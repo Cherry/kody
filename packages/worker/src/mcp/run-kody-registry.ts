@@ -17,6 +17,7 @@ import {
 import {
 	createExecuteExecutor,
 	createNamedExecutionError,
+	type ClaimWorkerDay,
 } from '#mcp/executor.ts'
 import {
 	callerDisconnectedSandboxLog,
@@ -87,6 +88,7 @@ import {
 	findUnboundRuntimeHelperAccess,
 } from '#worker/package-runtime/unbound-runtime-helpers.ts'
 import { runWithTransientDurableObjectResetRetry } from '#worker/durable-object-reset-retry.ts'
+import { isPreRunUsageDenial } from '#worker/entitlements/errors.ts'
 import { evaluationHasHostMediatedSideEffects } from '#mcp/evaluation-side-effects.ts'
 import { isTransientJobExecutionError } from '#worker/jobs/execution-safety.ts'
 import { beginRunRecord, finishRunRecord } from '#worker/run-records/service.ts'
@@ -637,6 +639,8 @@ export async function runModuleWithRegistry(
 		packageEventTools?: PackageEventTools
 		capabilityRegistry?: BuiltCapabilityRegistry
 		rawFetchHostSink?: RawFetchHostSink
+		/** Capped unique-worker-day claim for the top-level hosted execute worker. */
+		claimWorkerDay?: ClaimWorkerDay
 		/**
 		 * When set (MCP public `execute` tool), static/dynamic `kody:@…`
 		 * package deps are credited toward agent-facing package popularity.
@@ -992,7 +996,7 @@ export async function runBundledModuleWithRegistry(
 		/**
 		 * Skip `execute` usage metering for this evaluate. Used by computed
 		 * import library loads so nested default calls do not inflate the
-		 * outer MCP execute daily quota.
+		 * outer MCP execute call metric.
 		 */
 		skipExecuteUsage?: boolean
 		skipCapabilityRegistry?: boolean
@@ -1031,6 +1035,7 @@ export async function runBundledModuleWithRegistry(
 		 * `runModuleWithRegistry` from the caller-authored source string.
 		 */
 		executeShape?: ExecuteThinGlueClass | null
+		claimWorkerDay?: ClaimWorkerDay
 	},
 ): Promise<
 	ExecuteResult & {
@@ -1108,6 +1113,18 @@ export async function runBundledModuleWithRegistry(
 			waitUntil,
 		})
 		runRecordFinished = true
+	}
+	/**
+	 * A caller that pre-claimed the run record finishes or releases it:
+	 * the job scheduler retries transient failures, and keyed execute
+	 * releases its key when the capped worker-day claim denies the load.
+	 */
+	function leavesCallerRunRecordOpen(error: unknown) {
+		if (runRecordFinished || options?.runRecordHandle == null) return false
+		if (callerOwnsScheduledJobRun && isTransientJobExecutionError(error)) {
+			return true
+		}
+		return options.claimWorkerDay != null && isPreRunUsageDenial(error)
 	}
 	function resolveThrownRunError(error: unknown): {
 		error: unknown
@@ -1242,6 +1259,7 @@ export async function runBundledModuleWithRegistry(
 						}
 					}
 				: undefined,
+			claimWorkerDay: options?.claimWorkerDay,
 			waitUntil: options?.waitUntil,
 		})
 		const workflowTools = closedWorldRetrieverRuntime
@@ -1489,11 +1507,7 @@ ${runtimeHelperRuntimePropertySource}
 			await recordPackageExportUsage('error')
 			return withRunId(finalResult)
 		} catch (error) {
-			if (
-				!runRecordFinished &&
-				callerOwnsScheduledJobRun &&
-				isTransientJobExecutionError(error)
-			) {
+			if (leavesCallerRunRecordOpen(error)) {
 				throw error
 			}
 			if (!runRecordFinished) {
@@ -1507,11 +1521,7 @@ ${runtimeHelperRuntimePropertySource}
 			throw error
 		}
 	} catch (error) {
-		if (
-			!runRecordFinished &&
-			callerOwnsScheduledJobRun &&
-			isTransientJobExecutionError(error)
-		) {
+		if (leavesCallerRunRecordOpen(error)) {
 			throw error
 		}
 		if (!runRecordFinished) {
