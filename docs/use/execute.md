@@ -164,6 +164,21 @@ Sandbox timeout errors state the enforced budget (for example
 `Execution timed out after 90s: …`) and carry a structured next step pointing at
 workflows.
 
+### Time limits
+
+Sandbox budgets are the same on every plan:
+
+| Run                                                                     | Budget                       |
+| ----------------------------------------------------------------------- | ---------------------------- |
+| MCP / ad-hoc execute, package export HTTP invokes, `sync` webhooks      | ~90s                         |
+| Jobs (scheduled and `jobRunNow`, including package exports they import) | 5 minutes                    |
+| Ack (queued) webhook deliveries                                         | 5 minutes                    |
+| Each workflow step                                                      | 5 minutes                    |
+| `execute --local`                                                       | none (fetch deadlines apply) |
+
+A `sync` webhook's HTTP response stops waiting after 30s. Work that does not fit
+the interactive budget goes in a workflow or a job.
+
 ### Long calls: start a workflow and check back
 
 For work that may outlast one MCP call, return the `id` from `workflows.create`
