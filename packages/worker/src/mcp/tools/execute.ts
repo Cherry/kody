@@ -67,6 +67,10 @@ import { getCachedUserEntitlement } from '#worker/entitlements/service.ts'
 import {
 	admitHostedExecuteCall,
 	createExecuteWorkerDayClaim,
+	executeAdmissionStructuredContent,
+	executeLoopDetectedErrorCode,
+	executeRateLimitedErrorCode,
+	executeRepeatKey,
 } from '#mcp/execute-admission.ts'
 import {
 	abandonRunRecord,
@@ -166,6 +170,15 @@ export const executeToolOutputSchema = {
 		.optional()
 		.describe(
 			'Focused plan-limit or quota fields when a call is denied. Omitted from ordinary successes.',
+		),
+	admission: z
+		.object({
+			code: z.enum([executeRateLimitedErrorCode, executeLoopDetectedErrorCode]),
+			retryAfterMs: z.number(),
+		})
+		.optional()
+		.describe(
+			'Set when a runaway or loop brake refused the call before it ran: the refusal code and how long to wait before the same call is admitted.',
 		),
 	logs: z
 		.array(z.unknown())
@@ -326,6 +339,7 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 						error: error.message,
 						...(errorDetails ? { errorDetails } : {}),
 						...entitlementStructuredContent(error),
+						...executeAdmissionStructuredContent(error),
 					},
 					isError: true,
 				}
@@ -402,7 +416,7 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 					...executeAttribution,
 				}
 
-				// Runaway brake before claim/bundling/sandbox so a refused call
+				// Runaway and loop brakes before claim/bundling/sandbox so a refused call
 				// costs nothing and does not poison a key. The plan cap counts
 				// unique workers and is spent inside the executor, once the
 				// worker id is known and before that worker loads.
@@ -424,7 +438,21 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 							})
 						: undefined
 				if (claimWorkerDay) {
-					await admitHostedExecuteCall({ env, ownerId: storageOwnerId })
+					await admitHostedExecuteCall({
+						env,
+						ownerId: storageOwnerId,
+						repeatKey: await executeRepeatKey({
+							credential: callerContext.request?.credential ?? null,
+							actorUserId:
+								callerContext.request?.actor?.userId ??
+								callerContext.user?.userId ??
+								null,
+							conversationId,
+							code,
+							invoke,
+							params,
+						}),
+					})
 				}
 
 				if (normalizedIdempotencyKey && storageOwnerId) {
