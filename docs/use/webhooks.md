@@ -267,7 +267,15 @@ package settings.
   consumer + export time (ingress receive time is kept as metadata). Failed
   deliveries keep diagnostic logs — including when the export never reached user
   code.
-- `sync`: waits for the export JSON result (**502** on failure).
+- `sync`: waits for the export JSON result (**502** on failure). The failure
+  body is `{ "ok": false, "error": { "code", "message" } }` and never carries
+  package internals. `code` is `invocation_failed` unless the fetch gateway
+  refused the package's request for a credential placeholder outside its
+  declared header (in the URL, query, or body) or over plain HTTP: then it is
+  `credential_placement_refused`. When the refusal concerns one named slot,
+  `error.slot` carries that slot name (never a value); a Basic Auth pair or a
+  vault reference omits it. Ack deliveries record the same code in Activity. The
+  owner sees the full error in Activity.
 
 Background delivery retries keep the same idempotency key, so a transient
 platform persistence failure does not duplicate a completed export. Package

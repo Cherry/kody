@@ -2,6 +2,10 @@ import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import {
+	credentialPlacementRefusedCode,
+	readCredentialPlacementRefusalFromInvocationBody,
+} from '#worker/credentials/placement-refusal.ts'
+import {
 	decryptWebhookUrlSecret,
 	encryptWebhookUrlSecret,
 	userWebhookUrlSecretContext,
@@ -1010,13 +1014,20 @@ export async function dispatchSyntheticWebhookForUser(input: {
 					| Record<string, unknown>
 					| undefined)
 			: undefined
+	const placementRefused = Boolean(
+		readCredentialPlacementRefusalFromInvocationBody(response.body),
+	)
 	return await finish({
 		status: response.status,
 		outcome: 'failed',
-		error: `invocation_status_${response.status}`,
+		error: placementRefused
+			? credentialPlacementRefusedCode
+			: `invocation_status_${response.status}`,
 		result,
 		errorBody: {
-			code: String(errorRecord?.['code'] ?? 'invocation_failed'),
+			code: placementRefused
+				? credentialPlacementRefusedCode
+				: String(errorRecord?.['code'] ?? 'invocation_failed'),
 			message: String(
 				errorRecord?.['message'] ??
 					`Webhook export invocation failed with HTTP ${response.status}.`,

@@ -14,6 +14,10 @@
  * Host allowlists are checked separately, per credential, after resolution.
  */
 import { McpCallerError } from '#mcp/caller-error.ts'
+import {
+	credentialPlacementRefusedCode,
+	formatCredentialPlacementRefusalTag,
+} from '#worker/credentials/placement-refusal.ts'
 import { getSavedPackageByIdInAnyOrg } from '#worker/package-registry/repo.ts'
 import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
 import {
@@ -31,10 +35,17 @@ import {
 	parseSecretPlaceholders,
 } from './placeholders.ts'
 
+/**
+ * The message ends with a `(credential_placement_refused, slot "…")` tag so
+ * the cause survives the sandbox boundary, where only the message crosses.
+ */
 export class SecretPlacementError extends McpCallerError {
-	constructor(message: string) {
-		super(message)
+	readonly code = credentialPlacementRefusedCode
+	readonly slot: string | null
+	constructor(message: string, slot: string | null) {
+		super(`${message} ${formatCredentialPlacementRefusalTag(slot)}`)
 		this.name = 'SecretPlacementError'
+		this.slot = slot
 	}
 }
 
@@ -90,7 +101,7 @@ async function readSecretPlacementPolicy(
 ): Promise<SecretPlacementPolicy> {
 	const savedPackage = await getSavedPackageByIdInAnyOrg(env.APP_DB, packageId)
 	if (!savedPackage) {
-		throw new SecretPlacementError(
+		throw new McpCallerError(
 			`Package "${packageId}" was not found, so the fetch gateway cannot check where its credential slots may be sent.`,
 		)
 	}
@@ -164,6 +175,26 @@ function referencesIn(value: string): PlacedReference[] {
 	]
 }
 
+/** The slot a reference names; vault references name a provider, not a slot. */
+/**
+ * The one slot a refusal is about. A Basic Auth pair names two slots, so a
+ * refusal of the whole pair names neither; per-slot checks pass their own.
+ */
+function slotOf(reference: PlacedReference) {
+	switch (reference.kind) {
+		case 'secret':
+		case 'integration-token':
+			return reference.name
+		case 'secret-basic':
+		case 'provider-secret':
+			return null
+		default: {
+			const exhaustive: never = reference
+			throw new Error(`Unhandled placeholder: ${String(exhaustive)}`)
+		}
+	}
+}
+
 function describeReference(reference: PlacedReference) {
 	switch (reference.kind) {
 		case 'secret':
@@ -184,6 +215,7 @@ function describeReference(reference: PlacedReference) {
 function refuseOutsideHeader(reference: PlacedReference, location: string) {
 	return new SecretPlacementError(
 		`${describeReference(reference)} is in the request ${location}. ${headerRuleHint} Send it in a header instead, for example headers: { Authorization: 'Bearer ${reference.placeholder}' }.`,
+		slotOf(reference),
 	)
 }
 
@@ -231,38 +263,45 @@ function assertDeclaredSlotPlacement(input: {
 		if (loadError) {
 			throw new SecretPlacementError(
 				`Slot "${slotName}" of ${policy.packageName} is invalid in its published package.json, so the fetch gateway does not substitute it:\n${loadError}\nFix the slot and publish again.`,
+				slotName,
 			)
 		}
 		throw new SecretPlacementError(
 			`"${slotName}" is not a kody.credentials slot of ${policy.packageName}. A package that declares kody.credentials substitutes only its declared slots. Declare "${slotName}" as a ${input.expectedKind} slot with the header it goes in.`,
+			slotName,
 		)
 	}
 	if (slot.kind !== input.expectedKind) {
 		throw new SecretPlacementError(
 			`Slot "${slotName}" of ${policy.packageName} has kind "${slot.kind}", but ${input.placeholder} needs a slot of kind "${input.expectedKind}".`,
+			slotName,
 		)
 	}
 	const placement = credentialSlotPlacement(slot)
 	if (!placement) {
 		throw new SecretPlacementError(
 			`Slot "${slotName}" of ${policy.packageName} declares no placement, so the fetch gateway never substitutes it. Declare placement: { "header": "<name>" } on the slot.`,
+			slotName,
 		)
 	}
 	const template = placement.template ?? '{value}'
 	if (placement.header.toLowerCase() !== headerName.toLowerCase()) {
 		throw new SecretPlacementError(
 			`Slot "${slotName}" of ${policy.packageName} may only be sent in its declared header "${placement.header}" (as "${template}"), not in "${headerName}".`,
+			slotName,
 		)
 	}
 	if (input.use === 'basic') {
 		if (placement.template && placement.template !== basicAuthTemplate) {
 			throw new SecretPlacementError(
 				`Slot "${slotName}" of ${policy.packageName} declares template "${placement.template}", but a Basic Auth pair is sent as "${basicAuthTemplate}". Declare that template or no template on both slots.`,
+				slotName,
 			)
 		}
 		if (!isDerivedBasicAuthValue(input.headerValue, input.placeholder)) {
 			throw new SecretPlacementError(
 				`Header "${headerName}" must be exactly "Basic ${input.placeholder}" to send slots of ${policy.packageName} as Basic Auth.`,
+				slotName,
 			)
 		}
 		return
@@ -272,6 +311,7 @@ function assertDeclaredSlotPlacement(input: {
 	) {
 		throw new SecretPlacementError(
 			`Slot "${slotName}" of ${policy.packageName} must be sent as "${placement.header}: ${template}" with ${input.placeholder} in place of {value}. The "${headerName}" value does not match that template.`,
+			slotName,
 		)
 	}
 }
@@ -286,6 +326,7 @@ function assertDeclaredHeaderReferences(input: {
 	if (references.length > 1) {
 		throw new SecretPlacementError(
 			`Header "${headerName}" holds ${references.length} credential placeholders. A package that declares kody.credentials sends one slot per header.`,
+			references[0] ? slotOf(references[0]) : null,
 		)
 	}
 	const reference = references[0]
@@ -354,6 +395,7 @@ export async function assertSecretPlacement(input: {
 	if (new URL(input.url).protocol !== 'https:') {
 		throw new SecretPlacementError(
 			`${describeReference(firstHeaderReference)} cannot be sent over plain HTTP. The fetch gateway substitutes secrets only over HTTPS. Use an https:// URL.`,
+			slotOf(firstHeaderReference),
 		)
 	}
 	const policy = await input.loadPolicy()
@@ -376,5 +418,6 @@ export function assertNoBodyPlaceholder(body: Uint8Array | null) {
 	if (!reference) return
 	throw new SecretPlacementError(
 		`${describeReference(reference)} is in the request body. ${bodyRuleHint} Send a credential in a header instead, for example headers: { Authorization: 'Bearer ${reference.placeholder}' }. A value that is not a credential (such as an account id) belongs in params or package storage, not a secret. To send the placeholder text itself (a message that quotes the syntax), set the request header x-kody-secret-resolution: headers-only.`,
+		slotOf(reference),
 	)
 }
