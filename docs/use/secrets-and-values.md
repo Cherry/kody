@@ -35,8 +35,9 @@ decrypted plaintext. Put that string in a secret-aware `fetch` request header
 / `kody.secretJwtSign` (both accept saved secret names **or** opaque refs). Only
 platform use sites resolve it. Package and execute JavaScript never receive
 plaintext from `get`. A secret-aware `fetch` may send the value to an
-**approved** host; that host's response is not redacted for echoed credentials —
-treat response bodies as untrusted.
+**approved** host. If that host echoes the value back, the gateway redacts it
+from the response (see [Placeholders in `fetch`](#placeholders-in-fetch)); treat
+response bodies as untrusted all the same.
 
 **`kody.secretSet(...)`** persists a value that is already available inside
 execution (for example an API key the package just minted). It does not return
@@ -71,6 +72,16 @@ error names the credential and the rule. A package that declares
 further: each placeholder must name one of its slots and sit in that slot's
 declared `placement` header, matching its template (oauth slots default to
 `Authorization: Bearer {value}`).
+
+If the remote echoes a substituted value back, in a response header, status
+text, the final URL after redirects, or anywhere in the body, the gateway
+replaces it with `[REDACTED SECRET]` before your code reads the response, the
+same way run output is redacted. A Basic Auth header is redacted whole and as
+its encoded credential. Because the body can change length, `content-length` is
+dropped from those responses. Range responses (`206` or `content-range`) are
+masked with `*` byte for byte instead, so their offsets stay true. A WebSocket
+upgrade keeps its socket and redacted headers, but messages on the socket are
+not redacted.
 
 External providers use **`{{secret/<provider>:<ref>}}`** (first `:` after
 `secret/`). Canonical 1Password form is
