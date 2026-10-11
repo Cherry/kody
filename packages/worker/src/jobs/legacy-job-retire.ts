@@ -15,6 +15,8 @@ import { formatScheduleSummary } from '@kody-internal/shared/jobs/schedule.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { redactEmailRecipient } from '#worker/audit-log.ts'
 import { loadEarliestLiveOwnerId } from '#worker/enablements/repo.ts'
+import { parseModuleSource } from '#worker/module-source.ts'
+import { collectAmbientStorageImportFiles } from '#worker/repo/checks.ts'
 import { kodyPackageIdPattern } from '#worker/package-registry/types.ts'
 import { type JobRecord, type JobSchedule } from './types.ts'
 
@@ -261,7 +263,14 @@ export function buildMovedJobPackageFiles(input: {
 	}
 	const files: Record<string, string> = {}
 	for (const [path, content] of Object.entries(input.sourceFiles)) {
-		if (path !== manifestPath) files[path] = content
+		if (path !== manifestPath)
+			files[path] = replaceAmbientStorageImport(content)
+	}
+	const stillAmbient = collectAmbientStorageImportFiles(files)
+	if (stillAmbient.length > 0) {
+		throw new McpCallerError(
+			`Legacy job "${input.jobName}" uses ambient storage in a form the move cannot rewrite: ${stillAmbient.join(', ')}.`,
+		)
 	}
 	files['package.json'] = `${JSON.stringify(packageJson, null, '\t')}\n`
 	if (!files['README.md']?.trim()) {
@@ -289,6 +298,96 @@ export function buildMovedJobPackageFiles(input: {
 		].join('\n')
 	}
 	return files
+}
+
+type ImportNode = {
+	type?: string
+	start?: number
+	end?: number
+	importKind?: string
+	source?: { value?: unknown }
+	specifiers?: Array<{
+		type?: string
+		start?: number
+		end?: number
+		importKind?: string
+		imported?: { name?: unknown; value?: unknown }
+		local?: { name?: unknown }
+	}>
+}
+
+// Resolved per call: packageStorage() reads the run's package context.
+const storageMethodNames = ['get', 'set', 'list', 'delete', 'clear', 'sql']
+
+/**
+ * Package code cannot import the ambient `storage` binding. This swaps each
+ * `kody:runtime` storage import for a same-named object that forwards to
+ * `packageStorage()`, which has the same surface over the package bucket.
+ * Sources it cannot parse are returned unchanged for publish checks to reject.
+ */
+export function replaceAmbientStorageImport(source: string): string {
+	let parsed: {
+		program?: { body?: Array<ImportNode> }
+		body?: Array<ImportNode>
+	}
+	try {
+		parsed = parseModuleSource(source) as unknown as typeof parsed
+	} catch {
+		return source
+	}
+	const body = parsed.program?.body ?? parsed.body ?? []
+	const replacements: Array<{ start: number; end: number; text: string }> = []
+	for (const node of body) {
+		if (node.type !== 'ImportDeclaration' || node.importKind === 'type')
+			continue
+		if (node.source?.value !== 'kody:runtime') continue
+		if (typeof node.start !== 'number' || typeof node.end !== 'number') continue
+		const specifiers = node.specifiers ?? []
+		if (specifiers.some((specifier) => specifier.type !== 'ImportSpecifier')) {
+			continue
+		}
+		const importedName = (specifier: (typeof specifiers)[number]) =>
+			specifier.imported?.name ?? specifier.imported?.value
+		const storageSpecifier = specifiers.find(
+			(specifier) =>
+				specifier.importKind !== 'type' &&
+				importedName(specifier) === 'storage',
+		)
+		if (!storageSpecifier) continue
+		const storageLocal = String(storageSpecifier.local?.name ?? 'storage')
+		const packageStorageSpecifier = specifiers.find(
+			(specifier) =>
+				specifier.importKind !== 'type' &&
+				importedName(specifier) === 'packageStorage',
+		)
+		const packageStorageLocal = String(
+			packageStorageSpecifier?.local?.name ?? 'packageStorage',
+		)
+		const kept = specifiers
+			.filter((specifier) => specifier !== storageSpecifier)
+			.map((specifier) => source.slice(specifier.start, specifier.end))
+		if (!packageStorageSpecifier) kept.push('packageStorage')
+		const members = [
+			`\tget id() {\n\t\treturn ${packageStorageLocal}().id\n\t},`,
+			...storageMethodNames.map(
+				(name) =>
+					`\t${name}: (...args) => ${packageStorageLocal}().${name}(...args),`,
+			),
+		].join('\n')
+		replacements.push({
+			start: node.start,
+			end: node.end,
+			text: `import { ${kept.join(', ')} } from 'kody:runtime';\nconst ${storageLocal} = {\n${members}\n};`,
+		})
+	}
+	let next = source
+	for (const replacement of replacements.reverse()) {
+		next =
+			next.slice(0, replacement.start) +
+			replacement.text +
+			next.slice(replacement.end)
+	}
+	return next
 }
 
 async function loadOwner(
