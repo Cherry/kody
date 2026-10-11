@@ -7,6 +7,7 @@ import { adminCreditGrantCapability } from './admin-credit-grant.ts'
 import { adminCreditWalletGetCapability } from './admin-credit-wallet-get.ts'
 import { adminOrgLimitOverridesSetCapability } from './admin-org-limit-overrides-set.ts'
 import { adminOrgLimitsGetCapability } from './admin-org-limits-get.ts'
+import { adminOrgResourceTransferCapability } from './admin-org-resource-transfer.ts'
 import { adminCommunityOrphanForksCleanupCapability } from './admin-community-orphan-forks-cleanup.ts'
 import { adminEnablementsMigrateCapability } from './admin-enablements-migrate.ts'
 import { adminFeatureFlagListCapability } from './admin-feature-flag-list.ts'
@@ -102,6 +103,8 @@ export const adminDomain = defineDomain({
 		'credit eligibility',
 		'limit overrides',
 		'org limits',
+		'org transfer',
+		'move org resources',
 	],
 	capabilities: [
 		adminUserListCapability,
@@ -158,5 +161,6 @@ export const adminDomain = defineDomain({
 		adminCommunityActivityListCapability,
 		adminCommunityOrphanForksCleanupCapability,
 		adminEnablementsMigrateCapability,
+		adminOrgResourceTransferCapability,
 	],
 })
