@@ -216,6 +216,48 @@ test('MCP servers are one click from /account and two from the account menu', as
 	).toHaveAttribute('href', `/@${user.username}/-/overview`)
 })
 
+test('signed-in profile opens the workspace rail through to Activity', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	test.setTimeout(process.env.CI ? 90_000 : 60_000)
+	const runId = Date.now()
+	const user = await seedE2eUser({
+		email: `rail-entry-${runId}@example.com`,
+		username: `rail-entry-${runId}`,
+		password: 'rail-entry-password',
+	})
+	await login({ email: user.email, password: user.password, mode: 'login' })
+
+	// Own profile names Workspace; it is not a community-only dead end.
+	await page.goto(`/@${user.username}`)
+	await waitForClientHydration(page)
+	await expect(page.getByTestId('profile-workspace')).toHaveAttribute(
+		'href',
+		`/@${user.username}/-/packages`,
+	)
+	await Promise.all([
+		page.waitForURL(new RegExp(`/@${user.username}/-/packages$`)),
+		page.getByTestId('profile-workspace').click(),
+	])
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Repositories' }),
+	).toBeVisible()
+	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
+	await expect(rail).toBeVisible()
+	await Promise.all([
+		page.waitForURL(new RegExp(`/@${user.username}/-/activity$`)),
+		rail.getByRole('link', { name: 'Activity', exact: true }).click(),
+	])
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Activity' }),
+	).toBeVisible()
+	await expect(
+		rail.getByRole('link', { name: 'Activity', exact: true }),
+	).toHaveAttribute('aria-current', 'page')
+})
+
 test('credits live on the usage page: /account/credits redirects there', async ({
 	page,
 	seedE2eUser,

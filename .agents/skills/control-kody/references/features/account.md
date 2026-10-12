@@ -27,7 +27,9 @@ Its popover lists orgs, then Manage links: for the current team org Overview
 the role allows; with no team org, the signup org's Overview and Billing. Then
 Create organization, an invites row when you have any, then a "Your account"
 group (Your profile, Account settings, Log out). Narrow viewports show the same
-rows in the menu panel.
+rows in the menu panel. Own profile (`/@<username>`) also links **Workspace**
+(lands on `/@<slug>/-/packages`) beside Edit profile. A team org home lists
+**Workspace** above its management links.
 
 ## How to get there
 
