@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
+import { connect, type AddressInfo } from 'node:net'
 import { test } from 'node:test'
+import { Agent, EnvHttpProxyAgent } from 'undici'
 import {
 	assertTokenSafeApiUrl,
 	callCapabilityProxy,
+	capabilityProxyGatewayDeadlineMs,
+	capabilityProxyHttpTimeoutMs,
 	capabilityProxyUrl,
+	createCapabilityProxyAgent,
+	nodeUsesEnvProxy,
 	openCapabilityProxySession,
 } from '../src/capability-proxy.js'
 
@@ -217,4 +224,135 @@ test('callCapabilityProxy surfaces capability errors from string or object bodie
 			}),
 		/to is required/,
 	)
+})
+
+async function withDelayedHeadersServer(
+	delayMs: number,
+	run: (apiUrl: string, seen: Array<{ url: string; authorization: string | null }>) => Promise<void>,
+) {
+	const seen: Array<{ url: string; authorization: string | null }> = []
+	const server = createServer((request, response) => {
+		seen.push({ url: request.url ?? '', authorization: request.headers.authorization ?? null })
+		request.resume()
+		setTimeout(() => {
+			response.writeHead(200, { 'content-type': 'application/json' })
+			response.end(JSON.stringify({ result: { ok: true } }))
+		}, delayMs)
+	})
+	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+	const { port } = server.address() as AddressInfo
+	try {
+		await run(`http://127.0.0.1:${port}`, seen)
+	} finally {
+		server.closeAllConnections()
+		await new Promise<void>((resolve) => server.close(() => resolve()))
+	}
+}
+
+test('CapabilityProxy HTTP timeouts outlast the 5-minute gateway deadline plus overhead', () => {
+	assert.equal(capabilityProxyGatewayDeadlineMs, 5 * 60_000)
+	// Node's global fetch defaults headersTimeout to 300s, the same as the deadline.
+	assert.ok(capabilityProxyHttpTimeoutMs >= capabilityProxyGatewayDeadlineMs + 60_000)
+})
+
+test('the CapabilityProxy dispatcher governs how long a call waits for headers', async () => {
+	await withDelayedHeadersServer(2_500, async (apiUrl) => {
+		const call = (timeoutMs: number) =>
+			callCapabilityProxy({
+				apiUrl,
+				token,
+				dispatcher: createCapabilityProxyAgent(timeoutMs),
+				path: ['kody', 'emailSend'],
+				args: [{}],
+			})
+		await assert.rejects(() => call(1_000), /Could not reach the Kody API[\s\S]*UND_ERR_HEADERS_TIMEOUT/)
+		assert.deepEqual(await call(10_000), { ok: true })
+	})
+})
+
+test('callCapabilityProxy passes the shared long-timeout Agent to fetch by default', async () => {
+	const dispatchers: Array<unknown> = []
+	const fetchFn = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+		dispatchers.push((init as { dispatcher?: unknown } | undefined)?.dispatcher)
+		return new Response(JSON.stringify({ result: 1 }), { status: 200 })
+	}) as typeof fetch
+	const client = { apiUrl: 'https://api.kody.codes', token, fetchFn }
+	await openCapabilityProxySession(client)
+	await callCapabilityProxy({ ...client, path: ['kody', 'emailSend'], args: [{}] })
+	assert.equal(dispatchers.length, 2)
+	assert.ok(dispatchers[0] instanceof Agent)
+	assert.equal(dispatchers[0], dispatchers[1])
+})
+
+test('callCapabilityProxy reaches a real server through global fetch and the default Agent', async () => {
+	await withDelayedHeadersServer(0, async (apiUrl, seen) => {
+		const result = await callCapabilityProxy({
+			apiUrl,
+			token,
+			path: ['kody', 'emailSend'],
+			args: [{}],
+		})
+		assert.deepEqual(result, { ok: true })
+		assert.equal(seen[0]?.url, '/v1/capability-proxy/call')
+		assert.equal(seen[0]?.authorization, `Bearer ${token}`)
+	})
+})
+
+test('nodeUsesEnvProxy mirrors Node\'s NODE_USE_ENV_PROXY / --use-env-proxy opt-in', () => {
+	assert.equal(nodeUsesEnvProxy({}, []), false)
+	assert.equal(nodeUsesEnvProxy({ HTTPS_PROXY: 'http://proxy.test:8080' }, []), false)
+	assert.equal(nodeUsesEnvProxy({ NODE_USE_ENV_PROXY: '1' }, []), true)
+	assert.equal(nodeUsesEnvProxy({}, ['--use-env-proxy']), true)
+	assert.equal(nodeUsesEnvProxy({ NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy' }, []), true)
+	assert.ok(createCapabilityProxyAgent(1_000, { useEnvProxy: true }) instanceof EnvHttpProxyAgent)
+	assert.ok(createCapabilityProxyAgent(1_000, { useEnvProxy: false }) instanceof Agent)
+})
+
+test('with env proxy enabled, CapabilityProxy calls go through HTTP_PROXY', async () => {
+	await withDelayedHeadersServer(0, async (apiUrl, seen) => {
+		const proxied: Array<string> = []
+		const proxy = createServer((request, response) => {
+			proxied.push(`${request.method} ${request.url}`)
+			response.writeHead(502).end()
+		})
+		proxy.on('connect', (request, clientSocket, head) => {
+			proxied.push(`CONNECT ${request.url}`)
+			const [host, port] = (request.url ?? '').split(':')
+			const upstream = connect(Number(port), host, () => {
+				clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+				upstream.write(head)
+				upstream.pipe(clientSocket)
+				clientSocket.pipe(upstream)
+			})
+			upstream.on('error', () => clientSocket.destroy())
+			clientSocket.on('error', () => upstream.destroy())
+		})
+		await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
+		const { port } = proxy.address() as AddressInfo
+		const previous = { HTTP_PROXY: process.env.HTTP_PROXY, NO_PROXY: process.env.NO_PROXY }
+		process.env.HTTP_PROXY = `http://127.0.0.1:${port}`
+		delete process.env.NO_PROXY
+		const dispatcher = createCapabilityProxyAgent(5_000, { useEnvProxy: true })
+		try {
+			const result = await callCapabilityProxy({
+				apiUrl,
+				token,
+				dispatcher,
+				path: ['kody', 'emailSend'],
+				args: [{}],
+			})
+			assert.deepEqual(result, { ok: true })
+			assert.equal(proxied.length, 1)
+			assert.match(proxied[0] ?? '', new RegExp(`^(CONNECT ${new URL(apiUrl).host}|POST ${apiUrl}/v1/capability-proxy/call)$`))
+			assert.equal(seen[0]?.url, '/v1/capability-proxy/call')
+		} finally {
+			for (const [key, value] of Object.entries(previous)) {
+				if (value === undefined) delete process.env[key]
+				else process.env[key] = value
+			}
+			await dispatcher.destroy()
+			proxy.closeAllConnections()
+			await new Promise<void>((resolve) => proxy.close(() => resolve()))
+		}
+	})
 })

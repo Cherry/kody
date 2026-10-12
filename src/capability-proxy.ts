@@ -1,3 +1,4 @@
+import { Agent, EnvHttpProxyAgent, type Dispatcher } from 'undici'
 import {
 	apiTokenMintInstructions,
 	cliBootstrapInstructions,
@@ -31,6 +32,49 @@ import { readPackageVersion } from './package-info.js'
 export const capabilityProxySessionPath = 'v1/capability-proxy/session'
 export const capabilityProxyCallPath = 'v1/capability-proxy/call'
 
+/**
+ * Origin runs a placeholder `fetch` under a 5-minute deadline that starts only
+ * after quota checks and placeholder fill, buffers the whole upstream body,
+ * and sends headers once that body has ended. Node's global fetch gives up
+ * after 300s without headers (undici `headersTimeout`), which would cut the
+ * call before the gateway's own deadline fires, so CapabilityProxy requests
+ * use a dedicated undici Agent that waits longer than the deadline plus
+ * origin overhead.
+ */
+export const capabilityProxyGatewayDeadlineMs = 5 * 60_000
+export const capabilityProxyHttpTimeoutMs = 7 * 60_000
+
+/**
+ * Node routes global fetch through `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+ * only when `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` is set. A dispatcher
+ * passed to fetch replaces that global proxy agent, so mirror the same opt-in.
+ */
+export function nodeUsesEnvProxy(
+	env: NodeJS.ProcessEnv = process.env,
+	execArgv: ReadonlyArray<string> = process.execArgv,
+): boolean {
+	if (env.NODE_USE_ENV_PROXY === '1') return true
+	const flags = [...execArgv, ...(env.NODE_OPTIONS ?? '').split(/\s+/)]
+	return flags.includes('--use-env-proxy')
+}
+
+export function createCapabilityProxyAgent(
+	timeoutMs: number = capabilityProxyHttpTimeoutMs,
+	options: { useEnvProxy?: boolean } = {},
+): Dispatcher {
+	const timeouts = { headersTimeout: timeoutMs, bodyTimeout: timeoutMs }
+	return (options.useEnvProxy ?? nodeUsesEnvProxy())
+		? new EnvHttpProxyAgent(timeouts)
+		: new Agent(timeouts)
+}
+
+let defaultCapabilityProxyAgent: Dispatcher | null = null
+
+function capabilityProxyAgent(): Dispatcher {
+	defaultCapabilityProxyAgent ??= createCapabilityProxyAgent()
+	return defaultCapabilityProxyAgent
+}
+
 export type CapabilityProxySession = {
 	scopes: Array<string>
 	expiresAt: string | null
@@ -47,6 +91,8 @@ export type CapabilityProxyClientInput = {
 	token: string
 	fetchFn?: typeof fetch
 	signal?: AbortSignal
+	/** Defaults to the shared Agent from `createCapabilityProxyAgent()`. */
+	dispatcher?: Dispatcher
 }
 
 export class CapabilityProxyError extends Error {
@@ -132,9 +178,12 @@ async function send(
 	init: RequestInit,
 ): Promise<Response> {
 	const fetchFn = input.fetchFn ?? fetch
+	// Global fetch on Node 22+ (bundled undici 6–8) accepts undici 7 dispatchers.
+	const dispatcherInit = { dispatcher: input.dispatcher ?? capabilityProxyAgent() }
 	try {
 		return await fetchFn(url, {
 			...init,
+			...dispatcherInit,
 			signal: input.signal,
 			headers: {
 				...(init.headers as Record<string, string> | undefined),
