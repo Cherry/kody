@@ -19,6 +19,7 @@ export type CommunityDetailApiPayload = {
 	hasAgentsDocs?: boolean
 	imageBaseHref?: string | null
 	ownerPackage: AccountPackageDetail | null
+	hasPackage?: boolean
 	username: string
 	kodyId: string
 	isPrivate: boolean

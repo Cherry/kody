@@ -265,6 +265,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			viewerCanManage: result.viewerCanManage,
 			returnTo: path,
 			hasApp: result.ownerPackage?.hasApp === true,
+			hasPackage: result.hasPackage,
 			publishCompareHref:
 				result.viewerCanManage && listing?.sourceAhead
 					? listing.headCommit
@@ -279,14 +280,16 @@ export const loadPackage = createServerFn({ method: 'GET' })
 							})
 					: null,
 			iconUrl:
-				listing?.iconUrl ??
-				resolvePackageListIconUrl({
-					username: result.username,
-					kodyId: result.kodyId,
-					listingId: null,
-					listingIconCommit: null,
-					publishedCommit: result.ownerPackage?.publishedCommit ?? null,
-				}),
+				result.hasPackage !== false
+					? (listing?.iconUrl ??
+						resolvePackageListIconUrl({
+							username: result.username,
+							kodyId: result.kodyId,
+							listingId: null,
+							listingIconCommit: null,
+							publishedCommit: result.ownerPackage?.publishedCommit ?? null,
+						}))
+					: null,
 		}
 		const shell = {
 			...result,

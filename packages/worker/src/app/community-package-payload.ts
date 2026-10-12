@@ -1,5 +1,9 @@
 import { loadCommunityDetailData } from '#app/community-data.ts'
-import { loadPackagePage, packagePageIsPrivate } from '#app/package-page.ts'
+import {
+	loadPackagePage,
+	ownerPackageForClient,
+	packagePageIsPrivate,
+} from '#app/package-page.ts'
 import {
 	loadOwnerPackageReadme,
 	loadPackagePageHasAgentsDocs,
@@ -165,7 +169,8 @@ export async function loadCommunityPackagePayload(input: {
 			readmeFences: readme.readmeFences,
 			hasAgentsDocs,
 			imageBaseHref,
-			ownerPackage: page.ownerPackage,
+			ownerPackage: ownerPackageForClient(page),
+			hasPackage: page.hasPackage,
 			username: page.username,
 			kodyId: page.kodyId,
 			isPrivate: packagePageIsPrivate(page),

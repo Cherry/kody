@@ -48,6 +48,8 @@ export type CommunityDetailContentProps = {
 	treeRef?: string
 	publishCompareHref?: string | null
 	hasApp?: boolean
+	/** Defaults to true. Plain repos pass false for Repo mark + no Files tab. */
+	hasPackage?: boolean
 	iconUrl?: string | null
 }
 
@@ -66,6 +68,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		treeRef,
 		publishCompareHref,
 		hasApp,
+		hasPackage,
 		iconUrl,
 	} = props
 	const packageAppHref = resolvePackageAppHref({
@@ -75,6 +78,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		viewerIsOwner,
 	})
 	const markUrl = listing?.iconUrl ?? iconUrl ?? null
+	const isPackage = hasPackage !== false
 
 	const filesHref = getPackageTreeHref({
 		username,
@@ -90,6 +94,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 				kodyId,
 				isPrivate,
 				isListed: listing != null,
+				hasPackage: isPackage,
 				viewerIsOwner,
 				viewerCanManage,
 				active: 'repo',

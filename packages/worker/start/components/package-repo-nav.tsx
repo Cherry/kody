@@ -16,6 +16,8 @@ function renderPackageRepoNav(input: {
 	kodyId: string
 	filesHref: string
 	viewerCanManage: boolean
+	/** Plain repos hide Files until the tree loader accepts user_repos ids. */
+	showFilesNav?: boolean
 	active: PackageRepoNavActive
 }) {
 	const repoHref = routes.communityPackage.href({
@@ -26,6 +28,7 @@ function renderPackageRepoNav(input: {
 		username: input.username,
 		kodyId: input.kodyId,
 	})
+	const showFilesNav = input.showFilesNav !== false
 	return (
 		<nav aria-label="Repository" data-testid="package-repo-nav" css={navCss}>
 			<SiteLink
@@ -36,14 +39,17 @@ function renderPackageRepoNav(input: {
 			>
 				Repo
 			</SiteLink>
-			<SiteLink
-				href={input.filesHref}
-				aria-current={input.active === 'files' ? 'page' : undefined}
-				data-testid="package-repo-nav-files"
-				css={tabCss}
-			>
-				Files
-			</SiteLink>
+			{showFilesNav ? (
+				<SiteLink
+					href={input.filesHref}
+					aria-current={input.active === 'files' ? 'page' : undefined}
+					data-testid="package-repo-nav-files"
+					css={tabCss}
+				>
+					Files
+				</SiteLink>
+			) : null}
+
 			{input.viewerCanManage ? (
 				<SiteLink
 					href={settingsHref}
@@ -63,6 +69,8 @@ export function renderPackageRepoChrome(input: {
 	kodyId: string
 	isPrivate: boolean
 	isListed?: boolean
+	/** Defaults to true (saved package). Plain repos pass false. */
+	hasPackage?: boolean
 	viewerIsOwner: boolean
 	viewerCanManage: boolean
 	active: PackageRepoNavActive
@@ -93,6 +101,7 @@ export function renderPackageRepoChrome(input: {
 				} as const)
 			: {}
 	const isListed = input.isListed === true
+	const hasPackage = input.hasPackage !== false
 
 	return (
 		<div data-testid="package-repo-chrome">
@@ -133,6 +142,7 @@ export function renderPackageRepoChrome(input: {
 						{renderPackageStatusSignifiers({
 							isPrivate: input.isPrivate,
 							isListed,
+							hasPackage,
 						})}
 					</span>
 				</h1>
@@ -148,6 +158,7 @@ export function renderPackageRepoChrome(input: {
 					kodyId: input.kodyId,
 					filesHref: input.filesHref,
 					viewerCanManage: input.viewerCanManage,
+					showFilesNav: hasPackage,
 					active: input.active,
 				})}
 			</div>
