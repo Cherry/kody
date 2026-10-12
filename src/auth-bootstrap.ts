@@ -200,24 +200,52 @@ export function parseCliLifetimeSecondsFlag(
 }
 
 /**
+ * Lifetime for redeem after a successful mint. Trusts the server's clamped
+ * idle/max seconds (may be below CLI flag mins, or max below the requested
+ * idle). Only coerces idle down when max < idle so the pair stays consistent.
+ */
+export function resolveMintedRedeemLifetime(minted: {
+	idle_ttl_seconds: number
+	max_lifetime_seconds: number
+}): Extract<ResolvedCliTokenLifetime, { kind: 'explicit' }> {
+	const maxLifetimeSeconds = minted.max_lifetime_seconds
+	const idleTtlSeconds = Math.min(minted.idle_ttl_seconds, maxLifetimeSeconds)
+	return {
+		kind: 'explicit',
+		idleTtlSeconds,
+		maxLifetimeSeconds,
+	}
+}
+
+/**
  * POST /v1/tokens/bootstrap/redeem with JSON `{ code, lifetime }` or
  * `{ code, idle_ttl_seconds, max_lifetime_seconds }` and **no** Authorization
  * header (ADR 0056). Returns the minted `kody_at_…` once.
+ *
+ * Pass `trustedMintLifetime` after cliCredentialBootstrap so server-clamped
+ * seconds are redeemed without re-applying CLI flag mins (max may be below
+ * the requested idle or below `--idle-ttl-seconds` minimum).
  */
 export async function redeemBootstrapCode(input: {
 	code: string
 	lifetime?: string | null
 	idleTtlSeconds?: number
 	maxLifetimeSeconds?: number
+	trustedMintLifetime?: {
+		idle_ttl_seconds: number
+		max_lifetime_seconds: number
+	}
 	apiUrl?: string
 	fetchFn?: typeof fetch
 }): Promise<BootstrapRedeemResponse> {
 	const code = assertCliBootstrapCode(input.code)
-	const lifetime = resolveCliTokenLifetime({
-		lifetime: input.lifetime,
-		idleTtlSeconds: input.idleTtlSeconds,
-		maxLifetimeSeconds: input.maxLifetimeSeconds,
-	})
+	const lifetime = input.trustedMintLifetime
+		? resolveMintedRedeemLifetime(input.trustedMintLifetime)
+		: resolveCliTokenLifetime({
+				lifetime: input.lifetime,
+				idleTtlSeconds: input.idleTtlSeconds,
+				maxLifetimeSeconds: input.maxLifetimeSeconds,
+			})
 	const apiUrl = input.apiUrl || defaultApiUrl
 	assertTokenSafeApiUrl(apiUrl)
 	const url = capabilityProxyUrl(apiUrl, bootstrapRedeemPath)
@@ -292,6 +320,114 @@ export async function authBootstrap(input: {
 		lifetime: input.lifetime,
 		idleTtlSeconds: input.idleTtlSeconds,
 		maxLifetimeSeconds: input.maxLifetimeSeconds,
+		apiUrl,
+		fetchFn: input.fetchFn,
+	})
+	const stored = storedApiTokenFromRedeem({ apiUrl, redeemed })
+	const saved = saveStoredApiToken(stored, input.backend, input.resolution)
+	return {
+		stored,
+		backendKind: saved.backend.kind,
+		...(saved.backend.path ? { backendPath: saved.backend.path } : {}),
+	}
+}
+
+export const cliCredentialBootstrapOperationId = 'cliCredentialBootstrap'
+
+export type BootstrapMintResponse = {
+	bootstrap_code: string
+	scopes: Array<string>
+	idle_ttl_seconds: number
+	max_lifetime_seconds: number
+}
+
+/**
+ * Parse `--scopes`. Comma- or space-separated, deduped, order kept. The list
+ * replaces cliCredentialBootstrap's default scopes; the server validates names.
+ */
+export function parseCliScopesFlag(raw: string | undefined): Array<string> | undefined {
+	if (raw === undefined) return undefined
+	const scopes = [
+		...new Set(
+			raw
+				.split(/[\s,]+/)
+				.map((scope) => scope.trim())
+				.filter(Boolean),
+		),
+	]
+	if (scopes.length === 0) {
+		throw new Error('--scopes needs at least one scope (e.g. --scopes org:execute,package:write).')
+	}
+	return scopes
+}
+
+/** cliCredentialBootstrap params for an explicit scope list and lifetime. */
+export function bootstrapMintParams(
+	scopes: ReadonlyArray<string>,
+	lifetime: ResolvedCliTokenLifetime,
+): Record<string, unknown> {
+	return {
+		scopes: [...scopes],
+		...bootstrapMintLifetimeFields(lifetime),
+	}
+}
+
+export function bootstrapMintLifetimeFields(
+	lifetime: ResolvedCliTokenLifetime,
+): Record<string, string | number> {
+	return lifetime.kind === 'alias'
+		? { lifetime: lifetime.lifetime }
+		: {
+				idle_ttl_seconds: lifetime.idleTtlSeconds,
+				max_lifetime_seconds: lifetime.maxLifetimeSeconds,
+			}
+}
+
+export function parseBootstrapMintResponse(body: unknown): BootstrapMintResponse {
+	if (
+		!isRecord(body) ||
+		typeof body.bootstrap_code !== 'string' ||
+		typeof body.idle_ttl_seconds !== 'number' ||
+		typeof body.max_lifetime_seconds !== 'number'
+	) {
+		throw new Error('cliCredentialBootstrap returned an unexpected response.')
+	}
+	return {
+		bootstrap_code: body.bootstrap_code,
+		scopes: Array.isArray(body.scopes)
+			? body.scopes.filter((scope): scope is string => typeof scope === 'string')
+			: [],
+		idle_ttl_seconds: body.idle_ttl_seconds,
+		max_lifetime_seconds: body.max_lifetime_seconds,
+	}
+}
+
+/**
+ * Mint a bootstrap code with explicit `scopes` through the caller's current
+ * Kody credential, then redeem and store it like `authBootstrap`. Redeems with
+ * the minted idle/max seconds because the server may clamp the max lifetime to
+ * a parent API token's remaining lifetime — those values must not be
+ * re-validated as CLI lifetime flags (which would burn the one-shot code).
+ */
+export async function authBootstrapWithScopes(input: {
+	scopes: ReadonlyArray<string>
+	lifetime: ResolvedCliTokenLifetime
+	mint: (params: Record<string, unknown>) => Promise<unknown>
+	apiUrl?: string
+	fetchFn?: typeof fetch
+	backend?: SecretBackend
+	resolution?: StoreResolution
+}): Promise<Awaited<ReturnType<typeof authBootstrap>>> {
+	const minted = parseBootstrapMintResponse(
+		await input.mint(bootstrapMintParams(input.scopes, input.lifetime)),
+	)
+	const apiUrl = input.apiUrl || defaultApiUrl
+	const redeemed = await redeemBootstrapCode({
+		code: minted.bootstrap_code,
+		trustedMintLifetime: {
+			idle_ttl_seconds: minted.idle_ttl_seconds,
+			max_lifetime_seconds: minted.max_lifetime_seconds,
+		},
 		apiUrl,
 		fetchFn: input.fetchFn,
 	})
