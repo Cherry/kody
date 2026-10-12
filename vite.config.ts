@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cloudflare } from '@cloudflare/vite-plugin'
-import { remix } from '@pitlane/dev'
+import { tanstackStart } from '@tanstack/react-start/plugin/vite'
+import { redact } from '@tanstack/redact/vite'
+import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { parseJsonc } from './tools/ci/resource-utils.ts'
 import {
 	collectLocalOriginDevVars,
 	writeLocalOriginDevConfig,
@@ -33,21 +33,27 @@ const wranglerConfigPath =
 	process.env.KODY_WRANGLER_CONFIG ?? 'packages/worker/wrangler.jsonc'
 const isOriginDeployBuild = Boolean(process.env.KODY_WRANGLER_CONFIG)
 
-function resolveWorkerEntry(configPath: string) {
-	const absoluteConfig = path.resolve(root, configPath)
-	const config = parseJsonc<{ main?: string }>(
-		readFileSync(absoluteConfig, 'utf8'),
-	)
-	const main = config.main ?? './src/index.ts'
-	return path.relative(root, path.resolve(path.dirname(absoluteConfig), main))
-}
-
 function alias(prefix: string, target: string) {
 	return {
 		find: new RegExp(`^${prefix}/`),
 		replacement: `${target}/`,
 	}
 }
+
+// Match tanstack.com's Worker setup: every server variant uses one runtime.
+const redactServerAliases = [
+	'react-dom/server',
+	'react-dom/server.edge',
+	'react-dom/server.node',
+	'react-dom/server.bun',
+	'react-dom/server.browser',
+	'react-dom/static.edge',
+	'react-dom/static.node',
+	'react-dom/static',
+].map((specifier) => ({
+	find: new RegExp(`^${specifier.replaceAll('.', '\\.')}$`),
+	replacement: '@tanstack/redact/server',
+}))
 
 export default defineConfig(async ({ command }) => {
 	await ensureWorkerBundlerModules()
@@ -115,18 +121,40 @@ export default defineConfig(async ({ command }) => {
 
 	return {
 		publicDir: 'packages/worker/public',
+		environments: {
+			client: {
+				// The late-injected Buffer polyfill is missed by the initial dependency scan.
+				// Prebundle it so first use cannot reload a page with an unfinished form.
+				optimizeDeps: { include: ['buffer'] },
+			},
+			ssr: {
+				optimizeDeps: { noDiscovery: true, include: [] },
+				resolve: { noExternal: ['@tanstack/redact'] },
+			},
+		},
+		ssr: { noExternal: ['@tanstack/redact'] },
 		build: {
 			sourcemap: true,
 			outDir: process.env.KODY_VITE_OUTDIR ?? 'dist',
 		},
 		plugins: [
+			{
+				name: 'kody-legacy-jsx-compiler',
+				enforce: 'pre' as const,
+				transform(source: string, id: string) {
+					if (
+						!id.endsWith('.tsx') ||
+						id.includes('/start/') ||
+						!id.includes('/packages/worker/')
+					)
+						return
+					return {
+						code: `/** @jsxImportSource remix/component */\n${source}`,
+						map: null,
+					}
+				},
+			},
 			markdownAsText(),
-			remix({
-				serverHandler: false,
-				clientEntry: 'packages/worker/client/entry.tsx',
-				serverEntry: resolveWorkerEntry(serveWranglerConfigPath),
-				serverEnvironments: ['ssr'],
-			}),
 			cloudflare({
 				configPath: serveWranglerConfigPath,
 				viteEnvironment: { name: 'ssr' },
@@ -135,22 +163,59 @@ export default defineConfig(async ({ command }) => {
 				auxiliaryWorkers,
 			}),
 			workerWholeGraphReload(),
+			redact(),
+			tanstackStart({
+				srcDirectory: 'packages/worker/start',
+				router: {
+					codeSplittingOptions: {
+						defaultBehavior: [
+							['loader'],
+							['component'],
+							['pendingComponent'],
+							['errorComponent'],
+							['notFoundComponent'],
+						],
+					},
+				},
+				server: { entry: 'server.ts' },
+			}),
+			react({
+				include: /\/start\/.*\.[jt]sx?$/,
+				jsxImportSource: '@emotion/react',
+			}),
 		],
 		resolve: {
 			alias: [
+				...redactServerAliases,
 				{
-					find: /#app\/hmr\.ts$/,
+					find: /^use-sync-external-store\/shim\/index\.js$/,
+					replacement: '@tanstack/redact',
+				},
+				{
+					find: /^#app\/oauth-page\.ts$/,
 					replacement: path.resolve(
 						root,
-						'packages/worker/src/app/hmr.vite.ts',
+						'packages/worker/start/oauth-page.ts',
 					),
 				},
 				{
-					find: /#app\/client-entry-assets\.ts$/,
+					find: /^#start\/server\/(.*)$/,
+					replacement: path.resolve(root, 'packages/worker/start/server/$1.ts'),
+				},
+				{
+					find: /^#app\/hmr\.ts$/,
+					replacement: path.resolve(root, 'packages/worker/src/app/hmr.ts'),
+				},
+				{
+					find: /^#app\/client-entry-assets\.ts$/,
 					replacement: path.resolve(
 						root,
-						'packages/worker/src/app/client-entry-assets.vite.ts',
+						'packages/worker/src/app/client-entry-assets.ts',
 					),
+				},
+				{
+					find: /^#app\/handler\.ts$/,
+					replacement: path.resolve(root, 'packages/worker/start/server.ts'),
 				},
 				alias('#app', path.resolve(root, 'packages/worker/src/app')),
 				alias('#client', path.resolve(root, 'packages/worker/client')),
@@ -160,10 +225,7 @@ export default defineConfig(async ({ command }) => {
 			],
 		},
 		oxc: {
-			jsx: {
-				runtime: 'automatic',
-				importSource: 'remix/component',
-			},
+			jsx: { runtime: 'automatic' as const, importSource: '@emotion/react' },
 		},
 	}
 })

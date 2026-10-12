@@ -324,9 +324,7 @@ export function renderSuccessCard(input: {
 				/>
 			</div>
 			<SiteLink
-				href={routes.accountIntegrationDetail.href({
-					integrationName: input.config.providerKey,
-				})}
+				href={`/account/integrations/${encodeURIComponent(input.config.providerKey)}`}
 				css={primaryLinkCss}
 			>
 				View this connection

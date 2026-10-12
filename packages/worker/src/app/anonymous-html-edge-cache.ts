@@ -211,7 +211,10 @@ export async function serveAnonymousHtmlFromCache(
 ): Promise<Response> {
 	const eligible = isAnonymousHtmlCacheRequest(request, env)
 	if (!eligible) {
-		return expireRetiredSiteBannerDismissCookie(request, await prepareNonceHtmlForDelivery(await next(), { cached: false }))
+		return expireRetiredSiteBannerDismissCookie(
+			request,
+			await prepareNonceHtmlForDelivery(await next(), { cached: false }),
+		)
 	}
 
 	const cacheKey = buildAnonymousHtmlCacheKey(request, env)

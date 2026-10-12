@@ -1,22 +1,20 @@
 /** @jsxImportSource @emotion/react */
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { useMutation } from '@tanstack/react-query'
+import { toast } from '#client/toast.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
-import {
-	type AccountSecretDetail,
-	type AccountSecretListItem,
-	type AccountSecretsLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import { useState, type FormEvent } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { type ListDetailSelection } from '#client/list-detail-route.ts'
 import {
 	type ApprovalAction,
-	type ApprovalView,
 	accountSecretsApiPath,
 	getScopeLabel,
 	readJson,
-	submitApprovalRequest,
 } from '#client/routes/account-approval-shared.ts'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
 import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
@@ -43,7 +41,6 @@ import {
 } from './account-secrets-approval.tsx'
 import { SecretEditor } from './account-secrets-editor.tsx'
 import {
-	type PackageOption,
 	type SecretFilterScope,
 	buildBaseSecretsHref,
 	buildNewSecretHref,
@@ -81,25 +78,23 @@ export function AccountSecretsPage({
 	payload: AccountSecretsLoaderData
 	currentHref: string
 }) {
-	const [packageOptions, setPackageOptions] = useState<Array<PackageOption>>(
-		payload.packageOptions,
+	const packageOptions = payload.packageOptions
+	const packagesById = new Map(
+		payload.packages.map((pkg) => [
+			pkg.id,
+			{ kodyId: pkg.kodyId, name: pkg.name },
+		]),
 	)
-	const [packagesById, setPackagesById] = useState(
-		new Map(
-			payload.packages.map((pkg) => [
-				pkg.id,
-				{ kodyId: pkg.kodyId, name: pkg.name },
-			]),
-		),
-	)
-	const [secrets, setSecrets] = useState<Array<AccountSecretListItem>>(
-		payload.secrets,
-	)
-	const [selectedSecret, setSelectedSecret] =
-		useState<AccountSecretDetail | null>(payload.selectedSecret)
-	const [approval, setApproval] = useState<ApprovalView | null>(
-		payload.approval,
-	)
+	const secrets = payload.secrets
+	const selectedSecret = payload.selectedSecret
+	const approval = payload.approval
+		? {
+				...payload.approval,
+				names: payload.approval.names.length
+					? payload.approval.names
+					: [payload.approval.name],
+			}
+		: null
 	const [editorState, setEditorState] = useState(
 		secretsRoute.getSelection(currentHref).isCreating
 			? createEditorStateFromNewSecretQuery(payload.packageOptions, currentHref)
@@ -123,12 +118,46 @@ export function AccountSecretsPage({
 	)
 	const [showSecretValue, setShowSecretValue] = useState(false)
 	const invalidatePages = usePageInvalidation(mutationResources)
+	const secretsMutation = useMutation({
+		mutationKey: ['secrets', currentHref],
+		mutationFn: async (input: {
+			url: string
+			href: string
+			body: Record<string, unknown>
+		}) => {
+			const response = await fetch(input.url, {
+				method: 'POST',
+				referrer: orgAccountApiReferrer(input.href),
+				credentials: 'include',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify(input.body),
+			})
+			const result = await readJson<
+				AccountSecretsLoaderData & { error?: string }
+			>(response)
+			if (!response.ok || !result?.ok)
+				throw new Error(result?.error ?? 'Unable to update secrets.')
+			return result
+		},
+		onSuccess: () => invalidatePages(),
+		onError: (error) => toast.error(error.message),
+	})
 	const router = useRouter()
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const navigate = (href: string) =>
-		void router.navigate({ to: href, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			resetScroll: false,
+		})
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			replace: true,
+			resetScroll: false,
+		})
 
 	function getCurrentHref() {
 		return currentHref
@@ -167,28 +196,6 @@ export function AccountSecretsPage({
 		nextMessage: string | null,
 		preserveDraft = false,
 	) {
-		setPackageOptions(payload.packageOptions)
-		setPackagesById(
-			new Map(
-				payload.packages.map((pkg) => [
-					pkg.id,
-					{ kodyId: pkg.kodyId, name: pkg.name },
-				]),
-			),
-		)
-		setSecrets(payload.secrets)
-		setSelectedSecret(payload.selectedSecret)
-		setApproval(
-			payload.approval
-				? {
-						...payload.approval,
-						names:
-							payload.approval.names.length > 0
-								? payload.approval.names
-								: [payload.approval.name],
-					}
-				: null,
-		)
 		setDeleteArmed(false)
 		setShowSecretValue(false)
 		if (!preserveDraft) {
@@ -234,12 +241,12 @@ export function AccountSecretsPage({
 			if (selection.selectedId) {
 				requestUrl.searchParams.set('selected', selection.selectedId)
 			}
-			const payload = await submitApprovalRequest<
-				AccountSecretsLoaderData & { error?: string; ok?: boolean }
-			>(action, `${requestUrl.pathname}${requestUrl.search}`)
-			if (!payload) return
-
-			void invalidatePages()
+			const payload = await secretsMutation.mutateAsync({
+				url: `${requestUrl.pathname}${requestUrl.search}`,
+				href: currentHref,
+				body: { action },
+			})
+			if (router.state.location.href !== currentHref) return
 			const isPackageApproval = Boolean(approval.requestedPackageId)
 			applyPayload(
 				payload,
@@ -307,14 +314,10 @@ export function AccountSecretsPage({
 							left.localeCompare(right),
 						)
 					: []
-			const response = await fetch(accountSecretsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
+			const payload = await secretsMutation.mutateAsync({
+				url: accountSecretsApiPath,
+				href: currentHref,
+				body: {
 					action: 'save',
 					currentId: submittedEditorState.currentId,
 					name: submittedEditorState.name,
@@ -328,21 +331,10 @@ export function AccountSecretsPage({
 					value: submittedEditorState.value,
 					allowedHosts,
 					allowedPackages,
-				}),
+				},
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
+			if (router.state.location.href !== currentHref) return
 
-			const payload = await readJson<
-				AccountSecretsLoaderData & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to save secret.')
-			}
-
-			void invalidatePages()
 			const wasCreating = !submittedEditorState.currentId
 			const nextSelection: ListDetailSelection = {
 				selectedId: payload.selectedSecret?.id ?? null,
@@ -377,37 +369,16 @@ export function AccountSecretsPage({
 		setMessage(null)
 
 		try {
-			const response = await fetch(accountSecretsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
+			const payload = await secretsMutation.mutateAsync({
+				url: accountSecretsApiPath,
+				href: currentHref,
+				body: {
 					action: 'delete',
 					currentId: editorState.currentId,
-				}),
+				},
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
+			if (router.state.location.href !== currentHref) return
 
-			const payload = await readJson<
-				AccountSecretsLoaderData & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to delete secret.')
-			}
-
-			applyPayload(
-				payload,
-				{ selectedId: null, isCreating: false },
-				'Deleted secret.',
-			)
-			setDeleteArmed(false)
-			void invalidatePages()
 			navigate(buildBaseSecretsHref(getCurrentSearch()))
 		} catch (error) {
 			setSaveState('idle')
@@ -523,6 +494,7 @@ export function AccountSecretsPage({
 				approval,
 			})
 		return renderPackageSecretApprovalPage({
+			currentHref,
 			approval,
 			approvalError: pageApprovalError,
 			packagesById,
@@ -683,7 +655,10 @@ export function AccountSecretsPage({
 					// the selection until it settles.
 					href: isMutating
 						? undefined
-						: buildSecretHref(secret, getCurrentSearch()),
+						: relocateAccountHref(
+								buildSecretHref(secret, getCurrentSearch()),
+								currentHref,
+							),
 					cells: {
 						name: <span css={clampedCellCss}>{secret.name}</span>,
 						scope: getScopeLabel(secret.scope),

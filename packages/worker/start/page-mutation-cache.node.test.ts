@@ -177,3 +177,51 @@ it('can limit optimism to one public profile across cached search variants', asy
 	expect(client.getQueryData(other)).toEqual({ name: 'before' })
 	client.clear()
 })
+
+it.each([
+	['loadConnectionsPage', 'connectedAgents'],
+	['loadConnectionsPage', 'connectionProfiles'],
+	['loadConnectionUsagePage', 'connectionProfiles'],
+	['loadMcpServersPage', 'mcpServers'],
+	['loadSecretProvidersPage', 'secretProviders'],
+	['loadIntegrationsPage', 'integrations'],
+	['loadAccountPage', 'accountConnections'],
+])(
+	'holds %s refresh until %s settles, including a delayed undo decision',
+	async (resource, mutationKey) => {
+		const client = new QueryClient()
+		let finish!: () => void
+		const write = client
+			.getMutationCache()
+			.build(client, {
+				mutationKey: [mutationKey, 'alice', '/@one/-/connections'],
+				mutationFn: () =>
+					new Promise<void>((resolve) => {
+						finish = resolve
+					}),
+			})
+			.execute(undefined)
+		await Promise.resolve()
+		let refreshed = false
+		const read = waitForPageMutations(
+			client,
+			'alice',
+			resource,
+			new AbortController().signal,
+		).then(() => {
+			refreshed = true
+		})
+		await waitForPageMutations(
+			client,
+			'bob',
+			resource,
+			new AbortController().signal,
+		)
+		expect(refreshed).toBe(false)
+		finish()
+		await write
+		await read
+		expect(refreshed).toBe(true)
+		client.clear()
+	},
+)

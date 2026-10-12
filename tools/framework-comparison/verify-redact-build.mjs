@@ -1,7 +1,8 @@
+#!/usr/bin/env node
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-const root = resolve(process.argv[2] ?? 'dist-start')
+const root = resolve(process.argv[2] ?? 'dist')
 
 function sources(directory) {
 	const result = new Set()

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { resolve, join } from 'node:path'

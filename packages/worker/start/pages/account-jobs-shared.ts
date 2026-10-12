@@ -48,13 +48,8 @@ export function emptyJobsMessage(input: {
 	return 'No active or upcoming jobs. Switch to History or All to see other jobs.'
 }
 
-export function packageLabel(
-	job: Pick<AccountJobListItem, 'ownership' | 'packageName'>,
-) {
-	if (job.ownership === 'package') {
-		return job.packageName ?? 'Package'
-	}
-	return '—'
+export function packageLabel(job: Pick<AccountJobListItem, 'packageName'>) {
+	return job.packageName ?? 'Package'
 }
 
 export function statusLabel(

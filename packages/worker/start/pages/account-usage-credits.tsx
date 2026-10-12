@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useState, type FormEvent } from 'react'
+import { useShellData } from '../routes/__root.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { readJson } from '#client/routes/account-approval-shared.ts'
@@ -100,6 +101,7 @@ type AccountUsageCreditsSectionProps = {
 export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
+	const { session } = useShellData()
 	const [appliedCredits, setAppliedCredits] = useState(props.credits)
 	const [message, setMessage] = useState<string | null>(
 		props.error ?? props.notice ?? null,
@@ -226,7 +228,13 @@ export function AccountUsageCreditsSection(
 		if (switchPending) return
 		setSwitchPending(true)
 		setMessage(null)
-		const result = await requestProCheckout()
+		const orgSlug = session?.organizations.find((org) => org.personal)?.slug
+		if (!orgSlug) {
+			setSwitchPending(false)
+			showMessage('Sign in again to switch plans.', 'error')
+			return
+		}
+		const result = await requestProCheckout({ orgSlug })
 		if (result.ok) {
 			window.location.assign(result.url)
 			return

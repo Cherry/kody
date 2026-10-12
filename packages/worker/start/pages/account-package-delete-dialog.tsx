@@ -355,7 +355,6 @@ const mutationResources = [
 	'loadPackageFiles',
 	'loadProfile',
 	'loadCommunity',
-	'loadSharedPage',
 	'loadOnboarding',
 	'loadAccountPage',
 	'loadUsagePage',

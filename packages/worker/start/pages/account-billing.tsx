@@ -169,6 +169,7 @@ export function AccountBillingPage({
 	payload: AccountBillingLoaderData
 	currentHref: string
 }) {
+	const [promoCode, setPromoCode] = useState('')
 	const [message, setMessage] = useState<string | null>(
 		payload.error ?? payload.notice ?? null,
 	)
@@ -196,7 +197,11 @@ export function AccountBillingPage({
 		if (checkoutPending) return
 		setCheckoutPending({ plan, interval })
 		setMessage(null)
-		const result = await requestProCheckout(interval)
+		const result = await requestProCheckout({
+			orgSlug: payload.org.slug,
+			interval,
+			promoCode,
+		})
 		if (result.ok) {
 			if (result.mode === 'portal') {
 				// More than one active subscription: the portal update flow
@@ -286,7 +291,11 @@ export function AccountBillingPage({
 		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
 			<AccountPageHeader
 				title="Billing"
-				description="Your plan, Stripe subscription, and referral link."
+				description={
+					payload.org.personal
+						? 'Your plan, Stripe subscription, and referral link.'
+						: `Billing for @${payload.org.slug}, ${payload.org.seats} seats.`
+				}
 				currentHref={currentHref}
 			/>
 
@@ -347,7 +356,10 @@ export function AccountBillingPage({
 									{statusInfo.label}
 								</span>
 							) : null}
-							<SiteLink href={billing.usageHref} css={mutedLinkCss}>
+							<SiteLink
+								href={billing.usageHref ?? `/@${billing.org.slug}`}
+								css={mutedLinkCss}
+							>
 								view usage
 							</SiteLink>
 						</div>
@@ -369,7 +381,7 @@ export function AccountBillingPage({
 								{formatCancelDate(billing.cancelAt)}.
 							</p>
 						) : null}
-						{billing.creditsEligible ? (
+						{billing.creditsEligible && billing.creditsHref ? (
 							<p css={{ margin: 0 }}>
 								<SiteLink href={billing.creditsHref} css={primaryLinkCss}>
 									Manage credits
@@ -578,9 +590,12 @@ export function AccountBillingPage({
 							>
 								{/* Soft-nav fetch follows the Stripe 302 and fails (KODY-88). */}
 								<SiteLink
-									href={billingPortalPath}
+									href={billingPortalPath(payload.org.slug)}
 									onClick={(event) => {
-										navigateBillingPortalOnPrimaryClick(event.nativeEvent)
+										navigateBillingPortalOnPrimaryClick(
+											event.nativeEvent,
+											payload.org.slug,
+										)
 									}}
 									css={{
 										...(statusInfo?.tone === 'action'
@@ -596,8 +611,10 @@ export function AccountBillingPage({
 							</div>
 						</AccountManagementPanel>
 					) : null}
-
 					{renderAccountBillingPlans({
+						promoCode,
+						checkoutError: messageTone === 'error' ? message : null,
+						onPromoCodeChange: setPromoCode,
 						billing,
 						activeStripePlan,
 						paymentActionNeeded,
@@ -616,8 +633,13 @@ export function AccountBillingPage({
 			) : null}
 
 			<p css={{ margin: 0 }}>
-				<SiteLink href="/account" css={primaryLinkCss}>
-					Back to account
+				<SiteLink
+					href={payload.org.personal ? '/account' : `/@${payload.org.slug}`}
+					css={primaryLinkCss}
+				>
+					{payload.org.personal
+						? 'Back to account'
+						: `Back to @${payload.org.slug}`}
 				</SiteLink>
 			</p>
 		</AccountManagementShell>

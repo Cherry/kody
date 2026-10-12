@@ -1,109 +1,96 @@
-import { prefersMarkdown, markdownResponse } from '#app/markdown-negotiation.ts'
-import { getAppBaseUrl } from '#worker/app-base-url.ts'
+import { createRouter } from 'remix/router'
 import {
-	buildHomeMarkdown,
-	withAgentDiscoveryLinkHeaders,
-} from '#app/agent-discovery.ts'
-import { createAccountWriteLeaseMiddleware } from '#app/account-write-lease-middleware.ts'
-import { remixCrossOriginProtection } from '#app/cross-origin-protection.ts'
-import { createAccountActivityApiHandler } from '#app/handlers/account-activity.ts'
-import { createAccountAvatarApiPostHandler } from '#app/handlers/account-avatar.ts'
+	createAdminHandler,
+	createAdminUsersApiHandler,
+	createAdminUserUsageApiHandler,
+} from '#app/handlers/admin-users.ts'
+import { createAdminCommunityReportsApiHandler } from '#app/handlers/admin-community-reports.ts'
+import { createAdminReservedUsernamesApiHandler } from '#app/handlers/admin-reserved-usernames.ts'
+import { createAdminFeatureFlagsApiHandler } from '#app/handlers/admin-feature-flags.ts'
+import { createYoutubeThumbHandler } from '#app/handlers/youtube-thumb.ts'
+import { createLandingHeroVideosApiHandler } from '#app/handlers/landing-hero-videos.ts'
+import { createAdminPlatformIntegrationsApiHandler } from '#app/handlers/admin-platform-integrations.ts'
+import { createAdminProviderMarksApiHandler } from '#app/handlers/admin-provider-marks.ts'
 import {
-	createAccountBillingApiHandler,
-	createAccountBillingCancellationFeedbackApiHandler,
-	createAccountBillingCheckoutApiHandler,
-	createAccountBillingPortalHandler,
-} from '#app/handlers/account-billing.ts'
-import { createAccountConnectedAgentsApiHandler } from '#app/handlers/account-connected-agents.ts'
-import { createAccountConnectionsApiHandler } from '#app/handlers/account-connections.ts'
-import {
-	createAccountCreditsHandler,
-	createAccountCreditsSettingsApiHandler,
-	createAccountCreditsTopUpApiHandler,
-} from '#app/handlers/account-credits.ts'
+	createAdminCodemodsApiHandler,
+	createAdminCodemodsRunApiHandler,
+	createAdminCodemodsRunStopApiHandler,
+} from '#app/handlers/admin-codemods.ts'
+import { createAdminRolesApiHandler } from '#app/handlers/admin-roles.ts'
+import { createAdminInsightsApiHandler } from '#app/handlers/admin-insights.ts'
+import { createAdminPlatformFeedbackApiHandler } from '#app/handlers/admin-platform-feedback.ts'
+import { createAdminSystemEmailApiHandler } from '#app/handlers/admin-system-email.ts'
 import { createAccountDeleteHandler } from '#app/handlers/account-delete.ts'
+import { createAccountEmailApiHandler } from '#app/handlers/account-email.ts'
 import { createAccountEmailChangeHandler } from '#app/handlers/account-email-change.ts'
 import { createAccountEmailClaimReleaseHandler } from '#app/handlers/account-email-claim-release.ts'
-import { createAccountEmailDestinationsHandler } from '#app/handlers/account-email-destinations.ts'
-import { createAccountEmailApiHandler } from '#app/handlers/account-email.ts'
-import { createAccountExperimentsApiHandler } from '#app/handlers/account-experiments.ts'
+import { createAccountPasswordHandler } from '#app/handlers/account-password.ts'
 import { createAccountExportHandler } from '#app/handlers/account-export.ts'
 import { createAccountIntegrationsApiHandler } from '#app/handlers/account-integrations.ts'
+import { createAccountActivityApiHandler } from '#app/handlers/account-activity.ts'
 import { createAccountJobsApiHandler } from '#app/handlers/account-jobs.ts'
-import { createAccountMcpOauthClientsApiHandler } from '#app/handlers/account-mcp-oauth-clients.ts'
+import { createAccountWorkflowsApiHandler } from '#app/handlers/account-workflows.ts'
+import { createAccountWebhooksApiHandler } from '#app/handlers/account-webhooks.ts'
 import {
 	createAccountMcpServersApiHandler,
 	createAccountMcpServersOauthCallbackHandler,
 } from '#app/handlers/account-mcp-servers.ts'
+import { createOrgMcpServerAuthorizePostHandler } from '#app/handlers/org-mcp-server-authorize.ts'
 import {
 	createAccountMemoriesApiHandler,
 	createAccountMemoriesExportHandler,
 } from '#app/handlers/account-memories.ts'
 import { createAccountPackageApprovePublishApiHandler } from '#app/handlers/account-package-approve-publish.ts'
 import { createAccountPackagesApiHandler } from '#app/handlers/account-packages.ts'
+import {
+	createAccountPackageFilesApiHandler,
+	createCommunityDetailFilesApiHandler,
+	createCommunityPackageFilesApiHandler,
+} from '#app/handlers/package-files.ts'
+import {
+	createCommunityDetailRawHandler,
+	createCommunityPackageRawHandler,
+} from '#app/handlers/package-files-raw.ts'
 import { createAccountPasskeysApiHandler } from '#app/handlers/account-passkeys.ts'
-import { createAccountPasswordHandler } from '#app/handlers/account-password.ts'
+import { createAccountMcpOauthClientsApiHandler } from '#app/handlers/account-mcp-oauth-clients.ts'
+import { createAccountConnectionsApiHandler } from '#app/handlers/account-connections.ts'
+import { createAccountConnectedAgentsApiHandler } from '#app/handlers/account-connected-agents.ts'
+import { createAccountConnectionUsageApiHandler } from '#app/handlers/account-connection-usage.ts'
+import { createAccountAvatarApiPostHandler } from '#app/handlers/account-avatar.ts'
 import { createAccountProfileApiHandler } from '#app/handlers/account-profile.ts'
-import { createAccountRepoIconHandler } from '#app/handlers/account-repo-icon.ts'
-import { createAccountResendVerificationHandler } from '#app/handlers/account-resend-verification.ts'
-import { createAccountSecretProvidersApiHandler } from '#app/handlers/account-secret-providers.ts'
-import { createAccountSecretsApiHandler } from '#app/handlers/account-secrets.ts'
-import { createAccountSharedApiHandler } from '#app/handlers/account-shared.ts'
 import { createAccountTwoFactorApiHandler } from '#app/handlers/account-two-factor.ts'
+import {
+	createAccountBillingCancellationFeedbackApiHandler,
+	createOrgBillingApiHandler,
+	createOrgBillingCheckoutApiHandler,
+	createOrgBillingPortalHandler,
+} from '#app/handlers/org-billing.ts'
+import { createAdminUserCreditsApiHandler } from '#app/handlers/admin-user-credits.ts'
+import { createAdminOrgLimitsApiHandler } from '#app/handlers/admin-org-limits.ts'
+import {
+	createAccountCreditsHandler,
+	createAccountCreditsSettingsApiHandler,
+	createAccountCreditsTopUpApiHandler,
+} from '#app/handlers/account-credits.ts'
 import { createAccountUsageApiHandler } from '#app/handlers/account-usage.ts'
-import { createAccountValuesApiHandler } from '#app/handlers/account-values.ts'
 import {
 	createAccountWaitingApiHandler,
 	createAccountWaitingClickHandler,
 } from '#app/handlers/account-waiting.ts'
-import { createAccountWebhooksApproveApplyApiHandler } from '#app/handlers/account-webhooks-approve-apply.ts'
-import { createAccountWebhooksApiHandler } from '#app/handlers/account-webhooks.ts'
-import { createAccountWorkflowsApiHandler } from '#app/handlers/account-workflows.ts'
-import { createAdminBannersApiHandler } from '#app/handlers/admin-banners.ts'
-import {
-	createAdminCodemodsApiHandler,
-	createAdminCodemodsRunApiHandler,
-	createAdminCodemodsRunStopApiHandler,
-} from '#app/handlers/admin-codemods.ts'
-import { createAdminCommunityReportsApiHandler } from '#app/handlers/admin-community-reports.ts'
-import { createAdminFeatureFlagsApiHandler } from '#app/handlers/admin-feature-flags.ts'
-import { createAdminInsightsApiHandler } from '#app/handlers/admin-insights.ts'
-import { createAdminPlatformFeedbackApiHandler } from '#app/handlers/admin-platform-feedback.ts'
-import { createAdminPlatformIntegrationsApiHandler } from '#app/handlers/admin-platform-integrations.ts'
-import { createAdminProviderMarksApiHandler } from '#app/handlers/admin-provider-marks.ts'
-import { createAdminReservedUsernamesApiHandler } from '#app/handlers/admin-reserved-usernames.ts'
-import { createAdminRolesApiHandler } from '#app/handlers/admin-roles.ts'
-import { createAdminSystemEmailApiHandler } from '#app/handlers/admin-system-email.ts'
-import { createAdminUserCreditsApiHandler } from '#app/handlers/admin-user-credits.ts'
-import {
-	createAdminHandler,
-	createAdminUsersApiHandler,
-	createAdminUserUsageApiHandler,
-} from '#app/handlers/admin-users.ts'
-import {
-	createAgentSkillMarkdownHandler,
-	createAgentSkillsIndexHandler,
-	createApiCatalogHandler,
-	createAuthMarkdownHandler,
-	createMcpServerCardHandler,
-	createOpenaiAppsChallengeHandler,
-	createRobotsTxtHandler,
-	createSecurityTxtHandler,
-	createSitemapHandler,
-} from '#app/handlers/agent-discovery.ts'
-import {
-	createAuthProviderCallbackHandler,
-	createAuthProvidersApiHandler,
-	createAuthProviderStartHandler,
-} from '#app/handlers/auth-provider.ts'
+import { createAccountExperimentsApiHandler } from '#app/handlers/account-experiments.ts'
+import { createCommunityPackageWebhooksApiHandler } from '#app/handlers/package-webhooks.ts'
+import { createAccountResendVerificationHandler } from '#app/handlers/account-resend-verification.ts'
+import { createAccountSecretsApiHandler } from '#app/handlers/account-secrets.ts'
+import { createAccountSecretProvidersApiHandler } from '#app/handlers/account-secret-providers.ts'
+import { createAccountValuesApiHandler } from '#app/handlers/account-values.ts'
 import { createAuthHandler } from '#app/handlers/auth.ts'
 import {
-	createBlogApiHandler,
-	createBlogPostApiHandler,
-	createBlogPostMarkdownHandler,
-	createBlogPostOgImageHandler,
-	createBlogRssHandler,
-} from '#app/handlers/blog.tsx'
+	createAuthProviderCallbackHandler,
+	createAuthProviderStartHandler,
+	createAuthProvidersApiHandler,
+} from '#app/handlers/auth-provider.ts'
+import { createAccountWebhooksApproveApplyApiHandler } from '#app/handlers/account-webhooks-approve-apply.ts'
+import { createCommunityApiHandler } from '#app/handlers/community.tsx'
 import {
 	createCommunityDetailApiHandler,
 	createCommunityDetailOgImageHandler,
@@ -111,12 +98,32 @@ import {
 	createCommunityReportApiPostHandler,
 } from '#app/handlers/community-detail.tsx'
 import { createCommunityFeatureApiPostHandler } from '#app/handlers/community-feature.ts'
+import { createAccountRepoIconHandler } from '#app/handlers/account-repo-icon.ts'
 import { createCommunityIconHandler } from '#app/handlers/community-icon.ts'
-import { createCommunityInstallApiPostHandler } from '#app/handlers/community-install.ts'
 import { createCommunityPackageIconHandler } from '#app/handlers/community-package-icon.ts'
+import {
+	createCommunityDetailAssetHandler,
+	createCommunityPackageAssetHandler,
+} from '#app/handlers/package-readme-assets.ts'
+import { createIntegrationLogoHandler } from '#app/handlers/integration-logo.ts'
+import { createProviderMarkLogoHandler } from '#app/handlers/provider-mark-logo.ts'
+import { createMcpServerLogoHandler } from '#app/handlers/mcp-server-logo.ts'
+import { createCommunityInstallApiPostHandler } from '#app/handlers/community-install.ts'
 import { createCommunityTrustApiPostHandler } from '#app/handlers/community-trust.ts'
-import { createCommunityApiHandler } from '#app/handlers/community.tsx'
-import { createDiscordApiHandler } from '#app/handlers/discord.ts'
+import {
+	createProfileApiHandler,
+	createProfileOgImageHandler,
+} from '#app/handlers/profile.tsx'
+import { createProfileAvatarHandler } from '#app/handlers/profile-avatar.ts'
+import { createWebhookIngressHandler } from '#app/handlers/webhook-ingress.ts'
+import { createStripeWebhookHandler } from '#app/handlers/stripe-webhook.ts'
+import {
+	createBlogApiHandler,
+	createBlogPostApiHandler,
+	createBlogPostMarkdownHandler,
+	createBlogPostOgImageHandler,
+	createBlogRssHandler,
+} from '#app/handlers/blog.tsx'
 import {
 	createDocDetailApiHandler,
 	createDocDetailMarkdownHandler,
@@ -128,65 +135,89 @@ import {
 	createDocsMarkdownHandler,
 	createLlmsTxtHandler,
 } from '#app/handlers/docs.tsx'
-import { createHealthComponentsHandler } from '#app/handlers/health-components.ts'
-import { createHealthHandler } from '#app/handlers/health.ts'
-import { createIntegrationLogoHandler } from '#app/handlers/integration-logo.ts'
-import { createLandingHeroVideosApiHandler } from '#app/handlers/landing-hero-videos.ts'
+import { createPackageSkillsOptInHandler } from '#app/handlers/package-skills-opt-in.ts'
+import { createMcpEventsOptInHandler } from '#app/handlers/mcp-events-opt-in.ts'
 import {
 	createLegacyGuidesApiRedirectHandler,
 	createLegacyGuidesMarkdownRedirectHandler,
 	createLegacyGuidesPathRedirectHandler,
 	createLegacyGuidesRedirectHandler,
 } from '#app/handlers/legacy-guides-redirect.ts'
-import { logout } from '#app/handlers/logout.ts'
-import { createMcpServerLogoHandler } from '#app/handlers/mcp-server-logo.ts'
+import { createHealthHandler } from '#app/handlers/health.ts'
+import { createHealthComponentsHandler } from '#app/handlers/health-components.ts'
+import { createSentryTunnelHandler } from '#app/handlers/sentry-tunnel.ts'
+import {
+	createAgentSkillMarkdownHandler,
+	createAgentSkillsIndexHandler,
+	createApiCatalogHandler,
+	createAuthMarkdownHandler,
+	createMcpServerCardHandler,
+	createOpenaiAppsChallengeHandler,
+	createRobotsTxtHandler,
+	createSecurityTxtHandler,
+	createSitemapHandler,
+} from '#app/handlers/agent-discovery.ts'
 import { createOgPageImageHandler } from '#app/handlers/og-page-image.ts'
 import {
 	createOnboardingApiHandler,
 	createOnboardingChecklistDismissHandler,
 } from '#app/handlers/onboarding.ts'
-import {
-	createCommunityDetailRawHandler,
-	createCommunityPackageRawHandler,
-} from '#app/handlers/package-files-raw.ts'
-import {
-	createAccountPackageFilesApiHandler,
-	createCommunityDetailFilesApiHandler,
-	createCommunityPackageFilesApiHandler,
-} from '#app/handlers/package-files.ts'
-import {
-	createCommunityDetailAssetHandler,
-	createCommunityPackageAssetHandler,
-} from '#app/handlers/package-readme-assets.ts'
-import { createCommunityPackageApproveChangesApiHandler } from '#app/handlers/package-share-approve-changes.ts'
-import { createCommunityPackageShareApiHandler } from '#app/handlers/package-share.ts'
-import { createPackageSharingOptInHandler } from '#app/handlers/package-sharing-opt-in.ts'
-import { createCommunityPackageWebhooksApiHandler } from '#app/handlers/package-webhooks.ts'
-import {
-	createPasswordResetConfirmHandler,
-	createPasswordResetRequestHandler,
-} from '#app/handlers/password-reset.ts'
-import { createProfileAvatarHandler } from '#app/handlers/profile-avatar.ts'
-import {
-	createProfileApiHandler,
-	createProfileOgImageHandler,
-} from '#app/handlers/profile.tsx'
-import { createProviderMarkLogoHandler } from '#app/handlers/provider-mark-logo.ts'
-import { createSecretProvidersOptInHandler } from '#app/handlers/secret-providers-opt-in.ts'
-import { createSentryTunnelHandler } from '#app/handlers/sentry-tunnel.ts'
-import { createSessionHandler } from '#app/handlers/session.ts'
-import { createSiteBannerDismissHandler } from '#app/handlers/site-banner-dismiss.ts'
-import { createStripeWebhookHandler } from '#app/handlers/stripe-webhook.ts'
+import { createDiscordApiHandler } from '#app/handlers/discord.ts'
 import { createTwoFactorVerifyApiHandler } from '#app/handlers/verify.ts'
+import { createAccountEmailDestinationsHandler } from '#app/handlers/account-email-destinations.ts'
 import {
 	createWebauthnAuthenticationHandler,
 	createWebauthnRegistrationHandler,
 } from '#app/handlers/webauthn.ts'
-import { createWebhookIngressHandler } from '#app/handlers/webhook-ingress.ts'
-import { createYoutubeThumbHandler } from '#app/handlers/youtube-thumb.ts'
-import { createReferralCookieMiddleware } from '#app/referral-cookie-middleware.ts'
+import { logout } from '#app/handlers/logout.ts'
+import {
+	createPasswordResetConfirmHandler,
+	createPasswordResetRequestHandler,
+} from '#app/handlers/password-reset.ts'
+import { createSessionHandler } from '#app/handlers/session.ts'
 import { routes } from '#universal/routes.ts'
-import { createRouter } from 'remix/router'
+import { createAccountWriteLeaseMiddleware } from '#app/account-write-lease-middleware.ts'
+import { createOrgBindingGuardMiddleware } from '#app/org-binding-guard-middleware.ts'
+import { remixCrossOriginProtection } from '#app/cross-origin-protection.ts'
+import { createReferralCookieMiddleware } from '#app/referral-cookie-middleware.ts'
+import {
+	createAccountOrganizationsApiHandler,
+	createAccountOrganizationsNewPostHandler,
+} from '#app/handlers/account-organizations.ts'
+import { createOrgPackagesApiHandler } from '#app/handlers/org-section.ts'
+import { createOrgAvatarHandler } from '#app/handlers/org-avatar.ts'
+import { createOrgInviteJoinPostHandler } from '#app/handlers/org-invite-join.ts'
+import {
+	createOrgMembersApiHandler,
+	createOrgMembersInviteLinksPostHandler,
+	createOrgMembersInviteLinksRevokePostHandler,
+	createOrgMembersInvitePostHandler,
+	createOrgMembersRemovePostHandler,
+	createOrgMembersRolePostHandler,
+} from '#app/handlers/org-members.ts'
+import {
+	createOrgTeamsApiHandler,
+	createOrgTeamsCreatePostHandler,
+	createOrgTeamsMemberAddPostHandler,
+	createOrgTeamsMemberRemovePostHandler,
+} from '#app/handlers/org-teams.ts'
+import {
+	createOrgGrantsApiHandler,
+	createOrgGrantsRevokePostHandler,
+} from '#app/handlers/org-grants.ts'
+import { createOrgCollaboratorsApiHandler } from '#app/handlers/org-collaborators.ts'
+import {
+	createOrgSettingsApiHandler,
+	createOrgSettingsAvatarPostHandler,
+	createOrgSettingsDeletePostHandler,
+	createOrgSettingsPostHandler,
+} from '#app/handlers/org-settings.ts'
+import { prefersMarkdown, markdownResponse } from '#app/markdown-negotiation.ts'
+import { getAppBaseUrl } from '#worker/app-base-url.ts'
+import {
+	buildHomeMarkdown,
+	withAgentDiscoveryLinkHeaders,
+} from '#app/agent-discovery.ts'
 export function createBackendRouter(
 	env: Env,
 	renderDocument: (request: Request) => Promise<Response>,
@@ -225,6 +256,7 @@ export function createBackendRouter(
 		middleware: [
 			remixCrossOriginProtection,
 			createReferralCookieMiddleware(),
+			createOrgBindingGuardMiddleware(env),
 			createAccountWriteLeaseMiddleware(env),
 		],
 		async defaultHandler({ request }) {
@@ -262,8 +294,8 @@ export function createBackendRouter(
 			docDetailApi: routes.docDetailApi,
 			docDetailMarkdown: routes.docDetailMarkdown,
 			docDetailOgImage: routes.docDetailOgImage,
-			packageSharingOptInPost: routes.packageSharingOptInPost,
-			secretProvidersOptInPost: routes.secretProvidersOptInPost,
+			packageSkillsOptInPost: routes.packageSkillsOptInPost,
+			mcpEventsOptInPost: routes.mcpEventsOptInPost,
 			llmsTxt: routes.llmsTxt,
 			legacyGuides: routes.legacyGuides,
 			legacyGuidesApi: routes.legacyGuidesApi,
@@ -272,8 +304,9 @@ export function createBackendRouter(
 			discordApi: routes.discordApi,
 			onboardingApi: routes.onboardingApi,
 			onboardingChecklistDismissPost: routes.onboardingChecklistDismissPost,
-			siteBannerDismissPost: routes.siteBannerDismissPost,
 			youtubeThumb: routes.youtubeThumb,
+			accountOrganizationsApi: routes.accountOrganizationsApi,
+			accountOrganizationsNewPost: routes.accountOrganizationsNewPost,
 			accountDelete: routes.accountDelete,
 			accountExport: routes.accountExport,
 			accountIntegrationsApi: routes.accountIntegrationsApi,
@@ -285,10 +318,6 @@ export function createBackendRouter(
 			accountPackageApprovePublishApi: routes.accountPackageApprovePublishApi,
 			communityPackageApprovePublishApi:
 				routes.communityPackageApprovePublishApi,
-			communityPackageApproveChangesApi:
-				routes.communityPackageApproveChangesApi,
-			communityPackageShareApi: routes.communityPackageShareApi,
-			communityPackageShareApiPost: routes.communityPackageShareApiPost,
 			communityPackageWebhooksApi: routes.communityPackageWebhooksApi,
 			communityPackageWebhooksApiPost: routes.communityPackageWebhooksApiPost,
 			accountPackageFilesApi: routes.accountPackageFilesApi,
@@ -298,6 +327,7 @@ export function createBackendRouter(
 			accountConnectionsApiPost: routes.accountConnectionsApiPost,
 			accountConnectedAgentsApi: routes.accountConnectedAgentsApi,
 			accountConnectedAgentsApiPost: routes.accountConnectedAgentsApiPost,
+			accountConnectionUsageApi: routes.accountConnectionUsageApi,
 			accountPasskeysApi: routes.accountPasskeysApi,
 			accountPasskeysApiPost: routes.accountPasskeysApiPost,
 			accountMcpOauthClientsApi: routes.accountMcpOauthClientsApi,
@@ -307,11 +337,8 @@ export function createBackendRouter(
 			accountAvatarApiPost: routes.accountAvatarApiPost,
 			accountTwoFactorApi: routes.accountTwoFactorApi,
 			accountTwoFactorApiPost: routes.accountTwoFactorApiPost,
-			accountBillingApi: routes.accountBillingApi,
-			accountBillingCheckoutPost: routes.accountBillingCheckoutPost,
 			accountBillingCancellationFeedbackPost:
 				routes.accountBillingCancellationFeedbackPost,
-			accountBillingPortal: routes.accountBillingPortal,
 			accountCredits: routes.accountCredits,
 			accountCreditsTopUpPost: routes.accountCreditsTopUpPost,
 			accountCreditsSettingsPost: routes.accountCreditsSettingsPost,
@@ -320,8 +347,6 @@ export function createBackendRouter(
 			accountWaitingClickPost: routes.accountWaitingClickPost,
 			accountExperimentsApi: routes.accountExperimentsApi,
 			accountExperimentsApiPost: routes.accountExperimentsApiPost,
-			accountSharedApi: routes.accountSharedApi,
-			accountSharedApiPost: routes.accountSharedApiPost,
 			accountEmailChange: routes.accountEmailChange,
 			accountEmailDestinationsApi: routes.accountEmailDestinationsApi,
 			accountEmailDestinationsApiPost: routes.accountEmailDestinationsApiPost,
@@ -354,8 +379,6 @@ export function createBackendRouter(
 			adminReservedUsernamesApiPost: routes.adminReservedUsernamesApiPost,
 			adminFeatureFlagsApi: routes.adminFeatureFlagsApi,
 			adminFeatureFlagsApiPost: routes.adminFeatureFlagsApiPost,
-			adminBannersApi: routes.adminBannersApi,
-			adminBannersApiPost: routes.adminBannersApiPost,
 			adminPlatformIntegrationsApi: routes.adminPlatformIntegrationsApi,
 			adminPlatformIntegrationsApiPost: routes.adminPlatformIntegrationsApiPost,
 			adminProviderMarksApi: routes.adminProviderMarksApi,
@@ -369,9 +392,12 @@ export function createBackendRouter(
 			adminUserUsageApi: routes.adminUserUsageApi,
 			adminUserCreditsApi: routes.adminUserCreditsApi,
 			adminUserCreditsApiPost: routes.adminUserCreditsApiPost,
+			adminOrgLimitsApi: routes.adminOrgLimitsApi,
+			adminOrgLimitsApiPost: routes.adminOrgLimitsApiPost,
 			adminInsightsApi: routes.adminInsightsApi,
 			adminPlatformFeedbackApi: routes.adminPlatformFeedbackApi,
 			adminSystemEmailApi: routes.adminSystemEmailApi,
+			adminSystemEmailApiPost: routes.adminSystemEmailApiPost,
 			communityApi: routes.communityApi,
 			communityDetailApi: routes.communityDetailApi,
 			communityDetailFilesApi: routes.communityDetailFilesApi,
@@ -391,6 +417,30 @@ export function createBackendRouter(
 			communityTrustApiPost: routes.communityTrustApiPost,
 			communityFeatureApiPost: routes.communityFeatureApiPost,
 			communityInstallApiPost: routes.communityInstallApiPost,
+			orgBillingApi: routes.orgBillingApi,
+			orgBillingCheckoutPost: routes.orgBillingCheckoutPost,
+			orgBillingPortal: routes.orgBillingPortal,
+			orgMcpServerAuthorizePost: routes.orgMcpServerAuthorizePost,
+			orgPackagesApi: routes.orgPackagesApi,
+			orgSettingsApi: routes.orgSettingsApi,
+			orgSettingsPost: routes.orgSettingsPost,
+			orgSettingsAvatarPost: routes.orgSettingsAvatarPost,
+			orgSettingsDeletePost: routes.orgSettingsDeletePost,
+			orgMembersApi: routes.orgMembersApi,
+			orgMembersRolePost: routes.orgMembersRolePost,
+			orgMembersRemovePost: routes.orgMembersRemovePost,
+			orgMembersInvitePost: routes.orgMembersInvitePost,
+			orgMembersInviteLinksPost: routes.orgMembersInviteLinksPost,
+			orgMembersInviteLinksRevokePost: routes.orgMembersInviteLinksRevokePost,
+			orgInviteJoinPost: routes.orgInviteJoinPost,
+			orgTeamsApi: routes.orgTeamsApi,
+			orgTeamsCreatePost: routes.orgTeamsCreatePost,
+			orgTeamsMemberAddPost: routes.orgTeamsMemberAddPost,
+			orgTeamsMemberRemovePost: routes.orgTeamsMemberRemovePost,
+			orgGrantsApi: routes.orgGrantsApi,
+			orgGrantsRevokePost: routes.orgGrantsRevokePost,
+			orgCollaboratorsApi: routes.orgCollaboratorsApi,
+			orgAvatar: routes.orgAvatar,
 			profileApi: routes.profileApi,
 			profileAvatar: routes.profileAvatar,
 			profileOgImage: routes.profileOgImage,
@@ -439,8 +489,8 @@ export function createBackendRouter(
 				docDetailApi: createDocDetailApiHandler(env),
 				docDetailMarkdown: createDocDetailMarkdownHandler(env),
 				docDetailOgImage: createDocDetailOgImageHandler(env),
-				packageSharingOptInPost: createPackageSharingOptInHandler(env),
-				secretProvidersOptInPost: createSecretProvidersOptInHandler(env),
+				packageSkillsOptInPost: createPackageSkillsOptInHandler(env),
+				mcpEventsOptInPost: createMcpEventsOptInHandler(env),
 				llmsTxt: createLlmsTxtHandler(env),
 				legacyGuides: createLegacyGuidesRedirectHandler(env),
 				legacyGuidesApi: createLegacyGuidesApiRedirectHandler(env),
@@ -450,8 +500,10 @@ export function createBackendRouter(
 				onboardingApi: createOnboardingApiHandler(env),
 				onboardingChecklistDismissPost:
 					createOnboardingChecklistDismissHandler(env),
-				siteBannerDismissPost: createSiteBannerDismissHandler(env),
 				youtubeThumb: createYoutubeThumbHandler(env),
+				accountOrganizationsApi: createAccountOrganizationsApiHandler(env),
+				accountOrganizationsNewPost:
+					createAccountOrganizationsNewPostHandler(env),
 				accountDelete: createAccountDeleteHandler(env),
 				accountExport: createAccountExportHandler(env),
 				accountIntegrationsApi: createAccountIntegrationsApiHandler(env),
@@ -465,11 +517,6 @@ export function createBackendRouter(
 					createAccountPackageApprovePublishApiHandler(env),
 				communityPackageApprovePublishApi:
 					createAccountPackageApprovePublishApiHandler(env),
-				communityPackageApproveChangesApi:
-					createCommunityPackageApproveChangesApiHandler(env),
-				communityPackageShareApi: createCommunityPackageShareApiHandler(env),
-				communityPackageShareApiPost:
-					createCommunityPackageShareApiHandler(env),
 				communityPackageWebhooksApi:
 					createCommunityPackageWebhooksApiHandler(env),
 				communityPackageWebhooksApiPost:
@@ -482,6 +529,7 @@ export function createBackendRouter(
 				accountConnectedAgentsApi: createAccountConnectedAgentsApiHandler(env),
 				accountConnectedAgentsApiPost:
 					createAccountConnectedAgentsApiHandler(env),
+				accountConnectionUsageApi: createAccountConnectionUsageApiHandler(env),
 				accountPasskeysApi: createAccountPasskeysApiHandler(env),
 				accountPasskeysApiPost: createAccountPasskeysApiHandler(env),
 				accountMcpOauthClientsApi: createAccountMcpOauthClientsApiHandler(env),
@@ -492,11 +540,8 @@ export function createBackendRouter(
 				accountAvatarApiPost: createAccountAvatarApiPostHandler(env),
 				accountTwoFactorApi: createAccountTwoFactorApiHandler(env),
 				accountTwoFactorApiPost: createAccountTwoFactorApiHandler(env),
-				accountBillingApi: createAccountBillingApiHandler(env),
-				accountBillingCheckoutPost: createAccountBillingCheckoutApiHandler(env),
 				accountBillingCancellationFeedbackPost:
 					createAccountBillingCancellationFeedbackApiHandler(env),
-				accountBillingPortal: createAccountBillingPortalHandler(env),
 				accountCredits: createAccountCreditsHandler(),
 				accountCreditsTopUpPost: createAccountCreditsTopUpApiHandler(env),
 				accountCreditsSettingsPost: createAccountCreditsSettingsApiHandler(env),
@@ -505,8 +550,6 @@ export function createBackendRouter(
 				accountWaitingClickPost: createAccountWaitingClickHandler(env),
 				accountExperimentsApi: createAccountExperimentsApiHandler(env),
 				accountExperimentsApiPost: createAccountExperimentsApiHandler(env),
-				accountSharedApi: createAccountSharedApiHandler(env),
-				accountSharedApiPost: createAccountSharedApiHandler(env),
 				accountEmailChange: createAccountEmailChangeHandler(env),
 				accountEmailDestinationsApi: createAccountEmailDestinationsHandler(env),
 				accountEmailDestinationsApiPost:
@@ -543,8 +586,6 @@ export function createBackendRouter(
 					createAdminReservedUsernamesApiHandler(env),
 				adminFeatureFlagsApi: createAdminFeatureFlagsApiHandler(env),
 				adminFeatureFlagsApiPost: createAdminFeatureFlagsApiHandler(env),
-				adminBannersApi: createAdminBannersApiHandler(env),
-				adminBannersApiPost: createAdminBannersApiHandler(env),
 				adminPlatformIntegrationsApi:
 					createAdminPlatformIntegrationsApiHandler(env),
 				adminPlatformIntegrationsApiPost:
@@ -561,9 +602,12 @@ export function createBackendRouter(
 				adminUserUsageApi: createAdminUserUsageApiHandler(env),
 				adminUserCreditsApi: createAdminUserCreditsApiHandler(env),
 				adminUserCreditsApiPost: createAdminUserCreditsApiHandler(env),
+				adminOrgLimitsApi: createAdminOrgLimitsApiHandler(env),
+				adminOrgLimitsApiPost: createAdminOrgLimitsApiHandler(env),
 				adminInsightsApi: createAdminInsightsApiHandler(env),
 				adminPlatformFeedbackApi: createAdminPlatformFeedbackApiHandler(env),
 				adminSystemEmailApi: createAdminSystemEmailApiHandler(env),
+				adminSystemEmailApiPost: createAdminSystemEmailApiHandler(env),
 				communityApi: createCommunityApiHandler(env),
 				communityDetailApi: createCommunityDetailApiHandler(env),
 				communityDetailFilesApi: createCommunityDetailFilesApiHandler(env),
@@ -583,6 +627,31 @@ export function createBackendRouter(
 				communityTrustApiPost: createCommunityTrustApiPostHandler(env),
 				communityFeatureApiPost: createCommunityFeatureApiPostHandler(env),
 				communityInstallApiPost: createCommunityInstallApiPostHandler(env),
+				orgBillingApi: createOrgBillingApiHandler(env),
+				orgBillingCheckoutPost: createOrgBillingCheckoutApiHandler(env),
+				orgBillingPortal: createOrgBillingPortalHandler(env),
+				orgMcpServerAuthorizePost: createOrgMcpServerAuthorizePostHandler(env),
+				orgPackagesApi: createOrgPackagesApiHandler(env),
+				orgSettingsApi: createOrgSettingsApiHandler(env),
+				orgSettingsPost: createOrgSettingsPostHandler(env),
+				orgSettingsAvatarPost: createOrgSettingsAvatarPostHandler(env),
+				orgSettingsDeletePost: createOrgSettingsDeletePostHandler(env),
+				orgMembersApi: createOrgMembersApiHandler(env),
+				orgMembersRolePost: createOrgMembersRolePostHandler(env),
+				orgMembersRemovePost: createOrgMembersRemovePostHandler(env),
+				orgMembersInvitePost: createOrgMembersInvitePostHandler(env),
+				orgMembersInviteLinksPost: createOrgMembersInviteLinksPostHandler(env),
+				orgMembersInviteLinksRevokePost:
+					createOrgMembersInviteLinksRevokePostHandler(env),
+				orgInviteJoinPost: createOrgInviteJoinPostHandler(env),
+				orgTeamsApi: createOrgTeamsApiHandler(env),
+				orgTeamsCreatePost: createOrgTeamsCreatePostHandler(env),
+				orgTeamsMemberAddPost: createOrgTeamsMemberAddPostHandler(env),
+				orgTeamsMemberRemovePost: createOrgTeamsMemberRemovePostHandler(env),
+				orgGrantsApi: createOrgGrantsApiHandler(env),
+				orgGrantsRevokePost: createOrgGrantsRevokePostHandler(env),
+				orgCollaboratorsApi: createOrgCollaboratorsApiHandler(env),
+				orgAvatar: createOrgAvatarHandler(env),
 				profileApi: createProfileApiHandler(env),
 				profileAvatar: createProfileAvatarHandler(env),
 				profileOgImage: createProfileOgImageHandler(env),

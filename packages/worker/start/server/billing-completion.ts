@@ -5,7 +5,7 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/billing\/success(?:\?[^#]*)?$/.test(href)
+			!/^\/@[^/?#]+\/-\/billing\/success(?:\?[^#]*)?$/.test(href)
 		)
 			throw new Error('Invalid checkout completion URL')
 		return href
@@ -16,14 +16,14 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 			{ getRequest, setResponseHeader },
 			{ getEnv },
 			{ setAuthSessionSecret },
-			{ completeAccountBillingCheckout },
+			{ completeOrgBillingCheckout },
 			{ loadDocumentHead },
 		] = await Promise.all([
 			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
 			import('../../src/app/env.ts'),
 			import('../../src/app/auth-session.ts'),
-			import('../../src/app/account-billing-completion.ts'),
+			import('../../src/app/handlers/org-billing.ts'),
 			import('./document-head.ts'),
 		])
 		if (getRequest().method !== 'GET')
@@ -33,18 +33,19 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 		const request = new Request(new URL(href, getRequest().url), {
 			headers: getRequest().headers,
 		})
-		const result = await completeAccountBillingCheckout(request, bindings)
+		const result = await completeOrgBillingCheckout(request, bindings)
 		if (result instanceof Response) {
 			const cookies = result.headers.getSetCookie()
 			if (cookies.length) setResponseHeader('Set-Cookie', cookies)
 			throw redirect({
-				href: result.headers.get('Location') ?? '/account/billing',
+				href: result.headers.get('Location') ?? '/',
 				statusCode: result.status,
 			})
 		}
+		if (!result.ok) throw new Response(result.error, { status: result.status })
 		return {
 			payload: result,
-			head: loadDocumentHead('/account/billing/success', {
+			head: loadDocumentHead(new URL(request.url).pathname, {
 				accountBillingSuccess: result,
 			}),
 		}

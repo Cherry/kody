@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { chromium } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

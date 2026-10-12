@@ -1,5 +1,8 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountIntegrationsLoaderData,
@@ -30,7 +33,7 @@ import {
 	integrationsRoute,
 	isBuiltInApp,
 	oauthAppTitle,
-	postIntegrationsMutation,
+	postIntegrationsMutation as postIntegration,
 	readSearchFilter,
 	resolveIntegrationsSelection,
 } from './account-integrations-shared.ts'
@@ -51,28 +54,78 @@ export function AccountIntegrationsPage({
 	payload: AccountIntegrationsLoaderData
 	currentHref: string
 }) {
-	const [integrations, setIntegrations] = useState<
-		Array<AccountIntegrationListItem>
-	>(payload.integrations)
-	const [apps, setApps] = useState<Array<AccountOauthAppListItem>>(
-		payload.apps ?? [],
-	)
-	const [savedPackages, setSavedPackages] = useState<
-		Array<{ id: string; kodyId: string }>
-	>(payload.savedPackages ?? [])
-	const [platformCatalog, setPlatformCatalog] = useState<
-		NonNullable<AccountIntegrationsLoaderData['platformCatalog']>
-	>(payload.platformCatalog ?? [])
-	const [approval, setApproval] = useState<
-		AccountIntegrationsLoaderData['approval']
-	>(payload.approval ?? null)
+	const integrations = payload.integrations
+	const apps = payload.apps ?? []
+	const savedPackages = payload.savedPackages ?? []
+	const platformCatalog = payload.platformCatalog ?? []
+	const approval = payload.approval ?? null
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	function updatePayload(
+		update: (
+			data: AccountIntegrationsLoaderData,
+		) => AccountIntegrationsLoaderData,
+		href = currentHref,
+	) {
+		updateOrgPagePayload(
+			queryClient,
+			actorKey,
+			'loadIntegrationsPage',
+			href,
+			update,
+		)
+	}
+	const setIntegrations = (value: AccountIntegrationListItem[]) =>
+		updatePayload((data) => ({ ...data, integrations: value }))
+	const setApps = (value: AccountOauthAppListItem[]) =>
+		updatePayload((data) => ({ ...data, apps: value }))
+	const setApproval = (value: AccountIntegrationsLoaderData['approval']) =>
+		updatePayload((data) => ({ ...data, approval: value }))
+	const mutation = useMutation({
+		mutationKey: ['integrations', actorKey],
+		mutationFn: async ({
+			body,
+			href,
+			decision,
+		}: {
+			body: Record<string, unknown>
+			href: string
+			decision?: Promise<boolean>
+			optimistic?: () => void
+			rollback?: () => void
+		}) => {
+			if (decision && !(await decision)) return { undone: true as const }
+			return postIntegration(body, href)
+		},
+		onMutate: async ({ href, optimistic }) => {
+			await queryClient.cancelQueries(
+				orgPageFilters(actorKey, 'loadIntegrationsPage', href),
+			)
+			optimistic?.()
+		},
+		onSuccess: (result, { rollback }) => {
+			if (result && 'undone' in result) rollback?.()
+		},
+		onError: (_error, { rollback }) => rollback?.(),
+		onSettled: (_data, _error, { href }) => {
+			void queryClient.invalidateQueries(
+				orgPageFilters(actorKey, 'loadIntegrationsPage', href),
+			)
+		},
+	})
+	function invalidatePages() {
+		return queryClient.invalidateQueries(
+			orgPageFilters(actorKey, 'loadIntegrationsPage', currentHref),
+		)
+	}
 	const [usageDrafts, setUsageDrafts] = useState(
 		new Map<string, IntegrationUsageDraft>(),
 	)
 	const [usageSavingName, setUsageSavingName] = useState<string | null>(null)
 	const [approvalSubmitting, setApprovalSubmitting] = useState(false)
 	const [message, setMessage] = useState<string | null>(null)
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const postIntegrationsMutation = (body: Record<string, unknown>) =>
+		mutation.mutateAsync({ body, href: currentHref })
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
@@ -120,12 +173,63 @@ export function AccountIntegrationsPage({
 		}
 	}
 
-	function restoreSnapshot(snapshot: IntegrationsSnapshot) {
-		if (!mounted.current) return
-		setIntegrations(snapshot.integrations)
-		setApps(snapshot.apps)
+	function restoreSnapshot(
+		snapshot: IntegrationsSnapshot,
+		names: Set<string>,
+		deletedApp?: AccountOauthAppListItem,
+	) {
+		updatePayload(
+			(data) => ({
+				...data,
+				integrations: [
+					...data.integrations,
+					...snapshot.integrations.filter(
+						(entry) =>
+							names.has(entry.name) &&
+							!data.integrations.some((current) => current.name === entry.name),
+					),
+				],
+				apps: snapshot.apps.reduce((current, original) => {
+					const removed = original.connections.filter((connection) =>
+						names.has(connection.name),
+					)
+					if (
+						!removed.length &&
+						(!deletedApp ||
+							integrationListId(deletedApp) !== integrationListId(original))
+					)
+						return current
+					const existing = current.find(
+						(app) => integrationListId(app) === integrationListId(original),
+					)
+					if (!existing)
+						return [
+							...current,
+							{
+								...original,
+								connections: removed,
+								connectionCount: removed.length,
+							},
+						]
+					return current.map((app) => {
+						if (app !== existing) return app
+						const connections = [
+							...app.connections,
+							...removed.filter(
+								(row) =>
+									!app.connections.some((item) => item.name === row.name),
+							),
+						]
+						return { ...app, connections, connectionCount: connections.length }
+					})
+				}, data.apps ?? []),
+			}),
+			snapshot.href,
+		)
 		setMessage(null)
 		if (
+			mounted.current &&
+			getCurrentHref() === currentHref &&
 			integrationsRoute.isRoutePath(getCurrentHref()) &&
 			getCurrentHref() !== snapshot.href
 		) {
@@ -134,7 +238,7 @@ export function AccountIntegrationsPage({
 	}
 
 	function listHref() {
-		return `${routes.accountIntegrations.href()}${getCurrentSearch()}`
+		return `${relocateAccountHref('/account/integrations', currentHref)}${getCurrentSearch()}`
 	}
 
 	function currentSelectionMissing() {
@@ -154,7 +258,7 @@ export function AccountIntegrationsPage({
 		// detail share one data latch key, so navigating between them never
 		// refetches on its own; queue the reload before either branch.
 		void invalidatePages()
-		if (!mounted.current) return
+		if (!mounted.current || getCurrentHref() !== currentHref) return
 		if (currentSelectionMissing()) {
 			navigate(listHref())
 			return
@@ -273,7 +377,8 @@ export function AccountIntegrationsPage({
 			)
 			setApproval(approval ? { ...approval, alreadyGranted: true } : approval)
 			void invalidatePages()
-			navigate(routes.accountIntegrations.href())
+			if (getCurrentHref() !== currentHref) return
+			navigate(relocateAccountHref('/account/integrations', currentHref))
 		} catch (error) {
 			setMessage(
 				error instanceof Error
@@ -290,24 +395,28 @@ export function AccountIntegrationsPage({
 		accountLabel?: string | null
 	}) {
 		const snapshot = snapshotList()
-		removeConnectionLocally(connection.name)
+		let decide!: (commit: boolean) => void
+		const decision = new Promise<boolean>((resolve) => {
+			decide = resolve
+		})
+		const write = mutation.mutateAsync({
+			body: { action: 'disconnect_connection', name: connection.name },
+			href: currentHref,
+			decision,
+			optimistic: () => removeConnectionLocally(connection.name),
+			rollback: () => restoreSnapshot(snapshot, new Set([connection.name])),
+		})
 		setDisconnectArmed(null)
 		setHoldingOptimisticRemoval(true)
-		// Stay on this route element until commit. List/detail are separate
-		// Remix routes, so navigating away remounts, commits immediately, and
-		// loader data restores the row that was just hidden.
 		await undoable.start({
 			message: `Disconnected ${connectionLabel(connection)}.`,
 			onCommit: async () => {
 				try {
-					await postIntegrationsMutation({
-						action: 'disconnect_connection',
-						name: connection.name,
-					})
+					decide(true)
+					await write
 					finishOptimisticRemoval()
 				} catch (error) {
 					setHoldingOptimisticRemoval(false)
-					restoreSnapshot(snapshot)
 					setMessage(
 						error instanceof Error
 							? error.message
@@ -315,9 +424,10 @@ export function AccountIntegrationsPage({
 					)
 				}
 			},
-			onUndo: () => {
+			onUndo: async () => {
+				decide(false)
+				await write
 				setHoldingOptimisticRemoval(false)
-				restoreSnapshot(snapshot)
 			},
 		})
 	}
@@ -326,21 +436,33 @@ export function AccountIntegrationsPage({
 		const snapshot = snapshotList()
 		const title = oauthAppTitle(app)
 		const connectionCount = app.connections.length
-		removeAppLocally(app)
+		let decide!: (commit: boolean) => void
+		const decision = new Promise<boolean>((resolve) => {
+			decide = resolve
+		})
+		const write = mutation.mutateAsync({
+			body: { action: 'delete_oauth_app', appSlug: app.slug },
+			href: currentHref,
+			decision,
+			optimistic: () => removeAppLocally(app),
+			rollback: () =>
+				restoreSnapshot(
+					snapshot,
+					new Set(app.connections.map((connection) => connection.name)),
+					app,
+				),
+		})
 		setDeleteArmed(false)
 		setHoldingOptimisticRemoval(true)
 		await undoable.start({
 			message: deletedAppCopy(title, connectionCount),
 			onCommit: async () => {
 				try {
-					await postIntegrationsMutation({
-						action: 'delete_oauth_app',
-						appSlug: app.slug,
-					})
+					decide(true)
+					await write
 					finishOptimisticRemoval()
 				} catch (error) {
 					setHoldingOptimisticRemoval(false)
-					restoreSnapshot(snapshot)
 					setMessage(
 						error instanceof Error
 							? error.message
@@ -348,9 +470,10 @@ export function AccountIntegrationsPage({
 					)
 				}
 			},
-			onUndo: () => {
+			onUndo: async () => {
+				decide(false)
+				await write
 				setHoldingOptimisticRemoval(false)
-				restoreSnapshot(snapshot)
 			},
 		})
 	}
@@ -391,26 +514,7 @@ export function AccountIntegrationsPage({
 		)
 	}
 
-	function applyPayload(payload: AccountIntegrationsLoaderData) {
-		setIntegrations(payload.integrations)
-		setApps(payload.apps ?? [])
-		setSavedPackages(payload.savedPackages ?? [])
-		setPlatformCatalog(payload.platformCatalog ?? [])
-		setApproval(payload.approval ?? null)
-		setMessage(null)
-	}
-
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (
-		lastPayload !== payload &&
-		!isHoldingOptimisticRemoval() &&
-		!usageSavingName &&
-		!approvalSubmitting
-	) {
-		setLastPayload(payload)
-		applyPayload(payload)
-	}
 
 	const search = readSearchFilter(currentHref)
 	const setupIntro =
@@ -454,6 +558,7 @@ export function AccountIntegrationsPage({
 
 			{status === 'ready' && approval
 				? renderApprovalCard({
+						currentHref,
 						approval,
 						submitting: approvalSubmitting,
 						onApprove: () => void submitApproval(),
@@ -497,7 +602,7 @@ export function AccountIntegrationsPage({
 						]}
 						rows={filteredApps.map((app) => ({
 							id: integrationListId(app),
-							href: buildIntegrationHref(app, getCurrentSearch()),
+							href: buildIntegrationHref(app, getCurrentSearch(), currentHref),
 							cells: {
 								name: renderNamedProvider({
 									providerKey: app.provider || app.slug,
@@ -563,10 +668,3 @@ export function AccountIntegrationsPage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = [
-	'loadIntegrationsPage',
-	'loadOnboarding',
-	'loadAccountPage',
-	'loadUsagePage',
-] as const

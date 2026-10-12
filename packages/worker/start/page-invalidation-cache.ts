@@ -1,3 +1,4 @@
+import { pageQueryOrg } from './page-query-scope.ts'
 import { type QueryClient, type Query } from '@tanstack/react-query'
 import { type PageResource } from './page-resources.ts'
 
@@ -10,12 +11,16 @@ export async function invalidatePageResources(
 	actorKey: string | null,
 	resources: PageMutationDependencies,
 	refetchType: 'active' | 'none' = 'active',
+	href?: string,
 ) {
 	const filters = {
 		queryKey: ['page', actorKey],
 		predicate: (query: Query) =>
 			resources === 'permissions' ||
-			resources.some((resource) => query.queryKey[2] === resource),
+			(resources.some((resource) => query.queryKey[2] === resource) &&
+				(href === undefined ||
+					typeof query.queryKey[3] !== 'string' ||
+					pageQueryOrg(query.queryKey[3]) === pageQueryOrg(href))),
 	}
 	// A read started before the write must not satisfy its confirming refresh.
 	// Keep uncached reads waiting on a pending mutation barrier alive, because

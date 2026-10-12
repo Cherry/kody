@@ -2,6 +2,7 @@
 import { SiteLink } from './site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 
+import { workspaceLandingItem } from '#client/routes/account-rail.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
 import { formatCommunityPublishedDate } from '#universal/community-display.ts'
 import { type ProfileShellLoaderData } from '#universal/loader-data.ts'
@@ -21,7 +22,11 @@ import { UserAvatar } from './user-avatar.tsx'
 
 const profilePagePath = (username: string) => routes.profile.href({ username })
 
-export function renderProfileIdentity(shell: ProfileShellLoaderData) {
+export function renderProfileIdentity(
+	shell: ProfileShellLoaderData,
+	options?: { workspaceOrgSlug?: string | null },
+) {
+	const workspaceSlug = options?.workspaceOrgSlug?.trim() || shell.username
 	return (
 		<header css={identityCss} data-testid="profile-identity">
 			<div css={avatarWrapCss}>
@@ -57,6 +62,13 @@ export function renderProfileIdentity(shell: ProfileShellLoaderData) {
 				</p>
 				{shell.isSelf ? (
 					<div css={actionsCss} data-testid="profile-actions">
+						<SiteLink
+							href={workspaceLandingItem(workspaceSlug).href}
+							data-testid="profile-workspace"
+							css={getGhostButtonCss()}
+						>
+							Workspace
+						</SiteLink>
 						<SiteLink href={routes.account.href()} css={getGhostButtonCss()}>
 							Edit profile
 						</SiteLink>

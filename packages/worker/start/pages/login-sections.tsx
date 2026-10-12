@@ -1,4 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import {
+	handlePermanentNote,
+	handleUrlPreview,
+} from '@kody-internal/shared/handle-permanence.ts'
+import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, type FormEvent } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -131,12 +136,15 @@ export type LoginFormSharedProps = {
 export function AuthForm(
 	props: LoginFormSharedProps & {
 		isSignup: boolean
+		signupUsername: string
+		onSignupUsernameInput: (value: string) => void
 		submitLabel: string
 		submitBusyLabel: string
 		onSubmit: (event: FormEvent<HTMLFormElement>) => void
 		onPasskeySignIn: () => void
 	},
 ) {
+	const usernameNoteId = `${props.handleId}-username-note`
 	const statusId = `${props.handleId}-form-status`
 	const invalidFields = invalidFieldsForMessage(props.status, props.message, [
 		'email',
@@ -188,8 +196,35 @@ export function AuthForm(
 						placeholder="kent"
 						data-field-ring
 						{...fieldErrorProps('username', invalidFields, statusId)}
+						aria-describedby={[
+							usernameNoteId,
+							fieldErrorProps('username', invalidFields, statusId)[
+								'aria-describedby'
+							],
+						]
+							.filter(Boolean)
+							.join(' ')}
+						onInput={(event) =>
+							props.onSignupUsernameInput(event.currentTarget.value)
+						}
 						css={authInputCss}
 					/>
+					<p
+						id={usernameNoteId}
+						css={{
+							margin: 0,
+							fontSize: typography.fontSize.sm,
+							color: colors.textMuted,
+						}}
+					>
+						{handlePermanentNote} Your profile URL will be{' '}
+						<strong>
+							{handleUrlPreview(
+								props.signupUsername.trim().toLowerCase() || 'your-username',
+							)}
+						</strong>
+						.
+					</p>
 				</div>
 			) : null}
 			<div css={authFieldCss}>
@@ -231,9 +266,8 @@ export function AuthForm(
 						</SiteLink>
 					</div>
 				)}
-				<input
+				<PasswordRevealInput
 					id={`${props.handleId}-password`}
-					type="password"
 					name="password"
 					required
 					autoComplete={props.isSignup ? 'new-password' : 'current-password'}

@@ -11,7 +11,6 @@ import {
 	landingLanternGlass,
 	landingOrbitLightTone,
 	landingPrimitiveColorVar,
-	type LandingPrimitiveId,
 } from '#universal/landing-lantern.ts'
 import {
 	listAllWalkthroughHosts,
@@ -392,7 +391,6 @@ export function LandingHeroAgents({ hosts }: { hosts?: WalkthroughHostPick }) {
 					<LandingLantern
 						decorative
 						activeId={null}
-						panelId={(id: LandingPrimitiveId) => id}
 						onOpen={() => {}}
 						onToggle={() => {}}
 						onClose={() => {}}

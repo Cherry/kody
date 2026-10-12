@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { CommunityRoute } from '../pages/community.tsx'
 import { documentHead } from '../components/document-head.ts'
@@ -9,10 +10,20 @@ const pageQuery = createPageQuery('loadCommunity', loadCommunity)
 
 export const Route = createFileRoute('/community')({
 	validateSearch: (search: Record<string, unknown>) => search,
-	loaderDeps: ({ search }) => search,
+	loaderDeps: ({ search }) => ({
+		q: search.q,
+		sort: search.sort,
+		category: search.category,
+		limit: search.limit,
+	}),
 	context: ({ location }) => ({
 		pageQueryInput: {
-			search: location.searchStr,
+			search: pageSearch(location.searchStr, [
+				'q',
+				'sort',
+				'category',
+				'limit',
+			]),
 		},
 	}),
 	loader: ({ context, preload }) =>

@@ -46,6 +46,7 @@ const iconNames = [
 	'edit',
 	'check',
 	'close',
+	'plus',
 	'play',
 	'pause',
 	'information',
@@ -889,6 +890,24 @@ export const iconGlyphs = {
 				strokeLinejoin="round"
 				strokeWidth="1.5"
 				d="M6.75 6.75L17.25 17.25"
+			/>
+		</>
+	),
+	plus: () => (
+		<>
+			<path
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth="1.5"
+				d="M12 5.75V18.25"
+			/>
+			<path
+				stroke="currentColor"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+				strokeWidth="1.5"
+				d="M18.25 12L5.75 12"
 			/>
 		</>
 	),

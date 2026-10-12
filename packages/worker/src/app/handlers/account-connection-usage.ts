@@ -34,43 +34,44 @@ export function createAccountConnectionUsageApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const resolution = await loadRequestOrgResolution(
-				request,
-				env,
-				user.mcpUser.userId,
-			)
-			if (resolution === 'denied') {
-				return jsonResponse(
-					{ ok: false, error: 'Organization not found.' },
-					404,
-				)
-			}
-			const orgId = ownerIdFromCaller({
-				request: user.request,
-				user: user.mcpUser,
-			})
-			const access = await computeEffectivePermissions({
-				env,
-				request: user.request,
-			})
-			return jsonResponse(
-				await loadConnectionUsage({
-					env,
-					orgId,
-					orgSlug: user.request.org.slug ?? user.username,
-					viewerPersonId: user.mcpUser.userId,
-					includeOrgWide: await canReadOrgWideUsage(env, user.request),
-					canSeePackage: (packageId) =>
-						canSeeResource(
-							access,
-							packageResource({ id: packageId, userId: orgId }),
-						),
-				}),
-			)
+			return readAccountConnectionUsage(request, env)
 		},
 	} satisfies Action<typeof routes.accountConnectionUsageApi>
+}
+
+export async function readAccountConnectionUsage(request: Request, env: Env) {
+	const user = await readAuthenticatedAppUser(request, env)
+	if (!user) {
+		return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+	}
+	const resolution = await loadRequestOrgResolution(
+		request,
+		env,
+		user.mcpUser.userId,
+	)
+	if (resolution === 'denied') {
+		return jsonResponse({ ok: false, error: 'Organization not found.' }, 404)
+	}
+	const orgId = ownerIdFromCaller({
+		request: user.request,
+		user: user.mcpUser,
+	})
+	const access = await computeEffectivePermissions({
+		env,
+		request: user.request,
+	})
+	return jsonResponse(
+		await loadConnectionUsage({
+			env,
+			orgId,
+			orgSlug: user.request.org.slug ?? user.username,
+			viewerPersonId: user.mcpUser.userId,
+			includeOrgWide: await canReadOrgWideUsage(env, user.request),
+			canSeePackage: (packageId) =>
+				canSeeResource(
+					access,
+					packageResource({ id: packageId, userId: orgId }),
+				),
+		}),
+	)
 }

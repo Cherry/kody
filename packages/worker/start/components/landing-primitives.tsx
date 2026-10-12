@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { useEffect, useId, useReducer, useRef, type CSSProperties } from 'react'
+import { useEffect, useReducer, useRef, type CSSProperties } from 'react'
 import { SiteLink } from './site-link.tsx'
 import { docHref } from '#universal/docs-nav.ts'
 import {
@@ -19,16 +19,14 @@ import {
 	landingPrimitiveIds,
 	type LandingPrimitiveId,
 } from '#universal/landing-lantern.ts'
-import { LandingLantern, hoverPointer } from './landing-lantern.tsx'
+import { LandingLantern } from './landing-lantern.tsx'
 import { lanternOrbMotionEvent } from './landing-lantern-motion.ts'
 
 /**
  * Homepage primitives block: the locked intro line, then the five-orb
- * lantern with the five words listed beside it, then the learn-more line.
- * Each orb and each word is a disclosure for the same popover: hover, focus, or click opens one; Escape, blur, and leaving close
- * it. Escape does not move focus, so a hovered trigger stays dismissed
- * instead of reopening on focusin. Opening another primitive dismisses the
- * previous one so :hover and :focus-within cannot stack two panels.
+ * lantern with the six words listed beside it, then the learn-more line
+ * ("What is Kody?" → intro guide). Orbs highlight a primitive and draw
+ * leader lines to its word; each word links to that primitive's feature page.
  *
  * Leader lines run from each orb to the colored dot before its word. They
  * are measured from layout and redrawn on resize and font load, so they
@@ -186,22 +184,18 @@ function disclosureReducer(
 	}
 }
 export function LandingPrimitives() {
-	const [{ openId, dismissedId }, dispatch] = useReducer(disclosureReducer, {
+	const [{ openId }, dispatch] = useReducer(disclosureReducer, {
 		openId: null,
 		dismissedId: null,
 		openedAt: 0,
 	})
 	const section = useRef<HTMLElement>(null)
-	const idPrefix = useId()
 	useEffect(() => {
 		if (!section.current) return
 		const controller = new AbortController()
 		attachLeaderFollow(section.current, controller.signal)
 		return () => controller.abort()
 	}, [])
-	function panelId(id: LandingPrimitiveId) {
-		return idPrefix + '-' + id + '-panel'
-	}
 	function setOpen(id: LandingPrimitiveId) {
 		dispatch({ type: 'open', id, now: performance.now() })
 	}
@@ -232,7 +226,6 @@ export function LandingPrimitives() {
 			<div className="landing-primitives-stage">
 				<LandingLantern
 					activeId={openId}
-					panelId={panelId}
 					onOpen={setOpen}
 					onToggle={toggle}
 					onClose={close}
@@ -248,14 +241,7 @@ export function LandingPrimitives() {
 						<li key={primitive.id} className="landing-primitive-item">
 							<LandingPrimitiveWord
 								primitive={primitive}
-								panelId={panelId(primitive.id)}
-								open={openId === primitive.id}
-								dismissed={dismissedId === primitive.id}
-								onOpen={() => setOpen(primitive.id)}
-								onToggle={() => toggle(primitive.id)}
-								onClose={() => close(primitive.id)}
-								onDismiss={() => dismiss(primitive.id)}
-								onResume={() => clearDismissed(primitive.id)}
+								highlighted={openId === primitive.id}
 							/>
 						</li>
 					))}
@@ -271,94 +257,35 @@ export function LandingPrimitives() {
 	)
 }
 
-function LandingPrimitiveWord(props: {
+function LandingPrimitiveWord({
+	primitive,
+	highlighted,
+}: {
 	primitive: LandingHomePrimitive
-	panelId: string
-	open: boolean
-	dismissed: boolean
-	onOpen: () => void
-	onToggle: () => void
-	onClose: () => void
-	onDismiss: () => void
-	onResume: () => void
+	highlighted: boolean
 }) {
-	function closeIfLeaving(
-		current: EventTarget | null,
-		next: EventTarget | null,
-	) {
-		if (!(current instanceof Element)) return
-		if (next instanceof Node && current.contains(next)) return
-		props.onClose()
-		props.onResume()
-	}
-
-	const wordNode = useRef<HTMLSpanElement>(null)
-	useEffect(() => {
-		const node = wordNode.current
-		if (!node) return
-		function onKeydown(event: KeyboardEvent) {
-			if (
-				event.key !== 'Escape' ||
-				(!props.open && !node?.matches(':hover, :focus-within'))
-			)
-				return
-			event.preventDefault()
-			props.onDismiss()
-		}
-		document.addEventListener('keydown', onKeydown)
-		return () => document.removeEventListener('keydown', onKeydown)
-	}, [props])
-	const { primitive, panelId, open, dismissed, onOpen } = props
 	return (
 		<span
-			ref={wordNode}
 			className="landing-primitive"
-			data-open={open ? '' : undefined}
-			data-dismissed={dismissed ? '' : undefined}
+			data-open={highlighted ? '' : undefined}
 			style={
 				{
 					'--primitive-color': landingPrimitiveColorVar(primitive.id),
 				} as CSSProperties
 			}
-			onPointerEnter={(event) => {
-				if (hoverPointer(event)) onOpen()
-			}}
-			onPointerLeave={(event) => {
-				if (!hoverPointer(event)) return
-				closeIfLeaving(event.currentTarget, event.relatedTarget)
-			}}
-			onFocus={onOpen}
-			onBlur={(event) => {
-				closeIfLeaving(event.currentTarget, event.relatedTarget)
-			}}
 		>
 			<span
 				className="landing-primitive-dot"
 				data-dot={primitive.id}
 				aria-hidden="true"
-			></span>
-			<button
-				type="button"
+			/>
+			<SiteLink
+				href={`/features/${primitive.id}`}
 				className="landing-primitive-word"
 				data-word={primitive.id}
-				aria-expanded={open ? 'true' : 'false'}
-				aria-controls={panelId}
-				aria-describedby={panelId}
-				onClick={() => props.onToggle()}
-				onKeyDown={(event) => {
-					if (event.key !== 'Escape') return
-					event.preventDefault()
-					props.onDismiss()
-				}}
 			>
 				{primitive.word}
-			</button>
-			<span id={panelId} role="tooltip" className="landing-primitive-popover">
-				<span className="landing-primitive-popover-title" aria-hidden="true">
-					{primitive.word}
-				</span>
-				{primitive.body}
-			</span>
+			</SiteLink>
 		</span>
 	)
 }

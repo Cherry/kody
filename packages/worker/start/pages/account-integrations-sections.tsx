@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { type AccountIntegrationsLoaderData } from '#universal/loader-data.ts'
 import { type PlatformIntegrationCatalogItem } from '#universal/oauth-connect.ts'
 import { routes } from '#universal/routes.ts'
@@ -43,6 +44,7 @@ function PlugIcon() {
 }
 
 export function renderApprovalCard(props: {
+	currentHref: string
 	approval: NonNullable<AccountIntegrationsLoaderData['approval']>
 	submitting: boolean
 	onApprove: () => void
@@ -102,7 +104,10 @@ export function renderApprovalCard(props: {
 			>
 				{approval.alreadyGranted ? (
 					<SiteLink
-						href={routes.accountIntegrations.href()}
+						href={relocateAccountHref(
+							'/account/integrations',
+							props.currentHref,
+						)}
 						css={{
 							...getPillButtonCss({ size: 'sm' }),
 							display: 'inline-flex',
@@ -123,7 +128,10 @@ export function renderApprovalCard(props: {
 							{submitting ? 'Approving…' : 'Approve'}
 						</button>
 						<SiteLink
-							href={routes.accountIntegrations.href()}
+							href={relocateAccountHref(
+								'/account/integrations',
+								props.currentHref,
+							)}
 							css={{
 								...getPillButtonCss({ size: 'sm' }),
 								display: 'inline-flex',

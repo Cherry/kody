@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { chromium } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
 const [origin, output, executablePath] = process.argv.slice(2)

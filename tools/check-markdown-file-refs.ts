@@ -377,6 +377,8 @@ async function walkMarkdown(
 		const relativePath = relativeDirectory
 			? `${relativeDirectory}/${entry.name}`
 			: entry.name
+		// Local comparison output contains historical references, not maintained docs.
+		if (relativePath === 'tools/framework-comparison/reports') continue
 		const absolute = path.join(directory, entry.name)
 		if (entry.isDirectory()) {
 			await walkMarkdown(absolute, relativePath, files)

@@ -27,7 +27,7 @@ import {
 /** Hover opens for mice and pens only. A touch tap fires synthetic enter
  *  and leave events around its click, which would close what the tap just
  *  opened, so touch pointers are ignored here and handled by click. */
-export function hoverPointer(event: { pointerType: string }) {
+function hoverPointer(event: { pointerType: string }) {
 	return event.pointerType !== 'touch'
 }
 
@@ -37,7 +37,6 @@ function primitiveById(id: LandingPrimitiveId): LandingHomePrimitive {
 
 export type LandingLanternProps = {
 	activeId: LandingPrimitiveId | null
-	panelId: (id: LandingPrimitiveId) => string
 	onOpen: (id: LandingPrimitiveId) => void
 	onToggle: (id: LandingPrimitiveId) => void
 	onClose: (id: LandingPrimitiveId) => void
@@ -71,7 +70,7 @@ export function LandingLantern(props: LandingLanternProps) {
 		props.onResume(id)
 	}
 
-	const { activeId, panelId, onOpen, onToggle, onDismiss, decorative } = props
+	const { activeId, onOpen, onToggle, onDismiss, decorative } = props
 	return (
 		<figure
 			className="landing-lantern"
@@ -140,9 +139,6 @@ export function LandingLantern(props: LandingLanternProps) {
 							data-open={open ? '' : undefined}
 							style={pose}
 							aria-label={`${primitive.word} primitive`}
-							aria-expanded={open ? 'true' : 'false'}
-							aria-controls={panelId(orb.id)}
-							aria-describedby={panelId(orb.id)}
 							onPointerEnter={(event) => {
 								if (!hoverPointer(event)) return
 								const current = event.currentTarget

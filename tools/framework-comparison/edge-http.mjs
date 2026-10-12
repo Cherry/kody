@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { readEdgeAuth, deliveryHeaders } from './edge-auth.mjs'

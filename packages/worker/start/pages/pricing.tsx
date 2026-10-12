@@ -75,8 +75,14 @@ const limitGroups: ReadonlyArray<LimitGroup> = [
 		note: weeklyComputeWindowNote,
 		rows: [
 			{ label: 'Concurrent workflows', key: 'maxConcurrentWorkflows' },
-			{ label: 'Execute calls per day', key: 'maxExecuteCallsPerDay' },
-			{ label: 'Execute calls per week', key: 'maxExecuteCallsPerWeek' },
+			{
+				label: 'Unique execute workers per day',
+				key: 'maxExecuteUniqueWorkersPerDay',
+			},
+			{
+				label: 'Unique execute workers per week',
+				key: 'maxExecuteUniqueWorkersPerWeek',
+			},
 			{ label: 'Outbound fetches per day', key: 'maxOutboundFetchesPerDay' },
 			{ label: 'Outbound fetches per week', key: 'maxOutboundFetchesPerWeek' },
 			{ label: 'Job runs per day', key: 'maxJobRunsPerDay' },

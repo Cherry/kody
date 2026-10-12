@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { orgResourcePath } from '#universal/org-pages.ts'
 import { useEffect, useRef, useState } from 'react'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type PackageWebhookListItem } from '#universal/loader-data.ts'
@@ -175,6 +176,7 @@ export function PackageWebhookSettings({
 							<div key={webhook.id}>
 								{
 									<PackageWebhookCard
+										deliveriesHref={`${orgResourcePath(username, 'activity')}?view=recent&status=all&surface=webhook`}
 										{...{
 											webhook,
 											revealedUrl: revealedUrls.get(webhook.id) ?? null,

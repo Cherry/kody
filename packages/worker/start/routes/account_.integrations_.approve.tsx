@@ -1,22 +1,13 @@
-/** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
-import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
-import { loadIntegrationsPage } from '#start/server/account-collections'
-import { documentHead } from '../components/document-head.ts'
+import { createFileRoute } from '@tanstack/react-router'
+import { resolveOrgAlias } from '#start/server/org-alias'
 export const Route = createFileRoute('/account_/integrations_/approve')({
+	preload: false,
 	loaderDeps: ({ search }) => search,
-	loader: ({ abortController, location }) =>
-		loadIntegrationsPage({
-			signal: abortController.signal,
-			data: location.pathname + location.searchStr,
+	loader: ({ location }) =>
+		resolveOrgAlias({
+			data:
+				location.pathname +
+				location.searchStr +
+				(location.hash ? `#${location.hash}` : ''),
 		}),
-	head: ({ loaderData }) => documentHead(loaderData?.head),
-	component: Page,
 })
-function Page() {
-	const { payload } = Route.useLoaderData()
-	const location = useLocation()
-	return (
-		<AccountIntegrationsPage payload={payload} currentHref={location.href} />
-	)
-}

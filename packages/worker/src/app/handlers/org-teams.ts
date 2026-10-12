@@ -103,7 +103,7 @@ function toOrgMemberView(member: {
 	}
 }
 
-async function loadOrgTeamsData(input: {
+export async function loadOrgTeamsData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]
 	org: ManagedOrg

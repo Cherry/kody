@@ -5,7 +5,7 @@ import { loadShell } from '#start/server/shell'
 export function shellSearch(search: string) {
 	const input = new URLSearchParams(search)
 	const output = new URLSearchParams()
-	for (const key of ['siteBannerLook', 'siteBannerPreview', 'youtubeId']) {
+	for (const key of ['youtubeId']) {
 		const value = input.get(key)
 		if (value !== null) output.set(key, value)
 	}
@@ -24,18 +24,12 @@ export function shellQuery(actorKey: string | null, search: string) {
 	})
 }
 
-/** Preview data is permission-sensitive even when the actor has not changed. */
 export async function ensureShellQuery(
 	client: QueryClient,
 	actorKey: string | null,
 	search: string,
 ) {
 	const options = shellQuery(actorKey, search)
-	const params = new URLSearchParams(search)
-	if (params.has('siteBannerPreview') || params.has('siteBannerLook')) {
-		await client.cancelQueries({ queryKey: options.queryKey, exact: true })
-		return client.fetchQuery({ ...options, staleTime: 0 })
-	}
 	return client.ensureQueryData({ ...options, revalidateIfStale: true })
 }
 

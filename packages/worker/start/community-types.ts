@@ -4,7 +4,6 @@ import {
 	type ViewerListingInstall,
 } from '#universal/community-public-types.ts'
 import { type AccountPackageDetail } from '#universal/loader-data.ts'
-import { type PackageShareGrantLoaderView } from '#universal/package-share.ts'
 export type CommunityDetailApiPayload = {
 	ok: true
 	listing: PublicCommunityListing | null
@@ -12,6 +11,7 @@ export type CommunityDetailApiPayload = {
 	loggedIn: boolean
 	viewerIsAdmin: boolean
 	viewerIsOwner: boolean
+	viewerCanManage: boolean
 	forkPrompt: string
 	viewerInstall: ViewerListingInstall | null
 	readmeContent: string | null
@@ -23,7 +23,6 @@ export type CommunityDetailApiPayload = {
 	kodyId: string
 	isPrivate: boolean
 	invocationUrlOrigin: string
-	shareGrant?: PackageShareGrantLoaderView | null
 }
 
 export type CommunityInstallApiPayload = {

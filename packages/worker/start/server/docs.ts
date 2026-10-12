@@ -1,6 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { type DocDetailLoaderData } from '#universal/loader-data.ts'
 import { docHref, resolveLegacyDocSlug } from '#universal/docs-nav.ts'
 
 export const loadDoc = createServerFn({ method: 'GET' })
@@ -30,7 +29,7 @@ export const loadDoc = createServerFn({ method: 'GET' })
 			{ getEnv },
 			{ getRequest, setResponseHeader },
 			{ setAuthSessionSecret },
-			{ createDocDetailApiHandler },
+			{ loadAccessibleDocDetail },
 			{ loadSessionInfo },
 			{ loadDocumentHead },
 		] = await Promise.all([
@@ -45,13 +44,11 @@ export const loadDoc = createServerFn({ method: 'GET' })
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const request = getRequest()
-		const { RequestContext } = await import('remix/router')
-		const context = new RequestContext<{ slug: string }>(request)
-		context.params = { slug: data.slug }
-		const response = await createDocDetailApiHandler(bindings).handler(context)
-		if (response.status === 404) throw notFound()
-		if (!response.ok) throw new Error('Unable to load doc.')
-		const doc = (await response.json()) as DocDetailLoaderData
+		// The envelope includes the viewer session, so it must never enter a shared cache.
+		setResponseHeader('Cache-Control', 'private, no-store')
+		const detail = await loadAccessibleDocDetail(request, bindings, data.slug)
+		if (!detail) throw notFound()
+		const { doc } = detail
 		const { session, setCookie } = await loadSessionInfo(request, bindings)
 		if (setCookie) setResponseHeader('Set-Cookie', setCookie)
 		return {

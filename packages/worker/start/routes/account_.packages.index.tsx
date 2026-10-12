@@ -1,11 +1,13 @@
-/** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
-import { loadPackagesIndexPage } from '#start/server/account-collections'
+import { resolveOrgAlias } from '#start/server/org-alias'
 export const Route = createFileRoute('/account_/packages/')({
+	preload: false,
 	loaderDeps: ({ search }) => search,
-	loader: ({ abortController, location }) =>
-		loadPackagesIndexPage({
-			signal: abortController.signal,
-			data: location.pathname.replace(/\/$/, '') + location.searchStr,
+	loader: ({ location }) =>
+		resolveOrgAlias({
+			data:
+				location.pathname +
+				location.searchStr +
+				(location.hash ? `#${location.hash}` : ''),
 		}),
 })

@@ -1,11 +1,21 @@
+import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { readJsonRecord } from './json-value.ts'
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
+import { notFound, redirect } from '@tanstack/react-router'
 
+function collectionAliasHref(href: string) {
+	if (!href.startsWith('/') || href.startsWith('//') || href.includes('\\'))
+		return ''
+	const url = new URL(href, 'https://kody.local')
+	return accountAliasPath(url.pathname) + url.search + url.hash
+}
 function validateCollectionHref(href: string) {
 	if (
 		typeof href !== 'string' ||
-		!/^\/account\/(memories|values)(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+		!/^\/account\/(memories|values)(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+			collectionAliasHref(href),
+		)
 	)
 		throw new Error('Invalid account collection URL')
 	return href
@@ -30,7 +40,7 @@ async function loadCollection(href: string) {
 	const request = new Request(new URL(href, original.url), {
 		headers: original.headers,
 	})
-	const user = await requireAuthenticatedPageUser(original, bindings, {
+	const user = await requireAuthenticatedPageUser(request, bindings, {
 		redirectTo: href,
 	})
 	if (user instanceof Response) {
@@ -41,6 +51,26 @@ async function loadCollection(href: string) {
 			statusCode: user.status,
 		})
 	}
+	const { isOrgRequestDenied } =
+		await import('../../src/app/org-request-binding.ts')
+	if (await isOrgRequestDenied(request, bindings, user.mcpUser.userId))
+		throw notFound()
+	const orgPath = parseOrgResourcePath(new URL(request.url).pathname)
+	if (orgPath) {
+		const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
+			await Promise.all([
+				import('#universal/org-last-used-cookie.ts'),
+				import('../../src/app/auth-session.ts'),
+			])
+		setResponseHeader(
+			'Set-Cookie',
+			serializeLastUsedOrgCookie({
+				slug: orgPath.slug,
+				secure: isSecureRequest(request),
+			}),
+		)
+	}
+	setResponseHeader('Cache-Control', 'no-store')
 	return { bindings, request, user }
 }
 export const loadSecretsPage = createServerFn({ method: 'GET' })
@@ -48,7 +78,7 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 		if (
 			typeof href !== 'string' ||
 			!/^\/account\/secrets(?:\/(?:new|approve|user\/[^/?#]+|(?:session|package)\/[^/?#]+\/[^/?#]+))?(?:\?[^#]*)?$/.test(
-				href,
+				collectionAliasHref(href),
 			)
 		)
 			throw new Error('Invalid secrets URL')
@@ -81,9 +111,9 @@ export const loadMemoriesPage = createServerFn({ method: 'GET' })
 	.validator(validateCollectionHref)
 	.handler(async ({ data: href }) => {
 		if (
-			!new URL(href, 'https://kody.local').pathname.startsWith(
-				'/account/memories',
-			)
+			!accountAliasPath(
+				new URL(href, 'https://kody.local').pathname,
+			).startsWith('/account/memories')
 		)
 			throw new Error('Invalid memories URL')
 		const { bindings, request, user } = await loadCollection(href)
@@ -93,7 +123,7 @@ export const loadMemoriesPage = createServerFn({ method: 'GET' })
 				import('./document-head.ts'),
 			])
 		const url = new URL(request.url)
-		const pathMemoryId = url.pathname.split('/')[3]
+		const pathMemoryId = accountAliasPath(url.pathname).split('/')[3]
 		const payload = await loadAccountMemoriesData({
 			env: bindings,
 			request,
@@ -113,9 +143,9 @@ export const loadValuesPage = createServerFn({ method: 'GET' })
 	.validator(validateCollectionHref)
 	.handler(async ({ data: href }) => {
 		if (
-			!new URL(href, 'https://kody.local').pathname.startsWith(
-				'/account/values',
-			)
+			!accountAliasPath(
+				new URL(href, 'https://kody.local').pathname,
+			).startsWith('/account/values')
 		)
 			throw new Error('Invalid values URL')
 		const { bindings, request, user } = await loadCollection(href)
@@ -145,7 +175,9 @@ export const loadJobsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/jobs(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/jobs(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid jobs URL')
 		return href
@@ -161,8 +193,8 @@ export const loadJobsPage = createServerFn({ method: 'GET' })
 			env: bindings,
 			request,
 			user,
-			pathJobId: url.pathname.split('/')[3]
-				? decodeURIComponent(url.pathname.split('/')[3]!)
+			pathJobId: accountAliasPath(url.pathname).split('/')[3]
+				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
 				: undefined,
 		})
 		const payload = {
@@ -190,7 +222,9 @@ export const loadWorkflowsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/workflows(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/workflows(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid workflows URL')
 		return href
@@ -207,8 +241,8 @@ export const loadWorkflowsPage = createServerFn({ method: 'GET' })
 			env: bindings,
 			request,
 			user,
-			pathWorkflowId: url.pathname.split('/')[3]
-				? decodeURIComponent(url.pathname.split('/')[3]!)
+			pathWorkflowId: accountAliasPath(url.pathname).split('/')[3]
+				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
 				: undefined,
 		})
 		return {
@@ -225,7 +259,7 @@ export const loadWaitingPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/waiting(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/waiting(?:\?[^#]*)?$/.test(collectionAliasHref(href))
 		)
 			throw new Error('Invalid waiting URL')
 		return href
@@ -257,7 +291,7 @@ export const loadExperimentsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/experiments(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/experiments(?:\?[^#]*)?$/.test(collectionAliasHref(href))
 		)
 			throw new Error('Invalid experiments URL')
 		return href
@@ -288,7 +322,9 @@ export const loadActivityPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/activity(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/activity(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid activity URL')
 		return href
@@ -305,8 +341,8 @@ export const loadActivityPage = createServerFn({ method: 'GET' })
 			env: bindings,
 			request,
 			user,
-			pathRunId: url.pathname.split('/')[3]
-				? decodeURIComponent(url.pathname.split('/')[3]!)
+			pathRunId: accountAliasPath(url.pathname).split('/')[3]
+				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
 				: undefined,
 		})
 		const payload = {
@@ -337,24 +373,33 @@ export const loadBillingPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/billing(?:\?[^#]*)?$/.test(href)
+			!/^\/@[^/?#]+\/-\/billing(?:\?[^#]*)?$/.test(href)
 		)
 			throw new Error('Invalid billing URL')
 		return href
 	})
 	.handler(async ({ data: href }) => {
 		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountBillingData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-billing-data.ts'),
-				import('./document-head.ts'),
-			])
+		const [
+			{ loadOrgBillingPageData, resolveOrgBillingAccess },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('../../src/app/handlers/org-billing.ts'),
+			import('./document-head.ts'),
+		])
 		const url = new URL(request.url)
-		const payload = await loadAccountBillingData({
+		const access = await resolveOrgBillingAccess({
+			request,
 			env: bindings,
-			errorCode: url.searchParams.get('error'),
-			noticeCode: url.searchParams.get('billing'),
-			userId: user.userId,
+			user,
+			permission: 'billing:read',
+		})
+		if (!access.ok) throw new Response(access.error, { status: access.status })
+		const payload = await loadOrgBillingPageData({
+			request,
+			env: bindings,
+			user,
+			org: access.org,
 		})
 		return {
 			payload,
@@ -370,7 +415,7 @@ export const loadUsagePage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/usage(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/usage(?:\?[^#]*)?$/.test(collectionAliasHref(href))
 		)
 			throw new Error('Invalid usage URL')
 		return href
@@ -405,7 +450,9 @@ export const loadConnectionsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/connections(?:\/new(?:\/[^/?#]+)?)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/connections(?:\/(?:usage|new(?:\/[^/?#]+)?))?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid account URL')
 		return href
@@ -414,7 +461,11 @@ export const loadConnectionsPage = createServerFn({ method: 'GET' })
 		const { bindings, request, user } = await loadCollection(href)
 		const { parseAccountConnectionsPathname } =
 			await import('../../universal/account-connections.ts')
-		if (!parseAccountConnectionsPathname(new URL(request.url).pathname)) {
+		if (
+			!parseAccountConnectionsPathname(
+				accountAliasPath(new URL(request.url).pathname),
+			)
+		) {
 			const { notFound } = await import('@tanstack/react-router')
 			throw notFound()
 		}
@@ -444,7 +495,9 @@ export const loadMcpOauthClientsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/mcp-oauth-clients(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/mcp-oauth-clients(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid account URL')
 		return href
@@ -472,7 +525,7 @@ export const loadWebhooksPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/webhooks(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/webhooks(?:\?[^#]*)?$/.test(collectionAliasHref(href))
 		)
 			throw new Error('Invalid account URL')
 		return href
@@ -505,21 +558,15 @@ export const loadSecretProvidersPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/secret-providers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/secret-providers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid account URL')
 		return href
 	})
 	.handler(async ({ data: href }) => {
 		const { bindings, request, user } = await loadCollection(href)
-		if (
-			!(await (
-				await import('../../src/mcp/secrets/secret-providers/flag.ts')
-			).isSecretProvidersEnabled({ db: bindings.APP_DB, userId: user.userId }))
-		) {
-			const { notFound } = await import('@tanstack/react-router')
-			throw notFound()
-		}
 		const [{ loadAccountSecretProvidersData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/account-secret-providers-data.ts'),
@@ -527,7 +574,7 @@ export const loadSecretProvidersPage = createServerFn({ method: 'GET' })
 			])
 		const payload = await loadAccountSecretProvidersData({
 			env: bindings,
-			userId: user.mcpUser.userId,
+			userId: ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
 			email: user.email,
 			url: request.url,
 		})
@@ -546,7 +593,9 @@ export const loadEmailPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/email(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/email(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid inbox URL')
 		return href
@@ -568,8 +617,8 @@ export const loadEmailPage = createServerFn({ method: 'GET' })
 				env: bindings,
 				request,
 				user,
-				pathMessageId: url.pathname.split('/')[3]
-					? decodeURIComponent(url.pathname.split('/')[3]!)
+				pathMessageId: accountAliasPath(url.pathname).split('/')[3]
+					? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
 					: undefined,
 			}),
 			listEmailNotificationDestinations({
@@ -606,7 +655,9 @@ export const loadMcpServersPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/mcp-servers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/mcp-servers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+				collectionAliasHref(href),
+			)
 		)
 			throw new Error('Invalid account URL')
 		return href
@@ -641,7 +692,7 @@ export const loadIntegrationsPage = createServerFn({ method: 'GET' })
 		if (
 			typeof href !== 'string' ||
 			!/^\/account\/integrations(?:\/(?:apps\/[^/?#]+|[^/?#]+))?(?:\?[^#]*)?$/.test(
-				href,
+				collectionAliasHref(href),
 			)
 		)
 			throw new Error('Invalid account URL')
@@ -673,51 +724,11 @@ export const loadIntegrationsPage = createServerFn({ method: 'GET' })
 		}
 	})
 
-export const loadSharedPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/shared(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid shared URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const { isPackageShareGrantsEnabled } =
-			await import('../../src/package-registry/share-flag.ts')
-		if (
-			!(await isPackageShareGrantsEnabled({
-				db: bindings.APP_DB,
-				userId: user.userId,
-			}))
-		) {
-			const { notFound } = await import('@tanstack/react-router')
-			throw notFound()
-		}
-		const [{ loadAccountSharedData }, { loadDocumentHead }] = await Promise.all(
-			[
-				import('../../src/app/account-shared-data.ts'),
-				import('./document-head.ts'),
-			],
-		)
-		const payload = await loadAccountSharedData({ env: bindings, user })
-		const url = new URL(request.url)
-		return {
-			payload,
-			head: loadDocumentHead(
-				url.pathname,
-				{ accountShared: payload },
-				url.search,
-			),
-		}
-	})
-
 export const loadPackagesIndexPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/packages(?:\?[^#]*)?$/.test(href)
+			!/^\/account\/packages(?:\?[^#]*)?$/.test(collectionAliasHref(href))
 		)
 			throw new Error('Invalid packages URL')
 		return href

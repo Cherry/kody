@@ -3,15 +3,10 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
 import { useEffect, useRef, useState } from 'react'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
-import { type SessionInfo } from '#client/session.ts'
 import {
 	type AccountPackageDetail,
 	type AccountPackagesLoaderData,
 } from '#universal/loader-data.ts'
-import { type PackageShareGrantLoaderView } from '#universal/package-share.ts'
-import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
-import { packageShareGrantsFlagKey } from '#universal/feature-flags/registry.ts'
-import { postPackageShareAction } from '#client/routes/package-share-client.ts'
 import { renderPackageRepoChrome } from '../components/package-repo-nav.tsx'
 import {
 	detailArticleCss,
@@ -24,16 +19,10 @@ import {
 } from '#universal/package-files.ts'
 import { AccountPackageOwnerDetails } from './account-package-owner-details.tsx'
 import { PackageWebhookSettings } from './package-webhook-settings.tsx'
-import {
-	loadPackageShareGrants,
-	renderPackageShareSettings as PackageShareSettings,
-} from './package-share-settings.tsx'
 export function PackageSettingsRoute({
 	data,
-	session,
 }: {
 	data: CommunityDetailApiPayload
-	session: SessionInfo | null
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshRoute: true,
@@ -45,14 +34,8 @@ export function PackageSettingsRoute({
 	)
 	const [lockBusy, setLockBusy] = useState(false),
 		[message, setMessage] = useState<string | null>(null)
-	const [grants, setGrants] = useState<PackageShareGrantLoaderView[]>([]),
-		[inviteUsername, setInviteUsername] = useState(''),
-		[inviteEmail, setInviteEmail] = useState(''),
-		[shareBusy, setShareBusy] = useState(false),
-		[shareMessage, setShareMessage] = useState<string | null>(null)
 	const username = data.username,
 		kodyId = data.kodyId
-	const shareEnabled = isFeatureFlagEnabled(session, packageShareGrantsFlagKey)
 	useEffect(() => {
 		mounted.current = true
 		return () => {
@@ -64,23 +47,6 @@ export function PackageSettingsRoute({
 		setSnapshot(data.ownerPackage)
 		setOwnerPackage(data.ownerPackage ?? null)
 	}
-	const hasOwner = ownerPackage !== null
-
-	useEffect(() => {
-		let active = true
-		if (shareEnabled && hasOwner)
-			void loadPackageShareGrants({ username, kodyId })
-				.then((next) => {
-					if (active) setGrants(next)
-				})
-				.catch(() => {
-					if (active)
-						setShareMessage('Unable to load who this package is shared with.')
-				})
-		return () => {
-			active = false
-		}
-	}, [username, kodyId, shareEnabled, hasOwner])
 	function apply(payload: AccountPackagesLoaderData) {
 		if (payload.selectedPackage?.id === ownerPackage?.id)
 			setOwnerPackage(payload.selectedPackage)
@@ -134,44 +100,6 @@ export function PackageSettingsRoute({
 			if (mounted.current) setLockBusy(false)
 		}
 	}
-	async function share(intent: 'invite' | 'revoke', grantId?: string) {
-		if (busyRef.current) return
-		busyRef.current = true
-		setShareBusy(true)
-		setShareMessage(null)
-		try {
-			const result = await postPackageShareAction({
-				intent,
-				ownerUsername: username,
-				kodyId,
-				grantId,
-				username: inviteUsername,
-				email: inviteEmail,
-			})
-			if (!mounted.current) return
-			if (result.status === 'unauthorized') {
-				window.location.assign('/login')
-				return
-			}
-			if (result.status === 'error') {
-				setShareMessage(result.message)
-				return
-			}
-			if (intent === 'invite') {
-				setInviteUsername('')
-				setInviteEmail('')
-			}
-			const next = await loadPackageShareGrants({ username, kodyId })
-			if (mounted.current) setGrants(next)
-			void invalidatePages()
-		} catch {
-			if (mounted.current)
-				setShareMessage('Unable to update who this package is shared with.')
-		} finally {
-			busyRef.current = false
-			if (mounted.current) setShareBusy(false)
-		}
-	}
 	if (!ownerPackage)
 		return renderMissingListing('Not found', 'This package is not available.')
 	return (
@@ -181,7 +109,8 @@ export function PackageSettingsRoute({
 				kodyId,
 				isPrivate: ownerPackage.isPrivate,
 				isListed: ownerPackage.hasCommunityListing,
-				viewerIsOwner: true,
+				viewerIsOwner: data.viewerIsOwner,
+				viewerCanManage: data.viewerCanManage,
 				active: 'settings',
 				filesHref: getPackageTreeHref({
 					username,
@@ -219,23 +148,6 @@ export function PackageSettingsRoute({
 				username={username}
 				kodyId={kodyId}
 			/>
-			{shareEnabled ? (
-				<PackageShareSettings
-					{...{
-						username,
-						kodyId,
-						grants,
-						inviteUsername,
-						inviteEmail,
-						busy: shareBusy,
-						message: shareMessage,
-						onInviteUsername: setInviteUsername,
-						onInviteEmail: setInviteEmail,
-						onInvite: () => void share('invite'),
-						onRevoke: (id) => void share('revoke', id),
-					}}
-				/>
-			) : null}
 		</article>
 	)
 }
@@ -245,5 +157,4 @@ const mutationResources = [
 	'loadPackageFiles',
 	'loadProfile',
 	'loadCommunity',
-	'loadSharedPage',
 ] as const

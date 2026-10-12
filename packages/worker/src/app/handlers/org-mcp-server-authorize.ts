@@ -264,3 +264,17 @@ export function createOrgMcpServerAuthorizePostHandler(env: Env) {
 		},
 	} satisfies Action<typeof routes.orgMcpServerAuthorizePost>
 }
+
+/** Shared consent read for the document and Start route. */
+export async function loadMcpServerAuthorizeData(input: {
+	env: Env
+	request: Request
+	params: AuthorizeParams
+}) {
+	const context = await loadConsentContext(input)
+	if (isConsentRefusal(context)) return context
+	return {
+		kind: 'ready' as const,
+		payload: await buildConsentLoaderData({ env: input.env, context }),
+	}
+}

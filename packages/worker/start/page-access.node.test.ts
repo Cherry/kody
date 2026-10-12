@@ -4,13 +4,13 @@ it('classifies catalog public, unadvertised and canonical alias guides without e
 	for (const slug of [
 		'what-is-kody',
 		'values',
-		'account-package-invocation-token-setup',
 		'integration-backed-app-happy-path',
 	])
 		expect(isPublicDocSlug(slug)).toBe(true)
 	for (const slug of [
 		'admin-events',
 		'unknown',
+		'account-package-invocation-token-setup',
 		'connect',
 		'../what-is-kody',
 		'',

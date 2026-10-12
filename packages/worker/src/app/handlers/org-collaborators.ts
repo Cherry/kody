@@ -50,7 +50,7 @@ function renderDenied(
 	})
 }
 
-async function loadOrgCollaboratorsData(input: {
+export async function loadOrgCollaboratorsData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]
 	org: ManagedOrg

@@ -1,3 +1,5 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
@@ -13,7 +15,7 @@ export const integrationsRoute = createListDetailRoute(
 	'/account/integrations',
 	{
 		parseDetailId(pathname) {
-			const prefix = `${routes.accountIntegrations.href()}/`
+			const prefix = `${'/account/integrations'}/`
 			if (!pathname.startsWith(prefix)) return null
 			const segment = pathname.slice(prefix.length)
 			if (!segment || segment.includes('/') || segment === 'approve') {
@@ -24,7 +26,7 @@ export const integrationsRoute = createListDetailRoute(
 	},
 )
 
-const oauthAppsPathPrefix = `${routes.accountIntegrations.href()}/apps/`
+const oauthAppsPathPrefix = `${'/account/integrations'}/apps/`
 
 function decodePathSegment(value: string) {
 	try {
@@ -35,18 +37,19 @@ function decodePathSegment(value: string) {
 }
 
 function readSelectedOauthAppSlug(href: string): string | null {
-	const pathname = new URL(href, 'http://localhost').pathname
+	const pathname = accountAliasPath(new URL(href, 'http://localhost').pathname)
 	if (!pathname.startsWith(oauthAppsPathPrefix)) return null
 	const segment = pathname.slice(oauthAppsPathPrefix.length)
 	if (!segment || segment.includes('/')) return null
 	return decodePathSegment(segment)
 }
 
-function buildOauthAppHref(appSlug: string, search = '') {
-	return routes.accountOauthAppDetail.href(
-		{ appSlug },
-		{ searchParams: new URLSearchParams(search) },
-	)
+function buildOauthAppHref(appSlug: string, search = '', currentHref = '') {
+	const path = `/account/integrations/apps/${encodeURIComponent(appSlug)}`
+	const href = search
+		? `${path}?${new URLSearchParams(search).toString()}`
+		: path
+	return currentHref ? relocateAccountHref(href, currentHref) : href
 }
 
 export function oauthAppTitle(app: AccountOauthAppListItem) {
@@ -77,14 +80,15 @@ function findAppForConnection(
 export function buildIntegrationHref(
 	app: AccountOauthAppListItem,
 	search = '',
+	currentHref = '',
 ) {
 	if (isBuiltInApp(app)) {
 		const first = app.connections[0]
 		return first
-			? integrationsRoute.buildDetailHref(first.name, search)
-			: routes.accountIntegrations.href()
+			? integrationsRoute.buildDetailHref(first.name, search, currentHref)
+			: relocateAccountHref('/account/integrations', currentHref)
 	}
-	return buildOauthAppHref(app.slug, search)
+	return buildOauthAppHref(app.slug, search, currentHref)
 }
 
 export function accountsConnectedCopy(count: number) {
@@ -229,9 +233,13 @@ export function hostFromUrl(url: string | null | undefined) {
 	}
 }
 
-export async function postIntegrationsMutation(body: Record<string, unknown>) {
+export async function postIntegrationsMutation(
+	body: Record<string, unknown>,
+	currentHref: string,
+) {
 	const response = await fetch(accountIntegrationsApiPath, {
 		method: 'POST',
+		referrer: orgAccountApiReferrer(currentHref),
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',

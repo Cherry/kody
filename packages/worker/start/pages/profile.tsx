@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
+import { useShellData } from '../routes/__root.tsx'
 import { useNavigate } from '@tanstack/react-router'
 import {
 	type ProfileLoaderData,
@@ -28,6 +29,7 @@ export function ProfileRoute({
 	data: ProfileLoaderData
 	currentHref: string
 }) {
+	const { session } = useShellData()
 	const readyShell = toProfileShellLoaderData(data)
 	const visibleList = data
 	const username = data.profile.username
@@ -43,7 +45,13 @@ export function ProfileRoute({
 	return (
 		<section css={pageCss} data-testid="profile-page">
 			<div css={layoutCss}>
-				{readyShell ? renderProfileIdentity(readyShell) : null}
+				{readyShell
+					? renderProfileIdentity(readyShell, {
+							workspaceOrgSlug: session?.organizations.find(
+								(org) => org.personal,
+							)?.slug,
+						})
+					: null}
 
 				<div css={mainCss}>
 					<h2 css={packagesHeadingCss}>Repositories</h2>

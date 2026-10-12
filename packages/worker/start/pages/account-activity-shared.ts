@@ -1,9 +1,5 @@
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import {
-	readAccountActivityStatusFilter,
-	readAccountActivitySurfaceFilter,
-	readAccountActivityTriageFilter,
-	readAccountActivityViewFilter,
 	type AccountActivityStatusFilter,
 	type AccountActivitySurfaceFilter,
 	type AccountActivityTriageFilter,
@@ -30,7 +26,6 @@ export const activityErrorReviewPrompt = [
 	'Explain each failure and recommend whether to ignore it, mark it resolved, or fix something.',
 ].join(' ')
 
-const accountActivityApiPath = '/account/activity.json'
 export const activityRoute = createListDetailRoute('/account/activity')
 
 export const viewFilterOptions: Array<{
@@ -172,39 +167,4 @@ export function triageLabel(
 			return exhaustive
 		}
 	}
-}
-
-export function getDataLatchKey(href: string) {
-	const selection = activityRoute.getSelection(href)
-	const view = readAccountActivityViewFilter(href)
-	const status = readAccountActivityStatusFilter(href)
-	const surface = readAccountActivitySurfaceFilter(href)
-	const triage = readAccountActivityTriageFilter(href)
-	const filterKey = `${view}:${status}:${surface}:${triage}`
-	return selection.selectedId
-		? `/account/activity/${encodeURIComponent(selection.selectedId)}?${filterKey}`
-		: `/account/activity?${filterKey}`
-}
-
-export function buildActivityApiRequestUrl(
-	href: string,
-	cursor?: string | null,
-) {
-	const requestUrl = new URL(accountActivityApiPath, 'http://localhost')
-	const view = readAccountActivityViewFilter(href)
-	const status = readAccountActivityStatusFilter(href)
-	const surface = readAccountActivitySurfaceFilter(href)
-	const triage = readAccountActivityTriageFilter(href)
-	if (view !== 'errors') requestUrl.searchParams.set('view', view)
-	requestUrl.searchParams.set('status', status)
-	if (surface !== 'all') requestUrl.searchParams.set('surface', surface)
-	requestUrl.searchParams.set('error_triage', triage)
-	const selectedRunId = activityRoute.getSelection(href).selectedId
-	if (selectedRunId) {
-		requestUrl.searchParams.set('selected', selectedRunId)
-	}
-	if (cursor) {
-		requestUrl.searchParams.set('cursor', cursor)
-	}
-	return `${requestUrl.pathname}${requestUrl.search}`
 }

@@ -251,3 +251,43 @@ it('keeps deletion pending until acceptance, then removes cached rows and detail
 	).toBe(0)
 	client.clear()
 })
+
+it('does not mutate another organization with the same email message id', async () => {
+	const client = new QueryClient()
+	const acme = '/@acme/-/email/one'
+	const other = '/@other/-/email/one'
+	client.setQueryData(key(acme), { payload: payload() })
+	client.setQueryData(key(other), { payload: payload() })
+	const action: EmailAction = {
+		action: 'classify',
+		classification: 'accepted',
+		messageId: 'one',
+		href: acme,
+	}
+	const options = emailMutationOptions(
+		client,
+		'a',
+		async () => optimisticEmail(payload(), action),
+		() => {},
+		acme,
+	)
+	const snapshot = await options.onMutate(action)
+	expect(readPayload(client, acme).selectedMessage?.classification).toBe(
+		'accepted',
+	)
+	expect(readPayload(client, other).selectedMessage?.classification).toBe(
+		'quarantined',
+	)
+	await options.onSuccess(optimisticEmail(payload(), action), action)
+	expect(readPayload(client, other).selectedMessage?.classification).toBe(
+		'quarantined',
+	)
+	options.onError(new Error('Rejected'), action, snapshot)
+	expect(readPayload(client, acme).selectedMessage?.classification).toBe(
+		'quarantined',
+	)
+	expect(readPayload(client, other).selectedMessage?.classification).toBe(
+		'quarantined',
+	)
+	client.clear()
+})

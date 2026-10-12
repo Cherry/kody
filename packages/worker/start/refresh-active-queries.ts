@@ -10,13 +10,9 @@ export async function refreshActiveQueries(
 	await client.refetchQueries({
 		type: 'active',
 		predicate: (query) => {
-			const [kind, actor, search] = query.queryKey
+			const [kind, actor] = query.queryKey
 			if (actor !== actorKey || (kind !== 'page' && kind !== 'shell'))
 				return false
-			// Permissions can change while ordinary presentation data remains fresh.
-			const shellSearch = new URLSearchParams(
-				kind === 'shell' && typeof search === 'string' ? search : '',
-			)
 			// Recompute age at activation. A hidden tab can defer the observer's
 			// stale timer, leaving its cached result.isStale behind wall-clock time.
 			const stale = query.observers.some(({ options }) => {
@@ -30,12 +26,7 @@ export async function refreshActiveQueries(
 						: options.staleTime
 				return enabled !== false && query.isStaleByTime(staleTime)
 			})
-			return (
-				stale ||
-				query.meta?.freshAuthorization === true ||
-				shellSearch.has('siteBannerPreview') ||
-				shellSearch.has('siteBannerLook')
-			)
+			return stale || query.meta?.freshAuthorization === true
 		},
 	})
 }

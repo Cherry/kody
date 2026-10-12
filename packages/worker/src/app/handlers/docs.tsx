@@ -312,6 +312,21 @@ async function resolveAccessibleGuide(
 	return viewerCanAccessGuide(guide, isAdmin) ? guide : null
 }
 
+/** Shared data boundary for document routes and the public JSON endpoint. */
+export async function loadAccessibleDocDetail(
+	request: Request,
+	env: Env,
+	slug: string,
+	serverTiming?: Array<ServerTimingEntry>,
+) {
+	const guide = await resolveAccessibleGuide(request, env, slug)
+	if (!guide) return null
+	return {
+		doc: await toDocDetail(env, guide, serverTiming),
+		adminOnly: guide.adminOnly,
+	}
+}
+
 function guideMarkdownResponse(guide: Guide): Response {
 	const response = markdownResponse(guide.body)
 	if (guide.adminOnly) {
@@ -481,14 +496,17 @@ export function createDocDetailApiHandler(env: Env) {
 		async handler({ request, params }) {
 			const redirect = docDetailRedirect(params.slug, request, '.json')
 			if (redirect) return redirect
-			const guide = await resolveAccessibleGuide(request, env, params.slug)
-			if (!guide) {
-				return missingDocResponse(env, request, 'json')
-			}
 			const serverTiming: Array<ServerTimingEntry> = []
-			return jsonResponse(await toDocDetail(env, guide, serverTiming), {
+			const detail = await loadAccessibleDocDetail(
+				request,
+				env,
+				params.slug,
 				serverTiming,
-				headers: guide.adminOnly
+			)
+			if (!detail) return missingDocResponse(env, request, 'json')
+			return jsonResponse(detail.doc, {
+				serverTiming,
+				headers: detail.adminOnly
 					? { 'Cache-Control': 'no-store' }
 					: publicSharedJsonCacheHeaders(),
 			})

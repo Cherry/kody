@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
-import { useEffect, useId, useState, useRef } from 'react'
+import { useEffect, useId, useState, useRef, type ReactNode } from 'react'
 import { writeClipboardText } from '#client/clipboard.ts'
 import {
 	getChipButtonCss,
@@ -16,7 +16,8 @@ export const onboardingCopiedConnectActionEvent =
 
 type CopyTextButtonProps = {
 	value: string
-	idleLabel?: string
+	idleLabel?: ReactNode
+	copiedLabel?: string
 	class?: string
 	/**
 	 * `pill` is the redesign's display-face pill (prompt-block copy);
@@ -135,7 +136,7 @@ export function CopyTextButton(props: CopyTextButtonProps) {
 		}, 2000)
 	}
 
-	function renderLabel(state: CopyState, text: string) {
+	function renderLabel(state: CopyState, text: ReactNode) {
 		const active = copyState === state
 		return (
 			<span
@@ -164,7 +165,7 @@ export function CopyTextButton(props: CopyTextButtonProps) {
 			}}
 		>
 			{renderLabel('idle', props.idleLabel ?? 'Copy')}
-			{renderLabel('copied', 'Copied')}
+			{renderLabel('copied', props.copiedLabel ?? 'Copied')}
 			{renderLabel('error', 'Copy failed')}
 			<span id={`${id}-copy-status`} role="status" css={visuallyHiddenCss}>
 				{copyState === 'copied'

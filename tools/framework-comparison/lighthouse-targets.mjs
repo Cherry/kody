@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { resolve, join } from 'node:path'

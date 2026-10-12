@@ -1,4 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
@@ -87,9 +90,16 @@ export function AccountEmailPage({
 	})
 	const router = useRouter()
 	const navigate = (href: string) =>
-		void router.navigate({ to: href, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			resetScroll: false,
+		})
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			replace: true,
+			resetScroll: false,
+		})
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 
@@ -151,7 +161,7 @@ export function AccountEmailPage({
 
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const mutationKey = ['email', actorKey] as const
+	const mutationKey = ['email', actorKey, pageQueryOrg(currentHref)] as const
 	const pendingActions = useMutationState({
 		filters: { mutationKey, status: 'pending' },
 		select: (mutation) => (mutation.state.variables as EmailAction).action,
@@ -165,6 +175,7 @@ export function AccountEmailPage({
 			async (action) => {
 				const response = await fetch(buildEmailApiRequestUrl(action.href), {
 					method: 'POST',
+					referrer: orgAccountApiReferrer(action.href),
 					headers: {
 						Accept: 'application/json',
 						'Content-Type': 'application/json',
@@ -192,6 +203,7 @@ export function AccountEmailPage({
 				return accepted
 			},
 			(error) => toast.error(error.message),
+			currentHref,
 		),
 	)
 
@@ -199,7 +211,7 @@ export function AccountEmailPage({
 		const selected = data.selectedMessage
 		if (!selected || queryClient.isMutating({ mutationKey })) return
 		setMessage(null)
-		const listHref = emailRoute.buildListHref(getCurrentSearch())
+		const listHref = emailRoute.buildListHref(getCurrentSearch(), currentHref)
 		emailMutation.mutate(
 			{ action: 'delete', messageId: selected.id, href: currentHref },
 			{
@@ -387,6 +399,7 @@ export function AccountEmailPage({
 							href: emailRoute.buildDetailHref(
 								emailMessage.id,
 								getCurrentSearch(),
+								currentHref,
 							),
 							cells: {
 								subject: (

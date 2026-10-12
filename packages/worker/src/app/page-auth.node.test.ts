@@ -29,7 +29,12 @@ function authFixture() {
 				const statement = {
 					query,
 					bind: () => statement,
-					first: async () => null,
+					first: async () =>
+						query.toLowerCase().includes('from org_memberships') &&
+						query.toLowerCase().includes('inner join orgs') &&
+						state.user
+							? { org_id: stableUserId, org_slug: 'page-user', role: 'owner' }
+							: null,
 					run: async () => ({ meta: { changes: 0 } }),
 					all: async () => ({
 						results:

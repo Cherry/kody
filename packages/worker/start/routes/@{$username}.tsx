@@ -4,9 +4,12 @@ import { createFileRoute, useLocation } from '@tanstack/react-router'
 import { ProfileRoute, ProfileUnavailable } from '../pages/profile.tsx'
 import { documentHead } from '../components/document-head.ts'
 import { loadProfile } from '#start/server/public-data'
+import { OrgHomePage } from '../pages/org-home.tsx'
 import { pageSearch } from '../page-search.ts'
 
-const pageQuery = createPageQuery('loadProfile', loadProfile)
+const pageQuery = createPageQuery('loadProfile', loadProfile, {
+	freshAuthorization: true,
+})
 
 export const Route = createFileRoute('/@{$username}')({
 	validateSearch: (search: Record<string, unknown>) => search,
@@ -39,8 +42,10 @@ export const Route = createFileRoute('/@{$username}')({
 	notFoundComponent: ProfileUnavailable,
 })
 function Profile() {
-	const { data } = usePageData()
+	const { data, orgHome } = usePageData()
 	const href = useLocation({ select: (location) => location.href })
+	if (orgHome) return <OrgHomePage org={orgHome} />
+	if (!data) return <ProfileUnavailable />
 	return <ProfileRoute data={data} currentHref={href} />
 }
 

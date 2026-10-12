@@ -10,6 +10,8 @@ import {
 import { type AccountWaitingLoaderData } from '#universal/loader-data.ts'
 import { type WaitingItem, type WaitingSeverity } from '#universal/waiting.ts'
 import { routes } from '#universal/routes.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
 import {
 	getAccentCalloutCss,
@@ -39,12 +41,12 @@ export function AccountWaitingPage({
 				currentHref={currentHref}
 			/>
 
-			{data ? renderWaitingBody(data.items) : null}
+			{data ? renderWaitingBody(data.items, currentHref) : null}
 		</AccountManagementShell>
 	)
 }
 
-function renderWaitingBody(items: Array<WaitingItem>) {
+function renderWaitingBody(items: Array<WaitingItem>, currentHref: string) {
 	if (items.length === 0) {
 		return (
 			<AccountManagementPanel
@@ -52,10 +54,16 @@ function renderWaitingBody(items: Array<WaitingItem>) {
 				description="Connections are healthy, and no publishes or grants need a click."
 			>
 				<p css={{ margin: 0, color: colors.textMuted }}>
-					<SiteLink href={routes.accountActivity.href()}>Activity</SiteLink> is
-					run history.{' '}
-					<SiteLink href={routes.accountEmail.href()}>Email</SiteLink> is your
-					mailbox.
+					<SiteLink
+						href={relocateAccountHref('/account/activity', currentHref)}
+					>
+						Activity
+					</SiteLink>{' '}
+					is run history.{' '}
+					<SiteLink href={relocateAccountHref('/account/email', currentHref)}>
+						Email
+					</SiteLink>{' '}
+					is your mailbox.
 				</p>
 			</AccountManagementPanel>
 		)
@@ -101,11 +109,12 @@ function renderWaitingBody(items: Array<WaitingItem>) {
 						{item.why}
 					</p>
 					<SiteLink
-						href={item.href}
+						href={relocateAccountHref(item.href, currentHref)}
 						onClick={() => {
 							void fetch(routes.accountWaitingClickPost.href(), {
 								method: 'POST',
 								credentials: 'include',
+								referrer: orgAccountApiReferrer(currentHref),
 								headers: { 'content-type': 'application/json' },
 								body: JSON.stringify({ cardId: item.id }),
 								keepalive: true,

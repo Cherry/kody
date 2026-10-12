@@ -43,7 +43,6 @@ import { toast } from '#client/toast.ts'
 import {
 	interpretAccountProfileSave,
 	readProfileFormValues,
-	usernameFormatError,
 } from '#client/routes/account-profile-save.ts'
 import {
 	accountProfileApiPath,
@@ -93,12 +92,10 @@ export function AccountPage({
 	const savedDisplayName = initial.displayName
 	const savedBio = initial.bio ?? ''
 	const savedProfileVisibility = initial.profileVisibility
-	const [usernameEdit, setDraftUsername] = useState<string>()
 	const [displayNameEdit, setDraftDisplayName] = useState<string>()
 	const [bioEdit, setDraftBio] = useState<string>()
 	const [visibilityEdit, setDraftProfileVisibility] =
 		useState<ProfileVisibility>()
-	const draftUsername = usernameEdit ?? username
 	const draftDisplayName = displayNameEdit ?? savedDisplayName
 	const draftBio = bioEdit ?? savedBio
 	const draftProfileVisibility = visibilityEdit ?? savedProfileVisibility
@@ -112,9 +109,6 @@ export function AccountPage({
 	const [avatarDropActive, setAvatarDropActive] = useState(false)
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
-	const [usernameSaveError, setUsernameSaveError] = useState<string | null>(
-		null,
-	)
 	const optimisticAvatar = useRef<string | null>(null)
 	const accountConnections = useAccountConnections(
 		payloads.accountConnections,
@@ -310,12 +304,6 @@ export function AccountPage({
 		}
 	}
 
-	function updateDraftUsername(event: FormEvent<HTMLInputElement>) {
-		if (!(event.currentTarget instanceof HTMLInputElement)) return
-		setDraftUsername(event.currentTarget.value)
-		if (usernameSaveError) setUsernameSaveError(null)
-	}
-
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const isSaving = useIsMutating({ mutationKey: ['profile', actorKey] }) > 0
@@ -340,7 +328,6 @@ export function AccountPage({
 	const profileMutation = useMutation({
 		mutationKey: ['profile', actorKey],
 		mutationFn: async (input: {
-			username: string
 			displayName: string
 			bio: string
 			profileVisibility: ProfileVisibility
@@ -382,7 +369,7 @@ export function AccountPage({
 				actorKey,
 				'loadProfile',
 				(data) =>
-					data.data.isSelf
+					data.data?.isSelf
 						? {
 								...data,
 								data: {
@@ -418,7 +405,7 @@ export function AccountPage({
 			queryClient.setQueriesData<PublicProfileQueryData>(
 				{ queryKey: ownProfileKey },
 				(data) =>
-					data && data.data.isSelf
+					data && data.data?.isSelf
 						? {
 								...data,
 								data: {
@@ -433,9 +420,7 @@ export function AccountPage({
 						: data,
 			)
 			// Cache work belongs to the mutation and survives a page unmount.
-			void (profile.username === username
-				? invalidateProfileDependents()
-				: invalidatePages())
+			void invalidateProfileDependents()
 		},
 	})
 
@@ -443,138 +428,81 @@ export function AccountPage({
 		event.preventDefault()
 		if (queryClient.isMutating({ mutationKey: ['profile', actorKey] })) return
 		const submitted = readProfileFormValues(event.currentTarget, {
-			username: draftUsername,
 			displayName: draftDisplayName,
 			bio: draftBio,
 			profileVisibility: draftProfileVisibility,
 		})
-		setDraftUsername(submitted.username)
 		setDraftDisplayName(submitted.displayName)
 		setDraftBio(submitted.bio)
 		setDraftProfileVisibility(submitted.profileVisibility)
-		const nextUsername = submitted.username.trim()
-		if (!nextUsername) {
-			setUsernameSaveError('Username is required.')
-			setMessage('Username is required.')
-			setMessageTone('error')
-			return
-		}
-
-		const formatError = usernameFormatError(nextUsername)
-		const usernameChangeRequested =
-			nextUsername.toLowerCase() !== username.toLowerCase()
-		if (formatError && usernameChangeRequested) {
-			setUsernameSaveError(formatError)
-			setMessage(formatError)
-			setMessageTone('error')
-			return
-		}
-
 		const profileFieldsChanged =
 			submitted.displayName !== savedDisplayName ||
 			submitted.bio !== savedBio ||
 			submitted.profileVisibility !== savedProfileVisibility
-
 		setMessage(null)
 		setMessageTone('info')
-		setUsernameSaveError(null)
-
-		profileMutation.mutate(
-			{
-				username: nextUsername,
-				displayName: submitted.displayName,
-				bio: submitted.bio,
-				profileVisibility: submitted.profileVisibility,
-			},
-			{
-				onSuccess: (payload) => {
-					const result = interpretAccountProfileSave({
-						previousUsername: username,
-						requestedUsername: nextUsername,
-						profileFieldsChanged,
-						responseOk: true,
-						payload,
-					})
-					switch (result.status) {
-						case 'error':
-							setUsernameSaveError(
-								usernameChangeRequested ? result.message : null,
-							)
-							setMessage(result.message)
-							setMessageTone('error')
-							toast.error(result.message)
-							return
-						case 'noop':
-							setMessage(null)
-							setMessageTone('info')
-							return
-						case 'saved':
-							if (!payload) {
-								throw new Error('Unable to save profile.')
-							}
-							// Clear only submitted edits. Typing during the request stays intact.
-							setDraftUsername((edit) =>
-								edit === submitted.username ? undefined : edit,
-							)
-							setDraftDisplayName((edit) =>
-								edit === submitted.displayName ? undefined : edit,
-							)
-							setDraftBio((edit) => (edit === submitted.bio ? undefined : edit))
-							setDraftProfileVisibility((edit) =>
-								edit === submitted.profileVisibility ? undefined : edit,
-							)
-							setMessage(result.message)
-							setMessageTone(payload.communityUpdateWarning ? 'error' : 'info')
-							return
-						default: {
-							const _exhaustive: never = result
-							throw new Error(
-								`Unhandled profile save status: ${String(_exhaustive)}`,
-							)
-						}
-					}
-				},
-				onError: (error) => {
-					const errorMessage =
-						error instanceof Error ? error.message : 'Unable to save profile.'
-					if (usernameChangeRequested) setUsernameSaveError(errorMessage)
-					setMessage(errorMessage)
+		profileMutation.mutate(submitted, {
+			onSuccess: (payload) => {
+				const result = interpretAccountProfileSave({
+					profileFieldsChanged,
+					responseOk: true,
+					payload,
+				})
+				if (result.status === 'saved') {
+					setDraftDisplayName((edit) =>
+						edit === submitted.displayName ? undefined : edit,
+					)
+					setDraftBio((edit) => (edit === submitted.bio ? undefined : edit))
+					setDraftProfileVisibility((edit) =>
+						edit === submitted.profileVisibility ? undefined : edit,
+					)
+					setMessage(result.message)
+				} else if (result.status === 'error') {
+					setMessage(result.message)
 					setMessageTone('error')
-				},
+				}
 			},
-		)
+			onError: (error) => {
+				setMessage(
+					error instanceof Error ? error.message : 'Unable to save profile.',
+				)
+				setMessageTone('error')
+			},
+		})
 	}
 
-	const status = 'ready'
+	const view =
+		new URL(currentHref, 'https://kody.local').pathname === '/account/security'
+			? 'security'
+			: new URL(currentHref, 'https://kody.local').pathname === '/account/data'
+				? 'data'
+				: 'profile'
 
 	const emailClaims = accountEmailClaims.snapshot
 	const isSendingEmailChange = emailClaims.emailChangeStatus === 'sending'
-	const normalizedDraftUsername = draftUsername.trim().toLowerCase()
 	const normalizedDraftEmail = emailClaims.draftEmail.trim().toLowerCase()
 	const profileUnchanged =
-		normalizedDraftUsername === username &&
 		draftDisplayName === savedDisplayName &&
 		draftBio === savedBio &&
 		draftProfileVisibility === savedProfileVisibility
-	const [previousPayload, setPreviousPayload] = useState(payloads)
-	if (previousPayload !== payloads) {
-		setPreviousPayload(payloads)
-		const fresh = payloads.accountProfile
-		accountConnections.applyPayload(payloads.accountConnections)
-		accountEmailClaims.applyFormerEmails(fresh.formerEmails ?? [])
-	}
-
-	const liveUsernameFormatError =
-		normalizedDraftUsername && normalizedDraftUsername !== username
-			? usernameFormatError(draftUsername)
-			: null
-	const usernameFieldError = usernameSaveError ?? liveUsernameFormatError
 
 	return (
 		<AccountManagementShell busy={false}>
 			<AccountPageHeader
-				title="Account"
-				description="Manage your profile, security settings, connected accounts, and data."
+				title={
+					view === 'profile'
+						? 'Profile'
+						: view === 'security'
+							? 'Security'
+							: 'Data & deletion'
+				}
+				description={
+					view === 'profile'
+						? 'How you appear across Kody, and the email you sign in with.'
+						: view === 'security'
+							? 'Your password, second sign-in step, the accounts you can sign in with, and emails you used before.'
+							: 'Take a copy of your account data, or delete the account.'
+				}
 				currentHref={currentHref}
 			/>
 
@@ -584,7 +512,7 @@ export function AccountPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
+			{view === 'profile' ? (
 				<>
 					{!emailVerified
 						? renderEmailVerificationPrompt({
@@ -611,7 +539,6 @@ export function AccountPage({
 							email,
 							emailVerified,
 							username,
-							draftUsername,
 							draftDisplayName,
 							draftBio,
 							draftProfileVisibility,
@@ -622,19 +549,16 @@ export function AccountPage({
 							isSaving,
 							isSendingEmailChange,
 							profileUnchanged,
-							normalizedDraftUsername,
 							normalizedDraftEmail,
 							emailChangeMessage: emailClaims.emailChangeMessage,
 							emailChangeTone: emailClaims.emailChangeTone,
 							emailChangeOpen: emailClaims.emailChangeOpen,
-							usernameFieldError,
 							onProfileSubmit: handleProfileSubmit,
 							onEmailChangeSubmit: (event) => {
 								void accountEmailClaims.handleEmailChangeSubmit(event, email)
 							},
 							onAvatarSelected: handleAvatarSelected,
 							onRemoveAvatar: () => void handleRemoveAvatar(),
-							onDraftUsernameInput: updateDraftUsername,
 							onDraftDisplayNameChange: (value) => {
 								setDraftDisplayName(value)
 							},
@@ -650,6 +574,10 @@ export function AccountPage({
 								accountEmailClaims.updateEmailChangePassword,
 						}}
 					/>
+				</>
+			) : null}
+			{view === 'security' ? (
+				<>
 					{emailVerified
 						? AccountFormerEmailsPanel({
 								formerEmails: emailClaims.formerEmails,
@@ -676,20 +604,10 @@ export function AccountPage({
 						}}
 					/>
 					{accountConnections.render()}
-					<AccountManagementPanel
-						title="Connections"
-						description="The agents that have authorized against this account, the MCP URL for connecting another, and per-host revoke live on the Connections page."
-					>
-						<div css={accountActionsCss}>
-							<SiteLink
-								href={routes.accountConnections.href()}
-								data-testid="account-connections-link"
-								css={compactGhostButtonCss}
-							>
-								Manage connections
-							</SiteLink>
-						</div>
-					</AccountManagementPanel>
+				</>
+			) : null}
+			{view === 'data' ? (
+				<>
 					<AccountManagementPanel
 						title="Your data"
 						description="Download a portable JSON export of your Kody account data for backup or migration. Secret values are never included; secret entries export metadata such as names, hosts, and allowlists only."

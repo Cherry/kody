@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { orgPageFilters } from '../org-page-cache.ts'
 import { useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { readJson } from '#client/routes/account-approval-shared.ts'
@@ -32,11 +36,11 @@ export function AccountSecretProvidersPage({
 	payload: AccountSecretProvidersLoaderData
 	currentHref: string
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
 	const router = useRouter()
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 
-	const [status, setStatus] = useState<'idle' | 'saving' | 'error'>('idle')
 	const [message, setMessage] = useState<string | null>(null)
 	const [bindProvider, setBindProvider] = useState('1password')
 	const [bindPackageId, setBindPackageId] = useState('')
@@ -52,34 +56,51 @@ export function AccountSecretProvidersPage({
 		return `${grant.provider}:${grant.canonicalRef}:${grant.packageId}`
 	}
 
-	const submit = async (body: Record<string, unknown>, successHref: string) => {
-		if (status === 'saving') return
-		setStatus('saving')
-		setMessage(null)
-		try {
+	const mutation = useMutation({
+		mutationKey: ['secretProviders', actorKey, currentHref],
+		mutationFn: async ({
+			body,
+			href,
+		}: {
+			body: Record<string, unknown>
+			href: string
+		}) => {
 			const response = await fetch(apiPath, {
 				method: 'POST',
+				referrer: orgAccountApiReferrer(href),
 				headers: { 'Content-Type': 'application/json' },
 				credentials: 'include',
 				body: JSON.stringify(body),
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			if (response.status === 404)
-				throw new Error(
-					'External secret providers are not enabled for this account.',
-				)
+			if (response.status === 401) throw new Error('Please sign in again.')
 			const result = await readJson<{ ok?: boolean; error?: string }>(response)
 			if (!response.ok || !result?.ok)
 				throw new Error(result?.error ?? 'Unable to update secret providers.')
-			setStatus('idle')
+		},
+		onSuccess: (_result, { href }) => {
+			void Promise.all(
+				mutationResources.map((resource) =>
+					queryClient.invalidateQueries(
+						orgPageFilters(actorKey, resource, href),
+					),
+				),
+			)
+		},
+	})
+	const status = mutation.isPending
+		? 'saving'
+		: mutation.isError
+			? 'error'
+			: 'idle'
+	async function submit(body: Record<string, unknown>, successHref: string) {
+		if (mutation.isPending) return
+		setMessage(null)
+		try {
+			await mutation.mutateAsync({ body, href: currentHref })
 			setRevokeArmed(null)
-			await invalidatePages()
-			await router.navigate({ to: successHref })
+			if (router.state.location.href === currentHref)
+				await router.navigate({ to: successHref })
 		} catch (error) {
-			setStatus('error')
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -149,7 +170,7 @@ export function AccountSecretProvidersPage({
 										ref: approval.canonicalRef,
 										packageId: approval.packageId,
 									},
-									routes.accountSecretProviders.href(),
+									relocateAccountHref('/account/secret-providers', currentHref),
 								)
 							}}
 						>
@@ -167,7 +188,7 @@ export function AccountSecretProvidersPage({
 										ref: approval.canonicalRef,
 										packageId: approval.packageId,
 									},
-									routes.accountSecretProviders.href(),
+									relocateAccountHref('/account/secret-providers', currentHref),
 								)
 							}}
 							css={getPrimaryButtonCss()}
@@ -211,7 +232,10 @@ export function AccountSecretProvidersPage({
 												action: 'unbind',
 												provider: binding.provider,
 											},
-											routes.accountSecretProviders.href(),
+											relocateAccountHref(
+												'/account/secret-providers',
+												currentHref,
+											),
 										)
 									}}
 									css={getSecondaryButtonCss()}
@@ -267,7 +291,10 @@ export function AccountSecretProvidersPage({
 												ref: grant.canonicalRef,
 												packageId: grant.packageId,
 											},
-											routes.accountSecretProviders.href(),
+											relocateAccountHref(
+												'/account/secret-providers',
+												currentHref,
+											),
 										)
 									}}
 								>
@@ -358,7 +385,6 @@ export function AccountSecretProvidersPage({
 									if (typeof value === 'string') config[key] = value
 								}
 							} catch (error) {
-								setStatus('error')
 								setMessage(
 									error instanceof Error
 										? error.message
@@ -375,7 +401,7 @@ export function AccountSecretProvidersPage({
 								doorSecretName: bindDoorSecret,
 								config,
 							},
-							routes.accountSecretProviders.href(),
+							relocateAccountHref('/account/secret-providers', currentHref),
 						)
 					}}
 					css={getPrimaryButtonCss()}

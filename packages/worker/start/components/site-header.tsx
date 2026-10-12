@@ -2,11 +2,10 @@
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from './site-link.tsx'
 import { useEffect, useState } from 'react'
-import { UserAvatar } from './user-avatar.tsx'
-import { routes } from '#universal/routes.ts'
+import { OrgSwitcher } from './org-switcher.tsx'
+import { type ComponentProps } from 'react'
 import {
 	colors,
-	radius,
 	shadows,
 	spacing,
 	transitions,
@@ -20,6 +19,7 @@ import {
 
 export type SiteHeaderProps = {
 	loggedIn: boolean
+	organizationSession: ComponentProps<typeof OrgSwitcher>['session'] | null
 	displayName: string
 	username: string
 	avatarUrl: string | null
@@ -31,8 +31,7 @@ export type SiteHeaderProps = {
 
 /**
  * Sticky site header from the 2026 landing redesign: brand, marketing nav
- * (Community · Docs · Pricing · Blog), and the session corner (Account
- * then the avatar on desktop). The bottom hairline is a static CSS border so
+ * (Community · Docs · Pricing · Blog), and the organization and account menu. The bottom hairline is a static CSS border so
  * it paints before JS.
  */
 const marketingLinks = [
@@ -76,14 +75,6 @@ export function SiteHeader(props: SiteHeaderProps) {
 		setMenuOpen(event.newState === 'open')
 	}
 
-	const profileHref = props.username
-		? routes.profile.href({ username: props.username })
-		: null
-	const profileAriaCurrent =
-		profileHref && props.currentPathname === profileHref
-			? ('page' as const)
-			: undefined
-
 	return (
 		<header className="site-header" css={headerCss}>
 			<nav aria-label="Main" css={navCss}>
@@ -111,35 +102,15 @@ export function SiteHeader(props: SiteHeaderProps) {
 					) : null}
 				</div>
 				<div css={navActionsCss}>
+					{props.organizationSession ? (
+						<OrgSwitcher
+							session={props.organizationSession}
+							displayName={props.displayName}
+							avatarUrl={props.avatarUrl}
+						/>
+					) : null}
 					{props.loggedIn ? (
 						<>
-							<SiteLink
-								href={routes.account.href()}
-								aria-current={ariaCurrent(
-									props.currentPathname,
-									routes.account.href(),
-								)}
-								data-testid="site-header-account"
-								css={navAccountCss}
-							>
-								Account
-							</SiteLink>
-							{profileHref ? (
-								<SiteLink
-									href={profileHref}
-									aria-label={`@${props.username}`}
-									aria-current={profileAriaCurrent}
-									data-testid="site-header-profile"
-									css={navUserAvatarCss}
-								>
-									<UserAvatar
-										displayName={props.displayName}
-										avatarUrl={props.avatarUrl}
-										size={32}
-										variant="well"
-									/>
-								</SiteLink>
-							) : null}
 							{props.showDemoIndicator ? (
 								<span data-testid="demo-indicator" css={demoIndicatorCss}>
 									Demo
@@ -194,41 +165,18 @@ export function SiteHeader(props: SiteHeaderProps) {
 							</SiteLink>
 						) : null}
 					</div>
-					<div css={menuGroupCss}>
-						{props.loggedIn ? (
-							<>
-								{profileHref ? (
-									<SiteLink
-										href={profileHref}
-										aria-label={`@${props.username}`}
-										aria-current={profileAriaCurrent}
-										data-testid="site-header-profile-menu"
-										css={menuProfileLinkCss}
-									>
-										<UserAvatar
-											displayName={props.displayName}
-											avatarUrl={props.avatarUrl}
-											size={32}
-											variant="well"
-										/>
-										{props.username}
-									</SiteLink>
-								) : null}
-								<SiteLink
-									href={routes.account.href()}
-									aria-current={ariaCurrent(
-										props.currentPathname,
-										routes.account.href(),
-									)}
-									data-testid="site-header-account-menu"
-								>
-									Account
-								</SiteLink>
-							</>
-						) : (
+					{props.organizationSession ? (
+						<OrgSwitcher
+							session={props.organizationSession}
+							displayName={props.displayName}
+							avatarUrl={props.avatarUrl}
+							menu
+						/>
+					) : (
+						<div css={menuGroupCss}>
 							<SiteLink href={props.loginHref}>Log in</SiteLink>
-						)}
-					</div>
+						</div>
+					)}
 				</div>
 			</nav>
 		</header>
@@ -453,33 +401,6 @@ const navLoginCss: CSSObject = {
 	padding: '0.7rem 0.25rem',
 	whiteSpace: 'nowrap' as const,
 	'&:hover': { color: colors.primaryText },
-}
-
-const navAccountCss: CSSObject = {
-	color: colors.textMuted,
-	textDecoration: 'none',
-	fontWeight: 500,
-	fontSize: '0.98rem',
-	whiteSpace: 'nowrap' as const,
-	transition: `color ${transitions.fast}`,
-	'&:hover': { color: colors.text },
-	'&[aria-current="page"]': { color: colors.text },
-}
-
-const navUserAvatarCss: CSSObject = {
-	display: 'inline-flex',
-	alignItems: 'center',
-	justifyContent: 'center',
-	lineHeight: 0,
-	padding: '0.15rem',
-	borderRadius: radius.full,
-	textDecoration: 'none',
-	color: colors.textMuted,
-	'&:hover': { color: colors.text },
-}
-
-const menuProfileLinkCss: CSSObject = {
-	gap: '0.65rem',
 }
 
 const demoIndicatorCss: CSSObject = {

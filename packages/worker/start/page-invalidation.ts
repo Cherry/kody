@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
+import { useRouter, useRouteContext, useLocation } from '@tanstack/react-router'
 import {
 	invalidatePageResources,
 	type PageMutationDependencies,
@@ -20,6 +20,7 @@ export function usePageInvalidation(
 ) {
 	const queryClient = useQueryClient()
 	const router = useRouter()
+	const href = useLocation({ select: (location) => location.href })
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	return useCallback(async () => {
 		// One owner initiates active reads. Starting both Router and Query
@@ -29,6 +30,7 @@ export function usePageInvalidation(
 			actorKey,
 			resources,
 			refreshRoute ? 'none' : 'active',
+			href,
 		)
 		await Promise.all([
 			refreshShell ? invalidateShellQueries(queryClient, actorKey) : undefined,
@@ -36,5 +38,13 @@ export function usePageInvalidation(
 				? router.invalidate({ filter: (match) => match.routeId !== '__root__' })
 				: undefined,
 		])
-	}, [actorKey, queryClient, router, resources, refreshShell, refreshRoute])
+	}, [
+		actorKey,
+		queryClient,
+		router,
+		resources,
+		refreshShell,
+		refreshRoute,
+		href,
+	])
 }

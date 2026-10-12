@@ -51,7 +51,7 @@ function renderDenied(
 	})
 }
 
-async function loadOrgSettingsData(input: {
+export async function loadOrgSettingsData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]
 	org: ManagedOrg

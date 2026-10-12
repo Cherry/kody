@@ -4,7 +4,11 @@ import {
 	type AccountBillingLoaderData,
 	type AdminPlanName,
 } from '#universal/loader-data.ts'
-import { AccountManagementPanel } from './account-management-components.tsx'
+import {
+	accountInputCss,
+	AccountManagementMessage,
+	AccountManagementPanel,
+} from './account-management-components.tsx'
 import { type BillingInterval } from '#client/routes/billing-checkout.ts'
 import {
 	colors,
@@ -20,7 +24,6 @@ import {
 	primaryLinkCss,
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
-
 export type PaidTier = 'pro'
 type PlanTier = 'free' | PaidTier
 export type { BillingInterval }
@@ -30,10 +33,8 @@ export type CheckoutPending = {
 } | null
 /** Stripe subscription tiers, including retired Standard and $49 Pro. */
 export type StripePaidPlan = 'standard' | 'pro'
-
 const proratedSwitchNote =
 	'Switching plans is prorated: Stripe shows the exact charge or credit and asks you to confirm before anything changes.'
-
 function describePlanSwitch(input: {
 	interval: BillingInterval
 	onPurchasablePro: boolean
@@ -45,7 +46,6 @@ function describePlanSwitch(input: {
 	}
 	return 'Switch to Pro (prorated)'
 }
-
 const planTiers: Array<{
 	id: PlanTier
 	name: string
@@ -69,7 +69,6 @@ const planTiers: Array<{
 			'More room for jobs, workflows, and daily volume, with a monthly include. Need more? Add prepaid credits.',
 	},
 ]
-
 /** Mirrors server rank: free < standard < pro < max. */
 function getPlanRank(plan: AdminPlanName): number {
 	switch (plan) {
@@ -87,11 +86,9 @@ function getPlanRank(plan: AdminPlanName): number {
 		}
 	}
 }
-
 function planCoversTier(effectivePlan: AdminPlanName, tier: PlanTier): boolean {
 	return getPlanRank(effectivePlan) >= getPlanRank(tier)
 }
-
 /**
  * The tier the customer's Stripe subscription is on. Their plan changes are
  * prorated updates to that subscription (confirmed in the portal), not new
@@ -105,7 +102,6 @@ export function resolveActiveStripePlan(
 		? billing.stripePlan
 		: null
 }
-
 /**
  * Subscribed to retired Standard or $49 Pro: kept as-is, no credit wallet,
  * and offered a prorated switch to the purchasable Pro.
@@ -117,14 +113,23 @@ export function isRetiredPaidSubscription(
 	if (!billing || active === null) return false
 	return active === 'standard' || !billing.creditsEligible
 }
-
+/** "3 seats · $36/month" for organizations with more than the signup seat. */
+function describeSeatPricing(seats: number, interval: BillingInterval) {
+	const label = seats === 1 ? '1 seat' : `${seats} seats`
+	return interval === 'year'
+		? `${label} · $${120 * seats}/year`
+		: `${label} · $${12 * seats}/month`
+}
 export function renderAccountBillingPlans(input: {
 	billing: AccountBillingLoaderData
 	activeStripePlan: StripePaidPlan | null
 	paymentActionNeeded: boolean
 	checkoutPending: CheckoutPending
 	selectedIntervalByPlan: Record<PaidTier, BillingInterval>
+	promoCode: string
+	checkoutError: string | null
 	onIntervalChange: (plan: PaidTier, interval: BillingInterval) => void
+	onPromoCodeChange: (value: string) => void
 	onStartCheckout: (plan: PaidTier, interval: BillingInterval) => void
 }) {
 	const {
@@ -135,6 +140,7 @@ export function renderAccountBillingPlans(input: {
 		selectedIntervalByPlan,
 	} = input
 	const retired = isRetiredPaidSubscription(billing)
+	const { personal, seats } = billing.org
 	return (
 		<AccountManagementPanel title="Plans">
 			<div
@@ -173,7 +179,6 @@ export function renderAccountBillingPlans(input: {
 								? 'year'
 								: 'month'
 							: null
-
 					return (
 						<div
 							key={tier.id}
@@ -216,11 +221,26 @@ export function renderAccountBillingPlans(input: {
 								</span>
 							) : null}
 							<p css={descriptionCss}>{tier.description}</p>
-							<p css={{ margin: 0 }}>
-								<SiteLink href="/account/usage" css={primaryLinkCss}>
-									See your current usage
-								</SiteLink>
-							</p>
+							{paidTier && !personal ? (
+								<p
+									css={{ margin: 0, color: colors.text }}
+									data-testid="billing-seat-pricing"
+								>
+									{describeSeatPricing(
+										seats,
+										activeStripePlan && billing.stripeInterval
+											? billing.stripeInterval
+											: selectedIntervalByPlan[paidTier],
+									)}
+								</p>
+							) : null}
+							{billing.usageHref ? (
+								<p css={{ margin: 0 }}>
+									<SiteLink href={billing.usageHref} css={primaryLinkCss}>
+										See your current usage
+									</SiteLink>
+								</p>
+							) : null}
 							{intervalSwitch && paidTier ? (
 								<div
 									css={{
@@ -308,6 +328,34 @@ export function renderAccountBillingPlans(input: {
 											<span>Annual</span>
 										</label>
 									</fieldset>
+									{activeStripePlan ? null : (
+										<label css={{ display: 'grid', gap: spacing.xs }}>
+											<span
+												css={{
+													fontSize: typography.fontSize.sm,
+													color: colors.text,
+												}}
+											>
+												Promo code (optional)
+											</span>
+											<input
+												type="text"
+												name="promo-code"
+												autoComplete="off"
+												spellCheck={false}
+												maxLength={64}
+												value={input.promoCode}
+												data-field-ring
+												css={promoInputCss}
+												onChange={(event) =>
+													input.onPromoCodeChange(event.currentTarget.value)
+												}
+											/>
+											<span css={descriptionCss}>
+												Promo codes apply to monthly billing.
+											</span>
+										</label>
+									)}
 									<div>
 										<button
 											type="button"
@@ -334,6 +382,11 @@ export function renderAccountBillingPlans(input: {
 														: 'Subscribe monthly'}
 										</button>
 									</div>
+									{input.checkoutError ? (
+										<AccountManagementMessage tone="error">
+											{input.checkoutError}
+										</AccountManagementMessage>
+									) : null}
 								</div>
 							) : null}
 						</div>
@@ -346,6 +399,6 @@ export function renderAccountBillingPlans(input: {
 		</AccountManagementPanel>
 	)
 }
-
+const promoInputCss = { ...accountInputCss, maxWidth: '16rem' }
 const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })

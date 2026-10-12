@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -38,53 +42,30 @@ import {
 
 export function useAccountConnectedAgents(
 	initialPayload: AccountConnectedAgentsLoaderData,
+	currentHref: string,
 ) {
-	const [agents, setAgents] = useState<Array<AccountConnectedAgentListItem>>(
-		initialPayload.agents,
-	)
-	const [pendingRevokes] = useState(() => new Set<string>())
-	/**
-	 * After a revoke commits, ignore those grant IDs in later payloads so a
-	 * prefetched / in-flight GET cannot restore the row or the Add connection
-	 * Connected mark. Keyed by grant (not clientId) so a same-client reconnect
-	 * with a new grant still appears. Cleared only on revoke failure or reload.
-	 */
-	const [revokedGrantIds] = useState(() => new Set<string>())
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const agents = initialPayload.agents
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
-	const [lastPayload, setLastPayload] = useState(initialPayload)
-	if (lastPayload !== initialPayload) {
-		setLastPayload(initialPayload)
-		setAgents(visibleAgents(initialPayload.agents))
-	}
-
-	function agentSurvivesRevokeFilter(agent: AccountConnectedAgentListItem) {
-		if (pendingRevokes.has(agent.clientId)) return false
-		if (revokedGrantIds.size === 0) return true
-		// Hide only when every listed grant was tombstoned. A new grant under
-		// the same clientId means a fresh reconnect and must stay visible.
-		return agent.grantIds.some((grantId) => !revokedGrantIds.has(grantId))
-	}
-
-	function visibleAgents(next: Array<AccountConnectedAgentListItem>) {
-		if (pendingRevokes.size === 0 && revokedGrantIds.size === 0) return next
-		return next.filter(agentSurvivesRevokeFilter)
-	}
-
-	function applyPayload(payload: AccountConnectedAgentsLoaderData) {
-		setAgents(visibleAgents(payload.agents))
-	}
-
-	async function revokeAgent(clientId: string) {
-		const removed = agents.find((agent) => agent.clientId === clientId)
-		if (!removed) return
-
-		setAgents(agents.filter((agent) => agent.clientId !== clientId))
-		setRevokeArmed(null)
-		pendingRevokes.add(clientId)
-		try {
+	const mutation = useMutation({
+		mutationKey: [
+			'connectedAgents',
+			actorKey,
+			orgSlugFromOrgOwnedPath(
+				new URL(currentHref, 'http://localhost').pathname,
+			),
+		],
+		mutationFn: async ({
+			clientId,
+			href,
+		}: {
+			clientId: string
+			href: string
+		}) => {
 			const response = await fetch(connectedAgentsApiPath, {
 				method: 'POST',
+				referrer: orgAccountApiReferrer(href),
 				headers: {
 					Accept: 'application/json',
 					'Content-Type': 'application/json',
@@ -92,43 +73,79 @@ export function useAccountConnectedAgents(
 				credentials: 'include',
 				body: JSON.stringify({ intent: 'revoke', clientId }),
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
+			const accepted = await readJson<
 				AccountConnectedAgentsLoaderData & { error?: string }
 			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to revoke this agent.')
-			}
-			pendingRevokes.delete(clientId)
-			for (const grantId of removed.grantIds) {
-				revokedGrantIds.add(grantId)
-			}
-			// Keep the optimistic list. Replacing from this response can put
-			// back a sibling that already committed if that POST listed earlier.
+			if (!response.ok || !accepted?.ok)
+				throw new Error(accepted?.error ?? 'Unable to revoke this agent.')
+		},
+		onMutate: async ({ clientId, href }) => {
+			const filters = orgPageFilters(actorKey, 'loadConnectionsPage', href)
+			await queryClient.cancelQueries(filters)
+			const removed = queryClient
+				.getQueriesData<{ payload: AccountConnectedAgentsLoaderData }>(filters)
+				.map(([key, data]) => ({
+					key,
+					agent: data?.payload.agents.find(
+						(agent) => agent.clientId === clientId,
+					),
+				}))
+			updateOrgPagePayload<AccountConnectedAgentsLoaderData>(
+				queryClient,
+				actorKey,
+				'loadConnectionsPage',
+				href,
+				(payload) => ({
+					...payload,
+					agents: payload.agents.filter((agent) => agent.clientId !== clientId),
+				}),
+			)
+			return removed
+		},
+		onSuccess: () => {
 			toast.success('Agent disconnected.')
-			void invalidatePages()
-		} catch (error) {
-			pendingRevokes.delete(clientId)
-			// Do not clear revokedGrantIds: this attempt never added tombstones
-			// (only success does), and deleted IDs could wipe an earlier revoke.
-			setAgents((current) =>
-				current.some((agent) => agent.clientId === clientId)
-					? current
-					: [...current, removed],
+		},
+		onError: (error, _variables, removed) => {
+			for (const { key, agent } of removed ?? [])
+				if (agent)
+					queryClient.setQueryData<{
+						payload: AccountConnectedAgentsLoaderData
+					}>(key, (data) =>
+						data &&
+						!data.payload.agents.some(
+							(item) => item.clientId === agent.clientId,
+						)
+							? {
+									...data,
+									payload: {
+										...data.payload,
+										agents: [...data.payload.agents, agent],
+									},
+								}
+							: data,
+					)
+			toast.error(error.message)
+		},
+		onSettled: (_data, _error, { href }) => {
+			const orgSlug = orgSlugFromOrgOwnedPath(
+				new URL(href, 'http://localhost').pathname,
 			)
-			toast.error(
-				error instanceof Error ? error.message : 'Unable to revoke this agent.',
+			if (
+				queryClient.isMutating({
+					mutationKey: ['connectedAgents', actorKey, orgSlug],
+				}) === 1
 			)
-		} finally {
-			pendingRevokes.delete(clientId)
-		}
+				void queryClient.invalidateQueries(
+					orgPageFilters(actorKey, 'loadConnectionsPage', href),
+				)
+		},
+	})
+	function revokeAgent(clientId: string) {
+		setRevokeArmed(null)
+		mutation.mutate({ clientId, href: currentHref })
 	}
 
 	return {
-		applyPayload,
 		revokeAgent,
 		/** Current list after optimistic revokes — Add connection marks use this. */
 		listAgents() {
@@ -305,7 +322,7 @@ export function useAccountConnectedAgents(
 									</details>
 									{isAccountConnectionAgent(group.kind) ? (
 										<SiteLink
-											href={accountConnectionsNewHref(group.kind)}
+											href={accountConnectionsNewHref(group.kind, currentHref)}
 											data-testid="connected-agent-view-steps"
 											data-agent-kind={group.kind}
 											data-prevent-scroll-reset=""
@@ -414,9 +431,3 @@ const connectionRowCss: CSSObject = {
 }
 
 const dangerButtonCss = [getDangerPillCss({ size: 'sm' }), getSwapLabelCss()]
-
-const mutationResources = [
-	'loadConnectionsPage',
-	'loadOnboarding',
-	'loadAccountPage',
-] as const

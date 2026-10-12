@@ -12,10 +12,7 @@ import {
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
 import { mergeCss } from '../components/merge-css.ts'
-import {
-	EntityExplainer,
-	resolveEntityExplainer,
-} from '../components/entity-explainer.tsx'
+import { EntityExplainer, resolveEntityExplainer } from './entity-explainer.tsx'
 import { CommunityListingsContent } from '../components/community-listings-content.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 export function CommunityRoute({ data }: { data: CommunityIndexLoaderData }) {

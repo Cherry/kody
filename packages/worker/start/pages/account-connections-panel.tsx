@@ -1,15 +1,16 @@
 /** @jsxImportSource @emotion/react */
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { pageResourceKey } from '../page-mutation-cache.ts'
+import { type loadAccountPage } from '#start/server/account-page'
 import { SiteLink } from '../components/site-link.tsx'
 import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { startSocialSignIn } from '../social-sign-in.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
-import {
-	type AccountConnectionListItem,
-	type AccountConnectionsLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountConnectionsLoaderData } from '#universal/loader-data.ts'
 import { kodyDiscordInviteUrl } from '#universal/community-links.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -66,32 +67,71 @@ export function useAccountConnections(
 	href: string,
 ) {
 	const invalidatePages = usePageInvalidation(mutationResources)
-	const [connectionsBusy, setConnectionsBusy] = useState(false)
-	const [connections, setConnections] = useState<
-		Array<AccountConnectionListItem>
-	>(initial.connections)
-	const [canDisconnect, setCanDisconnect] = useState(initial.canDisconnect)
-	const [hasUsablePassword, setHasUsablePassword] = useState(
-		initial.hasUsablePassword,
-	)
-	const [availableProviders, setAvailableProviders] = useState<
-		Array<{ id: string; label: string }>
-	>(initial.availableProviders)
-	const [canSyncDiscordRoles, setCanSyncDiscordRoles] = useState(
-		initial.canSyncDiscordRoles,
-	)
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const [connecting, setConnectionsBusy] = useState(false)
+	const {
+		connections,
+		canDisconnect,
+		hasUsablePassword,
+		availableProviders,
+		canSyncDiscordRoles,
+	} = initial
+	function publish(payload: AccountConnectionsLoaderData) {
+		queryClient.setQueriesData<Awaited<ReturnType<typeof loadAccountPage>>>(
+			{ queryKey: pageResourceKey(actorKey, 'loadAccountPage') },
+			(data) =>
+				data
+					? {
+							...data,
+							payloads: { ...data.payloads, accountConnections: payload },
+						}
+					: data,
+		)
+	}
+	const mutation = useMutation({
+		mutationKey: ['accountConnections', actorKey],
+		mutationFn: async (
+			input:
+				| { intent: 'disconnect'; provider: string }
+				| { intent: 'sync-discord-role' },
+		) => {
+			const response = await fetch(connectionsApiPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify(input),
+			})
+			const payload = await readJson<
+				AccountConnectionsLoaderData & {
+					error?: string
+					discordMemberRole?: { status: string }
+				}
+			>(response)
+			if (!response.ok || !payload?.ok)
+				throw new Error(
+					payload?.error || 'Unable to update connected accounts.',
+				)
+			return payload
+		},
+		onMutate: () =>
+			queryClient.cancelQueries({
+				queryKey: pageResourceKey(actorKey, 'loadAccountPage'),
+			}),
+		onSuccess: publish,
+		onSettled: () => {
+			void invalidatePages()
+		},
+	})
+	const connectionsBusy = connecting || mutation.isPending
+
 	const [connectionsMessage, setConnectionsMessage] = useState<{
 		text: string
 		tone: 'error' | 'info'
 	} | null>(readConnectionCallbackMessage(href))
-
-	function applyPayload(payload: AccountConnectionsLoaderData) {
-		setConnections(payload.connections)
-		setCanDisconnect(payload.canDisconnect)
-		setHasUsablePassword(payload.hasUsablePassword)
-		setAvailableProviders(payload.availableProviders)
-		setCanSyncDiscordRoles(payload.canSyncDiscordRoles)
-	}
 
 	async function connectProvider(providerId: string) {
 		setConnectionsBusy(true)
@@ -113,103 +153,48 @@ export function useAccountConnections(
 		}
 	}
 
-	async function syncDiscordMemberRole() {
-		setConnectionsBusy(true)
+	function syncDiscordMemberRole() {
 		setConnectionsMessage(null)
-		try {
-			const response = await fetch(connectionsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+		mutation.mutate(
+			{ intent: 'sync-discord-role' },
+			{
+				onSuccess: (payload) => {
+					const status = payload.discordMemberRole?.status ?? 'error'
+					setConnectionsMessage({
+						text: discordMemberRoleMessage(status),
+						tone:
+							status === 'assigned' || status === 'not-in-guild'
+								? 'info'
+								: 'error',
+					})
 				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'sync-discord-role' }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountConnectionsLoaderData & {
-					error?: string
-					discordMemberRole?: { status: string }
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to sync the Discord role.')
-			}
-			void invalidatePages()
-			applyPayload(payload)
-			const status = payload.discordMemberRole?.status ?? 'error'
-			setConnectionsMessage({
-				text: discordMemberRoleMessage(status),
-				tone:
-					status === 'assigned' || status === 'not-in-guild' ? 'info' : 'error',
-			})
-		} catch (error) {
-			setConnectionsMessage({
-				text:
-					error instanceof Error
-						? error.message
-						: 'Unable to sync the Discord role.',
-				tone: 'error',
-			})
-		} finally {
-			setConnectionsBusy(false)
-		}
+				onError: (error) =>
+					setConnectionsMessage({ text: error.message, tone: 'error' }),
+			},
+		)
 	}
-
-	async function disconnectProvider(providerId: string) {
-		setConnectionsBusy(true)
+	function disconnectProvider(providerId: string) {
 		setConnectionsMessage(null)
-		try {
-			const response = await fetch(connectionsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'disconnect', provider: providerId }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountConnectionsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to disconnect the account.')
-			}
-			void invalidatePages()
-			applyPayload(payload)
-			setConnectionsMessage({
-				text: `${providerLabels[providerId] ?? providerId} disconnected.`,
-				tone: 'info',
-			})
-		} catch (error) {
-			setConnectionsMessage({
-				text:
-					error instanceof Error
-						? error.message
-						: 'Unable to disconnect the account.',
-				tone: 'error',
-			})
-		} finally {
-			setConnectionsBusy(false)
-		}
+		mutation.mutate(
+			{ intent: 'disconnect', provider: providerId },
+			{
+				onSuccess: () =>
+					setConnectionsMessage({
+						text: `${providerLabels[providerId] ?? providerId} disconnected.`,
+						tone: 'info',
+					}),
+				onError: (error) =>
+					setConnectionsMessage({ text: error.message, tone: 'error' }),
+			},
+		)
 	}
 
 	return {
-		applyPayload,
 		get hasUsablePassword() {
 			return hasUsablePassword
 		},
 		markHasUsablePassword() {
-			setHasUsablePassword(true)
-			setCanDisconnect(true)
+			publish({ ...initial, hasUsablePassword: true, canDisconnect: true })
 		},
 		setMessage(next: { text: string; tone: 'error' | 'info' } | null) {
 			setConnectionsMessage(next ?? connectionsMessage)

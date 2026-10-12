@@ -6,20 +6,14 @@ import {
 	type CommunityInstallApiPayload,
 	type CommunityInstallOutcome,
 } from '../community-types.ts'
-import { type SessionInfo } from '#client/session.ts'
-import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
-import { packageShareGrantsFlagKey } from '#universal/feature-flags/registry.ts'
-import { isOfficialCommunityListing } from '#universal/community-links.ts'
 import { routes } from '#universal/routes.ts'
 import { getPackageTreeHref } from '#universal/package-files.ts'
-import { postPackageShareAction } from '#client/routes/package-share-client.ts'
 import {
 	type CommunityDetailContentProps,
 	CommunityDetailContent,
 } from '../components/community-detail-content.tsx'
 import { PackageInstallContext } from '../components/package-title-actions.tsx'
 import { renderMarkdownNodes } from '../components/markdown-view.tsx'
-import { renderPackageShareBanners as PackageShareBanners } from '../components/package-share-banners.tsx'
 import {
 	detailArticleCss,
 	renderInstallStrip,
@@ -32,11 +26,9 @@ import {
 export function CommunityDetailRoute({
 	data,
 	header,
-	session,
 }: {
 	data: CommunityDetailApiPayload
 	header: CommunityDetailContentProps
-	session: SessionInfo | null
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshRoute: true,
@@ -75,8 +67,6 @@ export function CommunityDetailRoute({
 		'idle' | 'submitting' | 'success' | 'error'
 	>('idle')
 	const [reportMessage, setReportMessage] = useState<string | null>(null)
-	const [shareBusy, setShareBusy] = useState(false)
-	const [shareMessage, setShareMessage] = useState<string | null>(null)
 	const listing = data.listing
 	const listingId = listing?.id
 	const readme = useMemo(
@@ -120,13 +110,7 @@ export function CommunityDetailRoute({
 	}
 	async function install() {
 		if (!listing || busy.current.has('install') || installOutcome) return
-		if (
-			!isOfficialCommunityListing({
-				name: listing.name,
-				ownerUsername: listing.ownerUsername,
-			}) &&
-			!confirmed
-		) {
+		if (!confirmed) {
 			setConfirmed(true)
 			return
 		}
@@ -213,40 +197,6 @@ export function CommunityDetailRoute({
 			busy.current.delete('report')
 		}
 	}
-	async function share(
-		intent: 'accept' | 'leave',
-		trustLevel?: 'follow' | 'pin',
-	) {
-		if (!data.shareGrant || busy.current.has('share')) return
-		busy.current.add('share')
-		setShareBusy(true)
-		setShareMessage(null)
-		try {
-			const result = await postPackageShareAction({
-				intent,
-				trustLevel,
-				ownerUsername: data.username,
-				kodyId: data.kodyId,
-				grantId: data.shareGrant.id,
-			})
-			if (result.status === 'unauthorized') {
-				window.location.assign('/login')
-				return
-			}
-			if (result.status === 'error') throw new Error(result.message)
-			await invalidatePages()
-		} catch (error) {
-			if (mounted.current)
-				setShareMessage(
-					error instanceof Error
-						? error.message
-						: 'Unable to update shared package.',
-				)
-		} finally {
-			busy.current.delete('share')
-			if (mounted.current) setShareBusy(false)
-		}
-	}
 	return (
 		<PackageInstallContext.Provider
 			value={{
@@ -258,18 +208,6 @@ export function CommunityDetailRoute({
 		>
 			<article css={detailArticleCss}>
 				<CommunityDetailContent {...header} />
-				{isFeatureFlagEnabled(session, packageShareGrantsFlagKey) ? (
-					<PackageShareBanners
-						{...{
-							shareGrant: data.shareGrant,
-							loggedIn: data.loggedIn,
-							busy: shareBusy,
-							message: shareMessage,
-							onAccept: (trust) => void share('accept', trust),
-							onLeave: () => void share('leave'),
-						}}
-					/>
-				) : null}
 				{listingId
 					? renderInstallStrip({ installMessage, installOutcome })
 					: null}
@@ -308,7 +246,6 @@ const mutationResources = [
 	'loadPackageFiles',
 	'loadCommunity',
 	'loadProfile',
-	'loadSharedPage',
 	'loadOnboarding',
 	'loadAccountPage',
 	'loadUsagePage',

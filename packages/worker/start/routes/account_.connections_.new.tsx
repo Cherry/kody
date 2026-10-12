@@ -1,36 +1,13 @@
-/** @jsxImportSource @emotion/react */
-import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
-import { AccountConnectionsPage } from '../pages/account-connections.tsx'
-import { loadConnectionsPage } from '#start/server/account-collections'
-import { documentHead } from '../components/document-head.ts'
-const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
-	staleTime: 60_000,
-})
-
+import { createFileRoute } from '@tanstack/react-router'
+import { resolveOrgAlias } from '#start/server/org-alias'
 export const Route = createFileRoute('/account_/connections_/new')({
+	preload: false,
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
-	}),
-	loader: ({ context, preload }) =>
-		loadPageQuery(
-			context.queryClient,
-			pageQuery(context.actorKey, context.pageQueryInput),
-			preload,
-		),
-	head: ({ loaderData }) => documentHead(loaderData?.head),
-	component: Page,
+	loader: ({ location }) =>
+		resolveOrgAlias({
+			data:
+				location.pathname +
+				location.searchStr +
+				(location.hash ? `#${location.hash}` : ''),
+		}),
 })
-function Page() {
-	const { payload } = usePageData()
-	const location = useLocation()
-	return (
-		<AccountConnectionsPage payload={payload} currentHref={location.href} />
-	)
-}
-
-function usePageData() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	return usePageQuery(pageQuery(actorKey, pageQueryInput)).data
-}

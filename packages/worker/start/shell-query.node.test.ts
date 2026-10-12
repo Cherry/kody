@@ -6,7 +6,6 @@ import {
 	requiresSessionVerification,
 	shellQuery,
 	shellSearch,
-	ensureShellQuery,
 	invalidateShellQueries,
 } from './shell-query.ts'
 const clients: QueryClient[] = []
@@ -30,12 +29,8 @@ it('shares warm shell presentation across ordinary route/search changes', async 
 		client.getQueryState(shellQuery('b', '').queryKey)?.isInvalidated,
 	).toBe(false)
 })
-it('retains preview and video dependencies in a stable key', () => {
-	expect(
-		shellSearch(
-			'?q=x&youtubeId=video&siteBannerPreview=one&siteBannerLook=dark&og=x',
-		),
-	).toBe('?siteBannerLook=dark&siteBannerPreview=one&youtubeId=video')
+it('retains video dependencies in a stable key', () => {
+	expect(shellSearch('?q=x&youtubeId=video&og=x')).toBe('?youtubeId=video')
 	expect(shellQuery('a', '?youtubeId=first').queryKey).not.toEqual(
 		shellQuery('a', '?youtubeId=second').queryKey,
 	)
@@ -69,33 +64,4 @@ it('only skips foreground identity checks for known public content', () => {
 		'/unknown',
 	])
 		expect(requiresSessionVerification(path)).toBe(true)
-})
-
-it('preview revisits reauthorize instead of reusing a same-actor snapshot', async () => {
-	const client = new QueryClient()
-	clients.push(client)
-	await ensureShellQuery(client, 'a', '?siteBannerPreview=draft')
-	await ensureShellQuery(client, 'a', '?siteBannerPreview=draft')
-	expect(read).toHaveBeenCalledTimes(2)
-})
-
-it('a late preview response cannot replace a newer permission check', async () => {
-	const client = new QueryClient()
-	clients.push(client)
-	await ensureShellQuery(client, 'a', '?siteBannerLook=card')
-	let release!: (value: { revision: number }) => void
-	const held = new Promise<{ revision: number }>((resolve) => {
-		release = resolve
-	})
-	read.mockImplementationOnce(() => held)
-	const options = shellQuery('a', '?siteBannerLook=card')
-	const oldRead = client.refetchQueries({
-		queryKey: options.queryKey,
-		exact: true,
-	})
-	read.mockResolvedValueOnce({ revision: 2 })
-	await ensureShellQuery(client, 'a', '?siteBannerLook=card')
-	release({ revision: 0 })
-	await oldRead
-	expect(client.getQueryData(options.queryKey)).toMatchObject({ revision: 2 })
 })

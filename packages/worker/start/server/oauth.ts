@@ -17,12 +17,14 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 			{ getEnv },
 			{ loadSessionInfo },
 			{ loadOAuthAuthorizeData },
+			{ publicAuthProvidersLoaderData },
 		] = await Promise.all([
 			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
 			import('../../src/app/env.ts'),
 			import('../../src/app/session-info.ts'),
 			import('../../src/oauth-handlers.ts'),
+			import('../../src/app/public-auth-providers.ts'),
 		])
 		const bindings = getEnv(env)
 		const url = new URL(`/oauth/authorize${search}`, getRequest().url)
@@ -40,5 +42,9 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 			(cookie): cookie is string => Boolean(cookie),
 		)
 		if (cookies.length) setResponseHeader('Set-Cookie', cookies)
-		return { data: result.data, session }
+		return {
+			data: result.data,
+			session,
+			authProviders: publicAuthProvidersLoaderData(bindings),
+		}
 	})

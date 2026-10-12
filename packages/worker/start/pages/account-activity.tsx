@@ -1,18 +1,16 @@
 /** @jsxImportSource @emotion/react */
 import { formatTimestamp } from '../components/local-timestamp.tsx'
-import { useState, useRef, useEffect } from 'react'
+import { useSuspenseInfiniteQuery } from '@tanstack/react-query'
+import { activityQuery } from '../activity-query.ts'
 import { useRouter } from '@tanstack/react-router'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import { renderActivityRunDetail } from './account-activity-detail.tsx'
 import {
 	activityEmptyLabel,
 	activityErrorReviewPrompt,
 	activityRoute,
-	buildActivityApiRequestUrl,
 	buildActivitySearch,
 	formatDurationMs,
-	getDataLatchKey,
 	readStatusFilter,
 	readSurfaceFilter,
 	readTriageFilter,
@@ -49,12 +47,6 @@ import {
 	type AccountActivityViewFilter,
 } from '#universal/account-activity-filters.ts'
 import {
-	type AccountActivityLoaderData,
-	type AccountActivityRunDetail,
-	type AccountActivityRunListItem,
-	type AccountActivitySummary,
-} from '#universal/loader-data.ts'
-import {
 	colors,
 	radius,
 	spacing,
@@ -65,34 +57,35 @@ import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
 const clampedCellCss = recordCellClamp(30)
 
 export function AccountActivityPage({
-	payload,
+	actorKey,
+	pageQueryInput,
 	currentHref,
 }: {
-	payload: AccountActivityLoaderData
+	actorKey: string | null
+	pageQueryInput: string
 	currentHref: string
 }) {
-	const [runs, setRuns] = useState<Array<AccountActivityRunListItem>>(
-		payload.runs,
+	const query = useSuspenseInfiniteQuery(
+		activityQuery(actorKey, pageQueryInput),
 	)
-	const [selectedRun, setSelectedRun] =
-		useState<AccountActivityRunDetail | null>(payload.selectedRun)
-	const [summary, setSummary] = useState<AccountActivitySummary | null>(
-		payload.summary,
-	)
-	const [nextCursor, setNextCursor] = useState<string | null>(
-		payload.nextCursor,
-	)
-	const [retentionDays, setRetentionDays] = useState(payload.retentionDays)
-	const [message, setMessage] = useState<string | null>(null)
-	const [loadingMore, setLoadingMore] = useState(false)
+	const first = query.data.pages[0]!.payload
+	const { selectedRun, summary, retentionDays } = first
+	const seen = new Set<string>()
+	const runs = query.data.pages
+		.flatMap((page) => page.payload.runs)
+		.filter((run) => {
+			if (seen.has(run.id)) return false
+			seen.add(run.id)
+			return true
+		})
+	const nextCursor = query.hasNextPage
+	const loadingMore = query.isFetchingNextPage
+	const message = query.error?.message ?? null
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
 	const replaceLocation = (href: string) =>
 		void router.navigate({ to: href, replace: true, resetScroll: false })
-	const pagination = useRef<AbortController | null>(null)
-	const locationKey = getDataLatchKey(currentHref)
-	useEffect(() => () => pagination.current?.abort(), [locationKey, payload])
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 
@@ -100,61 +93,8 @@ export function AccountActivityPage({
 		return currentHref
 	}
 
-	function showMessage(nextMessage: string | null) {
-		setMessage(nextMessage)
-	}
-
-	function applyPayload(
-		payload: AccountActivityLoaderData,
-		options?: { append?: boolean },
-	) {
-		if (options?.append) {
-			const seen = new Set(runs.map((run) => run.id))
-			setRuns([...runs, ...payload.runs.filter((run) => !seen.has(run.id))])
-		} else {
-			setRuns(payload.runs)
-		}
-		setSelectedRun(payload.selectedRun)
-		setSummary(payload.summary)
-		setNextCursor(payload.nextCursor)
-		setRetentionDays(payload.retentionDays)
-	}
-
-	async function loadMoreRuns() {
-		if (loadingMore || !nextCursor) return
-		setLoadingMore(true)
-		const request = new AbortController()
-		pagination.current = request
-		const href = getCurrentHref()
-		try {
-			const response = await fetch(
-				buildActivityApiRequestUrl(href, nextCursor),
-				{
-					headers: { Accept: 'application/json' },
-					credentials: 'include',
-					signal: request.signal,
-				},
-			)
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<AccountActivityLoaderData>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error('Unable to load more activity.')
-			}
-			if (request.signal.aborted) return
-			applyPayload(payload, { append: true })
-			setLoadingMore(false)
-		} catch (error) {
-			if (request.signal.aborted) return
-			setLoadingMore(false)
-			showMessage(
-				error instanceof Error
-					? error.message
-					: 'Unable to load more activity.',
-			)
-		}
+	function loadMoreRuns() {
+		if (!query.isFetching && query.hasNextPage) void query.fetchNextPage()
 	}
 
 	function updateFilters(input: {
@@ -183,20 +123,19 @@ export function AccountActivityPage({
 					: readTriageFilter(href)),
 		})
 		if (selection.selectedId) {
-			navigate(activityRoute.buildDetailHref(selection.selectedId, search))
+			navigate(
+				activityRoute.buildDetailHref(
+					selection.selectedId,
+					search,
+					currentHref,
+				),
+			)
 			return
 		}
-		replaceLocation(activityRoute.buildListHref(search))
+		replaceLocation(activityRoute.buildListHref(search, currentHref))
 	}
 
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload) {
-		setLastPayload(payload)
-		applyPayload(payload)
-		setLoadingMore(false)
-		showMessage(null)
-	}
 
 	const selection = activityRoute.getSelection(currentHref)
 	const viewFilter = readViewFilter(currentHref)
@@ -346,7 +285,7 @@ export function AccountActivityPage({
 						ariaLabel="Activity runs"
 						selectedId={selection.selectedId}
 						recordLoading={waitingForDetail}
-						onNavigate={() => showMessage(null)}
+						onNavigate={() => {}}
 						emptyLabel={emptyLabel}
 						toolbar={
 							<>
@@ -448,7 +387,11 @@ export function AccountActivityPage({
 							const attribution = runAttributionSubtitle(item)
 							return {
 								id: item.id,
-								href: activityRoute.buildDetailHref(item.id, filterSearch),
+								href: activityRoute.buildDetailHref(
+									item.id,
+									filterSearch,
+									currentHref,
+								),
 								cells: {
 									name: (
 										<span

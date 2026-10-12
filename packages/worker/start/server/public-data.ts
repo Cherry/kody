@@ -47,7 +47,7 @@ export const loadProfile = createServerFn({ method: 'GET' })
 		const [
 			{ env },
 			{ getEnv },
-			{ getRequest },
+			{ getRequest, setResponseHeader },
 			{ setAuthSessionSecret },
 			{ loadProfileData },
 			{ loadDocumentHead },
@@ -70,9 +70,27 @@ export const loadProfile = createServerFn({ method: 'GET' })
 			{ headers: original.headers },
 		)
 		const profile = await loadProfileData(bindings, request, data.username)
-		if (!profile) throw notFound()
+		if (!profile) {
+			const { loadSessionInfo } = await import('../../src/app/session-info.ts')
+			const { session, setCookie } = await loadSessionInfo(request, bindings)
+			if (setCookie) setResponseHeader('Set-Cookie', setCookie)
+			const orgHome = session?.organizations.find(
+				(org) => org.slug === data.username && !org.personal,
+			)
+			if (!orgHome) throw notFound()
+			setResponseHeader('Cache-Control', 'no-store')
+			return {
+				data: null,
+				orgHome,
+				head: {
+					...loadDocumentHead(path),
+					title: orgHome.displayName || `@${orgHome.slug}`,
+				},
+			}
+		}
 		return {
 			data: profile,
+			orgHome: null,
 			head: loadDocumentHead(
 				path,
 				{
@@ -228,7 +246,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			throw new Error('Unable to load public package.')
 		if (
 			data.page === 'settings' &&
-			(!result.viewerIsOwner || !result.ownerPackage)
+			(!result.viewerCanManage || !result.ownerPackage)
 		)
 			throw notFound()
 		const { session, setCookie } = await loadSessionInfo(request, bindings)
@@ -245,11 +263,11 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			ownerProfilePublic: result.ownerProfilePublic,
 			loggedIn: result.loggedIn,
 			viewerIsOwner: result.viewerIsOwner,
+			viewerCanManage: result.viewerCanManage,
 			returnTo: path,
-			shareGrant: result.shareGrant ?? null,
 			hasApp: result.ownerPackage?.hasApp === true,
 			publishCompareHref:
-				result.viewerIsOwner && listing?.sourceAhead
+				result.viewerCanManage && listing?.sourceAhead
 					? listing.headCommit
 						? buildPackagePublishApprovalPath({
 								username: result.username,

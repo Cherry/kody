@@ -13,11 +13,12 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
-const billingPath = '/account/billing'
 const onboardingPath = '/onboarding'
 export function AccountBillingSuccessPage({
 	data,
+	billingPath,
 }: {
+	billingPath: string
 	data: AccountBillingSuccessLoaderData
 }) {
 	return (

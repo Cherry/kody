@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { SiteLink } from '../components/site-link.tsx'
-import { formatTimestamp } from '../components/local-timestamp.tsx'
+import { formatTimestamp } from '#client/format-timestamp.ts'
 import {
 	AccountManagementMessage,
 	IdValue,
@@ -10,17 +10,14 @@ import {
 import { recordBodyCss } from './record-table.tsx'
 import { renderHighlightedCode } from '../components/syntax-highlight.tsx'
 import { plainHighlightedCode } from '#universal/highlighted-code.ts'
-import {
-	type AccountJobDetail,
-	type AccountJobsLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountJobDetail } from '#universal/loader-data.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import {
 	cardTitleCss,
 	descriptionCss,
 	fieldCss,
 	fieldLabelCss,
-	getDangerPillCss,
 	getGhostButtonCss,
 	getPillButtonCss,
 	primaryLinkCss,
@@ -37,16 +34,12 @@ import {
 	statusColor,
 	statusLabel,
 } from './account-jobs-shared.ts'
-
 const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
-const dangerButtonCss = getDangerPillCss({ size: 'sm' })
-
 function packageValue(
 	username: string,
-	job: Pick<AccountJobDetail, 'ownership' | 'packageName' | 'packageKodyId'>,
+	job: Pick<AccountJobDetail, 'packageName' | 'packageKodyId'>,
 ) {
-	if (job.ownership !== 'package') return '—'
 	if (username && job.packageKodyId && job.packageName) {
 		return (
 			<SiteLink
@@ -62,7 +55,6 @@ function packageValue(
 	}
 	return job.packageName ?? 'Package'
 }
-
 export function renderJobDetailPlaceholder(title: string, body: string) {
 	return (
 		<div css={{ ...recordBodyCss, gap: spacing.sm }}>
@@ -80,39 +72,23 @@ export function renderJobDetailPlaceholder(title: string, body: string) {
 		</div>
 	)
 }
-
 export function renderAccountJobDetail(input: {
 	username: string
+	currentHref: string
 	detail: AccountJobDetail
 	isMutating: boolean
-	retention: AccountJobsLoaderData['retention']
-	deleteArmed: boolean
-	onDeleteArm: () => void
-	onDeleteReset: () => void
 	postAction: PostAccountJobsAction
 	navigateToList: () => void
 }) {
-	const {
-		username,
-		detail,
-		isMutating,
-		retention,
-		deleteArmed,
-		onDeleteArm,
-		onDeleteReset,
-		postAction,
-		navigateToList,
-	} = input
-	const isPackageOwned = detail.ownership === 'package'
-	const isNotPackageOwned = !isPackageOwned
+	const { username, detail, isMutating, postAction, navigateToList } = input
 	return (
 		<section css={recordBodyCss}>
 			<div css={{ display: 'grid', gap: spacing.xs }}>
 				<h2 css={cardTitleCss}>{detail.name}</h2>
 				<p css={descriptionCss}>
-					{isPackageOwned
-						? 'Package-owned job. Schedule and name are owned by package publish; kill switch and run-now are available here. Use the kill switch to stop it.'
-						: 'Scheduled job. You can enable or disable it, Preserve it from auto-cleanup, or delete it.'}
+					Package-owned job. Schedule and name are owned by package publish;
+					kill switch and run-now are available here. Use the kill switch to
+					stop it.
 				</p>
 			</div>
 
@@ -121,10 +97,6 @@ export function renderAccountJobDetail(input: {
 					{
 						label: 'Package',
 						value: packageValue(username, detail),
-					},
-					{
-						label: 'Preserve',
-						value: detail.preserved ? 'On (never auto-deleted)' : 'Off',
 					},
 					{
 						label: 'Expires',
@@ -201,12 +173,10 @@ export function renderAccountJobDetail(input: {
 				</AccountManagementMessage>
 			) : null}
 
-			{isPackageOwned ? (
-				<p css={descriptionCss}>
-					To change this job&apos;s schedule or name, update the package job
-					declaration and publish the package again.
-				</p>
-			) : null}
+			<p css={descriptionCss}>
+				To change this job&apos;s schedule or name, update the package job
+				declaration and publish the package again.
+			</p>
 
 			<div css={fieldCss}>
 				<span css={fieldLabelCss}>Recent runs</span>
@@ -313,9 +283,10 @@ export function renderAccountJobDetail(input: {
 											}}
 										>
 											<SiteLink
-												href={routes.accountActivityDetail.href({
-													runId: run.id,
-												})}
+												href={relocateAccountHref(
+													`/account/activity/${encodeURIComponent(run.id)}`,
+													input.currentHref,
+												)}
 												css={primaryLinkCss}
 											>
 												Logs
@@ -379,14 +350,7 @@ export function renderAccountJobDetail(input: {
 											}`
 								}
 								if (payload.runNow && !payload.runNow.ok) {
-									return `Run finished with an error${
-										payload.runNow.error ? `: ${payload.runNow.error}` : '.'
-									}`
-								}
-								if (detail.schedule.type === 'once' && payload.runNow?.ok) {
-									return detail.preserved
-										? 'Job run finished. Preserved — will not be auto-deleted.'
-										: `Job run finished. Kept for ${retention.successOnceDays} days · Preserve to keep forever.`
+									return `Run finished with an error${payload.runNow.error ? `: ${payload.runNow.error}` : '.'}`
 								}
 								return 'Job run requested.'
 							},
@@ -425,72 +389,6 @@ export function renderAccountJobDetail(input: {
 						? 'Clear kill switch'
 						: 'Enable kill switch'}
 				</button>
-				{isNotPackageOwned ? (
-					<button
-						type="button"
-						disabled={isMutating}
-						onClick={() =>
-							postAction({
-								body: {
-									action: 'set_preserved',
-									id: detail.id,
-									preserved: !detail.preserved,
-								},
-								successMessage: () =>
-									detail.preserved
-										? 'Cleared Preserve. This job can age out under retention.'
-										: 'Preserved. This job will not be auto-deleted.',
-								failureMessage: 'Unable to update Preserve.',
-							})
-						}
-						css={secondaryButtonCss}
-					>
-						{detail.preserved ? 'Clear Preserve' : 'Preserve'}
-					</button>
-				) : null}
-				{isNotPackageOwned ? (
-					<button
-						type="button"
-						disabled={isMutating}
-						onClick={() =>
-							postAction({
-								body: {
-									action: 'set_enabled',
-									id: detail.id,
-									enabled: !detail.enabled,
-								},
-								successMessage: () =>
-									detail.enabled ? 'Disabled job.' : 'Enabled job.',
-								failureMessage: 'Unable to update job.',
-							})
-						}
-						css={secondaryButtonCss}
-					>
-						{detail.enabled ? 'Disable' : 'Enable'}
-					</button>
-				) : null}
-				{isNotPackageOwned ? (
-					<button
-						type="button"
-						disabled={isMutating}
-						css={dangerButtonCss}
-						onBlur={onDeleteReset}
-						onClick={() => {
-							if (!deleteArmed) {
-								onDeleteArm()
-								return
-							}
-							void postAction({
-								body: { action: 'delete', id: detail.id },
-								successMessage: () => 'Deleted job.',
-								failureMessage: 'Unable to delete job.',
-								afterSuccess: navigateToList,
-							})
-						}}
-					>
-						{deleteArmed ? 'Confirm delete' : 'Delete'}
-					</button>
-				) : null}
 			</div>
 		</section>
 	)

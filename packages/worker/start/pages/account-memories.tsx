@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { useMutation } from '@tanstack/react-query'
+import { toast } from '#client/toast.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
@@ -6,7 +10,6 @@ import { SiteLink } from '../components/site-link.tsx'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
-	type AccountMemoryDetail,
 	type AccountMemoryListItem,
 	type AccountMemoriesLoaderData,
 } from '#universal/loader-data.ts'
@@ -46,15 +49,11 @@ const clampedCellCss = recordCellClamp(30)
 
 const accountMemoriesApiPath = routes.accountMemoriesApi.href()
 const accountMemoriesExportPath = routes.accountMemoriesExport.href()
-const memoriesRoute = createListDetailRoute(routes.accountMemories.href())
+const memoriesRoute = createListDetailRoute('/account/memories')
 
 type MessageTone = 'info' | 'error'
 type DeleteMode = 'soft' | 'hard' | null
 
-/**
- * Latch key for the GET payload. Selection, `includeDeleted`, and `q` all
- * affect which memories are returned or which detail is hydrated.
- */
 function readSearchFilter(href: string) {
 	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
 }
@@ -129,20 +128,57 @@ export function AccountMemoriesPage({
 	currentHref: string
 }) {
 	const [actionState, setActionState] = useState<'idle' | 'busy'>('idle')
-	const [memories, setMemories] = useState<Array<AccountMemoryListItem>>(
-		payload.memories,
-	)
-	const [selectedMemory, setSelectedMemory] =
-		useState<AccountMemoryDetail | null>(payload.selectedMemory)
+	const memories = payload.memories
+	const selectedMemory = payload.selectedMemory
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<MessageTone>('info')
 	const [deleteMode, setDeleteMode] = useState<DeleteMode>(null)
 	const invalidatePages = usePageInvalidation(mutationResources)
+	const deleteMutation = useMutation({
+		mutationKey: ['memories', currentHref],
+		mutationFn: async (input: { memoryId: string; force: boolean }) => {
+			const response = await fetch(accountMemoriesApiPath, {
+				method: 'POST',
+				referrer: orgAccountApiReferrer(currentHref),
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify({
+					action: 'delete',
+					memoryId: input.memoryId,
+					force: input.force,
+				}),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const payload = await readJson<
+				AccountMemoriesLoaderData & { error?: string; ok?: boolean }
+			>(response)
+			if (!response.ok || !payload?.ok) {
+				throw new Error(payload?.error || 'Unable to delete memory.')
+			}
+
+			return payload
+		},
+		onSuccess: () => invalidatePages(),
+		onError: (error) => toast.error(error.message),
+	})
 	const router = useRouter()
 	const navigate = (href: string) =>
-		void router.navigate({ to: href, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			resetScroll: false,
+		})
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		void router.navigate({
+			to: relocateAccountHref(href, currentHref),
+			replace: true,
+			resetScroll: false,
+		})
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
@@ -175,9 +211,7 @@ export function AccountMemoriesPage({
 		setMessageTone(tone)
 	}
 
-	function applyPayload(payload: AccountMemoriesLoaderData) {
-		setMemories(payload.memories)
-		setSelectedMemory(payload.selectedMemory)
+	function clearDeleteMode() {
 		setDeleteMode(null)
 	}
 
@@ -186,35 +220,13 @@ export function AccountMemoriesPage({
 		setActionState('busy')
 		showMessage(null)
 		try {
-			const response = await fetch(accountMemoriesApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'delete',
-					memoryId: input.memoryId,
-					force: input.force,
-				}),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountMemoriesLoaderData & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to delete memory.')
-			}
-			applyPayload(payload)
+			await deleteMutation.mutateAsync(input)
+			if (router.state.location.href !== currentHref) return
+			clearDeleteMode()
 			setActionState('idle')
 			showMessage(
 				input.force ? 'Permanently deleted memory.' : 'Soft-deleted memory.',
 			)
-			void invalidatePages()
 			navigate(memoriesRoute.buildListHref(getCurrentSearch()))
 		} catch (error) {
 			setActionState('idle')
@@ -231,7 +243,7 @@ export function AccountMemoriesPage({
 	const [lastPayload, setLastPayload] = useState(payload)
 	if (lastPayload !== payload) {
 		setLastPayload(payload)
-		applyPayload(payload)
+		clearDeleteMode()
 	}
 
 	const isMutating = actionState !== 'idle'
@@ -349,7 +361,11 @@ export function AccountMemoriesPage({
 							// the row being mutated would strand the confirmation.
 							href: isMutating
 								? undefined
-								: memoriesRoute.buildDetailHref(item.id, getCurrentSearch()),
+								: memoriesRoute.buildDetailHref(
+										item.id,
+										getCurrentSearch(),
+										currentHref,
+									),
 							cells: {
 								subject: <span css={clampedCellCss}>{item.subject}</span>,
 								status: (

@@ -9,11 +9,6 @@ import { routes } from '#universal/routes.ts'
 import { findDocsNavSection } from '#universal/docs-nav.ts'
 import { extractDocWatchMarkdown } from '#universal/doc-youtube.ts'
 import { userHasRole } from '#universal/permissions.ts'
-import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
-import {
-	packageShareGrantsFlagKey,
-	secretProvidersFlagKey,
-} from '#universal/feature-flags/registry.ts'
 import { colors, radius } from '#universal/styles/tokens.ts'
 import {
 	articleMeasure,
@@ -29,8 +24,6 @@ import {
 } from './docs-shell.tsx'
 import { HowKodyWorksWalkthrough } from './how-kody-works-walkthrough.tsx'
 import { renderGoogleOauthWalkthrough } from './google-oauth-walkthrough.tsx'
-import { renderPackageSharingFlagCallout } from './package-sharing-flag-callout.tsx'
-import { renderSecretProvidersFlagCallout } from './secret-providers-flag-callout.tsx'
 const interactiveDocRenderers: Readonly<
 	Record<
 		string,
@@ -131,20 +124,6 @@ export function DocDetailRoute({
 						{describeDoc(doc)}
 					</p>
 				</header>
-
-				{doc.slug === 'package-sharing'
-					? renderPackageSharingFlagCallout({
-							loggedIn: Boolean(session),
-							enabled: isFeatureFlagEnabled(session, packageShareGrantsFlagKey),
-						})
-					: null}
-
-				{doc.slug === 'secret-providers'
-					? renderSecretProvidersFlagCallout({
-							loggedIn: Boolean(session),
-							enabled: isFeatureFlagEnabled(session, secretProvidersFlagKey),
-						})
-					: null}
 
 				{doc.image && doc.imageAlt ? (
 					<img

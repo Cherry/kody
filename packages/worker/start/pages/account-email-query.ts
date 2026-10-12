@@ -1,11 +1,8 @@
+import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
 import { type QueryClient } from '@tanstack/react-query'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { type AccountEmailLoaderData } from '#universal/loader-data.ts'
-import {
-	pageResourceKey,
-	restorePageResource,
-	snapshotPageResource,
-} from '../page-mutation-cache.ts'
+import { restorePageResource } from '../page-mutation-cache.ts'
 
 export type EmailAction = {
 	href: string
@@ -71,13 +68,14 @@ export async function publishEmailResponse(
 	accepted: AccountEmailLoaderData,
 	action: EmailAction,
 ) {
-	const queryKey = pageResourceKey(actorKey, 'loadEmailPage')
+	const filters = scopedPageResource(actorKey, 'loadEmailPage', action.href)
 	await client.cancelQueries({
-		queryKey,
-		predicate: (query) => query.state.data !== undefined,
+		...filters,
+		predicate: (query) =>
+			filters.predicate(query) && query.state.data !== undefined,
 	})
 	const incomplete = new Set<string>()
-	for (const query of client.getQueryCache().findAll({ queryKey })) {
+	for (const query of client.getQueryCache().findAll(filters)) {
 		const data = query.state.data as EmailQueryData | undefined
 		if (!data) continue
 		const href = query.queryKey[3]
@@ -135,7 +133,7 @@ export async function publishEmailResponse(
 	// Do not await a confirming read inside the mutation lifecycle. Email reads
 	// wait for this mutation to settle before fetching authoritative data.
 	void client.invalidateQueries({
-		queryKey,
+		...filters,
 		predicate: (query) => incomplete.has(query.queryHash),
 	})
 }
@@ -145,23 +143,27 @@ export function emailMutationOptions(
 	actorKey: string | null,
 	send: (action: EmailAction) => Promise<AccountEmailLoaderData>,
 	onFailure: (error: Error) => void,
+	href = '/account/email',
 ) {
 	return {
-		mutationKey: ['email', actorKey] as const,
+		mutationKey: ['email', actorKey, pageQueryOrg(href)] as const,
 		mutationFn: send,
-		onMutate: async (action: EmailAction) => ({
-			snapshot: await snapshotPageResource<EmailQueryData>(
-				client,
-				actorKey,
-				'loadEmailPage',
-				(data) => ({ ...data, payload: optimisticEmail(data.payload, action) }),
-			),
-		}),
+		onMutate: async (action: EmailAction) => {
+			const filters = scopedPageResource(actorKey, 'loadEmailPage', action.href)
+			await client.cancelQueries(filters)
+			const snapshot = client.getQueriesData<EmailQueryData>(filters)
+			client.setQueriesData<EmailQueryData>(
+				filters,
+				(data) =>
+					data && { ...data, payload: optimisticEmail(data.payload, action) },
+			)
+			return { snapshot }
+		},
 		onSuccess: (accepted: AccountEmailLoaderData, action: EmailAction) =>
 			publishEmailResponse(client, actorKey, accepted, action),
 		onError: (
 			error: Error,
-			_action: EmailAction,
+			action: EmailAction,
 			context:
 				| {
 						snapshot: Array<
@@ -172,7 +174,7 @@ export function emailMutationOptions(
 		) => {
 			restorePageResource(client, context?.snapshot)
 			void client.invalidateQueries({
-				queryKey: pageResourceKey(actorKey, 'loadEmailPage'),
+				...scopedPageResource(actorKey, 'loadEmailPage', action.href),
 			})
 			onFailure(error)
 		},

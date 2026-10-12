@@ -25,9 +25,7 @@ import {
 	getPackageTreeHref,
 } from '#universal/package-files.ts'
 import { renderPackageRepoChrome } from './package-repo-nav.tsx'
-import { type PackageShareGrantLoaderView } from '#universal/package-share.ts'
 
-import { getAccentCalloutCss } from '#universal/styles/style-primitives.ts'
 import { colors } from '#universal/styles/tokens.ts'
 
 /**
@@ -45,10 +43,10 @@ export type CommunityDetailContentProps = {
 	ownerProfilePublic: boolean
 	loggedIn: boolean
 	viewerIsOwner: boolean
+	viewerCanManage: boolean
 	returnTo: string
 	treeRef?: string
 	publishCompareHref?: string | null
-	shareGrant?: PackageShareGrantLoaderView | null
 	hasApp?: boolean
 	iconUrl?: string | null
 }
@@ -63,10 +61,10 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		ownerProfilePublic,
 		loggedIn,
 		viewerIsOwner,
+		viewerCanManage,
 		returnTo,
 		treeRef,
 		publishCompareHref,
-		shareGrant,
 		hasApp,
 		iconUrl,
 	} = props
@@ -75,7 +73,6 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		username,
 		kodyId,
 		viewerIsOwner,
-		shareGrant,
 	})
 	const markUrl = listing?.iconUrl ?? iconUrl ?? null
 
@@ -94,6 +91,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 				isPrivate,
 				isListed: listing != null,
 				viewerIsOwner,
+				viewerCanManage,
 				active: 'repo',
 				filesHref,
 				description,
@@ -114,35 +112,6 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 						})
 					: null,
 			})}
-
-			{shareGrant?.status === 'pending' ? (
-				<section
-					data-testid="package-share-accept-frame-banner"
-					css={shareBannerCss}
-				>
-					<strong>You have been invited to use this package</strong>
-					<p>
-						Accept on this page after it loads. Default trust is pin: later
-						publishes stay blocked until you approve them.
-					</p>
-				</section>
-			) : null}
-			{shareGrant?.status === 'accepted' &&
-			shareGrant.pinAhead &&
-			shareGrant.approveChangesPath ? (
-				<section
-					data-testid="package-share-pin-ahead-frame-banner"
-					css={shareBannerCss}
-				>
-					<strong>This shared package published ahead of your pin</strong>
-					<p>
-						<SiteLink href={shareGrant.approveChangesPath}>
-							Approve changes
-						</SiteLink>{' '}
-						to review the published diff.
-					</p>
-				</section>
-			) : null}
 
 			{listing
 				? renderListingHead({
@@ -310,19 +279,6 @@ function renderListingHead(input: {
 	)
 }
 
-const shareBannerCss = {
-	...getAccentCalloutCss({ accentColor: colors.primary }),
-	marginTop: '1rem',
-	'& p': {
-		margin: '0.35rem 0 0',
-		color: colors.textMuted,
-	},
-	'& a': {
-		color: colors.primaryText,
-		fontWeight: 550,
-	},
-} satisfies CSSObject
-
 const listingHeadCss = {
 	marginTop: '1.4rem',
 	display: 'flex',
@@ -363,10 +319,8 @@ function resolvePackageAppHref(input: {
 	username: string
 	kodyId: string
 	viewerIsOwner: boolean
-	shareGrant?: PackageShareGrantLoaderView | null
 }) {
-	const canOpen = input.viewerIsOwner || input.shareGrant?.status === 'accepted'
-	if (!input.hasApp || !canOpen) return null
+	if (!input.hasApp || !input.viewerIsOwner) return null
 	return buildPackageAppPath({
 		username: input.username,
 		kodyId: input.kodyId,

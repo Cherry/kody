@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { chromium } from '@playwright/test'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'

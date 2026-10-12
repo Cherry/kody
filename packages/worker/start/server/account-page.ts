@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { redirect } from '@tanstack/react-router'
 
@@ -37,6 +38,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 		const appEnv = getEnv(env)
 		setAuthSessionSecret(appEnv.COOKIE_SECRET)
 		const request = getRequest()
+		setResponseHeader('Cache-Control', 'private, no-store')
 		const pageUrl = new URL(request.url)
 		pageUrl.pathname = '/account'
 		pageUrl.search = search
@@ -57,7 +59,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			loadOnboardingData({
 				env: appEnv,
 				requestUrl: pageUrl.href,
-				stableUserId: user.mcpUser.userId,
+				stableUserId: personalOrgId(user.mcpUser.userId),
 				username: user.username,
 				emailVerified: user.emailVerified,
 			}),
@@ -65,7 +67,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 		if (user.emailVerified)
 			onboarding.checklist = await loadChecklist(
 				appEnv,
-				user.mcpUser.userId,
+				personalOrgId(user.mcpUser.userId),
 				user.username,
 				onboarding.hasMcpClient,
 				{ hasSecondMcpClient: onboarding.hasSecondMcpClient },

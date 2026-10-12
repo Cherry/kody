@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, readFileSync, mkdtempSync } from 'node:fs'

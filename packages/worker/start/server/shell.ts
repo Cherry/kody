@@ -51,7 +51,6 @@ export const loadShell = createServerFn({ method: 'GET' })
 			{ setAuthSessionSecret },
 			{ getEnv },
 			{ getCanonicalAppBaseUrl },
-			{ loadEnabledSiteBannersForSsr, loadSiteBannerLoaderData },
 			{ loadYoutubeWatchLoaderData },
 			{ parseYoutubeWatchSearch },
 		] = await Promise.all([
@@ -62,38 +61,21 @@ export const loadShell = createServerFn({ method: 'GET' })
 			import('../../src/app/auth-session.ts'),
 			import('../../src/app/env.ts'),
 			import('../../src/app-base-url.ts'),
-			import('../../src/app/site-banner-ssr.ts'),
 			import('../../src/app/youtube-watch-ssr.ts'),
 			import('../../universal/youtube-watch.ts'),
 		])
 		const appEnv = getEnv(env)
 		setAuthSessionSecret(appEnv.COOKIE_SECRET)
 		const request = getRequest()
-		const pageUrl = new URL(request.url)
-		pageUrl.pathname = data.pathname
-		pageUrl.search = data.search
-		const pageRequest = new Request(pageUrl, { headers: request.headers })
-		// Banner lookup is independent of the session, so let both reads overlap.
-		const listedBanners = loadEnabledSiteBannersForSsr(env)
 		const [{ session, setCookie }, resolvedAuth] = await Promise.all([
 			loadSessionInfo(request, env),
 			loadResolvedRequestAuth(request, env),
 		])
 		if (setCookie) setResponseHeader('Set-Cookie', setCookie)
-		const [siteBanner, youtubeWatch] = await Promise.all([
-			loadSiteBannerLoaderData({
-				request: pageRequest,
-				env,
-				session,
-				pathname: data.pathname,
-				listedBanners,
-			}),
-			loadYoutubeWatchLoaderData({
-				env,
-				listedBanners,
-				loadPlaylists: parseYoutubeWatchSearch(data.search) !== null,
-			}),
-		])
+		const youtubeWatch = await loadYoutubeWatchLoaderData({
+			env,
+			loadPlaylists: parseYoutubeWatchSearch(data.search) !== null,
+		})
 		return {
 			actorKey:
 				session && resolvedAuth.user ? resolvedAuth.user.mcpUser.userId : null,
@@ -105,7 +87,6 @@ export const loadShell = createServerFn({ method: 'GET' })
 				localDev: appEnv.WRANGLER_IS_LOCAL_DEV === 'true',
 			}),
 			fathomSiteId: appEnv.FATHOM_SITE_ID?.trim() || null,
-			siteBanner,
 			youtubeWatch,
 			canonicalOrigin: getCanonicalAppBaseUrl({
 				env: appEnv,

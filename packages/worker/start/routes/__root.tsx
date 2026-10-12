@@ -23,7 +23,6 @@ import { SENTRY_CONFIG_META_NAME } from '#universal/sentry-config.ts'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 import { InternalErrorPage } from '../components/internal-error-page.tsx'
 import { Toaster } from '../components/toaster.tsx'
-import { SiteBanner } from '../components/site-banner.tsx'
 import { YouTubeWatchOverlay } from '../components/youtube-watch-overlay.tsx'
 
 import { verifySession } from '#start/server/shell'
@@ -58,8 +57,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 		loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 			youtubeId: search.youtubeId,
 			og: search.og,
-			siteBannerLook: search.siteBannerLook,
-			siteBannerPreview: search.siteBannerPreview,
 		}),
 		beforeLoad: async ({ location, abortController, preload }) => {
 			if (typeof document === 'undefined') {
@@ -145,7 +142,7 @@ export function useShellData() {
 
 function Root() {
 	const { shellLocation } = Route.useLoaderData()
-	const { session, siteBanner, youtubeWatch, fathomSiteId, canonicalOrigin } =
+	const { session, youtubeWatch, fathomSiteId, canonicalOrigin } =
 		useShellData()
 	const router = useRouter()
 	const { queryClient, actorKey } = Route.useRouteContext()
@@ -269,10 +266,10 @@ function Root() {
 					<a href="#main" css={visuallyHiddenUntilFocusedCss}>
 						Skip to content
 					</a>
-					<SiteBanner snapshot={siteBanner} location={shellLocation} />
 					{authShell ? null : (
 						<SiteHeader
 							loggedIn={session !== null}
+							organizationSession={session}
 							displayName={session?.username || session?.email || ''}
 							username={session?.username ?? ''}
 							avatarUrl={session?.avatarUrl ?? null}

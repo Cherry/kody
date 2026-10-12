@@ -1,4 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
+import { useLocation } from '@tanstack/react-router'
+import {
+	accountDeletedConfirmationMessage,
+	isAccountDeletedHome,
+} from '#universal/account-deletion-confirmation.ts'
 import { useState, type CSSProperties } from 'react'
 import { revealRef } from '../components/reveal.ts'
 import { SiteLink } from '../components/site-link.tsx'
@@ -109,12 +115,22 @@ export function HomeRoute({
 	initialHosts: WalkthroughHostPick
 	landingHeroVideos: Array<LandingHeroVideoItem>
 }) {
+	const location = useLocation()
 	const [walkthroughHosts, setWalkthroughHosts] = useState(initialHosts)
 	const isSignedIn = loggedIn
 	const connectHref = isSignedIn ? onboardingPath : homepageSignupPath
 
 	return (
 		<div>
+			{isAccountDeletedHome(location.searchStr) ? (
+				<p
+					role="status"
+					data-testid="account-deleted-notice"
+					className="landing-account-deleted"
+				>
+					{accountDeletedConfirmationMessage}
+				</p>
+			) : null}
 			<section className="landing-hero">
 				<div className="landing-hero-intro">
 					<h1
@@ -152,6 +168,7 @@ export function HomeRoute({
 						>
 							{landingHeroPrimaryCta}
 						</SiteLink>
+						<BuildWithAgentButton />
 						<SiteLink href={howItWorksHref} className="landing-hero-secondary">
 							{landingHeroSecondaryCta}
 						</SiteLink>

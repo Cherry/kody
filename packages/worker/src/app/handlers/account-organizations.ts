@@ -113,7 +113,7 @@ function redirectWithError(
 	return Response.redirect(destination.toString(), 302)
 }
 
-async function loadAccountOrganizationsData(
+export async function loadAccountOrganizationsData(
 	env: Env,
 	user: AuthenticatedAppUser,
 	request: Request,

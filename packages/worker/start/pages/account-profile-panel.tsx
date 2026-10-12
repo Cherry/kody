@@ -1,13 +1,22 @@
 /** @jsxImportSource @emotion/react */
-import { type CSSObject } from '@emotion/react'
 import { type FormEvent } from 'react'
-import { SiteLink } from '../components/site-link.tsx'
+import {
+	handlePermanentNote,
+	handleUrlPreview,
+} from '@kody-internal/shared/handle-permanence.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
+import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import { type ProfileVisibility } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
 import { UserAvatar } from '../components/user-avatar.tsx'
 import { renderIcon } from '../components/icon.tsx'
-import { colors, radius, shadows, spacing } from '#universal/styles/tokens.ts'
+import {
+	colors,
+	radius,
+	shadows,
+	spacing,
+	typography,
+} from '#universal/styles/tokens.ts'
 import {
 	getGhostButtonCss,
 	getPillButtonCss,
@@ -25,12 +34,10 @@ import {
 	accountTextareaCss,
 	verifiedPillCss,
 } from './account-management-components.tsx'
-
 export type AccountProfilePanelProps = {
 	email: string
 	emailVerified: boolean
 	username: string
-	draftUsername: string
 	draftDisplayName: string
 	draftBio: string
 	draftProfileVisibility: ProfileVisibility
@@ -41,17 +48,14 @@ export type AccountProfilePanelProps = {
 	isSaving: boolean
 	isSendingEmailChange: boolean
 	profileUnchanged: boolean
-	normalizedDraftUsername: string
 	normalizedDraftEmail: string
 	emailChangeMessage: string | null
 	emailChangeTone: 'error' | 'info'
 	emailChangeOpen: boolean
-	usernameFieldError: string | null
 	onProfileSubmit: (event: FormEvent<HTMLFormElement>) => void
 	onEmailChangeSubmit: (event: FormEvent<HTMLFormElement>) => void
 	onAvatarSelected: (event: FormEvent<HTMLElement>) => void
 	onRemoveAvatar: () => void
-	onDraftUsernameInput: (event: FormEvent<HTMLInputElement>) => void
 	onDraftDisplayNameChange: (value: string) => void
 	onDraftBioChange: (value: string) => void
 	onDraftProfileVisibilityChange: (value: ProfileVisibility) => void
@@ -59,13 +63,11 @@ export type AccountProfilePanelProps = {
 	onEmailChangeToggle: (event: FormEvent<HTMLDetailsElement>) => void
 	onEmailChangePasswordInput: (event: FormEvent<HTMLInputElement>) => void
 }
-
 export function AccountProfilePanel(props: AccountProfilePanelProps) {
 	const {
 		email,
 		emailVerified,
 		username,
-		draftUsername,
 		draftDisplayName,
 		draftBio,
 		draftProfileVisibility,
@@ -76,17 +78,14 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 		isSaving,
 		isSendingEmailChange,
 		profileUnchanged,
-		normalizedDraftUsername,
 		normalizedDraftEmail,
 		emailChangeMessage,
 		emailChangeTone,
 		emailChangeOpen,
-		usernameFieldError,
 		onProfileSubmit,
 		onEmailChangeSubmit,
 		onAvatarSelected,
 		onRemoveAvatar,
-		onDraftUsernameInput,
 		onDraftDisplayNameChange,
 		onDraftBioChange,
 		onDraftProfileVisibilityChange,
@@ -96,11 +95,10 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 	} = props
 	return (
 		<AccountManagementPanel
-			title="Profile"
-			description="Your username is unique. Display name, bio, avatar, and visibility control your public community profile."
+			title="Profile details"
+			description="Your username is permanent. Display name, bio, avatar, and visibility control your public community profile."
 		>
 			<form
-				method="post"
 				css={{ display: 'grid', gap: spacing.md, maxWidth: '34rem' }}
 				onSubmit={onProfileSubmit}
 			>
@@ -148,36 +146,21 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 						</button>
 					) : null}
 				</div>
-				<label css={accountFieldCss}>
+				<div css={accountFieldCss}>
 					<span css={accountFieldLabelCss}>Username</span>
-					<input
-						type="text"
-						name="username"
+					<p
 						id="account-username"
-						data-field-ring
-						required
-						autoComplete="username"
-						pattern={'[A-Za-z0-9][A-Za-z0-9\\-]{1,30}[A-Za-z0-9]'}
-						title="Use 3 to 32 letters, numbers, and hyphens. Start and end with a letter or number."
-						value={draftUsername}
-						aria-invalid={usernameFieldError ? 'true' : undefined}
-						aria-describedby={
-							usernameFieldError ? 'account-username-error' : undefined
-						}
-						css={accountInputCss}
-						onInput={onDraftUsernameInput}
-					/>
-					{usernameFieldError ? (
-						<p
-							id="account-username-error"
-							role="alert"
-							data-testid="account-username-error"
-							css={{ color: colors.error, margin: 0 }}
-						>
-							{usernameFieldError}
-						</p>
-					) : null}
-				</label>
+						data-testid="account-username"
+						aria-describedby="account-username-note"
+						css={usernameValueCss}
+					>
+						{handleUrlPreview(username)}
+					</p>
+					<p id="account-username-note" css={accountFieldNoteCss}>
+						{handlePermanentNote} Change your display name below to change how
+						you appear.
+					</p>
+				</div>
 				<label css={accountFieldCss}>
 					<span css={accountFieldLabelCss}>Display name</span>
 					<input
@@ -265,20 +248,10 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 					)}
 				</p>
 				<p css={{ margin: 0 }}>
-					<SiteLink href={routes.profile.href({ username })} css={mutedLinkCss}>
+					<a href={routes.profile.href({ username })} css={mutedLinkCss}>
 						View public profile
-					</SiteLink>
+					</a>
 				</p>
-				{normalizedDraftUsername !== username ? (
-					<p css={{ color: colors.textMuted, margin: 0 }}>
-						Changing your username updates every saved package to the new{' '}
-						<code>@{normalizedDraftUsername}</code> scope with an automatic
-						commit. That can affect third-party integrations and dynamic
-						invocations that still reference <code>@{username}</code>. Community
-						listings already pinned to the latest package commit are republished
-						automatically.
-					</p>
-				) : null}
 				<div>
 					<button
 						type="submit"
@@ -305,7 +278,6 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 				>
 					<summary>Change email</summary>
 					<form
-						method="post"
 						{...passwordManagerIgnoreProps}
 						css={{
 							display: 'grid',
@@ -338,10 +310,15 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 								onInput={onDraftEmailInput}
 							/>
 						</label>
-						<label css={accountFieldCss}>
-							<span css={accountFieldLabelCss}>Current password</span>
-							<input
-								type="password"
+						<div css={accountFieldCss}>
+							<label
+								htmlFor="account-email-change-password"
+								css={accountFieldLabelCss}
+							>
+								Current password
+							</label>
+							<PasswordRevealInput
+								id="account-email-change-password"
 								name="password"
 								data-field-ring
 								required
@@ -350,7 +327,7 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 								css={accountInputCss}
 								onInput={onEmailChangePasswordInput}
 							/>
-						</label>
+						</div>
 						<div>
 							<button
 								type="submit"
@@ -385,22 +362,17 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 		</AccountManagementPanel>
 	)
 }
-
 /* `.account-form .button` / `.account-actions .button` — the prototype's
  * compact pill sizing for in-section actions. */
 const compactPillButtonCss = getPillButtonCss({ size: 'sm' })
-
 const compactGhostButtonCss = getGhostButtonCss({ size: 'sm' })
-
 const accountAvatarSize = 128
-
-const avatarSectionCss: CSSObject = {
+const avatarSectionCss = {
 	display: 'grid',
 	gap: spacing.sm,
 	justifyItems: 'start' as const,
 }
-
-const avatarEditCss: CSSObject = {
+const avatarEditCss = {
 	position: 'relative' as const,
 	display: 'inline-block',
 	width: `${accountAvatarSize}px`,
@@ -416,8 +388,7 @@ const avatarEditCss: CSSObject = {
 			},
 	},
 }
-
-const avatarEditAffordanceCss: CSSObject = {
+const avatarEditAffordanceCss = {
 	position: 'absolute' as const,
 	right: '0.15rem',
 	bottom: '0.15rem',
@@ -434,7 +405,11 @@ const avatarEditAffordanceCss: CSSObject = {
 	opacity: 1,
 	pointerEvents: 'none' as const,
 }
-
 function avatarEditIcon() {
 	return renderIcon('edit', { size: '16' })
+}
+const usernameValueCss = {
+	margin: 0,
+	fontFamily: typography.fontFamilyMono,
+	color: colors.text,
 }

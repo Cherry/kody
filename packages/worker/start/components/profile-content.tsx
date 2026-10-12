@@ -51,7 +51,7 @@ import {
 export type ProfileContentProps = {
 	profile: PublicCommunityProfile
 	packages: Array<PublicProfilePackageItem>
-	activity: Array<PublicCommunityActivityItem>
+	activity: Array<PublicCommunityActivityItem> | null
 	query: string | null
 	visibility?: ProfilePackageVisibilityFilter
 	listing?: ProfilePackageListingFilter
@@ -468,53 +468,55 @@ export function ProfileContent(props: ProfileContentProps) {
 				)}
 			</section>
 
-			<section css={activitySectionCss} data-testid="profile-activity">
-				<h2 css={sectionTitleCss}>Recent activity</h2>
-				<p css={mutedCss} data-testid="profile-activity-hint">
-					Community publishes and forks. Editing a repository without
-					republishing it does not appear here.
-				</p>
-				{activity.length === 0 ? (
-					<p css={descriptionCss}>No public activity yet.</p>
-				) : (
-					<ul css={activityListCss}>
-						{activity.map((item) => (
-							<li
-								key={`${item.type}:${item.listingId}:${item.createdAt}`}
-								css={activityItemCss}
-							>
-								<span css={activityActorCss}>
-									<UserAvatar
-										displayName={item.actorDisplayName}
-										avatarUrl={item.actorAvatarUrl}
-										size={32}
-									/>
-									<span>
-										{communityActivityVerb(item.type)}{' '}
-										<SiteLink
-											href={getCommunityListingHref({
-												listingId: item.listingId,
-												listingName: item.listingName,
-												kodyId: item.listingKodyId,
-											})}
-											css={mutedLinkCss}
-										>
-											{item.listingName}
-										</SiteLink>
-									</span>
-								</span>
-								<time
-									dateTime={item.createdAt}
-									css={mutedCss}
-									title={item.createdAt}
+			{activity !== null ? (
+				<section css={activitySectionCss} data-testid="profile-activity">
+					<h2 css={sectionTitleCss}>Recent activity</h2>
+					<p css={mutedCss} data-testid="profile-activity-hint">
+						Community publishes and forks. Editing a repository without
+						republishing it does not appear here.
+					</p>
+					{activity.length === 0 ? (
+						<p css={descriptionCss}>No public activity yet.</p>
+					) : (
+						<ul css={activityListCss}>
+							{activity.map((item) => (
+								<li
+									key={`${item.type}:${item.listingId}:${item.createdAt}`}
+									css={activityItemCss}
 								>
-									{formatCommunityActivityDate(item.createdAt)}
-								</time>
-							</li>
-						))}
-					</ul>
-				)}
-			</section>
+									<span css={activityActorCss}>
+										<UserAvatar
+											displayName={item.actorDisplayName}
+											avatarUrl={item.actorAvatarUrl}
+											size={32}
+										/>
+										<span>
+											{communityActivityVerb(item.type)}{' '}
+											<SiteLink
+												href={getCommunityListingHref({
+													listingId: item.listingId,
+													listingName: item.listingName,
+													kodyId: item.listingKodyId,
+												})}
+												css={mutedLinkCss}
+											>
+												{item.listingName}
+											</SiteLink>
+										</span>
+									</span>
+									<time
+										dateTime={item.createdAt}
+										css={mutedCss}
+										title={item.createdAt}
+									>
+										{formatCommunityActivityDate(item.createdAt)}
+									</time>
+								</li>
+							))}
+						</ul>
+					)}
+				</section>
+			) : null}
 		</div>
 	)
 }

@@ -21,6 +21,7 @@ import { buildAuthLink } from '#client/auth-links.ts'
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
 import { type SessionInfo } from '#client/session.ts'
+import { handleUrlPreview } from '@kody-internal/shared/handle-permanence.ts'
 import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
 import {
 	clearStoredFirstTouchAttribution,
@@ -63,6 +64,10 @@ export function LoginPage({
 	const hydrated = useHydrated()
 	const [status, setStatus] = useState<AuthStatus>('idle')
 	const [message, setMessage] = useState<string | null>(null)
+	const [signupUsername, setSignupUsername] = useState('')
+	const [confirmedUsername, setConfirmedUsername] = useState<string | null>(
+		null,
+	)
 	const handleId = useId()
 	const lifecycle = useRef<AbortController | null>(null)
 	const signupStartedTracked = useRef(false)
@@ -127,6 +132,16 @@ export function LoginPage({
 		}
 		if (mode === 'signup' && !username) {
 			setState('error', 'Username is required.')
+			return
+		}
+
+		if (mode === 'signup' && confirmedUsername !== username.toLowerCase()) {
+			setConfirmedUsername(username.toLowerCase())
+			setSignupUsername(username)
+			setState(
+				'idle',
+				`Your profile URL will be ${handleUrlPreview(username.toLowerCase())}. This can't be changed. Submit again to create your account.`,
+			)
 			return
 		}
 
@@ -322,7 +337,11 @@ export function LoginPage({
 	const description = isSignup
 		? 'Create an account and start building automations you own.'
 		: 'Sign in to pick up where you left off.'
-	const submitLabel = isSignup ? 'Create account' : 'Sign in'
+	const submitLabel = isSignup
+		? confirmedUsername
+			? 'Yes, create account'
+			: 'Create account'
+		: 'Sign in'
 	const submitBusyLabel = isSignup ? 'Creating account…' : 'Signing in…'
 	const showSocial = authProviders.length > 0
 
@@ -357,6 +376,12 @@ export function LoginPage({
 						isSubmitting={isSubmitting}
 						isInteractive={hydrated}
 						isSignup={isSignup}
+						signupUsername={signupUsername}
+						onSignupUsernameInput={(value) => {
+							setSignupUsername(value)
+							setConfirmedUsername(null)
+							setState('idle')
+						}}
 						submitLabel={submitLabel}
 						submitBusyLabel={submitBusyLabel}
 						onSubmit={handleSubmit}
@@ -386,6 +411,7 @@ export function LoginPage({
 										type="button"
 										disabled={!hydrated || isSubmitting}
 										aria-label={`Continue with ${provider.label}`}
+										data-testid={`social-sign-in-${provider.id}`}
 										css={oauthButtonCss}
 										onClick={() => handleProviderSignIn(provider.id)}
 									>

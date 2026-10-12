@@ -56,3 +56,40 @@ test('blocking root loader sharing does not imply a fresh authority check per na
 	expect(reads).toEqual(['a', 'a'])
 	expect(router.state.matches[0]?.loaderData).toEqual({ actor: 'a' })
 })
+
+test('root beforeLoad verifies once per foreground navigation and skips intent preloads', async () => {
+	const checks: string[] = []
+	const root = createRootRoute({
+		preload: false,
+		shouldReload: true,
+		beforeLoad: async ({ location, preload }) => {
+			if (!preload) checks.push(location.pathname)
+			return { actor: 'a' }
+		},
+		loader: { staleReloadMode: 'blocking', handler: async () => ({}) },
+	})
+	const router = createRouter({
+		routeTree: root.addChildren(
+			['/one', '/two', '/three'].map((path) =>
+				createRoute({
+					getParentRoute: () => root,
+					path,
+					loader: async () => ({}),
+				}),
+			),
+		),
+		history: createMemoryHistory({ initialEntries: ['/one'] }),
+		isServer: false,
+		origin: 'https://identity.test',
+		defaultPreloadStaleTime: 0,
+		defaultStaleReloadMode: 'blocking',
+	})
+	await router.load()
+	await Promise.all(
+		Array.from({ length: 12 }, () => router.preloadRoute({ to: '/two' })),
+	)
+	await router.navigate({ to: '/two' })
+	await router.preloadRoute({ to: '/three' })
+	await router.navigate({ to: '/three' })
+	expect(checks).toEqual(['/one', '/two', '/three'])
+})

@@ -36,7 +36,7 @@ function isShellAreaPath(path: string) {
 }
 
 /** Both paths may carry a search string; only the pathname decides the area. */
-export function isSameShellAreaNavigation(from: string | null, to: string) {
+function isSameShellAreaNavigation(from: string | null, to: string) {
 	if (!from) return false
 	return shellAreas.some(
 		(area) =>

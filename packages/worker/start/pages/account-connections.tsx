@@ -1,4 +1,13 @@
 /** @jsxImportSource @emotion/react */
+import { useQuery } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { connectionUsageQuery } from '../connection-usage-query.ts'
+import { ConnectionProfiles } from './connection-profiles-panel.tsx'
+import {
+	ConnectionUsageSummaryPanel,
+	ConnectionUsageDetails,
+	type ConnectionUsageState,
+} from './account-connection-usage-panel.tsx'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
 import { useAccountConnectedAgents } from './account-connected-agents-panel.tsx'
@@ -17,6 +26,7 @@ import {
 	type AccountConnectionsView,
 	accountConnectionAgentIds,
 	accountConnectionsNewHref,
+	accountConnectionsListHref,
 	parseAccountConnectionsPathname,
 } from '#universal/account-connections.ts'
 import { docHref } from '#universal/docs-nav.ts'
@@ -57,7 +67,18 @@ export function AccountConnectionsPage({
 	payload: AccountConnectedAgentsLoaderData
 	currentHref: string
 }) {
-	const connectedAgents = useAccountConnectedAgents(payload)
+	const connectedAgents = useAccountConnectedAgents(payload, currentHref)
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const view = readView(currentHref)
+	const usage = useQuery({
+		...connectionUsageQuery(actorKey, currentHref),
+		enabled: view?.kind === 'list' || view?.kind === 'usage',
+	})
+	const usageState: ConnectionUsageState = usage.data
+		? { kind: 'ready', usage: usage.data }
+		: usage.isError
+			? { kind: 'error', message: usage.error.message }
+			: { kind: 'loading' }
 	return (
 		<AccountManagementShell>
 			<AccountPageHeader
@@ -66,7 +87,10 @@ export function AccountConnectionsPage({
 				currentHref={currentHref}
 			/>
 			{renderReadyView({
-				view: readView(currentHref),
+				view,
+				currentHref,
+				payload,
+				usageState,
 				connectedAgents,
 				mcpServerUrl: payload.mcpServerUrl,
 			})}
@@ -74,10 +98,10 @@ export function AccountConnectionsPage({
 	)
 }
 
-function renderBackToConnections() {
+function renderBackToConnections(currentHref: string) {
 	return (
 		<SiteLink
-			href={routes.accountConnections.href()}
+			href={accountConnectionsListHref(currentHref)}
 			data-testid="account-connections-back"
 			css={backLinkCss}
 		>
@@ -87,6 +111,9 @@ function renderBackToConnections() {
 }
 
 function renderReadyView(input: {
+	currentHref: string
+	payload: AccountConnectedAgentsLoaderData
+	usageState: ConnectionUsageState
 	view: AccountConnectionsView | null
 	connectedAgents: ReturnType<typeof useAccountConnectedAgents>
 	mcpServerUrl: string
@@ -94,8 +121,8 @@ function renderReadyView(input: {
 	if (input.view === null) {
 		return (
 			<>
-				{renderBackToConnections()}
-				{renderUnknownAgent()}
+				{renderBackToConnections(input.currentHref)}
+				{renderUnknownAgent(input.currentHref)}
 			</>
 		)
 	}
@@ -106,7 +133,7 @@ function renderReadyView(input: {
 					{input.connectedAgents.render({
 						actions: (
 							<SiteLink
-								href={accountConnectionsNewHref(null)}
+								href={accountConnectionsNewHref(null, input.currentHref)}
 								data-testid="account-connections-add"
 								css={primaryButtonCss}
 							>
@@ -114,22 +141,46 @@ function renderReadyView(input: {
 							</SiteLink>
 						),
 					})}
+					<ConnectionUsageSummaryPanel
+						state={input.usageState}
+						agents={input.connectedAgents.listAgents()}
+						pathname={input.currentHref}
+					/>
+					<ConnectionProfiles
+						payload={input.payload}
+						agents={input.connectedAgents.listAgents()}
+						currentHref={input.currentHref}
+					/>
 					{renderMcpUrlPanel({ mcpServerUrl: input.mcpServerUrl })}
 					{renderAdvancedPanel()}
 				</>
 			)
+		case 'usage':
+			return (
+				<ConnectionUsageDetails
+					state={input.usageState}
+					agents={input.connectedAgents.listAgents()}
+					pathname={input.currentHref}
+					focus={new URL(
+						input.currentHref,
+						'https://kody.local',
+					).searchParams.get('connection')}
+				/>
+			)
 		case 'new':
 			return (
 				<>
-					{renderBackToConnections()}
+					{renderBackToConnections(input.currentHref)}
 					{input.view.agent === null
 						? renderAgentGrid({
 								mcpServerUrl: input.mcpServerUrl,
+								currentHref: input.currentHref,
 								connectedAgents: input.connectedAgents.listAgents(),
 							})
 						: renderAgentInstructions({
 								agent: input.view.agent,
 								mcpServerUrl: input.mcpServerUrl,
+								currentHref: input.currentHref,
 							})}
 				</>
 			)
@@ -200,6 +251,7 @@ function renderMcpUrlPanel(input: { mcpServerUrl: string }) {
 }
 
 function renderAgentGrid(input: {
+	currentHref: string
 	mcpServerUrl: string
 	connectedAgents: AccountConnectedAgentsLoaderData['agents']
 }) {
@@ -226,7 +278,9 @@ function renderAgentGrid(input: {
 							viewport: 'both' as const,
 						}))}
 						labelledBy="account-connections-add-title"
-						agentHref={(agent) => accountConnectionsNewHref(agent)}
+						agentHref={(agent) =>
+							accountConnectionsNewHref(agent, input.currentHref)
+						}
 						greyedAgents={connectedMark.greyedAgents}
 						greyedReasons={connectedMark.greyedReasons}
 						greyedTitles={connectedMark.greyedTitles}
@@ -251,6 +305,7 @@ function renderAgentGrid(input: {
 }
 
 function renderAgentInstructions(input: {
+	currentHref: string
 	agent: McpClientKind
 	mcpServerUrl: string
 }) {
@@ -263,7 +318,7 @@ function renderAgentInstructions(input: {
 		>
 			<div css={accountActionsCss}>
 				<SiteLink
-					href={accountConnectionsNewHref(null)}
+					href={accountConnectionsNewHref(null, input.currentHref)}
 					data-testid="account-connections-change-agent"
 					css={compactGhostButtonCss}
 				>
@@ -288,7 +343,7 @@ function renderAgentInstructions(input: {
 	)
 }
 
-function renderUnknownAgent() {
+function renderUnknownAgent(currentHref: string) {
 	return (
 		<AccountManagementPanel
 			title="Unknown agent"
@@ -296,7 +351,7 @@ function renderUnknownAgent() {
 		>
 			<div css={accountActionsCss}>
 				<SiteLink
-					href={accountConnectionsNewHref(null)}
+					href={accountConnectionsNewHref(null, currentHref)}
 					css={compactGhostButtonCss}
 				>
 					Choose an agent

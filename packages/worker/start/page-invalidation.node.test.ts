@@ -65,8 +65,8 @@ describe('mutation resource invalidation', () => {
 		const client = new QueryClient()
 		const keys = [
 			['page', 'alice', 'loadSecretsPage'],
-			['page', 'alice', 'loadSharedPage'],
-			['page', 'bob', 'loadSharedPage'],
+			['page', 'alice', 'loadPackage'],
+			['page', 'bob', 'loadPackage'],
 			['shell', 'alice'],
 		]
 		for (const key of keys) client.setQueryData(key, {})
@@ -132,4 +132,22 @@ describe('mutation resource invalidation', () => {
 		expect(reads).toBe(1)
 		client.clear()
 	})
+})
+
+it('an organization write only invalidates that organization resource', async () => {
+	const client = new QueryClient()
+	const acme = ['page', 'actor', 'loadEmailPage', '/@acme/-/email'] as const
+	const other = ['page', 'actor', 'loadEmailPage', '/@other/-/email'] as const
+	client.setQueryData(acme, { messages: [] })
+	client.setQueryData(other, { messages: [] })
+	await invalidatePageResources(
+		client,
+		'actor',
+		['loadEmailPage'],
+		'none',
+		'/@acme/-/email/one',
+	)
+	expect(client.getQueryState(acme)?.isInvalidated).toBe(true)
+	expect(client.getQueryState(other)?.isInvalidated).toBe(false)
+	client.clear()
 })

@@ -46,7 +46,7 @@ function renderDenied(
 	})
 }
 
-async function loadOrgGrantsData(input: {
+export async function loadOrgGrantsData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]
 	org: ManagedOrg

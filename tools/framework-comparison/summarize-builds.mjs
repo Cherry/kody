@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 const [directoryArg] = process.argv.slice(2)

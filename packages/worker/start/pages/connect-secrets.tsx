@@ -250,7 +250,7 @@ export function ConnectSecretsRoute({
 					</div>
 					{showBackToSecrets ? (
 						<SiteLink
-							href={routes.accountSecrets.href()}
+							href={'/account/secrets'}
 							css={connectSecretsSecondaryButtonCss}
 						>
 							Back to secrets

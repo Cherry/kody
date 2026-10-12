@@ -12,7 +12,7 @@ import {
 	approvalRequestedHosts,
 	getScopeLabel,
 } from '#client/routes/account-approval-shared.ts'
-import { routes } from '#universal/routes.ts'
+import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 import {
 	colors,
 	radius,
@@ -337,9 +337,11 @@ const packageApprovalSecondaryButtonCss = getSecondaryButtonCss({
 
 export function isPackageApprovalHref(href: string) {
 	const url = new URL(href, 'http://localhost')
-	if (url.pathname === routes.accountSecretsApprove.href()) return true
+	if (accountAliasPath(url.pathname) === '/account/secrets/approve') return true
 	if (!url.searchParams.get('package_id')?.trim()) return false
-	return parseAccountSecretPath(url.pathname)?.scope === 'user'
+	return (
+		parseAccountSecretPath(accountAliasPath(url.pathname))?.scope === 'user'
+	)
 }
 
 export function isPackageSecretApprovalAlreadyGranted(input: {
@@ -370,6 +372,7 @@ function readPackageSecretApprovalView(input: {
 }
 
 export function renderPackageSecretApprovalPage(props: {
+	currentHref: string
 	approval: ApprovalView | null
 	approvalError: string | null
 	packagesById: ReadonlyMap<string, { kodyId: string; name: string }>
@@ -476,7 +479,7 @@ export function renderPackageSecretApprovalPage(props: {
 					</div>
 					{view.showBackToSecrets ? (
 						<SiteLink
-							href={routes.accountSecrets.href()}
+							href={relocateAccountHref('/account/secrets', props.currentHref)}
 							css={packageApprovalSecondaryButtonCss}
 						>
 							Back to secrets

@@ -33,17 +33,25 @@ export function hasPendingPageMutation(
 	actorKey: unknown,
 	resource: unknown,
 ) {
-	const mutation =
-		resource === 'loadAccountPage' || resource === 'loadProfile'
-			? 'profile'
-			: resource === 'loadJobsPage'
-				? 'jobs'
-				: resource === 'loadEmailPage'
-					? 'email'
-					: null
+	const mutations: Record<string, string[]> = {
+		loadAccountPage: ['profile', 'accountConnections'],
+		loadProfile: ['profile'],
+		loadJobsPage: ['jobs'],
+		loadEmailPage: ['email'],
+		loadValuesPage: ['values'],
+		loadWorkflowsPage: ['workflows'],
+		loadConnectionsPage: ['connectedAgents', 'connectionProfiles'],
+		loadConnectionUsagePage: ['connectedAgents', 'connectionProfiles'],
+		loadMcpServersPage: ['mcpServers'],
+		loadSecretProvidersPage: ['secretProviders'],
+		loadIntegrationsPage: ['integrations'],
+	}
 	return (
-		mutation !== null &&
-		client.isMutating({ mutationKey: [mutation, actorKey] }) > 0
+		typeof resource === 'string' &&
+		(mutations[resource] ?? []).some(
+			(mutation) =>
+				client.isMutating({ mutationKey: [mutation, actorKey] }) > 0,
+		)
 	)
 }
 

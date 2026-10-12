@@ -46,16 +46,18 @@ export const loadAdminSystemEmail = createServerFn({ method: 'GET' })
 			}
 		}
 		const payload = await loadAdminSystemEmailData(bindings, request.url)
-		const { auditSystemEmailRead } =
+		const { auditSystemEmailAccess } =
 			await import('../../src/app/handlers/admin-system-email.ts')
-		await auditSystemEmailRead({
+		await auditSystemEmailAccess({
 			env: bindings,
 			request,
 			actorEmail: user.email,
 			action: payload.selectedMessage
 				? 'adminSystemEmailGet'
 				: 'adminSystemEmailList',
-			messageId: payload.selectedMessage?.id,
+			reason: payload.selectedMessage
+				? `target_message_id=${payload.selectedMessage.id}`
+				: 'system_email_list',
 		})
 		return {
 			forbidden: false as const,

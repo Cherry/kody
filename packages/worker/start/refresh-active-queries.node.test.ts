@@ -61,15 +61,12 @@ test('activation respects active freshness and leaves inactive revisits reusable
 	expect(client.getQueryData(inactiveKey)).toBe('cached')
 })
 
-test('permission-sensitive pages and shell previews recheck even when fresh', async () => {
+test('permission-sensitive pages recheck even when fresh', async () => {
 	const { client, query } = setup()
 	const page = query(['page', 'a', 'private'], { freshAuthorization: true })
-	const preview = query(['shell', 'a', '?siteBannerPreview=draft'])
-	const look = query(['shell', 'a', '?siteBannerLook=card'])
 	const video = query(['shell', 'a', '?youtubeId=video'])
 	await refreshActiveQueries(client, 'a', async () => {})
-	for (const read of [page, preview, look])
-		expect(read).toHaveBeenCalledTimes(1)
+	expect(page).toHaveBeenCalledTimes(1)
 	expect(video).not.toHaveBeenCalled()
 })
 

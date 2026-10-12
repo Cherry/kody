@@ -1,7 +1,13 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import {
+	useMutation,
+	useQueryClient,
+	useIsMutating,
+} from '@tanstack/react-query'
+import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { useState } from 'react'
-import { useRouter } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { SiteLink } from '../components/site-link.tsx'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
@@ -32,7 +38,6 @@ import {
 	renderWorkflowNameCell,
 } from './workflow-name-display.tsx'
 import {
-	type AccountWorkflowDetail,
 	type AccountWorkflowListItem,
 	type AccountWorkflowRunStatus,
 	type AccountWorkflowsLoaderData,
@@ -179,17 +184,19 @@ export function AccountWorkflowsPage({
 	payload: AccountWorkflowsLoaderData
 	currentHref: string
 }) {
-	const [actionState, setActionState] = useState<'idle' | 'busy'>('idle')
-	const [username, setUsername] = useState(payload.username)
-	const [workflows, setWorkflows] = useState<Array<AccountWorkflowListItem>>(
-		payload.workflows,
-	)
-	const [selectedWorkflow, setSelectedWorkflow] =
-		useState<AccountWorkflowDetail | null>(payload.selectedWorkflow)
+	const { username, workflows, selectedWorkflow } = payload
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<MessageTone>('info')
 	const [cancelArmed, setCancelArmed] = useState(false)
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const mutationKey = [
+		'workflows',
+		actorKey,
+		pageQueryOrg(currentHref),
+	] as const
+
+	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
 		void router.navigate({ to: href, replace: true, resetScroll: false })
@@ -224,30 +231,20 @@ export function AccountWorkflowsPage({
 		setMessageTone(tone)
 	}
 
-	function applyPayload(payload: AccountWorkflowsLoaderData) {
-		setUsername(payload.username)
-		setWorkflows(payload.workflows)
-		setSelectedWorkflow(payload.selectedWorkflow)
-		setCancelArmed(false)
+	type ActionResult = AccountWorkflowsLoaderData & {
+		cancel?: {
+			cancelled: boolean
+			alreadyTerminal: boolean
+			status: AccountWorkflowRunStatus | null
+		}
 	}
-
-	async function postAction(input: {
-		body: Record<string, unknown>
-		successMessage: (
-			payload: AccountWorkflowsLoaderData & {
-				cancel?: {
-					cancelled: boolean
-					alreadyTerminal: boolean
-					status: AccountWorkflowRunStatus | null
-				}
-			},
-		) => string | null
-		failureMessage: string
-	}) {
-		if (actionState !== 'idle') return
-		setActionState('busy')
-		showMessage(null)
-		try {
+	const mutation = useMutation({
+		mutationKey,
+		mutationFn: async (input: {
+			body: Record<string, unknown>
+			href: string
+			failureMessage: string
+		}) => {
 			const response = await fetch(accountWorkflowsApiPath, {
 				method: 'POST',
 				headers: {
@@ -255,47 +252,88 @@ export function AccountWorkflowsPage({
 					'Content-Type': 'application/json',
 				},
 				credentials: 'include',
+				referrer: orgAccountApiReferrer(input.href),
 				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountWorkflowsLoaderData & {
-					error?: string
-					ok?: boolean
-					cancel?: {
-						cancelled: boolean
-						alreadyTerminal: boolean
-						status: AccountWorkflowRunStatus | null
-					}
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || input.failureMessage)
-			}
-			applyPayload(payload)
-			setActionState('idle')
-			showMessage(input.successMessage(payload))
-			void invalidatePages()
-		} catch (error) {
-			setActionState('idle')
-			showMessage(
-				error instanceof Error ? error.message : input.failureMessage,
-				'error',
+			if (response.status === 401) window.location.assign('/login')
+			const accepted = await readJson<ActionResult & { error?: string }>(
+				response,
 			)
-		}
+			if (!response.ok || !accepted?.ok)
+				throw new Error(accepted?.error || input.failureMessage)
+			return accepted
+		},
+		onSuccess: async (accepted, { href }) => {
+			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', href)
+			await queryClient.cancelQueries({
+				...resource,
+				predicate: (query) =>
+					resource.predicate(query) && query.state.data !== undefined,
+			})
+			queryClient.setQueriesData<{ payload: AccountWorkflowsLoaderData }>(
+				resource,
+				(data) =>
+					data && {
+						...data,
+						payload: {
+							...data.payload,
+							username: accepted.username,
+							workflows: accepted.workflows,
+							selectedWorkflow:
+								data.payload.selectedWorkflow?.id ===
+								accepted.selectedWorkflow?.id
+									? accepted.selectedWorkflow
+									: data.payload.selectedWorkflow &&
+										  accepted.workflows.some(
+												(row) => row.id === data.payload.selectedWorkflow?.id,
+										  )
+										? {
+												...data.payload.selectedWorkflow,
+												...accepted.workflows.find(
+													(row) => row.id === data.payload.selectedWorkflow?.id,
+												),
+											}
+										: null,
+						},
+					},
+			)
+			void queryClient.invalidateQueries({
+				...resource,
+				predicate: (query) => {
+					if (!resource.predicate(query)) return false
+					const selected =
+						workflowsRoute.getSelection(String(query.queryKey[3])).selectedId ??
+						new URL(
+							String(query.queryKey[3]),
+							'https://kody.local',
+						).searchParams.get('selected')
+					return Boolean(selected && selected !== accepted.selectedWorkflow?.id)
+				},
+			})
+			for (const dependent of ['loadWaitingPage', 'loadActivityPage'])
+				void queryClient.invalidateQueries(
+					scopedPageResource(actorKey, dependent, href),
+				)
+		},
+	})
+	function postAction(input: {
+		body: Record<string, unknown>
+		successMessage: (payload: ActionResult) => string | null
+		failureMessage: string
+	}) {
+		if (queryClient.isMutating({ mutationKey })) return
+		showMessage(null)
+		setCancelArmed(false)
+		mutation.mutate(
+			{ ...input, href: currentHref },
+			{
+				onSuccess: (accepted) => showMessage(input.successMessage(accepted)),
+				onError: (error) => showMessage(error.message, 'error'),
+			},
+		)
 	}
 
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload && actionState === 'idle') {
-		setLastPayload(payload)
-		applyPayload(payload)
-	}
-
-	const isMutating = actionState !== 'idle'
 	const selection = workflowsRoute.getSelection(currentHref)
 	const search = readWorkflowsSearchFilter(currentHref)
 	const view = readWorkflowsViewFilter(currentHref)
@@ -398,7 +436,11 @@ export function AccountWorkflowsPage({
 						id: item.id,
 						href: isMutating
 							? undefined
-							: workflowsRoute.buildDetailHref(item.id, getCurrentSearch()),
+							: workflowsRoute.buildDetailHref(
+									item.id,
+									getCurrentSearch(),
+									currentHref,
+								),
 						cells: {
 							name: renderWorkflowNameCell({
 								name: item.workflowName,
@@ -609,9 +651,3 @@ export function AccountWorkflowsPage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = [
-	'loadWorkflowsPage',
-	'loadWaitingPage',
-	'loadActivityPage',
-] as const

@@ -10,8 +10,7 @@ export default defineConfig({
 	testDir: './e2e',
 	// Vitest node-unit helpers live beside Playwright specs as
 	// `*.node.test.ts`; do not treat them as Playwright tests.
-	// Start adds focus freshness beyond the original frontend's behavior.
-	testIgnore: ['**/*.node.test.ts', '**/start/**'],
+	testIgnore: ['**/*.node.test.ts'],
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,

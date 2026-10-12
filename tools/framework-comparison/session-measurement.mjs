@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { createAccountSession } from './session-account.mjs'
 import { chromium } from '@playwright/test'

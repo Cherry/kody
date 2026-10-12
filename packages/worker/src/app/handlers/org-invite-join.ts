@@ -31,7 +31,7 @@ function joinRateLimitKey(request: Request, token: string) {
 	return `org-invite-join:${ip}:${tokenPrefix}`
 }
 
-async function loadJoinPageData(input: {
+export async function loadJoinPageData(input: {
 	env: Env
 	request: Request
 	token: string

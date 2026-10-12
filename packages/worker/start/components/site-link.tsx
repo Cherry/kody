@@ -1,11 +1,11 @@
 /** @jsxImportSource @emotion/react */
-import { Link } from '@tanstack/react-router'
+import { Link, useRouter } from '@tanstack/react-router'
 import { type ComponentProps } from 'react'
 import { actionPagePaths } from '../action-pages.ts'
-import { isMigratedPathname } from '../migrated-routes.ts'
 
 /** Protocol handshakes and non-page endpoints use document navigation. */
 export function SiteLink({ href, children, ...props }: ComponentProps<'a'>) {
+	const router = useRouter()
 	if (!href?.startsWith('/') || href.startsWith('//')) {
 		return (
 			<a href={href} {...props}>
@@ -14,13 +14,14 @@ export function SiteLink({ href, children, ...props }: ComponentProps<'a'>) {
 		)
 	}
 	const destination = new URL(href, 'https://kody.local')
+	const [, params, route] = router.getMatchedRoutes(destination.pathname)
+	const matchesPage = Boolean(route && !(route.path !== '/' && params['**']))
 	return (
 		<Link
 			to={href}
 			preload={actionPagePaths.has(destination.pathname) ? false : undefined}
 			reloadDocument={
-				destination.pathname.startsWith('/oauth/') ||
-				!isMigratedPathname(destination.pathname)
+				destination.pathname.startsWith('/oauth/') || !matchesPage
 			}
 			{...props}
 		>

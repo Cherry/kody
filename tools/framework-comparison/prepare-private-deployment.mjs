@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { parse } from 'jsonc-parser'
@@ -155,16 +156,12 @@ for (const fleet of manifest.fleets) {
 				'packages/jobs-worker/wrangler-preview.generated.json',
 			],
 		],
-		build: [
-			'npm',
-			'run',
-			fleet.variant === 'candidate' ? 'build:start' : 'build',
-		],
+		build: ['npm', 'run', 'build'],
 		buildOutput: path.resolve(
 			checkout,
 			fleet.buildOutput ??
 				(fleet.variant === 'candidate'
-					? 'dist-start/server/wrangler.json'
+					? 'dist/server/wrangler.json'
 					: 'dist/ssr/wrangler.json'),
 		),
 	})

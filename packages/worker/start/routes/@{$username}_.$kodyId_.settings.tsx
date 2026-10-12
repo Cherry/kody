@@ -38,7 +38,6 @@ function Page() {
 		<PackageSettingsRoute
 			key={`${data.data.username}/${data.data.kodyId}`}
 			data={data.data}
-			session={data.session}
 		/>
 	)
 }

@@ -172,7 +172,7 @@ function parseDomainList(value: unknown): Array<string> | null {
 
 const MAX_INVITE_LINK_EXPIRY_DAYS = 365
 
-async function loadOrgMembersData(input: {
+export async function loadOrgMembersData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]
 	org: ManagedOrg

@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useState, useEffect } from 'react'
 import { useRouter } from '@tanstack/react-router'
@@ -61,26 +65,66 @@ export function AccountMcpServersPage({
 	payload: AccountMcpServersPayload
 	currentHref: string
 }) {
-	const [actionState, setActionState] = useState<'idle' | 'busy'>('idle')
-	const [servers, setServers] = useState<Array<McpServerListItem>>(
-		payload.servers,
-	)
-	const [savedPackages, setSavedPackages] = useState<
-		Array<{ id: string; kodyId: string }>
-	>(payload.savedPackages ?? [])
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const mutation = useMutation({
+		mutationKey: ['mcpServers', actorKey, currentHref],
+		mutationFn: async (input: {
+			body: Record<string, unknown>
+			href: string
+			failureMessage: string
+		}) => {
+			const response = await fetch(accountMcpServersApiPath, {
+				method: 'POST',
+				referrer: orgAccountApiReferrer(input.href),
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify(input.body),
+			})
+			if (response.status === 401) throw new Error('Please sign in again.')
+			const accepted = await readJson<
+				AccountMcpServersPayload & { error?: string; ok?: boolean }
+			>(response)
+			if (!response.ok || !accepted?.ok)
+				throw new Error(accepted?.error || input.failureMessage)
+			return accepted
+		},
+		onMutate: async ({ href }) => {
+			await queryClient.cancelQueries(
+				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+			)
+		},
+		onSuccess: async (accepted, { href }) => {
+			await queryClient.cancelQueries(
+				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+			)
+			updateOrgPagePayload<AccountMcpServersPayload>(
+				queryClient,
+				actorKey,
+				'loadMcpServersPage',
+				href,
+				() => accepted,
+			)
+			void invalidatePages()
+		},
+		onError: (_error, { href }) => {
+			void queryClient.invalidateQueries(
+				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+			)
+		},
+	})
+	const actionState = mutation.isPending ? 'busy' : 'idle'
+	const servers = payload.servers
+	const savedPackages = payload.savedPackages ?? []
 	const [usageDrafts, setUsageDrafts] = useState(
 		new Map<string, McpServerUsageDraft>(),
 	)
 	const [usageSavingId, setUsageSavingId] = useState<string | null>(null)
-	const [oauthClientOrigin, setOauthClientOrigin] = useState(
-		payload.oauthClientOrigin,
-	)
-	const [oauthCallbackUrl, setOauthCallbackUrl] = useState(
-		payload.oauthCallbackUrl,
-	)
-	const [oauthClientMetadataUrl, setOauthClientMetadataUrl] = useState<
-		string | null
-	>(payload.oauthClientMetadataUrl)
+	const { oauthClientOrigin, oauthCallbackUrl, oauthClientMetadataUrl } =
+		payload
 	const [addName, setAddName] = useState('')
 	const [addUrl, setAddUrl] = useState('')
 	const [addBearerToken, setAddBearerToken] = useState('')
@@ -130,11 +174,6 @@ export function AccountMcpServersPage({
 		payload: AccountMcpServersPayload,
 		preserveDrafts = false,
 	) {
-		setServers(payload.servers)
-		setSavedPackages(payload.savedPackages ?? [])
-		setOauthClientOrigin(payload.oauthClientOrigin)
-		setOauthCallbackUrl(payload.oauthCallbackUrl)
-		setOauthClientMetadataUrl(payload.oauthClientMetadataUrl)
 		setUsageDrafts(
 			new Map(
 				payload.servers.map((server) => {
@@ -174,35 +213,17 @@ export function AccountMcpServersPage({
 		afterSuccess?: (payload: AccountMcpServersPayload) => void
 	}) {
 		if (actionState !== 'idle') return
-		setActionState('busy')
 		showMessage(null)
 		try {
-			const response = await fetch(accountMcpServersApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(input.body),
+			const payload = await mutation.mutateAsync({
+				...input,
+				href: currentHref,
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountMcpServersPayload & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || input.failureMessage)
-			}
+			if (router.state.location.href !== currentHref) return
 			applyPayload(payload)
-			setActionState('idle')
 			showMessage(input.successMessage(payload))
 			input.afterSuccess?.(payload)
-			void invalidatePages()
 		} catch (error) {
-			setActionState('idle')
 			setUsageSavingId(null)
 			showMessage(
 				error instanceof Error ? error.message : input.failureMessage,
@@ -261,6 +282,7 @@ export function AccountMcpServersPage({
 					mcpServersRoute.buildDetailHref(
 						payload.selectedServerId,
 						getCurrentSearch(),
+						currentHref,
 					),
 				)
 			},
@@ -306,7 +328,9 @@ export function AccountMcpServersPage({
 							if (isMutating) return
 							setDeleteArmed(false)
 							showMessage(null)
-							navigate(mcpServersRoute.buildNewHref(getCurrentSearch()))
+							navigate(
+								mcpServersRoute.buildNewHref(getCurrentSearch(), currentHref),
+							)
 						}}
 						css={primaryButtonCss}
 					>
@@ -374,7 +398,10 @@ export function AccountMcpServersPage({
 							? {
 									href: isMutating
 										? undefined
-										: mcpServersRoute.buildNewHref(getCurrentSearch()),
+										: mcpServersRoute.buildNewHref(
+												getCurrentSearch(),
+												currentHref,
+											),
 									label: 'New server',
 								}
 							: undefined
@@ -385,7 +412,11 @@ export function AccountMcpServersPage({
 						// editor owns the selection until it settles.
 						href: isMutating
 							? undefined
-							: mcpServersRoute.buildDetailHref(item.id, getCurrentSearch()),
+							: mcpServersRoute.buildDetailHref(
+									item.id,
+									getCurrentSearch(),
+									currentHref,
+								),
 						cells: {
 							name: renderNamedServer(item),
 							state: (
@@ -502,7 +533,10 @@ export function AccountMcpServersPage({
 										failureMessage: 'Unable to remove MCP server.',
 										afterSuccess: () => {
 											navigate(
-												mcpServersRoute.buildListHref(getCurrentSearch()),
+												mcpServersRoute.buildListHref(
+													getCurrentSearch(),
+													currentHref,
+												),
 											)
 										},
 									})
@@ -534,7 +568,6 @@ export function AccountMcpServersPage({
 }
 
 const mutationResources = [
-	'loadMcpServersPage',
 	'loadOnboarding',
 	'loadAccountPage',
 	'loadUsagePage',

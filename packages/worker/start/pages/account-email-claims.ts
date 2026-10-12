@@ -17,8 +17,7 @@ export function useAccountEmailClaims(
 		'idle' | 'sending'
 	>('idle')
 	const [emailChangeOpen, setEmailChangeOpen] = useState(false)
-	const [formerEmails, setFormerEmails] =
-		useState<Array<AccountFormerEmail>>(initialFormerEmails)
+	const formerEmails = initialFormerEmails
 	const [releaseEmail, setReleaseEmail] = useState('')
 	const [releasePassword, setReleasePassword] = useState('')
 	const [releaseStatus, setReleaseStatus] = useState<'idle' | 'sending'>('idle')
@@ -32,10 +31,6 @@ export function useAccountEmailClaims(
 	const [emailChangeTone, setEmailChangeTone] = useState<'error' | 'info'>(
 		'info',
 	)
-
-	function applyFormerEmails(nextFormerEmails: Array<AccountFormerEmail>) {
-		setFormerEmails(nextFormerEmails)
-	}
 
 	function applyCurrentEmail(email: string) {
 		setDraftEmail(email)
@@ -227,7 +222,6 @@ export function useAccountEmailClaims(
 	}
 
 	return {
-		applyFormerEmails,
 		applyCurrentEmail,
 		updateDraftEmail,
 		handleEmailChangeToggle,

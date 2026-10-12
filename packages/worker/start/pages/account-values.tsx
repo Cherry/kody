@@ -1,8 +1,15 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import {
+	useIsMutating,
+	useMutation,
+	useQueryClient,
+} from '@tanstack/react-query'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { valuesMutationOptions } from './account-values-query.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
-import { useRouter } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
@@ -32,18 +39,11 @@ import {
 	getDangerPillCss,
 } from '#universal/styles/style-primitives.ts'
 import {
-	type AccountValueDetail,
 	type AccountValueListItem,
 	type AccountValuesLoaderData,
 } from '#universal/loader-data.ts'
 
 const clampedCellCss = recordCellClamp(28)
-
-type EditorState = {
-	name: string
-	description: string
-	value: string
-}
 
 const accountValuesApiPath = '/account/values.json'
 const accountValuesPath = '/account/values'
@@ -67,22 +67,6 @@ function filterValues(values: Array<AccountValueListItem>, search: string) {
 	)
 }
 
-function createEmptyEditorState(): EditorState {
-	return {
-		name: '',
-		description: '',
-		value: '',
-	}
-}
-
-function createEditorStateFromDetail(detail: AccountValueDetail): EditorState {
-	return {
-		name: detail.name,
-		description: detail.description,
-		value: detail.value,
-	}
-}
-
 function formatRelativeTtl(ttlMs: number | null) {
 	if (ttlMs == null) return 'No expiry'
 	const totalMinutes = Math.max(1, Math.round(ttlMs / 60_000))
@@ -103,22 +87,14 @@ export function AccountValuesPage({
 	payload: AccountValuesLoaderData
 	currentHref: string
 }) {
-	const [saveState, setSaveState] = useState<'idle' | 'deleting'>('idle')
-	const [values, setValues] = useState<Array<AccountValueListItem>>(
-		payload.values,
-	)
-	const [selectedValue, setSelectedValue] = useState<AccountValueDetail | null>(
-		payload.selectedValue,
-	)
-	const [editorState, setEditorState] = useState(
-		payload.selectedValue
-			? createEditorStateFromDetail(payload.selectedValue)
-			: createEmptyEditorState(),
-	)
+	const { values, selectedValue } = payload
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [deleteArmed, setDeleteArmed] = useState(false)
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const mutationKey = ['values', actorKey, pageQueryOrg(currentHref)] as const
+	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
@@ -154,59 +130,49 @@ export function AccountValuesPage({
 		setMessageTone(tone)
 	}
 
-	function applyPayload(next: AccountValuesLoaderData) {
-		setValues(next.values)
-		setSelectedValue(next.selectedValue)
-		setEditorState(
-			next.selectedValue
-				? createEditorStateFromDetail(next.selectedValue)
-				: createEmptyEditorState(),
-		)
-		setDeleteArmed(false)
-	}
+	const deleteMutation = useMutation(
+		valuesMutationOptions(
+			queryClient,
+			actorKey,
+			async ({ name, href }) => {
+				const response = await fetch(accountValuesApiPath, {
+					method: 'POST',
+					headers: {
+						Accept: 'application/json',
+						'Content-Type': 'application/json',
+					},
+					credentials: 'include',
+					referrer: orgAccountApiReferrer(href),
+					body: JSON.stringify({ action: 'delete', name }),
+				})
+				if (response.status === 401) window.location.assign('/login')
+				const accepted = await readJson<
+					AccountValuesLoaderData & { error?: string }
+				>(response)
+				if (!response.ok || !accepted?.ok)
+					throw new Error(accepted?.error || 'Unable to delete value.')
+				return accepted
+			},
+			currentHref,
+		),
+	)
 
-	async function deleteValueEntry() {
-		if (!selectedValue || saveState !== 'idle') return
-		setSaveState('deleting')
+	function deleteValueEntry() {
+		if (!selectedValue || queryClient.isMutating({ mutationKey })) return
 		showMessage(null)
-		try {
-			const response = await fetch(accountValuesApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+		deleteMutation.mutate(
+			{ name: selectedValue.name, href: currentHref },
+			{
+				onSuccess: () => {
+					setDeleteArmed(false)
+					showMessage('Deleted value.')
+					syncRouterLocation(
+						valuesRoute.buildListHref(getCurrentSearch(), currentHref),
+					)
 				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'delete',
-					name: selectedValue.name,
-				}),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountValuesLoaderData & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to delete value.')
-			}
-			applyPayload(payload)
-			setSelectedValue(null)
-			setEditorState(createEmptyEditorState())
-			setDeleteArmed(false)
-			setSaveState('idle')
-			showMessage('Deleted value.')
-			void invalidatePages()
-			syncRouterLocation(valuesRoute.buildListHref(getCurrentSearch()))
-		} catch (error) {
-			setSaveState('idle')
-			showMessage(
-				error instanceof Error ? error.message : 'Unable to delete value.',
-				'error',
-			)
-		}
+				onError: (error) => showMessage(error.message, 'error'),
+			},
+		)
 	}
 
 	function resetSelectionState() {
@@ -216,16 +182,10 @@ export function AccountValuesPage({
 
 	const pending = false
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload) {
-		setLastPayload(payload)
-		applyPayload(payload)
-	}
 
 	const selection = valuesRoute.getSelection(currentHref)
 	const search = readSearchFilter(currentHref)
 	const filteredValues = filterValues(values, search)
-	const isMutating = saveState !== 'idle'
 	const detail = selectedValue
 	const isLoadingSelection =
 		selection.selectedId != null &&
@@ -296,7 +256,11 @@ export function AccountValuesPage({
 						// the selection until it settles.
 						href: isMutating
 							? undefined
-							: valuesRoute.buildDetailHref(entry.id, getCurrentSearch()),
+							: valuesRoute.buildDetailHref(
+									entry.id,
+									getCurrentSearch(),
+									currentHref,
+								),
 						cells: {
 							name: entry.name,
 							description: (
@@ -333,7 +297,7 @@ export function AccountValuesPage({
 										data-field-ring
 										name="name"
 										type="text"
-										value={editorState.name}
+										value={detail?.name ?? ''}
 										readOnly
 										css={{
 											...accountInputCss,
@@ -349,7 +313,7 @@ export function AccountValuesPage({
 										data-field-ring
 										name="description"
 										type="text"
-										value={editorState.description}
+										value={detail?.description ?? ''}
 										readOnly
 										css={{
 											...accountInputCss,
@@ -364,7 +328,7 @@ export function AccountValuesPage({
 									<textarea
 										data-field-ring
 										name="value"
-										value={editorState.value}
+										value={detail?.value ?? ''}
 										readOnly
 										css={{
 											...monospaceValueCss,
@@ -416,7 +380,7 @@ export function AccountValuesPage({
 											} else setDeleteArmed(true)
 										}}
 									>
-										{saveState === 'deleting'
+										{isMutating
 											? 'Deleting...'
 											: deleteArmed
 												? 'Confirm delete'
@@ -448,5 +412,3 @@ export function AccountValuesPage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = ['loadValuesPage', 'loadUsagePage'] as const

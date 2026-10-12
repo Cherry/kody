@@ -141,7 +141,11 @@ function QueryPageHead({
 		[client, queryHash],
 	)
 	const getSnapshot = useCallback(
-		() => client.getQueryState<{ head?: ResolvedDocumentHead }>(queryKey),
+		() =>
+			client.getQueryState<{
+				head?: ResolvedDocumentHead
+				pages?: Array<{ head?: ResolvedDocumentHead }>
+			}>(queryKey),
 		[client, queryKey],
 	)
 	// Reading the existing cache cannot change query options, retain an otherwise
@@ -153,7 +157,7 @@ function QueryPageHead({
 	const head =
 		!snapshot || isNotFound(snapshot.error)
 			? unavailableHead
-			: snapshot?.data?.head
+			: (snapshot?.data?.head ?? snapshot?.data?.pages?.[0]?.head)
 	const currentTags = useMemo(
 		() => (head ? mergePageHeadTags(tags, head, reference.head) : tags),
 		[tags, head, reference.head],

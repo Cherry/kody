@@ -3,7 +3,6 @@ import type * as account_collections from '#start/server/account-collections'
 import type * as account_page from '#start/server/account-page'
 import type * as account_security from '#start/server/account-security'
 import type * as action_page from '#start/server/action-page'
-import type * as admin_banners from '#start/server/admin-banners'
 import type * as admin_codemods from '#start/server/admin-codemods'
 import type * as admin_community_reports from '#start/server/admin-community-reports'
 import type * as admin_feature_flags from '#start/server/admin-feature-flags'
@@ -39,7 +38,6 @@ export type PageResource =
 	| keyof typeof account_page
 	| keyof typeof account_security
 	| keyof typeof action_page
-	| keyof typeof admin_banners
 	| keyof typeof admin_codemods
 	| keyof typeof admin_community_reports
 	| keyof typeof admin_feature_flags
