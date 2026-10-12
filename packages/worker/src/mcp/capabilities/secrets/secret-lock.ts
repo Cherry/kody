@@ -60,7 +60,10 @@ export const secretLockCapability = defineDomainCapability(
 			ctx: CapabilityContext,
 		) {
 			requireMcpUser(ctx.callerContext)
-			await authorizeSecret(ctx, 'secret:use', args.name)
+			await authorizeSecret(ctx, 'secret:use', {
+				name: args.name,
+				scope: 'user',
+			})
 			try {
 				const state = await inspectUserSecretPackageGrant({
 					env: ctx.env,

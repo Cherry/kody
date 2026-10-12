@@ -8,14 +8,22 @@ export function enablementPauseForDenial(
 	if (error.code === 'wrong_org') {
 		return { reason: 'org_access', permission: error.permission }
 	}
+	const resource = error.resource
+	if (resource?.type === 'credential') {
+		return {
+			reason: 'credential_access',
+			permission: error.permission,
+			resourceType: error.permission.split(':')[0] ?? null,
+			resourceId: resource.label ?? resource.id,
+			credentialId: resource.id || null,
+		}
+	}
 	return {
 		reason:
-			error.resource?.type === 'package'
-				? 'package_access'
-				: 'credential_access',
+			resource?.type === 'package' ? 'package_access' : 'credential_access',
 		permission: error.permission,
-		resourceType: error.resource?.type ?? null,
-		resourceId: error.resource?.id ?? null,
+		resourceType: resource?.type ?? null,
+		resourceId: resource?.id ?? null,
 	}
 }
 

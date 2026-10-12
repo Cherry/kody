@@ -69,6 +69,7 @@ function createJoinedIntegration(input: {
 		},
 		connection: {
 			userId,
+			credentialId: 'cred-integration',
 			name: input.name,
 			appSlug,
 			platformAppSlug: null,
@@ -254,6 +255,7 @@ test('searchUnified ranks mixed search rows through one shared pipeline', async 
 			],
 			userSecretRows: [
 				{
+					credentialId: 'cred-alpha-secret',
 					name: 'alpha-secret',
 					scope: 'user',
 					description: 'beta gamma delta secret',
@@ -1121,6 +1123,7 @@ test('searchUnified inspect affinity: live-status, package-oriented, and generic
 		optionalRows: rows({
 			userSecretRows: [
 				{
+					credentialId: 'cred-webhook_api_key',
 					name: 'webhook_api_key',
 					scope: 'user',
 					description: 'Webhook API key for outbound hooks',

@@ -27,6 +27,7 @@ type EnablementRow = {
 	paused_permission: string | null
 	paused_resource_type: string | null
 	paused_resource_id: string | null
+	paused_credential_id: string | null
 	paused_at: string | null
 	origin: string
 	enabled_at: string
@@ -36,8 +37,8 @@ type EnablementRow = {
 
 const enablementColumns = `id, org_id, package_id, trigger_kind, trigger_name,
 	instance_id, enabler_user_id, state, paused_reason, paused_permission,
-	paused_resource_type, paused_resource_id, paused_at, origin, enabled_at,
-	disabled_at, updated_at`
+	paused_resource_type, paused_resource_id, paused_credential_id, paused_at,
+	origin, enabled_at, disabled_at, updated_at`
 
 function isTriggerKind(value: string): value is EnablementTriggerKind {
 	return (enablementTriggerKinds as ReadonlyArray<string>).includes(value)
@@ -64,6 +65,7 @@ function toPause(row: EnablementRow): EnablementPause | null {
 		permission: row.paused_permission,
 		resourceType: row.paused_resource_type,
 		resourceId: row.paused_resource_id,
+		credentialId: row.paused_credential_id,
 		pausedAt: row.paused_at,
 	}
 }
@@ -227,6 +229,7 @@ export type EnablementPauseInput = {
 	permission?: string | null
 	resourceType?: string | null
 	resourceId?: string | null
+	credentialId?: string | null
 }
 
 /** Pause an `on` enablement. Returns false when it was not on. */
@@ -242,8 +245,8 @@ export async function pauseEnablement(input: {
 		.prepare(
 			`UPDATE enablements
 			 SET state = 'paused', paused_reason = ?, paused_permission = ?,
-			     paused_resource_type = ?, paused_resource_id = ?, paused_at = ?,
-			     updated_at = ?
+			     paused_resource_type = ?, paused_resource_id = ?,
+			     paused_credential_id = ?, paused_at = ?, updated_at = ?
 			 WHERE id = ? AND org_id = ? AND state = 'on'`,
 		)
 		.bind(
@@ -251,6 +254,7 @@ export async function pauseEnablement(input: {
 			input.pause.permission ?? null,
 			input.pause.resourceType ?? null,
 			input.pause.resourceId ?? null,
+			input.pause.credentialId ?? null,
 			now,
 			now,
 			input.id,
@@ -273,7 +277,7 @@ export async function resumeEnablement(input: {
 			`UPDATE enablements
 			 SET state = 'on', paused_reason = NULL, paused_permission = NULL,
 			     paused_resource_type = NULL, paused_resource_id = NULL,
-			     paused_at = NULL, updated_at = ?
+			     paused_credential_id = NULL, paused_at = NULL, updated_at = ?
 			 WHERE id = ? AND org_id = ? AND state = 'paused'`,
 		)
 		.bind(now, input.id, input.orgId)

@@ -6,25 +6,29 @@ import {
 	requireMcpRequest,
 	requireMcpUser,
 } from '#mcp/capabilities/meta/require-user.ts'
+import { findCredentialIdsByLegacyName } from '#worker/credentials/credential-ids.ts'
 import {
 	getGrantById,
 	isGrantResourceType,
 	listGrants,
 	softDeleteGrant,
 	upsertGrant,
+	type GrantResourceType,
 	type GrantSubject,
 } from '#worker/orgs/access-writes.ts'
 import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
 import {
 	accessGrantSchema,
+	authorizeGrantRevoke,
 	authorizeGrantTarget,
 	grantChangesMemberOrBilling,
 	grantPresetSchema,
-	grantResourceTypeSchema,
+	grantTargetTypeSchema,
 	readPermissionList,
 	requireOrgPermission,
 	requirePresetOrPermissions,
 	resolveAuthorizedGrantPermissions,
+	resolveGrantTarget,
 	resolvePersonId,
 	resolveTeamId,
 	rethrowAccessError,
@@ -114,14 +118,14 @@ export const accessGrantCapability = defineDomainCapability(
 			return existing.some(grantChangesMemberOrBilling)
 		},
 		description:
-			'Grant a user or team Use, Contribute, or Manage on a resource in the organization this request is bound to, or pass an explicit permission list instead of a preset. Organization grants use resource_type org and this organization id. You need manage access on that resource (or member:write for an organization grant). Only an Owner can put org:write, org:delete, member:write, or member:delete on an organization grant.',
+			'Grant a user or team Use, Contribute, or Manage on a resource in the organization this request is bound to, or pass an explicit permission list instead of a preset. Secrets, integrations, MCP servers, and vault bindings use resource_type credential with the credential_id from secretList, integrationList, mcpServerList, or secretProviderList; the grant follows the credential, not its name. resource_type secret or integration with a name still works: the name resolves to its credential once, when the grant is made. Organization grants use resource_type org and this organization id. You need manage access on that resource (or member:write for an organization grant). Only an Owner can put org:write, org:delete, member:write, or member:delete on an organization grant.',
 		keywords: ['grant', 'access', 'permission', 'share', 'preset'],
 		readOnly: false,
 		idempotent: true,
 		destructive: false,
 		inputSchema: z.object({
-			resource_type: grantResourceTypeSchema.describe(
-				'package, app, job, secret, integration, memory, email, or org.',
+			resource_type: grantTargetTypeSchema.describe(
+				'package, app, job, credential, memory, email, or org. secret or integration take a name instead of a credential id.',
 			),
 			resource_id: z.string().min(1),
 			subject_type: z.enum(['user', 'team']),
@@ -148,13 +152,17 @@ export const accessGrantCapability = defineDomainCapability(
 					preset: args.preset,
 					permissions,
 				})
+				const target = await resolveGrantTarget(ctx, {
+					type: args.resource_type,
+					id: args.resource_id,
+				})
 				const scoped = await authorizeGrantTarget(
 					ctx,
-					args.resource_type,
-					args.resource_id,
+					target.resourceType,
+					target.resourceId,
 				)
 				const resolved = await resolveAuthorizedGrantPermissions(ctx, {
-					resourceType: args.resource_type,
+					family: scoped.family,
 					preset: args.preset,
 					permissions,
 				})
@@ -171,8 +179,9 @@ export const accessGrantCapability = defineDomainCapability(
 				const written = await upsertGrant({
 					db: scoped.db,
 					orgId: scoped.request.org.id,
-					resourceType: args.resource_type,
-					resourceId: args.resource_id,
+					resourceType: target.resourceType,
+					resourceId: target.resourceId,
+					family: scoped.family,
 					subject,
 					preset: args.preset ?? null,
 					permissions: args.preset ? null : [...resolved],
@@ -236,7 +245,7 @@ export const accessRevokeCapability = defineDomainCapability(
 				if (!grant || !isGrantResourceType(grant.resourceType)) {
 					throw new McpCallerError('Grant was not found in this organization.')
 				}
-				await authorizeGrantTarget(ctx, grant.resourceType, grant.resourceId)
+				await authorizeGrantRevoke(ctx, grant.resourceType, grant.resourceId)
 				await softDeleteGrant({
 					db,
 					orgId: request.org.id,
@@ -263,7 +272,11 @@ export const accessListCapability = defineDomainCapability(
 		idempotent: true,
 		destructive: false,
 		inputSchema: z.object({
-			resource_type: grantResourceTypeSchema.optional(),
+			resource_type: grantTargetTypeSchema
+				.optional()
+				.describe(
+					'secret or integration with a resource_id filter by that credential name.',
+				),
 			resource_id: z.string().min(1).optional(),
 			subject_type: z.enum(['user', 'team']).optional(),
 			subject_id: z.string().min(1).optional(),
@@ -274,15 +287,45 @@ export const accessListCapability = defineDomainCapability(
 		async handler(args, ctx) {
 			try {
 				const { db, request } = await requireOrgPermission(ctx, 'member:read')
-				const grants = await listGrants({
+				let legacyFamily: 'secret' | 'integration' | null = null
+				let resourceType: GrantResourceType | undefined
+				if (
+					args.resource_type === 'secret' ||
+					args.resource_type === 'integration'
+				) {
+					legacyFamily = args.resource_type
+					resourceType = 'credential'
+				} else {
+					resourceType = args.resource_type
+				}
+				const filter = {
 					db,
 					orgId: request.org.id,
-					resourceType: args.resource_type,
-					resourceId: args.resource_id,
+					resourceType,
 					subjectType: args.subject_type,
 					subjectId: args.subject_id,
-				})
-				return { grants: grants.map(toAccessGrantPayload) }
+				}
+				const grants =
+					legacyFamily && args.resource_id
+						? (
+								await Promise.all(
+									(
+										await findCredentialIdsByLegacyName(db, request.org.id, {
+											type: legacyFamily,
+											name: args.resource_id,
+										})
+									).map((resourceId) => listGrants({ ...filter, resourceId })),
+								)
+							).flat()
+						: await listGrants({ ...filter, resourceId: args.resource_id })
+				const listed = legacyFamily
+					? grants.filter((grant) =>
+							grant.permissions.some((permission) =>
+								permission.startsWith(`${legacyFamily}:`),
+							),
+						)
+					: grants
+				return { grants: listed.map(toAccessGrantPayload) }
 			} catch (error) {
 				rethrowAccessError(error)
 			}

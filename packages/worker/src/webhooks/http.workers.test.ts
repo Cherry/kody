@@ -56,6 +56,11 @@ vi.mock('#worker/package-registry/source.ts', () => ({
 
 vi.mock('#mcp/secrets/service.ts', () => ({
 	resolveSecret: (...args: Array<unknown>) => mocks.resolveSecret(...args),
+	findSecretForUse: async (input: unknown) => {
+		const resolved = await mocks.resolveSecret(input)
+		const { value: _value, ...found } = resolved
+		return { found, readValue: async () => resolved }
+	},
 }))
 
 vi.mock('./dispatch-queue-producer.ts', async () => {

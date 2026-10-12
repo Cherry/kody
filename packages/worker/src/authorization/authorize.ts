@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import {
 	orgPermissions,
+	type OrgGrantResourceType,
 	type OrgPermission,
-	type OrgResourceType,
 } from '@kody-internal/shared/org-permissions.ts'
 import {
 	ownerIdFromStored,
@@ -24,10 +24,10 @@ import {
 
 /** A concrete org resource a permission is checked on. */
 export type OrgResource = {
-	type: OrgResourceType
+	type: OrgGrantResourceType
 	id: string
 	orgId: OwnerId
-	/** Human-readable name for denial messages (package name, inbox address). */
+	/** Human-readable name for denial messages (package name, credential name, inbox address). */
 	label?: string
 }
 
@@ -203,8 +203,11 @@ function profileAllows(
 	})
 }
 
-function describeResource(resource: OrgResource) {
-	return `${resource.type} ${resource.label ?? `"${resource.id}"`}`
+function describeResource(resource: OrgResource, permission: OrgPermission) {
+	// A credential is keyed by id, but people name it by family and name.
+	const noun =
+		resource.type === 'credential' ? permission.split(':')[0] : resource.type
+	return `${noun} ${resource.label ?? `"${resource.id}"`}`
 }
 
 function holdsPermission(
@@ -283,12 +286,12 @@ function denialMessage(
 	resource: OrgResource | undefined,
 	mintScopes: ReadonlyArray<OrgPermission> = [permission],
 ) {
-	const target = resource ? ` on ${describeResource(resource)}` : ''
+	const target = resource ? ` on ${describeResource(resource, permission)}` : ''
 	switch (code) {
 		case 'unauthenticated':
 			return `Authenticated MCP user is required for this capability. It needs ${permission}.`
 		case 'wrong_org':
-			return `${resource ? describeResource(resource) : 'This resource'} belongs to another org.`
+			return `${resource ? describeResource(resource, permission) : 'This resource'} belongs to another org.`
 		case 'missing_permission':
 			return `Missing ${permission}${target}. An org Owner can grant it.`
 		case 'credential_scope':
@@ -298,7 +301,7 @@ function denialMessage(
 				return 'This connection profile cannot create packages.'
 			}
 			const action = profileActionFor(permission) ?? permission
-			return `This connection profile cannot ${action}${resource ? ` ${describeResource(resource)}` : ''}.`
+			return `This connection profile cannot ${action}${resource ? ` ${describeResource(resource, permission)}` : ''}.`
 		}
 		default: {
 			const exhaustive: never = code
@@ -372,7 +375,7 @@ function holdsOrgWide(access: EffectivePermissions, permission: OrgPermission) {
 export function resourceListScope(
 	access: EffectivePermissions,
 	permission: OrgPermission,
-	resourceType: OrgResourceType,
+	resourceType: OrgGrantResourceType,
 ): ResourceListScope {
 	const ids = new Set<string>()
 	if (access.credentialScopes && !access.credentialScopes.has(permission)) {
@@ -398,7 +401,7 @@ export function listScopeIncludes(scope: ResourceListScope, id: string) {
  */
 export function resourceVisibility(
 	access: EffectivePermissions,
-	resourceType: OrgResourceType,
+	resourceType: OrgGrantResourceType,
 	permissions: ReadonlyArray<OrgPermission>,
 ): (id: string) => boolean {
 	const scopes = permissions.map((permission) =>
@@ -424,7 +427,7 @@ function requireRequest(
 export async function loadResourceListScope(
 	ctx: { env: Env; request: RequestContext | null },
 	permission: OrgPermission,
-	resourceType: OrgResourceType,
+	resourceType: OrgGrantResourceType,
 ): Promise<ResourceListScope> {
 	const request = requireRequest(ctx, permission)
 	const access = await computeEffectivePermissions({ env: ctx.env, request })
@@ -482,7 +485,7 @@ export function checkOrgWide(
 /** A resource in the request's own org, keyed the way grants store it. */
 export function orgResource(
 	request: RequestContext,
-	type: OrgResourceType,
+	type: OrgGrantResourceType,
 	id: string,
 	label?: string,
 ): OrgResource {

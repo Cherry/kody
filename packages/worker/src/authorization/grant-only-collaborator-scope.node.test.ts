@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { type OrgResourceType } from '@kody-internal/shared/org-permissions.ts'
+import { type OrgGrantResourceType } from '@kody-internal/shared/org-permissions.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 	findSecret: vi.fn(),
 	deleteSecret: vi.fn(),
 	saveSecret: vi.fn(),
+	findIntegrationCredentialId: vi.fn(),
 }))
 
 vi.mock('#mcp/memory/service.ts', async (importOriginal) => {
@@ -60,6 +61,11 @@ vi.mock('#worker/integrations/service.ts', () => ({
 	getIntegration: (...args: Array<unknown>) => mocks.getIntegration(...args),
 	deleteIntegration: (...args: Array<unknown>) =>
 		mocks.deleteIntegration(...args),
+}))
+
+vi.mock('#worker/integrations/credentials.ts', () => ({
+	findIntegrationCredentialId: (...args: Array<unknown>) =>
+		mocks.findIntegrationCredentialId(...args),
 }))
 
 vi.mock('#mcp/secrets/service.ts', async (importOriginal) => {
@@ -105,12 +111,13 @@ const grantedIntegration = 'github'
 const otherIntegration = 'linear'
 const grantedSecret = 'shared-api-key'
 const otherSecret = 'private-api-key'
+const credentialIdOf = (name: string) => `cred-${name}`
 
 async function seedGrant(input: {
 	db: D1Database
 	orgId: string
 	subjectId: string
-	resourceType: OrgResourceType
+	resourceType: OrgGrantResourceType
 	resourceId: string
 	permissions: Array<string>
 }) {
@@ -175,16 +182,16 @@ async function setup() {
 		db,
 		orgId: ownerId,
 		subjectId: collaboratorId,
-		resourceType: 'integration',
-		resourceId: grantedIntegration,
+		resourceType: 'credential',
+		resourceId: credentialIdOf(grantedIntegration),
 		permissions: ['integration:use', 'integration:read'],
 	})
 	await seedGrant({
 		db,
 		orgId: ownerId,
 		subjectId: collaboratorId,
-		resourceType: 'secret',
-		resourceId: grantedSecret,
+		resourceType: 'credential',
+		resourceId: credentialIdOf(grantedSecret),
 		permissions: ['secret:use', 'secret:write', 'secret:delete'],
 	})
 	const env = { APP_DB: db } as unknown as Env
@@ -257,6 +264,7 @@ function job(id: string) {
 function integration(name: string) {
 	return {
 		name,
+		credentialId: credentialIdOf(name),
 		tokenUrl: `https://${name}.example/oauth/token`,
 		flow: 'pkce' as const,
 		clientId: `${name}-client`,
@@ -266,6 +274,7 @@ function integration(name: string) {
 function secret(name: string) {
 	return {
 		name,
+		credentialId: credentialIdOf(name),
 		scope: 'user' as const,
 		description: '',
 		packageId: null,
@@ -410,6 +419,9 @@ test('integration list, get, and delete honor per-integration grants', async () 
 	mocks.getIntegration.mockImplementation(async (input: { name: string }) =>
 		integration(input.name),
 	)
+	mocks.findIntegrationCredentialId.mockImplementation(
+		async (input: { name: string }) => credentialIdOf(input.name),
+	)
 
 	const listed = await integrationListCapability.handler({}, collaborator)
 	expect(listed.integrations.map((entry) => entry.name)).toEqual([
@@ -442,6 +454,23 @@ test('secret list, delete, and set honor per-secret grants', async () => {
 		secret(grantedSecret),
 		secret(otherSecret),
 	])
+	mocks.findSecret.mockImplementation(async (input: { name: string }) =>
+		input.name === 'new-secret'
+			? {
+					found: false,
+					credentialId: null,
+					scope: null,
+					allowedHosts: [],
+					allowedPackages: [],
+				}
+			: {
+					found: true,
+					credentialId: credentialIdOf(input.name),
+					scope: 'user',
+					allowedHosts: [],
+					allowedPackages: [],
+				},
+	)
 
 	const listed = await secretListCapability.handler({}, collaborator)
 	expect(listed.secrets.map((entry) => entry.name)).toEqual([grantedSecret])
@@ -463,12 +492,6 @@ test('secret list, delete, and set honor per-secret grants', async () => {
 		),
 	).resolves.toEqual({ deleted: true })
 
-	mocks.findSecret.mockResolvedValue({
-		found: true,
-		scope: 'user',
-		allowedHosts: [],
-		allowedPackages: [],
-	})
 	await expect(
 		secretSetCapability.handler(
 			{ name: otherSecret, value: 'overwrite', scope: 'user' },
@@ -484,12 +507,6 @@ test('secret list, delete, and set honor per-secret grants', async () => {
 	expect(mocks.findSecret).toHaveBeenLastCalledWith(
 		expect.objectContaining({ name: otherSecret, includeExpired: true }),
 	)
-	mocks.findSecret.mockResolvedValue({
-		found: false,
-		scope: null,
-		allowedHosts: [],
-		allowedPackages: [],
-	})
 	await expect(
 		secretSetCapability.handler(
 			{ name: 'new-secret', value: 'value', scope: 'user' },

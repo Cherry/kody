@@ -10,7 +10,7 @@
  */
 import {
 	isOrgPermission,
-	isOrgResourceType,
+	isOrgGrantResourceType,
 	orgPermissions,
 	type OrgPermission,
 } from '@kody-internal/shared/org-permissions.ts'
@@ -21,6 +21,11 @@ import {
 	type EffectivePermissions,
 	type OrgResource,
 } from '#worker/authorization/authorize.ts'
+import {
+	findCredentialIdsByLegacyName,
+	getOrgCredential,
+	isLegacyNamedCredentialTarget,
+} from '#worker/credentials/credential-ids.ts'
 import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 import {
 	deriveRequestContext,
@@ -81,13 +86,16 @@ export function enablerCanSee(
 	if (access.isOwner) return true
 	if (!audience.resource) return false
 	const resource: OrgResource = { ...audience.resource, orgId: access.orgId }
-	const prefix = `${resource.type}:`
-	return orgPermissions.some(
-		(permission) =>
-			permission.startsWith(prefix) &&
-			permission !== `${resource.type}:create` &&
-			checkPermission(access, permission, resource).allowed,
-	)
+	const families: ReadonlyArray<string> =
+		resource.type === 'credential' ? ['secret', 'integration'] : [resource.type]
+	return orgPermissions.some((permission) => {
+		const [family, action] = permission.split(':')
+		return (
+			families.includes(family ?? '') &&
+			action !== 'create' &&
+			checkPermission(access, permission, resource).allowed
+		)
+	})
 }
 
 type EnablerRow = { stable_user_id: string; username: string }
@@ -103,20 +111,68 @@ async function loadLiveEnabler(db: D1Database, userId: string) {
 		.first<EnablerRow>()
 }
 
-function storedPauseResource(
+/**
+ * What a credential pause waits on. The credential's stable id while it is
+ * still live; once soft-deleted, its name resolves now (old lane), so a
+ * grant on a deleted credential never resumes the enablement. A vault
+ * binding, or an id whose row is gone (vault bindings are hard-deleted), has
+ * no name lane. A name that still names nothing only Owners and org-wide
+ * holders pass, and a name that names two integrations resumes on Use of
+ * either.
+ */
+async function storedPauseResource(
+	db: D1Database,
 	enablement: EnablementRecord,
-): { permission: OrgPermission; resource: OrgResource } | null {
+): Promise<{
+	permission: OrgPermission
+	resources: Array<OrgResource>
+} | null> {
 	const pause = enablement.pause
 	if (pause?.reason !== 'credential_access') return null
 	if (!isOrgPermission(pause.permission)) return null
-	if (!isOrgResourceType(pause.resourceType) || !pause.resourceId) return null
+	if (pause.credentialId) {
+		const credential = await getOrgCredential(
+			db,
+			enablement.orgId,
+			pause.credentialId,
+		)
+		if (!credential || credential.live || credential.kind === 'vault') {
+			return {
+				permission: pause.permission,
+				resources: [
+					{
+						type: 'credential',
+						id: credential?.live ? pause.credentialId : '',
+						orgId: enablement.orgId,
+					},
+				],
+			}
+		}
+	}
+	if (!pause.resourceId) return null
+	if (isLegacyNamedCredentialTarget(pause.resourceType)) {
+		const credentialIds = await findCredentialIdsByLegacyName(
+			db,
+			enablement.orgId,
+			{ type: pause.resourceType, name: pause.resourceId },
+		)
+		return {
+			permission: pause.permission,
+			resources: (credentialIds.length > 0 ? credentialIds : ['']).map(
+				(id) => ({ type: 'credential', id, orgId: enablement.orgId }),
+			),
+		}
+	}
+	if (!isOrgGrantResourceType(pause.resourceType)) return null
 	return {
 		permission: pause.permission,
-		resource: {
-			type: pause.resourceType,
-			id: pause.resourceId,
-			orgId: enablement.orgId,
-		},
+		resources: [
+			{
+				type: pause.resourceType,
+				id: pause.resourceId,
+				orgId: enablement.orgId,
+			},
+		],
 	}
 }
 
@@ -172,11 +228,14 @@ async function checkEnablerAccess(input: {
 			},
 		}
 	}
-	const stored = storedPauseResource(enablement)
+	const stored = await storedPauseResource(db, enablement)
 	if (stored) {
-		const decision = checkPermission(access, stored.permission, stored.resource)
 		// Still blocked on the same credential: stay paused as is.
-		if (!decision.allowed) return { ok: false, pause: null }
+		const allowed = stored.resources.some(
+			(resource) =>
+				checkPermission(access, stored.permission, resource).allowed,
+		)
+		if (!allowed) return { ok: false, pause: null }
 	}
 	return { ok: true, run, access }
 }

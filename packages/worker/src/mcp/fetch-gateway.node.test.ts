@@ -1,6 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
-import { expect, test, vi } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
+import { lookupSecretsThroughResolveSecret } from '#worker/test-support/secret-lookup.ts'
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import {
@@ -149,6 +150,7 @@ function userSecret(
 	allowedPackages: Array<string> = [],
 ): secretService.ResolvedSecret {
 	return {
+		credentialId: `cred-${value}`,
 		found: true,
 		value,
 		scope: 'user',
@@ -186,6 +188,10 @@ async function readHostApprovals(promise: Promise<unknown>) {
 const isPackageAccessRequiredFor = (packageName: string) => (error: unknown) =>
 	parsePackageAccessRequiredMessage(getErrorMessage(error))?.packageName ===
 	packageName
+
+beforeEach(() => {
+	lookupSecretsThroughResolveSecret()
+})
 
 test('fetch gateway blocks or expands secret placeholders based on host approval', async () => {
 	const createRequest = () =>
@@ -671,7 +677,10 @@ test('fetch gateway gates integration tokens by the connection grant and require
 		.mockResolvedValue(userSecret('oauth-access', ['example.com'], []))
 	const tokenSpy = vi
 		.spyOn(integrationCredentials, 'resolveIntegrationAccessToken')
-		.mockResolvedValue('oauth-access')
+		.mockResolvedValue({
+			credentialId: 'cred-integration',
+			accessToken: 'oauth-access',
+		})
 	const grantSpy = vi
 		.spyOn(integrationPackageAccess, 'assertCanUseIntegration')
 		.mockResolvedValue(undefined)
@@ -887,6 +896,7 @@ test('fetch gateway preserves request bodies and honors opt-out for text and bin
 		name === 'discordBotToken'
 			? userSecret('secret-value', ['discord.com'])
 			: {
+					credentialId: null,
 					found: false,
 					value: null,
 					scope: null,
@@ -978,6 +988,7 @@ test('fetch gateway derives Basic Auth header and enforces host approval', async
 			name in hostsByName
 				? userSecret(values[name]!, hostsByName[name]!)
 				: {
+						credentialId: null,
 						found: false,
 						value: null,
 						scope: null,

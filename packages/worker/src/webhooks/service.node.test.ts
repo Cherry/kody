@@ -24,15 +24,24 @@ import {
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
-vi.mock('#mcp/secrets/service.ts', () => ({
-	resolveSecret: vi.fn(async () => ({
+vi.mock('#mcp/secrets/service.ts', () => {
+	const resolveSecret = vi.fn(async (_input: unknown) => ({
 		found: true,
+		credentialId: 'cred-legacy-webhook-secret',
 		value: 'legacy-sentry-webhook-secret',
 		allowedHosts: [],
 		allowedPackages: ['pkg-1'],
 		scope: 'user',
-	})),
-}))
+	}))
+	return {
+		resolveSecret,
+		findSecretForUse: vi.fn(async (input: unknown) => {
+			const resolved = await resolveSecret(input)
+			const { value: _value, ...found } = resolved
+			return { found, readValue: async () => resolved }
+		}),
+	}
+})
 
 vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
 	resolveSavedPackage: vi.fn(

@@ -77,17 +77,39 @@ Profiles and the signed-in step are the other denials that can fire.
 1. re-checks that the acting person still has access to `orgId` (live
    membership, team, or outside-collaborator grant; org active), once per
    request context;
-2. calls `authorize` with `secret:use` or `integration:use` on the credential
-   unless the package stamp is `attested` (hosted bundler provenance, package
-   apps, webhooks). Ad hoc code (no stamp) and `claimed` stamps (CLI `--local`
-   CapabilityProxy) always need Use; a claimed stamp is checked for
-   `package:execute` only and is never secret authority;
+2. looks up the credential the name resolves to without reading its value, then
+   calls `authorize` with `secret:use` or `integration:use` on its `credential`
+   resource, by its stable credential id, for every package stamp. A `claimed`
+   stamp (CLI `--local` CapabilityProxy) is checked for `package:execute` only
+   and is never secret authority. A name with no credential is checked against a
+   target no grant names, so a non-holder gets a denial rather than a not-found.
+   Denial messages name the credential by family and name (`secret apiKey`),
+   never by id;
 3. applies the package rules (allowlists, usageMode, provider grants), then
    reads storage;
 4. schedules one `credential.resolve` row in `org_audit_events` per resolution
    (success, not found, denied, failed) via `waitUntil`, with the actor, the
-   credential's resource key, owner kind, and package stamp kind. It never holds
-   the value.
+   credential id (null when nothing resolved) and requested name, owner kind,
+   and package stamp kind. It never holds the value.
+
+**Credential ids and grants.** Org secrets, OAuth integrations, MCP servers, and
+vault bindings each have a stable credential id: the database assigns one on
+insert (`secret_entries.id`, `user_integrations.id`,
+`secret_provider_bindings.id`; an MCP server's id is its `mcp_server_settings`
+row id) and an upsert keeps it. Grants on them use one resource type,
+`credential`, keyed by that id (`credentials/credential-ids.ts`); the
+permissions stay `secret:*` for secrets and vault bindings and `integration:*`
+for integrations and MCP servers. Renaming a credential keeps its grants, and a
+name deleted then recreated gets a new id with no grants. A vault binding is its
+own credential: Use on its door-key secret is not Use on the vault.
+`secretList`, `integrationList`, `mcpServerList`, and `secretProviderList`
+return the ids that `accessGrant` takes.
+
+`accessGrant`, `accessList`, and grant invites still accept `secret` and
+`integration` targets by name. That is the old lane: the name resolves to the
+credential id once, at grant time, and the grant is stored under `credential`; a
+name that matches no credential is refused. The by-name targets are removed
+together with secret placeholders when the old credential lane is removed.
 
 `credential-storage-boundary.node.test.ts` fails if credential storage is read
 outside the door. Credential storage keys use `ownerIdFromCaller` (org id), not
@@ -130,7 +152,11 @@ gate every trigger passes:
   org, and `package:execute` on the package. A failure pauses the enablement
   (`org_access` or `package_access`) and drops the event.
 - `resolveCredential` pauses an enablement run that lacks Use on an org
-  credential (`credential_access`), even for an attested package stamp.
+  credential (`credential_access`), even for an attested package stamp. The
+  pause keeps the credential's family and name (what the waiting queue and
+  `enablementList` show) and its id in `paused_credential_id`, which the resume
+  check uses. A pause on a name that matched no credential has no id and
+  resolves the name on each check (old lane).
 - The next event checks again and resumes a paused enablement once access is
   back. There is never a fallback to another person, credential, or Owner.
 - No `on` enablement means nothing runs: a scheduled tick is skipped, a webhook

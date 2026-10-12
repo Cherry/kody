@@ -33,11 +33,15 @@ export const secretDeleteCapability = defineDomainCapability(
 		}),
 		async handler(args, ctx: CapabilityContext) {
 			requireMcpUser(ctx.callerContext)
-			await authorizeSecret(ctx, 'secret:delete', args.name)
 			const { authorityPackageId, storageContext } =
 				resolveCallerSecretAuthority({
 					storageContext: ctx.callerContext.storageContext,
 				})
+			await authorizeSecret(ctx, 'secret:delete', {
+				name: args.name,
+				scope: args.scope,
+				storageContext,
+			})
 			if (args.scope === 'user' && authorityPackageId) {
 				const existing = await findSecret({
 					env: ctx.env,

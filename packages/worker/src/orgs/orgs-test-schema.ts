@@ -177,6 +177,7 @@ export async function ensureOrgsTestSchema(db: D1Database) {
 				paused_permission TEXT,
 				paused_resource_type TEXT,
 				paused_resource_id TEXT,
+				paused_credential_id TEXT,
 				paused_at TEXT,
 				credential_mapping_json TEXT,
 				origin TEXT NOT NULL,

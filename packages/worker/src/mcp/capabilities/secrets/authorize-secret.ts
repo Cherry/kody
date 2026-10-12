@@ -4,8 +4,11 @@ import {
 	authorize,
 	authorizeOrgWide,
 	loadResourceListScope,
-	orgResource,
 } from '#worker/authorization/authorize.ts'
+import {
+	credentialResource,
+	missingCredentialResource,
+} from '#worker/credentials/credential-ids.ts'
 import { requireMcpRequest } from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { findSecret } from '#mcp/secrets/service.ts'
@@ -14,17 +17,36 @@ import { type StorageContext } from '#mcp/storage.ts'
 
 type SecretPermission = Extract<OrgPermission, `secret:${string}`>
 
-/** Secrets are `secret` resources keyed by name, the key `resolveCredential` checks. */
+/**
+ * Secrets are checked as the `credential` resource of the entry `name`
+ * resolves to (the key `resolveCredential` checks). A missing secret is
+ * checked against a target no grant names, so only org-wide holders pass.
+ */
 export async function authorizeSecret(
 	ctx: CapabilityContext,
 	permission: SecretPermission,
-	name: string,
+	input: {
+		name: string
+		scope?: SecretScope | null
+		storageContext?: StorageContext | null
+	},
 ) {
 	const request = requireMcpRequest(ctx.callerContext)
+	const name = input.name.trim()
+	const found = await findSecret({
+		env: ctx.env,
+		userId: ownerIdFromCaller(ctx.callerContext),
+		name,
+		scope: input.scope ?? undefined,
+		storageContext: input.storageContext ?? null,
+		includeExpired: true,
+	})
 	await authorize(
 		{ env: ctx.env, request },
 		permission,
-		orgResource(request, 'secret', name),
+		found.credentialId
+			? credentialResource(request.org.id, { id: found.credentialId, name })
+			: missingCredentialResource(request.org.id, name),
 	)
 }
 
@@ -46,8 +68,15 @@ export async function authorizeSecretSet(
 		storageContext: input.storageContext,
 		includeExpired: true,
 	})
-	if (existing.found) {
-		await authorizeSecret(ctx, 'secret:write', name)
+	if (existing.credentialId) {
+		await authorize(
+			{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
+			'secret:write',
+			credentialResource(requireMcpRequest(ctx.callerContext).org.id, {
+				id: existing.credentialId,
+				name,
+			}),
+		)
 		return
 	}
 	await authorize(
@@ -63,7 +92,7 @@ export async function loadSecretListScope(
 	return await loadResourceListScope(
 		{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
 		permission,
-		'secret',
+		'credential',
 	)
 }
 
