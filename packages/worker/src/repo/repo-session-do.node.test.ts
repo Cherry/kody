@@ -1579,7 +1579,7 @@ test('published artifact rebuild stages the published snapshot first and falls b
 			sourceId: 'source-1',
 			userId: ownerIdFromStored('user-1'),
 		})
-	async function stagedSourceFiles() {
+	async function stagedSourceFiles(publishedCommit = 'commit-1') {
 		const put = vi.fn(
 			async (_key: string, _body: string, _options: unknown) => undefined,
 		)
@@ -1588,6 +1588,7 @@ test('published artifact rebuild stages the published snapshot first and falls b
 		).stagePublishedPackageArtifactRebuild({
 			sourceId: 'source-1',
 			userId: ownerIdFromStored('user-1'),
+			publishedCommit,
 		})
 		expect(
 			staged.stagingKey.startsWith('repo-artifact-rebuild-staging:v1:user-1:'),
@@ -1596,11 +1597,12 @@ test('published artifact rebuild stages the published snapshot first and falls b
 		expect(put).toHaveBeenCalledWith(staged.stagingKey, expect.any(String), {
 			expirationTtl: 15 * 60,
 		})
-		return (
-			JSON.parse(put.mock.calls[0]![1]) as {
-				sourceFiles: Record<string, string>
-			}
-		).sourceFiles
+		const payload = JSON.parse(put.mock.calls[0]![1]) as {
+			sourceFiles: Record<string, string>
+			publishedCommit: string
+		}
+		expect(payload.publishedCommit).toBe(publishedCommit)
+		return payload.sourceFiles
 	}
 	const manifestSnapshot = (
 		manifestContent: string,
@@ -1692,7 +1694,6 @@ test('published artifact rebuild stages the published snapshot first and falls b
 	await expect(stagedSourceFiles()).resolves.toEqual(snapshotFiles)
 	expect(mockModule.workspaceGlob).not.toHaveBeenCalled()
 })
-
 test('already_published external publish refreshes the snapshot from the in-memory clone only when it differs', async () => {
 	const cloneFiles = {
 		'package.json': demoPackageJson,
