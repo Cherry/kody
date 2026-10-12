@@ -120,6 +120,20 @@ when listing: after a rename, the old name finds no grants, though the grant on
 the credential id remains. Those by-name targets are leftover and tracked in
 [planned breaking changes](../planned-breaking-changes.md).
 
+**Personal credentials** (`credentials/personal-credentials.ts`) are credentials
+in their owner's personal org. The owner grants one to another org they have a
+live binding to, one org at a time (`credential_org_grants`). It is then usable
+only in the owner's own runs there: no role, grant, or package stamp lets an
+Owner or Automation use someone else's personal credential. Only live
+credentials of an active personal org qualify: a user-scope secret that has not
+expired, an integration, or an MCP server. Vault bindings and package or session
+secrets never do. Leaving the org hard-deletes the person's rows for it, and an
+org transfer out of the personal org is blocked while a moved credential still
+has grants. This is backend only for now: placeholders still resolve org
+credentials, and no capability grants or lists personal credentials until the
+scoped client API
+([ADR 0068](../decisions/0068-credentials-own-placement-scoped-clients.md)).
+
 `credential-storage-boundary.node.test.ts` fails if credential storage is read
 outside the door and its resolvers. Credential storage keys use
 `ownerIdFromCaller` (org id), not the acting person. Automation is Owner. See

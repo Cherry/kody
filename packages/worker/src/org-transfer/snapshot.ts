@@ -73,6 +73,8 @@ export type OrgTransferSnapshot = {
 	targetMembers: Map<string, string>
 	/** Server ids registered in each org's McpClientHub. */
 	hubServerIds: { from: Set<string>; to: Set<string> }
+	/** Source credentials granted to other orgs as personal credentials. */
+	personalGrantCredentialIds: Set<string>
 }
 
 async function readOwnerRows(input: {
@@ -142,7 +144,7 @@ export async function loadOrgTransferSnapshot(input: {
 		mcpClientHubTransferStub({ env: input.env, userId })
 			.listServerIdsForTransfer()
 			.then((ids) => new Set(ids))
-	const [source, target, sourceJobs, members, fromHub, toHub] =
+	const [source, target, sourceJobs, members, fromHub, toHub, personalGrants] =
 		await Promise.all([
 			readOrgTransferTableRows(db, input.from.id),
 			readOrgTransferTableRows(db, input.to.id),
@@ -156,6 +158,12 @@ export async function loadOrgTransferSnapshot(input: {
 				.all<{ user_id: string; role: string }>(),
 			hubServerIds(input.from.id),
 			hubServerIds(input.to.id),
+			db
+				.prepare(
+					`SELECT DISTINCT credential_id FROM credential_org_grants WHERE user_id = ?`,
+				)
+				.bind(input.from.id)
+				.all<{ credential_id: string }>(),
 		])
 	return {
 		from: input.from,
@@ -167,5 +175,8 @@ export async function loadOrgTransferSnapshot(input: {
 			(members.results ?? []).map((row) => [row.user_id, row.role]),
 		),
 		hubServerIds: { from: fromHub, to: toHub },
+		personalGrantCredentialIds: new Set(
+			(personalGrants.results ?? []).map((row) => row.credential_id),
+		),
 	}
 }

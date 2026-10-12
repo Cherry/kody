@@ -451,6 +451,10 @@
 		{
 			"filename": "0115-drop-enablement-org-migrations.sql",
 			"sha256": "6e1c066fc7df114176741744e678b13b2db7f8ad7f3059059874bd35eb6b13c9"
+		},
+		{
+			"filename": "0116-credential-org-grants.sql",
+			"sha256": "88f8a994e1b1f99b872a7ad10fcf55f53987a7359e427d9e7cb9bdd05583fd16"
 		}
 	]
 }
