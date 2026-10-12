@@ -18,6 +18,7 @@ type AccountManagementLinkNavItem = {
 }
 
 type AccountManagementLinkNavGroup = {
+	note?: string
 	label: string | null
 	items: Array<AccountManagementLinkNavItem>
 }
@@ -102,6 +103,20 @@ function renderRailGroups(
 			{group.label ? (
 				<p aria-hidden="true" css={railGroupLabelCss}>
 					{group.label}
+				</p>
+			) : null}
+			{group.note ? (
+				<p
+					css={{
+						margin: 0,
+						padding: '0.35rem 0.7rem 0.55rem',
+						fontSize: '0.8rem',
+						lineHeight: 1.4,
+						color: colors.textMuted,
+					}}
+					data-testid="account-rail-group-note"
+				>
+					{group.note}
 				</p>
 			) : null}
 			{renderAccountNavLinks(group.items, linkCss)}
