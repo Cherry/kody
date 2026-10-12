@@ -4,10 +4,8 @@ import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	addReservedUsernames,
-	clearReservedUsernameSettingsCacheForTests,
 	findReservedUsernameConflicts,
 	getEffectiveReservedUsernameError,
 	isEffectivelyReservedUsername,
@@ -20,8 +18,8 @@ import {
 import {
 	getEffectiveUsernameValidationError,
 	normalizeUsername,
-	usernameRequirements,
 } from './username.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 function createMemoryKv(initial?: Record<string, string>) {
 	const store = new Map<string, string>(Object.entries(initial ?? {}))
@@ -78,7 +76,7 @@ async function mismatches<T>(
 
 async function insertUser(sqlite: DatabaseSync, username: string) {
 	const email = `${username}-holder@example.com`
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
 	sqlite.exec(`
 		INSERT INTO users (username, email, stable_user_id, password_hash)
 		VALUES (
@@ -131,15 +129,14 @@ test('reserved username KV overrides, fallback, memo, permanent lock, and confli
 		),
 	).toEqual([])
 
-	clearReservedUsernameSettingsCacheForTests()
 	const { env: swearEnv } = overrideEnv(['fuck'])
 	const reservedMessage = 'This username is reserved.'
 	const swearValidationCases = [
 		{ username: 'fuckyou', expected: reservedMessage },
-		{ username: 'FuckYou', expected: usernameRequirements },
+		{ username: 'FuckYou', expected: reservedMessage },
 		{ username: normalizeUsername('FuckYou'), expected: reservedMessage },
 		{ username: normalizeUsername('SUPERFUCK'), expected: reservedMessage },
-		{ username: 'fuck_you', expected: usernameRequirements },
+		{ username: 'fuck_you', expected: reservedMessage },
 		{ username: 'super-fuck', expected: reservedMessage },
 		{ username: 'fu-ck', expected: reservedMessage },
 	]
@@ -151,7 +148,6 @@ test('reserved username KV overrides, fallback, memo, permanent lock, and confli
 	expect(await isEffectivelyReservedUsername('fuck_you', swearEnv)).toBe(true)
 	expect(await isEffectivelyReservedUsername('super_fuck', swearEnv)).toBe(true)
 
-	clearReservedUsernameSettingsCacheForTests()
 	consoleWarn.mockImplementation(() => {})
 	expect(
 		await isEffectivelyReservedUsername(
@@ -164,7 +160,6 @@ test('reserved username KV overrides, fallback, memo, permanent lock, and confli
 		expect.anything(),
 	)
 
-	clearReservedUsernameSettingsCacheForTests()
 	vi.useFakeTimers()
 	try {
 		const { kv: memoKv, env: memoEnv } = overrideEnv(['brandnew'])
@@ -179,7 +174,6 @@ test('reserved username KV overrides, fallback, memo, permanent lock, and confli
 		vi.useRealTimers()
 	}
 
-	clearReservedUsernameSettingsCacheForTests()
 	const setEnv = createEnv(createMemoryKv())
 	const edit = (
 		change: typeof addReservedUsernames,

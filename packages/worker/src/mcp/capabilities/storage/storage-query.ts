@@ -1,3 +1,5 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -12,7 +14,10 @@ import {
 } from '#worker/storage-runner.ts'
 import { estimateEntitlementStorageSqlWriteBytes } from '#worker/entitlements/service.ts'
 import { isUserStorageSqlCallerMessage } from '#worker/storage-sql-caller-error.ts'
-import { authorizeCapabilityStorageId } from '#mcp/capabilities/storage-access.ts'
+import {
+	authorizeCapabilityStorageId,
+	authorizePackageBucketAccess,
+} from '#mcp/capabilities/storage-access.ts'
 import { storageIdSchema } from './shared.ts'
 
 const outputSchema = z.object({
@@ -34,9 +39,10 @@ export const storageQueryCapability = defineDomainCapability(
 	capabilityDomainNames.storage,
 	{
 		name: 'storageQuery',
+		orgPermission: 'package:write',
 		description:
 			'Run SQL against one durable storage bucket. Defaults to read-only and only allows SELECT, EXPLAIN, and schema PRAGMA queries unless writable is explicitly true.',
-		keywords: ['storage', 'sql', 'sqlite', 'query', 'inspect', 'database'],
+		keywords: ['storage', 'sql', 'query', 'inspect', 'database'],
 		readOnly: false,
 		idempotent: false,
 		destructive: false,
@@ -61,11 +67,17 @@ export const storageQueryCapability = defineDomainCapability(
 				capabilityName: 'storageQuery',
 				storageId: args.storage_id,
 			})
+			await authorizePackageBucketAccess({
+				env: ctx.env,
+				callerContext: ctx.callerContext,
+				storageId,
+				permission: 'package:write',
+			})
 			const writable = args.writable ?? false
 			if (writable && !isReadOnlyStorageSqlQuery(args.query)) {
 				await assertStorageRunnerWriteWithinEntitlement({
 					env: ctx.env,
-					userId: user.userId,
+					userId: personalOrgId(user.userId),
 					email: user.email,
 					storageId,
 					requested: estimateEntitlementStorageSqlWriteBytes({
@@ -77,7 +89,7 @@ export const storageQueryCapability = defineDomainCapability(
 			try {
 				const result = await storageRunnerRpc({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					storageId,
 				}).sqlQuery({
 					query: args.query,

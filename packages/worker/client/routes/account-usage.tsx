@@ -6,7 +6,9 @@ import {
 	type AccountUsageLoaderData,
 	type AdminPlanName,
 } from '#universal/loader-data.ts'
+import { readAppSession } from '#client/app-session-context.tsx'
 import { readCurrentRouterHref } from '#client/client-router.tsx'
+import { orgBillingPath } from '#universal/org-pages.ts'
 import { createRouteData, routeDataRedirect } from '#client/route-data.tsx'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
@@ -22,6 +24,7 @@ import {
 } from '#client/routes/account-management-components.tsx'
 import { RecordTable } from '#client/routes/record-table.tsx'
 import { chartColor, formatIntegerNumber } from '#client/charts/chart-theme.ts'
+import { isUnlimitedLimit } from '#universal/plans.ts'
 import {
 	colors,
 	radius,
@@ -46,9 +49,16 @@ import {
 	renderCreditsAlarm,
 	renderIncludedComputePanel,
 } from '#client/routes/account-usage-story.tsx'
+import { WhereItWentPanel } from '#client/routes/account-usage-where-it-went.tsx'
 
 const usageApiPath = '/account/usage.json'
-const billingPath = '/account/billing'
+
+function usageBillingHref(handle: Handle) {
+	const slug = readAppSession(handle).session?.organizations?.find(
+		(org) => org.personal,
+	)?.slug
+	return slug ? orgBillingPath(slug) : '/account'
+}
 
 const entitlementGroupOrder: Array<
 	AccountUsageEntitlementConsumption['group']
@@ -154,7 +164,13 @@ function formatCurrentValue(item: AccountUsageEntitlementConsumption) {
 }
 
 function formatLimitValue(item: AccountUsageEntitlementConsumption) {
-	return formatUsageValue(item.resource, item.limit)
+	return formatLimitNumber(item.resource, item.limit)
+}
+
+function formatLimitNumber(resource: string, limit: number) {
+	return isUnlimitedLimit(limit)
+		? 'Unlimited'
+		: formatUsageValue(resource, limit)
 }
 
 function usageProgressPercent(item: AccountUsageEntitlementConsumption) {
@@ -475,7 +491,7 @@ export function AccountUsageRoute(handle: Handle) {
 									gap: spacing.md,
 								})}
 							>
-								<a href={billingPath} mix={css(primaryLinkCss)}>
+								<a href={usageBillingHref(handle)} mix={css(primaryLinkCss)}>
 									Manage billing
 								</a>
 								{usage.computeOverage.creditWallet !== 'none' ? (
@@ -496,6 +512,7 @@ export function AccountUsageRoute(handle: Handle) {
 							meters: usage.includedCompute,
 							summary: usage.includedComputeSummary,
 						})}
+						<WhereItWentPanel breakdown={usage.whereItWent} />
 						{usage.warnings.length > 0 ? (
 							<AccountManagementPanel
 								title={accountUsageWarningsPanelTitle(usage.warnings)}
@@ -518,7 +535,7 @@ export function AccountUsageRoute(handle: Handle) {
 										<li key={item.resource}>
 											<strong>{item.label}</strong>:{' '}
 											{item.week
-												? `${formatCurrentValue(item)} / ${formatLimitValue(item)} today (${formatUsagePercent(item.percentOfLimit)}) · ${formatIntegerNumber(item.week.current)} / ${formatIntegerNumber(item.week.limit)} this week (${formatUsagePercent(item.week.percentOfLimit)})`
+												? `${formatCurrentValue(item)} / ${formatLimitValue(item)} today (${formatUsagePercent(item.percentOfLimit)}) · ${formatIntegerNumber(item.week.current)} / ${formatLimitNumber(item.resource, item.week.limit)} this week (${formatUsagePercent(item.week.percentOfLimit)})`
 												: `${formatCurrentValue(item)} / ${formatLimitValue(item)} (${formatUsagePercent(item.percentOfLimit)})`}
 											. {item.howToReduce}
 											{warningAction && warningOffersCredits(item.resource) ? (
@@ -576,7 +593,7 @@ export function AccountUsageRoute(handle: Handle) {
 												? `${formatCurrentValue(item)} today · ${formatIntegerNumber(item.week.current)} this week`
 												: formatCurrentValue(item),
 											limit: item.week
-												? `${formatLimitValue(item)} / day · ${formatIntegerNumber(item.week.limit)} / week`
+												? `${formatLimitValue(item)} / day · ${formatLimitNumber(item.resource, item.week.limit)} / week`
 												: formatLimitValue(item),
 											used: (
 												<span

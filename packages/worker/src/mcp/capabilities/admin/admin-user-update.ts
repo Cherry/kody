@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { updateAdminUserPlan } from '#worker/admin/users-data.ts'
+import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { resolvePlanWrite } from '#universal/plans.ts'
@@ -19,7 +20,7 @@ const inputSchema = z
 		plan: planNameSchema
 			.nullable()
 			.describe(
-				'Manual entitlement grant to set (users.plan). Null maps to free (never persists NULL). Does not change the Stripe subscription.',
+				'Manual entitlement grant to set (orgs.plan on the personal org). Null maps to free (never persists NULL). Does not change the Stripe subscription.',
 			),
 	})
 	.refine(
@@ -55,8 +56,9 @@ export const adminUserUpdateCapability = defineDomainCapability(
 						username: args.username,
 						plan: resolvePlanWrite(args.plan),
 					})
+					// Missing target is caller-supplied; keep off Sentry via McpCallerError.
 					if (!user) {
-						throw new Error('User not found.')
+						throw new McpCallerError('User not found.')
 					}
 					return { user }
 				},

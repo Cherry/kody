@@ -1,12 +1,13 @@
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
-import { routes } from '#universal/routes.ts'
+import { orgSectionRestPath } from '#universal/org-section-hrefs.ts'
+import { readSignupOrgSlugOrNull } from '#worker/orgs/signup-org-slug.ts'
 import { runQueueableDynamicWorkerWork } from '#worker/dynamic-worker-evaluation-budget.ts'
-import { readPreExecutionPackageInvocationInfrastructureCode } from '#worker/package-invocations/admin-package-subscriptions.ts'
+import {
+	loadMatchingPackageSubscriptions,
+	readPreExecutionPackageInvocationInfrastructureCode,
+} from '#worker/package-invocations/admin-package-subscriptions.ts'
 import { invokePackageSubscription } from '#worker/package-invocations/service.ts'
-import { listPackageSubscriptions } from '#worker/package-registry/manifest.ts'
-import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
-import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
-import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
+import { type EnablementAudience } from '#worker/enablements/run-gate.ts'
 import { type RunLogRowInput } from './run-log-do.ts'
 
 export const runErrorRecordedTopic = 'run.error.recorded'
@@ -34,11 +35,6 @@ type RunErrorRecordedSubscriptionEnvelope = {
 		error_message: string | null
 	}
 	activity_url: string
-}
-
-type LoadedRunErrorSubscription = {
-	savedPackage: SavedPackageRecord
-	subscription: ReturnType<typeof listPackageSubscriptions>[number]
 }
 
 function buildRunErrorEventPayload(input: {
@@ -78,10 +74,16 @@ function buildSubscriptionIdempotencyKey(input: {
 	return `run-error:${input.runId}:${input.packageId}:${runErrorRecordedTopic}`
 }
 
-function buildActivityUrl(input: { baseUrl: string; runId: string }) {
-	return `${input.baseUrl}${routes.accountActivityDetail.href({
-		runId: input.runId,
-	})}`
+function buildActivityUrl(input: {
+	baseUrl: string
+	orgSlug: string
+	runId: string
+}) {
+	return `${input.baseUrl}${orgSectionRestPath(
+		input.orgSlug,
+		'activity',
+		input.runId,
+	)}`
 }
 
 async function loadMatchingRunErrorSubscriptions(input: {
@@ -89,59 +91,25 @@ async function loadMatchingRunErrorSubscriptions(input: {
 	baseUrl: string
 	userId: string
 }) {
-	let savedPackages: Array<SavedPackageRecord>
 	try {
-		savedPackages = await listSavedPackagesByUserId(input.env.APP_DB, {
-			userId: input.userId,
+		return await loadMatchingPackageSubscriptions({
+			...input,
+			topic: runErrorRecordedTopic,
 		})
 	} catch (error) {
-		// Best-effort: discovery must not reject the dispatcher. Missing-table
-		// (local/test DBs) is silent; other DB failures are recorded for warn.
-		const missingTable =
-			error instanceof Error &&
-			error.message.includes('no such table: saved_packages')
-		return {
-			subscriptions: [] as Array<LoadedRunErrorSubscription>,
-			discoveryErrors: missingTable ? [] : [error],
-		}
+		// Best-effort: discovery must not reject the dispatcher.
+		return { subscriptions: [], discoveryErrors: [error] }
 	}
-	const settled = await Promise.allSettled(
-		savedPackages.map(async (savedPackage) => {
-			const loaded = await loadPackageManifestBySourceId({
-				env: input.env as Env,
-				baseUrl: input.baseUrl,
-				userId: input.userId,
-				sourceId: savedPackage.sourceId,
-			})
-			const subscription = listPackageSubscriptions(loaded.manifest).find(
-				(candidate) => candidate.topic === runErrorRecordedTopic,
-			)
-			if (!subscription) return null
-			return {
-				savedPackage,
-				subscription,
-			} satisfies LoadedRunErrorSubscription
-		}),
-	)
-	const subscriptions: Array<LoadedRunErrorSubscription> = []
-	const discoveryErrors: Array<unknown> = []
-	for (const [index, result] of settled.entries()) {
-		if (result.status === 'fulfilled') {
-			if (result.value) subscriptions.push(result.value)
-			continue
-		}
-		const savedPackage = savedPackages[index]
-		console.warn(
-			'Failed to load package manifest for run.error.recorded subscription',
-			{
-				sourceId: savedPackage?.sourceId,
-				packageId: savedPackage?.id,
-				error: result.reason,
-			},
-		)
-		discoveryErrors.push(result.reason)
-	}
-	return { subscriptions, discoveryErrors }
+}
+
+/**
+ * A run error reaches enablers who can see the run's package or job. An ad
+ * hoc run has neither, so only Owners receive it.
+ */
+function runErrorAudience(run: RunLogRowInput): EnablementAudience {
+	if (run.packageId) return { resource: { type: 'package', id: run.packageId } }
+	if (run.jobId) return { resource: { type: 'job', id: run.jobId } }
+	return { resource: null }
 }
 
 /**
@@ -155,6 +123,7 @@ export async function dispatchRunErrorSubscriptionEvents(input: {
 	env: Pick<Env, 'APP_DB' | 'BUNDLE_ARTIFACTS_KV' | 'APP_BASE_URL'>
 	userId: string
 	run: RunLogRowInput
+	orgSlug?: string
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
 	if (input.run.status !== 'error') return []
@@ -167,9 +136,31 @@ export async function dispatchRunErrorSubscriptionEvents(input: {
 			baseUrl,
 			userId: input.userId,
 		})
+	const orgSlug = await readSignupOrgSlugOrNull(
+		input.env.APP_DB,
+		input.userId,
+		input.orgSlug,
+	)
+	if (!orgSlug) {
+		if (discoveryErrors.length > 0) {
+			console.warn(
+				'run.error.recorded package subscription discovery incomplete',
+				{
+					runId: input.run.id,
+					errorCount: discoveryErrors.length,
+					error: discoveryErrors[0],
+				},
+			)
+		}
+		return []
+	}
 	const eventPayload = buildRunErrorEventPayload({
 		run: input.run,
-		activityUrl: buildActivityUrl({ baseUrl, runId: input.run.id }),
+		activityUrl: buildActivityUrl({
+			baseUrl,
+			orgSlug,
+			runId: input.run.id,
+		}),
 	})
 	const settled = await runQueueableDynamicWorkerWork(
 		async () =>
@@ -186,6 +177,8 @@ export async function dispatchRunErrorSubscriptionEvents(input: {
 							packageId: savedPackage.id,
 						}),
 						source: 'run-records',
+						request: { kind: 'platform-event', sourceId: 'run-records' },
+						audience: runErrorAudience(input.run),
 						waitUntil: input.waitUntil,
 					})
 					const retryableCode =

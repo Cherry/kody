@@ -41,8 +41,8 @@ package-app surfaces:
    from `@kody-internal/shared/password-policy.ts` wherever a password is set.
 6. **OAuth PKCE stays S256-only.** Keep the `getPkceValidationError` check in
    `oauth-handlers.ts` (reject `code_challenge_method` other than S256 when a
-   challenge is present). Do not set the provider's `allowPlainPKCE: true` — see
-   the OAuth section below.
+   challenge is present). `@cloudflare/workers-oauth-provider` is S256-only (no
+   `allowPlainPKCE`); see the OAuth section below.
 7. **Every data path is `userId`-scoped.** New D1 queries, Durable Object names,
    and Vectorize filters must include `userId`. Prefer parameterized SQL
    (`.prepare(...).bind(...)`); never interpolate user input into SQL.
@@ -89,9 +89,9 @@ package-app surfaces:
     address from Account settings — never leaking the current email). The owner
     re-verifies the former address (`POST /account/email-claim-release.json`
     plus `/verify-email-claim-release`) to drop the claim; that path is rate
-    limited. Operators inspect leftover implicit sha256 collisions with
-    `adminUserStableIdConflict` (metadata only). `users.stable_user_id` is never
-    recomputed for an existing account.
+    limited. New accounts get random `stable_user_id` values. Only `users.email`
+    and active `user_email_claims` rows reserve an address; a legacy email-hash
+    `stable_user_id` reserves nothing and is never recomputed from an email.
 12. **Unverified accounts are reclaimed on a provider-verified social match.**
     When a social login profile presents a verified email that matches
     `users.email` and `email_verified_at` is null, treat the row as a possible
@@ -152,13 +152,14 @@ package-app surfaces:
   external script; its image pageview beacon is allowed in `img-src` and its
   `sendBeacon` duration/event pings are allowed in `connect-src`; the
   scroll-restoration restore script is an inline classic script allowed only by
-  its sha256 hash), `frame-ancestors 'none'`, `base-uri 'self'`,
-  `object-src 'none'`, `form-action 'self'`, `worker-src 'self' blob:` (for
-  Sentry Session Replay), and `connect-src` limited to `'self'` plus the Fathom,
-  Cloudflare Web Analytics, and Turnstile beacon hosts. The client bundle loads
-  as an external module. `style-src` allows `'unsafe-inline'` because
-  SSR-streamed styles arrive as inline `<style>` tags; style injection is far
-  lower risk than script injection.
+  its sha256 hash), `img-src` also allowlists `https://static.scarf.sh` for the
+  Scarf page pixel on public marketing and docs, `frame-ancestors 'none'`,
+  `base-uri 'self'`, `object-src 'none'`, `form-action 'self'`,
+  `worker-src 'self' blob:` (for Sentry Session Replay), and `connect-src`
+  limited to `'self'` plus the Fathom, Cloudflare Web Analytics, and Turnstile
+  beacon hosts. The client bundle loads as an external module. `style-src`
+  allows `'unsafe-inline'` because SSR-streamed styles arrive as inline
+  `<style>` tags; style injection is far lower risk than script injection.
 - `X-Frame-Options: DENY` plus `frame-ancestors 'none'` — stops clickjacking of
   the OAuth consent screen and account pages.
 - `X-Content-Type-Options: nosniff`.
@@ -238,12 +239,12 @@ brand, infrastructure, mailbox, and trust labels (`autodiscover`, `mta-sts`,
 cannot become package-app subdomains or inbound mailboxes. Operators add or
 unreserve names at runtime through `platform-settings:v1:reserved-usernames`
 without a deploy; system-email locals and `kody`-prefixed built-in names stay
-permanently locked. Signup, username change, admin user creation, and social
-username generation consult the effective set (built-in plus KV). Inbound
-mailbox routing (`resolveInboundMailboxRoute`) uses only the RFC 5233 base local
-with `isPermanentlyReservedUsername` / `isSystemEmailLocal` — never the plus-tag
-and never the claim-denylist substring matcher — so `alice+kody@inbox…` is user
-mail for `alice`.
+permanently locked. Signup, admin user creation, and social username generation
+consult the effective set (built-in plus KV). Inbound mailbox routing
+(`resolveInboundMailboxRoute`) uses only the RFC 5233 base local with
+`isPermanentlyReservedUsername` / `isSystemEmailLocal` — never the plus-tag and
+never the claim-denylist substring matcher — so `alice+kody@inbox…` is user mail
+for `alice`.
 
 A new claim fails when the case-insensitive (lowercase-trimmed) username is an
 exact reserved token or when the hyphen/underscore-stripped form equals a
@@ -263,12 +264,10 @@ when invoked. Resolve conflicts before expanding the built-in list; do not treat
 `conflicts` as a mandatory post-expansion run. Operators may still change an
 existing username at their discretion when a handle is abusive, reserved,
 impersonating, or otherwise a problem — that policy is stated on
-[`/terms`](https://kody.codes/terms). Platform accounts still claim an exact
-token from the effective reserved set (built-in plus KV-added, minus removed),
-not a substring collision. Generated usernames keep numeric suffixes only when
-the preferred base is claimable but taken; a substring-eligible reserved base
-skips to a random compact candidate because `support-2` still contains
-`support`.
+[`/terms`](https://kody.codes/terms). Generated usernames keep numeric suffixes
+only when the preferred base is claimable but taken; a substring-eligible
+reserved base skips to a random compact candidate because `support-2` still
+contains `support`.
 
 Dispatch lives in `packages/worker/src/app/package-app-origin.ts`, called first
 in the Worker `fetch` handler:
@@ -280,12 +279,11 @@ in the Worker `fetch` handler:
 - **Package-app apex** (`kody.run`): serves no package code. `/` redirects to
   the app origin. Legacy path-based URLs (`/@{username}/packages/*`) redirect
   (`302`/`307`) to the owning user's subdomain. Everything else — including
-  `/account/*`, `/login`, `/mcp`, and the
-  `/@{username}/api/package-invocations/*` and `/webhooks/*` machine APIs — is
-  `404`. Those APIs stay on the app origin on purpose: they are authenticated by
-  their own bearer tokens or URL secrets, they are never called by package
-  browser code, and hosting them on the package-app domain would only widen its
-  surface. Retired `/@{username}/connectors/*` paths also 404.
+  `/account/*`, `/login`, `/mcp`, and the `/webhooks/*` machine API — is `404`.
+  Webhook ingress stays on the app origin on purpose: it is authenticated by its
+  own URL secret, it is never called by package browser code, and hosting it on
+  the package-app domain would only widen its surface. Retired
+  `/@{username}/connectors/*` paths also 404.
 - **Per-user package-app subdomain** (`{username}.kody.run`): serves only
   `/packages/{kodyId}/*` for that hostname's username label. `/` redirects to
   the app origin; every other path is `404`.
@@ -451,9 +449,8 @@ re-check length, so existing accounts are never locked out.
   (`packages/worker/src/oauth-handlers.ts`) rejects an authorize request whose
   `code_challenge_method` is anything other than `S256` when a `code_challenge`
   is present. Plain PKCE offers no protection against code interception.
-  `@cloudflare/workers-oauth-provider` 0.10+ defaults `allowPlainPKCE` to false
-  (S256-only) while allowing confidential clients to omit PKCE. Keep the
-  app-layer check; do not set `allowPlainPKCE: true`.
+  `@cloudflare/workers-oauth-provider` is S256-only (no `allowPlainPKCE`). Keep
+  the app-layer check; plain PKCE cannot be re-enabled.
 - Dynamic client registration (`/oauth/register`) is intentionally **open**: the
   MCP OAuth spec requires it, and clients (including native/public clients using
   PKCE) rely on it. This is a deliberate acceptance, not a gap. Do not add
@@ -553,9 +550,22 @@ guarded by a bearer secret comparison.
   backup SQL, manifests, or repository files.
 - Outbound secret use goes through the fetch gateway
   (`packages/worker/src/mcp/fetch-gateway.ts`), which is deny-by-default: a
-  secret placeholder is only substituted for a host the user explicitly approved
-  in the account UI. Policy writes (allowed hosts/capabilities/packages) are
-  only reachable through the authenticated account UI.
+  credential placeholder is filled only for a host the credential allows (a
+  secret's hosts the user approved in the account UI, an integration's
+  `requiredHosts` and `apiBaseUrl` host, a vault item's websites) and only over
+  HTTPS. It may sit in a header, the URL path or query, or a text body (JSON
+  values are JSON-escaped, form values form-encoded); multipart and non-UTF-8
+  bodies are forwarded byte for byte. A placeholder on plain HTTP, in the URL
+  host or user info, or bound for a host the credential does not allow is
+  refused before anything resolves
+  (`packages/worker/src/mcp/secrets/secret-placement.ts` and the credential
+  door), so none is sent unfilled. The values are redacted from echoes in the
+  response (also URL-, form-, and JSON-encoded) and from fetch errors.
+  `x-kody-secret-resolution: headers-only` fills headers only, for a body that
+  quotes the syntax; `off` skips resolution entirely. The control header is
+  stripped before the request leaves, on both the gateway and local native fetch
+  paths. Policy writes (allowed hosts/capabilities/ packages) are only reachable
+  through the authenticated account UI.
 - User code runs in a Cloudflare Worker Loader isolate without the parent `env`;
   capabilities are RPC'd back to handlers that enforce the caller's `userId`.
 - The DR control-plane Admin UI is protected by Cloudflare Access plus in-worker
@@ -573,12 +583,18 @@ Authentication-Results (DMARC fail, or SPF fail/softfail without DKIM pass →
 quarantine; missing header fails open). Accepted user mail dispatches
 `email.message.received`; quarantined user mail dispatches
 `email.message.quarantined` instead. Quarantined operator system-inbox mail is
-stored but suppresses `email.system-message.received`. Successful
-reserved-sender sends fan `email.system-message.sent` (admin-only) with the sent
-correspondence. Reclassification never retroactively fires subscription events.
-Users manage rules via `email_sender_rule_*` (200-rule cap), reclassify via
-`emailMessageClassify` or `/account/email`, and delete stored messages via
-`emailMessageDelete` or the delete action on `/account/email`; operators use
+stored but suppresses `email.system-message.received`. Before user-inbox
+dispatch, `classifyInboundEmailSender` decides who the run acts as: a verified,
+authenticated account email of a current org member runs as that member (only
+packages they hold `package:execute` on, credentials checked and audited under
+them at resolve time), any other sender that passes the auth verdict runs as the
+inbox's org, and failed auth or a spoofed member address runs nothing and logs
+`inbound-email-sender-unverified`. Successful reserved-sender sends fan
+`email.system-message.sent` (admin-only) with the sent correspondence.
+Reclassification never retroactively fires subscription events. Users manage
+rules via `email_sender_rule_*` (200-rule cap), reclassify via
+`emailMessageClassify` or `/@<slug>/-/email`, and delete stored messages via
+`emailMessageDelete` or the delete action on `/@<slug>/-/email`; operators use
 `admin_system_email_sender_rule_*` for system inboxes. Upstream, Cloudflare
 Email Routing already rejects mail failing both SPF and DKIM and honors sender
 DMARC policy.
@@ -607,7 +623,7 @@ blast radius:
   for 60 seconds, so a new suspension can take up to that long to stop
   background work already warm in an isolate. Set and cleared through the
   audited `suspend_user` / `unsuspend_user` actions on `POST /admin/users.json`.
-- **Automatic outbound-email pause (`users.email_outbound_paused_at`).** The
+- **Automatic outbound-email pause (`orgs.email_outbound_paused_at`).** The
   delivery queue evaluates provider delivery events
   (`packages/worker/src/email/outbound-abuse.ts`): one spam complaint, or five
   or more bounced sends within a UTC day, pauses that account's outbound email
@@ -618,10 +634,12 @@ blast radius:
   trends so reputation trouble is visible before providers act on it. The hourly
   `email_delivery_alert` cron fans `email.delivery.burst` on a platform-wide
   spike (see above) without replacing this per-user pause.
-- **Compute quotas.** `execute_calls_per_day` and `outbound_fetches_per_day`
-  entitlements bound sandbox compute and egress per user per UTC day, with
-  public-ladder weekly hard caps on the same meters (Monday–Sunday; whichever
-  window hits first blocks). See
+- **Compute quotas.** `execute_unique_workers_per_day` (new sandbox workers, the
+  billed unit) and `outbound_fetches_per_day` entitlements bound sandbox compute
+  and egress per org per UTC day, with public-ladder weekly hard caps on the
+  same meters (Monday–Sunday; whichever window hits first blocks). Warm repeats
+  are bounded separately by a per-org execute runaway brake (300 calls per
+  minute per paid seat, raised by admin overrides). See
   [`architecture/entitlements.md`](./architecture/entitlements.md).
 
 ## Accepted residual risks and out-of-scope items
@@ -694,23 +712,19 @@ change to these decisions here so future agents do not relitigate them.
   platform `/__platform/health`, and runtime `/__runtime/health` answer on the
   workers.dev trigger so deploy and status probes can hit the script directly.
   The rest of those hostnames return `404`.
-- **Admin roles apply to package code running as an admin owner — including
-  mutations with cross-user / fleet blast.** Jobs, inbound webhook handlers,
-  package subscriptions, and other background package invocations resolve the
-  owner's current roles (`packages/worker/src/identity/background-mcp-user.ts`),
-  and admin capability checks do not require an interactive session. That reach
-  is not read-only: admin-owned package, job, and webhook code can invoke admin
-  mutations (anything that uses `adminMutationCapabilityAccess`, plus other
-  admin-gated write paths). The concrete cross-user blast includes
-  `adminPackageCodemodApply` (fleet-applies a codemod and republishes other
-  users' published package trees), and the same unattended path can call other
-  high-blast mutations such as `adminUserCreate`, `adminFeatureFlagSet`, and
-  `adminSystemEmailSend`. Installing an untrusted package on an admin account
-  therefore carries that blast radius. This is accepted residual, not a silent
-  interactive-only mutation gate. Deferred alternatives include gating admin
-  mutations on `executionOrigin: 'interactive'`, and/or separate service
-  principals ([#2393](https://github.com/kentcdodds/kody/issues/2393)). See
-  [Background and package callers](./architecture/authorization.md#background-and-package-callers).
+- **Role, membership, and billing actions need a live person.** Every member,
+  role, invite, or member/billing grant change declares `requiresLivePerson`, so
+  a job, webhook, subscription, or inbound email run (and package code it
+  starts) is denied even when its enabler is an Owner
+  ([#2393](https://github.com/kentcdodds/kody/issues/2393)). See
+  [Capabilities that need a live person](./architecture/authorization.md#capabilities-that-need-a-live-person).
+- **Site-admin tools run from automation only for a site admin, and are
+  audited.** Background package runs resolve the owner's roles with a short
+  cache (`packages/worker/src/identity/background-mcp-user.ts`), so a triggered
+  run that calls a site-admin capability also re-reads the role for the person
+  it acts for from D1, and every such call writes an `admin` audit row naming
+  the trigger type and id. See
+  [Site-admin capabilities from triggered runs](./architecture/authorization.md#site-admin-capabilities-from-triggered-runs).
 - **Package inbound webhook replay protection is opt-in.** HMAC over the raw
   body without a `replay` declaration does not bind a timestamp or delivery id,
   so a captured signed payload can be replayed until the URL secret is rotated.

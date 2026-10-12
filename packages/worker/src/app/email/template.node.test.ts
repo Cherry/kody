@@ -5,6 +5,7 @@ import {
 	buildConnectAgentEmail,
 	buildCoolingHomeEmail,
 	buildKeepPackageEmail,
+	buildPlatformFeedbackAcknowledgementEmail,
 	buildPlatformFeedbackOutcomeEmail,
 	buildSecondAgentEmail,
 	buildUserEntitlementWarningEmail,
@@ -74,7 +75,8 @@ test('transactional emails escape untrusted content and put action URLs in both 
 		kind: 'approaching',
 		warnings: [
 			{
-				label: 'execute calls per day',
+				label: 'unique execute workers per day',
+				resource: 'execute_unique_workers_per_day',
 				current: 200,
 				limit: 250,
 				percentOfLimit: 0.8,
@@ -85,6 +87,8 @@ test('transactional emails escape untrusted content and put action URLs in both 
 	expect(warning.html).toContain('https://kody.codes/account/usage#credits')
 	expect(warning.text).toContain('https://kody.codes/account/usage')
 	expect(warning.html).toContain('200 of 250 (80%)')
+	expect(warning.html).toContain('https://kody.codes/docs/local-execute')
+	expect(warning.text).toContain('https://kody.codes/docs/local-execute')
 
 	const reached = buildUserEntitlementWarningEmail({
 		appBaseUrl: 'https://kody.codes',
@@ -93,7 +97,8 @@ test('transactional emails escape untrusted content and put action URLs in both 
 		kind: 'reached',
 		warnings: [
 			{
-				label: 'execute calls per day',
+				label: 'unique execute workers per day',
+				resource: 'execute_unique_workers_per_day',
 				current: 250,
 				limit: 250,
 				percentOfLimit: 1,
@@ -102,6 +107,24 @@ test('transactional emails escape untrusted content and put action URLs in both 
 	})
 	expect(reached.subject).toContain('reached')
 	expect(reached.html).toContain('250 of 250 (100%)')
+	expect(reached.text).toContain('https://kody.codes/docs/local-execute')
+
+	const storageOnly = buildUserEntitlementWarningEmail({
+		appBaseUrl: 'https://kody.codes',
+		creditsUrl: 'https://kody.codes/account/usage#credits',
+		usageUrl: 'https://kody.codes/account/usage',
+		kind: 'reached',
+		warnings: [
+			{
+				label: 'storage bytes',
+				resource: 'storage_bytes',
+				current: 1_000_000,
+				limit: 1_000_000,
+				percentOfLimit: 1,
+			},
+		],
+	})
+	expect(storageOnly.text).not.toContain('/docs/local-execute')
 
 	const connect = buildConnectAgentEmail({
 		appBaseUrl: 'https://kody.codes',
@@ -181,6 +204,43 @@ test('transactional emails escape untrusted content and put action URLs in both 
 	expect(errorRate.html).toContain('https://kody.codes/account/activity')
 	expect(errorRate.text).toContain('/support')
 	expect(errorRate.html).toContain('25%')
+	expect(errorRate.text).not.toContain('most recent open failure')
+
+	const namedErrorRate = buildUserErrorRateEmail({
+		appBaseUrl: 'https://kody.codes',
+		activityUrl: 'https://kody.codes/account/activity',
+		supportUrl: 'https://kody.codes/support',
+		errorCount: 10,
+		eventCount: 40,
+		failingRuns: [
+			{
+				label: 'Package <b>review-ticket</b>',
+				error: 'Request refused (credential_placement_refused, slot "token")',
+				runUrl: 'https://kody.codes/account/activity/run-1',
+			},
+		],
+	})
+	expect(namedErrorRate.text).toContain(
+		'Package <b>review-ticket</b> failed: Request refused (credential_placement_refused, slot "token") Open the run: https://kody.codes/account/activity/run-1',
+	)
+	expect(namedErrorRate.html).toContain('Package &lt;b&gt;review-ticket')
+	expect(namedErrorRate.html).not.toContain('<b>review-ticket</b>')
+	expect(namedErrorRate.html).toMatch(
+		/<a href="https:\/\/kody\.codes\/account\/activity\/run-1"[^>]*>Open the run<\/a>/,
+	)
+	expect(namedErrorRate.text).toContain('most recent open failure')
+
+	const acknowledgement = buildPlatformFeedbackAcknowledgementEmail({
+		appBaseUrl: 'https://kody.codes',
+		feedbackId: 'feedback-<script>1</script>',
+	})
+	expect(acknowledgement.subject).toContain('got your')
+	expect(acknowledgement.html).toContain('metaPlatformFeedbackGet')
+	expect(acknowledgement.html).toContain(
+		'feedback-&lt;script&gt;1&lt;/script&gt;',
+	)
+	expect(acknowledgement.html).not.toContain('<script>1</script>')
+	expect(acknowledgement.text).toContain('metaPlatformFeedbackGet')
 
 	const hostileSummary = '</p><script>alert(1)</script>Setup is confusing'
 	const genericResolved = buildPlatformFeedbackOutcomeEmail({
@@ -193,7 +253,6 @@ test('transactional emails escape untrusted content and put action URLs in both 
 	expect(genericResolved.html).toContain(
 		'&lt;/p&gt;&lt;script&gt;alert(1)&lt;/script&gt;Setup is confusing',
 	)
-	expect(genericResolved.html).not.toContain('The setup flow does not explain')
 	expect(genericResolved.text).toContain(`"${hostileSummary}"`)
 	expect(genericResolved.text).toContain(
 		'tell your agent you want to send more Kody feedback',

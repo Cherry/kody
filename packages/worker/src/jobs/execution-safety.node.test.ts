@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	buildScheduledJobIdempotencyKey,
@@ -89,16 +90,14 @@ test('running scheduled run backs off without duplicate execution', async () => 
 	expect(execute).not.toHaveBeenCalled()
 })
 
-test('scheduled caller context must belong to the jobs row user', () => {
+test('scheduled runs keep a legacy caller context whose user is not the row owner', () => {
 	const callerContext = {
-		user: { userId: 'user-1' },
+		user: { userId: personIdFromStored('person-1') },
 	} as PersistedJobCallerContext
-	expect(
-		resolveScheduledJobCallerContext({ rowUserId: 'user-1', callerContext }),
-	).toBe(callerContext)
-	expect(
-		resolveScheduledJobCallerContext({ rowUserId: 'user-2', callerContext }),
-	).toBeNull()
+	expect(resolveScheduledJobCallerContext({ callerContext })).toBe(
+		callerContext,
+	)
+	expect(resolveScheduledJobCallerContext({ callerContext: null })).toBeNull()
 })
 
 test('transient platform failures are classified for same-occurrence backoff', () => {

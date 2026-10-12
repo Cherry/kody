@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	AccountDeletionCleanupError,
@@ -22,7 +23,11 @@ type DeletionEnv = Parameters<typeof deleteUserAccount>[0]['env']
 const userA = { id: 1, email: 'a@example.com', stable_user_id: 'user-aaa' }
 
 function deleteUserA(env: DeletionEnv) {
-	return deleteUserAccount({ env, dbUserId: 1, mcpUserId: 'user-aaa' })
+	return deleteUserAccount({
+		env,
+		dbUserId: 1,
+		mcpUserId: ownerIdFromStored('user-aaa'),
+	})
 }
 
 function oauthProvider(overrides: Record<string, unknown> = {}) {
@@ -70,7 +75,11 @@ test('deleteUserAccount deletes owned OAuth clients and fails closed on critical
 	expect(deleteClient).toHaveBeenCalledWith('owned-client')
 	expect(deleteClient).toHaveBeenCalledWith('already-revoked')
 
-	const job = { id: 'job-1', user_id: 'user-aaa', storage_id: null }
+	const job = {
+		id: 'job-1',
+		user_id: ownerIdFromStored('user-aaa'),
+		storage_id: null,
+	}
 	const { db: missingDeleteDb, rows: missingDeleteRows } = createTestDb({
 		users: [userA],
 		jobs: [job],
@@ -111,10 +120,11 @@ test('deleteUserAccount deletes owned OAuth clients and fails closed on critical
 	const { db: kvFailureDb, rows: kvFailureRows } = createTestDb({
 		users: [userA],
 		published_bundle_artifacts: [
-			{ id: 'pba-1', user_id: 'user-aaa', kv_key: 'bundle-artifact:v1:src-1' },
-		],
-		archived_job_artifacts: [
-			{ id: 'aja-1', user_id: 'user-aaa', kv_key: 'archived:src-1' },
+			{
+				id: 'pba-1',
+				user_id: ownerIdFromStored('user-aaa'),
+				kv_key: 'bundle-artifact:v1:src-1',
+			},
 		],
 	})
 	await expect(
@@ -146,7 +156,6 @@ test('deleteUserAccount deletes owned OAuth clients and fails closed on critical
 		]),
 	})
 	expect(kvFailureRows.published_bundle_artifacts).toHaveLength(1)
-	expect(kvFailureRows.archived_job_artifacts).toHaveLength(1)
 	expect(kvFailureRows.users).toEqual([fencedUser])
 })
 
@@ -208,7 +217,9 @@ test('account deletion reports missing bindings and remains retryable', async ()
 	for (const [overrides, ErrorClass, fields, fence] of cases) {
 		const { db, rows } = createTestDb({
 			users: [userA],
-			mcp_memories: [{ id: 'memory-a', user_id: 'user-aaa' }],
+			mcp_memories: [
+				{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+			],
 		})
 		const error = await deleteUserA(
 			createSuccessfulDeletionEnv(db, overrides),
@@ -216,7 +227,9 @@ test('account deletion reports missing bindings and remains retryable', async ()
 		expect(error).toBeInstanceOf(ErrorClass)
 		expect(error).toMatchObject(fields)
 		expect(rows.users).toEqual([fence ? fencedUser : unfencedUser])
-		expect(rows.mcp_memories).toEqual([{ id: 'memory-a', user_id: 'user-aaa' }])
+		expect(rows.mcp_memories).toEqual([
+			{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+		])
 	}
 })
 
@@ -224,8 +237,16 @@ test('deleteUserAccount fails closed when preflight inventory cannot be read', a
 	const { db, rows } = createTestDb(
 		{
 			users: [userA],
-			mcp_memories: [{ id: 'memory-a', user_id: 'user-aaa' }],
-			jobs: [{ id: 'job-a', user_id: 'user-aaa', storage_id: 'job:job-a' }],
+			mcp_memories: [
+				{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+			],
+			jobs: [
+				{
+					id: 'job-a',
+					user_id: ownerIdFromStored('user-aaa'),
+					storage_id: 'job:job-a',
+				},
+			],
 		},
 		{ failSelectContaining: 'select id from mcp_memories where user_id = ?' },
 	)
@@ -247,12 +268,18 @@ test('deleteUserAccount fails closed when preflight inventory cannot be read', a
 	expect(
 		await userMeterRpc({
 			env: userMeter.env,
-			userId: 'user-aaa',
+			userId: ownerIdFromStored('user-aaa'),
 		}).readDeletionState(),
 	).toEqual({ deletingAt: null })
-	expect(rows.mcp_memories).toEqual([{ id: 'memory-a', user_id: 'user-aaa' }])
+	expect(rows.mcp_memories).toEqual([
+		{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+	])
 	expect(rows.jobs).toEqual([
-		{ id: 'job-a', user_id: 'user-aaa', storage_id: 'job:job-a' },
+		{
+			id: 'job-a',
+			user_id: ownerIdFromStored('user-aaa'),
+			storage_id: 'job:job-a',
+		},
 	])
 	expect(deleteVectors).not.toHaveBeenCalled()
 	expect(clearStorage).not.toHaveBeenCalled()
@@ -262,8 +289,10 @@ test('atomic D1 deletion rolls back every row when one statement fails', async (
 	const { db, rows } = createTestDb(
 		{
 			users: [{ id: 1, email: 'a@example.com' }],
-			secret_buckets: [{ id: 'sb-a', user_id: 'user-aaa' }],
-			mcp_memories: [{ id: 'memory-a', user_id: 'user-aaa' }],
+			secret_buckets: [{ id: 'sb-a', user_id: ownerIdFromStored('user-aaa') }],
+			mcp_memories: [
+				{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+			],
 		},
 		{ failRunContaining: 'delete from mcp_memories where user_id = ?' },
 	)
@@ -275,8 +304,12 @@ test('atomic D1 deletion rolls back every row when one statement fails', async (
 		],
 	})
 	expect(rows.users).toEqual([fencedUser])
-	expect(rows.secret_buckets).toEqual([{ id: 'sb-a', user_id: 'user-aaa' }])
-	expect(rows.mcp_memories).toEqual([{ id: 'memory-a', user_id: 'user-aaa' }])
+	expect(rows.secret_buckets).toEqual([
+		{ id: 'sb-a', user_id: ownerIdFromStored('user-aaa') },
+	])
+	expect(rows.mcp_memories).toEqual([
+		{ id: 'memory-a', user_id: ownerIdFromStored('user-aaa') },
+	])
 })
 
 test('account deletion quiesces a concurrent user write before inventory', async () => {
@@ -296,7 +329,7 @@ test('account deletion quiesces a concurrent user write before inventory', async
 				}
 				raceAttempted = true
 				try {
-					await assertAccountWritable(env, 'user-aaa')
+					await assertAccountWritable(env, ownerIdFromStored('user-aaa'))
 					writeCommitted = true
 				} catch (error) {
 					writeError = error
@@ -315,7 +348,11 @@ test('account deletion waits for active writers, releases only the fence it crea
 	function seed(users: RowMap['users']) {
 		const { db, rows } = createTestDb({ users })
 		const env = createSuccessfulDeletionEnv(db)
-		return { env, rows, meter: userMeterRpc({ env, userId: 'user-aaa' }) }
+		return {
+			env,
+			rows,
+			meter: userMeterRpc({ env, userId: ownerIdFromStored('user-aaa') }),
+		}
 	}
 	// A crashed writer still holds a lease: the fence this attempt created is
 	// released in both D1 and the UserMeter.
@@ -402,6 +439,10 @@ test('account deletion empties the user RunLog DO and leaves other users untouch
 					return {
 						listStorageIds: async () =>
 							(state?.runs ?? []).map((run) => run.storageId),
+						listWorkflowProjections: async () => ({
+							projections: [],
+							nextCursor: null,
+						}),
 						clearAll: async () => {
 							if (state) {
 								state.runs = []
@@ -428,7 +469,7 @@ test('account deletion empties the user RunLog DO and leaves other users untouch
 })
 
 test('account deletion purges a StorageRunner known only via user_storage_buckets', async () => {
-	const userId = 'user-bucket-only'
+	const userId = ownerIdFromStored('user-bucket-only')
 	const clearStorage = vi.fn(async () => ({ ok: true as const }))
 	const idFromName = vi.fn((name: string) => name as unknown as DurableObjectId)
 	const { db } = createTestDb({
@@ -451,4 +492,108 @@ test('account deletion purges a StorageRunner known only via user_storage_bucket
 	expect(idFromName).toHaveBeenCalledWith(
 		JSON.stringify([userId, 'exec:adhoc-only']),
 	)
+})
+
+function createRunningWorkflowDeletionEnv(input: {
+	events: Array<string>
+	terminate: (id: string) => Promise<void>
+}) {
+	const projections = new Map<string, Record<string, unknown>>([
+		[
+			'wf-running',
+			{
+				id: 'wf-running',
+				bindingName: 'DYNAMIC_CALLABLE_WORKFLOWS',
+				sourceType: 'inline',
+				workflowName: 'inline-code',
+				idempotencyKey: 'wf-running-key',
+				runAt: '2026-05-03T12:34:56.000Z',
+				status: 'running',
+				createdAt: '2026-05-03T12:34:56.000Z',
+				updatedAt: '2026-05-03T12:34:56.000Z',
+				completedAt: null,
+			},
+		],
+	])
+	const { db, rows } = createTestDb({ users: [userA] })
+	const env = createSuccessfulDeletionEnv(db, {
+		STORAGE_RUNNER: {
+			idFromName: (name: string) => name as unknown as DurableObjectId,
+			get: () => ({
+				clearStorage: async () => {
+					input.events.push('clearStorage')
+					return { ok: true as const }
+				},
+			}),
+		},
+		DYNAMIC_CALLABLE_WORKFLOWS: {
+			get: async (id: string) => ({
+				id,
+				status: async () => {
+					throw new Error('workflow status unavailable')
+				},
+				terminate: () => input.terminate(id),
+			}),
+		} as unknown as Workflow,
+		RUN_LOG: {
+			idFromName: (name: string) => name as unknown as DurableObjectId,
+			get: () => ({
+				listStorageIds: async () => ['storage-1'],
+				listWorkflowProjections: async (query: { status: string | null }) => ({
+					projections: [...projections.values()].filter(
+						(row) => row['status'] === query.status,
+					),
+					nextCursor: null,
+				}),
+				getWorkflowProjection: async (query: { id: string }) =>
+					projections.get(query.id) ?? null,
+				upsertWorkflowProjection: async (
+					projection: Record<string, unknown> & { id: string },
+				) => {
+					projections.set(projection.id, {
+						...projections.get(projection.id),
+						...projection,
+					})
+					return { ok: true as const }
+				},
+				clearAll: async () => {
+					input.events.push('clearAll')
+					projections.clear()
+					return { ok: true as const }
+				},
+			}),
+		},
+	})
+	return { env, rows }
+}
+
+test('account deletion terminates running package workflows before purging the run log', async () => {
+	const events: Array<string> = []
+	const { env } = createRunningWorkflowDeletionEnv({
+		events,
+		terminate: async (id) => {
+			events.push(`terminate:${id}`)
+		},
+	})
+	await deleteUserA(env)
+
+	expect(events).toEqual(['terminate:wf-running', 'clearStorage', 'clearAll'])
+})
+
+test('account deletion stops before purging anything when workflow termination fails', async () => {
+	const events: Array<string> = []
+	const { env, rows } = createRunningWorkflowDeletionEnv({
+		events,
+		terminate: async () => {
+			throw new Error('terminate unavailable')
+		},
+	})
+	await expect(deleteUserA(env)).rejects.toMatchObject({
+		name: 'AccountDeletionCleanupError',
+		cleanupErrors: [
+			expect.stringContaining('Workflow run cancellation failed'),
+		],
+	})
+	expect(events).toEqual([])
+	expect(rows.users).toEqual([fencedUser])
 })

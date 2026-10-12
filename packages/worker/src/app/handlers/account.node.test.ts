@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { RequestContext } from 'remix/router'
 import {
@@ -9,6 +10,10 @@ import { createAccountHandler } from '#app/handlers/account.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { loadSessionInfo } from '#app/session-info.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
+import {
+	isOrgBindingMembershipQuery,
+	mockPersonalOrgBindingRow,
+} from '#worker/test-support/org-binding-query.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
@@ -115,12 +120,30 @@ function createAccountEnv(
 				const normalizedQuery = query.replace(/\s+/g, ' ').trim().toLowerCase()
 				const statement = {
 					query,
-					bind: () => statement,
+					bind: (...params: Array<unknown>) => {
+						statement.bindParams = params
+						return statement
+					},
+					bindParams: [] as Array<unknown>,
 					all: async () => ({
 						results: resultsFor(normalizedQuery) ?? [],
 						meta: { changes: 0 },
 					}),
-					first: async () => null,
+					first: async () => {
+						if (isOrgBindingMembershipQuery(normalizedQuery)) {
+							const personId = String(statement.bindParams[0] ?? '')
+							const user = (rows.users ?? []).find(
+								(row) => row.stable_user_id === personId,
+							)
+							return user
+								? mockPersonalOrgBindingRow(
+										personId,
+										typeof user.username === 'string' ? user.username : null,
+									)
+								: null
+						}
+						return null
+					},
 					run: async () => ({ meta: { changes: 0 } }),
 				}
 				return statement
@@ -141,7 +164,7 @@ function createAccountEnv(
 async function getAccount(env: Env, session: AuthSession) {
 	setAuthSessionSecret(testCookieSecret)
 	const cookie = await createAuthCookie(session, false)
-	return createAccountHandler(env).handler(
+	return createAccountHandler(env, 'Profile').handler(
 		new RequestContext(
 			new Request('https://example.com/account', {
 				headers: { Cookie: cookie },
@@ -155,7 +178,7 @@ test('account handler redirects to login with a session-destroy cookie for stale
 	const cases = [
 		{
 			label: 'stale session',
-			stableUserId: 'f'.repeat(64),
+			stableUserId: ownerIdFromStored('f').repeat(64),
 			email: 'missing@example.com',
 			users: [],
 		},
@@ -239,10 +262,11 @@ test('authenticated account SSR batches user/role and flag reads into two round 
 	expect(body.session.permissions).toEqual(['read:user:own'])
 	expect(body.session.featureFlags).toEqual({
 		'demo-indicator': true,
-		'package-share-grants': false,
-		'secret-providers': false,
 		'jev-search-rerank': false,
 		'execute-invoke': true,
+		'connection-profiles': false,
+		'mcp-skills-extension': false,
+		'mcp-events-extension': false,
 	})
 	expect(Object.keys(body.loaderData).sort()).toEqual([
 		'accountConnections',
@@ -250,7 +274,11 @@ test('authenticated account SSR batches user/role and flag reads into two round 
 		'onboarding',
 	])
 	// Session batches: users+roles, then flags+overrides+experiments_opt_in.
+	// Organization list and invite list are extra prepares on the session
+	// shell only; the account page itself no longer lists organizations
+	// (inviteCount derives from the listed invites, so there is no separate
+	// COUNT query).
 	expect(counts.batchSizes).toEqual([2, 3])
-	expect(counts.prepare).toBe(5)
+	expect(counts.prepare).toBe(9)
 	expect(counts.batch).toBe(2)
 })

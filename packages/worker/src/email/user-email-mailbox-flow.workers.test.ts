@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { buildPublishedSourceManifestSnapshotKvKey } from '#worker/package-runtime/published-runtime-artifacts.ts'
@@ -6,17 +7,18 @@ import {
 	exportRunRecords,
 } from '#worker/run-records/service.ts'
 import {
+	enableSubscriptionForOwner,
 	ensurePackageSubscriptionTestSchema,
 	seedAccount,
 } from '#worker/test-support/workers-seed.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
 import { handleInboundEmail } from './inbound.ts'
 import { mailboxRpc } from './mailbox-client.ts'
 import { getOutboundProviderIndexRow } from './outbound-provider-index.ts'
 import { createForwardableEmailMessage } from './test-fixtures.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const platformBaseUrl = 'https://kody.example.com'
 const platformDomain = 'inbox.kody.example.com'
@@ -74,6 +76,12 @@ async function seedSubscribedPackage(input: {
 					'package.json', '/', ?, ?)`,
 		).bind(sourceId, input.userId, packageId, now, now),
 	])
+	await enableSubscriptionForOwner({
+		db: env.APP_DB,
+		userId: input.userId,
+		packageId,
+		topic: inboundTopic,
+	})
 	const manifest = {
 		name: '@flow/mailbox-flow',
 		exports: { '.': './src/index.ts' },
@@ -202,7 +210,7 @@ test('USER inbound attachment, package event, reply, and provider index stay Mai
 	await ensurePackageSubscriptionTestSchema(env.APP_DB)
 	const username = `mailbox-flow-${crypto.randomUUID().slice(0, 8)}`
 	const accountEmail = `${username}@example.com`
-	const userId = await createStableUserIdFromEmail(accountEmail)
+	const userId = testStableUserIdFromEmail(accountEmail)
 	await seedAccount({
 		db: env.APP_DB,
 		email: accountEmail,
@@ -210,7 +218,7 @@ test('USER inbound attachment, package event, reply, and provider index stay Mai
 		plan: 'max',
 		stableUserId: userId,
 	})
-	await clearRunRecords({ env, userId })
+	await clearRunRecords({ env, userId: ownerIdFromStored(userId) })
 	const bundleKv = new Map<string, string>()
 	const packageId = await seedSubscribedPackage({ bundleKv, userId })
 	const captured = captureD1Sql(env.APP_DB)
@@ -263,7 +271,7 @@ test('USER inbound attachment, package event, reply, and provider index stay Mai
 	for (const promise of waitUntilPromises) await promise
 	expect(inbound.rejectedReason).toBeNull()
 
-	const mailbox = mailboxRpc({ env, userId })
+	const mailbox = mailboxRpc({ env, userId: ownerIdFromStored(userId) })
 	const inboundPage = await mailbox.listMessages({
 		direction: 'inbound',
 		limit: 10,
@@ -285,7 +293,11 @@ test('USER inbound attachment, package event, reply, and provider index stay Mai
 	])
 
 	const invocations = (
-		await exportRunRecords({ env: flowEnv, userId, pageSize: 100 })
+		await exportRunRecords({
+			env: flowEnv,
+			userId: ownerIdFromStored(userId),
+			pageSize: 100,
+		})
 	).packageInvocations
 	expect(invocations).toHaveLength(1)
 	expect(invocations[0]).toMatchObject({

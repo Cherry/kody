@@ -1,17 +1,13 @@
+export {
+	orgSlugPermanentError,
+	usernamePermanentError,
+} from '@kody-internal/shared/handle-permanence.ts'
 import { dnsSafeUsernamePattern } from '@kody-internal/shared/public-urls.ts'
 import { getEffectiveReservedUsernameError } from '#worker/identity/reserved-username-settings.ts'
 import { getReservedUsernameError } from '#worker/identity/reserved-usernames.ts'
 
 export const usernameRequirements =
 	'Username must be 3 to 32 characters, use only letters, numbers, and hyphens, and start and end with a letter or number.'
-
-/**
- * Username of the operator-provisioned official platform account (`@kody`).
- * Reserved-username denylist membership is a signup constraint, not an
- * identity check: other reserved names (for example `user`) are not this
- * account and do not own the `@kody` package scope.
- */
-export const platformAccountUsername = 'kody'
 
 export function normalizeUsername(value: unknown) {
 	return typeof value === 'string' ? value.trim().toLowerCase() : ''
@@ -74,21 +70,23 @@ export function resolveDisplayName(input: { email: string; username: string }) {
 		: input.username
 }
 
+/**
+ * Reserved names are checked before format so a reserved handle shorter than
+ * the username minimum (`me`) still gets the reserved-name message.
+ */
 export function getUsernameValidationError(username: string) {
-	const formatError = getUsernameFormatValidationError(username)
-	if (formatError) {
-		return formatError
-	}
-	return getReservedUsernameError(username)
+	return (
+		getReservedUsernameError(username) ??
+		getUsernameFormatValidationError(username)
+	)
 }
 
 export async function getEffectiveUsernameValidationError(
 	username: string,
 	env?: Pick<Env, 'BUNDLE_ARTIFACTS_KV'>,
 ) {
-	const formatError = getUsernameFormatValidationError(username)
-	if (formatError) {
-		return formatError
-	}
-	return getEffectiveReservedUsernameError(username, env)
+	return (
+		(await getEffectiveReservedUsernameError(username, env)) ??
+		getUsernameFormatValidationError(username)
+	)
 }

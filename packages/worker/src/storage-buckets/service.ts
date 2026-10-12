@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { listRepoSessionDueOwnersPage } from '#worker/repo/repo-session-due-owners.ts'
 import { repoSessionIndexRpc } from '#worker/repo/repo-session-index-client.ts'
 import {
@@ -30,6 +31,7 @@ import {
  * recreate an inventory row that account, package, or job deletion removed.
  */
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type StorageBucketKind =
 	| 'job'
 	| 'package'
@@ -73,7 +75,7 @@ const registeredBucketKeys = new Set<string>()
 const estimateRefreshAttemptsAtMs = new Map<string, number>()
 const pendingRegistrations = new Set<Promise<unknown>>()
 
-function registrationDedupeKey(userId: string, storageId: string) {
+function registrationDedupeKey(userId: OwnerId, storageId: string) {
 	return `${userId}\u0000${storageId}`
 }
 
@@ -110,7 +112,7 @@ export function registerStorageBucket(input: {
 	waitUntil?: (promise: Promise<unknown>) => void
 }): void {
 	try {
-		const userId = input.userId?.trim()
+		const userId = (input.userId?.trim() || undefined) as OwnerId | undefined
 		const storageId = input.storageId?.trim()
 		if (!userId || !storageId) return
 		const db = input.env.APP_DB
@@ -143,11 +145,13 @@ export function registerStorageBucket(input: {
  */
 export async function registerStorageBucketAndWait(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageId: string
 	kind: StorageBucketKind
 }): Promise<void> {
-	const userId = input.userId.trim()
+	const trimmedUserId = input.userId.trim()
+	const userId =
+		trimmedUserId === input.userId ? input.userId : (trimmedUserId as OwnerId)
 	const storageId = input.storageId.trim()
 	if (!userId || !storageId || !input.env.APP_DB) return
 	const seenAt = new Date().toISOString()
@@ -268,13 +272,13 @@ export async function registerMissingRepoSessionStorageBuckets(input: {
  */
 export async function deleteStorageBucketInventory(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	storageId: string
 }): Promise<boolean> {
 	const result = await input.db
 		.prepare(
 			`DELETE FROM user_storage_buckets
-			WHERE user_id = ? AND storage_id = ?`,
+			WHERE user_id = ? AND storage_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.storageId)
 		.run()
@@ -295,7 +299,7 @@ function normalizeEstimatedBytes(estimatedBytes: number) {
  */
 export async function updateStorageBucketEstimate(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	storageId: string
 	estimatedBytes: number
 	updatedAt?: Date
@@ -325,7 +329,7 @@ export async function listStorageBucketsMissingEstimates(input: {
 	limit: number
 }): Promise<
 	Array<{
-		userId: string
+		userId: OwnerId
 		storageId: string
 		kind: StorageBucketKind
 	}>
@@ -334,13 +338,12 @@ export async function listStorageBucketsMissingEstimates(input: {
 		.prepare(
 			`SELECT user_id AS userId, storage_id AS storageId, kind
 			FROM user_storage_buckets
-			WHERE estimated_bytes IS NULL
-			ORDER BY last_seen_at DESC, user_id ASC, storage_id ASC
-			LIMIT ?`,
+			WHERE estimated_bytes IS NULL${andLiveDeletedAtSql()}
+			ORDER BY last_seen_at DESC, user_id ASC, storage_id ASC LIMIT ?`,
 		)
 		.bind(input.limit)
 		.all<{
-			userId: string
+			userId: OwnerId
 			storageId: string
 			kind: string
 		}>()
@@ -366,7 +369,7 @@ export function recordStorageBucketEstimate(input: {
 	waitUntil?: (promise: Promise<unknown>) => void
 }): void {
 	try {
-		const userId = input.userId?.trim()
+		const userId = (input.userId?.trim() || undefined) as OwnerId | undefined
 		const storageId = input.storageId?.trim()
 		if (!userId || !storageId) return
 		const db = input.env.APP_DB
@@ -405,7 +408,7 @@ export function maybeRefreshStorageBucketEstimate(input: {
 	waitUntil?: (promise: Promise<unknown>) => void
 }): void {
 	try {
-		const userId = input.userId?.trim()
+		const userId = (input.userId?.trim() || undefined) as OwnerId | undefined
 		const storageId = input.storageId?.trim()
 		if (!userId || !storageId) return
 		const db = input.env.APP_DB
@@ -450,12 +453,12 @@ export function maybeRefreshStorageBucketEstimate(input: {
 
 export async function listUserStorageBucketIds(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 }): Promise<Array<string>> {
 	const result = await input.env.APP_DB.prepare(
 		`SELECT storage_id AS storageId
 		FROM user_storage_buckets
-		WHERE user_id = ? AND kind <> 'repo_session'
+		WHERE user_id = ? AND kind <> 'repo_session'${andLiveDeletedAtSql()}
 		ORDER BY storage_id ASC`,
 	)
 		.bind(input.userId)
@@ -470,7 +473,7 @@ export async function listUserStorageBucketIds(input: {
  */
 export async function listUserStorageBucketEstimates(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 }): Promise<
 	Array<{
 		storageId: string
@@ -481,7 +484,7 @@ export async function listUserStorageBucketEstimates(input: {
 	const result = await input.env.APP_DB.prepare(
 		`SELECT storage_id AS storageId, kind, estimated_bytes AS estimatedBytes
 		FROM user_storage_buckets
-		WHERE user_id = ?
+		WHERE user_id = ?${andLiveDeletedAtSql()}
 		ORDER BY storage_id ASC`,
 	)
 		.bind(input.userId)
@@ -502,15 +505,15 @@ export async function listUserStorageBucketEstimates(input: {
 
 export async function listPlatformStorageBuckets(input: {
 	db: D1Database
-}): Promise<Array<{ userId: string; storageId: string }>> {
+}): Promise<Array<{ userId: OwnerId; storageId: string }>> {
 	const result = await input.db
 		.prepare(
 			`SELECT user_id AS userId, storage_id AS storageId
 			FROM user_storage_buckets
-			WHERE kind <> 'repo_session'
+			WHERE kind <> 'repo_session'${andLiveDeletedAtSql()}
 			ORDER BY user_id ASC, storage_id ASC`,
 		)
-		.all<{ userId: string; storageId: string }>()
+		.all<{ userId: OwnerId; storageId: string }>()
 	return result.results ?? []
 }
 

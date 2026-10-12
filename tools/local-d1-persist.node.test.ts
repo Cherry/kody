@@ -14,29 +14,64 @@ function persistPathFromArgs(args: ReadonlyArray<string>) {
 
 test('local migrate and seed target the persist directory Vite opens', () => {
 	const commands = buildLocalMigrationCommands({ argv: [], env: {} })
-	expect(commands).toHaveLength(4)
-	const sharedPath = persistPathFromArgs(commands[1] ?? [])
+	expect(commands).toHaveLength(7)
+	const sharedPath = persistPathFromArgs(commands[2] ?? [])
 	expect(sharedPath).toEqual(expect.any(String))
 	for (const command of commands) {
 		expect(persistPathFromArgs(command)).toBe(sharedPath)
 	}
-	expect(commands[1]).toContain('APP_DB')
-	expect(commands[2]).toContain('AUDIT_DB')
-	expect(commands[3]).toEqual(
-		expect.arrayContaining([
-			'JOBS_DB',
-			'--config',
-			'packages/jobs-worker/wrangler.jsonc',
-			'--env-file=packages/worker/.env',
-		]),
-	)
 	expect(commands[0]?.[0]).toBe('tools/ci/reset-migration-bookkeeping.ts')
 	expect(commands[0]).not.toContain('--env-file=packages/worker/.env')
+	const bindings: Array<[string, string, Array<string>]> = [
+		['APP_DB', 'packages/worker/migrations', []],
+		['AUDIT_DB', 'packages/worker/audit-migrations', []],
+		[
+			'JOBS_DB',
+			'packages/jobs-worker/migrations',
+			['--config', 'packages/jobs-worker/wrangler.jsonc'],
+		],
+	]
+	for (const [index, [binding, migrationsDir, config]] of bindings.entries()) {
+		const check = commands[1 + index * 2]
+		const apply = commands[2 + index * 2]
+		expect(check?.[0]).toBe('tools/check-stale-local-migrations.ts')
+		expect(check).toEqual(
+			expect.arrayContaining([
+				'--binding',
+				binding,
+				'--migrations-dir',
+				migrationsDir,
+				...config,
+			]),
+		)
+		expect(apply).toEqual(
+			expect.arrayContaining([
+				'--env-file=packages/worker/.env',
+				'apply',
+				binding,
+				...config,
+			]),
+		)
+	}
 
-	const seedArgs = buildSeedWranglerArgs('select 1', parseArgs(['--local']), {})
+	const seedArgs = buildSeedWranglerArgs(
+		parseArgs(['--local']),
+		{ command: 'select 1' },
+		{},
+	)
 	expect(persistPathFromArgs(seedArgs)).toBe(sharedPath)
 	expect(seedArgs).toContain('--local')
 	expect(seedArgs).not.toContain('--remote')
+	expect(seedArgs).toContain('--command')
+})
+
+test('seed wrangler args prefer --file for large SQL payloads', () => {
+	const fileArgs = buildSeedWranglerArgs(parseArgs(['--local']), {
+		file: '/tmp/kody-seed.sql',
+	})
+	expect(fileArgs).toContain('--file')
+	expect(fileArgs).toContain('/tmp/kody-seed.sql')
+	expect(fileArgs).not.toContain('--command')
 })
 
 test('explicit persist-to wins over WRANGLER_PERSIST_TO, and remote seed skips it', () => {
@@ -67,16 +102,16 @@ test('explicit persist-to wins over WRANGLER_PERSIST_TO, and remote seed skips i
 	).toThrow(/Only --persist-to is allowed/)
 
 	const remoteSeed = buildSeedWranglerArgs(
-		'select 1',
 		parseArgs(['--remote', '--config', 'packages/worker/wrangler.jsonc']),
+		{ command: 'select 1' },
 		env,
 	)
 	expect(remoteSeed).toContain('--remote')
 	expect(persistPathFromArgs(remoteSeed)).toBeUndefined()
 
 	const explicitSeed = buildSeedWranglerArgs(
-		'select 1',
 		parseArgs(['--local', '--persist-to', '.wrangler/state/e2e']),
+		{ command: 'select 1' },
 		env,
 	)
 	expect(persistPathFromArgs(explicitSeed)).toBe('.wrangler/state/e2e')
@@ -95,8 +130,8 @@ test('worker .env WRANGLER_PERSIST_TO reaches migrate and seed unless the shell 
 		expect(persistPathFromArgs(command)).toBe('.wrangler/state/from-file')
 	}
 	const seeded = buildSeedWranglerArgs(
-		'select 1',
 		parseArgs(['--local']),
+		{ command: 'select 1' },
 		fromFile,
 	)
 	expect(persistPathFromArgs(seeded)).toBe('.wrangler/state/from-file')

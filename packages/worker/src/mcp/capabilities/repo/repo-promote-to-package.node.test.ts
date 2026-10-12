@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -7,7 +11,7 @@ const mockModule = vi.hoisted(() => ({
 	resolveArtifactSourceHead: vi.fn(),
 	readArtifactFileAtCommit: vi.fn(),
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	insertSavedPackage: vi.fn(),
 	assertWithinEntitlement: vi.fn(),
 	repoSessionRpc: vi.fn(),
@@ -36,8 +40,8 @@ vi.mock('#worker/repo/artifact-file.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	insertSavedPackage: (...args: Array<unknown>) =>
 		mockModule.insertSavedPackage(...args),
 }))
@@ -99,7 +103,7 @@ function setup({
 	mockModule.resolveOwnedUserRepo.mockResolvedValue({
 		userRepo: {
 			id: 'repo-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: 'brave-search',
 			description: null,
 			isPrivate: repoIsPrivate,
@@ -108,7 +112,7 @@ function setup({
 		},
 		source: {
 			id: 'source-1',
-			user_id: 'user-1',
+			user_id: ownerIdFromStored('user-1'),
 			entity_kind: 'repo' as const,
 			entity_id: 'repo-1',
 			repo_id: 'repo-artifacts-1',
@@ -137,7 +141,7 @@ function setup({
 		),
 	)
 	mockModule.getSavedPackageById.mockResolvedValue(null)
-	mockModule.getSavedPackageByKodyId.mockResolvedValue(null)
+	mockModule.resolveSavedPackageRef.mockResolvedValue(null)
 	mockModule.insertSavedPackage.mockResolvedValue(undefined)
 	mockModule.assertWithinEntitlement.mockResolvedValue(undefined)
 	mockModule.updateEntitySource.mockResolvedValue(true)
@@ -183,8 +187,9 @@ function setup({
 			} as unknown as D1Database,
 		} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@test.invalid',
 				displayName: 'User',
 				username: 'user',
@@ -203,7 +208,10 @@ const insertedAs = (isPrivate: 0 | 1) => [
 	null,
 	{ stamp: false },
 ]
-const deletedRepo = [expect.anything(), { userId: 'user-1', repoId: 'repo-1' }]
+const deletedRepo = [
+	expect.anything(),
+	{ userId: ownerIdFromStored('user-1'), repoId: 'repo-1' },
+]
 
 test('repoPromoteToPackage rejects repos without package.json at HEAD', async () => {
 	const { promote } = setup()
@@ -233,7 +241,7 @@ test('repoPromoteToPackage seeds published_commit from the opened session base s
 	expect(mockModule.insertSavedPackage).toHaveBeenCalledWith(...insertedAs(0))
 	expect(rpc.runChecks).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			expectedPackageScope: 'user',
 		}),
 	)
@@ -250,7 +258,7 @@ test('repoPromoteToPackage seeds published_commit from the opened session base s
 	expect(mockModule.publishCommunityListing).toHaveBeenCalledWith(
 		expect.objectContaining({
 			packageId: result.package_id,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 		}),
 	)
 	expect(mockModule.deleteUserRepo).toHaveBeenCalledWith(...deletedRepo)

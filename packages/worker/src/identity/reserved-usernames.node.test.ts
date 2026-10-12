@@ -1,29 +1,11 @@
 import { expect, test } from 'vitest'
-import { dnsSafeUsernamePattern } from '@kody-internal/shared/public-urls.ts'
-import { systemEmailLocals } from '#worker/email/system-email.ts'
 import {
-	builtInReservedUsernameList,
 	getReservedUsernameError,
 	isPermanentlyReservedUsername,
 	isReservedUsername,
 	isUsernameEffectivelyReserved,
-	permanentlyReservedSystemLocals,
 } from './reserved-usernames.ts'
 import { getUsernameValidationError } from './username.ts'
-
-test('reserved username list is sorted, unique, lowercase, and DNS-safe except legacy underscore locals', () => {
-	const list = [...builtInReservedUsernameList]
-	expect(list).toEqual(
-		[...list].toSorted((left, right) => left.localeCompare(right)),
-	)
-	expect(new Set(list).size).toBe(list.length)
-	for (const name of list) {
-		expect(name).toBe(name.toLowerCase())
-		if (name.includes('_')) continue
-		expect(dnsSafeUsernamePattern.test(name)).toBe(true)
-	}
-	expect(permanentlyReservedSystemLocals).toEqual([...systemEmailLocals])
-})
 
 test('reserved username validation rejects brand, support, and infrastructure names', () => {
 	for (const reserved of [

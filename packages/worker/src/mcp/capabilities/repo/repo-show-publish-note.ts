@@ -1,10 +1,14 @@
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { resolveOwnedPackageSource } from '#mcp/capabilities/packages/resolve-package-source.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
-import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
+import { authorize, packageResource } from '#worker/authorization/authorize.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
 import { getEntitySourceByIdForUser } from '#worker/repo/entity-sources.ts'
 import {
 	kodyPublishGitNoteSchema,
@@ -56,6 +60,7 @@ export const repoShowPublishNoteCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoShowPublishNote',
+		orgPermission: 'package:read',
 		description:
 			'Read the Kody publish harness git note attached to a published Artifacts commit. Use this to inspect publish provenance, session/conversation ids, and check summaries without opening D1.',
 		keywords: [
@@ -73,29 +78,36 @@ export const repoShowPublishNoteCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			const owner = await resolvePackageOwnerContext(ctx.env, {
+				user: requireMcpUser(ctx.callerContext),
+				request: requireMcpRequest(ctx.callerContext),
+			})
 			const source =
 				args.source_id !== undefined
 					? await getEntitySourceByIdForUser(ctx.env.APP_DB, {
 							id: args.source_id,
-							userId: user.userId,
+							userId: owner.ownerUserId,
 						})
 					: (
 							await resolveOwnedPackageSource({
 								db: ctx.env.APP_DB,
-								userId: user.userId,
-								ownerScope:
-									args.kody_id === undefined
-										? undefined
-										: await getMcpUserPackageScope(ctx.env.APP_DB, user),
+								userId: owner.ownerUserId,
+								ownerScope: owner.ownerScope,
 								args: {
 									package_id: args.package_id,
 									kody_id: args.kody_id,
 								},
 							})
 						).source
-			if (!source || source.user_id !== user.userId) {
+			if (!source) {
 				throw new McpCallerError('Repo source was not found for this user.')
+			}
+			if (source.entity_kind === 'package') {
+				await authorize(
+					{ env: ctx.env, request: ctx.callerContext.request },
+					'package:read',
+					packageResource({ id: source.entity_id, userId: source.user_id }),
+				)
 			}
 			const commit = args.commit ?? source.published_commit
 			if (!commit) {

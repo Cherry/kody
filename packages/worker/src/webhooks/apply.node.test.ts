@@ -4,8 +4,9 @@ import {
 	decryptWebhookHmacSecret,
 	userWebhookHmacSecretContext,
 } from '#mcp/secrets/crypto.ts'
+import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
 import {
 	applyWebhookUrlForUser,
@@ -13,7 +14,10 @@ import {
 	revealWebhookUrlForWebsite,
 } from './service.ts'
 import { parseWebhookUrlHandle } from './handle.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const integrationMocks = vi.hoisted(() => ({
 	getJoinedIntegration: vi.fn(),
 	resolveIntegrationAccessToken: vi.fn(),
@@ -22,7 +26,6 @@ const integrationMocks = vi.hoisted(() => ({
 }))
 
 const secretMocks = vi.hoisted(() => ({
-	resolveSecretForHost: vi.fn(),
 	resolveSecret: vi.fn(),
 }))
 
@@ -34,46 +37,58 @@ vi.mock('#worker/integrations/service.ts', () => ({
 vi.mock('#worker/integrations/credentials.ts', () => ({
 	resolveIntegrationAccessToken: (...args: Array<unknown>) =>
 		integrationMocks.resolveIntegrationAccessToken(...args),
+	findIntegrationCredentialId: async () => 'cred-integration',
 }))
 
-vi.mock('#worker/integrations/package-access.ts', () => ({
+vi.mock('#worker/integrations/package-access.ts', async (importOriginal) => ({
+	...(await importOriginal<
+		typeof import('#worker/integrations/package-access.ts')
+	>()),
 	assertCanUseIntegration: (...args: Array<unknown>) =>
 		integrationMocks.assertCanUseIntegration(...args),
 }))
 
-vi.mock('#worker/integrations/token-refresh.ts', () => ({
+vi.mock('#worker/integrations/token-refresh.ts', async (importOriginal) => ({
+	...(await importOriginal<
+		typeof import('#worker/integrations/token-refresh.ts')
+	>()),
 	refreshIntegrationTokens: (...args: Array<unknown>) =>
 		integrationMocks.refreshIntegrationTokens(...args),
 }))
 
 vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
-	resolveSavedPackage: vi.fn(async (input: { packageIdOrKodyId: string }) => {
-		if (
-			input.packageIdOrKodyId === 'pkg-1' ||
-			input.packageIdOrKodyId === 'sentry-bridge'
-		) {
-			return {
-				id: 'pkg-1',
-				kodyId: 'sentry-bridge',
-				name: '@owner/sentry-bridge',
-				userId: 'ignored',
-				sourceId: 'src-1',
+	resolveSavedPackage: vi.fn(
+		async (input: { userId: string; packageIdOrKodyId: string }) => {
+			if (
+				input.packageIdOrKodyId === 'pkg-1' ||
+				input.packageIdOrKodyId === 'sentry-bridge'
+			) {
+				return {
+					id: 'pkg-1',
+					kodyId: 'sentry-bridge',
+					name: '@owner/sentry-bridge',
+					userId: input.userId,
+					sourceId: 'src-1',
+				}
 			}
-		}
-		return null
-	}),
+			return null
+		},
+	),
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	listSavedPackagesByUserId: vi.fn(async () => []),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 }))
 
 vi.mock('#mcp/secrets/service.ts', () => ({
-	resolveSecretForHost: (...args: Array<unknown>) =>
-		secretMocks.resolveSecretForHost(...args),
 	resolveSecret: (...args: Array<unknown>) =>
 		secretMocks.resolveSecret(...args),
+	findSecretForUse: async (input: unknown) => {
+		const resolved = await secretMocks.resolveSecret(input)
+		const { value: _value, ...found } = resolved
+		return { found, readValue: async () => resolved }
+	},
 }))
 
 vi.mock('#worker/package-registry/source.ts', () => ({
@@ -84,6 +99,10 @@ type Destination = Parameters<typeof applyWebhookUrlForUser>[0]['destination']
 
 const redirectError = 'Destination redirected. Apply does not follow redirects.'
 const hooksRegister = 'https://hooks.example/register'
+
+function storedToken(accessToken: string) {
+	return { credentialId: 'cred-integration', accessToken }
+}
 
 function mockIntegration(name = 'github', host = 'api.github.com') {
 	integrationMocks.getJoinedIntegration.mockResolvedValue({
@@ -96,21 +115,18 @@ function mockIntegration(name = 'github', host = 'api.github.com') {
 			allowedPackageIds: [],
 		},
 	})
-	integrationMocks.resolveIntegrationAccessToken.mockResolvedValue('ghs_test')
+	integrationMocks.resolveIntegrationAccessToken.mockResolvedValue(
+		storedToken('ghs_test'),
+	)
 	integrationMocks.assertCanUseIntegration.mockResolvedValue(undefined)
 }
 
 function mockSecret(value: string, host = 'api.github.com') {
-	secretMocks.resolveSecretForHost.mockResolvedValue({
-		found: true,
-		value,
-		allowedHosts: [host],
-		scope: 'user',
-	})
 	secretMocks.resolveSecret.mockResolvedValue({
 		found: true,
 		value,
 		allowedHosts: [host],
+		allowedPackages: ['pkg-1'],
 		scope: 'user',
 	})
 }
@@ -224,39 +240,16 @@ async function setupOwner(
 			},
 		},
 	} as never)
-	const userId = await createStableUserIdFromEmail('owner@example.com')
+	const userId = testStableUserIdFromEmail('owner@example.com')
 	const sqlite = new DatabaseSync(':memory:')
-	sqlite.exec(`
-		CREATE TABLE webhook_endpoints (
-			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL,
-			package_id TEXT NOT NULL,
-			webhook_name TEXT NOT NULL,
-			url_secret_hash TEXT NOT NULL,
-			url_secret_encrypted TEXT,
-			hmac_secret_encrypted TEXT,
-			previous_url_secret_hash TEXT,
-			previous_url_secret_expires_at TEXT,
-			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-			created_at TEXT NOT NULL,
-			rotated_at TEXT NOT NULL
-		);
-		CREATE UNIQUE INDEX idx_webhook_endpoints_user_package_name
-		ON webhook_endpoints(user_id, package_id, webhook_name);
-		CREATE TABLE users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-			username TEXT NOT NULL UNIQUE,
-			email TEXT NOT NULL UNIQUE,
-			password_hash TEXT NOT NULL,
-			stable_user_id TEXT NOT NULL
-		);
-	`)
+	applyAllMigrations(sqlite, new URL('../../migrations/', import.meta.url))
 	const db = createD1FromSqlite(sqlite)
 	const env = {
 		APP_DB: db,
 		APP_BASE_URL: 'https://heykody.dev',
 		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
-	} as Env
+		SENTRY_ENVIRONMENT: 'test',
+	} as unknown as Env
 	await db
 		.prepare(
 			`INSERT INTO users (username, email, password_hash, stable_user_id)
@@ -264,22 +257,27 @@ async function setupOwner(
 		)
 		.bind(userId)
 		.run()
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId: userId,
+		username: 'owner',
+	})
 	if (legacyMintHmac) {
 		secretMocks.resolveSecret.mockResolvedValue({
 			found: true,
 			value: legacyMintHmac,
 			allowedHosts: [],
+			allowedPackages: ['pkg-1'],
 			scope: 'user',
 		})
 	}
 	const { handle } = await mintWebhookUrlForUser({
 		env,
-		userId,
+		request: sessionRequestContext(userId),
+		userId: ownerIdFromStored(userId),
 		username: 'owner',
 		kodyId: 'sentry-bridge',
 		webhookName: 'sentry',
 	})
-	secretMocks.resolveSecretForHost.mockReset()
 	secretMocks.resolveSecret.mockReset()
 	return {
 		userId,
@@ -291,7 +289,7 @@ async function setupOwner(
 			(
 				await revealWebhookUrlForWebsite({
 					env,
-					userId,
+					userId: ownerIdFromStored(userId),
 					username: 'owner',
 					target: { handle },
 				})
@@ -299,7 +297,8 @@ async function setupOwner(
 		apply: (destination: Destination) =>
 			applyWebhookUrlForUser({
 				env,
-				userId,
+				request: sessionRequestContext(userId),
+				userId: ownerIdFromStored(userId),
 				username: 'owner',
 				handle,
 				destination,
@@ -454,10 +453,6 @@ test('webhookUrlApply rejects invalid destinations before fetch', async () => {
 			},
 			/Authorization/,
 		],
-		[
-			githubHooksHttpDestination({ includeWebhookSecret: true }),
-			/no verification declaration/,
-		],
 	]
 	for (const [destination, message] of cases) {
 		const { apply } = await setupOwner()
@@ -545,8 +540,8 @@ test('webhookUrlApply redacts refreshed Authorization tokens after 401 retry', a
 	const refreshedToken = 'tok_refreshed_apply_auth'
 	mockIntegration('hooks', 'hooks.example')
 	integrationMocks.resolveIntegrationAccessToken
-		.mockResolvedValueOnce(initialToken)
-		.mockResolvedValue(refreshedToken)
+		.mockResolvedValueOnce(storedToken(initialToken))
+		.mockResolvedValue(storedToken(refreshedToken))
 	integrationMocks.refreshIntegrationTokens.mockResolvedValue({
 		refreshed: true,
 		refreshedAt: new Date(0).toISOString(),
@@ -583,7 +578,7 @@ test('webhookUrlApply returns the original 401 when the integration refresh is n
 	const { apply } = await setupOwner()
 	mockIntegration('hooks', 'hooks.example')
 	integrationMocks.resolveIntegrationAccessToken.mockResolvedValue(
-		'gho_non_expiring',
+		storedToken('gho_non_expiring'),
 	)
 	integrationMocks.refreshIntegrationTokens.mockResolvedValue({
 		refreshed: false,
@@ -609,7 +604,9 @@ test('webhookUrlApply returns the original 401 when the integration refresh is n
 test('webhookUrlApply cancels the original 401 body when the integration refresh throws', async () => {
 	const { apply } = await setupOwner()
 	mockIntegration('hooks', 'hooks.example')
-	integrationMocks.resolveIntegrationAccessToken.mockResolvedValue('ya29_lost')
+	integrationMocks.resolveIntegrationAccessToken.mockResolvedValue(
+		storedToken('ya29_lost'),
+	)
 	integrationMocks.refreshIntegrationTokens.mockRejectedValue(
 		new Error('missing refresh token'),
 	)
@@ -647,7 +644,7 @@ test('webhookUrlApply injects JSON-escaped {{webhookSecret}} from package-owned 
 	const plaintext = await decryptWebhookHmacSecret(
 		env,
 		row!.hmac_secret_encrypted,
-		userWebhookHmacSecretContext(userId, endpointId!),
+		userWebhookHmacSecretContext(ownerIdFromStored(userId), endpointId!),
 	)
 	using fetchMock = fetchResponding(JSON.stringify({ id: 99 }), {
 		status: 201,
@@ -664,7 +661,35 @@ test('webhookUrlApply injects JSON-escaped {{webhookSecret}} from package-owned 
 	expect(injected).not.toEqual(url)
 	expect(JSON.stringify(applied)).not.toContain(injected)
 	expect(secretMocks.resolveSecret).not.toHaveBeenCalled()
-	expect(secretMocks.resolveSecretForHost).not.toHaveBeenCalled()
+})
+
+test('webhookUrlApply injects the default signing secret when the manifest declares no verification', async () => {
+	const { db, env, handle, userId, apply } = await setupOwner()
+	mockIntegration()
+	const endpointId = parseWebhookUrlHandle(handle)!
+	const row = await db
+		.prepare(`SELECT hmac_secret_encrypted FROM webhook_endpoints WHERE id = ?`)
+		.bind(endpointId)
+		.first<{ hmac_secret_encrypted: string | null }>()
+	expect(row?.hmac_secret_encrypted).toBeTruthy()
+	const plaintext = await decryptWebhookHmacSecret(
+		env,
+		row!.hmac_secret_encrypted!,
+		userWebhookHmacSecretContext(ownerIdFromStored(userId), endpointId),
+	)
+	using fetchMock = fetchResponding(JSON.stringify({ id: 7 }), {
+		status: 201,
+	})
+
+	const applied = await apply(
+		githubHooksHttpDestination({ includeWebhookSecret: true }),
+	)
+
+	expect(applied).toMatchObject({ ok: true, remoteId: '7' })
+	expect(JSON.parse(String(requestOf(fetchMock).init.body)).config.secret).toBe(
+		plaintext,
+	)
+	expect(JSON.stringify(applied)).not.toContain(plaintext)
 })
 
 test('webhookUrlApply uses HMAC copied from legacy secretName at mint, not a live secrets lookup', async () => {
@@ -700,15 +725,15 @@ test('webhookUrlApply uses HMAC copied from legacy secretName at mint, not a liv
 	// Apply must not re-resolve verification.secretName (prevents post-Allow
 	// secret swaps into an already-approved destination).
 	expect(secretMocks.resolveSecret).not.toHaveBeenCalled()
-	expect(secretMocks.resolveSecretForHost).not.toHaveBeenCalled()
 })
 
 test('webhookUrlApply still requires host Allow for destination.secretName Bearer auth', async () => {
 	const { apply } = await setupOwner()
-	secretMocks.resolveSecretForHost.mockResolvedValue({
+	secretMocks.resolveSecret.mockResolvedValue({
 		found: true,
 		value: 'tok_unapproved',
 		allowedHosts: [],
+		allowedPackages: ['pkg-1'],
 		scope: 'user',
 	})
 

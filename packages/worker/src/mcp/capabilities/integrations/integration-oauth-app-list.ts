@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeIntegrationOrgWide } from '#mcp/capabilities/integrations/authorize-integration.ts'
 import {
 	emptyCapabilityInputSchema,
 	type CapabilityContext,
@@ -20,6 +22,7 @@ export const integrationOauthAppListCapability = defineDomainCapability(
 	capabilityDomainNames.integrations,
 	{
 		name: 'integrationOauthAppList',
+		orgPermission: 'integration:read',
 		description:
 			'List OAuth apps for the signed-in user with connection counts and the connection names that share each app. Use this before rotating client credentials so one write updates every sibling connection.',
 		keywords: [
@@ -38,15 +41,16 @@ export const integrationOauthAppListCapability = defineDomainCapability(
 		inputSchema: emptyCapabilityInputSchema,
 		outputSchema,
 		async handler(_args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeIntegrationOrgWide(ctx, 'integration:read')
 			const [apps, joined] = await Promise.all([
 				listOauthApps({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 				}),
 				listJoinedIntegrations({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 				}),
 			])
 			const connectionsByAppSlug = new Map<

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { platformFeedbackTestSchemaSql } from '#worker/platform-feedback/test-schema.ts'
@@ -12,7 +13,8 @@ function createAdminPlatformFeedbackFixture() {
 			username TEXT NOT NULL,
 			email TEXT NOT NULL,
 			stable_user_id TEXT,
-			private_content TEXT
+			private_content TEXT,
+			deleted_at TEXT
 		);
 		CREATE UNIQUE INDEX idx_users_stable_user_id
 			ON users(stable_user_id)
@@ -131,7 +133,7 @@ test('admin platform feedback data lists safely and uses stored submitter snapsh
 		id: 'feedback-active',
 		submitter_user_id: 'stable-active',
 		submitter: {
-			user_id: 'stable-active',
+			user_id: ownerIdFromStored('stable-active'),
 			username: 'snapshot-submitter',
 			email: 'snapshot@example.com',
 		},
@@ -163,7 +165,7 @@ test('admin platform feedback data lists safely and uses stored submitter snapsh
 		id: 'feedback-missing',
 		submitter_user_id: 'stable-deleted',
 		submitter: {
-			user_id: 'stable-deleted',
+			user_id: ownerIdFromStored('stable-deleted'),
 			username: 'deleted-submitter',
 			email: 'deleted@example.com',
 		},

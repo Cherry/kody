@@ -1,3 +1,11 @@
+/**
+ * soft-delete-read-filter: opt-out
+ *
+ * Purge scans and claims unverified person accounts, including rows already
+ * soft-deleted or mid-deletion.
+ */
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { invalidatePackageAppOwnerCacheForDbUserId } from '#app/package-app-owner.ts'
 import * as Sentry from '@sentry/cloudflare'
 import { shouldRunRetentionCron } from '@kody-internal/shared/jobs/scheduled-lanes.ts'
 import { utcSqliteTimestamp } from '@kody-internal/shared/date-keys.ts'
@@ -40,7 +48,16 @@ const millisecondsPerDay = 24 * 60 * 60 * 1000
 
 const unverifiedPersonEligibilitySql = [
 	'email_verified_at IS NULL',
-	`account_type = 'person'`,
+	// Leftover platform accounts are ordinary orgs whose creator is null.
+	// They never complete email login, so this unverified sweep would delete
+	// those users rows. A missing org row stays eligible: person signups
+	// always set created_by_user_id.
+	`NOT EXISTS (
+			SELECT 1
+			FROM orgs
+			WHERE orgs.id = users.stable_user_id
+				AND orgs.created_by_user_id IS NULL
+		)`,
 	// Exempting any oauth_connections row is sound only because signed-in
 	// linking requires a live verified email (the insert is fenced on
 	// email_verified_at IS NOT NULL) and unauthenticated social sign-in
@@ -55,7 +72,7 @@ const unverifiedPersonEligibilitySql = [
 
 type UnverifiedAccountRow = {
 	id: number
-	stable_user_id: string
+	stable_user_id: OwnerId
 	email: string
 	created_at: string
 }
@@ -74,7 +91,7 @@ export type UnverifiedAccountPurgeOutcomeKind =
  * only; emails and usernames never leave the lane.
  */
 export type UnverifiedAccountPurgeOutcome = {
-	stableUserId: string
+	stableUserId: OwnerId
 	ageDays: number
 	outcome: UnverifiedAccountPurgeOutcomeKind
 	error?: string
@@ -90,7 +107,7 @@ export type UnverifiedAccountPurgeResult = {
 }
 
 export type UnverifiedAccountPurgeCandidate = {
-	stableUserId: string
+	stableUserId: OwnerId
 	ageDays: number
 }
 
@@ -180,7 +197,7 @@ function redactedErrorForReporting(error: unknown) {
 
 function reportPurgeFailureToSentry(input: {
 	error: unknown
-	userId: string
+	userId: OwnerId
 	warnings: ReadonlyArray<string>
 }) {
 	try {
@@ -264,6 +281,7 @@ async function claimUnverifiedAccountForPurge(input: {
 			.run(),
 	)
 	if ((createdResult.meta.changes ?? 0) === 1) {
+		await invalidatePackageAppOwnerCacheForDbUserId(input.db, input.dbUserId)
 		return { claimed: true, created: true, deletingAt }
 	}
 	const restampedResult = await runD1WithRetry(() =>
@@ -279,6 +297,7 @@ async function claimUnverifiedAccountForPurge(input: {
 			.run(),
 	)
 	if ((restampedResult.meta.changes ?? 0) === 1) {
+		await invalidatePackageAppOwnerCacheForDbUserId(input.db, input.dbUserId)
 		return { claimed: true, created: false, deletingAt }
 	}
 	return { claimed: false }

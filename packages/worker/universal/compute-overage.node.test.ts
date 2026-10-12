@@ -6,6 +6,7 @@ import {
 	computeOverageIncludePercent,
 	resolveComputeIncludeCreditsStatus,
 	resolvePastIncludeStop,
+	resolvePastIncludeStopLimits,
 } from './compute-overage.ts'
 import { planLimits, proCreditsPlanLimits } from './plans.ts'
 
@@ -87,6 +88,7 @@ test('howToReduce points wallet and retired accounts at /account/usage#credits; 
 		'empty',
 	)
 	expect(empty).toContain(`Add credits at ${accountCreditsPath}`)
+	expect(empty).toContain('With no credits left, usage past the include stops')
 	expect(empty).toContain('$0.004 per worker-compute day')
 	expect(
 		buildComputeOverageHowToReduce('durable_object_rows_read', 'pro', 'funded'),
@@ -146,4 +148,49 @@ test('past-include stop: only an empty purchasable-Pro wallet stops, and only pa
 			}),
 		).toBeNull()
 	}
+})
+
+test('a monthly override moves the $0 stop and the stop thresholds warnings compare against', () => {
+	const base = {
+		plan: 'pro',
+		ladder: 'public',
+		creditWallet: 'empty',
+	} as const
+	const limitOverrides = [
+		{
+			key: 'unique_worker_days_per_month',
+			value: 1_000,
+			expiresAt: null,
+		},
+	] as const
+	expect(resolvePastIncludeStopLimits(base)).toEqual({
+		unique_worker_days: 350,
+		durable_object_rows_read: 5_000_000_000,
+	})
+	expect(resolvePastIncludeStopLimits({ ...base, limitOverrides })).toEqual({
+		unique_worker_days: 1_000,
+		durable_object_rows_read: 5_000_000_000,
+	})
+	const stop = (uniqueWorkerDays: number) =>
+		resolvePastIncludeStop({
+			...base,
+			limitOverrides,
+			uniqueWorkerDays,
+			durableObjectRowsRead: 0,
+		})
+	expect(stop(400)).toBeNull()
+	expect(stop(1_001)).toEqual({
+		resource: 'unique_worker_days',
+		limit: 1_000,
+		current: 1_001,
+	})
+	// Debits still settle against the plan include.
+	expect(
+		computeMonthlyOverage({
+			...base,
+			creditWallet: 'funded',
+			uniqueWorkerDays: 400,
+			durableObjectRowsRead: 0,
+		}).billableUniqueWorkerDays,
+	).toBe(50)
 })

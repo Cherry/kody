@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	d1LockRetryBaseDelayMs,
@@ -44,7 +45,7 @@ const packageFiles = {
 function createPackageSourceRow(id: string, publishedCommit: string | null) {
 	return {
 		id,
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package' as const,
 		entity_id: `package-${id}`,
 		repo_id: `repo-${id}`,
@@ -61,6 +62,7 @@ function createPublishedSourcePayload(sourceId: string, commit: string) {
 	return {
 		source: createPackageSourceRow(sourceId, commit),
 		files: packageFiles,
+		snapshotCreatedAt: '2026-04-20T00:05:00.000Z',
 	}
 }
 
@@ -75,7 +77,7 @@ function createLoadSourceInput(sourceId: string) {
 			} as unknown as KVNamespace,
 		} as Env,
 		baseUrl: 'https://heykody.dev',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId,
 	}
 }
@@ -95,6 +97,7 @@ test('loadPackageSourceBySourceId caches published sources', async () => {
 	expect(mockModule.loadPublishedEntitySource).toHaveBeenCalledTimes(1)
 	expect(first).toStrictEqual(second)
 	expect(first.files).toEqual(packageFiles)
+	expect(first.snapshotCreatedAt).toBe('2026-04-20T00:05:00.000Z')
 })
 
 test('loadPackageSourceBySourceId shares in-flight loads', async () => {
@@ -229,7 +232,7 @@ test('loadPackageSourceFromFiles parses caller files with ownership checks', asy
 	const load = () =>
 		loadPackageSourceFromFiles({
 			env: { APP_DB: {} } as Env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			sourceId: 'source-from-files',
 			files,
 		})
@@ -242,7 +245,7 @@ test('loadPackageSourceFromFiles parses caller files with ownership checks', asy
 
 	mockModule.getEntitySourceById.mockResolvedValue({
 		...source,
-		user_id: 'user-2',
+		user_id: ownerIdFromStored('user-2'),
 	})
 	await expect(load()).rejects.toThrow('was not found')
 })

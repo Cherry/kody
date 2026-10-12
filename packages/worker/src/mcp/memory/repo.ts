@@ -1,7 +1,9 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	chunkArray,
 	maxD1BoundParameters,
 } from '@kody-internal/shared/chunk.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	type McpMemoryConversationSuppressionRow,
 	type McpMemoryRow,
@@ -10,7 +12,7 @@ import {
 function mapMemoryRow(row: Record<string, unknown>): McpMemoryRow {
 	return {
 		id: String(row['id']),
-		user_id: String(row['user_id']),
+		user_id: String(row['user_id']) as OwnerId,
 		category: row['category'] == null ? null : String(row['category']),
 		status: String(row['status']) as McpMemoryRow['status'],
 		subject: String(row['subject']),
@@ -84,7 +86,7 @@ export async function getMemoryById(
 			`SELECT id, user_id, category, status, subject, summary, details, tags_json,
 				source_uris_json, dedupe_key, created_at, updated_at, last_accessed_at, deleted_at
 			FROM mcp_memories
-			WHERE user_id = ? AND id = ?
+			WHERE user_id = ? AND id = ?${andLiveDeletedAtSql()}
 			LIMIT 1`,
 		)
 		.bind(userId, memoryId)
@@ -123,7 +125,7 @@ export async function updateMemory(
 				last_accessed_at = ?,
 				deleted_at = ?,
 				updated_at = ?
-			WHERE user_id = ? AND id = ?`,
+			WHERE user_id = ? AND id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			fields.category,
@@ -150,7 +152,9 @@ export async function deleteMemory(
 	memoryId: string,
 ): Promise<boolean> {
 	const out = await db
-		.prepare(`DELETE FROM mcp_memories WHERE user_id = ? AND id = ?`)
+		.prepare(
+			`DELETE FROM mcp_memories WHERE user_id = ? AND id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(userId, memoryId)
 		.run()
 	return (out.meta.changes ?? 0) > 0
@@ -175,7 +179,7 @@ export async function listMemoriesByUserId(
 			`SELECT id, user_id, category, status, subject, summary, details, tags_json,
 				source_uris_json, dedupe_key, created_at, updated_at, last_accessed_at, deleted_at
 			FROM mcp_memories
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 				${statusClause}
 			ORDER BY updated_at DESC
 			LIMIT ?`,
@@ -206,7 +210,7 @@ export async function listMemoriesByUserIdPage(input: {
 			`SELECT id, user_id, category, status, subject, summary, details, tags_json,
 				source_uris_json, dedupe_key, created_at, updated_at, last_accessed_at, deleted_at
 			FROM mcp_memories
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 				AND id > ?
 				${statusClause}
 			ORDER BY id
@@ -246,7 +250,7 @@ export async function listMemoriesByIds(
 				`SELECT id, user_id, category, status, subject, summary, details, tags_json,
 					source_uris_json, dedupe_key, created_at, updated_at, last_accessed_at, deleted_at
 				FROM mcp_memories
-				WHERE user_id = ?
+				WHERE user_id = ?${andLiveDeletedAtSql()}
 					AND id IN (${idPlaceholders})
 					${statusClause}`,
 			)
@@ -270,7 +274,7 @@ export async function listMemoriesPage(input: {
 			`SELECT id, user_id, category, status, subject, summary, details, tags_json,
 				source_uris_json, dedupe_key, created_at, updated_at, last_accessed_at, deleted_at
 			FROM mcp_memories
-			WHERE id > ?
+			WHERE id > ?${andLiveDeletedAtSql()}
 			ORDER BY id
 			LIMIT ?`,
 		)
@@ -290,7 +294,7 @@ function touchMemoryAccessedAtStatement(
 		.prepare(
 			`UPDATE mcp_memories
 			SET last_accessed_at = ?, updated_at = updated_at
-			WHERE user_id = ? AND id IN (${placeholders})`,
+			WHERE user_id = ? AND id IN (${placeholders})${andLiveDeletedAtSql()}`,
 		)
 		.bind(timestamp, userId, ...memoryIds)
 }

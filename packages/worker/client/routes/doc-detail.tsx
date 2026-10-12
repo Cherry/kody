@@ -31,12 +31,12 @@ import {
 } from '#client/routes/docs-shell.tsx'
 import { HowKodyWorksWalkthrough } from '#client/routes/how-kody-works-walkthrough.tsx'
 import { renderGoogleOauthWalkthrough } from '#client/routes/google-oauth-walkthrough.tsx'
-import { renderPackageSharingFlagCallout } from '#client/routes/package-sharing-flag-callout.tsx'
-import { renderSecretProvidersFlagCallout } from '#client/routes/secret-providers-flag-callout.tsx'
+import { renderPackageSkillsFlagCallout } from '#client/routes/package-skills-flag-callout.tsx'
+import { renderMcpEventsFlagCallout } from '#client/routes/mcp-events-flag-callout.tsx'
 import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
 import {
-	packageShareGrantsFlagKey,
-	secretProvidersFlagKey,
+	mcpSkillsExtensionFlagKey,
+	mcpEventsExtensionFlagKey,
 } from '#universal/feature-flags/registry.ts'
 import { extractDocWatchMarkdown } from '#universal/doc-youtube.ts'
 import { colors, radius } from '#universal/styles/tokens.ts'
@@ -66,7 +66,7 @@ const interactiveDocRenderers: Readonly<
  * Doc page for `/docs` (the introduction) and `/docs/:slug`: docs shell
  * (sidebar) → section eyebrow → title + meta → `.prose` body rendered from
  * the server's bundled markdown catalog with the first-party link policy
- * (docs link into `/connect/oauth` and `/account/secrets/new`) and copyable
+ * (docs link into `/connect/oauth` and `/connect/secret-set`) and copyable
  * code blocks → previous/next → a quiet foot with the raw markdown twin for
  * agents (`data-rmx-document` so the SPA does not intercept
  * `/docs/:slug.md`). Interactive slugs (how-kody-works, google-oauth) swap
@@ -316,20 +316,23 @@ export function DocDetailRoute(handle: Handle) {
 						</p>
 					</header>
 
-					{doc.slug === 'package-sharing'
-						? renderPackageSharingFlagCallout({
+					{doc.slug === 'mcp-events'
+						? renderMcpEventsFlagCallout({
 								loggedIn: Boolean(session),
 								enabled: isFeatureFlagEnabled(
 									session,
-									packageShareGrantsFlagKey,
+									mcpEventsExtensionFlagKey,
 								),
 							})
 						: null}
 
-					{doc.slug === 'secret-providers'
-						? renderSecretProvidersFlagCallout({
+					{doc.slug === 'package-skills'
+						? renderPackageSkillsFlagCallout({
 								loggedIn: Boolean(session),
-								enabled: isFeatureFlagEnabled(session, secretProvidersFlagKey),
+								enabled: isFeatureFlagEnabled(
+									session,
+									mcpSkillsExtensionFlagKey,
+								),
 							})
 						: null}
 

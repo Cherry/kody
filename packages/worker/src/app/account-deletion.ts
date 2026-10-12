@@ -1,4 +1,12 @@
+/**
+ * soft-delete-read-filter: opt-out
+ *
+ * Account deletion and soft-delete purge both read and remove user-owned rows
+ * including tombstones. Live product paths keep deleted_at filters elsewhere.
+ */
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	type OAuthGrantHelpers,
 	revokeAllOAuthGrantsBestEffort,
@@ -22,6 +30,7 @@ import {
 	type StripeSubscription,
 } from '#worker/billing/stripe-client.ts'
 import { auditDatabaseFromEnv, logAuditEvent } from '#worker/audit-log.ts'
+import { isKodySubscription } from '#worker/billing/billing-config.ts'
 import { purgeStripePlanRefreshForUser } from '#worker/billing/stripe-plan-refresh-client.ts'
 import { storageRunnerRpc } from '#worker/storage-runner.ts'
 import { purgeJobManagerForUser } from '#worker/jobs/manager-client.ts'
@@ -35,6 +44,8 @@ import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { mcpClientHubDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { packageRealtimeSessionRpc } from '#worker/package-runtime/realtime-session.ts'
 import { clearRunRecords } from '#worker/run-records/service.ts'
+import { cancelActiveWorkflowRunsForUser } from '#worker/package-runtime/package-workflows.ts'
+import { mcpOAuthRefreshFamilyUserKvPrefixes } from '#worker/oauth-refresh-family.ts'
 import {
 	userMeterNamespace,
 	userMeterRpc,
@@ -48,11 +59,11 @@ import {
 	listOwnedUserMcpOauthClientIds,
 } from '#app/account-mcp-oauth-clients.ts'
 import {
-	accountUserDataTargets,
 	buildUserScopedDeleteOrUpdateSql,
 	buildUserScopedTargetMatch,
 	getAccountD1UserColumnCoverage,
 } from '#worker/account/data-targets.ts'
+import { hardPurgeDataTargets } from '#worker/orgs/data-targets.ts'
 import {
 	accountUserOwnedVectorizeSurfaces,
 	getAccountDeletionDurableObjectResultKeys,
@@ -67,6 +78,7 @@ import {
 	deleteAccountCommunityAssetPrefixes,
 	deleteAccountEmailBlobPrefixes,
 } from '#app/account-r2-prefix-cleanup.ts'
+import { deleteOrgTransferBackupsForOwner } from '#worker/org-transfer/backup.ts'
 import {
 	listMcpAgentSessionsForUser,
 	type McpAgentSession,
@@ -82,6 +94,8 @@ import {
 	buildPublishedSourceSnapshotKvKey,
 } from '#worker/package-runtime/published-runtime-artifacts.ts'
 import { deleteAllPackageRetrieverCacheEntriesForUser } from '#worker/package-retrievers/manifest-cache.ts'
+import { deleteAllPackageSkillsIndexEntriesForUser } from '#worker/package-registry/skills-index-cache.ts'
+import { deletePackageSubscriptionTopicCacheForUser } from '#worker/package-invocations/subscription-topic-cache.ts'
 import { buildCommunitySnapshotKvKey } from '#worker/community/snapshot.ts'
 import {
 	communityIconKvListingPrefixes,
@@ -96,6 +110,7 @@ import {
 
 // The subset of the provider's OAuthHelpers that deletion consumes, kept
 // structural so node tests can pass small stubs as `OAUTH_PROVIDER`.
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 type OAuthHelpersShape = OAuthGrantHelpers & {
 	deleteClient?(clientId: string): Promise<unknown>
 }
@@ -259,7 +274,7 @@ const vectorIdBuildersBySurfaceId = {
 
 async function listUserVectorSourceRowIds(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 	source: UserOwnedVectorizeSource,
 ): Promise<Array<string>> {
 	switch (source.kind) {
@@ -289,7 +304,7 @@ async function listUserVectorSourceRowIds(
 	}
 }
 
-async function listUserVectorIds(env: Env, userId: string) {
+async function listUserVectorIds(env: Env, userId: OwnerId) {
 	const ids: Array<string> = []
 	for (const surface of accountUserOwnedVectorizeSurfaces) {
 		const buildId = vectorIdBuildersBySurfaceId[surface.id]
@@ -302,8 +317,12 @@ async function listUserVectorIds(env: Env, userId: string) {
 }
 
 async function getUserBillingIdentity(env: Env, dbUserId: number) {
+	// Look up by primary key during deletion/purge; do not require a live row.
 	const row = await env.APP_DB.prepare(
-		`SELECT stripe_customer_id, email FROM users WHERE id = ?`,
+		`SELECT o.stripe_customer_id, u.email
+		 FROM users u
+		 LEFT JOIN orgs o ON o.id = u.stable_user_id
+		 WHERE u.id = ?`,
 	)
 		.bind(dbUserId)
 		.first<{ stripe_customer_id: string | null; email: string | null }>()
@@ -313,14 +332,14 @@ async function getUserBillingIdentity(env: Env, dbUserId: number) {
 	}
 }
 
-async function listUserStorageIds(env: Env, userId: string) {
+async function listUserStorageIds(env: Env, userId: OwnerId) {
 	return await listAccountUserStorageIds({
 		env,
 		userId,
 	})
 }
 
-async function listUserSourceSnapshots(env: Env, userId: string) {
+async function listUserSourceSnapshots(env: Env, userId: OwnerId) {
 	const sourceRows = await env.APP_DB.prepare(
 		`SELECT id, published_commit, repo_id
 		FROM entity_sources
@@ -335,7 +354,7 @@ async function listUserSourceSnapshots(env: Env, userId: string) {
 	}))
 }
 
-async function listUserSavedPackages(env: Env, userId: string) {
+async function listUserSavedPackages(env: Env, userId: OwnerId) {
 	const rows = await env.APP_DB.prepare(
 		`SELECT id, kody_id, source_id, has_app
 		FROM saved_packages
@@ -356,7 +375,7 @@ async function listUserSavedPackages(env: Env, userId: string) {
 	}))
 }
 
-async function listUserRepoSessions(env: Env, userId: string) {
+async function listUserRepoSessions(env: Env, userId: OwnerId) {
 	if (!env.REPO_SESSION_INDEX) {
 		throw new Error(
 			'REPO_SESSION_INDEX binding is required for account deletion.',
@@ -367,7 +386,7 @@ async function listUserRepoSessions(env: Env, userId: string) {
 	}))
 }
 
-async function listUserMcpServers(env: Env, userId: string) {
+async function listUserMcpServers(env: Env, userId: OwnerId) {
 	const rows = await env.APP_DB.prepare(
 		`SELECT id
 		FROM mcp_server_settings
@@ -380,7 +399,7 @@ async function listUserMcpServers(env: Env, userId: string) {
 
 async function listUserBundleKvKeys(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sourceSnapshots: ReadonlyArray<UserSourceSnapshot>
 	communityListings: ReadonlyArray<AccountCommunityListingSnapshot>
 }) {
@@ -423,7 +442,7 @@ async function listUserBundleKvKeys(input: {
 
 async function collectUserDeletionInventory(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 	warnings: Array<string>
 }): Promise<UserDeletionInventory> {
@@ -817,12 +836,14 @@ async function appendEarlierAccountDeletionRefunds(input: {
 }
 
 /**
- * Refunds unused time on, then cancels, every subscription that can still
- * bill (see `stripeSubscriptionStatusesCanceledOnAccountDeletion`) and throws
- * {@link AccountDeletionBillingError} when any refund fails or any
- * subscription is still billable afterwards. Runs before any destructive
- * cleanup so a Stripe outage retains the account instead of leaving a paying
- * customer with no account, no portal access, and no refund.
+ * Refunds unused time on, then cancels, every **Kody** subscription that can
+ * still bill (see `stripeSubscriptionStatusesCanceledOnAccountDeletion` and
+ * {@link isKodySubscription}) and throws {@link AccountDeletionBillingError}
+ * when any refund fails or any Kody subscription is still billable afterwards.
+ * Non-Kody subscriptions on the shared Stripe account are left untouched.
+ * Runs before any destructive cleanup so a Stripe outage retains the account
+ * instead of leaving a paying customer with no account, no portal access, and
+ * no refund.
  *
  * Only `active` and `trialing` subscriptions are refunded, and the refund is
  * issued before the cancel so the invoice line's service period is still
@@ -853,7 +874,13 @@ async function cancelActiveStripeSubscriptions(input: {
 			`Stripe subscriptions could not be listed: ${getErrorMessage(error)}`,
 		])
 	}
-	const billable = subscriptions.filter(isStripeSubscriptionBillable)
+	// Shared Stripe account: only cancel Kody subscriptions. Never touch
+	// other products on the same customer (for example GratiText Premium).
+	const billable = subscriptions.filter(
+		(subscription) =>
+			isStripeSubscriptionBillable(subscription) &&
+			isKodySubscription(input.env, subscription),
+	)
 	const refunds: Array<AccountDeletionStripeRefund> = []
 
 	const nowSeconds = Math.floor(Date.now() / 1000)
@@ -904,7 +931,11 @@ async function cancelActiveStripeSubscriptions(input: {
 		try {
 			stillBillable = (
 				await listSubscriptions(input.env, input.customerId)
-			).filter(isStripeSubscriptionBillable)
+			).filter(
+				(subscription) =>
+					isStripeSubscriptionBillable(subscription) &&
+					isKodySubscription(input.env, subscription),
+			)
 		} catch (error) {
 			throw new AccountDeletionBillingError([
 				...failures,
@@ -934,7 +965,7 @@ async function cancelActiveStripeSubscriptions(input: {
 async function deleteStripeCustomer(input: {
 	env: Env
 	customerId: string
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }) {
 	try {
@@ -951,7 +982,7 @@ async function deleteStripeCustomer(input: {
 
 async function clearStorageRunners(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageIds: ReadonlyArray<string>
 	warnings: Array<string>
 }): Promise<number> {
@@ -975,9 +1006,28 @@ async function clearStorageRunners(input: {
 	return cleared
 }
 
+async function cancelActiveWorkflowRuns(input: {
+	env: Env
+	userId: OwnerId
+	warnings: Array<string>
+}): Promise<boolean> {
+	try {
+		await cancelActiveWorkflowRunsForUser({
+			env: input.env,
+			userId: input.userId,
+		})
+		return true
+	} catch (error) {
+		input.warnings.push(
+			`Workflow run cancellation failed: ${getErrorMessage(error)}`,
+		)
+		return false
+	}
+}
+
 async function clearRunLog(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -998,7 +1048,7 @@ async function clearRunLog(input: {
 
 async function purgeUserMeter(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -1019,7 +1069,7 @@ async function purgeUserMeter(input: {
 
 async function purgeStripePlanRefresh(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -1042,7 +1092,7 @@ async function purgeStripePlanRefresh(input: {
 
 async function purgeMailbox(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -1059,7 +1109,7 @@ async function purgeMailbox(input: {
 
 async function purgeJobManager(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -1082,7 +1132,7 @@ async function purgeJobManager(input: {
 
 async function purgeRepoSessions(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sessions: ReadonlyArray<UserRepoSessionSnapshot>
 	warnings: Array<string>
 }): Promise<number> {
@@ -1106,7 +1156,7 @@ async function purgeRepoSessions(input: {
 
 async function purgeRepoSessionIndex(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	try {
@@ -1124,7 +1174,7 @@ async function purgeRepoSessionIndex(input: {
 
 async function purgeMcpClientHub(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }): Promise<number> {
 	// Always purge, even when no mcp_server_settings rows remain: the hub DO
@@ -1154,7 +1204,7 @@ async function purgeMcpClientHub(input: {
 
 async function purgeMcpAgentSessions(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sessions: ReadonlyArray<McpAgentSession>
 	warnings: Array<string>
 }) {
@@ -1173,7 +1223,7 @@ async function purgeMcpAgentSessions(input: {
 			const stub = namespace.get(
 				namespace.idFromString(session.doId),
 			) as unknown as {
-				purgeForAccountDeletion: (payload: { userId: string }) => Promise<void>
+				purgeForAccountDeletion: (payload: { userId: OwnerId }) => Promise<void>
 			}
 			await stub.purgeForAccountDeletion({ userId: input.userId })
 			purged += 1
@@ -1188,7 +1238,7 @@ async function purgeMcpAgentSessions(input: {
 
 async function purgePackageRealtimeSessions(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packages: ReadonlyArray<UserSavedPackageSnapshot>
 	warnings: Array<string>
 }): Promise<number> {
@@ -1288,7 +1338,7 @@ type AccountEmailCleanupOutcome = {
 
 async function cleanupAccountEmailBlobs(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	r2Objects: ReadonlyArray<AccountR2ObjectRef>
 	warnings: Array<string>
 }): Promise<AccountEmailCleanupOutcome> {
@@ -1364,25 +1414,48 @@ async function listKvKeysByPrefix(input: {
 
 async function deleteRetrieverCache(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }) {
+	let deleted = 0
 	try {
-		return await deleteAllPackageRetrieverCacheEntriesForUser({
+		deleted = await deleteAllPackageRetrieverCacheEntriesForUser({
 			env: input.env,
 			userId: input.userId,
 		})
 	} catch (error) {
 		const message = getErrorMessage(error)
 		input.warnings.push(`Package retriever KV cleanup failed: ${message}`)
-		return 0
 	}
+	try {
+		deleted += await deleteAllPackageSkillsIndexEntriesForUser({
+			env: input.env,
+			userId: input.userId,
+		})
+	} catch (error) {
+		const message = getErrorMessage(error)
+		input.warnings.push(`Package skills index KV cleanup failed: ${message}`)
+	}
+	try {
+		await deletePackageSubscriptionTopicCacheForUser({
+			env: input.env,
+			userId: input.userId,
+		})
+	} catch (error) {
+		const message = getErrorMessage(error)
+		input.warnings.push(
+			`Package subscription topic map KV cleanup failed: ${message}`,
+		)
+	}
+	return deleted
 }
 
 async function deleteUserScopedRowsAndUser(input: {
 	env: Env
-	mcpUserId: string
+	mcpUserId: OwnerId
 	dbUserId: number
+	/** When true, delete a soft-deleted users row (purge lane). */
+	allowSoftDeletedUser?: boolean
 }): Promise<{
 	deletedRowCounts: Record<string, number>
 	updatedRowCounts: Record<string, number>
@@ -1397,7 +1470,7 @@ async function deleteUserScopedRowsAndUser(input: {
 		updatedRowCounts[tableName] =
 			(updatedRowCounts[tableName] ?? 0) + (changes ?? 0)
 	}
-	const operations = accountUserDataTargets.map((target) => {
+	const operations = hardPurgeDataTargets('person').map((target) => {
 		const match = buildUserScopedTargetMatch({
 			target,
 			mcpUserId: input.mcpUserId,
@@ -1410,7 +1483,9 @@ async function deleteUserScopedRowsAndUser(input: {
 		}
 	})
 	const userStatement = input.env.APP_DB.prepare(
-		`DELETE FROM users WHERE id = ?`,
+		input.allowSoftDeletedUser
+			? `DELETE FROM users WHERE id = ? AND deleted_at IS NOT NULL`
+			: `DELETE FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
 	).bind(input.dbUserId)
 	const results = await input.env.APP_DB.batch([
 		...operations.map((operation) => operation.statement),
@@ -1425,6 +1500,7 @@ async function deleteUserScopedRowsAndUser(input: {
 		}
 	}
 	deletedRowCounts.users = results.at(-1)?.meta.changes ?? 0
+	invalidatePackageAppOwnerCache({ stableUserId: input.mcpUserId })
 	return { deletedRowCounts, updatedRowCounts }
 }
 
@@ -1447,23 +1523,55 @@ async function deleteUserScopedRowsAndUser(input: {
 export async function deleteUserAccount(input: {
 	env: AccountDeletionEnv
 	dbUserId: number
-	mcpUserId: string
+	mcpUserId: OwnerId
+	/**
+	 * Purge lane: the account is already soft-deleted and claimed via
+	 * `deleting_at`. Skip the live deletion fence and remove the tombstoned
+	 * users row.
+	 */
+	purgeSoftDeleted?: boolean
 }): Promise<AccountDeletionResult> {
-	const marked = await markAccountDeleting({
-		db: input.env.APP_DB,
-		dbUserId: input.dbUserId,
-		env: input.env,
-	})
-	if (marked.leaseCount > 0) {
-		if (marked.created) {
-			await abortAccountDeleting({
-				db: input.env.APP_DB,
-				dbUserId: input.dbUserId,
-				env: input.env,
-				expectedDeletingAt: marked.deletingAt,
-			})
+	const purgeSoftDeleted = input.purgeSoftDeleted === true
+	let marked: {
+		leaseCount: number
+		created: boolean
+		deletingAt: string
+	}
+	if (purgeSoftDeleted) {
+		const tombstone = await input.env.APP_DB.prepare(
+			`SELECT deleting_at
+			 FROM users
+			 WHERE id = ? AND deleted_at IS NOT NULL`,
+		)
+			.bind(input.dbUserId)
+			.first<{ deleting_at: string | null }>()
+		if (!tombstone) {
+			throw new Error(
+				`Account ${input.mcpUserId} is not soft-deleted for purge.`,
+			)
 		}
-		throw new AccountDeletionWritersActiveError(marked.leaseCount)
+		marked = {
+			leaseCount: 0,
+			created: false,
+			deletingAt: tombstone.deleting_at ?? new Date().toISOString(),
+		}
+	} else {
+		marked = await markAccountDeleting({
+			db: input.env.APP_DB,
+			dbUserId: input.dbUserId,
+			env: input.env,
+		})
+		if (marked.leaseCount > 0) {
+			if (marked.created) {
+				await abortAccountDeleting({
+					db: input.env.APP_DB,
+					dbUserId: input.dbUserId,
+					env: input.env,
+					expectedDeletingAt: marked.deletingAt,
+				})
+			}
+			throw new AccountDeletionWritersActiveError(marked.leaseCount)
+		}
 	}
 	const warnings: Array<string> = []
 	const clearedDurableObjects: Record<string, number> = {}
@@ -1533,6 +1641,19 @@ export async function deleteUserAccount(input: {
 			}
 			throw error
 		}
+	}
+
+	// Stop running package workflows before purging the storage their steps
+	// write to. On failure, stop with the deletion fence held and nothing
+	// purged: RunLog is the only index of the user's workflow instances, so a
+	// retry needs it to find and terminate them.
+	const workflowRunsCancelled = await cancelActiveWorkflowRuns({
+		env: input.env,
+		userId: input.mcpUserId,
+		warnings,
+	})
+	if (!workflowRunsCancelled) {
+		throw new AccountDeletionCleanupError(warnings, result)
 	}
 
 	result.deletedVectors = await deleteVectorsByIds({
@@ -1623,6 +1744,8 @@ export async function deleteUserAccount(input: {
 				// deleted separately; purge the orphaned revert trees here rather
 				// than waiting on the 90-day TTL.
 				`package-codemod-revert:${input.mcpUserId}:`,
+				// Encrypted copies of the user's MCP OAuth tokens.
+				...mcpOAuthRefreshFamilyUserKvPrefixes(input.mcpUserId),
 			],
 			warnings,
 		})
@@ -1665,6 +1788,18 @@ export async function deleteUserAccount(input: {
 		warnings,
 	})
 	result.deletedEmailBlobs = emailCleanup.deletedEmailBlobs
+	if (input.env.OPERATOR_BACKUPS) {
+		try {
+			await deleteOrgTransferBackupsForOwner({
+				bucket: input.env.OPERATOR_BACKUPS,
+				ownerId: input.mcpUserId,
+			})
+		} catch (error) {
+			warnings.push(
+				`Org transfer backup cleanup failed: ${getErrorMessage(error)}`,
+			)
+		}
+	}
 
 	const discordConnection = await input.env.APP_DB.prepare(
 		`SELECT provider_id FROM oauth_connections
@@ -1787,21 +1922,26 @@ export async function deleteUserAccount(input: {
 			env: input.env,
 			mcpUserId: input.mcpUserId,
 			dbUserId: input.dbUserId,
+			allowSoftDeletedUser: purgeSoftDeleted,
 		})
 		result.deletedRowCounts = {
 			...result.deletedRowCounts,
 			...d1Cleanup.deletedRowCounts,
 		}
 		result.updatedRowCounts = d1Cleanup.updatedRowCounts
+		if (purgeSoftDeleted && (d1Cleanup.deletedRowCounts.users ?? 0) === 0) {
+			throw new Error(
+				`Soft-deleted user row was not removed for ${input.mcpUserId}.`,
+			)
+		}
 	} catch (error) {
 		const failure = `Atomic D1 account deletion failed: ${getErrorMessage(error)}`
 		warnings.push(failure)
 		throw new AccountDeletionCleanupError(warnings, result)
 	}
 
-	// The D1 user row is gone, so a later signup with the same email is a new
-	// account. Drop the UserMeter tombstone `purge()` restored; leaving it
-	// would fence every write (including `/mcp`) for that hashed stable id.
+	// The D1 user row is gone. Drop the UserMeter tombstone `purge()` restored
+	// so the purged object keeps no state for this stable id.
 	try {
 		await clearUserMeterDeletionTombstone({
 			env: input.env,

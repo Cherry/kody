@@ -22,14 +22,6 @@ export {
 	accountExperimentsRouteLoader,
 } from './account-experiments.tsx'
 export {
-	AccountSharedRoute,
-	accountSharedRouteLoader,
-} from './account-shared.tsx'
-export {
-	PackageShareApproveChangesRoute,
-	packageShareApproveChangesRouteLoader,
-} from './package-share-approve-changes.tsx'
-export {
 	AccountIntegrationsRoute,
 	accountIntegrationsRouteLoader,
 } from './account-integrations.tsx'
@@ -47,6 +39,10 @@ export {
 	AccountMcpServersRoute,
 	accountMcpServersRouteLoader,
 } from './account-mcp-servers.tsx'
+export {
+	AccountMcpServerAuthorizeRoute,
+	accountMcpServerAuthorizeRouteLoader,
+} from './account-mcp-server-authorize.tsx'
 export {
 	AccountMemoriesRoute,
 	accountMemoriesRouteLoader,
@@ -79,3 +75,19 @@ export {
 	AccountValuesRoute,
 	accountValuesRouteLoader,
 } from './account-values.tsx'
+export {
+	AccountOrganizationsNewRoute,
+	AccountOrganizationsRoute,
+	accountOrganizationsNewRouteLoader,
+	accountOrganizationsRouteLoader,
+} from './account-organizations.tsx'
+export { AccountRepositoriesRoute } from './account-repositories.tsx'
+export { OrgOverviewRoute, orgOverviewRouteLoader } from './org-overview.tsx'
+export { OrgSettingsRoute, orgSettingsRouteLoader } from './org-settings.tsx'
+export { OrgMembersRoute, orgMembersRouteLoader } from './org-members.tsx'
+export { OrgTeamsRoute, orgTeamsRouteLoader } from './org-teams.tsx'
+export { OrgGrantsRoute, orgGrantsRouteLoader } from './org-grants.tsx'
+export {
+	OrgCollaboratorsRoute,
+	orgCollaboratorsRouteLoader,
+} from './org-collaborators.tsx'

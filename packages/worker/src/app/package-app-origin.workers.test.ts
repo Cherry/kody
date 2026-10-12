@@ -6,17 +6,21 @@ import {
 	handlePackageAppRequest,
 } from '#app/handlers/package-app.ts'
 import { packageAppHandoffQueryParam } from '#app/package-app-handoff.ts'
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
 import {
 	buildPackageAppNotFoundMessage,
 	buildUnmatchedPackageAppOriginPathMessage,
 } from '#worker/package-runtime/package-app-synthetic.ts'
-import { silenceExpectedConsoleWarns } from '#worker/test-support/console-spies.ts'
+import {
+	consoleError,
+	silenceExpectedConsoleWarns,
+} from '#worker/test-support/console-spies.ts'
 import {
 	ensurePackageSubscriptionTestSchema,
 	ensureRbacTestSchema,
 	seedAccount,
 } from '#worker/test-support/workers-seed.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 // Different ports on purpose: swapping origins by mutating a `URL` keeps the
 // original port, and identical ports would hide that.
@@ -88,7 +92,7 @@ async function seedOwnerSessionCookie() {
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	const setCookie = await createAuthCookie(
 		{
-			stableUserId: await createStableUserIdFromEmail(ownerEmail),
+			stableUserId: testStableUserIdFromEmail(ownerEmail),
 			email: ownerEmail,
 			rememberMe: false,
 		},
@@ -210,6 +214,7 @@ test('hosted package apps move to the owner subdomain behind a single-use handof
 
 	// 4. The package-app session is re-checked against the account on every
 	// request, so suspension and password changes revoke package-app access too.
+	const ownerStableUserId = testStableUserIdFromEmail(ownerEmail)
 	for (const [column, value] of [
 		['suspended_at', new Date().toISOString()],
 		['password_changed_at', new Date(Date.now() + 1000).toISOString()],
@@ -217,6 +222,7 @@ test('hosted package apps move to the owner subdomain behind a single-use handof
 		await env.APP_DB.prepare(`UPDATE users SET ${column} = ? WHERE email = ?`)
 			.bind(value, ownerEmail)
 			.run()
+		invalidatePackageAppOwnerCache({ stableUserId: ownerStableUserId })
 		const revoked = await workerFetch(cleanLocation, withPackageSession())
 		expect({ column, status: revoked.status }).toEqual({ column, status: 403 })
 		await env.APP_DB.prepare(
@@ -224,6 +230,7 @@ test('hosted package apps move to the owner subdomain behind a single-use handof
 		)
 			.bind(ownerEmail)
 			.run()
+		invalidatePackageAppOwnerCache({ stableUserId: ownerStableUserId })
 	}
 
 	// 5. Replaying the consumed token is refused, and so is any request without a
@@ -264,7 +271,7 @@ test('hosted package apps move to the owner subdomain behind a single-use handof
 				'/login',
 				'/mcp',
 				'/session',
-				`/@${ownerUsername}/api/package-invocations/demo`,
+				`/@${ownerUsername}/webhooks/demo/sentry/secret`,
 				`/@${ownerUsername}/connectors/home/instance`,
 			].map((path) => `${origin}${path}`),
 		),
@@ -329,6 +336,9 @@ test('hosted package apps move to the owner subdomain behind a single-use handof
 
 test('package apps stay inline on the app origin when no package-app origin is configured', async () => {
 	configureOrigins({ packageAppBaseUrl: undefined, runtime: 'preview' })
+	invalidatePackageAppOwnerCache({
+		stableUserId: testStableUserIdFromEmail(ownerEmail),
+	})
 	const sessionCookie = await seedOwnerSessionCookie()
 
 	const response = await workerFetch(
@@ -365,9 +375,19 @@ test('production package apps fail closed when origin isolation is missing or un
 		packageAppBaseUrl: packageAppOrigin,
 		runtime: 'production',
 	})
+	consoleError.mockImplementation(() => {})
 	const inlineResponse = await handlePackageAppRequest(
 		new Request(`${appOrigin}/@${ownerUsername}/packages/demo`),
 		env,
+	)
+	expect(consoleError).toHaveBeenCalledWith(
+		'package-app-http-error',
+		expect.objectContaining({
+			status: 500,
+			phase: 'inline-disabled',
+			pathname: `/@${ownerUsername}/packages/demo`,
+			runtimeRunId: null,
+		}),
 	)
 	expect(inlineResponse.status).toBe(500)
 	await expect(inlineResponse.text()).resolves.toContain(

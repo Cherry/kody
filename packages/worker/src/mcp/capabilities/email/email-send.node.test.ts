@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -27,9 +31,10 @@ function createContext() {
 			},
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User Example',
 			},
@@ -85,7 +90,7 @@ test('emailSend forwards optional attachments and rejects invalid attachment sha
 	})
 	expect(mocks.sendOutboundEmail).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			accountEmail: 'user@example.com',
 			recipientPolicy: 'self',
 			to: null,

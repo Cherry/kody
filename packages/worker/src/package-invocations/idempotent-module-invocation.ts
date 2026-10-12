@@ -50,6 +50,14 @@ function isStaleInvocation(updatedAt: string, now: Date) {
 	return Date.parse(updatedAt) <= now.getTime() - packageInvocationStaleAfterMs
 }
 
+function readInvocationErrorCode(body: unknown): string | null {
+	if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+	const error = (body as Record<string, unknown>)['error']
+	if (!error || typeof error !== 'object' || Array.isArray(error)) return null
+	const code = (error as Record<string, unknown>)['code']
+	return typeof code === 'string' ? code : null
+}
+
 function toResolvableLedgerRecord(
 	record: PackageInvocationLedgerRecord,
 ): ResolvableInvocationRecord {
@@ -104,7 +112,7 @@ export async function invokeSavedPackageModule(input: {
 	toolFactories: PackageRuntimeToolFactories
 	waitUntil?: (promise: Promise<unknown>) => void
 	/**
-	 * Artifact already prepared by a `packages.invoke` check phase moments
+	 * Artifact already prepared by a host invoke check phase moments
 	 * earlier; skips a second manifest + artifact load. The claim still
 	 * happens first, so replay semantics are unchanged.
 	 */
@@ -120,7 +128,7 @@ export async function invokeSavedPackageModule(input: {
 	// reports them as before.
 	const suspension = await resolveBackgroundMcpUser(
 		input.env.APP_DB,
-		input.actor.userId,
+		input.actor.orgId,
 	).then(
 		() => null,
 		(error: unknown) => (isAccountSuspendedError(error) ? error : null),
@@ -144,7 +152,7 @@ export async function invokeSavedPackageModule(input: {
 		topic: input.topic,
 	})
 	const ledgerKey = {
-		tokenId: input.actor.tokenId,
+		tokenId: input.actor.sourceId,
 		packageId: input.savedPackage.id,
 		exportName: input.invocationName,
 		idempotencyKey: input.idempotencyKey,
@@ -212,7 +220,7 @@ export async function invokeSavedPackageModule(input: {
 	const attemptClaim = async () =>
 		await claimPackageInvocationRecord({
 			env: input.env,
-			userId: input.actor.userId,
+			userId: input.actor.orgId,
 			context: buildRunRecordContext(),
 			invocation: {
 				id: crypto.randomUUID(),
@@ -229,7 +237,7 @@ export async function invokeSavedPackageModule(input: {
 	const lookupLedger = async () =>
 		await getPackageInvocationRecord({
 			env: input.env,
-			userId: input.actor.userId,
+			userId: input.actor.orgId,
 			key: ledgerKey,
 		})
 	let claim: Awaited<ReturnType<typeof attemptClaim>>
@@ -313,7 +321,7 @@ export async function invokeSavedPackageModule(input: {
 		})
 		const pending = finishPackageInvocationRecord({
 			env: input.env,
-			userId: input.actor.userId,
+			userId: input.actor.orgId,
 			handle: claimed.handle,
 			invocationId: claimed.invocationId,
 			claimUpdatedAt: claimed.claimUpdatedAt,
@@ -408,12 +416,36 @@ export async function invokeSavedPackageModule(input: {
 		case 'pre-execution-denied': {
 			// Nothing ran: free the key so a later retry (quota reset, limit
 			// bump, or artifact prepare) is not stuck replaying this response.
+			// Finish the claimed run as an error with logs (do not delete it)
+			// so Activity keeps pre-execution evidence instead of a vanished
+			// zero-log attempt.
+			const releaseReason =
+				outcome.kind === 'artifact-unavailable'
+					? 'Package artifact preparation failed before execution.'
+					: 'Package invocation denied before execution.'
+			const releaseErrorCode = readInvocationErrorCode(outcome.response.body)
 			const release = await releasePackageInvocationRecord({
 				env: input.env,
-				userId: input.actor.userId,
+				userId: input.actor.orgId,
 				invocationId: claimed.invocationId,
 				claimUpdatedAt: claimed.claimUpdatedAt,
 				handle: claimed.handle,
+				error: {
+					name: releaseErrorCode ?? outcome.kind,
+					message: releaseReason,
+				},
+				logs: [
+					startedLog,
+					{
+						level: 'error',
+						message: releaseReason,
+						fields: {
+							kind: outcome.kind,
+							...(releaseErrorCode ? { code: releaseErrorCode } : {}),
+						},
+					},
+				],
+				waitUntil: input.waitUntil,
 			})
 			if (!release.released) {
 				const current = release.record
@@ -437,7 +469,7 @@ export async function invokeSavedPackageModule(input: {
 			try {
 				const finished = await finishPackageInvocationRecord({
 					env: input.env,
-					userId: input.actor.userId,
+					userId: input.actor.orgId,
 					handle: claimed.handle,
 					invocationId: claimed.invocationId,
 					claimUpdatedAt: claimed.claimUpdatedAt,
@@ -473,7 +505,7 @@ export async function invokeSavedPackageModule(input: {
 			try {
 				const finished = await finishPackageInvocationRecord({
 					env: input.env,
-					userId: input.actor.userId,
+					userId: input.actor.orgId,
 					handle: claimed.handle,
 					invocationId: claimed.invocationId,
 					claimUpdatedAt: claimed.claimUpdatedAt,

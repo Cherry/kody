@@ -17,16 +17,11 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import {
-	getGhostButtonCss,
-	mutedLinkCss,
-} from '#universal/styles/style-primitives.ts'
-import { queueSessionRefresh } from '#client/session.ts'
+import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
 import { toast } from '#client/toast.ts'
 import {
 	interpretAccountProfileSave,
 	readProfileFormValues,
-	usernameFormatError,
 } from '#client/routes/account-profile-save.ts'
 import {
 	type AccountStatus,
@@ -38,13 +33,11 @@ import {
 	fetchAccountPagePayloads,
 } from '#client/routes/account-page-data.ts'
 import { AccountDeletePanel } from '#client/routes/account-delete-panel.tsx'
-import { renderAccountLogoutPanel } from '#client/routes/account-logout-panel.tsx'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
 	AccountManagementShell,
 	AccountPageHeader,
-	accountActionsCss,
 } from '#client/routes/account-management-components.tsx'
 import { createAccountEmailClaims } from '#client/routes/account-email-claims-client.ts'
 import { renderAccountFormerEmailsPanel } from '#client/routes/account-former-emails-panel.tsx'
@@ -66,9 +59,37 @@ const accountAvatarApiPath = '/account/profile/avatar.json'
 
 export { accountRouteLoader } from '#client/routes/account-page-data.ts'
 
-function isAccountPath(href: string) {
-	return new URL(href, 'http://localhost').pathname === '/account'
+type AccountView = 'profile' | 'security' | 'data'
+
+/** Profile, Security, and Data & deletion share one route and one payload. */
+function accountViewFor(href: string): AccountView | null {
+	switch (new URL(href, 'http://localhost').pathname) {
+		case routes.account.href():
+			return 'profile'
+		case routes.accountSecurity.href():
+			return 'security'
+		case routes.accountData.href():
+			return 'data'
+		default:
+			return null
+	}
 }
+
+const accountViewHeaders = {
+	profile: {
+		title: 'Profile',
+		description: 'How you appear across Kody, and the email you sign in with.',
+	},
+	security: {
+		title: 'Security',
+		description:
+			'Your password, second sign-in step, the accounts you can sign in with, and emails you used before.',
+	},
+	data: {
+		title: 'Data & deletion',
+		description: 'Take a copy of your account data, or delete the account.',
+	},
+} satisfies Record<AccountView, { title: string; description: string }>
 
 export function AccountRoute(handle: Handle) {
 	let saveStatus: 'idle' | 'saving' = 'idle'
@@ -80,7 +101,6 @@ export function AccountRoute(handle: Handle) {
 	let emailVerificationDelivery: AccountProfileLoaderData['emailVerificationDelivery'] =
 		null
 	let username = ''
-	let draftUsername = ''
 	let draftDisplayName = ''
 	let draftBio = ''
 	let draftProfileVisibility: ProfileVisibility = 'public'
@@ -94,7 +114,6 @@ export function AccountRoute(handle: Handle) {
 	let avatarDropActive = false
 	let message: string | null = null
 	let messageTone: 'error' | 'info' = 'info'
-	let usernameSaveError: string | null = null
 	const accountConnections = createAccountConnections(handle)
 	const accountEmailClaims = createAccountEmailClaims(handle)
 	let consumedCallbackMessage = false
@@ -105,7 +124,7 @@ export function AccountRoute(handle: Handle) {
 	let appliedError: Error | null = null
 	const accountData = createRouteData<'accountProfile', AccountPagePayloads>({
 		consume(handle, href) {
-			if (!isAccountPath(href)) return null
+			if (!accountViewFor(href)) return null
 			const accountProfile = tryConsumeRouteLoaderData(
 				handle,
 				'accountProfile',
@@ -150,11 +169,8 @@ export function AccountRoute(handle: Handle) {
 		emailVerified = payload.emailVerified
 		emailVerificationDelivery = payload.emailVerificationDelivery ?? null
 		username = payload.username
-		if (!usernameSaveError) {
-			draftUsername = payload.username
-			message = null
-			messageTone = 'info'
-		}
+		message = null
+		messageTone = 'info'
 		applyProfileFields(payload)
 		accountEmailClaims.applyCurrentEmail(payload.email)
 	}
@@ -177,14 +193,18 @@ export function AccountRoute(handle: Handle) {
 	}
 
 	if (typeof document !== 'undefined') {
+		// The avatar lives on the Profile view; a drop on Security or Data
+		// would open an editor for a picture that is not on screen.
+		const onProfileView = () =>
+			accountViewFor(readCurrentRouterHref(handle)) === 'profile'
 		listenForAvatarFileDrop({
 			signal: handle.signal,
 			onDragActiveChange(active) {
-				avatarDropActive = active
+				avatarDropActive = active && onProfileView()
 				handle.update()
 			},
 			onImageFile(file) {
-				openAvatarEditor(file)
+				if (onProfileView()) openAvatarEditor(file)
 			},
 		})
 	}
@@ -340,45 +360,16 @@ export function AccountRoute(handle: Handle) {
 		}
 	}
 
-	function updateDraftUsername(event: InputEvent) {
-		if (!(event.currentTarget instanceof HTMLInputElement)) return
-		draftUsername = event.currentTarget.value
-		if (usernameSaveError) usernameSaveError = null
-		handle.update()
-	}
-
 	async function handleProfileSubmit(event: SubmitEvent) {
 		event.preventDefault()
 		const submitted = readProfileFormValues(event.currentTarget, {
-			username: draftUsername,
 			displayName: draftDisplayName,
 			bio: draftBio,
 			profileVisibility: draftProfileVisibility,
 		})
-		draftUsername = submitted.username
 		draftDisplayName = submitted.displayName
 		draftBio = submitted.bio
 		draftProfileVisibility = submitted.profileVisibility
-		const nextUsername = submitted.username.trim()
-		if (!nextUsername) {
-			usernameSaveError = 'Username is required.'
-			message = usernameSaveError
-			messageTone = 'error'
-			handle.update()
-			return
-		}
-
-		const formatError = usernameFormatError(nextUsername)
-		const usernameChangeRequested =
-			nextUsername.toLowerCase() !== username.toLowerCase()
-		if (formatError && usernameChangeRequested) {
-			usernameSaveError = formatError
-			message = formatError
-			messageTone = 'error'
-			handle.update()
-			return
-		}
-
 		const profileFieldsChanged =
 			submitted.displayName !== savedDisplayName ||
 			submitted.bio !== savedBio ||
@@ -387,7 +378,6 @@ export function AccountRoute(handle: Handle) {
 		saveStatus = 'saving'
 		message = null
 		messageTone = 'info'
-		usernameSaveError = null
 		handle.update()
 
 		try {
@@ -399,7 +389,6 @@ export function AccountRoute(handle: Handle) {
 				},
 				credentials: 'include',
 				body: JSON.stringify({
-					username: nextUsername,
 					displayName: submitted.displayName,
 					bio: submitted.bio,
 					profileVisibility: submitted.profileVisibility,
@@ -412,22 +401,15 @@ export function AccountRoute(handle: Handle) {
 			const payload = await readJson<
 				AccountProfileLoaderData & {
 					error?: string
-					packagesUpdated?: number
-					communityListingsRepublished?: number
-					packageUpdateMessage?: string
-					communityUpdateWarning?: string
 				}
 			>(response)
 			const result = interpretAccountProfileSave({
-				previousUsername: username,
-				requestedUsername: nextUsername,
 				profileFieldsChanged,
 				responseOk: response.ok,
 				payload,
 			})
 			switch (result.status) {
 				case 'error':
-					usernameSaveError = usernameChangeRequested ? result.message : null
 					message = result.message
 					messageTone = 'error'
 					toast.error(result.message)
@@ -444,15 +426,9 @@ export function AccountRoute(handle: Handle) {
 					emailVerified = payload.emailVerified
 					emailVerificationDelivery = payload.emailVerificationDelivery ?? null
 					username = payload.username
-					if (result.usernameChanged) {
-						draftUsername = payload.username
-					}
 					applyProfileFields(payload)
 					message = result.message
-					messageTone = payload.communityUpdateWarning ? 'error' : 'info'
-					if (result.usernameChanged) {
-						queueSessionRefresh()
-					}
+					messageTone = 'info'
 					return
 				default: {
 					const _exhaustive: never = result
@@ -464,7 +440,6 @@ export function AccountRoute(handle: Handle) {
 		} catch (error) {
 			const errorMessage =
 				error instanceof Error ? error.message : 'Unable to save profile.'
-			if (usernameChangeRequested) usernameSaveError = errorMessage
 			message = errorMessage
 			messageTone = 'error'
 			toast.error(errorMessage)
@@ -503,24 +478,18 @@ export function AccountRoute(handle: Handle) {
 		const isSaving = saveStatus === 'saving'
 		const emailClaims = accountEmailClaims.snapshot
 		const isSendingEmailChange = emailClaims.emailChangeStatus === 'sending'
-		const normalizedDraftUsername = draftUsername.trim().toLowerCase()
 		const normalizedDraftEmail = emailClaims.draftEmail.trim().toLowerCase()
 		const profileUnchanged =
-			normalizedDraftUsername === username &&
 			draftDisplayName === savedDisplayName &&
 			draftBio === savedBio &&
 			draftProfileVisibility === savedProfileVisibility
-		const liveUsernameFormatError =
-			normalizedDraftUsername && normalizedDraftUsername !== username
-				? usernameFormatError(draftUsername)
-				: null
-		const usernameFieldError = usernameSaveError ?? liveUsernameFormatError
+		const view = accountViewFor(currentHref) ?? 'profile'
 
 		return (
 			<AccountManagementShell busy={pending && appliedPayload !== null}>
 				<AccountPageHeader
-					title="Account"
-					description="Manage your profile, security settings, connected accounts, and data."
+					title={accountViewHeaders[view].title}
+					description={accountViewHeaders[view].description}
 					currentHref={currentHref}
 				/>
 
@@ -535,7 +504,7 @@ export function AccountRoute(handle: Handle) {
 					</AccountManagementMessage>
 				) : null}
 
-				{status === 'ready' ? (
+				{status === 'ready' && view === 'profile' ? (
 					<>
 						{!emailVerified
 							? renderEmailVerificationPrompt({
@@ -561,7 +530,6 @@ export function AccountRoute(handle: Handle) {
 							email,
 							emailVerified,
 							username,
-							draftUsername,
 							draftDisplayName,
 							draftBio,
 							draftProfileVisibility,
@@ -572,19 +540,16 @@ export function AccountRoute(handle: Handle) {
 							isSaving,
 							isSendingEmailChange,
 							profileUnchanged,
-							normalizedDraftUsername,
 							normalizedDraftEmail,
 							emailChangeMessage: emailClaims.emailChangeMessage,
 							emailChangeTone: emailClaims.emailChangeTone,
 							emailChangeOpen: emailClaims.emailChangeOpen,
-							usernameFieldError,
 							onProfileSubmit: handleProfileSubmit,
 							onEmailChangeSubmit: (event) => {
 								void accountEmailClaims.handleEmailChangeSubmit(event, email)
 							},
 							onAvatarSelected: handleAvatarSelected,
 							onRemoveAvatar: () => void handleRemoveAvatar(),
-							onDraftUsernameInput: updateDraftUsername,
 							onDraftDisplayNameChange: (value) => {
 								draftDisplayName = value
 								handle.update()
@@ -602,6 +567,17 @@ export function AccountRoute(handle: Handle) {
 							onEmailChangePasswordInput:
 								accountEmailClaims.updateEmailChangePassword,
 						})}
+					</>
+				) : null}
+				{status === 'ready' && view === 'security' ? (
+					<>
+						<AccountPasswordPanel
+							hasUsablePassword={accountConnections.hasUsablePassword}
+							onPasswordSet={() => {
+								accountConnections.markHasUsablePassword()
+							}}
+						/>
+						{accountConnections.render()}
 						{emailVerified
 							? renderAccountFormerEmailsPanel({
 									formerEmails: emailClaims.formerEmails,
@@ -623,27 +599,10 @@ export function AccountRoute(handle: Handle) {
 									},
 								})
 							: null}
-						<AccountPasswordPanel
-							hasUsablePassword={accountConnections.hasUsablePassword}
-							onPasswordSet={() => {
-								accountConnections.markHasUsablePassword()
-							}}
-						/>
-						{accountConnections.render()}
-						<AccountManagementPanel
-							title="Connections"
-							description="The agents that have authorized against this account, the MCP URL for connecting another, and per-host revoke live on the Connections page."
-						>
-							<div mix={css(accountActionsCss)}>
-								<a
-									href={routes.accountConnections.href()}
-									data-testid="account-connections-link"
-									mix={css(compactGhostButtonCss)}
-								>
-									Manage connections
-								</a>
-							</div>
-						</AccountManagementPanel>
+					</>
+				) : null}
+				{status === 'ready' && view === 'data' ? (
+					<>
 						<AccountManagementPanel
 							title="Your data"
 							description="Download a portable JSON export of your Kody account data for backup or migration. Secret values are never included; secret entries export metadata such as names, hosts, and allowlists only."
@@ -668,8 +627,6 @@ export function AccountRoute(handle: Handle) {
 						</AccountManagementPanel>
 					</>
 				) : null}
-
-				{renderAccountLogoutPanel()}
 
 				<AccountAvatarEditor
 					file={editorFile}
@@ -709,15 +666,6 @@ export function AccountRoute(handle: Handle) {
 						</p>
 					</div>
 				) : null}
-				<p mix={css({ margin: 0 })}>
-					<a href="/privacy" mix={css(mutedLinkCss)}>
-						Privacy
-					</a>
-					{' · '}
-					<a href="/terms" mix={css(mutedLinkCss)}>
-						Terms
-					</a>
-				</p>
 			</AccountManagementShell>
 		)
 	}

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { Script, createContext } from 'node:vm'
 import { expect, test } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -106,6 +107,7 @@ function capabilityDetail(
 			readOnly: true,
 			idempotent: true,
 			destructive: false,
+			orgPermission: 'none',
 			source: 'builtin',
 			inputFields: [],
 			requiredInputFields: [],
@@ -141,7 +143,7 @@ function packageDetail(input: {
 		listingAhead: input.listingAhead ?? null,
 		record: {
 			id: input.recordId,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name,
 			kodyId,
 			description,
@@ -149,6 +151,7 @@ function packageDetail(input: {
 			searchText: null,
 			sourceId: `source-${input.recordId}`,
 			hasApp: input.hasApp ?? false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: false,
 			lockedAt: null,
@@ -426,8 +429,10 @@ test('capability formatting keeps execute contracts for identifier and bracket i
 		readOnly: false,
 		idempotent: false,
 		destructive: false,
+		apiAvailable: false,
 		inputTypeDefinition: expect.stringContaining('GithubCreateIssueInput'),
 	})
+	expect(identifierDetail.markdown).toContain('execute-only')
 	expect(identifierDetail.structured).not.toHaveProperty('inputSchema')
 	expect(identifierDetail.structured).not.toHaveProperty('outputSchema')
 	const identifierExecution = await executeCapabilityExample(
@@ -452,6 +457,7 @@ test('capability formatting keeps execute contracts for identifier and bracket i
 	expect(bracketMatch).toMatchObject({
 		type: 'capability',
 		entityRef: 'capability:foo-bar',
+		apiAvailable: false,
 	})
 	const bracketDetail = capabilityDetail({
 		name: 'foo-bar',
@@ -581,7 +587,19 @@ test('package entity detail is a slim index with explicit follow-up, webhook cha
 				{
 					name: 'activity',
 					export: './activity',
-					challenge: { type: 'x-activity-crc', secretName: 'xConsumerSecret' },
+					challenge: {
+						type: 'subscription-challenge',
+						method: 'GET',
+						challenge: { in: 'query', key: 'crc_token' },
+						prove: {
+							kind: 'hmac',
+							secretName: 'xConsumerSecret',
+							algorithm: 'hmac-sha256',
+							encoding: 'base64',
+							prefix: 'sha256=',
+						},
+						respond: { as: 'json-hmac', key: 'response_token' },
+					},
 				},
 				{ name: 'plain', export: './plain' },
 			],
@@ -591,12 +609,24 @@ test('package entity detail is a slim index with explicit follow-up, webhook cha
 		webhooks: [
 			{
 				name: 'activity',
-				challenge: { type: 'x-activity-crc', secretName: 'xConsumerSecret' },
+				challenge: {
+					type: 'subscription-challenge',
+					method: 'GET',
+					challenge: { in: 'query', key: 'crc_token' },
+					prove: {
+						kind: 'hmac',
+						secretName: 'xConsumerSecret',
+						algorithm: 'hmac-sha256',
+						encoding: 'base64',
+						prefix: 'sha256=',
+					},
+					respond: { as: 'json-hmac', key: 'response_token' },
+				},
 			},
 			{ name: 'plain', challenge: null },
 		],
 	})
-	expect(webhookDetail.markdown).toContain('challenge x-activity-crc')
+	expect(webhookDetail.markdown).toContain('challenge subscription-challenge')
 	expect(webhookDetail.markdown).not.toContain('xConsumerSecret')
 
 	const notesDetail = packageDetail({
@@ -963,10 +993,24 @@ test('domain overview and capability list items format compact scoping hints', (
 	expect(listMarkdown([emailSend])).toContain(
 		'1. **capability** `emailSend` (`email`) — Send a message\\. Entity: `capability:emailSend`',
 	)
+	expect(listMarkdown([emailSend])).not.toContain('Execute-only')
 	expect(slim([emailSend])[0]).toMatchObject({
 		type: 'capability',
 		id: 'emailSend',
 		domain: 'email',
+		apiAvailable: true,
+	})
+
+	const executeOnly = {
+		type: 'capability' as const,
+		name: 'webhookSyntheticDispatch',
+		description: 'Smoke-test a minted webhook.',
+		domain: 'webhooks',
+	}
+	expect(listMarkdown([executeOnly])).toContain('Execute-only')
+	expect(slim([executeOnly])[0]).toMatchObject({
+		type: 'capability',
+		apiAvailable: false,
 	})
 })
 

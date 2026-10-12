@@ -18,9 +18,13 @@ Keep `neverConnectToCloud: true`. Share cache through a small Cloudflare Worker
 (`packages/nx-cache`, `nx-cache.kody.codes`) that implements the Nx HTTP OpenAPI
 spec and stores artifacts in R2. Clients set
 `NX_SELF_HOSTED_REMOTE_CACHE_SERVER` and
-`NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN`. Validate jobs also restore `.nx` via
-`actions/cache` as a same-runner L1. Test hashes include `{env:CI}` and CI pins
-`CI=1` so agent `validate` / `test:push` and GitHub Actions share keys.
+`NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN`. The remote cache is the only
+cross-run cache: Nx 23 keeps the local cache under `~/.nx/<workspace>/cache`, so
+an `actions/cache` step on `.nx/cache` never had anything to save and was
+removed. Test hashes include `{env:CI}` and CI pins `CI=1` so agent `validate` /
+`test:push` and GitHub Actions share keys. Typecheck and build hashes ignore
+`CI` because nothing they run reads it, so `npm run typecheck` from validate or
+the pre-commit hook (which do not set `CI=1`) shares keys with CI too.
 
 ## Consequences
 
@@ -30,7 +34,12 @@ Husky through Cursor's hook dispatcher (`npm run hooks:ensure`) so `pre-push`
 can upload `test:push` artifacts before GitHub sees the commit. Validate jobs
 probe `GET /health` and an authorized `GET /v1/cache/{hash}` before setting the
 server URL because Nx treats an unreachable or unauthorized self-hosted cache as
-a fatal error. First PUT wins (`409` on overwrite) so a poisoned key cannot
+a fatal error. `tools/run-nx.ts` applies that same gate on every cached script
+and treats a rejected token the way it treats a transport failure: local cache,
+a warning, and a successful exit when the tasks themselves succeeded. The same
+probe (`tools/nx-remote-cache-probe.ts`) `PUT`s a fixed non-hash key and every
+cached script prints whether the token writes, because Nx is silent when a `PUT`
+is rejected. First PUT wins (`409` on overwrite) so a poisoned key cannot
 replace a stored artifact. R2 expires `v1/` objects 14 days after write (Age,
 not last access — GET does not refresh mtime) and aborts incomplete multipart
 uploads after 1 day. The cache worker is contributor infra, not a product

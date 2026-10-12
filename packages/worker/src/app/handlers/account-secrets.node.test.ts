@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as secretsService from '#mcp/secrets/service.ts'
@@ -9,6 +13,7 @@ import type * as AllowedHosts from '#mcp/secrets/allowed-hosts.ts'
 import type * as HostApproval from '#mcp/secrets/host-approval.ts'
 import type * as IntegrationsService from '#worker/integrations/service.ts'
 import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn<
@@ -25,10 +30,11 @@ const mockModule = vi.hoisted(() => ({
 		permissions: [],
 		artifactOwnerIds: [],
 		mcpUser: {
-			userId: 'stable-user-1',
+			userId: personIdFromStored('stable-user-1'),
 			email: 'user@example.com',
 			displayName: 'user',
 		},
+		request: sessionRequestContext('stable-user-1'),
 	})),
 	readAuthSessionResult: async () => ({ session: null, setCookie: null }),
 	saveSecret: vi.fn<typeof secretsService.saveSecret>(async () => ({
@@ -81,6 +87,7 @@ const mockModule = vi.hoisted(() => ({
 		typeof secretsService.listPackageSecretsByPackageIds
 	>(async () => new Map()),
 	resolveSecret: vi.fn<typeof secretsService.resolveSecret>(async () => ({
+		credentialId: null,
 		found: false,
 		value: null,
 		scope: null,
@@ -112,7 +119,7 @@ const mockModule = vi.hoisted(() => ({
 	upsertOauthAppWithoutConnection: vi.fn<
 		typeof IntegrationsService.upsertOauthAppWithoutConnection
 	>(async (input) => ({
-		userId: 'stable-user-1',
+		userId: ownerIdFromStored('stable-user-1'),
 		slug: String(input.config.name).toLowerCase().replace(/\s+/g, '-'),
 		provider:
 			String(input.config.name)
@@ -170,7 +177,7 @@ const mockModule = vi.hoisted(() => ({
 			return {
 				lane: 'user',
 				app: {
-					userId: 'stable-user-1',
+					userId: ownerIdFromStored('stable-user-1'),
 					slug: name,
 					provider: name,
 					label: null,
@@ -188,7 +195,8 @@ const mockModule = vi.hoisted(() => ({
 					updatedAt: new Date(0).toISOString(),
 				},
 				connection: {
-					userId: 'stable-user-1',
+					userId: ownerIdFromStored('stable-user-1'),
+					credentialId: 'cred-integration',
 					name,
 					appSlug: name,
 					platformAppSlug: null,
@@ -380,6 +388,7 @@ const approve = (search: string) => postRequest({ action: 'approve' }, search)
 
 function makeSecret(name: string, overrides: Record<string, unknown> = {}) {
 	return {
+		credentialId: `cred-${name}`,
 		name,
 		scope: 'user' as const,
 		description: '',
@@ -430,7 +439,7 @@ test('save_oauth_app persists the app (client id + endpoints) before authorize r
 	})
 	expect(mockModule.upsertOauthAppWithoutConnection).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			config: expect.objectContaining({
 				name: 'GitHub',
 				clientId: 'github-client-id-value',
@@ -466,7 +475,7 @@ test('save_oauth_app persists the app (client id + endpoints) before authorize r
 	expect(slackResponse.status).toBe(200)
 	expect(mockModule.persistUserOauthAppClientSecret).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			slug: 'slack',
 			value: 'slack-client-secret',
 		}),
@@ -517,7 +526,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	expect(mockModule.saveSecret).not.toHaveBeenCalled()
 	expect(mockModule.persistIntegrationTokens).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			name: 'github',
 			accessToken: 'access-token',
 			refreshToken: 'refresh-token',
@@ -526,7 +535,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	)
 	expect(mockModule.upsertIntegration).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			config: expect.objectContaining({
 				name: 'github',
 				tokenUrl: 'https://github.com/login/oauth/access_token',
@@ -548,7 +557,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 		mockModule.dispatchIntegrationAuthSucceededSubscriptionEvents,
 	).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			source: 'oauth_connect',
 			integration: expect.objectContaining({ name: 'github', lane: 'user' }),
 		}),
@@ -597,7 +606,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	)
 	expect(mockModule.persistIntegrationTokens).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			name: 'spotify',
 			accessToken: 'newly-scoped-access-token',
 			refreshPolicy: 'not_applicable',
@@ -882,7 +891,7 @@ test('approval requests reject invalid targets and ignore stale capability query
 test('account secrets payload includes all packages and package titles and allowed packages', async () => {
 	const makePackage = (id: string, kodyId: string, hasApp: boolean) => ({
 		id,
-		userId: 'stable-user-1',
+		userId: ownerIdFromStored('stable-user-1'),
 		name: `@kentcdodds/${kodyId}`,
 		kodyId,
 		description: kodyId,
@@ -1088,12 +1097,139 @@ test('account secrets API loads selected secret values and deletes the selected 
 	})
 	expect(mockModule.deleteSecret).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			name: 'myApiKey',
 			scope: 'user',
 			storageContext: userStorage,
 		}),
 	)
+})
+
+test('account secrets save returns the new secret after a successful write', async () => {
+	mockModule.listSavedPackagesByUserId.mockResolvedValue([])
+	mockModule.listPackageSecretsByPackageIds.mockResolvedValue(new Map())
+	mockModule.listSecrets
+		.mockResolvedValueOnce([])
+		.mockResolvedValueOnce([makeSecret('newApiKey')])
+	mockModule.resolveSecret.mockResolvedValueOnce({
+		found: true,
+		value: 'fresh-secret',
+	} as never)
+
+	const call = createHandler()
+	const response = await call(
+		postRequest({
+			action: 'save',
+			name: 'newApiKey',
+			scope: 'user',
+			value: 'fresh-secret',
+			description: 'API key',
+			allowedHosts: [],
+			allowedPackages: [],
+		}),
+	)
+
+	expect(response.status).toBe(200)
+	await expect(response.json()).resolves.toMatchObject({
+		ok: true,
+		selectedSecret: {
+			id: 'user::::newApiKey',
+			name: 'newApiKey',
+			value: 'fresh-secret',
+		},
+	})
+	expect(mockModule.saveSecret).toHaveBeenCalledWith(
+		expect.objectContaining({
+			name: 'newApiKey',
+			value: 'fresh-secret',
+			scope: 'user',
+		}),
+	)
+})
+
+test('account secrets save stays ok when metadata reload fails after write', async () => {
+	mockModule.listSavedPackagesByUserId.mockResolvedValue([])
+	mockModule.listPackageSecretsByPackageIds.mockResolvedValue(new Map())
+	mockModule.listSecrets
+		.mockResolvedValueOnce([])
+		.mockRejectedValueOnce(new Error('metadata reload failed'))
+
+	const call = createHandler()
+	const response = await call(
+		postRequest({
+			action: 'save',
+			name: 'newApiKey',
+			scope: 'user',
+			value: 'fresh-secret',
+			description: 'API key',
+			allowedHosts: [],
+			allowedPackages: [],
+		}),
+	)
+
+	expect(response.status).toBe(200)
+	await expect(response.json()).resolves.toMatchObject({
+		ok: true,
+		selectedSecret: {
+			id: 'user::::newApiKey',
+			name: 'newApiKey',
+			value: 'fresh-secret',
+		},
+	})
+	expect(mockModule.saveSecret).toHaveBeenCalled()
+})
+
+test('account secrets save fallback uses the saved record metadata', async () => {
+	const existing = makeSecret('oldApiKey', {
+		ttlMs: 60_000,
+		expiresAt: '2026-10-06T00:00:00.000Z',
+	})
+	const savedAt = '2026-10-05T12:00:00.000Z'
+	const expiresAt = new Date(
+		Date.now() + 30 * 24 * 60 * 60 * 1000,
+	).toISOString()
+	mockModule.listSavedPackagesByUserId.mockResolvedValue([])
+	mockModule.listPackageSecretsByPackageIds.mockResolvedValue(new Map())
+	mockModule.listSecrets
+		.mockResolvedValueOnce([existing])
+		.mockRejectedValueOnce(new Error('metadata reload failed'))
+	mockModule.saveSecret.mockResolvedValueOnce({
+		name: 'renamedApiKey',
+		scope: 'user',
+		description: '',
+		packageId: null,
+		allowedHosts: [],
+		allowedPackages: [],
+		createdAt: savedAt,
+		updatedAt: savedAt,
+		expiresAt,
+		ttlMs: 2_592_000_000,
+	} as never)
+
+	const call = createHandler()
+	const response = await call(
+		postRequest({
+			action: 'save',
+			currentId: 'user::::oldApiKey',
+			name: 'renamedApiKey',
+			scope: 'user',
+			value: 'fresh-secret',
+			expiresAt,
+			allowedHosts: [],
+			allowedPackages: [],
+		}),
+	)
+
+	expect(response.status).toBe(200)
+	await expect(response.json()).resolves.toMatchObject({
+		ok: true,
+		selectedSecret: {
+			id: 'user::::renamedApiKey',
+			createdAt: savedAt,
+			expiresAt,
+			ttlMs: 2_592_000_000,
+		},
+	})
 })
 
 test('oauth_exchange maps provider failures and forwards exchange styles', async () => {

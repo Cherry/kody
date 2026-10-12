@@ -1,7 +1,16 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as PackageSourceModule from '#worker/package-registry/source.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 import { ComputeOverageLimitError } from '#worker/entitlements/errors.ts'
+import { parseServerTimingHeader } from '#worker/server-timing.ts'
+import {
+	packageAppRuntimeErrorHeader,
+	packageAppRuntimeRunIdHeader,
+} from './package-app-diagnostics.ts'
 import { servePackageAppRequest } from './package-app-serve.ts'
 
 // Existing serve tests exercise the local construction path (index/platform/
@@ -21,7 +30,7 @@ vi.mock('#worker/runtime-worker-service.ts', () => ({
 
 const mockModule = vi.hoisted(() => ({
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	getEntitySourceById: vi.fn(),
 	loadPublishedEntityManifest: vi.fn(),
 	buildPackageAppWorker: vi.fn(),
@@ -29,6 +38,7 @@ const mockModule = vi.hoisted(() => ({
 	loadPublishedBundleArtifactByIdentity: vi.fn(),
 	persistPublishedBundleArtifact: vi.fn(),
 	createWorker: vi.fn(),
+	packageRealtimeConnect: vi.fn(),
 }))
 
 vi.mock('#worker/package-registry/source.ts', async () => {
@@ -41,6 +51,13 @@ vi.mock('#worker/package-registry/source.ts', async () => {
 			mockModule.loadPackageSourceBySourceId(...args),
 	}
 })
+
+vi.mock('#worker/package-runtime/realtime-session.ts', () => ({
+	packageRealtimeSessionRpc: () => ({
+		connect: (...args: Array<unknown>) =>
+			mockModule.packageRealtimeConnect(...args),
+	}),
+}))
 
 vi.mock('#worker/package-runtime/published-bundle-artifacts.ts', () => ({
 	loadPublishedBundleArtifactByIdentity: (...args: Array<unknown>) =>
@@ -58,8 +75,8 @@ vi.mock('#worker/worker-bundler-modules.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/repo/entity-sources.ts', () => ({
@@ -85,7 +102,7 @@ vi.mock('#worker/package-runtime/package-app.ts', () => ({
 
 const serveLoadMocks = [
 	['saved package by id (D1)', mockModule.getSavedPackageById],
-	['saved package by kody id (D1)', mockModule.getSavedPackageByKodyId],
+	['saved package by kody id (D1)', mockModule.resolveSavedPackageRef],
 	['entity source row (D1)', mockModule.getEntitySourceById],
 	['published manifest snapshot (KV)', mockModule.loadPublishedEntityManifest],
 ] as const
@@ -113,7 +130,7 @@ function createFixture(options: FixtureOptions = {}) {
 	const sourceId = `source-${kodyId}`
 	const savedPackage = {
 		id: `pkg-${kodyId}`,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: `@kentcdodds/${kodyId}`,
 		kodyId,
 		description: 'Minimal hello-world app',
@@ -128,7 +145,7 @@ function createFixture(options: FixtureOptions = {}) {
 	}
 	const source = {
 		id: sourceId,
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package' as const,
 		entity_id: savedPackage.id,
 		repo_id: `repo-${kodyId}`,
@@ -157,10 +174,10 @@ function createFixture(options: FixtureOptions = {}) {
 function seedFixture(options?: FixtureOptions) {
 	const fixture = createFixture(options)
 	mockModule.getSavedPackageById.mockResolvedValue(null)
-	mockModule.getSavedPackageByKodyId.mockImplementation(
-		async (_db: unknown, input: { userId: string; kodyId: string }) =>
+	mockModule.resolveSavedPackageRef.mockImplementation(
+		async (_db: unknown, input: { userId: string; ref: string }) =>
 			input.userId === fixture.savedPackage.userId &&
-			input.kodyId === fixture.savedPackage.kodyId
+			input.ref === fixture.savedPackage.kodyId
 				? fixture.savedPackage
 				: null,
 	)
@@ -207,10 +224,15 @@ async function serveHelloWorld(input?: {
 			BUNDLE_ARTIFACTS_KV: {},
 		} as Env,
 		owner: {
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			username: 'kentcdodds',
 			email: 'kent@example.com',
 			displayName: 'Kent',
+		},
+		visitor: {
+			userId: personIdFromStored('user-1'),
+			username: 'kentcdodds',
+			role: 'owner',
 		},
 		packagePath: {
 			username: 'kentcdodds',
@@ -287,7 +309,7 @@ test('a warm package-app serve performs zero D1/KV loads before dispatch', async
 	const cold = await serveHelloWorld()
 	expect(cold.status).toBe(200)
 	expect(await cold.text()).toBe('ok')
-	expect(mockModule.getSavedPackageByKodyId).toHaveBeenCalledTimes(1)
+	expect(mockModule.resolveSavedPackageRef).toHaveBeenCalledTimes(1)
 	expect(mockModule.getEntitySourceById).toHaveBeenCalledTimes(1)
 	expect(mockModule.loadPublishedEntityManifest).toHaveBeenCalledTimes(1)
 	expect(mockModule.buildPackageAppWorker).toHaveBeenCalledTimes(1)
@@ -305,6 +327,181 @@ test('a warm package-app serve performs zero D1/KV loads before dispatch', async
 		'published manifest snapshot (KV)': 0,
 	})
 	expect(mockModule.buildPackageAppWorker).toHaveBeenCalledTimes(1)
+})
+
+test('hello-world serve emits Server-Timing phases and forwards the bag into buildPackageAppWorker', async () => {
+	seedFixture()
+	mockModule.buildPackageAppWorker.mockImplementation(
+		async (input: {
+			serverTiming?: Array<{ name: string; durationMs: number }>
+		}) => {
+			input.serverTiming?.push(
+				{ name: 'assertWithinComputeInclude', durationMs: 1 },
+				{ name: 'appLoader', durationMs: 2 },
+			)
+			return {
+				entrypointName: 'PackageAppWorker',
+				stub: {
+					getEntrypoint: () => ({
+						async fetch() {
+							return new Response('ok')
+						},
+					}),
+				},
+			}
+		},
+	)
+
+	const serverTiming: Array<{ name: string; durationMs: number }> = [
+		{ name: 'owner', durationMs: 3 },
+	]
+	const response = await servePackageAppRequest({
+		request: new Request('https://example.com/@kentcdodds/packages/perf-app'),
+		env: {
+			APP_DB: {},
+			BUNDLE_ARTIFACTS_KV: {},
+		} as Env,
+		owner: {
+			userId: ownerIdFromStored('user-1'),
+			username: 'kentcdodds',
+			email: 'kent@example.com',
+			displayName: 'Kent',
+		},
+		visitor: {
+			userId: personIdFromStored('user-1'),
+			username: 'kentcdodds',
+			role: 'owner',
+		},
+		packagePath: {
+			username: 'kentcdodds',
+			kodyId: 'perf-app',
+			restPath: '/',
+			mount: 'username-path',
+		},
+		serverTiming,
+	})
+
+	expect(response.status).toBe(200)
+	expect(await response.text()).toBe('ok')
+	expect(mockModule.buildPackageAppWorker).toHaveBeenCalledWith(
+		expect.objectContaining({ serverTiming }),
+	)
+	const phaseNames = parseServerTimingHeader(
+		response.headers.get('Server-Timing'),
+	).map((entry) => entry.name)
+	expect(phaseNames).toContain('owner')
+	expect(phaseNames).toContain('resolveSavedPackage')
+	expect(phaseNames).toContain('entrypoint')
+	expect(phaseNames).toContain('assertWithinComputeInclude')
+})
+
+test('websocket upgrade responses skip Server-Timing and keep the paired socket', async () => {
+	seedFixture()
+	const client = { kind: 'client-socket' } as unknown as WebSocket
+	// Node's Response rejects status 101; Workers still pair via `webSocket`.
+	const upgradeResponse = new Response(null, { status: 200 })
+	Object.defineProperty(upgradeResponse, 'webSocket', {
+		value: client,
+		configurable: true,
+	})
+	mockModule.packageRealtimeConnect.mockResolvedValue(upgradeResponse)
+
+	const response = await serveHelloWorld({
+		restPath: '/ws',
+		init: {
+			headers: {
+				Upgrade: 'websocket',
+				Connection: 'Upgrade',
+			},
+		},
+	})
+
+	expect(response.webSocket).toBe(client)
+	expect(response).toBe(upgradeResponse)
+	// DO upgrade responses have immutable headers; attaching timing would throw
+	// or force an unsafe rebuild. Skip Server-Timing on websocket upgrades.
+	expect(response.headers.get('Server-Timing')).toBeNull()
+	expect(mockModule.buildPackageAppWorker).not.toHaveBeenCalled()
+})
+
+test('package-app host permanent-308s a retired slug to the current leaf', async () => {
+	const fixture = createFixture({ kodyId: 'new-app' })
+	mockModule.resolveSavedPackageRef.mockImplementation(
+		async (
+			_db: unknown,
+			input: {
+				userId: string
+				ref: string
+				match?: string
+				followRedirects?: boolean
+			},
+		) => {
+			if (input.userId !== fixture.savedPackage.userId) return null
+			if (input.ref === 'new-app') return fixture.savedPackage
+			if (input.ref === 'old-app' && input.followRedirects) {
+				return fixture.savedPackage
+			}
+			return null
+		},
+	)
+
+	const redirected = await serveHelloWorld({
+		kodyId: 'old-app',
+		restPath: '/dashboard',
+	})
+	expect(redirected.status).toBe(308)
+	expect(redirected.headers.get('Location')).toBe(
+		'/@kentcdodds/packages/new-app/dashboard',
+	)
+	expect(redirected.headers.get('Cache-Control')).toBe('no-store')
+	expect(mockModule.buildPackageAppWorker).not.toHaveBeenCalled()
+
+	mockModule.buildPackageAppWorker.mockResolvedValue({
+		entrypointName: 'PackageAppWorker',
+		stub: {
+			getEntrypoint: () => ({
+				async fetch() {
+					return new Response('ok')
+				},
+			}),
+		},
+	})
+	mockModule.getEntitySourceById.mockResolvedValue(fixture.source)
+	mockModule.loadPublishedEntityManifest.mockResolvedValue({
+		source: fixture.source,
+		content: fixture.manifestContent,
+	})
+	const current = await serveHelloWorld({ kodyId: 'new-app' })
+	expect(current.status).toBe(200)
+	expect(await current.text()).toBe('ok')
+})
+
+test('package-app 308 Location uses the name leaf when kodyId diverges', async () => {
+	const fixture = createFixture({ kodyId: 'stale-kody-id' })
+	fixture.savedPackage.name = '@kentcdodds/canonical-leaf'
+	mockModule.resolveSavedPackageRef.mockImplementation(
+		async (
+			_db: unknown,
+			input: {
+				userId: string
+				ref: string
+				followRedirects?: boolean
+			},
+		) => {
+			if (input.userId !== fixture.savedPackage.userId) return null
+			if (input.ref === 'diverged-old-app' && input.followRedirects) {
+				return fixture.savedPackage
+			}
+			return null
+		},
+	)
+
+	const redirected = await serveHelloWorld({ kodyId: 'diverged-old-app' })
+	expect(redirected.status).toBe(308)
+	expect(redirected.headers.get('Location')).toBe(
+		'/@kentcdodds/packages/canonical-leaf',
+	)
+	expect(redirected.headers.get('Cache-Control')).toBe('no-store')
 })
 
 test('/_assets/ serves the fingerprinted client module with immutable caching and never builds the worker', async () => {
@@ -527,6 +724,72 @@ test('published leftover kody.app.runtime does not brick host-setup', async () =
 	expect(response.status).toBe(200)
 	expect(await response.text()).toBe('ok')
 	expect(mockModule.buildPackageAppWorker).toHaveBeenCalled()
+})
+
+test('a tagged runtime throw becomes the package-entrypoint page with the run id', async () => {
+	consoleError.mockImplementation(() => {})
+	seedFixture({ kodyId: 'runtime-throw-app' })
+	mockModule.buildPackageAppWorker.mockResolvedValue({
+		entrypointName: 'PackageAppWorker',
+		stub: {
+			getEntrypoint: () => ({
+				async fetch() {
+					return new Response(null, {
+						status: 500,
+						headers: {
+							[packageAppRuntimeErrorHeader]: '1',
+							[packageAppRuntimeRunIdHeader]: 'run-thrown-1',
+						},
+					})
+				},
+			}),
+		},
+	})
+
+	const response = await serveHelloWorld({
+		kodyId: 'runtime-throw-app',
+		init: { headers: { Accept: 'application/json' } },
+	})
+	expect(response.status).toBe(500)
+	expect(response.headers.get(packageAppRuntimeErrorHeader)).toBeNull()
+	expect(response.headers.get(packageAppRuntimeRunIdHeader)).toBeNull()
+	await expect(response.json()).resolves.toMatchObject({
+		error: 'Package app crashed',
+		package: { kody_id: 'runtime-throw-app' },
+	})
+	const logged = consoleError.mock.calls.find(
+		(call) => call[0] === 'package-app-http-error',
+	)
+	expect(logged?.[1]).toMatchObject({
+		status: 500,
+		phase: 'package-entrypoint',
+		runtimeRunId: 'run-thrown-1',
+	})
+})
+
+test('author 200 responses that set the runtime-error header stay successful', async () => {
+	seedFixture({ kodyId: 'author-marker-app' })
+	mockModule.buildPackageAppWorker.mockResolvedValue({
+		entrypointName: 'PackageAppWorker',
+		stub: {
+			getEntrypoint: () => ({
+				async fetch() {
+					return new Response('ok', {
+						status: 200,
+						headers: { [packageAppRuntimeErrorHeader]: '1' },
+					})
+				},
+			}),
+		},
+	})
+
+	const response = await serveHelloWorld({ kodyId: 'author-marker-app' })
+	expect(response.status).toBe(200)
+	expect(await response.text()).toBe('ok')
+	expect(consoleError).not.toHaveBeenCalledWith(
+		'package-app-http-error',
+		expect.anything(),
+	)
 })
 
 test('synthetic host-setup failures return JSON with the underlying cause', async () => {

@@ -1,4 +1,4 @@
-import { expect, test } from './playwright-utils.ts'
+import { expect, test, waitForClientHydration } from './playwright-utils.ts'
 import { ensurePrimaryUserExists, primaryTestUser } from './auth-test-user.ts'
 import { clearAuthRateLimitsInE2eDatabase } from './d1-utils.ts'
 
@@ -20,37 +20,58 @@ test('smoke test covers shell, auth redirect, and login', async ({ page }) => {
 
 	await page.goto('/account')
 	await expect(page).toHaveURL(/\/login\?redirectTo=%2Faccount$/)
+	await waitForClientHydration(page)
 	await expect(page.getByLabel('Email')).toBeVisible()
-	await expect(page.getByLabel('Password')).toBeVisible()
+	// exact: the Show password toggle's aria-label also contains "password".
+	const passwordField = page.getByLabel('Password', { exact: true })
+	await expect(passwordField).toBeVisible()
+	const showPassword = page.getByRole('button', {
+		name: 'Show password',
+		exact: true,
+	})
+	await expect(showPassword).toBeVisible()
+	await expect(showPassword).toHaveAttribute('aria-pressed', 'false')
+	await expect(passwordField).toHaveAttribute('type', 'password')
 
 	clearAuthRateLimitsInE2eDatabase()
 	await page.getByLabel('Email').fill(primaryTestUser.email)
-	await page.getByLabel('Password').fill(primaryTestUser.password)
+	await passwordField.fill(primaryTestUser.password)
+	await showPassword.click()
+	await expect(
+		page.getByRole('button', { name: 'Hide password', exact: true }),
+	).toHaveAttribute('aria-pressed', 'true')
+	await expect(passwordField).toHaveAttribute('type', 'text')
+	await expect(passwordField).toHaveValue(primaryTestUser.password)
+	await page.getByRole('button', { name: 'Hide password', exact: true }).click()
+	await expect(passwordField).toHaveAttribute('type', 'password')
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click()
 
 	await expect(page).toHaveURL(/\/account$/)
-	// Header avatar links to the public profile and is labeled @username so
-	// it does not collide with the "Kody" brand link. Desktop also shows
-	// Account to the left of that avatar.
+	// One header menu holds the organization and the person's own links; the
+	// workspace sections are a click away from the Profile page.
 	await expect(
-		page.getByRole('navigation', { name: 'Main' }).getByRole('link', {
-			name: 'Account',
-			exact: true,
-		}),
+		page.getByRole('heading', { level: 1, name: 'Profile' }),
 	).toBeVisible()
+	await expect(page.getByTestId('org-switcher')).toHaveAccessibleName(
+		`@${primaryTestUser.username}: organizations, manage, and account`,
+	)
+	await page.goto(`/@${primaryTestUser.username}/-/jobs`)
+	await waitForClientHydration(page)
+	const workspaceRail = page.getByRole('navigation', {
+		name: 'Workspace sections',
+	})
 	await expect(
-		page.getByRole('navigation', { name: 'Main' }).getByRole('link', {
-			name: `@${primaryTestUser.username}`,
-		}),
-	).toBeVisible()
-	await expect(
-		page.getByRole('link', { name: 'Secrets', exact: true }),
+		workspaceRail.getByRole('link', { name: 'Secrets', exact: true }),
 	).toBeVisible()
 
 	// SPA-navigate to secrets: the client refetch must hit the same origin
 	// (regression: absolute placeholder-origin URLs caused "Failed to fetch").
-	await page.getByRole('link', { name: 'Secrets', exact: true }).click()
-	await expect(page).toHaveURL(/\/account\/secrets$/)
+	await workspaceRail
+		.getByRole('link', { name: 'Secrets', exact: true })
+		.click()
+	await expect(page).toHaveURL(
+		new RegExp(`/@${primaryTestUser.username}/-/secrets$`),
+	)
 	// The list is a named region; it replaced the sidebar heading that used to
 	// carry this name, and it is present whether or not the account has rows.
 	await expect(
@@ -58,20 +79,19 @@ test('smoke test covers shell, auth redirect, and login', async ({ page }) => {
 	).toBeVisible()
 	await expect(page.getByText('Failed to fetch')).not.toBeVisible()
 
-	// Log out from the account overview. The router intercepts the form POST
-	// and SPA-navigates to /login, so the shell must refresh its session
-	// state without a full document reload (regression: the throttled refresh
-	// kept the username and Log out button visible after logging out).
+	// Log out from the header menu. The router intercepts the form POST and
+	// SPA-navigates to /login, so the shell must refresh its session state
+	// without a full document reload (regression: the throttled refresh kept
+	// the username and Log out button visible after logging out).
 	await page.goto('/account')
 	await expect(page).toHaveURL(/\/account$/)
-	await expect(
-		page.getByRole('navigation', { name: 'Main' }).getByRole('button', {
-			name: 'Log out',
-		}),
-	).toHaveCount(0)
-	const session = page.getByRole('region', { name: 'Session', exact: true })
-	await expect(session).toBeVisible()
-	await session.getByRole('button', { name: 'Log out' }).click()
+	await expect(page.getByRole('region', { name: 'Session' })).toHaveCount(0)
+	await waitForClientHydration(page)
+	await page.getByTestId('org-switcher').click()
+	await page
+		.getByTestId('org-switcher-panel')
+		.getByRole('button', { name: 'Log out' })
+		.click()
 	await expect(page).toHaveURL(/\/login$/)
 	// The redesigned login screen renders without the site header, so the
 	// logged-out state shows the auth card instead of a header "Log in" link.

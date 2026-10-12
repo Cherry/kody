@@ -9,6 +9,8 @@ on:
       - reopened
       - synchronize
       - ready_for_review
+      - labeled
+      - unlabeled
       - closed
   workflow_dispatch:
     inputs:
@@ -52,7 +54,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: 🔎 Deploy Preview Resources
-    timeout-minutes: 12
+    # Includes room for the failed-deploy cleanup step (150s budget).
+    timeout-minutes: 15
     environment:
       name:
         preview-${{ github.event.pull_request.number || inputs.pr_number ||
@@ -61,13 +64,20 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' &&
         github.event.action != 'closed' &&
+        github.event.pull_request.state == 'open' &&
         github.event.pull_request.head.repo.fork == false &&
-        github.event.pull_request.draft == false) ||
+        github.event.pull_request.draft == false &&
+        ((github.event.action != 'labeled' && github.event.action != 'unlabeled') ||
+          startsWith(github.event.label.name, 'preview-flag:'))) ||
       (github.event_name == 'workflow_dispatch' &&
         inputs.action == 'deploy')
     steps:
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
+        with:
+          # Full history so rename-aware d1_migrations rewrite can recover the
+          # pre-renumber SQL blob for sha256 matching (#2776 / Devin).
+          fetch-depth: 0
 
       - name: 🟢 Setup Node
         uses: actions/setup-node@v6
@@ -206,6 +216,19 @@ jobs:
           CLOUDFLARE_ENV: preview
           WRANGLER_CONFIG: ${{ steps.resources.outputs.wrangler_config }}
         run: |
+          # Rename-aware bookkeeping: if this PR renumbered a migration that
+          # preview D1 already applied under the old name, rewrite the ledger
+          # row when the SQL sha256 still matches (#2776). Never runs in prod.
+          node tools/ci/rewrite-renamed-preview-migrations.ts \
+            --remote \
+            --binding APP_DB \
+            --config "$WRANGLER_CONFIG" \
+            --migrations-dir packages/worker/migrations
+          node tools/ci/rewrite-renamed-preview-migrations.ts \
+            --remote \
+            --binding AUDIT_DB \
+            --config "$WRANGLER_CONFIG" \
+            --migrations-dir packages/worker/audit-migrations
           node ./wrangler-env.ts d1 migrations apply APP_DB --remote --config "$WRANGLER_CONFIG"
           node ./wrangler-env.ts d1 migrations apply AUDIT_DB --remote --config "$WRANGLER_CONFIG"
 
@@ -305,15 +328,16 @@ jobs:
       # workers are new scripts, so the generated config creates the
       # JobManager class fresh instead of running the production script
       # transfer.
-      - name: 🧱 Ensure preview jobs worker resources (D1)
+      - name: 🧱 Ensure preview jobs worker resources (own JOBS_DB)
         id: jobs_resources
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           APP_WORKER_NAME: ${{ steps.names.outputs.worker_name }}
+          JOBS_D1_NAME: ${{ steps.resources.outputs.jobs_d1_database_name }}
         run: |
           set -euo pipefail
-          node tools/ci/jobs-worker-resources.ts ensure --env preview --worker-name "${APP_WORKER_NAME}-jobs" --host-worker-name "$APP_WORKER_NAME" --out-config packages/jobs-worker/wrangler-preview.generated.json | tee -a "$GITHUB_OUTPUT"
+          node tools/ci/jobs-worker-resources.ts ensure --env preview --worker-name "${APP_WORKER_NAME}-jobs" --host-worker-name "$APP_WORKER_NAME" --jobs-d1-name "$JOBS_D1_NAME" --out-config packages/jobs-worker/wrangler-preview.generated.json | tee -a "$GITHUB_OUTPUT"
 
       - name: 🗄️ Apply D1 Migrations (preview jobs)
         env:
@@ -323,6 +347,11 @@ jobs:
           WRANGLER_CONFIG:
             ${{ steps.jobs_resources.outputs.jobs_wrangler_config }}
         run: |
+          node tools/ci/rewrite-renamed-preview-migrations.ts \
+            --remote \
+            --binding JOBS_DB \
+            --config "$WRANGLER_CONFIG" \
+            --migrations-dir packages/jobs-worker/migrations
           node ./wrangler-env.ts d1 migrations apply JOBS_DB --remote --config "$WRANGLER_CONFIG"
 
       - name: ☁️ Deploy preview highlight worker
@@ -529,12 +558,20 @@ jobs:
           echo "::add-mask::$PREVIEW_COOKIE_SECRET"
           extra_args+=(--set "COOKIE_SECRET=$PREVIEW_COOKIE_SECRET")
 
+          # Origin-only maintenance secret for this deploy's builtin
+          # capability reindex into the preview's own Vectorize index, fresh
+          # per deploy.
+          PREVIEW_REINDEX_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$PREVIEW_REINDEX_SECRET"
+          printf '%s' "$PREVIEW_REINDEX_SECRET" > "$RUNNER_TEMP/capability-reindex-secret"
+          app_extra_args=("${extra_args[@]}" --set "CAPABILITY_REINDEX_SECRET=$PREVIEW_REINDEX_SECRET")
+
           # Intentionally omit KIT_API_KEY so preview/E2E do not write to
           # production Kit.
           # CLOUDFLARE_ARTIFACTS_API_TOKEN carries the real deploy token so
           # Artifacts createToken/fork REST hits api.cloudflare.com while
           # CLOUDFLARE_API_TOKEN stays the per-PR mock credential for email.
-          node tools/ci/sync-worker-secrets.ts --env "" --name "$APP_WORKER_NAME" --config "$WRANGLER_CONFIG" --from-dotenv "$ENV_FILE" --from-dotenv "$OVERRIDES_FILE" --set-from-env-optional AI_GATEWAY_ID --set-from-env-optional SENTRY_DSN --set-from-env-optional YOUTUBE_DATA_API_KEY --set-from-env-optional CLOUDFLARE_ARTIFACTS_API_TOKEN=CLOUDFLARE_API_TOKEN --include-empty "${extra_args[@]}"
+          node tools/ci/sync-worker-secrets.ts --env "" --name "$APP_WORKER_NAME" --config "$WRANGLER_CONFIG" --from-dotenv "$ENV_FILE" --from-dotenv "$OVERRIDES_FILE" --set-from-env-optional AI_GATEWAY_ID --set-from-env-optional SENTRY_DSN --set-from-env-optional YOUTUBE_DATA_API_KEY --set-from-env-optional CLOUDFLARE_ARTIFACTS_API_TOKEN=CLOUDFLARE_API_TOKEN --include-empty "${app_extra_args[@]}"
           # The runtime worker intentionally reuses the same dotenv-based sync
           # here (unlike production, which uses a strict runtime-lane
           # allowlist): the preview values are .env.example placeholders plus
@@ -565,9 +602,35 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_ENV: preview
           WRANGLER_CONFIG: ${{ steps.resources.outputs.wrangler_config }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          node tools/seed-test-data.ts --remote --config "$WRANGLER_CONFIG" --email me@kentcdodds.com --password ilikecode
+          labels_json="${PR_LABELS_JSON}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${PR_NUMBER}" ]; then
+            labels_json="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')"
+          fi
+          if [ -z "$labels_json" ] || [ "$labels_json" = "null" ]; then
+            labels_json='[]'
+          fi
+          set +e
+          flag_keys_text="$(node tools/preview-seed-flags.ts --labels "$labels_json")"
+          flag_status=$?
+          set -e
+          if [ "$flag_status" -ne 0 ]; then
+            exit "$flag_status"
+          fi
+          flag_args=()
+          if [ -n "$flag_keys_text" ]; then
+            while IFS= read -r key; do
+              if [ -n "$key" ]; then
+                flag_args+=(--enable-flag "$key")
+              fi
+            done <<< "$flag_keys_text"
+          fi
+          node tools/seed-test-data.ts --remote --config "$WRANGLER_CONFIG" --email me@kentcdodds.com --password ilikecode "${flag_args[@]}"
 
       - name: 🩺 Healthcheck (preview)
         shell: bash
@@ -610,6 +673,22 @@ jobs:
             cat health.json >&2
           fi
           exit 1
+
+      # Each preview owns its Vectorize index, so builtin capability vectors are
+      # written here. --force because APP_DB embed fingerprints can outlive the
+      # index (an existing preview's first deploy onto its own index, or a
+      # deploy that failed between ensure and this step) and would skip the
+      # upserts. The secret was synced after the app deploy and takes a few
+      # seconds to reach the edge, hence --auth-retry-seconds.
+      - name: 🧭 Reindex builtin capability vectors (preview Vectorize)
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
+        run: |
+          set -euo pipefail
+          CAPABILITY_REINDEX_SECRET="$(cat "$RUNNER_TEMP/capability-reindex-secret")"
+          export CAPABILITY_REINDEX_SECRET
+          node tools/ci/reindex-capabilities.ts --url "$PREVIEW_URL" --phases capabilities --force --auth-retry-seconds 90
 
       - name: 🩺 Healthcheck platform worker (preview)
         shell: bash
@@ -729,6 +808,10 @@ jobs:
           echo "API worker healthcheck failed after ${attempts} attempts: $API_URL" >&2
           exit 1
 
+      - name: ✅ Mark preview healthy
+        id: preview_healthy
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+
       - name: 🧾 Write preview link summary
         if: steps.deploy_preview.outputs.url != ''
         env:
@@ -744,6 +827,10 @@ jobs:
           API_URL: ${{ steps.deploy_api.outputs.url }}
           MOCK_SUMMARY: ${{ steps.deploy_mocks.outputs.mock_summary }}
           D1_DATABASE_NAME: ${{ steps.resources.outputs.d1_database_name }}
+          JOBS_D1_DATABASE_NAME:
+            ${{ steps.resources.outputs.jobs_d1_database_name }}
+          VECTORIZE_INDEX_NAME:
+            ${{ steps.resources.outputs.vectorize_index_name }}
           OAUTH_KV_TITLE: ${{ steps.resources.outputs.oauth_kv_title }}
         run: |
           {
@@ -766,6 +853,12 @@ jobs:
             fi
             if [ -n "${D1_DATABASE_NAME:-}" ]; then
               printf 'D1: `%s`\n' "$D1_DATABASE_NAME"
+            fi
+            if [ -n "${JOBS_D1_DATABASE_NAME:-}" ]; then
+              printf 'Jobs D1: `%s`\n' "$JOBS_D1_DATABASE_NAME"
+            fi
+            if [ -n "${VECTORIZE_INDEX_NAME:-}" ]; then
+              printf 'Vectorize: `%s`\n' "$VECTORIZE_INDEX_NAME"
             fi
             if [ -n "${OAUTH_KV_TITLE:-}" ]; then
               printf 'KV: `%s`\n' "$OAUTH_KV_TITLE"
@@ -799,9 +892,11 @@ jobs:
         with:
           script: |
             const marker = "<!-- kody-preview-url -->";
+            const previewUrl = process.env.PREVIEW_URL;
+            const loginDeepLink = `${previewUrl}/login?redirectTo=${encodeURIComponent("/account")}`;
             const bodyLines = [
               marker,
-              `🔎 Preview deployed: ${process.env.PREVIEW_URL}`,
+              `🔎 Preview deployed: ${previewUrl}`,
               "",
               `Worker: \`${process.env.WORKER_NAME}\``,
             ];
@@ -831,6 +926,21 @@ jobs:
             if (process.env.OAUTH_KV_TITLE?.trim()) {
               bodyLines.push(`KV: \`${process.env.OAUTH_KV_TITLE.trim()}\``);
             }
+            bodyLines.push(
+              "",
+              "### Seed login (public preview fixture)",
+              "",
+              "- Email: `me@kentcdodds.com`",
+              "- Password: `ilikecode`",
+              "- Username: `user-me`",
+              "",
+              "Prefer MCP/API/`control-kody` execute for proof. Browser only when UI is under test.",
+              "",
+              `- Deep link (UI login still needed): [Sign in → /account](${loginDeepLink}) — change \`redirectTo\` to the path under test (for example \`/@user-me/your-pkg\`).`,
+              `- Already signed in (reuse CLI cookie): \`npm run control-kody -- browse --origin ${previewUrl} --path /account\``,
+              "",
+              "Do **not** post session cookies or tokens in PR comments.",
+            );
             if (process.env.MOCK_SUMMARY?.trim()) {
               bodyLines.push("");
               bodyLines.push("Mocks:");
@@ -865,6 +975,25 @@ jobs:
                 body,
               });
             }
+
+      # A failed PR preview still holds Workers (and their Durable Object
+      # namespaces), D1, KV, and R2 until the PR closes, which can keep the
+      # account at its Durable Object namespace cap (#3396). The next push
+      # re-creates everything. Branch previews (workflow_dispatch) keep their
+      # state so a migration rehearsal can inspect or restore it. A preview
+      # that passed its healthchecks stays up even if a later step fails.
+      - name: 🧹 Clean up preview resources after a failed deploy
+        if: >-
+          failure() && github.event_name == 'pull_request' &&
+          steps.names.outputs.worker_name != '' &&
+          steps.preview_healthy.outputs.ok != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          APP_WORKER_NAME: ${{ steps.names.outputs.worker_name }}
+        run: |
+          set -euo pipefail
+          node tools/ci/preview-resources.ts cleanup --worker-name "$APP_WORKER_NAME"
 
   cleanup:
     runs-on: ubuntu-latest
@@ -939,7 +1068,7 @@ jobs:
 
           echo "worker_name=$APP_WORKER_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: 🧹 Delete preview Workers and resources (D1 + KV + R2)
+      - name: 🧹 Delete preview Workers and resources (D1 + KV + R2 + Vectorize)
         if: always()
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

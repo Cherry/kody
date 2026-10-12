@@ -3,6 +3,8 @@ import { HttpResponse, http } from 'msw'
 import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { createAuthCookie, setAuthSessionSecret } from '#app/auth-session.ts'
 import { createAccountConnectionsApiHandler } from '#app/handlers/account-connections.ts'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const lifecycleMocks = vi.hoisted(() => ({
 	scheduleUserCreatedEvent: vi.fn(),
@@ -20,7 +22,6 @@ const {
 	createAuthProvidersApiHandler,
 } = await import('#app/handlers/auth-provider.ts')
 import { createMswNodeServer } from '#worker/test-support/msw-node-server.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	createPasswordHash,
 	verifyPassword,
@@ -93,7 +94,7 @@ async function sessionCookieFor(email: string) {
 	return getCookiePair(
 		await createAuthCookie(
 			{
-				stableUserId: await createStableUserIdFromEmail(email),
+				stableUserId: testStableUserIdFromEmail(email),
 				email,
 				rememberMe: false,
 			},
@@ -318,7 +319,7 @@ test('github sign-in creates a verified account, then signs it back in', async (
 		env: expect.anything(),
 		source: 'oauth',
 		user: {
-			id: await createStableUserIdFromEmail('octo@example.com'),
+			id: user.stable_user_id,
 			username: 'octo-cat',
 			email: 'octo@example.com',
 		},
@@ -346,6 +347,45 @@ test('github sign-in creates a verified account, then signs it back in', async (
 			reason: 'provider=github',
 		}),
 	)
+})
+
+test('github sign-in to MCP authorize strips prompt=login on return', async () => {
+	const { db } = createMigratedDb()
+	const env = createAppEnv(db)
+
+	msw.use(
+		http.post('https://github.com/login/oauth/access_token', () =>
+			HttpResponse.json({ access_token: 'github-access-token' }),
+		),
+		http.get('https://api.github.com/user', () =>
+			HttpResponse.json({
+				id: 99002,
+				login: 'authorize-octo',
+				name: 'Authorize Octo',
+				email: 'authorize-octo@example.com',
+			}),
+		),
+		http.get('https://api.github.com/user/emails', () =>
+			HttpResponse.json([
+				{
+					email: 'authorize-octo@example.com',
+					primary: true,
+					verified: true,
+				},
+			]),
+		),
+	)
+
+	const authorizeResume =
+		'/oauth/authorize?client_id=c&prompt=login&state=s&code_challenge=x&code_challenge_method=S256'
+	const { response } = await completeProviderFlow(env, 'github', {
+		startUrl: `http://example.com/auth/github?redirectTo=${encodeURIComponent(authorizeResume)}`,
+	})
+	expect(response.status).toBe(302)
+	expect(response.headers.get('Location')).toBe(
+		'/oauth/authorize?client_id=c&state=s&code_challenge=x&code_challenge_method=S256&accountCreated=1',
+	)
+	expect(setsCookie(response, 'kody_session=')).toBe(true)
 })
 
 test('google sign-in links a matching verified email to the existing account', async () => {
@@ -839,7 +879,7 @@ test('signed-in users link and disconnect providers from their account', async (
 	})
 	expect(linkResponse.status).toBe(302)
 	expect(linkResponse.headers.get('Location')).toBe(
-		'/account?oauthLinked=github',
+		'/account/security?oauthLinked=github',
 	)
 	const connection = sqlite
 		.prepare(
@@ -855,11 +895,11 @@ test('signed-in users link and disconnect providers from their account', async (
 		{ cookie, mockMode: true },
 	)
 	expect(relinkResponse.headers.get('Location')).toBe(
-		'/account?oauthLinked=github',
+		'/account/security?oauthLinked=github',
 	)
 
 	// The same provider identity linked to a different signed-in user is a
-	// conflict surfaced on the account page, never an account switch.
+	// conflict surfaced on the Security page, never an account switch.
 	await seedUser(sqlite, {
 		id: 12,
 		email: 'other@example.com',
@@ -872,7 +912,7 @@ test('signed-in users link and disconnect providers from their account', async (
 		{ cookie: await sessionCookieFor('other@example.com'), mockMode: true },
 	)
 	expect(conflictResponse.headers.get('Location')).toBe(
-		'/account?oauthError=connection-conflict',
+		'/account/security?oauthError=connection-conflict',
 	)
 
 	// The connections API lists the link; disconnecting the only connection
@@ -1001,16 +1041,19 @@ test('OAuth signup persists first-touch UTMs from the start URL through login st
 	)
 })
 
-test('OAuth signup returns a controlled error when stable_user_id already exists', async () => {
+test('OAuth signup returns a controlled error when another account claims the email', async () => {
 	const { sqlite, db } = createMigratedDb()
-	const victimEmail = 'victim-oauth@example.com'
+	const claimedEmail = 'former-oauth@example.com'
 	await seedUser(sqlite, {
 		id: 1,
-		email: 'attacker-oauth@example.com',
-		username: 'attacker-oauth',
-		stableUserId: await createStableUserIdFromEmail(victimEmail),
+		email: 'current-oauth@example.com',
+		username: 'current-oauth',
 	})
-	mockGithubProfileExchange(victimEmail)
+	sqlite.exec(`
+		INSERT INTO user_email_claims (user_id, email, status, claimed_at, updated_at)
+		VALUES (1, ${quoteSqlString(claimedEmail)}, 'claimed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+	`)
+	mockGithubProfileExchange(claimedEmail)
 
 	const { response: callback } = await completeProviderFlow(
 		createAppEnv(db),

@@ -1,9 +1,29 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 
 const mockModule = vi.hoisted(() => ({
-	getSavedPackageById: vi.fn(),
+	writablePackage: null as null | {
+		id: string
+		userId: string
+		name: string
+		kodyId: string
+		description: string
+		tags: Array<string>
+		searchText: string | null
+		sourceId: string
+		hasApp: boolean
+		hidden: boolean
+		isPrivate: boolean
+		lockedAt: string | null
+		createdAt: string
+		updatedAt: string
+	},
 	setSavedPackageLockedAt: vi.fn(),
-	loadAccountPackagesData: vi.fn(),
+	reloadAccountPackagesAfterWrite: vi.fn(),
 	getEntitySourceById: vi.fn(),
 	resolveArtifactSourceHead: vi.fn(),
 	publishFromExternalRef: vi.fn(),
@@ -16,12 +36,42 @@ const mockModule = vi.hoisted(() => ({
 	),
 }))
 
+vi.mock('#app/account-package-write-access.ts', () => ({
+	loadWritableAccountSavedPackage: vi.fn(
+		async (input: { user: { mcpUser: { userId: string } } }) => {
+			if (!mockModule.writablePackage) {
+				return {
+					ok: false as const,
+					response: new Response(
+						JSON.stringify({ ok: false, error: 'Package not found.' }),
+						{ status: 404 },
+					),
+				}
+			}
+			return {
+				ok: true as const,
+				package: {
+					savedPackage: mockModule.writablePackage,
+					ownerUserId: mockModule.writablePackage.userId,
+					actorUserId: input.user.mcpUser.userId,
+				},
+			}
+		},
+	),
+}))
+
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageById: mockModule.getSavedPackageById,
 	setSavedPackageLockedAt: mockModule.setSavedPackageLockedAt,
 }))
 vi.mock('#app/account-packages-data.ts', () => ({
-	loadAccountPackagesData: mockModule.loadAccountPackagesData,
+	reloadAccountPackagesAfterWrite: (...args: Array<unknown>) =>
+		mockModule.reloadAccountPackagesAfterWrite(...args),
+}))
+vi.mock('#worker/orgs/repo.ts', () => ({
+	loadOrgBindingForOrg: vi.fn(async () => ({
+		org: { id: ownerIdFromStored('user-1'), slug: 'user' },
+		role: 'owner' as const,
+	})),
 }))
 vi.mock('#worker/repo/entity-sources.ts', () => ({
 	getEntitySourceById: mockModule.getEntitySourceById,
@@ -56,7 +106,7 @@ const user = {
 	email: 'user@example.com',
 	username: 'user',
 	mcpUser: {
-		userId: 'user-1',
+		userId: personIdFromStored('user-1'),
 		email: 'user@example.com',
 		username: 'user',
 		displayName: 'User',
@@ -65,7 +115,7 @@ const user = {
 
 const unlockedPackage = {
 	id: 'pkg-1',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 	name: '@user/notes',
 	kodyId: 'notes',
 	description: 'Notes',
@@ -87,7 +137,7 @@ const lockedPackage = {
 function sourceRow(publishedCommit: string) {
 	return {
 		id: 'source-1',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package',
 		entity_id: 'pkg-1',
 		repo_id: 'repo-1',
@@ -127,7 +177,7 @@ async function loadApproveOk(commit?: string) {
 }
 
 test('website lock and unlock write locked_at and approve-publish promotes a named commit without unlocking', async () => {
-	mockModule.loadAccountPackagesData.mockResolvedValue({
+	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({
 		ok: true,
 		email: 'user@example.com',
 		username: 'user',
@@ -141,7 +191,7 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 		appFilter: 'all',
 		sort: 'updated',
 	})
-	mockModule.getSavedPackageById.mockResolvedValue(unlockedPackage)
+	mockModule.writablePackage = unlockedPackage
 	mockModule.setSavedPackageLockedAt.mockResolvedValue(true)
 
 	expect(await act({ action: 'absorb-listing', packageId: 'pkg-1' })).toBeNull()
@@ -150,12 +200,12 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 	const lockResponse = await act({ action: 'lock', packageId: 'pkg-1' })
 	expect(lockResponse?.status).toBe(200)
 	expect(mockModule.setSavedPackageLockedAt).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'pkg-1',
 		lockedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
 	})
 
-	mockModule.getSavedPackageById.mockResolvedValue(lockedPackage)
+	mockModule.writablePackage = lockedPackage
 	expect((await act({ action: 'lock', packageId: 'pkg-1' }))?.status).toBe(200)
 	expect(mockModule.setSavedPackageLockedAt).toHaveBeenCalledTimes(1)
 
@@ -164,7 +214,7 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 	)
 	expect(mockModule.setSavedPackageLockedAt).toHaveBeenLastCalledWith(
 		env.APP_DB,
-		{ userId: 'user-1', packageId: 'pkg-1', lockedAt: null },
+		{ userId: ownerIdFromStored('user-1'), packageId: 'pkg-1', lockedAt: null },
 	)
 
 	mockModule.getEntitySourceById.mockResolvedValue(sourceRow('commit-old'))
@@ -184,25 +234,25 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 	expect(mockModule.publishFromExternalRef).toHaveBeenCalledWith(
 		expect.objectContaining({
 			sourceId: 'source-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			newCommit: 'abc1234',
 			allowLockedPublish: true,
 		}),
 	)
 	expect(mockModule.setSavedPackageLockedAt).toHaveBeenCalledTimes(2)
 
-	mockModule.getSavedPackageById.mockResolvedValue(unlockedPackage)
+	mockModule.writablePackage = unlockedPackage
 	expect((await act(approveBody))?.status).toBe(200)
 	const unlockedPublish =
 		mockModule.publishFromExternalRef.mock.calls.at(-1)?.[0]
 	expect(unlockedPublish).toMatchObject({
 		sourceId: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		newCommit: 'abc1234',
 	})
 	expect(unlockedPublish).not.toHaveProperty('allowLockedPublish')
 
-	mockModule.getSavedPackageById.mockResolvedValue(lockedPackage)
+	mockModule.writablePackage = lockedPackage
 	mockModule.resolveArtifactSourceHead.mockResolvedValue({
 		branch: 'main',
 		commit: 'deadbeef',
@@ -216,6 +266,29 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 		package: { id: 'pkg-1', lockedAt: '2026-08-28T12:00:00.000Z' },
 		diff: { files: [], omittedCount: 0 },
 	})
+})
+
+test('approve-publish hrefs use the owning org slug for team packages', async () => {
+	mockModule.writablePackage = {
+		...unlockedPackage,
+		userId: ownerIdFromStored('org-acme'),
+		kodyId: 'shared',
+		name: '@acme/shared',
+	}
+	mockModule.getEntitySourceById.mockResolvedValue({
+		...sourceRow('commit-old'),
+		user_id: ownerIdFromStored('org-acme'),
+	})
+	vi.mocked(loadOrgBindingForOrg).mockResolvedValueOnce({
+		org: {
+			id: ownerIdFromStored('org-acme'),
+			slug: 'acme',
+		},
+		role: 'member',
+	} as Awaited<ReturnType<typeof loadOrgBindingForOrg>>)
+	const loaded = await loadApproveOk('abc1234')
+	expect(loaded.packageHref).toBe('/@acme/shared')
+	expect(loaded.filesHref).toContain('/@acme/shared')
 })
 
 test('approve-publish resolves HEAD, missing published, and missing HEAD diffs', async () => {
@@ -232,7 +305,7 @@ test('approve-publish resolves HEAD, missing published, and missing HEAD diffs',
 			input.commit === publishedCommit ? { 'README.md': '# published\n' } : {},
 		fromListingSnapshot: false,
 	})
-	mockModule.getSavedPackageById.mockResolvedValue(unlockedPackage)
+	mockModule.writablePackage = unlockedPackage
 	mockModule.getEntitySourceById.mockResolvedValue(sourceRow(publishedCommit))
 	mockModule.loadPublicTreeFiles.mockImplementation(publishedReadmeTree)
 	mockModule.readArtifactTreeAtCommit.mockImplementation(

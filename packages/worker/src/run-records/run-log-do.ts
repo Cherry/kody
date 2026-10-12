@@ -10,7 +10,10 @@ import {
 	getRecoveryBookmark,
 	restoreToBookmark,
 } from '#worker/dr/do-pitr.ts'
-import { terminalWorkflowStatusValues } from '#worker/package-runtime/workflow-statuses.ts'
+import {
+	releasedWorkflowProjectionIdempotencyKey,
+	terminalWorkflowStatusValues,
+} from '#worker/package-runtime/workflow-statuses.ts'
 import { buildSentryOptions } from '#worker/sentry-options.ts'
 import { type RunLogAdminInsightsSnapshot } from './admin-insights-snapshot.ts'
 import {
@@ -296,8 +299,10 @@ type ListRunsInput = {
 	status?: RunStatus | null
 	packageId?: string | null
 	jobId?: string | null
+	workflowId?: string | null
 	name?: string | null
 	since?: string | null
+	until?: string | null
 	errorTriage?: RunErrorTriageFilter | null
 	limit: number
 	cursor?: string | null
@@ -1511,6 +1516,9 @@ class RunLogBase extends DurableObject<Env> {
 		const shortLivedCutoff = new Date(
 			nowMs - runRecordStaleRunningTtlMsForSurface('execute'),
 		).toISOString()
+		const backgroundCutoff = new Date(
+			nowMs - runRecordStaleRunningTtlMsForSurface('webhook'),
+		).toISOString()
 		const jobCutoff = new Date(
 			nowMs - runRecordStaleRunningTtlMsForSurface('job'),
 		).toISOString()
@@ -1526,14 +1534,16 @@ class RunLogBase extends DurableObject<Env> {
 			'reconcileStaleRunning',
 			`SELECT id, started_at, surface, idempotency_key FROM runs
 			WHERE status = 'running' AND (
-				(surface IN ('execute', 'export', 'retriever', 'webhook', 'subscription', 'app_fetch', 'app_realtime')
+				(surface IN ('execute', 'export', 'retriever', 'subscription', 'app_fetch', 'app_realtime')
 					AND started_at < ?)
+				OR (surface = 'webhook' AND started_at < ?)
 				OR (surface = 'job' AND started_at < ?)
 				OR (surface = 'workflow' AND started_at < ?)
 			)
 			ORDER BY started_at ASC
 			LIMIT ?`,
 			shortLivedCutoff,
+			backgroundCutoff,
 			jobCutoff,
 			longLivedCutoff,
 			maxStaleRunningReconcilesPerPass,
@@ -2536,16 +2546,22 @@ class RunLogBase extends DurableObject<Env> {
 	/**
 	 * Release a claim whose execution never started so retries are not
 	 * poisoned. Deletes the still-`in_progress` ledger row (fenced on
-	 * `claimUpdatedAt`) and the attempt's still-`running` run row.
+	 * `claimUpdatedAt`). The attempt's still-`running` run row is finished as
+	 * an error with diagnostic logs (not deleted) so Activity keeps evidence
+	 * of pre-execution failures.
 	 */
 	async releasePackageInvocation(input: {
 		invocationId: string
 		claimUpdatedAt: string
 		runId: string | null
+		run: RunLogRowInput | null
+		logs: Array<RunLogEntryInput>
 	}): Promise<{
 		released: boolean
 		/** Current row when the fence failed, so the caller can resolve it. */
 		record: PackageInvocationLedgerRecord | null
+		/** True when this RPC finished the attempt's run as an error. */
+		runFinished: boolean
 	}> {
 		// Same explicit read-then-write fence as finishPackageInvocation: DO
 		// execution is serialized, so this is atomic within the RPC.
@@ -2560,13 +2576,42 @@ class RunLogBase extends DurableObject<Env> {
 				input.invocationId,
 			)
 		}
-		if (input.runId) {
+		// Finish this attempt's run even when the ledger fence failed — the
+		// attempt still happened and must not stay `running` or vanish.
+		let runFinished = false
+		const releasedRun = input.run
+		if (releasedRun) {
+			const previousStatus = this.getRunStatus(releasedRun.id)
+			if (previousStatus === 'running' || previousStatus == null) {
+				const existed = previousStatus != null
+				this.transactionSyncWithMetaCache(() => {
+					this.clearSystemPlatformInterruptTriageBeforeErrorFinish(releasedRun)
+					this.upsertRun(releasedRun, 'replace')
+					this.replaceLogs(releasedRun.id, input.logs)
+					if (!existed) {
+						this.adjustRunCount(1)
+					}
+					this.recordTerminalRunSideEffects({
+						previousStatus,
+						run: releasedRun,
+					})
+				})
+				runFinished = true
+				this.retentionIdleConfirmed = false
+				this.invalidateReadMemos()
+				this.resetRetentionEmptyBackoff()
+				this.maybeEnforceRetention()
+				await this.ensureRetentionAlarm()
+			}
+		} else if (input.runId) {
+			// Callers without a built terminal row still must not leave a
+			// running attempt (legacy / fence-only release).
 			await this.deleteRunIfRunning({ runId: input.runId })
 		}
 		if (released) {
-			return { released: true, record: null }
+			return { released: true, record: null, runFinished }
 		}
-		return { released: false, record: current }
+		return { released: false, record: current, runFinished }
 	}
 
 	/**
@@ -2626,6 +2671,42 @@ class RunLogBase extends DurableObject<Env> {
 		this.retentionIdleConfirmed = false
 		await this.ensureRetentionAlarm()
 		return { ok: true }
+	}
+
+	/**
+	 * Detach a dead terminal projection from its idempotency key so a later
+	 * create with the same key can mint a new run. Active and `complete` rows
+	 * must keep their keys for dedupe/replay; this only rewrites keys that are
+	 * not already released.
+	 */
+	async releaseWorkflowProjectionIdempotencyKey(input: {
+		id: string
+	}): Promise<{ released: boolean; previousKey: string | null }> {
+		const id = input.id.trim()
+		if (!id) {
+			return { released: false, previousKey: null }
+		}
+		const existing = await this.getWorkflowProjection({ id })
+		if (!existing) {
+			return { released: false, previousKey: null }
+		}
+		const previousKey = existing.idempotencyKey
+		if (previousKey.startsWith('released:')) {
+			return { released: false, previousKey }
+		}
+		const releasedKey = releasedWorkflowProjectionIdempotencyKey(id)
+		const now = new Date().toISOString()
+		this.ctx.storage.sql.exec(
+			`UPDATE workflow_projections
+			SET idempotency_key = ?, updated_at = ?
+			WHERE id = ?`,
+			releasedKey,
+			now,
+			id,
+		)
+		this.retentionIdleConfirmed = false
+		await this.ensureRetentionAlarm()
+		return { released: true, previousKey }
 	}
 
 	async getWorkflowProjection(input: {
@@ -3106,6 +3187,10 @@ class RunLogBase extends DurableObject<Env> {
 			clauses.push('r.job_id = ?')
 			params.push(input.jobId)
 		}
+		if (input.workflowId) {
+			clauses.push('r.workflow_id = ?')
+			params.push(input.workflowId)
+		}
 		if (input.name) {
 			clauses.push('r.name = ?')
 			params.push(input.name)
@@ -3113,6 +3198,10 @@ class RunLogBase extends DurableObject<Env> {
 		if (input.since) {
 			clauses.push('r.started_at >= ?')
 			params.push(input.since)
+		}
+		if (input.until) {
+			clauses.push('r.started_at < ?')
+			params.push(input.until)
 		}
 		const errorTriage = input.errorTriage ?? null
 		if (errorTriage === 'open') {
@@ -4004,13 +4093,19 @@ export type RunLogRpc = DurableObjectPitrRpc & {
 		invocationId: string
 		claimUpdatedAt: string
 		runId: string | null
+		run: RunLogRowInput | null
+		logs: Array<RunLogEntryInput>
 	}) => Promise<{
 		released: boolean
 		record: PackageInvocationLedgerRecord | null
+		runFinished: boolean
 	}>
 	upsertWorkflowProjection: (
 		input: WorkflowProjectionUpsertInput,
 	) => Promise<{ ok: true }>
+	releaseWorkflowProjectionIdempotencyKey: (input: {
+		id: string
+	}) => Promise<{ released: boolean; previousKey: string | null }>
 	getWorkflowProjection: (input: {
 		id: string
 	}) => Promise<WorkflowProjectionRecord | null>

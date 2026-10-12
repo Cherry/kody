@@ -1,14 +1,16 @@
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from 'vitest'
 import {
+	gitHookScriptEnv,
 	hookScripts,
 	isDocsOnlyHookPath,
 	listHookPaths,
 	parsePrePushUpdates,
+	isSkillsLockHookPath,
 	planGitHookChecks,
 	runGitHookChecks,
 	type GitRunner,
@@ -77,7 +79,7 @@ test('docs-only hook paths skip expensive checks and any code path keeps them', 
 		runMigrationsCheck: false,
 		runUnitTests: false,
 		summary:
-			'pre-commit: skipping typecheck and migrations:check (3 docs-only paths)',
+			'pre-commit: skipping install:check, typecheck, and migrations:check (3 docs-only paths)',
 	})
 	expect(
 		planGitHookChecks({ hook: 'pre-push', paths: codePaths }).summary,
@@ -86,15 +88,19 @@ test('docs-only hook paths skip expensive checks and any code path keeps them', 
 		['pre-commit' | 'pre-push', Array<string> | null, Array<string>]
 	> = [
 		['pre-push', docsPaths, []],
-		['pre-commit', codePaths, ['typecheck', 'migrations:check']],
+		[
+			'pre-commit',
+			codePaths,
+			['install:check', 'typecheck', 'migrations:check'],
+		],
 		[
 			'pre-push',
 			['packages/worker/migrations/0067-example.sql'],
 			['test:push'],
 		],
 		['pre-commit', [], []],
-		['pre-commit', null, ['typecheck', 'migrations:check']],
-		['pre-push', null, ['test:push']],
+		['pre-commit', null, ['install:check', 'typecheck', 'migrations:check']],
+		['pre-push', null, ['skills-lock:check', 'test:push']],
 	]
 	expect(
 		planCases.map(([hook, paths]) => [
@@ -124,9 +130,18 @@ test('docs-only hook paths skip expensive checks and any code path keeps them', 
 				hook: 'pre-commit',
 				git: () => gitResult(0, 'packages/worker/src/app.ts\0'),
 			},
+			(script) => (script === 'install:check' ? 2 : 0),
+		),
+	).toEqual({ code: 2, scripts: ['install:check'] })
+	expect(
+		await runHook(
+			{
+				hook: 'pre-commit',
+				git: () => gitResult(0, 'packages/worker/src/app.ts\0'),
+			},
 			(script) => (script === 'typecheck' ? 2 : 0),
 		),
-	).toEqual({ code: 2, scripts: ['typecheck'] })
+	).toEqual({ code: 2, scripts: ['install:check', 'typecheck'] })
 	expect(
 		await runHook({
 			hook: 'pre-push',
@@ -135,7 +150,56 @@ test('docs-only hook paths skip expensive checks and any code path keeps them', 
 				throw new Error('blank pre-push stdin must fail closed before git')
 			},
 		}),
-	).toEqual({ code: 0, scripts: ['test:push'] })
+	).toEqual({ code: 0, scripts: ['skills-lock:check', 'test:push'] })
+
+	expect(isSkillsLockHookPath('.agents/skills/ship-pr/SKILL.md')).toBe(true)
+	expect(isSkillsLockHookPath('./skills-lock.json')).toBe(true)
+	expect(isSkillsLockHookPath('README.md')).toBe(false)
+	expect(
+		plannedScripts('pre-push', ['.agents/skills/ship-pr/SKILL.md']),
+	).toEqual(['skills-lock:check'])
+	expect(
+		plannedScripts('pre-commit', ['.agents/skills/ship-pr/SKILL.md']),
+	).toEqual([])
+	expect(
+		planGitHookChecks({
+			hook: 'pre-push',
+			paths: ['.agents/skills/ship-pr/SKILL.md', 'README.md'],
+		}).summary,
+	).toBe(
+		'pre-push: running skills-lock:check (.agents/skills/ship-pr/SKILL.md)',
+	)
+	expect(
+		plannedScripts('pre-push', [
+			'.agents/skills/ship-pr/SKILL.md',
+			'skills-lock.json',
+		]),
+	).toEqual(['skills-lock:check'])
+	expect(
+		plannedScripts('pre-push', [
+			'.agents/skills/visual-recap/scripts/primitives-map.mjs',
+		]),
+	).toEqual(['skills-lock:check', 'test:push'])
+	expect(
+		plannedScripts('pre-push', [
+			'.agents/skills/visual-recap/scripts/primitives-map.mjs',
+			'skills-lock.json',
+		]),
+	).toEqual(['skills-lock:check', 'test:push'])
+	expect(
+		plannedScripts('pre-push', [
+			'.agents/skills/ship-pr/SKILL.md',
+			'packages/worker/src/app.ts',
+		]),
+	).toEqual(['skills-lock:check', 'test:push'])
+	expect(
+		planGitHookChecks({
+			hook: 'pre-push',
+			paths: ['skills-lock.json', 'packages/worker/src/app.ts'],
+		}).summary,
+	).toBe(
+		'pre-push: running skills-lock:check and test:push (packages/worker/src/app.ts)',
+	)
 })
 
 test('push path listing diffs the remote tip and fails closed without a new-branch base', () => {
@@ -268,6 +332,7 @@ test('a real docs follow-up skips unit tests and a source rename still typecheck
 			join(root, 'package.json'),
 			JSON.stringify({
 				scripts: {
+					'install:check': 'exit 2',
 					typecheck: 'exit 3',
 					'migrations:check': 'exit 4',
 					'test:push': 'exit 5',
@@ -280,7 +345,7 @@ test('a real docs follow-up skips unit tests and a source rename still typecheck
 		})
 		expect(preCommit.status).toBe(0)
 		expect(preCommit.stdout).toContain(
-			'pre-commit: skipping typecheck and migrations:check (1 docs-only path)',
+			'pre-commit: skipping install:check, typecheck, and migrations:check (1 docs-only path)',
 		)
 		git(['commit', '-m', 'docs'])
 		const docsCommit = git(['rev-parse', 'HEAD'])
@@ -326,6 +391,7 @@ test('a real docs follow-up skips unit tests and a source rename still typecheck
 			'src/app.ts',
 		])
 		expect(plannedScripts('pre-commit', ['src/app.md', 'src/app.ts'])).toEqual([
+			'install:check',
 			'typecheck',
 			'migrations:check',
 		])
@@ -335,8 +401,40 @@ test('a real docs follow-up skips unit tests and a source rename still typecheck
 		})
 		expect(renamedCommit.status).not.toBe(0)
 		expect(renamedCommit.stdout).toContain(
-			'pre-commit: running typecheck and migrations:check (src/app.ts)',
+			'pre-commit: running install:check, typecheck, and migrations:check (src/app.ts)',
 		)
+	} finally {
+		await rm(root, { recursive: true, force: true })
+	}
+})
+
+test('hook scripts can create foreign repositories without inherited worktree state', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'hook-env-'))
+	try {
+		const env = gitHookScriptEnv({
+			...process.env,
+			GIT_DIR: join(root, 'wrong.git'),
+			GIT_WORK_TREE: join(root, 'wrong-worktree'),
+			GIT_INDEX_FILE: join(root, 'wrong-index'),
+			KODY_HOOK_TEST: 'preserved',
+		})
+		expect(env.KODY_HOOK_TEST).toBe('preserved')
+		const target = join(root, 'fixture')
+		const init = spawnSync('git', ['init', target], { env, encoding: 'utf8' })
+		expect({ status: init.status, error: init.error }).toEqual({
+			status: 0,
+			error: undefined,
+		})
+		const top = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+			cwd: target,
+			env,
+			encoding: 'utf8',
+		})
+		expect({ status: top.status, error: top.error }).toEqual({
+			status: 0,
+			error: undefined,
+		})
+		expect(top.stdout.trim()).toBe(await realpath(target))
 	} finally {
 		await rm(root, { recursive: true, force: true })
 	}

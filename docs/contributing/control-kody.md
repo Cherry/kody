@@ -9,24 +9,29 @@ npm run control-kody -- doctor
 npm run control-kody -- dev
 npm run control-kody -- login
 npm run control-kody -- request GET /account/waiting.json
-npm run control-kody -- request GET /account/waiting --dump --contains 'Waiting'
+npm run control-kody -- request GET /@<slug>/-/waiting --dump --contains 'Waiting'
 npm run control-kody -- request POST /account/secrets.json 400 '{"action":"add"}'
+npm run control-kody -- request POST /account/organizations/new --form slug=x-org --form displayName=X
+npm run control-kody -- request POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png
+npm run control-kody -- request GET /account/connected-agents.json --header 'Referer: <origin>/@<slug>/-/connections'
 npm run control-kody -- map waiting
 npm run control-kody -- map --check
 npm run control-kody -- health --sha <commit>
-npm run control-kody -- preview --pr 42 --check /account/waiting
-npm run control-kody -- package-create --origin <preview> --package-name <leaf-or-@scope/leaf> [--head-ahead]
-npm run control-kody -- execute --origin <preview> --code-file fixture.ts [--params-file params.json]
-npm run control-kody -- search --origin <preview> --query "packageSave" [--domain packages]
+npm run control-kody -- preview --pr 42 --check /@<slug>/-/waiting
+npm run control-kody -- browse --origin <preview> --path /@user-me/pkg [--record]
+npm run control-kody -- package-create --origin <preview> --package-name <leaf-or-@scope/leaf> [--head-ahead] [--org <slug>]
+npm run control-kody -- execute --origin <preview> --code-file fixture.ts [--params-file params.json] [--org <slug>]
+npm run control-kody -- search --origin <preview> --query "packageSave" [--domain packages] [--org <slug>]
 ```
 
 Same entry: `node tools/control-kody.ts`.
 
 `doctor` checks Node 26, the Playwright browser revision in
-`node_modules/playwright-core/browsers.json`, git `core.hooksPath`, origin
-`/health`, and local APP_DB. Playwright passes only when `chromium-<rev>` and
-`chromium_headless_shell-<rev>` each contain `INSTALLATION_COMPLETE`. A missing
-revision fails with the unzip steps in
+`node_modules/playwright-core/browsers.json`, git `core.hooksPath`, installed
+root and workspace dependencies vs `package-lock.json` (`run npm ci` when they
+drift), origin `/health`, and local APP_DB. Playwright passes only when
+`chromium-<rev>` and `chromium_headless_shell-<rev>` each contain
+`INSTALLATION_COMPLETE`. A missing revision fails with the unzip steps in
 [Cursor Cloud Agent notes](./cloud-agents.md).
 
 `health --sha` succeeds when `/health` `commitSha` equals the argument, uniquely
@@ -61,6 +66,42 @@ exists.
 trailing `--dump` / `--contains <text>` flags as `request`, for example
 `preview --pr 42 --request 'GET /pricing --dump --contains Worker compute'`.
 
+Repeat `--form name=value` to send `application/x-www-form-urlencoded`. Add
+`--multipart` for `multipart/form-data`; a `@` value is a file path
+(`--form avatar=@./avatar.png`). `POST /account/organizations/new` reads
+`request.formData()` (`slug`, `displayName`) and redirects. `preview --request`
+leaves the redirect manual, and `--contains` also sees `Location`:
+
+```bash
+npm run control-kody -- preview --pr 42 --request 'POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org'
+```
+
+Org-owned `/account/<section>.json` routes (for example `connected-agents`,
+`connection-usage`, `secrets`, `jobs`) bind the org from a same-origin
+`Referer`. Without one they bind the personal org. Send it with `--header`
+(repeatable, `Name: value`; `Cookie` and `Content-Type` are rejected because the
+session and body own them). The session cookie and re-login work as for any
+other `request`:
+
+```bash
+npm run control-kody -- request GET /account/connected-agents.json --header 'Referer: http://localhost:3742/@<slug>/-/connections'
+```
+
+The same `--header` works inside a `preview --request` spec.
+
+`browse` reuses the seed cookie stored in `.tmp/control-kody-cookie` (from
+`login` or `preview`) and injects it into headed Playwright Chromium via
+`addCookies` (same pattern as `e2e/playwright-utils.ts`). It opens `--path`
+already signed in. Pass `--record` to write video under
+`.tmp/control-kody-browse` (needs Playwright ffmpeg:
+`npx playwright install ffmpeg` — small download; do not run
+`playwright install chromium` on Cloud Agents), `--headless` for environments
+without a display, and `--close-after <ms>` for scripted smoke. Prefer
+MCP/API/`execute` for proof; use `browse` only when UI is under test. Cursor
+`computerUse` drives its own browser and cannot attach to the CLI-opened
+Chromium — for computerUse, open `/login?redirectTo=<path>` with the public seed
+credentials instead of retyping a long package URL after landing on `/account`.
+
 `doctor` checks local APP_DB readiness. A failed local `login` (unmigrated or
 unseeded D1) prints:
 
@@ -79,13 +120,15 @@ node tools/seed-test-data.ts --local
 Override with `--email` / `--password`. `--cookie-file` defaults to
 `.tmp/control-kody-cookie` and stores the origin and email that created the
 session, so a leftover local cookie is not sent to a preview and `--email` does
-not reuse another user's cookie for the same origin. `preview` uses
+not reuse another user's cookie for the same origin. MCP commands also store the
+`--org` slug beside the OAuth token; a different org remints the token and keeps
+the login cookie. `preview` uses
 [`preview-manual-test`](./preview-manual-testing.md) and its own seed.
 
 `package-create` registers a stub saved package on a PR preview through MCP
 `packageGetGitRemote({ create: true, kody_id })`. Pass the package name leaf or
 `@owner/leaf` with `--package-name`. It reuses `--origin`, `--email`,
-`--password`, `--cookie-file`, and `--json`. Pass
+`--password`, `--cookie-file`, `--json`, and `--org <slug>`. Pass
 `--package-name <leaf-or-@scope/leaf>` (required; `--kody-id` is an alias),
 `--description` (optional), and `--head-ahead` to push one unpublished commit so
 the package page can show **HEAD ahead of published**. Do not POST a create
@@ -103,6 +146,14 @@ optional JSON `--params-file`. `search` takes `--query`, and optionally
 hand-write a throwaway MCP client script for preview fixtures. A module that
 calls `packageSave`, publish, or `packageGetGitRemote` must use
 `--origin <preview>`; the local origin cannot persist package repos.
+
+After the seed user belongs to more than one organization, OAuth authorize
+refuses to approve until an org is chosen. Pass `--org <slug>` on `execute`,
+`search`, and `package-create` (the slug from `POST /account/organizations/new`,
+with or without a leading `@`). The CLI sends that slug as `?org=` on authorize.
+The session file records the org next to the bearer token. A later call with a
+different `--org`, or with `--org` omitted, remints that token and keeps the
+login cookie.
 
 ## Daily garden
 

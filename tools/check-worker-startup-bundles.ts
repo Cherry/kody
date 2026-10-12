@@ -107,13 +107,6 @@ const oauthProviderGeneratedModuleSourcePath =
 	'/packages/worker/.generated/oauth-provider.mjs'
 const oauthProviderPackageSourcePath =
 	'/node_modules/@cloudflare/workers-oauth-provider/'
-/**
- * The pre-bundled `remix` file set package bundles receive as
- * `node_modules/remix/*` (~0.5 MB of string constants). Only the runtime
- * bundler path loads it, so it must stay a separate additional module.
- */
-const packageAppRemixGeneratedModuleSourcePath =
-	'/packages/worker/.generated/package-app-remix.mjs'
 
 type StartupBundleSpec = Omit<StartupBundleDefinition, 'maxEntryBytes'>
 
@@ -154,6 +147,11 @@ export const startupBundles: ReadonlyArray<StartupBundleSpec> = [
 			oauthProviderPackageSourcePath,
 			'/packages/worker/src/package-runtime/rewrite-inlined-local-runtime.ts',
 			'/packages/worker/src/package-runtime/local-execute-runtime-support.ts',
+			'/packages/worker/src/repo/isomorphic-git-module.ts',
+			'/node_modules/isomorphic-git/',
+			'/node_modules/@cloudflare/shell/dist/git/',
+			'/node_modules/postal-mime/',
+			'/node_modules/acorn/',
 		],
 	},
 	{
@@ -168,6 +166,11 @@ export const startupBundles: ReadonlyArray<StartupBundleSpec> = [
 			oauthProviderPackageSourcePath,
 			'/packages/worker/src/package-runtime/rewrite-inlined-local-runtime.ts',
 			'/packages/worker/src/package-runtime/local-execute-runtime-support.ts',
+			'/packages/worker/src/repo/isomorphic-git-module.ts',
+			'/node_modules/isomorphic-git/',
+			'/node_modules/@cloudflare/shell/dist/git/',
+			'/node_modules/postal-mime/',
+			'/node_modules/acorn/',
 		],
 	},
 ]
@@ -277,15 +280,6 @@ function assertDeferredSourcesStayOutOfMain(
 			`${definition.name} startup bundle inlines the generated OAuth provider (${oauthProviderGeneratedModuleSourcePath}) into its main module instead of loading it as a separate additional module.`,
 		)
 	}
-	if (
-		sources.some((source) =>
-			source.includes(packageAppRemixGeneratedModuleSourcePath),
-		)
-	) {
-		throw new Error(
-			`${definition.name} startup bundle inlines the generated package-app Remix file set (${packageAppRemixGeneratedModuleSourcePath}) into its main module instead of loading it as a separate additional module.`,
-		)
-	}
 }
 
 const strayKodyGeneratedModuleMarker = 'export const stray = 1\n'
@@ -367,11 +361,6 @@ function assertOriginViteDeferredChunks(
 	if (assets.workerBundler.length === 0) {
 		throw new Error(
 			`${name} Vite startup bundle did not emit a separate worker-bundler chunk (dynamic import() regression?).`,
-		)
-	}
-	if (assets.packageAppRemix.length === 0) {
-		throw new Error(
-			`${name} Vite startup bundle did not emit a separate package-app-remix chunk (dynamic import() regression?).`,
 		)
 	}
 	if (assets.esbuildWasm.length === 0) {

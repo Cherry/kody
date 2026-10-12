@@ -5,23 +5,31 @@ import {
 } from '#app/account-credits-data.ts'
 import { loadAccountUsageStory } from '#app/account-usage-story.ts'
 import { isBillingConfigured } from '#worker/billing/billing-config.ts'
+import { readCreditWallet } from '#worker/billing/credit-wallet.ts'
+import { reconcileSignupWelcomeCreditsIfPending } from '#worker/billing/signup-welcome-credits.ts'
 import { readAccountComputeOverage } from '#worker/billing/compute-overage-account.ts'
 import {
 	resolveUserEntitlementFromRow,
+	resolveUserPlanFromRow,
 	userEntitlementColumnsSql,
 	type UserEntitlementRow,
 } from '#worker/entitlements/service.ts'
 import { readEntitlementUsageSnapshot } from '#worker/entitlements/usage-snapshot.ts'
-import { resolveUserStableId } from '#worker/user-id.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	type AccountUsageEntitlementConsumption,
 	type AccountUsageLoaderData,
 	type AccountUsageWeekWindow,
 } from '#universal/loader-data.ts'
+import { loadCreditAttributionBreakdown } from '#worker/usage/credit-attribution.ts'
+import { orgBillingPath } from '#universal/org-pages.ts'
+import { getOrgById } from '#worker/orgs/repo.ts'
 
 type UsageUserRow = UserEntitlementRow & {
 	id: number
 	stable_user_id: string
+	username: string
 	stripe_customer_id: string | null
 }
 
@@ -38,29 +46,42 @@ export async function loadAccountUsageData(input: {
 }): Promise<AccountUsageLoaderData | null> {
 	const now = input.now ?? new Date()
 	const row = await input.env.APP_DB.prepare(
-		`SELECT id, stable_user_id, stripe_customer_id, ${userEntitlementColumnsSql()}
-		 FROM users WHERE id = ?`,
+		`SELECT u.id, u.stable_user_id, u.username, o.stripe_customer_id, ${userEntitlementColumnsSql('o')}
+		 FROM users u
+		 INNER JOIN orgs o ON o.id = u.stable_user_id
+		 WHERE u.id = ?${andLiveDeletedAtSql('u')}${andLiveDeletedAtSql('o')}`,
 	)
 		.bind(input.userId)
 		.first<UsageUserRow>()
 	if (!row) return null
 
 	const manualPlan = parseStoredPlanName(row.plan)
-	const usageUserId = resolveUserStableId(row)
+	const usageUserId = ownerIdFromStored(row.stable_user_id)
+	// Best-effort: retry a creation-time welcome grant that failed earlier.
+	// No-ops unless signup_welcome_credits_pending is set (no pre-ship backfill).
+	await reconcileSignupWelcomeCreditsIfPending({
+		db: input.env.APP_DB,
+		userId: usageUserId,
+		now,
+	})
+	const { creditsEligible } = resolveUserPlanFromRow(row, now)
+	// One credit_wallets read for entitlement balance + Credits section.
+	const wallet = creditsEligible
+		? await readCreditWallet(input.env.APP_DB, usageUserId)
+		: null
 	const entitlement = await resolveUserEntitlementFromRow({
 		db: input.env.APP_DB,
 		stableUserId: usageUserId,
 		row,
 		now,
+		...(wallet ? { balanceMicroUsd: wallet.balanceMicroUsd } : {}),
 	})
 	const [snapshot, computeOverage] = await Promise.all([
 		readEntitlementUsageSnapshot({
 			db: input.env.APP_DB,
 			env: input.env,
 			usageUserId,
-			plan: entitlement.plan,
-			ladder: entitlement.ladder,
-			creditWallet: entitlement.creditWallet,
+			entitlement,
 			now,
 		}),
 		readAccountComputeOverage({
@@ -69,6 +90,7 @@ export async function loadAccountUsageData(input: {
 			plan: entitlement.plan,
 			ladder: entitlement.ladder,
 			creditWallet: entitlement.creditWallet,
+			limitOverrides: entitlement.limitOverrides,
 			now,
 		}),
 	])
@@ -77,24 +99,37 @@ export async function loadAccountUsageData(input: {
 		entitlement,
 		stripeCustomerId: row.stripe_customer_id?.trim() || null,
 	})
-	const { credits, wallet } = await loadAccountUsageCredits({
+	const signupOrg = await getOrgById(input.env.APP_DB, usageUserId)
+	const billingHref = orgBillingPath(signupOrg?.slug?.trim() || row.username)
+	const { credits, wallet: creditsWallet } = await loadAccountUsageCredits({
 		env: input.env,
 		stableUserId: usageUserId,
 		entitlement,
 		canBuyCredits,
 		computeOverage,
 		now,
-	})
-	const story = await loadAccountUsageStory({
-		db: input.env.APP_DB,
-		stableUserId: usageUserId,
-		plan: entitlement.plan,
-		creditWallet: entitlement.creditWallet,
-		canBuyCredits: canBuyCredits && isBillingConfigured(input.env),
-		computeOverage,
-		now,
+		billingHref,
 		...(wallet ? { wallet } : {}),
 	})
+	const [story, whereItWent] = await Promise.all([
+		loadAccountUsageStory({
+			db: input.env.APP_DB,
+			stableUserId: usageUserId,
+			plan: entitlement.plan,
+			creditWallet: entitlement.creditWallet,
+			canBuyCredits: canBuyCredits && isBillingConfigured(input.env),
+			computeOverage,
+			now,
+			...(creditsWallet ? { wallet: creditsWallet } : {}),
+		}),
+		loadCreditAttributionBreakdown({
+			db: input.env.APP_DB,
+			stableUserId: usageUserId,
+			username: row.username,
+			computeOverage,
+			now,
+		}),
+	])
 
 	return {
 		ok: true,
@@ -110,6 +145,7 @@ export async function loadAccountUsageData(input: {
 		computeOverage,
 		canBuyCredits,
 		...story,
+		whereItWent,
 		credits,
 		...(input.notice ? { notice: input.notice } : {}),
 		...(input.error ? { error: input.error } : {}),

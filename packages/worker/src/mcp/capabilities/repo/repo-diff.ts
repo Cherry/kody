@@ -1,3 +1,5 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeRepoSessionPackageRead } from './authorize-repo-session-package.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
@@ -12,6 +14,7 @@ export const repoDiffCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoDiff',
+		orgPermission: 'package:read',
 		description: [
 			'Return git diff for the active repo session workspace.',
 			fileLevelApiNote,
@@ -23,10 +26,17 @@ export const repoDiffCapability = defineDomainCapability(
 		inputSchema: repoSessionIdSchema,
 		outputSchema: repoDiffOutputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageRead({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			const diff = await repoSessionRpc(ctx.env, args.session_id).sessionDiff({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: ownerId,
 			})
 			return { diff }
 		},

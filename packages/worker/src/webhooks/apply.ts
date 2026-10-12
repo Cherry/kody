@@ -1,11 +1,11 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { normalizeHost } from '#mcp/secrets/allowed-hosts.ts'
 import { buildSecretHostApprovalUrl } from '#mcp/secrets/host-approval.ts'
-import { resolveSecretForHost } from '#mcp/secrets/service.ts'
-import { assertCanUseIntegration } from '#worker/integrations/package-access.ts'
-import { resolveIntegrationAccessToken } from '#worker/integrations/credentials.ts'
+import { attestedPackageStamp } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
 import { getJoinedIntegration } from '#worker/integrations/service.ts'
-import { refreshIntegrationTokens } from '#worker/integrations/token-refresh.ts'
 import { type JoinedIntegration } from '#worker/integrations/types.ts'
 import {
 	listPackageWebhooks,
@@ -107,7 +107,7 @@ function assertDestinationHostAllowed(input: {
 async function loadDeclaredWebhookIfPresent(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	savedPackage: SavedPackageRecord
 	webhookName: string
 }): Promise<PackageWebhookManifestEntry | null> {
@@ -133,7 +133,8 @@ async function loadDeclaredWebhookIfPresent(input: {
 
 async function authorizeApplyRequest(input: {
 	env: Env
-	userId: string
+	request: RequestContext
+	userId: OwnerId
 	userEmail?: string | null
 	baseUrl: string
 	packageId: string
@@ -149,6 +150,13 @@ async function authorizeApplyRequest(input: {
 }> {
 	const secretName = input.secretName?.trim() ?? ''
 	const integrationName = input.integration?.trim() ?? ''
+	const credentialInput = {
+		env: input.env,
+		orgId: input.userId,
+		actor: input.request,
+		packageStamp: attestedPackageStamp(input.packageId),
+		baseUrl: input.baseUrl,
+	}
 	if (secretName && integrationName) {
 		throw new McpCallerError(
 			'Provide either integration or secretName, not both.',
@@ -156,16 +164,9 @@ async function authorizeApplyRequest(input: {
 	}
 	if (secretName) {
 		const host = normalizeHost(new URL(input.url).hostname)
-		const resolved = await resolveSecretForHost({
-			env: input.env,
-			userId: input.userId,
-			name: secretName,
-			storageContext: {
-				sessionId: null,
-				appId: null,
-				packageId: input.packageId,
-			},
-			host,
+		const resolved = await resolveCredential({
+			...credentialInput,
+			credential: { use: 'webhook-secret', name: secretName },
 		})
 		if (!resolved.found || !resolved.value) {
 			throw new McpCallerError(
@@ -208,24 +209,14 @@ async function authorizeApplyRequest(input: {
 			`Integration "${integrationName}" was not found. Connect it at /connect/oauth?provider=${encodeURIComponent(integrationName)} or pass secretName for a host-approved token.`,
 		)
 	}
-	await assertCanUseIntegration({
-		env: input.env,
-		baseUrl: input.baseUrl,
-		userId: input.userId,
-		name: integrationName,
-		packageId: input.packageId,
-		packageKodyId: input.packageKodyId,
-	})
-	assertDestinationHostAllowed({
-		joined,
-		integrationName,
-		url: input.url,
-	})
 	const readToken = async () => {
-		const token = await resolveIntegrationAccessToken({
-			env: input.env,
-			userId: input.userId,
-			name: integrationName,
+		const token = await resolveCredential({
+			...credentialInput,
+			credential: {
+				use: 'integration-token',
+				name: integrationName,
+				packageKodyId: input.packageKodyId,
+			},
 		})
 		if (!token) {
 			throw new McpCallerError(
@@ -234,18 +225,24 @@ async function authorizeApplyRequest(input: {
 		}
 		return `Bearer ${token}`
 	}
+	const authorization = await readToken()
+	assertDestinationHostAllowed({
+		joined,
+		integrationName,
+		url: input.url,
+	})
 	return {
-		authorization: await readToken(),
+		authorization,
 		retryAuthorization: async () => {
-			const refresh = await refreshIntegrationTokens({
-				env: input.env,
-				userId: input.userId,
-				userEmail: input.userEmail ?? undefined,
-				name: integrationName,
-				baseUrl: input.baseUrl,
-				packageId: input.packageId,
-				packageKodyId: input.packageKodyId,
-				waitUntil: input.waitUntil,
+			const refresh = await resolveCredential({
+				...credentialInput,
+				credential: {
+					use: 'integration-refresh',
+					name: integrationName,
+					userEmail: input.userEmail ?? undefined,
+					packageKodyId: input.packageKodyId,
+					waitUntil: input.waitUntil,
+				},
 			})
 			return refresh.refreshed ? readToken() : null
 		},
@@ -730,7 +727,7 @@ function validateHttpDestinationTemplate(
 
 async function resolveWebhookVerificationSecretForDestination(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	baseUrl: string
 	savedPackage: SavedPackageRecord
 	endpoint: WebhookEndpointRecord
@@ -743,7 +740,7 @@ async function resolveWebhookVerificationSecretForDestination(input: {
 		savedPackage: input.savedPackage,
 		webhookName: input.webhookName,
 	})
-	if (!declared?.verification) {
+	if (!declared) {
 		throw new McpCallerError(
 			`Destination includes ${webhookUrlApplySecretPlaceholder} but webhook "${input.webhookName}" has no verification declaration.`,
 		)
@@ -752,13 +749,13 @@ async function resolveWebhookVerificationSecretForDestination(input: {
 		env: input.env,
 		userId: input.userId,
 		endpoint: input.endpoint,
-		verification: declared.verification,
 	})
 }
 
 async function dispatchHttpApply(input: {
 	env: Env
-	userId: string
+	request: RequestContext
+	userId: OwnerId
 	userEmail?: string | null
 	baseUrl: string
 	packageId: string
@@ -845,6 +842,7 @@ async function dispatchHttpApply(input: {
 	}
 	const auth = await authorizeApplyRequest({
 		env: input.env,
+		request: input.request,
 		userId: input.userId,
 		userEmail: input.userEmail,
 		baseUrl: input.baseUrl,
@@ -887,7 +885,8 @@ async function dispatchHttpApply(input: {
 
 export async function dispatchWebhookUrlApply(input: {
 	env: Env
-	userId: string
+	request: RequestContext
+	userId: OwnerId
 	userEmail?: string | null
 	baseUrl: string
 	packageId: string
@@ -903,6 +902,7 @@ export async function dispatchWebhookUrlApply(input: {
 }): Promise<WebhookUrlApplyResult> {
 	const result = await dispatchHttpApply({
 		env: input.env,
+		request: input.request,
 		userId: input.userId,
 		userEmail: input.userEmail,
 		baseUrl: input.baseUrl,

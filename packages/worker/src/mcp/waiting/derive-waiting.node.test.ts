@@ -1,9 +1,10 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import type * as memoryRepo from '#mcp/memory/repo.ts'
 import { type McpMemoryRow } from '#mcp/memory/types.ts'
 import type * as secretsService from '#mcp/secrets/service.ts'
-import { type SecretMetadata } from '#mcp/secrets/types.ts'
+import { type ListedSecret } from '#mcp/secrets/types.ts'
 import type * as guildMembership from '#worker/discord/guild-membership.ts'
 import { persistIntegrationTokens } from '#worker/integrations/credentials.ts'
 import { inferIntegrationRefreshPolicy } from '#worker/integrations/refresh-policy.ts'
@@ -151,7 +152,7 @@ function createStubDb(
 
 const user = {
 	userId: 11,
-	stableUserId: 'user-aaa',
+	stableUserId: ownerIdFromStored('user-aaa'),
 	email: 'waiting@example.com',
 	username: 'waiting',
 	emailVerified: true,
@@ -161,13 +162,13 @@ test('waiting signals read MCP OAuth grants from OAUTH_KV when the provider help
 	const { kv } = createMemoryKvNamespace({
 		'grant:user-aaa:grant-1': JSON.stringify({
 			id: 'grant-1',
-			userId: 'user-aaa',
+			userId: ownerIdFromStored('user-aaa'),
 			clientId: 'host-client',
 			scope: ['mcp'],
 		}),
 		'grant:user-bbb:grant-2': JSON.stringify({
 			id: 'grant-2',
-			userId: 'user-bbb',
+			userId: ownerIdFromStored('user-bbb'),
 			clientId: 'host-client',
 			scope: ['mcp'],
 		}),
@@ -180,7 +181,7 @@ test('waiting signals read MCP OAuth grants from OAUTH_KV when the provider help
 
 	const disconnected = await collectWaitingSignals({
 		env: { APP_DB: createStubDb(), OAUTH_KV: kv } as Env,
-		user: { ...user, stableUserId: 'user-ccc' },
+		user: { ...user, stableUserId: ownerIdFromStored('user-ccc') },
 	})
 	expect(disconnected.onboardingRemaining).toContain('connect-agent')
 
@@ -201,7 +202,7 @@ const allStamped = {
 const fixtureTimestamp = '2026-08-01T00:00:00.000Z'
 const demoPackage: SavedPackageRecord = {
 	id: 'pkg-1',
-	userId: 'user-aaa',
+	userId: ownerIdFromStored('user-aaa'),
 	name: 'demo',
 	kodyId: 'demo',
 	description: '',
@@ -209,6 +210,7 @@ const demoPackage: SavedPackageRecord = {
 	searchText: null,
 	sourceId: 'source-1',
 	hasApp: false,
+	hasSkills: false,
 	hidden: false,
 	isPrivate: false,
 	lockedAt: null,
@@ -218,7 +220,7 @@ const demoPackage: SavedPackageRecord = {
 
 const commuteMemory: McpMemoryRow = {
 	id: 'mem-1',
-	user_id: 'user-aaa',
+	user_id: ownerIdFromStored('user-aaa'),
 	category: null,
 	status: 'active',
 	subject: 'Commute',
@@ -236,7 +238,7 @@ const commuteMemory: McpMemoryRow = {
 const githubIntegration: JoinedIntegration = {
 	lane: 'user',
 	app: {
-		userId: 'user-aaa',
+		userId: ownerIdFromStored('user-aaa'),
 		slug: 'github',
 		provider: 'github',
 		label: null,
@@ -254,7 +256,8 @@ const githubIntegration: JoinedIntegration = {
 		updatedAt: fixtureTimestamp,
 	},
 	connection: {
-		userId: 'user-aaa',
+		userId: ownerIdFromStored('user-aaa'),
+		credentialId: 'cred-integration',
 		name: 'github',
 		appSlug: 'github',
 		platformAppSlug: null,
@@ -272,7 +275,8 @@ const githubIntegration: JoinedIntegration = {
 	},
 }
 
-const apiKeySecret: SecretMetadata = {
+const apiKeySecret: ListedSecret = {
+	credentialId: 'cred-api-key',
 	name: 'apiKey',
 	scope: 'user',
 	description: '',
@@ -322,9 +326,9 @@ test('waiting error-rate card uses open Activity errors, not monthly rollups', a
 		since,
 	})
 	expect(triaged.errorRate).toEqual({ errorCount: 0, eventCount: 162103 })
-	expect(buildWaitingItems(triaged).map((item) => item.kind)).not.toContain(
-		'error-rate',
-	)
+	expect(
+		buildWaitingItems(triaged, 'ada').map((item) => item.kind),
+	).not.toContain('error-rate')
 
 	mockModule.summarizeRunRecords.mockResolvedValueOnce({
 		...summary,
@@ -336,11 +340,11 @@ test('waiting error-rate card uses open Activity errors, not monthly rollups', a
 	const open = await collectWaitingSignals({ env, user, now })
 	expect(open.errorRate).toEqual({ errorCount: 12, eventCount: 20 })
 	expect(
-		buildWaitingItems(open).find((item) => item.id === 'error-rate'),
+		buildWaitingItems(open, 'ada').find((item) => item.id === 'error-rate'),
 	).toEqual(
 		expect.objectContaining({
 			title: 'Error rate is elevated',
-			href: '/account/activity',
+			href: '/@ada/-/activity',
 		}),
 	)
 })
@@ -356,7 +360,7 @@ test('waiting first-use signals emit cards only when the probe knows they are mi
 		user,
 	})
 	expect(missing.firstUseMissing).toEqual([...waitingFirstUseIds])
-	expect(buildWaitingItems(missing).map((item) => item.id)).toEqual(
+	expect(buildWaitingItems(missing, 'ada').map((item) => item.id)).toEqual(
 		waitingFirstUseIds.map((id) => `first-use:${id}`),
 	)
 	expect(missing.onboardingDismissed).toBe(true)
@@ -368,7 +372,9 @@ test('waiting first-use signals emit cards only when the probe knows they are mi
 	})
 	expect(present.firstUseMissing).toEqual([])
 	expect(
-		buildWaitingItems(present).filter((item) => item.kind === 'first-use'),
+		buildWaitingItems(present, 'ada').filter(
+			(item) => item.kind === 'first-use',
+		),
 	).toEqual([])
 
 	mockModule.listMemoriesByUserId.mockRejectedValueOnce(new Error('d1 blip'))
@@ -390,7 +396,7 @@ test('waiting first-use signals emit cards only when the probe knows they are mi
 		user,
 	})
 	expect(discordOpen.firstUseMissing).toEqual(['discord'])
-	expect(buildWaitingItems(discordOpen).map((item) => item.id)).toEqual([
+	expect(buildWaitingItems(discordOpen, 'ada').map((item) => item.id)).toEqual([
 		'first-use:discord',
 	])
 })
@@ -499,7 +505,7 @@ test('waiting shows missing_refresh_token only for connections whose refresh is 
 		}),
 	])
 	expect(
-		buildWaitingItems(signals)
+		buildWaitingItems(signals, 'ada')
 			.filter((item) => item.kind === 'integration-auth')
 			.map((item) => item.id),
 	).toEqual(['integration-auth:google'])

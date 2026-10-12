@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	buildSavedPackageNotFoundMessage,
 	normalizeExportName,
@@ -65,7 +66,7 @@ export async function invokePackageExportWithToolFactories(input: {
 	if (isSealedSecretProviderExport(exportName)) {
 		return buildJsonErrorResponse(sealedSecretProviderExportDeniedResponse())
 	}
-	// External HTTP token invocations stay keyed-only: providers retry
+	// External webhook invocations stay keyed-only: providers retry
 	// deliveries, so exactly-once is the point of this surface. Workflow
 	// step retries pass ephemeral: true and run key-less instead.
 	const idempotencyKey = input.ephemeral
@@ -114,8 +115,9 @@ export async function invokePackageExportWithToolFactories(input: {
 		env: input.env,
 		baseUrl: input.baseUrl,
 		actor: {
-			tokenId: input.token.tokenId,
-			userId: input.token.userId,
+			sourceId: input.token.tokenId,
+			orgId: ownerIdFromStored(input.token.userId),
+			request: input.token.request,
 		},
 		savedPackage,
 		invocationName: exportName,

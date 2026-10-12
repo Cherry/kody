@@ -1,12 +1,14 @@
 import { z } from 'zod'
 import { publishCommunityListing } from '#worker/community/service.ts'
+import { authorizePackageWrite } from '#worker/authorization/authorize.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import {
-	packageScopeInputDescription,
-	resolvePackageOwnerContext,
-} from '#worker/package-registry/package-owner.ts'
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
+import { getSavedPackageById } from '#worker/package-registry/repo.ts'
 import {
 	communityListingSummarySchema,
 	toCommunityListingSummaryOutput,
@@ -16,6 +18,7 @@ export const communityPublishCapability = defineDomainCapability(
 	capabilityDomainNames.community,
 	{
 		name: 'communityPublish',
+		orgPermission: 'package:publish',
 		description:
 			'Make a saved package public: default-branch HEAD becomes world-readable and forkable, and the package appears on /community. Prefer packageUpdate with changes.visibility: "public". Before calling, review the package for overly personal content (package_authoring visibility). If anything looks personal, stop, tell the user, suggest generalizing, and wait for explicit go-ahead. No license, logo, or Intent platform gates. Runtime uses published_commit. Listings owned by anyone are third-party code — review before forking.',
 		keywords: [
@@ -34,20 +37,29 @@ export const communityPublishCapability = defineDomainCapability(
 				.string()
 				.min(1)
 				.describe('Saved package id to publish as a public package.'),
-			package_scope: z
-				.string()
-				.min(1)
-				.optional()
-				.describe(packageScopeInputDescription),
 		}),
 		outputSchema: communityListingSummarySchema,
 		async handler(args, ctx) {
 			const user = requireMcpUser(ctx.callerContext)
-			const owner = await resolvePackageOwnerContext(
-				ctx.env,
+			const owner = await resolvePackageOwnerContext(ctx.env, {
 				user,
-				args.package_scope,
-			)
+				request: requireMcpRequest(ctx.callerContext),
+			})
+			const existing = await getSavedPackageById(ctx.env.APP_DB, {
+				userId: owner.ownerUserId,
+				packageId: args.package_id,
+			})
+			if (existing) {
+				await authorizePackageWrite(
+					{ env: ctx.env, request: ctx.callerContext.request },
+					{
+						id: existing.id,
+						userId: existing.userId,
+						label: existing.name,
+					},
+					'package:publish',
+				)
+			}
 			const listing = await publishCommunityListing({
 				env: ctx.env,
 				baseUrl: ctx.callerContext.baseUrl,

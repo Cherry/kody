@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
@@ -36,7 +40,7 @@ function stubPackages(
 	mockModule.listSavedPackagesByUserId.mockResolvedValue(
 		packages.map(({ id, kodyId, sourceId }) => ({
 			id,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: `@kentcdodds/${kodyId}`,
 			kodyId,
 			description: `${kodyId} package`,
@@ -77,9 +81,10 @@ function listSubscriptions(args: { topic?: string } = {}) {
 	return listPackageSubscriptionsCapability.handler(args, {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'kody@example.com',
 				displayName: 'Kody',
 			},
@@ -112,6 +117,7 @@ test('listPackageSubscriptionsCapability filters, sorts, and skips broken manife
 				{
 					package_id: 'package-1',
 					kody_id: 'discord-general-chat',
+					slug: 'discord-general-chat',
 					name: '@kentcdodds/discord-general-chat',
 					topic: 'discord.message.created',
 					...messageHandler,
@@ -141,6 +147,7 @@ test('listPackageSubscriptionsCapability filters, sorts, and skips broken manife
 			{
 				package_id: 'package-2',
 				kody_id: 'a-package',
+				slug: 'a-package',
 				name: '@kentcdodds/a-package',
 				topic: 'discord.message.created',
 				...messageHandler,
@@ -148,6 +155,7 @@ test('listPackageSubscriptionsCapability filters, sorts, and skips broken manife
 			{
 				package_id: 'package-1',
 				kody_id: 'z-package',
+				slug: 'z-package',
 				name: '@kentcdodds/z-package',
 				topic: 'discord.reaction.created',
 				handler: './src/reaction.ts',
@@ -179,6 +187,7 @@ test('listPackageSubscriptionsCapability filters, sorts, and skips broken manife
 			{
 				package_id: 'package-1',
 				kody_id: 'ok-package',
+				slug: 'ok-package',
 				name: '@kentcdodds/ok-package',
 				topic: 'discord.message.created',
 				handler: './src/message.ts',

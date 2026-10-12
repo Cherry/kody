@@ -7,11 +7,8 @@ import { createAuthenticatedFetch } from '#mcp/execute-modules/kody-runtime-util
 import { executeGatewayFetch } from '#mcp/fetch-gateway.ts'
 import { buildKodyFns } from '#mcp/run-kody-registry.ts'
 import { secretAuthorityHeaderName } from '#mcp/secrets/secret-authority.ts'
-import {
-	collectShareStorageOwners,
-	retainAuthorizedPackageStorageGrantIds,
-} from '#worker/package-registry/share-grants.ts'
-import { createPackageStorageAccessDeniedMessage } from '#worker/storage-runner.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeLocalExecuteOwnedPackageId } from './capability-proxy-package-grants.ts'
 import { type ApiInvocationContext } from './context.ts'
 import { invalidRequest } from './errors.ts'
 
@@ -21,10 +18,10 @@ import { invalidRequest } from './errors.ts'
  * `{{integration-token:…}}` through the same fetch gateway cloud execute uses,
  * then returns a JSON-safe response envelope the local runtime reconstructs.
  *
- * Optional `packageId` is the stamped saved-package identity (same provenance
- * as packageStorage / packageSecrets). It becomes the fetch-gateway storage
- * context and secret-authority grant so package-limited integrations authorize
- * correctly.
+ * Optional `packageId` is a client stamp: origin verifies `package:execute`
+ * when present, but never grants secret authority from it. Local credential
+ * expansion requires `integration:use` / `secret:use` like ad-hoc; only cloud
+ * bundler provenance may skip Use via package attachment.
  */
 
 export const capabilityProxyAuthenticatedFetchMaxBodyBytes = 4 * 1024 * 1024
@@ -162,20 +159,13 @@ async function authorizeAuthenticatedFetchPackageId(input: {
 	ctx: ApiInvocationContext
 	packageId: string
 }) {
-	const authorized = await retainAuthorizedPackageStorageGrantIds({
+	return await authorizeLocalExecuteOwnedPackageId({
 		db: input.ctx.env.APP_DB,
-		callerUserId: input.ctx.callerContext.user.userId,
-		packageIds: [input.packageId],
-		storageOwnerByPackageId: await collectShareStorageOwners({
-			db: input.ctx.env.APP_DB,
-			callerUserId: input.ctx.callerContext.user.userId,
-			packageIds: [input.packageId],
-		}),
+		env: input.ctx.env,
+		request: input.ctx.callerContext.request,
+		orgUserId: ownerIdFromCaller(input.ctx.callerContext),
+		packageId: input.packageId,
 	})
-	if (!authorized.has(input.packageId)) {
-		throw new Error(createPackageStorageAccessDeniedMessage(input.packageId))
-	}
-	return input.packageId
 }
 
 export async function runCapabilityProxyAuthenticatedFetch(input: {
@@ -183,7 +173,8 @@ export async function runCapabilityProxyAuthenticatedFetch(input: {
 	args: ReadonlyArray<unknown>
 }): Promise<CapabilityProxyAuthenticatedFetchResult> {
 	const call = parseCapabilityProxyAuthenticatedFetchArgs(input.args)
-	const packageId = call.packageId
+	const orgUserId = ownerIdFromCaller(input.ctx.callerContext)
+	const stampedPackageId = call.packageId
 		? await authorizeAuthenticatedFetchPackageId({
 				ctx: input.ctx,
 				packageId: call.packageId,
@@ -194,36 +185,24 @@ export async function runCapabilityProxyAuthenticatedFetch(input: {
 	const storageContext = {
 		sessionId: existingStorage?.sessionId ?? null,
 		appId: existingStorage?.appId ?? null,
-		packageId: packageId ?? existingStorage?.packageId ?? null,
+		packageId: null,
 		storageId: existingStorage?.storageId ?? null,
 	}
 	const gatewayFetch: typeof fetch = async (requestInput, init) => {
 		const request = new Request(requestInput, init)
-		if (packageId) {
-			const headers = new Headers(request.headers)
-			headers.set(secretAuthorityHeaderName, packageId)
-			return executeGatewayFetch({
-				env: input.ctx.env,
-				props: {
-					baseUrl: input.ctx.callerContext.baseUrl,
-					userId: input.ctx.callerContext.user.userId,
-					email: input.ctx.callerContext.user.email,
-					storageContext,
-					grantedSecretAuthorityPackageIds: [packageId],
-				},
-				request: new Request(request, { headers }),
-				...(input.ctx.waitUntil ? { waitUntil: input.ctx.waitUntil } : {}),
-			})
-		}
+		const headers = new Headers(request.headers)
+		headers.delete(secretAuthorityHeaderName)
 		return executeGatewayFetch({
 			env: input.ctx.env,
 			props: {
 				baseUrl: input.ctx.callerContext.baseUrl,
-				userId: input.ctx.callerContext.user.userId,
+				userId: orgUserId,
 				email: input.ctx.callerContext.user.email,
+				request: input.ctx.callerContext.request,
 				storageContext,
+				claimedPackageId: stampedPackageId,
 			},
-			request,
+			request: new Request(request, { headers }),
 			...(input.ctx.waitUntil ? { waitUntil: input.ctx.waitUntil } : {}),
 		})
 	}

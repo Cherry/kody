@@ -8,8 +8,8 @@ Production has two public HTTP entrypoints:
 
 - **App origin** (`kody.codes`) — `packages/worker/src/index.ts`. Remix, MCP
   HTTP (`/mcp`), OAuth, inbound email, and queue consumers. Runtime-owned paths
-  (`/@{username}/packages/…`, package-invocation API, inline `/apps`) forward
-  over the `RUNTIME_WORKER` service binding to `kody-runtime`.
+  (package-app origin hosts and inline `/@{username}/packages/…` on the app
+  origin) forward over the `RUNTIME_WORKER` service binding to `kody-runtime`.
 - **Package-app origin** (`kody.run`) — `packages/worker/src/runtime-worker.ts`.
   Zone routes on that script; the origin handler does not see this host in
   production.
@@ -20,20 +20,16 @@ The default `fetch` handler delegates to `OAuthProvider` from
 `@cloudflare/workers-oauth-provider`, which means OAuth endpoints and token
 infrastructure are available alongside normal app routes.
 
-Before that, `GET`/`HEAD`/`OPTIONS` on `/.well-known/oauth-protected-resource`
-are handled in `packages/worker/src/index.ts` itself. The OAuth provider
-library’s built-in handler for that path advertises `resource` as the request
-**origin** only; this app’s MCP server is identified by `<origin>/mcp`. Serving
-our own metadata on that URL keeps the RFC 8707 `resource` value consistent for
-clients (e.g. some MCP stacks) that discover metadata from the 401
-`resource_metadata` URL and would otherwise get `invalid_target` at the token
-endpoint. Protected-resource metadata and MCP auth challenges resolve the origin
-from the inbound request URL (via `getAppBaseUrl`) so clients connecting through
-`kody.codes` or a preview/local `workers.dev` host get matching resource values.
-Production refuses non-canonical hosts (see
-[Non-canonical hosts](../security.md#non-canonical-hosts)), so MCP is not served
-on the production `workers.dev` trigger. `APP_BASE_URL` is only the fallback for
-background work with no request URL.
+The provider requires `resourceMetadata.resource` (canonical `<origin>/mcp`).
+That pins grant and access-token audiences and is the sole RFC 9728
+protected-resource metadata document, served at
+`/.well-known/oauth-protected-resource/mcp`. The root
+`/.well-known/oauth-protected-resource` path is not an alias. Preview, local,
+and production each construct a per-origin provider so the resource matches the
+host the client connected to (`getAppBaseUrl`). Production refuses non-canonical
+hosts (see [Non-canonical hosts](../security.md#non-canonical-hosts)), so MCP is
+not served on the production `workers.dev` trigger. `APP_BASE_URL` is only the
+fallback for background work with no request URL.
 
 ## Routing order
 
@@ -72,8 +68,6 @@ Requests are handled in this order:
      (same URL RFC 8414 authorization-server metadata advertises) plus matching
      `revocation_endpoint_auth_methods_supported`.
    - JWKS: `/.well-known/jwks.json` (`GET` / `HEAD` / `OPTIONS`)
-   - Protected resource metadata (base path only):
-     `/.well-known/oauth-protected-resource` (`GET` / `HEAD` / `OPTIONS`)
    - Client ID Metadata Document: `/oauth/client-metadata.json` (`GET` / `HEAD`
      / `OPTIONS`) — Kody-as-client CIMD. Served from the request origin so
      `client_id` matches the fetch URL.
@@ -86,19 +80,22 @@ Requests are handled in this order:
    - `/oauth/callback`
 4. Browser noise endpoint:
    - `/.well-known/appspecific/com.chrome.devtools.json` (returns 204)
-5. OAuth protected resource metadata endpoint (inside the default handler, for
-   the `/mcp` suffix path only):
+5. OAuth protected resource metadata (inside `OAuthProvider`, path-aware only):
    - `/.well-known/oauth-protected-resource/mcp`
 6. MCP endpoint:
-   - `/mcp` (requires OAuth bearer token). After authentication,
+   - `/mcp` (requires OAuth bearer token; `OAuthProvider` `apiRoute`). Missing
+     Bearer credentials are short-circuited with a JSON `401` (Gemini-friendly)
+     before the library's empty-bodied challenge. After authentication,
      `packages/worker/src/mcp-auth.ts` routes by protocol era: 2025-era requests
      go to the sessionful `MCP` Durable Object (`McpAgent`, MCP SDK v1) hosted
      on `kody-platform` and reached through the `MCP_OBJECT` binding, and
      `2026-07-28` envelope requests are served statelessly per request by
      `packages/worker/src/mcp/stateless-lane.ts` (MCP SDK v2, no Durable
-     Object). Both lanes share one tool registration; every authenticated
-     request records a lane data point to the `MCP_PROTOCOL_EVENTS` Analytics
-     Engine dataset for dual-lane traffic measurement (see
+     Object). Tokens that lack the resource's `requiredScopes` (OIDC baseline)
+     get the library `insufficientScope()` step-up `403`. Both lanes share one
+     tool registration; every authenticated request records a lane data point to
+     the `MCP_PROTOCOL_EVENTS` Analytics Engine dataset for dual-lane traffic
+     measurement (see
      [decision 0005](../decisions/0005-mcp-dual-lane-stateless-migration.md)).
      The origin script owns no Durable Object classes
      ([ADR 0034](../decisions/0034-origin-owns-no-durable-objects.md)). MCP
@@ -117,22 +114,30 @@ Requests are handled in this order:
      `executeEvidence` (never execute) so organic last-success is not one cron
      tick behind the live heartbeat. Persist merges with any newer timestamp
      written while that fetch was in flight.
+   - Catchable throws while serving `/mcp` (including through `OAuthProvider`'s
+     `apiHandler`) are mapped to an HTTP JSON-RPC `-32603` Internal error
+     response on the same connection so MCP clients see a failed request instead
+     of an OAuth `{ error: "server_error" }` body or a Cloudflare 1101 from a
+     rethrown exception. Real OAuth routes keep their RFC 6749 error shape.
+     Isolate kills are outside this catch.
 7. Public `@username` ingress handled in `packages/worker/src/index.ts` before
    the OAuth provider / app router (needs `ExecutionContext` for background
-   work). Production forwards package-invocation and package-app paths to
-   `kody-runtime` via `RUNTIME_WORKER`; webhook ingress stays on origin:
-   - `POST /@{username}/api/package-invocations/:kodyId/:exportName` —
-     unadvertised bearer-token drain (see
-     [package invocation API](../package-invocation-api.md))
+   work). Production forwards package-app paths to `kody-runtime` via
+   `RUNTIME_WORKER`; webhook ingress stays on origin:
    - `POST /@{username}/webhooks/:packageKodyId/:webhookName/:urlSecret` —
      inbound package webhooks (see [Inbound webhooks](./webhooks.md))
    - Retired `/@{username}/connectors/...` paths return `404`. Use outbound MCP
      servers (`kody.mcp[...]`) for home automation and similar tools.
 
 8. Static assets:
-   - Served from `ASSETS` for `GET` and `HEAD` when available
-   - Matching files under `packages/worker/public/` are asset-first at the edge
-     (they do not enter this Worker list) unless listed in
+   - Served from `ASSETS` for `GET` and `HEAD` when the path can be a file under
+     `packages/worker/public/` (for example `/favicon.ico`, `/images/…`,
+     `/fonts/…`, `/styles.css`, `/assets/…`)
+   - The origin skips that probe when the first segment is a Remix route root,
+     an `/@…` org or package path, or a pre-router mount (`/mcp`, `/api`,
+     `/oauth`, `/connectors`). Those prefixes have no static twin. `/og/…` still
+     probes because `public/og/` sits beside the `/og/:page.png` route
+   - Matching files are asset-first at the edge unless listed in
      `assets.run_worker_first`
 9. Hosted package apps served inline on the app origin
    (`/@{username}/packages/*`), only in confirmed non-production runtimes when

@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -69,10 +73,11 @@ function createCapabilityContext(
 	return {
 		env: { APP_DB: {} as D1Database } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			executionOrigin,
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User',
 				username: 'user',
@@ -86,7 +91,7 @@ function mockSavedWebhook(webhookName = 'sentry') {
 		id: 'pkg-1',
 		kodyId: 'sentry-bridge',
 		name: '@user/sentry-bridge',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: 'src-1',
 	})
 	mockModule.getWebhookEndpointByKey.mockResolvedValue(
@@ -97,7 +102,7 @@ function mockSavedWebhook(webhookName = 'sentry') {
 function endpoint(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'ep-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'pkg-1',
 		webhookName: 'sentry',
 		urlSecretHash: 'hash',
@@ -179,7 +184,20 @@ test('webhook capabilities expose mint once and never leak secrets on list', asy
 				secretName: 'sentryWebhookSecret',
 				encoding: 'hex',
 			},
-			challenge: { type: 'meta-hub', secretName: 'metaVerify' },
+			challenge: {
+				type: 'subscription-challenge',
+				method: 'GET',
+				challenge: { in: 'query', key: 'hub.challenge' },
+				when: { query: { 'hub.mode': 'subscribe' } },
+				prove: {
+					kind: 'verify-token',
+					in: 'query',
+					key: 'hub.verify_token',
+					secretName: 'metaVerify',
+					required: true,
+				},
+				respond: { as: 'text' },
+			},
 			minted: true,
 		},
 		{
@@ -233,7 +251,20 @@ test('webhook capabilities expose mint once and never leak secrets on list', asy
 		minted: true,
 		handle: 'whh_ep-1',
 		previous_url_active_until: null,
-		challenge: { type: 'meta-hub', secretName: 'metaVerify' },
+		challenge: {
+			type: 'subscription-challenge',
+			method: 'GET',
+			challenge: { in: 'query', key: 'hub.challenge' },
+			when: { query: { 'hub.mode': 'subscribe' } },
+			prove: {
+				kind: 'verify-token',
+				in: 'query',
+				key: 'hub.verify_token',
+				secretName: 'metaVerify',
+				required: true,
+			},
+			respond: { as: 'text' },
+		},
 	})
 	expect(listed.webhooks[1]?.challenge).toBeNull()
 	for (const row of listed.webhooks) {
@@ -367,7 +398,7 @@ test('webhook capabilities expose mint once and never leak secrets on list', asy
 	])
 	expect(mockModule.listRunRecords).toHaveBeenCalledWith({
 		env: ctx.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		filter: { surface: 'webhook', packageId: 'pkg-1', name: 'sentry' },
 		limit: 25,
 	})
@@ -399,7 +430,7 @@ test('webhookDeliveryList pushes the name filter, round-trips outcomes, and trea
 	expect(mockModule.listRunRecords).toHaveBeenCalledTimes(1)
 	expect(mockModule.listRunRecords).toHaveBeenCalledWith({
 		env: ctx.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		filter: { surface: 'webhook', packageId: 'pkg-1', name: 'alpha' },
 		limit,
 	})

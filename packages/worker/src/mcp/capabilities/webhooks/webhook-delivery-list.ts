@@ -1,8 +1,10 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorize, packageResource } from '#worker/authorization/authorize.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import { listRunRecords } from '#worker/run-records/service.ts'
 import { type RunRecord } from '#worker/run-records/types.ts'
@@ -85,6 +87,7 @@ export const webhookDeliveryListCapability = defineDomainCapability(
 	capabilityDomainNames.webhooks,
 	{
 		name: 'webhookDeliveryList',
+		orgPermission: 'package:read',
 		description:
 			'List recent inbound webhook deliveries for one minted package webhook from run records (metadata only; payload bodies are never stored).',
 		keywords: ['webhook', 'delivery', 'log', 'debug', 'history', 'runs'],
@@ -113,12 +116,12 @@ export const webhookDeliveryListCapability = defineDomainCapability(
 			deliveries: z.array(webhookDeliverySchema),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const webhookName = args.webhookName.trim()
 			const packageIdOrKodyId = (args.packageId ?? args.kodyId ?? '').trim()
 			const savedPackage = await resolveSavedPackage({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				packageIdOrKodyId,
 			})
 			if (!savedPackage) {
@@ -126,9 +129,14 @@ export const webhookDeliveryListCapability = defineDomainCapability(
 					`Saved package "${packageIdOrKodyId}" was not found for this user.`,
 				)
 			}
+			await authorize(
+				{ env: ctx.env, request: ctx.callerContext.request },
+				'package:read',
+				packageResource(savedPackage),
+			)
 			const mint = await getWebhookEndpointByKey({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				packageId: savedPackage.id,
 				webhookName,
 			})
@@ -140,7 +148,7 @@ export const webhookDeliveryListCapability = defineDomainCapability(
 			const limit = args.limit ?? 25
 			const page = await listRunRecords({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				filter: {
 					surface: 'webhook',
 					packageId: savedPackage.id,

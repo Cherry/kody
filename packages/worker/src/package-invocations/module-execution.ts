@@ -17,11 +17,16 @@ import { resolveBackgroundMcpUser } from '#worker/identity/background-mcp-user.t
 import { isAccountSuspendedError } from '#worker/account/account-suspension.ts'
 import { consumeDailyEntitlement } from '#worker/entitlements/service.ts'
 import {
+	budgetLimitErrorCode,
 	computeOverageLimitErrorCode,
 	entitlementLimitErrorCode,
+	isBudgetLimitError,
 	isComputeOverageLimitError,
 	isEntitlementLimitError,
 } from '#worker/entitlements/errors.ts'
+import { authorize } from '#worker/authorization/authorize.ts'
+import { getOrgById } from '#worker/orgs/repo.ts'
+import { backgroundRunBilledActor } from '#worker/request-context/request-context.ts'
 import {
 	automationInvocationsPerDayResource,
 	shouldConsumeAutomationInvocationEntitlement,
@@ -109,7 +114,7 @@ export type SavedPackageModuleRunInput = {
 	toolFactories: PackageRuntimeToolFactories
 	waitUntil?: (promise: Promise<unknown>) => void
 	/**
-	 * Artifact already prepared by a `packages.invoke` check phase moments
+	 * Artifact already prepared by a host invoke check phase moments
 	 * earlier; skips a second manifest + artifact load.
 	 */
 	preloadedModuleArtifact?: Awaited<
@@ -141,7 +146,7 @@ export async function runSavedPackageModuleOnce(
 	try {
 		const user = await resolveBackgroundMcpUser(
 			input.env.APP_DB,
-			input.actor.userId,
+			input.actor.orgId,
 		)
 		const { artifact, source: sourceRow } =
 			input.preloadedModuleArtifact ??
@@ -150,7 +155,7 @@ export async function runSavedPackageModuleOnce(
 				baseUrl: input.baseUrl,
 				savedPackage: input.savedPackage,
 				selector: input.moduleSelector,
-				userId: input.actor.userId,
+				userId: input.actor.orgId,
 			}))
 		const repoSource =
 			artifact.packageContext?.sourceId == null ||
@@ -158,30 +163,55 @@ export async function runSavedPackageModuleOnce(
 				? sourceRow
 				: await getEntitySourceByIdForUser(input.env.APP_DB, {
 						id: artifact.packageContext.sourceId,
-						userId: input.actor.userId,
+						userId: input.actor.orgId,
 					})
 		if (
 			shouldConsumeAutomationInvocationEntitlement({
-				actorTokenId: input.actor.tokenId,
+				actorTokenId: input.actor.sourceId,
 				runtimeInvokeDepth: input.runtimeInvokeDepth ?? 0,
 			})
 		) {
 			// Sibling daily automation quota before sandbox work so over-limit
 			// webhooks / package-export / subscription / workflow invokes cost
 			// nothing. Failed attempts still count. Distinct from MCP
-			// execute_calls_per_day and scheduled job_runs_per_day.
+			// execute_unique_workers_per_day and scheduled job_runs_per_day.
 			try {
+				const orgRecord = await getOrgById(input.env.APP_DB, input.actor.orgId)
+				const orgSlug = orgRecord?.slug?.trim() || user.username?.trim() || null
+				const automationSource =
+					input.actor.request.kind === 'schedule'
+						? 'schedule'
+						: input.actor.request.kind === 'webhook'
+							? 'webhook'
+							: input.actor.request.kind === 'inbound-email'
+								? 'email'
+								: 'event'
+				const billedActor = backgroundRunBilledActor(input.actor.request)
 				await consumeDailyEntitlement({
 					db: input.env.APP_DB,
 					env: input.env,
-					userId: input.actor.userId,
+					userId: input.actor.orgId,
 					email: user.email,
 					resource: automationInvocationsPerDayResource,
+					orgBudget: billedActor
+						? {
+								orgId: input.actor.orgId,
+								orgSlug,
+								actorUserId: billedActor.userId,
+								actorUsername: billedActor.username,
+							}
+						: {
+								orgId: input.actor.orgId,
+								orgSlug,
+								automationSource,
+								actorUserId: null,
+							},
 				})
 			} catch (error) {
 				if (
 					isEntitlementLimitError(error) ||
-					isComputeOverageLimitError(error)
+					isComputeOverageLimitError(error) ||
+					isBudgetLimitError(error)
 				) {
 					return {
 						kind: 'pre-execution-denied',
@@ -189,7 +219,9 @@ export async function runSavedPackageModuleOnce(
 							status: 429,
 							code: isEntitlementLimitError(error)
 								? entitlementLimitErrorCode
-								: computeOverageLimitErrorCode,
+								: isBudgetLimitError(error)
+									? budgetLimitErrorCode
+									: computeOverageLimitErrorCode,
 							message: error.message,
 							idempotencyKey: input.idempotencyKey ?? undefined,
 							details: error.details,
@@ -210,7 +242,14 @@ export async function runSavedPackageModuleOnce(
 				storageId: buildPackageInvocationStorageId(input.savedPackage.id),
 			},
 			repoContext: repoSource ? createRepoContext(repoSource) : null,
+			source: input.actor.request,
 		})
+		// A run reads org mail only with its person's email:read.
+		const requireRunEmailRead = () =>
+			authorize(
+				{ env: input.env, request: callerContext.request },
+				'email:read',
+			)
 		const runtimeSurface = resolveInvocationRuntimeSurface({
 			selector: input.moduleSelector,
 			source: input.source,
@@ -226,7 +265,8 @@ export async function runSavedPackageModuleOnce(
 			// not know the published commit yet; enrich it for the terminal write.
 			externalHandle.context = {
 				...externalHandle.context,
-				publishedCommit: repoSource?.published_commit ?? null,
+				publishedCommit:
+					artifact.publishedCommit ?? repoSource?.published_commit ?? null,
 			}
 		}
 		const runRecord: RunRecordContext | null = externalHandle
@@ -237,7 +277,8 @@ export async function runSavedPackageModuleOnce(
 						packageId: input.savedPackage.id,
 						kodyId: input.savedPackage.kodyId,
 						sourceId: input.savedPackage.sourceId,
-						publishedCommit: repoSource?.published_commit ?? null,
+						publishedCommit:
+							artifact.publishedCommit ?? repoSource?.published_commit ?? null,
 						surface: runtimeSurface,
 						name: resolveInvocationRuntimeName({
 							surface: runtimeSurface,
@@ -283,10 +324,11 @@ export async function runSavedPackageModuleOnce(
 					}),
 				emailTools: {
 					getMessage: async (messageId) => {
+						await requireRunEmailRead()
 						const loaded = await getEmailMessageWithAttachmentsById({
 							env: input.env,
 							db: input.env.APP_DB,
-							userId: input.actor.userId,
+							userId: input.actor.orgId,
 							messageId,
 						})
 						if (!loaded) {
@@ -335,11 +377,12 @@ export async function runSavedPackageModuleOnce(
 						}
 					},
 					getAttachment: async (attachmentId) => {
+						await requireRunEmailRead()
 						const attachment = await getEmailAttachmentById({
 							env: input.env,
 							db: input.env.APP_DB,
 							blobs: input.env.EMAIL_BLOBS,
-							userId: input.actor.userId,
+							userId: input.actor.orgId,
 							attachmentId,
 						})
 						if (!attachment) {
@@ -347,7 +390,7 @@ export async function runSavedPackageModuleOnce(
 						}
 						const message = await getInternalEmailMessageById({
 							env: input.env,
-							ownerId: input.actor.userId,
+							ownerId: input.actor.orgId,
 							messageId: attachment.messageId,
 						})
 						if (!message) {

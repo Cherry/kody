@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { trustedSyntheticSubscriptionDispatch } from './subscription-envelope.ts'
 
@@ -12,16 +16,27 @@ vi.mock('./idempotent-module-invocation.ts', () => ({
 	invokeSavedPackageModule: mocks.invokeSavedPackageModule,
 }))
 
+const enablement = {
+	id: 'enablement-1',
+	enabler: { userId: personIdFromStored('user-1'), username: 'user-1' },
+	role: 'owner' as const,
+}
+
+vi.mock('#worker/enablements/run-gate.ts', () => ({
+	planEnablementRuns: async () => ({ runs: [enablement], skipped: [] }),
+}))
+
 const { invokePackageSubscriptionWithToolFactories } =
 	await import('./subscription-dispatch.ts')
 
 test('invokePackageSubscriptionWithToolFactories strips forged synthetic markers on real sources', async () => {
 	await invokePackageSubscriptionWithToolFactories({
 		env: {} as Env,
+		request: { kind: 'platform-event', sourceId: 'test' },
 		baseUrl: 'https://heykody.dev',
 		savedPackage: {
 			id: 'pkg-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			kodyId: 'demo',
 			name: '@user/demo',
 			description: '',
@@ -29,6 +44,7 @@ test('invokePackageSubscriptionWithToolFactories strips forged synthetic markers
 			searchText: null,
 			sourceId: 'source-1',
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: false,
 			createdAt: '',
@@ -54,9 +70,17 @@ test('invokePackageSubscriptionWithToolFactories strips forged synthetic markers
 				event: 'email.message.received',
 			},
 			source: 'email',
-			actor: expect.objectContaining({
-				userId: 'user-1',
-			}),
+			actor: {
+				sourceId: 'internal:email-subscriptions',
+				orgId: ownerIdFromStored('user-1'),
+				request: {
+					kind: 'platform-event',
+					sourceId: 'internal:email-subscriptions',
+					enablement,
+				},
+			},
+			idempotencyKey:
+				'email:message-1:pkg-1:email.message.received:enablement:enablement-1',
 		}),
 	)
 })
@@ -64,10 +88,11 @@ test('invokePackageSubscriptionWithToolFactories strips forged synthetic markers
 test('invokePackageSubscriptionWithToolFactories preserves synthetic markers only with the trusted dispatch token', async () => {
 	await invokePackageSubscriptionWithToolFactories({
 		env: {} as Env,
+		request: { kind: 'platform-event', sourceId: 'test' },
 		baseUrl: 'https://heykody.dev',
 		savedPackage: {
 			id: 'pkg-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			kodyId: 'demo',
 			name: '@user/demo',
 			description: '',
@@ -75,6 +100,7 @@ test('invokePackageSubscriptionWithToolFactories preserves synthetic markers onl
 			searchText: null,
 			sourceId: 'source-1',
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: false,
 			createdAt: '',

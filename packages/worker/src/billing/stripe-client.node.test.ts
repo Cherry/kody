@@ -15,6 +15,7 @@ import {
 	creditNoteCapFitAttempts,
 	creditNoteListMaxPages,
 	deleteCustomer,
+	findActivePromotionCode,
 	getCheckoutSession,
 	getCreditTopUpCheckoutSession,
 	isAccountDeletionCreditNote,
@@ -23,7 +24,10 @@ import {
 	listCreditNotesForInvoice,
 	listPaidInvoicesForSubscription,
 	listSubscriptions,
+	mergeStripeObjectMetadata,
 	StripeApiError,
+	subscriptionSeatQuantity,
+	updateSubscriptionItemQuantity,
 } from './stripe-client.ts'
 
 const env = { STRIPE_SECRET_KEY: 'sk_test_secret' }
@@ -31,8 +35,8 @@ const checkoutInput = {
 	priceId: 'price_pro',
 	clientReferenceId: 'signed-ref',
 	successUrl:
-		'https://app.example.com/account/billing/success?session_id={CHECKOUT_SESSION_ID}',
-	cancelUrl: 'https://app.example.com/account/billing',
+		'https://app.example.com/@ada/-/billing/success?session_id={CHECKOUT_SESSION_ID}',
+	cancelUrl: 'https://app.example.com/@ada/-/billing',
 	customerEmail: 'user@example.com',
 }
 
@@ -136,16 +140,103 @@ test('stripe client request contracts for checkout, subscriptions, and portal', 
 			'line_items[0][quantity]': '1',
 			client_reference_id: 'signed-ref',
 			success_url: checkoutInput.successUrl,
-			cancel_url: 'https://app.example.com/account/billing',
+			cancel_url: 'https://app.example.com/@ada/-/billing',
 			customer_email: 'user@example.com',
 			customer: null,
 			'automatic_tax[enabled]': 'true',
 			'tax_id_collection[enabled]': 'true',
-			allow_promotion_codes: 'true',
+			// Kody validates promo codes itself (monthly only); Stripe's code
+			// box would let one-month codes apply to annual.
+			allow_promotion_codes: null,
+			'discounts[0][promotion_code]': null,
 			'customer_update[address]': null,
 			'customer_update[name]': null,
 		}
 		expect(formFields(createInit, Object.keys(expected))).toEqual(expected)
+	}
+
+	{
+		using fetchMock = fetchReturning(
+			jsonResponse({
+				id: 'cs_seats',
+				url: 'https://checkout.stripe.com/c/pay/cs_seats',
+			}),
+		)
+		await createCheckoutSession(env, { ...checkoutInput, quantity: 3 })
+		expect(
+			formFields(fetchMock.mock.calls[0]?.[1], ['line_items[0][quantity]']),
+		).toEqual({ 'line_items[0][quantity]': '3' })
+	}
+
+	{
+		using fetchMock = fetchReturning(
+			jsonResponse({
+				id: 'cs_promo',
+				url: 'https://checkout.stripe.com/c/pay/cs_promo',
+			}),
+		)
+		await createCheckoutSession(env, {
+			...checkoutInput,
+			promotionCodeId: 'promo_agency_1',
+		})
+		expect(
+			formFields(fetchMock.mock.calls[0]?.[1], [
+				'discounts[0][promotion_code]',
+				'allow_promotion_codes',
+			]),
+		).toEqual({
+			'discounts[0][promotion_code]': 'promo_agency_1',
+			allow_promotion_codes: null,
+		})
+	}
+
+	{
+		using fetchMock = fetchReturning(
+			jsonResponse({
+				id: 'cs_meta',
+				url: 'https://checkout.stripe.com/c/pay/cs_meta',
+			}),
+		)
+		await createCheckoutSession(env, {
+			...checkoutInput,
+			metadata: {
+				kody_org_id: 'org-acme',
+				kody_stable_user_id: 'org-acme',
+				kody_plan: 'pro',
+			},
+		})
+		expect(
+			formFields(fetchMock.mock.calls[0]?.[1], [
+				'metadata[kody_org_id]',
+				'metadata[kody_stable_user_id]',
+				'metadata[kody_plan]',
+				'subscription_data[metadata][kody_org_id]',
+				'subscription_data[metadata][kody_stable_user_id]',
+				'subscription_data[metadata][kody_plan]',
+			]),
+		).toEqual({
+			'metadata[kody_org_id]': 'org-acme',
+			'metadata[kody_stable_user_id]': 'org-acme',
+			'metadata[kody_plan]': 'pro',
+			'subscription_data[metadata][kody_org_id]': 'org-acme',
+			'subscription_data[metadata][kody_stable_user_id]': 'org-acme',
+			'subscription_data[metadata][kody_plan]': 'pro',
+		})
+	}
+
+	{
+		using fetchMock = fetchReturning(jsonResponse({ id: 'cus_1' }))
+		await mergeStripeObjectMetadata(env, {
+			object: 'customers',
+			id: 'cus_1',
+			metadata: { kody_org_id: 'org-acme' },
+		})
+		const [url, init] = fetchMock.mock.calls[0]!
+		expect(url).toBe('https://api.stripe.com/v1/customers/cus_1')
+		expect(init?.method).toBe('POST')
+		expect(formFields(init, ['metadata[kody_org_id]'])).toEqual({
+			'metadata[kody_org_id]': 'org-acme',
+		})
 	}
 
 	// Existing Stripe customers must send customer, never customer_email.
@@ -280,6 +371,24 @@ test('stripe client request contracts for checkout, subscriptions, and portal', 
 	}
 
 	{
+		using fetchMock = fetchReturning(
+			jsonResponse({ url: 'https://billing.stripe.com/session/seats' }),
+		)
+		await createBillingPortalSession(env, {
+			customerId: 'cus_portal',
+			returnUrl: 'https://app.example.com/account/billing',
+			configuration: 'bpc_kody',
+			flowData: { ...flowData, quantity: 4 },
+		})
+		const confirm = 'flow_data[subscription_update_confirm]'
+		expect(
+			formFields(fetchMock.mock.calls[0]?.[1], [
+				`${confirm}[items][0][quantity]`,
+			]),
+		).toEqual({ [`${confirm}[items][0][quantity]`]: '4' })
+	}
+
+	{
 		using fetchMock = stubFetch(vi.fn())
 		await expect(
 			createBillingPortalSession(env, {
@@ -290,6 +399,59 @@ test('stripe client request contracts for checkout, subscriptions, and portal', 
 		).rejects.toMatchObject({ name: 'StripeApiError', status: 400 })
 		expect(fetchMock).not.toHaveBeenCalled()
 	}
+})
+
+test('subscriptionSeatQuantity reads the first item quantity', () => {
+	expect(
+		subscriptionSeatQuantity({
+			id: 'sub_1',
+			status: 'active',
+			cancel_at: null,
+			current_period_end: undefined,
+			metadata: undefined,
+			items: {
+				data: [
+					{
+						id: undefined,
+						quantity: 5,
+						price: { id: 'price_pro' },
+						current_period_end: undefined,
+					},
+				],
+			},
+		}),
+	).toBe(5)
+	expect(
+		subscriptionSeatQuantity({
+			id: 'sub_1',
+			status: 'active',
+			cancel_at: null,
+			current_period_end: undefined,
+			metadata: undefined,
+			items: {
+				data: [
+					{
+						id: undefined,
+						quantity: undefined,
+						price: { id: 'price_pro' },
+						current_period_end: undefined,
+					},
+				],
+			},
+		}),
+	).toBe(1)
+})
+
+test('updateSubscriptionItemQuantity posts quantity to Stripe', async () => {
+	using fetchMock = fetchReturning(jsonResponse({ id: 'si_1', quantity: 2 }))
+	await updateSubscriptionItemQuantity(env, {
+		subscriptionItemId: 'si_1',
+		quantity: 2,
+	})
+	const [url, init] = fetchMock.mock.calls[0]!
+	expect(url).toBe('https://api.stripe.com/v1/subscription_items/si_1')
+	expect(init?.method).toBe('POST')
+	expect(formFields(init, ['quantity'])).toEqual({ quantity: '2' })
 })
 
 test('stripe client immediately cancels subscriptions and deletes customers', async () => {
@@ -975,4 +1137,41 @@ test('credit top-up checkout and off-session refill send the expected Stripe con
 	expect(
 		(refillInit.headers as Record<string, string>)['idempotency-key'],
 	).toBe('kody-credit-auto-refill:user-1:2026-09:1')
+})
+
+test('findActivePromotionCode looks up an active code by its customer-facing text', async () => {
+	{
+		using fetchMock = fetchReturning(
+			jsonResponse({
+				data: [
+					{
+						id: 'promo_agency_1',
+						code: 'AGENCY-1',
+						active: true,
+						expires_at: 1_800_000_000,
+						max_redemptions: 1,
+						times_redeemed: 0,
+						coupon: { id: 'kody-agency-first-month' },
+					},
+				],
+			}),
+		)
+		expect(await findActivePromotionCode(env, ' agency-1 ')).toEqual({
+			id: 'promo_agency_1',
+			code: 'AGENCY-1',
+			active: true,
+			expires_at: 1_800_000_000,
+			max_redemptions: 1,
+			times_redeemed: 0,
+		})
+		const [url, init] = fetchMock.mock.calls[0]!
+		expect(String(url)).toBe(
+			'https://api.stripe.com/v1/promotion_codes?code=agency-1&active=true&limit=1',
+		)
+		expect(init?.method).toBe('GET')
+	}
+	{
+		using _fetchMock = fetchReturning(jsonResponse({ data: [] }))
+		expect(await findActivePromotionCode(env, 'NOPE')).toBeNull()
+	}
 })

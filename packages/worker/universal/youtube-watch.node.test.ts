@@ -7,7 +7,6 @@ import {
 	parseYoutubeVideoId,
 	parseYoutubeVideoIdList,
 	parseYoutubeWatchSearch,
-	resolveSiteBannerImageUrl,
 	stripYoutubeWatchSearch,
 	youtubeNocookieEmbedUrl,
 	youtubeThumbPath,
@@ -81,7 +80,7 @@ test('playlist Atom feed parser reads yt:videoId entries', () => {
 	).toEqual([videoId, 'abcdefghijk'])
 })
 
-test('allowlist merge includes playlist, extra ids, and banner hrefs', () => {
+test('allowlist merge includes playlist, extra ids, and YouTube hrefs', () => {
 	expect(
 		mergeYoutubeWatchAllowlist({
 			playlistVideoIds: [videoId],
@@ -98,28 +97,7 @@ test('allowlist merge includes playlist, extra ids, and banner hrefs', () => {
 	).toEqual([videoId])
 })
 
-test('banner images rewrite YouTube hosts to first-party thumb paths', () => {
-	expect(
-		resolveSiteBannerImageUrl({
-			imageUrl: null,
-			ctaHref: youtubeWatchHref(videoId),
-			secondaryHref: null,
-		}),
-	).toBe(`/youtube-thumb/${videoId}`)
-	expect(
-		resolveSiteBannerImageUrl({
-			imageUrl: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
-			ctaHref: null,
-			secondaryHref: null,
-		}),
-	).toBe(`/youtube-thumb/${videoId}`)
-	expect(
-		resolveSiteBannerImageUrl({
-			imageUrl: '/brand/launch.png',
-			ctaHref: youtubeWatchHref(videoId),
-			secondaryHref: null,
-		}),
-	).toBe('/brand/launch.png')
+test('youtube thumbnail and embed helpers', () => {
 	expect(youtubeThumbnailSourceUrl(videoId)).toBe(
 		`https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
 	)

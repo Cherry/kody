@@ -114,6 +114,11 @@ package apps guide.
 `communityFork` copies **HEAD** into your account as an **inert** source:
 
 - `package.json` `name` is rewritten to your username scope (`@you/<leaf>`).
+  When you omit a name, the leaf is the listing leaf. If that leaf is already
+  taken by an unrelated package, Kody uses the next free leaf (`leaf-2`, then
+  `leaf-3`, …). Pass an explicit leaf (or `@owner/leaf`) to choose the name;
+  that path errors if the name is taken. Forking the same listing again errors
+  with the existing fork's identity instead of minting another leaf.
 - **No saved package row is created**, so nothing runs yet — no imports, jobs,
   subscriptions, or package app.
 
@@ -170,17 +175,17 @@ topic. Use it to auto-rebase, or to ping you on Discord. See
 
 ## One-click install
 
-The listing detail page puts the install control beside the package name.
-Official `@kody/*` listings show a fork icon and install on the first click —
-they are first-party platform packages. Listings from another account use the
-same fork icon. The tooltip says “This was built by another user. Verify it
-before using. Click again to confirm fork.” The first click arms that control
-and the second click on the same control starts the install and sends
-`acknowledged: true` on `POST /community/:listingId/install.json` (the endpoint
-responds `409` without that flag). Clicking elsewhere, navigating, or leaving
-the control clears the armed state. Logged-out visitors get the same icon as a
-login link and sign in on the first click. While the fork runs, that slot shows
-a spinner whose tooltip names the current stage.
+The listing detail page puts the install control beside the package name as a
+fork icon. `@kody/*` listings are public community packages from the `@kody` org
+and install like any other listing from another account. The tooltip says “This
+was built by another user. Verify it before using. Click again to confirm fork.”
+The first click arms that control and the second click on the same control
+starts the install and sends `acknowledged: true` on
+`POST /community/:listingId/install.json` (the endpoint responds `409` without
+that flag). Clicking elsewhere, navigating, or leaving the control clears the
+armed state. Logged-out visitors get the same icon as a login link and sign in
+on the first click. While the fork runs, that slot shows a spinner whose tooltip
+names the current stage.
 
 A current fork shows an open icon that links to the fork. An outdated fork shows
 a link-break icon in that slot; the click copies the absorb prompt and opens the
@@ -191,8 +196,9 @@ under the listing.
 Catalog cards show **Installed**, **Forked**, **Fork outdated**, and **Fork
 ahead**. The detail page shows **Fork ahead**. Install forks the listing into
 your account and, when the fork passes publish checks, publishes it as a live
-saved package. **Publishing activates the package right away** — declared jobs
-are scheduled.
+saved package. If the listing leaf is already taken by an unrelated package, the
+install uses the next free leaf. **Publishing activates the package right away**
+— declared jobs are scheduled.
 
 When checks fail — most commonly because the package imports code from the
 original author's scope (`kody:@originuser/...`) — nothing is published. The
@@ -301,7 +307,9 @@ Use the MCP `community` domain:
   published first; optional `category` to browse one listing category)
 - `communityGet` — fetch one listing's metadata and aggregates (including owner
   profile linkage when the owner is public)
-- `communityFork` — copy HEAD into your account (inert until published)
+- `communityFork` — copy HEAD into your account (inert until published).
+  Omitting a name uses the listing leaf, or the next free `leaf-N` when that
+  leaf is already taken by an unrelated package.
 - `communityForkAdopt` — return the website link where you adopt a reviewed
   fork, granting it self-authored-like secret read/use access (see
   [Secrets and host approval](./secrets-and-values.md)); it never adopts

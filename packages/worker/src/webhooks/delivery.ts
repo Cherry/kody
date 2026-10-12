@@ -1,6 +1,13 @@
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
-import { invokePackageExport } from '#worker/package-invocations/service.ts'
+import { planEnablementRuns } from '#worker/enablements/run-gate.ts'
+import { buildJsonErrorResponse } from '#worker/package-invocations/responses.ts'
+import {
+	invokePackageExport,
+	type PackageInvocationResponse,
+} from '#worker/package-invocations/service.ts'
+import { type EnablementRun } from '#worker/request-context/request-context.ts'
 import { recordRunRecord } from '#worker/run-records/service.ts'
+import { type RunRecordLogInput } from '#worker/run-records/types.ts'
 import {
 	type WebhookDeliveryOutcome,
 	type WebhookEndpointRecord,
@@ -21,6 +28,15 @@ export async function recordWebhookDelivery(input: {
 	/** Handler return value from the bound package export (bounded on finish). */
 	result?: unknown
 	startedAt: string
+	/**
+	 * Ingress receive time when it differs from `startedAt` (ack queue lag).
+	 * Stored under metadata so Activity duration measures dispatch work, not
+	 * provider→queue wait.
+	 */
+	receivedAt?: string
+	/** Underlying package-invocation error code when the export failed. */
+	invocationErrorCode?: string | null
+	logs?: Array<RunRecordLogInput>
 	waitUntil?: (promise: Promise<unknown>) => void
 	requirePersistence?: boolean
 	/** Platform-marked synthetic smoke test (interactive MCP only). */
@@ -41,12 +57,17 @@ export async function recordWebhookDelivery(input: {
 				httpStatus: input.httpStatus,
 				payloadBytes: input.payloadBytes,
 				outcome: input.outcome,
+				...(input.receivedAt ? { receivedAt: input.receivedAt } : {}),
+				...(input.invocationErrorCode
+					? { invocationErrorCode: input.invocationErrorCode }
+					: {}),
 				...(input.synthetic === true ? { synthetic: true } : {}),
 			},
 		},
 		status,
 		error: input.error ?? undefined,
 		result: input.result,
+		logs: input.logs,
 		startedAt: input.startedAt,
 		waitUntil: input.waitUntil,
 	})
@@ -61,7 +82,52 @@ export function readWebhookInvocationResult(body: unknown): unknown {
 	return (body as Record<string, unknown>)['result']
 }
 
-export async function dispatchWebhookInvocation(input: {
+export function readWebhookInvocationError(body: unknown): {
+	code: string | null
+	message: string | null
+} {
+	if (!body || typeof body !== 'object' || Array.isArray(body)) {
+		return { code: null, message: null }
+	}
+	const error = (body as Record<string, unknown>)['error']
+	if (!error || typeof error !== 'object' || Array.isArray(error)) {
+		return { code: null, message: null }
+	}
+	const record = error as Record<string, unknown>
+	return {
+		code: typeof record['code'] === 'string' ? record['code'] : null,
+		message: typeof record['message'] === 'string' ? record['message'] : null,
+	}
+}
+
+export function buildWebhookDispatchFailureLogs(input: {
+	httpStatus: number
+	body: unknown
+	exhausted?: boolean
+	attempts?: number
+}): Array<RunRecordLogInput> {
+	const invocationError = readWebhookInvocationError(input.body)
+	const logs: Array<RunRecordLogInput> = [
+		{
+			level: 'error',
+			message: input.exhausted
+				? `Webhook dispatch gave up after ${input.attempts ?? 'max'} retries.`
+				: `Webhook export invocation failed with HTTP ${input.httpStatus}.`,
+		},
+	]
+	if (invocationError.code) {
+		logs.push({
+			level: 'error',
+			message: `Invocation error code: ${invocationError.code}`,
+			fields: {
+				code: invocationError.code,
+			},
+		})
+	}
+	return logs
+}
+
+type WebhookInvocationInput = {
 	env: Env
 	baseUrl?: string
 	endpoint: Pick<
@@ -74,7 +140,45 @@ export async function dispatchWebhookInvocation(input: {
 	idempotencyKey: string
 	idempotencyParamsHash?: 'ignore'
 	idempotencyHashParams?: Record<string, unknown>
-}) {
+	/** Ack-queue deliveries pass the background budget; sync omits it. */
+	executorTimeoutMs?: number
+}
+
+/**
+ * Run a webhook's bound export as the endpoint's enabler. With no on
+ * enablement (paused, off, or never enabled) nothing runs and the delivery
+ * fails with 409 `enablement_not_on`.
+ */
+export async function dispatchWebhookInvocation(
+	input: WebhookInvocationInput,
+): Promise<PackageInvocationResponse> {
+	const plan = await planEnablementRuns({
+		env: input.env,
+		orgId: input.endpoint.userId,
+		packageId: input.endpoint.packageId,
+		trigger: { kind: 'webhook', instanceId: input.endpoint.id },
+	})
+	const [run] = plan.runs
+	if (!run) {
+		return buildJsonErrorResponse({
+			status: 409,
+			code: 'enablement_not_on',
+			message: `Webhook "${input.endpoint.webhookName}" has no on enablement, so nothing ran. Its enabler may have lost access (it resumes once access is back), or nobody has enabled it.`,
+			idempotencyKey: input.idempotencyKey,
+		})
+	}
+	return await invokeWebhookExport(
+		input,
+		run,
+		`${input.idempotencyKey}:enablement:${run.id}`,
+	)
+}
+
+async function invokeWebhookExport(
+	input: WebhookInvocationInput,
+	enablement: EnablementRun,
+	idempotencyKey: string,
+) {
 	return await invokePackageExport({
 		env: input.env,
 		baseUrl: input.baseUrl ?? getAppBaseUrl({ env: input.env }),
@@ -83,12 +187,17 @@ export async function dispatchWebhookInvocation(input: {
 			userId: input.endpoint.userId,
 			packageId: input.endpoint.packageId,
 			exportNames: [input.exportName],
+			request: {
+				kind: 'webhook',
+				sourceId: input.endpoint.id,
+				enablement,
+			},
 		},
 		request: {
 			packageIdOrKodyId: input.endpoint.packageId,
 			exportName: input.exportName,
 			params: input.params,
-			idempotencyKey: input.idempotencyKey,
+			idempotencyKey,
 			...(input.idempotencyParamsHash === 'ignore'
 				? { idempotencyParamsHash: 'ignore' as const }
 				: {}),
@@ -98,5 +207,8 @@ export async function dispatchWebhookInvocation(input: {
 			source: 'webhook',
 			topic: `webhook:${input.packageKodyId}:${input.endpoint.webhookName}`,
 		},
+		...(input.executorTimeoutMs === undefined
+			? {}
+			: { executorTimeoutMs: input.executorTimeoutMs }),
 	})
 }

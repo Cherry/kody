@@ -1,3 +1,10 @@
+/**
+ * soft-delete-read-filter: opt-out
+ *
+ * Account deletion / purge inventory must enumerate tombstoned rows so KV, R2,
+ * and DO cleanup still run after soft-delete.
+ */
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { accountUserOwnedR2Surfaces } from '#worker/account/user-owned-surfaces.ts'
 import { buildCommunityIconR2Key } from '#worker/community/community-icon.ts'
 import {
@@ -50,7 +57,7 @@ function bindingFor(
 	return surface.binding
 }
 
-async function listUserCommunityListings(env: Env, userId: string) {
+async function listUserCommunityListings(env: Env, userId: OwnerId) {
 	const listings: Array<AccountCommunityListingSnapshot> = []
 	let afterRowid = 0
 	const pageSize = 500
@@ -67,8 +74,7 @@ async function listUserCommunityListings(env: Env, userId: string) {
 				AND entity_sources.entity_id = community_listings.package_id
 			WHERE community_listings.owner_user_id = ?
 				AND community_listings.rowid > ?
-			ORDER BY community_listings.rowid
-			LIMIT ?`,
+			ORDER BY community_listings.rowid LIMIT ?`,
 		)
 			.bind(userId, afterRowid, pageSize + 1)
 			.all<{
@@ -92,7 +98,7 @@ async function listUserCommunityListings(env: Env, userId: string) {
 	}
 }
 
-async function listUserIdentityIcons(env: Env, userId: string) {
+async function listUserIdentityIcons(env: Env, userId: OwnerId) {
 	const icons: Array<AccountIdentityIconSnapshot> = []
 	let afterRowid = 0
 	const pageSize = 500
@@ -106,8 +112,7 @@ async function listUserIdentityIcons(env: Env, userId: string) {
 			FROM entity_sources
 			WHERE entity_sources.user_id = ?
 				AND entity_sources.rowid > ?
-			ORDER BY entity_sources.rowid
-			LIMIT ?`,
+			ORDER BY entity_sources.rowid LIMIT ?`,
 		)
 			.bind(userId, afterRowid, pageSize + 1)
 			.all<{
@@ -137,7 +142,7 @@ async function listUserIdentityIcons(env: Env, userId: string) {
 
 export async function collectAccountR2Inventory(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 }): Promise<{
 	objects: Array<AccountR2ObjectRef>

@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { isRecord } from '@kody-internal/shared/is-record.ts'
 import {
 	resolveProvider,
@@ -10,8 +11,13 @@ import {
 import { exports as workerExports } from 'cloudflare:workers'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import {
+	type Capability,
+	type CapabilityOpenApiPrincipal,
+} from '#mcp/capabilities/types.ts'
+import {
 	createExecuteExecutor,
 	createNamedExecutionError,
+	type ClaimWorkerDay,
 } from '#mcp/executor.ts'
 import {
 	callerDisconnectedSandboxLog,
@@ -30,7 +36,8 @@ import {
 	resolveObservedRunSurface,
 } from '#worker/usage/dynamic-worker-day-surface.ts'
 import { type RawFetchHostSink } from '#mcp/raw-fetch-host-nudge.ts'
-import { resolvePackageMountedSecret } from '#mcp/secrets/package-access.ts'
+import { attestedPackageStamp } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
 import {
 	getSecretAuthorityScope,
 	resolveSecretAuthorityPackageId,
@@ -42,17 +49,11 @@ import {
 import { type BuiltCapabilityRegistry } from '#mcp/capabilities/build-capability-registry.ts'
 import { assertCallerCanAccessCapability } from '#mcp/capabilities/access-control.ts'
 import { getCapabilityRegistryForContext } from '#mcp/capabilities/registry.ts'
-import { type Capability } from '#mcp/capabilities/types.ts'
 import { createRemovedValueWriteError } from '#mcp/capabilities/values/shared.ts'
 import {
 	type KodyMcpServerMetadata,
 	type KodyResolvedProvider,
 } from '#mcp/kody-remote-types.ts'
-import { assertPersonOwnedPackageMayNotRunPlatformDependencies } from '#worker/package-registry/platform-package-policy.ts'
-import {
-	collectShareStorageOwners,
-	retainAuthorizedPackageStorageGrantIds,
-} from '#worker/package-registry/share-grants.ts'
 import {
 	createRuntimeHelperExtraProviders,
 	createRuntimeHelperKodyToolSets,
@@ -87,6 +88,7 @@ import {
 	findUnboundRuntimeHelperAccess,
 } from '#worker/package-runtime/unbound-runtime-helpers.ts'
 import { runWithTransientDurableObjectResetRetry } from '#worker/durable-object-reset-retry.ts'
+import { isPreRunUsageDenial } from '#worker/entitlements/errors.ts'
 import { evaluationHasHostMediatedSideEffects } from '#mcp/evaluation-side-effects.ts'
 import { isTransientJobExecutionError } from '#worker/jobs/execution-safety.ts'
 import { beginRunRecord, finishRunRecord } from '#worker/run-records/service.ts'
@@ -97,11 +99,16 @@ import {
 } from '#worker/run-records/types.ts'
 import { shouldRecordExecuteUsageForRun } from '#worker/usage/execute-usage-surface.ts'
 import { createDynamicCallableWorkflow } from '#worker/package-runtime/package-workflows.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { requestLineage } from '#worker/request-context/request-context.ts'
 import {
 	isDirectBundleDependency,
 	type BundleArtifactDependency,
 } from '#worker/package-runtime/published-runtime-artifacts.ts'
-import { recordUsage } from '#worker/usage/record-usage.ts'
+import {
+	recordUsage,
+	usageAttributionFieldsFromRequest,
+} from '#worker/usage/record-usage.ts'
 import { createPackageStaticCallMeterTools } from '#worker/usage/package-static-call-usage.ts'
 import { recordAgentPackageConversationUses } from '#worker/usage/agent-package-conversation-uses.ts'
 import { type WorkerLoaderModules } from '#worker/worker-loader-types.ts'
@@ -292,25 +299,33 @@ function createPackageSecretTools(input: {
 		}
 		return authorityPackageId
 	}
+	const resolveMount = (
+		alias: string,
+		requestedPackageId?: string | null,
+		access?: 'presence' | 'value',
+	) =>
+		resolveCredential({
+			env: input.env,
+			orgId: ownerIdFromCaller(input.callerContext),
+			actor: input.callerContext.request,
+			packageStamp: attestedPackageStamp(
+				resolveAuthorityPackageId(requestedPackageId),
+			),
+			baseUrl: input.callerContext.baseUrl,
+			credential: {
+				use: 'package-secret-mount',
+				alias,
+				callerContext: input.callerContext,
+				...(access ? { access } : {}),
+			},
+		})
 	return {
 		runPackageId: input.runPackageId,
 		get: async (alias: string, requestedPackageId?: string | null) =>
-			(
-				await resolvePackageMountedSecret({
-					env: input.env,
-					callerContext: input.callerContext,
-					packageId: resolveAuthorityPackageId(requestedPackageId),
-					alias,
-				})
-			).ref,
+			(await resolveMount(alias, requestedPackageId)).ref,
 		has: async (alias: string, requestedPackageId?: string | null) => {
 			try {
-				await resolvePackageMountedSecret({
-					env: input.env,
-					callerContext: input.callerContext,
-					packageId: resolveAuthorityPackageId(requestedPackageId),
-					alias,
-				})
+				await resolveMount(alias, requestedPackageId, 'presence')
 				return true
 			} catch (error) {
 				if (isPackageSecretAvailabilityError(error)) {
@@ -330,8 +345,11 @@ export function createWorkflowTools(input: {
 	const packageContext = input.packageContext
 	return {
 		create: async (body) => {
-			const userId = input.callerContext.user?.userId
-			if (!userId) {
+			const userId = input.callerContext.user
+				? personalOrgId(input.callerContext.user.userId)
+				: undefined
+			const request = input.callerContext.request
+			if (!userId || !request) {
 				throw new Error('workflows.create requires an authenticated user.')
 			}
 			return await createDynamicCallableWorkflow({
@@ -340,6 +358,7 @@ export function createWorkflowTools(input: {
 				userEmail: input.callerContext.user?.email,
 				packageContext,
 				body,
+				lineage: requestLineage(request),
 			})
 		},
 	}
@@ -376,6 +395,7 @@ export async function buildKodyToolContext(
 		capabilityRegistry?: BuiltCapabilityRegistry
 		reportProgress?: McpReportProgress
 		waitUntil?: (promise: Promise<unknown>) => void
+		openApiPrincipal?: CapabilityOpenApiPrincipal
 	},
 ): Promise<{
 	tools: AdditionalKodyTools
@@ -431,6 +451,9 @@ export async function buildKodyToolContext(
 							? { reportProgress: options.reportProgress }
 							: {}),
 						...(options?.waitUntil ? { waitUntil: options.waitUntil } : {}),
+						...(options?.openApiPrincipal
+							? { openApiPrincipal: options.openApiPrincipal }
+							: {}),
 					})
 				} finally {
 					if (shouldSampleFirstDispatch) {
@@ -493,11 +516,11 @@ async function buildKodyMcpServerMetadata(input: {
 	callerContext: McpCallerContext
 	capabilityMap: Record<string, Capability>
 }): Promise<Array<KodyMcpServerMetadata>> {
-	const userId = input.callerContext.user?.userId ?? null
+	const userId = ownerIdFromCaller(input.callerContext) || null
 	const servers = new Map<string, KodyMcpServerMetadata>()
 
 	if (userId) {
-		// Per-user 30s cache: runtime metadata assembly runs on every execute /
+		// Per-org 30s cache: runtime metadata assembly runs on every execute /
 		// package invocation, so this must not cost a D1 read per call.
 		// List every enabled server (including package-locked). Call-time
 		// assertCanUseMcpServer + stamp ALS deny execute / unapproved packages;
@@ -621,6 +644,8 @@ export async function runModuleWithRegistry(
 		packageEventTools?: PackageEventTools
 		capabilityRegistry?: BuiltCapabilityRegistry
 		rawFetchHostSink?: RawFetchHostSink
+		/** Capped unique-worker-day claim for the top-level hosted execute worker. */
+		claimWorkerDay?: ClaimWorkerDay
 		/**
 		 * When set (MCP public `execute` tool), static/dynamic `kody:@…`
 		 * package deps are credited toward agent-facing package popularity.
@@ -653,7 +678,8 @@ export async function runModuleWithRegistry(
 		serverTiming?: Array<{ name: string; durationMs: number }>
 	}
 > {
-	const userId = callerContext.user?.userId ?? ''
+	const actorUserId = callerContext.user?.userId ?? ''
+	const packageOwnerUserId = ownerIdFromCaller(callerContext)
 	const serverTiming: Array<{ name: string; durationMs: number }> = []
 	const reportProgress = options?.reportProgress
 	const isAdHocExecute = shouldRecordExecuteUsageForRun({
@@ -672,7 +698,7 @@ export async function runModuleWithRegistry(
 		options?.runRecordHandle ??
 		beginRunRecord({
 			env,
-			userId: callerContext.user?.userId ?? null,
+			userId: ownerIdFromCaller(callerContext) || null,
 			context: options?.runRecord ?? null,
 			waitUntil: options?.waitUntil,
 		})
@@ -685,7 +711,7 @@ export async function runModuleWithRegistry(
 				await buildKodyModuleBundle({
 					env,
 					baseUrl: callerContext.baseUrl,
-					userId,
+					userId: packageOwnerUserId,
 					sourceFiles: createAdHocExecuteSourceFiles(code),
 					entryPoint: 'entry.ts',
 					reuseCachedBundle: true,
@@ -701,7 +727,7 @@ export async function runModuleWithRegistry(
 			durationMs: Date.now() - bundleStartedAtMs,
 		})
 		const conversationId = options?.conversationId?.trim()
-		if (conversationId && userId) {
+		if (conversationId && actorUserId) {
 			const packageIds = bundled.dependencies
 				.filter(isDirectBundleDependency)
 				.map((dependency) => dependency.packageId)
@@ -710,7 +736,7 @@ export async function runModuleWithRegistry(
 				await scheduleAgentPackageConversationUses(
 					env,
 					{
-						userId,
+						userId: actorUserId,
 						packageIds,
 						conversationId,
 					},
@@ -803,11 +829,7 @@ export function collectPackageStorageGrantIds(input: {
 		grantedPackageIds.add(input.packageContext.packageId)
 	}
 	for (const dependency of input.dependencies) {
-		// Platform-scope (built-in) dependencies run in the caller's runtime
-		// but stay stateless there: granting the platform package UUID would
-		// open an empty caller-local bucket, never the platform account's
-		// data, so `packageStorage()` fails closed inside live platform code.
-		if (dependency.packageId && dependency.platformOwned !== true) {
+		if (dependency.packageId) {
 			grantedPackageIds.add(dependency.packageId)
 		}
 	}
@@ -819,10 +841,8 @@ export function collectPackageStorageGrantIds(input: {
 
 /**
  * Host tools for computed `import(specifier)` of caller-owned `kody:@`
- * names. `packages` is always unbound; there is no author-facing
- * `packages.invoke` ([#1750](https://github.com/kentcdodds/kody/issues/1750)).
- * Nested evaluate uses library-load semantics: caller's `packageContext`,
- * callee stamp grants via the importable-module artifact.
+ * names. Nested evaluate uses library-load semantics: caller's
+ * `packageContext`, callee stamp grants via the importable-module artifact.
  */
 export function createComputedPackageImportTools(input: {
 	env: Env
@@ -862,8 +882,9 @@ export function createComputedPackageImportTools(input: {
 					'Computed kody:@ import requires a non-empty specifier string.',
 				)
 			}
-			const userId = input.callerContext.user?.userId
-			if (!userId) {
+			const actorUserId = input.callerContext.user?.userId
+			const packageOwnerUserId = ownerIdFromCaller(input.callerContext)
+			if (!packageOwnerUserId) {
 				throw new Error(
 					'Dynamic kody:@ package import requires an authenticated runtime. Use a static import (import fn from "kody:@scope/package/export") when the package name is known at write time.',
 				)
@@ -876,16 +897,16 @@ export function createComputedPackageImportTools(input: {
 			const artifact = await resolveComputedPackageImportArtifact({
 				env: input.env,
 				baseUrl: input.baseUrl,
-				userId,
+				userId: packageOwnerUserId,
 				specifier,
 			})
 			const conversationId = input.conversationId?.trim()
 			const calleePackageId = artifact.packageContext?.packageId?.trim()
-			if (conversationId && calleePackageId) {
+			if (conversationId && actorUserId && calleePackageId) {
 				await scheduleAgentPackageConversationUses(
 					input.env,
 					{
-						userId,
+						userId: actorUserId,
 						packageIds: [calleePackageId],
 						conversationId,
 					},
@@ -980,7 +1001,7 @@ export async function runBundledModuleWithRegistry(
 		/**
 		 * Skip `execute` usage metering for this evaluate. Used by computed
 		 * import library loads so nested default calls do not inflate the
-		 * outer MCP execute daily quota.
+		 * outer MCP execute call metric.
 		 */
 		skipExecuteUsage?: boolean
 		skipCapabilityRegistry?: boolean
@@ -1019,6 +1040,7 @@ export async function runBundledModuleWithRegistry(
 		 * `runModuleWithRegistry` from the caller-authored source string.
 		 */
 		executeShape?: ExecuteThinGlueClass | null
+		claimWorkerDay?: ClaimWorkerDay
 	},
 ): Promise<
 	ExecuteResult & {
@@ -1046,7 +1068,7 @@ export async function runBundledModuleWithRegistry(
 		options?.runRecordHandle ??
 		beginRunRecord({
 			env,
-			userId: callerContext.user?.userId ?? null,
+			userId: ownerIdFromCaller(callerContext) || null,
 			context: runRecordContext,
 			waitUntil,
 		})
@@ -1066,7 +1088,7 @@ export async function runBundledModuleWithRegistry(
 		if (usageRecorded) return
 		usageRecorded = true
 		if (options?.skipPackageExportUsage) return
-		const userId = callerContext.user?.userId
+		const userId = ownerIdFromCaller(callerContext)
 		if (!options?.packageContext || !userId) return
 		await recordUsage(env, {
 			userId,
@@ -1074,6 +1096,7 @@ export async function runBundledModuleWithRegistry(
 			entityId: options.packageContext.packageId,
 			durationMs: Date.now() - usageStartedAtMs,
 			outcome,
+			...usageAttributionFieldsFromRequest(callerContext.request),
 		})
 	}
 	async function finishObservedRun(input: {
@@ -1095,6 +1118,18 @@ export async function runBundledModuleWithRegistry(
 			waitUntil,
 		})
 		runRecordFinished = true
+	}
+	/**
+	 * A caller that pre-claimed the run record finishes or releases it:
+	 * the job scheduler retries transient failures, and keyed execute
+	 * releases its key when the capped worker-day claim denies the load.
+	 */
+	function leavesCallerRunRecordOpen(error: unknown) {
+		if (runRecordFinished || options?.runRecordHandle == null) return false
+		if (callerOwnsScheduledJobRun && isTransientJobExecutionError(error)) {
+			return true
+		}
+		return options.claimWorkerDay != null && isPreRunUsageDenial(error)
 	}
 	function resolveThrownRunError(error: unknown): {
 		error: unknown
@@ -1133,7 +1168,7 @@ export async function runBundledModuleWithRegistry(
 			await hydrateKodyRuntimeModules({
 				env,
 				baseUrl: callerContext.baseUrl,
-				userId: callerContext.user?.userId ?? '',
+				userId: ownerIdFromCaller(callerContext),
 				modules: bundle.modules,
 			})
 		runServerTiming.push({
@@ -1159,43 +1194,11 @@ export async function runBundledModuleWithRegistry(
 		}
 		await reportExecutePhaseProgress(reportProgress, 'provider-assembly')
 		const providerAssemblyStartedAtMs = Date.now()
-		const runningPackageId = options?.packageContext?.packageId?.trim()
-		const runningUserId = callerContext.user?.userId
-		if (runningPackageId && runningUserId) {
-			await assertPersonOwnedPackageMayNotRunPlatformDependencies({
-				db: env.APP_DB,
-				userId: runningUserId,
-				packageId: runningPackageId,
-				dependencies: bundle.dependencies ?? [],
-			})
-		}
 		const grantedPackageStorageIds = collectPackageStorageGrantIds({
 			packageContext: options?.packageContext ?? null,
 			dependencies: bundle.dependencies ?? [],
 			dynamicDependencyPackageIds,
 		})
-		const storageOwnerByPackageId = new Map<string, string>()
-		let authorizedPackageStorageIds = new Set(grantedPackageStorageIds)
-		if (callerContext.user?.userId) {
-			const shareOwners = await collectShareStorageOwners({
-				db: env.APP_DB,
-				callerUserId: callerContext.user.userId,
-				packageIds: grantedPackageStorageIds,
-			})
-			for (const [packageId, ownerUserId] of shareOwners) {
-				storageOwnerByPackageId.set(packageId, ownerUserId)
-			}
-			authorizedPackageStorageIds =
-				await retainAuthorizedPackageStorageGrantIds({
-					db: env.APP_DB,
-					callerUserId: callerContext.user.userId,
-					packageIds: grantedPackageStorageIds,
-					storageOwnerByPackageId,
-				})
-			if (runningPackageId && grantedPackageStorageIds.has(runningPackageId)) {
-				authorizedPackageStorageIds.add(runningPackageId)
-			}
-		}
 		// Static package export calls report through a sandbox bridge with a
 		// bundler-stamped callee package id; only ids recorded as *direct*
 		// static bundle dependencies at build time are accepted (mismatches are
@@ -1205,7 +1208,8 @@ export async function runBundledModuleWithRegistry(
 		// dependencies.
 		const staticCallMeterTools = createPackageStaticCallMeterTools({
 			env,
-			userId: callerContext.user?.userId ?? null,
+			userId: ownerIdFromCaller(callerContext) || null,
+			request: callerContext.request,
 			grantedPackageIds: new Set(
 				(bundle.dependencies ?? [])
 					.filter(isDirectBundleDependency)
@@ -1222,10 +1226,11 @@ export async function runBundledModuleWithRegistry(
 			signal: options?.signal,
 			gatewayProps: {
 				baseUrl: callerContext.baseUrl,
-				userId: callerContext.user?.userId ?? null,
+				userId: ownerIdFromCaller(callerContext) || null,
 				email: callerContext.user?.email ?? null,
+				request: callerContext.request,
 				storageContext: normalizedStorageContext,
-				grantedSecretAuthorityPackageIds: [...authorizedPackageStorageIds],
+				grantedSecretAuthorityPackageIds: [...grantedPackageStorageIds],
 			},
 			modules: hydratedModules,
 			// Package-context runs are saved-package code; do not count their fetch hosts.
@@ -1245,6 +1250,7 @@ export async function runBundledModuleWithRegistry(
 				runSurface: options?.runSurface,
 				hasPackageContext: Boolean(options?.packageContext),
 			}),
+			packageId: options?.packageContext?.packageId ?? null,
 			executeShape: options?.executeShape,
 			allowOutboundFetch: !closedWorldRetrieverRuntime,
 			onWorkerId: runRecordHandle
@@ -1258,6 +1264,7 @@ export async function runBundledModuleWithRegistry(
 						}
 					}
 				: undefined,
+			claimWorkerDay: options?.claimWorkerDay,
 			waitUntil: options?.waitUntil,
 		})
 		const workflowTools = closedWorldRetrieverRuntime
@@ -1296,9 +1303,8 @@ export async function runBundledModuleWithRegistry(
 		// missing-capability TypeError.
 		const packageStorageTools = callerContext.user?.userId
 			? {
-					grantedPackageIds: authorizedPackageStorageIds,
+					grantedPackageIds: grantedPackageStorageIds,
 					writable: !closedWorldRetrieverRuntime,
-					storageOwnerByPackageId,
 				}
 			: undefined
 		const packageSecretTools = callerContext.user?.userId
@@ -1306,7 +1312,7 @@ export async function runBundledModuleWithRegistry(
 					env,
 					callerContext,
 					runPackageId: options?.packageContext?.packageId ?? null,
-					grantedPackageIds: authorizedPackageStorageIds,
+					grantedPackageIds: grantedPackageStorageIds,
 				})
 			: undefined
 		const provider = await buildKodyProvider(env, callerContext, {
@@ -1506,11 +1512,7 @@ ${runtimeHelperRuntimePropertySource}
 			await recordPackageExportUsage('error')
 			return withRunId(finalResult)
 		} catch (error) {
-			if (
-				!runRecordFinished &&
-				callerOwnsScheduledJobRun &&
-				isTransientJobExecutionError(error)
-			) {
+			if (leavesCallerRunRecordOpen(error)) {
 				throw error
 			}
 			if (!runRecordFinished) {
@@ -1524,11 +1526,7 @@ ${runtimeHelperRuntimePropertySource}
 			throw error
 		}
 	} catch (error) {
-		if (
-			!runRecordFinished &&
-			callerOwnsScheduledJobRun &&
-			isTransientJobExecutionError(error)
-		) {
+		if (leavesCallerRunRecordOpen(error)) {
 			throw error
 		}
 		if (!runRecordFinished) {

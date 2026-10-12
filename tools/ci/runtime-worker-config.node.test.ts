@@ -115,21 +115,27 @@ function buildMainGeneratedConfig(envName: string) {
 			{ binding: 'OAUTH_KV', id: 'kv-oauth-id' },
 			{ binding: 'BUNDLE_ARTIFACTS_KV', id: 'kv-bundle-id' },
 		],
-		r2_buckets: ['COMMUNITY_ASSETS', 'EMAIL_BLOBS', 'REPO_SESSION_BLOBS'].map(
-			(binding) => ({
-				binding,
-				bucket_name: `kody-pr-7-${binding.toLowerCase().replaceAll('_', '-')}`,
-			}),
-		),
+		r2_buckets: [
+			'COMMUNITY_ASSETS',
+			'EMAIL_BLOBS',
+			'REPO_SESSION_BLOBS',
+			'OPERATOR_BACKUPS',
+		].map((binding) => ({
+			binding,
+			bucket_name: `kody-pr-7-${binding.toLowerCase().replaceAll('_', '-')}`,
+		})),
 		queues: {
 			producers: [
-				...producers('kody-pr-7', 'WEBHOOK_DISPATCH_QUEUE'),
+				...producers(
+					envName === 'production' ? 'kody' : 'kody-pr-7',
+					'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+					'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
+					'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
+					'WEBHOOK_DISPATCH_QUEUE',
+				),
 				...(envName === 'production'
 					? producers(
 							'kody',
-							'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
-							'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
-							'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
 							'SCHEDULED_DISPATCH_QUEUE',
 							'PACKAGE_EVENTS_DISPATCH_QUEUE',
 						)
@@ -146,7 +152,6 @@ function buildMainGeneratedConfig(envName: string) {
 			'USAGE_EVENTS',
 			'FLAG_EXPOSURES',
 			'MCP_PROTOCOL_EVENTS',
-			'PACKAGE_INVOKE_SPECIFIER_EVENTS',
 			'ONBOARDING_FUNNEL_EVENTS',
 		].map((binding) => ({
 			binding,
@@ -220,22 +225,29 @@ test('generate rewrites worker names, copies resource ids, and patches the main 
 		database_name: 'kody-pr-7-db',
 		database_id: 'd1-app-id',
 	})
+	expect(previewEnv?.queues?.producers?.map((entry) => entry.binding)).toEqual([
+		'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+		'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
+		'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
+		'WEBHOOK_DISPATCH_QUEUE',
+	])
 	expect(
-		previewEnv?.analytics_engine_datasets?.find(
-			(entry) => entry.binding === 'PACKAGE_INVOKE_SPECIFIER_EVENTS',
+		previewEnv?.queues?.producers?.find(
+			(entry) => entry.binding === 'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
 		),
-	).toEqual({
-		binding: 'PACKAGE_INVOKE_SPECIFIER_EVENTS',
-		dataset: 'kody_package_invoke_specifier_events_pr',
-	})
-	expect(previewEnv?.queues?.producers?.[0]).toMatchObject({
-		binding: 'WEBHOOK_DISPATCH_QUEUE',
-		queue: 'kody-pr-7-webhook-dispatch',
-	})
+	).toMatchObject({ queue: 'kody-pr-7-platform-feedback-dispatch' })
+	expect(
+		previewEnv?.queues?.producers?.find(
+			(entry) => entry.binding === 'WEBHOOK_DISPATCH_QUEUE',
+		),
+	).toMatchObject({ queue: 'kody-pr-7-webhook-dispatch' })
 	expect(previewEnv?.vars?.ARTIFACTS_NAMESPACE).toBe('kody-pr-7')
 	// The workflow gets a per-worker name.
 	expect(previewEnv?.workflows?.[0]?.name).toBe(
 		'kody-pr-7-runtime-dynamic-callable-workflows',
+	)
+	expect(String(previewEnv?.workflows?.[0]?.name).length).toBeLessThanOrEqual(
+		64,
 	)
 	// Preview has no package-app domain, so no routes are published.
 	expect(previewEnv?.routes).toBeUndefined()
@@ -257,6 +269,27 @@ test('generate rewrites worker names, copies resource ids, and patches the main 
 		name: 'kody-pr-7-runtime-dynamic-callable-workflows',
 		script_name: 'kody-pr-7-runtime',
 	})
+})
+
+test('generate truncates long branch preview workflow names to 64 chars', async () => {
+	const { runtime, patchedMain } = await generateRuntime({
+		envName: 'preview',
+		workerPrefix: 'kody-branch-local-execute-parity-0092',
+		mainWorkerName: 'kody-branch-local-execute-parity-0092',
+	})
+	const workflowName = runtime.env?.preview?.workflows?.[0]?.name
+	expect(typeof workflowName).toBe('string')
+	expect(String(workflowName).length).toBeLessThanOrEqual(64)
+	expect(String(workflowName)).toMatch(/-dynamic-callable-workflows$/)
+	expect(String(workflowName)).toMatch(
+		/-[0-9a-f]{8}-dynamic-callable-workflows$/,
+	)
+	expect(patchedMain.env?.preview?.workflows?.[0]?.name).toBe(workflowName)
+	// Untruncated would be 72 characters and wrangler would reject the config.
+	expect(
+		'kody-branch-local-execute-parity-0092-runtime-dynamic-callable-workflows'
+			.length,
+	).toBe(72)
 })
 
 const packageAppRoutes = [

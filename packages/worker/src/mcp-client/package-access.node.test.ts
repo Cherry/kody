@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	assertCanUseMcpServer,
@@ -93,17 +94,18 @@ test('assertCanUseMcpServer denies execute with the account usage URL message', 
 	const denied = await assertCanUseMcpServer({
 		env: { APP_DB: {} } as Pick<Env, 'APP_DB'>,
 		baseUrl: 'https://example.com',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		serverId: 'server-notion',
 		serverName: 'notion',
 		packageId: null,
+		orgSlug: 'ada',
 	}).then(
 		() => null,
 		(thrown: unknown) => thrown,
 	)
 	expect(denied).toBeInstanceOf(McpServerPackageAccessDeniedError)
 	expect((denied as Error).message).toContain(
-		'https://example.com/account/mcp-servers/server-notion',
+		'https://example.com/@ada/-/mcp-servers/server-notion',
 	)
 	expect((denied as Error).message).toMatch(/cannot be used from execute/)
 
@@ -111,7 +113,7 @@ test('assertCanUseMcpServer denies execute with the account usage URL message', 
 		assertCanUseMcpServer({
 			env: { APP_DB: {} } as Pick<Env, 'APP_DB'>,
 			baseUrl: 'https://example.com',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			serverId: 'server-notion',
 			serverName: 'notion',
 			packageId: 'pkg-notion-read',

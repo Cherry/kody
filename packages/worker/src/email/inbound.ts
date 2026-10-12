@@ -1,7 +1,11 @@
+import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { withAccountWriteLease } from '#worker/account/deletion-state.ts'
 import { findPublicUserIdentityByUsername } from '#worker/identity/user-lookup.ts'
 import { isEntitlementLimitError } from '#worker/entitlements/errors.ts'
-import { resolvePlanLimit } from '#universal/plans.ts'
+import { resolveEntitlementLimit } from '#universal/plans.ts'
 import {
 	assertWithinEntitlement,
 	assertWithinStorageBytesEntitlement,
@@ -60,6 +64,7 @@ import {
 	storeIdempotentInboundEmail,
 } from './service.ts'
 import { handleSystemInboundEmail } from './system-inbound-email.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 /**
  * Rejection audit writes are best-effort (the SMTP reject already happened),
@@ -136,7 +141,7 @@ async function parseAndStoreInboundEmail(input: {
 
 async function cleanupInboundDurability(input: {
 	env: UserInboundDeliveryAuthorityEnv & { EMAIL_BLOBS: R2Bucket }
-	userId: string
+	userId: OwnerId
 }) {
 	try {
 		await reconcileUserStaleInboundDeliveries(input)
@@ -227,7 +232,7 @@ export async function handleInboundEmail(
 		return
 	}
 
-	const userId = identity.mcpUserId
+	const userId = personalOrgId(identity.mcpUserId)
 	return await withAccountWriteLease({
 		db: env.APP_DB,
 		stableUserId: userId,
@@ -242,12 +247,14 @@ export async function handleInboundEmail(
 			// getUserPlan / isAccountEmailVerified) so a mismatched identity pair
 			// cannot apply another account's plan or verification state.
 			const accountRow = await env.APP_DB.prepare(
-				`SELECT plan, stripe_plan, entitlement_ladder, stripe_credits_eligible, admin_credits_eligible, email_verified_at, suspended_at FROM users
-			WHERE email = ? AND stable_user_id = ?`,
+				`SELECT o.plan, o.stripe_plan, o.entitlement_ladder, o.stripe_credits_eligible, o.admin_credits_eligible, u.email_verified_at, u.suspended_at
+			FROM users u
+			LEFT JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}
+			WHERE u.email = ? AND u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
 			)
 				.bind(identity.email, userId)
 				.first<{
-					plan: string
+					plan: string | null
 					stripe_plan: string | null
 					entitlement_ladder: string | null
 					stripe_credits_eligible: number | null
@@ -255,21 +262,31 @@ export async function handleInboundEmail(
 					email_verified_at: string | null
 					suspended_at: string | null
 				}>()
-			// A scoped miss keeps the existing synthetic-account fallback. A
-			// present row must satisfy the plan storage contract.
+			// A missing org (or missing user) keeps the synthetic max plan.
+			// Verification and suspension still come from the users row.
+			const orgPlan = accountRow?.plan
 			const accountEntitlement = await resolveBaseUserEntitlement({
 				db: env.APP_DB,
 				stableUserId: userId,
-				row: accountRow ?? {
-					plan: 'max',
-					stripe_plan: null,
-					entitlement_ladder: null,
-					stripe_credits_eligible: 0,
-					admin_credits_eligible: 0,
-				},
+				row: orgPlan
+					? {
+							plan: orgPlan,
+							stripe_plan: accountRow?.stripe_plan ?? null,
+							entitlement_ladder: accountRow?.entitlement_ladder ?? null,
+							stripe_credits_eligible: accountRow?.stripe_credits_eligible ?? 0,
+							admin_credits_eligible: accountRow?.admin_credits_eligible ?? 0,
+						}
+					: {
+							plan: 'max',
+							stripe_plan: null,
+							entitlement_ladder: null,
+							stripe_credits_eligible: 0,
+							admin_credits_eligible: 0,
+						},
 			})
 			const account = {
 				email: identity.email,
+				entitlement: accountEntitlement,
 				plan: accountEntitlement.plan,
 				ladder: accountEntitlement.ladder,
 				creditWallet: accountEntitlement.creditWallet,
@@ -305,6 +322,8 @@ export async function handleInboundEmail(
 					bytes: message.rawSize,
 					durationMs: Date.now() - receiveStartedAtMs,
 					outcome: input.outcome,
+					actorUserId: '',
+					automationSource: 'email',
 				})
 			}
 
@@ -397,11 +416,9 @@ export async function handleInboundEmail(
 				env,
 				userId,
 			})
-			const keepCap = resolvePlanLimit(
-				account.plan,
+			const keepCap = resolveEntitlementLimit(
+				account.entitlement,
 				'email_message_bytes',
-				account.ladder,
-				account.creditWallet,
 			)
 			let prepared
 			try {
@@ -498,11 +515,9 @@ export async function handleInboundEmail(
 								ownerId: userId,
 							}),
 					})
-					const receiveLimit = resolvePlanLimit(
-						account.plan,
+					const receiveLimit = resolveEntitlementLimit(
+						account.entitlement,
 						'email_receives_per_day',
-						account.ladder,
-						account.creditWallet,
 					)
 					const receivesToday = await readUserInboundReceiveCount({
 						db: env.APP_DB,
@@ -554,11 +569,9 @@ export async function handleInboundEmail(
 					const chargeResult = await authority.charge({
 						delivery: chargeCandidate,
 						plan: account.plan,
-						limit: resolvePlanLimit(
-							account.plan,
+						limit: resolveEntitlementLimit(
+							account.entitlement,
 							'email_receives_per_day',
-							account.ladder,
-							account.creditWallet,
 						),
 						now: quotaNow,
 					})

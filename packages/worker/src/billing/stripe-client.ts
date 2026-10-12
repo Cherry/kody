@@ -70,15 +70,21 @@ export class BillingNotConfiguredError extends Error {
 	}
 }
 
-type StripeEnv = {
+export type StripeEnv = {
 	STRIPE_SECRET_KEY?: string
 	STRIPE_API_BASE_URL?: string
 }
+
+const updatedSubscriptionItemSchema = object({
+	id: string(),
+	quantity: optional(number()),
+})
 
 const checkoutSessionSchema = object({
 	id: string(),
 	customer: nullable(string()),
 	client_reference_id: nullable(string()),
+	metadata: optional(nullable(record(string(), string()))),
 })
 
 const createdCheckoutSessionSchema = object({
@@ -88,6 +94,7 @@ const createdCheckoutSessionSchema = object({
 
 const subscriptionItemSchema = object({
 	id: optional(string()),
+	quantity: optional(number()),
 	price: object({
 		id: string(),
 	}),
@@ -179,6 +186,21 @@ export type StripeCheckoutSession = InferOutput<typeof checkoutSessionSchema>
 export type StripeSubscription = InferOutput<typeof subscriptionSchema>
 
 /** Newest period end from subscription items, then the top-level field. */
+/** Seat count on the primary subscription line item (defaults to 1). */
+export function subscriptionSeatQuantity(
+	subscription: StripeSubscription,
+): number {
+	const quantity = subscription.items.data[0]?.quantity
+	if (
+		typeof quantity === 'number' &&
+		Number.isFinite(quantity) &&
+		quantity >= 1
+	) {
+		return Math.floor(quantity)
+	}
+	return 1
+}
+
 export function readStripeSubscriptionPeriodEndUnix(
 	subscription: StripeSubscription,
 ): number | null {
@@ -381,8 +403,11 @@ export async function createCheckoutSession(
 		cancelUrl: string
 		customerId?: string
 		customerEmail?: string
-		/** Opaque session metadata (e.g. kody_stable_user_id for webhook lookup). */
+		/** Opaque session metadata (e.g. kody_org_id for webhook lookup). */
 		metadata?: Record<string, string>
+		quantity?: number
+		/** A promotion code Kody already validated (`promo_...`). */
+		promotionCodeId?: string
 	},
 ): Promise<{ id: string; url: string }> {
 	const priceId = input.priceId.trim()
@@ -405,21 +430,34 @@ export async function createCheckoutSession(
 	if (!cancelUrl) {
 		throw new StripeApiError('Cancel URL is required.', { status: 400 })
 	}
+	const quantityRaw = input.quantity ?? 1
+	if (!Number.isSafeInteger(quantityRaw) || quantityRaw < 1) {
+		throw new StripeApiError('Checkout quantity must be a positive integer.', {
+			status: 400,
+		})
+	}
 
 	const form: Record<string, string> = {
 		mode: 'subscription',
 		'line_items[0][price]': priceId,
-		'line_items[0][quantity]': '1',
+		'line_items[0][quantity]': String(quantityRaw),
 		client_reference_id: clientReferenceId,
 		success_url: successUrl,
 		cancel_url: cancelUrl,
 		// Stripe Tax is active on the account; with no registrations it computes
 		// 0 and tracks thresholds, and once a registration exists Checkout starts
 		// collecting without a code change. Tax IDs let business customers apply
-		// reverse charge. Promotion codes cost nothing to allow.
+		// reverse charge.
 		'automatic_tax[enabled]': 'true',
 		'tax_id_collection[enabled]': 'true',
-		allow_promotion_codes: 'true',
+	}
+	// No `allow_promotion_codes`: coupons can only be limited by product, and
+	// monthly and annual are one product, so Stripe's own code box would let a
+	// one-month code zero out a year. Kody checks the interval first
+	// (checkout-promo.ts) and attaches the code here.
+	const promotionCodeId = input.promotionCodeId?.trim()
+	if (promotionCodeId) {
+		form['discounts[0][promotion_code]'] = promotionCodeId
 	}
 	// Stripe accepts either `customer` or `customer_email`, never both.
 	if (customerId) {
@@ -436,7 +474,12 @@ export async function createCheckoutSession(
 			const trimmedKey = key.trim()
 			const trimmedValue = value.trim()
 			if (!trimmedKey || !trimmedValue) continue
+			// Session metadata for webhook/success attribution, and
+			// subscription_data so the created Subscription carries the same
+			// org keys (ADR 0065). Checkout does not copy session metadata
+			// onto the subscription by itself.
 			form[`metadata[${trimmedKey}]`] = trimmedValue
+			form[`subscription_data[metadata][${trimmedKey}]`] = trimmedValue
 		}
 	}
 
@@ -458,6 +501,45 @@ export async function createCheckoutSession(
 		})
 	}
 	return { id: parsed.value.id, url }
+}
+
+const promotionCodeSchema = object({
+	id: string(),
+	code: string(),
+	active: boolean(),
+	expires_at: optional(nullable(number())),
+	max_redemptions: optional(nullable(number())),
+	times_redeemed: optional(number()),
+})
+
+const promotionCodeListSchema = object({
+	data: array(promotionCodeSchema),
+})
+
+export type StripePromotionCode = InferOutput<typeof promotionCodeSchema>
+
+/**
+ * The active promotion code a customer typed. Stripe matches `code`
+ * case-insensitively. Null when no active code has that text.
+ */
+export async function findActivePromotionCode(
+	env: StripeEnv,
+	code: string,
+): Promise<StripePromotionCode | null> {
+	const trimmed = code.trim()
+	if (!trimmed) return null
+	const body = await stripeRequest(env, {
+		method: 'GET',
+		path: '/v1/promotion_codes',
+		query: { code: trimmed, active: 'true', limit: '1' },
+	})
+	const parsed = parseSafe(promotionCodeListSchema, body)
+	if (!parsed.success) {
+		throw new StripeApiError('Unexpected Stripe promotion code list shape.', {
+			status: 502,
+		})
+	}
+	return parsed.value.data[0] ?? null
 }
 
 /**
@@ -490,6 +572,38 @@ export async function listSubscriptions(
 		})
 	}
 	return parsed.value.data
+}
+
+/**
+ * Updates a subscription item seat quantity. Omits `proration_behavior` so
+ * Stripe uses the account default (create prorations).
+ */
+export async function updateSubscriptionItemQuantity(
+	env: StripeEnv,
+	input: { subscriptionItemId: string; quantity: number },
+): Promise<void> {
+	const subscriptionItemId = input.subscriptionItemId.trim()
+	if (!subscriptionItemId) {
+		throw new StripeApiError('Subscription item id is required.', {
+			status: 400,
+		})
+	}
+	if (!Number.isSafeInteger(input.quantity) || input.quantity < 1) {
+		throw new StripeApiError('Quantity must be a positive integer.', {
+			status: 400,
+		})
+	}
+	const body = await stripeRequest(env, {
+		method: 'POST',
+		path: `/v1/subscription_items/${encodeURIComponent(subscriptionItemId)}`,
+		form: { quantity: String(input.quantity) },
+	})
+	const parsed = parseSafe(updatedSubscriptionItemSchema, body)
+	if (!parsed.success) {
+		throw new StripeApiError('Unexpected Stripe subscription item shape.', {
+			status: 502,
+		})
+	}
 }
 
 /**
@@ -869,6 +983,39 @@ export async function createProratedRefundCreditNote(
 }
 
 /**
+ * Merge metadata onto an existing Stripe Customer or Subscription. Only sets
+ * the supplied keys; other metadata on the object is left alone. Used when
+ * Checkout created the object without org keys (legacy sessions) or when an
+ * operator backfills attribution.
+ */
+export async function mergeStripeObjectMetadata(
+	env: StripeEnv,
+	input: {
+		object: 'customers' | 'subscriptions'
+		id: string
+		metadata: Record<string, string>
+	},
+): Promise<void> {
+	const id = input.id.trim()
+	if (!id) {
+		throw new StripeApiError(`${input.object} id is required.`, { status: 400 })
+	}
+	const form: Record<string, string> = {}
+	for (const [key, value] of Object.entries(input.metadata)) {
+		const trimmedKey = key.trim()
+		const trimmedValue = value.trim()
+		if (!trimmedKey || !trimmedValue) continue
+		form[`metadata[${trimmedKey}]`] = trimmedValue
+	}
+	if (Object.keys(form).length === 0) return
+	await stripeRequest(env, {
+		method: 'POST',
+		path: `/v1/${input.object}/${encodeURIComponent(id)}`,
+		form,
+	})
+}
+
+/**
  * Permanently deletes a Stripe customer after its active subscriptions have
  * been canceled, preventing future invoices for an account that no longer
  * exists in Kody.
@@ -903,6 +1050,8 @@ export type BillingPortalFlowData = {
 	priceId: string
 	/** Where Stripe sends the customer once the update is confirmed. */
 	afterCompletionRedirectUrl: string
+	/** Seat quantity on the subscription item (defaults to 1). */
+	quantity?: number
 }
 
 /**
@@ -961,7 +1110,14 @@ export async function createBillingPortalSession(
 		form[`${flow}[subscription]`] = subscriptionId
 		form[`${flow}[items][0][id]`] = subscriptionItemId
 		form[`${flow}[items][0][price]`] = priceId
-		form[`${flow}[items][0][quantity]`] = '1'
+		const quantityRaw = input.flowData.quantity ?? 1
+		if (!Number.isSafeInteger(quantityRaw) || quantityRaw < 1) {
+			throw new StripeApiError(
+				'Portal subscription quantity must be a positive integer.',
+				{ status: 400 },
+			)
+		}
+		form[`${flow}[items][0][quantity]`] = String(quantityRaw)
 		form['flow_data[after_completion][type]'] = 'redirect'
 		form['flow_data[after_completion][redirect][return_url]'] =
 			afterCompletionRedirectUrl

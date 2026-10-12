@@ -6,33 +6,58 @@ from onboarding Step 1 — every named agent, on every device, none folded under
 Not listed — then one host's install steps. The MCP URL card covers any other
 host that speaks MCP. Also links the Advanced MCP OAuth clients page.
 
+Experimenters (`connection-profiles` flag, audience `experiments_opt_in`) also
+see named connection profiles on the list page: create a profile, add packages
+through the **Add package** combobox (each granted package is one row with
+read/execute toggles and Remove), copy `?profile=` MCP URL, and **Edit
+packages** on an existing profile (saves via `intent: 'update'`; the name is not
+editable there). Only granted packages render as rows, so large accounts do not
+get one checkbox per package. Unlimited remains the default connection (no
+profile param).
+
 ## How to get there
 
-- `/account/connections` — connected list, Add connection button, MCP URL. Does
-  not nest the add grid.
-- `/account/connections/new` — the agent grid, with a “← back to connections”
+Canonical pages are `/@<slug>/-/connections` (and `/@<slug>/-/connections/new`,
+`/@<slug>/-/connections/new/:agent`).
+
+- `/@<slug>/-/connections` — connected list, Add connection button, MCP URL.
+  Does not nest the add grid. Profiles (when flagged) sit under Unlimited.
+- `/@<slug>/-/connections/new` — the agent grid, with a “← back to connections”
   link. Does not wrap the connected list.
-- `/account/connections/new/:agent` — install steps for one `McpClientKind`
+- `/@<slug>/-/connections/new/:agent` — install steps for one `McpClientKind`
   (`cursor`, `claude-code`, `chatgpt`, …; `other` is not a page here). Unknown
   agents 404.
 
 Account rail → Connections; Overview keeps a "Manage connections" link.
+
+Each org page lists only the signed-in person's agents approved for that org
+(the org picked on the MCP consent screen; grants from before org stamping
+belong to the signup org). Team orgs open it to every member role and to
+grant-only collaborators. Revoke there removes only that org's grants; the same
+host stays connected elsewhere. Connection profiles are signup-org only.
+`/account/connected-agents.json` binds the org from a same-origin Referer on
+`/@<slug>/-/connections`.
 
 ## Drive it
 
 ```bash
 node tools/control-kody.ts login
 node tools/control-kody.ts request GET /account/connected-agents.json
-node tools/control-kody.ts request GET /account/connections/new
-node tools/control-kody.ts request GET /account/connections/new/cursor
+node tools/control-kody.ts request GET /@<slug>/-/connections/new
+node tools/control-kody.ts request GET /@<slug>/-/connections/new/cursor
+# Create a profile (experimenter + flag on):
+node tools/control-kody.ts request POST /account/connected-agents.json --json '{"intent":"create","name":"ci","grants":[{"resourceType":"package","resourceId":"<package-id>","actions":["read","execute"]}]}'
 ```
 
 ## APIs
 
-- `GET|POST /account/connected-agents.json` (`{ intent: 'revoke', clientId }`)
+- `GET|POST /account/connected-agents.json` (`{ intent: 'revoke', clientId }` or
+  profile `{ intent: 'create'|'update'|'delete', ... }`)
 - `mcpServerUrl` in that payload is empty until the account email is verified
   (same gate as `/onboarding.json`); the page then shows a verify note instead
   of the grid and copy card.
+- When `connectionProfilesEnabled` is true, the payload also includes
+  `connectionProfiles` and `connectionProfilePackageOptions`.
 - All three HTML views share that one payload (no refetch between them).
 
 ## Gotchas
@@ -54,3 +79,6 @@ node tools/control-kody.ts request GET /account/connections/new/cursor
   steps** for known kinds.
 - `/account/connections.json` is the sign-in provider (GitHub, Google, …) list
   on Overview, not this page's data.
+- Profile names are at most 64 characters; `Unlimited` is reserved. Empty named
+  profiles deny all packages; absent profile keeps unlimited access. Non-
+  experimenters ignore `?profile=`.

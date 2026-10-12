@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -30,6 +31,7 @@ export const emailSendCapability = defineDomainCapability(
 	capabilityDomainNames.email,
 	{
 		name: 'emailSend',
+		orgPermission: 'email:send',
 		description:
 			'Send email from your platform-assigned {username}@<platform domain> to your verified email destinations, optionally attaching files (base64 content). Destinations expand the allowed to set; Kody is not an open relay. Omit `to` to use the default destination. Every explicit address must be the verified identity email or a verified extra destination; if any `to` is missing or unverified the whole send fails. With attachments, the whole message must fit the plan email_message_bytes cap. Use emailReply to answer stored inbound mail.',
 		keywords: ['email', 'send', 'mail', 'outbound', 'notify', 'attachment'],
@@ -47,7 +49,8 @@ export const emailSendCapability = defineDomainCapability(
 			const user = await requireVerifiedEmailAccountUser(ctx)
 			const result = await sendOutboundEmail({
 				env: ctx.env,
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
+				request: ctx.callerContext.request,
 				accountEmail: user.email,
 				recipientPolicy: 'self',
 				to: args.to ?? null,

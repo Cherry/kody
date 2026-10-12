@@ -1,7 +1,14 @@
+import {
+	ownerIdFromStored,
+	personalOrgId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { inheritRequest } from '#worker/request-context/request-context.ts'
 import { expect, test, vi, afterEach } from 'vitest'
 import { getJobRowById } from '@kody-internal/shared/jobs/repo.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import * as registry from '#mcp/run-kody-registry.ts'
+import { backgroundExecutorTimeoutMs } from '#mcp/executor-budgets.ts'
+import { createMcpCallerContext } from '#worker/mcp/context.ts'
 import { planLimits } from '#universal/plans.ts'
 import {
 	AccountSuspendedError,
@@ -13,15 +20,15 @@ import * as moduleGraph from '#worker/package-runtime/module-graph.ts'
 import { persistPublishedBundleArtifact } from '#worker/package-runtime/published-bundle-artifacts.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
 import * as repoKodyExecution from '#worker/repo/repo-kody-execution.ts'
-import { buildJobSourceFiles } from '#worker/repo/source-templates.ts'
 import { durableObjectInstanceInactiveCloseMessage } from '#worker/sentry-options.ts'
 import { createStorageEstimateReadError } from '#worker/storage-estimate-error.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
 import * as usageModule from '#worker/usage/record-usage.ts'
 import { TransientJobExecutionError } from './execution-safety.ts'
+import { buildPackageJobId } from './package-job-id.ts'
 import * as schedule from './schedule.ts'
-import { executeJobOnce, runJobNow } from './service.ts'
+import { executeJobOnce, runJobNow, updateJob } from './service.ts'
 import { type JobRecord, type PersistedJobCallerContext } from './types.ts'
 import {
 	identityMockModule,
@@ -34,7 +41,8 @@ import {
 	createBundleArtifactsKv,
 	insertPublishedEntitySource,
 	createBaseCallerContext,
-	insertLeftoverJob,
+	insertPackageJob,
+	withCallerUser,
 } from '#worker/test-support/jobs-service.ts'
 
 vi.mock('#worker/repo/source-service.ts', async () =>
@@ -88,8 +96,10 @@ afterEach(() => {
 
 const onceSchedule = { type: 'once', runAt: '2026-04-17T15:00:00Z' } as const
 
-function createExecuteEnv() {
-	const db = createDatabase()
+function createExecuteEnv(
+	initialRows: Parameters<typeof createDatabase>[0] = {},
+) {
+	const db = createDatabase(initialRows)
 	const bundleKv = createBundleArtifactsKv()
 	const env = createJobServiceTestEnv({
 		APP_DB: db,
@@ -108,14 +118,13 @@ function createJob(
 ): JobRecord {
 	return {
 		version: 1,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		publishedCommit: null,
 		storageId: `job:${input.id}`,
 		schedule: onceSchedule,
 		timezone: 'UTC',
 		enabled: true,
 		killSwitchEnabled: false,
-		preserved: false,
 		expiresAt: null,
 		createdAt: '2026-04-16T00:00:00.000Z',
 		updatedAt: '2026-04-16T00:00:00.000Z',
@@ -127,30 +136,17 @@ function createJob(
 	}
 }
 
-function kodyJobManifest(title: string, description: string) {
-	return JSON.stringify({
-		version: 1,
-		kind: 'job',
-		title,
-		description,
-		sourceRoot: '/',
-		entrypoint: 'src/job.ts',
-	})
-}
-
-/** Leftover (non-package) job with a published kody.json snapshot. */
-async function publishLeftoverJob(input: {
+/** Package job inserted with a published package.json snapshot. */
+async function publishInsertedPackageJob(input: {
 	env: Env
 	callerContext: PersistedJobCallerContext
 	name: string
 	code: string
 	params?: Record<string, unknown>
 	schedule?: JobRecord['schedule']
-	publishedCommit?: string
-	description?: string
 }) {
 	mockRepoPersistence()
-	const jobView = await insertLeftoverJob({
+	const jobView = await insertPackageJob({
 		env: input.env,
 		callerContext: input.callerContext,
 		body: {
@@ -158,23 +154,6 @@ async function publishLeftoverJob(input: {
 			code: input.code,
 			params: input.params,
 			schedule: input.schedule ?? onceSchedule,
-		},
-	})
-	await insertPublishedEntitySource({
-		db: input.env.APP_DB as ReturnType<typeof createDatabase>,
-		env: input.env,
-		userId: input.callerContext.user.userId,
-		sourceId: jobView.sourceId,
-		entityKind: 'job',
-		entityId: jobView.id,
-		publishedCommit: input.publishedCommit ?? 'published-commit-1',
-		manifestPath: 'kody.json',
-		files: {
-			'kody.json': kodyJobManifest(
-				input.name,
-				input.description ?? 'Runs once at 2026-04-17T15:00:00.000Z',
-			),
-			'src/job.ts': input.code,
 		},
 	})
 	const row = await getJobRowById(
@@ -200,7 +179,7 @@ async function publishPackageJob(input: {
 	const { db, bundleKv, env } = createExecuteEnv()
 	await insertPublishedEntitySource({
 		db,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		sourceId: input.sourceId,
 		entityKind: 'package',
 		entityId: input.id,
@@ -270,6 +249,7 @@ test('executeJobOnce gates entitlement, identity blips, and suspension before sa
 		count: limit,
 	})
 	const quota = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env: quotaEnv,
 		job: intervalJob('job-run-quota'),
 		callerContext,
@@ -290,6 +270,7 @@ test('executeJobOnce gates entitlement, identity blips, and suspension before sa
 	)
 	await expect(
 		executeJobOnce({
+			source: { kind: 'schedule', jobId: 'test-job' },
 			env,
 			job: intervalJob('job-identity-retry'),
 			callerContext,
@@ -301,6 +282,7 @@ test('executeJobOnce gates entitlement, identity blips, and suspension before sa
 		new AccountSuspendedError(),
 	)
 	const suspended = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env,
 		job: intervalJob('job-suspended'),
 		callerContext,
@@ -314,7 +296,7 @@ test('executeJobOnce gates entitlement, identity blips, and suspension before sa
 	expect(recordUsageSpy).not.toHaveBeenCalled()
 })
 
-test('interactive-origin leftover jobs run in the background with writable storage and execute-style invoke tools', async () => {
+test('interactive-origin package jobs run in the background with writable storage and execute-style invoke tools', async () => {
 	// Usage rollup writes are best-effort and fail against this fake env.
 	silenceIncidentalRuntimeWarnings()
 	const { env } = createExecuteEnv()
@@ -324,10 +306,10 @@ test('interactive-origin leftover jobs run in the background with writable stora
 	}
 	const code =
 		'export default async (params) => { await storage.set("count", params.stepCount); return await storage.sql("select 2 as value") }'
-	const { jobView, row } = await publishLeftoverJob({
+	const { jobView, row } = await publishInsertedPackageJob({
 		env,
 		callerContext,
-		name: 'Storage bridge',
+		name: 'storage-bridge',
 		code,
 		params: { stepCount: 2 },
 	})
@@ -341,6 +323,7 @@ test('interactive-origin leftover jobs run in the background with writable stora
 	expect(row.record.storageId).toBe(`job:${jobView.id}`)
 	expect(row.callerContext?.executionOrigin).toBe('interactive')
 	const outcome = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env,
 		job: row.record,
 		callerContext: row.callerContext,
@@ -366,56 +349,9 @@ test('interactive-origin leftover jobs run in the background with writable stora
 			packageInvokeTools: expect.anything(),
 		}),
 	)
-})
-
-test('leftover kody.json jobs execute the bundled published entry with job run-record context', async () => {
-	silenceIncidentalRuntimeWarnings()
-	const { env } = createExecuteEnv()
-	const callerContext = createBaseCallerContext()
-	const name = 'Capability-created one-off job'
-	const { jobView, row } = await publishLeftoverJob({
-		env,
-		callerContext,
-		name,
-		code: 'export default async () => ({ ok: true, adHoc: true })',
-		params: { step: 'lights-off' },
+	expect(executeSpy.mock.calls[0]?.[4]).toMatchObject({
+		executorTimeoutMs: backgroundExecutorTimeoutMs,
 	})
-	const executeSpy = vi
-		.spyOn(registry, 'runBundledModuleWithRegistry')
-		.mockResolvedValue({
-			result: { ok: true, adHoc: true },
-			logs: ['ad hoc job executed'],
-		})
-
-	const outcome = await executeJobOnce({ env, job: row.record, callerContext })
-
-	expect(outcome.execution).toEqual({
-		ok: true,
-		result: { ok: true, adHoc: true },
-		logs: ['ad hoc job executed'],
-	})
-	expect(executeSpy).toHaveBeenCalledTimes(1)
-	const [, runCaller, bundle, , runOptions] = executeSpy.mock.calls[0]!
-	expect(runCaller).toMatchObject({
-		repoContext: expect.objectContaining({
-			entityKind: 'job',
-			entityId: jobView.id,
-			manifestPath: 'kody.json',
-		}),
-	})
-	expect(bundle).toMatchObject({ mainModule: 'dist/bundled-entry.js' })
-	expect(runOptions).toMatchObject({
-		runRecord: {
-			surface: 'job',
-			name,
-			jobId: jobView.id,
-			storageId: `job:${jobView.id}`,
-			sourceId: jobView.sourceId,
-			publishedCommit: 'published-commit-1',
-		},
-	})
-	expect(runOptions).not.toHaveProperty('runRecord.packageId')
-	expect(runOptions).not.toHaveProperty('runRecord.kodyId')
 })
 
 test('executeJobOnce records job_run usage for success and failure', async () => {
@@ -424,10 +360,10 @@ test('executeJobOnce records job_run usage for success and failure', async () =>
 		.mockResolvedValue(undefined)
 	const { env } = createExecuteEnv()
 	const callerContext = createBaseCallerContext()
-	const { jobView, row } = await publishLeftoverJob({
+	const { jobView, row } = await publishInsertedPackageJob({
 		env,
 		callerContext,
-		name: 'Usage-metered job',
+		name: 'usage-metered-job',
 		code: 'export default async () => ({ ok: true, metered: true })',
 	})
 	vi.spyOn(registry, 'runBundledModuleWithRegistry')
@@ -458,6 +394,7 @@ test('executeJobOnce records job_run usage for success and failure', async () =>
 	for (const [usageOutcome, execution] of cases) {
 		recordUsageSpy.mockClear()
 		const outcome = await executeJobOnce({
+			source: { kind: 'schedule', jobId: 'test-job' },
 			env,
 			job: row.record,
 			callerContext,
@@ -467,6 +404,8 @@ test('executeJobOnce records job_run usage for success and failure', async () =>
 		expect(recordUsageSpy).toHaveBeenCalledTimes(1)
 		expect(recordUsageSpy).toHaveBeenCalledWith(env, {
 			userId: row.record.userId,
+			actorUserId: '',
+			automationSource: 'schedule',
 			eventType: 'job_run',
 			entityId: jobView.id,
 			durationMs: outcome.durationMs,
@@ -559,6 +498,7 @@ test('package-backed jobs execute from published package.json manifests', async 
 		})
 		executeSpy.mockResolvedValueOnce(row.run)
 		const outcome = await executeJobOnce({
+			source: { kind: 'schedule', jobId: 'test-job' },
 			env,
 			job,
 			callerContext: createBaseCallerContext(),
@@ -591,23 +531,37 @@ test('package-backed jobs with a stored typecheck bypass policy still surface ex
 		})
 	const formatJobErrorSpy = vi.spyOn(schedule, 'formatJobError')
 
-	expect((await executeJobOnce({ env, job, callerContext })).execution).toEqual(
-		{
-			ok: true,
-			result: { ok: true, bypassed: true },
-			logs: ['repo-backed kody executed'],
-		},
-	)
+	expect(
+		(
+			await executeJobOnce({
+				env,
+				job,
+				callerContext,
+				source: { kind: 'schedule', jobId: 'test-job' },
+			})
+		).execution,
+	).toEqual({
+		ok: true,
+		result: { ok: true, bypassed: true },
+		logs: ['repo-backed kody executed'],
+	})
 	expect(executeSpy).toHaveBeenCalledTimes(1)
 
 	executeSpy.mockRejectedValueOnce(new Error('Executor import failed'))
-	expect((await executeJobOnce({ env, job, callerContext })).execution).toEqual(
-		{
-			ok: false,
-			error: 'Executor import failed',
-			logs: [],
-		},
-	)
+	expect(
+		(
+			await executeJobOnce({
+				env,
+				job,
+				callerContext,
+				source: { kind: 'schedule', jobId: 'test-job' },
+			})
+		).execution,
+	).toEqual({
+		ok: false,
+		error: 'Executor import failed',
+		logs: [],
+	})
 	expect(formatJobErrorSpy).toHaveBeenCalled()
 })
 
@@ -647,6 +601,7 @@ test('package-backed ESM jobs bundle the package entry and use runtime invoke to
 	})
 
 	const outcome = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env,
 		job,
 		callerContext: createBaseCallerContext(),
@@ -673,22 +628,20 @@ test('stale published job bundles rebuild after the source commit changes', asyn
 	const publish = (commit: string, jobSource: string) =>
 		insertPublishedEntitySource({
 			db,
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			sourceId: 'source-stale-bundle',
-			entityKind: 'job',
-			entityId: 'job-stale-bundle',
+			entityKind: 'package',
+			entityId: 'pkg-stale-bundle',
 			publishedCommit: commit,
-			manifestPath: 'kody.json',
+			manifestPath: 'package.json',
 			kv: bundleKv,
 			files: {
-				'kody.json': JSON.stringify({
-					version: 1,
-					kind: 'job',
-					title: 'Stale bundle job',
+				'package.json': createPackageJobManifestText({
+					packageName: '@kody/stale-bundle',
+					kodyId: 'stale-bundle',
 					description: 'Runs stale bundle test',
-					keywords: ['job'],
-					searchText: 'Runs stale bundle test',
-					entrypoint: 'src/job.ts',
+					jobName: 'stale-bundle-job',
+					exportPath: './src/job.ts',
 				}),
 				'src/job.ts': jobSource,
 			},
@@ -698,10 +651,10 @@ test('stale published job bundles rebuild after the source commit changes', asyn
 	if (!source) throw new Error('Expected source row.')
 	await persistPublishedBundleArtifact({
 		env: { APP_DB: db, BUNDLE_ARTIFACTS_KV: bundleKv } as Env,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		source,
 		kind: 'job',
-		artifactName: 'job-stale-bundle',
+		artifactName: 'stale-bundle-job',
 		entryPoint: 'src/job.ts',
 		mainModule: 'dist/bundled-entry.js',
 		modules: {
@@ -709,7 +662,11 @@ test('stale published job bundles rebuild after the source commit changes', asyn
 				'export default async () => ({ version: "old-bundle" })',
 		},
 		dependencies: [],
-		packageContext: null,
+		packageContext: {
+			packageId: 'pkg-stale-bundle',
+			kodyId: 'stale-bundle',
+			sourceId: 'source-stale-bundle',
+		},
 	})
 	await publish(
 		'commit-2',
@@ -723,10 +680,11 @@ test('stale published job bundles rebuild after the source commit changes', asyn
 		})
 
 	const outcome = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env,
 		job: createJob({
-			id: 'job-stale-bundle',
-			name: 'Stale bundle job',
+			id: buildPackageJobId('pkg-stale-bundle', 'stale-bundle-job'),
+			name: 'stale-bundle-job',
 			sourceId: 'source-stale-bundle',
 			publishedCommit: 'commit-2',
 		}),
@@ -751,7 +709,7 @@ test('executeJobOnce reports a missing published snapshot without running the sa
 	const { db, env } = createExecuteEnv()
 	await insertPublishedEntitySource({
 		db,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		sourceId: 'source-1',
 		entityKind: 'package',
 		entityId: 'job-repo-discard-failure',
@@ -762,6 +720,7 @@ test('executeJobOnce reports a missing published snapshot without running the sa
 	const executeSpy = vi.spyOn(registry, 'runBundledModuleWithRegistry')
 
 	const outcome = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'test-job' },
 		env,
 		job: createJob({
 			id: 'job-repo-discard-failure',
@@ -782,18 +741,53 @@ test('executeJobOnce reports a missing published snapshot without running the sa
 	expect(formatJobErrorSpy).toHaveBeenCalled()
 })
 
+test('executeJobOnce loads the published source by job owner id, not the caller person', async () => {
+	silenceIncidentalRuntimeWarnings()
+	const orgId = ownerIdFromStored('org-owner')
+	const { db, env } = createExecuteEnv({
+		orgs: [{ id: orgId, slug: 'org-owner', plan: 'free' }],
+	})
+	await insertPublishedEntitySource({
+		db,
+		userId: orgId,
+		sourceId: 'source-org',
+		entityKind: 'package',
+		entityId: 'pkg-org',
+		publishedCommit: 'commit-1',
+		manifestPath: 'package.json',
+	})
+
+	const outcome = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'job-org' },
+		env,
+		job: createJob({
+			id: 'job-org',
+			name: 'Org job',
+			sourceId: 'source-org',
+			publishedCommit: 'commit-1',
+			userId: orgId,
+		}),
+		callerContext: createBaseCallerContext(),
+	})
+
+	expect(outcome.execution).toEqual({
+		ok: false,
+		error:
+			'Published snapshot for source "source-org" at commit "commit-1" was not found.',
+		logs: [],
+	})
+})
+
 test('executeJobOnce retries claimed platform blips and surfaces them on run-now', async () => {
 	silenceIncidentalRuntimeWarnings()
 	const { env } = createExecuteEnv()
 	const callerContext = createBaseCallerContext()
-	const { row } = await publishLeftoverJob({
+	const { row } = await publishInsertedPackageJob({
 		env,
 		callerContext,
-		name: 'Platform blip retry job',
+		name: 'platform-blip-retry-job',
 		code: 'export default async () => ({ ok: true })',
 		schedule: { type: 'interval', every: '15m' },
-		publishedCommit: 'published-commit-platform-blip',
-		description: 'Retries claimed platform blips',
 	})
 	const estimateError = createStorageEstimateReadError({
 		storageId: 'package:estimate-target',
@@ -803,7 +797,7 @@ test('executeJobOnce retries claimed platform blips and surfaces them on run-now
 	const executeSpy = vi.spyOn(registry, 'runBundledModuleWithRegistry')
 	const claimedHandle = {
 		id: 'run-platform-blip-claimed',
-		userId: callerContext.user.userId,
+		userId: personalOrgId(callerContext.user.userId),
 		startedAt: '2026-08-21T14:40:00.000Z',
 		persistence: 'eager' as const,
 		context: {
@@ -814,7 +808,13 @@ test('executeJobOnce retries claimed platform blips and surfaces them on run-now
 		},
 	}
 	const run = (runRecordHandle?: typeof claimedHandle) =>
-		executeJobOnce({ env, job: row.record, callerContext, runRecordHandle })
+		executeJobOnce({
+			env,
+			job: row.record,
+			callerContext,
+			runRecordHandle,
+			source: { kind: 'schedule', jobId: 'test-job' },
+		})
 
 	for (const error of [
 		estimateError.message,
@@ -840,7 +840,49 @@ test('executeJobOnce retries claimed platform blips and surfaces them on run-now
 	})
 })
 
-test('runJobNow retains once jobs for retention cleanup instead of deleting them', async () => {
+test('runJobNow refuses a run that has no person', async () => {
+	silenceIncidentalRuntimeWarnings()
+	const { env } = createExecuteEnv()
+	mockRepoPersistence()
+	const callerContext = createBaseCallerContext()
+	const jobView = await insertPackageJob({
+		env,
+		callerContext,
+		body: { name: 'runs-as-nobody', schedule: onceSchedule },
+	})
+	const executeSpy = vi.spyOn(registry, 'runBundledModuleWithRegistry')
+	const actorless = {
+		...callerContext,
+		request: {
+			...callerContext.request!,
+			actor: null,
+			attribution: {
+				kind: 'automation' as const,
+				source: 'schedule' as const,
+				sourceId: jobView.id,
+			},
+		},
+	}
+
+	await expect(
+		runJobNow({
+			env,
+			userId: personalOrgId(callerContext.user.userId),
+			jobId: jobView.id,
+			callerContext: actorless as never,
+		}),
+	).rejects.toThrow('can only be run now by a signed-in person')
+	await expect(
+		runJobNow({
+			env,
+			userId: personalOrgId(callerContext.user.userId),
+			jobId: jobView.id,
+		}),
+	).rejects.toThrow('can only be run now by a signed-in person')
+	expect(executeSpy).not.toHaveBeenCalled()
+})
+
+test('runJobNow keeps once jobs instead of deleting them', async () => {
 	silenceIncidentalRuntimeWarnings()
 	const { db, env: baseEnv } = createExecuteEnv()
 	const deleteByIds = vi.fn(async () => {})
@@ -850,29 +892,34 @@ test('runJobNow retains once jobs for retention cleanup instead of deleting them
 	}
 	mockRepoPersistence()
 	const callerContext = createBaseCallerContext()
-	const jobView = await insertLeftoverJob({
+	const jobView = await insertPackageJob({
 		env,
 		callerContext,
-		body: {
-			name: 'Run once and retain',
-			code: 'export default async () => ({ ok: true })',
-			schedule: onceSchedule,
-		},
+		body: { name: 'run-once-and-retain', schedule: onceSchedule },
 	})
-	vi.spyOn(registry, 'runBundledModuleWithRegistry').mockResolvedValue({
-		result: { ok: true },
-		logs: [],
-	})
+	const executeSpy = vi
+		.spyOn(registry, 'runBundledModuleWithRegistry')
+		.mockResolvedValue({
+			result: { ok: true },
+			logs: [],
+		})
 
 	const result = await runJobNow({
 		env,
-		userId: callerContext.user.userId,
+		userId: personalOrgId(callerContext.user.userId),
 		jobId: jobView.id,
 		callerContext,
 	})
 
-	expect(result.execution).toEqual({ ok: true, result: { ok: true }, logs: [] })
+	expect(result.execution).toEqual({
+		ok: true,
+		result: { ok: true },
+		logs: [],
+	})
 	expect(result.deletedAfterRun).toBe(false)
+	const runRequest = executeSpy.mock.lastCall?.[1].request
+	expect(runRequest?.attribution).toEqual(callerContext.request?.attribution)
+	expect(runRequest?.credential).toEqual(callerContext.request?.credential)
 	expect(deleteByIds).not.toHaveBeenCalled()
 	const row = await getJobRowById(db, callerContext.user.userId, jobView.id)
 	expect(row?.record).toEqual(
@@ -894,42 +941,16 @@ test('runJobNow retains once jobs for retention cleanup instead of deleting them
 test('runJobNow can use a one-off repo check policy override without changing the stored job', async () => {
 	silenceIncidentalRuntimeWarnings()
 	const { db, env } = createExecuteEnv()
-	await insertPublishedEntitySource({
-		db,
-		userId: 'user-123',
-		sourceId: 'source-run-now-override',
-		entityKind: 'package',
-		entityId: 'job-repo-run-now-override',
-		publishedCommit: 'commit-run-now-override',
-		manifestPath: 'package.json',
-	})
 	const callerContext = createBaseCallerContext()
 	mockRepoPersistence()
-	const jobView = await insertLeftoverJob({
+	const jobView = await insertPackageJob({
 		env,
 		callerContext,
 		body: {
-			name: 'Repo-backed run-now override',
-			code: 'export default async () => ({ ok: true })',
-			sourceId: 'source-run-now-override',
-			publishedCommit: 'commit-run-now-override',
+			name: 'run-now-override',
+			code: 'export default async function run() { return { ok: true, override: true } }',
 			schedule: { type: 'interval', every: '15m' },
 		},
-	})
-	await insertPublishedEntitySource({
-		db,
-		env,
-		userId: callerContext.user.userId,
-		sourceId: jobView.sourceId,
-		entityKind: 'job',
-		entityId: jobView.id,
-		publishedCommit: 'published-commit-1',
-		manifestPath: 'kody.json',
-		files: buildJobSourceFiles({
-			job: jobView,
-			moduleSource:
-				'export default async function run() { return { ok: true, override: true } }',
-		}),
 	})
 	const executeSpy = vi
 		.spyOn(registry, 'runBundledModuleWithRegistry')
@@ -940,7 +961,7 @@ test('runJobNow can use a one-off repo check policy override without changing th
 
 	const result = await runJobNow({
 		env,
-		userId: callerContext.user.userId,
+		userId: personalOrgId(callerContext.user.userId),
 		jobId: jobView.id,
 		callerContext,
 		repoCheckPolicyOverride: { allowTypecheckFailures: true },
@@ -954,4 +975,142 @@ test('runJobNow can use a one-off repo check policy override without changing th
 	const row = await getJobRowById(db, callerContext.user.userId, jobView.id)
 	expect(row?.record.repoCheckPolicy).toBeUndefined()
 	expect(executeSpy).toHaveBeenCalledTimes(1)
+})
+
+test('executeJobOnce re-resolves the org binding at run time instead of trusting the stored one', async () => {
+	silenceIncidentalRuntimeWarnings()
+	const recordUsageSpy = vi
+		.spyOn(usageModule, 'recordUsage')
+		.mockResolvedValue(undefined)
+	const executeSpy = vi.spyOn(registry, 'runBundledModuleWithRegistry')
+	const callerContext = createBaseCallerContext()
+	if (!callerContext.request) throw new Error('Expected a request context.')
+	const orgId = 'org-gone'
+	// Blobs persisted before this change still carry a binding and role.
+	const legacyBlob = (orgBinding: unknown) =>
+		({ ...callerContext, orgBinding }) as PersistedJobCallerContext
+	const job = (id: string, owner: string) =>
+		createJob({
+			id,
+			name: id,
+			sourceId: `source-${id}`,
+			schedule: { type: 'interval', every: '1h' },
+			userId: ownerIdFromStored(owner),
+		})
+
+	// The stored blob still names the org, but the org was soft-deleted.
+	const { env } = createExecuteEnv({
+		orgs: [{ id: orgId, slug: 'gone', plan: 'free', deleted_at: '2026-01-01' }],
+	})
+	const missingOrg = await executeJobOnce({
+		source: { kind: 'schedule', jobId: 'job-org-gone' },
+		env,
+		job: job('job-org-gone', orgId),
+		callerContext: legacyBlob({
+			org: { id: orgId, slug: 'gone' },
+			role: 'owner',
+		}),
+	})
+	expect(missingOrg.execution).toMatchObject({
+		ok: false,
+		error: expect.stringContaining('no longer active'),
+	})
+
+	// Run-now by a person who no longer holds the org fails closed.
+	const { env: orgEnv } = createExecuteEnv({
+		orgs: [{ id: 'org-live', slug: 'live', plan: 'free' }],
+	})
+	const lostAccess = await executeJobOnce({
+		source: inheritRequest(callerContext.request),
+		env: orgEnv,
+		job: job('job-lost-access', 'org-live'),
+		callerContext: legacyBlob({
+			org: { id: 'org-live', slug: 'live' },
+			role: 'owner',
+		}),
+	})
+	expect(lostAccess.execution).toMatchObject({
+		ok: false,
+		error: expect.stringContaining('no longer has access'),
+	})
+
+	expect(executeSpy).not.toHaveBeenCalled()
+	expect(recordUsageSpy).not.toHaveBeenCalled()
+})
+
+test("a team-org job runs for an active member and a run-now uses the member's current role", async () => {
+	silenceIncidentalRuntimeWarnings()
+	vi.spyOn(usageModule, 'recordUsage').mockResolvedValue(undefined)
+	const base = createBaseCallerContext()
+	const teamOrgId = ownerIdFromStored('org-team')
+	const { db, env } = createExecuteEnv({
+		orgs: [{ id: teamOrgId, slug: 'team', plan: 'free' }],
+		org_memberships: [
+			{ org_id: teamOrgId, user_id: base.user.userId, role: 'member' },
+		],
+	})
+	// The request is bound to the team org; the stored blob (pre-change) still
+	// carries the Owner role the member held when the job was created.
+	const teamContext = withCallerUser(
+		createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl: base.baseUrl,
+			user: base.user,
+			storageContext: base.storageContext,
+			orgBinding: { org: { id: teamOrgId, slug: 'team' }, role: 'owner' },
+		}),
+	)
+	if (!teamContext.request) throw new Error('Expected a request context.')
+	mockRepoPersistence()
+	const jobView = await insertPackageJob({
+		env,
+		callerContext: teamContext,
+		ownerId: teamOrgId,
+		body: { name: 'team-job', schedule: { type: 'interval', every: '1h' } },
+	})
+	const row = await getJobRowById(db, teamOrgId, jobView.id)
+	if (!row) throw new Error('Expected the job under the team org.')
+
+	const executeSpy = vi
+		.spyOn(registry, 'runBundledModuleWithRegistry')
+		.mockResolvedValue({ result: { ok: true }, error: undefined, logs: [] })
+	const legacyBlob = {
+		...row.callerContext,
+		orgBinding: { org: { id: teamOrgId, slug: 'team' }, role: 'owner' },
+	} as PersistedJobCallerContext
+
+	// Scheduled tick: team automation with no actor keeps running.
+	const scheduled = await executeJobOnce({
+		source: { kind: 'schedule', jobId: row.record.id },
+		env,
+		job: row.record,
+		callerContext: legacyBlob,
+	})
+	expect(scheduled.execution).toMatchObject({ ok: true })
+	expect(executeSpy).toHaveBeenCalledTimes(1)
+	expect(executeSpy.mock.calls[0]?.[1]).toMatchObject({
+		orgBinding: { org: { id: teamOrgId }, role: null },
+	})
+
+	// Run-now by the (now demoted) member runs with the role they hold today.
+	const runNow = await executeJobOnce({
+		source: inheritRequest(teamContext.request),
+		env,
+		job: row.record,
+		callerContext: legacyBlob,
+	})
+	expect(runNow.execution).toMatchObject({ ok: true })
+	expect(executeSpy).toHaveBeenCalledTimes(2)
+	expect(executeSpy.mock.calls[1]?.[1]).toMatchObject({
+		orgBinding: { org: { id: teamOrgId }, role: 'member' },
+	})
+
+	// A member's update targets the team's job, not a personal one.
+	await updateJob({
+		env,
+		callerContext: teamContext,
+		body: { id: jobView.id, enabled: false },
+	})
+	const updated = await getJobRowById(db, teamOrgId, jobView.id)
+	expect(updated?.record.enabled).toBe(false)
 })

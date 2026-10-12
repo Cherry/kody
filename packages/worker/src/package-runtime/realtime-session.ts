@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { buildFacetName } from '#mcp/app-runner-facet-names.ts'
 import { resolveBackgroundMcpUser } from '#worker/identity/background-mcp-user.ts'
@@ -6,6 +7,7 @@ import {
 	accountSuspendedErrorCode,
 	isAccountSuspendedError,
 } from '#worker/account/account-suspension.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 import { getSavedPackageById } from '#worker/package-registry/repo.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
 import { loadPackageSourceBySourceId } from '#worker/package-registry/source.ts'
@@ -35,7 +37,7 @@ type PersistedPackageRealtimeSession = {
 }
 
 type PackageRealtimeBindingState = {
-	userId: string
+	userId: OwnerId
 	packageId: string
 	kodyId: string
 	sourceId: string
@@ -147,7 +149,7 @@ type PackageRealtimeHookInput = {
 }
 
 type PackageRealtimeHookContext = {
-	userId: string
+	userId: OwnerId
 	packageId: string
 	kodyId: string
 	baseUrl: string
@@ -310,10 +312,23 @@ function createPackageAppWorkerBindingIdentity(
 	])
 }
 
-async function resolvePackageAppWorkerBuildInput(input: {
+export async function resolvePackageAppWorkerBuildInput(input: {
 	env: Env
 	binding: PackageRealtimeBindingState
 }) {
+	// Realtime connects only through hosted serving, which serves a person's
+	// own personal-org apps, so the org id is that person and they are its
+	// Owner. A team org has no such person and is refused.
+	const orgBinding = await loadOrgBindingForOrg(
+		input.env.APP_DB,
+		input.binding.userId,
+		input.binding.userId,
+	)
+	if (!orgBinding) {
+		throw new Error(
+			"Package realtime serves only a person's own personal-org apps.",
+		)
+	}
 	const savedPackage = await getSavedPackageById(input.env.APP_DB, {
 		userId: input.binding.userId,
 		packageId: input.binding.packageId,
@@ -334,6 +349,7 @@ async function resolvePackageAppWorkerBuildInput(input: {
 			input.env.APP_DB,
 			input.binding.userId,
 		),
+		orgBinding,
 		storageContext: {
 			sessionId: null,
 			appId: input.binding.packageId,
@@ -341,6 +357,7 @@ async function resolvePackageAppWorkerBuildInput(input: {
 			storageId: input.binding.packageId,
 		},
 		repoContext: null,
+		source: { kind: 'package-app' },
 	})
 	return {
 		baseUrl: input.binding.baseUrl,
@@ -980,7 +997,7 @@ function getPackageRealtimeNamespace(env: Env) {
 
 function getPackageRealtimeStub(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId: string
 }): PackageRealtimeSessionRpc {
 	const namespace = getPackageRealtimeNamespace(input.env)
@@ -998,7 +1015,7 @@ function getPackageRealtimeStub(input: {
 
 export function packageRealtimeSessionRpc(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId: string
 	kodyId: string
 	sourceId: string

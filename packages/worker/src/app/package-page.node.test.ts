@@ -1,11 +1,14 @@
+import { DatabaseSync } from 'node:sqlite'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 
 const mockModule = vi.hoisted(() => ({
 	resolvePackagePageUrl: vi.fn(),
 	readAuthenticatedAppUser: vi.fn(),
 	loadCommunityDetailData: vi.fn(),
 	loadAccountPackageDetail: vi.fn(),
-	loadViewerPackageShare: vi.fn(),
 	getUserSocialRowByUsername: vi.fn(),
 }))
 
@@ -36,18 +39,35 @@ vi.mock('#worker/community/profile-repo.ts', () => ({
 		mockModule.getUserSocialRowByUsername(...args),
 }))
 
-vi.mock('#worker/package-registry/share-grants.ts', () => ({
-	loadViewerPackageShare: (...args: Array<unknown>) =>
-		mockModule.loadViewerPackageShare(...args),
-	toPackageShareGrantLoaderView: (view: unknown) => view,
-}))
+const { loadPackagePage } = await import('./package-page.ts')
 
-const { loadPackagePage, packagePageIsPrivate } =
-	await import('./package-page.ts')
+function createEnv() {
+	const sqlite = new DatabaseSync(':memory:')
+	applyAllMigrations(sqlite, new URL('../../migrations/', import.meta.url))
+	const now = '2026-01-01T00:00:00.000Z'
+	for (const personId of ['owner-1', 'guest-1']) {
+		sqlite
+			.prepare(
+				`INSERT INTO orgs (id, slug, display_name, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			)
+			.run(personId, personId, personId, now, now)
+		sqlite
+			.prepare(
+				`INSERT INTO org_memberships (org_id, user_id, role, created_at)
+				 VALUES (?, ?, 'owner', ?)`,
+			)
+			.run(personId, personId, now)
+	}
+	return { APP_DB: createD1FromSqlite(sqlite) } as unknown as Env
+}
 
 const request = new Request('https://example.com/@owner/notes')
-const env = {} as Env
-const ownerUser = { username: 'owner', mcpUser: { userId: 'owner-1' } }
+const env = createEnv()
+const ownerUser = {
+	username: 'owner',
+	mcpUser: { userId: ownerIdFromStored('owner-1') },
+}
 
 function resolvesTo(
 	kind: 'package' | 'redirect',
@@ -62,11 +82,11 @@ function resolvesTo(
 		kind,
 		username: 'owner',
 		kodyId: 'notes',
-		userId: 'owner-1',
+		userId: ownerIdFromStored('owner-1'),
 		listingId: null,
 		...(kind === 'package'
 			? { savedPackage: { id: 'pkg-1', hidden: false, isPrivate: false } }
-			: {}),
+			: { packageId: 'pkg-1' }),
 		...overrides,
 	})
 }
@@ -118,6 +138,7 @@ test('loadPackagePage applies the owner / community / public visibility matrix',
 	expect(await load()).toMatchObject({
 		kind: 'page',
 		viewerIsOwner: false,
+		viewerCanManage: false,
 		listing: { listing: { id: 'listing-1' } },
 		ownerPackage: null,
 	})
@@ -128,10 +149,14 @@ test('loadPackagePage applies the owner / community / public visibility matrix',
 	expect(await load()).toMatchObject({
 		kind: 'page',
 		viewerIsOwner: true,
+		viewerCanManage: true,
 		ownerPackage: { id: 'pkg-1' },
 		listing: null,
 		ownerProfilePublic: true,
 	})
+	expect(mockModule.loadAccountPackageDetail).toHaveBeenCalledWith(
+		expect.objectContaining({ creditAttributionUsername: 'owner' }),
+	)
 
 	// Unlisted renames only redirect the owner; listed renames redirect anyone.
 	resolvesTo('redirect', { kodyId: 'renamed' })
@@ -171,6 +196,7 @@ test('loadPackagePage does not send anonymous visitors to an unpublished listing
 	expect(await load()).toMatchObject({
 		kind: 'page',
 		viewerIsOwner: false,
+		viewerCanManage: false,
 		listing: { listing: { id: 'listing-1' } },
 	})
 
@@ -190,44 +216,15 @@ test('loadPackagePage does not send anonymous visitors to an unpublished listing
 	})
 })
 
-test('loadPackagePage lets pending and accepted share guests see a private package', async () => {
+test('loadPackagePage hides a private package from a signed-in non-owner', async () => {
 	setProfileVisibility('private')
 	mockModule.loadCommunityDetailData.mockResolvedValue(null)
-	mockModule.loadAccountPackageDetail.mockResolvedValue({
-		...ownerPackageDetail,
-		isPrivate: true,
-	})
+	mockModule.loadAccountPackageDetail.mockClear()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'guest@example.com',
-		mcpUser: { userId: 'guest-1' },
+		mcpUser: { userId: ownerIdFromStored('guest-1') },
 	})
 	resolvesTo('package', pkg({ isPrivate: true }))
-	const shareGrant = (status: string) => ({
-		id: 'grant-1',
-		status,
-		packageName: '@owner/notes',
-	})
-
-	mockModule.loadViewerPackageShare.mockResolvedValue(shareGrant('pending'))
-	const pending = await load()
-	expect(pending).toMatchObject({
-		kind: 'page',
-		viewerIsOwner: false,
-		loggedIn: true,
-		ownerPackage: null,
-		canReadOwnerSource: false,
-		shareGrant: { id: 'grant-1', status: 'pending' },
-		ownerProfilePublic: false,
-	})
-	expect(pending.kind === 'page' && packagePageIsPrivate(pending)).toBe(true)
-
-	mockModule.loadViewerPackageShare.mockResolvedValue(shareGrant('accepted'))
-	expect(await load()).toMatchObject({
-		kind: 'page',
-		viewerIsOwner: false,
-		ownerPackage: { id: 'pkg-1' },
-		canReadOwnerSource: true,
-		shareGrant: { id: 'grant-1', status: 'accepted' },
-		ownerProfilePublic: false,
-	})
+	expect(await load()).toEqual({ kind: 'not_found' })
+	expect(mockModule.loadAccountPackageDetail).not.toHaveBeenCalled()
 })

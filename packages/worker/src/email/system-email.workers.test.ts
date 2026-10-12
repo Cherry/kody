@@ -4,7 +4,11 @@ import { handleInboundEmail } from './inbound.ts'
 import { maxSurvivableInboundRawBytes } from './parser.ts'
 import { mailboxRpc } from './mailbox-client.ts'
 import { listEmailInboxesForUser } from './repo.ts'
-import { listSystemEmailMessages } from './system-email-graph-store.ts'
+import {
+	deleteSystemEmailMessageById,
+	listSystemEmailMessages,
+} from './system-email-graph-store.ts'
+import { systemInboundDeletedRejectionReason } from './system-inbound-dedupe.ts'
 import { loadSystemEmailHealth } from './system-email-health.ts'
 import {
 	maxDetailedEmailRejectionEventsPerDay,
@@ -18,12 +22,14 @@ import {
 	systemEmailOwnerId,
 } from './system-email.ts'
 import { createForwardableEmailMessage } from './test-fixtures.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 type InboundEnv = Parameters<typeof handleInboundEmail>[1]
 
 const platformBaseUrl = 'https://kody.example.com'
@@ -88,15 +94,14 @@ function proxyWith<T extends object>(
 
 async function seedVerifiedAccount(username: string) {
 	const email = `${username}-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await env.APP_DB.prepare(
-		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id, plan)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(username) DO UPDATE SET
 			email = excluded.email,
 			email_verified_at = excluded.email_verified_at,
 			stable_user_id = excluded.stable_user_id,
-			plan = excluded.plan,
 			updated_at = CURRENT_TIMESTAMP`,
 	)
 		.bind(
@@ -105,9 +110,13 @@ async function seedVerifiedAccount(username: string) {
 			'test-password-hash',
 			new Date().toISOString(),
 			userId,
-			'max',
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan: 'max',
+	})
 	return userId
 }
 
@@ -124,8 +133,11 @@ async function systemInboxNames() {
 }
 
 async function listUserInbound(userId: string) {
-	return (await mailboxRpc({ env, userId }).listMessages({ limit: 10 }))
-		.messages
+	return (
+		await mailboxRpc({ env, userId: ownerIdFromStored(userId) }).listMessages({
+			limit: 10,
+		})
+	).messages
 }
 
 async function readSystemDailyReceiveCount(
@@ -394,6 +406,73 @@ test('system inbox R2/D1 failures and retries keep one durable quota charge', as
 		expect(await readSystemDailyReceiveCount('abuse')).toBe(1)
 		expect(await listSystemMessages()).toHaveLength(1)
 	}
+})
+
+test('admin delete tombstones the inbound fingerprint so SMTP redelivery stays discarded', async () => {
+	await ensureEmailTestSchema(env.APP_DB)
+	await ensureUsageRollupsTestSchema(env.APP_DB)
+	const input = {
+		to: `abuse@${systemDomain}`,
+		messageId: 'system-delete-tombstone',
+	}
+	expect(await deliver(input)).toBeNull()
+	const stored = await listSystemMessages()
+	expect(stored).toHaveLength(1)
+	const pointer = await env.APP_DB.prepare(
+		`SELECT id, state, message_id, fingerprint
+		FROM system_email_delivery_events
+		WHERE provider = 'cloudflare-email-routing-dedupe'
+		LIMIT 1`,
+	).first<{
+		id: string
+		state: string
+		message_id: string | null
+		fingerprint: string
+	}>()
+	expect(pointer).toMatchObject({
+		state: 'pending',
+		message_id: null,
+	})
+	expect(pointer?.id).toBe(`email-inbound-dedupe:${pointer?.fingerprint}`)
+
+	await deleteSystemEmailMessageById({
+		db: env.APP_DB,
+		blobs: env.EMAIL_BLOBS,
+		messageId: stored[0]!.id,
+	})
+	expect(await listSystemMessages()).toEqual([])
+	const tombstone = await env.APP_DB.prepare(
+		`SELECT state, event_type, message_id, detail_json
+		FROM system_email_delivery_events
+		WHERE id = ?`,
+	)
+		.bind(pointer!.id)
+		.first<{
+			state: string
+			event_type: string
+			message_id: string | null
+			detail_json: string
+		}>()
+	expect(tombstone).toMatchObject({
+		state: 'rejected',
+		event_type: 'rejected',
+		message_id: null,
+	})
+	expect(JSON.parse(tombstone?.detail_json ?? '{}')).toMatchObject({
+		state: 'rejected',
+		rejectionReason: systemInboundDeletedRejectionReason,
+	})
+	expect(
+		await countRows(
+			`SELECT COUNT(*) AS count FROM system_email_delivery_events
+			WHERE message_id IS NOT NULL`,
+		),
+	).toBe(0)
+	expect(await readSystemDailyReceiveCount('abuse')).toBe(1)
+
+	expect(await deliver(input)).toBe(systemInboundDeletedRejectionReason)
+	expect(await listSystemMessages()).toEqual([])
+	expect(await readSystemDailyReceiveCount('abuse')).toBe(1)
 })
 
 test('system inbox ambiguous quota batch response charges once across retry', async () => {

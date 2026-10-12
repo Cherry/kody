@@ -8,6 +8,12 @@ import {
 } from './e2e-cloudflare-mock-state.ts'
 import { isExecutedDirectly, resolveNpmCommand } from './node-runtime.ts'
 import { spawnChildProcess, stopChildProcessTree } from './dev-process-utils.ts'
+import { workerOriginForPort } from './dev-server.ts'
+import {
+	createDefaultEnsureDevDeps,
+	hasKodyDevListeners,
+	type ProcessIdentity,
+} from './ensure-dev.ts'
 
 /** Same default as `playwright.config.ts` when `--port` is omitted. */
 export const defaultE2eWebServerPort = '3847'
@@ -28,6 +34,29 @@ export function resolveE2eWebServerHealthUrl(
  * After Playwright starts specs, a crash must kill this wrapper so the
  * suite-level dead-server retry can start a fresh run.
  */
+function formatUnhealthyOriginDevServerHint() {
+	return 'An existing kody `dev:ensure` server is listening but /health is failing. Stop that Vite/workerd process before `npm run test:e2e:run`; a crash-looping origin on 3742 collides with the e2e web server (inspector port / fetchWorkerExportTypes).'
+}
+
+export async function findUnhealthyOriginDevServerMessage(input: {
+	ports: ReadonlyArray<number>
+	probeHealth: (origin: string) => Promise<boolean>
+	listListenerPids: (port: number) => Array<number>
+	readProcess: (pid: number) => ProcessIdentity | null
+	protectedPids: ReadonlySet<number>
+}) {
+	for (const port of input.ports) {
+		const hasListener = hasKodyDevListeners({
+			...input,
+			ports: [port],
+		})
+		if (!hasListener) continue
+		if (await input.probeHealth(workerOriginForPort(port))) continue
+		return formatUnhealthyOriginDevServerHint()
+	}
+	return null
+}
+
 export function shouldRetryE2eWebServerFirstStart(input: {
 	allowRetry: boolean
 	shuttingDown: boolean
@@ -42,6 +71,29 @@ export function shouldRetryE2eWebServerFirstStart(input: {
 	)
 }
 
+/**
+ * The mock's 60s readiness budget can lapse on a busy VM (leftover `workerd
+ * serve` processes from earlier validate runs, #3430). Each attempt spawns a
+ * fresh wrangler with its own persist dir and token, so one retry does not
+ * inherit a wedged first process. `playwright.config.ts` sizes the webServer
+ * timeout for both attempts.
+ */
+export async function startCloudflareMockWithRetry<Mock>(input: {
+	start: (token: string) => Promise<Mock>
+	createToken: () => string
+	log: (message: string) => void
+}): Promise<Mock> {
+	try {
+		return await input.start(input.createToken())
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		input.log(
+			`Mock Cloudflare did not start (${message.split('\n')[0]}); retrying once with a fresh process.`,
+		)
+		return await input.start(input.createToken())
+	}
+}
+
 function runSetup(command: string, args: Array<string>) {
 	const result = spawnSync(command, args, {
 		stdio: 'inherit',
@@ -52,10 +104,21 @@ function runSetup(command: string, args: Array<string>) {
 }
 
 async function startE2eWebServer() {
+	const staleOrigin = await findUnhealthyOriginDevServerMessage(
+		createDefaultEnsureDevDeps(),
+	)
+	if (staleOrigin) {
+		throw new Error(staleOrigin)
+	}
+
 	runSetup(process.execPath, ['tools/prepare-e2e-env.ts'])
 	runSetup(resolveNpmCommand(), ['run', 'migrate:e2e'])
 
-	const mock = await startCloudflareMock(`e2e-cloudflare-${randomUUID()}`)
+	const mock = await startCloudflareMockWithRetry({
+		start: startCloudflareMock,
+		createToken: () => `e2e-cloudflare-${randomUUID()}`,
+		log: (message) => console.error(message),
+	})
 	try {
 		await writeE2eCloudflareMockState({
 			origin: mock.origin,

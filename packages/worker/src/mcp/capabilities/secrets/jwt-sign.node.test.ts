@@ -1,4 +1,8 @@
 import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	constants,
 	createHmac,
 	createVerify,
@@ -6,7 +10,8 @@ import {
 	timingSafeEqual,
 	verify,
 } from 'node:crypto'
-import { expect, test, vi } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
+import { lookupSecretsThroughResolveSecret } from '#worker/test-support/secret-lookup.ts'
 import { isMcpCallerError, McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import {
@@ -15,19 +20,22 @@ import {
 } from '#mcp/secrets/errors.ts'
 import * as secretService from '#mcp/secrets/service.ts'
 import * as unresolvedSecret from '#mcp/secrets/unresolved-secret.ts'
-import * as packageAccess from '#mcp/secrets/package-access.ts'
-import * as shareGrants from '#worker/package-registry/share-grants.ts'
+import { personalOrgAccessD1 } from '#worker/test-support/org-binding-query.ts'
 import { jwtSignCapability } from './jwt-sign.ts'
 import { decodeHmacKeyMaterial, extractSecretMaterial } from './jwt-signing.ts'
 
 const pem = { type: 'pkcs8', format: 'pem' } as const
 const spki = { type: 'spki', format: 'pem' } as const
 const ctx = {
-	env: {} as Env,
+	env: {
+		APP_DB: personalOrgAccessD1(),
+		SENTRY_ENVIRONMENT: 'test',
+	} as unknown as Env,
 	callerContext: createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://heykody.dev',
 		user: {
-			userId: 'user-123',
+			userId: personIdFromStored('user-123'),
 			email: 'user@example.com',
 			displayName: 'User',
 		},
@@ -53,6 +61,7 @@ function createEcKeyPair(namedCurve: 'prime256v1' | 'secp384r1' | 'secp521r1') {
 
 function stubSecret(value: string | null) {
 	return vi.spyOn(secretService, 'resolveSecret').mockResolvedValue({
+		credentialId: value === null ? null : 'cred-signing-key',
 		found: value !== null,
 		value,
 		scope: value === null ? null : 'user',
@@ -106,6 +115,10 @@ function rejectsWithoutLeaking(fragment: string, leaked: string) {
 	}
 }
 
+beforeEach(() => {
+	lookupSecretsThroughResolveSecret()
+})
+
 test('secretJwtSign resolves keys and never leaks key material', async () => {
 	const { privateKey, publicKey } = createKeyPair()
 	const signed = await signWith(privateKey, {
@@ -123,7 +136,11 @@ test('secretJwtSign resolves keys and never leaks key material', async () => {
 	const rs256 = jwtParts(signed.jwt)
 	expect(signed.jwt.split('.').every(Boolean)).toBe(true)
 	expect(signed.algorithm).toBe('RS256')
-	expect(rs256.header).toMatchObject({ alg: 'RS256', typ: 'JWT', kid: 'key-1' })
+	expect(rs256.header).toMatchObject({
+		alg: 'RS256',
+		typ: 'JWT',
+		kid: 'key-1',
+	})
 	expect(rs256.claims).toMatchObject({
 		iss: 'service@example.com',
 		sub: 'user@example.com',
@@ -482,48 +499,10 @@ test('secretJwtSign accepts opaque {{secret:…}} refs and remaps share-grant gu
 	expect(signed.jwt.split('.')).toHaveLength(3)
 	expect(secretService.resolveSecret).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			name: 'serviceAccountKey',
 			scope: 'user',
 		}),
 	)
 	expect(JSON.stringify(signed)).not.toContain('PRIVATE KEY')
-
-	const ownerSpy = vi
-		.spyOn(shareGrants, 'resolvePackageStorageOwnerUserId')
-		.mockResolvedValue('owner-user')
-	vi.spyOn(
-		packageAccess,
-		'assertPackageCanAccessResolvedSecret',
-	).mockResolvedValue(undefined)
-	await signWith(privateKey, refInput, {
-		env: { APP_DB: {} } as Env,
-		callerContext: createMcpCallerContext({
-			baseUrl: 'https://heykody.dev',
-			user: {
-				userId: 'guest-user',
-				email: 'guest@example.com',
-				displayName: 'Guest',
-			},
-			storageContext: {
-				sessionId: null,
-				appId: null,
-				packageId: 'shared-pkg',
-				storageId: null,
-			},
-		}),
-	})
-	expect(ownerSpy).toHaveBeenCalledWith(
-		expect.objectContaining({
-			callerUserId: 'guest-user',
-			packageId: 'shared-pkg',
-		}),
-	)
-	expect(secretService.resolveSecret).toHaveBeenLastCalledWith(
-		expect.objectContaining({
-			userId: 'owner-user',
-			name: 'serviceAccountKey',
-			scope: 'user',
-		}),
-	)
 })

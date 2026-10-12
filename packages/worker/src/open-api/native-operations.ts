@@ -1,4 +1,3 @@
-import { localExecuteScope } from '#worker/api-tokens/scopes.ts'
 import { toApiTokenView } from '#worker/api-tokens/service.ts'
 import {
 	capabilityProxyCallInputSchema,
@@ -47,7 +46,7 @@ function capabilityProxySessionFromPrincipal(
 			}
 		}
 		case 'mcp-oauth': {
-			// Effective grant for these surfaces matches a `local-execute` API
+			// Effective grant for these surfaces matches an `org:execute` API
 			// token (full kody.* via CapabilityProxy). OIDC grant scopes are
 			// identity claims, not capability scopes (ADR 0049/0055).
 			const expiresAt = new Date(principal.expiresAtUnix * 1000).toISOString()
@@ -56,7 +55,7 @@ function capabilityProxySessionFromPrincipal(
 				principal.expiresAtUnix - Math.floor(Date.now() / 1000),
 			)
 			return {
-				scopes: [localExecuteScope],
+				scopes: ['org:execute'],
 				expiresAt,
 				maxExpiresAt: expiresAt,
 				idleTtlSeconds: remainingSeconds,
@@ -80,7 +79,7 @@ const capabilityProxyOperationDefinitions: Record<
 	capabilityProxySession: {
 		summary: 'Open a CapabilityProxy session',
 		description:
-			'Preflight for local execute: confirms the bearer is valid (scoped `kody_at_` with `local-execute`, or CLI `kody login` MCP OAuth). Returns scopes, expiry, and proxy limits. Call before starting user code.',
+			'Preflight for local execute: confirms the bearer is valid (scoped `kody_at_` with `org:execute`, or CLI `kody login` MCP OAuth). Returns scopes, expiry, and proxy limits. Call before starting user code.',
 		inputSchema: emptyInputSchema,
 		outputSchema: capabilityProxySessionOutputSchema,
 		readOnly: true,
@@ -92,7 +91,7 @@ const capabilityProxyOperationDefinitions: Record<
 	capabilityProxyCall: {
 		summary: 'Proxy one kody:runtime call',
 		description:
-			"Run one `kody:runtime` call from a local execute venue: `path` is the runtime property path (`['kody','emailSend']`, `['kody','authenticatedFetch']`, `['kody','oauthClientCredentials']`, `['kody','mcp',server,tool]`, `['kody','packageStorageGet']`, `['workflows','create']`) and `args` the positional arguments. Behaves like the same call inside cloud execute. Authenticated fetch, OAuth client-credentials grants, and stamped packageStorage / packageSecrets hop here so OAuth tokens and secret plaintext stay on origin. Accepts a scoped API token or CLI MCP OAuth. There is no author-facing `packages.invoke`. Errors use the standard envelope; capability failures return `capability_error` with the capability's message.",
+			"Run one `kody:runtime` call from a local execute venue: `path` is the runtime property path (`['kody','emailSend']`, `['kody','authenticatedFetch']`, `['kody','oauthClientCredentials']`, `['kody','mcp',server,tool]`, `['kody','packageStorageGet']`, `['workflows','create']`) and `args` the positional arguments. Behaves like the same call inside cloud execute. Authenticated fetch, OAuth client-credentials grants, and stamped packageStorage / packageSecrets hop here so OAuth tokens and secret plaintext stay on origin. Accepts a scoped API token or CLI MCP OAuth. Errors use the standard envelope; capability failures return `capability_error` with the capability's message.",
 		inputSchema: capabilityProxyCallInputSchema,
 		outputSchema: capabilityProxyCallOutputSchema,
 		readOnly: false,

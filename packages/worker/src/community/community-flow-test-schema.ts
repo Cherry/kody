@@ -1,7 +1,7 @@
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import { ensureUserStorageBucketsTestSchema } from '#worker/storage-buckets/test-schema.ts'
-import { ensurePackageInvocationTokensTestSchema } from '#worker/package-invocations/test-schema.ts'
 import { ensureSecretBucketsTestSchema } from '#worker/secrets-test-schema.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 import { communityForksDeleteCascadeStatements } from './community-forks-delete-cascade.ts'
 
 /**
@@ -11,18 +11,9 @@ import { communityForksDeleteCascadeStatements } from './community-forks-delete-
 export async function ensureCommunityFlowSchema(db: D1Database) {
 	await ensureUsersTestSchema({
 		db,
-		columns: [
-			'account_type',
-			'bio',
-			'avatar_key',
-			'profile_visibility',
-			'stripe_customer_id',
-			'stripe_plan',
-			'stripe_plan_refreshed_at',
-		],
+		columns: ['bio', 'avatar_key', 'profile_visibility'],
 	})
 	await ensureUserStorageBucketsTestSchema(db)
-	await ensurePackageInvocationTokensTestSchema(db)
 	await ensureSecretBucketsTestSchema(db)
 	const statements = [
 		`CREATE TABLE IF NOT EXISTS saved_packages (
@@ -35,6 +26,7 @@ export async function ensureCommunityFlowSchema(db: D1Database) {
 			search_text TEXT,
 			source_id TEXT NOT NULL,
 			has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+			has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 			hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 			is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 			locked_at TEXT,
@@ -111,13 +103,6 @@ export async function ensureCommunityFlowSchema(db: D1Database) {
 			ON community_listings(owner_user_id, package_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_community_listings_owner_kody_id_active
 			ON community_listings(owner_user_id, kody_id) WHERE status = 'active'`,
-		`CREATE TABLE IF NOT EXISTS username_redirects (
-			old_username TEXT PRIMARY KEY NOT NULL,
-			user_id TEXT NOT NULL,
-			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_username_redirects_user_id
-			ON username_redirects(user_id)`,
 		`CREATE TABLE IF NOT EXISTS package_kody_id_redirects (
 			user_id TEXT NOT NULL,
 			old_kody_id TEXT NOT NULL,
@@ -127,6 +112,15 @@ export async function ensureCommunityFlowSchema(db: D1Database) {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_package_kody_id_redirects_package_id
 			ON package_kody_id_redirects(package_id)`,
+		`CREATE TABLE IF NOT EXISTS package_slug_redirects (
+			user_id TEXT NOT NULL,
+			old_slug TEXT NOT NULL,
+			package_id TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+			PRIMARY KEY (user_id, old_slug)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_package_slug_redirects_package_id
+			ON package_slug_redirects(package_id)`,
 		`CREATE TABLE IF NOT EXISTS community_forks (
 			id TEXT PRIMARY KEY NOT NULL,
 			listing_id TEXT NOT NULL,
@@ -272,4 +266,5 @@ export async function ensureCommunityFlowSchema(db: D1Database) {
 	} catch {
 		// Column already present.
 	}
+	await ensureSoftDeleteTestColumns(db)
 }

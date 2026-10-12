@@ -4,17 +4,17 @@ import { callerHasRole } from '#mcp/capabilities/access-control.ts'
 import { type McpRegistrationAgent } from '#mcp/mcp-registration-agent.ts'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
 import { importGuideCatalog } from '#worker/guide-catalog-modules.ts'
-import { legacyGuideIdAliases } from '#universal/docs-nav.ts'
+import {
+	guideNotFoundMessage,
+	resolveCatalogGuide,
+	suggestCatalogGuideIds,
+} from '#worker/guides/resolve-catalog-guide.ts'
 import {
 	getJoinedIntegration,
 	toJoinedIntegrationConfig,
 } from '#worker/integrations/service.ts'
 import { applySavedPackageForkListingAncestry } from '#worker/community/fork-listing-relation.ts'
-import {
-	getSavedPackageWithCommunityProvenanceById,
-	getSavedPackageWithCommunityProvenanceByKodyId,
-} from '#worker/package-registry/repo.ts'
-import { findPlatformPackageByRef } from '#worker/package-registry/platform-packages.ts'
+import { resolveSavedPackageRefWithCommunityProvenance } from '#worker/package-registry/repo.ts'
 import { loadPackageSourceBySourceId } from '#worker/package-registry/source.ts'
 
 import { collectIntegrationPackageSuggestions } from './integration-package-suggestions.ts'
@@ -91,18 +91,22 @@ export async function resolveEntityDetail(input: {
 
 	if (ref.type === 'guide') {
 		const { guides } = await importGuideCatalog()
-		// Ids of docs merged into another doc keep resolving to the absorbing
-		// guide (scoped to the heading that took the content).
-		const alias = legacyGuideIdAliases[ref.id]
-		const guideId = alias?.id ?? ref.id
-		const section = ref.section ?? alias?.section
-		const guide = guides.find((candidate) => candidate.id === guideId) ?? null
-		if (!guide) {
+		// Entity lookup: catalog id, slug, or a merged-doc alias.
+		const includeAdmin = callerHasRole(input.callerContext, 'admin')
+		const resolved = resolveCatalogGuide(guides, ref.id)
+		if (!resolved) {
+			throw new McpCallerError(
+				guideNotFoundMessage(
+					suggestCatalogGuideIds(guides, ref.id, { includeAdmin }),
+				),
+			)
+		}
+		const guide =
+			guides.find((candidate) => candidate.id === resolved.id) ?? null
+		if (!guide || (guide.adminOnly && !includeAdmin)) {
 			throw new McpCallerError('Guide not found.')
 		}
-		if (guide.adminOnly && !callerHasRole(input.callerContext, 'admin')) {
-			throw new McpCallerError('Guide not found.')
-		}
+		const section = ref.section ?? resolved.aliasSection
 		return {
 			type: 'guide' as const,
 			id: guide.id,
@@ -125,39 +129,30 @@ export async function resolveEntityDetail(input: {
 
 	if (ref.type === 'package') {
 		const env = input.agent.getEnv()
-		const loadedOwnRecord =
-			(await getSavedPackageWithCommunityProvenanceById(env.APP_DB, {
+		const loadedOwnRecord = await resolveSavedPackageRefWithCommunityProvenance(
+			env.APP_DB,
+			{
 				userId: input.userId,
-				packageId: ref.id,
-			})) ??
-			(await getSavedPackageWithCommunityProvenanceByKodyId(env.APP_DB, {
-				userId: input.userId,
-				kodyId: ref.id,
-			}))
-		const [ownRecord] = loadedOwnRecord
+				ref: ref.id,
+			},
+		)
+		const [record] = loadedOwnRecord
 			? await applySavedPackageForkListingAncestry({
 					env,
 					records: [loadedOwnRecord],
 				})
 			: [null]
-		// Platform (built-in) packages stay discoverable without a fork so
-		// agents can inspect and communityFork them. The caller's own copy
-		// wins when both exist.
-		const platformFallback = ownRecord
-			? null
-			: await findPlatformPackageByRef(env.APP_DB, { idOrKodyId: ref.id })
-		const record = ownRecord ?? platformFallback?.record
 		if (!record) {
 			throw new McpCallerError('Saved package not found for this user.')
 		}
 		const loaded = await loadPackageSourceBySourceId({
 			env,
 			baseUrl: input.callerContext.baseUrl,
-			userId: platformFallback?.ownerUserId ?? input.userId,
+			userId: input.userId,
 			sourceId: record.sourceId,
 		})
 		const packageAppOrigin = getPackageAppBaseUrl({ env })
-		const ownerUsername = platformFallback?.platformScope ?? input.username
+		const ownerUsername = input.username
 		return {
 			type: 'package' as const,
 			id: record.kodyId,
@@ -168,8 +163,7 @@ export async function resolveEntityDetail(input: {
 			files: loaded.files,
 			baseUrl: input.callerContext.baseUrl,
 			ownerUsername,
-			platformScope: platformFallback?.platformScope ?? null,
-			listingAhead: ownRecord?.listingAhead ?? null,
+			listingAhead: record.listingAhead ?? null,
 			hostedUrl:
 				record.hasApp && ownerUsername
 					? resolveHostedPackageAppUrl({
@@ -189,7 +183,12 @@ export async function resolveEntityDetail(input: {
 			userId: input.userId,
 			name: ref.id,
 		})
-		if (!joined) {
+		const visible =
+			joined &&
+			input.searchRows.userIntegrationRows.some(
+				(row) => row.connection.name === joined.connection.name,
+			)
+		if (!joined || !visible) {
 			throw new McpCallerError('Saved integration not found for this user.')
 		}
 		const config = toJoinedIntegrationConfig(joined)

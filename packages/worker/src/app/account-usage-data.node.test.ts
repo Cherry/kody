@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
-import { type DailyEntitlementResource } from '#worker/entitlements/user-meter-do.ts'
+import { type DailyEntitlementResource } from '#universal/plans.ts'
 import { createInMemoryRepoSessionIndexEnv } from '#worker/test-support/repo-session-index.ts'
 import { createInMemoryRunLogUsageEnv } from '#worker/test-support/run-log-usage.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
@@ -25,19 +25,24 @@ type UsageDbInput = {
 	giftExpiresAt?: string
 }
 
-function createUsageTestDb(input: UsageDbInput, stableUserId: string) {
+function createUsageTestDb(
+	input: UsageDbInput,
+	stableUserId: string,
+	counters: { creditWalletQueries: number } = { creditWalletQueries: 0 },
+) {
 	const rollups = [
 		['dynamic_worker_day', input.uniqueWorkerDays ?? 0],
 		['durable_object_rows_read', input.durableObjectRowsRead ?? 0],
 	].filter(([, count]) => Number(count) > 0)
 	return {
+		counters,
 		prepare(query: string) {
 			const normalized = query.replace(/\s+/g, ' ').trim().toLowerCase()
 			const statement = {
 				async first<T>() {
 					if (
 						normalized.includes('from users') &&
-						normalized.includes('where id')
+						(normalized.includes('where id') || normalized.includes('u.id ='))
 					) {
 						return {
 							id: input.userId,
@@ -48,10 +53,12 @@ function createUsageTestDb(input: UsageDbInput, stableUserId: string) {
 							second_agent_standard_gift_expires_at:
 								input.giftExpiresAt ?? null,
 							stable_user_id: stableUserId,
+							username: 'usage-user',
 							stripe_customer_id: input.stripeCustomerId ?? null,
 						} as T
 					}
 					if (normalized.includes('from credit_wallets')) {
+						counters.creditWalletQueries += 1
 						return { balance_micro_usd: input.creditBalanceMicroUsd ?? 0 } as T
 					}
 					if (normalized.includes('from saved_packages')) {
@@ -66,6 +73,9 @@ function createUsageTestDb(input: UsageDbInput, stableUserId: string) {
 					return null
 				},
 				async all() {
+					if (normalized.includes('from usage_attribution_daily')) {
+						return { results: [] }
+					}
 					if (!normalized.includes('from usage_rollups')) return { results: [] }
 					return {
 						results: [...rollups, ...Object.entries(input.activity ?? {})].map(
@@ -76,7 +86,7 @@ function createUsageTestDb(input: UsageDbInput, stableUserId: string) {
 			}
 			return { bind: () => statement }
 		},
-	} as unknown as D1Database
+	} as unknown as D1Database & { counters: { creditWalletQueries: number } }
 }
 
 /**
@@ -139,7 +149,12 @@ async function loadUsage(
 		data?.entitlementConsumption.find((entry) => entry.resource === resource)
 	const meterFor = (resource: string) =>
 		data?.computeOverage.meters.find((entry) => entry.resource === resource)
-	return { data, row, meterFor }
+	return {
+		data,
+		row,
+		meterFor,
+		creditWalletQueries: db.counters.creditWalletQueries,
+	}
 }
 
 test('loadAccountUsageData returns plan rows and authoritative UserMeter daily counts', async () => {
@@ -169,10 +184,10 @@ test('loadAccountUsageData returns plan rows and authoritative UserMeter daily c
 			plan: 'pro',
 			packageCount: 1,
 		},
-		{ daily: { email_sends_per_day: 17, execute_calls_per_day: 91 } },
+		{ daily: { email_sends_per_day: 17, execute_unique_workers_per_day: 91 } },
 	)
 	expect(bootstrapped.row('email_sends_per_day')?.current).toBe(17)
-	expect(bootstrapped.row('execute_calls_per_day')?.current).toBe(91)
+	expect(bootstrapped.row('execute_unique_workers_per_day')?.current).toBe(91)
 	expect(bootstrapped.row('saved_packages')?.current).toBe(1)
 
 	const warm = await loadUsage(
@@ -188,15 +203,15 @@ test('loadAccountUsageData returns plan rows and authoritative UserMeter daily c
 			daily: {
 				email_sends_per_day: 101,
 				email_receives_per_day: 202,
-				execute_calls_per_day: 303,
+				execute_unique_workers_per_day: 303,
 				outbound_fetches_per_day: 404,
 			},
 		},
 	)
 	expect(warm.row('email_sends_per_day')?.current).toBe(101)
 	expect(warm.row('email_receives_per_day')?.current).toBe(202)
-	expect(warm.row('execute_calls_per_day')?.current).toBe(303)
-	expect(warm.row('execute_calls_per_day')?.week).toEqual({
+	expect(warm.row('execute_unique_workers_per_day')?.current).toBe(303)
+	expect(warm.row('execute_unique_workers_per_day')?.week).toEqual({
 		current: 303,
 		limit: 4_000,
 		percentOfLimit: 303 / 4_000,
@@ -265,7 +280,7 @@ test('Free over compute includes stays informational: activity first, no warning
 	expect(data?.credits).toEqual({
 		eligible: false,
 		canSwitchToPro: false,
-		billingHref: '/account/billing',
+		billingHref: '/@usage-user/-/billing',
 	})
 	expect(data?.activity.metrics.slice(0, 2)).toEqual([
 		{ metric: 'execute', label: 'Code executions', count: 140 },
@@ -314,6 +329,7 @@ test('purchasable Pro with credits runs past the include on credits; at $0 it st
 		creditBalanceMicroUsd: 10_000_000,
 		stripeCustomerId: 'cus_credits',
 	})
+	expect(funded.creditWalletQueries).toBe(1)
 	expect(funded.data?.computeOverage.creditWallet).toBe('funded')
 	expect(funded.data?.computeOverage.creditsStatus).toBe('debiting_credits')
 	expect(funded.data?.computeOverage.creditsCostMicroUsd).toBe(50 * 4_000)
@@ -346,7 +362,7 @@ test('purchasable Pro with credits runs past the include on credits; at $0 it st
 			(row) => row.resource === 'unique_worker_days',
 		),
 	).toEqual([])
-	expect(funded.row('execute_calls_per_day')?.limit).toBe(25_000)
+	expect(funded.row('execute_unique_workers_per_day')?.limit).toBe(25_000)
 	expect(funded.row('email_sends_per_day')?.limit).toBe(200)
 
 	const empty = await loadUsage(
@@ -378,8 +394,8 @@ test('purchasable Pro with credits runs past the include on credits; at $0 it st
 	expect(
 		empty.data?.warnings.filter((row) => row.resource === 'unique_worker_days'),
 	).toEqual([])
-	expect(empty.row('execute_calls_per_day')?.limit).toBe(500)
-	expect(empty.row('execute_calls_per_day')?.howToReduce).toMatch(
+	expect(empty.row('execute_unique_workers_per_day')?.limit).toBe(500)
+	expect(empty.row('execute_unique_workers_per_day')?.howToReduce).toMatch(
 		/add credits at \/account\/usage#credits to keep going past your include/,
 	)
 	expect(empty.meterFor('unique_worker_days')?.howToReduce).toMatch(
@@ -432,7 +448,7 @@ test('gift Pro keeps retired Pro ceilings without a wallet and cannot buy credit
 		label: 'Rows read',
 		include: 20_000_000_000,
 	})
-	expect(row('execute_calls_per_day')?.limit).toBe(1_500)
+	expect(row('execute_unique_workers_per_day')?.limit).toBe(1_500)
 	expect(
 		[
 			...(data?.entitlementConsumption ?? []),

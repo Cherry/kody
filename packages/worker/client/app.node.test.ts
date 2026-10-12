@@ -15,10 +15,11 @@ const signedInSession: session.SessionInfo = {
 	permissions: [],
 	featureFlags: {
 		'demo-indicator': false,
-		'package-share-grants': false,
-		'secret-providers': false,
 		'jev-search-rerank': false,
 		'execute-invoke': false,
+		'connection-profiles': false,
+		'mcp-skills-extension': false,
+		'mcp-events-extension': false,
 	},
 }
 
@@ -177,6 +178,39 @@ test('error pages own main gutters on the SSR URL and at explicit /404 and /500;
 				pathname: '/500',
 				notFound: false,
 				internalError: false,
+				onSsrUrl: false,
+			},
+			true,
+		],
+		// Acquisition landing pages own their gutters (SSR and SPA).
+		[
+			{
+				pathname: '/use-cases',
+				notFound: false,
+				onSsrUrl: true,
+			},
+			true,
+		],
+		[
+			{
+				pathname: '/use-cases/shared-agent-memory',
+				notFound: false,
+				onSsrUrl: false,
+			},
+			true,
+		],
+		[
+			{
+				pathname: '/integrations/gmail',
+				notFound: false,
+				onSsrUrl: true,
+			},
+			true,
+		],
+		[
+			{
+				pathname: '/compare/n8n-alternatives',
+				notFound: false,
 				onSsrUrl: false,
 			},
 			true,

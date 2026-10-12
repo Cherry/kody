@@ -1,16 +1,24 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { expect, test, vi } from 'vitest'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
-import { consoleError } from '#worker/test-support/console-spies.ts'
+import {
+	consoleError,
+	consoleWarn,
+} from '#worker/test-support/console-spies.ts'
 import { createBillingLinkReference } from './billing-config.ts'
 import { StripeApiError } from './stripe-client.ts'
 import {
 	BillingLinkError,
 	linkStripeCustomerFromCheckoutSession,
+	linkStripeCustomerFromCheckoutSessionForOrg,
+	refreshStripePlanForOrg,
 	refreshStripePlanForUser,
 } from './subscription-sync.ts'
 import { ensureCreditWalletTestSchema } from './test-schema.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
+import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const legacyStandardPrice = 'price_1U3sg6LAQpAnsYszGeL2nc8O'
 const standardYearlyPrice = 'price_1U3sg6LAQpAnsYszqq9abwIY'
 
@@ -43,28 +51,30 @@ type SeedInput = {
 async function seedUser(label: string, input: SeedInput = {}) {
 	await ensureCreditWalletTestSchema(env.APP_DB)
 	const email = `${label}-${crypto.randomUUID()}@example.com`
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
+	const username = `billing-${crypto.randomUUID().slice(0, 8)}`
 	await env.APP_DB.prepare(
 		`INSERT INTO users (
-			username, email, password_hash, email_verified_at, stable_user_id, plan,
-			stripe_customer_id, stripe_plan, stripe_price_id, stripe_plan_refreshed_at,
-			entitlement_ladder
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			username, email, password_hash, email_verified_at, stable_user_id
+		) VALUES (?, ?, ?, ?, ?)`,
 	)
 		.bind(
-			`billing-${crypto.randomUUID().slice(0, 8)}`,
+			username,
 			email,
 			'test-password-hash',
 			new Date().toISOString(),
 			stableUserId,
-			input.plan ?? 'max',
-			input.stripeCustomerId ?? null,
-			input.stripePlan ?? null,
-			input.stripePriceId ?? null,
-			null,
-			input.entitlementLadder ?? 'public',
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId,
+		username,
+		plan: input.plan ?? 'max',
+		stripeCustomerId: input.stripeCustomerId ?? null,
+		stripePlan: input.stripePlan ?? null,
+		stripePriceId: input.stripePriceId ?? null,
+		entitlementLadder: input.entitlementLadder ?? 'public',
+	})
 	const row = await env.APP_DB.prepare(`SELECT id FROM users WHERE email = ?`)
 		.bind(email)
 		.first<{ id: number }>()
@@ -72,13 +82,18 @@ async function seedUser(label: string, input: SeedInput = {}) {
 	return {
 		id: row.id,
 		email,
-		stableUserId,
+		stableUserId: ownerIdFromStored(stableUserId),
 		linkReference: await createBillingLinkReference(env, stableUserId),
 	}
 }
 
 function readUser(userId: number, columns: string) {
-	return env.APP_DB.prepare(`SELECT ${columns} FROM users WHERE id = ?`)
+	return env.APP_DB.prepare(
+		`SELECT ${columns}
+		 FROM orgs o
+		 INNER JOIN users u ON u.stable_user_id = o.id
+		 WHERE u.id = ?`,
+	)
 		.bind(userId)
 		.first()
 }
@@ -118,9 +133,16 @@ function stubStripeFetch(input: {
 	subscriptions?: unknown
 	subscriptionsStatus?: number
 }) {
-	return stubFetch((url) => {
+	return stubFetch((url, init) => {
 		if (url.includes('/v1/checkout/sessions/')) {
 			return jsonResponse(input.checkout)
+		}
+		// Checkout link stamps customer metadata in waitUntil after D1 link.
+		if (
+			url.includes('/v1/customers/') &&
+			(init?.method ?? 'GET').toUpperCase() === 'POST'
+		) {
+			return jsonResponse({ id: 'cus_metadata' })
 		}
 		if (url.includes('/v1/subscriptions')) {
 			return jsonResponse(
@@ -349,6 +371,12 @@ test('checkout linking assigns the Discord Pro role when Discord is connected', 
 				client_reference_id: user.linkReference,
 			})
 		}
+		if (
+			url.includes('/v1/customers/') &&
+			(init?.method ?? 'GET').toUpperCase() === 'POST'
+		) {
+			return jsonResponse({ id: 'cus_discord_pro' })
+		}
 		if (url.includes('/v1/subscriptions')) {
 			return jsonResponse(subscriptionList('sub_discord_pro', 'active'))
 		}
@@ -492,4 +520,306 @@ test('refreshStripePlanForUser does not re-flag a public account that resubscrib
 			subscriptionList('sub_resub', 'active'),
 		),
 	).toMatchObject({ stripe_plan: 'pro', entitlement_ladder: 'public' })
+})
+
+test('team checkout links Stripe customer onto the team org, not the member personal org', async () => {
+	await ensureOrgsTestSchema(env.APP_DB)
+	const member = await seedUser('team-member', { plan: 'free' })
+	const teamOrgId = testStableUserIdFromEmail(
+		`team-org-${crypto.randomUUID()}@example.com`,
+	)
+	const now = new Date('2026-07-19T12:00:00.000Z')
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+		 VALUES (?, ?, 'free', ?, ?)`,
+	)
+		.bind(
+			teamOrgId,
+			`team-${teamOrgId.slice(0, 8)}`,
+			now.toISOString(),
+			now.toISOString(),
+		)
+		.run()
+	await env.APP_DB.prepare(
+		`INSERT INTO org_memberships (org_id, user_id, role, created_at)
+		 VALUES (?, ?, 'owner', ?)`,
+	)
+		.bind(teamOrgId, member.stableUserId, now.toISOString())
+		.run()
+
+	const orgLinkReference = await createBillingLinkReference(env, teamOrgId)
+	using _fetch = stubStripeFetch({
+		checkout: {
+			id: 'cs_team_org',
+			customer: 'cus_team_org',
+			client_reference_id: orgLinkReference,
+		},
+		subscriptions: subscriptionList('sub_team_org', 'active'),
+	})
+
+	const result = await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_team_org',
+		now,
+	})
+	expect(result.stripePlan).toBe('pro')
+
+	const org = await env.APP_DB.prepare(
+		`SELECT stripe_customer_id, stripe_plan FROM orgs WHERE id = ?`,
+	)
+		.bind(teamOrgId)
+		.first<{ stripe_customer_id: string | null; stripe_plan: string | null }>()
+	expect(org).toEqual({
+		stripe_customer_id: 'cus_team_org',
+		stripe_plan: 'pro',
+	})
+	expect(await readUser(member.id, 'stripe_customer_id, stripe_plan')).toEqual({
+		stripe_customer_id: null,
+		stripe_plan: null,
+	})
+})
+
+test('refreshStripePlanForOrg rejects a different Stripe customer before forgive', async () => {
+	await ensureOrgsTestSchema(env.APP_DB)
+	const teamOrgId = testStableUserIdFromEmail(
+		`team-mismatch-${crypto.randomUUID()}@example.com`,
+	)
+	const now = new Date('2026-07-19T12:00:00.000Z')
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (
+			id, slug, plan, stripe_customer_id, stripe_plan,
+			created_at, updated_at
+		) VALUES (?, ?, 'pro', ?, 'pro', ?, ?)`,
+	)
+		.bind(
+			teamOrgId,
+			`team-${teamOrgId.slice(0, 8)}`,
+			'cus_original',
+			now.toISOString(),
+			now.toISOString(),
+		)
+		.run()
+
+	using _fetch = stubStripeFetch({
+		subscriptions: subscriptionList('sub_other', 'active'),
+	})
+	await expect(
+		refreshStripePlanForOrg({
+			env: createBillingEnv(),
+			orgId: ownerIdFromStored(teamOrgId),
+			customerId: 'cus_other',
+			now,
+		}),
+	).rejects.toThrow(/Stripe customer mismatch/)
+	const org = await env.APP_DB.prepare(
+		`SELECT stripe_customer_id, stripe_plan FROM orgs WHERE id = ?`,
+	)
+		.bind(teamOrgId)
+		.first<{ stripe_customer_id: string | null; stripe_plan: string | null }>()
+	expect(org).toEqual({
+		stripe_customer_id: 'cus_original',
+		stripe_plan: 'pro',
+	})
+})
+
+test('refreshStripePlanForOrg defers until the org has a linked Stripe customer', async () => {
+	await ensureOrgsTestSchema(env.APP_DB)
+	const teamOrgId = testStableUserIdFromEmail(
+		`team-unlinked-${crypto.randomUUID()}@example.com`,
+	)
+	const now = new Date('2026-07-19T12:00:00.000Z')
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+		 VALUES (?, ?, 'free', ?, ?)`,
+	)
+		.bind(
+			teamOrgId,
+			`team-${teamOrgId.slice(0, 8)}`,
+			now.toISOString(),
+			now.toISOString(),
+		)
+		.run()
+
+	using _fetch = stubStripeFetch({
+		subscriptions: subscriptionList('sub_unlinked', 'active'),
+	})
+	await expect(
+		refreshStripePlanForOrg({
+			env: createBillingEnv(),
+			orgId: ownerIdFromStored(teamOrgId),
+			customerId: 'cus_unlinked',
+			now,
+		}),
+	).rejects.toThrow(/no Stripe customer linked yet/)
+	const org = await env.APP_DB.prepare(
+		`SELECT stripe_customer_id, stripe_plan FROM orgs WHERE id = ?`,
+	)
+		.bind(teamOrgId)
+		.first<{ stripe_customer_id: string | null; stripe_plan: string | null }>()
+	expect(org).toEqual({
+		stripe_customer_id: null,
+		stripe_plan: null,
+	})
+})
+
+test('checkout link replay skips Stripe subscription refresh when already linked', async () => {
+	await ensureOrgsTestSchema(env.APP_DB)
+	const member = await seedUser('link-replay', { plan: 'free' })
+	const teamOrgId = testStableUserIdFromEmail(
+		`team-replay-${crypto.randomUUID()}@example.com`,
+	)
+	const now = new Date('2026-07-19T12:00:00.000Z')
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+		 VALUES (?, ?, 'free', ?, ?)`,
+	)
+		.bind(
+			teamOrgId,
+			`team-${teamOrgId.slice(0, 8)}`,
+			now.toISOString(),
+			now.toISOString(),
+		)
+		.run()
+	await env.APP_DB.prepare(
+		`INSERT INTO org_memberships (org_id, user_id, role, created_at)
+		 VALUES (?, ?, 'owner', ?)`,
+	)
+		.bind(teamOrgId, member.stableUserId, now.toISOString())
+		.run()
+	const orgLinkReference = await createBillingLinkReference(env, teamOrgId)
+	let subscriptionListCalls = 0
+	using _fetch = stubFetch((url, init) => {
+		if (url.includes('/v1/checkout/sessions/')) {
+			return jsonResponse({
+				id: 'cs_replay',
+				customer: 'cus_replay',
+				client_reference_id: orgLinkReference,
+				metadata: { kody_plan: 'pro' },
+			})
+		}
+		if (
+			url.includes('/v1/customers/') &&
+			(init?.method ?? 'GET').toUpperCase() === 'POST'
+		) {
+			return jsonResponse({ id: 'cus_replay' })
+		}
+		if (url.includes('/v1/subscriptions')) {
+			subscriptionListCalls += 1
+			return jsonResponse(subscriptionList('sub_replay', 'active'))
+		}
+		return jsonResponse({ error: 'unexpected stripe path' }, 500)
+	})
+
+	const first = await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_replay',
+		now,
+	})
+	expect(first.stripePlan).toBe('pro')
+	expect(subscriptionListCalls).toBe(1)
+
+	const second = await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_replay',
+		now: new Date(now.getTime() + 1000),
+	})
+	expect(second.stripePlan).toBe('pro')
+	expect(second.creditsEligible).toBe(true)
+	// Webhook-then-success: second pass must not list subscriptions again.
+	expect(subscriptionListCalls).toBe(1)
+
+	// Stale stripe_plan_refreshed_at (canceled-then-resubscribe) must refresh.
+	await env.APP_DB.prepare(
+		`UPDATE orgs SET stripe_plan = 'standard',
+		 stripe_plan_refreshed_at = ? WHERE id = ?`,
+	)
+		.bind(new Date(now.getTime() - 60 * 60 * 1000).toISOString(), teamOrgId)
+		.run()
+	const third = await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_replay',
+		now: new Date(now.getTime() + 2000),
+	})
+	expect(third.stripePlan).toBe('pro')
+	expect(subscriptionListCalls).toBe(2)
+})
+
+test('a completed checkout with promo metadata records the claim for that person once', async () => {
+	await ensureOrgsTestSchema(env.APP_DB)
+	const member = await seedUser('promo-member', { plan: 'free' })
+	const teamOrgId = testStableUserIdFromEmail(
+		`promo-org-${crypto.randomUUID()}@example.com`,
+	)
+	const now = new Date('2026-07-19T12:00:00.000Z')
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+		 VALUES (?, ?, 'free', ?, ?)`,
+	)
+		.bind(
+			teamOrgId,
+			`promo-${teamOrgId.slice(0, 8)}`,
+			now.toISOString(),
+			now.toISOString(),
+		)
+		.run()
+	const orgLinkReference = await createBillingLinkReference(env, teamOrgId)
+	// The org has no members, so the background plan-upgrade email finds no
+	// billing recipients and warns.
+	consoleWarn.mockImplementation(() => {})
+	using _fetch = stubStripeFetch({
+		checkout: {
+			id: 'cs_promo_org',
+			customer: 'cus_promo_org',
+			client_reference_id: orgLinkReference,
+			metadata: {
+				kody_promo_user_id: member.stableUserId,
+				kody_promo_code_id: 'promo_agency_1',
+			},
+		},
+		subscriptions: subscriptionList('sub_promo_org', 'active'),
+	})
+
+	await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_promo_org',
+		now,
+	})
+	// A replay of the same link (success URL + webhook) keeps the first claim.
+	await linkStripeCustomerFromCheckoutSessionForOrg({
+		env: createBillingEnv(),
+		orgId: ownerIdFromStored(teamOrgId),
+		sessionId: 'cs_promo_org',
+		now: new Date(now.getTime() + 1000),
+	})
+
+	const claims = await env.APP_DB.prepare(
+		`SELECT user_id, promotion_code_id, org_id, status, checkout_session_id, claimed_at
+		 FROM billing_promo_claims WHERE user_id = ?`,
+	)
+		.bind(member.stableUserId)
+		.all<Record<string, string>>()
+	expect(claims.results).toEqual([
+		{
+			user_id: member.stableUserId,
+			promotion_code_id: 'promo_agency_1',
+			org_id: teamOrgId,
+			status: 'claimed',
+			checkout_session_id: 'cs_promo_org',
+			claimed_at: now.toISOString(),
+		},
+	])
+	await vi.waitFor(() =>
+		expect(consoleWarn).toHaveBeenCalledWith(
+			'billing-success-email-failed',
+			expect.objectContaining({
+				message: expect.stringContaining('No billing recipients with email'),
+			}),
+		),
+	)
+	expect(consoleWarn).toHaveBeenCalledTimes(1)
 })

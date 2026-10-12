@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	type ConnectedMcpAgent,
 	labelInboundMcpClient,
@@ -17,9 +18,13 @@ import {
 	type OAuthGrantListHelpers,
 	type OAuthGrantListItem,
 } from '#worker/oauth-grants.ts'
+import { readConnectionProfileNameFromGrantMetadata } from '#worker/connection-profiles/oauth.ts'
+import { grantMatchesConsentOrg } from '#worker/orgs/oauth-grant.ts'
 
 export type ConnectedMcpAgentListItem = ConnectedMcpAgent & {
 	grantIds: Array<string>
+	/** Named connection profile, or null for the unlimited default connection. */
+	connectionProfileName: string | null
 }
 
 export type InboundMcpConnectionState = {
@@ -28,17 +33,39 @@ export type InboundMcpConnectionState = {
 	listingFailed?: boolean
 }
 
+/**
+ * Grants live under the person who approved them. Each one is bound to the org
+ * chosen on the approval screen; grants from before org stamping belong to the
+ * person's signup org.
+ */
+function grantsBoundToOrg(
+	grants: Array<OAuthGrantListItem>,
+	userId: OwnerId,
+	orgId: OwnerId | undefined,
+) {
+	if (!orgId) return grants
+	return grants.filter((grant) =>
+		grantMatchesConsentOrg({ metadata: grant.metadata, userId, orgId }),
+	)
+}
+
 export async function loadInboundMcpConnectionState(
 	helpers: OAuthGrantListHelpers | undefined,
-	userId: string,
-	options?: { env?: UserMeterEnv },
+	userId: OwnerId,
+	options?: {
+		env?: UserMeterEnv
+		/** Only agents whose grants are bound to this org. */
+		orgId?: OwnerId
+	},
 ): Promise<InboundMcpConnectionState> {
 	if (!helpers) {
 		return { uniqueClientCount: 0, agents: [] }
 	}
 	try {
 		const [grants, lastUsedByClientId] = await Promise.all([
-			listUserOAuthGrants(helpers, userId),
+			listUserOAuthGrants(helpers, userId).then((all) =>
+				grantsBoundToOrg(all, userId, options?.orgId),
+			),
 			options?.env
 				? listInboundMcpConnectionLastUsed({
 						env: options.env,
@@ -52,21 +79,35 @@ export async function loadInboundMcpConnectionState(
 	}
 }
 
+/**
+ * Revoke the person's grants for `clientId`. With `orgId`, only grants bound
+ * to that org go; `clientRemains` reports grants the same client still holds
+ * in other orgs, so per-client state is kept for them.
+ */
 export async function revokeConnectedMcpAgent(input: {
 	helpers: OAuthGrantHelpers
-	userId: string
+	userId: OwnerId
 	clientId: string
+	orgId?: OwnerId
 	env?: UserMeterEnv
-}): Promise<{ revoked: number } | { error: 'not_found' }> {
-	const grants = await listUserOAuthGrantsForClient(
+}): Promise<
+	| { revoked: number; clientRemains: boolean }
+	| { error: 'not_found'; clientRemains: boolean }
+> {
+	const clientGrants = await listUserOAuthGrantsForClient(
 		input.helpers,
 		input.userId,
 		input.clientId,
 	)
-	if (grants.length === 0) return { error: 'not_found' }
+	const grants = grantsBoundToOrg(clientGrants, input.userId, input.orgId)
+	if (grants.length === 0) {
+		return { error: 'not_found', clientRemains: clientGrants.length > 0 }
+	}
 	for (const grant of grants) {
 		await revokeOAuthGrant(input.helpers, grant.id, input.userId)
 	}
+	const clientRemains = clientGrants.length > grants.length
+	if (clientRemains) return { revoked: grants.length, clientRemains }
 	if (input.env) {
 		await forgetInboundMcpConnectionLastUsed({
 			env: input.env,
@@ -74,7 +115,7 @@ export async function revokeConnectedMcpAgent(input: {
 			clientId: input.clientId,
 		}).catch(() => undefined)
 	}
-	return { revoked: grants.length }
+	return { revoked: grants.length, clientRemains }
 }
 
 async function labelInboundMcpGrants(
@@ -108,6 +149,7 @@ async function labelInboundMcpGrants(
 			kind: labeled.kind,
 			connectedAt: earliestGrantCreatedAt(clientGrants),
 			lastUsedAt: lastUsedByClientId.get(clientId) ?? null,
+			connectionProfileName: connectionProfileNameForGrants(clientGrants),
 		})
 	}
 
@@ -143,6 +185,17 @@ function firstGrantRedirectUri(grants: Array<OAuthGrantListItem>) {
 		if (grant.redirectUri) return grant.redirectUri
 	}
 	return undefined
+}
+
+function connectionProfileNameForGrants(grants: Array<OAuthGrantListItem>) {
+	let found: string | null = null
+	for (const grant of grants) {
+		const name = readConnectionProfileNameFromGrantMetadata(grant.metadata)
+		if (!name) continue
+		if (found === null) found = name
+		else if (found !== name) return null
+	}
+	return found
 }
 
 function earliestGrantCreatedAt(grants: Array<OAuthGrantListItem>) {

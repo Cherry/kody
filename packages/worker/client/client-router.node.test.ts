@@ -70,8 +70,6 @@ test('client route and loader matching prefer specific static routes over dynami
 		[routePattern(routes.communityPackage)]: element('package-detail'),
 		[routePattern(routes.communityPackageApprovePublish)]:
 			element('approve-publish'),
-		[routePattern(routes.communityPackageApproveChanges)]:
-			element('approve-changes'),
 	}
 	const routeCases: Array<[string, string]> = [
 		['/account/mcp-servers/new', 'new-server'],
@@ -81,7 +79,6 @@ test('client route and loader matching prefer specific static routes over dynami
 		['/@kentcdodds/pkg-1', 'package-detail'],
 		['/@kentcdodds/pkg-1/approve-publish', 'approve-publish'],
 		['/@kentcdodds/pkg-1/approve-publish?commit=abc1234', 'approve-publish'],
-		['/@kentcdodds/pkg-1/approve-changes', 'approve-changes'],
 	]
 	expect(
 		routeCases.map(([path]) => [path, matchRoute(path, pageRoutes)]),
@@ -199,6 +196,26 @@ test('view transitions skip shell tab switches, including when from-path was nev
 				}) !== want,
 		),
 	).toEqual([])
+
+	// Back/Forward swaps instantly so the restored page never fades or slides
+	// into its saved scroll position; the same hop as a push still animates.
+	const base = { canStart: true, prefersReducedMotion: false }
+	expect(
+		shouldUseViewTransition({
+			...base,
+			from: '/features/memory',
+			to: '/',
+			historyAction: 'pop',
+		}),
+	).toBe(false)
+	expect(
+		shouldUseViewTransition({
+			...base,
+			from: '/features/memory',
+			to: '/',
+			historyAction: 'push',
+		}),
+	).toBe(true)
 
 	const withRail = {
 		querySelector: (selector: string) =>

@@ -105,27 +105,32 @@ test('doc artwork and blog posts route Open Graph cards through generated paths'
 
 	const blogBase = {
 		ok: true as const,
-		slug: 'kody-vs-executor',
-		title: 'Kody vs Executor?',
-		date: '2026-08-20',
-		description: 'Kody is the runtime. Executor is the gateway.',
-		placeholder: false,
-		image: '/images/kody-vs-executor.webp',
-		imageAlt: 'Kody and the Executor logo size each other up.',
+		slug: 'openclaw-2-needs-a-home',
+		title: 'OpenClaw 2 needs a home',
+		date: '2026-08-31',
+		description: 'OpenClaw is the front door. Kody is the home behind it.',
+		placeholder: true,
+		image: '/images/openclaw-2-needs-a-home.webp',
+		imageAlt: 'Kody stands with his arm around OpenClaw.',
 		body: 'Body',
 		readNext: null,
 	}
 
-	for (const ogImage of [null, '/images/kody-vs-executor-og.jpg'] as const) {
+	for (const ogImage of [
+		null,
+		'/images/openclaw-2-needs-a-home-og.jpg',
+	] as const) {
 		const head = absolutizeDocumentHead(
-			resolveDocumentHead('/blog/kody-vs-executor', {
+			resolveDocumentHead('/blog/openclaw-2-needs-a-home', {
 				blogPost: { ...blogBase, ogImage },
 			}),
 			'https://kody.codes',
 		)
-		expect(head.canonicalUrl).toBe('https://kody.codes/blog/kody-vs-executor')
+		expect(head.canonicalUrl).toBe(
+			'https://kody.codes/blog/openclaw-2-needs-a-home',
+		)
 		expect(head.og?.imageUrl).toBe(
-			'https://kody.codes/blog/kody-vs-executor/og.png',
+			'https://kody.codes/blog/openclaw-2-needs-a-home/og.png',
 		)
 	}
 
@@ -134,9 +139,9 @@ test('doc artwork and blog posts route Open Graph cards through generated paths'
 			blogPost: {
 				ok: true,
 				slug: 'your-assistants-home',
-				title: "Your assistant's home",
+				title: "Your agents' cloud",
 				date: '2026-07-18',
-				description: 'A home for your assistant.',
+				description: 'A home for your agents.',
 				placeholder: true,
 				image: null,
 				imageAlt: null,
@@ -166,4 +171,30 @@ test('missing public packages and their settings use the shared not-found title'
 			resolveDocumentTitle(pathname),
 		]),
 	).toEqual(cases.map(([, pending]) => [NOT_FOUND_DOCUMENT_TITLE, pending]))
+})
+
+test.each([
+	'',
+	'/memory',
+	'/secrets',
+	'/packages',
+	'/triggers',
+	'/integrations',
+	'/apps',
+])('feature page %s has canonical metadata and its stylesheet', (suffix) => {
+	const path = `/features${suffix}`
+	const head = absolutizeDocumentHead(
+		resolveDocumentHead(path),
+		'https://kody.codes',
+	)
+	expect(head.title).not.toBe(NOT_FOUND_DOCUMENT_TITLE)
+	expect(head.description).toBeTruthy()
+	expect(head.canonicalUrl).toBe(`https://kody.codes${path}`)
+	expect(head.og?.imageUrl).toBe(
+		`https://kody.codes/og/${suffix ? `feature-${suffix.slice(1)}` : 'features'}.png`,
+	)
+	expect(head.links).toContainEqual({
+		rel: 'stylesheet',
+		href: '/feature-pages.css',
+	})
 })

@@ -8,16 +8,19 @@ import {
 	creditsUnlockMultiplier,
 	formatDurableObjectRowsRead,
 	formatMinJobInterval,
-	planLimits,
-	proCreditsPlanLimits,
 	weeklyComputeWindowNote,
 	type PlanLimits,
 } from '#universal/plans.ts'
+import {
+	pricingLimitColumns,
+	type PricingLimitColumn,
+} from '#universal/pricing-limits.ts'
 import {
 	publicSignupPrimaryCta,
 	type PublicSignupCta,
 } from '#universal/public-signup-copy.ts'
 import { docHref } from '#universal/docs-nav.ts'
+import { orgBillingPath } from '#universal/org-pages.ts'
 import { colors, radius, typography } from '#universal/styles/tokens.ts'
 import {
 	getGhostButtonCss,
@@ -45,6 +48,8 @@ type LimitRow = {
 	label: string
 	key: keyof PlanLimits
 	format?: (value: number) => LimitValue
+	/** Monthly meter that keeps running past the include, debiting credits. */
+	chargedPastInclude?: true
 }
 
 type LimitGroup = {
@@ -77,8 +82,14 @@ const limitGroups: ReadonlyArray<LimitGroup> = [
 		note: weeklyComputeWindowNote,
 		rows: [
 			{ label: 'Concurrent workflows', key: 'maxConcurrentWorkflows' },
-			{ label: 'Execute calls per day', key: 'maxExecuteCallsPerDay' },
-			{ label: 'Execute calls per week', key: 'maxExecuteCallsPerWeek' },
+			{
+				label: 'Unique execute workers per day',
+				key: 'maxExecuteUniqueWorkersPerDay',
+			},
+			{
+				label: 'Unique execute workers per week',
+				key: 'maxExecuteUniqueWorkersPerWeek',
+			},
 			{ label: 'Outbound fetches per day', key: 'maxOutboundFetchesPerDay' },
 			{ label: 'Outbound fetches per week', key: 'maxOutboundFetchesPerWeek' },
 			{ label: 'Job runs per day', key: 'maxJobRunsPerDay' },
@@ -87,9 +98,15 @@ const limitGroups: ReadonlyArray<LimitGroup> = [
 				key: 'maxAutomationInvocationsPerDay',
 			},
 			{
+				label: 'Worker compute per month',
+				key: 'maxUniqueWorkerDaysPerMonth',
+				chargedPastInclude: true,
+			},
+			{
 				label: 'Durable Object rows read per month',
 				key: 'maxDurableObjectRowsReadPerMonth',
 				format: (value) => ({ text: formatDurableObjectRowsRead(value) }),
+				chargedPastInclude: true,
 			},
 		],
 	},
@@ -144,9 +161,9 @@ export function PricingRoute(handle: Handle) {
 						Pay when Kody <em>earns it</em>.
 					</h1>
 					<p>
-						The home your agents share is a factory: it turns the work they do
-						once into durable software that keeps running. Every plan is the
-						whole factory. You pay for volume.
+						Your agents' cloud is a factory: it turns the work they do once into
+						durable software that keeps running. Every plan is the whole
+						factory. You pay for volume.
 					</p>
 				</header>
 
@@ -191,7 +208,11 @@ export function PricingRoute(handle: Handle) {
 							credits.
 							{improvedSearchNote}
 						</p>
-						{renderPaidPlanCta(isSignedIn, signedOutCta)}
+						{renderPaidPlanCta(
+							isSignedIn,
+							signedOutCta,
+							personalBillingHref(session),
+						)}
 					</section>
 
 					{/*
@@ -229,33 +250,38 @@ export function PricingRoute(handle: Handle) {
 									<th scope="col">
 										<span mix={css(visuallyHiddenCss)}>Resource</span>
 									</th>
-									<th scope="col">
-										<span data-limits-plan>Free</span>
-										<span data-limits-price>$0</span>
-									</th>
-									<th scope="col">
-										<span data-limits-plan>Pro</span>
-										<span data-limits-price>$12/mo</span>
-										<span data-limits-annual>or $120/yr</span>
-									</th>
+									{pricingLimitColumns.map((column) => (
+										<th scope="col" key={column.id}>
+											<span data-limits-plan>{column.plan}</span>
+											<span data-limits-price>{column.price}</span>
+											{column.priceNote ? (
+												<span data-limits-annual>{column.priceNote}</span>
+											) : null}
+										</th>
+									))}
 								</tr>
 							</thead>
 							<tbody>
 								{limitGroups.flatMap((group) => [
 									<tr key={group.title} data-group>
-										<th colspan={3}>{group.title}</th>
+										<th colspan={pricingLimitColumns.length + 1}>
+											{group.title}
+										</th>
 									</tr>,
 									...group.rows.map((row) => (
 										<tr key={row.key}>
 											<th scope="row">{row.label}</th>
-											{renderLimitCell(row, planLimits.free)}
-											{renderLimitCell(row, proCreditsPlanLimits)}
+											{pricingLimitColumns.map((column) =>
+												renderLimitCell(row, column),
+											)}
 										</tr>
 									)),
 									...(group.note
 										? [
 												<tr key={`${group.title}-note`} data-note>
-													<td colspan={3}>{group.note}</td>
+													<td colspan={pricingLimitColumns.length + 1}>
+														{group.note}
+													</td>
 												</tr>,
 											]
 										: []),
@@ -268,19 +294,30 @@ export function PricingRoute(handle: Handle) {
 					</h3>
 					<p mix={css(limitsFootnoteCss)} data-credits-story>
 						Pro includes the usage in the table. Need more? Add prepaid credits
-						and keep going until they run out. Free stops at its limits.
+						and keep going until they run out. Free stops at its execute caps
+						and other hard limits (fetches, job runs, email, and storage). On
+						Free, monthly Worker compute and Rows read are guidelines: they
+						never charge you or stop runs.
 					</p>
 					<p mix={css(limitsFootnoteCss)} data-credits-small-print>
 						Usage past the include is charged from credits (Worker compute and
-						Rows read). Daily and weekly limits can go up to{' '}
-						{creditsUnlockMultiplier}× Pro&rsquo;s included limits on credits.
-						When credits run out, usage past the include stops. No overage
-						invoices.
+						Rows read). On credits, daily and weekly limits go up to{' '}
+						{creditsUnlockMultiplier}× Pro&rsquo;s include, capped at the
+						&ldquo;Pro + credits&rdquo; column. When credits run out, usage past
+						the include stops. No overage invoices.
+					</p>
+					<p mix={css(limitsFootnoteCss)} data-credits-seats>
+						In an organization, daily and weekly limits are one shared pool for
+						everyone. Each paid seat adds the Pro unique execute workers,
+						outbound fetches, job runs, and automation invocations (and their
+						&ldquo;Pro + credits&rdquo; caps) to the pool, and raises the
+						execute runaway brake (300 calls per minute per seat). Credits come
+						from one organization wallet.
 					</p>
 					<p mix={css(limitsFootnoteCss)}>
-						Execute calls and outbound fetches count per day and per week;
-						whichever window fills first applies. Durable Object duration is
-						unmetered.
+						Unique execute workers and outbound fetches count per day and per
+						week; whichever window fills first applies. Durable Object duration
+						is unmetered.
 					</p>
 				</section>
 
@@ -304,10 +341,23 @@ function factoryGuideLink() {
 	return <a href={factoryGuideHref}>factory</a>
 }
 
-function renderPaidPlanCta(isSignedIn: boolean, signedOutCta: PublicSignupCta) {
+function personalBillingHref(
+	session: {
+		organizations?: ReadonlyArray<{ slug: string; personal: boolean }>
+	} | null,
+) {
+	const slug = session?.organizations?.find((org) => org.personal)?.slug
+	return slug ? orgBillingPath(slug) : '/account'
+}
+
+function renderPaidPlanCta(
+	isSignedIn: boolean,
+	signedOutCta: PublicSignupCta,
+	signedInBillingHref: string,
+) {
 	if (isSignedIn) {
 		return (
-			<a href="/account/billing" mix={css(planGhostButtonCss)}>
+			<a href={signedInBillingHref} mix={css(planGhostButtonCss)}>
 				Upgrade in billing
 			</a>
 		)
@@ -319,18 +369,28 @@ function renderPaidPlanCta(isSignedIn: boolean, signedOutCta: PublicSignupCta) {
 	)
 }
 
-function renderLimitCell(row: LimitRow, limits: PlanLimits) {
-	const value = limits[row.key]
+function renderLimitCell(row: LimitRow, column: PricingLimitColumn) {
+	const value = column.limits[row.key]
 	if (value == null) {
 		return <td>—</td>
 	}
-	const cell = row.format ? row.format(value) : { text: count.format(value) }
+	const formatted = row.format
+		? row.format(value)
+		: { text: count.format(value) }
+	const isGuideline = row.chargedPastInclude && column.monthlyIncludeIsGuideline
+	const cell = isGuideline
+		? { text: `${formatted.text} guideline`, muted: true }
+		: formatted
+	const text =
+		row.chargedPastInclude && column.chargesPastInclude
+			? `${cell.text} + credits`
+			: cell.text
 	return (
 		<td>
 			{cell.muted ? (
-				<span mix={css({ color: colors.textMuted })}>{cell.text}</span>
+				<span mix={css({ color: colors.textMuted })}>{text}</span>
 			) : (
-				cell.text
+				text
 			)}
 		</td>
 	)
@@ -570,8 +630,8 @@ const limitsTableCss = {
 		display: 'block',
 		color: colors.text,
 	},
-	/* Third column is Pro, the featured plan — the accent follows its panel. */
-	'& thead th:nth-child(3) [data-limits-plan]': {
+	/* Pro columns are the featured plan — the accent follows its panel. */
+	'& thead th:nth-child(n + 3) [data-limits-plan]': {
 		color: colors.primaryText,
 	},
 	'& [data-limits-price]': {

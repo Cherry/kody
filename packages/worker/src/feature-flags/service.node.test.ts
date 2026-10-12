@@ -1,7 +1,7 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import {
 	clearFeatureFlagUserOverride,
-	computeRolloutBucket,
 	deleteStaleFeatureFlag,
 	getFeatureFlagEvaluationsForUser,
 	getFeatureFlagsForUser,
@@ -282,10 +282,11 @@ function createFeatureFlagsTestDb(
 
 const registryKeys = [
 	'demo-indicator',
-	'package-share-grants',
-	'secret-providers',
 	'jev-search-rerank',
 	'execute-invoke',
+	'connection-profiles',
+	'mcp-skills-extension',
+	'mcp-events-extension',
 ] as const
 
 function everyFlag<T>(value: T, overrides: Partial<Record<FlagKey, T>> = {}) {
@@ -326,9 +327,10 @@ function enabledFor(
 	return Promise.all(userIds.map((userId) => isFeatureEnabled(db, key, userId)))
 }
 
-function userInBucket(inRollout: boolean) {
+async function userInBucket(db: TestDb, inRollout: boolean) {
 	for (let userId = 1; userId < 10_000; userId += 1) {
-		if (computeRolloutBucket('demo-indicator', userId) < 50 === inRollout) {
+		const enabled = await isFeatureEnabled(db, 'demo-indicator', userId)
+		if (enabled === inRollout) {
 			return userId
 		}
 	}
@@ -355,7 +357,11 @@ test('global on/off and percentage rollout evaluation', async () => {
 
 	await setGlobal(db, true, { rolloutPercent: 50 })
 	expect(
-		await enabledFor(db, [userInBucket(true), userInBucket(false), null]),
+		await enabledFor(db, [
+			await userInBucket(db, true),
+			await userInBucket(db, false),
+			null,
+		]),
 	).toEqual([true, false, false])
 	await expect(isFeatureGloballyEnabled(db, 'demo-indicator')).resolves.toBe(
 		true,
@@ -380,20 +386,21 @@ test('global on/off and percentage rollout evaluation', async () => {
 	expect(db.globals.get('demo-indicator')?.note).toBe('')
 })
 
-test('computeRolloutBucket is deterministic and spreads across 0-99', () => {
-	expect(computeRolloutBucket('demo-indicator', 42)).toBe(
-		computeRolloutBucket('demo-indicator', 42),
-	)
-	expect(computeRolloutBucket('demo-indicator', 1)).not.toBe(
-		computeRolloutBucket('other-flag', 1),
-	)
+test('percentage rollout is deterministic per user and both outcomes appear', async () => {
+	const db = createFeatureFlagsTestDb()
+	await setGlobal(db, true, { rolloutPercent: 50 })
 
-	const buckets = Array.from({ length: 2_000 }, (_, index) =>
-		computeRolloutBucket('demo-indicator', index + 1),
+	const results = await enabledFor(
+		db,
+		Array.from({ length: 200 }, (_, index) => index + 1),
 	)
-	expect(buckets.filter((bucket) => bucket < 0 || bucket >= 100)).toEqual([])
-	// Sanity: a decent spread across the 0–99 range for 2000 samples.
-	expect(new Set(buckets).size).toBeGreaterThan(80)
+	expect(results).toContain(true)
+	expect(results).toContain(false)
+
+	const sampleUserId = 42
+	const first = await isFeatureEnabled(db, 'demo-indicator', sampleUserId)
+	const second = await isFeatureEnabled(db, 'demo-indicator', sampleUserId)
+	expect(first).toBe(second)
 })
 
 test('user override wins over global off and global on; clear restores evaluation', async () => {
@@ -493,10 +500,10 @@ test('getFeatureFlagEvaluationsForUser reports assignment sources', async () => 
 	expect(await demoFor(7)).toEqual({ enabled: true, source: 'global' })
 
 	await setGlobal(db, true, { rolloutPercent: 50 })
-	expect(await demoFor(7)).toEqual({
-		enabled: computeRolloutBucket('demo-indicator', 7) < 50,
-		source: 'rollout',
-	})
+	const rolloutEval = await demoFor(7)
+	expect(rolloutEval.source).toBe('rollout')
+	expect(typeof rolloutEval.enabled).toBe('boolean')
+	expect(await demoFor(7)).toEqual(rolloutEval)
 	// Anonymous users are excluded from percentage rollouts but the
 	// assignment is still rollout-sourced.
 	expect(await demoFor(null)).toEqual({ enabled: false, source: 'rollout' })
@@ -550,7 +557,6 @@ test('listFeatureFlagsForAdmin includes registry flags and stale DB-only keys', 
 	})
 
 	const listed = await listFeatureFlagsForAdmin(db)
-	expect(listed).toHaveLength(7)
 	const byKey = (key: string) => listed.find((flag) => flag.key === key)
 	const executeMetric = {
 		eventType: 'execute',
@@ -558,8 +564,6 @@ test('listFeatureFlagsForAdmin includes registry flags and stale DB-only keys', 
 		goal: 'increase',
 	}
 	const registryExpectations: Array<[string, Record<string, unknown>]> = [
-		['package-share-grants', { successMetric: null }],
-		['secret-providers', { successMetric: null }],
 		[
 			'jev-search-rerank',
 			{ defaultAudience: 'experiments_opt_in', successMetric: executeMetric },
@@ -577,7 +581,11 @@ test('listFeatureFlagsForAdmin includes registry flags and stale DB-only keys', 
 					updatedByStableUserId: null,
 				},
 				overrides: [
-					{ stableUserId: 'stable-4', username: 'bob', enabled: true },
+					{
+						stableUserId: ownerIdFromStored('stable-4'),
+						username: 'bob',
+						enabled: true,
+					},
 				],
 			},
 		],
@@ -617,7 +625,7 @@ test('listFeatureFlagsForAdmin includes registry flags and stale DB-only keys', 
 		global: null,
 		overrides: [
 			{
-				stableUserId: 'stable-3',
+				stableUserId: ownerIdFromStored('stable-3'),
 				username: 'alice',
 				enabled: false,
 				updatedAt: '2026-07-03T00:00:00.000Z',

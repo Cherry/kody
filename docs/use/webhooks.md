@@ -11,8 +11,6 @@ package export.
 This is the HTTP sibling of [email primitives](./email-primitives.md). Webhooks
 are the external HTTP knock: vendor providers (Sentry, GitHub, Stripe) and
 first-party trusted clients (gateway proxies, CLIs) both POST to a minted URL.
-[Package invocation bearer tokens](../contributing/package-invocation-api.md)
-are an unadvertised drain; new callers use webhooks.
 
 There is no `*` / multi-export URL. One declared webhook name binds one export.
 
@@ -62,11 +60,18 @@ Rules:
   `params` (see [Trusted clients](#trusted-clients)).
 - `rateLimitPerMinute` is optional. Default **60**. Maximum **600** (gateway
   fan-in). A leaked URL is still bounded; there is no unlimited setting.
+- `verification.type` is `hmac-sha256`, `hmac-sha1`, or `url-secret` for senders
+  that cannot sign (see
+  [Senders that cannot sign](#senders-that-cannot-sign-url-secret)). The
+  remaining `verification` fields apply to the HMAC types only.
 - `verification.secretName` is **optional**. Omit it for GitHub-style hooks
   where Kody mints package-owned HMAC onto the webhook URL record at
   `webhookUrlMint` (not listed in account secrets, no host Allow). Set it only
   for **provider-issued** signing secrets that must live in the secret store
-  (for example Sentry). Never put an inline secret value in the manifest.
+  (for example Sentry or Stripe). Inbound signatures are checked against the
+  named secret first, on the same URL; a signing secret Kody stored on the
+  endpoint earlier (generated, or copied at mint) is still accepted as a
+  fallback. Never put an inline secret value in the manifest.
 - `verification.signedPayload` is `'body'` (default) or `'timestamp.body'`. Use
   `'timestamp.body'` when the provider HMAC covers
   `` `${timestamp}.${rawBody}` ``.
@@ -106,7 +111,7 @@ Other capabilities: `webhookList` (declarations — including `verification`,
 (metadata only; bodies are never stored), and `webhookSyntheticDispatch`
 (interactive-MCP smoke test for a minted webhook — see
 [Synthetic smoke test](#synthetic-smoke-test)). The same delivery history also
-appears under [Activity](./activity.md) (`/account/activity` and the `runs`
+appears under [Activity](./activity.md) (`/@<slug>/-/activity` and the `runs`
 capabilities). List, mint, rotate, apply, and synthetic dispatch never return
 the credential URL.
 
@@ -134,7 +139,7 @@ either apply the handle (`type: "http"`) or ask the owner to copy the URL from
 package settings. Mints that predate encrypted secret storage cannot be shown;
 the card offers Rotate for those.
 
-`/account/webhooks` (account rail → Webhooks) is a read-only index of every
+`/@<slug>/-/webhooks` (account rail → Webhooks) is a read-only index of every
 webhook across your packages. Each row links to the owning package's Webhooks
 section; nothing is minted or revealed from the index.
 
@@ -162,14 +167,14 @@ required. `{{webhookSecret}}` injects **package-owned HMAC signing material**
 stored on the minted webhook URL record (not a user secrets-list entry, and not
 host-gated). When a package declares `verification.secretName`, reminting (or
 rotating) the URL copies that value onto the endpoint when the named secret
-exists — apply never does a live `secretName` lookup for `{{webhookSecret}}` (so
-changing the name after destination Allow cannot swap credentials). Destination
-`secretName` / `integration` Bearer auth requires host approval / integration
-allowlists. Destination URLs must be `https://`. Redirects are not followed.
-Auth is optional via `secretName` or `integration` (Bearer), or a
-caller-supplied `Authorization` header — not both. Destination `secretName` /
-`integration` authorize the outbound request; they are not the webhook HMAC
-signing secret.
+exists and the endpoint holds no signing secret yet — apply never does a live
+`secretName` lookup for `{{webhookSecret}}` (so changing the name after
+destination Allow cannot swap credentials). Destination `secretName` /
+`integration` Bearer auth requires host approval / integration allowlists.
+Destination URLs must be `https://`. Redirects are not followed. Auth is
+optional via `secretName` or `integration` (Bearer), or a caller-supplied
+`Authorization` header — not both. Destination `secretName` / `integration`
+authorize the outbound request; they are not the webhook HMAC signing secret.
 
 That path is **interactive MCP only** and reuses the same **account owner
 approval flow** as secret host approval (`/connect/secrets`), secret package
@@ -265,14 +270,27 @@ package settings.
   export runs in the background. Bodies use the same **1 MB** cap as sync;
   oversized queue messages spill to ephemeral storage until the consumer runs. A
   temporary queue failure returns **503** so the provider can retry without Kody
-  claiming acceptance.
-- `sync`: waits for the export JSON result (**502** on failure).
+  claiming acceptance. Activity duration for ack deliveries measures queue
+  consumer + export time (ingress receive time is kept as metadata). Failed
+  deliveries keep diagnostic logs — including when the export never reached user
+  code.
+- `sync`: waits for the export JSON result (**502** on failure). The failure
+  body is `{ "ok": false, "error": { "code", "message" } }` and never carries
+  package internals. `code` is `invocation_failed` unless the fetch gateway
+  refused the package's request because a credential placeholder was bound for a
+  host the credential does not allow, went over plain HTTP, or sat in the URL
+  host or user info: then it is `credential_placement_refused`. When the refusal
+  concerns one named slot, `error.slot` carries that slot name (never a value);
+  a Basic Auth pair or a vault reference omits it. Ack deliveries record the
+  same code in Activity. The owner sees the full error in Activity.
 
 Background delivery retries keep the same idempotency key, so a transient
-platform persistence failure does not duplicate a completed export. Package
-exports still have the normal execution limit (about 90 seconds); packages that
-exceed it receive an explicit timeout failure and should split or checkpoint
-their work.
+platform persistence failure does not duplicate a completed export. Ack (queued)
+deliveries run the export with a 5-minute budget on every plan. `sync`
+deliveries keep the interactive ~90-second budget, and the HTTP response stops
+waiting after 30 seconds. Exports that exceed their budget receive an explicit
+timeout failure and should split or checkpoint their work, or hand long work to
+a [workflow](./workflows.md).
 
 ## Subscription challenges
 
@@ -283,9 +301,8 @@ export never runs for the quiz, and challenge handling does not mutate account
 state, call MCP, or fetch outbound.
 
 Declare one `challenge` object next to (or instead of, when the provider has no
-POST HMAC) `verification`. Prefer the generic `subscription-challenge` type with
-knobs; deprecated aliases remain for older manifests (see
-[migration](#challenge-compat-aliases)).
+POST HMAC) `verification`. Use the generic `subscription-challenge` type with
+knobs, or copy a documented preset below.
 
 ### Generic `subscription-challenge`
 
@@ -441,22 +458,6 @@ Store the X consumer secret with `secretSet` under `xConsumerSecret`, mint the
 webhook, then register the revealed URL directly with X. CRC GETs never invoke
 `./activity-event`; activity POSTs do, after HMAC verification.
 
-### Challenge compat aliases
-
-These short `challenge.type` values parse and expand to the presets above.
-Prefer `subscription-challenge` for new manifests; aliases are deprecated.
-
-| Alias                    | Expands to                                              |
-| ------------------------ | ------------------------------------------------------- |
-| `x-activity-crc`         | CRC preset (`crc_token` → `response_token`)             |
-| `websub-hub`             | WebSub preset (optional `secretName` → verify-token)    |
-| `meta-hub`               | Hub text/plain preset (required `secretName`)           |
-| `strava-hub`             | Hub JSON `{ "hub.challenge" }` preset (required secret) |
-| `slack-url-verification` | JSON body + optional request-hmac preset                |
-
-Migration: replace the alias object with the matching preset JSON (same
-`secretName` values). Behavior is identical after expand.
-
 ## Payload shape seen by the package export
 
 ```ts
@@ -487,6 +488,45 @@ export async function handleSentryWebhook(input) {
 ```
 
 ## Signature verification examples
+
+### Signing presets
+
+Every webhook should declare `verification`. Pick the row for your sender and
+copy its block into `verification` (full examples follow). Omit `secretName`
+where the table says so: mint then stores a package-owned signing secret on the
+URL record, and `webhookUrlApply` can hand it to the sender as
+`{{webhookSecret}}`.
+
+| Sender                               | `verification`                                                                                                            | Secret                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Stripe                               | `hmac-sha256`, header `Stripe-Signature`, `hex`, `signedPayload: "timestamp.body"`, plus `replay` (see [Stripe](#stripe)) | `secretName` (Stripe's signing secret)       |
+| GitHub                               | `hmac-sha256`, header `x-hub-signature-256`, `hex`, prefix `sha256=`                                                      | Omit `secretName`; apply `{{webhookSecret}}` |
+| Sentry                               | `hmac-sha256`, header `sentry-hook-signature`, `hex`                                                                      | `secretName` (Sentry's client secret)        |
+| X Account Activity                   | `hmac-sha256`, header `X-Twitter-Webhooks-Signature`, `base64`, prefix `sha256=`                                          | `secretName` (consumer secret)               |
+| Bitbucket Cloud                      | `hmac-sha256`, header `X-Hub-Signature`, `hex`, prefix `sha256=`                                                          | Omit `secretName`; apply `{{webhookSecret}}` |
+| Your own caller (script, server, CI) | `hmac-sha256`, header `x-kody-signature`, `hex`, prefix `sha256=`                                                         | Omit `secretName`; apply `{{webhookSecret}}` |
+| A sender that cannot sign            | `{ "type": "url-secret" }` (see [Senders that cannot sign](#senders-that-cannot-sign-url-secret))                         | The URL itself                               |
+
+A caller you control signs each request with
+`x-kody-signature: sha256=<lowercase hex HMAC-SHA256 of the raw request body>`,
+keyed by the secret `webhookUrlApply` delivered as `{{webhookSecret}}`. Kody
+package code cannot compute that signature yet (packages never see secret
+plaintext), so package-to-webhook calls use `url-secret` for now.
+
+Kody cannot verify these senders yet. Declare `url-secret` for them (Discord
+also needs a relay):
+
+- **Discord interactions (Ed25519).** Discord signs with an Ed25519 key pair
+  (`X-Signature-Ed25519` over `X-Signature-Timestamp` + body), and
+  `verification` supports only HMAC. Discord also checks that an interactions
+  endpoint rejects bad signatures, so point Discord at a bot or gateway that
+  verifies them and forwards to the webhook, rather than at the minted URL.
+- **Slack Events.** Slack signs `v0:{timestamp}:{body}`; delivery verification
+  supports only `body` and `timestamp.body`.
+- **Telegram.** Bots send a static `X-Telegram-Bot-Api-Secret-Token` header, not
+  an HMAC.
+- **Gmail Pub/Sub push** (OIDC JWT), **Microsoft Graph** (`clientState`),
+  **Azure DevOps service hooks** (basic auth), and **PostHog** (unsigned).
 
 ### Sentry
 
@@ -561,6 +601,37 @@ window:
 is missing, unparseable, or older than `toleranceSeconds` (default 300) are
 rejected with the same generic 401 as a bad HMAC.
 
+### Senders that cannot sign: `url-secret`
+
+Declare `url-secret` when the sender has no way to sign requests, or signs in a
+way Kody cannot verify yet (Telegram, Microsoft Graph, Azure DevOps, PostHog, a
+cron service; see [Signing presets](#signing-presets)). The URL secret is then
+the only credential and signature headers are ignored: a POST to the minted URL
+runs the export once it passes any declared `replay` checks (a matching
+`challenge` POST is answered without running it). This is a supported, permanent
+verification type:
+
+```json
+{
+	"name": "events",
+	"export": "./handle-events",
+	"verification": { "type": "url-secret" }
+}
+```
+
+A webhook that declares an HMAC type never falls back to the URL secret: a
+request without a valid signature is refused with 401, even on the right URL.
+Prefer an HMAC type whenever the sender can sign.
+
+A webhook that declares no `verification` is treated as `url-secret` for now.
+Codemod `0012-explicit-webhook-url-secret-verification` adds the explicit
+declaration to existing packages; once none are left, publish will require
+`verification` on every webhook
+([#3477](https://github.com/kentcdodds/kody/issues/3477)).
+
+Either way, the webhook runs as its enabler, the person who turned it on; with
+no `on` enablement the delivery answers 409 `enablement_not_on`.
+
 ## Synthetic smoke test
 
 After mint, smoke-test the bound export from **interactive MCP** with
@@ -601,7 +672,8 @@ extension, social-launch client) mints a webhook URL and POSTs JSON. No
 	"export": "./dispatch-message-created",
 	"responseMode": "sync",
 	"inputMode": "params",
-	"rateLimitPerMinute": 600
+	"rateLimitPerMinute": 600,
+	"verification": { "type": "url-secret" }
 }
 ```
 
@@ -609,23 +681,22 @@ Use `sync` when the caller needs the export JSON (or a **409** idempotency
 conflict). Use `ack` when the caller only needs acceptance; the queue consumer
 applies the same idempotency ledger.
 
-`inputMode: "params"` passes a JSON object as the export's **first argument**,
-matching invocation-token `params`. If the body is the invoke envelope
-(`{ "params": { … } }` with optional `idempotencyKey`, `source`, and `topic`),
-the platform unwraps `params`. `idempotencyKey` counts only as a non-empty
-string, and `source` / `topic` only as a string or null. A top-level JSON object
-that is not that envelope is the first argument as-is, so sibling fields such as
-`route` and `dryRun` stay visible even when a nested `params` object is present.
-Arrays and non-objects are **400** `invalid_params`. Default
-`inputMode: "request"` is unchanged: the export still receives
-`{ webhook, request }`.
+`inputMode: "params"` passes a JSON object as the export's **first argument**.
+If the body is the invoke envelope (`{ "params": { … } }` with optional
+`idempotencyKey`, `source`, and `topic`), the platform unwraps `params`.
+`idempotencyKey` counts only as a non-empty string, and `source` / `topic` only
+as a string or null. A top-level JSON object that is not that envelope is the
+first argument as-is, so sibling fields such as `route` and `dryRun` stay
+visible even when a nested `params` object is present. Arrays and non-objects
+are **400** `invalid_params`. Default `inputMode: "request"` passes
+`{ webhook, request }` as the export's first argument.
 
 Send **`Idempotency-Key`** (standard header). In `params` mode, JSON
 `idempotencyKey` is accepted when the header is absent. Same key + same payload
 replays the stored result. On `sync`, a different payload is **409**
 `idempotency_mismatch` and an in-progress key is **409**
 `invocation_in_progress`. `ack` still returns **202** after enqueue; the
-consumer records the ledger outcome. This works without HMAC — the URL secret is
+consumer records the ledger outcome. This works without HMAC: the URL secret is
 the credential.
 
 Caller keys use the same package-invocation idempotency ledger as

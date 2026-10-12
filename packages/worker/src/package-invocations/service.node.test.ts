@@ -1,4 +1,6 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import type * as EnablementsRepo from '#worker/enablements/repo.ts'
 import type * as packageSourceModule from '#worker/package-registry/source.ts'
 import {
 	AccountSuspendedError,
@@ -10,7 +12,7 @@ import {
 	consoleWarn,
 } from '#worker/test-support/console-spies.ts'
 import { invokePackageExport, invokePackageSubscription } from './service.ts'
-import { clearInvokeContractCachesForTests } from './invoke-contract-cache.ts'
+import { invalidateInvokeContractFreshness } from './invoke-contract-cache.ts'
 import { maxStoredInvocationResponseJsonBytes } from './repo.ts'
 import {
 	packageInvocationsRepoMockModule as repoMockModule,
@@ -23,8 +25,8 @@ import {
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		repoMockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		repoMockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageByName(...args),
 	listSavedPackagesByUserId: (...args: Array<unknown>) =>
@@ -85,6 +87,25 @@ const backgroundUserMocks = vi.hoisted(() => ({
 	})),
 }))
 
+// Every trigger runs as its enabler; here the personal org's own person.
+vi.mock('#worker/enablements/run-gate.ts', () => ({
+	planEnablementRuns: async (input: { orgId: string }) => ({
+		runs: [
+			{
+				id: `enablement-${input.orgId}`,
+				enabler: { userId: input.orgId, username: 'owner' },
+				role: 'owner',
+			},
+		],
+		skipped: [],
+	}),
+}))
+
+vi.mock('#worker/enablements/repo.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof EnablementsRepo>()),
+	loadEarliestLiveOwnerId: async (_db: D1Database, orgId: string) => orgId,
+}))
+
 vi.mock('#worker/identity/background-mcp-user.ts', () => ({
 	resolveBackgroundMcpUser: (db: D1Database, userId: string) =>
 		backgroundUserMocks.resolveBackgroundMcpUser(db, userId),
@@ -105,7 +126,7 @@ const packageContext = {
 }
 const source1 = {
 	id: 'source-1',
-	user_id: 'user-123',
+	user_id: ownerIdFromStored('user-123'),
 	entity_kind: 'package',
 	entity_id: 'pkg-1',
 	repo_id: 'repo-1',
@@ -115,6 +136,14 @@ const source1 = {
 	source_root: '/',
 	created_at: '2026-04-27T00:00:00.000Z',
 	updated_at: '2026-04-27T00:00:00.000Z',
+}
+
+function invalidateSeededInvokeContract() {
+	invalidateInvokeContractFreshness({
+		userId: ownerIdFromStored('user-123'),
+		packageIdOrKodyIds: ['pkg-1', 'discord-gateway'],
+		sourceId: 'source-1',
+	})
 }
 
 function dispatchRequest(
@@ -550,10 +579,14 @@ test('invokePackageExport stores terminal failures for execution errors and miss
 	expect(runMock).not.toHaveBeenCalled()
 })
 
-test('invokePackageExport asks for republish when a published artifact is missing for npm-backed source', async () => {
+test('invokePackageExport treats a missing npm-backed runtime bundle as retryable artifact prep', async () => {
+	invalidateSeededInvokeContract()
 	const db = createDatabase()
 	seedPackageResolution()
-	repoMockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(null)
+	const missingBundleSource = {
+		...source1,
+		published_commit: 'commit-missing-bundle',
+	}
 	const manifest = {
 		name: '@kentcdodds/discord-gateway',
 		exports: {
@@ -561,8 +594,13 @@ test('invokePackageExport asks for republish when a published artifact is missin
 		},
 		kody: { id: 'discord-gateway', description: 'Discord gateway helpers' },
 	}
+	repoMockModule.loadPackageManifestBySourceId.mockResolvedValue({
+		source: missingBundleSource,
+		manifest,
+	})
+	repoMockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(null)
 	repoMockModule.loadPackageSourceBySourceId.mockResolvedValue({
-		source: source1,
+		source: missingBundleSource,
 		manifest,
 		files: {
 			'package.json': JSON.stringify({
@@ -579,26 +617,18 @@ test('invokePackageExport asks for republish when a published artifact is missin
 		dispatchRequest('evt-republish-needed', { source: 'discord-gateway' }),
 	)
 
-	expect(response.status).toBe(500)
+	expect(response.status).toBe(503)
 	expect(response.body).toMatchObject({
 		ok: false,
 		error: {
-			code: 'invocation_failed',
-			message: expect.stringContaining(
-				'no published runtime bundle artifact is available yet',
-			),
+			code: 'artifact_preparation_failed',
+			message:
+				'Package artifact preparation failed before execution. Please retry.',
 		},
 	})
 	expect(
 		repoMockModule.typecheckPackageEntrypointsFromSourceFiles,
-	).toHaveBeenCalledWith({
-		sourceFiles: expect.objectContaining({
-			'package.json': expect.any(String),
-			'src/dispatch-message-created.ts': expect.any(String),
-		}),
-		entryPoints: [{ path: 'src/dispatch-message-created.ts' }],
-		emittedEventTopics: [],
-	})
+	).not.toHaveBeenCalled()
 	expect(repoMockModule.persistPublishedBundleArtifact).not.toHaveBeenCalled()
 	expect(runMock).not.toHaveBeenCalled()
 })
@@ -648,7 +678,7 @@ test('invokePackageSubscription uses the normal capability registry with package
 
 	const savedPackage = {
 		id: 'pkg-1',
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		name: '@kentcdodds/discord-gateway',
 		kodyId: 'discord-gateway',
 		description: 'Discord gateway helpers',
@@ -656,6 +686,7 @@ test('invokePackageSubscription uses the normal capability registry with package
 		searchText: null,
 		sourceId: 'source-1',
 		hasApp: true,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: false,
 		createdAt: '2026-04-27T00:00:00.000Z',
@@ -675,6 +706,11 @@ test('invokePackageSubscription uses the normal capability registry with package
 			params,
 			idempotencyKey: `email:${messageId}:pkg-1:email.message.received`,
 			source: 'email',
+			request: {
+				kind: 'inbound-email',
+				sourceId: 'inbox-1',
+				sender: { kind: 'inbox-owner' },
+			},
 		})
 
 	expect((await deliver('message-123')).status).toBe(200)
@@ -684,7 +720,7 @@ test('invokePackageSubscription uses the normal capability registry with package
 		expect.objectContaining({
 			baseUrl: 'https://kody.dev',
 			user: expect.objectContaining({
-				userId: 'user-123',
+				userId: ownerIdFromStored('user-123'),
 				email: 'owner@example.com',
 				displayName: 'Owner',
 			}),
@@ -707,13 +743,14 @@ test('invokePackageSubscription uses the normal capability registry with package
 	// bucket is reached via packageStorage(), granted through packageContext.
 	expect(runOptions?.storageTools).toBeUndefined()
 
+	const enablementSuffix = `:enablement:enablement-${savedPackage.userId}`
 	db.runLog.seedStaleInvocation(
-		'email:message-stale:pkg-1:email.message.received',
+		`email:message-stale:pkg-1:email.message.received${enablementSuffix}`,
 	)
 	expect((await deliver('message-stale')).status).toBe(200)
 	expect(runMock).toHaveBeenCalledTimes(2)
 
-	const freshKey = 'email:message-fresh:pkg-1:email.message.received'
+	const freshKey = `email:message-fresh:pkg-1:email.message.received${enablementSuffix}`
 	db.runLog.seedFreshInvocation(freshKey)
 	const completionTimer = setTimeout(() => {
 		db.runLog.completeInvocation(freshKey)
@@ -726,12 +763,57 @@ test('invokePackageSubscription uses the normal capability registry with package
 	}
 
 	// The commit-keyed artifact cache is warm from the invocations above and
-	// would absorb the injected KV failure; this scenario is about a cold
-	// artifact load failing transiently.
-	clearInvokeContractCachesForTests()
+	// would absorb the injected KV failure; bump the published commit so the
+	// commit-tier key is cold, matching a same-isolate republish.
+	invalidateSeededInvokeContract()
+	const transientSource = {
+		...source1,
+		published_commit: 'commit-transient',
+	}
+	repoMockModule.loadPackageManifestBySourceId.mockResolvedValue({
+		source: transientSource,
+		manifest: {
+			name: '@kentcdodds/discord-gateway',
+			exports: {
+				'./dispatch-message-created': './src/dispatch-message-created.ts',
+			},
+			kody: {
+				id: 'discord-gateway',
+				description: 'Discord gateway helpers',
+				app: { entry: './src/app.ts' },
+				subscriptions: {
+					'email.message.received': {
+						handler: './src/email-message-received.ts',
+					},
+				},
+			},
+		},
+	})
 	repoMockModule.loadPublishedBundleArtifactByIdentity.mockRejectedValueOnce(
 		new Error('KV timeout'),
 	)
+	repoMockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue({
+		row: {
+			id: 'artifact-subscription-1',
+			publishedCommit: 'commit-transient',
+		},
+		artifact: {
+			version: 1,
+			kind: 'module',
+			artifactName: 'subscription:email.message.received',
+			sourceId: 'source-1',
+			publishedCommit: 'commit-transient',
+			entryPoint: 'src/email-message-received.ts',
+			mainModule: 'dist/subscription.js',
+			modules: {
+				'dist/subscription.js':
+					'export default async function run(){ return { ok: true } }',
+			},
+			dependencies: [],
+			packageContext,
+			createdAt: '2026-04-27T00:00:00.000Z',
+		},
+	})
 	expect(await deliver('message-transient')).toMatchObject({
 		status: 503,
 		body: { error: { code: 'artifact_preparation_failed' } },

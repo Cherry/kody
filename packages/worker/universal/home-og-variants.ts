@@ -81,7 +81,7 @@ const homeOgVariants = {
 	shared: {
 		group: 'icp',
 		highlight: null,
-		imageTitle: 'The **software**\n**platform** your\nagents share',
+		imageTitle: 'Your agents\u2019\n**cloud**',
 		imageSubtitle: 'One home for memory, packages, and jobs',
 	},
 	memory: {

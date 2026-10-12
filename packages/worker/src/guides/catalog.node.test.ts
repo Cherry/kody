@@ -36,10 +36,18 @@ test('guide catalog parses every guide with unique ids and slugs', () => {
 		expect(guide.summary.length).toBeGreaterThan(0)
 		expect(guide.body.length).toBeGreaterThan(200)
 		// Bundled bodies must not carry unresolvable relative links; the
-		// catalog rewrites them to /docs routes or GitHub blob URLs.
+		// catalog rewrites them to /docs routes or raw GitHub URLs.
 		expect(guide.body).not.toMatch(/\]\(\.{1,2}\//)
 		expect(guide.body).not.toMatch(/\]\([a-z0-9-]+\.md/)
 		expect(guide.body).not.toContain('](/guides/')
+		for (const match of guide.body.matchAll(
+			/https:\/\/github\.com\/([^/\s)]+)\/([^/\s)]+)\/blob\/([^/\s)]+)\/([^#)\s]+)(#[^)\s]+)?/g,
+		)) {
+			expect(match[5], `${guide.slug} blob link needs a heading`).toBeTruthy()
+			expect(guide.body, guide.slug).toContain(
+				`https://raw.githubusercontent.com/${match[1]}/${match[2]}/${match[3]}/${match[4]}`,
+			)
+		}
 		expect(isReservedDocsIndexSlug(guide.slug)).toBe(false)
 		expect(getGuideBySlug(guide.slug)?.id).toBe(guide.id)
 		expect(getGuideById(guide.id)?.slug).toBe(guide.slug)
@@ -85,7 +93,7 @@ test('guide catalog parses every guide with unique ids and slugs', () => {
 
 	const listedIds = (options?: { includeAdmin: boolean }) =>
 		listGuides(options).map((guide) => guide.id)
-	for (const id of ['values', 'package_invocation_token_setup']) {
+	for (const id of ['values']) {
 		expect(getGuideById(id)?.unadvertised).toBe(true)
 		expect(listedIds()).not.toContain(id)
 	}

@@ -1,24 +1,22 @@
+import { getPackageNameLeaf } from '#worker/package-registry/package-name.ts'
 import { PromiseLruCache } from '#worker/package-registry/published-package-cache.ts'
 import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
 import { type PublishedBundleArtifact } from '#worker/package-runtime/published-runtime-artifacts.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
 
 /**
- * Per-isolate caches for invocation hot paths (`packages.invoke` contract
- * check and package-app HTTP serve), so a warm call of an already-warm
- * package+commit performs zero D1/KV loads before dispatch (see
+ * Per-isolate caches for invocation hot paths (host invoke contract check and
+ * package-app HTTP serve), so a warm call of an already-warm package+commit
+ * performs zero D1/KV loads before dispatch (see
  * docs/contributing/architecture/invocation-overhead-guardrails.md).
  *
  * Two tiers with different lifetimes:
  *
- * - **Freshness tier** (saved-package row, entity-source row, platform-account
- *   flag): these rows can change on republish/rename, so they carry a short
+ * - **Freshness tier** (saved-package row, entity-source row): these rows can change on republish/rename, so they carry a short
  *   TTL. That TTL is the cross-isolate republish staleness bound; the isolate
  *   that runs the projection refresh also invalidates eagerly, so it picks
  *   the new publish up immediately. Misses are never retained — a package
- *   saved moments later is visible on the next lookup. The platform-account
- *   flag is stable for an isolate lifetime in practice; the TTL only keeps it
- *   on the same freshness clock as the other invoke lookups.
+ *   saved moments later is visible on the next lookup.
  * - **Commit tier** (prepared bundle artifact): keyed by the published commit
  *   taken from the freshness tier, and a published commit's artifact is
  *   immutable, so entries here are never a staleness source. The TTL only
@@ -63,10 +61,24 @@ function createArtifactCache() {
 	})
 }
 
-let savedPackageCache = createFreshnessCache<SavedPackageRecord | null>()
-let sourceRowCache = createFreshnessCache<EntitySourceRow>()
-let platformAccountFlagCache = createFreshnessCache<boolean>()
-let moduleArtifactCache = createArtifactCache()
+/**
+ * Package-app host slug lookup: the URL path segment may be a retired slug.
+ * Cached under a distinct key prefix from live-only {@link resolveSavedPackage}
+ * so following redirects never teaches invocation paths to serve at an old path.
+ */
+export type PackageAppSlugLookup = {
+	savedPackage: SavedPackageRecord
+	/**
+	 * True when the URL slug is retired and the package now lives at a different
+	 * leaf. Callers must 308 to the current leaf instead of serving.
+	 */
+	retired: boolean
+}
+
+const savedPackageCache = createFreshnessCache<SavedPackageRecord | null>()
+const packageAppSlugCache = createFreshnessCache<PackageAppSlugLookup | null>()
+const sourceRowCache = createFreshnessCache<EntitySourceRow>()
+const moduleArtifactCache = createArtifactCache()
 
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 	if (value && typeof value === 'object') {
@@ -94,28 +106,12 @@ function savedPackageCacheKey(input: {
 	])
 }
 
-function savedPackageCacheKeyMatchesLookup(
-	cacheKey: string,
-	packageIdOrKodyId: string,
-) {
-	try {
-		const parsed: unknown = JSON.parse(cacheKey)
-		return (
-			Array.isArray(parsed) &&
-			parsed[0] === 'saved-package' &&
-			parsed[2] === packageIdOrKodyId
-		)
-	} catch {
-		return false
-	}
+function packageAppSlugCacheKey(input: { userId: string; slug: string }) {
+	return JSON.stringify(['saved-package-app-slug', input.userId, input.slug])
 }
 
 function sourceRowCacheKey(input: { userId: string; sourceId: string }) {
 	return JSON.stringify(['source-row', input.userId, input.sourceId])
-}
-
-function platformAccountFlagCacheKey(userId: string) {
-	return JSON.stringify(['platform-account', userId])
 }
 
 export async function resolveSavedPackageWithFreshnessCache(input: {
@@ -139,6 +135,30 @@ export async function resolveSavedPackageWithFreshnessCache(input: {
 	})
 }
 
+/**
+ * Freshness-cached package-app host lookup. Follows slug redirects but marks
+ * `retired` so the host can 308 to the canonical path instead of serving at
+ * the old URL (cookies, caches, and storage stay on one origin/path).
+ */
+export async function resolvePackageAppSlugWithFreshnessCache(input: {
+	userId: string
+	slug: string
+	load: () => Promise<PackageAppSlugLookup | null>
+}): Promise<PackageAppSlugLookup | null> {
+	const cacheKey = packageAppSlugCacheKey(input)
+	return await packageAppSlugCache.getOrCreate({
+		cacheKey,
+		create: async () => {
+			const lookup = await input.load()
+			if (!lookup) {
+				packageAppSlugCache.delete(cacheKey)
+				return null
+			}
+			return deepFreeze(lookup)
+		},
+	})
+}
+
 export async function loadSourceRowWithFreshnessCache(input: {
 	userId: string
 	sourceId: string
@@ -147,16 +167,6 @@ export async function loadSourceRowWithFreshnessCache(input: {
 	return await sourceRowCache.getOrCreate({
 		cacheKey: sourceRowCacheKey(input),
 		create: async () => deepFreeze(await input.load()),
-	})
-}
-
-export async function loadPlatformAccountFlagWithFreshnessCache(input: {
-	userId: string
-	load: () => Promise<boolean>
-}): Promise<boolean> {
-	return await platformAccountFlagCache.getOrCreate({
-		cacheKey: platformAccountFlagCacheKey(input.userId),
-		create: input.load,
 	})
 }
 
@@ -196,6 +206,14 @@ export async function loadModuleArtifactWithCommitCache(input: {
 	})
 }
 
+function evictPackageAppSlugCache(input: { userId: string; slug: string }) {
+	const slug = input.slug.trim()
+	if (!slug) return
+	packageAppSlugCache.delete(
+		packageAppSlugCacheKey({ userId: input.userId, slug }),
+	)
+}
+
 /**
  * Eager same-isolate invalidation for publish / projection-refresh / delete
  * flows. Cross-isolate pickup is bounded by
@@ -206,35 +224,43 @@ export function invalidateInvokeContractFreshness(input: {
 	userId: string
 	/**
 	 * Every lookup key the package resolves under: its package id plus any
-	 * current (and, on rename, previous) kody ids.
+	 * current (and, on rename, previous) kody ids / `kody:@scope/name` refs.
 	 */
 	packageIdOrKodyIds: Array<string>
+	/**
+	 * Package-app URL leaves to evict (current leaf, previous leaf on rename,
+	 * and retired redirect slugs about to be released). Callers must pass
+	 * these explicitly: {@link packageIdOrKodyIds} are often package ids or
+	 * `kody:@scope/name` refs, not the name-leaf keys this cache uses.
+	 */
+	packageAppSlugs?: Array<string>
 	sourceId?: string | null
 }) {
 	for (const packageIdOrKodyId of input.packageIdOrKodyIds) {
+		savedPackageCache.delete(
+			savedPackageCacheKey({ userId: input.userId, packageIdOrKodyId }),
+		)
 		if (packageIdOrKodyId.startsWith('kody:@')) {
-			// Public platform packages resolve under every caller's cache
-			// namespace. Publish/delete is rare and this cache is capped at 200,
-			// so scan it to evict every caller alias immediately in this isolate.
-			savedPackageCache.deleteWhere((cacheKey) =>
-				savedPackageCacheKeyMatchesLookup(cacheKey, packageIdOrKodyId),
-			)
+			// Derive the URL leaf from the scoped name so rename/delete also
+			// clears the package-app slug cache (keys are never `kody:@…`).
+			evictPackageAppSlugCache({
+				userId: input.userId,
+				slug: getPackageNameLeaf(packageIdOrKodyId.slice('kody:'.length)),
+			})
 		} else {
-			savedPackageCache.delete(
-				savedPackageCacheKey({ userId: input.userId, packageIdOrKodyId }),
-			)
+			// When kodyId still equals the leaf, this also clears the slug entry.
+			evictPackageAppSlugCache({
+				userId: input.userId,
+				slug: packageIdOrKodyId,
+			})
 		}
+	}
+	for (const slug of input.packageAppSlugs ?? []) {
+		evictPackageAppSlugCache({ userId: input.userId, slug })
 	}
 	if (input.sourceId) {
 		sourceRowCache.delete(
 			sourceRowCacheKey({ userId: input.userId, sourceId: input.sourceId }),
 		)
 	}
-}
-
-export function clearInvokeContractCachesForTests() {
-	savedPackageCache = createFreshnessCache<SavedPackageRecord | null>()
-	sourceRowCache = createFreshnessCache<EntitySourceRow>()
-	platformAccountFlagCache = createFreshnessCache<boolean>()
-	moduleArtifactCache = createArtifactCache()
 }

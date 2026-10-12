@@ -127,11 +127,8 @@ import main from 'kody:@scope/id'
 
 ## Smoke tests
 
-After publish, prefer `npx @kodycodes/cli execute --local` when Node ≥22 + CLI
-are available (`kody login`, or `KODY_API_TOKEN` in headless envs —
-[Local CLI execute](./local-execute.md)). If `--local` cannot run, use hosted
-MCP `execute` for the smoke module (Open API / MCP `api` cannot run a package
-export; see [Open API](./open-api.md)).
+After publish, run the module with local CLI execute. When, command, and
+failure: [Local CLI execute](./local-execute.md) (`guide:local_execute`).
 
 ## Edge cases
 
@@ -168,7 +165,6 @@ When you create or materially change a public export:
 3. Add `@param` for each input.
 4. Add `@returns`.
 5. Add `@example` that **imports** `kody:@scope/id/export` and **calls** it.
-   There is no author-facing `packages.invoke`.
 
 If the export's `package.json` `exports` entry has a `types` condition, put the
 JSDoc on that types file — search reads the types module when it exists. JSDoc
@@ -422,7 +418,7 @@ require it.
 ## Cross-package composition
 
 Call another package export the same way search entity detail shows: import it,
-then call it. There is no author-facing `packages.invoke`.
+then call it.
 
 - **Name known when you write the code** → static import, and list the package
   in `package.json#kody.dependencies` when the call site is package source:
@@ -448,6 +444,12 @@ and call. Do not demo a `packages` helper. Package codemod
 `0008-packages-invoke-to-static-import` rewrites literal call sites and
 parseable Markdown examples; ambiguous or keyed sites need a manual edit as
 above.
+
+## Ship Agent Skills
+
+Put `skills/<name>/SKILL.md` (with `name` and `description` frontmatter) in the
+package. Publish validates it and a malformed skill fails the publish. See
+[Ship Agent Skills in a package](./package-skills.md) (`guide:package_skills`).
 
 ## Verify your publish
 

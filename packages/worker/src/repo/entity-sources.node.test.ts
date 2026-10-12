@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
@@ -50,6 +51,8 @@ function entitySourcesSqlite() {
 			source_root TEXT NOT NULL,
 			last_external_check_at TEXT,
 			external_check_until TEXT,
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
@@ -62,21 +65,23 @@ test('source deletion removes only its repo-session storage inventory', async ()
 	sqlite.exec(`
 		CREATE TABLE entity_sources (
 			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL
+			user_id TEXT NOT NULL,
+			deleted_at TEXT
 		);
 		CREATE TABLE user_storage_buckets (
 			user_id TEXT NOT NULL,
 			storage_id TEXT NOT NULL,
 			kind TEXT NOT NULL,
+			deleted_at TEXT,
 			PRIMARY KEY (user_id, storage_id)
 		);
 		INSERT INTO entity_sources VALUES
-			('source-a', 'user-a'),
-			('source-b', 'user-b');
+			('source-a', 'user-a', NULL),
+			('source-b', 'user-b', NULL);
 		INSERT INTO user_storage_buckets VALUES
-			('user-a', 'repo-session:session-a', 'repo_session'),
-			('user-a', 'exec:keep', 'execute'),
-			('user-b', 'repo-session:session-b', 'repo_session');
+			('user-a', 'repo-session:session-a', 'repo_session', NULL),
+			('user-a', 'exec:keep', 'execute', NULL),
+			('user-b', 'repo-session:session-b', 'repo_session', NULL);
 	`)
 	const db = createD1FromSqlite(sqlite)
 	const indexEnv = createInMemoryRepoSessionIndexEnv(db)
@@ -87,18 +92,18 @@ test('source deletion removes only its repo-session storage inventory', async ()
 	const indexFor = (userId: string) =>
 		indexNamespace.get(indexNamespace.idFromName(userId))
 	await indexFor('user-a').insertSession({
-		ownerId: 'user-a',
+		ownerId: ownerIdFromStored('user-a'),
 		row: catalogSessionRow({
 			id: 'session-a',
-			user_id: 'user-a',
+			user_id: ownerIdFromStored('user-a'),
 			source_id: 'source-a',
 		}),
 	})
 	await indexFor('user-b').insertSession({
-		ownerId: 'user-b',
+		ownerId: ownerIdFromStored('user-b'),
 		row: catalogSessionRow({
 			id: 'session-b',
-			user_id: 'user-b',
+			user_id: ownerIdFromStored('user-b'),
 			source_id: 'source-b',
 		}),
 	})
@@ -106,7 +111,7 @@ test('source deletion removes only its repo-session storage inventory', async ()
 	await expect(
 		deleteEntitySource(
 			{ APP_DB: db, REPO_SESSION_INDEX: indexEnv.REPO_SESSION_INDEX },
-			{ id: 'source-a', userId: 'user-a' },
+			{ id: 'source-a', userId: ownerIdFromStored('user-a') },
 		),
 	).resolves.toBe(true)
 	expect(
@@ -118,18 +123,28 @@ test('source deletion removes only its repo-session storage inventory', async ()
 			)
 			.all(),
 	).toEqual([
-		{ user_id: 'user-a', storage_id: 'exec:keep', kind: 'execute' },
 		{
-			user_id: 'user-b',
+			user_id: ownerIdFromStored('user-a'),
+			storage_id: 'exec:keep',
+			kind: 'execute',
+		},
+		{
+			user_id: ownerIdFromStored('user-b'),
 			storage_id: 'repo-session:session-b',
 			kind: 'repo_session',
 		},
 	])
-	expect(await indexFor('user-a').listByUser({ ownerId: 'user-a' })).toEqual([])
 	expect(
-		(await indexFor('user-b').listByUser({ ownerId: 'user-b' })).map(
-			(row) => row.id,
-		),
+		await indexFor('user-a').listByUser({
+			ownerId: ownerIdFromStored('user-a'),
+		}),
+	).toEqual([])
+	expect(
+		(
+			await indexFor('user-b').listByUser({
+				ownerId: ownerIdFromStored('user-b'),
+			})
+		).map((row) => row.id),
 	).toEqual(['session-b'])
 })
 
@@ -139,18 +154,18 @@ test('external reconcile selects token-pending packages and the daily backstop c
 		INSERT INTO entity_sources VALUES
 			(
 				'dormant', 'user-1', 'package', 'package-1', 'repo-1',
-				'commit-1', NULL, 'package.json', '/', NULL, NULL,
+				'commit-1', NULL, 'package.json', '/', NULL, NULL, NULL,
 				'2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'
 			),
 			(
 				'pending', 'user-2', 'package', 'package-2', 'repo-2',
 				'commit-2', NULL, 'package.json', '/',
-				'2026-05-04T01:00:00.000Z', '2026-05-04T04:00:00.000Z',
+				'2026-05-04T01:00:00.000Z', '2026-05-04T04:00:00.000Z', NULL,
 				'2026-05-02T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
 			),
 			(
-				'job', 'user-1', 'job', 'job-1', 'repo-3',
-				'commit-3', NULL, 'kody.json', '/', NULL,
+				'plain-repo', 'user-1', 'repo', 'repo-1', 'repo-3',
+				'commit-3', NULL, 'package.json', '/', NULL, NULL,
 				'2026-05-04T04:00:00.000Z',
 				'2026-05-03T00:00:00.000Z', '2026-05-03T00:00:00.000Z'
 			);
@@ -167,7 +182,7 @@ test('external reconcile selects token-pending packages and the daily backstop c
 	const tokenExpiresAt = '2026-05-04T03:00:00.000Z'
 	await markEntitySourcePendingExternalReconcile(db, {
 		id: 'dormant',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		tokenExpiresAt,
 	})
 	const marked = sqlite
@@ -204,7 +219,7 @@ test('listEntitySourcesByIds batches ids into IN queries and skips missing rows'
 			.prepare(
 				`INSERT INTO entity_sources VALUES
 					(?, 'user-1', 'package', ?, ?, 'commit-1', NULL,
-					'package.json', '/', NULL, NULL,
+					'package.json', '/', NULL, NULL, NULL,
 					'2026-09-10T00:00:00.000Z', '2026-09-10T00:00:00.000Z')`,
 			)
 			.run(id, `package-${id}`, `repo-${id}`)
@@ -227,7 +242,7 @@ test('listEntitySourcesByIds batches ids into IN queries and skips missing rows'
 		'package-source-a',
 	)
 	expect(queries).toEqual([
-		'SELECT * FROM entity_sources WHERE id IN (?, ?, ?)',
+		'SELECT * FROM entity_sources WHERE id IN (?, ?, ?) AND deleted_at IS NULL',
 	])
 
 	const manyIds = Array.from({ length: 101 }, (_, index) => `missing-${index}`)

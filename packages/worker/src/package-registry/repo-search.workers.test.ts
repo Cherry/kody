@@ -1,9 +1,14 @@
+import {
+	ownerIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 import { insertSavedPackage, searchSavedPackagesByUserId } from './repo.ts'
 
-const userId = 'search-user-1'
-const otherUserId = 'search-user-2'
+const userId = ownerIdFromStored('search-user-1')
+const otherUserId = ownerIdFromStored('search-user-2')
 
 async function ensureSchema(db: D1Database) {
 	await db
@@ -18,6 +23,7 @@ async function ensureSchema(db: D1Database) {
 				search_text TEXT,
 				source_id TEXT NOT NULL,
 				has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+				has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 				hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 				is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 				locked_at TEXT,
@@ -40,11 +46,12 @@ async function ensureSchema(db: D1Database) {
 		.prepare(`DELETE FROM saved_packages WHERE user_id IN (?, ?)`)
 		.bind(userId, otherUserId)
 		.run()
+	await ensureSoftDeleteTestColumns(db)
 }
 
 function buildRow(input: {
 	id: string
-	userId?: string
+	userId?: OwnerId
 	name: string
 	kodyId: string
 	description?: string
@@ -64,6 +71,7 @@ function buildRow(input: {
 		search_text: input.searchText ?? null,
 		source_id: `source-${input.id}`,
 		has_app: input.hasApp ? (1 as const) : (0 as const),
+		has_skills: 0 as const,
 		hidden: 0 as const,
 		is_private: 0 as const,
 		created_at: input.createdAt,

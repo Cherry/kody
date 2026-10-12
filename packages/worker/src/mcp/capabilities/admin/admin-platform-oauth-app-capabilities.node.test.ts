@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -33,9 +34,10 @@ function createHarness() {
 	const ctx = {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'admin-user-1',
+				userId: personIdFromStored('admin-user-1'),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],

@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/cloudflare'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
+import { BudgetLimitError, type BudgetLimitErrorDetails } from './errors.ts'
 import { DurableObject } from 'cloudflare:workers'
 import {
 	type DurableObjectPitrRpc,
@@ -7,37 +8,34 @@ import {
 	restoreToBookmark,
 } from '#worker/dr/do-pitr.ts'
 import { buildSentryOptions } from '#worker/sentry-options.ts'
-import { type EntitlementResource } from '#universal/plans.ts'
-
-/** Daily rate-style resources stored in the per-user UserMeter (UTC day keys). */
-export const dailyEntitlementResources = [
-	'email_sends_per_day',
-	'email_receives_per_day',
-	'execute_calls_per_day',
-	'outbound_fetches_per_day',
-	'job_runs_per_day',
-	'automation_invocations_per_day',
-] as const satisfies ReadonlyArray<EntitlementResource>
-
-export type DailyEntitlementResource =
-	(typeof dailyEntitlementResources)[number]
-
-export function isDailyEntitlementResource(
-	resource: string,
-): resource is DailyEntitlementResource {
-	return (dailyEntitlementResources as ReadonlyArray<string>).includes(resource)
-}
+import {
+	admitExecuteCallInWindows,
+	ExecuteRepeatWindow,
+	type ExecuteAdmissionResult,
+	type ExecuteCallMinuteWindow,
+	type ExecuteRepeatInput,
+} from './execute-admission-windows.ts'
+import {
+	isDailyEntitlementResource,
+	type DailyEntitlementResource,
+} from '#universal/plans.ts'
 
 /**
- * Retention window for UserMeter daily rows. Enforcement needs today and,
- * for execute/outbound, the current UTC week (Monday–Sunday). Seven days
- * covers that week.
+ * Retention window for UserMeter daily rows (`daily_counters`,
+ * `inbound_delivery_claims`, and `dynamic_worker_days`). Enforcement needs
+ * today and, for execute/outbound, the current UTC week (Monday–Sunday).
+ * Fourteen days covers that week plus a second week of recent history.
  */
-export const userMeterDailyCounterRetentionDays = 7
+export const userMeterDailyCounterRetentionDays = 14
 
 const metaSchemaVersionKey = 'schema_version'
 /** Bump when initializeSchema DDL changes; warm objects skip DDL. */
-const userMeterSchemaVersion = 12
+const userMeterSchemaVersion = 15
+// How long a completed release is remembered for reset-retry idempotency.
+const writeLeaseReleaseMemoryMs = 60 * 60 * 1000
+/** Singleton row id for monthly org budget spend (schema v13). */
+const budgetSpendStateRowId = 1
+const utcMonthKeyPattern = /^\d{4}-\d{2}$/
 /** Singleton row id for authoritative storage-byte state (schema v4). */
 const storageBytesStateRowId = 1
 /** Singleton row id for deletion fence / write leases (schema v6+). */
@@ -96,7 +94,85 @@ export type UserMeterConsumeResult =
 			weekCount?: number
 	  })
 
+/**
+ * Result of {@link UserMeterRpc.claimDynamicWorkerDayWithinLimit}. `created`
+ * means this call loads a new worker for the day and spent one unit; a
+ * repeat of an already-claimed id returns `created: false` without spending.
+ * A denial (`consumed: false` with `deniedWindow`) leaves the id unclaimed.
+ */
+export type UserMeterWorkerDayConsumeResult =
+	| UserMeterBootstrapState
+	| (UserMeterReadyState & {
+			created: boolean
+			consumed: boolean
+			deniedWindow?: UserMeterDeniedWindow
+			weekCount?: number
+	  })
+
+export type UserMeterExecuteAdmissionResult = ExecuteAdmissionResult
+
 export type UserMeterReadResult = UserMeterBootstrapState | UserMeterReadyState
+
+/** One daily counter entry from {@link UserMeterRpc.readUsageSnapshot}. */
+export type UserMeterUsageSnapshotDailyEntry = {
+	resource: DailyEntitlementResource
+} & UserMeterReadResult
+
+/** One weekly window sum from {@link UserMeterRpc.readUsageSnapshot}. */
+export type UserMeterUsageSnapshotWeeklyEntry = {
+	resource: DailyEntitlementResource
+	outcome: 'ready'
+	count: number
+}
+
+/**
+ * Combined meter read for entitlement usage snapshots: daily counters for
+ * `day`, weekly sums from `weekStart` through `day`, and optional storage
+ * bytes. Missing daily keys and a missing storage singleton still report
+ * `needs_bootstrap` so callers can cold-init the same way as point reads.
+ */
+export type UserMeterUsageSnapshotResult = {
+	daily: Array<UserMeterUsageSnapshotDailyEntry>
+	weekly: Array<UserMeterUsageSnapshotWeeklyEntry>
+	storageBytes: UserMeterStorageBytesReadResult | null
+}
+
+/**
+ * One remaining daily_counters row inside the retention window. Missing days
+ * are omitted (callers treat absence as zero).
+ */
+export type UserMeterDailyTrendCounterRow = {
+	resource: DailyEntitlementResource
+	day: string
+	count: number
+}
+
+/** Per-UTC-day unique Dynamic Worker claim count (first-claim rows). */
+export type UserMeterDailyTrendUniqueWorkerDayRow = {
+	day: string
+	count: number
+}
+
+/**
+ * Compact retention-window read for customer usage charts: remaining
+ * daily_counters rows plus unique-worker-day claim counts grouped by day.
+ * Does not bootstrap missing keys — absence means zero.
+ */
+export type UserMeterBudgetSpendState = {
+	month: string
+	users: Record<string, number>
+	automationMicroUsd: number
+}
+
+export type UserMeterDailyTrendResult = {
+	retentionDays: number
+	startDay: string
+	endDay: string
+	counters: Array<UserMeterDailyTrendCounterRow>
+	uniqueWorkerDays: Array<UserMeterDailyTrendUniqueWorkerDayRow>
+	/** Admitted hosted execute calls per UTC day, repeats included. */
+	executeCalls: Array<UserMeterDailyTrendUniqueWorkerDayRow>
+}
 
 export type UserMeterRefundResult = UserMeterReadyState
 
@@ -296,6 +372,19 @@ function assertUtcDayKey(day: string): string {
 		)
 	}
 	return day
+}
+
+function assertUtcMonthKey(month: string): string {
+	if (!utcMonthKeyPattern.test(month)) {
+		throw new Error(
+			`UserMeter month must be a UTC YYYY-MM key; got ${JSON.stringify(month)}.`,
+		)
+	}
+	return month
+}
+
+function throwBudgetLimit(details: Omit<BudgetLimitErrorDetails, 'code'>) {
+	throw new BudgetLimitError(details)
 }
 
 function assertInboundDeliveryId(deliveryId: string): string {
@@ -578,6 +667,12 @@ class UserMeterBase extends DurableObject<Env> {
 				pending_repair_id TEXT
 			)
 		`)
+		this.ctx.storage.sql.exec(`
+			CREATE TABLE IF NOT EXISTS account_write_lease_releases (
+				token TEXT PRIMARY KEY NOT NULL,
+				released_at TEXT NOT NULL
+			)
+		`)
 		if (version != null && version < 7) {
 			try {
 				this.ctx.storage.sql.exec(
@@ -642,6 +737,28 @@ class UserMeterBase extends DurableObject<Env> {
 				last_used_at TEXT NOT NULL
 			)
 		`)
+		// Monthly org budget spend counters (schema v13).
+		this.ctx.storage.sql.exec(`
+			CREATE TABLE IF NOT EXISTS budget_spend_state (
+				id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+				month TEXT NOT NULL,
+				automation_micro_usd INTEGER NOT NULL DEFAULT 0
+			)
+		`)
+		this.ctx.storage.sql.exec(`
+			CREATE TABLE IF NOT EXISTS budget_spend_users (
+				user_id TEXT PRIMARY KEY NOT NULL,
+				micro_usd INTEGER NOT NULL
+			)
+		`)
+		// Admitted hosted execute calls per UTC day (schema v14). The plan cap
+		// counts unique workers; this keeps the per-call usage trend.
+		this.ctx.storage.sql.exec(`
+			CREATE TABLE IF NOT EXISTS execute_call_days (
+				day TEXT PRIMARY KEY NOT NULL,
+				count INTEGER NOT NULL
+			)
+		`)
 		this.ctx.storage.sql.exec(
 			`INSERT INTO user_meter_meta (key, value) VALUES (?, ?)
 			ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -697,6 +814,10 @@ class UserMeterBase extends DurableObject<Env> {
 		)
 		this.ctx.storage.sql.exec(
 			`DELETE FROM dynamic_worker_days WHERE day < ?`,
+			cutoffDay,
+		)
+		this.ctx.storage.sql.exec(
+			`DELETE FROM execute_call_days WHERE day < ?`,
 			cutoffDay,
 		)
 	}
@@ -821,52 +942,24 @@ class UserMeterBase extends DurableObject<Env> {
 			return { outcome: 'needs_bootstrap' }
 		}
 
-		const weekLimit =
-			typeof input.weekLimit === 'number' && Number.isFinite(input.weekLimit)
-				? input.weekLimit
-				: null
-		const weekStart = input.weekStart ? assertUtcDayKey(input.weekStart) : null
-		const weekCount =
-			weekStart && weekLimit !== null
-				? this.sumRange(resource, weekStart, day)
-				: undefined
-
-		if (input.limit < 1 || existing.count + 1 > input.limit) {
+		const window = this.checkDailyWindows({ ...input, resource, day, existing })
+		if (window.deniedWindow) {
 			return {
 				...readyState(existing.count, existing.revision),
 				consumed: false,
-				deniedWindow: 'day',
-				weekCount,
-			}
-		}
-		if (
-			weekStart &&
-			weekLimit !== null &&
-			(weekLimit < 1 || (weekCount ?? 0) + 1 > weekLimit)
-		) {
-			return {
-				...readyState(existing.count, existing.revision),
-				consumed: false,
-				deniedWindow: 'week',
-				weekCount,
+				deniedWindow: window.deniedWindow,
+				weekCount: window.weekCount,
 			}
 		}
 
 		const nextCount = existing.count + 1
 		const nextRevision = existing.revision + 1
-		this.ctx.storage.sql.exec(
-			`UPDATE daily_counters
-			SET count = ?,
-				revision = ?,
-				updated_at = ?
-			WHERE resource = ? AND day = ? AND revision = ?`,
-			nextCount,
-			nextRevision,
-			input.updatedAt,
+		this.incrementCounterRow({
 			resource,
 			day,
-			existing.revision,
-		)
+			existing,
+			updatedAt: input.updatedAt,
+		})
 		const row = this.readRow(resource, day)
 		if (!row) {
 			throw new Error('UserMeter consume lost the counter row.')
@@ -874,8 +967,189 @@ class UserMeterBase extends DurableObject<Env> {
 		return {
 			...readyState(row.count, row.revision),
 			consumed: row.count === nextCount && row.revision === nextRevision,
-			weekCount: weekCount === undefined ? undefined : weekCount + 1,
+			weekCount:
+				window.weekCount === undefined ? undefined : window.weekCount + 1,
 		}
+	}
+
+	/**
+	 * Claim `workerId` for `day` and spend one `resource` unit only when the
+	 * claim is new. A repeat of an id already claimed today (by any surface)
+	 * is free; a new id over the daily or weekly limit is denied and stays
+	 * unclaimed, so a later retry after the window resets still counts. The
+	 * counter increment and the claim insert commit together.
+	 */
+	async claimDynamicWorkerDayWithinLimit(input: {
+		workerId: string
+		resource: string
+		day: string
+		limit: number
+		createdAt: string
+		weekStart?: string
+		weekLimit?: number | null
+	}): Promise<UserMeterWorkerDayConsumeResult> {
+		const workerId = assertDynamicWorkerId(input.workerId)
+		const resource = assertDailyResource(input.resource)
+		const day = assertUtcDayKey(input.day)
+		const now = new Date(input.createdAt)
+		this.deleteStaleCounters(Number.isNaN(now.valueOf()) ? new Date() : now)
+
+		const existing = this.readRow(resource, day)
+		const alreadyClaimed =
+			this.ctx.storage.sql
+				.exec(
+					`SELECT 1 FROM dynamic_worker_days WHERE day = ? AND worker_id = ?`,
+					day,
+					workerId,
+				)
+				.toArray().length > 0
+		if (alreadyClaimed) {
+			const weekStart = input.weekStart
+				? assertUtcDayKey(input.weekStart)
+				: null
+			return {
+				...readyState(existing?.count ?? 0, existing?.revision ?? 0),
+				created: false,
+				consumed: false,
+				weekCount: weekStart
+					? this.sumRange(resource, weekStart, day)
+					: undefined,
+			}
+		}
+		if (!existing) {
+			return { outcome: 'needs_bootstrap' }
+		}
+
+		const window = this.checkDailyWindows({
+			...input,
+			resource,
+			day,
+			existing,
+		})
+		if (window.deniedWindow) {
+			return {
+				...readyState(existing.count, existing.revision),
+				created: false,
+				consumed: false,
+				deniedWindow: window.deniedWindow,
+				weekCount: window.weekCount,
+			}
+		}
+
+		this.ctx.storage.transactionSync(() => {
+			const counted = this.incrementCounterRow({
+				resource,
+				day,
+				existing,
+				updatedAt: input.createdAt,
+			})
+			// Throwing rolls back the claim so a worker is never free-loaded.
+			if (counted < 1) {
+				throw new Error('UserMeter worker-day consume lost the revision race.')
+			}
+			this.ctx.storage.sql.exec(
+				`INSERT INTO dynamic_worker_days (worker_id, day, created_at)
+				VALUES (?, ?, ?)`,
+				workerId,
+				day,
+				input.createdAt,
+			)
+		})
+		const row = this.readRow(resource, day)
+		if (!row) {
+			throw new Error('UserMeter worker-day consume lost the counter row.')
+		}
+		return {
+			...readyState(row.count, row.revision),
+			created: true,
+			consumed: true,
+			weekCount:
+				window.weekCount === undefined ? undefined : window.weekCount + 1,
+		}
+	}
+
+	/**
+	 * Per-minute runaway brake and identical-call loop brake for hosted
+	 * execute calls. Held in memory: an evicted meter starts both windows
+	 * over, which only ever admits more, so these stay safety nets rather
+	 * than billed counters. A refused call is not counted in either window.
+	 */
+	async admitExecuteCall(input: {
+		nowMs: number
+		limitPerMinute: number
+		repeat?: ExecuteRepeatInput
+	}): Promise<UserMeterExecuteAdmissionResult> {
+		const result = admitExecuteCallInWindows({
+			...input,
+			minuteWindow: this.executeCallMinute,
+			repeatWindow: this.executeRepeatWindow,
+		})
+		if (result.admitted) {
+			this.ctx.storage.sql.exec(
+				`INSERT INTO execute_call_days (day, count) VALUES (?, 1)
+				ON CONFLICT(day) DO UPDATE SET count = count + 1`,
+				utcDayKey(new Date(input.nowMs)),
+			)
+		}
+		return result
+	}
+
+	private readonly executeCallMinute: ExecuteCallMinuteWindow = {
+		minute: 0,
+		count: 0,
+	}
+
+	private readonly executeRepeatWindow = new ExecuteRepeatWindow()
+
+	private checkDailyWindows(input: {
+		resource: DailyEntitlementResource
+		day: string
+		limit: number
+		weekStart?: string
+		weekLimit?: number | null
+		existing: { count: number }
+	}): { deniedWindow?: UserMeterDeniedWindow; weekCount?: number } {
+		const weekLimit =
+			typeof input.weekLimit === 'number' && Number.isFinite(input.weekLimit)
+				? input.weekLimit
+				: null
+		const weekStart = input.weekStart ? assertUtcDayKey(input.weekStart) : null
+		const weekCount =
+			weekStart && weekLimit !== null
+				? this.sumRange(input.resource, weekStart, input.day)
+				: undefined
+		if (input.limit < 1 || input.existing.count + 1 > input.limit) {
+			return { deniedWindow: 'day', weekCount }
+		}
+		if (
+			weekStart &&
+			weekLimit !== null &&
+			(weekLimit < 1 || (weekCount ?? 0) + 1 > weekLimit)
+		) {
+			return { deniedWindow: 'week', weekCount }
+		}
+		return { weekCount }
+	}
+
+	private incrementCounterRow(input: {
+		resource: DailyEntitlementResource
+		day: string
+		existing: { count: number; revision: number }
+		updatedAt: string
+	}): number {
+		return this.ctx.storage.sql.exec(
+			`UPDATE daily_counters
+			SET count = ?,
+				revision = ?,
+				updated_at = ?
+			WHERE resource = ? AND day = ? AND revision = ?`,
+			input.existing.count + 1,
+			input.existing.revision + 1,
+			input.updatedAt,
+			input.resource,
+			input.day,
+			input.existing.revision,
+		).rowsWritten
 	}
 
 	/**
@@ -911,6 +1185,159 @@ class UserMeterBase extends DurableObject<Env> {
 		const row = this.readRow(resource, day)
 		if (!row) return { outcome: 'needs_bootstrap' }
 		return readyState(row.count, row.revision)
+	}
+
+	/**
+	 * One-RPC read of every daily counter, weekly window, and optional storage
+	 * bytes an entitlement usage snapshot needs. Prunes stale counters once.
+	 * Missing daily keys and a missing storage singleton still return
+	 * `needs_bootstrap` so callers can cold-init the same way as {@link read}
+	 * / {@link readStorageBytes}; this method does not write.
+	 */
+	async readUsageSnapshot(input: {
+		day: string
+		weekStart: string
+		dailyResources: ReadonlyArray<string>
+		weeklyResources: ReadonlyArray<string>
+		includeStorageBytes?: boolean
+		now?: string
+	}): Promise<UserMeterUsageSnapshotResult> {
+		const day = assertUtcDayKey(input.day)
+		const weekStart = assertUtcDayKey(input.weekStart)
+		if (weekStart > day) {
+			throw new Error(
+				`UserMeter readUsageSnapshot weekStart ${JSON.stringify(weekStart)} is after day ${JSON.stringify(day)}.`,
+			)
+		}
+		const now = input.now ? new Date(input.now) : new Date()
+		this.deleteStaleCounters(Number.isNaN(now.valueOf()) ? new Date() : now)
+
+		const daily: Array<UserMeterUsageSnapshotDailyEntry> = []
+		for (const raw of input.dailyResources) {
+			const resource = assertDailyResource(raw)
+			const row = this.readRow(resource, day)
+			daily.push(
+				row
+					? { resource, ...readyState(row.count, row.revision) }
+					: { resource, outcome: 'needs_bootstrap' },
+			)
+		}
+
+		const weekly: Array<UserMeterUsageSnapshotWeeklyEntry> = []
+		for (const raw of input.weeklyResources) {
+			const resource = assertDailyResource(raw)
+			weekly.push({
+				resource,
+				outcome: 'ready',
+				count: this.sumRange(resource, weekStart, day),
+			})
+		}
+
+		const storageBytes = input.includeStorageBytes
+			? (() => {
+					const row = this.readStorageRow()
+					if (!row) return { outcome: 'needs_bootstrap' as const }
+					return this.storageReadyState(row.bytes, row.revision)
+				})()
+			: null
+
+		return { daily, weekly, storageBytes }
+	}
+
+	/**
+	 * Compact read of remaining daily entitlement counters and unique Dynamic
+	 * Worker claim counts for the retention window ending at `now`. Prunes
+	 * once. Does not write counters or bootstrap missing keys — callers treat
+	 * absent days/resources as zero.
+	 */
+	async readDailyTrend(input?: {
+		now?: string
+	}): Promise<UserMeterDailyTrendResult> {
+		const now = input?.now ? new Date(input.now) : new Date()
+		const safeNow = Number.isNaN(now.valueOf()) ? new Date() : now
+		this.deleteStaleCounters(safeNow)
+		const endDay = utcDayKey(safeNow)
+		const startDay = retentionCutoffDay(safeNow)
+
+		const counterRows = this.ctx.storage.sql
+			.exec<{
+				resource: string
+				day: string
+				count: number
+			}>(
+				`SELECT resource, day, count
+				FROM daily_counters
+				WHERE day >= ? AND day <= ?
+				ORDER BY day ASC, resource ASC`,
+				startDay,
+				endDay,
+			)
+			.toArray()
+
+		const counters: Array<UserMeterDailyTrendCounterRow> = []
+		for (const row of counterRows) {
+			const resource = String(row.resource)
+			if (!isDailyEntitlementResource(resource)) continue
+			counters.push({
+				resource,
+				day: String(row.day),
+				count: Math.max(0, Number(row.count ?? 0)),
+			})
+		}
+
+		const uniqueWorkerDayRows = this.ctx.storage.sql
+			.exec<{
+				day: string
+				count: number
+			}>(
+				`SELECT day, COUNT(*) AS count
+				FROM dynamic_worker_days
+				WHERE day >= ? AND day <= ?
+				GROUP BY day
+				ORDER BY day ASC`,
+				startDay,
+				endDay,
+			)
+			.toArray()
+
+		const uniqueWorkerDays: Array<UserMeterDailyTrendUniqueWorkerDayRow> =
+			uniqueWorkerDayRows.map((row) => ({
+				day: String(row.day),
+				count: Math.max(0, Number(row.count ?? 0)),
+			}))
+
+		// Calls were counted under the retired `execute_calls_per_day` counter
+		// before execute_call_days existed. Those rows stop growing at deploy and
+		// age out with retention, so summing both keeps the 14-day history whole.
+		const executeCalls = this.ctx.storage.sql
+			.exec<{ day: string; count: number }>(
+				`SELECT day, SUM(count) AS count
+				FROM (
+					SELECT day, count FROM execute_call_days
+					UNION ALL
+					SELECT day, count FROM daily_counters
+					WHERE resource = 'execute_calls_per_day'
+				)
+				WHERE day >= ? AND day <= ?
+				GROUP BY day
+				ORDER BY day ASC`,
+				startDay,
+				endDay,
+			)
+			.toArray()
+			.map((row) => ({
+				day: String(row.day),
+				count: Math.max(0, Number(row.count ?? 0)),
+			}))
+
+		return {
+			retentionDays: userMeterDailyCounterRetentionDays,
+			startDay,
+			endDay,
+			counters,
+			uniqueWorkerDays,
+			executeCalls,
+		}
 	}
 
 	/**
@@ -1012,7 +1439,8 @@ class UserMeterBase extends DurableObject<Env> {
 	/**
 	 * Claim one unique Dynamic Worker id for a UTC day. First insert wins;
 	 * later claims for the same `(day, worker_id)` return `created: false`.
-	 * Used only for cost attribution — not an entitlement cap.
+	 * Cost attribution for uncapped surfaces; hosted execute claims through
+	 * {@link claimDynamicWorkerDayWithinLimit} instead.
 	 */
 	async claimDynamicWorkerDay(input: {
 		workerId: string
@@ -1476,16 +1904,42 @@ class UserMeterBase extends DurableObject<Env> {
 		}
 	}
 
-	/** Authoritative lease release. */
+	/**
+	 * Authoritative lease release. `released` doubles as the post-write held
+	 * proof, so a release is remembered briefly: a reset retry whose first
+	 * attempt already deleted the row still reports `released: true`, while a
+	 * lease removed by repair or purge still reports `false`.
+	 */
 	async releaseWriteLease(input: {
 		token: string
 	}): Promise<UserMeterReleaseWriteLeaseResult> {
 		const token = assertWriteLeaseToken(input.token)
+		const nowMs = Date.now()
+		this.ctx.storage.sql.exec(
+			`DELETE FROM account_write_lease_releases WHERE released_at < ?`,
+			new Date(nowMs - writeLeaseReleaseMemoryMs).toISOString(),
+		)
 		const cursor = this.ctx.storage.sql.exec(
 			`DELETE FROM account_write_leases WHERE token = ?`,
 			token,
 		)
-		return { released: cursor.rowsWritten > 0 }
+		if (cursor.rowsWritten > 0) {
+			this.ctx.storage.sql.exec(
+				`INSERT INTO account_write_lease_releases (token, released_at)
+				VALUES (?, ?)
+				ON CONFLICT(token) DO UPDATE SET released_at = excluded.released_at`,
+				token,
+				new Date(nowMs).toISOString(),
+			)
+			return { released: true }
+		}
+		const remembered = this.ctx.storage.sql
+			.exec(
+				`SELECT 1 AS present FROM account_write_lease_releases WHERE token = ?`,
+				token,
+			)
+			.toArray()
+		return { released: remembered.length > 0 }
 	}
 
 	/** Post-write held check; pending repair still counts as held. */
@@ -1664,6 +2118,267 @@ class UserMeterBase extends DurableObject<Env> {
 		return { ok: true }
 	}
 
+	private resetBudgetSpendForMonth(month: string) {
+		const safeMonth = assertUtcMonthKey(month)
+		this.ctx.storage.sql.exec(`DELETE FROM budget_spend_users`)
+		this.ctx.storage.sql.exec(
+			`INSERT INTO budget_spend_state (id, month, automation_micro_usd)
+			 VALUES (?, ?, 0)
+			 ON CONFLICT(id) DO UPDATE SET
+				month = excluded.month,
+				automation_micro_usd = 0`,
+			budgetSpendStateRowId,
+			safeMonth,
+		)
+	}
+
+	private storedBudgetMonth(): string | null {
+		const row = this.ctx.storage.sql
+			.exec<{ month: string }>(
+				`SELECT month FROM budget_spend_state WHERE id = ?`,
+				budgetSpendStateRowId,
+			)
+			.toArray()[0]
+		return row ? String(row.month) : null
+	}
+
+	private ensureBudgetMonth(month: string): string {
+		const safeMonth = assertUtcMonthKey(month)
+		const stored = this.storedBudgetMonth()
+		if (!stored) {
+			this.resetBudgetSpendForMonth(safeMonth)
+			return safeMonth
+		}
+		if (stored === safeMonth) {
+			return safeMonth
+		}
+		// Late settlement for a past month must not wipe the live MTD row.
+		if (safeMonth < stored) {
+			return stored
+		}
+		this.resetBudgetSpendForMonth(safeMonth)
+		return safeMonth
+	}
+
+	private readBudgetSpendState(month: string): UserMeterBudgetSpendState {
+		const safeMonth = assertUtcMonthKey(month)
+		const stored = this.storedBudgetMonth()
+		if (stored && safeMonth < stored) {
+			return {
+				month: safeMonth,
+				users: {},
+				automationMicroUsd: 0,
+			}
+		}
+		this.ensureBudgetMonth(safeMonth)
+		const automationRow = this.ctx.storage.sql
+			.exec<{ automation_micro_usd: number }>(
+				`SELECT automation_micro_usd FROM budget_spend_state WHERE id = ?`,
+				budgetSpendStateRowId,
+			)
+			.toArray()[0]
+		const userRows = this.ctx.storage.sql
+			.exec<{ user_id: string; micro_usd: number }>(
+				`SELECT user_id, micro_usd FROM budget_spend_users`,
+			)
+			.toArray()
+		const users: Record<string, number> = {}
+		for (const row of userRows) {
+			users[String(row.user_id)] = Math.max(0, Number(row.micro_usd ?? 0))
+		}
+		return {
+			month,
+			users,
+			automationMicroUsd: Math.max(
+				0,
+				Number(automationRow?.automation_micro_usd ?? 0),
+			),
+		}
+	}
+
+	async getBudgetSpend(input: {
+		month: string
+	}): Promise<UserMeterBudgetSpendState> {
+		const month = assertUtcMonthKey(input.month)
+		return this.readBudgetSpendState(month)
+	}
+
+	async assertWithinBudgetAndRecord(input: {
+		month: string
+		actorUserId: string | null
+		automationSource: string | null
+		deltaMicroUsd: number
+		userBudgetMicroUsd: number | null
+		automationBudgetMicroUsd: number | null
+		actorUsername?: string | null
+		orgSlug?: string | null
+	}): Promise<UserMeterBudgetSpendState> {
+		const month = assertUtcMonthKey(input.month)
+		const delta = Math.max(0, Math.floor(Number(input.deltaMicroUsd ?? 0)))
+		const orgSlug = input.orgSlug?.trim() || 'org'
+		const state = this.readBudgetSpendState(month)
+		const isAutomation =
+			input.actorUserId == null && input.automationSource != null
+		if (isAutomation) {
+			const budget = input.automationBudgetMicroUsd
+			if (budget != null && budget >= 0) {
+				const current = state.automationMicroUsd
+				const next = current + delta
+				const overBudget = next > budget || (delta === 0 && current >= budget)
+				if (overBudget) {
+					throwBudgetLimit({
+						kind: 'automation',
+						orgSlug,
+						spentMicroUsd: current,
+						budgetMicroUsd: budget,
+					})
+				}
+			}
+		} else if (input.actorUserId != null) {
+			const budget = input.userBudgetMicroUsd
+			if (budget != null && budget >= 0) {
+				const current = state.users[input.actorUserId] ?? 0
+				const next = current + delta
+				const overBudget = next > budget || (delta === 0 && current >= budget)
+				if (overBudget) {
+					throwBudgetLimit({
+						kind: 'user',
+						orgSlug,
+						actorUsername: input.actorUsername?.trim() || undefined,
+						spentMicroUsd: current,
+						budgetMicroUsd: budget,
+					})
+				}
+			}
+		}
+		if (delta === 0) {
+			return state
+		}
+		const stored = this.storedBudgetMonth()
+		if (stored && month < stored) {
+			console.info('user_meter_budget_skip_past_month', {
+				month,
+				storedMonth: stored,
+			})
+			return state
+		}
+		this.ctx.storage.transactionSync(() => {
+			this.ensureBudgetMonth(month)
+			if (isAutomation) {
+				this.ctx.storage.sql.exec(
+					`UPDATE budget_spend_state
+					 SET automation_micro_usd = automation_micro_usd + ?
+					 WHERE id = ?`,
+					delta,
+					budgetSpendStateRowId,
+				)
+			} else if (input.actorUserId != null) {
+				this.ctx.storage.sql.exec(
+					`INSERT INTO budget_spend_users (user_id, micro_usd)
+					 VALUES (?, ?)
+					 ON CONFLICT(user_id) DO UPDATE SET
+						micro_usd = micro_usd + excluded.micro_usd`,
+					input.actorUserId,
+					delta,
+				)
+			}
+		})
+		return this.readBudgetSpendState(month)
+	}
+
+	async recomputeBudgetSpend(input: {
+		month: string
+		users: Record<string, number>
+		automation: number
+	}): Promise<UserMeterBudgetSpendState> {
+		const month = assertUtcMonthKey(input.month)
+		const stored = this.storedBudgetMonth()
+		// Never let a past-month reconciliation wipe or rewrite live MTD rows.
+		if (stored && month < stored) {
+			console.info('user_meter_budget_recompute_skip_past_month', {
+				month,
+				storedMonth: stored,
+			})
+			return this.readBudgetSpendState(stored)
+		}
+		this.ensureBudgetMonth(month)
+		const automationTarget = Math.max(0, Math.floor(Number(input.automation)))
+		this.ctx.storage.transactionSync(() => {
+			const state = this.readBudgetSpendState(month)
+			if (automationTarget > state.automationMicroUsd) {
+				this.ctx.storage.sql.exec(
+					`UPDATE budget_spend_state
+					 SET automation_micro_usd = ?
+					 WHERE id = ?`,
+					automationTarget,
+					budgetSpendStateRowId,
+				)
+			}
+			for (const [userId, microUsd] of Object.entries(input.users)) {
+				const target = Math.max(0, Math.floor(Number(microUsd)))
+				const current = state.users[userId] ?? 0
+				if (target <= current) continue
+				this.ctx.storage.sql.exec(
+					`INSERT INTO budget_spend_users (user_id, micro_usd)
+					 VALUES (?, ?)
+					 ON CONFLICT(user_id) DO UPDATE SET
+						micro_usd = MAX(micro_usd, excluded.micro_usd)`,
+					userId,
+					target,
+				)
+			}
+		})
+		return this.readBudgetSpendState(month)
+	}
+
+	/**
+	 * Replace current-month budget MTD with absolute totals from the credit
+	 * ledger. Unlike {@link recomputeBudgetSpend} (MAX-only), this clears prior
+	 * actor rows so weight changes and org-fallback → member handoff cannot
+	 * double-count the same debit.
+	 */
+	async replaceBudgetSpendFromLedger(input: {
+		month: string
+		users: Record<string, number>
+		automation: number
+	}): Promise<UserMeterBudgetSpendState> {
+		const month = assertUtcMonthKey(input.month)
+		const stored = this.storedBudgetMonth()
+		if (stored && month < stored) {
+			console.info('user_meter_budget_replace_skip_past_month', {
+				month,
+				storedMonth: stored,
+			})
+			return this.readBudgetSpendState(stored)
+		}
+		this.ensureBudgetMonth(month)
+		const automationTarget = Math.max(0, Math.floor(Number(input.automation)))
+		// Absolute ledger replace is source of truth and must overwrite
+		// provisional rows from assertWithinBudgetAndRecord(estimatedDelta).
+		// Do not gate on stored totals: estimates can exceed committed debit.
+		this.ctx.storage.transactionSync(() => {
+			this.ctx.storage.sql.exec(`DELETE FROM budget_spend_users`)
+			this.ctx.storage.sql.exec(
+				`UPDATE budget_spend_state
+				 SET automation_micro_usd = ?
+				 WHERE id = ?`,
+				automationTarget,
+				budgetSpendStateRowId,
+			)
+			for (const [userId, microUsd] of Object.entries(input.users)) {
+				const target = Math.max(0, Math.floor(Number(microUsd)))
+				if (target <= 0) continue
+				this.ctx.storage.sql.exec(
+					`INSERT INTO budget_spend_users (user_id, micro_usd)
+					 VALUES (?, ?)`,
+					userId,
+					target,
+				)
+			}
+		})
+		return this.readBudgetSpendState(month)
+	}
+
 	async purge(): Promise<{ ok: true }> {
 		await this.ctx.blockConcurrencyWhile(async () => {
 			const deletingAt = this.readDeletingAt()
@@ -1818,6 +2533,25 @@ export type UserMeterRpc = DurableObjectPitrRpc & {
 		day: string
 		now?: string
 	}) => Promise<UserMeterReadResult>
+	/**
+	 * Batch read for entitlement usage snapshots: daily counters, weekly
+	 * windows, and optional storage bytes in one Durable Object hop.
+	 */
+	readUsageSnapshot: (input: {
+		day: string
+		weekStart: string
+		dailyResources: ReadonlyArray<string>
+		weeklyResources: ReadonlyArray<string>
+		includeStorageBytes?: boolean
+		now?: string
+	}) => Promise<UserMeterUsageSnapshotResult>
+	/**
+	 * Retention-window daily counters plus unique-worker-day counts grouped by
+	 * UTC day. Read-only aside from the usual stale-row prune.
+	 */
+	readDailyTrend: (input?: {
+		now?: string
+	}) => Promise<UserMeterDailyTrendResult>
 	refund: (input: {
 		resource: string
 		day: string
@@ -1829,6 +2563,22 @@ export type UserMeterRpc = DurableObjectPitrRpc & {
 		day: string
 		createdAt: string
 	}) => Promise<{ created: boolean }>
+	/** Claim a worker day and spend one unit only when the claim is new. */
+	claimDynamicWorkerDayWithinLimit: (input: {
+		workerId: string
+		resource: string
+		day: string
+		limit: number
+		createdAt: string
+		weekStart?: string
+		weekLimit?: number | null
+	}) => Promise<UserMeterWorkerDayConsumeResult>
+	/** In-memory per-minute and identical-call hosted execute admission. */
+	admitExecuteCall: (input: {
+		nowMs: number
+		limitPerMinute: number
+		repeat?: ExecuteRepeatInput
+	}) => Promise<UserMeterExecuteAdmissionResult>
 	/** Cold initialize authoritative state from a caller-provided physical byte count. */
 	initializeStorageBytes: (input: {
 		bytes: number
@@ -1910,6 +2660,29 @@ export type UserMeterRpc = DurableObjectPitrRpc & {
 		clientId: string
 	}) => Promise<{ ok: true }>
 	purge: () => Promise<{ ok: true }>
+	getBudgetSpend: (input: {
+		month: string
+	}) => Promise<UserMeterBudgetSpendState>
+	assertWithinBudgetAndRecord: (input: {
+		month: string
+		actorUserId: string | null
+		automationSource: string | null
+		deltaMicroUsd: number
+		userBudgetMicroUsd: number | null
+		automationBudgetMicroUsd: number | null
+		actorUsername?: string | null
+		orgSlug?: string | null
+	}) => Promise<UserMeterBudgetSpendState>
+	recomputeBudgetSpend: (input: {
+		month: string
+		users: Record<string, number>
+		automation: number
+	}) => Promise<UserMeterBudgetSpendState>
+	replaceBudgetSpendFromLedger: (input: {
+		month: string
+		users: Record<string, number>
+		automation: number
+	}) => Promise<UserMeterBudgetSpendState>
 	exportCounters: (input: {
 		pageSize?: number
 		startAfter?: string | null

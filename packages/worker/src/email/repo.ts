@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	maxRestorableTextColumnBytes,
 	truncateToUtf8Bytes,
@@ -21,6 +22,7 @@ import {
 	type EmailThreadRecord,
 } from './types.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 function nowIso() {
 	return new Date().toISOString()
 }
@@ -134,7 +136,7 @@ export function mapMessageRow(
 	return {
 		id: String(row['id']),
 		direction: String(row['direction']) as EmailDirection,
-		userId: String(row['user_id']),
+		userId: String(row['user_id']) as OwnerId,
 		inboxId: row['inbox_id'] == null ? null : String(row['inbox_id']),
 		threadId: row['thread_id'] == null ? null : String(row['thread_id']),
 		senderIdentityId:
@@ -289,7 +291,9 @@ export async function deleteEmailInboxAddressById(input: {
 	addressId: string
 }) {
 	await input.db
-		.prepare(`DELETE FROM email_inbox_addresses WHERE id = ?`)
+		.prepare(
+			`DELETE FROM email_inbox_addresses WHERE id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.addressId)
 		.run()
 }
@@ -343,7 +347,7 @@ export async function listEmailInboxesForUser(input: {
 		.prepare(
 			`SELECT *
 			FROM email_inboxes
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY created_at DESC, id DESC`,
 		)
 		.bind(input.userId)
@@ -359,7 +363,7 @@ export async function listEmailInboxAddressesForUser(input: {
 		.prepare(
 			`SELECT *
 			FROM email_inbox_addresses
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY created_at DESC, id DESC`,
 		)
 		.bind(input.userId)
@@ -381,7 +385,7 @@ export async function getEmailInboxAddressByAddress(input: {
 			`SELECT *
 			FROM email_inbox_addresses
 			WHERE address = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.address)
 		.first<Record<string, unknown>>()
@@ -399,7 +403,7 @@ export async function getEmailInboxById(input: {
 			FROM email_inboxes
 			WHERE id = ?
 				AND (? IS NULL OR user_id = ?)
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.id, input.userId ?? null, input.userId ?? null)
 		.first<Record<string, unknown>>()
@@ -417,7 +421,7 @@ export async function getEmailInboxByName(input: {
 			FROM email_inboxes
 			WHERE user_id = ?
 				AND name = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.name)
 		.first<Record<string, unknown>>()
@@ -450,7 +454,7 @@ async function getSenderIdentityByEmail(input: {
 			FROM email_sender_identities
 			WHERE user_id = ?
 				AND email = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.email)
 		.first<Record<string, unknown>>()

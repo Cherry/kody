@@ -1,3 +1,8 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { runInDurableObject } from 'cloudflare:test'
 import { expect, test } from 'vitest'
@@ -33,6 +38,7 @@ import {
 	runRecordRetentionDays,
 	runRecordRetentionEmptyBackoffMinMs,
 	runRecordRetentionEveryNFinishes,
+	runRecordStaleRunningTtlMsBackground,
 	runRecordStaleRunningTtlMsJob,
 	runRecordStaleRunningTtlMsShortLived,
 	type RunRecordContext,
@@ -40,6 +46,7 @@ import {
 	type RunRecordHandle,
 	type RunSurface,
 } from './types.ts'
+import { backgroundExecutorTimeoutMs } from '#mcp/executor-budgets.ts'
 
 type SeedRun = {
 	id: string
@@ -58,8 +65,8 @@ type SeedRun = {
 const dayMs = 24 * 60 * 60 * 1000
 const iso = (ms: number) => new Date(ms).toISOString()
 
-function uniqueUserId(label: string) {
-	return `run-records-${label}-${crypto.randomUUID()}`
+function uniqueUserId(label: string): OwnerId {
+	return ownerIdFromStored(`run-records-${label}-${crypto.randomUUID()}`)
 }
 
 function baseContext(overrides?: Partial<RunRecordContext>): RunRecordContext {
@@ -83,7 +90,7 @@ function handleFor(
 ): RunRecordHandle {
 	return {
 		id,
-		userId,
+		userId: ownerIdFromStored(userId),
 		startedAt: iso(startedAtMs),
 		persistence: 'eager',
 		context: baseContext(context),
@@ -104,10 +111,10 @@ function finishOk(
 }
 
 const getRun = (userId: string, runId: string) =>
-	getRunRecord({ env, userId, runId })
+	getRunRecord({ env, userId: ownerIdFromStored(userId), runId })
 
 const listRuns = (userId: string, filter?: RunRecordFilter, limit?: number) =>
-	listRunRecords({ env, userId, filter, limit })
+	listRunRecords({ env, userId: ownerIdFromStored(userId), filter, limit })
 
 async function drainWaitUntil(pending: Array<Promise<unknown>>) {
 	await Promise.all(pending)
@@ -425,6 +432,32 @@ test('listRunRecords filters by surface/status/jobId/name and paginates with cur
 		listed.push([filter, page.runs.map((run) => run.id)])
 	}
 	expect(listed).toEqual(cases)
+
+	const workflowUserId = uniqueUserId('list-workflow-filter')
+	await finishOk(workflowUserId, 'run-other-workflow', {
+		surface: 'workflow',
+		workflowId: 'dynwf-other',
+	})
+	await finishRunRecord({
+		env,
+		handle: handleFor(workflowUserId, 'run-workflow', {
+			surface: 'workflow',
+			workflowId: 'dynwf-check-back',
+		}),
+		status: 'success',
+		result: { answer: 42 },
+	})
+	const workflowPage = await listRuns(workflowUserId, {
+		workflowId: 'dynwf-check-back',
+	})
+	expect(workflowPage.runs).toEqual([
+		expect.objectContaining({
+			id: 'run-workflow',
+			workflowId: 'dynwf-check-back',
+			status: 'success',
+			metadata: expect.objectContaining({ result: { answer: 42 } }),
+		}),
+	])
 
 	const pages: Array<Array<string>> = []
 	let cursor: string | null = null
@@ -826,6 +859,35 @@ test('cap and stale retention journey', async () => {
 			status: 'error',
 			errorName: runRecordPlatformInterruptedErrorName,
 			surface: 'execute',
+		})
+	}
+
+	// --- a webhook run inside the 5-minute background budget is not stale ---
+	{
+		const userId = uniqueUserId('stale-webhook-heal')
+		await seedRuns(userId, [
+			{
+				id: 'live-webhook',
+				status: 'running',
+				startedAt: iso(Date.now() - backgroundExecutorTimeoutMs),
+				surface: 'webhook',
+			},
+			{
+				id: 'stale-webhook',
+				status: 'running',
+				startedAt: iso(
+					Date.now() - runRecordStaleRunningTtlMsBackground - 1_000,
+				),
+				surface: 'webhook',
+			},
+		])
+		expect((await getRun(userId, 'live-webhook'))?.run).toMatchObject({
+			status: 'running',
+		})
+		expect((await getRun(userId, 'stale-webhook'))?.run).toMatchObject({
+			status: 'error',
+			errorName: runRecordPlatformInterruptedErrorName,
+			surface: 'webhook',
 		})
 	}
 
@@ -1299,9 +1361,10 @@ test(
 		silenceIncidentalRuntimeWarnings()
 		const userId = uniqueUserId('sandbox-fail-logs')
 		const callerContext = createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.dev',
 			user: {
-				userId,
+				userId: personIdFromStored(String(userId)),
 				email: 'sandbox-fail-logs@example.com',
 				displayName: 'Sandbox Fail Logs',
 			},

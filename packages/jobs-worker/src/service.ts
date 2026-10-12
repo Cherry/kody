@@ -1,10 +1,10 @@
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type JobManagerDebugState } from '@kody-internal/shared/jobs/manager-debug.ts'
 import {
 	type JobsServiceContract,
 	type JobsHostContract,
 } from '@kody-internal/shared/jobs/rpc.ts'
-import { type ArchivedJobArtifactRecord } from '@kody-internal/shared/jobs/archived-artifacts-repo.ts'
 import {
 	type JobCountBySourceId,
 	type JobRow,
@@ -87,6 +87,15 @@ export class JobsService
 		return jobsStore(this.env).claimJob(input)
 	}
 
+	async renewClaimedJob(input: {
+		userId: string
+		jobId: string
+		claimToken: string
+		nowMs: number
+	}): Promise<boolean> {
+		return jobsStore(this.env).renewClaimedJob(input)
+	}
+
 	async finalizeClaimedJob(input: {
 		userId: string
 		job: JobRecord
@@ -127,35 +136,6 @@ export class JobsService
 		return jobsStore(this.env).disableExpiredJobsForUser(input)
 	}
 
-	async listJobRetentionCandidates(input: {
-		afterId: string | null
-		limit: number
-	}): Promise<Array<JobRow>> {
-		return jobsStore(this.env).listJobRetentionCandidates(input)
-	}
-
-	async upsertArchivedJobArtifact(input: {
-		jobId: string
-		userId: string
-		sourceId: string
-		publishedCommit: string
-		storageId: string
-		retainUntil: string
-	}): Promise<string> {
-		return jobsStore(this.env).upsertArchivedJobArtifact(input)
-	}
-
-	async listArchivedJobArtifactsDueBefore(input: {
-		retainUntil: string
-		limit?: number
-	}): Promise<Array<ArchivedJobArtifactRecord>> {
-		return jobsStore(this.env).listArchivedJobArtifactsDueBefore(input)
-	}
-
-	async deleteArchivedJobArtifact(input: { id: string }): Promise<void> {
-		await jobsStore(this.env).deleteArchivedJobArtifact(input)
-	}
-
 	async countJobsForUser(input: { userId: string }): Promise<number> {
 		return jobsStore(this.env).countJobsForUser(input)
 	}
@@ -180,12 +160,6 @@ export class JobsService
 		return jobsStore(this.env).listJobStorageIdsForUser(input)
 	}
 
-	async listArchivedJobArtifactsForUser(input: {
-		userId: string
-	}): Promise<Array<ArchivedJobArtifactRecord>> {
-		return jobsStore(this.env).listArchivedJobArtifactsForUser(input)
-	}
-
 	async listAllJobStorageOwners(): Promise<
 		Array<{ userId: string; storageId: string }>
 	> {
@@ -200,8 +174,32 @@ export class JobsService
 		await jobsStore(this.env).purgeUserJobsData(input)
 	}
 
-	async syncAlarm(input: {
+	async softDeleteJobsForUser(input: {
 		userId: string
+		deletedAt: string
+	}): Promise<number> {
+		return jobsStore(this.env).softDeleteJobsForUser(input)
+	}
+
+	async restoreJobsForUser(input: {
+		userId: string
+		deletedAt: string
+		restoredAt: string
+	}): Promise<number> {
+		return jobsStore(this.env).restoreJobsForUser(input)
+	}
+
+	async transferJobsOwner(input: {
+		fromUserId: string
+		toUserId: string
+		jobs: Array<{ jobId: string; callerContextJson: string }>
+		updatedAt: string
+	}): Promise<{ transferred: number }> {
+		return jobsStore(this.env).transferJobsOwner(input)
+	}
+
+	async syncAlarm(input: {
+		userId: OwnerId
 	}): Promise<{ ok: true; userId: string; nextRunAt: string | null }> {
 		return jobManagerStub(this.env, input.userId).syncAlarm({
 			userId: input.userId,
@@ -210,12 +208,12 @@ export class JobsService
 	}
 
 	async getDebugState(input: {
-		userId: string
+		userId: OwnerId
 	}): Promise<JobManagerDebugState> {
 		return jobManagerStub(this.env, input.userId).getDebugState(input)
 	}
 
-	async exportUser(input: { userId: string }): Promise<JobManagerDebugState> {
+	async exportUser(input: { userId: OwnerId }): Promise<JobManagerDebugState> {
 		return jobManagerStub(this.env, input.userId).exportUser(input)
 	}
 
@@ -224,19 +222,24 @@ export class JobsService
 	 * purges the JobManager Durable Object storage (including its alarm).
 	 */
 	async purgeUser(input: {
-		userId: string
+		userId: OwnerId
 	}): Promise<{ ok: true; userId: string; purged: boolean }> {
-		const userId = input.userId.trim()
-		if (!userId) {
+		const trimmed = input.userId.trim()
+		if (!trimmed) {
 			throw new Error('Jobs purge requires a non-empty userId.')
 		}
+		// Purge has always named the JobManager with the trimmed id. An
+		// OwnerId from the caller is already trimmed; keep the trimmed bytes
+		// when a stored id has surrounding spaces.
+		const userId =
+			trimmed === input.userId ? input.userId : (trimmed as OwnerId)
 		await jobsStore(this.env).purgeUserJobsData({ userId })
 		await jobManagerStub(this.env, userId).purgeUser({ userId })
 		return { ok: true as const, userId, purged: true }
 	}
 
 	async runJobNow(input: {
-		userId: string
+		userId: OwnerId
 		jobId: string
 		callerContext?: McpCallerContext | null
 		repoCheckPolicyOverride?: JobRepoCheckPolicy | null

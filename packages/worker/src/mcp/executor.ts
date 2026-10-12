@@ -1,5 +1,4 @@
 import {
-	normalizeCode,
 	sanitizeToolName,
 	ToolDispatcher,
 	type ExecuteResult,
@@ -11,12 +10,13 @@ import {
 } from '@kody-internal/shared/error-message.ts'
 import { type ContentBlock } from '@modelcontextprotocol/sdk/types.js'
 import { exports as workerExports } from 'cloudflare:workers'
+import { loadNormalizeCode } from '#worker/codemode-normalize-load.ts'
 import {
 	dynamicWorkerUsageTailLoaderIdSuffix,
 	type DynamicWorkerUsageTailProps,
 } from '#worker/usage/dynamic-worker-cpu.ts'
+import { defaultExecutorTimeoutMs } from '#mcp/executor-budgets.ts'
 import {
-	outboundFetchTimeoutMsForExecutor,
 	retrieverOutboundFetchDeniedMessage,
 	type FetchGatewayProps,
 } from '#mcp/fetch-gateway.ts'
@@ -25,7 +25,13 @@ import {
 	type RawFetchHostSink,
 } from '#mcp/raw-fetch-host-nudge.ts'
 import { extractMcpPassthrough } from '#mcp/downstream-mcp-result.ts'
-import { recordUsage, type UsageEnv } from '#worker/usage/record-usage.ts'
+import {
+	recordUsage,
+	usageAttributionFieldsFromRequest,
+	usageConnectionFieldsFromRequest,
+	type UsageEnv,
+	type UsageEvent,
+} from '#worker/usage/record-usage.ts'
 import { recordUniqueDynamicWorkerDay } from '#worker/usage/dynamic-worker-day.ts'
 import {
 	countDynamicWorkerModuleGraphChars,
@@ -74,7 +80,10 @@ import {
 	secretAuthorityHeaderName,
 	takeSecretAuthorityFromCapabilityArgs,
 } from '#mcp/secrets/secret-authority.ts'
-import { parseUnboundRuntimeHelperMessage } from '#worker/package-runtime/unbound-runtime-helpers.ts'
+import {
+	buildUnboundRuntimeHelperNextStep,
+	parseUnboundRuntimeHelperMessage,
+} from '#worker/package-runtime/unbound-runtime-helpers.ts'
 import { createDynamicWorkerCompatibilityOptions } from '#worker/dynamic-worker-compatibility.ts'
 import {
 	getDynamicWorkerEvaluationContext,
@@ -205,6 +214,12 @@ type DynamicWorkerExecutorInput = {
 	 */
 	surface?: DynamicWorkerDaySurface
 	/**
+	 * Saved package id when this worker belongs to a known package run.
+	 * Falls back to `invocation.packageContext.packageId` at claim time.
+	 * Omit for ad hoc execute; never guess.
+	 */
+	packageId?: string | null
+	/**
 	 * Host-side thin/glue class for ad-hoc execute usage events. Omit on
 	 * nested surfaces.
 	 */
@@ -215,12 +230,29 @@ type DynamicWorkerExecutorInput = {
 	 */
 	onWorkerId?: (workerId: string) => void
 	/**
+	 * Capped unique-worker-day claim. Awaited before the worker loads, so a
+	 * throw (plan limit) stops the run without a load. Must record the
+	 * `dynamic_worker_day` usage event itself. Omit to use the uncapped
+	 * attribution claim.
+	 */
+	claimWorkerDay?: ClaimWorkerDay
+	/**
 	 * When set, unique-worker-day metering and the first-execute activation
 	 * stamp run on `waitUntil` instead of the sandbox critical path. Without
 	 * an execution context the writes stay awaited so they are not dropped.
 	 */
 	waitUntil?: (promise: Promise<unknown>) => void
 }
+
+export type ClaimWorkerDayAttribution = Pick<
+	UsageEvent,
+	'packageId' | 'connectionKey'
+>
+
+export type ClaimWorkerDay = (
+	workerId: string,
+	attribution: ClaimWorkerDayAttribution,
+) => Promise<{ created: boolean }>
 
 export type DynamicWorkerEvaluatePackageContext = {
 	packageId: string
@@ -571,6 +603,11 @@ export function createExecuteExecutor(input: {
 	 */
 	surface?: DynamicWorkerDaySurface
 	/**
+	 * Saved package id when this worker belongs to a known package run.
+	 * Omit for ad hoc execute; never guess.
+	 */
+	packageId?: string | null
+	/**
 	 * Host-side thin/glue class for ad-hoc execute usage events. Omit on
 	 * nested surfaces.
 	 */
@@ -580,6 +617,8 @@ export function createExecuteExecutor(input: {
 	 * meters). Use to stamp run metadata before evaluate finishes.
 	 */
 	onWorkerId?: (workerId: string) => void
+	/** Capped unique-worker-day claim awaited before load (hosted execute). */
+	claimWorkerDay?: ClaimWorkerDay
 	/**
 	 * When false, sandbox `fetch` is rejected. Retriever runs use this to stay
 	 * closed-world. Defaults to true.
@@ -601,10 +640,9 @@ export function createExecuteExecutor(input: {
 	const timeout =
 		input.timeoutMs === null
 			? maxSupportedExecutorTimeoutMs
-			: (input.timeoutMs ?? 90_000)
+			: (input.timeoutMs ?? defaultExecutorTimeoutMs)
 	const gatewayProps = {
 		...input.gatewayProps,
-		outboundFetchTimeoutMs: outboundFetchTimeoutMsForExecutor(timeout),
 		allowOutboundFetch,
 	}
 	return createStableDynamicWorkerExecutor({
@@ -629,8 +667,10 @@ export function createExecuteExecutor(input: {
 		rawFetchHostSink: input.rawFetchHostSink,
 		recordExecuteUsage: input.recordExecuteUsage,
 		surface: input.surface ?? 'execute',
+		packageId: input.packageId,
 		executeShape: input.executeShape,
 		onWorkerId: input.onWorkerId,
+		claimWorkerDay: input.claimWorkerDay,
 		waitUntil: input.waitUntil,
 	})
 }
@@ -659,8 +699,9 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 				providers,
 				invocation,
 			)
+			const normalizeCode = await loadNormalizeCode()
 			const executorModule = createExecutorModule({
-				code,
+				normalizedCode: normalizeCode(code),
 				providers,
 				shadowGlobalThis: Object.keys(modules).length === 0,
 				timeoutMs: input.timeout,
@@ -682,17 +723,33 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 				workerOptions,
 			})
 			input.onWorkerId?.(workerId)
-			const claimedDay = recordUniqueDynamicWorkerDay({
-				env: input.usageEnv,
-				userId: input.gatewayProps.userId,
-				workerId,
-				surface: input.surface ?? 'execute',
-			})
-			await runExecuteBookkeeping(
-				claimedDay,
-				input.waitUntil,
-				'dynamic-worker-day-record-failed',
-			)
+			const attributedPackageId =
+				input.packageId?.trim() ||
+				invocation?.packageContext?.packageId?.trim() ||
+				null
+			const dayAttribution: ClaimWorkerDayAttribution = {
+				...(attributedPackageId ? { packageId: attributedPackageId } : {}),
+				...usageConnectionFieldsFromRequest(input.gatewayProps.request),
+			}
+			let claimedDay: Promise<{ created: boolean } | undefined>
+			if (input.claimWorkerDay) {
+				claimedDay = Promise.resolve(
+					await input.claimWorkerDay(workerId, dayAttribution),
+				)
+			} else {
+				claimedDay = recordUniqueDynamicWorkerDay({
+					env: input.usageEnv,
+					userId: input.gatewayProps.userId,
+					workerId,
+					surface: input.surface ?? 'execute',
+					...dayAttribution,
+				})
+				await runExecuteBookkeeping(
+					claimedDay,
+					input.waitUntil,
+					'dynamic-worker-day-record-failed',
+				)
+			}
 			const codeChars = countDynamicWorkerModuleGraphChars(
 				workerOptions.modules,
 			)
@@ -853,6 +910,9 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 								codeChars,
 								paramsChars,
 								executeShape: input.executeShape,
+								...usageAttributionFieldsFromRequest(
+									input.gatewayProps.request,
+								),
 								waitUntil: input.waitUntil,
 							})
 						}),
@@ -869,6 +929,7 @@ function createStableDynamicWorkerExecutor(input: DynamicWorkerExecutorInput) {
 							durationMs,
 							outcome,
 							surface: 'execute',
+							...usageAttributionFieldsFromRequest(input.gatewayProps.request),
 							...(input.executeShape
 								? { executeShape: input.executeShape }
 								: {}),
@@ -975,14 +1036,14 @@ function createSandboxRunFetchSource(allowOutboundFetch: boolean) {
 }
 
 function createExecutorModule(input: {
-	code: string
+	normalizedCode: string
 	providers: Array<ResolvedProvider>
 	shadowGlobalThis: boolean
 	timeoutMs: number
 	excludedHostname?: string
 	allowOutboundFetch?: boolean
 }) {
-	const normalized = normalizeCode(input.code)
+	const normalized = input.normalizedCode
 	const excludedHostname = JSON.stringify(input.excludedHostname ?? '')
 	const sandboxGlobalLines = input.shadowGlobalThis
 		? [
@@ -1085,7 +1146,10 @@ function createExecutorModule(input: {
 	].join('\n')
 }
 
-export function createExecutorModuleSource(input: {
+export async function createExecutorModuleSource({
+	code,
+	...input
+}: {
 	code: string
 	providers: Array<ResolvedProvider>
 	shadowGlobalThis: boolean
@@ -1093,7 +1157,8 @@ export function createExecutorModuleSource(input: {
 	excludedHostname?: string
 	allowOutboundFetch?: boolean
 }) {
-	return createExecutorModule(input)
+	const normalizeCode = await loadNormalizeCode()
+	return createExecutorModule({ ...input, normalizedCode: normalizeCode(code) })
 }
 
 function createProviderProxySource(provider: ResolvedProvider) {
@@ -1603,7 +1668,7 @@ export function getExecutionErrorDetails(
 			message,
 			nextStep: reconnectHref
 				? `Send the user to ${reconnectHref} so they can reconnect ${name ?? 'this integration'}, then retry.`
-				: 'Ask the user to reconnect this integration from /account/waiting or /account/integrations, then retry.',
+				: 'Ask the user to reconnect this integration from /@<slug>/-/waiting or /@<slug>/-/integrations, then retry.',
 			integrationName: name,
 			reconnectHref,
 			suggestedAction: {
@@ -1617,7 +1682,7 @@ export function getExecutionErrorDetails(
 		return {
 			kind: 'secret_required',
 			message,
-			nextStep: `Send the user to /account/secrets/new?name=${encodeURIComponent(missingSecretDetails.secretName)} so they can provide and save this secret, then retry the workflow.`,
+			nextStep: `Send the user to /connect/secret-set?name=${encodeURIComponent(missingSecretDetails.secretName)} so they can provide and save this secret, then retry the workflow.`,
 			secretNames: [missingSecretDetails.secretName],
 			suggestedAction: {
 				type: 'connect_secret',
@@ -1697,31 +1762,6 @@ const kodyRuntimeExportNames = new Set([
 	'packages',
 	'events',
 ])
-
-/**
- * Remedies for guard-less access to an optional `kody:runtime` export that
- * the execution context intentionally left unbound (`undefined` / `null` so
- * `if (email) { ... }` guards stay falsy). The message itself is produced
- * by `createUnboundRuntimeHelperMessage` in
- * `#worker/package-runtime/unbound-runtime-helpers.ts`.
- */
-const unboundRuntimeHelperNextSteps: Record<string, string> = {
-	packages:
-		'There is no author-facing `packages.invoke`; `packages` is always unbound. Use a static `kody:@scope/package/export` import when the name is known, or `import(specifier)` when the name is data. Exactly-once work uses workflows.',
-	events:
-		"`events` is only bound in saved-package runtime contexts that can dispatch package events; statically import the owning package's export so it runs in that context, or guard with `if (events) { ... }`.",
-	packageSecrets:
-		"`packageSecrets` is bound on stamped saved-package modules (including static `kody:@` imports) and in saved-package runtime contexts. Ad hoc execute entry code stays unbound; import the owning package's export so its stamp reads the mounts, or guard with `'get' in packageSecrets` / `packageContext?.packageId` (the late-bound export is always a proxy).",
-	email:
-		'`email` is only bound for email-triggered runs; guard with `if (email) { ... }` when the code can also run outside an email context.',
-}
-
-function buildUnboundRuntimeHelperNextStep(helperName: string) {
-	return (
-		unboundRuntimeHelperNextSteps[helperName] ??
-		`The optional \`${helperName}\` export of 'kody:runtime' is not provided in this execution context; guard with a falsiness check (for example \`if (${helperName}) { ... }\`) or run the code in a context that binds it, such as statically importing the owning saved package's export.`
-	)
-}
 
 /**
  * workerd throws this when an RPC stub outlives the execution context that

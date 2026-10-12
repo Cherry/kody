@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
@@ -16,10 +17,18 @@ const mocks = vi.hoisted(() => ({
 	listSavedPackagesPage: vi.fn(),
 	loadPackageSourceBySourceId: vi.fn(),
 	syncArtifactSourceSnapshot: vi.fn(),
+	syncPublishedSourceSnapshotOnly: vi.fn(),
 	refreshSavedPackageProjection: vi.fn(),
 	resolveArtifactSourceHead: vi.fn(),
 	runRepoChecks: vi.fn(),
 	dispatchPackageCodemodSubscriptionEvent: vi.fn(),
+	getPackageScopeByUserId: vi.fn(
+		async (_db: D1Database, userId: string) => userId,
+	),
+}))
+
+vi.mock('#worker/package-registry/user-scope.ts', () => ({
+	getPackageScopeByUserId: mocks.getPackageScopeByUserId,
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
@@ -31,6 +40,7 @@ vi.mock('#worker/package-registry/source.ts', () => ({
 }))
 vi.mock('#worker/repo/source-sync.ts', () => ({
 	syncArtifactSourceSnapshot: mocks.syncArtifactSourceSnapshot,
+	syncPublishedSourceSnapshotOnly: mocks.syncPublishedSourceSnapshotOnly,
 }))
 vi.mock('#worker/package-registry/service.ts', () => ({
 	refreshSavedPackageProjection: mocks.refreshSavedPackageProjection,
@@ -56,7 +66,10 @@ const { buildPackageCodemodRevertSnapshotKvKey, runPackageCodemodStep } =
 	await import('./engine.ts')
 
 const codemodId = '0001-ambient-storage-to-package-storage'
-const userScope = { kind: 'user', userId: 'user-1' } as const
+const userScope = {
+	kind: 'user',
+	userId: ownerIdFromStored('user-1'),
+} as const
 const fleetScope = { kind: 'fleet' } as const
 
 function createKv() {
@@ -250,6 +263,10 @@ function setupMocks() {
 				? 'commit-after'
 				: 'commit-reverted',
 	)
+	mocks.syncPublishedSourceSnapshotOnly.mockReset()
+	mocks.syncPublishedSourceSnapshotOnly.mockResolvedValue(
+		'commit-published-only-after',
+	)
 }
 
 async function insertAppliedItems(
@@ -261,7 +278,7 @@ async function insertAppliedItems(
 		await insertPackageCodemodRunItem(db, {
 			id: item.id,
 			runId,
-			userId: item.userId,
+			userId: ownerIdFromStored(item.userId),
 			packageId: `pkg-${item.id}`,
 			kodyId: item.id,
 			status: 'applied',
@@ -292,7 +309,9 @@ test('package codemod engine covers lifecycle, drift, isolation, snapshot keys, 
 		'pkg-unpublished',
 		'pkg-fail',
 	].map((id) => savedPackage(id))
-	const pkgOtherUser = savedPackage('pkg-other', { userId: 'user-2' })
+	const pkgOtherUser = savedPackage('pkg-other', {
+		userId: ownerIdFromStored('user-2'),
+	})
 	mocks.listSavedPackagesByUserId.mockImplementation(
 		async (_db: D1Database, input: { userId: string }) =>
 			input.userId === 'user-1'
@@ -390,7 +409,7 @@ test('package codemod engine covers lifecycle, drift, isolation, snapshot keys, 
 	})
 	const applyItemId = apply.items[0]!.itemId
 	const revertKey = buildPackageCodemodRevertSnapshotKvKey({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		itemId: applyItemId,
 	})
 	expect(revertKey).toBe(`package-codemod-revert:user-1:${applyItemId}`)
@@ -418,7 +437,7 @@ test('package codemod engine covers lifecycle, drift, isolation, snapshot keys, 
 	const user2CannotRevertUser1 = await step(env, {
 		...revertInput,
 		initiatedByUserId: 'user-2',
-		scope: { kind: 'user', userId: 'user-2' },
+		scope: { kind: 'user', userId: ownerIdFromStored('user-2') },
 	})
 	expect(user2CannotRevertUser1.items).toEqual([])
 })
@@ -458,7 +477,7 @@ test('package codemod engine enforces resume scope, binary paging, fleet progres
 			if (start > 250) return []
 			return Array.from({ length: input.limit }, (_, index) =>
 				savedPackage(`fleet-${String(start + index).padStart(4, '0')}`, {
-					userId: 'user-9',
+					userId: ownerIdFromStored('user-9'),
 					kodyId: `nope-${start + index}`,
 				}),
 			)
@@ -492,7 +511,7 @@ test('package codemod engine enforces resume scope, binary paging, fleet progres
 	)
 	expect(failedItem?.revertSnapshotKey).toBe(
 		buildPackageCodemodRevertSnapshotKvKey({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			itemId: failedPublish.items[0]!.itemId,
 		}),
 	)
@@ -527,9 +546,54 @@ test('package codemod revert skips when HEAD no longer matches applied afterComm
 		branch: 'main',
 		commit: 'commit-user-moved-head',
 	})
-	const revert = await step(env, { mode: 'revert', revertOfRunId: apply.runId })
+	const revert = await step(env, {
+		mode: 'revert',
+		revertOfRunId: apply.runId,
+	})
 	expect(revert.items[0]?.status).toBe('skipped_drift')
 	expect(mocks.syncArtifactSourceSnapshot).toHaveBeenCalledTimes(1)
+})
+
+test('codemod context takes the scope from the owner, not the saved package name', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const movedFiles = {
+		'package.json': `${JSON.stringify({
+			name: '@old-owner/moved',
+			exports: { '.': './index.ts' },
+			kody: { id: 'moved', description: 'Package for codemod tests.' },
+		})}\n`,
+		'index.ts': "export { helper } from 'kody:@old-owner/helper'\n",
+	}
+	mocks.listSavedPackagesByUserId.mockResolvedValue([
+		{ ...savedPackage('pkg-moved'), name: '@old-owner/moved' },
+	])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: movedFiles,
+			publishedCommit: 'commit-repo-moved',
+			repoId: 'repo-moved',
+			sourceId: 'source-moved',
+			userId: 'user-1',
+		}),
+	)
+
+	const scan = await step(env, {
+		codemodId: '0011-owner-scope-follows-registry',
+	})
+	expect(mocks.getPackageScopeByUserId).toHaveBeenCalledWith(
+		env.APP_DB,
+		'user-1',
+	)
+	expect(scan.items[0]).toMatchObject({
+		status: 'detected',
+		packageId: 'pkg-moved',
+	})
+	expect(scan.items[0]?.findings.map((finding) => finding.path)).toEqual([
+		'index.ts',
+		'package.json',
+	])
+	expect(scan.items[0]?.findings[0]?.message).toContain('@user-1/moved')
 })
 
 test('fleet apply on a locked package commits HEAD without promoting published_commit', async () => {
@@ -631,10 +695,10 @@ test('package codemod revert page ceiling and user-scoped SQL filter for sparse 
 	await insertAppliedItems(env.APP_DB, 'prior-fleet', [
 		...Array.from({ length: 40 }, (_, index) => ({
 			id: `other-${String(index).padStart(4, '0')}`,
-			userId: 'user-other',
+			userId: ownerIdFromStored('user-other'),
 		})),
-		{ id: 'mine-0001', userId: 'user-1' },
-		{ id: 'mine-0002', userId: 'user-1' },
+		{ id: 'mine-0001', userId: ownerIdFromStored('user-1') },
+		{ id: 'mine-0002', userId: ownerIdFromStored('user-1') },
 	])
 
 	const sparse = await revertOf('prior-fleet')
@@ -653,7 +717,7 @@ test('package codemod revert page ceiling and user-scoped SQL filter for sparse 
 		'prior-dense',
 		Array.from({ length: 30 }, (_, index) => ({
 			id: `dense-${String(index).padStart(4, '0')}`,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 		})),
 	)
 
@@ -670,9 +734,21 @@ test('package codemod fleet revert applies packageIds filters and leaves others 
 	const { env, kv } = createEnv()
 	await createPriorFleetApply(env.APP_DB, 'prior-canary-apply')
 	const priorItems = [
-		{ id: 'item-pkg-keep-a', userId: 'user-1', kodyId: 'keep-a' },
-		{ id: 'item-pkg-revert', userId: 'user-1', kodyId: 'revert-me' },
-		{ id: 'item-pkg-keep-b', userId: 'user-2', kodyId: 'keep-b' },
+		{
+			id: 'item-pkg-keep-a',
+			userId: ownerIdFromStored('user-1'),
+			kodyId: 'keep-a',
+		},
+		{
+			id: 'item-pkg-revert',
+			userId: ownerIdFromStored('user-1'),
+			kodyId: 'revert-me',
+		},
+		{
+			id: 'item-pkg-keep-b',
+			userId: ownerIdFromStored('user-2'),
+			kodyId: 'keep-b',
+		},
 	].map((prior) => ({
 		...prior,
 		packageId: `pkg-${prior.kodyId}`,
@@ -786,4 +862,307 @@ test('package codemod continuation steps heartbeat the run and reopen abandoned 
 	const reopened = await getPackageCodemodRunById(env.APP_DB, 'run-heartbeat')
 	expect(reopened).toMatchObject({ status: 'running' })
 	expect(reopened!.updatedAt > '2026-07-30T10:00:00.000Z').toBe(true)
+})
+
+const publishedOnlyCodemodId = '0012-explicit-webhook-url-secret-verification'
+
+function webhookMissingVerificationFiles() {
+	return {
+		'package.json': `${JSON.stringify(
+			{
+				name: '@user/webhook-pkg',
+				exports: { '.': './index.ts' },
+				kody: {
+					id: 'webhook-pkg',
+					description: 'Webhook package for published-only codemod tests.',
+					webhooks: [{ path: '/hooks/demo' }],
+				},
+			},
+			null,
+			'\t',
+		)}\n`,
+		'index.ts': 'export {}\n',
+	}
+}
+
+test('published-only apply on drifted packages uses syncPublishedSourceSnapshotOnly and never default-branch sync', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const pkg = savedPackage('pkg-drift-published-only', {
+		kodyId: 'webhook-pkg',
+		sourceId: 'source-drift-published-only',
+	})
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-published-old',
+			repoId: 'repo-drift-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-head-moved',
+	})
+	mocks.syncPublishedSourceSnapshotOnly.mockResolvedValue(
+		'commit-published-only-after',
+	)
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]).toMatchObject({
+		status: 'applied',
+		packageId: pkg.id,
+		beforeCommit: 'commit-published-old',
+		afterCommit: 'commit-published-only-after',
+	})
+	expect(mocks.syncPublishedSourceSnapshotOnly).toHaveBeenCalledWith(
+		expect.objectContaining({
+			sourceId: pkg.sourceId,
+			expectedPublishedCommit: 'commit-published-old',
+			commitMessage: expect.stringContaining(publishedOnlyCodemodId),
+		}),
+	)
+	expect(mocks.syncArtifactSourceSnapshot).not.toHaveBeenCalled()
+})
+
+test('published-only apply fails locked drifted packages instead of hiding a pending commit', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const pkg = {
+		...savedPackage('pkg-locked-drift-published-only', {
+			kodyId: 'webhook-pkg',
+			sourceId: 'source-locked-drift-published-only',
+		}),
+		lockedAt: '2026-10-12T00:00:00.000Z',
+	}
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-published-old',
+			repoId: 'repo-locked-drift-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-head-moved',
+	})
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]).toMatchObject({
+		status: 'failed',
+		packageId: pkg.id,
+	})
+	expect(apply.items[0]?.error).toMatch(/skips locked packages/i)
+	expect(mocks.syncPublishedSourceSnapshotOnly).not.toHaveBeenCalled()
+	expect(mocks.syncArtifactSourceSnapshot).not.toHaveBeenCalled()
+})
+
+test('published-only apply fails locked aligned packages so revert stays restorable', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const pkg = {
+		...savedPackage('pkg-locked-aligned-published-only', {
+			kodyId: 'webhook-pkg',
+			sourceId: 'source-locked-aligned-published-only',
+		}),
+		lockedAt: '2026-10-12T00:00:00.000Z',
+	}
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-repo-aligned',
+			repoId: 'repo-locked-aligned-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-repo-aligned',
+	})
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]).toMatchObject({
+		status: 'failed',
+		packageId: pkg.id,
+	})
+	expect(apply.items[0]?.error).toMatch(/skips locked packages/i)
+	expect(mocks.syncPublishedSourceSnapshotOnly).not.toHaveBeenCalled()
+	expect(mocks.syncArtifactSourceSnapshot).not.toHaveBeenCalled()
+})
+
+test('published-only apply on non-drifted packages still uses syncArtifactSourceSnapshot', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const pkg = savedPackage('pkg-aligned-published-only', {
+		kodyId: 'webhook-pkg',
+		sourceId: 'source-aligned-published-only',
+	})
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-repo-aligned',
+			repoId: 'repo-aligned-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-repo-aligned',
+	})
+	mocks.syncArtifactSourceSnapshot.mockResolvedValue('commit-after-aligned')
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]).toMatchObject({
+		status: 'applied',
+		afterCommit: 'commit-after-aligned',
+	})
+	expect(mocks.syncArtifactSourceSnapshot).toHaveBeenCalledTimes(1)
+	expect(mocks.syncPublishedSourceSnapshotOnly).not.toHaveBeenCalled()
+})
+
+test('published-only revert does not require HEAD to match afterCommit', async () => {
+	setupMocks()
+	const { env, kv } = createEnv()
+	const pkg = savedPackage('pkg-revert-published-only', {
+		kodyId: 'webhook-pkg',
+		sourceId: 'source-revert-published-only',
+	})
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-before',
+			repoId: 'repo-revert-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-head-still-drifted',
+	})
+	mocks.syncPublishedSourceSnapshotOnly.mockResolvedValue('commit-after-apply')
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]?.status).toBe('applied')
+	const applyItemId = apply.items[0]!.itemId
+	expect(
+		kv.store.has(
+			buildPackageCodemodRevertSnapshotKvKey({
+				userId: ownerIdFromStored('user-1'),
+				itemId: applyItemId,
+			}),
+		),
+	).toBe(true)
+
+	// HEAD remains drifted; published_commit still equals afterCommit.
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-user-unpublished-work',
+	})
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-after-apply',
+			repoId: 'repo-revert-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.syncPublishedSourceSnapshotOnly.mockResolvedValue('commit-reverted')
+
+	const revert = await step(env, {
+		mode: 'revert',
+		codemodId: publishedOnlyCodemodId,
+		revertOfRunId: apply.runId,
+	})
+	expect(revert.items[0]?.status).toBe('reverted')
+	expect(mocks.syncPublishedSourceSnapshotOnly).toHaveBeenCalledWith(
+		expect.objectContaining({
+			expectedPublishedCommit: 'commit-after-apply',
+		}),
+	)
+	expect(mocks.syncArtifactSourceSnapshot).not.toHaveBeenCalled()
+})
+
+test('published-only codemod revert of an aligned apply uses syncArtifactSourceSnapshot', async () => {
+	setupMocks()
+	const { env } = createEnv()
+	const pkg = savedPackage('pkg-revert-aligned-published-only', {
+		kodyId: 'webhook-pkg',
+		sourceId: 'source-revert-aligned-published-only',
+	})
+	mocks.listSavedPackagesByUserId.mockResolvedValue([pkg])
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-aligned',
+			repoId: 'repo-revert-aligned-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-aligned',
+	})
+	mocks.syncArtifactSourceSnapshot.mockResolvedValue('commit-after-aligned')
+
+	const apply = await step(env, {
+		mode: 'apply',
+		codemodId: publishedOnlyCodemodId,
+	})
+	expect(apply.items[0]?.status).toBe('applied')
+	expect(mocks.syncArtifactSourceSnapshot).toHaveBeenCalledTimes(1)
+	mocks.syncArtifactSourceSnapshot.mockClear()
+	mocks.syncPublishedSourceSnapshotOnly.mockClear()
+
+	// HEAD still at afterCommit — aligned apply must revert via default sync.
+	mocks.resolveArtifactSourceHead.mockResolvedValue({
+		branch: 'main',
+		commit: 'commit-after-aligned',
+	})
+	mocks.loadPackageSourceBySourceId.mockResolvedValue(
+		loadedSource({
+			files: webhookMissingVerificationFiles(),
+			publishedCommit: 'commit-after-aligned',
+			repoId: 'repo-revert-aligned-published-only',
+			sourceId: pkg.sourceId,
+			userId: pkg.userId,
+		}),
+	)
+	mocks.syncArtifactSourceSnapshot.mockResolvedValue('commit-reverted-aligned')
+
+	const revert = await step(env, {
+		mode: 'revert',
+		codemodId: publishedOnlyCodemodId,
+		revertOfRunId: apply.runId,
+	})
+	expect(revert.items[0]?.status).toBe('reverted')
+	expect(mocks.syncArtifactSourceSnapshot).toHaveBeenCalledTimes(1)
+	expect(mocks.syncPublishedSourceSnapshotOnly).not.toHaveBeenCalled()
 })

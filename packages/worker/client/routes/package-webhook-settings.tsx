@@ -11,7 +11,11 @@ import {
 	webhookSuccessMessage,
 	webhooksDocHref,
 } from '#client/routes/webhooks-shared.ts'
-import { type PackageWebhookListItem } from '#universal/loader-data.ts'
+import {
+	type PackageWebhookListItem,
+	type PackageWebhookRevealedUrl,
+} from '#universal/loader-data.ts'
+import { orgResourcePath } from '#universal/org-pages.ts'
 import { primaryLinkCss } from '#universal/styles/style-primitives.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
 import { detailSectionCss } from './community-detail-sections.tsx'
@@ -54,7 +58,7 @@ export function createPackageWebhooksController(handle: Handle) {
 	let message: string | null = null
 	let messageTone: MessageTone = 'info'
 	let mutating = false
-	const revealedUrls = new Map<string, string>()
+	const revealedUrls = new Map<string, PackageWebhookRevealedUrl>()
 	const rotateChecks = new Map<string, DoubleCheck>()
 	const disableChecks = new Map<string, DoubleCheck>()
 
@@ -155,10 +159,7 @@ export function createPackageWebhooksController(handle: Handle) {
 				applyWebhooks(result.payload.webhooks)
 				if (intent === 'rotate') revealedUrls.delete(webhook.id)
 				if (result.payload.revealed) {
-					revealedUrls.set(
-						result.payload.revealed.id,
-						result.payload.revealed.url,
-					)
+					revealedUrls.set(result.payload.revealed.id, result.payload.revealed)
 				}
 				setMessage(webhookSuccessMessage(intent))
 				break
@@ -230,7 +231,7 @@ export function createPackageWebhooksController(handle: Handle) {
 							{webhooks.map((webhook) =>
 								renderPackageWebhookCard({
 									webhook,
-									revealedUrl: revealedUrls.get(webhook.id) ?? null,
+									revealedUrl: revealedUrls.get(webhook.id)?.url ?? null,
 									isMutating: mutating,
 									rotateCheck: checkFor(rotateChecks, webhook.id),
 									disableCheck: checkFor(disableChecks, webhook.id),
@@ -238,6 +239,7 @@ export function createPackageWebhooksController(handle: Handle) {
 										void runIntent(ref, webhook, intent)
 									},
 									onHideUrl: () => hideUrl(webhook),
+									deliveriesHref: `${orgResourcePath(ref.username, 'activity')}?view=recent&status=all&surface=webhook`,
 								}),
 							)}
 						</div>

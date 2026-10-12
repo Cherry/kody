@@ -68,7 +68,7 @@ behavior it runs:
   the repo — change them there and publish.
 
 Jobs do not hang off an integration or an MCP connection. If a "job" has no
-package, save the package first. Runs show up on `/account/jobs`.
+package, save the package first. Runs show up on `/@<slug>/-/jobs`.
 
 ## Workflows — deferred and durable one-shot work
 
@@ -96,7 +96,7 @@ export default async function main() {
 
 `workflows.create` takes either `code` (a complete module string) or
 `exportName` (a saved-package export). Inspect runs with `workflowRunList`,
-cancel with `workflowRunCancel`; they appear on `/account/workflows`. Unnamed
+cancel with `workflowRunCancel`; they appear on `/@<slug>/-/workflows`. Unnamed
 inline runs display as `inline-code` with the idempotency key as a subtitle.
 Recurring work is a job, not a workflow that reschedules itself.
 
@@ -107,12 +107,17 @@ of MCP tool output). A provider POSTs to it and Kody dispatches the validated
 request to the package export that owns it.
 
 1. Declare it under `package.json#kody.webhooks`: a `name`, the `export` it
-   binds to, and (for vendor senders) `verification` — HMAC header and encoding.
-   Omit `secretName` for GitHub-style hooks so mint stores package-owned HMAC.
-   Set `secretName` only for provider-issued secrets (Sentry, Stripe) and store
-   that value with `secretSet`. Providers that quiz URL ownership (X CRC,
-   WebSub, Meta, Slack) also declare `challenge`; the platform answers that quiz
-   on the minted URL. One webhook name binds one export; there is no wildcard.
+   binds to, and `verification`. Use an HMAC type (header and encoding) when the
+   sender signs, or `{ "type": "url-secret" }` when it cannot; then the URL
+   secret is the only credential. A declared HMAC type never falls back to the
+   URL secret. The [signing presets](../use/webhooks.md#signing-presets) list
+   the block for Stripe, GitHub, Sentry, X, Bitbucket, your own callers, and the
+   senders Kody cannot verify yet (Discord Ed25519, Slack, Telegram). Omit
+   `secretName` for GitHub-style hooks so mint stores package-owned HMAC. Set
+   `secretName` only for provider-issued secrets (Sentry, Stripe) and store that
+   value with `secretSet`. Providers that quiz URL ownership (X CRC, WebSub,
+   Meta, Slack) also declare `challenge`; the platform answers that quiz on the
+   minted URL. One webhook name binds one export; there is no wildcard.
 2. Mint a handle with `webhookUrlMint` (returns a `handle`, not the credential)
    and register it with `webhookUrlApply` (`type: "http"` with `{{webhookUrl}}`
    after the owner Approves the destination at `/connect/webhook-apply`; GitHub
@@ -123,7 +128,7 @@ request to the package export that owns it.
    (`/@<username>/<packageKodyId>/settings`, Webhooks section), where they can
    also reveal, rotate, disable, or enable it. Rotate keeps the previous URL
    live for 24 hours, or until the first accepted delivery arrives on the new
-   URL. `/account/webhooks` lists every webhook across packages and links to
+   URL. `/@<slug>/-/webhooks` lists every webhook across packages and links to
    those sections.
 
 Declaring a webhook does not open ingress; minting does. Deliveries are
@@ -152,6 +157,23 @@ and systems that can send email but cannot call an API. The same inbox is how a
 job tells you it finished: `emailSend` mails the account's own address and
 nothing else. See [Email primitives](../use/email-primitives.md).
 
+## Turning triggers on in an org
+
+In an org, a declared trigger runs only for the people who turned it on, and it
+runs as them: their access, their bill, their audit trail. Publishing never
+turns anything on.
+
+- `enablementEnable` turns a job (`cron`), subscription topic, or minted webhook
+  on for you. You need execute access to the package. Minting a webhook URL
+  turns it on for you when nobody else has.
+- `enablementList` shows yours (`scope: "mine"`); Owners can list the whole org
+  (`scope: "org"`). `enablementDisable` turns one off.
+- If you lose access to the package, the org, or a credential the run uses, the
+  enablement pauses and events are dropped. It resumes by itself on the next
+  event once access is back.
+- `jobRunNow` does not fire a scheduled run in an org; use `execute` to invoke
+  the wrapper as yourself.
+
 ## Choosing well
 
 - A schedule is optional, not the point. If the person cannot name a time they
@@ -162,7 +184,7 @@ nothing else. See [Email primitives](../use/email-primitives.md).
   package-local `dryRun` field on trusted-client POSTs).
 - Keep the wrapper quiet. Notify only when there is news; an empty digest every
   morning trains people to ignore the real one.
-- Failures and recent runs for every trigger live on `/account/activity`.
+- Failures and recent runs for every trigger live on `/@<slug>/-/activity`.
 
 ## Where to go next
 

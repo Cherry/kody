@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as AuditLog from '#worker/audit-log.ts'
 import type * as RunRecordsService from '#worker/run-records/service.ts'
@@ -92,11 +93,12 @@ function createCtx(roles: Array<'admin' | 'user'>) {
 	return {
 		env: { APP_DB: {} } as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: roles.includes('admin')
-					? adminStableUserId
-					: targetStableUserId,
+				userId: personIdFromStored(
+					roles.includes('admin') ? adminStableUserId : targetStableUserId,
+				),
 				email: roles.includes('admin')
 					? 'admin@example.com'
 					: 'kent@example.com',

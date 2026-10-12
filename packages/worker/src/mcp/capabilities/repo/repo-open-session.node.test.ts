@@ -1,15 +1,23 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import type * as RepoSessions from '#worker/repo/repo-sessions.ts'
 import { isEntitlementLimitError } from '#worker/entitlements/errors.ts'
 import { planLimits } from '#universal/plans.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { buildSourceRecoveryProblemMessage } from '#worker/repo/source-safety-policy.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
 import { cloudflareOpaqueInternalErrorMessage } from '#worker/sentry-options.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { repoOpenSessionInputSchema } from './repo-shared.ts'
+import {
+	isLiveSeatCountQuery,
+	mockLiveSeatCountRow,
+} from '#worker/test-support/live-seat-count-query.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockModule = vi.hoisted(() => ({
 	getActiveRepoSessionByConversation: vi.fn(),
@@ -17,7 +25,7 @@ const mockModule = vi.hoisted(() => ({
 		async () => 0,
 	),
 	getEntitySourceByIdForUser: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	repoSessionRpc: vi.fn(),
 }))
 
@@ -35,8 +43,8 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/repo/repo-session-rpc.ts', () => ({
@@ -57,14 +65,33 @@ function createEntitlementsDatabase(user: {
 				bind(...params: Array<unknown>) {
 					return {
 						async first() {
-							if (!query.includes('SELECT plan, stripe_plan')) {
-								throw new Error(`Unsupported first query: ${query}`)
+							if (query.includes('SELECT 1 AS present FROM users')) {
+								const [email, stableUserId] = params
+								return email === user.email &&
+									stableUserId === user.stable_user_id
+									? { present: 1 }
+									: null
 							}
-							const [email, stableUserId] = params
-							return email === user.email &&
-								stableUserId === user.stable_user_id
-								? { plan: user.plan }
-								: null
+							if (
+								query.includes('SELECT plan, stripe_plan') ||
+								query.includes('entitlement_ladder')
+							) {
+								const [email, stableUserId] = params
+								return email === user.email &&
+									stableUserId === user.stable_user_id
+									? { plan: user.plan }
+									: null
+							}
+							if (isLiveSeatCountQuery(query)) {
+								return mockLiveSeatCountRow()
+							}
+							throw new Error(`Unsupported first query: ${query}`)
+						},
+						async all() {
+							if (query.includes('FROM org_limit_overrides')) {
+								return { results: [] }
+							}
+							throw new Error(`Unsupported all query: ${query}`)
 						},
 					}
 				},
@@ -76,7 +103,7 @@ function createEntitlementsDatabase(user: {
 function createPackageSourceRow(userId: string): EntitySourceRow {
 	return {
 		id: 'source-package-1',
-		user_id: userId,
+		user_id: ownerIdFromStored(userId),
 		entity_kind: 'package',
 		entity_id: 'package-1',
 		repo_id: 'repo-package-1',
@@ -140,10 +167,10 @@ async function setup({
 	activeSessions?: number | null
 }) {
 	for (const mock of Object.values(mockModule)) mock.mockReset()
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	mockModule.countActiveRepoSessions.mockResolvedValue(activeSessions ?? 0)
 	mockModule.getActiveRepoSessionByConversation.mockResolvedValue(null)
-	mockModule.getSavedPackageByKodyId.mockResolvedValue(
+	mockModule.resolveSavedPackageRef.mockResolvedValue(
 		createSavedPackageRow(userId),
 	)
 	mockModule.getEntitySourceByIdForUser.mockResolvedValue(
@@ -160,8 +187,14 @@ async function setup({
 			}),
 		} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
-			user: { userId, username: 'kody', email, displayName: 'Repo User' },
+			user: {
+				userId: personIdFromStored(userId),
+				username: 'kody',
+				email,
+				displayName: 'Repo User',
+			},
 		}),
 	}
 	const open = (input: { kody_id?: string; conversation_id?: string } = {}) =>
@@ -323,9 +356,9 @@ test('repoOpenSession opens a package by scoped @owner/leaf the same as the name
 		name: '@kody/triage-github-pr',
 	})
 	expect(leaf.resolved_target).toEqual(scoped.resolved_target)
-	expect(mockModule.getSavedPackageByKodyId.mock.calls).toEqual([
-		[expect.anything(), { userId, kodyId: 'triage-github-pr' }],
-		[expect.anything(), { userId, kodyId: 'triage-github-pr' }],
+	expect(mockModule.resolveSavedPackageRef.mock.calls).toEqual([
+		[expect.anything(), { userId, ref: 'triage-github-pr', match: 'slug' }],
+		[expect.anything(), { userId, ref: 'triage-github-pr', match: 'slug' }],
 	])
 })
 

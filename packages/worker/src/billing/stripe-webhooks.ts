@@ -5,6 +5,8 @@
  * (handlers are idempotent), then records the event id so later deliveries can
  * short-circuit as duplicates. Failures do not insert, so Stripe can retry.
  */
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { releasePromoReservationForCheckoutSession } from './checkout-promo.ts'
 import {
 	any,
 	nullable,
@@ -17,15 +19,18 @@ import {
 import { waitUntil } from 'cloudflare:workers'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { sendPaymentFailedEmail } from '#app/user-account-emails.ts'
+import { readSignupOrgSlug } from '#worker/orgs/signup-org-slug.ts'
 import {
 	isBillingConfigured,
-	selectPlanRetainingSubscriptions,
+	selectKodyPlanRetainingSubscriptions,
 } from './billing-config.ts'
 import { recordCheckoutFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
 import {
 	BillingLinkError,
 	linkStripeCustomerFromCheckoutSessionAttribution,
+	refreshStripePlanForOrg,
 	refreshStripePlanForStripeCustomer,
+	refreshStripePlanForUser,
 } from './subscription-sync.ts'
 import {
 	listSubscriptions,
@@ -49,7 +54,10 @@ import {
 	creditTopUpMetadataKey,
 	CreditTopUpError,
 } from './credit-top-ups.ts'
+import { sendToOrgBillingRecipients } from './org-billing-emails.ts'
+import { resolveOrgIdFromStripeMetadata } from './org-stripe-metadata.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const stripeEventSchema = object({
 	id: string(),
 	type: string(),
@@ -140,8 +148,7 @@ async function handleCheckoutSessionCompleted(input: {
 		session.customer_details?.email?.trim() ||
 		session.customer_email?.trim() ||
 		null
-	const stableUserIdHint =
-		session.metadata?.['kody_stable_user_id']?.trim() || null
+	const stableUserIdHint = resolveOrgIdFromStripeMetadata(session.metadata)
 
 	if (session.metadata?.[creditTopUpMetadataKey] === '1') {
 		await handleCreditTopUpCompleted({
@@ -158,6 +165,7 @@ async function handleCheckoutSessionCompleted(input: {
 			sessionId: session.id,
 			clientReferenceId: session.client_reference_id,
 			stableUserIdHint,
+			metadata: session.metadata ?? undefined,
 			customerId: session.customer,
 			customerEmail,
 			now: input.now,
@@ -237,12 +245,62 @@ async function handleCustomerSubscriptionChange(input: {
 		console.error('stripe_webhook_subscription_missing_customer')
 		return
 	}
-	const result = await refreshStripePlanForStripeCustomer({
+	const metadata =
+		input.object.metadata && typeof input.object.metadata === 'object'
+			? (input.object.metadata as Record<string, string>)
+			: null
+	const orgOrUserHint = resolveOrgIdFromStripeMetadata(metadata)
+	let result = await refreshStripePlanForStripeCustomer({
 		env: input.env,
 		customerId,
 		now: input.now,
 	})
-	if (result.userId == null) {
+	if (result.userId == null && result.orgId == null && orgOrUserHint) {
+		const user = await input.env.APP_DB.prepare(
+			`SELECT id FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+		)
+			.bind(orgOrUserHint)
+			.first<{ id: number }>()
+		const org = await input.env.APP_DB.prepare(
+			`SELECT id, stripe_customer_id FROM orgs
+			 WHERE id = ? AND deleted_at IS NULL`,
+		)
+			.bind(orgOrUserHint)
+			.first<{ id: OwnerId; stripe_customer_id: string | null }>()
+		// Subscription objects may carry org metadata before
+		// checkout.session.completed links stripe_customer_id. Unlinked
+		// team refresh throws (Stripe retries forever); unlinked personal
+		// refresh no-ops the UPDATE but still runs forgive/email/Discord,
+		// which checkout then repeats. Defer both until the customer is linked.
+		if (
+			(user?.id != null || org?.id) &&
+			org?.stripe_customer_id !== customerId
+		) {
+			console.info('stripe_webhook_subscription_org_not_linked_yet', {
+				orgId: org?.id ?? orgOrUserHint,
+				customerId,
+			})
+			return
+		}
+		if (user?.id != null) {
+			const resolved = await refreshStripePlanForUser({
+				env: input.env,
+				userId: user.id,
+				customerId,
+				now: input.now,
+			})
+			result = { userId: user.id, orgId: orgOrUserHint, resolved }
+		} else if (org?.id) {
+			const resolved = await refreshStripePlanForOrg({
+				env: input.env,
+				orgId: org.id,
+				customerId,
+				now: input.now,
+			})
+			result = { userId: null, orgId: org.id, resolved }
+		}
+	}
+	if (result.userId == null && result.orgId == null) {
 		console.error('stripe_webhook_subscription_user_not_found', { customerId })
 	}
 }
@@ -265,13 +323,25 @@ async function handleInvoicePaymentFailed(input: {
 		customerId,
 		now: input.now,
 	})
-	if (result.userId == null) {
+	const orgId =
+		result.orgId ??
+		(result.userId != null
+			? (
+					await input.env.APP_DB.prepare(
+						`SELECT stable_user_id FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
+					)
+						.bind(result.userId)
+						.first<{ stable_user_id: string }>()
+				)?.stable_user_id
+			: null)
+	if (!orgId) {
 		console.error('stripe_webhook_invoice_user_not_found', { customerId })
 		return
 	}
 	const subscriptionStatus = result.resolved?.subscriptionStatus ?? null
 	console.error('stripe_webhook_invoice_payment_failed', {
 		userId: result.userId,
+		orgId,
 		customerId,
 		subscriptionStatus,
 	})
@@ -281,18 +351,20 @@ async function handleInvoicePaymentFailed(input: {
 	if (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid') {
 		return
 	}
-	const user = await input.env.APP_DB.prepare(
-		`SELECT email, stable_user_id FROM users WHERE id = ?`,
-	)
-		.bind(result.userId)
-		.first<{ email: string; stable_user_id: string }>()
-	if (!user?.email) return
+	const day = utcDayKey(input.now ?? new Date())
 	waitUntil(
-		sendPaymentFailedEmail({
-			env: input.env,
-			email: user.email,
-			userId: user.stable_user_id,
-			day: utcDayKey(input.now ?? new Date()),
+		sendToOrgBillingRecipients({
+			db: input.env.APP_DB,
+			orgId,
+			sendOne: async (recipient) => {
+				await sendPaymentFailedEmail({
+					env: input.env,
+					email: recipient.email,
+					userId: recipient.userId,
+					orgSlug: await readSignupOrgSlug(input.env.APP_DB, orgId),
+					day,
+				})
+			},
 		}).catch((error) => {
 			console.warn('billing-payment-failed-email-failed', error)
 		}),
@@ -304,13 +376,14 @@ export async function latestReferrerPaidPeriodEnd(input: {
 	referrerStableUserId: string
 }): Promise<string | null> {
 	const row = await input.env.APP_DB.prepare(
-		`SELECT stripe_customer_id FROM users WHERE stable_user_id = ?`,
+		`SELECT stripe_customer_id FROM orgs WHERE id = ? AND deleted_at IS NULL`,
 	)
 		.bind(input.referrerStableUserId)
 		.first<{ stripe_customer_id: string | null }>()
 	const customerId = row?.stripe_customer_id?.trim()
 	if (!customerId) return null
-	const subscriptions = selectPlanRetainingSubscriptions(
+	const subscriptions = selectKodyPlanRetainingSubscriptions(
+		input.env,
 		await listSubscriptions(input.env, customerId),
 	)
 	let latest: string | null = null
@@ -350,12 +423,18 @@ async function handleInvoicePaid(input: {
 	if (!qualifies) return
 
 	const user = await input.env.APP_DB.prepare(
-		`SELECT stable_user_id FROM users WHERE stripe_customer_id = ?`,
+		`SELECT id AS stable_user_id FROM orgs WHERE stripe_customer_id = ? AND deleted_at IS NULL`,
 	)
 		.bind(customerId)
 		.first<{ stable_user_id: string }>()
 	if (!user?.stable_user_id) {
-		throw new Error('stripe_webhook_invoice_paid_user_not_linked')
+		// Soft-deleted (or unlinked) accounts must not fail the webhook: Stripe
+		// retries and can disable the endpoint for every customer. Soft-delete
+		// cancels Kody subscriptions; acknowledge and skip referral handling.
+		console.error('stripe_webhook_invoice_paid_user_not_linked', {
+			customerId,
+		})
+		return
 	}
 
 	const pending = await input.env.APP_DB.prepare(
@@ -429,6 +508,15 @@ export async function processStripeWebhookEvent(input: {
 				now: input.now,
 			})
 			return
+		case 'checkout.session.expired': {
+			const sessionId = input.object.id
+			if (typeof sessionId !== 'string' || !sessionId) return
+			await releasePromoReservationForCheckoutSession({
+				db: input.env.APP_DB,
+				checkoutSessionId: sessionId,
+			})
+			return
+		}
 		case 'customer.subscription.updated':
 		case 'customer.subscription.deleted':
 			await handleCustomerSubscriptionChange({

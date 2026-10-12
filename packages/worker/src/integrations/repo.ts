@@ -19,6 +19,7 @@ import {
 	isIntegrationRefreshPolicy,
 	type IntegrationRefreshPolicy,
 } from './refresh-policy.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	type JoinedIntegration,
 	type UserIntegrationConnection,
@@ -35,6 +36,7 @@ type NullablePrefixed<TRow, TPrefix extends string> = {
 type JoinedIntegrationRow = NullablePrefixed<UserOauthAppRow, 'a_'> &
 	NullablePrefixed<PlatformOauthAppRow, 'p_'> & {
 		user_id: string
+		connection_id: string
 		connection_name: string
 		app_slug: string | null
 		platform_app_slug: string | null
@@ -124,6 +126,7 @@ const joinedSelectColumns = `
 	p.logo_content_type AS p_logo_content_type,
 	p.created_at AS p_created_at,
 	p.updated_at AS p_updated_at,
+	i.id AS connection_id,
 	i.name AS connection_name,
 	i.app_slug AS app_slug,
 	i.platform_app_slug AS platform_app_slug,
@@ -149,7 +152,7 @@ const joinedSelectColumns = `
 const joinedFromClause = `
 	FROM user_integrations i
 	LEFT JOIN user_oauth_apps a
-		ON a.user_id = i.user_id AND a.slug = i.app_slug
+		ON a.user_id = i.user_id AND a.slug = i.app_slug${andLiveDeletedAtSql('a')}
 	LEFT JOIN platform_oauth_apps p
 		ON p.slug = i.platform_app_slug
 `
@@ -162,7 +165,7 @@ export async function listJoinedIntegrationsForUser(input: {
 		.prepare(
 			`SELECT ${joinedSelectColumns}
 			${joinedFromClause}
-			WHERE i.user_id = ?
+			WHERE i.user_id = ?${andLiveDeletedAtSql('i')}
 			ORDER BY i.name ASC`,
 		)
 		.bind(input.userId)
@@ -179,7 +182,7 @@ export async function getJoinedIntegrationByName(input: {
 		.prepare(
 			`SELECT ${joinedSelectColumns}
 			${joinedFromClause}
-			WHERE i.user_id = ? AND i.name = ?
+			WHERE i.user_id = ? AND i.name = ?${andLiveDeletedAtSql('i')}
 			LIMIT 1`,
 		)
 		.bind(input.userId, input.name)
@@ -196,7 +199,7 @@ export async function getOauthAppBySlug(input: {
 		.prepare(
 			`SELECT ${appSelectColumns}
 			FROM user_oauth_apps
-			WHERE user_id = ? AND slug = ?
+			WHERE user_id = ? AND slug = ?${andLiveDeletedAtSql()}
 			LIMIT 1`,
 		)
 		.bind(input.userId, input.slug)
@@ -213,7 +216,7 @@ export async function listOauthAppsByProvider(input: {
 		.prepare(
 			`SELECT ${appSelectColumns}
 			FROM user_oauth_apps
-			WHERE user_id = ? AND provider = ?
+			WHERE user_id = ? AND provider = ?${andLiveDeletedAtSql()}
 			ORDER BY slug ASC`,
 		)
 		.bind(input.userId, input.provider)
@@ -231,7 +234,7 @@ export async function findOauthAppByClientCredentials(input: {
 			`SELECT ${appSelectColumns}
 			FROM user_oauth_apps
 			WHERE user_id = ?
-				AND client_id = ?
+				AND client_id = ?${andLiveDeletedAtSql()}
 			LIMIT 1`,
 		)
 		.bind(input.userId, input.clientId)
@@ -266,7 +269,7 @@ export async function findOauthAppByAppTuple(input: {
 				AND use_pkce IS ?
 				AND token_exchange_style IS ?
 				AND scope_separator IS ?
-				AND extra_authorize_params_json = ?
+				AND extra_authorize_params_json = ?${andLiveDeletedAtSql()}
 			LIMIT 1`,
 		)
 		.bind(
@@ -310,7 +313,7 @@ export async function listOauthAppsWithConnectionCounts(input: {
 					WHERE i.user_id = a.user_id AND i.app_slug = a.slug
 				) AS connection_count
 			FROM user_oauth_apps a
-			WHERE a.user_id = ?
+			WHERE a.user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY a.slug ASC`,
 		)
 		.bind(input.userId)
@@ -330,7 +333,7 @@ export async function countConnectionsForApp(input: {
 		.prepare(
 			`SELECT count(*) AS count
 			FROM user_integrations
-			WHERE user_id = ? AND app_slug = ?`,
+			WHERE user_id = ? AND app_slug = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.appSlug)
 		.first<{ count: number }>()
@@ -408,7 +411,7 @@ export async function updateOauthAppClientCredentials(input: {
 			`UPDATE user_oauth_apps
 			SET client_id = ?,
 				updated_at = ?
-			WHERE user_id = ? AND slug = ?`,
+			WHERE user_id = ? AND slug = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			input.clientId,
@@ -428,7 +431,7 @@ export async function deleteOauthApp(input: {
 	const result = await input.db
 		.prepare(
 			`DELETE FROM user_oauth_apps
-			WHERE user_id = ? AND slug = ?`,
+			WHERE user_id = ? AND slug = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.slug)
 		.run()
@@ -437,7 +440,7 @@ export async function deleteOauthApp(input: {
 
 export async function upsertIntegrationConnection(input: {
 	db: D1Database
-	row: Omit<UserIntegrationRow, 'created_at' | 'updated_at'> & {
+	row: Omit<UserIntegrationRow, 'id' | 'created_at' | 'updated_at'> & {
 		created_at?: string
 		updated_at?: string
 	}
@@ -448,12 +451,19 @@ export async function upsertIntegrationConnection(input: {
 			`INSERT INTO user_integrations (
 				user_id, name, app_slug, platform_app_slug, account_label, description,
 				scopes_json, required_hosts_json, connected_at, token_refreshed_at,
-				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				created_at, updated_at, provider
+			) VALUES (
+				?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+				COALESCE(
+					(SELECT provider FROM platform_oauth_apps WHERE slug = ?4),
+					(SELECT provider FROM user_oauth_apps WHERE user_id = ?1 AND slug = ?3)
+				)
+			)
 			ON CONFLICT(user_id, name)
 			DO UPDATE SET
 				app_slug = excluded.app_slug,
 				platform_app_slug = excluded.platform_app_slug,
+				provider = excluded.provider,
 				account_label = excluded.account_label,
 				description = excluded.description,
 				scopes_json = excluded.scopes_json,
@@ -499,7 +509,7 @@ export async function addPlatformIntegrationRequiredHosts(input: {
 					ORDER BY host
 				)
 			)
-			WHERE user_id = ? AND name = ? AND platform_app_slug IS NOT NULL`,
+			WHERE user_id = ? AND name = ? AND platform_app_slug IS NOT NULL${andLiveDeletedAtSql()}`,
 		)
 		.bind(JSON.stringify(input.hosts), input.userId, input.name)
 		.run()
@@ -513,11 +523,26 @@ export async function deleteIntegrationConnection(input: {
 	const result = await input.db
 		.prepare(
 			`DELETE FROM user_integrations
-			WHERE user_id = ? AND name = ?`,
+			WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.name)
 		.run()
 	return (result.meta.changes ?? 0) > 0
+}
+
+export async function getIntegrationCredentialId(input: {
+	db: D1Database
+	userId: string
+	name: string
+}): Promise<string | null> {
+	const row = await input.db
+		.prepare(
+			`SELECT id FROM user_integrations
+			WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()} LIMIT 1`,
+		)
+		.bind(input.userId, input.name)
+		.first<{ id: string }>()
+	return row?.id ?? null
 }
 
 export async function getIntegrationCredentialCiphertexts(input: {
@@ -525,23 +550,26 @@ export async function getIntegrationCredentialCiphertexts(input: {
 	userId: string
 	name: string
 }): Promise<{
+	credentialId: string
 	accessTokenEncrypted: string | null
 	refreshTokenEncrypted: string | null
 } | null> {
 	const row = await input.db
 		.prepare(
-			`SELECT access_token_encrypted, refresh_token_encrypted
+			`SELECT id, access_token_encrypted, refresh_token_encrypted
 			FROM user_integrations
 			WHERE user_id = ? AND name = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.name)
 		.first<{
+			id: string
 			access_token_encrypted: string | null
 			refresh_token_encrypted: string | null
 		}>()
 	if (!row) return null
 	return {
+		credentialId: row.id,
 		accessTokenEncrypted: row.access_token_encrypted,
 		refreshTokenEncrypted: row.refresh_token_encrypted,
 	}
@@ -554,16 +582,20 @@ export async function updateIntegrationCredentialCiphertexts(input: {
 	accessTokenEncrypted: string
 	refreshTokenEncrypted: string | null
 	refreshPolicy: IntegrationRefreshPolicy
-}): Promise<void> {
+	/** When set, the write only lands while this refresh lease is still held. */
+	refreshLeaseId?: string
+}): Promise<{ written: boolean }> {
 	const now = new Date().toISOString()
-	await input.db
+	const leaseFence =
+		input.refreshLeaseId === undefined ? '' : ' AND token_refresh_lease_id = ?'
+	const result = await input.db
 		.prepare(
 			`UPDATE user_integrations
 			SET access_token_encrypted = ?,
 				refresh_token_encrypted = COALESCE(?, refresh_token_encrypted),
 				refresh_policy = ?,
 				updated_at = ?
-			WHERE user_id = ? AND name = ?`,
+			WHERE user_id = ? AND name = ?${leaseFence}${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			input.accessTokenEncrypted,
@@ -572,8 +604,10 @@ export async function updateIntegrationCredentialCiphertexts(input: {
 			now,
 			input.userId,
 			input.name,
+			...(input.refreshLeaseId === undefined ? [] : [input.refreshLeaseId]),
 		)
 		.run()
+	return { written: result.meta.changes > 0 }
 }
 
 export async function getOauthAppClientSecretCiphertext(input: {
@@ -586,7 +620,7 @@ export async function getOauthAppClientSecretCiphertext(input: {
 			`SELECT client_secret_encrypted
 			FROM user_oauth_apps
 			WHERE user_id = ? AND slug = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.slug)
 		.first<{ client_secret_encrypted: string | null }>()
@@ -604,7 +638,7 @@ export async function updateOauthAppClientSecretCiphertext(input: {
 		.prepare(
 			`UPDATE user_oauth_apps
 			SET client_secret_encrypted = ?, updated_at = ?
-			WHERE user_id = ? AND slug = ?`,
+			WHERE user_id = ? AND slug = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.clientSecretEncrypted, now, input.userId, input.slug)
 		.run()
@@ -624,7 +658,7 @@ export async function updateIntegrationUsage(input: {
 			SET usage_mode = ?,
 				allowed_packages_json = ?,
 				updated_at = ?
-			WHERE user_id = ? AND name = ?`,
+			WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			input.usageMode,
@@ -669,6 +703,7 @@ export function mapIntegrationRow(
 		? row.refresh_policy
 		: null
 	return {
+		credentialId: row.id,
 		userId: row.user_id,
 		name: row.name,
 		appSlug: row.app_slug,
@@ -716,7 +751,7 @@ export async function writeIntegrationAuthFailure(input: {
 				auth_failed_http_status = ?,
 				auth_failed_reconnectable = ?,
 				updated_at = ?
-			WHERE user_id = ? AND name = ? AND token_refreshed_at IS ?`,
+			WHERE user_id = ? AND name = ? AND token_refreshed_at IS ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			now,
@@ -749,9 +784,91 @@ export async function clearIntegrationAuthFailure(input: {
 				auth_failed_http_status = NULL,
 				auth_failed_reconnectable = NULL,
 				updated_at = ?
-			WHERE user_id = ? AND name = ?`,
+			WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(now, input.userId, input.name)
+		.run()
+}
+
+export type IntegrationTokenRefreshLeaseClaim =
+	| { status: 'claimed' }
+	| { status: 'held' }
+	| { status: 'refreshed'; tokenRefreshedAt: string }
+	| { status: 'stale' }
+	| { status: 'missing' }
+
+/**
+ * Claims the per-connection refresh lease only while `token_refreshed_at` still
+ * matches what the caller observed and no unexpired lease is held. When the
+ * claim fails, the re-read tells the caller whether another writer already
+ * refreshed (use the stored token), the connection was replaced since the
+ * caller read it (`stale`: re-read and start over), or a lease is still held
+ * (wait).
+ */
+export async function claimIntegrationTokenRefreshLease(input: {
+	db: D1Database
+	userId: string
+	name: string
+	leaseId: string
+	expectedTokenRefreshedAt: string | null
+	now: Date
+	leaseMs: number
+}): Promise<IntegrationTokenRefreshLeaseClaim> {
+	const nowIso = input.now.toISOString()
+	const expiresAt = new Date(input.now.getTime() + input.leaseMs).toISOString()
+	const claim = await input.db
+		.prepare(
+			`UPDATE user_integrations
+			SET token_refresh_lease_id = ?,
+				token_refresh_lease_expires_at = ?
+			WHERE user_id = ? AND name = ?
+				AND token_refreshed_at IS ?
+				AND (
+					token_refresh_lease_expires_at IS NULL
+					OR token_refresh_lease_expires_at <= ?
+				)${andLiveDeletedAtSql()}`,
+		)
+		.bind(
+			input.leaseId,
+			expiresAt,
+			input.userId,
+			input.name,
+			input.expectedTokenRefreshedAt,
+			nowIso,
+		)
+		.run()
+	if (claim.meta.changes === 1) return { status: 'claimed' }
+	const row = await input.db
+		.prepare(
+			`SELECT token_refreshed_at
+			FROM user_integrations
+			WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()}
+			LIMIT 1`,
+		)
+		.bind(input.userId, input.name)
+		.first<{ token_refreshed_at: string | null }>()
+	if (!row) return { status: 'missing' }
+	if (row.token_refreshed_at === input.expectedTokenRefreshedAt) {
+		return { status: 'held' }
+	}
+	if (row.token_refreshed_at === null) return { status: 'stale' }
+	return { status: 'refreshed', tokenRefreshedAt: row.token_refreshed_at }
+}
+
+export async function releaseIntegrationTokenRefreshLease(input: {
+	db: D1Database
+	userId: string
+	name: string
+	leaseId: string
+}): Promise<void> {
+	await input.db
+		.prepare(
+			`UPDATE user_integrations
+			SET token_refresh_lease_id = NULL,
+				token_refresh_lease_expires_at = NULL
+			WHERE user_id = ? AND name = ? AND token_refresh_lease_id = ?${andLiveDeletedAtSql()}`,
+		)
+		.bind(input.userId, input.name, input.leaseId)
 		.run()
 }
 
@@ -792,6 +909,7 @@ function mapLastAuthFailure(
 
 function mapJoinedRow(row: JoinedIntegrationRow): JoinedIntegration {
 	const connection = mapIntegrationRow({
+		id: row.connection_id,
 		user_id: row.user_id,
 		name: row.connection_name,
 		app_slug: row.app_slug,

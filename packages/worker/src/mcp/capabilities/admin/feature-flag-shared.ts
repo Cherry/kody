@@ -5,8 +5,10 @@ import {
 	type FeatureFlagKey,
 } from '#universal/feature-flags/registry.ts'
 import { usageEventTypes } from '#universal/usage-event-types.ts'
-import { isStableUserId, normalizeStableUserId } from '#worker/user-id.ts'
+import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
+import { McpCallerError } from '#mcp/caller-error.ts'
 import { stableUserIdSchema } from './admin-shared.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export const adminFeatureFlagOverrideSchema = z.object({
 	stableUserId: stableUserIdSchema,
@@ -85,35 +87,43 @@ export async function resolveTargetUser(
 	input: { stableUserId?: string; username?: string },
 ): Promise<{ dbUserId: number; stableUserId: string }> {
 	if (input.stableUserId !== undefined && input.username !== undefined) {
-		throw new Error('Provide either stableUserId or username, not both.')
+		throw new McpCallerError(
+			'Provide either stableUserId or username, not both.',
+		)
 	}
 	if (input.stableUserId !== undefined) {
-		const stableUserId = normalizeStableUserId(input.stableUserId)
-		if (!isStableUserId(stableUserId)) {
-			throw new Error('stableUserId must be a valid stable user id.')
+		const stableUserId = parsePersonId(input.stableUserId)
+		if (!stableUserId) {
+			throw new McpCallerError('stableUserId must be a valid stable user id.')
 		}
 		const row = await db
-			.prepare(`SELECT id, stable_user_id FROM users WHERE stable_user_id = ?`)
+			.prepare(
+				`SELECT id, stable_user_id FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+			)
 			.bind(stableUserId)
 			.first<{ id: number; stable_user_id: string }>()
 		if (!row) {
-			throw new Error(`User not found for stableUserId ${stableUserId}.`)
+			throw new McpCallerError(
+				`User not found for stableUserId ${stableUserId}.`,
+			)
 		}
 		return { dbUserId: row.id, stableUserId: row.stable_user_id }
 	}
 	if (input.username !== undefined) {
 		const username = input.username.trim().toLowerCase()
 		if (!username) {
-			throw new Error('username must not be empty.')
+			throw new McpCallerError('username must not be empty.')
 		}
 		const row = await db
-			.prepare(`SELECT id, stable_user_id FROM users WHERE username = ?`)
+			.prepare(
+				`SELECT id, stable_user_id FROM users WHERE username = ?${andLiveDeletedAtSql()}`,
+			)
 			.bind(username)
 			.first<{ id: number; stable_user_id: string }>()
 		if (!row) {
-			throw new Error(`User not found for username "${username}".`)
+			throw new McpCallerError(`User not found for username "${username}".`)
 		}
 		return { dbUserId: row.id, stableUserId: row.stable_user_id }
 	}
-	throw new Error('Provide either stableUserId or username.')
+	throw new McpCallerError('Provide either stableUserId or username.')
 }

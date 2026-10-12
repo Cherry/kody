@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -14,6 +18,7 @@ import { packageAppClientModuleNamePattern } from './package-app-client-module-n
 import { persistPublishedSourceSnapshot } from './published-runtime-artifacts.ts'
 import { persistPublishedBundleArtifact } from './published-bundle-artifacts.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 
 const baseUrl = 'https://kody.dev'
@@ -48,6 +53,7 @@ async function ensureSavedPackageArtifactSchema() {
 		search_text TEXT,
 		source_id TEXT NOT NULL,
 		has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+		has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 		hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 		is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 		locked_at TEXT,
@@ -77,6 +83,7 @@ async function ensureSavedPackageArtifactSchema() {
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	await ensureSoftDeleteTestColumns(env.APP_DB)
 }
 
 function makePackageFiles(
@@ -102,8 +109,13 @@ function makePackageFiles(
 
 function callerContextFor(userId: string) {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl,
-		user: { userId, email: 'worker@example.com', displayName: 'Worker Test' },
+		user: {
+			userId: personIdFromStored(userId),
+			email: 'worker@example.com',
+			displayName: 'Worker Test',
+		},
 	})
 }
 
@@ -174,7 +186,7 @@ async function publishImportablePackage(input: {
 	)
 	const source = {
 		id: sourceId,
-		user_id: userId,
+		user_id: ownerIdFromStored(userId),
 		entity_kind: 'package' as const,
 		entity_id: packageId,
 		repo_id: `repo-${sourceId}`,
@@ -244,13 +256,15 @@ async function publishImportablePackage(input: {
 
 test(
 	'saved package bundles and executes npm dependencies declared in package.json',
-	{ timeout: 20_000 },
+	// Contended `npm run validate` on Cloud Agent VMs can spend ~20s here
+	// (Friction #2760). Isolated run is ~14s for the whole file.
+	{ timeout: 40_000 },
 	async () => {
 		silenceIncidentalRuntimeWarnings()
 		const bundle = await buildKodyModuleBundle({
 			env,
 			baseUrl,
-			userId: 'user-workers-test',
+			userId: ownerIdFromStored('user-workers-test'),
 			sourceFiles: makePackageFiles(
 				'dependency-package',
 				{
@@ -287,7 +301,7 @@ export default async function run() {
 
 test(
 	'ad hoc execute synthesizes and executes npm dependencies through the bundler',
-	{ timeout: 20_000 },
+	{ timeout: 40_000 },
 	async () => {
 		silenceIncidentalRuntimeWarnings()
 		const sourceFiles = createAdHocExecuteSourceFiles(`import kleur from 'kleur'
@@ -300,7 +314,7 @@ export default function main() {
 		const bundle = await buildKodyModuleBundle({
 			env,
 			baseUrl,
-			userId: 'user-ad-hoc-npm-test',
+			userId: ownerIdFromStored('user-ad-hoc-npm-test'),
 			sourceFiles,
 			entryPoint: 'entry.ts',
 			bundleContext: 'ad-hoc-execute',

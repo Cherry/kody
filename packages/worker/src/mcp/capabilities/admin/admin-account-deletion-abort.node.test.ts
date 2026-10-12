@@ -1,6 +1,11 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import type * as AuditLog from '#worker/audit-log.ts'
+import { McpCallerError } from '#mcp/caller-error.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
@@ -39,6 +44,8 @@ function createCapabilityTestDb() {
 			username TEXT NOT NULL,
 			email TEXT NOT NULL,
 			deleting_at TEXT,
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
 			updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
 		);
@@ -58,9 +65,12 @@ function createAdminContext(
 			...meterEnv,
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: testStableUserIdFromEmail('admin@example.com'),
+				userId: personIdFromStored(
+					testStableUserIdFromEmail('admin@example.com'),
+				),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],
@@ -72,7 +82,10 @@ function createAdminContext(
 test('adminAccountDeletionAbort clears D1 and UserMeter fences', async () => {
 	const { sqlite, db } = createCapabilityTestDb()
 	const meter = createInMemoryUserMeterEnv()
-	const meterStub = userMeterRpc({ env: meter.env, userId: stableUserId })
+	const meterStub = userMeterRpc({
+		env: meter.env,
+		userId: ownerIdFromStored(stableUserId),
+	})
 	const ctx = createAdminContext(db, meter.env)
 
 	await markAccountDeleting({
@@ -123,7 +136,10 @@ test('adminAccountDeletionAbort fails closed for an unknown user', async () => {
 			},
 			ctx,
 		),
-	).rejects.toThrow('User not found.')
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError && error.message === 'User not found.',
+	)
 	expect(mockModule.logAuditEvent).toHaveBeenCalledWith(
 		expect.objectContaining({
 			action: 'adminAccountDeletionAbort',

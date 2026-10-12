@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { cachified } from '@epic-web/cachified'
 import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import {
@@ -232,7 +233,7 @@ export async function deleteCommunityIconAssets(input: {
  */
 export async function refreshCommunityIconForPackagePublish(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId: string
 	publishedCommit: string
 }) {
@@ -264,7 +265,7 @@ async function loadCommunityIconSource(input: {
 		)
 		if (!snapshot || snapshot.pinnedCommit !== input.listing.pinnedCommit) {
 			throw new Error(
-				`Community listing snapshot for "${input.listing.id}" at "${input.listing.pinnedCommit}" was not found.`,
+				`Catalog entry snapshot for "${input.listing.id}" at "${input.listing.pinnedCommit}" was not found.`,
 			)
 		}
 		const sourcePath =
@@ -329,7 +330,7 @@ async function getValidatedListingPackageSource(input: {
 		source.entity_id !== input.listing.packageId
 	) {
 		throw new Error(
-			`Community listing "${input.listing.id}" has an invalid package source.`,
+			`Catalog entry "${input.listing.id}" has an invalid package source.`,
 		)
 	}
 	return source
@@ -373,7 +374,7 @@ async function createCommunityIconDescriptor(input: {
 		if (!(await isServableIconCommit(input))) {
 			await input.env.COMMUNITY_ASSETS.delete(r2Key)
 			throw new Error(
-				`Community listing "${input.listing.id}" was removed while its icon was generated.`,
+				`Catalog entry "${input.listing.id}" was removed while its icon was generated.`,
 			)
 		}
 		return {

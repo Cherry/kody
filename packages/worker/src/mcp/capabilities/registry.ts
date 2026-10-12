@@ -1,4 +1,8 @@
 import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	buildCapabilityRegistry,
 	type BuiltCapabilityRegistry,
 } from './build-capability-registry.ts'
@@ -45,10 +49,10 @@ function createCapabilityRegistryCache() {
 	})
 }
 
-let capabilityRegistryCache = createCapabilityRegistryCache()
+const capabilityRegistryCache = createCapabilityRegistryCache()
 
 function createCapabilityRegistryCacheKey(input: {
-	userId: string
+	userId: OwnerId
 	mcpServerRefs: ReadonlyArray<McpServerRef>
 	mcpServerSnapshots: ReadonlyArray<McpServerSnapshot | null>
 }) {
@@ -117,7 +121,7 @@ async function resolveFeatureFlagsForRegistry(input: {
 
 async function loadEnabledMcpServerRefs(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 }): Promise<ReadonlyArray<McpServerRef>> {
 	try {
 		// Per-user 30s cache: registry assembly runs on every execute /
@@ -143,7 +147,7 @@ async function loadEnabledMcpServerRefs(input: {
 
 async function loadMcpServerSnapshots(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	refs: ReadonlyArray<McpServerRef>
 }): Promise<Array<McpServerSnapshot | null>> {
 	if (input.refs.length === 0) return []
@@ -168,17 +172,29 @@ export async function getCapabilityRegistryForContext(input: {
 	env: Env
 	callerContext: McpCallerContext
 }): Promise<BuiltCapabilityRegistry> {
-	const userId = input.callerContext.user?.userId ?? null
-	if (!userId) {
-		const registry = await getStaticRegistry()
-		return filterRegistryForContext({
-			registry,
+	const userId = input.callerContext.user
+		? personalOrgId(input.callerContext.user.userId)
+		: null
+	// Flag evaluation does not depend on MCP server refs or hub snapshots.
+	// Start it with the static registry so those reads overlap the flag D1
+	// round trips. Dynamic registries reuse this result when the static
+	// registry already has a gated capability (the common case).
+	const staticRegistryPromise = getStaticRegistry()
+	const flagsPromise = staticRegistryPromise.then((registry) =>
+		resolveFeatureFlagsForRegistry({
+			env: input.env,
 			callerContext: input.callerContext,
-			featureFlags: await resolveFeatureFlagsForRegistry({
-				env: input.env,
-				callerContext: input.callerContext,
-				registry,
-			}),
+			registry,
+		}),
+	)
+	// MCP ref reads sit between this start and the await. Observe a rejection
+	// now; awaiting `flagsPromise` later still throws.
+	void flagsPromise.catch(() => {})
+	if (!userId) {
+		return filterRegistryForContext({
+			registry: await staticRegistryPromise,
+			callerContext: input.callerContext,
+			featureFlags: await flagsPromise,
 		})
 	}
 	const mcpServerRefs = await loadEnabledMcpServerRefs({
@@ -186,15 +202,10 @@ export async function getCapabilityRegistryForContext(input: {
 		userId,
 	})
 	if (mcpServerRefs.length === 0) {
-		const registry = await getStaticRegistry()
 		return filterRegistryForContext({
-			registry,
+			registry: await staticRegistryPromise,
 			callerContext: input.callerContext,
-			featureFlags: await resolveFeatureFlagsForRegistry({
-				env: input.env,
-				callerContext: input.callerContext,
-				registry,
-			}),
+			featureFlags: await flagsPromise,
 		})
 	}
 	const mcpServerSnapshots = await loadMcpServerSnapshots({
@@ -215,17 +226,19 @@ export async function getCapabilityRegistryForContext(input: {
 				mcpServerSnapshots,
 			}),
 	})
+	let featureFlags = await flagsPromise
+	if (
+		featureFlags == null &&
+		registry.capabilityList.some((capability) => capability.featureFlag)
+	) {
+		featureFlags = await resolveCallerFeatureFlags(
+			input.env,
+			input.callerContext,
+		)
+	}
 	return filterRegistryForContext({
 		registry,
 		callerContext: input.callerContext,
-		featureFlags: await resolveFeatureFlagsForRegistry({
-			env: input.env,
-			callerContext: input.callerContext,
-			registry,
-		}),
+		featureFlags,
 	})
-}
-
-export function clearCapabilityRegistryCacheForTests() {
-	capabilityRegistryCache = createCapabilityRegistryCache()
 }

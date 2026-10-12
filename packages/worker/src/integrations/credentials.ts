@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	decryptUserOauthAccessToken,
 	decryptUserOauthClientSecret,
@@ -10,6 +11,7 @@ import {
 } from '#mcp/secrets/crypto.ts'
 import {
 	getIntegrationCredentialCiphertexts,
+	getIntegrationCredentialId,
 	getOauthAppClientSecretCiphertext,
 	clearIntegrationAuthFailure,
 	updateIntegrationCredentialCiphertexts,
@@ -25,7 +27,7 @@ export function createMissingIntegrationAccessTokenMessage(name: string) {
 
 export async function persistIntegrationTokens(input: {
 	env: CredentialEnv
-	userId: string
+	userId: OwnerId
 	name: string
 	accessToken: string
 	refreshToken?: string | null
@@ -35,6 +37,11 @@ export async function persistIntegrationTokens(input: {
 	 * it; a successful refresh passes `required`.
 	 */
 	refreshPolicy: IntegrationRefreshPolicy
+	/**
+	 * Host-side refresh passes its lease so a holder whose lease expired cannot
+	 * overwrite tokens a newer refresher already rotated.
+	 */
+	refreshLeaseId?: string
 }): Promise<void> {
 	const context = userIntegrationCredentialContext(input.userId, input.name)
 	const accessTokenEncrypted = await encryptUserOauthAccessToken(
@@ -46,14 +53,22 @@ export async function persistIntegrationTokens(input: {
 	const refreshTokenEncrypted = refreshToken
 		? await encryptUserOauthRefreshToken(input.env, refreshToken, context)
 		: null
-	await updateIntegrationCredentialCiphertexts({
+	const { written } = await updateIntegrationCredentialCiphertexts({
 		db: input.env.APP_DB,
 		userId: input.userId,
 		name: input.name,
 		accessTokenEncrypted,
 		refreshTokenEncrypted,
 		refreshPolicy: input.refreshPolicy,
+		...(input.refreshLeaseId === undefined
+			? {}
+			: { refreshLeaseId: input.refreshLeaseId }),
 	})
+	if (input.refreshLeaseId !== undefined && !written) {
+		throw new Error(
+			`Token refresh lease for integration "${input.name}" expired before its tokens were saved.`,
+		)
+	}
 	try {
 		await clearIntegrationAuthFailure({
 			db: input.env.APP_DB,
@@ -67,7 +82,7 @@ export async function persistIntegrationTokens(input: {
 
 export async function persistUserOauthAppClientSecret(input: {
 	env: CredentialEnv
-	userId: string
+	userId: OwnerId
 	slug: string
 	value: string
 }): Promise<void> {
@@ -84,27 +99,52 @@ export async function persistUserOauthAppClientSecret(input: {
 	})
 }
 
+export type IntegrationAccessToken = {
+	/** Credential id of the connection row the token was read from. */
+	credentialId: string
+	accessToken: string | null
+}
+
+/** Null when no connection has this name. */
 export async function resolveIntegrationAccessToken(input: {
 	env: CredentialEnv
-	userId: string
+	userId: OwnerId
 	name: string
-}): Promise<string | null> {
+}): Promise<IntegrationAccessToken | null> {
 	const ciphertexts = await getIntegrationCredentialCiphertexts({
 		db: input.env.APP_DB,
 		userId: input.userId,
 		name: input.name,
 	})
-	if (!ciphertexts?.accessTokenEncrypted) return null
-	return decryptUserOauthAccessToken(
-		input.env,
-		ciphertexts.accessTokenEncrypted,
-		userIntegrationCredentialContext(input.userId, input.name),
-	)
+	if (!ciphertexts) return null
+	return {
+		credentialId: ciphertexts.credentialId,
+		accessToken: ciphertexts.accessTokenEncrypted
+			? await decryptUserOauthAccessToken(
+					input.env,
+					ciphertexts.accessTokenEncrypted,
+					userIntegrationCredentialContext(input.userId, input.name),
+				)
+			: null,
+	}
+}
+
+/** The connection's credential id, without reading its tokens. */
+export async function findIntegrationCredentialId(input: {
+	env: Pick<Env, 'APP_DB'>
+	userId: OwnerId
+	name: string
+}): Promise<string | null> {
+	return await getIntegrationCredentialId({
+		db: input.env.APP_DB,
+		userId: input.userId,
+		name: input.name,
+	})
 }
 
 export async function resolveIntegrationRefreshToken(input: {
 	env: CredentialEnv
-	userId: string
+	userId: OwnerId
 	name: string
 }): Promise<string | null> {
 	const ciphertexts = await getIntegrationCredentialCiphertexts({
@@ -122,7 +162,7 @@ export async function resolveIntegrationRefreshToken(input: {
 
 export async function resolveUserOauthAppClientSecret(input: {
 	env: CredentialEnv
-	userId: string
+	userId: OwnerId
 	slug: string
 }): Promise<string | null> {
 	const encrypted = await getOauthAppClientSecretCiphertext({

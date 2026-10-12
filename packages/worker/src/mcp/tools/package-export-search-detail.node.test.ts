@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { type AuthoredPackageJson } from '#worker/package-registry/types.ts'
@@ -31,7 +32,7 @@ function createHomeControlsDetail(
 		listingAhead: null,
 		record: {
 			id: 'package-home',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: '@user/home-controls',
 			kodyId: 'home-controls',
 			description: 'Home control helpers.',
@@ -39,6 +40,7 @@ function createHomeControlsDetail(
 			searchText: null,
 			sourceId: 'source-home',
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: false,
 			lockedAt: null,
@@ -160,44 +162,6 @@ function formatExport(
 		...options,
 	})
 }
-
-test('platform package heading detail tells person accounts to communityFork first', () => {
-	const detail = createHomeControlsDetail('bond-area-shades')
-	const lookupDefinition =
-		'export default async function lookup(input: { id: string }): Promise<{ id: string }>'
-	const formatted = formatExport(
-		{
-			subpath: './lookup',
-			runtimeTarget: 'src/lookup.ts',
-			description: 'Look up one official record.',
-			typeDefinition: lookupDefinition,
-			functions: [
-				defaultFunction('Look up one official record.', lookupDefinition),
-			],
-		},
-		{
-			detail: {
-				...detail,
-				title: '@kody/official-tools',
-				platformScope: 'kody',
-				record: {
-					...detail.record,
-					name: '@kody/official-tools',
-					kodyId: 'official-tools',
-				},
-			},
-		},
-	)
-	expect(formatted.structured).toMatchObject({
-		detailMode: 'export',
-		platformScope: 'kody',
-		importSpecifier: 'kody:@kody/official-tools/lookup',
-		followUp: expect.stringContaining('communityFork'),
-	})
-	expect(formatted.markdown).toContain(
-		'This is a platform (built-in) package from @kody. communityFork it into your scope before importing it.',
-	)
-})
 
 test('heading usage uses the namespace import without a callable and prefers the default export over named helpers', () => {
 	expect(

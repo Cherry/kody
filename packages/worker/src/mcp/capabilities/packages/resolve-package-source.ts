@@ -1,9 +1,10 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { normalizePackageNameInput } from '#worker/package-registry/package-name.ts'
 import {
 	getSavedPackageById,
-	getSavedPackageByKodyId,
+	resolveSavedPackageRef,
 } from '#worker/package-registry/repo.ts'
 import { getEntitySourceByIdForUser } from '#worker/repo/entity-sources.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
@@ -24,13 +25,19 @@ function requireExactlyOnePackageSourceIdentity(input: PackageSourceIdentity) {
 	}
 }
 
+/**
+ * Resolve a saved package and its repo source in the org that owns the
+ * connection (`userId` is that org, `ownerScope` its package scope). A name
+ * leaf or `package_id` from another org is never resolved.
+ */
 export async function resolveOwnedPackageSource(input: {
 	db: D1Database
-	userId: string
-	ownerScope?: string
+	userId: OwnerId
+	ownerScope: string
 	args: PackageSourceIdentity
 }): Promise<{
 	packageId: string
+	userId: OwnerId
 	kodyId: string
 	name: string
 	hasApp: boolean
@@ -39,11 +46,6 @@ export async function resolveOwnedPackageSource(input: {
 	requireExactlyOnePackageSourceIdentity(input.args)
 	let requestedKodyId: string | undefined
 	if (input.args.kody_id !== undefined) {
-		if (input.ownerScope === undefined) {
-			throw new McpCallerError(
-				'Cannot resolve a package name leaf without the acting owner scope.',
-			)
-		}
 		try {
 			requestedKodyId = normalizePackageNameInput({
 				value: input.args.kody_id,
@@ -60,23 +62,29 @@ export async function resolveOwnedPackageSource(input: {
 					userId: input.userId,
 					packageId: input.args.package_id,
 				})
-			: await getSavedPackageByKodyId(input.db, {
+			: await resolveSavedPackageRef(input.db, {
 					userId: input.userId,
-					kodyId: requestedKodyId ?? '',
+					ref: requestedKodyId ?? '',
+					match: 'slug',
 				})
 	if (!savedPackage) {
 		const missingId = input.args.package_id ?? input.args.kody_id
-		throw new McpCallerError(`Saved package "${missingId}" was not found.`)
+		throw new McpCallerError(
+			`Saved package "${missingId}" was not found in @${input.ownerScope}, the org this connection is bound to. packageList lists the saved packages @${input.ownerScope} owns with their package_id; to use a package another org owns, bind the connection to that org.`,
+		)
 	}
 	const source = await getEntitySourceByIdForUser(input.db, {
 		id: savedPackage.sourceId,
 		userId: input.userId,
 	})
 	if (!source) {
-		throw new McpCallerError('Repo source was not found for this user.')
+		throw new McpCallerError(
+			`Saved package "${savedPackage.name}" (package_id ${savedPackage.id}) is missing its repo source record "${savedPackage.sourceId}". This is a missing source record, not an org-binding problem: the package row exists in @${input.ownerScope} but its source does not. Repair the source record or recreate the package.`,
+		)
 	}
 	return {
 		packageId: savedPackage.id,
+		userId: savedPackage.userId,
 		kodyId: savedPackage.kodyId,
 		name: savedPackage.name,
 		hasApp: savedPackage.hasApp,

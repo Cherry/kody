@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { type PackageOwnerContext } from '#worker/package-registry/package-owner.ts'
@@ -10,6 +14,7 @@ const mockModule = vi.hoisted(() => ({
 	insertSavedPackage: vi.fn(),
 	upsertSavedPackageVector: vi.fn(),
 	refreshSavedPackageProjection: vi.fn(),
+	scheduleKitSubscriberSync: vi.fn(),
 }))
 
 vi.mock('#worker/entitlements/service.ts', () => ({
@@ -42,6 +47,11 @@ vi.mock('#worker/package-registry/service.ts', () => ({
 		mockModule.refreshSavedPackageProjection(...args),
 }))
 
+vi.mock('#worker/kit/subscriber-sync.ts', () => ({
+	scheduleKitSubscriberSync: (...args: Array<unknown>) =>
+		mockModule.scheduleKitSubscriberSync(...args),
+}))
+
 const { createStubSavedPackage } = await import('./create-stub-package.ts')
 
 function resetMocks() {
@@ -54,17 +64,16 @@ function resetMocks() {
 		bootstrapAccess: null,
 	})
 	mockModule.syncArtifactSourceSnapshot.mockResolvedValue('commit-1')
-	mockModule.insertSavedPackage.mockResolvedValue(undefined)
+	mockModule.insertSavedPackage.mockResolvedValue(true)
 	mockModule.upsertSavedPackageVector.mockResolvedValue(undefined)
 	mockModule.refreshSavedPackageProjection.mockResolvedValue({ record: {} })
 }
 
 const owner: PackageOwnerContext = {
-	ownerUserId: 'user-1',
+	ownerUserId: ownerIdFromStored('user-1'),
 	ownerScope: 'kentcdodds',
 	ownerEmail: 'user-1@example.com',
-	actorUserId: 'user-1',
-	delegated: false,
+	actorUserId: personIdFromStored('user-1'),
 }
 
 function create(
@@ -81,7 +90,7 @@ function create(
 	})
 }
 
-test('createStubSavedPackage rejects invalid kody ids and registers stubs for owner and delegated scopes', async () => {
+test('createStubSavedPackage rejects invalid kody ids and registers stubs for personal and org scopes', async () => {
 	const rejections = [
 		{
 			args: { kodyId: 'Not_A_Valid_Id' },
@@ -129,14 +138,14 @@ test('createStubSavedPackage rejects invalid kody ids and registers stubs for ow
 	expect(mockModule.assertWithinEntitlement).toHaveBeenCalledWith(
 		expect.objectContaining({
 			resource: 'saved_packages',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			email: 'user-1@example.com',
 		}),
 	)
 	expect(mockModule.syncArtifactSourceSnapshot).toHaveBeenCalledWith(
 		expect.objectContaining({
 			sourceId: 'source-new',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			files: expect.objectContaining({
 				'package.json': expect.stringContaining('"private": true'),
 				'README.md': expect.stringContaining('## Intent'),
@@ -147,7 +156,7 @@ test('createStubSavedPackage rejects invalid kody ids and registers stubs for ow
 	expect(mockModule.insertSavedPackage).toHaveBeenCalledWith(
 		expect.anything(),
 		expect.objectContaining({
-			user_id: 'user-1',
+			user_id: ownerIdFromStored('user-1'),
 			name: '@kentcdodds/my-package',
 			kody_id: 'my-package',
 			description: 'Does the thing.',
@@ -157,43 +166,62 @@ test('createStubSavedPackage rejects invalid kody ids and registers stubs for ow
 			is_private: 1,
 		}),
 		expect.anything(),
+		{ actorUserId: personIdFromStored('user-1') },
 	)
 	expect(mockModule.upsertSavedPackageVector).toHaveBeenCalled()
 	expect(mockModule.refreshSavedPackageProjection).toHaveBeenCalled()
 
-	// Delegated grants must persist under the platform owner, not the actor.
+	// Org-owned packages must persist under the org, not the acting member.
 	await create({
-		kodyId: 'official-tool',
+		kodyId: 'team-tool',
 		owner: {
-			ownerUserId: 'platform-owner',
-			ownerScope: 'kody',
-			ownerEmail: 'kody@example.com',
-			actorUserId: 'actor-1',
-			delegated: true,
+			ownerUserId: ownerIdFromStored('org-owner'),
+			ownerScope: 'acme',
+			ownerEmail: 'acme@example.com',
+			actorUserId: personIdFromStored('actor-1'),
 		},
 	})
 	expect(mockModule.assertWithinEntitlement).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'platform-owner',
-			email: 'kody@example.com',
+			userId: ownerIdFromStored('org-owner'),
+			email: null,
 		}),
 	)
 	expect(mockModule.ensureEntitySource).toHaveBeenCalledWith(
-		expect.objectContaining({ userId: 'platform-owner' }),
+		expect.objectContaining({ userId: ownerIdFromStored('org-owner') }),
 	)
 	expect(mockModule.insertSavedPackage).toHaveBeenCalledWith(
 		expect.anything(),
 		expect.objectContaining({
-			user_id: 'platform-owner',
-			name: '@kody/official-tool',
+			user_id: ownerIdFromStored('org-owner'),
+			name: '@acme/team-tool',
 		}),
 		expect.anything(),
+		{ actorUserId: personIdFromStored('actor-1') },
 	)
+	// Insert stamps before projection refresh; Kit sync must fire here.
+	expect(mockModule.scheduleKitSubscriberSync).toHaveBeenCalledWith({
+		env: expect.anything(),
+		stableUserId: personIdFromStored('actor-1'),
+	})
 	expect(mockModule.upsertSavedPackageVector).toHaveBeenCalledWith(
 		expect.anything(),
-		expect.objectContaining({ userId: 'platform-owner' }),
+		expect.objectContaining({ userId: ownerIdFromStored('org-owner') }),
 	)
 	expect(mockModule.refreshSavedPackageProjection).toHaveBeenCalledWith(
-		expect.objectContaining({ userId: 'platform-owner' }),
+		expect.objectContaining({ userId: ownerIdFromStored('org-owner') }),
 	)
+})
+
+test('createStubSavedPackage skips Kit sync when the actor was already stamped', async () => {
+	resetMocks()
+	mockModule.insertSavedPackage.mockResolvedValueOnce(false)
+	await createStubSavedPackage({
+		env: { APP_DB: {} } as Env,
+		baseUrl: 'https://example.test',
+		owner,
+		kodyId: 'already-activated',
+	})
+	expect(mockModule.insertSavedPackage).toHaveBeenCalled()
+	expect(mockModule.scheduleKitSubscriberSync).not.toHaveBeenCalled()
 })

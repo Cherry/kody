@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -19,7 +23,6 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/package-owner.ts', () => ({
-	packageScopeInputDescription: 'package scope',
 	resolvePackageOwnerContext: (...args: Array<unknown>) =>
 		mockModule.resolvePackageOwnerContext(...args),
 }))
@@ -39,7 +42,6 @@ function update(
 			ownerScope: 'user',
 			ownerEmail: 'user@example.com',
 			actorUserId: userId,
-			delegated: false,
 		})
 	}
 	return packageUpdateCapability.handler(
@@ -47,9 +49,14 @@ function update(
 		{
 			env: { APP_DB: {} } as Env,
 			callerContext: createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
 				baseUrl: 'https://heykody.dev',
 				user: userId
-					? { userId, email: 'user@example.com', displayName: 'User' }
+					? {
+							userId: personIdFromStored(userId),
+							email: 'user@example.com',
+							displayName: 'User',
+						}
 					: null,
 			}),
 		},
@@ -62,7 +69,7 @@ function createSavedPackage(input?: {
 }) {
 	return {
 		id: 'pkg-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		kodyId: 'notes',
 		name: '@user/notes',
 		description: 'Personal notes',
@@ -91,6 +98,7 @@ test('packageUpdate hides and unhides a user-scoped package and returns persiste
 		package: {
 			package_id: 'pkg-1',
 			kody_id: 'notes',
+			slug: 'notes',
 			name: '@user/notes',
 			hidden: true,
 			visibility: 'public',
@@ -102,14 +110,25 @@ test('packageUpdate hides and unhides a user-scoped package and returns persiste
 		package: {
 			package_id: 'pkg-1',
 			kody_id: 'notes',
+			slug: 'notes',
 			hidden: false,
 			visibility: 'public',
 		},
 	})
 
 	expect(mockModule.updateSavedPackage.mock.calls).toEqual([
-		[{}, { userId: 'user-1', packageId: 'pkg-1', hidden: true }],
-		[{}, { userId: 'user-1', packageId: 'pkg-1', hidden: false }],
+		[
+			{},
+			{ userId: ownerIdFromStored('user-1'), packageId: 'pkg-1', hidden: true },
+		],
+		[
+			{},
+			{
+				userId: ownerIdFromStored('user-1'),
+				packageId: 'pkg-1',
+				hidden: false,
+			},
+		],
 	])
 	expect(mockModule.setSavedPackageLockedAt).not.toHaveBeenCalled()
 	expect(mockModule.getSavedPackageById).toHaveBeenCalledTimes(4)
@@ -133,7 +152,7 @@ test('packageUpdate locks a package and rejects unlock with the owner website UR
 	expect(mockModule.setSavedPackageLockedAt).toHaveBeenCalledWith(
 		{},
 		{
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			packageId: 'pkg-1',
 			lockedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
 		},
@@ -170,7 +189,7 @@ test('packageUpdate rejects invalid changes and cross-user or unauthenticated ac
 	await expect(
 		update(
 			{ hidden: true },
-			{ userId: 'user-2', packageId: 'other-user-package' },
+			{ userId: ownerIdFromStored('user-2'), packageId: 'other-user-package' },
 		),
 	).rejects.toThrow(/not found/i)
 

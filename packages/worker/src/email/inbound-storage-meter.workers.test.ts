@@ -6,14 +6,16 @@ import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { createWaitUntilDrain } from '#worker/test-support/user-meter.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { buildInboundDelivery } from './inbound-delivery.ts'
 import { handleInboundEmail } from './inbound.ts'
 import { mailboxRpc } from './mailbox-client.ts'
 import { RetryableInboundStorageError } from './service.ts'
 import { createForwardableEmailMessage } from './test-fixtures.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const platformBaseUrl = 'https://kody.example.com'
 const platformDomain = 'inbox.kody.example.com'
 const inboundStorageMeterTimeoutMs = 30_000
@@ -58,16 +60,25 @@ function estimateInboundEmailStorageBytes(input: {
 async function seedAccountWithPlan(label: string, plan: 'free' | 'max') {
 	const username = `${label}-${crypto.randomUUID().slice(0, 8)}`
 	const email = `${username}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await env.APP_DB.prepare(
 		`INSERT INTO users (
-			username, email, password_hash, email_verified_at, plan, stable_user_id
-		) VALUES (?, ?, 'test-password-hash', ?, ?, ?)`,
+			username, email, password_hash, email_verified_at, stable_user_id
+		) VALUES (?, ?, 'test-password-hash', ?, ?)`,
 	)
-		.bind(username, email, new Date().toISOString(), plan, userId)
+		.bind(username, email, new Date().toISOString(), userId)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan,
+	})
 	const address = `${username}@${platformDomain}`
-	return { address, userId, meter: userMeterRpc({ env, userId }) }
+	return {
+		address,
+		userId,
+		meter: userMeterRpc({ env, userId: ownerIdFromStored(userId) }),
+	}
 }
 
 function rawMail(address: string, subject: string, messageId: string) {
@@ -135,7 +146,10 @@ test(
 		await handleInboundEmail(message, createInboundEnv())
 		expect(message.rejectedReason).toBeNull()
 		expect(
-			await mailboxRpc({ env, userId: account.userId }).listMessages({
+			await mailboxRpc({
+				env,
+				userId: ownerIdFromStored(account.userId),
+			}).listMessages({
 				limit: 10,
 			}),
 		).toMatchObject({
@@ -224,7 +238,7 @@ test(
 			bytes: bytesAfterFailedAttempt,
 		})
 		const candidate = await buildInboundDelivery({
-			userId: retry.userId,
+			userId: ownerIdFromStored(retry.userId),
 			inboxId: 'unused',
 			recipient: retry.address,
 			envelopeFrom: 'sender@example.net',
@@ -232,7 +246,10 @@ test(
 			quotaDay: new Date().toISOString().slice(0, 10),
 		})
 		expect(
-			await mailboxRpc({ env, userId: retry.userId }).listMessages({
+			await mailboxRpc({
+				env,
+				userId: ownerIdFromStored(retry.userId),
+			}).listMessages({
 				limit: 1,
 			}),
 		).toMatchObject({ messages: [{ id: candidate.messageId }] })

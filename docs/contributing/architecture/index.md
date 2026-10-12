@@ -66,11 +66,12 @@ wrote during that fetch) so the next cron can skip the synthetic.
   [Waiting](../../use/waiting.md) for first-use and Discord membership cards.
 - [Authentication](./authentication.md): app session auth and OAuth-protected
   MCP auth.
-- [Platform accounts](./platform-accounts.md): operator-provisioned platform
-  accounts, package scope grants, and actor/owner delegation for official
-  package scopes.
-- [Authorization](./authorization.md): role-based access control (RBAC), admin
-  routes, and the `any`-access exception to per-user isolation.
+- [Request context](./request-context.md): the one `RequestContext` (org, actor,
+  attribution, credential) every request source derives, and lineage for runs
+  started by other runs.
+- [Authorization](./authorization.md): the one org access check (`authorize`),
+  what every surface declares, enablements (who a trigger runs as), and
+  site-admin RBAC with its `any`-access exception to per-user isolation.
 - [Entitlements](./entitlements.md): per-user plans (`free`, `standard`, `pro`,
   `max`; live DDL defaults and writers use `free`; `max` is a manual-only high
   finite ceiling), finite per-plan resource limits, and the shared
@@ -82,9 +83,6 @@ wrote during that fetch) so the next cron can skip the synthetic.
 - [Feature Flags](./feature-flags.md): code-registry flags with D1-backed global
   state, percentage rollouts, and per-user overrides, managed at
   `/admin/feature-flags`.
-- [Site banners](./site-banners.md): operator-owned announcement banners with
-  page targeting, audience, priority, dismiss, and SSR rendering, managed at
-  `/admin/banners`.
 - [YouTube watch overlay](./youtube-watch.md): site-wide `/?youtubeId=` player
   and first-party thumbnail proxy for allowlisted YouTube videos.
 - [Data Storage](./data-storage.md): what is stored in D1, KV, and Durable
@@ -106,7 +104,7 @@ wrote during that fetch) so the next cron can skip the synthetic.
   justification required for any new awaited D1 write on a hot invocation path.
 - [Run records](./run-records.md): per-user execution history and logs across
   every runtime surface (`RunLog` Durable Object, `runs` MCP domain,
-  `/account/activity`).
+  `/@<slug>/-/activity`).
 - [Runtime worker migration runbook](./runtime-worker-migration-runbook.md):
   ownership of the package runtime lane on `kody-runtime` and the deploy
   invariants later uploads must keep
@@ -124,9 +122,6 @@ wrote during that fetch) so the next cron can skip the synthetic.
 - [Values retirement runbook](./values-retirement-runbook.md): absorb values
   into memories, package storage, repos, secrets, and integrations
   ([ADR 0022](../decisions/0022-retire-values-primitive.md)).
-- [Invocation-token retirement runbook](./invocation-token-retirement-runbook.md):
-  drain HTTP invocation tokens after inbound webhooks cover first-party callers
-  ([ADR 0048](../decisions/0048-webhooks-replace-invocation-tokens.md)).
 - [Cleanup after migrations](../cleanup-after-migrations.md): drop leftovers in
   the same change when safe; otherwise open a GitHub issue.
 - [Primitives map](./primitives.yaml): stable taxonomy of system primitives and

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { createRouter } from 'remix/router'
@@ -28,8 +29,8 @@ function createDb() {
 async function insertUser(db: D1Database, userId = 'user-tips') {
 	await db
 		.prepare(
-			`INSERT INTO users (username, email, password_hash, stable_user_id, plan, account_type)
-			 VALUES ('tips', 'tips@example.com', 'x', ?, 'free', 'person')`,
+			`INSERT INTO users (username, email, password_hash, stable_user_id)
+			 VALUES ('tips', 'tips@example.com', 'x', ?)`,
 		)
 		.bind(userId)
 		.run()
@@ -49,7 +50,7 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	const handler = createUnsubscribeTipsHandler(env)
 	const token = await createTipsUnsubscribeToken({
 		env,
-		userId: 'user-tips',
+		userId: ownerIdFromStored('user-tips'),
 	})
 
 	const missing = await handler.handler({
@@ -85,7 +86,9 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 			},
 		},
 	})
-	expect(await isTipsEmailsOptedOut({ db, userId: 'user-tips' })).toBe(true)
+	expect(
+		await isTipsEmailsOptedOut({ db, userId: ownerIdFromStored('user-tips') }),
+	).toBe(true)
 
 	vi.mocked(renderAppPage).mockClear()
 	const again = await handler.handler({
@@ -105,7 +108,7 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	const otherHandler = createUnsubscribeTipsHandler(otherEnv)
 	const postToken = await createTipsUnsubscribeToken({
 		env: otherEnv,
-		userId: 'user-one-click',
+		userId: ownerIdFromStored('user-one-click'),
 	})
 	const postUrl = `https://example.com/unsubscribe/tips?token=${encodeURIComponent(postToken)}`
 	const posted = await otherHandler.handler({
@@ -120,7 +123,10 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	expect(posted.status).toBe(200)
 	expect(await posted.text()).toContain('unsubscribed from Kody tips')
 	expect(
-		await isTipsEmailsOptedOut({ db: otherDb, userId: 'user-one-click' }),
+		await isTipsEmailsOptedOut({
+			db: otherDb,
+			userId: ownerIdFromStored('user-one-click'),
+		}),
 	).toBe(true)
 })
 

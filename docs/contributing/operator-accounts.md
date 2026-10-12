@@ -62,12 +62,12 @@ Fleet table and request path:
 
 ### D1
 
-| Name            | Binding / role          | Production UUID (committed on the DR control plane) |
-| --------------- | ----------------------- | --------------------------------------------------- |
-| `kody`          | `APP_DB`                | `8c1014d1-6b41-4695-a0a2-159071f0f919`              |
-| `kody-audit`    | `AUDIT_DB`              | not committed                                       |
-| `kody-jobs`     | `JOBS_DB`               | `5410331e-4d25-47e4-a1e5-a248f7cc764c`              |
-| `kody-preview*` | per-PR / shared preview | created by `tools/ci/preview-resources.ts`          |
+| Name         | Binding / role             | Production UUID (committed on the DR control plane) |
+| ------------ | -------------------------- | --------------------------------------------------- |
+| `kody`       | `APP_DB`                   | `8c1014d1-6b41-4695-a0a2-159071f0f919`              |
+| `kody-audit` | `AUDIT_DB`                 | not committed                                       |
+| `kody-jobs`  | `JOBS_DB`                  | `5410331e-4d25-47e4-a1e5-a248f7cc764c`              |
+| `kody-pr-*`  | per-preview app/audit/jobs | created by `tools/ci/preview-resources.ts`          |
 
 Dashboard: **Workers & Pages → D1**. Remote `database_id` values are written
 into generated Wrangler configs at deploy, not into the committed
@@ -78,8 +78,8 @@ into generated Wrangler configs at deploy, not into the committed
 Production names from committed Wrangler / ensure scripts
 ([setup-manifest.md](./setup-manifest.md)):
 
-- **KV** — `OAUTH_KV` title `kody-production-oauth`; `BUNDLE_ARTIFACTS_KV` title
-  `kody-production-bundle-artifacts`. Preview titles are per-PR.
+- **KV** — `OAUTH_KV` title `kody-oauth`; `BUNDLE_ARTIFACTS_KV` title
+  `kody-bundle-artifacts`. Preview titles are per-PR.
 - **R2** — `kody-community-assets`, `kody-email-blobs`,
   `kody-repo-session-blobs`, `kody-nx-cache`. DR: `kody-production-backups`.
   Preview uses `kody-preview-*` prefixes.
@@ -88,12 +88,12 @@ Production names from committed Wrangler / ensure scripts
   `kody-community-activity-dispatch`,
   `kody-community-listing-published-dispatch`, `kody-package-events-dispatch`,
   `kody-scheduled-dispatch`, `kody-webhook-dispatch`.
-- **Vectorize** — `kody-capabilities-prod` / `kody-capabilities-preview` (384
-  dimensions, cosine, `@cf/baai/bge-small-en-v1.5`).
+- **Vectorize** — `kody-capabilities-prod` (384 dimensions, cosine,
+  `@cf/baai/bge-small-en-v1.5`). Previews use per-preview
+  `<preview-worker-name>-vectors` indexes.
 - **Analytics Engine** — `kody_usage_events`, `kody_flag_exposures`,
   `kody_email_events`, `kody_mcp_protocol_events`,
-  `kody_package_invoke_specifier_events`, `kody_execute_interpretable_events`,
-  `kody_mcp_search_events`.
+  `kody_execute_interpretable_events`, `kody_mcp_search_events`.
 - **Artifacts** — namespaces `production` and `preview`; binding `ARTIFACTS`.
 - **Images** — binding `IMAGES` on origin and platform (no extra resource to
   create).
@@ -139,22 +139,27 @@ Optional public-signup bot protection. Signup uses Turnstile when both
 
 ### API tokens
 
-GitHub Actions and Workers share these **names**.
-[#2010](https://github.com/kentcdodds/kody/issues/2010) tracks splitting the
-combined production token into least-privilege deploy / runtime / app tokens.
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_RUNTIME_API_TOKEN` may still be the same
-value.
+Every Worker reads its Cloudflare REST token as the Worker secret
+`CLOUDFLARE_API_TOKEN`, but production uploads a different least-privilege
+GitHub secret to each Worker
+([#2010](https://github.com/kentcdodds/kody/issues/2010)). The deploy token is
+never uploaded to a Worker, and `.github/workflows/deploy.yml` runs a shared
+`require-worker-tokens` job before any production mutation when a Worker-scoped
+token is unset or equals the deploy token, or when the deploy token itself is
+unset (`tools/ci/check-worker-cloudflare-tokens.ts`).
 
-| Name (GitHub Actions unless noted)   | Holder                                                        | Purpose                                                                              |
-| ------------------------------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`               | Actions + origin/platform/jobs/status/nx-cache Workers        | Deploy, resource ensure, Email REST, Analytics Engine SQL, Artifacts REST            |
-| `CLOUDFLARE_RUNTIME_API_TOKEN`       | Actions → `kody-runtime` Worker secret `CLOUDFLARE_API_TOKEN` | Email Sending + Artifacts only (falls back to the deploy token if unset)             |
-| `CLOUDFLARE_ACCOUNT_ID`              | Actions **variable** + Worker var                             | Account id for REST / ensure                                                         |
-| `CLOUDFLARE_ZONE_ID`                 | Actions **variable**                                          | Zone that owns the user-email sending domain                                         |
-| `DR_DEPLOY_TOKEN`                    | Actions                                                       | Deploy `kody-production-d1-backups` in the DR account                                |
-| `DR_BACKUP_ADMIN_TOKEN`              | Actions (never a Worker secret)                               | Reconcile DR R2 lock/lifecycle                                                       |
-| `DRILL_API_TOKEN`                    | DR Worker secret                                              | Isolated drill-account D1                                                            |
-| Control-plane `CLOUDFLARE_API_TOKEN` | DR Worker secret                                              | Production-account D1 Edit (export + import). Separate from the Actions deploy token |
+| Name (GitHub Actions unless noted)   | Holder                                                                             | Purpose                                                                              |
+| ------------------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`               | Actions only (wrangler + `tools/ci`)                                               | Deploy and resource ensure. Never a Worker secret                                    |
+| `CLOUDFLARE_APP_API_TOKEN`           | Actions → `kody-production` + `kody-platform` Worker secret `CLOUDFLARE_API_TOKEN` | Email Sending Edit, Artifacts Edit, Account Analytics Read, Queues Edit (required)   |
+| `CLOUDFLARE_RUNTIME_API_TOKEN`       | Actions → `kody-runtime` Worker secret `CLOUDFLARE_API_TOKEN`                      | Email Sending Edit + Artifacts Edit (required)                                       |
+| `CLOUDFLARE_STATUS_API_TOKEN`        | Actions → `kody-status` Worker secret `CLOUDFLARE_API_TOKEN`                       | Email Sending Edit for operator alert email (required)                               |
+| `CLOUDFLARE_ACCOUNT_ID`              | Actions **variable** + Worker var                                                  | Account id for REST / ensure                                                         |
+| `CLOUDFLARE_ZONE_ID`                 | Actions **variable**                                                               | Zone that owns the user-email sending domain                                         |
+| `DR_DEPLOY_TOKEN`                    | Actions                                                                            | Deploy `kody-production-d1-backups` in the DR account                                |
+| `DR_BACKUP_ADMIN_TOKEN`              | Actions (never a Worker secret)                                                    | Reconcile DR R2 lock/lifecycle                                                       |
+| `DRILL_API_TOKEN`                    | DR Worker secret                                                                   | Isolated drill-account D1                                                            |
+| Control-plane `CLOUDFLARE_API_TOKEN` | DR Worker secret                                                                   | Production-account D1 Edit (export + import). Separate from the Actions deploy token |
 
 `AI_GATEWAY_ID` / `AI_GATEWAY_ID_PREVIEW` are optional Worker secrets (Gateway
 id, not a Cloudflare API token). For `typesafe/jev`, the configured gateway must
@@ -201,7 +206,8 @@ Dashboard: repo **Settings → Secrets and variables → Actions**.
 
 From `.github/workflows/*.yml` (automatic `GITHUB_TOKEN` omitted):
 
-`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_RUNTIME_API_TOKEN`, `COOKIE_SECRET`,
+`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_APP_API_TOKEN`,
+`CLOUDFLARE_RUNTIME_API_TOKEN`, `CLOUDFLARE_STATUS_API_TOKEN`, `COOKIE_SECRET`,
 `SECRET_STORE_KEY`, `AI_GATEWAY_ID`, `AI_GATEWAY_ID_PREVIEW`, `SENTRY_DSN`,
 `SENTRY_AUTH_TOKEN`, `CAPABILITY_REINDEX_SECRET`, `OAUTH_GITHUB_CLIENT_ID`,
 `OAUTH_GITHUB_CLIENT_SECRET`, `OAUTH_GOOGLE_CLIENT_ID`,
@@ -342,9 +348,9 @@ dashboard, update the two Actions secrets, deploy. Price / portal id changes are
 committed Wrangler vars (same change as the Stripe catalog edit).
 
 Recovery: Stripe account login. Customers and subscriptions live in Stripe;
-`users.stripe_customer_id` / `users.stripe_plan` in D1 are a projection
-refreshed by webhooks and `StripePlanRefresh`. Losing `STRIPE_WEBHOOK_SECRET`
-returns 503 from `/webhooks/stripe` until it is replaced.
+`orgs.stripe_customer_id` / `orgs.stripe_plan` in D1 are a projection refreshed
+by webhooks and `StripePlanRefresh`. Losing `STRIPE_WEBHOOK_SECRET` returns 503
+from `/webhooks/stripe` until it is replaced.
 
 `Password manager: Stripe webhook endpoint id; entry for STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET.`
 
@@ -406,6 +412,21 @@ stays up.
 
 `Password manager: Fathom account login entry.`
 
+## Scarf
+
+Company-level page analytics on production `kody.codes` public marketing and
+docs only. Pixel id is committed in `packages/worker/client/scarf-analytics.ts`
+(no Wrangler var). Preview, local, and other hosts never send. CSP allowlist in
+`packages/worker/src/app/security-headers.ts` (`img-src` only).
+
+Dashboard: the Kody organization pixel at [scarf.sh](https://scarf.sh/). No
+secret in the Worker.
+
+Recovery: Scarf account login. Losing the pixel id only drops company analytics;
+the app stays up.
+
+`Password manager: Scarf account login entry.`
+
 ## Kit
 
 Exist-only lifecycle tags on account events. API: `https://api.kit.com/v4`
@@ -446,7 +467,7 @@ Three operator surfaces, one vendor:
    `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_MEMBER_ROLE_ID`,
    `DISCORD_STANDARD_ROLE_ID`, `DISCORD_PRO_ROLE_ID`. Bot needs **Create Instant
    Invite** and **Manage Roles**, and its highest role must sit above the roles
-   it assigns. Standard/Pro follow `users.stripe_plan`. Invite URL in product
+   it assigns. Standard/Pro follow `orgs.stripe_plan`. Invite URL in product
    copy: `https://kcd.im/kody-discord`.
 3. **Shipped-PR summaries** — `kody:@kentcdodds/discord/send-shipped-pr` (see
    [ship-pr](../../.agents/skills/ship-pr/SKILL.md)). That package uses its own
@@ -526,7 +547,12 @@ ship-pr Discord cost lookup; production Kody stays up.
 
 Publishes `server.json` to the public MCP Registry on `main` (and
 `workflow_dispatch`) via `.github/workflows/publish-mcp-registry.yml`. Auth is
-GitHub OIDC (`mcp-publisher login github-oidc`). No extra secret.
+GitHub OIDC (`mcp-publisher login github-oidc`). No extra secret. The job looks
+up the version first: a matching already-published payload is a successful
+no-op, and metadata edits that reuse a published version fail with a bump
+instruction. A late duplicate-version error re-fetches and succeeds only when
+the published payload still matches. `npm run workflows:check` requires that
+same version bump on PRs and main pushes (pre-push SHA).
 
 Dashboard: [MCP Registry](https://github.com/modelcontextprotocol/registry).
 Recovery: GitHub repo admin + OIDC trust on the registry side.
@@ -564,9 +590,10 @@ values in this repo.
 3. `Password manager: Stripe webhook endpoint id.`
 4. `Password manager: Sentry org slug; alert-rule destination; SENTRY_AUTH_TOKEN item name.`
 5. `Password manager: Fathom account login item name.`
-6. `Password manager: Kit account login item name.`
-7. `Password manager: Discord application name(s) for social login vs shipped-PR bot; guild name.`
-8. `Password manager: Google Cloud project / OAuth client name.`
-9. `Password manager: X project / app name.`
-10. `Password manager: GitHub OAuth App display name; PREVIEW_ENVIRONMENT_ADMIN_TOKEN item name; kody-bot GitHub user login item name.`
-11. `Password manager: Cursor API key / cursorApiKey item name.`
+6. `Password manager: Scarf account login item name.`
+7. `Password manager: Kit account login item name.`
+8. `Password manager: Discord application name(s) for social login vs shipped-PR bot; guild name.`
+9. `Password manager: Google Cloud project / OAuth client name.`
+10. `Password manager: X project / app name.`
+11. `Password manager: GitHub OAuth App display name; PREVIEW_ENVIRONMENT_ADMIN_TOKEN item name; kody-bot GitHub user login item name.`
+12. `Password manager: Cursor API key / cursorApiKey item name.`

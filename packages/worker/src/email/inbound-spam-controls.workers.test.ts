@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:workers'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { expect, test, vi } from 'vitest'
 import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
 import type * as PackageSubscriptionsModule from './package-subscriptions.ts'
@@ -12,8 +13,9 @@ import { createForwardableEmailMessage } from './test-fixtures.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const platformBaseUrl = 'https://kody.example.com'
 const platformDomain = 'inbox.kody.example.com'
 const systemDomain = 'kody.example.com'
@@ -47,15 +49,14 @@ function createInboundEnv() {
 async function seedVerifiedAccount(prefix: string) {
 	const username = `${prefix}-${crypto.randomUUID().slice(0, 8)}`
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await env.APP_DB.prepare(
-		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id, plan)
-			 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+			 VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(email) DO UPDATE SET
 			   username = excluded.username,
 			   email_verified_at = excluded.email_verified_at,
 			   stable_user_id = COALESCE(users.stable_user_id, excluded.stable_user_id),
-			   plan = excluded.plan,
 			   updated_at = CURRENT_TIMESTAMP`,
 	)
 		.bind(
@@ -64,14 +65,21 @@ async function seedVerifiedAccount(prefix: string) {
 			'test-password-hash',
 			new Date().toISOString(),
 			userId,
-			'max',
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan: 'max',
+	})
 	return { userId, address: `${username}@${platformDomain}` }
 }
 
 async function readUserDailyReceiveCount(userId: string) {
-	const result = await userMeterRpc({ env, userId }).read({
+	const result = await userMeterRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).read({
 		resource: 'email_receives_per_day',
 		day: new Date().toISOString().slice(0, 10),
 	})
@@ -129,7 +137,13 @@ async function addSenderRules(
 	>,
 ) {
 	for (const [kind, value, effect] of rules) {
-		await upsertEmailSenderRule({ db: env.APP_DB, userId, kind, value, effect })
+		await upsertEmailSenderRule({
+			db: env.APP_DB,
+			userId,
+			kind,
+			value,
+			effect,
+		})
 	}
 }
 
@@ -149,10 +163,15 @@ test('user sender rules block before quota, quarantine/allow, and fall back to a
 	await handleInboundEmail(blocked, createInboundEnv())
 	expect(blocked.rejectedReason).toBe('Message rejected by recipient policy.')
 	expect(
-		await mailboxRpc({ env, userId }).listMessages({ limit: 10 }),
+		await mailboxRpc({ env, userId: ownerIdFromStored(userId) }).listMessages({
+			limit: 10,
+		}),
 	).toMatchObject({ messages: [] })
 	expect(await readUserDailyReceiveCount(userId)).toBe(0)
-	const rejectEvents = await mailboxRpc({ env, userId }).listDeliveryEvents({
+	const rejectEvents = await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).listDeliveryEvents({
 		limit: 10,
 	})
 	const rejectDetails = rejectEvents.map((event) => ({
@@ -188,7 +207,10 @@ test('user sender rules block before quota, quarantine/allow, and fall back to a
 	const clean = mail('stranger@example.net', address, 'No auth header')
 	await handleInboundEmail(clean, createInboundEnv())
 
-	const { messages } = await mailboxRpc({ env, userId }).listMessages({
+	const { messages } = await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).listMessages({
 		limit: 20,
 	})
 	const bySubject = Object.fromEntries(

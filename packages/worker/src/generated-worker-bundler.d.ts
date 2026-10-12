@@ -33,15 +33,14 @@ declare module '*/node_modules/.kody-generated/local-execute-runtime-support.mjs
 	): string
 }
 
-/**
- * The platform-supplied `remix` and `@remix-run/ui` packages for package
- * apps: one code-split pre-bundle of the Workers-safe `remix/<subpath>`
- * entries plus the `@remix-run/ui/<primitive>` entries, keyed relative to
- * `node_modules/` (see `packageAppRemixSubpaths` /
- * `packageAppRemixUiSubpaths`).
- */
-declare module '*/node_modules/.kody-generated/package-app-remix.mjs' {
-	export const remixVersion: string
-	export const remixUiVersion: string
-	export const files: Record<string, string>
+declare module '*/node_modules/.kody-generated/isomorphic-git.mjs' {
+	export { git, http, createGit } from './repo/isomorphic-git-module.ts'
+}
+
+declare module '*/node_modules/.kody-generated/postal-mime.mjs' {
+	export { PostalMime } from './email/postal-mime-module.ts'
+}
+
+declare module '*/node_modules/.kody-generated/codemode-normalize.mjs' {
+	export { normalizeCode } from './mcp/codemode-normalize-module.ts'
 }

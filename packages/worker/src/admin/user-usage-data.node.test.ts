@@ -3,12 +3,17 @@ import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { createInMemoryRepoSessionIndexEnv } from '#worker/test-support/repo-session-index.ts'
 import { createInMemoryRunLogUsageEnv } from '#worker/test-support/run-log-usage.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
-import { type DailyEntitlementResource } from '#worker/entitlements/user-meter-do.ts'
+import { type DailyEntitlementResource } from '#universal/plans.ts'
 import { type RepoSessionRow } from '#worker/repo/types.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { type AdminUsageRollup } from '#universal/loader-data.ts'
 import { loadAdminUserUsageData } from './user-usage-data.ts'
+import {
+	isLiveSeatCountQuery,
+	mockLiveSeatCountRow,
+} from '#worker/test-support/live-seat-count-query.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 type UserRow = {
 	id: number
 	username: string
@@ -55,7 +60,7 @@ function createUsageRepoSessionRow(
 	const id = `usage-session-${index}`
 	return {
 		id,
-		user_id: userId,
+		user_id: ownerIdFromStored(userId),
 		source_id: `source-${index}`,
 		source_repo_id: `repo-${index}`,
 		session_branch: `sessions/${id}`,
@@ -83,6 +88,9 @@ function createAdminUserUsageTestDb(input: {
 
 	function countForQuery(normalizedQuery: string, userId: string) {
 		const counts = resourceCounts[userId] ?? {}
+		if (isLiveSeatCountQuery(normalizedQuery)) {
+			return mockLiveSeatCountRow().count
+		}
 		if (normalizedQuery.includes('from saved_packages')) {
 			return counts.saved_packages ?? 0
 		}
@@ -101,7 +109,8 @@ function createAdminUserUsageTestDb(input: {
 			const createStatement = (params: Array<unknown>) => ({
 				async first<T>() {
 					if (
-						normalizedQuery.includes('from users where stable_user_id = ?') &&
+						normalizedQuery.includes('from users') &&
+						normalizedQuery.includes('join orgs') &&
 						normalizedQuery.includes('stripe_price_id') &&
 						normalizedQuery.includes('stripe_credits_eligible')
 					) {
@@ -218,7 +227,7 @@ async function setupUsageUser(input: {
 	wrapDb?: (db: D1Database) => D1Database
 	extraEnv?: Record<string, unknown>
 }) {
-	const usageUserId = await createStableUserIdFromEmail(
+	const usageUserId = testStableUserIdFromEmail(
 		`${input.plan}-${crypto.randomUUID()}@example.com`,
 	)
 	const resourceCounts = { [usageUserId]: input.resourceCounts ?? {} }
@@ -541,7 +550,7 @@ test('loadAdminUserUsageData reads daily counts from UserMeter (seeded then warm
 		meter: {
 			email_sends_per_day: 111,
 			email_receives_per_day: 222,
-			execute_calls_per_day: 333,
+			execute_unique_workers_per_day: 333,
 			outbound_fetches_per_day: 444,
 		},
 	})
@@ -549,7 +558,7 @@ test('loadAdminUserUsageData reads daily counts from UserMeter (seeded then warm
 	expect(await consumption(Promise.resolve(warm))).toMatchObject({
 		email_sends_per_day: 111,
 		email_receives_per_day: 222,
-		execute_calls_per_day: 333,
+		execute_unique_workers_per_day: 333,
 		outbound_fetches_per_day: 444,
 		saved_packages: 6,
 		stored_email_messages: 9,

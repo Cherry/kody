@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import {
 	getArtifactsBinding,
@@ -20,7 +21,7 @@ import {
 import { type EntitySourceRow } from './types.ts'
 
 function logArtifactRepoDeleted(input: {
-	userId: string
+	userId: OwnerId
 	repoName: string
 	result: ArtifactDeleteRepoResult
 }) {
@@ -38,9 +39,17 @@ function logArtifactRepoDeleted(input: {
 
 export async function deleteUserScopedArtifactRepo(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	repoName: string
 	warnings?: Array<string>
+	/**
+	 * Cloudflare Artifacts REST delete can return before `get` observes
+	 * `not_found`. Community fork fallback needs the dest gone before
+	 * `ensureEntitySource` recreates an empty repo with bootstrapAccess.
+	 */
+	waitUntilAbsent?: boolean
+	waitUntilAbsentAttempts?: number
+	waitUntilAbsentDelayMs?: number
 }): Promise<boolean> {
 	const repoName = input.repoName.trim()
 	if (!repoName) return false
@@ -55,6 +64,28 @@ export async function deleteUserScopedArtifactRepo(input: {
 			repoName,
 			result,
 		})
+		if (input.waitUntilAbsent) {
+			const maxAttempts = input.waitUntilAbsentAttempts ?? 10
+			const delayMs = input.waitUntilAbsentDelayMs ?? 50
+			for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+				const observed = await binding.get(repoName)
+				if (observed.status === 'not_found') break
+				if (attempt === maxAttempts) {
+					const message = `Artifact repo "${repoName}" still present after delete (${observed.status}).`
+					input.warnings?.push(message)
+					console.warn(
+						JSON.stringify({
+							message: 'artifact repo delete not yet absent',
+							userId: input.userId,
+							repoName,
+							status: observed.status,
+						}),
+					)
+					return false
+				}
+				await new Promise((resolve) => setTimeout(resolve, delayMs))
+			}
+		}
 		return true
 	} catch (error) {
 		const message = getErrorMessage(error)
@@ -86,7 +117,7 @@ function collectUniqueRepoNames(
 
 async function deletePushSubscriptionForSource(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	source: EntitySourceRow
 	warnings?: Array<string>
 }) {
@@ -133,7 +164,7 @@ async function deletePushSubscriptionForSource(input: {
 
 async function deleteReposForEntitySource(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	source: EntitySourceRow
 	warnings?: Array<string>
 }) {
@@ -175,7 +206,7 @@ async function deleteReposForEntitySource(input: {
 
 export async function cleanupArtifactReposForPackage(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sourceId: string
 	warnings?: Array<string>
 }) {
@@ -216,7 +247,7 @@ export async function cleanupArtifactReposForPackage(input: {
 
 export async function cleanupArtifactReposForSource(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sourceId: string
 	warnings?: Array<string>
 }): Promise<{
@@ -263,7 +294,7 @@ export async function cleanupArtifactReposForSource(input: {
 
 export async function cleanupAllUserArtifactRepos(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	warnings: Array<string>
 }) {
 	if (!hasArtifactsAccess(input.env)) {
@@ -307,7 +338,7 @@ export async function cleanupAllUserArtifactRepos(input: {
 	return deleted
 }
 
-async function countUserArtifactRepoReferences(env: Env, userId: string) {
+async function countUserArtifactRepoReferences(env: Env, userId: OwnerId) {
 	const [sources, sessions] = await Promise.all([
 		listEntitySourcesByUser(env.APP_DB, userId),
 		listRepoSessionsByUser(env, userId),

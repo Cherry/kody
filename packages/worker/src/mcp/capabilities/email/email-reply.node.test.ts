@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 
@@ -37,9 +41,10 @@ function createContext(options: { emailVerifiedAt?: string | null } = {}) {
 			),
 		} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User Example',
 			},
@@ -119,7 +124,7 @@ test('emailReply gates unverified accounts, surfaces failed delivery, and forwar
 	)
 	expect(mocks.sendOutboundEmail).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			accountEmail: 'user@example.com',
 			recipientPolicy: 'reply',
 			replyToMessageId: 'inbound-1',

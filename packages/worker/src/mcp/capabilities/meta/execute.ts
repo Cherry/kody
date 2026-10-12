@@ -12,6 +12,7 @@ import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { getInboundRequestSignal } from '#mcp/inbound-request-signal.ts'
 import { runModuleWithRegistry } from '#mcp/run-kody-registry.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import {
 	conversationIdInputField,
@@ -59,6 +60,7 @@ export const executeCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'execute',
+		orgPermission: 'org:execute',
 		description:
 			'Run `execute({ code, params })`: one ephemeral ESM module whose default export receives `params`. Example: `export default async function main(params) { return await kody.emailSend(params) }`. Same user and module graph reuse one isolate for the UTC day when varying args stay in `params`. Use this inside package and execute runtimes when reusable code needs the same module execution surface as the public MCP execute tool.',
 		keywords: ['execute', 'kody', 'module', 'sandbox', 'runtime', 'params'],
@@ -111,7 +113,9 @@ export const executeCapability = defineDomainCapability(
 			const callerContext = ctx.callerContext
 			const conversationId = resolveConversationId(args.conversationId)
 			const idempotencyKey = args.idempotencyKey?.trim() || null
-			const userId = callerContext.user?.userId ?? null
+			const userId = callerContext.user
+				? personalOrgId(callerContext.user.userId)
+				: null
 			const existingStorageId = callerContext.storageContext?.storageId || null
 
 			if (idempotencyKey && userId) {

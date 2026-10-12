@@ -2,32 +2,30 @@ import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { toSecretCapabilityOutput } from '#mcp/capabilities/secrets/shared.ts'
 import { listPackageSecretsByPackageIds } from '#mcp/secrets/service.ts'
 import { applySavedPackageForkListingAncestry } from '#worker/community/fork-listing-relation.ts'
 import { buildPackageSearchProjection } from '#worker/package-registry/manifest.ts'
 import { buildPackageImportSpecifier } from '#worker/package-registry/package-import-specifier.ts'
-import {
-	packageScopeInputDescription,
-	resolvePackageOwnerContext,
-} from '#worker/package-registry/package-owner.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
 import { getSavedPackageWithCommunityProvenanceById } from '#worker/package-registry/repo.ts'
 import { loadPackageSourceBySourceId } from '#worker/package-registry/source.ts'
 import {
 	buildPlainRepoPromotionErrorMessage,
 	findPlainRepoPromotionHint,
 } from '#worker/repo/user-repos.ts'
-import {
-	authorizeSharedPackagePermission,
-	packageShareAccessErrorMessage,
-} from '#worker/package-registry/share-grants.ts'
+import { authorize, packageResource } from '#worker/authorization/authorize.ts'
 import { packageDetailSchema } from './shared.ts'
 
 export const getPackageCapability = defineDomainCapability(
 	capabilityDomainNames.packages,
 	{
 		name: 'packageGet',
+		orgPermission: 'package:read',
 		description:
 			'Load one saved package metadata record for the signed-in user, including community-fork source listing provenance, the full export array, callable export contracts, and FYI metadata for associated package-scoped secrets (names and package_id, never values). For a single export contract, prefer search({ entity: "package:{kodyId}#{subpath}" }). Does not return README, AGENTS.md, or source files; use repoOpenSession + repoReadFile (or packageGetGitRemote) for those.',
 		keywords: ['package', 'get', 'read', 'metadata', 'exports', 'imports'],
@@ -36,21 +34,15 @@ export const getPackageCapability = defineDomainCapability(
 		destructive: false,
 		inputSchema: z.object({
 			package_id: z.string().min(1),
-			package_scope: z
-				.string()
-				.min(1)
-				.optional()
-				.describe(packageScopeInputDescription),
 		}),
 		outputSchema: packageDetailSchema,
 		async handler(args, ctx) {
 			const user = requireMcpUser(ctx.callerContext)
-			const owner = await resolvePackageOwnerContext(
-				ctx.env,
+			const request = requireMcpRequest(ctx.callerContext)
+			const owner = await resolvePackageOwnerContext(ctx.env, {
 				user,
-				args.package_scope,
-			)
-			let sourceOwnerUserId = owner.ownerUserId
+				request,
+			})
 			const loadedRecord = await getSavedPackageWithCommunityProvenanceById(
 				ctx.env.APP_DB,
 				{
@@ -58,39 +50,12 @@ export const getPackageCapability = defineDomainCapability(
 					packageId: args.package_id,
 				},
 			)
-			let [saved] = loadedRecord
+			const [saved] = loadedRecord
 				? await applySavedPackageForkListingAncestry({
 						env: ctx.env,
 						records: [loadedRecord],
 					})
 				: [null]
-			if (!saved && !owner.delegated) {
-				try {
-					const shared = await authorizeSharedPackagePermission({
-						db: ctx.env.APP_DB,
-						packageId: args.package_id,
-						granteeUserId: user.userId,
-						granteeEmail: user.email,
-						permission: 'read_source',
-					})
-					if (shared) {
-						sourceOwnerUserId = shared.grant.ownerUserId
-						const sharedRecord =
-							await getSavedPackageWithCommunityProvenanceById(ctx.env.APP_DB, {
-								userId: shared.grant.ownerUserId,
-								packageId: shared.savedPackage.id,
-							})
-						;[saved] = sharedRecord
-							? await applySavedPackageForkListingAncestry({
-									env: ctx.env,
-									records: [sharedRecord],
-								})
-							: [null]
-					}
-				} catch (error) {
-					throw new McpCallerError(packageShareAccessErrorMessage(error))
-				}
-			}
 			if (!saved) {
 				const plainRepo = await findPlainRepoPromotionHint(ctx.env.APP_DB, {
 					userId: owner.ownerUserId,
@@ -103,10 +68,15 @@ export const getPackageCapability = defineDomainCapability(
 				}
 				throw new McpCallerError('Saved package not found for this user.')
 			}
+			await authorize(
+				{ env: ctx.env, request },
+				'package:read',
+				packageResource(saved),
+			)
 			const loaded = await loadPackageSourceBySourceId({
 				env: ctx.env,
 				baseUrl: ctx.callerContext.baseUrl,
-				userId: sourceOwnerUserId,
+				userId: owner.ownerUserId,
 				sourceId: saved.sourceId,
 			})
 			const projection = buildPackageSearchProjection(
@@ -124,6 +94,7 @@ export const getPackageCapability = defineDomainCapability(
 			return {
 				package_id: saved.id,
 				kody_id: saved.kodyId,
+				slug: saved.kodyId,
 				name: saved.name,
 				description: saved.description,
 				tags: saved.tags,

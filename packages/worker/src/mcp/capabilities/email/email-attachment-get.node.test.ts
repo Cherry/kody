@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
@@ -30,6 +34,7 @@ test('email capabilities require a signed-in user and return attachment content 
 			{
 				env: { APP_DB: {} } as Env,
 				callerContext: createMcpCallerContext({
+					source: { kind: 'mcp-oauth' },
 					baseUrl: 'https://example.com',
 				}),
 			},
@@ -37,9 +42,10 @@ test('email capabilities require a signed-in user and return attachment content 
 	).rejects.toThrow(/Authenticated MCP user/)
 
 	const callerContext = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		user: {
-			userId: 'user-1',
+			userId: personIdFromStored('user-1'),
 			email: 'user@example.com',
 			displayName: 'User Example',
 		},
@@ -82,7 +88,7 @@ test('email capabilities require a signed-in user and return attachment content 
 
 	expect(mockModule.getOwnerEmailAttachmentById).toHaveBeenCalledWith({
 		env,
-		ownerId: 'user-1',
+		ownerId: ownerIdFromStored('user-1'),
 		blobs: env.EMAIL_BLOBS,
 		attachmentId: 'attachment-1',
 	})

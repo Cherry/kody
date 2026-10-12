@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi, type Mock } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { type RunRecordHandle } from './types.ts'
@@ -6,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	dispatchRunErrorSubscriptionEvents: vi.fn(async () => []),
 	finishRun: vi.fn(async () => ({ ok: true })),
 	startRun: vi.fn(async () => ({ ok: true })),
+	listRuns: vi.fn(async () => ({ runs: [], nextCursor: null })),
 	listPackageRunSuccesses: vi.fn(async () => []),
 	listActivationMilestones: vi.fn(async () => []),
 	getAdminInsightsSnapshot: vi.fn(async () => ({
@@ -53,6 +55,7 @@ const {
 	inspectRunLogSqlBilling,
 	listActivationMilestones,
 	listPackageRunSuccesses,
+	listRunRecords,
 	recordRunRecord,
 } = await import('./service.ts')
 
@@ -63,6 +66,7 @@ function createEnv(overrides: Partial<Env> = {}) {
 			get: () => ({
 				startRun: mocks.startRun,
 				finishRun: mocks.finishRun,
+				listRuns: mocks.listRuns,
 				listPackageRunSuccesses: mocks.listPackageRunSuccesses,
 				listActivationMilestones: mocks.listActivationMilestones,
 				getAdminInsightsSnapshot: mocks.getAdminInsightsSnapshot,
@@ -83,7 +87,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 
 	const errorHandle = beginRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'job', name: 'daily', jobId: 'job-1' },
 	})
 	expect(errorHandle).not.toBeNull()
@@ -99,7 +103,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 	expect(mocks.finishRun).toHaveBeenCalledTimes(1)
 	expect(mocks.dispatchRunErrorSubscriptionEvents).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			run: expect.objectContaining({
 				id: errorHandle!.id,
 				status: 'error',
@@ -124,7 +128,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 	mocks.dispatchRunErrorSubscriptionEvents.mockClear()
 	const successHandle = beginRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'job', name: 'ok', packageId: 'pkg-a' },
 	})
 	await finishRunRecord({
@@ -137,7 +141,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 
 	const subscriptionHandle = beginRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'subscription', name: 'run.error.recorded' },
 	})
 	await finishRunRecord({
@@ -150,14 +154,14 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 
 	await recordRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'execute', name: 'adhoc' },
 		status: 'error',
 		error: new Error('execute failed'),
 	})
 	expect(mocks.dispatchRunErrorSubscriptionEvents).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			run: expect.objectContaining({
 				status: 'error',
 				surface: 'execute',
@@ -170,7 +174,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 	mocks.finishRun.mockRejectedValueOnce(new Error('do unavailable'))
 	const rpcFailHandle = beginRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'job', name: 'daily' },
 	})
 	await expect(
@@ -187,7 +191,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 	await expect(
 		recordRunRecord({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			context: { surface: 'webhook', name: 'durable-hook' },
 			status: 'success',
 		}),
@@ -198,7 +202,7 @@ test('finishRunRecord dispatches run.error.recorded only for persisted non-subsc
 	)
 	const swallowHandle = beginRunRecord({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		context: { surface: 'webhook', name: 'hook' },
 	})
 	await expect(
@@ -233,7 +237,7 @@ test('finishRunRecord awaits the terminal Durable Object write before scheduling
 	const waitUntil = vi.fn<(promise: Promise<unknown>) => void>()
 	const handle: RunRecordHandle = {
 		id: 'slow-export-run',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		startedAt: new Date().toISOString(),
 		persistence: 'eager',
 		context: { surface: 'export', name: './slow-export' },
@@ -262,10 +266,16 @@ test('activation reads never throw when RunLog is missing or RPC fails', async (
 	consoleWarn.mockImplementation(() => {})
 	const envWithoutBinding = {} as Env
 	await expect(
-		listPackageRunSuccesses({ env: envWithoutBinding, userId: 'user-1' }),
+		listPackageRunSuccesses({
+			env: envWithoutBinding,
+			userId: ownerIdFromStored('user-1'),
+		}),
 	).resolves.toEqual([])
 	await expect(
-		listActivationMilestones({ env: envWithoutBinding, userId: 'user-1' }),
+		listActivationMilestones({
+			env: envWithoutBinding,
+			userId: ownerIdFromStored('user-1'),
+		}),
 	).resolves.toEqual([])
 
 	mocks.listPackageRunSuccesses.mockRejectedValueOnce(
@@ -276,10 +286,10 @@ test('activation reads never throw when RunLog is missing or RPC fails', async (
 	)
 	const env = createEnv()
 	await expect(
-		listPackageRunSuccesses({ env, userId: 'user-1' }),
+		listPackageRunSuccesses({ env, userId: ownerIdFromStored('user-1') }),
 	).resolves.toEqual([])
 	await expect(
-		listActivationMilestones({ env, userId: 'user-1' }),
+		listActivationMilestones({ env, userId: ownerIdFromStored('user-1') }),
 	).resolves.toEqual([])
 	expect(consoleWarn).toHaveBeenCalledWith(
 		'package-run-successes-list-failed',
@@ -357,12 +367,37 @@ test('RUN_LOG admin reads require the binding and forward the RPC result', async
 	] as const
 	for (const [read, rpc, value] of cases) {
 		const call = read as (input: { env: Env; userId: string }) => unknown
-		await expect(call({ env: {} as Env, userId: 'user-1' })).rejects.toThrow(
-			'RUN_LOG Durable Object binding is not configured.',
-		)
+		await expect(
+			call({ env: {} as Env, userId: ownerIdFromStored('user-1') }),
+		).rejects.toThrow('RUN_LOG Durable Object binding is not configured.')
 		vi.mocked(rpc as Mock).mockResolvedValueOnce(value)
-		await expect(call({ env: createEnv(), userId: 'user-1' })).resolves.toEqual(
-			value,
-		)
+		await expect(
+			call({ env: createEnv(), userId: ownerIdFromStored('user-1') }),
+		).resolves.toEqual(value)
 	}
+})
+
+test('listRunRecords normalizes since/until to UTC ISO before lexical RunLog compares', async () => {
+	mocks.listRuns.mockClear()
+	await listRunRecords({
+		env: createEnv(),
+		userId: ownerIdFromStored('user-1'),
+		filter: {
+			since: '2026-10-11T00:56:00-06:00',
+			until: '2026-10-12T04:00:00Z',
+		},
+	})
+	expect(mocks.listRuns).toHaveBeenCalledWith(
+		expect.objectContaining({
+			since: '2026-10-11T06:56:00.000Z',
+			until: '2026-10-12T04:00:00.000Z',
+		}),
+	)
+	await expect(
+		listRunRecords({
+			env: createEnv(),
+			userId: ownerIdFromStored('user-1'),
+			filter: { until: 'not-a-timestamp' },
+		}),
+	).rejects.toThrow(/Invalid ISO timestamp filter/)
 })

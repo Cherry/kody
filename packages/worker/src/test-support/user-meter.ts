@@ -1,7 +1,19 @@
+import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
+import {
+	admitExecuteCallInWindows,
+	ExecuteRepeatWindow,
+	type ExecuteCallMinuteWindow,
+	type ExecuteRepeatInput,
+} from '#worker/entitlements/execute-admission-windows.ts'
 import {
 	isDailyEntitlementResource,
-	userMeterMirrorUpdatedAtToken,
 	type DailyEntitlementResource,
+} from '#universal/plans.ts'
+import {
+	userMeterDailyCounterRetentionDays,
+	userMeterMirrorUpdatedAtToken,
+	type UserMeterDailyTrendCounterRow,
+	type UserMeterDailyTrendUniqueWorkerDayRow,
 	type UserMeterDeletionStateExport,
 	type UserMeterStorageBytesState,
 	type UserMeterWriteLeaseEntry,
@@ -30,6 +42,11 @@ export function createInMemoryUserMeterEnv() {
 	const deletionByUser = new Map<string, DeletionState>()
 	const dynamicWorkerDaysByUser = new Map<string, Set<string>>()
 	const lastUsedByUser = new Map<string, Map<string, string>>()
+	const executeAdmissionByUser = new Map<
+		string,
+		{ minuteWindow: ExecuteCallMinuteWindow; repeatWindow: ExecuteRepeatWindow }
+	>()
+	const executeCallDaysByUser = new Map<string, Map<string, number>>()
 	function counterKey(resource: string, day: string) {
 		return `${resource}\0${day}`
 	}
@@ -59,6 +76,11 @@ export function createInMemoryUserMeterEnv() {
 		const existingLastUsed = lastUsedByUser.get(userId)
 		const lastUsed = existingLastUsed ?? new Map<string, string>()
 		if (!existingLastUsed) lastUsedByUser.set(userId, lastUsed)
+		const existingExecuteCallDays = executeCallDaysByUser.get(userId)
+		const executeCallDays = existingExecuteCallDays ?? new Map<string, number>()
+		if (!existingExecuteCallDays) {
+			executeCallDaysByUser.set(userId, executeCallDays)
+		}
 
 		function readRow(resource: string, day: string) {
 			return rows.get(counterKey(resource, day)) ?? null
@@ -171,6 +193,61 @@ export function createInMemoryUserMeterEnv() {
 			}
 		}
 
+		async function consumeCounter(input: {
+			resource: string
+			day: string
+			limit: number
+			updatedAt: string
+			weekStart?: string
+			weekLimit?: number | null
+		}) {
+			if (!isDailyEntitlementResource(input.resource)) {
+				throw new Error(`Invalid daily resource: ${input.resource}`)
+			}
+			const resource: DailyEntitlementResource = input.resource
+			const existing = readRow(resource, input.day)
+			if (!existing) return { outcome: 'needs_bootstrap' as const }
+			const weekLimit =
+				typeof input.weekLimit === 'number' && Number.isFinite(input.weekLimit)
+					? input.weekLimit
+					: null
+			const weekStart = input.weekStart ?? null
+			const weekCount =
+				weekStart && weekLimit !== null
+					? sumRange(resource, weekStart, input.day)
+					: undefined
+			if (input.limit < 1 || existing.count + 1 > input.limit) {
+				return {
+					...ready(existing),
+					consumed: false,
+					deniedWindow: 'day' as const,
+					weekCount,
+				}
+			}
+			if (
+				weekStart &&
+				weekLimit !== null &&
+				(weekLimit < 1 || (weekCount ?? 0) + 1 > weekLimit)
+			) {
+				return {
+					...ready(existing),
+					consumed: false,
+					deniedWindow: 'week' as const,
+					weekCount,
+				}
+			}
+			const next = {
+				count: existing.count + 1,
+				revision: existing.revision + 1,
+			}
+			rows.set(counterKey(resource, input.day), next)
+			return {
+				...ready(next),
+				consumed: true,
+				weekCount: weekCount === undefined ? undefined : weekCount + 1,
+			}
+		}
+
 		return {
 			async initialize(input: {
 				resource: string
@@ -199,57 +276,47 @@ export function createInMemoryUserMeterEnv() {
 				weekStart?: string
 				weekLimit?: number | null
 			}) {
-				if (!isDailyEntitlementResource(input.resource)) {
-					throw new Error(`Invalid daily resource: ${input.resource}`)
-				}
-				const resource: DailyEntitlementResource = input.resource
-				const existing = readRow(resource, input.day)
-				if (!existing) return { outcome: 'needs_bootstrap' as const }
-				const weekLimit =
-					typeof input.weekLimit === 'number' &&
-					Number.isFinite(input.weekLimit)
-						? input.weekLimit
-						: null
-				const weekStart = input.weekStart ?? null
-				const weekCount =
-					weekStart && weekLimit !== null
-						? sumRange(resource, weekStart, input.day)
-						: undefined
-				if (input.limit < 1 || existing.count + 1 > input.limit) {
-					return {
-						...ready(existing),
-						consumed: false,
-						deniedWindow: 'day' as const,
-						weekCount,
-					}
-				}
-				if (
-					weekStart &&
-					weekLimit !== null &&
-					(weekLimit < 1 || (weekCount ?? 0) + 1 > weekLimit)
-				) {
-					return {
-						...ready(existing),
-						consumed: false,
-						deniedWindow: 'week' as const,
-						weekCount,
-					}
-				}
-				const next = {
-					count: existing.count + 1,
-					revision: existing.revision + 1,
-				}
-				rows.set(counterKey(resource, input.day), next)
-				return {
-					...ready(next),
-					consumed: true,
-					weekCount: weekCount === undefined ? undefined : weekCount + 1,
-				}
+				return await consumeCounter(input)
 			},
 			async read(input: { resource: string; day: string }) {
 				const existing = readRow(input.resource, input.day)
 				if (!existing) return { outcome: 'needs_bootstrap' as const }
 				return ready(existing)
+			},
+			async readUsageSnapshot(input: {
+				day: string
+				weekStart: string
+				dailyResources: ReadonlyArray<string>
+				weeklyResources: ReadonlyArray<string>
+				includeStorageBytes?: boolean
+			}) {
+				const daily = input.dailyResources.map((resource) => {
+					if (!isDailyEntitlementResource(resource)) {
+						throw new Error(`Invalid daily resource: ${resource}`)
+					}
+					const existing = readRow(resource, input.day)
+					return existing
+						? { resource, ...ready(existing) }
+						: { resource, outcome: 'needs_bootstrap' as const }
+				})
+				const weekly = input.weeklyResources.map((resource) => {
+					if (!isDailyEntitlementResource(resource)) {
+						throw new Error(`Invalid daily resource: ${resource}`)
+					}
+					return {
+						resource,
+						outcome: 'ready' as const,
+						count: sumRange(resource, input.weekStart, input.day),
+					}
+				})
+				const storageBytes = input.includeStorageBytes
+					? (() => {
+							const existing = storageByUser.get(userId)
+							if (!existing) return { outcome: 'needs_bootstrap' as const }
+							return storageReady(existing)
+						})()
+					: null
+				return { daily, weekly, storageBytes }
 			},
 			async readRange(input: {
 				resource: string
@@ -264,6 +331,63 @@ export function createInMemoryUserMeterEnv() {
 					count: sumRange(input.resource, input.startDay, input.endDay),
 				}
 			},
+			async readDailyTrend(input?: { now?: string }) {
+				const now = input?.now ? new Date(input.now) : new Date()
+				const safeNow = Number.isNaN(now.valueOf()) ? new Date() : now
+				const endDay = utcDayKey(safeNow)
+				const start = new Date(safeNow)
+				start.setUTCDate(
+					start.getUTCDate() - (userMeterDailyCounterRetentionDays - 1),
+				)
+				const startDay = utcDayKey(start)
+				const counters: Array<UserMeterDailyTrendCounterRow> = []
+				for (const [entryKey, row] of rows) {
+					const separator = entryKey.indexOf('\0')
+					if (separator < 0) continue
+					const resource = entryKey.slice(0, separator)
+					const day = entryKey.slice(separator + 1)
+					if (!isDailyEntitlementResource(resource)) continue
+					if (day < startDay || day > endDay) continue
+					counters.push({
+						resource,
+						day,
+						count: row.count,
+					})
+				}
+				counters.sort((left, right) => {
+					const byDay = left.day.localeCompare(right.day)
+					if (byDay !== 0) return byDay
+					return left.resource.localeCompare(right.resource)
+				})
+				const uniqueWorkerDayCounts = new Map<string, number>()
+				for (const key of dynamicWorkerDays) {
+					const separator = key.indexOf('\0')
+					if (separator < 0) continue
+					const day = key.slice(0, separator)
+					if (day < startDay || day > endDay) continue
+					uniqueWorkerDayCounts.set(
+						day,
+						(uniqueWorkerDayCounts.get(day) ?? 0) + 1,
+					)
+				}
+				const uniqueWorkerDays: Array<UserMeterDailyTrendUniqueWorkerDayRow> = [
+					...uniqueWorkerDayCounts.entries(),
+				]
+					.map(([day, count]) => ({ day, count }))
+					.sort((left, right) => left.day.localeCompare(right.day))
+				const executeCalls = [...executeCallDays.entries()]
+					.filter(([day]) => day >= startDay && day <= endDay)
+					.map(([day, count]) => ({ day, count }))
+					.sort((left, right) => left.day.localeCompare(right.day))
+				return {
+					retentionDays: userMeterDailyCounterRetentionDays,
+					startDay,
+					endDay,
+					counters,
+					uniqueWorkerDays,
+					executeCalls,
+				}
+			},
 			async claimDynamicWorkerDay(input: {
 				workerId: string
 				day: string
@@ -273,6 +397,52 @@ export function createInMemoryUserMeterEnv() {
 				if (dynamicWorkerDays.has(key)) return { created: false }
 				dynamicWorkerDays.add(key)
 				return { created: true }
+			},
+			async claimDynamicWorkerDayWithinLimit(input: {
+				workerId: string
+				resource: string
+				day: string
+				limit: number
+				createdAt: string
+				weekStart?: string
+				weekLimit?: number | null
+			}) {
+				const key = `${input.day}\0${input.workerId}`
+				if (dynamicWorkerDays.has(key)) {
+					const existing = readRow(input.resource, input.day)
+					return {
+						...ready(existing ?? { count: 0, revision: 0 }),
+						created: false,
+						consumed: false,
+						weekCount: input.weekStart
+							? sumRange(input.resource, input.weekStart, input.day)
+							: undefined,
+					}
+				}
+				const result = await consumeCounter({
+					...input,
+					updatedAt: input.createdAt,
+				})
+				if (result.outcome === 'needs_bootstrap') return result
+				if (result.consumed) dynamicWorkerDays.add(key)
+				return { ...result, created: result.consumed }
+			},
+			async admitExecuteCall(input: {
+				nowMs: number
+				limitPerMinute: number
+				repeat?: ExecuteRepeatInput
+			}) {
+				const windows = executeAdmissionByUser.get(userId) ?? {
+					minuteWindow: { minute: 0, count: 0 },
+					repeatWindow: new ExecuteRepeatWindow(),
+				}
+				executeAdmissionByUser.set(userId, windows)
+				const result = admitExecuteCallInWindows({ ...input, ...windows })
+				if (result.admitted) {
+					const day = utcDayKey(new Date(input.nowMs))
+					executeCallDays.set(day, (executeCallDays.get(day) ?? 0) + 1)
+				}
+				return result
 			},
 			async refund(input: {
 				resource: string
@@ -613,19 +783,30 @@ export function createWaitUntilDrain() {
 }
 
 /**
- * Minimal D1 stub for the `deleting_at` gate used by
+ * Minimal D1 stub for the OwnerId write gate used by
  * {@link withAccountWriteLease} in node tests. The DO handles all lease
- * storage; the only D1 query on the hot path is the `deleting_at` point gate.
+ * storage; D1 only answers the person / personal-org / team-org point gates.
+ * The soft-deleted-person probe is intentionally unmatched so stubs return
+ * null (no tombstone) from their default `first()` path.
  */
 export function createPermissiveAccountWriteLeaseDbHooks() {
 	return {
 		supportsDeletingAtQuery(query: string) {
-			return query.includes(
-				'SELECT deleting_at FROM users WHERE stable_user_id',
+			const compact = query.replace(/\s+/g, ' ')
+			return (
+				compact.includes(
+					'SELECT deleting_at FROM users WHERE stable_user_id',
+				) ||
+				(/FROM orgs\b/.test(compact) &&
+					compact.includes('deleting_at') &&
+					/\bWHERE id = \?/.test(compact))
 			)
 		},
 		deletingAtFirstResult() {
-			return { deleting_at: null as string | null }
+			return {
+				deleting_at: null as string | null,
+				deleted_at: null as string | null,
+			}
 		},
 	}
 }

@@ -250,7 +250,6 @@ export const EnvSchema = object({
 	USAGE_EVENTS: optionalAnalyticsEngineDatasetSchema,
 	FLAG_EXPOSURES: optionalAnalyticsEngineDatasetSchema,
 	MCP_PROTOCOL_EVENTS: optionalAnalyticsEngineDatasetSchema,
-	PACKAGE_INVOKE_SPECIFIER_EVENTS: optionalAnalyticsEngineDatasetSchema,
 	EXECUTE_INTERPRETABLE_EVENTS: optionalAnalyticsEngineDatasetSchema,
 	MCP_SEARCH_EVENTS: optionalAnalyticsEngineDatasetSchema,
 	ONBOARDING_FUNNEL_EVENTS: optionalAnalyticsEngineDatasetSchema,
@@ -266,8 +265,7 @@ export const EnvSchema = object({
 	// `none` disables playlists. Unset means no playlist fetch (tests).
 	YOUTUBE_ALLOWED_PLAYLIST_IDS: optionalNonEmptyStringSchema,
 	// Comma-separated extra YouTube video ids allowed by the overlay and
-	// first-party thumbnail proxy, in addition to playlist items and ids
-	// extracted from enabled banner hrefs.
+	// first-party thumbnail proxy, in addition to playlist items.
 	YOUTUBE_ALLOWED_VIDEO_IDS: optionalNonEmptyStringSchema,
 	// Optional YouTube Data API key for the homepage hero playlist (playlist
 	// order). When unset, the Worker reads the same unlisted playlist through
@@ -344,6 +342,9 @@ export const EnvSchema = object({
 	// unless DR_EXPORT_ENABLED is the literal string "true" and credentials
 	// are present. Secrets are set out-of-band via the Cloudflare API.
 	DR_EXPORT_ENABLED: optionalNonEmptyStringSchema,
+	// Soft-delete purge lane (Teams P7). Default false: first production
+	// enable is dry-run via adminSoftDeletePurgeRun, then flip to "true".
+	SOFT_DELETE_PURGE_ENABLED: optionalNonEmptyStringSchema,
 	DR_BACKUP_ACCOUNT_ID: optionalNonEmptyStringSchema,
 	DR_BACKUP_BUCKET_NAME: optionalNonEmptyStringSchema,
 	DR_BACKUP_ACCESS_KEY_ID: optionalNonEmptyStringSchema,

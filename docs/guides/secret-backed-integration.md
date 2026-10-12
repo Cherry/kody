@@ -3,7 +3,7 @@ id: secret_backed_integration
 title: Secret-backed integrations
 summary:
   Default non-OAuth recipe for secret-backed integrations: research auth,
-  collect secrets through /account/secrets/new, run a smoke test, build the
+  collect secrets through /connect/secret-set, run a smoke test, build the
   downstream package, then surface package secret approval links (prefer
   bulk) before calling the work complete.
 category: platform
@@ -27,7 +27,7 @@ This is the default path for many automation-oriented integrations:
 Keep the integration flow simple:
 
 1. research the provider's auth requirements (see step 1 below)
-2. collect the required secret values through `/account/secrets/new`
+2. collect the required secret values through `/connect/secret-set`
 3. run one real authenticated smoke test
 4. only then build the downstream package or workflow
 
@@ -50,7 +50,7 @@ smoke-test path is unclear.
    - Use `search` first for saved secret references.
    - Use `kody.secretList({})` inside `execute` only when you need the current
      runtime metadata.
-3. If any secret is missing, stop and send the user to `/account/secrets/new`.
+3. If any secret is missing, stop and send the user to `/connect/secret-set`.
    - Ask for each missing secret by name.
    - Include the provider dashboard URL and short creation steps when helpful.
    - Do **not** ask the user to paste the secret into chat.
@@ -110,8 +110,11 @@ as secrets. Keep readable identifiers and defaults out of the secret store.
 
 Saved secrets are referenced by **placeholder**, never by plaintext. Inside
 `execute` (and package code), put `{{secret:name}}` — or
-`{{secret:name|scope=user}}` to pin a scope — in the URL, headers, or body of an
-outbound `fetch`. Kody resolves the placeholder for **approved** hosts only:
+`{{secret:name|scope=user}}` to pin a scope — anywhere in an outbound `fetch`: a
+header, the URL path or query, or a JSON, form-encoded, or text body. Kody fills
+the placeholder for **approved** hosts over HTTPS only, and refuses the request
+otherwise. An API that takes a credential in the body (a login password, a
+form-encoded token exchange) works the same way. For the usual header case:
 
 ```ts
 const response = await fetch('https://api.example.com/v1/me', {
@@ -136,12 +139,15 @@ Rules:
   name charset, so it never resolves. To deliberately deliver a resolvable
   placeholder to a third party, set the `x-kody-secret-resolution: off` header
   on that `fetch` (the gateway strips it and skips resolution for that request).
+  For a body that only quotes the syntax next to a real header credential, use
+  `x-kody-secret-resolution: headers-only`, which fills headers and sends the
+  URL and body as written.
 - For Basic Auth derived from two secrets, use `secretHeaders.basic(...)` from
   `kody:runtime` (see the secrets usage docs).
 
-## When `/account/secrets/new` is enough
+## When `/connect/secret-set` is enough
 
-In the common case, `/account/secrets/new` is the whole setup surface.
+In the common case, `/connect/secret-set` is the whole setup surface.
 
 Use it when:
 
@@ -160,10 +166,10 @@ Do **not** build one just to:
 - collect a normal API key or token
 - collect an account ID or other readable config
 - work around the need to ask the user for a secret through
-  `/account/secrets/new`
+  `/connect/secret-set`
 
 A package app is the exception when the setup requires something
-`/account/secrets/new` cannot express cleanly, such as:
+`/connect/secret-set` cannot express cleanly, such as:
 
 - browser-side OAuth or hosted callback handling
 - a provider-specific setup wizard with multiple non-secret choices
@@ -179,14 +185,14 @@ For a new secret-backed integration, the default response shape is:
 
 1. state the auth requirement you found
 2. ask the user to save the required secret or secrets through
-   `/account/secrets/new`
+   `/connect/secret-set`
 3. say you will run a smoke test after they confirm setup
 4. say you will build the package only after the smoke test passes
 
 Example:
 
 - \"This API uses an account ID plus a token. Please save `providerToken`
-  through `/account/secrets/new`. I will keep `providerAccountId` as readable
+  through `/connect/secret-set`. I will keep `providerAccountId` as readable
   config (memory or package storage), run a real authenticated smoke test, and
   then build the package.\"
 
@@ -194,8 +200,7 @@ Example:
 
 Avoid these mistakes:
 
-- building a package app before checking whether `/account/secrets/new` is
-  enough
+- building a package app before checking whether `/connect/secret-set` is enough
 - saving readable config as a secret
 - saving the downstream package before the smoke test passes
 - assuming a saved secret automatically approves outbound hosts

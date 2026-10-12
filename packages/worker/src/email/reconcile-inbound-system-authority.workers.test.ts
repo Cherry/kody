@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { emailRawMimeKey } from './blob-keys.ts'
 import { systemEmailOwnerId } from './email-owner.ts'
 import { createUserInboundDeliveryAuthority } from './inbound-delivery-authority.ts'
@@ -9,13 +8,15 @@ import { replaceInboundDueOwnerHint } from './inbound-due-owners.ts'
 import { rpcFor } from './mailbox-test-helpers.ts'
 import { sweepStaleInboundDeliveries } from './reconcile-inbound-deliveries.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const appBaseUrl = 'https://kody.example.com'
 const sweepNow = new Date('2026-08-03T00:00:00.000Z')
 
 async function seedStaleUserDelivery(label: string, createdAt: string) {
 	const email = `${label}-${crypto.randomUUID()}@example.test`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const inboxId = `${label}-inbox-${crypto.randomUUID()}`
 	const deliveryId = `${label}-delivery-${crypto.randomUUID()}`
 	const messageId = `${label}-message-${crypto.randomUUID()}`
@@ -31,14 +32,14 @@ async function seedStaleUserDelivery(label: string, createdAt: string) {
 			) VALUES (?, ?, 'Reconcile fixture', '', 1, ?, ?)`,
 		).bind(inboxId, userId, createdAt, createdAt),
 	])
-	await rpcFor(userId).insertChargedPendingInboundDelivery({
-		ownerId: userId,
+	await rpcFor(ownerIdFromStored(userId)).insertChargedPendingInboundDelivery({
+		ownerId: ownerIdFromStored(userId),
 		delivery: {
 			fingerprint: `${label}-fingerprint-${crypto.randomUUID()}`,
 			deliveryId,
 			messageId,
 			threadId: `${label}-thread-${crypto.randomUUID()}`,
-			rawMimeKey: emailRawMimeKey(userId, messageId),
+			rawMimeKey: emailRawMimeKey(ownerIdFromStored(userId), messageId),
 			inboxId,
 			recipient: email,
 			envelopeFrom: 'sender@example.test',
@@ -58,7 +59,7 @@ async function seedStaleUserDelivery(label: string, createdAt: string) {
 	const authorityEnv = { ...env, APP_BASE_URL: appBaseUrl }
 	const authority = createUserInboundDeliveryAuthority({
 		env: authorityEnv,
-		userId,
+		userId: ownerIdFromStored(userId),
 	})
 	expect(await authority.get(deliveryId)).toMatchObject({
 		deliveryId,
@@ -108,8 +109,8 @@ test(
 			})
 			expect(consoleWarn).not.toHaveBeenCalled()
 			expect(
-				await rpcFor(userOnly.userId).getInboundDelivery({
-					ownerId: userOnly.userId,
+				await rpcFor(ownerIdFromStored(userOnly.userId)).getInboundDelivery({
+					ownerId: ownerIdFromStored(userOnly.userId),
 					deliveryId: userOnly.deliveryId,
 				}),
 			).toMatchObject({ state: 'orphan-cleaned' })
@@ -163,8 +164,10 @@ test(
 				}),
 			)
 			expect(
-				await rpcFor(userAfterSystem.userId).getInboundDelivery({
-					ownerId: userAfterSystem.userId,
+				await rpcFor(
+					ownerIdFromStored(userAfterSystem.userId),
+				).getInboundDelivery({
+					ownerId: ownerIdFromStored(userAfterSystem.userId),
 					deliveryId: userAfterSystem.deliveryId,
 				}),
 			).toMatchObject({ state: 'orphan-cleaned' })

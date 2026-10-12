@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { quoteSqlIdentifier } from '@kody-internal/shared/sql-literals.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
@@ -7,6 +8,7 @@ import {
 	accountExportRedactedColumnsByTable,
 	accountExportRedactedForeignUserId,
 	accountOperatorOwnedD1Surfaces,
+	accountUserDataPendingDropTables,
 	accountUserDataTargets,
 	buildUserScopedDeleteOrUpdateSql,
 	buildUserScopedTargetMatch,
@@ -32,7 +34,7 @@ function columnNames(db: DatabaseSync, table: string) {
 function matchFor(target: UserScopedDataTarget) {
 	return buildUserScopedTargetMatch({
 		target,
-		mcpUserId: 'user-aaa',
+		mcpUserId: ownerIdFromStored('user-aaa'),
 		dbUserId: 42,
 	})
 }
@@ -244,7 +246,6 @@ test('operator-owned tables are explicit deletion/export exclusions', () => {
 		'platform_oauth_apps',
 		'platform_provider_marks',
 		'repo_session_storage_bucket_cursor',
-		'site_banners',
 		'system_email_attachments',
 		'system_email_delivery_events',
 		'system_email_messages',
@@ -271,11 +272,9 @@ test('operator-owned tables are explicit deletion/export exclusions', () => {
 							? 'Operator-provisioned built-in OAuth app'
 							: table === 'platform_provider_marks'
 								? 'Operator-owned provider brand marks'
-								: table === 'site_banners'
-									? 'Operator-owned site announcement'
-									: table.startsWith('repo_session_')
-										? 'Platform-owned'
-										: 'operator-owned system email',
+								: table.startsWith('repo_session_')
+									? 'Platform-owned'
+									: 'operator-owned system email',
 					),
 				}),
 			),
@@ -288,7 +287,7 @@ test('account deletion statements never bind a LIKE or GLOB pattern (D1 caps pat
 	// 68 bytes, which D1 rejects with "LIKE or GLOB pattern too complex". The
 	// production purge lane failed on exactly this until the JSON-column
 	// target switched to instr().
-	const stableUserId = 'f'.repeat(64)
+	const stableUserId = ownerIdFromStored('f').repeat(64)
 	for (const target of accountUserDataTargets) {
 		const match = buildUserScopedTargetMatch({
 			target,
@@ -310,6 +309,7 @@ test('final schema drops retired tables without stale deletion/export inventory 
 		'workflow_runs',
 		'user_package_run_successes',
 		'user_activation_milestones',
+		'package_invocation_tokens',
 	]
 	const deletionStatements = accountUserDataTargets.map(
 		(target) => buildUserScopedDeleteOrUpdateSql(matchFor(target)).sql,
@@ -337,13 +337,25 @@ test('final schema drops retired tables without stale deletion/export inventory 
 			.all() as Array<{ name: string }>
 	).map((table) => table.name)
 	expect(tables.filter((table) => retiredTables.includes(table))).toEqual([])
+	expect([...accountUserDataPendingDropTables]).toEqual([])
+	for (const table of accountUserDataPendingDropTables) {
+		expect(inventorySql).not.toMatch(new RegExp(`\\b${table}\\b`, 'u'))
+		expect(tables).toContain(table)
+	}
 
 	const liveUserColumns = new Set(
-		tables.flatMap((table) =>
-			columnNames(db, table)
+		tables.flatMap((table) => {
+			if (
+				(accountUserDataPendingDropTables as ReadonlyArray<string>).includes(
+					table,
+				)
+			) {
+				return []
+			}
+			return columnNames(db, table)
 				.filter((column) => column === 'user_id' || column.endsWith('_user_id'))
-				.map((column) => `${table}.${column}`),
-		),
+				.map((column) => `${table}.${column}`)
+		}),
 	)
 	const coveredColumns = getAccountD1UserColumnCoverage()
 	expect(

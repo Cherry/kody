@@ -25,18 +25,22 @@ export async function resolveListingPinAncestry(input: {
 	originCommit: string
 }): Promise<boolean | null> {
 	try {
-		const listing = await getCommunityListingById(input.env.APP_DB, {
-			listingId: input.listingId,
-			includeDelisted: false,
-		})
-		if (!listing) return null
-		const source = await getEntitySourceById(input.env.APP_DB, listing.sourceId)
-		if (!source) return null
 		return await listingPinIsAncestorOfForkTip({
 			env: input.env,
-			repoId: source.repo_id,
 			listingPinnedCommit: input.listingPinnedCommit,
 			forkTip: input.originCommit,
+			async resolveOriginRepoId() {
+				const listing = await getCommunityListingById(input.env.APP_DB, {
+					listingId: input.listingId,
+					includeDelisted: false,
+				})
+				if (!listing) return null
+				const source = await getEntitySourceById(
+					input.env.APP_DB,
+					listing.sourceId,
+				)
+				return source?.repo_id ?? null
+			},
 		})
 	} catch {
 		return null
@@ -94,7 +98,7 @@ export async function applySavedPackageForkListingAncestry(input: {
 
 function withForkListingRelation(
 	record: SavedPackageWithCommunityProvenanceRecord,
-	relation: ForkListingRelation,
+	relation: ForkListingRelation | null,
 ): SavedPackageWithCommunityProvenanceRecord {
 	if (record.listingCurrent == null) return record
 	if (record.listingCurrent !== true) {

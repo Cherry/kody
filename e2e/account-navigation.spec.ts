@@ -28,8 +28,8 @@ async function clickThroughSections(
 	const requests = collectJsonRequests(page)
 	let previousHeading = fromHeading
 	for (const hop of hops) {
-		requests.reset()
 		await observeMainTransitions(page)
+		requests.reset()
 		await page
 			.getByRole('navigation', { name: navName })
 			.getByRole('link', { name: hop.link, exact: true })
@@ -61,7 +61,8 @@ test('account section switches keep the current page on screen (no loading flash
 		password: 'account-nav-password',
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
-	await page.goto('/account/jobs')
+	await page.goto(`/@${user.username}/-/jobs`)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/jobs$`))
 	await waitForClientHydration(page)
 	await expect(
 		page.getByRole('heading', { level: 1, name: 'Jobs' }),
@@ -69,26 +70,192 @@ test('account section switches keep the current page on screen (no loading flash
 
 	await clickThroughSections(
 		page,
-		'Account sections',
+		'Workspace sections',
 		[
 			{ link: 'Memories', heading: 'Memories' },
 			{ link: 'Secrets', heading: 'Secrets' },
 			{ link: 'Connections', heading: 'Connections' },
 			{ link: 'Workflows', heading: 'Workflows' },
 			{ link: 'Webhooks', heading: 'Webhooks' },
-			{ link: 'Overview', heading: 'Account' },
+			{ link: 'Repositories', heading: 'Repositories' },
 			{ link: 'Jobs', heading: 'Jobs' },
 		],
 		'Jobs',
 	)
 
-	// Repositories sits in the rail at the same level as the other sections and
-	// points at the profile, which is the canonical repository list.
+	// Repositories is the workspace list in the rail, not the public profile.
 	await expect(
 		page
-			.getByRole('navigation', { name: 'Account sections' })
+			.getByRole('navigation', { name: 'Workspace sections' })
 			.getByRole('link', { name: 'Repositories', exact: true }),
-	).toHaveAttribute('href', `/@${user.username}`)
+	).toHaveAttribute('href', `/@${user.username}/-/packages`)
+
+	// Person settings have their own rail; the header menu is the way across.
+	await page.getByTestId('org-switcher').click()
+	await page
+		.getByTestId('org-switcher-panel')
+		.getByRole('link', { name: 'Account settings' })
+		.click()
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Profile' }),
+	).toBeVisible()
+	await expect(
+		page.getByRole('navigation', { name: 'Workspace sections' }),
+	).toHaveCount(0)
+	await clickThroughSections(
+		page,
+		'Account sections',
+		[
+			{ link: 'Security', heading: 'Security' },
+			{ link: 'Organizations', heading: 'Organizations' },
+			{ link: 'Data & deletion', heading: 'Data & deletion' },
+			{ link: 'Profile', heading: 'Profile' },
+		],
+		'Profile',
+	)
+})
+
+test('MCP servers are one click from /account and two from the account menu', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	test.setTimeout(process.env.CI ? 90_000 : 60_000)
+	const runId = Date.now()
+	const user = await seedE2eUser({
+		email: `account-workspace-${runId}@example.com`,
+		username: `account-workspace-${runId}`,
+		password: 'account-workspace-password',
+	})
+	await login({ email: user.email, password: user.password, mode: 'login' })
+	await page.setViewportSize({ width: 1440, height: 900 })
+	await page.goto('/account')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Profile' }),
+	).toBeVisible()
+
+	// The account rail has a Workspace group that opens the signup org's
+	// resources under `/@slug/-/…`.
+	const accountRail = page.getByRole('navigation', {
+		name: 'Account sections',
+	})
+	for (const [label, section] of [
+		['Overview', 'overview'],
+		['Repositories', 'packages'],
+		['Connections', 'connections'],
+		['Secrets', 'secrets'],
+		['Jobs', 'jobs'],
+		['Memories', 'memories'],
+	]) {
+		await expect(
+			accountRail.getByRole('link', { name: label, exact: true }),
+		).toHaveAttribute('href', `/@${user.username}/-/${section}`)
+	}
+	await accountRail
+		.getByRole('link', { name: 'MCP servers', exact: true })
+		.click()
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/mcp-servers$`))
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'MCP servers' }),
+	).toBeVisible()
+	await expect(
+		page
+			.getByRole('navigation', { name: 'Workspace sections' })
+			.getByRole('link', { name: 'MCP servers', exact: true }),
+	).toHaveAttribute('aria-current', 'page')
+
+	// From the account menu: Manage leads with the workspace Overview (not
+	// Billing), and the overview links every section.
+	await page.goto('/account/security')
+	await waitForClientHydration(page)
+	await page.getByTestId('org-switcher').click()
+	const manageGroup = page
+		.getByTestId('org-switcher-panel')
+		.getByTestId('org-switcher-manage-group')
+	await expect(manageGroup.getByRole('link').first()).toHaveAccessibleName(
+		/Overview/,
+	)
+	await manageGroup.getByRole('link', { name: /Overview/ }).click()
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/overview$`))
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Overview' }),
+	).toBeVisible()
+	await expect(
+		page
+			.getByRole('navigation', { name: 'Workspace sections' })
+			.getByRole('link', { name: 'Overview', exact: true }),
+	).toHaveAttribute('aria-current', 'page')
+	const overview = page.locator('[data-testid^="org-overview-"]')
+	for (const label of [
+		'Repositories',
+		'Connections',
+		'Secrets',
+		'Jobs',
+		'Memories',
+		'Billing',
+	]) {
+		await expect(
+			overview.getByRole('link', { name: new RegExp(`^${label}`) }),
+		).toBeVisible()
+	}
+	await page
+		.getByTestId('org-overview-access')
+		.getByRole('link', { name: /^MCP servers/ })
+		.click()
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/mcp-servers$`))
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'MCP servers' }),
+	).toBeVisible()
+
+	// The organizations list opens the signup org's overview too.
+	await page.goto('/account/organizations')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByTestId('account-organization').getByRole('link'),
+	).toHaveAttribute('href', `/@${user.username}/-/overview`)
+})
+
+test('signed-in profile opens the workspace rail through to Activity', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	test.setTimeout(process.env.CI ? 90_000 : 60_000)
+	const runId = Date.now()
+	const user = await seedE2eUser({
+		email: `rail-entry-${runId}@example.com`,
+		username: `rail-entry-${runId}`,
+		password: 'rail-entry-password',
+	})
+	await login({ email: user.email, password: user.password, mode: 'login' })
+
+	// Own profile names Workspace; it is not a community-only dead end.
+	await page.goto(`/@${user.username}`)
+	await waitForClientHydration(page)
+	await expect(page.getByTestId('profile-workspace')).toHaveAttribute(
+		'href',
+		`/@${user.username}/-/packages`,
+	)
+	await Promise.all([
+		page.waitForURL(new RegExp(`/@${user.username}/-/packages$`)),
+		page.getByTestId('profile-workspace').click(),
+	])
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Repositories' }),
+	).toBeVisible()
+	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
+	await expect(rail).toBeVisible()
+	await Promise.all([
+		page.waitForURL(new RegExp(`/@${user.username}/-/activity$`)),
+		rail.getByRole('link', { name: 'Activity', exact: true }).click(),
+	])
+	await expect(
+		page.getByRole('heading', { level: 1, name: 'Activity' }),
+	).toBeVisible()
+	await expect(
+		rail.getByRole('link', { name: 'Activity', exact: true }),
+	).toHaveAttribute('aria-current', 'page')
 })
 
 test('credits live on the usage page: /account/credits redirects there', async ({
@@ -117,7 +284,7 @@ test('credits live on the usage page: /account/credits redirects there', async (
 	await expect(page.locator('[data-credits-balance]')).toHaveCount(0)
 	await expect(page.getByLabel('Custom amount ($)')).toHaveCount(0)
 
-	const rail = page.getByRole('navigation', { name: 'Account sections' })
+	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
 	await expect(
 		rail.getByRole('link', { name: 'Usage', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
@@ -136,7 +303,8 @@ test('Add connection opens its own page with the client wall, then a host step (
 		password: 'connections-password',
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
-	await page.goto('/account/connections')
+	await page.goto(`/@${user.username}/-/connections`)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/connections$`))
 	await waitForClientHydration(page)
 	await expect(
 		page.getByRole('heading', { level: 1, name: 'Connections' }),
@@ -149,10 +317,12 @@ test('Add connection opens its own page with the client wall, then a host step (
 	)
 	await expect(page.getByTestId('account-connections-back')).toHaveCount(0)
 
-	const requests = collectJsonRequests(page)
 	await observeMainTransitions(page)
+	const requests = collectJsonRequests(page)
 	await page.getByTestId('account-connections-add').click()
-	await expect(page).toHaveURL(/\/account\/connections\/new$/)
+	await expect(page).toHaveURL(
+		new RegExp(`/@${user.username}/-/connections/new$`),
+	)
 	const grid = page.getByTestId('account-connections-agent-grid')
 	await expect(grid).toBeVisible()
 	await expect(page.getByTestId('account-connections-back')).toBeVisible()
@@ -182,7 +352,9 @@ test('Add connection opens its own page with the client wall, then a host step (
 	await expect(page.getByTestId('onboarding-agent-muse')).toBeVisible()
 
 	await page.getByTestId('onboarding-agent-claude-code').click()
-	await expect(page).toHaveURL(/\/account\/connections\/new\/claude-code$/)
+	await expect(page).toHaveURL(
+		new RegExp(`/@${user.username}/-/connections/new/claude-code$`),
+	)
 	await expect(
 		page.getByRole('heading', { level: 2, name: 'Connect Claude Code' }),
 	).toBeVisible()
@@ -195,7 +367,7 @@ test('Add connection opens its own page with the client wall, then a host step (
 	// Connections stays current in the rail on the add views.
 	await expect(
 		page
-			.getByRole('navigation', { name: 'Account sections' })
+			.getByRole('navigation', { name: 'Workspace sections' })
 			.getByRole('link', { name: 'Connections', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 
@@ -208,7 +380,7 @@ test('Add connection opens its own page with the client wall, then a host step (
 	requests.reset()
 
 	await page.getByTestId('account-connections-back').click()
-	await expect(page).toHaveURL(/\/account\/connections$/)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/connections$`))
 	await expect(page.getByTestId('account-connections-add')).toBeVisible()
 	await expect(
 		page.getByRole('region', { name: 'Connected agents' }),
@@ -266,7 +438,8 @@ test('account live search keeps the same focused input while the list filters', 
 	})
 	expect(betaSecret.ok()).toBe(true)
 
-	await page.goto('/account/secrets')
+	await page.goto(`/@${user.username}/-/secrets`)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/secrets$`))
 	await waitForClientHydration(page)
 	await expect(
 		page.getByRole('heading', { level: 1, name: 'Secrets' }),
@@ -284,7 +457,8 @@ test('account live search keeps the same focused input while the list filters', 
 	await expect(page.getByText(`alphaSecret${runId}`)).toBeVisible()
 	await expect(page.getByText(`betaSecret${runId}`)).toHaveCount(0)
 
-	await page.goto('/account/jobs')
+	await page.goto(`/@${user.username}/-/jobs`)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/jobs$`))
 	await waitForClientHydration(page)
 	const jobsSearch = page.getByRole('searchbox', { name: 'Search jobs' })
 	await jobsSearch.click()

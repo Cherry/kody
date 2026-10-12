@@ -16,10 +16,10 @@ export function buildVerificationEmail(input: {
 	return renderTransactionalEmail({
 		appBaseUrl: input.appBaseUrl,
 		subject: 'Verify your email to finish setting up Kody',
-		preheader: 'One click and your assistant’s home is ready.',
+		preheader: 'One click and Your agents\u2019 cloud is ready.',
 		heading: 'Welcome to Kody',
 		body: [
-			'Kody is the home your AI assistant keeps — memory, keys, code, and automations, portable across every MCP host.',
+			'Kody is Your agents\u2019 cloud: memory, keys, code, and automations, portable across every MCP host.',
 			'Verify your email address to activate your account and get started.',
 		],
 		action: { label: 'Verify email address', url: input.verificationUrl },
@@ -107,6 +107,9 @@ export const userEntitlementWarningKinds = ['approaching', 'reached'] as const
 export type UserEntitlementWarningKind =
 	(typeof userEntitlementWarningKinds)[number]
 
+/** Unique execute workers resource id; drives the local-execute tip in this mail. */
+const executeUniqueWorkersPerDayResource = 'execute_unique_workers_per_day'
+
 export function buildUserEntitlementWarningEmail(input: {
 	appBaseUrl: string
 	creditsUrl: string
@@ -117,6 +120,8 @@ export function buildUserEntitlementWarningEmail(input: {
 		current: number
 		limit: number
 		percentOfLimit: number
+		/** Entitlement resource id; required to gate the local-execute tip. */
+		resource?: string
 		whatCounts?: string
 		howToReduce?: string
 		include?: { unitLabel: string }
@@ -131,12 +136,25 @@ export function buildUserEntitlementWarningEmail(input: {
 		return counts.join(' ')
 	})
 	const copy = entitlementWarningCopy(input.kind)
+	const includesExecuteQuota = input.warnings.some(
+		(warning) => warning.resource === executeUniqueWorkersPerDayResource,
+	)
+	const body = [copy.intro, ...lines]
+	if (includesExecuteQuota) {
+		const localExecuteUrl = new URL(
+			'/docs/local-execute',
+			input.appBaseUrl,
+		).toString()
+		body.push(
+			`You can often avoid this execute quota by running locally with the CLI when the work does not need to stay on Kody: ${localExecuteUrl}`,
+		)
+	}
 	return renderTransactionalEmail({
 		appBaseUrl: input.appBaseUrl,
 		subject: copy.subject,
 		preheader: copy.preheader,
 		heading: copy.heading,
-		body: [copy.intro, ...lines],
+		body,
 		action: { label: 'Add credits', url: input.creditsUrl },
 		afterAction: [
 			`You can also see every limit on your usage page: ${input.usageUrl}`,
@@ -503,24 +521,47 @@ export function buildPastDueEmail(input: {
 	})
 }
 
+export type UserErrorRateEmailRun = {
+	/** Package name, or the run's display name when it has no package. */
+	label: string
+	error: string
+	runUrl: string
+}
+
 export function buildUserErrorRateEmail(input: {
 	appBaseUrl: string
 	activityUrl: string
 	supportUrl: string
 	errorCount: number
 	eventCount: number
+	failingRuns?: Array<UserErrorRateEmailRun>
 }) {
 	const percent =
 		input.eventCount > 0
 			? Math.round((input.errorCount / input.eventCount) * 100)
 			: 0
+	const failingRuns = input.failingRuns ?? []
+	const firstLabel = failingRuns[0]?.label
 	return renderTransactionalEmail({
 		appBaseUrl: input.appBaseUrl,
 		subject: 'Your Kody runs are erroring more than usual',
-		preheader: 'A look at the failures, and where to get help.',
+		preheader: firstLabel
+			? `${firstLabel} is among the failures. Here is what went wrong.`
+			: 'A look at the failures, and where to get help.',
 		heading: 'A few runs need attention',
 		body: [
 			`This month Kody recorded ${input.errorCount.toLocaleString('en-US')} errors across ${input.eventCount.toLocaleString('en-US')} runs (${percent}%).`,
+			...(failingRuns.length > 0
+				? [
+						failingRuns.length === 1
+							? 'The most recent open failure:'
+							: 'The most recent open failures:',
+						...failingRuns.map((run) => ({
+							text: `${run.label} failed: ${run.error}`,
+							link: { label: 'Open the run', url: run.runUrl },
+						})),
+					]
+				: []),
 			'Review the activity log, or contact support if you need help sorting out the failures.',
 		],
 		action: { label: 'Review account activity', url: input.activityUrl },
@@ -533,6 +574,31 @@ export function buildUserErrorRateEmail(input: {
 		},
 		footnote:
 			"You're receiving this because your Kody account crossed an error-rate threshold.",
+	})
+}
+
+export function buildPlatformFeedbackAcknowledgementEmail(input: {
+	appBaseUrl: string
+	feedbackId: string
+}) {
+	const feedbackId = input.feedbackId.trim()
+	return renderTransactionalEmail({
+		appBaseUrl: input.appBaseUrl,
+		subject: 'We got your Kody feedback',
+		preheader: 'Thanks — we have your note and will take a look.',
+		heading: 'We got your feedback',
+		body: [
+			'Thanks for telling us. We received your note and will take a look.',
+			`Your feedback id is ${feedbackId}.`,
+			'Your agent can check status anytime with metaPlatformFeedbackGet.',
+		],
+		illustration: {
+			src: '/images/kody-lantern.png',
+			alt: '',
+			width: 96,
+			height: 96,
+		},
+		footnote: "You're receiving this because you sent Kody platform feedback.",
 	})
 }
 
@@ -607,44 +673,6 @@ export function buildPasswordResetEmail(input: {
 		afterAction: ['This link expires in 1 hour and can only be used once.'],
 		footnote:
 			'If you did not request a reset, you can safely ignore this email — your password stays unchanged.',
-	})
-}
-
-export function buildPackageShareInviteEmail(input: {
-	appBaseUrl: string
-	ownerUsername: string
-	packageName: string
-	acceptUrl: string
-	existingAccount: boolean
-}) {
-	const owner = `@${input.ownerUsername}`
-	return renderTransactionalEmail({
-		appBaseUrl: input.appBaseUrl,
-		subject: `${owner} shared ${input.packageName} with you on Kody`,
-		preheader: input.existingAccount
-			? `Accept the invitation to use ${input.packageName}.`
-			: `Create a Kody account, choose a paid plan, then accept ${input.packageName}.`,
-		heading: `${owner} shared a package with you`,
-		body: input.existingAccount
-			? [
-					`${owner} invited you to use ${input.packageName} on their Kody account.`,
-					'Accepting lets you read the package source and invoke it from your own packages. You cannot publish or write to the shared package. Raw secret values stay hidden.',
-					'Both of you need a paid Kody plan to accept and to use the shared package.',
-				]
-			: [
-					'Kody is the home your AI assistant keeps — memory, keys, code, and automations.',
-					`${owner} invited you to use ${input.packageName}. This is an invitation, not an automatic attach.`,
-					'Create a Kody account with this email, choose a paid plan, then open the package page and accept. You will be able to read the source and invoke the package; you will not be able to publish or see raw secrets.',
-				],
-		action: {
-			label: input.existingAccount
-				? 'Review and accept'
-				: 'Create an account, then accept',
-			url: input.acceptUrl,
-		},
-		afterAction: [
-			'If you did not expect this invitation, you can ignore this email.',
-		],
 	})
 }
 

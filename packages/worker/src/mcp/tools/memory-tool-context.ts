@@ -1,5 +1,10 @@
+import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { type ContentBlock } from '@modelcontextprotocol/sdk/types.js'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import {
 	acknowledgeSurfacedMemories,
 	searchMemoryRecords,
@@ -58,7 +63,7 @@ function selectAutomaticMemories<
 async function loadAutomaticMemories(input: {
 	env: Pick<Env, 'APP_DB'> & Partial<Pick<Env, 'CAPABILITY_VECTOR_INDEX'>>
 	callerContext: McpCallerContext
-	userId: string
+	userId: OwnerId
 	query: string
 	conversationId: string
 	limit?: number
@@ -68,6 +73,8 @@ async function loadAutomaticMemories(input: {
 	const result = await searchMemoryRecords({
 		env: input.env,
 		userId: input.userId,
+		// Auto-surface reads only the person's own personal org, which they own.
+		scope: { kind: 'all' },
 		storageContext: {
 			sessionId: input.callerContext.storageContext?.sessionId ?? null,
 			appId: input.callerContext.storageContext?.appId ?? null,
@@ -91,7 +98,8 @@ async function loadAutomaticMemories(input: {
 async function runContextPackageRetrievers(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
+	request: RequestContext | null
 	query: string
 	memoryContext?: {
 		task?: string
@@ -107,6 +115,7 @@ async function runContextPackageRetrievers(input: {
 		env: input.env,
 		baseUrl: input.baseUrl,
 		userId: input.userId,
+		request: input.request,
 		scope: 'context',
 		query: input.query,
 		memoryContext: input.memoryContext,
@@ -129,7 +138,9 @@ export async function loadRelevantMemoriesForTool(input: {
 	acknowledgeSurfaced?: boolean
 	embedText?: EmbedTextFn
 }): Promise<MemoryToolSummary | null> {
-	const userId = input.callerContext.user?.userId ?? null
+	const userId = input.callerContext.user
+		? personalOrgId(input.callerContext.user.userId)
+		: null
 	if (!userId) return null
 	const retrievalQuery = buildMemoryRetrievalQuery(input.memoryContext)
 	if (!retrievalQuery) return null
@@ -148,6 +159,7 @@ export async function loadRelevantMemoriesForTool(input: {
 			env: input.env as Env,
 			baseUrl: input.callerContext.baseUrl,
 			userId,
+			request: input.callerContext.request,
 			query: retrievalQuery,
 			memoryContext: input.memoryContext,
 			conversationId: input.conversationId,
@@ -177,7 +189,9 @@ export async function acknowledgeToolMemories(input: {
 	conversationId: string
 	memoryIds: Array<string>
 }) {
-	const userId = input.callerContext.user?.userId ?? null
+	const userId = input.callerContext.user
+		? personalOrgId(input.callerContext.user.userId)
+		: null
 	if (!userId || input.memoryIds.length === 0) return
 	await acknowledgeSurfacedMemories({
 		env: input.env,
@@ -194,7 +208,9 @@ export async function surfaceToolMemories(input: {
 	retrievalQuery: string
 	limit?: number
 }) {
-	const userId = input.callerContext.user?.userId ?? null
+	const userId = input.callerContext.user
+		? personalOrgId(input.callerContext.user.userId)
+		: null
 	if (!userId) return null
 	const retrievalQuery = input.retrievalQuery.trim()
 	if (!retrievalQuery) return null
@@ -211,6 +227,7 @@ export async function surfaceToolMemories(input: {
 			env: input.env as Env,
 			baseUrl: input.callerContext.baseUrl,
 			userId,
+			request: input.callerContext.request,
 			query: retrievalQuery,
 			conversationId: input.conversationId,
 		}),

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import * as stripeClient from '#worker/billing/stripe-client.ts'
 import {
@@ -80,9 +81,13 @@ function stripeUser(
 	return {
 		rows,
 		deleteVectors,
-		meter: userMeterRpc({ env, userId: stableUserId }),
+		meter: userMeterRpc({ env, userId: ownerIdFromStored(stableUserId) }),
 		deleteAccount: () =>
-			deleteUserAccount({ env, dbUserId: 1, mcpUserId: stableUserId }),
+			deleteUserAccount({
+				env,
+				dbUserId: 1,
+				mcpUserId: ownerIdFromStored(stableUserId),
+			}),
 	}
 }
 
@@ -132,6 +137,24 @@ test('account deletion cancels Stripe billing before cleanup and keeps customer 
 		stripeSubscription('sub_incomplete', 'incomplete'),
 		stripeSubscription('sub_canceled', 'canceled'),
 		stripeSubscription('sub_expired', 'incomplete_expired'),
+		// Shared Stripe account product: never cancel or refund.
+		{
+			id: 'sub_gratitext',
+			status: 'active',
+			cancel_at: null,
+			current_period_end: undefined,
+			metadata: undefined,
+			items: {
+				data: [
+					{
+						id: undefined,
+						quantity: undefined,
+						price: { id: 'price_gratitext_premium_15' },
+						current_period_end: undefined,
+					},
+				],
+			},
+		},
 	])
 	const pro = stripeUser('user-pro', 'cus_pro')
 	const result = await pro.deleteAccount()
@@ -149,6 +172,9 @@ test('account deletion cancels Stripe billing before cleanup and keeps customer 
 		'sub_paused',
 		'sub_incomplete',
 	])
+	expect(subscriptionIdsOf(stripe.cancelSubscription.mock.calls)).not.toContain(
+		'sub_gratitext',
+	)
 	expect(stripe.deleteCustomer).toHaveBeenCalledWith(
 		expect.any(Object),
 		'cus_pro',
@@ -194,7 +220,7 @@ test('account deletion cancels Stripe billing before cleanup and keeps customer 
 	expect(consoleError).toHaveBeenCalledWith(
 		'account_deletion_stripe_cleanup_failed',
 		expect.objectContaining({
-			userId: 'user-customer-failure',
+			userId: ownerIdFromStored('user-customer-failure'),
 			error: expect.any(Error),
 		}),
 	)
@@ -653,7 +679,7 @@ test('an invoice never refunds more than it was paid net of earlier credit notes
 		// (a) Upgrade invoice, half the period remaining:
 		// floor(2900 * 15d / 30d) = 1450 fits under the 1700 net.
 		{
-			stableUserId: 'user-cap-fits',
+			stableUserId: ownerIdFromStored('user-cap-fits'),
 			invoice: upgradeInvoice(),
 			expectedPreviews: [1450],
 			expectedCreate: [1450, 1450],
@@ -662,7 +688,7 @@ test('an invoice never refunds more than it was paid net of earlier credit notes
 		// exceeds the 1700 net, so the line is scaled by 1700 / 2610 and
 		// previewed again.
 		{
-			stableUserId: 'user-cap-scaled',
+			stableUserId: ownerIdFromStored('user-cap-scaled'),
 			nowMs: refundPeriodTenthMs,
 			invoice: upgradeInvoice(),
 			expectedPreviews: [2610, 1700],
@@ -671,7 +697,7 @@ test('an invoice never refunds more than it was paid net of earlier credit notes
 		// (c) Support already credited 1000 of the 1200 paid, by any issuer, so
 		// only 200 is left to give back.
 		{
-			stableUserId: 'user-cap-prior-note',
+			stableUserId: ownerIdFromStored('user-cap-prior-note'),
 			invoice: paidInvoice({ id: 'in_prior', amountPaid: 1200 }),
 			creditNotes: [supportNote('cn_support', 'in_prior', 1000)],
 			expectedPreviews: [600, 200],
@@ -680,7 +706,7 @@ test('an invoice never refunds more than it was paid net of earlier credit notes
 		// (d) Earlier notes already consumed everything paid; a voided note
 		// does not count against the cap.
 		{
-			stableUserId: 'user-cap-exhausted',
+			stableUserId: ownerIdFromStored('user-cap-exhausted'),
 			invoice: paidInvoice({ id: 'in_exhausted', amountPaid: 1200 }),
 			creditNotes: [
 				supportNote('cn_support_a', 'in_exhausted', 700),
@@ -704,7 +730,7 @@ test('an invoice never refunds more than it was paid net of earlier credit notes
 		// previews at 649 and is issued. The gross line and the net,
 		// tax-inclusive preview only ever meet as a ratio.
 		{
-			stableUserId: 'user-cap-promo-tax',
+			stableUserId: ownerIdFromStored('user-cap-promo-tax'),
 			invoice: paidInvoice({
 				id: 'in_promo_tax',
 				amountPaid: 1595,

@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { getStaticPackageDependentsSummary } from '#worker/package-runtime/static-package-dependents.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 
 async function runSql(sql: string, ...values: Array<unknown>) {
 	await env.APP_DB.prepare(sql)
@@ -32,6 +33,7 @@ async function ensurePublishedBundleArtifactDependencySchema() {
 		search_text TEXT,
 		source_id TEXT NOT NULL,
 		has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+		has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 		hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 		is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 		locked_at TEXT,
@@ -63,6 +65,7 @@ async function ensurePublishedBundleArtifactDependencySchema() {
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	await ensureSoftDeleteTestColumns(env.APP_DB)
 }
 
 async function insertPackage(input: {

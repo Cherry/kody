@@ -1,6 +1,7 @@
 import { type JsonSchemaToolDescriptor } from '@cloudflare/codemode'
 import { z, type ZodType } from 'zod'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
+import { type SurfacePermission } from '#worker/authorization/authorize.ts'
 import { type FeatureFlagKey } from '#universal/feature-flags/registry.ts'
 import { type ApiTokenRecord } from '#worker/api-tokens/service.ts'
 import { type CapabilityDomain } from './domain-metadata.ts'
@@ -72,7 +73,28 @@ export type CapabilityDefinition<
 	readOnly?: boolean
 	idempotent?: boolean
 	destructive?: boolean
+	/**
+	 * Org permission the caller must hold to call this capability, checked
+	 * at dispatch by `authorizeSurface`. Handlers still `authorize` the
+	 * concrete resource they touch.
+	 */
+	orgPermission: SurfacePermission
+	/**
+	 * The capability needs a live person: role, membership, and invite
+	 * changes. It never runs from a triggered run (cron
+	 * job, webhook, subscription, inbound email) or package code one started,
+	 * whatever the enabler's role. `true` always applies; a function decides
+	 * from the parsed input. Checked at dispatch by `assertLivePerson`.
+	 */
+	requiresLivePerson?:
+		| true
+		| ((
+				args: InferCapabilitySchema<TInputSchema>,
+				ctx: CapabilityContext,
+		  ) => boolean | Promise<boolean>)
+	/** Site-admin role (separate from org permissions). */
 	requiredRole?: RoleName
+	/** Site-admin permission (separate from org permissions). */
 	requiredPermission?: PermissionString
 	featureFlag?: FeatureFlagKey
 	source?: CapabilitySource
@@ -100,6 +122,9 @@ export type Capability<TResult = CapabilityResult> = {
 	readOnly: boolean
 	idempotent: boolean
 	destructive: boolean
+	orgPermission: SurfacePermission
+	/** `by-input`: the definition decides per call from the parsed input. */
+	requiresLivePerson: 'always' | 'by-input' | 'never'
 	requiredRole?: RoleName
 	requiredPermission?: PermissionString
 	featureFlag?: FeatureFlagKey
@@ -123,6 +148,7 @@ export type CapabilitySpec = {
 	readOnly: boolean
 	idempotent: boolean
 	destructive: boolean
+	orgPermission: SurfacePermission
 	requiredRole?: RoleName
 	requiredPermission?: PermissionString
 	featureFlag?: FeatureFlagKey

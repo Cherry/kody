@@ -1,3 +1,4 @@
+import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
 import { createMultiMatcher } from 'remix/route-pattern/match'
 import { isAccountConnectionAgent } from '#universal/account-connections.ts'
 import { type AppLoaderData } from '#universal/loader-data.ts'
@@ -27,6 +28,8 @@ type DocumentHeadLink = {
 	hrefPath: string
 	type?: string
 	title?: string
+	/** Keep href origin-relative for same-origin assets (e.g. stylesheets under CSP). */
+	sameOrigin?: boolean
 }
 
 type DocumentHeadOg = {
@@ -128,7 +131,7 @@ function communityListingHead({
 function homeDocumentHead(
 	context: DocumentHeadContext,
 ): DocumentHeadDescriptor {
-	const head = publicPageHead('home', DEFAULT_DOCUMENT_TITLE)
+	const head = publicPageHead('home', publicOgPages.home.ogTitle)
 	const variant = readHomeOgVariant(context.search)
 	if (!variant || !head.og) return head
 	const page = applyHomeOgVariant(publicOgPages.home, variant)
@@ -157,6 +160,24 @@ function publicPageHead(
 			imagePath: `/og/${pageId}.png`,
 		},
 		links: extra?.links,
+	}
+}
+
+function featurePageHead(
+	pageId: PublicOgPageId,
+	title: string,
+): DocumentHeadDescriptor {
+	return {
+		...publicPageHead(pageId, title, {
+			links: [
+				{
+					rel: 'stylesheet',
+					hrefPath: '/feature-pages.css',
+					sameOrigin: true,
+				},
+			],
+		}),
+		description: publicOgPages[pageId].ogDescription,
 	}
 }
 
@@ -196,35 +217,16 @@ function docDetailHead({
  */
 const routeDocumentHeads = {
 	[routePattern(routes.home)]: homeDocumentHead,
-	[routePattern(routes.account)]: titleOnly('Account'),
-	[routePattern(routes.accountBilling)]: titleOnly('Billing'),
-	[routePattern(routes.accountBillingSuccess)]: titleOnly("You're in"),
+	[routePattern(routes.account)]: titleOnly('Profile'),
+	[routePattern(routes.accountSecurity)]: titleOnly('Security'),
+	[routePattern(routes.accountData)]: titleOnly('Data & deletion'),
+	[routePattern(routes.accountOrganizations)]: titleOnly('Organizations'),
+	[routePattern(routes.orgBilling)]: titleOnly('Billing'),
+	[routePattern(routes.orgBillingSuccess)]: titleOnly("You're in"),
 	[routePattern(routes.accountUsage)]: titleOnly('Usage'),
-	[routePattern(routes.accountWaiting)]: titleOnly('Waiting'),
 	[routePattern(routes.accountExperiments)]: titleOnly('Experiments'),
-	[routePattern(routes.accountConnections)]: titleOnly('Connections'),
-	[routePattern(routes.accountConnectionNew)]: titleOnly('Add connection'),
-	[routePattern(routes.accountConnectionNewAgent)]: ({ params }) => {
-		const agent = params.agent
-		return titleOnly(
-			isAccountConnectionAgent(agent)
-				? `Connect ${onboardingAgentLabel(agent)}`
-				: 'Add connection',
-		)
-	},
-	[routePattern(routes.accountShared)]: titleOnly('Shared packages'),
-	[routePattern(routes.accountIntegrations)]: titleOnly('Integrations'),
-	[routePattern(routes.accountOauthAppDetail)]: titleOnly('Integrations'),
-	[routePattern(routes.accountIntegrationsApprove)]: titleOnly('Integrations'),
-	[routePattern(routes.accountIntegrationDetail)]: titleOnly('Integrations'),
-	[routePattern(routes.accountMcpServers)]: titleOnly('MCP servers'),
-	[routePattern(routes.accountMcpServerNew)]: titleOnly('MCP servers'),
-	[routePattern(routes.accountMcpServerDetail)]: titleOnly('MCP servers'),
 	[routePattern(routes.communityPackageApprovePublish)]: titleOnly(
 		'Approve package publish',
-	),
-	[routePattern(routes.communityPackageApproveChanges)]: titleOnly(
-		'Approve shared package changes',
 	),
 	[routePattern(routes.accountPackageFiles)]: ({ loaderData }) => {
 		const files = loaderData?.packageFiles
@@ -232,29 +234,6 @@ const routeDocumentHeads = {
 	},
 	[routePattern(routes.accountPasskeys)]: titleOnly('Passkeys'),
 	[routePattern(routes.accountMcpOauthClients)]: titleOnly('MCP OAuth clients'),
-	[routePattern(routes.accountSecrets)]: titleOnly('Secrets'),
-	[routePattern(routes.accountSecretNew)]: titleOnly('Secrets'),
-	[routePattern(routes.accountSecretsApprove)]: titleOnly('Secrets'),
-	[routePattern(routes.accountSecretProviders)]: titleOnly('Secret providers'),
-	[routePattern(routes.accountSecretProvidersApprove)]:
-		titleOnly('Secret providers'),
-	[routePattern(routes.accountSecretUserDetail)]: titleOnly('Secrets'),
-	[routePattern(routes.accountSecretPackageDetail)]: titleOnly('Secrets'),
-	[routePattern(routes.accountSecretSessionDetail)]: titleOnly('Secrets'),
-	[routePattern(routes.accountValues)]: titleOnly('Values'),
-	[routePattern(routes.accountValueNew)]: titleOnly('Values'),
-	[routePattern(routes.accountValueDetail)]: titleOnly('Values'),
-	[routePattern(routes.accountJobs)]: titleOnly('Jobs'),
-	[routePattern(routes.accountJobDetail)]: titleOnly('Jobs'),
-	[routePattern(routes.accountWorkflows)]: titleOnly('Workflows'),
-	[routePattern(routes.accountWorkflowDetail)]: titleOnly('Workflows'),
-	[routePattern(routes.accountWebhooks)]: titleOnly('Webhooks'),
-	[routePattern(routes.accountActivity)]: titleOnly('Activity'),
-	[routePattern(routes.accountActivityDetail)]: titleOnly('Activity'),
-	[routePattern(routes.accountMemories)]: titleOnly('Memories'),
-	[routePattern(routes.accountMemoryDetail)]: titleOnly('Memories'),
-	[routePattern(routes.accountEmail)]: titleOnly('Email inbox'),
-	[routePattern(routes.accountEmailDetail)]: titleOnly('Email inbox'),
 	[routePattern(routes.accountTwoFactor)]: titleOnly(
 		'Two-factor authentication',
 	),
@@ -265,7 +244,6 @@ const routeDocumentHeads = {
 		'Admin reserved usernames',
 	),
 	[routePattern(routes.adminFeatureFlags)]: titleOnly('Admin feature flags'),
-	[routePattern(routes.adminBanners)]: titleOnly('Admin banners'),
 	[routePattern(routes.adminPlatformIntegrations)]: titleOnly(
 		'Admin platform integrations',
 	),
@@ -432,8 +410,51 @@ const routeDocumentHeads = {
 		'Get started',
 	),
 	[routePattern(routes.pendingVerification)]: titleOnly('Verify your email'),
+	[routePattern(routes.features)]: featurePageHead(
+		'features',
+		'Kody features for your AI agents | Kody',
+	),
+	[routePattern(routes.featureMemory)]: featurePageHead(
+		'feature-memory',
+		'Shared memory for your AI agents | Kody',
+	),
+	[routePattern(routes.featureSecrets)]: featurePageHead(
+		'feature-secrets',
+		'API secrets for your AI agents | Kody',
+	),
+	[routePattern(routes.featurePackages)]: featurePageHead(
+		'feature-packages',
+		'Reusable packages for your AI agents | Kody',
+	),
+	[routePattern(routes.featureTriggers)]: featurePageHead(
+		'feature-triggers',
+		'Triggers and automation for your AI agents | Kody',
+	),
+	[routePattern(routes.featureIntegrations)]: featurePageHead(
+		'feature-integrations',
+		'Service connections for your AI agents | Kody',
+	),
+	[routePattern(routes.featureApps)]: featurePageHead(
+		'feature-apps',
+		'Package apps for your AI agents | Kody',
+	),
+	[routePattern(routes.business)]: publicPageHead(
+		'business',
+		'AI Agent Cloud for Business and Agencies | Kody',
+	),
 	[routePattern(routes.pricing)]: publicPageHead('pricing', 'Pricing'),
 	[routePattern(routes.faq)]: publicPageHead('faq', 'FAQ'),
+	[routePattern(routes.n8nAlternatives)]: acquisitionHead,
+	[routePattern(routes.mcpGateway)]: acquisitionHead,
+	[routePattern(routes.sharedMemory)]: acquisitionHead,
+	[routePattern(routes.gmail)]: acquisitionHead,
+	[routePattern(routes.customTools)]: acquisitionHead,
+	[routePattern(routes.composioAlternatives)]: acquisitionHead,
+	[routePattern(routes.slack)]: acquisitionHead,
+	[routePattern(routes.scheduledWorkflows)]: acquisitionHead,
+	[routePattern(routes.claudeIntegrations)]: acquisitionHead,
+	[routePattern(routes.useCases)]: acquisitionHead,
+	[routePattern(routes.automation)]: acquisitionHead,
 	[routePattern(routes.caseStudies)]: publicPageHead(
 		'case-studies',
 		'Case studies',
@@ -446,6 +467,14 @@ const routeDocumentHeads = {
 		'reset-password',
 		'Reset password',
 	),
+	[routePattern(routes.orgInviteJoin)]: ({ loaderData }) => {
+		const join = loaderData?.orgInviteJoin
+		if (join?.ok) {
+			const name = join.org.displayName?.trim() || join.org.slug
+			return titleOnly(`Join ${name}`)
+		}
+		return titleOnly('Invite link')
+	},
 	[routePattern(routes.verify)]: titleOnly('Two-factor authentication'),
 	[routePattern(routes.verifyEmail)]: ({ loaderData }) => {
 		const verification = loaderData?.emailVerification
@@ -478,6 +507,7 @@ const routeDocumentHeads = {
 		return titleOnly(provider ? `Connect ${provider}` : 'Connect an account')
 	},
 	[routePattern(routes.connectSecrets)]: titleOnly('Allow secret hosts'),
+	[routePattern(routes.connectSecretSet)]: titleOnly('Set secret'),
 	[routePattern(routes.connectWebhookApply)]: titleOnly(
 		'Approve webhook apply destination',
 	),
@@ -485,9 +515,58 @@ const routeDocumentHeads = {
 	[oauthPaths.callback]: titleOnly('OAuth callback'),
 } as const satisfies Record<string, DocumentHeadResolver>
 
+const orgDocumentHeads: Record<string, DocumentHeadResolver> = {
+	[routePattern(routes.orgActivity)]: titleOnly('Activity'),
+	[routePattern(routes.orgConnections)]: ({ pathname }) => {
+		const rest = pathname.split('/-/connections/')[1]?.replace(/\/$/, '') ?? ''
+		if (rest === 'new') return titleOnly('Add connection')
+		if (rest === 'usage') return titleOnly('Connection usage')
+		if (rest.startsWith('new/')) {
+			const agent = rest.slice('new/'.length).split('/')[0] ?? ''
+			let decoded = agent
+			try {
+				decoded = decodeURIComponent(agent)
+			} catch {
+				decoded = agent
+			}
+			return titleOnly(
+				isAccountConnectionAgent(decoded)
+					? `Connect ${onboardingAgentLabel(decoded)}`
+					: 'Add connection',
+			)
+		}
+		return titleOnly('Connections')
+	},
+	[routePattern(routes.orgEmail)]: titleOnly('Email inbox'),
+	[routePattern(routes.orgIntegrations)]: titleOnly('Integrations'),
+	[routePattern(routes.orgJobs)]: titleOnly('Jobs'),
+	[routePattern(routes.orgMcpServers)]: titleOnly('MCP servers'),
+	[routePattern(routes.orgMemories)]: titleOnly('Memories'),
+	[routePattern(routes.orgOverview)]: titleOnly('Overview'),
+	[routePattern(routes.orgPackages)]: titleOnly('Repositories'),
+	[routePattern(routes.orgSecretProviders)]: titleOnly('Secret providers'),
+	[routePattern(routes.orgSecrets)]: titleOnly('Secrets'),
+	[routePattern(routes.orgValues)]: titleOnly('Values'),
+	[routePattern(routes.orgWaiting)]: titleOnly('Waiting'),
+	[routePattern(routes.orgWebhooks)]: titleOnly('Webhooks'),
+	[routePattern(routes.orgWorkflows)]: titleOnly('Workflows'),
+	// Static `/-/` outranks `/@:username/:kodyId/settings` (kodyId would be `-`).
+	[routePattern(routes.orgSettings)]: titleOnly('Settings'),
+	[routePattern(routes.orgMembers)]: titleOnly('Members'),
+	[routePattern(routes.orgTeams)]: titleOnly('Teams'),
+	[routePattern(routes.orgGrants)]: titleOnly('Grants'),
+	[routePattern(routes.orgCollaborators)]: titleOnly('Collaborators'),
+	[routePattern(routes.accountOrganizationsNew)]: titleOnly(
+		'Create organization',
+	),
+}
+
 const documentHeadMatcher = (() => {
 	const matcher = createMultiMatcher<DocumentHeadResolver>()
-	for (const [pattern, resolver] of Object.entries(routeDocumentHeads)) {
+	for (const [pattern, resolver] of Object.entries({
+		...routeDocumentHeads,
+		...orgDocumentHeads,
+	})) {
 		matcher.add(pattern, resolver)
 	}
 	return matcher
@@ -551,9 +630,25 @@ export function absolutizeDocumentHead(
 			: undefined,
 		links: descriptor.links?.map((link) => ({
 			rel: link.rel,
-			href: toAbsolute(link.hrefPath),
+			href: link.sameOrigin ? link.hrefPath : toAbsolute(link.hrefPath),
 			type: link.type,
 			title: link.title,
 		})),
+	}
+}
+
+function acquisitionHead({
+	pathname,
+}: {
+	pathname: string
+}): DocumentHeadDescriptor {
+	const page = acquisitionPageSummaries.find((entry) => entry.path === pathname)
+	if (!page) return { title: NOT_FOUND_DOCUMENT_TITLE }
+	const title = `${page.title} | Kody`
+	return {
+		title,
+		description: page.description,
+		canonicalPath: page.path,
+		og: { title, description: page.description, imagePath: '/og/home.png' },
 	}
 }

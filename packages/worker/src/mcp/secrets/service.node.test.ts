@@ -1,9 +1,9 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { isEntitlementLimitError } from '#worker/entitlements/errors.ts'
 import { planLimits } from '#universal/plans.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
@@ -24,9 +24,10 @@ import {
 	updateUserSecretsForPackageAtomically,
 } from './service.ts'
 import { createUnresolvedSecretMessage } from './unresolved-secret.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const migrationsDirectory = new URL('../../../migrations/', import.meta.url)
-const userId = 'user-123'
+const userId = ownerIdFromStored('user-123')
 const executeContext = ctx()
 
 function ctx(packageId: string | null = null, sessionId: string | null = null) {
@@ -39,13 +40,19 @@ async function createSecretEnv(
 	const sqlite = new DatabaseSync(':memory:')
 	applyAllMigrations(sqlite, migrationsDirectory)
 	if (input.email) {
-		const stableUserId = await createStableUserIdFromEmail(input.email)
+		const stableUserId = testStableUserIdFromEmail(input.email)
 		sqlite
 			.prepare(
-				`INSERT INTO users (id, username, email, password_hash, stable_user_id, plan)
-				 VALUES (1, 'planned', ?, 'hash', ?, ?)`,
+				`INSERT INTO users (id, username, email, password_hash, stable_user_id)
+				 VALUES (1, 'planned', ?, 'hash', ?)`,
 			)
-			.run(input.email, stableUserId, input.plan ?? null)
+			.run(input.email, stableUserId)
+		sqlite
+			.prepare(
+				`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+				 VALUES (?, 'planned', ?, '2026-07-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z')`,
+			)
+			.run(stableUserId, input.plan ?? 'free')
 		if (input.seededSecretCount) {
 			sqlite
 				.prepare(
@@ -101,6 +108,7 @@ test('resolveSecret returns the first scope hit in precedence order and ignores 
 		sessionExpiresAt: '2099-01-01T00:00:00.000Z',
 	})
 	const sessionHit = {
+		credentialId: expect.any(String),
 		found: true,
 		value: 'session-value',
 		scope: 'session',
@@ -179,7 +187,7 @@ test('listSecrets from execute lists caller-owned package metadata without weake
 	})
 	await saveSecret({
 		env,
-		userId: 'user-other',
+		userId: ownerIdFromStored('user-other'),
 		scope: 'package',
 		name: 'foreignToken',
 		value: 'other-user-value',
@@ -382,14 +390,14 @@ test('package writes to user secrets require every package approval and apply at
 
 test('saveSecret enforces plan secret quotas including updates and max ceiling', async () => {
 	const email = 'planned@example.com'
-	const plannedUserId = await createStableUserIdFromEmail(email)
+	const plannedUserId = testStableUserIdFromEmail(email)
 	const { env } = await createSecretEnv({ email, plan: 'pro' })
 	const limit = planLimits.pro.maxSecrets
 	if (limit === null) throw new Error('Expected a numeric pro secret limit.')
 	const save = (targetEnv: typeof env, name: string, value = 'secret-value') =>
 		saveSecret({
 			env: targetEnv,
-			userId: plannedUserId,
+			userId: ownerIdFromStored(plannedUserId),
 			userEmail: email,
 			scope: 'user',
 			name,
@@ -413,7 +421,7 @@ test('saveSecret enforces plan secret quotas including updates and max ceiling',
 	await expect(
 		saveSecret({
 			env,
-			userId: plannedUserId,
+			userId: ownerIdFromStored(plannedUserId),
 			userEmail: email,
 			scope: 'user',
 			name: 'quota-secret-0',

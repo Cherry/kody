@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const entitlementMocks = vi.hoisted(() => ({
@@ -23,6 +24,10 @@ type ActiveUserRow = {
 	plan: string
 	stripe_plan: string | null
 	entitlement_ladder: string | null
+	stripe_credits_eligible?: number | null
+	admin_credits_eligible?: number | null
+	second_agent_standard_gift_expires_at?: string | null
+	referral_standard_credit_expires_at?: string | null
 	event_count: number
 }
 
@@ -90,7 +95,7 @@ function createFleetDb(input: {
 							input.runtimeLeaders,
 						],
 						[
-							has('u.plan', 'entitlement_ladder', 'event_count'),
+							has('o.plan', 'entitlement_ladder', 'event_count'),
 							input.activeUsers,
 						],
 						[
@@ -108,6 +113,7 @@ function createFleetDb(input: {
 							has('sum(total_duration_ms)', 'user_id in'),
 							byUser(input.runtimeByUser, 'total_duration_ms'),
 						],
+						[has('from org_limit_overrides'), []],
 					]
 					const route = routes.find(([matches]) => matches)
 					if (!route) throw new Error(`Unsupported fleet query: ${query}`)
@@ -131,6 +137,10 @@ function activeUser(
 		plan,
 		stripe_plan: null,
 		entitlement_ladder: 'public',
+		stripe_credits_eligible: 0,
+		admin_credits_eligible: 0,
+		second_agent_standard_gift_expires_at: null,
+		referral_standard_credit_expires_at: null,
 		event_count,
 		...overrides,
 	}
@@ -157,8 +167,9 @@ function consumptionCalls() {
 	return entitlementMocks.readAdminEntitlementConsumption.mock.calls.map(
 		([input]) => ({
 			usageUserId: input.usageUserId,
-			plan: input.plan,
-			ladder: input.ladder,
+			plan: input.entitlement.plan,
+			ladder: input.entitlement.ladder,
+			inboundReceivePlan: input.inboundReceive?.plan ?? null,
 		}),
 	)
 }
@@ -183,7 +194,7 @@ test('loadFleetUsageInsights returns bounded consumer rankings and pressure pane
 		],
 		metricLeaders: [
 			{
-				user_id: 'user-a',
+				user_id: ownerIdFromStored('user-a'),
 				username: 'alice',
 				metric: 'execute',
 				total_duration_ms: 1_000,
@@ -204,10 +215,18 @@ test('loadFleetUsageInsights returns bounded consumer rankings and pressure pane
 		now,
 	})
 	expect(data.topRuntimeDurationConsumers).toEqual([
-		{ stableUserId: 'user-a', username: 'alice', totalDurationMs: 3_600_000 },
+		{
+			stableUserId: ownerIdFromStored('user-a'),
+			username: 'alice',
+			totalDurationMs: 3_600_000,
+		},
 	])
 	expect(data.topEventCountConsumers).toEqual([
-		{ stableUserId: 'user-b', username: 'bob', eventCount: 42 },
+		{
+			stableUserId: ownerIdFromStored('user-b'),
+			username: 'bob',
+			eventCount: 42,
+		},
 	])
 	expect(eventCountBinds.length).toBeGreaterThan(0)
 	expect(eventCountBinds[0]?.slice(1, 6)).toEqual([
@@ -219,11 +238,15 @@ test('loadFleetUsageInsights returns bounded consumer rankings and pressure pane
 	])
 	expect(data.topDurationConsumersByMetric).toHaveLength(3)
 	expect(data.topDurationConsumersByMetric[0]?.consumers).toEqual([
-		{ stableUserId: 'user-a', username: 'alice', totalDurationMs: 1_000 },
+		{
+			stableUserId: ownerIdFromStored('user-a'),
+			username: 'alice',
+			totalDurationMs: 1_000,
+		},
 	])
 	expect(data.entitlementPressure).toEqual([
 		{
-			stableUserId: 'user-a',
+			stableUserId: ownerIdFromStored('user-a'),
 			username: 'alice',
 			plan: 'free',
 			pressuredResources: [
@@ -244,7 +267,7 @@ test('loadFleetUsageInsights returns bounded consumer rankings and pressure pane
 		includedPerAccountMonth: 1000,
 		topConsumers: [
 			{
-				stableUserId: 'user-c',
+				stableUserId: ownerIdFromStored('user-c'),
 				username: 'cara',
 				uniqueWorkerDays: 90,
 				estimatedGrossUsd: 0.18,
@@ -300,7 +323,7 @@ test('detectFleetUsagePressure flags entitlement, runtime, and unique-worker cos
 	expect(issues).toEqual([
 		{
 			kind: 'entitlement',
-			stableUserId: 'user-a',
+			stableUserId: ownerIdFromStored('user-a'),
 			username: 'alice',
 			resource: 'secrets',
 			label: 'secrets',
@@ -310,7 +333,7 @@ test('detectFleetUsagePressure flags entitlement, runtime, and unique-worker cos
 		},
 		{
 			kind: 'dynamic_worker_cost',
-			stableUserId: 'user-a',
+			stableUserId: ownerIdFromStored('user-a'),
 			username: 'alice',
 			uniqueWorkerDays: 1000,
 			estimatedGrossUsd: 2,
@@ -318,7 +341,7 @@ test('detectFleetUsagePressure flags entitlement, runtime, and unique-worker cos
 		},
 		{
 			kind: 'entitlement',
-			stableUserId: 'user-admin',
+			stableUserId: ownerIdFromStored('user-admin'),
 			username: 'kentcdodds',
 			resource: 'saved_packages',
 			label: 'saved packages',
@@ -328,7 +351,7 @@ test('detectFleetUsagePressure flags entitlement, runtime, and unique-worker cos
 		},
 		{
 			kind: 'runtime_duration',
-			stableUserId: 'user-b',
+			stableUserId: ownerIdFromStored('user-b'),
 			username: 'bob',
 			totalDurationMs: fleetRuntimeDurationAlertThresholdMs + 1,
 		},
@@ -340,9 +363,24 @@ test('detectFleetUsagePressure flags entitlement, runtime, and unique-worker cos
 	])
 	expect(consumptionCalls()).toEqual(
 		expect.arrayContaining([
-			{ usageUserId: 'user-a', plan: 'free', ladder: 'public' },
-			{ usageUserId: 'user-b', plan: 'pro', ladder: 'public' },
-			{ usageUserId: 'user-admin', plan: 'max', ladder: 'public' },
+			{
+				usageUserId: ownerIdFromStored('user-a'),
+				plan: 'free',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
+			{
+				usageUserId: ownerIdFromStored('user-b'),
+				plan: 'pro',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
+			{
+				usageUserId: ownerIdFromStored('user-admin'),
+				plan: 'max',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
 		]),
 	)
 })
@@ -357,7 +395,7 @@ test('fleet entitlement pressure scores legacy Standard against the legacy outbo
 				'outbound_fetches_per_day',
 				'outbound fetches / day',
 				outboundCurrent,
-				input.ladder === 'legacy'
+				input.entitlement.ladder === 'legacy'
 					? legacyStandardOutboundLimit
 					: publicStandardOutboundLimit,
 			),
@@ -381,8 +419,18 @@ test('fleet entitlement pressure scores legacy Standard against the legacy outbo
 	])
 	expect(consumptionCalls()).toEqual(
 		expect.arrayContaining([
-			{ usageUserId: 'grant', plan: 'standard', ladder: 'legacy' },
-			{ usageUserId: 'pat', plan: 'standard', ladder: 'public' },
+			{
+				usageUserId: ownerIdFromStored('grant'),
+				plan: 'standard',
+				ladder: 'legacy',
+				inboundReceivePlan: null,
+			},
+			{
+				usageUserId: ownerIdFromStored('pat'),
+				plan: 'standard',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
 		]),
 	)
 	const outboundSnapshot = (limit: number, overEightyPercent: boolean) => [
@@ -395,13 +443,13 @@ test('fleet entitlement pressure scores legacy Standard against the legacy outbo
 	]
 	expect(snapshots).toEqual([
 		expect.objectContaining({
-			stableUserId: 'grant',
+			stableUserId: ownerIdFromStored('grant'),
 			plan: 'standard',
 			ladder: 'legacy',
 			entitlements: outboundSnapshot(legacyStandardOutboundLimit, false),
 		}),
 		expect.objectContaining({
-			stableUserId: 'pat',
+			stableUserId: ownerIdFromStored('pat'),
 			plan: 'standard',
 			ladder: 'public',
 			entitlements: outboundSnapshot(publicStandardOutboundLimit, true),
@@ -417,17 +465,218 @@ test('fleet entitlement pressure scores legacy Standard against the legacy outbo
 	expect(issues).toEqual([
 		{
 			kind: 'entitlement',
-			stableUserId: 'pat',
+			stableUserId: ownerIdFromStored('pat'),
 			username: 'pat',
 			...patPressure,
 		},
 	])
 	expect(insights.entitlementPressure).toEqual([
 		{
-			stableUserId: 'pat',
+			stableUserId: ownerIdFromStored('pat'),
 			username: 'pat',
 			plan: 'standard',
 			pressuredResources: [patPressure],
 		},
 	])
+})
+
+test('fleet entitlement pressure scores temporary Pro gift overlays, not Free caps', async () => {
+	const packagesOverFree = 15
+	const freePackageLimit = 10
+	const publicProPackageLimit = 200
+	const receivesAtFreeCap = 10
+	const freeReceiveLimit = 10
+	const publicProReceiveLimit = 2_000
+	entitlementMocks.readAdminEntitlementConsumption.mockImplementation(
+		async (input) => {
+			const packageLimit =
+				input.entitlement.plan === 'free'
+					? freePackageLimit
+					: publicProPackageLimit
+			const receivePlan = input.inboundReceive?.plan ?? input.entitlement.plan
+			const receiveLimit =
+				receivePlan === 'free' ? freeReceiveLimit : publicProReceiveLimit
+			return [
+				consumption(
+					'saved_packages',
+					'saved packages',
+					packagesOverFree,
+					packageLimit,
+				),
+				consumption(
+					'email_receives_per_day',
+					'email receives / day',
+					receivesAtFreeCap,
+					receiveLimit,
+				),
+			]
+		},
+	)
+	const giftExpiresAt = '2026-07-20T00:00:00.000Z'
+	const db = createFleetDb({
+		activeUsers: [
+			activeUser('gifted', 'continuumpraxis', 'free', 90, {
+				second_agent_standard_gift_expires_at: giftExpiresAt,
+			}),
+			activeUser('base-free', 'freefolk', 'free', 80),
+			activeUser('expired-gift', 'pastgift', 'free', 70, {
+				second_agent_standard_gift_expires_at: '2026-07-01T00:00:00.000Z',
+			}),
+			activeUser('referral-gift', 'referred', 'free', 60, {
+				referral_standard_credit_expires_at: giftExpiresAt,
+			}),
+		],
+	})
+	const env = { APP_DB: db } as Env
+	const [snapshots, issues, insights] = await Promise.all([
+		loadFleetEntitlementCrossingSnapshots({ db, env, now }),
+		detectFleetUsagePressure({ db, env, now }),
+		loadFleetUsageInsights({ db, env, now }),
+	])
+
+	expect(consumptionCalls()).toEqual(
+		expect.arrayContaining([
+			{
+				usageUserId: ownerIdFromStored('gifted'),
+				plan: 'pro',
+				ladder: 'public',
+				inboundReceivePlan: 'free',
+			},
+			{
+				usageUserId: ownerIdFromStored('base-free'),
+				plan: 'free',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
+			{
+				usageUserId: ownerIdFromStored('expired-gift'),
+				plan: 'free',
+				ladder: 'public',
+				inboundReceivePlan: null,
+			},
+			{
+				usageUserId: ownerIdFromStored('referral-gift'),
+				plan: 'pro',
+				ladder: 'public',
+				inboundReceivePlan: 'free',
+			},
+		]),
+	)
+
+	expect(snapshots).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('gifted'),
+				plan: 'pro',
+				entitlements: expect.arrayContaining([
+					expect.objectContaining({
+						resource: 'saved_packages',
+						current: packagesOverFree,
+						limit: publicProPackageLimit,
+						overEightyPercent: false,
+					}),
+					expect.objectContaining({
+						resource: 'email_receives_per_day',
+						current: receivesAtFreeCap,
+						limit: freeReceiveLimit,
+						overEightyPercent: true,
+					}),
+				]),
+			}),
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('base-free'),
+				plan: 'free',
+				entitlements: expect.arrayContaining([
+					expect.objectContaining({
+						resource: 'saved_packages',
+						current: packagesOverFree,
+						limit: freePackageLimit,
+						overEightyPercent: true,
+					}),
+				]),
+			}),
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('expired-gift'),
+				plan: 'free',
+				entitlements: expect.arrayContaining([
+					expect.objectContaining({
+						limit: freePackageLimit,
+						overEightyPercent: true,
+					}),
+				]),
+			}),
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('referral-gift'),
+				plan: 'pro',
+				entitlements: expect.arrayContaining([
+					expect.objectContaining({
+						resource: 'saved_packages',
+						limit: publicProPackageLimit,
+						overEightyPercent: false,
+					}),
+					expect.objectContaining({
+						resource: 'email_receives_per_day',
+						limit: freeReceiveLimit,
+						overEightyPercent: true,
+					}),
+				]),
+			}),
+		]),
+	)
+
+	const freePackagePressure = {
+		kind: 'entitlement' as const,
+		resource: 'saved_packages',
+		label: 'saved packages',
+		current: packagesOverFree,
+		limit: freePackageLimit,
+		percentOfLimit: packagesOverFree / freePackageLimit,
+	}
+	const freeReceivePressure = {
+		kind: 'entitlement' as const,
+		resource: 'email_receives_per_day',
+		label: 'email receives / day',
+		current: receivesAtFreeCap,
+		limit: freeReceiveLimit,
+		percentOfLimit: receivesAtFreeCap / freeReceiveLimit,
+	}
+	expect(issues).toEqual(
+		expect.arrayContaining([
+			{
+				...freePackagePressure,
+				stableUserId: ownerIdFromStored('base-free'),
+				username: 'freefolk',
+			},
+			{
+				...freePackagePressure,
+				stableUserId: ownerIdFromStored('expired-gift'),
+				username: 'pastgift',
+			},
+			{
+				...freeReceivePressure,
+				stableUserId: ownerIdFromStored('gifted'),
+				username: 'continuumpraxis',
+			},
+			{
+				...freeReceivePressure,
+				stableUserId: ownerIdFromStored('referral-gift'),
+				username: 'referred',
+			},
+		]),
+	)
+	expect(issues).not.toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('gifted'),
+				resource: 'saved_packages',
+			}),
+			expect.objectContaining({
+				stableUserId: ownerIdFromStored('referral-gift'),
+				resource: 'saved_packages',
+			}),
+		]),
+	)
+	expect(
+		insights.entitlementPressure.map((row) => row.stableUserId).sort(),
+	).toEqual(['base-free', 'expired-gift', 'gifted', 'referral-gift'])
 })

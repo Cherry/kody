@@ -15,6 +15,8 @@
  *   a per-user Durable Object, never `APP_DB`.
  */
 
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+
 export const runSurfaceValues = [
 	'execute',
 	'export',
@@ -72,7 +74,7 @@ export const runRecordPlatformInterruptedErrorMessage =
 
 /**
  * Idempotent unattended deliveries are retried by their owning scheduler,
- * queue, or invocation token, so retain their interrupted attempt as ignored
+ * queue, or webhook delivery, so retain their interrupted attempt as ignored
  * history instead of an open user-facing failure. Interactive and
  * non-idempotent attempts stay open.
  */
@@ -120,7 +122,7 @@ export type RunLogLevel = (typeof runLogLevelValues)[number]
  *   same way jobs and webhooks do.
  * - `on-failure`: nothing is persisted unless the run ends in `error`.
  *   {@link runPersistenceForContext} selects this only for key-less `export`
- *   (the lean `packages.invoke` path). That caller already holds the result
+ *   (the lean host export path). That caller already holds the result
  *   inline, and the user-visible history is the parent execute, job, webhook,
  *   or app run. An execute `idempotencyKey` claims the row for replay; it does
  *   not decide whether a success is stored.
@@ -148,8 +150,8 @@ export function runPersistenceForSurface(surface: RunSurface): RunPersistence {
 
 /**
  * Everything a caller knows about a run when it starts. `packageId`/`kodyId`
- * are optional because ad-hoc execute, standalone `kody.json` jobs, and inline
- * workflows have no owning package — that optionality is why run records are
+ * are optional because ad-hoc execute and inline workflows have no owning
+ * package — that optionality is why run records are
  * user-scoped rather than package-shaped.
  */
 export type RunRecordContext = {
@@ -171,9 +173,9 @@ export type RunRecordContext = {
 
 /**
  * Persistence for one begin/finish pair. Same as
- * {@link runPersistenceForSurface} except key-less `export` (the lean
- * `packages.invoke` path, which has no ledger row and returns its result
- * inline) downgrades to `on-failure`.
+ * {@link runPersistenceForSurface} except key-less `export` (the lean host
+ * export path, which has no ledger row and returns its result inline)
+ * downgrades to `on-failure`.
  */
 export function runPersistenceForContext(
 	context: Pick<RunRecordContext, 'surface' | 'idempotencyKey'>,
@@ -193,7 +195,7 @@ export function runPersistenceForContext(
  */
 export type RunRecordHandle = {
 	id: string
-	userId: string
+	userId: OwnerId
 	startedAt: string
 	persistence: RunPersistence
 	context: RunRecordContext
@@ -260,10 +262,14 @@ export type RunRecordFilter = {
 	status?: RunStatus | null
 	packageId?: string | null
 	jobId?: string | null
+	/** Workflow run id (`dynwf-…` / `pkgwf-…`) from `workflows.create`. */
+	workflowId?: string | null
 	/** Exact match on the run's display `name` (e.g. webhook or job name). */
 	name?: string | null
 	/** ISO 8601 lower bound on `startedAt`, inclusive. */
 	since?: string | null
+	/** ISO 8601 upper bound on `startedAt`, exclusive. */
+	until?: string | null
 	/**
 	 * Soft error-triage filter. Omit / `null` means no triage filter (all runs).
 	 * User-facing `runList` and Activity pass `open` by default.
@@ -335,6 +341,12 @@ export const runRecordStaleRunningTtlMs = 24 * 60 * 60 * 1000
  */
 export const runRecordStaleRunningTtlMsShortLived = 3 * 60 * 1000
 
+/**
+ * Webhook runs: ack-queue deliveries get the 5-minute background sandbox
+ * budget, so a legitimate run must not be reconciled before it can finish.
+ */
+export const runRecordStaleRunningTtlMsBackground = 10 * 60 * 1000
+
 /** Jobs can run longer than a single sandbox invoke; still bound the history row. */
 export const runRecordStaleRunningTtlMsJob = 6 * 60 * 60 * 1000
 
@@ -350,11 +362,12 @@ export function runRecordStaleRunningTtlMsForSurface(
 		case 'execute':
 		case 'export':
 		case 'retriever':
-		case 'webhook':
 		case 'subscription':
 		case 'app_fetch':
 		case 'app_realtime':
 			return runRecordStaleRunningTtlMsShortLived
+		case 'webhook':
+			return runRecordStaleRunningTtlMsBackground
 		case 'job':
 			return runRecordStaleRunningTtlMsJob
 		case 'workflow':

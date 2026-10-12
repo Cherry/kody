@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -5,6 +9,8 @@ import { buildPackageStorageId } from '#worker/storage-ids.ts'
 
 const mockModule = vi.hoisted(() => ({
 	sqlQuery: vi.fn(),
+	getSavedPackageById: vi.fn(),
+	authorizePackageWrite: vi.fn(),
 }))
 
 vi.mock('#worker/storage-runner.ts', () => ({
@@ -12,7 +18,7 @@ vi.mock('#worker/storage-runner.ts', () => ({
 	isReadOnlyStorageSqlQuery: (query: string) =>
 		query.trim().toLowerCase().startsWith('select'),
 	storageRunnerRpc: () => ({
-		sqlQuery: (...args: Array<unknown>) => mockModule.sqlQuery(...args),
+		sqlQuery: mockModule.sqlQuery,
 	}),
 }))
 
@@ -20,13 +26,26 @@ vi.mock('#worker/entitlements/service.ts', () => ({
 	estimateEntitlementStorageSqlWriteBytes: () => 0,
 }))
 
+vi.mock('#worker/package-registry/repo.ts', () => ({
+	getSavedPackageById: mockModule.getSavedPackageById,
+}))
+
+vi.mock('#worker/authorization/authorize.ts', async (importOriginal) => {
+	const actual = await importOriginal<Record<string, unknown>>()
+	return {
+		...actual,
+		authorizePackageWrite: mockModule.authorizePackageWrite,
+	}
+})
+
 const { storageQueryCapability } = await import('./storage-query.ts')
 
 function createCallerContext() {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		user: {
-			userId: 'user-1',
+			userId: personIdFromStored('user-1'),
 			email: 'user@example.com',
 			displayName: 'User',
 		},
@@ -35,10 +54,11 @@ function createCallerContext() {
 
 function createPackageCallerContext(packageId: string) {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		executionOrigin: 'background',
 		user: {
-			userId: 'user-1',
+			userId: personIdFromStored('user-1'),
 			email: 'user@example.com',
 			displayName: 'User',
 		},
@@ -52,6 +72,8 @@ function createPackageCallerContext(packageId: string) {
 }
 
 test('storageQuery wraps Durable Object SQL caller mistakes and rethrows platform failures', async () => {
+	mockModule.getSavedPackageById.mockResolvedValue(null)
+	mockModule.authorizePackageWrite.mockResolvedValue(undefined)
 	mockModule.sqlQuery.mockRejectedValueOnce(
 		new Error('no such table: articles: SQLITE_ERROR'),
 	)
@@ -71,6 +93,32 @@ test('storageQuery wraps Durable Object SQL caller mistakes and rethrows platfor
 		(error: unknown) =>
 			error instanceof McpCallerError &&
 			error.message === 'no such table: articles: SQLITE_ERROR',
+	)
+
+	// Extended Cloudflare suffix form (KODY-8P): "SQLITE_CONSTRAINT (extended: …)"
+	mockModule.sqlQuery.mockRejectedValueOnce(
+		new Error(
+			'FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)',
+		),
+	)
+
+	await expect(
+		storageQueryCapability.handler(
+			{
+				storage_id: 'storage-1',
+				query: 'INSERT INTO probe_t (parent_id) VALUES (99)',
+				writable: true,
+			},
+			{
+				env: {} as Env,
+				callerContext: createCallerContext(),
+			} as never,
+		),
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError &&
+			error.message ===
+				'FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)',
 	)
 
 	const platformError = new Error(
@@ -115,6 +163,12 @@ test('storageQuery denies package runtimes buckets their package does not own', 
 	)
 	expect(mockModule.sqlQuery).not.toHaveBeenCalled()
 
+	mockModule.getSavedPackageById.mockResolvedValueOnce({
+		id: packageId,
+		userId: ownerIdFromStored('user-1'),
+		name: '@user/pkg',
+		kodyId: 'pkg',
+	})
 	mockModule.sqlQuery.mockResolvedValueOnce({
 		columns: ['id'],
 		rows: [{ id: 1 }],
@@ -134,4 +188,5 @@ test('storageQuery denies package runtimes buckets their package does not own', 
 		} as never,
 	)
 	expect(ownBucketResult.storage_id).toBe(buildPackageStorageId(packageId))
+	expect(mockModule.authorizePackageWrite).toHaveBeenCalled()
 })

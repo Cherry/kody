@@ -1,3 +1,7 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -15,6 +19,7 @@ import {
 } from './module-graph.ts'
 import { persistPublishedBundleArtifact } from './published-bundle-artifacts.ts'
 import { persistPublishedSourceSnapshot } from './published-runtime-artifacts.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 
 /**
  * End-to-end behavior matrix for `packageStorage()` against REAL
@@ -58,6 +63,7 @@ async function ensureSavedPackageArtifactSchema() {
 		search_text TEXT,
 		source_id TEXT NOT NULL,
 		has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+		has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 		hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 		is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 		locked_at TEXT,
@@ -87,6 +93,7 @@ async function ensureSavedPackageArtifactSchema() {
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	await ensureSoftDeleteTestColumns(env.APP_DB)
 }
 
 function makePackageFiles(
@@ -145,7 +152,7 @@ async function publishPackage(
 	)
 	const source = {
 		id: sourceId,
-		user_id: userId,
+		user_id: ownerIdFromStored(userId),
 		entity_kind: 'package' as const,
 		entity_id: packageId,
 		repo_id: `repo-${sourceId}`,
@@ -212,7 +219,7 @@ async function publishPackage(
 function packageBucketRunner(userId: string, packageId: string) {
 	return storageRunnerRpc({
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
 		storageId: buildPackageStorageId(packageId),
 	})
 }
@@ -240,8 +247,13 @@ function runBundle(
 	return runBundledModuleWithRegistry(
 		env,
 		createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl,
-			user: { userId, email: 'worker@example.com', displayName: 'Worker Test' },
+			user: {
+				userId: personIdFromStored(userId),
+				email: 'worker@example.com',
+				displayName: 'Worker Test',
+			},
 		}),
 		bundle,
 		undefined,

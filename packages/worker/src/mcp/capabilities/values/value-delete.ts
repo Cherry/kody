@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -10,6 +11,7 @@ export const valueDeleteCapability = defineDomainCapability(
 	capabilityDomainNames.values,
 	{
 		name: 'valueDelete',
+		orgPermission: 'package:write',
 		description:
 			'Delete an existing leftover persisted row for the signed-in user.',
 		keywords: ['config', 'delete', 'remove'],
@@ -26,12 +28,12 @@ export const valueDeleteCapability = defineDomainCapability(
 			deleted: z.boolean(),
 		}),
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const name = args.name.trim()
 			return {
 				deleted: await deleteValue({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					name,
 					scope: args.scope,
 					storageContext: {

@@ -1,7 +1,12 @@
+import { authorizeOrgWide } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { updateRunErrorTriage } from '#worker/run-records/service.ts'
 import {
@@ -32,6 +37,7 @@ export const runUpdateCapability = defineDomainCapability(
 	capabilityDomainNames.runs,
 	{
 		name: 'runUpdate',
+		orgPermission: 'job:write',
 		description:
 			'Mark a retained error run as ignored or resolved (or clear triage back to open) so Activity / runList / runSummary can hide already-handled noise without deleting history. Only error runs accept ignored/resolved; original error details stay intact. Optional note records why. Default runList and runSummary hide ignored/resolved errors — pass error_triage "all", "ignored", or "resolved" on runList to inspect them.',
 		keywords: [
@@ -56,11 +62,15 @@ export const runUpdateCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeOrgWide(
+				{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
+				'job:write',
+			)
 			const errorTriage = args.triage === 'open' ? null : args.triage
 			const outcome = await updateRunErrorTriage({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				runId: args.run_id,
 				errorTriage,
 				triageNote: args.note,

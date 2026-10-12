@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { d1LockRetryBaseDelayMs } from '#worker/d1-retry.ts'
@@ -16,23 +20,24 @@ test('MCP agent session registry is idempotent and user scoped', async () => {
 		CREATE TABLE mcp_agent_sessions (
 			do_id TEXT PRIMARY KEY NOT NULL,
 			user_id TEXT NOT NULL,
+			org_id TEXT,
 			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 		);
 	`)
 	const db = createD1FromSqlite(sqlite)
 	await registerMcpAgentSession({
 		db,
-		userId: 'user-a',
+		userId: ownerIdFromStored('user-a'),
 		doId: 'do-a',
 	})
 	await registerMcpAgentSession({
 		db,
-		userId: 'user-a',
+		userId: ownerIdFromStored('user-a'),
 		doId: 'do-a',
 	})
 	await registerMcpAgentSession({
 		db,
-		userId: 'user-b',
+		userId: ownerIdFromStored('user-b'),
 		doId: 'do-b',
 	})
 	await expect(listMcpAgentSessionsForUser(db, 'user-a')).resolves.toEqual([
@@ -44,7 +49,7 @@ test('MCP agent session registry is idempotent and user scoped', async () => {
 	await expect(
 		registerMcpAgentSession({
 			db,
-			userId: 'user-b',
+			userId: ownerIdFromStored('user-b'),
 			doId: 'do-a',
 		}),
 	).rejects.toThrow('ownership conflict')
@@ -81,7 +86,7 @@ test('registerMcpAgentSession retries a transient D1 internal error with an unde
 	try {
 		const resultPromise = registerMcpAgentSession({
 			db,
-			userId: 'user-a',
+			userId: ownerIdFromStored('user-a'),
 			doId: 'do-a',
 		})
 		await vi.advanceTimersByTimeAsync(d1LockRetryBaseDelayMs)
@@ -94,10 +99,11 @@ test('registerMcpAgentSession retries a transient D1 internal error with an unde
 
 test('cold MCP session owner discovery reads persisted Agents SDK props', async () => {
 	const props = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		executionOrigin: 'interactive',
 		user: {
-			userId: 'user-a',
+			userId: personIdFromStored('user-a'),
 			email: 'a@example.com',
 			displayName: 'User A',
 		},
@@ -113,7 +119,7 @@ test('cold MCP session owner discovery reads persisted Agents SDK props', async 
 			storage,
 			doId: 'cold-do',
 		}),
-	).resolves.toEqual({ doId: 'cold-do', userId: 'user-a' })
+	).resolves.toEqual({ doId: 'cold-do', userId: ownerIdFromStored('user-a') })
 	let purged = false
 	await purgePersistedMcpAgentSession({
 		storage: {
@@ -123,7 +129,7 @@ test('cold MCP session owner discovery reads persisted Agents SDK props', async 
 			},
 		},
 		doId: 'cold-do',
-		userId: 'user-a',
+		userId: ownerIdFromStored('user-a'),
 	})
 	expect(purged).toBe(true)
 })

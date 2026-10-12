@@ -8,7 +8,6 @@ import {
 	type AuthSession,
 } from '#app/auth-session.ts'
 import { createAccountPasswordHandler } from './account-password.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	createPasswordHash,
 	verifyPassword,
@@ -16,6 +15,7 @@ import {
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
+import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { isCredentialInvalidatedByStoredPasswordChange } from '#worker/password-change-lockout.ts'
 
@@ -42,7 +42,7 @@ async function seedUser(
 ) {
 	const passwordHash =
 		input.passwordHash ?? (await createPasswordHash(input.password ?? ''))
-	const stableUserId = await createStableUserIdFromEmail(input.email)
+	const stableUserId = testStableUserIdFromEmail(input.email)
 	sqlite.exec(`
 		INSERT INTO users (
 			id,
@@ -60,6 +60,10 @@ async function seedUser(
 			CURRENT_TIMESTAMP
 		);
 	`)
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId,
+		username: input.username,
+	})
 	return stableUserId
 }
 

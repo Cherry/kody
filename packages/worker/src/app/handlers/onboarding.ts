@@ -1,3 +1,7 @@
+import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import {
@@ -18,8 +22,8 @@ import {
 	loadOnboardingMcpChooserListings,
 } from '#app/community-data.ts'
 import {
-	buildMcpServerStatusView,
 	loadMcpClientHubSnapshotOrNull,
+	mcpServerStatusError,
 } from '#mcp/capabilities/mcp-servers/shared.ts'
 import { listMcpServerSettings } from '#worker/mcp-client/settings-service.ts'
 import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
@@ -75,7 +79,7 @@ import {
  */
 export async function loadChecklist(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 	username: string,
 	hasMcpClient: boolean,
 	options?: { hasAccessWin?: boolean; hasSecondMcpClient?: boolean },
@@ -96,7 +100,7 @@ export async function loadChecklist(
 
 async function attachOnboardingProgress(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 	username: string,
 	onboarding: OnboardingLoaderData,
 ) {
@@ -123,7 +127,7 @@ async function attachOnboardingProgress(
 
 export async function loadPersistedPackageName(
 	env: Pick<Env, 'APP_DB'>,
-	userId: string,
+	userId: OwnerId,
 ): Promise<string | null> {
 	try {
 		const packages = await listSavedPackagesByUserId(env.APP_DB, { userId })
@@ -141,7 +145,7 @@ export async function loadPersistedPackageName(
  */
 async function loadOnboardingMcpChooserOverlay(
 	env: Env,
-	userId?: string | null,
+	userId?: OwnerId | null,
 ) {
 	if (!userId) return { settings: [], statusByServerId: undefined }
 	try {
@@ -152,20 +156,16 @@ async function loadOnboardingMcpChooserOverlay(
 		const snapshot = await loadMcpClientHubSnapshotOrNull({ env, userId })
 		const statusByServerId = new Map(
 			settings.map((setting) => {
-				const view = buildMcpServerStatusView({
-					setting,
-					snapshot:
-						snapshot?.servers.find(
-							(server) => server.serverId === setting.id,
-						) ?? null,
-				})
+				const server =
+					snapshot?.servers.find((entry) => entry.serverId === setting.id) ??
+					null
 				return [
 					setting.id,
 					{
-						connected: view.connected,
-						authUrl: view.authUrl,
-						state: view.state,
-						error: view.error,
+						connected: server?.state === 'ready',
+						authorizationPending: server?.authorizationPending ?? false,
+						state: server?.state ?? 'disconnected',
+						error: mcpServerStatusError({ setting, snapshot: server }),
 					},
 				] as const
 			}),
@@ -178,7 +178,7 @@ async function loadOnboardingMcpChooserOverlay(
 
 export async function loadOnboardingFeaturedMcpServers(
 	env: Env,
-	userId?: string | null,
+	userId?: OwnerId | null,
 ): Promise<Array<OnboardingFeaturedMcpServer>> {
 	if (!userId) return listDisconnectedOnboardingFeaturedMcpServers()
 	try {
@@ -194,7 +194,7 @@ export async function loadOnboardingFeaturedMcpServers(
 
 export async function loadOnboardingCustomMcpServers(
 	env: Env,
-	userId?: string | null,
+	userId?: OwnerId | null,
 ): Promise<Array<OnboardingCustomMcpServer>> {
 	if (!userId) return []
 	const overlay = await loadOnboardingMcpChooserOverlay(env, userId)
@@ -204,7 +204,7 @@ export async function loadOnboardingCustomMcpServers(
 async function loadOnboardingChooserMcpState(
 	env: Env,
 	request: Request,
-	userId?: string | null,
+	userId?: OwnerId | null,
 ): Promise<{
 	featuredMcpServers: Array<OnboardingFeaturedMcpServer>
 	customMcpServers: Array<OnboardingCustomMcpServer>
@@ -229,7 +229,7 @@ async function loadOnboardingChooserMcpState(
 async function loadOnboardingChooserFields(
 	env: Env,
 	request: Request,
-	userId?: string | null,
+	userId?: OwnerId | null,
 ) {
 	const [featuredListings, chooser, featuredPlatformIntegrations] =
 		await Promise.all([
@@ -259,7 +259,7 @@ async function loadOnboardingChooserFields(
 
 async function loadOnboardingResumeProgress(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 ): Promise<OnboardingWizardProgress> {
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(env)
 	const [inbound, hasAccessWin] = await Promise.all([
@@ -287,7 +287,10 @@ async function redirectOnboardingIndex(env: Env, request: Request) {
 	if (!user.emailVerified) {
 		return redirectUnverifiedToPending(request)
 	}
-	const progress = await loadOnboardingResumeProgress(env, user.mcpUser.userId)
+	const progress = await loadOnboardingResumeProgress(
+		env,
+		personalOrgId(user.mcpUser.userId),
+	)
 	return Response.redirect(
 		new URL(
 			onboardingIndexRedirectHref(requestUrl.search, progress),
@@ -377,19 +380,23 @@ export function createOnboardingHandler(env: Env) {
 			}
 
 			const chooser = await pushServerTiming(serverTiming, 'listings', () =>
-				loadOnboardingChooserFields(env, request, user.mcpUser.userId),
+				loadOnboardingChooserFields(
+					env,
+					request,
+					personalOrgId(user.mcpUser.userId),
+				),
 			)
 			const onboarding = await loadOnboardingData({
 				env,
 				requestUrl: request.url,
-				stableUserId: user.mcpUser.userId,
+				stableUserId: personalOrgId(user.mcpUser.userId),
 				username: user.username,
 				emailVerified: user.emailVerified,
 				...chooser,
 			})
 			await attachOnboardingProgress(
 				env,
-				user.mcpUser.userId,
+				personalOrgId(user.mcpUser.userId),
 				user.username,
 				onboarding,
 			)
@@ -460,13 +467,17 @@ export function createOnboardingApiHandler(env: Env) {
 			// verification succeeds.
 			const chooser = user.emailVerified
 				? await pushServerTiming(serverTiming, 'listings', () =>
-						loadOnboardingChooserFields(env, request, user.mcpUser.userId),
+						loadOnboardingChooserFields(
+							env,
+							request,
+							personalOrgId(user.mcpUser.userId),
+						),
 					)
 				: null
 			const onboarding = await loadOnboardingData({
 				env,
 				requestUrl: request.url,
-				stableUserId: user.mcpUser.userId,
+				stableUserId: personalOrgId(user.mcpUser.userId),
 				username: user.username,
 				emailVerified: user.emailVerified,
 				...chooser,
@@ -474,7 +485,7 @@ export function createOnboardingApiHandler(env: Env) {
 			if (user.emailVerified) {
 				await attachOnboardingProgress(
 					env,
-					user.mcpUser.userId,
+					personalOrgId(user.mcpUser.userId),
 					user.username,
 					onboarding,
 				)
@@ -495,7 +506,10 @@ export function createOnboardingChecklistDismissHandler(env: Env) {
 			if (!user) {
 				return jsonResponse({ ok: false, error: 'Sign in required.' }, 401)
 			}
-			await dismissOnboardingChecklist({ env, userId: user.mcpUser.userId })
+			await dismissOnboardingChecklist({
+				env,
+				userId: personalOrgId(user.mcpUser.userId),
+			})
 			return jsonResponse({ ok: true })
 		},
 	} satisfies Action<typeof routes.onboardingChecklistDismissPost>

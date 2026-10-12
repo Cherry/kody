@@ -1,5 +1,6 @@
 import { css } from 'remix/component'
 import { buildAuthLink } from '#client/auth-links.ts'
+import { workspaceLandingItem } from '#client/routes/account-rail.ts'
 import { formatCommunityPublishedDate } from '#universal/community-display.ts'
 import { type ProfileShellLoaderData } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
@@ -18,7 +19,18 @@ import { UserAvatar } from '#universal/user-avatar.tsx'
 
 const profilePagePath = (username: string) => routes.profile.href({ username })
 
-export function renderProfileIdentity(shell: ProfileShellLoaderData) {
+export function renderProfileIdentity(
+	shell: ProfileShellLoaderData,
+	options?: {
+		/**
+		 * Personal organization slug for the Workspace link. After a username
+		 * rename the profile handle can diverge from the immutable signup org
+		 * slug; callers should pass the session's personal org when known.
+		 */
+		workspaceOrgSlug?: string | null
+	},
+) {
+	const workspaceSlug = options?.workspaceOrgSlug?.trim() || shell.username
 	return (
 		<header mix={css(identityCss)} data-testid="profile-identity">
 			<div mix={css(avatarWrapCss)}>
@@ -54,6 +66,13 @@ export function renderProfileIdentity(shell: ProfileShellLoaderData) {
 				</p>
 				{shell.isSelf ? (
 					<div mix={css(actionsCss)} data-testid="profile-actions">
+						<a
+							href={workspaceLandingItem(workspaceSlug).href}
+							data-testid="profile-workspace"
+							mix={css(getGhostButtonCss())}
+						>
+							Workspace
+						</a>
 						<a href={routes.account.href()} mix={css(getGhostButtonCss())}>
 							Edit profile
 						</a>
@@ -62,6 +81,39 @@ export function renderProfileIdentity(shell: ProfileShellLoaderData) {
 				{!shell.loggedIn
 					? renderProfileLoggedOutCtas(profilePagePath(shell.username))
 					: null}
+			</div>
+		</header>
+	)
+}
+
+/**
+ * Identity column for an organization's home: the same face as a person's
+ * profile, with the viewer's role where a person shows their bio.
+ */
+export function renderOrgIdentity(input: {
+	name: string
+	handle: string
+	avatarName: string
+	role: string
+}) {
+	return (
+		<header mix={css(identityCss)} data-testid="org-identity">
+			<div mix={css(avatarWrapCss)}>
+				<UserAvatar
+					displayName={input.avatarName}
+					avatarUrl={null}
+					size={{ narrow: 72, wide: 160 }}
+					variant="well"
+				/>
+			</div>
+			<div mix={css(identityCopyCss)}>
+				<div mix={css(nameRowCss)}>
+					<h1 mix={css(displayNameCss)}>{input.name}</h1>
+					<span mix={css(badgeCss)} data-testid="org-role">
+						{input.role}
+					</span>
+				</div>
+				<p mix={css(usernameCss)}>{input.handle}</p>
 			</div>
 		</header>
 	)
@@ -156,9 +208,10 @@ const badgeCss = {
 }
 
 const actionsCss = {
-	display: 'grid',
+	display: 'flex',
+	flexWrap: 'wrap' as const,
+	alignItems: 'center',
 	gap: spacing.sm,
-	justifyItems: 'start',
 	marginTop: spacing.xs,
 }
 

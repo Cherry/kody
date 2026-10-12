@@ -1,3 +1,5 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { readFile } from 'node:fs/promises'
 import { expect, test, vi } from 'vitest'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 
@@ -10,8 +12,10 @@ vi.mock('#worker/identity/permissions-db.ts', () => ({
 		mockModule.getUserRolesAndPermissions(...args),
 }))
 
-const { buildMcpUserContextFromGrantProps } =
-	await import('./mcp-auth-user-context.ts')
+const {
+	buildMcpUserContextFromGrantProps,
+	buildMcpUserContextWithOrgBindingFromGrantProps,
+} = await import('./mcp-auth-user-context.ts')
 
 type GrantUserRow = {
 	id: number
@@ -100,7 +104,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 	}> = [
 		{
 			grantProps: {
-				userId: 'stable-admin-id',
+				userId: ownerIdFromStored('stable-admin-id'),
 				email: 'stale@example.com',
 				displayName: 'stale',
 			},
@@ -115,7 +119,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 		},
 		{
 			grantProps: {
-				userId: 'stable-original',
+				userId: ownerIdFromStored('stable-original'),
 				email: 'reused-by-admin@example.com',
 				displayName: 'stale',
 			},
@@ -132,7 +136,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 			displayName: 'original',
 		},
 		{
-			grantProps: { userId: 'legacy-id' },
+			grantProps: { userId: ownerIdFromStored('legacy-id') },
 			row: account(9, 'legacy-id', 'resolved@example.com', 'resolved'),
 			roles: ['user'],
 			permissions: [],
@@ -176,7 +180,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 	const missingRow = await build(
 		{ row: null },
 		{
-			userId: 'orphan-id',
+			userId: ownerIdFromStored('orphan-id'),
 			email: 'missing@example.com',
 			displayName: 'missing',
 		},
@@ -188,7 +192,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 				deleting_at: '2026-07-22 22:00:00',
 			}),
 		},
-		{ userId: 'deleting-id', email: 'deleting@example.com' },
+		{ userId: ownerIdFromStored('deleting-id'), email: 'deleting@example.com' },
 	)
 	expect(deleting.result).toBeNull()
 
@@ -197,7 +201,7 @@ test('buildMcpUserContextFromGrantProps resolves identity from the stable user i
 		build(
 			{ reject: new Error('D1 unavailable') },
 			{
-				userId: 'resilient-id',
+				userId: ownerIdFromStored('resilient-id'),
 				email: 'resilient@example.com',
 				displayName: 'resilient',
 			},
@@ -240,4 +244,116 @@ test('MCP auth reads verification and suspension from the account row', async ()
 		{ emailVerified: true, suspended: false },
 		{ emailVerified: true, suspended: true },
 	])
+})
+
+test('authorization.md copies the stable_user_id lookup from this module', async () => {
+	const source = await readFile(
+		new URL('./mcp-auth-user-context.ts', import.meta.url),
+		'utf8',
+	)
+	const doc = await readFile(
+		new URL(
+			'../../../docs/contributing/architecture/authorization.md',
+			import.meta.url,
+		),
+		'utf8',
+	)
+	const sql = source.match(
+		/SELECT id, email, username, display_name, stable_user_id,[\s\S]*?WHERE stable_user_id = \?/,
+	)?.[0]
+	if (!sql)
+		throw new Error(
+			'mcp-auth-user-context.ts is missing the stable_user_id lookup',
+		)
+	const compact = (value: string) => value.replace(/\s+/g, ' ').trim()
+	expect(compact(doc)).toContain(compact(sql))
+	expect(doc).toContain('.bind(userId)')
+	expect(doc).toContain('getUserRolesAndPermissions')
+	expect(doc).not.toMatch(/grant's email/i)
+})
+
+test('buildMcpUserContextWithOrgBindingFromGrantProps reads the user row and org binding in one D1 batch', async () => {
+	mockModule.getUserRolesAndPermissions.mockResolvedValue({
+		roles: ['user'],
+		permissions: [],
+	})
+	const row = account(9, 'stable-member', 'member@example.com', 'member', {
+		email_verified_at: '2026-01-01T00:00:00.000Z',
+	})
+	const batches: Array<Array<string>> = []
+	function createBatchDb(options: {
+		membershipRow: unknown
+		grantRow: unknown
+	}) {
+		return {
+			prepare(sql: string) {
+				return {
+					bind() {
+						return { sql }
+					},
+				}
+			},
+			async batch(statements: Array<{ sql: string }>) {
+				batches.push(statements.map((statement) => statement.sql))
+				return statements.map(({ sql }) => {
+					const normalized = sql.replace(/\s+/g, ' ').toLowerCase()
+					let result: unknown = null
+					if (normalized.includes('from users')) result = row
+					else if (normalized.includes('from org_memberships')) {
+						result = options.membershipRow
+					} else if (normalized.includes('exists (')) {
+						result = options.grantRow
+					}
+					return { results: result == null ? [] : [result], meta: {} }
+				})
+			},
+		} as unknown as D1Database
+	}
+	const grantProps = {
+		userId: ownerIdFromStored('stable-member'),
+		metadata: { orgId: ownerIdFromStored('org-team') },
+	} as GrantProps
+
+	const bound = await buildMcpUserContextWithOrgBindingFromGrantProps(
+		{
+			APP_DB: createBatchDb({
+				membershipRow: { org_id: 'org-team', org_slug: 'team', role: 'member' },
+				grantRow: null,
+			}),
+		} as Env,
+		grantProps,
+	)
+	expect(bound?.context.user.email).toBe('member@example.com')
+	expect(bound?.context.emailVerified).toBe(true)
+	expect(bound?.orgBinding).toEqual({
+		org: { id: ownerIdFromStored('org-team'), slug: 'team' },
+		role: 'member',
+	})
+	expect(batches).toHaveLength(1)
+	expect(batches[0]).toHaveLength(3)
+	expect(batches[0]?.[0]).toContain('FROM users')
+	expect(batches[0]?.[1]).toContain('FROM org_memberships')
+
+	// Membership gone in the same snapshot: no role is granted.
+	const unbound = await buildMcpUserContextWithOrgBindingFromGrantProps(
+		{ APP_DB: createBatchDb({ membershipRow: null, grantRow: null }) } as Env,
+		grantProps,
+	)
+	expect(unbound?.context.user.email).toBe('member@example.com')
+	expect(unbound?.orgBinding).toBeNull()
+
+	// A live grant without membership binds as an outside collaborator.
+	const collaborator = await buildMcpUserContextWithOrgBindingFromGrantProps(
+		{
+			APP_DB: createBatchDb({
+				membershipRow: null,
+				grantRow: { org_id: 'org-team', org_slug: 'team' },
+			}),
+		} as Env,
+		grantProps,
+	)
+	expect(collaborator?.orgBinding).toEqual({
+		org: { id: ownerIdFromStored('org-team'), slug: 'team' },
+		role: null,
+	})
 })

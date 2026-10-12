@@ -1,3 +1,7 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { buildCapabilityRegistry } from '#mcp/capabilities/build-capability-registry.ts'
@@ -11,6 +15,8 @@ import {
 	setSecretAllowedHosts,
 } from '#mcp/secrets/service.ts'
 import { ensureEntitlementTestSchema } from '#worker/entitlements/test-schema.ts'
+import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
+import { ensurePersonalOrg } from '#worker/orgs/provision.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import {
 	buildKodyImportableModuleBundle,
@@ -18,6 +24,7 @@ import {
 } from './module-graph.ts'
 import { persistPublishedBundleArtifact } from './published-bundle-artifacts.ts'
 import { persistPublishedSourceSnapshot } from './published-runtime-artifacts.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 
 async function runSql(sql: string, ...values: Array<unknown>) {
 	await env.APP_DB.prepare(sql)
@@ -27,6 +34,7 @@ async function runSql(sql: string, ...values: Array<unknown>) {
 
 async function ensureSecretAuthorityTestSchema() {
 	await ensureEntitlementTestSchema(env.APP_DB)
+	await ensureOrgsTestSchema(env.APP_DB)
 	await runSql(`CREATE TABLE IF NOT EXISTS entity_sources (
 		id TEXT PRIMARY KEY,
 		user_id TEXT NOT NULL,
@@ -50,6 +58,7 @@ async function ensureSecretAuthorityTestSchema() {
 		search_text TEXT,
 		source_id TEXT NOT NULL,
 		has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+		has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 		hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 		is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 		locked_at TEXT,
@@ -80,10 +89,14 @@ async function ensureSecretAuthorityTestSchema() {
 		UNIQUE(user_id, scope, binding_key)
 	)`)
 	await runSql(`CREATE TABLE IF NOT EXISTS secret_entries (
+		id TEXT UNIQUE DEFAULT (lower(hex(randomblob(16)))),
 		bucket_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		description TEXT NOT NULL DEFAULT '',
 		encrypted_value TEXT NOT NULL,
+		kind TEXT NOT NULL DEFAULT 'secret',
+		inject_json TEXT NOT NULL DEFAULT '{"kind":"header","name":"Authorization","format":"Bearer {value}"}',
+		config_json TEXT,
 		allowed_hosts TEXT NOT NULL DEFAULT '[]',
 		allowed_packages TEXT NOT NULL DEFAULT '[]',
 		lookup_hash TEXT,
@@ -107,6 +120,7 @@ async function ensureSecretAuthorityTestSchema() {
 		actor TEXT,
 		created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 	)`)
+	await ensureSoftDeleteTestColumns(env.APP_DB)
 }
 
 async function insertSavedPackage(input: {
@@ -147,7 +161,7 @@ async function insertSavedPackage(input: {
 	)
 	return {
 		id: input.sourceId,
-		user_id: input.userId,
+		user_id: ownerIdFromStored(input.userId),
 		entity_kind: 'package' as const,
 		entity_id: input.packageId,
 		repo_id: `repo-${input.sourceId}`,
@@ -296,22 +310,33 @@ async function publishDependent(
 	})
 }
 
+async function provisionTestUser(userId: string, username: string) {
+	await ensurePersonalOrg(env.APP_DB, { stableUserId: userId, username })
+}
+
 async function saveWakeTokenLockedTo(userId: string, packageId: string) {
 	await saveSecret({
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
 		scope: 'user',
 		name: 'wakeToken',
 		value: 'wake-secret-value',
 	})
-	await lockSecretToPackage({ env, userId, name: 'wakeToken', packageId })
+	await lockSecretToPackage({
+		env,
+		userId: ownerIdFromStored(userId),
+		name: 'wakeToken',
+		packageId,
+	})
 }
 
 function createCallerContext(userId: string) {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://kody.dev',
 		user: {
-			userId,
+			userId: personIdFromStored(userId),
+			username: 'worker-test',
 			email: 'worker@example.com',
 			displayName: 'Worker Test',
 		},
@@ -426,6 +451,7 @@ test(
 		silenceIncidentalRuntimeWarnings()
 		await ensureSecretAuthorityTestSchema()
 		const userId = `user-${crypto.randomUUID()}`
+		await provisionTestUser(userId, `wt-${userId.slice(-12)}`)
 		const wakeSource = `import { packageSecrets } from 'kody:runtime'
 export default async function wake() {
 	return { token: await packageSecrets.get("wakeToken") }
@@ -537,6 +563,7 @@ test(
 		silenceIncidentalRuntimeWarnings()
 		await ensureSecretAuthorityTestSchema()
 		const userId = `user-${crypto.randomUUID()}`
+		await provisionTestUser(userId, `wt-${userId.slice(-12)}`)
 		const wake = await publishGrokBotWake(userId, victimWakeModuleSource)
 		const importer = await publishDependent(
 			userId,
@@ -656,6 +683,7 @@ test(
 		silenceIncidentalRuntimeWarnings()
 		await ensureSecretAuthorityTestSchema()
 		const userId = `user-${crypto.randomUUID()}`
+		await provisionTestUser(userId, `wt-${userId.slice(-12)}`)
 		const wake = await publishGrokBotWake(userId, victimWakeModuleSource)
 		await publishDependent(userId, {
 			'src/forge.ts': `import * as runtime from 'kody:runtime'
@@ -842,6 +870,7 @@ test(
 			'test-password-hash',
 			userId,
 		)
+		await provisionTestUser(userId, username)
 		const fork = await publishForkedPackage({
 			userId,
 			name: '@kentcdodds/evil-fork',
@@ -886,7 +915,7 @@ export default async function selfAdopt() {
 		})
 		await saveSecret({
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			scope: 'user',
 			name: 'userToken',
 			value: 'user-secret-value',
@@ -895,10 +924,11 @@ export default async function selfAdopt() {
 		const executed = await runBundledModuleWithRegistry(
 			env,
 			createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
 				baseUrl: 'https://kody.dev',
 				executionOrigin: 'interactive',
 				user: {
-					userId,
+					userId: personIdFromStored(userId),
 					email: `${username}@example.com`,
 					displayName: 'Forker',
 				},
@@ -945,6 +975,7 @@ test(
 		silenceIncidentalRuntimeWarnings()
 		await ensureSecretAuthorityTestSchema()
 		const userId = `user-${crypto.randomUUID()}`
+		await provisionTestUser(userId, `wt-${userId.slice(-12)}`)
 		const wake = await publishGrokBotWake(
 			userId,
 			`import { packageSecrets } from 'kody:runtime'
@@ -976,7 +1007,7 @@ export default async function wake(probe) {
 		}
 		await saveSecret({
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			scope: 'package',
 			name: 'wakeToken',
 			value: 'package-wake-secret-value',
@@ -984,7 +1015,7 @@ export default async function wake(probe) {
 		})
 		await setSecretAllowedHosts({
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			scope: 'package',
 			name: 'wakeToken',
 			allowedHosts: ['example.com'],

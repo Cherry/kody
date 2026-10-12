@@ -1,5 +1,9 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { type RequestLineage } from '@kody-internal/shared/request-context.ts'
+import { parseRequestLineage } from '#worker/request-context/request-context.ts'
+
 export type PackageEventsDispatchQueueMessage = {
-	userId: string
+	userId: OwnerId
 	topic: string
 	idempotencyKey: string
 	payload: Record<string, unknown>
@@ -10,9 +14,22 @@ export type PackageEventsDispatchQueueMessage = {
 	/**
 	 * Runtime invocation depth carried across the queue boundary so
 	 * event-driven package chains (A emits, B's handler emits, ...) keep the
-	 * same cycle protection as synchronous packages.invoke chains.
+	 * same cycle protection as synchronous host invoke chains.
 	 */
 	invokeDepth: number
+	/**
+	 * Set when the emitting package declared this topic with `mcp: true` at
+	 * dispatch time. Absent means no MCP Events fan-out (fail closed for
+	 * messages enqueued before the field existed).
+	 */
+	mcp?: true
+	/** ISO time `events.dispatch` accepted the event (MCP occurrence timestamp). */
+	emittedAt?: string
+	/**
+	 * The run that emitted the event; subscriber handlers inherit it. Absent
+	 * on messages enqueued before the field existed.
+	 */
+	lineage?: RequestLineage
 }
 
 export function parsePackageEventsDispatchQueueMessage(
@@ -56,12 +73,19 @@ export function parsePackageEventsDispatchQueueMessage(
 	) {
 		return null
 	}
+	const emittedAt = record['emittedAt']
+	const lineage = parseRequestLineage(record['lineage'])
 	return {
-		userId: userId.trim(),
+		userId: userId.trim() as OwnerId,
 		topic: topic.trim(),
 		idempotencyKey: idempotencyKey.trim(),
 		payload: payload as Record<string, unknown>,
 		source: { packageId: packageId.trim(), kodyId: kodyId.trim() },
 		invokeDepth,
+		...(record['mcp'] === true ? { mcp: true as const } : {}),
+		...(typeof emittedAt === 'string' && !Number.isNaN(Date.parse(emittedAt))
+			? { emittedAt }
+			: {}),
+		...(lineage ? { lineage } : {}),
 	}
 }

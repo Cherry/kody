@@ -3,15 +3,55 @@ import {
 	maxD1BoundParameters,
 } from '@kody-internal/shared/chunk.ts'
 import { earliestSecretExpiresAt } from '@kody-internal/shared/secret-expires-at.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	type SecretBucketRow,
 	type SecretEntryRow,
 	type SecretScope,
+	type StoredCredentialKind,
+	storedCredentialKinds,
 } from './types.ts'
 
 const listPackageScopeSecretFixedBindings = 2
 
+const secretEntryColumns =
+	'id, bucket_id, name, description, encrypted_value, allowed_hosts, allowed_packages, expires_at, created_at, updated_at'
+
+function isMissingKindColumn(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error)
+	return /no such column: (?:\w+\.)?kind\b/i.test(message)
+}
+
+function isMissingConfigColumn(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error)
+	return /no such column: (?:\w+\.)?config_json\b/i.test(message)
+}
+
+/**
+ * 0117 adds `secret_entries.kind`. A rehearsal restore (or a preview still on
+ * the previous schema) can drop that column while this worker is already
+ * deployed; every existing row is a `secret`.
+ */
+async function firstRowWithOptionalKind(
+	queryWithKind: () => Promise<Record<string, unknown> | null>,
+	queryWithoutKind: () => Promise<Record<string, unknown> | null>,
+): Promise<Record<string, unknown> | null> {
+	try {
+		return await queryWithKind()
+	} catch (error) {
+		if (!isMissingKindColumn(error)) throw error
+		return await queryWithoutKind()
+	}
+}
+
+function storedKindFromRow(row: Record<string, unknown>): StoredCredentialKind {
+	return row['kind'] === undefined
+		? 'secret'
+		: readStoredCredentialKind(row['kind'])
+}
+
 type SecretMetadataRow = {
+	id: string
 	scope: SecretScope
 	binding_key: string
 	name: string
@@ -37,7 +77,7 @@ export async function getSecretBucket(input: {
 			FROM secret_buckets
 			WHERE user_id = ? AND scope = ? AND binding_key = ?
 				AND (expires_at IS NULL OR expires_at > ?)
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.scope, input.bindingKey, now)
 		.first<Record<string, unknown>>()
@@ -78,22 +118,99 @@ export async function getSecretEntry(input: {
 	db: D1Database
 	bucketId: string
 	name: string
-}): Promise<SecretEntryRow | null> {
-	const row = await input.db
-		.prepare(
-			`SELECT bucket_id, name, description, encrypted_value, allowed_hosts, allowed_packages, expires_at, created_at, updated_at
-			FROM secret_entries
+}): Promise<(SecretEntryRow & { kind: StoredCredentialKind }) | null> {
+	const where = `FROM secret_entries
 			WHERE bucket_id = ? AND name = ?
-			LIMIT 1`,
-		)
-		.bind(input.bucketId, input.name)
-		.first<Record<string, unknown>>()
-	return row ? mapSecretEntryRow(row) : null
+			${andLiveDeletedAtSql()} LIMIT 1`
+	const row = await firstRowWithOptionalKind(
+		() =>
+			input.db
+				.prepare(`SELECT ${secretEntryColumns}, kind ${where}`)
+				.bind(input.bucketId, input.name)
+				.first<Record<string, unknown>>(),
+		() =>
+			input.db
+				.prepare(`SELECT ${secretEntryColumns} ${where}`)
+				.bind(input.bucketId, input.name)
+				.first<Record<string, unknown>>(),
+	)
+	return row
+		? { ...mapSecretEntryRow(row), kind: storedKindFromRow(row) }
+		: null
+}
+
+export function readStoredCredentialKind(value: unknown): StoredCredentialKind {
+	const kind = storedCredentialKinds.find((candidate) => candidate === value)
+	if (!kind) throw new Error(`Unknown stored credential kind: ${String(value)}`)
+	return kind
+}
+
+export type StoredCredentialRow = {
+	id: string
+	name: string
+	kind: StoredCredentialKind
+	encrypted_value: string
+	allowed_hosts: string
+	inject_json: string
+	config_json: string | null
+}
+
+/**
+ * A live, unexpired user-scope entry of `ownerId` by credential id, with the
+ * fields a later-kind resolver reads. Package and session secrets are never
+ * credentials of a kind.
+ */
+export async function getStoredCredentialEntry(input: {
+	db: D1Database
+	ownerId: string
+	credentialId: string
+	now?: string
+}): Promise<StoredCredentialRow | null> {
+	const now = input.now ?? new Date().toISOString()
+	const from = `FROM secret_entries e
+			JOIN secret_buckets b ON b.id = e.bucket_id
+			WHERE b.user_id = ? AND b.scope = 'user' AND b.binding_key = ''
+				AND e.id = ? AND e.deleted_at IS NULL AND b.deleted_at IS NULL
+				AND (e.expires_at IS NULL OR e.expires_at > ?)
+				AND (b.expires_at IS NULL OR b.expires_at > ?)
+			LIMIT 1`
+	const select = (columns: string) =>
+		input.db
+			.prepare(`SELECT ${columns} ${from}`)
+			.bind(input.ownerId, input.credentialId, now, now)
+			.first<Record<string, unknown>>()
+	const columns = `e.id AS id, e.name AS name,
+				e.encrypted_value AS encrypted_value, e.allowed_hosts AS allowed_hosts,
+				e.inject_json AS inject_json`
+	// 0118 adds `config_json`; before it no row has an exchange.
+	const row = await firstRowWithOptionalKind(
+		async () => {
+			try {
+				return await select(
+					`${columns}, e.kind AS kind, e.config_json AS config_json`,
+				)
+			} catch (error) {
+				if (!isMissingConfigColumn(error)) throw error
+				return await select(`${columns}, e.kind AS kind`)
+			}
+		},
+		() => select(columns),
+	)
+	if (!row) return null
+	return {
+		id: String(row['id']),
+		name: String(row['name']),
+		kind: storedKindFromRow(row),
+		encrypted_value: String(row['encrypted_value']),
+		allowed_hosts: String(row['allowed_hosts']),
+		inject_json: String(row['inject_json']),
+		config_json: row['config_json'] == null ? null : String(row['config_json']),
+	}
 }
 
 function prepareUpsertSecretEntryStatement(input: {
 	db: D1Database
-	row: Omit<SecretEntryRow, 'created_at' | 'updated_at'> & {
+	row: Omit<SecretEntryRow, 'id' | 'created_at' | 'updated_at'> & {
 		created_at?: string
 		updated_at?: string
 	}
@@ -128,7 +245,7 @@ function prepareUpsertSecretEntryStatement(input: {
 
 export async function upsertSecretEntry(input: {
 	db: D1Database
-	row: Omit<SecretEntryRow, 'created_at' | 'updated_at'> & {
+	row: Omit<SecretEntryRow, 'id' | 'created_at' | 'updated_at'> & {
 		created_at?: string
 		updated_at?: string
 	}
@@ -144,7 +261,7 @@ export async function upsertSecretEntry(input: {
 export async function upsertSecretEntriesAtomically(input: {
 	db: D1Database
 	rows: Array<
-		Omit<SecretEntryRow, 'created_at' | 'updated_at'> & {
+		Omit<SecretEntryRow, 'id' | 'created_at' | 'updated_at'> & {
 			created_at?: string
 			updated_at?: string
 		}
@@ -176,6 +293,7 @@ function prepareUpdateApprovedUserSecretEntryForPackageStatement(input: {
 					SELECT id
 					FROM secret_buckets
 					WHERE user_id = ? AND scope = 'user' AND binding_key = ''
+						AND deleted_at IS NULL
 					LIMIT 1
 				)
 				AND json_valid(allowed_packages)
@@ -183,7 +301,7 @@ function prepareUpdateApprovedUserSecretEntryForPackageStatement(input: {
 					SELECT 1
 					FROM json_each(allowed_packages)
 					WHERE value = ?
-				)`,
+				)${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			input.description,
@@ -266,6 +384,7 @@ export async function updateApprovedUserSecretEntriesForPackageAtomically(input:
 					SELECT id
 					FROM secret_buckets
 					WHERE user_id = ? AND scope = 'user' AND binding_key = ''
+						AND deleted_at IS NULL
 					LIMIT 1
 				)
 				AND json_valid(allowed_packages)
@@ -288,7 +407,9 @@ export async function updateApprovedUserSecretEntriesForPackageAtomically(input:
 							FROM json_each(e.allowed_packages)
 							WHERE value = ?
 						)
-				) = ?`,
+						AND e.deleted_at IS NULL
+						AND b.deleted_at IS NULL
+				) = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			...input.updates.flatMap((update) => [update.name, update.description]),
@@ -318,7 +439,9 @@ export async function deleteSecretEntry(input: {
 	name: string
 }): Promise<boolean> {
 	const result = await input.db
-		.prepare(`DELETE FROM secret_entries WHERE bucket_id = ? AND name = ?`)
+		.prepare(
+			`DELETE FROM secret_entries WHERE bucket_id = ? AND name = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.bucketId, input.name)
 		.run()
 	return (result.meta.changes ?? 0) > 0
@@ -336,7 +459,7 @@ export async function listSecretBucketsByScope(input: {
 			`SELECT id, user_id, scope, binding_key, expires_at, created_at, updated_at
 			FROM secret_buckets
 			WHERE user_id = ? AND scope = ?
-				AND (expires_at IS NULL OR expires_at > ?)
+				AND (expires_at IS NULL OR expires_at > ?)${andLiveDeletedAtSql()}
 			ORDER BY binding_key ASC`,
 		)
 		.bind(input.userId, input.scope, now)
@@ -350,9 +473,9 @@ export async function listSecretMetadataForBucket(input: {
 }): Promise<Array<SecretMetadataRow>> {
 	const { results } = await input.db
 		.prepare(
-			`SELECT ? AS scope, ? AS binding_key, name, description, allowed_hosts, allowed_packages, created_at, updated_at, expires_at AS entry_expires_at, ? AS bucket_expires_at
+			`SELECT id, ? AS scope, ? AS binding_key, name, description, allowed_hosts, allowed_packages, created_at, updated_at, expires_at AS entry_expires_at, ? AS bucket_expires_at
 			FROM secret_entries
-			WHERE bucket_id = ?
+			WHERE bucket_id = ?${andLiveDeletedAtSql()}
 			ORDER BY name ASC`,
 		)
 		.bind(
@@ -373,11 +496,11 @@ export async function listUserScopeSecretMetadata(input: {
 	const now = input.now ?? new Date().toISOString()
 	const { results } = await input.db
 		.prepare(
-			`SELECT b.scope, b.binding_key, e.name, e.description, e.allowed_hosts, e.allowed_packages, e.created_at, e.updated_at, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
+			`SELECT e.id, b.scope, b.binding_key, e.name, e.description, e.allowed_hosts, e.allowed_packages, e.created_at, e.updated_at, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
 			FROM secret_buckets b
 			JOIN secret_entries e ON e.bucket_id = b.id
 			WHERE b.user_id = ? AND b.scope = 'user'
-				AND (b.expires_at IS NULL OR b.expires_at > ?)
+				AND (b.expires_at IS NULL OR b.expires_at > ?)${andLiveDeletedAtSql('b')}${andLiveDeletedAtSql('e')}
 			ORDER BY e.name ASC`,
 		)
 		.bind(input.userId, now)
@@ -406,12 +529,12 @@ export async function listSecretLocationsByNameForUser(input: {
 	const now = input.now ?? new Date().toISOString()
 	const { results } = await input.db
 		.prepare(
-			`SELECT b.scope, b.binding_key, e.name, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
+			`SELECT e.id, b.scope, b.binding_key, e.name, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
 			FROM secret_buckets b
 			JOIN secret_entries e ON e.bucket_id = b.id
 			WHERE b.user_id = ? AND e.name = ?
 				AND (b.expires_at IS NULL OR b.expires_at > ?)
-				AND (e.expires_at IS NULL OR e.expires_at > ?)
+				AND (e.expires_at IS NULL OR e.expires_at > ?)${andLiveDeletedAtSql('b')}${andLiveDeletedAtSql('e')}
 			ORDER BY b.scope ASC, b.binding_key ASC`,
 		)
 		.bind(input.userId, input.name, now, now)
@@ -447,12 +570,12 @@ export async function listPackageScopeSecretMetadata(input: {
 		const placeholders = idChunk.map(() => '?').join(', ')
 		const { results } = await input.db
 			.prepare(
-				`SELECT b.scope, b.binding_key, e.name, e.description, e.allowed_hosts, e.allowed_packages, e.created_at, e.updated_at, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
+				`SELECT e.id, b.scope, b.binding_key, e.name, e.description, e.allowed_hosts, e.allowed_packages, e.created_at, e.updated_at, e.expires_at AS entry_expires_at, b.expires_at AS bucket_expires_at
 				FROM secret_buckets b
 				JOIN secret_entries e ON e.bucket_id = b.id
 				WHERE b.user_id = ? AND b.scope = 'package'
 					AND b.binding_key IN (${placeholders})
-					AND (b.expires_at IS NULL OR b.expires_at > ?)
+					AND (b.expires_at IS NULL OR b.expires_at > ?)${andLiveDeletedAtSql('b')}${andLiveDeletedAtSql('e')}
 				ORDER BY e.name ASC`,
 			)
 			.bind(input.userId, ...idChunk, now)
@@ -478,6 +601,7 @@ function mapSecretBucketRow(row: Record<string, unknown>): SecretBucketRow {
 
 function mapSecretEntryRow(row: Record<string, unknown>): SecretEntryRow {
 	return {
+		id: String(row['id']),
 		bucket_id: String(row['bucket_id']),
 		name: String(row['name']),
 		description: String(row['description']),
@@ -500,6 +624,7 @@ function mapSecretMetadataRow(row: Record<string, unknown>): SecretMetadataRow {
 				: String(row['expires_at'])
 			: String(row['bucket_expires_at'])
 	return {
+		id: String(row['id']),
 		scope: String(row['scope']) as SecretScope,
 		binding_key: String(row['binding_key']),
 		name: String(row['name']),

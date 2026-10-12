@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 
@@ -15,9 +19,10 @@ function createContext(userId = 'user-1') {
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.test',
 			user: {
-				userId,
+				userId: personIdFromStored(userId),
 				email: `${userId}@example.com`,
 				displayName: userId,
 			},
@@ -29,7 +34,7 @@ test('repoList includes owner identity icon URLs from indexed commits', async ()
 	mockModule.listUserRepos.mockResolvedValue([
 		{
 			id: 'repo-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: 'notes',
 			description: 'Notes',
 			isPrivate: true,
@@ -39,7 +44,7 @@ test('repoList includes owner identity icon URLs from indexed commits', async ()
 		},
 		{
 			id: 'repo-2',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: 'empty',
 			description: null,
 			isPrivate: false,

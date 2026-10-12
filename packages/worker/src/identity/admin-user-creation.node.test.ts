@@ -62,8 +62,10 @@ test('adminCreateUserWithPasswordSetup creates verified user and seven-day setup
 	expect(
 		sqlite
 			.prepare(
-				`SELECT email, username, email_verified_at, password_hash, plan
-				FROM users WHERE id = ?`,
+				`SELECT u.email, u.username, u.email_verified_at, u.password_hash, o.plan
+				FROM users u
+				INNER JOIN orgs o ON o.id = u.stable_user_id
+				WHERE u.id = ?`,
 			)
 			.get(created.userId),
 	).toEqual({
@@ -105,6 +107,14 @@ test('adminCreateUserWithPasswordSetup creates verified user and seven-day setup
 			.prepare(`SELECT balance_micro_usd FROM credit_wallets WHERE user_id = ?`)
 			.get(created.stableUserId),
 	).toEqual({ balance_micro_usd: 5_000_000 })
+	expect(
+		sqlite
+			.prepare(
+				`SELECT signup_welcome_credits_pending AS pending
+				 FROM orgs WHERE id = ?`,
+			)
+			.get(created.stableUserId),
+	).toEqual({ pending: 0 })
 })
 
 test('adminCreateUserWithPasswordSetup rejects explicit reserved usernames and skips reserved generated ones', async () => {

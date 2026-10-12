@@ -1,3 +1,5 @@
+import { authorize, orgResource } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -11,7 +13,7 @@ import {
 	memoryRecordSchema,
 	verifyFirstGuidance,
 } from './meta-memory-shared.ts'
-import { requireMcpUser } from './require-user.ts'
+import { requireMcpRequest, requireMcpUser } from './require-user.ts'
 
 const outputSchema = z.object({
 	ok: z.boolean(),
@@ -24,6 +26,7 @@ export const metaMemoryDeleteCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'metaMemoryDelete',
+		orgPermission: 'memory:delete',
 		description:
 			'Soft-delete a stored memory by default, or hard-delete it when `force` is true. Always run `metaMemoryVerify` before deleting memory. Do not delete memory blindly. Review related memories first, decide the correct action, then delete.',
 		keywords: [
@@ -60,15 +63,21 @@ export const metaMemoryDeleteCapability = defineDomainCapability(
 		}),
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			if (!args.verified_by_agent) {
 				throw new Error(
 					'Agents must run metaMemoryVerify before calling metaMemoryDelete. Set verified_by_agent=true only after review.',
 				)
 			}
+			const request = requireMcpRequest(ctx.callerContext)
+			await authorize(
+				{ env: ctx.env, request },
+				'memory:delete',
+				orgResource(request, 'memory', args.memory_id),
+			)
 			const existing = await getMemory({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				memoryId: args.memory_id,
 			})
 			if (!existing) {
@@ -76,7 +85,7 @@ export const metaMemoryDeleteCapability = defineDomainCapability(
 			}
 			const memory = await deleteMemory({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				memoryId: args.memory_id,
 				force: args.force ?? false,
 			})

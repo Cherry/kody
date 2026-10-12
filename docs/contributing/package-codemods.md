@@ -79,6 +79,8 @@ type PackageCodemodTransformResult = {
 type PackageCodemod = {
 	id: string
 	description: string
+	/** Opt-in; default `head-and-published`. See Drift and applyMode. */
+	applyMode?: 'head-and-published' | 'published-only'
 	detect(files: Record<string, string>): Array<PackageCodemodFinding>
 	transform(files: Record<string, string>): PackageCodemodTransformResult
 }
@@ -232,19 +234,14 @@ package API to an explicit owner-scoped specifier:
 - Rewrites complete examples in JavaScript/TypeScript Markdown fences and inline
   code spans. Untyped/unsupported fences, partial snippets, and matching prose
   remain unchanged with `needsManual`.
-- Applies those safe Markdown rewrites to platform-owned package documentation,
-  using the package's explicit platform scope. Documentation for `@kody/notify`,
-  `@kody/stash`, and `@kody/personal-capture` remains manual because examples
-  must use the installed user-fork owner to preserve `packageStorage()`
-  semantics.
 - Leaves already string-first calls unchanged and is idempotent.
 - Emits `needsManual` for immutable `packageId` targets, dynamic or indirect
   input objects, calls without `exportName`, computed properties, spreads,
   comments in the removed field, parse failures, and manifests without a valid
   scoped package name.
-- Emits file-level `needsManual` findings for platform-owned runtime source: its
-  old bare-id lookup follows the runtime caller, which cannot be replaced by the
-  source package's platform scope without changing behavior.
+- Emits file-level `needsManual` findings when the `package.json` scope is not
+  the package's org: the old bare-id lookup resolved in the package's org, so
+  rewriting to a different manifest scope would retarget the call.
 - Remains registered because publish checks permanently reject object-only
   `packages.invoke` in JavaScript and TypeScript. Authors and operators can use
   this codemod as the mechanical repair path for source that predates or
@@ -332,6 +329,137 @@ Builtin capability and domain ids are camelCase identifiers (`emailSend`,
 `mcpServers`). Input field names, usage-metric event types, Codex TOML
 `[mcp_servers.kody]`, and SQL `cf_agents_mcp_servers` stay snake_case.
 
+### `0010-detect-legacy-credential-patterns`
+
+This detect-only codemod lists credential placeholder patterns in package source
+and the root `package.json` (see
+[Credential slots](../use/packages.md#credential-slots-kodycredentials)).
+`transform` writes nothing; dry-run and apply return the findings as
+`needs_manual`. Run it with `adminPackageCodemodScan`.
+
+It scans JavaScript and TypeScript modules and the root `package.json`. Each
+finding message starts with one fixed pattern label:
+
+| Label                  | Matches                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `literal secret`       | A complete `{{secret:…}}`, `{{secret-basic:…}}`, `{{secret/provider:…}}`, or `{{integration-token:…}}` placeholder, or a known string passed to `createAuthenticatedFetch`, `packageSecrets.get`, `secretHeaders.basic`, or similar helpers, unless it names a declared slot of its kind |
+| `computed secret`      | A secret placeholder built at runtime, or a secret helper called with a runtime name                                                                                                                                                                                                     |
+| `computed integration` | `createAuthenticatedFetch`, `integrationTokenRefresh`, or `{{integration-token:…}}` with a runtime name                                                                                                                                                                                  |
+| `kody.mcp`             | Any `kody.mcp` access, including `const { mcp } = kody`                                                                                                                                                                                                                                  |
+| `\|scope=`             | A `\|scope=` placeholder suffix with a literal or computed scope, or a `scope` option on a secret helper                                                                                                                                                                                 |
+| `secretMounts`         | `package.json#kody.secretMounts`                                                                                                                                                                                                                                                         |
+| `webhook secretName`   | `verification.secretName` or `challenge.prove.secretName` on a `kody.webhooks` entry                                                                                                                                                                                                     |
+| `plain http`           | A `fetch` or `new Request` of an `http://` URL in a module that uses placeholders                                                                                                                                                                                                        |
+| `packageSecrets.get`   | Any `packageSecrets.get` or `kody.packageSecretGet` call                                                                                                                                                                                                                                 |
+
+A reference that names a declared `kody.credentials` slot of its kind is not a
+finding. A secret name needs a `secret` slot: `{{secret:NAME}}`, either
+`{{secret-basic:…}}` name, `packageSecrets.get`, and the secret helper fields.
+An integration name needs an `oauth` slot: `{{integration-token:NAME}}`,
+`createAuthenticatedFetch`, and `integrationTokenRefresh`. A vault reference
+names no slot, so it stays a finding.
+
+A known string is a literal, a top-level `const` string (including one imported
+from a relative module), or a template or `+` chain of those. A local binding
+that shadows a module constant is not treated as that constant.
+Placeholder-shaped text that names nothing, such as `{{secret:<name>}}` in help
+or redaction text, is ignored. Test files (`*.test.*`, `*.spec.*`, and anything
+under `__tests__/`) are skipped unless a runtime entry points at them: `exports`
+(import/default, not types-only), `main` / `module` / `browser`, `kody.app`
+entries, job entries, subscription handlers, or a module those entries reach
+through a bundler-resolved import (`import` / `export … from`, `import()`,
+`require()`).
+
+Helpers are matched by name, comments are ignored, and an unparseable module
+falls back to a text match. An unsuffixed `{{secret:NAME}}` still reads a
+package-scoped secret before the user one, and no static scan can see that, so
+`|scope=` findings undercount package-scoped buckets. Count those from secret
+rows with `scope = 'package'`. This module yields `literal secret`,
+`computed secret`, `computed integration`, `kody.mcp`, and `|scope=` for
+`index.ts`:
+
+```ts
+import { createAuthenticatedFetch, kody } from 'kody:runtime'
+
+export default async function digest(input: { account: string; key: string }) {
+	const google = await createAuthenticatedFetch(input.account)
+	await kody.mcp.linear.list_issues({})
+	return fetch('https://api.example.com', {
+		headers: {
+			'x-api-key': `{{secret:${input.key}}}`,
+			authorization: 'Bearer {{secret:EXAMPLE_TOKEN|scope=package}}',
+		},
+	}).then(() => google('https://www.googleapis.com/calendar/v3/users/me'))
+}
+```
+
+Save each scan step result as its own JSON file, then print the report over all
+of them:
+
+```bash
+node tools/credential-pattern-report.ts .tmp/scan/
+```
+
+It takes any number of files or directories. A directory reads its `.json` files
+in natural order (`step-2.json` before `step-10.json`). When a package appears
+more than once, the last item read wins.
+
+It counts packages and files per pattern, per org, and per package, plus
+`skipped_unpublished` and `skipped_drift`. The org and package tables name
+private packages. Keep them out of public issues; public issues get the pattern
+counts only.
+
+### `0011-owner-scope-follows-registry`
+
+This codemod runs after an [org resource transfer](./org-resource-transfer.md).
+The transfer moves each package to the new org, but package sources still name
+the old scope. The engine builds `context.packageName` from the owning org's
+package scope and the package leaf, not from `saved_packages.name` (that column
+mirrors the published `package.json`, so a revert or projection refresh puts the
+old scope back). When the scope of the `package.json` `name` differs from the
+owner scope, the codemod replaces every `@<oldScope>/` with `@<newScope>/` in
+every file. That covers the manifest name, `kody.dependencies` keys,
+`kody:@oldScope/...` imports, and docs.
+
+- A match must be followed by `/`, so `@oldScopeish/x`, a bare `@oldScope`
+  handle, and email addresses are left alone. It shares
+  `rewriteScopedReferences` with the community fork self-reference rewrite.
+- Every package in the old scope moved together, so references to sibling
+  packages are rewritten too.
+- Packages whose scope already matches, unscoped names, and unparseable or
+  missing manifests are clean. The codemod is idempotent.
+
+Once the transfer has committed, run `adminPackageCodemodDryRun`, then
+`adminPackageCodemodApply`, with `userIds` set to the new org id.
+`adminPackageCodemodRevert` undoes it like any other codemod. A revert puts the
+old scope back in the sources, so the next scan detects the package again.
+Reverting a package whose `kody:@oldScope/...` dependencies no longer exist
+under the old scope fails the publish checks and leaves the package applied.
+Re-applying after a revert can report `dry_run_new_failures` for a package whose
+sibling dependency is still registered under the old scope. Run apply again once
+the sibling is applied.
+
+### `0012-explicit-webhook-url-secret-verification`
+
+This one-shot manifest-format codemod adds
+`"verification": { "type": "url-secret" }` to every `package.json#kody.webhooks`
+entry that declares no `verification`. Ingress already authenticates those
+webhooks by URL secret alone, so the rewrite changes no behavior (see
+[Senders that cannot sign](../use/webhooks.md#senders-that-cannot-sign-url-secret)).
+Once a rescan finds no webhook without `verification`, publish requires it
+([#3477](https://github.com/kentcdodds/kody/issues/3477)).
+
+- Appends `verification` to each undeclared entry. Entries that already declare
+  any verification type are left unchanged, and the codemod is idempotent.
+- Packages without `kody.webhooks` are clean.
+- Emits `needsManual` for missing or invalid `package.json`, a `kody.webhooks`
+  that is not an array of objects, and a `verification` that is not an object.
+- Does not touch the stored signing secret. Mint still gives these webhooks the
+  default `X-Kody-Signature` secret, and `{{webhookSecret}}` apply is unchanged.
+- Sets `applyMode: 'published-only'` so fleet apply can advance
+  `published_commit` on packages whose Artifacts default-branch HEAD has
+  drifted, without moving that HEAD (owner unpublished work stays put).
+
 ## Engine
 
 The engine entry point is `runPackageCodemodStep` in
@@ -343,12 +471,12 @@ and `nextCursor` until `nextCursor` is null.
 The admin UI walks those pages as separate HTTP requests. MCP `execute` and
 inline workflow sandboxes do not: dry-run, apply, and revert are check-heavy
 enough that a second page in the same sandbox typically exceeds the workflow
-observer (~270s, under the Cloudflare Workflow step timeout). Those modes take
-one page per execute or workflow sandbox. When `nextCursor` is set, start a new
-`execute` or `workflows.create` with that `runId` and cursor. Omitted filters
-inherit from the stored run. Capability results include a `nextStep` string that
-restates this. Scan pages are cheaper and can often continue in the same
-sandbox.
+observer (5-minute sandbox budget, under the Cloudflare Workflow step timeout).
+Those modes take one page per execute or workflow sandbox. When `nextCursor` is
+set, start a new `execute` or `workflows.create` with that `runId` and cursor.
+Omitted filters inherit from the stored run. Capability results include a
+`nextStep` string that restates this. Scan pages are cheaper and can often
+continue in the same sandbox.
 
 ### Step limits
 
@@ -367,14 +495,18 @@ step matched zero packages.
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `scan`    | Run `detect` only; record findings per package.                                                                                                                                                                                                                                                                                   |
 | `dry-run` | Run `transform` in memory, then run the full publish check suite (`runRepoChecks`) on **both** the original and transformed trees. Pass only when transformed checks introduce **no new failures** compared to the original. Also verifies mechanical idempotency by transforming twice and requiring an unchanged second result. |
-| `apply`   | Same gates as dry-run. On success: snapshot the original published tree to KV for revert, commit and push via `syncArtifactSourceSnapshot` with commit message `codemod(<id>): ...`, refresh the saved-package projection, and dispatch subscription events (see below). Re-checks drift immediately before the write.            |
-| `revert`  | For each `applied` item on a prior apply run: load the KV revert snapshot, verify Artifacts HEAD still matches that item's `afterCommit`, write the snapshot tree back, mark the source apply item `reverted`, and dispatch `package.codemod.reverted`.                                                                           |
+| `apply`   | Same gates as dry-run. On success: snapshot the original published tree to KV for revert, commit and push (see [Drift and applyMode](#drift-and-applymode)), refresh the saved-package projection, and dispatch subscription events (see below). Re-checks drift immediately before the write.                                    |
+| `revert`  | For each `applied` item on a prior apply run: load the KV revert snapshot, verify the publish tip is still safe to restore (HEAD match for `head-and-published`; published-commit match for `published-only`), write the snapshot tree back, mark the source apply item `reverted`, and dispatch `package.codemod.reverted`.      |
 
-Locked packages (`saved_packages.locked_at` set) still run apply and revert. The
-engine commits and pushes HEAD and does **not** advance `published_commit`. The
-owner reviews that HEAD commit later at
-`/@username/:kodyId/approve-publish?commit=…`. Fleet apply does not skip locked
-packages.
+Locked packages (`saved_packages.locked_at` set) still run apply and revert for
+`head-and-published` codemods when HEAD matches published: the engine commits
+and pushes HEAD and does **not** advance `published_commit`. The owner reviews
+that HEAD commit later at `/@username/:kodyId/approve-publish?commit=…`.
+`published-only` codemods **skip locked packages entirely** (aligned or
+drifted): an aligned locked apply would leave HEAD at `afterCommit` while
+`published_commit` stayed behind (revert cannot open a RepoSession), and a
+drifted locked apply would hide the pending tip on `kody-published` (approval UI
+loads HEAD).
 
 Per-package failures are **isolated**; one package error does not abort sibling
 items in the same run step.
@@ -399,14 +531,44 @@ stops early:
 Abandoned and failed **apply** runs can still hold `applied` items; revert
 accepts them (the admin UI only blocks revert while a run is `running`).
 
+### Drift and applyMode
+
+By default (`applyMode: 'head-and-published'`, or omitted), apply requires
+Artifacts default-branch HEAD to equal `published_commit`, then writes through
+`syncArtifactSourceSnapshot` so HEAD and published stay aligned. Drifted
+packages are `skipped_drift`.
+
+Codemods that set `applyMode: 'published-only'` (today: `0012`) change only the
+**drifted** lane:
+
+1. Load the published tree (same as today).
+2. Run the same transform + check gates.
+3. Commit the transformed files as a **child of** `published_commit`.
+4. Push that commit to the durable non-default ref `refs/heads/kody-published`
+   (never the default-branch tip — owner unpublished work on HEAD is untouched).
+5. Call `finalizePublishedEntitySource` to advance `published_commit` + KV.
+
+When HEAD already matches published, published-only codemods still use
+`syncArtifactSourceSnapshot` so HEAD and published stay aligned.
+`syncPublishedSourceSnapshotOnly` requires `expectedPublishedCommit` and refuses
+when `published_commit` moved (concurrent owner publish). On a non-fast-forward
+`kody-published` push it re-reads `published_commit`: still equal → force-push
+(recover leftover tips after a push that never finalized); moved → refuse.
+Revert chooses the lane from tip state: if HEAD still equals the apply
+`afterCommit`, restore via `syncArtifactSourceSnapshot`; otherwise restore via
+published-only (no HEAD match required; default-branch tip is not moved).
+
 ### Safety rails
 
 - **`skipped_unpublished`** — packages with no published commit are skipped.
 - **`skipped_drift`** — when Artifacts default-branch HEAD does not match
-  `entity_sources.published_commit`, the engine skips and never overwrites.
-  Apply re-checks drift after transform gates pass and before KV snapshot /
-  publish. Revert compares HEAD to the prior apply item's **`afterCommit`**
-  (post-codemod published commit); drift skips revert for that item.
+  `entity_sources.published_commit`, the engine skips and never overwrites
+  **unless** the codemod opts into `applyMode: 'published-only'` (see
+  [Drift and applyMode](#drift-and-applymode)). Apply re-checks drift after
+  transform gates pass and before KV snapshot / publish. Revert for
+  `head-and-published` compares HEAD to the prior apply item's
+  **`afterCommit`**; `published-only` revert compares `published_commit` instead
+  and never moves default-branch HEAD.
 - **Apply snapshots** — before publish, apply writes the pre-codemod published
   tree to `BUNDLE_ARTIFACTS_KV` at `package-codemod-revert:{userId}:{itemId}`
   with a **90-day TTL** and stores that key on the ledger item as
@@ -473,6 +635,7 @@ Admin-gated operator fleet runs:
 - `adminPackageCodemodDryRun`
 - `adminPackageCodemodApply`
 - `adminPackageCodemodRevert`
+- `adminPackageCodemodOwnerNotice` (see [Owner notice](#owner-notice))
 
 Admin capabilities require `requiredRole: 'admin'` and follow the RBAC boundary
 in [Authorization](./architecture/authorization.md).
@@ -491,28 +654,69 @@ sequence (formalizing existing practice):
 4. **Canary apply** — use admin filters (`userIds` / `packageIds`) for a small
    cohort; monitor checks, projections, and subscriber notifiers.
 5. **Fleet apply** — page through the full population.
-6. **Land enforcement** — add or tighten publish-time lint/checks so **new**
-   publishes cannot use the deprecated pattern.
+6. **Owner notice** — before a gateway, credential, or other runtime rule starts
+   refusing what affected packages still do, email each affected owner what
+   breaks, when, and how to fix it. See [Owner notice](#owner-notice). Required
+   whenever a scan finds packages a codemod cannot fix (for example
+   `needs_manual` findings).
+7. **Land enforcement** — add or tighten publish-time lint/checks so **new**
+   publishes cannot use the deprecated pattern, and turn on the runtime rule.
 
 Skipping dry-run or canary apply risks mass check failures; skipping step 6
-allows new packages to reintroduce debt. After enforcement lands, drop the
-deprecation shims when no remaining packages need them — or open a GitHub issue
-if that drop must wait. See
-[Cleanup after migrations](./cleanup-after-migrations.md).
+breaks packages with no warning; skipping step 7 allows new packages to
+reintroduce debt. After enforcement lands, drop the deprecation shims when no
+remaining packages need them — or open a GitHub issue if that drop must wait.
+See [Cleanup after migrations](./cleanup-after-migrations.md).
+
+### Owner notice
+
+`adminPackageCodemodOwnerNotice` emails the owners of every package a scan run
+flagged. Run a fresh scan after fleet apply, so owners whose packages the
+codemod already fixed are not warned, and pass that scan's `runId`. Dry-run,
+apply, and revert runs are refused, and a scan still running can be previewed
+but not sent. Also pass a stable `noticeId` (for example
+`2026-10-body-placeholders`), a `subject`, `whatBreaks`, `howToFix`,
+`effectiveAt` (when the rule takes effect, in words), and optionally
+`findingMessages` (exact finding messages to include; omit for every finding in
+the run).
+
+- **Dry run by default.** `dryRun` defaults to `true`. It lists each owner with
+  their flagged packages and a status, and renders a preview of the first email.
+  Review the preview before sending with `dryRun: false`.
+- **Recipients.** Every `owner` of the owning org with a verified email. A
+  personal org with no membership rows goes to the user whose id is the org id.
+  Owners with no verified address report `no_recipients`.
+- **Once per notice and recipient.** A KV claim
+  (`package-owner-notice:v1:<noticeId>:<ownerId>:<userId>`, 180 days) is written
+  after each successful send. A re-run skips delivered recipients
+  (`already_sent` once all are reached) and retries the rest (`send_failed`
+  until then). `claim_failed` means the email went out but its claim did not
+  save, so a re-run may send it again. KV has no atomic claim, so run one notice
+  from one place at a time.
+- **Content.** The email names up to 25 affected packages with a link to each
+  and its findings, then the fix. Never put secret values, internal hostnames,
+  or other owners' data in `whatBreaks` or `howToFix`.
+- **Paging.** Owners are processed in id order, `limit` (default 20, max 50) per
+  call. Pass `nextCursor` back until it is `null`. A scan with more than 10,000
+  items is refused; filter the scan first.
 
 ## Revert
 
 Apply persists the pre-codemod published tree to KV (`revert_snapshot_key`,
 90-day TTL) before republishing the transformed tree. **Revert** mode creates a
 new run with `revert_of_run_id` pointing at the prior apply run, pages through
-source items with status `applied`, loads each KV snapshot, and republishes via
-`syncArtifactSourceSnapshot` with commit message `revert codemod(<id>)`. On
-success it marks the **source apply item** `reverted`, refreshes projections,
+source items with status `applied`, loads each KV snapshot, and republishes with
+commit message `revert codemod(<id>)` — via `syncArtifactSourceSnapshot` for
+`head-and-published`, or `syncPublishedSourceSnapshotOnly` for `published-only`.
+On success it marks the **source apply item** `reverted`, refreshes projections,
 and dispatches `package.codemod.reverted`.
 
-Revert requires published HEAD to still equal the source item's `afterCommit`.
-Missing or expired KV snapshots fail the revert item. Revert does not restore
-Artifacts working-copy edits made after apply.
+For `head-and-published`, revert requires default-branch HEAD to still equal the
+source item's `afterCommit`. For `published-only`, revert requires
+`published_commit` to still equal `afterCommit` (or, for locked non-promoted
+applies, still equal `beforeCommit`) and does not move HEAD. Missing or expired
+KV snapshots fail the revert item. Revert does not restore Artifacts
+working-copy edits made after apply.
 
 Runs are single-pass in every mode: items that fail or are drift-skipped are
 recorded on the run but not retried within it. Because failed or skipped source

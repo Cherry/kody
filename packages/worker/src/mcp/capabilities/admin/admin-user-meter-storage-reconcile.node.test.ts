@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as AuditLog from '#worker/audit-log.ts'
 import type * as D1StorageReconciliation from '#worker/entitlements/d1-storage-reconciliation.ts'
@@ -43,9 +44,12 @@ function createAdminContext(env: Env) {
 	return {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: testStableUserIdFromEmail('admin@example.com'),
+				userId: personIdFromStored(
+					testStableUserIdFromEmail('admin@example.com'),
+				),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],

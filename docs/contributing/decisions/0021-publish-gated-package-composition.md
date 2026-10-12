@@ -2,6 +2,12 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-18
+- **Amended:** 2026-10-10 (Teams: ambient credential use requires per-resource
+  `secret:use` / `integration:use`; delete the pre-Teams ambient skip)
+- **Superseded in part by:**
+  [0068](./0068-credentials-own-placement-scoped-clients.md) (credential
+  authority for scoped clients only; Key placeholders keep this record; see the
+  note at the end)
 
 ## Context
 
@@ -27,9 +33,42 @@ Keep Kody publish-gated and snapshot-isolated:
 - Do not deactivate or auto-republish dependents when a provider changes or is
   deleted. Publish already reports stale static snapshots for the agent to
   decide.
-- Ad hoc `execute` stays ambient. Packages remain the declared-authority unit
-  (`kody.secretMounts`, host approval, integration allowlists,
-  `kody.dependencies`).
+- Packages remain the declared-authority unit for _which_ credentials a run may
+  touch (`kody.secretMounts`, host approval, integration allowlists, provider
+  grants, `kody.dependencies`). A package's slot binding / allowlist is itself
+  the grant for package runs: the binder needs Use at bind time; the runner
+  needs `package:execute`, not per-credential Use. Ad hoc `execute` has no
+  package attachment: it may still resolve org credentials by name, but only
+  when the acting person holds `secret:use` / `integration:use` on that concrete
+  credential, by its stable credential id
+  ([ADR 0062](./0062-one-access-check.md)). There is no ambient skip of org
+  RBAC.
+
+**Amended (2026-10-10):** Before Teams, "ad hoc execute stays ambient" was read
+as skipping per-resource use checks. With org members and outside collaborators,
+that skipped `authorize` on placeholder expansion and let any actor with
+`org:execute` use every unlocked org secret and integration. Resolution now
+calls `authorize` for ad-hoc (no package secret authority) paths in the fetch
+gateway, JWT sign, provider door keys, and connected MCP servers.
+Package-authority runs keep package attachment / mounts / usageMode only — do
+not require the runner to hold Use on each bound credential. Automation acts as
+Owner and keeps using the org's attachments. Credential storage lookups use
+`ownerIdFromCaller` (org), not the acting person id.
+
+**Amended (2026-10-10, local execute):** CLI `execute --local` CapabilityProxy
+hops may stamp a client-supplied package id. That stamp is **not** bundler
+provenance: origin verifies `package:execute` when present, but never skips
+`secret:use` / `integration:use` from it. Only cloud / hosted package runs,
+where the bundler proves package identity, keep package-attachment credential
+semantics.
+
+**Amended (2026-10-10, credential door):** Every resolution goes through
+`resolveCredential(orgId, actor, packageStamp)`
+(`packages/worker/src/credentials/resolve-credential.ts`). The package stamp is
+`attested` (the server knows the package) or `claimed` (a client named it); only
+`attested` skips the actor's Use. The door also re-checks that the actor still
+has access to the org at resolve time and writes one org audit row per
+resolution. Credential storage is read nowhere else.
 
 ## Consequences
 
@@ -41,5 +80,26 @@ Keep Kody publish-gated and snapshot-isolated:
   whose published manifest cannot load fails the dependency check instead of
   being treated as a leaf. There is no runtime that leaves cyclic packages
   "permanently inactive."
+- A member or outside collaborator who can run ad hoc execute cannot expand
+  `{{secret:…}}` / `{{integration-token:…}}` (or ambient provider / MCP use)
+  without a Use grant on that resource. Hosted package runs with
+  `package:execute` still use that package's attachments only. CLI `--local`
+  package stamps never skip Use. Owners and Automation are unchanged.
 - Revisit only if a concrete user need requires live in-process composition or a
   package-wide kill switch that is not delete.
+
+**Superseded in part (2026-10-11):**
+[0068](./0068-credentials-own-placement-scoped-clients.md) replaces the
+credential authority this record describes: the package as the unit of declared
+authority (`kody.secretMounts`, integration allowlists, provider grants), the
+slot binding or allowlist as the grant for package runs, package-attachment
+semantics for runners, and the `attested` stamp skipping the actor's Use. Under
+0068 the only authority is the actor's Use plus `package:execute`, and package
+stamps select needs and storage only. The publish-gated, snapshot-isolated
+composition decision is unchanged.
+
+**Narrowed (2026-10-12):** 0068's authority change applies only to the opt-in
+credential types used through scoped clients. Key credentials (today's secrets
+and their placeholders) keep the authority this record describes, permanently:
+package attachments, `kody.secretMounts`, allowlists, provider grants, and the
+`attested` stamp.

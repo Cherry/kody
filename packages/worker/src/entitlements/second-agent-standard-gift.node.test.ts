@@ -1,7 +1,9 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import { getUserEntitlement } from './service.ts'
 import {
@@ -26,22 +28,24 @@ async function createGiftTestDb(input: {
 	const db = createD1FromSqlite(sqlite)
 	await ensureUsersTestSchema({
 		db,
-		columns: ['stripe_plan'],
+		columns: ['email_verified_at'],
 	})
 	const stableUserId = testStableUserIdFromEmail(input.email)
+	const username = input.email.split('@')[0] ?? 'gift-user'
 	await db
 		.prepare(
-			`INSERT INTO users (username, email, password_hash, stable_user_id, plan, stripe_plan)
-			 VALUES (?, ?, 'hash', ?, ?, ?)`,
+			`INSERT INTO users (username, email, password_hash, stable_user_id)
+			 VALUES (?, ?, 'hash', ?)`,
 		)
-		.bind(
-			input.email.split('@')[0],
-			input.email,
-			stableUserId,
-			input.plan ?? 'free',
-			input.stripePlan ?? null,
-		)
+		.bind(username, input.email, stableUserId)
 		.run()
+	await provisionPersonalOrg(db, {
+		stableUserId,
+		username,
+		plan: input.plan ?? 'free',
+		stripePlan: input.stripePlan ?? null,
+		createdAt: now.toISOString(),
+	})
 	return { db, stableUserId, email: input.email }
 }
 
@@ -90,6 +94,8 @@ test('first second-ecosystem grant gives 14-day Standard; later events and paid 
 			plan: 'free',
 			ladder: 'public',
 			creditWallet: 'none',
+			seats: 1,
+			limitOverrides: [],
 		})
 		expect(await evaluate(free, 2)).toEqual({
 			outcome: 'granted',
@@ -99,6 +105,8 @@ test('first second-ecosystem grant gives 14-day Standard; later events and paid 
 			plan: 'pro',
 			ladder: 'public',
 			creditWallet: 'none',
+			seats: 1,
+			limitOverrides: [],
 		})
 
 		const second = await evaluate(
@@ -117,7 +125,7 @@ test('first second-ecosystem grant gives 14-day Standard; later events and paid 
 				.prepare(
 					`SELECT second_agent_standard_gift_granted_at,
 					        second_agent_standard_gift_expires_at
-					 FROM users WHERE stable_user_id = ?`,
+					 FROM orgs WHERE id = ?`,
 				)
 				.bind(free.stableUserId)
 				.first(),
@@ -139,6 +147,8 @@ test('first second-ecosystem grant gives 14-day Standard; later events and paid 
 				plan: stripePlan,
 				ladder: 'public',
 				creditWallet: 'none',
+				seats: 1,
+				limitOverrides: [],
 			})
 			expect((await evaluate(paid, 4)).outcome).toBe('already_granted')
 		}
@@ -152,7 +162,7 @@ test('maybeEvaluate skips writes without prepare and keeps an existing gift belo
 	await expect(
 		maybeEvaluateSecondAgentStandardGift({
 			db: {} as D1Database,
-			stableUserId: 'user-1',
+			stableUserId: ownerIdFromStored('user-1'),
 			ecosystemCount: 2,
 		}),
 	).resolves.toEqual({

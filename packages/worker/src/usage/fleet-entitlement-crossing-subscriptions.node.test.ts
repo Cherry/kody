@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as AdminPackageSubscriptions from '#worker/package-invocations/admin-package-subscriptions.ts'
 import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
@@ -24,7 +25,7 @@ const { dispatchFleetEntitlementCrossingSubscriptionEvent } =
 
 const adminSavedPackage: SavedPackageRecord = {
 	id: 'package-1',
-	userId: 'admin-user-1',
+	userId: ownerIdFromStored('admin-user-1'),
 	name: 'Admin package',
 	kodyId: 'admin-package',
 	description: '',
@@ -32,6 +33,7 @@ const adminSavedPackage: SavedPackageRecord = {
 	searchText: null,
 	sourceId: 'source-1',
 	hasApp: false,
+	hasSkills: false,
 	hidden: false,
 	isPrivate: false,
 	lockedAt: null,

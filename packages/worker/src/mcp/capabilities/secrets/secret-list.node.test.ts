@@ -1,8 +1,12 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import * as secretService from '#mcp/secrets/service.ts'
-import { type SecretMetadata } from '#mcp/secrets/types.ts'
+import { type ListedSecret } from '#mcp/secrets/types.ts'
 import { applyAllMigrations as applyRepositoryMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
@@ -44,9 +48,10 @@ const communityFork = {
 }
 
 function secretMetadata(
-	overrides: Partial<SecretMetadata> & Pick<SecretMetadata, 'name' | 'scope'>,
-): SecretMetadata {
+	overrides: Partial<ListedSecret> & Pick<ListedSecret, 'name' | 'scope'>,
+): ListedSecret {
 	return {
+		credentialId: `cred-${overrides.name}`,
 		description: '',
 		packageId: overrides.scope === 'package' ? 'pkg-1' : null,
 		allowedHosts: [],
@@ -77,9 +82,10 @@ test('secretList matches implicit user-secret read access and still lists packag
 	const executeContext = {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User',
 			},
@@ -88,9 +94,10 @@ test('secretList matches implicit user-secret read access and still lists packag
 	const packageContext = {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User',
 			},
@@ -163,7 +170,7 @@ test('secretList from execute returns caller-owned package metadata with package
 		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
 		...createInMemoryUserMeterEnv().env,
 	} as Env
-	const userId = 'user-execute-list'
+	const userId = ownerIdFromStored('user-execute-list')
 	await secretService.saveSecret({
 		env,
 		userId,
@@ -183,8 +190,13 @@ test('secretList from execute returns caller-owned package metadata with package
 		{
 			env,
 			callerContext: createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
 				baseUrl: 'https://example.com',
-				user: { userId, email: `${userId}@example.com`, displayName: userId },
+				user: {
+					userId: personIdFromStored('user-execute-list'),
+					email: `${userId}@example.com`,
+					displayName: userId,
+				},
 			}),
 		},
 	)

@@ -1,8 +1,9 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as packageSourceModule from '#worker/package-registry/source.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { planLimits } from '#universal/plans.ts'
-import { consumeDailyEntitlement } from '#worker/entitlements/service.ts'
+import { consumeExecuteUniqueWorkerDay } from '#worker/entitlements/service.ts'
 import type * as EntitlementService from '#worker/entitlements/service.ts'
 import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
 import {
@@ -11,7 +12,7 @@ import {
 	entitlementLimitErrorCode,
 } from '#worker/entitlements/errors.ts'
 import { invokePackageExport } from './service.ts'
-import { clearInvokeContractCachesForTests } from './invoke-contract-cache.ts'
+import { invalidateInvokeContractFreshness } from './invoke-contract-cache.ts'
 import {
 	packageInvocationsRepoMockModule as repoMockModule,
 	createDatabase,
@@ -49,8 +50,8 @@ vi.mock('#worker/entitlements/service.ts', async (importOriginal) => {
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		repoMockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		repoMockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageByName(...args),
 	listSavedPackagesByUserId: (...args: Array<unknown>) =>
@@ -111,8 +112,16 @@ vi.mock('#worker/identity/background-mcp-user.ts', () => ({
 	}),
 }))
 
+function invalidateSeededInvokeContract() {
+	invalidateInvokeContractFreshness({
+		userId: ownerIdFromStored('user-123'),
+		packageIdOrKodyIds: ['pkg-1', 'discord-gateway', '@owner/pkg'],
+		sourceId: 'source-1',
+	})
+}
+
 function prepareSuccessfulExport() {
-	clearInvokeContractCachesForTests()
+	invalidateSeededInvokeContract()
 	seedPackageResolution()
 	repoMockModule.runBundledModuleWithRegistry.mockResolvedValue({
 		result: { ok: true },
@@ -142,7 +151,10 @@ function invokeWebhook(
 }
 
 function readMeter(env: Env, userId: string, resource: string) {
-	return userMeterRpc({ env, userId }).read({ resource, day: utcDayKey() })
+	return userMeterRpc({ env, userId: ownerIdFromStored(userId) }).read({
+		resource,
+		day: utcDayKey(),
+	})
 }
 
 async function readCount(env: Env, userId: string, resource: string) {
@@ -150,13 +162,15 @@ async function readCount(env: Env, userId: string, resource: string) {
 	return read.outcome === 'ready' ? read.count : 0
 }
 
+let executeWorkerSeq = 0
 function consumeExecuteCall(env: Env, userId: string) {
-	return consumeDailyEntitlement({
+	executeWorkerSeq += 1
+	return consumeExecuteUniqueWorkerDay({
 		db: env.APP_DB,
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
 		email: 'owner@example.com',
-		resource: 'execute_calls_per_day',
+		workerId: `kody-execute-${executeWorkerSeq}`,
 	})
 }
 
@@ -169,7 +183,9 @@ test('automation_invocations_per_day under quota succeeds without touching execu
 	expect(
 		await readMeter(env, token.userId, automationInvocationsPerDayResource),
 	).toMatchObject({ outcome: 'ready', count: 1 })
-	expect(await readCount(env, token.userId, 'execute_calls_per_day')).toBe(0)
+	expect(
+		await readCount(env, token.userId, 'execute_unique_workers_per_day'),
+	).toBe(0)
 })
 
 test('automation_invocations_per_day at quota fails before sandbox, leaves execute free, and releases the keyed claim so a later retry can succeed', async () => {
@@ -206,7 +222,7 @@ test('automation_invocations_per_day at quota fails before sandbox, leaves execu
 
 	await consumeExecuteCall(env, token.userId)
 	expect(
-		await readMeter(env, token.userId, 'execute_calls_per_day'),
+		await readMeter(env, token.userId, 'execute_unique_workers_per_day'),
 	).toMatchObject({ outcome: 'ready', count: 1 })
 	expect(
 		await readMeter(env, token.userId, automationInvocationsPerDayResource),
@@ -228,14 +244,16 @@ test('automation_invocations_per_day at quota fails before sandbox, leaves execu
 	expect(repoMockModule.runBundledModuleWithRegistry).toHaveBeenCalledTimes(1)
 })
 
-test('execute_calls_per_day flood does not burn automation_invocations_per_day', async () => {
-	clearInvokeContractCachesForTests()
+test('execute_unique_workers_per_day flood does not burn automation_invocations_per_day', async () => {
+	invalidateSeededInvokeContract()
 	const { env } = createEnvWithUserMeter(createDatabase())
-	const userId = 'user-123'
+	const userId = ownerIdFromStored('user-123')
 
 	for (let i = 0; i < 3; i++) await consumeExecuteCall(env, userId)
 
-	expect(await readMeter(env, userId, 'execute_calls_per_day')).toMatchObject({
+	expect(
+		await readMeter(env, userId, 'execute_unique_workers_per_day'),
+	).toMatchObject({
 		outcome: 'ready',
 		count: 3,
 	})

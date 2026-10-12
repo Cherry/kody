@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeRepoSessionPackageWrite } from './authorize-repo-session-package.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import {
 	repoEditFilesInputSchema,
@@ -15,6 +17,7 @@ export const repoEditFilesCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoEditFiles',
+		orgPermission: 'package:write',
 		description: [
 			'Apply a batch of file-level edits in an active repo session: write, replace, writeJson, delete, or move. Same-path write/replace/writeJson edits in one call compose in order against each prior result.',
 			'Use `write` for whole-file replacements or for creating new files when a unified diff for `repoApplyPatch` would be brittle (for example, single-file job sources or generated package modules). A write replaces the file at `path` with `content` exactly, creates missing parent directories, and treats empty `content` as clearing the file. Each edit returns a per-file diff plus a `changed` flag.',
@@ -39,10 +42,17 @@ export const repoEditFilesCapability = defineDomainCapability(
 		inputSchema: repoEditFilesInputSchema,
 		outputSchema: repoEditFilesOutputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageWrite({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			const result = await repoSessionRpc(ctx.env, args.session_id).applyEdits({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: ownerId,
 				edits: args.edits.map((edit) => {
 					switch (edit.kind) {
 						case 'write':

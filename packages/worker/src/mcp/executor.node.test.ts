@@ -34,6 +34,7 @@ import {
 	getExecutionErrorDetails,
 	limitExecutionResultValue,
 	runWithDynamicWorkerEvaluationBudget,
+	type ClaimWorkerDayAttribution,
 } from './executor.ts'
 import {
 	durableObjectCodeUpdatedResetMessage,
@@ -44,6 +45,7 @@ import { createDynamicWorkerCompatibilityOptions } from '#worker/dynamic-worker-
 import { createEvaluationSideEffectTracker } from '#mcp/evaluation-side-effects.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 type FakeWorkerOptions = Record<string, unknown>
 type Dispatchers = Record<string, { call: typeof ToolDispatcherCall }>
 type ExecutorInput = Parameters<typeof createExecuteExecutor>[0]
@@ -133,8 +135,9 @@ function createGatewayProps(
 ) {
 	return {
 		baseUrl: 'https://heykody.dev',
-		userId,
+		userId: ownerIdFromStored(userId),
 		email: overrides?.email ?? `${userId}@example.com`,
+		request: null,
 		storageContext:
 			overrides?.storageContext === undefined ? null : overrides.storageContext,
 	}
@@ -292,7 +295,7 @@ test('kody namespaced proxy dispatches, enumerates tools, and reports entry/capa
 	)
 })
 
-test('generated kody provider and executor module sources stay bundle-safe and gate outbound fetch', () => {
+test('generated kody provider and executor module sources stay bundle-safe and gate outbound fetch', async () => {
 	assertGeneratedExecutorSourceIsBundleSafe(
 		createKodyProviderProxySource({ providerName: 'kody' }),
 	)
@@ -307,7 +310,7 @@ test('generated kody provider and executor module sources stay bundle-safe and g
 			...options,
 		})
 
-	const moduleSource = moduleSourceFor()
+	const moduleSource = await moduleSourceFor()
 	assertGeneratedExecutorSourceIsBundleSafe(moduleSource)
 	const expectedSnippets = [
 		'from "node:async_hooks"',
@@ -338,12 +341,12 @@ test('generated kody provider and executor module sources stay bundle-safe and g
 		`async (globalThis, self, global, ${kodyCallDispatcherName}`,
 	)
 
-	expect(moduleSourceFor({ shadowGlobalThis: true })).toContain(
+	expect(await moduleSourceFor({ shadowGlobalThis: true })).toContain(
 		`async (globalThis, self, global, ${kodyCallDispatcherName}, ${kodyProviderEvaluateBindingName}, __kodyMcp, __kodyCreateRemoteProxy, __dispatchers) => (`,
 	)
 
 	// Closed-world modules reject fetch in the sandbox before outbound RPC.
-	const denied = moduleSourceFor({ allowOutboundFetch: false })
+	const denied = await moduleSourceFor({ allowOutboundFetch: false })
 	expect(denied).not.toContain('.call("recordFetch", "[]")')
 	expect(denied).not.toContain('__kodyNativeFetchSymbol](input, init)')
 })
@@ -419,7 +422,9 @@ test('generated kody provider source wires mcp proxy dispatch', async () => {
 		expect('mcp' in kody).toBe(true)
 		const { home } = kody.mcp
 		if (!home) throw new Error('Expected home MCP server proxy')
-		await expect(home.set_pin?.({ pin: '5678' })).resolves.toEqual({ ok: true })
+		await expect(home.set_pin?.({ pin: '5678' })).resolves.toEqual({
+			ok: true,
+		})
 		expect(() => kody.mcp['missing']).toThrow(
 			'Unknown MCP server "missing". Available MCP servers: "home".',
 		)
@@ -428,7 +433,7 @@ test('generated kody provider source wires mcp proxy dispatch', async () => {
 	}
 })
 
-test('createExecuteExecutor aligns worker compatibility and gives the fetch gateway a deadline under the sandbox budget', async () => {
+test('createExecuteExecutor aligns worker compatibility and leaves the fetch deadline to the gateway', async () => {
 	const readWorkerOptions = async (timeoutMs?: number | null) => {
 		const fakeLoader = createFakeWorkerLoader()
 		await runExecutor({
@@ -441,15 +446,13 @@ test('createExecuteExecutor aligns worker compatibility and gives the fetch gate
 	expect(await readWorkerOptions()).toMatchObject(
 		createDynamicWorkerCompatibilityOptions(),
 	)
-	for (const [timeoutMs, outboundFetchTimeoutMs] of [
-		[undefined, 60_000],
-		[270_000, 240_000],
-		[null, 240_000],
-	] as const) {
+	for (const timeoutMs of [undefined, 300_000, null]) {
 		const workerOptions = await readWorkerOptions(timeoutMs)
-		expect(
-			(workerOptions?.globalOutbound as { props?: unknown } | undefined)?.props,
-		).toMatchObject({ outboundFetchTimeoutMs })
+		const gatewayProps = (
+			workerOptions?.globalOutbound as { props?: object } | undefined
+		)?.props
+		expect(gatewayProps).toMatchObject({ allowOutboundFetch: true })
+		expect(gatewayProps).not.toHaveProperty('outboundFetchTimeoutMs')
 	}
 })
 
@@ -730,26 +733,22 @@ test('createExecuteExecutor reuses stable dynamic worker ids until binding conte
 			statsFor(2, 2),
 		],
 		[
-			'non-hashable module',
+			'binary module bytes',
 			[
 				{
 					modules: {
-						'entry.js': {
-							js: entryModules['entry.js'],
-							onLoad: async () => 'not-hashable',
-						},
+						...entryModules,
+						'lib.wasm': { wasm: new Uint8Array([0, 97, 115, 109]) },
 					} as never,
 				},
 				{
 					modules: {
-						'entry.js': {
-							js: entryModules['entry.js'],
-							onLoad: async () => 'not-hashable',
-						},
+						...entryModules,
+						'lib.wasm': { wasm: new Uint8Array([0, 97, 115, 109]) },
 					} as never,
 				},
 			],
-			statsFor(2, 2),
+			statsFor(2, 1),
 		],
 	]
 	const bundledStats = []
@@ -987,6 +986,43 @@ test('createExecuteExecutor records one unique Dynamic Worker day per worker id 
 	])
 })
 
+test('createExecuteExecutor awaits a capped worker-day claim before load and skips the attribution claim', async () => {
+	const usage = createUsageBindings({ meter: true })
+	const claimed: Array<string> = []
+	const attributions: Array<ClaimWorkerDayAttribution> = []
+	const allowedLoader = createFakeWorkerLoader()
+	const allowed = await runExecutor({
+		env: createExecutorTestEnv(allowedLoader.loader, usage.bindings),
+		recordExecuteUsage: false,
+		packageId: 'pkg-1',
+		claimWorkerDay: async (workerId, attribution) => {
+			claimed.push(workerId)
+			attributions.push(attribution)
+			expect(allowedLoader.ids).toEqual([])
+			return { created: true }
+		},
+	})
+	expect(allowed.error).toBeUndefined()
+	expect(allowedLoader.ids).toEqual(claimed)
+	expect(attributions).toEqual([{ packageId: 'pkg-1' }])
+	expect(usage.dataPoints.map((point) => point.blobs?.[1])).toEqual([
+		'dynamic_worker_invoke',
+	])
+	expect(usage.dataPoints[0]?.blobs?.[7]).toBe('miss')
+
+	const deniedLoader = createFakeWorkerLoader()
+	const denial = new Error('Plan limit reached')
+	await expect(
+		runExecutor({
+			env: createExecutorTestEnv(deniedLoader.loader, usage.bindings),
+			claimWorkerDay: async () => {
+				throw denial
+			},
+		}),
+	).rejects.toBe(denial)
+	expect(deniedLoader.ids).toEqual([])
+})
+
 test('createExecuteExecutor notifies onWorkerId with the stable LOADER id', async () => {
 	const fakeLoader = createFakeWorkerLoader()
 	const workerIds: Array<string> = []
@@ -1204,7 +1240,7 @@ test('createToolDispatchers counts host-mediated attempts, rejects sanitized-nam
 		).resolves.toEqual({ result })
 	}
 
-	const moduleSource = createExecutorModuleSource({
+	const moduleSource = await createExecutorModuleSource({
 		code: 'async () => "ok"',
 		providers: [{ name: 'codemode', fns: { search: async () => ({}) } }],
 		shadowGlobalThis: false,

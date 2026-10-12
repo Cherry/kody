@@ -1,12 +1,18 @@
+import { authorizeOrgWide } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 
 export const workflowCancelCapability = defineDomainCapability(
 	capabilityDomainNames.jobs,
 	{
 		name: 'workflowRunCancel',
+		orgPermission: 'job:execute',
 		description:
 			'Cancel a Cloudflare Workflow run created through kody:runtime workflows.create by id. Terminates the underlying workflow instance and marks the run cancelled; cancelling an already-finished run is a safe no-op.',
 		keywords: [
@@ -51,12 +57,16 @@ export const workflowCancelCapability = defineDomainCapability(
 			message: z.string(),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeOrgWide(
+				{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
+				'job:execute',
+			)
 			const { cancelWorkflowRunForUser } =
 				await import('#worker/package-runtime/package-workflows.ts')
 			const result = await cancelWorkflowRunForUser({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				workflowRunId: args.id,
 			})
 			switch (result.outcome) {

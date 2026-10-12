@@ -57,14 +57,13 @@ Search the `packages` domain, then call `packageSubscriptionDispatch`:
 
 Fields:
 
-| Field              | Required | Meaning                                                                 |
-| ------------------ | -------- | ----------------------------------------------------------------------- |
-| scoped name        | one of   | `@owner/leaf` (or the name leaf) as `kody_id`                           |
-| `package_id`       | one of   | Saved-package UUID when the scoped name is not known                    |
-| `package_scope`    | no       | Owner scope for delegated packages; preserve it from publish test hints |
-| `topic`            | yes      | Exact topic key from `kody.subscriptions`                               |
-| `params`           | one of   | Handler input fixture — use `{}` only when the handler tolerates empty  |
-| `email_message_id` | one of   | Stored inbound message id; platform rebuilds the production envelope    |
+| Field              | Required | Meaning                                                                |
+| ------------------ | -------- | ---------------------------------------------------------------------- |
+| scoped name        | one of   | `@owner/leaf` (or the name leaf) as `kody_id`                          |
+| `package_id`       | one of   | Saved-package UUID when the scoped name is not known                   |
+| `topic`            | yes      | Exact topic key from `kody.subscriptions`                              |
+| `params`           | one of   | Handler input fixture — use `{}` only when the handler tolerates empty |
+| `email_message_id` | one of   | Stored inbound message id; platform rebuilds the production envelope   |
 
 Pass exactly **one** of `params` or `email_message_id`, not both. There is no
 top-level request `idempotency_key` — the platform generates it. A
@@ -72,8 +71,7 @@ package-emitted event fixture can still include its production
 `params.idempotency_key` inside the nested event envelope.
 
 Look up the package with the scoped `@owner/leaf` name (or `package_id` when the
-name is not known). Preserve `package_scope` when it appears in a publish test
-hint so dispatch resolves the intended owner-scoped package.
+name is not known). The lookup runs in the org the connection is bound to.
 
 ### Fixture input (`params`)
 
@@ -119,7 +117,7 @@ Example minimal `run.error.recorded` fixture:
 			"error_name": "Error",
 			"error_message": "Synthetic smoke failure"
 		},
-		"activity_url": "https://kody.codes/account/activity/00000000000000000000000000000001"
+		"activity_url": "https://kody.codes/@<slug>/-/activity/00000000000000000000000000000001"
 	}
 }
 ```
@@ -151,7 +149,7 @@ Example minimal `integration.auth.failed` fixture:
 			"http_status": 400
 		},
 		"reconnect_url": "https://kody.codes/connect/oauth?provider=google&loginHint=kent.c.dodds%40gmail.com",
-		"account_url": "https://kody.codes/account/integrations/google",
+		"account_url": "https://kody.codes/@<slug>/-/integrations/google",
 		"occurred_at": "2026-08-18T17:00:00.000Z"
 	}
 }
@@ -174,7 +172,7 @@ Example minimal `integration.auth.succeeded` fixture:
 			"platform_app_slug": "google"
 		},
 		"source": "oauth_connect",
-		"account_url": "https://kody.codes/account/integrations/google",
+		"account_url": "https://kody.codes/@<slug>/-/integrations/google",
 		"occurred_at": "2026-08-18T18:00:00.000Z"
 	}
 }
@@ -197,7 +195,7 @@ Example minimal `mcp.server.disconnected` fixture:
 			"episode_id": "00000000-0000-4000-8000-000000000003"
 		},
 		"observed_at": "2026-08-18T17:54:07.000Z",
-		"account_url": "https://kody.codes/account/mcp-servers/00000000-0000-4000-8000-000000000002"
+		"account_url": "https://kody.codes/@<slug>/-/mcp-servers/00000000-0000-4000-8000-000000000002"
 	}
 }
 ```

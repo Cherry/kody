@@ -1,6 +1,11 @@
-import { expect, test, vi } from 'vitest'
+import { expect, test } from 'vitest'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
-import { legacyPlanLimits, planLimits } from '#universal/plans.ts'
+import {
+	legacyPlanLimits,
+	planLimits,
+	unlimitedLimit,
+	type UserEntitlement,
+} from '#universal/plans.ts'
 import { readEntitlementUsageSnapshot } from '#worker/entitlements/usage-snapshot.ts'
 import { createInMemoryRepoSessionIndexEnv } from '#worker/test-support/repo-session-index.ts'
 import { createInMemoryRunLogUsageEnv } from '#worker/test-support/run-log-usage.ts'
@@ -8,6 +13,7 @@ import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { accountUsageEntitlementResources } from '#worker/entitlements/resource-visibility.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 function withUsageEnv(env: { APP_DB: D1Database } & Record<string, unknown>) {
 	const meter = createInMemoryUserMeterEnv()
 	const runLog = createInMemoryRunLogUsageEnv()
@@ -101,16 +107,23 @@ function readSnapshot(
 	db: D1Database,
 	env: unknown,
 	usageUserId: string,
-	options: { plan?: 'free' | 'standard'; ladder?: 'public' | 'legacy' } = {},
+	options: {
+		plan?: 'free' | 'standard'
+		ladder?: 'public' | 'legacy'
+		limitOverrides?: UserEntitlement['limitOverrides']
+	} = {},
 	at: Date | undefined = now,
 ) {
 	return readEntitlementUsageSnapshot({
 		db,
 		env: env as Env,
-		usageUserId,
-		plan: options.plan ?? 'free',
-		ladder: options.ladder ?? 'public',
-		creditWallet: 'none',
+		usageUserId: ownerIdFromStored(usageUserId),
+		entitlement: {
+			plan: options.plan ?? 'free',
+			ladder: options.ladder ?? 'public',
+			creditWallet: 'none',
+			limitOverrides: options.limitOverrides,
+		},
 		now: at,
 	})
 }
@@ -140,7 +153,7 @@ test('readEntitlementUsageSnapshot warns at 80% and includes the account resourc
 		accountUsageEntitlementResources,
 	)
 	expect(snapshot.weekStart).toBe('2026-07-20')
-	expect(resource(snapshot, 'execute_calls_per_day')?.week).toEqual({
+	expect(resource(snapshot, 'execute_unique_workers_per_day')?.week).toEqual({
 		current: 0,
 		limit: 400,
 		percentOfLimit: 0,
@@ -170,60 +183,121 @@ test('readEntitlementUsageSnapshot uses the requested entitlement ladder', async
 					{ plan: 'standard', ladder },
 					undefined,
 				),
-				'execute_calls_per_day',
+				'execute_unique_workers_per_day',
 			),
 		),
 	)
-	expect(publicExecute?.limit).toBe(planLimits.standard.maxExecuteCallsPerDay)
+	expect(publicExecute?.limit).toBe(
+		planLimits.standard.maxExecuteUniqueWorkersPerDay,
+	)
 	expect(legacyExecute?.limit).toBe(
-		legacyPlanLimits.standard.maxExecuteCallsPerDay,
+		legacyPlanLimits.standard.maxExecuteUniqueWorkersPerDay,
 	)
 	expect(publicExecute?.week?.limit).toBe(
-		planLimits.standard.maxExecuteCallsPerWeek,
+		planLimits.standard.maxExecuteUniqueWorkersPerWeek,
 	)
 	expect(legacyExecute?.week).toBeUndefined()
 })
 
-test('readEntitlementUsageSnapshot reads the weekly window without waiting on the daily read', async () => {
+test('readEntitlementUsageSnapshot shows effective limits with active overrides applied', async () => {
 	const { stableUserId, db } = createUsageTestDb({
-		email: 'weekly-parallel@example.com',
+		email: 'override-usage@example.com',
 	})
 	const env = withUsageEnv({ APP_DB: db })
+	const snapshot = await readSnapshot(db, env, stableUserId, {
+		limitOverrides: [
+			{ key: 'outbound_fetches_per_day', value: 1_000_000, expiresAt: null },
+			{ key: 'outbound_fetches_per_week', value: 'unlimited', expiresAt: null },
+			{
+				key: 'email_sends_per_day',
+				value: 500,
+				expiresAt: new Date(now.getTime() - 1).toISOString(),
+			},
+		],
+	})
+	const outbound = resource(snapshot, 'outbound_fetches_per_day')
+	expect(outbound?.limit).toBe(1_000_000)
+	expect(outbound?.week?.limit).toBe(unlimitedLimit)
+	expect(resource(snapshot, 'email_sends_per_day')?.limit).toBe(
+		planLimits.free.maxEmailSendsPerDay,
+	)
+})
+
+test('readEntitlementUsageSnapshot uses one UserMeter RPC for daily, weekly, and storage', async () => {
+	const { stableUserId, db } = createUsageTestDb({
+		email: 'batch-snapshot@example.com',
+		storageBucketEstimates: [1_000],
+	})
+	const env = withUsageEnv({ APP_DB: db })
+	// Warm meters (production usageGet path): every daily key already exists so
+	// the snapshot is one RPC with no cold-bootstrap re-read.
+	for (const resource of [
+		'email_sends_per_day',
+		'email_receives_per_day',
+		'execute_unique_workers_per_day',
+		'outbound_fetches_per_day',
+		'job_runs_per_day',
+		'automation_invocations_per_day',
+	] as const) {
+		await env.meter.seed({
+			userId: stableUserId,
+			resource,
+			day: utcDayKey(now),
+			count: resource === 'execute_unique_workers_per_day' ? 4 : 0,
+		})
+	}
+	await env.meter.seedStorageBytes({ userId: stableUserId, bytes: 2_000 })
 	type MeterStub = {
-		read: (input: { resource: string }) => Promise<unknown>
-		readRange: (input: { resource: string }) => Promise<unknown>
+		read: (input: unknown) => Promise<unknown>
+		readRange: (input: unknown) => Promise<unknown>
+		readStorageBytes: () => Promise<unknown>
+		readUsageSnapshot: (input: unknown) => Promise<unknown>
 	}
 	const userMeter = env.USER_METER as unknown as {
 		get: (id: unknown) => MeterStub
 	}
 	const realGet = userMeter.get
-	let releaseDailyRead!: () => void
-	const dailyReadGate = new Promise<void>((resolve) => {
-		releaseDailyRead = resolve
-	})
-	const weeklyRangeResources: Array<string> = []
+	const calls = {
+		read: 0,
+		readRange: 0,
+		readStorageBytes: 0,
+		readUsageSnapshot: 0,
+	}
 	userMeter.get = (id) => {
 		const meter = realGet(id)
 		return {
 			...meter,
-			async read(input: { resource: string }) {
-				if (input.resource === 'execute_calls_per_day') await dailyReadGate
+			async read(input: unknown) {
+				calls.read += 1
 				return meter.read(input)
 			},
-			async readRange(input: { resource: string }) {
-				weeklyRangeResources.push(input.resource)
+			async readRange(input: unknown) {
+				calls.readRange += 1
 				return meter.readRange(input)
+			},
+			async readStorageBytes() {
+				calls.readStorageBytes += 1
+				return meter.readStorageBytes()
+			},
+			async readUsageSnapshot(input: unknown) {
+				calls.readUsageSnapshot += 1
+				return meter.readUsageSnapshot(input)
 			},
 		}
 	}
 
-	const snapshotPromise = readSnapshot(db, env, stableUserId)
-	await vi.waitFor(() => {
-		expect(weeklyRangeResources).toContain('execute_calls_per_day')
+	const snapshot = await readSnapshot(db, env, stableUserId)
+	expect(calls).toEqual({
+		read: 0,
+		readRange: 0,
+		readStorageBytes: 0,
+		readUsageSnapshot: 1,
 	})
-	releaseDailyRead()
-	const snapshot = await snapshotPromise
-	expect(resource(snapshot, 'execute_calls_per_day')?.week?.limit).toBe(400)
+	expect(resource(snapshot, 'execute_unique_workers_per_day')?.current).toBe(4)
+	expect(
+		resource(snapshot, 'execute_unique_workers_per_day')?.week?.current,
+	).toBe(4)
+	expect(resource(snapshot, 'storage_bytes')?.current).toBe(3_000)
 })
 
 test('readEntitlementUsageSnapshot warns when the weekly window is hotter than today', async () => {
@@ -237,13 +311,13 @@ test('readEntitlementUsageSnapshot warns when the weekly window is hotter than t
 	] as const) {
 		await env.meter.seed({
 			userId: stableUserId,
-			resource: 'execute_calls_per_day',
+			resource: 'execute_unique_workers_per_day',
 			day,
 			count,
 		})
 	}
 	const snapshot = await readSnapshot(db, env, stableUserId)
-	const execute = resource(snapshot, 'execute_calls_per_day')
+	const execute = resource(snapshot, 'execute_unique_workers_per_day')
 	expect(execute?.current).toBe(10)
 	expect(execute?.percentOfLimit).toBe(10 / 150)
 	expect(execute?.week).toEqual({
@@ -253,5 +327,5 @@ test('readEntitlementUsageSnapshot warns when the weekly window is hotter than t
 		overEightyPercent: true,
 	})
 	expect(execute?.overEightyPercent).toBe(true)
-	expect(hasWarning(snapshot, 'execute_calls_per_day')).toBe(true)
+	expect(hasWarning(snapshot, 'execute_unique_workers_per_day')).toBe(true)
 })

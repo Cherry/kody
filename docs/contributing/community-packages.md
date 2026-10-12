@@ -116,11 +116,9 @@ There is no trusted-listing mark. Public listing records expose
 
 Admin **featured** marks live in `featured_at`. Featured is editorial placement
 on `/community` and listing detail (`featured_at IS NOT NULL`), not a safety
-badge and not a wizard step. Operators publish official starters under a
-platform scope (for example `@kody`) by passing `package_scope` while holding a
-package scope grant; see
-[Platform accounts](./architecture/platform-accounts.md). Surfaces: the
-`Featured` badge on the detail page, the admin-only toggle
+badge and not a wizard step. Operators publish starters from the `@kody` org, an
+ordinary org they belong to, by binding the connection to it like any other org.
+Surfaces: the `Featured` badge on the detail page, the admin-only toggle
 (`POST /community/:listingId/feature.json`, audited), and the admin-only
 `communitySetFeatured` capability. `communityGet` exposes the `featured` flag.
 
@@ -129,14 +127,13 @@ package scope grant; see
 persist-prompt copy can name an already-installed example. The `/onboarding`
 wizard itself is connect an agent, make something useful (one prompt), then
 connect a second agent — see [Onboarding process](./architecture/onboarding.md).
-Official `@kody/*` listings are catalog and fork source — person accounts run
-the owned copy, not the platform package. One-click install on listing detail
-puts a fork icon beside the name for official `@kody/*` packages. Listings from
-another account use the same fork icon and `createDoubleCheck` (the tooltip is
-“This was built by another user. Verify it before using. Click again to confirm
-fork.”; the first click arms that control; the second click sends
-`acknowledged: true`; clicking elsewhere, navigating, or leaving the control
-clears the armed state; the endpoint responds `409` without the flag).
+`@kody/*` listings are ordinary community packages from the `@kody` org: an org
+forks them and runs its own copy. One-click install on listing detail puts a
+fork icon beside the name. Listings from another account use `createDoubleCheck`
+(the tooltip is “This was built by another user. Verify it before using. Click
+again to confirm fork.”; the first click arms that control; the second click
+sends `acknowledged: true`; clicking elsewhere, navigating, or leaving the
+control clears the armed state; the endpoint responds `409` without the flag).
 User-facing install UX:
 [Public packages](../use/community-packages.md#one-click-install). `/community`
 cards overlay a per-request `viewerInstall` when the viewer already has a
@@ -216,18 +213,19 @@ source.
 
 Core logic: `packages/worker/src/community/`
 
-| Module               | Role                                                                |
-| -------------------- | ------------------------------------------------------------------- |
-| `service.ts`         | Publish, unpublish, search, fork, rate, report, admin resolution    |
-| `profile-service.ts` | Profiles, profile activity, public package lists                    |
-| `profile-repo.ts`    | D1 for profiles, activity events, and public package lists          |
-| `install.ts`         | One-click install: fork + publish checks + projection publish       |
-| `repo.ts`            | D1 queries                                                          |
-| `activity-*`         | Admin activity feed and durable admin subscription dispatch         |
-| `snapshot.ts`        | KV snapshot I/O                                                     |
-| `fork-scan.ts`       | Manifest rewrite + cross-scope `kody:@…` / `kody.dependencies` scan |
-| `og-image.ts`        | Community listing 1200×630 PNG on the shared `#worker/og` pipeline  |
-| `types.ts`           | Shared record types                                                 |
+| Module                  | Role                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `service.ts`            | Publish, unpublish, search, fork, rate, report, admin resolution                  |
+| `allocate-fork-leaf.ts` | Next free `leaf-N` when the default listing leaf is taken by an unrelated package |
+| `profile-service.ts`    | Profiles, profile activity, public package lists                                  |
+| `profile-repo.ts`       | D1 for profiles, activity events, and public package lists                        |
+| `install.ts`            | One-click install: fork + publish checks + projection publish                     |
+| `repo.ts`               | D1 queries                                                                        |
+| `activity-*`            | Admin activity feed and durable admin subscription dispatch                       |
+| `snapshot.ts`           | KV snapshot I/O                                                                   |
+| `fork-scan.ts`          | Manifest rewrite + cross-scope `kody:@…` / `kody.dependencies` scan               |
+| `og-image.ts`           | Community listing 1200×630 PNG on the shared `#worker/og` pipeline                |
+| `types.ts`              | Shared record types                                                               |
 
 `publishCommunityListing` has no MIT, logo, Intent, or personal-content gates.
 Visibility is separate from package publish checks, which require non-empty root
@@ -240,19 +238,24 @@ SHA-keyed source snapshot.
 
 `forkCommunityListing` reads the KV snapshot for rewrite/scan (Worker), then
 copies the origin Artifacts repo with `POST .../repos/{source}/fork` so the tree
-never enters a RepoSession isolate as `Record<path, string>` edits. Persist
-stamps dest `published_commit` to dest HEAD (the default-branch tip the fork
-copied) and records that SHA on `community_forks.origin_commit`. When dest HEAD
-matches the listing pin used in prepare, only rewritten files (`package.json`
-and self-reference text) are applied. When dest HEAD is ahead of that pin,
-persist re-derives the `package.json` rewrite from dest HEAD instead of applying
+never enters a RepoSession isolate as `Record<path, string>` edits. When the
+caller omits an explicit leaf and the listing leaf is already taken by an
+unrelated saved package (no `community_forks` row for this listing at that
+leaf), it picks the next free `leaf-N` (`allocate-fork-leaf.ts`). An explicit
+leaf errors if that name is taken. A repeat fork of the same listing errors with
+the existing fork instead of allocating another leaf. Persist stamps dest
+`published_commit` to dest HEAD (the default-branch tip the fork copied) and
+records that SHA on `community_forks.origin_commit`. When dest HEAD matches the
+listing pin used in prepare, only rewritten files (`package.json` and
+self-reference text) are applied. When dest HEAD is ahead of that pin, persist
+re-derives the `package.json` rewrite from dest HEAD instead of applying
 pin-relative edits that would revert later origin commits. When the origin
 Artifacts repo is missing, persist falls back to the full-tree snapshot sync.
 Isolate memory / Artifacts `MEMORY_LIMIT` failures surface as
 `CommunityForkResourceLimitError` (honest UI/MCP copy; fork count does not
 increment). Records `community_forks` — **without** inserting `saved_packages`.
 Failed persist cleanup deletes the dest Artifacts repo, the inert entity source,
-any `package_kody_id_redirects` for the allocated package id, and the matching
+any slug redirects for the allocated package id, and the matching
 `community_forks` row so a leftover metadata row cannot inflate `fork_count` or
 block a retry.
 
@@ -288,12 +291,11 @@ pass, `refreshSavedPackageProjection` — the same projection step
 `repoPublishSession` ends with, so declared jobs are scheduled immediately. When
 checks fail (typically cross-scope imports), the fork stays inert and the
 failing checks are returned for agent follow-up. The HTTP surface is
-`POST /community/:listingId/install.json` (authenticated). Official `@kody/*`
-listings skip acknowledgement. Third-party listings must send
-`acknowledged: true` or the handler responds `409`. There is intentionally
-**no** MCP capability for install: agents must go through `communityFork` +
-repo-session review, so a prompt-injected agent cannot silently activate
-community code.
+`POST /community/:listingId/install.json` (authenticated). Listings from another
+account (including `@kody/*`) must send `acknowledged: true` or the handler
+responds `409`. There is intentionally **no** MCP capability for install: agents
+must go through `communityFork` + repo-session review, so a prompt-injected
+agent cannot silently activate community code.
 
 ## MCP capabilities
 
@@ -336,10 +338,11 @@ Client routes: `packages/worker/client/routes/community*`
   unfiltered browse page (`?category=` filters to one category). Empty
   categories omit their chip; an empty catalog hides the facet and sort row.
 - `/@:username/:kodyId` — the canonical package page, resolved from the owner
-  plus the listing slug (JSON companion:
-  `/profiles/:username/packages/:kodyId.json`). `username_redirects` and
-  `package_kody_id_redirects` map prior owner usernames and package slugs to a
-  redirect at that URL
+  plus the package slug (the saved package by name leaf, then its listing by
+  `package_id`; JSON companion: `/profiles/:username/packages/:kodyId.json`).
+  The listing slug stays the public pair until republish.
+  `package_slug_redirects` maps prior package slugs to a redirect at that URL
+  (usernames are permanent, so there is no username redirect)
 - `/@:username/:kodyId/tree/:ref(/*relativePath)` — GitHub-lite source explorer
   (default-branch name from git, SHA, or another branch). `HEAD` and leftover
   `/files` URLs 301 to `/tree/{defaultBranch}` (`main` when lookup misses).
@@ -357,8 +360,7 @@ Client routes: `packages/worker/client/routes/community*`
 - `/community/:listingId` — the same page by listing id; redirects to the
   canonical URL. Metadata, ratings, README, one-click install (login required;
   other-account listings arm via `createDoubleCheck` and fork on the second
-  click; official `@kody/*` install on first click), fork prompt, and report
-  link (report requires login)
+  click), fork prompt, and report link (report requires login)
 - `/community/:listingId/icon/:iconCommit` — cached package icon or generated
   fallback; serves the current icon commit or the pinned snapshot commit, and
   rejects stale commit URLs

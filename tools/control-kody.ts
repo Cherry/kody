@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { checkInstalledLockfile } from './check-installed-lockfile.ts'
 import {
 	createDefaultEnsureDevDeps,
 	ensureDev,
@@ -15,6 +16,7 @@ import {
 	workerPortRange,
 } from './dev-server.ts'
 import { isExecutedDirectly } from './node-runtime.ts'
+import { isOrganizationSlug } from '../packages/worker/universal/org-pages.ts'
 import {
 	checkFeatureCatalog,
 	featureCatalog,
@@ -40,6 +42,13 @@ import {
 	withLocalAppDbRemediation,
 } from './control-kody/local-app-db.ts'
 import {
+	defaultBrowsePath,
+	defaultBrowseVideoDir,
+	formatBrowseReport,
+	normalizeBrowsePath,
+	openBrowseSession,
+} from './control-kody/browse.ts'
+import {
 	defaultPlaywrightBrowsersJsonPath,
 	inspectPlaywrightBrowsers,
 	type PlaywrightBrowserCheck,
@@ -51,6 +60,7 @@ import {
 } from './control-kody/request-proof.ts'
 import {
 	formatCookieFile,
+	mcpAuthForOrg,
 	sessionForOrigin,
 	shouldRefreshSession,
 	type AppSessionOAuth,
@@ -58,6 +68,9 @@ import {
 import {
 	cookieHeaderFromSetCookie,
 	evaluateAppHealth,
+	shaEqualsOrUniquePrefix,
+	applySessionRequestBody,
+	applySessionRequestHeaders,
 	parseSessionRequest,
 	previewSeedEmail,
 	previewSeedPassword,
@@ -77,11 +90,12 @@ const usageLines = [
 	'Drive and verify the Kody app without throwaway scripts.',
 	'',
 	'Commands:',
-	'  doctor          Check Node, Playwright browser revision, hooks, /health, and local APP_DB',
+	'  doctor          Check Node, Playwright browser revision, hooks, installed deps, /health, and local APP_DB',
 	'  dev             Start or reuse the local origin (npm run dev:ensure)',
 	'  login           POST /auth and write a session cookie',
 	'  request         Authenticated HTTP as the current session',
 	'  preview         PR preview smoke (forwards flags to preview:manual-test)',
+	'  browse          Open headed Chromium already signed in (reuse seed cookie)',
 	'  health          GET /health and optionally assert commitSha',
 	'  map             List or print a Feature Map entry; --check for drift',
 	'  package-create  Create a stub saved package via MCP (preview data)',
@@ -91,10 +105,14 @@ const usageLines = [
 	'Common options:',
 	'  --origin <url>       App origin (default: healthy local 3742-3751)',
 	'  --json               Machine-readable stdout',
-	'  --cookie-file <p>    Session file: cookie + MCP OAuth client/token (origin + --email)',
+	'  --cookie-file <p>    Session file: cookie + MCP OAuth (origin + --email + --org)',
 	"  --email <addr>       Session identity; does not reuse another user's cookie",
 	'  --dump               Write the raw response body to .tmp/control-kody-body',
 	'  --contains <text>    Fail unless the response body includes this text',
+	'  --path <path>        browse target path (default: /account)',
+	'  --record             browse: record Playwright video under .tmp/control-kody-browse',
+	'  --headless           browse: launch Chromium headless (default is headed)',
+	'  --close-after <ms>   browse: close after N ms (scripted smoke / tests)',
 	'  --package-name <s>   Required for package-create (leaf or @scope/leaf)',
 	'  --kody-id <slug>     Alias for --package-name',
 	'  --description <t>    Optional package-create stub description',
@@ -105,6 +123,7 @@ const usageLines = [
 	'  --domain <id>        Optional search domain',
 	'  --entity <ref>       Optional search entity ref',
 	'  --limit <n>          Optional search result limit',
+	'  --org <slug>         Bind execute, search, and package-create to this org',
 	'  --help               Print this help',
 	'',
 	'preview forwards its flags to preview:manual-test (--pr, --request, --check).',
@@ -112,12 +131,29 @@ const usageLines = [
 	"--request specs take request's --dump/--contains at the end, e.g.",
 	"  preview --pr 42 --request 'GET /pricing --dump --contains Worker compute'",
 	'',
-	'request spec is METHOD /path [status] [json-body]. Separate arguments',
-	'are joined, so POST /path 400 \'{"action":"add"}\' sends the body.',
+	'browse reuses the seed cookie from login/preview and injects it into',
+	'Playwright Chromium (same addCookies pattern as e2e/playwright-utils.ts).',
+	'Prefer MCP/API/control-kody execute for proof; browse only when UI is under',
+	'test. Example: browse --origin <preview> --path /@user/pkg --record',
+	'',
+	'request spec is METHOD /path [status] [json-body] [--form name=value]...',
+	"[--multipart] [--header 'Name: value']... Separate arguments are joined, so",
+	'POST /path 400 \'{"action":"add"}\' sends JSON and',
+	'POST /account/organizations/new --form slug=x-org --form displayName=X',
+	'sends application/x-www-form-urlencoded. --multipart sends',
+	'multipart/form-data; a --form value starting with @ is a file path',
+	'(POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png).',
+	'Repeat --header for extra headers (not Cookie or Content-Type). Org-bound',
+	'/account/<section>.json routes bind the org from a same-origin Referer:',
+	"GET /account/connected-agents.json --header 'Referer: <origin>/@<slug>/-/connections'.",
 	'request fetches GET/HEAD first and only POSTs /auth when the response is',
 	'401 or login HTML. Public pages such as /pricing do not need a session.',
 	'Mutating methods log in first when no cookie exists. --email keys the',
 	'stored cookie; a leftover session for a different user is not reused.',
+	'execute, search, and package-create take --org <slug> so OAuth authorize',
+	'sends ?org= and can approve a team organization. The cached bearer token is',
+	'keyed by that org. Switching --org, or omitting it, remints the token and',
+	'keeps the login cookie.',
 	'--skip-login sends the request without authenticating, even when another',
 	"user's cookie is stored for the same origin.",
 	'',
@@ -130,6 +166,7 @@ export type ControlKodyCommand =
 	| 'login'
 	| 'request'
 	| 'preview'
+	| 'browse'
 	| 'health'
 	| 'map'
 	| 'package-create'
@@ -155,6 +192,10 @@ export type ControlKodyOptions = {
 	dumpFile: string
 	contains: Array<string>
 	previewArgv: Array<string>
+	path: string
+	record: boolean
+	headed: boolean
+	closeAfterMs: number | null
 	kodyId: string | null
 	description: string | null
 	headAhead: boolean
@@ -164,6 +205,7 @@ export type ControlKodyOptions = {
 	domain: string | null
 	entity: string | null
 	limit: number | null
+	orgSlug: string | null
 }
 
 export class ControlKodyError extends Error {
@@ -216,6 +258,10 @@ export function parseControlArgs(argv: Array<string>): ControlKodyOptions {
 		dumpFile: defaultDumpFile(),
 		contains: [],
 		previewArgv: [],
+		path: defaultBrowsePath,
+		record: false,
+		headed: true,
+		closeAfterMs: null,
 		kodyId: null,
 		description: null,
 		headAhead: false,
@@ -225,6 +271,7 @@ export function parseControlArgs(argv: Array<string>): ControlKodyOptions {
 		domain: null,
 		entity: null,
 		limit: null,
+		orgSlug: null,
 	}
 
 	const [command, ...rest] = argv
@@ -245,6 +292,7 @@ export function parseControlArgs(argv: Array<string>): ControlKodyOptions {
 		'login',
 		'request',
 		'preview',
+		'browse',
 		'health',
 		'map',
 		'package-create',
@@ -272,12 +320,21 @@ export function parseControlArgs(argv: Array<string>): ControlKodyOptions {
 
 	if (options.command === 'request') {
 		const positional: Array<string> = []
-		parseSharedFlags(rest, options, positional)
+		parseSharedFlags(rest, options, positional, { requestSpec: true })
 		if (positional.length > 0) {
 			const spec = positional.join(' ')
 			const parsed = parseSessionRequest(spec)
 			if (options.body) {
+				if (parsed.form) {
+					throw new ControlKodyError(
+						'--body JSON cannot be combined with --form',
+					)
+				}
 				parsed.body = JSON.parse(options.body)
+			}
+			if (parsed.dump) options.dump = true
+			if (parsed.contains.length > 0) {
+				options.contains.push(...parsed.contains)
 			}
 			options.request = parsed
 		}
@@ -291,6 +348,15 @@ export function parseControlArgs(argv: Array<string>): ControlKodyOptions {
 		return options
 	}
 
+	if (options.command === 'browse') {
+		const positional: Array<string> = []
+		parseSharedFlags(rest, options, positional)
+		if (positional[0]) {
+			options.path = normalizeBrowsePath(positional[0])
+		}
+		return options
+	}
+
 	parseSharedFlags(rest, options)
 	return options
 }
@@ -299,6 +365,7 @@ function parseSharedFlags(
 	argv: Array<string>,
 	options: ControlKodyOptions,
 	positional: Array<string> = [],
+	flags: { requestSpec?: boolean } = {},
 ) {
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index]
@@ -360,6 +427,29 @@ function parseSharedFlags(
 				index += 1
 				break
 			}
+			case '--form': {
+				if (!flags.requestSpec) {
+					throw new ControlKodyError(`Unknown flag ${arg}`)
+				}
+				positional.push('--form', requireValue(argv[index + 1], '--form'))
+				index += 1
+				break
+			}
+			case '--multipart': {
+				if (!flags.requestSpec) {
+					throw new ControlKodyError(`Unknown flag ${arg}`)
+				}
+				positional.push('--multipart')
+				break
+			}
+			case '--header': {
+				if (!flags.requestSpec) {
+					throw new ControlKodyError(`Unknown flag ${arg}`)
+				}
+				positional.push('--header', requireValue(argv[index + 1], '--header'))
+				index += 1
+				break
+			}
 			case '--package-name': {
 				options.kodyId = requireValue(argv[index + 1], '--package-name')
 				index += 1
@@ -417,6 +507,46 @@ function parseSharedFlags(
 				index += 1
 				break
 			}
+			case '--org': {
+				if (
+					options.command !== 'execute' &&
+					options.command !== 'search' &&
+					options.command !== 'package-create'
+				) {
+					throw new ControlKodyError(
+						'--org is only valid for execute, search, and package-create',
+					)
+				}
+				options.orgSlug = parseOrgSlug(requireValue(argv[index + 1], '--org'))
+				index += 1
+				break
+			}
+			case '--path': {
+				options.path = normalizeBrowsePath(
+					requireValue(argv[index + 1], '--path'),
+				)
+				index += 1
+				break
+			}
+			case '--record': {
+				options.record = true
+				break
+			}
+			case '--headless': {
+				options.headed = false
+				break
+			}
+			case '--close-after': {
+				const raw = requireValue(argv[index + 1], '--close-after')
+				if (!/^(0|[1-9]\d*)$/.test(raw)) {
+					throw new ControlKodyError(
+						'--close-after must be a non-negative integer (ms)',
+					)
+				}
+				options.closeAfterMs = Number(raw)
+				index += 1
+				break
+			}
 			default: {
 				if (arg.startsWith('-')) {
 					throw new ControlKodyError(`Unknown flag ${arg}`)
@@ -432,6 +562,16 @@ function requireValue(value: string | undefined, flag: string) {
 		throw new ControlKodyError(`${flag} requires a value`)
 	}
 	return value
+}
+
+function parseOrgSlug(value: string) {
+	const slug = value.trim().toLowerCase().replace(/^@/, '')
+	if (!isOrganizationSlug(slug)) {
+		throw new ControlKodyError(
+			'--org must be an organization slug (for example "x-org")',
+		)
+	}
+	return slug
 }
 
 export type DoctorCheck = {
@@ -457,6 +597,9 @@ export type DoctorDeps = {
 	homeDir: string
 	hooksPath: string | null
 	inspectPlaywright: (homeDir: string) => PlaywrightBrowserCheck
+	inspectInstalledLockfile?: () =>
+		| { ok: boolean; detail: string }
+		| Promise<{ ok: boolean; detail: string }>
 	probeHealth: (origin: string) => Promise<boolean>
 	ports: ReadonlyArray<number>
 	origin: string | null
@@ -490,6 +633,24 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
 		detail: hooksOk
 			? `core.hooksPath=${deps.hooksPath}`
 			: 'git core.hooksPath is empty. Run npm run hooks:ensure.',
+	})
+
+	const inspectInstalledLockfile =
+		deps.inspectInstalledLockfile ?? checkInstalledLockfile
+	let installedLockfile: { ok: boolean; detail: string }
+	try {
+		installedLockfile = await inspectInstalledLockfile()
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error)
+		installedLockfile = {
+			ok: false,
+			detail: `Could not inspect package-lock.json: ${detail}. Check that the file is readable and valid JSON.`,
+		}
+	}
+	checks.push({
+		name: 'deps',
+		ok: installedLockfile.ok,
+		detail: installedLockfile.detail,
 	})
 
 	const origin =
@@ -670,13 +831,12 @@ export async function requestAsSession(input: {
 		Accept: 'application/json, text/html',
 		'User-Agent': controlKodyUserAgent,
 	}
+	applySessionRequestHeaders(input.spec, headers)
 	if (input.cookieHeader) headers.Cookie = input.cookieHeader
-	if (input.spec.body !== null) headers['Content-Type'] = 'application/json'
 	const response = await fetchImpl(`${input.origin}${input.spec.path}`, {
 		method: input.spec.method,
 		headers,
-		body:
-			input.spec.body === null ? undefined : JSON.stringify(input.spec.body),
+		body: await applySessionRequestBody(input.spec, headers),
 	})
 	const rawBody = await response.text()
 	let body: unknown = rawBody
@@ -723,11 +883,139 @@ export function isGitAncestor(
 	}
 }
 
+export type HealthCommitInfo = {
+	parents: ReadonlyArray<string>
+	message: string
+}
+
+const healthCommitShaPattern = /^[0-9a-f]{7,40}$/i
+const mergeHeadMessagePattern = /^Merge\s+([0-9a-f]{7,40})\s+into\b/i
+
+export function isHealthCommitSha(sha: string) {
+	return healthCommitShaPattern.test(sha)
+}
+
+/** Preview merge commits name the PR head in `Merge <head> into <base>`. */
+function healthBodyReportsOk(body: unknown) {
+	return Boolean(
+		body && typeof body === 'object' && (body as { ok?: unknown }).ok === true,
+	)
+}
+
+export function mergeCommitMessageNamesHead(
+	message: string,
+	expectedSha: string,
+) {
+	const firstLine = message.trim().split(/\r?\n/, 1)[0] ?? ''
+	const named = firstLine.match(mergeHeadMessagePattern)?.[1]
+	if (!named) return false
+	return (
+		shaEqualsOrUniquePrefix(named, expectedSha) ||
+		shaEqualsOrUniquePrefix(expectedSha, named)
+	)
+}
+
+export function readLocalHealthCommitInfo(
+	sha: string,
+	options: {
+		execFile?: (
+			file: string,
+			args: ReadonlyArray<string>,
+			options: ExecFileSyncOptions,
+		) => string
+		cwd?: string
+	} = {},
+): HealthCommitInfo | null {
+	const execFile =
+		options.execFile ??
+		((file, args, execOptions) =>
+			execFileSync(file, args, execOptions).toString())
+	try {
+		const output = execFile(
+			'git',
+			['log', '-1', '--format=%P%x00%s', '--end-of-options', sha],
+			{
+				cwd: options.cwd ?? process.cwd(),
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+			},
+		)
+		const [parents, message] = output.split('\0')
+		return {
+			parents: (parents ?? '')
+				.trim()
+				.split(/\s+/)
+				.filter((parent) => parent.length > 0),
+			message: (message ?? '').trim(),
+		}
+	} catch {
+		return null
+	}
+}
+
+export function readGithubHealthCommitInfo(
+	sha: string,
+	options: {
+		execFile?: (
+			file: string,
+			args: ReadonlyArray<string>,
+			options: ExecFileSyncOptions,
+		) => string
+	} = {},
+): HealthCommitInfo | null {
+	const execFile =
+		options.execFile ??
+		((file, args, execOptions) =>
+			execFileSync(file, args, execOptions).toString())
+	try {
+		const repo = JSON.parse(
+			execFile('gh', ['repo', 'view', '--json', 'nameWithOwner'], {
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+				timeout: 10_000,
+			}),
+		) as { nameWithOwner?: string }
+		const nameWithOwner = repo.nameWithOwner?.trim()
+		if (!nameWithOwner) return null
+		const commit = JSON.parse(
+			execFile('gh', ['api', `repos/${nameWithOwner}/commits/${sha}`], {
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'ignore'],
+				timeout: 10_000,
+			}),
+		) as {
+			parents?: Array<{ sha?: string }>
+			commit?: { message?: string }
+		}
+		return {
+			parents: (commit.parents ?? [])
+				.map((parent) => parent.sha)
+				.filter((parentSha): parentSha is string => Boolean(parentSha)),
+			message: commit.commit?.message ?? '',
+		}
+	} catch {
+		return null
+	}
+}
+
+export function loadHealthCommitInfo(
+	sha: string,
+	options: {
+		readLocal?: (sha: string) => HealthCommitInfo | null
+		readGithub?: (sha: string) => HealthCommitInfo | null
+	} = {},
+): HealthCommitInfo | null {
+	const readLocal = options.readLocal ?? readLocalHealthCommitInfo
+	const readGithub = options.readGithub ?? readGithubHealthCommitInfo
+	return readLocal(sha) ?? readGithub(sha)
+}
+
 export async function readHealth(input: {
 	origin: string
 	expectedSha: string | null
 	fetchImpl?: typeof fetch
 	isAncestor?: (ancestor: string, descendant: string) => boolean
+	loadCommitInfo?: (sha: string) => HealthCommitInfo | null
 }) {
 	const fetchImpl = input.fetchImpl ?? fetch
 	const response = await fetchImpl(healthUrlForOrigin(input.origin), {
@@ -744,7 +1032,9 @@ export async function readHealth(input: {
 		!evaluated.ok &&
 		input.expectedSha &&
 		evaluated.commitSha &&
-		response.ok
+		response.ok &&
+		isHealthCommitSha(evaluated.commitSha) &&
+		isHealthCommitSha(input.expectedSha)
 	) {
 		const isAncestor = input.isAncestor ?? isGitAncestor
 		if (isAncestor(input.expectedSha, evaluated.commitSha)) {
@@ -752,6 +1042,28 @@ export async function readHealth(input: {
 				ok: true,
 				commitSha: evaluated.commitSha,
 				detail: `ok, commitSha ${evaluated.commitSha} (descendant of ${input.expectedSha})`,
+			}
+		} else {
+			const loadCommitInfo = input.loadCommitInfo ?? loadHealthCommitInfo
+			const info = loadCommitInfo(evaluated.commitSha)
+			if (info) {
+				const withParents = evaluateAppHealth(
+					body,
+					input.expectedSha,
+					info.parents,
+				)
+				if (withParents.ok) {
+					evaluated = withParents
+				} else if (
+					healthBodyReportsOk(body) &&
+					mergeCommitMessageNamesHead(info.message, input.expectedSha)
+				) {
+					evaluated = {
+						ok: true,
+						commitSha: evaluated.commitSha,
+						detail: `ok, commitSha ${evaluated.commitSha} (merge of ${input.expectedSha})`,
+					}
+				}
 			}
 		}
 	}
@@ -789,16 +1101,29 @@ export async function writeCookieFile(
 	origin: string,
 	email?: string | null,
 	oauth?: AppSessionOAuth | null,
+	orgSlug?: string | null,
 ) {
 	await mkdir(path.dirname(cookieFile), { recursive: true })
 	await writeFile(
 		cookieFile,
-		formatCookieFile(origin, cookieHeader, email, oauth),
+		formatCookieFile(origin, cookieHeader, email, oauth, orgSlug),
 		{
 			mode: 0o600,
 		},
 	)
 	await chmod(cookieFile, 0o600)
+}
+
+function readMcpAuthFile(
+	cookieFile: string,
+	origin: string,
+	email: string,
+	orgSlug: string | null,
+) {
+	const fileText = existsSync(cookieFile)
+		? readFileSync(cookieFile, 'utf8')
+		: null
+	return mcpAuthForOrg(fileText, origin, email, orgSlug)
 }
 
 async function writeDumpFile(dumpFile: string, rawBody: string) {
@@ -879,6 +1204,7 @@ export function defaultDoctorDeps(origin: string | null = null): DoctorDeps {
 				homeDir,
 				browsersJsonPath: defaultPlaywrightBrowsersJsonPath(repoRootFromHere()),
 			}),
+		inspectInstalledLockfile: () => checkInstalledLockfile(),
 		probeHealth: (value) => isWorkerHealthOk(value),
 		ports: workerPortRange(),
 		origin,
@@ -971,7 +1297,7 @@ async function runCommand(options: ControlKodyOptions) {
 		case 'request': {
 			if (!options.request) {
 				throw new ControlKodyError(
-					'request needs METHOD /path [status] [json-body]. Example: request GET /account/waiting.json',
+					"request needs METHOD /path [status] [json-body] [--form name=value]... [--multipart] [--header 'Name: value']... Example: request GET /account/waiting.json",
 				)
 			}
 			const origin = await resolveOrigin(options)
@@ -1048,7 +1374,84 @@ async function runCommand(options: ControlKodyOptions) {
 		}
 		case 'preview': {
 			const result = await runPreviewManualTest(options.previewArgv)
+			const session = result.result?.session
+			if (result.exitCode === 0 && session?.cookieHeader && session.origin) {
+				const email =
+					result.result?.login.email ??
+					credentialsForOrigin(session.origin).email
+				await writeCookieFile(
+					options.cookieFile,
+					session.cookieHeader,
+					session.origin,
+					email,
+				)
+				if (!options.json) {
+					console.log(`cookie-file ${options.cookieFile}`)
+				}
+			}
 			return result.exitCode
+		}
+		case 'browse': {
+			const origin = await resolveOrigin(options)
+			const defaults = credentialsForOrigin(origin)
+			const email = options.email ?? defaults.email
+			let cookieHeader = readCookieFile(options.cookieFile, origin, email)
+			if (!cookieHeader) {
+				const loggedIn = await loginAndStoreCookie(origin, options)
+				if (!loggedIn.ok) return 1
+				cookieHeader = loggedIn.cookieHeader
+			}
+			if (!cookieHeader) {
+				throw new ControlKodyError(
+					'browse needs a session cookie. Run control-kody login or preview first.',
+				)
+			}
+			// Refresh expired sessions the same way request does, before opening
+			// a headed browser that would otherwise land on /login.
+			const probe = await requestAsSession({
+				origin,
+				spec: {
+					method: 'GET',
+					path: '/account',
+					expectedStatus: null,
+					body: null,
+					form: null,
+					headers: [],
+					dump: false,
+					contains: [],
+				},
+				cookieHeader,
+			})
+			if (
+				shouldRefreshSession({
+					skipLogin: false,
+					status: probe.status,
+					path: '/account',
+					rawBody: probe.rawBody,
+					method: 'GET',
+				})
+			) {
+				const loggedIn = await loginAndStoreCookie(origin, options)
+				if (!loggedIn.ok) return 1
+				cookieHeader = loggedIn.cookieHeader
+			}
+			if (!cookieHeader) {
+				throw new ControlKodyError(
+					'browse needs a session cookie. Run control-kody login or preview first.',
+				)
+			}
+			const report = await openBrowseSession({
+				origin,
+				path: options.path,
+				cookieHeader,
+				headed: options.headed,
+				record: options.record,
+				videoDir: options.record ? defaultBrowseVideoDir : undefined,
+				closeAfterMs: options.closeAfterMs,
+			})
+			if (options.json) printJson({ ...report, cookieFile: options.cookieFile })
+			else console.log(formatBrowseReport(report))
+			return 0
 		}
 		case 'health': {
 			const origin = await resolveOrigin(options)
@@ -1080,7 +1483,12 @@ async function runCommand(options: ControlKodyOptions) {
 			}
 			const defaults = credentialsForOrigin(origin)
 			const email = options.email ?? defaults.email
-			const session = readSessionFile(options.cookieFile, origin, email)
+			const cached = readMcpAuthFile(
+				options.cookieFile,
+				origin,
+				email,
+				options.orgSlug,
+			)
 			const report = await createPreviewPackage({
 				origin,
 				email,
@@ -1088,8 +1496,9 @@ async function runCommand(options: ControlKodyOptions) {
 				kodyId: options.kodyId,
 				description: options.description,
 				headAhead: options.headAhead,
-				cookieHeader: session?.cookieHeader ?? undefined,
-				oauth: session?.oauth ?? undefined,
+				cookieHeader: cached.cookieHeader,
+				oauth: cached.oauth,
+				orgSlug: cached.orgSlug,
 			})
 			if (report.cookieHeader) {
 				await writeCookieFile(
@@ -1098,6 +1507,7 @@ async function runCommand(options: ControlKodyOptions) {
 					origin,
 					email,
 					report.oauth,
+					options.orgSlug,
 				)
 			}
 			if (options.json) {
@@ -1127,7 +1537,12 @@ async function runCommand(options: ControlKodyOptions) {
 			}
 			const defaults = credentialsForOrigin(origin)
 			const email = options.email ?? defaults.email
-			const session = readSessionFile(options.cookieFile, origin, email)
+			const cached = readMcpAuthFile(
+				options.cookieFile,
+				origin,
+				email,
+				options.orgSlug,
+			)
 			const params = options.paramsFile
 				? await readJsonObjectFile(options.paramsFile)
 				: undefined
@@ -1137,8 +1552,9 @@ async function runCommand(options: ControlKodyOptions) {
 				password: options.password ?? defaults.password,
 				code: readFileSync(options.codeFile, 'utf8'),
 				params,
-				cookieHeader: session?.cookieHeader ?? undefined,
-				oauth: session?.oauth ?? undefined,
+				cookieHeader: cached.cookieHeader,
+				oauth: cached.oauth,
+				orgSlug: cached.orgSlug,
 			})
 			if (report.cookieHeader) {
 				await writeCookieFile(
@@ -1147,6 +1563,7 @@ async function runCommand(options: ControlKodyOptions) {
 					origin,
 					email,
 					report.oauth,
+					options.orgSlug,
 				)
 			}
 			if (options.json) {
@@ -1175,7 +1592,12 @@ async function runCommand(options: ControlKodyOptions) {
 			}
 			const defaults = credentialsForOrigin(origin)
 			const email = options.email ?? defaults.email
-			const session = readSessionFile(options.cookieFile, origin, email)
+			const cached = readMcpAuthFile(
+				options.cookieFile,
+				origin,
+				email,
+				options.orgSlug,
+			)
 			const report = await searchAppMcp({
 				origin,
 				email,
@@ -1184,8 +1606,9 @@ async function runCommand(options: ControlKodyOptions) {
 				domain: options.domain ?? undefined,
 				entity: options.entity ?? undefined,
 				limit: options.limit ?? undefined,
-				cookieHeader: session?.cookieHeader ?? undefined,
-				oauth: session?.oauth ?? undefined,
+				cookieHeader: cached.cookieHeader,
+				oauth: cached.oauth,
+				orgSlug: cached.orgSlug,
 			})
 			if (report.cookieHeader) {
 				await writeCookieFile(
@@ -1194,6 +1617,7 @@ async function runCommand(options: ControlKodyOptions) {
 					origin,
 					email,
 					report.oauth,
+					options.orgSlug,
 				)
 			}
 			if (options.json) {

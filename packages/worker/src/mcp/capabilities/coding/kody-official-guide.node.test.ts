@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { type CapabilityContext } from '../types.ts'
@@ -7,6 +8,7 @@ import { guides } from '#worker/guides/catalog.ts'
 const ctx: CapabilityContext = {
 	env: {} as Env,
 	callerContext: createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://kody.example',
 		user: null,
 	}),
@@ -77,9 +79,10 @@ test('codingGuideGet serves public bundled guides and hides admin-only docs from
 		{
 			env: {} as Env,
 			callerContext: createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
 				baseUrl: 'https://kody.example',
 				user: {
-					userId: 'admin-1',
+					userId: personIdFromStored('admin-1'),
 					email: 'admin@example.com',
 					displayName: 'Admin',
 					roles: ['admin'],

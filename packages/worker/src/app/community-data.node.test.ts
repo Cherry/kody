@@ -1,4 +1,6 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	emptyCommunityCategoryCounts,
 	type CommunityCategoryCounts,
@@ -7,7 +9,7 @@ import type * as forkListingRelation from '#worker/community/fork-listing-relati
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
 import { onboardingFeaturedMcpServers } from '#universal/onboarding-mcp-chooser.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
-import { resetDataCacheForTests } from './data-cache.ts'
+import { invalidateCommunityPublicCache } from './data-cache.ts'
 import {
 	loadCommunityDetailData,
 	loadCommunityIndexData,
@@ -28,7 +30,7 @@ const mockModule = vi.hoisted(() => ({
 	getCommunityListingById: vi.fn(),
 	getEntitySourceById: vi.fn(),
 	resolveCachedArtifactSourceHead: vi.fn(),
-	listSavedPackagesByKodyIds: vi.fn(),
+	listSavedPackagesBySlugs: vi.fn(),
 	listSavedPackagesByIds: vi.fn(),
 	getMcpUserPackageScope: vi.fn(),
 	getUserSocialRowByUsername: vi.fn(),
@@ -77,7 +79,7 @@ vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByKodyIds: mockModule.listSavedPackagesByKodyIds,
+	listSavedPackagesBySlugs: mockModule.listSavedPackagesBySlugs,
 	listSavedPackagesByIds: mockModule.listSavedPackagesByIds,
 }))
 
@@ -87,7 +89,7 @@ vi.mock('#worker/package-registry/user-scope.ts', () => ({
 
 const sampleListing = {
 	id: 'listing-github',
-	ownerUserId: 'owner-mcp-id',
+	ownerUserId: ownerIdFromStored('owner-mcp-id'),
 	packageId: 'pkg-1',
 	sourceId: 'src-1',
 	kodyId: 'github',
@@ -148,18 +150,39 @@ function sampleOverview(listing = sampleListing) {
 }
 
 function signedInUser() {
-	return { mcpUser: { userId: 'viewer-1', username: 'burhan' }, roles: [] }
+	return {
+		mcpUser: { userId: ownerIdFromStored('viewer-1'), username: 'burhan' },
+		request: sessionRequestContext('viewer-1', 'burhan'),
+		roles: [],
+	}
 }
 
 const request = (path: string) => new Request(`https://example.com${path}`)
 
-test('community index overlays matching kody_id installs for signed-in viewers', async () => {
-	resetDataCacheForTests()
+test('community index overlays fork installs and ignores same-leaf packages without a fork', async () => {
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(signedInUser())
 	mockModule.listCommunityIndexOverview.mockResolvedValue(sampleOverview())
 	mockModule.getMcpUserPackageScope.mockResolvedValue('burhan')
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([viewerGithubPackage])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([viewerGithubPackage])
+	mockModule.listSavedPackagesByIds.mockResolvedValue([])
+
+	const sameLeafOnly = await loadCommunityIndexData(
+		{} as Env,
+		request('/community'),
+	)
+	expect(sameLeafOnly.listings).toHaveLength(1)
+	expect(sameLeafOnly.listings[0]?.viewerInstall).toBeUndefined()
+
+	invalidateCommunityPublicCache()
+	mockModule.readAuthenticatedAppUser.mockResolvedValue(signedInUser())
+	mockModule.listCommunityIndexOverview.mockResolvedValue(sampleOverview())
+	mockModule.getMcpUserPackageScope.mockResolvedValue('burhan')
+	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([
+		viewerFork(),
+	])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([viewerGithubPackage])
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
 
 	const data = await loadCommunityIndexData({} as Env, request('/community'))
@@ -171,18 +194,18 @@ test('community index overlays matching kody_id installs for signed-in viewers',
 			packageId: 'pkg-github',
 		}),
 	)
-	expect(mockModule.listSavedPackagesByKodyIds).toHaveBeenCalledWith(
+	expect(mockModule.listSavedPackagesBySlugs).toHaveBeenCalledWith(
 		undefined,
-		expect.objectContaining({ userId: 'viewer-1' }),
+		expect.objectContaining({ userId: ownerIdFromStored('viewer-1') }),
 	)
 	expect(mockModule.listCommunityForksByListingIdsAndUser).toHaveBeenCalledWith(
 		undefined,
-		expect.objectContaining({ userId: 'viewer-1' }),
+		expect.objectContaining({ userId: ownerIdFromStored('viewer-1') }),
 	)
 })
 
 test('community index resolves the viewer while listings are still loading', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	let releaseOverview!: () => void
 	const overviewGate = new Promise<void>((resolve) => {
@@ -205,7 +228,7 @@ test('community index resolves the viewer while listings are still loading', asy
 })
 
 test('onboarding MCP chooser listings load official packages by pinned id', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	const pinnedIds = onboardingFeaturedMcpServers
 		.map((server) => server.listingId)
@@ -240,7 +263,7 @@ test('onboarding MCP chooser listings load official packages by pinned id', asyn
 })
 
 test('onboarding featured listings overlay inert forks as adaptation_required', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(signedInUser())
 	mockModule.listFeaturedCommunityListingsWithAggregates.mockResolvedValue([
 		sampleListing,
@@ -249,7 +272,7 @@ test('onboarding featured listings overlay inert forks as adaptation_required', 
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([
 		viewerFork({ forkedPackageId: 'pkg-inert', forkedSourceId: 'src-inert' }),
 	])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([])
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
 
 	const listings = await loadOnboardingFeaturedListings(
@@ -267,7 +290,7 @@ test('onboarding featured listings overlay inert forks as adaptation_required', 
 })
 
 test('community detail overlays viewerInstall for forked listings and omits it when not forked', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.getCommunityListingWithAggregates.mockResolvedValue(sampleListing)
 	mockModule.getCommunityListingById.mockResolvedValue(sampleListing)
 	mockModule.getEntitySourceById.mockResolvedValue(null)
@@ -279,18 +302,18 @@ test('community detail overlays viewerInstall for forked listings and omits it w
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(signedInUser())
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([])
 	const loadDetail = (path: string) =>
 		loadCommunityDetailData({} as Env, request(path), 'listing-github')
 
 	const notForked = await loadDetail('/community/listing-github')
 	expect(notForked?.viewerInstall).toBeNull()
 
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([
 		viewerFork(),
 	])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([viewerGithubPackage])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([viewerGithubPackage])
 	const forked = await loadDetail('/community/listing-github-forked')
 	expect(forked?.viewerInstall).toEqual(
 		expect.objectContaining({
@@ -304,7 +327,7 @@ test('community detail overlays viewerInstall for forked listings and omits it w
 	expect(forkedListing.viewerInstall?.status).toBe('installed')
 	expect(forked?.viewerInstall?.listingAhead).toBe(false)
 
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.getCommunityListingWithAggregates.mockResolvedValue({
 		...sampleListing,
 		pinnedCommit: 'commit-new',
@@ -323,7 +346,7 @@ test('community detail overlays viewerInstall for forked listings and omits it w
 	)
 	expect(outdated?.viewerInstall?.listingAheadPrompt).toMatch(/\S/)
 
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.getCommunityListingWithAggregates.mockResolvedValue({
 		...sampleListing,
 		pinnedCommit: 'commit-pin',
@@ -352,7 +375,7 @@ test('community detail overlays viewerInstall for forked listings and omits it w
 })
 
 test('sourceAhead compares HEAD to the runtime pin, not the community catalog snapshot', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	mockModule.getCommunityListingWithAggregates.mockResolvedValue(sampleListing)
 	mockModule.getCommunityListingById.mockResolvedValue(sampleListing)
@@ -361,7 +384,7 @@ test('sourceAhead compares HEAD to the runtime pin, not the community catalog sn
 		stable_user_id: 'owner-mcp-id',
 	})
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([])
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([])
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
 	mockModule.getMcpUserPackageScope.mockResolvedValue('viewer')
 	const runtimePin = 'cccccccccccccccccccccccccccccccccccccccc'
@@ -387,7 +410,7 @@ test('sourceAhead compares HEAD to the runtime pin, not the community catalog sn
 	expect(publishedListing.pinnedCommit).toBe(sampleListing.pinnedCommit)
 	expect(publishedListing.pinnedCommit).not.toBe(runtimePin)
 
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.resolveCachedArtifactSourceHead.mockResolvedValue({
 		branch: 'main',
 		commit: unpublishedHead,
@@ -404,7 +427,7 @@ test('sourceAhead compares HEAD to the runtime pin, not the community catalog sn
 })
 
 test('community index is memoized per request and forwards newest sort to loaders', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	mockModule.listCommunityIndexOverview.mockResolvedValue(sampleOverview())
 	mockModule.listCommunityListingsWithAggregates.mockResolvedValue([
@@ -480,7 +503,7 @@ test('community index is memoized per request and forwards newest sort to loader
 })
 
 test('community index omits viewerInstall for anonymous viewers and auth failures', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	mockModule.listCommunityIndexOverview.mockResolvedValue(sampleOverview())
 
@@ -489,7 +512,7 @@ test('community index omits viewerInstall for anonymous viewers and auth failure
 		request('/community'),
 	)
 	expect(anonymous.listings[0]?.viewerInstall).toBeUndefined()
-	expect(mockModule.listSavedPackagesByKodyIds).not.toHaveBeenCalled()
+	expect(mockModule.listSavedPackagesBySlugs).not.toHaveBeenCalled()
 
 	mockModule.readAuthenticatedAppUser.mockRejectedValue(
 		new Error('Missing COOKIE_SECRET for session signing.'),
@@ -503,6 +526,6 @@ test('community index omits viewerInstall for anonymous viewers and auth failure
 	expect(failedAuth.listings).toHaveLength(1)
 	expect(failedAuth.listings[0]?.id).toBe('listing-github')
 	expect(failedAuth.listings[0]?.viewerInstall).toBeUndefined()
-	expect(mockModule.listSavedPackagesByKodyIds).not.toHaveBeenCalled()
+	expect(mockModule.listSavedPackagesBySlugs).not.toHaveBeenCalled()
 	expect(consoleError).toHaveBeenCalled()
 })

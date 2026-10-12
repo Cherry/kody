@@ -3,15 +3,14 @@
  * Keep these strings exact. Do not invent positioning or swap in synonyms.
  */
 
-export const landingHeroHeadlineLead =
-	'You shouldn\u2019t have to start over in '
-export const landingHeroHeadlineEmphasis = 'every agent.'
+export const landingHeroHeadlineLead = 'Your agents\u2019 '
+export const landingHeroHeadlineEmphasis = 'cloud'
 export const landingHeroHeadline = `${landingHeroHeadlineLead}${landingHeroHeadlineEmphasis}`
 
-export const landingHeroSubheadLead = 'Kody is the '
-export const landingHeroSubheadEmphasis = 'software platform'
-export const landingHeroSubheadTail = ' your agents share'
-export const landingHeroSubhead = `${landingHeroSubheadLead}${landingHeroSubheadEmphasis}${landingHeroSubheadTail}`
+export const landingHeroSubheadLead =
+	'You shouldn\u2019t have to start over in '
+export const landingHeroSubheadEmphasis = 'every agent.'
+export const landingHeroSubheadTail = ''
 export const landingHeroLead =
 	'One home for packages, secrets, memory, and jobs, so what you build in Cursor still runs in Claude.'
 export const landingHeroPrimaryCta = 'Connect your agent'
@@ -26,7 +25,7 @@ export const landingHomePrimitives = [
 	{
 		id: 'memory',
 		word: 'memory',
-		body: 'Facts and context your agents can search later, across hosts. You stop re-explaining the same project every session.',
+		body: 'Facts without a better home, like project nicknames or personal context, that your connected agents can retrieve.',
 	},
 	{
 		id: 'secrets',
@@ -36,7 +35,7 @@ export const landingHomePrimitives = [
 	{
 		id: 'packages',
 		word: 'packages',
-		body: 'Durable software you own. An agent writes it once; any connected agent can run it.',
+		body: 'Reusable code with typed inputs and documented defaults. Keep how a task gets done in the package, ready for any connected agent to run.',
 	},
 	{
 		id: 'triggers',
@@ -92,32 +91,7 @@ export const landingCompareWithItems = [
 
 export const landingInviteHeadingLead = 'Give your services a '
 export const landingInviteHeadingEmphasis = 'home'
-export const landingInviteHeading = `${landingInviteHeadingLead}${landingInviteHeadingEmphasis}`
 export const landingInviteGuestLead =
 	'Create a free account and connect a service you already use.'
 export const landingInviteSignedInLead =
 	'You\u2019re in. Connect a service you already use and start saving packages.'
-
-export function landingHomeUiCopyBlob() {
-	return [
-		landingHeroHeadline,
-		landingHeroSubhead,
-		landingHeroLead,
-		landingHeroPrimaryCta,
-		landingHeroSecondaryCta,
-		landingPrimitivesIntroLead,
-		landingPrimitivesMoreLead,
-		landingPrimitivesMoreLink,
-		...landingHomePrimitives.flatMap((item) => [item.word, item.body]),
-		landingVsHeading,
-		...landingVsItems.flatMap((item) => [item.kicker, item.body]),
-		landingCompareWithoutTitle,
-		landingCompareWithTitle,
-		landingCompareCaption,
-		...landingCompareWithoutItems,
-		...landingCompareWithItems,
-		landingInviteHeading,
-		landingInviteGuestLead,
-		landingInviteSignedInLead,
-	].join('\n')
-}

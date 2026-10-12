@@ -7,8 +7,10 @@ import { consoleError } from '#worker/test-support/console-spies.ts'
 
 import {
 	cloudflareApiRequest,
+	cloudflareWorkflowNameMaxLength,
 	deleteArtifactsNamespace,
 	deleteCloudflareQueue,
+	dynamicCallableWorkflowName,
 	emailSendingEventTypes,
 	emptyR2Bucket,
 	encodeR2ObjectKey,
@@ -29,6 +31,24 @@ import {
 	setArtifactsNamespaceOnWranglerEnv,
 	writeGeneratedWranglerConfig,
 } from './resource-utils.ts'
+
+test('dynamicCallableWorkflowName stays within 64 chars and digests collisions', () => {
+	const short = dynamicCallableWorkflowName('kody-pr-7-runtime')
+	expect(short).toBe('kody-pr-7-runtime-dynamic-callable-workflows')
+	expect(short.length).toBeLessThanOrEqual(cloudflareWorkflowNameMaxLength)
+
+	const a = dynamicCallableWorkflowName(
+		'kody-branch-abcdefghijklmnopqrstuvwxyza-runtime',
+	)
+	const b = dynamicCallableWorkflowName(
+		'kody-branch-abcdefghijklmnopqrstuvwxyzb-runtime',
+	)
+	expect(a.length).toBeLessThanOrEqual(cloudflareWorkflowNameMaxLength)
+	expect(b.length).toBeLessThanOrEqual(cloudflareWorkflowNameMaxLength)
+	expect(a).not.toBe(b)
+	expect(a).toMatch(/-[0-9a-f]{8}-dynamic-callable-workflows$/)
+	expect(b).toMatch(/-[0-9a-f]{8}-dynamic-callable-workflows$/)
+})
 
 const thisDir = path.dirname(fileURLToPath(import.meta.url))
 const workerWranglerConfigPath = path.resolve(
@@ -76,6 +96,7 @@ const productionArgs = (outConfigPath: string) => ({
 	communityAssetsBucketName: 'kody-community-assets',
 	emailBlobsBucketName: 'kody-email-blobs',
 	repoSessionBlobsBucketName: 'kody-repo-session-blobs',
+	operatorBackupsBucketName: 'kody-operator-backups',
 })
 
 type GeneratedEnv = {
@@ -153,6 +174,11 @@ test('Wrangler / Cloudflare output and error classifiers', () => {
 			false,
 		],
 		[
+			isRetryableCloudflareFailure,
+			'Received a malformed response from the API\nGET /accounts/acct/workers/scripts/kody-platform/deployments -> 200 OK',
+			true,
+		],
+		[
 			isPermanentCloudflareAuthFailure,
 			'Authentication error [code: 10000]',
 			true,
@@ -228,6 +254,7 @@ test('writeGeneratedWranglerConfig preserves migrations and copies environment a
 		{ binding: 'COMMUNITY_ASSETS', bucket_name: 'kody-community-assets' },
 		{ binding: 'EMAIL_BLOBS', bucket_name: 'kody-email-blobs' },
 		{ binding: 'REPO_SESSION_BLOBS', bucket_name: 'kody-repo-session-blobs' },
+		{ binding: 'OPERATOR_BACKUPS', bucket_name: 'kody-operator-backups' },
 	])
 	// Routes are generated from the base-URL vars rather than committed (a
 	// committed route would make `wrangler dev` resolve every local request as
@@ -255,6 +282,7 @@ test('writeGeneratedWranglerConfig preserves migrations and copies environment a
 		communityAssetsBucketName: 'kody-pr-123-community-assets',
 		emailBlobsBucketName: 'kody-pr-123-email-blobs',
 		repoSessionBlobsBucketName: 'kody-pr-123-repo-session-blobs',
+		operatorBackupsBucketName: 'kody-pr-123-operator-backups',
 		queueBindings: [
 			{
 				binding: 'WEBHOOK_DISPATCH_QUEUE',
@@ -293,13 +321,28 @@ test('writeGeneratedWranglerConfig preserves migrations and copies environment a
 			binding: 'REPO_SESSION_BLOBS',
 			bucket_name: 'kody-pr-123-repo-session-blobs',
 		},
+		{
+			binding: 'OPERATOR_BACKUPS',
+			bucket_name: 'kody-pr-123-operator-backups',
+		},
 	])
-	expect(preview?.queues).toMatchObject({
-		producers: [{ binding: 'WEBHOOK_DISPATCH_QUEUE', queue: previewQueue }],
-		consumers: [
-			{ queue: previewQueue, dead_letter_queue: `${previewQueue}-dlq` },
-		],
-	})
+	expect(preview?.queues).toEqual(
+		expect.objectContaining({
+			producers: expect.arrayContaining([
+				{ binding: 'WEBHOOK_DISPATCH_QUEUE', queue: previewQueue },
+				{
+					binding: 'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+					queue: 'kody-preview-platform-feedback-dispatch',
+				},
+			]),
+			consumers: expect.arrayContaining([
+				expect.objectContaining({
+					queue: previewQueue,
+					dead_letter_queue: `${previewQueue}-dlq`,
+				}),
+			]),
+		}),
+	)
 	// Preview serves package apps inline on its own origin, so it publishes no
 	// routes. It still sets workers_dev so secret-bulk reapply cannot drop the
 	// workers.dev trigger (Cloudflare 1042).

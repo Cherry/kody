@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import type * as IsolatedArtifactRebuildModule from '#worker/repo/isolated-artifact-rebuild.ts'
@@ -53,7 +54,9 @@ type Target = (typeof sampleTargets)[number]
 const stagingKey = 'repo-artifact-rebuild-staging:v1:user-1:stage-1'
 const isolatedEnv = {
 	REPO_SESSION: {},
-	BUNDLE_ARTIFACTS_KV: {},
+	BUNDLE_ARTIFACTS_KV: {
+		get: async () => null,
+	},
 } as unknown as Env
 
 function setup({
@@ -88,13 +91,18 @@ function setup({
 }
 
 function rebuild(
-	overrides: { env?: Env; publishedCommit?: string; force?: boolean } = {},
+	overrides: {
+		env?: Env
+		publishedCommit?: string
+		force?: boolean
+		targets?: Array<Target>
+	} = {},
 ) {
 	return rebuildPublishedPackageArtifactsViaRepoSession({
 		env: isolatedEnv,
 		rpcSessionId: 'session-1',
 		sourceId: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		publishedCommit: 'commit-1',
 		baseUrl: 'https://kody.test',
 		...overrides,
@@ -151,6 +159,12 @@ test('isolated rebuild lists then stages once, chunks targets per isolate with b
 	expect(mockModule.stagePublishedPackageArtifactRebuild).toHaveBeenCalledTimes(
 		1,
 	)
+	expect(mockModule.stagePublishedPackageArtifactRebuild).toHaveBeenCalledWith({
+		sessionId: undefined,
+		sourceId: 'source-1',
+		userId: ownerIdFromStored('user-1'),
+		publishedCommit: 'commit-1',
+	})
 	expect(mockModule.rebuildPublishedPackageArtifact).not.toHaveBeenCalled()
 	expect(touch).not.toHaveBeenCalled()
 	expect(runTargets(run)).toEqual([
@@ -175,7 +189,7 @@ test('isolated rebuild lists then stages once, chunks targets per isolate with b
 		expect.objectContaining({
 			stagingKey,
 			sourceId: 'source-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			publishedCommit: 'commit-1',
 			targets: sampleTargets.slice(0, 4),
 		}),
@@ -390,4 +404,99 @@ test('does not retry non-transient rebuild failures', async () => {
 	expect(mockModule.stagePublishedPackageArtifactRebuild).toHaveBeenCalledTimes(
 		1,
 	)
+})
+
+test('undeclared bare-import rebuild failures rehydrate as UserCodeError; declared stay platform Errors', async () => {
+	const { isUserCodeError, UserCodeError } =
+		await import('#worker/user-code-error.ts')
+	const undeclaredMessage =
+		'Saved package module "src/a.ts" bundle still contains unresolved bare package imports after bundling (bundle.js: "remix/data-schema"). Declare supported runtime dependencies in package.json and ensure checks/publish can resolve them before execution.'
+
+	const callerRun = vi.fn(async (input: { targets: Array<Target> }) => ({
+		ok: false,
+		message: undeclaredMessage,
+		results: input.targets.map((target) => ({
+			ok: false,
+			message: undeclaredMessage,
+			callerFailure: true,
+			target,
+		})),
+	}))
+	setup({ targets: [sampleTargets[0]!], run: callerRun })
+	await expect(rebuild()).rejects.toSatisfy((error: unknown) => {
+		expect(error).toBeInstanceOf(UserCodeError)
+		expect(isUserCodeError(error)).toBe(true)
+		expect(String(error)).toMatch(/unresolved bare package imports/)
+		return true
+	})
+
+	const platformRun = vi.fn(async (input: { targets: Array<Target> }) => ({
+		ok: false,
+		message: undeclaredMessage,
+		results: input.targets.map((target) => ({
+			ok: false,
+			message: undeclaredMessage,
+			target,
+		})),
+	}))
+	setup({ targets: [sampleTargets[0]!], run: platformRun })
+	await expect(rebuild()).rejects.toSatisfy((error: unknown) => {
+		expect(error).toBeInstanceOf(Error)
+		expect(error).not.toBeInstanceOf(UserCodeError)
+		expect(isUserCodeError(error)).toBe(false)
+		return true
+	})
+})
+
+test('mixed caller and platform rebuild failures keep a platform cause for Sentry', async () => {
+	const { isUserCodeError, UserCodeError } =
+		await import('#worker/user-code-error.ts')
+	const callerMessage =
+		'Saved package module "src/a.ts" bundle still contains unresolved bare package imports after bundling (bundle.js: "remix/data-schema").'
+	const platformMessage = 'KV PUT failed: 500 Internal Server Error'
+	const run = vi.fn(async (input: { targets: Array<Target> }) => ({
+		ok: false,
+		message: 'mixed failures',
+		results: input.targets.map((target, index) =>
+			index === 0
+				? {
+						ok: false,
+						message: callerMessage,
+						callerFailure: true,
+						target,
+					}
+				: {
+						ok: false,
+						message: platformMessage,
+						target,
+					},
+		),
+	}))
+	setup({ targets: sampleTargets.slice(0, 2), run })
+	await expect(rebuild()).rejects.toSatisfy((error: unknown) => {
+		expect(error).toBeInstanceOf(Error)
+		expect(error).not.toBeInstanceOf(UserCodeError)
+		expect(isUserCodeError(error)).toBe(false)
+		expect((error as Error).cause).toBeInstanceOf(Error)
+		expect((error as Error).cause).not.toBeInstanceOf(UserCodeError)
+		expect(String((error as Error).cause)).toContain(platformMessage)
+		return true
+	})
+})
+
+test('optional targets skip listing and only rebuild the supplied set', async () => {
+	const selected = sampleTargets.slice(0, 2)
+	const run = vi.fn(async (input: { targets: Array<Target> }) => ({
+		ok: true,
+		message: 'rebuilt',
+		results: input.targets.map((target) => ({
+			ok: true,
+			message: 'rebuilt',
+			target,
+		})),
+	}))
+	setup({ run })
+	await rebuild({ targets: selected })
+	expect(mockModule.listPublishedPackageArtifactTargets).not.toHaveBeenCalled()
+	expect(runTargets(run).flat()).toEqual(selected)
 })

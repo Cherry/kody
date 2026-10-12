@@ -2,11 +2,12 @@ import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import {
 	getCommunityPublicCacheVersion,
-	resetDataCacheForTests,
+	invalidateCommunityPublicCache,
 } from '#app/data-cache.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { jobsData } from '#worker/jobs/jobs-data.ts'
+import { buildPackageJobId } from '#worker/jobs/package-job-id.ts'
 import { createJobStorageId } from '@kody-internal/shared/jobs/storage-id.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureCommunityFlowSchema } from './community-flow-test-schema.ts'
 import { insertCommunityActivityEvent } from './profile-repo.ts'
 import {
@@ -15,7 +16,9 @@ import {
 	listPublicProfilePackages,
 	updateCommunityProfile,
 } from './profile-service.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const fixedNow = '2026-07-01T00:00:00.000Z'
 
 type TestUser = Awaited<ReturnType<typeof insertUser>>
@@ -33,19 +36,23 @@ async function insertUser(
 	await ensureCommunityFlowSchema(env.APP_DB)
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`
 	const username = `${prefix}${crypto.randomUUID().slice(0, 8)}`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await runSql(
 		`INSERT INTO users (
-			username, email, stable_user_id, display_name, profile_visibility, password_hash, plan
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			username, email, stable_user_id, display_name, profile_visibility, password_hash
+		) VALUES (?, ?, ?, ?, ?, ?)`,
 		username,
 		email,
 		userId,
 		input.displayName ?? null,
 		input.visibility ?? 'public',
 		'test-password-hash',
-		'max',
 	)
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan: 'max',
+	})
 	const row = await env.APP_DB.prepare(
 		`SELECT id FROM users WHERE stable_user_id = ?`,
 	)
@@ -139,15 +146,16 @@ async function insertListing(
 }
 
 async function insertTestJob(userId: string, packageId: string) {
-	const id = `job-${crypto.randomUUID()}`
+	const name = `job ${crypto.randomUUID()} for ${packageId}`
+	const id = buildPackageJobId(packageId, name)
 	await jobsData(env).insertJob({
 		userId,
 		callerContextJson: '{}',
 		job: {
 			version: 1,
 			id,
-			userId,
-			name: `job for ${packageId}`,
+			userId: ownerIdFromStored(userId),
+			name,
 			sourceId: `source-${packageId}`,
 			publishedCommit: null,
 			storageId: createJobStorageId(id),
@@ -155,7 +163,6 @@ async function insertTestJob(userId: string, packageId: string) {
 			timezone: 'UTC',
 			enabled: true,
 			killSwitchEnabled: false,
-			preserved: false,
 			expiresAt: null,
 			createdAt: fixedNow,
 			updatedAt: fixedNow,
@@ -244,7 +251,7 @@ test('updateCommunityProfile validates display name and bio bounds', async () =>
 		/Bio must be at most 500/,
 	)
 
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	const versionBeforeVisibilityChange = getCommunityPublicCacheVersion()
 	await update({
 		displayName: '  Nice Name  ',

@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 import { parsePackageEventsDispatchQueueMessage } from './dispatch-queue-producer.ts'
@@ -21,7 +25,7 @@ const { handlePackageEventsDispatchQueue } = await import('./dispatch-queue.ts')
 
 function createMessageBody(overrides: Record<string, unknown> = {}) {
 	return {
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		topic: '@kentcdodds/discord.message.created',
 		idempotencyKey: 'discord:message-create:123',
 		payload: { messageId: '123' },
@@ -119,16 +123,19 @@ test('package events queue message parsing rejects malformed bodies', () => {
 	)
 	expect(
 		parsePackageEventsDispatchQueueMessage(
-			createMessageBody({ userId: ' user-123 ', topic: ' topic.a ' }),
+			createMessageBody({
+				userId: ' user-123 ' as OwnerId,
+				topic: ' topic.a ',
+			}),
 		),
-	).toMatchObject({ userId: 'user-123', topic: 'topic.a' })
+	).toMatchObject({ userId: ownerIdFromStored('user-123'), topic: 'topic.a' })
 	const malformed = [
 		null,
 		'nope',
 		createMessageBody({ topic: ' ' }),
 		// userId selects whose packages receive the event, so it enforces
 		// per-user isolation across the queue boundary.
-		createMessageBody({ userId: ' ' }),
+		createMessageBody({ userId: ' ' as OwnerId }),
 		createMessageBody({ userId: 42 }),
 		createMessageBody({ idempotencyKey: '' }),
 		createMessageBody({ payload: ['nope'] }),
@@ -139,4 +146,19 @@ test('package events queue message parsing rejects malformed bodies', () => {
 	expect(malformed.map(parsePackageEventsDispatchQueueMessage)).toEqual(
 		malformed.map(() => null),
 	)
+})
+
+test('package events queue message parsing keeps MCP fan-out fields only when well-formed', () => {
+	const emittedAt = '2026-10-07T12:00:00.000Z'
+	expect(
+		parsePackageEventsDispatchQueueMessage(
+			createMessageBody({ mcp: true, emittedAt }),
+		),
+	).toEqual({ ...createMessageBody(), mcp: true, emittedAt })
+	const parsed = parsePackageEventsDispatchQueueMessage(
+		createMessageBody({ mcp: 'true', emittedAt: 'yesterday' }),
+	)
+	expect(parsed).toEqual(createMessageBody())
+	expect(parsed).not.toHaveProperty('mcp')
+	expect(parsed).not.toHaveProperty('emittedAt')
 })

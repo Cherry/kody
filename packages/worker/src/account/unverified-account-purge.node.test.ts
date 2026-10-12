@@ -8,7 +8,6 @@ import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createSuccessfulDeletionEnv } from '#worker/test-support/account-deletion.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import * as AuditLog from '#worker/audit-log.ts'
 import * as AccountDeletion from '#app/account-deletion.ts'
 import * as DeletionState from '#worker/account/deletion-state.ts'
@@ -23,6 +22,7 @@ import {
 	pruneUnverifiedAccounts,
 	unverifiedAccountPurgeFailureReasonMaxLength,
 } from './unverified-account-purge.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const now = new Date('2026-09-02T12:00:00.000Z')
 const millisecondsPerDay = 24 * 60 * 60 * 1000
@@ -135,29 +135,45 @@ function createHarness() {
 			input: {
 				email?: string
 				emailVerifiedAt?: string
-				accountType?: 'person' | 'platform'
 				deletingAt?: string
 				oauthProvider?: string
+				/** Set to insert this user's org. `null` is a creator-less org. */
+				orgCreatedByUserId?: string | null
 			} = {},
 		) {
 			const email = input.email ?? `${username}@example.com`
-			const stableUserId = await createStableUserIdFromEmail(email)
+			const stableUserId = testStableUserIdFromEmail(email)
+			const createdAt = daysAgo(createdDaysAgo)
 			const inserted = sqlite
 				.prepare(
 					`INSERT INTO users (
 						username, email, password_hash, stable_user_id,
-						email_verified_at, account_type, deleting_at, created_at
-					) VALUES (?, ?, 'hash', ?, ?, ?, ?, ?)`,
+						email_verified_at, deleting_at, created_at
+					) VALUES (?, ?, 'hash', ?, ?, ?, ?)`,
 				)
 				.run(
 					username,
 					email,
 					stableUserId,
 					input.emailVerifiedAt ?? null,
-					input.accountType ?? 'person',
 					input.deletingAt ?? null,
-					daysAgo(createdDaysAgo),
+					createdAt,
 				)
+			if (input.orgCreatedByUserId !== undefined) {
+				sqlite
+					.prepare(
+						`INSERT INTO orgs (
+							id, slug, created_by_user_id, created_at, updated_at
+						) VALUES (?, ?, ?, ?, ?)`,
+					)
+					.run(
+						stableUserId,
+						username,
+						input.orgCreatedByUserId,
+						createdAt,
+						createdAt,
+					)
+			}
 			const id = Number(inserted.lastInsertRowid)
 			if (input.oauthProvider) {
 				sqlite
@@ -223,7 +239,7 @@ test('purge deletes only aged unverified person accounts through full account de
 	const eligible = await h.seed('stale-unverified', 8)
 	await h.seed('verified-old', 30, { emailVerifiedAt: daysAgo(29) })
 	await h.seed('young-unverified', 1)
-	await h.seed('platform-unverified', 30, { accountType: 'platform' })
+	await h.seed('platform-unverified', 30, { orgCreatedByUserId: null })
 	await h.seed('fenced-unverified', 30, { deletingAt: minutesAgo(5) })
 	await h.seed('social-unverified', 30, { oauthProvider: 'github' })
 

@@ -1,152 +1,13 @@
-import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
-import { mintApiToken } from '#worker/api-tokens/service.ts'
-import { cliClientIdMetadataPath } from '#worker/cli-client-metadata.ts'
-import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
-import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
-import { handleOpenApiRequest } from './http-handler.ts'
-
-type ApiResponseBody = Record<string, unknown> & {
-	error?: { code: string; message: string; details?: unknown }
-}
-
-const migrationsDirectory = new URL('../../migrations/', import.meta.url)
-const apiOrigin = 'https://api.kody.test'
-const appOrigin = 'https://kody.test'
-
-async function createApi(
-	input: {
-		emailVerified?: boolean
-		suspended?: boolean
-		oauthAccessToken?: string | null
-		oauthAudience?: string | Array<string>
-		oauthClientId?: string
-		oauthExpiresAtUnix?: number
-		oauthUnwrapFails?: boolean
-		captureUsage?: Array<{
-			blobs: Array<string | null | undefined>
-			indexes?: Array<string | null | undefined>
-		}>
-	} = {},
-) {
-	const sqlite = new DatabaseSync(':memory:')
-	applyAllMigrations(sqlite, migrationsDirectory)
-	const email = 'api-user@example.com'
-	const userId = await createStableUserIdFromEmail(email)
-	sqlite
-		.prepare(
-			`INSERT INTO users (id, username, email, password_hash, stable_user_id, email_verified_at, suspended_at)
-			 VALUES (1, 'api-user', ?, 'hash', ?, ?, ?)`,
-		)
-		.run(
-			email,
-			userId,
-			input.emailVerified === false ? null : '2026-01-01T00:00:00.000Z',
-			input.suspended ? '2026-01-01T00:00:00.000Z' : null,
-		)
-	const db = createD1FromSqlite(sqlite)
-	const oauthAccessToken = input.oauthAccessToken
-	const oauthExpiresAtUnix =
-		input.oauthExpiresAtUnix ?? Math.floor(Date.now() / 1000) + 3600
-	const env = {
-		APP_DB: db,
-		COOKIE_SECRET: 'test-cookie-secret',
-		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
-		...createInMemoryUserMeterEnv().env,
-		...(oauthAccessToken !== undefined
-			? {
-					OAUTH_PROVIDER: {
-						async unwrapToken(token: string) {
-							if (input.oauthUnwrapFails) return null
-							if (token !== oauthAccessToken) return null
-							return {
-								createdAt: Math.floor(Date.now() / 1000) - 60,
-								expiresAt: oauthExpiresAtUnix,
-								audience: input.oauthAudience ?? appOrigin,
-								scope: ['openid', 'profile', 'email'],
-								grant: {
-									clientId:
-										input.oauthClientId ??
-										`${appOrigin}${cliClientIdMetadataPath}`,
-									scope: ['openid', 'profile', 'email'],
-									props: {
-										userId,
-										email,
-										username: 'api-user',
-										displayName: 'API User',
-										authTime: Math.floor(Date.now() / 1000) - 60,
-									},
-								},
-							}
-						},
-					},
-				}
-			: {}),
-		...(input.captureUsage
-			? {
-					USAGE_EVENTS: {
-						writeDataPoint(point?: {
-							blobs?: Array<string | null | undefined>
-							indexes?: Array<string | null | undefined>
-						}) {
-							input.captureUsage?.push({
-								blobs: point?.blobs ?? [],
-								indexes: point?.indexes,
-							})
-						},
-					},
-				}
-			: {}),
-	} as unknown as Env
-	const pending: Array<Promise<unknown>> = []
-	async function call(
-		method: string,
-		path: string,
-		options: { token?: string; body?: unknown; contentType?: string } = {},
-	) {
-		const headers = new Headers()
-		if (options.token) headers.set('Authorization', `Bearer ${options.token}`)
-		if (options.body !== undefined) {
-			headers.set('Content-Type', options.contentType ?? 'application/json')
-		}
-		const response = await handleOpenApiRequest({
-			request: new Request(`${apiOrigin}${path}`, {
-				method,
-				headers,
-				...(options.body === undefined
-					? {}
-					: {
-							body:
-								typeof options.body === 'string'
-									? options.body
-									: JSON.stringify(options.body),
-						}),
-			}),
-			env,
-			appOrigin,
-			waitUntil: (promise) => pending.push(promise),
-		})
-		await Promise.all(pending.splice(0))
-		return {
-			status: response.status,
-			headers: response.headers,
-			body: (await response.json()) as ApiResponseBody,
-		}
-	}
-	async function mint(scopes: Array<string>) {
-		const minted = await mintApiToken({
-			db,
-			userId,
-			name: 'test',
-			scopes,
-			createdVia: 'api',
-		})
-		return minted.token
-	}
-	return { sqlite, db, env, userId, call, mint, oauthAccessToken }
-}
+import {
+	mintApiToken,
+	apiTokenLifetimeAliases,
+} from '#worker/api-tokens/service.ts'
+import {
+	createOpenApiTestHarness as createApi,
+	openApiTestApiOrigin as apiOrigin,
+	openApiTestAppOrigin as appOrigin,
+} from '#worker/test-support/open-api-http.ts'
 
 test('serves the OpenAPI document without auth', async () => {
 	const api = await createApi()
@@ -166,7 +27,7 @@ test('rejects missing, invalid, and revoked tokens with 401', async () => {
 	)
 	expect(missing.body.error?.code).toBe('unauthorized')
 
-	const token = await api.mint(['account:read'])
+	const token = await api.mint(['org:read'])
 	const tampered = `${token.slice(0, -4)}AAAA`
 	const invalid = await api.call('GET', '/v1/me', { token: tampered })
 	expect(invalid.status).toBe(401)
@@ -185,7 +46,7 @@ test('rejects missing, invalid, and revoked tokens with 401', async () => {
 
 test('runs capability operations under the token scope and slides expiry', async () => {
 	const api = await createApi()
-	const token = await api.mint(['account:read'])
+	const token = await api.mint(['org:read'])
 	const me = await api.call('GET', '/v1/me', { token })
 	expect(me.status).toBe(200)
 	expect(JSON.stringify(me.body)).toContain('api-user@example.com')
@@ -193,7 +54,7 @@ test('runs capability operations under the token scope and slides expiry', async
 	const current = await api.call('GET', '/v1/tokens/current', { token })
 	expect(current.status).toBe(200)
 	expect(current.body).toMatchObject({
-		scopes: ['account:read'],
+		scopes: ['org:read'],
 		status: 'active',
 	})
 	expect(current.body['last_used_at']).toEqual(expect.any(String))
@@ -203,7 +64,7 @@ test('runs capability operations under the token scope and slides expiry', async
 	expect(denied.status).toBe(403)
 	expect(denied.body['error']).toMatchObject({
 		code: 'insufficient_scope',
-		details: { required_scope: 'secrets:read' },
+		details: { required_permission: 'secret:use' },
 	})
 
 	const usage = api.sqlite
@@ -216,7 +77,7 @@ test('runs capability operations under the token scope and slides expiry', async
 
 test('writes secrets through path params and never returns the value', async () => {
 	const api = await createApi()
-	const token = await api.mint(['secrets:write'])
+	const token = await api.mint(['secret:use', 'secret:write', 'secret:create'])
 	const saved = await api.call('PUT', '/v1/secrets/user/api-test-secret', {
 		token,
 		body: { value: 'super-secret-value', description: 'from the api' },
@@ -245,46 +106,79 @@ test('writes secrets through path params and never returns the value', async () 
 
 test('token minting enforces parent scopes for local-execute', async () => {
 	const api = await createApi()
-	const parent = await api.mint(['tokens:write', 'packages:read'])
+	const parent = await api.mint(['token:delete', 'token:read', 'package:read'])
 	const child = await api.call('POST', '/v1/tokens', {
 		token: parent,
-		body: { name: 'child', scopes: ['packages:read'], idle_ttl_seconds: 300 },
+		body: {
+			name: 'child',
+			scopes: ['package:read'],
+			lifetime: 'short',
+			idle_ttl_seconds: 300,
+			max_lifetime_seconds: 600,
+		},
 	})
-	expect(child.status).toBe(200)
-	expect(child.body).toMatchObject({
-		scopes: ['packages:read'],
+	expect(child.status).toBe(400)
+
+	const childOk = await api.call('POST', '/v1/tokens', {
+		token: parent,
+		body: {
+			name: 'child',
+			scopes: ['package:read'],
+			idle_ttl_seconds: 300,
+			max_lifetime_seconds: 600,
+		},
+	})
+	expect(childOk.status).toBe(200)
+	expect(childOk.body).toMatchObject({
+		scopes: ['package:read'],
 		idle_ttl_seconds: 300,
 		token_type: 'Bearer',
 		created_via: 'api',
 	})
-	expect(child.body['token']).toMatch(/^kody_at_/)
+	expect(childOk.body['token']).toMatch(/^kody_at_/)
+
+	const missingLifetime = await api.call('POST', '/v1/tokens', {
+		token: parent,
+		body: { name: 'no-life', scopes: ['package:read'] },
+	})
+	expect(missingLifetime.status).toBe(400)
+	expect(missingLifetime.body.error?.message).toMatch(
+		/Token lifetime is required/,
+	)
 
 	const escalate = await api.call('POST', '/v1/tokens', {
 		token: parent,
-		body: { name: 'escalate', scopes: ['secrets:read'] },
+		body: { name: 'escalate', scopes: ['secret:use'], lifetime: 'short' },
 	})
 	expect(escalate.status).toBe(400)
 
 	const missingParentScope = await api.call('POST', '/v1/tokens', {
 		token: parent,
-		body: { name: 'local', scopes: ['local-execute'] },
+		body: { name: 'local', scopes: ['org:execute'], lifetime: 'short' },
 	})
 	expect(missingParentScope.status).toBe(400)
 
 	const listed = await api.call('GET', '/v1/tokens', { token: parent })
 	expect(listed.status).toBe(200)
 	expect(listed.body['tokens']).toHaveLength(2)
-	expect(JSON.stringify(listed.body)).not.toContain(child.body['token'])
+	expect(JSON.stringify(listed.body)).not.toContain(childOk.body['token'])
+
+	const noTokenRead = await api.mint(['package:read'])
+	const listDenied = await api.call('GET', '/v1/tokens', { token: noTokenRead })
+	expect(listDenied.status).toBe(403)
+	expect(listDenied.body.error?.code).toMatch(/insufficient_scope|forbidden/)
 })
 
 test('a token can only rotate tokens it could have minted', async () => {
 	const api = await createApi()
-	const rotator = await api.mint(['tokens:write'])
+	const rotator = await api.mint(['token:delete', 'token:read'])
 	const stronger = await mintApiToken({
 		db: api.db,
 		userId: api.userId,
 		name: 'stronger',
-		scopes: ['secrets:write'],
+		scopes: ['secret:use', 'secret:write'],
+		idleTtlSeconds: apiTokenLifetimeAliases.short.idleTtlSeconds,
+		maxLifetimeSeconds: apiTokenLifetimeAliases.short.maxLifetimeSeconds,
 		createdVia: 'mcp-api',
 	})
 	const denied = await api.call('POST', `/v1/tokens/${stronger.id}/rotate`, {
@@ -293,7 +187,7 @@ test('a token can only rotate tokens it could have minted', async () => {
 	expect(denied.status).toBe(403)
 	expect(denied.body.error).toMatchObject({
 		code: 'insufficient_scope',
-		details: { missing_scopes: ['secrets:write'] },
+		details: { missing_scopes: ['secret:use', 'secret:write'] },
 	})
 	expect(JSON.stringify(denied.body)).not.toMatch(/kody_at_/)
 	const stillWorks = await api.call('GET', '/v1/secrets', {
@@ -305,7 +199,8 @@ test('a token can only rotate tokens it could have minted', async () => {
 		db: api.db,
 		userId: api.userId,
 		name: 'longer',
-		scopes: ['tokens:write'],
+		scopes: ['token:delete'],
+		idleTtlSeconds: apiTokenLifetimeAliases.short.idleTtlSeconds,
 		maxLifetimeSeconds: 7 * 24 * 60 * 60,
 		createdVia: 'mcp-api',
 	})
@@ -321,7 +216,8 @@ test('a token can only rotate tokens it could have minted', async () => {
 		db: api.db,
 		userId: api.userId,
 		name: 'peer',
-		scopes: ['tokens:read'],
+		scopes: ['token:read'],
+		idleTtlSeconds: 60,
 		maxLifetimeSeconds: 60 * 60,
 		createdVia: 'api',
 	})
@@ -334,11 +230,14 @@ test('a token can only rotate tokens it could have minted', async () => {
 
 test('reported expiry includes the slide from the current request', async () => {
 	const api = await createApi()
+	const idleTtlSeconds = apiTokenLifetimeAliases.short.idleTtlSeconds
 	const minted = await mintApiToken({
 		db: api.db,
 		userId: api.userId,
 		name: 'aged',
-		scopes: ['account:read'],
+		scopes: ['org:read'],
+		idleTtlSeconds,
+		maxLifetimeSeconds: apiTokenLifetimeAliases.short.maxLifetimeSeconds,
 		createdVia: 'api',
 		now: new Date(Date.now() - 5 * 60 * 1000),
 	})
@@ -349,7 +248,7 @@ test('reported expiry includes the slide from the current request', async () => 
 	expect(current.status).toBe(200)
 	const reported = Date.parse(String(current.body['expires_at']))
 	expect(reported).toBeGreaterThan(Date.parse(minted.expires_at))
-	expect(reported).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000)
+	expect(reported).toBeGreaterThanOrEqual(before + idleTtlSeconds * 1000 - 1000)
 	const stored = api.sqlite
 		.prepare(`SELECT expires_at FROM api_tokens WHERE id = ?`)
 		.get(minted.id) as { expires_at: string }
@@ -361,10 +260,10 @@ test('local-execute tokens are mintable when the parent holds the scope', async 
 	const parent = await mintWithLocalExecute(api)
 	const minted = await api.call('POST', '/v1/tokens', {
 		token: parent,
-		body: { name: 'local', scopes: ['local-execute'] },
+		body: { name: 'local', scopes: ['org:execute'], lifetime: 'short' },
 	})
 	expect(minted.status).toBe(200)
-	expect(minted.body['scopes']).toEqual(['local-execute'])
+	expect(minted.body['scopes']).toEqual(['org:execute'])
 })
 
 async function mintWithLocalExecute(
@@ -374,7 +273,9 @@ async function mintWithLocalExecute(
 		db: api.db,
 		userId: api.userId,
 		name: 'parent',
-		scopes: ['tokens:write', 'local-execute'],
+		scopes: ['token:delete', 'org:execute'],
+		idleTtlSeconds: apiTokenLifetimeAliases.short.idleTtlSeconds,
+		maxLifetimeSeconds: apiTokenLifetimeAliases.short.maxLifetimeSeconds,
 		createdVia: 'mcp-api',
 	})
 	return minted.token
@@ -388,14 +289,14 @@ test('capability proxy session matches the CLI preflight contract', async () => 
 	})
 	expect(session.status).toBe(200)
 	expect(session.body).toMatchObject({
-		scopes: ['local-execute', 'tokens:write'],
+		scopes: ['org:execute', 'token:delete'],
 		expiresAt: expect.any(String),
 		maxExpiresAt: expect.any(String),
 		user: { userId: api.userId, email: 'api-user@example.com' },
 	})
 
 	const noScope = await api.call('GET', '/v1/capability-proxy/session', {
-		token: await api.mint(['account:read']),
+		token: await api.mint(['org:read']),
 	})
 	expect(noScope.status).toBe(403)
 	expect(noScope.body.error?.code).toBe('insufficient_scope')
@@ -453,7 +354,7 @@ test('capability proxy records distinguishable observe-only api_call telemetry',
 	expect(session.status).toBe(200)
 
 	const noScope = await api.call('GET', '/v1/capability-proxy/session', {
-		token: await api.mint(['account:read']),
+		token: await api.mint(['org:read']),
 	})
 	expect(noScope.status).toBe(403)
 	expect(noScope.body.error?.code).toBe('insufficient_scope')
@@ -553,7 +454,7 @@ test('capability proxy runs kody:runtime calls and meters each hop', async () =>
 
 test('mirrors the /mcp account gates', async () => {
 	const unverified = await createApi({ emailVerified: false })
-	const unverifiedToken = await unverified.mint(['account:read'])
+	const unverifiedToken = await unverified.mint(['org:read'])
 	const unverifiedResponse = await unverified.call('GET', '/v1/me', {
 		token: unverifiedToken,
 	})
@@ -563,7 +464,7 @@ test('mirrors the /mcp account gates', async () => {
 	)
 
 	const suspended = await createApi({ suspended: true })
-	const suspendedToken = await suspended.mint(['account:read'])
+	const suspendedToken = await suspended.mint(['org:read'])
 	const suspendedResponse = await suspended.call('GET', '/v1/me', {
 		token: suspendedToken,
 	})
@@ -571,7 +472,7 @@ test('mirrors the /mcp account gates', async () => {
 	expect(suspendedResponse.body.error?.code).toBe('account_suspended')
 
 	const reset = await createApi()
-	const resetToken = await reset.mint(['account:read'])
+	const resetToken = await reset.mint(['org:read'])
 	reset.sqlite
 		.prepare(`UPDATE users SET password_changed_at = ? WHERE id = 1`)
 		.run(new Date(Date.now() + 1000).toISOString())
@@ -579,7 +480,7 @@ test('mirrors the /mcp account gates', async () => {
 	expect(resetResponse.status).toBe(401)
 
 	const deleting = await createApi()
-	const deletingToken = await deleting.mint(['account:read'])
+	const deletingToken = await deleting.mint(['org:read'])
 	deleting.sqlite
 		.prepare(`UPDATE users SET deleting_at = ? WHERE id = 1`)
 		.run(new Date().toISOString())
@@ -610,11 +511,26 @@ test('local-execute package-graph requires scope and meters as api_call prep', a
 	const empty = await api.call('POST', '/v1/local-execute/package-graph', {
 		token,
 		body: {
-			code: 'export default async function main() { return 1 }',
+			code: `export default async function main() {
+  return fetch('https://api.example.com', {
+    headers: { authorization: 'Bearer {{secret:demoToken}}' },
+  })
+}`,
 		},
 	})
 	expect(empty.status).toBe(200)
-	expect(empty.body).toEqual({ modules: [], imports: [], warnings: [] })
+	expect(empty.body).toMatchObject({
+		imports: [],
+		warnings: [],
+		modules: [
+			{
+				name: '.__kody_virtual__/runtime.js',
+				esModule: expect.stringMatching(
+					/__kodyGatewayFetch[\s\S]*globalThis\.fetch\s*=/,
+				),
+			},
+		],
+	})
 
 	const dynamic = await api.call('POST', '/v1/local-execute/package-graph', {
 		token,
@@ -637,7 +553,7 @@ export default async () => x`,
 	expect(unresolved.body.error?.code).toBe('package_import_unresolved')
 
 	const noScope = await api.call('POST', '/v1/local-execute/package-graph', {
-		token: await api.mint(['account:read']),
+		token: await api.mint(['org:read']),
 		body: { code: 'export default async function main() { return 1 }' },
 	})
 	expect(noScope.status).toBe(403)
@@ -678,7 +594,7 @@ test('MCP OAuth Bearer authenticates CapabilityProxy and package-graph', async (
 	})
 	expect(session.status).toBe(200)
 	expect(session.body).toMatchObject({
-		scopes: ['local-execute'],
+		scopes: ['org:execute'],
 		expiresAt: expect.any(String),
 		maxExpiresAt: expect.any(String),
 		idleTtlSeconds: expect.any(Number),
@@ -708,11 +624,14 @@ test('MCP OAuth Bearer authenticates CapabilityProxy and package-graph', async (
 		},
 	)
 	expect(packageGraph.status).toBe(200)
-	expect(packageGraph.body).toEqual({
-		modules: [],
-		imports: [],
-		warnings: [],
-	})
+	expect(packageGraph.body.imports).toEqual([])
+	expect(packageGraph.body.warnings).toEqual([])
+	expect(packageGraph.body.modules).toEqual([
+		expect.objectContaining({
+			name: '.__kody_virtual__/runtime.js',
+			esModule: expect.stringContaining('__kodyGatewayFetch'),
+		}),
+	])
 })
 
 test('MCP OAuth Bearer is rejected unless it is a valid CLI token on a local-execute route', async () => {

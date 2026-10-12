@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -33,11 +37,13 @@ test('mcpServerLock grants a package and rejects missing packages', async () => 
 	const ctx = {
 		env: {} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.codes',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'alice@example.com',
 				displayName: 'Alice',
+				username: 'alice',
 			},
 		}),
 	}
@@ -52,11 +58,11 @@ test('mcpServerLock grants a package and rejects missing packages', async () => 
 		name: 'linear',
 		usage_mode: 'packages',
 		allowed_package_ids: ['pkg-drafts'],
-		usage_url: 'https://kody.codes/account/mcp-servers/server-1',
+		usage_url: 'https://kody.codes/@alice/-/mcp-servers/server-1',
 	})
 	expect(mockModule.lockMcpServerToPackage).toHaveBeenCalledWith({
 		env: ctx.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		packageId: 'pkg-drafts',
 	})

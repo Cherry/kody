@@ -1,3 +1,7 @@
+import {
+	type OwnerId,
+	type PersonId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { d1ContainsLikePattern } from '#worker/d1-like-pattern.ts'
 import { chunkArray } from '@kody-internal/shared/chunk.ts'
 import { parseTagsJson } from '@kody-internal/shared/tags-json.ts'
@@ -6,6 +10,13 @@ import { buildLengthSafeVectorId } from '#worker/vectorize/vector-ids.ts'
 import { stampFirstSavedPackage } from '#worker/identity/activation-stamps.ts'
 import { type OnboardingFunnelEnv } from '#worker/identity/onboarding-funnel-event.ts'
 import {
+	getPackageNameLeaf,
+	getPackageNameScope,
+	isScopedPackageName,
+} from './package-name.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
+import {
+	kodyPackageIdPattern,
 	type SavedPackageCommunityProvenance,
 	type SavedPackageRecord,
 	type SavedPackageRow,
@@ -21,6 +32,7 @@ export function savedPackageVectorId(packageId: string) {
 const savedPackageSelectColumns = `saved_packages.id, saved_packages.user_id, saved_packages.name,
 				saved_packages.kody_id, saved_packages.description, saved_packages.tags_json,
 				saved_packages.search_text, saved_packages.source_id, saved_packages.has_app,
+				saved_packages.has_skills,
 				saved_packages.hidden, saved_packages.is_private, saved_packages.locked_at,
 				saved_packages.created_at, saved_packages.updated_at`
 
@@ -42,12 +54,12 @@ const savedPackageCommunityProvenanceJoins = `LEFT JOIN community_forks
 				AND community_forks.forker_user_id = saved_packages.user_id
 			LEFT JOIN community_listings
 				ON community_listings.id = community_forks.listing_id
-				AND community_listings.status = 'active'`
+				AND community_listings.status = 'active'${andLiveDeletedAtSql('community_listings')}`
 
 function mapSavedPackageRow(row: Record<string, unknown>): SavedPackageRecord {
 	return {
 		id: String(row['id']),
-		userId: String(row['user_id']),
+		userId: String(row['user_id']) as OwnerId,
 		name: String(row['name']),
 		kodyId: String(row['kody_id']),
 		description: String(row['description']),
@@ -57,6 +69,10 @@ function mapSavedPackageRow(row: Record<string, unknown>): SavedPackageRecord {
 		sourceId: String(row['source_id']),
 		hasApp:
 			row['has_app'] === 1 || row['has_app'] === '1' || row['has_app'] === true,
+		hasSkills:
+			row['has_skills'] === 1 ||
+			row['has_skills'] === '1' ||
+			row['has_skills'] === true,
 		hidden:
 			row['hidden'] === 1 || row['hidden'] === '1' || row['hidden'] === true,
 		isPrivate:
@@ -127,6 +143,12 @@ const emptyCommunityProvenance: SavedPackageCommunityProvenance = {
 	listingAhead: null,
 	forkListingRelation: null,
 }
+/**
+ * Inserts a saved-package row. Returns whether this insert newly claimed
+ * `users.first_saved_package_at` for the actor (or the owning user when no
+ * actor is passed). Callers that stamp before a projection refresh must Kit
+ * sync when this returns true — refresh sees an existing row and will not.
+ */
 export async function insertSavedPackage(
 	db: D1Database,
 	row: Omit<SavedPackageRow, 'created_at' | 'updated_at' | 'locked_at'> & {
@@ -134,15 +156,15 @@ export async function insertSavedPackage(
 		updated_at?: string
 	},
 	telemetry?: OnboardingFunnelEnv | null,
-	options?: { stamp?: boolean },
-) {
+	options?: { stamp?: boolean; actorUserId?: PersonId },
+): Promise<boolean> {
 	const now = new Date().toISOString()
 	await db
 		.prepare(
 			`INSERT INTO saved_packages (
 				id, user_id, name, kody_id, description, tags_json, search_text,
-				source_id, has_app, hidden, is_private, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				source_id, has_app, has_skills, hidden, is_private, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			row.id,
@@ -154,17 +176,18 @@ export async function insertSavedPackage(
 			row.search_text ?? null,
 			row.source_id,
 			row.has_app,
+			row.has_skills,
 			row.hidden ?? 0,
 			row.is_private ?? 1,
 			row.created_at ?? now,
 			row.updated_at ?? now,
 		)
 		.run()
-	if (options?.stamp === false) return
-	await stampFirstSavedPackage(
+	if (options?.stamp === false) return false
+	return await stampFirstSavedPackage(
 		db,
 		{
-			stableUserId: row.user_id,
+			stableUserId: options?.actorUserId ?? row.user_id,
 			at: row.created_at ?? now,
 		},
 		telemetry,
@@ -183,6 +206,7 @@ export async function updateSavedPackage(
 		searchText?: string | null
 		sourceId?: string
 		hasApp?: boolean
+		hasSkills?: boolean
 		hidden?: boolean
 		isPrivate?: boolean
 	},
@@ -216,6 +240,9 @@ export async function updateSavedPackage(
 	if (input.hasApp !== undefined) {
 		addAssignment('has_app', input.hasApp ? 1 : 0)
 	}
+	if (input.hasSkills !== undefined) {
+		addAssignment('has_skills', input.hasSkills ? 1 : 0)
+	}
 	if (input.hidden !== undefined) {
 		addAssignment('hidden', input.hidden ? 1 : 0)
 	}
@@ -229,7 +256,7 @@ export async function updateSavedPackage(
 		.prepare(
 			`UPDATE saved_packages
 			SET ${assignments.join(', ')}
-			WHERE id = ? AND user_id = ?`,
+			WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(...values, input.packageId, input.userId)
 		.run()
@@ -248,7 +275,7 @@ export async function getSavedPackageLockedAt(
 		.prepare(
 			`SELECT locked_at
 			FROM saved_packages
-			WHERE id = ? AND user_id = ?`,
+			WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.packageId, input.userId)
 		.first<{ locked_at: string | null }>()
@@ -270,7 +297,7 @@ export async function setSavedPackageLockedAt(
 		.prepare(
 			`UPDATE saved_packages
 			SET locked_at = ?, updated_at = ?
-			WHERE id = ? AND user_id = ?`,
+			WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			input.lockedAt,
@@ -290,7 +317,9 @@ export async function deleteSavedPackage(
 	},
 ) {
 	const result = await db
-		.prepare(`DELETE FROM saved_packages WHERE id = ? AND user_id = ?`)
+		.prepare(
+			`DELETE FROM saved_packages WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.packageId, input.userId)
 		.run()
 	return (result.meta.changes ?? 0) > 0
@@ -307,15 +336,18 @@ export async function getSavedPackageById(
 		.prepare(
 			`SELECT ${savedPackageSelectColumns}
 			FROM saved_packages
-			WHERE id = ? AND user_id = ?`,
+			WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.packageId, input.userId)
 		.first<Record<string, unknown>>()
 	return row ? mapSavedPackageRow(row) : null
 }
 
-/** Unscoped id lookup for share-grant and stamp-authority paths. */
-export async function getSavedPackageByIdAny(
+/**
+ * A live saved package by id in whichever org owns it. Only for facts that
+ * belong to the package itself (its manifest), never for access decisions.
+ */
+export async function getSavedPackageByIdInAnyOrg(
 	db: D1Database,
 	packageId: string,
 ): Promise<SavedPackageRecord | null> {
@@ -323,7 +355,7 @@ export async function getSavedPackageByIdAny(
 		.prepare(
 			`SELECT ${savedPackageSelectColumns}
 			FROM saved_packages
-			WHERE id = ?`,
+			WHERE id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(packageId)
 		.first<Record<string, unknown>>()
@@ -342,48 +374,160 @@ export async function getSavedPackageWithCommunityProvenanceById(
 			`SELECT ${savedPackageCommunityProvenanceSelectColumns}
 			FROM saved_packages
 			${savedPackageCommunityProvenanceJoins}
-			WHERE saved_packages.id = ? AND saved_packages.user_id = ?`,
+			WHERE saved_packages.id = ? AND saved_packages.user_id = ?${andLiveDeletedAtSql('saved_packages')}`,
 		)
 		.bind(input.packageId, input.userId)
 		.first<Record<string, unknown>>()
 	return row ? mapSavedPackageWithCommunityProvenanceRow(row) : null
 }
 
-export async function getSavedPackageWithCommunityProvenanceByKodyId(
-	db: D1Database,
-	input: {
-		userId: string
-		kodyId: string
-	},
-): Promise<SavedPackageWithCommunityProvenanceRecord | null> {
-	const row = await db
-		.prepare(
-			`SELECT ${savedPackageCommunityProvenanceSelectColumns}
-			FROM saved_packages
-			${savedPackageCommunityProvenanceJoins}
-			WHERE saved_packages.kody_id = ? AND saved_packages.user_id = ?`,
-		)
-		.bind(input.kodyId, input.userId)
-		.first<Record<string, unknown>>()
-	return row ? mapSavedPackageWithCommunityProvenanceRow(row) : null
+export type SavedPackageRefLookup = {
+	userId: string
+	/** Package slug (name leaf), `@scope/leaf`, or saved-package UUID. */
+	ref: string
+	/** `slug` limits matching to the name leaf, for URL path segments. */
+	match?: 'any' | 'slug'
+	/**
+	 * When no live package owns the slug, follow `package_slug_redirects` to
+	 * the package that retired it. Only for URLs third parties hold on to
+	 * (webhook ingress, invocation, public pages); collision checks must not.
+	 */
+	followRedirects?: boolean
 }
 
-export async function getSavedPackageByKodyId(
+const savedPackageSlugSql = `substr(saved_packages.name, instr(saved_packages.name, '/') + 1)`
+
+type SavedPackageRefQuery = {
+	where: string
+	orderBy: string
+	values: Array<unknown>
+}
+
+function buildSavedPackageRefQuery(input: {
+	userId: string
+	ref: string
+	match?: 'any' | 'slug'
+}): SavedPackageRefQuery | null {
+	const ref = input.ref.trim()
+	if (!ref) return null
+	const slug = ref.toLowerCase()
+	if (input.match === 'slug') {
+		if (!kodyPackageIdPattern.test(slug)) return null
+		return {
+			where: `saved_packages.user_id = ? AND ${savedPackageSlugSql} = ?`,
+			orderBy: 'saved_packages.id',
+			values: [input.userId, slug],
+		}
+	}
+	if (ref.startsWith('@')) {
+		if (!isScopedPackageName(ref)) return null
+		return {
+			where: 'saved_packages.user_id = ? AND saved_packages.name = ?',
+			orderBy: 'saved_packages.id',
+			values: [input.userId, slug],
+		}
+	}
+	return {
+		where: `saved_packages.user_id = ?
+				AND (saved_packages.id IN (?, ?) OR ${savedPackageSlugSql} = ?)`,
+		orderBy: `CASE WHEN saved_packages.id IN (?, ?) THEN 0 ELSE 1 END`,
+		values: [input.userId, ref, slug, slug, ref, slug],
+	}
+}
+
+async function findSavedPackageIdBySlugRedirect(
 	db: D1Database,
-	input: {
-		userId: string
-		kodyId: string
-	},
-): Promise<SavedPackageRecord | null> {
+	input: { userId: string; ref: string },
+): Promise<string | null> {
+	const ref = input.ref.trim()
+	const slug = (
+		ref.startsWith('@') ? getPackageNameLeaf(ref) : ref
+	).toLowerCase()
+	if (!kodyPackageIdPattern.test(slug)) return null
 	const row = await db
 		.prepare(
-			`SELECT ${savedPackageSelectColumns}
-			FROM saved_packages
-			WHERE kody_id = ? AND user_id = ?`,
+			`SELECT package_id FROM (
+				SELECT package_id, 0 AS priority FROM package_slug_redirects
+				WHERE user_id = ? AND old_slug = ?
+				UNION ALL
+				SELECT package_id, 1 AS priority FROM package_kody_id_redirects
+				WHERE user_id = ? AND old_kody_id = ?
+			)
+			ORDER BY priority
+			LIMIT 1`,
 		)
-		.bind(input.kodyId, input.userId)
+		.bind(input.userId, slug, input.userId, slug)
+		.first<{ package_id: string }>()
+	return row?.package_id ?? null
+}
+
+async function resolveSavedPackageRefRow(
+	db: D1Database,
+	input: SavedPackageRefLookup & { columns: string; joins: string },
+): Promise<Record<string, unknown> | null> {
+	const query = buildSavedPackageRefQuery(input)
+	if (!query) return null
+	const select = (where: string, orderBy: string) =>
+		`SELECT ${input.columns}
+			FROM saved_packages
+			${input.joins}
+			WHERE ${where}${andLiveDeletedAtSql('saved_packages')}
+			ORDER BY ${orderBy}
+			LIMIT 1`
+	const live = await db
+		.prepare(select(query.where, query.orderBy))
+		.bind(...query.values)
 		.first<Record<string, unknown>>()
+	if (live || !input.followRedirects) return live ?? null
+	const packageId = await findSavedPackageIdBySlugRedirect(db, input)
+	if (!packageId) return null
+	const redirected = await db
+		.prepare(
+			select(
+				'saved_packages.user_id = ? AND saved_packages.id = ?',
+				'saved_packages.id',
+			),
+		)
+		.bind(input.userId, packageId)
+		.first<Record<string, unknown>>()
+	if (!redirected) return null
+	// A scoped ref only follows a redirect inside the package's current scope.
+	if (
+		input.ref.trim().startsWith('@') &&
+		getPackageNameScope(input.ref)?.toLowerCase() !==
+			getPackageNameScope(String(redirected['name']))
+	) {
+		return null
+	}
+	return redirected
+}
+
+/**
+ * The one saved-package lookup by caller-supplied identity. The slug is the
+ * leaf of `saved_packages.name`; a UUID match wins over a slug match.
+ */
+export async function resolveSavedPackageRef(
+	db: D1Database,
+	input: SavedPackageRefLookup,
+): Promise<SavedPackageRecord | null> {
+	const row = await resolveSavedPackageRefRow(db, {
+		...input,
+		columns: savedPackageSelectColumns,
+		joins: '',
+	})
 	return row ? mapSavedPackageRow(row) : null
+}
+
+export async function resolveSavedPackageRefWithCommunityProvenance(
+	db: D1Database,
+	input: SavedPackageRefLookup,
+): Promise<SavedPackageWithCommunityProvenanceRecord | null> {
+	const row = await resolveSavedPackageRefRow(db, {
+		...input,
+		columns: savedPackageCommunityProvenanceSelectColumns,
+		joins: savedPackageCommunityProvenanceJoins,
+	})
+	return row ? mapSavedPackageWithCommunityProvenanceRow(row) : null
 }
 
 export async function getSavedPackageByName(
@@ -397,7 +541,7 @@ export async function getSavedPackageByName(
 		.prepare(
 			`SELECT ${savedPackageSelectColumns}
 			FROM saved_packages
-			WHERE name = ? AND user_id = ?`,
+			WHERE name = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.name, input.userId)
 		.first<Record<string, unknown>>()
@@ -414,7 +558,7 @@ export async function listSavedPackagesByUserId(
 		.prepare(
 			`SELECT ${savedPackageSelectColumns}
 			FROM saved_packages
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY updated_at DESC`,
 		)
 		.bind(input.userId)
@@ -433,7 +577,7 @@ export async function listSavedPackagesWithCommunityProvenanceByUserId(
 			`SELECT ${savedPackageCommunityProvenanceSelectColumns}
 			FROM saved_packages
 			${savedPackageCommunityProvenanceJoins}
-			WHERE saved_packages.user_id = ?
+			WHERE saved_packages.user_id = ?${andLiveDeletedAtSql('saved_packages')}
 			ORDER BY saved_packages.updated_at DESC`,
 		)
 		.bind(input.userId)
@@ -441,25 +585,25 @@ export async function listSavedPackagesWithCommunityProvenanceByUserId(
 	return (rows.results ?? []).map(mapSavedPackageWithCommunityProvenanceRow)
 }
 
-export async function listSavedPackagesByKodyIds(
+export async function listSavedPackagesBySlugs(
 	db: D1Database,
 	input: {
 		userId: string
-		kodyIds: Array<string>
+		slugs: Array<string>
 	},
 ): Promise<Array<SavedPackageRecord>> {
-	if (input.kodyIds.length === 0) return []
-	const uniqueKodyIds = [...new Set(input.kodyIds)]
+	if (input.slugs.length === 0) return []
+	const uniqueSlugs = [...new Set(input.slugs)]
 	const packages: Array<SavedPackageRecord> = []
-	for (const idChunk of chunkArray(uniqueKodyIds, maxSqlBindingsPerChunk - 1)) {
-		const placeholders = idChunk.map(() => '?').join(', ')
+	for (const slugChunk of chunkArray(uniqueSlugs, maxSqlBindingsPerChunk - 1)) {
+		const placeholders = slugChunk.map(() => '?').join(', ')
 		const rows = await db
 			.prepare(
 				`SELECT ${savedPackageSelectColumns}
 				FROM saved_packages
-				WHERE user_id = ? AND kody_id IN (${placeholders})`,
+				WHERE user_id = ? AND ${savedPackageSlugSql} IN (${placeholders})${andLiveDeletedAtSql()}`,
 			)
-			.bind(input.userId, ...idChunk)
+			.bind(input.userId, ...slugChunk)
 			.all<Record<string, unknown>>()
 		for (const row of rows.results ?? []) {
 			packages.push(mapSavedPackageRow(row))
@@ -487,7 +631,7 @@ export async function listSavedPackagesByIds(
 			.prepare(
 				`SELECT ${savedPackageSelectColumns}
 				FROM saved_packages
-				WHERE user_id = ? AND id IN (${placeholders})`,
+				WHERE user_id = ? AND id IN (${placeholders})${andLiveDeletedAtSql()}`,
 			)
 			.bind(input.userId, ...idChunk)
 			.all<Record<string, unknown>>()
@@ -518,7 +662,7 @@ export async function listSavedPackageCommunityProvenanceByIds(
 				`SELECT ${savedPackageCommunityProvenanceSelectColumns}
 				FROM saved_packages
 				${savedPackageCommunityProvenanceJoins}
-				WHERE saved_packages.user_id = ? AND saved_packages.id IN (${placeholders})`,
+				WHERE saved_packages.user_id = ? AND saved_packages.id IN (${placeholders})${andLiveDeletedAtSql('saved_packages')}`,
 			)
 			.bind(input.userId, ...idChunk)
 			.all<Record<string, unknown>>()
@@ -585,14 +729,16 @@ export async function searchSavedPackagesByUserId(
 
 	const [totalRow, rows] = await Promise.all([
 		db
-			.prepare(`SELECT COUNT(*) AS total FROM saved_packages ${whereClause}`)
+			.prepare(
+				`SELECT COUNT(*) AS total FROM saved_packages ${whereClause}${andLiveDeletedAtSql()}`,
+			)
 			.bind(...params)
 			.first<{ total: number }>(),
 		db
 			.prepare(
 				`SELECT ${savedPackageSelectColumns}
 				FROM saved_packages
-				${whereClause}
+				${whereClause}${andLiveDeletedAtSql()}
 				ORDER BY ${orderBy}
 				LIMIT ? OFFSET ?`,
 			)
@@ -619,7 +765,7 @@ export async function listSavedPackagesPage(
 		.prepare(
 			`SELECT ${savedPackageSelectColumns}
 			FROM saved_packages
-			WHERE id > ?
+			WHERE id > ?${andLiveDeletedAtSql()}
 			ORDER BY id
 			LIMIT ?`,
 		)

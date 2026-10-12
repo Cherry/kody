@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 
@@ -39,15 +43,17 @@ function resetMocks() {
 	for (const fn of Object.values(mockModule)) {
 		fn.mockReset()
 	}
+	mockModule.getMcpUserPackageScope.mockResolvedValue('kent')
 }
 
 function createContext(userId = 'user-1') {
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId,
+				userId: personIdFromStored(userId),
 				email: `${userId}@example.com`,
 				displayName: userId,
 			},
@@ -57,7 +63,7 @@ function createContext(userId = 'user-1') {
 
 const sampleSource = {
 	id: 'source-1',
-	user_id: 'user-1',
+	user_id: ownerIdFromStored('user-1'),
 	entity_kind: 'package' as const,
 	entity_id: 'package-1',
 	repo_id: 'package-package-1',
@@ -111,7 +117,6 @@ test('repoShowPublishNote reads notes by source or package identity and rejects 
 	expect(bySource.note?.publishedBy).toBe('repo_session')
 
 	resetMocks()
-	mockModule.getMcpUserPackageScope.mockResolvedValue('kent')
 	mockModule.resolveOwnedPackageSource.mockResolvedValue({
 		packageId: 'package-1',
 		kodyId: 'demo',
@@ -145,6 +150,6 @@ test('repoShowPublishNote reads notes by source or package identity and rejects 
 	).rejects.toThrow('Repo source was not found for this user.')
 	expect(mockModule.getEntitySourceByIdForUser).toHaveBeenCalledWith(
 		expect.anything(),
-		{ id: 'source-1', userId: 'user-1' },
+		{ id: 'source-1', userId: ownerIdFromStored('user-1') },
 	)
 })

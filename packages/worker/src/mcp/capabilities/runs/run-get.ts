@@ -1,7 +1,16 @@
+import {
+	authorizeOrgWide,
+	listScopeIncludes,
+	loadResourceListScope,
+} from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { getRunRecord } from '#worker/run-records/service.ts'
 import {
@@ -29,8 +38,9 @@ export const runGetCapability = defineDomainCapability(
 	capabilityDomainNames.runs,
 	{
 		name: 'runGet',
+		orgPermission: 'job:read',
 		description:
-			'Load one retained run with its captured log lines, error details, soft triage fields (error_triage / note / who / when), and (when available) a bounded metadata.result snapshot of the handler return value — useful for webhook deliveries, package exports, and execute runs. Works for ignored/resolved runs too. Records are retained about 30 days, capped per user, and pruned failure-last.',
+			'Load one retained run with its captured log lines, error details, soft triage fields (error_triage / note / who / when), and (when available) a bounded metadata.result snapshot of the handler return value — useful for webhook deliveries, package exports, execute runs, and workflow runs. Works for ignored/resolved runs too. Records are retained about 30 days, capped per user, and pruned failure-last.',
 		keywords: [
 			'run',
 			'logs',
@@ -51,14 +61,23 @@ export const runGetCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const result = await getRunRecord({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				runId: args.run_id,
 			})
 			if (!result) {
 				throw new McpCallerError(`Run "${args.run_id}" was not found.`)
+			}
+			const auth = {
+				env: ctx.env,
+				request: requireMcpRequest(ctx.callerContext),
+			}
+			const scope = await loadResourceListScope(auth, 'job:read', 'job')
+			const jobId = result.run.jobId
+			if (!jobId || !listScopeIncludes(scope, jobId)) {
+				await authorizeOrgWide(auth, 'job:read')
 			}
 			return {
 				run: formatRunRecord(result.run),

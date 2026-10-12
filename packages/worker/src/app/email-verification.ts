@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { isNonProductionRuntime } from '#app/deployment-env.ts'
 import { sendCloudflareEmail } from '#app/email/cloudflare-email.ts'
 import { buildVerificationEmail } from '#app/email/messages.ts'
@@ -25,6 +26,7 @@ import {
  * layer do not pull in the token-minting pipeline. Re-exported for app-layer
  * callers that read it alongside the token helpers below.
  */
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export {
 	assertAccountEmailVerified,
 	emailVerificationRequiredMessage,
@@ -156,7 +158,7 @@ export type VerifyEmailResult =
 			ok: true
 			userId: number
 			email: string
-			stableUserId: string
+			stableUserId: OwnerId
 			newlyVerified: boolean
 	  }
 	| { ok: false; reason: 'missing_token' | 'invalid_token' | 'expired_token' }
@@ -176,7 +178,7 @@ export async function verifyEmailToken(input: {
 			        u.stable_user_id, u.email_verified_at
 			 FROM email_verifications ev
 			 INNER JOIN users u ON u.id = ev.user_id
-			 WHERE ev.token_hash = ?`,
+			 WHERE ev.token_hash = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(tokenHash)
 		.first<{
@@ -184,7 +186,7 @@ export async function verifyEmailToken(input: {
 			user_id: number
 			expires_at: number
 			email: string
-			stable_user_id: string
+			stable_user_id: OwnerId
 			email_verified_at: string | null
 		}>()
 	const now = input.now ?? new Date()
@@ -214,7 +216,7 @@ export async function verifyEmailToken(input: {
 			`UPDATE users
 			 SET email_verified_at = COALESCE(email_verified_at, ?),
 			     updated_at = CURRENT_TIMESTAMP
-			 WHERE id = ? AND deleting_at IS NULL`,
+			 WHERE id = ? AND deleting_at IS NULL${andLiveDeletedAtSql()}`,
 		)
 		.bind(verifiedAt, record.user_id)
 		.run()

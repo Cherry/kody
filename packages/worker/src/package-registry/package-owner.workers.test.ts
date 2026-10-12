@@ -1,127 +1,119 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
-import { createPlatformAccount } from '#worker/identity/platform-account-creation.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
+import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import {
-	PackageScopeAccessError,
+	packageOwnerEntitlementEmail,
 	resolvePackageOwnerContext,
 } from './package-owner.ts'
-import { insertPackageScopeGrant } from './scope-grants.ts'
-import { ensurePackageScopeGrantsTestSchema } from './test-schema.ts'
-
-function reservedPlatformUsername() {
-	return `kody-r-${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`
-}
 
 function personUsername() {
 	return `person-${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`
 }
 
 async function seedPersonUser(input: { username: string; email: string }) {
-	const stableUserId = await createStableUserIdFromEmail(input.email)
-	const result = await env.APP_DB.prepare(
-		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id, account_type, plan)
-		 VALUES (?, ?, 'test-password-hash', ?, ?, 'person', 'max')`,
+	const stableUserId = testStableUserIdFromEmail(input.email)
+	await env.APP_DB.prepare(
+		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+		 VALUES (?, ?, 'test-password-hash', ?, ?)`,
 	)
 		.bind(input.username, input.email, new Date().toISOString(), stableUserId)
 		.run()
-	return {
-		id: result.meta.last_row_id as number,
-		username: input.username,
-		email: input.email,
+	await provisionPersonalOrg(env.APP_DB, {
 		stableUserId,
+		username: input.username,
+		plan: 'max',
+	})
+	return { username: input.username, email: input.email, stableUserId }
+}
+
+function orgBoundRequest(
+	request: RequestContext,
+	org: RequestContext['org'],
+): RequestContext {
+	return {
+		...request,
+		org,
+		credential: { ...request.credential, orgId: org.id },
+		membership: { role: 'member' },
 	}
 }
 
-test('resolvePackageOwnerContext returns caller ownership, grant delegation, and rejection paths', async () => {
-	await ensurePackageScopeGrantsTestSchema(env.APP_DB)
+test('resolvePackageOwnerContext owns packages in the org the request is bound to', async () => {
+	await ensureUsersTestSchema({
+		db: env.APP_DB,
+		columns: ['email_verified_at'],
+	})
 	const person = await seedPersonUser({
 		username: personUsername(),
 		email: `owner-${crypto.randomUUID()}@example.com`,
 	})
-	const actor = await seedPersonUser({
-		username: personUsername(),
-		email: `actor-${crypto.randomUUID()}@example.com`,
-	})
-	const otherPerson = await seedPersonUser({
-		username: personUsername(),
-		email: `other-${crypto.randomUUID()}@example.com`,
-	})
-	const platform = await createPlatformAccount({
-		db: env.APP_DB,
-		email: `platform-${crypto.randomUUID()}@example.com`,
-		username: reservedPlatformUsername(),
-	})
-	const personUser = {
-		userId: person.stableUserId,
+	const user = {
+		userId: personIdFromStored(person.stableUserId),
 		email: person.email,
 		displayName: person.username,
 	}
-	const actorUser = {
-		userId: actor.stableUserId,
-		email: actor.email,
-		displayName: actor.username,
-	}
+	const personalRequest = sessionRequestContext(person.stableUserId)
 
-	expect(await resolvePackageOwnerContext(env, personUser)).toEqual({
+	expect(
+		await resolvePackageOwnerContext(env, { user, request: personalRequest }),
+	).toEqual({
 		ownerUserId: person.stableUserId,
 		ownerScope: person.username,
 		ownerEmail: person.email,
 		actorUserId: person.stableUserId,
-		delegated: false,
 	})
 
-	await insertPackageScopeGrant(env.APP_DB, {
-		scopeOwnerUserId: platform.stableUserId,
-		granteeUserId: person.stableUserId,
-		createdByUserId: person.stableUserId,
+	const orgId = ownerIdFromStored(`org-${crypto.randomUUID()}`)
+	const teamOwner = await resolvePackageOwnerContext(env, {
+		user,
+		request: orgBoundRequest(personalRequest, { id: orgId, slug: 'acme' }),
 	})
-	expect(
-		await resolvePackageOwnerContext(env, personUser, platform.username),
-	).toEqual({
-		ownerUserId: platform.stableUserId,
-		ownerScope: platform.username,
-		ownerEmail: platform.email,
+	expect(teamOwner).toEqual({
+		ownerUserId: orgId,
+		ownerScope: 'acme',
+		ownerEmail: person.email,
 		actorUserId: person.stableUserId,
-		delegated: true,
 	})
+	// Actor email stays on the owner context for display/audit, but
+	// entitlement lookups must blank it so the team org plan resolves.
+	expect(packageOwnerEntitlementEmail(teamOwner)).toBeNull()
+	expect(
+		packageOwnerEntitlementEmail(
+			await resolvePackageOwnerContext(env, {
+				user,
+				request: personalRequest,
+			}),
+		),
+	).toBe(person.email)
 
 	await expect(
-		resolvePackageOwnerContext(env, actorUser, otherPerson.username),
-	).rejects.toThrow(PackageScopeAccessError)
-	await expect(
-		resolvePackageOwnerContext(env, actorUser, otherPerson.username),
-	).rejects.toThrow(/not a platform account scope/)
-
-	await expect(
-		resolvePackageOwnerContext(env, actorUser, platform.username),
-	).rejects.toThrow(PackageScopeAccessError)
-	await expect(
-		resolvePackageOwnerContext(env, actorUser, platform.username),
-	).rejects.toThrow(/do not have a package scope grant/)
-
-	await expect(
-		resolvePackageOwnerContext(env, actorUser, 'missing-scope-xyz'),
-	).rejects.toThrow(PackageScopeAccessError)
-	await expect(
-		resolvePackageOwnerContext(env, actorUser, 'missing-scope-xyz'),
-	).rejects.toThrow(/not a platform account scope/)
+		resolvePackageOwnerContext(env, {
+			user,
+			request: orgBoundRequest(personalRequest, { id: orgId, slug: null }),
+		}),
+	).rejects.toThrow(/has no slug/)
 
 	// Email on the caller context can drift (for example mid-request email
-	// change) while stable_user_id stays authoritative — package scope must
+	// change) while stable_user_id stays authoritative: package scope must
 	// still resolve from identity, not email.
 	const staleEmail = `stale-${crypto.randomUUID()}@example.com`
 	expect(
 		await resolvePackageOwnerContext(env, {
-			userId: person.stableUserId,
-			email: staleEmail,
-			displayName: person.username,
+			user: { ...user, email: staleEmail },
+			request: personalRequest,
 		}),
 	).toEqual({
 		ownerUserId: person.stableUserId,
 		ownerScope: person.username,
 		ownerEmail: staleEmail,
 		actorUserId: person.stableUserId,
-		delegated: false,
 	})
 })

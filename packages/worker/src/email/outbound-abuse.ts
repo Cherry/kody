@@ -6,11 +6,12 @@
  * complaints or sustained bounces burns sender reputation for every user.
  * This monitor reacts to provider delivery events: any spam complaint, or
  * repeated hard bounces within a UTC day, sets
- * `users.email_outbound_paused_at`, which blocks further outbound sends
+ * `orgs.email_outbound_paused_at`, which blocks further outbound sends
  * (see `sendOutboundEmail`) until an admin reviews and clears it from the
  * admin users page.
  */
 
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { joinAppUrl } from '#worker/app-base-url.ts'
 import { mailboxRpc } from './mailbox-client.ts'
@@ -20,6 +21,7 @@ import {
 	isUserEmailOutboundPausedReason,
 } from './outbound-paused-subscription-event.ts'
 import { type EmailDeliveryStatus } from './types.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 /**
  * Bounced sends tolerated per user per UTC day before outbound email is
@@ -46,7 +48,7 @@ type OutboundAbuseEnv = Pick<
 export async function applyOutboundEmailAbusePause(input: {
 	env: OutboundAbuseEnv
 	/** Stable MCP userId of the account that sent the message. */
-	userId: string
+	userId: OwnerId
 	deliveryStatus: EmailDeliveryStatus
 	/**
 	 * Whether this delivery event was persisted by the current processing
@@ -101,9 +103,9 @@ export async function applyOutboundEmailAbusePause(input: {
 	}
 
 	const result = await input.env.APP_DB.prepare(
-		`UPDATE users
+		`UPDATE orgs
 		 SET email_outbound_paused_at = ?, updated_at = ?
-		 WHERE stable_user_id = ? AND email_outbound_paused_at IS NULL`,
+		 WHERE id = ? AND email_outbound_paused_at IS NULL${andLiveDeletedAtSql()}`,
 	)
 		.bind(now.toISOString(), now.toISOString(), input.userId)
 		.run()
@@ -124,7 +126,7 @@ export async function applyOutboundEmailAbusePause(input: {
 
 async function countProviderDeliveryEventsToday(input: {
 	env: OutboundAbuseEnv
-	userId: string
+	userId: OwnerId
 	eventType: EmailDeliveryStatus
 	now: Date
 }) {
@@ -149,14 +151,14 @@ async function countProviderDeliveryEventsToday(input: {
  */
 async function notifyAdminsOfOutboundEmailPause(input: {
 	env: OutboundAbuseEnv
-	userId: string
+	userId: OwnerId
 	deliveryStatus: EmailDeliveryStatus
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
 	try {
 		if (!isUserEmailOutboundPausedReason(input.deliveryStatus)) return
 		const pausedUser = await input.env.APP_DB.prepare(
-			`SELECT username, email FROM users WHERE stable_user_id = ?`,
+			`SELECT username, email FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
 		)
 			.bind(input.userId)
 			.first<{ username: string; email: string }>()

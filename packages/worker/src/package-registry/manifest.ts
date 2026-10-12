@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { parseModuleSource, type ModuleAstNode } from '#worker/module-source.ts'
 import {
 	authoredPackageJsonSchema,
+	packageCredentialsSchema,
 	webhookDefaultRateLimitPerMinute,
 	type AuthoredPackageJson,
 	type PackageExportTarget,
@@ -117,6 +118,8 @@ export function parseAuthoredPackageJson(input: {
 		manifestPath: input.manifestPath ?? packageManifestPath,
 		mode: input.mode ?? 'authoring',
 	})
+	const invalidCredentialSlots =
+		input.mode === 'published' ? splitPublishedCredentials(parsed) : null
 	const result = authoredPackageJsonSchema.safeParse(parsed)
 	if (!result.success) {
 		const formatted = z.prettifyError(result.error)
@@ -139,6 +142,9 @@ export function parseAuthoredPackageJson(input: {
 	}
 	manifest.kody.id = expectedKodyId
 	const authored = manifest as AuthoredPackageJson
+	if (invalidCredentialSlots) {
+		authored.kody.invalidCredentialSlots = invalidCredentialSlots
+	}
 	if (input.expectedPackageScope !== undefined) {
 		assertAuthoredPackageJsonNameScope({
 			manifest: authored,
@@ -204,6 +210,64 @@ function assertNoRetiredKodyFields(input: {
 			`Invalid ${input.manifestPath}:\n${retiredPackageAppRuntimeMessage}`,
 		)
 	}
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * Snapshot load must not brick a package, and must not let one slot that a
+ * later rule rejects take its valid siblings with it. Each slot is validated
+ * on its own: valid slots stay in `kody.credentials`, and invalid ones come
+ * back by name with their message so every use fails loudly. Publish
+ * (`authoring`) still rejects the whole manifest.
+ *
+ * Publishes before `kody.credentials` existed stripped the key unvalidated,
+ * so an old snapshot can carry any shape there (a string, an array, a map of
+ * strings). That was never honored, so a non-empty key with no object-shaped
+ * slot is dropped whole and the package stays undeclared. An empty map is a
+ * valid declaration and stays. A retired `placement` is dropped, the way
+ * `kody.app.runtime` is ignored on load.
+ */
+function splitPublishedCredentials(
+	parsed: unknown,
+): Record<string, string> | null {
+	if (!isPlainRecord(parsed) || !isPlainRecord(parsed.kody)) return null
+	const kody = parsed.kody
+	if (!('credentials' in kody)) return null
+	const credentials = kody.credentials
+	if (
+		!isPlainRecord(credentials) ||
+		(Object.keys(credentials).length > 0 &&
+			!Object.values(credentials).some(isPlainRecord))
+	) {
+		delete kody.credentials
+		return null
+	}
+	const valid: Array<[string, unknown]> = []
+	const invalid: Array<[string, string]> = []
+	for (const [name, slot] of Object.entries(credentials)) {
+		if (isPlainRecord(slot)) delete slot.placement
+		const result = packageCredentialsSchema.safeParse(
+			Object.fromEntries([[name, slot]]),
+		)
+		if (result.success) {
+			valid.push([name, slot])
+			continue
+		}
+		invalid.push([
+			name,
+			result.error.issues
+				.map(
+					(issue) =>
+						`${['kody.credentials', ...issue.path.map(String)].join('.')}: ${issue.message}`,
+				)
+				.join('\n'),
+		])
+	}
+	kody.credentials = Object.fromEntries(valid)
+	return invalid.length > 0 ? Object.fromEntries(invalid) : null
 }
 
 function assertPackageWebhooks(input: {
@@ -332,6 +396,25 @@ export function listPackageSubscriptions(manifest: AuthoredPackageJson) {
 		.sort((left, right) => left.topic.localeCompare(right.topic))
 }
 
+export type PackageWebhookHmacVerificationEntry = {
+	type: 'hmac-sha256' | 'hmac-sha1'
+	header: string
+	secretName?: string
+	encoding: 'hex' | 'base64'
+	prefix?: string
+	signedPayload?: 'body' | 'timestamp.body'
+}
+
+export type PackageWebhookUrlSecretVerificationEntry = { type: 'url-secret' }
+
+/** The declared HMAC scheme, or null for url-secret and undeclared webhooks. */
+export function webhookHmacVerification(
+	verification: PackageWebhookManifestEntry['verification'] | undefined,
+): PackageWebhookHmacVerificationEntry | null {
+	if (!verification || verification.type === 'url-secret') return null
+	return verification
+}
+
 export type PackageWebhookManifestEntry = {
 	name: string
 	exportName: string
@@ -339,14 +422,10 @@ export type PackageWebhookManifestEntry = {
 	responseMode: 'ack' | 'sync'
 	inputMode: 'request' | 'params'
 	rateLimitPerMinute: number
-	verification: {
-		type: 'hmac-sha256' | 'hmac-sha1'
-		header: string
-		secretName?: string
-		encoding: 'hex' | 'base64'
-		prefix?: string
-		signedPayload?: 'body' | 'timestamp.body'
-	} | null
+	verification:
+		| PackageWebhookHmacVerificationEntry
+		| PackageWebhookUrlSecretVerificationEntry
+		| null
 	replay: {
 		timestampHeader?: string
 		timestampFormat?:
@@ -372,22 +451,24 @@ export function listPackageWebhooks(
 			inputMode: webhook.inputMode ?? 'request',
 			rateLimitPerMinute:
 				webhook.rateLimitPerMinute ?? webhookDefaultRateLimitPerMinute,
-			verification: webhook.verification
-				? {
-						type: webhook.verification.type,
-						header: webhook.verification.header,
-						...(webhook.verification.secretName !== undefined
-							? { secretName: webhook.verification.secretName }
-							: {}),
-						encoding: webhook.verification.encoding,
-						...(webhook.verification.prefix !== undefined
-							? { prefix: webhook.verification.prefix }
-							: {}),
-						...(webhook.verification.signedPayload !== undefined
-							? { signedPayload: webhook.verification.signedPayload }
-							: {}),
-					}
-				: null,
+			verification: !webhook.verification
+				? null
+				: webhook.verification.type === 'url-secret'
+					? { type: 'url-secret' as const }
+					: {
+							type: webhook.verification.type,
+							header: webhook.verification.header,
+							...(webhook.verification.secretName !== undefined
+								? { secretName: webhook.verification.secretName }
+								: {}),
+							encoding: webhook.verification.encoding,
+							...(webhook.verification.prefix !== undefined
+								? { prefix: webhook.verification.prefix }
+								: {}),
+							...(webhook.verification.signedPayload !== undefined
+								? { signedPayload: webhook.verification.signedPayload }
+								: {}),
+						},
 			replay: webhook.replay
 				? {
 						...(webhook.replay.timestampHeader !== undefined
@@ -415,6 +496,7 @@ export function listPackageEmittedEvents(manifest: AuthoredPackageJson) {
 			topic,
 			description: emittedEvent.description.trim(),
 			payloadSchema: emittedEvent.payloadSchema ?? null,
+			...(emittedEvent.mcp === true ? { mcp: true as const } : {}),
 		}))
 		.sort((left, right) => left.topic.localeCompare(right.topic))
 }
@@ -498,6 +580,7 @@ export type PackageSearchProjection = {
 		topic: string
 		description: string
 		payloadSchema?: Record<string, unknown> | null
+		mcp?: true
 	}>
 	retrievers: Array<PackageRetrieverManifestEntry>
 	webhooks: Array<PackageWebhookManifestEntry>
@@ -1540,7 +1623,12 @@ export function buildPackageSearchDocument(
 			webhook.rateLimitPerMinute !== webhookDefaultRateLimitPerMinute
 				? `rate:${webhook.rateLimitPerMinute}`
 				: '',
-			webhook.verification ? `verify:${webhook.verification.header}` : '',
+			webhook.verification?.type === 'url-secret'
+				? 'verify:url-secret'
+				: webhook.verification
+					? `verify:${webhook.verification.header}`
+					: '',
+			webhook.verification?.type !== 'url-secret' &&
 			webhook.verification?.signedPayload
 				? `signed:${webhook.verification.signedPayload}`
 				: '',

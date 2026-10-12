@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { loadAccountSecretProvidersData } from '#app/account-secret-providers-data.ts'
@@ -6,20 +7,12 @@ import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
-import { isSecretProvidersEnabled } from '#mcp/secrets/secret-providers/flag.ts'
 import {
 	bindSecretProvider,
 	grantSecretProviderToPackage,
 	revokeSecretProviderGrant,
 	unbindSecretProvider,
 } from '#mcp/secrets/secret-providers/service.ts'
-
-async function secretProvidersUnavailable(userId: number, env: Env) {
-	return !(await isSecretProvidersEnabled({
-		db: env.APP_DB,
-		userId,
-	}))
-}
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -28,17 +21,17 @@ type AuthenticatedUser = NonNullable<
 export function createAccountSecretProvidersHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request }) {
+		async handler({ request }: { request: Request }) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
 			}
-			if (await secretProvidersUnavailable(user.userId, env)) {
-				return new Response('Not found.', { status: 404 })
-			}
 			const accountSecretProviders = await loadAccountSecretProvidersData({
 				env,
-				userId: user.mcpUser.userId,
+				userId: ownerIdFromCaller({
+					request: user.request,
+					user: user.mcpUser,
+				}),
 				email: user.email,
 				url: request.url,
 			})
@@ -49,10 +42,7 @@ export function createAccountSecretProvidersHandler(env: Env) {
 				loaderData: { accountSecretProviders },
 			})
 		},
-	} satisfies Action<
-		| typeof routes.accountSecretProviders
-		| typeof routes.accountSecretProvidersApprove
-	>
+	}
 }
 
 export function createAccountSecretProvidersApiHandler(env: Env) {
@@ -63,14 +53,14 @@ export function createAccountSecretProvidersApiHandler(env: Env) {
 			if (!user) {
 				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
 			}
-			if (await secretProvidersUnavailable(user.userId, env)) {
-				return jsonResponse({ ok: false, error: 'Not found.' }, 404)
-			}
 			if (request.method === 'GET') {
 				return jsonResponse(
 					await loadAccountSecretProvidersData({
 						env,
-						userId: user.mcpUser.userId,
+						userId: ownerIdFromCaller({
+							request: user.request,
+							user: user.mcpUser,
+						}),
 						email: user.email,
 						url: request.url,
 					}),
@@ -126,7 +116,10 @@ async function handleBind(input: {
 	const bound = await bindSecretProvider({
 		env: input.env,
 		baseUrl: new URL(input.requestUrl).origin,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
 		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),
 		doorSecretName: readTrimmedStringOrEmpty(input.body, 'doorSecretName'),
@@ -142,7 +135,10 @@ async function handleUnbind(input: {
 }) {
 	await unbindSecretProvider({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
 	})
 	return jsonResponse({ ok: true })
@@ -155,7 +151,10 @@ async function handleGrant(input: {
 }) {
 	const granted = await grantSecretProviderToPackage({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
 		ref: readTrimmedStringOrEmpty(input.body, 'ref'),
 		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),
@@ -170,7 +169,10 @@ async function handleRevoke(input: {
 }) {
 	await revokeSecretProviderGrant({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
 		ref: readTrimmedStringOrEmpty(input.body, 'ref'),
 		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),

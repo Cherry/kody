@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createProfileApiHandler, createProfileHandler } from './profile.tsx'
 import { type CommunityProfileRecord } from '#worker/community/types.ts'
@@ -8,6 +9,12 @@ const mockModule = vi.hoisted(() => ({
 	getCommunityProfileByUsername: vi.fn(),
 	getProfileActivity: vi.fn(),
 	listPublicProfilePackages: vi.fn(),
+	listOrganizationsForPerson: vi.fn(),
+}))
+
+vi.mock('#worker/orgs/repo.ts', () => ({
+	listOrganizationsForPerson: (...args: Array<unknown>) =>
+		mockModule.listOrganizationsForPerson(...args),
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
@@ -56,7 +63,7 @@ vi.mock('#app/frame-registry.ts', async (importOriginal) => {
 })
 
 const publicProfile = {
-	userId: 'stable-alice',
+	userId: ownerIdFromStored('stable-alice'),
 	username: 'alice',
 	displayName: 'Alice',
 	bio: 'Hello',
@@ -221,7 +228,7 @@ test('profile API respects visibility, ignores owner-only filters for guests, an
 	// Own private profile is visible to self, including private packages.
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		userId: 1,
-		mcpUser: { userId: 'stable-alice' },
+		mcpUser: { userId: ownerIdFromStored('stable-alice') },
 	})
 	mockModule.listPublicProfilePackages.mockResolvedValue([])
 	mockModule.getProfileActivity.mockResolvedValue([])
@@ -308,4 +315,63 @@ test('profile page shell embeds the person and the unfiltered package list, or 4
 		ok: false,
 		unavailable: true,
 	})
+})
+
+test('an organization handle is a home for everyone its switcher lists and a 404 for everyone else', async () => {
+	setupPublicProfileMocks()
+	mockModule.getCommunityProfileByUsername.mockResolvedValue(null)
+	mockModule.readAuthenticatedAppUser.mockResolvedValue({
+		userId: 1,
+		mcpUser: { userId: ownerIdFromStored('stable-alice') },
+	})
+	mockModule.listOrganizationsForPerson.mockResolvedValue([
+		{ slug: 'alice', displayName: null, role: 'owner', personal: true },
+		{ slug: 'acme', displayName: 'Acme', role: 'member', personal: false },
+		{ slug: 'globex', displayName: 'Globex', role: null, personal: false },
+	])
+
+	const member = await call(createProfileHandler, '/@acme', 'acme')
+	expect(member.status).toBe(200)
+	expect(member.body).toMatchObject({
+		title: 'Acme',
+		loaderData: { profileShell: { ok: false, unavailable: true } },
+	})
+	expect(mockModule.listOrganizationsForPerson).toHaveBeenCalledWith(
+		undefined,
+		'stable-alice',
+	)
+
+	const collaborator = await call(createProfileHandler, '/@globex', 'globex')
+	expect(collaborator.status).toBe(200)
+	expect(collaborator.body).toMatchObject({ title: 'Globex' })
+
+	const outsider = await call(createProfileHandler, '/@zeta', 'zeta')
+	expect(outsider.status).toBe(404)
+	expect(outsider.body).toMatchObject({ title: 'Profile unavailable' })
+})
+
+test('an organization home remembers the org as last used; a public profile does not', async () => {
+	setupPublicProfileMocks()
+	mockModule.readAuthenticatedAppUser.mockResolvedValue({
+		userId: 1,
+		mcpUser: { userId: ownerIdFromStored('stable-alice') },
+	})
+	mockModule.listOrganizationsForPerson.mockResolvedValue([
+		{ slug: 'alice', displayName: null, role: 'owner', personal: true },
+		{ slug: 'acme', displayName: 'Acme', role: 'member', personal: false },
+	])
+	const render = (username: string) =>
+		createProfileHandler(env).handler({
+			request: new Request(`https://example.com/@${username}`),
+			params: { username },
+			url: new URL(`https://example.com/@${username}`),
+		} as never)
+
+	expect((await render('alice')).headers.get('Set-Cookie')).toBeNull()
+
+	mockModule.getCommunityProfileByUsername.mockResolvedValue(null)
+	expect((await render('acme')).headers.get('Set-Cookie')).toContain(
+		'kody_last_org=acme',
+	)
+	expect((await render('zeta')).headers.get('Set-Cookie')).toBeNull()
 })

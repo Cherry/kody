@@ -1,9 +1,10 @@
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
 import { getUniqueConstraintField } from '#worker/database-errors.ts'
 import {
-	createRandomStableUserId,
-	createStableUserIdFromEmail,
-} from '#worker/user-id.ts'
+	mintPersonId,
+	type PersonId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export type EmailClaimStatus = 'claimed' | 'released'
 
@@ -21,7 +22,7 @@ export type FormerEmailClaim = {
 }
 
 export type AllocateSignupIdentityResult =
-	| { ok: true; stableUserId: string }
+	| { ok: true; stableUserId: PersonId }
 	| { ok: false; reason: 'current_email' | 'former_email_claimed' }
 
 export type ReleasableEmailClaimResult =
@@ -30,8 +31,6 @@ export type ReleasableEmailClaimResult =
 			ok: false
 			reason: 'current_email' | 'not_claimed' | 'already_released'
 	  }
-
-const randomStableUserIdAttempts = 8
 
 export async function findActiveEmailClaim(
 	db: D1Database,
@@ -83,27 +82,9 @@ export async function listFormerEmailClaims(
 	}))
 }
 
-export async function isEmailClaimReleased(db: D1Database, email: string) {
-	const normalized = normalizeEmail(email)
-	if (!normalized) return false
-	const active = await findActiveEmailClaim(db, normalized)
-	if (active) return false
-	const released = await db
-		.prepare(
-			`SELECT 1 AS present
-			 FROM user_email_claims
-			 WHERE email = ? AND status = 'released'
-			 LIMIT 1`,
-		)
-		.bind(normalized)
-		.first<{ present: number }>()
-	return Boolean(released)
-}
-
 /**
- * True when another account currently uses this address as login, holds an
- * active former-email claim, or still implicitly reserves sha256(email) as
- * `stable_user_id` and has not released it.
+ * True when another account currently uses this address as login or holds an
+ * active former-email claim.
  */
 export async function isEmailReservedForOtherAccount(
 	db: D1Database,
@@ -114,30 +95,18 @@ export async function isEmailReservedForOtherAccount(
 	if (!normalized) return false
 
 	const currentOwner = await db
-		.prepare(`SELECT id FROM users WHERE email = ?`)
+		.prepare(`SELECT id FROM users WHERE email = ?${andLiveDeletedAtSql()}`)
 		.bind(normalized)
 		.first<{ id: number }>()
 	if (currentOwner && currentOwner.id !== exceptUserId) return true
 
 	const active = await findActiveEmailClaim(db, normalized)
-	if (active && active.userId !== exceptUserId) return true
-
-	if (await isEmailClaimReleased(db, normalized)) return false
-
-	const hashedId = await createStableUserIdFromEmail(normalized)
-	const implicitHolder = await db
-		.prepare(`SELECT id, email FROM users WHERE stable_user_id = ?`)
-		.bind(hashedId)
-		.first<{ id: number; email: string }>()
-	if (!implicitHolder) return false
-	if (implicitHolder.id === exceptUserId) return false
-	return normalizeEmail(implicitHolder.email) !== normalized
+	return Boolean(active && active.userId !== exceptUserId)
 }
 
 export async function resolveReleasableEmailClaim(input: {
 	db: D1Database
 	userId: number
-	stableUserId: string
 	currentEmail: string
 	email: string
 }): Promise<ReleasableEmailClaimResult> {
@@ -164,11 +133,6 @@ export async function resolveReleasableEmailClaim(input: {
 		.bind(input.userId, email)
 		.first<{ present: number }>()
 	if (ownReleased) return { ok: false, reason: 'already_released' }
-
-	const implicitId = await createStableUserIdFromEmail(email)
-	if (implicitId === input.stableUserId) {
-		return { ok: true, email }
-	}
 	return { ok: false, reason: 'not_claimed' }
 }
 
@@ -292,32 +256,15 @@ export async function allocateSignupIdentity(
 	if (!normalized) return { ok: false, reason: 'current_email' }
 
 	const currentOwner = await db
-		.prepare(`SELECT id FROM users WHERE email = ?`)
+		.prepare(`SELECT id FROM users WHERE email = ?${andLiveDeletedAtSql()}`)
 		.bind(normalized)
 		.first<{ id: number }>()
 	if (currentOwner) return { ok: false, reason: 'current_email' }
 
-	const active = await findActiveEmailClaim(db, normalized)
-	if (active) return { ok: false, reason: 'former_email_claimed' }
-
-	const preferredId = await createStableUserIdFromEmail(normalized)
-	const existing = await db
-		.prepare(`SELECT id, email FROM users WHERE stable_user_id = ?`)
-		.bind(preferredId)
-		.first<{ id: number; email: string }>()
-	if (!existing) {
-		return { ok: true, stableUserId: preferredId }
+	if (await isEmailReservedForOtherAccount(db, normalized)) {
+		return { ok: false, reason: 'former_email_claimed' }
 	}
-	if (normalizeEmail(existing.email) === normalized) {
-		return { ok: false, reason: 'current_email' }
-	}
-	if (await isEmailClaimReleased(db, normalized)) {
-		return {
-			ok: true,
-			stableUserId: await createUnusedRandomStableUserId(db),
-		}
-	}
-	return { ok: false, reason: 'former_email_claimed' }
+	return { ok: true, stableUserId: mintPersonId() }
 }
 
 export class EmailClaimConflictError extends Error {
@@ -328,16 +275,4 @@ export class EmailClaimConflictError extends Error {
 		this.name = 'EmailClaimConflictError'
 		this.email = email
 	}
-}
-
-async function createUnusedRandomStableUserId(db: D1Database) {
-	for (let attempt = 0; attempt < randomStableUserIdAttempts; attempt++) {
-		const stableUserId = createRandomStableUserId()
-		const existing = await db
-			.prepare(`SELECT id FROM users WHERE stable_user_id = ?`)
-			.bind(stableUserId)
-			.first<{ id: number }>()
-		if (!existing) return stableUserId
-	}
-	throw new Error('Unable to allocate a unique stable_user_id')
 }

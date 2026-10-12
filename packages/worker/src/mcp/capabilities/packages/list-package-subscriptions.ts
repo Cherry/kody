@@ -1,13 +1,23 @@
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import {
+	checkPermission,
+	computeEffectivePermissions,
+	packageResource,
+} from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
 import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
 
 const packageSubscriptionSchema = z.object({
 	package_id: z.string(),
-	kody_id: z.string(),
+	kody_id: z.string().describe('Package name leaf (same value as `slug`).'),
+	slug: z.string().describe('Package name leaf (same value as `kody_id`).'),
 	name: z.string(),
 	topic: z.string(),
 	handler: z.string(),
@@ -19,8 +29,9 @@ export const listPackageSubscriptionsCapability = defineDomainCapability(
 	capabilityDomainNames.packages,
 	{
 		name: 'packageSubscriptionsList',
+		orgPermission: 'package:read',
 		description:
-			'List package.json#kody.subscriptions entries for the signed-in user, optionally filtered by exact event topic. Use this to discover package event handlers such as email receipt, delivery-update, repo.pushed / repo.created / repo.deleted Artifacts lifecycle notifiers, run.error.recorded activity notifiers, integration.auth.failed / integration.auth.succeeded reconnect notifiers, mcp.server.disconnected / mcp.server.reconnected connection episodes, community.fork.upstream_updated fork notifiers, admin platform-feedback, admin community-activity, admin community-listing-published, admin status-incident, admin fleet.package_error_rate.elevated, admin fleet.entitlement.crossed, admin auth.denial.burst, admin email.delivery.burst, admin user.created / user.deleted, admin user.email_verification.failed, admin user.email_verification.stalled, admin user.email_outbound.paused, or admin email.system-message.sent notification subscribers before debugging dispatch or building fan-out. Admin-only topics carry only their documented payload, and declaring one does not grant delivery; dispatch checks the package owner role fresh at delivery time.',
+			'List package.json#kody.subscriptions entries for the packages you can read in the org this connection is bound to, optionally filtered by exact event topic. Use this to discover package event handlers such as email receipt, delivery-update, repo.pushed / repo.created / repo.deleted Artifacts lifecycle notifiers, run.error.recorded activity notifiers, integration.auth.failed / integration.auth.succeeded reconnect notifiers, mcp.server.disconnected / mcp.server.reconnected connection episodes, community.fork.upstream_updated fork notifiers, admin platform-feedback, admin community-activity, admin community-listing-published, admin status-incident, admin fleet.package_error_rate.elevated, admin fleet.entitlement.crossed, admin auth.denial.burst, admin email.delivery.burst, admin user.created / user.deleted, admin user.email_verification.failed, admin user.email_verification.stalled, admin user.email_outbound.paused, or admin email.system-message.sent notification subscribers before debugging dispatch or building fan-out. Admin-only topics carry only their documented payload, and declaring one does not grant delivery; dispatch checks the package owner role fresh at delivery time.',
 		keywords: [
 			'package',
 			'package.json#kody.subscriptions',
@@ -50,6 +61,7 @@ export const listPackageSubscriptionsCapability = defineDomainCapability(
 			'community.activity.recorded',
 			'community activity recorded',
 			'community.listing.published',
+			'public package published',
 			'community listing published',
 			'community.fork.upstream_updated',
 			'fork upstream updated',
@@ -105,17 +117,26 @@ export const listPackageSubscriptionsCapability = defineDomainCapability(
 			subscriptions: z.array(packageSubscriptionSchema),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
-			const packages = await listSavedPackagesByUserId(ctx.env.APP_DB, {
-				userId: user.userId,
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			const access = await computeEffectivePermissions({
+				env: ctx.env,
+				request: requireMcpRequest(ctx.callerContext),
 			})
+			const packages = (
+				await listSavedPackagesByUserId(ctx.env.APP_DB, { userId: ownerId })
+			).filter(
+				(savedPackage) =>
+					checkPermission(access, 'package:read', packageResource(savedPackage))
+						.allowed,
+			)
 			const loadedManifests = await Promise.all(
 				packages.map(async (savedPackage) => ({
 					savedPackage,
 					loaded: await loadPackageManifestBySourceId({
 						env: ctx.env,
 						baseUrl: ctx.callerContext.baseUrl,
-						userId: user.userId,
+						userId: ownerId,
 						sourceId: savedPackage.sourceId,
 					}).catch((error) => {
 						console.warn('Failed to load package manifest for subscriptions', {
@@ -136,6 +157,7 @@ export const listPackageSubscriptionsCapability = defineDomainCapability(
 					subscriptions.push({
 						package_id: savedPackage.id,
 						kody_id: savedPackage.kodyId,
+						slug: savedPackage.kodyId,
 						name: savedPackage.name,
 						topic,
 						handler: definition.handler,

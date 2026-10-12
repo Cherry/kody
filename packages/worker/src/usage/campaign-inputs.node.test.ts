@@ -14,6 +14,7 @@ import {
 	isPackagedSingleClientTrialCtaLive,
 } from './campaign-states.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const now = new Date('2026-09-07T12:00:00.000Z')
 const noJobsEnv = { JOBS: { listJobsForUser: async () => [] } }
 
@@ -27,7 +28,7 @@ function makeCandidate(
 	overrides: Partial<UsageCampaignCandidate> = {},
 ): UsageCampaignCandidate {
 	return {
-		stable_user_id: 'user-stock',
+		stable_user_id: ownerIdFromStored('user-stock'),
 		username: 'stock',
 		email: 'stock@example.com',
 		email_verified_at: '2026-09-01T00:00:00.000Z',
@@ -85,9 +86,8 @@ test('near-cap reads use Standard overlays, not the stored free plan', async () 
 	sqlite
 		.prepare(
 			`INSERT INTO users (
-				username, email, password_hash, email_verified_at, stable_user_id,
-				plan, account_type
-			) VALUES ('stock', 'stock@example.com', 'x', ?, 'user-stock', 'free', 'person')`,
+				username, email, password_hash, email_verified_at, stable_user_id
+			) VALUES ('stock', 'stock@example.com', 'x', ?, 'user-stock')`,
 		)
 		.run('2026-09-01T00:00:00.000Z')
 	// Free 80% of 10 packages is 8; Standard 80% of 50 is 40.
@@ -150,7 +150,7 @@ test('execute rollup failures do not look like zero use', async () => {
 	const snapshot = await gatherUsageCampaignSnapshot({
 		env: { APP_DB: failingDb, ...noJobsEnv } as unknown as Env,
 		user: makeCandidate({
-			stable_user_id: 'user-exec',
+			stable_user_id: ownerIdFromStored('user-exec'),
 			username: 'exec',
 			email: 'exec@example.com',
 			first_mcp_connected_at: '2026-09-02T00:00:00.000Z',

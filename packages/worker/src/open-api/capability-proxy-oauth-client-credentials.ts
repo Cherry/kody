@@ -4,11 +4,8 @@ import {
 	type OAuthClientCredentialsInput,
 } from '#mcp/execute-modules/kody-runtime-utils.ts'
 import { secretAuthorityHeaderName } from '#mcp/secrets/secret-authority.ts'
-import {
-	collectShareStorageOwners,
-	retainAuthorizedPackageStorageGrantIds,
-} from '#worker/package-registry/share-grants.ts'
-import { createPackageStorageAccessDeniedMessage } from '#worker/storage-runner.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeLocalExecuteOwnedPackageId } from './capability-proxy-package-grants.ts'
 import { type ApiInvocationContext } from './context.ts'
 import { invalidRequest } from './errors.ts'
 
@@ -17,9 +14,9 @@ import { invalidRequest } from './errors.ts'
  * secret placeholders through the fetch gateway (same as cloud execute), so
  * client id/secret values never enter local workerd.
  *
- * Optional `packageId` is stamped saved-package identity (same provenance as
- * createAuthenticatedFetch / packageSecrets). It becomes the fetch-gateway
- * storage context and secret-authority grant.
+ * Optional `packageId` is a client stamp: origin verifies `package:execute`
+ * when present, but never grants secret authority from it. Local expansion
+ * requires `secret:use` like ad-hoc.
  */
 
 export type CapabilityProxyOauthClientCredentialsRequest =
@@ -111,20 +108,13 @@ async function authorizeOauthClientCredentialsPackageId(input: {
 	ctx: ApiInvocationContext
 	packageId: string
 }) {
-	const authorized = await retainAuthorizedPackageStorageGrantIds({
+	return await authorizeLocalExecuteOwnedPackageId({
 		db: input.ctx.env.APP_DB,
-		callerUserId: input.ctx.callerContext.user.userId,
-		packageIds: [input.packageId],
-		storageOwnerByPackageId: await collectShareStorageOwners({
-			db: input.ctx.env.APP_DB,
-			callerUserId: input.ctx.callerContext.user.userId,
-			packageIds: [input.packageId],
-		}),
+		env: input.ctx.env,
+		request: input.ctx.callerContext.request,
+		orgUserId: ownerIdFromCaller(input.ctx.callerContext),
+		packageId: input.packageId,
 	})
-	if (!authorized.has(input.packageId)) {
-		throw new Error(createPackageStorageAccessDeniedMessage(input.packageId))
-	}
-	return input.packageId
 }
 
 export async function runCapabilityProxyOauthClientCredentials(input: {
@@ -138,7 +128,8 @@ export async function runCapabilityProxyOauthClientCredentials(input: {
 			'oauthClientCredentials requires an authenticated user.',
 		)
 	}
-	const packageId = call.packageId
+	const orgUserId = ownerIdFromCaller(input.ctx.callerContext)
+	const stampedPackageId = call.packageId
 		? await authorizeOauthClientCredentialsPackageId({
 				ctx: input.ctx,
 				packageId: call.packageId,
@@ -148,37 +139,25 @@ export async function runCapabilityProxyOauthClientCredentials(input: {
 	const storageContext = {
 		sessionId: existingStorage?.sessionId ?? null,
 		appId: existingStorage?.appId ?? null,
-		packageId: packageId ?? existingStorage?.packageId ?? null,
+		packageId: null,
 		storageId: existingStorage?.storageId ?? null,
 	}
 	const { packageId: _ignoredPackageId, ...oauthInput } = call
 	const gatewayFetch: typeof fetch = async (requestInput, init) => {
 		const request = new Request(requestInput, init)
-		if (packageId) {
-			const headers = new Headers(request.headers)
-			headers.set(secretAuthorityHeaderName, packageId)
-			return executeGatewayFetch({
-				env: input.ctx.env,
-				props: {
-					baseUrl: input.ctx.callerContext.baseUrl,
-					userId: user.userId,
-					email: user.email,
-					storageContext,
-					grantedSecretAuthorityPackageIds: [packageId],
-				},
-				request: new Request(request, { headers }),
-				...(input.ctx.waitUntil ? { waitUntil: input.ctx.waitUntil } : {}),
-			})
-		}
+		const headers = new Headers(request.headers)
+		headers.delete(secretAuthorityHeaderName)
 		return executeGatewayFetch({
 			env: input.ctx.env,
 			props: {
 				baseUrl: input.ctx.callerContext.baseUrl,
-				userId: user.userId,
+				userId: orgUserId,
 				email: user.email,
+				request: input.ctx.callerContext.request,
 				storageContext,
+				claimedPackageId: stampedPackageId,
 			},
-			request,
+			request: new Request(request, { headers }),
 			...(input.ctx.waitUntil ? { waitUntil: input.ctx.waitUntil } : {}),
 		})
 	}

@@ -1,4 +1,5 @@
 import { type Handle, css } from 'remix/component'
+import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
 import { routes } from '#universal/routes.ts'
 import { formatTimestampDate } from '#client/format-timestamp.ts'
 import { on } from '#client/event-mixin.ts'
@@ -42,6 +43,9 @@ export function AccountPackageOwnerDetails(
 		ownerUsername: string
 		packageDetail: AccountPackageDetail
 		lockInFlight: boolean
+		viewerCanPublish: boolean
+		viewerCanDelete: boolean
+		viewerCanAdoptCommunityFork: boolean
 		onToggleLock: () => void
 		onPackagesPayload: (payload: AccountPackagesLoaderData) => void
 	}>,
@@ -105,7 +109,14 @@ export function AccountPackageOwnerDetails(
 	}
 
 	return () => {
-		const { packageDetail, lockInFlight, onToggleLock } = handle.props
+		const {
+			packageDetail,
+			lockInFlight,
+			onToggleLock,
+			viewerCanPublish,
+			viewerCanDelete,
+			viewerCanAdoptCommunityFork,
+		} = handle.props
 
 		return (
 			<div mix={css(recordBodyCss)} data-testid="package-owner-details">
@@ -196,77 +207,79 @@ export function AccountPackageOwnerDetails(
 						<span mix={css(statusBadgeCss)}>Not listed</span>
 					)}
 				</div>
-				<div
-					mix={css({ display: 'grid', gap: spacing.xs })}
-					data-testid="package-visibility-controls"
-				>
-					<p mix={css({ margin: 0, color: colors.textMuted })}>
-						{packageDetail.isPrivate
-							? 'Making this package public lists it on /community. Anyone can read and fork the default branch. Skim source, README, and examples for personal details first, then type the slug to confirm.'
-							: 'Making this package private unlists it from /community and 404s public URLs. Existing forks keep their copies. Type the slug to confirm.'}
-					</p>
-					<label mix={css({ display: 'grid', gap: spacing.xs })}>
-						<span mix={css(visuallyHiddenCss)}>
-							Type {packageDetail.kodyId} to change visibility
-						</span>
-						<input
-							value={confirmName}
-							placeholder={packageDetail.kodyId}
+				{viewerCanPublish ? (
+					<div
+						mix={css({ display: 'grid', gap: spacing.xs })}
+						data-testid="package-visibility-controls"
+					>
+						<p mix={css({ margin: 0, color: colors.textMuted })}>
+							{packageDetail.isPrivate
+								? 'Making this package public lists it on /community. Anyone can read and fork the default branch. Skim source, README, and examples for personal details first, then type the slug to confirm.'
+								: 'Making this package private unlists it from /community and 404s public URLs. Existing forks keep their copies. Type the slug to confirm.'}
+						</p>
+						<label mix={css({ display: 'grid', gap: spacing.xs })}>
+							<span mix={css(visuallyHiddenCss)}>
+								Type {packageDetail.kodyId} to change visibility
+							</span>
+							<input
+								value={confirmName}
+								placeholder={packageDetail.kodyId}
+								data-testid={
+									packageDetail.isPrivate
+										? 'package-make-public-confirm'
+										: 'package-make-private-confirm'
+								}
+								mix={[
+									css({
+										padding: spacing.sm,
+										borderRadius: radius.md,
+										border: `1px solid ${colors.border}`,
+										backgroundColor: colors.surface,
+										color: colors.text,
+									}),
+									on('input', (event) => {
+										if (!(event.currentTarget instanceof HTMLInputElement)) {
+											return
+										}
+										confirmName = event.currentTarget.value
+										handle.update()
+									}),
+								]}
+							/>
+						</label>
+						<button
+							type="button"
+							disabled={visibilityState === 'submitting'}
 							data-testid={
 								packageDetail.isPrivate
-									? 'package-make-public-confirm'
-									: 'package-make-private-confirm'
+									? 'package-make-public'
+									: 'package-make-private'
 							}
 							mix={[
-								css({
-									padding: spacing.sm,
-									borderRadius: radius.md,
-									border: `1px solid ${colors.border}`,
-									backgroundColor: colors.surface,
-									color: colors.text,
-								}),
-								on('input', (event) => {
-									if (!(event.currentTarget instanceof HTMLInputElement)) {
-										return
-									}
-									confirmName = event.currentTarget.value
-									handle.update()
-								}),
+								css(getGhostButtonCss()),
+								on(
+									'click',
+									() =>
+										void submitVisibility(
+											packageDetail,
+											packageDetail.isPrivate ? 'public' : 'private',
+										),
+								),
 							]}
-						/>
-					</label>
-					<button
-						type="button"
-						disabled={visibilityState === 'submitting'}
-						data-testid={
-							packageDetail.isPrivate
-								? 'package-make-public'
-								: 'package-make-private'
-						}
-						mix={[
-							css(getGhostButtonCss()),
-							on(
-								'click',
-								() =>
-									void submitVisibility(
-										packageDetail,
-										packageDetail.isPrivate ? 'public' : 'private',
-									),
-							),
-						]}
-					>
-						{visibilityState === 'submitting'
-							? 'Saving…'
-							: packageDetail.isPrivate
-								? 'Make public'
-								: 'Make private'}
-					</button>
-					{visibilityMessage ? (
-						<p mix={css({ margin: 0, color: colors.danger })} role="alert">
-							{visibilityMessage}
-						</p>
-					) : null}
-				</div>
+						>
+							{visibilityState === 'submitting'
+								? 'Saving…'
+								: packageDetail.isPrivate
+									? 'Make public'
+									: 'Make private'}
+						</button>
+						{visibilityMessage ? (
+							<p mix={css({ margin: 0, color: colors.danger })} role="alert">
+								{visibilityMessage}
+							</p>
+						) : null}
+					</div>
+				) : null}
 				{packageDetail.tags.length > 0 ? (
 					<RecordChips items={packageDetail.tags} />
 				) : null}
@@ -282,7 +295,22 @@ export function AccountPackageOwnerDetails(
 						},
 						{
 							label: 'App',
-							value: packageDetail.hasApp ? 'Declares a package app' : 'No app',
+							value: packageDetail.hasApp ? (
+								<a
+									href={buildPackageAppPath({
+										username: handle.props.ownerUsername,
+										kodyId: packageDetail.kodyId,
+									})}
+									data-testid="open-package-app"
+									data-rmx-document
+									mix={css(packageAppLinkCss)}
+								>
+									{renderIcon('share', { size: '1em' })}
+									Open Package App
+								</a>
+							) : (
+								'No app'
+							),
 						},
 						{
 							label: 'Source id',
@@ -337,17 +365,19 @@ export function AccountPackageOwnerDetails(
 						</div>
 					) : null}
 				</div>
-				{packageDetail.communityFork ? (
+				{viewerCanAdoptCommunityFork && packageDetail.communityFork ? (
 					<AccountPackageForkAdoption
 						packageDetail={packageDetail}
 						communityFork={packageDetail.communityFork}
 						onPackagesPayload={handle.props.onPackagesPayload}
 					/>
 				) : null}
-				<AccountPackageDeleteDialog
-					ownerUsername={handle.props.ownerUsername}
-					packageDetail={packageDetail}
-				/>
+				{viewerCanDelete ? (
+					<AccountPackageDeleteDialog
+						ownerUsername={handle.props.ownerUsername}
+						packageDetail={packageDetail}
+					/>
+				) : null}
 				{packageDetail.searchText ? (
 					<details mix={css(accountDisclosureCss)}>
 						<summary>Search text</summary>
@@ -427,4 +457,16 @@ const communityBadgeCss = {
 	border: 'none',
 	color: colors.primaryText,
 	fontWeight: typography.fontWeight.semibold,
+}
+
+const packageAppLinkCss = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	gap: '0.35rem',
+	color: colors.primaryText,
+	fontWeight: typography.fontWeight.semibold,
+	textDecoration: 'none',
+	'&:hover': {
+		color: colors.text,
+	},
 }

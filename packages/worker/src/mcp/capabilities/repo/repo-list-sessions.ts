@@ -1,7 +1,17 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import {
+	checkPermission,
+	computeEffectivePermissions,
+	packageResource,
+} from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { getSavedPackageById } from '#worker/package-registry/repo.ts'
 import { getEntitySourceByIdForUser } from '#worker/repo/entity-sources.ts'
 import {
@@ -30,7 +40,7 @@ function toResolvedSourceTarget(source: EntitySourceRow): RepoResolvedTarget {
 
 async function resolveListSessionTarget(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	source: EntitySourceRow
 }): Promise<RepoResolvedTarget> {
 	if (input.source.entity_kind === 'package') {
@@ -55,8 +65,9 @@ export const repoListSessionsCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoListSessions',
+		orgPermission: 'package:read',
 		description:
-			'List repo editing sessions for the signed-in user, defaulting to active sessions so agents can discover sessions to resume, inspect, publish, or discard without already knowing session ids.',
+			'List repo editing sessions in the org this connection is bound to, defaulting to active sessions so agents can discover sessions to resume, inspect, publish, or discard without already knowing session ids.',
 		keywords: [
 			'repo',
 			'session',
@@ -73,32 +84,50 @@ export const repoListSessionsCapability = defineDomainCapability(
 		inputSchema: repoListSessionsInputSchema,
 		outputSchema: repoListSessionsOutputSchema,
 		async handler(args, ctx): Promise<RepoListSessionsOutput> {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			const access = await computeEffectivePermissions({
+				env: ctx.env,
+				request: requireMcpRequest(ctx.callerContext),
+			})
 			const rows = args.source_id
 				? await listRepoSessionsBySource(ctx.env, {
-						userId: user.userId,
+						userId: ownerId,
 						sourceId: args.source_id,
 					})
-				: await listRepoSessionsByUser(ctx.env, user.userId)
+				: await listRepoSessionsByUser(ctx.env, ownerId)
 			const sessions: RepoListSessionsOutput['sessions'] = []
 			for (const row of rows) {
 				if (
-					row.user_id !== user.userId ||
+					row.user_id !== ownerId ||
 					(args.status !== 'all' && row.status !== args.status)
 				) {
 					continue
 				}
 				const source = await getEntitySourceByIdForUser(ctx.env.APP_DB, {
 					id: row.source_id,
-					userId: user.userId,
+					userId: ownerId,
 				})
-				if (!source) continue
+				if (
+					!source ||
+					(source.entity_kind === 'package' &&
+						!checkPermission(
+							access,
+							'package:read',
+							packageResource({
+								id: source.entity_id,
+								userId: source.user_id,
+							}),
+						).allowed)
+				) {
+					continue
+				}
 				sessions.push({
 					...toRepoSessionInfoResult(row, source),
 					status: row.status,
 					resolved_target: await resolveListSessionTarget({
 						db: ctx.env.APP_DB,
-						userId: user.userId,
+						userId: ownerId,
 						source,
 					}),
 				})

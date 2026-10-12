@@ -1,14 +1,24 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 
 const mockModule = vi.hoisted(() => ({
 	lockIntegrationToPackage: vi.fn(),
+	findIntegrationCredentialId: vi.fn(),
 }))
 
 vi.mock('#worker/integrations/service.ts', () => ({
 	lockIntegrationToPackage: (...args: Array<unknown>) =>
 		mockModule.lockIntegrationToPackage(...args),
+}))
+
+vi.mock('#worker/integrations/credentials.ts', () => ({
+	findIntegrationCredentialId: (...args: Array<unknown>) =>
+		mockModule.findIntegrationCredentialId(...args),
 }))
 
 const { integrationLockCapability } = await import('./integration-lock.ts')
@@ -18,15 +28,18 @@ test('integrationLock grants a package and rejects missing packages', async () =
 		name: 'google',
 		allowedPackageIds: ['pkg-drafts'],
 	})
+	mockModule.findIntegrationCredentialId.mockResolvedValue('cred-google')
 
 	const ctx = {
 		env: {} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.codes',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'alice@example.com',
 				displayName: 'Alice',
+				username: 'alice',
 			},
 		}),
 	}
@@ -40,11 +53,11 @@ test('integrationLock grants a package and rejects missing packages', async () =
 		name: 'google',
 		usage_mode: 'packages',
 		allowed_package_ids: ['pkg-drafts'],
-		usage_url: 'https://kody.codes/account/integrations/google',
+		usage_url: 'https://kody.codes/@alice/-/integrations/google',
 	})
 	expect(mockModule.lockIntegrationToPackage).toHaveBeenCalledWith({
 		env: ctx.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: 'google',
 		packageId: 'pkg-drafts',
 	})

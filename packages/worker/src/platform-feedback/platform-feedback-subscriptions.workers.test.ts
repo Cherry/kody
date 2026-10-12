@@ -5,18 +5,20 @@ import { exportRunRecords } from '#worker/run-records/service.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import {
 	assignAdminRole,
+	enableSubscriptionForOwner,
 	ensurePackageSubscriptionTestSchema,
 	ensureRbacTestSchema,
 	seedAccount,
 } from '#worker/test-support/workers-seed.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { platformFeedbackContentWarning } from './content-warning.ts'
 import { dispatchPlatformFeedbackSubmittedSubscriptionEvent } from './package-subscriptions.ts'
 import {
 	buildPlatformFeedbackSubmittedEvent,
 	platformFeedbackSubmittedTopic,
 } from './subscription-event.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const platformBaseUrl = 'https://kody.example.com'
 
 const openFeedback = {
@@ -61,7 +63,7 @@ async function ensurePlatformFeedbackTestSchema(db: D1Database) {
 async function seedUser(prefix: string) {
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`
 	const username = `${prefix.replace(/-/g, '')}-${crypto.randomUUID().slice(0, 8)}`
-	const stableId = await createStableUserIdFromEmail(email)
+	const stableId = testStableUserIdFromEmail(email)
 	const accountId = await seedAccount({ db: env.APP_DB, email, username })
 	return { email, username, stableId, accountId }
 }
@@ -110,6 +112,13 @@ async function seedSubscribedPackage(input: {
 		)
 		.bind(sourceId, input.userId, packageId, now, now)
 		.run()
+
+	const enablement = await enableSubscriptionForOwner({
+		db: env.APP_DB,
+		userId: input.userId,
+		packageId,
+		topic: platformFeedbackSubmittedTopic,
+	})
 
 	const manifest = {
 		name: `@${input.scope}/${kodyId}`,
@@ -207,7 +216,7 @@ export default async function main(input = {}) {
 			now,
 		)
 		.run()
-	return { packageId }
+	return { packageId, enablementId: enablement.id }
 }
 
 // Package subscription dispatch boots the real Worker Loader sandbox, which
@@ -315,10 +324,18 @@ test(
 
 			// The keyed idempotency ledger lives in each owner's RunLog DO now.
 			const adminInvocations = (
-				await exportRunRecords({ env, userId: adminStableId, pageSize: 100 })
+				await exportRunRecords({
+					env,
+					userId: ownerIdFromStored(adminStableId),
+					pageSize: 100,
+				})
 			).packageInvocations
 			const regularInvocations = (
-				await exportRunRecords({ env, userId: regularStableId, pageSize: 100 })
+				await exportRunRecords({
+					env,
+					userId: ownerIdFromStored(regularStableId),
+					pageSize: 100,
+				})
 			).packageInvocations
 			expect(adminInvocations).toHaveLength(2)
 			for (const adminPackage of [firstAdminPackage, secondAdminPackage]) {
@@ -331,7 +348,7 @@ test(
 					exportName: `subscription:${platformFeedbackSubmittedTopic}`,
 					topic: platformFeedbackSubmittedTopic,
 					source: 'platform-feedback',
-					idempotencyKey: `platform-feedback:${dispatchFeedback.id}:${adminPackage.packageId}:${platformFeedbackSubmittedTopic}`,
+					idempotencyKey: `platform-feedback:${dispatchFeedback.id}:${adminPackage.packageId}:${platformFeedbackSubmittedTopic}:enablement:${adminPackage.enablementId}`,
 				})
 				const responseJson = invocation?.responseJson
 				if (!responseJson) {
@@ -372,7 +389,11 @@ test(
 			const countInvocations = async () => {
 				const pages = await Promise.all(
 					[adminStableId, regularStableId].map((userId) =>
-						exportRunRecords({ env, userId, pageSize: 100 }),
+						exportRunRecords({
+							env,
+							userId: ownerIdFromStored(userId),
+							pageSize: 100,
+						}),
 					),
 				)
 				return pages.reduce(

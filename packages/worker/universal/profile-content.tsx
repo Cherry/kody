@@ -49,7 +49,8 @@ import {
 export type ProfileContentProps = {
 	profile: PublicCommunityProfile
 	packages: Array<PublicProfilePackageItem>
-	activity: Array<PublicCommunityActivityItem>
+	/** Null omits the activity section (no feed source). An empty array still renders it. */
+	activity: Array<PublicCommunityActivityItem> | null
 	query: string | null
 	visibility?: ProfilePackageVisibilityFilter
 	listing?: ProfilePackageListingFilter
@@ -61,6 +62,8 @@ export type ProfileContentProps = {
 	isSelf: boolean
 	/** Server already applied `q` (capped inventory). Do not AND-filter again. */
 	queryAppliedByLoader?: boolean
+	/** Filter links stay on this page instead of the public profile. */
+	basePath?: string
 }
 
 function renderForkIcon() {
@@ -153,11 +156,12 @@ function renderProfileFilterNav<Filter extends string>(input: {
  */
 function renderProfilePackageFilters(input: {
 	username: string
+	basePath: string | undefined
 	filters: ProfilePackageFilters
 	isSelf: boolean
 	filtersActive: boolean
 }) {
-	const { username, filters, isSelf } = input
+	const { username, basePath, filters, isSelf } = input
 	const listingChoices: Array<
 		ProfileFilterChoice<ProfilePackageListingFilter>
 	> = [
@@ -193,7 +197,12 @@ function renderProfilePackageFilters(input: {
 								{ value: 'private', label: 'Private' },
 							],
 							hrefFor: (visibility) =>
-								buildProfileHref({ username, ...filters, visibility }),
+								buildProfileHref({
+									username,
+									basePath,
+									...filters,
+									visibility,
+								}),
 						})
 					: null}
 				{renderProfileFilterNav<ProfilePackageListingFilter>({
@@ -204,7 +213,7 @@ function renderProfilePackageFilters(input: {
 					selected: filters.listing,
 					choices: listingChoices,
 					hrefFor: (listing) =>
-						buildProfileHref({ username, ...filters, listing }),
+						buildProfileHref({ username, basePath, ...filters, listing }),
 				})}
 				{isSelf
 					? renderProfileFilterNav<ProfilePackageHiddenFilter>({
@@ -218,7 +227,7 @@ function renderProfilePackageFilters(input: {
 								{ value: 'no', label: 'Visible' },
 							],
 							hrefFor: (hidden) =>
-								buildProfileHref({ username, ...filters, hidden }),
+								buildProfileHref({ username, basePath, ...filters, hidden }),
 						})
 					: null}
 				{renderProfileFilterNav<ProfilePackagePresenceFilter>({
@@ -234,6 +243,7 @@ function renderProfilePackageFilters(input: {
 					hrefFor: (packagePresence) =>
 						buildProfileHref({
 							username,
+							basePath,
 							...filters,
 							package: packagePresence,
 						}),
@@ -248,7 +258,8 @@ function renderProfilePackageFilters(input: {
 						{ value: 'yes', label: 'Has app' },
 						{ value: 'no', label: 'No app' },
 					],
-					hrefFor: (app) => buildProfileHref({ username, ...filters, app }),
+					hrefFor: (app) =>
+						buildProfileHref({ username, basePath, ...filters, app }),
 				})}
 				{renderProfileFilterNav<ProfilePackageSort>({
 					label: 'Sort',
@@ -263,6 +274,7 @@ function renderProfilePackageFilters(input: {
 					hrefFor: (sort) =>
 						buildProfileHref({
 							username,
+							basePath,
 							...filters,
 							sort,
 							dir: defaultProfilePackageSortDirection(sort),
@@ -277,7 +289,8 @@ function renderProfilePackageFilters(input: {
 						{ value: 'asc', label: 'Ascending' },
 						{ value: 'desc', label: 'Descending' },
 					],
-					hrefFor: (dir) => buildProfileHref({ username, ...filters, dir }),
+					hrefFor: (dir) =>
+						buildProfileHref({ username, basePath, ...filters, dir }),
 				})}
 			</div>
 		</details>
@@ -392,6 +405,7 @@ export function ProfileContent(handle: Handle<ProfileContentProps>) {
 					{showFilters
 						? renderProfilePackageFilters({
 								username: profile.username,
+								basePath: handle.props.basePath,
 								filters,
 								isSelf,
 								filtersActive: toolbarActive,
@@ -409,10 +423,13 @@ export function ProfileContent(handle: Handle<ProfileContentProps>) {
 					) : (
 						<ul mix={css(packageListCss)}>
 							{visiblePackages.map((pkg) => {
-								const packageHref = routes.communityPackage.href({
-									username: profile.username,
-									kodyId: pkg.communityListingKodyId ?? pkg.kodyId,
-								})
+								const canOpenDetail = pkg.canOpenDetail !== false
+								const packageHref = canOpenDetail
+									? routes.communityPackage.href({
+											username: profile.username,
+											kodyId: pkg.communityListingKodyId ?? pkg.kodyId,
+										})
+									: null
 								const listingHref = pkg.communityListingId
 									? getCommunityListingHref({
 											listingId: pkg.communityListingId,
@@ -441,9 +458,15 @@ export function ProfileContent(handle: Handle<ProfileContentProps>) {
 													</a>
 												) : null}
 												<h3 mix={css(packageNameCss)}>
-													<a href={packageHref} mix={css(packageNameLinkCss)}>
-														{renderCommunityListingName(pkg.name)}
-													</a>
+													{packageHref ? (
+														<a href={packageHref} mix={css(packageNameLinkCss)}>
+															{renderCommunityListingName(pkg.name)}
+														</a>
+													) : (
+														<span data-testid="profile-package-name-nolink">
+															{renderCommunityListingName(pkg.name)}
+														</span>
+													)}
 												</h3>
 												{renderProfilePackageSignifiers(pkg)}
 											</div>
@@ -470,53 +493,55 @@ export function ProfileContent(handle: Handle<ProfileContentProps>) {
 					)}
 				</section>
 
-				<section mix={css(activitySectionCss)} data-testid="profile-activity">
-					<h2 mix={css(sectionTitleCss)}>Recent activity</h2>
-					<p mix={css(mutedCss)} data-testid="profile-activity-hint">
-						Community publishes and forks. Editing a repository without
-						republishing it does not appear here.
-					</p>
-					{activity.length === 0 ? (
-						<p mix={css(descriptionCss)}>No public activity yet.</p>
-					) : (
-						<ul mix={css(activityListCss)}>
-							{activity.map((item) => (
-								<li
-									key={`${item.type}:${item.listingId}:${item.createdAt}`}
-									mix={css(activityItemCss)}
-								>
-									<span mix={css(activityActorCss)}>
-										<UserAvatar
-											displayName={item.actorDisplayName}
-											avatarUrl={item.actorAvatarUrl}
-											size={32}
-										/>
-										<span>
-											{communityActivityVerb(item.type)}{' '}
-											<a
-												href={getCommunityListingHref({
-													listingId: item.listingId,
-													listingName: item.listingName,
-													kodyId: item.listingKodyId,
-												})}
-												mix={css(mutedLinkCss)}
-											>
-												{item.listingName}
-											</a>
-										</span>
-									</span>
-									<time
-										dateTime={item.createdAt}
-										mix={css(mutedCss)}
-										title={item.createdAt}
+				{activity == null ? null : (
+					<section mix={css(activitySectionCss)} data-testid="profile-activity">
+						<h2 mix={css(sectionTitleCss)}>Recent activity</h2>
+						<p mix={css(mutedCss)} data-testid="profile-activity-hint">
+							Community publishes and forks. Editing a repository without
+							republishing it does not appear here.
+						</p>
+						{activity.length === 0 ? (
+							<p mix={css(descriptionCss)}>No public activity yet.</p>
+						) : (
+							<ul mix={css(activityListCss)}>
+								{activity.map((item) => (
+									<li
+										key={`${item.type}:${item.listingId}:${item.createdAt}`}
+										mix={css(activityItemCss)}
 									>
-										{formatCommunityActivityDate(item.createdAt)}
-									</time>
-								</li>
-							))}
-						</ul>
-					)}
-				</section>
+										<span mix={css(activityActorCss)}>
+											<UserAvatar
+												displayName={item.actorDisplayName}
+												avatarUrl={item.actorAvatarUrl}
+												size={32}
+											/>
+											<span>
+												{communityActivityVerb(item.type)}{' '}
+												<a
+													href={getCommunityListingHref({
+														listingId: item.listingId,
+														listingName: item.listingName,
+														kodyId: item.listingKodyId,
+													})}
+													mix={css(mutedLinkCss)}
+												>
+													{item.listingName}
+												</a>
+											</span>
+										</span>
+										<time
+											dateTime={item.createdAt}
+											mix={css(mutedCss)}
+											title={item.createdAt}
+										>
+											{formatCommunityActivityDate(item.createdAt)}
+										</time>
+									</li>
+								))}
+							</ul>
+						)}
+					</section>
+				)}
 			</div>
 		)
 	}

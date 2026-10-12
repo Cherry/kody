@@ -10,6 +10,8 @@ import {
 } from '@kody-internal/shared/account-secret-route.ts'
 import { normalizeSecretExpiresAt } from '@kody-internal/shared/secret-expires-at.ts'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 import {
 	routeLoaderRedirect,
 	type RouteLoaderResult,
@@ -257,23 +259,27 @@ export function buildSecretHref(
 		packageId: string | null
 	},
 	search: string,
+	currentHref = '',
 ) {
-	return buildSecretsHref(
-		buildAccountSecretPath({
-			name: secret.name,
-			scope: secret.scope,
-			packageId: secret.packageId,
-		}),
-		search,
+	return relocateAccountHref(
+		buildSecretsHref(
+			buildAccountSecretPath({
+				name: secret.name,
+				scope: secret.scope,
+				packageId: secret.packageId,
+			}),
+			search,
+		),
+		currentHref,
 	)
 }
 
-export function buildNewSecretHref(search = '') {
-	return secretsRoute.buildNewHref(search)
+export function buildNewSecretHref(search = '', currentHref = '') {
+	return secretsRoute.buildNewHref(search, currentHref)
 }
 
-export function buildBaseSecretsHref(search = '') {
-	return secretsRoute.buildListHref(search)
+export function buildBaseSecretsHref(search = '', currentHref = '') {
+	return secretsRoute.buildListHref(search, currentHref)
 }
 
 export function getDataRefreshKey(href: string) {
@@ -293,7 +299,7 @@ export function getDataRefreshKey(href: string) {
 	return `${url.pathname}?allowed-host=${requestedHost}&package_id=${requestedPackageId}&names=${requestedNames}&new-secret=${newSecretQuery}`
 }
 
-export function buildSecretsApiRequestUrl(href: string) {
+function buildSecretsApiRequestUrl(href: string) {
 	const pageUrl = new URL(href, 'http://localhost')
 	const selection = secretsRoute.getSelection(href)
 	const requestUrl = new URL(accountSecretsApiPath, 'http://localhost')
@@ -306,24 +312,42 @@ export function buildSecretsApiRequestUrl(href: string) {
 	return requestUrl
 }
 
-export async function accountSecretsRouteLoader(
-	url: URL,
+/** `/account/secrets.json` for the page at `href`, or null when signed out. */
+export async function fetchAccountSecretsPayload(
+	href: string,
 	signal: AbortSignal,
-): Promise<RouteLoaderResult> {
-	const href = `${url.pathname}${url.search}`
+) {
 	const requestUrl = buildSecretsApiRequestUrl(href)
 	const response = await fetch(`${requestUrl.pathname}${requestUrl.search}`, {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(href),
 		signal,
 	})
-	if (response.status === 401) {
-		return routeLoaderRedirect('/login')
-	}
+	if (response.status === 401) return null
 	const payload = await readJson<AccountSecretsLoaderData>(response)
 	if (!response.ok || !payload?.ok) {
 		throw new Error('Unable to load your secrets.')
 	}
+	return payload
+}
+
+export async function accountSecretsRouteLoader(
+	url: URL,
+	signal: AbortSignal,
+): Promise<RouteLoaderResult> {
+	const prefillName = url.searchParams.get('name')?.trim()
+	if (
+		accountAliasPath(url.pathname) === '/account/secrets/new' &&
+		prefillName
+	) {
+		return routeLoaderRedirect(`/connect/secret-set${url.search}`)
+	}
+	const payload = await fetchAccountSecretsPayload(
+		`${url.pathname}${url.search}`,
+		signal,
+	)
+	if (!payload) return routeLoaderRedirect('/login')
 	return { accountSecrets: payload }
 }
 

@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeRepoSessionPackageWrite } from './authorize-repo-session-package.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { repoCommitInputSchema, repoCommitOutputSchema } from './repo-shared.ts'
 
@@ -12,6 +14,7 @@ export const repoCommitCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoCommit',
+		orgPermission: 'package:write',
 		description: [
 			'Stage all session workspace changes and create a git commit with the given message.',
 			fileLevelApiNote,
@@ -24,10 +27,17 @@ export const repoCommitCapability = defineDomainCapability(
 		inputSchema: repoCommitInputSchema,
 		outputSchema: repoCommitOutputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageWrite({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			return repoSessionRpc(ctx.env, args.session_id).sessionCommit({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: ownerId,
 				message: args.message,
 			})
 		},

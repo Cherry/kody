@@ -1,9 +1,17 @@
-import { redactApiTokens } from '@kody-internal/shared/api-token-format.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import {
+	redactKodyCredentials,
+	redactKodyCredentialsDeep,
+} from '@kody-internal/shared/api-token-format.ts'
 import {
 	getErrorCauseChain,
 	getErrorMessage,
 } from '@kody-internal/shared/error-message.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
+import {
+	AuthorizationError,
+	LivePersonRequiredError,
+} from '#worker/authorization/authorize.ts'
 import {
 	AccountDeletionInProgressError,
 	AccountWriteLeaseLostError,
@@ -13,6 +21,14 @@ import {
 	isEntitlementLimitError,
 	isJobIntervalFloorError,
 } from '#worker/entitlements/errors.ts'
+import {
+	ArtifactsGitUnavailableError,
+	artifactsGitTemporarilyUnavailableMessage,
+	isArtifactsGitTransientRemapError,
+	toArtifactsGitUnavailableError,
+} from '#worker/repo/artifacts-git-retry.ts'
+
+export { artifactsGitTemporarilyUnavailableMessage }
 
 export const apiErrorCodes = [
 	'invalid_request',
@@ -55,7 +71,7 @@ export class ApiError extends Error {
 	 * Owning user for observe-only metering when auth fails before
 	 * `invokeApiOperation`. Never serialized to clients.
 	 */
-	readonly meteringUserId?: string
+	readonly meteringUserId?: OwnerId
 
 	constructor(input: {
 		status: number
@@ -63,9 +79,13 @@ export class ApiError extends Error {
 		message: string
 		details?: unknown
 		headers?: Record<string, string>
-		meteringUserId?: string
+		meteringUserId?: OwnerId
+		cause?: unknown
 	}) {
-		super(input.message)
+		super(
+			input.message,
+			input.cause === undefined ? undefined : { cause: input.cause },
+		)
 		this.name = 'ApiError'
 		this.status = input.status
 		this.code = input.code
@@ -78,8 +98,10 @@ export class ApiError extends Error {
 		return {
 			error: {
 				code: this.code,
-				message: redactApiTokens(this.message),
-				...(this.details === undefined ? {} : { details: this.details }),
+				message: redactKodyCredentials(this.message),
+				...(this.details === undefined
+					? {}
+					: { details: redactKodyCredentialsDeep(this.details) }),
 			},
 		}
 	}
@@ -101,16 +123,58 @@ export function notFound(message: string) {
 /**
  * Map a thrown value to the public error envelope. Caller errors become
  * 400 (or 404 when they say something was not found); unknown errors are
- * 500 with a generic message so internals never leak.
+ * 500 with a generic message so internals never leak. Exhausted Artifacts
+ * git unavailability is 503 `internal_error` with a report id and upstream
+ * status class in the message/details (closed OpenAPI code enum — no new
+ * public code).
  */
 export function toApiError(error: unknown): ApiError {
 	if (error instanceof ApiError) return error
+	if (error instanceof AuthorizationError) {
+		if (error.code === 'unauthenticated') {
+			return new ApiError({
+				status: 401,
+				code: 'unauthorized',
+				message: error.message,
+				cause: error,
+			})
+		}
+		return new ApiError({
+			status: 403,
+			code: 'insufficient_scope',
+			message: error.message,
+			details: {
+				required_permission: error.permission,
+				denial: error.code,
+				...(error.mintScopes
+					? { required_scope: error.permission, mint_scopes: error.mintScopes }
+					: {}),
+			},
+			headers: {
+				'WWW-Authenticate': `Bearer error="insufficient_scope", scope="${error.permission}"`,
+			},
+			cause: error,
+		})
+	}
+	if (error instanceof LivePersonRequiredError) {
+		return new ApiError({
+			status: 403,
+			code: 'insufficient_scope',
+			message: error.message,
+			details: {
+				capability: error.capabilityName,
+				denial: 'live_person_required',
+			},
+			cause: error,
+		})
+	}
 	if (error instanceof AccountDeletionInProgressError) {
 		return new ApiError({
 			status: 409,
 			code: 'account_deleting',
 			message:
 				'Account deletion is in progress; user-owned writes are disabled.',
+			cause: error,
 		})
 	}
 	if (error instanceof AccountWriteLeaseLostError) {
@@ -119,6 +183,7 @@ export function toApiError(error: unknown): ApiError {
 			code: 'account_deleting',
 			message:
 				'Account deletion is in progress; retry after the current write finishes.',
+			cause: error,
 		})
 	}
 	const limitError = getErrorCauseChain(error).find(
@@ -131,6 +196,7 @@ export function toApiError(error: unknown): ApiError {
 			code: 'entitlement_limit',
 			message: getErrorMessage(limitError),
 			details: limitError.details,
+			cause: error,
 		})
 	}
 	if (isMcpCallerError(error) || isJobIntervalFloorError(error)) {
@@ -139,10 +205,24 @@ export function toApiError(error: unknown): ApiError {
 			? notFound(message)
 			: invalidRequest(message)
 	}
+	if (
+		error instanceof ArtifactsGitUnavailableError ||
+		isArtifactsGitTransientRemapError(error)
+	) {
+		const unavailable = toArtifactsGitUnavailableError(error)
+		return new ApiError({
+			status: 503,
+			code: 'internal_error',
+			message: unavailable.message,
+			details: unavailable.toApiDetails(),
+			cause: unavailable,
+		})
+	}
 	return new ApiError({
 		status: 500,
 		code: 'internal_error',
 		message: 'Internal error. Retry later or report it if it persists.',
+		cause: error,
 	})
 }
 

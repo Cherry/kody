@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi, beforeEach } from 'vitest'
 import type * as PublishedBundleArtifactsModule from './published-bundle-artifacts.ts'
 import {
@@ -17,15 +18,9 @@ import {
 	runtimeModulePath,
 } from './module-graph-paths.ts'
 
-vi.mock('#worker/package-registry/scope-grants.ts', () => ({
-	getPlatformAccountByUsername: mockModule.getPlatformAccountByUsername,
-	isPlatformAccountStableUserId: async () => false,
-	listPlatformAccountUsernames: async () => [],
-}))
-
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageByName(...args),
 }))
@@ -48,13 +43,12 @@ vi.mock('./published-bundle-artifacts.ts', async () => {
 
 beforeEach(() => {
 	vi.clearAllMocks()
-	mockModule.getPlatformAccountByUsername.mockResolvedValue(null)
 })
 
 const graphInput = {
 	env: { APP_DB: {}, REPO_SESSION: {} } as Env,
 	baseUrl: 'https://heykody.dev',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 }
 
 const examplePackage = {
@@ -62,23 +56,18 @@ const examplePackage = {
 	kodyId: 'example-package',
 }
 
-function manifestJson(input: {
-	name: string
-	kodyId: string
-	exports: Record<string, string>
-}) {
-	return JSON.stringify({
-		name: input.name,
-		exports: input.exports,
-		kody: { id: input.kodyId, description: 'Example package' },
-	})
-}
-
 function makeLoadedSource(input: {
 	exports: Record<string, string>
 	files: Record<string, string>
 	publishedCommit?: string | null
+	dependencies?: Record<string, string>
 }) {
+	const packageJson = JSON.stringify({
+		name: examplePackage.name,
+		exports: input.exports,
+		...(input.dependencies ? { dependencies: input.dependencies } : {}),
+		kody: { id: examplePackage.kodyId, description: 'Example package' },
+	})
 	return {
 		source: {
 			id: 'source-1',
@@ -88,12 +77,10 @@ function makeLoadedSource(input: {
 			name: examplePackage.name,
 			exports: input.exports,
 			kody: { id: examplePackage.kodyId, description: 'Example package' },
+			...(input.dependencies ? { dependencies: input.dependencies } : {}),
 		},
 		files: {
-			'package.json': manifestJson({
-				...examplePackage,
-				exports: input.exports,
-			}),
+			'package.json': packageJson,
 			...input.files,
 		},
 	}
@@ -266,6 +253,122 @@ export default async function main() { return await smokeTest() }`,
 	)
 })
 
+test('buildLocalExecutePackageGraph rewrites user-secret placeholders onto gateway fetch', async () => {
+	const packageId = 'pkg-1'
+	mockModule.getSavedPackageByName.mockResolvedValue(createSavedPackageRecord())
+	mockModule.loadPackageSourceBySourceId.mockResolvedValue(
+		makeLoadedSource({
+			exports: { '.': './src/index.ts' },
+			files: {
+				'src/index.ts': `const SECRET_API_TOKEN = '{{secret:demoAnalyticsToken|scope=user}}'
+export async function listSites() {
+  return fetch('https://api.usefathom.com/v1/sites', {
+    headers: { authorization: 'Bearer ' + SECRET_API_TOKEN },
+  })
+}
+export default listSites`,
+			},
+		}),
+	)
+	mockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(
+		makeArtifactHit({
+			artifactName: '.',
+			entryPoint: 'src/index.ts',
+			mainModule: 'dist/index.js',
+			modules: {
+				'dist/index.js': `const SECRET_API_TOKEN = '{{secret:demoAnalyticsToken|scope=user}}';
+export async function listSites() {
+  return fetch("https://api.usefathom.com/v1/sites", {
+    headers: { authorization: "Bearer " + SECRET_API_TOKEN }
+  });
+}
+export default listSites;
+`,
+			},
+		}),
+	)
+
+	const graph = await buildLocalExecutePackageGraph({
+		...graphInput,
+		code: `import { listSites } from 'kody:@kentcdodds/example-package'
+export default async function main() { return await listSites() }`,
+	})
+
+	const bundle = graph.modules.find((module) =>
+		module.name.endsWith('/dist/index.js'),
+	)
+	expect(bundle).toBeDefined()
+	expect(bundle?.esModule).not.toContain(
+		'{{secret:demoAnalyticsToken|scope=user}}',
+	)
+	expect(bundle?.esModule).toContain(
+		'__kodySecretRef("demoAnalyticsToken", "user")',
+	)
+	expect(bundle?.esModule).toContain('__kodyCreatePackageBoundGatewayFetch')
+	expect(bundle?.esModule).toContain(JSON.stringify(packageId))
+	const runtimeShim = graph.modules.find(
+		(module) => module.name === '.__kody_virtual__/runtime.js',
+	)?.esModule
+	expect(runtimeShim).toContain('__kodyGatewayFetch')
+	expect(runtimeShim).toContain('kody.gatewayFetch')
+})
+
+test('buildLocalExecutePackageGraph imports free nested meter helper for inlined callees', async () => {
+	const nestedPackageId = '41095c29-4539-4f2f-a6fb-646348602c18'
+	mockModule.getSavedPackageByName.mockResolvedValue(createSavedPackageRecord())
+	mockModule.loadPackageSourceBySourceId.mockResolvedValue(
+		makeLoadedSource({
+			exports: { './advance': './src/advance.ts' },
+			files: {
+				'src/advance.ts': `export default async function advance() { return null }`,
+			},
+		}),
+	)
+	mockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(
+		makeArtifactHit({
+			artifactName: './advance',
+			entryPoint: 'src/advance.ts',
+			mainModule: 'dist/advance.js',
+			modules: {
+				'dist/advance.js': `var DISCORD_BOT_AUTHORIZATION = "Bot {{secret:discordBotTokenKentPersonalAutomation}}";
+async function discordFetch(path, init) {
+  const headers = new Headers(init.headers || {});
+  headers.set("Authorization", DISCORD_BOT_AUTHORIZATION);
+  return fetch("https://discord.com/api/v10" + path, { ...init, headers });
+}
+var editMessage = __kodyMeterStaticPackageExport(${JSON.stringify(nestedPackageId)}, async function edit() {
+  return discordFetch("/channels/1/messages/2", { method: "PATCH", body: "{}" });
+});
+export default async function advance() {
+  return editMessage({ dryRun: true });
+}
+`,
+			},
+		}),
+	)
+
+	const graph = await buildLocalExecutePackageGraph({
+		...graphInput,
+		code: `import advance from 'kody:@kentcdodds/example-package/advance'
+export default async function main() { return await advance() }`,
+	})
+
+	const bundle = graph.modules.find((module) =>
+		module.name.endsWith('/dist/advance.js'),
+	)
+	expect(bundle).toBeDefined()
+	expect(bundle?.esModule).toMatch(
+		/import\s*\{[^}]*__kodyMeterStaticPackageExport[^}]*\}/,
+	)
+	expect(bundle?.esModule).toContain(
+		`__kodyMeterStaticPackageExport(${JSON.stringify(nestedPackageId)}`,
+	)
+	expect(bundle?.esModule).toContain('__kodyCreatePackageBoundGatewayFetch')
+	expect(bundle?.esModule).toMatch(
+		/__kodyCreatePackageBoundGatewayFetch\("pkg-1"\)/,
+	)
+})
+
 test('local secretHeaders.basic parses opaque {{secret:…}} refs like cloud', () => {
 	const shim = createLocalExecuteRuntimeShimSource(runtimeModulePath)
 	const start = shim.indexOf('const __kodyParseSecretNameOrPlaceholder')
@@ -297,12 +400,718 @@ test('local secretHeaders.basic parses opaque {{secret:…}} refs like cloud', (
 	)
 })
 
+test('local gateway fetch hops scoped secrets and preserves ambient body metadata', async () => {
+	const shim = createLocalExecuteRuntimeShimSource(runtimeModulePath)
+	const start = shim.indexOf('const __kodyNullBodyStatuses')
+	const end = shim.indexOf('export function __kodyCreatePackageBoundStorage')
+	expect(start).toBeGreaterThan(-1)
+	expect(end).toBeGreaterThan(start)
+	const helpersSource = shim.slice(start, end).replaceAll(/^export /gm, '')
+	const ambientCalls: Array<{ input: unknown; init: unknown }> = []
+	const gatewayCalls: Array<unknown> = []
+	const kody = {
+		gatewayFetch: async (args: unknown) => {
+			gatewayCalls.push(args)
+			return {
+				status: 200,
+				statusText: 'OK',
+				headers: {},
+				bodyBase64: btoa('gw'),
+			}
+		},
+	}
+	const originalFetch = globalThis.fetch
+	globalThis.fetch = (async (input: unknown, init?: unknown) => {
+		ambientCalls.push({ input, init })
+		return new Response('ambient')
+	}) as typeof fetch
+	try {
+		const { __kodyGatewayFetch } = new Function(
+			'kody',
+			`${helpersSource}; return { __kodyGatewayFetch };`,
+		)(kody) as {
+			__kodyGatewayFetch: (
+				input: RequestInfo | URL,
+				init?: RequestInit,
+			) => Promise<Response>
+		}
+
+		await __kodyGatewayFetch('https://api.example.com/v1', {
+			headers: {
+				authorization: 'Bearer {{secret:demoToken|scope=user}}',
+			},
+		})
+		expect(gatewayCalls).toHaveLength(1)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://api.example.com/v1',
+				headers: {
+					authorization: 'Bearer {{secret:demoToken|scope=user}}',
+				},
+			},
+		})
+
+		gatewayCalls.length = 0
+		await __kodyGatewayFetch(
+			new Request('https://api.example.com/bot{{secret:demoToken}}/me'),
+		)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(1)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://api.example.com/bot%7B%7Bsecret:demoToken%7D%7D/me',
+			},
+		})
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: 'plain-text-body',
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls).toHaveLength(1)
+		// Reuse original init so ambient fetch keeps implicit Content-Type.
+		expect(ambientCalls[0]?.input).toBe('https://api.example.com/post')
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe('plain-text-body')
+
+		// A large upload without placeholders is scanned in place and sent as
+		// the caller's own body, not a buffered copy.
+		ambientCalls.length = 0
+		const largeUpload = new Blob(['x'.repeat(3 * 1024 * 1024)], {
+			type: 'application/octet-stream',
+		})
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'PUT',
+			body: largeUpload,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(largeUpload)
+
+		// A placeholder straddling a scan chunk boundary still hops.
+		const straddling = new TextEncoder().encode(
+			`${'x'.repeat(64 * 1024 - 5)}{{secret:demoToken}}`,
+		)
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'PUT',
+			body: straddling,
+		})
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'PUT',
+			body: new Blob([straddling]),
+		})
+		expect(gatewayCalls).toHaveLength(2)
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('hello'))
+				controller.close()
+			},
+		})
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: stream,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls).toHaveLength(1)
+		expect(ambientCalls[0]?.input).toBe('https://api.example.com/post')
+		const streamedBody = (ambientCalls[0]?.init as RequestInit).body
+		expect(streamedBody).toBeInstanceOf(ReadableStream)
+		expect(
+			new TextDecoder().decode(
+				await new Response(streamedBody as ReadableStream).arrayBuffer(),
+			),
+		).toBe('hello')
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const secretStream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('before-'))
+				controller.enqueue(new TextEncoder().encode('{{secret:demoToken}}'))
+				controller.enqueue(new TextEncoder().encode('-after'))
+				controller.close()
+			},
+		})
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: secretStream,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		await expect(
+			new Response(
+				(ambientCalls.at(-1)?.init as RequestInit).body as ReadableStream,
+			).arrayBuffer(),
+		).rejects.toThrow(/cannot fill secret placeholders in a streaming body/)
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const decodeBody = (call: unknown) =>
+			atob((call as { request: { bodyBase64: string } }).request.bodyBase64)
+		const bodySecretText = '{"note":"{{secret:demoToken|scope=user}}"}'
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: bodySecretText,
+		})
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: new URLSearchParams({ token: '{{secret:demoToken}}' }),
+		})
+		await __kodyGatewayFetch(
+			new Request('https://api.example.com/post', {
+				method: 'POST',
+				body: '{{integration-token:github}}',
+			}),
+		)
+		const bigBlobBody = new Blob([
+			'x'.repeat(2 * 1024 * 1024),
+			'{{secret:demoToken}}',
+		])
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'POST',
+			body: bigBlobBody,
+		})
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(4)
+		expect(decodeBody(gatewayCalls[0])).toBe(bodySecretText)
+		expect(gatewayCalls[1]).toMatchObject({
+			request: {
+				headers: {
+					'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+				},
+			},
+		})
+		expect(decodeBody(gatewayCalls[1])).toBe(
+			'token=%7B%7Bsecret%3AdemoToken%7D%7D',
+		)
+		expect(decodeBody(gatewayCalls[2])).toBe('{{integration-token:github}}')
+		expect(decodeBody(gatewayCalls[3]).endsWith('{{secret:demoToken}}')).toBe(
+			true,
+		)
+
+		gatewayCalls.length = 0
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			headers: { 'x-kody-secret-resolution': 'headers-only' },
+			body: bodySecretText,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(bodySecretText)
+		expect(
+			new Headers((ambientCalls[0]?.init as RequestInit).headers).has(
+				'x-kody-secret-resolution',
+			),
+		).toBe(false)
+
+		ambientCalls.length = 0
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			headers: {
+				authorization: 'Bearer {{secret:demoToken}}',
+				'x-kody-secret-resolution': 'headers-only',
+			},
+			body: bodySecretText,
+		})
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(1)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				headers: {
+					authorization: 'Bearer {{secret:demoToken}}',
+					'x-kody-secret-resolution': 'headers-only',
+				},
+			},
+		})
+
+		// The gateway never fills a multipart body, so its content never hops.
+		gatewayCalls.length = 0
+		const namedFileForm = new FormData()
+		namedFileForm.set('upload', new Blob(['plain']), '{{secret:demoToken}}.txt')
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'POST',
+			body: namedFileForm,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect((ambientCalls.at(-1)?.init as RequestInit).body).toBe(namedFileForm)
+		ambientCalls.length = 0
+
+		const ambientBeforeHeaderSecret = ambientCalls.length
+		await expect(
+			__kodyGatewayFetch(
+				'https://api.example.com/{{secret:demoToken}}/upload',
+				{
+					method: 'POST',
+					body: new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode('plain'))
+							controller.close()
+						},
+					}),
+				},
+			),
+		).rejects.toThrow(/streaming body/)
+		expect(ambientCalls).toHaveLength(ambientBeforeHeaderSecret)
+		expect(gatewayCalls).toHaveLength(0)
+
+		ambientCalls.length = 0
+		const braceStream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('keep {{not-a-secret}}'))
+				controller.close()
+			},
+		})
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: braceStream,
+		})
+		expect(
+			new TextDecoder().decode(
+				await new Response(
+					(ambientCalls[0]?.init as RequestInit).body as ReadableStream,
+				).arrayBuffer(),
+			),
+		).toBe('keep {{not-a-secret}}')
+		expect(gatewayCalls).toHaveLength(0)
+
+		ambientCalls.length = 0
+		const typedBlob = new Blob(['blob-body'], { type: 'application/json' })
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: typedBlob,
+		})
+		expect(ambientCalls).toHaveLength(1)
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(typedBlob)
+		expect(
+			new Request(
+				ambientCalls[0]?.input as string,
+				ambientCalls[0]?.init as RequestInit,
+			).headers.get('content-type'),
+		).toBe('application/json')
+
+		ambientCalls.length = 0
+		const request = new Request('https://api.example.com/post', {
+			method: 'POST',
+			body: 'payload',
+			cache: 'no-store',
+		})
+		await __kodyGatewayFetch(request)
+		expect(ambientCalls).toHaveLength(1)
+		expect(ambientCalls[0]?.input).toBeInstanceOf(Request)
+		const forwarded = ambientCalls[0]?.input as Request
+		expect(forwarded.url).toBe('https://api.example.com/post')
+		expect(forwarded.method).toBe('POST')
+		expect(forwarded.cache).toBe('no-store')
+		expect(await forwarded.text()).toBe('payload')
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const wrappedStream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('wrapped-hello'))
+				controller.close()
+			},
+		})
+		const wrappedRequest = new Request('https://api.example.com/post', {
+			method: 'POST',
+			body: wrappedStream,
+			duplex: 'half',
+		} as RequestInit & { duplex: 'half' })
+		await __kodyGatewayFetch(wrappedRequest)
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls[0]?.input).toBe('https://api.example.com/post')
+		const wrappedInit = ambientCalls[0]?.init as RequestInit & {
+			cache?: string
+		}
+		expect(wrappedInit.body).toBeInstanceOf(ReadableStream)
+		expect(wrappedInit.cache).toBeUndefined()
+		expect(
+			new TextDecoder().decode(
+				await new Response(wrappedInit.body as ReadableStream).arrayBuffer(),
+			),
+		).toBe('wrapped-hello')
+
+		ambientCalls.length = 0
+		const storedStream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('stored'))
+				controller.close()
+			},
+		})
+		const storedRequest = new Request('https://api.example.com/post', {
+			method: 'POST',
+			body: storedStream,
+			cache: 'no-store',
+			duplex: 'half',
+		} as RequestInit & { duplex: 'half' })
+		await __kodyGatewayFetch(storedRequest)
+		expect(
+			(ambientCalls[0]?.init as RequestInit & { cache?: string }).cache,
+		).toBe('no-store')
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const largePayload = `${'b'.repeat(5000)}tail`
+		const largeRequest = new Request('https://api.example.com/post', {
+			method: 'POST',
+			body: largePayload,
+			cache: 'no-store',
+			headers: { authorization: 'Bearer {{secret:demoToken}}' },
+		})
+		await __kodyGatewayFetch(largeRequest)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(1)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://api.example.com/post',
+				headers: { authorization: 'Bearer {{secret:demoToken}}' },
+			},
+		})
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const trailingBraces = new Blob(['report {{'])
+		await __kodyGatewayFetch('https://api.example.com/post', {
+			method: 'POST',
+			body: trailingBraces,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(trailingBraces)
+
+		ambientCalls.length = 0
+		gatewayCalls.length = 0
+		const form = new FormData()
+		form.set('note', 'hello')
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'POST',
+			body: form,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls).toHaveLength(1)
+		expect(ambientCalls[0]?.input).toBe('https://api.example.com/upload')
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(form)
+
+		await expect(
+			__kodyGatewayFetch('https://api.example.com/upload', {
+				method: 'POST',
+				headers: {
+					authorization: 'Bearer {{secret:demoToken|scope=user}}',
+				},
+				body: form,
+			}),
+		).resolves.toBeInstanceOf(Response)
+		expect(gatewayCalls).toHaveLength(1)
+		expect(ambientCalls).toHaveLength(1) // only the earlier non-secret form
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://api.example.com/upload',
+				headers: {
+					authorization: 'Bearer {{secret:demoToken|scope=user}}',
+				},
+			},
+		})
+		expect(
+			(gatewayCalls[0] as { request: { bodyBase64?: string } }).request
+				.bodyBase64,
+		).toEqual(expect.any(String))
+
+		gatewayCalls.length = 0
+		ambientCalls.length = 0
+		const pathSecretForm = new FormData()
+		pathSecretForm.set('note', 'hello')
+		await __kodyGatewayFetch(
+			'https://api.example.com/bot{{secret:demoToken|scope=user}}/upload',
+			{
+				method: 'POST',
+				body: pathSecretForm,
+			},
+		)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(1)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://api.example.com/bot{{secret:demoToken|scope=user}}/upload',
+			},
+		})
+
+		gatewayCalls.length = 0
+		ambientCalls.length = 0
+		const placeholderForm = new FormData()
+		placeholderForm.set('{{secret:demoToken|scope=user}}', 'field-value')
+		await __kodyGatewayFetch('https://api.example.com/upload', {
+			method: 'POST',
+			body: placeholderForm,
+		})
+		expect(gatewayCalls).toHaveLength(0)
+		expect((ambientCalls[0]?.init as RequestInit).body).toBe(placeholderForm)
+
+		ambientCalls.length = 0
+		const requestForm = new FormData()
+		requestForm.set('note', '{{secret:demoToken|scope=user}}')
+		await __kodyGatewayFetch(
+			new Request('https://api.example.com/upload', {
+				method: 'POST',
+				headers: { 'x-kody-secret-resolution': 'headers-only' },
+				body: requestForm,
+			}),
+		)
+		expect(gatewayCalls).toHaveLength(0)
+		const forwardedForm = ambientCalls[0]?.input as Request
+		expect(forwardedForm.headers.has('x-kody-secret-resolution')).toBe(false)
+
+		ambientCalls.length = 0
+		await __kodyGatewayFetch(
+			new Request('https://api.example.com/get', {
+				headers: { 'x-kody-secret-resolution': 'off' },
+			}),
+		)
+		const forwardedGet = ambientCalls[0]?.input as Request
+		expect(forwardedGet).toBeInstanceOf(Request)
+		expect(forwardedGet.url).toBe('https://api.example.com/get')
+		expect(forwardedGet.headers.has('x-kody-secret-resolution')).toBe(false)
+		expect(await forwardedForm.text()).toContain(
+			'{{secret:demoToken|scope=user}}',
+		)
+
+		ambientCalls.length = 0
+		await __kodyGatewayFetch(
+			new Request('https://api.example.com/post', {
+				method: 'POST',
+				body: new Blob(['x'.repeat(2 * 1024 * 1024), '{{secret:demoToken}}']),
+			}),
+		)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls).toHaveLength(1)
+	} finally {
+		globalThis.fetch = originalFetch
+	}
+})
+
+test('local isolate wraps globalThis.fetch so frozen copies still hop secrets', async () => {
+	const shim = createLocalExecuteRuntimeShimSource(runtimeModulePath)
+	const start = shim.indexOf('const __kodyNullBodyStatuses')
+	const end = shim.indexOf('export function __kodyCreatePackageBoundSecrets')
+	expect(start).toBeGreaterThan(-1)
+	expect(end).toBeGreaterThan(start)
+	const helpersSource = shim.slice(start, end).replaceAll(/^export /gm, '')
+	const ambientCalls: Array<{ input: unknown; init: unknown }> = []
+	const gatewayCalls: Array<unknown> = []
+	const kody = {
+		gatewayFetch: async (args: unknown) => {
+			gatewayCalls.push(args)
+			return {
+				status: 200,
+				statusText: 'OK',
+				headers: {},
+				bodyBase64: btoa('gw'),
+			}
+		},
+	}
+	const patchedSymbol = Symbol.for('kody.localExecuteFetchPatched')
+	const originalFetch = globalThis.fetch
+	const originalPatched = Reflect.get(globalThis, patchedSymbol)
+	globalThis.fetch = (async (input: unknown, init?: unknown) => {
+		ambientCalls.push({ input, init })
+		return new Response('ambient')
+	}) as typeof fetch
+	Reflect.deleteProperty(globalThis, patchedSymbol)
+	try {
+		new Function('kody', `${helpersSource}; return null;`)(kody)
+		expect(Reflect.get(globalThis, patchedSymbol)).toBe(true)
+
+		const frozenAlias = globalThis.fetch
+		await frozenAlias('https://discord.com/api/v10/channels/1/messages/2', {
+			method: 'PATCH',
+			headers: {
+				authorization: 'Bot {{secret:discordBotTokenKentPersonalAutomation}}',
+			},
+		})
+		expect(gatewayCalls).toHaveLength(1)
+		expect(ambientCalls).toHaveLength(0)
+		expect(gatewayCalls[0]).toMatchObject({
+			request: {
+				url: 'https://discord.com/api/v10/channels/1/messages/2',
+				headers: {
+					authorization: 'Bot {{secret:discordBotTokenKentPersonalAutomation}}',
+				},
+			},
+		})
+
+		gatewayCalls.length = 0
+		await globalThis.fetch('https://api.example.com/health')
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls).toHaveLength(1)
+		expect(ambientCalls[0]?.input).toBe('https://api.example.com/health')
+
+		ambientCalls.length = 0
+		await globalThis.fetch(
+			new Request('https://api.example.com/post', {
+				method: 'POST',
+				body: 'payload',
+				cache: 'no-store',
+			}),
+		)
+		expect(gatewayCalls).toHaveLength(0)
+		expect(ambientCalls).toHaveLength(1)
+		expect(ambientCalls[0]?.input).toBeInstanceOf(Request)
+		const forwarded = ambientCalls[0]?.input as Request
+		expect(forwarded.cache).toBe('no-store')
+		expect(forwarded.method).toBe('POST')
+		expect(await forwarded.text()).toBe('payload')
+	} finally {
+		globalThis.fetch = originalFetch
+		if (originalPatched === undefined) {
+			Reflect.deleteProperty(globalThis, patchedSymbol)
+		} else {
+			Reflect.set(globalThis, patchedSymbol, originalPatched)
+		}
+	}
+})
+
+test('local meter stamp overrides closed-over gatewayFetch packageId for nested imports', async () => {
+	const { AsyncLocalStorage } = await import('node:async_hooks')
+	const shim = createLocalExecuteRuntimeShimSource(runtimeModulePath)
+
+	const alsStart = shim.indexOf('const __kodySecretAuthorityAls')
+	const alsEnd = shim.indexOf('// Pure placeholder builders')
+	expect(alsStart).toBeGreaterThan(-1)
+	expect(alsEnd).toBeGreaterThan(alsStart)
+	const alsSource = shim
+		.slice(alsStart, alsEnd)
+		.replaceAll(/^export /gm, '')
+		.replaceAll('/** @type {any} */ (globalThis)', 'globalThis')
+
+	const meterStart = shim.indexOf(
+		'export function __kodyMeterStaticPackageExport',
+	)
+	const meterEnd = shim.indexOf('export function packageStorage()', meterStart)
+	expect(meterStart).toBeGreaterThan(-1)
+	expect(meterEnd).toBeGreaterThan(meterStart)
+	const meterSource = shim
+		.slice(meterStart, meterEnd)
+		.replaceAll(/^export /gm, '')
+
+	const gatewayStart = shim.indexOf('const __kodyNullBodyStatuses')
+	const gatewayEnd = shim.indexOf(
+		'export function __kodyCreatePackageBoundStorage',
+	)
+	expect(gatewayStart).toBeGreaterThan(-1)
+	expect(gatewayEnd).toBeGreaterThan(gatewayStart)
+	const gatewaySource = shim
+		.slice(gatewayStart, gatewayEnd)
+		.replaceAll(/^export /gm, '')
+
+	const gatewayCalls: Array<unknown> = []
+	const kody = {
+		gatewayFetch: async (args: unknown) => {
+			gatewayCalls.push(args)
+			return {
+				status: 200,
+				statusText: 'OK',
+				headers: {},
+				bodyBase64: btoa('gw'),
+			}
+		},
+	}
+	const {
+		__kodyCreatePackageBoundGatewayFetch,
+		__kodyGatewayFetch,
+		__kodyMeterStaticPackageExport,
+		__kodyGetSecretAuthority,
+	} = new Function(
+		'AsyncLocalStorage',
+		'kody',
+		`${alsSource}
+${gatewaySource}
+${meterSource}
+return {
+	__kodyCreatePackageBoundGatewayFetch,
+	__kodyGatewayFetch,
+	__kodyMeterStaticPackageExport,
+	__kodyGetSecretAuthority,
+};`,
+	)(AsyncLocalStorage, kody) as {
+		__kodyCreatePackageBoundGatewayFetch: (
+			packageId: string,
+		) => (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+		__kodyGatewayFetch: (
+			input: RequestInfo | URL,
+			init?: RequestInit,
+		) => Promise<Response>
+		__kodyMeterStaticPackageExport: <T>(packageId: string, exportValue: T) => T
+		__kodyGetSecretAuthority: () => string | null
+	}
+
+	const outerBoundFetch =
+		__kodyCreatePackageBoundGatewayFetch('pkg-outer-friction')
+	const nestedWake = __kodyMeterStaticPackageExport(
+		'pkg-nested-grok-bot',
+		async () => {
+			expect(__kodyGetSecretAuthority()).toBe('pkg-nested-grok-bot')
+			// Preliminary await before fetch — workerd keeps ALS only when the
+			// meter wrapper awaits the callee inside ALS.run (kody#2876 / Devin).
+			await Promise.resolve()
+			expect(__kodyGetSecretAuthority()).toBe('pkg-nested-grok-bot')
+			await outerBoundFetch('https://api2.cursor.sh/automations/webhook/x', {
+				method: 'POST',
+				headers: {
+					authorization: 'Bearer {{secret:grokBotWake.nested|scope=package}}',
+				},
+			})
+			return { duringStamp: __kodyGetSecretAuthority() }
+		},
+	)
+
+	expect(__kodyGetSecretAuthority()).toBeNull()
+	const result = await nestedWake()
+	expect(result.duringStamp).toBe('pkg-nested-grok-bot')
+	expect(__kodyGetSecretAuthority()).toBeNull()
+	expect(gatewayCalls).toHaveLength(1)
+	expect(gatewayCalls[0]).toMatchObject({
+		packageId: 'pkg-nested-grok-bot',
+		request: {
+			url: 'https://api2.cursor.sh/automations/webhook/x',
+			headers: {
+				authorization: 'Bearer {{secret:grokBotWake.nested|scope=package}}',
+			},
+		},
+	})
+
+	gatewayCalls.length = 0
+	await outerBoundFetch('https://api.example.com/v1', {
+		headers: {
+			authorization: 'Bearer {{secret:demoToken|scope=user}}',
+		},
+	})
+	expect(gatewayCalls).toHaveLength(1)
+	// Without a meter stamp, the closed-over outer package id is used.
+	expect(gatewayCalls[0]).toMatchObject({
+		packageId: 'pkg-outer-friction',
+	})
+
+	gatewayCalls.length = 0
+	await __kodyGatewayFetch('https://api.example.com/v1', {
+		headers: {
+			authorization: 'Bearer {{secret:demoToken|scope=user}}',
+		},
+	})
+	expect(gatewayCalls).toHaveLength(1)
+	// Missing stamp + unbound fetch → no packageId on the hop (origin hides
+	// package-scoped secrets).
+	expect((gatewayCalls[0] as { packageId?: string }).packageId).toBeUndefined()
+})
+
 test('createLocalExecuteRuntimeShimSource uses a relative host import from path-like module names', () => {
 	const nestedPath =
 		'.__kody_packages__/@kentcdodds/google/.__published_bundle__/2e2f676d61696c/.__kody_virtual__/runtime.js'
 	const nested = createLocalExecuteRuntimeShimSource(nestedPath)
 	expect(nested).not.toMatch(/from ["']kody:runtime["']/)
-	const importMatch = /from ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/.exec(nested)
+	const importMatch =
+		/default as __kodyHostRuntimeDefault,\n\} from ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/.exec(
+			nested,
+		)
 	expect(importMatch?.[1]).toBeDefined()
 	const specifier = JSON.parse(
 		importMatch![1]!.startsWith("'")
@@ -400,7 +1209,6 @@ export default async () => m`
 
 test('buildLocalExecutePackageGraph rejects unresolved packages', async () => {
 	mockModule.getSavedPackageByName.mockResolvedValue(null)
-	mockModule.getPlatformAccountByUsername.mockResolvedValue(null)
 	const code = `import x from 'kody:@missing/pkg/export'
 export default async () => x`
 	await expect(
@@ -446,11 +1254,49 @@ export default async () => hello()`
 	} satisfies Partial<LocalExecutePackageGraphError>)
 })
 
-test('buildLocalExecutePackageGraph returns an empty graph when there are no kody:@ imports', async () => {
+test('buildLocalExecutePackageGraph maps missing runtime bundles to retry-or-report', async () => {
+	const code = `import hello from 'kody:@kentcdodds/example-package/hello'
+export default async () => hello()`
+	mockModule.getSavedPackageByName.mockResolvedValue(createSavedPackageRecord())
+	mockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(null)
+	mockModule.loadPackageSourceBySourceId.mockResolvedValue(
+		makeLoadedSource({
+			exports: { './hello': './src/hello.ts' },
+			dependencies: { marked: '18.0.2' },
+			files: {
+				'src/hello.ts':
+					'import { marked } from "marked"\nexport default async function hello() { return marked.parse("**ok**") }',
+			},
+		}),
+	)
+
+	await expect(
+		buildLocalExecutePackageGraph({ ...graphInput, code }),
+	).rejects.toMatchObject({
+		code: 'package_import_unpublished',
+		message: expect.stringMatching(
+			/missing a published runtime bundle.*Retry later or report it if it persists\./,
+		),
+	} satisfies Partial<LocalExecutePackageGraphError>)
+})
+
+test('buildLocalExecutePackageGraph always embeds the gateway-fetch shim without kody:@ imports', async () => {
 	const graph = await buildLocalExecutePackageGraph({
 		...graphInput,
-		code: 'export default async function main() { return 1 }',
+		code: `export default async function main() {
+  return fetch('https://api.example.com/v1', {
+    headers: { authorization: 'Bearer {{secret:cloudflarePagesApiToken}}' },
+  })
+}`,
 	})
-	expect(graph).toEqual({ modules: [], imports: [], warnings: [] })
+	expect(graph.imports).toEqual([])
+	expect(graph.warnings).toEqual([])
 	expect(mockModule.getSavedPackageByName).not.toHaveBeenCalled()
+	expect(graph.modules).toHaveLength(1)
+	const runtimeShim = graph.modules[0]
+	expect(runtimeShim?.name).toBe(runtimeModulePath)
+	expect(runtimeShim?.esModule).toContain('__kodyGatewayFetch')
+	expect(runtimeShim?.esModule).toContain('kody.gatewayFetch')
+	expect(runtimeShim?.esModule).toContain('kody.localExecuteFetchPatched')
+	expect(runtimeShim?.esModule).toMatch(/globalThis\.fetch\s*=/)
 })

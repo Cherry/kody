@@ -1,3 +1,7 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import type * as AuditLog from '#worker/audit-log.ts'
@@ -37,6 +41,8 @@ function createCapabilityTestDb() {
 			username TEXT NOT NULL,
 			email TEXT NOT NULL,
 			deleting_at TEXT,
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z',
 			updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
 		);
@@ -49,7 +55,10 @@ function createCapabilityTestDb() {
 test('adminUserMeterParity returns null for missing users and omits lease secrets', async () => {
 	const db = createCapabilityTestDb()
 	const meter = createInMemoryUserMeterEnv()
-	const meterStub = userMeterRpc({ env: meter.env, userId: stableUserId })
+	const meterStub = userMeterRpc({
+		env: meter.env,
+		userId: ownerIdFromStored(stableUserId),
+	})
 	// Seed one active authoritative write lease.
 	await meterStub.acquireWriteLease({
 		token: 'active-lease-xyz789',
@@ -66,9 +75,12 @@ test('adminUserMeterParity returns null for missing users and omits lease secret
 			...meter.env,
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: testStableUserIdFromEmail('admin@example.com'),
+				userId: personIdFromStored(
+					testStableUserIdFromEmail('admin@example.com'),
+				),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],

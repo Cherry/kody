@@ -1,15 +1,18 @@
 import { expect, test, vi } from 'vitest'
 import {
+	ArtifactsGitUnavailableError,
 	getArtifactsGitHttpStatus,
 	isArtifactsGitPackfileCorruptionSentryMessage,
 	isArtifactsGitTransientErrorMessage,
 	isArtifactsGitTransientHttpErrorMessage,
+	isArtifactsGitTransientRemapError,
 	isIsomorphicGitPackfileCorruptionError,
 	isArtifactsGitTimeoutError,
 	isTransientArtifactsGitError,
 	isTransientArtifactsGitHttpError,
 	isTransientArtifactsGitHttpStatus,
 	runArtifactsGitWithRetry,
+	toArtifactsGitUnavailableError,
 	wrapArtifactsGitHttpError,
 } from './artifacts-git-retry.ts'
 
@@ -174,4 +177,116 @@ test('Artifacts git packfile corruption is transient, wrapped for git clone, and
 		/Packfile payload corrupted/,
 	)
 	expect(persistent).toHaveBeenCalledTimes(3)
+})
+
+test('Artifacts git remap helper requires Artifacts markers and skips source-recovery outer wraps', () => {
+	const wrappedHttp = wrapArtifactsGitHttpError({
+		operation: 'git clone',
+		remote: 'https://example.test/repo.git',
+		error: httpError(500),
+	})
+	expect(isArtifactsGitTransientRemapError(wrappedHttp)).toBe(true)
+	expect(
+		isArtifactsGitTransientRemapError(
+			new Error(
+				'The package source could not be read after retries (HTTP 5xx). Report id: report-1.',
+				{
+					cause: wrappedHttp,
+				},
+			),
+		),
+	).toBe(true)
+
+	const bareTimeout = new Error('The operation timed out.')
+	bareTimeout.name = 'TimeoutError'
+	expect(isArtifactsGitTransientRemapError(bareTimeout)).toBe(false)
+	expect(isTransientArtifactsGitError(bareTimeout)).toBe(true)
+	expect(
+		isArtifactsGitTransientRemapError(
+			new Error('oauth refresh stalled', { cause: bareTimeout }),
+		),
+	).toBe(false)
+
+	const artifactsTimeout = new Error(
+		'Artifacts git request timed out after 8000ms.',
+	)
+	artifactsTimeout.name = 'ArtifactsGitTimeoutError'
+	expect(isArtifactsGitTransientRemapError(artifactsTimeout)).toBe(true)
+
+	expect(
+		isArtifactsGitTransientRemapError(
+			new Error(
+				'packageGetGitRemote stopped by the production package source safety policy. Stop and report this source recovery problem instead of rebuilding or overwriting the package in place.',
+				{ cause: wrappedHttp },
+			),
+		),
+	).toBe(false)
+
+	expect(
+		isArtifactsGitTransientRemapError(
+			new Error('Internal error. Retry later or report it if it persists.', {
+				cause: new Error(
+					'packageGetGitRemote stopped by the production package source safety policy. Stop and report this source recovery problem instead of rebuilding or overwriting the package in place.',
+					{ cause: wrappedHttp },
+				),
+			}),
+		),
+	).toBe(false)
+})
+
+test('ArtifactsGitUnavailableError classifies exhausted failures with a report id', () => {
+	const wrappedHttp = wrapArtifactsGitHttpError({
+		operation: 'git clone',
+		remote: 'https://example.test/repo.git',
+		error: httpError(500),
+	})
+	const unavailable = new ArtifactsGitUnavailableError(wrappedHttp, 'report-1')
+	expect(unavailable.message).toBe(
+		'The package source could not be read after retries (HTTP 5xx). Report id: report-1.',
+	)
+	expect(unavailable.toApiDetails()).toEqual({
+		report_id: 'report-1',
+		upstream_status_class: 'http_5xx',
+		upstream_status: 500,
+	})
+
+	const corruption = new ArtifactsGitUnavailableError(
+		packfileCorruptionError(),
+		'report-2',
+	)
+	expect(corruption.statusClass).toBe('packfile_corruption')
+	expect(corruption.message).toContain('corrupt pack')
+
+	const missing = new ArtifactsGitUnavailableError(
+		wrapArtifactsGitHttpError({
+			operation: 'git fetch',
+			remote: 'https://example.test/repo.git',
+			error: new Error(
+				'Could not find c48d4ab947e943e8681e5f992e945b8e0d97a9d8.',
+			),
+		}),
+		'report-3',
+	)
+	expect(missing.statusClass).toBe('missing_object')
+	expect(missing.message).toContain('missing object or ref')
+})
+
+test('toArtifactsGitUnavailableError logs the minted report id once', () => {
+	const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+	try {
+		const wrappedHttp = wrapArtifactsGitHttpError({
+			operation: 'git clone',
+			remote: 'https://example.test/repo.git',
+			error: httpError(500),
+		})
+		const first = toArtifactsGitUnavailableError(wrappedHttp)
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining(`"reportId":"${first.reportId}"`),
+		)
+		errorSpy.mockClear()
+		expect(toArtifactsGitUnavailableError(first)).toBe(first)
+		expect(errorSpy).not.toHaveBeenCalled()
+	} finally {
+		errorSpy.mockRestore()
+	}
 })

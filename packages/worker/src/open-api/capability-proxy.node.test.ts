@@ -1,7 +1,18 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { afterEach, expect, test, vi } from 'vitest'
+import { DatabaseSync } from 'node:sqlite'
+import { createMcpCallerContext } from '#mcp/context.ts'
+import { cliCredentialBootstrapCapability } from '#mcp/capabilities/meta/cli-credential-bootstrap.ts'
+import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { ApiError, invalidRequest } from './errors.ts'
 import { type ApiInvocationContext } from './context.ts'
 import { runCapabilityProxyCall } from './capability-proxy.ts'
+
+const migrationsDirectory = new URL('../../migrations/', import.meta.url)
 
 const mockFns = vi.hoisted(() => ({
 	buildKodyToolContext: vi.fn(),
@@ -14,10 +25,11 @@ vi.mock('#mcp/run-kody-registry.ts', () => ({
 
 const secretValue = 'sk-live-very-secret-value'
 const apiToken = `kody_at_${'a'.repeat(20)}_${'b'.repeat(43)}`
+const bootstrapCode = `kody_bc_${'a'.repeat(16)}_${'B'.repeat(32)}`
 
 const ctx = {
 	env: {},
-	callerContext: { user: { userId: 'user-1' } },
+	callerContext: { user: { userId: ownerIdFromStored('user-1') } },
 	principal: { kind: 'mcp' },
 	getFeatureFlags: async () => ({}),
 } as unknown as ApiInvocationContext
@@ -40,6 +52,43 @@ function mockToolContext(secretSet: (args: unknown) => unknown) {
 	)
 }
 
+function mockBootstrapToolContext(db: D1Database) {
+	mockFns.buildKodyToolContext.mockImplementation(
+		async (
+			_env: unknown,
+			callerContext: { user: { userId: string } },
+			options: {
+				openApiPrincipal?: Parameters<
+					typeof cliCredentialBootstrapCapability.handler
+				>[1]['openApiPrincipal']
+			},
+		) => ({
+			mcpServers: [],
+			tools: {
+				cliCredentialBootstrap: (args: unknown) =>
+					cliCredentialBootstrapCapability.handler(
+						args as Record<string, unknown>,
+						{
+							env: { APP_DB: db } as Env,
+							callerContext: createMcpCallerContext({
+								source: { kind: 'mcp-oauth' },
+								baseUrl: 'https://kody.codes',
+								user: {
+									userId: personIdFromStored(callerContext.user.userId),
+									email: 'caller@example.com',
+									displayName: 'Caller',
+								},
+							}),
+							...(options.openApiPrincipal
+								? { openApiPrincipal: options.openApiPrincipal }
+								: {}),
+						},
+					),
+			},
+		}),
+	)
+}
+
 async function callSecretSet() {
 	return runCapabilityProxyCall({
 		ctx,
@@ -54,7 +103,9 @@ afterEach(() => {
 
 test('unexpected capability failures hide written secrets and API tokens', async () => {
 	mockToolContext(() => {
-		throw new Error(`write failed for ${secretValue} via ${apiToken}`)
+		throw new Error(
+			`write failed for ${secretValue} via ${apiToken} and ${bootstrapCode}`,
+		)
 	})
 	const error = await callSecretSet()
 	expect(error).toBeInstanceOf(ApiError)
@@ -63,6 +114,8 @@ test('unexpected capability failures hide written secrets and API tokens', async
 	expect(message).toContain('write failed for [REDACTED SECRET]')
 	expect(message).not.toContain(secretValue)
 	expect(message).not.toContain(apiToken)
+	expect(message).toContain('kody_bc_[redacted]')
+	expect(message).not.toContain(bootstrapCode)
 })
 
 test('caller errors from a capability keep their status with secrets redacted', async () => {
@@ -94,7 +147,109 @@ test('platform failures outside the capability return a generic error and log de
 	)
 })
 
-test('packages.invoke is rejected as unbound', async () => {
+test('CapabilityProxy preserves token scopes when minting CLI bootstrap credentials', async () => {
+	const sqlite = new DatabaseSync(':memory:')
+	applyAllMigrations(sqlite, migrationsDirectory)
+	const db = createD1FromSqlite(sqlite)
+	mockBootstrapToolContext(db)
+	const now = new Date()
+	const tokenCtx = {
+		...ctx,
+		principal: {
+			kind: 'token',
+			token: {
+				id: 'parent-token',
+				user_id: ownerIdFromStored('user-1'),
+				name: 'parent',
+				token_hash: 'hash',
+				scopes: ['org:execute'],
+				idle_ttl_seconds: 3600,
+				expires_at: new Date(now.getTime() + 3600_000).toISOString(),
+				max_expires_at: new Date(now.getTime() + 3600_000).toISOString(),
+				created_via: 'api',
+				created_at: now.toISOString(),
+				updated_at: now.toISOString(),
+				last_used_at: null,
+				rotated_at: null,
+				revoked_at: null,
+			},
+		},
+	} as unknown as ApiInvocationContext
+
+	const error = await runCapabilityProxyCall({
+		ctx: tokenCtx,
+		call: {
+			path: ['kody', 'cliCredentialBootstrap'],
+			args: [{ scopes: ['token:delete'], idle_ttl_seconds: 60 }],
+		},
+	}).catch((value: unknown) => value)
+	expect(error).toMatchObject({
+		status: 400,
+		message: expect.stringMatching(/scopes it does not hold/),
+	})
+	expect(mockFns.buildKodyToolContext).toHaveBeenCalledWith(
+		expect.anything(),
+		expect.anything(),
+		expect.objectContaining({
+			openApiPrincipal: expect.objectContaining({
+				kind: 'token',
+				token: expect.objectContaining({ scopes: ['org:execute'] }),
+			}),
+		}),
+	)
+})
+
+test('CapabilityProxy caps bootstrap token lifetime to the parent token lifetime', async () => {
+	const sqlite = new DatabaseSync(':memory:')
+	applyAllMigrations(sqlite, migrationsDirectory)
+	const db = createD1FromSqlite(sqlite)
+	mockBootstrapToolContext(db)
+	const now = new Date()
+	const tokenCtx = {
+		...ctx,
+		principal: {
+			kind: 'token',
+			token: {
+				id: 'parent-token',
+				user_id: ownerIdFromStored('user-1'),
+				name: 'parent',
+				token_hash: 'hash',
+				scopes: ['org:execute'],
+				idle_ttl_seconds: 3600,
+				expires_at: new Date(now.getTime() + 3600_000).toISOString(),
+				max_expires_at: new Date(now.getTime() + 3600_000).toISOString(),
+				created_via: 'api',
+				created_at: now.toISOString(),
+				updated_at: now.toISOString(),
+				last_used_at: null,
+				rotated_at: null,
+				revoked_at: null,
+			},
+		},
+	} as unknown as ApiInvocationContext
+
+	const result = await runCapabilityProxyCall({
+		ctx: tokenCtx,
+		call: {
+			path: ['kody', 'cliCredentialBootstrap'],
+			args: [
+				{
+					scopes: ['org:execute'],
+					idle_ttl_seconds: 60,
+					max_lifetime_seconds: 7200,
+				},
+			],
+		},
+	})
+	expect(
+		(result.result as { max_lifetime_seconds: number }).max_lifetime_seconds,
+	).toBeLessThanOrEqual(3600)
+	expect(
+		(result.result as { max_lifetime_seconds: number }).max_lifetime_seconds,
+	).toBeGreaterThan(3000)
+})
+
+test('packages invoke path is rejected as unknown', async () => {
 	const error = await runCapabilityProxyCall({
 		ctx,
 		call: {
@@ -104,12 +259,68 @@ test('packages.invoke is rejected as unbound', async () => {
 	}).catch((value: unknown) => value)
 	expect(error).toMatchObject({ status: 404, code: 'not_found' })
 	expect(String((error as { message?: string }).message)).toMatch(
-		/There is no author-facing packages\.invoke/,
+		/Unknown runtime path/,
 	)
 	expect(String((error as { message?: string }).message)).toMatch(
-		/static kody:@scope\/package\/export import/,
+		/packages\.invoke|packages.*invoke/,
 	)
 	expect(String((error as { message?: string }).message)).not.toMatch(
 		/run execute without --local/,
 	)
+})
+
+test('dotted kody.mcp[server].tool looks up raw tools-map keys, not sanitizeToolName dispatchName', async () => {
+	const rawCapabilityName = 'mcp:home:set_pin'
+	const sanitizedDispatchName = 'mcphomeset_pin'
+	const calls: Array<unknown> = []
+	mockFns.buildKodyToolContext.mockResolvedValue({
+		mcpServers: [
+			{
+				name: 'home',
+				serverId: 'home-server',
+				status: {
+					state: 'ready',
+					connected: true,
+					toolCount: 1,
+					message: 'connected',
+					unavailableMessage: 'unavailable',
+				},
+				capabilities: [
+					{
+						name: 'set_pin',
+						// Cloud ToolDispatcher key; CapabilityProxy must not use this
+						// against the raw-name tools map (#2949).
+						dispatchName: sanitizedDispatchName,
+					},
+				],
+			},
+		],
+		// Production tools map is keyed by raw capability.name (colons intact).
+		tools: {
+			[rawCapabilityName]: async (args: unknown) => {
+				calls.push(args)
+				return { ok: true }
+			},
+		},
+	})
+
+	const dotted = await runCapabilityProxyCall({
+		ctx,
+		call: {
+			path: ['kody', 'mcp', 'home', 'set_pin'],
+			args: [{ pin: '1234' }],
+		},
+	})
+	expect(dotted.result).toEqual({ ok: true })
+
+	const flat = await runCapabilityProxyCall({
+		ctx,
+		call: {
+			path: ['kody', rawCapabilityName],
+			args: [{ pin: '5678' }],
+		},
+	})
+	expect(flat.result).toEqual({ ok: true })
+
+	expect(calls).toEqual([{ pin: '1234' }, { pin: '5678' }])
 })

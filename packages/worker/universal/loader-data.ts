@@ -7,6 +7,7 @@ import {
 	type PublicProfilePackageItem,
 	type ViewerListingInstall,
 } from '#universal/community-public-types.ts'
+import { type McpOAuthClientMode } from '@kody-internal/shared/mcp-servers.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import { type AdminFeatureFlag } from '#universal/feature-flags/types.ts'
 import { type OnboardingChecklistItemId } from '#universal/onboarding-checklist-types.ts'
@@ -24,6 +25,7 @@ import { type PackageFilesContentKind } from '#universal/package-file-media.ts'
 import { type WalkthroughHostPick } from '#universal/walkthrough-hosts.ts'
 import { type LandingHeroVideo } from '#universal/landing-hero-copy.ts'
 import { type ConnectedMcpAgent } from '#universal/connected-mcp-agents.ts'
+import { type AccountConnectionUsageLoaderData } from '#universal/connection-usage.ts'
 import { type ReferralProgramSummary } from '#universal/referral-program.ts'
 import { type SecondAgentStandardGiftState } from '#universal/second-agent-standard-gift.ts'
 import { type OnboardingAgentChooserPick } from '#universal/onboarding-mcp-clients.ts'
@@ -39,6 +41,8 @@ import { type OnboardingFunnelStage } from '#universal/onboarding-funnel-point.t
 import {
 	type CreditWalletState,
 	type EntitlementLadder,
+	type LimitOverrideKey,
+	type LimitOverrideValue,
 } from '#universal/plans.ts'
 import {
 	type ComputeIncludeCreditsStatus,
@@ -50,21 +54,16 @@ import {
 	type IncludedComputeMeter,
 } from '#universal/usage-presentation.ts'
 import {
+	type CreditAttributionBreakdown,
+	type CreditAttributionRow,
+} from '#universal/credit-attribution.ts'
+import {
 	type AccountActivityStatusFilter,
 	type AccountActivitySurfaceFilter,
 	type AccountActivityTriageFilter,
 	type AccountActivityViewFilter,
 } from '#universal/account-activity-filters.ts'
 import { type FleetPackageErrorRateConcentration } from '#universal/fleet-package-error-rate-concentration.ts'
-import {
-	type SiteBannerRecord,
-	type SiteBannerView,
-	type SiteBannerViewer,
-} from '#universal/site-banners.ts'
-import {
-	type PackageShareFileChange,
-	type PackageShareGrantLoaderView,
-} from '#universal/package-share.ts'
 
 export type { ProfileVisibility }
 export type { AdminFeatureFlag }
@@ -173,8 +172,10 @@ export type CommunityDetailLoaderData = {
 	listing: PublicCommunityListing | null
 	/** True when `/@owner` is publicly reachable. */
 	ownerProfilePublic: boolean
-	/** True when the signed-in viewer owns this listing. */
+	/** True when the signed-in viewer may open the private package view. */
 	viewerIsOwner: boolean
+	/** True when the signed-in viewer may change the package (settings, publish). */
+	viewerCanManage: boolean
 	loggedIn: boolean
 	viewerIsAdmin: boolean
 	forkPrompt: string
@@ -213,6 +214,7 @@ export type PackageFilesLoaderData = {
 	username?: string
 	kodyId?: string
 	viewerIsOwner?: boolean
+	viewerCanManage?: boolean
 	isPrivate?: boolean
 	isListed?: boolean
 	iconUrl?: string | null
@@ -246,9 +248,12 @@ type CommunityDetailShellLoaderData = {
 	username: string
 	kodyId: string
 	viewerIsOwner: boolean
+	viewerCanManage: boolean
+	viewerCanPublish?: boolean
+	viewerCanDelete?: boolean
+	viewerCanAdoptCommunityFork?: boolean
 	isPrivate: boolean
 	invocationUrlOrigin: string
-	shareGrant?: PackageShareGrantLoaderView | null
 }
 
 type CommunityPackageUnauthorizedLoaderData = {
@@ -265,7 +270,8 @@ export type ProfileLoaderData = {
 	ok: true
 	profile: PublicCommunityProfile
 	packages: Array<PublicProfilePackageItem>
-	activity: Array<PublicCommunityActivityItem>
+	/** Null when the profile has no activity source (e.g. team org repositories). */
+	activity: Array<PublicCommunityActivityItem> | null
 	query: string | null
 	isSelf: boolean
 	loggedIn: boolean
@@ -275,7 +281,7 @@ export type ProfileLoaderData = {
 export type ProfileListLoaderData = {
 	profile: PublicCommunityProfile
 	packages: Array<PublicProfilePackageItem>
-	activity: Array<PublicCommunityActivityItem>
+	activity: Array<PublicCommunityActivityItem> | null
 }
 
 /** SSR-embedded shell data for the identity header on the profile page. */
@@ -333,11 +339,31 @@ export type AdminUserListItem = {
 	email: string
 	email_verified: boolean
 	email_verified_at: string | null
-	/** Manual grant (`users.plan`). Manage plan writes this column. */
+	/** Manual grant (`orgs.plan` on the personal org). */
 	plan: AdminPlanName
 	manualPlan: AdminPlanName
 	stripePlan: AdminPlanName | null
 	effectivePlan: AdminPlanName
+	/** Raw `orgs.second_agent_standard_gift_expires_at`, or null. */
+	secondAgentGiftExpiresAt: string | null
+	/** Raw `orgs.referral_standard_credit_expires_at`, or null. */
+	referralCreditExpiresAt: string | null
+	/**
+	 * Later of the two overlay expiry columns (or null). Same value
+	 * `resolveEffectivePlanWithSecondAgentGift` / gating use for the overlay.
+	 */
+	overlayExpiresAt: string | null
+	/**
+	 * True while a temporary Pro overlay currently raises Free. False for
+	 * paid/manual plans even when expiry columns are still set.
+	 */
+	isProOverlay: boolean
+	/**
+	 * Which overlay is classifying the current Pro raise.
+	 * When both are active, the later expiry wins; equal timestamps prefer
+	 * `second_agent_gift`. Null unless `isProOverlay`.
+	 */
+	overlayType: 'second_agent_gift' | 'referral_credit' | null
 	/** `legacy` keeps pre-cut Standard/Pro ceilings while paid access stays continuous. */
 	entitlementLadder: EntitlementLadder
 	stripeCustomerLinked: boolean
@@ -392,11 +418,39 @@ export type AdminCreditWalletSummary = {
 	plan: AdminPlanName
 	/** Purchasable Pro: credits unlock limits and debit usage. */
 	eligible: boolean
-	/** `users.admin_credits_eligible`: admin-set, never touched by Stripe. */
+	/** `orgs.admin_credits_eligible`: admin-set, never touched by Stripe. */
 	adminCreditsEligible: boolean
 	unlocked: boolean
 	balanceMicroUsd: number
 	recent: Array<AdminCreditLedgerItem>
+}
+
+/** One overridable cap on the admin org limits panel. */
+export type AdminOrgLimitRow = {
+	key: LimitOverrideKey
+	label: string
+	/** The plan's limit (seat pool and credits ceiling); null = no window. */
+	planLimit: number | null
+	/** What enforcement uses: the plan limit with active overrides on top. */
+	effectiveLimit: number | null
+	override: {
+		value: LimitOverrideValue
+		expiresAt: string | null
+		reason: string
+		setByUserId: string
+		createdAt: string
+		updatedAt: string
+		active: boolean
+	} | null
+}
+
+/** Admin view of one org's overridable caps (`/admin/orgs/limits.json`). */
+export type AdminOrgLimits = {
+	org: { id: string; slug: string; displayName: string | null }
+	plan: AdminPlanName
+	creditWallet: CreditWalletState
+	seats: number
+	limits: Array<AdminOrgLimitRow>
 }
 
 export type AdminCreatedUserSetup = {
@@ -478,19 +532,6 @@ export type AdminReservedUsernamesLoaderData = {
 export type AdminFeatureFlagsLoaderData = {
 	ok: true
 	featureFlags: Array<AdminFeatureFlag>
-}
-
-export type AdminBannersLoaderData = {
-	ok: true
-	banners: Array<SiteBannerRecord>
-	savedBannerId?: string
-}
-
-export type SiteBannerLoaderData = {
-	banner: SiteBannerView | null
-	candidates: Array<SiteBannerRecord>
-	dismissedIds: Array<string>
-	viewer: SiteBannerViewer
 }
 
 export type YoutubeWatchLoaderData = {
@@ -622,7 +663,7 @@ export type AdminUsageEntitlementResource =
 	| 'secrets'
 	| 'concurrent_workflows'
 	| 'storage_bytes'
-	| 'execute_calls_per_day'
+	| 'execute_unique_workers_per_day'
 	| 'outbound_fetches_per_day'
 	| 'job_runs_per_day'
 	| 'automation_invocations_per_day'
@@ -1135,6 +1176,23 @@ export type AccountFormerEmail = {
 	claimedAt: string
 }
 
+export type AccountOrganizationSummary = {
+	slug: string
+	displayName: string | null
+	role: 'owner' | 'member' | 'billing' | null
+	personal: boolean
+	avatarUrl?: string | null
+}
+
+type AccountInviteSummary = {
+	id: string
+	orgSlug: string
+	orgDisplayName: string | null
+	kind: string
+	role: string | null
+	expiresAt: string
+}
+
 export type AccountProfileLoaderData = {
 	ok: true
 	email: string
@@ -1146,6 +1204,169 @@ export type AccountProfileLoaderData = {
 	avatarUrl: string | null
 	profileVisibility: ProfileVisibility
 	formerEmails: Array<AccountFormerEmail>
+}
+
+type AccountOrganizationsNewLoaderData = {
+	ok: true
+	error: string | null
+	/** What the person typed before a rejected submit, so it is not lost. */
+	draft: { displayName: string; slug: string }
+}
+
+export type AccountOrganizationsLoaderData = {
+	ok: true
+	username: string
+	/** The signup organization is named and pictured after the person. */
+	viewer: { displayName: string; avatarUrl: string | null }
+	organizations: Array<AccountOrganizationSummary>
+	lastUsedOrganization: string | null
+	invites: Array<AccountInviteSummary>
+}
+
+type OrgManagementOrg = {
+	id: string
+	slug: string
+	displayName: string | null
+	avatarUrl: string | null
+	personal: boolean
+	role: 'owner' | 'member' | 'billing'
+}
+
+export type OrgSettingsLoaderData = {
+	ok: true
+	org: OrgManagementOrg
+	canManage: boolean
+	canDelete: boolean
+}
+
+export type OrgMemberView = {
+	userId: string
+	username: string | null
+	displayName: string | null
+	avatarUrl: string | null
+	role: 'owner' | 'member' | 'billing'
+	roleLabel: string
+}
+
+export type OrgInviteView = {
+	id: string
+	kind: string
+	role: 'owner' | 'member' | 'billing' | null
+	roleLabel: string | null
+	inviteeEmail: string | null
+	inviteeUsername: string | null
+	expiresAt: string
+}
+
+export type OrgInviteLinkView = {
+	id: string
+	role: 'member' | 'billing'
+	roleLabel: string
+	allowedEmailDomains: Array<string>
+	maxUses: number | null
+	useCount: number
+	expiresAt: string
+	createdAt: string
+	createdByUsername: string | null
+	createdByDisplayName: string | null
+}
+
+export type OrgMembersLoaderData = {
+	ok: true
+	org: OrgManagementOrg
+	members: Array<OrgMemberView>
+	invites: Array<OrgInviteView>
+	inviteLinks: Array<OrgInviteLinkView>
+	canManage: boolean
+}
+
+export type OrgInviteJoinLoaderData =
+	| {
+			ok: true
+			token: string
+			org: {
+				slug: string
+				displayName: string | null
+				avatarUrl: string | null
+			}
+			role: 'member' | 'billing'
+			roleLabel: string
+			alreadyMember: boolean
+			authenticated: boolean
+	  }
+	| {
+			ok: false
+			error: string
+			reason:
+				| 'missing'
+				| 'invalid'
+				| 'revoked'
+				| 'expired'
+				| 'exhausted'
+				| 'org_inactive'
+				| 'personal_org'
+	  }
+
+export type OrgTeamMemberView = {
+	userId: string
+	username: string | null
+	displayName: string | null
+	avatarUrl: string | null
+}
+
+export type OrgTeamView = {
+	id: string
+	slug: string
+	name: string
+	description: string | null
+	memberCount: number
+	members: Array<OrgTeamMemberView>
+}
+
+export type OrgTeamsLoaderData = {
+	ok: true
+	org: OrgManagementOrg
+	teams: Array<OrgTeamView>
+	/** Org members eligible to add to a team. */
+	orgMembers: Array<OrgMemberView>
+	canManage: boolean
+	canRemoveMembers: boolean
+}
+
+export type OrgGrantView = {
+	id: string
+	resourceType: string
+	resourceId: string
+	resourceLabel: string
+	subjectType: 'user' | 'team'
+	subjectId: string
+	subjectLabel: string
+	preset: string | null
+	presetLabel: string | null
+	permissions: Array<string>
+	createdAt: string
+}
+
+export type OrgGrantsLoaderData = {
+	ok: true
+	org: OrgManagementOrg
+	grants: Array<OrgGrantView>
+	canManage: boolean
+}
+
+export type OrgCollaboratorView = {
+	userId: string
+	username: string | null
+	displayName: string | null
+	avatarUrl: string | null
+	grants: Array<OrgGrantView>
+}
+
+export type OrgCollaboratorsLoaderData = {
+	ok: true
+	org: OrgManagementOrg
+	collaborators: Array<OrgCollaboratorView>
+	canManage: boolean
 }
 
 export type AccountConnectionListItem = {
@@ -1270,6 +1491,20 @@ export type AccountMcpOauthClientsLoaderData = {
 
 export type AccountConnectedAgentListItem = ConnectedMcpAgent & {
 	grantIds: Array<string>
+	connectionProfileName: string | null
+}
+
+export type AccountConnectionProfileView = {
+	id: string
+	name: string
+	grants: Array<{
+		resourceType: string
+		resourceId: string
+		actions: Array<'read' | 'execute' | 'write'>
+	}>
+	mcpServerUrl: string
+	createdAt: string
+	updatedAt: string
 }
 
 export type AccountConnectedAgentsLoaderData = {
@@ -1281,16 +1516,28 @@ export type AccountConnectedAgentsLoaderData = {
 	 * cannot send an unverified user into the authorize → 403 loop.
 	 */
 	mcpServerUrl: string
+	/** Experimenter-only. Absent/empty when the connection-profiles flag is off. */
+	connectionProfilesEnabled?: boolean
+	connectionProfiles?: Array<AccountConnectionProfileView>
+	/** Owned packages offered when editing profile grants (id + name). */
+	connectionProfilePackageOptions?: Array<{
+		id: string
+		name: string
+		kodyId: string
+	}>
 }
 
-type PackageWebhookVerification = {
-	type: 'hmac-sha256' | 'hmac-sha1'
-	header: string
-	secretName?: string
-	encoding: 'hex' | 'base64'
-	prefix?: string
-	signedPayload?: 'body' | 'timestamp.body'
-} | null
+type PackageWebhookVerification =
+	| {
+			type: 'hmac-sha256' | 'hmac-sha1'
+			header: string
+			secretName?: string
+			encoding: 'hex' | 'base64'
+			prefix?: string
+			signedPayload?: 'body' | 'timestamp.body'
+	  }
+	| { type: 'url-secret' }
+	| null
 
 type PackageWebhookReplay = {
 	timestampHeader?: string
@@ -1330,31 +1577,20 @@ type PackageWebhookChallengeProve =
 			signedPayload: 'v0.timestamp.body'
 	  }
 
-type PackageWebhookChallenge =
-	| {
-			type: 'subscription-challenge'
-			method: 'GET' | 'POST'
-			challenge: { in: 'query' | 'json'; key: string }
-			when?: {
-				query?: Record<string, string | Array<string>>
-				json?: Record<string, string>
-			}
-			prove?: PackageWebhookChallengeProve
-			respond:
-				| { as: 'text' }
-				| { as: 'json'; key: string }
-				| { as: 'json-hmac'; key: string }
-	  }
-	| {
-			type:
-				| 'x-activity-crc'
-				| 'websub-hub'
-				| 'meta-hub'
-				| 'strava-hub'
-				| 'slack-url-verification'
-			secretName?: string
-	  }
-	| null
+type PackageWebhookChallenge = {
+	type: 'subscription-challenge'
+	method: 'GET' | 'POST'
+	challenge: { in: 'query' | 'json'; key: string }
+	when?: {
+		query?: Record<string, string | Array<string>>
+		json?: Record<string, string>
+	}
+	prove?: PackageWebhookChallengeProve
+	respond:
+		| { as: 'text' }
+		| { as: 'json'; key: string }
+		| { as: 'json-hmac'; key: string }
+} | null
 
 /**
  * One declared package webhook joined with its minted URL state. Never
@@ -1672,6 +1908,7 @@ type AccountMcpServerListItem = {
 	state: string
 	connected: boolean
 	toolCount: number
+	/** Kody consent page for a pending authorization, never the provider URL. */
 	authUrl: string | null
 	error: string | null
 	hasRefreshToken: boolean
@@ -1684,6 +1921,11 @@ type AccountMcpServerListItem = {
 	catalogLogoPath: string | null
 	usageMode: 'any' | 'packages'
 	allowedPackageIds: Array<string>
+	/**
+	 * Public id of the pre-registered OAuth client, or null. The client
+	 * secret is never sent to the browser.
+	 */
+	oauthClientId: string | null
 }
 
 export type AccountMcpServersLoaderData = {
@@ -1700,15 +1942,36 @@ export type AccountMcpServersLoaderData = {
 	savedPackages: Array<{ id: string; kodyId: string }>
 }
 
-export type AccountPackageToken = {
-	id: string
-	name: string
-	exportNames: Array<string>
-	createdAt: string
-	updatedAt: string
-	lastUsedAt: string | null
-	revokedAt: string | null
+export type McpServerAuthorizeLoaderData = {
+	ok: true
+	orgSlug: string
+	serverId: string
+	serverName: string
+	serverUrl: string
+	/** The server's detail page, for Cancel and the not-pending state. */
+	serverHref: string
+	/** Null when the server is not waiting for approval. */
+	pending: {
+		authorizationServerHost: string
+		clientMode: McpOAuthClientMode
+		csrfToken: string
+	} | null
+	error: string | null
 }
+
+/**
+ * Continue on the MCP server consent page. The CSP keeps `form-action` on
+ * 'self', so the browser cannot follow a form redirect to the provider: the
+ * page posts with fetch and navigates to `authorizationUrl` itself.
+ */
+export type McpServerAuthorizeContinueResponse =
+	| { ok: true; authorizationUrl: string }
+	| {
+			ok: false
+			error: string
+			/** Fresh page data (a new form token) when the page can still be shown. */
+			consent: McpServerAuthorizeLoaderData | null
+	  }
 
 export type AccountPackageListingAhead = {
 	listingId: string
@@ -1755,10 +2018,14 @@ export type AccountPackageCommunityFork = {
 export type AccountPackageDetail = AccountPackageListItem & {
 	searchText: string | null
 	exports: Array<string> | null
-	tokens: Array<AccountPackageToken>
 	publishedCommit: string | null
 	/** Null for self-authored packages (no `community_forks` row). */
 	communityFork: AccountPackageCommunityFork | null
+	/**
+	 * This UTC month's past-include credits for this package only (owner
+	 * view). Always a row for owners (zero credits when nothing past include).
+	 */
+	creditAttribution?: CreditAttributionRow | null
 }
 
 type AccountPackagePublishDiffFile = {
@@ -1926,8 +2193,6 @@ export type AccountValuesLoaderData = {
 	selectedValueId: string | null
 }
 
-type AccountJobOwnership = 'ad-hoc' | 'package'
-
 /**
  * JSON-safe blob for job params (and similar free-form payloads). Remix
  * entry props require SerializableValue; `unknown` is not allowed.
@@ -1948,8 +2213,7 @@ type AccountJobSchedule =
 export type AccountJobListItem = {
 	id: string
 	name: string
-	ownership: AccountJobOwnership
-	packageId: string | null
+	packageId: string
 	packageName: string | null
 	packageKodyId: string | null
 	scheduleSummary: string
@@ -1957,7 +2221,6 @@ export type AccountJobListItem = {
 	timezone: string
 	enabled: boolean
 	killSwitchEnabled: boolean
-	preserved: boolean
 	expiresAt: string | null
 	expired: boolean
 	dueNow: boolean
@@ -2009,16 +2272,6 @@ export type AccountJobsLoaderData = {
 	selectedJob: AccountJobDetail | null
 	selectedJobId: string | null
 	alarm?: AccountJobsAlarm
-	retention: {
-		successOnceDays: number
-		failedOrNeverRanOnceDays: number
-		disabledRecurringDays: number
-		defaults: {
-			successOnce: number
-			failedOrNeverRanOnce: number
-			disabledRecurring: number
-		}
-	}
 }
 
 type AccountWorkflowSourceType = 'package' | 'inline'
@@ -2272,10 +2525,16 @@ export type AccountEmailLoaderData = {
 	classification: 'accepted' | 'quarantined' | null
 }
 
-type AuthProvidersLoaderData = {
+export type AuthProvidersLoaderData = {
 	ok: true
 	providers: Array<{ id: string; label: string }>
 	turnstileSiteKey: string | null
+}
+
+export type OAuthAuthorizeConsentOrg = {
+	slug: string
+	displayName: string | null
+	role: string | null
 }
 
 export type OAuthAuthorizeLoaderData =
@@ -2286,6 +2545,9 @@ export type OAuthAuthorizeLoaderData =
 			emailVerified: boolean | null
 			/** When true, authorize UI must collect credentials (prompt=login / max_age). */
 			requireCredentials: boolean
+			orgs: Array<OAuthAuthorizeConsentOrg>
+			/** From `?org=`, the sole accessible org, or null when multi and unspecified. */
+			selectedOrgSlug: string | null
 	  }
 	| {
 			ok: false
@@ -2322,8 +2584,6 @@ export type AppLoaderData = {
 	adminCommunityReports?: AdminCommunityReportsLoaderData
 	adminReservedUsernames?: AdminReservedUsernamesLoaderData
 	adminFeatureFlags?: AdminFeatureFlagsLoaderData
-	adminBanners?: AdminBannersLoaderData
-	siteBanner?: SiteBannerLoaderData
 	youtubeWatch?: YoutubeWatchLoaderData
 	landingHeroVideos?: Array<LandingHeroVideo>
 	adminPlatformIntegrations?: AdminPlatformIntegrationsLoaderData
@@ -2333,9 +2593,18 @@ export type AppLoaderData = {
 	adminPlatformFeedback?: AdminPlatformFeedbackLoaderData
 	adminSystemEmail?: AdminSystemEmailLoaderData
 	accountProfile?: AccountProfileLoaderData
+	accountOrganizations?: AccountOrganizationsLoaderData
+	accountOrganizationsNew?: AccountOrganizationsNewLoaderData
+	orgSettings?: OrgSettingsLoaderData
+	orgMembers?: OrgMembersLoaderData
+	orgInviteJoin?: OrgInviteJoinLoaderData
+	orgTeams?: OrgTeamsLoaderData
+	orgGrants?: OrgGrantsLoaderData
+	orgCollaborators?: OrgCollaboratorsLoaderData
 	accountConnections?: AccountConnectionsLoaderData
 	accountEmailDestinations?: AccountEmailDestinationsLoaderData
 	accountConnectedAgents?: AccountConnectedAgentsLoaderData
+	accountConnectionUsage?: AccountConnectionUsageLoaderData
 	accountWebhooks?: AccountWebhooksLoaderData
 	connectWebhookApply?: ConnectWebhookApplyLoaderData
 	onboarding?: OnboardingLoaderData
@@ -2346,6 +2615,7 @@ export type AppLoaderData = {
 	accountMcpOauthClients?: AccountMcpOauthClientsLoaderData
 	accountIntegrations?: AccountIntegrationsLoaderData
 	accountMcpServers?: AccountMcpServersLoaderData
+	mcpServerAuthorize?: McpServerAuthorizeLoaderData
 	accountPackages?: AccountPackagesLoaderData
 	accountPackageApprovePublish?: AccountPackageApprovePublishLoaderData
 	accountSecrets?: AccountSecretsLoaderData
@@ -2365,11 +2635,18 @@ export type AppLoaderData = {
 	accountUsage?: AccountUsageLoaderData
 	accountWaiting?: AccountWaitingLoaderData
 	accountExperiments?: AccountExperimentsLoaderData
-	accountShared?: AccountSharedLoaderData
-	packageShareApproveChanges?: PackageShareApproveChangesLoaderData
 	discord?: DiscordPageLoaderData
 	walkthroughHosts?: WalkthroughHostPick
 	onboardingAgentChooser?: OnboardingAgentChooserPick
+}
+
+type AccountBillingOrg = {
+	slug: string
+	/** Null for the signup organization, which shows the person's own name. */
+	displayName: string | null
+	personal: boolean
+	/** Owners and members: the Pro quantity checkout charges for. */
+	seats: number
 }
 
 export type AccountBillingLoaderData = {
@@ -2390,11 +2667,12 @@ export type AccountBillingLoaderData = {
 	purchasablePlans: Array<'pro'>
 	/** Stripe subscription uses the purchasable Pro price (credit wallet). */
 	creditsEligible: boolean
-	/** Deep link to the Credits section of the usage page. */
-	creditsHref: '/account/usage#credits'
-	/** Deep link to the account usage page (limits / consumption). */
-	usageHref: '/account/usage'
+	/** Deep link to the Credits section of the usage page; null off the signup org. */
+	creditsHref: '/account/usage#credits' | null
+	/** Account usage page (limits / consumption); null off the signup org. */
+	usageHref: '/account/usage' | null
 	referralProgram: ReferralProgramSummary | null
+	org: AccountBillingOrg
 	error?: string
 	/** Success notice mapped from `?billing=<code>` (e.g. a completed plan change). */
 	notice?: string
@@ -2454,6 +2732,11 @@ export type AccountUsageStoryData = {
 }
 
 /**
+ * Credits spent this period attributed to packages (and Ad hoc). Loaded with
+ * `/account/usage`; package pages reuse the same breakdown shape.
+ */
+
+/**
  * Credits section of `/account/usage`. Without a wallet (Free, retired
  * Standard/Pro, gift/referral overlays, manual grants) it is only the
  * switch-to-Pro prompt: no balance, no purchase UI.
@@ -2463,7 +2746,7 @@ export type AccountUsageCredits =
 			eligible: false
 			/** Checkout for the purchasable Pro is configured. */
 			canSwitchToPro: boolean
-			billingHref: '/account/billing'
+			billingHref: string
 	  }
 	| AccountUsageCreditsWallet
 
@@ -2567,6 +2850,11 @@ export type AccountUsageLoaderData = AccountUsageStoryData & {
 	computeOverage: AccountUsageComputeOverage
 	/** True only for the purchasable Pro with a Stripe customer. */
 	canBuyCredits: boolean
+	/**
+	 * Past-include credits by package (and Ad hoc). Directly under the period
+	 * credit total on `/account/usage`.
+	 */
+	whereItWent: CreditAttributionBreakdown
 	/** Null for operator plans, which have no credits story. */
 	credits: AccountUsageCredits | null
 	/** Credits outcome (top-up added, settings saved) shown in that section. */
@@ -2582,18 +2870,4 @@ export type AccountWaitingLoaderData = {
 export type AccountExperimentsLoaderData = {
 	ok: true
 	experimentsOptIn: boolean
-}
-
-export type AccountSharedLoaderData = {
-	ok: true
-	outbound: Array<PackageShareGrantLoaderView>
-	inbound: Array<PackageShareGrantLoaderView>
-}
-
-export type PackageShareApproveChangesLoaderData = {
-	ok: true
-	grant: PackageShareGrantLoaderView
-	acceptedCommit: string
-	currentCommit: string
-	files: Array<PackageShareFileChange>
 }

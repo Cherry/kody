@@ -1,7 +1,14 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { requestHasSessionCookie } from '#app/anonymous-html-cache.ts'
 import { redirectToLoginWhenUnauthenticated } from '#app/auth-redirect.ts'
 import { isNonProductionRuntime } from '#app/deployment-env.ts'
 import { type PackageAppOwner } from '#app/package-app-owner.ts'
+import {
+	logPackageAppAuthFailed,
+	logPackageAppHttpError,
+	withPackageAppRequestId,
+} from '#worker/package-runtime/package-app-diagnostics.ts'
 import { buildPackageAppNotFoundMessage } from '#worker/package-runtime/package-app-synthetic.ts'
 import {
 	createPackageCodeRequest,
@@ -30,7 +37,15 @@ export {
  * is never reached — see `packages/worker/src/app/package-app-origin.ts`.
  */
 export async function handlePackageAppRequest(request: Request, env: Env) {
+	const tagged = withPackageAppRequestId(request)
+	request = tagged.request
 	if (!isNonProductionRuntime(env)) {
+		logPackageAppHttpError({
+			request,
+			status: 500,
+			phase: 'inline-disabled',
+			runtimeRunId: null,
+		})
 		return new Response(
 			'Hosted package apps are unavailable. Inline package-app serving is disabled in production.',
 			{
@@ -50,10 +65,17 @@ export async function handlePackageAppRequest(request: Request, env: Env) {
 	}
 	const user = await readAuthenticatedAppUser(request, env)
 	if (!user) {
+		if (requestHasSessionCookie(request)) {
+			logPackageAppAuthFailed({
+				requestId: tagged.requestId,
+				method: request.method,
+				pathname: requestUrl.pathname,
+			})
+		}
 		return redirectToLoginWhenUnauthenticated(request, env)
 	}
 	const owner: PackageAppOwner = {
-		userId: user.mcpUser.userId,
+		userId: personalOrgId(user.mcpUser.userId),
 		username: user.username,
 		email: user.email,
 		displayName: user.displayName,
@@ -63,5 +85,11 @@ export async function handlePackageAppRequest(request: Request, env: Env) {
 		env,
 		packagePath,
 		owner,
+		// Only a person's own personal-org apps serve here, so they are its Owner.
+		visitor: {
+			userId: user.mcpUser.userId,
+			username: user.username,
+			role: 'owner',
+		},
 	})
 }

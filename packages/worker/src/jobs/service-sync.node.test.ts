@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi, afterEach } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
@@ -6,7 +10,6 @@ import {
 	isJobIntervalFloorError,
 } from '#worker/entitlements/errors.ts'
 import { planLimits } from '#universal/plans.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { saveValue } from '#mcp/values/service.ts'
 import { syncPackageJobsForPackage, updateJob } from './service.ts'
 import {
@@ -14,7 +17,6 @@ import {
 	refreshPackageJobRowIdentity,
 } from '@kody-internal/shared/jobs/repo.ts'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
-import { type PersistedJobCallerContext } from './types.ts'
 import {
 	identityMockModule,
 	resetJobServiceMocks,
@@ -22,9 +24,11 @@ import {
 	createDatabase,
 	createJobServiceTestEnv,
 	insertPublishedEntitySource,
-	insertLeftoverJob,
+	insertPackageJob,
 	syncSinglePackageJob,
+	withCallerUser,
 } from '#worker/test-support/jobs-service.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 vi.mock('#worker/repo/source-service.ts', async () =>
 	(
@@ -123,7 +127,7 @@ function seedPackageSource(input: {
 function mockBackgroundEmails(emailsByUserId: Record<string, string>) {
 	identityMockModule.resolveBackgroundMcpUser.mockImplementation(
 		async (_db: D1Database, id: string) => ({
-			userId: id,
+			userId: personIdFromStored(id),
 			email: emailsByUserId[id] ?? `${id}@example.com`,
 			username: id,
 			displayName: id,
@@ -132,20 +136,23 @@ function mockBackgroundEmails(emailsByUserId: Record<string, string>) {
 }
 
 function createPlanUserCallerContext(input: { userId: string; email: string }) {
-	return createMcpCallerContext({
-		baseUrl: 'https://example.com',
-		user: {
-			userId: input.userId,
-			email: input.email,
-			displayName: 'Plan User',
-		},
-		storageContext: {
-			sessionId: null,
-			appId: 'app-123',
-			packageId: null,
-			storageId: null,
-		},
-	}) as PersistedJobCallerContext
+	return withCallerUser(
+		createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl: 'https://example.com',
+			user: {
+				userId: personIdFromStored(input.userId),
+				email: input.email,
+				displayName: 'Plan User',
+			},
+			storageContext: {
+				sessionId: null,
+				appId: 'app-123',
+				packageId: null,
+				storageId: null,
+			},
+		}),
+	)
 }
 
 function syncQuotaJob(input: {
@@ -182,7 +189,7 @@ test('package job sync reports scheduler changes for add, update, and remove onl
 	const env = createJobServiceTestEnv({ APP_DB: createDatabase() })
 	const input = {
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		baseUrl: 'https://heykody.dev',
 		packageId: 'package-1',
 		sourceId: 'source-1',
@@ -249,7 +256,7 @@ test('package job sync preserves a runtime-enabled job when the manifest still s
 	const env = createJobServiceTestEnv({ APP_DB: createDatabase() })
 	const input = {
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		baseUrl: 'https://heykody.dev',
 		packageId: 'package-1',
 		sourceId: 'source-1',
@@ -288,7 +295,7 @@ test('package job sync preserves a runtime-enabled job when the manifest still s
 
 test('package job sync preflights the full addition set without partial inserts', async () => {
 	const email = 'package-sync-free@example.com'
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const now = '2026-08-08T12:00:00.000Z'
 	const existingJobCount = planLimits.free.maxScheduledJobs - 1
 	const db = createDatabase({
@@ -306,7 +313,6 @@ test('package job sync preflights the full addition set without partial inserts'
 			timezone: 'UTC',
 			enabled: 1,
 			kill_switch_enabled: 0,
-			preserved: 0,
 			expires_at: null,
 			caller_context_json: JSON.stringify(
 				createPlanUserCallerContext({ userId, email }),
@@ -320,7 +326,7 @@ test('package job sync preflights the full addition set without partial inserts'
 	})
 	const env = createJobServiceTestEnv({ APP_DB: db })
 	const target = {
-		userId,
+		userId: ownerIdFromStored(userId),
 		packageId: 'new-package',
 		sourceId: 'new-package-source',
 	}
@@ -355,12 +361,11 @@ test('package job sync preflights the full addition set without partial inserts'
 
 test('free and public Standard plans reject new or changed schedules faster than 15 minutes, preflight whole manifests, and grandfather existing jobs', async () => {
 	const email = 'interval-floor@example.com'
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const publicStandardEmail = 'public-standard-interval@example.com'
-	const publicStandardUserId =
-		await createStableUserIdFromEmail(publicStandardEmail)
+	const publicStandardUserId = testStableUserIdFromEmail(publicStandardEmail)
 	const paidEmail = 'interval-floor-paid@example.com'
-	const paidUserId = await createStableUserIdFromEmail(paidEmail)
+	const paidUserId = testStableUserIdFromEmail(paidEmail)
 	mockBackgroundEmails({
 		[userId]: email,
 		[publicStandardUserId]: publicStandardEmail,
@@ -408,7 +413,7 @@ test('free and public Standard plans reject new or changed schedules faster than
 
 	// A later too-fast job in the same manifest means nothing is written.
 	const mixed = {
-		userId,
+		userId: ownerIdFromStored(userId),
 		packageId: 'mixed-interval-package',
 		sourceId: 'mixed-interval-source',
 	}
@@ -442,13 +447,12 @@ test('free and public Standard plans reject new or changed schedules faster than
 	expect(await listJobRowsByUserId(env.APP_DB, userId)).toEqual(before)
 
 	const callerContext = createPlanUserCallerContext({ userId, email })
-	const grandfathered = await insertLeftoverJob({
+	const grandfathered = await insertPackageJob({
 		env,
 		callerContext,
 		body: {
-			name: 'Legacy five-minute poller',
+			name: 'five-minute-poller',
 			schedule: { type: 'interval', every: '5m' },
-			sourceId: 'legacy-5m-source',
 		},
 	})
 	const updateGrandfathered = (body: Record<string, unknown>) =>
@@ -474,9 +478,9 @@ test('free and public Standard plans reject new or changed schedules faster than
 
 test('syncPackageJobsForPackage enforces scheduled job entitlements for plan users and denies at the max plan ceiling', async () => {
 	const plannedEmail = 'planned@example.com'
-	const plannedUserId = await createStableUserIdFromEmail(plannedEmail)
+	const plannedUserId = testStableUserIdFromEmail(plannedEmail)
 	const maxEmail = 'max@example.com'
-	const maxUserId = await createStableUserIdFromEmail(maxEmail)
+	const maxUserId = testStableUserIdFromEmail(maxEmail)
 	mockBackgroundEmails({
 		[plannedUserId]: plannedEmail,
 		[maxUserId]: maxEmail,
@@ -496,11 +500,11 @@ test('syncPackageJobsForPackage enforces scheduled job entitlements for plan use
 	})
 	const freeLimit = planLimits.free.maxScheduledJobs
 	for (let index = 0; index < freeLimit; index += 1) {
-		await insertLeftoverJob({
+		await insertPackageJob({
 			env: plannedEnv,
 			callerContext: plannedCallerContext,
 			body: {
-				name: `Quota job ${index}`,
+				name: `quota-job-${index}`,
 				schedule: { type: 'interval', every: '15m' },
 			},
 		})
@@ -542,7 +546,7 @@ test('syncPackageJobsForPackage enforces scheduled job entitlements for plan use
 
 test('blank-email package context uses the max plan for storage writes and nested job scheduling', async () => {
 	const email = 'package-owner@example.com'
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const meter = createInMemoryUserMeterEnv()
 	const db = createDatabase({
 		users: [{ email, plan: 'max', stable_user_id: userId }],
@@ -566,21 +570,24 @@ test('blank-email package context uses the max plan for storage writes and neste
 		packageId: 'package-1',
 		storageId: 'job:package-job:package-1:parent',
 	}
-	const stalePackageContext = createMcpCallerContext({
-		baseUrl: 'https://example.com',
-		executionOrigin: 'background',
-		user: {
-			userId,
-			email: '',
-			displayName: 'Package Owner',
-		},
-		storageContext: stalePackageStorageContext,
-	}) as PersistedJobCallerContext
+	const stalePackageContext = withCallerUser(
+		createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl: 'https://example.com',
+			executionOrigin: 'background',
+			user: {
+				userId: personIdFromStored(userId),
+				email: '',
+				displayName: 'Package Owner',
+			},
+			storageContext: stalePackageStorageContext,
+		}),
+	)
 
 	await expect(
 		saveValue({
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			userEmail: stalePackageContext.user.email,
 			scope: 'app',
 			name: 'checkpoint',
@@ -589,7 +596,7 @@ test('blank-email package context uses the max plan for storage writes and neste
 		}),
 	).resolves.toMatchObject({ name: 'checkpoint' })
 	identityMockModule.resolveBackgroundMcpUser.mockResolvedValueOnce({
-		userId,
+		userId: personIdFromStored(userId),
 		email,
 		username: userId,
 		displayName: 'Package Owner',

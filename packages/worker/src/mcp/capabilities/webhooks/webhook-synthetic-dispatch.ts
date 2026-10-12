@@ -1,8 +1,12 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { dispatchSyntheticWebhookForUser } from '#worker/webhooks/service.ts'
 import { webhookSyntheticDispatchCapabilityName } from '#worker/webhooks/synthetic.ts'
 import { requirePackageRef, webhookPackageRefSchema } from './shared.ts'
@@ -45,6 +49,7 @@ export const webhookSyntheticDispatchCapability = defineDomainCapability(
 	capabilityDomainNames.webhooks,
 	{
 		name: webhookSyntheticDispatchCapabilityName,
+		orgPermission: 'package:execute',
 		description:
 			'Interactive-MCP post-publish smoke test for one minted package.json#kody.webhooks export. Skips public URL and HMAC, invokes the bound export with a caller fixture, marks the Activity webhook run synthetic: true, and counts against automation usage like a normal delivery. Side effects are real. Unavailable from package jobs, subscriptions, webhooks, or other package runtimes. Does not return url or url_secret. Distinct from any package-local dryRun field on trusted-client POSTs.',
 		keywords: [
@@ -118,11 +123,12 @@ export const webhookSyntheticDispatchCapability = defineDomainCapability(
 				.optional(),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			assertDirectMcpCaller(ctx.callerContext)
 			const dispatched = await dispatchSyntheticWebhookForUser({
 				env: ctx.env,
-				userId: user.userId,
+				requestContext: requireMcpRequest(ctx.callerContext),
+				userId: ownerIdFromCaller(ctx.callerContext),
 				baseUrl: ctx.callerContext.baseUrl,
 				packageId: args.packageId,
 				kodyId: args.kodyId,

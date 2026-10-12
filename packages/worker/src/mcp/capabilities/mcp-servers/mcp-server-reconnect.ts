@@ -1,15 +1,18 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeMcpServer } from '#mcp/capabilities/integrations/authorize-integration.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { createMcpClientHubClient } from '#worker/mcp-client/hub-client.ts'
+import { buildMcpServerAuthorizeUrl } from '#worker/mcp-client/authorize-consent.ts'
 import { enrichMcpOAuthProviderError } from '#worker/mcp-client/oauth-provider-error.ts'
 import {
 	persistMcpServerLastErrorIfChanged,
 	resolveMcpServerOAuthClientUrls,
 } from '#worker/mcp-client/settings-service.ts'
-import { resolveMcpServerSetting } from './shared.ts'
+import { mcpServerCallerOrgSlug, resolveMcpServerSetting } from './shared.ts'
 
 const outputSchema = z.object({
 	id: z.string(),
@@ -27,8 +30,9 @@ export const mcpServerReconnectCapability = defineDomainCapability(
 	capabilityDomainNames.mcpServers,
 	{
 		name: 'mcpServerReconnect',
+		orgPermission: 'integration:write',
 		description:
-			'Retry connecting to a saved MCP server that is failed or disconnected. Tries stored OAuth refresh first; an authUrl means the user must re-authorize. Surfaces a durable lastError when refresh failed.',
+			'Retry connecting to a saved MCP server that is failed or disconnected. Tries stored OAuth refresh first; an authUrl is the Kody consent page the user opens to re-authorize. Surfaces a durable lastError when refresh failed.',
 		keywords: ['mcp', 'server', 'reconnect', 'retry', 'connection', 'client'],
 		readOnly: false,
 		idempotent: true,
@@ -38,19 +42,20 @@ export const mcpServerReconnectCapability = defineDomainCapability(
 		}),
 		outputSchema,
 		async handler(args: { server: string }, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const setting = await resolveMcpServerSetting({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				server: args.server,
 			})
+			await authorizeMcpServer(ctx, 'integration:write', setting)
 			const oauth = resolveMcpServerOAuthClientUrls({
 				env: ctx.env,
 				requestUrl: ctx.callerContext.baseUrl,
 			})
 			const hub = createMcpClientHubClient({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				waitUntil: ctx.waitUntil,
 			})
 			const result = await hub.reconnectServer({
@@ -59,7 +64,7 @@ export const mcpServerReconnectCapability = defineDomainCapability(
 			})
 			await persistMcpServerLastErrorIfChanged({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				id: setting.id,
 				state: result.state,
 				lastError: result.lastError ?? null,
@@ -69,7 +74,13 @@ export const mcpServerReconnectCapability = defineDomainCapability(
 				name: setting.name,
 				state: result.state,
 				toolCount: result.toolCount,
-				authUrl: result.authUrl,
+				authUrl: result.authorizationPending
+					? buildMcpServerAuthorizeUrl({
+							appOrigin: oauth.clientOrigin,
+							orgSlug: mcpServerCallerOrgSlug(ctx.callerContext),
+							serverId: setting.id,
+						})
+					: null,
 				error: result.error
 					? enrichMcpOAuthProviderError(result.error, oauth)
 					: null,

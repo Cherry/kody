@@ -21,7 +21,8 @@ import {
 } from '#worker/entitlements/service.ts'
 import { resolveStripePriceCatalog } from '#worker/billing/stripe-price-catalog.ts'
 import { createKvCachifiedCache } from '#worker/kv-cachified.ts'
-import { resolveUserStableId } from '#worker/user-id.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export const adminUsageMetrics = [
 	'execute',
@@ -77,14 +78,16 @@ export async function loadAdminUserUsageData(
 	now: Date = new Date(),
 ): Promise<AdminUserUsageLoaderData | null> {
 	const row = await env.APP_DB.prepare(
-		`SELECT id, username, email, stripe_price_id, stable_user_id, ${userEntitlementColumnsSql()}
-		 FROM users WHERE stable_user_id = ?`,
+		`SELECT u.id, u.username, u.email, o.stripe_price_id, u.stable_user_id, ${userEntitlementColumnsSql('o')}
+		 FROM users u
+		 INNER JOIN orgs o ON o.id = u.stable_user_id
+		 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}${andLiveDeletedAtSql('o')}`,
 	)
 		.bind(stableUserId)
 		.first<AdminUserUsageUserRow>()
 	if (!row) return null
 
-	const usageUserId = resolveUserStableId(row)
+	const usageUserId = ownerIdFromStored(row.stable_user_id)
 	const entitlement = await resolveUserEntitlementFromRow({
 		db: env.APP_DB,
 		stableUserId: usageUserId,
@@ -116,9 +119,7 @@ export async function loadAdminUserUsageData(
 			readAdminEntitlementConsumption({
 				env,
 				usageUserId,
-				plan,
-				ladder: entitlement.ladder,
-				creditWallet: entitlement.creditWallet,
+				entitlement,
 				now,
 			}),
 			userHasAdminRole(env.APP_DB, usageUserId),
@@ -219,7 +220,7 @@ async function userHasAdminRole(db: D1Database, stableUserId: string) {
 			 INNER JOIN roles r ON r.id = ur.role_id
 			 WHERE u.stable_user_id = ?
 				AND r.name = 'admin'
-				AND u.deleting_at IS NULL`,
+				AND u.deleting_at IS NULL${andLiveDeletedAtSql()}`,
 		)
 		.bind(stableUserId)
 		.first<{ present: number }>()

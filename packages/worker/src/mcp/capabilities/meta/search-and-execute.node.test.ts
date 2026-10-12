@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as AccessControlModule from '#mcp/capabilities/access-control.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -39,9 +40,10 @@ test('execute capability runs modules through the shared execute runtime', async
 	})
 
 	const callerContext = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://heykody.dev',
 		user: {
-			userId: 'user-1',
+			userId: personIdFromStored('user-1'),
 			email: 'user@example.com',
 			displayName: 'User',
 		},

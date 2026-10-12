@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -10,15 +14,20 @@ vi.mock('#worker/repo/repo-session-rpc.ts', () => ({
 	repoSessionRpc: (...args: Array<unknown>) => mocks.repoSessionRpc(...args),
 }))
 
+vi.mock('./authorize-repo-session-package.ts', () => ({
+	authorizeRepoSessionPackageRead: async () => undefined,
+}))
+
 const { repoTreeCapability } = await import('./repo-tree.ts')
 
 function createContext() {
 	return {
 		env: {} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-alice',
+				userId: personIdFromStored('user-alice'),
 				email: 'alice@example.com',
 				displayName: 'Alice',
 			},
@@ -56,7 +65,7 @@ test('repoTree maps missing-path ENOENT to McpCallerError and summarizes existin
 	})
 	expect(missing).toHaveBeenCalledWith({
 		sessionId: 'session-1',
-		userId: 'user-alice',
+		userId: ownerIdFromStored('user-alice'),
 		path: 'docs',
 		maxDepth: undefined,
 	})

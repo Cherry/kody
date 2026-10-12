@@ -10,6 +10,11 @@ import { loadOnboardingData } from '#app/onboarding-data.ts'
 import { loadSessionInfo } from '#app/session-info.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
+import {
+	isOrgBindingMembershipQuery,
+	mockPersonalOrgBindingRow,
+} from '#worker/test-support/org-binding-query.ts'
+import { silenceExpectedConsoleWarns } from '#worker/test-support/console-spies.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import type * as OnboardingData from '#app/onboarding-data.ts'
 
@@ -74,7 +79,13 @@ test('authenticated home SSR prefetches flags while loading page data', async ()
 					query,
 					bind: () => statement,
 					all: async () => ({ results: rowsFor(query), meta: { changes: 0 } }),
-					first: async () => null,
+					first: async () => {
+						const normalized = query.replace(/\s+/g, ' ').trim().toLowerCase()
+						if (isOrgBindingMembershipQuery(normalized)) {
+							return mockPersonalOrgBindingRow(stableUserId, userRow.username)
+						}
+						return null
+					},
 					run: async () => ({ meta: { changes: 0 } }),
 				}
 				return statement
@@ -96,6 +107,10 @@ test('authenticated home SSR prefetches flags while loading page data', async ()
 		return Response.json({ session: loaded.session })
 	})
 
+	silenceExpectedConsoleWarns(['landing-hero-videos'])
+	const fetchMock = vi
+		.spyOn(globalThis, 'fetch')
+		.mockRejectedValue(new Error('offline'))
 	const response = await createHomeHandler(env).handler(
 		new RequestContext(request),
 	)
@@ -106,15 +121,15 @@ test('authenticated home SSR prefetches flags while loading page data', async ()
 	expect(body.session.username).toBe('home-user')
 	expect(body.session.featureFlags).toEqual({
 		'demo-indicator': true,
-		'package-share-grants': false,
-		'secret-providers': false,
 		'jev-search-rerank': false,
 		'execute-invoke': true,
+		'connection-profiles': false,
+		'mcp-skills-extension': false,
+		'mcp-events-extension': false,
 	})
 	expect(counts.batchSizes).toEqual([2, 3])
 	expect(loadOnboardingData).not.toHaveBeenCalled()
 	const homeInput = vi.mocked(renderAppPage).mock.calls.at(-1)?.[0]
-	expect(homeInput?.listedBanners).toEqual(expect.any(Promise))
 	expect(homeInput?.loaderData?.onboarding).toMatchObject({
 		loggedIn: true,
 		username: 'home-user',
@@ -126,10 +141,15 @@ test('authenticated home SSR prefetches flags while loading page data', async ()
 	expect(
 		homeInput?.loaderData?.onboarding?.discoveryPrompt.length,
 	).toBeGreaterThan(0)
+	fetchMock.mockRestore()
 })
 
 test('anonymous home SSR omits the unused onboarding chooser catalog', async () => {
 	vi.mocked(renderAppPage).mockResolvedValue(new Response('ok'))
+	silenceExpectedConsoleWarns(['landing-hero-videos'])
+	const fetchMock = vi
+		.spyOn(globalThis, 'fetch')
+		.mockRejectedValue(new Error('offline'))
 
 	setAuthSessionSecret(testCookieSecret)
 	const response = await createHomeHandler({
@@ -141,4 +161,5 @@ test('anonymous home SSR omits the unused onboarding chooser catalog', async () 
 		0,
 	)
 	expect(input?.loaderData?.landingHeroVideos).toEqual([])
+	fetchMock.mockRestore()
 })

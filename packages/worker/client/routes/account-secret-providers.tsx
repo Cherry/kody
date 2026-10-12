@@ -1,3 +1,4 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { type Handle, css } from 'remix/component'
 import { on } from '#client/event-mixin.ts'
 import { navigate, readCurrentRouterHref } from '#client/client-router.tsx'
@@ -15,6 +16,7 @@ import {
 	AccountPageHeader,
 	accountInputCss,
 } from '#client/routes/account-management-components.tsx'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { type AccountSecretProvidersLoaderData } from '#universal/loader-data.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
@@ -43,6 +45,7 @@ async function loadSecretProviders(
 	const response = await fetch(apiUrlForHref(href), {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(href),
 		signal,
 	})
 	if (response.status === 401) {
@@ -65,13 +68,16 @@ export async function accountSecretProvidersRouteLoader(
 	const response = await fetch(apiUrlForHref(url.pathname + url.search), {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(url.href),
 		signal,
 	})
 	if (response.status === 401) {
 		return routeLoaderRedirect('/login')
 	}
 	if (response.status === 404) {
-		return routeLoaderRedirect(routes.accountSecrets.href())
+		return routeLoaderRedirect(
+			relocateAccountHref('/account/secrets', url.href),
+		)
 	}
 	const payload = await readJson<AccountSecretProvidersLoaderData>(response)
 	if (!response.ok || !payload?.ok) {
@@ -91,7 +97,9 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 					return routeDataRedirect('/login')
 				}
 				if (error instanceof Error && error.message === 'Not enabled.') {
-					return routeDataRedirect(routes.accountSecrets.href())
+					return routeDataRedirect(
+						relocateAccountHref('/account/secrets', href),
+					)
 				}
 				throw error
 			}
@@ -132,12 +140,6 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 			credentials: 'include',
 			body: JSON.stringify(body),
 		})
-		if (response.status === 404) {
-			status = 'error'
-			message = 'External secret providers are not enabled for this account.'
-			handle.update()
-			return
-		}
 		const result = await readJson<{ ok?: boolean; error?: string }>(response)
 		if (!response.ok || !result?.ok) {
 			status = 'error'
@@ -227,7 +229,10 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 														ref: approval.canonicalRef,
 														packageId: approval.packageId,
 													},
-													routes.accountSecretProviders.href(),
+													relocateAccountHref(
+														'/account/secret-providers',
+														readCurrentRouterHref(handle),
+													),
 												)
 											},
 										},
@@ -252,7 +257,10 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 												ref: approval.canonicalRef,
 												packageId: approval.packageId,
 											},
-											routes.accountSecretProviders.href(),
+											relocateAccountHref(
+												'/account/secret-providers',
+												readCurrentRouterHref(handle),
+											),
 										)
 									}),
 								]}
@@ -300,7 +308,10 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 														action: 'unbind',
 														provider: binding.provider,
 													},
-													routes.accountSecretProviders.href(),
+													relocateAccountHref(
+														'/account/secret-providers',
+														readCurrentRouterHref(handle),
+													),
 												)
 											}),
 										]}
@@ -356,7 +367,10 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 																ref: grant.canonicalRef,
 																packageId: grant.packageId,
 															},
-															routes.accountSecretProviders.href(),
+															relocateAccountHref(
+																'/account/secret-providers',
+																readCurrentRouterHref(handle),
+															),
 														)
 													},
 												},
@@ -479,7 +493,10 @@ export function AccountSecretProvidersRoute(handle: Handle) {
 										doorSecretName: bindDoorSecret,
 										config,
 									},
-									routes.accountSecretProviders.href(),
+									relocateAccountHref(
+										'/account/secret-providers',
+										readCurrentRouterHref(handle),
+									),
 								)
 							}),
 						]}

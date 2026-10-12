@@ -1,6 +1,13 @@
 import { loadAccountPackageDetail } from '#app/account-packages-data.ts'
 import { loadCommunityDetailData } from '#app/community-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import {
+	viewerCanDeleteSavedPackage,
+	viewerCanManageSavedPackage,
+	viewerCanPublishSavedPackage,
+	viewerCanReadSavedPackage,
+	viewerIsSavedPackageOrgOwner,
+} from '#app/package-viewer-access.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import { getUserSocialRowByUsername } from '#worker/community/profile-repo.ts'
 import {
@@ -15,11 +22,6 @@ import {
 	type AccountPackageDetail,
 	type CommunityDetailLoaderData,
 } from '#universal/loader-data.ts'
-import { type PackageShareGrantLoaderView } from '#universal/package-share.ts'
-import {
-	loadViewerPackageShare,
-	toPackageShareGrantLoaderView,
-} from '#worker/package-registry/share-grants.ts'
 
 export type PackagePageAccess =
 	| { kind: 'redirect'; to: string; shared: boolean }
@@ -31,11 +33,16 @@ export type PackagePageAccess =
 			kodyId: string
 			listing: CommunityDetailLoaderData | null
 			ownerPackage: AccountPackageDetail | null
+			/** The viewer may open the private view (details, source files). */
 			viewerIsOwner: boolean
+			/** The viewer may change the package (settings, publish). */
+			viewerCanManage: boolean
+			viewerCanPublish: boolean
+			viewerCanDelete: boolean
+			/** May adopt a community fork (org owner only; widens secret access). */
+			viewerCanAdoptCommunityFork: boolean
 			loggedIn: boolean
 			invocationUrlOrigin: string
-			shareGrant: PackageShareGrantLoaderView | null
-			canReadOwnerSource: boolean
 			ownerUserId: string
 			/** True when `/@owner` is publicly reachable. */
 			ownerProfilePublic: boolean
@@ -43,16 +50,10 @@ export type PackagePageAccess =
 
 export type PackagePagePrivacySource = {
 	ownerPackage: { isPrivate: boolean } | null
-	shareGrant: PackageShareGrantLoaderView | null
 }
 
-/**
- * Pending share guests do not load `ownerPackage` (no source read until
- * accept). Treat a share grant as private so the details frame does not
- * fall through to the unlisted-public "Not published" mark.
- */
 export function packagePageIsPrivate(page: PackagePagePrivacySource): boolean {
-	return page.ownerPackage?.isPrivate ?? page.shareGrant != null
+	return page.ownerPackage?.isPrivate ?? false
 }
 
 function isPublicSavedPackage(pkg: { hidden: boolean; isPrivate: boolean }) {
@@ -126,14 +127,20 @@ async function loadPackagePageUncached(input: {
 	])
 	if (!target) return { kind: 'not_found' }
 
-	const viewerUserId = user?.mcpUser.userId ?? null
+	const viewer = user?.mcpUser ?? null
 
 	if (target.kind === 'redirect') {
-		const viewerOwnsRedirect =
-			viewerUserId != null && viewerUserId === target.userId
 		// A listing move is public. An unlisted rename must not leak the new
-		// pair: only the owner is sent to the current URL.
-		if (!target.listingId && !viewerOwnsRedirect) {
+		// pair: only viewers who can see the package are sent to the current URL.
+		if (
+			!target.listingId &&
+			!(await viewerCanReadSavedPackage({
+				env: input.env,
+				viewer,
+				ownerId: target.userId,
+				packageId: target.packageId,
+			}))
+		) {
 			return { kind: 'not_found' }
 		}
 		const listingKodyId = target.listingKodyId
@@ -151,7 +158,14 @@ async function loadPackagePageUncached(input: {
 		}
 	}
 
-	const viewerIsOwner = viewerUserId != null && viewerUserId === target.userId
+	const viewerIsOwner = target.savedPackage
+		? await viewerCanReadSavedPackage({
+				env: input.env,
+				viewer,
+				ownerId: target.userId,
+				packageId: target.savedPackage.id,
+			})
+		: false
 	const listingKodyId = target.listingKodyId
 	const savedKodyId = target.savedPackage?.kodyId ?? null
 	if (listingKodyId && savedKodyId && !sameKodyId(listingKodyId, savedKodyId)) {
@@ -184,25 +198,39 @@ async function loadPackagePageUncached(input: {
 		requestUrl: input.request.url,
 	})
 
-	const shareGrantView = target.savedPackage
-		? await loadViewerPackageShare({
-				db: input.env.APP_DB,
-				packageId: target.savedPackage.id,
-				viewer: user
-					? {
-							userId: user.mcpUser.userId,
-							email: user.email,
-							emailVerified: user.emailVerified,
-						}
-					: null,
-			})
-		: null
-	const shareGrant = shareGrantView
-		? toPackageShareGrantLoaderView(shareGrantView)
-		: null
-	const shareCanReadSource = shareGrant?.status === 'accepted'
-
 	if (viewerIsOwner && target.savedPackage) {
+		const packageId = target.savedPackage.id
+		const ownerId = target.userId
+		const [
+			viewerCanManage,
+			viewerCanPublish,
+			viewerCanDelete,
+			viewerCanAdoptCommunityFork,
+		] = await Promise.all([
+			viewerCanManageSavedPackage({
+				env: input.env,
+				viewer,
+				ownerId,
+				packageId,
+			}),
+			viewerCanPublishSavedPackage({
+				env: input.env,
+				viewer,
+				ownerId,
+				packageId,
+			}),
+			viewerCanDeleteSavedPackage({
+				env: input.env,
+				viewer,
+				ownerId,
+				packageId,
+			}),
+			viewerIsSavedPackageOrgOwner({
+				env: input.env,
+				viewer,
+				ownerId,
+			}),
+		])
 		const [listing, ownerPackage] = await Promise.all([
 			target.listingId
 				? loadCommunityDetailData(input.env, input.request, target.listingId)
@@ -211,6 +239,9 @@ async function loadPackagePageUncached(input: {
 				env: input.env,
 				requestUrl: input.request.url,
 				userId: target.userId,
+				...(viewerCanManage
+					? { creditAttributionUsername: target.username }
+					: {}),
 				packageId: target.savedPackage.id,
 			}),
 		])
@@ -226,49 +257,12 @@ async function loadPackagePageUncached(input: {
 			listing,
 			ownerPackage,
 			viewerIsOwner: true,
+			viewerCanManage,
+			viewerCanPublish,
+			viewerCanDelete,
+			viewerCanAdoptCommunityFork,
 			loggedIn: true,
 			invocationUrlOrigin,
-			shareGrant: null,
-			canReadOwnerSource: true,
-			ownerUserId: target.userId,
-			ownerProfilePublic,
-		}
-	}
-
-	if (
-		shareGrant &&
-		(shareGrant.status === 'pending' || shareGrant.status === 'accepted') &&
-		target.savedPackage
-	) {
-		const [listing, ownerPackage] = await Promise.all([
-			target.listingId
-				? loadCommunityDetailData(input.env, input.request, target.listingId)
-				: Promise.resolve(null),
-			shareCanReadSource
-				? loadAccountPackageDetail({
-						env: input.env,
-						requestUrl: input.request.url,
-						userId: target.userId,
-						packageId: target.savedPackage.id,
-					})
-				: Promise.resolve(null),
-		])
-		const ownerProfilePublic = await resolvePackagePageOwnerProfilePublic({
-			env: input.env,
-			username: target.username,
-			listing,
-		})
-		return {
-			kind: 'page',
-			username: target.username,
-			kodyId: target.kodyId,
-			listing,
-			ownerPackage,
-			viewerIsOwner: false,
-			loggedIn: true,
-			invocationUrlOrigin,
-			shareGrant,
-			canReadOwnerSource: shareCanReadSource,
 			ownerUserId: target.userId,
 			ownerProfilePublic,
 		}
@@ -288,10 +282,12 @@ async function loadPackagePageUncached(input: {
 			listing,
 			ownerPackage: null,
 			viewerIsOwner: false,
+			viewerCanManage: false,
+			viewerCanPublish: false,
+			viewerCanDelete: false,
+			viewerCanAdoptCommunityFork: false,
 			loggedIn: Boolean(user),
 			invocationUrlOrigin,
-			shareGrant,
-			canReadOwnerSource: false,
 			ownerUserId: target.userId,
 			ownerProfilePublic: listing.ownerProfilePublic,
 		}

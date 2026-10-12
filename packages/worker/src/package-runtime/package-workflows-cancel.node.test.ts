@@ -1,4 +1,6 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestLineage } from '#worker/test-support/request-context.ts'
 import { type WorkflowProjectionUpsertInput } from '#worker/run-records/service.ts'
 import { creatingWorkflowProjectionStatus } from '#worker/run-records/workflow-projection.ts'
 import {
@@ -6,6 +8,7 @@ import {
 	createWorkflowRunsDatabase,
 } from '#worker/test-support/package-workflows.ts'
 import {
+	cancelActiveWorkflowRunsForUser,
 	cancelWorkflowRunForUser,
 	createDynamicCallableWorkflow,
 	dynamicCallableWorkflowsBindingName,
@@ -32,6 +35,10 @@ vi.mock('#worker/run-records/service.ts', async (importOriginal) => {
 						projection: WorkflowProjectionUpsertInput
 					},
 				]),
+			),
+		releaseWorkflowProjectionIdempotencyKey: (...args: Array<unknown>) =>
+			runRecordMocks.releaseWorkflowProjectionIdempotencyKey(
+				...(args as [{ env: Env; userId: string; id: string }]),
 			),
 		getWorkflowProjection: (...args: Array<unknown>) =>
 			runRecordMocks.getWorkflowProjection(
@@ -140,7 +147,8 @@ function createCancelTestEnv() {
 		) =>
 			createDynamicCallableWorkflow({
 				env,
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
+				lineage: sessionRequestLineage('user-1'),
 				packageContext: null,
 				body: {
 					code: 'export default async function main() { return { ok: true } }',
@@ -149,11 +157,15 @@ function createCancelTestEnv() {
 				},
 			}),
 		cancel: (workflowRunId: string, userId = 'user-1') =>
-			cancelWorkflowRunForUser({ env, userId, workflowRunId }),
+			cancelWorkflowRunForUser({
+				env,
+				userId: ownerIdFromStored(userId),
+				workflowRunId,
+			}),
 		seedProjection: (id: string, idempotencyKey: string, status: string) =>
 			runRecordMocks.upsertWorkflowProjection({
 				env,
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				projection: {
 					id,
 					bindingName: dynamicCallableWorkflowsBindingName,
@@ -196,7 +208,11 @@ test('cancelWorkflowRunForUser cancels a queued run and is idempotent', async ()
 		bindingName: dynamicCallableWorkflowsBindingName,
 	})
 	expect(
-		await listWorkflowRunsForUser({ env, userId: 'user-1', limit: 10 }),
+		await listWorkflowRunsForUser({
+			env,
+			userId: ownerIdFromStored('user-1'),
+			limit: 10,
+		}),
 	).toEqual([expect.objectContaining({ id: created.id, status: 'cancelled' })])
 
 	expect(await cancel(created.id)).toMatchObject({
@@ -290,7 +306,7 @@ test('cancel projection loses to a concurrent complete write', async () => {
 			).toISOString()
 			await runRecordMocks.upsertWorkflowProjection({
 				env,
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				projection: {
 					...existing,
 					status: 'complete',
@@ -348,4 +364,38 @@ test('cancelling a run whose engine instance is missing projects cancelled unles
 		status: creatingWorkflowProjectionStatus,
 		completedAt: null,
 	})
+})
+
+test('cancelActiveWorkflowRunsForUser terminates every active run for one user only', async () => {
+	const { env, binding, createInline, seedProjection } = createCancelTestEnv()
+	const queued = await createInline('delete-active-queued')
+	await seedProjection('retained-running', 'delete-retained-running', 'running')
+	await seedProjection('already-complete', 'delete-complete', 'complete')
+	await runRecordMocks.upsertWorkflowProjection({
+		env,
+		userId: ownerIdFromStored('user-2'),
+		projection: {
+			id: 'other-user-queued',
+			bindingName: dynamicCallableWorkflowsBindingName,
+			sourceType: 'inline',
+			workflowName: 'inline-code',
+			idempotencyKey: 'other-user-queued',
+			runAt: '2026-05-03T12:34:56.000Z',
+			status: 'queued',
+		},
+	})
+
+	expect(
+		await cancelActiveWorkflowRunsForUser({
+			env,
+			userId: ownerIdFromStored('user-1'),
+		}),
+	).toBe(2)
+	expect(binding.terminateCalls).toEqual([queued.id])
+	expect(findRun(queued.id)?.status).toBe('cancelled')
+	expect(findRun('retained-running')?.status).toBe('cancelled')
+	expect(findRun('already-complete')?.status).toBe('complete')
+	expect(runRecordMocks.listForUser('user-2')).toEqual([
+		expect.objectContaining({ id: 'other-user-queued', status: 'queued' }),
+	])
 })

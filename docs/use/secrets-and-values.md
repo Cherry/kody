@@ -3,7 +3,7 @@
 ## Secrets
 
 Credential setup uses **saved secrets**, **`/connect/oauth`** for OAuth,
-**`/account/secrets/new`** for API keys and PATs, or execution-time persistence
+**`/connect/secret-set`** for API keys and PATs, or execution-time persistence
 when a token already exists inside trusted code.
 
 Use **search** first to discover saved secret references or integrations before
@@ -30,12 +30,15 @@ carries that authority. Access rules are covered in
 
 `packageSecrets.get(alias)` (and `kody.packageSecretGet`) return an **opaque
 `{{secret:…}}` placeholder** after mount and grant checks succeed — never
-decrypted plaintext. Put that string in a secret-aware `fetch` header/URL/body,
-or pass it to `secretHeaders.basic` / `kody.secretJwtSign` (both accept saved
-secret names **or** opaque refs). Only platform use sites resolve it. Package
-and execute JavaScript never receive plaintext from `get`. A secret-aware
-`fetch` may send the value to an **approved** host; that host's response is not
-redacted for echoed credentials — treat response bodies as untrusted.
+decrypted plaintext. Put that string anywhere in a secret-aware `fetch` request
+(see [Placeholders in `fetch`](#placeholders-in-fetch)), or pass it to
+`secretHeaders.basic` / `kody.secretJwtSign` (both accept saved secret names
+**or** opaque refs). Only platform use sites resolve it. Package and execute
+JavaScript never receive plaintext from `get`. A secret-aware `fetch` may send
+the value to an **approved** host. If that host echoes the value back, the
+gateway redacts it from the response (see
+[Placeholders in `fetch`](#placeholders-in-fetch)); treat response bodies as
+untrusted all the same.
 
 **`kody.secretSet(...)`** persists a value that is already available inside
 execution (for example an API key the package just minted). It does not return
@@ -48,7 +51,7 @@ only change description or expiry may omit **`value`**. Package runtimes cannot
 change expiry on a user secret.
 
 The account create/edit form has the same optional expiry field. Agents
-prefilling **`/account/secrets/new`** can set **`expiresAt`** as a query
+prefilling **`/connect/secret-set`** can set **`expiresAt`** as a query
 parameter so the human pastes the token without typing the date. See
 [Account secret setup](../guides/account-secret-setup.md).
 
@@ -60,8 +63,56 @@ ones. See the [Terms](/terms).
 ## Placeholders in `fetch`
 
 Outbound **`fetch`** can include placeholders such as **`{{secret:tokenName}}`**
-or **`{{secret:tokenName|scope=user}}`** in the URL, headers, or body. The host
-resolves them for **approved** destinations.
+or **`{{secret:tokenName|scope=user}}`** anywhere in the request: a header, the
+URL path, the query string, or a text body (JSON, form-encoded, or plain text).
+The gateway fills them only when both hold:
+
+- the request is **HTTPS**;
+- the request host is one the credential allows: a saved secret's approved
+  hosts, an integration's `requiredHosts` and `apiBaseUrl` host, or a vault
+  item's websites.
+
+Otherwise the request is refused before any credential resolves, with an error
+that names the credential and the host; the gateway never sends a placeholder it
+would fill unfilled. A placeholder in the URL host or user info is always
+refused, so filling one can never change where a request goes. In a JSON body
+each value is JSON-escaped; in a form-encoded body or query string each value is
+form-encoded, and the other keys and values keep their bytes as written. In the
+URL path each value is encoded as segment data, so a `/`, `?`, or `#` in it
+cannot change the route. A placeholder encoded with `encodeURIComponent` is
+found too.
+
+`multipart/*` bodies (file uploads) and bodies that are not UTF-8 text are
+forwarded byte for byte and never filled, so a placeholder there reaches the
+remote as written. Put a credential such an upload needs in a header.
+
+The `x-kody-secret-resolution` header changes this per request, and Kody strips
+it before the request leaves:
+
+- `headers-only` fills header placeholders and sends the URL and body as
+  written, for a body that quotes the syntax on purpose (an issue or chat
+  message that documents it) on a host the credential allows. Without it, that
+  text would be filled with the secret.
+- `off` resolves nothing and checks nothing: every placeholder, in the URL,
+  headers, or body, is sent as written.
+
+See
+[Mentioning placeholders without resolving them](#mentioning-placeholders-without-resolving-them).
+Local execute sends a request through the cloud gateway when its URL, headers,
+or buffered body hold a placeholder. It cannot replay a caller `ReadableStream`
+body, so it scans that stream as it is sent and fails instead of sending a
+placeholder in it unfilled.
+
+If the remote echoes a substituted value back, in a response header, status
+text, the final URL after redirects, or anywhere in the body, the gateway
+replaces it with `[REDACTED SECRET]` before your code reads the response, the
+same way run output is redacted. The value is also redacted in its URL-encoded,
+form-encoded, and JSON-escaped forms, and from the message of a fetch that
+fails. A Basic Auth header is redacted whole and as its encoded credential.
+Because the body can change length, `content-length` is dropped from those
+responses. Range responses (`206` or `content-range`) are masked with `*` byte
+for byte instead, so their offsets stay true. A WebSocket upgrade keeps its
+socket and redacted headers, but messages on the socket are not redacted.
 
 External providers use **`{{secret/<provider>:<ref>}}`** (first `:` after
 `secret/`). Canonical 1Password form is
@@ -70,11 +121,9 @@ External providers use **`{{secret/<provider>:<ref>}}`** (first `:` after
 canonicalize to the same grant/cache key. The item's websites are the host
 allowlist; empty websites refuse the fetch. Ad hoc execute does not need a
 package grant; saved packages do (`secretProviderLock` returns the Allow URL).
-Revoke a grant on `/account/secret-providers`. Shared packages use the owner's
-provider binding. Search does not crawl vaults. Bind providers on
-`/account/secret-providers`. The whole provider surface is behind the
-`secret-providers` flag (off by default; signed-in users can turn it on from
-[Custom secret providers](../guides/secret-providers.md)).
+Bind and revoke on `/@<slug>/-/secret-providers`. Shared packages use the
+owner's provider binding. Search does not crawl vaults. See
+[Custom secret providers](../guides/secret-providers.md).
 
 When an API requires Basic Auth derived from two saved secrets, import
 **`secretHeaders`** from **`kody:runtime`** and put the opaque helper result in
@@ -131,18 +180,21 @@ algorithms:
 
 ## Mentioning placeholders without resolving them
 
-Resolution runs on the **final serialized request** (URL, headers, and
-non-multipart body), so a literal placeholder assembled by any means — including
-string concatenation — will resolve. `multipart/*` bodies are opaque:
-placeholders inside a part are not resolved (put credentials in the URL or
-headers). Do **not** place resolvable placeholder tokens into user-visible or
+The gateway scans the **final serialized URL, headers, and body**, so a literal
+placeholder assembled by any means, including string concatenation, resolves
+there. Avoid placing resolvable placeholder tokens into user-visible or
 third-party-visible content such as issue bodies, comments, prompts, logs, or
-returned strings.
+returned strings: sent to a host the credential allows, that text is filled with
+the secret.
 
 - To **mention** the syntax in prose or docs, write **`{{secret:<name>}}`**.
   Angle brackets are outside the placeholder name charset (`[a-zA-Z0-9._-]`), so
   this form is inert everywhere — it cannot resolve in this request or any later
   one.
+- To send a body that **quotes** the syntax (an issue, comment, or chat
+  message), set the **`x-kody-secret-resolution: headers-only`** header on that
+  **`fetch`**. Header placeholders still resolve; placeholder text in the URL
+  and body is sent as written. Without it the gateway fills that text.
 - To deliberately send a **resolvable** literal placeholder to a third party
   (for example, config text that Kody itself will resolve later), set the
   **`x-kody-secret-resolution: off`** header on that **`fetch`**. The gateway
@@ -184,10 +236,10 @@ importing run. Dependents statically import the owning export; they do not need
 their own grant for secrets locked to that owner. Updating or deleting a user
 secret from package code (`secretSet`, `secretDelete`) always needs the grant on
 the stamp package, including for self-authored and adopted packages. Only the
-account owner can add a package to that grant on `/account/secrets/user/:name`
-or `/account/secrets/approve`. **`secretLock`** returns an approval URL for the
-owner to click (one-click Allow, same spirit as `/connect/secrets`); it does not
-change `allowed_packages`. Send the link and wait. Removing a grant is also
+account owner can add a package to that grant on `/@<slug>/-/secrets/user/:name`
+or `/@<slug>/-/secrets/approve`. **`secretLock`** returns an approval URL for
+the owner to click (one-click Allow, same spirit as `/connect/secrets`); it does
+not change `allowed_packages`. Send the link and wait. Removing a grant is also
 website-only. `secretSet` cannot change `allowed_packages`. Official OAuth token
 rotation (`createAuthenticatedFetch` 401 retry via `integrationTokenRefresh`)
 persists host-side and does not need that write grant.
@@ -200,11 +252,11 @@ host or grant package write access.
 
 When several secrets need the same package approved, Kody can provide a bulk
 approval URL shaped like
-`/account/secrets/approve?package_id=...&names=secretA,secretB`. That page lists
-every pending secret and approves them in one click. A single-secret link grants
-one package on one secret. For community forks, reviewing the source and sending
-the owner the `communityForkAdopt` adoption link is an alternative to sending
-those approval links. Agents and package runtimes cannot adopt.
+`/@<slug>/-/secrets/approve?package_id=...&names=secretA,secretB`. That page
+lists every pending secret and approves them in one click. A single-secret link
+grants one package on one secret. For community forks, reviewing the source and
+sending the owner the `communityForkAdopt` adoption link is an alternative to
+sending those approval links. Agents and package runtimes cannot adopt.
 
 ## Package config vs package storage
 

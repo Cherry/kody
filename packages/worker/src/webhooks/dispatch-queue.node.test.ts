@@ -1,8 +1,13 @@
+import {
+	ownerIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 import {
 	handleWebhookDispatchQueue,
 	processWebhookDispatch,
+	webhookDispatchMaxRetries,
 } from './dispatch-queue.ts'
 import {
 	createWebhookDispatchQueueMessage,
@@ -19,22 +24,22 @@ const mocks = vi.hoisted(() => ({
 	recordWebhookDelivery: vi.fn(),
 }))
 
-vi.mock('./delivery.ts', () => ({
-	dispatchWebhookInvocation: (...args: Array<unknown>) =>
-		mocks.dispatchWebhookInvocation(...args),
-	readWebhookInvocationResult: (body: unknown) =>
-		body && typeof body === 'object'
-			? (body as Record<string, unknown>)['result']
-			: undefined,
-	recordWebhookDelivery: (...args: Array<unknown>) =>
-		mocks.recordWebhookDelivery(...args),
-}))
+vi.mock('./delivery.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./delivery.ts')>()
+	return {
+		...actual,
+		dispatchWebhookInvocation: (...args: Array<unknown>) =>
+			mocks.dispatchWebhookInvocation(...args),
+		recordWebhookDelivery: (...args: Array<unknown>) =>
+			mocks.recordWebhookDelivery(...args),
+	}
+})
 
 function createMessage(): WebhookDispatchQueueMessage {
 	return {
 		endpoint: {
 			id: 'endpoint-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			packageId: 'package-1',
 			webhookName: 'sentry',
 		},
@@ -159,6 +164,9 @@ test('ack webhook work outlives the old waitUntil window and persists a terminal
 			result: { handled: true },
 		}),
 	)
+	expect(mocks.dispatchWebhookInvocation).toHaveBeenCalledWith(
+		expect.objectContaining({ executorTimeoutMs: 300_000 }),
+	)
 	vi.useRealTimers()
 })
 
@@ -169,11 +177,16 @@ test('queue retries incomplete terminal persistence and acks terminal outcomes',
 			status: 500,
 			body: { ok: false, error: { code: 'idempotency_persistence_failed' } },
 		})
+		.mockResolvedValueOnce({
+			status: 503,
+			body: { ok: false, error: { code: 'artifact_preparation_failed' } },
+		})
 		.mockResolvedValue(handledResponse)
 	mocks.recordWebhookDelivery
 		.mockResolvedValueOnce(undefined)
 		.mockRejectedValueOnce(new Error('RunLog unavailable'))
 	const retry = createQueueMessage('retry', createMessage())
+	const artifactRetry = createQueueMessage('artifact-retry', createMessage())
 	const terminal = createQueueMessage('terminal', createMessage())
 	const persistenceFailure = createQueueMessage(
 		'persistence-failure',
@@ -182,14 +195,140 @@ test('queue retries incomplete terminal persistence and acks terminal outcomes',
 	const invalid = createQueueMessage('invalid', { endpoint: null })
 
 	await handleWebhookDispatchQueue(
-		createBatch([retry, terminal, persistenceFailure, invalid]),
+		createBatch([retry, artifactRetry, terminal, persistenceFailure, invalid]),
 		{} as Env,
 	)
 
 	expect(
-		[retry, terminal, persistenceFailure, invalid].map(queueOutcome),
-	).toEqual([retried, acked, retried, acked])
+		[retry, artifactRetry, terminal, persistenceFailure, invalid].map(
+			queueOutcome,
+		),
+	).toEqual([retried, retried, acked, retried, acked])
 	expect(mocks.recordWebhookDelivery).toHaveBeenCalledTimes(2)
+})
+
+test('queue records a terminal failure when retryable artifact prep is exhausted', async () => {
+	mocks.dispatchWebhookInvocation.mockResolvedValue({
+		status: 503,
+		body: {
+			ok: false,
+			error: {
+				code: 'artifact_preparation_failed',
+				message: 'Package artifact preparation failed before execution.',
+			},
+		},
+	})
+	mocks.recordWebhookDelivery.mockResolvedValue(undefined)
+	const exhausted = createQueueMessage('exhausted', createMessage())
+	exhausted.attempts = webhookDispatchMaxRetries
+
+	await handleWebhookDispatchQueue(createBatch([exhausted]), {} as Env)
+
+	expect(queueOutcome(exhausted)).toEqual(acked)
+	expect(mocks.recordWebhookDelivery).toHaveBeenCalledWith(
+		expect.objectContaining({
+			outcome: 'failed',
+			httpStatus: 502,
+			error: 'invocation_retry_exhausted',
+			invocationId: 'delivery-1',
+			invocationErrorCode: 'artifact_preparation_failed',
+			receivedAt: '2026-08-08T12:00:00.000Z',
+			logs: expect.arrayContaining([
+				expect.objectContaining({
+					level: 'error',
+					message: expect.stringMatching(/gave up after/i),
+				}),
+				expect.objectContaining({
+					level: 'error',
+					message: 'Invocation error code: artifact_preparation_failed',
+				}),
+			]),
+		}),
+	)
+})
+
+test('queue retries pre-execution conflict codes and records failed invokes with logs', async () => {
+	mocks.dispatchWebhookInvocation
+		.mockResolvedValueOnce({
+			status: 500,
+			body: {
+				ok: false,
+				error: {
+					code: 'idempotency_conflict_unresolved',
+					message: 'Package invocation disappeared while polling.',
+				},
+			},
+		})
+		.mockResolvedValueOnce({
+			status: 500,
+			body: {
+				ok: false,
+				error: {
+					code: 'invocation_failed',
+					message: 'Sandbox blew up before user code.',
+				},
+			},
+		})
+	mocks.recordWebhookDelivery.mockResolvedValue(undefined)
+	const conflict = createQueueMessage('conflict', createMessage())
+	const failed = createQueueMessage('failed', createMessage())
+
+	await handleWebhookDispatchQueue(createBatch([conflict, failed]), {} as Env)
+
+	expect([conflict, failed].map(queueOutcome)).toEqual([retried, acked])
+	expect(mocks.recordWebhookDelivery).toHaveBeenCalledTimes(1)
+	expect(mocks.recordWebhookDelivery).toHaveBeenCalledWith(
+		expect.objectContaining({
+			outcome: 'failed',
+			httpStatus: 502,
+			error: 'invocation_status_500',
+			invocationErrorCode: 'invocation_failed',
+			receivedAt: '2026-08-08T12:00:00.000Z',
+			logs: expect.arrayContaining([
+				expect.objectContaining({
+					level: 'error',
+					message: 'Webhook export invocation failed with HTTP 500.',
+				}),
+				expect.objectContaining({
+					level: 'error',
+					message: 'Invocation error code: invocation_failed',
+				}),
+			]),
+		}),
+	)
+	const recorded = mocks.recordWebhookDelivery.mock.calls[0]?.[0] as {
+		startedAt: string
+		receivedAt: string
+	}
+	expect(recorded.startedAt).not.toBe(recorded.receivedAt)
+})
+
+test('queue records credential_placement_refused for an ack delivery the fetch gateway refused', async () => {
+	mocks.dispatchWebhookInvocation.mockResolvedValueOnce({
+		status: 500,
+		body: {
+			ok: false,
+			error: {
+				code: 'execution_failed',
+				message:
+					'Secret "token" cannot be sent to host "api.example.com" over plain HTTP. (credential_placement_refused, slot "token")',
+			},
+		},
+	})
+	mocks.recordWebhookDelivery.mockResolvedValue(undefined)
+	const refused = createQueueMessage('refused', createMessage())
+
+	await handleWebhookDispatchQueue(createBatch([refused]), {} as Env)
+
+	expect(queueOutcome(refused)).toEqual(acked)
+	expect(mocks.recordWebhookDelivery).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			outcome: 'failed',
+			httpStatus: 502,
+			error: 'credential_placement_refused',
+			invocationErrorCode: 'credential_placement_refused',
+		}),
+	)
 })
 
 test('webhook queue parser rejects malformed isolation and delivery fields', () => {
@@ -202,7 +341,10 @@ test('webhook queue parser rejects malformed isolation and delivery fields', () 
 	]
 	expect(accepted.map(parseWebhookDispatchQueueMessage)).toEqual(accepted)
 	const rejected: Array<unknown> = [
-		{ ...message, endpoint: { ...message.endpoint, userId: '' } },
+		{
+			...message,
+			endpoint: { ...message.endpoint, userId: '' as OwnerId },
+		},
 		{ ...message, payloadBytes: -1 },
 		{ ...message, params: [] },
 		{ ...message, idempotencyParamsHash: 'include' },

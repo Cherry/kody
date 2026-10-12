@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { setAuthSessionSecret } from '#app/auth-session.ts'
-import { resetDataCacheForTests } from '#app/data-cache.ts'
+import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import { createBlogPostHandler } from '#app/handlers/blog.tsx'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { getBlogPost, getReadNextBlogPost } from '#worker/blog/catalog.ts'
@@ -58,7 +58,7 @@ function createTestEnv() {
 }
 
 test('homepage carousel SSR keeps short quotes and story links only for vignettes', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	setAuthSessionSecret(testCookieSecret)
 	const response = await renderAppPage({
 		request: new Request('https://example.com/'),
@@ -86,7 +86,7 @@ test('homepage carousel SSR keeps short quotes and story links only for vignette
 })
 
 test('case studies blog post SSR renders approved vignettes and heading anchors', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	setAuthSessionSecret(testCookieSecret)
 	const post = getBlogPost(landingTestimonialsStorySlug)
 	expect(post).toBeDefined()
@@ -109,13 +109,11 @@ test('case studies blog post SSR renders approved vignettes and heading anchors'
 	expect(html).toContain('id="maciek-sitkowski"')
 	expect(html).toContain('Gabriel Alegría')
 	expect(html).toContain('Maciek Sitkowski')
-	expect(html).toContain('shared layer behind how I work with agents')
-	expect(html).not.toContain('written by AI')
 	expect(getReadNextBlogPost(landingTestimonialsStorySlug)).not.toBeNull()
 })
 
 test('case studies page SSR renders all vignettes and stable anchors', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	setAuthSessionSecret(testCookieSecret)
 	const response = await renderAppPage({
 		request: new Request('https://example.com/case-studies'),
@@ -130,7 +128,5 @@ test('case studies page SSR renders all vignettes and stable anchors', async () 
 	expect(html).toContain('id="maciek-sitkowski"')
 	expect(html).toContain('Maciek Sitkowski')
 	expect(html).toContain('Frontend Developer, Keto-Mojo')
-	expect(html).toContain('Hey Kody…')
-	expect(html).toContain('shared layer behind how I work with agents')
 	expect(html).toContain('/blog/early-kody-users')
 })

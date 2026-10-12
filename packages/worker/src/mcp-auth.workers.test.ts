@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import {
@@ -5,18 +6,26 @@ import {
 	type TokenSummary,
 } from '@cloudflare/workers-oauth-provider'
 import {
+	buildProtectedResourceMetadata,
 	handleMcpRequest,
-	handleProtectedResourceMetadata,
 	mcpInvalidTokenDescription,
 	mcpParsedBodyNeedsAccountWriteLease,
+	mcpProtectedResourceMetadataUrl,
 	mcpResourcePath,
 	protectedResourceMetadataPath,
 } from './mcp-auth.ts'
 import { oauthScopes } from './oauth-handlers.ts'
-import { createStableUserIdFromEmail } from './user-id.ts'
 import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
-import { consoleError } from '#worker/test-support/console-spies.ts'
+import {
+	consoleError,
+	silenceExpectedConsoleWarns,
+} from '#worker/test-support/console-spies.ts'
 import { createWaitUntilDrain } from '#worker/test-support/user-meter.ts'
+import {
+	isOrgBindingMembershipQuery,
+	mockPersonalOrgBindingRow,
+} from '#worker/test-support/org-binding-query.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const origin = 'https://example.com'
 const epoch = new Date(0).toISOString()
@@ -45,7 +54,7 @@ function expectAuthenticateHeader(
 		}
 	}
 	expect(header).toContain(
-		`resource_metadata="${challengeOrigin}${protectedResourceMetadataPath}"`,
+		`resource_metadata="${mcpProtectedResourceMetadataUrl(challengeOrigin)}"`,
 	)
 	if (oauthScopes.length > 0) {
 		expect(header).toContain(`scope="${oauthScopes.join(' ')}"`)
@@ -59,6 +68,38 @@ function createHelpers(overrides: Partial<OAuthHelpers> = {}): OAuthHelpers {
 		},
 		lookupClient: async () => null,
 		completeAuthorization: async () => ({ redirectTo: 'https://example.com' }),
+		describeConsent: async () => ({
+			clientId: 'client',
+			clientName: 'client',
+			redirectUri: 'https://example.com/callback',
+			redirectHost: 'example.com',
+			redirectIsLoopback: false,
+			scope: [],
+		}),
+		isConsentRemembered: async () => false,
+		beginConsent: async () => ({
+			handle: 'handle',
+			headers: new Headers(),
+		}),
+		approveConsent: async () => ({
+			request: {} as never,
+			headers: new Headers(),
+		}),
+		denyConsent: async () => ({
+			request: {} as never,
+			redirectTo: 'https://example.com/denied',
+			headers: new Headers({ Location: 'https://example.com/denied' }),
+		}),
+		beginUpstream: async () => ({
+			state: 'state',
+			headers: new Headers(),
+		}),
+		finishUpstream: async <Data = unknown>() =>
+			({
+				request: {} as never,
+				data: undefined as Data,
+				headers: new Headers(),
+			}) as never,
 		async createClient() {
 			throw new Error('Not implemented')
 		},
@@ -126,6 +167,7 @@ function createMockDb(options: MockDbOptions = {}) {
 		const normalized = query.replace(/\s+/g, ' ').toLowerCase()
 		let boundParams: Array<unknown> = []
 		const statement = {
+			query,
 			bind(...params: Array<unknown>) {
 				boundParams = params
 				return statement
@@ -219,6 +261,15 @@ function createMockDb(options: MockDbOptions = {}) {
 					// lookup is a regression.
 					throw new Error(`Unexpected per-field users lookup: ${query}`)
 				}
+				if (isOrgBindingMembershipQuery(normalized)) {
+					const personId =
+						typeof boundParams[0] === 'string' ? boundParams[0] : null
+					if (!personId) return null
+					return mockPersonalOrgBindingRow(personId)
+				}
+				if (normalized.includes('from org_memberships')) {
+					return null
+				}
 				const result = await statement.all()
 				return result.results[0] ?? null
 			},
@@ -227,9 +278,20 @@ function createMockDb(options: MockDbOptions = {}) {
 	}
 	return {
 		prepare: (query: string) => statementFor(query),
-		async batch(statements: Array<{ run: () => Promise<unknown> }>) {
+		async batch(
+			statements: Array<{
+				query: string
+				run: () => Promise<unknown>
+				first: () => Promise<unknown>
+			}>,
+		) {
 			const results = []
 			for (const statement of statements) {
+				if (statement.query.trimStart().toLowerCase().startsWith('select')) {
+					const row = await statement.first()
+					results.push({ results: row == null ? [] : [row], meta: {} })
+					continue
+				}
 				results.push(await statement.run())
 			}
 			return results
@@ -441,17 +503,15 @@ test('protected resource metadata and auth challenge use the request origin over
 	// MCP clients require resource metadata to match the URL they connected to.
 	const requestOrigin = 'https://kody-production.kentcdodds.workers.dev'
 	const envOverrides = { APP_BASE_URL: 'https://heykody.dev' }
-	const metadataResponse = handleProtectedResourceMetadata(
-		new Request(`${requestOrigin}${protectedResourceMetadataPath}`),
-		envOverrides as Env,
-	)
-	expect(metadataResponse.status).toBe(200)
-	expect(await metadataResponse.json()).toEqual({
+	expect(buildProtectedResourceMetadata(requestOrigin)).toEqual({
 		resource: `${requestOrigin}/mcp`,
 		authorization_servers: [requestOrigin],
 		scopes_supported: oauthScopes,
 		bearer_methods_supported: ['header'],
 	})
+	expect(mcpProtectedResourceMetadataUrl(requestOrigin)).toBe(
+		`${requestOrigin}${protectedResourceMetadataPath}/mcp`,
+	)
 
 	const unauthorized = await callMcp(
 		new Request(`${requestOrigin}${mcpResourcePath}`),
@@ -487,8 +547,11 @@ test('mcp request enforces token audience and forwards caller props', async () =
 		baseUrl: 'https://example.com',
 		executionOrigin: 'interactive',
 		storageContext: null,
-		user: { userId: 'user' },
+		user: { userId: ownerIdFromStored('user') },
 	})
+	// Legacy agent props persist in Durable Object storage; derived ids do not.
+	expect(receivedProps).not.toHaveProperty('actor')
+	expect(receivedProps).not.toHaveProperty('owner')
 	expect(userSelects).toHaveLength(1)
 	expect(userSelects[0]).toContain('email_verified_at')
 	expect(userSelects[0]).toContain('suspended_at')
@@ -501,7 +564,7 @@ test('mcp request enforces token audience and forwards caller props', async () =
 			connectorRows: [
 				{
 					id: 'connector-1',
-					user_id: 'user',
+					user_id: ownerIdFromStored('user'),
 					instance_id: 'home',
 					enabled: 1,
 					attached: 1,
@@ -536,7 +599,25 @@ test('mcp request enforces token audience and forwards caller props', async () =
 	)
 }, 15_000)
 
+test('mcp request returns library insufficient_scope step-up when required scopes are missing', async () => {
+	const narrow = mcpToken()
+	narrow.scope = ['openid']
+	narrow.grant = { ...narrow.grant, scope: ['openid'] }
+	const stepUp = await callMcp(bearerRequest(), tokenEnv(narrow, verified))
+	expect(stepUp.status).toBe(403)
+	expect(await stepUp.json()).toEqual({ error: 'insufficient_scope' })
+	const challenge = stepUp.headers.get('WWW-Authenticate') ?? ''
+	expect(challenge).toContain('error="insufficient_scope"')
+	expect(challenge).toContain(`scope="${oauthScopes.join(' ')}"`)
+	expect(challenge).toContain(
+		`resource_metadata="${mcpProtectedResourceMetadataUrl(origin)}"`,
+	)
+})
+
 test('mcp requests route by protocol era and record lane metrics', async () => {
+	// The token env's fake D1 rejects the feature-flag exposure rollup that
+	// `tools/list` records while resolving caller flags.
+	silenceExpectedConsoleWarns(['flag-exposure-rollup-failed'])
 	const dataPoints: Array<AnalyticsEngineDataPoint> = []
 	const mcpEnv = tokenEnv(mcpToken(), verified, {
 		MCP_PROTOCOL_EVENTS: {
@@ -641,6 +722,7 @@ test('mcp requests route by protocol era and record lane metrics', async () => {
 				'1.0.0',
 				'user',
 				'example.com',
+				'',
 			],
 			doubles: [1],
 		},
@@ -654,6 +736,7 @@ test('mcp requests route by protocol era and record lane metrics', async () => {
 				'2.0.0',
 				'user',
 				'example.com',
+				'',
 			],
 			doubles: [1],
 		},
@@ -708,7 +791,7 @@ test('mcp request rejects unverified and unidentifiable accounts fail-closed', a
 
 	// Indexed stable-user-id lookup verifies accounts when grant props lack email.
 	const fallbackEmail = 'fallback@example.com'
-	const stableUserId = await createStableUserIdFromEmail(fallbackEmail)
+	const stableUserId = testStableUserIdFromEmail(fallbackEmail)
 	const fallbackUserSelects: Array<string> = []
 	const fallbackResponse = await callMcp(
 		request,
@@ -766,7 +849,7 @@ test('mcp request rejects access tokens issued before a password reset', async (
 })
 
 test('mcp request heals a leftover UserMeter tombstone for a live account', async () => {
-	const userId = 'leftover-meter-user'
+	const userId = ownerIdFromStored('leftover-meter-user')
 	const email = 'leftover@example.com'
 	const mcpEnv = tokenEnv(mcpToken({ userId, email }), {
 		...verified,
@@ -884,11 +967,7 @@ test('mcp write lease is scoped to mutating tools/call and still rejects deletin
 	).toEqual([])
 
 	const transport = countingFetchMcp('legacy-ok')
-	const leaseRpcs = [
-		'acquireWriteLease',
-		'assertWriteLeaseHeld',
-		'releaseWriteLease',
-	]
+	const leaseRpcs = ['acquireWriteLease', 'releaseWriteLease']
 	for (const [call, expectedLeaseRpcs] of [
 		[listCall, []],
 		[searchCall, []],
@@ -930,7 +1009,10 @@ test('successful mcp bearer validation records inbound connection last-used', as
 		expectedStableUserId: userId,
 	})
 	const listLastUsed = () =>
-		userMeterRpc({ env: mcpEnv, userId }).listInboundConnectionLastUsed()
+		userMeterRpc({
+			env: mcpEnv,
+			userId: ownerIdFromStored(userId),
+		}).listInboundConnectionLastUsed()
 
 	expect((await callMcp(bearerRequest(), mcpEnv)).status).toBe(200)
 	const rows = await listLastUsed()

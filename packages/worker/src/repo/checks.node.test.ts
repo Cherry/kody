@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
@@ -35,6 +36,14 @@ import {
 } from './checks.ts'
 import { withRequiredPackageDocs } from './checks-test-docs.ts'
 import {
+	credentialPatternFindingsNotice,
+	credentialPatternNoticeForFiles,
+} from './credential-pattern-check.ts'
+import {
+	createMalformedPackageSkillsFixtureFiles,
+	createPackageSkillsFixtureFiles,
+} from '#worker/test-support/package-skills-fixture.ts'
+import {
 	isolatedBundleChunkConcurrency,
 	isolatedBundleChunkSize,
 } from './isolated-check-phases.ts'
@@ -48,7 +57,7 @@ const moduleCheckPath = '.__kody_repo_module_check__.ts'
 const bundleContext = {
 	env: {} as Env,
 	baseUrl: 'https://kody.dev',
-	userId: 'user-123',
+	userId: ownerIdFromStored('user-123'),
 }
 
 function onceJob(entry: string) {
@@ -432,6 +441,72 @@ export default async (params) => {
 	expect(getSemanticDiagnostics).toHaveBeenCalledWith(moduleCheckPath)
 })
 
+test('runRepoChecks typechecks every callable through one language-service program', async () => {
+	const getSemanticDiagnostics = vi.fn((path: string) =>
+		path === moduleCheckPath ? [] : [],
+	)
+	const { result, typeScriptFileSystem } = await runChecks(
+		packageFiles(
+			manifest(
+				'multi-callable',
+				{
+					jobs: {
+						alpha: onceJob('src/job-a.ts'),
+						beta: onceJob('src/job-b.ts'),
+					},
+					subscriptions: {
+						'email.message.received': { handler: './src/on-email.ts' },
+					},
+				},
+				{
+					exports: {
+						'.': './src/index.ts',
+						'./job-a': './src/job-a.ts',
+						'./job-b': './src/job-b.ts',
+						'./on-email': './src/on-email.ts',
+					},
+				},
+			),
+			{
+				'src/index.ts': 'export const ready = true\n',
+				'src/job-a.ts': 'export default async () => ({ a: true })\n',
+				'src/job-b.ts': 'export default async () => ({ b: true })\n',
+				'src/on-email.ts': 'export default async (event) => event\n',
+			},
+		),
+		{ getSemanticDiagnostics },
+	)
+
+	expect(result.ok).toBe(true)
+	expect(findCheck(result, 'typecheck')?.ok).toBe(true)
+	expect(getSemanticDiagnostics).toHaveBeenCalledTimes(1)
+	expect(getSemanticDiagnostics).toHaveBeenCalledWith(moduleCheckPath)
+	const harnessWrite = typeScriptFileSystem.write.mock.calls.find(
+		(call) => call[0] === moduleCheckPath,
+	)?.[1]
+	expect(harnessWrite).toEqual(
+		expect.stringContaining('import userEntrypoint0 from'),
+	)
+	expect(harnessWrite).toEqual(
+		expect.stringContaining('import userEntrypoint1 from'),
+	)
+	expect(harnessWrite).toEqual(
+		expect.stringContaining('import userEntrypoint2 from'),
+	)
+	expect(harnessWrite).toEqual(
+		expect.stringContaining('__kodyTypecheckModule(userEntrypoint0)'),
+	)
+	expect(harnessWrite).toEqual(
+		expect.stringContaining('__kodyTypecheckModule(userEntrypoint2)'),
+	)
+	// One harness write — not one rewrite per callable target.
+	expect(
+		typeScriptFileSystem.write.mock.calls.filter(
+			(call) => call[0] === moduleCheckPath,
+		),
+	).toHaveLength(1)
+})
+
 test('runRepoChecks still reports unknown globals for package-owned jobs', async () => {
 	const { result } = await runChecks(
 		packageFiles(
@@ -521,6 +596,55 @@ test('runRepoChecks injects package tsconfig overlays that allow optional .ts im
 			'.__kody_repo_tsconfig_base__.json',
 		),
 	).toBe(repoTsconfig)
+})
+
+test('runRepoChecks returns typecheck failure for formatDiagnostics path(line,col) form', async () => {
+	// @typescript/vfs formatDiagnostics uses `path(line,col): error TS####:`
+	// when the diagnostic names the synthetic extends base. That must still
+	// become checks_failed, not a thrown internal error (Bugbot on #2877).
+	const files = packageFiles(manifest('tsconfig-path-diag'), {
+		'tsconfig.json': JSON.stringify({
+			compilerOptions: { strict: true, noEmit: true },
+		}),
+	})
+	withRequiredPackageDocs(files)
+	setupDefaultBundleMocks()
+	let snapshotFiles = new Map<string, string>()
+	const snapshot = {
+		read: vi.fn((path: string) => snapshotFiles.get(path) ?? null),
+	}
+	mockModule.createFileSystemSnapshot.mockImplementation(
+		async (entries: AsyncIterable<readonly [string, string]>) => {
+			snapshotFiles = new Map()
+			for await (const [path, content] of entries) {
+				snapshotFiles.set(path, content)
+			}
+			return snapshot
+		},
+	)
+	const message =
+		".__kody_repo_tsconfig_base__.json(1,1): error TS5023: Unknown compiler option 'totallyBogusOption'."
+	mockModule.createTypescriptLanguageService.mockRejectedValue(
+		new Error(message),
+	)
+	const result = await runRepoChecks({
+		workspace: {
+			async readFile(path: string) {
+				return files.get(path) ?? null
+			},
+			async glob() {
+				return Array.from(files.keys()).map((path) => ({ path, type: 'file' }))
+			},
+		},
+		manifestPath: 'package.json',
+		sourceRoot: '/',
+	})
+	expect(result.ok).toBe(false)
+	expect(findCheck(result, 'typecheck')).toEqual({
+		kind: 'typecheck',
+		ok: false,
+		message,
+	})
 })
 
 test('runRepoChecks validates static kody package dependency declarations and returns manifest failures instead of throwing', async () => {
@@ -659,7 +783,7 @@ test('runRepoChecks bundles npm-dependency packages and surfaces bundler failure
 	expect(mockModule.buildKodyImportableModuleBundle).toHaveBeenCalledWith(
 		expect.objectContaining({
 			entryPoint: 'src/index.ts',
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			sourceFiles: {
 				'package.json': passing.get('package.json'),
 				'README.md': passing.get('README.md'),
@@ -669,7 +793,10 @@ test('runRepoChecks bundles npm-dependency packages and surfaces bundler failure
 		}),
 	)
 	expect(mockModule.buildKodyModuleBundle).toHaveBeenCalledWith(
-		expect.objectContaining({ entryPoint: 'src/index.ts', userId: 'user-123' }),
+		expect.objectContaining({
+			entryPoint: 'src/index.ts',
+			userId: ownerIdFromStored('user-123'),
+		}),
 	)
 
 	const failures = [
@@ -862,7 +989,7 @@ test('heavy check phases run in throwaway isolates when the env has the bindings
 	const resultPromise = runChecks(files, {
 		env,
 		baseUrl: '/',
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 	})
 
 	// Wait until typecheck and the first bundle chunks have started while the
@@ -925,7 +1052,9 @@ test('heavy check phases run in throwaway isolates when the env has the bindings
 		(request) => request.phase === 'typecheck',
 	)
 	expect(typecheckRequests).toHaveLength(1)
-	expect(typecheckRequests[0]).toMatchObject({ userId: 'user-123' })
+	expect(typecheckRequests[0]).toMatchObject({
+		userId: ownerIdFromStored('user-123'),
+	})
 	for (const [name] of namespace.idFromName.mock.calls) {
 		expect(name).toContain('-user-123-')
 	}
@@ -965,7 +1094,7 @@ test('an isolate reset during a check phase becomes a failed check, not a crash'
 		packageFiles(manifest('oversized-package'), {
 			'src/index.ts': `export default async function main() {\n\treturn 'ok'\n}\n`,
 		}),
-		{ env, baseUrl: '/', userId: 'user-123' },
+		{ env, baseUrl: '/', userId: ownerIdFromStored('user-123') },
 	)
 
 	expect(result.ok).toBe(false)
@@ -977,4 +1106,154 @@ test('an isolate reset during a check phase becomes a failed check, not a crash'
 	expect(bundleResult?.message).toContain(
 		'search({ entity: "guide:heavy_work_offload" })',
 	)
+})
+
+test('runRepoChecks validates package skills and fails publish on malformed SKILL.md frontmatter', async () => {
+	const okFiles = packageFiles(
+		manifest('skilled', {}, { name: '@kentcdodds/skilled' }),
+		createPackageSkillsFixtureFiles(),
+	)
+	const { result: ok } = await runChecks(okFiles)
+	expect(findCheck(ok, 'skills')).toEqual({
+		kind: 'skills',
+		ok: true,
+		message: 'Validated 1 package skill: hello-skill.',
+	})
+	expect(ok.ok).toBe(true)
+
+	const { result: bad } = await runChecks(
+		packageFiles(
+			manifest('skilled', {}, { name: '@kentcdodds/skilled' }),
+			createMalformedPackageSkillsFixtureFiles(),
+		),
+	)
+	expect(bad.ok).toBe(false)
+	expect(findCheck(bad, 'skills')).toEqual({
+		kind: 'skills',
+		ok: false,
+		message: expect.stringContaining('missing frontmatter "name"'),
+	})
+	expect(findCheck(bad, 'bundle')).toBeUndefined()
+
+	const { result: none } = await runChecks(packageFiles(manifest('plain')))
+	expect(findCheck(none, 'skills')).toEqual({
+		kind: 'skills',
+		ok: true,
+		message: 'No package skills found.',
+	})
+})
+
+test('runRepoChecks lists credential placeholder references neutrally by path and pattern without failing', async () => {
+	const { result } = await runChecks(
+		packageFiles(
+			manifest('legacy-credentials', {
+				secretMounts: { token: { name: 'TOKEN' } },
+			}),
+			{
+				'src/index.ts': [
+					"import { createAuthenticatedFetch } from 'kody:runtime'",
+					'export const ready = true',
+					"export const run = (name: string) => createAuthenticatedFetch(name).then(() => fetch('https://api.example.com', { headers: { Authorization: 'Bearer {{secret:TOKEN}}' } }))",
+				].join('\n'),
+			},
+		),
+	)
+	expect(result.ok).toBe(true)
+	const check = findCheck(result, 'credentials')
+	expect(check).toEqual({
+		kind: 'credentials',
+		ok: true,
+		message: [
+			'Credential placeholder references (codemod 0010-detect-legacy-credential-patterns, informational; publish is unaffected):',
+			'- package.json: secretMounts',
+			'- src/index.ts: literal secret, computed integration',
+			'These references keep working; nothing here needs to change. Labels are described under "Credential slots" in the packages docs.',
+		].join('\n'),
+	})
+	expect(credentialPatternFindingsNotice(result.results)).toBe(check!.message)
+	expect(check!.message).not.toContain('TOKEN')
+
+	const clean = await runChecks(packageFiles(manifest('clean-credentials')))
+	expect(findCheck(clean.result, 'credentials')).toEqual({
+		kind: 'credentials',
+		ok: true,
+		message:
+			'No credential placeholder references to list (codemod 0010-detect-legacy-credential-patterns).',
+	})
+	expect(credentialPatternFindingsNotice(clean.result.results)).toBeNull()
+
+	const { result: docsFailed } = await runChecks(
+		packageFiles(manifest('docs-fail-credentials'), {
+			'AGENTS.md': '',
+			'src/send.ts': "export const h = { a: '{{secret:OLD_KEY}}' }",
+		}),
+	)
+	expect(findCheck(docsFailed, 'docs')?.ok).toBe(false)
+	expect(findCheck(docsFailed, 'credentials')?.message).toContain(
+		'- src/send.ts: literal secret',
+	)
+
+	const { result: migrated } = await runChecks(
+		packageFiles(
+			manifest('migrated-credentials', {
+				credentials: {
+					RESEND_API_KEY: {
+						kind: 'secret',
+						provider: 'resend',
+						description: 'Resend API key.',
+					},
+				},
+			}),
+			{
+				'src/send.ts':
+					"export const h = { Authorization: 'Bearer {{secret:RESEND_API_KEY}}' }",
+			},
+		),
+	)
+	expect(findCheck(migrated, 'credentials')?.message).toBe(
+		'No credential placeholder references to list (codemod 0010-detect-legacy-credential-patterns).',
+	)
+})
+
+test('runRepoChecks adds the plain http note only when that pattern is found', async () => {
+	const { result } = await runChecks(
+		packageFiles(manifest('plain-http-credentials'), {
+			'src/send.ts': [
+				"export const h = { Authorization: 'Bearer {{secret:TOKEN}}' }",
+				"export const send = () => fetch('http://api.example.com', { headers: h })",
+			].join('\n'),
+		}),
+	)
+	expect(result.ok).toBe(true)
+	const message = findCheck(result, 'credentials')?.message
+	expect(message).toContain('- src/send.ts: literal secret, plain http')
+	expect(message?.split('\n').slice(-2)).toEqual([
+		'These references keep working, except as noted below. Labels are described under "Credential slots" in the packages docs.',
+		'plain http: the fetch gateway refuses a request that carries a placeholder over http://; use https:// for those requests.',
+	])
+
+	const { result: https } = await runChecks(
+		packageFiles(manifest('https-credentials'), {
+			'src/send.ts': "export const h = { a: '{{secret:TOKEN}}' }",
+		}),
+	)
+	expect(findCheck(https, 'credentials')?.message).not.toContain('plain http:')
+})
+
+test('credentialPatternNoticeForFiles reads repo paths under the source root', () => {
+	const files = {
+		'packages/app/package.json': manifest('rooted', {
+			secretMounts: { t: { name: 'T' } },
+		}),
+		'packages/app/src/send.ts': "export const h = { a: '{{secret:T}}' }",
+		'other/src/x.ts': "export const h = { a: '{{secret:X}}' }",
+	}
+	const notice = credentialPatternNoticeForFiles(files, '/packages/app/')
+	expect(notice).toContain(
+		'- package.json: secretMounts\n- src/send.ts: literal secret\n',
+	)
+	expect(notice).not.toContain('other/')
+	expect(
+		credentialPatternNoticeForFiles({ 'package.json': manifest('clean') }),
+	).toBeNull()
 })

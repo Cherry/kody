@@ -19,6 +19,7 @@ import {
 	type ReferralRejectReason,
 } from '#universal/referral-program.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type ReferralAttributionOutcome =
 	| { outcome: 'attributed' }
 	| { outcome: 'ignored'; reason: 'missing_code' | 'unknown_referrer' | 'self' }
@@ -37,7 +38,6 @@ type ReferralParty = {
 	email: string
 	email_verified_at: string | null
 	stripe_customer_id: string | null
-	account_type: string | null
 	referral_standard_credit_expires_at: string | null
 }
 
@@ -152,20 +152,17 @@ export async function attributeReferralAtSignup(input: {
 	}
 	const referrer = await input.db
 		.prepare(
-			`SELECT stable_user_id, account_type
+			`SELECT stable_user_id
 			 FROM users
-			 WHERE username = ?`,
+			 WHERE username = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(code)
-		.first<{ stable_user_id: string; account_type: string | null }>()
+		.first<{ stable_user_id: string }>()
 	if (!referrer?.stable_user_id) {
 		return { outcome: 'ignored', reason: 'unknown_referrer' }
 	}
 	if (referrer.stable_user_id === input.refereeStableUserId) {
 		return { outcome: 'ignored', reason: 'self' }
-	}
-	if (referrer.account_type === 'platform') {
-		return { outcome: 'ignored', reason: 'unknown_referrer' }
 	}
 	const now = input.now ?? new Date()
 	try {
@@ -197,11 +194,12 @@ async function loadParty(
 ): Promise<ReferralParty | null> {
 	return db
 		.prepare(
-			`SELECT stable_user_id, username, email, email_verified_at,
-			        stripe_customer_id, account_type,
-			        referral_standard_credit_expires_at
-			 FROM users
-			 WHERE stable_user_id = ?`,
+			`SELECT u.stable_user_id, u.username, u.email, u.email_verified_at,
+			        o.stripe_customer_id,
+			        o.referral_standard_credit_expires_at
+			 FROM users u
+			 LEFT JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}
+			 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
 		)
 		.bind(stableUserId)
 		.first<ReferralParty>()
@@ -213,9 +211,6 @@ function rejectReasonForParties(
 ): ReferralRejectReason | null {
 	if (referrer.stable_user_id === referee.stable_user_id) {
 		return 'self_referral'
-	}
-	if (referrer.account_type === 'platform') {
-		return 'platform_referrer'
 	}
 	if (
 		normalizeEmailForReferralFraud(referrer.email) ===
@@ -260,7 +255,7 @@ function stackReferralCreditStatement(input: {
 }) {
 	return input.db
 		.prepare(
-			`UPDATE users
+			`UPDATE orgs
 			 SET referral_standard_credit_expires_at = strftime(
 			       '%Y-%m-%dT%H:%M:%fZ',
 			       max(
@@ -271,7 +266,8 @@ function stackReferralCreditStatement(input: {
 			       'unixepoch'
 			     ),
 			     updated_at = ?
-			 WHERE stable_user_id = ?
+			 WHERE id = ?
+			   AND deleted_at IS NULL
 			   AND EXISTS (
 			     SELECT 1 FROM referrals
 			     WHERE id = ?
@@ -479,8 +475,8 @@ export async function loadReferralProgramSummary(input: {
 	const creditRow = await input.db
 		.prepare(
 			`SELECT referral_standard_credit_expires_at
-			 FROM users
-			 WHERE stable_user_id = ?`,
+			 FROM orgs
+			 WHERE id = ? AND deleted_at IS NULL`,
 		)
 		.bind(input.stableUserId)
 		.first<{ referral_standard_credit_expires_at: string | null }>()
@@ -491,11 +487,12 @@ export async function loadReferralProgramSummary(input: {
 			.prepare(
 				`SELECT r.status, r.created_at, r.rewarded_at, u.username AS referee_username
 				 FROM referrals r
-				 LEFT JOIN users u ON u.stable_user_id = r.referee_stable_user_id
+				 LEFT JOIN users u
+					ON u.stable_user_id = r.referee_stable_user_id
+					AND u.deleted_at IS NULL
 				 WHERE r.referrer_stable_user_id = ?
 				   AND r.status IN ('pending', 'rewarded')
-				 ORDER BY r.created_at DESC
-				 LIMIT 50`,
+				 ORDER BY r.created_at DESC LIMIT 50`,
 			)
 			.bind(input.stableUserId)
 			.all<{

@@ -1,3 +1,7 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -25,9 +29,10 @@ function createTenant(label: string) {
 	const ctx = {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId,
+				userId: personIdFromStored(userId),
 				email: `${userId}@example.com`,
 				displayName: 'Runs Tester',
 			},
@@ -56,7 +61,7 @@ function createTenant(label: string) {
 		}) {
 			const handle: RunRecordHandle = {
 				id: input.id,
-				userId,
+				userId: ownerIdFromStored(userId),
 				startedAt: new Date(baseMs + input.offsetMs).toISOString(),
 				persistence: 'eager',
 				context: { surface: 'job', name: 'example-job', ...input.context },
@@ -79,7 +84,10 @@ test(
 	async () => {
 		const anonymous = {
 			env,
-			callerContext: createMcpCallerContext({ baseUrl: 'https://example.com' }),
+			callerContext: createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
+				baseUrl: 'https://example.com',
+			}),
 		}
 		const authRequired = /Authenticated MCP user/
 		await expect(runListCapability.handler({}, anonymous)).rejects.toThrow(
@@ -130,7 +138,7 @@ test(
 		const pending: Array<Promise<unknown>> = []
 		beginRunRecord({
 			env,
-			userId: owner.userId,
+			userId: ownerIdFromStored(owner.userId),
 			context: {
 				surface: 'workflow',
 				workflowId: 'wf-running',
@@ -428,7 +436,10 @@ test(
 			},
 		})
 
-		const listed = await owner.list({ surface: 'execute', error_triage: 'all' })
+		const listed = await owner.list({
+			surface: 'execute',
+			error_triage: 'all',
+		})
 		expect(listed.runs).toEqual([
 			expect.objectContaining({
 				id: 'run-execute-attr',

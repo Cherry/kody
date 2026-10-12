@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	loadAccountActivityData,
@@ -7,6 +11,7 @@ import {
 	surfaceFilterToRunSurface,
 } from '#app/account-activity-data.ts'
 import { type RunRecord } from '#worker/run-records/types.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => ({
 	listRunRecords: vi.fn(),
@@ -30,11 +35,12 @@ const user: ActivityUser = {
 	permissions: [],
 	artifactOwnerIds: [],
 	mcpUser: {
-		userId: 'stable-user-1',
+		userId: personIdFromStored('stable-user-1'),
 		email: 'user@example.com',
 		username: 'test-user',
 		displayName: 'user',
 	},
+	request: sessionRequestContext('stable-user-1'),
 }
 
 const weekAgo = '2026-07-19T12:00:00.000Z'
@@ -176,7 +182,7 @@ test('loadAccountActivityData maps filters, summary, pagination, detail, and cur
 		'/account/activity/run-1?status=error&surface=job',
 		env,
 	)
-	const owner = { env, userId: 'stable-user-1' }
+	const owner = { env, userId: ownerIdFromStored('stable-user-1') }
 	expect(mockModule.summarizeRunRecords).toHaveBeenCalledWith({
 		...owner,
 		since: weekAgo,

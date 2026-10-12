@@ -8,10 +8,14 @@ import {
 	createExecutionSecretRedactor,
 	type ExecutionSecretRedactor,
 } from '#mcp/secrets/execution-secret-redactor.ts'
-import { type ApiInvocationContext } from './context.ts'
+import {
+	toCapabilityOpenApiPrincipal,
+	type ApiInvocationContext,
+} from './context.ts'
 import { ApiError, invalidRequest, notFound, toApiError } from './errors.ts'
 import { maxApiRequestBodyBytes } from './request-params.ts'
 import { runCapabilityProxyAuthenticatedFetch } from './capability-proxy-authenticated-fetch.ts'
+import { runCapabilityProxyGatewayFetch } from './capability-proxy-gateway-fetch.ts'
 import { runCapabilityProxyOauthClientCredentials } from './capability-proxy-oauth-client-credentials.ts'
 import { createCapabilityProxyPackageHostTools } from './capability-proxy-package-grants.ts'
 
@@ -23,15 +27,15 @@ import { createCapabilityProxyPackageHostTools } from './capability-proxy-packag
  * `kody.mcp`, and `workflows.create` behave as they do in the cloud. Static
  * `kody:@…` imports are downloaded via `POST /v1/local-execute/package-graph`
  * and embedded in that workerd — never a silent whole-module hop to
- * `kody.execute`. There is no author-facing `packages.invoke`. Local CPU is
- * never metered; each hop is one `api_call`, and the capability behind it
- * meters itself as usual.
+ * `kody.execute`. Local CPU is never metered; each hop is one `api_call`, and
+ * the capability behind it meters itself as usual.
  *
  * Authenticated outbound fetch uses `kody.authenticatedFetch` (placeholder +
- * fetch-gateway on origin). OAuth client-credentials grants use
- * `kody.oauthClientCredentials` the same way. Stamped `packageStorage` /
- * `packageSecrets` hop as `kody.packageStorage*` / `kody.packageSecret*` with
- * per-call ownership / share grant checks — long-lived OAuth tokens and secret
+ * fetch-gateway on origin). Secret-bearing ambient `fetch` uses
+ * `kody.gatewayFetch` the same way. OAuth client-credentials grants use
+ * `kody.oauthClientCredentials`. Stamped `packageStorage` / `packageSecrets`
+ * hop as `kody.packageStorage*` / `kody.packageSecret*` with per-call
+ * ownership checks — long-lived OAuth tokens and secret
  * plaintext never enter local workerd.
  */
 
@@ -131,6 +135,9 @@ async function callKodyPath(input: {
 			runCapabilityProxyAuthenticatedFetch({ ctx, args }),
 		)
 	}
+	if (path.length === 2 && name === 'gatewayFetch') {
+		return invokeCapability(() => runCapabilityProxyGatewayFetch({ ctx, args }))
+	}
 	if (path.length === 2 && name === 'oauthClientCredentials') {
 		return invokeCapability(() =>
 			runCapabilityProxyOauthClientCredentials({ ctx, args }),
@@ -156,6 +163,7 @@ async function callKodyPath(input: {
 				callerContext: ctx.callerContext,
 				packageContext: null,
 			}),
+			openApiPrincipal: toCapabilityOpenApiPrincipal(ctx.principal),
 			...(ctx.waitUntil ? { waitUntil: ctx.waitUntil } : {}),
 		},
 	)
@@ -180,7 +188,12 @@ async function callKodyPath(input: {
 		const capability = server.capabilities.find(
 			(entry) => entry.name === toolName,
 		)
-		const tool = capability ? tools[capability.dispatchName] : undefined
+		// tools map is keyed by raw capability.name (`mcp:server:tool`). Cloud
+		// ToolDispatcher indexes by sanitizeToolName (dispatchName); looking up
+		// dispatchName here misses colon-bearing keys and throws Unknown tool
+		// while still listing the short name as available (#2949).
+		const toolKey = `mcp:${serverName}:${toolName}`
+		const tool = capability ? tools[toolKey] : undefined
 		if (!tool) {
 			throw notFound(
 				`Unknown tool "${toolName}" for MCP server "${serverName}". Available tools: ${
@@ -215,13 +228,8 @@ async function dispatchCapabilityProxyCall(input: {
 		})
 		return invokeCapability(() => workflowTools.create(call.args[0] as never))
 	}
-	if (root === 'packages' && name === 'invoke') {
-		throw notFound(
-			`There is no author-facing packages.invoke. Use a static kody:@scope/package/export import when the name is known, or import(specifier) when the name is data.`,
-		)
-	}
 	throw notFound(
-		`Unknown runtime path ${describePath(call.path)}. CapabilityProxy serves kody.*, kody.authenticatedFetch, kody.oauthClientCredentials, kody.mcp.<server>.<tool>, kody.packageStorage* / kody.packageSecret*, and workflows.create.`,
+		`Unknown runtime path ${describePath(call.path)}. CapabilityProxy serves kody.*, kody.authenticatedFetch, kody.gatewayFetch, kody.oauthClientCredentials, kody.mcp.<server>.<tool>, kody.packageStorage* / kody.packageSecret*, and workflows.create.`,
 	)
 }
 
@@ -245,7 +253,13 @@ export async function runCapabilityProxyCall(input: {
 		const fromCapability = error instanceof CapabilityInvocationError
 		const cause = fromCapability ? error.cause : error
 		const apiError = toApiError(cause)
-		if (cause instanceof ApiError || apiError.status < 500) {
+		if (
+			cause instanceof ApiError ||
+			apiError.status < 500 ||
+			// Transient Artifacts git (and similar) already mapped to sanitized
+			// 503 internal_error — keep that envelope instead of capability_error.
+			(apiError.status === 503 && apiError.code === 'internal_error')
+		) {
 			throwRedacted(apiError, redactor)
 		}
 		if (fromCapability) {
@@ -276,5 +290,6 @@ function throwRedacted(
 		message,
 		details: redactor.redactUnknown(apiError.details),
 		headers: apiError.headers,
+		cause: apiError,
 	})
 }

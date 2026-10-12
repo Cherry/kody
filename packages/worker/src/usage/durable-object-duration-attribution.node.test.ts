@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi, type Mock } from 'vitest'
 import { toAdminMeasuredDurableObjectDuration } from '#universal/durable-object-duration.ts'
 import {
@@ -30,6 +31,7 @@ function fakeNamespace(label: string) {
 
 function createEnv(input: {
 	users?: Array<string>
+	orgs?: Array<string>
 	buckets?: Array<{ user_id: string; storage_id: string; kind: string }>
 	apps?: Array<{ user_id: string; id: string }>
 	credentials?: boolean
@@ -50,6 +52,11 @@ function createEnv(input: {
 							results: (input.users ?? []).map((id) => ({
 								stable_user_id: id,
 							})),
+						}
+					}
+					if (sql.includes('FROM orgs')) {
+						return {
+							results: (input.orgs ?? []).map((id) => ({ id })),
 						}
 					}
 					if (sql.includes('FROM user_storage_buckets')) {
@@ -90,19 +97,27 @@ test('owner map covers user-named, bucket, repo-session, and realtime objects', 
 	const { env } = createEnv({
 		users: ['user-a'],
 		buckets: [
-			{ user_id: 'user-a', storage_id: 'package:p1', kind: 'package' },
 			{
-				user_id: 'user-a',
+				user_id: ownerIdFromStored('user-a'),
+				storage_id: 'package:p1',
+				kind: 'package',
+			},
+			{
+				user_id: ownerIdFromStored('user-a'),
 				storage_id: 'repo-session:rs-1',
 				kind: 'repo_session',
 			},
-			{ user_id: 'user-a', storage_id: 'malformed', kind: 'repo_session' },
+			{
+				user_id: ownerIdFromStored('user-a'),
+				storage_id: 'malformed',
+				kind: 'repo_session',
+			},
 		],
-		apps: [{ user_id: 'user-a', id: 'pkg-1' }],
+		apps: [{ user_id: ownerIdFromStored('user-a'), id: 'pkg-1' }],
 	})
 	const owners = await buildDurableObjectOwnerMap(env)
 	expect(owners.get('hub:user-a')).toEqual({
-		userId: 'user-a',
+		userId: ownerIdFromStored('user-a'),
 		doClass: 'McpClientHub',
 	})
 	expect(owners.get('runlog:user-a')?.doClass).toBe('RunLog')
@@ -110,7 +125,7 @@ test('owner map covers user-named, bucket, repo-session, and realtime objects', 
 		'StorageRunner',
 	)
 	expect(owners.get('session:rs-1')).toEqual({
-		userId: 'user-a',
+		userId: ownerIdFromStored('user-a'),
 		doClass: 'RepoSession',
 	})
 	expect(owners.get('realtime:["user-a","pkg-1"]')?.doClass).toBe(
@@ -120,11 +135,24 @@ test('owner map covers user-named, bucket, repo-session, and realtime objects', 
 	expect(owners.has('session:repo-session:rs-1')).toBe(false)
 })
 
+test('owner map names Durable Objects for a team org with no users row', async () => {
+	const { env } = createEnv({
+		users: [],
+		orgs: ['org-team'],
+	})
+	const owners = await buildDurableObjectOwnerMap(env)
+	expect(owners.get('hub:org-team')).toEqual({
+		userId: ownerIdFromStored('org-team'),
+		doClass: 'McpClientHub',
+	})
+	expect(owners.get('runlog:org-team')?.doClass).toBe('RunLog')
+})
+
 test('active time converts microseconds and keeps unmapped objects unattributed', () => {
 	const owners = new Map([
-		['hub:a', { userId: 'a', doClass: 'McpClientHub' }],
-		['session:1', { userId: 'a', doClass: 'RepoSession' }],
-		['session:2', { userId: 'a', doClass: 'RepoSession' }],
+		['hub:a', { userId: ownerIdFromStored('a'), doClass: 'McpClientHub' }],
+		['session:1', { userId: ownerIdFromStored('a'), doClass: 'RepoSession' }],
+		['session:2', { userId: ownerIdFromStored('a'), doClass: 'RepoSession' }],
 	])
 	const result = attributeDurableObjectActiveTime({
 		owners,
@@ -137,12 +165,17 @@ test('active time converts microseconds and keeps unmapped objects unattributed'
 	})
 	expect(result.rows).toEqual([
 		{
-			userId: 'a',
+			userId: ownerIdFromStored('a'),
 			doClass: 'McpClientHub',
 			activeMs: 3_600_000,
 			objectCount: 1,
 		},
-		{ userId: 'a', doClass: 'RepoSession', activeMs: 5, objectCount: 2 },
+		{
+			userId: ownerIdFromStored('a'),
+			doClass: 'RepoSession',
+			activeMs: 5,
+			objectCount: 2,
+		},
 	])
 	expect(result.totalActiveMs).toBe(3_609_005)
 	expect(result.attributedActiveMs).toBe(3_600_005)
@@ -152,7 +185,9 @@ test('active time converts microseconds and keeps unmapped objects unattributed'
 
 test('the fleet total replaces a truncated per-object sum as the denominator', () => {
 	const result = attributeDurableObjectActiveTime({
-		owners: new Map([['hub:a', { userId: 'a', doClass: 'McpClientHub' }]]),
+		owners: new Map([
+			['hub:a', { userId: ownerIdFromStored('a'), doClass: 'McpClientHub' }],
+		]),
 		groups: [group('hub:a', 4_000_000)],
 		fleetActiveTimeUs: 10_000_000,
 	})
@@ -202,6 +237,7 @@ test('the lane rewrites days with analytics atomically and skips lagging empty d
 		sql: 'DELETE FROM durable_object_duration_daily WHERE day = ?',
 		params: ['2026-09-26'],
 	})
+	expect(batches[0]?.[1]?.sql).toContain('FROM orgs')
 	expect(batches[0]?.[1]?.params.slice(0, 5)).toEqual([
 		'user-a',
 		'McpClientHub',

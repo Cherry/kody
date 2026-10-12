@@ -1,17 +1,18 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
-import { secretProvidersFlagKey } from '#mcp/secrets/secret-providers/flag.ts'
 import { bindSecretProvider } from '#mcp/secrets/secret-providers/service.ts'
+import { authorizeSecretOrgWide } from './authorize-secret.ts'
 
 export const secretProviderBindCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretProviderBind',
-		featureFlag: secretProvidersFlagKey,
+		orgPermission: 'secret:write',
 		description:
 			'Pin which saved package serves an external secret provider id for this account, plus which user secret holds the door key. Declaring kody.secretProvider on a package does not bind it. Owner-controlled; does not return secret values.',
 		keywords: ['secret', 'provider', '1password', 'bind', 'service account'],
@@ -50,12 +51,13 @@ export const secretProviderBindCapability = defineDomainCapability(
 			config: z.record(z.string(), z.string()),
 		}),
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeSecretOrgWide(ctx, 'secret:write')
 			try {
 				const bound = await bindSecretProvider({
 					env: ctx.env,
 					baseUrl: ctx.callerContext.baseUrl,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					providerId: args.provider,
 					packageId: args.package_id,
 					doorSecretName: args.door_secret_name,

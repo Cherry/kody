@@ -1,15 +1,16 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { runInDurableObject } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { expect, test, vi } from 'vitest'
-import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
+import { utcDayKey, utcMonthKey } from '@kody-internal/shared/date-keys.ts'
 import { seedAccount } from '#worker/test-support/workers-seed.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { userMeterDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { EntitlementLimitError } from './errors.ts'
 import { planLimits } from '#universal/plans.ts'
 import {
 	assertWithinStorageBytesEntitlement,
 	consumeDailyEntitlement,
+	consumeExecuteUniqueWorkerDay,
 	readDailyEntitlementResourceUsage,
 	refundDailyEntitlement,
 } from './service.ts'
@@ -17,13 +18,14 @@ import { ensureEntitlementTestSchema } from './test-schema.ts'
 import { userMeterRpc } from './user-meter-client.ts'
 import { UserMeter, userMeterMirrorUpdatedAtToken } from './user-meter-do.ts'
 import { withPatchedDbPrepare } from '#worker/test-support/user-meter.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 type DailyResource = Parameters<typeof consumeDailyEntitlement>[0]['resource']
 
 async function seedFreeUser(emailPrefix: string) {
 	await ensureEntitlementTestSchema(env.APP_DB)
 	const email = `${emailPrefix}-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await seedAccount({
 		db: env.APP_DB,
 		email,
@@ -31,16 +33,24 @@ async function seedFreeUser(emailPrefix: string) {
 		plan: 'free',
 		stableUserId: userId,
 	})
-	const meter = userMeterRpc({ env, userId })
-	const consume = (resource: DailyResource, now: Date) =>
-		consumeDailyEntitlement({
+	const meter = userMeterRpc({ env, userId: ownerIdFromStored(userId) })
+	const consume = async (resource: DailyResource, now: Date) => {
+		const input = {
 			db: env.APP_DB,
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			email,
-			resource,
 			now,
-		})
+		}
+		if (resource === 'execute_unique_workers_per_day') {
+			await consumeExecuteUniqueWorkerDay({
+				...input,
+				workerId: `kody-${crypto.randomUUID()}`,
+			})
+			return
+		}
+		await consumeDailyEntitlement({ ...input, resource })
+	}
 	const readDaily = (resource: DailyResource, now: Date) =>
 		meter.read({ resource, day: utcDayKey(now), now: now.toISOString() })
 	return { email, userId, meter, consume, readDaily }
@@ -48,7 +58,9 @@ async function seedFreeUser(emailPrefix: string) {
 
 function meterStub(userId: string) {
 	return env.USER_METER.get(
-		env.USER_METER.idFromName(userMeterDurableObjectName(userId)),
+		env.USER_METER.idFromName(
+			userMeterDurableObjectName(ownerIdFromStored(userId)),
+		),
 	)
 }
 
@@ -92,13 +104,13 @@ function sqliteNames(state: DurableObjectState, where: string) {
 		.map((row) => row.name)
 }
 
-function expectSchemaV12(state: DurableObjectState) {
+function expectSchemaV15(state: DurableObjectState) {
 	const version = state.storage.sql
 		.exec<{ value: number }>(
 			`SELECT value FROM user_meter_meta WHERE key = 'schema_version' LIMIT 1`,
 		)
 		.toArray()[0]
-	expect(Number(version?.value)).toBe(12)
+	expect(Number(version?.value)).toBe(15)
 	expect(
 		state.storage.sql
 			.exec<{ name: string }>(`PRAGMA table_info(account_write_leases)`)
@@ -108,17 +120,21 @@ function expectSchemaV12(state: DurableObjectState) {
 	expect(
 		sqliteNames(
 			state,
-			`type = 'table' AND name IN ('dynamic_worker_days', 'inbound_mcp_connection_last_used') ORDER BY name`,
+			`type = 'table' AND name IN ('dynamic_worker_days', 'execute_call_days', 'inbound_mcp_connection_last_used') ORDER BY name`,
 		),
-	).toEqual(['dynamic_worker_days', 'inbound_mcp_connection_last_used'])
+	).toEqual([
+		'dynamic_worker_days',
+		'execute_call_days',
+		'inbound_mcp_connection_last_used',
+	])
 }
 
 /**
  * A stable recent instant for daily-counter tests: yesterday at 15:00 UTC.
  * The UserMeter DO purges daily counters older than its retention window
- * against the real clock, so a hardcoded date silently ages out and flips
- * cold-consume reads back to `needs_bootstrap` (this suite broke exactly
- * seven days after its previous hardcoded date).
+ * (`userMeterDailyCounterRetentionDays`) against the real clock, so a
+ * hardcoded date silently ages out and flips cold-consume reads back to
+ * `needs_bootstrap`.
  */
 function recentDailyCounterNow(): Date {
 	const now = new Date()
@@ -127,13 +143,13 @@ function recentDailyCounterNow(): Date {
 	)
 }
 
-test('fresh UserMeter schema is v12 and warm v7 upgrades to v12 preserving leases', async () => {
+test('fresh UserMeter schema is v15 and warm v7 upgrades to v15 preserving leases', async () => {
 	const fresh = await seedFreeUser('meter-schema-v12-fresh')
 	await runInDurableObject(
 		meterStub(fresh.userId),
 		async (instance: UserMeter, state) => {
 			expect(instance).toBeInstanceOf(UserMeter)
-			expectSchemaV12(state)
+			expectSchemaV15(state)
 		},
 	)
 
@@ -180,7 +196,7 @@ test('fresh UserMeter schema is v12 and warm v7 upgrades to v12 preserving lease
 			}
 			proto.initializeSchema.call(instance)
 
-			expectSchemaV12(state)
+			expectSchemaV15(state)
 			expect(
 				state.storage.sql
 					.exec(
@@ -275,7 +291,7 @@ test('cold, warm, and next-UTC-day daily consumes start at zero without preparin
 	await expect(
 		readDailyEntitlementResourceUsage({
 			env,
-			userId: warm.userId,
+			userId: ownerIdFromStored(warm.userId),
 			resource,
 			now: warmNow,
 		}),
@@ -305,7 +321,7 @@ test('UserMeter consume denies public execute when the UTC week hits first', asy
 	const monday = new Date('2026-07-06T15:00:00.000Z')
 	const tuesday = new Date('2026-07-07T15:00:00.000Z')
 	const wednesday = new Date('2026-07-08T15:00:00.000Z')
-	const resource = 'execute_calls_per_day'
+	const resource = 'execute_unique_workers_per_day'
 	const user = await seedFreeUser('meter-weekly-execute')
 	for (const [day, count] of [
 		[monday, 150],
@@ -328,12 +344,303 @@ test('UserMeter consume denies public execute when the UTC week hits first', asy
 		}),
 	).toEqual({ outcome: 'ready', count: 399 })
 
-	await user.consume(resource, wednesday)
-	const denied = await catchError(user.consume(resource, wednesday))
+	const claim = (workerId: string) =>
+		consumeExecuteUniqueWorkerDay({
+			db: env.APP_DB,
+			env,
+			userId: ownerIdFromStored(user.userId),
+			email: user.email,
+			workerId,
+			now: wednesday,
+		})
+	await expect(claim('kody-week-a')).resolves.toEqual({
+		created: true,
+		used: 100,
+		limit: 150,
+		weekUsed: 400,
+		weekLimit: 400,
+	})
+	const denied = await catchError(claim('kody-week-b'))
 	expect(denied).toBeInstanceOf(EntitlementLimitError)
 	expect(denied).toMatchObject({
 		details: { resource, limit: 400, current: 400, window: 'week' },
 	})
+}, 30_000)
+
+test('consumeExecuteUniqueWorkerDay spends one unit per new worker per day, repeats free, and leaves denied workers unclaimed', async () => {
+	const now = recentDailyCounterNow()
+	const nextDay = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+	const user = await seedFreeUser('meter-execute-unique-workers')
+	const limit = planLimits.free.maxExecuteUniqueWorkersPerDay
+	const claim = (workerId: string, at = now) =>
+		consumeExecuteUniqueWorkerDay({
+			db: env.APP_DB,
+			env,
+			userId: ownerIdFromStored(user.userId),
+			email: user.email,
+			workerId,
+			now: at,
+		})
+
+	await expect(claim('kody-a')).resolves.toMatchObject({
+		created: true,
+		used: 1,
+	})
+	await expect(claim('kody-a')).resolves.toMatchObject({
+		created: false,
+		used: 1,
+	})
+	await runInDurableObject(
+		meterStub(user.userId),
+		async (_instance: UserMeter, state) => {
+			state.storage.sql.exec(
+				`UPDATE daily_counters SET count = ? WHERE resource = ? AND day = ?`,
+				limit,
+				'execute_unique_workers_per_day',
+				utcDayKey(now),
+			)
+		},
+	)
+	await expect(claim('kody-a')).resolves.toMatchObject({
+		created: false,
+		used: limit,
+	})
+	const denied = await catchError(claim('kody-b'))
+	expect(denied).toMatchObject({
+		details: {
+			resource: 'execute_unique_workers_per_day',
+			limit,
+			current: limit,
+		},
+	})
+	await runInDurableObject(
+		meterStub(user.userId),
+		async (_instance: UserMeter, state) => {
+			expect(
+				state.storage.sql
+					.exec(
+						`SELECT worker_id FROM dynamic_worker_days WHERE day = ? ORDER BY worker_id`,
+						utcDayKey(now),
+					)
+					.toArray(),
+			).toEqual([{ worker_id: 'kody-a' }])
+		},
+	)
+	await expect(claim('kody-b', nextDay)).resolves.toMatchObject({
+		created: true,
+		used: 1,
+	})
+}, 30_000)
+
+test('UserMeter admitExecuteCall admits up to the per-minute limit, resets on the next minute, and refuses identical repeats', async () => {
+	const user = await seedFreeUser('meter-execute-admission')
+	const minuteStart = Date.parse('2026-10-10T12:00:00.000Z')
+	const admit = (nowMs: number) =>
+		user.meter.admitExecuteCall({ nowMs, limitPerMinute: 2 })
+	await expect(admit(minuteStart + 1_000)).resolves.toEqual({
+		admitted: true,
+		count: 1,
+	})
+	await expect(admit(minuteStart + 2_000)).resolves.toEqual({
+		admitted: true,
+		count: 2,
+	})
+	await expect(admit(minuteStart + 45_000)).resolves.toEqual({
+		admitted: false,
+		reason: 'rate',
+		count: 2,
+		retryAfterMs: 15_000,
+	})
+	await expect(admit(minuteStart + 60_000)).resolves.toEqual({
+		admitted: true,
+		count: 1,
+	})
+	const repeat = { key: 'same-call', limit: 1, windowMs: 60_000 }
+	await expect(
+		user.meter.admitExecuteCall({
+			nowMs: minuteStart + 61_000,
+			limitPerMinute: 2,
+			repeat,
+		}),
+	).resolves.toEqual({ admitted: true, count: 2 })
+	await expect(
+		user.meter.admitExecuteCall({
+			nowMs: minuteStart + 62_000,
+			limitPerMinute: 3,
+			repeat,
+		}),
+	).resolves.toEqual({
+		admitted: false,
+		reason: 'repeat',
+		repeats: 1,
+		retryAfterMs: 59_000,
+	})
+	// Four admitted calls; the rate and repeat refusals are not counted.
+	const trend = await user.meter.readDailyTrend({
+		now: new Date(minuteStart + 62_000).toISOString(),
+	})
+	expect(trend.executeCalls).toEqual([{ day: '2026-10-10', count: 4 }])
+}, 30_000)
+
+test('UserMeter readUsageSnapshot returns daily, weekly, and storage in one call', async () => {
+	const monday = new Date('2026-07-06T15:00:00.000Z')
+	const tuesday = new Date('2026-07-07T15:00:00.000Z')
+	const user = await seedFreeUser('meter-usage-snapshot')
+	await user.meter.initialize({
+		resource: 'execute_unique_workers_per_day',
+		day: utcDayKey(monday),
+		count: 10,
+		updatedAt: monday.toISOString(),
+	})
+	await user.meter.initialize({
+		resource: 'execute_unique_workers_per_day',
+		day: utcDayKey(tuesday),
+		count: 7,
+		updatedAt: tuesday.toISOString(),
+	})
+	await user.meter.initialize({
+		resource: 'email_sends_per_day',
+		day: utcDayKey(tuesday),
+		count: 3,
+		updatedAt: tuesday.toISOString(),
+	})
+	await user.meter.initializeStorageBytes({
+		bytes: 42,
+		updatedAt: tuesday.toISOString(),
+	})
+
+	const snapshot = await user.meter.readUsageSnapshot({
+		day: utcDayKey(tuesday),
+		weekStart: utcDayKey(monday),
+		dailyResources: ['execute_unique_workers_per_day', 'email_sends_per_day'],
+		weeklyResources: ['execute_unique_workers_per_day'],
+		includeStorageBytes: true,
+		now: tuesday.toISOString(),
+	})
+	expect(snapshot.daily).toEqual([
+		expect.objectContaining({
+			resource: 'execute_unique_workers_per_day',
+			outcome: 'ready',
+			count: 7,
+		}),
+		expect.objectContaining({
+			resource: 'email_sends_per_day',
+			outcome: 'ready',
+			count: 3,
+		}),
+	])
+	expect(snapshot.weekly).toEqual([
+		{
+			resource: 'execute_unique_workers_per_day',
+			outcome: 'ready',
+			count: 17,
+		},
+	])
+	expect(snapshot.storageBytes).toMatchObject({
+		outcome: 'ready',
+		bytes: 42,
+	})
+
+	const cold = await user.meter.readUsageSnapshot({
+		day: utcDayKey(tuesday),
+		weekStart: utcDayKey(monday),
+		dailyResources: ['outbound_fetches_per_day'],
+		weeklyResources: ['outbound_fetches_per_day'],
+		includeStorageBytes: false,
+		now: tuesday.toISOString(),
+	})
+	expect(cold.daily).toEqual([
+		{ resource: 'outbound_fetches_per_day', outcome: 'needs_bootstrap' },
+	])
+	expect(cold.weekly).toEqual([
+		{
+			resource: 'outbound_fetches_per_day',
+			outcome: 'ready',
+			count: 0,
+		},
+	])
+	expect(cold.storageBytes).toBeNull()
+}, 30_000)
+
+test('UserMeter readDailyTrend returns counters and unique worker days for the retention window', async () => {
+	const now = new Date('2026-10-07T15:00:00.000Z')
+	const yesterday = new Date('2026-10-06T15:00:00.000Z')
+	const user = await seedFreeUser('meter-daily-trend')
+	await user.meter.initialize({
+		resource: 'execute_unique_workers_per_day',
+		day: utcDayKey(yesterday),
+		count: 11,
+		updatedAt: yesterday.toISOString(),
+	})
+	await user.meter.initialize({
+		resource: 'job_runs_per_day',
+		day: utcDayKey(yesterday),
+		count: 2,
+		updatedAt: yesterday.toISOString(),
+	})
+	await user.meter.claimDynamicWorkerDay({
+		workerId: 'worker-a',
+		day: utcDayKey(yesterday),
+		createdAt: yesterday.toISOString(),
+	})
+	await user.meter.claimDynamicWorkerDay({
+		workerId: 'worker-b',
+		day: utcDayKey(yesterday),
+		createdAt: yesterday.toISOString(),
+	})
+	await user.meter.claimDynamicWorkerDay({
+		workerId: 'worker-a',
+		day: utcDayKey(now),
+		createdAt: now.toISOString(),
+	})
+
+	for (const nowMs of [yesterday.getTime(), now.getTime(), now.getTime()]) {
+		await user.meter.admitExecuteCall({ nowMs, limitPerMinute: 300 })
+	}
+	// Pre-deploy call counts under the retired per-call counter still show.
+	await runInDurableObject(
+		meterStub(user.userId),
+		async (_instance: UserMeter, state) => {
+			for (const [day, count] of [
+				[utcDayKey(yesterday), 40],
+				[utcDayKey(now), 5],
+			] as const) {
+				state.storage.sql.exec(
+					`INSERT INTO daily_counters (resource, day, count, revision, updated_at)
+					 VALUES ('execute_calls_per_day', ?, ?, 1, ?)`,
+					day,
+					count,
+					now.toISOString(),
+				)
+			}
+		},
+	)
+
+	const trend = await user.meter.readDailyTrend({ now: now.toISOString() })
+	expect(trend.retentionDays).toBeGreaterThan(0)
+	expect(trend.endDay).toBe(utcDayKey(now))
+	expect(trend.counters).toEqual(
+		expect.arrayContaining([
+			{
+				resource: 'execute_unique_workers_per_day',
+				day: utcDayKey(yesterday),
+				count: 11,
+			},
+			{
+				resource: 'job_runs_per_day',
+				day: utcDayKey(yesterday),
+				count: 2,
+			},
+		]),
+	)
+	expect(trend.uniqueWorkerDays).toEqual([
+		{ day: utcDayKey(yesterday), count: 2 },
+		{ day: utcDayKey(now), count: 1 },
+	])
+	expect(trend.executeCalls).toEqual([
+		{ day: utcDayKey(yesterday), count: 41 },
+		{ day: utcDayKey(now), count: 7 },
+	])
 }, 30_000)
 
 test('UserMeter daily entitlement consume/refund/read/export/purge workflow is per-user without D1 daily table', async () => {
@@ -345,9 +652,16 @@ test('UserMeter daily entitlement consume/refund/read/export/purge workflow is p
 	const userB = await seedFreeUser('meter-b')
 	const readA = () => userA.readDaily(resource, now)
 	const refundA = () =>
-		refundDailyEntitlement({ env, userId: userA.userId, resource, now })
+		refundDailyEntitlement({
+			env,
+			userId: ownerIdFromStored(userA.userId),
+			resource,
+			now,
+		})
 
-	expect(userMeterDurableObjectName(userA.userId)).toBe(userA.userId)
+	expect(userMeterDurableObjectName(ownerIdFromStored(userA.userId))).toBe(
+		userA.userId,
+	)
 	using prepares = countDailyCounterPrepares()
 
 	await userA.consume(resource, now)
@@ -383,12 +697,12 @@ test('UserMeter daily entitlement consume/refund/read/export/purge workflow is p
 	expect(await readA()).toMatchObject({ outcome: 'ready', count: 0 })
 
 	await userA.consume(resource, now)
-	await userA.consume('execute_calls_per_day', now)
+	await userA.consume('execute_unique_workers_per_day', now)
 	expect((await userA.meter.exportCounters({})).counters).toEqual(
 		expect.arrayContaining([
 			expect.objectContaining({ resource, day, count: 1 }),
 			expect.objectContaining({
-				resource: 'execute_calls_per_day',
+				resource: 'execute_unique_workers_per_day',
 				day,
 				count: 1,
 			}),
@@ -495,7 +809,7 @@ test('storage bytes are UserMeter-authoritative: cold zero bootstrap, denial, co
 		assertWithinStorageBytesEntitlement({
 			db: env.APP_DB,
 			env,
-			userId: user.userId,
+			userId: ownerIdFromStored(user.userId),
 			email: user.email,
 			requested,
 		})
@@ -543,7 +857,7 @@ test('storage bytes are UserMeter-authoritative: cold zero bootstrap, denial, co
 	})
 
 	// Missing user (synthetic context) gets free-plan semantics.
-	const missing = { userId: 'a'.repeat(64), email: null }
+	const missing = { userId: ownerIdFromStored('a').repeat(64), email: null }
 	await expect(reserve(missing, 1)).resolves.toBeUndefined()
 	const missingDenied = await catchError(reserve(missing, storageLimit + 1))
 	expect(missingDenied).toBeInstanceOf(EntitlementLimitError)
@@ -573,13 +887,13 @@ test('UserMeter storage RPCs, authoritative export state, and purge work additiv
 		updatedAt: '2026-07-31T17:02:00.000Z',
 	})
 
-	// Wall-clock retention on export/read; keep counters inside the 7-day window.
+	// Wall-clock retention on export/read; keep counters inside the 14-day window.
 	const day = utcDayKey()
 	const counterUpdatedAt = new Date().toISOString()
 	for (const resource of [
 		'email_receives_per_day',
 		'email_sends_per_day',
-		'execute_calls_per_day',
+		'execute_unique_workers_per_day',
 		'job_runs_per_day',
 		'automation_invocations_per_day',
 		'outbound_fetches_per_day',
@@ -653,7 +967,11 @@ test('UserMeter deletion leases: mark, acquire, release, repair, export, and pur
 	// markDeleting preserves tombstone; repeated calls return the first timestamp.
 	expect(
 		await meterA.markDeleting({ deletingAt: '2026-08-01 10:00:00' }),
-	).toEqual({ deletingAt: '2026-08-01 10:00:00', created: true, leaseCount: 0 })
+	).toEqual({
+		deletingAt: '2026-08-01 10:00:00',
+		created: true,
+		leaseCount: 0,
+	})
 	expect(
 		await meterA.markDeleting({ deletingAt: '2026-08-01 11:00:00' }),
 	).toEqual({
@@ -678,7 +996,11 @@ test('UserMeter deletion leases: mark, acquire, release, repair, export, and pur
 	).toEqual({ cleared: true })
 	expect(
 		await meterA.markDeleting({ deletingAt: '2026-08-01 10:00:00' }),
-	).toEqual({ deletingAt: '2026-08-01 10:00:00', created: true, leaseCount: 0 })
+	).toEqual({
+		deletingAt: '2026-08-01 10:00:00',
+		created: true,
+		leaseCount: 0,
+	})
 
 	// acquireWriteLease is idempotent (same token).
 	for (const [token, holder, acquiredAt] of [
@@ -693,7 +1015,11 @@ test('UserMeter deletion leases: mark, acquire, release, repair, export, and pur
 	expect(await meterB.countActiveWriteLeases()).toEqual({ count: 2 })
 	expect(
 		await meterB.markDeleting({ deletingAt: '2026-08-01 09:00:00' }),
-	).toEqual({ deletingAt: '2026-08-01 09:00:00', created: true, leaseCount: 2 })
+	).toEqual({
+		deletingAt: '2026-08-01 09:00:00',
+		created: true,
+		leaseCount: 2,
+	})
 	await expect(
 		acquire(
 			meterB,
@@ -723,6 +1049,14 @@ test('UserMeter deletion leases: mark, acquire, release, repair, export, and pur
 		released: true,
 	})
 	expect(await meterB.countActiveWriteLeases()).toEqual({ count: 1 })
+	// A reset retry of the same release still proves the lease was held, while
+	// a token that was never acquired does not.
+	await expect(meterB.releaseWriteLease({ token: tokenA })).resolves.toEqual({
+		released: true,
+	})
+	await expect(
+		meterB.releaseWriteLease({ token: 'lease_never_acquired_token' }),
+	).resolves.toEqual({ released: false })
 
 	// Acquiring on a deleted account is blocked.
 	await expect(
@@ -891,3 +1225,97 @@ test('UserMeter inbound MCP last-used touches debounce, list, forget, export, an
 	expect(await meter.exportCounters({})).toEqual(emptyExport())
 	expect(await otherMeter.listInboundConnectionLastUsed()).toEqual(otherEntries)
 }, 30_000)
+
+test('UserMeter budget spend resets on UTC month rollover', async () => {
+	const { userId, meter } = await seedFreeUser('budget-meter')
+	const month = '2026-02'
+	const nextMonth = '2026-03'
+	await meter.assertWithinBudgetAndRecord({
+		month,
+		actorUserId: userId,
+		automationSource: null,
+		deltaMicroUsd: 1_000_000,
+		userBudgetMicroUsd: null,
+		automationBudgetMicroUsd: null,
+	})
+	await meter.assertWithinBudgetAndRecord({
+		month,
+		actorUserId: null,
+		automationSource: 'webhook',
+		deltaMicroUsd: 2_000_000,
+		userBudgetMicroUsd: null,
+		automationBudgetMicroUsd: null,
+	})
+	expect(await meter.getBudgetSpend({ month })).toEqual({
+		month,
+		users: { [userId]: 1_000_000 },
+		automationMicroUsd: 2_000_000,
+	})
+	expect(await meter.getBudgetSpend({ month: nextMonth })).toEqual({
+		month: nextMonth,
+		users: {},
+		automationMicroUsd: 0,
+	})
+})
+
+test('UserMeter budget enforcement separates user and automation limits', async () => {
+	const { userId, meter } = await seedFreeUser('budget-enforce')
+	const month = utcMonthKey(new Date())
+	await expect(
+		meter.assertWithinBudgetAndRecord({
+			month,
+			actorUserId: userId,
+			automationSource: null,
+			deltaMicroUsd: 0,
+			userBudgetMicroUsd: 1_000_000,
+			automationBudgetMicroUsd: null,
+			actorUsername: 'member',
+			orgSlug: 'team',
+		}),
+	).resolves.toBeDefined()
+	await meter.assertWithinBudgetAndRecord({
+		month,
+		actorUserId: userId,
+		automationSource: null,
+		deltaMicroUsd: 1_000_000,
+		userBudgetMicroUsd: 1_000_000,
+		automationBudgetMicroUsd: null,
+		actorUsername: 'member',
+		orgSlug: 'team',
+	})
+	const atUserBudget = await catchError(
+		meter.assertWithinBudgetAndRecord({
+			month,
+			actorUserId: userId,
+			automationSource: null,
+			deltaMicroUsd: 0,
+			userBudgetMicroUsd: 1_000_000,
+			automationBudgetMicroUsd: null,
+			actorUsername: 'member',
+			orgSlug: 'team',
+		}),
+	)
+	expect(atUserBudget).toMatchObject({ name: 'BudgetLimitError' })
+
+	await meter.assertWithinBudgetAndRecord({
+		month,
+		actorUserId: null,
+		automationSource: 'schedule',
+		deltaMicroUsd: 500_000,
+		userBudgetMicroUsd: null,
+		automationBudgetMicroUsd: 500_000,
+		orgSlug: 'team',
+	})
+	const overAutomation = await catchError(
+		meter.assertWithinBudgetAndRecord({
+			month,
+			actorUserId: null,
+			automationSource: 'schedule',
+			deltaMicroUsd: 1,
+			userBudgetMicroUsd: null,
+			automationBudgetMicroUsd: 500_000,
+			orgSlug: 'team',
+		}),
+	)
+	expect(overAutomation).toMatchObject({ name: 'BudgetLimitError' })
+})

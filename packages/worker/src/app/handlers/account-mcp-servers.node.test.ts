@@ -1,15 +1,24 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as authSession from '#app/auth-session.ts'
 import type * as settingsService from '#worker/mcp-client/settings-service.ts'
 import type * as hubClient from '#worker/mcp-client/hub-client.ts'
+import type * as settingsRepo from '#worker/mcp-client/settings-repo.ts'
+import type * as orgsRepo from '#worker/orgs/repo.ts'
+import type * as authorizeModule from '#worker/authorization/authorize.ts'
 import { type McpClientHubClient } from '#worker/mcp-client/hub-client.ts'
 import { type McpServerSettingMetadata } from '#worker/mcp-client/settings-types.ts'
 import { type McpServerLastError } from '#worker/mcp-client/types.ts'
 import type * as CloudflareWorkers from 'cloudflare:workers'
 import type * as ProviderMarks from '#worker/integrations/provider-marks.ts'
 
-const mockModule = vi.hoisted(() => {
+const mockModule = await vi.hoisted(async () => {
+	// Hoisted above static imports, so the id helpers load here.
+	const { personIdFromStored } =
+		await import('@kody-internal/shared/owner-person-ids.ts')
+	const { sessionRequestContext } =
+		await import('#worker/test-support/request-context.ts')
 	const epoch = new Date(0).toISOString()
 	const setting = (
 		overrides: Partial<McpServerSettingMetadata> = {},
@@ -30,13 +39,21 @@ const mockModule = vi.hoisted(() => {
 		...overrides,
 	})
 	const mcpUser = {
-		userId: 'stable-user-1',
+		userId: personIdFromStored('stable-user-1'),
 		email: 'user@example.com',
 		username: 'test-user',
 		displayName: 'user',
 	}
 	return {
 		epoch,
+		hubOwners: [] as Array<string>,
+		getMcpServerOwnerId: vi.fn<typeof settingsRepo.getMcpServerOwnerId>(
+			async () => null,
+		),
+		loadOrgBindingForOrg: vi.fn<typeof orgsRepo.loadOrgBindingForOrg>(
+			async () => null,
+		),
+		authorize: vi.fn<typeof authorizeModule.authorize>(async () => {}),
 		waitUntil: vi.fn<typeof CloudflareWorkers.waitUntil>(),
 		readAuthenticatedAppUser: vi.fn<
 			typeof authenticatedUserModule.readAuthenticatedAppUser
@@ -52,11 +69,12 @@ const mockModule = vi.hoisted(() => {
 			permissions: [],
 			artifactOwnerIds: [],
 			mcpUser,
+			request: sessionRequestContext(mcpUser.userId),
 		})),
 		readAuthSessionResult: vi.fn<typeof authSession.readAuthSessionResult>(
 			async () => ({
 				session: {
-					stableUserId: 'stable-user-1',
+					stableUserId: ownerIdFromStored('stable-user-1'),
 					email: 'user@example.com',
 					rememberMe: false,
 				},
@@ -78,7 +96,7 @@ const mockModule = vi.hoisted(() => {
 			connection: {
 				serverId: 'server-2',
 				state: 'authenticating',
-				authUrl: 'https://auth.example.com/authorize?state=abc',
+				authorizationPending: true,
 				error: null,
 				toolCount: 0,
 			},
@@ -108,7 +126,7 @@ const mockModule = vi.hoisted(() => {
 					name: 'linear',
 					url: 'https://mcp.example.com/mcp',
 					state: 'ready',
-					authUrl: null,
+					authorizationPending: false,
 					error: null,
 					instructions: null,
 					tools: [
@@ -131,7 +149,7 @@ const mockModule = vi.hoisted(() => {
 		reconnectServer: vi.fn<McpClientHubClient['reconnectServer']>(async () => ({
 			serverId: 'server-1',
 			state: 'authenticating',
-			authUrl: 'https://auth.example.com/authorize?state=fresh.server-1',
+			authorizationPending: true,
 			error: null,
 			toolCount: 0,
 		})),
@@ -226,25 +244,48 @@ vi.mock('#worker/integrations/provider-marks.ts', async (importOriginal) => {
 	}
 })
 
+vi.mock('#worker/mcp-client/settings-repo.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof settingsRepo>()),
+	getMcpServerOwnerId: (
+		...args: Parameters<typeof settingsRepo.getMcpServerOwnerId>
+	) => mockModule.getMcpServerOwnerId(...args),
+}))
+
+vi.mock('#worker/orgs/repo.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof orgsRepo>()),
+	loadOrgBindingForOrg: (
+		...args: Parameters<typeof orgsRepo.loadOrgBindingForOrg>
+	) => mockModule.loadOrgBindingForOrg(...args),
+}))
+
+vi.mock('#worker/authorization/authorize.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof authorizeModule>()),
+	authorize: (...args: Parameters<typeof authorizeModule.authorize>) =>
+		mockModule.authorize(...args),
+}))
+
 vi.mock('#worker/mcp-client/hub-client.ts', () => ({
 	getCachedMcpClientHubSnapshot: (
 		...args: Parameters<typeof hubClient.getCachedMcpClientHubSnapshot>
 	) => mockModule.getCachedMcpClientHubSnapshot(...args),
-	createMcpClientHubClient: () => ({
-		handleOAuthCallback: (
-			...args: Parameters<McpClientHubClient['handleOAuthCallback']>
-		) => mockModule.handleOAuthCallback(...args),
-		reconnectServer: (
-			...args: Parameters<McpClientHubClient['reconnectServer']>
-		) => mockModule.reconnectServer(...args),
-		refreshServer: vi.fn(async () => ({
-			serverId: 'server-1',
-			state: 'ready',
-			authUrl: null,
-			error: null,
-			toolCount: 2,
-		})),
-	}),
+	createMcpClientHubClient: (input: { userId: string }) => {
+		mockModule.hubOwners.push(input.userId)
+		return {
+			handleOAuthCallback: (
+				...args: Parameters<McpClientHubClient['handleOAuthCallback']>
+			) => mockModule.handleOAuthCallback(...args),
+			reconnectServer: (
+				...args: Parameters<McpClientHubClient['reconnectServer']>
+			) => mockModule.reconnectServer(...args),
+			refreshServer: vi.fn(async () => ({
+				serverId: 'server-1',
+				state: 'ready',
+				authorizationPending: false,
+				error: null,
+				toolCount: 2,
+			})),
+		}
+	},
 }))
 
 const {
@@ -255,7 +296,10 @@ const {
 const env = { APP_DB: {} as D1Database } as Env
 const apiUrl = 'https://example.com/account/mcp-servers.json'
 const callbackUrl = 'https://example.com/account/mcp-servers/oauth/callback'
-const userScope = { userId: 'stable-user-1', id: 'server-1' }
+const userScope = {
+	userId: ownerIdFromStored('stable-user-1'),
+	id: 'server-1',
+}
 
 function discoveryFailure(attemptId: string, suffix = '') {
 	const message = `Authorization completed at the identity provider, but tool discovery didn't finish (phase server/discover, mcp https://mcp.example.com/mcp, id ${attemptId}).${suffix}`
@@ -335,6 +379,7 @@ test('MCP servers API lists, adds, reconnects, disables, and deletes with user s
 				catalogLogoPath: null,
 				usageMode: 'any',
 				allowedPackageIds: [],
+				oauthClientId: null,
 			},
 		],
 		savedPackages: [{ id: 'pkg-drafts', kodyId: 'gmail-drafts' }],
@@ -349,7 +394,7 @@ test('MCP servers API lists, adds, reconnects, disables, and deletes with user s
 	expect(addResponse.status).toBe(200)
 	expect(mockModule.addMcpServer).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			name: 'notion',
 			url: 'https://mcp.notion.example/mcp',
 			baseUrl: 'https://example.com',
@@ -373,7 +418,7 @@ test('MCP servers API lists, adds, reconnects, disables, and deletes with user s
 	mockModule.reconnectServer.mockResolvedValueOnce({
 		serverId: 'server-1',
 		state: 'connected',
-		authUrl: null,
+		authorizationPending: false,
 		error: hung.message,
 		toolCount: 0,
 		lastError: hung.lastError,
@@ -431,7 +476,7 @@ test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcom
 
 	const success = await callback('code=abc&state=xyz')
 	expect(success.response.status).toBe(303)
-	expect(success.location.pathname).toBe('/account/mcp-servers/server-1')
+	expect(success.location.pathname).toBe('/@test-user/-/mcp-servers/server-1')
 	expect(success.location.searchParams.get('auth')).toBe('success')
 	expect(success.location.searchParams.get('server')).toBe('linear')
 	expect(mockModule.setMcpServerLastError).toHaveBeenCalledWith(
@@ -464,7 +509,7 @@ test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcom
 	})
 	const failure = await callback('error=access_denied')
 	expect(failure.response.status).toBe(303)
-	expect(failure.location.pathname).toBe('/account/mcp-servers')
+	expect(failure.location.pathname).toBe('/@test-user/-/mcp-servers')
 	expect(failure.location.searchParams.get('auth')).toBe('error')
 	expect(failure.location.searchParams.get('reason')).toBe('Invalid state.')
 
@@ -495,7 +540,7 @@ test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcom
 	})
 	const recovery = await callback('code=abc&state=used.server-1')
 	expect(recovery.response.status).toBe(303)
-	expect(recovery.location.pathname).toBe('/account/mcp-servers/server-1')
+	expect(recovery.location.pathname).toBe('/@test-user/-/mcp-servers/server-1')
 	expect(recovery.location.searchParams.get('auth')).toBe('required')
 	expect(recovery.location.searchParams.has('reason')).toBe(false)
 
@@ -508,13 +553,13 @@ test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcom
 		lastError: null,
 	})
 	const unknownRecovery = await callback('error=access_denied')
-	expect(unknownRecovery.location.pathname).toBe('/account/mcp-servers')
+	expect(unknownRecovery.location.pathname).toBe('/@test-user/-/mcp-servers')
 	expect(unknownRecovery.location.searchParams.get('auth')).toBe('retry')
 	expect(unknownRecovery.location.searchParams.has('reason')).toBe(false)
 
 	const settle = discoveryFailure(
 		'attempt-1',
-		' Reconnect it from /account/mcp-servers.',
+		' Reconnect it from /@test-user/-/mcp-servers.',
 	)
 	mockModule.handleOAuthCallback.mockResolvedValueOnce({
 		serverId: 'server-1',
@@ -538,4 +583,74 @@ test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcom
 			}),
 		}),
 	)
+})
+
+test('the OAuth callback finishes in the org that owns the server when the person can write its integrations', async () => {
+	const { AuthorizationError } =
+		await import('#worker/authorization/authorize.ts')
+	const acmeId = ownerIdFromStored('org-acme')
+	const callback = createCallbackClient()
+	mockModule.getMcpServerOwnerId.mockResolvedValue(acmeId)
+	mockModule.loadOrgBindingForOrg.mockResolvedValue({
+		org: { id: acmeId, slug: 'acme' },
+		role: 'member',
+	})
+	mockModule.hubOwners.length = 0
+	mockModule.setMcpServerLastError.mockClear()
+
+	const team = await callback('code=abc&state=nonce.server-1')
+	expect(mockModule.getMcpServerOwnerId).toHaveBeenCalledWith(
+		expect.objectContaining({ id: 'server-1' }),
+	)
+	expect(mockModule.authorize).toHaveBeenCalledWith(
+		expect.objectContaining({
+			request: expect.objectContaining({
+				org: expect.objectContaining({ id: acmeId }),
+			}),
+		}),
+		'integration:write',
+	)
+	expect(mockModule.hubOwners).toEqual([acmeId])
+	expect(mockModule.setMcpServerLastError).toHaveBeenCalledWith(
+		expect.objectContaining({
+			userId: acmeId,
+			id: 'server-1',
+			lastError: null,
+		}),
+	)
+	expect(team.location.pathname).toBe('/@acme/-/mcp-servers/server-1')
+	expect(team.location.searchParams.get('auth')).toBe('success')
+
+	// Without integration:write there, or without access to the org, the
+	// callback stays in the session's org, as before.
+	mockModule.authorize.mockRejectedValueOnce(
+		new AuthorizationError({
+			code: 'missing_permission',
+			permission: 'integration:write',
+			orgId: acmeId,
+			resource: null,
+			message: 'Missing integration:write',
+		}),
+	)
+	await callback('code=abc&state=nonce.server-1')
+	mockModule.loadOrgBindingForOrg.mockResolvedValueOnce(null)
+	await callback('code=abc&state=nonce.server-1')
+	mockModule.getMcpServerOwnerId.mockResolvedValueOnce(null)
+	const unknown = await callback('code=abc&state=nonce.server-9')
+	mockModule.getMcpServerOwnerId.mockRejectedValueOnce(new Error('D1 down'))
+	const lookupFailed = await callback('code=abc&state=nonce.server-1')
+	expect(mockModule.hubOwners.slice(1)).toEqual([
+		userScope.userId,
+		userScope.userId,
+		userScope.userId,
+		userScope.userId,
+	])
+	expect(unknown.location.pathname).toBe('/@test-user/-/mcp-servers/server-1')
+	expect(lookupFailed.response.status).toBe(303)
+	expect(lookupFailed.location.pathname).toBe(
+		'/@test-user/-/mcp-servers/server-1',
+	)
+
+	mockModule.getMcpServerOwnerId.mockResolvedValue(null)
+	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
 })

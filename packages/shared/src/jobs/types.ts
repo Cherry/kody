@@ -1,4 +1,5 @@
 import { type McpCallerContext, type McpUserContext } from '../chat.ts'
+import { type OwnerId } from '../owner-person-ids.ts'
 
 export type JobSchedule =
 	| {
@@ -23,7 +24,7 @@ export type JobRepoCheckPolicy = {
 export type JobRecord = {
 	version: 1
 	id: string
-	userId: string
+	userId: OwnerId
 	name: string
 	sourceId: string
 	publishedCommit: string | null
@@ -35,14 +36,9 @@ export type JobRecord = {
 	enabled: boolean
 	killSwitchEnabled: boolean
 	/**
-	 * When true, platform job auto-cleanup never deletes this job. Preserved
-	 * jobs still count toward `scheduled_jobs` and `storage_bytes`.
-	 */
-	preserved: boolean
-	/**
 	 * Optional UTC ISO timestamp after which the platform stops scheduling and
 	 * auto-disables the job (`enabled = false`). Null means never expires.
-	 * Separate from `preserved` (retention) and `lease_expires_at` (claim lease).
+	 * Separate from `lease_expires_at` (claim lease).
 	 */
 	expiresAt: string | null
 	createdAt: string
@@ -106,17 +102,11 @@ export type PersistedJobCallerContext = Pick<
 
 export type JobUpdateInput = {
 	id: string
-	name?: string
-	code?: string
-	sourceId?: string | null
-	publishedCommit?: string | null
-	repoCheckPolicy?: JobRepoCheckPolicy | null
 	params?: Record<string, unknown> | null
 	schedule?: JobSchedule
 	timezone?: string | null
 	enabled?: boolean
 	killSwitchEnabled?: boolean
-	preserved?: boolean
 	/** Pass null to clear expiry. Omit to leave unchanged. */
 	expiresAt?: string | null
 }

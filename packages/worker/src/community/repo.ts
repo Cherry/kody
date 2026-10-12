@@ -1,6 +1,8 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { d1ContainsLikePattern } from '#worker/d1-like-pattern.ts'
 import { chunkArray } from '@kody-internal/shared/chunk.ts'
 import { parseTagsJson } from '@kody-internal/shared/tags-json.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import {
 	emptyCommunityCategoryCounts,
 	parseCommunityListingCategory,
@@ -36,7 +38,7 @@ export function mapCommunityListingRow(
 		row['featured_at'] == null ? null : String(row['featured_at'])
 	return {
 		id: String(row['id']),
-		ownerUserId: String(row['owner_user_id']),
+		ownerUserId: String(row['owner_user_id']) as OwnerId,
 		packageId: String(row['package_id']),
 		sourceId: String(row['source_id']),
 		kodyId: String(row['kody_id']),
@@ -140,8 +142,8 @@ function mapCommunityReportRow(
 		id: String(row['id']),
 		listingId: String(row['listing_id']),
 		listingName: String(row['listing_name']),
-		listingOwnerUserId: String(row['listing_owner_user_id']),
-		reporterUserId: String(row['reporter_user_id']),
+		listingOwnerUserId: String(row['listing_owner_user_id']) as OwnerId,
+		reporterUserId: String(row['reporter_user_id']) as OwnerId,
 		reason: String(row['reason']),
 		status: String(row['status']) as CommunityReportStatus,
 		resolvedByUserId:
@@ -166,7 +168,10 @@ function mapCommunityBanRow(row: Record<string, unknown>): CommunityBanRecord {
 }
 
 function listingStatusFilter(includeDelisted: boolean) {
-	return includeDelisted ? '' : `WHERE community_listings.status = 'active'`
+	if (includeDelisted) {
+		return `WHERE 1=1${andLiveDeletedAtSql('community_listings')}`
+	}
+	return `WHERE community_listings.status = 'active'${andLiveDeletedAtSql('community_listings')}`
 }
 
 /**
@@ -190,7 +195,7 @@ export const communityListingSourceJoin = `LEFT JOIN entity_sources
 	ON entity_sources.id = community_listings.source_id
 	AND entity_sources.user_id = community_listings.owner_user_id
 	AND entity_sources.entity_kind = 'package'
-	AND entity_sources.entity_id = community_listings.package_id`
+	AND entity_sources.entity_id = community_listings.package_id${andLiveDeletedAtSql('entity_sources')}`
 
 // D1 caps bound parameters per statement, so IN (...) lookups over large id
 // sets are issued in chunks (90 leaves headroom for fixed bindings).
@@ -392,7 +397,7 @@ export async function updateCommunityListing(
 		.prepare(
 			`UPDATE community_listings
 			SET ${assignments.join(', ')}
-			WHERE id = ? AND owner_user_id = ?${statusClause}`,
+			WHERE id = ? AND owner_user_id = ?${statusClause}${andLiveDeletedAtSql()}`,
 		)
 		.bind(...values, input.listingId, input.ownerUserId, ...statusBindings)
 		.run()
@@ -415,7 +420,7 @@ export async function getCommunityListingById(
 			`SELECT ${communityListingSelectColumns}
 			FROM community_listings
 			${communityListingSourceJoin}
-			WHERE community_listings.id = ? ${statusClause}`,
+			WHERE community_listings.id = ? ${statusClause}${andLiveDeletedAtSql('community_listings')}`,
 		)
 		.bind(input.listingId)
 		.first<Record<string, unknown>>()
@@ -447,7 +452,7 @@ export async function getCommunityListingsByIds(
 				`SELECT ${communityListingSelectColumns}
 				FROM community_listings
 				${communityListingSourceJoin}
-				WHERE community_listings.id IN (${placeholders}) ${statusClause}`,
+				WHERE community_listings.id IN (${placeholders}) ${statusClause}${andLiveDeletedAtSql('community_listings')}`,
 			)
 			.bind(...idChunk)
 			.all<Record<string, unknown>>()
@@ -482,7 +487,8 @@ export async function getActiveCommunityListingWithPublisherUsername(
 			${communityListingSourceJoin}
 			LEFT JOIN users ON users.stable_user_id = community_listings.owner_user_id
 			WHERE community_listings.id = ?
-				AND community_listings.status = 'active'`,
+				AND community_listings.status = 'active'${andLiveDeletedAtSql('community_listings')}
+				AND users.deleted_at IS NULL`,
 		)
 		.bind(input.listingId)
 		.first<Record<string, unknown>>()
@@ -508,7 +514,7 @@ export async function getCommunityListingByOwnerAndPackage(
 			`SELECT ${communityListingSelectColumns}
 			FROM community_listings
 			${communityListingSourceJoin}
-			WHERE community_listings.owner_user_id = ? AND community_listings.package_id = ?`,
+			WHERE community_listings.owner_user_id = ? AND community_listings.package_id = ?${andLiveDeletedAtSql('community_listings')}`,
 		)
 		.bind(input.ownerUserId, input.packageId)
 		.first<Record<string, unknown>>()
@@ -534,7 +540,7 @@ export async function getCommunityListingByOwnerAndKodyId(
 			${communityListingSourceJoin}
 			WHERE community_listings.owner_user_id = ?
 				AND community_listings.kody_id = ?
-				AND community_listings.status = 'active'`,
+				AND community_listings.status = 'active'${andLiveDeletedAtSql('community_listings')}`,
 		)
 		.bind(input.ownerUserId, input.kodyId)
 		.first<Record<string, unknown>>()
@@ -554,7 +560,7 @@ export async function listCommunityListings(
 			`SELECT ${communityListingSelectColumns}
 			FROM community_listings
 			${communityListingSourceJoin}
-			${listingStatusFilter(input.includeDelisted)}
+			${listingStatusFilter(input.includeDelisted)}${andLiveDeletedAtSql('community_listings')}
 			ORDER BY community_listings.published_at DESC
 			LIMIT ? OFFSET ?`,
 		)
@@ -570,7 +576,7 @@ export async function countActiveCommunityListingsByCategory(
 		.prepare(
 			`SELECT category, COUNT(*) AS listing_count
 			FROM community_listings
-			WHERE status = 'active'
+			WHERE status = 'active'${andLiveDeletedAtSql()}
 			GROUP BY category`,
 		)
 		.all<{ category: string; listing_count: number }>()
@@ -600,7 +606,10 @@ export async function listCommunityListingCandidates(
 		category?: CommunityListingCategory | null
 	},
 ): Promise<Array<CommunityListingRecord>> {
-	const conditions: Array<string> = []
+	const conditions: Array<string> = [
+		'community_listings.deleted_at IS NULL',
+		'(entity_sources.id IS NULL OR entity_sources.deleted_at IS NULL)',
+	]
 	const bindings: Array<unknown> = []
 	if (!input.includeDelisted) {
 		conditions.push(`community_listings.status = 'active'`)
@@ -628,7 +637,7 @@ export async function listCommunityListingCandidates(
 			`SELECT ${communityListingSelectColumns}
 			FROM community_listings
 			${communityListingSourceJoin}
-			${whereClause}
+			${whereClause}${andLiveDeletedAtSql('community_listings')}
 			ORDER BY community_listings.published_at DESC
 			LIMIT ?`,
 		)
@@ -665,6 +674,7 @@ export async function listCommunityIndexOverviewCandidates(
 					) AS category_rank
 				FROM community_listings
 				WHERE status = 'active'
+					AND deleted_at IS NULL
 					${categoryFilter}
 			)
 			SELECT ${communityListingSelectColumns}
@@ -693,7 +703,9 @@ export async function deleteCommunityListing(
 			? [input.listingId, input.ownerUserId]
 			: [input.listingId]
 	const result = await db
-		.prepare(`DELETE FROM community_listings WHERE id = ? ${ownerClause}`)
+		.prepare(
+			`DELETE FROM community_listings WHERE id = ? ${ownerClause}${andLiveDeletedAtSql()}`,
+		)
 		.bind(...bindings)
 		.run()
 	return (result.meta.changes ?? 0) > 0
@@ -714,7 +726,7 @@ export async function setCommunityListingFeaturedAt(
 			`UPDATE community_listings
 			SET featured_at = CASE WHEN ? THEN COALESCE(featured_at, ?) ELSE NULL END,
 				updated_at = ?
-			WHERE id = ?`,
+			WHERE id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.featured ? 1 : 0, now, now, input.listingId)
 		.run()
@@ -738,7 +750,7 @@ export async function listFeaturedCommunityListings(
 			FROM community_listings
 			${communityListingSourceJoin}
 			WHERE community_listings.status = 'active'
-				AND community_listings.featured_at IS NOT NULL
+				AND community_listings.featured_at IS NOT NULL${andLiveDeletedAtSql('community_listings')}
 			ORDER BY community_listings.featured_at ASC
 			LIMIT ?`,
 		)
@@ -758,7 +770,7 @@ export async function setCommunityListingStatus(
 		.prepare(
 			`UPDATE community_listings
 			SET status = ?, updated_at = ?
-			WHERE id = ?`,
+			WHERE id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.status, new Date().toISOString(), input.listingId)
 		.run()
@@ -885,6 +897,7 @@ export async function listOrphanedCommunityForks(
 					SELECT 1
 					FROM saved_packages
 					WHERE saved_packages.id = community_forks.forked_package_id
+						AND saved_packages.deleted_at IS NULL
 				)
 				${idFilter}
 				ORDER BY community_forks.created_at ASC`,
@@ -935,6 +948,7 @@ export async function repointOrphanedCommunityForksToListing(
 					SELECT 1
 					FROM community_listings
 					WHERE community_listings.id = community_forks.listing_id
+						${andLiveDeletedAtSql('community_listings')}
 				)`,
 		)
 		.bind(

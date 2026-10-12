@@ -1,3 +1,5 @@
+import { listScopeIncludes } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -6,14 +8,16 @@ import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import { packageHasImplicitUserSecretReadAccess } from '#mcp/secrets/package-access.ts'
 import { listSecrets } from '#mcp/secrets/service.ts'
 import { secretScopeValues } from '#mcp/secrets/types.ts'
-import { secretMetadataSchema, toSecretCapabilityOutput } from './shared.ts'
+import { loadSecretListScope } from './authorize-secret.ts'
+import { listedSecretSchema, toListedSecretCapabilityOutput } from './shared.ts'
 
 export const secretListCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretList',
+		orgPermission: 'secret:use',
 		description:
-			'List available secret references for the signed-in user. Results include metadata such as names, descriptions, allowed hosts, allowed packages, and package_id for package-scoped secrets — never plaintext values. Explicit listing includes caller-owned package-scoped metadata from execute (no package runtime); using a package secret still requires package context. From a package runtime, self-authored and adopted packages see user secrets they can already read; unadopted community forks see only explicitly granted user secrets. Listing a secret does not approve a host: outbound `fetch` still resolves `{{secret:name}}` (optionally `{{secret:name|scope=user}}`) only for approved hosts. Use `kody.secretList({ scope })` inside execute-time code for the same metadata. Use `/account/secrets/new` for user-provided API key, token, and credential entry or rotation.',
+			'List available secret references for the signed-in user. Results include metadata such as names, credential ids (for accessGrant), descriptions, allowed hosts, allowed packages, and package_id for package-scoped secrets — never plaintext values. Explicit listing includes caller-owned package-scoped metadata from execute (no package runtime); using a package secret still requires package context. From a package runtime, self-authored and adopted packages see user secrets they can already read; unadopted community forks see only explicitly granted user secrets. Listing a secret does not approve a host: outbound `fetch` still resolves `{{secret:name}}` (optionally `{{secret:name|scope=user}}`) only for approved hosts. Use `kody.secretList({ scope })` inside execute-time code for the same metadata. Use `/connect/secret-set` for user-provided API key, token, and credential entry or rotation.',
 		keywords: ['secret', 'list', 'discovery', 'metadata', 'credentials'],
 		readOnly: true,
 		idempotent: true,
@@ -27,15 +31,16 @@ export const secretListCapability = defineDomainCapability(
 				),
 		}),
 		outputSchema: z.object({
-			secrets: z.array(secretMetadataSchema),
+			secrets: z.array(listedSecretSchema),
 		}),
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const packageId =
 				ctx.callerContext.storageContext?.packageId?.trim() || null
-			const secrets = await listSecrets({
+			const listScope = await loadSecretListScope(ctx, 'secret:use')
+			const listed = await listSecrets({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				scope: args.scope ?? null,
 				storageContext: {
 					sessionId: ctx.callerContext.storageContext?.sessionId ?? null,
@@ -44,12 +49,15 @@ export const secretListCapability = defineDomainCapability(
 					storageId: ctx.callerContext.storageContext?.storageId ?? null,
 				},
 			})
+			const secrets = listed.filter((secret) =>
+				listScopeIncludes(listScope, secret.credentialId),
+			)
 			const implicitReadAccess =
 				packageId == null
 					? true
 					: await packageHasImplicitUserSecretReadAccess({
 							env: ctx.env,
-							userId: user.userId,
+							userId: ownerIdFromCaller(ctx.callerContext),
 							packageId,
 						})
 			const accessibleSecrets =
@@ -62,7 +70,7 @@ export const secretListCapability = defineDomainCapability(
 					: secrets
 			return {
 				secrets: accessibleSecrets.map((secret) =>
-					toSecretCapabilityOutput(secret),
+					toListedSecretCapabilityOutput(secret),
 				),
 			}
 		},

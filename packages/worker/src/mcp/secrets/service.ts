@@ -1,3 +1,5 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { sha256Hex } from '@kody-internal/shared/sha256.ts'
 import {
 	earliestSecretExpiresAt,
 	isSecretExpired,
@@ -12,7 +14,6 @@ import {
 } from './allowed-packages.ts'
 import {
 	normalizeAllowedHosts,
-	normalizeHost,
 	parseAllowedHosts,
 	stringifyAllowedHosts,
 } from './allowed-hosts.ts'
@@ -32,6 +33,7 @@ import {
 	deleteSecretEntry,
 	getSecretBucket,
 	getSecretEntry,
+	getStoredCredentialEntry,
 	listPackageScopeSecretMetadata,
 	listSecretBucketsByScope,
 	listSecretMetadataForBucket,
@@ -47,12 +49,17 @@ import {
 	estimateEntitlementStorageEntryByteDelta,
 } from '#worker/entitlements/service.ts'
 import { type UserMeterEnv } from '#worker/entitlements/user-meter-client.ts'
-import { type SecretMetadata, type SecretScope } from './types.ts'
+import {
+	type ListedSecret,
+	type SecretMetadata,
+	type SecretScope,
+	type StoredCredentialKind,
+} from './types.ts'
 import { getSavedPackageById } from '#worker/package-registry/repo.ts'
 import { stampFirstSecret } from '#worker/identity/activation-stamps.ts'
 
 type SecretOwnerContext = {
-	userId: string
+	userId: OwnerId
 	storageContext?: StorageContext | null
 }
 
@@ -99,6 +106,8 @@ type DeleteSecretInput = SecretOwnerContext & {
 
 export type ResolvedSecret = {
 	found: boolean
+	/** Stable credential id of the entry that resolved; null when not found. */
+	credentialId: string | null
 	value: string | null
 	scope: SecretScope | null
 	allowedHosts: Array<string>
@@ -216,7 +225,7 @@ export async function saveSecret(
 
 export async function updateUserSecretForPackage(input: {
 	env: SecretWriteEnv
-	userId: string
+	userId: OwnerId
 	userEmail?: string | null
 	packageId: string
 	name: string
@@ -255,7 +264,7 @@ export async function updateUserSecretForPackage(input: {
  */
 export async function setSecretsAtomically(input: {
 	env: SecretWriteEnv
-	userId: string
+	userId: OwnerId
 	userEmail?: string | null
 	secrets: Array<{
 		name: string
@@ -336,7 +345,7 @@ export async function setSecretsAtomically(input: {
 
 export async function updateUserSecretsForPackageAtomically(input: {
 	env: SecretWriteEnv
-	userId: string
+	userId: OwnerId
 	userEmail?: string | null
 	packageId: string
 	secrets: Array<{
@@ -463,7 +472,7 @@ export async function updateUserSecretsForPackageAtomically(input: {
 
 async function saveSecretsAtomically(input: {
 	env: SecretWriteEnv
-	userId: string
+	userId: OwnerId
 	userEmail?: string | null
 	scope: SecretScope
 	secrets: Array<{
@@ -607,7 +616,7 @@ async function saveSecretsAtomically(input: {
 
 export async function listSecrets(
 	input: ListSecretsInput,
-): Promise<Array<SecretMetadata>> {
+): Promise<Array<ListedSecret>> {
 	const buckets = await getAccessibleBuckets({
 		db: input.env.APP_DB,
 		userId: input.userId,
@@ -625,8 +634,9 @@ export async function listSecrets(
 	const listed = results
 		.flat()
 		.filter((row) => !isReservedSecretName(row.name))
-		.map((row) =>
-			toSecretMetadata({
+		.map((row) => ({
+			credentialId: row.id,
+			...toSecretMetadata({
 				name: row.name,
 				scope: row.scope,
 				description: row.description,
@@ -637,13 +647,13 @@ export async function listSecrets(
 				updatedAt: row.updated_at,
 				expiresAt: row.expires_at,
 			}),
-		)
+		}))
 	return listed
 }
 
-export async function resolveSecret(
-	input: ResolveSecretInput,
-): Promise<ResolvedSecret> {
+export type FoundSecret = Omit<ResolvedSecret, 'value'>
+
+async function findSecretEntry(input: ResolveSecretInput) {
 	assertSecretNameAllowed(input.name)
 	const scopes = input.scope
 		? [input.scope]
@@ -666,18 +676,7 @@ export async function resolveSecret(
 			if (!input.includeExpired && isSecretExpired(entry.expires_at)) {
 				return null
 			}
-			const decrypted = await decryptSecretValue(
-				input.env,
-				entry.encrypted_value,
-				userSecretContext(input.userId),
-			)
-			return {
-				found: true as const,
-				value: decrypted,
-				scope,
-				allowedHosts: parseAllowedHosts(entry.allowed_hosts),
-				allowedPackages: parseAllowedPackages(entry.allowed_packages),
-			}
+			return { scope, entry }
 		}),
 	)
 	// Preserve sequential precedence semantics: a lower-precedence failure must
@@ -687,12 +686,161 @@ export async function resolveSecret(
 		if (result.status === 'rejected') throw result.reason
 		if (result.value) return result.value
 	}
+	return null
+}
+
+/**
+ * Whether a secret exists, and its scope and allowlists, without decrypting
+ * the value. Existence and policy checks use this; only `resolveCredential`
+ * and account management read values.
+ */
+export async function findSecret(
+	input: ResolveSecretInput,
+): Promise<FoundSecret> {
+	const found = await findSecretEntry(input)
+	if (!found) {
+		return {
+			found: false,
+			credentialId: null,
+			scope: null,
+			allowedHosts: [],
+			allowedPackages: [],
+		}
+	}
 	return {
-		found: false,
-		value: null,
-		scope: null,
-		allowedHosts: [],
-		allowedPackages: [],
+		found: true,
+		credentialId: found.entry.id,
+		scope: found.scope,
+		allowedHosts: parseAllowedHosts(found.entry.allowed_hosts),
+		allowedPackages: parseAllowedPackages(found.entry.allowed_packages),
+	}
+}
+
+/**
+ * One lookup for `resolveCredential`: the metadata it authorizes on, and a
+ * `readValue` that decrypts only when the door calls it after authorizing.
+ * Only a `secret` is found: a later kind places its own value through its
+ * resolver, so a placeholder never fills it.
+ */
+export async function findSecretForUse(input: ResolveSecretInput): Promise<{
+	found: FoundSecret
+	readValue: () => Promise<ResolvedSecret>
+}> {
+	const found = await findSecretEntry(input)
+	if (!found || found.entry.kind !== 'secret') {
+		const missing: ResolvedSecret = {
+			found: false,
+			credentialId: null,
+			value: null,
+			scope: null,
+			allowedHosts: [],
+			allowedPackages: [],
+		}
+		const { value: _value, ...metadata } = missing
+		return { found: metadata, readValue: async () => missing }
+	}
+	const metadata: FoundSecret = {
+		found: true,
+		credentialId: found.entry.id,
+		scope: found.scope,
+		allowedHosts: parseAllowedHosts(found.entry.allowed_hosts),
+		allowedPackages: parseAllowedPackages(found.entry.allowed_packages),
+	}
+	return {
+		found: metadata,
+		readValue: async () => ({
+			...metadata,
+			value: await decryptSecretValue(
+				input.env,
+				found.entry.encrypted_value,
+				userSecretContext(input.userId),
+			),
+		}),
+	}
+}
+
+export type StoredCredential = {
+	credentialId: string
+	name: string
+	kind: StoredCredentialKind
+	allowedHosts: Array<string>
+	/** Raw `inject_json`: how the credential's value or session is placed. */
+	injectJson: string
+	/** Raw `config_json`: a login credential's exchange, else null. */
+	configJson: string | null
+	/**
+	 * Digest of the stored ciphertext and `config_json`. Every value write
+	 * re-encrypts with a fresh IV, so any change to the value or exchange
+	 * changes it.
+	 */
+	revision: string
+}
+
+/**
+ * A stored credential by id for a later-kind resolver: its metadata, and a
+ * `readValue` that decrypts only when the door calls it after authorizing.
+ * Null when `ownerId` has no live, unexpired user-scope entry with that id.
+ */
+export async function findStoredCredentialForUse(input: {
+	env: Pick<Env, 'APP_DB' | 'SECRET_STORE_KEY'>
+	ownerId: OwnerId
+	credentialId: string
+}): Promise<{
+	found: StoredCredential
+	readValue: () => Promise<string>
+} | null> {
+	const row = await getStoredCredentialEntry({
+		db: input.env.APP_DB,
+		ownerId: input.ownerId,
+		credentialId: input.credentialId,
+	})
+	if (!row) return null
+	return {
+		found: {
+			credentialId: row.id,
+			name: row.name,
+			kind: row.kind,
+			allowedHosts: parseAllowedHosts(row.allowed_hosts),
+			injectJson: row.inject_json,
+			configJson: row.config_json,
+			revision: await sha256Hex(
+				JSON.stringify([row.encrypted_value, row.config_json]),
+			),
+		},
+		readValue: () =>
+			decryptSecretValue(
+				input.env,
+				row.encrypted_value,
+				userSecretContext(input.ownerId),
+			),
+	}
+}
+
+export async function resolveSecret(
+	input: ResolveSecretInput,
+): Promise<ResolvedSecret> {
+	const found = await findSecretEntry(input)
+	if (!found) {
+		return {
+			found: false,
+			credentialId: null,
+			value: null,
+			scope: null,
+			allowedHosts: [],
+			allowedPackages: [],
+		}
+	}
+	return {
+		found: true,
+		credentialId: found.entry.id,
+		value: await decryptSecretValue(
+			input.env,
+			found.entry.encrypted_value,
+			userSecretContext(input.userId),
+		),
+		scope: found.scope,
+		allowedHosts: parseAllowedHosts(found.entry.allowed_hosts),
+		allowedPackages: parseAllowedPackages(found.entry.allowed_packages),
 	}
 }
 
@@ -795,7 +943,7 @@ export async function updateSecret(
 
 export async function listUserSecretsForSearch(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 }) {
 	const rows = await listUserScopeSecretMetadata({
 		db: input.env.APP_DB,
@@ -804,6 +952,7 @@ export async function listUserSecretsForSearch(input: {
 	return rows
 		.filter((row) => !isReservedSecretName(row.name))
 		.map((row) => ({
+			credentialId: row.id,
 			name: row.name,
 			scope: row.scope,
 			description: row.description,
@@ -814,7 +963,7 @@ export async function listUserSecretsForSearch(input: {
 
 export async function listPackageSecretsByPackageIds(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	packageIds: Array<string>
 }) {
 	const rows = await listPackageScopeSecretMetadata({
@@ -847,7 +996,7 @@ export async function listPackageSecretsByPackageIds(input: {
 
 async function getAccessibleBuckets(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	scope: SecretScope | null
 	storageContext: StorageContext | null
 }) {
@@ -869,7 +1018,7 @@ async function getAccessibleBuckets(input: {
 
 async function listAccessibleBucketsForScope(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	scope: SecretScope
 	storageContext: StorageContext | null
 }) {
@@ -892,7 +1041,7 @@ async function listAccessibleBucketsForScope(input: {
 
 async function getExistingBucketForScope(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	scope: SecretScope
 	storageContext: StorageContext | null
 }) {
@@ -908,7 +1057,7 @@ async function getExistingBucketForScope(input: {
 
 async function getOrCreateSecretBucket(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	scope: SecretScope
 	storageContext: StorageContext | null
 	sessionExpiresAt: string | null
@@ -993,7 +1142,7 @@ function toSecretMetadata(input: {
 
 export async function setSecretAllowedHosts(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	name: string
 	scope: SecretScope
 	allowedHosts: Array<string>
@@ -1048,7 +1197,7 @@ export async function setSecretAllowedHosts(input: {
 
 export async function setSecretAllowedPackages(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	name: string
 	scope: SecretScope
 	allowedPackages: Array<string>
@@ -1120,7 +1269,7 @@ type UserSecretPackageGrantState = {
  */
 export async function inspectUserSecretPackageGrant(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	name: string
 	packageId: string
 }): Promise<UserSecretPackageGrantState> {
@@ -1185,7 +1334,7 @@ export async function inspectUserSecretPackageGrant(input: {
  */
 export async function lockSecretToPackage(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	name: string
 	packageId: string
 }): Promise<SecretMetadata> {
@@ -1200,18 +1349,4 @@ export async function lockSecretToPackage(input: {
 		scope: 'user',
 		allowedPackages: [...state.secret.allowedPackages, state.savedPackage.id],
 	})
-}
-
-export async function resolveSecretForHost(
-	input: ResolveSecretInput & {
-		host: string
-	},
-) {
-	const normalizedHost = normalizeHost(input.host)
-	const resolved = await resolveSecret(input)
-	if (!resolved.found) return resolved
-	return {
-		...resolved,
-		allowedForHost: resolved.allowedHosts.includes(normalizedHost),
-	}
 }

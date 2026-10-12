@@ -1,10 +1,18 @@
 import { utcMonthKey } from '@kody-internal/shared/date-keys.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	estimateDynamicWorkerUsd,
 	fleetDynamicWorkerCostAlertUsd,
 	toAdminDynamicWorkerCost,
 } from '#universal/dynamic-worker-cost.ts'
-import { type EntitlementLadder, type PlanName } from '#universal/plans.ts'
+import {
+	parseEntitlementLadder,
+	parseStoredPlanName,
+	resolveEffectivePlan,
+	type EntitlementLadder,
+	type PlanName,
+	type UserEntitlement,
+} from '#universal/plans.ts'
 import { observeOnlyUsageEventTypes } from '#universal/usage-event-types.ts'
 import {
 	adminFleetCostVsPayDisplayLimit,
@@ -15,7 +23,11 @@ import {
 import { resolveStripePriceCatalog } from '#worker/billing/stripe-price-catalog.ts'
 import { adminUsageMetrics } from '#worker/admin/user-usage-data.ts'
 import { readAdminEntitlementConsumption } from '#worker/admin/entitlement-consumption.ts'
-import { resolveBaseUserEntitlement } from '#worker/entitlements/service.ts'
+import {
+	resolveUserEntitlementFromRow,
+	userEntitlementColumnsSql,
+	type UserEntitlementRow,
+} from '#worker/entitlements/service.ts'
 import {
 	type AdminInsightsDurationConsumer,
 	type AdminInsightsDynamicWorkerCost,
@@ -27,6 +39,7 @@ import {
 	type AdminUsageMetric,
 } from '#universal/loader-data.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export const adminFleetTopConsumersLimit = 10
 
 const observeOnlyMetricPlaceholders = observeOnlyUsageEventTypes
@@ -59,19 +72,37 @@ export const fleetRuntimeDurationAlertThresholdMs = 24 * 60 * 60 * 1000
 
 const entitlementSweepConcurrency = 4
 
+/**
+ * Inbound receives enforce the base (manual + Stripe) plan so a temporary Pro
+ * gift cannot inflate the receive cap. Overlays only raise Free → Pro, so when
+ * effective and base differ the base wallet is always `none` and we skip a
+ * second credit-wallet read. When they match, omit the override entirely.
+ */
+function inboundReceiveAgainstBasePlan(
+	row: Pick<UserEntitlementRow, 'plan' | 'stripe_plan' | 'entitlement_ladder'>,
+	effective: UserEntitlement,
+): UserEntitlement | undefined {
+	const basePlan = resolveEffectivePlan(
+		parseStoredPlanName(row.plan),
+		row.stripe_plan,
+	)
+	if (basePlan === effective.plan) return undefined
+	return {
+		plan: basePlan,
+		ladder: parseEntitlementLadder(row.entitlement_ladder),
+		creditWallet: 'none',
+		limitOverrides: effective.limitOverrides,
+	}
+}
+
 type RuntimeDurationRow = {
 	user_id: string
 	total_duration_ms: number
 }
 
-type ActiveUserRow = {
-	stable_user_id: string
+type ActiveUserRow = UserEntitlementRow & {
+	stable_user_id: OwnerId
 	username: string
-	plan: string
-	stripe_plan: string | null
-	entitlement_ladder: string | null
-	stripe_credits_eligible?: number | null
-	admin_credits_eligible?: number | null
 	event_count: number
 }
 
@@ -189,18 +220,19 @@ export async function loadFleetEntitlementCrossingSnapshots(input: {
 		activeUsers,
 		entitlementSweepConcurrency,
 		async (user) => {
-			const { plan, ladder, creditWallet } = await resolveBaseUserEntitlement({
+			const effective = await resolveUserEntitlementFromRow({
 				db: input.env.APP_DB,
 				stableUserId: user.stable_user_id,
 				row: user,
+				now: input.now,
 			})
+			const { plan, ladder } = effective
 			const consumption = await readAdminEntitlementConsumption({
 				env: input.env,
 				usageUserId: user.stable_user_id,
-				plan,
-				ladder,
-				creditWallet,
+				entitlement: effective,
 				now: input.now,
+				inboundReceive: inboundReceiveAgainstBasePlan(user, effective),
 			})
 			snapshots.push({
 				stableUserId: user.stable_user_id,
@@ -293,7 +325,7 @@ async function queryTopRuntimeDurationConsumers(
 			 INNER JOIN users u ON u.stable_user_id = r.user_id
 			 WHERE r.month = ?
 				AND r.metric IN (${metricPlaceholders})
-				AND u.deleting_at IS NULL
+				AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
 			 GROUP BY u.stable_user_id, u.username
 			 ORDER BY total_duration_ms DESC
 			 LIMIT ?`,
@@ -326,7 +358,7 @@ async function queryTopEventCountConsumers(
 			 INNER JOIN users u ON u.stable_user_id = r.user_id
 			 WHERE r.month = ?
 				AND r.metric NOT IN (${observeOnlyMetricPlaceholders})
-				AND u.deleting_at IS NULL
+				AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
 			 GROUP BY u.stable_user_id, u.username
 			 ORDER BY event_count DESC
 			 LIMIT ?`,
@@ -362,13 +394,14 @@ async function queryDynamicWorkerCost(
 			.first<{ unique_worker_days: number }>(),
 		db
 			.prepare(
-				`SELECT u.stable_user_id, u.username, u.plan, u.stripe_plan,
-					u.stripe_price_id, r.event_count
+				`SELECT u.stable_user_id, u.username, o.plan, o.stripe_plan,
+					o.stripe_price_id, r.event_count
 				 FROM usage_rollups r
-				 INNER JOIN users u ON u.stable_user_id = r.user_id
+				 INNER JOIN orgs o ON o.id = r.user_id${andLiveDeletedAtSql('o')}
+				 INNER JOIN users u ON u.stable_user_id = o.id
 				 WHERE r.month = ?
 					AND r.metric = 'dynamic_worker_day'
-					AND u.deleting_at IS NULL
+					AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
 				 ORDER BY r.event_count DESC
 				 LIMIT ?`,
 			)
@@ -424,7 +457,7 @@ async function queryTopDurationConsumersByMetric(
 				WHERE r.month = ?
 					AND r.metric IN (${metricPlaceholders})
 					AND r.total_duration_ms > 0
-					AND u.deleting_at IS NULL
+					AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
 			 ) AS ranked
 			 WHERE ranked.rank_in_metric <= ?
 			 ORDER BY ranked.metric ASC, ranked.total_duration_ms DESC`,
@@ -476,19 +509,19 @@ async function buildEntitlementPressurePanel(input: {
 		activeUsers,
 		entitlementSweepConcurrency,
 		async (user) => {
-			const entitlement = await resolveBaseUserEntitlement({
+			const entitlement = await resolveUserEntitlementFromRow({
 				db: input.env.APP_DB,
 				stableUserId: user.stable_user_id,
 				row: user,
+				now: input.now,
 			})
 			const plan = toAdminPlanName(entitlement.plan)
 			const consumption = await readAdminEntitlementConsumption({
 				env: input.env,
 				usageUserId: user.stable_user_id,
-				plan,
-				ladder: entitlement.ladder,
-				creditWallet: entitlement.creditWallet,
+				entitlement,
 				now: input.now,
+				inboundReceive: inboundReceiveAgainstBasePlan(user, entitlement),
 			})
 			const pressuredResources = consumption
 				.filter((item) => item.overEightyPercent && item.percentOfLimit != null)
@@ -520,15 +553,17 @@ async function listActiveUsersForEntitlementSweep(
 	db: D1Database,
 	currentMonth: string,
 ): Promise<Array<ActiveUserRow>> {
+	const entitlementColumns = userEntitlementColumnsSql('o')
 	const rows = await db
 		.prepare(
-			`SELECT u.stable_user_id, u.username, u.plan, u.stripe_plan, u.entitlement_ladder, u.stripe_credits_eligible, u.admin_credits_eligible, SUM(r.event_count) AS event_count
+			`SELECT u.stable_user_id, u.username, ${entitlementColumns}, SUM(r.event_count) AS event_count
 			 FROM usage_rollups r
 			 INNER JOIN users u ON u.stable_user_id = r.user_id
+			 INNER JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}
 			 WHERE r.month = ?
 				AND r.metric NOT IN (${observeOnlyMetricPlaceholders})
-				AND u.deleting_at IS NULL
-			 GROUP BY u.stable_user_id, u.username, u.plan, u.stripe_plan, u.entitlement_ladder, u.stripe_credits_eligible, u.admin_credits_eligible
+				AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
+			 GROUP BY u.stable_user_id, u.username, ${entitlementColumns}
 			 ORDER BY event_count DESC
 			 LIMIT ?`,
 		)
@@ -549,7 +584,7 @@ async function listAdminStableUserIds(db: D1Database) {
 			 INNER JOIN user_roles ur ON ur.user_id = u.id
 			 INNER JOIN roles r ON r.id = ur.role_id
 			 WHERE r.name = 'admin'
-				AND u.deleting_at IS NULL`,
+				AND u.deleting_at IS NULL${andLiveDeletedAtSql()}`,
 		)
 		.all<{ stable_user_id: string }>()
 	return new Set((rows.results ?? []).map((row) => row.stable_user_id))

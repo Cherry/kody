@@ -155,7 +155,7 @@ without consuming it, so link scanners do not burn an unused link. A successful
 links from earlier resends stay valid until expiry or the address verifies.
 Identity email change and release stay on their existing flows; destinations do
 not own `users.email`. Add, resend, set-default, and remove live at
-`/account/email`, `/account/email-destinations.json`, and the
+`/@<slug>/-/email`, `/account/email-destinations.json`, and the
 `emailDestination*` capabilities (3 requests per 15 minutes for add/resend).
 Re-adding a pending unverified address resends a verification email. The cap is
 5 extras besides the identity email. Unverified extras never receive mail.
@@ -213,6 +213,10 @@ Operators can unblock a stranded signup without a raw D1 write:
 - `mint_verify_url` returns a one-time `/verify-email?token=...` link so the
   operator can send it over a path that is not `kody.codes`
 - both paths audit the actor and `target_stable_user_id`
+- both actions also run from a job, webhook, or subscription a site admin
+  enabled (admin-event auto-rescue), with an extra audit row naming the trigger;
+  see
+  [Site-admin capabilities from triggered runs](./authorization.md#site-admin-capabilities-from-triggered-runs)
 
 Unverified accounts can still use browser sessions (sign in, manage account,
 resend verification), but they must verify before MCP OAuth authorization or
@@ -244,13 +248,22 @@ assistant features:
   connection again" message instead of `client_id is required`. The authorize UI
   keeps inline verification/resend controls and the original OAuth query so
   verification in another tab can resume without restarting the host connection.
+  Consent binds the grant to one org
+  ([0064](../decisions/0064-oauth-org-binding.md)): `?org=<slug>` on the
+  authorize URL or `/mcp` resource, a hidden field when the user has exactly one
+  org, or a required picker when they have several. Approval stamps `orgId` and
+  `personId` on grant props and metadata (`grantBindingFields`). Nothing reads
+  `personId` yet; credential resolution will require it for new grants. Grants
+  minted before the stamp have only `userId`. There is no feature flag.
 - **MCP requests**: `handleMcpRequest` in `packages/worker/src/mcp-auth.ts` is
   the single chokepoint for `/mcp`. After token validation it checks
   `users.email_verified_at` (via `isAccountEmailVerified`) and rejects
   unverified — or unidentifiable — accounts with a
   `403 email_verification_required` JSON response pointing at `/account`. The
   gate fails closed: when verification cannot be established, the request is
-  rejected.
+  rejected. The request org comes from the grant's `props.orgId` (falling back
+  to `props.userId` as the personal org id when the grant has no `orgId`), not
+  always the person's implicit personal org.
 - **Inbound email**: `handleInboundEmail` in
   `packages/worker/src/email/inbound.ts` rejects routed mail for unverified
   accounts right after username routing (`setReject` plus a bounded `rejected`
@@ -336,8 +349,12 @@ Both are opt-in and adapted from the Epic Stack.
 ## Account deletion
 
 `POST /account/delete` is implemented by
-`packages/worker/src/app/handlers/account-delete.ts` and orchestrated by
-`packages/worker/src/app/account-deletion.ts`.
+`packages/worker/src/app/handlers/account-delete.ts`. It soft-deletes through
+`softDeleteUserAccount` (`packages/worker/src/orgs/soft-delete.ts`). Hard purge
+after the restore window is `hardPurgeSoftDeletedUser`
+(`packages/worker/src/orgs/hard-purge.ts`), which calls `deleteUserAccount` in
+`packages/worker/src/app/account-deletion.ts`. See
+[ADR 0066](../decisions/0066-soft-delete-and-purge.md).
 
 - Requires an active `kody_session` cookie and a JSON body with `confirmation`
   set to `GOODBYE KODY`. Accounts that have a usable password also re-enter
@@ -346,52 +363,70 @@ Both are opt-in and adapted from the Epic Stack.
   `action: 'account_delete'`, `result: 'failure'`.
 - The Account settings page opens a modal for this confirmation before posting
   `POST /account/delete`.
-- Successful deletion best-effort fans `user.deleted` to admin-owned packages.
-  Successful password signup, social-login signup, and admin person account
-  creation fan `user.created`. See
+- On success the handler clears the session cookie and the account page
+  navigates to `/?accountDeleted=1`. The homepage renders "Your Kody account has
+  been deleted" from that query, so the confirmation is on the signed-out page
+  the user lands on. The edge cache keys anonymous HTML on pathname plus search,
+  so this document stays distinct from `/`.
+- Successful soft delete best-effort fans `user.deleted` to admin-owned
+  packages. Successful password signup, social-login signup, and admin person
+  account creation fan `user.created`. See
   [the admin events guide](../../guides/admin-events.md#user-created-and-deleted-admins).
-- On success, runs a full per-user cascade across:
+- The handler stamps `deleted_at`, soft-deletes sole-member orgs, and cancels
+  Kody Stripe subscriptions. Restore within 30 UTC days is `restoreUserAccount`.
+  The JSON body is
+  `{ ok, softDeleted: true, restoreWindowDays: 30, userId, deletedAt, deletedOrgIds }`
+  plus a `Set-Cookie` that destroys the session. It does not hard-delete rows or
+  refund unused time. Prorated refunds run with the later hard purge.
+- After the 30-day restore window, the purge lane hard-deletes across the
+  surfaces below. While `SOFT_DELETE_PURGE_ENABLED` is not `true`, that lane
+  only lists candidates:
+  - the user's active package workflow instances, terminated first so no step
+    writes after the purge; if any termination fails, deletion stops before
+    purging anything and keeps the account fenced so a retry can still find the
+    runs (finished instances stay in Cloudflare for their 30-day retention; see
+    `accountUserOwnedWorkflowSurfaces`),
   - all `user_id`-scoped D1 tables (children before parents),
   - the shared Vectorize capability index, removing memory, job and
     saved-package entries by id,
-  - `BUNDLE_ARTIFACTS_KV` keys captured from `published_bundle_artifacts` and
-    `archived_job_artifacts`,
+  - `BUNDLE_ARTIFACTS_KV` keys captured from `published_bundle_artifacts`, plus
+    user-prefixed keys such as the encrypted MCP OAuth refresh-family snapshots,
   - the user's `StorageRunner` Durable Objects via the user-scoped
     `storageRunnerRpc` stub,
   - all OAuth grants for the user (and the provider clients the user minted) via
     the bound OAuth provider,
   - the user row itself last so a partial failure can be retried.
 - `env.OAUTH_PROVIDER` is injected by `@cloudflare/workers-oauth-provider` only
-  inside its own `fetch` wrapper, so it exists for `POST /account/delete` but
-  not for the hourly unverified-account purge (`JobsHost.runScheduledLane` RPC
-  on origin) or for `adminUnverifiedAccountPurgeRun` when served from the
-  sessionful `MCP` Durable Object on kody-platform. Those paths call
-  `resolveOAuthHelpers` (`packages/worker/src/oauth-helpers.ts`), which returns
-  `env.OAUTH_PROVIDER` when present and otherwise builds the same
-  `OAuthHelpersImpl` through the library's `getOAuthApi(options, env)` over
-  `OAUTH_KV`. The non-handler provider options (endpoints, scopes, TTLs, CIMD,
-  `onError`) live in `packages/worker/src/oauth-provider-options.ts` and are
-  spread into both the origin `OAuthProvider` and the fallback, so storage
-  semantics cannot drift; the fallback supplies inert 404 handlers because the
-  helpers API never routes a request. The fallback loads the library from the
-  pre-bundled `oauth-provider.mjs` additional module
+  inside its own `fetch` wrapper, so the soft-delete POST does not use it, and
+  it is also absent for the hourly unverified-account purge
+  (`JobsHost.runScheduledLane` RPC on origin) or for
+  `adminUnverifiedAccountPurgeRun` when served from the sessionful `MCP` Durable
+  Object on kody-platform. Those paths call `resolveOAuthHelpers`
+  (`packages/worker/src/oauth-helpers.ts`), which returns `env.OAUTH_PROVIDER`
+  when present and otherwise builds the same `OAuthHelpersImpl` through the
+  library's `getOAuthApi(options, env)` over `OAUTH_KV`. The non-handler
+  provider options (endpoints, scopes, TTLs, CIMD, `onError`) live in
+  `packages/worker/src/oauth-provider-options.ts` and are spread into both the
+  origin `OAuthProvider` and the fallback, so storage semantics cannot drift;
+  the fallback supplies inert 404 handlers because the helpers API never routes
+  a request. The fallback loads the library from the pre-bundled
+  `oauth-provider.mjs` additional module
   (`tools/build-worker-bundler-modules.ts`, `find_additional_modules`) because
   wrangler inlines plain dynamic imports into the main module; the startup
   bundle check forbids the provider package in the platform/runtime entries so
-  it stays off their startup path. Deletion only reports "OAuth grants were not
-  revoked" when both `OAUTH_PROVIDER` and `OAUTH_KV` are missing. Account
+  it stays off their startup path. Hard purge only reports "OAuth grants were
+  not revoked" when both `OAUTH_PROVIDER` and `OAUTH_KV` are missing. Account
   export's `oauth_grants` section (`packages/worker/src/account/export.ts`) uses
   the same reader for `listUserGrants`, so `accountExportManifest` /
   `accountExportSection` served from the platform `MCP` Durable Object include
   grant metadata too.
 - After the user row is gone, origin clears the UserMeter deletion tombstone
-  `purge()` restored. `users.stable_user_id` is SHA-256 of the signup email, so
-  a later account with that email reuses the same Durable Object id and must not
-  inherit the previous deletion fence. Username reuse with a different email is
-  a different `stable_user_id` and does not share that object.
-- Returns a structured
-  `{ ok, deletedRowCounts, deletedKvKeys, revokedOAuthGrants, clearedDurableObjects, deletedVectors, warnings }`
-  payload alongside a `Set-Cookie` that destroys the session.
+  `purge()` restored so the purged object keeps no state. A later signup with
+  the same email or username gets a new random `stable_user_id`, so it never
+  shares the deleted account's Durable Objects, storage prefixes, or secrets.
+- `deleteUserAccount` (the hard purge) returns
+  `{ deletedRowCounts, deletedKvKeys, revokedOAuthGrants, clearedDurableObjects, deletedVectors, warnings }`.
+  That payload is not the `POST /account/delete` response.
 
 Related handlers:
 
@@ -570,7 +605,7 @@ selected secret:
   authenticated user's `mcpUser.userId`, so a session can only ever read its own
   secrets
 - All responses set `Cache-Control: no-store`
-- There is **no** separate `/account/secrets/reveal` endpoint and **no**
+- There is **no** separate `/@<slug>/-/secrets/reveal` endpoint and **no**
   password reauthentication step — revealing a secret is inside the owner's own
   trust boundary (same-origin, session-authenticated)
 
@@ -599,7 +634,7 @@ connections also best-effort join the official Kody Discord (`guilds.join` plus
 the operator bot) and assign or remove configured guild roles
 (`packages/worker/src/discord/guild-role.ts`) without persisting the login
 token. The member role is assigned on connect; Standard and Pro roles follow
-`users.stripe_plan`.
+`orgs.stripe_plan`.
 
 - `POST /auth/:provider` starts the flow (CSRF state + PKCE verifier in the
   signed `kody_oauth_login` cookie); `GET /auth/:provider/callback` completes it
@@ -643,7 +678,7 @@ routed from `packages/worker/src/index.ts`.
   its `client_id` with no registration step. Signed-in users can also mint a
   confidential pre-registered client from `/account/mcp-oauth-clients` (Account
   → Connections → Advanced). That page is user-minted clients, not inbound host
-  grants. Account → Connections (`/account/connections`) lists inbound grants
+  grants. Account → Connections (`/@<slug>/-/connections`) lists inbound grants
   from `listUserGrants` (paged) joined with `lookupClient` for a best-effort
   label, authorized time, and revoke. The account UI groups those unique
   `clientId`s by display name, shows a public icon when the host kind already
@@ -692,13 +727,18 @@ routed from `packages/worker/src/index.ts`.
   See [0049](../decisions/0049-no-mcp-capability-oauth-scopes.md).
 - Kody's MCP authorization server is an **OAuth 2.1 + OpenID Connect
   Authorization Code** provider with CIMD and RFC 9728 resource metadata. Issuer
-  is the app origin (`getAppBaseUrl`). `sub` is the account `stable_user_id`. ID
-  tokens are RS256 JWTs signed with `OIDC_SIGNING_PRIVATE_KEY_PEM` (`kid` =
-  `OIDC_SIGNING_KEY_ID`). Discovery: `/.well-known/openid-configuration`; JWKS:
-  `/.well-known/jwks.json`; UserInfo: `/oauth/userinfo` (Bearer access token;
-  fail-closed when email is unverified). RP-Initiated Logout: `/oauth/logout`.
-  RFC 7009 revocation is the token endpoint (`/oauth/token`); both
-  `/.well-known/openid-configuration` and
+  is the app origin (`getAppBaseUrl`). `sub` identifies the connection: personal
+  (and personal-org) grants use the account `stable_user_id`; organization
+  grants use `org:<orgId>:user:<userId>` so one person can connect both a
+  personal and an org account to the same OIDC client. Existing grants without
+  `metadata.orgId` or `props.orgId` keep the `userId` subject on refresh and
+  code exchange; reauthorization is required for an organization-specific
+  subject. ID tokens are RS256 JWTs signed with `OIDC_SIGNING_PRIVATE_KEY_PEM`
+  (`kid` = `OIDC_SIGNING_KEY_ID`). Discovery:
+  `/.well-known/openid-configuration`; JWKS: `/.well-known/jwks.json`; UserInfo:
+  `/oauth/userinfo` (Bearer access token; fail-closed when email is unverified).
+  RP-Initiated Logout: `/oauth/logout`. RFC 7009 revocation is the token
+  endpoint (`/oauth/token`); both `/.well-known/openid-configuration` and
   `/.well-known/oauth-authorization-server` advertise that URL as
   `revocation_endpoint`. OpenID Connect discovery also lists
   `revocation_endpoint_auth_methods_supported` matching
@@ -723,16 +763,22 @@ routed from `packages/worker/src/index.ts`.
   the client do not include `iss`. Kody is not OpenID Certified. `/api/me`
   remains the OAuth-protected JSON helper for grant props; it is not the OIDC
   UserInfo endpoint.
-- On `/oauth/authorize`, unauthenticated users can log in inline or via top-nav
-  auth links; those links preserve the full authorize URL in `redirectTo` so
-  successful login returns to the original OAuth request. Password signup lands
-  on `/pending-verification` with that safe `redirectTo` preserved for
+- On `/oauth/authorize`, unauthenticated users can log in with the same methods
+  as `/login` (password, social providers including GitHub, and passkey) inline,
+  or via top-nav / “full sign-in page” links. Those flows preserve the full
+  authorize URL in `redirectTo` so successful login returns to the original
+  OAuth request (client_id, redirect_uri, PKCE, state, scope, org). After auth,
+  `prompt=login` is stripped from that resume target so the new session is not
+  treated as signed-out on the consent screen. Password signup lands on
+  `/pending-verification` with that safe `redirectTo` preserved for
   continue-after-verify. The authorize tab itself should stay open when the
   email link is opened elsewhere, so the original OAuth query remains resumable.
   Signed-in vs signed-out chrome on that page comes from the SSR-embedded app
   session; the route does not wait on a separate browser `/session` fetch before
-  rendering approve or login. The approve control stays inert until hydration so
-  the visible button cannot submit a GET that drops `client_id`.
+  rendering approve or login. Social buttons use the same SSR-embedded provider
+  list as `/login`, so a full-document load does not wait on
+  `/auth/providers.json`. The approve control stays inert until hydration so the
+  visible button cannot submit a GET that drops `client_id`.
 - Approval is rejected before `completeAuthorization` when the account email is
   unverified, so no grant/token is created until verification succeeds.
 
@@ -785,9 +831,10 @@ intercepts `POST /oauth/token` refresh grants:
   exits.
 - Encrypted snapshots live in `BUNDLE_ARTIFACTS_KV` under
   `derived-cache:v1:mcp-oauth-refresh-family:` / `-replay:` with KV TTLs of two
-  hours and one hour. Retention is the TTL, so account deletion does not sweep
-  those keys. Snapshot writes are best-effort: a KV or encrypt failure does not
-  replace the provider's minted response.
+  hours and one hour. Account deletion prefix-deletes the user's keys; the TTL
+  covers any key written by a refresh that races deletion. Snapshot writes are
+  best-effort: a KV or encrypt failure does not replace the provider's minted
+  response.
 
 `/mcp` is protected by `packages/worker/src/mcp-auth.ts`:
 

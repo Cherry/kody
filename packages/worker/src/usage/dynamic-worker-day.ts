@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import {
 	userMeterNamespace,
@@ -25,9 +26,16 @@ export type DynamicWorkerDayEnv = UsageEnv & UserMeterEnv
  */
 export async function recordUniqueDynamicWorkerDay(input: {
 	env: DynamicWorkerDayEnv
-	userId: string | null | undefined
+	userId: OwnerId | null | undefined
 	workerId: string
 	surface: DynamicWorkerDaySurface
+	/**
+	 * Saved package id when this claim belongs to a known package run.
+	 * Omit for ad hoc execute; never guess.
+	 */
+	packageId?: string | null
+	/** From `usageConnectionKey`; attributes the first claim to a credential. */
+	connectionKey?: string | null
 	now?: Date
 }): Promise<{ created: boolean } | undefined> {
 	try {
@@ -50,6 +58,10 @@ export async function recordUniqueDynamicWorkerDay(input: {
 				outcome: 'success',
 				timestamp: now.toISOString(),
 				surface: input.surface,
+				...(input.packageId?.trim()
+					? { packageId: input.packageId.trim() }
+					: {}),
+				...(input.connectionKey ? { connectionKey: input.connectionKey } : {}),
 			})
 		}
 		return claimed

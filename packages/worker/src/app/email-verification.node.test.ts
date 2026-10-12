@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import {
@@ -6,9 +7,9 @@ import {
 	isAccountEmailVerified,
 	verifyEmailToken,
 } from '#app/email-verification.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 test('email verification links preserve safe resume targets and reject open redirects', () => {
 	const oauthResume = '/oauth/authorize?client_id=demo&state=abc'
@@ -70,11 +71,9 @@ function createVerificationTestDb(users: Array<VerificationUser>) {
 
 test('isAccountEmailVerified binds email+stable id together and keeps single-key lookup paths', async () => {
 	const ownerEmail = 'owner@example.com'
-	const ownerStableId = await createStableUserIdFromEmail(ownerEmail)
+	const ownerStableId = testStableUserIdFromEmail(ownerEmail)
 	const reusedEmail = 'reused@example.com'
-	const otherStableId = await createStableUserIdFromEmail(
-		'other-account@example.com',
-	)
+	const otherStableId = testStableUserIdFromEmail('other-account@example.com')
 	const combined = createVerificationTestDb([
 		{
 			email: ownerEmail,
@@ -107,7 +106,7 @@ test('isAccountEmailVerified binds email+stable id together and keeps single-key
 	).toBe(false)
 
 	const email = 'browser@example.com'
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
 	const singleKey = createVerificationTestDb([
 		{
 			email,
@@ -129,7 +128,7 @@ test('isAccountEmailVerified binds email+stable id together and keeps single-key
 	expect(
 		await isAccountEmailVerified({
 			db: singleKey,
-			stableUserId: 'missing-stable-id',
+			stableUserId: ownerIdFromStored('missing-stable-id'),
 		}),
 	).toBe(false)
 })
@@ -148,7 +147,7 @@ async function seedPendingVerification(
 		.bind(
 			input.username,
 			email,
-			await createStableUserIdFromEmail(email),
+			testStableUserIdFromEmail(email),
 			input.deletingAt ?? null,
 		)
 		.run()

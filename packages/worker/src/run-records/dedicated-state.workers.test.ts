@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers'
 import { runInDurableObject } from 'cloudflare:test'
 import { expect, test } from 'vitest'
+import {
+	ownerIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { RunLog } from './run-log-do.ts'
 import { seedRunLogMeta } from './run-log-meta-test-seed.ts'
 import {
@@ -23,6 +27,7 @@ import {
 	listPackageRunSuccesses,
 	listRunRecords,
 	listWorkflowProjections,
+	releaseWorkflowProjectionIdempotencyKey,
 	reserveWorkflowProjectionSlot,
 	deleteWorkflowProjectionIfCreating,
 	upsertJobRunObservability,
@@ -66,8 +71,8 @@ const legacyRunsColumnsDdl = `
 	metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL`
 
-function uniqueUserId(label: string) {
-	return `runlog-dedicated-${label}-${crypto.randomUUID()}`
+function uniqueUserId(label: string): OwnerId {
+	return ownerIdFromStored(`runlog-dedicated-${label}-${crypto.randomUUID()}`)
 }
 
 function runLogStub(userId: string) {
@@ -97,7 +102,7 @@ function upsertWorkflow(
 ) {
 	return upsertWorkflowProjection({
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
 		projection: workflow(id, overrides),
 	})
 }
@@ -109,7 +114,7 @@ function finishBegunRun(
 ) {
 	return finishRunRecord({
 		env,
-		handle: beginRunRecord({ env, userId, context }),
+		handle: beginRunRecord({ env, userId: ownerIdFromStored(userId), context }),
 		status,
 	})
 }
@@ -122,7 +127,7 @@ async function claimInvocation(
 ) {
 	const claimed = await claimPackageInvocationRecord({
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
 		context: { surface: 'export', packageId, name: 'handler', idempotencyKey },
 		invocation: {
 			id: crypto.randomUUID(),
@@ -141,7 +146,7 @@ async function claimInvocation(
 	return () =>
 		finishPackageInvocationRecord({
 			env,
-			userId,
+			userId: ownerIdFromStored(userId),
 			handle: claimed.handle,
 			invocationId: claimed.invocationId,
 			claimUpdatedAt: claimed.claimUpdatedAt,
@@ -228,6 +233,53 @@ async function upgradeFromLegacySchema(
 		},
 	)
 }
+
+test('releaseWorkflowProjectionIdempotencyKey frees a dead run for same-key create', async () => {
+	const userId = uniqueUserId('wf-release-key')
+	await upsertWorkflow(userId, 'wf-errored', {
+		idempotencyKey: 'publish-same-commit',
+		status: 'errored',
+		completedAt: '2026-07-30T00:01:00.000Z',
+		lastError: 'Durable Object reset because its code was updated.',
+	})
+	expect(
+		await findWorkflowProjectionByIdempotencyKey({
+			env,
+			userId,
+			idempotencyKey: 'publish-same-commit',
+		}),
+	).toMatchObject({ id: 'wf-errored' })
+
+	const released = await releaseWorkflowProjectionIdempotencyKey({
+		env,
+		userId,
+		id: 'wf-errored',
+	})
+	expect(released).toEqual({
+		released: true,
+		previousKey: 'publish-same-commit',
+	})
+	expect(
+		await findWorkflowProjectionByIdempotencyKey({
+			env,
+			userId,
+			idempotencyKey: 'publish-same-commit',
+		}),
+	).toBeNull()
+	expect(
+		await getWorkflowProjection({ env, userId, id: 'wf-errored' }),
+	).toMatchObject({
+		idempotencyKey: 'released:wf-errored',
+		status: 'errored',
+	})
+	expect(
+		await releaseWorkflowProjectionIdempotencyKey({
+			env,
+			userId,
+			id: 'wf-errored',
+		}),
+	).toEqual({ released: false, previousKey: 'released:wf-errored' })
+})
 
 test('workflow projections track binding name, idempotency, and active counts', async () => {
 	const userId = uniqueUserId('workflows')
@@ -326,7 +378,7 @@ test('reserveWorkflowProjectionSlot serializes concurrent creating, prunes stale
 	) =>
 		reserveWorkflowProjectionSlot({
 			env,
-			userId: reserveUserId,
+			userId: ownerIdFromStored(reserveUserId),
 			projection: workflow(id, { status: 'creating', ...overrides }),
 		})
 	const results = await Promise.all(

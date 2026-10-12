@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const sentryMock = vi.hoisted(() => ({
@@ -44,8 +45,6 @@ const { CommunityActionError } = await import('#worker/community/errors.ts')
 const { EntitlementLimitError } = await import('#worker/entitlements/errors.ts')
 const { PackageNameInputError, normalizePackageNameInput } =
 	await import('#worker/package-registry/package-name.ts')
-const { PackageScopeAccessError } =
-	await import('#worker/package-registry/package-owner.ts')
 const { SavedPackageNotFoundError } =
 	await import('#worker/package-runtime/package-import-resolution.ts')
 const { UserCodeError } = await import('#worker/user-code-error.ts')
@@ -79,7 +78,7 @@ const callerFailureBase = {
 	durationMs: 3,
 	baseUrl: 'https://example.com',
 	hasUser: true,
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 } as const
 
 type McpEvent = Parameters<typeof logMcpEvent>[0]
@@ -124,8 +123,6 @@ function thrownBy(run: () => unknown) {
 	throw new Error('expected run to throw')
 }
 
-const packageScopeMessage =
-	'You do not have a package scope grant for "@kody". Omit package_scope to use your personal scope, or ask an admin to grant access to that platform account.'
 const repoSearchMessage =
 	'repoSearch received an invalid regex: Invalid regular expression: /(?s).|^$/gi: Invalid group. mode=regex uses JavaScript RegExp syntax (no inline flags like (?s) or (?i); for dotall matching use [\\s\\S] instead of `.` with (?s)).'
 const packageSaveOverwriteMessage =
@@ -198,14 +195,7 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 			'communityRate',
 			'community',
 			'CommunityActionError',
-			new CommunityActionError('Fork this community listing before rating it.'),
-		),
-		// Missing package scope grant (KODY-CLOUDFLARE-5N).
-		handlerFailure(
-			'packageList',
-			'packages',
-			'PackageScopeAccessError',
-			new PackageScopeAccessError(packageScopeMessage),
+			new CommunityActionError('Fork this public package before rating it.'),
 		),
 		handlerFailure(
 			'storageQuery',
@@ -217,7 +207,7 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 				limit: 67_108_864,
 				current: 449_966_219,
 				upgradeHint:
-					'Remove or finish existing storage bytes you no longer need, or upgrade your plan at /account/billing.',
+					'Remove or finish existing storage bytes you no longer need, or upgrade your plan at /@<slug>/-/billing.',
 			}),
 		),
 		handlerFailure(
@@ -231,7 +221,7 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 					limit: 10,
 					current: 46,
 					upgradeHint:
-						'Remove or finish existing scheduled jobs you no longer need, or upgrade your plan at /account/billing.',
+						'Remove or finish existing scheduled jobs you no longer need, or upgrade your plan at /@<slug>/-/billing.',
 				}),
 			}),
 		),
@@ -333,6 +323,24 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 			'Error',
 			new Error('EFBIG: content too large for diff (max 10000 lines)'),
 		),
+		// Extended Cloudflare storage FK constraint (KODY-8P). StorageRunner
+		// surfaces "SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)"
+		// — user SQL mistake, stays off Sentry.
+		handlerFailure(
+			'storageQuery',
+			'storage',
+			'Error',
+			new Error(
+				'FOREIGN KEY constraint failed: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_FOREIGNKEY)',
+			),
+			{
+				conversationId: 'conv-storage-2',
+				storageId: 'storage-fk-1',
+				context: {
+					sqlPreview: 'INSERT INTO probe_t (parent_id) VALUES (99)',
+				},
+			},
+		),
 	]
 	const payloads = captureMcpEvents(() => {
 		for (const event of callerFailures) logMcpEvent(event)
@@ -367,6 +375,18 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 				}),
 			),
 		)
+		// Extended D1 constraint error from a non-storage capability must still
+		// reach Sentry (KODY-8P regression guard — only storageQuery is exempt).
+		logMcpEvent(
+			handlerFailure(
+				'packageSave',
+				'packages',
+				'Error',
+				new Error(
+					'D1_ERROR: UNIQUE constraint failed: saved_packages.user_id, saved_packages.name: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)',
+				),
+			),
+		)
 		logMcpEvent(
 			handlerFailure(
 				'mcp:home:bond_shade_set_position',
@@ -377,7 +397,7 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 		)
 	})
 
-	expect(sentryMock.captureException).toHaveBeenCalledTimes(3)
+	expect(sentryMock.captureException).toHaveBeenCalledTimes(4)
 	expect(sentryMock.captureException).toHaveBeenNthCalledWith(
 		1,
 		expect.objectContaining({ message: 'platform handler blew up' }),
@@ -388,6 +408,13 @@ test('logMcpEvent keeps sandbox and caller failures off Sentry and still reports
 	)
 	expect(sentryMock.captureException).toHaveBeenNthCalledWith(
 		3,
+		expect.objectContaining({
+			message:
+				'D1_ERROR: UNIQUE constraint failed: saved_packages.user_id, saved_packages.name: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)',
+		}),
+	)
+	expect(sentryMock.captureException).toHaveBeenNthCalledWith(
+		4,
 		expect.objectContaining({
 			message: 'MCP tool "home:bond_shade_set_position" failed: timeout',
 		}),

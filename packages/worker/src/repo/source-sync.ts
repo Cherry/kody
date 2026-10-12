@@ -1,16 +1,21 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	hasArtifactsAccess,
 	type ArtifactBootstrapAccess,
 	isLoopbackArtifactsRemote,
 } from './artifacts.ts'
 import { writeArtifactSourceSnapshot } from './artifact-source-snapshot.ts'
+import {
+	createSnapshotFilesWorkspace,
+	formatFailedRepoCheckMessages,
+	runRepoChecks,
+} from './checks.ts'
 import { getEntitySourceById, updateEntitySource } from './entity-sources.ts'
 import {
 	buildRepoLargeFileMessage,
 	findOversizedRepoSourceFile,
 } from './large-file-policy.ts'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
-import { parseRepoManifest } from './manifest.ts'
 import {
 	loadLockedSavedPackage,
 	PackagePublishLockedError,
@@ -28,7 +33,7 @@ import {
 
 type SyncArtifactSourceInput = {
 	env: Env
-	userId: string
+	userId: OwnerId
 	baseUrl: string
 	sourceId: string | null
 	files: Record<string, string>
@@ -58,6 +63,21 @@ type SyncArtifactSourceInput = {
 	 * Used by fleet codemods on locked packages.
 	 */
 	promotePublished?: boolean
+	/**
+	 * Forwarded to `runRepoChecks`. Platform codemods pass `false` so legacy
+	 * trees without README/AGENTS stay migratable. Omit (default true) for
+	 * packageSave and other authoring lanes — same default as
+	 * `publishFromExternalRef`.
+	 */
+	requirePackageDocs?: boolean
+	/**
+	 * When false, skip the throwing publish-check gate in bootstrap / loopback
+	 * / package update sync. Community install persists an inert fork first and
+	 * runs its own `runRepoChecks` to choose live vs `adaptation_required`;
+	 * failing persist on check failure would break that path. Omit (default
+	 * true) for packageSave — same gate strength as `publishFromExternalRef`.
+	 */
+	runPublishChecks?: boolean
 }
 
 function validateEntitySourceManifest(input: {
@@ -65,25 +85,25 @@ function validateEntitySourceManifest(input: {
 	content: string
 	manifestPath: string
 }) {
-	if (input.entityKind === 'package') {
-		parseAuthoredPackageJson({
-			content: input.content,
-			manifestPath: input.manifestPath,
-		})
-		return
+	switch (input.entityKind) {
+		case 'package':
+			parseAuthoredPackageJson({
+				content: input.content,
+				manifestPath: input.manifestPath,
+			})
+			return
+		case 'repo':
+			return
+		default: {
+			const entityKind: never = input.entityKind
+			throw new Error(`Unsupported entity kind: ${String(entityKind)}`)
+		}
 	}
-	if (input.entityKind === 'repo') {
-		return
-	}
-	parseRepoManifest({
-		content: input.content,
-		manifestPath: input.manifestPath,
-	})
 }
 
 async function assertPackageBootstrapUnlocked(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	source: EntitySourceRow
 	allowLockedPublish?: boolean
 }): Promise<void> {
@@ -198,11 +218,6 @@ export async function syncArtifactSourceSnapshot(
 						if (oversizedFile) {
 							throw new Error(buildRepoLargeFileMessage(oversizedFile))
 						}
-						const snapshot = await writeArtifactSourceSnapshot({
-							env: input.env,
-							repoId: source.repo_id,
-							files: input.files,
-						})
 						// Plain repos have no manifest requirement (live-at-HEAD).
 						if (source.entity_kind !== 'repo') {
 							const manifestContent = input.files[source.manifest_path]
@@ -217,6 +232,37 @@ export async function syncArtifactSourceSnapshot(
 								manifestPath: source.manifest_path,
 							})
 						}
+						// Same publish gate as bootstrapSource / publishFromExternalRef:
+						// do not stamp published_commit or the published snapshot until
+						// runRepoChecks passes on this tree. Community install opts out
+						// via runPublishChecks: false (its own checks drive adaptation).
+						if (
+							source.entity_kind === 'package' &&
+							input.runPublishChecks !== false
+						) {
+							const checks = await runRepoChecks({
+								workspace: createSnapshotFilesWorkspace(input.files),
+								manifestPath: source.manifest_path,
+								sourceRoot: source.source_root || '/',
+								env: input.env,
+								baseUrl: input.baseUrl,
+								userId: input.userId,
+								...(input.expectedPackageScope !== undefined
+									? { expectedPackageScope: input.expectedPackageScope }
+									: {}),
+								...(input.requirePackageDocs === false
+									? { requirePackageDocs: false }
+									: {}),
+							})
+							if (!checks.ok) {
+								throw new Error(formatFailedRepoCheckMessages(checks.results))
+							}
+						}
+						const snapshot = await writeArtifactSourceSnapshot({
+							env: input.env,
+							repoId: source.repo_id,
+							files: input.files,
+						})
 						await writePublishedSourceSnapshot({
 							env: input.env,
 							source: {
@@ -259,6 +305,15 @@ export async function syncArtifactSourceSnapshot(
 						...(input.existingHeadCommit
 							? { existingHeadCommit: input.existingHeadCommit }
 							: {}),
+						...(input.expectedPackageScope !== undefined
+							? { expectedPackageScope: input.expectedPackageScope }
+							: {}),
+						...(input.requirePackageDocs === false
+							? { requirePackageDocs: false }
+							: {}),
+						...(input.runPublishChecks === false
+							? { runPublishChecks: false }
+							: {}),
 					})
 					if (input.serverTiming && result.serverTiming) {
 						input.serverTiming.push(...result.serverTiming)
@@ -300,10 +355,45 @@ export async function syncArtifactSourceSnapshot(
 			dryRun: false,
 			rollbackOnError: true,
 		})
+		// packageSave updates previously used publishSession({ force: true }),
+		// which skipped the check-status gate. For packages, run the same
+		// runRepoChecks path publishFromExternalRef uses, then publish without
+		// force so the session check-status contract still holds. Destructive
+		// overwrite still needs force for history rewrite / force-push, but
+		// only after checks pass. When runPublishChecks is false (community
+		// inert-fork lane), skip validators and stamp an accepted check-status
+		// so publishSession proceeds without force — force alone would trip
+		// assertPackageSourceOverwriteAllowed without destructiveOverwriteConfirmed.
+		const forcePublish =
+			source.entity_kind !== 'package' ||
+			input.destructiveOverwriteConfirmed === true
+		if (source.entity_kind === 'package' && input.runPublishChecks !== false) {
+			const checkRun = await session.runChecks({
+				sessionId,
+				userId: input.userId,
+				...(input.expectedPackageScope !== undefined
+					? { expectedPackageScope: input.expectedPackageScope }
+					: {}),
+				...(input.requirePackageDocs === false
+					? { requirePackageDocs: false }
+					: {}),
+			})
+			if (!checkRun.ok) {
+				throw new Error(formatFailedRepoCheckMessages(checkRun.results))
+			}
+		} else if (
+			source.entity_kind === 'package' &&
+			input.runPublishChecks === false
+		) {
+			await session.acceptCurrentTreeForPublish({
+				sessionId,
+				userId: input.userId,
+			})
+		}
 		const publishResult = await session.publishSession({
 			sessionId,
 			userId: input.userId,
-			force: true,
+			...(forcePublish ? { force: true } : {}),
 			...(input.destructiveOverwriteConfirmed === true
 				? { destructiveOverwriteConfirmed: true }
 				: {}),
@@ -351,3 +441,10 @@ export async function syncArtifactSourceSnapshot(
 		)
 	}
 }
+
+export {
+	kodyPublishedBranchName,
+	kodyPublishedRef,
+	syncPublishedSourceSnapshotOnly,
+	type SyncPublishedSourceOnlyInput,
+} from './published-source-sync.ts'

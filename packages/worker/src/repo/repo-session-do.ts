@@ -1,4 +1,6 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { isUserCodeError } from '#worker/user-code-error.ts'
 import * as Sentry from '@sentry/cloudflare'
 import { DurableObject } from 'cloudflare:workers'
 import {
@@ -12,7 +14,6 @@ import {
 	resolveUnifiedDiffFileNames,
 	stripUnifiedDiffPath,
 } from './unified-diff-paths.ts'
-import { createGit } from '@cloudflare/shell/git'
 import {
 	deleteRepoSession,
 	getRepoSessionById,
@@ -48,6 +49,7 @@ import {
 	persistPublishedPackageArtifactTarget,
 	type PublishedPackageArtifactBuildTarget,
 } from '#worker/package-runtime/published-bundle-artifacts.ts'
+import { type PreparedKodyGraphCache } from '#worker/package-runtime/module-graph.ts'
 import {
 	hasPublishedRuntimeArtifacts,
 	loadPublishedSourceManifestSnapshot,
@@ -68,8 +70,10 @@ import {
 	runPackageTypecheckLanguageService,
 	runRepoChecks,
 	runRepoSourceWalkChecks,
+	formatFailedRepoCheckMessages,
 	validatePackageBundles,
 } from './checks.ts'
+import { credentialPatternNoticeForFiles } from './credential-pattern-check.ts'
 import {
 	isolatedArtifactRebuildStagingKeyBelongsToUser,
 	isolatedArtifactRebuildStagingKeyForUser,
@@ -83,9 +87,7 @@ import {
 	type IsolatedCheckPhaseOutcome,
 	type IsolatedCheckPhaseRequest,
 } from './isolated-check-phases.ts'
-import { parseRepoManifest } from './manifest.ts'
 import {
-	type EntityKind,
 	type EntitySourceRow,
 	type RepoSearchMode,
 	type RepoSearchOutputMode,
@@ -182,6 +184,7 @@ type CachedRepoSessionState = {
 }
 
 type RawGitPushInput = Parameters<IsomorphicGit['git']['push']>[0]
+type CreateGit = typeof import('@cloudflare/shell/git').createGit
 
 function nowIso() {
 	return new Date().toISOString()
@@ -214,7 +217,7 @@ export async function readWithRetry<T>(
 
 async function readRepoSessionWithRetry(
 	env: Env,
-	input: { userId: string; sessionId: string },
+	input: { userId: OwnerId; sessionId: string },
 ) {
 	return readWithRetry(() => getRepoSessionById(env, input))
 }
@@ -316,7 +319,15 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	readonly state = createWorkspaceStateBackend(this.workspace)
 
-	readonly git = createGit(this.fileSystem, repoSessionWorkspacePrefix)
+	private gitApi: ReturnType<CreateGit> | null = null
+
+	private async ensureGit() {
+		if (!this.gitApi) {
+			const { createGit: createShellGit } = await loadIsomorphicGit()
+			this.gitApi = createShellGit(this.fileSystem, repoSessionWorkspacePrefix)
+		}
+		return this.gitApi
+	}
 
 	private initializedSessionId: string | null = null
 
@@ -343,7 +354,9 @@ class RepoSessionBase extends DurableObject<Env> {
 				await this.workspace.mkdir(repoSessionWorkspacePrefix, {
 					recursive: true,
 				})
-				await this.git.clone({
+				await (
+					await this.ensureGit()
+				).clone({
 					dir: repoSessionWorkspacePrefix,
 					...(input.branch
 						? {
@@ -401,7 +414,7 @@ class RepoSessionBase extends DurableObject<Env> {
 		return this.ctx.storage.sql.databaseSize + r2Bytes
 	}
 
-	private refreshStoredEstimate(sessionId: string, userId: string): void {
+	private refreshStoredEstimate(sessionId: string, userId: OwnerId): void {
 		maybeRefreshStorageBucketEstimate({
 			env: this.env,
 			userId,
@@ -420,7 +433,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	private async deleteStorageInventory(
 		sessionId: string,
-		userId: string,
+		userId: OwnerId,
 	): Promise<void> {
 		await deleteStorageBucketInventory({
 			db: this.env.APP_DB,
@@ -470,7 +483,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	private async getSessionState(
 		sessionId: string,
-		userId: string,
+		userId: OwnerId,
 		options: {
 			allowedStatuses?: ReadonlyArray<RepoSessionRow['status']>
 		} = {},
@@ -533,7 +546,9 @@ class RepoSessionBase extends DurableObject<Env> {
 	}
 
 	private async ensureRemote(input: { name: string; url: string }) {
-		const existing = await this.git.remote({
+		const existing = await (
+			await this.ensureGit()
+		).remote({
 			dir: repoSessionWorkspacePrefix,
 			list: true,
 		})
@@ -543,12 +558,16 @@ class RepoSessionBase extends DurableObject<Env> {
 			return
 		}
 		if (current) {
-			await this.git.remote({
+			await (
+				await this.ensureGit()
+			).remote({
 				dir: repoSessionWorkspacePrefix,
 				remove: input.name,
 			})
 		}
-		await this.git.remote({
+		await (
+			await this.ensureGit()
+		).remote({
 			dir: repoSessionWorkspacePrefix,
 			add: {
 				name: input.name,
@@ -580,7 +599,9 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	private async hasExpectedOriginRemote(expectedUrl: string) {
 		try {
-			const remotes = await this.git.remote({
+			const remotes = await (
+				await this.ensureGit()
+			).remote({
 				dir: repoSessionWorkspacePrefix,
 				list: true,
 			})
@@ -597,7 +618,6 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	private async readManifestFromWorkspace(
 		manifestPath: string,
-		entityKind: EntityKind,
 		expectedPackageScope?: string,
 	) {
 		const manifestContent = await this.workspace.readFile(
@@ -606,21 +626,17 @@ class RepoSessionBase extends DurableObject<Env> {
 		if (manifestContent == null) {
 			throw new Error(`Manifest "${manifestPath}" was not found.`)
 		}
-		if (entityKind === 'package') {
-			return parseAuthoredPackageJson({
-				content: manifestContent,
-				manifestPath,
-				expectedPackageScope,
-			})
-		}
-		return parseRepoManifest({
+		return parseAuthoredPackageJson({
 			content: manifestContent,
 			manifestPath,
+			expectedPackageScope,
 		})
 	}
 
 	private async getHeadCommit() {
-		const log = await this.git.log({
+		const log = await (
+			await this.ensureGit()
+		).log({
 			dir: repoSessionWorkspacePrefix,
 			depth: 1,
 		})
@@ -632,7 +648,9 @@ class RepoSessionBase extends DurableObject<Env> {
 		options?: { replaceHistory?: boolean },
 	) {
 		const replaceHistory = options?.replaceHistory === true
-		const statusEntries = await this.git.status({
+		const statusEntries = await (
+			await this.ensureGit()
+		).status({
 			dir: repoSessionWorkspacePrefix,
 		})
 		const hasChanges = statusEntries.some(
@@ -641,7 +659,9 @@ class RepoSessionBase extends DurableObject<Env> {
 		if (!hasChanges && !replaceHistory) {
 			return this.getHeadCommit()
 		}
-		await this.git.add({
+		await (
+			await this.ensureGit()
+		).add({
 			dir: repoSessionWorkspacePrefix,
 			filepath: '.',
 		})
@@ -655,7 +675,9 @@ class RepoSessionBase extends DurableObject<Env> {
 				parent: [],
 			})
 		}
-		const commit = await this.git.commit({
+		const commit = await (
+			await this.ensureGit()
+		).commit({
 			dir: repoSessionWorkspacePrefix,
 			message,
 			author: sessionCommitAuthor,
@@ -786,9 +808,22 @@ class RepoSessionBase extends DurableObject<Env> {
 	private async collectWorkspaceFiles(
 		root = repoSessionWorkspacePrefix,
 	): Promise<Record<string, string>> {
+		const snapshot = await this.collectWorkspacePublishSnapshot(root)
+		return snapshot.files
+	}
+
+	/**
+	 * One workspace walk that yields both the relative-path file map and the
+	 * tree hash used for checks_outdated. Publish reuses this instead of
+	 * globbing and re-reading every file three times.
+	 */
+	private async collectWorkspacePublishSnapshot(
+		root = repoSessionWorkspacePrefix,
+	): Promise<{ files: Record<string, string>; treeHash: string }> {
 		const entries = await this.listWorkspaceFileEntries(root)
 		const rootPrefix = `${root.replace(/\/+$/, '')}/`
 		const files: Record<string, string> = {}
+		const chunks: Array<string> = []
 		for (const entry of entries) {
 			// Raw bytes — UTF-8 `readFile` replaces invalid sequences with
 			// U+FFFD (PNG `0x89` → `0xFD`), which then poisons `/_assets`.
@@ -806,9 +841,16 @@ class RepoSessionBase extends DurableObject<Env> {
 			const relativePath = entry.path.startsWith(rootPrefix)
 				? entry.path.slice(rootPrefix.length)
 				: entry.path
-			files[relativePath] = bytesToSnapshotString(bytes, relativePath)
+			const content = bytesToSnapshotString(bytes, relativePath)
+			files[relativePath] = content
+			chunks.push(`${entry.path}\n${content}\n`)
 		}
-		return files
+		const data = new TextEncoder().encode(chunks.join(''))
+		const digest = await crypto.subtle.digest('SHA-256', data)
+		const treeHash = [...new Uint8Array(digest)]
+			.map((byte) => byte.toString(16).padStart(2, '0'))
+			.join('')
+		return { files, treeHash }
 	}
 
 	private async computeTreeHash(root = repoSessionWorkspacePrefix) {
@@ -906,7 +948,7 @@ class RepoSessionBase extends DurableObject<Env> {
 	private async resolvePublishSource(input: {
 		sessionId?: string
 		sourceId?: string
-		userId: string
+		userId: OwnerId
 	}) {
 		if (input.sessionId) {
 			const { source } = await this.getSessionState(
@@ -982,17 +1024,50 @@ class RepoSessionBase extends DurableObject<Env> {
 		throw new Error(`Manifest "${source.manifest_path}" was not found.`)
 	}
 
+	private assertPublishedCommitUnchanged(input: {
+		source: EntitySourceRow
+		publishedCommit: string
+	}) {
+		const currentCommit = input.source.published_commit?.trim() || null
+		if (currentCommit === input.publishedCommit) return
+		throw new Error(
+			`Published commit changed from "${input.publishedCommit}" to "${currentCommit ?? 'unpublished'}" during package artifact rebuild; retry this package.`,
+		)
+	}
+
+	/**
+	 * Load source files for the requested published commit's immutable snapshot.
+	 * Never stages the current source row's commit when the caller asked for a
+	 * different one — that mislabels newer files under an older commit.
+	 * Workspace fallback is only allowed when the source is still at that
+	 * commit (re-checked after a snapshot miss).
+	 */
 	private async collectSourceFilesForPublishedArtifactRebuild(
 		source: EntitySourceRow,
+		publishedCommit: string,
 	) {
+		const sourceAtPublishedCommit = {
+			...source,
+			published_commit: publishedCommit,
+		}
 		const snapshot = await loadPublishedSourceSnapshot({
 			env: this.env,
 			userId: source.user_id,
-			source,
+			source: sourceAtPublishedCommit,
 		})
 		if (snapshot && typeof snapshot.files[source.manifest_path] === 'string') {
 			return snapshot.files
 		}
+		// Snapshot miss: only fall back to the session workspace when the
+		// source is still published at the requested commit.
+		const freshSource = await this.resolvePublishSource({
+			sourceId: source.id,
+			userId: source.user_id,
+		})
+		this.assertPublishedCommitUnchanged({
+			source: freshSource,
+			publishedCommit,
+		})
 		const workspaceFiles = await this.collectWorkspaceFiles()
 		if (typeof workspaceFiles[source.manifest_path] === 'string') {
 			return workspaceFiles
@@ -1384,7 +1459,7 @@ class RepoSessionBase extends DurableObject<Env> {
 	async openSession(input: {
 		sessionId: string
 		sourceId: string
-		userId: string
+		userId: OwnerId
 		baseUrl: string
 		conversationId?: string | null
 		sourceRoot?: string | null
@@ -1456,16 +1531,22 @@ class RepoSessionBase extends DurableObject<Env> {
 				branch: sourceBranch,
 				resetBeforeFirstAttempt: true,
 			})
-			await this.git.checkout({
+			await (
+				await this.ensureGit()
+			).checkout({
 				dir: repoSessionWorkspacePrefix,
 				ref: baseCommit,
 				force: true,
 			})
-			await this.git.checkout({
+			await (
+				await this.ensureGit()
+			).checkout({
 				dir: repoSessionWorkspacePrefix,
 				branch: sessionBranch,
 			})
-			await this.git.push({
+			await (
+				await this.ensureGit()
+			).push({
 				dir: repoSessionWorkspacePrefix,
 				remote: 'origin',
 				ref: sessionBranch,
@@ -1557,9 +1638,26 @@ class RepoSessionBase extends DurableObject<Env> {
 	async bootstrapSource(input: {
 		sessionId: string
 		sourceId: string
-		userId: string
+		userId: OwnerId
 		bootstrapAccess?: ArtifactBootstrapAccess | null
 		existingHeadCommit?: string
+		/**
+		 * Forwarded to `runRepoChecks`. Community forks may also set
+		 * `runPublishChecks: false` so install can persist an inert source
+		 * before its own checks choose live vs adaptation. Default matches
+		 * `publishFromExternalRef` (docs required) when checks run.
+		 */
+		requirePackageDocs?: boolean
+		/**
+		 * When false, skip the throwing publish-check gate. Community install
+		 * persists first and evaluates checks separately.
+		 */
+		runPublishChecks?: boolean
+		/**
+		 * Forwarded to `runRepoChecks` so bootstrap rejects a wrong
+		 * `package.json#name` scope before advancing published_commit.
+		 */
+		expectedPackageScope?: string
 		edits: Array<{
 			kind: 'write' | 'replace' | 'writeJson'
 			path: string
@@ -1655,7 +1753,9 @@ class RepoSessionBase extends DurableObject<Env> {
 				await this.workspace.mkdir(repoSessionWorkspacePrefix, {
 					recursive: true,
 				})
-				await this.git.init({
+				await (
+					await this.ensureGit()
+				).init({
 					dir: repoSessionWorkspacePrefix,
 					defaultBranch: targetBranch,
 				})
@@ -1682,13 +1782,53 @@ class RepoSessionBase extends DurableObject<Env> {
 				if (!commit) {
 					throw new Error(`Source "${source.id}" bootstrap produced no commit.`)
 				}
-				await this.readManifestFromWorkspace(
-					source.manifest_path,
-					source.entity_kind,
-				)
+				switch (source.entity_kind) {
+					case 'package':
+						await this.readManifestFromWorkspace(source.manifest_path)
+						break
+					case 'repo':
+						break
+					default: {
+						const entityKind: never = source.entity_kind
+						throw new Error(`Unsupported entity kind: ${String(entityKind)}`)
+					}
+				}
 				return commit
 			},
 		)
+		if (source.entity_kind === 'package' && input.runPublishChecks !== false) {
+			await pushServerTiming(
+				serverTiming,
+				'bootstrap-repo-checks',
+				async () => {
+					const manifestPath = resolveRepoWorkspacePath(
+						source.manifest_path,
+						repoSessionWorkspacePrefix,
+					)
+					const sourceRoot = resolveRepoWorkspacePath(
+						source.source_root || repoSessionWorkspacePrefix,
+						repoSessionWorkspacePrefix,
+					)
+					const checks = await runRepoChecks({
+						workspace: this.workspace,
+						manifestPath,
+						sourceRoot,
+						env: this.env,
+						baseUrl: source.source_root,
+						userId: input.userId,
+						...(input.expectedPackageScope !== undefined
+							? { expectedPackageScope: input.expectedPackageScope }
+							: {}),
+						...(input.requirePackageDocs === false
+							? { requirePackageDocs: false }
+							: {}),
+					})
+					if (!checks.ok) {
+						throw new Error(formatFailedRepoCheckMessages(checks.results))
+					}
+				},
+			)
+		}
 		const snapshotFiles = await pushServerTiming(
 			serverTiming,
 			'bootstrap-workspace-snapshot',
@@ -1699,8 +1839,8 @@ class RepoSessionBase extends DurableObject<Env> {
 				`Source "${source.id}" first-publish from dest HEAD produced an empty workspace snapshot.`,
 			)
 		}
-		await pushServerTiming(serverTiming, 'bootstrap-git-push', () =>
-			this.git.push({
+		await pushServerTiming(serverTiming, 'bootstrap-git-push', async () =>
+			(await this.ensureGit()).push({
 				dir: repoSessionWorkspacePrefix,
 				remote: 'source',
 				ref: targetBranch,
@@ -1738,7 +1878,7 @@ class RepoSessionBase extends DurableObject<Env> {
 		}
 	}
 
-	async getSessionInfo(input: { sessionId: string; userId: string }) {
+	async getSessionInfo(input: { sessionId: string; userId: OwnerId }) {
 		const { sessionRow, source } = await this.getSessionState(
 			input.sessionId,
 			input.userId,
@@ -1750,7 +1890,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async discardSession(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 	}): Promise<RepoSessionDiscardResult> {
 		const sessionRow = await getRepoSessionById(this.env, {
 			userId: input.userId,
@@ -1786,7 +1926,7 @@ class RepoSessionBase extends DurableObject<Env> {
 		}
 	}
 
-	async purgeSession(input: { sessionId: string; userId: string }) {
+	async purgeSession(input: { sessionId: string; userId: OwnerId }) {
 		const sessionRow = await getRepoSessionById(this.env, {
 			userId: input.userId,
 			sessionId: input.sessionId,
@@ -1812,7 +1952,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async cleanupSessionBranch(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		reason: 'expired' | 'abandoned' | 'source_deleted'
 	}) {
 		const sessionRow = await getRepoSessionById(this.env, {
@@ -1933,7 +2073,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async readFile(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		path: string
 	}): Promise<{ path: string; content: string | null }> {
 		const { sessionRow } = await this.getSessionState(
@@ -1951,7 +2091,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async writeFile(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		path: string
 		content: string
 	}): Promise<{ ok: true; path: string }> {
@@ -1980,7 +2120,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async search(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		pattern: string
 		mode?: RepoSearchMode
 		glob?: string | null
@@ -2133,7 +2273,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async applyPatch(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		patch: string
 		dryRun?: boolean
 	}): Promise<RepoSessionApplyEditsResult> {
@@ -2156,23 +2296,23 @@ class RepoSessionBase extends DurableObject<Env> {
 		return result
 	}
 
-	async sessionStatus(input: { sessionId: string; userId: string }) {
+	async sessionStatus(input: { sessionId: string; userId: OwnerId }) {
 		await this.getSessionState(input.sessionId, input.userId)
-		return this.git.status({ dir: repoSessionWorkspacePrefix })
+		return (await this.ensureGit()).status({ dir: repoSessionWorkspacePrefix })
 	}
 
-	async sessionDiff(input: { sessionId: string; userId: string }) {
+	async sessionDiff(input: { sessionId: string; userId: OwnerId }) {
 		await this.getSessionState(input.sessionId, input.userId)
-		return this.git.diff({ dir: repoSessionWorkspacePrefix })
+		return (await this.ensureGit()).diff({ dir: repoSessionWorkspacePrefix })
 	}
 
 	async sessionLog(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		depth?: number
 	}) {
 		await this.getSessionState(input.sessionId, input.userId)
-		return this.git.log({
+		return (await this.ensureGit()).log({
 			dir: repoSessionWorkspacePrefix,
 			depth: input.depth,
 		})
@@ -2180,7 +2320,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async sessionCommit(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		message: string
 	}) {
 		const { sessionRow } = await this.getSessionState(
@@ -2190,11 +2330,15 @@ class RepoSessionBase extends DurableObject<Env> {
 		if (!input.message.trim()) {
 			throw new Error('Commit message cannot be empty.')
 		}
-		await this.git.add({
+		await (
+			await this.ensureGit()
+		).add({
 			dir: repoSessionWorkspacePrefix,
 			filepath: '.',
 		})
-		const commit = await this.git.commit({
+		const commit = await (
+			await this.ensureGit()
+		).commit({
 			dir: repoSessionWorkspacePrefix,
 			message: input.message,
 			author: sessionCommitAuthor,
@@ -2214,7 +2358,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async restoreFiles(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		paths: Array<string>
 		commit?: string
 	}) {
@@ -2278,7 +2422,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async tree(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		path?: string | null
 		maxDepth?: number
 	}): Promise<RepoSessionTreeResult> {
@@ -2304,7 +2448,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async applyEdits(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		edits: Array<RepoSessionEdit>
 		dryRun?: boolean
 		rollbackOnError?: boolean
@@ -2327,8 +2471,13 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async runChecks(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		expectedPackageScope?: string
+		/**
+		 * Forwarded to `runRepoChecks`. Codemod / community lanes may pass
+		 * `false`; authoring publish defaults to requiring docs.
+		 */
+		requirePackageDocs?: boolean
 	}): Promise<RepoSessionCheckRun> {
 		const { sessionRow, source } = await this.getSessionState(
 			input.sessionId,
@@ -2352,6 +2501,9 @@ class RepoSessionBase extends DurableObject<Env> {
 			// Honor an explicit scope even on a still-plain repo: promote
 			// runs package checks before flipping entity_kind.
 			expectedPackageScope: input.expectedPackageScope,
+			...(input.requirePackageDocs === false
+				? { requirePackageDocs: false }
+				: {}),
 		})
 		const { sourceFiles: _sourceFiles, ...publicResult } = result
 		const runId = crypto.randomUUID()
@@ -2384,13 +2536,57 @@ class RepoSessionBase extends DurableObject<Env> {
 		}
 	}
 
-	async getCheckStatus(input: { sessionId: string; userId: string }) {
+	async getCheckStatus(input: { sessionId: string; userId: OwnerId }) {
 		const { sessionRow } = await this.getSessionState(
 			input.sessionId,
 			input.userId,
 		)
 		await this.touchRepoSession(sessionRow)
 		return this.readCheckStatus()
+	}
+
+	/**
+	 * Stamp an ok check-status for the current workspace tree without running
+	 * validators. Trusted opt-out for community inert-fork persist
+	 * (`runPublishChecks: false`): publishSession can then proceed without
+	 * `force`, so the destructive-overwrite gate stays intact. Do not use this
+	 * to weaken `publishFromExternalRef` / packageSave (those keep real checks).
+	 */
+	async acceptCurrentTreeForPublish(input: {
+		sessionId: string
+		userId: OwnerId
+	}): Promise<RepoSessionCheckStatus> {
+		const { sessionRow } = await this.getSessionState(
+			input.sessionId,
+			input.userId,
+		)
+		const runId = crypto.randomUUID()
+		const treeHash = await this.computeTreeHash()
+		const checkedAt = nowIso()
+		const status: RepoSessionCheckStatus = {
+			runId,
+			treeHash,
+			checkedAt,
+			ok: true,
+			results: [
+				{
+					kind: 'manifest',
+					ok: true,
+					message:
+						'Publish checks accepted without running validators (trusted opt-out).',
+				},
+			],
+		}
+		await updateRepoSession(this.env, {
+			id: input.sessionId,
+			userId: sessionRow.user_id,
+			lastCheckRunId: runId,
+			lastCheckTreeHash: treeHash,
+			lastCheckpointAt: checkedAt,
+		})
+		await this.writeCheckStatus(status)
+		this.refreshStoredEstimate(input.sessionId, sessionRow.user_id)
+		return status
 	}
 
 	/**
@@ -2451,22 +2647,25 @@ class RepoSessionBase extends DurableObject<Env> {
 	async listPublishedPackageArtifactTargets(input: {
 		sessionId?: string
 		sourceId?: string
-		userId: string
+		userId: OwnerId
 	}): Promise<Array<PublishedPackageArtifactBuildTarget>> {
 		const source = await this.resolvePublishSource(input)
 		return await this.listPackageArtifactTargetsForSource(source)
 	}
 
 	/**
-	 * Collect workspace files once on the long-lived publish session and stage
-	 * the snapshot in KV for throwaway rebuild isolates (see
-	 * isolated-artifact-rebuild.ts). Callers list and filter targets before
-	 * staging so already-built resumes skip this work.
+	 * Collect the requested published commit's immutable snapshot once on the
+	 * long-lived publish session and stage it in KV for throwaway rebuild
+	 * isolates (see isolated-artifact-rebuild.ts). Callers list and filter
+	 * targets before staging so already-built resumes skip this work.
+	 * Rejects when the source's current published commit differs so a
+	 * concurrent publish cannot stage newer files under an older label.
 	 */
 	async stagePublishedPackageArtifactRebuild(input: {
 		sessionId?: string
 		sourceId?: string
-		userId: string
+		userId: OwnerId
+		publishedCommit: string
 	}): Promise<{
 		stagingKey: string
 	}> {
@@ -2476,6 +2675,10 @@ class RepoSessionBase extends DurableObject<Env> {
 				'Published bundle artifacts can only be rebuilt for packages.',
 			)
 		}
+		this.assertPublishedCommitUnchanged({
+			source,
+			publishedCommit: input.publishedCommit,
+		})
 		const stagingKv = (this.env as Env & { BUNDLE_ARTIFACTS_KV?: KVNamespace })
 			.BUNDLE_ARTIFACTS_KV
 		if (!stagingKv) {
@@ -2484,11 +2687,21 @@ class RepoSessionBase extends DurableObject<Env> {
 			)
 		}
 		const sourceFiles =
-			await this.collectSourceFilesForPublishedArtifactRebuild(source)
+			await this.collectSourceFilesForPublishedArtifactRebuild(
+				source,
+				input.publishedCommit,
+			)
 		const stagingKey = isolatedArtifactRebuildStagingKeyForUser(input.userId)
-		await stagingKv.put(stagingKey, JSON.stringify({ sourceFiles }), {
-			expirationTtl: isolatedArtifactRebuildStagingTtlSeconds,
-		})
+		await stagingKv.put(
+			stagingKey,
+			JSON.stringify({
+				sourceFiles,
+				publishedCommit: input.publishedCommit,
+			}),
+			{
+				expirationTtl: isolatedArtifactRebuildStagingTtlSeconds,
+			},
+		)
 		return { stagingKey }
 	}
 
@@ -2529,6 +2742,7 @@ class RepoSessionBase extends DurableObject<Env> {
 		}
 		const results: Array<IsolatedArtifactRebuildTargetResult> = []
 		const remaining: Array<PublishedPackageArtifactBuildTarget> = []
+		const snapshotCache = new Map()
 		for (const target of input.targets) {
 			const alreadyBuilt =
 				!input.force &&
@@ -2538,6 +2752,7 @@ class RepoSessionBase extends DurableObject<Env> {
 					sourceId: input.sourceId,
 					publishedCommit: input.publishedCommit,
 					target,
+					snapshotCache,
 				}))
 			if (alreadyBuilt) {
 				results.push({
@@ -2560,11 +2775,20 @@ class RepoSessionBase extends DurableObject<Env> {
 		}
 		const staged = await this.env.BUNDLE_ARTIFACTS_KV.get<{
 			sourceFiles?: Record<string, string>
+			publishedCommit?: string
 		}>(input.stagingKey, 'json')
 		const sourceFiles = staged?.sourceFiles
 		if (!sourceFiles) {
 			const message =
 				'Isolated artifact rebuild staging data expired or is missing; re-run the publish capability to repair artifacts.'
+			results.push(...failTargets(remaining, message))
+			return { ok: false, message, results }
+		}
+		if (
+			typeof staged.publishedCommit === 'string' &&
+			staged.publishedCommit !== input.publishedCommit
+		) {
+			const message = `Isolated artifact rebuild staging was for commit "${staged.publishedCommit}" but rebuild requested "${input.publishedCommit}".`
 			results.push(...failTargets(remaining, message))
 			return { ok: false, message, results }
 		}
@@ -2579,6 +2803,12 @@ class RepoSessionBase extends DurableObject<Env> {
 				results.push(...failTargets(remaining, message))
 				return { ok: false, message, results }
 			}
+			// Reject before writing so a publish that landed after staging
+			// cannot leave newer files labeled as the caller's older commit.
+			this.assertPublishedCommitUnchanged({
+				source,
+				publishedCommit: input.publishedCommit,
+			})
 			const savedPackage = await getSavedPackageById(this.env.APP_DB, {
 				userId: input.userId,
 				packageId: source.entity_id,
@@ -2588,6 +2818,7 @@ class RepoSessionBase extends DurableObject<Env> {
 				results.push(...failTargets(remaining, message))
 				return { ok: false, message, results }
 			}
+			const prepareCache: PreparedKodyGraphCache = new Map()
 			for (const target of remaining) {
 				try {
 					const kvKey =
@@ -2599,6 +2830,7 @@ class RepoSessionBase extends DurableObject<Env> {
 							target,
 							baseUrl: input.baseUrl,
 							sourceFiles,
+							prepareCache,
 						})
 					results.push({
 						ok: true,
@@ -2610,6 +2842,7 @@ class RepoSessionBase extends DurableObject<Env> {
 					results.push({
 						ok: false,
 						message: getErrorMessage(error),
+						...(isUserCodeError(error) ? { callerFailure: true } : {}),
 						target,
 					})
 				}
@@ -2646,7 +2879,7 @@ class RepoSessionBase extends DurableObject<Env> {
 	async rebuildPublishedPackageArtifact(input: {
 		sessionId?: string
 		sourceId?: string
-		userId: string
+		userId: OwnerId
 		publishedCommit: string
 		target: PublishedPackageArtifactBuildTarget
 		baseUrl?: string
@@ -2661,6 +2894,10 @@ class RepoSessionBase extends DurableObject<Env> {
 				'Published bundle artifacts can only be rebuilt for packages.',
 			)
 		}
+		this.assertPublishedCommitUnchanged({
+			source,
+			publishedCommit: input.publishedCommit,
+		})
 		const savedPackage = await getSavedPackageById(this.env.APP_DB, {
 			userId: input.userId,
 			packageId: source.entity_id,
@@ -2669,9 +2906,19 @@ class RepoSessionBase extends DurableObject<Env> {
 			throw new Error(`Saved package "${source.entity_id}" was not found.`)
 		}
 		const sourceFiles =
-			await this.collectSourceFilesForPublishedArtifactRebuild(source)
+			await this.collectSourceFilesForPublishedArtifactRebuild(
+				source,
+				input.publishedCommit,
+			)
+		// Re-check immediately before persist: staging/collection is not
+		// atomic with a concurrent publish updating the source row.
+		const freshSource = await this.resolvePublishSource(input)
+		this.assertPublishedCommitUnchanged({
+			source: freshSource,
+			publishedCommit: input.publishedCommit,
+		})
 		const kvKey = await this.persistPublishedPackageArtifactTargetFromFiles({
-			source,
+			source: freshSource,
 			savedPackage,
 			userId: input.userId,
 			publishedCommit: input.publishedCommit,
@@ -2689,11 +2936,12 @@ class RepoSessionBase extends DurableObject<Env> {
 	private async persistPublishedPackageArtifactTargetFromFiles(input: {
 		source: EntitySourceRow
 		savedPackage: SavedPackageRecord
-		userId: string
+		userId: OwnerId
 		publishedCommit: string
 		target: PublishedPackageArtifactBuildTarget
 		baseUrl?: string
 		sourceFiles: Record<string, string>
+		prepareCache?: PreparedKodyGraphCache
 	}) {
 		const sourceAtPublishedCommit = {
 			...input.source,
@@ -2705,6 +2953,7 @@ class RepoSessionBase extends DurableObject<Env> {
 			buildKodyModuleBundle,
 			buildKodyImportableModuleBundle,
 		} = await import('#worker/package-runtime/module-graph.ts')
+		const prepareCache = input.prepareCache ?? new Map()
 		return await persistPublishedPackageArtifactTarget({
 			env: this.env,
 			userId: input.userId,
@@ -2720,6 +2969,7 @@ class RepoSessionBase extends DurableObject<Env> {
 					entryPoint,
 					rootPackageId: input.savedPackage.id,
 					cacheKey: null,
+					prepareCache,
 				}),
 			buildAppClientBundle: async ({ entryPoint }) =>
 				await buildKodyAppClientBundle({
@@ -2734,6 +2984,7 @@ class RepoSessionBase extends DurableObject<Env> {
 					sourceFiles: input.sourceFiles,
 					entryPoint,
 					rootPackageId: input.savedPackage.id,
+					prepareCache,
 				}),
 			buildImportableModuleBundle: async ({ entryPoint }) =>
 				await buildKodyImportableModuleBundle({
@@ -2743,20 +2994,23 @@ class RepoSessionBase extends DurableObject<Env> {
 					sourceFiles: input.sourceFiles,
 					entryPoint,
 					rootPackageId: input.savedPackage.id,
+					prepareCache,
 				}),
 		})
 	}
 
 	async rebaseSession(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 	}): Promise<RepoSessionRebaseResult> {
 		const { sessionRow, source, sessionAccess } = await this.getSessionState(
 			input.sessionId,
 			input.userId,
 		)
 		const sessionBranch = sessionRow.session_branch
-		const pullResult = await this.git.pull({
+		const pullResult = await (
+			await this.ensureGit()
+		).pull({
 			dir: repoSessionWorkspacePrefix,
 			remote: 'origin',
 			ref: sessionRow.source_branch,
@@ -2766,7 +3020,9 @@ class RepoSessionBase extends DurableObject<Env> {
 		const headCommit = await this.getHeadCommit()
 		// Session branches are ephemeral workspace state; pull/merge can rewrite
 		// history, so force-push the session ref (never the source branch).
-		await this.git.push({
+		await (
+			await this.ensureGit()
+		).push({
 			dir: repoSessionWorkspacePrefix,
 			remote: 'origin',
 			ref: sessionBranch,
@@ -2839,7 +3095,9 @@ class RepoSessionBase extends DurableObject<Env> {
 				input.commitMessage?.trim() ||
 					`Publish repo session ${input.sessionRow.id}`,
 			)) ?? (await this.getHeadCommit())
-		await this.git.push({
+		await (
+			await this.ensureGit()
+		).push({
 			dir: repoSessionWorkspacePrefix,
 			remote: 'origin',
 			ref: sessionBranch,
@@ -2913,7 +3171,7 @@ class RepoSessionBase extends DurableObject<Env> {
 
 	async publishSession(input: {
 		sessionId: string
-		userId: string
+		userId: OwnerId
 		force?: boolean
 		destructiveOverwriteConfirmed?: boolean
 		privateVisibilityChangeConfirmed?: boolean
@@ -2927,17 +3185,25 @@ class RepoSessionBase extends DurableObject<Env> {
 			input.sessionId,
 			input.userId,
 		)
-		if (source.entity_kind === 'repo') {
-			return await this.publishPlainRepoSession({
-				sessionRow,
-				source,
-				sessionAccess,
-				commitMessage: input.commitMessage,
-			})
+		switch (source.entity_kind) {
+			case 'repo':
+				return await this.publishPlainRepoSession({
+					sessionRow,
+					source,
+					sessionAccess,
+					commitMessage: input.commitMessage,
+				})
+			case 'package':
+				break
+			default: {
+				const entityKind: never = source.entity_kind
+				throw new Error(`Unsupported entity kind: ${String(entityKind)}`)
+			}
 		}
 		const sessionBranch = sessionRow.session_branch
 		const checkStatus = await this.readCheckStatus()
-		const currentTreeHash = await this.computeTreeHash()
+		const workspaceSnapshot = await this.collectWorkspacePublishSnapshot()
+		const currentTreeHash = workspaceSnapshot.treeHash
 		if (
 			(!input.force && !checkStatus.runId) ||
 			(!input.force && !checkStatus.ok) ||
@@ -2978,8 +3244,7 @@ class RepoSessionBase extends DurableObject<Env> {
 			})
 		}
 		if (source.entity_kind === 'package') {
-			const workspaceFiles = await this.collectWorkspaceFiles()
-			const afterContent = workspaceFiles[source.manifest_path]
+			const afterContent = workspaceSnapshot.files[source.manifest_path]
 			if (typeof afterContent !== 'string') {
 				throw new Error(`Manifest "${source.manifest_path}" was not found.`)
 			}
@@ -3004,10 +3269,11 @@ class RepoSessionBase extends DurableObject<Env> {
 			)) ?? (await this.getHeadCommit())
 		await this.readManifestFromWorkspace(
 			source.manifest_path,
-			source.entity_kind,
 			input.expectedPackageScope,
 		)
-		await this.git.push({
+		await (
+			await this.ensureGit()
+		).push({
 			dir: repoSessionWorkspacePrefix,
 			remote: 'origin',
 			ref: sessionBranch,
@@ -3036,8 +3302,16 @@ class RepoSessionBase extends DurableObject<Env> {
 			}
 			throw error
 		}
-		const snapshotFiles = await this.collectWorkspaceFiles()
+		// Commit/push do not rewrite workspace file bytes, so reuse the
+		// snapshot collected once above for the published source KV write.
+		const snapshotFiles = workspaceSnapshot.files
 		const publishedCommit = sessionHeadCommit ?? sessionRow.base_commit
+		const credentialNotice =
+			source.entity_kind === 'package'
+				? credentialPatternNoticeForFiles(snapshotFiles, source.source_root)
+				: null
+		const withCredentialNotice = (message: string) =>
+			credentialNotice ? `${message}\n\n${credentialNotice}` : message
 		if (input.promotePublished === false) {
 			return {
 				status: 'ok',
@@ -3067,6 +3341,7 @@ class RepoSessionBase extends DurableObject<Env> {
 					packageId: lockedPackage.id,
 					packageName: lockedPackage.name,
 					message: error.message,
+					credentialNotice,
 				}
 			}
 		}
@@ -3126,14 +3401,16 @@ class RepoSessionBase extends DurableObject<Env> {
 			status: 'ok',
 			sessionId: sessionRow.id,
 			publishedCommit: sessionHeadCommit ?? sessionRow.base_commit,
-			message: `Published session ${sessionRow.id} to ${source.repo_id}.`,
+			message: withCredentialNotice(
+				`Published session ${sessionRow.id} to ${source.repo_id}.`,
+			),
 		}
 	}
 
 	async publishFromExternalRef(input: {
 		sessionId: string
 		sourceId: string
-		userId: string
+		userId: OwnerId
 		newCommit: string
 		expectedHead?: string | null
 		allowForce?: boolean

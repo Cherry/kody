@@ -1,3 +1,5 @@
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
+import { updateOrgBillingColumns } from '#worker/orgs/org-billing-columns.ts'
 import { d1ContainsLikePattern } from '#worker/d1-like-pattern.ts'
 import { utcSqliteTimestamp } from '@kody-internal/shared/date-keys.ts'
 import { readPagination } from '#worker/query-params.ts'
@@ -16,7 +18,10 @@ import {
 	type EntitlementLadder,
 	type PlanName,
 } from '#universal/plans.ts'
-import { laterIsoTimestamp } from '#universal/referral-program.ts'
+import {
+	resolveAdminPlanOverlay,
+	type AdminPlanOverlayType,
+} from '#universal/referral-program.ts'
 import { resolveEffectivePlanWithSecondAgentGift } from '#universal/second-agent-standard-gift.ts'
 import {
 	chunkArray,
@@ -37,18 +42,19 @@ import {
 	userEntitlementColumnsSql,
 	type UserEntitlementRow,
 } from '#worker/entitlements/service.ts'
-import { normalizeEmail } from '#worker/identity/normalize-email.ts'
 import {
-	createStableUserIdFromEmail,
-	isStableUserId,
-	normalizeStableUserId,
-} from '#worker/user-id.ts'
+	parsePersonId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
-export const adminUserRowSelectSql = `id, stable_user_id, username, email, email_verified_at, plan, stripe_plan, entitlement_ladder, stripe_customer_id, suspended_at,
-				email_outbound_paused_at, email_verification_delivery_status, email_verification_delivery_at, email_verification_delivery_detail, email_verification_delivery_class,
-				utm_source, utm_medium, utm_campaign, utm_content, utm_term, first_touch_landing_path, first_touch_referrer,
-				first_mcp_connected_at, first_execute_at, first_search_at, first_saved_package_at, mcp_client_name, last_active_at,
-				second_agent_standard_gift_expires_at, referral_standard_credit_expires_at, created_at, updated_at`
+export const adminUserRowSelectSql = `u.id, u.stable_user_id, u.username, u.email, u.email_verified_at, COALESCE(o.plan, 'free') AS plan, o.stripe_plan, COALESCE(o.entitlement_ladder, 'public') AS entitlement_ladder, o.stripe_customer_id, u.suspended_at,
+				o.email_outbound_paused_at, u.email_verification_delivery_status, u.email_verification_delivery_at, u.email_verification_delivery_detail, u.email_verification_delivery_class,
+				u.utm_source, u.utm_medium, u.utm_campaign, u.utm_content, u.utm_term, u.first_touch_landing_path, u.first_touch_referrer,
+				u.first_mcp_connected_at, u.first_execute_at, u.first_search_at, u.first_saved_package_at, u.mcp_client_name, u.last_active_at,
+				o.second_agent_standard_gift_expires_at, o.referral_standard_credit_expires_at, u.created_at, u.updated_at`
+
+const adminUsersFromSql = `users u LEFT JOIN orgs o ON o.id = u.stable_user_id AND o.deleted_at IS NULL`
 
 export const adminUserListItemFieldNames = [
 	'stableUserId',
@@ -60,6 +66,11 @@ export const adminUserListItemFieldNames = [
 	'manualPlan',
 	'stripePlan',
 	'effectivePlan',
+	'secondAgentGiftExpiresAt',
+	'referralCreditExpiresAt',
+	'overlayExpiresAt',
+	'isProOverlay',
+	'overlayType',
 	'entitlementLadder',
 	'stripeCustomerLinked',
 	'suspended_at',
@@ -88,7 +99,7 @@ export type AdminUserListItemFieldName =
 	(typeof adminUserListItemFieldNames)[number]
 
 export type AdminUserListItem = Record<AdminUserListItemFieldName, unknown> & {
-	stableUserId: string
+	stableUserId: OwnerId
 	username: string
 	email: string
 	email_verified: boolean
@@ -97,6 +108,11 @@ export type AdminUserListItem = Record<AdminUserListItemFieldName, unknown> & {
 	manualPlan: PlanName
 	stripePlan: PlanName | null
 	effectivePlan: PlanName
+	secondAgentGiftExpiresAt: string | null
+	referralCreditExpiresAt: string | null
+	overlayExpiresAt: string | null
+	isProOverlay: boolean
+	overlayType: AdminPlanOverlayType | null
 	entitlementLadder: EntitlementLadder
 	stripeCustomerLinked: boolean
 	suspended_at: string | null
@@ -169,8 +185,7 @@ function decodePathSegment(value: string) {
 function parseSelectedStableUserId(
 	value: string | null | undefined,
 ): string | null {
-	const stableUserId = normalizeStableUserId(value)
-	return isStableUserId(stableUserId) ? stableUserId : null
+	return parsePersonId(value)
 }
 
 /** Read the `q`, `role`, and `verification` filter query params. */
@@ -194,23 +209,25 @@ function buildAdminUserListWhereClause(
 	filters: AdminUserListFilters,
 	now: Date,
 ) {
-	const conditions: Array<string> = []
+	const conditions: Array<string> = ['u.deleted_at IS NULL']
 	const params: Array<string> = []
 	if (filters.query) {
 		const pattern = d1ContainsLikePattern(filters.query)
-		conditions.push(`(username LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')`)
+		conditions.push(
+			`(u.username LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\')`,
+		)
 		params.push(pattern, pattern)
 	}
 	if (filters.role) {
 		conditions.push(
-			`id IN (SELECT ur.user_id FROM user_roles ur INNER JOIN roles r ON r.id = ur.role_id WHERE r.name = ?)`,
+			`u.id IN (SELECT ur.user_id FROM user_roles ur INNER JOIN roles r ON r.id = ur.role_id WHERE r.name = ?)`,
 		)
 		params.push(filters.role)
 	}
 	if (filters.verification) {
 		switch (filters.verification) {
 			case 'stalled':
-				conditions.push(...emailVerificationStallSqlConditions())
+				conditions.push(...emailVerificationStallSqlConditions('u'))
 				params.push(emailVerificationStallCutoffIso(now))
 				break
 			default: {
@@ -236,7 +253,7 @@ export async function adminUserMatchesListFilters(
 	requestUrl: string,
 	stableUserId: string,
 ): Promise<boolean> {
-	if (!isStableUserId(stableUserId)) return false
+	if (!parsePersonId(stableUserId)) return false
 	const url = new URL(requestUrl, 'http://localhost')
 	const filters = readAdminUserListFilters(url)
 	const { whereClause, params } = buildAdminUserListWhereClause(
@@ -244,10 +261,10 @@ export async function adminUserMatchesListFilters(
 		new Date(),
 	)
 	const membershipWhere = whereClause
-		? `${whereClause} AND stable_user_id = ?`
-		: 'WHERE stable_user_id = ?'
+		? `${whereClause} AND u.stable_user_id = ?`
+		: 'WHERE u.stable_user_id = ?'
 	const row = await env.APP_DB.prepare(
-		`SELECT 1 AS found FROM users ${membershipWhere} LIMIT 1`,
+		`SELECT 1 AS found FROM users u ${membershipWhere}${andLiveDeletedAtSql('u')} LIMIT 1`,
 	)
 		.bind(...params, stableUserId)
 		.first<{ found: number }>()
@@ -275,14 +292,16 @@ export async function loadAdminUsersData(
 	)
 
 	const [totalResult, userRows, selectedUser] = await Promise.all([
-		env.APP_DB.prepare(`SELECT COUNT(*) AS total FROM users ${whereClause}`)
+		env.APP_DB.prepare(
+			`SELECT COUNT(*) AS total FROM users u ${whereClause}${andLiveDeletedAtSql('u')}`,
+		)
 			.bind(...params)
 			.first<{ total: number }>(),
 		env.APP_DB.prepare(
 			`SELECT ${adminUserRowSelectSql}
-			 FROM users
-			 ${whereClause}
-			 ORDER BY id ASC
+			 FROM ${adminUsersFromSql}
+			 ${whereClause}${andLiveDeletedAtSql('u')}
+			 ORDER BY u.id ASC
 			 LIMIT ? OFFSET ?`,
 		)
 			.bind(...params, pageSize, offset)
@@ -322,18 +341,18 @@ export async function loadAdminUserByTarget(
 	db: D1Database,
 	input: AdminUserTarget,
 ): Promise<AdminUserListItem | null> {
-	const stableUserId = normalizeStableUserId(input.stableUserId)
+	const stableUserId = parsePersonId(input.stableUserId)
 	const email = input.email?.trim() ?? ''
 	const username = input.username?.trim() ?? ''
-	if (input.stableUserId !== undefined && !isStableUserId(stableUserId)) {
+	if (input.stableUserId !== undefined && !stableUserId) {
 		return null
 	}
 	const userRow = stableUserId
 		? await db
 				.prepare(
 					`SELECT ${adminUserRowSelectSql}
-					 FROM users
-					 WHERE stable_user_id = ?`,
+					 FROM ${adminUsersFromSql}
+					 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
 				)
 				.bind(stableUserId)
 				.first<AdminUserRow>()
@@ -341,8 +360,8 @@ export async function loadAdminUserByTarget(
 			? await db
 					.prepare(
 						`SELECT ${adminUserRowSelectSql}
-						 FROM users
-						 WHERE email = ? COLLATE NOCASE`,
+						 FROM ${adminUsersFromSql}
+						 WHERE u.email = ? COLLATE NOCASE${andLiveDeletedAtSql('u')}`,
 					)
 					.bind(email)
 					.first<AdminUserRow>()
@@ -350,8 +369,8 @@ export async function loadAdminUserByTarget(
 				? await db
 						.prepare(
 							`SELECT ${adminUserRowSelectSql}
-							 FROM users
-							 WHERE username = ? COLLATE NOCASE`,
+							 FROM ${adminUsersFromSql}
+							 WHERE u.username = ? COLLATE NOCASE${andLiveDeletedAtSql('u')}`,
 						)
 						.bind(username)
 						.first<AdminUserRow>()
@@ -363,9 +382,9 @@ export async function loadAdminUserByTarget(
 }
 
 /**
- * Set the manual entitlement grant on one user account (`users.plan`).
+ * Set the manual entitlement grant on the person's personal org (`orgs.plan`).
  * Nullish inputs map to `free`, the normal default; writers never persist
- * NULL. Stripe subscriptions stay on `users.stripe_plan`. A change that unlocks
+ * NULL. Stripe subscriptions stay on `orgs.stripe_plan`. A change that unlocks
  * an admin-eligible credit wallet forgives locked-period usage first. Returns
  * the updated account metadata record, or null when no user matches the target.
  */
@@ -391,8 +410,10 @@ export async function updateAdminUserPlan(
 		nextStripePlan: stripePlan,
 	})
 	const entitlementRow = await db
-		.prepare(`SELECT ${userEntitlementColumnsSql()} FROM users WHERE id = ?`)
-		.bind(existingRow.id)
+		.prepare(
+			`SELECT ${userEntitlementColumnsSql()} FROM orgs WHERE id = ?${andLiveDeletedAtSql()}`,
+		)
+		.bind(existing.stableUserId)
 		.first<UserEntitlementRow>()
 	if (entitlementRow) {
 		await forgiveCreditUsageBeforeUnlock({
@@ -407,12 +428,18 @@ export async function updateAdminUserPlan(
 			now,
 		})
 	}
-	await db
-		.prepare(
-			`UPDATE users SET plan = ?, entitlement_ladder = ?, updated_at = ? WHERE id = ?`,
+	const updatedAt = utcSqliteTimestamp(now)
+	const planWrite = await updateOrgBillingColumns({
+		db,
+		orgId: existing.stableUserId,
+		setClause: 'plan = ?, entitlement_ladder = ?, updated_at = ?',
+		values: [nextPlan, nextLadder, updatedAt],
+	})
+	if ((planWrite.meta.changes ?? 0) === 0) {
+		throw new Error(
+			`Cannot update billing: missing personal org ${existing.stableUserId}.`,
 		)
-		.bind(nextPlan, nextLadder, utcSqliteTimestamp(now), existingRow.id)
-		.run()
+	}
 
 	return loadAdminUserByTarget(db, { stableUserId: existing.stableUserId })
 }
@@ -432,9 +459,13 @@ export async function updateAdminUserSuspension(
 
 	const now = utcSqliteTimestamp()
 	await db
-		.prepare(`UPDATE users SET suspended_at = ?, updated_at = ? WHERE id = ?`)
+		.prepare(
+			`UPDATE users SET suspended_at = ?, updated_at = ? WHERE id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.suspended ? now : null, now, existing.id)
 		.run()
+
+	invalidatePackageAppOwnerCache({ stableUserId: input.stableUserId })
 
 	return loadAdminUserByTarget(db, { stableUserId: input.stableUserId })
 }
@@ -451,12 +482,12 @@ export async function clearAdminUserEmailOutboundPause(
 	const existing = await loadAdminUserRowByStableUserId(db, input.stableUserId)
 	if (!existing) return null
 
-	await db
-		.prepare(
-			`UPDATE users SET email_outbound_paused_at = NULL, updated_at = ? WHERE id = ?`,
-		)
-		.bind(utcSqliteTimestamp(), existing.id)
-		.run()
+	await updateOrgBillingColumns({
+		db,
+		orgId: input.stableUserId,
+		setClause: 'email_outbound_paused_at = NULL, updated_at = ?',
+		values: [utcSqliteTimestamp()],
+	})
 
 	return loadAdminUserByTarget(db, { stableUserId: input.stableUserId })
 }
@@ -498,7 +529,7 @@ export async function loadRolesByUserIds(
 
 type AdminUserRow = {
 	id: number
-	stable_user_id: string
+	stable_user_id: OwnerId
 	username: string
 	email: string
 	email_verified_at: string | null
@@ -537,6 +568,12 @@ function toAdminUserListItem(
 ): AdminUserListItem {
 	const manualPlan = parseStoredPlanName(row.plan)
 	const stripePlan = parseStripePlanName(row.stripe_plan)
+	const overlay = resolveAdminPlanOverlay({
+		manualPlan,
+		stripePlan: row.stripe_plan,
+		secondAgentGiftExpiresAt: row.second_agent_standard_gift_expires_at,
+		referralCreditExpiresAt: row.referral_standard_credit_expires_at,
+	})
 	return {
 		stableUserId: row.stable_user_id,
 		username: row.username,
@@ -549,11 +586,13 @@ function toAdminUserListItem(
 		effectivePlan: resolveEffectivePlanWithSecondAgentGift(
 			manualPlan,
 			row.stripe_plan,
-			laterIsoTimestamp(
-				row.second_agent_standard_gift_expires_at,
-				row.referral_standard_credit_expires_at,
-			),
+			overlay.overlayExpiresAt,
 		),
+		secondAgentGiftExpiresAt: overlay.secondAgentGiftExpiresAt,
+		referralCreditExpiresAt: overlay.referralCreditExpiresAt,
+		overlayExpiresAt: overlay.overlayExpiresAt,
+		isProOverlay: overlay.isProOverlay,
+		overlayType: overlay.overlayType,
 		entitlementLadder: parseEntitlementLadder(row.entitlement_ladder),
 		stripeCustomerLinked: Boolean(row.stripe_customer_id),
 		suspended_at: row.suspended_at,
@@ -588,53 +627,15 @@ export async function loadAdminUserRowByStableUserId(
 	db: D1Database,
 	stableUserId: string,
 ): Promise<AdminUserRow | null> {
-	if (!isStableUserId(stableUserId)) return null
+	if (!parsePersonId(stableUserId)) return null
 	return await db
 		.prepare(
 			`SELECT ${adminUserRowSelectSql}
-			 FROM users
-			 WHERE stable_user_id = ?`,
+			 FROM ${adminUsersFromSql}
+			 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
 		)
 		.bind(stableUserId)
 		.first<AdminUserRow>()
-}
-
-export type StableUserIdConflict = {
-	stableUserId: string
-	username: string
-	created_at: string
-	email_verified: boolean
-}
-
-export async function findStableUserIdConflictByEmail(
-	db: D1Database,
-	email: string,
-): Promise<StableUserIdConflict | null> {
-	const normalizedEmail = normalizeEmail(email)
-	if (!normalizedEmail) return null
-	const stableUserId = await createStableUserIdFromEmail(normalizedEmail)
-	const row = await db
-		.prepare(
-			`SELECT stable_user_id, username, email, created_at, email_verified_at
-			 FROM users
-			 WHERE stable_user_id = ?`,
-		)
-		.bind(stableUserId)
-		.first<{
-			stable_user_id: string
-			username: string
-			email: string
-			created_at: string
-			email_verified_at: string | null
-		}>()
-	if (!row) return null
-	if (normalizeEmail(row.email) === normalizedEmail) return null
-	return {
-		stableUserId: row.stable_user_id,
-		username: row.username,
-		created_at: row.created_at,
-		email_verified: Boolean(row.email_verified_at),
-	}
 }
 
 function isRoleName(value: string): value is RoleName {

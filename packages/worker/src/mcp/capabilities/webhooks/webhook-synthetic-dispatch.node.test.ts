@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -24,10 +28,11 @@ function createCtx(
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			executionOrigin: overrides?.executionOrigin ?? 'interactive',
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User',
 				username: 'user',
@@ -77,7 +82,7 @@ test('webhookSyntheticDispatch returns synthetic run metadata and rejects runtim
 	expect(requestResult).not.toHaveProperty('url_secret')
 	expect(mocks.dispatchSyntheticWebhookForUser).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			kodyId: 'sentry-bridge',
 			webhookName: 'sentry',
 			request: {
@@ -148,6 +153,7 @@ test('webhookSyntheticDispatch returns synthetic run metadata and rejects runtim
 			ctx: {
 				env: { APP_DB: {} } as Env,
 				callerContext: createMcpCallerContext({
+					source: { kind: 'mcp-oauth' },
 					baseUrl: 'https://heykody.dev',
 					executionOrigin: 'interactive',
 					user: null,

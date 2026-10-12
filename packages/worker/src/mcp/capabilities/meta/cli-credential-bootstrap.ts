@@ -1,7 +1,9 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
+import { McpCallerError } from '#mcp/caller-error.ts'
 import {
 	cliCredentialBootstrapPolicy,
 	mintCliCredentialBootstrap,
@@ -11,7 +13,11 @@ import {
 	apiTokenScopes,
 	type ApiTokenScope,
 } from '#worker/api-tokens/scopes.ts'
-import { apiTokenPolicy } from '#worker/api-tokens/service.ts'
+import {
+	apiTokenIdleTtlDescription,
+	apiTokenLifetimeAliasNames,
+	apiTokenPolicy,
+} from '#worker/api-tokens/service.ts'
 import { requireMcpUser } from './require-user.ts'
 
 const scopeSchema = z.enum(
@@ -21,6 +27,10 @@ const scopeSchema = z.enum(
 const scopeListDescription = Object.entries(apiTokenScopeDescriptions)
 	.map(([scope, description]) => `\`${scope}\`: ${description}`)
 	.join('\n')
+
+const lifetimeAliasSchema = z.enum(
+	apiTokenLifetimeAliasNames as [string, ...Array<string>],
+)
 
 const inputSchema = z
 	.object({
@@ -37,7 +47,12 @@ const inputSchema = z
 			.min(1)
 			.optional()
 			.describe(
-				`Scopes for the eventual \`kody_at_\` (default \`local-execute\` + \`account:read\`). \`<resource>:write\` also grants \`<resource>:read\`.\n${scopeListDescription}`,
+				`Org-permission scopes for the eventual \`kody_at_\` (default: pre-P4 local-execute parity — \`org:execute\` + \`org:read\` + package/integration/secret/email/job/app/memory use scopes). There is no write-implies-read hierarchy.\n${scopeListDescription}`,
+			),
+		lifetime: lifetimeAliasSchema
+			.optional()
+			.describe(
+				'Required unless idle_ttl_seconds and max_lifetime_seconds are both set. `short` = 1h idle / 24h max. `long` = 14d idle / 3mo max. Single-task agents should use `short`.',
 			),
 		idle_ttl_seconds: z
 			.number()
@@ -46,7 +61,7 @@ const inputSchema = z
 			.max(apiTokenPolicy.maxIdleTtlSeconds)
 			.optional()
 			.describe(
-				`Seconds without use before the eventual token expires (default ${apiTokenPolicy.defaultIdleTtlSeconds}).`,
+				'Seconds without use before the eventual token expires. Required with max_lifetime_seconds when lifetime is omitted.',
 			),
 		max_lifetime_seconds: z
 			.number()
@@ -55,7 +70,7 @@ const inputSchema = z
 			.max(apiTokenPolicy.maxMaxLifetimeSeconds)
 			.optional()
 			.describe(
-				`Absolute lifetime cap for the eventual token in seconds (default ${apiTokenPolicy.defaultMaxLifetimeSeconds}).`,
+				'Absolute lifetime cap for the eventual token in seconds. Required with idle_ttl_seconds when lifetime is omitted.',
 			),
 		redeem_ttl_seconds: z
 			.number()
@@ -73,13 +88,13 @@ const outputSchema = z.object({
 	bootstrap_code: z
 		.string()
 		.describe(
-			'One-shot code for the CLI (`kody_bc_…`). Not an API token. Pass it to `npx @kodycodes/cli auth bootstrap --code …` — do not paste a `kody_at_` into chat.',
+			'One-shot code for the CLI (`kody_bc_…`). Not an API token. Pass it to `npx @kodycodes/cli auth bootstrap --code … --lifetime short` — do not paste a `kody_at_` into chat.',
 		),
 	expires_at: z.string().describe('Absolute redeem deadline (ISO-8601).'),
 	cli_command: z
 		.string()
 		.describe(
-			'Ready-to-run CLI command that redeems the code into a local `KODY_API_TOKEN` store entry without a second interactive OAuth.',
+			'Ready-to-run CLI command that redeems the code into a local `KODY_API_TOKEN` store entry without a second interactive OAuth. Includes the required lifetime flags.',
 		),
 	name: z.string(),
 	scopes: z.array(scopeSchema),
@@ -96,8 +111,8 @@ export const cliCredentialBootstrapCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'cliCredentialBootstrap',
-		description:
-			'Seed CLI `--local` auth from the current Kody session without a second interactive OAuth: returns a one-shot `kody_bc_…` bootstrap code plus a CLI command. The CLI redeems the code over HTTPS for a scoped `kody_at_…` (never returned here). Prefer this over `tokenCreate` for interactive agents already on MCP. Do not paste API tokens into chat. Interactive desktop humans who already ran `kody login` can skip this. CI/headless may still mint `kody_at_` directly.',
+		orgPermission: 'none',
+		description: `Seed CLI \`--local\` auth from the current Kody session without a second interactive OAuth: returns a one-shot \`kody_bc_…\` bootstrap code plus a CLI command that includes required lifetime flags. The CLI redeems the code over HTTPS for a scoped \`kody_at_…\` (never returned here). Prefer this over \`tokenCreate\` for interactive agents already on MCP. Do not paste API tokens into chat. Interactive desktop humans who already ran \`kody login\` can skip this. CI/headless may still mint \`kody_at_\` directly. ${apiTokenIdleTtlDescription()}`,
 		keywords: [
 			'cli',
 			'local execute',
@@ -116,18 +131,37 @@ export const cliCredentialBootstrapCapability = defineDomainCapability(
 		async handler(args, ctx: CapabilityContext) {
 			const user = requireMcpUser(ctx.callerContext)
 			const input = inputSchema.parse(args ?? {})
+			const storageContext = ctx.callerContext.storageContext
+			if (storageContext?.packageId || storageContext?.appId) {
+				throw new McpCallerError(
+					'cliCredentialBootstrap cannot run inside saved-package, job, webhook, or app runtimes. Call it from the MCP api tool or the Open API.',
+				)
+			}
+			if (ctx.callerContext.request?.credential.profileName) {
+				throw new McpCallerError(
+					'cliCredentialBootstrap is not available on a named connection profile. Mint a profile-bound API token with tokenCreate instead.',
+				)
+			}
 			const parent =
 				ctx.openApiPrincipal?.kind === 'token'
 					? {
 							scopes: ctx.openApiPrincipal.token.scopes,
 							maxExpiresAt: ctx.openApiPrincipal.token.max_expires_at,
+							profileName: ctx.openApiPrincipal.token.profile_name ?? null,
 						}
 					: undefined
+			if (parent?.profileName) {
+				throw new McpCallerError(
+					'cliCredentialBootstrap is not available on a profile-bound API token. Mint a profile-bound child token with tokenCreate instead.',
+				)
+			}
 			return mintCliCredentialBootstrap({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
+				orgId: ctx.callerContext.request?.org.id ?? personalOrgId(user.userId),
 				...(input.name === undefined ? {} : { name: input.name }),
 				...(input.scopes === undefined ? {} : { scopes: input.scopes }),
+				...(input.lifetime === undefined ? {} : { lifetime: input.lifetime }),
 				...(input.idle_ttl_seconds === undefined
 					? {}
 					: { idleTtlSeconds: input.idle_ttl_seconds }),

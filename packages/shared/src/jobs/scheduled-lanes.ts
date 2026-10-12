@@ -8,22 +8,16 @@
 export const scheduledLaneNames = [
 	'reconcile_artifacts_pushes',
 	'repo_session_cleanup',
-	// Inactive no-op; name stays in the union so in-flight queue messages parse.
-	'repo_session_index_backfill',
 	'reconcile_inbound_deliveries',
 	'system_email_retention',
 	'storage_bucket_estimate_backfill',
 	'd1_storage_reconciliation',
 	'oauth_purge_expired',
 	'retention',
-	'job_retention',
 	'unverified_account_purge',
+	'soft_delete_purge',
 	'usage_aggregation',
 	'durable_object_duration_attribution',
-	// Inactive no-op (overage invoicing is retired; credits debit inside
-	// usage_aggregation). Name stays in the union so in-flight queue
-	// messages parse.
-	'compute_overage_billing',
 	'auth_denial_alert',
 	'email_delivery_alert',
 	'email_verification_stall_alert',
@@ -32,6 +26,7 @@ export const scheduledLaneNames = [
 	'dr_export',
 	'dr_export_watchdog',
 	'job_schedule_watchdog',
+	'org_audit_outbox',
 ] as const
 
 export type ScheduledLaneName = (typeof scheduledLaneNames)[number]
@@ -253,9 +248,10 @@ export function getScheduledLaneCadence(
 		'storage_bucket_estimate_backfill',
 		'd1_storage_reconciliation',
 		'oauth_purge_expired',
+		'org_audit_outbox',
 	]
 	if (shouldRunRetentionCron(scheduledAt)) {
-		lanes.push('retention', 'job_retention', 'unverified_account_purge')
+		lanes.push('retention', 'unverified_account_purge', 'soft_delete_purge')
 	}
 	if (shouldRunUsageAggregationCron(scheduledAt)) {
 		lanes.push('usage_aggregation')

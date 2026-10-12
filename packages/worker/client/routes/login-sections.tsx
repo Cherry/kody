@@ -1,3 +1,7 @@
+import {
+	handlePermanentNote,
+	handleUrlPreview,
+} from '@kody-internal/shared/handle-permanence.ts'
 import { css } from 'remix/component'
 import { on } from '#client/event-mixin.ts'
 import {
@@ -6,6 +10,7 @@ import {
 } from '#client/form-error-fields.ts'
 import { HeroStage } from '#client/hero-stage.tsx'
 import { renderHoneypot } from '#client/honeypot-field.tsx'
+import { PasswordRevealInput } from '#client/password-reveal-input.tsx'
 import { renderIcon } from '#universal/icon.tsx'
 import { turnstileWidgetClassName } from '#client/public-form-protection.ts'
 import { colors, transitions, typography } from '#universal/styles/tokens.ts'
@@ -132,13 +137,21 @@ export function renderAuthForm(
 		submitBusyLabel: string
 		onSubmit: (event: SubmitEvent) => void
 		onPasskeySignIn: () => void
+		signupUsername: string
+		onSignupUsernameInput: (value: string) => void
 	},
 ) {
 	const statusId = `${props.handleId}-form-status`
+	const usernameNoteId = `${props.handleId}-username-note`
 	const invalidFields = invalidFieldsForMessage(props.status, props.message, [
 		'email',
 		'password',
 	])
+	const usernameErrorProps = fieldErrorProps(
+		'username',
+		invalidFields,
+		statusId,
+	)
 	return (
 		<form
 			key="authentication"
@@ -174,9 +187,30 @@ export function renderAuthForm(
 						title="Use 3 to 32 letters, numbers, and hyphens. Start and end with a letter or number."
 						placeholder="kent"
 						data-field-ring
-						{...fieldErrorProps('username', invalidFields, statusId)}
-						mix={css(authInputCss)}
+						{...usernameErrorProps}
+						aria-describedby={
+							usernameErrorProps['aria-describedby']
+								? `${usernameNoteId} ${usernameErrorProps['aria-describedby']}`
+								: usernameNoteId
+						}
+						mix={[
+							css(authInputCss),
+							on('input', (event) => {
+								props.onSignupUsernameInput(
+									(event.currentTarget as HTMLInputElement).value,
+								)
+							}),
+						]}
 					/>
+					<p id={usernameNoteId} mix={css(authFieldNoteCss)}>
+						{handlePermanentNote} Your profile URL will be{' '}
+						<strong>
+							{handleUrlPreview(
+								props.signupUsername.trim().toLowerCase() || 'your-username',
+							)}
+						</strong>
+						.
+					</p>
 				</div>
 			) : null}
 			<div mix={css(authFieldCss)}>
@@ -221,9 +255,8 @@ export function renderAuthForm(
 						</a>
 					</div>
 				)}
-				<input
+				<PasswordRevealInput
 					id={`${props.handleId}-password`}
-					type="password"
 					name="password"
 					required
 					autoComplete={props.isSignup ? 'new-password' : 'current-password'}
@@ -487,3 +520,9 @@ const authSubmitCss = mergeCss(getPillButtonCss(), getSwapLabelCss(), {
 })
 
 const ghostButtonCss = getGhostButtonCss()
+
+const authFieldNoteCss = {
+	margin: 0,
+	fontSize: typography.fontSize.sm,
+	color: colors.textMuted,
+}

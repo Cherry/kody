@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import * as Sentry from '@sentry/cloudflare'
 import { refreshCommunityIconForPackagePublish } from '#worker/community/community-icon.ts'
 import { refreshIdentityIconForSource } from '#worker/repo/identity-icon.ts'
@@ -128,6 +129,9 @@ export async function finalizePublishedEntitySource(
 			packageId: input.source.entity_id,
 			sourceId: input.source.id,
 			rebuildArtifacts: input.rebuildPackageArtifacts ?? true,
+			// Always pass the published file set so skills indexing runs even
+			// when artifact rebuild is deferred (`rebuildArtifacts: false`).
+			sourceFiles: input.files,
 		})
 	} catch (projectionError) {
 		try {
@@ -183,7 +187,7 @@ export async function finalizePublishedEntitySource(
 export async function publishFromExternalRef(input: {
 	env: Env
 	sourceId: string
-	userId: string
+	userId: OwnerId
 	newCommit: string
 	isFastForward(input: { previousCommit: string }): Promise<boolean>
 	allowForce?: boolean

@@ -1,10 +1,14 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { consoleInfo, consoleWarn } from '#worker/test-support/console-spies.ts'
 
 const mockModule = vi.hoisted(() => ({
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	getEntitySourceByIdForUser: vi.fn(),
 	resolveArtifactSourceHead: vi.fn(),
 	publishFromExternalRef: vi.fn(),
@@ -18,8 +22,8 @@ const mockModule = vi.hoisted(() => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/repo/entity-sources.ts', () => ({
@@ -103,7 +107,7 @@ const noStaticDependents = expect.objectContaining({
 function sourceRow(publishedCommit = 'commit-old') {
 	return {
 		id: 'source-1',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package',
 		entity_id: 'package-1',
 		repo_id: 'package-package-1',
@@ -132,7 +136,7 @@ function publishedResult(overrides: Record<string, unknown> = {}) {
 function rebuildCall(publishedCommit: string, target: unknown) {
 	return {
 		sourceId: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		publishedCommit,
 		target,
 		baseUrl: 'https://kody.test',
@@ -153,6 +157,7 @@ function setupDefaultMocks({
 	for (const mock of Object.values(mockModule)) mock.mockReset()
 	mockModule.getSavedPackageById.mockResolvedValue({
 		id: 'package-1',
+		userId: ownerIdFromStored('user-1'),
 		kodyId: 'demo-package',
 		name: '@kentcdodds/demo-package',
 		sourceId: 'source-1',
@@ -201,10 +206,11 @@ function createContext(
 			PACKAGE_APP_BASE_URL: 'https://packages.kody.test',
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.test',
 			executionOrigin: executionOrigin === 'omit' ? undefined : executionOrigin,
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@example.com',
 				username: 'user',
 				displayName: 'User',
@@ -256,7 +262,7 @@ test('publishExternalPush publishes HEAD and rebuilds bundle artifacts per targe
 	expect(mockModule.publishFromExternalRef).toHaveBeenCalledWith(
 		expect.objectContaining({
 			sourceId: 'source-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			newCommit: 'commit-new',
 			expectedHead: 'commit-new',
 			allowForce: false,
@@ -281,7 +287,7 @@ test('publishExternalPush publishes HEAD and rebuilds bundle artifacts per targe
 	expect((await publish()).status).toBe('published')
 	expect(mockModule.listPublishedPackageArtifactTargets).toHaveBeenCalledWith({
 		sourceId: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(mockModule.rebuildPublishedPackageArtifact.mock.calls).toEqual([
 		[rebuildCall('commit-new', targets[0])],
@@ -487,6 +493,27 @@ test('publishExternalPush handles already_published branches, stale dependents, 
 		manifest: {},
 		run_id: expect.any(String),
 	})
+
+	setupDefaultMocks({
+		head: 'commit-old',
+		publish: alreadyPublishedOld,
+		targets: [moduleTarget],
+	})
+	mockModule.rebuildPublishedPackageArtifact.mockRejectedValueOnce(
+		new Error('No matching default export for import "default"'),
+	)
+	expect(await publish()).toEqual({
+		status: 'checks_failed',
+		failed_checks: [
+			expect.objectContaining({
+				kind: 'bundle',
+				ok: false,
+				message: expect.stringMatching(/bundle artifact rebuild failed/i),
+			}),
+		],
+		manifest: null,
+		run_id: expect.any(String),
+	})
 })
 
 test('force publish passes destructive confirmation through and refuses without allow_force', async () => {
@@ -532,7 +559,7 @@ test('ineligible publishes return structured results without durable escalation 
 	expect(mockModule.runWithDurableEscalation.mock.calls).toEqual([
 		[
 			expect.objectContaining({
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				idempotencyParts: defaultPublishIdempotencyParts,
 			}),
 		],
@@ -570,8 +597,74 @@ test('budget exhaustion returns a dispatched handle', async () => {
 	expect(mockModule.publishFromExternalRef).not.toHaveBeenCalled()
 	expect(mockModule.runWithDurableEscalation).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			idempotencyParts: defaultPublishIdempotencyParts,
+		}),
+	)
+})
+
+test('durable escalation keys team-org publishes to the owning org, not the actor personal org', async () => {
+	const teamOrgId = ownerIdFromStored('org-kody')
+	setupDefaultMocks()
+	mockModule.getSavedPackageById.mockResolvedValue({
+		id: 'package-1',
+		userId: teamOrgId,
+		kodyId: 'agent-mail',
+		name: '@kody/agent-mail',
+		sourceId: 'source-1',
+		hasApp: false,
+	})
+	mockModule.getEntitySourceByIdForUser.mockResolvedValue({
+		...sourceRow(),
+		user_id: teamOrgId,
+	})
+	mockModule.runWithDurableEscalation.mockResolvedValue({
+		kind: 'dispatched',
+		handle: {
+			status: 'dispatched',
+			workflow_id: 'dynwf-team-1',
+			workflow_name: 'packagePublishExternalPush',
+			idempotency_key: 'org-kody:publish',
+			run_status: 'queued',
+			message: 'dispatched',
+		},
+	})
+
+	const ctx = {
+		env: {
+			APP_DB: {
+				prepare: () => ({
+					bind: () => ({ first: async () => ({ username: 'patch' }) }),
+				}),
+			},
+			DYNAMIC_CALLABLE_WORKFLOWS: {},
+			PACKAGE_APP_BASE_URL: 'https://packages.kody.test',
+		} as unknown as Env,
+		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl: 'https://kody.test',
+			executionOrigin: 'interactive',
+			user: {
+				userId: personIdFromStored('actor-1'),
+				email: 'patch@example.com',
+				username: 'patch',
+				displayName: 'Patch',
+			},
+			orgBinding: {
+				org: { id: teamOrgId, slug: 'kody' },
+				role: 'owner',
+			},
+		}),
+	}
+
+	const result = await publishExternalPushCapability.handler(
+		{ package_id: 'package-1' },
+		ctx,
+	)
+	expect(result.status).toBe('dispatched')
+	expect(mockModule.runWithDurableEscalation).toHaveBeenCalledWith(
+		expect.objectContaining({
+			userId: teamOrgId,
 		}),
 	)
 })

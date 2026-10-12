@@ -4,12 +4,13 @@
  * `adminCreditGrant` / `adminCreditWalletGet` capabilities so both write
  * the same ledger row (granted_by, amount, recipient, time, note) and the
  * same audit event. `adminCreditEligibilitySet` owns the admin half of
- * wallet eligibility (`users.admin_credits_eligible`).
+ * wallet eligibility (`orgs.admin_credits_eligible`).
  */
 import {
 	type AdminCreditLedgerItem,
 	type AdminCreditWalletSummary,
 } from '#universal/loader-data.ts'
+import { updateOrgBillingColumns } from '#worker/orgs/org-billing-columns.ts'
 import {
 	creditAdminGrantNoteMaxLength,
 	validateCreditAdminGrantCents,
@@ -30,8 +31,9 @@ import {
 	type UserEntitlementRow,
 } from '#worker/entitlements/service.ts'
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
-import { isStableUserId, normalizeStableUserId } from '#worker/user-id.ts'
+import { parseOwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type AdminUserTarget } from './users-data.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 const adminCreditLedgerLimit = 20
 
@@ -54,24 +56,31 @@ async function loadCreditGrantTarget(
 	db: D1Database,
 	target: AdminUserTarget,
 ): Promise<CreditGrantTargetRow | null> {
-	const columns = `id, stable_user_id, username, ${userEntitlementColumnsSql()}`
+	const columns = `u.id, u.stable_user_id, u.username, ${userEntitlementColumnsSql('o')}`
+	const fromSql = `users u INNER JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}`
 	if (target.stableUserId !== undefined) {
-		const stableUserId = normalizeStableUserId(target.stableUserId)
-		if (!isStableUserId(stableUserId)) return null
+		const stableUserId = parseOwnerId(target.stableUserId)
+		if (!stableUserId) return null
 		return db
-			.prepare(`SELECT ${columns} FROM users WHERE stable_user_id = ?`)
+			.prepare(
+				`SELECT ${columns} FROM ${fromSql} WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
+			)
 			.bind(stableUserId)
 			.first<CreditGrantTargetRow>()
 	}
 	if (target.email !== undefined) {
 		return db
-			.prepare(`SELECT ${columns} FROM users WHERE lower(email) = ?`)
+			.prepare(
+				`SELECT ${columns} FROM ${fromSql} WHERE lower(u.email) = ?${andLiveDeletedAtSql('u')}`,
+			)
 			.bind(normalizeEmail(target.email))
 			.first<CreditGrantTargetRow>()
 	}
 	if (target.username !== undefined) {
 		return db
-			.prepare(`SELECT ${columns} FROM users WHERE username = ?`)
+			.prepare(
+				`SELECT ${columns} FROM ${fromSql} WHERE u.username = ?${andLiveDeletedAtSql('u')}`,
+			)
 			.bind(target.username.trim())
 			.first<CreditGrantTargetRow>()
 	}
@@ -87,7 +96,7 @@ async function loadGranterUsernames(
 	const rows = await db
 		.prepare(
 			`SELECT stable_user_id, username FROM users
-			 WHERE stable_user_id IN (${unique.map(() => '?').join(', ')})`,
+			 WHERE stable_user_id IN (${unique.map(() => '?').join(', ')})${andLiveDeletedAtSql()}`,
 		)
 		.bind(...unique)
 		.all<{ stable_user_id: string; username: string }>()
@@ -229,7 +238,7 @@ export function formatAdminCreditGrantAuditReason(input: {
 }
 
 /**
- * Set or clear `users.admin_credits_eligible`. With an effective `pro` plan
+ * Set or clear `orgs.admin_credits_eligible`. With an effective `pro` plan
  * (for example a manual `adminUserUpdate` grant) this unlocks the wallet
  * exactly like the purchasable Pro price: a positive balance lifts limits and
  * past-include usage debits it. Clearing it leaves the balance on hold. It
@@ -262,12 +271,14 @@ export async function setAdminCreditEligibility(input: {
 		next: { ...row, admin_credits_eligible: input.creditsEligible ? 1 : 0 },
 		now,
 	})
-	await db
-		.prepare(
-			`UPDATE users SET admin_credits_eligible = ?, updated_at = ? WHERE id = ?`,
-		)
-		.bind(input.creditsEligible ? 1 : 0, utcSqliteTimestamp(now), row.id)
-		.run()
+	const updatedAt = utcSqliteTimestamp(now)
+	const adminCreditsEligible = input.creditsEligible ? 1 : 0
+	await updateOrgBillingColumns({
+		db,
+		orgId: stableUserId,
+		setClause: 'admin_credits_eligible = ?, updated_at = ?',
+		values: [adminCreditsEligible, updatedAt],
+	})
 	const wallet = await loadAdminCreditWallet(input.env, { stableUserId })
 	if (!wallet) throw new AdminCreditGrantError(404, 'User not found.')
 	return { previousAdminCreditsEligible, note, wallet }

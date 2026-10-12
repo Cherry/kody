@@ -3,7 +3,7 @@ id: local_execute
 title: Local CLI execute
 summary:
   Prefer @kodycodes/cli execute --local when Node ≥22 and the CLI are available.
-  Orthogonal to Open API — use this guide for CLI setup and --local usage; see
+  Orthogonal to Open API: use this guide for CLI setup and --local usage; see
   guide:open_api for HTTPS / MCP api fallback.
 category: platform
 ---
@@ -17,47 +17,80 @@ module in a local workerd and forwards each `kody:runtime` call through the
 CapabilityProxy. Do **not** use hosted MCP `execute` for agent work when a local
 or Open API path exists.
 
-Auth: `--token` / `KODY_API_TOKEN` (`kody_at_…` with `local-execute` scope), or
-— when no API token is set — the access token from `kody login` (MCP OAuth) as
-Bearer on CapabilityProxy and package-graph routes.
+Auth: `--token` / `KODY_API_TOKEN` (`kody_at_…` with `org:execute`; add
+`package:execute` when the module imports `kody:@…`), or when no API token is
+set, the access token from `kody login` (MCP OAuth) as Bearer on CapabilityProxy
+and package-graph routes.
 
 ## Setup
 
-**Agents already on MCP** — call `cliCredentialBootstrap` (MCP `api` /
-`kody.cliCredentialBootstrap`). It returns a one-shot `kody_bc_…` code and a
-`cli_command` — **not** a `kody_at_…`. Run the CLI command (no second OAuth, no
-`tokenCreate`):
+**Agents already on MCP:** call `cliCredentialBootstrap` with a required
+lifetime (single-task agents use `short`). It returns a one-shot `kody_bc_…`
+code and a `cli_command` that already includes lifetime flags (**not** a
+`kody_at_…`). Run the CLI command (no second OAuth, no `tokenCreate`):
 
 ```json
 {
 	"operationId": "cliCredentialBootstrap",
-	"params": {}
+	"params": { "lifetime": "short" }
 }
 ```
 
 ```bash
-npx @kodycodes/cli auth bootstrap --code 'kody_bc_…'   # from cli_command
+npx @kodycodes/cli auth bootstrap --code 'kody_bc_…' --lifetime short
 ```
 
-**Interactive humans** — `kody login` once per machine, then run `--local`
+`short` is 1 hour idle / 24 hours max. `long` is 14 days idle / 3 months max. Or
+pass both `--idle-ttl-seconds` and `--max-lifetime-seconds`. Lifetime is
+required; missing it fails with the exact flag syntax.
+
+**Opt-in scopes:** bootstrap defaults stay least-privilege (no `package:write`,
+for example). When a task needs more, pass `scopes` when minting. The list
+replaces the defaults, so include every scope you need:
+
+```bash
+# Agents on MCP: cliCredentialBootstrap({ lifetime: "short", scopes: ["org:execute", "org:read", "package:execute", "package:read", "package:write"] })
+npx @kodycodes/cli auth bootstrap --code 'kody_bc_…' --lifetime short
+
+# After `kody login`, the CLI mints the code itself and stores the token:
+npx @kodycodes/cli auth bootstrap --lifetime short \
+  --scopes org:execute,org:read,package:execute,package:read,package:write
+```
+
+`--scopes` mints with `--token` when given, else the `kody login` session (any
+scope your org role grants), else `KODY_API_TOKEN` or the stored token (only
+scopes that token already holds). `--code` with `--scopes` is an error because a
+code's scopes are fixed when it is minted.
+
+**Interactive humans:** `kody login` once per machine, then run `--local`
 without `KODY_API_TOKEN`.
 
 ```bash
 npx @kodycodes/cli login   # once
 ```
 
-**CI / headless only** — scoped `KODY_API_TOKEN` (`kody_at_…` with
-`local-execute` scope), usually from MCP `api` `tokenCreate`. Put the value in
-the environment; never paste it into chat. Prefer the env var over `--token`.
-When set, `KODY_API_TOKEN` wins over `kody login` / bootstrap store. Minting
-details: [Open API](./open-api.md) (`guide:open_api`).
+**CI / headless only:** scoped `KODY_API_TOKEN` (`kody_at_…` with `org:execute`,
+plus `package:execute` for saved-package imports), usually from MCP `api`
+`tokenCreate` with a required lifetime. Put the value in the environment; never
+paste it into chat. Prefer the env var over `--token`. When set,
+`KODY_API_TOKEN` wins over `kody login` / bootstrap store. Minting details:
+[Open API](./open-api.md) (`guide:open_api`).
 
 ```json
 {
 	"operationId": "tokenCreate",
 	"params": {
 		"name": "kody-cli-local",
-		"scopes": ["local-execute", "account:read"]
+		"scopes": [
+			"org:execute",
+			"org:read",
+			"package:execute",
+			"package:read",
+			"integration:read",
+			"integration:use",
+			"secret:use"
+		],
+		"lifetime": "short"
 	}
 }
 ```
@@ -74,75 +107,41 @@ npx @kodycodes/cli execute --local --code 'import { kody } from "kody:runtime"; 
 
 Use `--file path.ts` the same way when the module lives on disk. Keep `--local`;
 static `kody:@owner/name` imports still run locally (package-graph download +
-CapabilityProxy hops). There is no author-facing `packages.invoke`.
+CapabilityProxy hops). Package-graph always returns the gateway-fetch shim, so
+ad-hoc scripts with no `kody:@` imports still expand `{{secret:…}}` placeholders
+on origin (or fail closed naming the secret) instead of sending them raw.
 
-See [Cursor Cloud Agent notes](../contributing/cloud-agents.md) and the
-[prefer-local-cli-execute](../../.agents/skills/prefer-local-cli-execute/SKILL.md)
-skill.
+A `fetch` that carries a placeholder runs on origin with the same 5-minute
+overall deadline as cloud fetches. The deadline starts when origin sends the
+request upstream, after it checks your quota and fills placeholders, and runs
+until the response body ends. The response is also aborted after 60s with no
+bytes. `--local` has no run cap, so a long streamed response, such as an AI
+completion, can finish. Origin buffers the whole response before returning it,
+so your code receives nothing until the body ends, and a body over 4 MiB fails.
+From `@kodycodes/cli` 1.13.1, the CLI's CapabilityProxy client waits up to 7
+minutes for origin's reply, so the gateway's 5-minute deadline is what ends a
+slow fetch, with its own error. Older CLIs stop waiting after Node's default 300
+seconds (`UND_ERR_HEADERS_TIMEOUT`) and need a few seconds of margin. With
+`NODE_USE_ENV_PROXY=1` or `--use-env-proxy`, these requests still go through
+`HTTP_PROXY` / `HTTPS_PROXY`. Use cloud execute or a workflow for larger
+payloads. A `fetch` without placeholders goes straight from local workerd and is
+not subject to this deadline.
 
-## Saved-package imports
+## Failure
 
-Modules that `import { kody }` / `workflows` from `kody:runtime` (same contract
-as cloud execute — no ambient global `kody`) run in local workerd; each
-`kody:runtime` call is a CapabilityProxy hop. Modules with static `kody:@…`
-imports keep `--local`: the CLI calls `POST /v1/local-execute/package-graph`
-(API tokens need `local-execute` scope; CLI login OAuth does not) to download
-published, stamped importable-module artifacts, embeds them next to your module
-
-- `kody:runtime`, and still uses CapabilityProxy only for per-call runtime hops.
-  There is **no** silent whole-module defer to CapabilityProxy → `kody.execute`.
-  Agents keep writing:
-
-```ts
-import { searchMessages } from 'kody:@kentcdodds/google/gmail'
-export default async function main(params) {
-	return await searchMessages(params)
-}
-```
-
-and running `npx @kodycodes/cli execute --local …`.
-
-Package-graph prep meters as an observe-only Open API `api_call` (not
-`dynamic_worker_day` / cloud execute of the user module). Capability hops during
-the later local run still meter normally. Literal `import("kody:@…")` is not
-bound for local embedding — use a static import.
-
-**Authenticated fetch and stamped host grants:** package-graph modules embed a
-local runtime shim that binds `createAuthenticatedFetch`, `secretHeaders`,
-`oauthClientCredentials`, stamped `packageSecrets`, and stamped `packageStorage`
-through CapabilityProxy hops (or pure placeholder builders for `secretHeaders`).
-`createAuthenticatedFetch` becomes `kody.authenticatedFetch` on origin, which
-expands `{{integration-token:…}}` via the same fetch gateway as cloud execute —
-long-lived OAuth tokens never enter local workerd. Published bundles that inline
-the virtual runtime (instead of importing `.__kody_virtual__/runtime.js`) are
-rewritten onto that shim during package-graph prep so Dropbox-style artifacts
-work under `--local` without cloud's ALS preload. Stamped `packageStorage` /
-`packageSecrets` hop as `kody.packageStorage*` / `kody.packageSecret*` with
-per-call ownership / share grant checks. Gmail-style helpers such as
-`@kentcdodds/google` and Dropbox helpers such as `@kentcdodds/dropbox` can
-complete authenticated outbound fetch under `--local` after package-graph
-download (responses over 4 MiB still need cloud execute or a smaller
-projection).
-
-Ad hoc modules that import `createAuthenticatedFetch` directly from
-`kody:runtime` (not via a stamped `kody:@…` package) still need a CLI runtime
-that exports the same CapabilityProxy-backed helper and enters the runtime ALS
-before evaluating user code; package imports do not.
-
-CLI consumer: [kody-bot/cli#13](https://github.com/kody-bot/cli/pull/13).
-
-## Metering
-
-Local CPU for modules that run in workerd (including embedded `kody:@…` package
-modules after package-graph download) is not counted as `execute` or
-`dynamic_worker_day`; capabilities you call through the proxy still meter
-normally. The package-graph prep call meters as an observe-only Open API
-`api_call` (`localExecutePackageGraph`), not a full cloud execute.
-
-## Fallback
-
-If `--local` cannot run (no suitable Node, CLI missing, scope/auth missing, or
-the host cannot run local workerd), use Open API / MCP `api`, or fix the
-environment — hosted MCP `execute` is banned for agents that can use local CLI
-or Open API. Details for HTTPS, tokens, and the `api` tool:
-`search({ entity: "guide:open_api" })` or [Open API](./open-api.md).
+- Node is below 22, the CLI is missing, or the host cannot run workerd. Use
+  [Open API](./open-api.md) / MCP `api`, or fix the environment. Hosted MCP
+  `execute` stays banned for that failure case.
+- Bootstrap or redeem rejects a missing lifetime. Pass `--lifetime short|long`
+  (or both idle/max flags). Call `cliCredentialBootstrap` again with
+  `lifetime: "short"` if the code expired.
+- `insufficient_scope` on a token means it lacks a scope. The error names the
+  scope and prints both mint commands with the full list (the token's scopes
+  plus the missing one); run one and retry. `--token` and `KODY_API_TOKEN` still
+  win over the stored token, so replace or unset them before retrying. Open API
+  errors carry the same list as `details.mint_scopes`. When your org role lacks
+  the permission (`denial: missing_permission`), a new token cannot help; an org
+  Owner has to grant it.
+- The module imports `kody:@…`. Keep `--local`.
+- Auth priority for `--local`: `--token` / `KODY_API_TOKEN`, then the stored
+  bootstrap token, then `kody login`.

@@ -3,6 +3,9 @@ import {
 	type IncomingMessage,
 	type ServerResponse,
 } from 'node:http'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { expect, test } from 'vitest'
 import {
 	cookieHeaderFromSetCookie,
@@ -12,15 +15,18 @@ import {
 	evaluatePlatformHealth,
 	evaluateRuntimeHealth,
 	flattenGhJsonPages,
+	formatBriefing,
 	parseArgs,
 	parsePreviewComment,
 	parseSessionRequest,
 	previewCommentMarker,
 	previewSeedEmail,
 	runPreviewManualTest,
+	shellQuote,
 	workerNameFromPreviewUrl,
 	type GhResult,
 	type PreviewManualTestDeps,
+	type PreviewManualTestResult,
 } from './preview-manual-test.ts'
 
 const sampleComment = [
@@ -30,6 +36,7 @@ const sampleComment = [
 	'Worker: `kody-pr-42`',
 	'Runtime worker: `kody-pr-42-runtime` (https://kody-pr-42-runtime.kody.workers.dev)',
 	'Platform worker: `kody-pr-42-platform` (https://kody-pr-42-platform.kody.workers.dev)',
+	'API worker: `kody-pr-42-api` (https://kody-pr-42-api.kody.workers.dev)',
 	'D1: `kody-pr-42-db`',
 	'KV: `kody-pr-42-oauth-kv`',
 	'',
@@ -40,6 +47,8 @@ const sampleComment = [
 const plainSpec = {
 	expectedStatus: null,
 	body: null,
+	form: null,
+	headers: [],
 	dump: false,
 	contains: [],
 }
@@ -65,12 +74,12 @@ test('preview manual test parses flags, PR comments, worker URLs, and health pay
 		/--check requires a session cookie/,
 	)
 	expect(() =>
-		parseArgs(['--request', 'GET /account/values.json', '--skip-login']),
+		parseArgs(['--request', 'GET /account/secrets.json', '--skip-login']),
 	).toThrow(/--request requires a session cookie/)
 	expect(
 		parseArgs([
 			'--request',
-			'POST /account/values.json {"action":"save","name":"locale","value":"en-US"}',
+			'POST /account/secrets.json {"action":"save","scope":"user","name":"previewSeed","value":"preview-seed-value","allowedHosts":["api.example.com"]}',
 			'--request',
 			'GET /admin 403',
 			'--cookie-file',
@@ -83,17 +92,23 @@ test('preview manual test parses flags, PR comments, worker URLs, and health pay
 				{
 					...plainSpec,
 					method: 'POST',
-					path: '/account/values.json',
-					body: { action: 'save', name: 'locale', value: 'en-US' },
+					path: '/account/secrets.json',
+					body: {
+						action: 'save',
+						scope: 'user',
+						name: 'previewSeed',
+						value: 'preview-seed-value',
+						allowedHosts: ['api.example.com'],
+					},
 				},
 				{ ...plainSpec, method: 'GET', path: '/admin', expectedStatus: 403 },
 			],
 		}),
 	)
-	expect(parseSessionRequest('GET /account/values.json')).toEqual({
+	expect(parseSessionRequest('GET /account/secrets.json')).toEqual({
 		...plainSpec,
 		method: 'GET',
-		path: '/account/values.json',
+		path: '/account/secrets.json',
 	})
 	expect(() => parseSessionRequest('FETCH /nope')).toThrow(/Invalid --request/)
 
@@ -107,10 +122,25 @@ test('preview manual test parses flags, PR comments, worker URLs, and health pay
 		runtimeUrl: 'https://kody-pr-42-runtime.kody.workers.dev',
 		platformWorkerName: 'kody-pr-42-platform',
 		platformUrl: 'https://kody-pr-42-platform.kody.workers.dev',
+		apiWorkerName: 'kody-pr-42-api',
+		apiUrl: 'https://kody-pr-42-api.kody.workers.dev',
 		d1DatabaseName: 'kody-pr-42-db',
 		oauthKvTitle: 'kody-pr-42-oauth-kv',
 		mocks: [mock],
 	})
+	expect(
+		parsePreviewComment(
+			[
+				sampleComment,
+				'',
+				'### Seed login (public preview fixture)',
+				'',
+				'- Email: `me@kentcdodds.com`',
+				'- Password: `ilikecode`',
+				'- Already signed in: `npm run control-kody -- browse`',
+			].join('\n'),
+		)?.mocks,
+	).toEqual([mock])
 	expect(
 		parsePreviewComment(sampleCommentWithUrl('http://127.0.0.1:9')),
 	).toEqual({
@@ -120,6 +150,8 @@ test('preview manual test parses flags, PR comments, worker URLs, and health pay
 		runtimeUrl: null,
 		platformWorkerName: null,
 		platformUrl: null,
+		apiWorkerName: null,
+		apiUrl: null,
 		d1DatabaseName: null,
 		oauthKvTitle: null,
 		mocks: [],
@@ -141,25 +173,19 @@ test('preview manual test parses flags, PR comments, worker URLs, and health pay
 	).toBe('kody_session=abc')
 
 	const fullSha = '91bab582b2040e7b55a84f2415be82c1684ad565'
-	expect([
-		evaluateAppHealth({ ok: true, commitSha: 'abc' }, 'abc'),
-		evaluateAppHealth({ ok: true, commitSha: fullSha }, '91bab582'),
-		evaluateAppHealth({ ok: true, commitSha: 'mergesha' }, 'headsha', [
-			'basesha',
-			'headsha',
-		]),
-	]).toEqual([
-		{ ok: true, commitSha: 'abc', detail: 'ok, commitSha abc' },
-		{
-			ok: true,
-			commitSha: fullSha,
-			detail: `ok, commitSha ${fullSha} (matches 91bab582)`,
-		},
-		{
-			ok: true,
-			commitSha: 'mergesha',
-			detail: 'ok, commitSha mergesha (merge of headsha)',
-		},
+	expect(
+		[
+			evaluateAppHealth({ ok: true, commitSha: 'abc' }, 'abc'),
+			evaluateAppHealth({ ok: true, commitSha: fullSha }, '91bab582'),
+			evaluateAppHealth({ ok: true, commitSha: 'mergesha' }, 'headsha', [
+				'basesha',
+				'headsha',
+			]),
+		].map(({ ok, commitSha }) => ({ ok, commitSha })),
+	).toEqual([
+		{ ok: true, commitSha: 'abc' },
+		{ ok: true, commitSha: fullSha },
+		{ ok: true, commitSha: 'mergesha' },
 	])
 	expect(evaluateAppHealth({ ok: true, commitSha: 'old' }, 'new').ok).toBe(
 		false,
@@ -221,18 +247,18 @@ test('preview manual test --request specs accept control-kody request --dump/--c
 	)
 	expect(
 		parseSessionRequest(
-			'POST /account/values.json 201 {"action":"save"} --contains selectedValueId',
+			'POST /account/secrets.json 201 {"action":"save"} --contains selectedSecretId',
 		),
 	).toEqual(
 		expect.objectContaining({
 			expectedStatus: 201,
 			body: { action: 'save' },
-			contains: ['selectedValueId'],
+			contains: ['selectedSecretId'],
 		}),
 	)
 	expect(
 		parseSessionRequest(
-			'POST /account/values.json {"value":"use --dump --contains"} --contains "a --dump b" --contains Kent\'s --dump',
+			'POST /account/secrets.json {"value":"use --dump --contains"} --contains "a --dump b" --contains Kent\'s --dump',
 		),
 	).toEqual(
 		expect.objectContaining({
@@ -255,6 +281,51 @@ test('preview manual test --request specs accept control-kody request --dump/--c
 	expect(() => parseSessionRequest('GET /pricing oops')).toThrow(
 		/GET --request cannot include a JSON body: oops[\s\S]*--contains <text>/,
 	)
+	expect(
+		parseSessionRequest(
+			'POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org',
+		),
+	).toEqual({
+		...plainSpec,
+		method: 'POST',
+		path: '/account/organizations/new',
+		expectedStatus: 302,
+		form: {
+			encoding: 'urlencoded',
+			fields: [
+				{ name: 'slug', value: 'x-org', filePath: null },
+				{ name: 'displayName', value: 'X', filePath: null },
+			],
+		},
+		contains: ['/@x-org'],
+	})
+	expect(
+		parseSessionRequest(
+			'POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png --form alt=me',
+		).form,
+	).toEqual({
+		encoding: 'multipart',
+		fields: [
+			{ name: 'avatar', value: '', filePath: './avatar.png' },
+			{ name: 'alt', value: 'me', filePath: null },
+		],
+	})
+	expect(() =>
+		parseSessionRequest(
+			'POST /account/organizations/new {"slug":"x"} --form slug=x',
+		),
+	).toThrow(/both a JSON body and --form/)
+	expect(() =>
+		parseSessionRequest(
+			'POST /account/profile/avatar.json --form avatar=@./a.png',
+		),
+	).toThrow(/requires --multipart/)
+	expect(() =>
+		parseSessionRequest('POST /account/organizations/new --multipart'),
+	).toThrow(/requires at least one --form/)
+	expect(() =>
+		parseSessionRequest('GET /account/organizations/new --form slug=x'),
+	).toThrow(/GET --request cannot include form fields/)
 
 	expect(
 		parseArgs([
@@ -291,7 +362,7 @@ test('preview manual test --request --dump/--contains assert the raw response bo
 			'--request',
 			'GET /pricing --dump --contains Worker compute',
 			'--request',
-			'GET /account/values.json --contains preview-locale',
+			'GET /account/secrets.json --contains previewSeed',
 			'--json',
 		],
 		createSilentDeps({ logs, files }),
@@ -350,9 +421,9 @@ test('preview manual test smokes a local preview: health, login page, auth, sess
 			'--cookie-file',
 			'.tmp/preview-cookie',
 			'--request',
-			'POST /account/values.json {"action":"save","name":"preview-locale","value":"en-US"}',
+			'POST /account/secrets.json {"action":"save","scope":"user","name":"previewSeed","value":"preview-seed-value","allowedHosts":["api.example.com"]}',
 			'--request',
-			'GET /account/values.json',
+			'GET /account/secrets.json',
 			'--request',
 			'GET /admin 403',
 			'--check',
@@ -367,7 +438,10 @@ test('preview manual test smokes a local preview: health, login page, auth, sess
 	expect(result?.smoke?.ok).toBe(true)
 	expect(result?.smoke?.sessionEmail).toBe(previewSeedEmail)
 	expect(result?.session.cookieHeader).toBe('kody_session=test-cookie')
-	expect(files.get('.tmp/preview-cookie')).toBe('kody_session=test-cookie\n')
+	const writtenCookie = files.get('.tmp/preview-cookie') ?? ''
+	expect(writtenCookie).toContain('# origin=')
+	expect(writtenCookie).toContain(`# email=${previewSeedEmail}`)
+	expect(writtenCookie).toContain('kody_session=test-cookie')
 	expect(logs.join('\n')).not.toContain('kody_session=test-cookie')
 	expect(logs.join('\n')).toContain('"cookieHeader": "present"')
 	expect(result?.smoke?.checks.map((check) => check.name)).toEqual([
@@ -378,12 +452,109 @@ test('preview manual test smokes a local preview: health, login page, auth, sess
 		'GET /session',
 		'GET /account',
 		'cookie-file',
-		'POST /account/values.json (2xx)',
-		'GET /account/values.json (2xx)',
+		'POST /account/secrets.json (2xx)',
+		'GET /account/secrets.json (2xx)',
 		'GET /admin (403)',
 		'GET /account/secrets',
 	])
 	expect(result?.briefing).toContain(server.origin)
+	expect(result?.briefing).toContain('/account/secrets.json')
+})
+
+test('preview --request sends urlencoded and multipart form bodies', async () => {
+	await using server = await createPreviewFixtureServer()
+	const avatarDir = await mkdtemp(path.join(tmpdir(), 'kody-form-'))
+	const avatarPath = path.join(avatarDir, 'avatar.png')
+	await writeFile(avatarPath, 'png-bytes')
+	try {
+		const { exitCode, result } = await runPreviewManualTest(
+			[
+				'--url',
+				server.origin,
+				'--no-wait',
+				'--request',
+				'POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org',
+				'--request',
+				`POST /account/profile/avatar.json --multipart --form avatar=@${avatarPath} --contains avatar`,
+				'--json',
+			],
+			createSilentDeps({ logs: [] }),
+		)
+		expect(exitCode).toBe(0)
+		expect(result?.ok).toBe(true)
+		expect(server.captured.map((entry) => entry.path)).toEqual([
+			'/account/organizations/new',
+			'/account/profile/avatar.json',
+		])
+		expect(server.captured[0]).toMatchObject({
+			contentType: 'application/x-www-form-urlencoded',
+			body: 'slug=x-org&displayName=X',
+		})
+		const upload = server.captured[1]
+		expect(upload?.contentType).toMatch(/^multipart\/form-data; boundary=/)
+		expect(upload?.body).toContain('name="avatar"')
+		expect(upload?.body).toContain('filename="avatar.png"')
+		expect(upload?.body).toContain('Content-Type: image/png')
+		expect(upload?.body).toContain('png-bytes')
+	} finally {
+		await rm(avatarDir, { recursive: true, force: true })
+	}
+})
+
+test('preview --request --header parses Name: value pairs and rejects session-managed headers', () => {
+	expect(
+		parseSessionRequest(
+			"GET /account/connected-agents.json --header 'Referer: https://kody.test/@acme/-/connections' --header X-Trace:abc --contains agents",
+		),
+	).toEqual({
+		...plainSpec,
+		method: 'GET',
+		path: '/account/connected-agents.json',
+		headers: [
+			{ name: 'Referer', value: 'https://kody.test/@acme/-/connections' },
+			{ name: 'X-Trace', value: 'abc' },
+		],
+		contains: ['agents'],
+	})
+	expect(() => parseSessionRequest('GET /account --header Referer')).toThrow(
+		/--header expects 'Name: value'/,
+	)
+	expect(() =>
+		parseSessionRequest('GET /account --header Cookie: kody_session=x'),
+	).toThrow(/cannot set Cookie: the session cookie comes from --cookie-file/)
+	expect(() =>
+		parseSessionRequest(
+			'POST /account/secrets.json --header content-type: text/plain --form a=b',
+		),
+	).toThrow(/cannot set content-type: Content-Type comes from the JSON body/)
+	expect(() =>
+		parseSessionRequest('GET /account --header A: 1 --header a: 2'),
+	).toThrow(/--header a is set more than once/)
+})
+
+test('preview --request --header sends the header with the session cookie and replaces the default Accept', async () => {
+	await using server = await createPreviewFixtureServer()
+	const referer = `${server.origin}/@acme/-/connections`
+	const { exitCode, result } = await runPreviewManualTest(
+		[
+			'--url',
+			server.origin,
+			'--no-wait',
+			'--request',
+			`GET /account/connected-agents.json --header 'Referer: ${referer}' --header 'accept: application/vnd.kody+json' --contains ${referer}`,
+			'--json',
+		],
+		createSilentDeps({ logs: [] }),
+	)
+	expect(exitCode).toBe(0)
+	expect(result?.ok).toBe(true)
+	expect(server.echoed).toEqual([
+		{
+			referer,
+			accept: 'application/vnd.kody+json',
+			cookie: 'kody_session=test-cookie',
+		},
+	])
 })
 
 test('preview manual test waits for the GitHub preview comment and head SHA workflow before smoking', async () => {
@@ -432,6 +603,145 @@ test('preview manual test waits for the GitHub preview comment and head SHA work
 	expect(prViews).toBeGreaterThanOrEqual(2)
 	expect(result?.snapshot.workflowStatus).toBe('completed')
 	expect(result?.snapshot.workflowConclusion).toBe('success')
+})
+
+test('briefing single-quotes KODY_API_URL so comment-sourced shell metacharacters do not run on paste', () => {
+	const hostile = 'https://evil.example/$(touch%/tmp/pwned)`id`&sleep%201;true'
+	expect(shellQuote(hostile)).toBe(`'${hostile}'`)
+	expect(shellQuote("https://x.test/o'clock")).toBe(
+		`'https://x.test/o'\\''clock'`,
+	)
+	// parsePreviewComment's URL capture is `https?:\/\/[^)\s]+`, so `$()`,
+	// backticks, `;`, and `&` can reach the briefing line; quote them.
+	const briefing = formatBriefing({
+		ok: true,
+		message: 'ready',
+		options: parseArgs(['--skip-login']),
+		snapshot: {
+			prNumber: 1,
+			prUrl: null,
+			isDraft: false,
+			headSha: null,
+			previewUrl: 'https://kody-pr-1.kody.workers.dev',
+			workerName: 'kody-pr-1',
+			runtimeWorkerName: null,
+			runtimeUrl: null,
+			platformWorkerName: null,
+			platformUrl: null,
+			apiWorkerName: 'kody-pr-1-api',
+			apiUrl: hostile,
+			d1DatabaseName: null,
+			oauthKvTitle: null,
+			mocks: [],
+			expectedSha: null,
+			workflowUrl: null,
+			workflowStatus: null,
+			workflowConclusion: null,
+			workflowHeadSha: null,
+			deploymentSha: null,
+		},
+		smoke: null,
+		session: { cookieHeader: null, origin: null, cookieFile: null },
+		login: {
+			email: previewSeedEmail,
+			password: 'x',
+			username: 'x',
+			admin: false,
+		},
+		briefing: '',
+	} satisfies PreviewManualTestResult)
+	expect(briefing).toContain(`export KODY_API_URL='${hostile}'`)
+	expect(briefing.includes(`export KODY_API_URL=${hostile}`)).toBe(false)
+})
+
+test('preview briefing prints the API host the CLI needs for auth bootstrap and execute --local', async () => {
+	await using server = await createPreviewFixtureServer()
+	const apiUrl = 'https://kody-pr-42-api.kody.workers.dev'
+	const fromComment = await runPreviewManualTest(
+		['--pr', '42', '--skip-login'],
+		createSilentDeps({
+			logs: [],
+			execGh: async (args) =>
+				fakeGh(args, {
+					commentBody: [
+						sampleCommentWithUrl(server.origin),
+						`API worker: \`kody-pr-42-api\` (${apiUrl})`,
+					].join('\n'),
+					headSha: 'headsha',
+					deploymentSha: 'deployedsha',
+					runStatus: 'completed',
+					runConclusion: 'success',
+				}),
+		}),
+	)
+	expect(fromComment.exitCode).toBe(0)
+	expect(fromComment.result?.snapshot).toMatchObject({
+		apiWorkerName: 'kody-pr-42-api',
+		apiUrl,
+	})
+	expect(fromComment.result?.briefing).toContain(
+		`API: ${apiUrl} (\`kody-pr-42-api\`)`,
+	)
+	expect(fromComment.result?.briefing).toContain(
+		`export KODY_API_URL='${apiUrl}'`,
+	)
+
+	const fromUrl = await runPreviewManualTest(
+		[
+			'--url',
+			'https://kody-pr-7.kody-a99.workers.dev',
+			'--no-wait',
+			'--skip-login',
+		],
+		{
+			...createSilentDeps({ logs: [] }),
+			fetch: async () => {
+				throw new Error('offline')
+			},
+		},
+	)
+	expect(fromUrl.result?.snapshot).toMatchObject({
+		apiWorkerName: 'kody-pr-7-api',
+		apiUrl: 'https://kody-pr-7-api.kody-a99.workers.dev',
+	})
+	expect(fromUrl.result?.briefing).toContain(
+		"export KODY_API_URL='https://kody-pr-7-api.kody-a99.workers.dev'",
+	)
+
+	const overridden = await runPreviewManualTest(
+		[
+			'--pr',
+			'42',
+			'--url',
+			'https://kody-pr-7.kody-a99.workers.dev',
+			'--no-wait',
+			'--skip-login',
+		],
+		{
+			...createSilentDeps({
+				logs: [],
+				execGh: async (args) =>
+					fakeGh(args, {
+						commentBody: [
+							sampleCommentWithUrl('https://kody-pr-42.kody-a99.workers.dev'),
+							'API worker: `kody-pr-42-api` (https://kody-pr-42-api.kody-a99.workers.dev)',
+						].join('\n'),
+						headSha: 'headsha',
+						deploymentSha: 'headsha',
+						runStatus: 'completed',
+						runConclusion: 'success',
+					}),
+			}),
+			fetch: async () => {
+				throw new Error('offline')
+			},
+		},
+	)
+	expect(overridden.result?.snapshot).toMatchObject({
+		previewUrl: 'https://kody-pr-7.kody-a99.workers.dev',
+		apiWorkerName: 'kody-pr-7-api',
+		apiUrl: 'https://kody-pr-7-api.kody-a99.workers.dev',
+	})
 })
 
 test('preview manual test treats merge-commit /health as ready when it contains the PR head', async () => {
@@ -734,13 +1044,29 @@ async function createPreviewFixtureServer(commitSha = 'deployedsha') {
 		'GET /pricing': (_request, response) =>
 			html(response, 200, '<h1>Pricing</h1><p>Worker compute is metered.</p>'),
 		'GET /admin': (_request, response) => html(response, 403, 'forbidden'),
-		'POST /account/values.json': requireSession((_request, response) =>
-			json(response, 200, { ok: true, selectedValueId: 'preview-locale' }),
-		),
-		'GET /account/values.json': requireSession((_request, response) =>
+		'POST /account/secrets.json': requireSession((_request, response) =>
 			json(response, 200, {
 				ok: true,
-				values: [{ id: 'preview-locale', value: 'en-US' }],
+				selectedSecretId: 'user::::previewSeed',
+				secrets: [
+					{
+						id: 'user::::previewSeed',
+						name: 'previewSeed',
+						scope: 'user',
+					},
+				],
+			}),
+		),
+		'GET /account/secrets.json': requireSession((_request, response) =>
+			json(response, 200, {
+				ok: true,
+				secrets: [
+					{
+						id: 'user::::previewSeed',
+						name: 'previewSeed',
+						scope: 'user',
+					},
+				],
 			}),
 		),
 		'GET /account': accountPage,
@@ -763,8 +1089,51 @@ async function createPreviewFixtureServer(commitSha = 'deployedsha') {
 		throw new Error('Failed to resolve fixture server port')
 	}
 
+	const captured: Array<{ path: string; contentType: string; body: string }> =
+		[]
+	const record =
+		(handler: Handler): Handler =>
+		(request, response) => {
+			const chunks: Array<Buffer> = []
+			request.on('data', (chunk: Buffer | string) => {
+				chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+			})
+			request.on('end', () => {
+				const body = Buffer.concat(chunks).toString('utf8')
+				captured.push({
+					path: new URL(request.url ?? '/', 'http://127.0.0.1').pathname,
+					contentType: String(request.headers['content-type'] ?? ''),
+					body,
+				})
+				handler(request, response)
+			})
+		}
+	routes['POST /account/organizations/new'] = record((_request, response) => {
+		const slug = new URLSearchParams(captured.at(-1)?.body ?? '').get('slug')
+		response.writeHead(302, { Location: `/@${slug ?? ''}` })
+		response.end()
+	})
+	routes['POST /account/profile/avatar.json'] = record((_request, response) => {
+		json(response, 200, { ok: true, avatar: true })
+	})
+	const echoed: Array<{ referer?: string; accept?: string; cookie?: string }> =
+		[]
+	routes['GET /account/connected-agents.json'] = requireSession(
+		(request, response) => {
+			const seen = {
+				referer: request.headers.referer,
+				accept: request.headers.accept,
+				cookie: request.headers.cookie,
+			}
+			echoed.push(seen)
+			json(response, 200, { ok: true, agents: [], seen })
+		},
+	)
+
 	return {
 		origin: `http://127.0.0.1:${address.port}`,
+		captured,
+		echoed,
 		async [Symbol.asyncDispose]() {
 			await new Promise<void>((resolve, reject) => {
 				server.close((error) => {

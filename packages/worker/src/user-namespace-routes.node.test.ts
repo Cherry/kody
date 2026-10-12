@@ -2,10 +2,7 @@ import { expect, test } from 'vitest'
 import { createMatcher } from 'remix/route-pattern/match'
 import { routes } from '#universal/routes.ts'
 import { parsePackageAppPath } from '#worker/package-runtime/package-app-serve.ts'
-import {
-	isNamespacedAppEndpointPath,
-	isNamespacedPackageInvocationEndpointPath,
-} from './user-namespace-routes.ts'
+import { isNamespacedAppEndpointPath } from './user-namespace-routes.ts'
 
 const communityPackageMatcher = createMatcher(routes.communityPackage.pattern)
 
@@ -18,26 +15,22 @@ test('machine namespaces claim only their multi-segment paths', () => {
 	expect(isNamespacedAppEndpointPath('/@kody/webhooks/devin/hook/secret')).toBe(
 		true,
 	)
-	expect(
-		isNamespacedPackageInvocationEndpointPath(
-			'/@kody/api/package-invocations/abc',
-		),
-	).toBe(true)
-
 	expect(isNamespacedAppEndpointPath('/community/listing-1')).toBe(false)
-	expect(isNamespacedPackageInvocationEndpointPath('/@kody/api')).toBe(false)
 
 	// Including the ids that spell a namespace segment: the two-segment form is
-	// the public page, not a truncated machine path.
+	// the public page, not a truncated machine path. Org pages under `/-/` are
+	// also not machine surfaces.
 	for (const pathname of [
 		'/@kody/devin',
 		'/@kody/packages',
 		'/@kody/connectors',
 		'/@kody/webhooks',
 		'/@kody/api',
+		'/@kody/-/packages',
+		'/@kody/-/webhooks',
+		'/@kody/-/billing',
 	]) {
 		expect(isNamespacedAppEndpointPath(pathname)).toBe(false)
-		expect(isNamespacedPackageInvocationEndpointPath(pathname)).toBe(false)
 		expect(parsePackageAppPath(pathname)).toBeNull()
 	}
 

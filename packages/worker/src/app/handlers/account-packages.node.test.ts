@@ -1,15 +1,20 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as packageRepo from '#worker/package-registry/repo.ts'
 import type * as packageSource from '#worker/package-registry/source.ts'
 import type * as entitySources from '#worker/repo/entity-sources.ts'
-import type * as invocationRepo from '#worker/package-invocations/repo.ts'
 import type * as communityRepo from '#worker/community/repo.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => {
 	const savedPackage = {
 		id: 'pkg-1',
-		userId: 'stable-user-1',
+		userId: 'stable-user-1' as OwnerId,
 		name: '@test/discord-gateway',
 		kodyId: 'discord-gateway',
 		description: 'Dispatch Discord gateway events.',
@@ -17,24 +22,12 @@ const mockModule = vi.hoisted(() => {
 		searchText: 'discord gateway websocket',
 		sourceId: 'source-1',
 		hasApp: true,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: false,
 		lockedAt: null,
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
-	}
-	const tokenRecord = {
-		id: 'token-1',
-		user_id: 'stable-user-1',
-		package_id: 'pkg-1',
-		token_hash: 'stored-hash',
-		name: 'Personal client',
-		export_names_json: '["*"]',
-		created_at: new Date(0).toISOString(),
-		updated_at: new Date(0).toISOString(),
-		last_used_at: null,
-		revoked_at: null,
-		exportNames: ['*'],
 	}
 	return {
 		savedPackage,
@@ -52,11 +45,12 @@ const mockModule = vi.hoisted(() => {
 			permissions: [],
 			artifactOwnerIds: [],
 			mcpUser: {
-				userId: 'stable-user-1',
+				userId: personIdFromStored('stable-user-1'),
 				email: 'user@example.com',
 				username: 'test-user',
 				displayName: 'user',
 			},
+			request: sessionRequestContext('stable-user-1'),
 		})),
 		searchSavedPackagesByUserId: vi.fn<
 			typeof packageRepo.searchSavedPackagesByUserId
@@ -66,6 +60,11 @@ const mockModule = vi.hoisted(() => {
 		})),
 		getSavedPackageById: vi.fn<typeof packageRepo.getSavedPackageById>(
 			async () => savedPackage,
+		),
+		getSavedPackageByIdInAnyOrg: vi.fn<
+			typeof packageRepo.getSavedPackageByIdInAnyOrg
+		>(async (_db, packageId) =>
+			packageId === savedPackage.id ? savedPackage : null,
 		),
 		getSavedPackageWithCommunityProvenanceById: vi.fn<
 			typeof packageRepo.getSavedPackageWithCommunityProvenanceById
@@ -87,34 +86,13 @@ const mockModule = vi.hoisted(() => {
 		getEntitySourceById: vi.fn<typeof entitySources.getEntitySourceById>(
 			async () => null,
 		),
-		listPackageInvocationTokensByPackageId: vi.fn<
-			typeof invocationRepo.listPackageInvocationTokensByPackageId
-		>(async () => [tokenRecord]),
-		hashPackageInvocationBearerToken: vi.fn<
-			typeof invocationRepo.hashPackageInvocationBearerToken
-		>(async () => 'hashed-raw-token'),
-		insertPackageInvocationToken: vi.fn<
-			typeof invocationRepo.insertPackageInvocationToken
-		>(async () => undefined),
-		updatePackageInvocationToken: vi.fn<
-			typeof invocationRepo.updatePackageInvocationToken
-		>(async () => true),
-		revokePackageInvocationToken: vi.fn<
-			typeof invocationRepo.revokePackageInvocationToken
-		>(async () => true),
-		reinstatePackageInvocationToken: vi.fn<
-			typeof invocationRepo.reinstatePackageInvocationToken
-		>(async () => true),
-		deletePackageInvocationToken: vi.fn<
-			typeof invocationRepo.deletePackageInvocationToken
-		>(async () => true),
 		getAppBaseUrl: () => 'https://example.com',
 		loadPackageManifestBySourceId: vi.fn<
 			typeof packageSource.loadPackageManifestBySourceId
 		>(async () => ({
 			source: {
 				id: 'source-1',
-				user_id: 'stable-user-1',
+				user_id: ownerIdFromStored('stable-user-1'),
 				entity_kind: 'package',
 				entity_id: 'pkg-1',
 				repo_id: 'repo-1',
@@ -190,6 +168,21 @@ vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 	}) => records,
 }))
 
+vi.mock('#app/package-viewer-access.ts', () => ({
+	viewerCanReadSavedPackage: vi.fn(async () => true),
+}))
+
+vi.mock('#worker/orgs/repo.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('#worker/orgs/repo.ts')>()
+	return {
+		...actual,
+		loadOrgBindingForOrg: vi.fn(async () => ({
+			org: { id: ownerIdFromStored('stable-user-1'), slug: 'test-user' },
+			role: 'owner' as const,
+		})),
+	}
+})
+
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	searchSavedPackagesByUserId: (
 		...args: Parameters<typeof packageRepo.searchSavedPackagesByUserId>
@@ -197,6 +190,9 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (
 		...args: Parameters<typeof packageRepo.getSavedPackageById>
 	) => mockModule.getSavedPackageById(...args),
+	getSavedPackageByIdInAnyOrg: (
+		...args: Parameters<typeof packageRepo.getSavedPackageByIdInAnyOrg>
+	) => mockModule.getSavedPackageByIdInAnyOrg(...args),
 	getSavedPackageWithCommunityProvenanceById: (
 		...args: Parameters<
 			typeof packageRepo.getSavedPackageWithCommunityProvenanceById
@@ -219,32 +215,6 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 	getEntitySourceById: (
 		...args: Parameters<typeof entitySources.getEntitySourceById>
 	) => mockModule.getEntitySourceById(...args),
-}))
-
-vi.mock('#worker/package-invocations/repo.ts', () => ({
-	listPackageInvocationTokensByPackageId: (
-		...args: Parameters<
-			typeof invocationRepo.listPackageInvocationTokensByPackageId
-		>
-	) => mockModule.listPackageInvocationTokensByPackageId(...args),
-	hashPackageInvocationBearerToken: (
-		...args: Parameters<typeof invocationRepo.hashPackageInvocationBearerToken>
-	) => mockModule.hashPackageInvocationBearerToken(...args),
-	insertPackageInvocationToken: (
-		...args: Parameters<typeof invocationRepo.insertPackageInvocationToken>
-	) => mockModule.insertPackageInvocationToken(...args),
-	updatePackageInvocationToken: (
-		...args: Parameters<typeof invocationRepo.updatePackageInvocationToken>
-	) => mockModule.updatePackageInvocationToken(...args),
-	revokePackageInvocationToken: (
-		...args: Parameters<typeof invocationRepo.revokePackageInvocationToken>
-	) => mockModule.revokePackageInvocationToken(...args),
-	reinstatePackageInvocationToken: (
-		...args: Parameters<typeof invocationRepo.reinstatePackageInvocationToken>
-	) => mockModule.reinstatePackageInvocationToken(...args),
-	deletePackageInvocationToken: (
-		...args: Parameters<typeof invocationRepo.deletePackageInvocationToken>
-	) => mockModule.deletePackageInvocationToken(...args),
 }))
 
 const { createAccountPackagesApiHandler, createAccountPackagesHandler } =
@@ -286,13 +256,19 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 	const searchCall = (input: Record<string, unknown>) =>
 		expect(mockModule.searchSavedPackagesByUserId).toHaveBeenLastCalledWith(
 			env.APP_DB,
-			{ userId: 'stable-user-1', ...input },
+			{ userId: 'stable-user-1' as OwnerId, ...input },
 		)
 
 	const defaults = await get()
 	expect(defaults.status).toBe(200)
 	expect(defaults.headers.get('Cache-Control')).toBe('no-store')
-	searchCall({ query: '', hasApp: null, sort: 'updated', limit: 20, offset: 0 })
+	searchCall({
+		query: '',
+		hasApp: null,
+		sort: 'updated',
+		limit: 20,
+		offset: 0,
+	})
 	expect(mockModule.getSavedPackageById).not.toHaveBeenCalled()
 	await expect(defaults.json()).resolves.toMatchObject({
 		ok: true,
@@ -329,14 +305,7 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 	expect(
 		mockModule.getSavedPackageWithCommunityProvenanceById,
 	).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'stable-user-1',
-		packageId: 'pkg-1',
-	})
-	expect(
-		mockModule.listPackageInvocationTokensByPackageId,
-	).toHaveBeenCalledWith({
-		db: env.APP_DB,
-		userId: 'stable-user-1',
+		userId: 'stable-user-1' as OwnerId,
 		packageId: 'pkg-1',
 	})
 	const filteredPayload = await filtered.json()
@@ -351,14 +320,12 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 			id: 'pkg-1',
 			searchText: 'discord gateway websocket',
 			exports: ['./dispatch-message-created'],
-			tokens: [{ id: 'token-1', name: 'Personal client', exportNames: ['*'] }],
 		},
 	})
-	expect(JSON.stringify(filteredPayload)).not.toContain('stored-hash')
 	expect(mockModule.loadPackageManifestBySourceId).toHaveBeenCalledWith({
 		env,
 		baseUrl: 'https://example.com',
-		userId: 'stable-user-1',
+		userId: 'stable-user-1' as OwnerId,
 		sourceId: 'source-1',
 	})
 
@@ -392,128 +359,12 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 	expect((await get()).status).toBe(401)
 })
 
-test('packages API creates, updates, revokes, reinstates, and deletes package tokens', async () => {
-	const { env, post } = createPackagesClient()
-	const tokenAction = (action: string, extra: Record<string, unknown> = {}) =>
-		post({ action, packageId: 'pkg-1', ...extra })
-	const tokenScope = {
-		db: env.APP_DB,
-		userId: 'stable-user-1',
-		packageId: 'pkg-1',
-		id: 'token-1',
-	}
-
-	const createResponse = await tokenAction('create-token', {
-		name: 'Personal automation',
-		rawToken: 'raw-personal-client-token',
-		exportNames: ['*'],
-	})
-	expect(createResponse.status).toBe(200)
-	expect(mockModule.hashPackageInvocationBearerToken).toHaveBeenCalledWith(
-		'raw-personal-client-token',
-	)
-	expect(mockModule.insertPackageInvocationToken).toHaveBeenCalledWith({
-		db: env.APP_DB,
-		row: expect.objectContaining({
-			userId: 'stable-user-1',
-			packageId: 'pkg-1',
-			name: 'Personal automation',
-			tokenHash: 'hashed-raw-token',
-			exportNames: ['*'],
-		}),
-	})
-	const createText = await createResponse.text()
-	expect(createText).not.toContain('raw-personal-client-token')
-	expect(JSON.parse(createText)).toMatchObject({
-		ok: true,
-		selectedTokenId: expect.any(String),
-	})
-
-	const missingExportResponse = await tokenAction('create-token', {
-		name: 'Bad scope',
-		rawToken: 'raw-token',
-	})
-	expect(missingExportResponse.status).toBe(400)
-	await expect(missingExportResponse.json()).resolves.toEqual({
-		ok: false,
-		error: 'Choose at least one export scope.',
-	})
-
-	const updateResponse = await tokenAction('update-token', {
-		id: 'token-1',
-		name: 'Updated personal client',
-		exportNames: ['dispatch-message-created'],
-		tokenHash: 'should-not-be-read',
-	})
-	expect(updateResponse.status).toBe(200)
-	expect(mockModule.hashPackageInvocationBearerToken).toHaveBeenCalledTimes(1)
-	expect(mockModule.updatePackageInvocationToken).toHaveBeenNthCalledWith(1, {
-		...tokenScope,
-		name: 'Updated personal client',
-		tokenHash: undefined,
-		exportNames: ['./dispatch-message-created'],
-	})
-	const updateText = await updateResponse.text()
-	expect(updateText).not.toContain('should-not-be-read')
-	expect(updateText).not.toContain('stored-hash')
-	expect(JSON.parse(updateText)).toMatchObject({
-		ok: true,
-		selectedTokenId: 'token-1',
-	})
-
-	const replaceTokenResponse = await tokenAction('update-token', {
-		id: 'token-1',
-		name: 'Rotated personal client',
-		rawToken: 'replacement-raw-token',
-		exportNames: ['dispatch-message-created'],
-	})
-	expect(replaceTokenResponse.status).toBe(200)
-	expect(mockModule.hashPackageInvocationBearerToken).toHaveBeenCalledTimes(2)
-	expect(mockModule.hashPackageInvocationBearerToken).toHaveBeenLastCalledWith(
-		'replacement-raw-token',
-	)
-	expect(mockModule.updatePackageInvocationToken).toHaveBeenNthCalledWith(2, {
-		...tokenScope,
-		name: 'Rotated personal client',
-		tokenHash: 'hashed-raw-token',
-		exportNames: ['./dispatch-message-created'],
-	})
-
-	expect((await tokenAction('revoke-token', { id: 'token-1' })).status).toBe(
-		200,
-	)
-	expect(mockModule.revokePackageInvocationToken).toHaveBeenCalledWith(
-		tokenScope,
-	)
-
-	const reinstateResponse = await tokenAction('reinstate-token', {
-		id: 'token-1',
-	})
-	expect(reinstateResponse.status).toBe(200)
-	expect(mockModule.reinstatePackageInvocationToken).toHaveBeenCalledWith(
-		tokenScope,
-	)
-	await expect(reinstateResponse.json()).resolves.toMatchObject({
-		ok: true,
-		selectedTokenId: 'token-1',
-	})
-
-	const deleteResponse = await tokenAction('delete-token', { id: 'token-1' })
-	expect(deleteResponse.status).toBe(200)
-	expect(mockModule.deletePackageInvocationToken).toHaveBeenCalledWith(
-		tokenScope,
-	)
-	const deletePayload = await deleteResponse.json()
-	expect(deletePayload).toMatchObject({ ok: true })
-	expect(deletePayload).not.toHaveProperty('selectedTokenId')
-})
-
 test('account package detail redirects the owner to the canonical package URL', async () => {
 	mockModule.requireAuthenticatedPageUser.mockResolvedValue({
 		username: 'test-user',
 		email: 'user@example.com',
 		mcpUser: {
-			userId: 'stable-user-1',
+			userId: personIdFromStored('stable-user-1'),
 			email: 'user@example.com',
 			username: 'test-user',
 			displayName: 'user',
@@ -532,15 +383,15 @@ test('account package detail redirects the owner to the canonical package URL', 
 		'https://example.com/@test-user?q=discord',
 	)
 
-	const redirect = await visit('/pkg-1?newToken=1&exportNames=.', {
+	const redirect = await visit('/pkg-1?q=discord', {
 		packageId: 'pkg-1',
 	})
 	expect(redirect.status).toBe(302)
 	expect(redirect.headers.get('location')).toBe(
-		'https://example.com/@test-user/discord-gateway?newToken=1&exportNames=.',
+		'https://example.com/@test-user/discord-gateway?q=discord',
 	)
 
-	mockModule.getSavedPackageById.mockResolvedValue(null as never)
+	mockModule.getSavedPackageByIdInAnyOrg.mockResolvedValue(null as never)
 	expect((await visit('/missing', { packageId: 'missing' })).status).toBe(404)
 })
 
@@ -558,7 +409,7 @@ test('packages API loads the selected package detail while list provenance is st
 
 	const responding = createPackagesClient().get('?selected=pkg-1')
 	await vi.waitFor(() => {
-		expect(mockModule.listPackageInvocationTokensByPackageId).toHaveBeenCalled()
+		expect(mockModule.loadPackageManifestBySourceId).toHaveBeenCalled()
 	})
 	releaseProvenance()
 	const response = await responding

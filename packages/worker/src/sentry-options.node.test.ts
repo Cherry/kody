@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { type ErrorEvent } from '@sentry/core'
 import { expect, test } from 'vitest'
 import { isCloudflareKvTransientHttpErrorMessage } from './cloudflare-kv-platform-error.ts'
@@ -5,6 +6,7 @@ import {
 	ComputeOverageLimitError,
 	EntitlementLimitError,
 } from './entitlements/errors.ts'
+import { artifactsGitTemporarilyUnavailableMessage } from './open-api/errors.ts'
 import {
 	buildArtifactsOpaqueInternalErrorMessage,
 	buildArtifactsRepoLookupTimeoutMessage,
@@ -31,6 +33,7 @@ import {
 	isDurableObjectIsolateResourceLimitResetMessage,
 	isMcpAgentSessionDestroyedAbortMessage,
 	mcpAgentSessionDestroyedAbortMessage,
+	redactKodyCredentialsInSentryEvent,
 } from './sentry-options.ts'
 
 function exceptionEvent(
@@ -59,7 +62,7 @@ function packageSourceForSentry(
 ): EntitySourceRow {
 	return {
 		id: '3b0c33c6-20b2-447f-98b1-fd165f8fabfe',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package',
 		entity_id: 'package-1',
 		repo_id: 'repo-1',
@@ -317,7 +320,10 @@ test('filterSentryEvent drops expected platform and caller noise and keeps real 
 	}
 
 	// User-code errors drop via the typed originalException (including causes).
-	const userCodeEvent = exceptionEvent({ type: 'UserCodeError', value: 'boom' })
+	const userCodeEvent = exceptionEvent({
+		type: 'UserCodeError',
+		value: 'boom',
+	})
 	expect(
 		filterSentryEvent(userCodeEvent, {
 			originalException: new UserCodeError('boom'),
@@ -359,7 +365,7 @@ test('filterSentryEvent drops expected platform and caller noise and keeps real 
 		limit: 67_108_864,
 		current: 449_966_219,
 		upgradeHint:
-			'Remove or finish existing storage bytes you no longer need, or upgrade your plan at /account/billing.',
+			'Remove or finish existing storage bytes you no longer need, or upgrade your plan at /@<slug>/-/billing.',
 	})
 	const entitlementEvent = exceptionEvent({
 		type: 'EntitlementLimitError',
@@ -401,4 +407,133 @@ test('filterSentryEvent drops expected platform and caller noise and keeps real 
 			{ originalException: new Error(entitlementLimitError.message) },
 		),
 	).not.toBeNull()
+
+	// KODY-8P: Open API remaps exhausted Artifacts git transients to ApiError
+	// (503 internal_error) with the wrapper as cause. Drop via the cause chain
+	// even when the public message includes a report id instead of "retry".
+	const artifactsGitWrapper = new Error(
+		`Artifacts git clone failed for ${artifactsRepo}: HTTP Error: 500 Internal Server Error`,
+		{ cause: new Error('HTTP Error: 500 Internal Server Error') },
+	)
+	const remappedArtifactsApiError = new Error(
+		'The package source could not be read after retries (HTTP 5xx). Report id: report-1.',
+		{ cause: artifactsGitWrapper },
+	)
+	remappedArtifactsApiError.name = 'ApiError'
+	const remappedArtifactsEvent = exceptionEvent({
+		type: 'ApiError',
+		value: remappedArtifactsApiError.message,
+	})
+	expect(
+		filterSentryEvent(remappedArtifactsEvent, {
+			originalException: remappedArtifactsApiError,
+		}),
+	).toBeNull()
+	expect(filterSentryEvent(remappedArtifactsEvent)).toBe(remappedArtifactsEvent)
+
+	const legacyRetryRemap = new Error(
+		artifactsGitTemporarilyUnavailableMessage,
+		{
+			cause: artifactsGitWrapper,
+		},
+	)
+	legacyRetryRemap.name = 'ApiError'
+	expect(
+		filterSentryEvent(
+			exceptionEvent({
+				type: 'ApiError',
+				value: legacyRetryRemap.message,
+			}),
+			{ originalException: legacyRetryRemap },
+		),
+	).toBeNull()
+
+	// Bare TimeoutError / unrelated wraps must not drop via the remapped path.
+	const bareTimeout = new Error('The operation timed out.')
+	bareTimeout.name = 'TimeoutError'
+	const oauthTimeoutEvent = exceptionEvent({
+		type: 'Error',
+		value: 'Token refresh failed for integration "google".',
+	})
+	expect(
+		filterSentryEvent(oauthTimeoutEvent, {
+			originalException: new Error(
+				'Token refresh failed for integration "google".',
+				{ cause: bareTimeout },
+			),
+		}),
+	).toBe(oauthTimeoutEvent)
+
+	const sourceRecoveryMessage =
+		'packageGetGitRemote stopped by the production package source safety policy. Stop and report this source recovery problem instead of rebuilding or overwriting the package in place.'
+	const sourceRecoveryEvent = exceptionEvent({
+		type: 'Error',
+		value: sourceRecoveryMessage,
+	})
+	expect(
+		filterSentryEvent(sourceRecoveryEvent, {
+			originalException: new Error(sourceRecoveryMessage, {
+				cause: artifactsGitWrapper,
+			}),
+		}),
+	).toBe(sourceRecoveryEvent)
+
+	// After toApiError wraps source-recovery as a generic ApiError, the top
+	// message is no longer the stop-guidance sentence — still keep the event.
+	const remappedRecoveryApiError = new Error(
+		'Internal error. Retry later or report it if it persists.',
+		{
+			cause: new Error(sourceRecoveryMessage, {
+				cause: artifactsGitWrapper,
+			}),
+		},
+	)
+	remappedRecoveryApiError.name = 'ApiError'
+	const remappedRecoveryEvent = exceptionEvent({
+		type: 'ApiError',
+		value: remappedRecoveryApiError.message,
+	})
+	expect(
+		filterSentryEvent(remappedRecoveryEvent, {
+			originalException: remappedRecoveryApiError,
+		}),
+	).toBe(remappedRecoveryEvent)
+})
+test('filterSentryEvent redacts Kody credentials from event messages', () => {
+	const apiToken = `kody_at_${'a'.repeat(20)}_${'B'.repeat(43)}`
+	const bootstrapCode = `kody_bc_${'c'.repeat(16)}_${'D'.repeat(32)}`
+	const event: ErrorEvent = {
+		type: undefined,
+		message: `request failed with ${apiToken}`,
+		logentry: { message: `bootstrap ${bootstrapCode}` },
+		exception: {
+			values: [
+				{
+					type: 'Error',
+					value: `credentials ${apiToken} and ${bootstrapCode}`,
+				},
+			],
+		},
+	}
+
+	expect(filterSentryEvent(event)).toBe(event)
+	expect(event.message).toBe('request failed with kody_at_[redacted]')
+	expect(event.logentry?.message).toBe('bootstrap kody_bc_[redacted]')
+	expect(event.exception?.values?.[0]?.value).toBe(
+		'credentials kody_at_[redacted] and kody_bc_[redacted]',
+	)
+})
+
+test('redactKodyCredentialsInSentryEvent leaves non-credential events unchanged', () => {
+	const event = exceptionEvent('Ordinary error')
+	event.message = 'A harmless event'
+	event.logentry = { message: 'No credentials here' }
+
+	expect(redactKodyCredentialsInSentryEvent(event)).toBe(event)
+	expect(event).toEqual({
+		type: undefined,
+		message: 'A harmless event',
+		logentry: { message: 'No credentials here' },
+		exception: { values: [{ value: 'Ordinary error' }] },
+	})
 })

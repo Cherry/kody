@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as SecretsRepo from './repo.ts'
 import {
@@ -8,6 +9,15 @@ import {
 const mockModule = vi.hoisted(() => ({
 	listSecretLocationsByNameForUser: vi.fn(),
 	getSavedPackageById: vi.fn(),
+	getOrgById: vi.fn(
+		async (..._args: Array<unknown>): Promise<{ slug: string } | null> => ({
+			slug: 'acme',
+		}),
+	),
+}))
+
+vi.mock('#worker/orgs/repo.ts', () => ({
+	getOrgById: (...args: Array<unknown>) => mockModule.getOrgById(...args),
 }))
 
 vi.mock('./repo.ts', async (importOriginal) => {
@@ -27,7 +37,7 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 const { createUnresolvedSecretMessage } = await import('./unresolved-secret.ts')
 
 const env = { APP_DB: {} as D1Database }
-const userId = 'user-1'
+const userId = ownerIdFromStored('user-1')
 const secretName = 'discordBotToken'
 const noPackage = {
 	sessionId: null,
@@ -104,8 +114,22 @@ test('unresolved secret errors distinguish inaccessible scopes from a true miss'
 		packageId: null,
 	})
 	expect(pinnedPackageMiss).toContain(
-		'https://example.com/account/secrets/user/discordBotToken',
+		'https://example.com/@acme/-/secrets/user/discordBotToken',
 	)
+	expect(mockModule.getOrgById).toHaveBeenCalledWith(env.APP_DB, userId)
+
+	mockModule.getOrgById.mockResolvedValueOnce(null)
+	const noOrgMiss = await unresolved({
+		scope: 'package',
+		storageContext: noPackage,
+	})
+	expect(parseSecretScopeUnavailableMessage(noOrgMiss)).toEqual({
+		secretName,
+		scope: 'user',
+		packageName: null,
+		packageId: null,
+	})
+	expect(noOrgMiss).not.toContain('/secrets/')
 
 	const dottedSecretName = 'grokBotWake.71e7550e-746d-417f-b253-05165975ff69'
 	mockModule.listSecretLocationsByNameForUser.mockResolvedValue([
@@ -123,10 +147,10 @@ test('unresolved secret errors distinguish inaccessible scopes from a true miss'
 		baseUrl: 'https://kody.codes',
 	})
 	expect(dottedMiss).toContain(
-		'https://kody.codes/account/secrets/user/grokBotWake%2E71e7550e-746d-417f-b253-05165975ff69',
+		'https://kody.codes/@acme/-/secrets/user/grokBotWake%2E71e7550e-746d-417f-b253-05165975ff69',
 	)
 	expect(dottedMiss).not.toContain(
-		'https://kody.codes/account/secrets/user/grokBotWake.71e7550e-746d-417f-b253-05165975ff69',
+		'https://kody.codes/@acme/-/secrets/user/grokBotWake.71e7550e-746d-417f-b253-05165975ff69',
 	)
 
 	mockModule.listSecretLocationsByNameForUser.mockRejectedValue(

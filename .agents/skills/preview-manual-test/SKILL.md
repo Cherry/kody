@@ -42,11 +42,35 @@ npm run preview:manual-test -- \
 `METHOD /path [status] [json-body] [--dump] [--contains <text>]` (default
 success: 2xx). `--dump` / `--contains` match `control-kody request`, e.g.
 `--request 'GET /pricing --dump --contains Worker compute'`. Use the JSON APIs
-the UI uses (`/account/*.json` in `packages/worker/universal/routes.ts`). For
-more authenticated HTTP after login, use `control-kody request` (`--dump` /
-`--contains` for HTML). Do not cat the session cookie into `curl` or Python.
+the UI uses (`/account/*.json` in `packages/worker/universal/routes.ts`).
+`GET /account/export.json` is a metadata manifest only — do not `--contains`
+user data there; verify rows with MCP `accountExportSection` via
+`control-kody execute` (see the contributing doc). For more authenticated HTTP
+after login, use `control-kody request` (`--dump` / `--contains` for HTML). Do
+not cat the session cookie into `curl` or Python.
 
 `--pr`, `--url`, `--no-wait`, `--skip-login`, `--help` as documented.
+
+The briefing's `API:` line is the preview's Open API host,
+`https://kody-pr-<n>-api.kody-a99.workers.dev`, and the next line prints
+`export KODY_API_URL=…` for it. `@kodycodes/cli` (`auth bootstrap`,
+`execute --local`) needs that host; the app origin 404s `/v1/*` with HTML. See
+[CLI against a PR preview](../../../docs/contributing/cloud-agents.md#cli-against-a-pr-preview).
+
+Flag-gated preview checks need a `preview-flag:<key>` label for a key in
+`tools/preview-seed-flag-allowlist.ts` before 🔎 Preview seeds. Example for
+connection profiles:
+
+```bash
+# PR label: preview-flag:connection-profiles
+# .github/workflows/preview.yml then seeds with:
+# node tools/seed-test-data.ts --remote --config "$WRANGLER_CONFIG" \
+#   --email me@kentcdodds.com --password ilikecode \
+#   --enable-flag connection-profiles
+npm run control-kody -- preview --pr 42 --request 'GET /account/connected-agents.json --dump --contains "connectionProfilesEnabled":true'
+```
+
+`--enable-flag` with `--remote` fails unless the wrangler env is `preview`.
 
 ## When
 
@@ -59,10 +83,18 @@ This does not replace `npm run validate`.
 
 ## After the scripted session
 
-1. Open the printed URL. On Cloud Agents, use the `computerUse` subagent.
-2. Sign in at `/login` with the seed credentials. Button label is **Sign in**.
-3. Confirm the data you created and exercise the UI this PR changes. Stay on the
-   preview origin.
+Default: prove behavior via MCP/API/`control-kody` `request` / `execute`. Open a
+browser only when UI is under test.
+
+When UI is under test:
+
+1. Prefer `npm run control-kody -- browse --origin <preview> --path <path>` so
+   Chromium opens already signed in (reuses `.tmp/control-kody-cookie`).
+   Optional `--record` writes video under `.tmp/control-kody-browse`.
+2. Cursor `computerUse` cannot drive that Playwright window. For computerUse,
+   open `/login?redirectTo=<path>` (seed email `me@kentcdodds.com` / password
+   `ilikecode`, button **Sign in**) and stay on the preview origin.
+3. Confirm the data you created and exercise the UI this PR changes.
 4. Record what you saw on the PR.
 
 `GET /mcp` is 401 without OAuth; `/admin` is 403 (seed account is not admin).

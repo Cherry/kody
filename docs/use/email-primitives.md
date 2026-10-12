@@ -58,8 +58,11 @@ Use the MCP `email` domain:
   before `emailSend` can use them. Cap is 5 extras besides the account email.
   Mail comes from `{username}@<platform domain>`.
 - `emailDestinationAdd` starts verification for an extra address, or resends the
-  verification email if that address is already pending. Unused links from
-  earlier sends stay valid until they expire or the address is verified.
+  verification email if that address is already pending. The verification
+  message is sent from your platform address (`{username}@<platform domain>`) on
+  the same Cloudflare Email binding path as `emailSend` / `emailReply` — not
+  from the apex transactional sender. Unused links from earlier sends stay valid
+  until they expire or the address is verified.
 - `emailDestinationSetDefault` picks the destination used when `emailSend` omits
   `to`.
 - `emailDestinationRemove` removes an extra destination. The identity email
@@ -74,7 +77,7 @@ Use the MCP `email` domain:
   `emailAttachmentGet`. The same attachments go to every allowed `to` on one
   MIME message. With attachments, the whole message (bodies plus decoded
   attachment bytes) must fit the plan's `email_message_bytes` per-message cap.
-  Manage destinations from `/account/email` as well. Unverified extras never
+  Manage destinations from `/@<slug>/-/email` as well. Unverified extras never
   receive mail.
 - `emailReply` replies to a stored inbound message. The recipient always comes
   from the stored message. Optional `attachments` (up to 10 of
@@ -96,7 +99,7 @@ Use the MCP `email` domain:
 - `emailMessageDelete` deletes one stored inbound or outbound message owned by
   the signed-in user. Missing and foreign ids fail. Deleting frees a
   `stored_email_messages` slot so new inbound mail can be accepted again. The
-  same delete is available on `/account/email`.
+  same delete is available on `/@<slug>/-/email`.
 - `emailMessageClassify` reclassifies a stored inbound message as `accepted` or
   `quarantined`. Reclassification never retroactively dispatches package
   subscription events.
@@ -147,8 +150,8 @@ Inbound storage is quota-gated per user:
 - Check where you stand with `usageGet`. When `stored_email_messages` is at the
   cap, inbound mail is rejected at routing and `email.message.received`
   subscriptions do not fire. Delete messages you no longer need with
-  `emailMessageDelete` or from `/account/email` to free slots. Mailbox retention
-  does not keep Free-tier inboxes under the stored-message cap.
+  `emailMessageDelete` or from `/@<slug>/-/email` to free slots. Mailbox
+  retention does not keep Free-tier inboxes under the stored-message cap.
 
 ## Safety model
 
@@ -240,7 +243,7 @@ Each user may store at most 200 sender rules. Manage them with
 `emailSenderRuleDelete`. Reclassify a stored inbound message with
 `emailMessageClassify`, or filter `emailMessageList` by `classification`.
 
-On `/account/email`, quarantined messages show a Quarantined badge (with the
+On `/@<slug>/-/email`, quarantined messages show a Quarantined badge (with the
 reason as tooltip/secondary text), the list can filter to Quarantined only, and
 inbound messages offer Mark as spam / Not spam actions that call the same
 reclassification path.
@@ -249,6 +252,31 @@ Subscription dispatch uses the receive-time classification exactly once:
 accepted mail fires `email.message.received`; quarantined mail fires
 `email.message.quarantined` instead. Later reclassification never retroactively
 dispatches either topic.
+
+## Who an inbound email runs as
+
+Before any subscription runs, Kody checks the sender of mail to an org's inbox:
+
+- **Org member.** The From address is the verified account email of a current
+  member of the inbox's org, and the message authenticated that address (DMARC
+  `pass`, or SPF `pass` with the envelope sender on the From domain; a DKIM
+  `pass` alone is not enough). The run acts as that member with their own role.
+  Only packages the member can run (`package:execute`) receive the event, and
+  every credential the run resolves is checked and audited under that member. If
+  the member lost access to the org, the credential is denied when the run reads
+  it and the run fails. It never retries with another identity or credential.
+- **Verified non-member** (receipts, notifications, outside collaborators,
+  people who left the org). Mail that passes the authentication check above runs
+  as the org that owns the inbox, as it always has.
+- **Unverified or spoofed.** Mail that failed authentication (DMARC `fail`, or
+  SPF `fail`/`softfail` without DKIM `pass`), mail with no From address, and
+  mail that claims a member address without authenticating it (or from a member
+  whose account email is unverified or whose account is suspended) runs nothing,
+  even when a sender `allow` rule accepted it. The message is still stored and
+  visible on `/@<slug>/-/email`, and the worker logs
+  `inbound-email-sender-unverified` with the reason.
+
+Email runs are still billed to the org that owns the inbox.
 
 ## `email.message.received` package subscription
 
@@ -410,7 +438,11 @@ Handlers run as the admin package owner, not the system owner, so the
 user-scoped email capabilities and the `kody:runtime` `email` helper cannot read
 the system message. Use the metadata for routing and notifications (for example
 a Discord report), and follow `admin_url` (or the admin `adminSystemEmailGet`
-capability) for full contents.
+capability) for full contents. Admins can remove unwanted system mail with
+`adminSystemEmailDelete({ message_id })` (attachments, charged delivery rows,
+blobs, and an empty parent thread included). The inbound fingerprint pointer is
+tombstoned as rejected until the 48-hour dedupe window expires, so provider
+retries do not recreate the message.
 
 ## `email.system-message.sent` package subscription (admins)
 

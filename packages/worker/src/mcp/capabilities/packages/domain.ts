@@ -1,6 +1,9 @@
 import { defineDomain } from '#mcp/capabilities/define-domain.ts'
 import { capabilityDomainNames } from '../domain-metadata.ts'
 import { deletePackageCapability } from './delete-package.ts'
+import { enablementDisableCapability } from './enablement-disable.ts'
+import { enablementEnableCapability } from './enablement-enable.ts'
+import { enablementListCapability } from './enablement-list.ts'
 import { getGitRemoteCapability } from './get-git-remote.ts'
 import { getPackageCapability } from './get-package.ts'
 import { listPackagesCapability } from './list-packages.ts'
@@ -9,15 +12,6 @@ import { packageAppFetchCapability } from './package-app-fetch.ts'
 import { packageSubscriptionDispatchCapability } from './package-subscription-dispatch.ts'
 import { packageUpdateCapability } from './package-update.ts'
 import { publishExternalPushCapability } from './publish-external-push.ts'
-import {
-	packageShareAcceptCapability,
-	packageShareAcknowledgeUpdateCapability,
-	packageShareInspectCapability,
-	packageShareInviteCapability,
-	packageShareLeaveCapability,
-	packageShareListCapability,
-	packageShareRevokeCapability,
-} from './package-share.ts'
 import { savePackageCapability } from './save-package.ts'
 
 export const packagesDomain = defineDomain({
@@ -33,13 +27,14 @@ export const packagesDomain = defineDomain({
 		'app',
 		'subscriptions',
 		'event handlers',
-		'share',
 		'invite',
 		'test',
 		'smoke',
 		'simulate',
 		'probe',
 		'synthetic',
+		'enablement',
+		'enable',
 	],
 	capabilities: [
 		savePackageCapability,
@@ -52,12 +47,8 @@ export const packagesDomain = defineDomain({
 		packageUpdateCapability,
 		publishExternalPushCapability,
 		deletePackageCapability,
-		packageShareInviteCapability,
-		packageShareAcceptCapability,
-		packageShareRevokeCapability,
-		packageShareLeaveCapability,
-		packageShareListCapability,
-		packageShareInspectCapability,
-		packageShareAcknowledgeUpdateCapability,
+		enablementListCapability,
+		enablementEnableCapability,
+		enablementDisableCapability,
 	],
 })

@@ -19,15 +19,14 @@ finish timestamps, duration, truncated error fields, optional soft error triage
 (`error_triage`: `ignored` / `resolved`, plus note / who / when — separate from
 execution status), JSON metadata, and up to 200 captured log lines.
 
-Package ownership is optional. Ad-hoc MCP `execute`, standalone `kody.json`
-jobs, and inline workflows have no `package_id`; the record still lands under
-the signed-in user. That optionality is why run records are not shaped as
-package-scoped debug rows.
+Package ownership is optional. Ad-hoc MCP `execute` and inline workflows have no
+`package_id`; the record still lands under the signed-in user. That optionality
+is why run records are not shaped as package-scoped debug rows.
 
 Code lives in `packages/worker/src/run-records/` (types, worker service, and the
 `RunLog` Durable Object). MCP capabilities live under
 `packages/worker/src/mcp/capabilities/runs/` (list/get/summary plus soft triage
-via `runUpdate`). The account UI is `/account/activity`.
+via `runUpdate`). The account UI is `/@<slug>/-/activity`.
 
 ## Surfaces
 
@@ -145,8 +144,11 @@ Rules:
   forward-only attribution in metadata: `entry` (`invoke` | `code`), optional
   `invoke` specifier when entry is invoke, and `workerId` (the stable LOADER id
   unique_worker_days already meters) once the module graph is minted. Package
-  columns (`package_id`, `published_commit`, …) stay first-class. No historical
-  backfill.
+  columns (`package_id`, `published_commit`, …) stay first-class.
+  `published_commit` is the bundle that executed, which can trail
+  `entity_sources.published_commit` for a short npm-backed republish window
+  (bounded by the published source snapshot `createdAt`, not
+  `entity_sources.updated_at`). No historical backfill.
 - Keyed execute claims the idempotency key through `claimRunRecord` (awaited DO
   RPC) before sandbox work so a concurrent retry sees `running` or the terminal
   row instead of starting a second attempt. Lookups are scoped by
@@ -201,7 +203,8 @@ a shared D1 table:
 | Log lines per run          | 200                                             |
 | Text / JSON field budgets  | 16 KiB / 32 KiB truncated                       |
 | `metadata.result` snapshot | 4 KiB (`runRecordMaxResultSnapshotBytes`)       |
-| Stale `running` (short)    | ~3 minutes for execute/export/webhook/…         |
+| Stale `running` (short)    | ~3 minutes for execute/export/subscription/…    |
+| Stale `running` (webhook)  | ~10 minutes (2× the 5-minute background budget) |
 | Stale `running` (job)      | ~6 hours                                        |
 | Stale `running` (long)     | ~24 hours for service/workflow                  |
 
@@ -234,10 +237,10 @@ and reuses a same-isolate memo for the same `since` minute.
 Interrupted scheduled-job occurrences (`idempotency_key` beginning
 `scheduled-job:`), keyed subscription deliveries, and keyed package-export
 invocations are retained with `error_triage=ignored` because their scheduler,
-delivery queue, or invocation-token caller retries the same idempotent unit.
-Manual jobs, keyed execute calls, and other surfaces stay open: their caller may
-need to recover or act on the unknown outcome. A later terminal finish still
-replaces the reconciled row when the outcome becomes known.
+delivery queue, or webhook caller retries the same idempotent unit. Manual jobs,
+keyed execute calls, and other surfaces stay open: their caller may need to
+recover or act on the unknown outcome. A later terminal finish still replaces
+the reconciled row when the outcome becomes known.
 
 ## Keyed package-invocation idempotency ledger
 
@@ -282,11 +285,11 @@ instead of replaying.
 ## Invariant: state vs history
 
 Entity rows hold **current state**. Run records hold **history**. Jobs keep
-schedule metadata and `last_run_at` / `last_run_status` on the D1 `jobs` row for
-the hourly retention sweeper; last-run error, duration, and counters for
-observability live in RunLog `job_run_observability` and survive run-history
-pruning. Package activation counters and milestones live in the same DO
-(`package_run_successes`, `activation_milestones`).
+schedule metadata and `last_run_at` / `last_run_status` on the D1 `jobs` row;
+last-run error, duration, and counters for observability live in RunLog
+`job_run_observability` and survive run-history pruning. Package activation
+counters and milestones live in the same DO (`package_run_successes`,
+`activation_milestones`).
 
 ## Recipe: instrumenting a new surface
 
@@ -392,7 +395,7 @@ user.
 **Entity state** stays on the entity (or its dedicated projection table). Job
 last-run error, duration, and counters live in RunLog `job_run_observability`;
 D1 `jobs` keeps schedule fields and `last_run_at` / `last_run_status` as
-retention anchors only. History browsers (`/account/activity`, `runList` /
+retention anchors only. History browsers (`/@<slug>/-/activity`, `runList` /
 `runGet` / `runSummary`) read `RunLog`.
 
 ## Soft error triage
@@ -423,10 +426,10 @@ Schema version 10 on the RunLog DO.
 
 ## Reading the data
 
-- UI: `/account/activity` (open failures first by default; Recent runs lists the
-  last 7 days of successes and errors; status / triage / surface filters, 7-day
-  summary with ignored/resolved counts, log viewer, cursor pagination).
-  `/account/jobs` recent runs link into it.
+- UI: `/@<slug>/-/activity` (open failures first by default; Recent runs lists
+  the last 7 days of successes and errors; status / triage / surface filters,
+  7-day summary with ignored/resolved counts, log viewer, cursor pagination).
+  `/@<slug>/-/jobs` recent runs link into it.
 - MCP domain `runs`: `runList`, `runGet`, `runSummary`, `runUpdate`,
   `runUpdateBulk`.
 - Account export: section `run_records` pages through the user’s `RunLog`.

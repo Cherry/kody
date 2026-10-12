@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { type AccountMcpServersLoaderData } from '#universal/loader-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
@@ -27,7 +28,10 @@ export async function loadAccountMcpServersData(input: {
 	requestUrl?: string | URL | null
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<AccountMcpServersLoaderData> {
-	const userId = input.user.mcpUser.userId
+	const userId = ownerIdFromCaller({
+		request: input.user.request,
+		user: input.user.mcpUser,
+	})
 	const oauth = resolveMcpServerOAuthClientUrls({
 		env: input.env,
 		requestUrl: input.requestUrl,
@@ -75,24 +79,29 @@ export async function loadAccountMcpServersData(input: {
 		oauthClientOrigin: oauth.clientOrigin,
 		oauthCallbackUrl: oauth.callbackUrl,
 		oauthClientMetadataUrl: oauth.clientMetadataUrl,
-		servers: settings.map((setting) =>
-			attachCatalogLogoPath(
+		servers: settings.map((setting) => {
+			const server =
+				snapshot?.servers.find((entry) => entry.serverId === setting.id) ?? null
+			return attachCatalogLogoPath(
 				{
 					...buildMcpServerStatusView({
 						setting,
-						snapshot:
-							snapshot?.servers.find(
-								(server) => server.serverId === setting.id,
-							) ?? null,
+						snapshot: server,
+						authorizeLink: {
+							appOrigin: oauth.clientOrigin,
+							orgSlug:
+								input.user.request.org.slug?.trim() || input.user.username,
+						},
 						oauthCallbackUrl: oauth.callbackUrl,
 						oauthClientOrigin: oauth.clientOrigin,
 						oauthClientMetadataUrl: oauth.clientMetadataUrl,
 					}),
 					autoLogoPath: buildMcpServerAutoLogoPath(setting),
+					oauthClientId: server?.oauthClientId ?? null,
 				},
 				marks,
-			),
-		),
+			)
+		}),
 		savedPackages: savedPackages.map((entry) => ({
 			id: entry.id,
 			kodyId: entry.kodyId,

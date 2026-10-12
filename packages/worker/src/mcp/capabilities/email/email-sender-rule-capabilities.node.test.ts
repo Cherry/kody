@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import type * as EmailSenderRules from '#worker/email/sender-rules.ts'
@@ -45,9 +49,10 @@ function createEnv() {
 
 function createUserContext(userId = 'user-1') {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		user: {
-			userId,
+			userId: personIdFromStored(userId),
 			email: `${userId}@example.com`,
 			displayName: 'User Example',
 		},
@@ -58,7 +63,7 @@ test('emailSenderRuleSet/list/delete scopes to the caller and maps domain errors
 	const env = createEnv()
 	const rule = {
 		id: 'rule-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		kind: 'domain' as const,
 		value: 'spam.example',
 		effect: 'block' as const,
@@ -81,7 +86,7 @@ test('emailSenderRuleSet/list/delete scopes to the caller and maps domain errors
 	)
 	expect(mocks.upsertEmailSenderRule).toHaveBeenCalledWith({
 		db: env.APP_DB,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		kind: 'domain',
 		value: 'Spam.Example',
 		effect: 'block',
@@ -103,7 +108,7 @@ test('emailSenderRuleSet/list/delete scopes to the caller and maps domain errors
 	)
 	expect(mocks.listEmailSenderRules).toHaveBeenCalledWith({
 		db: env.APP_DB,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(listResult.rules).toEqual([setResult.rule])
 
@@ -113,7 +118,7 @@ test('emailSenderRuleSet/list/delete scopes to the caller and maps domain errors
 	)
 	expect(mocks.deleteEmailSenderRule).toHaveBeenCalledWith({
 		db: env.APP_DB,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		ruleId: 'rule-1',
 	})
 	expect(deleteResult).toEqual({ deleted: true })
@@ -154,7 +159,7 @@ test('emailSenderRuleSet/list/delete scopes to the caller and maps domain errors
 	).rejects.toThrow('Email sender rule not found: other-user-rule')
 	expect(mocks.deleteEmailSenderRule).toHaveBeenLastCalledWith({
 		db: env.APP_DB,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		ruleId: 'other-user-rule',
 	})
 })

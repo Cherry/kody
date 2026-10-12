@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { waitUntil } from 'cloudflare:workers'
 import { jsonResponse } from '#worker/json-response.ts'
@@ -87,7 +88,7 @@ const accountIntegrationsActionSchema = z
 export function createAccountIntegrationsHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request }) {
+		async handler({ request }: { request: Request }) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
@@ -104,12 +105,7 @@ export function createAccountIntegrationsHandler(env: Env) {
 				loaderData: { accountIntegrations },
 			})
 		},
-	} satisfies Action<
-		| typeof routes.accountIntegrations
-		| typeof routes.accountOauthAppDetail
-		| typeof routes.accountIntegrationsApprove
-		| typeof routes.accountIntegrationDetail
-	>
+	}
 }
 
 export function createAccountIntegrationsApiHandler(env: Env) {
@@ -128,7 +124,10 @@ export function createAccountIntegrationsApiHandler(env: Env) {
 						ok: true,
 						chooser: await loadConnectOauthChooser({
 							env,
-							userId: user.mcpUser.userId,
+							userId: ownerIdFromCaller({
+								request: user.request,
+								user: user.mcpUser,
+							}),
 						}),
 					})
 				}
@@ -280,7 +279,10 @@ async function handleSetUsage(input: {
 			: []
 	const updated = await setIntegrationUsage({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		name: input.body.name,
 		usageMode: input.body.usageMode,
 		allowedPackageIds,
@@ -300,7 +302,10 @@ async function handleApprovePackage(input: {
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: z.infer<typeof approvePackageSchema>
 }) {
-	const userId = input.user.mcpUser.userId
+	const userId = ownerIdFromCaller({
+		request: input.user.request,
+		user: input.user.mcpUser,
+	})
 	const savedPackage = (
 		await listSavedPackagesByUserId(input.env.APP_DB, {
 			userId,
@@ -338,7 +343,10 @@ async function handleDisconnectConnection(input: {
 }) {
 	const deleted = await deleteIntegration({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		name: input.name,
 	})
 	if (!deleted) {
@@ -352,7 +360,10 @@ async function handleDeleteOauthApp(input: {
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	appSlug: string
 }) {
-	const userId = input.user.mcpUser.userId
+	const userId = ownerIdFromCaller({
+		request: input.user.request,
+		user: input.user.mcpUser,
+	})
 	const existing = await getOauthApp({
 		env: input.env,
 		userId,
@@ -381,7 +392,10 @@ async function handleRotateOauthAppCredentials(input: {
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: z.infer<typeof rotateOauthAppCredentialsSchema>
 }) {
-	const userId = input.user.mcpUser.userId
+	const userId = ownerIdFromCaller({
+		request: input.user.request,
+		user: input.user.mcpUser,
+	})
 	const existing = await getOauthApp({
 		env: input.env,
 		userId,

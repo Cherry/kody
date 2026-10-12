@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -19,7 +23,6 @@ vi.mock('#worker/package-registry/service.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/package-owner.ts', () => ({
-	packageScopeInputDescription: 'package scope',
 	resolvePackageOwnerContext: (...args: Array<unknown>) =>
 		mockModule.resolvePackageOwnerContext(...args),
 }))
@@ -32,14 +35,14 @@ function createCtx(userId = 'user-1') {
 		ownerScope: 'user',
 		ownerEmail: 'user@example.com',
 		actorUserId: userId,
-		delegated: false,
 	})
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId,
+				userId: personIdFromStored(userId),
 				email: 'user@example.com',
 				displayName: 'User',
 			},
@@ -50,7 +53,7 @@ function createCtx(userId = 'user-1') {
 function createSavedPackage() {
 	return {
 		id: 'pkg-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		kodyId: 'notes',
 		name: '@user/notes',
 		description: 'Personal notes',
@@ -70,7 +73,7 @@ test('packageDelete requires the owner-typed package name before deleting', asyn
 	mockModule.getSavedPackageById.mockResolvedValue(createSavedPackage())
 	mockModule.deleteSavedPackageProjection.mockResolvedValue(undefined)
 	const expectedError =
-		'This permanently deletes "@user/notes". It removes the package from the account, stops its jobs, clears package storage and package-scoped secrets, drops invocation tokens, unlists a public catalog entry if one exists, and best-effort deletes Artifacts repos. Existing forks keep their copies. This cannot be undone. Hiding or making the package private is not deletion. Do not call this unless the owner explicitly asked to delete this package and typed its name. Then pass confirm_name: "@user/notes" (the package name).'
+		'This permanently deletes "@user/notes". It removes the package from the account, stops its jobs, clears package storage and package-scoped secrets, unlists a public catalog entry if one exists, and best-effort deletes Artifacts repos. Existing forks keep their copies. This cannot be undone. Hiding or making the package private is not deletion. Do not call this unless the owner explicitly asked to delete this package and typed its name. Then pass confirm_name: "@user/notes" (the package name).'
 
 	const missingName = await deletePackageCapability
 		.handler({ package_id: 'pkg-1' }, createCtx())
@@ -97,7 +100,7 @@ test('packageDelete requires the owner-typed package name before deleting', asyn
 	})
 	expect(mockModule.deleteSavedPackageProjection).toHaveBeenCalledWith({
 		env: expect.objectContaining({ APP_DB: {} }),
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		actorUserId: 'user-1',
 		packageId: 'pkg-1',
 	})
@@ -117,6 +120,7 @@ test('packageDelete requires the owner-typed package name before deleting', asyn
 			{
 				env: { APP_DB: {} } as Env,
 				callerContext: createMcpCallerContext({
+					source: { kind: 'mcp-oauth' },
 					baseUrl: 'https://heykody.dev',
 					user: null,
 				}),

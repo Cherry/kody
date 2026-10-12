@@ -12,13 +12,16 @@ import { userMeterDurableObjectName } from '#worker/user-scoped-durable-object-n
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { createWaitUntilDrain } from '#worker/test-support/user-meter.ts'
 import { seedAccount } from '#worker/test-support/workers-seed.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 async function seedOutboundFetchCounter(userId: string, count: number) {
 	const day = utcDayKey()
 	const updatedAt = new Date().toISOString()
 	const stub = env.USER_METER.get(
-		env.USER_METER.idFromName(userMeterDurableObjectName(userId)),
+		env.USER_METER.idFromName(
+			userMeterDurableObjectName(ownerIdFromStored(userId)),
+		),
 	)
 	await runInDurableObject(stub, async (instance: UserMeter, state) => {
 		expect(instance).toBeInstanceOf(UserMeter)
@@ -42,7 +45,7 @@ test('gateway fetches consume the daily outbound-fetch entitlement and deny over
 	silenceIncidentalRuntimeWarnings()
 	await ensureEntitlementTestSchema(env.APP_DB)
 	const email = `fetcher-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await seedAccount({
 		db: env.APP_DB,
 		email,
@@ -52,8 +55,9 @@ test('gateway fetches consume the daily outbound-fetch entitlement and deny over
 	})
 	const props = {
 		baseUrl: 'https://kody.example.com',
-		userId,
+		userId: ownerIdFromStored(userId),
 		email,
+		request: null,
 		storageContext: null,
 	}
 	const globalFetch = (async () =>
@@ -70,7 +74,7 @@ test('gateway fetches consume the daily outbound-fetch entitlement and deny over
 	expect(await allowed.text()).toBe('ok')
 	await drain.drain()
 	expect(
-		await userMeterRpc({ env, userId }).read({
+		await userMeterRpc({ env, userId: ownerIdFromStored(userId) }).read({
 			resource: 'outbound_fetches_per_day',
 			day: utcDayKey(),
 		}),
@@ -114,4 +118,85 @@ test('gateway fetches consume the daily outbound-fetch entitlement and deny over
 	})
 	expect(await contextless.text()).toBe('ok')
 	await drain.drain()
+}, 30_000)
+
+test('workerd: gateway streams a progressing body and aborts a stalled one at the idle deadline', async () => {
+	const encoder = new TextEncoder()
+	const streamingFetch = (gapsMs: ReadonlyArray<number>) =>
+		(async (request: Request) => {
+			let index = 0
+			const body = new ReadableStream<Uint8Array>({
+				async pull(controller) {
+					const gapMs = gapsMs[index]
+					if (gapMs === undefined) {
+						controller.close()
+						return
+					}
+					index += 1
+					await new Promise((resolve) => {
+						if (Number.isFinite(gapMs)) setTimeout(resolve, gapMs)
+					})
+					controller.enqueue(encoder.encode(`${index};`))
+				},
+			})
+			const response = new Response(body, {
+				headers: { 'content-type': 'text/event-stream' },
+			})
+			Object.defineProperty(response, 'url', { value: request.url })
+			return response
+		}) as unknown as typeof fetch
+	const props = {
+		baseUrl: 'https://kody.example.com',
+		userId: null,
+		email: null,
+		request: null,
+		storageContext: null,
+	}
+
+	const progressing = await executeGatewayFetch({
+		env,
+		props,
+		request: new Request('https://api.example.net/stream'),
+		globalFetch: streamingFetch([30, 30, 30, 30, 30]),
+		timeoutMs: 5_000,
+		idleTimeoutMs: 80,
+	})
+	expect(progressing.url).toBe('https://api.example.net/stream')
+	expect(progressing.headers.get('content-type')).toBe('text/event-stream')
+	expect(await progressing.text()).toBe('1;2;3;4;5;')
+
+	const stalled = await executeGatewayFetch({
+		env,
+		props,
+		request: new Request('https://api.example.net/stall'),
+		globalFetch: streamingFetch([0, Infinity]),
+		timeoutMs: 5_000,
+		idleTimeoutMs: 80,
+	})
+	await expect(stalled.text()).rejects.toThrow(
+		'Outbound fetch response stalled: no bytes for 80ms.',
+	)
+}, 30_000)
+
+test('workerd: gateway passes a WebSocket upgrade response through untouched', async () => {
+	const pair = new WebSocketPair()
+	const upgrade = new Response(null, { status: 101, webSocket: pair[0] })
+	const response = await executeGatewayFetch({
+		env,
+		props: {
+			baseUrl: 'https://kody.example.com',
+			userId: null,
+			email: null,
+			request: null,
+			storageContext: null,
+		},
+		request: new Request('https://api.example.net/socket', {
+			headers: { Upgrade: 'websocket' },
+		}),
+		globalFetch: (async () => upgrade) as unknown as typeof fetch,
+		timeoutMs: 5_000,
+		idleTimeoutMs: 80,
+	})
+	expect(response.status).toBe(101)
+	expect(response.webSocket).toBe(pair[0])
 }, 30_000)

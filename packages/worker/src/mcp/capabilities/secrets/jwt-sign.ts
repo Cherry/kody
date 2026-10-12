@@ -5,19 +5,16 @@ import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createUnresolvedSecretMessage } from '#mcp/secrets/unresolved-secret.ts'
-import { assertPackageCanAccessResolvedSecret } from '#mcp/secrets/package-access.ts'
+import { secretPageOrgSlugFromCaller } from '#mcp/secrets/package-approval-url.ts'
 import { parseSecretNameOrPlaceholder } from '#mcp/secrets/placeholders.ts'
-import { resolveCallerSecretAuthority } from '#mcp/secrets/secret-authority.ts'
-import { resolveSecret } from '#mcp/secrets/service.ts'
+import { attestedPackageStampFromCaller } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { secretScopeValues } from '#mcp/secrets/types.ts'
-import { resolvePackageStorageOwnerUserId } from '#worker/package-registry/share-grants.ts'
 import {
-	decodeHmacKeyMaterial,
-	extractSecretMaterial,
-	isHmacJwtAlgorithm,
 	jwtAlgorithms,
 	jwtKeyEncodings,
-	signJwt,
+	signJwtWithSecret,
 } from './jwt-signing.ts'
 
 const jwtAlgorithmSchema = z.enum(jwtAlgorithms)
@@ -64,6 +61,7 @@ export const jwtSignCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretJwtSign',
+		orgPermission: 'secret:use',
 		description:
 			'Sign a JWT with a key stored in a saved secret without revealing the key. HMAC algorithms (HS256, HS384, HS512) use key material from the secret; RS*, PS*, ES*, and EdDSA use a PKCS#8 PEM private key. This generic primitive only signs caller-provided header and claims; package or execute code should perform any OAuth token exchange separately.',
 		keywords: [
@@ -92,11 +90,10 @@ export const jwtSignCapability = defineDomainCapability(
 			algorithm: jwtAlgorithmSchema,
 		}),
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
-			const { authorityPackageId, storageContext } =
-				resolveCallerSecretAuthority({
-					storageContext: ctx.callerContext.storageContext,
-				})
+			requireMcpUser(ctx.callerContext)
+			const { packageStamp, storageContext } = attestedPackageStampFromCaller({
+				storageContext: ctx.callerContext.storageContext,
+			})
 			const referenced = parseSecretNameOrPlaceholder(
 				args.private_key_secret_name,
 				'private_key_secret_name',
@@ -104,19 +101,20 @@ export const jwtSignCapability = defineDomainCapability(
 			const secretName = referenced.name
 			const secretScope =
 				args.private_key_secret_scope ?? referenced.scope ?? undefined
-			const secretUserId = authorityPackageId
-				? await resolvePackageStorageOwnerUserId({
-						db: ctx.env.APP_DB,
-						callerUserId: user.userId,
-						packageId: authorityPackageId,
-					})
-				: user.userId
-			const resolved = await resolveSecret({
+			const secretUserId = ownerIdFromCaller(ctx.callerContext)
+			const resolved = await resolveCredential({
 				env: ctx.env,
-				userId: secretUserId,
-				name: secretName,
-				scope: secretScope,
-				storageContext,
+				orgId: secretUserId,
+				actor: ctx.callerContext.request,
+				packageStamp,
+				baseUrl: ctx.callerContext.baseUrl,
+				credential: {
+					use: 'secret',
+					name: secretName,
+					scope: secretScope,
+					storageContext,
+					orgSlug: secretPageOrgSlugFromCaller(ctx.callerContext),
+				},
 			})
 			if (!resolved.found || typeof resolved.value !== 'string') {
 				// Missing or scope-unavailable secrets are caller-clearable
@@ -132,48 +130,12 @@ export const jwtSignCapability = defineDomainCapability(
 					}),
 				)
 			}
-			await assertPackageCanAccessResolvedSecret({
-				env: ctx.env,
-				baseUrl: ctx.callerContext.baseUrl,
-				userId: secretUserId,
-				storageContext,
-				authorityPackageId,
-				secretName,
-				resolved,
-				allowImplicitUserSecretAccess: secretUserId === user.userId,
-			})
-
-			const secretMaterial = extractSecretMaterial({
-				secretValue: resolved.value,
-				jsonField: args.private_key_json_field,
-			})
-
-			if (isHmacJwtAlgorithm(args.algorithm)) {
-				return {
-					jwt: await signJwt({
-						algorithm: args.algorithm,
-						hmacKeyBytes: decodeHmacKeyMaterial({
-							secretValue: secretMaterial,
-							encoding: args.key_encoding ?? 'base64',
-							algorithm: args.algorithm,
-						}),
-						header: args.header,
-						claims: args.claims,
-					}),
-					algorithm: args.algorithm,
-				}
-			}
-
-			if (args.key_encoding !== undefined) {
-				throw new Error(
-					'key_encoding is only valid when algorithm is HS256, HS384, or HS512.',
-				)
-			}
 
 			return {
-				jwt: await signJwt({
+				jwt: await signJwtWithSecret(resolved.value, {
 					algorithm: args.algorithm,
-					privateKeyPem: secretMaterial,
+					keyEncoding: args.key_encoding,
+					jsonField: args.private_key_json_field,
 					header: args.header,
 					claims: args.claims,
 				}),

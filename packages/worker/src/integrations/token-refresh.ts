@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { safeParseHost } from '@kody-internal/shared/url-hosts.ts'
 import {
 	integrationAuthFailureCopy,
@@ -8,8 +9,11 @@ import {
 	resolveIntegrationRefreshToken,
 	resolveUserOauthAppClientSecret,
 } from './credentials.ts'
-import { writeIntegrationAuthFailure } from './repo.ts'
-import { assertCanUseIntegration } from './package-access.ts'
+import {
+	claimIntegrationTokenRefreshLease,
+	releaseIntegrationTokenRefreshLease,
+	writeIntegrationAuthFailure,
+} from './repo.ts'
 import {
 	buildOAuthTokenExchangeRequest,
 	resolveTokenExchangeStyle,
@@ -18,6 +22,7 @@ import { isAccountEmailLabel } from './account-identity.ts'
 import { getPlatformOauthAppClientSecret } from './platform-apps.ts'
 import { getJoinedIntegration } from './service.ts'
 import { type JoinedIntegration } from './types.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 /**
  * `refreshed: false` is the clear skip for `not_applicable` connections
@@ -156,7 +161,7 @@ function snapshotJoinedIntegration(
 
 async function maybePersistGoogleAccountLabel(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	name: string
 	accountLabel: string | null
 	requiredHosts: Array<string>
@@ -183,7 +188,7 @@ async function maybePersistGoogleAccountLabel(input: {
 			`UPDATE user_integrations
 			SET account_label = ?, updated_at = ?
 			WHERE user_id = ? AND name = ?
-				AND (account_label IS NULL OR account_label = '')`,
+				AND (account_label IS NULL OR account_label = '')${andLiveDeletedAtSql()}`,
 		)
 			.bind(email, now, input.userId, input.name)
 			.run()
@@ -217,7 +222,7 @@ function formatProviderTokenError(payload: Record<string, unknown> | null) {
 
 async function emitIntegrationAuthFailedEvent(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	error: IntegrationTokenRefreshCallerError
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
@@ -264,7 +269,7 @@ async function emitIntegrationAuthFailedEvent(input: {
 
 async function emitIntegrationAuthSucceededEvent(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	integration: IntegrationAuthFailedSnapshot
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
@@ -332,27 +337,25 @@ function scheduleSubscriptionEmit(
  * failed or inventing a Waiting row. Successful refreshes clear the snapshot
  * and emit `integration.auth.succeeded`. Sequential attempts each emit;
  * notifier packages edge-detect working ↔ failed. Concurrent in-flight
- * refreshes of the same connection share one provider POST, persist, and
- * event so a 401 stampede cannot rotate the refresh token out from under
- * itself.
+ * refreshes of the same connection in one isolate share one attempt, and
+ * across isolates the `user_integrations` refresh lease lets one provider POST
+ * run while the others return the token it stored, so a 401 stampede cannot
+ * rotate the refresh token out from under itself.
  */
 const inFlightIntegrationTokenRefreshes = new Map<
 	string,
 	Promise<IntegrationTokenRefreshResult>
 >()
 
-function integrationTokenRefreshDedupeKey(userId: string, name: string) {
+function integrationTokenRefreshDedupeKey(userId: OwnerId, name: string) {
 	return `${userId}\0${name}`
 }
 
 export async function refreshIntegrationTokens(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	userEmail?: string | undefined
 	name: string
-	baseUrl?: string
-	packageId?: string | null
-	packageKodyId?: string | null
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<IntegrationTokenRefreshResult> {
 	const key = integrationTokenRefreshDedupeKey(input.userId, input.name)
@@ -379,12 +382,9 @@ export async function refreshIntegrationTokens(input: {
 
 async function refreshIntegrationTokensAttempt(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	userEmail?: string | undefined
 	name: string
-	baseUrl?: string
-	packageId?: string | null
-	packageKodyId?: string | null
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<IntegrationTokenRefreshResult> {
 	try {
@@ -410,24 +410,11 @@ async function refreshIntegrationTokensAttempt(input: {
 
 async function refreshIntegrationTokensOrThrow(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	userEmail?: string | undefined
 	name: string
-	baseUrl?: string
-	packageId?: string | null
-	packageKodyId?: string | null
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<IntegrationTokenRefreshResult> {
-	if (input.baseUrl) {
-		await assertCanUseIntegration({
-			env: input.env,
-			baseUrl: input.baseUrl,
-			userId: input.userId,
-			name: input.name,
-			packageId: input.packageId,
-			packageKodyId: input.packageKodyId,
-		})
-	}
 	const joined = await getJoinedIntegration({
 		env: input.env,
 		userId: input.userId,
@@ -482,6 +469,133 @@ async function refreshIntegrationTokensOrThrow(input: {
 		)
 	}
 
+	const lease = await acquireTokenRefreshLease({
+		env: input.env,
+		userId: input.userId,
+		name: connection.name,
+		observedTokenRefreshedAt: connection.tokenRefreshedAt,
+	})
+	if (lease.status === 'refreshed') {
+		return {
+			refreshed: true,
+			refreshedAt: lease.tokenRefreshedAt,
+			refreshTokenRotated: false,
+		}
+	}
+	if (lease.status === 'stale') return refreshIntegrationTokensOrThrow(input)
+	try {
+		return await exchangeRefreshTokenWithLease({
+			input,
+			joined,
+			integration,
+			fail,
+			clientId,
+			reconnectPath,
+			leaseId: lease.leaseId,
+		})
+	} finally {
+		await releaseIntegrationTokenRefreshLease({
+			db: input.env.APP_DB,
+			userId: input.userId,
+			name: connection.name,
+			leaseId: lease.leaseId,
+		})
+	}
+}
+
+// Outlasts the 30s provider POST so a live holder keeps its lease; if a holder
+// still overruns it, the lease-fenced token write refuses its stale tokens.
+const tokenRefreshLeaseMs = 60_000
+const tokenRefreshLeasePollMs = 250
+
+/**
+ * One refresh per connection at a time across isolates. Rotating providers
+ * invalidate the old refresh token on use, so a second concurrent POST would
+ * either be rejected or persist a stale token over the winner's. A caller that
+ * finds the connection already refreshed since it read the row returns the
+ * stored token instead of calling the provider again.
+ */
+async function acquireTokenRefreshLease(input: {
+	env: Env
+	userId: OwnerId
+	name: string
+	observedTokenRefreshedAt: string | null
+}): Promise<
+	| { status: 'claimed'; leaseId: string }
+	| { status: 'refreshed'; tokenRefreshedAt: string }
+	| { status: 'stale' }
+> {
+	const leaseId = crypto.randomUUID()
+	const deadline = Date.now() + tokenRefreshLeaseMs * 2
+	for (;;) {
+		const claim = await claimIntegrationTokenRefreshLease({
+			db: input.env.APP_DB,
+			userId: input.userId,
+			name: input.name,
+			leaseId,
+			expectedTokenRefreshedAt: input.observedTokenRefreshedAt,
+			now: new Date(),
+			leaseMs: tokenRefreshLeaseMs,
+		})
+		switch (claim.status) {
+			case 'claimed':
+				return { status: 'claimed', leaseId }
+			case 'refreshed':
+			case 'stale':
+				return claim
+			case 'missing':
+				throw callerRefreshError(`Integration "${input.name}" was not found.`, {
+					reason: 'not_found',
+				})
+			case 'held':
+				break
+			default: {
+				const exhaustiveCheck: never = claim
+				throw new Error(
+					`Unhandled token refresh lease claim: ${String(exhaustiveCheck)}`,
+				)
+			}
+		}
+		if (Date.now() >= deadline) {
+			throw new Error(
+				`Timed out waiting for another token refresh of integration "${input.name}" to finish.`,
+			)
+		}
+		await new Promise((resolve) => setTimeout(resolve, tokenRefreshLeasePollMs))
+	}
+}
+
+async function exchangeRefreshTokenWithLease({
+	input,
+	joined,
+	integration,
+	fail,
+	clientId,
+	reconnectPath,
+	leaseId,
+}: {
+	input: {
+		env: Env
+		userId: OwnerId
+		name: string
+		waitUntil?: (promise: Promise<unknown>) => void
+	}
+	joined: JoinedIntegration
+	integration: IntegrationAuthFailedSnapshot
+	fail: (
+		message: string,
+		options: {
+			reason: IntegrationAuthFailedReason
+			providerError?: string | null
+			providerErrorDescription?: string | null
+			httpStatus?: number | null
+		},
+	) => IntegrationTokenRefreshCallerError
+	clientId: string
+	reconnectPath: string
+	leaseId: string
+}): Promise<IntegrationTokenRefreshResult> {
+	const { app, connection } = joined
 	const refreshToken = await resolveIntegrationRefreshToken({
 		env: input.env,
 		userId: input.userId,
@@ -629,6 +743,7 @@ async function refreshIntegrationTokensOrThrow(input: {
 			? (payload.refresh_token as string)
 			: null,
 		refreshPolicy: 'required',
+		refreshLeaseId: leaseId,
 	})
 
 	const refreshedAt = new Date().toISOString()
@@ -642,7 +757,7 @@ async function refreshIntegrationTokensOrThrow(input: {
 			auth_failed_provider_description = NULL,
 			auth_failed_http_status = NULL,
 			auth_failed_reconnectable = NULL
-		WHERE user_id = ? AND name = ?`,
+		WHERE user_id = ? AND name = ?${andLiveDeletedAtSql()}`,
 	)
 		.bind(refreshedAt, refreshedAt, input.userId, connection.name)
 		.run()
@@ -669,7 +784,7 @@ async function refreshIntegrationTokensOrThrow(input: {
 
 async function persistAuthFailureSnapshot(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	error: IntegrationTokenRefreshCallerError
 }) {
 	const reason = input.error.reason
@@ -692,7 +807,7 @@ async function persistAuthFailureSnapshot(input: {
 
 async function persistProviderUnavailableSnapshot(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	joined: JoinedIntegration
 	providerError?: string | null
 	providerErrorDescription?: string | null
@@ -714,7 +829,7 @@ async function persistProviderUnavailableSnapshot(input: {
 
 async function persistAuthFailureRow(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	name: string
 	lane: 'user' | 'platform'
 	accountLabel: string | null

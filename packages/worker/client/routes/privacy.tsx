@@ -11,7 +11,10 @@ import {
 	sectionTitleCss,
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
-import { privacyRetentionPeriods } from '#universal/privacy-retention.ts'
+import {
+	privacyRetentionPeriods,
+	privacySubprocessors,
+} from '#universal/privacy-retention.ts'
 import { privacyLastUpdated } from './legal-last-updated.ts'
 
 export function PrivacyRoute(_handle: Handle) {
@@ -65,13 +68,12 @@ export function PrivacyRoute(_handle: Handle) {
 					name when known, last-active day stamps used for return metrics,
 					secrets, memories, packages and their source, jobs, email inboxes and
 					messages, durable storage, MCP server configuration, OAuth grants,
-					package invocation tokens, short-lived execution history, stored
-					community activity events, and any platform feedback you approve for
-					submission. All of this remains scoped to your account except for
-					content you deliberately make public (public packages published to
-					Community and a public profile), the narrow admin review of approved
-					platform feedback, and the community activity metadata described
-					below.
+					short-lived execution history, stored community activity events, and
+					any platform feedback you approve for submission. All of this remains
+					scoped to your account except for content you deliberately make public
+					(public packages published to Community and a public profile), the
+					narrow admin review of approved platform feedback, and the community
+					activity metadata described below.
 				</p>
 				<p mix={css(descriptionCss)}>
 					When profile visibility is <strong>public</strong>, display name, bio,
@@ -277,7 +279,6 @@ export function PrivacyRoute(_handle: Handle) {
 				</p>
 				<ul mix={css(listCss)}>
 					<li>Secret values or secret metadata (names, scopes, allowlists)</li>
-					<li>Package invocation tokens</li>
 					<li>Memories</li>
 					<li>Private packages and their source</li>
 					<li>Jobs</li>
@@ -353,20 +354,9 @@ export function PrivacyRoute(_handle: Handle) {
 					only the data needed for their role:
 				</p>
 				<ul mix={css(listCss)}>
-					<li>
-						Cloudflare — application hosting, database, object storage, email
-						delivery, security, network infrastructure, and Workers AI
-						embeddings and ranked-search scoring
-					</li>
-					<li>Stripe — paid subscriptions, billing, and payment records</li>
-					<li>
-						Kit — product email subscriptions when you submit your email for
-						those purposes
-					</li>
-					<li>
-						Sentry — application error reporting and operational diagnostics
-					</li>
-					<li>Fathom — privacy-focused website traffic analytics</li>
+					{privacySubprocessors.map((provider) => (
+						<li key={provider}>{provider}</li>
+					))}
 				</ul>
 				<p mix={css(descriptionCss)}>
 					The only cookies are the session cookie (<code>kody_session</code>),
@@ -376,9 +366,9 @@ export function PrivacyRoute(_handle: Handle) {
 					<code>__Host-kody_pkg_session</code> on HTTPS,{' '}
 					<code>kody_pkg_session</code> on HTTP). Short-lived cookies support
 					two-factor verification, passkey challenges, and OAuth login.
-					Analytics (Fathom) is cookieless. The browser uses sessionStorage for
-					first-touch signup attribution and scroll restoration, not tracking
-					cookies.
+					Analytics (Fathom and Scarf) are cookieless. The browser uses
+					sessionStorage for first-touch signup attribution and scroll
+					restoration, not tracking cookies.
 				</p>
 			</section>
 

@@ -11,6 +11,10 @@ import {
 } from '#worker/billing/compute-overage-account.ts'
 import { getUserEntitlement } from '#worker/entitlements/service.ts'
 import { readEntitlementUsageSnapshot } from '#worker/entitlements/usage-snapshot.ts'
+import {
+	entitlementEmailForOwner,
+	ownerIdFromCaller,
+} from '#worker/request-context/owner-id.ts'
 
 const usageWeekWindowSchema = z.object({
 	current: z.number().int().nonnegative(),
@@ -38,8 +42,9 @@ export const usageGetCapability = defineDomainCapability(
 	capabilityDomainNames.account,
 	{
 		name: 'usageGet',
+		orgPermission: 'billing:read',
 		description:
-			'Read the signed-in user’s entitlement usage against plan limits, including monthly Worker compute and Rows read plus execute/outbound hard caps: per-resource current, limit, percent used, and plain-language guidance on what counts and how to reduce it.',
+			'Read entitlement usage for the org this connection is bound to (personal or team) against that org’s plan limits, including monthly Worker compute and Rows read plus execute/outbound hard caps: per-resource current, limit, percent used, and plain-language guidance on what counts and how to reduce it.',
 		keywords: [
 			'account',
 			'usage',
@@ -65,27 +70,27 @@ export const usageGetCapability = defineDomainCapability(
 			warnings: z.array(usageResourceSchema),
 		}),
 		async handler(_args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const db = ctx.env.APP_DB
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
 			const entitlement = await getUserEntitlement(db, {
-				userId: user.userId,
-				email: user.email,
+				userId: ownerId,
+				email: entitlementEmailForOwner(ctx.callerContext, ownerId),
 			})
 			const [snapshot, computeOverage] = await Promise.all([
 				readEntitlementUsageSnapshot({
 					db,
 					env: ctx.env,
-					usageUserId: user.userId,
-					plan: entitlement.plan,
-					ladder: entitlement.ladder,
-					creditWallet: entitlement.creditWallet,
+					usageUserId: ownerId,
+					entitlement,
 				}),
 				readAccountComputeOverage({
 					db,
-					stableUserId: user.userId,
+					stableUserId: ownerId,
 					plan: entitlement.plan,
 					ladder: entitlement.ladder,
 					creditWallet: entitlement.creditWallet,
+					limitOverrides: entitlement.limitOverrides,
 					now: new Date(),
 				}),
 			])

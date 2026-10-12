@@ -72,6 +72,14 @@ The result lists scoped package `name`, `package_id`, topic, handler,
 description, and filters. Use this before debugging event dispatch, building
 fan-out, or deciding whether a package already subscribes to a topic.
 
+Host wake paths (email, Discord-driven package events, webhooks that fan out via
+subscriptions, integrations, and the other subscription discovery helpers) read
+a per-user KV cache of the computed topic→package map rather than loading every
+saved package manifest. The manifest remains the only source of truth; publish
+and unpublish refresh the cache. Prefer that pattern (normalized source +
+computed cache, invalidate on the write that changes the source, no TTL) over a
+denormalized topic-index table.
+
 ## Synthetic dispatch
 
 `packageSubscriptionDispatch` is the **interactive MCP** post-publish smoke test
@@ -148,7 +156,8 @@ the event. There is no cross-user delivery.
 
 Declare topics in `package.json#kody.emits`. Topics must use the scoped form
 `@{username}/topic.name` with a lower-dot-case body, and the scope must match
-the emitting package's npm scope:
+the emitting package's npm scope. Set `"mcp": true` on a topic to also expose it
+over [MCP Events](./mcp-events.md) (flag-gated; nothing is exposed by default):
 
 ```json
 {
@@ -183,8 +192,8 @@ search/detail projections so subscribers can discover payload shapes.
 
 ### Emitting
 
-Emit from any package runtime context (exports, subscription handlers,
-package-owned jobs, apps, retrievers) with the `events` helper:
+`events` is bound only in package jobs, subscription handlers, and package apps.
+Emit from those runtimes (including package modules they load):
 
 ```ts
 import { events } from 'kody:runtime'
@@ -204,8 +213,8 @@ Rules:
 - Payloads are capped at 64 KiB (canonical JSON). Store large data with
   `packageStorage()` and emit a reference instead.
 - `events.dispatch` is unavailable in ad hoc `execute` runs — topics belong to
-  packages, so emit from package code (or statically import a package export
-  that dispatches).
+  packages. Statically importing a package export from `execute` does not bind
+  `events`.
 
 ### Delivery semantics
 
@@ -368,9 +377,9 @@ type RunErrorRecordedEvent = {
 ```
 
 `activity_url` is built from the trusted deployment origin and links to
-`/account/activity/<runId>`. The event deliberately omits log lines and the full
-run `metadata` blob — fetch detail with `runGet` when needed. Error name and
-message use the same truncation budget as the stored run record.
+`/@<slug>/-/activity/<runId>`. The event deliberately omits log lines and the
+full run `metadata` blob — fetch detail with `runGet` when needed. Error name
+and message use the same truncation budget as the stored run record.
 
 Recursion guard: runs whose surface is `subscription` never emit this event.
 Subscription-handler failures themselves create run records; emitting again
@@ -436,7 +445,7 @@ type IntegrationAuthFailedEvent = {
 `reconnect_url` is built from the trusted deployment origin and links to
 `/connect/oauth?provider=<name>`. When `account_label` looks like an email it
 also adds `loginHint` so Google/OIDC can preselect that account. `account_url`
-is the connection detail page (`/account/integrations/<name>`). The event
+is the connection detail page (`/@<slug>/-/integrations/<name>`). The event
 deliberately omits token values, secret values, client secrets, and secret
 names. A short-lived access token that refreshes cleanly never emits. Successful
 Google refreshes persist `userinfo.email` onto an empty `account_label` so later
@@ -485,7 +494,7 @@ type IntegrationAuthSucceededEvent = {
 
 `source` is `refresh` for `refreshIntegrationTokens` and `oauth_connect` for the
 `/connect/oauth` persist path. `account_url` is built from the trusted
-deployment origin and links to `/account/integrations/<name>`. The event
+deployment origin and links to `/@<slug>/-/integrations/<name>`. The event
 deliberately omits token values, secret values, client secrets, and secret
 names.
 
@@ -540,7 +549,7 @@ type McpServerConnectionEvent = {
 ```
 
 `account_url` is built from the trusted deployment origin and links to
-`/account/mcp-servers/<id>`. The event omits server URLs, OAuth tokens, bearer
+`/@<slug>/-/mcp-servers/<id>`. The event omits server URLs, OAuth tokens, bearer
 headers, auth URLs, and discovered tool lists. Fetch live status with
 `mcpServerList` when needed. Idempotency keys include the topic, episode id, and
 subscriber package id, so one disconnected and one reconnected invoke per
@@ -553,9 +562,9 @@ run-error strings for connection health.
 ## `repo.pushed`
 
 When Cloudflare Artifacts reports commits pushed to a Kody-managed Artifacts
-repo (plain repo, package, or job source), Kody dispatches `repo.pushed` to
-packages saved by that same user that declare the topic. Delivery is durable via
-the `kody-artifacts-repo-events` Queue (with DLQ). Session fork repos, session
+repo (plain repo or package), Kody dispatches `repo.pushed` to packages saved by
+that same user that declare the topic. Delivery is durable via the
+`kody-artifacts-repo-events` Queue (with DLQ). Session fork repos, session
 workspace branch pushes (`sessions/<id>`), and publish git-notes
 (`refs/notes/commits`) never emit. Opening a repo session git-pushes the session
 ref, and delivering it as `repo.pushed` would let a handler that opens another
@@ -572,7 +581,7 @@ type RepoPushedEvent = {
 	repo: {
 		source_id: string
 		repo_id: string
-		entity_kind: 'repo' | 'package' | 'job'
+		entity_kind: 'repo' | 'package'
 		entity_id: string
 		name: string | null
 		kody_id: string | null
@@ -603,9 +612,9 @@ type RepoPushedEvent = {
 
 `repo_id` is the Artifacts repo name (also stored on `entity_sources.repo_id`).
 `name` is the user-facing plain-repo name or package npm name when known; The
-package name leaf is set for packages. For `entity_kind: 'package' | 'job'`, a
-push updates live HEAD but does not mean the package/job published commit
-advanced — use publish / external-push / reconcile for activation.
+package name leaf is set for packages. For `entity_kind: 'package'`, a push
+updates live HEAD but does not mean the package published commit advanced — use
+publish / external-push / reconcile for activation.
 
 Idempotency keys include the after commit, ref, and subscriber package id, so
 Queue redelivery is safe.
@@ -620,12 +629,12 @@ already gone) are acknowledged without retry.
 
 ## `community.fork.upstream_updated`
 
-When a community listing you forked is republished with a new pinned commit,
-Kody dispatches `community.fork.upstream_updated` to packages saved by **your**
+When a public package you forked is republished with a new pinned commit, Kody
+dispatches `community.fork.upstream_updated` to packages saved by **your**
 account that declare the topic. There is one event per fork of that listing
 (forking the same listing twice produces two events). Republishes that keep the
 same pinned commit do not emit, and forks already at the new pinned commit are
-skipped. Watching a listing without forking it is not supported.
+skipped. Watching a public package without forking it is not supported.
 
 Delivery is durable: `communityPublish` enqueues the republish on the
 `kody-community-listing-published-dispatch` Queue (with DLQ). Enqueue failures

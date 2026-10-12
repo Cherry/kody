@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as accessControl from '#mcp/capabilities/access-control.ts'
 import type * as capabilityRegistry from '#mcp/capabilities/registry.ts'
@@ -47,7 +51,7 @@ const mockModule = vi.hoisted(() => ({
 		}),
 	),
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	listSavedPackagesByUserId: vi.fn<
 		typeof packageRepo.listSavedPackagesByUserId
 	>(async () => []),
@@ -89,11 +93,6 @@ vi.mock('#mcp/capabilities/registry.ts', () => ({
 	) => mockModule.getCapabilityRegistryForContext(...args),
 }))
 
-vi.mock('#worker/package-registry/platform-packages.ts', () => ({
-	listPlatformPackagesForSearch: async () => [],
-	findPlatformPackageByRef: async () => null,
-}))
-
 vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 	applySavedPackageForkListingAncestry: async ({
 		records,
@@ -105,12 +104,12 @@ vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageWithCommunityProvenanceById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageWithCommunityProvenanceByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRefWithCommunityProvenance: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	listSavedPackagesByUserId: (
 		...args: Parameters<typeof packageRepo.listSavedPackagesByUserId>
 	) => mockModule.listSavedPackagesByUserId(...args),
@@ -219,10 +218,12 @@ function createContext(
 			WRANGLER_IS_LOCAL_DEV: 'true',
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: user
 				? {
 						...user,
+						userId: personIdFromStored(user.userId),
 						email: 'user@example.com',
 						displayName: 'User',
 					}
@@ -234,7 +235,7 @@ function createContext(
 function createSavedPackage(hidden = false) {
 	return {
 		id: packageId,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: '@user/daily-notes',
 		kodyId: 'daily-notes',
 		description: 'Daily notes package',
@@ -253,8 +254,11 @@ test('meta search wires exact package identity, hidden gating, and natural-langu
 		.mockResolvedValueOnce(createSavedPackage())
 		.mockResolvedValueOnce(createSavedPackage(true))
 		.mockResolvedValueOnce(createSavedPackage(true))
-	mockModule.getSavedPackageByKodyId.mockResolvedValueOnce(createSavedPackage())
-	const context = createContext({ userId: 'user-1', username: 'user' })
+	mockModule.resolveSavedPackageRef.mockResolvedValueOnce(createSavedPackage())
+	const context = createContext({
+		userId: ownerIdFromStored('user-1'),
+		username: 'user',
+	})
 
 	const byAccountUrl = await searchCapability.handler(
 		{
@@ -335,24 +339,26 @@ test('meta search wires exact package identity, hidden gating, and natural-langu
 	})
 	expect(naturalLanguage.phaseTimings?.jevRerankMs).toEqual(expect.any(Number))
 
-	const unauthenticated = await searchCapability.handler(
-		{ query: packageId, conversationId: 'meta-unauthenticated' },
-		createContext(null),
-	)
-	expect(unauthenticated.matches).toEqual([])
+	await expect(
+		searchCapability.handler(
+			{ query: packageId, conversationId: 'meta-unauthenticated' },
+			createContext(null),
+		),
+	).rejects.toThrow(/Authenticated MCP user is required/)
 
 	expect(mockModule.getSavedPackageById).toHaveBeenCalledWith(
 		{},
 		{
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			packageId,
 		},
 	)
-	expect(mockModule.getSavedPackageByKodyId).toHaveBeenCalledWith(
+	expect(mockModule.resolveSavedPackageRef).toHaveBeenCalledWith(
 		{},
 		{
-			userId: 'user-1',
-			kodyId: 'daily-notes',
+			userId: ownerIdFromStored('user-1'),
+			ref: 'daily-notes',
+			match: 'slug',
 		},
 	)
 	expect(mockModule.getCapabilityRegistryForContext).toHaveBeenCalledTimes(1)
@@ -409,7 +415,10 @@ test('meta search wires exact package identity, hidden gating, and natural-langu
 })
 
 test('meta search supports domain browsing and empty discovery', async () => {
-	const context = createContext({ userId: 'user-1', username: 'user' })
+	const context = createContext({
+		userId: ownerIdFromStored('user-1'),
+		username: 'user',
+	})
 
 	const browse = await searchCapability.handler(
 		{ domain: 'meta', conversationId: 'meta-domain-browse' },

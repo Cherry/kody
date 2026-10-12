@@ -17,8 +17,8 @@ import {
 	consoleWarn,
 } from '#worker/test-support/console-spies.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { createAccountEmailClaimReleaseHandler } from './account-email-claim-release.ts'
 import { createAuthHandler } from './auth.ts'
 
@@ -42,7 +42,7 @@ async function seedUser(
 ) {
 	const passwordHash = await createPasswordHash(input.password)
 	const stableUserId =
-		input.stableUserId ?? (await createStableUserIdFromEmail(input.email))
+		input.stableUserId ?? testStableUserIdFromEmail(input.email)
 	sqlite.exec(`
 		INSERT INTO users (
 			id, username, email, stable_user_id, password_hash, email_verified_at
@@ -55,6 +55,10 @@ async function seedUser(
 			CURRENT_TIMESTAMP
 		);
 	`)
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId,
+		username: input.username,
+	})
 	return stableUserId
 }
 
@@ -105,7 +109,7 @@ test('release re-verifies a former address then allows a new account without rem
 		email: currentEmail,
 		username: 'jamie',
 		password: 'correct-password',
-		stableUserId: await createStableUserIdFromEmail(formerEmail),
+		stableUserId: testStableUserIdFromEmail(formerEmail),
 	})
 	sqlite.exec(`
 		INSERT INTO user_email_claims (user_id, email, status)

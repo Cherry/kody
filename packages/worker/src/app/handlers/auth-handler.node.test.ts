@@ -2,6 +2,7 @@ import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { RequestContext } from 'remix/router'
 import { setAuthSessionSecret } from '#app/auth-session.ts'
 import type * as signupWelcomeCredits from '#worker/billing/signup-welcome-credits.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const lifecycleMocks = vi.hoisted(() => ({
 	scheduleUserCreatedEvent: vi.fn(),
@@ -16,6 +17,9 @@ const welcomeCreditMocks = vi.hoisted(() => ({
 		balanceMicroUsd: 5_000_000,
 		createdAt: '2026-09-29T00:00:00.000Z',
 	})),
+	reconcileSignupWelcomeCreditsIfPending: vi.fn<
+		typeof signupWelcomeCredits.reconcileSignupWelcomeCreditsIfPending
+	>(async () => null),
 }))
 
 vi.mock('#worker/identity/schedule-user-lifecycle-event.ts', () => ({
@@ -30,6 +34,11 @@ vi.mock('#worker/billing/signup-welcome-credits.ts', () => ({
 			typeof signupWelcomeCredits.maybeGrantSignupWelcomeCredits
 		>
 	) => welcomeCreditMocks.maybeGrantSignupWelcomeCredits(...args),
+	reconcileSignupWelcomeCreditsIfPending: (
+		...args: Parameters<
+			typeof signupWelcomeCredits.reconcileSignupWelcomeCreditsIfPending
+		>
+	) => welcomeCreditMocks.reconcileSignupWelcomeCreditsIfPending(...args),
 }))
 
 const { createAuthHandler } = await import('#app/handlers/auth.ts')
@@ -43,7 +52,6 @@ import {
 	auditEventSummaries,
 	logAuditEventSpy,
 } from '#worker/test-support/audit-log-spy.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { reservedUsernamesKvKey } from '#worker/identity/reserved-username-settings.ts'
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
@@ -152,6 +160,11 @@ function createTestDb(options: { failRoleAssignment?: boolean } = {}) {
 	let nextId = 1
 	const users = new Map<string, TestUser>()
 	const db = {
+		async batch(statements: Array<{ run: () => Promise<unknown> }>) {
+			const results = []
+			for (const statement of statements) results.push(await statement.run())
+			return results
+		},
 		prepare(query: string) {
 			const normalizedQuery = query.replace(/\s+/g, ' ').trim().toLowerCase()
 			return {
@@ -297,7 +310,7 @@ function createTestDb(options: { failRoleAssignment?: boolean } = {}) {
 			username,
 			password_hash: await createPasswordHash(password),
 			plan: 'free',
-			stable_user_id: await createStableUserIdFromEmail(email),
+			stable_user_id: testStableUserIdFromEmail(email),
 			...Object.fromEntries(utmColumns.map((column) => [column, null])),
 		} as TestUser
 		nextId += 1
@@ -398,7 +411,6 @@ test('auth handler login and signup workflow', async () => {
 	expect(allowedSignupResponse.status).toBe(200)
 	expect(await allowedSignupResponse.json()).toEqual(signupAccepted)
 	expect(signupContext.testDb.users.get('allowed@example.com')).toMatchObject({
-		plan: 'free',
 		username: 'allowed-jane',
 	})
 	expect(
@@ -434,6 +446,8 @@ test('auth handler login and signup workflow', async () => {
 		['kody', 400, 'This username is reserved.'],
 		['postmaster', 400, 'This username is reserved.'],
 		['kody-r-0123456789abcdef', 400, 'This username is reserved.'],
+		['me', 400, 'This username is reserved.'],
+		['ME', 400, 'This username is reserved.'],
 		['Existing-Jane', 409, 'Username already registered.'],
 	]
 	for (const [username, status, error] of usernameRejections) {
@@ -487,7 +501,7 @@ test('auth handler login and signup workflow', async () => {
 	)
 	// The full workflow audits exactly these events, in order: the unknown
 	// login, the first open signup, the registered-email attempt, the
-	// weak-password rejection, the second open signup, the six username
+	// weak-password rejection, the second open signup, the eight username
 	// rejections, the duplicate-email rejection, and the three successful
 	// logins.
 	expect(auditEventSummaries()).toEqual([
@@ -496,7 +510,7 @@ test('auth handler login and signup workflow', async () => {
 		'signup:failure',
 		'signup:failure',
 		'signup:success',
-		...Array.from({ length: 7 }, () => 'signup:failure'),
+		...Array.from({ length: 9 }, () => 'signup:failure'),
 		'login:success',
 		'login:success',
 		'login:success',
@@ -508,11 +522,14 @@ test('password signup schedules user.created with first-touch attribution and pe
 
 	const plainEmail = 'newbie@example.com'
 	expect((await context.signup(plainEmail, 'newbie')).status).toBe(200)
+	const plainStableUserId = context.testDb.users.get(plainEmail)?.stable_user_id
+	expect(plainStableUserId).toMatch(/^[a-f0-9]{64}$/)
+	expect(plainStableUserId).not.toBe(testStableUserIdFromEmail(plainEmail))
 	expect(lifecycleMocks.scheduleUserCreatedEvent).toHaveBeenCalledWith({
 		env: expect.anything(),
 		source: 'signup',
 		user: {
-			id: await createStableUserIdFromEmail(plainEmail),
+			id: plainStableUserId,
 			username: 'newbie',
 			email: plainEmail,
 		},
@@ -530,7 +547,7 @@ test('password signup schedules user.created with first-touch attribution and pe
 		welcomeCreditMocks.maybeGrantSignupWelcomeCredits,
 	).toHaveBeenCalledWith({
 		db: expect.anything(),
-		userId: await createStableUserIdFromEmail(plainEmail),
+		userId: plainStableUserId,
 	})
 
 	const email = 'attributed@example.com'

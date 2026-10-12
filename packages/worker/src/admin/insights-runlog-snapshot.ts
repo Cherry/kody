@@ -3,6 +3,7 @@
  * reads this instead of fanning out per-user Durable Object RPCs.
  */
 
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type RunLogAdminInsightsSnapshot } from '#worker/run-records/admin-insights-snapshot.ts'
 import { getAdminInsightsSnapshot } from '#worker/run-records/service.ts'
 import {
@@ -10,6 +11,7 @@ import {
 	type AdminInsightsWorkflowStatus,
 } from '#universal/loader-data.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export const adminInsightsRunLogSnapshotKvKey = 'admin-insights-runlog:v1'
 
 /**
@@ -24,7 +26,7 @@ export const adminInsightsRunLogMaxUsersPerTick = 1_500
 const hourMs = 60 * 60 * 1000
 
 type InsightsUserRow = {
-	stable_user_id: string
+	stable_user_id: OwnerId
 	email_verified_at: string | null
 }
 
@@ -132,9 +134,8 @@ async function listNonDeletingInsightsUsers(db: D1Database): Promise<{
 			`SELECT stable_user_id, email_verified_at
 			 FROM users
 			 WHERE deleting_at IS NULL
-			   AND stable_user_id IS NOT NULL
-			 ORDER BY stable_user_id
-			 LIMIT ?`,
+			   AND stable_user_id IS NOT NULL${andLiveDeletedAtSql()}
+			 ORDER BY stable_user_id LIMIT ?`,
 		)
 		.bind(adminInsightsRunLogMaxUsersPerTick + 1)
 		.all<InsightsUserRow>()

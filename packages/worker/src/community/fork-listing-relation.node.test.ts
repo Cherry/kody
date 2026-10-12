@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { applySavedPackageForkListingAncestry } from './fork-listing-relation.ts'
 import { type SavedPackageWithCommunityProvenanceRecord } from '#worker/package-registry/types.ts'
@@ -28,7 +29,7 @@ function forkRecord(
 ): SavedPackageWithCommunityProvenanceRecord {
 	return {
 		id: 'pkg-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: '@me/github',
 		kodyId: 'github',
 		description: 'Fork',
@@ -36,6 +37,7 @@ function forkRecord(
 		searchText: null,
 		sourceId: 'src-1',
 		hasApp: false,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: true,
 		lockedAt: null,
@@ -79,7 +81,13 @@ test('package provenance enrichment marks outdated only when the pin is not an a
 		repo_id: 'listing-origin-repo',
 		published_commit: 'unrelated-fork-sha',
 	})
-	mocks.listingPinIsAncestorOfForkTip.mockResolvedValue(true)
+	const resolvedRepoIds: Array<string | null> = []
+	mocks.listingPinIsAncestorOfForkTip.mockImplementation(
+		async (input: { resolveOriginRepoId: () => Promise<string | null> }) => {
+			resolvedRepoIds.push(await input.resolveOriginRepoId())
+			return true
+		},
+	)
 	const ahead = await applySavedPackageForkListingAncestry({
 		env: { APP_DB: {} } as Env,
 		records: [forkRecord({ originCommit: 'commit-tip' })],
@@ -101,11 +109,13 @@ test('package provenance enrichment marks outdated only when the pin is not an a
 	)
 	expect(mocks.listingPinIsAncestorOfForkTip).toHaveBeenCalledWith({
 		env: expect.anything(),
-		repoId: 'listing-origin-repo',
 		listingPinnedCommit: 'commit-new',
 		forkTip: 'commit-tip',
+		resolveOriginRepoId: expect.any(Function),
 	})
+	expect(resolvedRepoIds).toEqual(['listing-origin-repo'])
 
+	mocks.listingPinIsAncestorOfForkTip.mockReset()
 	mocks.listingPinIsAncestorOfForkTip.mockResolvedValue(false)
 	const outdated = await applySavedPackageForkListingAncestry({
 		env: { APP_DB: {} } as Env,

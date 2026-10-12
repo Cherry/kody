@@ -1,4 +1,9 @@
 import {
+	personalOrgId,
+	type OwnerId,
+	type PersonId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	deriveOnboardingChecklist,
 	readOnboardingChecklistDismissed,
 } from '#mcp/onboarding-checklist.ts'
@@ -16,6 +21,8 @@ import { getUserEntitlement } from '#worker/entitlements/service.ts'
 import { isSavedPackageLocked } from '#worker/package-registry/package-publish-lock.ts'
 import { listJoinedIntegrations } from '#worker/integrations/service.ts'
 import { jobsData } from '#worker/jobs/jobs-data.ts'
+import { listEnablementsForOrg } from '#worker/enablements/repo.ts'
+import { type EnablementRecord } from '#worker/enablements/types.ts'
 import { readOfficialDiscordMembershipForUser } from '#worker/discord/guild-membership.ts'
 import { summarizeRunRecords } from '#worker/run-records/service.ts'
 import { accountActivitySummaryWindowMs } from '#universal/account-activity-filters.ts'
@@ -29,12 +36,17 @@ import {
 	type WaitingIntegrationAuthSignal,
 	type WaitingItem,
 	type WaitingMcpServerSignal,
+	type WaitingPausedEnablementSignal,
 	type WaitingSignals,
 } from '#universal/waiting.ts'
 
+import { getOrgById } from '#worker/orgs/repo.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type DeriveWaitingUser = {
 	userId: number
-	stableUserId: string
+	stableUserId: OwnerId
+	/** Person id for probes that are not org-owned, such as agent OAuth grants. */
+	actorStableUserId?: OwnerId
 	email: string
 	username: string
 	emailVerified: boolean
@@ -51,45 +63,59 @@ type WaitingEnv = Env & {
 export async function deriveWaitingItems(input: {
 	env: WaitingEnv
 	user: DeriveWaitingUser
+	orgSlug: string
 	now?: Date
-	fetchImpl?: typeof fetch
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<Array<WaitingItem>> {
 	const signals = await collectWaitingSignals(input)
-	return buildWaitingItems(signals)
+	return buildWaitingItems(signals, input.orgSlug)
 }
 
 /**
- * Same queue as `deriveWaitingItems`, looked up by MCP `stable_user_id`.
+ * Same queue as `deriveWaitingItems`, for an MCP caller: the person's queue in
+ * the org their connection is bound to (their personal org when unbound).
  * Fail-open: missing user or a probe blip returns no items.
  */
 export async function deriveWaitingItemsForStableUser(input: {
 	env: WaitingEnv
-	stableUserId: string
+	personId: PersonId
+	orgId?: OwnerId | null
 	email: string
 	now?: Date
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<Array<WaitingItem>> {
 	try {
 		const userRow = await input.env.APP_DB.prepare(
-			`SELECT id, username, email_verified_at FROM users WHERE stable_user_id = ? LIMIT 1`,
+			`SELECT id, username, email_verified_at FROM users WHERE stable_user_id = ? ${andLiveDeletedAtSql()} LIMIT 1`,
 		)
-			.bind(input.stableUserId)
+			.bind(input.personId)
 			.first<{
 				id: number
 				username: string
 				email_verified_at: string | null
 			}>()
 		if (!userRow) return []
+		const actorStableUserId = personalOrgId(input.personId)
+		const orgId = input.orgId ?? actorStableUserId
+		let orgSlug = userRow.username?.trim() ?? ''
+		try {
+			const org = await getOrgById(input.env.APP_DB, orgId)
+			const slug = org?.slug?.trim()
+			if (slug) orgSlug = slug
+		} catch {
+			// Test doubles that do not model orgs keep the username slug.
+		}
 		return await deriveWaitingItems({
 			env: input.env,
 			user: {
 				userId: userRow.id,
-				stableUserId: input.stableUserId,
+				stableUserId: orgId,
+				actorStableUserId,
 				email: input.email,
 				username: userRow.username,
 				emailVerified: Boolean(userRow.email_verified_at),
 			},
+			orgSlug,
 			now: input.now,
 			waitUntil: input.waitUntil,
 		})
@@ -102,7 +128,6 @@ export async function collectWaitingSignals(input: {
 	env: WaitingEnv
 	user: DeriveWaitingUser
 	now?: Date
-	fetchImpl?: typeof fetch
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<WaitingSignals> {
 	const now = input.now ?? new Date()
@@ -122,12 +147,13 @@ export async function collectWaitingSignals(input: {
 		firstMemory,
 		firstJob,
 		discordJoined,
+		enablementsProbe,
 	] = await Promise.all([
 		readOnboardingChecklistDismissed({
 			env,
 			userId: user.stableUserId,
 		}).catch(() => true),
-		userHasMcpOAuthGrants(env, user.stableUserId),
+		userHasMcpOAuthGrants(env, user.actorStableUserId ?? user.stableUserId),
 		collectMcpServerSignals(env, user.stableUserId, input.waitUntil),
 		probe(() => listJoinedIntegrations({ env, userId: user.stableUserId })),
 		probe(() =>
@@ -151,8 +177,15 @@ export async function collectWaitingSignals(input: {
 		readOfficialDiscordMembershipForUser({
 			env,
 			userId: user.userId,
-			fetchImpl: input.fetchImpl,
 		}),
+		// The viewer's own enablements in this org, never another member's.
+		probe(() =>
+			listEnablementsForOrg({
+				db: env.APP_DB,
+				orgId: user.stableUserId,
+				enablerUserId: user.actorStableUserId ?? user.stableUserId,
+			}),
+		),
 	])
 
 	// A failed package probe leaves both inputs unknown so the checklist
@@ -187,6 +220,12 @@ export async function collectWaitingSignals(input: {
 		mcpServers,
 		integrationAuth: integrationsProbe.ok
 			? reconnectableIntegrationAuth(integrationsProbe.value)
+			: [],
+		pausedEnablements: enablementsProbe.ok
+			? pausedEnablementSignals(
+					enablementsProbe.value,
+					packagesProbe.ok ? packagesProbe.value : [],
+				)
 			: [],
 		expiredSecrets: secretsProbe.ok
 			? expiredUserSecrets(secretsProbe.value)
@@ -249,7 +288,7 @@ function combineFirstPackage(
  * run in the sessionful `MCP` Durable Object on kody-platform, where
  * `resolveOAuthHelpers` builds the same helpers through the library.
  */
-async function userHasMcpOAuthGrants(env: WaitingEnv, stableUserId: string) {
+async function userHasMcpOAuthGrants(env: WaitingEnv, stableUserId: OwnerId) {
 	try {
 		const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(env)
 		if (!helpers) return false
@@ -262,7 +301,7 @@ async function userHasMcpOAuthGrants(env: WaitingEnv, stableUserId: string) {
 
 async function collectMcpServerSignals(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 	waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Array<WaitingMcpServerSignal>> {
 	const settings = await listMcpServerSettings({ env, userId }).catch(
@@ -317,6 +356,29 @@ function reconnectableIntegrationAuth(
 	return items
 }
 
+function pausedEnablementSignals(
+	enablements: Array<EnablementRecord>,
+	packages: Array<{ id: string; name: string }>,
+): Array<WaitingPausedEnablementSignal> {
+	const packageNames = new Map(packages.map((pkg) => [pkg.id, pkg.name]))
+	const signals: Array<WaitingPausedEnablementSignal> = []
+	for (const enablement of enablements) {
+		if (!enablement.pause) continue
+		signals.push({
+			id: enablement.id,
+			triggerKind: enablement.triggerKind,
+			triggerName: enablement.triggerName,
+			packageName: enablement.packageId
+				? (packageNames.get(enablement.packageId) ?? null)
+				: null,
+			reason: enablement.pause.reason,
+			resourceType: enablement.pause.resourceType,
+			resourceId: enablement.pause.resourceId,
+		})
+	}
+	return signals
+}
+
 function expiredUserSecrets(
 	secrets: Awaited<ReturnType<typeof listSecrets>>,
 ): Array<WaitingExpiredSecretSignal> {
@@ -344,14 +406,14 @@ type ActivationStampRow = {
 }
 
 /** `null` (missing row or read failure) means every stamp is unknown. */
-async function probeActivationStamps(db: D1Database, userId: string) {
+async function probeActivationStamps(db: D1Database, userId: OwnerId) {
 	try {
 		return await db
 			.prepare(
 				`SELECT first_search_at, first_execute_at, first_saved_package_at
 				 FROM users
 				 WHERE stable_user_id = ?
-				 LIMIT 1`,
+				 ${andLiveDeletedAtSql()} LIMIT 1`,
 			)
 			.bind(userId)
 			.first<ActivationStampRow>()
@@ -367,7 +429,7 @@ function activationStamp(
 	return row ? Boolean(row[column]) : null
 }
 
-async function probeHasMemory(db: D1Database, userId: string) {
+async function probeHasMemory(db: D1Database, userId: OwnerId) {
 	try {
 		const rows = await listMemoriesByUserId(db, userId, { limit: 1 })
 		return rows.length > 0
@@ -376,7 +438,7 @@ async function probeHasMemory(db: D1Database, userId: string) {
 	}
 }
 
-async function probeHasJob(env: WaitingEnv, userId: string) {
+async function probeHasJob(env: WaitingEnv, userId: OwnerId) {
 	try {
 		const count = await jobsData(env).countJobsForUser({ userId })
 		return count > 0
@@ -406,7 +468,7 @@ async function collectPendingEmailChange(env: Env, userId: number, now: Date) {
 	}
 }
 
-async function collectErrorRate(env: Env, userId: string, now: Date) {
+async function collectErrorRate(env: Env, userId: OwnerId, now: Date) {
 	try {
 		// Count open (untriaged) Activity errors in the same 7-day window as
 		// `/account/activity`. Monthly usage_rollups never drop when the user
@@ -441,9 +503,7 @@ async function collectEntitlementCaps(
 			db: env.APP_DB,
 			env,
 			usageUserId: user.stableUserId,
-			plan: entitlement.plan,
-			ladder: entitlement.ladder,
-			creditWallet: entitlement.creditWallet,
+			entitlement,
 			now,
 		})
 		return snapshot.resources

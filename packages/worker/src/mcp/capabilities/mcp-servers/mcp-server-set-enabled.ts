@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeMcpServer } from '#mcp/capabilities/integrations/authorize-integration.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { setMcpServerEnabled } from '#worker/mcp-client/settings-service.ts'
 import { resolveMcpServerSetting } from './shared.ts'
@@ -16,6 +18,7 @@ export const mcpServerSetEnabledCapability = defineDomainCapability(
 	capabilityDomainNames.mcpServers,
 	{
 		name: 'mcpServerSetEnabled',
+		orgPermission: 'integration:write',
 		description:
 			'Enable or disable a saved MCP server. Disabled servers keep their stored connection and OAuth state but their tools are hidden from search, execute, and package code until re-enabled.',
 		keywords: ['mcp', 'server', 'enable', 'disable', 'toggle', 'client'],
@@ -31,15 +34,16 @@ export const mcpServerSetEnabledCapability = defineDomainCapability(
 			args: { server: string; enabled: boolean },
 			ctx: CapabilityContext,
 		) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const setting = await resolveMcpServerSetting({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				server: args.server,
 			})
+			await authorizeMcpServer(ctx, 'integration:write', setting)
 			const updated = await setMcpServerEnabled({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				id: setting.id,
 				enabled: args.enabled,
 			})

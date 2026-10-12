@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { readFile } from 'node:fs/promises'
 import { expect, test, vi } from 'vitest'
 import { secretAuthorityArgName } from '#mcp/secrets/secret-authority.ts'
@@ -31,18 +32,18 @@ function extractGeneratedSource(startMarker: string, endMarker: string) {
 }
 
 const kodyProxySource = extractGeneratedSource(
-	'function createKodyProxy(runtimeBridge, mcpServerNames) {',
+	'function createKodyProxy(runtimeBridge, mcpServerNamesOrLoader) {',
 	'\nfunction createRealtimeProxy',
 )
 
 function createKodyProxyForTest(
 	runtimeBridge: unknown,
-	mcpServerNames: Array<string> = [],
+	mcpServerNames: Array<string> | (() => Promise<Array<string>>) = [],
 ) {
 	return new Function(
 		'runtimeBridge',
-		'mcpServerNames',
-		`${kodyProxySource}; return createKodyProxy(runtimeBridge, mcpServerNames);`,
+		'mcpServerNamesOrLoader',
+		`${kodyProxySource}; return createKodyProxy(runtimeBridge, mcpServerNamesOrLoader);`,
 	)(runtimeBridge, mcpServerNames) as Record<string, unknown>
 }
 
@@ -167,7 +168,9 @@ test('package app kody.mcp supports calls, advertises connected servers, and ded
 	// Get stays open even when ownKeys is empty (Node destructure uses Get).
 	const { home: openGetHome } = withoutNames.mcp as McpNamespace
 	if (!openGetHome) throw new Error('Expected open Get for mcp.home.')
-	await expect(openGetHome.set_pin({ pin: '9' })).resolves.toEqual({ ok: true })
+	await expect(openGetHome.set_pin({ pin: '9' })).resolves.toEqual({
+		ok: true,
+	})
 
 	for (const [names, pin] of [
 		[['home', 'mediarss'], '2'],
@@ -180,7 +183,9 @@ test('package app kody.mcp supports calls, advertises connected servers, and ded
 			'home',
 		) as McpNamespace[string]
 		expect(advertisedHome).toBeTypeOf('object')
-		await expect(advertisedHome.set_pin({ pin })).resolves.toEqual({ ok: true })
+		await expect(advertisedHome.set_pin({ pin })).resolves.toEqual({
+			ok: true,
+		})
 	}
 
 	expect(calls).toEqual(
@@ -208,6 +213,121 @@ test('package app kody.mcp supports calls, advertises connected servers, and ded
 	} finally {
 		delete (globalThis as unknown as Record<symbol, unknown>)[authoritySymbol]
 	}
+})
+
+test('package app kody.mcp loads server names lazily on first mcp touch', async () => {
+	let loadCount = 0
+	const runtimeBridge = {
+		callCapability: async () => ({ ok: true }),
+	}
+	const proxy = createKodyProxyForTest(runtimeBridge, async () => {
+		loadCount += 1
+		return ['home']
+	})
+
+	expect(loadCount).toBe(0)
+	await expect(
+		(
+			proxy.mcp as Record<
+				string,
+				{ set_pin: (args: unknown) => Promise<unknown> }
+			>
+		).home?.set_pin({ pin: '1' }),
+	).resolves.toEqual({ ok: true })
+	expect(loadCount).toBe(1)
+
+	await Promise.resolve()
+	await Promise.resolve()
+	expect(Reflect.ownKeys(proxy.mcp as object)).toEqual(['home'])
+	expect(loadCount).toBe(1)
+
+	const advertised = getViaOwnKeysThenGopd(proxy.mcp as object, 'home') as {
+		set_pin: (args: unknown) => Promise<unknown>
+	}
+	expect(advertised).toBeTypeOf('object')
+	await expect(advertised.set_pin({ pin: '2' })).resolves.toEqual({ ok: true })
+	expect(loadCount).toBe(1)
+})
+
+test('modulesReferenceKodyMcp detects authored kody.mcp access', async () => {
+	const { modulesReferenceKodyMcp } =
+		await import('./package-app-mcp-preload.ts')
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'export default { async fetch() { return new Response("ok") } }',
+		}),
+	).toBe(false)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody } from "kody:runtime"\nexport default { async fetch() { return kody.mcp.home.ping({}) } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody } from "kody:runtime"\nconst home = kody["mcp"].home\nexport default home',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody as api } from "kody:runtime"\nexport default { async fetch() { const { home } = api.mcp; return home } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody as api } from "../.__kody_virtual__/public-runtime.js"\nexport default { async fetch() { const { home } = api.mcp; return home } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody as api } from "../.__kody_virtual__/package-runtime/abc.js"\nexport default { async fetch() { return api.mcp.home.ping({}) } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody as api } from "kody:runtime"\nexport default { async fetch() { return new Response(api.metaGetCurrentUser ? "ok" : "no") } }',
+		}),
+	).toBe(false)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'import { kody as api } from "../.__kody_virtual__/public-runtime.js"\nexport default { async fetch() { return new Response("ok") } }',
+		}),
+	).toBe(false)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.cjs':
+				'const { kody: api } = require("../.__kody_virtual__/public-runtime.js")\nmodule.exports = { async fetch() { const { home } = api.mcp; return home } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'entry.js':
+				'export default { async fetch() { const { kody: api } = await import("../.__kody_virtual__/public-runtime.js"); return api.mcp.home.ping({}) } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'runtime.js':
+				'export { kody } from "../.__kody_virtual__/public-runtime.js"',
+			'entry.js':
+				'import { kody as api } from "./runtime.js"\nexport default { async fetch() { const { home } = api.mcp; return home } }',
+		}),
+	).toBe(true)
+	expect(
+		modulesReferenceKodyMcp({
+			'runtime.js':
+				'export { kody } from "../.__kody_virtual__/public-runtime.js"',
+			'entry.js':
+				'import { kody as api } from "./runtime.js"\nexport default { async fetch() { return new Response(api.metaGetCurrentUser ? "ok" : "no") } }',
+		}),
+	).toBe(false)
 })
 
 test('package app workflows proxy validates input and forwards to the runtime bridge', async () => {
@@ -282,7 +402,7 @@ const packageAppRuntimeMock = vi.hoisted(() => ({
 	assertPublishedSourceCanRebuildWithoutInstallingDeps: vi.fn(),
 	getEntitySourceById: vi.fn(),
 	packageAppRuntimeBridge: vi.fn((input: unknown) => input),
-	resolvePackageMountedSecret: vi.fn(),
+	resolveCredential: vi.fn(),
 	beginRunRecord: vi.fn(),
 	finishRunRecord: vi.fn(
 		async (
@@ -360,8 +480,11 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 vi.mock('#mcp/secrets/package-access.ts', () => ({
 	isPackageSecretAccessUnavailableError: (error: unknown) =>
 		error instanceof Error && error.message === 'secret-unavailable',
-	resolvePackageMountedSecret: (...args: Array<unknown>) =>
-		packageAppRuntimeMock.resolvePackageMountedSecret(...args),
+}))
+
+vi.mock('#worker/credentials/resolve-credential.ts', () => ({
+	resolveCredential: (...args: Array<unknown>) =>
+		packageAppRuntimeMock.resolveCredential(...args),
 }))
 
 vi.mock('#worker/mcp-auth-user-context.ts', async (importOriginal) => {
@@ -400,7 +523,7 @@ vi.mock('#worker/run-records/service.ts', async (importOriginal) => {
 function createPackageAppTestSource() {
 	return {
 		id: 'source-1',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package' as const,
 		entity_id: 'package-1',
 		repo_id: 'repo-1',
@@ -437,8 +560,11 @@ function createPackageAppTestEnv() {
 		load: vi.fn(() => ({ getEntrypoint })),
 		get: vi.fn(() => ({ getEntrypoint })),
 	}
+	const appDb = {
+		prepare: () => ({ bind: () => ({ first: async () => null }) }),
+	}
 	return {
-		env: { APP_DB: {}, APP_LOADER: loader } as unknown as Env,
+		env: { APP_DB: appDb, APP_LOADER: loader } as unknown as Env,
 		loader,
 	}
 }
@@ -492,6 +618,24 @@ const {
 
 type BuildInput = Parameters<typeof buildPackageAppWorker>[0]
 
+/** The request of an Owner visiting their own org's app. */
+function appVisitorRequest(key: string) {
+	const id = `user-${key}`
+	return {
+		org: { id, slug: key },
+		actor: { userId: id, username: key },
+		attribution: { kind: 'user', userId: id },
+		credential: {
+			kind: 'package-app',
+			id: null,
+			orgId: id,
+			scopes: null,
+			profileName: null,
+		},
+		membership: { role: 'owner' },
+	}
+}
+
 /** `key` keeps user/package ids unique so the in-memory build cache never leaks between tests. */
 function makeBuildInput(
 	env: Env,
@@ -504,7 +648,7 @@ function makeBuildInput(
 	return {
 		env,
 		baseUrl: 'https://example.com',
-		userId: `user-${key}`,
+		userId: ownerIdFromStored(`user-${key}`),
 		source: createPackageAppTestSource(),
 		manifest: createPackageAppTestManifest(),
 		runtime: {
@@ -514,6 +658,7 @@ function makeBuildInput(
 					email: `${key}@example.com`,
 					displayName: `${key} User`,
 				},
+				request: appVisitorRequest(key),
 			},
 		} as never,
 		...rest,
@@ -538,7 +683,9 @@ function createPackageAppRuntimeBridgeForTest(input?: {
 		{
 			props: {
 				baseUrl: 'https://example.com',
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
+				orgSlug: 'user',
+				visitor: { userId: 'user-1', username: 'user', role: 'owner' },
 				email: 'user@example.com',
 				displayName: 'User',
 				packageId: 'package-1',
@@ -581,7 +728,7 @@ test('buildPackageAppWorker serves an artifactName-null artifact hit and reuses 
 		packageAppRuntimeMock.loadPublishedBundleArtifactByIdentity,
 	).toHaveBeenCalledWith({
 		env,
-		userId: 'user-artifact-hit',
+		userId: ownerIdFromStored('user-artifact-hit'),
 		sourceId: 'source-1',
 		kind: 'app',
 		artifactName: null,
@@ -645,7 +792,7 @@ test('buildPackageAppWorker claims the unique Dynamic Worker day with its surfac
 		expect(recordSpy).toHaveBeenCalledTimes(1)
 		expect(recordSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
-				userId: 'user-uwd-surface',
+				userId: ownerIdFromStored('user-uwd-surface'),
 				surface: 'app_realtime',
 				workerId: expect.stringMatching(/^package-app-/),
 			}),
@@ -676,6 +823,7 @@ test('package app worker exposes its public mount and records fetch query and re
 			runtime: {
 				callerContext: {
 					user: { email: 'owner@example.com', displayName: 'Owner' },
+					request: appVisitorRequest('owner'),
 				} as never,
 				servingUsername: 'serving-owner',
 				hostedOrigin: 'https://packages.kody.test',
@@ -701,6 +849,41 @@ test('package app worker exposes its public mount and records fetch query and re
 			),
 		),
 	).toEqual(['audio', 'code', 'state'])
+})
+
+test('package app public mount uses the name leaf when kodyId diverges', async () => {
+	const { env, loader } = createPackageAppTestEnv()
+	packageAppRuntimeMock.loadPublishedBundleArtifactByIdentity.mockResolvedValue(
+		makeArtifact('export default { fetch() { return new Response("ok") } }'),
+	)
+
+	await buildPackageAppWorker(
+		makeBuildInput(env, 'public-context-leaf', {
+			baseUrl: 'https://app.kody.test',
+			savedPackage: {
+				kodyId: 'legacy-kody-id',
+				name: '@current-owner/canonical-leaf',
+			},
+			runtime: {
+				callerContext: {
+					user: { email: 'owner@example.com', displayName: 'Owner' },
+					request: appVisitorRequest('owner'),
+				} as never,
+				servingUsername: 'serving-owner',
+				hostedOrigin: 'https://packages.kody.test',
+			},
+		}),
+	)
+
+	expect(
+		loaderWorkerOptions(loader)?.env['__kodyPackageContext'],
+	).toMatchObject({
+		kodyId: 'legacy-kody-id',
+		appBasePath: '/@serving-owner/packages/canonical-leaf',
+		hostedUrl:
+			'https://packages.kody.test/@serving-owner/packages/canonical-leaf',
+		assetBasePath: '/@serving-owner/packages/canonical-leaf/_assets',
+	})
 })
 
 test('package app worker exposes the fingerprinted client module URL when kody.app.client is declared', async () => {
@@ -739,6 +922,7 @@ test('package app worker exposes the fingerprinted client module URL when kody.a
 			runtime: {
 				callerContext: {
 					user: { email: 'owner@example.com', displayName: 'Owner' },
+					request: appVisitorRequest('owner'),
 				} as never,
 				servingUsername: 'serving-owner',
 				hostedOrigin: 'https://serving-owner.kody.run',
@@ -821,7 +1005,7 @@ test('an app artifact rebuild persists artifactName null using the fresh source 
 
 	await buildPackageAppWorker(
 		makeBuildInput(env, 'rebuild-entry', {
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			manifest: createPackageAppTestManifest('stale.js'),
 			loadSourceFiles: sourceFilesFor(freshManifest),
 		}),
@@ -836,7 +1020,7 @@ test('an app artifact rebuild persists artifactName null using the fresh source 
 		packageAppRuntimeMock.persistPublishedBundleArtifact,
 	).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			source: freshSource,
 			kind: 'app',
 			artifactName: null,
@@ -897,7 +1081,7 @@ test('buildPackageAppWorker skips published artifact lookup when publishedCommit
 
 test('package app runtime bridge returns opaque secret refs and merges metadata via waitUntil', async () => {
 	const opaqueRef = '{{secret:apiToken|scope=user}}'
-	packageAppRuntimeMock.resolvePackageMountedSecret.mockResolvedValue({
+	packageAppRuntimeMock.resolveCredential.mockResolvedValue({
 		alias: 'api-token',
 		name: 'apiToken',
 		ref: opaqueRef,
@@ -915,7 +1099,7 @@ test('package app runtime bridge returns opaque secret refs and merges metadata 
 	const { bridge, waitUntilTasks } = createPackageAppRuntimeBridgeForTest()
 	const runHandle = {
 		id: 'run-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		startedAt: '2026-07-26T00:00:00.000Z',
 		persistence: 'eager' as const,
 		context: {
@@ -974,7 +1158,7 @@ test('package app runtime bridge returns opaque secret refs and merges metadata 
 
 test('package app secret mounts ignore author-selected packageId and honor the stamp field', async () => {
 	const ref = '{{secret:apiToken|scope=user}}'
-	packageAppRuntimeMock.resolvePackageMountedSecret.mockResolvedValue({
+	packageAppRuntimeMock.resolveCredential.mockResolvedValue({
 		alias: 'api-token',
 		name: 'apiToken',
 		ref,
@@ -999,16 +1183,17 @@ test('package app secret mounts ignore author-selected packageId and honor the s
 		],
 	]
 	for (const [input, resolvedPackageId] of cases) {
-		packageAppRuntimeMock.resolvePackageMountedSecret.mockClear()
+		packageAppRuntimeMock.resolveCredential.mockClear()
 		await expect(bridge.packageSecretGet(input)).resolves.toEqual({
 			value: ref,
 		})
-		expect(
-			packageAppRuntimeMock.resolvePackageMountedSecret,
-		).toHaveBeenCalledWith(
+		expect(packageAppRuntimeMock.resolveCredential).toHaveBeenCalledWith(
 			expect.objectContaining({
-				packageId: resolvedPackageId,
-				alias: 'api-token',
+				packageStamp: { kind: 'attested', packageId: resolvedPackageId },
+				credential: expect.objectContaining({
+					use: 'package-secret-mount',
+					alias: 'api-token',
+				}),
 			}),
 		)
 	}

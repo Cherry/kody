@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -21,9 +25,10 @@ const reuseEnv = {
 
 function createCaller(userId: string) {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://kody.dev',
 		user: {
-			userId,
+			userId: personIdFromStored(userId),
 			email: `${userId}@example.com`,
 			displayName: 'Console Capture',
 		},
@@ -63,7 +68,7 @@ test(
 	{ timeout: 60_000 },
 	async () => {
 		silenceIncidentalRuntimeWarnings()
-		const userId = 'user-console-capture-contract'
+		const userId = ownerIdFromStored('user-console-capture-contract')
 		const cases = [
 			{
 				label: 'log/warn/error levels are captured with the correct prefix',
@@ -132,7 +137,7 @@ test(
 	{ timeout: 60_000 },
 	async () => {
 		silenceIncidentalRuntimeWarnings()
-		const userId = 'user-console-capture-reuse'
+		const userId = ownerIdFromStored('user-console-capture-reuse')
 		// Identical code + modules + acting user => same dynamic-worker id.
 		// Per-run labels arrive through RPC dispatchers, not baked code.
 		const bundle = await bundleLines(reuseEnv, userId, [

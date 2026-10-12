@@ -1,8 +1,12 @@
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { mintWebhookUrlForUser } from '#worker/webhooks/service.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	mintedWebhookHandleSchema,
 	requirePackageRef,
@@ -14,6 +18,7 @@ export const webhookUrlMintCapability = defineDomainCapability(
 	capabilityDomainNames.webhooks,
 	{
 		name: 'webhookUrlMint',
+		orgPermission: 'package:write',
 		description:
 			'Mint (or remint) the URL secret for a package-declared webhook and return an opaque handle plus url_host. The credential URL is never returned — register it with webhookUrlApply. Declaring kody.webhooks alone does not open ingress; minting does.',
 		keywords: ['webhook', 'mint', 'url', 'activate', 'handle', 'inbound'],
@@ -47,7 +52,8 @@ export const webhookUrlMintCapability = defineDomainCapability(
 			const user = requireMcpUser(ctx.callerContext)
 			const minted = await mintWebhookUrlForUser({
 				env: ctx.env,
-				userId: user.userId,
+				request: requireMcpRequest(ctx.callerContext),
+				userId: ownerIdFromCaller(ctx.callerContext),
 				email: user.email,
 				username: user.username,
 				packageId: args.packageId,

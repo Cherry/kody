@@ -2,9 +2,17 @@ import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
+import { authorizePackageWrite } from '#worker/authorization/authorize.ts'
 import { assertWithinEntitlement } from '#worker/entitlements/service.ts'
-import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
+import {
+	packageOwnerEntitlementEmail,
+	resolvePackageOwnerContext,
+} from '#worker/package-registry/package-owner.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import {
 	countActiveRepoSessions,
@@ -57,6 +65,7 @@ export const repoOpenSessionCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoOpenSession',
+		orgPermission: 'package:write',
 		description:
 			"Open or resume an MCP-native repo-backed editing session for a saved source artifact when editing through Kody tools instead of a local clone. Later repo capabilities can read, search, edit, validate, and publish against a mutable session branch. Pass conversation_id to resume that conversation's active session. Omitting conversation_id always mints a new session so concurrent callers of the same source do not share a workspace that has not checkpointed yet.",
 		keywords: ['repo', 'session', 'open', 'resume', 'artifact', 'source'],
@@ -66,27 +75,31 @@ export const repoOpenSessionCapability = defineDomainCapability(
 		inputSchema: repoOpenSessionInputSchema,
 		outputSchema: repoOpenSessionOutputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = ctx.callerContext.user
-			if (!user) {
-				throw new McpCallerError(
-					'repoOpenSession requires an authenticated user.',
-				)
-			}
-
+			const owner = await resolvePackageOwnerContext(ctx.env, {
+				user: requireMcpUser(ctx.callerContext),
+				request: requireMcpRequest(ctx.callerContext),
+			})
 			const requested = await resolveRepoSourceReference({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
-				ownerScope:
-					args.target?.kind === 'package' && 'kody_id' in args.target
-						? await getMcpUserPackageScope(ctx.env.APP_DB, user)
-						: undefined,
+				userId: owner.ownerUserId,
+				ownerScope: owner.ownerScope,
 				args,
 			})
+			if (requested.resolvedTarget.kind === 'package') {
+				await authorizePackageWrite(
+					{ env: ctx.env, request: ctx.callerContext.request },
+					{
+						id: requested.resolvedTarget.package_id,
+						userId: requested.source.user_id,
+						label: requested.resolvedTarget.name,
+					},
+				)
+			}
 			const existingSession =
 				args.conversation_id == null
 					? null
 					: await getActiveRepoSessionByConversation(ctx.env, {
-							userId: user.userId,
+							userId: owner.ownerUserId,
 							conversationId: args.conversation_id,
 						})
 			if (existingSession) {
@@ -100,7 +113,7 @@ export const repoOpenSessionCapability = defineDomainCapability(
 					existingSession.id,
 				).getSessionInfo({
 					sessionId: existingSession.id,
-					userId: user.userId,
+					userId: owner.ownerUserId,
 				})
 				return {
 					...session,
@@ -110,10 +123,10 @@ export const repoOpenSessionCapability = defineDomainCapability(
 
 			await assertWithinEntitlement({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
-				email: user.email,
+				userId: owner.ownerUserId,
+				email: packageOwnerEntitlementEmail(owner),
 				resource: 'repo_sessions',
-				getCurrent: () => countActiveRepoSessions(ctx.env, user.userId),
+				getCurrent: () => countActiveRepoSessions(ctx.env, owner.ownerUserId),
 			})
 
 			// Opaque Cloudflare platform internals (KODY-CLOUDFLARE-4H) are brief
@@ -128,7 +141,7 @@ export const repoOpenSessionCapability = defineDomainCapability(
 					session = await repoSessionRpc(ctx.env, sessionId).openSession({
 						sessionId,
 						sourceId: requested.source.id,
-						userId: user.userId,
+						userId: owner.ownerUserId,
 						baseUrl: ctx.callerContext.baseUrl,
 						conversationId: args.conversation_id ?? null,
 						sourceRoot: args.source_root ?? requested.source.source_root,

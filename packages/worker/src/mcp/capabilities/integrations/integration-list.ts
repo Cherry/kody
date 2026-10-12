@@ -1,7 +1,10 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { loadIntegrationListScope } from '#mcp/capabilities/integrations/authorize-integration.ts'
+import { listScopeIncludes } from '#worker/authorization/authorize.ts'
 import {
 	emptyCapabilityInputSchema,
 	type CapabilityContext,
@@ -17,6 +20,7 @@ export const integrationListCapability = defineDomainCapability(
 	capabilityDomainNames.integrations,
 	{
 		name: 'integrationList',
+		orgPermission: 'integration:read',
 		description:
 			'List saved OAuth integration connections. Call createAuthenticatedFetch(name) to use one. Do not persist access or refresh tokens with secretSet.',
 		keywords: [
@@ -33,12 +37,19 @@ export const integrationListCapability = defineDomainCapability(
 		inputSchema: emptyCapabilityInputSchema,
 		outputSchema,
 		async handler(_args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
-			const integrations = await listIntegrations({
-				env: ctx.env,
-				userId: user.userId,
-			})
-			return { integrations }
+			requireMcpUser(ctx.callerContext)
+			const [integrations, scope] = await Promise.all([
+				listIntegrations({
+					env: ctx.env,
+					userId: ownerIdFromCaller(ctx.callerContext),
+				}),
+				loadIntegrationListScope(ctx, 'integration:read'),
+			])
+			return {
+				integrations: integrations.filter((integration) =>
+					listScopeIncludes(scope, integration.credentialId ?? ''),
+				),
+			}
 		},
 	},
 )

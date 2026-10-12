@@ -1,5 +1,6 @@
 import { type CloudflareOptions } from '@sentry/cloudflare'
 import { type ErrorEvent, type EventHint } from '@sentry/core'
+import { redactKodyCredentials } from '@kody-internal/shared/api-token-format.ts'
 import { getErrorCauseChain } from '@kody-internal/shared/error-message.ts'
 import { isRetryableD1LockSentryEvent } from './d1-retry.ts'
 import { isCloudflareKvTransientHttpErrorMessage } from './cloudflare-kv-platform-error.ts'
@@ -10,7 +11,10 @@ import {
 	isEntitlementLimitError,
 } from './entitlements/errors.ts'
 import { isIntegrationTokenRefreshCallerMessage } from './integrations/token-refresh.ts'
-import { isArtifactsGitTransientErrorMessage } from './repo/artifacts-git-retry.ts'
+import {
+	isArtifactsGitTransientErrorMessage,
+	isArtifactsGitTransientRemapError,
+} from './repo/artifacts-git-retry.ts'
 import {
 	isArtifactsGitReadTimeoutMessage,
 	isArtifactsOpaqueInternalRetryMessage,
@@ -30,6 +34,27 @@ function sentryEventMessages(event: ErrorEvent) {
 		event.message,
 		...(event.exception?.values?.map((value) => value.value) ?? []),
 	]
+}
+
+export function redactKodyCredentialsInSentryEvent(
+	event: ErrorEvent,
+): ErrorEvent {
+	if (typeof event.message === 'string') {
+		event.message = redactKodyCredentials(event.message)
+	}
+
+	const logentry = event.logentry
+	if (typeof logentry?.message === 'string') {
+		logentry.message = redactKodyCredentials(logentry.message)
+	}
+
+	for (const exception of event.exception?.values ?? []) {
+		if (typeof exception.value === 'string') {
+			exception.value = redactKodyCredentials(exception.value)
+		}
+	}
+
+	return event
 }
 
 /**
@@ -118,7 +143,8 @@ export function filterUserModuleBundlerFailureSentryEvent(event: ErrorEvent) {
  * code exceeds `timeoutMs` (`packages/worker/src/mcp/executor.ts`). The
  * executor injects the enforced budget after this phrase (`Execution timed
  * out after 90s: …` via `createExecutorSandboxTimeoutMessage`) so consumers
- * can tell a 90s ad hoc execute cut from a 270s workflow-step cut.
+ * can tell a 90s ad hoc execute cut from a 300s background (job, async
+ * webhook, workflow-step) cut.
  */
 export const executorSandboxTimeoutMessagePrefix = 'Execution timed out'
 
@@ -460,8 +486,17 @@ export function filterCloudflareOpaqueInternalErrorSentryEvent(
  * Also drops source-safety remaps of Artifacts repo-lookup and git-HEAD
  * timeouts (`TimeoutError` / ArtifactsGitTimeoutError) so a lookup stall is
  * not labeled a git failure and neither opens Sentry issues.
+ *
+ * Open API / MCP map exhausted transient Artifacts git failures to
+ * `ApiError` (`internal_error`, HTTP 503) with the wrapper as `cause`
+ * (KODY-8P). Match `hint.originalException` through the cause chain so those
+ * remapped events stay filtered the same way as the raw wrapper.
  */
-export function isArtifactsGitTransientHttpErrorSentryEvent(event: ErrorEvent) {
+export function isArtifactsGitTransientHttpErrorSentryEvent(
+	event: ErrorEvent,
+	hint?: EventHint,
+) {
+	if (isArtifactsGitTransientRemapError(hint?.originalException)) return true
 	return sentryEventMessages(event).some(
 		(message) =>
 			typeof message === 'string' &&
@@ -473,8 +508,9 @@ export function isArtifactsGitTransientHttpErrorSentryEvent(event: ErrorEvent) {
 
 export function filterArtifactsGitTransientHttpErrorSentryEvent(
 	event: ErrorEvent,
+	hint?: EventHint,
 ) {
-	if (!isArtifactsGitTransientHttpErrorSentryEvent(event)) return event
+	if (!isArtifactsGitTransientHttpErrorSentryEvent(event, hint)) return event
 	return null
 }
 
@@ -591,14 +627,14 @@ export function filterSentryEvent(event: ErrorEvent, hint?: EventHint) {
 	if (filterDurableObjectOverloadedSentryEvent(event) === null) return null
 	if (filterCloudflareOpaqueInternalErrorSentryEvent(event) === null)
 		return null
-	if (filterArtifactsGitTransientHttpErrorSentryEvent(event) === null)
+	if (filterArtifactsGitTransientHttpErrorSentryEvent(event, hint) === null)
 		return null
 	if (filterMcpAgentSessionDestroyedAbortSentryEvent(event) === null)
 		return null
 	if (filterCimdUnknownClientSentryEvent(event) === null) return null
 	if (filterCloudflareKvTransientHttpErrorSentryEvent(event) === null)
 		return null
-	return event
+	return redactKodyCredentialsInSentryEvent(event)
 }
 
 export function buildSentryOptions(env: Env): CloudflareOptions {
@@ -656,7 +692,8 @@ export function buildSentryOptions(env: Env): CloudflareOptions {
 		// Artifacts git protocol HTTP 5xx / 429 wrappers (listServerRefs /
 		// git fetch / git clone), stalled info/refs deadlines, and
 		// isomorphic-git "Packfile payload corrupted" events are dropped the
-		// same way after brief call-site retries — see
+		// same way after brief call-site retries — including when Open API
+		// remaps them to ApiError with the wrapper as cause (KODY-8P) — see
 		// filterArtifactsGitTransientHttpErrorSentryEvent.
 		// Bare Durable Object abort token `destroyed` from Agents MCP session
 		// teardown (`ctx.abort("destroyed")`) is dropped the same way — see

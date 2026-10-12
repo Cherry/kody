@@ -2,23 +2,25 @@ import { isRecord } from '@kody-internal/shared/is-record.ts'
 import { callerCanAccessCapability } from '#mcp/capabilities/access-control.ts'
 import { getStaticRegistry } from '#mcp/capabilities/registry.ts'
 import { type Capability } from '#mcp/capabilities/types.ts'
+import { authorizeSurface } from '#worker/authorization/authorize.ts'
 import {
-	apiTokenScopeSatisfies,
-	type ApiTokenScope,
-} from '#worker/api-tokens/scopes.ts'
-import { recordUsage } from '#worker/usage/record-usage.ts'
-import { type ApiInvocationContext } from './context.ts'
+	recordUsage,
+	usageAttributionFieldsFromRequest,
+} from '#worker/usage/record-usage.ts'
+import {
+	toCapabilityOpenApiPrincipal,
+	type ApiInvocationContext,
+} from './context.ts'
 import { ApiError, invalidRequest, notFound, toApiError } from './errors.ts'
 import {
 	apiOperationsById,
-	resolveCapabilityOperationScope,
 	type ApiOperation,
 	type CapabilityApiOperation,
 } from './operations.ts'
 import { nativeApiOperationDefinitions } from './native-operations.ts'
 
 /**
- * CapabilityProxy native routes (`local-execute` scope). Their observe-only
+ * CapabilityProxy native routes (`org:execute`). Their observe-only
  * `api_call` events append the ApiError `code` to `entityId` on failure so
  * session start vs `unauthorized` / hop errors stay distinguishable in
  * Analytics Engine without a new UsageEventType.
@@ -54,23 +56,6 @@ export function capabilityProxyObservationEntityId(input: {
 	const suffix = `:${input.failureCode}`
 	const maxBaseLength = Math.max(0, maxLength - suffix.length)
 	return `${input.baseEntityId.slice(0, maxBaseLength)}${suffix}`
-}
-
-export function assertApiScope(
-	ctx: ApiInvocationContext,
-	scope: ApiTokenScope | null,
-) {
-	if (ctx.principal.kind !== 'token' || scope === null) return
-	if (apiTokenScopeSatisfies(ctx.principal.token.scopes, scope)) return
-	throw new ApiError({
-		status: 403,
-		code: 'insufficient_scope',
-		message: `This API token lacks the "${scope}" scope.`,
-		details: { required_scope: scope },
-		headers: {
-			'WWW-Authenticate': `Bearer error="insufficient_scope", scope="${scope}"`,
-		},
-	})
 }
 
 async function resolveCapability(operation: CapabilityApiOperation) {
@@ -124,7 +109,10 @@ async function dispatch(input: {
 	const { operation, params, ctx } = input
 	switch (operation.kind) {
 		case 'native': {
-			assertApiScope(ctx, operation.scope)
+			await authorizeSurface(
+				{ env: ctx.env, request: ctx.callerContext.request },
+				operation.permission,
+			)
 			return nativeApiOperationDefinitions[operation.operationId].handler(
 				params,
 				ctx,
@@ -132,21 +120,11 @@ async function dispatch(input: {
 		}
 		case 'capability': {
 			const capability = await resolveCapability(operation)
-			assertApiScope(
-				ctx,
-				resolveCapabilityOperationScope(operation, capability),
-			)
 			await assertCapabilityAvailable(ctx, capability)
-			const openApiPrincipal =
-				ctx.principal.kind === 'token'
-					? { kind: 'token' as const, token: ctx.principal.token }
-					: ctx.principal.kind === 'mcp'
-						? { kind: 'mcp' as const }
-						: { kind: 'mcp-oauth' as const }
 			return capability.handler(params, {
 				env: ctx.env,
 				callerContext: ctx.callerContext,
-				openApiPrincipal,
+				openApiPrincipal: toCapabilityOpenApiPrincipal(ctx.principal),
 				...(ctx.waitUntil ? { waitUntil: ctx.waitUntil } : {}),
 			})
 		}
@@ -169,7 +147,7 @@ function resolveUsageEntityId(
 /**
  * Run one Open API operation for an authenticated account. Shared by the
  * HTTP API (`api.kody.codes`) and the MCP `api` tool so both enforce the same
- * scopes, feature flags, and metering. Throws `ApiError` on failure.
+ * org permissions, feature flags, and metering. Throws `ApiError` on failure.
  */
 export async function invokeApiOperation(input: {
 	operationId: string
@@ -212,6 +190,7 @@ export async function invokeApiOperation(input: {
 				entityId,
 				durationMs: Date.now() - startedAt,
 				outcome,
+				...usageAttributionFieldsFromRequest(input.ctx.callerContext.request),
 			},
 			input.ctx.waitUntil ? { waitUntil: input.ctx.waitUntil } : undefined,
 		)

@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { isoTimestampDayKey } from '@kody-internal/shared/date-keys.ts'
 import { canonicalJsonStringify } from '@kody-internal/shared/canonical-json.ts'
 import {
@@ -15,16 +16,19 @@ import {
 import { NonRetryableError } from 'cloudflare:workflows'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import { backgroundExecutorTimeoutMs } from '#mcp/executor-budgets.ts'
+import { type RequestLineage } from '@kody-internal/shared/request-context.ts'
+import {
+	parseRequestLineage,
+	type RequestSource,
+} from '#worker/request-context/request-context.ts'
 import {
 	readPreExecutionPackageInvocationInfrastructureCode,
 	readRetryablePackageInvocationInfrastructureCode,
 } from '#worker/package-invocations/admin-package-subscriptions.ts'
 import { invokePackageExport } from '#worker/package-invocations/service.ts'
 import { packageWorkflowInvocationSource } from './package-invocation-sources.ts'
-import {
-	getSavedPackageById,
-	getSavedPackageByKodyId,
-} from '#worker/package-registry/repo.ts'
+import { resolveSavedPackageRef } from '#worker/package-registry/repo.ts'
 import { buildSentryOptions } from '#worker/sentry-options.ts'
 import { assertWithinEntitlement } from '#worker/entitlements/service.ts'
 import { resolveBackgroundMcpUser } from '#worker/identity/background-mcp-user.ts'
@@ -49,8 +53,10 @@ import {
 import {
 	creatingWorkflowProjectionStatus,
 	isWorkflowBindingName,
+	workflowProjectionReservationStatuses,
 	type WorkflowBindingName,
 } from '#worker/run-records/workflow-projection.ts'
+import { runRecordMaxPageSize } from '#worker/run-records/types.ts'
 import { isTransientDurableObjectResetError } from '#worker/durable-object-reset-retry.ts'
 import { UserCodeError } from '#worker/user-code-error.ts'
 import { inlineWorkflowNameFallback } from '#universal/workflow-display.ts'
@@ -112,7 +118,7 @@ export type DynamicCallableWorkflowPayload =
 	| {
 			version: 2
 			sourceType: 'package'
-			userId: string
+			userId: OwnerId
 			packageId: string
 			kodyId: string
 			sourceId: string
@@ -122,11 +128,12 @@ export type DynamicCallableWorkflowPayload =
 			runAt: string
 			planDate: string | null
 			params?: PackageWorkflowParams
+			lineage?: RequestLineage
 	  }
 	| {
 			version: 3
 			sourceType: 'inline'
-			userId: string
+			userId: OwnerId
 			packageContext: {
 				packageId: string
 				kodyId: string
@@ -138,11 +145,12 @@ export type DynamicCallableWorkflowPayload =
 			runAt: string
 			planDate: string | null
 			params?: PackageWorkflowParams
+			lineage?: RequestLineage
 	  }
 
 export type WorkflowRunInspection = {
 	id: string
-	userId: string
+	userId: OwnerId
 	bindingName: WorkflowBindingName
 	sourceType: 'package' | 'inline'
 	packageId: string | null
@@ -193,15 +201,12 @@ const workflowStepDoConfig: WorkflowStepDoConfig = {
 		delay: '30 seconds',
 		backoff: 'exponential',
 	},
-	timeout: '5 minutes',
+	// One minute over `backgroundExecutorTimeoutMs`, the sandbox budget for
+	// workflow-invoked exports and inline code, so the step records the
+	// sandbox's own timeout and run-record finish instead of being cut by the
+	// engine mid-write.
+	timeout: '6 minutes',
 }
-
-/**
- * Sandbox budget for workflow-invoked package exports / inline code.
- * Kept under the Cloudflare Workflow step timeout (`5 minutes`) so status
- * bookkeeping still has headroom after the sandbox returns.
- */
-export const workflowExecutorTimeoutMs = 270_000
 
 type DynamicCallableWorkflowStep = {
 	do(
@@ -212,6 +217,18 @@ type DynamicCallableWorkflowStep = {
 }
 
 const packageWorkflowTokenId = 'internal:package-workflows'
+
+/**
+ * Instances created before payloads carried lineage have no person behind
+ * them, so they hold no permissions.
+ */
+function workflowRequestSource(
+	payload: DynamicCallableWorkflowPayload,
+): RequestSource {
+	return payload.lineage
+		? { kind: 'inherited', lineage: payload.lineage }
+		: { kind: 'platform-event', sourceId: packageWorkflowTokenId }
+}
 const maxPackageWorkflowParamsJsonBytes = 16 * 1024
 const workflowStatusRefreshTtlMs = 30_000
 const knownWorkflowStatusValues = [
@@ -252,6 +269,13 @@ function readWorkflowInvocationErrorCode(response: {
 	return typeof code === 'string' && code.trim() ? code : null
 }
 
+function readWorkflowInvocationLogs(body: Record<string, unknown>) {
+	const logs = body['logs']
+	return Array.isArray(logs)
+		? logs.filter((line): line is string => typeof line === 'string')
+		: undefined
+}
+
 // Sandbox throws are HTTP 500 `execution_failed`; client mistakes are 4xx.
 // Known infrastructure codes and other 5xx/unexpected statuses stay plain Errors.
 function isPackageWorkflowUserCodeFailure(response: {
@@ -285,6 +309,11 @@ function normalizeNonEmptyString(value: string, fieldName: string) {
 		throw new Error(`${fieldName} must not be empty.`)
 	}
 	return trimmed
+}
+
+function normalizeOwnerId(value: OwnerId, fieldName: string): OwnerId {
+	const trimmed = normalizeNonEmptyString(value, fieldName)
+	return trimmed === value ? value : (trimmed as OwnerId)
 }
 
 export function normalizeWorkflowExportName(exportName: string) {
@@ -342,7 +371,7 @@ export function normalizePackageWorkflowParams(
 }
 
 export async function createPackageWorkflowInstanceId(input: {
-	userId: string
+	userId: OwnerId
 	packageId: string
 	workflowName: string
 	idempotencyKey: string
@@ -352,7 +381,7 @@ export async function createPackageWorkflowInstanceId(input: {
 	}
 }) {
 	const canonical = canonicalJsonStringify({
-		userId: normalizeNonEmptyString(input.userId, 'userId'),
+		userId: normalizeOwnerId(input.userId, 'userId'),
 		packageId: normalizeNonEmptyString(input.packageId, 'packageId'),
 		workflowName: normalizeNonEmptyString(input.workflowName, 'workflowName'),
 		idempotencyKey: normalizeNonEmptyString(
@@ -378,7 +407,7 @@ function normalizeWorkflowIdempotencyKey(idempotencyKey: string | undefined) {
 }
 
 function createInlineWorkflowPayload(input: {
-	userId: string
+	userId: OwnerId
 	packageContext?: {
 		packageId: string
 		kodyId: string
@@ -390,6 +419,7 @@ function createInlineWorkflowPayload(input: {
 	runAt?: string | Date
 	params?: PackageWorkflowParams | null
 	planDate?: string | null
+	lineage: RequestLineage | null
 }): DynamicCallableWorkflowPayload {
 	const runAt = normalizeRunAt(input.runAt)
 	const idempotencyKey = normalizeWorkflowIdempotencyKey(input.idempotencyKey)
@@ -397,7 +427,7 @@ function createInlineWorkflowPayload(input: {
 	return {
 		version: 3,
 		sourceType: 'inline',
-		userId: normalizeNonEmptyString(input.userId, 'userId'),
+		userId: normalizeOwnerId(input.userId, 'userId'),
 		packageContext: input.packageContext ?? null,
 		workflowName: normalizeOptionalWorkflowName(
 			input.workflowName,
@@ -408,11 +438,12 @@ function createInlineWorkflowPayload(input: {
 		runAt,
 		planDate: input.planDate?.trim() || createPackageWorkflowPlanDate(runAt),
 		...(params === undefined ? {} : { params }),
+		...(input.lineage ? { lineage: input.lineage } : {}),
 	}
 }
 
 function createDynamicPackageWorkflowPayload(input: {
-	userId: string
+	userId: OwnerId
 	packageId: string
 	kodyId: string
 	sourceId: string
@@ -422,6 +453,7 @@ function createDynamicPackageWorkflowPayload(input: {
 	runAt?: string | Date
 	params?: PackageWorkflowParams | null
 	planDate?: string | null
+	lineage: RequestLineage | null
 }): DynamicCallableWorkflowPayload {
 	const runAt = normalizeRunAt(input.runAt)
 	const idempotencyKey = normalizeWorkflowIdempotencyKey(input.idempotencyKey)
@@ -433,7 +465,7 @@ function createDynamicPackageWorkflowPayload(input: {
 	return {
 		version: 2,
 		sourceType: 'package',
-		userId: normalizeNonEmptyString(input.userId, 'userId'),
+		userId: normalizeOwnerId(input.userId, 'userId'),
 		packageId: normalizeNonEmptyString(input.packageId, 'packageId'),
 		kodyId: normalizeNonEmptyString(input.kodyId, 'kodyId'),
 		sourceId: normalizeNonEmptyString(input.sourceId, 'sourceId'),
@@ -443,6 +475,7 @@ function createDynamicPackageWorkflowPayload(input: {
 		runAt,
 		planDate: input.planDate?.trim() || createPackageWorkflowPlanDate(runAt),
 		...(params === undefined ? {} : { params }),
+		...(input.lineage ? { lineage: input.lineage } : {}),
 	}
 }
 
@@ -457,6 +490,7 @@ function validateDynamicCallableWorkflowPayload(
 	const params = normalizePackageWorkflowParams(
 		record['params'] as PackageWorkflowParams | null | undefined,
 	)
+	const lineage = parseRequestLineage(record['lineage'])
 	if (sourceType === 'inline') {
 		if (record['version'] !== 3) {
 			throw new Error('Inline workflow payload version must be 3.')
@@ -497,7 +531,7 @@ function validateDynamicCallableWorkflowPayload(
 				}
 			: null
 		return createInlineWorkflowPayload({
-			userId: String(record['userId'] ?? ''),
+			userId: String(record['userId'] ?? '') as OwnerId,
 			packageContext,
 			workflowName:
 				typeof record['workflowName'] === 'string'
@@ -509,11 +543,12 @@ function validateDynamicCallableWorkflowPayload(
 			params,
 			planDate:
 				typeof record['planDate'] === 'string' ? record['planDate'] : null,
+			lineage,
 		})
 	}
 	if (sourceType === 'package') {
 		return createDynamicPackageWorkflowPayload({
-			userId: String(record['userId'] ?? ''),
+			userId: String(record['userId'] ?? '') as OwnerId,
 			packageId: String(record['packageId'] ?? ''),
 			kodyId: String(record['kodyId'] ?? ''),
 			sourceId: String(record['sourceId'] ?? ''),
@@ -527,6 +562,7 @@ function validateDynamicCallableWorkflowPayload(
 			params,
 			planDate:
 				typeof record['planDate'] === 'string' ? record['planDate'] : null,
+			lineage,
 		})
 	}
 	throw new Error('Dynamic callable workflow payload sourceType is invalid.')
@@ -614,7 +650,7 @@ function createWorkflowCreateResultFromRow(
 
 function mapWorkflowProjectionToInspection(
 	projection: WorkflowProjectionRecord,
-	userId: string,
+	userId: OwnerId,
 ): WorkflowRunInspection {
 	const rawStatus = projection.status
 	const status =
@@ -647,7 +683,7 @@ function mapWorkflowProjectionToInspection(
  */
 export async function findWorkflowRunByIdempotencyKey(input: {
 	env: Pick<Env, 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	idempotencyKey: string
 	bindingName?: WorkflowBindingName
 }): Promise<WorkflowRunInspection | null> {
@@ -667,7 +703,7 @@ export async function findWorkflowRunByIdempotencyKey(input: {
 
 async function getWorkflowRunForUser(input: {
 	env: Pick<Env, 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	id: string
 }): Promise<WorkflowRunInspection | null> {
 	const projection = await getWorkflowProjection({
@@ -746,7 +782,7 @@ function payloadFromWorkflowInspection(
 }
 
 async function createInlineWorkflowInstanceId(input: {
-	userId: string
+	userId: OwnerId
 	workflowName: string
 	idempotencyKey: string
 	runAt: string | Date
@@ -755,7 +791,7 @@ async function createInlineWorkflowInstanceId(input: {
 	}
 }) {
 	const canonical = canonicalJsonStringify({
-		userId: normalizeNonEmptyString(input.userId, 'userId'),
+		userId: normalizeOwnerId(input.userId, 'userId'),
 		sourceType: 'inline',
 		workflowName: normalizeNonEmptyString(input.workflowName, 'workflowName'),
 		idempotencyKey: normalizeNonEmptyString(
@@ -787,7 +823,7 @@ function isTerminalWorkflowStatus(status: string | null | undefined): boolean {
 
 async function projectWorkflowRun(input: {
 	env: Pick<Env, 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	id: string
 	payload: DynamicCallableWorkflowPayload
 	status: string | null
@@ -867,13 +903,14 @@ function assertWorkflowCreateBodyShape(body: PackageWorkflowCreateInput): {
 
 async function resolveWorkflowPayload(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	packageContext?: {
 		packageId: string
 		kodyId: string
 		sourceId?: string | null
 	} | null
 	body: PackageWorkflowCreateInput
+	lineage: RequestLineage
 }): Promise<DynamicCallableWorkflowPayload> {
 	const body = input.body as PackageWorkflowCreateInput &
 		Record<string, unknown>
@@ -887,6 +924,7 @@ async function resolveWorkflowPayload(input: {
 			idempotencyKey: input.body.idempotencyKey,
 			runAt: input.body.runAt,
 			params: input.body.params,
+			lineage: input.lineage,
 		})
 	}
 	const packageIdOrKodyId =
@@ -897,15 +935,10 @@ async function resolveWorkflowPayload(input: {
 			'workflows.create requires packageId when exportName is used outside package runtime context.',
 		)
 	}
-	const savedPackage =
-		(await getSavedPackageById(input.env.APP_DB, {
-			userId: input.userId,
-			packageId: packageIdOrKodyId,
-		})) ??
-		(await getSavedPackageByKodyId(input.env.APP_DB, {
-			userId: input.userId,
-			kodyId: packageIdOrKodyId,
-		}))
+	const savedPackage = await resolveSavedPackageRef(input.env.APP_DB, {
+		userId: input.userId,
+		ref: packageIdOrKodyId,
+	})
 	if (!savedPackage) {
 		throw new Error(
 			`Package "${packageIdOrKodyId}" was not found or is not owned by the current user.`,
@@ -921,12 +954,13 @@ async function resolveWorkflowPayload(input: {
 		idempotencyKey: input.body.idempotencyKey,
 		runAt: input.body.runAt,
 		params: input.body.params,
+		lineage: input.lineage,
 	})
 }
 
 export async function createDynamicCallableWorkflow(input: {
 	env: Pick<Env, 'APP_DB' | 'DYNAMIC_CALLABLE_WORKFLOWS' | 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	userEmail?: string | null
 	packageContext?: {
 		packageId: string
@@ -934,6 +968,8 @@ export async function createDynamicCallableWorkflow(input: {
 		sourceId?: string | null
 	} | null
 	body: PackageWorkflowCreateInput
+	/** The run that starts the workflow; every step inherits it. */
+	lineage: RequestLineage
 }): Promise<PackageWorkflowCreateResult> {
 	const env = input.env as Env
 	const workflowBinding = resolveWorkflowEngineBinding(
@@ -957,12 +993,48 @@ export async function createDynamicCallableWorkflow(input: {
 		}
 	}
 	const payload = await resolveWorkflowPayload(input)
-	const id = await createDynamicCallableWorkflowInstanceId(payload, {
-		// An explicit idempotency key must single-flight even before the
-		// RunLog projection row is written.
+	// An explicit idempotency key must single-flight even before the
+	// RunLog projection row is written. After a key release the deterministic
+	// engine id (and any later successors) stay occupied, so walk the
+	// `:after:<occupiedId>` chain until an unused id is free or a projection
+	// still holds the semantic key.
+	const maxSuccessorGenerations = 16
+	let id = await createDynamicCallableWorkflowInstanceId(payload, {
 		includeRunAt: !idempotencyKeyInput,
 	})
-	const existing = await getExistingWorkflowInstance(workflowBinding, id)
+	let existing = await getExistingWorkflowInstance(workflowBinding, id)
+	if (idempotencyKeyInput) {
+		for (
+			let generation = 0;
+			generation < maxSuccessorGenerations;
+			generation += 1
+		) {
+			const projectionForId = await getWorkflowProjection({
+				env,
+				userId: input.userId,
+				id,
+			})
+			if (projectionForId?.idempotencyKey === idempotencyKeyInput) {
+				break
+			}
+			if (!projectionForId && !existing) {
+				break
+			}
+			if (!projectionForId && existing) {
+				// Engine instance without a projection — reclaim below.
+				break
+			}
+			const occupiedId = existing?.id ?? projectionForId!.id
+			id = await createDynamicCallableWorkflowInstanceId(
+				{
+					...payload,
+					idempotencyKey: `${idempotencyKeyInput}:after:${occupiedId}`,
+				},
+				{ includeRunAt: false },
+			)
+			existing = await getExistingWorkflowInstance(workflowBinding, id)
+		}
+	}
 	if (existing) {
 		await projectWorkflowRun({
 			env,
@@ -1101,7 +1173,7 @@ export type CancelWorkflowRunResult =
 
 export async function cancelWorkflowRunForUser(input: {
 	env: Pick<Env, 'DYNAMIC_CALLABLE_WORKFLOWS' | 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	workflowRunId: string
 }): Promise<CancelWorkflowRunResult> {
 	const env = input.env as Env
@@ -1283,9 +1355,45 @@ export async function cancelWorkflowRunForUser(input: {
 	}
 }
 
+/**
+ * Terminate every non-terminal workflow run the user owns (account deletion).
+ * Each run goes through {@link cancelWorkflowRunForUser}, so a run that is
+ * still `creating` throws and the caller retries instead of leaving an engine
+ * instance running after the account's storage is purged.
+ */
+export async function cancelActiveWorkflowRunsForUser(input: {
+	env: Pick<Env, 'DYNAMIC_CALLABLE_WORKFLOWS' | 'RUN_LOG'>
+	userId: OwnerId
+}): Promise<number> {
+	const env = input.env as Env
+	let cancelled = 0
+	for (const status of workflowProjectionReservationStatuses) {
+		let cursor: string | null = null
+		do {
+			const page = await listWorkflowProjections({
+				env,
+				userId: input.userId,
+				status,
+				cursor,
+				limit: runRecordMaxPageSize,
+			})
+			for (const projection of page.projections) {
+				const result = await cancelWorkflowRunForUser({
+					env,
+					userId: input.userId,
+					workflowRunId: projection.id,
+				})
+				if (result.outcome === 'cancelled') cancelled += 1
+			}
+			cursor = page.nextCursor
+		} while (cursor)
+	}
+	return cancelled
+}
+
 export async function listWorkflowRunsForUser(input: {
 	env: Pick<Env, 'DYNAMIC_CALLABLE_WORKFLOWS' | 'RUN_LOG'>
-	userId: string
+	userId: OwnerId
 	limit?: number
 }): Promise<Array<WorkflowRunInspection>> {
 	const env = input.env as Env
@@ -1470,6 +1578,8 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 					entityId: input.instanceId,
 					durationMs: Date.now() - input.startedAtMs,
 					outcome: input.outcome,
+					actorUserId: '',
+					automationSource: 'schedule',
 				})
 				return { ok: true }
 			},
@@ -1500,11 +1610,12 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 				this.ctx.waitUntil(promise)
 			},
 		})
+		let logs: Array<string> | undefined
 		try {
 			// Ephemeral + raised timeout: Workflow step.do already caches
 			// successful results. Keyed invoke would replay a sandbox timeout
-			// on retry (~ms) instead of re-executing; the default 90s export
-			// cap is also below the 5-minute step window.
+			// on retry (~ms) instead of re-executing. The background budget
+			// replaces the 90s interactive export cap.
 			const response = await invokePackageExport({
 				env: this.env,
 				baseUrl: getAppBaseUrl({
@@ -1515,6 +1626,7 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 					userId: payload.userId,
 					packageId: payload.packageId,
 					exportNames: [payload.exportName],
+					request: workflowRequestSource(payload),
 				},
 				request: {
 					packageIdOrKodyId: payload.packageId,
@@ -1525,8 +1637,9 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 					topic: payload.workflowName,
 				},
 				ephemeral: true,
-				executorTimeoutMs: workflowExecutorTimeoutMs,
+				executorTimeoutMs: backgroundExecutorTimeoutMs,
 			})
+			logs = readWorkflowInvocationLogs(response.body)
 			if (
 				readWorkflowInvocationErrorCode(response) === accountSuspendedErrorCode
 			) {
@@ -1543,6 +1656,8 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 				env: this.env,
 				handle: runHandle,
 				status: 'success',
+				logs,
+				result: response.body['result'],
 			})
 			return result
 		} catch (error) {
@@ -1550,6 +1665,7 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 				env: this.env,
 				handle: runHandle,
 				status: 'error',
+				logs,
 				error,
 			})
 			throw error
@@ -1585,6 +1701,7 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 						storageId: null,
 					}
 				: null,
+			source: workflowRequestSource(payload),
 		})
 		const runHandle = beginRunRecord({
 			env: this.env,
@@ -1610,7 +1727,7 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 				payload.params,
 				{
 					packageContext: payload.packageContext,
-					executorTimeoutMs: workflowExecutorTimeoutMs,
+					executorTimeoutMs: backgroundExecutorTimeoutMs,
 					runSurface: 'workflow',
 				},
 			)
@@ -1621,13 +1738,15 @@ export class DynamicCallableWorkflowBase extends WorkflowEntrypoint<
 				}
 				throw new UserCodeError(getErrorMessage(result.error))
 			}
+			const value = toJsonSafeValue(result.result) as JsonValue
 			await finishRunRecord({
 				env: this.env,
 				handle: runHandle,
 				status: 'success',
 				logs,
+				result: value,
 			})
-			return toJsonSafeValue(result.result) as JsonValue
+			return value
 		} catch (error) {
 			await finishRunRecord({
 				env: this.env,

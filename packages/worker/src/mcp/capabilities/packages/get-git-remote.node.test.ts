@@ -1,3 +1,8 @@
+import { type OrgPermission } from '@kody-internal/shared/org-permissions.ts'
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -5,7 +10,7 @@ import { KODY_DESCRIPTION_MAX_LENGTH } from '#worker/package-registry/types.ts'
 
 const mockModule = vi.hoisted(() => ({
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	getEntitySourceByIdForUser: vi.fn(),
 	markEntitySourcePendingExternalReconcile: vi.fn(),
 	resolveExistingArtifactSourceRepo: vi.fn(),
@@ -14,26 +19,24 @@ const mockModule = vi.hoisted(() => ({
 	listServerRefs: vi.fn(),
 }))
 
-vi.mock('isomorphic-git', () => ({
-	default: {
-		listServerRefs: (...args: Array<unknown>) =>
-			mockModule.listServerRefs(...args),
-	},
-}))
-
-vi.mock('isomorphic-git/http/web', () => ({
-	default: {},
+vi.mock('#worker/repo/isomorphic-git-lazy.ts', () => ({
+	loadIsomorphicGit: async () => ({
+		git: {
+			listServerRefs: (...args: Array<unknown>) =>
+				mockModule.listServerRefs(...args),
+		},
+		http: {},
+	}),
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/package-registry/package-owner.ts', () => ({
-	packageScopeInputDescription: 'package scope',
 	resolvePackageOwnerContext: (...args: Array<unknown>) =>
 		mockModule.resolvePackageOwnerContext(...args),
 }))
@@ -62,11 +65,10 @@ vi.mock('./create-stub-package.ts', () => ({
 const { getGitRemoteCapability } = await import('./get-git-remote.ts')
 
 const personalOwner = {
-	ownerUserId: 'user-1',
+	ownerUserId: ownerIdFromStored('user-1'),
 	ownerScope: 'kentcdodds',
 	ownerEmail: 'user-1@example.com',
 	actorUserId: 'user-1',
-	delegated: false,
 }
 const invalidInput = 'Invalid input for capability "packageGetGitRemote"'
 const createRequiresLeaf =
@@ -83,9 +85,32 @@ type GitRemoteResult = {
 	setup_commands: Array<string>
 }
 
+function callerContextWithScopes(scopes: Array<OrgPermission> | null) {
+	const callerContext = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
+		baseUrl: 'https://heykody.dev',
+		user: {
+			userId: personIdFromStored('user-1'),
+			email: 'user-1@example.com',
+			displayName: 'user-1',
+		},
+	})
+	if (!scopes || !callerContext.request) return callerContext
+	return {
+		...callerContext,
+		request: {
+			...callerContext.request,
+			credential: { ...callerContext.request.credential, scopes },
+		},
+	}
+}
+
 async function getRemote(
 	args: Record<string, unknown>,
-	{ snapshot = createPublishedSnapshot() }: { snapshot?: unknown } = {},
+	{
+		snapshot = createPublishedSnapshot(),
+		scopes = null,
+	}: { snapshot?: unknown; scopes?: Array<OrgPermission> | null } = {},
 ) {
 	const result = await getGitRemoteCapability.handler(args, {
 		env: {
@@ -96,14 +121,7 @@ async function getRemote(
 				},
 			},
 		} as unknown as Env,
-		callerContext: createMcpCallerContext({
-			baseUrl: 'https://heykody.dev',
-			user: {
-				userId: 'user-1',
-				email: 'user-1@example.com',
-				displayName: 'user-1',
-			},
-		}),
+		callerContext: callerContextWithScopes(scopes),
 	})
 	return result as GitRemoteResult
 }
@@ -136,12 +154,13 @@ function createPublishedSnapshot() {
 function mockPackageSource(sourceUserId = 'user-1') {
 	const savedPackage = {
 		id: 'package-1',
+		userId: sourceUserId,
 		kodyId: 'unleashed-wifi',
 		name: '@kentcdodds/unleashed-wifi',
 		sourceId: 'source-1',
 	}
 	mockModule.getSavedPackageById.mockResolvedValue(savedPackage)
-	mockModule.getSavedPackageByKodyId.mockResolvedValue(savedPackage)
+	mockModule.resolveSavedPackageRef.mockResolvedValue(savedPackage)
 	mockModule.getEntitySourceByIdForUser.mockImplementation(
 		async (_db: unknown, input: { id: string; userId: string }) => {
 			if (input.userId !== sourceUserId) return null
@@ -184,7 +203,7 @@ function stubCreatedPackage(
 	ownerUserId = 'user-1',
 	name = '@kentcdodds/unleashed-wifi',
 ) {
-	mockModule.getSavedPackageByKodyId.mockResolvedValueOnce(null)
+	mockModule.resolveSavedPackageRef.mockResolvedValueOnce(null)
 	mockModule.createStubSavedPackage.mockImplementation(async () => {
 		mockPackageSource(ownerUserId)
 		return { packageId: 'package-1', kodyId: 'unleashed-wifi', name }
@@ -194,14 +213,26 @@ function stubCreatedPackage(
 test('get_git_remote rejects invalid input before creating stubs', async () => {
 	for (const [args, message] of [
 		[{}, 'Provide exactly one of `package_id` or the package name leaf.'],
-		[{ package_id: 'package-1', create: true }, createRequiresLeaf],
-		[{ create: true }, createRequiresLeaf],
 		[{ package_id: 'package-1', ttl_seconds: 59 }, invalidInput],
 		[{ package_id: 'package-1', ttl_seconds: 86_401 }, invalidInput],
 	] as const) {
 		resetMocks()
 		mockPackageSource()
 		await expect(getRemote(args)).rejects.toThrow(message)
+		expect(mockModule.createStubSavedPackage).not.toHaveBeenCalled()
+	}
+
+	for (const args of [
+		{ package_id: 'package-1', create: true },
+		{ create: true },
+	] as const) {
+		resetMocks()
+		mockPackageSource()
+		const createRequiresError = await getRemote(args).catch(
+			(error: unknown) => error,
+		)
+		expect(createRequiresError).toBeInstanceOf(McpCallerError)
+		expect(createRequiresError).toMatchObject({ message: createRequiresLeaf })
 		expect(mockModule.createStubSavedPackage).not.toHaveBeenCalled()
 	}
 
@@ -221,13 +252,13 @@ test('get_git_remote rejects invalid input before creating stubs', async () => {
 	resetMocks()
 	mockModule.getSavedPackageById.mockResolvedValue(null)
 	await expect(getRemote({ package_id: 'missing' })).rejects.toThrow(
-		'Saved package "missing" was not found.',
+		'Saved package "missing" was not found in @kentcdodds, the org this connection is bound to. packageList lists the saved packages @kentcdodds owns with their package_id; to use a package another org owns, bind the connection to that org.',
 	)
 
 	resetMocks()
 	mockPackageSource('other-user')
 	await expect(getRemote({ package_id: 'package-1' })).rejects.toThrow(
-		'Repo source was not found for this user.',
+		'Saved package "@kentcdodds/unleashed-wifi" (package_id package-1) is missing its repo source record "source-1". This is a missing source record, not an org-binding problem: the package row exists in @kentcdodds but its source does not. Repair the source record or recreate the package.',
 	)
 })
 
@@ -245,12 +276,13 @@ test('get_git_remote returns scoped write and read artifact remotes', async () =
 		mockModule.markEntitySourcePendingExternalReconcile,
 	).toHaveBeenCalledWith(expect.anything(), {
 		id: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		tokenExpiresAt: writeResult.expires_at,
 	})
 	expect(writeResult).toMatchObject({
 		package_id: 'package-1',
 		kody_id: 'unleashed-wifi',
+		slug: 'unleashed-wifi',
 		created: false,
 		remote,
 		scope: 'write',
@@ -263,9 +295,6 @@ test('get_git_remote returns scoped write and read artifact remotes', async () =
 		'https://x:art_v1_write_token@',
 	)
 	expect(writeResult.setup_commands.length).toBeGreaterThan(0)
-	expect(
-		writeResult.setup_commands.every((command) => typeof command === 'string'),
-	).toBe(true)
 	expect(mockModule.listServerRefs).toHaveBeenCalledWith(
 		expect.objectContaining({
 			protocolVersion: 1,
@@ -295,6 +324,39 @@ test('get_git_remote returns scoped write and read artifact remotes', async () =
 	).not.toHaveBeenCalled()
 })
 
+test('get_git_remote mints read remotes with package:read and needs package:write or package:create for more', async () => {
+	resetMocks()
+	const { createToken } = mockPackageSource()
+	await expect(
+		getRemote(
+			{ package_id: 'package-1', scope: 'read' },
+			{ scopes: ['package:read'] },
+		),
+	).resolves.toMatchObject({ scope: 'read' })
+
+	createToken.mockClear()
+	await expect(
+		getRemote({ package_id: 'package-1' }, { scopes: ['package:read'] }),
+	).rejects.toMatchObject({
+		code: 'credential_scope',
+		permission: 'package:write',
+	})
+	expect(createToken).not.toHaveBeenCalled()
+
+	resetMocks()
+	stubCreatedPackage()
+	await expect(
+		getRemote(
+			{ kody_id: 'unleashed-wifi', create: true, scope: 'read' },
+			{ scopes: ['package:read'] },
+		),
+	).rejects.toMatchObject({
+		code: 'credential_scope',
+		permission: 'package:create',
+	})
+	expect(mockModule.createStubSavedPackage).not.toHaveBeenCalled()
+})
+
 test('get_git_remote retries remote timeouts and write scope blocks without a restorable backup snapshot', async () => {
 	resetMocks()
 	mockPackageSource()
@@ -313,7 +375,7 @@ test('get_git_remote retries remote timeouts and write scope blocks without a re
 	).rejects.toThrow('Stop and report this source recovery problem')
 })
 
-test('get_git_remote create mode registers stubs for owner and delegated scopes', async () => {
+test('get_git_remote create mode registers stubs for personal and org-bound owners', async () => {
 	resetMocks()
 	stubCreatedPackage()
 	const createdResult = await getRemote({
@@ -354,10 +416,10 @@ test('get_git_remote create mode registers stubs for owner and delegated scopes'
 		kody_id: '  unleashed-wifi  ',
 		create: true,
 	})
-	expect(mockModule.getSavedPackageByKodyId).toHaveBeenNthCalledWith(
+	expect(mockModule.resolveSavedPackageRef).toHaveBeenNthCalledWith(
 		1,
 		expect.anything(),
-		expect.objectContaining({ kodyId: 'unleashed-wifi' }),
+		expect.objectContaining({ ref: 'unleashed-wifi' }),
 	)
 	expect(mockModule.createStubSavedPackage).toHaveBeenCalledWith(
 		expect.objectContaining({ kodyId: 'unleashed-wifi' }),
@@ -368,43 +430,42 @@ test('get_git_remote create mode registers stubs for owner and delegated scopes'
 	})
 
 	resetMocks()
-	const delegatedOwner = {
-		ownerUserId: 'platform-owner',
-		ownerScope: 'kody',
-		ownerEmail: 'kody@example.com',
+	const orgOwner = {
+		ownerUserId: ownerIdFromStored('org-owner'),
+		ownerScope: 'acme',
+		ownerEmail: 'acme@example.com',
 		actorUserId: 'user-1',
-		delegated: true,
 	}
-	mockModule.resolvePackageOwnerContext.mockResolvedValue(delegatedOwner)
-	stubCreatedPackage('platform-owner', '@kody/unleashed-wifi')
-	const delegatedResult = await getRemote({
+	mockModule.resolvePackageOwnerContext.mockResolvedValue(orgOwner)
+	stubCreatedPackage('org-owner', '@acme/unleashed-wifi')
+	const orgResult = await getRemote({
 		kody_id: 'unleashed-wifi',
 		create: true,
-		package_scope: 'kody',
 	})
 	expect(mockModule.resolvePackageOwnerContext).toHaveBeenCalledWith(
 		expect.anything(),
-		expect.objectContaining({ userId: 'user-1' }),
-		'kody',
+		expect.objectContaining({
+			user: expect.objectContaining({ userId: ownerIdFromStored('user-1') }),
+		}),
 	)
 	const ownerLookup = [
 		expect.anything(),
 		expect.objectContaining({
-			userId: 'platform-owner',
-			kodyId: 'unleashed-wifi',
+			userId: ownerIdFromStored('org-owner'),
+			ref: 'unleashed-wifi',
 		}),
 	]
-	expect(mockModule.getSavedPackageByKodyId.mock.calls).toEqual([
+	expect(mockModule.resolveSavedPackageRef.mock.calls).toEqual([
 		ownerLookup,
 		ownerLookup,
 	])
 	expect(mockModule.createStubSavedPackage).toHaveBeenCalledWith(
 		expect.objectContaining({
-			owner: delegatedOwner,
+			owner: orgOwner,
 			kodyId: 'unleashed-wifi',
 		}),
 	)
-	expect(delegatedResult).toMatchObject({
+	expect(orgResult).toMatchObject({
 		created: true,
 		package_id: 'package-1',
 	})

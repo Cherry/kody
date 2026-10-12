@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import { parseListingOwnerUsername } from '#universal/community-links.ts'
@@ -23,11 +24,10 @@ import {
 import { buildPackageReadmeDetail } from '#worker/package-registry/package-readme.ts'
 import {
 	getSavedPackageById,
-	getSavedPackageByKodyId,
+	resolveSavedPackageRef,
 	getSavedPackageByName,
 	updateSavedPackage,
 } from '#worker/package-registry/repo.ts'
-import { rewriteForkedPackageSelfReferences } from '#worker/package-registry/platform-package-policy.ts'
 import { loadPackageSourceBySourceId } from '#worker/package-registry/source.ts'
 import {
 	cleanupArtifactReposForPackage,
@@ -45,10 +45,15 @@ import {
 import {
 	forkArtifactRepo,
 	persistForkedArtifactRepoContents,
+	resolveCommunityForkArtifactsGitFallbackTree,
 	shouldFallbackFromArtifactFork,
+	shouldFallbackFromForkedArtifactPersist,
 } from '#worker/repo/artifact-repo-fork.ts'
 import { readPublishedSourceSnapshot } from '#worker/package-runtime/published-runtime-artifacts.ts'
-import { ensureEntitySource } from '#worker/repo/source-service.ts'
+import {
+	ensureEntitySource,
+	type EnsuredEntitySource,
+} from '#worker/repo/source-service.ts'
 import { syncArtifactSourceSnapshot } from '#worker/repo/source-sync.ts'
 import { shouldStripIdentityIconFromCommunitySnapshot } from '#worker/repo/identity-icon-paths.ts'
 import {
@@ -72,7 +77,7 @@ import {
 } from './listing-published-dispatch-queue-producer.ts'
 import { type CommunityListingPublishedProjection } from './listing-published-subscription-event.ts'
 import {
-	deletePackageKodyIdRedirects,
+	deletePackageSlugRedirects,
 	getCommunityPackageHref,
 } from './package-url.ts'
 import {
@@ -124,8 +129,10 @@ import {
 	deleteCommunityActivityEventsByListingId,
 	insertCommunityActivityEvent,
 } from './profile-repo.ts'
+import { resolveCommunityForkAlternateLeaf } from './allocate-fork-leaf.ts'
 import {
 	collectChangedForkFiles,
+	rewriteForkedPackageSelfReferences,
 	rewritePackageManifestForFork,
 	scanCrossScopeReferences,
 } from './fork-scan.ts'
@@ -353,7 +360,7 @@ function buildRepeatForkErrorMessage(input: {
 
 async function cleanupFailedCommunityFork(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sourceId: string
 	packageId: string
 }) {
@@ -419,14 +426,14 @@ async function cleanupFailedCommunityFork(input: {
 			}),
 		)
 	})
-	await deletePackageKodyIdRedirects({
+	await deletePackageSlugRedirects({
 		db: input.env.APP_DB,
 		userId: input.userId,
 		packageId: input.packageId,
 	}).catch((error) => {
 		console.warn(
 			JSON.stringify({
-				message: 'community fork kody id redirect cleanup failed',
+				message: 'community fork slug redirect cleanup failed',
 				userId: input.userId,
 				packageId: input.packageId,
 				sourceId: input.sourceId,
@@ -594,10 +601,10 @@ async function restoreCommunityListingAfterPublishFailure(input: {
 export async function publishCommunityListing(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	/**
-	 * Acting user on delegated (package scope grant) publishes. Community bans
-	 * must bind to the person acting, not just the owning platform account.
+	 * Acting person when the owner is an org. Community bans bind to the
+	 * person acting, not just the owning org.
 	 */
 	actorUserId?: string
 	packageId: string
@@ -612,11 +619,11 @@ export async function publishCommunityListing(input: {
 		packageId: input.packageId,
 	})
 	if (!savedPackage) {
-		// Missing / wrong-owner package_id (including delegated package_scope
-		// mismatches) is caller-clearable. CommunityActionError keeps these on
-		// mcp-event lines and out of Sentry (KODY-CLOUDFLARE-5B).
+		// Missing / wrong-owner package_id is caller-clearable.
+		// CommunityActionError keeps these on mcp-event lines and out of Sentry
+		// (KODY-CLOUDFLARE-5B).
 		throw new CommunityActionError(
-			`Saved package "${input.packageId}" was not found for this package owner. Confirm package_id with search({ domain: "packages" }) and that package_scope matches the account that owns it.`,
+			`Saved package "${input.packageId}" was not found in this org. Confirm package_id with search({ domain: "packages" }) and that this connection is bound to the org that owns it.`,
 		)
 	}
 
@@ -836,11 +843,10 @@ export async function publishCommunityListing(input: {
 
 export async function unpublishCommunityListing(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	/**
-	 * Acting user on delegated (package scope grant) unpublishes. Community
-	 * bans must bind to the person acting, not just the owning platform
-	 * account.
+	 * Acting member when an org unpublishes. Community bans must bind to the
+	 * person acting, not just the owning org.
 	 */
 	actorUserId?: string
 	listingId: string
@@ -1299,7 +1305,7 @@ export async function getCommunityListingPublishedForAdmin(input: {
 export type PrepareCommunityForkInput = {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	expectedPackageScope: string
 	listingId: string
 	kodyId?: string
@@ -1321,7 +1327,7 @@ export type PrepareCommunityForkInput = {
 export type PreparedCommunityFork = {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	listingId: string
 	listingName: string
 	listingKodyId: string
@@ -1438,7 +1444,91 @@ export async function prepareCommunityFork(
 		throw new Error('Catalog entry snapshot is missing package.json.')
 	}
 
-	const targetKodyId = input.kodyId?.trim() || listing.kodyId
+	const explicitKodyId = input.kodyId?.trim() || undefined
+	const preferredKodyId = explicitKodyId || listing.kodyId
+	const packageScope = input.expectedPackageScope.replace(/^@/, '')
+	const scopedName = (leaf: string) => `@${packageScope}/${leaf}`
+	const [existingByKody, existingByName, existingForks] = await Promise.all([
+		resolveSavedPackageRef(input.env.APP_DB, {
+			userId: input.userId,
+			ref: preferredKodyId,
+			match: 'slug',
+		}),
+		getSavedPackageByName(input.env.APP_DB, {
+			userId: input.userId,
+			name: scopedName(preferredKodyId),
+		}),
+		listCommunityForksByListingAndUser(input.env.APP_DB, {
+			listingId: input.listingId,
+			userId: input.userId,
+		}),
+	])
+	const collidingFork = existingForks.find(
+		(fork) => fork.targetKodyId === preferredKodyId,
+	)
+	let targetKodyId = preferredKodyId
+	if (existingByKody || existingByName) {
+		// A fork row for this listing at the preferred leaf is a repeat fork
+		// (Installed / adaptation_required). An unrelated same-leaf package —
+		// no fork linkage — used to make one-click Install/Fork fail on the
+		// default leaf. Auto-pick the next free leaf only for that default
+		// path; an explicit leaf still errors so callers keep control.
+		if (!explicitKodyId && !collidingFork) {
+			// Already forked this listing under another leaf (for example the
+			// previous default auto-picked leaf-2). Do not silently mint leaf-3;
+			// resume the existing fork or pass an explicit different leaf.
+			const existingAlternateFork =
+				existingForks.length > 0
+					? existingForks[existingForks.length - 1]
+					: null
+			if (existingAlternateFork) {
+				throw new CommunityActionError(
+					buildRepeatForkErrorMessage({
+						targetKodyId: existingAlternateFork.targetKodyId,
+						forkedSourceId: existingAlternateFork.forkedSourceId,
+						forkedPackageId: existingAlternateFork.forkedPackageId,
+					}),
+				)
+			}
+			const alternate = await resolveCommunityForkAlternateLeaf({
+				preferredLeaf: preferredKodyId,
+				reservedLeaves: new Set(existingForks.map((fork) => fork.targetKodyId)),
+				isLeafTaken: async (leaf) => {
+					const [byKody, byName] = await Promise.all([
+						resolveSavedPackageRef(input.env.APP_DB, {
+							userId: input.userId,
+							ref: leaf,
+							match: 'slug',
+						}),
+						getSavedPackageByName(input.env.APP_DB, {
+							userId: input.userId,
+							name: scopedName(leaf),
+						}),
+					])
+					return Boolean(byKody || byName)
+				},
+			})
+			if (!alternate) {
+				throw new CommunityActionError(
+					`You already have a saved package named "${preferredKodyId}". Pass a different package name leaf to fork this listing.`,
+				)
+			}
+			targetKodyId = alternate
+		} else {
+			throw new CommunityActionError(
+				`You already have a saved package named "${preferredKodyId}". Pass a different package name leaf to fork this listing.`,
+			)
+		}
+	} else if (collidingFork) {
+		throw new CommunityActionError(
+			buildRepeatForkErrorMessage({
+				targetKodyId: preferredKodyId,
+				forkedSourceId: collidingFork.forkedSourceId,
+				forkedPackageId: collidingFork.forkedPackageId,
+			}),
+		)
+	}
+
 	let rewrittenManifest: ReturnType<typeof rewritePackageManifestForFork>
 	try {
 		rewrittenManifest = rewritePackageManifestForFork({
@@ -1457,35 +1547,16 @@ export async function prepareCommunityFork(
 	} catch (error) {
 		throw new CommunityActionError(getErrorMessage(error))
 	}
-	const [existingByKody, existingByName, existingForks] = await Promise.all([
-		getSavedPackageByKodyId(input.env.APP_DB, {
-			userId: input.userId,
-			kodyId: targetKodyId,
-		}),
-		getSavedPackageByName(input.env.APP_DB, {
-			userId: input.userId,
-			name: rewrittenManifest.targetName,
-		}),
-		listCommunityForksByListingAndUser(input.env.APP_DB, {
-			listingId: input.listingId,
-			userId: input.userId,
-		}),
-	])
-	if (existingByKody || existingByName) {
-		throw new CommunityActionError(
-			`You already have a saved package named "${targetKodyId}". Pass a different package name leaf to fork this listing.`,
-		)
-	}
 
-	const collidingFork = existingForks.find(
+	const collidingForkAtTarget = existingForks.find(
 		(fork) => fork.targetKodyId === targetKodyId,
 	)
-	if (collidingFork) {
+	if (collidingForkAtTarget) {
 		throw new CommunityActionError(
 			buildRepeatForkErrorMessage({
 				targetKodyId,
-				forkedSourceId: collidingFork.forkedSourceId,
-				forkedPackageId: collidingFork.forkedPackageId,
+				forkedSourceId: collidingForkAtTarget.forkedSourceId,
+				forkedPackageId: collidingForkAtTarget.forkedPackageId,
 			}),
 		)
 	}
@@ -1564,7 +1635,7 @@ export async function persistPreparedCommunityFork(
 			}
 		}
 	}
-	let ensuredSource
+	let ensuredSource: EnsuredEntitySource
 	try {
 		ensuredSource = await ensureEntitySource({
 			db: prepared.env.APP_DB,
@@ -1587,21 +1658,97 @@ export async function persistPreparedCommunityFork(
 	}
 	try {
 		let originCommit = prepared.originCommit
+		let syncedFiles = prepared.files
 		if (copiedAtStorageLayer) {
-			const persisted = await persistForkedArtifactRepoContents({
-				env: prepared.env,
-				baseUrl: prepared.baseUrl,
-				userId: prepared.userId,
-				source: ensuredSource,
-				originCommit: prepared.originCommit,
-				expectedPackageScope: prepared.expectedPackageScope,
-				targetKodyId: prepared.targetKodyId,
-				changedFiles: prepared.changedFiles,
-				files: prepared.files,
-				bootstrapAccess: ensuredSource.bootstrapAccess ?? null,
-				serverTiming,
-			})
-			originCommit = persisted.copiedOriginCommit
+			try {
+				const persisted = await persistForkedArtifactRepoContents({
+					env: prepared.env,
+					baseUrl: prepared.baseUrl,
+					userId: prepared.userId,
+					source: ensuredSource,
+					originCommit: prepared.originCommit,
+					expectedPackageScope: prepared.expectedPackageScope,
+					targetKodyId: prepared.targetKodyId,
+					changedFiles: prepared.changedFiles,
+					files: prepared.files,
+					bootstrapAccess: ensuredSource.bootstrapAccess ?? null,
+					serverTiming,
+				})
+				originCommit = persisted.copiedOriginCommit
+			} catch (error) {
+				// Storage-layer fork can leave a dest whose git clone fails with
+				// persistent Artifacts HTTP 5xx / corrupt pack even when origin
+				// is healthy. Fall back to writing a full tree into a fresh empty
+				// repo. Prefer dest HEAD from origin when preparation still holds
+				// an older listing-pin snapshot.
+				if (!shouldFallbackFromForkedArtifactPersist(error)) {
+					throw error
+				}
+				const fallbackTree = await resolveCommunityForkArtifactsGitFallbackTree(
+					{
+						env: prepared.env,
+						destRepoId,
+						originRepoId: prepared.originRepoId,
+						preparedOriginCommit: prepared.originCommit,
+						preparedFiles: prepared.files,
+						expectedPackageScope: prepared.expectedPackageScope,
+						targetKodyId: prepared.targetKodyId,
+						listingName: prepared.listingName,
+						targetName: prepared.targetName,
+					},
+				)
+				if (!fallbackTree) {
+					throw error
+				}
+				const destDeleted = await deleteUserScopedArtifactRepo({
+					env: prepared.env,
+					userId: prepared.userId,
+					repoName: destRepoId,
+					waitUntilAbsent: true,
+				})
+				if (!destDeleted) {
+					throw error
+				}
+				console.info(
+					JSON.stringify({
+						message: 'community-fork-artifacts-git-fallback',
+						listingId: prepared.listingId,
+						packageId: prepared.packageId,
+						sourceId: ensuredSource.id,
+						originCommit: fallbackTree.originCommit,
+						preparedOriginCommit: prepared.originCommit,
+						error: getErrorMessage(error),
+					}),
+				)
+				copiedAtStorageLayer = false
+				ensuredSource = await ensureEntitySource({
+					db: prepared.env.APP_DB,
+					env: prepared.env,
+					userId: prepared.userId,
+					entityKind: 'package',
+					entityId: prepared.packageId,
+					requirePersistence: true,
+					serverTiming,
+				})
+				if (!ensuredSource.bootstrapAccess) {
+					throw error
+				}
+				originCommit = fallbackTree.originCommit
+				syncedFiles = fallbackTree.files
+				const snapshotCommit = await syncArtifactSourceSnapshot({
+					env: prepared.env,
+					baseUrl: prepared.baseUrl,
+					userId: prepared.userId,
+					sourceId: ensuredSource.id,
+					files: syncedFiles,
+					bootstrapAccess: ensuredSource.bootstrapAccess,
+					serverTiming,
+					runPublishChecks: false,
+				})
+				if (snapshotCommit == null) {
+					throw error
+				}
+			}
 		} else {
 			await syncArtifactSourceSnapshot({
 				env: prepared.env,
@@ -1611,6 +1758,9 @@ export async function persistPreparedCommunityFork(
 				files: prepared.files,
 				bootstrapAccess: ensuredSource.bootstrapAccess ?? null,
 				serverTiming,
+				// Persist an inert fork even when checks would fail; installer's
+				// parallel runRepoChecks chooses live vs adaptation_required.
+				runPublishChecks: false,
 			})
 		}
 
@@ -1641,7 +1791,7 @@ export async function persistPreparedCommunityFork(
 			durationMs: Date.now() - persistStartedAt,
 			listingId: prepared.listingId,
 			packageId: prepared.packageId,
-			filesCount: Object.keys(prepared.files).length,
+			filesCount: Object.keys(syncedFiles).length,
 		})
 
 		return {
@@ -1652,8 +1802,8 @@ export async function persistPreparedCommunityFork(
 			targetName: prepared.targetName,
 			originCommit,
 			crossScopeReferences: prepared.crossScopeReferences,
-			filesCount: Object.keys(prepared.files).length,
-			files: prepared.files,
+			filesCount: Object.keys(syncedFiles).length,
+			files: syncedFiles,
 			...(serverTiming && serverTiming.length > 0 ? { serverTiming } : {}),
 		}
 	} catch (error) {
@@ -1750,7 +1900,7 @@ export type AdoptCommunityForkResult = {
 
 async function resolveOwnedCommunityPackageNameLeaf(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	value: string
 }) {
 	const ownerScope = await getPackageScopeByUserId(input.db, input.userId)
@@ -1767,7 +1917,7 @@ async function resolveOwnedCommunityPackageNameLeaf(input: {
 
 async function resolveCommunityForkForAdoption(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId?: string
 	kodyId?: string
 }) {
@@ -1786,9 +1936,10 @@ async function resolveCommunityForkForAdoption(input: {
 					userId: input.userId,
 					packageId: input.packageId,
 				})
-			: await getSavedPackageByKodyId(input.env.APP_DB, {
+			: await resolveSavedPackageRef(input.env.APP_DB, {
 					userId: input.userId,
-					kodyId: await resolveOwnedCommunityPackageNameLeaf({
+					match: 'slug',
+					ref: await resolveOwnedCommunityPackageNameLeaf({
 						db: input.env.APP_DB,
 						userId: input.userId,
 						value: input.kodyId ?? '',
@@ -1826,7 +1977,7 @@ export type CommunityForkAdoptionState = {
 
 export async function inspectCommunityForkAdoption(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId?: string
 	kodyId?: string
 }): Promise<CommunityForkAdoptionState> {
@@ -1849,7 +2000,7 @@ export async function inspectCommunityForkAdoption(input: {
  */
 export async function adoptCommunityFork(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId: string
 	reviewSummary: string
 }): Promise<AdoptCommunityForkResult> {
@@ -1921,7 +2072,7 @@ export type AbsorbCommunityForkUpstreamResult = {
 
 export async function absorbCommunityForkUpstream(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	packageId?: string
 	kodyId?: string
 	originCommit?: string
@@ -1941,9 +2092,10 @@ export async function absorbCommunityForkUpstream(input: {
 					userId: input.userId,
 					packageId: input.packageId,
 				})
-			: await getSavedPackageByKodyId(input.env.APP_DB, {
+			: await resolveSavedPackageRef(input.env.APP_DB, {
 					userId: input.userId,
-					kodyId: await resolveOwnedCommunityPackageNameLeaf({
+					match: 'slug',
+					ref: await resolveOwnedCommunityPackageNameLeaf({
 						db: input.env.APP_DB,
 						userId: input.userId,
 						value: input.kodyId ?? '',
@@ -2009,7 +2161,7 @@ export async function absorbCommunityForkUpstream(input: {
 
 export async function rateCommunityListing(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	listingId: string
 	stars: number
 	adaptationEffort: number
@@ -2058,7 +2210,7 @@ export async function rateCommunityListing(input: {
 
 export async function reportCommunityListing(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	listingId: string
 	reason: string
 }): Promise<CommunityReportRecord> {
@@ -2172,7 +2324,7 @@ export async function resolveCommunityReport(input: {
 			})
 			if (!deleted) {
 				console.error(
-					`Community listing "${report.listingId}" was already deleted during report resolution.`,
+					`Catalog entry "${report.listingId}" was already deleted during report resolution.`,
 				)
 			} else {
 				if (listing) {
@@ -2219,7 +2371,7 @@ export async function resolveCommunityReport(input: {
 export async function banCommunityUser(input: {
 	env: Env
 	adminUserId: string
-	userId: string
+	userId: OwnerId
 	reason: string
 }): Promise<void> {
 	const trimmedReason = input.reason.trim()
@@ -2235,7 +2387,7 @@ export async function banCommunityUser(input: {
 
 export async function unbanCommunityUser(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 }): Promise<void> {
 	const removed = await deleteCommunityBan(input.env.APP_DB, input.userId)
 	if (!removed) {

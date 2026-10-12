@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as PublishedBundleArtifactsModule from './published-bundle-artifacts.ts'
 import {
@@ -18,15 +19,9 @@ vi.mock('#worker/worker-bundler-modules.ts', () => ({
 	}),
 }))
 
-vi.mock('#worker/package-registry/scope-grants.ts', () => ({
-	getPlatformAccountByUsername: mockModule.getPlatformAccountByUsername,
-	isPlatformAccountStableUserId: async () => false,
-	listPlatformAccountUsernames: async () => [],
-}))
-
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageByName(...args),
 }))
@@ -63,7 +58,7 @@ const {
 const graphInput = {
 	env: { APP_DB: {}, REPO_SESSION: {} } as Env,
 	baseUrl: 'https://heykody.dev',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 }
 
 const staleRuntimeSource = `const runtime = {}
@@ -106,7 +101,7 @@ function makeArtifact(
 
 function appCacheKey(sourceId: string, entryPoint = 'app.js') {
 	return createPublishedPackageAppBundleCacheKey({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		source: {
 			id: sourceId,
 			published_commit: `commit-${sourceId}`,
@@ -330,10 +325,7 @@ export default async function main() {
 	})
 })
 
-test('buildKodyAppBundle keeps esbuild defaults even when the graph imports remix/component', async () => {
-	const remixRouter = `import { createRouter } from 'remix/router'
-import { renderToString } from 'remix/component/server'
-export default createRouter()`
+test('buildKodyAppBundle keeps esbuild JSX defaults unless the package tsconfig sets them', async () => {
 	const bundleApp = async (
 		label: string,
 		entryPoint: string | undefined,
@@ -347,22 +339,15 @@ export default createRouter()`
 		return lastBundlerCall()
 	}
 
-	const remixCall = await bundleApp('remix', 'app/router.ts', {
-		'app/router.ts': remixRouter,
+	const defaultCall = await bundleApp('plain', 'app/router.ts', {
+		'app/router.ts': 'export default { fetch() { return new Response("ok") } }',
 	})
-	expect(remixCall.files['node_modules/remix/package.json']).toContain(
-		'"./router": "./dist/router.js"',
-	)
-	expect(
-		remixCall.files['node_modules/remix/dist/component/server.js'],
-	).toBeTypeOf('string')
-	// Vendored remix is a convenience; the host does not sniff the graph for
-	// JSX, import.meta.url, or keepNames. Without a tsconfig, esbuild defaults.
-	expect(remixCall).not.toHaveProperty('jsx')
-	expect(remixCall).not.toHaveProperty('jsxImportSource')
+	expect(defaultCall).not.toHaveProperty('jsx')
+	expect(defaultCall).not.toHaveProperty('jsxImportSource')
+	expect(defaultCall.files['node_modules/remix/package.json']).toBeUndefined()
 
 	const tsconfigCall = await bundleApp('tsconfig', 'app/router.ts', {
-		'app/router.ts': remixRouter,
+		'app/router.ts': 'export default function App() { return <div /> }',
 		'tsconfig.json': JSON.stringify({
 			compilerOptions: { jsx: 'react-jsx', jsxImportSource: 'remix/component' },
 		}),
@@ -371,22 +356,58 @@ export default createRouter()`
 		jsx: 'automatic',
 		jsxImportSource: 'remix/component',
 	})
+	expect(tsconfigCall.files['node_modules/remix/package.json']).toBeUndefined()
+})
 
-	for (const [label, entryPoint, files] of [
-		[
-			'headers',
-			'src/app.ts',
-			{
-				'src/app.ts': `import { CacheControl } from 'remix/headers'
-export default { fetch: () => new Response("ok") }`,
-			},
-		],
-		['fetch', undefined, {}],
-	] as const) {
-		const call = await bundleApp(label, entryPoint, files)
-		expect(call.files['node_modules/remix/package.json']).toBeTypeOf('string')
-		expect(call).not.toHaveProperty('jsx')
-	}
+test('buildKodyAppBundle does not inject remix and fails when the bundle still imports it', async () => {
+	mockModule.createWorker.mockReset()
+	mockModule.createWorker.mockResolvedValue({
+		mainModule: 'dist/remix.js',
+		modules: {
+			'dist/remix.js': `import { createRouter } from 'remix/router'\nexport default createRouter()`,
+		},
+		dependencies: [],
+	})
+	const input = createBundleInput({ entryPoint: 'app/router.ts' })
+	Object.assign(input.sourceFiles, {
+		'app/router.ts': `import { createRouter } from 'remix/router'\nexport default createRouter()`,
+	})
+	await expect(buildKodyAppBundle(input)).rejects.toThrow(
+		/unresolved bare package imports after bundling.*remix\/router/s,
+	)
+	expect(
+		lastBundlerCall().files['node_modules/remix/package.json'],
+	).toBeUndefined()
+})
+
+test('buildKodyAppBundle keeps package-supplied remix without injecting platform files', async () => {
+	mockModule.createWorker.mockReset()
+	mockModule.createWorker.mockResolvedValue({
+		mainModule: 'dist/app.js',
+		modules: {
+			'dist/app.js': 'export default { fetch() { return new Response("ok") } }',
+		},
+		dependencies: [],
+	})
+	const input = createBundleInput({ entryPoint: 'app/router.ts' })
+	Object.assign(input.sourceFiles, {
+		'app/router.ts': `import { createRouter } from 'remix/router'\nexport default { fetch() { return new Response("ok") } }`,
+		'node_modules/remix/package.json': JSON.stringify({
+			name: 'remix',
+			type: 'module',
+			exports: { './router': './dist/router.js' },
+		}),
+		'node_modules/remix/dist/router.js':
+			'export function createRouter() { return {} }',
+	})
+	await buildKodyAppBundle(input)
+	const remixPaths = Object.keys(lastBundlerCall().files)
+		.filter((filePath) => filePath.startsWith('node_modules/remix/'))
+		.sort((left, right) => left.localeCompare(right))
+	expect(remixPaths).toEqual([
+		'node_modules/remix/dist/router.js',
+		'node_modules/remix/package.json',
+	])
 })
 
 test('buildKodyAppBundle cache lifecycle reuses hits, shares in-flight builds, evicts failures, and keys by entrypoint', async () => {
@@ -483,8 +504,8 @@ test('buildKodyModuleBundle cache lifecycle reuses hits, skips when disabled, ke
 		['code', { code: code('a') }, { code: code('b') }],
 		[
 			'user',
-			{ userId: 'user-cache-a', code: code('shared') },
-			{ userId: 'user-cache-b', code: code('shared') },
+			{ userId: ownerIdFromStored('user-cache-a'), code: code('shared') },
+			{ userId: ownerIdFromStored('user-cache-b'), code: code('shared') },
 		],
 	] as const) {
 		mockModule.createWorker.mockReset()
@@ -728,7 +749,7 @@ test('statically imported saved package sources get stamped with their own packa
 		createBundleResult('stamped-dependency'),
 	)
 	mockModule.getSavedPackageByName.mockResolvedValue(createSavedPackageRecord())
-	mockModule.getSavedPackageByKodyId.mockResolvedValue(null)
+	mockModule.resolveSavedPackageRef.mockResolvedValue(null)
 	mockModule.loadPublishedBundleArtifactByIdentity.mockResolvedValue(null)
 	mockModule.loadPackageSourceBySourceId.mockResolvedValue({
 		...createLoadedPackageSource(),

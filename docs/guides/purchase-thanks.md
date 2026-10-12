@@ -82,10 +82,11 @@ await events.dispatch({
 }
 ```
 
-`events.dispatch` is unavailable in ad hoc `execute`. Emit from package code (or
-a static import of an export that dispatches). Payloads are JSON objects capped
-at 64 KiB. Store Gmail threads and draft ids in `packageStorage()` and emit a
-reference when the thank-you record is large.
+`events.dispatch` is unavailable in ad hoc `execute`, including a statically
+imported package export. Emit from a package job, subscription handler, or
+package app. Payloads are JSON objects capped at 64 KiB. Store Gmail threads and
+draft ids in `packageStorage()` and emit a reference when the thank-you record
+is large.
 
 ## Package shape
 
@@ -152,7 +153,7 @@ Rules that keep this safe:
 | Package settings → Webhooks | Mint / reveal / rotate for the `stripe` door                        |
 | Gmail Drafts                | The thank-you, To = buyer, waiting on a human to send               |
 | Discord (Kent's copy)       | One-liner that the draft is ready                                   |
-| `/account/activity`         | Webhook deliveries and subscription runs                            |
+| `/@<slug>/-/activity`       | Webhook deliveries and subscription runs                            |
 | Chat (`execute`)            | Replay `thankPurchase` or dry-run the webhook handler               |
 
 The homepage card is a tile with the kicker **Event** and the title **Purchase

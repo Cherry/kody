@@ -7,6 +7,10 @@ import {
 } from '#worker/audit-log.ts'
 import { normalizeRedirectTo } from '#app/auth-redirect.ts'
 import {
+	resolvePostAuthLandingPath,
+	defaultPostVerificationRedirect,
+} from '#universal/safe-redirect.ts'
+import {
 	createAuthCookie,
 	destroyAuthCookie,
 	isSecureRequest,
@@ -14,7 +18,6 @@ import {
 } from '#app/auth-session.ts'
 import { getUniqueConstraintField } from '#worker/database-errors.ts'
 import { maybeTagKitSubscriberOnSignup } from '#app/kit-signup.ts'
-import { attachPendingPackageShareInvitesSafely } from '#worker/package-registry/share-grants.ts'
 import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
 import { getAvailableUsernameFromBase } from '#worker/identity/generated-username.ts'
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
@@ -31,16 +34,15 @@ import {
 import {
 	buildAuthorizeRedirectUrl,
 	generateOauthRandomValue,
-	getEnabledOauthProviders,
 	getOauthClientConfig,
 	isOauthProviderId,
-	oauthProviderDefinitions,
 	resolveOauthProfile,
 	type OauthProfile,
 	type OauthProviderId,
 } from '#app/oauth-providers.ts'
+import { publicAuthProvidersLoaderData } from '#app/public-auth-providers.ts'
 import { assignUserRole } from '#worker/identity/permissions-db.ts'
-import { type routes } from '#universal/routes.ts'
+import { routes } from '#universal/routes.ts'
 import { isTwoFactorEnabled } from '#app/two-factor.ts'
 import { usernameFromEmail } from '#worker/identity/username.ts'
 import {
@@ -55,13 +57,13 @@ import {
 	allocateSignupIdentity,
 	claimAccountEmail,
 } from '#worker/identity/email-claims.ts'
-import { resolveUserStableId } from '#worker/user-id.ts'
-import { recordOnboardingFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
 import {
-	getTurnstileSiteKey,
-	verifyPublicFormProtection,
-} from '#app/public-form-protection.ts'
-import { defaultPostVerificationRedirect } from '#universal/safe-redirect.ts'
+	personIdFromStored,
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { recordOnboardingFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
+import { verifyPublicFormProtection } from '#app/public-form-protection.ts'
 import {
 	firstTouchAttributionCreateFields,
 	hasFirstTouchAttribution,
@@ -73,8 +75,15 @@ import {
 	serializeReferralCookie,
 } from '#universal/referral-cookie.ts'
 import { scheduleUserCreatedEvent } from '#worker/identity/schedule-user-lifecycle-event.ts'
-import { maybeGrantSignupWelcomeCredits } from '#worker/billing/signup-welcome-credits.ts'
+import {
+	maybeGrantSignupWelcomeCredits,
+	reconcileSignupWelcomeCreditsIfPending,
+} from '#worker/billing/signup-welcome-credits.ts'
 import { attributeReferralAtSignup } from '#worker/entitlements/referral-program.ts'
+import {
+	provisionPersonalOrgForSignup,
+	rollbackPersonalOrgAfterFailedSignup,
+} from '#worker/orgs/signup-provision.ts'
 import { touchLastActiveAt } from '#worker/identity/activation-stamps.ts'
 import { parseLegacyHosts } from '#worker/app-legacy-redirect.ts'
 import {
@@ -82,6 +91,7 @@ import {
 	maybeSyncDiscordGuildRolesForUser,
 } from '#worker/discord/guild-role.ts'
 import { applyPasswordChange } from '#app/apply-password-change.ts'
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
 import { clearedFactorsAuditReason } from '#app/clear-account-factors.ts'
 import { type OAuthGrantHelpers } from '#worker/oauth-grants.ts'
 import { unusablePasswordHash } from '#worker/identity/usable-password.ts'
@@ -94,6 +104,7 @@ import {
  * Accounts created through social login have no usable password until the
  * user sets one via password reset; verifyPassword rejects this sentinel.
  */
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const oauthNoUsablePasswordHash = unusablePasswordHash.oauthCreated
 
 function getCallbackRedirectUri(env: Env, url: URL, provider: OauthProviderId) {
@@ -159,7 +170,11 @@ function signedInOauthReturnLocation(
 	key: 'oauthLinked' | 'oauthError',
 	value: string,
 ) {
-	return oauthResultLocation(redirectTo ?? '/account', key, value)
+	return oauthResultLocation(
+		redirectTo ?? routes.accountSecurity.href(),
+		key,
+		value,
+	)
 }
 
 /**
@@ -182,14 +197,7 @@ export function createAuthProvidersApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler() {
-			return jsonResponse({
-				ok: true,
-				turnstileSiteKey: getTurnstileSiteKey(env),
-				providers: getEnabledOauthProviders(env).map((provider) => ({
-					id: provider,
-					label: oauthProviderDefinitions[provider].label,
-				})),
-			})
+			return jsonResponse(publicAuthProvidersLoaderData(env))
 		},
 	} satisfies Action<typeof routes.authProvidersApi>
 }
@@ -438,9 +446,15 @@ export function createAuthProviderCallbackHandler(env: Env) {
 					clearReferralCookie?: boolean
 				} = {},
 			) {
-				const stableUserId = resolveUserStableId(user)
-				const postLoginPath =
+				const stableUserId = personalOrgId(
+					personIdFromStored(user.stable_user_id),
+				)
+				const rawPostLoginPath =
 					options.destination ?? redirectTo ?? defaultRedirectTo
+				// Authorize resumes drop prompt=login after this completed auth
+				// so consent can use the session cookie just issued.
+				const postLoginPath =
+					resolvePostAuthLandingPath(rawPostLoginPath) ?? rawPostLoginPath
 				// Two-factor accounts get the same pending-verification gate as
 				// password and passkey logins; the session cookie is only
 				// issued once the TOTP code passes.
@@ -480,6 +494,10 @@ export function createAuthProviderCallbackHandler(env: Env) {
 					options.issuedAt ?? Date.now(),
 				)
 				await touchLastActiveAt(env.APP_DB, { stableUserId })
+				await reconcileSignupWelcomeCreditsIfPending({
+					db: env.APP_DB,
+					userId: stableUserId,
+				})
 				void logAuditEvent({
 					db: auditDatabaseFromEnv(env),
 					category: 'auth',
@@ -606,7 +624,7 @@ export function createAuthProviderCallbackHandler(env: Env) {
 				try {
 					await assertAccountWritableDb(
 						env.APP_DB,
-						resolveUserStableId(existingUser),
+						personalOrgId(personIdFromStored(existingUser.stable_user_id)),
 					)
 				} catch (error) {
 					if (error instanceof AccountDeletionInProgressError) {
@@ -624,7 +642,9 @@ export function createAuthProviderCallbackHandler(env: Env) {
 							d1: env.APP_DB,
 							helpers,
 							userId: existingUser.id,
-							stableUserId: resolveUserStableId(existingUser),
+							stableUserId: personalOrgId(
+								personIdFromStored(existingUser.stable_user_id),
+							),
 							unusablePasswordHash: unusablePasswordHash.reclaimedUnverified,
 							clearSecondFactorsAndConnections: true,
 							requireWritableAccount: true,
@@ -676,14 +696,16 @@ export function createAuthProviderCallbackHandler(env: Env) {
 					const stamped = await env.APP_DB.prepare(
 						`UPDATE users
 						 SET email_verified_at = ?, updated_at = CURRENT_TIMESTAMP
-						 WHERE id = ? AND deleting_at IS NULL`,
+						 WHERE id = ? AND deleting_at IS NULL${andLiveDeletedAtSql()}`,
 					)
 						.bind(new Date().toISOString(), existingUser.id)
 						.run()
 					if ((stamped.meta.changes ?? 0) === 1) {
 						recordOnboardingFunnelEvent(env, {
 							stage: 'email_verified',
-							userId: resolveUserStableId(existingUser),
+							userId: personalOrgId(
+								personIdFromStored(existingUser.stable_user_id),
+							),
 						})
 					}
 					if ((stamped.meta.changes ?? 0) !== 1) {
@@ -709,12 +731,30 @@ export function createAuthProviderCallbackHandler(env: Env) {
 
 			// 4. New account.
 			let username: string
-			let stableUserId: string
+			let stableUserId: OwnerId
 			let newUser: {
 				id: number
 				stable_user_id: string
 				email: string
 			} | null = null
+
+			async function rollbackNewUser(userId: number) {
+				invalidatePackageAppOwnerCache({ stableUserId })
+				await rollbackPersonalOrgAfterFailedSignup(env.APP_DB, stableUserId)
+				try {
+					await env.APP_DB.prepare(
+						`DELETE FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
+					)
+						.bind(userId)
+						.run()
+				} catch (rollbackError) {
+					console.error(
+						'Failed to roll back OAuth-created user row:',
+						rollbackError,
+					)
+				}
+			}
+
 			try {
 				username = await getAvailableUsernameFromBase(
 					env.APP_DB,
@@ -728,7 +768,7 @@ export function createAuthProviderCallbackHandler(env: Env) {
 					}
 					return fail('account-error', 'user_create_conflict')
 				}
-				stableUserId = allocated.stableUserId
+				stableUserId = personalOrgId(allocated.stableUserId)
 				recordOnboardingFunnelEvent(env, {
 					stage: 'signup_started',
 					userId: stableUserId,
@@ -743,14 +783,23 @@ export function createAuthProviderCallbackHandler(env: Env) {
 						stable_user_id: stableUserId,
 						password_hash: oauthNoUsablePasswordHash,
 						email_verified_at: createdAt,
-						plan: resolvePlanWrite(null),
 						...firstTouchAttributionCreateFields(signupAttribution),
 						last_active_at: createdAt,
 					},
 					{ returnRow: true },
 				)
 				newUser = { id: createdUser.id, stable_user_id: stableUserId, email }
+				await provisionPersonalOrgForSignup(env.APP_DB, {
+					stableUserId,
+					username,
+					createdAt,
+					plan: resolvePlanWrite(null),
+					signupWelcomeCreditsPending: 1,
+				})
 			} catch (error) {
+				if (newUser) {
+					await rollbackNewUser(newUser.id)
+				}
 				const uniqueField = getUniqueConstraintField(error)
 				if (uniqueField === 'stable_user_id') {
 					return fail('email-claimed', 'former_email_claimed')
@@ -761,14 +810,8 @@ export function createAuthProviderCallbackHandler(env: Env) {
 				throw error
 			}
 
-			async function rollbackNewUser(userId: number) {
-				try {
-					await env.APP_DB.prepare(`DELETE FROM users WHERE id = ?`)
-						.bind(userId)
-						.run()
-				} catch (error) {
-					console.error('Failed to roll back OAuth-created user row:', error)
-				}
+			if (!newUser) {
+				return fail('account-error', 'user_create_conflict')
 			}
 
 			let assigned = false
@@ -804,12 +847,6 @@ export function createAuthProviderCallbackHandler(env: Env) {
 				await rollbackNewUser(newUser.id)
 				return fail('account-error', 'connection_create_failed')
 			}
-			await attachPendingPackageShareInvitesSafely({
-				db: env.APP_DB,
-				userId: newUser.stable_user_id,
-				email,
-				username,
-			})
 			await completeDiscordGuildLogin({
 				provider,
 				userId: newUser.id,

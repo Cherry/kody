@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { type CommunityListingCategory } from '#universal/community-categories.ts'
@@ -70,7 +71,7 @@ test('listCommunityIndexOverview loads shelves with one windowed listing query',
 		},
 	})
 	expect(queries).toEqual([
-		"SELECT category, COUNT(*) AS listing_count FROM community_listings WHERE status = 'active' GROUP BY category",
+		"SELECT category, COUNT(*) AS listing_count FROM community_listings WHERE status = 'active' AND deleted_at IS NULL GROUP BY category",
 	])
 
 	const seeds: Array<
@@ -102,7 +103,7 @@ test('listCommunityIndexOverview loads shelves with one windowed listing query',
 	await upsertCommunityRating(db, {
 		id: 'rating-oldest',
 		listing_id: 'integration-1',
-		user_id: 'rater-1',
+		user_id: ownerIdFromStored('rater-1'),
 		stars: 5,
 		adaptation_effort: 2,
 		note: null,

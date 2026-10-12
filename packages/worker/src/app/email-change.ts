@@ -1,3 +1,4 @@
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
 import { isNonProductionRuntime } from '#app/deployment-env.ts'
 import { getUniqueConstraintField } from '#worker/database-errors.ts'
 import { sendCloudflareEmail } from '#app/email/cloudflare-email.ts'
@@ -10,10 +11,10 @@ import {
 	claimAccountEmail,
 	isEmailReservedForOtherAccount,
 } from '#worker/identity/email-claims.ts'
-import { resolveUserStableId } from '#worker/user-id.ts'
-import { attachPendingPackageShareInvitesSafely } from '#worker/package-registry/share-grants.ts'
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { reconcileDestinationsAfterIdentityEmailChange } from '#worker/email/destinations.ts'
 import { toHex } from '@kody-internal/shared/hex.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 const emailChangeTokenBytes = 32
 const emailChangeTokenExpiryMs = 24 * 60 * 60 * 1000
@@ -159,7 +160,7 @@ export async function verifyEmailChangeToken(input: {
 			`SELECT pec.id, pec.user_id, pec.new_email, pec.expires_at, u.email, u.stable_user_id
 			 FROM pending_email_changes pec
 			 INNER JOIN users u ON u.id = pec.user_id
-			 WHERE pec.token_hash = ?`,
+			 WHERE pec.token_hash = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(tokenHash)
 		.first<{
@@ -183,7 +184,9 @@ export async function verifyEmailChangeToken(input: {
 
 	const newEmail = normalizeEmail(record.new_email)
 	const existing = await input.db
-		.prepare(`SELECT id FROM users WHERE email = ? AND id != ?`)
+		.prepare(
+			`SELECT id FROM users WHERE email = ? AND id != ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(newEmail, record.user_id)
 		.first<{ id: number }>()
 	if (existing) return { ok: false, reason: 'email_conflict' }
@@ -195,7 +198,7 @@ export async function verifyEmailChangeToken(input: {
 
 	// Preserve the existing stable id across email changes so MCP identity,
 	// ownership rows, and grants stay bound to the same account.
-	const stableUserId = resolveUserStableId(record)
+	const stableUserId = personIdFromStored(record.stable_user_id)
 	const verifiedAt = now.toISOString()
 
 	try {
@@ -206,7 +209,7 @@ export async function verifyEmailChangeToken(input: {
 				     email_verified_at = ?,
 				     stable_user_id = ?,
 				     updated_at = CURRENT_TIMESTAMP
-				 WHERE id = ?`,
+				 WHERE id = ?${andLiveDeletedAtSql()}`,
 			)
 			.bind(newEmail, verifiedAt, stableUserId, record.user_id)
 			.run()
@@ -216,6 +219,10 @@ export async function verifyEmailChangeToken(input: {
 		}
 		throw error
 	}
+
+	// Invalidate immediately after the email write so same-isolate package-app
+	// serve cannot keep the old email while later cleanup claims may fail.
+	invalidatePackageAppOwnerCache({ stableUserId })
 
 	await input.db
 		.prepare(`DELETE FROM pending_email_changes WHERE user_id = ?`)
@@ -235,11 +242,6 @@ export async function verifyEmailChangeToken(input: {
 		userId: record.user_id,
 		email: newEmail,
 		now,
-	})
-	await attachPendingPackageShareInvitesSafely({
-		db: input.db,
-		userId: stableUserId,
-		email: newEmail,
 	})
 	await reconcileDestinationsAfterIdentityEmailChange({
 		db: input.db,

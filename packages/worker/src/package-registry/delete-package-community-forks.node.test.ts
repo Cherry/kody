@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { communityForksDeleteCascadeStatements } from '#worker/community/community-forks-delete-cascade.ts'
@@ -95,7 +96,16 @@ function createDeleteForkDb() {
 	sqlite.exec(`
 		CREATE TABLE users (
 			stable_user_id TEXT PRIMARY KEY NOT NULL,
-			deleting_at TEXT
+			deleting_at TEXT,
+			deleted_at TEXT
+		);
+		CREATE TABLE orgs (
+			id TEXT PRIMARY KEY NOT NULL,
+			slug TEXT NOT NULL UNIQUE,
+			deleted_at TEXT,
+			deleting_at TEXT,
+			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+			updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 		);
 		CREATE TABLE saved_packages (
 			id TEXT PRIMARY KEY NOT NULL,
@@ -107,9 +117,12 @@ function createDeleteForkDb() {
 			search_text TEXT,
 			source_id TEXT NOT NULL,
 			has_app INTEGER NOT NULL DEFAULT 0,
+			has_skills INTEGER NOT NULL DEFAULT 0,
 			hidden INTEGER NOT NULL DEFAULT 0,
 			is_private INTEGER NOT NULL DEFAULT 1,
 			locked_at TEXT,
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 			updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 		);
@@ -117,7 +130,8 @@ function createDeleteForkDb() {
 			id TEXT PRIMARY KEY NOT NULL,
 			user_id TEXT NOT NULL,
 			entity_kind TEXT NOT NULL,
-			entity_id TEXT NOT NULL
+			entity_id TEXT NOT NULL,
+			deleted_at TEXT
 		);
 		CREATE TABLE community_forks (
 			id TEXT PRIMARY KEY NOT NULL,
@@ -141,20 +155,18 @@ function createDeleteForkDb() {
 			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 			PRIMARY KEY (user_id, old_kody_id)
 		);
-		CREATE TABLE package_invocation_tokens (
-			id TEXT PRIMARY KEY NOT NULL,
+		CREATE TABLE package_slug_redirects (
 			user_id TEXT NOT NULL,
+			old_slug TEXT NOT NULL,
 			package_id TEXT NOT NULL,
-			token_hash TEXT NOT NULL,
-			name TEXT NOT NULL,
-			export_names_json TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+			PRIMARY KEY (user_id, old_slug)
 		);
 		CREATE TABLE user_storage_buckets (
 			user_id TEXT NOT NULL,
 			storage_id TEXT NOT NULL,
-			kind TEXT NOT NULL DEFAULT 'package'
+			kind TEXT NOT NULL DEFAULT 'package',
+			deleted_at TEXT
 		);
 		${communityForksDeleteCascadeStatements.join(';\n')}
 	`)
@@ -284,7 +296,7 @@ test('package delete removes community_forks so Fork outdated does not linger', 
 
 	await deleteSavedPackageProjection({
 		env,
-		userId: 'user-kent',
+		userId: ownerIdFromStored('user-kent'),
 		packageId: 'package-live',
 	})
 

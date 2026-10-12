@@ -1,11 +1,13 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
+import { findIntegrationCredentialId } from '#worker/integrations/credentials.ts'
+import { readSignupOrgSlugOrNull } from '#worker/orgs/signup-org-slug.ts'
 import { runQueueableDynamicWorkerWork } from '#worker/dynamic-worker-evaluation-budget.ts'
-import { readPreExecutionPackageInvocationInfrastructureCode } from '#worker/package-invocations/admin-package-subscriptions.ts'
+import {
+	loadMatchingPackageSubscriptions,
+	readPreExecutionPackageInvocationInfrastructureCode,
+} from '#worker/package-invocations/admin-package-subscriptions.ts'
 import { invokePackageSubscription } from '#worker/package-invocations/service.ts'
-import { listPackageSubscriptions } from '#worker/package-registry/manifest.ts'
-import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
-import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
-import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
 import {
 	buildIntegrationAccountUrl,
 	buildIntegrationReconnectUrl,
@@ -63,11 +65,6 @@ type IntegrationAuthTopic =
 	| typeof integrationAuthFailedTopic
 	| typeof integrationAuthSucceededTopic
 
-type LoadedAuthSubscription = {
-	savedPackage: SavedPackageRecord
-	subscription: ReturnType<typeof listPackageSubscriptions>[number]
-}
-
 export function buildIntegrationAuthFailedReconnectUrl(input: {
 	baseUrl: string
 	integrationName: string
@@ -82,6 +79,7 @@ export function buildIntegrationAuthFailedReconnectUrl(input: {
 
 export function buildIntegrationAuthAccountUrl(input: {
 	baseUrl: string
+	orgSlug: string
 	integrationName: string
 }) {
 	return buildIntegrationAccountUrl(input)
@@ -101,6 +99,7 @@ function buildSubscriptionIdempotencyKey(input: {
 
 function buildFailedEventPayload(input: {
 	baseUrl: string
+	orgSlug: string
 	eventId: string
 	occurredAt: string
 	integration: IntegrationAuthConnection
@@ -120,6 +119,7 @@ function buildFailedEventPayload(input: {
 		}),
 		account_url: buildIntegrationAccountUrl({
 			baseUrl: input.baseUrl,
+			orgSlug: input.orgSlug,
 			integrationName: input.integration.name,
 		}),
 		occurred_at: input.occurredAt,
@@ -128,6 +128,7 @@ function buildFailedEventPayload(input: {
 
 function buildSucceededEventPayload(input: {
 	baseUrl: string
+	orgSlug: string
 	eventId: string
 	occurredAt: string
 	integration: IntegrationAuthConnection
@@ -140,6 +141,7 @@ function buildSucceededEventPayload(input: {
 		source: input.source,
 		account_url: buildIntegrationAuthAccountUrl({
 			baseUrl: input.baseUrl,
+			orgSlug: input.orgSlug,
 			integrationName: input.integration.name,
 		}),
 		occurred_at: input.occurredAt,
@@ -152,57 +154,11 @@ async function loadMatchingAuthSubscriptions(input: {
 	userId: string
 	topic: IntegrationAuthTopic
 }) {
-	let savedPackages: Array<SavedPackageRecord>
 	try {
-		savedPackages = await listSavedPackagesByUserId(input.env.APP_DB, {
-			userId: input.userId,
-		})
+		return await loadMatchingPackageSubscriptions(input)
 	} catch (error) {
-		const missingTable =
-			error instanceof Error &&
-			error.message.includes('no such table: saved_packages')
-		return {
-			subscriptions: [] as Array<LoadedAuthSubscription>,
-			discoveryErrors: missingTable ? [] : [error],
-		}
+		return { subscriptions: [], discoveryErrors: [error] }
 	}
-	const settled = await Promise.allSettled(
-		savedPackages.map(async (savedPackage) => {
-			const loaded = await loadPackageManifestBySourceId({
-				env: input.env as Env,
-				baseUrl: input.baseUrl,
-				userId: input.userId,
-				sourceId: savedPackage.sourceId,
-			})
-			const subscription = listPackageSubscriptions(loaded.manifest).find(
-				(candidate) => candidate.topic === input.topic,
-			)
-			if (!subscription) return null
-			return {
-				savedPackage,
-				subscription,
-			} satisfies LoadedAuthSubscription
-		}),
-	)
-	const subscriptions: Array<LoadedAuthSubscription> = []
-	const discoveryErrors: Array<unknown> = []
-	for (const [index, result] of settled.entries()) {
-		if (result.status === 'fulfilled') {
-			if (result.value) subscriptions.push(result.value)
-			continue
-		}
-		const savedPackage = savedPackages[index]
-		console.warn(
-			`Failed to load package manifest for ${input.topic} subscription`,
-			{
-				sourceId: savedPackage?.sourceId,
-				packageId: savedPackage?.id,
-				error: result.reason,
-			},
-		)
-		discoveryErrors.push(result.reason)
-	}
-	return { subscriptions, discoveryErrors }
 }
 
 async function dispatchIntegrationAuthSubscriptionEvents(input: {
@@ -215,6 +171,11 @@ async function dispatchIntegrationAuthSubscriptionEvents(input: {
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
 	const baseUrl = getAppBaseUrl({ env: input.env })
+	const credentialId = await findIntegrationCredentialId({
+		env: input.env,
+		userId: ownerIdFromStored(input.userId),
+		name: input.integrationName,
+	})
 	const { subscriptions, discoveryErrors } =
 		await loadMatchingAuthSubscriptions({
 			env: input.env,
@@ -238,6 +199,12 @@ async function dispatchIntegrationAuthSubscriptionEvents(input: {
 							packageId: savedPackage.id,
 						}),
 						source: 'integrations',
+						request: { kind: 'platform-event', sourceId: 'integrations' },
+						audience: {
+							resource: credentialId
+								? { type: 'credential', id: credentialId }
+								: null,
+						},
 						waitUntil: input.waitUntil,
 					})
 					const retryableCode =
@@ -291,10 +258,19 @@ export async function dispatchIntegrationAuthFailedSubscriptionEvents(input: {
 	eventId: string
 	occurredAt: string
 	integration: IntegrationAuthConnection
+	orgSlug?: string
 	reason: IntegrationAuthFailedReason
 	provider: IntegrationAuthFailedSubscriptionEnvelope['provider']
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
+	const orgSlug = await readSignupOrgSlugOrNull(
+		input.env.APP_DB,
+		input.userId,
+		input.orgSlug,
+	)
+	if (!orgSlug) {
+		return []
+	}
 	const baseUrl = getAppBaseUrl({ env: input.env })
 	return dispatchIntegrationAuthSubscriptionEvents({
 		env: input.env,
@@ -303,6 +279,7 @@ export async function dispatchIntegrationAuthFailedSubscriptionEvents(input: {
 		topic: integrationAuthFailedTopic,
 		eventPayload: buildFailedEventPayload({
 			baseUrl,
+			orgSlug,
 			eventId: input.eventId,
 			occurredAt: input.occurredAt,
 			integration: input.integration,
@@ -330,8 +307,17 @@ export async function dispatchIntegrationAuthSucceededSubscriptionEvents(input: 
 	occurredAt: string
 	integration: IntegrationAuthConnection
 	source: IntegrationAuthSucceededSource
+	orgSlug?: string
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
+	const orgSlug = await readSignupOrgSlugOrNull(
+		input.env.APP_DB,
+		input.userId,
+		input.orgSlug,
+	)
+	if (!orgSlug) {
+		return []
+	}
 	const baseUrl = getAppBaseUrl({ env: input.env })
 	return dispatchIntegrationAuthSubscriptionEvents({
 		env: input.env,
@@ -340,6 +326,7 @@ export async function dispatchIntegrationAuthSucceededSubscriptionEvents(input: 
 		topic: integrationAuthSucceededTopic,
 		eventPayload: buildSucceededEventPayload({
 			baseUrl,
+			orgSlug,
 			eventId: input.eventId,
 			occurredAt: input.occurredAt,
 			integration: input.integration,

@@ -3,15 +3,11 @@ id: secret_providers
 title: Custom secret providers
 summary:
   Use credentials from an external vault in secret-aware fetch without the agent
-  ever reading them. Behind a feature flag; signed-in users can turn it on from
-  this page.
+  ever reading them.
 category: platform
 ---
 
 # Custom secret providers
-
-Custom secret providers are behind the `secret-providers` feature flag because
-they may change or go away. Signed-in users can turn them on from this page.
 
 A custom secret provider lets your agent use a password-manager item the same
 way it uses a Kody secret: a placeholder in `fetch`, resolved at the network
@@ -21,19 +17,14 @@ providers use `{{secret/<provider>:<ref>}}`.
 Provider packages declare an id such as `1password`. Provider logic lives in a
 saved package you bind; Kody core does not talk to the vault itself.
 
-## Turn it on
-
-The account UI and `secretProvider*` capabilities stay hidden until the flag is
-on for you. Use the button at the top of this page.
-
 ## Bind a provider
 
 1. Save the vault door key as a Kody user secret. Paste it on
-   `/account/secrets/new`, never into chat. URL shape:
+   `/connect/secret-set`, never into chat. URL shape:
    [Secret setup URL reference](./account-secret-setup.md).
 2. Have a saved package that declares `kody.secretProvider.id` (for example
    `1password`) and exports `./secretProvider`.
-3. Bind that package on `/account/secret-providers` (`secretProviderBind`):
+3. Bind that package on `/@<slug>/-/secret-providers` (`secretProviderBind`):
    provider id, package, door-key secret name, and optional non-secret config.
 
 Declaring metadata on a package does not bind it. Only the account owner can
@@ -58,8 +49,8 @@ request URL must be `https:`.
 
 Ad hoc execute does not need a package grant. Saved packages do:
 `secretProviderLock` returns the Allow URL; grant and revoke on
-`/account/secret-providers`. Shared packages use the **owner's** binding and
-grants, not the guest's.
+`/@<slug>/-/secret-providers`. A package runs in the org that owns it, so a
+collaborator holding a grant uses that org's binding and grants, not their own.
 
 Search does not crawl vaults. `secretProviderList` returns binding metadata
 only.

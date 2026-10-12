@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -21,9 +25,10 @@ test(
 	async () => {
 		silenceIncidentalRuntimeWarnings()
 		const callerContext = createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.dev',
 			user: {
-				userId: 'user-unbound-repro',
+				userId: personIdFromStored('user-unbound-repro'),
 				email: 'repro@example.com',
 				displayName: 'Repro',
 			},
@@ -31,7 +36,7 @@ test(
 		const bundle = await buildKodyModuleBundle({
 			env,
 			baseUrl: 'https://kody.dev',
-			userId: 'user-unbound-repro',
+			userId: ownerIdFromStored('user-unbound-repro'),
 			sourceFiles: {
 				'entry.ts': [
 					"import { email } from 'kody:runtime'",
@@ -62,9 +67,10 @@ test(
 	async () => {
 		silenceIncidentalRuntimeWarnings()
 		const callerContext = createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://kody.dev',
 			user: {
-				userId: 'user-unbound-secrets',
+				userId: personIdFromStored('user-unbound-secrets'),
 				email: 'secrets@example.com',
 				displayName: 'Secrets',
 			},
@@ -72,7 +78,7 @@ test(
 		const bundle = await buildKodyModuleBundle({
 			env,
 			baseUrl: 'https://kody.dev',
-			userId: 'user-unbound-secrets',
+			userId: ownerIdFromStored('user-unbound-secrets'),
 			sourceFiles: {
 				'entry.ts': [
 					"import { packageSecrets } from 'kody:runtime'",

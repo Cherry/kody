@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname } from 'node:path'
 import { promisify } from 'node:util'
 import { usernameFromEmail } from '../packages/worker/src/identity/username.ts'
 import { runtimeWorkerHealthPath } from '../packages/shared/src/runtime-worker.ts'
@@ -10,6 +10,7 @@ import {
 	formatContainsFailure,
 	missingContainsNeedles,
 } from './control-kody/request-proof.ts'
+import { formatCookieFile } from './control-kody/session-cookie.ts'
 import { isExecutedDirectly } from './node-runtime.ts'
 
 const execFileAsync = promisify(execFile)
@@ -40,10 +41,24 @@ const usageLines = [
 	'  --skip-login        Skip POST /auth and cookie-backed checks',
 	'  --request <spec>    Authenticated HTTP as the seed user (repeatable).',
 	'                      Spec: METHOD /path [status] [json-body]',
+	'                            [--form name=value]... [--multipart]',
+	"                            [--header 'Name: value']...",
 	'                            [--dump] [--contains <text>]',
-	'                      Default success is any 2xx. Examples:',
-	'                      POST /account/values.json {"action":"save",...}',
+	'                      Default success is any 2xx. JSON is the default',
+	'                      body. Repeat --form for application/x-www-form-urlencoded.',
+	'                      Add --multipart for multipart/form-data; a value',
+	'                      that starts with @ is a file path. Repeat --header',
+	'                      for extra request headers (not Cookie or',
+	'                      Content-Type). Redirects stay manual, and',
+	'                      --contains also sees Location.',
+	'                      Examples:',
+	'                      POST /account/secrets.json {"action":"save",...}',
+	'                      POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org',
+	'                      POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png',
 	'                      GET /pricing --dump --contains Worker compute',
+	'                      GET /account/export.json is a metadata manifest;',
+	'                      do not --contains user data there. Verify rows with',
+	'                      MCP accountExportSection via control-kody execute.',
 	'  --dump              Write the previous --request body to',
 	'                      .tmp/control-kody-body (-<n> when several dump)',
 	'  --contains <text>   Fail unless the previous --request body includes',
@@ -73,11 +88,29 @@ export type PreviewManualTestOptions = {
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
+export type SessionFormField = {
+	name: string
+	value: string
+	filePath: string | null
+}
+
+export type SessionRequestForm = {
+	encoding: 'urlencoded' | 'multipart'
+	fields: Array<SessionFormField>
+}
+
+export type SessionRequestHeader = {
+	name: string
+	value: string
+}
+
 export type SessionRequestSpec = {
 	method: HttpMethod
 	path: string
 	expectedStatus: number | null
 	body: unknown | null
+	form: SessionRequestForm | null
+	headers: Array<SessionRequestHeader>
 	dump: boolean
 	contains: Array<string>
 }
@@ -89,6 +122,8 @@ export type ParsedPreviewComment = {
 	runtimeUrl: string | null
 	platformWorkerName: string | null
 	platformUrl: string | null
+	apiWorkerName: string | null
+	apiUrl: string | null
 	d1DatabaseName: string | null
 	oauthKvTitle: string | null
 	mocks: Array<string>
@@ -105,6 +140,8 @@ export type PreviewSnapshot = {
 	runtimeUrl: string | null
 	platformWorkerName: string | null
 	platformUrl: string | null
+	apiWorkerName: string | null
+	apiUrl: string | null
 	d1DatabaseName: string | null
 	oauthKvTitle: string | null
 	mocks: Array<string>
@@ -341,9 +378,15 @@ function isHttpMethod(value: string): value is HttpMethod {
 }
 
 const sessionRequestSpecUsage =
-	'METHOD /path [status] [json-body] [--dump] [--contains <text>]'
+	"METHOD /path [status] [json-body] [--form name=value]... [--multipart] [--header 'Name: value']... [--dump] [--contains <text>]"
 
-const specFlags = ['--dump', '--contains'] as const
+const specFlags = [
+	'--dump',
+	'--contains',
+	'--form',
+	'--multipart',
+	'--header',
+] as const
 
 type SpecFlagMatch = {
 	flag: (typeof specFlags)[number]
@@ -394,7 +437,10 @@ export function parseSessionRequest(spec: string): SessionRequestSpec {
 	const rest = match[3] ?? ''
 	const flags = findSpecFlags(rest)
 	const head = rest.slice(0, flags[0]?.start ?? rest.length).trim()
-	const { dump, contains } = parseSessionRequestFlags(rest, flags)
+	const { dump, contains, form, headers } = parseSessionRequestFlags(
+		rest,
+		flags,
+	)
 	const headMatch = /^(?:(\d{3})(?:\s+|$))?([\s\S]*)$/.exec(head)
 	const methodName = match[1].toUpperCase()
 	if (!isHttpMethod(methodName)) {
@@ -411,6 +457,11 @@ export function parseSessionRequest(spec: string): SessionRequestSpec {
 		: null
 	const rawBody = headMatch?.[2]?.trim() ?? ''
 	let body: unknown | null = null
+	if (rawBody.length > 0 && form) {
+		throw new PreviewManualTestError(
+			`--request cannot include both a JSON body and --form fields: ${rawBody}\nExpected: ${sessionRequestSpecUsage}`,
+		)
+	}
 	if (rawBody.length > 0) {
 		if (methodName === 'GET') {
 			throw new PreviewManualTestError(
@@ -425,14 +476,104 @@ export function parseSessionRequest(spec: string): SessionRequestSpec {
 			)
 		}
 	}
+	if (form && methodName === 'GET') {
+		throw new PreviewManualTestError(
+			`GET --request cannot include form fields.\nExpected: ${sessionRequestSpecUsage}`,
+		)
+	}
 	return {
 		method: methodName,
 		path,
 		expectedStatus,
 		body,
+		form,
+		headers,
 		dump,
 		contains,
 	}
+}
+
+/**
+ * Spec headers replace same-named defaults (header names are
+ * case-insensitive). Cookie comes from the session and Content-Type from the
+ * body, so the spec parser rejects both.
+ */
+export function applySessionRequestHeaders(
+	spec: Pick<SessionRequestSpec, 'headers'>,
+	headers: Record<string, string>,
+) {
+	for (const header of spec.headers) {
+		const lower = header.name.toLowerCase()
+		for (const existing of Object.keys(headers)) {
+			if (existing.toLowerCase() === lower) delete headers[existing]
+		}
+		headers[header.name] = header.value
+	}
+}
+
+export async function applySessionRequestBody(
+	spec: Pick<SessionRequestSpec, 'body' | 'form'>,
+	headers: Record<string, string>,
+): Promise<BodyInit | undefined> {
+	if (spec.form) {
+		if (spec.form.encoding === 'urlencoded') {
+			const params = new URLSearchParams()
+			for (const field of spec.form.fields) {
+				params.append(field.name, field.value)
+			}
+			headers['Content-Type'] = 'application/x-www-form-urlencoded'
+			return params.toString()
+		}
+		if (spec.form.encoding === 'multipart') {
+			const form = new FormData()
+			for (const field of spec.form.fields) {
+				if (field.filePath) {
+					const bytes = await readFile(field.filePath)
+					const contentType = contentTypeForFormFile(field.filePath)
+					form.append(
+						field.name,
+						new Blob([bytes], contentType ? { type: contentType } : undefined),
+						basename(field.filePath),
+					)
+				} else {
+					form.append(field.name, field.value)
+				}
+			}
+			return form
+		}
+		const exhaustive: never = spec.form.encoding
+		throw new PreviewManualTestError(
+			`Unsupported form encoding: ${String(exhaustive)}`,
+		)
+	}
+	if (spec.body !== null) {
+		headers['Content-Type'] = 'application/json'
+		return JSON.stringify(spec.body)
+	}
+	return undefined
+}
+
+const formFileContentTypes: Record<string, string> = {
+	gif: 'image/gif',
+	jpeg: 'image/jpeg',
+	jpg: 'image/jpeg',
+	png: 'image/png',
+	webp: 'image/webp',
+}
+
+function contentTypeForFormFile(filePath: string) {
+	const extension = extname(filePath).slice(1).toLowerCase()
+	return formFileContentTypes[extension]
+}
+
+export function sessionResponseSearchText(
+	body: string,
+	location: string | null,
+) {
+	if (!location) return body
+	return body.length > 0
+		? `${body}\nLocation: ${location}`
+		: `Location: ${location}`
 }
 
 function parseSessionRequestFlags(
@@ -440,25 +581,105 @@ function parseSessionRequestFlags(
 	flags: ReadonlyArray<SpecFlagMatch>,
 ) {
 	let dump = false
+	let multipart = false
 	const contains: Array<string> = []
+	const fields: Array<SessionFormField> = []
+	const headers: Array<SessionRequestHeader> = []
 	for (const [index, { flag, end }] of flags.entries()) {
 		const value = text.slice(end, flags[index + 1]?.start).trim()
-		if (flag === '--dump') {
+		if (flag === '--dump' || flag === '--multipart') {
 			if (value.length > 0) {
 				throw new PreviewManualTestError(
-					`--request --dump takes no value (got ${JSON.stringify(value)}). Put --contains <text> after it.`,
+					`--request ${flag} takes no value (got ${JSON.stringify(value)}). Put --contains <text> after it.`,
 				)
 			}
-			dump = true
+			if (flag === '--dump') dump = true
+			else multipart = true
 			continue
 		}
-		const needle = unquoteSpecValue(value)
-		if (needle.length === 0) {
+		const raw = unquoteSpecValue(value)
+		if (flag === '--form') {
+			fields.push(parseSessionFormField(raw))
+			continue
+		}
+		if (flag === '--header') {
+			const header = parseSessionRequestHeader(raw)
+			const duplicate = headers.find(
+				(existing) => existing.name.toLowerCase() === header.name.toLowerCase(),
+			)
+			if (duplicate) {
+				throw new PreviewManualTestError(
+					`--request --header ${header.name} is set more than once.`,
+				)
+			}
+			headers.push(header)
+			continue
+		}
+		if (raw.length === 0) {
 			throw new PreviewManualTestError('--request --contains requires text.')
 		}
-		contains.push(needle)
+		contains.push(raw)
 	}
-	return { dump, contains }
+	if (multipart && fields.length === 0) {
+		throw new PreviewManualTestError(
+			'--request --multipart requires at least one --form name=value field.',
+		)
+	}
+	const fileField = fields.find((field) => field.filePath)
+	if (fileField && !multipart) {
+		throw new PreviewManualTestError(
+			`--request file field ${fileField.name}=@${fileField.filePath} requires --multipart.`,
+		)
+	}
+	const form: SessionRequestForm | null =
+		fields.length === 0
+			? null
+			: { encoding: multipart ? 'multipart' : 'urlencoded', fields }
+	return { dump, contains, form, headers }
+}
+
+const httpHeaderNamePattern = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
+const sessionManagedHeaders: Record<string, string> = {
+	cookie: 'the session cookie comes from --cookie-file / --email',
+	'content-type': 'Content-Type comes from the JSON body or --form fields',
+}
+
+function parseSessionRequestHeader(raw: string): SessionRequestHeader {
+	const separator = raw.indexOf(':')
+	const name = separator === -1 ? '' : raw.slice(0, separator).trim()
+	if (!httpHeaderNamePattern.test(name)) {
+		throw new PreviewManualTestError(
+			`--request --header expects 'Name: value' (got ${JSON.stringify(raw)}).`,
+		)
+	}
+	const managed = sessionManagedHeaders[name.toLowerCase()]
+	if (managed) {
+		throw new PreviewManualTestError(
+			`--request --header cannot set ${name}: ${managed}.`,
+		)
+	}
+	return { name, value: raw.slice(separator + 1).trim() }
+}
+
+function parseSessionFormField(raw: string): SessionFormField {
+	const separator = raw.indexOf('=')
+	if (separator <= 0) {
+		throw new PreviewManualTestError(
+			`--request --form expects name=value (got ${JSON.stringify(raw)}).`,
+		)
+	}
+	const name = raw.slice(0, separator)
+	const value = raw.slice(separator + 1)
+	if (value.startsWith('@')) {
+		const filePath = value.slice(1)
+		if (filePath.length === 0) {
+			throw new PreviewManualTestError(
+				`--request --form ${name}=@ requires a file path.`,
+			)
+		}
+		return { name, value: '', filePath }
+	}
+	return { name, value, filePath: null }
 }
 
 function unquoteSpecValue(value: string) {
@@ -514,6 +735,9 @@ export function parsePreviewComment(body: string): ParsedPreviewComment | null {
 	const platformLine = body.match(
 		/Platform worker:\s*`([^`]+)`\s*(?:\((https?:\/\/[^)\s]+)\))?/i,
 	)
+	const apiLine = body.match(
+		/API worker:\s*`([^`]+)`\s*(?:\((https?:\/\/[^)\s]+)\))?/i,
+	)
 	const d1DatabaseName = matchFirst(body, /D1:\s*`([^`]+)`/)
 	const oauthKvTitle = matchFirst(body, /KV:\s*`([^`]+)`/)
 	const mocks: Array<string> = []
@@ -521,6 +745,7 @@ export function parsePreviewComment(body: string): ParsedPreviewComment | null {
 	if (mocksSection) {
 		for (const line of mocksSection.split('\n')) {
 			const trimmed = line.trim()
+			if (/^#{1,6}\s/.test(trimmed)) break
 			if (trimmed.startsWith('- ')) mocks.push(trimmed.slice(2).trim())
 		}
 	}
@@ -532,6 +757,8 @@ export function parsePreviewComment(body: string): ParsedPreviewComment | null {
 		runtimeUrl: runtimeLine?.[2] ?? null,
 		platformWorkerName: platformLine?.[1] ?? null,
 		platformUrl: platformLine?.[2] ?? null,
+		apiWorkerName: apiLine?.[1] ?? null,
+		apiUrl: apiLine?.[2] ?? null,
 		d1DatabaseName,
 		oauthKvTitle,
 		mocks,
@@ -566,6 +793,15 @@ export function deriveSiblingWorkerUrl(
 		return url.origin
 	} catch {
 		return null
+	}
+}
+
+function sameOrigin(a: string, b: string | null) {
+	if (!b) return false
+	try {
+		return new URL(a).origin === new URL(b).origin
+	} catch {
+		return false
 	}
 }
 
@@ -775,6 +1011,11 @@ function healthMatchDetail(
 	return `ok, commitSha ${commitSha}`
 }
 
+/** Single-quote for paste-into-shell briefing lines (blocks metacharacters). */
+export function shellQuote(value: string) {
+	return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
 export function formatBriefing(result: PreviewManualTestResult): string {
 	const lines = [
 		result.ok
@@ -793,6 +1034,12 @@ export function formatBriefing(result: PreviewManualTestResult): string {
 			: null,
 		result.snapshot.platformUrl
 			? `Platform: ${result.snapshot.platformUrl}${result.snapshot.platformWorkerName ? ` (\`${result.snapshot.platformWorkerName}\`)` : ''}`
+			: null,
+		result.snapshot.apiUrl
+			? `API: ${result.snapshot.apiUrl}${result.snapshot.apiWorkerName ? ` (\`${result.snapshot.apiWorkerName}\`)` : ''}`
+			: null,
+		result.snapshot.apiUrl
+			? `CLI (auth bootstrap / execute --local) API host: export KODY_API_URL=${shellQuote(result.snapshot.apiUrl)}`
 			: null,
 		result.smoke?.commitSha
 			? `Deployed commit: ${result.smoke.commitSha}`
@@ -819,7 +1066,7 @@ export function formatBriefing(result: PreviewManualTestResult): string {
 		`Username: ${result.login.username}`,
 		'`/admin` is expected to 403 — preview does not seed an admin account.',
 		result.session.origin
-			? `Follow-up HTTP: npm run control-kody -- request GET /account/values.json --origin ${result.session.origin}`
+			? `Follow-up HTTP: npm run control-kody -- request GET /account/secrets.json --origin ${result.session.origin}`
 			: null,
 	].filter((line): line is string => line !== null)
 
@@ -842,9 +1089,15 @@ export function formatBriefing(result: PreviewManualTestResult): string {
 		'Logged-in testing (required for medium/high risk):',
 		'The seed account starts empty except the user row. Create the data this',
 		'PR needs through the same JSON APIs the UI uses, then assert them:',
-		'  npm run preview:manual-test -- --request \'POST /account/values.json {"action":"save","name":"preview-locale","value":"en-US"}\' --request \'GET /account/values.json\'',
+		'  npm run preview:manual-test -- --request \'POST /account/secrets.json {"action":"save","scope":"user","name":"previewSeed","value":"preview-seed-value","allowedHosts":["api.example.com"]}\' --request \'GET /account/secrets.json\'',
 		'Follow-up HTML/JSON assertions use control-kody request, not cookie+curl:',
-		`  npm run control-kody -- request GET /account/values.json --origin ${result.session.origin ?? '<preview-url>'}`,
+		`  npm run control-kody -- request GET /account/secrets.json --origin ${result.session.origin ?? '<preview-url>'}`,
+		'GET /account/export.json is a bounded metadata manifest, not section',
+		'rows. Do not --contains a secret name there. Verify export content with',
+		'MCP accountExportSection (example: section d1_table table secret_entries)',
+		'via control-kody execute on the same origin.',
+		'Values are retired drain-only (POST delete). Prefer secrets, memories,',
+		'package storage, or the feature APIs this PR changes for seed data.',
 		'Stay on the preview origin. `/mcp` is 401 without OAuth by design.',
 		'',
 		'UI pass after data exists: open the preview URL (computerUse on Cloud',
@@ -1081,6 +1334,7 @@ async function loadSnapshot(
 		const workerName = workerNameFromPreviewUrl(options.previewUrl)
 		const runtimeWorkerName = workerName ? `${workerName}-runtime` : null
 		const platformWorkerName = workerName ? `${workerName}-platform` : null
+		const apiWorkerName = workerName ? `${workerName}-api` : null
 		return {
 			prNumber: null,
 			prUrl: null,
@@ -1104,6 +1358,15 @@ async function loadSnapshot(
 							options.previewUrl,
 							workerName,
 							platformWorkerName,
+						)
+					: null,
+			apiWorkerName,
+			apiUrl:
+				workerName && apiWorkerName
+					? deriveSiblingWorkerUrl(
+							options.previewUrl,
+							workerName,
+							apiWorkerName,
 						)
 					: null,
 			d1DatabaseName: null,
@@ -1141,6 +1404,24 @@ async function loadSnapshot(
 		(previewUrl && workerName && platformWorkerName
 			? deriveSiblingWorkerUrl(previewUrl, workerName, platformWorkerName)
 			: null)
+	// The CLI must redeem on the same preview the smoke tests, so a `--url`
+	// that overrides the comment's preview ignores the comment's API host.
+	const apiFromComment =
+		parsed?.apiUrl &&
+		(!options.previewUrl || sameOrigin(options.previewUrl, parsed.previewUrl))
+			? parsed
+			: null
+	const previewWorkerName = previewUrl
+		? workerNameFromPreviewUrl(previewUrl)
+		: null
+	const apiWorkerName =
+		apiFromComment?.apiWorkerName ??
+		(previewWorkerName ? `${previewWorkerName}-api` : null)
+	const apiUrl =
+		apiFromComment?.apiUrl ??
+		(previewUrl && previewWorkerName && apiWorkerName
+			? deriveSiblingWorkerUrl(previewUrl, previewWorkerName, apiWorkerName)
+			: null)
 
 	return {
 		prNumber: pr.number,
@@ -1153,6 +1434,8 @@ async function loadSnapshot(
 		runtimeUrl,
 		platformWorkerName,
 		platformUrl,
+		apiWorkerName,
+		apiUrl,
 		d1DatabaseName: parsed?.d1DatabaseName ?? null,
 		oauthKvTitle: parsed?.oauthKvTitle ?? null,
 		mocks: parsed?.mocks ?? [],
@@ -1553,7 +1836,14 @@ async function runSmokeChecks(
 
 			if (options.cookieFile) {
 				try {
-					await deps.writeFile(options.cookieFile, `${cookieHeader}\n`)
+					await deps.writeFile(
+						options.cookieFile,
+						formatCookieFile(
+							origin,
+							cookieHeader,
+							sessionEmail ?? previewSeedEmail,
+						),
+					)
 					checks.push({
 						name: 'cookie-file',
 						ok: true,
@@ -1732,14 +2022,12 @@ async function runAuthenticatedSessionRequest(
 		Cookie: cookieHeader,
 		Accept: spec.path.includes('.json') ? 'application/json' : '*/*',
 	}
+	applySessionRequestHeaders(spec, headers)
 	const init: RequestInit = {
 		method: spec.method,
 		headers,
 		redirect: 'manual',
-	}
-	if (spec.body !== null) {
-		headers['Content-Type'] = 'application/json'
-		init.body = JSON.stringify(spec.body)
+		body: await applySessionRequestBody(spec, headers),
 	}
 	const response = await fetchText(deps, `${origin}${spec.path}`, init)
 	if (response.error) {
@@ -1753,13 +2041,14 @@ async function runAuthenticatedSessionRequest(
 		response.status,
 		spec.expectedStatus,
 	)
-	const missing = missingContainsNeedles(response.body, spec.contains)
+	const searchable = sessionResponseSearchText(response.body, response.location)
+	const missing = missingContainsNeedles(searchable, spec.contains)
 	const expected =
 		spec.expectedStatus === null ? '2xx' : String(spec.expectedStatus)
 	const detail = [
 		statusOk
-			? `HTTP ${response.status} ${truncateDetail(response.body)}`
-			: `expected ${expected}, got HTTP ${response.status} ${truncateDetail(response.body)}`,
+			? `HTTP ${response.status} ${truncateDetail(searchable)}`
+			: `expected ${expected}, got HTTP ${response.status} ${truncateDetail(searchable)}`,
 	]
 	let dumpOk = true
 	if (dumpFile) {
@@ -1799,6 +2088,7 @@ type FetchedJson = {
 type FetchedText = {
 	status: number
 	body: string
+	location: string | null
 	setCookie: Array<string>
 	error?: string
 }
@@ -1842,12 +2132,14 @@ async function fetchText(
 		return {
 			status: response.status,
 			body: await response.text().catch(() => ''),
+			location: response.headers.get('location'),
 			setCookie: readSetCookie(response),
 		}
 	} catch (error) {
 		return {
 			status: 0,
 			body: '',
+			location: null,
 			setCookie: [],
 			error: error instanceof Error ? error.message : String(error),
 		}

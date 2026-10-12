@@ -2,7 +2,17 @@
  * Hourly credit debit lane. Runs right after `usage_aggregation` recomputes
  * `usage_rollups`, so debits only ever read a freshly recomputed month.
  *
- * For every wallet, per UTC month (the prior month while its rollup still
+ * Candidates are every live org that holds a `credit_wallets` row, plus
+ * every active gift/referral overlay period that still lacks a wallet row.
+ * Team org wallets are keyed by org id. Personal org id equals
+ * `stable_user_id`, and the keyset visits each id once. A missing wallet
+ * reads as zero
+ * balance and is backfilled (INSERT OR IGNORE) before settle, so the debit
+ * walk never skips an overlay period and later funded debits still see the
+ * row. Non-charging settle advances progress against at least the
+ * purchasable Pro baseline (#2642).
+ *
+ * For every candidate, per UTC month (the prior month while its rollup still
  * settles, and the current month) and per debit meter:
  *
  * - billable units = usage above the include for the account's current
@@ -27,6 +37,7 @@
  * run is bounded; `credit_debit_cursor` keeps the keyset position so the
  * next run continues past the last wallet this one reached.
  */
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { computeMonthlyOverage } from '#universal/compute-overage.ts'
 import {
 	creditDebitCostMicroUsd,
@@ -41,16 +52,19 @@ import {
 	userEntitlementColumnsSql,
 	type UserEntitlementRow,
 } from '#worker/entitlements/service.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 import { runCreditAutoRefill } from './credit-auto-refill.ts'
 import { sendCreditLowBalanceEmail } from '#app/user-account-emails.ts'
+import { sendToOrgBillingRecipients } from './org-billing-emails.ts'
 import { creditDebitMonths } from './credit-wallet.ts'
 import { readMonthlyComputeUsage } from './compute-overage-usage.ts'
+import { syncOrgBudgetSpendFromCreditLedger } from '#worker/entitlements/budget-gate.ts'
 
 export const creditDebitBatchSize = 50
 export const creditDebitMaxBatchesPerRun = 20
 
 type CreditDebitCandidateRow = UserEntitlementRow & {
-	user_id: string
+	user_id: OwnerId
 	email: string
 	stripe_customer_id: string | null
 	balance_micro_usd: number
@@ -87,7 +101,11 @@ export async function runCreditDebits(input: {
 	let failed = 0
 	let done = false
 	for (let batch = 0; batch < creditDebitMaxBatchesPerRun; batch += 1) {
-		const rows = await listCreditDebitCandidates({ db, startAfter })
+		const rows = await listCreditDebitCandidates({
+			db,
+			startAfter,
+			now: input.now,
+		})
 		for (const row of rows) {
 			try {
 				const outcome = await debitOneWallet({
@@ -149,24 +167,84 @@ async function writeCreditDebitCursor(input: {
 		.run()
 }
 
-async function listCreditDebitCandidates(input: {
+/**
+ * Wallet holders plus active gift/referral overlay periods. Every live org
+ * with a `credit_wallets` row is a candidate (personal or team). Overlay orgs
+ * without a wallet still appear (balance coalesced to 0) so non-charging
+ * settle can leave a high-water mark before a later funded return. `UNION`
+ * keeps one row per org id. Exported for tests.
+ */
+export async function listCreditDebitCandidates(input: {
 	db: D1Database
 	startAfter: string
+	now: Date
 }): Promise<Array<CreditDebitCandidateRow>> {
+	const nowIso = input.now.toISOString()
 	const rows = await input.db
 		.prepare(
-			`SELECT w.user_id, w.balance_micro_usd, w.auto_refill_enabled,
-				w.notify_low_balance, u.email, u.stripe_customer_id,
-				${userEntitlementColumnsSql('u')}
-			 FROM credit_wallets w
-			 INNER JOIN users u ON u.stable_user_id = w.user_id
-			 WHERE u.deleting_at IS NULL AND w.user_id > ?
-			 ORDER BY w.user_id
+			`SELECT ids.id AS user_id,
+				COALESCE(w.balance_micro_usd, 0) AS balance_micro_usd,
+				COALESCE(w.auto_refill_enabled, 0) AS auto_refill_enabled,
+				COALESCE(w.notify_low_balance, 1) AS notify_low_balance,
+				COALESCE(u.email, '') AS email,
+				o.stripe_customer_id AS stripe_customer_id,
+				${userEntitlementColumnsSql('o')}
+			 FROM (
+				SELECT w.user_id AS id
+				FROM credit_wallets w
+				INNER JOIN orgs live_org
+					ON live_org.id = w.user_id
+				   AND live_org.deleting_at IS NULL${andLiveDeletedAtSql('live_org')}
+				WHERE w.user_id > ?
+				UNION
+				SELECT live_org.id AS id
+				FROM orgs live_org
+				WHERE live_org.deleting_at IS NULL${andLiveDeletedAtSql('live_org')}
+				  AND live_org.id > ?
+				  AND (
+					live_org.second_agent_standard_gift_expires_at > ?
+					OR live_org.referral_standard_credit_expires_at > ?
+				  )
+			 ) ids
+			 INNER JOIN orgs o
+				ON o.id = ids.id
+			   AND o.deleting_at IS NULL${andLiveDeletedAtSql('o')}
+			 LEFT JOIN users u
+				ON u.stable_user_id = ids.id
+			   AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}
+			 LEFT JOIN credit_wallets w ON w.user_id = ids.id
+			 ORDER BY ids.id
 			 LIMIT ?`,
 		)
-		.bind(input.startAfter, creditDebitBatchSize)
+		.bind(
+			input.startAfter,
+			input.startAfter,
+			nowIso,
+			nowIso,
+			creditDebitBatchSize,
+		)
 		.all<CreditDebitCandidateRow>()
 	return rows.results ?? []
+}
+
+/**
+ * Ensure a zero-balance wallet row exists for this user. Overlay periods
+ * that never bought credits still need the row so later debit scans and
+ * funded settles see them. Does not forgive usage — settle owns progress.
+ */
+export async function backfillCreditWalletRow(input: {
+	db: D1Database
+	userId: OwnerId
+	now: Date
+}): Promise<void> {
+	const nowIso = input.now.toISOString()
+	await input.db
+		.prepare(
+			`INSERT OR IGNORE INTO credit_wallets (user_id, created_at, updated_at)
+			 VALUES (?, ?, ?)`,
+		)
+		.bind(input.userId, nowIso, nowIso)
+		.run()
 }
 
 async function debitOneWallet(input: {
@@ -177,6 +255,7 @@ async function debitOneWallet(input: {
 }): Promise<{ debitedMicroUsd: number; autoRefilled: boolean }> {
 	const db = input.env.APP_DB
 	const userId = input.row.user_id
+	await backfillCreditWalletRow({ db, userId, now: input.now })
 	const entitlement = await resolveUserEntitlementFromRow({
 		db,
 		stableUserId: userId,
@@ -188,6 +267,7 @@ async function debitOneWallet(input: {
 	for (const month of input.months) {
 		const outcome = await settleCreditDebitMonth({
 			db,
+			env: input.env,
 			userId,
 			entitlement,
 			month,
@@ -218,12 +298,18 @@ async function debitOneWallet(input: {
 			autoRefillEnabled: Number(input.row.auto_refill_enabled) === 1,
 		})
 	) {
-		await sendCreditLowBalanceEmail({
-			env: input.env,
-			email: input.row.email,
-			userId,
-			balanceMicroUsd: nextBalance,
-			now: input.now,
+		await sendToOrgBillingRecipients({
+			db: input.env.APP_DB,
+			orgId: userId,
+			sendOne: async (recipient) => {
+				await sendCreditLowBalanceEmail({
+					env: input.env,
+					email: recipient.email,
+					userId: recipient.userId,
+					balanceMicroUsd: nextBalance,
+					now: input.now,
+				})
+			},
 		}).catch((error: unknown) => {
 			console.warn('credit-low-balance-email-failed', error)
 		})
@@ -242,7 +328,8 @@ type ProgressRow = { meter: string; accounted_units: number }
  */
 export async function settleCreditDebitMonth(input: {
 	db: D1Database
-	userId: string
+	env: Env
+	userId: OwnerId
 	entitlement: UserEntitlement
 	month: string
 	now: Date
@@ -259,32 +346,31 @@ export async function settleCreditDebitMonth(input: {
 		uniqueWorkerDays: usage.uniqueWorkerDays,
 		durableObjectRowsRead: usage.durableObjectRowsRead,
 	})
+	const purchasableProDebitBaseline = computeMonthlyOverage({
+		plan: 'pro',
+		ladder: 'public',
+		creditWallet: 'funded',
+		uniqueWorkerDays: usage.uniqueWorkerDays,
+		durableObjectRowsRead: usage.durableObjectRowsRead,
+	})
 	const charge = input.entitlement.creditWallet === 'funded'
 	// When not charging, advance progress against at least the purchasable
 	// Pro debit baseline. Gift/retired Pro ceilings are larger than that
 	// baseline; without this, usage between 350 and 2,000 UWD would leave
-	// progress behind and get back-charged on a later funded return.
+	// progress behind and get back-charged on a later funded return. Empty
+	// purchasable Pro already sits on that baseline.
 	const progressOverage = charge
 		? overage
-		: (() => {
-				const creditsBaseline = computeMonthlyOverage({
-					plan: 'pro',
-					ladder: 'public',
-					creditWallet: 'empty',
-					uniqueWorkerDays: usage.uniqueWorkerDays,
-					durableObjectRowsRead: usage.durableObjectRowsRead,
-				})
-				return {
-					billableUniqueWorkerDays: Math.max(
-						overage.billableUniqueWorkerDays,
-						creditsBaseline.billableUniqueWorkerDays,
-					),
-					billableDurableObjectRowsRead: Math.max(
-						overage.billableDurableObjectRowsRead,
-						creditsBaseline.billableDurableObjectRowsRead,
-					),
-				}
-			})()
+		: {
+				billableUniqueWorkerDays: Math.max(
+					overage.billableUniqueWorkerDays,
+					purchasableProDebitBaseline.billableUniqueWorkerDays,
+				),
+				billableDurableObjectRowsRead: Math.max(
+					overage.billableDurableObjectRowsRead,
+					purchasableProDebitBaseline.billableDurableObjectRowsRead,
+				),
+			}
 	const billable: Record<CreditDebitMeter, number> = {
 		unique_worker_days: progressOverage.billableUniqueWorkerDays,
 		durable_object_rows_read: progressOverage.billableDurableObjectRowsRead,
@@ -364,6 +450,8 @@ export async function settleCreditDebitMonth(input: {
 				.bind(debitedMicroUsd, nowIso, input.userId),
 		)
 	}
+	let settledDebitedMicroUsd = debitedMicroUsd
+	let batchCommitted = true
 	if (statements.length > 0) {
 		try {
 			await input.db.batch(statements)
@@ -371,15 +459,52 @@ export async function settleCreditDebitMonth(input: {
 			const message = error instanceof Error ? error.message : String(error)
 			if (!/UNIQUE constraint failed/i.test(message)) throw error
 			// An overlapping run already settled from this starting point.
-			return {
+			settledDebitedMicroUsd = 0
+			batchCommitted = false
+		}
+	}
+	// Funded and empty wallets replay budget MTD from committed ledger
+	// debits (idempotent absolute replace). Empty must still run: the debit
+	// that hit $0 is the one most likely to need recovery, and the next
+	// hourly settle would otherwise skip until a later top-up. Free/`none`
+	// never debit, so skip those.
+	if (input.entitlement.creditWallet !== 'none') {
+		try {
+			await syncOrgBudgetSpendFromCreditLedger({
+				db: input.db,
+				env: input.env,
+				orgId: input.userId,
 				month: input.month,
-				debitedMicroUsd: 0,
-				forgivenUnits: {
+				includes: [
+					{
+						meter: 'unique_worker_days',
+						include: overage.includedUniqueWorkerDays,
+					},
+					{
+						meter: 'durable_object_rows_read',
+						include: overage.includedDurableObjectRowsRead,
+					},
+				],
+				now: input.now,
+			})
+		} catch (error) {
+			console.error('org-budget-spend-sync-failed', {
+				orgId: input.userId,
+				month: input.month,
+				debitedMicroUsd: settledDebitedMicroUsd,
+				error,
+			})
+			// Debit already committed; next hourly settle retries the sync.
+		}
+	}
+	return {
+		month: input.month,
+		debitedMicroUsd: settledDebitedMicroUsd,
+		forgivenUnits: batchCommitted
+			? forgivenUnits
+			: {
 					unique_worker_days: 0,
 					durable_object_rows_read: 0,
 				},
-			}
-		}
 	}
-	return { month: input.month, debitedMicroUsd, forgivenUnits }
 }

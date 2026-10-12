@@ -16,33 +16,21 @@ export const routes = route({
 	openaiAppsChallenge: '/.well-known/openai-apps-challenge',
 	connectOauth: '/connect/oauth',
 	connectSecrets: '/connect/secrets',
+	connectSecretSet: '/connect/secret-set',
 	connectWebhookApply: '/connect/webhook-apply',
 	integrationLogo: '/integrations/logos/:integrationSlug',
 	providerMarkLogo: '/integrations/provider-marks/:slug',
-	accountIntegrations: '/account/integrations',
-	// More specific than `:integrationName` so a connection named `apps` still
-	// resolves at `/account/integrations/apps` while OAuth apps live under
-	// `/account/integrations/apps/:appSlug`.
-	accountOauthAppDetail: '/account/integrations/apps/:appSlug',
-	// Static `/approve` must win over `:integrationName` so a connection named
-	// `approve` is not required to claim the one-click grant URL.
-	accountIntegrationsApprove: '/account/integrations/approve',
-	accountIntegrationDetail: '/account/integrations/:integrationName',
 	accountIntegrationsApi: '/account/integrations.json',
 	accountIntegrationsApiPost: post('/account/integrations.json'),
-	accountMcpServers: '/account/mcp-servers',
-	accountMcpServerNew: '/account/mcp-servers/new',
-	// More specific than `:serverId` so favicon assets do not collide with
-	// the expand-detail route.
+	// Favicon bytes and the OAuth callback stay on `/account`. The servers
+	// page itself is `/@:orgSlug/-/mcp-servers`.
 	accountMcpServerLogo: '/account/mcp-servers/logos/:serverId',
-	accountMcpServerDetail: '/account/mcp-servers/:serverId',
 	accountMcpServersOauthCallback: '/account/mcp-servers/oauth/callback',
 	accountMcpServersApi: '/account/mcp-servers.json',
 	accountMcpServersApiPost: post('/account/mcp-servers.json'),
-	// Legacy HTML package routes only redirect to their canonical `/@…` pages.
+	// Package detail still redirects to the canonical `/@user/:kodyId` page.
 	// The JSON endpoints remain account-scoped mutation/read APIs.
 	accountRepoIcon: '/account/repos/:repoId/icon/:iconCommit',
-	accountPackages: '/account/packages',
 	accountPackageDetail: '/account/packages/:packageId',
 	accountPackageApprovePublish: '/account/packages/:packageId/approve-publish',
 	accountPackageApprovePublishApi:
@@ -51,74 +39,47 @@ export const routes = route({
 	accountPackageFilesApi: '/account/packages/:packageId/files.json',
 	accountPackagesApi: '/account/packages.json',
 	accountPackagesApiPost: post('/account/packages.json'),
-	accountSecrets: '/account/secrets',
-	accountSecretNew: '/account/secrets/new',
-	accountSecretUserDetail: '/account/secrets/user/:secretName',
-	accountSecretSessionDetail: '/account/secrets/session/:sessionId/:secretName',
-	accountSecretPackageDetail: '/account/secrets/package/:packageId/:secretName',
-	accountSecretsApprove: '/account/secrets/approve',
 	accountSecretsApi: '/account/secrets.json',
 	accountSecretsApiPost: post('/account/secrets.json'),
-	accountSecretProviders: '/account/secret-providers',
-	accountSecretProvidersApprove: '/account/secret-providers/approve',
 	accountSecretProvidersApi: '/account/secret-providers.json',
 	accountSecretProvidersApiPost: post('/account/secret-providers.json'),
-	accountValues: '/account/values',
-	accountValueNew: '/account/values/new',
-	accountValueDetail: '/account/values/:valueId',
 	accountValuesApi: '/account/values.json',
 	accountValuesApiPost: post('/account/values.json'),
-	accountJobs: '/account/jobs',
-	accountJobDetail: '/account/jobs/:jobId',
 	accountJobsApi: '/account/jobs.json',
 	accountJobsApiPost: post('/account/jobs.json'),
-	accountWorkflows: '/account/workflows',
-	accountWorkflowDetail: '/account/workflows/:workflowId',
 	accountWorkflowsApi: '/account/workflows.json',
 	accountWorkflowsApiPost: post('/account/workflows.json'),
 	// Thin cross-package index of declared webhooks. Each row deep-links into
 	// the owning package's settings (`communityPackageSettings#webhooks`),
-	// which is where mint / reveal / rotate / enable-disable live.
-	accountWebhooks: '/account/webhooks',
+	// which is where mint / reveal / rotate / enable-disable live. The page
+	// is `/@:orgSlug/-/webhooks`.
 	accountWebhooksApi: '/account/webhooks.json',
 	accountWebhooksApproveApplyApi: '/account/webhooks/approve-apply.json',
 	accountWebhooksApproveApplyApiPost: post(
 		'/account/webhooks/approve-apply.json',
 	),
-	accountActivity: '/account/activity',
-	accountActivityDetail: '/account/activity/:runId',
 	accountActivityApi: '/account/activity.json',
-	accountWaiting: '/account/waiting',
 	accountWaitingApi: '/account/waiting.json',
 	accountWaitingClickPost: post('/account/waiting/click.json'),
 	accountExperiments: '/account/experiments',
 	accountExperimentsApi: '/account/experiments.json',
 	accountExperimentsApiPost: post('/account/experiments.json'),
-	accountShared: '/account/shared',
-	accountSharedApi: '/account/shared.json',
-	accountSharedApiPost: post('/account/shared.json'),
-	accountMemories: '/account/memories',
-	accountMemoryDetail: '/account/memories/:memoryId',
-	// Sibling of `/account/memories.json` so `:memoryId` cannot claim the
-	// signed-in user's memories download.
+	// Sibling of `/account/memories.json` so a page segment cannot claim the
+	// signed-in user's memories download. The page is `/@:orgSlug/-/memories`.
 	accountMemoriesExport: '/account/memories-export.json',
 	accountMemoriesApi: '/account/memories.json',
 	accountMemoriesApiPost: post('/account/memories.json'),
-	accountEmail: '/account/email',
-	accountEmailDetail: '/account/email/:messageId',
 	accountEmailApi: '/account/email.json',
-	// The Connections page is the home for inbound MCP hosts (connected
-	// agents): MCP URL, setup guides, and per-host revoke. Its data twin is
-	// `/account/connected-agents.json`; `/account/connections.json` is the
-	// older sign-in provider (GitHub, Google, …) list on the Overview page.
-	accountConnections: '/account/connections',
-	// Add connection: the full client grid, then one host's install steps.
-	accountConnectionNew: '/account/connections/new',
-	accountConnectionNewAgent: '/account/connections/new/:agent',
+	// The Connections page (`/@:orgSlug/-/connections`) is the home for inbound
+	// MCP hosts. Its data twin is `/account/connected-agents.json`.
+	// `/account/connections.json` is the older sign-in provider (GitHub,
+	// Google, and the rest) list on the Overview page.
 	accountConnectionsApi: '/account/connections.json',
 	accountConnectionsApiPost: post('/account/connections.json'),
 	accountConnectedAgentsApi: '/account/connected-agents.json',
 	accountConnectedAgentsApiPost: post('/account/connected-agents.json'),
+	// Per-connection usage for the Connections page (same org binding).
+	accountConnectionUsageApi: '/account/connection-usage.json',
 	accountPasskeys: '/account/passkeys',
 	accountPasskeysApi: '/account/passkeys.json',
 	accountPasskeysApiPost: post('/account/passkeys.json'),
@@ -131,14 +92,10 @@ export const routes = route({
 	accountTwoFactor: '/account/two-factor',
 	accountTwoFactorApi: '/account/two-factor.json',
 	accountTwoFactorApiPost: post('/account/two-factor.json'),
-	accountBilling: '/account/billing',
-	accountBillingApi: '/account/billing.json',
-	accountBillingCheckoutPost: post('/account/billing/checkout.json'),
 	accountBillingCancellationFeedbackPost: post(
 		'/account/billing/cancellation-feedback.json',
 	),
-	accountBillingSuccess: '/account/billing/success',
-	accountBillingPortal: '/account/billing/portal',
+	// Old `/account/credits` links open the usage page's Credits section.
 	accountCredits: '/account/credits',
 	accountCreditsTopUpPost: post('/account/credits/top-up.json'),
 	accountCreditsSettingsPost: post('/account/credits/settings.json'),
@@ -164,10 +121,6 @@ export const routes = route({
 	adminFeatureFlags: '/admin/feature-flags',
 	adminFeatureFlagsApi: '/admin/feature-flags.json',
 	adminFeatureFlagsApiPost: post('/admin/feature-flags.json'),
-	adminBanners: '/admin/banners',
-	adminBannersApi: '/admin/banners.json',
-	adminBannersApiPost: post('/admin/banners.json'),
-	siteBannerDismissPost: post('/site-banner-dismiss.json'),
 	youtubeThumb: '/youtube-thumb/:videoId',
 	adminPlatformIntegrations: '/admin/platform-integrations',
 	adminPlatformIntegrationNew: '/admin/platform-integrations/new',
@@ -187,12 +140,15 @@ export const routes = route({
 	adminUserUsageApi: '/admin/users/usage.json',
 	adminUserCreditsApi: '/admin/users/credits.json',
 	adminUserCreditsApiPost: post('/admin/users/credits.json'),
+	adminOrgLimitsApi: '/admin/orgs/limits.json',
+	adminOrgLimitsApiPost: post('/admin/orgs/limits.json'),
 	adminInsights: '/admin/insights',
 	adminInsightsApi: '/admin/insights.json',
 	adminPlatformFeedback: '/admin/platform-feedback',
 	adminPlatformFeedbackApi: '/admin/platform-feedback.json',
 	adminSystemEmail: '/admin/system-email',
 	adminSystemEmailApi: '/admin/system-email.json',
+	adminSystemEmailApiPost: post('/admin/system-email.json'),
 	blog: '/blog',
 	blogApi: '/blog.json',
 	blogRss: '/blog/rss.xml',
@@ -215,10 +171,10 @@ export const routes = route({
 	docDetailApi: '/docs/:slug.json',
 	docDetailMarkdown: '/docs/:slug.md',
 	docDetailOgImage: '/docs/:slug/og.png',
-	// Signed-in opt-in for the package-share-grants flag from the sharing docs.
-	packageSharingOptInPost: post('/docs/package-sharing/opt-in'),
-	// Signed-in opt-in for the secret-providers flag from the usage docs.
-	secretProvidersOptInPost: post('/docs/secret-providers/opt-in'),
+	// Signed-in opt-in for the mcp-skills-extension flag from the package skills docs.
+	packageSkillsOptInPost: post('/docs/package-skills/opt-in'),
+	// Signed-in opt-in for the mcp-events-extension flag from the MCP Events docs.
+	mcpEventsOptInPost: post('/docs/mcp-events/opt-in'),
 	llmsTxt: '/llms.txt',
 	// The docs used to live under `/guides`. Everything there 308s to `/docs`
 	// (see `#app/handlers/legacy-guides-redirect.ts`).
@@ -240,6 +196,65 @@ export const routes = route({
 	communityTrustApiPost: post('/community/:listingId/trust.json'),
 	communityFeatureApiPost: post('/community/:listingId/feature.json'),
 	communityInstallApiPost: post('/community/:listingId/install.json'),
+	// Organization section pages under `/@:orgSlug/-/…` so they never collide
+	// with a package's canonical public URL at `/@:username/:kodyId`.
+	// `packages` and `webhooks` are index-only so package apps and ingress
+	// (`/@owner/packages/…`, `/@owner/webhooks/…`) stay put.
+	orgActivity: get('/@:orgSlug/-/activity(/*rest)'),
+	orgBilling: get('/@:orgSlug/-/billing'),
+	orgBillingApi: get('/@:orgSlug/-/billing.json'),
+	orgBillingCheckoutPost: post('/@:orgSlug/-/billing/checkout.json'),
+	orgBillingSuccess: get('/@:orgSlug/-/billing/success'),
+	orgBillingPortal: get('/@:orgSlug/-/billing/portal'),
+	orgConnections: get('/@:orgSlug/-/connections(/*rest)'),
+	orgEmail: get('/@:orgSlug/-/email(/*rest)'),
+	orgIntegrations: get('/@:orgSlug/-/integrations(/*rest)'),
+	orgJobs: get('/@:orgSlug/-/jobs(/*rest)'),
+	orgMcpServers: get('/@:orgSlug/-/mcp-servers(/*rest)'),
+	// Every MCP server `authUrl` opens this consent page. Continue posts back
+	// here and is redirected to the provider.
+	orgMcpServerAuthorize: get('/@:orgSlug/-/mcp-servers/:serverId/authorize'),
+	orgMcpServerAuthorizePost: post(
+		'/@:orgSlug/-/mcp-servers/:serverId/authorize',
+	),
+	orgMemories: get('/@:orgSlug/-/memories(/*rest)'),
+	orgOverview: get('/@:orgSlug/-/overview'),
+	orgPackages: get('/@:orgSlug/-/packages'),
+	orgPackagesApi: get('/@:orgSlug/-/packages.json'),
+	orgSecretProviders: get('/@:orgSlug/-/secret-providers(/*rest)'),
+	orgSecrets: get('/@:orgSlug/-/secrets(/*rest)'),
+	orgValues: get('/@:orgSlug/-/values(/*rest)'),
+	orgWaiting: get('/@:orgSlug/-/waiting(/*rest)'),
+	orgWebhooks: get('/@:orgSlug/-/webhooks'),
+	orgWorkflows: get('/@:orgSlug/-/workflows(/*rest)'),
+	// Org settings and members under the same `/-/` separator.
+	orgSettings: get('/@:orgSlug/-/settings'),
+	orgSettingsApi: get('/@:orgSlug/-/settings.json'),
+	orgSettingsPost: post('/@:orgSlug/-/settings.json'),
+	orgSettingsAvatarPost: post('/@:orgSlug/-/settings/avatar.json'),
+	orgSettingsDeletePost: post('/@:orgSlug/-/settings/delete.json'),
+	orgMembers: get('/@:orgSlug/-/members'),
+	orgMembersApi: get('/@:orgSlug/-/members.json'),
+	orgMembersRolePost: post('/@:orgSlug/-/members/role.json'),
+	orgMembersRemovePost: post('/@:orgSlug/-/members/remove.json'),
+	orgMembersInvitePost: post('/@:orgSlug/-/members/invite.json'),
+	orgMembersInviteLinksPost: post('/@:orgSlug/-/members/invite-links.json'),
+	orgMembersInviteLinksRevokePost: post(
+		'/@:orgSlug/-/members/invite-links-revoke.json',
+	),
+	orgInviteJoin: get('/join/:token'),
+	orgInviteJoinPost: post('/join/:token'),
+	orgTeams: get('/@:orgSlug/-/teams'),
+	orgTeamsApi: get('/@:orgSlug/-/teams.json'),
+	orgTeamsCreatePost: post('/@:orgSlug/-/teams/create.json'),
+	orgTeamsMemberAddPost: post('/@:orgSlug/-/teams/member-add.json'),
+	orgTeamsMemberRemovePost: post('/@:orgSlug/-/teams/member-remove.json'),
+	orgGrants: get('/@:orgSlug/-/grants'),
+	orgGrantsApi: get('/@:orgSlug/-/grants.json'),
+	orgGrantsRevokePost: post('/@:orgSlug/-/grants/revoke.json'),
+	orgCollaborators: get('/@:orgSlug/-/collaborators'),
+	orgCollaboratorsApi: get('/@:orgSlug/-/collaborators.json'),
+	orgAvatar: get('/orgs/:orgSlug/avatar/:hash.:ext'),
 	profile: '/@:username',
 	// Canonical public URL for a published package, keyed by its owner and
 	// package name leaf (`/@acme/devin`) rather than the listing uuid. Deeper
@@ -257,19 +272,12 @@ export const routes = route({
 	communityPackageIcon: '/@:username/:kodyId/icon/:iconCommit',
 	communityPackageSettings: '/@:username/:kodyId/settings',
 	communityPackageApprovePublish: '/@:username/:kodyId/approve-publish',
-	communityPackageApproveChanges: '/@:username/:kodyId/approve-changes',
 	// JSON companion lives under `/profiles/…` with the other username-keyed
 	// APIs, keeping the `/@…` namespace to human-shareable page URLs.
 	communityPackageApi: '/profiles/:username/packages/:kodyId.json',
 	communityPackageFilesApi: '/profiles/:username/packages/:kodyId/files.json',
 	communityPackageApprovePublishApi:
 		'/profiles/:username/packages/:kodyId/approve-publish.json',
-	communityPackageApproveChangesApi:
-		'/profiles/:username/packages/:kodyId/approve-changes.json',
-	communityPackageShareApi: '/profiles/:username/packages/:kodyId/share.json',
-	communityPackageShareApiPost: post(
-		'/profiles/:username/packages/:kodyId/share.json',
-	),
 	// Owner-only webhook URL management for one package (the Webhooks section
 	// of package settings): GET lists declared webhooks with minted state,
 	// POST mints / rotates / reveals / enables / disables one. The credential
@@ -294,9 +302,29 @@ export const routes = route({
 	sentryTunnel: post('/sentry-tunnel'),
 	login: '/login',
 	ogPageImage: '/og/:page.png',
+	features: '/features',
+	featureMemory: '/features/memory',
+	featureSecrets: '/features/secrets',
+	featurePackages: '/features/packages',
+	featureTriggers: '/features/triggers',
+	featureIntegrations: '/features/integrations',
+	featureApps: '/features/apps',
+	business: '/for/business',
 	pricing: get('/pricing'),
 	faq: '/faq',
 	caseStudies: '/case-studies',
+	n8nAlternatives: '/compare/n8n-alternatives',
+	mcpGateway: '/use-cases/mcp-gateway',
+	sharedMemory: '/use-cases/shared-agent-memory',
+	gmail: '/integrations/gmail',
+	customTools: '/use-cases/claude-code-custom-tools',
+	composioAlternatives: '/compare/composio-alternatives',
+	slack: '/integrations/slack',
+	scheduledWorkflows: '/use-cases/scheduled-workflows',
+	claudeIntegrations: '/integrations/claude',
+	useCases: '/use-cases',
+	automation: '/use-cases/ai-workflow-automation',
+
 	support: '/support',
 	privacy: '/privacy',
 	terms: '/terms',
@@ -322,6 +350,12 @@ export const routes = route({
 	pendingVerification: '/pending-verification',
 	signup: '/signup',
 	account: '/account',
+	accountSecurity: '/account/security',
+	accountData: '/account/data',
+	accountOrganizations: '/account/organizations',
+	accountOrganizationsApi: '/account/organizations.json',
+	accountOrganizationsNew: get('/account/organizations/new'),
+	accountOrganizationsNewPost: post('/account/organizations/new'),
 	accountDelete: post('/account/delete'),
 	auth: post('/auth'),
 	authProvidersApi: '/auth/providers.json',

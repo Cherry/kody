@@ -1,4 +1,6 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import type * as PackageInvocations from '#worker/package-invocations/service.ts'
 
 const inboundEmailReceiptTopic = 'email.message.received'
@@ -11,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 		body: { result: { ok: true } },
 	})),
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	resolvePackageOwnerContext: vi.fn(),
 	loadPackageManifestBySourceId: vi.fn(),
 	getInternalEmailMessageById: vi.fn(),
@@ -40,11 +42,10 @@ vi.mock('#worker/package-invocations/service.ts', () => ({
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: mocks.getSavedPackageById,
-	getSavedPackageByKodyId: mocks.getSavedPackageByKodyId,
+	resolveSavedPackageRef: mocks.resolveSavedPackageRef,
 }))
 
 vi.mock('#worker/package-registry/package-owner.ts', () => ({
-	packageScopeInputDescription: 'package scope',
 	resolvePackageOwnerContext: mocks.resolvePackageOwnerContext,
 }))
 
@@ -63,7 +64,7 @@ const { packageSubscriptionDispatchCapability } =
 
 const savedPackage = {
 	id: 'pkg-1',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 	sourceId: 'source-1',
 	kodyId: 'demo',
 	name: '@user/demo',
@@ -89,11 +90,10 @@ function createCtx(
 	}>,
 ) {
 	mocks.resolvePackageOwnerContext.mockResolvedValue({
-		ownerUserId: 'user-1',
+		ownerUserId: ownerIdFromStored('user-1'),
 		ownerScope: 'user',
 		ownerEmail: 'user@example.com',
 		actorUserId: 'user-1',
-		delegated: false,
 	})
 	return {
 		env: { APP_DB: {} } as Env,
@@ -101,12 +101,13 @@ function createCtx(
 			baseUrl: 'https://heykody.dev',
 			executionOrigin: overrides?.executionOrigin ?? 'interactive',
 			user: {
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				email: 'user@example.com',
 				displayName: 'User',
 			},
 			storageContext: overrides?.storageContext ?? null,
 			repoContext: null,
+			request: sessionRequestContext('user-1'),
 		},
 	}
 }
@@ -127,7 +128,7 @@ function dispatch(
 }
 
 function mockDeclaredSubscription(topic = inboundEmailReceiptTopic) {
-	mocks.getSavedPackageByKodyId.mockResolvedValue(savedPackage)
+	mocks.resolveSavedPackageRef.mockResolvedValue(savedPackage)
 	mocks.loadPackageManifestBySourceId.mockResolvedValue({
 		manifest: {
 			name: '@user/demo',
@@ -174,6 +175,7 @@ test('packageSubscriptionDispatch sends synthetic params envelopes to one packag
 	expect(result).toMatchObject({
 		package_id: 'pkg-1',
 		kody_id: 'demo',
+		slug: 'demo',
 		topic: 'repo.pushed',
 		source: 'synthetic',
 		synthetic: true,
@@ -282,26 +284,25 @@ test('packageSubscriptionDispatch rejects runtime callers and undeclared topics'
 	await expect(dispatch()).rejects.toThrow(/packageSubscriptionDispatch/)
 })
 
-test('packageSubscriptionDispatch resolves delegated package scope like packageGet', async () => {
+test('packageSubscriptionDispatch resolves the package in the request org like packageGet', async () => {
 	mockDeclaredSubscription('repo.pushed')
 	const ctx = createCtx()
 	mocks.resolvePackageOwnerContext.mockResolvedValue({
-		ownerUserId: 'platform-user',
-		ownerScope: 'kody',
-		ownerEmail: 'kody@example.com',
+		ownerUserId: ownerIdFromStored('org-owner'),
+		ownerScope: 'acme',
+		ownerEmail: 'acme@example.com',
 		actorUserId: 'user-1',
-		delegated: true,
 	})
 
-	await dispatch({ package_scope: 'kody' }, ctx)
+	await dispatch({}, ctx)
 
-	expect(mocks.resolvePackageOwnerContext).toHaveBeenCalledWith(
-		ctx.env,
-		ctx.callerContext.user,
-		'kody',
-	)
-	expect(mocks.getSavedPackageByKodyId).toHaveBeenCalledWith(ctx.env.APP_DB, {
-		userId: 'platform-user',
-		kodyId: 'demo',
+	expect(mocks.resolvePackageOwnerContext).toHaveBeenCalledWith(ctx.env, {
+		user: ctx.callerContext.user,
+		request: ctx.callerContext.request,
+	})
+	expect(mocks.resolveSavedPackageRef).toHaveBeenCalledWith(ctx.env.APP_DB, {
+		userId: ownerIdFromStored('org-owner'),
+		ref: 'demo',
+		match: 'slug',
 	})
 })

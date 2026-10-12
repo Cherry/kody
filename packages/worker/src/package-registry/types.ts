@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { communityPackageCategories } from '#universal/community-categories.ts'
 import { type ForkListingRelation } from '#universal/community-listing-ahead.ts'
@@ -106,6 +107,46 @@ export type PackageSecretMountDefinition = z.infer<
 	typeof packageSecretMountDefinitionSchema
 >
 
+export const packageCredentialKindValues = ['secret', 'oauth', 'mcp'] as const
+export type PackageCredentialKind = (typeof packageCredentialKindValues)[number]
+
+/**
+ * Slot names land inside `{{secret:NAME}}`-style placeholders, so they use the
+ * placeholder name characters. `@` and `/` stay out: `@me/NAME` and
+ * `{{secret/provider:ref}}` are reference grammar, not names.
+ */
+export const packageCredentialSlotNamePattern = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/
+
+export const retiredCredentialPlacementMessage =
+	'kody.credentials slots take no placement: the fetch gateway fills a credential anywhere in a request (a header, the URL path or query, or the body) to a host the credential allows, over HTTPS. Remove placement.'
+
+export const packageCredentialSlotSchema = z.strictObject({
+	kind: z.enum(packageCredentialKindValues),
+	/** Free-form provider label (for example `google` or `1password`). */
+	provider: z.string().trim().min(1).max(64),
+	/** The package picks among several assigned accounts with `{ account }`. */
+	multiple: z.boolean().optional(),
+	/** Shown when someone assigns a credential to this slot. */
+	description: z.string().trim().min(1).max(500),
+	placement: z.never({ error: retiredCredentialPlacementMessage }).optional(),
+})
+
+export type PackageCredentialSlot = z.infer<typeof packageCredentialSlotSchema>
+
+export const packageCredentialsSchema = z
+	.record(z.string(), packageCredentialSlotSchema)
+	.superRefine((slots, ctx) => {
+		for (const name of Object.keys(slots)) {
+			if (packageCredentialSlotNamePattern.test(name)) continue
+			ctx.addIssue({
+				code: 'custom',
+				path: [name],
+				message:
+					'Credential slot names start with a letter and use letters, numbers, dots, underscores, or hyphens (max 64).',
+			})
+		}
+	})
+
 export const packageSubscriptionDefinitionSchema = z.object({
 	handler: z.string().min(1),
 	description: z.string().min(1).optional(),
@@ -131,7 +172,7 @@ export const webhookTimestampFormatValues = [
 export type WebhookTimestampFormat =
 	(typeof webhookTimestampFormatValues)[number]
 
-export const packageWebhookVerificationSchema = z.object({
+export const packageWebhookHmacVerificationSchema = z.object({
 	type: z.enum(['hmac-sha256', 'hmac-sha1']),
 	header: z.string().regex(httpFieldNamePattern),
 	/**
@@ -146,6 +187,24 @@ export const packageWebhookVerificationSchema = z.object({
 	signedPayload: z.enum(webhookSignedPayloadValues).optional(),
 })
 
+/**
+ * For senders that cannot sign: the minted URL's secret path segment is the
+ * only credential. A webhook that declares an HMAC type never falls back to
+ * this; requests without a valid signature are refused.
+ */
+export const packageWebhookUrlSecretVerificationSchema = z.object({
+	type: z.literal('url-secret'),
+})
+
+export const packageWebhookVerificationSchema = z.discriminatedUnion('type', [
+	packageWebhookHmacVerificationSchema,
+	packageWebhookUrlSecretVerificationSchema,
+])
+
+export type PackageWebhookHmacVerification = z.infer<
+	typeof packageWebhookHmacVerificationSchema
+>
+
 export type PackageWebhookVerification = z.infer<
 	typeof packageWebhookVerificationSchema
 >
@@ -155,25 +214,11 @@ export type PackageWebhookVerification = z.infer<
  * requests never invoke package code: the worker answers from query/body +
  * optional named secret only.
  *
- * Canonical type is `subscription-challenge` (generic knobs). Vendor-named
- * aliases (`meta-hub`, `strava-hub`, …) remain parseable for existing
- * manifests and expand to the generic form at runtime — do not add new
- * vendor type ids (see decision 0054).
+ * Only `subscription-challenge` (generic knobs) is supported. Do not add
+ * vendor-named type ids (see decision 0054); configure providers with
+ * documented presets under this type.
  */
-export const webhookChallengeAliasTypeValues = [
-	'x-activity-crc',
-	'websub-hub',
-	'meta-hub',
-	'strava-hub',
-	'slack-url-verification',
-] as const
-export type WebhookChallengeAliasType =
-	(typeof webhookChallengeAliasTypeValues)[number]
-
-export const webhookChallengeTypeValues = [
-	'subscription-challenge',
-	...webhookChallengeAliasTypeValues,
-] as const
+export const webhookChallengeTypeValues = ['subscription-challenge'] as const
 export type WebhookChallengeType = (typeof webhookChallengeTypeValues)[number]
 
 const webhookChallengeParamKeySchema = z
@@ -264,38 +309,8 @@ export type PackageWebhookSubscriptionChallenge = z.infer<
 	typeof packageWebhookSubscriptionChallengeSchema
 >
 
-const packageWebhookChallengeUnionSchema = z.discriminatedUnion('type', [
-	packageWebhookSubscriptionChallengeSchema,
-	z.object({
-		type: z.literal('x-activity-crc'),
-		secretName: z.string().min(1),
-	}),
-	z.object({
-		type: z.literal('websub-hub'),
-		/** When set, `hub.verify_token` must match this secret. */
-		secretName: z.string().min(1).optional(),
-	}),
-	z.object({
-		type: z.literal('meta-hub'),
-		secretName: z.string().min(1),
-	}),
-	z.object({
-		type: z.literal('strava-hub'),
-		secretName: z.string().min(1),
-	}),
-	z.object({
-		type: z.literal('slack-url-verification'),
-		/**
-		 * When set, the challenge POST must carry a valid request-hmac for
-		 * this signing secret (Slack-style `v0.timestamp.body`).
-		 */
-		secretName: z.string().min(1).optional(),
-	}),
-])
-
 export const packageWebhookChallengeSchema =
-	packageWebhookChallengeUnionSchema.superRefine((challenge, ctx) => {
-		if (challenge.type !== 'subscription-challenge') return
+	packageWebhookSubscriptionChallengeSchema.superRefine((challenge, ctx) => {
 		if (challenge.method === 'GET' && challenge.challenge.in !== 'query') {
 			ctx.addIssue({
 				code: 'custom',
@@ -347,16 +362,13 @@ export const packageWebhookChallengeSchema =
 	})
 
 export type PackageWebhookChallenge = z.infer<
-	typeof packageWebhookChallengeUnionSchema
+	typeof packageWebhookChallengeSchema
 >
 
-/** Secret name used by a challenge declaration, if any (aliases or prove). */
+/** Secret name used by a challenge declaration's prove block, if any. */
 export function webhookChallengeSecretName(
 	challenge: PackageWebhookChallenge,
 ): string | undefined {
-	if (challenge.type !== 'subscription-challenge') {
-		return challenge.secretName
-	}
 	const prove = challenge.prove
 	if (!prove || prove.kind === 'none') return undefined
 	return prove.secretName
@@ -426,6 +438,7 @@ export const packageWebhookDefinitionSchema = z
 	})
 	.superRefine((webhook, ctx) => {
 		if (
+			webhook.verification?.type !== 'url-secret' &&
 			webhook.verification?.signedPayload === 'timestamp.body' &&
 			!webhook.replay?.timestampHeader
 		) {
@@ -464,6 +477,9 @@ export const packageEmittedEventDefinitionSchema = z.object({
 	// keyword set is enforced in parseAuthoredPackageJson (manifest.ts) so
 	// schema problems surface as publish-time manifest errors.
 	payloadSchema: z.record(z.string(), z.unknown()).optional(),
+	// Opt-in exposure through the MCP Events extension (events/list,
+	// events/subscribe). Absent or false keeps the topic package-internal.
+	mcp: z.boolean().optional(),
 })
 
 export type PackageEmittedEventDefinition = z.infer<
@@ -629,6 +645,7 @@ export const authoredPackageKodySchema = z.object({
 	category: z.enum(communityPackageCategories).optional(),
 	searchText: z.string().min(1).optional(),
 	dependencies: kodyPackageDependenciesSchema.optional(),
+	credentials: packageCredentialsSchema.optional(),
 	secretMounts: z
 		.record(z.string().min(1), packageSecretMountDefinitionSchema)
 		.optional(),
@@ -655,6 +672,13 @@ export type AuthoredPackageKody = Omit<
 	'id'
 > & {
 	id: string
+	/**
+	 * Published snapshot load only: `kody.credentials` slots that fail today's
+	 * slot schema, by name, with the validation message. They are left out of
+	 * `credentials` and every use of one fails with this message. Never read
+	 * from package.json.
+	 */
+	invalidCredentialSlots?: Record<string, string>
 }
 
 export const authoredPackageJsonSchema = z.object({
@@ -673,7 +697,7 @@ export type AuthoredPackageJson = Omit<
 
 export type SavedPackageRow = {
 	id: string
-	user_id: string
+	user_id: OwnerId
 	name: string
 	kody_id: string
 	description: string
@@ -681,6 +705,7 @@ export type SavedPackageRow = {
 	search_text: string | null
 	source_id: string
 	has_app: 0 | 1
+	has_skills: 0 | 1
 	hidden: 0 | 1
 	is_private: 0 | 1
 	locked_at: string | null
@@ -690,7 +715,7 @@ export type SavedPackageRow = {
 
 export type SavedPackageRecord = {
 	id: string
-	userId: string
+	userId: OwnerId
 	name: string
 	kodyId: string
 	description: string
@@ -698,6 +723,7 @@ export type SavedPackageRecord = {
 	searchText: string | null
 	sourceId: string
 	hasApp: boolean
+	hasSkills: boolean
 	hidden: boolean
 	isPrivate: boolean
 	lockedAt: string | null

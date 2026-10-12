@@ -1,5 +1,7 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import { personalOrgAccessD1 } from '#worker/test-support/org-binding-query.ts'
 import { createToolDispatchers } from '#mcp/executor.ts'
 import {
 	resolveCallerSecretAuthority,
@@ -18,9 +20,15 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('#worker/mcp-client/hub-client.ts', () => ({
-	createMcpClientHubClient: () => ({
-		callTool: (...args: Array<unknown>) => mocks.callTool(...args),
-	}),
+	callMcpServerTool: ({
+		serverId,
+		toolName,
+		args,
+	}: {
+		serverId: string
+		toolName: string
+		args: Record<string, unknown>
+	}) => mocks.callTool({ serverId, toolName, args }),
 }))
 
 vi.mock('#worker/mcp-client/package-access.ts', async () => {
@@ -56,7 +64,7 @@ function createSnapshot(): McpServerSnapshot {
 		name: 'notion',
 		url: 'https://mcp.notion.com/mcp',
 		state: 'ready',
-		authUrl: null,
+		authorizationPending: false,
 		error: null,
 		instructions: null,
 		tools: [
@@ -71,11 +79,15 @@ function createSnapshot(): McpServerSnapshot {
 
 function createExecuteContext() {
 	return {
-		env: {} as Env,
+		env: {
+			APP_DB: personalOrgAccessD1(),
+			SENTRY_ENVIRONMENT: 'test',
+		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'user-alice',
+				userId: personIdFromStored('user-alice'),
 				email: 'alice@example.com',
 				displayName: 'Alice',
 			},

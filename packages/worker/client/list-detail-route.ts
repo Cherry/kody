@@ -1,4 +1,5 @@
 import { createHref } from 'remix/route-pattern/href'
+import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 
 function decodePathSegment(value: string) {
 	try {
@@ -31,12 +32,16 @@ export function createListDetailRoute(
 	const detailPrefix = `${basePath}/`
 
 	function isRoutePath(href: string) {
-		const pathname = new URL(href, 'http://localhost').pathname
+		const pathname = accountAliasPath(
+			new URL(href, 'http://localhost').pathname,
+		)
 		return pathname === basePath || pathname.startsWith(detailPrefix)
 	}
 
 	function getSelection(href: string): ListDetailSelection {
-		const pathname = new URL(href, 'http://localhost').pathname
+		const pathname = accountAliasPath(
+			new URL(href, 'http://localhost').pathname,
+		)
 		if (pathname === newPath) {
 			return {
 				selectedId: null,
@@ -68,19 +73,27 @@ export function createListDetailRoute(
 		}
 	}
 
-	function buildListHref(search = '') {
-		return appendSearch(basePath, search)
+	function publish(path: string, currentHref?: string) {
+		if (!currentHref) return path
+		return relocateAccountHref(path, currentHref)
 	}
 
-	function buildNewHref(search = '') {
-		return appendSearch(newPath, search)
+	function buildListHref(search = '', currentHref?: string) {
+		return publish(appendSearch(basePath, search), currentHref)
 	}
 
-	function buildDetailHref(id: string, search = '') {
+	function buildNewHref(search = '', currentHref?: string) {
+		return publish(appendSearch(newPath, search), currentHref)
+	}
+
+	function buildDetailHref(id: string, search = '', currentHref?: string) {
 		// Remix treats `.` as a route delimiter, so `encodeURIComponent` is not
-		// enough — `createHref` percent-encodes dots (`%2E`) the same way
+		// enough. `createHref` percent-encodes dots (`%2E`) the same way
 		// `routes.*.href()` does for named routes.
-		return appendSearch(createHref(`${basePath}/:id`, { id }), search)
+		return publish(
+			appendSearch(createHref(`${basePath}/:id`, { id }), search),
+			currentHref,
+		)
 	}
 
 	return {

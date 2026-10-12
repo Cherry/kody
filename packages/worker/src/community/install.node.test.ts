@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
@@ -12,9 +13,13 @@ vi.mock('./service.ts', () => ({
 	persistPreparedCommunityFork: mockModule.persistPreparedCommunityFork,
 }))
 
-vi.mock('#worker/repo/checks.ts', () => ({
-	runRepoChecks: mockModule.runRepoChecks,
-}))
+vi.mock('#worker/repo/checks.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('#worker/repo/checks.ts')>()
+	return {
+		...actual,
+		runRepoChecks: mockModule.runRepoChecks,
+	}
+})
 
 vi.mock('#worker/package-registry/service.ts', () => ({
 	refreshSavedPackageProjection: mockModule.refreshSavedPackageProjection,
@@ -43,7 +48,7 @@ function preparedFork(overrides: { crossScopeReferences?: unknown } = {}) {
 	return {
 		env,
 		baseUrl: 'https://kody.test',
-		userId: 'user-b',
+		userId: ownerIdFromStored('user-b'),
 		listingId: 'listing-1',
 		listingName: '@owner/demo',
 		listingKodyId: 'demo',
@@ -58,7 +63,14 @@ function preparedFork(overrides: { crossScopeReferences?: unknown } = {}) {
 	}
 }
 
-function forkResult(overrides: { crossScopeReferences?: unknown } = {}) {
+function forkResult(
+	overrides: {
+		crossScopeReferences?: unknown
+		files?: Record<string, string>
+		filesCount?: number
+		originCommit?: string
+	} = {},
+) {
 	return {
 		...forkFields,
 		crossScopeReferences: [],
@@ -72,7 +84,7 @@ function install(overrides: { waitUntil?: () => void } = {}) {
 	return installCommunityListing({
 		env,
 		baseUrl: 'https://kody.test',
-		userId: 'user-b',
+		userId: ownerIdFromStored('user-b'),
 		userEmail: 'userb@example.com',
 		expectedPackageScope: 'userb',
 		listingId: 'listing-1',
@@ -115,7 +127,7 @@ test('install publishes clean forks, keeps failed checks inert, and propagates e
 			sourceRoot: '/',
 			env,
 			baseUrl: 'https://kody.test',
-			userId: 'user-b',
+			userId: ownerIdFromStored('user-b'),
 			expectedPackageScope: 'userb',
 			requirePackageDocs: false,
 		}),
@@ -136,7 +148,7 @@ test('install publishes clean forks, keeps failed checks inert, and propagates e
 	expect(mockModule.refreshSavedPackageProjection).toHaveBeenCalledWith({
 		env,
 		baseUrl: 'https://kody.test',
-		userId: 'user-b',
+		userId: ownerIdFromStored('user-b'),
 		userEmail: 'userb@example.com',
 		packageId: 'package-1',
 		sourceId: 'source-1',
@@ -248,4 +260,33 @@ test('install overlaps Artifacts persist with publish checks', async () => {
 	persistFailChecksGate.resolve()
 	await expect(persistThrowPromise).rejects.toThrow('artifact bootstrap failed')
 	expect(checksFinished).toBe(true)
+})
+
+test('install re-checks and projects the synced fork files when fallback differs from prepare', async () => {
+	mockCleanInstall()
+	const syncedFiles = {
+		'package.json': '{"name":"@userb/demo","version":"2.0.0"}',
+		'src/index.ts': 'export default async function main() { return 2 }',
+		'README.md': '# dest HEAD',
+	}
+	mockModule.persistPreparedCommunityFork.mockResolvedValue(
+		forkResult({
+			files: syncedFiles,
+			filesCount: Object.keys(syncedFiles).length,
+			originCommit: 'commit-dest-head',
+		}),
+	)
+	mockModule.runRepoChecks
+		.mockResolvedValueOnce({ ok: true, results: [] })
+		.mockResolvedValueOnce({ ok: true, results: [] })
+
+	await expect(install()).resolves.toMatchObject({
+		status: 'installed',
+		originCommit: 'commit-dest-head',
+	})
+
+	expect(mockModule.runRepoChecks).toHaveBeenCalledTimes(2)
+	expect(mockModule.refreshSavedPackageProjection).toHaveBeenCalledWith(
+		expect.objectContaining({ sourceFiles: syncedFiles }),
+	)
 })

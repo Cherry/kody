@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { jsonResponse as buildJsonResponse } from '#worker/json-response.ts'
 import { z } from 'zod'
 import { type Action } from 'remix/router'
@@ -147,6 +148,7 @@ async function renderCommunityListingPage(input: {
 				username: detail.username,
 				kodyId: detail.listing.kodyId,
 				viewerIsOwner: detail.viewerIsOwner,
+				viewerCanManage: detail.viewerCanManage,
 				isPrivate: false,
 				invocationUrlOrigin: detail.invocationUrlOrigin,
 			},
@@ -190,16 +192,14 @@ async function readmeForPackagePage(
 		listingReadme: string | null | undefined
 		ownerSourceId: string | null | undefined
 		viewerIsOwner: boolean
-		canReadOwnerSource?: boolean
 		ownerUserId?: string
 	},
 	serverTiming?: Array<ServerTimingEntry>,
 ) {
 	let readmeContent = input.listingReadme ?? null
 	const ownerSourceId = input.ownerSourceId
-	const canReadOwnerSource = input.canReadOwnerSource ?? input.viewerIsOwner
 	const ownerUserId = input.ownerUserId
-	if (!readmeContent && canReadOwnerSource && ownerSourceId && ownerUserId) {
+	if (!readmeContent && input.viewerIsOwner && ownerSourceId && ownerUserId) {
 		readmeContent = await recordServerTiming(
 			'owner-readme',
 			() =>
@@ -296,7 +296,6 @@ export function createCommunityPackageHandler(env: Env) {
 							listingReadme: page.listing.listing.readmeContent,
 							ownerSourceId: page.ownerPackage?.sourceId,
 							viewerIsOwner: page.viewerIsOwner,
-							canReadOwnerSource: page.canReadOwnerSource,
 							ownerUserId: page.ownerUserId,
 						},
 						serverTiming,
@@ -310,7 +309,6 @@ export function createCommunityPackageHandler(env: Env) {
 								listingId: page.listing?.listing?.id,
 								ownerSourceId: page.ownerPackage?.sourceId,
 								viewerIsOwner: page.viewerIsOwner,
-								canReadOwnerSource: page.canReadOwnerSource,
 								ownerUserId: page.ownerUserId,
 							}),
 						request,
@@ -350,15 +348,18 @@ export function createCommunityPackageHandler(env: Env) {
 							username: page.username,
 							kodyId: page.kodyId,
 							viewerIsOwner: page.viewerIsOwner,
+							viewerCanManage: page.viewerCanManage,
+							viewerCanPublish: page.viewerCanPublish,
+							viewerCanDelete: page.viewerCanDelete,
+							viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,
 							isPrivate: packagePageIsPrivate(page),
 							invocationUrlOrigin: page.invocationUrlOrigin,
-							shareGrant: page.shareGrant,
 						},
 					},
 				})
 			}
 
-			if (!page.ownerPackage && page.shareGrant?.status !== 'pending') {
+			if (!page.ownerPackage) {
 				return renderPackageNotFoundPage({ request, env })
 			}
 
@@ -371,7 +372,6 @@ export function createCommunityPackageHandler(env: Env) {
 						listingReadme: null,
 						ownerSourceId: page.ownerPackage?.sourceId,
 						viewerIsOwner: page.viewerIsOwner,
-						canReadOwnerSource: page.canReadOwnerSource,
 						ownerUserId: page.ownerUserId,
 					},
 					serverTiming,
@@ -385,7 +385,6 @@ export function createCommunityPackageHandler(env: Env) {
 							listingId: null,
 							ownerSourceId: page.ownerPackage?.sourceId,
 							viewerIsOwner: page.viewerIsOwner,
-							canReadOwnerSource: page.canReadOwnerSource,
 							ownerUserId: page.ownerUserId,
 						}),
 					request,
@@ -400,20 +399,14 @@ export function createCommunityPackageHandler(env: Env) {
 			return renderAppPage({
 				request,
 				env,
-				title:
-					page.ownerPackage?.name ??
-					page.shareGrant?.packageName ??
-					`@${page.username}/${page.kodyId}`,
+				title: page.ownerPackage?.name ?? `@${page.username}/${page.kodyId}`,
 				serverTiming,
 				loaderData: {
 					communityDetailShell: {
 						ok: true,
 						listingId: null,
 						defaultBranch: null,
-						name:
-							page.ownerPackage?.name ??
-							page.shareGrant?.packageName ??
-							`@${page.username}/${page.kodyId}`,
+						name: page.ownerPackage?.name ?? `@${page.username}/${page.kodyId}`,
 						description: page.ownerPackage?.description ?? '',
 						ownerProfilePublic: page.ownerProfilePublic,
 						forkPrompt: '',
@@ -430,9 +423,12 @@ export function createCommunityPackageHandler(env: Env) {
 						username: page.username,
 						kodyId: page.kodyId,
 						viewerIsOwner: page.viewerIsOwner,
+						viewerCanManage: page.viewerCanManage,
+						viewerCanPublish: page.viewerCanPublish,
+						viewerCanDelete: page.viewerCanDelete,
+						viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,
 						isPrivate: packagePageIsPrivate(page),
 						invocationUrlOrigin: page.invocationUrlOrigin,
-						shareGrant: page.shareGrant,
 					},
 				},
 			})
@@ -449,7 +445,7 @@ export function createCommunityDetailApiHandler(env: Env) {
 			if (!detail?.listing) {
 				return jsonResponse(
 					request,
-					{ ok: false, error: 'Community listing not found.' },
+					{ ok: false, error: 'Catalog entry not found.' },
 					404,
 				)
 			}
@@ -523,7 +519,7 @@ export function createCommunityPackageApiHandler(env: Env) {
 			if (page.kind === 'not_found') {
 				return jsonResponse(
 					request,
-					{ ok: false, error: 'Community listing not found.' },
+					{ ok: false, error: 'Catalog entry not found.' },
 					404,
 				)
 			}
@@ -540,7 +536,6 @@ export function createCommunityPackageApiHandler(env: Env) {
 						listingReadme: page.listing?.listing?.readmeContent,
 						ownerSourceId: page.ownerPackage?.sourceId,
 						viewerIsOwner: page.viewerIsOwner,
-						canReadOwnerSource: page.canReadOwnerSource,
 						ownerUserId: page.ownerUserId,
 					},
 					serverTiming,
@@ -554,7 +549,6 @@ export function createCommunityPackageApiHandler(env: Env) {
 							listingId: page.listing?.listing?.id,
 							ownerSourceId: page.ownerPackage?.sourceId,
 							viewerIsOwner: page.viewerIsOwner,
-							canReadOwnerSource: page.canReadOwnerSource,
 							ownerUserId: page.ownerUserId,
 						}),
 					request,
@@ -575,6 +569,10 @@ export function createCommunityPackageApiHandler(env: Env) {
 					listing: page.listing?.listing ?? null,
 					ownerProfilePublic: page.ownerProfilePublic,
 					viewerIsOwner: page.viewerIsOwner,
+					viewerCanManage: page.viewerCanManage,
+					viewerCanPublish: page.viewerCanPublish,
+					viewerCanDelete: page.viewerCanDelete,
+					viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,
 					loggedIn: page.loggedIn,
 					viewerIsAdmin: page.listing?.viewerIsAdmin ?? false,
 					forkPrompt: page.listing?.forkPrompt ?? '',
@@ -588,7 +586,6 @@ export function createCommunityPackageApiHandler(env: Env) {
 					kodyId: page.kodyId,
 					isPrivate: packagePageIsPrivate(page),
 					invocationUrlOrigin: page.invocationUrlOrigin,
-					shareGrant: page.shareGrant,
 				},
 				200,
 				serverTiming,
@@ -625,7 +622,7 @@ export function createCommunityPackageSettingsHandler(env: Env) {
 			if (page.kind === 'unauthorized') {
 				return renderPackageUnauthorizedPage({ request, env })
 			}
-			if (!page.viewerIsOwner || !page.ownerPackage) {
+			if (!page.viewerCanManage || !page.ownerPackage) {
 				return renderPackageNotFoundPage({ request, env })
 			}
 
@@ -654,9 +651,12 @@ export function createCommunityPackageSettingsHandler(env: Env) {
 						username: page.username,
 						kodyId: page.kodyId,
 						viewerIsOwner: true,
+						viewerCanManage: true,
+						viewerCanPublish: page.viewerCanPublish,
+						viewerCanDelete: page.viewerCanDelete,
+						viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,
 						isPrivate: page.ownerPackage.isPrivate,
 						invocationUrlOrigin: page.invocationUrlOrigin,
-						shareGrant: null,
 					},
 				},
 			})
@@ -794,7 +794,7 @@ export function createCommunityReportApiPostHandler(env: Env) {
 			try {
 				await reportCommunityListing({
 					env,
-					userId: user.mcpUser.userId,
+					userId: personalOrgId(user.mcpUser.userId),
 					listingId: params.listingId,
 					reason: parsedReason.data,
 				})

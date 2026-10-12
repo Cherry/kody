@@ -6,13 +6,11 @@ bound saved-package export. End-user setup lives in
 
 ## Why this exists
 
-Package-invocation HTTP endpoints require `Authorization: Bearer`. Many webhook
-providers cannot set custom Authorization headers. Webhook endpoints are the
-external HTTP knock: credential-in-URL sibling of per-user
+Many webhook providers cannot set custom Authorization headers. Webhook
+endpoints are the external HTTP knock: credential-in-URL sibling of per-user
 [email](../../use/email-primitives.md) inboxes, declared alongside other package
 surfaces in `package.json#kody.webhooks` (same family as `kody.subscriptions`).
-First-party trusted clients use the same path (URL secret, no Bearer).
-Invocation tokens are an unadvertised drain; see
+First-party trusted clients use the same path (URL secret, no Bearer). See
 [0048](../decisions/0048-webhooks-replace-invocation-tokens.md).
 
 ## Manifest contract
@@ -30,13 +28,11 @@ Parsing and export existence checks live in `parseAuthoredPackageJson` /
 `listPackageWebhooks` (`packages/worker/src/package-registry/`).
 
 `challenge` is answered entirely by the ingress worker
-(`packages/worker/src/webhooks/challenge.ts`). The canonical type is
+(`packages/worker/src/webhooks/challenge.ts`). The only supported type is
 `subscription-challenge` with knobs for method, where the token arrives, how the
-subscriber proves itself, and how success is echoed. Deprecated compat aliases
-(`websub-hub`, `meta-hub`, `strava-hub`, `x-activity-crc`,
-`slack-url-verification`) parse and expand to that form — do not add new
-vendor-named type ids
-([0054](../decisions/0054-no-vendor-specific-platform-logic.md)). Challenge
+subscriber proves itself, and how success is echoed. Do not add vendor-named
+type ids ([0054](../decisions/0054-no-vendor-specific-platform-logic.md));
+configure providers with documented presets under the generic type. Challenge
 requests never call `invokePackageExport`, never write delivery/run history, and
 never perform outbound fetch or MCP. They may resolve a named secret for HMAC or
 verify-token compare. After the quiz succeeds, later provider POSTs still use
@@ -67,7 +63,7 @@ is rotated.
 
 `inputMode: "params"` is the first-party trusted-client contract. The bound
 export's first argument is the parsed JSON object. When that object is the
-invoke-token envelope (`params` plus optional `idempotencyKey`, `source`, and
+invoke envelope (`params` plus optional `idempotencyKey`, `source`, and
 `topic`), the platform unwraps `params`. `idempotencyKey` counts only as a
 non-empty string, and `source` / `topic` only as a string or null. An
 application payload that includes a nested `params` object next to other keys
@@ -116,15 +112,19 @@ Route: `GET|POST /@:username/webhooks/:packageKodyId/:webhookName/:urlSecret`
    `handleWebhookSubscriptionChallenge` and return — no package invoke, no
    delivery row. Non-matching POSTs continue. GET without a matching challenge
    declaration → **405**.
-7. Payload cap 1 MB → **413**. When verification is declared, resolve
-   package-owned HMAC from `webhook_endpoints.hmac_secret_encrypted`, or
-   `verification.secretName` in the secret store (user/package scope via package
-   storage context). Missing secret or HMAC mismatch → **401**, with a clear
-   delivery-log error for missing secrets. When `replay.timestampHeader` is
-   declared, a missing, unparseable, or stale timestamp is rejected with the
-   same generic **401** before dispatch (and before any run record that implies
-   acceptance). When `replay.deliveryIdHeader` is declared, a missing id is
-   rejected the same way; present ids become the invocation idempotency key.
+7. Payload cap 1 MB → **413**. When verification is `{ type: 'url-secret' }` (or
+   omitted, which is treated the same until publish requires it;
+   [#3477](https://github.com/kentcdodds/kody/issues/3477)), the URL secret is
+   the credential and signature headers are ignored. A declared HMAC type never
+   falls back to the URL secret. For HMAC, try `verification.secretName` in the
+   secret store first (user/package scope via package storage context), then the
+   package-owned HMAC on `webhook_endpoints.hmac_secret_encrypted`. Missing
+   secret or HMAC mismatch → **401**, with a clear delivery-log error for
+   missing secrets. When `replay.timestampHeader` is declared, a missing,
+   unparseable, or stale timestamp is rejected with the same generic **401**
+   before dispatch (and before any run record that implies acceptance). When
+   `replay.deliveryIdHeader` is declared, a missing id is rejected the same way;
+   present ids become the invocation idempotency key.
 8. Dispatch via `invokePackageExport` with a synthetic internal token scoped to
    the owning user / package / export, `source: 'webhook'`.
 9. `ack`: await enqueue to `kody-webhook-dispatch`, then return **202**. The
@@ -140,6 +140,14 @@ Route: `GET|POST /@:username/webhooks/:packageKodyId/:webhookName/:urlSecret`
     missing declaration) record a `webhook` surface run record (no payload
     body). See [Run records](./run-records.md). URL-secret mismatches, pre-auth
     rate limits, and subscription challenges still write no delivery history.
+    Ack delivery `startedAt` is the queue-consumer dispatch start (not ingress
+    `receivedAt`); ingress time is retained under metadata `receivedAt` so
+    Activity duration measures export/dispatch work, not provider→queue lag.
+    Failed ack deliveries attach diagnostic logs and the underlying invocation
+    error code (`metadata.invocationErrorCode`). Pre-execution claim releases
+    finish the companion `export` run as an error with logs instead of deleting
+    it, so a failed delivery is never a silent `log_count: 0` with no export
+    row.
 
 Ack messages carry the accepted delivery id, idempotency key, scoped endpoint
 identity, export name, and already-authenticated payload (inline `body`, or a
@@ -147,12 +155,20 @@ user-scoped KV key when the body was spilled). Queue retries reuse that exact
 idempotency key. Request-mode caller `Idempotency-Key` messages set
 `callerIdempotency` so the consumer hashes the JSON body (same as sync).
 Unique-key ack claims omit that flag and hash the `{ webhook, request }`
-envelope. Transient ledger lookup/terminal-persistence failures and
-still-in-progress replays are retried; terminal package errors are recorded and
-acknowledged. A missing spilled body is a terminal failure
-(`ack_queue_payload_missing`). The package export sandbox retains its normal
-~90s budget, so genuinely longer package work ends as an explicit timeout rather
-than an unknown interrupted outcome.
+envelope. Transient ledger lookup/terminal-persistence failures,
+still-in-progress replays, and other pre-execution infrastructure codes
+(`idempotency_conflict_unresolved`, `artifact_preparation_failed`, … — see
+`readPreExecutionPackageInvocationInfrastructureCode`) are retried. On the last
+consumer attempt (`max_retries`, currently 10) those retries record
+`invocation_retry_exhausted` (with diagnostic logs) and ack instead of falling
+through to the dead-letter queue. Terminal package errors are recorded with logs
+and acknowledged. A missing spilled body is a terminal failure
+(`ack_queue_payload_missing`). The consumer runs the export with
+`backgroundExecutorTimeoutMs` (5 minutes), so genuinely longer package work ends
+as an explicit timeout rather than an unknown interrupted outcome. Sync
+deliveries keep the 90s interactive budget behind the 30s
+`webhookSyncInvocationTimeoutMs` race. `webhook` run records use a 10-minute
+stale-`running` TTL so a full-length ack run is not reconciled early.
 
 The Queue consumer batch size is one. Processing is sequential and one export
 can consume the full sandbox budget, so larger batches could exceed the Queue
@@ -204,7 +220,7 @@ so a stray click cannot rotate a provider's URL; `reveal` refuses mints without
 `url_secret_encrypted` and points at Rotate. The client keeps revealed URLs in
 memory only and drops them on Hide or when the settings page changes package.
 
-`/account/webhooks` (`packages/worker/client/routes/account-webhooks.tsx`,
+`/@<slug>/-/webhooks` (`packages/worker/client/routes/account-webhooks.tsx`,
 `packages/worker/src/app/handlers/account-webhooks.ts`) is a thin cross-package
 index. `GET /account/webhooks.json` lists every declared webhook (never a URL)
 and each row deep-links to `/@:username/:kodyId/settings#webhook-<name>`. The

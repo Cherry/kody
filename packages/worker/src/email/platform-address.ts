@@ -1,6 +1,6 @@
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
 import { isPermanentlyReservedUsername } from '#worker/identity/reserved-usernames.ts'
-import { normalizeStableUserId } from '#worker/user-id.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 /**
  * The label prepended to the app hostname to form the default user email
@@ -142,7 +142,7 @@ async function findUserAccount(input: {
 	accountEmail: string | null | undefined
 	userId: string
 }): Promise<{ email: string; username: string | null } | null> {
-	const userId = normalizeStableUserId(input.userId)
+	const userId = input.userId.trim()
 	if (!userId) return null
 	// The stored stable userId is the authoritative identity: a caller-supplied
 	// email is only trusted (as an indexed lookup) when it matches that
@@ -154,7 +154,7 @@ async function findUserAccount(input: {
 			.prepare(
 				`SELECT email, stable_user_id, username
 				 FROM users
-				 WHERE email = ? AND stable_user_id = ?`,
+				 WHERE email = ? AND stable_user_id = ?${andLiveDeletedAtSql()}`,
 			)
 			.bind(email, userId)
 			.first<{
@@ -162,7 +162,7 @@ async function findUserAccount(input: {
 				stable_user_id: string
 				username: string | null
 			}>()
-		if (row && normalizeStableUserId(row.stable_user_id) === userId) {
+		if (row && row.stable_user_id.trim() === userId) {
 			return {
 				email: row.email,
 				username: row.username?.trim().toLowerCase() || null,
@@ -178,7 +178,7 @@ async function findUserAccount(input: {
 		.prepare(
 			`SELECT email, username
 			 FROM users
-			 WHERE stable_user_id = ?`,
+			 WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(userId)
 		.first<{

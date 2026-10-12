@@ -5,21 +5,6 @@ secrets: placeholders at the secret-aware `fetch` boundary, never a
 `secret_get`. Provider logic lives in saved packages. Kody core stays
 provider-agnostic.
 
-## Feature flag
-
-The whole surface is behind the `secret-providers` admin flag (registry default
-**off**). Signed-in users can turn it on from
-[Custom secret providers](../guides/secret-providers.md). Operators can also
-enable it globally at `/admin/feature-flags`. Evaluation is fail-closed:
-unresolved accounts and evaluation errors stay off, even when the global flag is
-on. When the flag is off:
-
-- `{{secret/<provider>:<ref>}}` is unsupported (clear error, no provider call)
-- binding, grants, approval UX, and the account nav item are hidden
-- MCP `secretProvider*` capabilities are hidden and denied
-
-User-secret `{{secret:name}}` placeholders do not use this flag.
-
 ## Grammar
 
 `{{secret/<provider>:<ref>}}` splits on the **first** `:` after `secret/`. The
@@ -59,7 +44,7 @@ A saved package may declare it can serve a provider id:
 ```
 
 Declaring metadata does **not** bind the provider. The account owner pins one
-saved package identity to that provider id on `/account/secret-providers` (or
+saved package identity to that provider id on `/@<slug>/-/secret-providers` (or
 `secretProviderBind`), plus the **Kody user secret** that holds the door key and
 optional non-secret config (for example a Connect base URL).
 
@@ -82,10 +67,10 @@ websites fail closed.
   spirit as unlocked user secrets).
 - Saved packages need an explicit `(provider, canonicalRef) → package` grant.
   `secretProviderLock` returns the approval URL; only the owner can grant or
-  revoke on `/account/secret-providers`. Unbind, and rebind to a different
+  revoke on `/@<slug>/-/secret-providers`. Unbind, and rebind to a different
   provider package, drop every grant for that provider.
-- Share-granted packages use the **package owner's** binding and grants, not the
-  guest's.
+- A package runs in the org that owns it, so a collaborator holding a grant uses
+  that org's binding and grants, not their own.
 
 Ungranted package use fails **before** the value-returning provider call.
 

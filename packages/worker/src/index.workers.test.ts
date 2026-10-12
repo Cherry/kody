@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import * as Sentry from '@sentry/cloudflare'
 import { env, runInDurableObject } from 'cloudflare:test'
@@ -15,10 +16,17 @@ const mocks = vi.hoisted(() => ({
 	cleanupRepoSessionBranches: vi.fn(async () => ({})),
 	pruneSystemEmailRetention: vi.fn(async () => ({})),
 	pruneRetention: vi.fn(async () => ({})),
-	pruneJobRetention: vi.fn(async () => ({})),
 	checkAuthDenialBurstAndNotify: vi.fn(async () => ({
 		status: 'below_threshold',
 		count: 0,
+	})),
+	checkWebhookAuthRegressionsAndAlert: vi.fn(async () => ({
+		ownersScanned: 0,
+		ownersFailed: 0,
+		candidates: 0,
+		regressions: [],
+		alerted: 0,
+		cooldown: 0,
 	})),
 	aggregateUsageRollups: vi.fn(async () => ({ skipped: true })),
 	runCreditDebits: vi.fn(async () => ({
@@ -77,12 +85,13 @@ vi.mock('#app/retention.ts', () => ({
 	pruneRetention: mocks.pruneRetention,
 }))
 
-vi.mock('#worker/jobs/job-retention-cleanup.ts', () => ({
-	pruneJobRetention: mocks.pruneJobRetention,
-}))
-
 vi.mock('#app/auth-denial-alerts.ts', () => ({
 	checkAuthDenialBurstAndNotify: mocks.checkAuthDenialBurstAndNotify,
+}))
+
+vi.mock('#worker/webhooks/auth-regression-alert.ts', () => ({
+	checkWebhookAuthRegressionsAndAlert:
+		mocks.checkWebhookAuthRegressionsAndAlert,
 }))
 
 vi.mock('#worker/usage/aggregate-rollups.ts', () => ({
@@ -155,13 +164,11 @@ test('platform lanes execute with their expected inputs and jobs-owned lanes are
 	for (const lane of [
 		'reconcile_artifacts_pushes',
 		'repo_session_cleanup',
-		'repo_session_index_backfill',
 		'reconcile_inbound_deliveries',
 		'system_email_retention',
 		'storage_bucket_estimate_backfill',
 		'd1_storage_reconciliation',
 		'retention',
-		'job_retention',
 		'usage_aggregation',
 		'auth_denial_alert',
 	] as const) {
@@ -173,9 +180,9 @@ test('platform lanes execute with their expected inputs and jobs-owned lanes are
 		mocks.sweepStaleInboundDeliveries,
 		mocks.refreshAdminInsightsRunLogSnapshot,
 		mocks.checkAuthDenialBurstAndNotify,
+		mocks.checkWebhookAuthRegressionsAndAlert,
 		mocks.backfillStorageBucketEstimates,
 		mocks.pruneRetention,
-		mocks.pruneJobRetention,
 	]) {
 		expect(laneMock).toHaveBeenCalledWith(
 			expect.objectContaining({ now: scheduledAt }),
@@ -209,7 +216,7 @@ test('platform lanes execute with their expected inputs and jobs-owned lanes are
 
 test('scheduled OAuth purge advances and revokes every grant token before the grant', async () => {
 	const scheduledTime = Date.parse('2026-07-05T10:05:00.000Z')
-	const userId = 'oauth-purge-user'
+	const userId = ownerIdFromStored('oauth-purge-user')
 	const clientId = 'oauth-purge-client'
 	const healthyGrantIds = Array.from(
 		{ length: 51 },

@@ -1,3 +1,5 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
@@ -27,7 +29,7 @@ import {
 	type EmailMessageRecord,
 	type EmailProcessingStatus,
 } from '#worker/email/types.ts'
-import { resolvePlanLimit, type PlanName } from '#universal/plans.ts'
+import { resolveEntitlementLimit, type PlanName } from '#universal/plans.ts'
 import {
 	getUserEntitlement,
 	readCurrentEntitlementResourceUsage,
@@ -225,7 +227,7 @@ function messageToListItem(
 async function loadUsage(input: {
 	db: D1Database
 	env: EntitlementUsageEnv
-	userId: string
+	userId: OwnerId
 	email: string
 }): Promise<AccountEmailUsage> {
 	const now = new Date()
@@ -260,43 +262,31 @@ async function loadUsage(input: {
 		day: utcDayKey(now),
 		stored_messages: {
 			count: storedMessages,
-			limit: resolvePlanLimit(
-				plan,
-				'stored_email_messages',
-				entitlement.ladder,
-				entitlement.creditWallet,
-			),
+			limit: resolveEntitlementLimit(entitlement, 'stored_email_messages', now),
 		},
 		sends_today: {
 			count: sendsToday,
-			limit: resolvePlanLimit(
-				plan,
-				'email_sends_per_day',
-				entitlement.ladder,
-				entitlement.creditWallet,
-			),
+			limit: resolveEntitlementLimit(entitlement, 'email_sends_per_day', now),
 		},
 		receives_today: {
 			count: receivesToday,
-			limit: resolvePlanLimit(
-				plan,
+			limit: resolveEntitlementLimit(
+				entitlement,
 				'email_receives_per_day',
-				entitlement.ladder,
-				entitlement.creditWallet,
+				now,
 			),
 		},
-		max_message_bytes: resolvePlanLimit(
-			plan,
+		max_message_bytes: resolveEntitlementLimit(
+			entitlement,
 			'email_message_bytes',
-			entitlement.ladder,
-			entitlement.creditWallet,
+			now,
 		),
 	}
 }
 
 async function loadInboxes(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 }): Promise<Array<AccountEmailInbox>> {
 	const [inboxes, addresses] = await Promise.all([
 		listEmailInboxesForUser(input),
@@ -322,7 +312,7 @@ async function loadInboxes(input: {
 
 async function loadSelectedMessage(input: {
 	env: Env
-	stableUserId: string
+	stableUserId: OwnerId
 	messageId: string
 }): Promise<AccountEmailMessageDetail | null> {
 	const message = await getOwnerEmailMessageById({
@@ -419,13 +409,16 @@ export async function loadAccountEmailData(input: {
 	})
 	const query = url.searchParams.get('q')?.trim() ?? ''
 	const classification = readAccountEmailClassificationFilter(input.request.url)
-	const userId = input.user.mcpUser.userId
+	const userId = ownerIdFromCaller({
+		request: input.user.request,
+		user: input.user.mcpUser,
+	})
 	const emailVerified =
 		input.user.emailVerified ||
 		(await isAccountEmailVerified({
 			db: input.env.APP_DB,
 			email: input.user.email,
-			stableUserId: userId,
+			stableUserId: input.user.mcpUser.userId,
 		}))
 
 	if (!emailVerified) {

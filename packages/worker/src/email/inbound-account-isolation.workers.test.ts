@@ -2,13 +2,15 @@ import { env } from 'cloudflare:workers'
 import { expect, test, vi } from 'vitest'
 import type * as UserLookupModule from '#worker/identity/user-lookup.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
 import { handleInboundEmail } from './inbound.ts'
 import { mailboxRpc } from './mailbox-client.ts'
 import { createForwardableEmailMessage } from './test-fixtures.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const platformBaseUrl = 'https://kody.example.com'
 const platformDomain = 'inbox.kody.example.com'
 
@@ -40,18 +42,22 @@ async function seedAccount(input: {
 	stableUserId: string
 }) {
 	await env.APP_DB.prepare(
-		`INSERT INTO users (username, email, password_hash, email_verified_at, plan, stable_user_id)
-			VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+			VALUES (?, ?, ?, ?, ?)`,
 	)
 		.bind(
 			input.username,
 			input.email,
 			'test-password-hash',
 			input.emailVerifiedAt,
-			input.plan,
 			input.stableUserId,
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: input.stableUserId,
+		username: input.username,
+		plan: input.plan,
+	})
 }
 
 // Boots the full inbound pipeline plus mailbox DOs; needs headroom beyond the
@@ -65,7 +71,7 @@ test(
 		await ensureUsageRollupsTestSchema(env.APP_DB)
 
 		const otherEmail = `other-plan-${crypto.randomUUID()}@example.com`
-		const otherUserId = await createStableUserIdFromEmail(otherEmail)
+		const otherUserId = testStableUserIdFromEmail(otherEmail)
 		const otherUsername = `other-${crypto.randomUUID().slice(0, 8)}`
 		await seedAccount({
 			username: otherUsername,
@@ -76,7 +82,7 @@ test(
 		})
 
 		const recipientEmail = `recipient-${crypto.randomUUID()}@example.com`
-		const recipientUserId = await createStableUserIdFromEmail(recipientEmail)
+		const recipientUserId = testStableUserIdFromEmail(recipientEmail)
 		const recipientUsername = `recv-${crypto.randomUUID().slice(0, 8)}`
 		await seedAccount({
 			username: recipientUsername,
@@ -116,8 +122,14 @@ test(
 		// Dual-scoped miss → unverified gate (not the other account's verified/max).
 		expect(message.rejectedReason).toBe('Account email is not verified.')
 
-		const recipientMailbox = mailboxRpc({ env, userId: recipientUserId })
-		const otherMailbox = mailboxRpc({ env, userId: otherUserId })
+		const recipientMailbox = mailboxRpc({
+			env,
+			userId: ownerIdFromStored(recipientUserId),
+		})
+		const otherMailbox = mailboxRpc({
+			env,
+			userId: ownerIdFromStored(otherUserId),
+		})
 		expect(await recipientMailbox.listMessages({ limit: 10 })).toMatchObject({
 			messages: [],
 		})

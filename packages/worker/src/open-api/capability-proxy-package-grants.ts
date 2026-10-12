@@ -1,27 +1,30 @@
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import {
 	type AdditionalKodyTools,
 	type PackageSecretToolOptions,
 } from '#mcp/runtime-helper-manifest.ts'
 import { takeSecretAuthorityFromCapabilityArgs } from '#mcp/secrets/secret-authority.ts'
-import {
-	collectShareStorageOwners,
-	retainAuthorizedPackageStorageGrantIds,
-} from '#worker/package-registry/share-grants.ts'
+import { authorize, packageResource } from '#worker/authorization/authorize.ts'
+import { getSavedPackageById } from '#worker/package-registry/repo.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	createPackageStorageAccessDeniedMessage,
 	createPackageStorageKodyTools,
 } from '#worker/storage-runner.ts'
-import { resolvePackageMountedSecret } from '#mcp/secrets/package-access.ts'
+import { claimedPackageStamp } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
 
 /**
  * Local-execute CapabilityProxy packageStorage / packageSecrets host tools.
  *
  * Cloud execute builds a bundler provenance grant set once per run. Local
  * execute has no sandbox graph on origin per hop, so each call validates the
- * stamped package id against ownership / accepted share grants (same retain
- * helper cloud uses after collecting share owners), then runs the ordinary
- * storage / mounted-secret tools for that single id.
+ * stamped package id is in the org and the actor holds `package:execute` on
+ * it before packageStorage. Client-stamped package ids are `claimed` package
+ * stamps: packageSecrets also require `secret:use` on the mounted secret
+ * (same as ad-hoc). Gateway / authenticatedFetch / oauthClientCredentials
+ * pass the same claimed stamp.
  */
 
 function isPackageSecretAvailabilityError(error: unknown) {
@@ -37,8 +40,8 @@ async function authorizeLocalExecutePackageId(input: {
 	callerContext: McpCallerContext
 	packageId: string
 }) {
-	const userId = input.callerContext.user?.userId
-	if (!userId) {
+	const orgUserId = ownerIdFromCaller(input.callerContext)
+	if (!orgUserId) {
 		throw new Error(
 			'packageStorage / packageSecrets require an authenticated user.',
 		)
@@ -47,25 +50,17 @@ async function authorizeLocalExecutePackageId(input: {
 	if (!packageId) {
 		throw new Error('packageStorage requires a non-empty package id.')
 	}
-	const storageOwnerByPackageId = await collectShareStorageOwners({
+	const authorizedPackageId = await authorizeLocalExecuteOwnedPackageId({
 		db: input.env.APP_DB,
-		callerUserId: userId,
-		packageIds: [packageId],
-	})
-	const authorized = await retainAuthorizedPackageStorageGrantIds({
-		db: input.env.APP_DB,
-		callerUserId: userId,
-		packageIds: [packageId],
-		storageOwnerByPackageId,
-	})
-	if (!authorized.has(packageId)) {
-		throw new Error(createPackageStorageAccessDeniedMessage(packageId))
-	}
-	return {
-		userId,
+		env: input.env,
+		request: input.callerContext.request,
+		orgUserId,
 		packageId,
-		storageOwnerByPackageId,
-		grantedPackageIds: authorized,
+	})
+	return {
+		userId: orgUserId,
+		packageId: authorizedPackageId,
+		grantedPackageIds: new Set([authorizedPackageId]),
 	}
 }
 
@@ -89,12 +84,44 @@ function readPackageSecretCall(args: unknown) {
 	return { alias, requestedPackageId }
 }
 
+/**
+ * Confirm the stamped package lives in the bound org and the acting person
+ * holds `package:execute` on it. Org ownership alone is not enough: a member
+ * with execute on package A must not stamp package B to skip ad-hoc
+ * credential Use checks.
+ */
+export async function authorizeLocalExecuteOwnedPackageId(input: {
+	db: D1Database
+	env: Env
+	request: RequestContext | null
+	orgUserId: string
+	packageId: string
+}) {
+	const owned = await getSavedPackageById(input.db, {
+		userId: input.orgUserId,
+		packageId: input.packageId,
+	})
+	if (!owned) {
+		throw new Error(createPackageStorageAccessDeniedMessage(input.packageId))
+	}
+	await authorize(
+		{ env: input.env, request: input.request },
+		'package:execute',
+		packageResource({
+			id: input.packageId,
+			userId: input.orgUserId,
+			label: owned.name || owned.kodyId,
+		}),
+	)
+	return input.packageId
+}
+
 export async function createCapabilityProxyPackageHostTools(input: {
 	env: Env
 	callerContext: McpCallerContext
 }): Promise<AdditionalKodyTools> {
-	const userId = input.callerContext.user?.userId
-	if (!userId) return {}
+	const orgUserId = ownerIdFromCaller(input.callerContext)
+	if (!orgUserId) return {}
 
 	const storageToolsByPackageId = new Map<
 		string,
@@ -115,7 +142,6 @@ export async function createCapabilityProxyPackageHostTools(input: {
 				email: input.callerContext.user?.email ?? null,
 				grantedPackageIds: authorized.grantedPackageIds,
 				writable: true,
-				storageOwnerByPackageId: authorized.storageOwnerByPackageId,
 			})
 			storageToolsByPackageId.set(authorized.packageId, tools)
 		}
@@ -135,6 +161,25 @@ export async function createCapabilityProxyPackageHostTools(input: {
 		})
 	}
 
+	const resolveClaimedMount = (inputMount: {
+		packageId: string
+		alias: string
+		access?: 'presence' | 'value'
+	}) =>
+		resolveCredential({
+			env: input.env,
+			orgId: orgUserId,
+			actor: input.callerContext.request,
+			packageStamp: claimedPackageStamp(inputMount.packageId),
+			baseUrl: input.callerContext.baseUrl,
+			credential: {
+				use: 'package-secret-mount',
+				alias: inputMount.alias,
+				callerContext: input.callerContext,
+				...(inputMount.access ? { access: inputMount.access } : {}),
+			},
+		})
+
 	const packageSecretTools: PackageSecretToolOptions = {
 		runPackageId: null,
 		get: async (alias, requestedPackageId) => {
@@ -142,9 +187,7 @@ export async function createCapabilityProxyPackageHostTools(input: {
 				requestedPackageId ?? null,
 			)
 			return (
-				await resolvePackageMountedSecret({
-					env: input.env,
-					callerContext: input.callerContext,
+				await resolveClaimedMount({
 					packageId: authorized.packageId,
 					alias,
 				})
@@ -155,11 +198,10 @@ export async function createCapabilityProxyPackageHostTools(input: {
 				requestedPackageId ?? null,
 			)
 			try {
-				await resolvePackageMountedSecret({
-					env: input.env,
-					callerContext: input.callerContext,
+				await resolveClaimedMount({
 					packageId: authorized.packageId,
 					alias,
+					access: 'presence',
 				})
 				return true
 			} catch (error) {

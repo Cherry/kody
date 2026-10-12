@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
@@ -13,23 +14,24 @@ test('recordUniqueDynamicWorkerDay records the first claim and skips repeats', a
 
 	const first = await recordUniqueDynamicWorkerDay({
 		env: meter.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workerId: 'kody-worker-a',
 		surface: 'execute',
 		now,
 	})
 	const repeat = await recordUniqueDynamicWorkerDay({
 		env: meter.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workerId: 'kody-worker-a',
 		surface: 'job',
 		now,
 	})
 	const other = await recordUniqueDynamicWorkerDay({
 		env: meter.env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workerId: 'kody-worker-b',
 		surface: 'package_export',
+		connectionKey: 'api-token:person-1:tok-1',
 		now,
 	})
 	expect(first).toEqual({ created: true })
@@ -38,7 +40,7 @@ test('recordUniqueDynamicWorkerDay records the first claim and skips repeats', a
 
 	expect(recordUsageSpy).toHaveBeenCalledTimes(2)
 	expect(recordUsageSpy.mock.calls[0]?.[1]).toEqual({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		eventType: 'dynamic_worker_day',
 		entityId: 'kody-worker-a',
 		outcome: 'success',
@@ -46,12 +48,13 @@ test('recordUniqueDynamicWorkerDay records the first claim and skips repeats', a
 		surface: 'execute',
 	})
 	expect(recordUsageSpy.mock.calls[1]?.[1]).toEqual({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		eventType: 'dynamic_worker_day',
 		entityId: 'kody-worker-b',
 		outcome: 'success',
 		timestamp: now.toISOString(),
 		surface: 'package_export',
+		connectionKey: 'api-token:person-1:tok-1',
 	})
 	recordUsageSpy.mockRestore()
 })
@@ -62,7 +65,7 @@ test('recordUniqueDynamicWorkerDay skips when USER_METER is missing', async () =
 
 	const claimed = await recordUniqueDynamicWorkerDay({
 		env: {},
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workerId: 'kody-worker-a',
 		surface: 'execute',
 		now: new Date('2026-09-01T12:00:00.000Z'),
@@ -96,7 +99,7 @@ test('recordUniqueDynamicWorkerDay skips anonymous runs and never throws', async
 				},
 			} as unknown as DurableObjectNamespace,
 		},
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workerId: 'kody-worker-a',
 		surface: 'job',
 	})

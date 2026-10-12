@@ -7,7 +7,6 @@ import {
 	parseAuthoredPackageJson,
 	resolvePackageExportPath,
 } from '#worker/package-registry/manifest.ts'
-import { throwIfPersonPackagePlatformReference } from '#worker/package-registry/platform-package-policy.ts'
 import {
 	type AuthoredPackageJson,
 	type SavedPackageRecord,
@@ -26,7 +25,10 @@ import {
 	collectStaticKodyPackageImportsFromFiles,
 	isTypeDeclarationFilePath,
 } from './static-kody-imports.ts'
-import { collectLiteralImportNodes } from './import-specifiers.ts'
+import {
+	collectModuleImportNodesCached,
+	type ModuleImportNodesCache,
+} from './import-specifiers.ts'
 import { type BundleArtifactDependency } from './published-runtime-artifacts.ts'
 import {
 	dirname,
@@ -59,7 +61,10 @@ export function readRootPackage(sourceFiles: Record<string, string>) {
 	if (!packageJson) return null
 	try {
 		return {
-			manifest: parseAuthoredPackageJson({ content: packageJson }),
+			manifest: parseAuthoredPackageJson({
+				content: packageJson,
+				mode: 'published',
+			}),
 			prefix: rootSourcePrefix,
 		}
 	} catch {
@@ -97,6 +102,11 @@ export function collectReachableSourceFilePaths(input: {
 		prefix: string
 	} | null
 	includeTypeOnly?: boolean
+	/**
+	 * Optional request-scoped AST cache so prepare can reuse the same parse
+	 * when rewriting the same source files.
+	 */
+	importNodesCache?: ModuleImportNodesCache
 }) {
 	const reachable = new Set<string>()
 	const stack = [
@@ -117,9 +127,13 @@ export function collectReachableSourceFilePaths(input: {
 		const source = input.files[filePath]
 		if (source == null) continue
 		reachable.add(filePath)
-		for (const node of collectLiteralImportNodes(source, {
-			includeTypeOnly: input.includeTypeOnly,
-		})) {
+		for (const node of collectModuleImportNodesCached(
+			input.importNodesCache,
+			source,
+			{
+				includeTypeOnly: input.includeTypeOnly,
+			},
+		).literalImports) {
 			if (
 				node.kind === 'static' &&
 				node.specifier.startsWith(packageSpecifierPrefix)
@@ -155,20 +169,12 @@ export function collectReachableSourceFilePaths(input: {
 type LoadedDependencyPackage = LoadedPackageSource & {
 	row: SavedPackageRecord
 	prefix: string
-	sourceOwnerUserId: string
-	platformScope: string | null
-	shareOwned?: boolean
-	storageOwnerUserId?: string
 }
 
 function createBundleArtifactDependency(input: {
 	row: SavedPackageRecord
 	sourceId: string
 	publishedCommit: string
-	platformScope: string | null
-	shareOwned?: boolean
-	storageOwnerUserId?: string
-	sourceOwnerUserId: string
 }): BundleArtifactDependency {
 	return {
 		sourceId: input.sourceId,
@@ -176,16 +182,6 @@ function createBundleArtifactDependency(input: {
 		kodyId: input.row.kodyId,
 		packageName: input.row.name,
 		packageId: input.row.id,
-		// Platform-owned dependency ids never become caller-side
-		// packageStorage grants; see collectPackageStorageGrantIds.
-		...(input.platformScope ? { platformOwned: true } : {}),
-		...(input.shareOwned
-			? {
-					shareOwned: true,
-					storageOwnerUserId:
-						input.storageOwnerUserId ?? input.sourceOwnerUserId,
-				}
-			: {}),
 	}
 }
 
@@ -217,17 +213,7 @@ function collectTransitiveKodyDependencies(input: {
 		if (!next) continue
 		const parsed = parseKodyPackageSpecifier(next.specifier)
 		if (parsed.packageName === input.rootPackageName) continue
-		// Mirrors ensurePackageResolved: imports inside a share-owned package
-		// resolve under the share owner, keyed `${name}#${ownerUserId}`.
-		const nestedShareOwnerUserId =
-			next.importer?.shareOwned === true
-				? (next.importer.storageOwnerUserId ?? next.importer.sourceOwnerUserId)
-				: undefined
-		const loaded = input.loadedPackages.get(
-			nestedShareOwnerUserId
-				? `${parsed.packageName}#${nestedShareOwnerUserId}`
-				: parsed.packageName,
-		)
+		const loaded = input.loadedPackages.get(parsed.packageName)
 		if (!loaded) continue
 		const exportEntryPoint = resolvePackageExportSourcePath({
 			files: loaded.files,
@@ -249,10 +235,6 @@ function collectTransitiveKodyDependencies(input: {
 					row: loaded.row,
 					sourceId: loaded.source.id,
 					publishedCommit,
-					platformScope: loaded.platformScope,
-					shareOwned: loaded.shareOwned,
-					storageOwnerUserId: loaded.storageOwnerUserId,
-					sourceOwnerUserId: loaded.sourceOwnerUserId,
 				}),
 				transitive: true,
 			})
@@ -290,7 +272,6 @@ export async function resolveKodyDependenciesForEntryPoint(input: {
 	sourceFiles: Record<string, string>
 	entryPoint: string
 	loadedPackages?: Map<string, LoadedDependencyPackage>
-	allowPlatformScopes?: boolean
 }) {
 	const rootPackage = readRootPackage(input.sourceFiles)
 	const entryPoint =
@@ -325,26 +306,13 @@ export async function resolveKodyDependenciesForEntryPoint(input: {
 			const parsed = parseKodyPackageSpecifier(specifier)
 			const cached = input.loadedPackages?.get(parsed.packageName)
 			const resolution = cached
-				? {
-						row: cached.row,
-						sourceOwnerUserId: cached.sourceOwnerUserId,
-						platformScope: cached.platformScope,
-						shareOwned: cached.shareOwned,
-						storageOwnerUserId: cached.storageOwnerUserId,
-					}
+				? { row: cached.row }
 				: await resolveSavedPackageImport({
 						db: input.env.APP_DB,
 						userId: input.userId,
 						specifier: parsed,
-						allowPlatformScopes: input.allowPlatformScopes,
 					})
 			if (!resolution) {
-				if (input.allowPlatformScopes !== true) {
-					await throwIfPersonPackagePlatformReference({
-						db: input.env.APP_DB,
-						packageName: parsed.packageName,
-					})
-				}
 				const plainRepo = await findPlainRepoPromotionHint(input.env.APP_DB, {
 					userId: input.userId,
 					packageIdOrKodyId: parsed.packageName,
@@ -362,7 +330,7 @@ export async function resolveKodyDependenciesForEntryPoint(input: {
 				(await loadPackageSourceBySourceId({
 					env: input.env,
 					baseUrl: input.baseUrl,
-					userId: resolution.sourceOwnerUserId,
+					userId: input.userId,
 					sourceId: row.sourceId,
 				}))
 			if (!loaded.source.published_commit) {
@@ -374,10 +342,6 @@ export async function resolveKodyDependenciesForEntryPoint(input: {
 				row,
 				sourceId: loaded.source.id,
 				publishedCommit: loaded.source.published_commit,
-				platformScope: resolution.platformScope,
-				shareOwned: resolution.shareOwned,
-				storageOwnerUserId: resolution.storageOwnerUserId,
-				sourceOwnerUserId: resolution.sourceOwnerUserId,
 			})
 		}),
 	)

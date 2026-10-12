@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { processDueJobs } from './process-due-jobs.ts'
 import { type JobRecord } from './types.ts'
@@ -6,7 +7,7 @@ function createCronJob(overrides: Partial<JobRecord> = {}): JobRecord {
 	return {
 		version: 1,
 		id: 'job-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: 'Morning job',
 		sourceId: 'source-1',
 		publishedCommit: null,
@@ -18,7 +19,6 @@ function createCronJob(overrides: Partial<JobRecord> = {}): JobRecord {
 		timezone: 'UTC',
 		enabled: true,
 		killSwitchEnabled: false,
-		preserved: false,
 		expiresAt: null,
 		createdAt: '2026-04-12T00:00:00.000Z',
 		updatedAt: '2026-04-12T00:00:00.000Z',
@@ -127,7 +127,12 @@ test('processDueJobs handles cron batching and once-job retain, preserve, and re
 			],
 			now,
 			async executeJob() {
-				return { execution, startedAt: runAt, finishedAt: runAt, durationMs: 0 }
+				return {
+					execution,
+					startedAt: runAt,
+					finishedAt: runAt,
+					durationMs: 0,
+				}
 			},
 		})
 		expect(result.deleteJobIds).toEqual([])

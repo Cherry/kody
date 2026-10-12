@@ -22,6 +22,11 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/server/valida
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import { assembleMcpServerInstructionsForCaller } from './assemble-mcp-server-instructions.ts'
 import { registerTools } from './register-tools.ts'
+import { registerPackageSkillsExtensionWhenEnabled } from './skills/register-package-skills.ts'
+import {
+	readMcpRequestClientCapabilities,
+	registerMcpEvents,
+} from './events/register-mcp-events.ts'
 import {
 	asMcpToolServer,
 	type McpRegistrationAgent,
@@ -46,6 +51,8 @@ export async function handleStatelessMcpRequest(input: {
 	callerContext: McpCallerContext
 	/** Body already parsed by lane classification, so it is read only once. */
 	parsedBody?: unknown
+	/** OAuth client the bearer grant was issued to (MCP Events principal). */
+	oauthClientId?: string | null
 }): Promise<Response> {
 	const { request, env, ctx, callerContext } = input
 	const handler = createMcpHandler(
@@ -68,6 +75,19 @@ export async function handleStatelessMcpRequest(input: {
 			await registerTools(
 				createStatelessRegistrationAgent({ server, env, ctx, callerContext }),
 			)
+			await registerPackageSkillsExtensionWhenEnabled({
+				server,
+				env,
+				callerContext,
+				parsedBody: input.parsedBody,
+			})
+			await registerMcpEvents({
+				server,
+				env,
+				callerContext,
+				oauthClientId: input.oauthClientId ?? null,
+				clientCapabilities: readMcpRequestClientCapabilities(input.parsedBody),
+			})
 			return server
 		},
 		{

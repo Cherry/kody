@@ -8,7 +8,6 @@ import {
 } from '#app/auth-session.ts'
 import { verifyEmailChangeToken } from '#app/email-change.ts'
 import { hashVerificationToken } from '#app/email-verification.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import {
@@ -17,6 +16,7 @@ import {
 } from '#worker/test-support/audit-log-spy.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { createAccountEmailChangeHandler } from './account-email-change.ts'
 
@@ -47,7 +47,7 @@ async function seedUser(
 	},
 ) {
 	const passwordHash = await createPasswordHash(input.password)
-	const stableUserId = await createStableUserIdFromEmail(input.email)
+	const stableUserId = testStableUserIdFromEmail(input.email)
 	sqlite.exec(`
 		INSERT INTO users (
 			id,
@@ -65,6 +65,10 @@ async function seedUser(
 			${input.verified === false ? 'NULL' : 'CURRENT_TIMESTAMP'}
 		);
 	`)
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId,
+		username: input.username,
+	})
 	return stableUserId
 }
 

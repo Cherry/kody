@@ -122,23 +122,26 @@ function buildMainGeneratedConfig(envName: string) {
 			{ binding: 'OAUTH_KV', id: 'kv-oauth-id' },
 			{ binding: 'BUNDLE_ARTIFACTS_KV', id: 'kv-bundle-id' },
 		],
-		r2_buckets: ['COMMUNITY_ASSETS', 'EMAIL_BLOBS', 'REPO_SESSION_BLOBS'].map(
-			(binding) => ({
-				binding,
-				bucket_name: `kody-pr-7-${binding.toLowerCase().replaceAll('_', '-')}`,
-			}),
-		),
+		r2_buckets: [
+			'COMMUNITY_ASSETS',
+			'EMAIL_BLOBS',
+			'REPO_SESSION_BLOBS',
+			'OPERATOR_BACKUPS',
+		].map((binding) => ({
+			binding,
+			bucket_name: `kody-pr-7-${binding.toLowerCase().replaceAll('_', '-')}`,
+		})),
 		queues: {
 			producers: [
-				...producers('kody-pr-7', 'WEBHOOK_DISPATCH_QUEUE'),
+				...producers(
+					envName === 'production' ? 'kody' : 'kody-pr-7',
+					'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+					'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
+					'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
+					'WEBHOOK_DISPATCH_QUEUE',
+				),
 				...(envName === 'production'
-					? producers(
-							'kody',
-							'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
-							'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
-							'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
-							'PACKAGE_EVENTS_DISPATCH_QUEUE',
-						)
+					? producers('kody', 'PACKAGE_EVENTS_DISPATCH_QUEUE')
 					: []),
 			],
 		},
@@ -153,7 +156,6 @@ function buildMainGeneratedConfig(envName: string) {
 			'FLAG_EXPOSURES',
 			'EMAIL_EVENTS',
 			'MCP_PROTOCOL_EVENTS',
-			'PACKAGE_INVOKE_SPECIFIER_EVENTS',
 			'EXECUTE_INTERPRETABLE_EVENTS',
 			'MCP_SEARCH_EVENTS',
 			'ONBOARDING_FUNNEL_EVENTS',
@@ -234,27 +236,33 @@ test('generate rewrites worker names, copies resource ids, and writes a bootstra
 	})
 	expect(
 		previewEnv?.analytics_engine_datasets?.filter((entry) =>
-			[
-				'PACKAGE_INVOKE_SPECIFIER_EVENTS',
-				'EXECUTE_INTERPRETABLE_EVENTS',
-				'MCP_SEARCH_EVENTS',
-			].includes(String(entry.binding)),
+			['EXECUTE_INTERPRETABLE_EVENTS', 'MCP_SEARCH_EVENTS'].includes(
+				String(entry.binding),
+			),
 		),
 	).toEqual([
-		{
-			binding: 'PACKAGE_INVOKE_SPECIFIER_EVENTS',
-			dataset: 'kody_package_invoke_specifier_events_pr',
-		},
 		{
 			binding: 'EXECUTE_INTERPRETABLE_EVENTS',
 			dataset: 'kody_execute_interpretable_events_pr',
 		},
 		{ binding: 'MCP_SEARCH_EVENTS', dataset: 'kody_mcp_search_events_pr' },
 	])
-	expect(previewEnv?.queues?.producers?.[0]).toMatchObject({
-		binding: 'WEBHOOK_DISPATCH_QUEUE',
-		queue: 'kody-pr-7-webhook-dispatch',
-	})
+	expect(previewEnv?.queues?.producers?.map((entry) => entry.binding)).toEqual([
+		'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+		'COMMUNITY_ACTIVITY_DISPATCH_QUEUE',
+		'COMMUNITY_LISTING_PUBLISHED_DISPATCH_QUEUE',
+		'WEBHOOK_DISPATCH_QUEUE',
+	])
+	expect(
+		previewEnv?.queues?.producers?.find(
+			(entry) => entry.binding === 'PLATFORM_FEEDBACK_DISPATCH_QUEUE',
+		),
+	).toMatchObject({ queue: 'kody-pr-7-platform-feedback-dispatch' })
+	expect(
+		previewEnv?.queues?.producers?.find(
+			(entry) => entry.binding === 'WEBHOOK_DISPATCH_QUEUE',
+		),
+	).toMatchObject({ queue: 'kody-pr-7-webhook-dispatch' })
 	expect(previewEnv?.artifacts?.[0]).toMatchObject({
 		binding: 'ARTIFACTS',
 		namespace: 'kody-pr-7',

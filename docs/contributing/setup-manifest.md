@@ -16,6 +16,12 @@ This project uses the following resources:
     workflow is dispatched on `main`. The dedicated
     `.github/workflows/nx-cache-deploy.yml` workflow does the same on its own
     `workflow_dispatch` without a full production deploy.
+- R2 bucket for operator rollback snapshots
+  - `binding`: `OPERATOR_BACKUPS` (origin and platform workers)
+  - `bucket_name`: `kody-operator-backups`; previews use
+    `{worker}-operator-backups`
+  - Production and preview deploys ensure the bucket. Written only by admin
+    operations such as [org resource transfer](./org-resource-transfer.md).
 - KV namespace for OAuth/session storage
   - `binding`: `OAUTH_KV`
   - `title`: `<app-name>-oauth`
@@ -60,6 +66,9 @@ This project uses the following resources:
   - The production consumer batches at most 10 messages for 5 seconds, retries
     three times, and routes exhausted messages to the dedicated dead-letter
     queue. Production CI ensures both resources.
+  - Preview ensure creates a per-PR copy of this queue from the same producer
+    binding (`tools/ci/preview-queue-plan.ts`). The committed `kody-preview-*`
+    queue names are placeholders the generated config replaces.
   - Queue messages contain only `{ feedbackId }`. The consumer reloads current
     feedback metadata, acknowledges invalid or deleted ids, and retries
     transient load, subscription-discovery, or package-invocation wrapper
@@ -117,10 +126,13 @@ This project uses the following resources:
     the same registry inline so maintenance behavior remains testable.
 - Vectorize indexes for MCP capability search (`CAPABILITY_VECTOR_INDEX`)
   - Production: `kody-capabilities-prod`
-  - Preview: `kody-capabilities-preview`
-  - Create once per account, for example:
-    `wrangler vectorize create kody-capabilities-prod --dimensions=384 --metric=cosine`
-    (same for preview). **Dimensions must match** the embedding model in
+  - Preview: `<preview-worker-name>-vectors`, created and deleted per preview by
+    `tools/ci/preview-resources.ts` (with metadata indexes) and filled by the
+    preview workflow's builtin reindex. `kody-capabilities-preview` is only the
+    committed placeholder the generated preview config replaces.
+  - Create production once per account, for example:
+    `wrangler vectorize create kody-capabilities-prod --dimensions=384 --metric=cosine`.
+    **Dimensions must match** the embedding model in
     `packages/worker/src/vectorize/embedding.ts` (`@cf/baai/bge-small-en-v1.5`,
     384 dimensions, `cls` pooling).
 - Cloudflare Images binding for package-icon and integration-logo ingest
@@ -342,11 +354,11 @@ every manual `workflow_dispatch` of that workflow. A longer Validate gap can
 skip the job even when `main` still contains those paths; dispatch Deploy on
 current `main` HEAD to force it. The job deploys with the production-account
 `CLOUDFLARE_API_TOKEN`, sets `BUILD_COMMIT` to the deploy SHA, and syncs the
-same token as the Worker secret `CLOUDFLARE_API_TOKEN` so the status worker can
-send operator alert email through the Cloudflare Email REST API (from
-`ALERT_EMAIL_FROM` to `ALERT_EMAIL_TO`, both non-secret vars in
-`packages/status/wrangler.jsonc`). Without that secret, alert sends are skipped
-and logged.
+Email Sending-only `CLOUDFLARE_STATUS_API_TOKEN` GitHub secret as the Worker
+secret `CLOUDFLARE_API_TOKEN` so the status worker can send operator alert email
+through the Cloudflare Email REST API (from `ALERT_EMAIL_FROM` to
+`ALERT_EMAIL_TO`, both non-secret vars in `packages/status/wrangler.jsonc`).
+Without that secret, alert sends are skipped and logged.
 
 MCP execute evidence on the status page is a timestamp-only last-success
 heartbeat from real authenticated execute completions, plus at most one hourly
@@ -371,10 +383,12 @@ is fire-and-forget with a short timeout so a down or missing secret cannot stall
 probes or email. The same bearer authenticates
 `POST https://status.kody.codes/__maintenance/incidents/:id/retrospective`,
 which attaches an operator writeup to a resolved probe-derived incident on the
-status Durable Object. That write stays on the status worker so origin /
-`APP_DB` being down cannot block it. When the GitHub secret is unset, emit stays
-skipped and the retrospective route returns 503; packages can reconcile incident
-open/resolve from the public `/status.json` snapshot.
+status Durable Object, and
+`DELETE https://status.kody.codes/__maintenance/incidents/:id`, which removes a
+resolved health-check-only incident. Those writes stay on the status worker so
+origin / `APP_DB` being down cannot block them. When the GitHub secret is unset,
+emit stays skipped and both incident maintenance routes return 503; packages can
+reconcile incident open/resolve from the public `/status.json` snapshot.
 
 ## Optional Cloudflare offerings
 
@@ -510,7 +524,7 @@ automatically:
   login and Stripe plan refresh. The bot needs Create Instant Invite and Manage
   Roles. See `docs/contributing/social-login.md`.)
 - `STRIPE_SECRET_KEY` (optional Worker secret; enables Stripe checkout linking,
-  billing portal, and `users.stripe_plan` refresh. When unset, billing degrades
+  billing portal, and `orgs.stripe_plan` refresh. When unset, billing degrades
   to manual plans.)
 - `STRIPE_WEBHOOK_SECRET` (optional Worker secret; Stripe webhook signing secret
   for `POST /webhooks/stripe`. When unset, the webhook endpoint returns 503.)
@@ -537,19 +551,34 @@ from `packages/worker/.env`.
 
 Configure these GitHub Actions secrets and variables for workflows:
 
-- `CLOUDFLARE_API_TOKEN` (Workers deploy + D1 edit access on the correct
-  account; also reused for remote AI and Cloudflare API workflows that run with
-  account secrets + package workflows)
-- `CLOUDFLARE_RUNTIME_API_TOKEN` (optional; the value uploaded to the
-  `kody-runtime` Worker as its `CLOUDFLARE_API_TOKEN` secret. The runtime lane
+- `CLOUDFLARE_API_TOKEN` (deploy token: Workers deploy + D1 edit access on the
+  correct account for wrangler and `tools/ci` resource ensure; also reused for
+  remote AI and Cloudflare API workflows that run with account secrets + package
+  workflows. The production deploy never uploads it to a Worker.)
+- `CLOUDFLARE_APP_API_TOKEN` (required for production deploys; uploaded to
+  `kody-production` and `kody-platform` as their `CLOUDFLARE_API_TOKEN` Worker
+  secret. Needs `Account · Email Sending · Edit`, `Account · Artifacts · Edit`,
+  `Account · Account Analytics · Read` (Analytics Engine SQL for admin insights
+  and usage rollups), and `Account · Queues · Edit` (Artifacts push
+  event-subscription lookup and cleanup).)
+- `CLOUDFLARE_RUNTIME_API_TOKEN` (required for production deploys; uploaded to
+  `kody-runtime` as its `CLOUDFLARE_API_TOKEN` Worker secret. The runtime lane
   executes package capabilities in-process, and the only Cloudflare REST APIs
   those reach are Email Sending (`/email/sending/send`) and Artifacts
   (`/artifacts/namespaces/...`, including repo token minting, which has no
   binding equivalent), so this token needs exactly
   `Account · Email Sending · Edit` and `Account · Artifacts · Edit`. Workers AI,
   Images, Vectorize, D1, and Queues are reached through bindings or are not used
-  by the runtime lane. When unset, the deploy falls back to
-  `CLOUDFLARE_API_TOKEN`.)
+  by the runtime lane.)
+- `CLOUDFLARE_STATUS_API_TOKEN` (required for production deploys; uploaded to
+  `kody-status` as its `CLOUDFLARE_API_TOKEN` Worker secret for operator alert
+  email. Needs only `Account · Email Sending · Edit`.)
+- Production deploys fail in a shared `require-worker-tokens` job (before
+  jobs/highlight/origin/status mutations) when `CLOUDFLARE_APP_API_TOKEN`,
+  `CLOUDFLARE_RUNTIME_API_TOKEN`, or `CLOUDFLARE_STATUS_API_TOKEN` is unset or
+  equals `CLOUDFLARE_API_TOKEN`, or when `CLOUDFLARE_API_TOKEN` itself is unset
+  (`tools/ci/check-worker-cloudflare-tokens.ts`). There is no fallback to the
+  deploy token.
 - `CLOUDFLARE_ACCOUNT_ID` (required GitHub Actions **variable** for Cloudflare
   resource provisioning and Email Service)
 - `CLOUDFLARE_ZONE_ID` (required GitHub Actions **variable** for the zone that
@@ -629,7 +658,7 @@ Configure these GitHub Actions secrets and variables for workflows:
   `POST`s this minted inbound webhook URL for `@kentcdodds/weekly-site-perf`
   webhook `run` (`inputMode: "params"`, `responseMode: "sync"`). The value is
   the Kody user secret `weeklySitePerfWebhookRun`
-  (https://kody.codes/account/secrets/user/weeklySitePerfWebhookRun); Kent
+  (https://kody.codes/@<slug>/-/secrets/user/weeklySitePerfWebhookRun); Kent
   copies it into GitHub. Agents never paste the URL. Not a Worker secret; the
   weekly job skips invoke when this is unset, blank, or not a valid `http(s)`
   URL.)
@@ -649,8 +678,7 @@ Configure these GitHub Actions secrets and variables for workflows:
   not the write token. Fork `pull_request` validate jobs set Nx's
   `NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN` from this secret so they can GET
   and cannot PUT. The worker syncs it as `CACHE_READ_TOKEN`. PUT with this token
-  returns 403. Leave unset to run fork CI with local `.nx` + `actions/cache`
-  only.)
+  returns 403. Leave unset to run fork CI without any Nx cache.)
 - **Repository variables** `SENTRY_ORG` and `SENTRY_PROJECT` (optional; Sentry
   organization and project **slugs** for source map upload — same values as in
   the Sentry wizard’s `--org` / `--project` flags)
@@ -730,9 +758,9 @@ How to get/set each value:
 - `KODY_WEBHOOK_URL_RUN` (optional)
   - Minted inbound webhook URL for `@kentcdodds/weekly-site-perf` webhook `run`.
   - Kent copies the value from the Kody user secret `weeklySitePerfWebhookRun`
-    at https://kody.codes/account/secrets/user/weeklySitePerfWebhookRun into the
-    GitHub Actions repository secret `KODY_WEBHOOK_URL_RUN`. Agents never paste
-    the URL.
+    at https://kody.codes/@<slug>/-/secrets/user/weeklySitePerfWebhookRun into
+    the GitHub Actions repository secret `KODY_WEBHOOK_URL_RUN`. Agents never
+    paste the URL.
   - The weekly workflow uses this secret only to invoke that package; it is not
     synced to the Worker. Rotate with `webhookUrlRotate`, then update both the
     Kody user secret and this GitHub secret.
@@ -781,9 +809,10 @@ How to get/set each value:
     existing rows are rebuilt with compatible vectors. Pooling is not part of
     the fingerprint, so a pooling-only change also needs `force` (or a
     `vectorEmbedFingerprintVersion` bump). After Vectorize data loss, `force` is
-    required so restored D1 fingerprints cannot skip an empty index. Local and
-    preview environments can omit it; CI skips reindex and origin-only
-    execute-smoke when the secret is unset.
+    required so restored D1 fingerprints cannot skip an empty index. Local
+    environments can omit it; production CI skips reindex and origin-only
+    execute-smoke when the secret is unset. Preview deploys generate a random
+    per-deploy value and run the builtin reindex against the per-preview index.
 - `JOB_REINDEX_SECRET` (optional; jobs-only reindex)
   - Bearer token for `POST /__maintenance/reindex-jobs`. Generate and sync the
     same way as `CAPABILITY_REINDEX_SECRET` only if you want the jobs-only

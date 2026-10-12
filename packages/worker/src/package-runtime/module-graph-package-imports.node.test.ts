@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as PublishedBundleArtifactsModule from './published-bundle-artifacts.ts'
 import {
@@ -14,15 +15,9 @@ vi.mock('#worker/worker-bundler-modules.ts', () => ({
 	}),
 }))
 
-vi.mock('#worker/package-registry/scope-grants.ts', () => ({
-	getPlatformAccountByUsername: mockModule.getPlatformAccountByUsername,
-	isPlatformAccountStableUserId: async () => false,
-	listPlatformAccountUsernames: async () => [],
-}))
-
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageByName(...args),
 }))
@@ -49,7 +44,7 @@ const { buildKodyImportableModuleBundle, buildKodyModuleBundle } =
 const graphInput = {
 	env: { APP_DB: {}, REPO_SESSION: {} } as Env,
 	baseUrl: 'https://heykody.dev',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 }
 
 type Manifest = {
@@ -183,7 +178,7 @@ test('buildKodyModuleBundle resolves scoped package imports by full package name
 	mockModule.getSavedPackageByName.mockResolvedValue(
 		createSavedPackageRecord(examplePackage),
 	)
-	mockModule.getSavedPackageByKodyId.mockResolvedValue(null)
+	mockModule.resolveSavedPackageRef.mockResolvedValue(null)
 	mockModule.loadPackageSourceBySourceId.mockResolvedValue(
 		createLoadedPackageSource(),
 	)
@@ -195,9 +190,12 @@ test('buildKodyModuleBundle resolves scoped package imports by full package name
 
 	expect(mockModule.getSavedPackageByName).toHaveBeenCalledWith(
 		{},
-		{ userId: 'user-1', name: '@kentcdodds/example-package' },
+		{
+			userId: ownerIdFromStored('user-1'),
+			name: '@kentcdodds/example-package',
+		},
 	)
-	expect(mockModule.getSavedPackageByKodyId).not.toHaveBeenCalled()
+	expect(mockModule.resolveSavedPackageRef).not.toHaveBeenCalled()
 	const rootEntry = bundlerFiles()['.__kody_root__/index.js']
 	expect(rootEntry).toContain('__kody_virtual__/imports/')
 	expect(rootEntry).not.toContain(
@@ -616,7 +614,7 @@ test('buildKodyModuleBundle resolves transitive imports back to the root package
 	expect(mockModule.getSavedPackageByName).toHaveBeenCalledTimes(1)
 	expect(mockModule.getSavedPackageByName).toHaveBeenCalledWith(
 		{},
-		{ userId: 'user-1', name: '@kentcdodds/journaling' },
+		{ userId: ownerIdFromStored('user-1'), name: '@kentcdodds/journaling' },
 	)
 })
 

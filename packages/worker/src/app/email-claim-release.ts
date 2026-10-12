@@ -10,6 +10,7 @@ import {
 } from '#worker/identity/email-claims.ts'
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
 import { toHex } from '@kody-internal/shared/hex.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export const emailClaimReleaseRequestRateLimitConfig = {
 	maxRequests: 3,
@@ -50,7 +51,6 @@ function getEmailClaimReleaseConfig(input: {
 export async function createEmailClaimReleaseVerification(input: {
 	env: Env
 	userId: number
-	stableUserId: string
 	currentEmail: string
 	email: string
 	requestUrl: string | URL
@@ -59,7 +59,6 @@ export async function createEmailClaimReleaseVerification(input: {
 	const releasable = await resolveReleasableEmailClaim({
 		db: input.env.APP_DB,
 		userId: input.userId,
-		stableUserId: input.stableUserId,
 		currentEmail: input.currentEmail,
 		email,
 	})
@@ -166,10 +165,10 @@ export async function verifyEmailClaimReleaseToken(input: {
 	const record = await input.db
 		.prepare(
 			`SELECT pec.id, pec.user_id, pec.email, pec.expires_at,
-			        u.email AS current_email, u.stable_user_id
+			        u.email AS current_email
 			 FROM pending_email_claim_releases pec
 			 INNER JOIN users u ON u.id = pec.user_id
-			 WHERE pec.token_hash = ?`,
+			 WHERE pec.token_hash = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(tokenHash)
 		.first<{
@@ -178,7 +177,6 @@ export async function verifyEmailClaimReleaseToken(input: {
 			email: string
 			expires_at: number
 			current_email: string
-			stable_user_id: string
 		}>()
 	const now = input.now ?? new Date()
 
@@ -194,7 +192,6 @@ export async function verifyEmailClaimReleaseToken(input: {
 	const releasable = await resolveReleasableEmailClaim({
 		db: input.db,
 		userId: record.user_id,
-		stableUserId: record.stable_user_id,
 		currentEmail: record.current_email,
 		email: record.email,
 	})

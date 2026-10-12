@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import { durableObjectIsolateMemoryResetMessage } from '#worker/sentry-options.ts'
@@ -88,7 +89,10 @@ test('community install POST enforces gates and maps install outcomes', async ()
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'userb@example.com',
-		mcpUser: { userId: 'stable-user-b', email: 'userb@example.com' },
+		mcpUser: {
+			userId: ownerIdFromStored('stable-user-b'),
+			email: 'userb@example.com',
+		},
 	})
 	mockModule.getCommunityListingById.mockResolvedValue(null)
 	expect((await post({})).status).toBe(404)
@@ -104,21 +108,18 @@ test('community install POST enforces gates and maps install outcomes', async ()
 	})
 	expect(mockModule.installCommunityListing).not.toHaveBeenCalled()
 
-	// Official `@kody/*` listings skip the acknowledgement gate.
+	// `@kody/*` listings are ordinary community packages from the `@kody` org.
 	mockModule.getCommunityListingById.mockResolvedValue(
-		listing('listing-official', '@kody/notion-mcp'),
+		listing('listing-kody', '@kody/notion-mcp'),
 	)
 	mockModule.getMcpUserPackageScope.mockResolvedValue('userb')
-	mockModule.installCommunityListing.mockResolvedValue(installed('notion-mcp'))
-	const official = await post({})
-	expect(official.status).toBe(200)
-	expect(official.payload).toMatchObject({
-		ok: true,
-		status: 'installed',
-		targetName: '@userb/notion-mcp',
+	const kodyOrgListing = await post({})
+	expect(kodyOrgListing.status).toBe(409)
+	expect(kodyOrgListing.payload).toMatchObject({
+		ok: false,
+		requiresAcknowledgement: true,
 	})
-	expect(mockModule.installCommunityListing).toHaveBeenCalledTimes(1)
-	mockModule.installCommunityListing.mockClear()
+	expect(mockModule.installCommunityListing).not.toHaveBeenCalled()
 
 	mockModule.getCommunityListingById.mockResolvedValue(
 		listing('listing-1', '@someone/demo'),
@@ -140,7 +141,7 @@ test('community install POST enforces gates and maps install outcomes', async ()
 	expect(mockModule.installCommunityListing).toHaveBeenCalledWith(
 		expect.objectContaining({
 			env,
-			userId: 'stable-user-b',
+			userId: ownerIdFromStored('stable-user-b'),
 			userEmail: 'userb@example.com',
 			expectedPackageScope: 'userb',
 			listingId: 'listing-1',
@@ -190,9 +191,40 @@ test('community install POST enforces gates and maps install outcomes', async ()
 	)
 	expect(await post()).toEqual({
 		status: 500,
-		payload: { ok: false, error: 'Unable to install this public package.' },
+		payload: {
+			ok: false,
+			error: 'Internal error. Retry later or report it if it persists.',
+		},
 	})
 	expect(consoleError).toHaveBeenCalled()
+
+	const artifactsClone = Object.assign(
+		new Error('HTTP Error: 500 Internal Server Error'),
+		{
+			code: 'HttpError',
+			name: 'HttpError',
+			data: {
+				statusCode: 500,
+				statusMessage: 'Internal Server Error',
+				response: '',
+			},
+		},
+	)
+	mockModule.installCommunityListing.mockRejectedValue(
+		new Error(
+			'Artifacts git clone failed for https://example.test/repo.git: HTTP Error: 500 Internal Server Error',
+			{ cause: artifactsClone },
+		),
+	)
+	expect(await post()).toEqual({
+		status: 503,
+		payload: {
+			ok: false,
+			error: expect.stringMatching(
+				/^The package source could not be read after retries \(HTTP 5xx\)\. Report id: /,
+			),
+		},
+	})
 
 	mockModule.installCommunityListing.mockRejectedValue(
 		new Error(durableObjectIsolateMemoryResetMessage),

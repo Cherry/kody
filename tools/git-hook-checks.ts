@@ -4,10 +4,16 @@ import { resolveNpmCommand, isExecutedDirectly } from './node-runtime.ts'
 /**
  * Husky pre-commit and pre-push gates.
  *
- * A docs-only diff skips typecheck, migrations:check, and test:push.
- * lint-staged still formats the commit. Any other path, including a comment
- * in a source file, keeps the full check for that hook. An unreadable diff
- * fails closed and runs the check.
+ * A docs-only diff skips install:check, typecheck, migrations:check, and
+ * test:push. lint-staged still formats the commit. Any other path, including
+ * a comment in a source file, keeps the full check for that hook. An
+ * unreadable diff fails closed and runs the check.
+ *
+ * pre-push also runs skills-lock:check when the push changes skills-lock.json
+ * or a path under .agents/skills/, and when the pushed paths cannot be listed.
+ * Markdown skill files are docs-only, so they do not run test:push.
+ * skills-lock.json alone does not either. Executable files under
+ * .agents/skills/ still run test:push.
  *
  * Rename detection is off so a source file renamed to markdown still lists
  * the deleted path.
@@ -24,9 +30,11 @@ type GitCommandResult = {
 export type GitRunner = (args: ReadonlyArray<string>) => GitCommandResult
 
 export type GitHookCheckPlan = {
+	runInstallCheck: boolean
 	runTypecheck: boolean
 	runMigrationsCheck: boolean
 	runUnitTests: boolean
+	runSkillsLockCheck: boolean
 	summary: string
 }
 
@@ -81,8 +89,10 @@ export function planGitHookChecks(input: {
 
 export function hookScripts(plan: GitHookCheckPlan) {
 	const scripts: Array<string> = []
+	if (plan.runInstallCheck) scripts.push('install:check')
 	if (plan.runTypecheck) scripts.push('typecheck')
 	if (plan.runMigrationsCheck) scripts.push('migrations:check')
+	if (plan.runSkillsLockCheck) scripts.push('skills-lock:check')
 	if (plan.runUnitTests) scripts.push('test:push')
 	return scripts
 }
@@ -137,52 +147,101 @@ export async function runGitHookChecks(input: {
 function planPreCommit(paths: ReadonlyArray<string> | null): GitHookCheckPlan {
 	if (paths === null) {
 		return {
+			runInstallCheck: true,
 			runTypecheck: true,
 			runMigrationsCheck: true,
 			runUnitTests: false,
+			runSkillsLockCheck: false,
 			summary:
-				'pre-commit: running typecheck and migrations:check (could not list staged paths)',
+				'pre-commit: running install:check, typecheck, and migrations:check (could not list staged paths)',
 		}
 	}
 	if (paths.every(isDocsOnlyHookPath)) {
 		return {
+			runInstallCheck: false,
 			runTypecheck: false,
 			runMigrationsCheck: false,
 			runUnitTests: false,
-			summary: `pre-commit: skipping typecheck and migrations:check (${docsOnlySummary(paths)})`,
+			runSkillsLockCheck: false,
+			summary: `pre-commit: skipping install:check, typecheck, and migrations:check (${docsOnlySummary(paths)})`,
 		}
 	}
 	return {
+		runInstallCheck: true,
 		runTypecheck: true,
 		runMigrationsCheck: true,
 		runUnitTests: false,
-		summary: `pre-commit: running typecheck and migrations:check (${codePathSummary(paths)})`,
+		runSkillsLockCheck: false,
+		summary: `pre-commit: running install:check, typecheck, and migrations:check (${codePathSummary(paths)})`,
 	}
 }
 
 function planPrePush(paths: ReadonlyArray<string> | null): GitHookCheckPlan {
 	if (paths === null) {
 		return {
+			runInstallCheck: false,
 			runTypecheck: false,
 			runMigrationsCheck: false,
 			runUnitTests: true,
-			summary: 'pre-push: running test:push (could not list pushed paths)',
+			runSkillsLockCheck: true,
+			summary:
+				'pre-push: running test:push and skills-lock:check (could not list pushed paths)',
 		}
 	}
-	if (paths.every(isDocsOnlyHookPath)) {
+	const skillsLock = paths.some(isSkillsLockHookPath)
+	// skills-lock.json is not markdown. Markdown under .agents/skills/ is
+	// already docs-only. Executable skill scripts (.mjs, tests) are not, so
+	// they still run test:push.
+	if (paths.every(skipsPrePushUnitTests)) {
+		if (skillsLock) {
+			return {
+				runInstallCheck: false,
+				runTypecheck: false,
+				runMigrationsCheck: false,
+				runUnitTests: false,
+				runSkillsLockCheck: true,
+				summary: `pre-push: running skills-lock:check (${skillsLockPathSummary(paths)})`,
+			}
+		}
 		return {
+			runInstallCheck: false,
 			runTypecheck: false,
 			runMigrationsCheck: false,
 			runUnitTests: false,
+			runSkillsLockCheck: false,
 			summary: `pre-push: skipping test:push (${docsOnlySummary(paths)})`,
 		}
 	}
 	return {
+		runInstallCheck: false,
 		runTypecheck: false,
 		runMigrationsCheck: false,
 		runUnitTests: true,
-		summary: `pre-push: running test:push (${codePathSummary(paths)})`,
+		runSkillsLockCheck: skillsLock,
+		summary: skillsLock
+			? `pre-push: running skills-lock:check and test:push (${codePathSummary(paths)})`
+			: `pre-push: running test:push (${codePathSummary(paths)})`,
 	}
+}
+
+export function isSkillsLockHookPath(filePath: string) {
+	const normalized = normalizeHookPath(filePath)
+	return (
+		normalized === 'skills-lock.json' ||
+		normalized.startsWith('.agents/skills/')
+	)
+}
+
+function skipsPrePushUnitTests(filePath: string) {
+	return (
+		isDocsOnlyHookPath(filePath) ||
+		normalizeHookPath(filePath) === 'skills-lock.json'
+	)
+}
+
+function skillsLockPathSummary(paths: ReadonlyArray<string>) {
+	const skillPaths = paths.filter(isSkillsLockHookPath).sort()
+	return skillPaths[0] ?? 'skills-lock.json'
 }
 
 function docsOnlySummary(paths: ReadonlyArray<string>) {
@@ -294,9 +353,24 @@ function defaultGit(args: ReadonlyArray<string>): GitCommandResult {
 	}
 }
 
+export function gitHookScriptEnv(source: NodeJS.ProcessEnv = process.env) {
+	const result = defaultGit(['rev-parse', '--local-env-vars'])
+	if (result.status !== 0) {
+		throw new Error(
+			'Could not isolate Git hook checks from repository environment',
+		)
+	}
+	const env = { ...source }
+	// Tests create foreign repositories. Inherited worktree variables would
+	// redirect their Git commands back into the repository being pushed.
+	for (const name of result.stdout.trim().split(/\s+/)) delete env[name]
+	return env
+}
+
 function runNpmScript(script: string) {
 	const result = spawnSync(resolveNpmCommand(), ['run', script], {
 		stdio: 'inherit',
+		env: gitHookScriptEnv(),
 	})
 	if (result.error) {
 		console.error(result.error.message)

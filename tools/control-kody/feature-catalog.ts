@@ -92,9 +92,30 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'account',
 		title: 'Account hub',
 		file: 'account.md',
-		paths: ['/account', '/account/delete'],
+		paths: [
+			'/account',
+			'/account/security',
+			'/account/data',
+			'/account/delete',
+			'/account/organizations',
+			'/account/organizations/new',
+			'/@:orgSlug/-/settings',
+			'/@:orgSlug/-/members',
+			'/@:orgSlug/-/teams',
+			'/@:orgSlug/-/grants',
+			'/@:orgSlug/-/collaborators',
+			'/join/:token',
+		],
 		apis: [
 			'/account/profile.json',
+			'/account/organizations.json',
+			'/@:orgSlug/-/settings.json',
+			'/@:orgSlug/-/members.json',
+			'/@:orgSlug/-/members/invite-links.json',
+			'/@:orgSlug/-/members/invite-links-revoke.json',
+			'/@:orgSlug/-/teams.json',
+			'/@:orgSlug/-/grants.json',
+			'/@:orgSlug/-/collaborators.json',
 			'/account/profile/avatar.json',
 			'/account/email-change.json',
 			'/account/email-claim-release.json',
@@ -107,11 +128,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'connections',
 		title: 'Connections (connected agents)',
 		file: 'connections.md',
-		paths: [
-			'/account/connections',
-			'/account/connections/new',
-			'/account/connections/new/:agent',
-		],
+		paths: ['/@:orgSlug/-/connections(/*rest)'],
 		apis: ['/account/connected-agents.json'],
 	},
 	{
@@ -119,7 +136,6 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'Packages',
 		file: 'packages.md',
 		paths: [
-			'/account/packages',
 			'/account/packages/:packageId',
 			'/account/packages/:packageId/approve-publish',
 			'/account/packages/:packageId/files(/*relativePath)',
@@ -129,15 +145,14 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/@:username/:kodyId/settings',
 			'/account/repos/:repoId/icon/:iconCommit',
 			'/@:username/:kodyId/approve-publish',
-			'/@:username/:kodyId/approve-changes',
+			'/@:orgSlug/-/packages',
 		],
 		apis: [
 			'/account/packages.json',
+			'/@:orgSlug/-/packages.json',
 			'/account/packages/:packageId/approve-publish.json',
 			'/account/packages/:packageId/files.json',
 			'/profiles/:username/packages/:kodyId/approve-publish.json',
-			'/profiles/:username/packages/:kodyId/approve-changes.json',
-			'/profiles/:username/packages/:kodyId/share.json',
 			'/@:username/:kodyId/raw/:ref(/*relativePath)',
 		],
 	},
@@ -146,10 +161,10 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'Secrets',
 		file: 'secrets.md',
 		paths: [
-			'/account/secrets',
 			'/connect/secrets',
-			'/account/secret-providers',
-			'/account/secret-providers/approve',
+			'/connect/secret-set',
+			'/@:orgSlug/-/secrets(/*rest)',
+			'/@:orgSlug/-/secret-providers(/*rest)',
 		],
 		apis: ['/account/secrets.json', '/account/secret-providers.json'],
 	},
@@ -157,28 +172,33 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'integrations',
 		title: 'Integrations and OAuth connect',
 		file: 'integrations.md',
-		paths: ['/account/integrations', '/connect/oauth'],
+		paths: ['/connect/oauth', '/@:orgSlug/-/integrations(/*rest)'],
 		apis: ['/account/integrations.json'],
 	},
 	{
 		id: 'mcp-servers',
 		title: 'MCP servers',
 		file: 'mcp-servers.md',
-		paths: ['/account/mcp-servers', '/account/mcp-oauth-clients'],
+		paths: [
+			'/account/mcp-oauth-clients',
+			'/account/mcp-servers/oauth/callback',
+			'/account/mcp-servers/logos/:serverId',
+			'/@:orgSlug/-/mcp-servers(/*rest)',
+		],
 		apis: ['/account/mcp-servers.json', '/account/mcp-oauth-clients.json'],
 	},
 	{
 		id: 'jobs',
 		title: 'Jobs',
 		file: 'jobs.md',
-		paths: ['/account/jobs'],
+		paths: ['/@:orgSlug/-/jobs(/*rest)'],
 		apis: ['/account/jobs.json'],
 	},
 	{
 		id: 'workflows',
 		title: 'Workflows',
 		file: 'workflows.md',
-		paths: ['/account/workflows'],
+		paths: ['/@:orgSlug/-/workflows(/*rest)'],
 		apis: ['/account/workflows.json'],
 	},
 	{
@@ -187,7 +207,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		file: 'webhooks.md',
 		paths: [
 			'/@:username/:kodyId/settings',
-			'/account/webhooks',
+			'/@:orgSlug/-/webhooks',
 			'/connect/webhook-apply',
 		],
 		apis: [
@@ -200,14 +220,14 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'activity',
 		title: 'Activity',
 		file: 'activity.md',
-		paths: ['/account/activity'],
+		paths: ['/@:orgSlug/-/activity(/*rest)'],
 		apis: ['/account/activity.json'],
 	},
 	{
 		id: 'waiting',
 		title: 'Waiting inbox',
 		file: 'waiting.md',
-		paths: ['/account/waiting'],
+		paths: ['/@:orgSlug/-/waiting(/*rest)'],
 		apis: ['/account/waiting.json'],
 	},
 	{
@@ -218,41 +238,40 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		apis: ['/account/experiments.json'],
 	},
 	{
-		id: 'shared',
-		title: 'Shared packages',
-		file: 'shared.md',
-		paths: ['/account/shared'],
-		apis: ['/account/shared.json'],
-	},
-	{
 		id: 'memories',
 		title: 'Memories',
 		file: 'memories.md',
-		paths: ['/account/memories'],
+		paths: ['/@:orgSlug/-/memories(/*rest)'],
 		apis: ['/account/memories.json', '/account/memories-export.json'],
 	},
 	{
 		id: 'email',
 		title: 'Email inbox',
 		file: 'email.md',
-		paths: ['/account/email'],
+		paths: ['/@:orgSlug/-/email(/*rest)'],
 		apis: ['/account/email.json', '/account/email-destinations.json'],
 	},
 	{
 		id: 'values',
 		title: 'Values',
 		file: 'values.md',
-		paths: ['/account/values'],
+		paths: ['/@:orgSlug/-/values(/*rest)'],
 		apis: ['/account/values.json'],
 	},
 	{
 		id: 'billing',
 		title: 'Billing, credits, and usage',
 		file: 'billing.md',
-		paths: ['/account/billing', '/account/credits', '/account/usage'],
+		paths: [
+			'/@:orgSlug/-/billing',
+			'/@:orgSlug/-/billing/success',
+			'/@:orgSlug/-/billing/portal',
+			'/account/credits',
+			'/account/usage',
+		],
 		apis: [
-			'/account/billing.json',
-			'/account/billing/checkout.json',
+			'/@:orgSlug/-/billing.json',
+			'/@:orgSlug/-/billing/checkout.json',
 			'/account/billing/cancellation-feedback.json',
 			'/account/credits/top-up.json',
 			'/account/credits/settings.json',
@@ -270,7 +289,6 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/admin/roles.json',
 			'/admin/reserved-usernames.json',
 			'/admin/feature-flags.json',
-			'/admin/banners.json',
 			'/admin/platform-integrations.json',
 			'/admin/provider-marks.json',
 			'/admin/codemods.json',
@@ -305,8 +323,21 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		paths: [
 			'/',
 			'/pricing',
+			'/for/business',
 			'/faq',
 			'/case-studies',
+			'/compare/n8n-alternatives',
+			'/compare/composio-alternatives',
+			'/use-cases',
+			'/use-cases/mcp-gateway',
+			'/use-cases/shared-agent-memory',
+			'/use-cases/claude-code-custom-tools',
+			'/use-cases/scheduled-workflows',
+			'/use-cases/ai-workflow-automation',
+			'/integrations/gmail',
+			'/integrations/slack',
+			'/integrations/claude',
+
 			'/support',
 			'/privacy',
 			'/terms',
@@ -325,7 +356,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 ]
 
 /** HTML prefixes that must stay mapped. JSON, assets, and well-known stay out. */
-export const requiredHtmlPrefixes = [
+const requiredHtmlPrefixes = [
 	'/login',
 	'/signup',
 	'/onboarding',
@@ -341,7 +372,7 @@ export const requiredHtmlPrefixes = [
 	'/docs',
 ] as const
 
-export function extractQuotedPaths(source: string) {
+function extractQuotedPaths(source: string) {
 	const paths = new Set<string>()
 	for (const match of source.matchAll(/['"`](\/[^'"`\s]*)['"`]/g)) {
 		const value = match[1]
@@ -350,7 +381,7 @@ export function extractQuotedPaths(source: string) {
 	return [...paths].toSorted()
 }
 
-export function isHtmlUserPath(routePath: string) {
+function isHtmlUserPath(routePath: string) {
 	if (routePath.startsWith('/.')) return false
 	if (routePath.startsWith('/integrations/')) return false
 	if (routePath.startsWith('/webhooks/')) return false
@@ -371,33 +402,30 @@ export function isHtmlUserPath(routePath: string) {
 	return true
 }
 
-export function featureCoversPath(feature: Feature, routePath: string) {
+function featureCoversPath(feature: Feature, routePath: string) {
 	return feature.paths.some((owned) => pathCoveredBy(owned, routePath))
 }
 
 /** Hub paths that must not swallow sibling Feature Map entries. */
-export const exactOnlyOwnedPaths = ['/', '/account'] as const
+const exactOnlyOwnedPaths = ['/', '/account'] as const
 
-export function isExactOnlyOwnedPath(owned: string) {
+function isExactOnlyOwnedPath(owned: string) {
 	return (exactOnlyOwnedPaths as ReadonlyArray<string>).includes(owned)
 }
 
-export function prefixMatches(prefix: string, routePath: string) {
+function prefixMatches(prefix: string, routePath: string) {
 	if (routePath === prefix) return true
 	if (prefix === '/') return routePath === '/'
 	return routePath.startsWith(`${prefix}/`)
 }
 
-export function pathCoveredBy(owned: string, routePath: string) {
+function pathCoveredBy(owned: string, routePath: string) {
 	if (routePath === owned) return true
 	if (isExactOnlyOwnedPath(owned)) return false
 	return routePath.startsWith(`${owned}/`)
 }
 
-export function catalogCoversPath(
-	catalog: ReadonlyArray<Feature>,
-	routePath: string,
-) {
+function catalogCoversPath(catalog: ReadonlyArray<Feature>, routePath: string) {
 	return catalog.some((feature) => featureCoversPath(feature, routePath))
 }
 

@@ -64,11 +64,15 @@ export NX_SELF_HOSTED_REMOTE_CACHE_SERVER=https://nx-cache.kody.codes
 export NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN="$NX_CACHE_WRITE_TOKEN"
 ```
 
-Use `CI=1` on cached test commands (the repo scripts already do). Leave the
-variables unset to run without remote cache. Those scripts run through
-`tools/run-nx.ts` so a mid-run `/v1/cache` transport flake cannot fail
-`test:push` or validate after the tasks already succeeded. See
-[`packages/nx-cache/readme.md`](../packages/nx-cache/readme.md).
+Use `CI=1` on cached test commands (the repo scripts already do; typecheck and
+build hashes ignore `CI`). Leave the variables unset to run without remote
+cache. Those scripts run through `tools/run-nx.ts` so a rejected remote-cache
+token or a mid-run `/v1/cache` transport flake cannot fail `test:push` or
+validate after the tasks already succeeded. A token the probe cannot read is
+unset before Nx starts. Each cached script ends with an `Nx remote cache ...`
+line that says whether the token reads and writes next to the hit count;
+`READ-ONLY` means the environment holds the read token and nothing is uploaded
+for CI. See [`packages/nx-cache/readme.md`](../../packages/nx-cache/readme.md).
 
 ## Git hooks
 
@@ -80,7 +84,9 @@ dispatcher with Husky: `core.hooksPath` stays on the dispatcher,
 `pre-commit` / `commit-msg` become dispatcher symlinks when those user scripts
 exist. `git push` then runs `npm run test:push` (`test:node` + `test:workers`)
 when the push changes a non-docs path, and can upload those Nx remote-cache
-artifacts before GitHub Actions starts. A docs-only push skips the suites.
+artifacts before GitHub Actions starts. A docs-only push skips the suites. A
+push that touches `skills-lock.json` or `.agents/skills/` still runs
+`npm run skills-lock:check`.
 
 Playwright E2E is not in the push hook: that suite is heavier than the unit
 gate, and a failed e2e leg skips the unit gate when the push is retried with
@@ -103,17 +109,78 @@ dispatcher. The command is a no-op on machines without `~/.cursor/agent-hooks`.
 ## Dependency install
 
 Cloud Agent environment setup and local setup both run `npm install`. CI runs
-`npm ci`. `npm install` keeps `package-lock.json` unchanged when every locked
-direct dependency satisfies the peer ranges its declared range can still reach,
-including optional peers. `npm run lockfile:check` (part of `npm run validate`
-and the CI static job) rejects a lockfile `npm install` would rewrite, such as
-an `@cloudflare/workers-types` pin older than wrangler's peer range.
+`npm ci`. A snapshot built before a lockfile bump still has the old
+`node_modules` after `git pull`; `npm run install:check` (pre-commit when the
+staged diff is not docs-only, plus prevalidate) and `control-kody doctor`'s
+`deps` check fail with `run npm ci` instead of downstream type/bundle errors. Do
+not treat a cached typecheck as proof the install matches the lockfile — run
+`install:check` (or `npm ci`) first. `npm install` keeps `package-lock.json`
+unchanged when every locked direct dependency satisfies the peer ranges its
+declared range can still reach, including optional peers.
+`npm run lockfile:check` (part of `npm run validate` and the CI static job)
+rejects a lockfile `npm install` would rewrite, such as an
+`@cloudflare/workers-types` pin older than wrangler's peer range. A boot can
+already show `package-lock.json` modified, often that `workers-types` bump,
+before you install anything yourself. Leave that diff unstaged. Restore it with
+`git restore package-lock.json` when you did not change dependencies. A pin
+update that `lockfile:check` asks for belongs in its own commit.
+
+## Git worktrees
+
+A worktree lets one VM work on several branches without a second `npm install`.
+Do not symlink the whole `node_modules` directory into the worktree.
+`node_modules/@kody/*` and `node_modules/@kody-internal/shared` are relative
+links to `../../packages/*`. Through a whole-directory symlink they resolve to
+the main checkout's `packages/`, so typecheck and tests read the main checkout's
+branch instead of the worktree's (#3404).
+
+From the main checkout, link every entry except those workspace scopes, which
+are copied as links so they point at the worktree's own `packages/`. The repo
+root is often not writable, so put worktrees under `~`:
+
+```sh
+main="$(git rev-parse --show-toplevel)"
+git worktree add ~/wt/my-branch -b cursor/my-branch origin/main
+cd ~/wt/my-branch
+mkdir node_modules
+for entry in "$main"/node_modules/* "$main"/node_modules/.bin \
+  "$main"/node_modules/.package-lock.json; do
+  if [ -d "$entry" ] &&
+    find "$entry" -maxdepth 1 -type l -lname '../../packages/*' | grep -q .; then
+    cp -PR "$entry" node_modules/
+  else
+    ln -s "$entry" "node_modules/$(basename "$entry")"
+  fi
+done
+ln -s "$main/packages/worker/node_modules" packages/worker/node_modules
+```
+
+`realpath node_modules/@kody-internal/shared` should print the worktree path.
+Tool caches (`node_modules/.vite`, `.mf`, `.tmp`) stay per worktree. The
+worktree's `node_modules` holds only links, copied scope links, and those
+caches. After `npm ci` in the main checkout adds or removes a package, run
+`rm -rf node_modules` in the worktree and redo the loop. A worktree whose
+`package-lock.json` differs from the main checkout's needs its own `npm ci`.
+
+Git hooks are shared. The Cursor dispatcher's `.cursor-original-hooks-path`
+names one Husky directory for every checkout, so `git push` from the worktree
+runs the main checkout's `.husky` scripts with the worktree as the working
+directory (`test:push` tests the worktree). `npm run hooks:ensure`, `npm ci`,
+and `npm install` (through `prepare`) rewrite that file to the checkout they run
+in. After running one of them in a worktree, run `npm run hooks:ensure` in the
+main checkout before `git worktree remove ~/wt/my-branch`, or the main
+checkout's commits and pushes lose their Husky hooks.
 
 ## GitHub CLI
 
-Cloud Agent `gh` can read issues, PRs, and checks. It cannot post PR
-review-thread replies (`403`). Reply with `kody:@kentcdodds/github/request`
-(kody-bot) or Cursor `ManagePullRequest` `post_comment` / `in_reply_to`. See
+Cloud Agent `gh` can read issues, PRs, and checks (`gh issue view`,
+`gh pr view`, `gh pr checks`). It cannot write GitHub issues or PR review-thread
+replies (`403` / GraphQL `Resource not accessible by integration`). That
+includes `gh issue comment`, `gh issue close`, `gh issue edit --add-label`, and
+review-thread replies.
+
+Write those with `kody:@kentcdodds/github/request` (kody-bot) or Cursor
+`ManagePullRequest` `post_comment` / `in_reply_to`. See
 [ship-pr](../../.agents/skills/ship-pr/SKILL.md).
 
 ## GitHub token expiry mid-run
@@ -138,19 +205,51 @@ When `git push` or `gh` fails with bad credentials:
    reviewer. If the token is still dead at the end of the run, park the PR and
    say so.
 
-Kody `@kentcdodds/github/request` (kody-bot) can still comment, label, and read
-when the Cloud Agent git token is stale. Use it for GitHub API writes that
-ship-pr already routes through kody-bot — not for pushing the branch.
+Kody `@kentcdodds/github/request` (kody-bot) can still comment, close, label,
+and read when the Cloud Agent git token is stale. Use it for GitHub API writes
+that ship-pr already routes through kody-bot — not for pushing the branch.
+
+## Validate on a 4-core VM
+
+`npm run validate` runs the same checks CI runs. CI gives typecheck, node unit,
+workers unit, Playwright, and MCP each their own runner. This VM has 4 cores and
+about 16GB of RAM. Starting those suite legs plus every worker dry-run at once
+drops available memory to tens of megabytes and pushes load well above the core
+count, so typecheck, workers, MCP, and Playwright time out or crash even though
+each one passes on its own (#3147).
+
+`tools/run-validate.ts` runs one suite leg and one build leg at a time when the
+machine has at most 4 cores or under 24GB of RAM. It does not drop checks and it
+does not change the GitHub Actions jobs. Larger machines still start every leg
+together.
+
+## Focused Vitest runs
+
+Run one file from the repo root. Pass `--project node-unit` for `*.node.test.ts`
+or `--project workers-unit` for `*.workers.test.ts`, plus a repo-relative path:
+
+```sh
+npx vitest run --project node-unit packages/worker/universal/compute-overage.node.test.ts
+npx vitest run --project workers-unit packages/worker/src/billing/credit-wallet.workers.test.ts
+```
+
+A command started in `packages/worker` exits with
+`Projects definition references a non-existing file or a directory` and a path
+ending in `vitest.node.config.ts` under that package. The configs live at the
+repo root, and the Nx targets run from there. Filename suffixes, `mcp-e2e`, and
+the full error are in
+[Running one file](./testing-principles.md#running-one-file).
 
 ## Quick commands
 
 | Task               | Command                                                                                                                                                                     |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Install deps       | `npm install`                                                                                                                                                               |
+| Install deps       | `npm ci` after pulling a lockfile bump; `npm run install:check` / `control-kody doctor` say so when `node_modules` lags                                                     |
 | Start or reuse dev | `npm run dev:ensure` (prints the resolved URL)                                                                                                                              |
 | Migrate local D1   | `npm run migrate:local`                                                                                                                                                     |
 | Seed test login    | `node tools/seed-test-data.ts --local` (see seeding note below)                                                                                                             |
 | Full validate gate | `npm run validate` (CI runs the same checks as parallel jobs)                                                                                                               |
+| One Vitest file    | Repo root: `npx vitest run --project node-unit` or `--project workers-unit` plus a repo-relative path ([Focused Vitest runs](#focused-vitest-runs))                         |
 | Manual PR preview  | `npm run preview:manual-test` (see preview-manual-testing.md)                                                                                                               |
 | App verification   | `npm run control-kody -- doctor` then `login` / `request` (`--dump` / `--contains` for HTML) / `map --check` / `preview` / `health` (see [control-kody](./control-kody.md)) |
 
@@ -188,7 +287,10 @@ ship-pr already routes through kody-bot — not for pushing the branch.
   `{"ok":true,"commitSha":...,"commit":...,"pullRequest":...,"deploy":...}`.
   Locally the extra fields are `null` unless a deploy var is set. Platform and
   runtime health paths (`/__platform/health`, `/__runtime/health`) 404 on the
-  origin port.
+  origin port. After `npm ci` or a merge that changes source under a running
+  `dev:ensure` process, `/health` can hang while workerd crash-loops. Stop that
+  Vite PID before `npm run test:e2e:run`; the e2e web server refuses to start
+  and names the leftover when 3742–3751 is listening but unhealthy.
 
 ## Environment file
 
@@ -215,6 +317,28 @@ in the Cloud **environment** secrets/vars (not in the prompt), or call
 token into chat. Guide: [Local CLI execute](../guides/local-execute.md). Skill:
 [prefer-local-cli-execute](../../.agents/skills/prefer-local-cli-execute/SKILL.md).
 Open API fallback: [Open API](../guides/open-api.md).
+
+### CLI against a PR preview
+
+A preview deploys the Open API edge as its own worker,
+`https://kody-pr-<n>-api.kody-a99.workers.dev`, next to the app origin
+`https://kody-pr-<n>.kody-a99.workers.dev`. The CLI (`auth bootstrap`,
+`execute --local`, `api`) needs that `-api` host. The app origin answers `/v1/*`
+with an HTML 404, so `auth bootstrap` against it fails with
+`Bootstrap redeem failed (HTTP 404)`. That 404 comes before redemption, so the
+code is still unused; retry it against the API host instead of minting a new
+one. `npm run control-kody -- preview --pr <n>` prints the host as `API:` plus
+an `export KODY_API_URL=…` line (`snapshot.apiUrl` with `--json`). Mint the
+bootstrap code on the same preview, then pass the host with `--api-url` or the
+exported `KODY_API_URL`:
+
+```bash
+export KODY_API_URL=https://kody-pr-<n>-api.kody-a99.workers.dev
+npx @kodycodes/cli auth bootstrap --code 'kody_bc_…' --lifetime short
+```
+
+`control-kody execute --origin <preview>` is different: it calls the preview's
+`/mcp` (OAuth through the seed login) and never touches the API host.
 
 ## Seeding a test account
 

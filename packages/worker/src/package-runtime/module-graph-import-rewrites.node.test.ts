@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as PublishedBundleArtifactsModule from './published-bundle-artifacts.ts'
 import {
@@ -8,7 +9,6 @@ import {
 	createLoadedPackageSource,
 	type RuntimeModule,
 } from '#worker/test-support/module-graph.ts'
-import { personPackagePlatformDependencyMessage } from '#worker/package-registry/platform-package-policy.ts'
 import { SavedPackageNotFoundError } from './package-import-resolution.ts'
 
 vi.mock('#worker/worker-bundler-modules.ts', () => ({
@@ -17,15 +17,9 @@ vi.mock('#worker/worker-bundler-modules.ts', () => ({
 	}),
 }))
 
-vi.mock('#worker/package-registry/scope-grants.ts', () => ({
-	getPlatformAccountByUsername: mockModule.getPlatformAccountByUsername,
-	isPlatformAccountStableUserId: async () => false,
-	listPlatformAccountUsernames: async () => [],
-}))
-
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageByName(...args),
 }))
@@ -52,7 +46,7 @@ const { buildKodyAppBundle, buildKodyModuleBundle, hydrateKodyRuntimeModules } =
 const graphInput = {
 	env: { APP_DB: {}, REPO_SESSION: {} } as Env,
 	baseUrl: 'https://heykody.dev',
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 }
 
 function makePackageFiles(
@@ -203,7 +197,7 @@ export default async function run() {
 	expect(mockModule.getSavedPackageByName).toHaveBeenCalledWith(
 		{},
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: '@kentcdodds/example-package',
 		}),
 	)
@@ -346,14 +340,14 @@ test.each([
 		expected: { ok: true, tool: 'secretList', input: { scope: 'user' } },
 	},
 	{
-		name: 'export package invocation token list',
-		call: 'kody.packageInvocationTokenList({})',
+		name: 'export webhook list',
+		call: 'kody.webhookList({})',
 		kody: {
-			async packageInvocationTokenList(input: unknown) {
-				return { ok: true, tool: 'packageInvocationTokenList', input }
+			async webhookList(input: unknown) {
+				return { ok: true, tool: 'webhookList', input }
 			},
 		},
-		expected: { ok: true, tool: 'packageInvocationTokenList', input: {} },
+		expected: { ok: true, tool: 'webhookList', input: {} },
 	},
 ])(
 	'buildKodyModuleBundle keeps kody available for a preloaded package $name runtime',
@@ -416,50 +410,16 @@ test('buildKodyModuleBundle rejects kody id shorthand imports', async () => {
 	).catch((error: unknown) => error)
 	expect(thrown).toBeInstanceOf(SavedPackageNotFoundError)
 	expect((thrown as Error).message).toBe(
-		'Saved package "@example-package/follow-up-on-pr-agent" was not found for this user.',
+		'Saved package "@example-package/follow-up-on-pr-agent" was not found in this org. Imports resolve only within the caller\'s org; to use a package from another org, communityFork it into this org and import the copy.',
 	)
 	expect(mockModule.getSavedPackageByName).toHaveBeenCalledWith(
 		{},
-		{ userId: 'user-1', name: '@example-package/follow-up-on-pr-agent' },
-	)
-	expect(mockModule.getSavedPackageByKodyId).not.toHaveBeenCalled()
-})
-
-test('buildKodyModuleBundle rejects ad-hoc execute and person-package imports of platform scopes', async () => {
-	mockModule.getPlatformAccountByUsername.mockImplementation(
-		async (_db: unknown, username: unknown) =>
-			username === 'kody'
-				? {
-						id: 1,
-						username: 'kody',
-						email: 'kody@example.com',
-						stableUserId: 'platform-kody',
-					}
-				: null,
-	)
-	mockModule.getSavedPackageByName.mockResolvedValue(null)
-	const importGithub =
-		'import github from "kody:@kody/github"\nexport default github\n'
-
-	for (const input of [
 		{
-			sourceFiles: { 'index.js': importGithub },
-			bundleContext: 'ad-hoc-execute' as const,
+			userId: ownerIdFromStored('user-1'),
+			name: '@example-package/follow-up-on-pr-agent',
 		},
-		{
-			sourceFiles: makePackageFiles('@alice/local-package', localKody, {
-				'index.js': importGithub,
-			}),
-		},
-	]) {
-		await expect(
-			buildKodyModuleBundle({
-				...graphInput,
-				...input,
-				entryPoint: 'index.js',
-			}),
-		).rejects.toThrow(personPackagePlatformDependencyMessage)
-	}
+	)
+	expect(mockModule.resolveSavedPackageRef).not.toHaveBeenCalled()
 })
 
 test('buildKodyAppBundle rewrites static and dynamic kody runtime imports inside TypeScript package apps', async () => {

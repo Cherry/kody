@@ -75,8 +75,7 @@ flag:
 - **MCP**:
   `adminFeatureFlagSet({ key, enabled: true, audience: "experiments_opt_in" })`.
 
-Audience values: `everyone` (default) | `experiments_opt_in`. Distinct from
-site-banner audiences.
+Audience values: `everyone` (default) | `experiments_opt_in`.
 
 ## Surfaces
 
@@ -142,22 +141,50 @@ members with
 `adminFeatureFlagSet({ key: "execute-invoke", enabled: true, audience: "experiments_opt_in" })`.
 Remove the flag and gate sites when the experiment ends.
 
-`package-share-grants` is a rollout kill switch for person-to-person package
-shares (invite, accept, UI, MCP, and runtime use). Registry default is **off**.
-Signed-in users can opt themselves in from `/docs/package-sharing` (a per-user
-on override). Operators can also enable it globally at `/admin/feature-flags`
-(or `adminFeatureFlagSet`). Evaluation failures fail closed. No `successMetric`:
-this is not an experiment. Remove the flag and every gate site after general
-availability.
+`connection-profiles` is an experiment (default **off**, registry
+`defaultAudience: experiments_opt_in`) for named connection profiles on
+`/@<slug>/-/connections`. When on, experimenters create profiles with package
+grant allowlists (read/execute) for MCP `?profile=` URLs and profile-bound API
+tokens. Unlimited (no profile param) is the default connection. When off, the
+list page hides profiles and callers without the flag ignore `?profile=`. The
+declared `successMetric` is `execute` event count, goal increase: experimenters
+create restricted agent connections and keep executing against granted packages.
+Exposures are recorded at the evaluation chokepoints. Enable for experiment
+members with
+`adminFeatureFlagSet({ key: "connection-profiles", enabled: true, audience: "experiments_opt_in" })`.
+Remove the flag and gate sites when the experiment ends.
 
-`secret-providers` is a rollout kill switch for pluggable external secret
-providers (placeholders, account bindings, sealed resolve, package grants, and
-the `/account/secret-providers` UI). Registry default is **off**. Signed-in
-users can opt themselves in from `/docs/secret-providers` (a per-user on
-override). Operators can also enable it globally at `/admin/feature-flags` (or
-`adminFeatureFlagSet`). Evaluation failures fail closed. No `successMetric`:
-this is not an experiment. See [secret providers](../secret-providers.md).
-Remove the flag and every gate site after general availability.
+`mcp-skills-extension` is an experiment (default **off**, registry
+`defaultAudience: experiments_opt_in`) for Skills-over-MCP (SEP-2640). Packages
+may ship Agent Skills at `skills/<name>/SKILL.md`; publish validates them and
+stores a per-package-version skills index. When on for a caller and the MCP
+client advertises the skills extension, Kody exposes those skills through
+`skills/list`, `skills/get`, and `resources/read` as a progressive enhancement.
+When off (or the client does not advertise the extension), the MCP surface stays
+`search` / `execute` / `api`. Signed-in users can opt themselves in from
+`/docs/package-skills`. The declared `successMetric` is `execute` event count,
+goal increase: skill-aware hosts load package skills, then act via `execute`.
+Enable for experiment members with
+`adminFeatureFlagSet({ key: "mcp-skills-extension", enabled: true, audience: "experiments_opt_in" })`.
+Remove the flag and gate sites when the experiment ends.
+
+`mcp-events-extension` is an experiment (default **off**, registry
+`defaultAudience: experiments_opt_in`) for the draft MCP Events extension
+(webhook delivery only; see
+[ADR 0059](../decisions/0059-mcp-events-extension-behind-flag.md)). When on for
+a caller whose stateless-lane request declares events support in its client
+capabilities, `server/discover` advertises `capabilities.events` and the server
+answers `events/list`, `events/subscribe`, and `events/unsubscribe`. Only
+`kody.emits` topics declared with `mcp: true` are listed. When off (or the
+client does not declare events), none of that is registered, and existing
+subscriptions stop receiving deliveries. Signed-in users can also turn it on
+from `/docs/mcp-events` (a per-user on override). The declared `successMetric`
+is `execute` event count, goal increase: event-driven clients follow deliveries
+with execute calls. Exposures use `exposureRecording: mcp-events-clients`
+(dedicated write from `registerMcpEvents` only), so execute and other non-events
+MCP callers stay out of the on/off cohorts. Enable for experiment members with
+`adminFeatureFlagSet({ key: "mcp-events-extension", enabled: true, audience: "experiments_opt_in" })`.
+Remove the flag and gate sites when the experiment ends.
 
 ## Success metrics
 
@@ -186,13 +213,22 @@ Current flag state cannot reconstruct who was inside a percentage rollout last
 week, so measured flags record **exposures** at their configured write site
 `(stable user id, flag key, on/off, assignment source, timestamp)`. Most flags
 use the two evaluation chokepoints (the app session flag cache and the MCP
-caller flag resolver). Flags with `exposureRecording: 'paid-ranked-search'`
-(Jev) write only from paid list-mode ranked search so free opt-ins and
-non-search traffic stay outside that experiment frame. The write path mirrors
-usage metering — the `FLAG_EXPOSURES` Analytics Engine dataset in
-production/preview, the D1 `feature_flag_exposure_rollups` table (migration
-`0001-squashed-init.sql`, 90-day retention) in local dev and tests — and never
-throws.
+caller flag resolver). The app session cache records **once per HTTP request**.
+The MCP resolver records when it loads a user's evaluations, at most **once per
+15 second TTL per isolate**, and call sites in that window reuse the evaluation.
+Stateless `/mcp` builds a new caller context per request, so this replaces the
+old 2–4 exposure writes per tools/call. **Lower exposure counts are expected and
+more accurate**: they count the assignment the user saw, not each call site or
+each stateless request inside the window. A kill switch or override can be stale
+until the TTL expires. Evaluation failures are not cached and fail closed (every
+flag off) without an exposure write, and execute refuses before loading a
+worker, so the failure never spends daily quota. Flags with
+`exposureRecording: 'paid-ranked-search'` (Jev) write only from paid list-mode
+ranked search so free opt-ins and non-search traffic stay outside that
+experiment frame. The write path mirrors usage metering — the `FLAG_EXPOSURES`
+Analytics Engine dataset in production/preview, the D1
+`feature_flag_exposure_rollups` table (migration `0001-squashed-init.sql`,
+90-day retention) in local dev and tests — and never throws.
 
 The assignment source (`default` / `global` / `rollout` / `override`) is what
 keeps the readout honest: `override` users are hand-picked and excluded from

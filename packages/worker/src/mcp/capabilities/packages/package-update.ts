@@ -1,12 +1,13 @@
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
+import { authorizePackageWrite } from '#worker/authorization/authorize.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import {
-	packageScopeInputDescription,
-	resolvePackageOwnerContext,
-} from '#worker/package-registry/package-owner.ts'
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
 import {
 	buildPackageUnlockUrl,
 	createPackageUnlockRequiredMessage,
@@ -59,6 +60,7 @@ export const packageUpdateCapability = defineDomainCapability(
 	capabilityDomainNames.packages,
 	{
 		name: 'packageUpdate',
+		orgPermission: 'package:write',
 		description:
 			'Update mutable settings for a saved package: hidden search-discovery, publish lock (`changes.locked: true`; agents cannot unlock), and repo visibility (`changes.visibility`). Making a package public lists it on /community with full source and fork. Before setting visibility public, review source, README, Intent, description, tags, examples, and hardcoded identifiers for overly personal material. If anything looks personal or household-specific, do not publish yet — tell the user what you found, suggest how to generalize, and wait for explicit go-ahead. No MIT, logo, or Intent platform gates. Making it private unlists it (public URLs 404; forks keep their copies) — pass confirm_name matching the package slug after the owner typed that name. Canonical package metadata such as name, description, and tags remains derived from package.json. Visibility is not package.json#private.',
 		keywords: [
@@ -76,11 +78,6 @@ export const packageUpdateCapability = defineDomainCapability(
 		destructive: false,
 		inputSchema: z.strictObject({
 			package_id: z.string().min(1).describe('Saved package id.'),
-			package_scope: z
-				.string()
-				.min(1)
-				.optional()
-				.describe(packageScopeInputDescription),
 			changes: packageUpdateChangesSchema,
 			confirm_name: z
 				.string()
@@ -96,11 +93,10 @@ export const packageUpdateCapability = defineDomainCapability(
 		}),
 		async handler(args, ctx) {
 			const user = requireMcpUser(ctx.callerContext)
-			const owner = await resolvePackageOwnerContext(
-				ctx.env,
+			const owner = await resolvePackageOwnerContext(ctx.env, {
 				user,
-				args.package_scope,
-			)
+				request: requireMcpRequest(ctx.callerContext),
+			})
 			const existing = await getSavedPackageById(ctx.env.APP_DB, {
 				userId: owner.ownerUserId,
 				packageId: args.package_id,
@@ -108,6 +104,14 @@ export const packageUpdateCapability = defineDomainCapability(
 			if (!existing) {
 				throw new McpCallerError('Saved package not found for this user.')
 			}
+			await authorizePackageWrite(
+				{ env: ctx.env, request: ctx.callerContext.request },
+				{
+					id: existing.id,
+					userId: existing.userId,
+					label: existing.name,
+				},
+			)
 			if (args.changes.locked === false) {
 				throw new McpCallerError(
 					createPackageUnlockRequiredMessage(

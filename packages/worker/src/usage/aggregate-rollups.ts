@@ -22,6 +22,12 @@
 import { coalescedCountUsageEventTypes } from '#universal/usage-event-types.ts'
 import { runD1WithRetry } from '#worker/d1-retry.ts'
 import { listSystemInboundUsageRows } from '#worker/email/system-inbound-delivery-store.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
+import {
+	liveBillingOwnerSql,
+	liveOrgMatchSql,
+	liveUserMatchSql,
+} from '#worker/usage/live-billing-owner.ts'
 
 export const usageAggregationCronGateMinutes = 5
 export const usageAggregationCronIntervalMinutes = 60
@@ -183,11 +189,7 @@ INSERT INTO usage_rollups (
 	updated_at
 )
 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
-WHERE ?1 = 'system:email'
-	OR EXISTS (
-		SELECT 1 FROM users
-		WHERE stable_user_id = ?1 AND deleting_at IS NULL
-	)
+WHERE ${liveBillingOwnerSql('?1')}
 ON CONFLICT (user_id, metric, month) DO UPDATE SET
 	event_count = excluded.event_count,
 	error_count = excluded.error_count,
@@ -222,7 +224,9 @@ function utcMonthBounds(now: Date) {
  * are `sum(doubleN * _sample_interval)`. Coalesced points
  * (`coalescedCountUsageEventTypes`) store the unit count in `double3`, so
  * those metrics' counts use `double3` when it is set. Blob/double positions match the data point layout in
- * `record-usage.ts`.
+ * `record-usage.ts`. Analytics Engine `blob1` is the org billing id (same as
+ * the rollup `user_id` for personal orgs). Actor and automation attribution
+ * live in `blob10` and `blob11` when present.
  *
  * Every `if()` branch must be a Float: Analytics Engine rejects the whole
  * query (HTTP 422) when one branch is `doubleN` and the other an Integer
@@ -333,12 +337,18 @@ function toCount(value: number | string) {
 	return Number.isFinite(parsed) ? Math.round(parsed) : 0
 }
 
+/**
+ * Keep Analytics Engine rows whose billing id is still a live user or a live
+ * org. Team org ids have no `users` row. Personal orgs share
+ * `stable_user_id`. Soft-deleted owners stay out so the hourly recompute
+ * cannot rebuild their rollups.
+ */
 export async function filterLiveUsageRows<T extends { user_id: string }>(
 	db: D1Database,
 	rows: Array<T>,
 ) {
 	const systemRows = rows.filter((row) => row.user_id === 'system:email')
-	const userIds = [
+	const ownerIds = [
 		...new Set(
 			rows
 				.map((row) => row.user_id)
@@ -346,20 +356,33 @@ export async function filterLiveUsageRows<T extends { user_id: string }>(
 		),
 	]
 	const live = new Set<string>()
-	for (let index = 0; index < userIds.length; index += 80) {
-		const chunk = userIds.slice(index, index + 80)
+	for (let index = 0; index < ownerIds.length; index += 80) {
+		const chunk = ownerIds.slice(index, index + 80)
 		const placeholders = chunk.map(() => '?').join(', ')
-		const result = await runD1WithRetry(() =>
-			db
-				.prepare(
-					`SELECT stable_user_id FROM users
-					WHERE deleting_at IS NULL
-						AND stable_user_id IN (${placeholders})`,
-				)
-				.bind(...chunk)
-				.all<{ stable_user_id: string }>(),
-		)
-		for (const row of result.results ?? []) live.add(row.stable_user_id)
+		const [users, orgs] = await Promise.all([
+			runD1WithRetry(() =>
+				db
+					.prepare(
+						`SELECT stable_user_id FROM users
+						WHERE deleting_at IS NULL${andLiveDeletedAtSql()}
+							AND stable_user_id IN (${placeholders})`,
+					)
+					.bind(...chunk)
+					.all<{ stable_user_id: string }>(),
+			),
+			runD1WithRetry(() =>
+				db
+					.prepare(
+						`SELECT id FROM orgs
+						WHERE deleting_at IS NULL${andLiveDeletedAtSql()}
+							AND id IN (${placeholders})`,
+					)
+					.bind(...chunk)
+					.all<{ id: string }>(),
+			),
+		])
+		for (const row of users.results ?? []) live.add(row.stable_user_id)
+		for (const row of orgs.results ?? []) live.add(row.id)
 	}
 	return [...systemRows, ...rows.filter((row) => live.has(row.user_id))]
 }
@@ -435,11 +458,8 @@ async function deleteNonLiveUserRollups(input: {
 				`DELETE FROM usage_rollups
 				WHERE month IN (?, ?)
 					AND user_id != 'system:email'
-					AND NOT EXISTS (
-						SELECT 1 FROM users
-						WHERE stable_user_id = usage_rollups.user_id
-							AND deleting_at IS NULL
-					)`,
+					AND NOT ${liveUserMatchSql('usage_rollups.user_id')}
+					AND NOT ${liveOrgMatchSql('usage_rollups.user_id')}`,
 			)
 			.bind(...input.months)
 			.run(),

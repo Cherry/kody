@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as CapabilityRegistry from '#mcp/capabilities/registry.ts'
 import type * as SecretsService from '#mcp/secrets/service.ts'
@@ -63,7 +64,7 @@ const mockModule = vi.hoisted(() => ({
 		}),
 	),
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	listSavedPackagesByUserId: vi.fn<
 		typeof PackageRepo.listSavedPackagesByUserId
 	>(async () => []),
@@ -106,11 +107,6 @@ vi.mock('#mcp/capabilities/registry.ts', () => ({
 	) => mockModule.getCapabilityRegistryForContext(...args),
 }))
 
-vi.mock('#worker/package-registry/platform-packages.ts', () => ({
-	listPlatformPackagesForSearch: async () => [],
-	findPlatformPackageByRef: async () => null,
-}))
-
 vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 	applySavedPackageForkListingAncestry: async ({
 		records,
@@ -122,12 +118,18 @@ vi.mock('#worker/community/fork-listing-relation.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageWithCommunityProvenanceById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageWithCommunityProvenanceByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRefWithCommunityProvenance: async (
+		db: unknown,
+		input: { userId: string; ref: string },
+	) =>
+		(await mockModule.getSavedPackageById(db, {
+			userId: input.userId,
+			packageId: input.ref,
+		})) ?? (await mockModule.resolveSavedPackageRef(db, input)),
 	listSavedPackagesByUserId: (
 		...args: Parameters<typeof PackageRepo.listSavedPackagesByUserId>
 	) => mockModule.listSavedPackagesByUserId(...args),
@@ -274,7 +276,7 @@ type SearchResult = {
 }
 
 const signedInUser = {
-	userId: 'user-1',
+	userId: ownerIdFromStored('user-1'),
 	email: 'user@example.com',
 	displayName: 'User',
 	username: 'user',
@@ -315,7 +317,7 @@ function savedPackage(
 ): SavedPackageRecord {
 	return {
 		id,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: id,
 		kodyId: id,
 		description: `${id} package`,
@@ -323,6 +325,7 @@ function savedPackage(
 		searchText: `${id} package`,
 		sourceId: `source-${id}`,
 		hasApp: false,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: false,
 		lockedAt: null,
@@ -675,9 +678,9 @@ test('search tool treats exact package identity as authoritative and still resol
 	})
 	expect(mockModule.getSavedPackageById).toHaveBeenCalledWith(
 		{},
-		{ userId: 'user-1', packageId: exactPackageId },
+		{ userId: ownerIdFromStored('user-1'), packageId: exactPackageId },
 	)
-	expect(mockModule.getSavedPackageByKodyId).not.toHaveBeenCalled()
+	expect(mockModule.resolveSavedPackageRef).not.toHaveBeenCalled()
 })
 
 test('search tool batches entity detail with per-ref isolation and preserves single-entity shape', async () => {
@@ -842,7 +845,7 @@ test('integration entity detail enriches related packages without bloating ranke
 	const githubJoinedIntegration = {
 		lane: 'user' as const,
 		app: {
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			slug: 'github',
 			provider: 'github',
 			label: null,
@@ -860,7 +863,7 @@ test('integration entity detail enriches related packages without bloating ranke
 			updatedAt: now,
 		},
 		connection: {
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: 'github',
 			appSlug: 'github',
 			platformAppSlug: null,
@@ -885,7 +888,7 @@ test('integration entity detail enriches related packages without bloating ranke
 	mockModule.searchCommunityListings.mockResolvedValue([
 		{
 			id: 'listing-github',
-			ownerUserId: 'owner-1',
+			ownerUserId: ownerIdFromStored('owner-1'),
 			packageId: 'pkg-github',
 			sourceId: 'source-github',
 			kodyId: 'github',

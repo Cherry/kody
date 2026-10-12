@@ -3,8 +3,8 @@ import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import {
 	createAppSessionCookie,
 	createMcpClient,
-	createTestDatabase,
-	startDevServer,
+	createUniqueTestUser,
+	getSharedMcpE2eServer,
 } from '../../../../tools/mcp-test-support.ts'
 import { silenceExpectedConsoleWarns } from '#worker/test-support/console-spies.ts'
 import { createRemixPackageAppFiles } from '#worker/test-support/remix-package-app-fixture.ts'
@@ -23,9 +23,20 @@ type PackageSaveResult = {
 }
 
 function readExecuteResult<T>(toolResult: CallToolResult): T {
-	expect(toolResult.isError).toBeFalsy()
 	const structured = toolResult.structuredContent as ExecuteStructured
-	expect(structured.error).toBeUndefined()
+	if (toolResult.isError || structured.error != null) {
+		expect.fail(
+			`execute failed: ${JSON.stringify(
+				{
+					isError: toolResult.isError,
+					error: structured.error,
+					content: toolResult.content,
+				},
+				null,
+				2,
+			)}`,
+		)
+	}
 	expect(structured.result).toBeTruthy()
 	return structured.result as T
 }
@@ -34,21 +45,19 @@ test('a Remix package app publishes and serves SSR routes, a form action, middle
 	silenceExpectedConsoleWarns([
 		/Ignoring duplicate module:.*generated\/esbuild\.wasm/,
 	])
-	await using database = await createTestDatabase()
-	await using server = await startDevServer(database.persistDir, {
-		withCloudflareMock: true,
-	})
-	await using mcp = await createMcpClient(server.origin, database.user, {
-		persistDir: database.persistDir,
+	const server = await getSharedMcpE2eServer()
+	const user = createUniqueTestUser()
+	await using mcp = await createMcpClient(server.origin, user, {
 		ensureUser: server.ensureUser,
 		markEmailVerified: server.markEmailVerified,
+		clearAuthRateLimits: server.clearAuthRateLimits,
 	})
-	const { username } = database.user
+	const { username } = user
 	let packageId: string | undefined
 
 	try {
 		const files = Object.entries(
-			createRemixPackageAppFiles({ username, kodyId }),
+			await createRemixPackageAppFiles({ username, kodyId }),
 		).map(([path, content]) => ({ path, content }))
 		const saved = readExecuteResult<PackageSaveResult>(
 			(await mcp.client.callTool({
@@ -67,7 +76,7 @@ export default async function main(input) {
 		expect(saved.has_app).toBe(true)
 		packageId = saved.package_id
 
-		const cookie = await createAppSessionCookie(server.origin, database.user)
+		const cookie = await createAppSessionCookie(server.origin, user)
 		const appBasePath = `/@${username}/packages/${kodyId}`
 		const appOrigin = `${server.origin}${appBasePath}`
 		const authedFetch = (url: string, init?: RequestInit) =>
@@ -154,7 +163,7 @@ export default async function main(input) {
 		).toBe(405)
 
 		// The browser module: run() plus the island, compiled from the same
-		// platform Remix as the server, served fingerprinted and immutable.
+		// package-supplied remix as the server, served fingerprinted and immutable.
 		const clientModule = await authedFetch(clientModuleUrl as string)
 		const clientSource = await clientModule.text()
 		expect({ status: clientModule.status }).toEqual({ status: 200 })

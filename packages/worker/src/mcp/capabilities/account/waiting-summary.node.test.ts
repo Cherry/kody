@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
@@ -64,8 +65,14 @@ test('waitingSummary requires auth and stays self-scoped', async () => {
 	})
 	const env = { APP_DB: db } as Env
 	const callerContext = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com/',
-		user: { userId: stableUserId, email, displayName: 'Waiting' },
+		user: {
+			userId: personIdFromStored(stableUserId),
+			email,
+			displayName: 'Waiting',
+			username: 'waiting',
+		},
 	})
 
 	await expect(
@@ -74,6 +81,7 @@ test('waitingSummary requires auth and stays self-scoped', async () => {
 			{
 				env,
 				callerContext: createMcpCallerContext({
+					source: { kind: 'mcp-oauth' },
 					baseUrl: 'https://example.com/',
 				}),
 			},
@@ -84,7 +92,7 @@ test('waitingSummary requires auth and stays self-scoped', async () => {
 		{},
 		{ env, callerContext },
 	)
-	expect(dismissed.waiting_url).toBe('https://example.com/account/waiting')
+	expect(dismissed.waiting_url).toBe('https://example.com/@waiting/-/waiting')
 	expect(dismissed.items.every((item) => item.kind === 'first-use')).toBe(true)
 	expect(dismissed.items.map((item) => item.id)).toEqual([
 		'first-use:memory',
@@ -137,7 +145,7 @@ test('waitingSummary requires auth and stays self-scoped', async () => {
 	)
 	expect(missing).toEqual({
 		count: 0,
-		waiting_url: 'https://example.com/account/waiting',
+		waiting_url: 'https://example.com/@waiting/-/waiting',
 		items: [],
 	})
 })

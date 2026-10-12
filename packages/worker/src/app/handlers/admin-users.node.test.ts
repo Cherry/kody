@@ -78,6 +78,8 @@ type UserRow = {
 	email_verification_delivery_at?: string | null
 	email_verification_delivery_detail?: string | null
 	email_verification_delivery_class?: string | null
+	second_agent_standard_gift_expires_at?: string | null
+	referral_standard_credit_expires_at?: string | null
 	created_at: string
 	updated_at: string
 }
@@ -115,10 +117,20 @@ function createAdminTestEnv(input: {
 	const sqlite = new DatabaseSync(':memory:')
 	applyAllMigrations(sqlite, new URL('../../../migrations/', import.meta.url))
 	for (const user of input.users) {
+		const {
+			plan,
+			stripe_plan,
+			stripe_customer_id,
+			email_outbound_paused_at,
+			second_agent_standard_gift_expires_at,
+			referral_standard_credit_expires_at,
+			...identity
+		} = user
+		const stableUser = stableUserId(user.id)
 		const row = {
 			password_hash: 'test-password-hash',
-			stable_user_id: stableUserId(user.id),
-			...user,
+			stable_user_id: stableUser,
+			...identity,
 		}
 		const columns = Object.keys(row)
 		sqlite
@@ -126,6 +138,26 @@ function createAdminTestEnv(input: {
 				`INSERT INTO users (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
 			)
 			.run(...Object.values(row))
+		sqlite
+			.prepare(
+				`INSERT INTO orgs (
+					id, slug, plan, stripe_plan, stripe_customer_id,
+					email_outbound_paused_at, second_agent_standard_gift_expires_at,
+					referral_standard_credit_expires_at, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				stableUser,
+				user.username,
+				plan ?? 'free',
+				stripe_plan ?? null,
+				stripe_customer_id ?? null,
+				email_outbound_paused_at ?? null,
+				second_agent_standard_gift_expires_at ?? null,
+				referral_standard_credit_expires_at ?? null,
+				user.created_at,
+				user.updated_at,
+			)
 	}
 	for (const [userId, role] of input.userRoles) {
 		sqlite
@@ -261,6 +293,11 @@ test('admin users list payload exposes only account metadata fields', async () =
 			manualPlan: 'pro',
 			stripePlan: null,
 			effectivePlan: 'pro',
+			secondAgentGiftExpiresAt: null,
+			referralCreditExpiresAt: null,
+			overlayExpiresAt: null,
+			isProOverlay: false,
+			overlayType: null,
 			stripeCustomerLinked: false,
 		}),
 		expect.objectContaining({
@@ -271,9 +308,50 @@ test('admin users list payload exposes only account metadata fields', async () =
 			manualPlan: 'free',
 			stripePlan: 'standard',
 			effectivePlan: 'standard',
+			secondAgentGiftExpiresAt: null,
+			referralCreditExpiresAt: null,
+			overlayExpiresAt: null,
+			isProOverlay: false,
+			overlayType: null,
 			stripeCustomerLinked: true,
 		}),
 	])
+})
+
+test('admin users list exposes temporary Pro gift overlay fields for Package filters', async () => {
+	const giftExpiresAt = '2099-01-10T00:00:00.000Z'
+	const referralExpiresAt = '2099-01-20T00:00:00.000Z'
+	const { list } = setupAdminUsers(
+		[
+			makeUser(1, 'admin-user', { email: 'admin@example.com' }),
+			makeUser(2, 'continuumpraxis', {
+				email: 'continuum@example.com',
+				plan: 'free',
+				second_agent_standard_gift_expires_at: giftExpiresAt,
+				referral_standard_credit_expires_at: referralExpiresAt,
+			}),
+		],
+		[
+			[1, 'admin'],
+			[2, 'user'],
+		],
+	)
+
+	const payload = await list('')
+	expect(payload.users).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				username: 'continuumpraxis',
+				plan: 'free',
+				effectivePlan: 'pro',
+				secondAgentGiftExpiresAt: giftExpiresAt,
+				referralCreditExpiresAt: referralExpiresAt,
+				overlayExpiresAt: referralExpiresAt,
+				isProOverlay: true,
+				overlayType: 'referral_credit',
+			}),
+		]),
+	)
 })
 
 test('admin users list applies selected, q, role, and pagination filters', async () => {
@@ -565,6 +643,39 @@ test('mark email verified and mint verify url actions update the account and log
 	expectAdminAudit('mark_email_verified', targetReason)
 
 	expect((await act('mint_verify_url')).status).toBe(400)
+})
+
+test('mark_email_destination_verified action updates the destination and logs audit events', async () => {
+	const { env, post } = setupAdminUsers(
+		[makeUser(2, 'member', { email_verified_at: '2026-01-01T00:00:00.000Z' })],
+		[[2, 'user']],
+	)
+	const destinationId = 'dest-pager-1'
+	await env.APP_DB.prepare(
+		`INSERT INTO email_notification_destinations
+		 (id, user_id, email, verified_at, is_default)
+		 VALUES (?, 2, 'pager@example.com', NULL, 0)`,
+	)
+		.bind(destinationId)
+		.run()
+
+	const response = await post({
+		action: 'mark_email_destination_verified',
+		stableUserId: stableUserId(2),
+		destinationEmail: 'pager@example.com',
+	})
+	expect(response.status).toBe(200)
+	expectAdminAudit(
+		'mark_email_destination_verified',
+		`target_stable_user_id=${stableUserId(2)};destination=pager@example.com`,
+	)
+	const row = await env.APP_DB.prepare(
+		`SELECT verified_at IS NOT NULL AS verified
+		 FROM email_notification_destinations WHERE id = ?`,
+	)
+		.bind(destinationId)
+		.first<{ verified: number }>()
+	expect(row).toEqual({ verified: 1 })
 })
 
 test('create_user action returns setup link, logs audit, maps duplicate email to 409, and keeps the setup link when list refresh fails', async () => {

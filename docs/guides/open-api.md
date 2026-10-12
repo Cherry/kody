@@ -29,19 +29,22 @@ separate from Open API; some `/v1` routes exist so the CLI can hop to origin.
 
 ## Mint a scoped API token
 
-With MCP `api` available, mint a short-lived token (value returned once):
+With MCP `api` available, mint a token (value returned once). Lifetime is
+required: `short` (1h idle / 24h max), `long` (14d idle / 3mo max), or both
+`idle_ttl_seconds` and `max_lifetime_seconds`.
 
 ```json
 {
 	"operationId": "tokenCreate",
 	"params": {
 		"name": "ci-bot",
-		"scopes": ["account:read", "search:read"]
+		"scopes": ["org:read", "search:read"],
+		"lifetime": "short"
 	}
 }
 ```
 
-Include `"local-execute"` in `scopes` only when a headless CLI needs
+Include `"org:execute"` in `scopes` only when a headless CLI needs
 CapabilityProxy / package-graph over a `kody_at_…` token (see
 [Local CLI execute](./local-execute.md)). Put the value in the environment
 (`KODY_API_TOKEN`); never paste it into chat.

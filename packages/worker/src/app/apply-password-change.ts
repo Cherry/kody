@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	type AppDatabase,
 	passwordResetsTable,
@@ -9,12 +10,15 @@ import {
 	type OAuthGrantHelpers,
 	revokeAllOAuthGrantsForUser,
 } from '#worker/oauth-grants.ts'
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
+import { deleteMcpEventSubscriptionsForUser } from '#mcp/events/subscriptions-repo.ts'
 import { AccountDeletionInProgressError } from '#worker/account/deletion-state.ts'
 import {
 	type ClearedAccountFactors,
 	clearSecondFactorsAndConnections,
 } from '#app/clear-account-factors.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type { ClearedAccountFactors }
 
 export type ApplyPasswordChangeResult =
@@ -54,7 +58,7 @@ export async function applyPasswordChange(
 		d1: D1Database
 		helpers: OAuthGrantHelpers | undefined
 		userId: number
-		stableUserId: string
+		stableUserId: OwnerId
 		clearSecondFactorsAndConnections?: boolean
 		/** Stamp with `AND deleting_at IS NULL` and throw if the fence landed. */
 		requireWritableAccount?: boolean
@@ -69,6 +73,10 @@ export async function applyPasswordChange(
 		try {
 			await revokeAllOAuthGrantsForUser({
 				helpers,
+				userId: input.stableUserId,
+			})
+			await deleteMcpEventSubscriptionsForUser({
+				db: input.d1,
 				userId: input.stableUserId,
 			})
 			return null
@@ -112,7 +120,7 @@ export async function applyPasswordChange(
 			.prepare(
 				`UPDATE users
 				 SET password_hash = ?, password_changed_at = ?, updated_at = ?
-				 WHERE id = ? AND deleting_at IS NULL`,
+				 WHERE id = ? AND deleting_at IS NULL${andLiveDeletedAtSql()}`,
 			)
 			.bind(passwordHash, changedAt, updatedAt, input.userId)
 			.run()
@@ -126,6 +134,11 @@ export async function applyPasswordChange(
 			updated_at: updatedAt,
 		})
 	}
+
+	// Invalidate immediately after the stamp so same-isolate package-app
+	// sessions issued before password_changed_at fail closed even if a later
+	// revoke or factor sweep returns stamped:true with ok:false.
+	invalidatePackageAppOwnerCache({ stableUserId: input.stableUserId })
 
 	// Stamp, then revoke again so a grant created in that window is still
 	// collected.

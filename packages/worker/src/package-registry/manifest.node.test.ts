@@ -316,7 +316,19 @@ test('parseAuthoredPackageJson rejects invalid manifests with a specific error p
 		],
 		[
 			'@kentcdodds/sentry-bridge',
-			sentryHook({ challenge: { type: 'x-activity-crc' } }),
+			sentryHook({
+				challenge: {
+					type: 'subscription-challenge',
+					method: 'GET',
+					challenge: { in: 'query', key: 'crc_token' },
+					prove: {
+						kind: 'hmac',
+						algorithm: 'hmac-sha256',
+						encoding: 'base64',
+					},
+					respond: { as: 'json-hmac', key: 'response_token' },
+				},
+			}),
 			/secretName/,
 			sentryExports,
 		],
@@ -462,6 +474,56 @@ test('parseAuthoredPackageJson accepts subscriptions, emits, retrievers, and sec
 	])
 })
 
+test('kody.emits mcp: true opts a topic into MCP Events; false or absent does not', () => {
+	const manifest = parse('@kentcdodds/discord-gateway', {
+		emits: {
+			'@kentcdodds/discord.message.created': {
+				description: 'A Discord message was created.',
+				mcp: true,
+			},
+			'@kentcdodds/discord.message.deleted': {
+				description: 'A Discord message was deleted.',
+				mcp: false,
+			},
+			'@kentcdodds/discord.message.updated': {
+				description: 'A Discord message was updated.',
+			},
+		},
+	})
+	const emitted = listPackageEmittedEvents(manifest)
+	expect(emitted).toEqual([
+		{
+			topic: '@kentcdodds/discord.message.created',
+			description: 'A Discord message was created.',
+			payloadSchema: null,
+			mcp: true,
+		},
+		{
+			topic: '@kentcdodds/discord.message.deleted',
+			description: 'A Discord message was deleted.',
+			payloadSchema: null,
+		},
+		{
+			topic: '@kentcdodds/discord.message.updated',
+			description: 'A Discord message was updated.',
+			payloadSchema: null,
+		},
+	])
+	expect(
+		emitted.filter((event) => event.mcp).map((event) => event.topic),
+	).toEqual(['@kentcdodds/discord.message.created'])
+	expect(() =>
+		parse('@kentcdodds/discord-gateway', {
+			emits: {
+				'@kentcdodds/discord.message.created': {
+					description: 'A Discord message was created.',
+					mcp: 'yes',
+				},
+			},
+		}),
+	).toThrow(/expected boolean[\s\S]*\.mcp/)
+})
+
 test('parseAuthoredPackageJson accepts kody.webhooks with verification, replay, challenge, and trusted rate limits', () => {
 	const sentryVerification = hmac(
 		'sentry-hook-signature',
@@ -488,6 +550,30 @@ test('parseAuthoredPackageJson accepts kody.webhooks with verification, replay, 
 			verification: sentryVerification,
 		},
 	])
+
+	const urlSecret = parse(
+		'@kentcdodds/sentry-bridge',
+		sentryHook({ verification: { type: 'url-secret' } }),
+		sentryExports,
+	)
+	expect(urlSecret.kody.webhooks?.[0]?.verification).toEqual({
+		type: 'url-secret',
+	})
+	expect(buildPackageSearchProjection(urlSecret).webhooks).toEqual([
+		{
+			...webhookDefaults,
+			name: 'sentry',
+			exportName: './handle-sentry-webhook',
+			verification: { type: 'url-secret' },
+		},
+	])
+	expect(() =>
+		parse(
+			'@kentcdodds/sentry-bridge',
+			sentryHook({ verification: { type: 'url-secrets' } }),
+			sentryExports,
+		),
+	).toThrow(/verification/)
 
 	const trusted = parse(
 		'@kentcdodds/discord',
@@ -559,7 +645,19 @@ test('parseAuthoredPackageJson accepts kody.webhooks with verification, replay, 
 		encoding: 'base64',
 		prefix: 'sha256=',
 	}
-	const xChallenge = { type: 'x-activity-crc', secretName: 'xConsumerSecret' }
+	const xChallenge = {
+		type: 'subscription-challenge',
+		method: 'GET',
+		challenge: { in: 'query', key: 'crc_token' },
+		prove: {
+			kind: 'hmac',
+			secretName: 'xConsumerSecret',
+			algorithm: 'hmac-sha256',
+			encoding: 'base64',
+			prefix: 'sha256=',
+		},
+		respond: { as: 'json-hmac', key: 'response_token' },
+	}
 	const x = parse(
 		'@kentcdodds/x',
 		{

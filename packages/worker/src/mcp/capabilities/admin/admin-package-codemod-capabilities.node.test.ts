@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import type * as AuditLog from '#worker/audit-log.ts'
@@ -39,9 +40,10 @@ function createAdminCtx(userId = 'admin-1') {
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId,
+				userId: personIdFromStored(userId),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],

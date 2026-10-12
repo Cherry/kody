@@ -36,8 +36,10 @@ deploys, code, or database are broken (see decision record 0004).
   send alert email.
 - A single `StatusStore` Durable Object (SQLite) stores per-minute samples (24
   h), daily uptime rollups (90 days), incidents, and sent notifications.
-- A component opens an incident after two consecutive probe failures and
-  resolves it after two consecutive successes.
+- A component opens an incident after three consecutive probe failures (about
+  three minutes) and resolves it after two consecutive successes. The thresholds
+  are independent (`failureThreshold` and `recoveryThreshold` in
+  `incidents.ts`), and apply to every component.
 - Day bars and the uptime percentage follow those opened incidents. Isolated
   probe failures below the threshold stay in the 24h sample log only — they do
   not increment daily failed counts or paint a day amber. A day turns amber when
@@ -84,6 +86,61 @@ GitHub Actions. When it is unset, the route returns 503. Open incidents return
 The 2026-09-02 Jobs incident payload lives at
 `packages/status/retrospectives/jobs-2026-09-02.json` (status incident id 10).
 
+A resolved incident that turned out to be health-check-only can be deleted with
+a bearer `DELETE` on the same host:
+
+```bash
+curl -fsS -X DELETE \
+  "https://status.kody.codes/__maintenance/incidents/11" \
+  -H "Authorization: Bearer $STATUS_INCIDENT_EVENT_SECRET"
+```
+
+The secret lives only in GitHub Actions, so the usual way to run this is the
+`🧹 Status Incident Delete` workflow (`status-incident-delete.yml`) from main
+with `incident_id` and `confirm: delete status incident <id>`. Agents dispatch
+it through `@kentcdodds/github` as kody-bot.
+
+The delete removes the incident row and recomputes `daily_stats.failed` for the
+days it covered, so the day bar loses its amber or red marker. Days no other
+incident covers drop to zero failed. Days shared with another incident only lose
+the deleted span's failed samples, or one failure per incident minute once those
+samples are past the 24h retention. Open incidents return 409, unknown ids 404,
+and an unset secret 503. Alert emails and `status.incident.*` package events
+already sent for the incident are not retracted.
+
+## Retrospectives
+
+Every resolved incident gets an impact check. The outcome decides whether it
+gets a public retrospective or is deleted.
+
+1. **Start with the impact-check queries** for the incident window (open time
+   minus a few minutes through resolve time):
+   - Workers analytics per minute for the main worker: requests, errors, and 5xx
+     by status.
+   - Sentry events for the window compared with the baseline before it.
+   - D1 analytics for the affected database: read and write queries, rows, and
+     latency per minute.
+   - Run errors: failed jobs and execute runs in the window.
+2. **Real user impact** means Workers errors, 5xx responses, or Sentry events
+   above baseline during the window. That incident requires a retrospective,
+   published within 3 business days of resolve:
+   - Write the payload at
+     `packages/status/retrospectives/<component>-<YYYY-MM-DD>.json` using the
+     existing fields (`whatHappened`, `impact`, `timeline`, `cause`,
+     `whatWeDid`, `whatWeWillChange`). `component` is the status component id
+     (for example `app_db`) and the date is the incident's start day in UTC.
+   - Commit the file, then publish it with the
+     `POST /__maintenance/incidents/:id/retrospective` command above.
+3. **Health-check-only** means the probe failed but none of those signals moved.
+   Record the evidence (the query results and the likely cause) in the PR,
+   issue, or thread that approved the cleanup, then remove the incident with
+   `DELETE /__maintenance/incidents/:id`. Example: status incident 11 (`app_db`,
+   2026-10-12 13:21:14Z–13:22:11Z) had 0 Workers errors, 0 Sentry events, and
+   normal D1 reads; a D1 write burst likely slowed the probe, so it was deleted.
+
+Changing incident-opening thresholds is a separate decision; do not adjust them
+as part of an incident cleanup.
+
 ## Provider incidents (Cloudflare)
 
 Each cron tick also fetches Cloudflare's public Statuspage feed
@@ -109,6 +166,7 @@ suppressed based on provider status.
 | `/`                                               | Public status page (HTML)                                                       |
 | `/status.json`                                    | Snapshot as JSON                                                                |
 | `POST /__maintenance/incidents/:id/retrospective` | Operator writeup on a resolved incident (bearer `STATUS_INCIDENT_EVENT_SECRET`) |
+| `DELETE /__maintenance/incidents/:id`             | Delete a resolved health-check-only incident (same bearer)                      |
 | `/health`                                         | Liveness for the status worker itself                                           |
 | `/favicon-operational.png`                        | Favicon when all measured components are up                                     |
 | `/favicon-down.png`                               | Favicon while a kody incident is open                                           |
@@ -126,8 +184,10 @@ only.
 
 Deployed by `.github/workflows/deploy.yml` (path-filtered job, like the backup
 control plane) with `npm run status:deploy`. The `CLOUDFLARE_API_TOKEN` Worker
-secret (Email Sending permission) is synced at deploy time; without it, alert
-emails are skipped and logged.
+secret is synced at deploy time from the Email Sending-only
+`CLOUDFLARE_STATUS_API_TOKEN` GitHub secret (never the deploy token); the deploy
+fails when that secret is unset. Without the Worker secret, alert emails are
+skipped and logged.
 
 Wrangler attaches `status.kody.codes` as a custom domain. The deploy healthcheck
 probes that host's `/health`. Other component probes do not depend on the status

@@ -3,7 +3,9 @@ import {
 	type SecretProviderGrantRecord,
 } from './types.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 type BindingRow = {
+	id: string
 	user_id: string
 	provider_id: string
 	package_id: string
@@ -42,6 +44,7 @@ export function parseSecretProviderConfigJson(
 
 function toBindingRecord(row: BindingRow): SecretProviderBindingRecord {
 	return {
+		credentialId: row.id,
 		userId: row.user_id,
 		providerId: row.provider_id,
 		packageId: row.package_id,
@@ -99,8 +102,11 @@ export async function upsertSecretProviderBinding(
 		.prepare(
 			`INSERT INTO secret_provider_bindings (
 				user_id, provider_id, package_id, door_secret_name, config_json,
-				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+				source_json, created_at, updated_at
+			) VALUES (
+				?, ?, ?, ?, ?, json_object('vault', ?), CURRENT_TIMESTAMP,
+				CURRENT_TIMESTAMP
+			)
 			ON CONFLICT(user_id, provider_id) DO UPDATE SET
 				package_id = excluded.package_id,
 				door_secret_name = excluded.door_secret_name,
@@ -113,6 +119,7 @@ export async function upsertSecretProviderBinding(
 			input.packageId,
 			input.doorSecretName,
 			input.configJson,
+			input.providerId,
 		)
 		.run()
 }
@@ -125,7 +132,7 @@ export async function deleteSecretProviderBinding(
 	await db
 		.prepare(
 			`DELETE FROM secret_provider_bindings
-			WHERE user_id = ? AND provider_id = ?`,
+			WHERE user_id = ? AND provider_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.providerId)
 		.run()
@@ -137,10 +144,10 @@ export async function getSecretProviderBinding(
 ): Promise<SecretProviderBindingRecord | null> {
 	const row = await db
 		.prepare(
-			`SELECT user_id, provider_id, package_id, door_secret_name, config_json,
+			`SELECT id, user_id, provider_id, package_id, door_secret_name, config_json,
 				created_at, updated_at
 			FROM secret_provider_bindings
-			WHERE user_id = ? AND provider_id = ?`,
+			WHERE user_id = ? AND provider_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.providerId)
 		.first<BindingRow>()
@@ -153,10 +160,10 @@ export async function listSecretProviderBindings(
 ): Promise<Array<SecretProviderBindingRecord>> {
 	const result = await db
 		.prepare(
-			`SELECT user_id, provider_id, package_id, door_secret_name, config_json,
+			`SELECT id, user_id, provider_id, package_id, door_secret_name, config_json,
 				created_at, updated_at
 			FROM secret_provider_bindings
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY provider_id ASC`,
 		)
 		.bind(input.userId)

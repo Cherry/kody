@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	consoleError,
@@ -6,11 +7,15 @@ import {
 } from '#worker/test-support/console-spies.ts'
 import { isEntitlementLimitError } from '#worker/entitlements/errors.ts'
 import { planLimits } from '#universal/plans.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	createInMemoryUserMeterEnv,
 	createPermissiveAccountWriteLeaseDbHooks,
 } from '#worker/test-support/user-meter.ts'
+import {
+	isLiveSeatCountQuery,
+	mockLiveSeatCountRow,
+} from '#worker/test-support/live-seat-count-query.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const { mockModule, pickMocks } = vi.hoisted(() => {
 	const mockModule = {
@@ -19,6 +24,11 @@ const { mockModule, pickMocks } = vi.hoisted(() => {
 		buildPublishedPackageArtifacts: vi.fn(),
 		refreshPackageRetrieverManifestCache: vi.fn(),
 		removePackageRetrieverManifestCacheEntries: vi.fn(),
+		writePackageSkillsIndex: vi.fn(),
+		removePackageSkillsIndexEntries: vi.fn(),
+		collectPackageSkills: vi.fn(),
+		buildPackageSkillsIndex: vi.fn(),
+		refreshPackageSubscriptionTopicMap: vi.fn(),
 		deleteJobRow: vi.fn(),
 		deleteEntitySource: vi.fn(),
 		deleteSavedPackage: vi.fn(),
@@ -44,6 +54,8 @@ const { mockModule, pickMocks } = vi.hoisted(() => {
 		deleteCommunityForksForPackage: vi.fn(),
 		unpublishCommunityListing: vi.fn(),
 		invalidateCommunityPublicCache: vi.fn(),
+		scheduleKitSubscriberSync: vi.fn(),
+		stampFirstSavedPackage: vi.fn(),
 	}
 	const pickMocks = (...names: Array<keyof typeof mockModule>) =>
 		Object.fromEntries(names.map((name) => [name, mockModule[name]]))
@@ -78,6 +90,15 @@ vi.mock('#worker/package-retrievers/manifest-cache.ts', () =>
 		'refreshPackageRetrieverManifestCache',
 		'removePackageRetrieverManifestCacheEntries',
 	),
+)
+vi.mock('#worker/package-registry/skills-index-cache.ts', () =>
+	pickMocks('writePackageSkillsIndex', 'removePackageSkillsIndexEntries'),
+)
+vi.mock('#worker/package-registry/package-skills.ts', () =>
+	pickMocks('collectPackageSkills', 'buildPackageSkillsIndex'),
+)
+vi.mock('#worker/package-invocations/subscription-topic-cache.ts', () =>
+	pickMocks('refreshPackageSubscriptionTopicMap'),
 )
 vi.mock('./repo.ts', () =>
 	pickMocks(
@@ -124,6 +145,12 @@ vi.mock('#app/data-cache.ts', () => pickMocks('invalidateCommunityPublicCache'))
 vi.mock('#worker/community/service.ts', () =>
 	pickMocks('unpublishCommunityListing'),
 )
+vi.mock('#worker/kit/subscriber-sync.ts', () =>
+	pickMocks('scheduleKitSubscriberSync'),
+)
+vi.mock('#worker/identity/activation-stamps.ts', () =>
+	pickMocks('stampFirstSavedPackage'),
+)
 
 const {
 	deleteSavedPackageProjection,
@@ -139,6 +166,7 @@ function createEnv(
 		storageBuckets?: Array<StorageBucket>
 		users?: Array<{ email: string; plan: string | null }>
 		savedPackageCount?: number
+		failStorageInventory?: boolean
 	},
 ) {
 	// Projection refresh asserts finite storage bytes (default/missing plan →
@@ -150,6 +178,7 @@ function createEnv(
 			userId,
 			storageBuckets: options?.storageBuckets,
 			savedPackageCount: options?.savedPackageCount,
+			failStorageInventory: options?.failStorageInventory,
 		}),
 		USER_METER: createInMemoryUserMeterEnv().env.USER_METER,
 	} as Env
@@ -171,7 +200,7 @@ function createProjection() {
 function savedPackageRecord(overrides: Record<string, unknown> = {}) {
 	return {
 		id: 'package-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: '@kentcdodds/shade-automation',
 		kodyId: 'shade-automation',
 		description: 'Old description',
@@ -202,6 +231,10 @@ function mockSource(manifest: unknown = shadeManifest()) {
 	mockModule.loadPackageSourceBySourceId.mockResolvedValue({
 		manifest,
 		files: { 'package.json': '{}' },
+		source: {
+			id: 'source-1',
+			published_commit: 'commit-1',
+		},
 	})
 }
 
@@ -214,11 +247,22 @@ function setupDefaultMocks() {
 	mockModule.syncPackageJobsForPackage.mockResolvedValue(false)
 	mockModule.syncJobManagerAlarm.mockResolvedValue(undefined)
 	mockModule.refreshPackageRetrieverManifestCache.mockResolvedValue(undefined)
+	mockModule.refreshPackageSubscriptionTopicMap.mockResolvedValue(undefined)
 	mockModule.removePackageRetrieverManifestCacheEntries.mockResolvedValue(
 		undefined,
 	)
+	mockModule.collectPackageSkills.mockResolvedValue([])
+	mockModule.buildPackageSkillsIndex.mockReturnValue({
+		version: 1,
+		packageId: 'package-1',
+		kodyId: '@owner/pkg',
+		publishedCommit: 'commit',
+		skills: [],
+	})
+	mockModule.writePackageSkillsIndex.mockResolvedValue(undefined)
+	mockModule.removePackageSkillsIndexEntries.mockResolvedValue(undefined)
 	mockModule.updateSavedPackage.mockResolvedValue(undefined)
-	mockModule.insertSavedPackage.mockResolvedValue(undefined)
+	mockModule.insertSavedPackage.mockResolvedValue(true)
 	mockModule.deleteEntitySource.mockResolvedValue(undefined)
 	mockModule.deleteSavedPackage.mockResolvedValue(undefined)
 	mockModule.deleteSavedPackageVector.mockResolvedValue(undefined)
@@ -230,13 +274,16 @@ function setupDefaultMocks() {
 	mockModule.getCommunityListingByOwnerAndPackage.mockResolvedValue(null)
 	mockModule.unpublishCommunityListing.mockResolvedValue(undefined)
 	mockModule.deleteCommunityForksForPackage.mockResolvedValue(0)
+	mockModule.scheduleKitSubscriberSync.mockReset()
+	mockModule.stampFirstSavedPackage.mockReset()
+	mockModule.stampFirstSavedPackage.mockResolvedValue(true)
 }
 
 function refresh(env: Env, overrides: Record<string, unknown> = {}) {
 	return refreshSavedPackageProjection({
 		env,
 		baseUrl: 'https://heykody.dev',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'package-1',
 		sourceId: 'source-1',
 		...overrides,
@@ -246,6 +293,7 @@ function refresh(env: Env, overrides: Record<string, unknown> = {}) {
 function mockPackageRow(id = 'package-1', sourceId = 'source-1') {
 	mockModule.getSavedPackageById.mockResolvedValue({
 		id,
+		name: '@kentcdodds/shade-automation',
 		kodyId: 'shade-automation',
 		sourceId,
 	})
@@ -258,7 +306,7 @@ function deletePackage(
 ) {
 	return deleteSavedPackageProjection({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId,
 		...(actorUserId ? { actorUserId } : {}),
 	})
@@ -271,7 +319,7 @@ function clearedStorageIds() {
 }
 
 function appScopedCleanup(env: Env, packageId: string) {
-	return { env, userId: 'user-1', appId: packageId }
+	return { env, userId: ownerIdFromStored('user-1'), appId: packageId }
 }
 
 test('refreshSavedPackageProjection defers search-index upsert and retriever cache via waitUntil', async () => {
@@ -289,7 +337,7 @@ test('refreshSavedPackageProjection defers search-index upsert and retriever cac
 	expect(mockModule.scheduleSavedPackageSearchIndexUpsert).toHaveBeenCalledWith(
 		expect.objectContaining({
 			packageId: 'package-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			waitUntil: expect.any(Function),
 		}),
 	)
@@ -308,7 +356,7 @@ test('refreshSavedPackageProjection uses caller-supplied source files instead of
 	mockModule.loadPackageSourceFromFiles.mockResolvedValue({
 		manifest: shadeManifest({ tags: ['home'] }),
 		files: sourceFiles,
-		source: { id: 'source-1' },
+		source: { id: 'source-1', published_commit: 'commit-1' },
 	})
 	mockModule.getSavedPackageById.mockResolvedValue(savedPackageRecord())
 
@@ -316,7 +364,7 @@ test('refreshSavedPackageProjection uses caller-supplied source files instead of
 
 	expect(mockModule.loadPackageSourceFromFiles).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: 'source-1',
 		files: sourceFiles,
 	})
@@ -347,7 +395,7 @@ test('refreshSavedPackageProjection syncs the job manager only when package jobs
 
 	expect(mockModule.syncPackageJobsForPackage).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		baseUrl: 'https://heykody.dev',
 		packageId: 'package-1',
 		sourceId: 'source-1',
@@ -355,8 +403,11 @@ test('refreshSavedPackageProjection syncs the job manager only when package jobs
 	})
 	expect(mockModule.buildPublishedPackageArtifacts).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
-		source: undefined,
+		userId: ownerIdFromStored('user-1'),
+		source: expect.objectContaining({
+			id: 'source-1',
+			published_commit: 'commit-1',
+		}),
 		savedPackage: expect.objectContaining({
 			...savedPackageRecord({
 				description: 'Shade automation package',
@@ -373,8 +424,11 @@ test('refreshSavedPackageProjection syncs the job manager only when package jobs
 	})
 	expect(mockModule.refreshPackageRetrieverManifestCache).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
-		source: undefined,
+		userId: ownerIdFromStored('user-1'),
+		source: expect.objectContaining({
+			id: 'source-1',
+			published_commit: 'commit-1',
+		}),
 		savedPackage: expect.objectContaining({
 			id: 'package-1',
 			kodyId: 'shade-automation',
@@ -390,7 +444,7 @@ test('refreshSavedPackageProjection syncs the job manager only when package jobs
 	expect(savedPackageArg?.updatedAt).not.toBe('2026-04-20T00:00:00.000Z')
 	expect(mockModule.syncJobManagerAlarm).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(mockModule.getSavedPackageById).toHaveBeenCalledTimes(1)
 	expect(
@@ -425,6 +479,53 @@ test('refreshSavedPackageProjection omits files when artifact rebuild is skipped
 	expect(refreshed).not.toHaveProperty('files')
 	expect(mockModule.loadPackageSourceBySourceId).not.toHaveBeenCalled()
 	expect(mockModule.buildPublishedPackageArtifacts).not.toHaveBeenCalled()
+	expect(mockModule.collectPackageSkills).not.toHaveBeenCalled()
+})
+
+test('refreshSavedPackageProjection indexes skills from sourceFiles even when artifact rebuild is skipped', async () => {
+	setupDefaultMocks()
+	const skillFiles = {
+		'package.json': JSON.stringify(shadeManifest()),
+		'skills/ship-it/SKILL.md':
+			'---\nname: ship-it\ndescription: Ship it.\n---\n\n# Ship\n',
+	}
+	mockModule.loadPackageSourceFromFiles.mockResolvedValue({
+		source: {
+			id: 'source-1',
+			entity_id: 'package-1',
+			entity_kind: 'package',
+			published_commit: 'commit-1',
+		},
+		manifest: shadeManifest(),
+		files: skillFiles,
+	})
+	mockModule.getSavedPackageById.mockResolvedValue(
+		savedPackageRecord({ description: 'Shade automation package', tags: [] }),
+	)
+	mockModule.collectPackageSkills.mockResolvedValue([
+		{ name: 'ship-it', resources: [] },
+	])
+	mockModule.buildPackageSkillsIndex.mockReturnValue({
+		version: 1,
+		packageId: 'package-1',
+		kodyId: '@kentcdodds/shade-automation',
+		publishedCommit: 'commit-1',
+		skills: [{ name: 'ship-it' }],
+	})
+
+	const refreshed = await refresh(createEnv(), {
+		rebuildArtifacts: false,
+		sourceFiles: skillFiles,
+	})
+
+	expect(refreshed).not.toHaveProperty('files')
+	expect(mockModule.buildPublishedPackageArtifacts).not.toHaveBeenCalled()
+	expect(mockModule.collectPackageSkills).toHaveBeenCalled()
+	expect(mockModule.writePackageSkillsIndex).toHaveBeenCalled()
+	expect(mockModule.updateSavedPackage).toHaveBeenCalledWith(
+		expect.anything(),
+		expect.objectContaining({ hasSkills: true }),
+	)
 })
 
 test('refreshSavedPackageProjection continues best-effort cleanup when dependent steps fail', async () => {
@@ -445,7 +546,7 @@ test('refreshSavedPackageProjection continues best-effort cleanup when dependent
 
 	expect(mockModule.syncPackageJobsForPackage).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		baseUrl: 'https://heykody.dev',
 		packageId: 'package-1',
 		sourceId: 'source-1',
@@ -481,7 +582,7 @@ test('refreshSavedPackageProjection preserves hidden and isPrivate across projec
 	expect(updateArg).not.toHaveProperty('hidden')
 	expect(updateArg).not.toHaveProperty('isPrivate')
 	expect(updateArg).toMatchObject({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'package-1',
 		description: 'Updated description',
 	})
@@ -492,10 +593,126 @@ test('refreshSavedPackageProjection preserves hidden and isPrivate across projec
 	})
 })
 
+test('refreshSavedPackageProjection Kit-syncs the actor on a team insert, not the owning org', async () => {
+	setupDefaultMocks()
+	const teamId = ownerIdFromStored('acme-org')
+	const actorUserId = 'person-member-1'
+	const env = createEnv(teamId)
+	mockSource()
+	mockModule.getSavedPackageById.mockResolvedValue(null)
+	mockModule.insertSavedPackage.mockResolvedValueOnce(true)
+
+	await refresh(env, {
+		userId: teamId,
+		actorUserId,
+		userEmail: null,
+		packageId: 'package-team',
+		sourceId: 'source-team',
+	})
+
+	expect(mockModule.insertSavedPackage).toHaveBeenCalledWith(
+		env.APP_DB,
+		expect.objectContaining({ user_id: teamId, id: 'package-team' }),
+		env,
+		{ actorUserId },
+	)
+	expect(mockModule.scheduleKitSubscriberSync).toHaveBeenCalledWith({
+		env,
+		stableUserId: actorUserId,
+	})
+	expect(mockModule.scheduleKitSubscriberSync).not.toHaveBeenCalledWith(
+		expect.objectContaining({ stableUserId: teamId }),
+	)
+})
+
+test('refreshSavedPackageProjection skips Kit sync on insert when the actor was already stamped', async () => {
+	setupDefaultMocks()
+	const teamId = ownerIdFromStored('acme-org')
+	const actorUserId = 'person-member-already'
+	const env = createEnv(teamId)
+	mockSource()
+	mockModule.getSavedPackageById.mockResolvedValue(null)
+	mockModule.insertSavedPackage.mockResolvedValueOnce(false)
+
+	await refresh(env, {
+		userId: teamId,
+		actorUserId,
+		packageId: 'package-team-2',
+		sourceId: 'source-team-2',
+	})
+
+	expect(mockModule.insertSavedPackage).toHaveBeenCalled()
+	expect(mockModule.scheduleKitSubscriberSync).not.toHaveBeenCalled()
+})
+
+test('refreshSavedPackageProjection stamps the actor when updating an existing team package', async () => {
+	setupDefaultMocks()
+	const teamId = ownerIdFromStored('acme-org')
+	const actorUserId = 'person-member-2'
+	const env = createEnv(teamId)
+	mockSource()
+	mockModule.getSavedPackageById.mockResolvedValue(
+		savedPackageRecord({ userId: teamId }),
+	)
+	mockModule.stampFirstSavedPackage.mockResolvedValueOnce(true)
+
+	await refresh(env, {
+		userId: teamId,
+		actorUserId,
+		packageId: 'package-1',
+		sourceId: 'source-1',
+	})
+
+	expect(mockModule.updateSavedPackage).toHaveBeenCalled()
+	expect(mockModule.insertSavedPackage).not.toHaveBeenCalled()
+	expect(mockModule.stampFirstSavedPackage).toHaveBeenCalledWith(
+		env.APP_DB,
+		{ stableUserId: actorUserId },
+		env,
+	)
+	expect(mockModule.scheduleKitSubscriberSync).toHaveBeenCalledWith({
+		env,
+		stableUserId: actorUserId,
+	})
+})
+
+test('refreshSavedPackageProjection skips Kit sync when the actor was already stamped on update', async () => {
+	setupDefaultMocks()
+	const teamId = ownerIdFromStored('acme-org')
+	const actorUserId = 'person-member-3'
+	const env = createEnv(teamId)
+	mockSource()
+	mockModule.getSavedPackageById.mockResolvedValue(
+		savedPackageRecord({ userId: teamId }),
+	)
+	mockModule.stampFirstSavedPackage.mockResolvedValueOnce(false)
+
+	await refresh(env, {
+		userId: teamId,
+		actorUserId,
+	})
+
+	expect(mockModule.stampFirstSavedPackage).toHaveBeenCalled()
+	expect(mockModule.scheduleKitSubscriberSync).not.toHaveBeenCalled()
+})
+
+test('refreshSavedPackageProjection does not stamp anyone on actor-free updates', async () => {
+	setupDefaultMocks()
+	const env = createEnv()
+	mockSource()
+	mockModule.getSavedPackageById.mockResolvedValue(savedPackageRecord())
+
+	await refresh(env)
+
+	expect(mockModule.updateSavedPackage).toHaveBeenCalled()
+	expect(mockModule.stampFirstSavedPackage).not.toHaveBeenCalled()
+	expect(mockModule.scheduleKitSubscriberSync).not.toHaveBeenCalled()
+})
+
 test('refreshSavedPackageProjection enforces the saved packages entitlement on insert but not on update', async () => {
 	setupDefaultMocks()
 	const email = 'planned@example.com'
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const limit = planLimits.pro.maxSavedPackages
 	if (limit === null) throw new Error('Expected a numeric pro package limit.')
 	const env = createEnv(userId, {
@@ -548,15 +765,19 @@ test('deleteSavedPackageProjection resyncs the job manager after removing packag
 
 	await deletePackage(env)
 
-	const scoped = { env, userId: 'user-1', packageId: 'package-1' }
+	const scoped = {
+		env,
+		userId: ownerIdFromStored('user-1'),
+		packageId: 'package-1',
+	}
 	expect(mockModule.cleanupArtifactReposForPackage).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: 'source-1',
 	})
 	expect(mockModule.deleteEntitySource).toHaveBeenCalledWith(env, {
 		id: 'source-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(
 		mockModule.deleteEntitySource.mock.invocationCallOrder[0],
@@ -565,7 +786,7 @@ test('deleteSavedPackageProjection resyncs the job manager after removing packag
 	)
 	expect(mockModule.deleteJobRow).toHaveBeenCalledTimes(1)
 	expect(mockModule.deleteJobRow).toHaveBeenCalledWith({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		jobId: 'job-1',
 	})
 	expect(mockModule.deleteAllPackageScopedSecrets).toHaveBeenCalledWith(scoped)
@@ -573,12 +794,16 @@ test('deleteSavedPackageProjection resyncs the job manager after removing packag
 		scoped,
 	)
 	expect(mockModule.deleteSavedPackage).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'package-1',
 	})
 	expect(mockModule.deleteCommunityForksForPackage).toHaveBeenCalledWith(
 		env.APP_DB,
-		{ userId: 'user-1', packageId: 'package-1', sourceId: 'source-1' },
+		{
+			userId: ownerIdFromStored('user-1'),
+			packageId: 'package-1',
+			sourceId: 'source-1',
+		},
 	)
 	expect(mockModule.invalidateCommunityPublicCache).toHaveBeenCalledTimes(1)
 	expect(
@@ -590,7 +815,7 @@ test('deleteSavedPackageProjection resyncs the job manager after removing packag
 	)
 	expect(mockModule.syncJobManagerAlarm).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(
 		mockModule.syncJobManagerAlarm.mock.invocationCallOrder[0],
@@ -611,11 +836,11 @@ test('deleteSavedPackageProjection unpublishes an active listing before removing
 
 	expect(mockModule.getCommunityListingByOwnerAndPackage).toHaveBeenCalledWith(
 		env.APP_DB,
-		{ ownerUserId: 'user-1', packageId: 'package-1' },
+		{ ownerUserId: ownerIdFromStored('user-1'), packageId: 'package-1' },
 	)
 	expect(mockModule.unpublishCommunityListing).toHaveBeenCalledWith({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		actorUserId: 'actor-1',
 		listingId: 'listing-1',
 	})
@@ -648,7 +873,7 @@ test('deleteSavedPackageProjection continues best-effort cleanup when dependent 
 	await deletePackage(env)
 
 	expect(mockModule.deleteSavedPackage).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		packageId: 'package-1',
 	})
 	expect(mockModule.deleteSavedPackageVector).toHaveBeenCalledWith(
@@ -677,7 +902,10 @@ const packageStorageId = `package:${encodeURIComponent(uuidPackageId)}`
 const facetStorageId = `${uuidPackageId}:facet:main`
 const jobStorageId = `job:package-job:${uuidPackageId}:event-runner`
 const otherJobStorageId = `job:package-job:${otherPackageId}:nightly`
-const bucket = (storageId: string, userId = 'user-1') => ({ userId, storageId })
+const bucket = (storageId: string, userId = 'user-1') => ({
+	userId,
+	storageId,
+})
 
 test('deleteSavedPackageProjection clears package-owned storage buckets and inventory rows', async () => {
 	setupDefaultMocks()
@@ -713,7 +941,7 @@ test('deleteSavedPackageProjection clears package-owned storage buckets and inve
 	expect(clearedStorageIds()).not.toContain(otherPackageBucket.storageId)
 	expect(clearedStorageIds()).not.toContain(otherJobStorageId)
 	for (const call of mockModule.storageRunnerRpc.mock.calls) {
-		expect(call[0]).toMatchObject({ userId: 'user-1' })
+		expect(call[0]).toMatchObject({ userId: ownerIdFromStored('user-1') })
 	}
 	// Other users' and other packages' inventory rows survive.
 	expect(storageBuckets).toEqual([
@@ -726,7 +954,7 @@ test('deleteSavedPackageProjection clears package-owned storage buckets and inve
 	)
 })
 
-test('deleteSavedPackageProjection keeps inventory when clearStorage fails and continues delete', async () => {
+test('deleteSavedPackageProjection aborts before source cleanup when clearStorage fails', async () => {
 	consoleWarn.mockImplementation(() => {})
 	setupDefaultMocks()
 	const storageBuckets = [
@@ -736,6 +964,13 @@ test('deleteSavedPackageProjection keeps inventory when clearStorage fails and c
 	]
 	const env = createEnv('user-1', { storageBuckets })
 	mockPackageRow(uuidPackageId)
+	mockModule.listJobRowsByUserId.mockResolvedValue([
+		{
+			id: `package-job:${uuidPackageId}:event-runner`,
+			source_id: 'source-1',
+			storage_id: jobStorageId,
+		},
+	])
 	mockModule.clearStorage.mockImplementation(async () => {
 		const call = mockModule.storageRunnerRpc.mock.calls.at(-1)?.[0] as
 			| { storageId: string }
@@ -746,18 +981,39 @@ test('deleteSavedPackageProjection keeps inventory when clearStorage fails and c
 		return { ok: true as const }
 	})
 
-	await deletePackage(env, uuidPackageId)
-
-	expect(mockModule.deleteSavedPackage).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
-		packageId: uuidPackageId,
-	})
-	expect(mockModule.deleteAllAppScopedValues).toHaveBeenCalledWith(
-		appScopedCleanup(env, uuidPackageId),
+	await expect(deletePackage(env, uuidPackageId)).rejects.toThrow(
+		/Package storage cleanup failed/,
 	)
+
+	expect(mockModule.deleteSavedPackage).not.toHaveBeenCalled()
+	expect(mockModule.deleteEntitySource).not.toHaveBeenCalled()
+	expect(mockModule.deleteCommunityForksForPackage).not.toHaveBeenCalled()
+	expect(mockModule.deleteJobRow).not.toHaveBeenCalled()
+	expect(mockModule.deleteAllAppScopedValues).not.toHaveBeenCalled()
 	expect(storageBuckets.map((row) => row.storageId)).toEqual([facetStorageId])
 	expect(consoleWarn).toHaveBeenCalledWith(
 		expect.stringContaining('"message":"package storage clear failed"'),
+	)
+})
+
+test('deleteSavedPackageProjection aborts when storage inventory lookup fails', async () => {
+	consoleWarn.mockImplementation(() => {})
+	setupDefaultMocks()
+	const env = createEnv('user-1', { failStorageInventory: true })
+	mockPackageRow(uuidPackageId)
+
+	await expect(deletePackage(env, uuidPackageId)).rejects.toThrow(
+		/Package storage cleanup failed/,
+	)
+
+	expect(mockModule.deleteSavedPackage).not.toHaveBeenCalled()
+	expect(mockModule.deleteEntitySource).not.toHaveBeenCalled()
+	expect(mockModule.deleteCommunityForksForPackage).not.toHaveBeenCalled()
+	expect(mockModule.clearStorage).not.toHaveBeenCalled()
+	expect(consoleWarn).toHaveBeenCalledWith(
+		expect.stringContaining(
+			'"message":"package storage inventory lookup failed"',
+		),
 	)
 })
 
@@ -773,7 +1029,11 @@ test('deleteSavedPackageProjection cleans secrets and deterministic storage when
 
 	await deletePackage(env, uuidPackageId)
 
-	const scoped = { env, userId: 'user-1', packageId: uuidPackageId }
+	const scoped = {
+		env,
+		userId: ownerIdFromStored('user-1'),
+		packageId: uuidPackageId,
+	}
 	expect(mockModule.deleteAllPackageScopedSecrets).toHaveBeenCalledWith(scoped)
 	expect(mockModule.removeAllSecretApprovalsForPackage).toHaveBeenCalledWith(
 		scoped,
@@ -856,6 +1116,7 @@ function createEntitlementsDatabase(input: {
 	savedPackageCount?: number
 	userId: string
 	storageBuckets?: Array<{ userId: string; storageId: string }>
+	failStorageInventory?: boolean
 }) {
 	const users = input.users ?? []
 	const savedPackageCount = input.savedPackageCount ?? 0
@@ -899,11 +1160,11 @@ function createEntitlementsDatabase(input: {
 								}
 								return { meta: { changes: before - storageBuckets.length } }
 							}
-							// Deleting a package releases the `kody.id`s it retired.
-							if (query.includes('DELETE FROM package_kody_id_redirects')) {
-								return { meta: { changes: 0 } }
-							}
-							if (query.includes('DELETE FROM package_invocation_tokens')) {
+							// Deleting a package releases the slugs it retired.
+							if (
+								query.includes('DELETE FROM package_slug_redirects') ||
+								query.includes('DELETE FROM package_kody_id_redirects')
+							) {
 								return { meta: { changes: 0 } }
 							}
 							throw new Error(`Unsupported run query: ${query}`)
@@ -912,8 +1173,17 @@ function createEntitlementsDatabase(input: {
 							if (writeLeaseDb.supportsDeletingAtQuery(query)) {
 								return writeLeaseDb.deletingAtFirstResult() as T
 							}
-							if (query.includes('SELECT plan, stripe_plan')) {
-								const user = users.find((row) => row.email === params[0])
+							if (
+								query.includes('SELECT plan, stripe_plan') ||
+								query.includes('entitlement_ladder')
+							) {
+								const pairLookup = query.includes('email = ?')
+								const user = pairLookup
+									? users.find(
+											(row) =>
+												row.email === params[0] && input.userId === params[1],
+										)
+									: users.find((row) => row.email === params[0])
 								return (user ? { plan: user.plan } : null) as T | null
 							}
 							if (query.includes('SELECT first_saved_package_at FROM users')) {
@@ -922,12 +1192,22 @@ function createEntitlementsDatabase(input: {
 							// Synthetic-context probe: no users row in this mock, so the
 							// storage reserve path applies free-plan semantics without a DO.
 							if (query.includes('SELECT 1 AS present FROM users')) {
+								if (query.includes('email = ?')) {
+									const user = users.find(
+										(row) =>
+											row.email === params[0] && input.userId === params[1],
+									)
+									return user ? ({ present: 1 } as T) : null
+								}
 								return null
 							}
 							if (
 								query.includes('SELECT COUNT(*) AS count FROM saved_packages')
 							) {
 								return { count: savedPackageCount } as T
+							}
+							if (isLiveSeatCountQuery(query)) {
+								return mockLiveSeatCountRow() as T
 							}
 							const storageByteTables = [
 								'email_attachments',
@@ -950,11 +1230,17 @@ function createEntitlementsDatabase(input: {
 							throw new Error(`Unsupported first query: ${query}`)
 						},
 						async all<T>() {
+							if (query.includes('FROM org_limit_overrides')) {
+								return { results: [] as Array<T> }
+							}
 							if (
 								query.includes('FROM user_storage_buckets') &&
 								query.includes('SELECT storage_id AS storageId') &&
 								query.includes('WHERE user_id = ?')
 							) {
+								if (input.failStorageInventory) {
+									throw new Error('storage inventory unavailable')
+								}
 								const userId = String(params[0])
 								const results = storageBuckets
 									.filter((row) => row.userId === userId)
@@ -963,6 +1249,15 @@ function createEntitlementsDatabase(input: {
 										left.storageId.localeCompare(right.storageId),
 									)
 								return { results: results as Array<T> }
+							}
+							// deleteSavedPackageProjection lists retired leaves before
+							// clearing redirect rows so the package-app slug cache can
+							// evict them; this mock has no redirect fixtures.
+							if (
+								query.includes('FROM package_slug_redirects') &&
+								query.includes('FROM package_kody_id_redirects')
+							) {
+								return { results: [] as Array<T> }
 							}
 							throw new Error(`Unsupported all query: ${query}`)
 						},

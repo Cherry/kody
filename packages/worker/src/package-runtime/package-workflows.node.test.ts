@@ -1,6 +1,8 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { type WorkflowStep } from 'cloudflare:workers'
 import { NonRetryableError } from 'cloudflare:workflows'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestLineage } from '#worker/test-support/request-context.ts'
 import type * as PackageInvocationsService from '#worker/package-invocations/service.ts'
 import type * as RunKodyRegistry from '#mcp/run-kody-registry.ts'
 import type * as RunRecordsServiceModule from '#worker/run-records/service.ts'
@@ -11,11 +13,11 @@ import {
 import { type PackageInvocationStoredResponse } from '#worker/package-invocations/repo.ts'
 import { type WorkflowProjectionUpsertInput } from '#worker/run-records/service.ts'
 import { UserCodeError, isUserCodeError } from '#worker/user-code-error.ts'
+import { backgroundExecutorTimeoutMs } from '#mcp/executor-budgets.ts'
 import {
 	DynamicCallableWorkflowBase,
 	createDynamicCallableWorkflow,
 	dynamicCallableWorkflowsBindingName,
-	workflowExecutorTimeoutMs,
 	type DynamicCallableWorkflowPayload,
 } from './package-workflows.ts'
 import {
@@ -68,6 +70,10 @@ vi.mock('#worker/run-records/service.ts', () => ({
 					projection: WorkflowProjectionUpsertInput
 				},
 			]),
+		),
+	releaseWorkflowProjectionIdempotencyKey: (...args: Array<unknown>) =>
+		runRecordMocks.releaseWorkflowProjectionIdempotencyKey(
+			...(args as [{ env: Env; userId: string; id: string }]),
 		),
 	getWorkflowProjection: (...args: Array<unknown>) =>
 		runRecordMocks.getWorkflowProjection(
@@ -154,12 +160,14 @@ async function queueWorkflow(
 	const env = createWorkflowEnv(binding)
 	const created = await createDynamicCallableWorkflow({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		lineage: sessionRequestLineage('user-1'),
 		packageContext,
 		body: body as never,
 	})
 	const queued = binding.instances.get(created.id)
 	if (!queued?.params) throw new Error('Expected queued workflow payload.')
+	const step = createInlineStep()
 	const run = (payload: unknown = queued.params, instanceId = created.id) =>
 		new DynamicCallableWorkflowBase(
 			{ waitUntil: vi.fn() } as unknown as ExecutionContext,
@@ -171,9 +179,9 @@ async function queueWorkflow(
 				instanceId,
 				workflowName: 'dynamic-callable-workflow',
 			},
-			createInlineStep(),
+			step,
 		)
-	return { env, binding, created, queued, run }
+	return { env, binding, created, queued, run, step }
 }
 
 const findRun = (id: string) =>
@@ -203,7 +211,7 @@ test('createDynamicCallableWorkflow queues inline code without package context a
 		params: expect.objectContaining({
 			version: 3,
 			sourceType: 'inline',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			packageContext: null,
 			code,
 			params: { greeting: 'hello' },
@@ -228,7 +236,8 @@ test('createDynamicCallableWorkflow queues inline code without package context a
 					statusThrows: new Error('status unavailable'),
 				}),
 			),
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			lineage: sessionRequestLineage('user-1'),
 			packageContext: null,
 			body: {
 				code: 'export default async function main() { return { ok: true } }',
@@ -255,7 +264,7 @@ test('DynamicCallableWorkflowBase executes queued inline code and records comple
 		vi.setSystemTime(new Date(runAt))
 		const code =
 			'export default async function main(p){ return { ok: true, p }; }'
-		const { created, run } = await queueWorkflow({
+		const { created, run, step } = await queueWorkflow({
 			code,
 			runAt,
 			idempotencyKey: 'execute-smoke',
@@ -272,7 +281,7 @@ test('DynamicCallableWorkflowBase executes queued inline code and records comple
 		})
 		const backgroundCaller = expect.objectContaining({
 			executionOrigin: 'background',
-			user: expect.objectContaining({ userId: 'user-1' }),
+			user: expect.objectContaining({ userId: ownerIdFromStored('user-1') }),
 		})
 		expect(invocationMocks.runModuleWithRegistry).toHaveBeenCalledWith(
 			expect.objectContaining({ APP_BASE_URL: 'https://app.example.com' }),
@@ -281,9 +290,16 @@ test('DynamicCallableWorkflowBase executes queued inline code and records comple
 			{ greeting: 'hello' },
 			{
 				packageContext: null,
-				executorTimeoutMs: workflowExecutorTimeoutMs,
+				executorTimeoutMs: backgroundExecutorTimeoutMs,
 				runSurface: 'workflow',
 			},
+		)
+		// The step outlasts the 5-minute sandbox so the sandbox timeout and run
+		// finish land before the engine would cut the step.
+		expect(step.do).toHaveBeenCalledWith(
+			'execute inline workflow code',
+			expect.objectContaining({ timeout: '6 minutes' }),
+			expect.any(Function),
 		)
 		expect(findRun(created.id)).toMatchObject({
 			status: 'complete',
@@ -327,7 +343,7 @@ test('inline workflow sandbox failures throw UserCodeError except Durable Object
 		})
 		expect(runRecordMocks.beginRunRecord).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				context: expect.objectContaining({
 					surface: 'workflow',
 					workflowId: created.id,
@@ -386,7 +402,7 @@ test('package-created inline workflows retain package secret authorization conte
 		undefined,
 		{
 			packageContext,
-			executorTimeoutMs: workflowExecutorTimeoutMs,
+			executorTimeoutMs: backgroundExecutorTimeoutMs,
 			runSurface: 'workflow',
 		},
 	)
@@ -533,13 +549,13 @@ test('package and inline workflows each record exactly one workflow run with wor
 	})
 	invocationMocks.invokePackageExport.mockResolvedValueOnce({
 		status: 200,
-		body: { result: { ok: true } },
+		body: { result: { ok: true, source: 'package' }, logs: ['[log] pkg'] },
 	})
 	await packageRun.run()
 	expect(runRecordMocks.beginRunRecord).toHaveBeenCalledTimes(1)
 	expect(runRecordMocks.beginRunRecord).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			context: expect.objectContaining({
 				surface: 'workflow',
 				name: 'shade-event',
@@ -554,7 +570,11 @@ test('package and inline workflows each record exactly one workflow run with wor
 	)
 	expect(runRecordMocks.finishRunRecord).toHaveBeenCalledTimes(1)
 	expect(runRecordMocks.finishRunRecord).toHaveBeenCalledWith(
-		expect.objectContaining({ status: 'success' }),
+		expect.objectContaining({
+			status: 'success',
+			logs: ['[log] pkg'],
+			result: { ok: true, source: 'package' },
+		}),
 	)
 	expect(invocationMocks.invokePackageExport).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -571,8 +591,8 @@ test('package and inline workflows each record exactly one workflow run with wor
 		idempotencyKey: 'inline-single-run-record',
 	})
 	invocationMocks.runModuleWithRegistry.mockResolvedValueOnce({
-		result: { ok: true },
-		logs: [],
+		result: { ok: true, source: 'inline' },
+		logs: ['[log] inline'],
 	})
 	await inlineRun.run()
 	expect(runRecordMocks.beginRunRecord).toHaveBeenCalledTimes(1)
@@ -588,6 +608,72 @@ test('package and inline workflows each record exactly one workflow run with wor
 	)
 	expect(runRecordMocks.finishRunRecord).toHaveBeenCalledTimes(1)
 	expect(runRecordMocks.finishRunRecord).toHaveBeenCalledWith(
-		expect.objectContaining({ status: 'success' }),
+		expect.objectContaining({
+			status: 'success',
+			logs: ['[log] inline'],
+			result: { ok: true, source: 'inline' },
+		}),
+	)
+})
+
+test('workflow steps inherit the request that started the workflow', async () => {
+	runRecordMocks.resetProjections()
+	const lineage = sessionRequestLineage('user-1')
+	const packageRun = await queueWorkflow({
+		...packageBody,
+		runAt,
+		idempotencyKey: 'package-lineage',
+	})
+	expect(packageRun.queued.params).toMatchObject({ lineage })
+	invocationMocks.invokePackageExport.mockResolvedValue({
+		status: 200,
+		body: { result: { ok: true } },
+	})
+	await packageRun.run()
+	expect(invocationMocks.invokePackageExport).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			token: expect.objectContaining({
+				request: { kind: 'inherited', lineage },
+			}),
+		}),
+	)
+
+	const { lineage: _lineage, ...legacyPayload } = packageRun.queued
+		.params as DynamicCallableWorkflowPayload
+	await packageRun.run(legacyPayload)
+	expect(invocationMocks.invokePackageExport).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			token: expect.objectContaining({
+				request: {
+					kind: 'platform-event',
+					sourceId: 'internal:package-workflows',
+				},
+			}),
+		}),
+	)
+	invocationMocks.invokePackageExport.mockReset()
+
+	const inlineRun = await queueWorkflow({
+		code: 'export default async function main(){ return { ok: true }; }',
+		runAt,
+		idempotencyKey: 'inline-lineage',
+	})
+	invocationMocks.runModuleWithRegistry.mockResolvedValueOnce({
+		result: { ok: true },
+		logs: [],
+	})
+	await inlineRun.run()
+	expect(invocationMocks.runModuleWithRegistry).toHaveBeenLastCalledWith(
+		expect.anything(),
+		expect.objectContaining({
+			request: expect.objectContaining({
+				actor: lineage.actor,
+				attribution: lineage.attribution,
+				credential: lineage.credential,
+			}),
+		}),
+		expect.anything(),
+		undefined,
+		expect.anything(),
 	)
 })

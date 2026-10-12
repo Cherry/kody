@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const emailDeliveryUpdatedTopic = 'email.message.delivery.updated'
@@ -28,6 +29,10 @@ vi.mock('./repo.ts', () => ({
 	listEmailAttachmentsForMessage: mocks.listEmailAttachmentsForMessage,
 }))
 
+vi.mock('./inbound-sender.ts', () => ({
+	classifyInboundEmailSender: async () => ({ kind: 'inbox-owner' }),
+}))
+
 vi.mock('./mailbox-internal-read.ts', () => ({
 	listInternalEmailAttachmentsForMessage:
 		mocks.listInternalEmailAttachmentsForMessage,
@@ -47,7 +52,7 @@ const env = {
 function subscribePackage(kodyId: string, topic: string) {
 	const savedPackage = {
 		id: `package-${kodyId}`,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: `source-${kodyId}`,
 		kodyId,
 		name: `@user/${kodyId}`,
@@ -73,7 +78,7 @@ test('delivery updates fan out only through the stored message owner', async () 
 	)
 	const message = {
 		id: 'message-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		inboxId: 'inbox-1',
 		threadId: 'thread-1',
 		fromAddress: 'user@inbox.example.com',
@@ -118,7 +123,7 @@ test('delivery updates fan out only through the stored message owner', async () 
 
 	await dispatch()
 	expect(mocks.listSavedPackagesByUserId).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(mocks.invokePackageSubscription).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -156,7 +161,7 @@ function inboundMessageFixture(input: {
 }) {
 	return {
 		id: input.id,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		inboxId: 'inbox-1',
 		fromAddress: 'sender@example.net',
 		envelopeFrom: 'sender@example.net',
@@ -197,7 +202,7 @@ test('accepted inbound messages dispatch email.message.received with classificat
 	)
 	await dispatchInboundEmailSubscriptionEvents({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		message: inboundMessageFixture({
 			id: 'accepted-1',
 			classification: 'accepted',
@@ -211,6 +216,11 @@ test('accepted inbound messages dispatch email.message.received with classificat
 			savedPackage,
 			topic: inboundEmailReceiptTopic,
 			idempotencyKey: `email:accepted-1:${savedPackage.id}:${inboundEmailReceiptTopic}`,
+			request: {
+				kind: 'inbound-email',
+				sourceId: 'inbox-1',
+				sender: { kind: 'inbox-owner' },
+			},
 			params: expect.objectContaining({
 				event: inboundEmailReceiptTopic,
 				message: expect.objectContaining({
@@ -230,7 +240,7 @@ test('accepted inbound messages dispatch email.message.received with classificat
 	)
 	expect(mocks.listInternalEmailAttachmentsForMessage).toHaveBeenCalledWith({
 		env,
-		ownerId: 'user-1',
+		ownerId: ownerIdFromStored('user-1'),
 		messageId: 'accepted-1',
 	})
 	expect(mocks.listEmailAttachmentsForMessage).not.toHaveBeenCalled()
@@ -245,7 +255,7 @@ test('quarantined inbound messages dispatch email.message.quarantined and not re
 	)
 	await dispatchInboundEmailSubscriptionEvents({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		message: inboundMessageFixture({
 			id: 'quarantined-1',
 			classification: 'quarantined',

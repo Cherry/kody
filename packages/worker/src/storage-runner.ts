@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/cloudflare'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { getRecoveryBookmark, restoreToBookmark } from '#worker/dr/do-pitr.ts'
 import { buildSentryOptions } from '#worker/sentry-options.ts'
@@ -18,7 +19,21 @@ import {
 	storageBucketKindFromStorageId,
 } from '#worker/storage-buckets/service.ts'
 import { createStorageEstimateReadError } from '#worker/storage-estimate-error.ts'
-import { buildPackageStorageId } from '#worker/storage-ids.ts'
+import {
+	countStorageSqlRows,
+	readStorageSqlRowsPage,
+	readStorageSqlSchema,
+	writeStorageSqlRows,
+	writeStorageSqlSchema,
+	type StorageSqlExec,
+	type StorageSqlRowsPage,
+	type StorageSqlSchemaObject,
+	type StorageSqlValue as DumpSqlValue,
+} from '#worker/storage-runner-sql-dump.ts'
+import {
+	buildPackageStorageId,
+	packageIdFromStorageId,
+} from '#worker/storage-ids.ts'
 import { storageRunnerDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { recordDurableObjectRowsRead } from '#worker/usage/durable-object-rows.ts'
 import { createMeteredDurableObjectStub } from '#worker/usage/durable-object-usage.ts'
@@ -168,6 +183,57 @@ export async function applyImportStoragePage(
 			throw new Error(`Unsupported importStorage mode: ${String(exhaustive)}`)
 		}
 	}
+	return await applyReplaceStoragePage(storage, {
+		replacePage: input.replacePage,
+		entries: input.entries.map((entry) => ({
+			key: entry.key,
+			read: () => {
+				try {
+					return JSON.parse(entry.valueJson) as unknown
+				} catch {
+					throw new Error(
+						`importStorage received invalid valueJson for key ${normalizeStorageKey(entry.key)}`,
+					)
+				}
+			},
+		})),
+	})
+}
+
+/**
+ * Same replace protocol as {@link applyImportStoragePage}, but values arrive
+ * already structured-cloned over RPC, so Dates, Maps, typed arrays, and other
+ * cloneable values survive (JSON would flatten them).
+ */
+export async function applyImportStorageValuesPage(
+	storage: {
+		deleteAll: () => Promise<void> | void
+		put: (key: string, value: unknown) => Promise<void> | void
+	},
+	input: {
+		replacePage: 'first' | 'continue'
+		entries: Array<{ key: string; value: unknown }>
+	},
+): Promise<{ ok: true; written: number; cleared: boolean }> {
+	return await applyReplaceStoragePage(storage, {
+		replacePage: input.replacePage,
+		entries: input.entries.map((entry) => ({
+			key: entry.key,
+			read: () => entry.value,
+		})),
+	})
+}
+
+async function applyReplaceStoragePage(
+	storage: {
+		deleteAll: () => Promise<void> | void
+		put: (key: string, value: unknown) => Promise<void> | void
+	},
+	input: {
+		replacePage: 'first' | 'continue'
+		entries: Array<{ key: string; read: () => unknown }>
+	},
+): Promise<{ ok: true; written: number; cleared: boolean }> {
 	let cleared = false
 	switch (input.replacePage) {
 		case 'first': {
@@ -187,13 +253,7 @@ export async function applyImportStoragePage(
 	let written = 0
 	for (const entry of input.entries) {
 		const key = normalizeStorageKey(entry.key)
-		let value: unknown
-		try {
-			value = JSON.parse(entry.valueJson) as unknown
-		} catch {
-			throw new Error(`importStorage received invalid valueJson for key ${key}`)
-		}
-		await storage.put(key, value)
+		await storage.put(key, entry.read())
 		written += 1
 	}
 	return { ok: true, written, cleared }
@@ -665,6 +725,59 @@ class StorageRunnerBase extends DurableObject<Env> {
 		return await applyImportStoragePage(this.ctx.storage, input)
 	}
 
+	/** Owner-to-owner copy counterpart of {@link exportStorage}; lossless. */
+	async importStorageValues(input: {
+		replacePage: 'first' | 'continue'
+		entries: Array<{ key: string; value: unknown }>
+	}): Promise<{
+		ok: true
+		written: number
+		cleared: boolean
+	}> {
+		return await applyImportStorageValuesPage(this.ctx.storage, input)
+	}
+
+	private readonly sqlExec: StorageSqlExec = (query, ...params) =>
+		this.ctx.storage.sql.exec<Record<string, DumpSqlValue>>(query, ...params)
+
+	async exportSqlSchema(): Promise<Array<StorageSqlSchemaObject>> {
+		return readStorageSqlSchema(this.sqlExec)
+	}
+
+	async exportSqlRows(input: {
+		table: string
+		cursor: number | null
+		pageSize?: number
+	}): Promise<StorageSqlRowsPage> {
+		return readStorageSqlRowsPage(this.sqlExec, input)
+	}
+
+	async importSqlSchema(input: {
+		objects: Array<StorageSqlSchemaObject>
+		phase: 'tables' | 'finish'
+	}): Promise<{ ok: true }> {
+		this.ctx.storage.transactionSync(() =>
+			writeStorageSqlSchema(this.sqlExec, input),
+		)
+		return { ok: true }
+	}
+
+	async importSqlRows(input: {
+		table: string
+		columns: Array<string>
+		rows: Array<Array<DumpSqlValue>>
+	}): Promise<{ written: number }> {
+		return {
+			written: this.ctx.storage.transactionSync(() =>
+				writeStorageSqlRows(this.sqlExec, input),
+			),
+		}
+	}
+
+	async countSqlRows(): Promise<Record<string, number>> {
+		return countStorageSqlRows(this.sqlExec)
+	}
+
 	async sqlQuery(input: {
 		query: string
 		params?: Array<unknown>
@@ -688,9 +801,55 @@ export const StorageRunner = Sentry.instrumentDurableObjectWithSentry(
 )
 export type StorageRunner = InstanceType<typeof StorageRunner>
 
+export type StorageRunnerTransferStub = {
+	exportStorage: (payload: {
+		pageSize?: number
+		startAfter?: string | null
+	}) => Promise<StorageExportResult>
+	importStorageValues: (payload: {
+		replacePage: 'first' | 'continue'
+		entries: Array<{ key: string; value: unknown }>
+	}) => Promise<{ ok: true; written: number; cleared: boolean }>
+	clearStorage: () => Promise<StorageClearResult>
+	exportSqlSchema: () => Promise<Array<StorageSqlSchemaObject>>
+	exportSqlRows: (payload: {
+		table: string
+		cursor: number | null
+		pageSize?: number
+	}) => Promise<StorageSqlRowsPage>
+	importSqlSchema: (payload: {
+		objects: Array<StorageSqlSchemaObject>
+		phase: 'tables' | 'finish'
+	}) => Promise<{ ok: true }>
+	importSqlRows: (payload: {
+		table: string
+		columns: Array<string>
+		rows: Array<Array<DumpSqlValue>>
+	}) => Promise<{ written: number }>
+	countSqlRows: () => Promise<Record<string, number>>
+}
+
+/**
+ * Unmetered StorageRunner stub for operator copies between owners. It skips
+ * bucket registration on purpose: an org resource transfer re-points the
+ * `user_storage_buckets` row in its own D1 batch, and a registration upsert
+ * for the target owner would collide with that row.
+ */
+export function storageRunnerTransferStub(input: {
+	env: Pick<Env, 'STORAGE_RUNNER'>
+	userId: OwnerId
+	storageId: string
+}): StorageRunnerTransferStub {
+	return input.env.STORAGE_RUNNER.get(
+		input.env.STORAGE_RUNNER.idFromName(
+			storageRunnerDurableObjectName(input.userId, input.storageId),
+		),
+	) as unknown as StorageRunnerTransferStub
+}
+
 export function storageRunnerRpc(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageId: string
 }) {
 	const runner = createMeteredDurableObjectStub({
@@ -771,6 +930,7 @@ export function storageRunnerRpc(input: {
 		})
 	}
 
+	const attributedPackageId = packageIdFromStorageId(input.storageId)
 	// Key-value reads on a SQLite-backed Durable Object are billed as rows
 	// read: one per key (including cache hits) and one per listed entry. The
 	// KV API exposes no cursor, so these are the billing units, not a guess.
@@ -780,6 +940,7 @@ export function storageRunnerRpc(input: {
 			userId: input.userId,
 			doClass: 'StorageRunner',
 			rowsRead,
+			...(attributedPackageId ? { packageId: attributedPackageId } : {}),
 		})
 	}
 
@@ -855,7 +1016,7 @@ export function storageRunnerRpc(input: {
 
 async function readStorageEstimateChunkWithRetry(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	buckets: Array<{ storageId: string; kind: StorageBucketKind }>
 	/** Backoff pauses between attempts; attempts = length + 1. */
 	retryDelaysMs?: ReadonlyArray<number>
@@ -989,7 +1150,7 @@ async function readStorageEstimateChunkWithRetry(input: {
  */
 export async function readStorageBucketEstimatedBytes(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageId: string
 	retryDelaysMs?: ReadonlyArray<number>
 }): Promise<number> {
@@ -1009,7 +1170,7 @@ export async function readStorageBucketEstimatedBytes(input: {
 
 export async function readInventoriedStorageBucketEstimatedBytes(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageId: string
 	kind: StorageBucketKind
 	retryDelaysMs?: ReadonlyArray<number>
@@ -1025,7 +1186,7 @@ export async function readInventoriedStorageBucketEstimatedBytes(input: {
 
 async function readStorageBytesEntitlementBaseline(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	storageId: string
 }) {
 	const [d1Bytes, bucketEstimates] = await Promise.all([
@@ -1114,7 +1275,7 @@ async function readStorageBytesEntitlementBaseline(input: {
 
 export async function assertStorageRunnerWriteWithinEntitlement(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	email: string | null | undefined
 	storageId: string
 	requested?: number
@@ -1184,7 +1345,7 @@ export async function assertStorageRunnerWriteWithinEntitlement(input: {
 
 export function createStorageKodyTools(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	email?: string | null
 	storageId: string
 	writable: boolean
@@ -1347,31 +1508,17 @@ export const packageStorageRetrieverReadOnlyMessage =
 
 export function createPackageStorageKodyTools(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	email?: string | null
 	grantedPackageIds: ReadonlySet<string>
 	writable?: boolean
-	storageOwnerByPackageId?: ReadonlyMap<string, string>
 }) {
 	const writable = input.writable !== false
 	// One cache for the whole sandbox so nested packageStorage() SQL across
 	// granted packages (and repeated CREATE/INSERT in one export) does not
 	// rescan every inventoried bucket on each statement.
-	const entitlementCacheByOwner = new Map<
-		string,
-		ReturnType<typeof createStorageBytesEntitlementRunCache>
-	>()
-	const entitlementCacheFor = (storageOwnerUserId: string) => {
-		let cache = entitlementCacheByOwner.get(storageOwnerUserId)
-		if (!cache) {
-			cache = createStorageBytesEntitlementRunCache()
-			entitlementCacheByOwner.set(storageOwnerUserId, cache)
-		}
-		return cache
-	}
+	const entitlementCache = createStorageBytesEntitlementRunCache()
 	const createGrantedStorageTools = (packageId: string) => {
-		const storageOwnerUserId =
-			input.storageOwnerByPackageId?.get(packageId) ?? input.userId
 		const {
 			storageGet,
 			storageList,
@@ -1381,13 +1528,11 @@ export function createPackageStorageKodyTools(input: {
 			storageClear,
 		} = createStorageKodyTools({
 			env: input.env,
-			userId: storageOwnerUserId,
-			// Owner-id storage must not pair the guest email with the owner's
-			// user id (plan lookup is email+id). Resolve the owner by id only.
-			email: storageOwnerUserId === input.userId ? input.email : null,
+			userId: input.userId,
+			email: input.email,
 			storageId: buildPackageStorageId(packageId),
 			writable,
-			entitlementCache: entitlementCacheFor(storageOwnerUserId),
+			entitlementCache,
 		})
 		if (writable && (!storageSet || !storageDelete || !storageClear)) {
 			// createStorageKodyTools only omits these when writable is false.

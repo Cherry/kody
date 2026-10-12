@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import {
@@ -22,7 +23,7 @@ type AuthenticatedUser = NonNullable<
 export function createAccountValuesHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request }) {
+		async handler({ request }: { request: Request }) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
@@ -40,11 +41,7 @@ export function createAccountValuesHandler(env: Env) {
 				loaderData: { accountValues },
 			})
 		},
-	} satisfies Action<
-		| typeof routes.accountValues
-		| typeof routes.accountValueNew
-		| typeof routes.accountValueDetail
-	>
+	}
 }
 
 /**
@@ -112,7 +109,10 @@ async function handleDeleteAction(input: {
 	}
 	const deleted = await deleteValue({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		scope: 'user',
 		storageContext: userScopedStorageContext,
 		name,

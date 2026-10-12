@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import type * as serviceModule from '#worker/package-invocations/service.ts'
@@ -88,7 +89,7 @@ function subscribedManifest(input: {
 function savedPackage(index: number, kodyId: string) {
 	return {
 		id: `package-${index}`,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: `source-${index}`,
 		kodyId,
 		name: `@user/${kodyId}`,
@@ -109,13 +110,14 @@ test('run.error.recorded fans out only to owning-user packages with a lean paylo
 
 	const results = await dispatchRunErrorSubscriptionEvents({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		orgSlug: 'ada',
 		run: run as never,
 	})
 
 	expect(results).toHaveLength(1)
 	expect(mocks.listSavedPackagesByUserId).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(mocks.invokePackageSubscription).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -125,7 +127,7 @@ test('run.error.recorded fans out only to owning-user packages with a lean paylo
 			source: 'run-records',
 			params: expect.objectContaining({
 				event: runErrorRecordedTopic,
-				activity_url: 'https://example.com/account/activity/run-1',
+				activity_url: 'https://example.com/@ada/-/activity/run-1',
 				run: expect.objectContaining({
 					id: 'run-1',
 					surface: 'job',
@@ -162,7 +164,8 @@ test('run.error.recorded skips recursion/non-errors and never throws on handler 
 	const dispatch = (run: ReturnType<typeof errorRun>) =>
 		dispatchRunErrorSubscriptionEvents({
 			env: createEnv(),
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			orgSlug: 'ada',
 			run: run as never,
 		})
 
@@ -224,7 +227,7 @@ test('run.error.recorded skips recursion/non-errors and never throws on handler 
 		expect.objectContaining({ runId: 'run-1', error: expect.any(Error) }),
 	)
 	expect(consoleWarn).toHaveBeenCalledWith(
-		'Failed to load package manifest for run.error.recorded subscription',
+		'admin-package-subscription-manifest-load-failed',
 		expect.objectContaining({ packageId: 'package-2' }),
 	)
 })

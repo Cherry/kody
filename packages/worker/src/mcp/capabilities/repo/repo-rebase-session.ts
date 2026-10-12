@@ -1,9 +1,11 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeRepoSessionPackageWrite } from './authorize-repo-session-package.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { repoSessionIdSchema } from './repo-shared.ts'
-import { z } from 'zod'
 
 const outputSchema = z.object({
 	ok: z.literal(true),
@@ -17,6 +19,7 @@ export const repoRebaseSessionCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoRebaseSession',
+		orgPermission: 'package:write',
 		description:
 			'Rebase a repo session against the latest published source state when the base commit has moved.',
 		keywords: ['repo', 'rebase', 'session', 'publish', 'base moved'],
@@ -26,13 +29,20 @@ export const repoRebaseSessionCapability = defineDomainCapability(
 		inputSchema: repoSessionIdSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageWrite({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			const result = await repoSessionRpc(
 				ctx.env,
 				args.session_id,
 			).rebaseSession({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: ownerId,
 			})
 			return {
 				ok: result.ok,

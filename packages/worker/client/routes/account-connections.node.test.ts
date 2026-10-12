@@ -1,17 +1,26 @@
 import { jsx } from 'remix/component/jsx-runtime'
 import { renderToString } from 'remix/component/server'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { AppSessionProvider } from '#client/app-session-context.tsx'
 import { AppLoaderDataProvider } from '#client/loader-data-context.tsx'
 import { RouterLocationProvider } from '#client/router-location.tsx'
-import { AccountConnectionsRoute } from '#client/routes/account-connections.tsx'
 import {
-	accountNavItemsFor,
+	AccountConnectionsRoute,
+	accountConnectionsRouteLoader,
+} from '#client/routes/account-connections.tsx'
+import {
 	accountPackagesNavHref,
-} from '#client/routes/account-management-components.tsx'
+	accountRailGroups,
+	accountRailOrgSlug,
+	isAccountNavItemActive,
+	isAccountRailPath,
+	workspaceLandingItem,
+	workspaceRailGroups,
+} from '#client/routes/account-rail.ts'
 import { type SessionInfo } from '#client/session.ts'
 import {
 	accountConnectionAgentIds,
+	accountConnectionsListHref,
 	accountConnectionsNewHref,
 	parseAccountConnectionsPathname,
 } from '#universal/account-connections.ts'
@@ -31,7 +40,7 @@ const session: SessionInfo = {
 
 function renderConnectionsPage(
 	accountConnectedAgents: AccountConnectedAgentsLoaderData,
-	url: string = routes.accountConnections.href(),
+	url: string = '/account/connections',
 ) {
 	return renderToString(
 		jsx(RouterLocationProvider, {
@@ -55,6 +64,7 @@ const connectedCursor: AccountConnectedAgentsLoaderData = {
 		{
 			clientId: 'cursor-client',
 			grantIds: ['grant-1'],
+			connectionProfileName: null,
 			label: 'Cursor',
 			kind: 'cursor',
 			connectedAt: '2026-01-01T00:00:00.000Z',
@@ -78,7 +88,7 @@ test('connections page renders the connected list with Add connection, the MCP U
 	expect(html).toMatch(
 		/data-testid="account-connections-add"[^>]*>Add connection</,
 	)
-	expect(html).toContain(`href="${routes.accountConnectionNew.href()}"`)
+	expect(html).toContain(`href="${'/account/connections/new'}"`)
 	expect(html).toContain('aria-label="MCP URL"')
 	expect(html).toContain('>https://kody.example/mcp<')
 	expect(html).toContain('Copy MCP URL')
@@ -89,16 +99,20 @@ test('connections page renders the connected list with Add connection, the MCP U
 	expect(html).toContain(`href="${routes.accountMcpOauthClients.href()}"`)
 	// No cold-path loading copy when the SSR payload is present.
 	expect(html).not.toContain('Loading connections')
-	// The rail marks this page current and links Repositories to the profile.
-	expect(html).toMatch(/href="\/account\/connections"[^>]*aria-current="page"/)
-	expect(html).toMatch(/href="\/@jane"[^>]*>[\s\S]*?Repositories<\/a>/)
+	// The workspace rail marks this page current and links Repositories to
+	// the workspace list, not the public profile.
+	expect(html).toContain('aria-label="Workspace sections"')
+	expect(html).toMatch(/href="\/@jane\/-\/connections"[^>]*aria-current="page"/)
+	expect(html).toMatch(
+		/href="\/@jane\/-\/packages"[^>]*>[\s\S]*?Repositories<\/a>/,
+	)
 	expect(html).toContain('data-icon="box"')
 })
 
 test('Add connection shows every named client on every viewport; already-connected hosts stay links with a Connected mark', async () => {
 	const html = await renderConnectionsPage(
 		connectedCursor,
-		routes.accountConnectionNew.href(),
+		'/account/connections/new',
 	)
 
 	expect(html).toContain('data-testid="account-connections-agent-grid"')
@@ -106,7 +120,7 @@ test('Add connection shows every named client on every viewport; already-connect
 	expect(html).toMatch(
 		/data-testid="account-connections-back"[^>]*>← back to connections</,
 	)
-	expect(html).toContain(`href="${routes.accountConnections.href()}"`)
+	expect(html).toContain(`href="${'/account/connections'}"`)
 	// The list is its own page; it does not wrap the grid.
 	expect(html).not.toContain('aria-label="Connected agents"')
 	expect(html).not.toContain('data-testid="account-connections-add"')
@@ -153,7 +167,7 @@ test('Add connection shows every named client on every viewport; already-connect
 test('picking a client shows that host’s install steps with a way back to the grid', async () => {
 	const html = await renderConnectionsPage(
 		connectedCursor,
-		routes.accountConnectionNewAgent.href({ agent: 'claude-code' }),
+		'/account/connections/new/claude-code',
 	)
 
 	expect(html).toContain('aria-label="Connect Claude Code"')
@@ -165,7 +179,7 @@ test('picking a client shows that host’s install steps with a way back to the 
 	expect(html).toContain('data-testid="onboarding-authenticate-callout"')
 	expect(html).toMatch(
 		new RegExp(
-			`href="${routes.accountConnectionNew.href()}"[^>]*data-testid="account-connections-change-agent"`,
+			`href="${'/account/connections/new'}"[^>]*data-testid="account-connections-change-agent"`,
 		),
 	)
 	expect(html).not.toContain('data-testid="account-connections-agent-grid"')
@@ -174,7 +188,7 @@ test('picking a client shows that host’s install steps with a way back to the 
 	)
 	expect(html).not.toContain('aria-label="Connected agents"')
 	// Connections stays the current rail item on the add views.
-	expect(html).toMatch(/href="\/account\/connections"[^>]*aria-current="page"/)
+	expect(html).toMatch(/href="\/@jane\/-\/connections"[^>]*aria-current="page"/)
 })
 
 test('an unknown agent segment renders the fallback instead of instructions', async () => {
@@ -199,6 +213,10 @@ test('connections views parse from the pathname', () => {
 		['/account/connections/new/nope', null],
 		['/account/connections/new/cursor/x', null],
 		['/account/connections/nope', null],
+		['/@jane/-/connections', { kind: 'list' }],
+		['/@jane/-/connections/new', { kind: 'new', agent: null }],
+		['/@jane/-/connections/new/cursor', { kind: 'new', agent: 'cursor' }],
+		['/@jane/-/connections/new/nope', null],
 	] as const
 	expect(
 		cases.map(([pathname]) => [
@@ -210,6 +228,26 @@ test('connections views parse from the pathname', () => {
 	expect(accountConnectionsNewHref('grok-cli')).toBe(
 		'/account/connections/new/grok-cli',
 	)
+	expect(accountConnectionsListHref('/@jane/-/connections')).toBe(
+		'/@jane/-/connections',
+	)
+	expect(accountConnectionsNewHref(null, '/@jane/-/connections')).toBe(
+		'/@jane/-/connections/new',
+	)
+	expect(accountConnectionsNewHref('cursor', '/@jane/-/connections')).toBe(
+		'/@jane/-/connections/new/cursor',
+	)
+})
+
+test('connections list under /@slug keeps Add and View steps on org paths', async () => {
+	const html = await renderConnectionsPage(
+		connectedCursor,
+		'/@jane/-/connections',
+	)
+	expect(html).toContain('href="/@jane/-/connections/new"')
+	expect(html).toContain('href="/@jane/-/connections/new/cursor"')
+	expect(html).not.toContain('href="/account/connections/new"')
+	expect(html).not.toContain('href="/account/connections/new/cursor"')
 })
 
 test('connections page swaps the copy card for a verify note while the email is unverified', async () => {
@@ -225,24 +263,372 @@ test('connections page swaps the copy card for a verify note while the email is 
 	expect(html).toContain('No agents have authorized yet.')
 })
 
-test('account rail lists Connections and Repositories at the same level as the other sections', () => {
-	const items = accountNavItemsFor({
-		username: 'jane',
-		showShared: true,
-		showSecretProviders: false,
+test('connection profiles list only granted packages and add more through a package combobox', async () => {
+	const packageOptions = Array.from({ length: 40 }, (_, index) => ({
+		id: `pkg-${index}`,
+		name: `tool-${index}`,
+		kodyId: `@jane/tool-${String(index).padStart(2, '0')}`,
+	}))
+	const html = await renderConnectionsPage({
+		...connectedCursor,
+		connectionProfilesEnabled: true,
+		connectionProfilePackageOptions: packageOptions,
+		connectionProfiles: [
+			{
+				id: 'profile-ci',
+				name: 'ci',
+				grants: [
+					{ resourceType: 'package', resourceId: 'pkg-3', actions: ['read'] },
+					{
+						resourceType: 'package',
+						resourceId: 'pkg-gone',
+						actions: ['execute', 'read'],
+					},
+				],
+				mcpServerUrl: 'https://kody.example/mcp?profile=ci',
+				createdAt: '2026-01-01T00:00:00.000Z',
+				updatedAt: '2026-01-01T00:00:00.000Z',
+			},
+		],
 	})
-	expect(items.map((item) => item.label)).toContain('Shared')
-	expect(items.map((item) => item.label)).toContain('Experiments')
-	expect(items.find((item) => item.label === 'Experiments')?.href).toBe(
+
+	expect(html).toContain('data-testid="connection-profiles"')
+	expect(html).toContain('>https://kody.example/mcp?profile=ci<')
+	const profileCard = html.slice(
+		html.indexOf('data-testid="connection-profile-profile-ci"'),
+		html.indexOf('data-testid="connection-profile-create"'),
+	)
+	// The profile card lists only its grants (a deleted package stays visible
+	// so it can still be removed), not one row per account package.
+	expect(profileCard).toContain('aria-label="Packages granted to ci"')
+	expect(profileCard).toContain('>@jane/tool-03<')
+	expect(profileCard).toContain('>read<')
+	expect(profileCard).toContain('>read · execute<')
+	expect(profileCard).toContain('>Unknown package<code>pkg-gone</code>')
+	expect(profileCard).not.toContain('@jane/tool-04')
+	expect(profileCard).toContain('aria-label="Edit packages for ci"')
+
+	const createForm = html.slice(
+		html.indexOf('data-testid="connection-profile-create"'),
+	)
+	// A new profile starts with no packages; every saved package is
+	// reachable through the combobox instead of a grant-scoped list.
+	expect(createForm).toContain('No packages yet')
+	expect(createForm).toMatch(
+		/<label[^>]*for="connection-profile-create-add-package"[^>]*>Add package</,
+	)
+	expect(createForm).toContain('placeholder="Search saved packages"')
+	expect(createForm.match(/role="option"/g)).toHaveLength(40)
+	expect(createForm).not.toContain('pkg-3"')
+})
+
+test('account rail holds the person: profile, security, organizations, experiments, data', () => {
+	const items = accountRailGroups({ workspaceSlug: null }).flatMap(
+		(group) => group.items,
+	)
+	expect(items.map((item) => item.label)).toEqual([
+		'Profile',
+		'Security',
+		'Organizations',
+		'Experiments',
+		'Data & deletion',
+	])
+	const security = items.find((item) => item.label === 'Security')
+	expect(
+		security && isAccountNavItemActive(security, '/account/passkeys'),
+	).toBe(true)
+	const profile = items.find((item) => item.label === 'Profile')
+	expect(profile && isAccountNavItemActive(profile, '/account/security')).toBe(
+		false,
+	)
+	for (const path of [
+		'/account',
+		'/account/security',
+		'/account/two-factor',
+		'/account/passkeys',
+		'/account/organizations',
+		'/account/organizations/new',
 		'/account/experiments',
+		'/account/data',
+	]) {
+		expect(isAccountRailPath(path), path).toBe(true)
+	}
+	for (const path of [
+		'/account/billing',
+		'/account/usage',
+		'/account/credits',
+		'/account/mcp-oauth-clients',
+		'/@jane/-/secrets',
+		'/@jane/-/packages',
+	]) {
+		expect(isAccountRailPath(path), path).toBe(false)
+	}
+})
+
+test('workspace landing opens Repositories so the rail is one click away', () => {
+	expect(workspaceLandingItem('jane')).toEqual({
+		href: '/@jane/-/packages',
+		label: 'Workspace',
+		icon: 'box',
+	})
+	expect(workspaceLandingItem(null).href).toBe('/account')
+})
+
+test('account rail opens the signup workspace: overview, repositories, connections, MCP servers, secrets, jobs, memories', () => {
+	const groups = accountRailGroups({ workspaceSlug: 'jane-old' })
+	expect(groups.map((group) => group.label)).toEqual([null, 'Workspace'])
+	expect(
+		groups[1]?.items.map((item) => [item.label, item.href, item.icon]),
+	).toEqual([
+		['Overview', '/@jane-old/-/overview', 'home'],
+		['Repositories', '/@jane-old/-/packages', 'box'],
+		['Connections', '/@jane-old/-/connections', 'link'],
+		['MCP servers', '/@jane-old/-/mcp-servers', 'server'],
+		['Secrets', '/@jane-old/-/secrets', 'key'],
+		['Jobs', '/@jane-old/-/jobs', 'briefcase'],
+		['Memories', '/@jane-old/-/memories', 'book'],
+	])
+	// Workspace links leave the account rail: those pages take the workspace
+	// rail, and nothing in the Workspace group is current on an account page.
+	for (const item of groups[1]?.items ?? []) {
+		expect(isAccountRailPath(item.href), item.href).toBe(false)
+		expect(isAccountNavItemActive(item, '/account'), item.href).toBe(false)
+	}
+})
+
+test('workspace rail groups what the organization owns and keeps its slug in every link', () => {
+	const groups = workspaceRailGroups({
+		orgSlug: 'jane',
+		personal: true,
+		role: 'owner',
+	})
+	const items = groups.flatMap((group) => group.items)
+	// Overview leads the personal rail and is current only on its own page.
+	expect(groups[0]).toEqual({
+		label: null,
+		items: [{ href: '/@jane/-/overview', label: 'Overview', icon: 'home' }],
+	})
+	const overview = items[0]
+	expect(
+		overview && isAccountNavItemActive(overview, '/@jane/-/overview'),
+	).toBe(true)
+	expect(overview && isAccountNavItemActive(overview, '/@jane/-/jobs')).toBe(
+		false,
 	)
-	expect(items.find((item) => item.label === 'Connections')?.href).toBe(
-		'/account/connections',
-	)
-	// Repositories is the profile page — the canonical repo list — not the
-	// `/account/packages` redirect, unless the session has no username yet.
+	// Every section the overview page lists carries a one-line description.
+	for (const item of groups.slice(1).flatMap((group) => group.items)) {
+		expect(item.description, item.label).toBeTruthy()
+	}
+	// Repositories is the workspace list, not the public profile.
 	expect(items.find((item) => item.label === 'Repositories')?.href).toBe(
-		'/@jane',
+		'/@jane/-/packages',
 	)
-	expect(accountPackagesNavHref(null)).toBe('/account/packages')
+	expect(items.find((item) => item.label === 'Secret providers')?.href).toBe(
+		'/@jane/-/secret-providers',
+	)
+	const billing = items.find((item) => item.label === 'Billing')
+	expect(billing?.href).toBe('/@jane/-/billing')
+	expect(billing && isAccountNavItemActive(billing, '/@jane/-/billing')).toBe(
+		true,
+	)
+	const usage = items.find((item) => item.label === 'Usage')
+	expect(usage && isAccountNavItemActive(usage, '/account/credits')).toBe(true)
+	const connections = items.find((item) => item.label === 'Connections')
+	expect(
+		connections &&
+			isAccountNavItemActive(connections, '/account/mcp-oauth-clients'),
+	).toBe(true)
+	expect(
+		connections &&
+			isAccountNavItemActive(connections, '/@jane/-/connections/new'),
+	).toBe(true)
+	expect(accountPackagesNavHref(null)).toBe('/account')
+})
+
+test('workspace rail for a team organization follows each section page gate', () => {
+	expect(
+		workspaceRailGroups({
+			orgSlug: 'acme',
+			personal: false,
+			role: 'owner',
+		}).map((group) => [group.label, group.items.map((item) => item.href)]),
+	).toEqual([
+		['Build', ['/@acme/-/packages', '/@acme/-/jobs']],
+		['Access', ['/@acme/-/connections']],
+		['Data', ['/@acme/-/secrets']],
+		[
+			'Organization',
+			[
+				'/@acme/-/settings',
+				'/@acme/-/members',
+				'/@acme/-/teams',
+				'/@acme/-/grants',
+				'/@acme/-/collaborators',
+				'/@acme/-/billing',
+			],
+		],
+	])
+	expect(
+		workspaceRailGroups({
+			orgSlug: 'acme',
+			personal: false,
+			role: 'billing',
+		})
+			.flatMap((group) => group.items)
+			.map((item) => item.label),
+	).toEqual([
+		'Repositories',
+		'Jobs',
+		'Connections',
+		'Secrets',
+		'Settings',
+		'Members',
+		'Grants',
+		'Collaborators',
+		'Billing',
+	])
+	expect(
+		workspaceRailGroups({
+			orgSlug: 'acme',
+			personal: false,
+			role: 'member',
+		})
+			.flatMap((group) => group.items)
+			.map((item) => item.label),
+	).toEqual([
+		'Repositories',
+		'Jobs',
+		'Connections',
+		'Secrets',
+		'Settings',
+		'Members',
+		'Teams',
+		'Grants',
+		'Collaborators',
+	])
+	// Grant-only collaborators can open Connections (their own agents bound
+	// to the org) but get a 404 on Repositories and the rest.
+	expect(
+		workspaceRailGroups({
+			orgSlug: 'acme',
+			personal: false,
+			role: null,
+		}).map((group) => [group.label, group.items.map((item) => item.href)]),
+	).toEqual([['Access', ['/@acme/-/connections']]])
+	expect(
+		workspaceRailGroups({ orgSlug: null, personal: false, role: 'owner' }),
+	).toEqual([])
+})
+
+test('account rail org slug prefers the path org over username', () => {
+	const organizations = [
+		{ slug: 'ada-old', personal: true },
+		{ slug: 'acme', personal: false },
+	]
+	expect(
+		accountRailOrgSlug({
+			pathname: '/@acme/-/jobs',
+			organizations,
+			username: 'ada-new',
+		}),
+	).toBe('acme')
+	expect(
+		accountRailOrgSlug({
+			pathname: '/account',
+			organizations,
+			username: 'ada-new',
+		}),
+	).toBe('ada-old')
+})
+
+test('account rail org slug trusts org-owned URLs when the session list is stale', () => {
+	expect(
+		accountRailOrgSlug({
+			pathname: '/@acme/-/settings',
+			organizations: [{ slug: 'ada-old', personal: true }],
+			username: 'ada-new',
+		}),
+	).toBe('acme')
+	expect(
+		accountRailOrgSlug({
+			pathname: '/@acme/-/grants',
+			organizations: [],
+			username: 'ada-new',
+		}),
+	).toBe('acme')
+})
+
+test('the connections loader names the destination org page as referrer', async () => {
+	vi.stubGlobal('window', { location: { origin: 'https://kody.test' } })
+	const fetchMock = vi.fn(
+		async (_input: RequestInfo | URL, _init?: RequestInit) =>
+			new Response(JSON.stringify({ ok: true, agents: [], mcpServerUrl: '' }), {
+				headers: { 'Content-Type': 'application/json' },
+			}),
+	)
+	vi.stubGlobal('fetch', fetchMock)
+	try {
+		// A client navigation from another org: the loader runs before the URL
+		// commits, so the Referer would otherwise name the source org.
+		await accountConnectionsRouteLoader(
+			new URL('https://kody.test/@acme/-/connections'),
+			new AbortController().signal,
+		)
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/account/connected-agents.json',
+			expect.objectContaining({
+				referrer: 'https://kody.test/@acme/-/connections',
+			}),
+		)
+	} finally {
+		vi.unstubAllGlobals()
+	}
+})
+
+test('the connections loader binds usage to the destination org, skips it on Add connection, and never waits long for it', async () => {
+	vi.stubGlobal('window', { location: { origin: 'https://kody.test' } })
+	const agentsPayload = { ok: true, agents: [], mcpServerUrl: '' }
+	const fetchMock = vi.fn(
+		async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/account/connection-usage.json') {
+				// Never answers until aborted, like a stalled usage request.
+				return new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener('abort', () =>
+						reject(new DOMException('Aborted', 'AbortError')),
+					)
+				})
+			}
+			return new Response(JSON.stringify(agentsPayload), {
+				headers: { 'Content-Type': 'application/json' },
+			})
+		},
+	)
+	vi.stubGlobal('fetch', fetchMock)
+	vi.useFakeTimers()
+	try {
+		const listLoad = accountConnectionsRouteLoader(
+			new URL('https://kody.test/@acme/-/connections'),
+			new AbortController().signal,
+		)
+		await vi.advanceTimersByTimeAsync(1500)
+		expect(await listLoad).toEqual({ accountConnectedAgents: agentsPayload })
+		expect(fetchMock).toHaveBeenCalledWith(
+			'/account/connection-usage.json',
+			expect.objectContaining({
+				referrer: 'https://kody.test/@acme/-/connections',
+			}),
+		)
+
+		fetchMock.mockClear()
+		await accountConnectionsRouteLoader(
+			new URL('https://kody.test/@acme/-/connections/new'),
+			new AbortController().signal,
+		)
+		expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+			'/account/connected-agents.json',
+		])
+	} finally {
+		vi.useRealTimers()
+		vi.unstubAllGlobals()
+	}
 })

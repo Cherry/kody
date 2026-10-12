@@ -1,7 +1,11 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { listWebhooksForUser } from '#worker/webhooks/service.ts'
 import { listedWebhookSchema, toListedWebhookCapability } from './shared.ts'
 
@@ -9,6 +13,7 @@ export const webhookListCapability = defineDomainCapability(
 	capabilityDomainNames.webhooks,
 	{
 		name: 'webhookList',
+		orgPermission: 'package:read',
 		description:
 			"List package.json#kody.webhooks declarations across the signed-in user's saved packages, joined with minted handle / enabled state. Declaring a webhook does not open ingress until webhookUrlMint is called. URL secrets and credential URLs are never returned.",
 		keywords: [
@@ -29,11 +34,12 @@ export const webhookListCapability = defineDomainCapability(
 			webhooks: z.array(listedWebhookSchema),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
 			const webhooks = await listWebhooksForUser({
 				env: ctx.env,
+				request: requireMcpRequest(ctx.callerContext),
 				baseUrl: ctx.callerContext.baseUrl,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				packageId: args.packageId,
 				kodyId: args.kodyId,
 			})

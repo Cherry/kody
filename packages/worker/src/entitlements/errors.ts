@@ -8,7 +8,12 @@ import {
 	type ComputeOverageWarningResource,
 } from '#universal/compute-overage.ts'
 import {
+	nextUtcDayStart,
+	nextUtcWeekStart,
+} from '@kody-internal/shared/date-keys.ts'
+import {
 	entitlementResourceLabels,
+	entitlementResourceWindows,
 	formatMinJobInterval,
 	hasHigherPublicPlan,
 	isCreditsUnlockedResource,
@@ -17,6 +22,7 @@ import {
 	parsePlanName,
 	weeklyEntitlementResourceLabel,
 	type EntitlementResource,
+	type EntitlementResourceWindow,
 	type PlanName,
 	type WeeklyComputeWindowResource,
 } from '#universal/plans.ts'
@@ -67,22 +73,109 @@ export function entitlementCreditsOffer(
 }
 
 /**
- * Next step appended to every entitlement denial. Stock is on the
- * purchasable Pro subscription, so it only offers an upgrade on Free.
+ * Next step appended to every entitlement denial, derived from the
+ * resource's window: metered windows say when they reset, standing counts
+ * say what to remove. Stock is on the purchasable Pro subscription, so it
+ * only offers an upgrade on Free.
  */
-export function buildEntitlementUpgradeHint(
+export function buildEntitlementUpgradeHint(input: {
+	resource: EntitlementResource
+	plan: PlanName
+	creditWallet?: CreditWalletState
+	billingPath?: string
+	/** Which hard window blocked a `utc_day` resource. Defaults to `day`. */
+	window?: EntitlementLimitWindow
+	now?: Date
+}) {
+	const resourceWindow = entitlementResourceWindows[input.resource]
+	const reset = buildWindowResetSentence({
+		resourceWindow,
+		deniedWindow: input.window ?? 'day',
+		now: input.now ?? new Date(),
+	})
+	const creditsOffer = entitlementCreditsOffer(
+		input.resource,
+		input.plan,
+		input.creditWallet ?? 'none',
+	)
+	const upgradeOffer = hasHigherPublicPlan(input.plan)
+		? `upgrade your plan at ${input.billingPath ?? '/@<slug>/-/billing'}`
+		: null
+	const actions = [
+		reduceGuidance(input.resource, resourceWindow),
+		creditsOffer ?? upgradeOffer,
+	].filter((action) => action !== null)
+	const actionSentence =
+		actions.length > 0 ? capitalizeSentence(actions.join(', or ')) : null
+	return [reset, actionSentence].filter((part) => part !== null).join(' ')
+}
+
+function reduceGuidance(
 	resource: EntitlementResource,
-	plan: PlanName,
-	creditWallet: CreditWalletState = 'none',
-) {
-	const label = entitlementResourceLabels[resource]
-	const reduceGuidance = `Remove or finish existing ${label} you no longer need.`
-	const creditsOffer = entitlementCreditsOffer(resource, plan, creditWallet)
-	if (creditsOffer) {
-		return `${reduceGuidance.slice(0, -1)}, or ${creditsOffer}.`
+	resourceWindow: EntitlementResourceWindow,
+): string | null {
+	switch (resourceWindow) {
+		case 'standing':
+			return `Remove or finish existing ${entitlementResourceLabels[resource]} you no longer need`
+		case 'per_item':
+			return `Use fewer ${entitlementResourceLabels[resource]}`
+		case 'utc_day':
+			return resource === 'execute_unique_workers_per_day'
+				? 'Rerun code you already ran today and vary params; repeats are free'
+				: null
+		case 'utc_minute':
+			return null
+		default: {
+			const exhaustive: never = resourceWindow
+			throw new Error(`Unknown resource window: ${String(exhaustive)}`)
+		}
 	}
-	if (!hasHigherPublicPlan(plan)) return reduceGuidance
-	return `${reduceGuidance.slice(0, -1)}, or upgrade your plan at /account/billing.`
+}
+
+function buildWindowResetSentence(input: {
+	resourceWindow: EntitlementResourceWindow
+	deniedWindow: EntitlementLimitWindow
+	now: Date
+}): string | null {
+	switch (input.resourceWindow) {
+		case 'utc_day': {
+			if (input.deniedWindow === 'week') {
+				const resetAt = nextUtcWeekStart(input.now)
+				return `This weekly limit resets Monday 00:00 UTC, in ${formatTimeUntil(input.now, resetAt)}.`
+			}
+			const resetAt = nextUtcDayStart(input.now)
+			return `This daily limit resets at 00:00 UTC, in ${formatTimeUntil(input.now, resetAt)}.`
+		}
+		case 'utc_minute':
+			return 'This limit resets when the next minute starts.'
+		case 'standing':
+		case 'per_item':
+			return null
+		default: {
+			const exhaustive: never = input.resourceWindow
+			throw new Error(`Unknown resource window: ${String(exhaustive)}`)
+		}
+	}
+}
+
+const minuteMs = 60 * 1000
+
+/** Compact countdown such as `45m`, `1h 26m`, or `2d 5h 3m` (rounded up). */
+function formatTimeUntil(now: Date, resetAt: Date) {
+	const totalMinutes = Math.max(
+		1,
+		Math.ceil((resetAt.getTime() - now.getTime()) / minuteMs),
+	)
+	const days = Math.floor(totalMinutes / (24 * 60))
+	const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+	const minutes = totalMinutes % 60
+	if (days > 0) return `${days}d ${hours}h ${minutes}m`
+	if (hours > 0) return `${hours}h ${minutes}m`
+	return `${minutes}m`
+}
+
+function capitalizeSentence(text: string) {
+	return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`
 }
 
 /**
@@ -111,7 +204,7 @@ export function parseEntitlementLimitMessage(
 	message: string,
 ): EntitlementLimitErrorDetails | null {
 	const weeklyLabels = (
-		['execute_calls_per_day', 'outbound_fetches_per_day'] as const
+		['execute_unique_workers_per_day', 'outbound_fetches_per_day'] as const
 	).map((resource) => ({
 		resource: resource satisfies WeeklyComputeWindowResource,
 		label: weeklyEntitlementResourceLabel(resource),
@@ -421,4 +514,160 @@ export function isJobIntervalFloorError(
 
 function escapeRegex(value: string) {
 	return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+export const budgetLimitErrorCode = 'org_budget_limit_exceeded' as const
+
+export type BudgetLimitKind = 'user' | 'automation'
+
+export type BudgetLimitErrorDetails = {
+	code: typeof budgetLimitErrorCode
+	kind: BudgetLimitKind
+	orgSlug: string
+	actorUsername?: string
+	spentMicroUsd: number
+	budgetMicroUsd: number
+}
+
+export function formatBudgetMicroUsd(microUsd: number) {
+	return `$${(microUsd / 1_000_000).toFixed(2)}`
+}
+
+export function buildBudgetLimitMessage(details: BudgetLimitErrorDetails) {
+	const orgLabel = `@${details.orgSlug}`
+	switch (details.kind) {
+		case 'user': {
+			const actorLabel = details.actorUsername
+				? `@${details.actorUsername}`
+				: 'This member'
+			const spent = formatBudgetMicroUsd(details.spentMicroUsd)
+			const budget = formatBudgetMicroUsd(details.budgetMicroUsd)
+			return `${actorLabel} reached their monthly budget in org ${orgLabel} (${spent} of ${budget}). An org Owner or Billing member can raise it.`
+		}
+		case 'automation':
+			return `Automation in org ${orgLabel} reached its monthly budget. An org Owner or Billing member can raise it.`
+		default: {
+			const exhaustive: never = details.kind
+			throw new Error(`Unknown budget limit kind: ${String(exhaustive)}`)
+		}
+	}
+}
+
+export function parseBudgetLimitMessage(
+	message: string,
+): BudgetLimitErrorDetails | null {
+	const automationMatch =
+		/^Automation in org @([^ ]+) reached its monthly budget\. An org Owner or Billing member can raise it\.$/.exec(
+			message,
+		)
+	if (automationMatch) {
+		return {
+			code: budgetLimitErrorCode,
+			kind: 'automation',
+			orgSlug: automationMatch[1] ?? '',
+			spentMicroUsd: 0,
+			budgetMicroUsd: 0,
+		}
+	}
+	const userMatch =
+		/^@([^ ]+) reached their monthly budget in org @([^ ]+) \((\$[\d.]+) of (\$[\d.]+)\)\. An org Owner or Billing member can raise it\.$/.exec(
+			message,
+		)
+	if (userMatch) {
+		const spentMicroUsd = parseBudgetDollarAmount(userMatch[3])
+		const budgetMicroUsd = parseBudgetDollarAmount(userMatch[4])
+		if (spentMicroUsd === null || budgetMicroUsd === null) return null
+		return {
+			code: budgetLimitErrorCode,
+			kind: 'user',
+			actorUsername: userMatch[1],
+			orgSlug: userMatch[2] ?? '',
+			spentMicroUsd,
+			budgetMicroUsd,
+		}
+	}
+	const memberMatch =
+		/^This member reached their monthly budget in org @([^ ]+) \((\$[\d.]+) of (\$[\d.]+)\)\. An org Owner or Billing member can raise it\.$/.exec(
+			message,
+		)
+	if (memberMatch) {
+		const spentMicroUsd = parseBudgetDollarAmount(memberMatch[2])
+		const budgetMicroUsd = parseBudgetDollarAmount(memberMatch[3])
+		if (spentMicroUsd === null || budgetMicroUsd === null) return null
+		return {
+			code: budgetLimitErrorCode,
+			kind: 'user',
+			orgSlug: memberMatch[1] ?? '',
+			spentMicroUsd,
+			budgetMicroUsd,
+		}
+	}
+	return null
+}
+
+function parseBudgetDollarAmount(value: string | undefined) {
+	if (!value?.startsWith('$')) return null
+	const dollars = Number(value.slice(1))
+	if (!Number.isFinite(dollars)) return null
+	return Math.round(dollars * 1_000_000)
+}
+
+export class BudgetLimitError extends Error {
+	readonly details: BudgetLimitErrorDetails
+
+	constructor(details: Omit<BudgetLimitErrorDetails, 'code'>) {
+		const fullDetails: BudgetLimitErrorDetails = {
+			code: budgetLimitErrorCode,
+			...details,
+		}
+		super(buildBudgetLimitMessage(fullDetails))
+		this.name = 'BudgetLimitError'
+		this.details = fullDetails
+	}
+}
+
+export function isBudgetLimitError(error: unknown): error is BudgetLimitError {
+	return (
+		error instanceof BudgetLimitError ||
+		(error instanceof Error &&
+			'details' in error &&
+			typeof error.details === 'object' &&
+			error.details !== null &&
+			'code' in error.details &&
+			error.details.code === budgetLimitErrorCode)
+	)
+}
+
+/** Rehydrate a budget denial from a Durable Object RPC error. */
+export function coerceBudgetLimitError(
+	error: unknown,
+): BudgetLimitError | null {
+	if (isBudgetLimitError(error)) return error
+	if (!(error instanceof Error)) return null
+	if (
+		'details' in error &&
+		typeof error.details === 'object' &&
+		error.details !== null &&
+		'code' in error.details &&
+		error.details.code === budgetLimitErrorCode
+	) {
+		const details = error.details as BudgetLimitErrorDetails
+		return new BudgetLimitError(details)
+	}
+	const parsed = parseBudgetLimitMessage(error.message)
+	if (!parsed) return null
+	return new BudgetLimitError(parsed)
+}
+
+/**
+ * Usage refusals a counted entry point raises before any work runs: plan
+ * limits, the past-include stop, and org budgets. Callers that pre-claimed
+ * an idempotency key release it so a retry can succeed once usage allows.
+ */
+export function isPreRunUsageDenial(error: unknown): boolean {
+	return (
+		isEntitlementLimitError(error) ||
+		isComputeOverageLimitError(error) ||
+		isBudgetLimitError(error)
+	)
 }

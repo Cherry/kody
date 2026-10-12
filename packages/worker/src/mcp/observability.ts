@@ -9,7 +9,6 @@ import {
 } from '#worker/entitlements/errors.ts'
 import { isSearchRateLimitError } from '#worker/search-rate-limit-error.ts'
 import { PackageNameInputError } from '#worker/package-registry/package-name.ts'
-import { PackageScopeAccessError } from '#worker/package-registry/package-owner.ts'
 import { SavedPackageNotFoundError } from '#worker/package-runtime/package-import-resolution.ts'
 import { isKodyDescriptionLengthMessage } from '#worker/package-registry/types.ts'
 import {
@@ -133,15 +132,6 @@ function isCallerFailure(payload: McpObservabilityPayload, cause?: unknown) {
 	) {
 		return true
 	}
-	// Missing / invalid package_scope (no grant, non-platform target, bad
-	// format) — agents must omit the field or obtain a grant. KODY-CLOUDFLARE-5N.
-	if (
-		getErrorCauseChain(cause).some(
-			(entry) => entry instanceof PackageScopeAccessError,
-		)
-	) {
-		return true
-	}
 	// Empty, mismatched-scope, or invalid package names. Agents must use the
 	// leaf or their own "@owner/…" form. KODY-83.
 	if (
@@ -180,7 +170,10 @@ function isCallerFailure(payload: McpObservabilityPayload, cause?: unknown) {
 	// constraints, read-only policy). storageQuery wraps these as
 	// McpCallerError; this message match covers plain Errors that still
 	// arrive via RPC without subclass identity.
+	// Restrict to storageQuery so that D1 errors from other capabilities
+	// (e.g. application database FK/unique violations) still reach Sentry.
 	if (
+		payload.capabilityName === 'storageQuery' &&
 		getErrorCauseChain(cause).some(
 			(entry) =>
 				entry instanceof Error && isUserStorageSqlCallerMessage(entry.message),

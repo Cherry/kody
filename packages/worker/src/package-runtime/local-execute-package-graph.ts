@@ -1,4 +1,4 @@
-import { isPlatformAccountStableUserId } from '#worker/package-registry/scope-grants.ts'
+import { AuthorizationError } from '#worker/authorization/authorize.ts'
 import { loadLocalExecuteRuntimeSupport } from '#worker/local-execute-runtime-support-load.ts'
 import { packageSpecifierPrefix } from './package-import-resolution.ts'
 import { collectDynamicImportExpressionNodes } from './import-specifiers.ts'
@@ -9,11 +9,13 @@ import {
 	joinPath,
 	normalizeWorkspaceModulePath,
 	packageImportProxyPrefix,
+	packageRuntimeModulePrefix,
 	packageSourcePrefix,
 	resolveRelativeModulePath,
 	rootSourcePrefix,
 	runtimeModulePath,
 } from './module-graph-paths.ts'
+import { rewriteLocalExecuteModuleForSecretAwareFetch } from './rewrite-local-execute-secret-fetch.ts'
 import {
 	createPackageImportProxySource,
 	createRuntimeModuleReexportSource,
@@ -21,6 +23,7 @@ import {
 	isKodyRuntimeModulePath,
 	parsePackageRuntimeModulePathPackageId,
 } from './runtime-source-modules.ts'
+import { publishedRuntimeBundleMissingMessage } from './published-source-dependencies.ts'
 import { collectStaticKodyPackageImportsFromFiles } from './static-kody-imports.ts'
 
 /** Host module name the CLI registers in local workerd (`localWorkerModuleNames.runtime`). */
@@ -73,33 +76,43 @@ export async function buildLocalExecutePackageGraph(input: {
 			(entry) => entry.specifier,
 		),
 	)
-	if (staticImports.length === 0) {
-		return { modules: [], imports: [], warnings: [] }
-	}
-
-	let prepared: Awaited<ReturnType<typeof prepareKodyGraphFiles>>
-	try {
-		const allowPlatformScopes = await isPlatformAccountStableUserId(
-			input.env.APP_DB,
-			input.userId,
-		)
-		prepared = await prepareKodyGraphFiles({
-			env: input.env,
-			baseUrl: input.baseUrl,
-			userId: input.userId,
-			sourceFiles,
-			entryPoint: 'entry.ts',
-			allowPlatformScopes,
-		})
-	} catch (error) {
-		throw mapPrepareFailure(error, staticImports)
-	}
 
 	const {
 		rewriteInlinedLocalExecuteBundleSource,
 		createLocalExecuteRuntimeShimSource,
 		createLocalExecutePackageRuntimeModuleSource,
 	} = await loadLocalExecuteRuntimeSupport()
+
+	// Always embed the gateway-fetch runtime shim, even when the entry has no
+	// `kody:@` imports. Ad-hoc scripts that call ambient `fetch` with
+	// `{{secret:…}}` placeholders still need globalThis.fetch wrapped so the
+	// hop expands on origin (or fails closed) instead of sending the raw
+	// template to a third party (kody#3020).
+	if (staticImports.length === 0) {
+		return {
+			modules: [
+				{
+					name: runtimeModulePath,
+					esModule: createLocalExecuteRuntimeShimSource(runtimeModulePath),
+				},
+			],
+			imports: [],
+			warnings: [],
+		}
+	}
+
+	let prepared: Awaited<ReturnType<typeof prepareKodyGraphFiles>>
+	try {
+		prepared = await prepareKodyGraphFiles({
+			env: input.env,
+			baseUrl: input.baseUrl,
+			userId: input.userId,
+			sourceFiles,
+			entryPoint: 'entry.ts',
+		})
+	} catch (error) {
+		throw mapPrepareFailure(error, staticImports)
+	}
 
 	const modulesByName = new Map<string, string>()
 	const runtimeModulePaths: Array<string> = []
@@ -135,6 +148,11 @@ export async function buildLocalExecutePackageGraph(input: {
 		)
 	}
 
+	const packageIdsByPrefix = collectPackageIdsByModulePrefix(
+		modulesByName.keys(),
+	)
+	const packageIdByModulePath = new Map<string, string>()
+
 	for (const specifier of staticImports) {
 		const proxyPath = joinPath(
 			packageImportProxyPrefix,
@@ -157,8 +175,14 @@ export async function buildLocalExecutePackageGraph(input: {
 		if (!modulesByName.has(targetPath)) {
 			throw new LocalExecutePackageGraphError(
 				'package_import_unpublished',
-				`Saved package import ${specifier} is missing its published artifact modules for local execute.`,
+				`Saved package import ${specifier} is missing its published artifact modules for local execute. Retry later or report it if it persists.`,
 			)
+		}
+		const meteredPackageId = readMeteredProxyPackageId(proxySource)
+		if (meteredPackageId) {
+			const prefix = packagePrefixForPublishedModule(targetPath)
+			if (prefix) packageIdsByPrefix.set(prefix, meteredPackageId)
+			packageIdByModulePath.set(targetPath, meteredPackageId)
 		}
 		// Alias the exact `kody:@…` specifier the CLI embeds next to user code.
 		// Use an unmetered re-export so local workerd does not need cloud
@@ -183,6 +207,34 @@ export async function buildLocalExecutePackageGraph(input: {
 			modulePath,
 			source,
 			primaryRuntimePath,
+		})
+		if (rewritten.rewritten) {
+			modulesByName.set(modulePath, rewritten.source)
+			if (rewritten.packageId) {
+				packageIdByModulePath.set(modulePath, rewritten.packageId)
+				const prefix = packagePrefixForPublishedModule(modulePath)
+				if (prefix) packageIdsByPrefix.set(prefix, rewritten.packageId)
+			}
+		}
+	}
+
+	// Secret-bearing ambient fetch: cloud expands placeholders at the fetch
+	// gateway; local ambient fetch does not. Rebind published modules onto
+	// CapabilityProxy gatewayFetch and rewrite quoted `{{secret:…}}` literals
+	// to `__kodySecretRef(...)` so the resolvable template never leaves origin
+	// via ambient workerd fetch (kody#2808).
+	for (const [modulePath, source] of modulesByName.entries()) {
+		if (!shouldRewritePublishedModuleForSecretAwareFetch(modulePath)) {
+			continue
+		}
+		const packageId =
+			packageIdByModulePath.get(modulePath) ??
+			packageIdForModulePath(modulePath, packageIdsByPrefix)
+		const rewritten = rewriteLocalExecuteModuleForSecretAwareFetch({
+			modulePath,
+			source,
+			primaryRuntimePath,
+			packageId,
 		})
 		if (rewritten.rewritten) {
 			modulesByName.set(modulePath, rewritten.source)
@@ -233,6 +285,82 @@ function shouldOmitPreparedModule(modulePath: string) {
 	return true
 }
 
+function shouldRewritePublishedModuleForSecretAwareFetch(modulePath: string) {
+	if (isKodyRuntimeModulePath(modulePath)) return false
+	if (parsePackageRuntimeModulePathPackageId(modulePath) != null) return false
+	if (modulePath.startsWith(packageSpecifierPrefix)) return false
+	return modulePath.includes('/.__published_bundle__/')
+}
+
+function collectPackageIdsByModulePrefix(modulePaths: Iterable<string>) {
+	const packageIdsByPrefix = new Map<string, string>()
+	const marker = `/${packageRuntimeModulePrefix}/`
+	for (const modulePath of modulePaths) {
+		const packageId = parsePackageRuntimeModulePathPackageId(modulePath)
+		if (!packageId) continue
+		const index = modulePath.lastIndexOf(marker)
+		const prefix = index >= 0 ? modulePath.slice(0, index) : ''
+		packageIdsByPrefix.set(prefix, packageId)
+	}
+	return packageIdsByPrefix
+}
+
+function packagePrefixForPublishedModule(modulePath: string) {
+	const bundleIndex = modulePath.indexOf('/.__published_bundle__/')
+	if (bundleIndex >= 0) return modulePath.slice(0, bundleIndex)
+	const virtualIndex = modulePath.indexOf('/.__kody_virtual__/')
+	if (virtualIndex >= 0 && modulePath.includes(`${packageSourcePrefix}/`)) {
+		return modulePath.slice(0, virtualIndex)
+	}
+	return null
+}
+
+function packageIdForModulePath(
+	modulePath: string,
+	packageIdsByPrefix: ReadonlyMap<string, string>,
+) {
+	let bestPackageId: string | null = null
+	let bestPrefixLength = -1
+	for (const [prefix, packageId] of packageIdsByPrefix) {
+		if (prefix.length === 0) {
+			if (
+				bestPrefixLength < 0 &&
+				!modulePath.includes(`${packageSourcePrefix}/`) &&
+				!modulePath.includes('.__kody_packages__/')
+			) {
+				bestPackageId = packageId
+				bestPrefixLength = 0
+			}
+			continue
+		}
+		if (
+			(modulePath === prefix || modulePath.startsWith(`${prefix}/`)) &&
+			prefix.length > bestPrefixLength
+		) {
+			bestPackageId = packageId
+			bestPrefixLength = prefix.length
+		}
+	}
+	return bestPackageId
+}
+
+function readMeteredProxyPackageId(proxySource: string) {
+	const match =
+		/__kodyMeterStaticPackageExport\(\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/.exec(
+			proxySource,
+		)
+	if (!match?.[1]) return null
+	try {
+		return JSON.parse(
+			match[1].startsWith("'")
+				? `"${match[1].slice(1, -1).replaceAll('"', '\\"')}"`
+				: match[1],
+		) as string
+	} catch {
+		return null
+	}
+}
+
 function readProxyTargetAbsolutePath(proxyPath: string, proxySource: string) {
 	const match =
 		/export\s*\*\s*from\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/.exec(
@@ -260,22 +388,28 @@ function mapPrepareFailure(
 	imports: ReadonlyArray<string>,
 ): LocalExecutePackageGraphError {
 	if (error instanceof LocalExecutePackageGraphError) return error
+	// Scope/permission denials must surface as AuthorizationError →
+	// Open API `insufficient_scope` (names `package:execute`), not as a
+	// misleading "package was not found".
+	if (error instanceof AuthorizationError) throw error
 	const message =
 		error instanceof Error
 			? error.message
 			: 'Could not resolve package imports.'
 	const importList = imports.join(', ')
+	// Missing published runtime bundle: consumer cannot republish an upstream
+	// package. Honest next step matches Open API internal_error copy.
+	if (message.includes(publishedRuntimeBundleMissingMessage)) {
+		return new LocalExecutePackageGraphError(
+			'package_import_unpublished',
+			`Saved package import(s) for local execute are missing a published runtime bundle (${importList}). Retry later or report it if it persists.`,
+			{ cause: error },
+		)
+	}
 	if (/not found/i.test(message) || /was not found/i.test(message)) {
 		return new LocalExecutePackageGraphError(
 			'package_import_unresolved',
 			`Could not resolve saved package import(s) for local bundling (${importList}): ${message}`,
-			{ cause: error },
-		)
-	}
-	if (/platform packages are not runnable/i.test(message)) {
-		return new LocalExecutePackageGraphError(
-			'package_import_unresolved',
-			message,
 			{ cause: error },
 		)
 	}

@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { canonicalJsonStringify } from '@kody-internal/shared/canonical-json.ts'
 import { resolveHostedPackageAppUrl } from '@kody-internal/shared/public-urls.ts'
@@ -13,14 +14,19 @@ import {
 } from '@kody-internal/shared/error-message.ts'
 import { isDurableObjectIsolateResetMessage } from '#worker/sentry-options.ts'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
+import { authorizePackageWrite } from '#worker/authorization/authorize.ts'
 import { resolvePublicUsername } from '#worker/identity/user-lookup.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import { requestLineage } from '#worker/request-context/request-context.ts'
 import {
 	getStaticPackageDependentsSummary,
 	type StaticPackageDependentsSummary,
 } from '#worker/package-runtime/static-package-dependents.ts'
 import {
-	packageScopeInputDescription,
+	packageOwnerEntitlementEmail,
 	resolvePackageOwnerContext,
 } from '#worker/package-registry/package-owner.ts'
 import {
@@ -37,6 +43,7 @@ import {
 	type PublishPhaseTimings,
 } from '#worker/repo/publish-phase-timing.ts'
 import { destructiveOverwriteConfirmationDescription } from '#worker/repo/source-safety-policy.ts'
+import { secretPageOrgSlugFromCaller } from '#mcp/secrets/package-approval-url.ts'
 import {
 	buildPendingPackageSecretApprovalsSummary,
 	type PendingPackageSecretApprovalsSummary,
@@ -56,11 +63,6 @@ import {
 const inputSchema = z.object({
 	package_id: z.string().min(1).optional(),
 	kody_id: z.string().min(1).optional(),
-	package_scope: z
-		.string()
-		.min(1)
-		.optional()
-		.describe(packageScopeInputDescription),
 	allow_force: z.boolean().optional().default(false),
 	confirm_destructive_overwrite: z
 		.boolean()
@@ -146,10 +148,12 @@ const checkSchema = z.object({
 	kind: z.enum([
 		'manifest',
 		'docs',
+		'skills',
 		'dependencies',
 		'bundle',
 		'typecheck',
 		'lint',
+		'credentials',
 		'smoke',
 	]),
 	ok: z.boolean(),
@@ -391,7 +395,6 @@ function buildPublishPhaseTimings(input: {
 function readPackageTestHintsFromManifest(input: {
 	manifest: unknown
 	packageId: string
-	packageScope?: string
 }): PackageTestHints | undefined {
 	const { manifest } = input
 	if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
@@ -402,7 +405,6 @@ function readPackageTestHintsFromManifest(input: {
 	const subscriptions = Reflect.get(kody, 'subscriptions')
 	return buildPackageTestHints({
 		packageId: input.packageId,
-		...(input.packageScope ? { packageScope: input.packageScope } : {}),
 		hasApp: Reflect.get(kody, 'app') !== undefined,
 		subscriptionTopics:
 			subscriptions &&
@@ -415,10 +417,9 @@ function readPackageTestHintsFromManifest(input: {
 
 async function getPublishedPackageTestHints(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	sourceId: string
 	packageId: string
-	packageScope?: string
 }) {
 	try {
 		const published = await loadPublishedEntitySource({
@@ -431,7 +432,6 @@ async function getPublishedPackageTestHints(input: {
 		return readPackageTestHintsFromManifest({
 			manifest: JSON.parse(packageJson),
 			packageId: input.packageId,
-			...(input.packageScope ? { packageScope: input.packageScope } : {}),
 		})
 	} catch {
 		return undefined
@@ -483,7 +483,8 @@ function readSecretMountsFromPackageJson(content: string | undefined) {
 async function getPendingSecretApprovalsForPublishedPackage(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
+	orgSlug?: string | null
 	packageId: string
 	kodyId: string
 	sourceId: string
@@ -498,6 +499,7 @@ async function getPendingSecretApprovalsForPublishedPackage(input: {
 			env: input.env,
 			baseUrl: input.baseUrl,
 			userId: input.userId,
+			orgSlug: input.orgSlug,
 			packageId: input.packageId,
 			kodyId: input.kodyId,
 			secretMounts: readSecretMountsFromPackageJson(
@@ -518,7 +520,7 @@ async function getPendingSecretApprovalsForPublishedPackage(input: {
 
 async function getPublishStaticDependents(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	sourceId: string
 	publishedCommit: string | null
 }): Promise<StaticPackageDependentsSummary> {
@@ -546,7 +548,7 @@ async function getPublishStaticDependents(input: {
  * and the canonical JSON blob below includes every property automatically.
  */
 export type ExternalPublishSemanticInput = {
-	ownerUserId: string
+	ownerUserId: OwnerId
 	packageId: string
 	newCommit: string
 	allowForce: boolean
@@ -560,7 +562,9 @@ export function buildExternalPublishIdempotencyParts(
 	// projections are user-scoped). Distinct delegates may each dispatch for
 	// the same publish; that is safe because re-invoking publish when
 	// published_commit already matches HEAD returns already_published without
-	// checks or D1 writes.
+	// checks or D1 writes. Active and succeeded durable runs still dedupe on
+	// this key; a terminal failure releases it so the same commit can publish
+	// again (for example after a Durable Object reset mid-run).
 	return ['packagePublishExternalPush', canonicalJsonStringify(input)] as const
 }
 
@@ -576,13 +580,13 @@ function shouldEscalateExternalPublish(executionOrigin: string | undefined) {
 async function runExternalPublishAttempt(input: {
 	env: Env
 	baseUrl: string
-	ownerUserId: string
+	ownerUserId: OwnerId
 	ownerScope: string
+	orgSlug?: string | null
 	ownerEmail: string
 	expectedPackageScope: string
 	packageId: string
 	kodyId: string
-	testHintPackageScope?: string
 	hasApp: boolean
 	source: {
 		id: string
@@ -646,24 +650,44 @@ async function runExternalPublishAttempt(input: {
 						? `Already published after ${publishMs}ms — snapshot changed, rebuilding artifacts…`
 						: `Already published after ${publishMs}ms — confirming artifacts match this commit…`,
 				})
-				const { durationMs: rebuildMs } = await timePublishExternalPushPhase(
-					{
-						phase: 'rebuild',
-						sourceId: input.source.id,
-						publishedCommit,
-					},
-					async () => {
-						await rebuildPublishedPackageArtifactsViaRepoSession({
-							env: input.env,
-							rpcSessionId: sessionId,
+				const { durationMs: rebuildMs, value: rebuildOutcome } =
+					await timePublishExternalPushPhase(
+						{
+							phase: 'rebuild',
 							sourceId: input.source.id,
-							userId: input.ownerUserId,
 							publishedCommit,
-							baseUrl: input.baseUrl,
-							...(forceRebuild ? { force: true } : {}),
-						})
-					},
-				)
+						},
+						async () => {
+							try {
+								await rebuildPublishedPackageArtifactsViaRepoSession({
+									env: input.env,
+									rpcSessionId: sessionId,
+									sourceId: input.source.id,
+									userId: input.ownerUserId,
+									publishedCommit,
+									baseUrl: input.baseUrl,
+									...(forceRebuild ? { force: true } : {}),
+								})
+								return { ok: true as const }
+							} catch (error) {
+								if (isTransientDurableObjectResetError(error)) {
+									throw error
+								}
+								return {
+									ok: false as const,
+									failedCheck: bundleCheckFailedFromRebuildError(error),
+								}
+							}
+						},
+					)
+				if (!rebuildOutcome.ok) {
+					return {
+						status: 'checks_failed' as const,
+						failed_checks: [rebuildOutcome.failedCheck],
+						manifest: null,
+						run_id: crypto.randomUUID(),
+					}
+				}
 				const { durationMs: dependentsMs, value: alreadyPublishedExtras } =
 					await timePublishExternalPushPhase(
 						{
@@ -677,9 +701,6 @@ async function runExternalPublishAttempt(input: {
 								userId: input.ownerUserId,
 								sourceId: input.source.id,
 								packageId: input.packageId,
-								...(input.testHintPackageScope
-									? { packageScope: input.testHintPackageScope }
-									: {}),
 							})
 							return {
 								testHints,
@@ -702,6 +723,7 @@ async function runExternalPublishAttempt(input: {
 										env: input.env,
 										baseUrl: input.baseUrl,
 										userId: input.ownerUserId,
+										orgSlug: input.orgSlug,
 										packageId: input.packageId,
 										kodyId: input.kodyId,
 										sourceId: input.source.id,
@@ -806,9 +828,6 @@ async function runExternalPublishAttempt(input: {
 						const testHints = readPackageTestHintsFromManifest({
 							manifest: result.manifest,
 							packageId: input.packageId,
-							...(input.testHintPackageScope
-								? { packageScope: input.testHintPackageScope }
-								: {}),
 						})
 						return {
 							testHints,
@@ -831,6 +850,7 @@ async function runExternalPublishAttempt(input: {
 									env: input.env,
 									baseUrl: input.baseUrl,
 									userId: input.ownerUserId,
+									orgSlug: input.orgSlug,
 									packageId: input.packageId,
 									kodyId: input.kodyId,
 									sourceId: input.source.id,
@@ -895,8 +915,9 @@ export const publishExternalPushCapability = defineDomainCapability(
 	capabilityDomainNames.packages,
 	{
 		name: 'packagePublishExternalPush',
+		orgPermission: 'package:write',
 		description:
-			'Publish the current Artifacts git HEAD for a saved package after a packageGetGitRemote clone/edit/push workflow and server-side checks pass. Non-fast-forward publishes require explicit destructive overwrite confirmation and a verified restorable backup snapshot. Full check-time esbuild is deferred to the published artifact rebuild so callable and importable targets are bundled once; unchanged targets are copied from the previous published commit when their reachable inputs match, and a rebuild failure returns checks_failed with a bundle check. Published and already_published responses include hosted_app_url when the package declares an app, plus bounded static dependent metadata so agents can decide whether stale kody:@ bundled snapshots need inspection or dependent republish; Kody does not republish dependents automatically. Those success results also include phase_timings with optional millisecond fields clone_ms, checks_typecheck_ms, checks_bundle_ms, rebuild_ms, dependents_ms, and total_ms — omitted keys did not run; checks_bundle_ms is omitted when bundle validation is deferred to rebuild; checks_bundle_ms and rebuild_ms stay separate. Common cases return the full synchronous result. If the publish exceeds the inline budget (~35s), the work is dispatched once to a durable workflow (idempotent per acting caller plus the full semantic publish input, including force/overwrite flags) and this capability returns status dispatched with a workflow_id to poll via workflowRunList instead of hanging until an opaque execute timeout. dispatched includes phase_timings.total_ms as time-to-dispatch.',
+			'Publish the current Artifacts git HEAD for a saved package after a packageGetGitRemote clone/edit/push workflow and server-side checks pass. Non-fast-forward publishes require explicit destructive overwrite confirmation and a verified restorable backup snapshot. Full check-time esbuild is deferred to the published artifact rebuild so callable and importable targets are bundled once; unchanged targets are copied from the previous published commit when their reachable inputs match, and a rebuild failure returns checks_failed with a bundle check. Published and already_published responses include hosted_app_url when the package declares an app, plus bounded static dependent metadata so agents can decide whether stale kody:@ bundled snapshots need inspection or dependent republish; Kody does not republish dependents automatically. Those success results also include phase_timings with optional millisecond fields clone_ms, checks_typecheck_ms, checks_bundle_ms, rebuild_ms, dependents_ms, and total_ms — omitted keys did not run; checks_bundle_ms is omitted when bundle validation is deferred to rebuild; checks_bundle_ms and rebuild_ms stay separate. Common cases return the full synchronous result. If the publish exceeds the inline budget (~35s), the work is dispatched once to a durable workflow (idempotent per acting caller plus the full semantic publish input, including force/overwrite flags) and this capability returns status dispatched with a workflow_id to poll via workflowRunList instead of hanging until an opaque execute timeout. Active and succeeded durable runs still dedupe; a terminal failure (for example Durable Object reset because its code was updated) releases the idempotency key so the same commit can be published again. dispatched includes phase_timings.total_ms as time-to-dispatch.',
 		keywords: ['package', 'publish', 'git', 'artifacts', 'external', 'push'],
 		readOnly: false,
 		idempotent: true,
@@ -905,13 +926,12 @@ export const publishExternalPushCapability = defineDomainCapability(
 		outputSchema,
 		async handler(args, ctx) {
 			const user = requireMcpUser(ctx.callerContext)
-			const owner = await resolvePackageOwnerContext(
-				ctx.env,
+			const owner = await resolvePackageOwnerContext(ctx.env, {
 				user,
-				args.package_scope,
-			)
+				request: requireMcpRequest(ctx.callerContext),
+			})
 			const expectedPackageScope = owner.ownerScope
-			const { packageId, kodyId, hasApp, source } =
+			const { packageId, userId, kodyId, hasApp, name, source } =
 				await resolveOwnedPackageSource({
 					db: ctx.env.APP_DB,
 					userId: owner.ownerUserId,
@@ -921,6 +941,10 @@ export const publishExternalPushCapability = defineDomainCapability(
 						kody_id: args.kody_id,
 					},
 				})
+			await authorizePackageWrite(
+				{ env: ctx.env, request: ctx.callerContext.request },
+				{ id: packageId, userId, label: name },
+			)
 			const head = await resolveArtifactSourceHead(ctx.env, source.repo_id)
 			const newCommit = head.commit
 			if (!newCommit) {
@@ -934,13 +958,11 @@ export const publishExternalPushCapability = defineDomainCapability(
 				baseUrl: ctx.callerContext.baseUrl,
 				ownerUserId: owner.ownerUserId,
 				ownerScope: owner.ownerScope,
+				orgSlug: secretPageOrgSlugFromCaller(ctx.callerContext),
 				ownerEmail: owner.ownerEmail,
 				expectedPackageScope,
 				packageId,
 				kodyId,
-				...(args.package_scope
-					? { testHintPackageScope: args.package_scope }
-					: {}),
 				hasApp,
 				source: { id: source.id, repo_id: source.repo_id },
 				newCommit,
@@ -963,15 +985,18 @@ export const publishExternalPushCapability = defineDomainCapability(
 			const durableParams = {
 				...(args.package_id ? { package_id: args.package_id } : {}),
 				...(args.kody_id ? { kody_id: args.kody_id } : {}),
-				...(args.package_scope ? { package_scope: args.package_scope } : {}),
 				allow_force: args.allow_force,
 				confirm_destructive_overwrite: args.confirm_destructive_overwrite,
 			}
 			const escalateStartedAt = Date.now()
+			// Key the durable re-entry to the package-owning org, not the actor's
+			// personal org. Team publishes (`@kody`, …) otherwise re-bind to the
+			// actor personal org and fail mid-rebuild after git accepted the push.
 			const outcome = await runWithDurableEscalation({
 				env: ctx.env,
-				userId: user.userId,
-				userEmail: user.email,
+				userId: owner.ownerUserId,
+				userEmail: packageOwnerEntitlementEmail(owner),
+				lineage: requestLineage(requireMcpRequest(ctx.callerContext)),
 				budgetMs: defaultDurableEscalationBudgetMs,
 				idempotencyParts: buildExternalPublishIdempotencyParts(semanticInput),
 				workflowName: 'packagePublishExternalPush',
@@ -998,7 +1023,9 @@ export const publishExternalPushCapability = defineDomainCapability(
 						phase_timings: withPublishAttemptTotalMs({}, escalateStartedAt),
 					}
 				case 'failed':
-					throw new Error(outcome.error)
+					// Preserve typed errors (EntitlementLimitError, …) for toApiError.
+					if (outcome.error instanceof Error) throw outcome.error
+					throw new Error(getErrorMessage(outcome.error))
 				default: {
 					const exhaustive: never = outcome
 					throw new Error(

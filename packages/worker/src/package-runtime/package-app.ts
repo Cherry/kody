@@ -1,15 +1,22 @@
+import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
+import { type RuntimePackageAppVisitor } from '@kody-internal/shared/runtime-worker.ts'
 import {
 	WorkerEntrypoint,
 	exports as workerExports,
 	waitUntil as scheduleWorkerWaitUntil,
 } from 'cloudflare:workers'
 import { requireLocalPackageAppRuntimeBridge } from '#worker/runtime-worker-service.ts'
+import {
+	packageAppRuntimeErrorHeader,
+	packageAppRuntimeRunIdHeader,
+} from '#worker/package-runtime/package-app-diagnostics.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import { requestLineage } from '#worker/request-context/request-context.ts'
 import {
 	getPackageAppEntryPath,
 	parseAuthoredPackageJson,
 } from '#worker/package-registry/manifest.ts'
-import { assertPersonOwnedPackageMayNotRunPlatformDependencies } from '#worker/package-registry/platform-package-policy.ts'
 import { type AuthoredPackageJson } from '#worker/package-registry/types.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
 import {
@@ -47,16 +54,20 @@ import {
 	estimateEntitlementStorageEntryByteDelta,
 	estimateEntitlementStorageSqlWriteBytes,
 } from '#worker/entitlements/service.ts'
+import {
+	pushServerTiming,
+	type ServerTimingEntry,
+} from '#worker/server-timing.ts'
 import { createDynamicWorkerCompatibilityOptions } from '#worker/dynamic-worker-compatibility.ts'
 import { packageRealtimeSessionRpc } from './realtime-session.ts'
 import {
 	createDynamicCallableWorkflow,
 	type PackageWorkflowCreateInput,
 } from './package-workflows.ts'
-import {
-	isPackageSecretAccessUnavailableError,
-	resolvePackageMountedSecret,
-} from '#mcp/secrets/package-access.ts'
+import { isPackageSecretAccessUnavailableError } from '#mcp/secrets/package-access.ts'
+import { attestedPackageStamp } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	resolveSecretAuthorityPackageId,
 	runWithCurrentSecretAuthority,
@@ -82,6 +93,7 @@ import {
 	type PackageAppMount,
 } from '@kody-internal/shared/public-urls.ts'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
+import { getPackageNameLeaf } from '#worker/package-registry/package-name.ts'
 import {
 	packageAppSyntheticHeaderName,
 	packageAppSyntheticHeaderValue,
@@ -92,11 +104,24 @@ import {
 	resolvePackageAppClientArtifact,
 } from './package-app-assets.ts'
 import { recordUniqueDynamicWorkerDay } from '#worker/usage/dynamic-worker-day.ts'
+import { usageConnectionKey } from '#worker/usage/record-usage.ts'
+import {
+	createNullPackagesInvokeRewriteHostSource,
+	modulesContainUnboundPackagesInvokeAccess,
+} from './unbound-runtime-helpers.ts'
+import { modulesReferenceKodyMcp } from './package-app-mcp-preload.ts'
 
 const packageAppEntrypointName = 'PackageAppWorker'
 const packageAppRuntimeBindingName = 'KODY_RUNTIME'
 
-function createPackageAppWorkerSource(input: { mainModule: string }) {
+function createPackageAppWorkerSource(input: {
+	mainModule: string
+	rewriteNullPackagesInvoke: boolean
+	preloadMcpServerNames: boolean
+}) {
+	const mcpServerNamesExpr = input.preloadMcpServerNames
+		? 'await runtimeBridge.listMcpServerNames().catch(() => [])'
+		: '() => runtimeBridge.listMcpServerNames().catch(() => [])'
 	return `
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -168,7 +193,7 @@ function buildFacetClassExportName(rawFacetName) {
 		: \`App_\${sanitizedFacetName}_\${hashSuffix}\`;
 }
 
-function createKodyProxy(runtimeBridge, mcpServerNames) {
+function createKodyProxy(runtimeBridge, mcpServerNamesOrLoader) {
 	const isProxyLookupKey = (name) =>
 		typeof name !== 'string' || name === 'then';
 	const createOpenNamespaceProxy = (getValue) =>
@@ -195,27 +220,61 @@ function createKodyProxy(runtimeBridge, mcpServerNames) {
 	// Empty/missing names stay open (GOPD still returns getValue) so a
 	// listing failure does not hide Get. Only a non-empty list restricts
 	// has/GOPD. Tool namespaces stay fully open.
-	const knownServerNames = Array.isArray(mcpServerNames)
-		? [...new Set(mcpServerNames.filter((name) => typeof name === 'string' && name.length > 0))]
-		: [];
-	const restrictServerKeys = knownServerNames.length > 0;
+	//
+	// Entrypoints that statically reference kody.mcp preload names before
+	// author code runs (array argument). Hello-world / non-MCP apps pass a
+	// loader instead so listMcpServerNames runs only on first kody.mcp touch.
+	const mcpNamesState = { known: [], restrict: false };
+	let mcpNamesLoadPromise = null;
+	const applyMcpServerNames = (names) => {
+		mcpNamesState.known = [
+			...new Set(
+				(Array.isArray(names) ? names : []).filter(
+					(name) => typeof name === 'string' && name.length > 0,
+				),
+			),
+		];
+		mcpNamesState.restrict = mcpNamesState.known.length > 0;
+		return mcpNamesState.known;
+	};
+	const ensureMcpServerNames = () => {
+		if (mcpNamesLoadPromise) return mcpNamesLoadPromise;
+		if (Array.isArray(mcpServerNamesOrLoader)) {
+			applyMcpServerNames(mcpServerNamesOrLoader);
+			mcpNamesLoadPromise = Promise.resolve(mcpNamesState.known);
+			return mcpNamesLoadPromise;
+		}
+		const loader =
+			typeof mcpServerNamesOrLoader === 'function'
+				? mcpServerNamesOrLoader
+				: async () => [];
+		mcpNamesLoadPromise = Promise.resolve()
+			.then(() => loader())
+			.then((names) => applyMcpServerNames(names))
+			.catch(() => applyMcpServerNames([]));
+		return mcpNamesLoadPromise;
+	};
+	if (Array.isArray(mcpServerNamesOrLoader)) {
+		ensureMcpServerNames();
+	}
 	const createMcpServerNamespaceProxy = (getValue) =>
 		new Proxy({}, {
 			get(_target, name) {
 				if (isProxyLookupKey(name)) return undefined;
+				void ensureMcpServerNames();
 				return getValue(name);
 			},
 			has(_target, name) {
 				if (isProxyLookupKey(name)) return false;
-				if (!restrictServerKeys) return true;
-				return knownServerNames.includes(name);
+				if (!mcpNamesState.restrict) return true;
+				return mcpNamesState.known.includes(name);
 			},
 			ownKeys() {
-				return [...knownServerNames];
+				return [...mcpNamesState.known];
 			},
 			getOwnPropertyDescriptor(_target, name) {
 				if (isProxyLookupKey(name)) return undefined;
-				if (restrictServerKeys && !knownServerNames.includes(name)) {
+				if (mcpNamesState.restrict && !mcpNamesState.known.includes(name)) {
 					return undefined;
 				}
 				return {
@@ -253,10 +312,14 @@ function createKodyProxy(runtimeBridge, mcpServerNames) {
 			}),
 		),
 	);
+	const touchMcp = () => {
+		void ensureMcpServerNames();
+		return mcp;
+	};
 	return new Proxy({}, {
 		get(_target, property) {
 			if (typeof property !== 'string' || property === 'then') return undefined;
-			if (property === 'mcp') return mcp;
+			if (property === 'mcp') return touchMcp();
 			if (property.startsWith('mcp:')) {
 				throw new Error(
 					\`MCP server tool "\${property}" is not available as a flat kody function. Use kody.mcp[serverName].toolName(input) instead.\`,
@@ -280,7 +343,7 @@ function createKodyProxy(runtimeBridge, mcpServerNames) {
 				configurable: true,
 				enumerable: true,
 				writable: true,
-				value: mcp,
+				value: touchMcp(),
 			};
 		},
 	});
@@ -553,7 +616,7 @@ function createPackageAppEnv(env, userModule) {
 	return runtimeEnv;
 }
 
-function createRuntime(runtimeBridge, packageContext, mcpServerNames) {
+function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {
 	const packageId = packageContext?.packageId ?? '';
 	const packageSecrets =
 		packageId.length > 0
@@ -571,7 +634,7 @@ function createRuntime(runtimeBridge, packageContext, mcpServerNames) {
 					},
 				}
 	return {
-		kody: createKodyProxy(runtimeBridge, mcpServerNames),
+		kody: createKodyProxy(runtimeBridge, mcpServerNamesOrLoader),
 		storage: undefined,
 		__kodyPackageSecrets: (secretsPackageId) =>
 			createPackageSecretsProxy(runtimeBridge, secretsPackageId),
@@ -636,6 +699,10 @@ function serializeRuntimeError(error) {
 				: String(error),
 	};
 }
+
+${createNullPackagesInvokeRewriteHostSource({
+	enabled: input.rewriteNullPackagesInvoke,
+})}
 
 function createConsoleLogCapture() {
 	const logs = [];
@@ -742,6 +809,64 @@ function resolveRealtimeHandler(userModule, facetName) {
 	return null;
 }
 
+async function readRuntimeRunId(runtimeRun) {
+	try {
+		const run = await runtimeRun;
+		return run && typeof run.id === 'string' ? run.id : null;
+	} catch (error) {
+		console.warn('package-app-run-record-read-failed', error);
+		return null;
+	}
+}
+
+function withoutAuthorRuntimeErrorHeader(response) {
+	if (!response?.headers?.has(${JSON.stringify(packageAppRuntimeErrorHeader)})) {
+		return response;
+	}
+	try {
+		const headers = new Headers(response.headers);
+		headers.delete(${JSON.stringify(packageAppRuntimeErrorHeader)});
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	} catch (error) {
+		// Body may be locked/disturbed; still drop the internal marker so serve
+		// does not treat an authored 5xx as a runtime throw.
+		const fallbackHeaders = new Headers(response.headers);
+		fallbackHeaders.delete(${JSON.stringify(packageAppRuntimeErrorHeader)});
+		return new Response(null, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: fallbackHeaders,
+		});
+	}
+}
+
+function tagPackageAppRuntimeRun(response, runtimeRunId) {
+	if (!runtimeRunId || !response || response.status < 500) return response;
+	try {
+		const headers = new Headers(response.headers);
+		headers.delete(${JSON.stringify(packageAppRuntimeErrorHeader)});
+		headers.set(${JSON.stringify(packageAppRuntimeRunIdHeader)}, runtimeRunId);
+		return new Response(response.body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers,
+		});
+	} catch (error) {
+		const fallbackHeaders = new Headers(response.headers);
+		fallbackHeaders.delete(${JSON.stringify(packageAppRuntimeErrorHeader)});
+		fallbackHeaders.set(${JSON.stringify(packageAppRuntimeRunIdHeader)}, runtimeRunId);
+		return new Response(null, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: fallbackHeaders,
+		});
+	}
+}
+
 export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 	async fetch(request) {
 		const runtimeBridge = this.env.${packageAppRuntimeBindingName};
@@ -756,11 +881,10 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 			},
 		});
 		const consoleCapture = createConsoleLogCapture();
-		const mcpServerNames = await runtimeBridge.listMcpServerNames().catch(() => []);
 		const runtime = createRuntime(
 			runtimeBridge,
 			this.env.__kodyPackageContext ?? null,
-			mcpServerNames,
+			${mcpServerNamesExpr},
 		);
 		try {
 			consoleCapture.install();
@@ -779,6 +903,17 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 				}
 				return await fetchHandler(request, runtimeEnv, this.ctx);
 			});
+			// Authors (or proxied upstreams) must not set the internal throw
+			// marker; only the catch path below may attach it.
+			let outgoing = withoutAuthorRuntimeErrorHeader(response);
+			if (outgoing && outgoing.status >= 500) {
+				const runtimeRunId = await readRuntimeRunId(runtimeRun);
+				console.error('package-app-runtime-http-error', {
+					runtimeRunId,
+					httpStatus: outgoing.status,
+				});
+				outgoing = tagPackageAppRuntimeRun(outgoing, runtimeRunId);
+			}
 			finishRuntimeRun(runtimeBridge, this.ctx, {
 				run: runtimeRun,
 				status: 'success',
@@ -787,15 +922,27 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 				},
 				logs: consoleCapture.logs,
 			});
-			return response;
+			return outgoing;
 		} catch (error) {
+			const enrichedError = enrichUnboundPackagesInvokeError(error);
+			const runtimeRunId = await readRuntimeRunId(runtimeRun);
+			console.error('package-app-runtime-threw', { runtimeRunId });
 			finishRuntimeRun(runtimeBridge, this.ctx, {
 				run: runtimeRun,
 				status: 'error',
-				error: serializeRuntimeError(error),
+				error: serializeRuntimeError(enrichedError),
 				logs: consoleCapture.logs,
 			});
-			throw error;
+			// Dynamic Worker fetch does not preserve custom Error properties.
+			// Return a tagged 500 so the serve path can log runtimeRunId and
+			// render the package-entrypoint error page.
+			const headers = new Headers({
+				[${JSON.stringify(packageAppRuntimeErrorHeader)}]: '1',
+			});
+			if (runtimeRunId) {
+				headers.set(${JSON.stringify(packageAppRuntimeRunIdHeader)}, runtimeRunId);
+			}
+			return new Response(null, { status: 500, headers });
 		} finally {
 			consoleCapture.restore();
 		}
@@ -813,11 +960,10 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 			},
 		});
 		const consoleCapture = createConsoleLogCapture();
-		const mcpServerNames = await runtimeBridge.listMcpServerNames().catch(() => []);
 		const runtime = createRuntime(
 			runtimeBridge,
 			this.env.__kodyPackageContext ?? null,
-			mcpServerNames,
+			${mcpServerNamesExpr},
 		);
 		try {
 			consoleCapture.install();
@@ -853,13 +999,14 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 			});
 			return result;
 		} catch (error) {
+			const enrichedError = enrichUnboundPackagesInvokeError(error);
 			finishRuntimeRun(runtimeBridge, this.ctx, {
 				run: runtimeRun,
 				status: 'error',
-				error: serializeRuntimeError(error),
+				error: serializeRuntimeError(enrichedError),
 				logs: consoleCapture.logs,
 			});
-			throw error;
+			throw enrichedError;
 		} finally {
 			consoleCapture.restore();
 		}
@@ -870,7 +1017,11 @@ export class ${packageAppEntrypointName} extends WorkerEntrypoint {
 
 type PackageAppRuntimeBridgeProps = {
 	baseUrl: string
-	userId: string
+	/** The org that owns the app. */
+	userId: OwnerId
+	orgSlug: string | null
+	/** Who every bridge call acts as. */
+	visitor: RuntimePackageAppVisitor
 	email: string
 	displayName: string
 	packageId: string
@@ -913,14 +1064,19 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		createExecutionSecretRedactor()
 
 	private async createCallerContext(storageId: string | null) {
+		const { visitor } = this.ctx.props
 		return createMcpCallerContext({
 			baseUrl: this.ctx.props.baseUrl,
 			executionOrigin: 'background',
 			user: {
-				userId: this.ctx.props.userId,
+				userId: visitor.userId,
 				email: this.ctx.props.email,
-				username: undefined,
+				username: visitor.username,
 				displayName: this.ctx.props.displayName,
+			},
+			orgBinding: {
+				org: { id: this.ctx.props.userId, slug: this.ctx.props.orgSlug },
+				role: visitor.role,
 			},
 			storageContext: {
 				sessionId: null,
@@ -928,6 +1084,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 				packageId: this.ctx.props.packageId,
 				storageId,
 			},
+			source: { kind: 'package-app' },
 		})
 	}
 
@@ -1332,17 +1489,32 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		})
 	}
 
-	async packageSecretGet(input: { alias: string; packageId?: string }) {
+	private async resolvePackageSecretMount(input: {
+		alias: string
+		packageId?: string
+		access?: 'presence' | 'value'
+	}) {
 		const packageId = this.resolvePackageSecretAuthorityPackageId(input)
 		const callerContext = await this.createCallerContext(
 			this.ctx.props.packageId,
 		)
-		const resolved = await resolvePackageMountedSecret({
+		return await resolveCredential({
 			env: this.env,
-			callerContext,
-			packageId,
-			alias: input.alias,
+			orgId: ownerIdFromCaller(callerContext),
+			actor: callerContext.request,
+			packageStamp: attestedPackageStamp(packageId),
+			baseUrl: callerContext.baseUrl,
+			credential: {
+				use: 'package-secret-mount',
+				alias: input.alias,
+				callerContext,
+				...(input.access ? { access: input.access } : {}),
+			},
 		})
+	}
+
+	async packageSecretGet(input: { alias: string; packageId?: string }) {
+		const resolved = await this.resolvePackageSecretMount(input)
 		// Opaque placeholder string only — never track or return plaintext.
 		return {
 			value: resolved.ref,
@@ -1350,16 +1522,10 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	}
 
 	async packageSecretHas(input: { alias: string; packageId?: string }) {
-		const packageId = this.resolvePackageSecretAuthorityPackageId(input)
-		const callerContext = await this.createCallerContext(
-			this.ctx.props.packageId,
-		)
 		try {
-			await resolvePackageMountedSecret({
-				env: this.env,
-				callerContext,
-				packageId,
-				alias: input.alias,
+			await this.resolvePackageSecretMount({
+				...input,
+				access: 'presence',
 			})
 			return {
 				has: true,
@@ -1405,6 +1571,9 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	}
 
 	async workflowCreate(input: unknown) {
+		const { request } = await this.createCallerContext(null)
+		if (!request)
+			throw new Error('workflows.create requires a package app user.')
 		return await createDynamicCallableWorkflow({
 			env: this.env,
 			userId: this.ctx.props.userId,
@@ -1415,6 +1584,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 				sourceId: this.ctx.props.sourceId,
 			},
 			body: input as PackageWorkflowCreateInput,
+			lineage: requestLineage(request),
 		})
 	}
 
@@ -1501,7 +1671,8 @@ export async function createPackageAppWorkerId(input: {
 }
 
 function createPackageAppWorkerCacheKey(input: {
-	userId: string
+	userId: OwnerId
+	visitor: RuntimePackageAppVisitor
 	packageId: string
 	kodyId: string
 	sourceId: string
@@ -1517,6 +1688,9 @@ function createPackageAppWorkerCacheKey(input: {
 	}
 	return JSON.stringify([
 		input.userId,
+		input.visitor.userId,
+		input.visitor.username,
+		input.visitor.role,
 		input.packageId,
 		input.kodyId,
 		input.sourceId,
@@ -1527,6 +1701,21 @@ function createPackageAppWorkerCacheKey(input: {
 		input.callerEmail,
 		input.callerDisplayName,
 	])
+}
+
+function packageAppVisitorOf(callerContext: McpCallerContext) {
+	const request = callerContext.request
+	if (!request?.actor) {
+		throw new Error('A package app acts only as a signed-in visitor.')
+	}
+	return {
+		orgSlug: request.org.slug,
+		visitor: {
+			userId: request.actor.userId,
+			username: request.actor.username ?? '',
+			role: request.membership?.role ?? null,
+		} satisfies RuntimePackageAppVisitor,
+	}
 }
 
 function getUsernameFromPackageName(packageName: string) {
@@ -1552,16 +1741,18 @@ function buildPackageAppPublicContext(input: {
 	const username =
 		input.runtime.servingUsername ??
 		getUsernameFromPackageName(input.savedPackage.name)
-	const { kodyId } = input.savedPackage
+	// Public URLs use the name leaf (Kent: slug = leaf). Keep kodyId on the
+	// package context as identity; only the path segment switches to the leaf.
+	const urlSlug = getPackageNameLeaf(input.savedPackage.name)
 	if (input.runtime.hostedOrigin) {
 		// Request-scoped: the mount the request actually arrived on. On a
 		// per-user subdomain the username lives in the hostname, so the app is
-		// mounted at `/packages/{kodyId}`; inline serving keeps the
+		// mounted at `/packages/{slug}`; inline serving keeps the
 		// `/@{username}` path prefix.
 		const appBasePath =
 			input.runtime.mount === 'user-subdomain'
-				? buildPackageAppSubdomainPath({ kodyId })
-				: buildPackageAppPath({ username, kodyId })
+				? buildPackageAppSubdomainPath({ kodyId: urlSlug })
+				: buildPackageAppPath({ username, kodyId: urlSlug })
 		return {
 			appBasePath,
 			hostedUrl: `${input.runtime.hostedOrigin.replace(/\/+$/, '')}${appBasePath}`,
@@ -1574,7 +1765,7 @@ function buildPackageAppPublicContext(input: {
 		packageAppBaseUrl: getPackageAppBaseUrl({ env: input.env }),
 		appBaseUrl: input.baseUrl,
 		username,
-		kodyId,
+		kodyId: urlSlug,
 	})
 	return {
 		appBasePath: new URL(hostedUrl).pathname,
@@ -1601,12 +1792,13 @@ function resolvePackageAppManifest(input: {
 		content: packageJsonContent,
 		manifestPath:
 			input.source?.manifest_path ?? input.savedPackage.manifestPath,
+		mode: 'published',
 	})
 }
 
 async function resolvePersistablePackageSource(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	source?: EntitySourceRow
 	sourceId: string
 }) {
@@ -1622,7 +1814,7 @@ async function resolvePersistablePackageSource(input: {
 
 async function resolvePackageAppBundledArtifact(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	source?: EntitySourceRow
 	manifest: AuthoredPackageJson
 	savedPackage: {
@@ -1770,7 +1962,7 @@ async function resolvePackageAppSourceFiles(input: {
 async function buildPackageAppWorkerOptionsUncached(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	savedPackage: {
 		id: string
 		kodyId: string
@@ -1830,12 +2022,6 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 				})
 			: null,
 	}
-	await assertPersonOwnedPackageMayNotRunPlatformDependencies({
-		db: input.env.APP_DB,
-		userId: input.userId,
-		packageId: input.savedPackage.id,
-		dependencies: bundled.dependencies ?? [],
-	})
 	const mainModule = 'package-app-entry.js'
 	const { modules: hydratedModules, dynamicDependencyPackageIds } =
 		await hydrateKodyRuntimeModules({
@@ -1859,6 +2045,9 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 		...hydratedModules,
 		[mainModule]: createPackageAppWorkerSource({
 			mainModule: bundled.mainModule,
+			rewriteNullPackagesInvoke:
+				modulesContainUnboundPackagesInvokeAccess(hydratedModules),
+			preloadMcpServerNames: modulesReferenceKodyMcp(bundled.modules),
 		}),
 	}
 	return {
@@ -1870,6 +2059,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 				props: {
 					baseUrl: input.baseUrl,
 					userId: input.userId,
+					...packageAppVisitorOf(input.runtime.callerContext),
 					email: input.runtime.callerContext.user?.email ?? '',
 					displayName:
 						input.runtime.callerContext.user?.displayName ??
@@ -1896,6 +2086,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 						baseUrl: input.baseUrl,
 						userId: input.userId,
 						email: input.runtime.callerContext.user?.email ?? null,
+						request: input.runtime.callerContext.request,
 						storageContext: {
 							sessionId: null,
 							appId: input.savedPackage.id,
@@ -1912,7 +2103,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 export async function buildPackageAppWorker(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	savedPackage: {
 		id: string
 		kodyId: string
@@ -1939,75 +2130,105 @@ export async function buildPackageAppWorker(input: {
 	 * path. Defaults to the invocation `waitUntil` from `cloudflare:workers`.
 	 */
 	waitUntil?: (promise: Promise<unknown>) => void
+	/**
+	 * Optional Server-Timing bag from `servePackageAppRequest`. Records
+	 * `assertWithinComputeInclude` and `appLoader` (options cache +
+	 * `APP_LOADER.get` / `load`).
+	 */
+	serverTiming?: Array<ServerTimingEntry>
 }) {
 	// Apps run package code and read package storage without a daily counter,
 	// so they take the include → credits → stop gate directly.
-	await assertWithinComputeInclude({
-		db: input.env.APP_DB,
-		userId: input.userId,
-	})
-	const publicContext = buildPackageAppPublicContext(input)
-	const cacheKey = createPackageAppWorkerCacheKey({
-		userId: input.userId,
-		packageId: input.savedPackage.id,
-		kodyId: input.savedPackage.kodyId,
-		sourceId: input.savedPackage.sourceId,
-		publishedCommit: input.savedPackage.publishedCommit,
-		baseUrl: input.baseUrl,
-		...publicContext,
-		callerEmail: input.runtime.callerContext.user?.email ?? '',
-		callerDisplayName:
-			input.runtime.callerContext.user?.displayName ??
-			`package:${input.savedPackage.id}`,
-	})
-	const surface = input.surface ?? 'app_fetch'
-	if (!cacheKey) {
+	await pushServerTiming(
+		input.serverTiming,
+		'assertWithinComputeInclude',
+		async () => {
+			await assertWithinComputeInclude({
+				db: input.env.APP_DB,
+				env: input.env,
+				userId: input.userId,
+				orgBudget: input.runtime.callerContext.request
+					? {
+							orgId: input.runtime.callerContext.request.org.id,
+							orgSlug: input.runtime.callerContext.request.org.slug,
+							actorUserId:
+								input.runtime.callerContext.request.actor?.userId ?? null,
+							actorUsername:
+								input.runtime.callerContext.request.actor?.username ?? null,
+						}
+					: undefined,
+			})
+		},
+	)
+	return await pushServerTiming(input.serverTiming, 'appLoader', async () => {
+		const publicContext = buildPackageAppPublicContext(input)
+		const cacheKey = createPackageAppWorkerCacheKey({
+			userId: input.userId,
+			visitor: packageAppVisitorOf(input.runtime.callerContext).visitor,
+			packageId: input.savedPackage.id,
+			kodyId: input.savedPackage.kodyId,
+			sourceId: input.savedPackage.sourceId,
+			publishedCommit: input.savedPackage.publishedCommit,
+			baseUrl: input.baseUrl,
+			...publicContext,
+			callerEmail: input.runtime.callerContext.user?.email ?? '',
+			callerDisplayName:
+				input.runtime.callerContext.user?.displayName ??
+				`package:${input.savedPackage.id}`,
+		})
+		const surface = input.surface ?? 'app_fetch'
+		if (!cacheKey) {
+			return {
+				stub: input.env.APP_LOADER.load(
+					await buildPackageAppWorkerOptionsUncached(input),
+				),
+				entrypointName: packageAppEntrypointName,
+			}
+		}
+		const build = await packageAppWorkerOptionsCache.getOrCreate({
+			cacheKey,
+			create: async () => {
+				const workerOptions = await buildPackageAppWorkerOptionsUncached(input)
+				return {
+					workerId: await createPackageAppWorkerId({ cacheKey, workerOptions }),
+					workerOptions,
+				}
+			},
+		})
+		// Acquire the request-bound stub before claiming the day. A failed
+		// `APP_LOADER.get()` must not persist a (day, workerId) that a retry
+		// would then skip without a `dynamic_worker_day` event.
+		const stub = build.workerId
+			? input.env.APP_LOADER.get(build.workerId, () => build.workerOptions)
+			: input.env.APP_LOADER.load(build.workerOptions)
+		if (build.workerId) {
+			schedulePackageAppUniqueWorkerDay({
+				env: input.env,
+				userId: input.userId,
+				workerId: build.workerId,
+				surface,
+				packageId: input.savedPackage.id,
+				connectionKey: usageConnectionKey(input.runtime.callerContext.request),
+				waitUntil: input.waitUntil,
+			})
+		}
 		return {
-			stub: input.env.APP_LOADER.load(
-				await buildPackageAppWorkerOptionsUncached(input),
-			),
+			// Stubs are request-bound, so acquire a fresh one per request. The stable
+			// worker id (derived from user + package + commit + caller identity) lets
+			// the loader reuse a warm isolate instead of compiling a new worker.
+			stub,
 			entrypointName: packageAppEntrypointName,
 		}
-	}
-	const build = await packageAppWorkerOptionsCache.getOrCreate({
-		cacheKey,
-		create: async () => {
-			const workerOptions = await buildPackageAppWorkerOptionsUncached(input)
-			return {
-				workerId: await createPackageAppWorkerId({ cacheKey, workerOptions }),
-				workerOptions,
-			}
-		},
 	})
-	// Acquire the request-bound stub before claiming the day. A failed
-	// `APP_LOADER.get()` must not persist a (day, workerId) that a retry
-	// would then skip without a `dynamic_worker_day` event.
-	const stub = build.workerId
-		? input.env.APP_LOADER.get(build.workerId, () => build.workerOptions)
-		: input.env.APP_LOADER.load(build.workerOptions)
-	if (build.workerId) {
-		schedulePackageAppUniqueWorkerDay({
-			env: input.env,
-			userId: input.userId,
-			workerId: build.workerId,
-			surface,
-			waitUntil: input.waitUntil,
-		})
-	}
-	return {
-		// Stubs are request-bound, so acquire a fresh one per request. The stable
-		// worker id (derived from user + package + commit + caller identity) lets
-		// the loader reuse a warm isolate instead of compiling a new worker.
-		stub,
-		entrypointName: packageAppEntrypointName,
-	}
 }
 
 function schedulePackageAppUniqueWorkerDay(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	workerId: string
 	surface: 'app_fetch' | 'app_realtime'
+	packageId: string
+	connectionKey: string
 	waitUntil?: (promise: Promise<unknown>) => void
 }) {
 	const tracked = recordUniqueDynamicWorkerDay({
@@ -2015,6 +2236,8 @@ function schedulePackageAppUniqueWorkerDay(input: {
 		userId: input.userId,
 		workerId: input.workerId,
 		surface: input.surface,
+		packageId: input.packageId,
+		connectionKey: input.connectionKey,
 	}).catch((error: unknown) => {
 		console.warn('package-app-dynamic-worker-day-record-failed', error)
 	})
@@ -2022,24 +2245,34 @@ function schedulePackageAppUniqueWorkerDay(input: {
 	sink(tracked)
 }
 
+/**
+ * A package app acts as its visitor, bound to the org that owns the app, with
+ * the visitor's live role there.
+ */
 export async function createPackageAppCallerContext(input: {
 	baseUrl: string
-	user: {
-		userId: string
+	owner: {
+		userId: OwnerId
+		/** The owning org's package scope, which is its slug. */
+		username: string
 		email: string
-		username?: string
 		displayName?: string
 	}
+	visitor: RuntimePackageAppVisitor
 	packageId: string
 }) {
 	return createMcpCallerContext({
 		baseUrl: input.baseUrl,
 		executionOrigin: 'background',
 		user: {
-			userId: input.user.userId,
-			email: input.user.email,
-			username: input.user.username,
-			displayName: input.user.displayName ?? `package:${input.packageId}`,
+			userId: input.visitor.userId,
+			email: input.owner.email,
+			username: input.visitor.username,
+			displayName: input.owner.displayName ?? `package:${input.packageId}`,
+		},
+		orgBinding: {
+			org: { id: input.owner.userId, slug: input.owner.username },
+			role: input.visitor.role,
 		},
 		storageContext: {
 			sessionId: null,
@@ -2047,5 +2280,6 @@ export async function createPackageAppCallerContext(input: {
 			packageId: input.packageId,
 			storageId: null,
 		},
+		source: { kind: 'package-app' },
 	})
 }

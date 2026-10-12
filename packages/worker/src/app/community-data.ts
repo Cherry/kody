@@ -44,10 +44,10 @@ import { resolveListingPinAncestry } from '#worker/community/fork-listing-relati
 import { resolveViewerListingInstalls } from '#worker/community/viewer-install.ts'
 import {
 	listSavedPackagesByIds,
-	listSavedPackagesByKodyIds,
+	listSavedPackagesBySlugs,
 } from '#worker/package-registry/repo.ts'
 import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
-import { resolveUserStableId } from '#worker/user-id.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 
 const defaultCommunityListLimit = 50
 const onboardingFeaturedListingLimit = 12
@@ -119,62 +119,72 @@ async function loadCommunityIndexDataUncached(
 		overview,
 	})
 	const viewerPromise = readOptionalAuthenticatedViewer(request, env)
-	const cached = await loadWithCommunityCache(
-		env,
-		request,
-		cacheKey,
-		async () => {
-			if (overview) {
-				const overviewResult = await listCommunityIndexOverview({
-					env,
-					sort,
-				})
-				return {
-					listings: overviewResult.listings.map(toPublicCommunityListing),
-					groups: overviewResult.groups.map((group) => ({
-						category: group.category,
-						listings: group.listings.map(toPublicCommunityListing),
-						total: group.total,
-					})),
-					categoryCounts: overviewResult.categoryCounts,
+	const cached = await recordServerTiming(
+		'community-listings',
+		() =>
+			loadWithCommunityCache(env, request, cacheKey, async () => {
+				if (overview) {
+					const overviewResult = await listCommunityIndexOverview({
+						env,
+						sort,
+					})
+					return {
+						listings: overviewResult.listings.map(toPublicCommunityListing),
+						groups: overviewResult.groups.map((group) => ({
+							category: group.category,
+							listings: group.listings.map(toPublicCommunityListing),
+							total: group.total,
+						})),
+						categoryCounts: overviewResult.categoryCounts,
+					}
 				}
-			}
-			const [rows, categoryCounts] = await Promise.all([
-				query
-					? searchCommunityListings({
-							env,
-							query,
-							limit,
-							sort,
-							category,
-						})
-					: listCommunityListingsWithAggregates({
-							env,
-							includeDelisted: false,
-							limit,
-							offset: 0,
-							sort,
-							category,
-						}),
-				getCommunityCategoryCounts({ env }),
-			])
-			return {
-				listings: rows.map(toPublicCommunityListing),
-				groups: null,
-				categoryCounts,
-			}
-		},
+				const [rows, categoryCounts] = await Promise.all([
+					query
+						? searchCommunityListings({
+								env,
+								query,
+								limit,
+								sort,
+								category,
+							})
+						: listCommunityListingsWithAggregates({
+								env,
+								includeDelisted: false,
+								limit,
+								offset: 0,
+								sort,
+								category,
+							}),
+					getCommunityCategoryCounts({ env }),
+				])
+				return {
+					listings: rows.map(toPublicCommunityListing),
+					groups: null,
+					categoryCounts,
+				}
+			}),
+		request,
 	)
 
-	const user = await viewerPromise
+	const user = await recordServerTiming(
+		'viewer-auth',
+		() => viewerPromise,
+		request,
+	)
 	const visibleListings = overview
 		? (cached.groups ?? []).flatMap((group) => group.listings)
 		: cached.listings
-	const listings = await overlayViewerInstallsOnListings({
-		env,
-		user,
-		listings: visibleListings,
-	})
+	const listings = await recordServerTiming(
+		'viewer-installs',
+		() =>
+			overlayViewerInstallsOnListings({
+				env,
+				user,
+				listings: visibleListings,
+				request,
+			}),
+		request,
+	)
 	const listingById = new Map(listings.map((listing) => [listing.id, listing]))
 	return {
 		ok: true,
@@ -396,8 +406,10 @@ async function loadCommunityDetailDataUncached(
 		readOptionalAuthenticatedAppUser(request, env),
 	])
 	const ownerProfilePublic = ownerRow?.profile_visibility === 'public'
-	const ownerUserId = ownerRow ? resolveUserStableId(ownerRow) : null
-	const viewerUserId = user?.mcpUser.userId ?? null
+	const ownerUserId = ownerRow
+		? ownerIdFromStored(ownerRow.stable_user_id)
+		: null
+	const viewerUserId = user?.request.org.id ?? null
 	const viewerIsOwner =
 		viewerUserId != null && ownerUserId != null && viewerUserId === ownerUserId
 	const viewerInstalls = await loadViewerListingInstalls({
@@ -439,6 +451,7 @@ export function composeCommunityDetailLoaderData(input: {
 		listing: input.listing,
 		ownerProfilePublic: input.ownerProfilePublic ?? false,
 		viewerIsOwner: input.viewerIsOwner ?? false,
+		viewerCanManage: input.viewerIsOwner ?? false,
 		loggedIn: input.loggedIn,
 		viewerIsAdmin: input.viewerIsAdmin ?? false,
 		forkPrompt: buildForkPrompt({
@@ -475,6 +488,7 @@ async function overlayViewerInstallsOnListings<
 	env: Env
 	user: McpUserContext | null
 	listings: Array<T>
+	request?: Request
 }): Promise<Array<T>> {
 	if (input.user == null || input.listings.length === 0) {
 		return input.listings
@@ -483,6 +497,7 @@ async function overlayViewerInstallsOnListings<
 		env: input.env,
 		user: input.user,
 		listings: input.listings,
+		request: input.request,
 	})
 	if (viewerInstalls.size === 0) return input.listings
 	return input.listings.map((listing) => {
@@ -505,22 +520,23 @@ async function loadViewerListingInstalls(input: {
 		name?: string
 		pinnedCommit?: string
 	}>
+	request?: Request
 }): Promise<Map<string, ViewerListingInstall>> {
 	if (input.user == null || input.listings.length === 0) {
 		return new Map()
 	}
 	try {
 		const listingIds = input.listings.map((listing) => listing.id)
-		const kodyIds = input.listings.map((listing) => listing.kodyId)
+		const slugs = input.listings.map((listing) => listing.kodyId)
 		const [packageScope, forks, savedByKody] = await Promise.all([
 			getMcpUserPackageScope(input.env.APP_DB, input.user),
 			listCommunityForksByListingIdsAndUser(input.env.APP_DB, {
 				listingIds,
 				userId: input.user.userId,
 			}),
-			listSavedPackagesByKodyIds(input.env.APP_DB, {
+			listSavedPackagesBySlugs(input.env.APP_DB, {
 				userId: input.user.userId,
-				kodyIds,
+				slugs,
 			}),
 		])
 		const missingPackageIds = [
@@ -542,13 +558,18 @@ async function loadViewerListingInstalls(input: {
 						userId: input.user.userId,
 						packageIds: missingPackageIds,
 					})
-		const listingPinIsAncestorByListingId = await resolveViewerListingAncestry({
-			env: input.env,
-			listings: input.listings,
-			packageScope,
-			savedPackages: [...savedByKody, ...savedByForkId],
-			forks,
-		})
+		const listingPinIsAncestorByListingId = await recordServerTiming(
+			'fork-ancestry',
+			() =>
+				resolveViewerListingAncestry({
+					env: input.env,
+					listings: input.listings,
+					packageScope,
+					savedPackages: [...savedByKody, ...savedByForkId],
+					forks,
+				}),
+			input.request,
+		)
 		const resolved = resolveViewerListingInstalls({
 			listings: input.listings,
 			packageScope,

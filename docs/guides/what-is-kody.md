@@ -2,12 +2,12 @@
 id: what_is_kody
 title: What is Kody?
 summary:
-  Start here. Kody is the home your agents share. Connect the AI agent you
-  already use over MCP and it gains durable memory, secrets it never reads,
-  saved packages, and jobs that keep running while you are offline. Covers what
-  Kody is, how it pairs with personal agents, what you cannot get elsewhere, the
-  building blocks, real uses, and notes for an agent running a discovery
-  interview. Nothing here requires an account.
+  Start here. Kody is Your agents' cloud. Connect the AI agent you already use
+  over MCP and it gains durable memory, secrets it never reads, saved packages,
+  and jobs that keep running while you are offline. Covers what Kody is, how it
+  pairs with personal agents, what you cannot get elsewhere, the building
+  blocks, real uses, and notes for an agent running a discovery interview.
+  Nothing here requires an account.
 category: platform
 ---
 
@@ -35,7 +35,7 @@ Agent notes — for AI agents running a discovery conversation from this page:
   markdown at /docs/<slug>.md.
 -->
 
-Kody is the home your agents share. You keep using the AI agent you already have
+Kody is Your agents' cloud. You keep using the AI agent you already have
 (Claude, ChatGPT, Cursor, Codex, Copilot, Grok, OpenClaw, or any other
 MCP-capable host) and connect it to your Kody account. That agent gains durable
 state that outlives the conversation and keeps working while your computer is
@@ -60,13 +60,15 @@ Also watch:
 You do not chat with Kody. Your agent supplies the intelligence; Kody supplies
 the things that should not live in one chat window:
 
-- **Memory** — durable facts and preferences on the account, surfaced to every
-  connected agent.
+- **Memory**: useful facts without a better home, available to connected agents
+  when relevant.
 - **Secrets** — API keys and OAuth grants your code can use but your agent can
   never read (mount `get` returns an opaque placeholder only). There is
   deliberately no plaintext `secret_get`.
-- **Packages** — code your agent wrote once and saved, callable from any agent,
-  with exports, a hosted app surface, and its own storage.
+- **Packages**: reusable code with typed inputs and documented defaults,
+  callable from any agent, with exports, a hosted app surface, and its own
+  storage. Put repeatable behavior here so running the task doesn’t depend on an
+  agent retrieving an instruction from memory.
 - **Jobs, workflows, and webhooks** — the triggers that run those packages on a
   schedule, later, or when a provider knocks — with no model in the loop.
 - **Integrations and MCP servers** — the logins and tool servers those packages
@@ -111,7 +113,8 @@ Together, the agent does the thinking once and Kody keeps the result:
 - **Ask again tomorrow** becomes a saved export. No model in the loop.
 - **A key in chat or a `.env`** becomes a secret the agent never sees.
 - **Re-run the agent on a timer** becomes a job that runs while you are offline.
-- **Context stuck in one host** becomes memories that follow the account.
+- **Facts without another home** become memories that follow the account.
+- **Repeated task instructions** become package code and documented defaults.
 
 A personal agent watching your school inbox can hand the watching to a Kody job
 that still fires when the laptop is in a bag. A receipt hunt your phone agent

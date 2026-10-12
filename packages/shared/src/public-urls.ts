@@ -59,6 +59,15 @@ export type PackageAppMount = 'user-subdomain' | 'username-path'
  */
 export const dnsSafeUsernamePattern = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/
 
+/**
+ * Anchor-free source of {@link dnsSafeUsernamePattern}. Embed this fragment
+ * in a larger expression so org slugs and path parsers share one handle shape.
+ */
+export const dnsSafeUsernamePatternSource = dnsSafeUsernamePattern.source.slice(
+	1,
+	-1,
+)
+
 export function isDnsSafeUsername(username: string) {
 	return dnsSafeUsernamePattern.test(username.trim())
 }
@@ -134,8 +143,6 @@ export function resolveHostedPackageAppUrl(input: {
 	})
 }
 
-export const packageInvocationRootExportRouteSegment = '__root__'
-
 export function normalizePackageInvocationExportName(exportName: string) {
 	const trimmed = exportName.trim()
 	if (!trimmed) {
@@ -145,31 +152,6 @@ export function normalizePackageInvocationExportName(exportName: string) {
 		return '.'
 	}
 	return trimmed.startsWith('./') ? trimmed : `./${trimmed}`
-}
-
-export function buildPackageInvocationRouteExportName(exportName: string) {
-	const normalized = normalizePackageInvocationExportName(exportName)
-	if (normalized === '.') return packageInvocationRootExportRouteSegment
-	return normalized.startsWith('./') ? normalized.slice(2) : normalized
-}
-
-export function buildPackageInvocationPath(input: {
-	username: string
-	kodyId: string
-	exportName: string
-}) {
-	return `${buildUsernamePathPrefix(input.username)}/api/package-invocations/${encodeURIComponent(
-		input.kodyId.trim(),
-	)}/${encodeURIComponent(buildPackageInvocationRouteExportName(input.exportName))}`
-}
-
-export function buildPackageInvocationUrl(input: {
-	origin: string
-	username: string
-	kodyId: string
-	exportName: string
-}) {
-	return `${input.origin.trim().replace(/\/+$/, '')}${buildPackageInvocationPath(input)}`
 }
 
 export function requireUsernameForPublicUrl(

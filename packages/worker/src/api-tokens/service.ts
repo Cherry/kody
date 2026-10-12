@@ -16,18 +16,19 @@ import { sha256Hex } from '@kody-internal/shared/sha256.ts'
 import { timingSafeEqualString } from '@kody-internal/shared/timing-safe.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import {
-	apiTokenScopeSatisfies,
+	apiTokenScopeIncludes,
 	normalizeApiTokenScopes,
 	type ApiTokenScope,
 } from './scopes.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export const apiTokenPolicy = {
-	defaultIdleTtlSeconds: 15 * 60,
 	minIdleTtlSeconds: 60,
-	maxIdleTtlSeconds: 60 * 60,
-	defaultMaxLifetimeSeconds: 24 * 60 * 60,
-	maxMaxLifetimeSeconds: 7 * 24 * 60 * 60,
-	maxActiveTokensPerUser: 50,
+	/** ADR 0056: idle timeout at most 14 days. */
+	maxIdleTtlSeconds: 14 * 24 * 60 * 60,
+	/** ADR 0056: absolute lifetime at most 3 months. */
+	maxMaxLifetimeSeconds: 90 * 24 * 60 * 60,
+	maxActiveTokensPerUser: 500,
 	maxNameLength: 100,
 	/**
 	 * Sliding-expiry writes are skipped when they would extend the expiry by
@@ -38,12 +39,123 @@ export const apiTokenPolicy = {
 	inactiveRetentionSeconds: 7 * 24 * 60 * 60,
 } as const
 
+/**
+ * Input aliases for required token lifetimes. Sugar only: never stored on the
+ * token. `short` suits single-task agents; `long` is the policy maximum.
+ */
+export const apiTokenLifetimeAliases = {
+	short: {
+		idleTtlSeconds: 60 * 60,
+		maxLifetimeSeconds: 24 * 60 * 60,
+	},
+	long: {
+		idleTtlSeconds: apiTokenPolicy.maxIdleTtlSeconds,
+		maxLifetimeSeconds: apiTokenPolicy.maxMaxLifetimeSeconds,
+	},
+} as const
+
+export type ApiTokenLifetimeAlias = keyof typeof apiTokenLifetimeAliases
+
+export const apiTokenLifetimeAliasNames = Object.keys(
+	apiTokenLifetimeAliases,
+) as Array<ApiTokenLifetimeAlias>
+
+export type ResolvedApiTokenLifetime = {
+	idleTtlSeconds: number
+	maxLifetimeSeconds: number
+	/** CLI flags that reproduce this choice (alias or explicit pair). */
+	cliFlags: string
+}
+
+export function apiTokenLifetimeMissingError(surface: 'api' | 'cli') {
+	if (surface === 'cli') {
+		return (
+			'Token lifetime is required. Pass --lifetime short|long, or both ' +
+			`--idle-ttl-seconds <n> and --max-lifetime-seconds <n> ` +
+			`(idle ${apiTokenPolicy.minIdleTtlSeconds}-${apiTokenPolicy.maxIdleTtlSeconds}s, ` +
+			`max age up to ${apiTokenPolicy.maxMaxLifetimeSeconds}s). ` +
+			'Single-task agents should use --lifetime short.'
+		)
+	}
+	return (
+		'Token lifetime is required. Pass lifetime: "short"|"long", or both ' +
+		`idle_ttl_seconds and max_lifetime_seconds ` +
+		`(idle ${apiTokenPolicy.minIdleTtlSeconds}-${apiTokenPolicy.maxIdleTtlSeconds}, ` +
+		`max age up to ${apiTokenPolicy.maxMaxLifetimeSeconds}). ` +
+		'Single-task agents should use lifetime: "short".'
+	)
+}
+
+/**
+ * Resolve a required lifetime choice. Aliases expand to idle/max seconds;
+ * the label is not kept. Rejects missing, mixed, or over-limit values.
+ */
+export function resolveApiTokenLifetime(input: {
+	lifetime?: string | null
+	idleTtlSeconds?: number
+	maxLifetimeSeconds?: number
+	missingError?: string
+}): ResolvedApiTokenLifetime {
+	const missingError = input.missingError ?? apiTokenLifetimeMissingError('api')
+	const aliasRaw =
+		typeof input.lifetime === 'string' ? input.lifetime.trim() : ''
+	const hasAlias = aliasRaw.length > 0
+	const hasIdle = input.idleTtlSeconds !== undefined
+	const hasMax = input.maxLifetimeSeconds !== undefined
+
+	if (!hasAlias && !hasIdle && !hasMax) {
+		throw new McpCallerError(missingError)
+	}
+	if (hasAlias && (hasIdle || hasMax)) {
+		throw new McpCallerError(
+			'Pass lifetime: "short"|"long", or both idle_ttl_seconds and max_lifetime_seconds, not both forms.',
+		)
+	}
+	if (hasAlias) {
+		if (!Object.hasOwn(apiTokenLifetimeAliases, aliasRaw)) {
+			throw new McpCallerError(
+				`lifetime must be "short" or "long" (got ${JSON.stringify(aliasRaw)}).`,
+			)
+		}
+		const alias = aliasRaw as ApiTokenLifetimeAlias
+		const resolved = apiTokenLifetimeAliases[alias]
+		return {
+			idleTtlSeconds: resolved.idleTtlSeconds,
+			maxLifetimeSeconds: resolved.maxLifetimeSeconds,
+			cliFlags: `--lifetime ${alias}`,
+		}
+	}
+	if (!hasIdle || !hasMax) {
+		throw new McpCallerError(
+			'When not using lifetime: "short"|"long", both idle_ttl_seconds and max_lifetime_seconds are required.',
+		)
+	}
+	const idleTtlSeconds = readRequiredInteger({
+		value: input.idleTtlSeconds!,
+		min: apiTokenPolicy.minIdleTtlSeconds,
+		max: apiTokenPolicy.maxIdleTtlSeconds,
+		field: 'idle_ttl_seconds',
+	})
+	const maxLifetimeSeconds = readRequiredInteger({
+		value: input.maxLifetimeSeconds!,
+		min: idleTtlSeconds,
+		max: apiTokenPolicy.maxMaxLifetimeSeconds,
+		field: 'max_lifetime_seconds',
+	})
+	return {
+		idleTtlSeconds,
+		maxLifetimeSeconds,
+		cliFlags: `--idle-ttl-seconds ${idleTtlSeconds} --max-lifetime-seconds ${maxLifetimeSeconds}`,
+	}
+}
+
 export const apiTokenCreatedVia = ['api', 'mcp-api', 'cli-bootstrap'] as const
 export type ApiTokenCreatedVia = (typeof apiTokenCreatedVia)[number]
 
 const apiTokenRowSchema = object({
 	id: string(),
 	user_id: string(),
+	org_id: string(),
 	name: string(),
 	token_hash: string(),
 	scopes_json: string(),
@@ -56,6 +168,7 @@ const apiTokenRowSchema = object({
 	last_used_at: nullable(string()),
 	rotated_at: nullable(string()),
 	revoked_at: nullable(string()),
+	profile_name: nullable(string()),
 })
 
 type ApiTokenRow = InferOutput<typeof apiTokenRowSchema>
@@ -70,6 +183,7 @@ export type ApiTokenStatus = 'active' | 'expired' | 'revoked'
 export type ApiTokenView = {
 	id: string
 	name: string
+	org_id: string
 	scopes: Array<ApiTokenScope>
 	status: ApiTokenStatus
 	idle_ttl_seconds: number
@@ -80,6 +194,7 @@ export type ApiTokenView = {
 	last_used_at: string | null
 	rotated_at: string | null
 	revoked_at: string | null
+	profile_name: string | null
 }
 
 export type ApiTokenSecretView = ApiTokenView & {
@@ -89,7 +204,17 @@ export type ApiTokenSecretView = ApiTokenView & {
 }
 
 function mapRow(row: Record<string, unknown>): ApiTokenRecord {
-	const parsed = parseSafe(apiTokenRowSchema, row)
+	// org_id is required. A missing value must not be coerced to user_id.
+	if (typeof row.org_id !== 'string' || !row.org_id.trim()) {
+		throw new Error('Invalid API token record: org_id is required')
+	}
+	const parsed = parseSafe(apiTokenRowSchema, {
+		...row,
+		profile_name:
+			typeof row.profile_name === 'string' || row.profile_name === null
+				? row.profile_name
+				: null,
+	})
 	if (!parsed.success) {
 		const message = parsed.issues.map((issue) => issue.message).join(', ')
 		throw new Error(`Invalid API token record: ${message}`)
@@ -116,6 +241,7 @@ export function toApiTokenView(
 	return {
 		id: record.id,
 		name: record.name,
+		org_id: record.org_id,
 		scopes: record.scopes,
 		status: getApiTokenStatus(record, now),
 		idle_ttl_seconds: record.idle_ttl_seconds,
@@ -126,6 +252,7 @@ export function toApiTokenView(
 		last_used_at: record.last_used_at,
 		rotated_at: record.rotated_at,
 		revoked_at: record.revoked_at,
+		profile_name: record.profile_name ?? null,
 	}
 }
 
@@ -144,14 +271,12 @@ function slidingExpiry(input: {
 	).toISOString()
 }
 
-function readIntegerOption(input: {
-	value: number | undefined
-	fallback: number
+function readRequiredInteger(input: {
+	value: number
 	min: number
 	max: number
 	field: string
 }) {
-	if (input.value === undefined) return input.fallback
 	if (
 		!Number.isInteger(input.value) ||
 		input.value < input.min ||
@@ -192,7 +317,7 @@ async function pruneInactiveApiTokens(input: {
 		.prepare(
 			`DELETE FROM api_tokens
 			WHERE user_id = ?
-				AND (revoked_at < ? OR expires_at < ?)`,
+				AND (revoked_at < ? OR expires_at < ?)${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, cutoff, cutoff)
 		.run()
@@ -209,7 +334,7 @@ async function countActiveApiTokens(input: {
 			FROM api_tokens
 			WHERE user_id = ?
 				AND revoked_at IS NULL
-				AND expires_at > ?`,
+				AND expires_at > ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.userId, input.now.toISOString())
 		.first<{ count: number }>()
@@ -217,27 +342,129 @@ async function countActiveApiTokens(input: {
 }
 
 /**
+ * Remaining life until the token stops working: time until the stored
+ * `expires_at` (already the sooner of the sliding idle window and
+ * `max_expires_at`). Prefer `expires_at` over recomputing from
+ * last_used_at/created_at so rotation and touch stay accurate for reclaim.
+ */
+export function apiTokenRemainingLifeMs(
+	record: Pick<ApiTokenRecord, 'expires_at'>,
+	now: Date,
+) {
+	return Date.parse(record.expires_at) - now.getTime()
+}
+
+async function listActiveApiTokenRecords(input: {
+	db: D1Database
+	userId: string
+	now: Date
+}) {
+	const rows = await input.db
+		.prepare(
+			`SELECT *
+			FROM api_tokens
+			WHERE user_id = ?
+				AND revoked_at IS NULL
+				AND expires_at > ?${andLiveDeletedAtSql()}
+			ORDER BY created_at ASC, id ASC`,
+		)
+		.bind(input.userId, input.now.toISOString())
+		.all<Record<string, unknown>>()
+	return (rows.results ?? []).map(mapRow)
+}
+
+/**
+ * When the account is at or over the active-token cap, revoke active tokens
+ * with the least remaining life until `activeCount + slotsNeeded <= max`.
+ * Never revokes ids in `excludeTokenIds` (caller + just-minted). Optionally
+ * only considers tokens created strictly before `onlyCreatedBefore` so a
+ * concurrent sibling mint is not revoked by post-insert healing. Applies to
+ * every mint via `mintApiToken`.
+ */
+async function reclaimApiTokenSlots(input: {
+	db: D1Database
+	userId: string
+	now: Date
+	excludeTokenIds?: ReadonlyArray<string>
+	/** ISO timestamp: only reclaim rows with created_at strictly earlier. */
+	onlyCreatedBefore?: string
+	slotsNeeded: number
+}) {
+	const excluded = new Set(
+		(input.excludeTokenIds ?? []).filter((id) => typeof id === 'string' && id),
+	)
+	let activeCount = await countActiveApiTokens(input)
+	while (
+		activeCount + input.slotsNeeded >
+		apiTokenPolicy.maxActiveTokensPerUser
+	) {
+		const active = await listActiveApiTokenRecords(input)
+		const candidates = active
+			.filter((record) => {
+				if (excluded.has(record.id)) return false
+				if (
+					input.onlyCreatedBefore &&
+					!(record.created_at < input.onlyCreatedBefore)
+				) {
+					return false
+				}
+				return true
+			})
+			.sort((left, right) => {
+				const lifeDiff =
+					apiTokenRemainingLifeMs(left, input.now) -
+					apiTokenRemainingLifeMs(right, input.now)
+				if (lifeDiff !== 0) return lifeDiff
+				return left.id.localeCompare(right.id)
+			})
+		const victim = candidates[0]
+		if (!victim) {
+			// Soft overshoot from concurrent sibling mints; next mint heals.
+			if (input.onlyCreatedBefore && input.slotsNeeded === 0) return
+			throw new McpCallerError(
+				`This account already has ${apiTokenPolicy.maxActiveTokensPerUser} active API tokens and none can be reclaimed (protected tokens cannot be revoked). Revoke one before minting another.`,
+			)
+		}
+		await revokeApiToken({
+			db: input.db,
+			userId: input.userId,
+			tokenId: victim.id,
+			now: input.now,
+		})
+		activeCount = await countActiveApiTokens(input)
+	}
+}
+
+/**
  * The token doing the minting, when a token mints a token. A child token can
  * never hold scopes the parent lacks or outlive the parent's absolute expiry.
+ * A profile-bound parent can only mint tokens for the same profile.
  */
 export type ApiTokenMintParent = {
 	scopes: ReadonlyArray<ApiTokenScope>
 	maxExpiresAt: string
+	profileName?: string | null
 }
 
 export async function mintApiToken(input: {
 	db: D1Database
 	userId: string
+	/** Org this token is bound to. Defaults to the caller's personal org (`userId`). */
+	orgId?: string
 	name: string
 	scopes: ReadonlyArray<unknown>
-	idleTtlSeconds?: number
-	maxLifetimeSeconds?: number
+	idleTtlSeconds: number
+	maxLifetimeSeconds: number
 	createdVia: ApiTokenCreatedVia
 	parent?: ApiTokenMintParent
+	profileName?: string | null
+	/** Never reclaimed when the active-token pool is full. */
+	excludeTokenId?: string
 	now?: Date
 }): Promise<ApiTokenSecretView> {
 	const now = input.now ?? new Date()
 	const name = readTokenName(input.name)
+	const orgId = input.orgId?.trim() || input.userId
 	let scopes: Array<ApiTokenScope>
 	try {
 		scopes = normalizeApiTokenScopes(input.scopes)
@@ -252,7 +479,7 @@ export async function mintApiToken(input: {
 	const parent = input.parent
 	if (parent) {
 		const missing = scopes.filter(
-			(scope) => !apiTokenScopeSatisfies(parent.scopes, scope),
+			(scope) => !apiTokenScopeIncludes(parent.scopes, scope),
 		)
 		if (missing.length > 0) {
 			throw new McpCallerError(
@@ -260,19 +487,25 @@ export async function mintApiToken(input: {
 			)
 		}
 	}
-	const idleTtlSeconds = readIntegerOption({
+	const profileName =
+		typeof input.profileName === 'string' && input.profileName.trim()
+			? input.profileName.trim()
+			: null
+	if (parent?.profileName) {
+		if (!profileName || profileName !== parent.profileName) {
+			throw new McpCallerError(
+				`A profile-bound token can only mint tokens for the same connection profile ("${parent.profileName}").`,
+			)
+		}
+	}
+	const idleTtlSeconds = readRequiredInteger({
 		value: input.idleTtlSeconds,
-		fallback: apiTokenPolicy.defaultIdleTtlSeconds,
 		min: apiTokenPolicy.minIdleTtlSeconds,
 		max: apiTokenPolicy.maxIdleTtlSeconds,
 		field: 'idle_ttl_seconds',
 	})
-	const maxLifetimeSeconds = readIntegerOption({
+	const maxLifetimeSeconds = readRequiredInteger({
 		value: input.maxLifetimeSeconds,
-		fallback: Math.max(
-			apiTokenPolicy.defaultMaxLifetimeSeconds,
-			idleTtlSeconds,
-		),
 		min: idleTtlSeconds,
 		max: apiTokenPolicy.maxMaxLifetimeSeconds,
 		field: 'max_lifetime_seconds',
@@ -281,26 +514,29 @@ export async function mintApiToken(input: {
 	if (parent) {
 		maxExpiresAtMs = Math.min(maxExpiresAtMs, Date.parse(parent.maxExpiresAt))
 	}
+	if (maxExpiresAtMs <= now.getTime()) {
+		throw new McpCallerError(
+			'The resulting API token would already be expired (absolute max expiry is not in the future).',
+		)
+	}
 	const maxExpiresAt = new Date(maxExpiresAtMs).toISOString()
 
 	await pruneInactiveApiTokens({ db: input.db, userId: input.userId, now })
-	const activeCount = await countActiveApiTokens({
+	const protectedIds = input.excludeTokenId ? [input.excludeTokenId] : []
+	await reclaimApiTokenSlots({
 		db: input.db,
 		userId: input.userId,
 		now,
+		excludeTokenIds: protectedIds,
+		slotsNeeded: 1,
 	})
-	if (activeCount >= apiTokenPolicy.maxActiveTokensPerUser) {
-		throw new McpCallerError(
-			`This account already has ${apiTokenPolicy.maxActiveTokensPerUser} active API tokens. Revoke one before minting another.`,
-		)
-	}
-
 	const tokenId = generateApiTokenId()
 	const secret = generateApiTokenSecret()
 	const nowIso = now.toISOString()
 	const record: ApiTokenRecord = {
 		id: tokenId,
 		user_id: input.userId,
+		org_id: orgId,
 		name,
 		token_hash: await hashSecret(secret),
 		scopes,
@@ -313,12 +549,14 @@ export async function mintApiToken(input: {
 		last_used_at: null,
 		rotated_at: null,
 		revoked_at: null,
+		profile_name: profileName,
 	}
 	await input.db
 		.prepare(
 			`INSERT INTO api_tokens (
 				id,
 				user_id,
+				org_id,
 				name,
 				token_hash,
 				scopes_json,
@@ -327,12 +565,14 @@ export async function mintApiToken(input: {
 				max_expires_at,
 				created_via,
 				created_at,
-				updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				updated_at,
+				profile_name
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			record.id,
 			record.user_id,
+			record.org_id,
 			record.name,
 			record.token_hash,
 			JSON.stringify(record.scopes),
@@ -342,8 +582,19 @@ export async function mintApiToken(input: {
 			record.created_via,
 			record.created_at,
 			record.updated_at,
+			record.profile_name,
 		)
 		.run()
+	// Heal concurrent mint races that both reclaimed the same victim. Only
+	// reclaim older rows so a sibling mint created in the same race is kept.
+	await reclaimApiTokenSlots({
+		db: input.db,
+		userId: input.userId,
+		now,
+		excludeTokenIds: [...protectedIds, record.id],
+		onlyCreatedBefore: record.created_at,
+		slotsNeeded: 0,
+	})
 	return {
 		...toApiTokenView(record, now),
 		token: formatApiToken({ tokenId, secret }),
@@ -357,7 +608,9 @@ export async function getApiTokenRecord(input: {
 	tokenId: string
 }) {
 	const row = await input.db
-		.prepare(`SELECT * FROM api_tokens WHERE id = ? AND user_id = ? LIMIT 1`)
+		.prepare(
+			`SELECT * FROM api_tokens WHERE id = ? AND user_id = ? ${andLiveDeletedAtSql()} LIMIT 1`,
+		)
 		.bind(input.tokenId, input.userId)
 		.first<Record<string, unknown>>()
 	return row ? mapRow(row) : null
@@ -374,7 +627,7 @@ export async function listApiTokens(input: {
 		.prepare(
 			`SELECT *
 			FROM api_tokens
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY created_at DESC, id ASC`,
 		)
 		.bind(input.userId)
@@ -399,7 +652,7 @@ export async function revokeApiToken(input: {
 		.prepare(
 			`UPDATE api_tokens
 			SET revoked_at = ?, updated_at = ?
-			WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+			WHERE id = ? AND user_id = ? AND revoked_at IS NULL${andLiveDeletedAtSql()}`,
 		)
 		.bind(nowIso, nowIso, input.tokenId, input.userId)
 		.run()
@@ -436,7 +689,7 @@ export async function rotateApiToken(input: {
 		.prepare(
 			`UPDATE api_tokens
 			SET token_hash = ?, expires_at = ?, rotated_at = ?, updated_at = ?
-			WHERE id = ? AND user_id = ? AND token_hash = ? AND revoked_at IS NULL`,
+			WHERE id = ? AND user_id = ? AND token_hash = ? AND revoked_at IS NULL${andLiveDeletedAtSql()}`,
 		)
 		.bind(
 			rotated.token_hash,
@@ -479,7 +732,9 @@ export async function authenticateApiToken(input: {
 	const parsed = parseApiToken(input.token)
 	if (!parsed) return { ok: false, reason: 'malformed' }
 	const row = await input.db
-		.prepare(`SELECT * FROM api_tokens WHERE id = ? LIMIT 1`)
+		.prepare(
+			`SELECT * FROM api_tokens WHERE id = ? ${andLiveDeletedAtSql()} LIMIT 1`,
+		)
 		.bind(parsed.tokenId)
 		.first<Record<string, unknown>>()
 	if (!row) return { ok: false, reason: 'unknown' }
@@ -545,7 +800,7 @@ export async function touchApiToken(input: {
 		.prepare(
 			`UPDATE api_tokens
 			SET expires_at = ?, last_used_at = ?
-			WHERE id = ? AND revoked_at IS NULL AND expires_at > ?`,
+			WHERE id = ? AND revoked_at IS NULL AND expires_at > ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(input.record.expires_at, usedAt, input.record.id, usedAt)
 		.run()
@@ -558,5 +813,19 @@ export function getApiTokenIssuedAtMs(record: ApiTokenRecord) {
 }
 
 export function apiTokenIdleTtlDescription() {
-	return `Tokens expire after idle_ttl_seconds without use (default ${apiTokenPolicy.defaultIdleTtlSeconds}s, ${apiTokenPolicy.minIdleTtlSeconds}-${apiTokenPolicy.maxIdleTtlSeconds}s). Each successful request slides expires_at forward, never past max_expires_at (default ${apiTokenPolicy.defaultMaxLifetimeSeconds}s after mint, at most ${apiTokenPolicy.maxMaxLifetimeSeconds}s).`
+	return (
+		`Tokens require an explicit lifetime: lifetime "short" ` +
+		`(${apiTokenLifetimeAliases.short.idleTtlSeconds}s idle / ` +
+		`${apiTokenLifetimeAliases.short.maxLifetimeSeconds}s max) or "long" ` +
+		`(${apiTokenLifetimeAliases.long.idleTtlSeconds}s idle / ` +
+		`${apiTokenLifetimeAliases.long.maxLifetimeSeconds}s max), or both ` +
+		`idle_ttl_seconds (${apiTokenPolicy.minIdleTtlSeconds}-` +
+		`${apiTokenPolicy.maxIdleTtlSeconds}) and max_lifetime_seconds ` +
+		`(up to ${apiTokenPolicy.maxMaxLifetimeSeconds}). Each successful ` +
+		`request slides expires_at forward, never past max_expires_at. ` +
+		`At most ${apiTokenPolicy.maxActiveTokensPerUser} active tokens per ` +
+		`account; a new mint reclaims the active token(s) with the least ` +
+		`remaining life (sooner of idle deadline and absolute expiry), never ` +
+		`the caller's own token.`
+	)
 }

@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -12,8 +13,8 @@ import {
 	createSecretProviderGrantAlreadyPresentMessage,
 	createSecretProviderGrantRequiresWebsiteMessage,
 } from '#mcp/secrets/secret-providers/errors.ts'
-import { secretProvidersFlagKey } from '#mcp/secrets/secret-providers/flag.ts'
 import { inspectSecretProviderPackageGrant } from '#mcp/secrets/secret-providers/service.ts'
+import { authorizeSecretOrgWide } from './authorize-secret.ts'
 
 const outputSchema = z.object({
 	provider: z.string(),
@@ -29,7 +30,7 @@ export const secretProviderLockCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretProviderLock',
-		featureFlag: secretProvidersFlagKey,
+		orgPermission: 'secret:use',
 		description:
 			'Return a website approval URL so the account owner can grant a saved package use of one external secret-provider ref (canonical i/<item-id>/<field>: UUID or 1Password Connect 26-char id). This capability does not change grants. Send the approval_url to the user and wait. Ad hoc execute does not need this grant; saved packages do.',
 		keywords: [
@@ -62,11 +63,12 @@ export const secretProviderLockCapability = defineDomainCapability(
 		}),
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeSecretOrgWide(ctx, 'secret:use')
 			try {
 				const state = await inspectSecretProviderPackageGrant({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					providerId: args.provider,
 					ref: args.ref,
 					packageId: args.package_id,

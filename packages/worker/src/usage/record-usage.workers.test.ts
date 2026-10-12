@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import {
@@ -45,11 +46,14 @@ async function recordAll(
 	for (const event of events) await recordUsage(usageEnv, event)
 }
 
-const blobRow = (userId: string, blobs: Array<string>) => [
-	userId,
-	...blobs,
-	...Array(7 - blobs.length).fill(''),
-]
+const blobRow = (userId: string, blobs: Array<string>) => {
+	const padded = [userId, ...blobs]
+	while (padded.length < 12) padded.push('')
+	if (!padded[usageEventBlobIndexes.actorUserId]) {
+		padded[usageEventBlobIndexes.actorUserId] = userId
+	}
+	return padded
+}
 
 function dataPoint(
 	userId: string,
@@ -241,7 +245,11 @@ test('recordUsage never throws when bindings are missing, sinks fail, or userId 
 	await expect(
 		recordUsage(
 			{ APP_DB: env.APP_DB },
-			{ userId: '', eventType: 'execute', outcome: 'success' },
+			{
+				userId: '' as OwnerId,
+				eventType: 'execute',
+				outcome: 'success',
+			},
 		),
 	).resolves.toBeUndefined()
 	expect(await listRollups(env.APP_DB, '')).toEqual([])

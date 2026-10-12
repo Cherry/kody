@@ -34,6 +34,10 @@ import {
 	type AdminUsageMetric,
 } from '#universal/loader-data.ts'
 
+import {
+	andLiveDeletedAtSql,
+	liveDeletedAtSql,
+} from '#worker/soft-delete/live-sql.ts'
 export const adminInsightsSignupWeeks = 12
 export const adminInsightsUsageMonths = 12
 export const adminInsightsActivityDays = 28
@@ -138,14 +142,16 @@ async function queryAdminInsights(
 			.prepare(
 				`SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n
 				 FROM users
-				 WHERE created_at >= ?
+				 WHERE created_at >= ?${andLiveDeletedAtSql()}
 				 GROUP BY day
 				 ORDER BY day ASC`,
 			)
 			.bind(signupCutoff)
 			.all<DayCountRow>(),
 		db
-			.prepare(`SELECT COUNT(*) AS n FROM users WHERE created_at < ?`)
+			.prepare(
+				`SELECT COUNT(*) AS n FROM users WHERE created_at < ?${andLiveDeletedAtSql()}`,
+			)
 			.bind(signupCutoff)
 			.first<CountRow>(),
 		db
@@ -164,6 +170,7 @@ async function queryAdminInsights(
 			.prepare(
 				`SELECT COALESCE(plan, 'none') AS plan, COUNT(*) AS n
 				 FROM users
+				 WHERE ${liveDeletedAtSql()}
 				 GROUP BY COALESCE(plan, 'none')
 				 ORDER BY n DESC`,
 			)

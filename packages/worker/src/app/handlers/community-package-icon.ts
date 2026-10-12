@@ -1,5 +1,6 @@
 import { type Action } from 'remix/router'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { viewerCanReadSavedPackage } from '#app/package-viewer-access.ts'
 import {
 	identityIconNotFound,
 	ownerIdentityIconCacheControl,
@@ -8,7 +9,6 @@ import {
 import { resolvePackagePageUrl } from '#worker/community/package-url.ts'
 import { getCommunityListingById } from '#worker/community/repo.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
-import { loadViewerPackageShare } from '#worker/package-registry/share-grants.ts'
 import { type routes } from '#universal/routes.ts'
 
 function isGuestVisiblePackage(pkg: { hidden: boolean; isPrivate: boolean }) {
@@ -31,22 +31,6 @@ export function createCommunityPackageIconHandler(env: Env) {
 				return identityIconNotFound()
 			}
 
-			const viewerUserId = user?.mcpUser.userId ?? null
-			const viewerIsOwner = viewerUserId === target.userId
-			const shareGrant = viewerIsOwner
-				? null
-				: await loadViewerPackageShare({
-						db: env.APP_DB,
-						packageId: target.savedPackage.id,
-						viewer: user
-							? {
-									userId: user.mcpUser.userId,
-									email: user.email,
-									emailVerified: user.emailVerified,
-								}
-							: null,
-					})
-			const shareCanRead = shareGrant?.status === 'accepted'
 			const listing = target.listingId
 				? await getCommunityListingById(env.APP_DB, {
 						listingId: target.listingId,
@@ -55,7 +39,15 @@ export function createCommunityPackageIconHandler(env: Env) {
 				: null
 			const guestVisible =
 				Boolean(listing) || isGuestVisiblePackage(target.savedPackage)
-			if (!viewerIsOwner && !shareCanRead && !guestVisible) {
+			if (
+				!guestVisible &&
+				!(await viewerCanReadSavedPackage({
+					env,
+					viewer: user?.mcpUser ?? null,
+					ownerId: target.userId,
+					packageId: target.savedPackage.id,
+				}))
+			) {
 				return identityIconNotFound()
 			}
 

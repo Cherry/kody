@@ -9,6 +9,7 @@ import {
 import { buildConnectOauthWhatsNextPrompt } from '#universal/connect-oauth-whats-next.ts'
 import { on } from '#client/event-mixin.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
+import { PasswordRevealInput } from '#client/password-reveal-input.tsx'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	cardCss,
@@ -157,11 +158,19 @@ export function ConnectOauthCredentialsForm(
 				>
 					<label mix={css(fieldCss)}>
 						<span mix={css(fieldLabelCss)}>Client ID</span>
+						{/*
+						 * Uncontrolled: the DOM owns the typed value. Calling
+						 * handle.update() on every keystroke is unnecessary (nothing
+						 * else on this form re-derives from the draft) and cascades
+						 * into Remix's same-turn update guard when many input events
+						 * land before setTimeout(0) — autofill, paste, or rapid
+						 * sequential insert (KODY-8K / ConnectOauthRoute x51).
+						 */}
 						<input
 							name="oauthClientId"
 							required
 							{...passwordManagerIgnoreProps}
-							value={props.clientIdInput}
+							defaultValue={props.clientIdInput}
 							mix={[
 								on('input', (event) => {
 									props.onClientIdInput(event.currentTarget.value)
@@ -198,14 +207,20 @@ export function ConnectOauthCredentialsForm(
 								</button>
 							</section>
 						) : (
-							<label mix={css(fieldCss)}>
-								<span mix={css(fieldLabelCss)}>Client Secret</span>
-								<input
+							<div mix={css(fieldCss)}>
+								<label
+									for="connect-oauth-client-secret"
+									mix={css(fieldLabelCss)}
+								>
+									Client Secret
+								</label>
+								<PasswordRevealInput
+									id="connect-oauth-client-secret"
 									name="oauthClientSecret"
-									type="password"
 									required
 									{...passwordManagerIgnoreProps}
-									value={props.clientSecretInput}
+									defaultValue={props.clientSecretInput}
+									revealNoun="client secret"
 									mix={[
 										on('input', (event) => {
 											props.onClientSecretInput(event.currentTarget.value)
@@ -213,7 +228,7 @@ export function ConnectOauthCredentialsForm(
 										css(inputCss),
 									]}
 								/>
-							</label>
+							</div>
 						)
 					) : null}
 					<button
@@ -293,6 +308,7 @@ export function renderSuccessCard(input: {
 	nextSteps: ConnectOauthNextSteps | null
 	approvingAllHosts: boolean
 	onApproveAllHosts: () => void
+	connectionHref: string
 }) {
 	return (
 		<section mix={css(cardCss)}>
@@ -336,12 +352,7 @@ export function renderSuccessCard(input: {
 					copyLabel="Copy prompt"
 				/>
 			</div>
-			<a
-				href={routes.accountIntegrationDetail.href({
-					integrationName: input.config.providerKey,
-				})}
-				mix={css(primaryLinkCss)}
-			>
+			<a href={input.connectionHref} mix={css(primaryLinkCss)}>
 				View this connection
 			</a>
 		</section>

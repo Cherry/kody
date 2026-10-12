@@ -1,166 +1,159 @@
 ---
 id: package_sharing
-title: Share a package with another person
+title: Share a package and manage access
 summary:
-  Invite another paid Kody account to use one of your packages. Guests can read
-  source and invoke, cannot publish or write, and must accept before the package
-  attaches. Pin or follow published commits after accept.
+  Give a person or team Use, Contribute, or Manage on one package with a grant,
+  invite someone who is not in your organization yet, and know what each side
+  can run, read, and pay for. Fork instead when they should own a copy.
 category: platform
 audience: agents
 ---
 
-# Share a package with another person
+# Share a package and manage access
+
+Access in Kody belongs to an **organization**. Resources (packages, apps, jobs,
+secrets, integrations, memory, email) live in one org, and a **grant** gives one
+person or team a preset on one resource. To let someone use a package without
+sharing a login, grant them **Use** on it.
 
 > [!TIP] Prefer a
 > [fork](/docs/package-lifecycle#fork-a-close-public-package-before-creating)
-> for most use cases. Share when someone should use **your** live package
-> without getting their own copy.
+> when they should own and edit a copy. Grant access when they should run
+> **your** live package.
 
-<details>
-<summary>What's the difference between forking and sharing?</summary>
+## Presets
 
-**Fork** copies a public package into the other person's account. They own that
-copy: they can edit, publish, schedule jobs, and keep their own storage. Use a
-fork when they should adapt the behavior or run it independently.
+| Preset         | On a package                                                        |
+| -------------- | ------------------------------------------------------------------- |
+| **Use**        | Read the source and run it (`package:read`, `package:execute`)      |
+| **Contribute** | Use, plus write (`package:write`)                                   |
+| **Manage**     | Contribute, plus publish, delete, and manage access for the package |
 
-**Share** leaves the package in your account. After the guest accepts, they can
-read source and invoke it, but they cannot publish or write it. Storage stays
-yours. Use a share when you want one live package — a household tool, a private
-package that should not be public, or a source of truth that should stay in
-sync.
+Advanced grants take an explicit permission list instead of a preset. No preset
+includes `billing:*` or revealing a secret.
 
-Both people need a paid plan to share. Forking a public listing does not.
+## Grant access
 
-</details>
-
-Use this guide when one person should **use** another person's package without
-sharing a login. Sharing is behind the `package-share-grants` feature flag
-because it may change or go away. Signed-in users can turn it on from this page.
-Search `packageShareInvite` / `packageShareAccept` first; open capability detail
-for the exact call shape.
-
-## What sharing is
-
-Package sharing is an invitation from a package **owner** to a **guest**. The
-guest keeps their own account. After they accept, they can import and invoke the
-shared package and read its source.
-
-Sharing is not:
-
-- Giving someone your password or MCP token
-- A community fork (the guest does not get their own copy of the source repo;
-  prefer a
-  [fork](/docs/package-lifecycle#fork-a-close-public-package-before-creating)
-  when they should own a copy)
-- A platform scope grant (`package_scope_grants`). Those are admin-minted,
-  platform-account only, and grant full authoring under a platform scope. Person
-  accounts never own that table.
-
-## Invite, accept, use, leave
-
-1. Owner invites by **username or email** (`packageShareInvite`). The invite
-   email links to `@{owner}/{packageName}` with an Accept banner. Email invites
-   bind to an existing account only when that mailbox is verified; otherwise the
-   row stays pending until the guest verifies.
-2. Guest **must accept** (`packageShareAccept`). Nothing attaches silently.
-3. Invite-before-signup: a pending invite is held. The email explains Kody, what
-   is shared, and that the guest creates an account, pays, then accepts.
-4. Guest uses the shared package from their own packages or `execute`.
-5. Owner **revokes** (`packageShareRevoke`) or guest **leaves**
-   (`packageShareLeave`). New invokes fail immediately. An in-flight Worker
-   isolate may finish.
-
-Both owner and guest must be on a **paid** plan to invite, accept, and use.
-
-## Pin and follow
-
-At accept, the guest chooses a trust level. The Accept UI defaults to `pin`.
-
-- `pin` — accept the current published commit only. If the owner publishes
-  ahead, use and import fail closed with a link to
-  `/@{owner}/{packageName}/approve-changes`. That page shows the accepted →
-  current published source diff. Approve updates the snapshot only for the
-  commit that was reviewed; a later owner publish requires a fresh review.
-  Approve and follow switches trust to `follow`.
-- `follow` — accept the current published commit and auto-accept later owner
-  publishes.
-
-`accepted_published_commit` and `trust_level` live on the grant. This pin is
-**grant-level publish trust**, not a user-facing import specifier pin
-([0001](../contributing/decisions/0001-no-package-versioning.md)).
-
-## What a guest can and cannot do
-
-The guest role is `use`: `read_source` + `invoke`.
-
-Guests can:
-
-- Read package source (safety review for human and agent)
-- Invoke and import the shared package
-- Create **their own** packages that depend on the granted package
-- Use package-scoped secrets **through** the package
-
-Guests cannot:
-
-- Publish or write the shared package
-- See raw secret values (hard invariant)
-- Create jobs, apps, webhooks, or subscriptions on the shared package
-- Watch the owner's transcripts or runs
-
-Shared state is the owner's `packageStorage`. The owner pays that storage even
-when a guest writes it. The guest pays executes and jobs on **their** packages.
-The owner pays owner-created jobs and apps on the shared package.
-
-## Runtime isolation
-
-When shared package code runs for a guest, it does **not** receive the guest's
-other user secrets, integrations, or packages by default. It gets package-scoped
-powers (owner stamp, mounts, owner storage) plus **explicit inputs**. Guest
-wrapper modules still run as the guest. Imported shared modules stay stamped as
-the shared package.
-
-## MCP playbook
-
-Invite by scoped name:
+Call `accessGrant` from a request bound to the org that owns the package. You
+need manage access on the package.
 
 ```json
 {
-	"name": "@alice/household-notes",
-	"username": "jesse"
+	"resource_type": "package",
+	"resource_id": "<package id>",
+	"subject_type": "user",
+	"username": "jesse",
+	"preset": "use"
 }
 ```
 
-Accept with the safer default (`pin` if `trust_level` is omitted):
+`accessList` shows who holds what. `accessRevoke` removes one grant by
+`grant_id`.
+
+## Invite someone who has no access yet
+
+`inviteCreate` with `kind: "grant"` sends the same grant to an email address or
+username. The token is shown once, with a prompt for the invitee's agent:
 
 ```json
 {
-	"name": "@alice/household-notes",
-	"trust_level": "pin"
+	"kind": "grant",
+	"email": "jesse@example.com",
+	"resource_type": "package",
+	"resource_id": "<package id>",
+	"preset": "use"
 }
 ```
 
-List what you shared and what is shared with you:
+The invitee calls `inviteAccept` with the token. Nothing attaches before they
+accept. Invites expire after 7 days; `inviteRevoke` cancels a pending one.
 
-```json
-{ "scope": "outbound" }
-```
+Use `kind: "membership"` to add someone to the whole **team** org instead (with
+a role and optional teams). Members hold the org-level basics plus what they are
+granted. Owners hold everything. Membership invites are refused on a personal
+(signup) org; create a team org to invite people.
 
-```json
-{ "scope": "inbound" }
-```
+Personal orgs can still grant Use/Contribute/Manage on packages via
+`accessGrant` / `inviteCreate` `kind: "grant"` and revoke with `accessRevoke`.
+The web Grants page is aimed at team orgs; manage personal-org grants through
+those capabilities.
 
-Approve a pin-ahead publish, optionally switching to follow:
+## What a collaborator can do
 
-```json
-{
-	"grant_id": "…",
-	"switch_to_follow": false
-}
-```
+Someone who holds a grant but is not a member is an **outside collaborator**.
+They must connect with **your** org selected at consent. Then they can:
 
-Use `packageShareInspect` for one grant, `packageShareRevoke` as the owner, and
-`packageShareLeave` as the guest. Prefer scoped package `name`; `kody_id` is the
-fallback.
+- Read and run the packages they hold Use on
+- Run ad hoc code that imports those packages
+- Search the shared catalog
 
-UI: package settings share controls, `/account/shared`, and the Accept / Approve
-changes banners on `@{owner}/{packageName}`.
+They cannot see anything else in your org, reveal secret values, or change a
+package unless the grant says so.
+
+### Who pays when a Use collaborator runs your package
+
+The org is the billing boundary, and a connection is billed to the org it is
+bound to. Jesse connects with the **owning** org selected, so everything his
+runs use is charged there:
+
+| Meter                                                                | Charged to                     |
+| -------------------------------------------------------------------- | ------------------------------ |
+| Usage events, credits, org and per-user budgets, outbound fetch      | **Owning org** (the bound org) |
+| Daily and weekly **execute** limits (unique execute workers per day) | **Owning org's** execute pool  |
+
+Execute limits are one org-wide pool that grows with the org's paid seats. A
+grant-only collaborator draws from the owning org's pool but is not a seat, so
+granting someone Use does not change your seat count or grow your pool. Nothing
+from these runs is charged to the collaborator's personal plan.
+
+Example: Jesse has Use on `@acme/bot`. Connected as `@acme`, a run debits acme's
+credits and budgets and counts against acme's execute pool. Jesse's own
+personal-org limits are untouched. See
+[Organizations](/docs/organizations#execute-limits-one-org-wide-pool) for how
+the pool is sized.
+
+### Secrets and integrations on a granted run
+
+Every run acts as a person, and a credential resolves only when that person
+holds Use on it. When Jesse runs **your** package in your org:
+
+- Secret **values** and integration tokens come from **your** org
+- Jesse never gets `secret:read` from a Use grant
+- Each secret or integration the package reads needs Jesse's own `secret:use` or
+  `integration:use` on it. A Use grant on the package does not include them;
+  grant them on the credential: `accessGrant` with `resource_type: "credential"`
+  and the `credential_id` from `secretList` (or `integrationList`,
+  `mcpServerList`, `secretProviderList`). The grant follows the credential if it
+  is renamed, and ends if it is deleted
+- The package rules then narrow that use: `package:execute` on the package, and
+  each secret or integration must allow that package (host allowlist,
+  `allowed_packages`, or self-authored rules for user secrets)
+- The same applies to `{{secret:…}}` in Jesse's own ad hoc code
+
+See [Secrets](/docs/secrets) for placeholders and allowlists.
+
+### Triggers in a shared package
+
+A package's jobs, subscriptions, and webhooks run only for people who turn them
+on for themselves with `enablementEnable`, and each run acts as that person with
+their live access. If Jesse turns on the nightly job in `@acme/bot`, it runs as
+Jesse, with Jesse's grants, and pauses if he loses access. Usage still counts
+against `@acme`. See
+[Organizations](/docs/organizations#automation-runs-as-the-person-who-turned-it-on).
+
+## Cross-org imports
+
+A package imports only packages from its own org. A package in org A cannot
+import a package from org B, even with a grant. To reuse another org's public
+package,
+[fork](/docs/package-lifecycle#fork-a-close-public-package-before-creating) it
+into your own org and import the copy.
+
+## Which call to use
+
+- One person or team, already known: `accessGrant`
+- Someone without access or an account yet: `inviteCreate` with `kind: "grant"`
+- The whole org: `inviteCreate` with `kind: "membership"` or `orgMemberUpdate`
+- Take access away: `accessRevoke` (a grant) or `orgMemberRemove` (a member)
+
+Search these names first and open capability detail for the exact call shape.

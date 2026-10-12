@@ -5,6 +5,7 @@ import { http, HttpResponse } from 'msw'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { ensureUsageRollupsTestSchema } from '#worker/usage/test-schema.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureEmailTestSchema } from './test-schema.ts'
 import { mailboxRpc } from './mailbox-client.ts'
 import { type Mailbox } from './mailbox-do.ts'
@@ -25,8 +26,9 @@ import { UserMeter } from '#worker/entitlements/user-meter-do.ts'
 import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
 import { userMeterDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const cloudflareEmailApi =
 	'https://api.cloudflare.test/client/v4/accounts/account-123/email/sending/send'
 
@@ -52,26 +54,29 @@ async function seedAccount(
 ) {
 	await ensureEmailTestSchema(env.APP_DB)
 	const accountEmail = `account-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(accountEmail)
+	const userId = testStableUserIdFromEmail(accountEmail)
 	const username = input.username ?? `sender-${crypto.randomUUID().slice(0, 8)}`
 	await env.APP_DB.prepare(
-		`INSERT INTO users (username, email, password_hash, email_verified_at, plan, stable_user_id)
-			VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+			VALUES (?, ?, ?, ?, ?)
 			ON CONFLICT(username) DO UPDATE SET
 				email = excluded.email,
 				email_verified_at = excluded.email_verified_at,
-				stable_user_id = excluded.stable_user_id,
-				plan = excluded.plan`,
+				stable_user_id = excluded.stable_user_id`,
 	)
 		.bind(
 			username,
 			accountEmail,
 			'test-password-hash',
 			input.verified === false ? null : new Date().toISOString(),
-			input.plan ?? 'max',
 			userId,
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan: input.plan ?? 'max',
+	})
 	return { accountEmail, userId, from: `${username}@${platformDomain}` }
 }
 
@@ -166,7 +171,7 @@ async function writeInboundMailboxMessage(
 	},
 ) {
 	const now = new Date().toISOString()
-	const message = baseMessage(userId, {
+	const message = baseMessage(ownerIdFromStored(userId), {
 		...input,
 		inboxId: null,
 		fromAddress: 'recipient@example.com',
@@ -176,8 +181,11 @@ async function writeInboundMailboxMessage(
 		createdAt: now,
 		updatedAt: now,
 	})
-	await mailboxRpc({ env, userId }).upsertMessageGraph({
-		ownerId: userId,
+	await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).upsertMessageGraph({
+		ownerId: ownerIdFromStored(userId),
 		message,
 		attachments: [],
 	})
@@ -185,7 +193,10 @@ async function writeInboundMailboxMessage(
 }
 
 async function readDailyEmailSendCounter(userId: string) {
-	const result = await userMeterRpc({ env, userId }).read({
+	const result = await userMeterRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).read({
 		resource: 'email_sends_per_day',
 		day: utcDayKey(),
 	})
@@ -195,7 +206,9 @@ async function readDailyEmailSendCounter(userId: string) {
 async function seedDailyEmailSendCounter(userId: string, count: number) {
 	const day = utcDayKey()
 	const stub = env.USER_METER.get(
-		env.USER_METER.idFromName(userMeterDurableObjectName(userId)),
+		env.USER_METER.idFromName(
+			userMeterDurableObjectName(ownerIdFromStored(userId)),
+		),
 	)
 	await runInDurableObject(stub, async (instance: UserMeter, state) => {
 		expect(instance).toBeInstanceOf(UserMeter)
@@ -216,7 +229,10 @@ async function seedDailyEmailSendCounter(userId: string, count: number) {
 }
 
 async function listOutboundMessages(userId: string) {
-	return await mailboxRpc({ env, userId }).listMessages({
+	return await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).listMessages({
 		direction: 'outbound',
 		limit: 5,
 	})
@@ -300,7 +316,10 @@ test('sendOutboundEmail sends from the platform-assigned username address to the
 	expect(sent[0]?.headers).toEqual({})
 	expect(result.status).toBe('sent')
 	expect(result.providerMessageId).toBe('provider-message-123')
-	const stored = await mailboxRpc({ env, userId: account.userId }).getMessage({
+	const stored = await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(account.userId),
+	}).getMessage({
 		messageId: result.message.id,
 	})
 	expect(stored).toMatchObject({
@@ -372,12 +391,14 @@ test('provider acceptance survives D1 index outage and the Mailbox alarm repairs
 	await expect(
 		getOutboundProviderIndexRow({ db: env.APP_DB, providerMessageId }),
 	).resolves.toBeNull()
-	const mailbox = mailboxRpc({ env, userId })
+	const mailbox = mailboxRpc({ env, userId: ownerIdFromStored(userId) })
 	await expect(
-		mailbox.getOutboundProviderIndexRepairStatus({ ownerId: userId }),
+		mailbox.getOutboundProviderIndexRepairStatus({
+			ownerId: ownerIdFromStored(userId),
+		}),
 	).resolves.toMatchObject({ pendingCount: 1 })
 	await runInDurableObject(
-		stubFor(userId),
+		stubFor(ownerIdFromStored(userId)),
 		async (instance: Mailbox, state) => {
 			state.storage.sql.exec(
 				`UPDATE email_outbound_provider_index_repairs SET retry_at = ?`,
@@ -392,7 +413,9 @@ test('provider acceptance survives D1 index outage and the Mailbox alarm repairs
 		getOutboundProviderIndexRow({ db: env.APP_DB, providerMessageId }),
 	).resolves.toMatchObject({ userId, messageId: result.message.id })
 	await expect(
-		mailbox.getOutboundProviderIndexRepairStatus({ ownerId: userId }),
+		mailbox.getOutboundProviderIndexRepairStatus({
+			ownerId: ownerIdFromStored(userId),
+		}),
 	).resolves.toMatchObject({ pendingCount: 0 })
 	expect(consoleWarn).toHaveBeenCalledWith(
 		'email-outbound-provider-index-persistence-failed',
@@ -607,7 +630,10 @@ test('sendOutboundEmail preserves reply headers and records failed fallback send
 	expect(fetchCalls[0]).not.toHaveProperty('replyTo')
 	expect(fetchCalls[0]?.headers).not.toHaveProperty('Message-ID')
 	expect(fetchCalls[0]?.headers).not.toHaveProperty('X-Kody-Email-Message-Id')
-	const stored = await mailboxRpc({ env, userId }).getMessage({
+	const stored = await mailboxRpc({
+		env,
+		userId: ownerIdFromStored(userId),
+	}).getMessage({
 		messageId: result.message.id,
 	})
 	expect(stored).toMatchObject({
@@ -678,7 +704,7 @@ test('sendOutboundEmail sends, stores, and re-serves reply attachments', async (
 
 	// The attachment is stored as its own R2 object and stays readable via
 	// the normal attachment read path.
-	const mailbox = mailboxRpc({ env, userId })
+	const mailbox = mailboxRpc({ env, userId: ownerIdFromStored(userId) })
 	const stored = await mailbox.listAttachmentsForMessage({
 		messageId: result.message.id,
 	})
@@ -696,7 +722,7 @@ test('sendOutboundEmail sends, stores, and re-serves reply attachments', async (
 		env,
 		db: env.APP_DB,
 		blobs: env.EMAIL_BLOBS,
-		userId,
+		userId: ownerIdFromStored(userId),
 		attachmentId: stored[0]!.id,
 	})
 	expect(loaded?.contentBase64).toBe(bytesToBase64(pdfBytes))
@@ -711,7 +737,7 @@ test('sendOutboundEmail sends, stores, and re-serves reply attachments', async (
 
 	// Deleting the message removes the external attachment blob too.
 	await mailbox.deleteMessageWithBlobs({
-		ownerId: userId,
+		ownerId: ownerIdFromStored(userId),
 		messageId: result.message.id,
 	})
 	expect(await env.EMAIL_BLOBS.get(storageKey!)).toBeNull()

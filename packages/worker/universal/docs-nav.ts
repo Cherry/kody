@@ -85,6 +85,7 @@ export const docsNav: ReadonlyArray<DocsNavSection> = [
 				slug: 'packages-integrations-mcp',
 				label: 'Packages vs integrations vs MCP',
 			},
+			{ slug: 'organizations', label: 'Organizations' },
 			{ slug: 'text-your-agent', label: 'Text your agent' },
 			{ slug: 'openmuse', label: 'OpenMuse and Kody' },
 			{ slug: 'triggers', label: 'Jobs, workflows, and webhooks' },
@@ -116,8 +117,10 @@ export const docsNav: ReadonlyArray<DocsNavSection> = [
 			},
 			{ slug: 'package-authoring', label: 'Authoring' },
 			{ slug: 'package-sharing', label: 'Sharing a package' },
+			{ slug: 'package-skills', label: 'Package skills' },
 			{ slug: 'package-apps', label: 'Package apps' },
 			{ slug: 'package-subscriptions', label: 'Subscriptions and events' },
+			{ slug: 'mcp-events', label: 'MCP Events' },
 			{ slug: 'heavy-work-offload', label: 'Offload heavy work' },
 		],
 	},
@@ -179,10 +182,7 @@ export const docsNav: ReadonlyArray<DocsNavSection> = [
  * of the sidebar, indexes, sitemap, and search advertisements. Matches the
  * frontmatter `unadvertised: true` flag on each file.
  */
-export const unadvertisedDocSlugs: ReadonlyArray<string> = [
-	'values',
-	'account-package-invocation-token-setup',
-]
+export const unadvertisedDocSlugs: ReadonlyArray<string> = ['values']
 
 /**
  * Old slugs that no longer exist as their own page. The legacy `/guides/*`
@@ -195,6 +195,10 @@ export const legacyDocSlugAliases: Readonly<
 	'integration-backed-app-happy-path': {
 		slug: 'package-apps',
 		fragment: 'after-an-integration-smoke-test',
+	},
+	webhooks: {
+		slug: 'triggers',
+		fragment: 'inbound-webhooks-the-external-http-knock',
 	},
 }
 
@@ -209,6 +213,15 @@ export const legacyGuideIdAliases: Readonly<
 		id: 'package_apps',
 		section: 'after-an-integration-smoke-test',
 	},
+	what_can_kody_do: { id: 'what_is_kody' },
+}
+
+/**
+ * `docs/use` filenames whose page only points at a catalog guide.
+ * Bundled links to those files resolve to the served `/docs` route.
+ */
+export const useDocGuideTwins: Readonly<Record<string, string>> = {
+	'what-can-kody-do': 'what-is-kody',
 }
 
 export function isReservedDocsIndexSlug(slug: string): boolean {

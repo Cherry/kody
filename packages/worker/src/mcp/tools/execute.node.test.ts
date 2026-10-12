@@ -1,8 +1,11 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { type ContentBlock } from '@modelcontextprotocol/sdk/types.js'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
-import { expect, test, vi } from 'vitest'
+import { expect, onTestFinished, test, vi } from 'vitest'
 import { planLimits } from '#universal/plans.ts'
 import {
+	BudgetLimitError,
+	ComputeOverageLimitError,
 	EntitlementLimitError,
 	JobIntervalFloorError,
 	buildEntitlementLimitMessage,
@@ -10,7 +13,6 @@ import {
 	entitlementLimitErrorCode,
 	jobIntervalFloorErrorCode,
 } from '#worker/entitlements/errors.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	defaultMcpContentLimitBytes,
 	maxMcpContentBlockCount,
@@ -22,9 +24,17 @@ import {
 	executeInvokeMutualExclusionMessage,
 } from '#mcp/execute-invoke.ts'
 import type * as AccessControlModule from '#mcp/capabilities/access-control.ts'
+import type * as MemoryToolContextModule from './memory-tool-context.ts'
 import type * as CapabilityRegistryModule from '#mcp/capabilities/registry.ts'
 import type * as RunRecordsServiceModule from '#worker/run-records/service.ts'
+import {
+	executeCallsPerMinutePerOrg,
+	identicalExecuteCallsPerWindow,
+	type ExecuteUsageReport,
+} from '#mcp/execute-admission.ts'
+import { userMeterRpc } from '#worker/entitlements/user-meter-client.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const heartbeatMock = vi.hoisted(() => ({
 	scheduleFleetExecuteLastSuccess: vi.fn(),
@@ -34,6 +44,7 @@ vi.mock('#worker/execute-health-heartbeat.ts', () => heartbeatMock)
 
 const mockModule = vi.hoisted(() => ({
 	runModuleWithRegistry: vi.fn(),
+	surfaceToolMemories: vi.fn(),
 	createPackageEventTools: vi.fn(),
 	getCapabilityRegistryForContext: vi.fn(
 		async (
@@ -57,12 +68,27 @@ const mockModule = vi.hoisted(() => ({
 			..._args: Parameters<typeof RunRecordsServiceModule.finishRunRecord>
 		) => undefined,
 	),
+	abandonRunRecord: vi.fn(
+		async (
+			..._args: Parameters<typeof RunRecordsServiceModule.abandonRunRecord>
+		) => undefined,
+	),
 	resolveCallerFeatureFlags: vi.fn(
 		async (
 			..._args: Parameters<typeof AccessControlModule.resolveCallerFeatureFlags>
 		) => ({
 			'execute-invoke': false,
+			'connection-profiles': false,
+			'mcp-skills-extension': false,
+			'mcp-events-extension': false,
 		}),
+	),
+	callerFeatureFlagEvaluationFailed: vi.fn(
+		async (
+			..._args: Parameters<
+				typeof AccessControlModule.callerFeatureFlagEvaluationFailed
+			>
+		) => false,
 	),
 }))
 
@@ -70,6 +96,19 @@ vi.mock('#mcp/run-kody-registry.ts', () => ({
 	runModuleWithRegistry: (...args: Array<unknown>) =>
 		mockModule.runModuleWithRegistry(...args),
 }))
+
+vi.mock('./memory-tool-context.ts', async () => {
+	const actual = await vi.importActual<typeof MemoryToolContextModule>(
+		'./memory-tool-context.ts',
+	)
+	mockModule.surfaceToolMemories.mockImplementation(actual.surfaceToolMemories)
+	return {
+		...actual,
+		surfaceToolMemories: (
+			...args: Parameters<typeof MemoryToolContextModule.surfaceToolMemories>
+		) => mockModule.surfaceToolMemories(...args),
+	}
+})
 
 vi.mock('#mcp/capabilities/registry.ts', () => ({
 	getCapabilityRegistryForContext: (
@@ -90,6 +129,11 @@ vi.mock(
 					typeof AccessControlModule.resolveCallerFeatureFlags
 				>
 			) => mockModule.resolveCallerFeatureFlags(...args),
+			callerFeatureFlagEvaluationFailed: (
+				...args: Parameters<
+					typeof AccessControlModule.callerFeatureFlagEvaluationFailed
+				>
+			) => mockModule.callerFeatureFlagEvaluationFailed(...args),
 		}
 	},
 )
@@ -116,6 +160,9 @@ vi.mock('#worker/run-records/service.ts', async () => {
 		finishRunRecord: (
 			...args: Parameters<typeof RunRecordsServiceModule.finishRunRecord>
 		) => mockModule.finishRunRecord(...args),
+		abandonRunRecord: (
+			...args: Parameters<typeof RunRecordsServiceModule.abandonRunRecord>
+		) => mockModule.abandonRunRecord(...args),
 	}
 })
 
@@ -124,10 +171,9 @@ const { registerExecuteTool } = await import('./execute.ts')
 const userMeter = createInMemoryUserMeterEnv()
 
 /**
- * Minimal env stub: the daily execute entitlement consumed at the top of
- * the tool handler issues one conditional upsert (allowed when
- * meta.changes > 0). Plan lookup never touches D1 because these caller
- * contexts carry no account email (resolves to `max`).
+ * Minimal env stub: UserMeter is in memory, and plan lookup never touches
+ * D1 because these caller contexts carry no account email (resolves to
+ * `max`).
  */
 const stubEnv = {
 	...userMeter.env,
@@ -141,6 +187,9 @@ const stubEnv = {
 						},
 						async first() {
 							return null
+						},
+						async all() {
+							return { results: [] }
 						},
 					}
 				},
@@ -167,6 +216,7 @@ type ExecuteInput = {
 	responseLimit?: number
 	conversationId?: string
 	idempotencyKey?: string
+	memoryContext?: { task?: string; query?: string }
 }
 
 type ExecuteResponse = {
@@ -200,6 +250,7 @@ type ExecuteResponse = {
 			used?: number
 			remaining?: number
 		}
+		usage?: ExecuteUsageReport
 	}
 	isError: boolean
 }
@@ -235,7 +286,11 @@ async function getExecuteRegistration(
 	vi.clearAllMocks()
 	mockModule.resolveCallerFeatureFlags.mockResolvedValue({
 		'execute-invoke': agentExtras.invokeEnabled === true,
+		'connection-profiles': false,
+		'mcp-skills-extension': false,
+		'mcp-events-extension': false,
 	})
+	mockModule.callerFeatureFlagEvaluationFailed.mockResolvedValue(false)
 	const registerTool = vi.fn()
 
 	await registerExecuteTool({
@@ -284,7 +339,7 @@ const timing = (durationMs: number) => ({
 const truncationNote = (bytes: number, limit: number) =>
 	`Returned value was ${String(bytes)} bytes, exceeding responseLimit ${String(limit)} bytes; output was truncated. Project fields before returning.`
 
-test('execute tool serializes successes and errors, binds no packages.invoke tools, and truncates oversized returns', async () => {
+test('execute tool serializes successes and errors, binds no packages helper tools, and truncates oversized returns', async () => {
 	const handler = await getExecuteHandler()
 	const rawContent: Array<ContentBlock> = [
 		{
@@ -355,7 +410,11 @@ test('execute tool serializes successes and errors, binds no packages.invoke too
 
 	const callerContext = {
 		baseUrl: 'https://example.com',
-		user: { userId: 'user-123', email: 'me@example.com', displayName: 'Me' },
+		user: {
+			userId: ownerIdFromStored('user-123'),
+			email: 'me@example.com',
+			displayName: 'Me',
+		},
 	}
 	const authenticatedHandler = await getExecuteHandler(callerContext)
 	moduleReturns({ ok: true })
@@ -518,6 +577,27 @@ test('execute passes through downstream MCP image content with structured data a
 		text: expect.stringContaining('exceeding content limit'),
 	})
 
+	// Oversized text-only __mcpContent truncates (usable result) instead of failing.
+	const hugeText = 'T'.repeat(defaultMcpContentLimitBytes + 80_000)
+	moduleReturns({
+		__mcpContent: [{ type: 'text', text: hugeText }],
+	})
+	const oversizeTextResponse = await handler({
+		code: 'async () => oversize-text',
+		conversationId: 'conv-oversize-text',
+	})
+	expect(oversizeTextResponse.isError).toBe(false)
+	expect(oversizeTextResponse.structuredContent.truncated).toBe(true)
+	expect(oversizeTextResponse.structuredContent.note).toMatch(
+		/text was truncated/,
+	)
+	const returnedText = oversizeTextResponse.content
+		.filter((block) => block.type === 'text')
+		.map((block) => (block.type === 'text' ? block.text : ''))
+		.join('')
+	expect(returnedText).toContain('--- TRUNCATED ---')
+	expect(returnedText.length).toBeLessThan(hugeText.length)
+
 	// Ordinary application objects with a `content` array stay JSON text.
 	moduleReturns({ content: [webpBlock], ok: true })
 	const arbitraryContentResponse = await handler({
@@ -575,7 +655,7 @@ test('execute tool nudges repeated raw-fetch hosts once per conversation', async
 	const handler = await getExecuteHandler(
 		{
 			baseUrl: 'https://example.com',
-			user: { userId: 'user-1', email: 'user@example.com' },
+			user: { userId: ownerIdFromStored('user-1'), email: 'user@example.com' },
 		},
 		{ state: agentState, setState },
 	)
@@ -654,7 +734,7 @@ test('execute tool replays finished keyed runs and reports in-progress without r
 	const handler = await getExecuteHandler({
 		baseUrl: 'https://example.com',
 		user: {
-			userId: 'user-keyed-execute',
+			userId: ownerIdFromStored('user-keyed-execute'),
 			email: 'keyed@example.com',
 			displayName: 'Keyed',
 		},
@@ -698,11 +778,14 @@ test('execute tool replays finished keyed runs and reports in-progress without r
 		status: 'running',
 	})
 
-	const quotaLimit = planLimits.free.maxExecuteCallsPerDay
-	const quotaHint = buildEntitlementUpgradeHint('execute_calls_per_day', 'free')
+	const quotaLimit = planLimits.free.maxExecuteUniqueWorkersPerDay
+	const quotaHint = buildEntitlementUpgradeHint({
+		resource: 'execute_unique_workers_per_day',
+		plan: 'free',
+	})
 	const quotaMessage = buildEntitlementLimitMessage({
 		code: entitlementLimitErrorCode,
-		resource: 'execute_calls_per_day',
+		resource: 'execute_unique_workers_per_day',
 		plan: 'free',
 		limit: quotaLimit,
 		current: quotaLimit,
@@ -719,7 +802,7 @@ test('execute tool replays finished keyed runs and reports in-progress without r
 	expect(quotaReplayed.structuredContent.error).toBe(quotaMessage)
 	expect(quotaReplayed.structuredContent.entitlement).toEqual({
 		code: entitlementLimitErrorCode,
-		resource: 'execute_calls_per_day',
+		resource: 'execute_unique_workers_per_day',
 		plan: 'free',
 		limit: quotaLimit,
 		current: quotaLimit,
@@ -753,7 +836,7 @@ test('execute tool replays finished keyed runs and reports in-progress without r
 test('execute tool claims a keyed run, passes the handle, and returns runId', async () => {
 	const claimedHandle = {
 		id: 'run-claimed-1',
-		userId: 'user-claim-execute',
+		userId: ownerIdFromStored('user-claim-execute'),
 		startedAt: '2026-07-28T00:00:00.000Z',
 		persistence: 'eager' as const,
 		context: { surface: 'execute' as const, idempotencyKey: 'claim-key-1' },
@@ -761,7 +844,7 @@ test('execute tool claims a keyed run, passes the handle, and returns runId', as
 	const handler = await getExecuteHandler({
 		baseUrl: 'https://example.com',
 		user: {
-			userId: 'user-claim-execute',
+			userId: ownerIdFromStored('user-claim-execute'),
 			email: 'claim@example.com',
 			displayName: 'Claim',
 		},
@@ -780,7 +863,7 @@ test('execute tool claims a keyed run, passes the handle, and returns runId', as
 	})
 	expect(mockModule.claimRunRecord).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-claim-execute',
+			userId: ownerIdFromStored('user-claim-execute'),
 			context: expect.objectContaining({
 				surface: 'execute',
 				idempotencyKey: 'claim-key-1',
@@ -801,6 +884,71 @@ test('execute tool claims a keyed run, passes the handle, and returns runId', as
 		runId: 'run-claimed-1',
 		result: { spawned: true },
 	})
+})
+
+test('execute tool releases a keyed claim when a usage denial stops the load', async () => {
+	const denials = [
+		new EntitlementLimitError({
+			resource: 'execute_unique_workers_per_day',
+			plan: 'free',
+			limit: 150,
+			current: 150,
+			upgradeHint: buildEntitlementUpgradeHint({
+				resource: 'execute_unique_workers_per_day',
+				plan: 'free',
+			}),
+		}),
+		new ComputeOverageLimitError({
+			resource: 'unique_worker_days',
+			plan: 'pro',
+			limit: 350,
+			current: 351,
+			creditsStatus: 'add_credits',
+		}),
+		new BudgetLimitError({
+			kind: 'user',
+			orgSlug: 'acme',
+			actorUsername: 'sam',
+			spentMicroUsd: 50_000_000,
+			budgetMicroUsd: 50_000_000,
+		}),
+	]
+	for (const denial of denials) {
+		const claimedHandle = {
+			id: `run-claimed-${denial.name}`,
+			userId: ownerIdFromStored('user-claim-denied'),
+			startedAt: '2026-07-28T00:00:00.000Z',
+			persistence: 'eager' as const,
+			context: { surface: 'execute' as const, idempotencyKey: 'claim-denied' },
+		}
+		const handler = await getExecuteHandler({
+			baseUrl: 'https://example.com',
+			user: {
+				userId: ownerIdFromStored('user-claim-denied'),
+				email: 'claim-denied@example.com',
+			},
+		})
+		mockModule.claimRunRecord.mockResolvedValueOnce({
+			claimed: true,
+			handle: claimedHandle,
+		} as never)
+		mockModule.runModuleWithRegistry.mockRejectedValueOnce(denial)
+		mockModule.finishRunRecord.mockClear()
+		const response = await handler({
+			code: okCode,
+			idempotencyKey: 'claim-denied',
+			conversationId: 'conv-claim-denied',
+		})
+		expect(response.isError).toBe(true)
+		expect(response.structuredContent.error).toBe(denial.message)
+		expect(Boolean(response.structuredContent.entitlement)).toBe(
+			!(denial instanceof BudgetLimitError),
+		)
+		expect(mockModule.abandonRunRecord).toHaveBeenCalledWith(
+			expect.objectContaining({ handle: claimedHandle }),
+		)
+		expect(mockModule.finishRunRecord).not.toHaveBeenCalled()
+	}
 })
 
 test('execute tool threads a progress reporter when the client sends progressToken', async () => {
@@ -856,7 +1004,10 @@ test('execute tool attaches entitlement metadata on denials and quota, not on su
 
 	heartbeatMock.scheduleFleetExecuteLastSuccess.mockClear()
 	const stockLimit = planLimits.free.maxSavedPackages
-	const stockHint = buildEntitlementUpgradeHint('saved_packages', 'free')
+	const stockHint = buildEntitlementUpgradeHint({
+		resource: 'saved_packages',
+		plan: 'free',
+	})
 	const stockDenial = new EntitlementLimitError({
 		resource: 'saved_packages',
 		plan: 'free',
@@ -892,28 +1043,80 @@ test('execute tool attaches entitlement metadata on denials and quota, not on su
 	expect(heartbeatMock.scheduleFleetExecuteLastSuccess).not.toHaveBeenCalled()
 
 	const quotaEmail = 'quota-metadata@example.com'
-	const quotaUserId = await createStableUserIdFromEmail(quotaEmail)
-	const quotaLimit = planLimits.free.maxExecuteCallsPerDay
-	const quotaHint = buildEntitlementUpgradeHint('execute_calls_per_day', 'free')
+	const quotaUserId = testStableUserIdFromEmail(quotaEmail)
+	const quotaLimit = planLimits.free.maxExecuteUniqueWorkersPerDay
 	await userMeter.seed({
 		userId: quotaUserId,
-		resource: 'execute_calls_per_day',
+		resource: 'execute_unique_workers_per_day',
 		day: utcDayKey(new Date()),
-		count: quotaLimit,
+		count: quotaLimit - 1,
 	})
 	const quotaHandler = await getExecuteHandler({
 		baseUrl: 'https://example.com',
 		user: { userId: quotaUserId, email: quotaEmail },
 	})
+	const sandboxLoads: Array<string> = []
+	function runWorker(workerId: string) {
+		mockModule.runModuleWithRegistry.mockImplementationOnce(
+			async (...args: Array<unknown>) => {
+				const options = args[4] as {
+					claimWorkerDay?: (id: string) => Promise<{ created: boolean }>
+				}
+				await options.claimWorkerDay?.(workerId)
+				sandboxLoads.push(workerId)
+				return { result: { ok: workerId }, logs: [] }
+			},
+		)
+	}
+	runWorker('kody-worker-a')
+	const lastUnit = await quotaHandler({
+		code: okCode,
+		conversationId: 'conv-entitlement-quota',
+	})
+	expect(lastUnit.isError).toBe(false)
+	const quotaWeekLimit = planLimits.free.maxExecuteUniqueWorkersPerWeek!
+	const atLimitUsage = {
+		unit: 'unique execute workers',
+		day: {
+			used: quotaLimit,
+			limit: quotaLimit,
+			remaining: 0,
+			resetsAt: expect.stringMatching(/T00:00:00\.000Z$/),
+		},
+		week: {
+			used: quotaLimit,
+			limit: quotaWeekLimit,
+			remaining: quotaWeekLimit - quotaLimit,
+			resetsAt: expect.stringMatching(/T00:00:00\.000Z$/),
+		},
+	}
+	expect(lastUnit.structuredContent.usage).toEqual(atLimitUsage)
+	runWorker('kody-worker-a')
+	const repeatAtLimit = await quotaHandler({
+		code: okCode,
+		params: { other: true },
+		conversationId: 'conv-entitlement-quota',
+	})
+	expect(repeatAtLimit.isError).toBe(false)
+	expect(repeatAtLimit.structuredContent.usage).toEqual(atLimitUsage)
+	runWorker('kody-worker-b')
 	const quotaDenied = await quotaHandler({
 		code: shouldNotRunCode,
 		conversationId: 'conv-entitlement-quota',
 	})
-	expect(mockModule.runModuleWithRegistry).not.toHaveBeenCalled()
+	expect(sandboxLoads).toEqual(['kody-worker-a', 'kody-worker-a'])
 	expect(quotaDenied.isError).toBe(true)
+	expect(quotaDenied.structuredContent.usage).toEqual(atLimitUsage)
+	const quotaHint = quotaDenied.structuredContent.entitlement?.upgradeHint
+	if (quotaHint === undefined) {
+		throw new Error('Expected an entitlement upgrade hint on quota denial')
+	}
+	expect(quotaHint).toMatch(
+		/^This daily limit resets at 00:00 UTC, in (\d+h )?\d+m\. Rerun code you already ran today and vary params; repeats are free, or upgrade your plan at \/@[^/]+\/-\/billing\.$/,
+	)
 	const quotaEntitlement = {
 		code: entitlementLimitErrorCode,
-		resource: 'execute_calls_per_day',
+		resource: 'execute_unique_workers_per_day',
 		plan: 'free',
 		limit: quotaLimit,
 		current: quotaLimit,
@@ -927,6 +1130,91 @@ test('execute tool attaches entitlement metadata on denials and quota, not on su
 		used: quotaLimit,
 		remaining: 0,
 	})
+})
+
+test('execute tool refuses past the per-minute runaway limit before any run work', async () => {
+	const email = 'execute-rate@example.com'
+	const userId = testStableUserIdFromEmail(email)
+	const meter = userMeterRpc({
+		env: userMeter.env,
+		userId: ownerIdFromStored(userId),
+	})
+	const nowMs = Date.parse('2026-10-10T12:00:10.000Z')
+	vi.useFakeTimers({ toFake: ['Date'] })
+	vi.setSystemTime(nowMs)
+	onTestFinished(() => {
+		vi.useRealTimers()
+	})
+	for (let index = 0; index < executeCallsPerMinutePerOrg; index += 1) {
+		await meter.admitExecuteCall({
+			nowMs,
+			limitPerMinute: executeCallsPerMinutePerOrg,
+		})
+	}
+	const handler = await getExecuteHandler({
+		baseUrl: 'https://example.com',
+		user: { userId, email },
+	})
+	mockModule.surfaceToolMemories.mockClear()
+	const refused = await handler({
+		code: shouldNotRunCode,
+		conversationId: 'conv-execute-rate',
+		memoryContext: { task: 'recall what the user asked for last time' },
+	})
+	expect(mockModule.runModuleWithRegistry).not.toHaveBeenCalled()
+	// Memory retrievers can run package code, so a refused call never starts
+	// them.
+	expect(mockModule.surfaceToolMemories).not.toHaveBeenCalled()
+	expect(refused.isError).toBe(true)
+	expect(refused.structuredContent.error).toMatch(
+		new RegExp(
+			`^Execute rate limit: this account started ${executeCallsPerMinutePerOrg} execute calls in the last minute`,
+		),
+	)
+	expect(refused.structuredContent).toMatchObject({
+		admission: { code: 'execute_rate_limited' },
+	})
+})
+
+test('execute tool refuses an identical call loop but still runs changed params', async () => {
+	const email = 'execute-loop@example.com'
+	const userId = testStableUserIdFromEmail(email)
+	vi.useFakeTimers({ toFake: ['Date'] })
+	vi.setSystemTime(Date.parse('2026-10-10T12:00:10.000Z'))
+	onTestFinished(() => {
+		vi.useRealTimers()
+	})
+	const handler = await getExecuteHandler({
+		baseUrl: 'https://example.com',
+		user: { userId, email },
+	})
+	const call = (params: Record<string, unknown>) =>
+		handler({ code: okCode, params, conversationId: 'conv-execute-loop' })
+	mockModule.runModuleWithRegistry.mockResolvedValue({
+		result: { ok: true },
+		logs: [],
+	})
+	for (let index = 0; index < identicalExecuteCallsPerWindow; index += 1) {
+		expect((await call({ id: 1 })).isError).toBeFalsy()
+	}
+	const refused = await call({ id: 1 })
+	expect(refused.isError).toBe(true)
+	expect(refused.structuredContent.error).toMatch(
+		`Execute loop detected: this connection ran the same code with the same params ${identicalExecuteCallsPerWindow} times in the last 60s.`,
+	)
+	expect(refused.structuredContent).toMatchObject({
+		admission: {
+			code: 'execute_loop_detected',
+			retryAfterMs: expect.any(Number),
+		},
+	})
+	expect(mockModule.runModuleWithRegistry).toHaveBeenCalledTimes(
+		identicalExecuteCallsPerWindow,
+	)
+	expect((await call({ id: 2 })).isError).toBeFalsy()
+	expect(mockModule.runModuleWithRegistry).toHaveBeenCalledTimes(
+		identicalExecuteCallsPerWindow + 1,
+	)
 })
 
 test('execute invoke is omitted when the flag is off and mints the handwritten passthrough when on', async () => {
@@ -943,7 +1231,10 @@ test('execute invoke is omitted when the flag is off and mints the handwritten p
 	expect(mockModule.runModuleWithRegistry).not.toHaveBeenCalled()
 
 	const [, onConfig, onHandler] = await getExecuteRegistration(
-		{ baseUrl: 'https://example.com', user: { userId: 'user-1' } },
+		{
+			baseUrl: 'https://example.com',
+			user: { userId: ownerIdFromStored('user-1') },
+		},
 		{ invokeEnabled: true },
 	)
 	expect(onConfig.inputSchema).toHaveProperty('invoke')
@@ -985,6 +1276,9 @@ export default async function main(params) {
 
 	mockModule.resolveCallerFeatureFlags.mockResolvedValue({
 		'execute-invoke': false,
+		'connection-profiles': false,
+		'mcp-skills-extension': false,
+		'mcp-events-extension': false,
 	})
 	const killed = await onHandler({
 		invoke: 'kody:@acme/github/listRepos',
@@ -993,4 +1287,51 @@ export default async function main(params) {
 	expect(killed.isError).toBe(true)
 	expect(killed.structuredContent.error).toBe(executeInvokeFlagOffMessage)
 	expect(mockModule.runModuleWithRegistry).toHaveBeenCalledTimes(1)
+})
+
+test('execute does not run or reach the registry when live flag resolution fails', async () => {
+	const userId = testStableUserIdFromEmail('flag-fail@example.com')
+	const handler = await getExecuteHandler({
+		baseUrl: 'https://example.com',
+		user: {
+			userId,
+			email: 'flag-fail@example.com',
+		},
+	})
+	mockModule.resolveCallerFeatureFlags.mockRejectedValueOnce(
+		new Error('flag resolution failed'),
+	)
+
+	const denied = await handler({
+		code: shouldNotRunCode,
+		conversationId: 'conv-flag-fail',
+	})
+
+	expect(denied.isError).toBe(true)
+	expect(denied.structuredContent.error).toBe('flag resolution failed')
+	expect(denied.structuredContent).not.toHaveProperty('entitlement')
+	expect(mockModule.runModuleWithRegistry).not.toHaveBeenCalled()
+	expect(mockModule.getCapabilityRegistryForContext).not.toHaveBeenCalled()
+})
+
+test('execute does not run or reach the registry when flag evaluation fails closed', async () => {
+	const userId = testStableUserIdFromEmail('flag-fail-closed@example.com')
+	const handler = await getExecuteHandler({
+		baseUrl: 'https://example.com',
+		user: {
+			userId,
+			email: 'flag-fail-closed@example.com',
+		},
+	})
+	mockModule.callerFeatureFlagEvaluationFailed.mockResolvedValueOnce(true)
+
+	const denied = await handler({
+		code: shouldNotRunCode,
+		conversationId: 'conv-flag-fail-closed',
+	})
+
+	expect(denied.isError).toBe(true)
+	expect(denied.structuredContent.error).toBe('Feature flag evaluation failed')
+	expect(mockModule.runModuleWithRegistry).not.toHaveBeenCalled()
+	expect(mockModule.getCapabilityRegistryForContext).not.toHaveBeenCalled()
 })

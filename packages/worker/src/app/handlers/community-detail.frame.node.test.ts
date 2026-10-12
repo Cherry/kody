@@ -1,6 +1,8 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import { createCommunityDetailHandler } from './community-detail.tsx'
-import { resetDataCacheForTests } from '#app/data-cache.ts'
+import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
 
 const mockModule = vi.hoisted(() => ({
@@ -11,9 +13,9 @@ const mockModule = vi.hoisted(() => ({
 	getCommunityListingById: vi.fn(),
 	getEntitySourceById: vi.fn(),
 	resolveArtifactSourceHead: vi.fn(),
-	listSavedPackagesByKodyIds: vi.fn(),
+	listSavedPackagesBySlugs: vi.fn(),
 	listSavedPackagesByIds: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	getMcpUserPackageScope: vi.fn(),
 }))
 
@@ -53,12 +55,12 @@ vi.mock('#worker/repo/artifact-head-cache.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByKodyIds: (...args: Array<unknown>) =>
-		mockModule.listSavedPackagesByKodyIds(...args),
+	listSavedPackagesBySlugs: (...args: Array<unknown>) =>
+		mockModule.listSavedPackagesBySlugs(...args),
 	listSavedPackagesByIds: (...args: Array<unknown>) =>
 		mockModule.listSavedPackagesByIds(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/package-registry/user-scope.ts', () => ({
@@ -68,7 +70,7 @@ vi.mock('#worker/package-registry/user-scope.ts', () => ({
 
 const sampleListing = {
 	id: 'listing-1',
-	ownerUserId: 'owner-mcp-id',
+	ownerUserId: ownerIdFromStored('owner-mcp-id'),
 	packageId: 'pkg-1',
 	sourceId: 'src-1',
 	kodyId: 'github-triage',
@@ -98,7 +100,10 @@ const sampleListing = {
 
 const env = {} as Env
 const owner = {
-	mcpUser: { userId: 'owner-mcp-id', username: 'kentcdodds' },
+	mcpUser: {
+		userId: ownerIdFromStored('owner-mcp-id'),
+		username: 'kentcdodds',
+	},
 	roles: [],
 }
 const aheadCommit = 'ffffffffffffffffffffffffffffffffffffffff'
@@ -110,10 +115,11 @@ async function renderDetail({
 	branch = 'main',
 	profileVisibility = 'public',
 	savedPackagesByKodyId = [] as Array<Record<string, string>>,
+	forks = [] as Array<Record<string, string>>,
 } = {}) {
 	// Every render addresses `listing-1` with its own source fixture; the
 	// in-isolate listing cache must not carry one answer into the next.
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	mockModule.getCommunityListingWithAggregates.mockResolvedValue(sampleListing)
 	mockModule.getCommunityListingById.mockResolvedValue(sampleListing)
 	mockModule.getEntitySourceById.mockResolvedValue(source)
@@ -122,10 +128,14 @@ async function renderDetail({
 		commit: headCommit,
 	})
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(
-		viewer && { roles: [], ...viewer },
+		viewer && {
+			roles: [],
+			...viewer,
+			request: sessionRequestContext(viewer.mcpUser.userId),
+		},
 	)
-	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue(savedPackagesByKodyId)
+	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue(forks)
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue(savedPackagesByKodyId)
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
 	mockModule.getMcpUserPackageScope.mockResolvedValue(
 		viewer?.mcpUser.username ?? 'viewer',
@@ -175,14 +185,48 @@ test('community detail handler returns bare detail frame HTML for target header'
 	)
 	expect(privateOwner.html).not.toContain('href="/@kentcdodds"')
 
-	const signedIn = await renderDetail({
-		viewer: { mcpUser: { userId: 'viewer-mcp-id', username: 'burhan' } },
+	const sameLeafOnly = await renderDetail({
+		viewer: {
+			mcpUser: {
+				userId: ownerIdFromStored('viewer-mcp-id'),
+				username: 'burhan',
+			},
+		},
 		savedPackagesByKodyId: [
 			{
 				id: 'pkg-github',
 				kodyId: 'github-triage',
 				name: '@burhan/github-triage',
 				sourceId: 'src-github',
+			},
+		],
+	})
+	expect(sameLeafOnly.html).not.toContain('data-package-title-status="open"')
+	expect(sameLeafOnly.html).not.toContain('href="/@burhan/github-triage"')
+
+	const signedIn = await renderDetail({
+		viewer: {
+			mcpUser: {
+				userId: ownerIdFromStored('viewer-mcp-id'),
+				username: 'burhan',
+			},
+		},
+		savedPackagesByKodyId: [
+			{
+				id: 'pkg-github',
+				kodyId: 'github-triage',
+				name: '@burhan/github-triage',
+				sourceId: 'src-github',
+			},
+		],
+		forks: [
+			{
+				listingId: 'listing-1',
+				targetKodyId: 'github-triage',
+				forkedPackageId: 'pkg-github',
+				forkedSourceId: 'src-github',
+				createdAt: '2026-08-01T00:00:00.000Z',
+				originCommit: 'abc1234567890',
 			},
 		],
 	})

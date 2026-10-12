@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { createRouter } from 'remix/router'
+import { route } from 'remix/routes'
 import { routePattern } from '#universal/route-pattern.ts'
 import { routes } from '#universal/routes.ts'
 
@@ -39,7 +40,6 @@ test('router prefers static nested paths and package files over dynamic siblings
 	const resolve = makeRouter([
 		'accountMcpServersOauthCallback',
 		'accountMcpServerLogo',
-		'accountMcpServerDetail',
 		'adminUserUsageApi',
 		'adminUserDetail',
 		'communityPackage',
@@ -49,17 +49,16 @@ test('router prefers static nested paths and package files over dynamic siblings
 		'communityPackageAsset',
 		'communityDetailAsset',
 		'communityPackageApprovePublish',
-		'communityPackageApproveChanges',
 		'accountPackageDetail',
 		'accountPackageApprovePublish',
 		'accountPackageFiles',
 		'communityDetail',
 		'communityDetailFiles',
 	])
-	const cases: Array<[string, keyof typeof routes]> = [
+	const cases: Array<[string, keyof typeof routes | 404]> = [
 		['/account/mcp-servers/oauth/callback', 'accountMcpServersOauthCallback'],
 		[`/account/mcp-servers/logos/${uuid}`, 'accountMcpServerLogo'],
-		['/account/mcp-servers/my-server', 'accountMcpServerDetail'],
+		['/account/mcp-servers/my-server', 404],
 		['/admin/users/usage.json', 'adminUserUsageApi'],
 		['/admin/users/42', 'adminUserDetail'],
 		['/@kentcdodds/devin', 'communityPackage'],
@@ -75,6 +74,105 @@ test('router prefers static nested paths and package files over dynamic siblings
 		[`/community/${uuid}/files/src/lib.ts`, 'communityDetailFiles'],
 	]
 	expect(await resolveAll(resolve, cases)).toEqual(cases)
+})
+
+test('organization section pages use /-/ and leave two-segment package urls free', async () => {
+	const resolve = makeRouter([
+		'orgSecrets',
+		'orgPackages',
+		'orgPackagesApi',
+		'orgBilling',
+		'orgBillingApi',
+		'orgBillingSuccess',
+		'orgBillingPortal',
+		'communityPackage',
+		'communityPackageFiles',
+		'profile',
+	])
+	expect(await resolve('/@ada/-/secrets')).toBe('orgSecrets')
+	expect(await resolve('/@acme/-/billing')).toBe('orgBilling')
+	expect(await resolve('/@acme/-/billing.json')).toBe('orgBillingApi')
+	expect(await resolve('/@acme/-/billing/success')).toBe('orgBillingSuccess')
+	expect(await resolve('/@acme/-/billing/portal')).toBe('orgBillingPortal')
+	expect(await resolve('/account/billing')).toBe(404)
+	expect(await resolve('/account/billing/success')).toBe(404)
+	expect(await resolve('/account/billing/portal')).toBe(404)
+	expect(await resolve('/account/packages')).toBe(404)
+	expect(await resolve('/@ada/-/secrets/new')).toBe('orgSecrets')
+	expect(await resolve('/@ada/-/packages')).toBe('orgPackages')
+	expect(await resolve('/@ada/-/packages.json')).toBe('orgPackagesApi')
+	// A package whose id equals a former org section name is still a package.
+	expect(await resolve('/@ada/billing')).toBe('communityPackage')
+	expect(await resolve('/@ada/secrets')).toBe('communityPackage')
+	expect(await resolve('/@ada/jobs')).toBe('communityPackage')
+	expect(await resolve('/@ada/devin')).toBe('communityPackage')
+	expect(await resolve('/@ada')).toBe('profile')
+})
+
+test('the MCP server consent page wins over the MCP servers section', async () => {
+	const resolve = makeRouter(['orgMcpServers', 'orgMcpServerAuthorize'])
+	expect(await resolve('/@acme/-/mcp-servers/server-1/authorize')).toBe(
+		'orgMcpServerAuthorize',
+	)
+	expect(await resolve('/@acme/-/mcp-servers/server-1')).toBe('orgMcpServers')
+	expect(await resolve('/@acme/-/mcp-servers')).toBe('orgMcpServers')
+})
+
+test('organization settings and members live under /- and leave package urls free', async () => {
+	const resolve = makeRouter([
+		'orgSettings',
+		'orgSettingsApi',
+		'orgMembers',
+		'orgMembersApi',
+		'orgTeams',
+		'orgTeamsApi',
+		'orgGrants',
+		'orgGrantsApi',
+		'orgCollaborators',
+		'orgCollaboratorsApi',
+		'communityPackage',
+		'profile',
+	])
+	expect(await resolve('/@acme/-/settings')).toBe('orgSettings')
+	expect(await resolve('/@acme/-/settings.json')).toBe('orgSettingsApi')
+	expect(await resolve('/@acme/-/members')).toBe('orgMembers')
+	expect(await resolve('/@acme/-/members.json')).toBe('orgMembersApi')
+	expect(await resolve('/@acme/-/teams')).toBe('orgTeams')
+	expect(await resolve('/@acme/-/teams.json')).toBe('orgTeamsApi')
+	expect(await resolve('/@acme/-/grants')).toBe('orgGrants')
+	expect(await resolve('/@acme/-/grants.json')).toBe('orgGrantsApi')
+	expect(await resolve('/@acme/-/collaborators')).toBe('orgCollaborators')
+	expect(await resolve('/@acme/-/collaborators.json')).toBe(
+		'orgCollaboratorsApi',
+	)
+	expect(await resolve('/@acme/settings')).toBe('communityPackage')
+	expect(await resolve('/@acme/members')).toBe('communityPackage')
+	expect(await resolve('/@acme/teams')).toBe('communityPackage')
+	expect(await resolve('/@acme/devin')).toBe('communityPackage')
+})
+
+test('the create-organization form posts to the create action, not back to the page', async () => {
+	const router = createRouter()
+	router.map(
+		route({
+			accountOrganizationsNew: routes.accountOrganizationsNew,
+			accountOrganizationsNewPost: routes.accountOrganizationsNewPost,
+		}),
+		{
+			actions: {
+				accountOrganizationsNew: createStubHandler('page'),
+				accountOrganizationsNewPost: createStubHandler('create'),
+			},
+		},
+	)
+	const resolve = async (method: string) => {
+		const response = await router.fetch(
+			new Request('http://localhost/account/organizations/new', { method }),
+		)
+		return response.text()
+	}
+	expect(await resolve('GET')).toBe('page')
+	expect(await resolve('POST')).toBe('create')
 })
 
 test('method mismatches return 405 with Allow and GET routes serve HEAD', async () => {
@@ -120,13 +218,13 @@ test('delimiter-bounded params keep companion suffixes and only match dotted ids
 		'profile',
 		'profileAvatar',
 		'profileOgImage',
-		'accountSecretUserDetail',
-		'accountIntegrationDetail',
+		'orgSecrets',
+		'orgIntegrations',
 		'integrationLogo',
 		'adminPlatformIntegrationDetail',
-		'accountJobDetail',
-		'accountWorkflowDetail',
-		'accountActivityDetail',
+		'orgJobs',
+		'orgWorkflows',
+		'orgActivity',
 	])
 	const avatarHash =
 		'00e495130208345dcc438bce0102f73a6e5cef01085a930c9c9ed2651a67b8d9'
@@ -137,9 +235,9 @@ test('delimiter-bounded params keep companion suffixes and only match dotted ids
 		['/@john.doe', 404],
 		[`/profiles/kentcdodds/avatar/${avatarHash}.jpg`, 'profileAvatar'],
 		['/profiles/alice/og.png', 'profileOgImage'],
-		['/account/secrets/user/google%2Eapi%2Ekey', 'accountSecretUserDetail'],
-		['/account/integrations/google.personal', 404],
-		['/account/integrations/google%2Epersonal', 'accountIntegrationDetail'],
+		['/@ada/-/secrets/user/google%2Eapi%2Ekey', 'orgSecrets'],
+		['/@ada/-/integrations/google.personal', 'orgIntegrations'],
+		['/@ada/-/integrations/google%2Epersonal', 'orgIntegrations'],
 		['/integrations/logos/openai.com', 404],
 		['/integrations/logos/openai%2Ecom', 'integrationLogo'],
 		['/admin/platform-integrations/openai.com', 404],
@@ -147,10 +245,10 @@ test('delimiter-bounded params keep companion suffixes and only match dotted ids
 			'/admin/platform-integrations/openai%2Ecom',
 			'adminPlatformIntegrationDetail',
 		],
-		['/account/jobs/package-job:pkg:daily.backup', 404],
-		['/account/jobs/package-job%3Apkg%3Adaily%2Ebackup', 'accountJobDetail'],
-		['/account/activity/run-1', 'accountActivityDetail'],
-		['/account/workflows/dynwf-example', 'accountWorkflowDetail'],
+		['/@ada/-/jobs/package-job:pkg:daily.backup', 'orgJobs'],
+		['/@ada/-/jobs/package-job%3Apkg%3Adaily%2Ebackup', 'orgJobs'],
+		['/@ada/-/activity/run-1', 'orgActivity'],
+		['/@ada/-/workflows/dynwf-example', 'orgWorkflows'],
 	]
 	expect(await resolveAll(resolve, cases)).toEqual(cases)
 })

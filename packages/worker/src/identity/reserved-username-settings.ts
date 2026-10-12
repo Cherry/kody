@@ -10,6 +10,7 @@ import {
 	usernameCollidesWithReservedNames,
 } from '#worker/identity/reserved-usernames.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export const reservedUsernamesKvKey = 'platform-settings:v1:reserved-usernames'
 const reservedUsernamesCacheTtlMs = 30_000
 export const reservedUsernamesKvReadFailedLogKey =
@@ -31,7 +32,7 @@ type ReservedUsernamesEnv = Pick<Env, 'BUNDLE_ARTIFACTS_KV'>
 
 type ReservedUsernamesWriteEnv = Pick<Env, 'BUNDLE_ARTIFACTS_KV'>
 
-let cacheGeneration = 0
+const cacheGeneration = 0
 const memos = new WeakMap<
 	object,
 	{
@@ -40,10 +41,6 @@ const memos = new WeakMap<
 		generation: number
 	}
 >()
-
-export function clearReservedUsernameSettingsCacheForTests() {
-	cacheGeneration += 1
-}
 
 function uniqueSorted(names: Iterable<string>) {
 	return [...new Set(names)].sort((left, right) => left.localeCompare(right))
@@ -303,6 +300,7 @@ export async function findReservedUsernameConflicts(
 			.prepare(
 				`SELECT username, stable_user_id
 				 FROM users
+				 WHERE 1 = 1${andLiveDeletedAtSql()}
 				 ORDER BY username ASC
 				 LIMIT ? OFFSET ?`,
 			)

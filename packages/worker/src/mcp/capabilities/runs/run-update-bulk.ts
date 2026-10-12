@@ -1,7 +1,12 @@
+import { authorizeOrgWide } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { bulkUpdateRunErrorTriage } from '#worker/run-records/service.ts'
 import {
@@ -93,6 +98,7 @@ export const runUpdateBulkCapability = defineDomainCapability(
 	capabilityDomainNames.runs,
 	{
 		name: 'runUpdateBulk',
+		orgPermission: 'job:write',
 		description:
 			'Non-destructively triage up to 100 retained error runs by explicit ids or safe exact-match filters. Use dry_run first for operational cleanup, then repeat filtered updates while has_more is true. Original error status, message, logs, and history remain inspectable.',
 		keywords: [
@@ -110,11 +116,15 @@ export const runUpdateBulkCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeOrgWide(
+				{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
+				'job:write',
+			)
 			const errorTriage = args.triage === 'open' ? null : args.triage
 			const result = await bulkUpdateRunErrorTriage({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				runIds: args.run_ids ?? null,
 				filter: args.filter
 					? {

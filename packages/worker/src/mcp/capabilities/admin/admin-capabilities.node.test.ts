@@ -1,7 +1,18 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
+import { McpCallerError } from '#mcp/caller-error.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import {
+	deriveRequestContext,
+	type EnablementRun,
+	inheritRequest,
+	type RequestSource,
+} from '#worker/request-context/request-context.ts'
 
 const lifecycleMocks = vi.hoisted(() => ({
 	scheduleUserCreatedEvent: vi.fn(),
@@ -17,14 +28,23 @@ vi.mock('#worker/identity/schedule-user-lifecycle-event.ts', () => ({
 // audit pipeline, so opt out of the shared audit-log-spy setup mock.
 vi.unmock('#worker/audit-log.ts')
 import { adminAuditLogQueryCapability } from './admin-audit-log-query.ts'
+import { adminSystemEmailDeleteCapability } from './admin-system-email-delete.ts'
 import { adminSystemEmailGetCapability } from './admin-system-email-get.ts'
 import { adminSystemEmailListCapability } from './admin-system-email-list.ts'
+import {
+	emailAttachmentBlobKey,
+	emailRawMimeKey,
+} from '#worker/email/blob-keys.ts'
+import { systemEmailOwnerId } from '#worker/email/system-email.ts'
 import { adminUserUsageCapability } from './admin-user-usage.ts'
 import { adminUserCreateCapability } from './admin-user-create.ts'
 import { adminUserGetCapability } from './admin-user-get.ts'
 import { adminUserListCapability } from './admin-user-list.ts'
 import { adminUserUpdateCapability } from './admin-user-update.ts'
 import { adminUserVerifyCapability } from './admin-user-verify.ts'
+import { adminEmailDestinationVerifyCapability } from './admin-email-destination-verify.ts'
+import { adminCreditWalletGetCapability } from './admin-credit-wallet-get.ts'
+import { addEmailNotificationDestination } from '#worker/email/destinations.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createInMemoryRepoSessionIndexEnv } from '#worker/test-support/repo-session-index.ts'
@@ -34,6 +54,10 @@ import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
 import { loadAdminUserByTarget } from '#worker/admin/users-data.ts'
 
 const janeStableId = testStableUserIdFromEmail('jane@example.com')
+const adminPersonId = personIdFromStored(
+	testStableUserIdFromEmail('admin@example.com'),
+)
+const automationPackageId = 'pkg-admin-event-notify'
 const roleIds = { user: 1, admin: 2 } as const
 
 type SeedUser = {
@@ -56,12 +80,35 @@ const jane: SeedUser = {
 	createdAt: '2026-01-03 00:00:00',
 }
 
+function createMemoryEmailBlobs(seed: Record<string, string> = {}) {
+	const store = new Map<string, string>(Object.entries(seed))
+	return {
+		store,
+		blobs: {
+			get: async (key: string) => {
+				const value = store.get(key)
+				if (value == null) return null
+				return { text: async () => value }
+			},
+			put: async (key: string, value: string) => {
+				store.set(key, value)
+			},
+			delete: async (key: string) => {
+				store.delete(key)
+			},
+			head: async (key: string) => (store.has(key) ? { key } : null),
+		},
+	}
+}
+
 function createAdminCapabilityTest(
 	users: Array<SeedUser>,
-	blobs?: {
-		get: (key: string) => Promise<{ text: () => Promise<string> } | null>
-	},
+	blobs?: ReturnType<typeof createMemoryEmailBlobs>['blobs'],
+	callerRoles: Array<string> = ['admin'],
+	caller: { source?: RequestSource; packageId?: string | null } = {},
 ) {
+	const callerPackageId =
+		caller.packageId === undefined ? automationPackageId : caller.packageId
 	const sqlite = new DatabaseSync(':memory:')
 	applyAllMigrations(
 		sqlite,
@@ -82,27 +129,39 @@ function createAdminCapabilityTest(
 		),
 	)
 	const insertUser = sqlite.prepare(
-		`INSERT INTO users (id, username, email, password_hash, stable_user_id, plan, email_verified_at, created_at, updated_at)
-		 VALUES (?, ?, ?, 'hash', ?, ?, ?, ?, ?)`,
+		`INSERT INTO users (id, username, email, password_hash, stable_user_id, email_verified_at, created_at, updated_at)
+		 VALUES (?, ?, ?, 'hash', ?, ?, ?, ?)`,
+	)
+	const insertOrg = sqlite.prepare(
+		`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
 	)
 	const insertRole = sqlite.prepare(
 		`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
 	)
 	users.forEach((user, index) => {
 		const email = `${user.username}@example.com`
+		const stableUserId = testStableUserIdFromEmail(email)
 		insertUser.run(
 			index + 1,
 			user.username,
 			email,
-			testStableUserIdFromEmail(email),
-			user.plan ?? 'free',
+			stableUserId,
 			user.emailVerifiedAt ?? null,
+			user.createdAt,
+			user.createdAt,
+		)
+		insertOrg.run(
+			stableUserId,
+			user.username,
+			user.plan ?? 'free',
 			user.createdAt,
 			user.createdAt,
 		)
 		for (const role of user.roles) insertRole.run(index + 1, roleIds[role])
 	})
 	const db = createD1FromSqlite(sqlite)
+	const emailBlobs = blobs ?? createMemoryEmailBlobs().blobs
 	const ctx = {
 		env: {
 			...createInMemoryRunLogUsageEnv().env,
@@ -115,15 +174,22 @@ function createAdminCapabilityTest(
 					({ userId }) as unknown as DurableObjectId,
 				get: () => ({ countMessages: async () => ({ total: 0 }) }),
 			},
-			EMAIL_BLOBS: blobs ?? { get: async () => null },
+			EMAIL_BLOBS: emailBlobs,
 		} as unknown as Env,
 		callerContext: createMcpCallerContext({
+			source: caller.source ?? { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: 'admin-user',
+				userId: adminPersonId,
 				email: 'admin@example.com',
 				displayName: 'admin',
-				roles: ['admin'],
+				roles: callerRoles,
+			},
+			storageContext: {
+				sessionId: null,
+				appId: callerPackageId,
+				packageId: callerPackageId,
+				storageId: null,
 			},
 		}),
 	}
@@ -139,7 +205,10 @@ function createAdminCapabilityTest(
 		userRow: (email: string) =>
 			sqlite
 				.prepare(
-					'SELECT id, email, stable_user_id, plan, email_verified_at FROM users WHERE email = ?',
+					`SELECT u.id, u.email, u.stable_user_id, o.plan, u.email_verified_at
+					 FROM users u
+					 LEFT JOIN orgs o ON o.id = u.stable_user_id
+					 WHERE u.email = ?`,
 				)
 				.get(email) as Record<string, unknown> | undefined,
 	}
@@ -204,7 +273,7 @@ test('admin capabilities list and get account metadata and query sanitized audit
 	// An invalid stable id must not fall through to the email lookup.
 	await expect(
 		loadAdminUserByTarget(t.db, {
-			stableUserId: 'not-a-stable-id',
+			stableUserId: ownerIdFromStored('not-a-stable-id'),
 			email: 'admin@example.com',
 		}),
 	).resolves.toBeNull()
@@ -262,13 +331,11 @@ test('adminAuditLogQuery accepts legacy SQLite rowids through output parse', asy
 })
 
 test('admin system email capabilities read only system-owned mail and audit reads', async () => {
-	const rawMimeKey = 'email-raw:v1:system:email/system-message-1'
-	const t = createAdminCapabilityTest([admin], {
-		get: async (key: string) =>
-			key === rawMimeKey
-				? { text: async () => 'Subject: Abuse\r\n\r\nSystem body.' }
-				: null,
+	const rawMimeKey = emailRawMimeKey(systemEmailOwnerId, 'system-message-1')
+	const memoryBlobs = createMemoryEmailBlobs({
+		[rawMimeKey]: 'Subject: Abuse\r\n\r\nSystem body.',
 	})
+	const t = createAdminCapabilityTest([admin], memoryBlobs.blobs)
 	t.sqlite.exec(
 		`INSERT INTO email_inboxes (id, user_id, name, created_at, updated_at)
 		 VALUES ('system-inbox-1', 'system:email', 'abuse', '2026-01-01', '2026-01-01')`,
@@ -321,13 +388,171 @@ test('admin system email capabilities read only system-owned mail and audit read
 	})
 })
 
+test('adminSystemEmailDelete removes system mail graph rows and blobs, refuses non-admins and missing ids', async () => {
+	const messageId = 'system-message-delete-1'
+	const rawMimeKey = emailRawMimeKey(systemEmailOwnerId, messageId)
+	const attachmentId = 'system-attachment-delete-1'
+	const attachmentKey = emailAttachmentBlobKey(
+		systemEmailOwnerId,
+		messageId,
+		attachmentId,
+	)
+	const memoryBlobs = createMemoryEmailBlobs({
+		[rawMimeKey]: 'Subject: Phish\r\n\r\nOpen the rar.',
+		[attachmentKey]: 'fake-rar-bytes',
+	})
+	const t = createAdminCapabilityTest([admin], memoryBlobs.blobs)
+	t.sqlite.exec(
+		`INSERT INTO email_inboxes (id, user_id, name, created_at, updated_at)
+		 VALUES ('system-inbox-delete', 'system:email', 'kody', '2026-01-01', '2026-01-01');
+		 INSERT INTO system_email_threads (
+			id, inbox_id, subject_normalized, last_message_at, created_at, updated_at
+		 ) VALUES (
+			'system-thread-delete', 'system-inbox-delete', 'gemini order',
+			'2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z'
+		 );`,
+	)
+	t.sqlite
+		.prepare(
+			`INSERT INTO system_email_messages (
+				id, direction, inbox_id, thread_id, from_address, envelope_from,
+				to_addresses_json, subject, text_body, raw_mime_key, processing_status,
+				raw_size, received_at, created_at, updated_at
+			) VALUES (
+				?, 'inbound', 'system-inbox-delete', 'system-thread-delete',
+				'phish@example.net', 'phish@example.net', '["kody@kody.codes"]',
+				'Gemini Order No.206378105', 'Open the rar.', ?, 'stored', 64,
+				'2026-01-03T00:00:00.000Z', '2026-01-03T00:00:00.000Z',
+				'2026-01-03T00:00:00.000Z'
+			)`,
+		)
+		.run(messageId, rawMimeKey)
+	t.sqlite
+		.prepare(
+			`INSERT INTO system_email_attachments (
+				id, message_id, filename, content_type, size, storage_kind, storage_key, created_at
+			) VALUES (?, ?, 'invoice.rar', 'application/x-rar-compressed', 12, 'external', ?, ?)`,
+		)
+		.run(attachmentId, messageId, attachmentKey, '2026-01-03T00:00:00.000Z')
+	t.sqlite
+		.prepare(
+			`INSERT INTO system_email_delivery_events (
+				id, message_id, event_type, provider, fingerprint, detail_json,
+				state, created_at
+			) VALUES ('system-event-delete', ?, 'received', 'test', 'fp-delete', '{}',
+				'received', ?)`,
+		)
+		.run(messageId, '2026-01-03T00:00:00.000Z')
+	t.sqlite
+		.prepare(
+			`INSERT INTO system_email_delivery_events (
+				id, message_id, event_type, provider, fingerprint, detail_json,
+				state, created_at
+			) VALUES (
+				'email-inbound-dedupe:fp-delete', NULL, 'receive_started',
+				'cloudflare-email-routing-dedupe', 'fp-delete',
+				json_object('messageId', ?), 'pending', ?
+			)`,
+		)
+		.run(messageId, '2026-01-03T00:00:00.000Z')
+
+	const nonAdmin = createAdminCapabilityTest([jane], memoryBlobs.blobs, [
+		'user',
+	])
+	await expect(
+		adminSystemEmailDeleteCapability.handler(
+			{ message_id: messageId },
+			nonAdmin.ctx,
+		),
+	).rejects.toThrow(/admin/i)
+
+	await expect(
+		adminSystemEmailDeleteCapability.handler(
+			{ message_id: 'missing-system-message' },
+			t.ctx,
+		),
+	).rejects.toThrow('System email message not found: missing-system-message')
+	// User-owned mailbox ids are not on the system graph; refuse as not found.
+	await expect(
+		adminSystemEmailDeleteCapability.handler(
+			{ message_id: 'user-message-1' },
+			t.ctx,
+		),
+	).rejects.toThrow('System email message not found: user-message-1')
+
+	const deleted = await adminSystemEmailDeleteCapability.handler(
+		{ message_id: messageId },
+		t.ctx,
+	)
+	expect(deleted).toEqual({
+		ownerId: systemEmailOwnerId,
+		deleted: true,
+		message_id: messageId,
+	})
+	expect(
+		t.sqlite
+			.prepare(`SELECT id FROM system_email_messages WHERE id = ?`)
+			.get(messageId),
+	).toBeUndefined()
+	expect(
+		t.sqlite
+			.prepare(`SELECT id FROM system_email_attachments WHERE message_id = ?`)
+			.all(messageId),
+	).toEqual([])
+	expect(
+		t.sqlite
+			.prepare(
+				`SELECT id FROM system_email_delivery_events WHERE message_id = ?`,
+			)
+			.all(messageId),
+	).toEqual([])
+	expect(
+		t.sqlite
+			.prepare(
+				`SELECT state, event_type, message_id
+				FROM system_email_delivery_events
+				WHERE id = 'email-inbound-dedupe:fp-delete'`,
+			)
+			.get(),
+	).toEqual({
+		state: 'rejected',
+		event_type: 'rejected',
+		message_id: null,
+	})
+	expect(
+		t.sqlite
+			.prepare(`SELECT id FROM system_email_threads WHERE id = ?`)
+			.get('system-thread-delete'),
+	).toBeUndefined()
+	expect(memoryBlobs.store.has(rawMimeKey)).toBe(false)
+	expect(memoryBlobs.store.has(attachmentKey)).toBe(false)
+	expect(t.auditEvents().at(-1)).toMatchObject({
+		action: 'adminSystemEmailDelete',
+		result: 'success',
+		reason: `target_message_id=${messageId}`,
+	})
+	expect(
+		t
+			.auditEvents()
+			.some(
+				(event) =>
+					event.action === 'adminSystemEmailDelete' &&
+					event.result === 'failure',
+			),
+	).toBe(true)
+})
+
 test('adminUserCreate records audit metadata and assigns the default role', async () => {
 	const t = createAdminCapabilityTest([admin])
-	const stableUserId = testStableUserIdFromEmail('person+launch@example.com')
 
 	const result = await adminUserCreateCapability.handler(
 		{ email: 'Person+Launch@Example.com' },
 		t.ctx,
+	)
+	const stableUserId = result.createdUser.stableUserId
+	expect(stableUserId).toMatch(/^[a-f0-9]{64}$/)
+	expect(stableUserId).not.toBe(
+		testStableUserIdFromEmail('person+launch@example.com'),
 	)
 
 	expect(result.createdUser).toMatchObject({
@@ -396,7 +621,10 @@ test('adminUserUpdate sets plan, maps null clear to free, and rejects unknown us
 			{ email: 'missing@example.com', plan: 'pro' },
 			t.ctx,
 		),
-	).rejects.toThrow('User not found.')
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError && error.message === 'User not found.',
+	)
 	await expect(
 		adminUserUpdateCapability.handler(
 			{ id: 1, plan: 'enterprise' } as never,
@@ -418,6 +646,62 @@ test('adminUserUpdate sets plan, maps null clear to free, and rejects unknown us
 			action: 'adminUserUpdate',
 			result: 'failure',
 			reason: 'User not found.',
+		},
+	])
+})
+
+test('adminCreditWalletGet rejects unknown users as McpCallerError with audit failure', async () => {
+	const t = createAdminCapabilityTest([admin, jane])
+
+	await expect(
+		adminCreditWalletGetCapability.handler(
+			{ email: 'missing@example.com' },
+			t.ctx,
+		),
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError && error.message === 'User not found.',
+	)
+	expect(t.auditEvents()).toEqual([
+		{
+			action: 'adminCreditWalletGet',
+			result: 'failure',
+			reason: 'User not found.',
+		},
+	])
+})
+
+test('adminEmailDestinationVerify marks an additional destination verified with audit metadata', async () => {
+	const t = createAdminCapabilityTest([
+		admin,
+		{ ...jane, emailVerifiedAt: '2026-01-03T00:00:00.000Z' },
+	])
+	const janeRow = t.userRow('jane@example.com')
+	expect(janeRow).toBeTruthy()
+	const added = await addEmailNotificationDestination({
+		db: t.db,
+		dbUserId: Number(janeRow!['id']),
+		email: 'pager@example.com',
+	})
+	expect(added.destination.verified).toBe(false)
+
+	const marked = await adminEmailDestinationVerifyCapability.handler(
+		{
+			stableUserId: janeStableId,
+			destinationEmail: 'pager@example.com',
+		},
+		t.ctx,
+	)
+	expect(marked.destination).toMatchObject({
+		id: added.destination.id,
+		email: 'pager@example.com',
+		verified: true,
+	})
+	expect(t.auditEvents()).toEqual([
+		{
+			action: 'adminEmailDestinationVerify',
+			result: 'success',
+			reason: `target_stable_user_id=${janeStableId};destination=pager@example.com`,
 		},
 	])
 })
@@ -448,7 +732,20 @@ test('adminUserVerify marks verified and mints a one-time url with audit metadat
 			{ email: 'jane@example.com', action: 'mint_verify_url' },
 			t.ctx,
 		),
-	).rejects.toThrow('Email is already verified.')
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError &&
+			error.message === 'Email is already verified.',
+	)
+	await expect(
+		adminUserVerifyCapability.handler(
+			{ email: 'missing@example.com', action: 'mark_verified' },
+			t.ctx,
+		),
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			error instanceof McpCallerError && error.message === 'User not found.',
+	)
 	expect(t.auditEvents()).toEqual([
 		{
 			action: 'adminUserVerify',
@@ -465,5 +762,229 @@ test('adminUserVerify marks verified and mints a one-time url with audit metadat
 			result: 'failure',
 			reason: 'Email is already verified.',
 		},
+		{
+			action: 'adminUserVerify',
+			result: 'failure',
+			reason: 'User not found.',
+		},
 	])
 })
+
+const adminEnablement: EnablementRun = {
+	id: 'enablement-admin-notify',
+	enabler: { userId: adminPersonId, username: 'admin' },
+	role: 'owner',
+}
+const bea: SeedUser = {
+	username: 'bea',
+	roles: ['user'],
+	createdAt: '2026-01-04 00:00:00',
+}
+const beaEnablement: EnablementRun = {
+	...adminEnablement,
+	enabler: {
+		userId: personIdFromStored(testStableUserIdFromEmail('bea@example.com')),
+		username: 'bea',
+	},
+	role: 'member',
+}
+const triggerAudit = (trigger: string, triggerId = adminEnablement.id) =>
+	`trigger=${trigger};trigger_id=${triggerId};actor=${adminPersonId};package_id=${automationPackageId}`
+
+const subscriptionRun = (
+	enablement: EnablementRun = adminEnablement,
+): RequestSource => ({
+	kind: 'platform-event',
+	sourceId: 'email_verification_stall_alert',
+	enablement,
+})
+
+const triggeredAdminRuns: Array<{
+	name: string
+	source: RequestSource
+	trigger: string
+}> = [
+	{
+		name: 'job',
+		source: { kind: 'schedule', jobId: 'job-1', enablement: adminEnablement },
+		trigger: 'job',
+	},
+	{
+		name: 'webhook',
+		source: { kind: 'webhook', sourceId: 'ep-1', enablement: adminEnablement },
+		trigger: 'webhook',
+	},
+	{ name: 'subscription', source: subscriptionRun(), trigger: 'subscription' },
+	{
+		name: 'inbound email',
+		source: {
+			kind: 'inbound-email',
+			sourceId: 'message-1',
+			sender: { kind: 'inbox-owner' },
+			enablement: adminEnablement,
+		},
+		trigger: 'email',
+	},
+	{
+		name: 'package code a subscription started',
+		source: inheritRequest(
+			deriveRequestContext({
+				user: adminEnablement.enabler,
+				source: subscriptionRun(),
+			}),
+		),
+		trigger: 'subscription',
+	},
+]
+
+test.each(triggeredAdminRuns)(
+	'a $name run an admin enabled may call site-admin capabilities, and each call audits the trigger',
+	async ({ source, trigger }) => {
+		const t = createAdminCapabilityTest([admin, jane], undefined, ['admin'], {
+			source,
+		})
+		const verified = await adminUserVerifyCapability.handler(
+			{ email: 'jane@example.com', action: 'mark_verified' },
+			t.ctx,
+		)
+		expect(verified.user.email_verified).toBe(true)
+		await expect(
+			adminUserVerifyCapability.handler(
+				{ email: 'missing@example.com', action: 'mint_verify_url' },
+				t.ctx,
+			),
+		).rejects.toThrow('User not found.')
+		expect(t.auditEvents()).toEqual([
+			{
+				action: 'adminUserVerify',
+				result: 'success',
+				reason: `target_stable_user_id=${janeStableId};action=mark_verified`,
+			},
+			{
+				action: 'adminUserVerify',
+				result: 'success',
+				reason: triggerAudit(trigger),
+			},
+			{
+				action: 'adminUserVerify',
+				result: 'failure',
+				reason: 'User not found.',
+			},
+			{
+				action: 'adminUserVerify',
+				result: 'failure',
+				reason: `${triggerAudit(trigger)};error=User not found.`,
+			},
+		])
+	},
+)
+
+test('a triggered call that fails input validation still writes its trigger audit row', async () => {
+	const t = createAdminCapabilityTest([admin, jane], undefined, ['admin'], {
+		source: subscriptionRun(),
+	})
+	await expect(
+		adminUserVerifyCapability.handler(
+			{
+				email: 'jane@example.com',
+				username: 'jane',
+				action: 'mark_verified',
+			},
+			t.ctx,
+		),
+	).rejects.toThrow('Invalid input for capability "adminUserVerify"')
+	expect(t.auditEvents()).toEqual([
+		{
+			action: 'adminUserVerify',
+			result: 'failure',
+			reason: expect.stringMatching(
+				new RegExp(
+					`^${triggerAudit('subscription')};error=Invalid input for capability "adminUserVerify"`,
+				),
+			),
+		},
+	])
+	expect(t.userRow('jane@example.com')?.['email_verified_at']).toBeNull()
+})
+
+const triggeredAdminRefusals: Array<{
+	name: string
+	source?: RequestSource
+	roles?: Array<string>
+	prepare?: (sqlite: DatabaseSync) => void
+	error: RegExp
+	denial: string
+}> = [
+	{
+		name: 'caller lacks the admin role',
+		roles: ['user'],
+		error:
+			/MCP user lacks required role "admin" for capability "adminUserVerify"/,
+		denial: 'role',
+	},
+	{
+		name: 'enabler admin role revoked in D1 while cached roles still say admin',
+		prepare: (sqlite) =>
+			sqlite
+				.prepare('DELETE FROM user_roles WHERE user_id = 1 AND role_id = ?')
+				.run(roleIds.admin),
+		error:
+			/This subscription run acts for a person who lacks required role "admin" for capability "adminUserVerify"/,
+		denial: 'role',
+	},
+	{
+		name: 'enabler is not an admin',
+		source: subscriptionRun(beaEnablement),
+		error: /acts for a person who lacks required role "admin"/,
+		denial: 'role',
+	},
+	{
+		name: 'enabler is suspended',
+		prepare: (sqlite) =>
+			sqlite
+				.prepare("UPDATE users SET suspended_at = '2026-10-01' WHERE id = 1")
+				.run(),
+		error: /This subscription run acts for no active person/,
+		denial: 'no_user',
+	},
+	{
+		name: 'trigger nobody turned on',
+		source: { kind: 'platform-event', sourceId: 'event-1' },
+		error: /This subscription run acts for no active person/,
+		denial: 'no_user',
+	},
+	{
+		name: 'package app visitor',
+		source: { kind: 'package-app' },
+		roles: [],
+		error: /MCP user lacks required role "admin"/,
+		denial: 'role',
+	},
+]
+
+test.each(triggeredAdminRefusals)(
+	'site-admin capabilities refuse a non-interactive run: $name',
+	async (refusal) => {
+		const t = createAdminCapabilityTest(
+			[admin, jane, bea],
+			undefined,
+			refusal.roles ?? ['admin'],
+			{ source: refusal.source ?? subscriptionRun() },
+		)
+		refusal.prepare?.(t.sqlite)
+		await expect(
+			adminUserVerifyCapability.handler(
+				{ email: 'jane@example.com', action: 'mark_verified' },
+				t.ctx,
+			),
+		).rejects.toThrow(refusal.error)
+		expect(t.auditEvents()).toEqual([
+			{
+				action: 'mcp_capability_denied',
+				result: 'failure',
+				reason: refusal.denial,
+			},
+		])
+		expect(t.userRow('jane@example.com')?.['email_verified_at']).toBeNull()
+	},
+)

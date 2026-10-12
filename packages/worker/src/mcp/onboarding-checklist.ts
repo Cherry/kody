@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	readCurrentEntitlementResourceUsage,
 	type EntitlementUsageEnv,
@@ -17,6 +18,7 @@ import {
  * already stores. Dismissal lives on `users.onboarding_checklist_dismissed_at`.
  */
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type { OnboardingChecklistItem, OnboardingChecklistItemId }
 
 export type OnboardingChecklist = {
@@ -35,7 +37,7 @@ export type OnboardingChecklistEnv = Pick<Env, 'APP_DB'> & EntitlementUsageEnv
  */
 export async function loadOnboardingAccessWin(
 	env: OnboardingChecklistEnv,
-	userId: string,
+	userId: OwnerId,
 ): Promise<boolean> {
 	const [firstSearch, execute, memories, savedPackages] = await Promise.all([
 		userHasFirstSearch(env.APP_DB, userId).catch(() => false),
@@ -64,7 +66,7 @@ export async function loadOnboardingAccessWin(
  */
 export async function loadOnboardingAccessWinMemorySubject(
 	env: OnboardingChecklistEnv,
-	userId: string,
+	userId: OwnerId,
 ): Promise<string | null> {
 	try {
 		const rows = await listMemoriesByUserId(env.APP_DB, userId, {
@@ -80,7 +82,7 @@ export async function loadOnboardingAccessWinMemorySubject(
 
 export async function deriveOnboardingChecklist(input: {
 	env: OnboardingChecklistEnv
-	userId: string
+	userId: OwnerId
 	emailVerified: boolean
 	hasMcpClient: boolean
 	hasAccessWin?: boolean
@@ -122,7 +124,7 @@ export async function deriveOnboardingChecklist(input: {
 
 export async function readOnboardingChecklistDismissed(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 }): Promise<boolean> {
 	try {
 		const dismissedAt = await readDismissedAtColumn(
@@ -137,7 +139,7 @@ export async function readOnboardingChecklistDismissed(input: {
 
 export async function dismissOnboardingChecklist(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 }): Promise<void> {
 	await writeDismissedAtColumn(
 		input.env.APP_DB,
@@ -146,13 +148,13 @@ export async function dismissOnboardingChecklist(input: {
 	)
 }
 
-async function readDismissedAtColumn(db: D1Database, userId: string) {
+async function readDismissedAtColumn(db: D1Database, userId: OwnerId) {
 	const row = await db
 		.prepare(
 			`SELECT onboarding_checklist_dismissed_at
 			 FROM users
 			 WHERE stable_user_id = ?
-			 LIMIT 1`,
+			 ${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(userId)
 		.first<{ onboarding_checklist_dismissed_at: string | null }>()
@@ -162,7 +164,7 @@ async function readDismissedAtColumn(db: D1Database, userId: string) {
 
 async function writeDismissedAtColumn(
 	db: D1Database,
-	userId: string,
+	userId: OwnerId,
 	dismissedAt: string,
 ) {
 	await db
@@ -170,7 +172,7 @@ async function writeDismissedAtColumn(
 			`UPDATE users
 			 SET onboarding_checklist_dismissed_at = ?,
 			     updated_at = CURRENT_TIMESTAMP
-			 WHERE stable_user_id = ?`,
+			 WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
 		)
 		.bind(dismissedAt, userId)
 		.run()

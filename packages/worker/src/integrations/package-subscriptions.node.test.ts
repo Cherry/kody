@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import type * as PackageInvocationsService from '#worker/package-invocations/service.ts'
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 	>(async () => ({ status: 200, body: {} })),
 	listSavedPackagesByUserId: vi.fn(),
 	loadPackageManifestBySourceId: vi.fn(),
+	findIntegrationCredentialId: vi.fn(async () => 'cred-google'),
 }))
 
 vi.mock('#worker/package-invocations/service.ts', () => ({
@@ -20,6 +22,10 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 
 vi.mock('#worker/package-registry/source.ts', () => ({
 	loadPackageManifestBySourceId: mocks.loadPackageManifestBySourceId,
+}))
+
+vi.mock('#worker/integrations/credentials.ts', () => ({
+	findIntegrationCredentialId: mocks.findIntegrationCredentialId,
 }))
 
 const {
@@ -39,7 +45,8 @@ const env = {
 function pkg(index: number, kodyId: string) {
 	return {
 		id: `package-${index}`,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		orgSlug: 'ada',
 		sourceId: `source-${index}`,
 		kodyId,
 		name: `@user/${kodyId}`,
@@ -132,7 +139,8 @@ test('integration.auth.failed fans out only to owning-user packages with a lean 
 	}
 	const results = await dispatchIntegrationAuthFailedSubscriptionEvents({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		orgSlug: 'ada',
 		eventId: 'event-1',
 		occurredAt: '2026-08-18T17:00:00.000Z',
 		integration,
@@ -142,7 +150,7 @@ test('integration.auth.failed fans out only to owning-user packages with a lean 
 
 	expect(results).toHaveLength(1)
 	expect(mocks.listSavedPackagesByUserId).toHaveBeenCalledWith(env.APP_DB, {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 	})
 	expect(mocks.invokePackageSubscription).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -157,7 +165,7 @@ test('integration.auth.failed fans out only to owning-user packages with a lean 
 				reason: 'provider_rejected',
 				provider,
 				reconnect_url: 'https://example.com/connect/oauth?provider=google',
-				account_url: 'https://example.com/account/integrations/google',
+				account_url: 'https://example.com/@ada/-/integrations/google',
 				occurred_at: '2026-08-18T17:00:00.000Z',
 			},
 		}),
@@ -175,7 +183,8 @@ test('integration.auth.failed never throws on discovery or handler failures', as
 	await expect(
 		dispatchIntegrationAuthFailedSubscriptionEvents({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			orgSlug: 'ada',
 			eventId: 'event-2',
 			occurredAt: '2026-08-18T17:00:00.000Z',
 			integration: {
@@ -215,7 +224,8 @@ test('integration.auth.failed never throws on discovery or handler failures', as
 	await expect(
 		dispatchIntegrationAuthFailedSubscriptionEvents({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			orgSlug: 'ada',
 			eventId: 'event-3',
 			occurredAt: '2026-08-18T17:00:00.000Z',
 			integration: {
@@ -237,7 +247,7 @@ test('integration.auth.failed never throws on discovery or handler failures', as
 		expect.objectContaining({ eventId: 'event-3', error: expect.any(Error) }),
 	)
 	expect(consoleWarn).toHaveBeenCalledWith(
-		'Failed to load package manifest for integration.auth.failed subscription',
+		'admin-package-subscription-manifest-load-failed',
 		expect.objectContaining({ packageId: 'package-2' }),
 	)
 })
@@ -261,7 +271,8 @@ test('integration.auth.succeeded fans out a lean payload only to packages on tha
 
 	const results = await dispatchIntegrationAuthSucceededSubscriptionEvents({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		orgSlug: 'ada',
 		eventId: 'event-4',
 		occurredAt: '2026-08-18T18:00:00.000Z',
 		integration,
@@ -280,7 +291,7 @@ test('integration.auth.succeeded fans out a lean payload only to packages on tha
 				event_id: 'event-4',
 				integration,
 				source: 'refresh',
-				account_url: 'https://example.com/account/integrations/google',
+				account_url: 'https://example.com/@ada/-/integrations/google',
 				occurred_at: '2026-08-18T18:00:00.000Z',
 			},
 		}),

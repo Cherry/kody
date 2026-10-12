@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
@@ -68,8 +69,8 @@ function createAppDb(stableUserId: string) {
 	applyAllMigrations(sqlite, new URL('../../migrations/', import.meta.url))
 	sqlite
 		.prepare(
-			`INSERT INTO users (username, email, password_hash, stable_user_id, plan, account_type)
-			 VALUES ('ada', 'ada@example.com', 'x', ?, 'free', 'person')`,
+			`INSERT INTO users (username, email, password_hash, stable_user_id)
+			 VALUES ('ada', 'ada@example.com', 'x', ?)`,
 		)
 		.run(stableUserId)
 	return { sqlite, db: createD1FromSqlite(sqlite) }
@@ -98,7 +99,10 @@ test('account emails claim once per kind and skip when KV or sender is missing',
 	expect(payload.text).toContain('/unsubscribe/tips?token=')
 	expect(
 		store.get(
-			userAccountEmailKvKey({ userId: 'user-1', kind: 'connect_agent' }),
+			userAccountEmailKvKey({
+				userId: ownerIdFromStored('user-1'),
+				kind: 'connect_agent',
+			}),
 		),
 	).toBeTruthy()
 	expect(puts[0]?.options?.expirationTtl).toBe(accountEmailClaimTtlSeconds)
@@ -107,7 +111,12 @@ test('account emails claim once per kind and skip when KV or sender is missing',
 	expect(await connectAgent(env, 'user-1')).toBe(false)
 	expect(sendCloudflareEmail).not.toHaveBeenCalled()
 
-	const user = { env, email: 'ada@example.com', userId: 'user-1' }
+	const user = {
+		env,
+		email: 'ada@example.com',
+		userId: ownerIdFromStored('user-1'),
+		orgSlug: 'ada',
+	}
 	expect(await sendBillingSuccessEmail({ ...user, planLabel: 'Pro' })).toBe(
 		true,
 	)
@@ -128,7 +137,10 @@ test('connect-agent mail does not claim when unsubscribe minting fails, and open
 	expect(sendCloudflareEmail).not.toHaveBeenCalled()
 	expect(
 		store.get(
-			userAccountEmailKvKey({ userId: 'user-open', kind: 'connect_agent' }),
+			userAccountEmailKvKey({
+				userId: ownerIdFromStored('user-open'),
+				kind: 'connect_agent',
+			}),
 		),
 	).toBeUndefined()
 	expect(consoleWarn).toHaveBeenCalledWith(
@@ -178,7 +190,8 @@ test('account emails reserve the KV claim before sending and release it on send 
 		await sendBillingSuccessEmail({
 			env,
 			email: 'ada@example.com',
-			userId: 'user-claim',
+			userId: ownerIdFromStored('user-claim'),
+			orgSlug: 'ada',
 			planLabel: 'Pro',
 		}),
 	).toBe(false)
@@ -189,7 +202,7 @@ test('account emails reserve the KV claim before sending and release it on send 
 	expect(
 		store.get(
 			userAccountEmailKvKey({
-				userId: 'user-claim',
+				userId: ownerIdFromStored('user-claim'),
 				kind: 'billing_success',
 				suffix: 'pro',
 			}),
@@ -204,7 +217,7 @@ test('the credits monthly-cap notice sends at most once per UTC month', async ()
 		sendCreditMonthlyCapEmail({
 			env,
 			email: 'ada@example.com',
-			userId: 'user-cap',
+			userId: ownerIdFromStored('user-cap'),
 			month,
 		})
 	// The debit lane reports cap_reached every hour for the rest of the month.
@@ -215,7 +228,7 @@ test('the credits monthly-cap notice sends at most once per UTC month', async ()
 	expect(
 		store.has(
 			userAccountEmailKvKey({
-				userId: 'user-cap',
+				userId: ownerIdFromStored('user-cap'),
 				kind: 'credits_monthly_cap',
 				suffix: '2026-09',
 			}),
@@ -223,4 +236,49 @@ test('the credits monthly-cap notice sends at most once per UTC month', async ()
 	).toBe(true)
 	expect(await send('2026-10')).toBe(true)
 	expect(sendCloudflareEmail).toHaveBeenCalledTimes(2)
+})
+
+test('connect-agent mail sends from the verify request origin when no sending domain is set', async () => {
+	sendCloudflareEmail.mockClear()
+	const { kv } = createKv()
+	const env = createEnv(kv, {
+		APP_BASE_URL: '',
+		SYSTEM_EMAIL_DOMAIN: '',
+	})
+	expect(
+		await sendConnectAgentEmail({
+			env,
+			email: 'ada@example.com',
+			userId: ownerIdFromStored('user-request'),
+			requestUrl: 'http://127.0.0.1:3847/verify-email?token=abc',
+		}),
+	).toBe(true)
+	expect(sendCloudflareEmail).toHaveBeenCalledWith(
+		expect.anything(),
+		expect.objectContaining({ from: 'kody@127.0.0.1' }),
+	)
+})
+
+test('connect-agent mail opens the retry row when no sender can be resolved', async () => {
+	sendCloudflareEmail.mockClear()
+	const { db } = createAppDb('user-noconfig')
+	const { kv } = createKv()
+	const env = createEnv(kv, {
+		APP_DB: db,
+		APP_BASE_URL: '',
+		SYSTEM_EMAIL_DOMAIN: '',
+	})
+	expect(
+		await sendConnectAgentEmail({
+			env,
+			email: 'ada@example.com',
+			userId: ownerIdFromStored('user-noconfig'),
+		}),
+	).toBe(false)
+	expect(sendCloudflareEmail).not.toHaveBeenCalled()
+	expect(await readUsageCampaign(db, 'user-noconfig')).toMatchObject({
+		state: 'VerifiedNoMcp',
+		origin: 'event',
+		send_count: 0,
+	})
 })

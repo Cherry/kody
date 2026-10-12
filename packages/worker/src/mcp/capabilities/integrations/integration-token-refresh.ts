@@ -1,14 +1,13 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
-import { resolveCallerSecretAuthority } from '#mcp/secrets/secret-authority.ts'
-import {
-	IntegrationTokenRefreshCallerError,
-	refreshIntegrationTokens,
-} from '#worker/integrations/token-refresh.ts'
+import { attestedPackageStampFromCaller } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
+import { IntegrationTokenRefreshCallerError } from '#worker/integrations/token-refresh.ts'
 
 const inputSchema = z.object({
 	name: z
@@ -29,6 +28,7 @@ export const integrationTokenRefreshCapability = defineDomainCapability(
 	capabilityDomainNames.integrations,
 	{
 		name: 'integrationTokenRefresh',
+		orgPermission: 'integration:use',
 		description:
 			'Refresh the OAuth access token for a saved integration host-side and persist the new tokens on the connection. Connections whose provider issued neither a refresh token nor an access-token expiry at connect (for example GitHub OAuth Apps with token expiration off) are skipped with refreshed: false instead of failing. Returns metadata only — token values never appear in the output. createAuthenticatedFetch refreshes through this path for every integration; it is the only refresh path for platform (built-in) integrations, whose shared client secret stays server-side.',
 		keywords: [
@@ -50,18 +50,22 @@ export const integrationTokenRefreshCapability = defineDomainCapability(
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
 			const user = requireMcpUser(ctx.callerContext)
-			const { authorityPackageId } = resolveCallerSecretAuthority({
+			const { packageStamp } = attestedPackageStampFromCaller({
 				storageContext: ctx.callerContext.storageContext,
 			})
 			try {
-				const result = await refreshIntegrationTokens({
+				const result = await resolveCredential({
 					env: ctx.env,
-					userId: user.userId,
-					userEmail: user.email,
-					name: args.name,
+					orgId: ownerIdFromCaller(ctx.callerContext),
+					actor: ctx.callerContext.request,
+					packageStamp,
 					baseUrl: ctx.callerContext.baseUrl,
-					packageId: authorityPackageId,
-					waitUntil: ctx.waitUntil,
+					credential: {
+						use: 'integration-refresh',
+						name: args.name,
+						userEmail: user.email,
+						waitUntil: ctx.waitUntil,
+					},
 				})
 				return {
 					ok: true as const,

@@ -1,14 +1,16 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createCommunityPackageWebhooksApiHandler } from '#app/handlers/package-webhooks.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	type PackageWebhooksActionPayload,
 	type PackageWebhooksLoaderData,
 } from '#universal/loader-data.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -21,7 +23,7 @@ vi.mock('#app/authenticated-user.ts', () => ({
 
 const savedPackage = {
 	id: 'pkg-1',
-	userId: 'set-per-test',
+	userId: ownerIdFromStored('set-per-test'),
 	name: '@owner/sentry-bridge',
 	kodyId: 'sentry-bridge',
 	description: 'Sentry bridge',
@@ -36,17 +38,22 @@ const savedPackage = {
 }
 
 vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
-	resolveSavedPackage: vi.fn(async (input: { packageIdOrKodyId: string }) =>
-		input.packageIdOrKodyId === 'pkg-1' ||
-		input.packageIdOrKodyId === 'sentry-bridge'
-			? savedPackage
-			: null,
+	resolveSavedPackage: vi.fn(
+		async (input: { userId: string; packageIdOrKodyId: string }) =>
+			input.packageIdOrKodyId === 'pkg-1' ||
+			input.packageIdOrKodyId === 'sentry-bridge'
+				? { ...savedPackage, userId: input.userId }
+				: null,
 	),
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByUserId: vi.fn(async () => [savedPackage]),
-	getSavedPackageByKodyId: vi.fn(),
+	listSavedPackagesByUserId: vi.fn(
+		async (_db: unknown, input: { userId: string }) => [
+			{ ...savedPackage, userId: ownerIdFromStored(input.userId) },
+		],
+	),
+	resolveSavedPackageRef: vi.fn(),
 }))
 
 vi.mock('#worker/package-registry/source.ts', () => ({
@@ -91,11 +98,12 @@ const ownerParams = { username: 'owner', kodyId: 'sentry-bridge' }
 const otherParams = { username: 'someone-else', kodyId: 'sentry-bridge' }
 
 async function setup(sessionUsername = 'owner') {
-	const userId = await createStableUserIdFromEmail('owner@example.com')
+	const userId = testStableUserIdFromEmail('owner@example.com')
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'owner@example.com',
 		username: sessionUsername,
 		mcpUser: { userId },
+		request: sessionRequestContext(userId),
 	})
 	const sqlite = new DatabaseSync(':memory:')
 	sqlite.exec(`
@@ -110,11 +118,34 @@ async function setup(sessionUsername = 'owner') {
 			previous_url_secret_hash TEXT,
 			previous_url_secret_expires_at TEXT,
 			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL,
 			rotated_at TEXT NOT NULL
 		);
 		CREATE UNIQUE INDEX idx_webhook_endpoints_user_package_name
 		ON webhook_endpoints(user_id, package_id, webhook_name);
+		CREATE TABLE enablements (
+			id TEXT PRIMARY KEY NOT NULL,
+			org_id TEXT NOT NULL,
+			package_id TEXT,
+			trigger_kind TEXT NOT NULL,
+			trigger_name TEXT NOT NULL,
+			instance_id TEXT NOT NULL,
+			enabler_user_id TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'on',
+			paused_reason TEXT,
+			paused_permission TEXT,
+			paused_resource_type TEXT,
+			paused_resource_id TEXT,
+			paused_credential_id TEXT,
+			paused_at TEXT,
+			credential_mapping_json TEXT,
+			origin TEXT NOT NULL,
+			enabled_at TEXT NOT NULL,
+			disabled_at TEXT,
+			updated_at TEXT NOT NULL
+		);
 	`)
 	const db = createD1FromSqlite(sqlite)
 	const handler = createCommunityPackageWebhooksApiHandler({

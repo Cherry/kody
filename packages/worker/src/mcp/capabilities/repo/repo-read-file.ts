@@ -1,3 +1,5 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeRepoSessionPackageRead } from './authorize-repo-session-package.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
@@ -18,6 +20,7 @@ export const repoReadFileCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoReadFile',
+		orgPermission: 'package:read',
 		description:
 			'Read a file from the active repo session workspace. Reads the live session overlay, not just the published base commit. Append #L165, #L165-L180, or a Markdown heading slug (#export-jsdoc) to path to return that region instead of the whole file. A missing or invalid anchor fails instead of ignoring the fragment.',
 		keywords: ['repo', 'session', 'read', 'file', 'workspace'],
@@ -27,11 +30,18 @@ export const repoReadFileCapability = defineDomainCapability(
 		inputSchema: repoReadFileInputSchema,
 		outputSchema: repoReadFileOutputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageRead({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			const requested = splitFileAnchorForCaller(args.path)
 			const file = await repoSessionRpc(ctx.env, args.session_id).readFile({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: ownerId,
 				path: requested.path,
 			})
 			if (!requested.fragment || file.content == null) {

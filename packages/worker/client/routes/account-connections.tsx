@@ -1,4 +1,5 @@
 import { type Handle, css } from 'remix/component'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { readCurrentRouterHref } from '#client/client-router.tsx'
 import { createRouteData, routeDataRedirect } from '#client/route-data.tsx'
 import {
@@ -6,6 +7,12 @@ import {
 	readJson,
 } from '#client/routes/account-approval-shared.ts'
 import { createAccountConnectedAgents } from '#client/routes/account-connected-agents-panel.tsx'
+import {
+	ConnectionUsageDetails,
+	ConnectionUsageSummaryPanel,
+	fetchConnectionUsage,
+	type ConnectionUsageState,
+} from '#client/routes/account-connection-usage-panel.tsx'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -19,6 +26,7 @@ import {
 	AgentPickerGrid,
 	AgentSurfaceInstructions,
 } from '#client/routes/onboarding-mcp-client-tabs.tsx'
+import { createConnectionProfiles } from '#client/routes/connection-profiles-panel.tsx'
 import {
 	routeLoaderRedirect,
 	type RouteLoaderResult,
@@ -26,10 +34,12 @@ import {
 import {
 	type AccountConnectionsView,
 	accountConnectionAgentIds,
+	accountConnectionsListHref,
 	accountConnectionsNewHref,
 	parseAccountConnectionsPathname,
 } from '#universal/account-connections.ts'
 import { docHref } from '#universal/docs-nav.ts'
+import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import { onboardingSecondAgentGreyedPresentation } from '#universal/onboarding-agent-ecosystems.ts'
 import {
@@ -45,10 +55,11 @@ import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 const connectYourAgentDocHref = docHref('connect-your-agent')
 
-async function fetchConnectedAgents(signal: AbortSignal) {
+async function fetchConnectedAgents(href: string, signal: AbortSignal) {
 	const response = await fetch(connectedAgentsApiPath, {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(href),
 		signal,
 	})
 	if (response.status === 401) return { kind: 'unauthorized' as const }
@@ -60,19 +71,74 @@ async function fetchConnectedAgents(signal: AbortSignal) {
 }
 
 export async function accountConnectionsRouteLoader(
-	_url: URL,
+	url: URL,
 	signal: AbortSignal,
 ): Promise<RouteLoaderResult> {
-	const result = await fetchConnectedAgents(signal)
+	const [result, usage] = await Promise.all([
+		fetchConnectedAgents(url.href, signal),
+		viewShowsUsage(readView(url.href))
+			? loadUsageWithinBudget(url.href, signal)
+			: null,
+	])
 	if (result.kind === 'unauthorized') {
 		return routeLoaderRedirect('/login')
 	}
-	return { accountConnectedAgents: result.payload }
+	return {
+		accountConnectedAgents: result.payload,
+		...(usage?.kind === 'ok' ? { accountConnectionUsage: usage.payload } : {}),
+	}
 }
 
-/** The list, grid, and per-agent views all read one connected-agents payload. */
-function connectionsLatchKey() {
-	return routes.accountConnections.href()
+/**
+ * Usage is a secondary panel. The loader waits for it only briefly so a slow
+ * usage request never holds the Connections navigation; after a miss or a
+ * failure the route data fallback fetches it once the page commits.
+ */
+const loaderUsageBudgetMs = 1500
+
+async function loadUsageWithinBudget(href: string, signal: AbortSignal) {
+	const controller = new AbortController()
+	const abort = () => controller.abort()
+	signal.addEventListener('abort', abort, { once: true })
+	const timer = setTimeout(abort, loaderUsageBudgetMs)
+	try {
+		return await fetchConnectionUsage(href, controller.signal)
+	} catch {
+		return null
+	} finally {
+		clearTimeout(timer)
+		signal.removeEventListener('abort', abort)
+	}
+}
+
+function viewShowsUsage(view: AccountConnectionsView | null) {
+	return view?.kind === 'list' || view?.kind === 'usage'
+}
+
+/**
+ * Every view reads one usage payload per organization; only the list and
+ * usage views ask.
+ */
+function connectionUsageLatchKey(href: string) {
+	return `${connectionsLatchKey(href)}/usage`
+}
+
+function readUsageFocus(href: string) {
+	return (
+		new URL(href, 'http://localhost').searchParams.get('connection')?.trim() ||
+		null
+	)
+}
+
+/**
+ * The list, grid, and per-agent views all read one connected-agents payload.
+ * Each organization lists its own agents, so switching orgs is a new load.
+ */
+function connectionsLatchKey(href: string) {
+	const slug = orgSlugFromOrgOwnedPath(
+		new URL(href, 'http://localhost').pathname,
+	)
+	return slug ? `/@${slug}/-/connections` : '/account/connections'
 }
 
 function readView(href: string): AccountConnectionsView | null {
@@ -94,22 +160,49 @@ export function AccountConnectionsRoute(handle: Handle) {
 	const connectedAgents = createAccountConnectedAgents(handle)
 	let mcpServerUrl = ''
 	let message: string | null = null
+	const connectionProfiles = createConnectionProfiles(handle, {
+		onSaved: applyPayload,
+	})
 	/** Payload last applied to the closure state above. */
 	let appliedPayload: AccountConnectedAgentsLoaderData | null = null
 	let appliedError: Error | null = null
 	const connectionsData = createRouteData({
 		key: 'accountConnectedAgents',
 		locationKey: connectionsLatchKey,
-		async load(_href, signal) {
-			const result = await fetchConnectedAgents(signal)
+		async load(href, signal) {
+			const result = await fetchConnectedAgents(href, signal)
 			if (result.kind === 'unauthorized') return routeDataRedirect('/login')
 			return result.payload
 		},
 	})
 
+	const usageData = createRouteData({
+		key: 'accountConnectionUsage',
+		locationKey: connectionUsageLatchKey,
+		async load(href, signal) {
+			const result = await fetchConnectionUsage(href, signal)
+			if (result.kind === 'unauthorized') return routeDataRedirect('/login')
+			return result.payload
+		},
+	})
+
+	function readUsageState(currentHref: string): ConnectionUsageState {
+		const usage = usageData.read(handle, currentHref)
+		// Stale data belongs to another org (the latch key is per org).
+		if (usage.data && !usage.stale) return { kind: 'ready', usage: usage.data }
+		if (usage.kind === 'error') {
+			return {
+				kind: 'error',
+				message: usage.error?.message ?? 'Unable to load connection usage.',
+			}
+		}
+		return { kind: 'loading' }
+	}
+
 	function applyPayload(payload: AccountConnectedAgentsLoaderData) {
 		connectedAgents.applyPayload(payload)
 		mcpServerUrl = payload.mcpServerUrl
+		connectionProfiles.applyPayload(payload)
 		message = null
 	}
 
@@ -125,6 +218,7 @@ export function AccountConnectionsRoute(handle: Handle) {
 			appliedError = snapshot.error
 			message = snapshot.error.message
 		}
+		const usage = viewShowsUsage(view) ? readUsageState(currentHref) : null
 		const pending = snapshot.kind === 'pending'
 		const status: AccountStatus =
 			snapshot.kind === 'error'
@@ -157,6 +251,10 @@ export function AccountConnectionsRoute(handle: Handle) {
 							view,
 							connectedAgents,
 							mcpServerUrl,
+							connectionProfiles,
+							usage,
+							usageFocus: readUsageFocus(currentHref),
+							pathname: new URL(currentHref, 'http://localhost').pathname,
 						})
 					: null}
 			</AccountManagementShell>
@@ -164,10 +262,10 @@ export function AccountConnectionsRoute(handle: Handle) {
 	}
 }
 
-function renderBackToConnections() {
+function renderBackToConnections(pathname: string) {
 	return (
 		<a
-			href={routes.accountConnections.href()}
+			href={accountConnectionsListHref(pathname)}
 			data-testid="account-connections-back"
 			mix={css(backLinkCss)}
 		>
@@ -180,12 +278,16 @@ function renderReadyView(input: {
 	view: AccountConnectionsView | null
 	connectedAgents: ReturnType<typeof createAccountConnectedAgents>
 	mcpServerUrl: string
+	connectionProfiles: ReturnType<typeof createConnectionProfiles>
+	usage: ConnectionUsageState | null
+	usageFocus: string | null
+	pathname: string
 }) {
 	if (input.view === null) {
 		return (
 			<>
-				{renderBackToConnections()}
-				{renderUnknownAgent()}
+				{renderBackToConnections(input.pathname)}
+				{renderUnknownAgent(input.pathname)}
 			</>
 		)
 	}
@@ -194,9 +296,10 @@ function renderReadyView(input: {
 			return (
 				<>
 					{input.connectedAgents.render({
+						pathname: input.pathname,
 						actions: (
 							<a
-								href={accountConnectionsNewHref(null)}
+								href={accountConnectionsNewHref(null, input.pathname)}
 								data-testid="account-connections-add"
 								mix={css(primaryButtonCss)}
 							>
@@ -204,23 +307,47 @@ function renderReadyView(input: {
 							</a>
 						),
 					})}
+					{input.usage ? (
+						<ConnectionUsageSummaryPanel
+							state={input.usage}
+							agents={input.connectedAgents.listAgents()}
+							pathname={input.pathname}
+						/>
+					) : null}
 					{renderMcpUrlPanel({ mcpServerUrl: input.mcpServerUrl })}
+					{input.connectionProfiles.render({
+						agents: input.connectedAgents.listAgents(),
+					})}
 					{renderAdvancedPanel()}
 				</>
 			)
 		case 'new':
 			return (
 				<>
-					{renderBackToConnections()}
+					{renderBackToConnections(input.pathname)}
 					{input.view.agent === null
 						? renderAgentGrid({
 								mcpServerUrl: input.mcpServerUrl,
 								connectedAgents: input.connectedAgents.listAgents(),
+								pathname: input.pathname,
 							})
 						: renderAgentInstructions({
 								agent: input.view.agent,
 								mcpServerUrl: input.mcpServerUrl,
+								pathname: input.pathname,
 							})}
+				</>
+			)
+		case 'usage':
+			return (
+				<>
+					{renderBackToConnections(input.pathname)}
+					<ConnectionUsageDetails
+						state={input.usage ?? { kind: 'loading' }}
+						agents={input.connectedAgents.listAgents()}
+						pathname={input.pathname}
+						focus={input.usageFocus}
+					/>
 				</>
 			)
 		default: {
@@ -290,6 +417,7 @@ function renderMcpUrlPanel(input: { mcpServerUrl: string }) {
 function renderAgentGrid(input: {
 	mcpServerUrl: string
 	connectedAgents: AccountConnectedAgentsLoaderData['agents']
+	pathname: string
 }) {
 	const connectedMark = onboardingSecondAgentGreyedPresentation(
 		input.connectedAgents,
@@ -314,7 +442,9 @@ function renderAgentGrid(input: {
 							viewport: 'both' as const,
 						}))}
 						labelledBy="account-connections-add-title"
-						agentHref={(agent) => accountConnectionsNewHref(agent)}
+						agentHref={(agent) =>
+							accountConnectionsNewHref(agent, input.pathname)
+						}
 						greyedAgents={connectedMark.greyedAgents}
 						greyedReasons={connectedMark.greyedReasons}
 						greyedTitles={connectedMark.greyedTitles}
@@ -341,6 +471,7 @@ function renderAgentGrid(input: {
 function renderAgentInstructions(input: {
 	agent: McpClientKind
 	mcpServerUrl: string
+	pathname: string
 }) {
 	const label = onboardingAgentLabel(input.agent)
 	return (
@@ -351,7 +482,7 @@ function renderAgentInstructions(input: {
 		>
 			<div mix={css(accountActionsCss)}>
 				<a
-					href={accountConnectionsNewHref(null)}
+					href={accountConnectionsNewHref(null, input.pathname)}
 					data-testid="account-connections-change-agent"
 					mix={css(compactGhostButtonCss)}
 				>
@@ -376,7 +507,7 @@ function renderAgentInstructions(input: {
 	)
 }
 
-function renderUnknownAgent() {
+function renderUnknownAgent(pathname: string) {
 	return (
 		<AccountManagementPanel
 			title="Unknown agent"
@@ -384,7 +515,7 @@ function renderUnknownAgent() {
 		>
 			<div mix={css(accountActionsCss)}>
 				<a
-					href={accountConnectionsNewHref(null)}
+					href={accountConnectionsNewHref(null, pathname)}
 					mix={css(compactGhostButtonCss)}
 				>
 					Choose an agent

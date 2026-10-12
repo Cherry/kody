@@ -2,6 +2,16 @@
  * One-shot $5 welcome credits for newly created person accounts. Lives
  * outside `credit-wallet.ts` so the debit/auto-refill graph (runtime worker)
  * does not carry signup-only grant code.
+ *
+ * Personal-org provisioning sets `orgs.signup_welcome_credits_pending = 1`
+ * in the same signup that creates the account, so a later D1 failure during the
+ * grant cannot erase the retry signal. Creation-time grants are best-effort
+ * (`maybeGrantSignupWelcomeCredits`) so signup still succeeds when D1 blips;
+ * success clears the flag. Login and wallet-touch call
+ * `reconcileSignupWelcomeCreditsIfPending` to retry. The ledger id is
+ * deterministic (`signup_welcome:{stableUserId}`), so retries never
+ * double-grant. Migration default is 0, so pre-ship accounts are not
+ * backfilled.
  */
 import { utcMonthKey } from '@kody-internal/shared/date-keys.ts'
 import {
@@ -15,6 +25,7 @@ import {
 	forgiveUnchargedCreditUsage,
 	readCreditWallet,
 } from './credit-wallet.ts'
+import { updateOrgBillingColumns } from '#worker/orgs/org-billing-columns.ts'
 
 export type SignupWelcomeCreditResult = {
 	applied: boolean
@@ -26,6 +37,35 @@ export type SignupWelcomeCreditResult = {
 function isUniqueConstraintError(error: unknown) {
 	const message = error instanceof Error ? error.message : String(error)
 	return /UNIQUE constraint failed/i.test(message)
+}
+
+async function setSignupWelcomeCreditsPending(input: {
+	db: D1Database
+	userId: string
+	pending: boolean
+}): Promise<void> {
+	const pending = input.pending ? 1 : 0
+	await updateOrgBillingColumns({
+		db: input.db,
+		orgId: input.userId,
+		setClause:
+			'signup_welcome_credits_pending = ?, updated_at = CURRENT_TIMESTAMP',
+		values: [pending],
+	})
+}
+
+async function isSignupWelcomeCreditsPending(
+	db: D1Database,
+	userId: string,
+): Promise<boolean> {
+	const row = await db
+		.prepare(
+			`SELECT signup_welcome_credits_pending AS pending
+			 FROM orgs WHERE id = ? AND deleted_at IS NULL`,
+		)
+		.bind(userId)
+		.first<{ pending: number }>()
+	return row?.pending === 1
 }
 
 /**
@@ -107,7 +147,9 @@ export async function grantSignupWelcomeCredits(input: {
 /**
  * Best-effort wrapper for account-creation sites. Signup must not fail when
  * the welcome grant cannot run (fake test DBs, transient D1 errors); the
- * deterministic ledger id still makes a later retry safe.
+ * deterministic ledger id still makes a later retry safe. Personal-org
+ * provisioning already sets `signup_welcome_credits_pending = 1`; this clears it on
+ * success and re-asserts it on failure as belt-and-suspenders.
  */
 export async function maybeGrantSignupWelcomeCredits(input: {
 	db: D1Database
@@ -115,9 +157,49 @@ export async function maybeGrantSignupWelcomeCredits(input: {
 	now?: Date
 }): Promise<SignupWelcomeCreditResult | null> {
 	try {
-		return await grantSignupWelcomeCredits(input)
+		const result = await grantSignupWelcomeCredits(input)
+		try {
+			await setSignupWelcomeCreditsPending({
+				db: input.db,
+				userId: input.userId,
+				pending: false,
+			})
+		} catch (clearError) {
+			console.warn('signup-welcome-credits-clear-pending-failed', clearError)
+		}
+		return result
 	} catch (error) {
 		console.warn('signup-welcome-credits-failed', error)
+		try {
+			await setSignupWelcomeCreditsPending({
+				db: input.db,
+				userId: input.userId,
+				pending: true,
+			})
+		} catch (pendingError) {
+			console.warn('signup-welcome-credits-mark-pending-failed', pendingError)
+		}
 		return null
 	}
+}
+
+/**
+ * Retry a creation-time grant that failed earlier. No-ops unless
+ * `signup_welcome_credits_pending` is set, so pre-ship accounts without the
+ * flag are never backfilled. Safe to call on every login / wallet touch.
+ */
+export async function reconcileSignupWelcomeCreditsIfPending(input: {
+	db: D1Database
+	userId: string
+	now?: Date
+}): Promise<SignupWelcomeCreditResult | null> {
+	try {
+		if (!(await isSignupWelcomeCreditsPending(input.db, input.userId))) {
+			return null
+		}
+	} catch (error) {
+		console.warn('signup-welcome-credits-pending-lookup-failed', error)
+		return null
+	}
+	return maybeGrantSignupWelcomeCredits(input)
 }

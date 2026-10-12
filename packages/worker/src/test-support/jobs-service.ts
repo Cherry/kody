@@ -1,3 +1,9 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 export * from './jobs-service-mocks.ts'
 import { repoMockModule } from './jobs-service-mocks.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -5,7 +11,6 @@ import {
 	createInMemoryUserMeterEnv,
 	createPermissiveAccountWriteLeaseDbHooks,
 } from '#worker/test-support/user-meter.ts'
-import { buildJobSourceFiles } from '#worker/repo/source-templates.ts'
 import { syncPackageJobsForPackage } from '#worker/jobs/service.ts'
 import { jobsData } from '#worker/jobs/jobs-data.ts'
 import { computeNextRunAt, toJobView } from '#worker/jobs/schedule.ts'
@@ -18,6 +23,10 @@ import {
 	type JobSchedule,
 	type PersistedJobCallerContext,
 } from '#worker/jobs/types.ts'
+import {
+	type McpCallerContext,
+	type McpUserContext,
+} from '@kody-internal/shared/chat.ts'
 export function mockRepoPersistence() {
 	repoMockModule.ensureEntitySource.mockImplementation(
 		async ({ db, id, userId, entityKind, entityId, sourceRoot }) => {
@@ -32,7 +41,7 @@ export function mockRepoPersistence() {
 				entityKind,
 				entityId,
 				publishedCommit: 'published-commit-1',
-				manifestPath: entityKind === 'package' ? 'package.json' : 'kody.json',
+				manifestPath: 'package.json',
 				sourceRoot: sourceRoot ?? '/',
 			})
 			return {
@@ -43,7 +52,7 @@ export function mockRepoPersistence() {
 				repo_id: `${entityKind}-${entityId}`,
 				published_commit: 'published-commit-1',
 				indexed_commit: null,
-				manifest_path: entityKind === 'package' ? 'package.json' : 'kody.json',
+				manifest_path: 'package.json',
 				source_root: sourceRoot ?? '/',
 				last_external_check_at: null,
 				external_check_until: null,
@@ -68,10 +77,10 @@ export function mockRepoPersistence() {
 					userId,
 					sourceId,
 					entityKind:
-						(existing['entity_kind'] as 'job' | 'package' | undefined) ?? 'job',
+						(existing['entity_kind'] as EntityKind | undefined) ?? 'package',
 					entityId: String(existing['entity_id'] ?? sourceId),
 					publishedCommit: 'published-commit-1',
-					manifestPath: String(existing['manifest_path'] ?? 'kody.json'),
+					manifestPath: String(existing['manifest_path'] ?? 'package.json'),
 					sourceRoot: String(existing['source_root'] ?? '/'),
 				})
 				if (env.BUNDLE_ARTIFACTS_KV) {
@@ -81,14 +90,17 @@ export function mockRepoPersistence() {
 						env,
 						source: {
 							id: sourceId,
-							user_id: String(existing['user_id']),
+							user_id: ownerIdFromStored(String(existing['user_id'])),
 							entity_kind:
-								(existing['entity_kind'] as 'job' | 'package') ?? 'job',
+								(existing['entity_kind'] as EntityKind | undefined) ??
+								'package',
 							entity_id: String(existing['entity_id'] ?? sourceId),
 							repo_id: String(existing['repo_id'] ?? sourceId),
 							published_commit: 'published-commit-1',
 							indexed_commit: null,
-							manifest_path: String(existing['manifest_path'] ?? 'kody.json'),
+							manifest_path: String(
+								existing['manifest_path'] ?? 'package.json',
+							),
 							source_root: String(existing['source_root'] ?? '/'),
 							last_external_check_at: null,
 							external_check_until: null,
@@ -147,6 +159,8 @@ export function createDatabase(
 	initialRows: {
 		users?: Array<Record<string, unknown>>
 		jobs?: Array<Record<string, unknown>>
+		orgs?: Array<Record<string, unknown>>
+		org_memberships?: Array<Record<string, unknown>>
 	} = {},
 ) {
 	const tables = new Map<string, Array<Record<string, unknown>>>([
@@ -156,10 +170,14 @@ export function createDatabase(
 		['value_entries', []],
 		['entity_sources', []],
 		['published_bundle_artifacts', []],
-		['archived_job_artifacts', []],
 		['user_storage_buckets', []],
 		['jobs', (initialRows.jobs ?? []).map((row) => ({ ...row }))],
 		['users', (initialRows.users ?? []).map((row) => ({ ...row }))],
+		['orgs', (initialRows.orgs ?? []).map((row) => ({ ...row }))],
+		[
+			'org_memberships',
+			(initialRows.org_memberships ?? []).map((row) => ({ ...row })),
+		],
 	])
 	const writeLeaseDb = createPermissiveAccountWriteLeaseDbHooks()
 
@@ -225,7 +243,59 @@ export function createDatabase(
 							if (writeLeaseDb.supportsDeletingAtQuery(query)) {
 								return writeLeaseDb.deletingAtFirstResult() as T
 							}
-							if (query.includes('SELECT plan, stripe_plan')) {
+							if (query.includes('SELECT 1 AS ok FROM orgs')) {
+								return null
+							}
+							// Org rows: an explicit orgs row (soft-deleted when it has
+							// deleted_at), else a live personal org for the owner id.
+							if (
+								query.includes('avatar_key') &&
+								query.includes('FROM orgs WHERE id = ?')
+							) {
+								const org = selectOne('orgs', (row) => row['id'] === params[0])
+								if (org) return (org['deleted_at'] ? null : org) as T | null
+								const user = selectOne(
+									'users',
+									(row) => row['stable_user_id'] === params[0],
+								)
+								return {
+									id: params[0],
+									slug: user?.['username'] ?? null,
+									display_name: null,
+									avatar_key: null,
+									plan: user?.['plan'] ?? 'free',
+									entitlement_ladder: 'standard',
+								} as T
+							}
+							if (query.includes('FROM org_memberships m')) {
+								const membership = selectOne(
+									'org_memberships',
+									(row) =>
+										row['user_id'] === params[0] &&
+										row['org_id'] === params[1] &&
+										!row['deleted_at'],
+								)
+								if (membership) {
+									return {
+										org_id: membership['org_id'],
+										org_slug: membership['org_slug'] ?? null,
+										role: membership['role'],
+									} as T
+								}
+								// A person always owns their personal org (id == person id).
+								return (
+									params[0] === params[1]
+										? { org_id: params[0], org_slug: null, role: 'owner' }
+										: null
+								) as T | null
+							}
+							if (query.includes('FROM orgs o') && query.includes('EXISTS (')) {
+								return null
+							}
+							if (
+								query.includes('SELECT plan, stripe_plan') ||
+								query.includes('entitlement_ladder')
+							) {
 								const pairLookup = query.includes('email = ?')
 								return selectOne('users', (row) =>
 									pairLookup
@@ -274,7 +344,10 @@ export function createDatabase(
 										row['bucket_id'] === params[0] && row['name'] === params[1],
 								) as T | null
 							}
-							if (query.includes('FROM jobs WHERE id = ? AND user_id = ?')) {
+							if (
+								query.includes('FROM jobs WHERE id = ? AND user_id = ?') &&
+								query.includes('deleted_at IS NULL')
+							) {
 								return selectOne(
 									'jobs',
 									(row) =>
@@ -310,17 +383,6 @@ export function createDatabase(
 										row['user_id'] === params[0] &&
 										row['entity_kind'] === params[1] &&
 										row['entity_id'] === params[2],
-								) as T | null
-							}
-							if (
-								query.includes(
-									'SELECT id FROM archived_job_artifacts WHERE job_id = ? AND user_id = ?',
-								)
-							) {
-								return selectOne(
-									'archived_job_artifacts',
-									(row) =>
-										row['job_id'] === params[0] && row['user_id'] === params[1],
 								) as T | null
 							}
 							if (
@@ -376,6 +438,16 @@ export function createDatabase(
 							// Cold bootstrap probes for a users row; none seeded here so
 							// null triggers synthetic-context free-plan allow.
 							if (query.includes('SELECT 1 AS present FROM users')) {
+								if (query.includes('email = ?')) {
+									return selectOne(
+										'users',
+										(row) =>
+											row['email'] === params[0] &&
+											row['stable_user_id'] === params[1],
+									)
+										? ({ present: 1 } as T)
+										: null
+								}
 								return selectOne(
 									'users',
 									(row) => row['stable_user_id'] === params[0],
@@ -386,7 +458,11 @@ export function createDatabase(
 							throw new Error(`Unsupported first query: ${query}`)
 						},
 						async all<T = Record<string, unknown>>() {
-							if (query.includes('FROM jobs WHERE user_id = ? ORDER BY')) {
+							if (
+								query.includes('FROM jobs WHERE user_id = ?') &&
+								query.includes('deleted_at IS NULL') &&
+								query.includes('ORDER BY')
+							) {
 								return {
 									results: selectAll(
 										'jobs',
@@ -467,21 +543,6 @@ export function createDatabase(
 								}
 							}
 							if (
-								query.includes('FROM archived_job_artifacts') &&
-								query.includes('WHERE retain_until <= ?')
-							) {
-								return {
-									results: selectAll(
-										'archived_job_artifacts',
-										(row) => String(row['retain_until']) <= String(params[0]),
-									).sort((left, right) =>
-										String(left['retain_until']).localeCompare(
-											String(right['retain_until']),
-										),
-									) as T[],
-								}
-							}
-							if (
 								query.includes('FROM published_bundle_artifacts') &&
 								query.includes('WHERE user_id = ? AND source_id = ?')
 							) {
@@ -512,6 +573,9 @@ export function createDatabase(
 										),
 									) as T[],
 								}
+							}
+							if (query.includes('FROM org_limit_overrides')) {
+								return { results: [] as T[] }
 							}
 							throw new Error(`Unsupported all query: ${query}`)
 						},
@@ -612,14 +676,13 @@ export function createDatabase(
 									timezone: params[9],
 									enabled: params[10],
 									kill_switch_enabled: params[11],
-									preserved: params[12],
-									expires_at: params[13],
-									caller_context_json: params[14],
-									created_at: params[15],
-									updated_at: params[16],
-									last_run_at: params[17],
-									last_run_status: params[18],
-									next_run_at: params[19],
+									expires_at: params[12],
+									caller_context_json: params[13],
+									created_at: params[14],
+									updated_at: params[15],
+									last_run_at: params[16],
+									last_run_status: params[17],
+									next_run_at: params[18],
 								}
 								upsert(
 									'jobs',
@@ -696,12 +759,12 @@ export function createDatabase(
 								const existingJob = selectOne(
 									'jobs',
 									(existing) =>
-										existing['id'] === params[17] &&
-										existing['user_id'] === params[18],
+										existing['id'] === params[16] &&
+										existing['user_id'] === params[17],
 								)
 								const row = {
-									id: params[17],
-									user_id: params[18],
+									id: params[16],
+									user_id: params[17],
 									name: params[0],
 									source_id: params[1],
 									published_commit: params[2],
@@ -712,14 +775,13 @@ export function createDatabase(
 									timezone: params[7],
 									enabled: params[8],
 									kill_switch_enabled: params[9],
-									preserved: params[10],
-									expires_at: params[11],
-									caller_context_json: params[12],
-									updated_at: params[13],
-									last_run_at: params[14],
-									last_run_status: params[15],
-									next_run_at: params[16],
-									created_at: existingJob?.['created_at'] ?? params[13],
+									expires_at: params[10],
+									caller_context_json: params[11],
+									updated_at: params[12],
+									last_run_at: params[13],
+									last_run_status: params[14],
+									next_run_at: params[15],
+									created_at: existingJob?.['created_at'] ?? params[12],
 								}
 								upsert(
 									'jobs',
@@ -851,55 +913,6 @@ export function createDatabase(
 										changes: deleteWhere(
 											'published_bundle_artifacts',
 											(row) => row['source_id'] === params[0],
-										),
-										last_row_id: 0,
-									},
-								}
-							}
-							if (query.startsWith('INSERT INTO archived_job_artifacts')) {
-								const row = {
-									id: params[0],
-									job_id: params[1],
-									user_id: params[2],
-									source_id: params[3],
-									published_commit: params[4],
-									storage_id: params[5],
-									retain_until: params[6],
-									created_at: params[7],
-									updated_at: params[8],
-								}
-								upsert(
-									'archived_job_artifacts',
-									(existing) => existing['id'] === row.id,
-									row,
-								)
-								return { meta: { changes: 1, last_row_id: 0 } }
-							}
-							if (query.startsWith('UPDATE archived_job_artifacts')) {
-								const id = params[5]
-								const existing = selectOne(
-									'archived_job_artifacts',
-									(row) => row['id'] === id,
-								)
-								if (!existing) {
-									return { meta: { changes: 0, last_row_id: 0 } }
-								}
-								upsert('archived_job_artifacts', (row) => row['id'] === id, {
-									...existing,
-									source_id: params[0],
-									published_commit: params[1],
-									storage_id: params[2],
-									retain_until: params[3],
-									updated_at: params[4],
-								})
-								return { meta: { changes: 1, last_row_id: 0 } }
-							}
-							if (query.startsWith('DELETE FROM archived_job_artifacts')) {
-								return {
-									meta: {
-										changes: deleteWhere(
-											'archived_job_artifacts',
-											(row) => row['id'] === params[0],
 										),
 										last_row_id: 0,
 									},
@@ -1041,12 +1054,12 @@ export async function insertPublishedEntitySource(input: {
 		.bind(
 			input.sourceId,
 			input.userId,
-			input.entityKind ?? 'job',
+			input.entityKind ?? 'package',
 			input.entityId,
-			`${input.entityKind ?? 'job'}-${input.entityId}`,
+			`${input.entityKind ?? 'package'}-${input.entityId}`,
 			input.publishedCommit,
 			null,
-			input.manifestPath ?? 'kody.json',
+			input.manifestPath ?? 'package.json',
 			input.sourceRoot ?? '/',
 			'2026-04-16T00:00:00.000Z',
 			'2026-04-16T00:00:00.000Z',
@@ -1066,13 +1079,13 @@ export async function insertPublishedEntitySource(input: {
 			env: snapshotEnv,
 			source: {
 				id: input.sourceId,
-				user_id: input.userId,
-				entity_kind: input.entityKind ?? 'job',
+				user_id: ownerIdFromStored(input.userId),
+				entity_kind: input.entityKind ?? 'package',
 				entity_id: input.entityId,
-				repo_id: `${input.entityKind ?? 'job'}-${input.entityId}`,
+				repo_id: `${input.entityKind ?? 'package'}-${input.entityId}`,
 				published_commit: input.publishedCommit,
 				indexed_commit: null,
-				manifest_path: input.manifestPath ?? 'kody.json',
+				manifest_path: input.manifestPath ?? 'package.json',
 				source_root: input.sourceRoot ?? '/',
 				last_external_check_at: null,
 				external_check_until: null,
@@ -1084,26 +1097,42 @@ export async function insertPublishedEntitySource(input: {
 	}
 }
 
-export function createBaseCallerContext(): PersistedJobCallerContext {
-	return createMcpCallerContext({
-		baseUrl: 'https://example.com',
-		user: {
-			userId: 'user-123',
-			email: 'user@example.com',
-			displayName: 'User Example',
-		},
-		storageContext: {
-			sessionId: null,
-			appId: 'app-123',
-			packageId: null,
-			storageId: null,
-		},
-	}) as PersistedJobCallerContext
+export function withCallerUser(
+	callerContext: McpCallerContext,
+): McpCallerContext & { user: McpUserContext } {
+	if (!callerContext.user) throw new Error('Caller context needs a user')
+	return { ...callerContext, user: callerContext.user }
 }
 
-export async function insertLeftoverJob(input: {
+export function createBaseCallerContext() {
+	return withCallerUser(
+		createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl: 'https://example.com',
+			user: {
+				userId: personIdFromStored('user-123'),
+				email: 'user@example.com',
+				displayName: 'User Example',
+			},
+			storageContext: {
+				sessionId: null,
+				appId: 'app-123',
+				packageId: null,
+				storageId: null,
+			},
+		}),
+	)
+}
+
+/**
+ * A package job as `syncPackageJobsForPackage` writes it: the row points at a
+ * published package source whose package.json declares the job.
+ */
+export async function insertPackageJob(input: {
 	env: Env
 	callerContext: PersistedJobCallerContext
+	/** Org that owns the job; defaults to the caller's personal org. */
+	ownerId?: OwnerId
 	body: {
 		name: string
 		schedule: JobSchedule
@@ -1111,19 +1140,22 @@ export async function insertLeftoverJob(input: {
 		params?: Record<string, unknown>
 		timezone?: string | null
 		enabled?: boolean
-		sourceId?: string | null
-		publishedCommit?: string | null
+		publishedCommit?: string
 	}
 }) {
 	const now = new Date().toISOString()
-	const jobId = crypto.randomUUID()
-	const sourceId = input.body.sourceId ?? `job-${jobId}`
+	const suffix = crypto.randomUUID().slice(0, 8)
+	const packageId = `pkg-${suffix}`
+	const sourceId = `package-source-${suffix}`
+	const jobId = buildPackageJobId(packageId, input.body.name)
 	const publishedCommit = input.body.publishedCommit ?? 'published-commit-1'
 	const timezone = input.body.timezone ?? 'UTC'
+	const ownerId =
+		input.ownerId ?? personalOrgId(input.callerContext.user.userId)
 	const job: JobRecord = {
 		version: 1,
 		id: jobId,
-		userId: input.callerContext.user.userId,
+		userId: ownerId,
 		name: input.body.name,
 		sourceId,
 		publishedCommit,
@@ -1133,7 +1165,6 @@ export async function insertLeftoverJob(input: {
 		timezone,
 		enabled: input.body.enabled ?? true,
 		killSwitchEnabled: false,
-		preserved: false,
 		expiresAt: null,
 		createdAt: now,
 		updatedAt: now,
@@ -1145,27 +1176,32 @@ export async function insertLeftoverJob(input: {
 		successCount: 0,
 		errorCount: 0,
 	}
-	if (input.body.sourceId == null) {
-		const jobView = toJobView(job)
-		await insertPublishedEntitySource({
-			db: input.env.APP_DB as ReturnType<typeof createDatabase>,
-			env: input.env.BUNDLE_ARTIFACTS_KV ? input.env : undefined,
-			userId: input.callerContext.user.userId,
-			sourceId,
-			entityKind: 'job',
-			entityId: jobId,
-			publishedCommit,
-			files: input.env.BUNDLE_ARTIFACTS_KV
-				? buildJobSourceFiles({
-						job: jobView,
-						moduleSource:
-							input.body.code ?? 'export default async () => ({ ok: true })',
-					})
-				: undefined,
-		})
-	}
+	await insertPublishedEntitySource({
+		db: input.env.APP_DB as ReturnType<typeof createDatabase>,
+		env: input.env.BUNDLE_ARTIFACTS_KV ? input.env : undefined,
+		userId: ownerId,
+		sourceId,
+		entityKind: 'package',
+		entityId: packageId,
+		publishedCommit,
+		manifestPath: 'package.json',
+		files: input.env.BUNDLE_ARTIFACTS_KV
+			? {
+					'package.json': createPackageJobManifestText({
+						packageName: `@owner/${packageId}`,
+						kodyId: packageId,
+						description: 'Package job fixture',
+						jobName: input.body.name,
+						schedule: input.body.schedule,
+						exportPath: './src/job.ts',
+					}),
+					'src/job.ts':
+						input.body.code ?? 'export default async () => ({ ok: true })',
+				}
+			: undefined,
+	})
 	await jobsData(input.env).insertJob({
-		userId: input.callerContext.user.userId,
+		userId: ownerId,
 		job,
 		callerContextJson: JSON.stringify(input.callerContext),
 	})
@@ -1193,7 +1229,7 @@ export async function syncSinglePackageJob(input: {
 	})
 	await syncPackageJobsForPackage({
 		env: input.env,
-		userId: input.userId,
+		userId: ownerIdFromStored(input.userId),
 		baseUrl: input.baseUrl,
 		packageId: input.packageId,
 		sourceId: input.sourceId,

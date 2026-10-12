@@ -1,4 +1,6 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { getOwnerUsernameFromListingName } from '#worker/community/public-urls.ts'
 import { getCommunityListingById } from '#worker/community/repo.ts'
 import { getUserSocialRowByUsername } from '#worker/community/profile-repo.ts'
@@ -67,6 +69,7 @@ async function toLoaderData(input: {
 	username?: string
 	kodyId?: string
 	viewerIsOwner?: boolean
+	viewerCanManage?: boolean
 	isPrivate?: boolean
 	isListed?: boolean
 	listingId?: string | null
@@ -122,6 +125,7 @@ async function toLoaderData(input: {
 		username: input.username,
 		kodyId: input.kodyId,
 		viewerIsOwner: input.viewerIsOwner,
+		viewerCanManage: input.viewerCanManage,
 		isPrivate: input.isPrivate,
 		isListed: input.isListed ?? Boolean(input.listingId),
 		iconUrl: input.iconUrl ?? null,
@@ -192,6 +196,8 @@ export async function loadCommunityPackageFilesData(input: {
 		selectedPath: input.selectedPath,
 	})
 	if (!view) return null
+	const viewerOwnsListing =
+		viewerUserId != null && personalOrgId(viewerUserId) === listing.ownerUserId
 
 	return toLoaderData({
 		env: input.env,
@@ -207,7 +213,8 @@ export async function loadCommunityPackageFilesData(input: {
 		serverTiming: input.serverTiming,
 		username: ownerUsername ?? undefined,
 		kodyId: listing.kodyId,
-		viewerIsOwner: viewerUserId === listing.ownerUserId,
+		viewerIsOwner: viewerOwnsListing,
+		viewerCanManage: viewerOwnsListing,
 		isPrivate: false,
 		listingId: listing.id,
 		iconUrl: buildCommunityIconUrl({
@@ -494,6 +501,7 @@ export async function loadAccountPackageFilesData(input: {
 		username: input.username,
 		kodyId: record.kodyId,
 		viewerIsOwner: true,
+		viewerCanManage: true,
 		isPrivate: record.isPrivate,
 		isListed: input.isListed === true,
 		iconUrl: resolvePackageListIconUrl({
@@ -548,6 +556,7 @@ export async function loadAccessiblePackageFilesData(input: {
 		return {
 			...data,
 			viewerIsOwner: page.viewerIsOwner,
+			viewerCanManage: page.viewerCanManage,
 			isPrivate: page.ownerPackage?.isPrivate ?? false,
 			username: page.username,
 			kodyId: page.kodyId,
@@ -556,8 +565,7 @@ export async function loadAccessiblePackageFilesData(input: {
 		}
 	}
 
-	if (!page.ownerPackage) return null
-	if (!page.canReadOwnerSource) return null
+	if (!page.ownerPackage || !page.viewerIsOwner) return null
 	const user = await readAuthenticatedAppUser(input.request, input.env)
 	if (!user) return null
 	const data = await loadAccountPackageFilesData({
@@ -574,6 +582,7 @@ export async function loadAccessiblePackageFilesData(input: {
 	if (!data) return null
 	return {
 		...data,
+		viewerCanManage: page.viewerCanManage,
 		description: page.ownerPackage.description,
 		ownerProfilePublic: page.ownerProfilePublic,
 	}
@@ -585,7 +594,6 @@ export async function loadPackagePageHasAgentsDocs(input: {
 	listingId?: string | null
 	ownerSourceId?: string | null
 	viewerIsOwner: boolean
-	canReadOwnerSource?: boolean
 	ownerUserId?: string
 }): Promise<boolean> {
 	if (input.listingId && input.env.BUNDLE_ARTIFACTS_KV) {
@@ -602,8 +610,7 @@ export async function loadPackagePageHasAgentsDocs(input: {
 			// Agent docs link instead of 404ing visitors on a dead tree URL.
 		}
 	}
-	const canReadOwnerSource = input.canReadOwnerSource ?? input.viewerIsOwner
-	if (!canReadOwnerSource || !input.ownerSourceId) return false
+	if (!input.viewerIsOwner || !input.ownerSourceId) return false
 	const user = await readAuthenticatedAppUser(input.request, input.env)
 	if (!user) return false
 	try {
@@ -613,7 +620,9 @@ export async function loadPackagePageHasAgentsDocs(input: {
 				env: input.env,
 				requestUrl: input.request.url,
 			}),
-			userId: input.ownerUserId ?? user.mcpUser.userId,
+			userId:
+				input.ownerUserId ??
+				ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
 			sourceId: input.ownerSourceId,
 		})
 		return findRootPackageDoc(loaded.files, 'AGENTS.md') != null
@@ -865,12 +874,10 @@ export async function loadAccessiblePackageFileRaw(input: {
 	}
 
 	if (!page.ownerPackage) return { kind: 'not-found' }
-	const user = await readAuthenticatedAppUser(input.request, input.env)
-	if (!user) return { kind: 'unauthorized' }
 	return loadAccountPackageFileRaw({
 		env: input.env,
 		request: input.request,
-		userId: user.mcpUser.userId,
+		userId: page.ownerUserId,
 		username: page.username,
 		packageId: page.ownerPackage.id,
 		selectedPath: input.selectedPath,

@@ -55,6 +55,10 @@ test('anonymous marketing HTML is cacheable only without a session', () => {
 		'/onboarding/step-1',
 		'/docs',
 		'/docs/how-kody-works',
+		'/llms.txt',
+		'/docs/llms.txt',
+		'/login',
+		'/signup',
 	]
 	expect(
 		sharedPaths.map((pathname) => [pathname, pageCache(pathname)]),
@@ -64,6 +68,18 @@ test('anonymous marketing HTML is cacheable only without a session', () => {
 	expect(isCacheableAnonymousPath('/docs/connect')).toBe(true)
 	expect(isCacheableAnonymousPath('/docs/nested/path')).toBe(false)
 	expect(isCacheableAnonymousPath('/onboarding/step-2/notion')).toBe(true)
+	// Cookie-bearing auth requests stay private even though the paths are
+	// on the anonymous allowlist.
+	expect(
+		pageCache('/login', {
+			request: request('https://example.com/login', 'kody_session=stale'),
+		}),
+	).toEqual(noStore)
+	expect(
+		pageCache('/signup', {
+			request: request('https://example.com/signup', 'kody_session=stale'),
+		}),
+	).toEqual(noStore)
 
 	const privateCases: Array<[string, Partial<PageCacheInput>]> = [
 		// Local dev: a browser-cached document would be what Vite's post-HMR page
@@ -87,15 +103,6 @@ test('anonymous marketing HTML is cacheable only without a session', () => {
 		],
 		['/account', {}],
 		['/', { session: { id: 'user-1' } }],
-		[
-			'/',
-			{
-				request: request(
-					'https://example.com/',
-					'kody_site_banner_dismiss=11111111-1111-4111-8111-111111111111',
-				),
-			},
-		],
 		['/', { request: request('https://example.com/', 'kody_session=stale') }],
 		['/', { responseSetsCookie: true }],
 	]

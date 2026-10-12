@@ -549,10 +549,12 @@ export const repoCheckResultSchema = z.object({
 	kind: z.enum([
 		'manifest',
 		'docs',
+		'skills',
 		'dependencies',
 		'bundle',
 		'typecheck',
 		'lint',
+		'credentials',
 		'smoke',
 	]),
 	ok: z.boolean(),

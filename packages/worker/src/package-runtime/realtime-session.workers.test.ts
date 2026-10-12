@@ -3,12 +3,14 @@ import { runInDurableObject } from 'cloudflare:test'
 import { expect, test } from 'vitest'
 import { seedAccount } from '#worker/test-support/workers-seed.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	packageRealtimeSessionRpc,
 	PackageRealtimeSession,
+	resolvePackageAppWorkerBuildInput,
 } from './realtime-session.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 function createBinding(
 	overrides?: Partial<{
 		userId: string
@@ -20,7 +22,7 @@ function createBinding(
 ) {
 	return {
 		env,
-		userId: overrides?.userId ?? 'user-1',
+		userId: ownerIdFromStored(overrides?.userId ?? 'user-1'),
 		packageId: overrides?.packageId ?? 'package-1',
 		kodyId: overrides?.kodyId ?? 'example',
 		sourceId: overrides?.sourceId ?? 'source-1',
@@ -80,7 +82,9 @@ test('package realtime session DO lists empty sessions and is addressable as a d
 })
 
 test('package realtime connect upgrades through the real durable object stub and hands the request to the connect hook', async () => {
-	const binding = createBinding({ packageId: `package-${crypto.randomUUID()}` })
+	const binding = createBinding({
+		packageId: `package-${crypto.randomUUID()}`,
+	})
 	const hookPayloads: Array<{
 		event: string
 		facet: string
@@ -236,7 +240,7 @@ test('package realtime session closes open sockets without running hooks once th
 		columns: ['email_verified_at'],
 	})
 	const email = `realtime-suspended-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	await seedAccount({
 		db: env.APP_DB,
 		email,
@@ -342,4 +346,44 @@ test('package realtime session closes open sockets without running hooks once th
 	expect(closes).toEqual(
 		Array.from({ length: 4 }, () => [1008, 'account-suspended']),
 	)
+})
+
+test('package realtime builds only for a personal org, never as a team org', async () => {
+	await ensureUsersTestSchema({
+		db: env.APP_DB,
+		columns: ['email_verified_at'],
+	})
+	const email = `realtime-team-${crypto.randomUUID()}@example.com`
+	const personId = testStableUserIdFromEmail(email)
+	await seedAccount({
+		db: env.APP_DB,
+		email,
+		username: `rtteam-${crypto.randomUUID().slice(0, 8)}`,
+		stableUserId: personId,
+	})
+	const teamOrgId = `org-${crypto.randomUUID()}`
+	const now = new Date().toISOString()
+	await env.APP_DB.batch([
+		env.APP_DB.prepare(
+			`INSERT INTO orgs (id, slug, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		).bind(teamOrgId, `team-${crypto.randomUUID().slice(0, 8)}`, now, now),
+		env.APP_DB.prepare(
+			`INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`,
+		).bind(teamOrgId, personId, now),
+	])
+	const bindingFor = (userId: string) => {
+		const { env: _env, ...binding } = createBinding({ userId })
+		return binding
+	}
+
+	await expect(
+		resolvePackageAppWorkerBuildInput({ env, binding: bindingFor(teamOrgId) }),
+	).rejects.toThrow(
+		"Package realtime serves only a person's own personal-org apps.",
+	)
+	const personal = await resolvePackageAppWorkerBuildInput({
+		env,
+		binding: bindingFor(personId),
+	}).catch((error: unknown) => error)
+	expect(String(personal)).not.toContain('personal-org apps')
 })

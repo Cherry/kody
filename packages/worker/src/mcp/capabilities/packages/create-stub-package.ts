@@ -4,9 +4,13 @@ import { assertWithinEntitlement } from '#worker/entitlements/service.ts'
 import { buildSavedPackageEmbedText } from '#worker/package-registry/embed.ts'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
 import { normalizePackageNameInput } from '#worker/package-registry/package-name.ts'
-import { type PackageOwnerContext } from '#worker/package-registry/package-owner.ts'
+import {
+	packageOwnerEntitlementEmail,
+	type PackageOwnerContext,
+} from '#worker/package-registry/package-owner.ts'
 import { insertSavedPackage } from '#worker/package-registry/repo.ts'
 import { refreshSavedPackageProjection } from '#worker/package-registry/service.ts'
+import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
 import { assertKodyDescriptionLength } from '#worker/package-registry/types.ts'
 import { upsertSavedPackageVector } from '#worker/package-registry/vectorize.ts'
 import { ensureEntitySource } from '#worker/repo/source-service.ts'
@@ -57,8 +61,9 @@ export function buildStubPackageFiles(input: {
 			'',
 			'After publish, prefer `npx @kodycodes/cli execute --local` when Node ≥22',
 			'+ CLI are available (`kody login` or headless `KODY_API_TOKEN`; `guide:local_execute`).',
-			'If `--local` cannot run, use hosted MCP `execute` for the smoke module',
-			'(Open API / MCP `api` cannot run a package export; `guide:open_api`).',
+			'If `--local` cannot run, fix the environment so local works — Open API / MCP',
+			'`api` cannot run a package export, and hosted MCP `execute` is banned',
+			'(`guide:open_api` / `guide:local_execute`).',
 			'',
 			'## Edge cases',
 			'',
@@ -89,7 +94,7 @@ export async function createStubSavedPackage(input: {
 	await assertWithinEntitlement({
 		db: input.env.APP_DB,
 		userId: input.owner.ownerUserId,
-		email: input.owner.ownerEmail,
+		email: packageOwnerEntitlementEmail(input.owner),
 		resource: 'saved_packages',
 	})
 	const name = `@${input.owner.ownerScope}/${kodyId}`
@@ -101,10 +106,28 @@ export async function createStubSavedPackage(input: {
 		// off Sentry even if the packageGetGitRemote schema max is bypassed.
 		throw new McpCallerError(getErrorMessage(error), { cause: error })
 	}
-	const files = buildStubPackageFiles({ name, kodyId, description })
+	return await createSavedPackageFromFiles({
+		env: input.env,
+		baseUrl: input.baseUrl,
+		owner: input.owner,
+		files: buildStubPackageFiles({ name, kodyId, description }),
+	})
+}
+
+/**
+ * Publish `files` as a new private saved package owned by `owner`, then
+ * refresh its projection (which syncs any `kody.jobs` into job rows).
+ */
+export async function createSavedPackageFromFiles(input: {
+	env: Env
+	baseUrl: string
+	owner: PackageOwnerContext
+	files: Record<string, string>
+}) {
+	const { files } = input
 	const packageJsonContent = files['package.json']
 	if (!packageJsonContent) {
-		throw new Error('Stub package files are missing package.json.')
+		throw new Error('Package files are missing package.json.')
 	}
 	const manifest = parseAuthoredPackageJson({
 		content: packageJsonContent,
@@ -131,7 +154,7 @@ export async function createStubSavedPackage(input: {
 		files,
 	})
 	const now = new Date().toISOString()
-	await insertSavedPackage(
+	const stamped = await insertSavedPackage(
 		input.env.APP_DB,
 		{
 			id: packageId,
@@ -142,14 +165,22 @@ export async function createStubSavedPackage(input: {
 			tags_json: JSON.stringify(manifest.kody.tags ?? []),
 			search_text: manifest.kody.searchText ?? null,
 			source_id: ensuredSource.id,
-			has_app: 0,
+			has_app: manifest.kody.app ? 1 : 0,
+			has_skills: 0,
 			hidden: 0,
 			is_private: 1,
 			created_at: now,
 			updated_at: now,
 		},
 		input.env,
+		{ actorUserId: input.owner.actorUserId },
 	)
+	if (stamped) {
+		scheduleKitSubscriberSync({
+			env: input.env,
+			stableUserId: input.owner.actorUserId,
+		})
+	}
 	await upsertSavedPackageVector(input.env, {
 		packageId,
 		userId: input.owner.ownerUserId,
@@ -159,6 +190,8 @@ export async function createStubSavedPackage(input: {
 		env: input.env,
 		baseUrl: input.baseUrl,
 		userId: input.owner.ownerUserId,
+		actorUserId: input.owner.actorUserId,
+		userEmail: packageOwnerEntitlementEmail(input.owner),
 		packageId,
 		sourceId: ensuredSource.id,
 	})

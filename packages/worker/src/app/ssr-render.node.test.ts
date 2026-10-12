@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
 import {
@@ -10,6 +11,10 @@ import { createAccountHandler } from '#app/handlers/account.ts'
 import { createAccountConnectionsHandler } from '#app/handlers/account-connected-agents.ts'
 import { createAccountPasskeysHandler } from '#app/handlers/account-passkeys.ts'
 import { createAccountMcpOauthClientsHandler } from '#app/handlers/account-mcp-oauth-clients.ts'
+import {
+	createAccountOrganizationsApiHandler,
+	createAccountOrganizationsHandler,
+} from '#app/handlers/account-organizations.ts'
 import { createAccountTwoFactorHandler } from '#app/handlers/account-two-factor.ts'
 import { createAccountWaitingHandler } from '#app/handlers/account-waiting.ts'
 import { createCommunityHandler } from '#app/handlers/community.tsx'
@@ -31,9 +36,13 @@ import {
 	listBlogPosts,
 	toBlogPostSummary,
 } from '#worker/blog/catalog.ts'
-import { resetDataCacheForTests } from '#app/data-cache.ts'
+import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import { firstPartySecurityHeaders } from '#app/security-headers.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
+import {
+	isOrgBindingMembershipQuery,
+	mockPersonalOrgBindingRow,
+} from '#worker/test-support/org-binding-query.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { BLOG_PLACEHOLDER_CALLOUT } from '#universal/blog-display.ts'
 import {
@@ -107,7 +116,7 @@ vi.mock('#worker/community/profile-repo.ts', async (importOriginal) => {
 
 const sampleListing = {
 	id: 'listing-1',
-	ownerUserId: 'owner-mcp-id',
+	ownerUserId: ownerIdFromStored('owner-mcp-id'),
 	packageId: 'pkg-1',
 	sourceId: 'src-1',
 	kodyId: 'github-triage',
@@ -187,6 +196,15 @@ function createUserTestDb(users: Array<TestUser>) {
 			},
 			all: executeAll,
 			async first() {
+				if (isOrgBindingMembershipQuery(normalizedQuery)) {
+					const personId = String(params[0] ?? '')
+					const user = [...userRecords.values()].find(
+						(row) => row.stable_user_id === personId,
+					)
+					return user
+						? mockPersonalOrgBindingRow(user.stable_user_id, user.username)
+						: null
+				}
 				return (await executeAll()).results[0] ?? null
 			},
 			async run() {
@@ -204,7 +222,7 @@ function createUserTestDb(users: Array<TestUser>) {
 }
 
 function setupEnv(users: Array<TestUser> = []) {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
 	setAuthSessionSecret(testCookieSecret)
 	return {
 		COOKIE_SECRET: testCookieSecret,
@@ -411,35 +429,102 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 		return { ...page, loaderData: readAppRootProps(page.html).loaderData }
 	}
 
-	const account = await signedIn(createAccountHandler, '/account')
+	const accountPage =
+		(title: 'Profile' | 'Security' | 'Data & deletion') => (env: Env) =>
+			createAccountHandler(env, title)
+	const account = await signedIn(accountPage('Profile'), '/account')
 	expect(account.response.status).toBe(200)
-	// Connected agents moved to `/account/connections`; Overview only links
-	// there. The rail carries Connections and Repositories (the profile is the
-	// canonical repository list, so the nav links there rather than the
-	// `/account/packages` redirect).
+	// `/account` is the Profile view in the account rail. The header has one
+	// menu: organizations, then the person's own links and Log out. The
+	// workspace sections and connected agents live elsewhere.
 	expectHtml(
 		account.html,
 		[
 			'aria-label="Account sections"',
+			'href="/account/security"',
+			'href="/account/organizations"',
+			'href="/account/data"',
+			'data-testid="org-switcher-account-group"',
+			'href="/@account-user"',
+			'action="/logout"',
+			'/pending-verification',
+		],
+		[
+			'aria-label="Workspace sections"',
+			'aria-label="Connected agents"',
+			'aria-label="Connected accounts"',
+			'aria-label="Session"',
 			'data-testid="site-header-account"',
 			'data-testid="site-header-profile"',
-			'data-testid="site-header-account-menu"',
-			'href="/@account-user"',
-			'aria-label="@account-user"',
 			'data-testid="account-connections-link"',
-			'href="/account/connections"',
-			'>Connections</a>',
-			'data-icon="link"',
-			'data-icon="box"',
-			'/pending-verification',
-			'action="/logout"',
-			'aria-label="Session"',
+			'Download account export',
 		],
-		['aria-label="Connected agents"'],
 	)
-	expect(account.html).toMatch(
-		/href="\/@account-user"[^>]*>[\s\S]*?Repositories<\/a>/,
+	expect(account.html).toMatch(/href="\/account"[^>]*aria-current="page"/)
+
+	const security = await signedIn(accountPage('Security'), '/account/security')
+	expect(security.response.status).toBe(200)
+	expectHtml(
+		security.html,
+		[
+			'<title>Security',
+			'aria-label="Connected accounts"',
+			'href="/account/two-factor"',
+			'href="/account/passkeys"',
+		],
+		['Download account export'],
 	)
+	expect(security.html).toMatch(
+		/href="\/account\/security"[^>]*aria-current="page"/,
+	)
+
+	// Organizations and invites are one page in the account rail; the JSON
+	// twin serves the same payload.
+	const organizations = await signedIn(
+		createAccountOrganizationsHandler,
+		'/account/organizations',
+	)
+	expect(organizations.response.status).toBe(200)
+	expectHtml(organizations.html, [
+		'<title>Organizations',
+		'data-testid="account-organizations"',
+		'data-testid="account-organization"',
+		'id="invites"',
+		'data-testid="invites-empty"',
+		'href="/account/organizations/new"',
+	])
+	expect(organizations.html).toMatch(
+		/href="\/account\/organizations"[^>]*aria-current="page"/,
+	)
+	const organizationsPayload = {
+		ok: true,
+		username: 'account-user',
+		viewer: { displayName: 'account-user', avatarUrl: null },
+		organizations: [],
+		lastUsedOrganization: null,
+		invites: [],
+	}
+	expect(organizations.loaderData?.accountOrganizations).toEqual(
+		organizationsPayload,
+	)
+	const organizationsApi = await createAccountOrganizationsApiHandler(
+		env,
+	).handler({ request: get('/account/organizations.json', cookie) } as never)
+	expect(organizationsApi.status).toBe(200)
+	expect(await organizationsApi.json()).toEqual(organizationsPayload)
+	const anonymousOrganizationsApi = await createAccountOrganizationsApiHandler(
+		env,
+	).handler({ request: get('/account/organizations.json') } as never)
+	expect(anonymousOrganizationsApi.status).toBe(401)
+
+	const data = await signedIn(accountPage('Data & deletion'), '/account/data')
+	expect(data.response.status).toBe(200)
+	expectHtml(
+		data.html,
+		['Download account export', '>Delete account<'],
+		['aria-label="Connected accounts"'],
+	)
+
 	expect(account.loaderData?.accountProfile).toEqual({
 		ok: true,
 		email: 'user@example.com',
@@ -513,7 +598,10 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 		ok: true,
 		enabled: false,
 	})
-	expect(twoFactor.html).not.toContain('action="/logout"')
+	expect(twoFactor.html).not.toContain('aria-label="Session"')
+	expect(twoFactor.html).toMatch(
+		/href="\/account\/security"[^>]*aria-current="page"/,
+	)
 	const passkeys = await signedIn(
 		createAccountPasskeysHandler,
 		'/account/passkeys',
@@ -525,7 +613,7 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 	})
 	const waiting = await signedIn(
 		createAccountWaitingHandler,
-		'/account/waiting',
+		'/@account-user/-/waiting',
 	)
 	expect(waiting.response.status).toBe(200)
 	expect(waiting.loaderData?.accountWaiting).toEqual({
@@ -547,11 +635,14 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 	// server-renders the verify note instead of a copy card.
 	const connections = await signedIn(
 		createAccountConnectionsHandler,
-		'/account/connections',
+		'/@account-user/-/connections',
 	)
 	expect(connections.response.status).toBe(200)
 	expectHtml(connections.html, [
-		'aria-label="Account sections"',
+		'aria-label="Workspace sections"',
+		'>Workspace<',
+		'>@account-user<',
+		'href="/@account-user/-/packages"',
 		'aria-label="Connected agents"',
 		'aria-label="MCP URL"',
 		'data-testid="account-connections-verify-note"',
@@ -560,19 +651,22 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 		'data-testid="account-connections-add"',
 	])
 	expect(connections.html).toMatch(
-		/href="\/account\/connections"[^>]*aria-current="page"/,
+		/href="\/@account-user\/-\/connections"[^>]*aria-current="page"/,
 	)
 	expect(connections.loaderData?.accountConnectedAgents).toEqual({
 		ok: true,
 		agents: [],
 		mcpServerUrl: '',
+		connectionProfilesEnabled: false,
+		connectionProfiles: [],
+		connectionProfilePackageOptions: [],
 	})
 
 	// `/new` is its own page; the per-agent step shares the handler; unknown
 	// agent segments 404 instead of rendering an empty grid.
 	const addGrid = await signedIn(
 		createAccountConnectionsHandler,
-		'/account/connections/new',
+		'/@account-user/-/connections/new',
 	)
 	expectHtml(
 		addGrid.html,
@@ -581,7 +675,7 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 	)
 	const addCursor = await signedIn(
 		createAccountConnectionsHandler,
-		'/account/connections/new/cursor',
+		'/@account-user/-/connections/new/cursor',
 	)
 	expect(addCursor.response.status).toBe(200)
 	expectHtml(addCursor.html, [
@@ -589,17 +683,17 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 		'aria-label="Connect Cursor"',
 	])
 	expect(addCursor.html).toMatch(
-		/href="\/account\/connections"[^>]*aria-current="page"/,
+		/href="\/@account-user\/-\/connections"[^>]*aria-current="page"/,
 	)
 	const unknownAgent = await runHtml(
 		createAccountConnectionsHandler(env),
-		get('/account/connections/new/not-a-client', cookie),
+		get('/@account-user/-/connections/new/not-a-client', cookie),
 	)
 	expect(unknownAgent.response.status).toBe(404)
 
 	const accountLinked = await signedIn(
-		createAccountHandler,
-		'/account?oauthLinked=google',
+		accountPage('Security'),
+		'/account/security?oauthLinked=google',
 	)
 	expect(accountLinked.response.status).toBe(200)
 	expect(accountLinked.loaderData?.accountConnections).toEqual(
@@ -633,7 +727,7 @@ test('SSR HTML routes render page content and embedded loader data', async () =>
 	expect(positions).toEqual([...positions].sort((a, b) => a - b))
 
 	const anonymousAccount = await runHtml(
-		createAccountHandler(env),
+		createAccountHandler(env, 'Profile'),
 		get('/account'),
 	)
 	expect(anonymousAccount.response.status).toBe(302)
@@ -703,7 +797,7 @@ test('renderAppPage embeds the Fathom tracker only when FATHOM_SITE_ID is set', 
 	expectHtml(withFathom.headers.get('Content-Security-Policy') ?? '', [
 		"script-src 'self' 'sha256-",
 		'https://cdn.usefathom.com https://static.cloudflareinsights.com',
-		"img-src 'self' data: blob: https://cdn.usefathom.com",
+		"img-src 'self' data: blob: https://cdn.usefathom.com https://static.scarf.sh",
 		"connect-src 'self' https://cdn.usefathom.com https://cloudflareinsights.com",
 	])
 })
@@ -760,20 +854,49 @@ test('anonymous homepage document: doctype, preloads, scroll restoration, loop t
 	expect(timing).toContain('ssr;dur=')
 	expect(response.headers.get('Vary')).toBe('Cookie')
 	const publicCache = 'public, max-age=60, stale-while-revalidate=300'
-	for (const path of ['/', '/onboarding', '/docs/how-kody-works']) {
-		const { response: page } = await render(env, path)
+	for (const path of [
+		'/',
+		'/onboarding',
+		'/docs/how-kody-works',
+		'/login',
+		'/signup',
+	]) {
+		const { response: page, html } = await render(env, path)
 		expect(page.headers.get('Cache-Control')).toBe(publicCache)
+		expect(page.headers.get('Vary')).toBe('Cookie')
+		if (path === '/login' || path === '/signup') {
+			const props = readAppRootProps(html)
+			expect(props.session).toBeNull()
+			expect(html).not.toMatch(/csrf|nonce=/i)
+			expect(html).not.toContain('user@example.com')
+		}
 	}
 
-	// Any session cookie (even stale) and auth pages stay private.
+	// Any session cookie (even stale) stays private; auth paths included.
 	for (const [path, cookie] of [
 		['/', 'kody_session=stale-or-unsigned'],
 		['/', await cookieFor()],
-		['/login', undefined],
+		['/login', 'kody_session=stale-or-unsigned'],
+		['/signup', await cookieFor()],
 	] as const) {
 		const { response: page } = await render(env, path, { cookie })
 		expect(page.headers.get('Cache-Control')).toBe('no-store')
 	}
+
+	// Anonymous auth HTML is viewer-independent aside from Remix handle ids
+	// (same per-render variance already accepted for cached /pricing).
+	function normalizeRemixIds(input: string) {
+		return input
+			.replace(/<!-- rmx:h:h[0-9a-f]+ -->/g, '<!-- rmx:h:HID -->')
+			.replace(/"h[0-9a-f]+":\{"exportName"/g, '"HID":{"exportName"')
+			.replace(/\bs[0-9a-f]+-\d+/g, 'sHANDLE')
+	}
+	const loginA = await render(env, '/login')
+	const loginB = await render(env, '/login')
+	expect(normalizeRemixIds(loginA.html)).toBe(normalizeRemixIds(loginB.html))
+	const signupA = await render(env, '/signup')
+	const signupB = await render(env, '/signup')
+	expect(normalizeRemixIds(signupA.html)).toBe(normalizeRemixIds(signupB.html))
 })
 
 test('renderAppPage inlines the stylesheet only when ASSETS serves HTML-safe CSS', async () => {
@@ -842,6 +965,8 @@ test('renderAppPage configures session secret and server-renders oauth authorize
 		scopes: ['profile', 'email'],
 		emailVerified,
 		requireCredentials: false,
+		orgs: [{ slug: 'ada', displayName: 'Ada', role: 'owner' }],
+		selectedOrgSlug: 'ada',
 	})
 
 	const anonymous = await render(env, authorizePath, {
@@ -853,6 +978,8 @@ test('renderAppPage configures session secret and server-renders oauth authorize
 		anonymous.html,
 		[
 			'data-testid="oauth-authorize-grant"',
+			'This agent gets full access in @ada',
+			'data-testid="oauth-authorize-org"',
 			'data-testid="oauth-authorize-oidc-scopes"',
 			'<code>profile</code>',
 			'<code>email</code>',
@@ -1102,7 +1229,7 @@ test('renderAppPage server-renders simplified integration and secret-approval pa
 		integrations: Array<AccountIntegrationListItem> = [googleConnection],
 		apps: Array<AccountOauthAppListItem> = [googleApp],
 	) => {
-		const page = await render(env, `/account/integrations${path}`, {
+		const page = await render(env, `/@account-user/-/integrations${path}`, {
 			cookie,
 			loaderData: {
 				accountIntegrations: {
@@ -1124,7 +1251,7 @@ test('renderAppPage server-renders simplified integration and secret-approval pa
 		[
 			'1 account connected.',
 			'data-testid="add-account-open"',
-			'href="/account/integrations/google?add-account=1#add-account"',
+			'href="/@account-user/-/integrations/google?add-account=1#add-account"',
 			'data-prevent-scroll-reset',
 			'>Reconnect<',
 			'data-testid="provider-mark"',
@@ -1213,7 +1340,7 @@ test('renderAppPage server-renders simplified integration and secret-approval pa
 	}
 	const approval = await render(
 		env,
-		'/account/secrets/user/googleAccessToken?allowed-host=gmail.googleapis.com',
+		'/@account-user/-/secrets/user/googleAccessToken?allowed-host=gmail.googleapis.com',
 		{
 			cookie,
 			loaderData: {
@@ -1300,18 +1427,17 @@ test('renderAppPage renders the blog index and posts with placeholder or reviewe
 	expect(placeholder.html).toMatch(/<h2[^>]*>/)
 	expect(placeholder.html).not.toMatch(/<h4[^>]*>/)
 
-	const reviewed = await renderPost('kody-vs-executor')
+	const reviewed = await renderPost('early-kody-users')
 	expect(reviewed.post.placeholder).toBe(false)
-	expect(reviewed.post.image).toBe('/images/kody-vs-executor.webp')
-	expect(reviewed.post.ogImage).toBe('/images/kody-vs-executor-og.jpg')
-	expectHtml(
-		reviewed.html,
-		[
-			'src="/images/kody-vs-executor.webp"',
-			'property="og:image" content="https://example.com/blog/kody-vs-executor/og.png"',
-		],
-		[BLOG_PLACEHOLDER_CALLOUT],
-	)
+	expectHtml(reviewed.html, [], [BLOG_PLACEHOLDER_CALLOUT])
+
+	const withArt = await renderPost('openclaw-2-needs-a-home')
+	expect(withArt.post.image).toBe('/images/openclaw-2-needs-a-home.webp')
+	expect(withArt.post.ogImage).toBe('/images/openclaw-2-needs-a-home-og.jpg')
+	expectHtml(withArt.html, [
+		'src="/images/openclaw-2-needs-a-home.webp"',
+		'property="og:image" content="https://example.com/blog/openclaw-2-needs-a-home/og.png"',
+	])
 })
 
 function mockPublicListing(listing: CommunityListingWithAggregates) {
@@ -1356,7 +1482,7 @@ test('canonical package URL SSR renders the redesigned article', async () => {
 		kind: 'package',
 		username: 'kentcdodds',
 		kodyId: 'github-triage',
-		userId: 'owner-mcp-id',
+		userId: ownerIdFromStored('owner-mcp-id'),
 		savedPackage: null,
 		listingId: 'listing-detail-1',
 	})
@@ -1452,7 +1578,7 @@ test('listed package rename does not 301 anonymous visitors to the unpublished i
 	const listingTarget = {
 		username: 'kentcdodds',
 		kodyId: 'github-triage',
-		userId: 'owner-mcp-id',
+		userId: ownerIdFromStored('owner-mcp-id'),
 		listingId: 'listing-detail-1',
 		listingKodyId: 'github-triage',
 	}

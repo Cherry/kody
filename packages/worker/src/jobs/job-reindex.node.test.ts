@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { jobVectorId } from '#mcp/jobs-vectorize.ts'
 import {
@@ -49,7 +50,7 @@ function buildJobRow(id: string, userId = 'user-1') {
 	const record: JobRecord = {
 		version: 1,
 		id,
-		userId,
+		userId: ownerIdFromStored(userId),
 		name: `Job ${id}`,
 		sourceId: 'source-1',
 		publishedCommit: null,
@@ -58,7 +59,6 @@ function buildJobRow(id: string, userId = 'user-1') {
 		timezone: 'UTC',
 		enabled: true,
 		killSwitchEnabled: false,
-		preserved: false,
 		expiresAt: null,
 		createdAt: '2026-01-01T00:00:00.000Z',
 		updatedAt: '2026-01-01T00:00:00.000Z',
@@ -94,7 +94,7 @@ test('job reindex keeps package job vector ids under the Vectorize limit', async
 			id: vectorId,
 			values: [0.4, 0.5, 0.6],
 			namespace: 'user-1',
-			metadata: { kind: 'job', userId: 'user-1' },
+			metadata: { kind: 'job', userId: ownerIdFromStored('user-1') },
 		},
 	])
 })

@@ -17,6 +17,8 @@ const apiTokenPattern = /^kody_at_([a-z0-9]{20})_([A-Za-z0-9_-]{43})$/
 
 /** Matches any embedded token (for redaction), not only a whole string. */
 export const apiTokenSearchPattern = /kody_at_[a-z0-9]{20}_[A-Za-z0-9_-]{43}/g
+export const cliBootstrapCodeSearchPattern =
+	/kody_bc_[a-z0-9]{16}_[A-Za-z0-9_-]{32}/g
 
 export type ParsedApiToken = {
 	tokenId: string
@@ -52,6 +54,33 @@ export function formatApiToken(input: ParsedApiToken) {
 
 export function redactApiTokens(value: string) {
 	return value.replace(apiTokenSearchPattern, `${apiTokenPrefix}[redacted]`)
+}
+
+export function redactKodyCredentials(value: string) {
+	return redactApiTokens(value).replace(
+		cliBootstrapCodeSearchPattern,
+		'kody_bc_[redacted]',
+	)
+}
+
+export function redactKodyCredentialsDeep(value: unknown): unknown {
+	if (typeof value === 'string') return redactKodyCredentials(value)
+	if (Array.isArray(value)) return value.map(redactKodyCredentialsDeep)
+	if (value === null || typeof value !== 'object') return value
+
+	const prototype = Object.getPrototypeOf(value)
+	if (prototype !== Object.prototype && prototype !== null) return value
+
+	const redacted: Record<string, unknown> = Object.create(prototype)
+	for (const [key, nestedValue] of Object.entries(value)) {
+		Object.defineProperty(redacted, key, {
+			configurable: true,
+			enumerable: true,
+			value: redactKodyCredentialsDeep(nestedValue),
+			writable: true,
+		})
+	}
+	return redacted
 }
 
 export function readBearerApiToken(authorization: string | null) {

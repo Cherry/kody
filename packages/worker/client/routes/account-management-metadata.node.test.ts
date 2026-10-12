@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { jsx } from 'remix/component/jsx-runtime'
 import { renderToString } from 'remix/component/server'
 import { expect, test } from 'vitest'
+import { AppSessionProvider } from '#client/app-session-context.tsx'
 import { AppLoaderDataProvider } from '#client/loader-data-context.tsx'
 import { RouterLocationProvider } from '#client/router-location.tsx'
 import { AdminCommunityReportsRoute } from '#client/routes/admin-community-reports.tsx'
@@ -15,6 +16,7 @@ import {
 	MetadataGrid,
 	TimestampValue,
 } from '#client/routes/account-management-components.tsx'
+import { type SessionInfo } from '#client/session.ts'
 import { routes } from '#universal/routes.ts'
 
 /**
@@ -100,7 +102,7 @@ test('inline link nav stays in flow and is not a second account rail', async () 
 	const railHtml = await renderToString(
 		jsx(AccountManagementLinkNav, {
 			label: 'Admin sections',
-			items,
+			groups: [{ label: null, items }],
 		}),
 	)
 	expect(railHtml).toContain('data-account-nav')
@@ -133,6 +135,35 @@ test('inline link nav stays in flow and is not a second account rail', async () 
 	expect(readRulesFor(inlineHtml, 'nav')).not.toContain('position: absolute')
 })
 
+test('grouped rail names its groups and whose settings they are', async () => {
+	const html = await renderToString(
+		jsx(AccountManagementLinkNav, {
+			label: 'Workspace sections',
+			heading: { eyebrow: 'Workspace', name: '@jane' },
+			groups: [
+				{
+					label: 'Build',
+					items: [
+						{ href: '/@jane/-/packages', label: 'Repositories', active: true },
+					],
+				},
+				{
+					label: 'Data',
+					items: [
+						{ href: '/@jane/-/secrets', label: 'Secrets', active: false },
+					],
+				},
+			],
+		}),
+	)
+	expect(html).toContain('>Workspace</span>')
+	expect(html).toContain('>@jane</span>')
+	expect(html).toContain('role="group" aria-label="Build"')
+	expect(html).toContain('role="group" aria-label="Data"')
+	// The phone summary names the workspace and the current section.
+	expect(html).toMatch(/<summary>[\s\S]*?>@jane<\/span>[\s\S]*?>Repositories</)
+})
+
 test('account shell grows into main so a short page has no band above the footer', async () => {
 	const shellHtml = await renderToString(
 		jsx(AccountManagementShell, { children: jsx('p', { children: 'Short' }) }),
@@ -141,6 +172,11 @@ test('account shell grows into main so a short page has no band above the footer
 	expect(shellRules).toContain('flex-grow: 1')
 	expect(shellRules).toContain('width: 100%')
 	expect(shellRules).toContain('align-content: start')
+	// With a rail, the shell is at least as tall as the rail's measured link
+	// column, so a short page never hides links behind an inner scroll.
+	expect(shellHtml).toContain(
+		'min-height: calc(var(--account-rail-height, 0px)',
+	)
 
 	// `<main>` keeps growing in the 100vh app frame (sticky footer) and hands
 	// that growth to the shell through a flex column.
@@ -173,16 +209,65 @@ test('community reports page keeps one admin rail and an in-flow status filter',
 	expect(html).toContain('href="/admin/community-reports?status=resolved"')
 })
 
+test('team settings rail names the URL org when the session list is personal-only', async () => {
+	const session: SessionInfo = {
+		email: 'ada@example.com',
+		emailVerified: true,
+		emailVerificationDelivery: null,
+		username: 'ada',
+		avatarUrl: null,
+		roles: [],
+		permissions: [],
+		featureFlags: {} as SessionInfo['featureFlags'],
+		organizations: [
+			{
+				slug: 'ada',
+				displayName: 'Ada',
+				role: 'owner',
+				personal: true,
+			},
+		],
+		lastUsedOrganization: 'ada',
+	}
+	const html = await renderToString(
+		jsx(RouterLocationProvider, {
+			url: '/@acme/-/settings',
+			children: jsx(AppSessionProvider, {
+				session,
+				status: 'ready',
+				children: jsx(AccountPageHeader, {
+					title: 'Settings',
+					description: 'Organization settings.',
+					currentHref: '/@acme/-/settings',
+				}),
+			}),
+		}),
+	)
+	// Heading and Organization rail follow the URL org (member-shaped when
+	// the session list omitted the team — no Billing).
+	expect(html).toContain('>@acme<')
+	expect(html).toContain('href="/@acme/-/settings"')
+	expect(html).toContain('href="/@acme/-/members"')
+	expect(html).toContain('aria-label="Organization"')
+	expect(html).not.toContain('href="/@acme/-/billing"')
+	expect(html).toContain('href="/@acme/-/packages"')
+	expect(html).toContain('href="/@acme/-/jobs"')
+	expect(html).toContain('href="/@acme/-/connections"')
+	expect(html).toContain('href="/@acme/-/secrets"')
+	// No personal workspace links leak onto the team URL.
+	expect(html).not.toContain('href="/@ada/-/')
+})
+
 test('account page header puts the phone section menu above the heading', async () => {
 	const connectionsHtml = await renderToString(
 		jsx(AccountPageHeader, {
 			title: 'Connections',
 			description:
 				'The agents connected to this Kody account, and how to connect another.',
-			currentHref: routes.accountConnections.href(),
+			currentHref: '/account/connections',
 		}),
 	)
-	const menu = connectionsHtml.indexOf('>Account sections</span>')
+	const menu = connectionsHtml.indexOf('>Workspace</span>')
 	const heading = connectionsHtml.indexOf('<h1')
 	const trigger = connectionsHtml.indexOf(
 		'data-entity-explainer-trigger="connections"',
@@ -199,11 +284,12 @@ test('account page header puts the phone section menu above the heading', async 
 		jsx(AccountPageHeader, {
 			title: 'Billing',
 			description: 'Plan and invoices.',
-			currentHref: routes.accountBilling.href(),
+			currentHref: '/account/billing',
 		}),
 	)
 	expect(billingHtml.indexOf('<h1')).toBeGreaterThan(
-		billingHtml.indexOf('>Account sections</span>'),
+		billingHtml.indexOf('>Workspace</span>'),
 	)
+	expect(billingHtml).toContain('aria-label="Workspace sections"')
 	expect(billingHtml).not.toContain('data-entity-explainer')
 })

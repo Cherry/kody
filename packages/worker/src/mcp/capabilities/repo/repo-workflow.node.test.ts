@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import type * as RepoSessions from '#worker/repo/repo-sessions.ts'
@@ -7,9 +11,10 @@ const mockModule = vi.hoisted(() => ({
 	countActiveRepoSessions: vi.fn<typeof RepoSessions.countActiveRepoSessions>(
 		async () => 0,
 	),
+	getRepoSessionById: vi.fn(),
 	getEntitySourceByIdForUser: vi.fn(),
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 	repoSessionRpc: vi.fn(),
 }))
 
@@ -19,6 +24,8 @@ vi.mock('#worker/repo/repo-sessions.ts', () => ({
 	countActiveRepoSessions: (
 		...args: Parameters<typeof RepoSessions.countActiveRepoSessions>
 	) => mockModule.countActiveRepoSessions(...args),
+	getRepoSessionById: (...args: Array<unknown>) =>
+		mockModule.getRepoSessionById(...args),
 }))
 
 vi.mock('#worker/repo/entity-sources.ts', () => ({
@@ -29,8 +36,8 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 vi.mock('#worker/repo/repo-session-rpc.ts', () => ({
@@ -60,9 +67,10 @@ const ctx = {
 		},
 	} as unknown as Env,
 	callerContext: createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://heykody.dev',
 		user: {
-			userId: 'user-1',
+			userId: personIdFromStored('user-1'),
 			email: 'user@example.com',
 			displayName: 'user',
 		},
@@ -72,6 +80,17 @@ const ctx = {
 function setupRepoRpc() {
 	for (const mock of Object.values(mockModule)) mock.mockReset()
 	mockModule.countActiveRepoSessions.mockResolvedValue(0)
+	mockModule.getRepoSessionById.mockResolvedValue({
+		id: 'session-1',
+		user_id: ownerIdFromStored('user-1'),
+		source_id: 'source-package-1',
+	})
+	mockModule.getEntitySourceByIdForUser.mockResolvedValue({
+		id: 'source-package-1',
+		user_id: ownerIdFromStored('user-1'),
+		entity_kind: 'package',
+		entity_id: 'package-1',
+	})
 	const rpc = {
 		openSession: vi.fn(),
 		getSessionInfo: vi.fn(),
@@ -111,9 +130,9 @@ function sessionInfo(overrides: Record<string, unknown> = {}) {
 }
 
 function stubPackageLookup(sourceOverrides: Record<string, unknown> = {}) {
-	mockModule.getSavedPackageByKodyId.mockResolvedValueOnce({
+	mockModule.resolveSavedPackageRef.mockResolvedValueOnce({
 		id: 'package-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: '@kody/triage-github-pr',
 		kodyId: 'triage-github-pr',
 		description: 'Triages one PR',
@@ -128,7 +147,7 @@ function stubPackageLookup(sourceOverrides: Record<string, unknown> = {}) {
 	})
 	mockModule.getEntitySourceByIdForUser.mockResolvedValueOnce({
 		id: 'source-package-1',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package',
 		entity_id: 'package-1',
 		repo_id: 'repo-package-1',
@@ -163,7 +182,7 @@ test('repo open session workflow and conversation conflict guard', async () => {
 	expect(openRpc.openSession).toHaveBeenCalledWith(
 		expect.objectContaining({
 			sourceId: 'source-package-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			sourceRoot: '/',
 		}),
 	)
@@ -252,7 +271,7 @@ test('repo edit → commit → checks → publish session workflow', async () =>
 
 	expect(rpc.applyEdits).toHaveBeenCalledWith({
 		sessionId: 'session-existing',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		edits,
 		dryRun: true,
 		rollbackOnError: false,
@@ -261,7 +280,7 @@ test('repo edit → commit → checks → publish session workflow', async () =>
 	expect(edited.dry_run).toBe(true)
 	expect(rpc.sessionCommit).toHaveBeenCalledWith({
 		sessionId: 'session-existing',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		message: 'Update index',
 	})
 	expect(committed).toEqual({
@@ -335,7 +354,7 @@ test('repoPublishSession covers base_moved repair, artifact rebuild, and rebuild
 	})
 	expect(publishRpc.publishSession).toHaveBeenCalledWith({
 		sessionId: 'session-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		rebuildPackageArtifacts: false,
 		expectedPackageScope: 'user',
 		privateVisibilityChangeConfirmed: false,
@@ -343,7 +362,7 @@ test('repoPublishSession covers base_moved repair, artifact rebuild, and rebuild
 	expect(publishRpc.rebuildPublishedPackageArtifact).toHaveBeenCalledWith({
 		sessionId: 'session-1',
 		sourceId: 'source-package-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		publishedCommit: 'commit-new',
 		target,
 		baseUrl: 'https://heykody.dev',

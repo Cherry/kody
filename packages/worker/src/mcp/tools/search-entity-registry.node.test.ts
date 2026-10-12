@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { type JoinedIntegration } from '#worker/integrations/types.ts'
 
@@ -12,7 +13,7 @@ function createPackageRow(): PackageSearchRow {
 	return {
 		record: {
 			id: 'pkg-1',
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name: '@user/weather',
 			kodyId: 'weather',
 			description: 'Weather package',
@@ -20,6 +21,7 @@ function createPackageRow(): PackageSearchRow {
 			searchText: null,
 			sourceId: 'source-1',
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: false,
 			lockedAt: null,
@@ -79,6 +81,7 @@ function createJoinedIntegration(input: {
 		},
 		connection: {
 			userId,
+			credentialId: 'cred-integration',
 			name: input.name,
 			appSlug,
 			platformAppSlug: null,
@@ -121,6 +124,7 @@ test('descriptor seam follows registry order and preserves integration affinity'
 			],
 			userSecretRows: [
 				{
+					credentialId: 'cred-weather_api_key',
 					name: 'weather_api_key',
 					description: 'Weather API key',
 					scope: 'user',

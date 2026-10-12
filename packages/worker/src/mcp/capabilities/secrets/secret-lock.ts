@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -8,11 +9,13 @@ import {
 	createSecretPackageGrantAlreadyPresentMessage,
 	createSecretPackageGrantRequiresWebsiteMessage,
 } from '#mcp/secrets/errors.ts'
+import { resolveSecretPageOrgSlug } from '#mcp/secrets/package-access.ts'
 import {
 	buildSecretPackageApprovalUrl,
 	buildSecretUsageUrl,
 } from '#mcp/secrets/package-approval-url.ts'
 import { inspectUserSecretPackageGrant } from '#mcp/secrets/service.ts'
+import { authorizeSecret } from './authorize-secret.ts'
 
 const outputSchema = z.object({
 	name: z.string(),
@@ -28,8 +31,9 @@ export const secretLockCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretLock',
+		orgPermission: 'secret:use',
 		description:
-			'Return a website approval URL so the account owner can grant a user-scoped secret to a saved package (one-click Allow, same spirit as /connect/secrets host approval). This capability does not change allowed_packages. Send the approval_url to the user and wait; never treat this call as a grant. Only the owner can add a grant at /account/secrets/approve or the secret editor. Removing a grant is also website-only. User secrets still allow execute and self-authored / adopted packages to read unless the owner tightens further on the account page. secretSet cannot change allowed_packages.',
+			'Return a website approval URL so the account owner can grant a user-scoped secret to a saved package (one-click Allow, same spirit as /connect/secrets host approval). This capability does not change allowed_packages. Send the approval_url to the user and wait; never treat this call as a grant. Only the owner can add a grant at /@<slug>/-/secrets/approve or the secret editor. Removing a grant is also website-only. User secrets still allow execute and self-authored / adopted packages to read unless the owner tightens further on the account page. secretSet cannot change allowed_packages.',
 		keywords: [
 			'secret',
 			'lock',
@@ -55,16 +59,31 @@ export const secretLockCapability = defineDomainCapability(
 			args: { name: string; package_id: string },
 			ctx: CapabilityContext,
 		) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeSecret(ctx, 'secret:use', {
+				name: args.name,
+				scope: 'user',
+			})
 			try {
 				const state = await inspectUserSecretPackageGrant({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					name: args.name,
 					packageId: args.package_id,
 				})
+				const orgSlug = await resolveSecretPageOrgSlug({
+					db: ctx.env.APP_DB,
+					userId: ownerIdFromCaller(ctx.callerContext),
+					caller: ctx.callerContext,
+				})
+				if (!orgSlug) {
+					throw new McpCallerError(
+						'Unable to build a secrets page URL because this account has no org slug.',
+					)
+				}
 				const approvalUrl = buildSecretPackageApprovalUrl({
 					baseUrl: ctx.callerContext.baseUrl,
+					orgSlug,
 					name: state.secret.name,
 					scope: 'user',
 					packageId: state.savedPackage.id,
@@ -73,6 +92,7 @@ export const secretLockCapability = defineDomainCapability(
 				})
 				const usageUrl = buildSecretUsageUrl({
 					baseUrl: ctx.callerContext.baseUrl,
+					orgSlug,
 					name: state.secret.name,
 				})
 				if (state.alreadyGranted) {

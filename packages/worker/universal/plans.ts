@@ -15,11 +15,11 @@
  * Standard/Pro ceilings have two ladders: {@link planLimits} is the
  * 2026-09 table (Standard $12 and Pro $49 subscribers, now retired from
  * checkout). {@link legacyPlanLimits} applies only while
- * `users.entitlement_ladder = 'legacy'` and paid access stays continuous.
+ * `orgs.entitlement_ladder = 'legacy'` and paid access stays continuous.
  *
  * The purchasable Pro (Stripe `STRIPE_PRO_PRICE_ID`, $12) uses
  * {@link proCreditsPlanLimits} and carries the prepaid credit wallet
- * (`users.stripe_credits_eligible`). See {@link CreditWalletState}.
+ * (`orgs.stripe_credits_eligible`). See {@link CreditWalletState}.
  */
 
 export const planNames = ['free', 'standard', 'pro', 'max'] as const
@@ -39,7 +39,7 @@ export function parsePlanName(value: unknown): PlanName | null {
 }
 
 /**
- * Parse a plan value read from a stored `users.plan` (or equivalent) column.
+ * Parse a plan value read from a stored `orgs.plan` column.
  *
  * Unlike {@link parsePlanName}, which returns null for expected invalid
  * untrusted input, this helper throws when persisted data violates the schema
@@ -53,7 +53,7 @@ export function parseStoredPlanName(value: unknown): PlanName {
 
 /**
  * Parse a plan name that may come from Stripe subscription metadata
- * (`kody_plan`) or `users.stripe_plan`. `max` is manual-only (never
+ * (`kody_plan`) or `orgs.stripe_plan`. `max` is manual-only (never
  * purchasable or Stripe-sourced); unknown values contribute nothing.
  */
 export function parseStripePlanName(value: unknown): PlanName | null {
@@ -157,7 +157,7 @@ const entitlementLadders = ['public', 'legacy'] as const
 export type EntitlementLadder = (typeof entitlementLadders)[number]
 
 /**
- * Parse a stored `users.entitlement_ladder` value. Missing/blank values
+ * Parse a stored `orgs.entitlement_ladder` value. Missing/blank values
  * (pre-migration test fixtures) resolve to `public`. Unexpected values
  * throw without echoing the raw value.
  */
@@ -184,7 +184,7 @@ function normalizeStripePriceId(value: string | null | undefined): string {
  * Drop `legacy` when continuous paid access ends, or when the granting
  * Stripe subscription changes plan, price, product, or interval. Same-plan
  * auto-renew (same price id) keeps `legacy`. The first Stripe refresh after
- * `users.stripe_price_id` is added writes the current price without treating
+ * `orgs.stripe_price_id` is added writes the current price without treating
  * an empty previous value as a change. Never promotes `public` to `legacy`
  * — only the one-shot backfill writes that marker.
  */
@@ -217,7 +217,8 @@ export function resolveEntitlementLadderAfterPaidAccessChange(input: {
 /**
  * Prepaid credit wallet state for limit resolution. Purchasable Pro bills
  * include → credits → stop: the subscription covers the include, usage past
- * it runs on credits, and at $0 usage past the include stops.
+ * it runs on credits, and at $0 usage past the include stops. A Pro account
+ * never drops below its include.
  *
  * - `none` — not wallet-eligible (Free, retired Standard/Pro, gift/referral
  *   Pro overlays, manual grants, `max`). Credits are never used or debited;
@@ -240,6 +241,17 @@ export type UserEntitlement = {
 	plan: PlanName
 	ladder: EntitlementLadder
 	creditWallet: CreditWalletState
+	/**
+	 * Live paid seats (owners + members, at least 1). Scales the execute
+	 * runaway brake on every plan and the credits rate pool when the org is
+	 * wallet-eligible. Absent means one seat.
+	 */
+	seats?: number
+	/**
+	 * Admin per-org limit overrides ({@link applyLimitOverrides}). Absent
+	 * or empty means plan limits only.
+	 */
+	limitOverrides?: ReadonlyArray<LimitOverride>
 }
 
 /**
@@ -286,16 +298,21 @@ export type PlanLimits = {
 	maxStorageBytes: number
 	/** Maximum concurrently active workflow runs. */
 	maxConcurrentWorkflows: number
-	/** Maximum MCP execute-tool runs per UTC day. */
-	maxExecuteCallsPerDay: number
 	/**
-	 * Maximum MCP execute-tool runs per UTC week (Monday–Sunday). `null`
+	 * Maximum unique sandbox workers MCP execute loads per UTC day: one per
+	 * distinct module graph per day (`dynamic_worker_day` on the execute
+	 * surface), which is what Cloudflare bills. Repeats of code already
+	 * loaded today are free.
+	 */
+	maxExecuteUniqueWorkersPerDay: number
+	/**
+	 * Maximum unique execute workers per UTC week (Monday–Sunday). `null`
 	 * means no weekly window — daily is the only hard cap. Public
 	 * Free/Standard/Pro set a weekly total so a 1–2 day burst cannot spend
 	 * a full week of daily headroom. `max` and legacy Standard/Pro leave
 	 * this unset so their daily-only behavior stays unchanged.
 	 */
-	maxExecuteCallsPerWeek: number | null
+	maxExecuteUniqueWorkersPerWeek: number | null
 	/**
 	 * Maximum sandbox outbound fetches (through the fetch gateway) per UTC
 	 * day. Bounds cost abuse and third-party hammering from user code; the
@@ -306,7 +323,7 @@ export type PlanLimits = {
 	/**
 	 * Maximum sandbox outbound fetches per UTC week (Monday–Sunday).
 	 * `null` means no weekly window. Same public-vs-legacy/`max` rule as
-	 * {@link PlanLimits.maxExecuteCallsPerWeek}.
+	 * {@link PlanLimits.maxExecuteUniqueWorkersPerWeek}.
 	 */
 	maxOutboundFetchesPerWeek: number | null
 	/**
@@ -319,13 +336,20 @@ export type PlanLimits = {
 	 * Maximum always-on automation invocations per UTC day: inbound
 	 * webhooks, HTTP package-export invocations, package subscriptions,
 	 * and package-backed workflow steps. Sibling of
-	 * {@link PlanLimits.maxExecuteCallsPerDay} (MCP execute only) and
+	 * {@link PlanLimits.maxExecuteUniqueWorkersPerDay} (MCP execute only) and
 	 * {@link PlanLimits.maxJobRunsPerDay} (scheduled jobs). Daily only —
 	 * no weekly window. Public Free sits modestly above job runs. Public
 	 * Standard, Pro, and `max` are burst-friendly above job runs. Legacy
 	 * Standard/Pro stay at the earlier job-matched ceilings.
 	 */
 	maxAutomationInvocationsPerDay: number
+	/**
+	 * Hosted execute runaway brake: calls one org may start per UTC minute
+	 * (repeats and failures included). The table holds the per-seat base
+	 * ({@link executeCallsPerMinutePerSeat}); {@link resolvePlanLimits}
+	 * multiplies by paid seats. Not credits-unlocked.
+	 */
+	maxExecuteCallsPerMinute: number
 	/**
 	 * Fastest allowed recurring job interval on this plan. `0` means no extra
 	 * floor beyond the schedule itself. Enforced when a schedule is created
@@ -363,13 +387,20 @@ export const entitlementResources = [
 	'secrets',
 	'storage_bytes',
 	'concurrent_workflows',
-	'execute_calls_per_day',
+	'execute_unique_workers_per_day',
 	'outbound_fetches_per_day',
 	'job_runs_per_day',
 	'automation_invocations_per_day',
+	'execute_calls_per_minute',
 ] as const
 
 export type EntitlementResource = (typeof entitlementResources)[number]
+
+/**
+ * Per-seat base for the hosted execute runaway brake. The org limit is
+ * this times paid seats (at least one), then admin overrides may raise it.
+ */
+export const executeCallsPerMinutePerSeat = 300
 
 /** Human-readable resource labels used in the shared error message. */
 export const entitlementResourceLabels: Record<EntitlementResource, string> = {
@@ -384,11 +415,67 @@ export const entitlementResourceLabels: Record<EntitlementResource, string> = {
 	secrets: 'secrets',
 	storage_bytes: 'storage bytes',
 	concurrent_workflows: 'concurrent workflows',
-	execute_calls_per_day: 'execute calls per day',
+	execute_unique_workers_per_day: 'unique execute workers per day',
 	outbound_fetches_per_day: 'outbound fetches per day',
 	job_runs_per_day: 'job runs per day',
 	automation_invocations_per_day: 'automation invocations per day',
+	execute_calls_per_minute: 'execute calls per minute',
 }
+
+/**
+ * How each resource counts usage. `utc_day` meters reset at 00:00 UTC
+ * (execute and outbound also keep a Monday-start UTC week). `standing`
+ * counts are what exists right now and drop when items are removed or
+ * finish. `per_item` caps bound a single request and never accumulate.
+ * `utc_minute` brakes count calls in the current UTC clock minute and reset
+ * when the next minute starts.
+ */
+export type EntitlementResourceWindow =
+	| 'utc_day'
+	| 'standing'
+	| 'per_item'
+	| 'utc_minute'
+
+export const entitlementResourceWindows = {
+	repos: 'standing',
+	saved_packages: 'standing',
+	scheduled_jobs: 'standing',
+	repo_sessions: 'standing',
+	email_sends_per_day: 'utc_day',
+	email_receives_per_day: 'utc_day',
+	stored_email_messages: 'standing',
+	email_message_bytes: 'per_item',
+	secrets: 'standing',
+	storage_bytes: 'standing',
+	concurrent_workflows: 'standing',
+	execute_unique_workers_per_day: 'utc_day',
+	outbound_fetches_per_day: 'utc_day',
+	job_runs_per_day: 'utc_day',
+	automation_invocations_per_day: 'utc_day',
+	execute_calls_per_minute: 'utc_minute',
+} as const satisfies Record<EntitlementResource, EntitlementResourceWindow>
+
+export type DailyEntitlementResource = {
+	[
+		Resource in EntitlementResource
+	]: (typeof entitlementResourceWindows)[Resource] extends 'utc_day'
+		? Resource
+		: never
+}[EntitlementResource]
+
+export function isDailyEntitlementResource(
+	resource: string,
+): resource is DailyEntitlementResource {
+	return (
+		Object.hasOwn(entitlementResourceWindows, resource) &&
+		entitlementResourceWindows[resource as EntitlementResource] === 'utc_day'
+	)
+}
+
+/** Resources metered per UTC day, in {@link entitlementResources} order. */
+export const dailyEntitlementResources = entitlementResources.filter(
+	isDailyEntitlementResource,
+) as [DailyEntitlementResource, ...Array<DailyEntitlementResource>]
 
 /**
  * Email caps for the first-class `max` plan. Email is abuse-sensitive in
@@ -454,16 +541,17 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 		// Concurrent active runs (not lifetime or daily). One at a time on
 		// free; a second deferred workflow is the upgrade nudge.
 		maxConcurrentWorkflows: 1,
-		// Unique execute is the Dynamic Worker bill. Daily headroom covers a
-		// bursty agent morning; the weekly total keeps a free account from
-		// spending a full week of that headroom every day.
-		maxExecuteCallsPerDay: 150,
-		maxExecuteCallsPerWeek: 400,
+		// Unique execute workers are the Dynamic Worker bill. Daily headroom
+		// covers a bursty agent morning; the weekly total keeps a free account
+		// from spending a full week of that headroom every day.
+		maxExecuteUniqueWorkersPerDay: 150,
+		maxExecuteUniqueWorkersPerWeek: 400,
 		maxOutboundFetchesPerDay: 1_000,
 		maxOutboundFetchesPerWeek: 2_500,
 		maxJobRunsPerDay: 500,
 		// Modestly above job runs (500).
 		maxAutomationInvocationsPerDay: 1_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 15 * 60 * 1000,
 		maxUniqueWorkerDaysPerMonth: 50,
 		maxDurableObjectRowsReadPerMonth: 500_000_000,
@@ -483,13 +571,14 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 		// Public Standard execute is a try-paid rung with bursty daily
 		// headroom and a weekly total. Continuous pre-cut subscribers keep
 		// {@link legacyPlanLimits} (daily-only, no weekly window).
-		maxExecuteCallsPerDay: 500,
-		maxExecuteCallsPerWeek: 1_200,
+		maxExecuteUniqueWorkersPerDay: 500,
+		maxExecuteUniqueWorkersPerWeek: 1_200,
 		maxOutboundFetchesPerDay: 15_000,
 		maxOutboundFetchesPerWeek: 40_000,
 		maxJobRunsPerDay: 1_500,
 		// Burst-friendly above job runs (1_500).
 		maxAutomationInvocationsPerDay: 10_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 15 * 60 * 1000,
 		maxUniqueWorkerDaysPerMonth: 350,
 		maxDurableObjectRowsReadPerMonth: 5_000_000_000,
@@ -507,13 +596,14 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 		maxStorageBytes: 5 * 1024 * 1024 * 1024,
 		maxConcurrentWorkflows: 50,
 		// Retired $49 Pro. Execute is a hard daily + weekly cap.
-		maxExecuteCallsPerDay: 1_500,
-		maxExecuteCallsPerWeek: 4_000,
+		maxExecuteUniqueWorkersPerDay: 1_500,
+		maxExecuteUniqueWorkersPerWeek: 4_000,
 		maxOutboundFetchesPerDay: 50_000,
 		maxOutboundFetchesPerWeek: 120_000,
 		maxJobRunsPerDay: 8_000,
 		// Burst-friendly above job runs (8_000).
 		maxAutomationInvocationsPerDay: 50_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 5 * 60 * 1000,
 		maxUniqueWorkerDaysPerMonth: 2_000,
 		maxDurableObjectRowsReadPerMonth: 20_000_000_000,
@@ -541,11 +631,13 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 		// Operator runaway cap. kentcdodds August 2026 rollup avg ~3,800
 		// execute/day (116k/month); entitlement meter today ~1,810. Daily
 		// peak is not stored; 25,000 is at least 2× a ~12,500 peak (~3×
-		// August avg). Unique-DW ceiling is $50/day ($0.002 × 25,000).
-		maxExecuteCallsPerDay: 25_000,
-		maxExecuteCallsPerWeek: null,
-		// 2× pro (40_000). Today's fetch spike (~17,000) stays well under.
-		maxOutboundFetchesPerDay: 80_000,
+		// August avg). Unique-DW ceiling is $50/day ($0.002 × 25,000). Sized
+		// against calls; unique workers are never more than calls.
+		maxExecuteUniqueWorkersPerDay: 25_000,
+		maxExecuteUniqueWorkersPerWeek: null,
+		// 50× the purchasable Pro include (15_000), so the funded credits
+		// ceiling per seat matches the 50× multiplier like execute does.
+		maxOutboundFetchesPerDay: 750_000,
 		maxOutboundFetchesPerWeek: null,
 		// 2× the previous public Pro (20_000). Busy days are ~1,500–1,700
 		// job runs. `max` ceilings stay on that earlier Pro table; they
@@ -553,6 +645,7 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 		maxJobRunsPerDay: 40_000,
 		// Burst-friendly above job runs (40_000).
 		maxAutomationInvocationsPerDay: 200_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 0,
 		maxUniqueWorkerDaysPerMonth: 25_000,
 		// Dominates public Pro (20B). Operator cap only.
@@ -562,7 +655,7 @@ export const planLimits: Record<PlanName, PlanLimits> = {
 
 /**
  * Pre-cut Standard/Pro ceilings. Applied only when
- * `users.entitlement_ladder = 'legacy'` and the effective plan is
+ * `orgs.entitlement_ladder = 'legacy'` and the effective plan is
  * `standard` or `pro`. Free and `max` always use {@link planLimits}.
  * Unique-worker-day and Durable Object rows-read includes match the
  * public table. Those allotments are not hard-cut and not charged for
@@ -582,12 +675,13 @@ export const legacyPlanLimits: Record<'standard' | 'pro', PlanLimits> = {
 		maxSecrets: 100,
 		maxStorageBytes: 1024 * 1024 * 1024,
 		maxConcurrentWorkflows: 50,
-		maxExecuteCallsPerDay: 500,
-		maxExecuteCallsPerWeek: null,
+		maxExecuteUniqueWorkersPerDay: 500,
+		maxExecuteUniqueWorkersPerWeek: null,
 		maxOutboundFetchesPerDay: 20_000,
 		maxOutboundFetchesPerWeek: null,
 		maxJobRunsPerDay: 10_000,
 		maxAutomationInvocationsPerDay: 10_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 0,
 		maxUniqueWorkerDaysPerMonth: 350,
 		maxDurableObjectRowsReadPerMonth: 5_000_000_000,
@@ -604,12 +698,13 @@ export const legacyPlanLimits: Record<'standard' | 'pro', PlanLimits> = {
 		maxSecrets: 200,
 		maxStorageBytes: 5 * 1024 * 1024 * 1024,
 		maxConcurrentWorkflows: 100,
-		maxExecuteCallsPerDay: 800,
-		maxExecuteCallsPerWeek: null,
+		maxExecuteUniqueWorkersPerDay: 800,
+		maxExecuteUniqueWorkersPerWeek: null,
 		maxOutboundFetchesPerDay: 40_000,
 		maxOutboundFetchesPerWeek: null,
 		maxJobRunsPerDay: 20_000,
 		maxAutomationInvocationsPerDay: 20_000,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat,
 		minJobIntervalMs: 0,
 		maxUniqueWorkerDaysPerMonth: 2_000,
 		maxDurableObjectRowsReadPerMonth: 20_000_000_000,
@@ -640,8 +735,9 @@ export const proCreditsPlanLimits: PlanLimits = {
 
 /**
  * How far credits carry the rate/compute include: up to this multiple of
- * the Pro include, capped at the `max` operator ceilings (daily only: `max`
- * has no weekly window). Applies only while the wallet is funded, so an
+ * the org's seat-pooled Pro include, capped at the `max` operator ceilings
+ * times seats ({@link creditsCeilingScalesWithSeats}; weekly is seven
+ * capped days). Applies only while the wallet is funded, so an
  * empty wallet stops at the include (include → credits → stop). Stock,
  * concurrency, email caps, UWD/DO includes, and the job interval floor stay
  * on {@link proCreditsPlanLimits}. Customer copy calls this a ceiling on how
@@ -650,8 +746,8 @@ export const proCreditsPlanLimits: PlanLimits = {
 export const creditsUnlockMultiplier = 50
 
 const creditsUnlockedLimitFields = [
-	'maxExecuteCallsPerDay',
-	'maxExecuteCallsPerWeek',
+	'maxExecuteUniqueWorkersPerDay',
+	'maxExecuteUniqueWorkersPerWeek',
 	'maxOutboundFetchesPerDay',
 	'maxOutboundFetchesPerWeek',
 	'maxJobRunsPerDay',
@@ -660,7 +756,7 @@ const creditsUnlockedLimitFields = [
 
 /** Entitlement resources credits can carry past the include (rates only). */
 export const creditsUnlockedResources = [
-	'execute_calls_per_day',
+	'execute_unique_workers_per_day',
 	'outbound_fetches_per_day',
 	'job_runs_per_day',
 	'automation_invocations_per_day',
@@ -681,7 +777,7 @@ export function isCreditsUnlockedResource(
  * admitted, and failing them mid-run would strand half-done work.
  */
 const pastIncludeStopResources = [
-	'execute_calls_per_day',
+	'execute_unique_workers_per_day',
 	'job_runs_per_day',
 	'automation_invocations_per_day',
 ] as const satisfies ReadonlyArray<EntitlementResource>
@@ -692,66 +788,122 @@ export function isPastIncludeStopResource(
 	return (pastIncludeStopResources as ReadonlyArray<string>).includes(resource)
 }
 
-function unlockCreditsLimits(limits: PlanLimits): PlanLimits {
-	const scale = (value: number, ceiling: number) =>
-		Math.min(value * creditsUnlockMultiplier, ceiling)
-	// A week can never exceed seven capped days, so the weekly ceiling is
-	// bounded by the daily one (otherwise the credits page shows a number
-	// no one can reach).
-	const scaleWeekly = (value: number | null, dailyCeiling: number) =>
-		value === null
-			? null
-			: Math.min(value * creditsUnlockMultiplier, dailyCeiling * 7)
-	const ceiling = planLimits.max
-	return {
-		...limits,
-		maxExecuteCallsPerDay: scale(
-			limits.maxExecuteCallsPerDay,
-			ceiling.maxExecuteCallsPerDay,
-		),
-		maxExecuteCallsPerWeek: scaleWeekly(
-			limits.maxExecuteCallsPerWeek,
-			ceiling.maxExecuteCallsPerDay,
-		),
-		maxOutboundFetchesPerDay: scale(
-			limits.maxOutboundFetchesPerDay,
-			ceiling.maxOutboundFetchesPerDay,
-		),
-		maxOutboundFetchesPerWeek: scaleWeekly(
-			limits.maxOutboundFetchesPerWeek,
-			ceiling.maxOutboundFetchesPerDay,
-		),
-		maxJobRunsPerDay: scale(limits.maxJobRunsPerDay, ceiling.maxJobRunsPerDay),
-		maxAutomationInvocationsPerDay: scale(
-			limits.maxAutomationInvocationsPerDay,
-			ceiling.maxAutomationInvocationsPerDay,
-		),
-	} satisfies Record<(typeof creditsUnlockedLimitFields)[number], unknown> &
-		PlanLimits
+/**
+ * Whether the funded ceiling ({@link planLimits.max} rate fields) grows with
+ * paid seats like the include does. When true, a funded org runs up to
+ * seats × the per-seat ceiling (25,000 unique execute workers a day and
+ * 175,000 a week per seat, though 50× the weekly include binds first); when
+ * false, every org shares one ceiling.
+ */
+export const creditsCeilingScalesWithSeats = true
+
+type CreditsUnlockedLimitField = (typeof creditsUnlockedLimitFields)[number]
+
+function normalizeSeats(seats: number): number {
+	return Number.isFinite(seats) ? Math.max(1, Math.floor(seats)) : 1
 }
 
-const proCreditsUnlockedPlanLimits = unlockCreditsLimits(proCreditsPlanLimits)
+function mapCreditsUnlockedFields(
+	limits: PlanLimits,
+	map: (field: CreditsUnlockedLimitField, value: number) => number,
+): PlanLimits {
+	const next: PlanLimits = { ...limits }
+	for (const field of creditsUnlockedLimitFields) {
+		const value = limits[field]
+		if (value !== null) next[field] = map(field, value)
+	}
+	return next
+}
+
+/** The org's rate pool: each rate field of the include, times paid seats. */
+function scaleIncludeBySeats(limits: PlanLimits, seats: number): PlanLimits {
+	if (seats === 1) return limits
+	return mapCreditsUnlockedFields(limits, (_field, value) => value * seats)
+}
+
+/** Daily `max` ceiling for a credits-unlocked field (weekly maps to daily). */
+function dailyCeilingFor(field: CreditsUnlockedLimitField): number {
+	switch (field) {
+		case 'maxExecuteUniqueWorkersPerDay':
+		case 'maxExecuteUniqueWorkersPerWeek':
+			return planLimits.max.maxExecuteUniqueWorkersPerDay
+		case 'maxOutboundFetchesPerDay':
+		case 'maxOutboundFetchesPerWeek':
+			return planLimits.max.maxOutboundFetchesPerDay
+		case 'maxJobRunsPerDay':
+			return planLimits.max.maxJobRunsPerDay
+		case 'maxAutomationInvocationsPerDay':
+			return planLimits.max.maxAutomationInvocationsPerDay
+		default: {
+			const exhaustive: never = field
+			throw new Error(`Unknown credits field: ${String(exhaustive)}`)
+		}
+	}
+}
+
+function isWeeklyCreditsField(field: CreditsUnlockedLimitField): boolean {
+	return (
+		field === 'maxExecuteUniqueWorkersPerWeek' ||
+		field === 'maxOutboundFetchesPerWeek'
+	)
+}
+
+function unlockCreditsLimits(include: PlanLimits, seats: number): PlanLimits {
+	const ceilingSeats = creditsCeilingScalesWithSeats ? seats : 1
+	return mapCreditsUnlockedFields(include, (field, value) => {
+		// A week can never exceed seven capped days, so the weekly ceiling is
+		// bounded by the daily one (otherwise the credits page shows a number
+		// no one can reach).
+		const ceiling =
+			dailyCeilingFor(field) * (isWeeklyCreditsField(field) ? 7 : 1)
+		return Math.min(value * creditsUnlockMultiplier, ceiling * ceilingSeats)
+	})
+}
+
+const proCreditsUnlockedPlanLimits = unlockCreditsLimits(
+	proCreditsPlanLimits,
+	1,
+)
 
 /**
  * Resolve the full limit table for a plan. The purchasable Pro wallet
- * (`creditWallet` other than `none`) uses {@link proCreditsPlanLimits},
- * unlocked when funded. Legacy applies only to retired Standard/Pro; free
- * and `max` always use {@link planLimits}.
+ * (`creditWallet` other than `none`) uses {@link proCreditsPlanLimits} with
+ * its rate fields pooled across `seats` (one org-wide pool of seats × the
+ * per-seat include), unlocked when funded. Legacy applies only to retired
+ * Standard/Pro; free and `max` always use {@link planLimits} and ignore
+ * seats (a Free org is one pool).
  */
 export function resolvePlanLimits(
 	plan: PlanName,
 	ladder: EntitlementLadder = 'public',
 	creditWallet: CreditWalletState = 'none',
+	seats = 1,
 ): PlanLimits {
+	const paidSeats = normalizeSeats(seats)
+	let limits: PlanLimits
 	if (plan === 'pro' && creditWallet !== 'none') {
-		return creditWallet === 'funded'
-			? proCreditsUnlockedPlanLimits
-			: proCreditsPlanLimits
+		if (paidSeats === 1) {
+			limits =
+				creditWallet === 'funded'
+					? proCreditsUnlockedPlanLimits
+					: proCreditsPlanLimits
+		} else {
+			const include = scaleIncludeBySeats(proCreditsPlanLimits, paidSeats)
+			limits =
+				creditWallet === 'funded'
+					? unlockCreditsLimits(include, paidSeats)
+					: include
+		}
+	} else if (ladder === 'legacy' && (plan === 'standard' || plan === 'pro')) {
+		limits = legacyPlanLimits[plan]
+	} else {
+		limits = planLimits[plan]
 	}
-	if (ladder === 'legacy' && (plan === 'standard' || plan === 'pro')) {
-		return legacyPlanLimits[plan]
+	// Runaway brake: always seats × per-seat base (not credits-unlocked).
+	return {
+		...limits,
+		maxExecuteCallsPerMinute: executeCallsPerMinutePerSeat * paidSeats,
 	}
-	return planLimits[plan]
 }
 
 /**
@@ -795,8 +947,19 @@ export function resolvePlanLimit(
 	resource: EntitlementResource,
 	ladder: EntitlementLadder = 'public',
 	creditWallet: CreditWalletState = 'none',
+	seats = 1,
 ): number {
-	const limits = resolvePlanLimits(plan, ladder, creditWallet)
+	return limitForResource(
+		resolvePlanLimits(plan, ladder, creditWallet, seats),
+		resource,
+	)
+}
+
+/** The limit for one resource from a resolved limit table. */
+export function limitForResource(
+	limits: PlanLimits,
+	resource: EntitlementResource,
+): number {
 	switch (resource) {
 		case 'repos':
 			return limits.maxRepos
@@ -820,14 +983,16 @@ export function resolvePlanLimit(
 			return limits.maxStorageBytes
 		case 'concurrent_workflows':
 			return limits.maxConcurrentWorkflows
-		case 'execute_calls_per_day':
-			return limits.maxExecuteCallsPerDay
+		case 'execute_unique_workers_per_day':
+			return limits.maxExecuteUniqueWorkersPerDay
 		case 'outbound_fetches_per_day':
 			return limits.maxOutboundFetchesPerDay
 		case 'job_runs_per_day':
 			return limits.maxJobRunsPerDay
 		case 'automation_invocations_per_day':
 			return limits.maxAutomationInvocationsPerDay
+		case 'execute_calls_per_minute':
+			return limits.maxExecuteCallsPerMinute
 		default: {
 			const exhaustive: never = resource
 			throw new Error(`Unknown entitlement resource: ${String(exhaustive)}`)
@@ -837,7 +1002,7 @@ export function resolvePlanLimit(
 
 /** Daily resources that also have a public-ladder weekly hard cap. */
 const weeklyComputeWindowResources = [
-	'execute_calls_per_day',
+	'execute_unique_workers_per_day',
 	'outbound_fetches_per_day',
 ] as const satisfies ReadonlyArray<EntitlementResource>
 
@@ -869,12 +1034,23 @@ export function resolveWeeklyPlanLimit(
 	resource: EntitlementResource,
 	ladder: EntitlementLadder = 'public',
 	creditWallet: CreditWalletState = 'none',
+	seats = 1,
+): number | null {
+	return weeklyLimitForResource(
+		resolvePlanLimits(plan, ladder, creditWallet, seats),
+		resource,
+	)
+}
+
+/** The weekly window from a resolved limit table (`null` when none). */
+export function weeklyLimitForResource(
+	limits: PlanLimits,
+	resource: EntitlementResource,
 ): number | null {
 	if (!isWeeklyComputeWindowResource(resource)) return null
-	const limits = resolvePlanLimits(plan, ladder, creditWallet)
 	switch (resource) {
-		case 'execute_calls_per_day':
-			return limits.maxExecuteCallsPerWeek
+		case 'execute_unique_workers_per_day':
+			return limits.maxExecuteUniqueWorkersPerWeek
 		case 'outbound_fetches_per_day':
 			return limits.maxOutboundFetchesPerWeek
 		default: {
@@ -889,8 +1065,8 @@ export function weeklyEntitlementResourceLabel(
 	resource: WeeklyComputeWindowResource,
 ): string {
 	switch (resource) {
-		case 'execute_calls_per_day':
-			return 'execute calls this week'
+		case 'execute_unique_workers_per_day':
+			return 'unique execute workers this week'
 		case 'outbound_fetches_per_day':
 			return 'outbound fetches this week'
 		default: {
@@ -898,4 +1074,201 @@ export function weeklyEntitlementResourceLabel(
 			throw new Error(`Unknown weekly compute resource: ${String(exhaustive)}`)
 		}
 	}
+}
+
+/**
+ * Daily, weekly, and monthly caps an admin can override per org
+ * (`org_limit_overrides`). Stock, concurrency, per-message size, and the job
+ * interval floor are not overridable.
+ */
+export const limitOverrideKeys = [
+	'execute_unique_workers_per_day',
+	'execute_unique_workers_per_week',
+	'outbound_fetches_per_day',
+	'outbound_fetches_per_week',
+	'job_runs_per_day',
+	'automation_invocations_per_day',
+	'email_sends_per_day',
+	'email_receives_per_day',
+	'unique_worker_days_per_month',
+	'durable_object_rows_read_per_month',
+	'execute_calls_per_minute',
+] as const
+
+export type LimitOverrideKey = (typeof limitOverrideKeys)[number]
+
+export function parseLimitOverrideKey(value: unknown): LimitOverrideKey | null {
+	return typeof value === 'string' &&
+		(limitOverrideKeys as ReadonlyArray<string>).includes(value)
+		? (value as LimitOverrideKey)
+		: null
+}
+
+export const limitOverrideKeyLabels: Record<LimitOverrideKey, string> = {
+	execute_unique_workers_per_day: 'Unique execute workers per day',
+	execute_unique_workers_per_week: 'Unique execute workers per week',
+	outbound_fetches_per_day: 'Outbound fetches per day',
+	outbound_fetches_per_week: 'Outbound fetches per week',
+	job_runs_per_day: 'Job runs per day',
+	automation_invocations_per_day: 'Automation invocations per day',
+	email_sends_per_day: 'Email sends per day',
+	email_receives_per_day: 'Email receives per day',
+	unique_worker_days_per_month: 'Worker compute per month (stop at $0)',
+	durable_object_rows_read_per_month: 'Rows read per month (stop at $0)',
+	execute_calls_per_minute: 'Execute calls per minute',
+}
+
+type LimitOverrideField =
+	| 'maxExecuteUniqueWorkersPerDay'
+	| 'maxExecuteUniqueWorkersPerWeek'
+	| 'maxOutboundFetchesPerDay'
+	| 'maxOutboundFetchesPerWeek'
+	| 'maxJobRunsPerDay'
+	| 'maxAutomationInvocationsPerDay'
+	| 'maxEmailSendsPerDay'
+	| 'maxEmailReceivesPerDay'
+	| 'maxUniqueWorkerDaysPerMonth'
+	| 'maxDurableObjectRowsReadPerMonth'
+	| 'maxExecuteCallsPerMinute'
+
+function limitOverrideField(key: LimitOverrideKey): LimitOverrideField {
+	switch (key) {
+		case 'execute_unique_workers_per_day':
+			return 'maxExecuteUniqueWorkersPerDay'
+		case 'execute_unique_workers_per_week':
+			return 'maxExecuteUniqueWorkersPerWeek'
+		case 'outbound_fetches_per_day':
+			return 'maxOutboundFetchesPerDay'
+		case 'outbound_fetches_per_week':
+			return 'maxOutboundFetchesPerWeek'
+		case 'job_runs_per_day':
+			return 'maxJobRunsPerDay'
+		case 'automation_invocations_per_day':
+			return 'maxAutomationInvocationsPerDay'
+		case 'email_sends_per_day':
+			return 'maxEmailSendsPerDay'
+		case 'email_receives_per_day':
+			return 'maxEmailReceivesPerDay'
+		case 'unique_worker_days_per_month':
+			return 'maxUniqueWorkerDaysPerMonth'
+		case 'durable_object_rows_read_per_month':
+			return 'maxDurableObjectRowsReadPerMonth'
+		case 'execute_calls_per_minute':
+			return 'maxExecuteCallsPerMinute'
+		default: {
+			const exhaustive: never = key
+			throw new Error(`Unknown limit override key: ${String(exhaustive)}`)
+		}
+	}
+}
+
+/** The limit a resolved table holds for an override key (null = no window). */
+export function limitForOverrideKey(
+	limits: PlanLimits,
+	key: LimitOverrideKey,
+): number | null {
+	return limits[limitOverrideField(key)]
+}
+
+/**
+ * The limit an `unlimited` override resolves to. A finite number so it
+ * survives JSON and Durable Object RPC; no counter reaches it.
+ */
+export const unlimitedLimit = Number.MAX_SAFE_INTEGER
+
+export function isUnlimitedLimit(limit: number): boolean {
+	return limit >= unlimitedLimit
+}
+
+export type LimitOverrideValue = number | 'unlimited'
+
+export type LimitOverride = {
+	key: LimitOverrideKey
+	value: LimitOverrideValue
+	/** ISO timestamp; the override stops applying at this instant. */
+	expiresAt: string | null
+}
+
+export function isLimitOverrideActive(
+	override: Pick<LimitOverride, 'expiresAt'>,
+	now: Date = new Date(),
+): boolean {
+	if (override.expiresAt === null) return true
+	const expiresAtMs = Date.parse(override.expiresAt)
+	return Number.isFinite(expiresAtMs) && expiresAtMs > now.getTime()
+}
+
+/**
+ * Plan limits with active overrides applied on top. An override only
+ * raises: each field becomes the larger of the plan limit and the override,
+ * so a growing seat pool is never cut back by an older override. A weekly
+ * field the plan leaves `null` (no weekly window) stays `null`. Expired
+ * overrides are skipped here as well as in the D1 read, so a cached
+ * entitlement cannot keep one alive past its expiry.
+ */
+export function applyLimitOverrides(
+	limits: PlanLimits,
+	overrides: ReadonlyArray<LimitOverride> | undefined,
+	now: Date = new Date(),
+): PlanLimits {
+	if (!overrides || overrides.length === 0) return limits
+	const next: PlanLimits = { ...limits }
+	for (const override of overrides) {
+		if (!isLimitOverrideActive(override, now)) continue
+		const field = limitOverrideField(override.key)
+		const planValue = next[field]
+		if (planValue === null) continue
+		const overrideValue =
+			override.value === 'unlimited' ? unlimitedLimit : override.value
+		next[field] = Math.max(planValue, overrideValue)
+	}
+	return next
+}
+
+/**
+ * The effective limit table for an entitlement: plan limits (ladder,
+ * wallet, seat pool, credits ceiling), then admin overrides on top. Every
+ * enforcement and display path that has an entitlement resolves through
+ * here; the `resolvePlan*` helpers answer "what does this plan give".
+ */
+export function resolveEntitlementLimits(
+	entitlement: UserEntitlement,
+	now: Date = new Date(),
+): PlanLimits {
+	return applyLimitOverrides(
+		resolvePlanLimits(
+			entitlement.plan,
+			entitlement.ladder,
+			entitlement.creditWallet,
+			entitlement.seats,
+		),
+		entitlement.limitOverrides,
+		now,
+	)
+}
+
+export function resolveEntitlementLimit(
+	entitlement: UserEntitlement,
+	resource: EntitlementResource,
+	now: Date = new Date(),
+): number {
+	return limitForResource(resolveEntitlementLimits(entitlement, now), resource)
+}
+
+export function resolveWeeklyEntitlementLimit(
+	entitlement: UserEntitlement,
+	resource: EntitlementResource,
+	now: Date = new Date(),
+): number | null {
+	return weeklyLimitForResource(
+		resolveEntitlementLimits(entitlement, now),
+		resource,
+	)
+}
+
+/** Entitlement resources whose limit an override can raise. */
+export function isLimitOverrideResource(
+	resource: EntitlementResource,
+): boolean {
+	return (limitOverrideKeys as ReadonlyArray<string>).includes(resource)
 }

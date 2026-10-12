@@ -1,5 +1,9 @@
-import { listBlogPosts } from '#worker/blog/catalog.ts'
+import {
+	listPublicWebsitePages,
+	listPublicBlogPages,
+} from '#app/public-content.ts'
 import { listGuides } from '#worker/guides/catalog.ts'
+import { mcpOauthScopes } from '#worker/mcp-oauth-scopes.ts'
 import { docHref, docsIntroSlug } from '#universal/docs-nav.ts'
 import { oauthPaths } from '#universal/oauth-paths.ts'
 
@@ -22,8 +26,6 @@ export const openaiAppsChallengeToken =
 
 /** Matches the MCP server `version` advertised on both protocol lanes. */
 export const kodyMcpServerCardVersion = '1.0.0'
-
-const mcpOauthScopes = ['profile', 'email'] as const
 
 const aiCrawlerUserAgents = [
 	'GPTBot',
@@ -54,6 +56,7 @@ const robotsDisallowPaths = [
 	'/webhooks',
 	'/connect/oauth',
 	'/connect/secrets',
+	'/connect/secret-set',
 ] as const
 
 export type AgentSkillDefinition = {
@@ -64,9 +67,10 @@ export type AgentSkillDefinition = {
 
 const connectKodySkillBody = `# Connect Kody
 
-Kody is an OAuth-protected MCP personal assistant. You use it from an existing
-MCP host (Cursor, ChatGPT, Claude Desktop, Claude Code, Codex, Copilot, Grok,
-OpenCode, OpenClaw, Muse). There is no separate Kody chat app.
+Kody is Your agents' cloud: an OAuth-protected MCP personal assistant. You use
+it from an existing MCP host (Cursor, ChatGPT, Claude Desktop, Claude Code,
+Codex, Copilot, Grok, OpenCode, OpenClaw, Muse). There is no separate Kody chat
+app.
 
 ## When to use
 
@@ -91,9 +95,10 @@ or passwords into chat.
 
 const whatIsKodySkillBody = `# What is Kody
 
-Kody is a per-user personal assistant reached over MCP. Each signed-in user
-gets an isolated assistant (packages, jobs, secrets, memories, email,
-storage). The public MCP surface is two tools: \`search\` and \`execute\`.
+Kody is Your agents' cloud: a per-user personal assistant reached over MCP.
+Each signed-in user gets an isolated assistant (packages, jobs, secrets,
+memories, email, storage). The public MCP surface is two tools: \`search\` and
+\`execute\`.
 
 ## When to use
 
@@ -168,35 +173,12 @@ type SitemapEntry = {
 	lastmod?: string
 }
 
-function staticPublicPages(): ReadonlyArray<SitemapEntry> {
-	return [
-		{ path: '/' },
-		{ path: '/docs' },
-		{ path: '/docs/connect' },
-		{ path: '/blog' },
-		{ path: '/community' },
-		{ path: '/pricing' },
-		{ path: '/faq' },
-		{ path: '/case-studies' },
-		{ path: '/support' },
-		{ path: '/privacy' },
-		{ path: '/terms' },
-		{ path: '/discord' },
-		{ path: '/onboarding' },
-		{ path: authMdPath },
-	]
-}
-
 export function listPublicSitemapEntries(): ReadonlyArray<SitemapEntry> {
 	// The introduction is canonical at `/docs` (already in the static list).
 	const guides = listGuides()
 		.filter((guide) => guide.slug !== docsIntroSlug)
 		.map((guide) => ({ path: docHref(guide.slug) }))
-	const posts = listBlogPosts().map((post) => ({
-		path: `/blog/${post.slug}`,
-		lastmod: post.date,
-	}))
-	return [...staticPublicPages(), ...guides, ...posts]
+	return [...listPublicWebsitePages(), ...guides, ...listPublicBlogPages()]
 }
 
 function escapeXml(value: string): string {
@@ -235,7 +217,7 @@ export function buildMcpServerCard(origin: string) {
 			version: kodyMcpServerCardVersion,
 		},
 		description:
-			'Per-user personal assistant over MCP. Two tools: search and execute. OAuth required. Connect from an existing MCP host — there is no separate Kody chat app.',
+			"Your agents' cloud. Per-user MCP assistant with search and execute. OAuth required. Connect from an existing MCP host. There is no separate Kody chat app.",
 		url: endpoint,
 		transport: {
 			type: 'streamable-http',
@@ -314,10 +296,10 @@ export function buildAuthMarkdown(origin: string): string {
 	return [
 		'# auth.md',
 		'',
-		'Kody is an OAuth-protected MCP personal assistant. Agents connect at',
-		`\`${mcp}\` from an existing MCP host. People complete sign-in and`,
-		'consent in the browser; do not ask anyone to paste secrets or tokens',
-		'into chat.',
+		"Kody is Your agents' cloud: an OAuth-protected MCP personal assistant.",
+		`Agents connect at \`${mcp}\` from an existing MCP host. People complete`,
+		'sign-in and consent in the browser; do not ask anyone to paste secrets',
+		'or tokens into chat.',
 		'',
 		'## Add the MCP server',
 		'',
@@ -337,7 +319,7 @@ export function buildAuthMarkdown(origin: string): string {
 		'## OAuth',
 		'',
 		`- Authorization server: \`${origin}${oauthPaths.discovery}\``,
-		`- Protected resource: \`${origin}/.well-known/oauth-protected-resource\``,
+		`- Protected resource: \`${origin}/.well-known/oauth-protected-resource/mcp\``,
 		`- Resource: \`${mcp}\``,
 		`- Scopes: \`${mcpOauthScopes.join('`, `')}\``,
 		`- Dynamic client registration: \`${registerUri}\``,
@@ -356,10 +338,10 @@ export function buildHomeMarkdown(origin: string): string {
 	return [
 		'# Kody',
 		'',
-		'Kody is a per-user personal assistant for builders who would rather',
-		'own their automations than rent them. You use it from Cursor, ChatGPT,',
-		'Claude, Codex, Copilot, Grok, or any MCP host — not from a separate',
-		'Kody chat app.',
+		"Kody is Your agents' cloud: a per-user personal assistant for builders",
+		'who would rather own their automations than rent them. You use it from',
+		'Cursor, ChatGPT, Claude, Codex, Copilot, Grok, or any MCP host, not from',
+		'a separate Kody chat app.',
 		'',
 		`MCP URL: \`${origin}${mcpResourcePath}\` (OAuth required).`,
 		'',
@@ -395,7 +377,7 @@ export function buildSecurityTxt(origin: string, now = new Date()): string {
 		`Expires: ${expires.toISOString()}`,
 		'Preferred-Languages: en',
 		`Canonical: ${origin}${securityTxtPath}`,
-		'Policy: https://github.com/kentcdodds/kody/blob/main/SECURITY.md',
+		'Policy: https://raw.githubusercontent.com/kentcdodds/kody/main/SECURITY.md',
 		'',
 	].join('\n')
 }
@@ -457,7 +439,7 @@ export function listAgentDiscoveryLinks(
 			type: 'application/xml',
 		},
 		{
-			href: `${origin}/.well-known/oauth-protected-resource`,
+			href: `${origin}/.well-known/oauth-protected-resource/mcp`,
 			rel: 'oauth-protected-resource',
 			type: 'application/json',
 		},

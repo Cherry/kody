@@ -1,8 +1,14 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as memoryRepo from '#mcp/memory/repo.ts'
 import type * as memoryService from '#mcp/memory/service.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => {
 	const memoryRow = {
@@ -22,7 +28,7 @@ const mockModule = vi.hoisted(() => {
 	}
 	const memoryDbRow = {
 		id: memoryRow.id,
-		user_id: 'stable-user-1',
+		user_id: 'stable-user-1' as OwnerId,
 		category: memoryRow.category,
 		status: memoryRow.status,
 		subject: memoryRow.subject,
@@ -53,11 +59,12 @@ const mockModule = vi.hoisted(() => {
 			permissions: [],
 			artifactOwnerIds: [],
 			mcpUser: {
-				userId: 'stable-user-1',
+				userId: personIdFromStored('stable-user-1'),
 				email: 'user@example.com',
 				username: 'test-user',
 				displayName: 'user',
 			},
+			request: sessionRequestContext('stable-user-1'),
 		})),
 		readAuthSessionResult: async () => ({ session: null, setCookie: null }),
 		listMemoriesByUserId: vi.fn<typeof memoryRepo.listMemoriesByUserId>(
@@ -184,7 +191,7 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 	)
 	expect(mockModule.getMemory).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			memoryId: memoryRow.id,
 		}),
 	)
@@ -219,7 +226,7 @@ test('memories API soft/force deletes and rejects invalid delete requests', asyn
 		expect([force, response.status]).toEqual([force, 200])
 		expect(mockModule.deleteMemory).toHaveBeenLastCalledWith(
 			expect.objectContaining({
-				userId: 'stable-user-1',
+				userId: ownerIdFromStored('stable-user-1'),
 				memoryId: memoryRow.id,
 				force,
 			}),
@@ -265,7 +272,7 @@ test('memories export downloads the signed-in user memories as JSON', async () =
 	)
 	expect(mockModule.listMemoriesByUserIdPage).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			afterId: null,
 			statuses: ['active', 'archived'],
 			limit: 200,

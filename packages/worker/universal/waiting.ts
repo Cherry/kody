@@ -10,12 +10,15 @@ import {
 	onboardingChecklistItemLabels,
 	type OnboardingChecklistItemId,
 } from './onboarding-process.ts'
+import { createHref } from 'remix/route-pattern/href'
+import { orgResourcePathForAccountPath } from './org-pages.ts'
 import { routes } from './routes.ts'
 
 export const waitingItemKinds = [
 	'verify-email',
 	'mcp-server',
 	'integration-auth',
+	'enablement-paused',
 	'secret-expired',
 	'publish-lock',
 	'email-change',
@@ -109,6 +112,22 @@ export type WaitingExpiredSecretSignal = {
 	name: string
 }
 
+/**
+ * One of the viewer's own paused enablements in the org being viewed. Only
+ * the enabler sees it: a paused run of someone else's never lands here.
+ */
+export type WaitingPausedEnablementSignal = {
+	id: string
+	triggerKind: 'cron' | 'subscription' | 'webhook'
+	triggerName: string
+	packageName: string | null
+	reason: 'org_access' | 'package_access' | 'credential_access'
+	resourceType: string | null
+	resourceId: string | null
+}
+
+export const waitingPausedEnablementCap = 3
+
 type WaitingLockedPackageSignal = {
 	id: string
 	name: string
@@ -127,6 +146,7 @@ export type WaitingSignals = {
 	onboardingRemaining: Array<OnboardingChecklistItemId>
 	mcpServers: Array<WaitingMcpServerSignal>
 	integrationAuth: Array<WaitingIntegrationAuthSignal>
+	pausedEnablements: Array<WaitingPausedEnablementSignal>
 	expiredSecrets: Array<WaitingExpiredSecretSignal>
 	lockedPackages: Array<WaitingLockedPackageSignal>
 	pendingEmailChange: string | null
@@ -150,13 +170,14 @@ const kindRank: Record<WaitingItemKind, number> = {
 	'verify-email': 0,
 	'mcp-server': 1,
 	'integration-auth': 2,
-	'secret-expired': 3,
-	'publish-lock': 4,
-	'email-change': 5,
-	entitlement: 6,
-	'error-rate': 7,
-	onboarding: 8,
-	'first-use': 9,
+	'enablement-paused': 3,
+	'secret-expired': 4,
+	'publish-lock': 5,
+	'email-change': 6,
+	entitlement: 7,
+	'error-rate': 8,
+	onboarding: 9,
+	'first-use': 10,
 }
 
 const firstUseRank = Object.fromEntries(
@@ -174,7 +195,10 @@ export function isUnexpiredEpochMs(expiresAt: number, now: Date) {
 	return Number.isFinite(expiresAt) && expiresAt > now.getTime()
 }
 
-export function buildWaitingItems(signals: WaitingSignals): Array<WaitingItem> {
+export function buildWaitingItems(
+	signals: WaitingSignals,
+	orgSlug: string,
+): Array<WaitingItem> {
 	const items: Array<WaitingItem> = []
 
 	if (!signals.emailVerified) {
@@ -210,6 +234,28 @@ export function buildWaitingItems(signals: WaitingSignals): Array<WaitingItem> {
 		})
 	}
 
+	const pausedEnablements = signals.pausedEnablements.slice(
+		0,
+		waitingPausedEnablementCap,
+	)
+	for (const enablement of pausedEnablements) {
+		items.push(buildPausedEnablementWaitingItem(enablement))
+	}
+	const extraPaused =
+		signals.pausedEnablements.length - pausedEnablements.length
+	if (extraPaused > 0) {
+		items.push({
+			id: 'enablement-paused-more',
+			kind: 'enablement-paused',
+			title: `${String(extraPaused)} more of your automations are paused`,
+			why: 'Ask your agent to run enablementList to see each paused enablement and why.',
+			who: 'you',
+			doLabel: pausedEnablementDocLabel,
+			href: pausedEnablementDocHref,
+			severity: 'block',
+		})
+	}
+
 	const expiredSecrets = signals.expiredSecrets.slice(
 		0,
 		waitingExpiredSecretCap,
@@ -236,7 +282,7 @@ export function buildWaitingItems(signals: WaitingSignals): Array<WaitingItem> {
 			why: 'Open Secrets to paste new values. Do not put them in chat.',
 			who: 'you',
 			doLabel: 'Open Secrets',
-			href: routes.accountSecrets.href(),
+			href: '/account/secrets',
 			severity: 'degraded',
 		})
 	}
@@ -297,7 +343,7 @@ export function buildWaitingItems(signals: WaitingSignals): Array<WaitingItem> {
 			why: `${signals.errorRate.errorCount} of ${signals.errorRate.eventCount} recent runs failed and still need triage. Activity is where you handle those errors.`,
 			who: 'you',
 			doLabel: 'Open Activity',
-			href: routes.accountActivity.href(),
+			href: '/account/activity',
 			severity: 'degraded',
 		})
 	}
@@ -323,18 +369,35 @@ export function buildWaitingItems(signals: WaitingSignals): Array<WaitingItem> {
 		items.push(buildFirstUseWaitingItem(id))
 	}
 
-	return items.sort((left, right) => {
-		const severity = severityRank[left.severity] - severityRank[right.severity]
-		if (severity !== 0) return severity
-		const kind = kindRank[left.kind] - kindRank[right.kind]
-		if (kind !== 0) return kind
-		if (left.kind === 'first-use' && right.kind === 'first-use') {
-			return firstUseItemRank(left.id) - firstUseItemRank(right.id)
-		}
-		if (left.id === 'secret-expired-more') return 1
-		if (right.id === 'secret-expired-more') return -1
-		return left.title.localeCompare(right.title)
-	})
+	return items
+		.map((item) => relocateWaitingHref(item, orgSlug))
+		.sort((left, right) => {
+			const severity =
+				severityRank[left.severity] - severityRank[right.severity]
+			if (severity !== 0) return severity
+			const kind = kindRank[left.kind] - kindRank[right.kind]
+			if (kind !== 0) return kind
+			if (left.kind === 'first-use' && right.kind === 'first-use') {
+				return firstUseItemRank(left.id) - firstUseItemRank(right.id)
+			}
+			if (left.id.endsWith('-more')) return 1
+			if (right.id.endsWith('-more')) return -1
+			return left.title.localeCompare(right.title)
+		})
+}
+
+function relocateWaitingHref(item: WaitingItem, orgSlug: string): WaitingItem {
+	const hashIndex = item.href.indexOf('#')
+	const hash = hashIndex === -1 ? '' : item.href.slice(hashIndex)
+	const beforeHash =
+		hashIndex === -1 ? item.href : item.href.slice(0, hashIndex)
+	const queryIndex = beforeHash.indexOf('?')
+	const pathname =
+		queryIndex === -1 ? beforeHash : beforeHash.slice(0, queryIndex)
+	const search = queryIndex === -1 ? '' : beforeHash.slice(queryIndex)
+	const orgPath = orgResourcePathForAccountPath(pathname, orgSlug)
+	if (!orgPath) return item
+	return { ...item, href: `${orgPath}${search}${hash}` }
 }
 
 function firstUseItemRank(itemId: string) {
@@ -370,7 +433,7 @@ const waitingFirstUseCopy: Record<
 		title: 'Save your first memory',
 		why: 'Memories persist facts your agents can reuse across hosts.',
 		doLabel: 'Open Memories',
-		href: routes.accountMemories.href(),
+		href: '/account/memories',
 	},
 	execute: {
 		title: 'Run your first execute',
@@ -382,25 +445,25 @@ const waitingFirstUseCopy: Record<
 		title: 'Persist your first package',
 		why: 'A saved package is reusable code your agents can keep and share.',
 		doLabel: 'Open Repositories',
-		href: routes.accountPackages.href(),
+		href: '/account/packages',
 	},
 	job: {
 		title: 'Create your first job',
 		why: 'Jobs run on a schedule so your agents can keep working without you.',
 		doLabel: 'Open Jobs',
-		href: routes.accountJobs.href(),
+		href: '/account/jobs',
 	},
 	integration: {
 		title: 'Connect your first integration',
 		why: 'An integration grant lets your agents call a connected third-party account.',
 		doLabel: 'Open Integrations',
-		href: routes.accountIntegrations.href(),
+		href: '/account/integrations',
 	},
 	secret: {
 		title: 'Add your first secret',
 		why: 'User-scope secrets stay out of chat. Add one so your agents can use credentials safely.',
 		doLabel: 'Open Secrets',
-		href: routes.accountSecrets.href(),
+		href: '/account/secrets',
 	},
 	discord: {
 		title: 'Join the Kody Discord',
@@ -410,10 +473,72 @@ const waitingFirstUseCopy: Record<
 	},
 }
 
+const pausedEnablementDocLabel = 'How paused automation resumes'
+const pausedEnablementDocHref = `${routes.docDetail.href({
+	slug: 'organizations',
+})}#automation-runs-as-the-person-who-turned-it-on`
+
+function pausedEnablementTitle(signal: WaitingPausedEnablementSignal) {
+	const pkg = signal.packageName ? `${signal.packageName} ` : ''
+	switch (signal.triggerKind) {
+		case 'cron':
+			return `Your ${pkg}scheduled job is paused`
+		case 'subscription':
+			return `Your ${pkg}"${signal.triggerName}" subscription is paused`
+		case 'webhook':
+			return `Your ${pkg}webhook is paused`
+		default: {
+			const unknownKind: never = signal.triggerKind
+			throw new Error(`Unknown enablement trigger kind: ${String(unknownKind)}`)
+		}
+	}
+}
+
+function pausedEnablementWhy(signal: WaitingPausedEnablementSignal) {
+	const resumes =
+		'Its events are dropped until then, and the next event resumes it.'
+	switch (signal.reason) {
+		case 'credential_access': {
+			const credential =
+				signal.resourceType && signal.resourceId
+					? `the ${signal.resourceType} "${signal.resourceId}"`
+					: 'a credential'
+			return `It runs as you, and its last run needed Use on ${credential}, which you do not have. Ask an org Owner for access. ${resumes}`
+		}
+		case 'package_access':
+			return `It runs as you, and you no longer hold package:execute on ${signal.packageName ?? 'its package'}. Ask an org Owner for access. ${resumes}`
+		case 'org_access':
+			return `It runs as you, and you no longer have access to this org. ${resumes}`
+		default: {
+			const unknownReason: never = signal.reason
+			throw new Error(
+				`Unknown enablement pause reason: ${String(unknownReason)}`,
+			)
+		}
+	}
+}
+
+function buildPausedEnablementWaitingItem(
+	signal: WaitingPausedEnablementSignal,
+): WaitingItem {
+	return {
+		id: `enablement-paused:${signal.id}`,
+		kind: 'enablement-paused',
+		title: pausedEnablementTitle(signal),
+		why: pausedEnablementWhy(signal),
+		who: 'you',
+		doLabel: pausedEnablementDocLabel,
+		href: pausedEnablementDocHref,
+		severity: 'block',
+	}
+}
+
 function buildMcpServerWaitingItem(
 	server: WaitingMcpServerSignal,
 ): WaitingItem | null {
-	const href = routes.accountMcpServerDetail.href({ serverId: server.id })
+	const href = createHref('/account/mcp-servers/:serverId', {
+		serverId: server.id,
+	})
 	if (server.state === 'authenticating') {
 		return {
 			id: `mcp-server:${server.id}`,

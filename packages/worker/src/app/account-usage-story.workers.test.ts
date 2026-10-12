@@ -8,8 +8,9 @@ import {
 import { loadAccountUsageStory } from '#app/account-usage-story.ts'
 import { readAccountComputeOverage } from '#worker/billing/compute-overage-account.ts'
 import { applyCreditPayment } from '#worker/billing/credit-wallet.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureCreditWalletTestSchema } from '#worker/billing/test-schema.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const now = new Date('2026-09-27T12:00:00.000Z')
 const month = utcMonthKey(now)
@@ -21,24 +22,32 @@ async function seedUser(input: {
 	creditsEligible?: boolean
 }) {
 	const email = `${input.label}-${crypto.randomUUID()}@example.com`
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
+	const username = `${input.label}-${crypto.randomUUID().slice(0, 8)}`
 	const result = await env.APP_DB.prepare(
 		`INSERT INTO users (
-			username, email, password_hash, email_verified_at, stable_user_id, plan,
-			stripe_customer_id, stripe_plan, stripe_credits_eligible
-		) VALUES (?, ?, ?, ?, ?, 'free', ?, ?, ?)`,
+			username, email, password_hash, email_verified_at, stable_user_id
+		) VALUES (?, ?, ?, ?, ?)`,
 	)
 		.bind(
-			`${input.label}-${crypto.randomUUID().slice(0, 8)}`,
+			username,
 			email,
 			'test-password-hash',
 			now.toISOString(),
 			stableUserId,
-			input.creditsEligible ? `cus_${crypto.randomUUID()}` : null,
-			input.stripePlan ?? null,
-			input.creditsEligible ? 1 : 0,
 		)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId,
+		username,
+		plan: 'free',
+		stripeCustomerId: input.creditsEligible
+			? `cus_${crypto.randomUUID()}`
+			: null,
+		stripePlan: input.stripePlan ?? null,
+		stripeCreditsEligible: input.creditsEligible ? 1 : 0,
+		createdAt: now.toISOString(),
+	})
 	return { id: Number(result.meta.last_row_id), stableUserId }
 }
 
@@ -75,6 +84,7 @@ async function loadStoryAndCredits(userId: number) {
 		canBuyCredits: user.canBuyCredits,
 		computeOverage,
 		now,
+		billingHref: '/@usage/-/billing',
 	})
 	const story = await loadAccountUsageStory({
 		db: env.APP_DB,

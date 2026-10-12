@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { type Action } from 'remix/router'
 import { waitUntil } from 'cloudflare:workers'
@@ -7,7 +8,6 @@ import {
 	buildInstallAdaptPrompt,
 	buildInstallSuccessPrompt,
 } from '#app/community-public.ts'
-import { isOfficialCommunityListing } from '#universal/community-links.ts'
 import { type routes } from '#universal/routes.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import {
@@ -18,6 +18,7 @@ import {
 import { installCommunityListing } from '#worker/community/install.ts'
 import { getCommunityListingById } from '#worker/community/repo.ts'
 import { EntitlementLimitError } from '#worker/entitlements/errors.ts'
+import { toApiError } from '#worker/open-api/errors.ts'
 import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
 import { resolveArtifactSourceHead } from '#worker/repo/artifacts.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
@@ -56,15 +57,13 @@ export function createCommunityInstallApiPostHandler(env: Env) {
 			})
 			if (!listing) {
 				return jsonResponse(
-					{ ok: false, error: 'Community listing not found.' },
+					{ ok: false, error: 'Catalog entry not found.' },
 					404,
 				)
 			}
-			// Official `@kody/*` listings are first-party and skip acknowledgement.
-			// Third-party listings require acknowledged: true. The listing page
-			// sends that flag after createDoubleCheck confirms the fork.
-			const official = isOfficialCommunityListing({ name: listing.name })
-			if (!official && parsed.data.acknowledged !== true) {
+			// Every listing requires acknowledged: true. The listing page sends
+			// that flag after createDoubleCheck confirms the fork.
+			if (parsed.data.acknowledged !== true) {
 				return jsonResponse(
 					{
 						ok: false,
@@ -95,7 +94,7 @@ export function createCommunityInstallApiPostHandler(env: Env) {
 				const result = await installCommunityListing({
 					env,
 					baseUrl: getAppBaseUrl({ env, requestUrl: request.url }),
-					userId: user.mcpUser.userId,
+					userId: personalOrgId(user.mcpUser.userId),
 					userEmail: user.email,
 					expectedPackageScope,
 					listingId: listing.id,
@@ -156,10 +155,14 @@ export function createCommunityInstallApiPostHandler(env: Env) {
 					)
 					return jsonResponse({ ok: false, error: mapped.message }, 503)
 				}
+				// Same Open API remap as communityFork: Artifacts git transients
+				// become 503 with a retry next step; other unknowns keep the
+				// generic internal message that says retry or report.
+				const apiError = toApiError(error)
 				console.error('Community install failed:', error)
 				return jsonResponse(
-					{ ok: false, error: 'Unable to install this public package.' },
-					500,
+					{ ok: false, error: apiError.message },
+					apiError.status,
 				)
 			}
 		},

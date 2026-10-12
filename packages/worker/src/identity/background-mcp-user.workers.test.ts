@@ -1,6 +1,5 @@
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import {
 	assignAdminRole,
@@ -11,14 +10,17 @@ import {
 	AccountSuspendedError,
 	accountSuspendedMessage,
 } from '#worker/account/account-suspension.ts'
+import { createMcpCallerContext } from '#mcp/context.ts'
 import { resolveBackgroundMcpUser } from './background-mcp-user.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 
 test('resolveBackgroundMcpUser loads admin roles only for assigned accounts', async () => {
 	await ensureUsersTestSchema({ db: env.APP_DB })
 	await ensureRbacTestSchema(env.APP_DB)
 
 	const adminEmail = `bg-admin-${crypto.randomUUID()}@example.com`
-	const adminStableUserId = await createStableUserIdFromEmail(adminEmail)
+	const adminStableUserId = testStableUserIdFromEmail(adminEmail)
 	const adminAccountId = await seedAccount({
 		db: env.APP_DB,
 		email: adminEmail,
@@ -36,7 +38,7 @@ test('resolveBackgroundMcpUser loads admin roles only for assigned accounts', as
 	})
 
 	const userEmail = `bg-user-${crypto.randomUUID()}@example.com`
-	const userStableUserId = await createStableUserIdFromEmail(userEmail)
+	const userStableUserId = testStableUserIdFromEmail(userEmail)
 	await seedAccount({
 		db: env.APP_DB,
 		email: userEmail,
@@ -55,7 +57,7 @@ test('resolveBackgroundMcpUser fails closed for suspended accounts and recovers 
 	await ensureRbacTestSchema(env.APP_DB)
 
 	const email = `bg-suspended-${crypto.randomUUID()}@example.com`
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
 	await seedAccount({
 		db: env.APP_DB,
 		email,
@@ -85,4 +87,140 @@ test('resolveBackgroundMcpUser fails closed for suspended accounts and recovers 
 	await expect(
 		resolveBackgroundMcpUser(env.APP_DB, stableUserId),
 	).resolves.toMatchObject({ userId: stableUserId, email })
+})
+
+test('resolveBackgroundMcpUser treats a live team org as the background owner', async () => {
+	await ensureUsersTestSchema({ db: env.APP_DB })
+	await ensureOrgsTestSchema(env.APP_DB)
+	const orgId = testStableUserIdFromEmail(
+		`bg-org-${crypto.randomUUID()}@example.com`,
+	)
+	const slug = `bg-org-${crypto.randomUUID().slice(0, 8)}`
+	const now = new Date().toISOString()
+	await env.APP_DB.prepare(
+		`INSERT INTO orgs (id, slug, display_name, plan, created_at, updated_at)
+		 VALUES (?, ?, ?, 'free', ?, ?)`,
+	)
+		.bind(orgId, slug, 'Write Lease Org', now, now)
+		.run()
+
+	const user = await resolveBackgroundMcpUser(env.APP_DB, orgId)
+	expect(user).toEqual({
+		userId: orgId,
+		email: '',
+		username: slug,
+		displayName: 'Write Lease Org',
+		roles: ['user'],
+		permissions: [],
+	})
+	const caller = createMcpCallerContext({
+		baseUrl: 'https://example.com',
+		executionOrigin: 'background',
+		user,
+		source: { kind: 'schedule', jobId: 'job-1' },
+	})
+	expect(caller.request?.org).toEqual({ id: orgId, slug })
+	expect(caller.request?.actor).toBeNull()
+})
+
+test('resolveBackgroundMcpUser fails closed for a missing owner and a deleted, deleting, or suspended org', async () => {
+	await ensureUsersTestSchema({ db: env.APP_DB })
+	await ensureOrgsTestSchema(env.APP_DB)
+	const missingId = testStableUserIdFromEmail(
+		`bg-missing-${crypto.randomUUID()}@example.com`,
+	)
+	await expect(resolveBackgroundMcpUser(env.APP_DB, missingId)).rejects.toThrow(
+		`Background MCP user was not found: ${missingId}`,
+	)
+
+	const now = new Date().toISOString()
+	const insertOrg = async (
+		suffix: string,
+		fields: {
+			deleted_at?: string
+			deleting_at?: string
+			suspended_at?: string
+		},
+	) => {
+		const orgId = testStableUserIdFromEmail(
+			`bg-${suffix}-${crypto.randomUUID()}@example.com`,
+		)
+		await env.APP_DB.prepare(
+			`INSERT INTO orgs (id, slug, plan, deleted_at, deleting_at, suspended_at, created_at, updated_at)
+			 VALUES (?, ?, 'free', ?, ?, ?, ?, ?)`,
+		)
+			.bind(
+				orgId,
+				`bg-${suffix}-${crypto.randomUUID().slice(0, 8)}`,
+				fields.deleted_at ?? null,
+				fields.deleting_at ?? null,
+				fields.suspended_at ?? null,
+				now,
+				now,
+			)
+			.run()
+		return orgId
+	}
+
+	const deletedId = await insertOrg('deleted-org', { deleted_at: now })
+	await expect(resolveBackgroundMcpUser(env.APP_DB, deletedId)).rejects.toThrow(
+		`Background MCP user was not found: ${deletedId}`,
+	)
+
+	const deletingId = await insertOrg('deleting-org', { deleting_at: now })
+	await expect(
+		resolveBackgroundMcpUser(env.APP_DB, deletingId),
+	).rejects.toThrow(`Background MCP user was not found: ${deletingId}`)
+
+	const suspendedId = await insertOrg('suspended-org', { suspended_at: now })
+	const suspendedError = await resolveBackgroundMcpUser(
+		env.APP_DB,
+		suspendedId,
+	).catch((caught: unknown) => caught)
+	expect(suspendedError).toBeInstanceOf(AccountSuspendedError)
+	expect(suspendedError).toMatchObject({
+		code: 'account_suspended',
+		message: accountSuspendedMessage,
+	})
+})
+
+test('resolveBackgroundMcpUser does not fall through a deleting or deleted person to a leftover personal org', async () => {
+	await ensureUsersTestSchema({ db: env.APP_DB })
+	await ensureOrgsTestSchema(env.APP_DB)
+	const deletingEmail = `bg-deleting-${crypto.randomUUID()}@example.com`
+	const deletingId = testStableUserIdFromEmail(deletingEmail)
+	await seedAccount({
+		db: env.APP_DB,
+		email: deletingEmail,
+		username: `bgdel-${crypto.randomUUID().slice(0, 8)}`,
+		stableUserId: deletingId,
+		plan: 'max',
+	})
+	const deletedEmail = `bg-deleted-${crypto.randomUUID()}@example.com`
+	const deletedId = testStableUserIdFromEmail(deletedEmail)
+	await seedAccount({
+		db: env.APP_DB,
+		email: deletedEmail,
+		username: `bgdead-${crypto.randomUUID().slice(0, 8)}`,
+		stableUserId: deletedId,
+		plan: 'max',
+	})
+	const now = new Date().toISOString()
+	await env.APP_DB.prepare(
+		`UPDATE users SET deleting_at = ? WHERE stable_user_id = ?`,
+	)
+		.bind(now, deletingId)
+		.run()
+	await env.APP_DB.prepare(
+		`UPDATE users SET deleted_at = ? WHERE stable_user_id = ?`,
+	)
+		.bind(now, deletedId)
+		.run()
+
+	await expect(
+		resolveBackgroundMcpUser(env.APP_DB, deletingId),
+	).rejects.toThrow(`Background MCP user was not found: ${deletingId}`)
+	await expect(resolveBackgroundMcpUser(env.APP_DB, deletedId)).rejects.toThrow(
+		`Background MCP user was not found: ${deletedId}`,
+	)
 })

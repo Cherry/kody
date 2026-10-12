@@ -29,7 +29,7 @@ sequenceDiagram
   C->>E: HTTPS api.kody.codes
   E->>E: CORS, path + method allowlist, rate limits, 5 MiB cap
   E->>O: service binding KODY_API (allowlisted headers only)
-  O->>DB: authenticate token, scope check, operation
+  O->>DB: authenticate token, permission check, operation
   O-->>E: JSON
   E-->>C: JSON (no Set-Cookie)
 ```
@@ -74,8 +74,7 @@ a method or path, or remove an operation without a new version.
 
 Never in the Open API: `execute`, secret plaintext, the inbound webhook receive
 path, package-app HTTP/WebSocket/realtime traffic, admin capabilities, and
-runtime-only capabilities (values, invocation tokens, package-app fetch,
-synthetic dispatch).
+runtime-only capabilities (values, package-app fetch, synthetic dispatch).
 
 Plain API reads and token mints need no execute entitlement and never start a
 Dynamic Worker. Writes hold the account write lease, like MCP tool calls.
@@ -94,26 +93,38 @@ full MCP grant, without API-token scope checks
 ([ADR 0055](../decisions/0055-cli-mcp-oauth-local-execute-http.md)). Other `/v1`
 operations reject non-`kody_at_` bearers with `401 Invalid API token`.
 
-- Scopes: `<resource>:read` and `<resource>:write` for `account`, `memories`,
-  `secrets`, `packages`, `repos`, `jobs`, `webhooks`, `email`, `integrations`,
-  `mcp-servers`, `runs`, `storage`, `community`, and `tokens`; plus
-  `search:read` and `local-execute`. `:write` satisfies `:read`. Capabilities
-  that sign, lock, or run caller queries (`secretLock`, `secretJwtSign`,
-  `secretProviderLock`, `storageQuery`) need `:write`. `local-execute` grants
-  the whole `kody.*` runtime surface, like cloud execute.
-- TTL: tokens expire after `idle_ttl_seconds` without use (default 900, range
-  60–3600). Each authenticated request slides `expires_at` forward (debounced to
-  one write per minute), never past `max_expires_at` (default 24 hours, at most
-  7 days).
+- Scopes are org permissions (`resource-type:action`: `org:read`, `org:execute`,
+  `package:read`, `search:read`, …). Vocabulary:
+  [`packages/shared/src/org-permissions.ts`](../../../packages/shared/src/org-permissions.ts).
+  There is no implied hierarchy: `package:write` does not grant `package:read`.
+  Every operation publishes the required permission as `x-kody-permission`
+  (capability operations take it from `orgPermission`; native operations declare
+  it in `nativeRoute`). `authorize` step 4 narrows the compiled role by
+  `credential.scopes`. There is no separate `x-kody-scope` check. `org:execute`
+  is the CapabilityProxy / package-graph / execute route grant; each resolved
+  `kody:@…` import also needs `package:execute`. `none` means the surface
+  touches no org data (own tokens, who-am-I, discovery, site-admin tools).
+- TTL: tokens require an explicit lifetime: `lifetime` `short` (1h idle / 24h
+  max) or `long` (14d idle / 3mo max), or both `idle_ttl_seconds` (60–1209600)
+  and `max_lifetime_seconds` (up to 7776000). Each authenticated request slides
+  `expires_at` forward (debounced), never past `max_expires_at`. Aliases are
+  input sugar only; only the resulting idle/max values are stored.
 - Minting: the first token comes from the MCP `api` tool (`tokenCreate`, full
-  MCP grant). A token holding `tokens:write` can mint more, but only with scopes
-  it holds and never outliving its own `max_expires_at`. At most 50 active
-  tokens per account.
+  MCP grant; `x-kody-permission: none`). An existing token can mint more, but
+  only with scopes it holds and never outliving its own `max_expires_at`. At
+  most 500 active tokens per account. When the pool is full, a new mint revokes
+  the active token(s) with the least remaining life (time until stored
+  `expires_at`), never the caller's own token. Reclaim applies to every mint.
 - **CLI bootstrap (ADR 0056):** `cliCredentialBootstrap` (capability +
   `POST /v1/tokens/bootstrap`) returns a one-shot `kody_bc_…` code (never
-  `kody_at_`). `POST /v1/tokens/bootstrap/redeem` is code-authenticated only (no
-  Bearer; rejected for MCP `api`) and mints a normal `kody_at_` with
-  `created_via: cli-bootstrap` for the CLI to store.
+  `kody_at_`) and a `cli_command` that includes required lifetime flags.
+  `POST /v1/tokens/bootstrap/redeem` is code-authenticated only (no Bearer;
+  rejected for MCP `api`) and mints a normal `kody_at_` with default scopes that
+  restore pre-P4 `local-execute` parity (`org:execute` + `org:read` +
+  package/integration/secret/email/job/app/memory use scopes; migration 0092)
+  and `created_via: cli-bootstrap` for the CLI to store. Lifetime is required on
+  both bootstrap mint and redeem. CLI `whoami` / `GET /v1/tokens/current`
+  surface sliding `expires_at` (the idle window).
 - Mint and rotate return `token`, `token_type: "Bearer"`, `id`, `name`,
   `scopes`, `status`, `idle_ttl_seconds`, `expires_at`, `max_expires_at`, and
   timestamps. List and get never return the value.
@@ -131,12 +142,12 @@ operations reject non-`kody_at_` bearers with `401 Invalid API token`.
 
 The cloud half of local execute. The CLI runs modules in a local workerd and
 forwards each `kody:runtime` call here. Static `kody:@…` imports are resolved by
-`POST /v1/local-execute/package-graph` (same `local-execute` scope): origin
-returns published, stamped importable-module artifacts for embedding — it does
-**not** execute the user module and does not silently hop to `kody.execute`. See
-[Local CLI execute](../../guides/local-execute.md),
-[Open API](../../guides/open-api.md), and
-[kody-bot/cli#13](https://github.com/kody-bot/cli/pull/13).
+`POST /v1/local-execute/package-graph` (`org:execute` on the route;
+`package:execute` per imported package): origin returns published, stamped
+importable-module artifacts for embedding — it does **not** execute the user
+module and does not silently hop to `kody.execute`. See
+[Local CLI execute](../../guides/local-execute.md) and
+[Open API](../../guides/open-api.md).
 
 | Route                                  | Body                                  | 200 response                                                                    |
 | -------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
@@ -147,15 +158,15 @@ returns published, stamped importable-module artifacts for embedding — it does
 - `path` is the `kody:runtime` property path: `['kody', name]`,
   `['kody', 'mcp', server, tool]`, or `['workflows', 'create']`. `args` are
   positional (at most 8; paths at most 8 segments). Unknown keys answer 400.
-  `['packages', 'invoke']` is rejected: there is no author-facing
-  `packages.invoke` (use a static `kody:@` import or `import(specifier)`).
-  Token-auth / `--local` package composition uses package-graph download + local
-  workerd embedding — not `packages.invoke` and not whole-module `kody.execute`.
+  `['packages', 'invoke']` answers the same unknown-path 404 as any other
+  unbound runtime path. Token-auth / `--local` package composition uses
+  package-graph download + local workerd embedding — not whole-module
+  `kody.execute`.
 - Package-graph uses the same static-import scanner and resolution policy as
-  cloud ad hoc execute (own copy → share grant → platform scopes only when
-  allowed). Prefer published `importable-module` artifacts; unpublished or
-  missing artifacts answer `400 package_import_unpublished`. Literal dynamic
-  `import("kody:@…")` answers `400 unsupported_dynamic_package_import`.
+  cloud ad hoc execute (imports resolve only in the caller's org). Prefer
+  published `importable-module` artifacts; unpublished or missing artifacts
+  answer `400 package_import_unpublished`. Literal dynamic `import("kody:@…")`
+  answers `400 unsupported_dynamic_package_import`.
 - Calls dispatch through the same `kody.*` tool map as ad hoc cloud execute, so
   capability behavior, `kody.mcp`, and workflows match the cloud. Caller errors
   from a capability keep their status and message. Unexpected capability
@@ -167,10 +178,10 @@ returns published, stamped importable-module artifacts for embedding — it does
   or cookie is forwarded into a capability, and the edge strips `Cookie` and
   `X-Kody-*` before origin sees the request.
 - Order of checks: bearer credential (401), then — for `kody_at_` tokens only —
-  the `local-execute` scope (403 `insufficient_scope`). CLI MCP OAuth skips the
-  scope check (full MCP grant on these routes).
-- Auth: `kody_at_…` with `local-execute`, or a valid `kody login` MCP OAuth
-  access token for this origin
+  `org:execute` via `authorize` (403 `insufficient_scope`). CLI MCP OAuth skips
+  the token-scope check (full MCP grant on these routes).
+- Auth: `kody_at_…` with `org:execute`, or a valid `kody login` MCP OAuth access
+  token for this origin
   ([ADR 0055](../decisions/0055-cli-mcp-oauth-local-execute-http.md)).
 - Authenticated outbound fetch: `path: ['kody','authenticatedFetch']` with
   `{ providerName, request: { url, method?, headers?, body? } }`. Origin runs
@@ -185,15 +196,25 @@ returns published, stamped importable-module artifacts for embedding — it does
   under path-like module names. Published bundles that **inline** the virtual
   runtime (Dropbox-style esbuild) are rewritten onto that same shim during
   package-graph prep so `--local` does not depend on cloud's ALS preload.
+- Secret-bearing ambient fetch: `path: ['kody','gatewayFetch']` with
+  `{ request: { url, method?, headers?, body? }, packageId? }`. Origin runs
+  `executeGatewayFetch` / `expandSecretPlaceholders` (same as cloud sandbox
+  `fetch`). Package-graph always returns the `.__kody_virtual__/runtime.js`
+  gateway-fetch shim (even when the entry has no `kody:@` imports) so ad-hoc
+  scripts that call ambient `fetch` with `{{secret:…}}` still hop here. It also
+  rewrites published modules so ambient `fetch` hops here and quoted
+  `{{secret:name|scope=…}}` literals become `__kodySecretRef(...)` — secret
+  plaintext never enters local workerd, and a missing secret fails closed before
+  any third-party request.
 - OAuth client-credentials: `path: ['kody','oauthClientCredentials']` with the
   same argument shape as cloud `oauthClientCredentials(...)`. Origin expands
   secret placeholders through the fetch gateway.
 - Stamped `packageStorage` / `packageSecrets`: local shim factories hop as
   `kody.packageStorage*` / `kody.packageSecret*` (secret authority via
-  `__kodySecretAuthorityPackageId`). Each hop authorizes the stamped package id
-  against ownership or an accepted share grant, then uses the ordinary storage /
-  mounted-secret tools. Ad hoc (unstamped) `packageStorage()` / `packageSecrets`
-  on the host `kody:runtime` remain unbound, matching cloud ad hoc execute.
+  `__kodySecretAuthorityPackageId`). Each local hop accepts only package ids
+  owned by the caller's org. Ad hoc (unstamped) `packageStorage()` /
+  `packageSecrets` on the host `kody:runtime` remain unbound, matching cloud ad
+  hoc execute.
 
 ## Errors
 
@@ -224,7 +245,7 @@ appends the ApiError code (for example
 `capabilityProxySession:unauthorized`) so session start, package-graph prep, and
 auth failures are distinguishable in Analytics Engine without a new event type
 or fake `execute` / `dynamic_worker_day` charges. The capability behind a call
-call meters itself as usual (email sends, outbound fetches, package runs). Local
+meters itself as usual (email sends, outbound fetches, package runs). Local
 execute CPU runs on the user's machine and is never recorded as `execute` or
 `dynamic_worker_day`.
 

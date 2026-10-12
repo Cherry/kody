@@ -33,6 +33,18 @@
 
 import * as cloudflareWorkers from 'cloudflare:workers'
 import {
+	type AutomationSource,
+	type RequestContext,
+} from '@kody-internal/shared/request-context.ts'
+import {
+	connectionKeyColumns,
+	isConnectionUsageEventType,
+} from '#universal/connection-usage.ts'
+import {
+	creditAttributionMeterFromUsageEventType,
+	normalizeCreditAttributionPackageId,
+} from '#universal/credit-attribution.ts'
+import {
 	isCoalescedCountUsageEventType,
 	type UsageEventType,
 } from '#universal/usage-event-types.ts'
@@ -105,6 +117,29 @@ export type UsageEvent = {
 	 * never the JSON.
 	 */
 	paramsChars?: number | null
+	/**
+	 * Saved package id when the billable unit is known to belong to one
+	 * package. Written to Analytics Engine blob9. Empty means Ad hoc
+	 * (direct execute or unattributed). Never guess.
+	 */
+	packageId?: string | null
+	/**
+	 * Person who triggered the metered unit. Empty for Automation. When unset
+	 * at write time, defaults to `userId` (org billing id) for backward
+	 * compatibility with P3 actor backfill.
+	 */
+	actorUserId?: string | null
+	/**
+	 * Closed automation source for Analytics Engine blob11. Empty for
+	 * interactive runs and for platform `event` automations.
+	 */
+	automationSource?: string | null
+	/**
+	 * Credential the unit came through, from {@link usageConnectionKey}.
+	 * Analytics Engine blob12. Empty when unknown (pre-attribution events,
+	 * call sites without a request context).
+	 */
+	connectionKey?: string | null
 }
 
 export const dynamicWorkerCacheReuses = ['hit', 'miss'] as const
@@ -120,7 +155,87 @@ export const usageEventBlobIndexes = {
 	surface: 5,
 	executeShape: 6,
 	cacheReuse: 7,
+	packageId: 8,
+	actorUserId: 9,
+	automationSource: 10,
+	connectionKey: 11,
 } as const
+
+export function automationSourceForAnalytics(
+	source: AutomationSource | undefined,
+): string {
+	if (source === 'webhook' || source === 'schedule' || source === 'email') {
+		return source
+	}
+	return ''
+}
+
+/**
+ * `<credential kind>:<holder person id>:<credential id>` for the credential
+ * a request came through. The holder is the acting person (empty for
+ * Automation), so one shared OAuth client id (the CLI) still splits by person
+ * and team readers can filter to their own connections. The credential id is
+ * last because OAuth client ids are URLs that contain `:`.
+ */
+export function usageConnectionKey(
+	request: RequestContext | null | undefined,
+): string {
+	if (!request) return ''
+	const holder =
+		request.attribution.kind === 'automation'
+			? ''
+			: (request.actor?.userId ?? request.attribution.userId ?? '')
+	return `${request.credential.kind}:${holder}:${request.credential.id ?? ''}`
+}
+
+/**
+ * Connection-key-only attribution for events whose actor blobs must keep
+ * their current meaning (`dynamic_worker_day` feeds budget actor weights).
+ */
+export function usageConnectionFieldsFromRequest(
+	request: RequestContext | null | undefined,
+): Pick<UsageEvent, 'connectionKey'> {
+	const connectionKey = usageConnectionKey(request)
+	return connectionKey ? { connectionKey } : {}
+}
+
+/** Map a request context to usage attribution blobs when available. */
+export function usageAttributionFieldsFromRequest(
+	request: RequestContext | null | undefined,
+): Pick<UsageEvent, 'actorUserId' | 'automationSource' | 'connectionKey'> {
+	if (!request) return {}
+	const connectionKey = usageConnectionKey(request)
+	if (request.attribution.kind === 'automation') {
+		return {
+			actorUserId: '',
+			automationSource: automationSourceForAnalytics(
+				request.attribution.source,
+			),
+			connectionKey,
+		}
+	}
+	const actorUserId =
+		request.actor?.userId ?? request.attribution.userId ?? undefined
+	return {
+		...(actorUserId ? { actorUserId } : {}),
+		automationSource: '',
+		connectionKey,
+	}
+}
+
+function resolvedUsageAttributionBlobs(
+	event: Pick<UsageEvent, 'userId' | 'actorUserId' | 'automationSource'>,
+): [string, string] {
+	const automationSource = event.automationSource?.trim() ?? ''
+	const actorTrimmed = event.actorUserId?.trim()
+	if (actorTrimmed) {
+		return [actorTrimmed, automationSource]
+	}
+	if (automationSource) {
+		return ['', automationSource]
+	}
+	return [event.userId, '']
+}
 
 export const usageEventDoubleIndexes = {
 	durationMs: 0,
@@ -140,9 +255,27 @@ export function usageEventBlobs(
 		| 'surface'
 		| 'executeShape'
 		| 'cacheReuse'
+		| 'packageId'
+		| 'actorUserId'
+		| 'automationSource'
+		| 'connectionKey'
 	>,
 	timestamp: string,
-): [string, string, string, string, string, string, string, string] {
+): [
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+	string,
+] {
+	const [actorUserId, automationSource] = resolvedUsageAttributionBlobs(event)
 	return [
 		event.userId,
 		event.eventType,
@@ -152,6 +285,10 @@ export function usageEventBlobs(
 		event.surface ?? '',
 		event.executeShape ?? '',
 		event.cacheReuse ?? '',
+		event.packageId?.trim() || '',
+		actorUserId,
+		automationSource,
+		event.connectionKey?.trim() || '',
 	]
 }
 
@@ -173,6 +310,31 @@ ON CONFLICT (user_id, metric, month) DO UPDATE SET
 	total_duration_ms = total_duration_ms + excluded.total_duration_ms,
 	total_cpu_ms = total_cpu_ms + excluded.total_cpu_ms,
 	total_bytes = total_bytes + excluded.total_bytes,
+	updated_at = excluded.updated_at
+`.trim()
+
+const usageAttributionDailyUpsertStatement = `
+INSERT INTO usage_attribution_daily (
+	user_id, day, package_id, meter, units, updated_at,
+	actor_user_id, automation_source
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+ON CONFLICT (user_id, day, package_id, meter) DO UPDATE SET
+	units = units + excluded.units,
+	updated_at = excluded.updated_at,
+	actor_user_id = excluded.actor_user_id,
+	automation_source = excluded.automation_source
+`.trim()
+
+const usageConnectionDailyUpsertStatement = `
+INSERT INTO usage_connection_daily (
+	user_id, day, credential_kind, holder_user_id, credential_id,
+	package_id, event_type, units, updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+ON CONFLICT (
+	user_id, day, credential_kind, holder_user_id, credential_id,
+	package_id, event_type
+) DO UPDATE SET
+	units = units + excluded.units,
 	updated_at = excluded.updated_at
 `.trim()
 
@@ -268,6 +430,20 @@ function emitUsageSpan(event: UsageEvent) {
 			if (event.paramsChars != null) {
 				span.setAttribute('kody.params_chars', event.paramsChars)
 			}
+			if (event.packageId) {
+				span.setAttribute('kody.package_id', event.packageId)
+			}
+			const [actorUserId, automationSource] =
+				resolvedUsageAttributionBlobs(event)
+			if (actorUserId) {
+				span.setAttribute('kody.actor_user_id', actorUserId)
+			}
+			if (automationSource) {
+				span.setAttribute('kody.automation_source', automationSource)
+			}
+			if (event.connectionKey) {
+				span.setAttribute('kody.connection_key', event.connectionKey)
+			}
 		})
 	} catch (error) {
 		console.debug('usage-span-failed', error)
@@ -323,8 +499,75 @@ async function writeUsageRollup(
 				timestamp,
 			)
 			.run()
+		await writeUsageAttributionDaily(env, event, timestamp, eventCount)
+		await writeUsageConnectionDaily(env, event, timestamp, eventCount)
 	} catch (error) {
 		console.warn('usage-rollup-failed', error)
+	}
+}
+
+/**
+ * Local/dev path: stamp billable units into `usage_attribution_daily` so
+ * `/account/usage` can show Where it went without Analytics Engine.
+ * Production recomputes this table from AE hourly.
+ */
+async function writeUsageAttributionDaily(
+	env: UsageEnv,
+	event: UsageEvent,
+	timestamp: string,
+	eventCount: number,
+) {
+	if (!env.APP_DB) return
+	const meter = creditAttributionMeterFromUsageEventType(event.eventType)
+	if (!meter) return
+	const [actorUserId, automationSource] = resolvedUsageAttributionBlobs(event)
+	try {
+		await env.APP_DB.prepare(usageAttributionDailyUpsertStatement)
+			.bind(
+				event.userId,
+				timestamp.slice(0, 'YYYY-MM-DD'.length),
+				normalizeCreditAttributionPackageId(event.packageId),
+				meter,
+				eventCount,
+				timestamp,
+				actorUserId,
+				automationSource,
+			)
+			.run()
+	} catch (error) {
+		console.warn('usage-attribution-daily-failed', error)
+	}
+}
+
+/**
+ * Local/dev path: add one event's units to its `usage_connection_daily` row
+ * so the Connections page shows usage without Analytics Engine. Production
+ * recomputes this table from AE hourly (`connection-usage-rollup.ts`).
+ */
+async function writeUsageConnectionDaily(
+	env: UsageEnv,
+	event: UsageEvent,
+	timestamp: string,
+	eventCount: number,
+) {
+	if (!env.APP_DB || !isConnectionUsageEventType(event.eventType)) return
+	const columns = connectionKeyColumns(event.connectionKey)
+	try {
+		await env.APP_DB.prepare(usageConnectionDailyUpsertStatement)
+			.bind(
+				event.userId,
+				timestamp.slice(0, 'YYYY-MM-DD'.length),
+				columns.credential_kind,
+				columns.holder_user_id,
+				columns.credential_id,
+				event.packageId?.trim() || '',
+				event.eventType,
+				eventCount,
+				timestamp,
+			)
+			.run()
+	} catch (error) {
+		console.warn('usage-connection-daily-failed', error)
 	}
 }
 

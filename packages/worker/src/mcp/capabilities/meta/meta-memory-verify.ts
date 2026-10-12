@@ -1,3 +1,5 @@
+import { loadResourceListScope } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -9,6 +11,7 @@ import {
 	memoryVerifyInputSchema,
 	requireMcpUser,
 } from './meta-memory-shared.ts'
+import { requireMcpRequest } from './require-user.ts'
 
 const recommendedActions: Array<
 	'upsert' | 'delete' | 'upsert_and_delete' | 'none'
@@ -48,6 +51,7 @@ export const metaMemoryVerifyCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'metaMemoryVerify',
+		orgPermission: 'memory:read',
 		description:
 			'Always run this capability before writing or deleting memory. Submit the candidate memory, review the related memories returned here, then decide whether to upsert, delete, both, or do nothing. Do not upsert memory blindly. If the candidate is really package- or export-scoped guidance, do not upsert — update package docs or JSDoc instead (see search({ entity: "guide:agent_guidance" }), Where agent guidance lives / /docs/agent-guidance).',
 		keywords: [
@@ -66,10 +70,16 @@ export const metaMemoryVerifyCapability = defineDomainCapability(
 		inputSchema: memoryVerifyInputSchema,
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const request = requireMcpRequest(ctx.callerContext)
 			const result = await verifyMemoryCandidate({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
+				scope: await loadResourceListScope(
+					{ env: ctx.env, request },
+					'memory:read',
+					'memory',
+				),
 				candidate: {
 					category: args.category ?? null,
 					subject: args.subject,

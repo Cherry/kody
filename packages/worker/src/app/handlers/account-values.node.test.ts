@@ -1,7 +1,12 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as valuesService from '#mcp/values/service.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn<
@@ -18,11 +23,12 @@ const mockModule = vi.hoisted(() => ({
 		permissions: [],
 		artifactOwnerIds: [],
 		mcpUser: {
-			userId: 'stable-user-1',
+			userId: personIdFromStored('stable-user-1'),
 			email: 'user@example.com',
 			username: 'test-user',
 			displayName: 'user',
 		},
+		request: sessionRequestContext('stable-user-1'),
 	})),
 	readAuthSessionResult: async () => ({ session: null, setCookie: null }),
 	listValues: vi.fn<typeof valuesService.listValues>(async () => [
@@ -133,7 +139,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 	})
 	expect(mockModule.listValues).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			scope: 'user',
 			storageContext: { sessionId: null, appId: null },
 		}),
@@ -156,7 +162,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 	expect(deleteResponse.status).toBe(200)
 	expect(mockModule.deleteValue).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'stable-user-1',
+			userId: ownerIdFromStored('stable-user-1'),
 			scope: 'user',
 			name: 'theme',
 		}),

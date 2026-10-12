@@ -2,6 +2,7 @@ import {
 	base64UrlToBytes,
 	bytesToBase64Url,
 } from '@kody-internal/shared/base64.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 
 const ivBytes = 12
 
@@ -108,9 +109,13 @@ const userOauthClientSecretPurpose = 'user-oauth-client-secret'
 const webhookUrlSecretPurpose = 'webhook-url-secret'
 /** Package-owned HMAC signing material on webhook_endpoints (not user secrets). */
 const webhookHmacSecretPurpose = 'webhook-hmac-secret'
+/** Client-supplied `whsec_` signing secrets on mcp_event_subscriptions. */
+const mcpEventSubscriptionSecretPurpose = 'mcp-event-subscription-secret'
+/** Pre-registered OAuth client secrets for user-added MCP servers. */
+const mcpServerOAuthClientSecretPurpose = 'mcp-server-oauth-client-secret'
 
 /** AAD context for a user-owned secret ciphertext. */
-export function userSecretContext(userId: string) {
+export function userSecretContext(userId: OwnerId) {
 	return `user:${userId}`
 }
 
@@ -121,14 +126,14 @@ export function platformOauthAppContext(slug: string) {
 
 /** AAD context for a user-lane OAuth connection token ciphertext. */
 export function userIntegrationCredentialContext(
-	userId: string,
+	userId: OwnerId,
 	integrationName: string,
 ) {
 	return `user:${userId}:integration:${integrationName}`
 }
 
 /** AAD context for a user-lane OAuth app client secret ciphertext. */
-export function userOauthAppCredentialContext(userId: string, slug: string) {
+export function userOauthAppCredentialContext(userId: OwnerId, slug: string) {
 	return `user:${userId}:oauth-app:${slug}`
 }
 
@@ -254,7 +259,7 @@ export async function decryptUserOauthClientSecret(
 
 /** AAD context for a minted webhook URL secret ciphertext. */
 export function userWebhookUrlSecretContext(
-	userId: string,
+	userId: OwnerId,
 	endpointId: string,
 ) {
 	return `user:${userId}:webhook-endpoint:${endpointId}`
@@ -295,7 +300,7 @@ export async function decryptWebhookUrlSecret(
  * identity as the URL secret so rotate/remint keep one binding per row.
  */
 export function userWebhookHmacSecretContext(
-	userId: string,
+	userId: OwnerId,
 	endpointId: string,
 ) {
 	return `user:${userId}:webhook-endpoint:${endpointId}:hmac`
@@ -328,6 +333,83 @@ export async function decryptWebhookHmacSecret(
 		)
 	} catch {
 		throw new Error('Unable to decrypt webhook HMAC secret.')
+	}
+}
+
+/** AAD context for an MCP event subscription signing secret ciphertext. */
+export function userMcpEventSubscriptionSecretContext(
+	userId: OwnerId,
+	subscriptionId: string,
+) {
+	return `user:${userId}:mcp-event-subscription:${subscriptionId}`
+}
+
+export async function encryptMcpEventSubscriptionSecret(
+	env: Pick<Env, 'SECRET_STORE_KEY'>,
+	value: string,
+	context: string,
+) {
+	return encryptWithKey(
+		env.SECRET_STORE_KEY,
+		mcpEventSubscriptionSecretPurpose,
+		context,
+		value,
+	)
+}
+
+export async function decryptMcpEventSubscriptionSecret(
+	env: Pick<Env, 'SECRET_STORE_KEY'>,
+	payload: string,
+	context: string,
+) {
+	try {
+		return await decryptWithKey(
+			env.SECRET_STORE_KEY,
+			mcpEventSubscriptionSecretPurpose,
+			context,
+			payload,
+		)
+	} catch {
+		throw new Error('Unable to decrypt MCP event subscription secret.')
+	}
+}
+
+/**
+ * AAD context for an MCP server's pre-registered OAuth client secret. The
+ * MCP client hub decrypts it and knows servers only by id, which is a
+ * UUID that never moves between owners.
+ */
+export function mcpServerOAuthClientSecretContext(serverId: string) {
+	return `mcp-server:${serverId}:oauth-client`
+}
+
+export async function encryptMcpServerOAuthClientSecret(
+	env: Pick<Env, 'SECRET_STORE_KEY'>,
+	value: string,
+	context: string,
+) {
+	return encryptWithKey(
+		env.SECRET_STORE_KEY,
+		mcpServerOAuthClientSecretPurpose,
+		context,
+		value,
+	)
+}
+
+export async function decryptMcpServerOAuthClientSecret(
+	env: Pick<Env, 'SECRET_STORE_KEY'>,
+	payload: string,
+	context: string,
+) {
+	try {
+		return await decryptWithKey(
+			env.SECRET_STORE_KEY,
+			mcpServerOAuthClientSecretPurpose,
+			context,
+			payload,
+		)
+	} catch {
+		throw new Error('Unable to decrypt MCP server OAuth client secret.')
 	}
 }
 

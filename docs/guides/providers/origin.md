@@ -3,7 +3,7 @@ id: provider_origin
 title: Connect Origin
 summary:
   Verified walkthrough for connecting Cursor Origin to Kody: Origin Apps with
-  Ed25519 signing keys, installation access tokens, the official helpers
+  Ed25519 signing keys, installation access tokens, the community helpers
   package, and a rate-limit smoke test. Cloud Agents API keys are not Origin
   credentials.
 category: provider
@@ -72,7 +72,7 @@ repos Origin mirrors _out_ to GitHub are in scope.
 Save the PKCS#8 PEM through the account secrets page — never paste it into chat:
 
 ```text
-https://kody.codes/account/secrets/new?name=originAppPrivateKey&description=Origin%20App%20Ed25519%20PKCS%238%20private%20key&allowedHosts=api.cursor.com&scope=user
+https://kody.codes/connect/secret-set?name=originAppPrivateKey&description=Origin%20App%20Ed25519%20PKCS%238%20private%20key&allowedHosts=api.cursor.com&scope=user
 ```
 
 Approve `api.cursor.com` on that page. The name `originAppPrivateKey` is what

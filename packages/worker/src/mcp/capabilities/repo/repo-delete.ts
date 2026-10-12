@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -29,8 +30,9 @@ export const repoDeleteCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoDelete',
+		orgPermission: 'package:delete',
 		description:
-			'Delete a plain repo for the signed-in user. Removes the user_repos row, entity_sources mapping, and Artifacts repo (best-effort).',
+			'Delete a plain repo in the org this connection is bound to. Removes the user_repos row, entity_sources mapping, and Artifacts repo (best-effort).',
 		keywords: ['repo', 'delete', 'plain', 'remove'],
 		readOnly: false,
 		idempotent: false,
@@ -43,10 +45,11 @@ export const repoDeleteCapability = defineDomainCapability(
 			warning: z.string().optional(),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
 			const { userRepo, source } = await resolveOwnedUserRepo({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: ownerId,
 				args,
 			})
 			if (source.entity_kind !== 'repo') {
@@ -56,7 +59,7 @@ export const repoDeleteCapability = defineDomainCapability(
 			}
 			const cleanup = await cleanupArtifactReposForSource({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerId,
 				sourceId: source.id,
 			}).then(
 				() => 'ok' as const,
@@ -64,10 +67,10 @@ export const repoDeleteCapability = defineDomainCapability(
 			)
 			await deleteEntitySource(ctx.env, {
 				id: source.id,
-				userId: user.userId,
+				userId: ownerId,
 			}).catch(() => undefined)
 			await deleteUserRepo(ctx.env.APP_DB, {
-				userId: user.userId,
+				userId: ownerId,
 				repoId: userRepo.id,
 			})
 			return {

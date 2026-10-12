@@ -1,3 +1,4 @@
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -39,8 +40,8 @@ function seedUnverifiedUser(
 	sqlite
 		.prepare(
 			`INSERT INTO users (
-				username, email, password_hash, stable_user_id, account_type, created_at
-			) VALUES (?, ?, 'hash', ?, 'person', ?)`,
+				username, email, password_hash, stable_user_id, created_at
+			) VALUES (?, ?, 'hash', ?, ?)`,
 		)
 		.run(input.username, input.email, stableUserId, input.createdAt)
 	return { stableUserId, ...input }
@@ -73,9 +74,12 @@ function createContext(roles: Array<string>, env: Env) {
 	return {
 		env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
 			user: {
-				userId: testStableUserIdFromEmail('admin@example.com'),
+				userId: personIdFromStored(
+					testStableUserIdFromEmail('admin@example.com'),
+				),
 				email: 'admin@example.com',
 				displayName: 'admin',
 				roles,

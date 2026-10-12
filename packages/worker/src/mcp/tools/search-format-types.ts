@@ -97,9 +97,11 @@ export type SearchResultStructuredContent = {
 			top1Type: SearchMatchType | null
 			/**
 			 * Adaptive keep path after Jev Score (`kept-high` |
-			 * `kept-lowered` | `empty`). Present when Score ran successfully.
+			 * `kept-lowered` | `kept-identity` | `empty`). Present when Score
+			 * ran successfully. `kept-identity` is the empty-list exception
+			 * for package name / kody id / leaf hits.
 			 */
-			keepPath?: 'kept-high' | 'kept-lowered' | 'empty'
+			keepPath?: 'kept-high' | 'kept-lowered' | 'kept-identity' | 'empty'
 			/** Present only when `outcome` is `fallback-error`. */
 			errorReason?: string
 			/** Present when the Jev stage ran or attempted. */
@@ -233,6 +235,8 @@ export type SlimSearchMatch =
 			description: string
 			domain: string
 			usage: string
+			/** False when Open API / MCP `api` does not accept this name. */
+			apiAvailable: boolean
 			source?: CapabilitySpec['source']
 			mcpServer?: CapabilitySpec['mcpServer']
 			inputTypeDefinition?: string
@@ -262,8 +266,6 @@ export type SlimSearchMatch =
 			tags: Array<string>
 			hasApp: boolean
 			hidden: boolean
-			/** Platform (built-in) scope username; live for execute and platform-account packages. Person-account saved packages must fork. */
-			platformScope?: string | null
 			hostedUrl: string | null
 			readmeSnippet: {
 				path: string
@@ -356,6 +358,8 @@ export type SearchEntityDetailStructured =
 			title: string
 			description: string
 			usage: string
+			/** False when Open API / MCP `api` does not accept this name. */
+			apiAvailable: boolean
 			executeExample: string
 			requiredInputFields: Array<string>
 			readOnly: boolean
@@ -415,8 +419,6 @@ export type SearchEntityDetailStructured =
 			tags: Array<string>
 			hasApp: boolean
 			hidden: boolean
-			/** Platform (built-in) scope username; live for execute and platform-account packages. Person-account saved packages must fork. */
-			platformScope?: string | null
 			hostedUrl: string | null
 			appEntry: string | null
 			maintain: {
@@ -494,7 +496,6 @@ export type SearchEntityDetailStructured =
 			example: string | null
 			followUp: string
 			hidden: boolean
-			platformScope?: string | null
 			referencedTypesTruncated?: true
 	  }
 	| {
@@ -615,8 +616,6 @@ export type SearchEntityDetail =
 			baseUrl: string
 			hostedUrl: string | null
 			ownerUsername?: string | null
-			/** Platform (built-in) scope username when owned by a platform account. */
-			platformScope?: string | null
 			listingAhead: boolean | null
 			/** Export subpath when opening `package:{id}#{subpath}`. */
 			section?: string
@@ -720,10 +719,6 @@ export type SearchMatch =
 			tags: Array<string>
 			hasApp: boolean
 			hidden: boolean
-			/** Platform (built-in) scope username when owned by a platform account. */
-			platformScope?: string | null
-			/** Owner username for person-to-person share-grant rows. */
-			ownerUsername?: string | null
 			readmeSnippet?: {
 				path: string
 				snippet: string

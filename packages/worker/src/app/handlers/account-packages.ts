@@ -1,18 +1,23 @@
+import { loadWritableAccountSavedPackage } from '#app/account-package-write-access.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { handleAccountPackageAdoptAction } from '#app/account-package-adopt.ts'
 import { handleAccountPackageDeleteAction } from '#app/account-package-delete.ts'
 import { handleAccountPackagePublishLockAction } from '#app/account-package-publish-lock.ts'
-import { handleAccountPackageTokenAction } from '#app/account-package-tokens.ts'
 import { handleAccountPackageVisibilityAction } from '#app/account-package-visibility.ts'
-import { loadAccountPackagesData } from '#app/account-packages-data.ts'
+import {
+	loadAccountPackagesData,
+	reloadAccountPackagesAfterWrite,
+} from '#app/account-packages-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { CommunityActionError } from '#worker/community/errors.ts'
+import { viewerCanReadSavedPackage } from '#app/package-viewer-access.ts'
 import { absorbCommunityForkUpstream } from '#worker/community/service.ts'
-import { getSavedPackageById } from '#worker/package-registry/repo.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
+import { getSavedPackageByIdInAnyOrg } from '#worker/package-registry/repo.ts'
 import { routes } from '#universal/routes.ts'
 
 export function createAccountPackagesHandler(env: Env) {
@@ -33,11 +38,19 @@ export function createAccountPackagesHandler(env: Env) {
 					: undefined
 			const url = new URL(request.url)
 			if (pathPackageId) {
-				const savedPackage = await getSavedPackageById(env.APP_DB, {
-					userId: user.mcpUser.userId,
-					packageId: pathPackageId,
-				})
-				if (!savedPackage) {
+				const savedPackage = await getSavedPackageByIdInAnyOrg(
+					env.APP_DB,
+					pathPackageId,
+				)
+				if (
+					!savedPackage ||
+					!(await viewerCanReadSavedPackage({
+						env,
+						viewer: user.mcpUser,
+						ownerId: savedPackage.userId,
+						packageId: savedPackage.id,
+					}))
+				) {
 					return renderAppPage({
 						request,
 						env,
@@ -46,9 +59,14 @@ export function createAccountPackagesHandler(env: Env) {
 						status: 404,
 					})
 				}
+				const binding = await loadOrgBindingForOrg(
+					env.APP_DB,
+					user.mcpUser.userId,
+					savedPackage.userId,
+				)
 				const destination = new URL(
 					routes.communityPackage.href({
-						username: user.username,
+						username: binding?.org.slug ?? user.username,
 						kodyId: savedPackage.kodyId,
 					}),
 					url,
@@ -70,9 +88,7 @@ export function createAccountPackagesHandler(env: Env) {
 				headers: { location: destination.toString() },
 			})
 		},
-	} satisfies Action<
-		typeof routes.accountPackages | typeof routes.accountPackageDetail
-	>
+	} satisfies Action<typeof routes.accountPackageDetail>
 }
 
 export function createAccountPackagesApiHandler(env: Env) {
@@ -98,14 +114,6 @@ export function createAccountPackagesApiHandler(env: Env) {
 			if (!body || typeof body !== 'object' || Array.isArray(body)) {
 				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
 			}
-
-			const tokenResponse = await handleAccountPackageTokenAction({
-				env,
-				request,
-				user,
-				body,
-			})
-			if (tokenResponse) return tokenResponse
 
 			const publishLockResponse = await handleAccountPackagePublishLockAction({
 				env,
@@ -147,10 +155,17 @@ export function createAccountPackagesApiHandler(env: Env) {
 						400,
 					)
 				}
+				const resolved = await loadWritableAccountSavedPackage({
+					env,
+					user,
+					packageId,
+					permission: 'package:write',
+				})
+				if (!resolved.ok) return resolved.response
 				try {
 					await absorbCommunityForkUpstream({
 						env,
-						userId: user.mcpUser.userId,
+						userId: resolved.package.ownerUserId,
 						packageId,
 					})
 				} catch (error) {
@@ -160,7 +175,13 @@ export function createAccountPackagesApiHandler(env: Env) {
 					throw error
 				}
 				return jsonResponse(
-					await loadAccountPackagesData({ env, request, user }),
+					await reloadAccountPackagesAfterWrite({
+						env,
+						request,
+						user,
+						packageId,
+						ownerUserId: resolved.package.ownerUserId,
+					}),
 				)
 			}
 

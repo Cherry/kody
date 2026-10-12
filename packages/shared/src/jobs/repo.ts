@@ -1,10 +1,17 @@
 import { parseJsonWithFallback } from '../json-parsing.ts'
+import { type OwnerId } from '../owner-person-ids.ts'
+import { requirePackageIdFromJobId } from './package-job-id.ts'
 import { createJobStorageId } from './storage-id.ts'
 import { type JobRecord, type PersistedJobCallerContext } from './types.ts'
 
 type JobRowRecord = {
 	id: string
-	user_id: string
+	/** Owner id bytes as stored. JobManager names use this value untrimmed. */
+	user_id: OwnerId
+	/** Provenance only (Teams P3+). Falls back to user_id when absent. */
+	created_by_user_id: string | null
+	deleted_at: string | null
+	deleting_at: string | null
 	name: string
 	source_id: string
 	published_commit: string | null
@@ -15,7 +22,6 @@ type JobRowRecord = {
 	timezone: string
 	enabled: number
 	kill_switch_enabled: number
-	preserved: number
 	expires_at: string | null
 	caller_context_json: string
 	created_at: string
@@ -54,7 +60,6 @@ function serializeJob(job: JobRecord) {
 		timezone: job.timezone,
 		enabled: job.enabled ? 1 : 0,
 		kill_switch_enabled: job.killSwitchEnabled ? 1 : 0,
-		preserved: job.preserved ? 1 : 0,
 		expires_at: job.expiresAt ?? null,
 		created_at: job.createdAt,
 		updated_at: job.updatedAt,
@@ -72,7 +77,7 @@ function mapRow(row: Record<string, unknown>): JobRow {
 	const record: JobRecord = {
 		version: 1,
 		id: jobId,
-		userId: String(row['user_id']),
+		userId: String(row['user_id']) as OwnerId,
 		name: String(row['name']),
 		sourceId: String(row['source_id']),
 		publishedCommit:
@@ -100,7 +105,6 @@ function mapRow(row: Record<string, unknown>): JobRow {
 		timezone: String(row['timezone']),
 		enabled: Number(row['enabled']) === 1,
 		killSwitchEnabled: Number(row['kill_switch_enabled']) === 1,
-		preserved: Number(row['preserved'] ?? 0) === 1,
 		expiresAt: row['expires_at'] == null ? null : String(row['expires_at']),
 		createdAt: String(row['created_at']),
 		updatedAt: String(row['updated_at']),
@@ -119,7 +123,13 @@ function mapRow(row: Record<string, unknown>): JobRow {
 	}
 	return {
 		id: record.id,
-		user_id: String(row['user_id']),
+		user_id: String(row['user_id']) as OwnerId,
+		created_by_user_id:
+			row['created_by_user_id'] == null
+				? null
+				: String(row['created_by_user_id']),
+		deleted_at: row['deleted_at'] == null ? null : String(row['deleted_at']),
+		deleting_at: row['deleting_at'] == null ? null : String(row['deleting_at']),
 		name: record.name,
 		source_id: record.sourceId,
 		published_commit: record.publishedCommit ?? null,
@@ -133,7 +143,6 @@ function mapRow(row: Record<string, unknown>): JobRow {
 		timezone: record.timezone,
 		enabled: record.enabled ? 1 : 0,
 		kill_switch_enabled: record.killSwitchEnabled ? 1 : 0,
-		preserved: record.preserved ? 1 : 0,
 		expires_at: record.expiresAt,
 		caller_context_json: String(row['caller_context_json']),
 		created_at: record.createdAt,
@@ -180,14 +189,15 @@ export async function insertJobRow(input: {
 	job: JobRecord
 	callerContextJson: string
 }) {
+	requirePackageIdFromJobId(input.job.id)
 	const serialized = serializeJob(input.job)
 	await input.db
 		.prepare(
 			`INSERT INTO jobs (
 				id, user_id, name, source_id, published_commit, repo_check_policy_json, storage_id, params_json, schedule_json, timezone, enabled,
-				kill_switch_enabled, preserved, expires_at, caller_context_json, created_at, updated_at,
+				kill_switch_enabled, expires_at, caller_context_json, created_at, updated_at,
 				last_run_at, last_run_status, next_run_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
 		.bind(
 			serialized.id,
@@ -202,7 +212,6 @@ export async function insertJobRow(input: {
 			serialized.timezone,
 			serialized.enabled,
 			serialized.kill_switch_enabled,
-			serialized.preserved,
 			serialized.expires_at,
 			input.callerContextJson,
 			serialized.created_at,
@@ -225,7 +234,7 @@ export async function updateJobRow(input: {
 		.prepare(
 			`UPDATE jobs SET
 				name = ?, source_id = ?, published_commit = ?, repo_check_policy_json = ?, storage_id = ?, params_json = ?, schedule_json = ?, timezone = ?,
-				enabled = ?, kill_switch_enabled = ?, preserved = ?, expires_at = ?, caller_context_json = ?, updated_at = ?,
+				enabled = ?, kill_switch_enabled = ?, expires_at = ?, caller_context_json = ?, updated_at = ?,
 				last_run_at = ?, last_run_status = ?,
 				next_run_at = ?,
 				claim_token = NULL, running_since = NULL, lease_expires_at = NULL,
@@ -244,7 +253,6 @@ export async function updateJobRow(input: {
 			serialized.timezone,
 			serialized.enabled,
 			serialized.kill_switch_enabled,
-			serialized.preserved,
 			serialized.expires_at,
 			input.callerContextJson,
 			serialized.updated_at,
@@ -264,7 +272,9 @@ export async function getJobRowById(
 	jobId: string,
 ): Promise<JobRow | null> {
 	const result = await db
-		.prepare(`SELECT * FROM jobs WHERE id = ? AND user_id = ?`)
+		.prepare(
+			`SELECT * FROM jobs WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+		)
 		.bind(jobId, userId)
 		.first<Record<string, unknown>>()
 	return result ? mapRow(result) : null
@@ -276,7 +286,7 @@ export async function listJobRowsByUserId(
 ): Promise<Array<JobRow>> {
 	const { results } = await db
 		.prepare(
-			`SELECT * FROM jobs WHERE user_id = ? ORDER BY next_run_at ASC, name ASC`,
+			`SELECT * FROM jobs WHERE user_id = ? AND deleted_at IS NULL ORDER BY next_run_at ASC, name ASC`,
 		)
 		.bind(userId)
 		.all<Record<string, unknown>>()
@@ -484,9 +494,11 @@ export async function getNextRunnableJobRow(
 }
 
 /**
- * Scheduled executions use a ten-minute lease, comfortably above the
- * sandbox's default 90-second maximum runtime. A single conditional D1 write
- * is the ownership boundary; reading due rows alone never grants ownership.
+ * Scheduled executions use a ten-minute lease, twice the 5-minute job
+ * sandbox budget (`backgroundExecutorTimeoutMs`), renewed before each further
+ * enablement run of the same tick ({@link renewClaimedJobRow}). A single
+ * conditional D1 write is the ownership boundary; reading due rows alone never
+ * grants ownership.
  */
 export const jobExecutionLeaseMs = 10 * 60 * 1_000
 
@@ -537,6 +549,31 @@ export async function claimJobRow(input: {
 		)
 		.first<Record<string, unknown>>()
 	return result ? mapRow(result) : null
+}
+
+/**
+ * Pushes a held claim's lease to `now + jobExecutionLeaseMs` before the next
+ * run of a multi-enablement tick, so each run starts with the full lease.
+ * Returns false when the claim was lost (token no longer matches).
+ */
+export async function renewClaimedJobRow(input: {
+	db: D1Database
+	userId: string
+	jobId: string
+	claimToken: string
+	nowMs: number
+}): Promise<boolean> {
+	const leaseExpiresAt = new Date(
+		input.nowMs + jobExecutionLeaseMs,
+	).toISOString()
+	const result = await input.db
+		.prepare(
+			`UPDATE jobs SET lease_expires_at = ?
+			WHERE id = ? AND user_id = ? AND claim_token = ?`,
+		)
+		.bind(leaseExpiresAt, input.jobId, input.userId, input.claimToken)
+		.run()
+	return (result.meta.changes ?? 0) > 0
 }
 
 export async function finalizeClaimedJobRow(input: {
@@ -634,6 +671,46 @@ export async function refreshPackageJobRowIdentity(input: {
 	return (result.meta.changes ?? 0) > 0
 }
 
+export async function softDeleteJobRowsForUser(input: {
+	db: D1Database
+	userId: string
+	deletedAt: string
+}): Promise<number> {
+	const result = await input.db
+		.prepare(
+			`UPDATE jobs
+			 SET deleted_at = ?,
+			     enabled_before_soft_delete = enabled,
+			     enabled = 0,
+			     updated_at = ?
+			 WHERE user_id = ? AND deleted_at IS NULL`,
+		)
+		.bind(input.deletedAt, input.deletedAt, input.userId)
+		.run()
+	return result.meta.changes ?? 0
+}
+
+export async function restoreJobRowsForUser(input: {
+	db: D1Database
+	userId: string
+	deletedAt: string
+	restoredAt: string
+}): Promise<number> {
+	const result = await input.db
+		.prepare(
+			`UPDATE jobs
+			 SET deleted_at = NULL,
+			     deleting_at = NULL,
+			     enabled = COALESCE(enabled_before_soft_delete, enabled),
+			     enabled_before_soft_delete = NULL,
+			     updated_at = ?
+			 WHERE user_id = ? AND deleted_at = ?`,
+		)
+		.bind(input.restoredAt, input.userId, input.deletedAt)
+		.run()
+	return result.meta.changes ?? 0
+}
+
 export async function deleteJobRow(
 	db: D1Database,
 	userId: string,
@@ -646,10 +723,82 @@ export async function deleteJobRow(
 	return (result.meta.changes ?? 0) > 0
 }
 
+export async function transferJobRowsOwner(input: {
+	db: D1Database
+	fromUserId: string
+	toUserId: string
+	jobs: Array<{ jobId: string; callerContextJson: string }>
+	updatedAt: string
+}): Promise<{ transferred: number }> {
+	if (input.jobs.length === 0) return { transferred: 0 }
+	const jobIds = input.jobs.map((job) => job.jobId)
+	const { results } = await input.db
+		.prepare(
+			`SELECT id, caller_context_json, updated_at, claim_token
+			 FROM jobs
+			 WHERE user_id = ? AND deleted_at IS NULL
+			   AND id IN (SELECT value FROM json_each(?))`,
+		)
+		.bind(input.fromUserId, JSON.stringify(jobIds))
+		.all<{
+			id: string
+			caller_context_json: string
+			updated_at: string
+			claim_token: string | null
+		}>()
+	const current = new Map((results ?? []).map((row) => [row.id, row]))
+	for (const jobId of jobIds) {
+		const row = current.get(jobId)
+		if (!row) throw new Error(`Job ${jobId} is not a live job of the source.`)
+		if (row.claim_token) throw new Error(`Job ${jobId} is running; retry.`)
+	}
+	const statement = (
+		jobId: string,
+		owner: { from: string; to: string },
+		callerContextJson: string,
+		updatedAt: string,
+	) =>
+		input.db
+			.prepare(
+				`UPDATE jobs
+				 SET user_id = ?, caller_context_json = ?, updated_at = ?
+				 WHERE id = ? AND user_id = ? AND deleted_at IS NULL AND claim_token IS NULL`,
+			)
+			.bind(owner.to, callerContextJson, updatedAt, jobId, owner.from)
+	const batchResults = await input.db.batch(
+		input.jobs.map((job) =>
+			statement(
+				job.jobId,
+				{ from: input.fromUserId, to: input.toUserId },
+				job.callerContextJson,
+				input.updatedAt,
+			),
+		),
+	)
+	const moved = input.jobs.filter(
+		(_, index) => (batchResults[index]?.meta.changes ?? 0) > 0,
+	)
+	if (moved.length === input.jobs.length) {
+		return { transferred: moved.length }
+	}
+	// A job was claimed between the check and the batch: put the rest back.
+	await input.db.batch(
+		moved.map((job) => {
+			const original = current.get(job.jobId)!
+			return statement(
+				job.jobId,
+				{ from: input.toUserId, to: input.fromUserId },
+				original.caller_context_json,
+				original.updated_at,
+			)
+		}),
+	)
+	throw new Error('A job changed during the transfer; nothing moved. Retry.')
+}
+
 /**
  * Auto-disable enabled jobs whose expires_at has passed. Expiry stops
- * scheduling; retention still ages disabled ad-hoc jobs separately from
- * `preserved`. Returns the number of rows flipped to enabled = 0.
+ * scheduling. Returns the number of rows flipped to enabled = 0.
  */
 export async function disableExpiredJobRowsForUser(input: {
 	db: D1Database
@@ -669,56 +818,6 @@ export async function disableExpiredJobRowsForUser(input: {
 		.bind(input.nowIso, input.userId, input.nowIso)
 		.run()
 	return result.meta.changes ?? 0
-}
-
-/**
- * Caps how many job rows the retention sweeper loads per cron tick so one
- * backlog cannot exhaust the Worker CPU budget. Remaining candidates are
- * picked up on subsequent hourly runs.
- */
-export const maxJobRetentionCandidatesPerRun = 100
-
-/**
- * Candidate scan for the platform job retention sweeper. Excludes preserved,
- * package-owned, and clearly held/active rows in SQL so hourly budget is not
- * spent re-walking live jobs:
- * - enabled recurring (including kill-switched pause)
- * - enabled never-ran once that is still runnable
- * Age/category eligibility still runs in application code so account
- * preferences can vary per user. Not-yet-aged inactive rows are skipped cheaply;
- * deletes shrink that set across hourly ticks.
- */
-export async function listJobRetentionCandidateRows(
-	db: D1Database,
-	input: {
-		afterId: string | null
-		limit: number
-	},
-): Promise<Array<JobRow>> {
-	const { results } = await db
-		.prepare(
-			`SELECT * FROM jobs
-			WHERE preserved = 0
-				AND id NOT LIKE 'package-job:%'
-				AND id > ?
-				AND NOT (
-					(
-						enabled = 1
-						AND json_extract(schedule_json, '$.type') != 'once'
-					)
-					OR (
-						enabled = 1
-						AND kill_switch_enabled = 0
-						AND json_extract(schedule_json, '$.type') = 'once'
-						AND last_run_at IS NULL
-					)
-				)
-			ORDER BY id ASC
-			LIMIT ?`,
-		)
-		.bind(input.afterId ?? '', input.limit)
-		.all<Record<string, unknown>>()
-	return (results ?? []).map(mapRow)
 }
 
 export async function countJobRowsForUser(

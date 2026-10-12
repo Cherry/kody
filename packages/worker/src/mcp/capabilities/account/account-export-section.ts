@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -16,6 +17,7 @@ export const accountExportSectionCapability = defineDomainCapability(
 	capabilityDomainNames.account,
 	{
 		name: 'accountExportSection',
+		orgPermission: 'org:read',
 		description:
 			'Read a paged section of the signed-in user account export. Use accountExportManifest first for section counts and warnings. Secret values are never exported.',
 		keywords: ['account', 'export', 'chunk', 'backup', 'migration'],
@@ -50,13 +52,13 @@ export const accountExportSectionCapability = defineDomainCapability(
 			const user = requireMcpUser(ctx.callerContext)
 			const dbUserId = await resolveAccountExportDbUserId({
 				env: ctx.env,
-				mcpUserId: user.userId,
+				mcpUserId: personalOrgId(user.userId),
 				email: user.email,
 			})
 			const result = await readAccountExportSection({
 				env: ctx.env,
 				dbUserId,
-				mcpUserId: user.userId,
+				mcpUserId: personalOrgId(user.userId),
 				section: args.section,
 				table: args.table,
 				storageId: args.storage_id,

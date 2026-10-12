@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import {
 	deterministicEmbedding,
@@ -169,13 +170,21 @@ export async function searchUnified(input: {
 	query: string
 	limit: number
 	/** Authenticated user; required for fail-closed package Vectorize isolation. */
-	userId?: string
+	userId?: OwnerId
 	registry: Awaited<ReturnType<typeof getCapabilityRegistryForContext>>
 	optionalRows: Pick<
 		OptionalSearchRowsResult,
 		'packageRows' | 'userSecretRows' | 'userValueRows' | 'userIntegrationRows'
 	>
-	retrieverResults?: Array<PackageRetrieverSurfaceResult>
+	/**
+	 * Search-scope retriever hits. A promise lets candidate generation and
+	 * embedding start before retrievers settle; results are merged in plugin
+	 * order before hybrid rerank / Jev. An already-resolved array ranks the
+	 * same way.
+	 */
+	retrieverResults?:
+		| Array<PackageRetrieverSurfaceResult>
+		| Promise<Array<PackageRetrieverSurfaceResult>>
 	/** Optional capability domain id; scopes ranked results to that domain's capabilities. */
 	domain?: string
 	embedText?: EmbedTextFn
@@ -218,7 +227,14 @@ export async function searchUnified(input: {
 				userIntegrationRows: [],
 			}
 		: input.optionalRows
-	const retrieverResults = domainFilter ? [] : (input.retrieverResults ?? [])
+	// Domain drill-down ignores user-owned retrievers. Observe the promise
+	// either way so a caller that hands off an in-flight run does not leak an
+	// unhandled rejection when this search returns before ranking.
+	const retrieverResultsPromise: Promise<Array<PackageRetrieverSurfaceResult>> =
+		domainFilter
+			? Promise.resolve([])
+			: Promise.resolve(input.retrieverResults ?? [])
+	void retrieverResultsPromise.catch(() => {})
 	if (!query) {
 		if (domainFilter) {
 			return buildDomainBrowseResult({
@@ -309,17 +325,32 @@ export async function searchUnified(input: {
 		}
 	}
 	const candidateGenerationStart = performance.now()
-	const queryEmbeddingStart = performance.now()
-	const queryEmbedding = deterministicEmbedding(intent.normalizedQuery)
-	const sharedQueryVector = offline
-		? queryEmbedding
-		: await (
-				input.embedText ?? ((text) => embedTextForVectorize(input.env, text))
-			)(intent.normalizedQuery)
-	const queryEmbeddingMs = elapsedMs(queryEmbeddingStart)
+	const queryEmbeddingPromise = (async () => {
+		const queryEmbeddingStart = performance.now()
+		const queryEmbedding = deterministicEmbedding(intent.normalizedQuery)
+		const sharedQueryVector = offline
+			? queryEmbedding
+			: await (
+					input.embedText ?? ((text) => embedTextForVectorize(input.env, text))
+				)(intent.normalizedQuery)
+		return {
+			queryEmbedding,
+			sharedQueryVector,
+			queryEmbeddingMs: elapsedMs(queryEmbeddingStart),
+		}
+	})()
 
 	const candidateResults = await Promise.all(
 		searchEntityPlugins.map(async (plugin) => {
+			const waitsForRetrieverResults =
+				'waitsForRetrieverResults' in plugin &&
+				plugin.waitsForRetrieverResults === true
+			const [embedding, retrieverResults] = await Promise.all([
+				queryEmbeddingPromise,
+				waitsForRetrieverResults
+					? retrieverResultsPromise
+					: Promise.resolve([]),
+			])
 			const startedAt = performance.now()
 			const candidates =
 				'buildCandidates' in plugin && plugin.buildCandidates
@@ -333,8 +364,8 @@ export async function searchUnified(input: {
 							registry,
 							optionalRows,
 							retrieverResults,
-							queryEmbedding,
-							sharedQueryVector,
+							queryEmbedding: embedding.queryEmbedding,
+							sharedQueryVector: embedding.sharedQueryVector,
 							...(domainFilter ? { domain: domainFilter } : {}),
 							...(input.includeAdminGuides ? { includeAdminGuides: true } : {}),
 						})
@@ -346,6 +377,7 @@ export async function searchUnified(input: {
 			}
 		}),
 	)
+	const queryEmbeddingMs = (await queryEmbeddingPromise).queryEmbeddingMs
 	// Annotate the flatMap callback: `as const` plugins infer distinct candidate
 	// array element types, and without this TS widens the union to `unknown[]`.
 	const candidates = candidateResults.flatMap(
@@ -466,7 +498,7 @@ export async function searchPackages(input: {
 	baseUrl: string
 	query: string
 	limit: number
-	userId?: string
+	userId?: OwnerId
 	rows: Array<PackageSearchRow>
 }): Promise<{ matches: Array<SearchMatch>; offline: boolean }> {
 	const result = await searchUnified({

@@ -3,18 +3,22 @@ import {
 	utcMonthKey,
 	utcWeekStart,
 } from '@kody-internal/shared/date-keys.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type JobsStore } from '@kody-internal/shared/jobs/store.ts'
 import { resolvePastIncludeStop } from '#universal/compute-overage.ts'
 import {
+	isCreditsUnlockedResource,
+	isDailyEntitlementResource,
+	isLimitOverrideResource,
 	isPastIncludeStopResource,
-	isWeeklyComputeWindowResource,
 	parseEntitlementLadder,
 	parseStoredPlanName,
 	parseStripePlanName,
 	resolveCreditWalletState,
 	resolveEffectivePlan,
-	resolvePlanLimit,
-	resolveWeeklyPlanLimit,
+	resolveEntitlementLimit,
+	resolveWeeklyEntitlementLimit,
+	type DailyEntitlementResource,
 	type EntitlementResource,
 	type PlanName,
 	type UserEntitlement,
@@ -26,7 +30,6 @@ import { jobsData } from '#worker/jobs/jobs-data.ts'
 import { type RepoSessionIndexEnv } from '#worker/repo/repo-session-index-client.ts'
 import { countActiveRepoSessions } from '#worker/repo/repo-sessions.ts'
 import { countActiveWorkflowProjections } from '#worker/run-records/service.ts'
-import { normalizeStableUserId } from '#worker/user-id.ts'
 import {
 	readMonthlyComputeUsage,
 	type MonthlyComputeUsage,
@@ -35,11 +38,18 @@ import {
 	ComputeOverageLimitError,
 	EntitlementLimitError,
 	buildEntitlementUpgradeHint,
+	isBudgetLimitError,
 } from './errors.ts'
+import { orgBillingPath } from '#universal/org-pages.ts'
+import { countLiveSeats } from '#worker/orgs/billing.ts'
+import { getOrgById } from '#worker/orgs/repo.ts'
 import {
-	isDailyEntitlementResource,
-	type DailyEntitlementResource,
-} from './user-meter-do.ts'
+	assertWithinOrgBudget,
+	orgBudgetFromGateContext,
+	type OrgBudgetGateContext,
+} from './budget-gate.ts'
+import { readActiveOrgLimitOverrides } from './limit-overrides.ts'
+import { type UserMeterUsageSnapshotResult } from './user-meter-do.ts'
 import {
 	userMeterNamespace,
 	userMeterRpc,
@@ -47,6 +57,11 @@ import {
 } from './user-meter-client.ts'
 
 /** Env surface for authoritative entitlement usage readers. */
+import {
+	andLiveDeletedAtSql,
+	liveDeletedAtSql,
+} from '#worker/soft-delete/live-sql.ts'
+
 export type EntitlementUsageEnv = UserMeterEnv &
 	RepoSessionIndexEnv &
 	Pick<Env, 'RUN_LOG' | 'MAILBOX' | 'JOBS'>
@@ -60,9 +75,9 @@ const publicFreeEntitlement: UserEntitlement = {
 }
 
 /**
- * `users` columns every entitlement resolution reads. Select these (with a
- * `u.` prefix via {@link userEntitlementColumnsSql}) wherever a sweep
- * already has the row, then call {@link resolveUserEntitlementFromRow}.
+ * Org columns every entitlement resolution reads. Select these (with an
+ * `o.` prefix via {@link userEntitlementColumnsSql}) wherever a sweep
+ * already has the org row, then call {@link resolveUserEntitlementFromRow}.
  */
 export const userEntitlementColumns = [
 	'plan',
@@ -169,9 +184,10 @@ export async function readCreditWalletBalanceMicroUsd(
 
 /**
  * Entitlement from the manual grant and Stripe only, without gift or
- * referral overlays (inbound email and admin sweeps score the base plan).
- * It resolves the plan itself so an overlay plan can never be paired with
- * Stripe-only eligibility. Overlay-aware callers use
+ * referral overlays (inbound email scores the base plan so gifted Pro
+ * cannot inflate receive caps). It resolves the plan itself so an overlay
+ * plan can never be paired with Stripe-only eligibility. Overlay-aware
+ * callers (live gating, user warnings, fleet entitlement sweeps) use
  * {@link resolveUserEntitlementFromRow}.
  */
 export async function resolveBaseUserEntitlement(input: {
@@ -192,40 +208,63 @@ export async function resolveBaseUserEntitlement(input: {
 	)
 	const creditsEligible =
 		plan === 'pro' && hasStoredCreditsEligibility(input.row)
+	const [balanceMicroUsd, limitOverrides] = await Promise.all([
+		creditsEligible
+			? readCreditWalletBalanceMicroUsd(input.db, input.stableUserId)
+			: null,
+		readActiveOrgLimitOverrides(input.db, input.stableUserId),
+	])
 	return {
 		plan,
 		ladder: parseEntitlementLadder(input.row.entitlement_ladder),
 		creditWallet: creditsEligible
-			? resolveCreditWalletState({
-					plan,
-					creditsEligible,
-					balanceMicroUsd: await readCreditWalletBalanceMicroUsd(
-						input.db,
-						input.stableUserId,
-					),
-				})
+			? resolveCreditWalletState({ plan, creditsEligible, balanceMicroUsd })
 			: 'none',
+		limitOverrides,
 	}
 }
 
 /**
- * Full {@link UserEntitlement} for a `users` row. Reads the wallet balance
- * only for wallet-eligible Pro accounts, so every other account costs no
- * extra query.
+ * Full {@link UserEntitlement} for a `users` row. Always attaches live seats
+ * (runaway brake scales on every plan). Reads the wallet balance only for
+ * wallet-eligible Pro accounts. Pass {@link balanceMicroUsd} when the caller
+ * already loaded the wallet (for example `/account/usage`) so the balance is
+ * not read twice.
  */
 export async function resolveUserEntitlementFromRow(input: {
 	db: D1Database
 	stableUserId: string
 	row: UserEntitlementRow
 	now?: Date
+	/** When set, skip the credit_wallets balance query. */
+	balanceMicroUsd?: number
 }): Promise<UserEntitlement> {
 	const { plan, ladder, creditsEligible } = resolveUserPlanFromRow(
 		input.row,
 		input.now,
 	)
-	const balanceMicroUsd = creditsEligible
-		? await readCreditWalletBalanceMicroUsd(input.db, input.stableUserId)
-		: 0
+	// Seats always attach: the execute runaway brake is seats × 300 on every
+	// plan, and admin / resolveEntitlementLimit display must match admit.
+	if (!creditsEligible) {
+		const [seats, limitOverrides] = await Promise.all([
+			readPaidSeats(input.db, input.stableUserId),
+			readActiveOrgLimitOverrides(input.db, input.stableUserId, input.now),
+		])
+		return {
+			plan,
+			ladder,
+			creditWallet: 'none',
+			seats,
+			limitOverrides,
+		}
+	}
+	const [balanceMicroUsd, seats, limitOverrides] = await Promise.all([
+		input.balanceMicroUsd !== undefined
+			? input.balanceMicroUsd
+			: readCreditWalletBalanceMicroUsd(input.db, input.stableUserId),
+		readPaidSeats(input.db, input.stableUserId),
+		readActiveOrgLimitOverrides(input.db, input.stableUserId, input.now),
+	])
 	return {
 		plan,
 		ladder,
@@ -234,7 +273,73 @@ export async function resolveUserEntitlementFromRow(input: {
 			creditsEligible,
 			balanceMicroUsd,
 		}),
+		seats,
+		limitOverrides,
 	}
+}
+
+/**
+ * Paid seats for the org's rate pool: live owners + members, the same count
+ * seat sync bills (at least 1).
+ */
+async function readPaidSeats(db: D1Database, orgId: string): Promise<number> {
+	return Math.max(1, await countLiveSeats(db, orgId))
+}
+
+/**
+ * The rate pool is seats × the per-seat include, so seats are read live for
+ * pooled resources: a removed seat shrinks the pool on the next check, not
+ * after the entitlement cache. The execute runaway brake also live-reads
+ * seats so a seat change binds on the next admit.
+ */
+async function withLiveSeats(input: {
+	db: D1Database
+	orgId: string
+	entitlement: UserEntitlement
+	resource: EntitlementResource
+}): Promise<UserEntitlement> {
+	const needsLiveSeats =
+		input.resource === 'execute_calls_per_minute' ||
+		(input.entitlement.creditWallet !== 'none' &&
+			isCreditsUnlockedResource(input.resource))
+	if (!needsLiveSeats) {
+		return input.entitlement
+	}
+	return {
+		...input.entitlement,
+		seats: await readPaidSeats(input.db, input.orgId),
+	}
+}
+
+/**
+ * Cached entitlement with live seats (when the resource pools by seats) and
+ * live limit overrides (when the resource is overridable). Used by counted
+ * checks and the execute runaway brake so a seat or override change binds
+ * on the next call.
+ */
+export async function resolveLiveEntitlementForResource(input: {
+	db: D1Database
+	userId: OwnerId
+	email: string | null | undefined
+	resource: EntitlementResource
+	now?: Date
+}): Promise<UserEntitlement> {
+	const now = input.now ?? new Date()
+	return await withLiveSeats({
+		db: input.db,
+		orgId: input.userId,
+		entitlement: await withLiveLimitOverrides({
+			db: input.db,
+			orgId: input.userId,
+			entitlement: getCachedUserEntitlement(input.db, {
+				userId: input.userId,
+				email: input.email,
+			}),
+			resource: input.resource,
+			now,
+		}),
+		resource: input.resource,
+	})
 }
 
 /**
@@ -250,7 +355,7 @@ export async function resolveUserEntitlementFromRow(input: {
  * contexts with a blank/missing email reverse-resolve by stable id. Missing or
  * invalid stable ids still fail closed to public `free` without touching D1.
  *
- * Effective plan = f(manual users.plan, users.stripe_plan, unexpired
+ * Effective plan = f(manual orgs.plan, orgs.stripe_plan, unexpired
  * Pro overlays): the higher-ranked of the manual grant and Stripe
  * subscription plan, then a public Pro overlay when the later of the
  * second-agent gift and stacked referral credit is still active and the
@@ -259,6 +364,36 @@ export async function resolveUserEntitlementFromRow(input: {
  * paid access remains continuous. The credit wallet is `funded` only for
  * the purchasable Pro with a positive balance.
  */
+async function loadEntitlementRowForStableUserId(
+	db: D1Database,
+	input: { stableUserId: string; email: string | null | undefined },
+): Promise<UserEntitlementRow | null> {
+	const orgColumns = userEntitlementColumnsSql('o')
+	const email = input.email?.trim().toLowerCase()
+
+	// When email is provided, require a live users row for (email, stable id)
+	// before reading org billing — a mismatched caller context must not inherit
+	// another account's plan. Entitlement columns come from `orgs` only.
+	if (email) {
+		return await db
+			.prepare(
+				`SELECT ${orgColumns}
+				 FROM users u
+				 INNER JOIN orgs o ON o.id = u.stable_user_id
+				 WHERE u.email = ? AND u.stable_user_id = ? AND u.deleting_at IS NULL${andLiveDeletedAtSql('u')}${andLiveDeletedAtSql('o')}`,
+			)
+			.bind(email, input.stableUserId)
+			.first<UserEntitlementRow>()
+	}
+
+	return await db
+		.prepare(
+			`SELECT ${orgColumns} FROM orgs o WHERE o.id = ?${andLiveDeletedAtSql('o')}`,
+		)
+		.bind(input.stableUserId)
+		.first<UserEntitlementRow>()
+}
+
 export async function getUserEntitlement(
 	db: D1Database,
 	input: { userId: string; email: string | null | undefined },
@@ -266,15 +401,10 @@ export async function getUserEntitlement(
 	const email = input.email?.trim().toLowerCase()
 	if (!input.userId) return publicFreeEntitlement
 	if (!stableUserIdPattern.test(input.userId)) return publicFreeEntitlement
-	const columns = userEntitlementColumnsSql()
-	const row = await db
-		.prepare(
-			email
-				? `SELECT ${columns} FROM users WHERE email = ? AND stable_user_id = ?`
-				: `SELECT ${columns} FROM users WHERE stable_user_id = ?`,
-		)
-		.bind(...(email ? [email, input.userId] : [input.userId]))
-		.first<UserEntitlementRow>()
+	const row = await loadEntitlementRowForStableUserId(db, {
+		stableUserId: input.userId,
+		email,
+	})
 	if (!row) return publicFreeEntitlement
 	return await resolveUserEntitlementFromRow({
 		db,
@@ -306,7 +436,7 @@ export type StableUserAccount = {
 
 /**
  * Short-TTL caches for the plan / account lookups that run on metered hot
- * paths (every execute call and every sandbox outbound fetch pays one). The
+ * paths (every new execute worker and every sandbox outbound fetch pays one). The
  * quota counter write itself stays atomic and uncached; only the plan-limit
  * resolution tolerates staleness, so a plan change takes effect for quota
  * checks within {@link entitlementLookupCacheTtlMs} instead of immediately.
@@ -356,6 +486,13 @@ function createEntitlementLookupCache<T>() {
 			})
 			return await value
 		},
+		deleteByKeyPrefix(db: D1Database, keyPrefix: string) {
+			const cache = cachesByDb.get(db)
+			if (!cache) return
+			for (const key of [...cache.keys()]) {
+				if (key.startsWith(keyPrefix)) cache.delete(key)
+			}
+		},
 	}
 }
 
@@ -384,6 +521,46 @@ export async function getCachedUserEntitlement(
 }
 
 /**
+ * Drop this isolate's cached entitlements for an org so the next lookup
+ * re-reads D1. Other isolates cannot be reached, which is why counted
+ * checks also read limit overrides live ({@link withLiveLimitOverrides}).
+ */
+export function invalidateCachedUserEntitlement(
+	db: D1Database,
+	orgId: string,
+): void {
+	cachedUserEntitlements.deleteByKeyPrefix(db, `${orgId}\n`)
+}
+
+/**
+ * Replace the (possibly cached) overrides with a live D1 read when the
+ * resource has an overridable limit. The per-isolate entitlement cache can
+ * only be invalidated in the isolate that wrote, so an override change must
+ * not wait out the cache TTL anywhere else.
+ */
+async function withLiveLimitOverrides(input: {
+	db: D1Database
+	orgId: string
+	entitlement: Promise<UserEntitlement>
+	resource: EntitlementResource
+	now: Date
+}): Promise<UserEntitlement> {
+	if (!isLimitOverrideResource(input.resource)) {
+		return await input.entitlement
+	}
+	const [entitlement, limitOverrides] = await Promise.all([
+		input.entitlement,
+		stableUserIdPattern.test(input.orgId)
+			? readActiveOrgLimitOverrides(input.db, input.orgId, input.now)
+			: [],
+	])
+	// The fail-closed public Free fallback (unknown org or mismatched
+	// caller) carries no overrides and must not gain any here.
+	if (entitlement.limitOverrides === undefined) return entitlement
+	return { ...entitlement, limitOverrides }
+}
+
+/**
  * {@link getUserPlan} behind the short-TTL hot-path cache. Use only where a
  * plan change may take up to a minute to apply (quota limit resolution);
  * interactive plan displays should keep calling {@link getUserPlan}.
@@ -403,7 +580,7 @@ export async function findCachedUserAccountByStableUserId(
 	db: D1Database,
 	stableUserId: string,
 ): Promise<StableUserAccount | null> {
-	const trimmed = normalizeStableUserId(stableUserId)
+	const trimmed = stableUserId.trim()
 	if (!trimmed) return null
 	return await cachedStableUserAccounts.getOrCreate(
 		db,
@@ -413,8 +590,8 @@ export async function findCachedUserAccountByStableUserId(
 }
 
 /**
- * Reverse-resolve a stable MCP userId back to the account email, plan, and
- * verified-email state via one indexed `users.stable_user_id` point read.
+ * Reverse-resolve a stable MCP userId back to the account email, personal-org
+ * plan, and verified-email state via the indexed `users.stable_user_id`.
  * Only call this on paths that genuinely have no caller context email (for
  * example package-runtime contexts acting with only the stable userId);
  * inbound email routing resolves accounts via the indexed username lookup
@@ -424,13 +601,14 @@ export async function findUserAccountByStableUserId(
 	db: D1Database,
 	stableUserId: string,
 ): Promise<StableUserAccount | null> {
-	const trimmed = normalizeStableUserId(stableUserId)
+	const trimmed = stableUserId.trim()
 	if (!trimmed) return null
 	const row = await db
 		.prepare(
-			`SELECT email, plan, email_verified_at
-			 FROM users
-			 WHERE stable_user_id = ?`,
+			`SELECT u.email, o.plan, u.email_verified_at
+			 FROM users u
+			 INNER JOIN orgs o ON o.id = u.stable_user_id
+			 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}${andLiveDeletedAtSql('o')}`,
 		)
 		.bind(trimmed)
 		.first<{
@@ -463,7 +641,7 @@ function assertDailyEntitlementResource(
  */
 async function ensureUserMeterCounterInitializedAtZero(input: {
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 	resource: DailyEntitlementResource
 	day: string
 	updatedAt: string
@@ -484,7 +662,7 @@ async function ensureUserMeterCounterInitializedAtZero(input: {
  */
 export async function readDailyEntitlementResourceUsage(input: {
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 	resource: EntitlementResource
 	now?: Date
 }): Promise<number> {
@@ -526,7 +704,7 @@ export async function readDailyEntitlementResourceUsage(input: {
  */
 export async function readWeeklyEntitlementResourceUsage(input: {
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 	resource: EntitlementResource
 	now?: Date
 }): Promise<number> {
@@ -542,6 +720,134 @@ export async function readWeeklyEntitlementResourceUsage(input: {
 		now: now.toISOString(),
 	})
 	return result.count
+}
+
+/**
+ * Authoritative UserMeter slice for an entitlement usage snapshot: every
+ * requested daily counter, weekly window, and optional storage bytes in one
+ * Durable Object hop (cold keys still bootstrap then re-read once). Point
+ * readers keep {@link readDailyEntitlementResourceUsage},
+ * {@link readWeeklyEntitlementResourceUsage}, and
+ * {@link readStorageBytesFromUserMeter}.
+ */
+export type UserMeterEntitlementUsageCounts = {
+	daily: Partial<Record<DailyEntitlementResource, number>>
+	weekly: Partial<Record<DailyEntitlementResource, number>>
+	storageBytes: number | null
+}
+
+export async function readUserMeterEntitlementUsageSnapshot(input: {
+	db: D1Database
+	env: EntitlementUsageEnv
+	userId: OwnerId
+	now: Date
+	dailyResources: ReadonlyArray<DailyEntitlementResource>
+	weeklyResources: ReadonlyArray<DailyEntitlementResource>
+	includeStorageBytes: boolean
+}): Promise<UserMeterEntitlementUsageCounts> {
+	const day = utcDayKey(input.now)
+	const weekStart = utcWeekStart(input.now)
+	const updatedAt = input.now.toISOString()
+	const meter = userMeterRpc({ env: input.env, userId: input.userId })
+	const request = {
+		day,
+		weekStart,
+		dailyResources: input.dailyResources,
+		weeklyResources: input.weeklyResources,
+		includeStorageBytes: input.includeStorageBytes,
+		now: updatedAt,
+	}
+
+	let snapshot = await meter.readUsageSnapshot(request)
+	const missingDaily = snapshot.daily
+		.filter((entry) => entry.outcome === 'needs_bootstrap')
+		.map((entry) => entry.resource)
+	const storageNeedsBootstrap =
+		input.includeStorageBytes &&
+		snapshot.storageBytes?.outcome === 'needs_bootstrap'
+	let storageBootstrapSkipped = false
+
+	if (missingDaily.length > 0 || storageNeedsBootstrap) {
+		const accountExists = storageNeedsBootstrap
+			? await userAccountRowExists({
+					db: input.db,
+					userId: input.userId,
+				})
+			: false
+		storageBootstrapSkipped = Boolean(storageNeedsBootstrap && !accountExists)
+		const shouldInitializeStorage = Boolean(
+			storageNeedsBootstrap && accountExists,
+		)
+		await Promise.all([
+			...missingDaily.map((resource) =>
+				ensureUserMeterCounterInitializedAtZero({
+					env: input.env,
+					userId: input.userId,
+					resource,
+					day,
+					updatedAt,
+				}),
+			),
+			shouldInitializeStorage
+				? meter.initializeStorageBytes({ bytes: 0, updatedAt })
+				: Promise.resolve(),
+		])
+		if (missingDaily.length > 0 || shouldInitializeStorage) {
+			snapshot = await meter.readUsageSnapshot(request)
+		}
+	}
+
+	return countsFromUserMeterUsageSnapshot({
+		snapshot,
+		dailyResources: input.dailyResources,
+		weeklyResources: input.weeklyResources,
+		includeStorageBytes: input.includeStorageBytes,
+		storageBootstrapSkipped,
+	})
+}
+
+function countsFromUserMeterUsageSnapshot(input: {
+	snapshot: UserMeterUsageSnapshotResult
+	dailyResources: ReadonlyArray<DailyEntitlementResource>
+	weeklyResources: ReadonlyArray<DailyEntitlementResource>
+	includeStorageBytes: boolean
+	storageBootstrapSkipped: boolean
+}): UserMeterEntitlementUsageCounts {
+	const daily: Partial<Record<DailyEntitlementResource, number>> = {}
+	for (const resource of input.dailyResources) {
+		const entry = input.snapshot.daily.find((row) => row.resource === resource)
+		if (!entry || entry.outcome === 'needs_bootstrap') {
+			throw new Error(
+				`UserMeter usage snapshot daily read still needs bootstrap for ${resource}.`,
+			)
+		}
+		daily[resource] = entry.count
+	}
+
+	const weekly: Partial<Record<DailyEntitlementResource, number>> = {}
+	for (const resource of input.weeklyResources) {
+		const entry = input.snapshot.weekly.find((row) => row.resource === resource)
+		if (!entry) {
+			throw new Error(
+				`UserMeter usage snapshot omitted weekly count for ${resource}.`,
+			)
+		}
+		weekly[resource] = entry.count
+	}
+
+	if (!input.includeStorageBytes) {
+		return { daily, weekly, storageBytes: null }
+	}
+	if (input.storageBootstrapSkipped) {
+		return { daily, weekly, storageBytes: 0 }
+	}
+	const storage = input.snapshot.storageBytes
+	if (!storage || storage.outcome === 'needs_bootstrap') {
+		throw new Error(
+			'UserMeter usage snapshot storage bytes still need bootstrap after initialize.',
+		)
+	}
+	return { daily, weekly, storageBytes: storage.bytes }
 }
 
 async function countRows(db: D1Database, sql: string, params: Array<unknown>) {
@@ -648,7 +954,7 @@ async function sumStorageBytes(
  */
 export async function calculateUserD1StorageBytes(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	/**
 	 * Jobs-data access for the jobs-worker database (ADR 0016). Job rows no
 	 * longer live in APP_DB; when provided, their byte estimate is included
@@ -768,10 +1074,12 @@ export async function calculateUserD1StorageBytes(input: {
  */
 async function userAccountRowExists(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 }): Promise<boolean> {
 	const row = await input.db
-		.prepare(`SELECT 1 AS present FROM users WHERE stable_user_id = ?`)
+		.prepare(
+			`SELECT 1 AS present FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.userId)
 		.first<{ present: number }>()
 	return row != null
@@ -796,7 +1104,7 @@ async function userAccountRowExists(input: {
  */
 export async function reconcileUserD1StorageBytes(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	now?: Date
 	/** Required because UserMeter is the storage-usage authority. */
 	env: UserMeterEnv
@@ -861,7 +1169,7 @@ export async function reconcileUserD1StorageBytes(input: {
 export async function listUsersForD1StorageReconciliation(input: {
 	db: D1Database
 	limit: number
-}): Promise<Array<{ userId: string }>> {
+}): Promise<Array<{ userId: OwnerId }>> {
 	const cursorRow = await input.db
 		.prepare(
 			`SELECT position FROM d1_storage_reconcile_cursor
@@ -873,12 +1181,11 @@ export async function listUsersForD1StorageReconciliation(input: {
 		.prepare(
 			`SELECT stable_user_id AS userId
 			FROM users
-			WHERE stable_user_id > ?
-			ORDER BY stable_user_id ASC
-			LIMIT ?`,
+			WHERE stable_user_id > ?${andLiveDeletedAtSql()}
+			ORDER BY stable_user_id ASC LIMIT ?`,
 		)
 		.bind(lastUserId, input.limit)
-		.all<{ userId: string }>()
+		.all<{ userId: OwnerId }>()
 	const rows = page.results ?? []
 	if (rows.length > 0 || lastUserId === '') return rows
 	// Tail reached: wrap to the start of the keyset for the next full sweep.
@@ -886,11 +1193,12 @@ export async function listUsersForD1StorageReconciliation(input: {
 		.prepare(
 			`SELECT stable_user_id AS userId
 			FROM users
+			WHERE ${liveDeletedAtSql()}
 			ORDER BY stable_user_id ASC
 			LIMIT ?`,
 		)
 		.bind(input.limit)
-		.all<{ userId: string }>()
+		.all<{ userId: OwnerId }>()
 	return wrapped.results ?? []
 }
 
@@ -912,7 +1220,7 @@ export async function advanceD1StorageReconciliationCursor(input: {
 
 export async function readEntitlementResourceUsage(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	resource: EntitlementResource
 	now: Date
 }): Promise<number> {
@@ -940,7 +1248,7 @@ export async function readEntitlementResourceUsage(input: {
 			)
 		case 'email_sends_per_day':
 		case 'email_receives_per_day':
-		case 'execute_calls_per_day':
+		case 'execute_unique_workers_per_day':
 		case 'outbound_fetches_per_day':
 		case 'job_runs_per_day':
 		case 'automation_invocations_per_day':
@@ -987,6 +1295,12 @@ export async function readEntitlementResourceUsage(input: {
 			throw new Error(
 				'email_message_bytes has no built-in counter; pass getCurrent to assertWithinEntitlement.',
 			)
+		case 'execute_calls_per_minute':
+			// In-memory runaway brake on UserMeter.admitExecuteCall, not a
+			// durable accumulating counter.
+			throw new Error(
+				'execute_calls_per_minute has no built-in counter; resolve the limit and pass it to admitExecuteCall.',
+			)
 		default: {
 			const exhaustive: never = resource
 			throw new Error(`Unknown entitlement resource: ${String(exhaustive)}`)
@@ -1004,7 +1318,7 @@ export async function readEntitlementResourceUsage(input: {
 export async function readStorageBytesFromUserMeter(input: {
 	db: D1Database
 	env: EntitlementUsageEnv
-	userId: string
+	userId: OwnerId
 	now: Date
 }): Promise<number> {
 	const meter = userMeterRpc({ env: input.env, userId: input.userId })
@@ -1035,7 +1349,7 @@ export async function readStorageBytesFromUserMeter(input: {
 export async function readCurrentEntitlementResourceUsage(input: {
 	db: D1Database
 	env: EntitlementUsageEnv
-	userId: string
+	userId: OwnerId
 	resource: EntitlementResource
 	now: Date
 }): Promise<number> {
@@ -1104,9 +1418,21 @@ const storageBytesBootstrapMaxAttempts = 2
  * The `env` / `USER_METER` binding is required for the DO reserve path and
  * throws immediately when absent — failing closed for real users.
  */
+/** Signup org billing page, or a placeholder when the org cannot be read. */
+export async function entitlementBillingPath(db: D1Database, userId: string) {
+	try {
+		const org = await getOrgById(db, userId)
+		if (org?.slug) return orgBillingPath(org.slug)
+	} catch {
+		// A test double that does not model orgs still owes the caller a limit
+		// error. Production D1 returns null when the org is missing.
+	}
+	return '/@<slug>/-/billing'
+}
+
 export async function assertWithinStorageBytesEntitlement(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	email: string | null | undefined
 	requested?: number
 	getCurrent?: () => Promise<number>
@@ -1142,12 +1468,7 @@ export async function assertWithinStorageBytesEntitlement(input: {
 		email: input.email,
 	})
 	const plan = entitlement.plan
-	const limit = resolvePlanLimit(
-		plan,
-		'storage_bytes',
-		entitlement.ladder,
-		entitlement.creditWallet,
-	)
+	const limit = resolveEntitlementLimit(entitlement, 'storage_bytes')
 	const requested = Math.max(0, input.requested ?? 1)
 	const updatedAt = new Date().toISOString()
 
@@ -1173,11 +1494,12 @@ export async function assertWithinStorageBytesEntitlement(input: {
 					plan,
 					limit,
 					current,
-					upgradeHint: buildEntitlementUpgradeHint(
-						'storage_bytes',
+					upgradeHint: buildEntitlementUpgradeHint({
+						resource: 'storage_bytes',
 						plan,
-						entitlement.creditWallet,
-					),
+						creditWallet: entitlement.creditWallet,
+						billingPath: await entitlementBillingPath(input.db, input.userId),
+					}),
 				})
 			}
 			// Real user with no DO row: zero-initialize, then retry. The
@@ -1195,11 +1517,12 @@ export async function assertWithinStorageBytesEntitlement(input: {
 				plan,
 				limit,
 				current: result.bytes,
-				upgradeHint: buildEntitlementUpgradeHint(
-					'storage_bytes',
+				upgradeHint: buildEntitlementUpgradeHint({
+					resource: 'storage_bytes',
 					plan,
-					entitlement.creditWallet,
-				),
+					creditWallet: entitlement.creditWallet,
+					billingPath: await entitlementBillingPath(input.db, input.userId),
+				}),
 			})
 		}
 
@@ -1213,7 +1536,7 @@ export async function assertWithinStorageBytesEntitlement(input: {
 
 export type AssertWithinEntitlementInput = {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	/**
 	 * Real account email of the acting user. Plan lookup requires the email +
 	 * stable-id pair; absent or unknown identities fail closed to `free`.
@@ -1239,20 +1562,21 @@ export type AssertWithinEntitlementInput = {
 export async function assertWithinEntitlement(
 	input: AssertWithinEntitlementInput,
 ): Promise<void> {
+	const now = input.now ?? new Date()
 	// Cached plan resolution: quota limit lookup tolerates short-TTL
 	// staleness; usage counters below stay fresh on every call.
-	const entitlement = await getCachedUserEntitlement(input.db, {
-		userId: input.userId,
-		email: input.email,
+	const entitlement = await withLiveLimitOverrides({
+		db: input.db,
+		orgId: input.userId,
+		entitlement: getCachedUserEntitlement(input.db, {
+			userId: input.userId,
+			email: input.email,
+		}),
+		resource: input.resource,
+		now,
 	})
 	const plan = entitlement.plan
-	const limit = resolvePlanLimit(
-		plan,
-		input.resource,
-		entitlement.ladder,
-		entitlement.creditWallet,
-	)
-	const now = input.now ?? new Date()
+	const limit = resolveEntitlementLimit(entitlement, input.resource, now)
 	const requested = input.requested ?? 1
 	const current = input.getCurrent
 		? await input.getCurrent()
@@ -1263,16 +1587,19 @@ export async function assertWithinEntitlement(
 				now,
 			})
 	if (current + requested > limit) {
+		const billingPath = await entitlementBillingPath(input.db, input.userId)
 		throw new EntitlementLimitError({
 			resource: input.resource,
 			plan,
 			limit,
 			current,
-			upgradeHint: buildEntitlementUpgradeHint(
-				input.resource,
+			upgradeHint: buildEntitlementUpgradeHint({
+				resource: input.resource,
 				plan,
-				entitlement.creditWallet,
-			),
+				creditWallet: entitlement.creditWallet,
+				billingPath,
+				now,
+			}),
 		})
 	}
 }
@@ -1281,10 +1608,12 @@ export type ConsumeDailyEntitlementInput = {
 	db: D1Database
 	/** Must expose `USER_METER` (sole daily counter authority). */
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 	email: string | null | undefined
 	resource: EntitlementResource
 	now?: Date
+	/** Org budget context for team orgs (defaults to personal org id = userId). */
+	orgBudget?: OrgBudgetGateContext
 }
 
 /**
@@ -1297,93 +1626,267 @@ export async function consumeDailyEntitlement(
 	input: ConsumeDailyEntitlementInput,
 ): Promise<void> {
 	const resource = assertDailyEntitlementResource(input.resource)
-	const now = input.now ?? new Date()
-	const day = utcDayKey(now)
-	const updatedAt = now.toISOString()
-	// Cached plan resolution: this runs on every execute call and every
-	// sandbox outbound fetch; the UserMeter consume below is the only
-	// counter state that must be fresh.
-	const entitlement = await getCachedUserEntitlement(input.db, {
-		userId: input.userId,
-		email: input.email,
-	})
-	// Before the counter so a stopped attempt does not spend daily quota.
-	if (isPastIncludeStopResource(resource)) {
-		await assertWithinPastIncludeCredits({
-			db: input.db,
-			userId: input.userId,
-			entitlement,
-			now,
-		})
+	if (resource === executeUniqueWorkersResource) {
+		throw new Error(
+			'execute_unique_workers_per_day counts unique workers; use consumeExecuteUniqueWorkerDay.',
+		)
 	}
-	const plan = entitlement.plan
-	const limit = resolvePlanLimit(
-		plan,
-		resource,
-		entitlement.ladder,
-		entitlement.creditWallet,
-	)
-	const weekLimit = isWeeklyComputeWindowResource(resource)
-		? resolveWeeklyPlanLimit(
-				plan,
-				resource,
-				entitlement.ladder,
-				entitlement.creditWallet,
-			)
-		: null
-	const weekStart = weekLimit === null ? undefined : utcWeekStart(now)
-	const meter = userMeterRpc({ env: input.env, userId: input.userId })
+	const window = await resolveDailyEntitlementWindow({ ...input, resource })
 	const consumeInput = {
 		resource,
-		day,
+		day: window.day,
+		limit: window.limit,
+		updatedAt: window.updatedAt,
+		weekStart: window.weekStart,
+		weekLimit: window.weekLimit,
+	}
+	const result = await withUserMeterCounterBootstrap({
+		...input,
+		resource,
+		window,
+		run: (meter) => meter.consume(consumeInput),
+	})
+	if (!result.consumed) {
+		await throwDailyEntitlementDenial({ ...input, resource, window, result })
+	}
+}
+
+export type ExecuteUniqueWorkerUsage = {
+	used: number
+	limit: number
+	weekUsed: number | null
+	weekLimit: number | null
+}
+
+export type ExecuteUniqueWorkerDayUsage = ExecuteUniqueWorkerUsage & {
+	/** True when this call loads a new worker today and spent one unit. */
+	created: boolean
+}
+
+/**
+ * Current hosted execute usage without spending, for execute responses that
+ * never reached the worker claim (refused or failed before load).
+ */
+export async function readExecuteUniqueWorkerUsage(input: {
+	db: D1Database
+	env: UserMeterEnv
+	userId: OwnerId
+	email: string | null | undefined
+	now?: Date
+}): Promise<ExecuteUniqueWorkerUsage> {
+	const resource = executeUniqueWorkersResource
+	const now = input.now ?? new Date()
+	const entitlement = await withLiveSeats({
+		db: input.db,
+		orgId: input.userId,
+		entitlement: await withLiveLimitOverrides({
+			db: input.db,
+			orgId: input.userId,
+			entitlement: getCachedUserEntitlement(input.db, {
+				userId: input.userId,
+				email: input.email,
+			}),
+			resource,
+			now,
+		}),
+		resource,
+	})
+	const limit = resolveEntitlementLimit(entitlement, resource, now)
+	const weekLimit = resolveWeeklyEntitlementLimit(entitlement, resource, now)
+	const [used, weekUsed] = await Promise.all([
+		readDailyEntitlementResourceUsage({
+			env: input.env,
+			userId: input.userId,
+			resource,
+			now,
+		}),
+		weekLimit === null
+			? null
+			: readWeeklyEntitlementResourceUsage({
+					env: input.env,
+					userId: input.userId,
+					resource,
+					now,
+				}),
+	])
+	return { used, limit, weekUsed, weekLimit }
+}
+
+const executeUniqueWorkersResource =
+	'execute_unique_workers_per_day' satisfies DailyEntitlementResource
+
+/**
+ * Hosted execute cap: spend one unit only when `workerId` is a new Dynamic
+ * Worker for this org today (the unit Cloudflare bills). Repeats of code
+ * already loaded today are free. Throws EntitlementLimitError when a new
+ * worker would exceed the daily or weekly limit; the worker stays unclaimed.
+ */
+export async function consumeExecuteUniqueWorkerDay(input: {
+	db: D1Database
+	env: UserMeterEnv
+	userId: OwnerId
+	email: string | null | undefined
+	workerId: string
+	now?: Date
+	orgBudget?: OrgBudgetGateContext
+}): Promise<ExecuteUniqueWorkerDayUsage> {
+	const resource = executeUniqueWorkersResource
+	const window = await resolveDailyEntitlementWindow({ ...input, resource })
+	const result = await withUserMeterCounterBootstrap({
+		...input,
+		resource,
+		window,
+		run: (meter) =>
+			meter.claimDynamicWorkerDayWithinLimit({
+				workerId: input.workerId,
+				resource,
+				day: window.day,
+				limit: window.limit,
+				createdAt: window.updatedAt,
+				weekStart: window.weekStart,
+				weekLimit: window.weekLimit,
+			}),
+	})
+	if (result.deniedWindow) {
+		await throwDailyEntitlementDenial({ ...input, resource, window, result })
+	}
+	return {
+		created: result.created,
+		used: result.count,
+		limit: window.limit,
+		weekUsed: window.weekLimit === null ? null : (result.weekCount ?? 0),
+		weekLimit: window.weekLimit,
+	}
+}
+
+type DailyEntitlementWindow = {
+	entitlement: UserEntitlement
+	now: Date
+	day: string
+	updatedAt: string
+	limit: number
+	weekStart: string | undefined
+	weekLimit: number | null
+}
+
+async function resolveDailyEntitlementWindow(input: {
+	db: D1Database
+	env: UserMeterEnv
+	userId: OwnerId
+	email: string | null | undefined
+	resource: DailyEntitlementResource
+	now?: Date
+	orgBudget?: OrgBudgetGateContext
+}): Promise<DailyEntitlementWindow> {
+	const resource = input.resource
+	const now = input.now ?? new Date()
+	// Cached plan resolution: this runs on every new execute worker and every
+	// sandbox outbound fetch; the UserMeter call after it is the only
+	// counter state that must be fresh. Overrides are read live in parallel.
+	const cachedEntitlement = await withLiveLimitOverrides({
+		db: input.db,
+		orgId: input.userId,
+		entitlement: getCachedUserEntitlement(input.db, {
+			userId: input.userId,
+			email: input.email,
+		}),
+		resource,
+		now,
+	})
+	// Before the counter so a stopped attempt does not spend daily quota.
+	const checkedEntitlement = isPastIncludeStopResource(resource)
+		? await assertWithinPastIncludeCredits({
+				db: input.db,
+				env: input.env,
+				userId: input.userId,
+				entitlement: cachedEntitlement,
+				now,
+				orgBudget: input.orgBudget,
+			})
+		: cachedEntitlement
+	const entitlement = await withLiveSeats({
+		db: input.db,
+		orgId: input.userId,
+		entitlement: checkedEntitlement,
+		resource,
+	})
+	const limit = resolveEntitlementLimit(entitlement, resource, now)
+	const weekLimit = resolveWeeklyEntitlementLimit(entitlement, resource, now)
+	return {
+		entitlement,
+		now,
+		day: utcDayKey(now),
+		updatedAt: now.toISOString(),
 		limit,
-		updatedAt,
-		weekStart,
+		weekStart: weekLimit === null ? undefined : utcWeekStart(now),
 		weekLimit,
 	}
-	let result = await meter.consume(consumeInput)
+}
+
+async function withUserMeterCounterBootstrap<
+	T extends { outcome: 'ready' } | { outcome: 'needs_bootstrap' },
+>(input: {
+	env: UserMeterEnv
+	userId: OwnerId
+	resource: DailyEntitlementResource
+	window: DailyEntitlementWindow
+	run: (meter: ReturnType<typeof userMeterRpc>) => Promise<T>
+}): Promise<Exclude<T, { outcome: 'needs_bootstrap' }>> {
+	const meter = userMeterRpc({ env: input.env, userId: input.userId })
+	let result = await input.run(meter)
 	if (result.outcome === 'needs_bootstrap') {
 		await ensureUserMeterCounterInitializedAtZero({
 			env: input.env,
 			userId: input.userId,
-			resource,
-			day,
-			updatedAt,
+			resource: input.resource,
+			day: input.window.day,
+			updatedAt: input.window.updatedAt,
 		})
-		result = await meter.consume(consumeInput)
+		result = await input.run(meter)
 		if (result.outcome === 'needs_bootstrap') {
 			throw new Error(
 				'UserMeter consume still needs bootstrap after initialize.',
 			)
 		}
 	}
-	if (!result.consumed) {
-		if (result.deniedWindow === 'week' && weekLimit !== null) {
-			throw new EntitlementLimitError({
-				resource,
-				plan,
-				limit: weekLimit,
-				current: result.weekCount ?? 0,
-				window: 'week',
-				upgradeHint: buildEntitlementUpgradeHint(
-					resource,
-					plan,
-					entitlement.creditWallet,
-				),
-			})
-		}
+	return result as Exclude<T, { outcome: 'needs_bootstrap' }>
+}
+
+async function throwDailyEntitlementDenial(input: {
+	db: D1Database
+	userId: OwnerId
+	resource: DailyEntitlementResource
+	window: DailyEntitlementWindow
+	result: { count: number; deniedWindow?: 'day' | 'week'; weekCount?: number }
+}): Promise<never> {
+	const { entitlement, now, limit, weekLimit } = input.window
+	const billingPath = await entitlementBillingPath(input.db, input.userId)
+	const upgradeHint = (window: 'day' | 'week') =>
+		buildEntitlementUpgradeHint({
+			resource: input.resource,
+			plan: entitlement.plan,
+			creditWallet: entitlement.creditWallet,
+			billingPath,
+			window,
+			now,
+		})
+	if (input.result.deniedWindow === 'week' && weekLimit !== null) {
 		throw new EntitlementLimitError({
-			resource,
-			plan,
-			limit,
-			current: result.count,
-			upgradeHint: buildEntitlementUpgradeHint(
-				resource,
-				plan,
-				entitlement.creditWallet,
-			),
+			resource: input.resource,
+			plan: entitlement.plan,
+			limit: weekLimit,
+			current: input.result.weekCount ?? 0,
+			window: 'week',
+			upgradeHint: upgradeHint('week'),
 		})
 	}
+	throw new EntitlementLimitError({
+		resource: input.resource,
+		plan: entitlement.plan,
+		limit,
+		current: input.result.count,
+		upgradeHint: upgradeHint('day'),
+	})
 }
 
 const cachedMonthlyComputeUsage =
@@ -1397,45 +1900,69 @@ const cachedMonthlyComputeUsage =
  * hourly and the read shares the entitlement cache TTL, so the stop trails
  * usage by about an hour; a later top-up forgives that overshoot instead of
  * charging it. A stop is confirmed against an uncached entitlement so a
- * top-up in another isolate resumes work right away.
+ * top-up in another isolate resumes work right away. Org budgets are
+ * checked after the include stop. Returns the entitlement callers should
+ * resolve limits from: the uncached one when the stop re-read it.
  */
 async function assertWithinPastIncludeCredits(input: {
 	db: D1Database
-	userId: string
+	env: UserMeterEnv
+	userId: OwnerId
 	entitlement: UserEntitlement
 	now: Date
-}) {
-	if (input.entitlement.creditWallet !== 'empty') return
-	const month = utcMonthKey(input.now)
-	const usage = await cachedMonthlyComputeUsage.getOrCreate(
-		input.db,
-		`${input.userId}\n${month}`,
-		async () =>
-			await readMonthlyComputeUsage({
-				db: input.db,
-				stableUserId: input.userId,
-				month,
-			}),
-	)
-	const stop = resolvePastIncludeStop({
-		plan: input.entitlement.plan,
-		ladder: input.entitlement.ladder,
-		creditWallet: input.entitlement.creditWallet,
-		...usage,
+	orgBudget?: OrgBudgetGateContext
+}): Promise<UserEntitlement> {
+	let entitlement = input.entitlement
+	if (input.entitlement.creditWallet === 'empty') {
+		const month = utcMonthKey(input.now)
+		const usage = await cachedMonthlyComputeUsage.getOrCreate(
+			input.db,
+			`${input.userId}\n${month}`,
+			async () =>
+				await readMonthlyComputeUsage({
+					db: input.db,
+					stableUserId: input.userId,
+					month,
+				}),
+		)
+		const stop = resolvePastIncludeStop({
+			plan: input.entitlement.plan,
+			ladder: input.entitlement.ladder,
+			creditWallet: input.entitlement.creditWallet,
+			...usage,
+			limitOverrides: input.entitlement.limitOverrides,
+			now: input.now,
+		})
+		if (stop) {
+			const fresh = await getUserEntitlement(input.db, {
+				userId: input.userId,
+				email: null,
+			})
+			if (fresh.creditWallet === 'empty') {
+				throw new ComputeOverageLimitError({
+					resource: stop.resource,
+					plan: fresh.plan,
+					limit: stop.limit,
+					current: stop.current,
+					creditsStatus: 'add_credits',
+				})
+			}
+			entitlement = fresh
+		}
+	}
+	const budget = orgBudgetFromGateContext(input.userId, input.orgBudget)
+	await assertWithinOrgBudget({
+		db: input.db,
+		env: input.env,
+		orgId: budget.orgId,
+		orgSlug: budget.orgSlug,
+		actorUserId: budget.actorUserId,
+		automationSource: budget.automationSource,
+		actorUsername: budget.actorUsername,
+		estimatedDeltaMicroUsd: 0,
+		now: input.now,
 	})
-	if (!stop) return
-	const fresh = await getUserEntitlement(input.db, {
-		userId: input.userId,
-		email: null,
-	})
-	if (fresh.creditWallet !== 'empty') return
-	throw new ComputeOverageLimitError({
-		resource: stop.resource,
-		plan: fresh.plan,
-		limit: stop.limit,
-		current: stop.current,
-		creditsStatus: 'add_credits',
-	})
+	return entitlement
 }
 
 /**
@@ -1445,24 +1972,44 @@ async function assertWithinPastIncludeCredits(input: {
  */
 export async function assertWithinComputeInclude(input: {
 	db: D1Database
-	userId: string
+	env: UserMeterEnv
+	userId: OwnerId
 	now?: Date
+	orgBudget?: OrgBudgetGateContext
 }) {
-	const entitlement = await getCachedUserEntitlement(input.db, {
+	const now = input.now ?? new Date()
+	const cached = await getCachedUserEntitlement(input.db, {
 		userId: input.userId,
 		email: null,
 	})
+	// Only an empty wallet can stop here, so only it pays the live read of
+	// the monthly cap overrides.
+	const entitlement =
+		cached.creditWallet === 'empty' && cached.limitOverrides !== undefined
+			? {
+					...cached,
+					limitOverrides: await readActiveOrgLimitOverrides(
+						input.db,
+						input.userId,
+						now,
+					),
+				}
+			: cached
 	await assertWithinPastIncludeCredits({
 		db: input.db,
+		env: input.env,
 		userId: input.userId,
 		entitlement,
-		now: input.now ?? new Date(),
+		now,
+		orgBudget: input.orgBudget,
 	})
 }
 
+export { isBudgetLimitError }
+
 export type RefundDailyEntitlementInput = {
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 	resource: EntitlementResource
 	now?: Date
 }

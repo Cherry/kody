@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import {
@@ -24,7 +25,13 @@ type AuthenticatedUser = NonNullable<
 export function createAccountMemoriesHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request, params }) {
+		async handler({
+			request,
+			params,
+		}: {
+			request: Request
+			params?: { memoryId?: string }
+		}) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
@@ -43,13 +50,12 @@ export function createAccountMemoriesHandler(env: Env) {
 				loaderData: { accountMemories },
 			})
 		},
-	} satisfies Action<
-		typeof routes.accountMemories | typeof routes.accountMemoryDetail
-	>
+	}
 }
 
 /**
- * GET /account/memories-export.json for the signed-in user only.
+ * GET /account/memories-export.json for the org whose Memories page sent it
+ * (Referer), else the signed-in user's signup org.
  * Follows the page Include deleted toggle: active and archived by default;
  * deleted rows only when that control is on.
  */
@@ -153,7 +159,10 @@ async function handleDeleteAction(input: {
 	const force = readBoolean(input.body, 'force', false)
 	const deleted = await deleteMemory({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		memoryId,
 		force,
 	})

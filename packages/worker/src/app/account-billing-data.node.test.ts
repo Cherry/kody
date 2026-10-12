@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 
@@ -10,11 +11,22 @@ const refreshStripePlanForUser = vi.hoisted(() =>
 		subscriptionStatus: 'active' as string | null,
 	})),
 )
+const refreshStripePlanForOrg = vi.hoisted(() =>
+	vi.fn(async () => ({
+		stripePlan: 'pro' as const,
+		creditsEligible: true,
+		stripeInterval: 'month' as 'month' | 'year' | null,
+		stripePriceId: 'price_pro' as string | null,
+		cancelAt: null as string | null,
+		subscriptionStatus: 'active' as string | null,
+	})),
+)
 const scheduleStripePlanRefreshBackstop = vi.hoisted(() =>
 	vi.fn(async () => true),
 )
 
 vi.mock('#worker/billing/subscription-sync.ts', () => ({
+	refreshStripePlanForOrg,
 	refreshStripePlanForUser,
 }))
 vi.mock('#worker/billing/stripe-plan-refresh-client.ts', () => ({
@@ -27,9 +39,24 @@ import {
 	resolveBillingNoticeMessage,
 } from '#app/account-billing-data.ts'
 
+const personalOrg = {
+	id: ownerIdFromStored('stable-user-id'),
+	slug: 'billing-user',
+	displayName: null,
+	personal: true,
+}
+
+const teamOrg = {
+	id: ownerIdFromStored('org-acme'),
+	slug: 'acme',
+	displayName: 'Acme',
+	personal: false,
+}
+
 function createBillingEnv(input: {
 	stripePlan: string | null
 	stripeCustomerId: string | null
+	orgStripeCustomerId?: string | null
 }) {
 	const userRow = {
 		plan: 'free',
@@ -41,15 +68,24 @@ function createBillingEnv(input: {
 		second_agent_standard_gift_expires_at: null,
 		referral_standard_credit_expires_at: null,
 	}
+	const orgRow = {
+		plan: 'free',
+		stripe_plan: null,
+		stripe_credits_eligible: 0,
+		stripe_customer_id: input.orgStripeCustomerId ?? null,
+	}
 	const db = {
 		prepare(query: string) {
 			const normalized = query.replace(/\s+/g, ' ').trim().toLowerCase()
 			const statement = {
 				bind: () => statement,
 				first: async () =>
-					normalized.includes('from users') && normalized.includes('where id')
+					normalized.includes('from users') && normalized.includes('join orgs')
 						? userRow
-						: null,
+						: normalized.includes('from orgs') &&
+							  normalized.includes('where id')
+							? orgRow
+							: null,
 				all: async () => ({ results: [] }),
 				run: async () => ({ success: true }),
 			}
@@ -88,6 +124,8 @@ test('loadAccountBillingData refreshes Stripe status and degrades when refresh i
 	const data = await loadAccountBillingData({
 		env,
 		userId: 9,
+		org: personalOrg,
+		seats: 1,
 		noticeCode: 'updated',
 		now,
 	})
@@ -119,13 +157,18 @@ test('loadAccountBillingData refreshes Stripe status and degrades when refresh i
 	)
 	expect(scheduleStripePlanRefreshBackstop).toHaveBeenCalledWith({
 		env,
-		userId: 'stable-user-id',
+		userId: ownerIdFromStored('stable-user-id'),
 		now,
 	})
 
 	consoleError.mockImplementation(() => {})
 	refreshStripePlanForUser.mockRejectedValueOnce(new Error('stripe down'))
-	const failed = await loadAccountBillingData({ env, userId: 3 })
+	const failed = await loadAccountBillingData({
+		env,
+		userId: 3,
+		org: personalOrg,
+		seats: 1,
+	})
 	expect(failed).toMatchObject({
 		stripePlan: 'pro',
 		stripeInterval: null,
@@ -143,6 +186,8 @@ test('loadAccountBillingData refreshes Stripe status and degrades when refresh i
 		await loadAccountBillingData({
 			env: createBillingEnv({ stripePlan: null, stripeCustomerId: null }),
 			userId: 4,
+			org: personalOrg,
+			seats: 1,
 		}),
 	).toMatchObject({
 		hasStripeCustomer: false,
@@ -152,4 +197,42 @@ test('loadAccountBillingData refreshes Stripe status and degrades when refresh i
 	})
 	expect(refreshStripePlanForUser).not.toHaveBeenCalled()
 	expect(scheduleStripePlanRefreshBackstop).toHaveBeenCalledTimes(2)
+})
+
+test("a team organization reads and refreshes its own Stripe customer, not the viewer's", async () => {
+	refreshStripePlanForUser.mockClear()
+	refreshStripePlanForOrg.mockClear()
+	const env = createBillingEnv({
+		stripePlan: 'pro',
+		stripeCustomerId: 'cus_person',
+		orgStripeCustomerId: 'cus_acme',
+	})
+	const data = await loadAccountBillingData({
+		env,
+		userId: 9,
+		org: teamOrg,
+		seats: 4,
+	})
+	expect(data).toMatchObject({
+		hasStripeCustomer: true,
+		stripePlan: 'pro',
+		effectivePlan: 'pro',
+		creditsEligible: true,
+		creditsHref: null,
+		usageHref: null,
+		referralProgram: null,
+		org: {
+			slug: 'acme',
+			displayName: 'Acme',
+			personal: false,
+			seats: 4,
+		},
+	})
+	expect(refreshStripePlanForOrg).toHaveBeenCalledWith(
+		expect.objectContaining({
+			orgId: ownerIdFromStored('org-acme'),
+			customerId: 'cus_acme',
+		}),
+	)
+	expect(refreshStripePlanForUser).not.toHaveBeenCalled()
 })

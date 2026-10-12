@@ -1,7 +1,8 @@
 import { stripOgEmphasis } from '#universal/og-emphasis.ts'
 
-const homeOgImageTitle = 'Don\u2019t **start over**\nwith every agent'
-const homeOgImageSubtitle = 'The software platform your agents share'
+const homeOgImageTitle = 'Your agents\u2019\n**cloud**'
+const homeOgImageSubtitle =
+	'You shouldn\u2019t have to start over in every agent.'
 
 /**
  * Registry of public pages that get a Satori-generated OG image at
@@ -27,7 +28,7 @@ export type PublicOgPage = {
 export const publicOgPages = {
 	home: {
 		// Locked share card. `**` is accent emphasis in the PNG. The newline is
-		// the 1200×630 break (after "over"), not a wording change. Meta uses
+		// the 1200×630 break (after "agents'"), not a wording change. Meta uses
 		// the same words with the markers removed.
 		imageTitle: homeOgImageTitle,
 		imageSubtitle: homeOgImageSubtitle,
@@ -53,7 +54,7 @@ export const publicOgPages = {
 		path: '/blog',
 	},
 	login: {
-		imageTitle: 'The Home Your Agents Share',
+		imageTitle: 'Your agents\u2019 cloud',
 		imageSubtitle:
 			"For all the agents you use today,\nand the ones you'll use tomorrow",
 		ogTitle: 'Sign in — Kody',
@@ -62,13 +63,85 @@ export const publicOgPages = {
 		path: '/login',
 	},
 	signup: {
-		imageTitle: 'The Home Your Agents Share',
+		imageTitle: 'Your agents\u2019 cloud',
 		imageSubtitle:
 			"For all the agents you use today,\nand the ones you'll use tomorrow",
 		ogTitle: 'Sign up — Kody',
 		ogDescription:
 			"For all the agents you use today, and the ones you'll use tomorrow.",
 		path: '/signup',
+	},
+	features: {
+		imageTitle: 'Your agents’ cloud',
+		imageSubtitle:
+			'Memory, secrets, packages, triggers, integrations, and apps for your connected AI agents.',
+		ogTitle: 'Kody features for your AI agents | Kody',
+		ogDescription:
+			'Memory, secrets, packages, triggers, integrations, and apps for your connected AI agents.',
+		path: '/features',
+	},
+	'feature-memory': {
+		imageTitle: 'New agent. Same you.',
+		imageSubtitle:
+			'Save facts and preferences in Kody and use them with agents connected to your account.',
+		ogTitle: 'Shared memory for your AI agents | Kody',
+		ogDescription:
+			'Save facts and preferences in Kody and use them with agents connected to your account.',
+		path: '/features/memory',
+	},
+	'feature-secrets': {
+		imageTitle: 'Your agent can use the key. It can’t read it.',
+		imageSubtitle:
+			'Keep credentials out of the conversation and send them only to hosts you approve.',
+		ogTitle: 'API secrets for your AI agents | Kody',
+		ogDescription:
+			'Keep credentials out of the conversation and send them only to hosts you approve.',
+		path: '/features/secrets',
+	},
+	'feature-packages': {
+		imageTitle: 'Work worth keeping.',
+		imageSubtitle:
+			'Save reusable code, review its source, publish changes, and share access to your packages.',
+		ogTitle: 'Reusable packages for your AI agents | Kody',
+		ogDescription:
+			'Save reusable code, review its source, publish changes, and share access to your packages.',
+		path: '/features/packages',
+	},
+	'feature-triggers': {
+		imageTitle: 'When it happens, your work starts.',
+		imageSubtitle:
+			'Start saved packages from schedules, webhooks, incoming email, and package events.',
+		ogTitle: 'Triggers and automation for your AI agents | Kody',
+		ogDescription:
+			'Start saved packages from schedules, webhooks, incoming email, and package events.',
+		path: '/features/triggers',
+	},
+	'feature-integrations': {
+		imageTitle: 'Connect once. Keep working.',
+		imageSubtitle:
+			'Connect service accounts so saved packages can use the authorization your work needs.',
+		ogTitle: 'Service connections for your AI agents | Kody',
+		ogDescription:
+			'Connect service accounts so saved packages can use the authorization your work needs.',
+		path: '/features/integrations',
+	},
+	'feature-apps': {
+		imageTitle: 'Give your work an interface.',
+		imageSubtitle:
+			'Build browser interfaces backed by saved packages and durable package storage.',
+		ogTitle: 'Package apps for your AI agents | Kody',
+		ogDescription:
+			'Build browser interfaces backed by saved packages and durable package storage.',
+		path: '/features/apps',
+	},
+	business: {
+		imageTitle: 'The agent cloud\nfor your business',
+		imageSubtitle:
+			'Shared tools, data, and automations for teams and agencies.',
+		ogTitle: 'AI Agent Cloud for Business and Agencies | Kody',
+		ogDescription:
+			'Give your teams and AI agents a shared home for tools, data, and automations. Run work across departments and client organizations with clear ownership.',
+		path: '/for/business',
 	},
 	pricing: {
 		imageTitle: 'Simple Kody pricing',

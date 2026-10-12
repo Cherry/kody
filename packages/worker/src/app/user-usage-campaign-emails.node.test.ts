@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
@@ -64,9 +65,9 @@ async function setup(...users: Array<TestUserInput>) {
 			.prepare(
 				`INSERT INTO users (
 					username, email, password_hash, email_verified_at, stable_user_id,
-					plan, account_type, first_mcp_connected_at, first_saved_package_at,
-					mcp_client_name, stripe_plan
-				) VALUES (?, ?, 'x', ?, ?, 'free', 'person', ?, ?, ?, ?)`,
+					first_mcp_connected_at, first_saved_package_at,
+					mcp_client_name
+				) VALUES (?, ?, 'x', ?, ?, ?, ?, ?)`,
 			)
 			.bind(
 				input.id,
@@ -76,8 +77,15 @@ async function setup(...users: Array<TestUserInput>) {
 				input.mcpAt ?? null,
 				input.packageAt ?? null,
 				input.clientName ?? null,
-				input.stripePlan ?? null,
 			)
+			.run()
+		await db
+			.prepare(
+				`INSERT INTO orgs (
+					id, slug, plan, stripe_plan, created_at, updated_at
+				) VALUES (?, ?, 'free', ?, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`,
+			)
+			.bind(input.id, input.id, input.stripePlan ?? null)
 			.run()
 	}
 	const env = {
@@ -155,7 +163,10 @@ async function sweep(env: Env, at: Date) {
 	return await sendUserUsageCampaignEmails({ env, now: at })
 }
 
-const noSends = (evaluatedUsers = 1) => ({ status: 'no_sends', evaluatedUsers })
+const noSends = (evaluatedUsers = 1) => ({
+	status: 'no_sends',
+	evaluatedUsers,
+})
 const notified = (evaluatedUsers = 1) => ({
 	status: 'notified',
 	evaluatedUsers,
@@ -181,7 +192,11 @@ test('campaign sweep seeds without mailing, then event-origin sends are ledger-i
 	expect((await readUsageCampaign(db, 'user-paid'))?.state).toBe('Paid')
 
 	const recordEvent = () =>
-		recordVerifiedNoMcpCampaignSend({ env, userId: 'user-event', now })
+		recordVerifiedNoMcpCampaignSend({
+			env,
+			userId: ownerIdFromStored('user-event'),
+			now,
+		})
 	expect(await recordEvent()).toBe(true)
 	expect(await recordEvent()).toBe(false)
 	expect(await listUsageCampaignSends(db, 'user-event')).toEqual([
@@ -237,7 +252,11 @@ test('failed campaign sends release the ledger claim so a later sweep can retry'
 		email: 'retry@example.com',
 		clientName: 'Cursor',
 	})
-	await recordVerifiedNoMcpCampaignSend({ env, userId: 'user-retry', now })
+	await recordVerifiedNoMcpCampaignSend({
+		env,
+		userId: ownerIdFromStored('user-retry'),
+		now,
+	})
 	const connected = { firstMcpConnectedAt: '2026-09-08T00:00:00.000Z' }
 	gatherUsageCampaignSnapshot.mockResolvedValue(
 		snapshot({ ...connected, now: later }),
@@ -271,7 +290,9 @@ test('failed campaign sends release the ledger claim so a later sweep can retry'
 	expect(await sendUserUsageCampaignEmails({ env, now: due })).toEqual(
 		notified(),
 	)
-	const keep = sendCloudflareEmail.mock.calls.at(-1)?.[1] as { subject: string }
+	const keep = sendCloudflareEmail.mock.calls.at(-1)?.[1] as {
+		subject: string
+	}
 	expect(keep.subject).toBe('Keep what Cursor just figured out')
 	expect(await listUsageCampaignSends(db, 'user-retry')).toEqual([
 		...onlyVerifiedNoMcpSend,
@@ -294,7 +315,11 @@ test('tips opt-out skips campaign mail and does not consume a send slot', async 
 		)
 		.bind('user-opted', '2026-09-06T00:00:00.000Z')
 		.run()
-	await recordVerifiedNoMcpCampaignSend({ env, userId: 'user-opted', now })
+	await recordVerifiedNoMcpCampaignSend({
+		env,
+		userId: ownerIdFromStored('user-opted'),
+		now,
+	})
 	gatherUsageCampaignSnapshot.mockResolvedValue(snapshot({ now: later }))
 	expect(await sweep(env, later)).toEqual(noSends())
 	expect(sendCloudflareEmail).not.toHaveBeenCalled()
@@ -318,7 +343,7 @@ test('a lost send-ledger race does not persist a stale campaign row', async () =
 	expect(
 		await claimUsageCampaignSend({
 			db,
-			userId: 'user-race',
+			userId: ownerIdFromStored('user-race'),
 			state: 'Cooling',
 			template: 'cooling',
 			sendIndex: 1,
@@ -382,7 +407,11 @@ test('campaign upsert keeps verify-time event rows over later seeds and never cl
 		{ id: 'user-sticky', email: 'sticky@example.com' },
 	)
 	expect(
-		await recordVerifiedNoMcpCampaignSend({ env, userId: 'user-verify', now }),
+		await recordVerifiedNoMcpCampaignSend({
+			env,
+			userId: ownerIdFromStored('user-verify'),
+			now,
+		}),
 	).toBe(true)
 	const eventRow = {
 		state: 'VerifiedNoMcp',
@@ -453,7 +482,11 @@ test('opening a verify-time event row lets the sweep send after a failed first m
 		email: 'open@example.com',
 	})
 	expect(
-		await openVerifiedNoMcpCampaignEvent({ env, userId: 'user-open', now }),
+		await openVerifiedNoMcpCampaignEvent({
+			env,
+			userId: ownerIdFromStored('user-open'),
+			now,
+		}),
 	).toBe(true)
 	expect(await readUsageCampaign(db, 'user-open')).toMatchObject({
 		state: 'VerifiedNoMcp',
@@ -531,10 +564,10 @@ test('campaign sweep selects referral overlay expiry for stock-cap plan reads', 
 	})
 	await db
 		.prepare(
-			`UPDATE users
+			`UPDATE orgs
 			 SET referral_standard_credit_expires_at = ?,
 			     second_agent_standard_gift_expires_at = ?
-			 WHERE stable_user_id = ?`,
+			 WHERE id = ?`,
 		)
 		.bind(
 			'2026-10-01T00:00:00.000Z',

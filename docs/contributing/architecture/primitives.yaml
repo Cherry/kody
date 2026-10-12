@@ -92,8 +92,7 @@ primitives:
     summary:
       Independently deployed jobs worker owning the JobManager Durable Object,
       the cron/scheduled dispatch lane and queue, and the dedicated kody-jobs D1
-      database (jobs + archived_job_artifacts), calling back into the main
-      worker for job execution.
+      database (jobs), calling back into the main worker for job execution.
     code:
       - packages/jobs-worker/
     docs:
@@ -139,7 +138,6 @@ primitives:
       - packages/worker/src/index.ts
       - packages/worker/src/scheduled/
       - packages/worker/src/jobs/reconcile-artifacts-pushes.ts
-      - packages/worker/src/jobs/job-retention-cleanup.ts
       - packages/worker/src/repo/repo-session-cleanup.ts
       - packages/worker/src/app/retention.ts
       - packages/worker/src/account/unverified-account-purge.ts
@@ -218,6 +216,20 @@ primitives:
     docs:
       - docs/contributing/architecture/authorization.md
 
+  - id: org-access-grants
+    group: auth
+    name: Org memberships and access grants
+    summary:
+      The one way to give access. Members and teams hold org roles; a grant
+      gives one person or team a preset on one resource; invites deliver both.
+    code:
+      - packages/worker/src/orgs/
+      - packages/worker/src/mcp/capabilities/access/
+    docs:
+      - docs/guides/package-sharing.md
+      - docs/contributing/architecture/authorization.md
+      - docs/contributing/decisions/0067-cross-org-grants-replace-shares-and-platform-accounts.md
+
   - id: entitlements
     group: auth
     name: Plans & entitlements
@@ -287,21 +299,6 @@ primitives:
     docs:
       - docs/contributing/architecture/data-storage.md
 
-  - id: package-share-grants
-    group: assistant
-    name: Package share grants
-    summary:
-      Person-to-person invitations to use a saved package (read source + invoke)
-      without write, publish, or the guest's other secrets.
-    code:
-      - packages/worker/src/package-registry/share-grants.ts
-      - packages/worker/src/package-registry/share-rbac.ts
-      - packages/worker/src/mcp/capabilities/packages/package-share.ts
-    docs:
-      - docs/guides/package-sharing.md
-      - docs/contributing/decisions/0050-package-share-grants-are-not-scope-grants.md
-      - docs/contributing/architecture/data-storage.md
-
   - id: package-codemods
     group: assistant
     name: Package codemods
@@ -337,8 +334,6 @@ primitives:
     code:
       - packages/worker/src/package-runtime/package-app.ts
       - packages/worker/src/package-runtime/package-app-assets.ts
-      - packages/worker/src/package-runtime/package-app-remix.ts
-      - packages/worker/src/package-runtime/package-app-remix-subpaths.ts
       - packages/worker/src/package-runtime/package-app-tsconfig.ts
       - packages/worker/src/package-runtime/module-graph-client-bundle.ts
     docs:
@@ -354,6 +349,18 @@ primitives:
     docs:
       - docs/contributing/architecture/data-storage.md
 
+  - id: enablements
+    group: auth
+    name: Enablements
+    summary:
+      One per person per trigger (cron, subscription, webhook) that runs on its
+      own. Each run acts as, bills and audits its enabler, and pauses when the
+      enabler loses access.
+    code:
+      - packages/worker/src/enablements/
+    docs:
+      - docs/contributing/architecture/authorization.md
+
   - id: workflows
     group: assistant
     name: Workflows
@@ -366,10 +373,15 @@ primitives:
   - id: secrets
     group: assistant
     name: Secret references
-    summary: Server-side secret references; raw values never enter prompts.
+    summary:
+      Server-side secret references; raw values never enter prompts. Every
+      runtime credential use goes through resolveCredential.
     code:
+      - packages/worker/src/credentials/
       - packages/worker/src/mcp/capabilities/secrets/
       - packages/worker/src/security/
+    docs:
+      - docs/contributing/architecture/authorization.md
 
   - id: integrations
     group: assistant
@@ -552,7 +564,7 @@ primitives:
   - id: artifacts-repos
     group: storage
     name: Artifacts repos
-    summary: Canonical published git source for packages and jobs.
+    summary: Canonical published git source for packages.
     code:
       - packages/worker/src/repo/artifacts.ts
       - packages/worker/src/repo/public-package-git-http.ts
@@ -726,8 +738,8 @@ primitives:
       - docs/contributing/architecture/data-storage.md
 
 invariants:
-  - id: per-user-isolation
-    summary: userId scopes every read/write, DO id, and vector path.
+  - id: per-org-isolation
+    summary: The org scopes every read/write, DO id, and vector path.
     docs:
       - docs/contributing/project-intent.md
       - docs/contributing/architecture/data-storage.md
@@ -740,7 +752,7 @@ invariants:
       - docs/contributing/architecture/integrations.md
 
   - id: canonical-repo-source
-    summary: Artifacts repos are canonical package/job source; D1 is metadata.
+    summary: Artifacts repos are canonical package source; D1 is metadata.
     docs:
       - docs/contributing/architecture/data-storage.md
 

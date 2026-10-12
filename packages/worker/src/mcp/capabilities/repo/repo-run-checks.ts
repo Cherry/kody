@@ -1,8 +1,12 @@
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeRepoSessionPackageWrite } from './authorize-repo-session-package.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
-import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
 import {
 	normalizeRepoManifestSummary,
 	repoRunChecksOutputSchema,
@@ -13,6 +17,7 @@ export const repoRunChecksCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoRunChecks',
+		orgPermission: 'package:write',
 		description:
 			'Run the Worker-native validation pipeline for an active repo session so edits can be checked before publish. Package publishes require non-empty root README.md (human-focused) and AGENTS.md (agent-focused).',
 		keywords: [
@@ -30,19 +35,26 @@ export const repoRunChecksCapability = defineDomainCapability(
 		inputSchema: repoSessionIdSchema,
 		outputSchema: repoRunChecksOutputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			const owner = await resolvePackageOwnerContext(ctx.env, {
+				user: requireMcpUser(ctx.callerContext),
+				request: requireMcpRequest(ctx.callerContext),
+			})
+			await authorizeRepoSessionPackageWrite({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: owner.ownerUserId,
+				sessionId: args.session_id,
+			})
 			const session = repoSessionRpc(ctx.env, args.session_id)
 			const sessionInfo = await session.getSessionInfo({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 			})
 			const result = await session.runChecks({
 				sessionId: args.session_id,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				expectedPackageScope:
-					sessionInfo.entity_type === 'package'
-						? await getMcpUserPackageScope(ctx.env.APP_DB, user)
-						: undefined,
+					sessionInfo.entity_type === 'package' ? owner.ownerScope : undefined,
 			})
 			return {
 				ok: result.ok,

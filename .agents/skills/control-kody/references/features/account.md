@@ -1,34 +1,97 @@
 # Account hub
 
-Signed-in home: profile, sign-in providers, export, logout, delete, and links to
-the other account surfaces. Logout lives at the bottom of this page, not in the
-site header. Desktop puts an Account link in the header to the left of the
-avatar; narrower viewports keep Account in the menu panel. The header avatar
-goes to the public profile (`/@username`).
+Pages about the person, split from the org workspace:
 
-The account rail ("Account sections") lists every account page plus Repositories
-(`/@username`, the canonical repository list) and Connections
-(`/account/connections`, connected agents). Experiments opt-in lives at
-`/account/experiments`. The rail is rendered by `AccountPageHeader` in
-`packages/worker/client/routes/account-management-components.tsx`. Below 860px
-it collapses to a `<details>` menu. On short pages the rail scrolls inside the
-content box.
+- `/account` (Profile): name, avatar, email, onboarding banner.
+- `/account/security`: password, links to two-factor and passkeys, sign-in
+  providers (Connected accounts), former emails.
+- `/account/organizations`: every org you belong to (Current marks the one the
+  switcher is acting in), pending invites (`#invites`), and Create organization.
+- `/account/experiments`: experiments opt-in.
+- `/account/data`: export and delete account.
+
+The account rail ("Account sections") lists those pages, then a Workspace group
+that links the signup org's Overview, Repositories, Connections, MCP servers,
+Secrets, Jobs, and Memories. Those workspace pages (and Billing and the rest)
+sit on a separate "Workspace sections" rail under `/@<slug>/-/…`; Repositories
+is `/@<slug>/-/packages`, distinct from the public profile at `/@<slug>`. The
+signup org's Overview (`/@<slug>/-/overview`) is a card for every workspace
+section; a team org's overview URL redirects to its home at `/@<slug>`. Both
+rails come from `account-rail.ts` and render through `AccountPageHeader` in
+`packages/worker/client/routes/account-management-components.tsx`. Below 860px a
+rail collapses to a `<details>` menu.
+
+The site header has one avatar: the org switcher (`data-testid="org-switcher"`).
+Its popover lists orgs, then Manage links: for the current team org Overview
+(`/@<slug>`), Settings, Members, Teams, Grants, Collaborators, and Billing when
+the role allows; with no team org, the signup org's Overview and Billing. Then
+Create organization, an invites row when you have any, then a "Your account"
+group (Your profile, Account settings, Log out). Narrow viewports show the same
+rows in the menu panel. Own profile (`/@<username>`) also links **Workspace**
+(lands on `/@<slug>/-/packages`) beside Edit profile. A team org home lists
+**Workspace** above its management links.
 
 ## How to get there
 
-`/account` after login. Account deletion is `/account/delete`.
+`/account` after login. Create an organization at `/account/organizations/new`
+(`POST` the same path with `displayName` and `slug`); it redirects to the org
+home at `/@<slug>`. Account deletion is `/account/delete`. Team-org settings,
+members, teams, grants, and collaborators are `/@<slug>/-/settings`,
+`/@<slug>/-/members`, `/@<slug>/-/teams`, `/@<slug>/-/grants`, and
+`/@<slug>/-/collaborators`.
+
+A non-personal org handle (`/@<slug>`) renders the org home for its members and
+404s for everyone else. Secrets, jobs, and the other org resource pages read
+`request.org.id`. Connections lists the viewer's own agents approved for that
+org (members and grant-only collaborators). Repositories (`/@<slug>/-/packages`)
+lists the packages a team org owns that the member can see (Owners see all,
+other roles see what their grants and teams give them); rows do not link to a
+package page yet. Team orgs have an Organization rail: Settings, Members, Teams
+(owners/members), Grants, Collaborators, and Billing (`/@<slug>/-/billing`,
+owners and billing users). The org switcher, org home, and
+`/account/organizations` also link into those sections. From a page with no org
+section (such as `/account`), an org row in the switcher or in
+`/account/organizations` opens that org's overview: the team home, or the signup
+org's `/@<slug>/-/overview`. Personal orgs keep Billing/Usage in the workspace
+rail's Organization group.
+
+Resource pages (packages, secrets, jobs, and the rest) live under
+`/@<slug>/-/…`. `/account/...` resource pages 404, except
+`/account/packages/:packageId`, which redirects to `/@username/:kodyId`.
 
 ## Drive it
 
 ```bash
 node tools/control-kody.ts login
 node tools/control-kody.ts request GET /account/profile.json
+node tools/control-kody.ts request GET /account/organizations.json
+node tools/control-kody.ts request GET /@<slug>/-/settings.json
+node tools/control-kody.ts request GET /@<slug>/-/members.json
+node tools/control-kody.ts request GET /@<slug>/-/teams.json
+node tools/control-kody.ts request GET /@<slug>/-/grants.json
+node tools/control-kody.ts request GET /@<slug>/-/collaborators.json
 node tools/control-kody.ts request GET /account/connections.json
 ```
 
 ## APIs
 
 - `GET|POST /account/profile.json`
+- `GET /account/organizations.json` (orgs, last-used org, pending invites)
+- `GET|POST /@<slug>/-/settings.json` (team org profile; personal orgs point at
+  Account)
+- `POST /@<slug>/-/settings/avatar.json`
+- `POST /@<slug>/-/settings/delete.json`
+- `GET /@<slug>/-/members.json`
+- `POST /@<slug>/-/members/role.json`
+- `POST /@<slug>/-/members/remove.json`
+- `POST /@<slug>/-/members/invite.json`
+- `GET /@<slug>/-/teams.json`
+- `POST /@<slug>/-/teams/create.json`
+- `POST /@<slug>/-/teams/member-add.json`
+- `POST /@<slug>/-/teams/member-remove.json`
+- `GET /@<slug>/-/grants.json`
+- `POST /@<slug>/-/grants/revoke.json`
+- `GET /@<slug>/-/collaborators.json`
 - `POST /account/profile/avatar.json`
 - `POST /account/email-change.json`
 - `POST /account/email-claim-release.json`
@@ -36,15 +99,19 @@ node tools/control-kody.ts request GET /account/connections.json
 - `POST /account/delete`
 - `GET|POST /account/connections.json` (sign-in providers: GitHub, Google, X,
   Discord)
-- `POST /logout` (form at the bottom of this page)
+- `POST /logout` (Log out in the switcher popover)
 
 ## Gotchas
 
 - Seed users start empty. Profile fields exist; packages/secrets/jobs do not
   until you create them.
-- Connected agents (inbound MCP hosts) are not on this page. They live on
-  [connections](./connections.md) at `/account/connections`; Overview only links
-  there.
+- A successful `POST /account/delete` clears the session and the account page
+  navigates to `/?accountDeleted=1`. The homepage status
+  `data-testid="account-deleted-notice"` reads "Your Kody account has been
+  deleted". Do not delete the shared preview seed to prove this.
+- Connected agents (inbound MCP hosts) are a workspace page:
+  [connections](./connections.md) at `/@<slug>/-/connections`.
+- Linking a sign-in provider returns to `/account/security?oauthLinked=<id>`.
 - Former-address release is `POST /account/email-claim-release.json`, then
   confirm at `/verify-email-claim-release`. It drops the claim without reminting
   `users.stable_user_id`.

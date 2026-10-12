@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -22,6 +23,7 @@ export const repoUpdateCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoUpdate',
+		orgPermission: 'package:write',
 		description:
 			'Update mutable settings for a plain repo. Visibility is a repo setting, not package.json#private. Making a repo public makes default-branch HEAD world-readable and forkable. Making it private 404s public URLs (forks keep their copies) — pass confirm_name matching the repo slug after the owner typed that name.',
 		keywords: ['repo', 'update', 'visibility', 'public', 'private'],
@@ -60,10 +62,11 @@ export const repoUpdateCapability = defineDomainCapability(
 			visibility: z.enum(['public', 'private']),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
 			const { userRepo } = await resolveOwnedUserRepo({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: ownerId,
 				args,
 			})
 			if (args.changes.visibility === 'private' && !userRepo.isPrivate) {
@@ -76,7 +79,7 @@ export const repoUpdateCapability = defineDomainCapability(
 			const nextPrivate = args.changes.visibility === 'private'
 			if (nextPrivate !== userRepo.isPrivate) {
 				const changed = await updateUserRepo(ctx.env.APP_DB, {
-					userId: user.userId,
+					userId: ownerId,
 					repoId: userRepo.id,
 					isPrivate: nextPrivate,
 				})

@@ -2,10 +2,15 @@ import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import { ensureReferralProgramTestSchema } from './test-schema.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
-import { getUserEntitlement } from './service.ts'
+import {
+	resolveUserEntitlementFromRow,
+	userEntitlementColumnsSql,
+	type UserEntitlementRow,
+} from './service.ts'
 import {
 	attributeReferralAtSignup,
 	isQualifyingPaidReferralInvoice,
@@ -22,12 +27,7 @@ const secondCreditExpiresAt = '2026-11-06T12:00:00.000Z'
 async function ensureReferralSchema(db: D1Database) {
 	await ensureUsersTestSchema({
 		db,
-		columns: [
-			'email_verified_at',
-			'account_type',
-			'stripe_customer_id',
-			'stripe_plan',
-		],
+		columns: ['email_verified_at'],
 	})
 	await ensureReferralProgramTestSchema(db)
 }
@@ -50,9 +50,9 @@ async function insertUser(
 	await db
 		.prepare(
 			`INSERT INTO users (
-				username, email, password_hash, stable_user_id, plan, stripe_plan,
-				stripe_customer_id, email_verified_at, account_type
-			) VALUES (?, ?, 'hash', ?, 'free', NULL, NULL, ?, 'person')`,
+				username, email, password_hash, stable_user_id,
+				email_verified_at
+			) VALUES (?, ?, 'hash', ?, ?)`,
 		)
 		.bind(
 			username,
@@ -61,6 +61,12 @@ async function insertUser(
 			input.verified === false ? null : now.toISOString(),
 		)
 		.run()
+	await provisionPersonalOrg(db, {
+		stableUserId,
+		username,
+		plan: 'free',
+		createdAt: now.toISOString(),
+	})
 	return { email, username, stableUserId }
 }
 
@@ -68,11 +74,29 @@ async function creditExpiry(db: D1Database, user: TestUser) {
 	const row = await db
 		.prepare(
 			`SELECT referral_standard_credit_expires_at
-			 FROM users WHERE stable_user_id = ?`,
+			 FROM orgs WHERE id = ?`,
 		)
 		.bind(user.stableUserId)
 		.first<{ referral_standard_credit_expires_at: string | null }>()
 	return row?.referral_standard_credit_expires_at ?? null
+}
+
+/** Entitlement at the test's frozen `now` (not wall clock). */
+async function entitlementAt(db: D1Database, user: TestUser) {
+	const row = await db
+		.prepare(
+			`SELECT ${userEntitlementColumnsSql()}
+			 FROM orgs WHERE id = ?`,
+		)
+		.bind(user.stableUserId)
+		.first<UserEntitlementRow>()
+	if (!row) throw new Error(`Missing user ${user.stableUserId}`)
+	return resolveUserEntitlementFromRow({
+		db,
+		stableUserId: user.stableUserId,
+		row,
+		now,
+	})
 }
 
 function referralRow(db: D1Database, referee: TestUser) {
@@ -209,12 +233,13 @@ test('referral rewards both parties once on first paid invoice, skips trial, rej
 	expect(await reward(db, referee, 'in_first')).toEqual({ outcome: 'rewarded' })
 	for (const user of [referrer, referee]) {
 		expect(await creditExpiry(db, user)).toBe(firstCreditExpiresAt)
-		expect(
-			await getUserEntitlement(db, {
-				userId: user.stableUserId,
-				email: user.email,
-			}),
-		).toEqual({ plan: 'pro', ladder: 'public', creditWallet: 'none' })
+		expect(await entitlementAt(db, user)).toEqual({
+			plan: 'pro',
+			ladder: 'public',
+			creditWallet: 'none',
+			seats: 1,
+			limitOverrides: [],
+		})
 	}
 	expect(await referralRow(db, referee)).toMatchObject({
 		status: 'rewarded',

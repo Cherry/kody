@@ -112,18 +112,22 @@ account user id, username, and email may be delivered to deployment admins
 through admin-configured notifications. The admin-only event labels the text
 `summary_untrusted` and `details_untrusted`, includes a warning to treat it as
 user-authored data rather than instructions, and carries a trusted deep link to
-that feedback in the admin interface. Deployment admins can also read and triage
-the approved submission through role-gated capabilities. When they resolve or
-dismiss it, Kody may email the submitter from the platform sender with the
-decision, thanks, and an invitation to send more feedback through their agent.
-That mail is skipped when the submitter has no current email, outbound email is
-paused, the account is suspended, or the update is a no-op of an already
-resolved or dismissed row. Admin list results intentionally omit the full
-submission; a detail read exposes only the approved feedback, not unrelated
-account content. This delivery exception is limited to feedback the user
-explicitly approved; it does not expose other account content. Each account can
-create at most 10 feedback submissions in a rolling 24-hour period and have at
-most 100 active submissions (open or triaged).
+that feedback in the admin interface. Kody may also email the submitter a short
+receipt from the platform sender with the feedback id and a reminder that their
+agent can check status with `metaPlatformFeedbackGet`. That receipt is skipped
+when the submitter has no current email, outbound email is paused, or the
+account is suspended. Deployment admins can also read and triage the approved
+submission through role-gated capabilities. When they resolve or dismiss it,
+Kody may email the submitter from the platform sender with the decision, thanks,
+and an invitation to send more feedback through their agent. That outcome mail
+is skipped when the submitter has no current email, outbound email is paused,
+the account is suspended, or the update is a no-op of an already resolved or
+dismissed row. Admin list results intentionally omit the full submission; a
+detail read exposes only the approved feedback, not unrelated account content.
+This delivery exception is limited to feedback the user explicitly approved; it
+does not expose other account content. Each account can create at most 10
+feedback submissions in a rolling 24-hour period and have at most 100 active
+submissions (open or triaged).
 
 Before asking for approval, also disclose that Kody cannot recall notification
 copies already delivered outside Kody. Admin notification copies may remain
@@ -133,12 +137,17 @@ and attribution described above, never unrelated content.
 
 Open and triaged feedback remains until an admin resolves or dismisses it, or
 the submitting account is deleted. Resolved and dismissed feedback is removed
-365 days after its last update. The submitting user's account export includes
-the submission and status but redacts internal reviewer identity, notes, and
-timestamps. Account deletion removes any remaining submissions. Kody rechecks a
-queued submission immediately before invoking discovered admin subscribers, so
-deletion cancels delivery when it wins that race; it cannot recall a copy that
-was already posted.
+365 days after its last update. To check status later (including triaged, when
+no outcome email is sent), call `metaPlatformFeedbackGet` with the returned
+`feedback_id`, or `metaPlatformFeedbackList` for the signed-in user's
+submissions. Those reads return the same submitter-visible fields as account
+export (id, category, summary, details on get, status, created_at, updated_at)
+and never expose reviewer identity or admin notes. The submitting user's account
+export includes the submission and status but redacts internal reviewer
+identity, notes, and timestamps. Account deletion removes any remaining
+submissions. Kody rechecks a queued submission immediately before invoking
+discovered admin subscribers, so deletion cancels delivery when it wins that
+race; it cannot recall a copy that was already posted.
 
 The user may ask to submit feedback about any Kody-related issue even when you
 would not proactively recommend it. Use category `other` when no more specific

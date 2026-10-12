@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -10,6 +11,7 @@ export const emailMessageClassifyCapability = defineDomainCapability(
 	capabilityDomainNames.email,
 	{
 		name: 'emailMessageClassify',
+		orgPermission: 'email:write',
 		description:
 			'Reclassify a stored inbound email message as accepted or quarantined. Receive-time classification decides package subscription dispatch once; reclassifying to accepted does not retroactively fire email.message.received.',
 		keywords: [
@@ -38,7 +40,7 @@ export const emailMessageClassifyCapability = defineDomainCapability(
 			const updated = await setEmailMessageClassification({
 				env: ctx.env,
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
 				messageId: args.message_id,
 				classification: args.classification,
 				classificationReason,

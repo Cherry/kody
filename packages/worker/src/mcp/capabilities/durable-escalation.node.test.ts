@@ -1,4 +1,10 @@
+import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
+import {
+	EntitlementLimitError,
+	isEntitlementLimitError,
+} from '#worker/entitlements/errors.ts'
 import {
 	alreadyDispatchedWorkflowStatusExclusion,
 	buildCallerScopedIdempotencyKey,
@@ -75,6 +81,25 @@ const runRecordMocks = vi.hoisted(() => {
 				return { ok: true as const }
 			},
 		),
+		releaseWorkflowProjectionIdempotencyKey: vi.fn(
+			async (input: { userId: string; id: string }) => {
+				const store = userStore(input.userId)
+				const existing = store.get(input.id)
+				if (!existing) {
+					return { released: false, previousKey: null }
+				}
+				if (existing.idempotencyKey.startsWith('released:')) {
+					return { released: false, previousKey: existing.idempotencyKey }
+				}
+				const previousKey = existing.idempotencyKey
+				store.set(input.id, {
+					...existing,
+					idempotencyKey: `released:${input.id}`,
+					updatedAt: new Date().toISOString(),
+				})
+				return { released: true, previousKey }
+			},
+		),
 		findWorkflowProjectionByIdempotencyKey: vi.fn(
 			async (input: {
 				userId: string
@@ -126,6 +151,8 @@ vi.mock('#worker/run-records/service.ts', async (importOriginal) => ({
 	...(await importOriginal<typeof RunRecordsServiceModule>()),
 	upsertWorkflowProjection: (input: never) =>
 		runRecordMocks.upsertWorkflowProjection(input),
+	releaseWorkflowProjectionIdempotencyKey: (input: never) =>
+		runRecordMocks.releaseWorkflowProjectionIdempotencyKey(input),
 	findWorkflowProjectionByIdempotencyKey: (input: never) =>
 		runRecordMocks.findWorkflowProjectionByIdempotencyKey(input),
 	findWorkflowProjectionByBindingIdempotencyKey: (input: never) =>
@@ -169,7 +196,7 @@ type EscalationInput = Parameters<typeof runWithDurableEscalation>[0]
 function escalate(overrides: Partial<EscalationInput> = {}) {
 	return runWithDurableEscalation({
 		env: envStub(),
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		idempotencyParts: publishParts,
 		workflowName,
 		durableCode: 'export default async function main() { return null }',
@@ -209,7 +236,7 @@ function seedProjection(
 }
 
 const keyFor = (userId: string, parts: ReadonlyArray<string> = publishParts) =>
-	buildCallerScopedIdempotencyKey({ userId, parts })
+	buildCallerScopedIdempotencyKey({ userId: ownerIdFromStored(userId), parts })
 
 test('runWithDurableEscalation returns the inline result when work finishes within budget', async () => {
 	const run = vi.fn(async (_signal: AbortSignal) => ({
@@ -260,7 +287,7 @@ test('runWithDurableEscalation dispatches once on budget exhaustion and reuses a
 	expect(mockModule.createDynamicCallableWorkflow).toHaveBeenCalledTimes(1)
 	expect(mockModule.createDynamicCallableWorkflow).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			userEmail: 'user@example.com',
 			body: expect.objectContaining({
 				idempotencyKey: expectedKey,
@@ -315,7 +342,7 @@ test('mid-creation workflow projection rows are treated as already dispatched', 
 		runRecordMocks.findWorkflowProjectionByBindingIdempotencyKey,
 	).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			bindingName: projectionBindingName,
 			idempotencyKey: expectedKey,
 		}),
@@ -336,7 +363,9 @@ test('different acting callers get non-colliding dedupe; same caller still reuse
 		.mockResolvedValueOnce(created('dynwf-delegate-a'))
 		.mockResolvedValueOnce(created('dynwf-delegate-b'))
 
-	await expect(escalate({ userId: 'delegate-a' })).resolves.toEqual({
+	await expect(
+		escalate({ userId: ownerIdFromStored('delegate-a') }),
+	).resolves.toEqual({
 		kind: 'dispatched',
 		handle: expect.objectContaining({
 			workflow_id: 'dynwf-delegate-a',
@@ -347,7 +376,9 @@ test('different acting callers get non-colliding dedupe; same caller still reuse
 
 	// A second acting caller must not reuse the first caller's active row even
 	// when owner/package/commit parts match (projections are user-scoped).
-	await expect(escalate({ userId: 'delegate-b' })).resolves.toEqual({
+	await expect(
+		escalate({ userId: ownerIdFromStored('delegate-b') }),
+	).resolves.toEqual({
 		kind: 'dispatched',
 		handle: expect.objectContaining({
 			workflow_id: 'dynwf-delegate-b',
@@ -370,7 +401,9 @@ test('different acting callers get non-colliding dedupe; same caller still reuse
 
 	mockModule.createDynamicCallableWorkflow.mockClear()
 	seedProjection('delegate-b', 'dynwf-delegate-b', delegateBKey, 'running')
-	await expect(escalate({ userId: 'delegate-a' })).resolves.toEqual({
+	await expect(
+		escalate({ userId: ownerIdFromStored('delegate-a') }),
+	).resolves.toEqual({
 		kind: 'dispatched',
 		handle: expect.objectContaining({
 			workflow_id: 'dynwf-delegate-a',
@@ -381,30 +414,35 @@ test('different acting callers get non-colliding dedupe; same caller still reuse
 	expect(mockModule.createDynamicCallableWorkflow).not.toHaveBeenCalled()
 })
 
-test('runWithDurableEscalation never throws and reports structured failures', async () => {
+test('runWithDurableEscalation never throws and preserves original failures', async () => {
+	const checksError = new Error('checks blew up')
 	await expect(
 		escalate({
 			idempotencyParts: ['publish', 'pkg-1', 'fail'],
 			budgetMs: 5_000,
 			run: async () => {
-				throw new Error('checks blew up')
+				throw checksError
 			},
 		}),
-	).resolves.toEqual({ kind: 'failed', error: 'checks blew up' })
-	await expect(
-		escalate({
-			idempotencyParts: ['   ', ''],
-			budgetMs: undefined,
-			run: async () => ({ ok: true }),
-		}),
-	).resolves.toEqual({
-		kind: 'failed',
-		error: 'Durable escalation requires at least one idempotency part.',
+	).resolves.toEqual({ kind: 'failed', error: checksError })
+	const emptyParts = await escalate({
+		idempotencyParts: ['   ', ''],
+		budgetMs: undefined,
+		run: async () => ({ ok: true }),
 	})
-
-	mockModule.createDynamicCallableWorkflow.mockRejectedValue(
-		new Error('Missing DYNAMIC_CALLABLE_WORKFLOWS binding.'),
+	expect(emptyParts).toEqual({
+		kind: 'failed',
+		error: expect.any(Error),
+	})
+	if (emptyParts.kind !== 'failed') {
+		throw new Error('expected failed')
+	}
+	expect(getErrorMessage(emptyParts.error)).toBe(
+		'Durable escalation requires at least one idempotency part.',
 	)
+
+	const dispatchError = new Error('Missing DYNAMIC_CALLABLE_WORKFLOWS binding.')
+	mockModule.createDynamicCallableWorkflow.mockRejectedValue(dispatchError)
 	await expect(
 		escalate({
 			idempotencyParts: ['publish', 'pkg-1', 'dispatch-fail'],
@@ -412,24 +450,63 @@ test('runWithDurableEscalation never throws and reports structured failures', as
 		}),
 	).resolves.toEqual({
 		kind: 'failed',
-		error: 'Missing DYNAMIC_CALLABLE_WORKFLOWS binding.',
+		error: dispatchError,
 	})
+
+	const entitlementError = new EntitlementLimitError({
+		resource: 'concurrent_workflows',
+		plan: 'pro',
+		limit: 5,
+		current: 5,
+		upgradeHint:
+			'Wait for a run to finish, or upgrade your plan at /@<slug>/-/billing.',
+	})
+	const entitlementOutcome = await escalate({
+		idempotencyParts: ['publish', 'pkg-1', 'entitlement'],
+		budgetMs: 5_000,
+		run: async () => {
+			throw entitlementError
+		},
+	})
+	expect(entitlementOutcome).toEqual({
+		kind: 'failed',
+		error: entitlementError,
+	})
+	if (entitlementOutcome.kind !== 'failed') {
+		throw new Error('expected failed')
+	}
+	expect(isEntitlementLimitError(entitlementOutcome.error)).toBe(true)
 })
 
-test('budget exhaustion fails closed when create single-flights onto a dead terminal run', async () => {
+test('budget exhaustion releases a dead terminal key and re-dispatches once', async () => {
 	runRecordMocks.resetProjections()
-	mockModule.createDynamicCallableWorkflow.mockResolvedValueOnce(
-		created('dynwf-cancelled-1', 'cancelled'),
-	)
+	const expectedKey = keyFor('user-1')
+	seedProjection('user-1', 'dynwf-cancelled-1', expectedKey, 'cancelled')
+	mockModule.createDynamicCallableWorkflow
+		.mockResolvedValueOnce(created('dynwf-cancelled-1', 'cancelled'))
+		.mockResolvedValueOnce(created('dynwf-retry-1', 'queued'))
 	const cancelledOutcome = await escalate()
-	expect(cancelledOutcome.kind).toBe('failed')
-	if (cancelledOutcome.kind !== 'failed') {
-		throw new Error('Expected cancelled single-flight to fail closed.')
-	}
-	expect(cancelledOutcome.error).toContain('dynwf-cancelled-1')
-	expect(cancelledOutcome.error).toContain('cancelled')
-	expect(cancelledOutcome.error).toContain('blocks re-dispatch')
+	expect(cancelledOutcome).toEqual({
+		kind: 'dispatched',
+		handle: expect.objectContaining({
+			status: 'dispatched',
+			workflow_id: 'dynwf-retry-1',
+			run_status: 'queued',
+			idempotency_key: expectedKey,
+		}),
+	})
+	expect(mockModule.createDynamicCallableWorkflow).toHaveBeenCalledTimes(2)
+	expect(
+		runRecordMocks.releaseWorkflowProjectionIdempotencyKey,
+	).toHaveBeenCalledWith(
+		expect.objectContaining({
+			userId: ownerIdFromStored('user-1'),
+			id: 'dynwf-cancelled-1',
+		}),
+	)
 
+	mockModule.createDynamicCallableWorkflow.mockClear()
+	runRecordMocks.releaseWorkflowProjectionIdempotencyKey.mockClear()
 	mockModule.createDynamicCallableWorkflow.mockResolvedValueOnce(
 		created('dynwf-complete-1', 'complete'),
 	)
@@ -443,6 +520,9 @@ test('budget exhaustion fails closed when create single-flights onto a dead term
 			idempotency_key: keyFor('user-1', completeParts),
 		}),
 	})
+	expect(
+		runRecordMocks.releaseWorkflowProjectionIdempotencyKey,
+	).not.toHaveBeenCalled()
 })
 
 test('budget abort dispatches while the inline attempt is still in flight', async () => {

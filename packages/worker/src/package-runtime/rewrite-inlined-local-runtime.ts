@@ -79,6 +79,24 @@ export function rewriteInlinedLocalExecuteBundleSource(input: {
 		packageBoundBindings.at(-1)?.packageId ??
 		null
 	const bindingNames = readInlinedBindingNames(preambleSource)
+	const removableInitNames = readRemovableEsmInitNames(preambleSource).filter(
+		(name) => retained.includes(name),
+	)
+	const sharedRuntimeExportAliases = (() => {
+		const sharedAliasByName = new Map<string, SharedRuntimeExportAlias>()
+		for (const alias of [
+			...readRemovableSharedRuntimeExportAliases(preambleSource),
+			...readRetainedSharedRuntimeExportAliases(retained, authorBindings),
+		]) {
+			if (!retained.includes(alias.name) || authorBindings.has(alias.name)) {
+				continue
+			}
+			if (!sharedAliasByName.has(alias.name)) {
+				sharedAliasByName.set(alias.name, alias)
+			}
+		}
+		return [...sharedAliasByName.values()]
+	})()
 	const relativeShim = createRelativeImportSpecifier(
 		normalizeWorkspaceModulePath(input.modulePath),
 		normalizeWorkspaceModulePath(input.primaryRuntimePath),
@@ -89,6 +107,8 @@ export function rewriteInlinedLocalExecuteBundleSource(input: {
 		packageBoundBindings,
 		bindingNames,
 		authorBindings,
+		removableInitNames,
+		sharedRuntimeExportAliases,
 	})
 
 	// Walk sections in order: keep author modules where they were, emit the
@@ -174,15 +194,74 @@ const packageBoundFactoryPatterns: ReadonlyArray<{
 	kind: PackageBoundBindingKind
 	rhs: RegExp
 }> = [
-	{ kind: 'packageStorage', rhs: /__kodyCreatePackageBoundStorage\s*\(/ },
-	{ kind: 'packageSecrets', rhs: /__kodyCreatePackageBoundSecrets\s*\(/ },
+	// Esbuild renames colliding inlined factories (`…Storage` → `…Storage2`).
+	{ kind: 'packageStorage', rhs: /__kodyCreatePackageBoundStorage\d*\s*\(/ },
+	{ kind: 'packageSecrets', rhs: /__kodyCreatePackageBoundSecrets\d*\s*\(/ },
 	{
 		kind: 'createAuthenticatedFetch',
-		rhs: /__kodyCreatePackageBoundAuthenticatedFetch\s*\(/,
+		rhs: /__kodyCreatePackageBoundAuthenticatedFetch\d*\s*\(/,
 	},
 	{
 		kind: 'oauthClientCredentials',
-		rhs: /__kodyCreatePackageBoundOauthClientCredentials\s*\(/,
+		rhs: /__kodyCreatePackageBoundOauthClientCredentials\d*\s*\(/,
+	},
+]
+
+/**
+ * Shared ALS / CapabilityProxy exports that the local shim re-provides under
+ * their canonical names. Esbuild renames colliding inlined copies
+ * (`packageContext` → `packageContext6`); retained author modules keep the
+ * renamed identifier after the removable runtime sections are stripped.
+ */
+const sharedRuntimeExportCanonicals = [
+	'kody',
+	'secretHeaders',
+	'packageContext',
+	'email',
+	'workflows',
+	'packages',
+	'events',
+] as const
+
+type SharedRuntimeExportCanonical =
+	(typeof sharedRuntimeExportCanonicals)[number]
+
+type SharedRuntimeExportAlias = {
+	canonical: SharedRuntimeExportCanonical
+	name: string
+}
+
+const sharedRuntimeExportFactoryPatterns: ReadonlyArray<{
+	canonical: SharedRuntimeExportCanonical
+	rhs: RegExp
+}> = [
+	{
+		canonical: 'kody',
+		rhs: /__kodyCreateRuntimeObjectProxy\d*\s*\(\s*["']kody["']/,
+	},
+	{
+		canonical: 'secretHeaders',
+		rhs: /__kodyOptionalRuntimeObjectExport\d*\s*\(\s*["']secretHeaders["']/,
+	},
+	{
+		canonical: 'packageContext',
+		rhs: /__kodyCreateRuntimeRecordExport\d*\s*\(\s*["']packageContext["']/,
+	},
+	{
+		canonical: 'email',
+		rhs: /__kodyOptionalRuntimeObjectExport\d*\s*\(\s*["']email["']/,
+	},
+	{
+		canonical: 'workflows',
+		rhs: /__kodyOptionalRuntimeObjectExport\d*\s*\(\s*["']workflows["']/,
+	},
+	{
+		canonical: 'packages',
+		rhs: /__kodyOptionalRuntimeObjectExport\d*\s*\(\s*["']packages["']/,
+	},
+	{
+		canonical: 'events',
+		rhs: /__kodyOptionalRuntimeObjectExport\d*\s*\(\s*["']events["']/,
 	},
 ]
 
@@ -190,6 +269,9 @@ const packageBoundFactoryPatterns: ReadonlyArray<{
  * Every package-stamped factory assignment in the removed preamble, in source
  * order. Multi-facade graphs bind dependency storage/secrets before the root;
  * each binding keeps the package ID from its own facade.
+ *
+ * Matches both Dropbox-style top-level `var name = factory("id")` and esbuild
+ * `__esm` bodies that hoist `var name;` then assign inside the init callback.
  */
 export function readPackageBoundBindings(
 	preambleSource: string,
@@ -197,7 +279,7 @@ export function readPackageBoundBindings(
 	const bindings: Array<PackageBoundBinding & { index: number }> = []
 	for (const { kind, rhs } of packageBoundFactoryPatterns) {
 		const pattern = new RegExp(
-			`(?:var|let|const)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${rhs.source}\\s*["']([^"']+)["']`,
+			`(?:(?:var|let|const)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*${rhs.source}\\s*["']([^"']+)["']`,
 			'g',
 		)
 		for (const match of preambleSource.matchAll(pattern)) {
@@ -215,9 +297,146 @@ export function readPackageBoundBindings(
 	}))
 }
 
+/**
+ * Renamed shared runtime exports declared in removable sections
+ * (`packageContext6 = __kodyCreateRuntimeRecordExport("packageContext")`, a
+ * hoisted `var packageContext6` — including multi-declarator lists — or any
+ * other removable-text mention of the renamed binding). Retained author
+ * modules keep those names; the replacement preamble must alias them to the
+ * shim.
+ */
+export function readRemovableSharedRuntimeExportAliases(
+	preambleSource: string,
+): Array<SharedRuntimeExportAlias> {
+	const aliases: Array<SharedRuntimeExportAlias & { index: number }> = []
+	const seen = new Set<string>()
+	const remember = (
+		canonical: SharedRuntimeExportCanonical,
+		name: string | undefined,
+		index: number,
+	) => {
+		if (!name || name === canonical || seen.has(name)) return
+		if (!name.startsWith(canonical)) return
+		const suffix = name.slice(canonical.length)
+		if (!/^\d+$/.test(suffix)) return
+		seen.add(name)
+		aliases.push({ canonical, name, index })
+	}
+
+	for (const { canonical, rhs } of sharedRuntimeExportFactoryPatterns) {
+		const assignPattern = new RegExp(
+			`(?:(?:var|let|const)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*${rhs.source}`,
+			'g',
+		)
+		for (const match of preambleSource.matchAll(assignPattern)) {
+			remember(canonical, match[1], match.index ?? 0)
+		}
+	}
+
+	for (const canonical of sharedRuntimeExportCanonicals) {
+		// Any mention in removable text, including multi-declarator lists
+		// (`var packageStorage6, packageContext6`), facade fields, and
+		// assignments left after inlining stripped the factory call.
+		const anyPattern = new RegExp(`\\b(${canonical}\\d+)\\b`, 'g')
+		for (const match of preambleSource.matchAll(anyPattern)) {
+			remember(canonical, match[1], match.index ?? 0)
+		}
+	}
+
+	aliases.sort((left, right) => left.index - right.index)
+	return aliases.map(({ canonical, name }) => ({ canonical, name }))
+}
+
+/**
+ * Retained author modules may still reference `packageContext6` after the
+ * removable sections that declared it are stripped, even when the removable
+ * text no longer contains that identifier (unusual inlining shapes). Collect
+ * numbered shared-export names from retained source that are not already
+ * top-level author bindings.
+ *
+ * Skip names that appear only as bare `typeof name` probes — those are
+ * intentional unbound checks and must keep returning `"undefined"` rather
+ * than gaining a shim binding.
+ */
+export function readRetainedSharedRuntimeExportAliases(
+	retainedSource: string,
+	authorBindings: ReadonlySet<string>,
+): Array<SharedRuntimeExportAlias> {
+	const aliases: Array<SharedRuntimeExportAlias & { index: number }> = []
+	const seen = new Set<string>()
+	for (const canonical of sharedRuntimeExportCanonicals) {
+		const pattern = new RegExp(`\\b(${canonical}\\d+)\\b`, 'g')
+		for (const match of retainedSource.matchAll(pattern)) {
+			const name = match[1]
+			const index = match.index ?? 0
+			if (!name || seen.has(name) || authorBindings.has(name)) continue
+			if (isOnlyBareTypeofProbe(retainedSource, name)) continue
+			seen.add(name)
+			aliases.push({ canonical, name, index })
+		}
+	}
+	aliases.sort((left, right) => left.index - right.index)
+	return aliases.map(({ canonical, name }) => ({ canonical, name }))
+}
+
+/**
+ * `typeof undeclared` is defined to return `"undefined"`. Binding that name
+ * to the shim would flip feature probes. `typeof name?.prop` still throws if
+ * `name` is undeclared, so those uses still need an alias.
+ */
+function isOnlyBareTypeofProbe(source: string, name: string) {
+	const pattern = new RegExp(`\\b${name}\\b`, 'g')
+	const matches = [...source.matchAll(pattern)]
+	if (matches.length === 0) return true
+	return matches.every((match) => {
+		const index = match.index ?? 0
+		if (!isPrecededByTypeof(source, index)) return false
+		const after = source.slice(index + name.length, index + name.length + 2)
+		// Bare probe: typeof name / typeof name === … — not typeof name?.x
+		return !/^[?.([]/.test(after)
+	})
+}
+
+/** True when `source[index]` is immediately after `typeof` plus whitespace. */
+function isPrecededByTypeof(source: string, index: number) {
+	let cursor = index
+	while (cursor > 0 && /\s/.test(source[cursor - 1] ?? '')) {
+		cursor -= 1
+	}
+	const keyword = 'typeof'
+	if (cursor < keyword.length) return false
+	if (source.slice(cursor - keyword.length, cursor) !== keyword) return false
+	const beforeKeyword = cursor - keyword.length - 1
+	if (beforeKeyword >= 0 && /[A-Za-z0-9_$]/.test(source[beforeKeyword] ?? '')) {
+		return false
+	}
+	return true
+}
+
+/**
+ * `__esm` init helpers defined in removable runtime / package-runtime sections.
+ * Retained author modules often call these (`init_storage` → `init_<pkg>()`);
+ * stripping the section without re-emitting the init leaves
+ * `ReferenceError: init_… is not defined` under local workerd after the
+ * rewrite clears the SyntaxError path.
+ */
+export function readRemovableEsmInitNames(preambleSource: string) {
+	const names: Array<string> = []
+	const seen = new Set<string>()
+	for (const match of preambleSource.matchAll(
+		/(?:var|let|const)\s+(init_[A-Za-z0-9_$]+)\s*=\s*__esm\s*\(/g,
+	)) {
+		const name = match[1]
+		if (!name || seen.has(name)) continue
+		seen.add(name)
+		names.push(name)
+	}
+	return names
+}
+
 function readAssignmentBindingName(preambleSource: string, rhsPattern: RegExp) {
 	const match = new RegExp(
-		`(?:var|let|const)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${rhsPattern.source}`,
+		`(?:(?:var|let|const)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*${rhsPattern.source}`,
 	).exec(preambleSource)
 	return match?.[1] ?? null
 }
@@ -229,7 +448,7 @@ function readLastAssignmentBindingName(
 	const matches = [
 		...preambleSource.matchAll(
 			new RegExp(
-				`(?:var|let|const)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${rhsPattern.source}`,
+				`(?:(?:var|let|const)\\s+)?([A-Za-z_$][\\w$]*)\\s*=\\s*${rhsPattern.source}`,
 				'g',
 			),
 		),
@@ -457,14 +676,116 @@ function emitCanonicalAlias(
 	return `var ${canonical} = ${actual};`
 }
 
+type ShimImportBinding =
+	| string
+	| {
+			name: string
+			as: string
+	  }
+
+/**
+ * Named imports from the CapabilityProxy shim. Skip any local binding that
+ * retained author source already declares — npm-backed published bundles often
+ * keep `import { kody, … }` from nested package runtimes (esbuild aliases the
+ * later ones to `kody2`), and a second `import { kody }` is a SyntaxError under
+ * workerd. Hosted execute never injects this shim import.
+ */
+function collectShimImportSpecifiers(
+	bindings: ReadonlyArray<ShimImportBinding>,
+	authorBindings: ReadonlySet<string>,
+) {
+	const specifiers: Array<string> = []
+	for (const binding of bindings) {
+		if (typeof binding === 'string') {
+			if (authorBindings.has(binding)) continue
+			specifiers.push(binding)
+			continue
+		}
+		if (authorBindings.has(binding.as)) continue
+		specifiers.push(`${binding.name} as ${binding.as}`)
+	}
+	return specifiers
+}
+
+/**
+ * Private local name for a shim import used only to feed renamed shared-export
+ * aliases (`packageContext6 = __kodyShimPackageContext`). Avoids binding the
+ * renamed export to a colliding author `packageContext` when the bare
+ * canonical import is skipped.
+ */
+function pickCollisionFreeShimLocalName(
+	canonical: SharedRuntimeExportCanonical,
+	authorBindings: ReadonlySet<string>,
+) {
+	return pickCollisionFreeLocalName(
+		`__kodyShim${canonical.charAt(0).toUpperCase()}${canonical.slice(1)}`,
+		authorBindings,
+	)
+}
+
+const shimPackageBoundFactoryNames = [
+	'__kodyCreatePackageBoundAuthenticatedFetch',
+	'__kodyCreatePackageBoundStorage',
+	'__kodyCreatePackageBoundSecrets',
+	'__kodyCreatePackageBoundOauthClientCredentials',
+	'__kodyCreatePackageBoundGatewayFetch',
+] as const
+
+type ShimPackageBoundFactoryName = (typeof shimPackageBoundFactoryNames)[number]
+
+/**
+ * Local names for the shim's package-bound factories. Published artifacts
+ * from before the shared runtime was externalized inline a cloud runtime copy
+ * that declares `__kodyCreatePackageBoundStorage` (and siblings) at top level.
+ * Composed into a later consumer, that copy is retained author source; the
+ * replacement bindings must still reach the shim's CapabilityProxy factories,
+ * so a colliding name is imported under a private alias instead of skipped.
+ */
+function pickShimPackageBoundFactoryLocals(
+	authorBindings: ReadonlySet<string>,
+) {
+	return Object.fromEntries(
+		shimPackageBoundFactoryNames.map((name) => [
+			name,
+			authorBindings.has(name)
+				? pickCollisionFreeLocalName(
+						`__kodyShim${name.slice('__kody'.length)}`,
+						authorBindings,
+					)
+				: name,
+		]),
+	) as Record<ShimPackageBoundFactoryName, string>
+}
+
+function pickCollisionFreeLocalName(
+	preferred: string,
+	authorBindings: ReadonlySet<string>,
+) {
+	if (!authorBindings.has(preferred)) return preferred
+	let suffix = 2
+	while (authorBindings.has(`${preferred}${suffix}`)) suffix += 1
+	return `${preferred}${suffix}`
+}
+
+function formatShimImportBlock(
+	relativeShimSpecifier: string,
+	specifiers: ReadonlyArray<string>,
+) {
+	if (specifiers.length === 0) return ''
+	return `import {\n\t${specifiers.join(',\n\t')},\n} from ${JSON.stringify(
+		relativeShimSpecifier,
+	)};`
+}
+
 function createInlinedRuntimeReplacementPreamble(input: {
 	relativeShimSpecifier: string
 	packageId: string | null
 	packageBoundBindings: ReadonlyArray<PackageBoundBinding>
 	bindingNames: ReturnType<typeof readInlinedBindingNames>
 	authorBindings: ReadonlySet<string>
+	removableInitNames?: ReadonlyArray<string>
+	sharedRuntimeExportAliases?: ReadonlyArray<SharedRuntimeExportAlias>
 }) {
-	const shim = JSON.stringify(input.relativeShimSpecifier)
 	const {
 		packageStorage,
 		packageSecrets,
@@ -489,8 +810,13 @@ function createInlinedRuntimeReplacementPreamble(input: {
 }`
 	const facadeLines: Array<string> = []
 	if (packageRuntimeDefault) {
-		facadeLines.push(`var ${packageRuntimeDefault} = ${facadeDefaultObject};`)
-		if (packageRuntimeDefault !== '__kodyPackageRuntimeDefault') {
+		if (!input.authorBindings.has(packageRuntimeDefault)) {
+			facadeLines.push(`var ${packageRuntimeDefault} = ${facadeDefaultObject};`)
+		}
+		if (
+			packageRuntimeDefault !== '__kodyPackageRuntimeDefault' &&
+			!input.authorBindings.has('__kodyPackageRuntimeDefault')
+		) {
 			facadeLines.push(
 				`var __kodyPackageRuntimeDefault = ${packageRuntimeDefault};`,
 			)
@@ -498,9 +824,11 @@ function createInlinedRuntimeReplacementPreamble(input: {
 	}
 	if (kodyRuntime) {
 		const defaultValueExpr = packageRuntimeDefault ?? facadeDefaultObject
-		facadeLines.push(
-			`var ${kodyRuntime} = Object.freeze({ defaultValue: ${defaultValueExpr} });`,
-		)
+		if (!input.authorBindings.has(kodyRuntime)) {
+			facadeLines.push(
+				`var ${kodyRuntime} = Object.freeze({ defaultValue: ${defaultValueExpr} });`,
+			)
+		}
 		if (
 			kodyRuntime !== 'KodyRuntime' &&
 			!input.authorBindings.has('KodyRuntime')
@@ -508,35 +836,74 @@ function createInlinedRuntimeReplacementPreamble(input: {
 			facadeLines.push(`var KodyRuntime = ${kodyRuntime};`)
 		}
 	}
-	const facadeBlock = facadeLines.filter(Boolean).join('\n')
+	const initStubLines = (input.removableInitNames ?? [])
+		.filter((name) => !input.authorBindings.has(name))
+		.map(
+			// Bindings are hoisted onto the shim factories above; retained
+			// author `__esm` modules only need the init symbol to exist.
+			(name) => `var ${name} = () => {};`,
+		)
+	const packageBoundEmittedNames = new Set(
+		input.packageBoundBindings.map((binding) => binding.name),
+	)
+	const activeSharedAliases = (input.sharedRuntimeExportAliases ?? []).filter(
+		(alias) =>
+			!input.authorBindings.has(alias.name) &&
+			!packageBoundEmittedNames.has(alias.name),
+	)
+	const sharedShimLocals = new Map<SharedRuntimeExportCanonical, string>()
+	for (const alias of activeSharedAliases) {
+		if (sharedShimLocals.has(alias.canonical)) continue
+		sharedShimLocals.set(
+			alias.canonical,
+			pickCollisionFreeShimLocalName(alias.canonical, input.authorBindings),
+		)
+	}
+	const sharedAliasBlock = activeSharedAliases
+		.map((alias) => {
+			const local = sharedShimLocals.get(alias.canonical)
+			return local ? `var ${alias.name} = ${local};` : ''
+		})
+		.filter(Boolean)
+		.join('\n')
+	const sharedShimImportBindings: Array<ShimImportBinding> = [
+		...sharedShimLocals.entries(),
+	].map(([canonical, local]) =>
+		local === canonical ? canonical : { name: canonical, as: local },
+	)
+	const facadeBlock = [...facadeLines, ...initStubLines]
+		.filter(Boolean)
+		.join('\n')
 
 	if (input.packageId) {
 		const packageIdLiteral = JSON.stringify(input.packageId)
+		const factory = pickShimPackageBoundFactoryLocals(input.authorBindings)
 		const packageBoundLines: Array<string> = []
 		const emittedBindingNames = new Set<string>()
 		for (const binding of input.packageBoundBindings) {
 			if (emittedBindingNames.has(binding.name)) continue
+			if (input.authorBindings.has(binding.name)) continue
 			emittedBindingNames.add(binding.name)
 			const idLiteral = JSON.stringify(binding.packageId)
 			switch (binding.kind) {
 				case 'packageStorage':
 					packageBoundLines.push(
-						`var ${binding.name} = __kodyCreatePackageBoundStorage(${idLiteral});`,
+						`var ${binding.name} = ${factory.__kodyCreatePackageBoundStorage}(${idLiteral});`,
 					)
 					break
 				case 'packageSecrets':
 					packageBoundLines.push(
-						`var ${binding.name} = __kodyCreatePackageBoundSecrets(${idLiteral});`,
+						`var ${binding.name} = ${factory.__kodyCreatePackageBoundSecrets}(${idLiteral});`,
 					)
 					break
 				case 'createAuthenticatedFetch':
 					packageBoundLines.push(
-						`var ${binding.name} = __kodyCreatePackageBoundAuthenticatedFetch(${idLiteral});`,
+						`var ${binding.name} = ${factory.__kodyCreatePackageBoundAuthenticatedFetch}(${idLiteral});`,
 					)
 					break
 				case 'oauthClientCredentials':
 					packageBoundLines.push(
-						`var ${binding.name} = __kodyCreatePackageBoundOauthClientCredentials(${idLiteral});`,
+						`var ${binding.name} = ${factory.__kodyCreatePackageBoundOauthClientCredentials}(${idLiteral});`,
 					)
 					break
 				default: {
@@ -548,27 +915,39 @@ function createInlinedRuntimeReplacementPreamble(input: {
 		// Optional-export CAF/oauth (shared runtime) and any missing host
 		// bindings stamp to the root package id so author entry code still
 		// resolves them under --local.
-		if (!emittedBindingNames.has(createAuthenticatedFetch)) {
+		if (
+			!emittedBindingNames.has(createAuthenticatedFetch) &&
+			!input.authorBindings.has(createAuthenticatedFetch)
+		) {
 			packageBoundLines.push(
-				`var ${createAuthenticatedFetch} = __kodyCreatePackageBoundAuthenticatedFetch(${packageIdLiteral});`,
+				`var ${createAuthenticatedFetch} = ${factory.__kodyCreatePackageBoundAuthenticatedFetch}(${packageIdLiteral});`,
 			)
 			emittedBindingNames.add(createAuthenticatedFetch)
 		}
-		if (!emittedBindingNames.has(packageStorage)) {
+		if (
+			!emittedBindingNames.has(packageStorage) &&
+			!input.authorBindings.has(packageStorage)
+		) {
 			packageBoundLines.push(
-				`var ${packageStorage} = __kodyCreatePackageBoundStorage(${packageIdLiteral});`,
+				`var ${packageStorage} = ${factory.__kodyCreatePackageBoundStorage}(${packageIdLiteral});`,
 			)
 			emittedBindingNames.add(packageStorage)
 		}
-		if (!emittedBindingNames.has(packageSecrets)) {
+		if (
+			!emittedBindingNames.has(packageSecrets) &&
+			!input.authorBindings.has(packageSecrets)
+		) {
 			packageBoundLines.push(
-				`var ${packageSecrets} = __kodyCreatePackageBoundSecrets(${packageIdLiteral});`,
+				`var ${packageSecrets} = ${factory.__kodyCreatePackageBoundSecrets}(${packageIdLiteral});`,
 			)
 			emittedBindingNames.add(packageSecrets)
 		}
-		if (!emittedBindingNames.has(oauthClientCredentials)) {
+		if (
+			!emittedBindingNames.has(oauthClientCredentials) &&
+			!input.authorBindings.has(oauthClientCredentials)
+		) {
 			packageBoundLines.push(
-				`var ${oauthClientCredentials} = __kodyCreatePackageBoundOauthClientCredentials(${packageIdLiteral});`,
+				`var ${oauthClientCredentials} = ${factory.__kodyCreatePackageBoundOauthClientCredentials}(${packageIdLiteral});`,
 			)
 			emittedBindingNames.add(oauthClientCredentials)
 		}
@@ -596,52 +975,134 @@ function createInlinedRuntimeReplacementPreamble(input: {
 		]
 			.filter(Boolean)
 			.join('\n')
+		const emitFetchBinding = !input.authorBindings.has('fetch')
+		const needsPackageBoundFactories = packageBoundLines.length > 0
+		const shimImport = formatShimImportBlock(
+			input.relativeShimSpecifier,
+			collectShimImportSpecifiers(
+				[
+					'kody',
+					'secretHeaders',
+					'packageContext',
+					'email',
+					'workflows',
+					'packages',
+					'events',
+					...sharedShimImportBindings,
+					...(needsPackageBoundFactories || emitFetchBinding
+						? (['__kodySecretRef'] as const)
+						: []),
+					...shimPackageBoundFactoryNames
+						.filter((name) =>
+							name === '__kodyCreatePackageBoundGatewayFetch'
+								? emitFetchBinding
+								: needsPackageBoundFactories,
+						)
+						.map((name): ShimImportBinding =>
+							factory[name] === name ? name : { name, as: factory[name] },
+						),
+				],
+				input.authorBindings,
+			),
+		)
 		return `
-import {
-	kody,
-	secretHeaders,
-	packageContext,
-	email,
-	workflows,
-	packages,
-	events,
-	__kodyCreatePackageBoundAuthenticatedFetch,
-	__kodyCreatePackageBoundStorage,
-	__kodyCreatePackageBoundSecrets,
-	__kodyCreatePackageBoundOauthClientCredentials,
-} from ${shim};
+${shimImport}
 
 ${packageBoundLines.join('\n')}
+${
+	emitFetchBinding
+		? `var fetch = ${factory.__kodyCreatePackageBoundGatewayFetch}(${packageIdLiteral});`
+		: ''
+}
 ${aliases}
+${sharedAliasBlock}
 ${facadeBlock}
 `.trim()
 	}
 
 	// Unstamped inlined runtime (rare): import shim helpers under stable local
 	// aliases, then expose whatever esbuild names the author body still uses.
+	// Nested npm-backed graphs often already import `kody` / CAF from an
+	// external package runtime — do not redeclare those locals.
+	const bindCreateAuthenticatedFetch = !input.authorBindings.has(
+		createAuthenticatedFetch,
+	)
+	const bindOauthClientCredentials = !input.authorBindings.has(
+		oauthClientCredentials,
+	)
+	const bindPackageStorage = !input.authorBindings.has(packageStorage)
+	const bindPackageSecrets = !input.authorBindings.has(packageSecrets)
+	const shimImport = formatShimImportBlock(
+		input.relativeShimSpecifier,
+		collectShimImportSpecifiers(
+			[
+				'kody',
+				...(bindCreateAuthenticatedFetch
+					? [
+							{
+								name: 'createAuthenticatedFetch',
+								as: '__kodyShimCreateAuthenticatedFetch',
+							},
+						]
+					: []),
+				'secretHeaders',
+				...(bindOauthClientCredentials
+					? [
+							{
+								name: 'oauthClientCredentials',
+								as: '__kodyShimOauthClientCredentials',
+							},
+						]
+					: []),
+				'packageContext',
+				...(bindPackageStorage
+					? [{ name: 'packageStorage', as: '__kodyShimPackageStorage' }]
+					: []),
+				...(bindPackageSecrets
+					? [{ name: 'packageSecrets', as: '__kodyShimPackageSecrets' }]
+					: []),
+				'email',
+				'workflows',
+				'packages',
+				'events',
+				...sharedShimImportBindings,
+			],
+			input.authorBindings,
+		),
+	)
+	const assignmentLines = [
+		bindCreateAuthenticatedFetch
+			? `var ${createAuthenticatedFetch} = __kodyShimCreateAuthenticatedFetch;`
+			: '',
+		bindOauthClientCredentials
+			? `var ${oauthClientCredentials} = __kodyShimOauthClientCredentials;`
+			: '',
+		bindPackageStorage
+			? `var ${packageStorage} = __kodyShimPackageStorage;`
+			: '',
+		bindPackageSecrets
+			? `var ${packageSecrets} = __kodyShimPackageSecrets;`
+			: '',
+		emitCanonicalAlias(
+			'createAuthenticatedFetch',
+			createAuthenticatedFetch,
+			input.authorBindings,
+		),
+		emitCanonicalAlias(
+			'oauthClientCredentials',
+			oauthClientCredentials,
+			input.authorBindings,
+		),
+		emitCanonicalAlias('packageStorage', packageStorage, input.authorBindings),
+		emitCanonicalAlias('packageSecrets', packageSecrets, input.authorBindings),
+		sharedAliasBlock,
+	]
+		.filter(Boolean)
+		.join('\n')
 	return `
-import {
-	kody,
-	createAuthenticatedFetch as __kodyShimCreateAuthenticatedFetch,
-	secretHeaders,
-	oauthClientCredentials as __kodyShimOauthClientCredentials,
-	packageContext,
-	packageStorage as __kodyShimPackageStorage,
-	packageSecrets as __kodyShimPackageSecrets,
-	email,
-	workflows,
-	packages,
-	events,
-} from ${shim};
+${shimImport}
 
-var ${createAuthenticatedFetch} = __kodyShimCreateAuthenticatedFetch;
-var ${oauthClientCredentials} = __kodyShimOauthClientCredentials;
-var ${packageStorage} = __kodyShimPackageStorage;
-var ${packageSecrets} = __kodyShimPackageSecrets;
-${emitCanonicalAlias('createAuthenticatedFetch', createAuthenticatedFetch, input.authorBindings)}
-${emitCanonicalAlias('oauthClientCredentials', oauthClientCredentials, input.authorBindings)}
-${emitCanonicalAlias('packageStorage', packageStorage, input.authorBindings)}
-${emitCanonicalAlias('packageSecrets', packageSecrets, input.authorBindings)}
+${assignmentLines}
 ${facadeBlock}
 `.trim()
 }

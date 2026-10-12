@@ -19,10 +19,10 @@ for an outcome, watch the plan, review the actions that matter, and come back to
 the result. It is MIT licensed and, in its own words, an alpha for self-hosting
 and building on.
 
-Kody is the home your agents share. OpenMuse and Kody are complementary:
-OpenMuse is a place to talk to a personal agent, and Kody is what that agent
-keeps (and shares with Claude, Cursor, Codex, and the rest) after the
-conversation ends. The rest of this page is about using them together.
+Kody is Your agents' cloud. OpenMuse and Kody are complementary: OpenMuse is a
+place to talk to a personal agent, and Kody is what that agent keeps (and shares
+with Claude, Cursor, Codex, and the rest) after the conversation ends. The rest
+of this page is about using them together.
 
 ## What each one is good at
 
@@ -45,8 +45,9 @@ conversation ends. The rest of this page is about using them together.
   keep its interface and swap the agent behind it.
 
 The full list lives in OpenMuse's
-[feature inventory](https://github.com/CopilotKit/OpenMuse/blob/main/docs/FEATURES.md)
-and [roadmap](https://github.com/CopilotKit/OpenMuse/blob/main/ROADMAP.md).
+[feature inventory](https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/docs/FEATURES.md)
+and
+[roadmap](https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/ROADMAP.md).
 
 ### Kody
 
@@ -126,7 +127,7 @@ There are two ways to do that.
 
 **Approving gives that agent full access to your Kody account**, not a limited
 permission set. Connect it only to an OpenMuse deployment you control, and
-revoke it from Account → Connections (`/account/connections`) when you stop
+revoke it from Account → Connections (`/@<slug>/-/connections`) when you stop
 using it.
 
 ### Option A: add Kody to OpenMuse's built-in agent
@@ -183,7 +184,7 @@ preferences and repeatable work there."
 
 OpenMuse can hand conversation to an external AG-UI agent. Set
 `AGENT_BACKEND=agui`, `AGENT_URL`, and optionally `AGENT_TOKEN` as shown in its
-[`.env.example`](https://github.com/CopilotKit/OpenMuse/blob/main/.env.example).
+[`.env.example`](https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/.env.example).
 If the harness you already use speaks AG-UI and supports remote MCP servers,
 connect Kody there the way that harness connects any OAuth MCP server, then
 point OpenMuse at it.
@@ -207,8 +208,8 @@ OpenMuse's browser and computer tools.
    saved. That is the whole point: the phone conversation furnished a home your
    other agents already share. [Second agent](/docs/portability) is the
    playbook.
-4. **Find the connection.** Account → Connections (`/account/connections`) lists
-   the client your OpenMuse deployment registered, with a revoke button.
+4. **Find the connection.** Account → Connections (`/@<slug>/-/connections`)
+   lists the client your OpenMuse deployment registered, with a revoke button.
 
 ## A worked example
 
@@ -230,7 +231,7 @@ cloud with no model in the loop, and your OpenMuse server can be off.
 - **OpenMuse is alpha.** Its README notes that open-ended reasoning, live Google
   accounts, and Rich Threads need their own configuration. Expect file paths and
   settings to move between releases, and check its
-  [verification notes](https://github.com/CopilotKit/OpenMuse/blob/main/docs/VERIFICATION.md)
+  [verification notes](https://raw.githubusercontent.com/CopilotKit/OpenMuse/main/docs/VERIFICATION.md)
   before relying on a flow.
 - **The Kody wiring is yours.** Neither option above is an official OpenMuse
   feature. You are adding an MCP client to your own fork or harness.

@@ -6,10 +6,14 @@ import {
 import {
 	dailyEntitlementResources,
 	type DailyEntitlementResource,
-} from '#worker/entitlements/user-meter-do.ts'
+} from '#universal/plans.ts'
 import { calculateUserD1StorageBytes } from '#worker/entitlements/service.ts'
 import { type JobsStore } from '@kody-internal/shared/jobs/store.ts'
-import { isStableUserId, normalizeStableUserId } from '#worker/user-id.ts'
+import {
+	parseOwnerId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 type DailyResourceRead = {
 	resource: DailyEntitlementResource
@@ -35,7 +39,7 @@ type DeletionParity = {
 
 export type AdminUserMeterParityReport = {
 	generatedAt: string
-	stableUserId: string
+	stableUserId: OwnerId
 	/**
 	 * Daily counters are UserMeter-only. There is no D1
 	 * `entitlement_daily_counters` mirror, so this section reports meter counts
@@ -61,9 +65,11 @@ function countDeltaParity(input: {
 	return { delta, parity: delta === 0 }
 }
 
-async function userExists(db: D1Database, stableUserId: string) {
+async function userExists(db: D1Database, stableUserId: OwnerId) {
 	const row = await db
-		.prepare(`SELECT 1 AS present FROM users WHERE stable_user_id = ?`)
+		.prepare(
+			`SELECT 1 AS present FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(stableUserId)
 		.first<{ present: number }>()
 	return row != null
@@ -71,7 +77,7 @@ async function userExists(db: D1Database, stableUserId: string) {
 
 async function readDailyMeterCounts(input: {
 	env: UserMeterEnv
-	stableUserId: string
+	stableUserId: OwnerId
 	day: string
 	generatedAt: string
 }): Promise<AdminUserMeterParityReport['daily']> {
@@ -97,7 +103,7 @@ async function readStorageParity(input: {
 	db: D1Database
 	env: UserMeterEnv
 	jobs?: JobsStore
-	stableUserId: string
+	stableUserId: OwnerId
 }): Promise<StorageParity> {
 	// Physical recompute from D1 payload tables — the same source the
 	// reconcile lane applies to UserMeter. The retired users.d1_storage_bytes
@@ -131,10 +137,12 @@ async function readStorageParity(input: {
 async function readDeletionParity(input: {
 	db: D1Database
 	env: UserMeterEnv
-	stableUserId: string
+	stableUserId: OwnerId
 }): Promise<DeletionParity> {
 	const d1DeletingRow = await input.db
-		.prepare(`SELECT deleting_at FROM users WHERE stable_user_id = ?`)
+		.prepare(
+			`SELECT deleting_at FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.stableUserId)
 		.first<{ deleting_at: string | null }>()
 	const d1DeletingAt = d1DeletingRow?.deleting_at ?? null
@@ -166,8 +174,8 @@ export async function loadAdminUserMeterParityReport(input: {
 	stableUserId: string
 	now?: Date
 }): Promise<AdminUserMeterParityReport | null> {
-	const stableUserId = normalizeStableUserId(input.stableUserId)
-	if (!isStableUserId(stableUserId)) return null
+	const stableUserId = parseOwnerId(input.stableUserId)
+	if (!stableUserId) return null
 	if (!(await userExists(input.db, stableUserId))) return null
 
 	const now = input.now ?? new Date()

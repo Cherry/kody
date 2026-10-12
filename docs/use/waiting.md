@@ -1,8 +1,8 @@
 # Waiting
 
 Waiting is the current-state queue of things only **you** can clear. Open
-**`/account/waiting`** from Account while signed in. Desktop puts Account in the
-header to the left of the avatar; the avatar goes to your public profile
+**`/@<slug>/-/waiting`** from Account while signed in. Desktop puts Account in
+the header to the left of the avatar; the avatar goes to your public profile
 (`/@username`).
 
 Items are derived from live account state. They disappear when the gate clears.
@@ -21,6 +21,11 @@ Typical items:
   (`invalid_grant`, missing user credential, or a missing refresh token on a
   sign-in that expires; a non-expiring grant such as a GitHub OAuth App token
   with no refresh token is healthy and does not appear)
+- one of your own automations is paused: a job, subscription (inbound email
+  included), or webhook you turned on lost access it needs, such as Use on a
+  credential its run asked for (up to three, then a “more” card). In a team org
+  this card goes only to the person who turned the automation on, never to the
+  rest of the org. It clears on the next event once access is back
 - update an expired user-scope secret (up to three, then a “more” card)
 - review a locked package (published code stays put until you promote or unlock)
 - confirm a pending email change
@@ -51,12 +56,12 @@ fails open and hides the card, because login already attempted `guilds.join`.
 Vendor outages, operator work, and other people's queues do not appear here.
 Session-scoped secret approvals stay on the session that requested them. Missing
 secret _names_ stay off Waiting (the agent’s `nextStep` and
-`/account/secrets/new` already cover those).
+`/connect/secret-set` already cover those).
 
 OAuth last-failure **is** stored on the connection. A reconnectable grant shows
 a Waiting card with Reconnect. A provider 5xx or timeout is stored for
-[Integrations](https://kody.codes/account/integrations) as a service issue, but
-it does not appear here and does not emit `integration.auth.failed`.
+[Integrations](https://kody.codes/@<slug>/-/integrations) as a service issue,
+but it does not appear here and does not emit `integration.auth.failed`.
 
 ## Not Activity, not Email
 

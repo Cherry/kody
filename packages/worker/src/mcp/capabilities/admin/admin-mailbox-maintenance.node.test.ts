@@ -1,3 +1,7 @@
+import {
+	personIdFromStored,
+	ownerIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import type * as AuditLog from '#worker/audit-log.ts'
@@ -129,7 +133,8 @@ function createAdminCtx() {
 			id INTEGER PRIMARY KEY,
 			stable_user_id TEXT UNIQUE NOT NULL,
 			username TEXT NOT NULL,
-			email TEXT NOT NULL
+			email TEXT NOT NULL,
+			deleted_at TEXT
 		);
 	`)
 	const auditSqlite = new DatabaseSync(':memory:')
@@ -153,9 +158,12 @@ function createAdminCtx() {
 			AUDIT_DB: createD1FromSqlite(auditSqlite),
 		} as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://heykody.dev',
 			user: {
-				userId: testStableUserIdFromEmail('admin@example.com'),
+				userId: personIdFromStored(
+					testStableUserIdFromEmail('admin@example.com'),
+				),
 				email: 'admin@example.com',
 				displayName: 'Admin',
 				roles: ['admin'],
@@ -251,7 +259,7 @@ test('adminMailboxMaintenance routes final status, retention, and delete with au
 	}
 
 	const notFound = new AdminMailboxMessageNotFoundError({
-		stableUserId,
+		stableUserId: ownerIdFromStored(stableUserId),
 		messageId: 'already-gone',
 	})
 	mockModule.runAdminMailboxMaintenanceDeleteMessage.mockRejectedValueOnce(

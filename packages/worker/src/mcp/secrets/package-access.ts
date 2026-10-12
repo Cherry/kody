@@ -1,25 +1,23 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
+
+import { getOrgById } from '#worker/orgs/repo.ts'
 import {
 	buildSecretPackageApprovalUrl,
 	buildSecretPackageBulkApprovalUrlIfNeeded,
+	secretPageOrgSlugFromCaller,
 } from './package-approval-url.ts'
 import {
 	createPackageSecretAccessDeniedBatchMessage,
 	createPackageSecretAccessDeniedMessage,
 } from './errors.ts'
-import { buildSecretPlaceholder } from './placeholders.ts'
-import { createUnresolvedSecretMessage } from './unresolved-secret.ts'
-import { resolveSecret, type ResolvedSecret } from './service.ts'
+import { findSecret, type FoundSecret } from './service.ts'
 import { type SecretScope } from './types.ts'
 import { type StorageContext } from '#mcp/storage.ts'
 import { resolveCallerSecretAuthority } from './secret-authority.ts'
 import { getCommunityForkByForkedPackageId } from '#worker/community/repo.ts'
 import { getSavedPackageById } from '#worker/package-registry/repo.ts'
-import {
-	findAcceptedPackageShareGrant,
-	isShareGrantedForeignPackage,
-} from '#worker/package-registry/share-grants.ts'
 import {
 	loadPackageManifestBySourceId,
 	type LoadedPackageManifest,
@@ -65,53 +63,6 @@ export function isPackageSecretAccessUnavailableError(error: unknown) {
 }
 
 /**
- * Resolve the package whose runtime is asking for a secret.
- *
- * Caller-owned packages stay on the caller's stamp. Share-granted packages
- * load as the owner so mounts and package-scoped secrets stay on the
- * owner's stamp. Shared code never receives the guest's other user secrets.
- */
-async function resolvePackageRecordForSecretAccess(input: {
-	db: D1Database
-	userId: string
-	packageId: string
-}): Promise<SavedPackageRecord | null> {
-	const own = await getSavedPackageById(input.db, {
-		userId: input.userId,
-		packageId: input.packageId,
-	})
-	if (own) return own
-	const grant = await findAcceptedPackageShareGrant({
-		db: input.db,
-		packageId: input.packageId,
-		granteeUserId: input.userId,
-	})
-	if (!grant) return null
-	return await getSavedPackageById(input.db, {
-		userId: grant.ownerUserId,
-		packageId: grant.packageId,
-	})
-}
-
-async function resolveSecretStampUserId(input: {
-	db: D1Database
-	callerUserId: string
-	packageId: string
-}) {
-	const own = await getSavedPackageById(input.db, {
-		userId: input.callerUserId,
-		packageId: input.packageId,
-	})
-	if (own) return input.callerUserId
-	const grant = await findAcceptedPackageShareGrant({
-		db: input.db,
-		packageId: input.packageId,
-		granteeUserId: input.callerUserId,
-	})
-	return grant?.ownerUserId ?? input.callerUserId
-}
-
-/**
  * Self-authored packages (no `community_forks` row) and adopted community
  * forks may read/use user secrets without an explicit `allowed_packages`
  * grant. Missing packages and unadopted forks do not. Host allowlists are
@@ -119,7 +70,7 @@ async function resolveSecretStampUserId(input: {
  */
 export async function packageHasImplicitUserSecretReadAccess(input: {
 	env: Pick<Env, 'APP_DB'>
-	userId: string
+	userId: OwnerId
 	packageId: string
 }): Promise<boolean> {
 	const savedPackage = await getSavedPackageById(input.env.APP_DB, {
@@ -136,7 +87,7 @@ export async function packageHasImplicitUserSecretReadAccess(input: {
 
 async function savedPackageHasImplicitUserSecretReadAccess(input: {
 	db: D1Database
-	userId: string
+	userId: OwnerId
 	savedPackage: SavedPackageRecord
 }): Promise<boolean> {
 	const communityFork = await getCommunityForkByForkedPackageId(input.db, {
@@ -146,10 +97,33 @@ async function savedPackageHasImplicitUserSecretReadAccess(input: {
 	return !communityFork || Boolean(communityFork.adoptedAt)
 }
 
+export async function resolveSecretPageOrgSlug(input: {
+	db: D1Database
+	userId: OwnerId
+	orgSlug?: string | null
+	caller?: Parameters<typeof secretPageOrgSlugFromCaller>[0]
+}) {
+	try {
+		const org = await getOrgById(input.db, input.userId)
+		const slug = org?.slug?.trim()
+		if (slug) return slug
+	} catch {
+		// Test doubles that do not model orgs keep the provided or username slug.
+	}
+	const provided = input.orgSlug?.trim()
+	if (provided) return provided
+	if (input.caller) {
+		const fromCaller = secretPageOrgSlugFromCaller(input.caller)
+		if (fromCaller) return fromCaller
+	}
+	return input.caller?.user?.username?.trim() || null
+}
+
 export async function assertPackageCanAccessResolvedSecret(input: {
 	env: Pick<Env, 'APP_DB'>
 	baseUrl: string
-	userId: string
+	orgSlug?: string | null
+	userId: OwnerId
 	storageContext:
 		| {
 				sessionId?: string | null
@@ -160,7 +134,7 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 		| null
 		| undefined
 	secretName: string
-	resolved: ResolvedSecret
+	resolved: FoundSecret
 	/** Default `'use'` (read/resolve). `'mutate'` always requires allowed_packages. */
 	intent?: 'use' | 'mutate'
 	/**
@@ -168,34 +142,15 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 	 * `storageContext.packageId` (the run) is used.
 	 */
 	authorityPackageId?: string | null
-	/**
-	 * When false, skip implicit self-authored package access. Share-grant
-	 * owner remaps at fetch/JWT use sites must pass false so a guest cannot
-	 * open the owner's full user keychain — only `allowed_packages` grants.
-	 * Defaults to true.
-	 */
-	allowImplicitUserSecretAccess?: boolean
 }) {
 	const { authorityPackageId: packageId } = resolveCallerSecretAuthority({
 		storageContext: input.storageContext,
 		authorityPackageId: input.authorityPackageId,
 	})
 	if (!packageId || input.resolved.scope !== 'user') return
-	if (
-		await isShareGrantedForeignPackage({
-			db: input.env.APP_DB,
-			callerUserId: input.userId,
-			packageId,
-		})
-	) {
-		throw new PackageSecretAccessDeniedError(
-			`Shared package code cannot use the guest's user secrets, including "${input.secretName}". Pass explicit inputs or use package-scoped mounts on the shared package.`,
-		)
-	}
 	if (input.resolved.allowedPackages.includes(packageId)) return
 
-	const savedPackage = await resolvePackageRecordForSecretAccess({
-		db: input.env.APP_DB,
+	const savedPackage = await getSavedPackageById(input.env.APP_DB, {
 		userId: input.userId,
 		packageId,
 	})
@@ -205,9 +160,7 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 		)
 	}
 	const intent = input.intent ?? 'use'
-	const allowImplicit = input.allowImplicitUserSecretAccess ?? true
 	if (
-		allowImplicit &&
 		intent === 'use' &&
 		(await savedPackageHasImplicitUserSecretReadAccess({
 			db: input.env.APP_DB,
@@ -218,19 +171,27 @@ export async function assertPackageCanAccessResolvedSecret(input: {
 		return
 	}
 
-	const approvalUrl = buildSecretPackageApprovalUrl({
-		baseUrl: input.baseUrl,
-		name: input.secretName,
-		scope: 'user',
-		packageId: savedPackage.id,
-		kodyId: savedPackage.kodyId,
-		storageContext: {
-			sessionId: input.storageContext?.sessionId ?? null,
-			appId: input.storageContext?.appId ?? null,
-			packageId,
-			storageId: input.storageContext?.storageId ?? null,
-		},
+	const orgSlug = await resolveSecretPageOrgSlug({
+		db: input.env.APP_DB,
+		userId: input.userId,
+		orgSlug: input.orgSlug,
 	})
+	const approvalUrl = orgSlug
+		? buildSecretPackageApprovalUrl({
+				baseUrl: input.baseUrl,
+				orgSlug,
+				name: input.secretName,
+				scope: 'user',
+				packageId: savedPackage.id,
+				kodyId: savedPackage.kodyId,
+				storageContext: {
+					sessionId: input.storageContext?.sessionId ?? null,
+					appId: input.storageContext?.appId ?? null,
+					packageId,
+					storageId: input.storageContext?.storageId ?? null,
+				},
+			})
+		: null
 	throw new PackageSecretAccessDeniedError(
 		createPackageSecretAccessDeniedMessage({
 			secretName: input.secretName,
@@ -248,8 +209,9 @@ export async function assertPackageCanAccessResolvedSecret(input: {
  */
 export async function assertCanSetSecrets(input: {
 	env: Pick<Env, 'APP_DB' | 'SECRET_STORE_KEY'>
-	userId: string
+	userId: OwnerId
 	baseUrl: string
+	orgSlug?: string | null
 	secrets: Array<{
 		name: string
 		scope: SecretScope
@@ -273,7 +235,7 @@ export async function assertCanSetSecrets(input: {
 		const name = secret.name.trim()
 		if (!name) throw new Error('Secret name is required.')
 		if (secret.scope === 'user' && authorityPackageId) {
-			const resolved = await resolveSecret({
+			const resolved = await findSecret({
 				env: input.env,
 				userId: input.userId,
 				name,
@@ -288,6 +250,7 @@ export async function assertCanSetSecrets(input: {
 			await assertPackageCanAccessResolvedSecret({
 				env: input.env,
 				baseUrl: input.baseUrl,
+				orgSlug: input.orgSlug,
 				userId: input.userId,
 				storageContext: authorityStorageContext,
 				authorityPackageId,
@@ -302,7 +265,7 @@ export async function assertCanSetSecrets(input: {
 export async function loadPackageSecretMounts(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	packageId: string
 }): Promise<{
 	savedPackage: {
@@ -314,23 +277,17 @@ export async function loadPackageSecretMounts(input: {
 	manifest: LoadedPackageManifest['manifest']
 	mounts: Record<string, SecretMountDefinition>
 }> {
-	const savedPackage = await resolvePackageRecordForSecretAccess({
-		db: input.env.APP_DB,
+	const savedPackage = await getSavedPackageById(input.env.APP_DB, {
 		userId: input.userId,
 		packageId: input.packageId,
 	})
 	if (!savedPackage) {
 		throw new Error(`Saved package "${input.packageId}" was not found.`)
 	}
-	const stampUserId = await resolveSecretStampUserId({
-		db: input.env.APP_DB,
-		callerUserId: input.userId,
-		packageId: input.packageId,
-	})
 	const loaded = await loadPackageManifestBySourceId({
 		env: input.env,
 		baseUrl: input.baseUrl,
-		userId: stampUserId,
+		userId: input.userId,
 		sourceId: savedPackage.sourceId,
 	})
 	return {
@@ -345,99 +302,11 @@ export async function loadPackageSecretMounts(input: {
 	}
 }
 
-export async function resolvePackageMountedSecret(input: {
-	env: Env
-	callerContext: McpCallerContext
-	packageId: string
-	alias: string
-}) {
-	const packageId = input.packageId.trim()
-	if (!packageId) {
-		throw new Error(
-			'Package secret access requires a matching server-side package runtime context.',
-		)
-	}
-	const userId = input.callerContext.user?.userId
-	if (!userId) {
-		throw new Error(
-			'Package secret access requires an authenticated package caller context.',
-		)
-	}
-	const packageInfo = await loadPackageSecretMounts({
-		env: input.env,
-		baseUrl: input.callerContext.baseUrl,
-		userId,
-		packageId,
-	})
-	const mount = packageInfo.mounts[input.alias]
-	if (!mount) {
-		throw new PackageSecretMountError(
-			`Package "${packageInfo.savedPackage.kodyId}" does not declare secret mount "${input.alias}".`,
-		)
-	}
-	const stampUserId = await resolveSecretStampUserId({
-		db: input.env.APP_DB,
-		callerUserId: userId,
-		packageId,
-	})
-	const storageContext = {
-		sessionId: input.callerContext.storageContext?.sessionId ?? null,
-		appId: input.callerContext.storageContext?.appId ?? null,
-		packageId,
-		storageId: input.callerContext.storageContext?.storageId ?? null,
-	}
-	const resolved = await resolveSecret({
-		env: input.env,
-		userId: stampUserId,
-		name: mount.name,
-		scope: mount.scope,
-		storageContext,
-	})
-	if (!resolved.found || typeof resolved.value !== 'string') {
-		throw new PackageSecretMissingError(
-			await createUnresolvedSecretMessage({
-				env: input.env,
-				userId: stampUserId,
-				name: mount.name,
-				scope: mount.scope,
-				storageContext,
-				baseUrl: input.callerContext.baseUrl,
-			}),
-		)
-	}
-	await assertPackageCanAccessResolvedSecret({
-		env: input.env,
-		baseUrl: input.callerContext.baseUrl,
-		userId: stampUserId,
-		storageContext,
-		authorityPackageId: packageId,
-		secretName: mount.name,
-		resolved,
-	})
-	// Opaque ref only — decrypted plaintext stays on the host. Package /
-	// execute JS must never observe `resolved.value`. The placeholder carries
-	// name+scope only (never owner id — that would be caller-forgeable).
-	// Share-grant resolution remaps to the package owner at platform use
-	// sites via the trusted package authority stamp (fetch gateway,
-	// secretHeaders → fetch, secretJwtSign).
-	const scope = resolved.scope ?? mount.scope ?? 'user'
-	return {
-		alias: input.alias,
-		name: mount.name,
-		ref: buildSecretPlaceholder({
-			name: mount.name,
-			scope,
-		}),
-		scope,
-		packageId: packageInfo.savedPackage.id,
-		kodyId: packageInfo.savedPackage.kodyId,
-	}
-}
-
 export async function findMissingPackageApprovals(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	orgSlug?: string | null
+	userId: OwnerId
 	packageId: string
 	mounts: Record<string, SecretMountDefinition>
 	storageContext: McpCallerContext['storageContext']
@@ -465,9 +334,14 @@ export async function findMissingPackageApprovals(input: {
 		packageId: input.storageContext?.packageId ?? null,
 		storageId: input.storageContext?.storageId ?? null,
 	}
+	const orgSlug = await resolveSecretPageOrgSlug({
+		db: input.env.APP_DB,
+		userId: input.userId,
+		orgSlug: input.orgSlug,
+	})
 	const entries = await Promise.all(
 		Object.values(input.mounts).map(async (mount) => {
-			const resolved = await resolveSecret({
+			const resolved = await findSecret({
 				env: input.env,
 				userId: input.userId,
 				name: mount.name,
@@ -483,18 +357,30 @@ export async function findMissingPackageApprovals(input: {
 				secretName: mount.name,
 				packageId: savedPackage.id,
 				kodyId: savedPackage.kodyId,
-				approvalUrl: buildSecretPackageApprovalUrl({
-					baseUrl: input.baseUrl,
-					name: mount.name,
-					scope: resolved.scope ?? mount.scope ?? 'user',
-					packageId: savedPackage.id,
-					kodyId: savedPackage.kodyId,
-					storageContext,
-				}),
+				approvalUrl: orgSlug
+					? buildSecretPackageApprovalUrl({
+							baseUrl: input.baseUrl,
+							orgSlug,
+							name: mount.name,
+							scope: resolved.scope ?? mount.scope ?? 'user',
+							packageId: savedPackage.id,
+							kodyId: savedPackage.kodyId,
+							storageContext,
+						})
+					: '',
 			}
 		}),
 	)
 	return entries.filter((entry) => entry != null)
+}
+
+function orgSlugFromSecretPageUrl(url: string) {
+	try {
+		const match = /^\/@([^/]+)\/-\/secrets(?:\/|$)/.exec(new URL(url).pathname)
+		return match?.[1] ?? null
+	} catch {
+		return null
+	}
 }
 
 export function buildPackageApprovalErrorForMounts(input: {
@@ -505,6 +391,7 @@ export function buildPackageApprovalErrorForMounts(input: {
 		approvalUrl: string
 	}>
 	baseUrl?: string
+	orgSlug?: string | null
 }) {
 	if (input.entries.length === 0) {
 		return null
@@ -531,10 +418,14 @@ export function buildPackageApprovalErrorForMounts(input: {
 					}
 				})()
 			: null)
+	const orgSlug =
+		input.orgSlug?.trim() ||
+		(first ? orgSlugFromSecretPageUrl(first.approvalUrl) : null)
 	const bulkApprovalUrl =
-		packageIds.size === 1 && first && baseUrl
+		packageIds.size === 1 && first && baseUrl && orgSlug
 			? buildSecretPackageBulkApprovalUrlIfNeeded({
 					baseUrl,
+					orgSlug,
 					packageId: first.packageId,
 					kodyId: first.kodyId,
 					names: input.entries.map((entry) => entry.secretName),

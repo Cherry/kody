@@ -1,7 +1,12 @@
+import { authorizeOrgWide } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 
 const workflowRunSchema = z.object({
 	id: z.string(),
@@ -38,6 +43,7 @@ export const workflowListCapability = defineDomainCapability(
 	capabilityDomainNames.jobs,
 	{
 		name: 'workflowRunList',
+		orgPermission: 'job:read',
 		description:
 			'List recent Cloudflare Workflow runs created through kody:runtime workflows.create for durable work that may outlive execute timeouts, including source, status, and completion/error metadata.',
 		keywords: [
@@ -69,12 +75,16 @@ export const workflowListCapability = defineDomainCapability(
 			workflows: z.array(workflowRunSchema),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeOrgWide(
+				{ env: ctx.env, request: requireMcpRequest(ctx.callerContext) },
+				'job:read',
+			)
 			const { listWorkflowRunsForUser } =
 				await import('#worker/package-runtime/package-workflows.ts')
 			const workflows = await listWorkflowRunsForUser({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				limit: args.limit,
 			})
 			return {

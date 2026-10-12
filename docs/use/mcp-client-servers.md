@@ -11,8 +11,8 @@ This is the inverse of [connecting your agent to Kody](./connect-your-agent.md)
 
 ## Add a server
 
-1. Open [`/account/mcp-servers`](https://kody.codes/account/mcp-servers), or ask
-   your agent to use `mcpServerAdd` with a short kebab-case `name` and the
+1. Open [`/@<slug>/-/mcp-servers`](https://kody.codes/@<slug>/-/mcp-servers), or
+   ask your agent to use `mcpServerAdd` with a short kebab-case `name` and the
    server `url` (https required). PostHog's documented endpoint is
    `https://mcp.posthog.com/mcp` — the site root redirects to docs and will not
    finish tool discovery. Kody rewrites that exact origin to `/mcp`.
@@ -22,20 +22,25 @@ This is the inverse of [connecting your agent to Kody](./connect-your-agent.md)
    `Authorization: Bearer <token>`; scheme-prefixed values and full
    `Authorization: …` header pastes are normalized. The credential is stored
    only in your private MCP client hub and is never returned later.
-3. If the server needs OAuth, Kody returns an authorization link. Open it, sign
-   in at the provider, and approve access.
+3. If the server needs OAuth, Kody returns an authorization link to a Kody page,
+   `/@<slug>/-/mcp-servers/:serverId/authorize`. Open it while signed in. It
+   shows the server name, the authorization server it will send you to, and how
+   Kody identifies itself there (a Client ID Metadata Document, Dynamic Client
+   Registration, or a pre-registered OAuth client). Click Continue, sign in at
+   the provider, and approve access. Kody never sends you to the provider before
+   you click Continue.
 4. Confirm with `mcpServerList` (or refresh the account page). The connected
    server shows up in `search` as an **mcp-server** hit (name and server
    instructions). List its tools with `search({ entity: "mcp-server:<name>" })`
    or `search({ domain: "mcp:<name>" })`. If the identity provider approved
-   access but tools never appear, Status on `/account/mcp-servers/:serverId`
+   access but tools never appear, Status on `/@<slug>/-/mcp-servers/:serverId`
    shows the last sanitized settle error (phase, HTTP status, URLs, and an
    attempt id). The same durable error is written when add, reconnect, or
    refresh times out still discovering tools after Kody has also retried the
    older MCP handshake. Reconnect from that page.
 
 If a server is authenticating, failed, or disconnected, [Waiting](./waiting.md)
-lists it and links to `/account/mcp-servers/:id`. `waitingSummary` returns the
+lists it and links to `/@<slug>/-/mcp-servers/:id`. `waitingSummary` returns the
 same items. When a server that was already connected later asks for
 authorization again, Status and `mcpServerList.error` include the sanitized
 token-refresh reason (for example a rejected or already-used refresh token).
@@ -58,8 +63,9 @@ notices the park first.
 ## Lock a server to a package
 
 By default every enabled server is callable from execute and every package. Set
-**Usage** on `/account/mcp-servers/:serverId` to **Specific packages only**, or
-ask an agent to call `mcpServerLock` with the server and a saved `package_id`.
+**Usage** on `/@<slug>/-/mcp-servers/:serverId` to **Specific packages only**,
+or ask an agent to call `mcpServerLock` with the server and a saved
+`package_id`.
 
 After that lock:
 
@@ -87,6 +93,31 @@ authorization server advertises `client_id_metadata_document_supported`.
 Otherwise it falls back to Dynamic Client Registration. Local `http` origins
 skip CIMD and use DCR only.
 
+## Pre-registered OAuth client (GitHub and similar)
+
+Some authorization servers support neither Client ID Metadata Documents nor
+Dynamic Client Registration, so Kody cannot register itself. GitHub's remote MCP
+server is the common case. Status then says to add a pre-registered OAuth
+client.
+
+1. Register an OAuth app with the provider (for GitHub, an OAuth App or GitHub
+   App). Set its callback or redirect URI to
+   `{origin}/account/mcp-servers/oauth/callback`, as shown on the MCP servers
+   page.
+2. On `/@<slug>/-/mcp-servers/:serverId`, under **OAuth client**, enter the
+   client ID and client secret and click Save. You need permission to manage
+   integrations in that organization.
+3. Kody starts a fresh authorization with that client. Open the authorization
+   link, check that the page says **Pre-registered OAuth client**, and click
+   Continue.
+
+The secret is stored sealed and is never shown again. The page shows the client
+as configured with its client ID, and offers Replace and Remove. Agents cannot
+set or read it: no capability takes or returns the secret. A configured client
+is always used, even when the server also supports CIMD or DCR. Saving,
+replacing, or removing one signs the server out and asks for authorization
+again.
+
 Many authorization servers (including FusionAuth "authorized origins" / redirect
 URI settings, and other providers with similar allowlists) reject the authorize
 step unless those values are permitted.
@@ -95,7 +126,7 @@ If authorization fails with a message like `Invalid origin uri https://…` or a
 invalid redirect URI error:
 
 1. In the remote MCP server's identity provider, allow Kody's client origin and
-   register the exact redirect URI shown on `/account/mcp-servers` (also
+   register the exact redirect URI shown on `/@<slug>/-/mcp-servers` (also
    returned as `oauthClientOrigin` / `oauthCallbackUrl` from `mcpServerAdd` and
    `mcpServerList`).
 2. Remove and re-add the server in Kody (or reconnect) so client registration

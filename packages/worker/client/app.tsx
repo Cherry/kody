@@ -41,6 +41,7 @@ import {
 import { SiteFooter } from './site-footer.tsx'
 import { SiteHeader } from './site-header.tsx'
 import { Toaster } from './toaster.tsx'
+import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
 import { isDocsPagePath } from '#universal/docs-nav.ts'
 import { type AppLoaderData } from '#universal/loader-data.ts'
 import { isPackageFilesPathname } from '#universal/package-files.ts'
@@ -51,7 +52,6 @@ import { buildAuthLink } from './auth-links.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import { NotFoundPage } from './not-found-page.tsx'
 import { InternalErrorPage } from './internal-error-page.tsx'
-import { SiteBanner } from './site-banner.tsx'
 import { YouTubeWatchOverlay } from './youtube-watch-overlay.tsx'
 import { scheduleConsumeAccountCreatedFathomSignal } from './fathom-events.ts'
 import { stripHomeOgQueryFromLocation } from './strip-home-og-query.ts'
@@ -60,6 +60,7 @@ import {
 	clearStoredFirstTouchAttribution,
 } from './first-touch-attribution.ts'
 import { persistReferralCookieFromLocation } from './referral-cookie.ts'
+import { createScarfPageTracker } from './scarf-analytics.ts'
 
 registerRouteLoaders(clientRouteLoaders)
 registerClientRoutes(clientRoutes)
@@ -72,9 +73,21 @@ type AppProps = {
 	internalError?: boolean
 }
 
+function isAcquisitionPath(pathname: string) {
+	return acquisitionPageSummaries.some((page) => page.path === pathname)
+}
+
 function isRedesignedMarketingPath(pathname: string) {
 	return (
 		pathname === '/' ||
+		pathname === '/features' ||
+		pathname === '/features/memory' ||
+		pathname === '/features/secrets' ||
+		pathname === '/features/packages' ||
+		pathname === '/features/triggers' ||
+		pathname === '/features/integrations' ||
+		pathname === '/features/apps' ||
+		pathname === '/for/business' ||
 		pathname === '/pricing' ||
 		pathname === '/faq' ||
 		pathname === '/case-studies' ||
@@ -85,7 +98,8 @@ function isRedesignedMarketingPath(pathname: string) {
 		isDocsPagePath(pathname) ||
 		isProfilePathname(pathname) ||
 		isCommunityListingPathname(pathname) ||
-		getSlugFromPathname(pathname) !== null
+		getSlugFromPathname(pathname) !== null ||
+		isAcquisitionPath(pathname)
 	)
 }
 
@@ -179,6 +193,15 @@ export function App(handle: Handle<AppProps>) {
 
 	if (typeof document !== 'undefined') {
 		setSessionRefreshHandler(queueSessionRefresh)
+		const trackScarfPage = createScarfPageTracker()
+		if (
+			!handle.props.notFound &&
+			!handle.props.unauthorized &&
+			!handle.props.internalError
+		) {
+			trackScarfPage()
+		}
+		listenToRouterNavigationEnd(handle, trackScarfPage)
 		// Capture UTMs from any landing URL before homepage CTAs rewrite them.
 		// Referral share links write a last-wins one-week cookie separately.
 		captureFirstTouchAttributionFromLocation()
@@ -318,8 +341,8 @@ export function App(handle: Handle<AppProps>) {
 						>
 							Skip to content
 						</a>
-						<SiteBanner snapshot={handle.props.loaderData?.siteBanner} />
-						{isAuthShellPath ? null : (
+						{isAuthShellPath ||
+						currentPathname === routes.business.href() ? null : (
 							<SiteHeader
 								loggedIn={isLoggedIn}
 								displayName={sessionDisplayName}
@@ -329,6 +352,9 @@ export function App(handle: Handle<AppProps>) {
 								showDemoIndicator={isLoggedIn && showDemoIndicator}
 								loginHref={loginHref}
 								currentPathname={currentPathname}
+								organizations={session?.organizations}
+								inviteCount={session?.inviteCount}
+								lastUsedOrganization={session?.lastUsedOrganization}
 							/>
 						)}
 						<main

@@ -1,8 +1,12 @@
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { rotateWebhookUrlForUser } from '#worker/webhooks/service.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	mintedWebhookHandleSchema,
 	requirePackageRef,
@@ -14,6 +18,7 @@ export const webhookUrlRotateCapability = defineDomainCapability(
 	capabilityDomainNames.webhooks,
 	{
 		name: 'webhookUrlRotate',
+		orgPermission: 'package:write',
 		description:
 			'Rotate the URL secret for a minted package webhook and return a new opaque handle. The previous URL stays active for 24 hours, or until the first accepted delivery arrives on the new URL. Register the new URL with webhookUrlApply — the credential is never returned.',
 		keywords: ['webhook', 'rotate', 'secret', 'handle', 'url'],
@@ -44,7 +49,8 @@ export const webhookUrlRotateCapability = defineDomainCapability(
 			const user = requireMcpUser(ctx.callerContext)
 			const rotated = await rotateWebhookUrlForUser({
 				env: ctx.env,
-				userId: user.userId,
+				request: requireMcpRequest(ctx.callerContext),
+				userId: ownerIdFromCaller(ctx.callerContext),
 				email: user.email,
 				username: user.username,
 				packageId: args.packageId,

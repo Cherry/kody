@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest'
+import { blogPostSlugs } from '#universal/blog-post-slugs.ts'
 import { caseStudies } from '#universal/case-studies.ts'
 import {
 	getBlogPost,
@@ -56,13 +57,13 @@ test('parseBlogPostMarkdown reads frontmatter and rejects invalid input', () => 
 		parseBlogPostMarkdown(
 			'reviewed',
 			markdown(
-				`title: Reviewed\n${baseFrontmatter}\nplaceholder: false\nimage: /images/kody-vs-executor.webp\nimageAlt: Kody and the Executor logo size each other up.`,
+				`title: Reviewed\n${baseFrontmatter}\nplaceholder: false\nimage: /images/openclaw-2-needs-a-home.webp\nimageAlt: Kody stands with his arm around OpenClaw.`,
 			),
 		),
 	).toMatchObject({
 		placeholder: false,
-		image: '/images/kody-vs-executor.webp',
-		imageAlt: 'Kody and the Executor logo size each other up.',
+		image: '/images/openclaw-2-needs-a-home.webp',
+		imageAlt: 'Kody stands with his arm around OpenClaw.',
 		ogImage: null,
 	})
 
@@ -70,10 +71,10 @@ test('parseBlogPostMarkdown reads frontmatter and rejects invalid input', () => 
 		parseBlogPostMarkdown(
 			'custom-og',
 			markdown(
-				`title: Custom OG\n${baseFrontmatter}\nimage: /images/kody-vs-executor.webp\nimageAlt: Headline art.\nogImage: /images/kody-vs-executor.webp`,
+				`title: Custom OG\n${baseFrontmatter}\nimage: /images/openclaw-2-needs-a-home.webp\nimageAlt: Headline art.\nogImage: /images/openclaw-2-needs-a-home.webp`,
 			),
 		).ogImage,
-	).toBe('/images/kody-vs-executor.webp')
+	).toBe('/images/openclaw-2-needs-a-home.webp')
 
 	for (const [frontmatter, error] of [
 		[
@@ -121,6 +122,11 @@ test('blog catalog enumerates posts with required fields and slug lookup', () =>
 		expect(getBlogPost(post.slug)).toEqual(post)
 	}
 
+	// Client-safe scarf allowlist must stay in lockstep with the catalog.
+	expect([...blogPostSlugs].sort()).toEqual(
+		posts.map((post) => post.slug).sort(),
+	)
+
 	expectPost(
 		'early-kody-users',
 		{ title: 'Case studies', date: '2026-09-08', placeholder: false },
@@ -144,21 +150,6 @@ test('blog catalog enumerates posts with required fields and slug lookup', () =>
 		)
 		expect(caseStudiesPost?.body).toContain(`## ${study.name}`)
 	}
-	expectPost(
-		'kody-vs-executor',
-		{
-			title: 'Kody vs Executor?',
-			date: '2026-08-20',
-			placeholder: false,
-			image: '/images/kody-vs-executor.webp',
-			ogImage: '/images/kody-vs-executor-og.jpg',
-		},
-		[
-			'best of both worlds',
-			'Leave one `execute`',
-			'I wrote this on August 20, 2026. Both products will keep moving. The comparison is accurate as of that date.',
-		],
-	)
 	expectPost(
 		'openclaw-2-needs-a-home',
 		{
@@ -193,8 +184,7 @@ test('blog catalog enumerates posts with required fields and slug lookup', () =>
 	expect(getBlogPost('does-not-exist')).toBeNull()
 
 	const placeholderPosts = posts.filter(
-		(post) =>
-			post.slug !== 'kody-vs-executor' && post.slug !== 'early-kody-users',
+		(post) => post.slug !== 'early-kody-users',
 	)
 	expect(placeholderPosts.length).toBeGreaterThan(0)
 	expect(placeholderPosts.every((post) => post.placeholder)).toBe(true)

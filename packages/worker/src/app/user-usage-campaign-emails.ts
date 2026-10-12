@@ -12,6 +12,7 @@ import {
 } from '#universal/referral-program.ts'
 import { resolveTransactionalEmailConfig } from '#app/email/sender-config.ts'
 import { portabilityGuideHref } from '#universal/onboarding-process.ts'
+import { orgBillingPath } from '#universal/org-pages.ts'
 import {
 	evaluateUsageCampaign,
 	nextUsageCampaignRow,
@@ -41,7 +42,9 @@ import {
 	tipsUnsubscribeHeaders,
 	tipsUnsubscribeLabel,
 } from '#worker/usage/tips-unsubscribe.ts'
+import { getOrgById } from '#worker/orgs/repo.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 export type UserUsageCampaignEmailResult =
 	| { status: 'skipped'; reason: 'no_email_config' }
 	| { status: 'no_sends'; evaluatedUsers: number }
@@ -57,6 +60,7 @@ export function buildUsageCampaignEmail(input: {
 	template: UsageCampaignMailTemplate
 	clientLabel: string
 	trialGiftLive: boolean
+	orgSlug?: string
 	shareUrl?: string
 	unsubscribe?: { label: string; url: string }
 }) {
@@ -65,7 +69,10 @@ export function buildUsageCampaignEmail(input: {
 		portabilityGuideHref,
 		input.appBaseUrl,
 	).toString()
-	const billingUrl = new URL('/account/billing', input.appBaseUrl).toString()
+	const billingUrl =
+		input.orgSlug && input.trialGiftLive
+			? new URL(orgBillingPath(input.orgSlug), input.appBaseUrl).toString()
+			: undefined
 	switch (input.template) {
 		case 'verified_no_mcp':
 			return buildConnectAgentEmail({
@@ -84,7 +91,7 @@ export function buildUsageCampaignEmail(input: {
 			return buildSecondAgentEmail({
 				appBaseUrl: input.appBaseUrl,
 				portabilityUrl,
-				trialUrl: input.trialGiftLive ? billingUrl : undefined,
+				trialUrl: billingUrl,
 				unsubscribe: input.unsubscribe,
 			})
 		case 'cooling':
@@ -264,18 +271,18 @@ export async function listUsersForUsageCampaignSweep(
 			`SELECT u.stable_user_id, u.username, u.email, u.email_verified_at,
 			        u.first_mcp_connected_at, u.first_saved_package_at,
 			        u.first_execute_at, u.mcp_client_name, u.last_active_at,
-			        u.second_agent_standard_gift_granted_at,
-			        u.second_agent_standard_gift_expires_at,
-			        u.referral_standard_credit_expires_at,
-			        u.plan, u.stripe_plan, u.entitlement_ladder, u.stripe_credits_eligible,
-			        u.admin_credits_eligible
+			        o.second_agent_standard_gift_granted_at,
+			        o.second_agent_standard_gift_expires_at,
+			        o.referral_standard_credit_expires_at,
+			        o.plan, o.stripe_plan, o.entitlement_ladder, o.stripe_credits_eligible,
+			        o.admin_credits_eligible
 			 FROM users u
+			 INNER JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}
 			 LEFT JOIN user_usage_campaigns c ON c.user_id = u.stable_user_id
 			 WHERE u.email_verified_at IS NOT NULL
 			   AND u.deleting_at IS NULL
 			   AND u.suspended_at IS NULL
-			   AND u.email_outbound_paused_at IS NULL
-			   AND u.account_type = 'person'
+			   AND o.email_outbound_paused_at IS NULL${andLiveDeletedAtSql('u')}
 			 ORDER BY COALESCE(c.last_evaluated_at, '') ASC, u.stable_user_id ASC
 			 LIMIT ?`,
 		)
@@ -410,8 +417,10 @@ async function sendClaimedCampaignEmail(input: {
 		})
 		return false
 	}
+	const org = await getOrgById(input.env.APP_DB, input.user.stable_user_id)
 	const email = buildUsageCampaignEmail({
 		appBaseUrl: input.emailConfig.appBaseUrl,
+		orgSlug: org?.slug,
 		template,
 		clientLabel: campaignClientLabel(input.user.mcp_client_name),
 		trialGiftLive: isPackagedSingleClientTrialCtaLive({

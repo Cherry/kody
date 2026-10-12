@@ -30,6 +30,10 @@ import {
 	mintAdminEmailVerificationUrl,
 } from '#worker/identity/email-verification-admin.ts'
 import {
+	AdminEmailDestinationVerificationError,
+	markAdminEmailDestinationVerified,
+} from '#worker/email/destination-verification-admin.ts'
+import {
 	parsePlanName,
 	planNames,
 	resolvePlanWrite,
@@ -46,7 +50,7 @@ import {
 import { type RoleName, roleNames } from '#universal/permissions.ts'
 import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { isStableUserId, normalizeStableUserId } from '#worker/user-id.ts'
+import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
 
 export { adminUserListItemFieldNames, type AdminUserListItem }
 
@@ -193,6 +197,15 @@ export function createAdminUsersApiHandler(env: Env) {
 						body,
 					})
 				}
+				if (action === 'mark_email_destination_verified') {
+					return handleMarkEmailDestinationVerifiedAction({
+						env,
+						request,
+						url,
+						actor,
+						body,
+					})
+				}
 				if (action === 'create_user') {
 					return handleCreateUserAction({
 						env,
@@ -226,8 +239,8 @@ export function createAdminUserUsageApiHandler(env: Env) {
 			try {
 				await requireUserWithPermission(request, env, 'read:user:any')
 				const url = new URL(request.url)
-				const stableUserId = url.searchParams.get('stableUserId')?.trim() ?? ''
-				if (!isStableUserId(stableUserId)) {
+				const stableUserId = parsePersonId(url.searchParams.get('stableUserId'))
+				if (!stableUserId) {
 					return jsonResponse(
 						{ ok: false, error: 'stableUserId is required.' },
 						400,
@@ -639,6 +652,61 @@ async function handleMintVerifyUrlAction(input: {
 	)
 }
 
+async function handleMarkEmailDestinationVerifiedAction(input: {
+	env: Env
+	request: Request
+	url: URL
+	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
+	body: object
+}) {
+	const targetStableUserId = readStableUserIdField(input.body)
+	if (!targetStableUserId) {
+		return jsonResponse(
+			{ ok: false, error: 'Stable user id is required.' },
+			400,
+		)
+	}
+	const destinationEmail =
+		readNonEmptyTrimmedStringOrNumber(input.body, 'destinationEmail') ?? ''
+	if (!destinationEmail) {
+		return jsonResponse(
+			{ ok: false, error: 'Destination email is required.' },
+			400,
+		)
+	}
+
+	let marked: Awaited<ReturnType<typeof markAdminEmailDestinationVerified>>
+	try {
+		marked = await markAdminEmailDestinationVerified({
+			db: input.env.APP_DB,
+			target: { stableUserId: targetStableUserId },
+			destinationEmail,
+		})
+	} catch (error) {
+		if (error instanceof AdminEmailDestinationVerificationError) {
+			return jsonResponse(
+				{ ok: false, error: error.message },
+				error.code === 'not_found' ? 404 : 400,
+			)
+		}
+		throw error
+	}
+
+	const requestIp = getRequestIp(input.request) ?? undefined
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(input.env),
+		category: 'admin',
+		action: 'mark_email_destination_verified',
+		result: 'success',
+		email: input.actor.email,
+		ip: requestIp,
+		path: input.url.pathname,
+		reason: `target_stable_user_id=${targetStableUserId};destination=${marked.destination.email}`,
+	})
+
+	return buildMutationResponse(input.env, input.request.url, targetStableUserId)
+}
+
 async function handleCreateUserAction(input: {
 	env: Env
 	request: Request
@@ -769,8 +837,5 @@ function readRoleName(body: object, key: string): RoleName | null {
 }
 
 function readStableUserIdField(body: object): string | null {
-	const value = (body as Record<string, unknown>).stableUserId
-	if (typeof value !== 'string') return null
-	const stableUserId = normalizeStableUserId(value)
-	return isStableUserId(stableUserId) ? stableUserId : null
+	return parsePersonId((body as Record<string, unknown>).stableUserId)
 }

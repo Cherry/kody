@@ -96,7 +96,13 @@ type PlatformFeedbackSubmittedEvent = {
 	admin_url: string
 	feedback: {
 		id: string
-		category: 'friction' | 'bug' | 'experience' | 'suggestion' | 'other'
+		category:
+			| 'friction'
+			| 'bug'
+			| 'experience'
+			| 'suggestion'
+			| 'cancellation'
+			| 'other'
 		status: 'open'
 		created_at: string
 		summary_untrusted: string
@@ -377,20 +383,22 @@ or package source.
 ## `fleet.entitlement.crossed` (admins)
 
 The hourly `usage_entitlement_alert` lane sweeps the top ~15 active accounts
-this UTC month and fans `fleet.entitlement.crossed` to packages saved by users
-who hold the admin role at dispatch time. A non-admin package may declare the
-topic, but it never receives the event. Role revocation stops delivery on the
-next crossing.
+this UTC month (scored against each account's effective plan, including
+temporary Pro gift / referral overlays; inbound `email_receives_per_day` uses
+the base plan, matching inbound mail enforcement) and fans
+`fleet.entitlement.crossed` to packages saved by users who hold the admin role
+at dispatch time. A non-admin package may declare the topic, but it never
+receives the event. Role revocation stops delivery on the next crossing.
 
 One event fires per crossing of 80% (`approaching`) or 100% (`reached`) on a
 specific entitlement, when a non-admin account first exceeds 24h of combined
 execute / job / workflow runtime in the UTC month, when a non-admin account
 first reaches a plan-aware unique Dynamic Worker cost threshold this UTC month
 (Free $2, Standard $12, Pro $49; `max` and admin accounts do not page), or when
-a non-admin account first hits 100% of `execute_calls_per_day` on three of the
-last seven UTC days. Staying over the same threshold does not emit again. A
-later drop below that threshold, then a climb back over it, is a new instance. A
-same-hour jump to 100% emits `reached` only and claims the 80% crossing so a
+a non-admin account first hits 100% of `execute_unique_workers_per_day` on three
+of the last seven UTC days. Staying over the same threshold does not emit again.
+A later drop below that threshold, then a climb back over it, is a new instance.
+A same-hour jump to 100% emits `reached` only and claims the 80% crossing so a
 later drop into the 80–99% band stays silent. Execute-cap days are recorded on
 durable hit keys so a later drop below 100% the same day does not erase the
 train.
@@ -417,7 +425,7 @@ type FleetEntitlementCrossedEvent =
 				| 'secrets'
 				| 'concurrent_workflows'
 				| 'storage_bytes'
-				| 'execute_calls_per_day'
+				| 'execute_unique_workers_per_day'
 				| 'outbound_fetches_per_day'
 				| 'job_runs_per_day'
 			label: string
@@ -443,7 +451,7 @@ type FleetEntitlementCrossedEvent =
 			event: 'fleet.entitlement.crossed'
 			kind: 'repeated_entitlement'
 			user: { id: string; username: string }
-			resource: 'execute_calls_per_day'
+			resource: 'execute_unique_workers_per_day'
 			days_at_limit: number
 			window_days: 7
 			threshold_days: 3
@@ -482,8 +490,7 @@ packages, secrets, or Activity.
 Password signup, social-login signup, and admin-created person accounts dispatch
 `user.created` after the account row and default `user` role exist. Self-service
 account deletion at `/account` dispatches `user.deleted` after the per-user
-cascade finishes. Platform accounts (reserved official package owners) do not
-emit `user.created`.
+cascade finishes. Creating an org (`orgCreate`) does not emit `user.created`.
 
 Production fan-out selects only packages whose owners hold the admin role at
 dispatch time. A non-admin package may declare the topic, but it never receives
@@ -577,9 +584,8 @@ Use this topic for notifier packages that email or page an operator when
 signup/verify mail bounces or otherwise fails at the provider. Silent drops that
 stay `accepted` use `user.email_verification.stalled`. `user.created` still
 fires for every new person account, including accounts that later verify
-themselves. Do not treat this topic as permission to mark the account verified
-or mint a link — call `adminUserVerify` from an admin session when ownership is
-proven.
+themselves. To rescue the signup from a handler, see
+[Rescuing a stalled signup from a handler](#rescuing-a-stalled-signup-from-a-handler).
 
 ## `user.email_verification.stalled` (admins)
 
@@ -629,9 +635,21 @@ Use this topic for notifier packages that email or page an operator when a
 signup is stranded without a bounce. SimpleLogin-style aliases can drop `kody@`
 mail without a terminal Cloudflare event. Terminal failures still use
 `user.email_verification.failed`. `/admin/users` and `adminUserList` accept
-`verification=stalled` for the same derived set. Do not treat this topic as
-permission to mark the account verified or mint a link — call `adminUserVerify`
-from an admin session when ownership is proven.
+`verification=stalled` for the same derived set.
+
+### Rescuing a stalled signup from a handler
+
+A subscription handler for this topic (or for `user.email_verification.failed`)
+may call `adminUserVerify`: `mint_verify_url` returns a one-time link to send
+over a path that is not `kody.codes`, and `mark_verified` verifies the account
+outright once ownership is proven. A job or webhook may do the same. Like every
+site-admin capability, it runs only when the person the run acts for holds the
+site `admin` role at call time (read fresh, so a revoked admin is refused at
+once), and each call writes an extra audit row naming the trigger type and id
+(see
+[Site-admin capabilities from triggered runs](../contributing/architecture/authorization.md#site-admin-capabilities-from-triggered-runs)).
+A non-admin automation is refused with
+`MCP user lacks required role "admin" for capability "adminUserVerify"`.
 
 ## `user.email_outbound.paused` (admins)
 

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { buildCapabilityRegistry } from '#mcp/capabilities/build-capability-registry.ts'
 import { deterministicEmbedding } from '#worker/vectorize/embedding.ts'
@@ -76,13 +77,14 @@ function packageRow({
 	return {
 		record: {
 			id,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			name,
 			kodyId,
 			description,
 			tags,
 			searchText,
 			sourceId: `source-${id}`,
+			hasSkills: false,
 			...flags,
 			lockedAt: null,
 			createdAt: '2026-04-20T00:00:00.000Z',
@@ -115,7 +117,7 @@ function searchPackages(
 	return searchUnified({
 		env: {} as Env,
 		query,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		limit,
 		registry: buildCapabilityRegistry([]),
 		optionalRows: {
@@ -508,7 +510,7 @@ test('package candidates hydrate the requested page, not Jev wide recall', async
 			}),
 			pageLimit,
 			offline: true,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			registry: buildCapabilityRegistry([]),
 			optionalRows: {
 				packageRows: rows,

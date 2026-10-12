@@ -1,21 +1,27 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from 'vitest'
 import {
 	allowedHistoricalDuplicateMigrationFilenames,
+	checkMigrationFilenameReferences,
 	checkMigrationFilenames,
 	checkMigrationLedger,
 	checkMigrationsDirectory,
+	checkRepositoryMigrationFilenameReferences,
+	collectMigrationFilenameReferences,
 	expectedMigrationBaselineSha256,
 	formatMigrationPrefix,
+	formatOpenPullRequestMigrationAdvisory,
 	getMaxMigrationPrefix,
 	getNextMigrationPrefix,
 	hashMigrationContent,
+	isPlaceholderMigrationFilename,
 	parseMigrationFilename,
 	readMigrationLedger,
+	suggestFreeMigrationPrefix,
 	resolveTrustedMigrationBase,
 	type MigrationLedger,
 	type MigrationLedgerEntry,
@@ -379,6 +385,9 @@ test(
 					GITHUB_BASE_REF: '',
 					GITHUB_REF_NAME: 'main',
 					MIGRATION_VALIDATION_BASE: '',
+					GH_TOKEN: '',
+					GITHUB_TOKEN: '',
+					GITHUB_REPOSITORY: '',
 				},
 			})
 			expect(result.status).toBe(1)
@@ -387,11 +396,106 @@ test(
 				'Historical ledger entries cannot be edited',
 			)
 			expect(result.stderr).toContain('differs from trusted history')
+			expect(result.stderr).not.toContain('prefix scan')
 		} finally {
 			await rm(tempRoot, { recursive: true, force: true })
 		}
 	},
 )
+
+test('migrations:check flags docs and source references to missing migration filenames', () => {
+	expect(
+		isPlaceholderMigrationFilename('0074-platform-oauth-app-visibility.sql'),
+	).toBe(false)
+	expect(
+		collectMigrationFilenameReferences(
+			'See 0075-platform-oauth-app-visibility.sql and 0075-platform-oauth-app-visibility.sql again.',
+		),
+	).toEqual(['0075-platform-oauth-app-visibility.sql'])
+
+	const knownFilenames = new Set([
+		'0001-squashed-init.sql',
+		'0075-platform-oauth-app-visibility.sql',
+		'0001-jobs-init.sql',
+		'0001-audit-events.sql',
+	])
+	expect(
+		checkMigrationFilenameReferences({
+			knownFilenames,
+			files: [
+				{
+					path: 'docs/contributing/setup/migrations.md',
+					content:
+						'Use the next free prefix (for example, 0076-my-change.sql).',
+				},
+				{
+					path: 'docs/contributing/architecture/integrations.md',
+					content:
+						'Visibility lives in 0075-platform-oauth-app-visibility.sql.',
+				},
+				{
+					path: 'docs/contributing/architecture/data-storage.md',
+					content:
+						'Jobs schema is packages/jobs-worker/migrations/0001-jobs-init.sql.',
+				},
+			],
+		}),
+	).toEqual([])
+	expect(
+		checkMigrationFilenameReferences({
+			knownFilenames,
+			files: [
+				{
+					path: 'docs/contributing/decisions/0002-data-placement.md',
+					content:
+						'RunLog dropped D1 rows in 0112-drop-package-invocations.sql.',
+				},
+				{
+					path: 'docs/contributing/architecture/integrations.md',
+					content:
+						'Visibility lives in 0074-platform-oauth-app-visibility.sql.',
+				},
+				{
+					path: 'packages/worker/src/integrations/platform-apps.node.test.ts',
+					content:
+						"const visibilityMigration = '0074-platform-oauth-app-visibility.sql'",
+				},
+				{
+					path: 'packages/worker/src/app/note.tsx',
+					content:
+						"const visibilityMigration = '0074-platform-oauth-app-visibility.sql'",
+				},
+			],
+		}),
+	).toEqual([
+		'docs/contributing/architecture/integrations.md references migration "0074-platform-oauth-app-visibility.sql", which is not in packages/worker/migrations (or jobs/audit migration directories). After a renumber, update the reference to the current filename.',
+		'packages/worker/src/integrations/platform-apps.node.test.ts references migration "0074-platform-oauth-app-visibility.sql", which is not in packages/worker/migrations (or jobs/audit migration directories). After a renumber, update the reference to the current filename.',
+		'packages/worker/src/app/note.tsx references migration "0074-platform-oauth-app-visibility.sql", which is not in packages/worker/migrations (or jobs/audit migration directories). After a renumber, update the reference to the current filename.',
+	])
+})
+
+test('migrations:check walks tsx files when scanning the repository', async () => {
+	const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'migration-tsx-refs-'))
+	const srcDir = path.join(tempRoot, 'packages', 'worker', 'src')
+	const migrationsDir = path.join(tempRoot, 'packages', 'worker', 'migrations')
+	try {
+		await mkdir(srcDir, { recursive: true })
+		await mkdir(migrationsDir, { recursive: true })
+		await writeFile(path.join(migrationsDir, '0001-squashed-init.sql'), '--\n')
+		await writeFile(
+			path.join(srcDir, 'note.tsx'),
+			"const visibilityMigration = '0074-platform-oauth-app-visibility.sql'\n",
+		)
+		const errors = await checkRepositoryMigrationFilenameReferences(tempRoot)
+		expect(
+			errors.filter((error) => error.includes('packages/worker/src/note.tsx')),
+		).toEqual([
+			'packages/worker/src/note.tsx references migration "0074-platform-oauth-app-visibility.sql", which is not in packages/worker/migrations (or jobs/audit migration directories). After a renumber, update the reference to the current filename.',
+		])
+	} finally {
+		await rm(tempRoot, { recursive: true, force: true })
+	}
+})
 
 test('checkMigrationFilenames rejects malformed names, ordinary duplicates, and non-allowlisted prefix reuse', () => {
 	const cases = [
@@ -438,4 +542,115 @@ test('checkMigrationFilenames rejects malformed names, ordinary duplicates, and 
 		expectErrorsMention(result.errors, mentions)
 		expect(result.errors.join('\n')).not.toMatch(/grandfathered/i)
 	}
+})
+
+test('the next free prefix skips open-PR claims and still allows gaps', () => {
+	expect(
+		suggestFreeMigrationPrefix({
+			nextPrefix: '0098',
+			claimedPrefixes: [],
+		}),
+	).toBe('0098')
+	expect(
+		suggestFreeMigrationPrefix({
+			nextPrefix: '0098',
+			claimedPrefixes: ['0097', '0098', '0100', 'not-a-prefix'],
+		}),
+	).toBe('0099')
+	expect(
+		suggestFreeMigrationPrefix({ nextPrefix: '98', claimedPrefixes: [] }),
+	).toBeNull()
+	expect(
+		suggestFreeMigrationPrefix({
+			nextPrefix: '9999',
+			claimedPrefixes: ['9999'],
+		}),
+	).toBeNull()
+	expect(
+		formatOpenPullRequestMigrationAdvisory({
+			migrationsDir: 'packages/worker/migrations',
+			localFilenames: ['9999-final.sql'],
+			localNextPrefix: '10000',
+			scan: { status: 'ok', claims: [] },
+		}),
+	).toEqual({
+		suggestedPrefix: '10000',
+		lines: [],
+		warning:
+			'No free 4-digit migration prefix remains. The ledger result is unchanged.',
+	})
+
+	const migrationsDir = 'packages/worker/migrations'
+	const localFilenames = ['0001-squashed-init.sql', '0097-already.sql']
+	expect(
+		formatOpenPullRequestMigrationAdvisory({
+			migrationsDir,
+			localFilenames,
+			localNextPrefix: '0098',
+			scan: { status: 'skipped', reason: 'no-token' },
+		}),
+	).toEqual({ suggestedPrefix: '0098', lines: [], warning: null })
+	expect(
+		formatOpenPullRequestMigrationAdvisory({
+			migrationsDir,
+			localFilenames,
+			localNextPrefix: '0098',
+			scan: { status: 'skipped', reason: 'no-repository' },
+		}).warning,
+	).toBeNull()
+
+	const unauthorized = formatOpenPullRequestMigrationAdvisory({
+		migrationsDir,
+		localFilenames,
+		localNextPrefix: '0098',
+		scan: {
+			status: 'skipped',
+			reason: 'unauthorized',
+			detail: 'GitHub API GET /repos/kentcdodds/kody/pulls failed (401)',
+		},
+	})
+	expect(unauthorized.suggestedPrefix).toBe('0098')
+	expect(unauthorized.lines).toEqual([])
+	expect(unauthorized.warning).toContain('failed (401)')
+
+	const claimed = formatOpenPullRequestMigrationAdvisory({
+		migrationsDir,
+		localFilenames,
+		localNextPrefix: '0098',
+		scan: {
+			status: 'ok',
+			claims: [
+				{
+					number: 3220,
+					filenames: [
+						`${migrationsDir}/0098-usage.sql`,
+						`${migrationsDir}/0097-Bad.sql`,
+					],
+				},
+				{
+					number: 3219,
+					filenames: [`${migrationsDir}/0097-contract.sql`],
+				},
+				{
+					number: 3242,
+					filenames: [`${migrationsDir}/0097-oauth.sql`],
+				},
+				{
+					number: 3238,
+					filenames: [`${migrationsDir}/0100-daily.sql`],
+				},
+			],
+		},
+	})
+	expect(claimed.warning).toBeNull()
+	expect(claimed.suggestedPrefix).toBe('0099')
+	expect(claimed.lines).toEqual([
+		`Open pull requests claim migration prefixes in ${migrationsDir}:`,
+		'  0097: #3219, #3242',
+		'  0098: #3220',
+		'  0100: #3238',
+		'This checkout uses prefixes also claimed by open pull requests:',
+		'  0097: #3219, #3242',
+		'Next prefix free of this checkout and those claims: 0099.',
+	])
 })

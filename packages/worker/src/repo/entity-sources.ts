@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	chunkArray,
 	maxD1BoundParameters,
@@ -14,10 +15,12 @@ import {
 	entitySourceRowSchema,
 } from './types.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 function mapEntitySourceRow(row: Record<string, unknown>): EntitySourceRow {
-	return entitySourceRowSchema.parse({
+	const userId = String(row['user_id']) as OwnerId
+	const parsed = entitySourceRowSchema.parse({
 		id: String(row['id']),
-		user_id: String(row['user_id']),
+		user_id: userId,
 		entity_kind: String(row['entity_kind']),
 		entity_id: String(row['entity_id']),
 		repo_id: String(row['repo_id']),
@@ -38,6 +41,7 @@ function mapEntitySourceRow(row: Record<string, unknown>): EntitySourceRow {
 		created_at: String(row['created_at']),
 		updated_at: String(row['updated_at']),
 	})
+	return { ...parsed, user_id: userId }
 }
 
 export async function insertEntitySource(
@@ -75,7 +79,9 @@ export async function getEntitySourceById(
 	id: string,
 ): Promise<EntitySourceRow | null> {
 	const result = await db
-		.prepare(`SELECT * FROM entity_sources WHERE id = ?`)
+		.prepare(
+			`SELECT * FROM entity_sources WHERE id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(id)
 		.first<Record<string, unknown>>()
 	return result ? mapEntitySourceRow(result) : null
@@ -91,7 +97,9 @@ export async function listEntitySourcesByIds(
 	for (const idChunk of chunkArray(uniqueIds, maxD1BoundParameters)) {
 		const placeholders = idChunk.map(() => '?').join(', ')
 		const { results } = await db
-			.prepare(`SELECT * FROM entity_sources WHERE id IN (${placeholders})`)
+			.prepare(
+				`SELECT * FROM entity_sources WHERE id IN (${placeholders})${andLiveDeletedAtSql()}`,
+			)
 			.bind(...idChunk)
 			.all<Record<string, unknown>>()
 		for (const row of results ?? []) {
@@ -105,11 +113,13 @@ export async function getEntitySourceByIdForUser(
 	db: D1Database,
 	input: {
 		id: string
-		userId: string
+		userId: OwnerId
 	},
 ): Promise<EntitySourceRow | null> {
 	const result = await db
-		.prepare(`SELECT * FROM entity_sources WHERE id = ? AND user_id = ?`)
+		.prepare(
+			`SELECT * FROM entity_sources WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(input.id, input.userId)
 		.first<Record<string, unknown>>()
 	return result ? mapEntitySourceRow(result) : null
@@ -118,7 +128,7 @@ export async function getEntitySourceByIdForUser(
 export async function getEntitySourceByEntity(
 	db: D1Database,
 	input: {
-		userId: string
+		userId: OwnerId
 		entityKind: EntityKind
 		entityId: string
 	},
@@ -127,7 +137,7 @@ export async function getEntitySourceByEntity(
 		.prepare(
 			`SELECT * FROM entity_sources
 			WHERE user_id = ? AND entity_kind = ? AND entity_id = ?
-			LIMIT 1`,
+			${andLiveDeletedAtSql()} LIMIT 1`,
 		)
 		.bind(input.userId, input.entityKind, input.entityId)
 		.first<Record<string, unknown>>()
@@ -139,7 +149,9 @@ export async function getEntitySourceByRepoId(
 	repoId: string,
 ): Promise<EntitySourceRow | null> {
 	const result = await db
-		.prepare(`SELECT * FROM entity_sources WHERE repo_id = ? LIMIT 1`)
+		.prepare(
+			`SELECT * FROM entity_sources WHERE repo_id = ? ${andLiveDeletedAtSql()} LIMIT 1`,
+		)
 		.bind(repoId)
 		.first<Record<string, unknown>>()
 	return result ? mapEntitySourceRow(result) : null
@@ -147,12 +159,12 @@ export async function getEntitySourceByRepoId(
 
 export async function listEntitySourcesByUser(
 	db: D1Database,
-	userId: string,
+	userId: OwnerId,
 ): Promise<Array<EntitySourceRow>> {
 	const { results } = await db
 		.prepare(
 			`SELECT * FROM entity_sources
-			WHERE user_id = ?
+			WHERE user_id = ?${andLiveDeletedAtSql()}
 			ORDER BY updated_at DESC, created_at DESC`,
 		)
 		.bind(userId)
@@ -164,7 +176,7 @@ export async function updateEntitySource(
 	db: D1Database,
 	input: {
 		id: string
-		userId: string
+		userId: OwnerId
 		repoId?: string
 		publishedCommit?: string | null
 		indexedCommit?: string | null
@@ -204,7 +216,7 @@ export async function updateEntitySource(
 			.prepare(
 				`UPDATE entity_sources
 			SET ${assignments.join(', ')}
-			WHERE id = ? AND user_id = ?`,
+			WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 			)
 			.bind(...values, input.id, input.userId)
 			.run(),
@@ -242,7 +254,7 @@ export async function markEntitySourcePendingExternalReconcile(
 	db: D1Database,
 	input: {
 		id: string
-		userId: string
+		userId: OwnerId
 		tokenExpiresAt: string
 	},
 ): Promise<boolean> {
@@ -260,7 +272,7 @@ export async function markEntitySourcePendingExternalReconcile(
 						ELSE external_check_until
 					END,
 					updated_at = ?
-				WHERE id = ? AND user_id = ?`,
+				WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 			)
 			.bind(checkUntil, checkUntil, updatedAt, input.id, input.userId)
 			.run(),
@@ -317,7 +329,7 @@ export async function listEntitySourcesForExternalReconcile(
 			`SELECT * FROM entity_sources
 			WHERE entity_kind = 'package'
 				${pendingClause}
-				${afterClause}
+				${afterClause}${andLiveDeletedAtSql()}
 			ORDER BY COALESCE(last_external_check_at, created_at) ASC, id ASC
 			LIMIT ?`,
 		)
@@ -330,7 +342,7 @@ export async function deleteEntitySource(
 	env: { APP_DB: D1Database } & Partial<RepoSessionIndexEnv>,
 	input: {
 		id: string
-		userId: string
+		userId: OwnerId
 	},
 ): Promise<boolean> {
 	if (repoSessionIndexNamespace(env as RepoSessionIndexEnv)) {
@@ -340,7 +352,7 @@ export async function deleteEntitySource(
 		})
 	}
 	const result = await env.APP_DB.prepare(
-		`DELETE FROM entity_sources WHERE id = ? AND user_id = ?`,
+		`DELETE FROM entity_sources WHERE id = ? AND user_id = ?${andLiveDeletedAtSql()}`,
 	)
 		.bind(input.id, input.userId)
 		.run()

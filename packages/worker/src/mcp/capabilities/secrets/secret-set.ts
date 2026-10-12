@@ -1,3 +1,4 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -5,14 +6,16 @@ import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { assertPackageCanAccessResolvedSecret } from '#mcp/secrets/package-access.ts'
+import { secretPageOrgSlugFromCaller } from '#mcp/secrets/package-approval-url.ts'
 import { resolveCallerSecretAuthority } from '#mcp/secrets/secret-authority.ts'
 import {
-	resolveSecret,
+	findSecret,
 	saveSecret,
 	updateSecret,
 	updateUserSecretForPackage,
 } from '#mcp/secrets/service.ts'
 import { secretScopeValues } from '#mcp/secrets/types.ts'
+import { authorizeSecretSet } from './authorize-secret.ts'
 import { secretMetadataSchema, toSecretCapabilityOutput } from './shared.ts'
 
 const secretSetInputSchema = z
@@ -55,16 +58,13 @@ const secretSetInputSchema = z
 		}
 	})
 
-const secretSetCapabilityInputJsonSchema = z.toJSONSchema(
-	secretSetInputSchema,
-) as Record<string, unknown>
-
 export const secretSetCapability = defineDomainCapability(
 	capabilityDomainNames.secrets,
 	{
 		name: 'secretSet',
+		orgPermission: 'secret:write',
 		description:
-			'Create or update a stored secret reference for the signed-in user. Use this for API keys, PATs, webhook HMAC secrets, and other static credentials already available inside trusted execution. Do not persist OAuth access or refresh tokens here — `/connect/oauth` and `createAuthenticatedFetch` / `integrationTokenRefresh` write those on the connection. Optional expires_at is a UTC ISO timestamp or YYYY-MM-DD; null clears expiry. Updates that only change description or expiry may omit value. Use `/account/secrets/new` for user-provided API key, PAT, and credential entry or rotation. Host use is authorized through secret policy approvals. Saved secrets are consumed in outbound `fetch` calls by placeholder, e.g. `{{secret:name}}`, resolved only for approved hosts.',
+			'Create or update a stored secret reference for the signed-in user. Use this for API keys, PATs, webhook HMAC secrets, and other static credentials already available inside trusted execution. Do not persist OAuth access or refresh tokens here — `/connect/oauth` and `createAuthenticatedFetch` / `integrationTokenRefresh` write those on the connection. Optional expires_at is a UTC ISO timestamp or YYYY-MM-DD; null clears expiry. Updates that only change description or expiry may omit value. Use `/connect/secret-set` for user-provided API key, PAT, and credential entry or rotation. Host use is authorized through secret policy approvals. Saved secrets are consumed in outbound `fetch` calls by placeholder, e.g. `{{secret:name}}`, resolved only for approved hosts.',
 		keywords: [
 			'secret',
 			'persist',
@@ -78,15 +78,20 @@ export const secretSetCapability = defineDomainCapability(
 		readOnly: false,
 		idempotent: false,
 		destructive: false,
-		inputSchema: secretSetCapabilityInputJsonSchema,
+		// Zod (not z.toJSONSchema): wrapper parse_input → McpCallerError (KODY-8T).
+		inputSchema: secretSetInputSchema,
 		outputSchema: secretMetadataSchema,
-		async handler(args, ctx: CapabilityContext) {
-			const parsed = secretSetInputSchema.parse(args)
+		async handler(parsed, ctx: CapabilityContext) {
 			const user = requireMcpUser(ctx.callerContext)
 			const { authorityPackageId, storageContext } =
 				resolveCallerSecretAuthority({
 					storageContext: ctx.callerContext.storageContext,
 				})
+			await authorizeSecretSet(ctx, {
+				name: parsed.name,
+				scope: parsed.scope,
+				storageContext,
+			})
 			let saved
 			if (parsed.scope === 'user' && authorityPackageId) {
 				if (parsed.expires_at !== undefined) {
@@ -99,9 +104,9 @@ export const secretSetCapability = defineDomainCapability(
 						'Package runtimes must supply a secret value when updating a user secret.',
 					)
 				}
-				const existing = await resolveSecret({
+				const existing = await findSecret({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					name: parsed.name,
 					scope: 'user',
 					storageContext,
@@ -114,7 +119,8 @@ export const secretSetCapability = defineDomainCapability(
 				await assertPackageCanAccessResolvedSecret({
 					env: ctx.env,
 					baseUrl: ctx.callerContext.baseUrl,
-					userId: user.userId,
+					orgSlug: secretPageOrgSlugFromCaller(ctx.callerContext),
+					userId: ownerIdFromCaller(ctx.callerContext),
 					storageContext,
 					authorityPackageId,
 					secretName: parsed.name,
@@ -123,7 +129,7 @@ export const secretSetCapability = defineDomainCapability(
 				})
 				saved = await updateUserSecretForPackage({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					userEmail: user.email,
 					packageId: authorityPackageId,
 					name: parsed.name,
@@ -133,7 +139,7 @@ export const secretSetCapability = defineDomainCapability(
 			} else if (typeof parsed.value === 'string' && parsed.value.length > 0) {
 				saved = await saveSecret({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					userEmail: user.email,
 					scope: parsed.scope,
 					name: parsed.name,
@@ -145,7 +151,7 @@ export const secretSetCapability = defineDomainCapability(
 			} else {
 				saved = await updateSecret({
 					env: ctx.env,
-					userId: user.userId,
+					userId: ownerIdFromCaller(ctx.callerContext),
 					scope: parsed.scope,
 					name: parsed.name,
 					description: parsed.description,

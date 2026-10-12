@@ -1,3 +1,5 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeRepoSessionPackageRead } from './authorize-repo-session-package.ts'
 import { getErrorCauseChain } from '@kody-internal/shared/error-message.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -11,6 +13,7 @@ export const repoSearchCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoSearch',
+		orgPermission: 'package:read',
 		description:
 			'Search within a repo session using rg-style lexical matching over the live session workspace. This is scoped code/file search, not semantic retrieval. When mode=regex, patterns must be valid JavaScript RegExp syntax (not Python/PCRE inline flags).',
 		keywords: ['repo', 'search', 'ripgrep', 'regex', 'literal', 'files'],
@@ -20,13 +23,20 @@ export const repoSearchCapability = defineDomainCapability(
 		inputSchema: repoSearchInputSchema,
 		outputSchema: repoSearchOutputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageRead({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			const session = repoSessionRpc(ctx.env, args.session_id)
 			let result
 			try {
 				result = await session.search({
 					sessionId: args.session_id,
-					userId: user.userId,
+					userId: ownerId,
 					pattern: args.pattern,
 					mode: args.mode,
 					glob: args.glob,

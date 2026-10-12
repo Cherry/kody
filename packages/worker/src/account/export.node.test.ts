@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { quoteSqlIdentifier } from '@kody-internal/shared/sql-literals.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
@@ -18,13 +19,14 @@ import {
 	insertTestUser,
 	rawMimeReference,
 } from '#worker/test-support/account-export.ts'
+import { accountUserDataPendingDropTables } from '#worker/account/data-targets.ts'
 import { createMemoryKvNamespace } from '#worker/test-support/memory-kv.ts'
 
 const exportFor = (env: Env, dbUserId = 1, mcpUserId = 'user-aaa') =>
 	createAccountExport({
 		env,
 		dbUserId,
-		mcpUserId,
+		mcpUserId: ownerIdFromStored(mcpUserId),
 		generatedAt: '2026-07-05T00:00:00.000Z',
 	})
 
@@ -53,6 +55,13 @@ test('account export D1 coverage includes every live user-owned schema column', 
 		.all() as Array<{ name: string }>
 	const liveUserColumns = new Set<string>()
 	for (const table of tables) {
+		if (
+			(accountUserDataPendingDropTables as ReadonlyArray<string>).includes(
+				table.name,
+			)
+		) {
+			continue
+		}
 		const columns = db
 			.prepare(`PRAGMA table_info(${quoteSqlIdentifier(table.name)})`)
 			.all() as Array<{ name: string }>
@@ -218,12 +227,12 @@ test('account export separates listing-owner deletion cascades from participant 
 	insertTestUser(sqlite, {
 		id: 1,
 		username: 'owner',
-		stableUserId: 'user-owner',
+		stableUserId: ownerIdFromStored('user-owner'),
 	})
 	insertTestUser(sqlite, {
 		id: 2,
 		username: 'participant',
-		stableUserId: 'user-participant',
+		stableUserId: ownerIdFromStored('user-participant'),
 	})
 	sqlite.exec(`
 		INSERT INTO community_listings (
@@ -293,12 +302,12 @@ test('account write lease repair export redacts the foreign party for both persp
 	insertTestUser(sqlite, {
 		id: 1,
 		username: 'target',
-		stableUserId: 'user-target',
+		stableUserId: ownerIdFromStored('user-target'),
 	})
 	insertTestUser(sqlite, {
 		id: 2,
 		username: 'admin',
-		stableUserId: 'user-admin',
+		stableUserId: ownerIdFromStored('user-admin'),
 	})
 	sqlite.exec(`
 		INSERT INTO account_write_lease_repairs (
@@ -330,7 +339,7 @@ test('createAccountExport redacts secrets and credential-equivalent hashes', asy
 	insertTestUser(sqlite, {
 		id: 2,
 		username: 'user-b',
-		stableUserId: 'user-bbb',
+		stableUserId: ownerIdFromStored('user-bbb'),
 	})
 	sqlite.exec(`
 		INSERT INTO secret_buckets (id, user_id, scope, binding_key, created_at, updated_at)
@@ -347,13 +356,6 @@ test('createAccountExport redacts secrets and credential-equivalent hashes', asy
 		VALUES ('value-bucket-a', 'user-aaa', 'user', 'global', '2026-07-05', '2026-07-05');
 		INSERT INTO value_entries (bucket_id, name, description, value, created_at, updated_at)
 		VALUES ('value-bucket-a', 'timezone', 'Preferred timezone', 'America/Denver', '2026-07-05', '2026-07-05');
-
-		INSERT INTO package_invocation_tokens (
-			id, user_id, package_id, name, token_hash, created_at, updated_at
-		) VALUES (
-			'token-a', 'user-aaa', 'pkg-a', 'Migration token', 'token-hash-a',
-			'2026-07-05', '2026-07-05'
-		);
 
 		INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at)
 		VALUES (1, 1, 'reset-token-hash-a', 2000000000, '2026-07-05');
@@ -392,9 +394,6 @@ test('createAccountExport redacts secrets and credential-equivalent hashes', asy
 	expect(d1Table(accountExport, 'secret_entries').rows[0]).not.toHaveProperty(
 		'lookup_hash',
 	)
-	expect(
-		d1Table(accountExport, 'package_invocation_tokens').rows[0],
-	).not.toHaveProperty('token_hash')
 	expect(d1Table(accountExport, 'password_resets').rows[0]).not.toHaveProperty(
 		'token_hash',
 	)
@@ -412,12 +411,13 @@ test('createAccountExport redacts secrets and credential-equivalent hashes', asy
 test('createAccountExport records partial-failure warnings and section pagination works', async () => {
 	const { sqlite, db } = createMigratedDbWithUser()
 	sqlite.exec(`
-		INSERT INTO archived_job_artifacts (
-			id, job_id, user_id, source_id, published_commit, storage_id,
-			retain_until, created_at, updated_at
+		INSERT INTO jobs (
+			id, user_id, name, source_id, storage_id, schedule_json, timezone,
+			caller_context_json, created_at, updated_at, next_run_at
 		) VALUES (
-			'archive-a', 'job-a', 'user-aaa', 'source-a', 'commit-a',
-			'job:archive-a', '2026-08-05', '2026-07-05', '2026-07-05'
+			'package-job:pkg-a:job-a', 'user-aaa', 'Archive stand-in', 'source-a',
+			'job:archive-a', '{}', 'UTC', '{}', '2026-07-05', '2026-07-05',
+			'2026-08-05'
 		);
 		INSERT INTO value_buckets (id, user_id, scope, binding_key, created_at, updated_at)
 		VALUES ('value-bucket-a', 'user-aaa', 'user', 'global', '2026-07-05', '2026-07-05');
@@ -452,7 +452,7 @@ test('createAccountExport records partial-failure warnings and section paginatio
 		readAccountExportSection({
 			env,
 			dbUserId: 1,
-			mcpUserId: 'user-aaa',
+			mcpUserId: ownerIdFromStored('user-aaa'),
 			section: 'd1_table',
 			table: 'value_entries',
 			pageSize: 1,
@@ -510,7 +510,7 @@ test('D1 export reads large tables in bounded keyset pages', async () => {
 		const page = await readAccountExportSection({
 			env,
 			dbUserId: 1,
-			mcpUserId: 'user-aaa',
+			mcpUserId: ownerIdFromStored('user-aaa'),
 			section: 'd1_table',
 			table: 'mcp_memories',
 			pageSize: 500,
@@ -545,7 +545,7 @@ test('D1 export reads large tables in bounded keyset pages', async () => {
 			},
 		} as unknown as Env,
 		dbUserId: 1,
-		mcpUserId: 'user-aaa',
+		mcpUserId: ownerIdFromStored('user-aaa'),
 	})
 	expect(manifest.sections['d1.mcp_memories']?.count).toBe(totalRows)
 	expect(manifest.sections).not.toHaveProperty('d1.email_messages')
@@ -585,7 +585,7 @@ test('account export reads OAuth grant metadata from OAUTH_KV when the provider 
 		'token:user-aaa:grant-1:tok-1': JSON.stringify({
 			id: 'tok-1',
 			grantId: 'grant-1',
-			userId: 'user-aaa',
+			userId: ownerIdFromStored('user-aaa'),
 			wrappedEncryptionKey: 'token-wrapped-key',
 		}),
 	})
@@ -597,7 +597,7 @@ test('account export reads OAuth grant metadata from OAUTH_KV when the provider 
 	const expectedGrants = ['grant-1', 'grant-2'].map((id) => ({
 		id,
 		clientId: 'host-client',
-		userId: 'user-aaa',
+		userId: ownerIdFromStored('user-aaa'),
 		scope: ['mcp'],
 		metadata: { label: id },
 		createdAt: 1_700_000_000,
@@ -619,7 +619,7 @@ test('account export reads OAuth grant metadata from OAUTH_KV when the provider 
 	const manifest = await createAccountExportManifest({
 		env,
 		dbUserId: 1,
-		mcpUserId: 'user-aaa',
+		mcpUserId: ownerIdFromStored('user-aaa'),
 	})
 	expect(manifest.sections.oauth_grants?.count).toBe(2)
 	expect(manifest.warnings).not.toEqual(oauthUnavailableWarning)
@@ -627,7 +627,7 @@ test('account export reads OAuth grant metadata from OAUTH_KV when the provider 
 	const section = await readAccountExportSection({
 		env,
 		dbUserId: 1,
-		mcpUserId: 'user-aaa',
+		mcpUserId: ownerIdFromStored('user-aaa'),
 		section: 'oauth_grants',
 	})
 	expect(section.items).toEqual(expectedGrants)

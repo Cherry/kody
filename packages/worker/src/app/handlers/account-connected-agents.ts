@@ -1,4 +1,10 @@
+import {
+	personalOrgId,
+	type PersonId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { jsonResponse } from '#worker/json-response.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { type Action } from 'remix/router'
 import { enum_, object, parseSafe, string } from 'remix/data-schema'
 import {
@@ -24,13 +30,33 @@ import {
 	type OAuthGrantListHelpers,
 } from '#worker/oauth-grants.ts'
 import { buildMcpServerUrl } from '#worker/onboarding-prompts.ts'
+import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
 import { parseAccountConnectionsPathname } from '#universal/account-connections.ts'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import { type routes } from '#universal/routes.ts'
+import {
+	loadConnectionProfilesForAccount,
+	applyConnectionProfileMutation,
+} from '#worker/connection-profiles/account.ts'
 
 type ConnectedAgentsUser = {
-	mcpUser: { userId: string }
+	mcpUser: { userId: PersonId }
 	emailVerified: boolean
+	request: RequestContext
+}
+
+/**
+ * Inbound agents are OAuth grants held by the signed-in person. The page org
+ * (`request.org.id`) picks which of them to show: the ones approved for that
+ * org. Connection profiles and the second-agent gift stay on the signup org.
+ */
+function connectedAgentsScope(user: ConnectedAgentsUser) {
+	const personId = personalOrgId(user.mcpUser.userId)
+	const orgId = ownerIdFromCaller({
+		request: user.request,
+		user: user.mcpUser,
+	})
+	return { personId, orgId, personalOrg: orgId === personId }
 }
 
 export async function loadAccountConnectedAgentsData(input: {
@@ -38,17 +64,21 @@ export async function loadAccountConnectedAgentsData(input: {
 	requestUrl: string | URL
 	user: ConnectedAgentsUser
 }): Promise<AccountConnectedAgentsLoaderData> {
-	const stableUserId = input.user.mcpUser.userId
+	const { personId, orgId, personalOrg } = connectedAgentsScope(input.user)
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(input.env)
-	const state = await loadInboundMcpConnectionState(helpers, stableUserId, {
+	const state = await loadInboundMcpConnectionState(helpers, personId, {
 		env: input.env,
+		orgId,
 	})
-	const ecosystemCount = countConnectedAgentEcosystems(state.agents)
-	if (!state.listingFailed && hasSecondConnectedMcpClient(state.agents)) {
+	if (
+		personalOrg &&
+		!state.listingFailed &&
+		hasSecondConnectedMcpClient(state.agents)
+	) {
 		await maybeEvaluateSecondAgentStandardGift({
 			db: input.env.APP_DB,
-			stableUserId,
-			ecosystemCount,
+			stableUserId: personId,
+			ecosystemCount: countConnectedAgentEcosystems(state.agents),
 			listingFailed: state.listingFailed,
 		})
 	}
@@ -58,6 +88,18 @@ export async function loadAccountConnectedAgentsData(input: {
 		mcpServerUrl: input.user.emailVerified
 			? buildMcpServerUrl({ env: input.env, requestUrl: input.requestUrl })
 			: '',
+		...(personalOrg
+			? await loadConnectionProfilesForAccount({
+					env: input.env,
+					requestUrl: input.requestUrl,
+					userId: personId,
+					emailVerified: input.user.emailVerified,
+				})
+			: {
+					connectionProfilesEnabled: false,
+					connectionProfiles: [],
+					connectionProfilePackageOptions: [],
+				}),
 	}
 }
 
@@ -70,7 +112,7 @@ export async function loadAccountConnectedAgentsData(input: {
 export function createAccountConnectionsHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request }) {
+		async handler({ request }: { request: Request }) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
@@ -102,11 +144,7 @@ export function createAccountConnectionsHandler(env: Env) {
 				loaderData: { accountConnectedAgents },
 			})
 		},
-	} satisfies Action<
-		| typeof routes.accountConnections
-		| typeof routes.accountConnectionNew
-		| typeof routes.accountConnectionNewAgent
-	>
+	}
 }
 
 export function createAccountConnectedAgentsApiHandler(env: Env) {
@@ -133,6 +171,50 @@ export function createAccountConnectedAgentsApiHandler(env: Env) {
 			}
 
 			const body = await request.json().catch(() => null)
+			if (
+				body &&
+				typeof body === 'object' &&
+				'intent' in body &&
+				(body.intent === 'create' ||
+					body.intent === 'update' ||
+					body.intent === 'delete')
+			) {
+				if (!connectedAgentsScope(user).personalOrg) {
+					return jsonResponse(
+						{
+							ok: false,
+							error:
+								'Connection profiles are only available in your personal organization.',
+						},
+						404,
+					)
+				}
+				const mutation = await applyConnectionProfileMutation({
+					env,
+					requestUrl: request.url,
+					userId: personalOrgId(user.mcpUser.userId),
+					emailVerified: user.emailVerified,
+					body,
+				})
+				if (!mutation.ok) {
+					return jsonResponse(
+						{ ok: false, error: mutation.error },
+						mutation.status,
+					)
+				}
+				const payload = await loadAccountConnectedAgentsData({
+					env,
+					requestUrl: request.url,
+					user,
+				})
+				return jsonResponse({
+					...payload,
+					connectionProfiles: mutation.connectionProfiles,
+					connectionProfilePackageOptions:
+						mutation.connectionProfilePackageOptions,
+				})
+			}
+
 			const parsed = parseSafe(revokeSchema, body)
 			if (!parsed.success || parsed.value.intent !== 'revoke') {
 				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
@@ -146,17 +228,35 @@ export function createAccountConnectedAgentsApiHandler(env: Env) {
 				)
 			}
 
+			const { personId, orgId } = connectedAgentsScope(user)
 			const revoked = await revokeConnectedMcpAgent({
 				helpers,
-				userId: user.mcpUser.userId,
+				userId: personId,
 				clientId: parsed.value.clientId.trim(),
+				orgId,
 				env,
 			})
 			if ('error' in revoked) {
+				// Retry cleanup when grants are already gone but subscription
+				// rows may have survived a prior partial revoke.
+				if (!revoked.clientRemains) {
+					await deleteMcpEventSubscriptionsForOauthClient({
+						db: env.APP_DB,
+						oauthClientId: parsed.value.clientId.trim(),
+						userId: personId,
+					})
+				}
 				return jsonResponse(
 					{ ok: false, error: 'Connected agent not found.' },
 					404,
 				)
+			}
+			if (!revoked.clientRemains) {
+				await deleteMcpEventSubscriptionsForOauthClient({
+					db: env.APP_DB,
+					oauthClientId: parsed.value.clientId.trim(),
+					userId: personId,
+				})
 			}
 
 			void logAuditEvent({

@@ -7,6 +7,11 @@ import {
 	restoreReadableMcpOAuthTokens,
 	withPreservedMcpOAuthRefreshToken,
 } from './oauth-token-recovery.ts'
+import {
+	installMcpPreRegisteredOAuthClient,
+	type McpPreRegisteredOAuthClientInformation,
+} from './preregistered-oauth-client.ts'
+import { type McpOAuthClientMode } from '@kody-internal/shared/mcp-servers.ts'
 
 export const mcpClientIdMetadataPath = '/oauth/client-metadata.json'
 export const mcpServerOAuthCallbackPath = '/account/mcp-servers/oauth/callback'
@@ -25,6 +30,25 @@ export function resolveMcpClientMetadataUrl(callbackUrl: string) {
 	} catch {
 		return undefined
 	}
+}
+
+/**
+ * Which client identity an authorization URL carries. A configured
+ * pre-registered client always wins; otherwise the MCP SDK puts the CIMD URL
+ * in `client_id` when the authorization server supports it, and the
+ * registered id otherwise.
+ */
+export function resolveMcpOAuthClientMode(input: {
+	authorizationUrl: string
+	callbackUrl: string
+	preRegisteredClientId?: string | null
+}): McpOAuthClientMode {
+	const clientId = new URL(input.authorizationUrl).searchParams.get('client_id')
+	if (input.preRegisteredClientId && clientId === input.preRegisteredClientId) {
+		return 'pre-registered'
+	}
+	const metadataUrl = resolveMcpClientMetadataUrl(input.callbackUrl)
+	return metadataUrl && clientId === metadataUrl ? 'cimd' : 'dcr'
 }
 
 export function buildMcpClientIdMetadataDocument(origin: string) {
@@ -93,11 +117,18 @@ type McpOAuthSaveTokens = Parameters<
  * `invalidateCredentials` for `tokens`, `client`, or `all` infers
  * `clientId` when it is missing, deletes leftover `/token` keys and the
  * sidecar so a rejected grant cannot be replayed, and skips a `tokens`
- * wipe when a save completed after the invalidate was requested.
+ * wipe when a save completed after the invalidate was requested. With
+ * `resolvePreRegisteredClient`, a server's admin-configured OAuth client is
+ * presented ahead of CIMD and DCR.
  */
 export function createMcpClientOAuthProvider(
 	storage: DurableObjectStorage,
 	callbackUrl: string,
+	options?: {
+		resolvePreRegisteredClient?: (
+			serverId: string,
+		) => Promise<McpPreRegisteredOAuthClientInformation | null>
+	},
 ) {
 	const provider = new DurableObjectOAuthClientProvider(
 		storage,
@@ -105,6 +136,12 @@ export function createMcpClientOAuthProvider(
 		callbackUrl,
 	) as McpClientOAuthProvider
 	installMcpOAuthTokenPreservation(provider)
+	if (options?.resolvePreRegisteredClient) {
+		installMcpPreRegisteredOAuthClient(
+			provider,
+			options.resolvePreRegisteredClient,
+		)
+	}
 	const clientMetadataUrl = resolveMcpClientMetadataUrl(callbackUrl)
 	if (clientMetadataUrl) {
 		provider.clientMetadataUrl = clientMetadataUrl

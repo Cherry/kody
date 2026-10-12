@@ -14,11 +14,6 @@ import {
 	loadReachableStaticKodyDependencyEdges,
 } from '#worker/package-registry/static-dependency-cycles.ts'
 import {
-	findPersonPackagePlatformReference,
-	formatPersonPackagePlatformDependencyMessage,
-} from '#worker/package-registry/platform-package-policy.ts'
-import { isPlatformAccountStableUserId } from '#worker/package-registry/scope-grants.ts'
-import {
 	assertKodyDescriptionLength,
 	listKodyPackageDependencyNames,
 	type AuthoredPackageJson,
@@ -35,7 +30,6 @@ import {
 } from '#worker/package-runtime/module-graph-workspace.ts'
 import { validatePackageAppAssetsDirectory } from '#worker/package-runtime/package-app-assets-directory.ts'
 import { validatePackageAppGraphSeparation } from '#worker/package-runtime/package-app-client-graph.ts'
-import { remixPackageName } from '#worker/package-runtime/package-app-remix-subpaths.ts'
 import {
 	collectPublishedPackageArtifactTargets,
 	type PublishedPackageArtifactBuildTarget,
@@ -44,6 +38,7 @@ import {
 	collectDeprecatedInvocationUsage,
 	formatRemovedInvocationUsageFailure,
 } from '#worker/package-runtime/deprecated-invocation-usage.ts'
+import { validateBarePackageImportDeclarations } from '#worker/package-runtime/bare-package-import-declarations.ts'
 import {
 	collectStaticKodyPackageImportsFromFiles,
 	isTypeDeclarationFilePath,
@@ -59,6 +54,7 @@ import {
 } from '#worker/worker-bundler-modules.ts'
 import {
 	createRepoCapabilitiesModuleTypecheckHarness,
+	mapRepoCapabilitiesModuleTypecheckHarnessLines,
 	repoBackedModuleEntrypointExportErrorMessage,
 	repoCapabilitiesModuleTypecheckHarnessPath,
 } from './repo-kody-execution.ts'
@@ -78,14 +74,18 @@ import {
 	type PublishPhaseTimings,
 } from './publish-phase-timing.ts'
 import { validateRequiredPackageDocs } from './required-package-docs.ts'
+import { validatePackageSkills } from '#worker/package-registry/package-skills.ts'
+import { buildCredentialPatternCheck } from './credential-pattern-check.ts'
 
 export const repoCheckKinds = [
 	'manifest',
 	'docs',
+	'skills',
 	'dependencies',
 	'bundle',
 	'typecheck',
 	'lint',
+	'credentials',
 	'smoke',
 ] as const
 
@@ -115,6 +115,40 @@ export type RepoCheckRunResult =
 			manifest: AuthoredPackageJson | null
 			sourceFiles: Record<string, string>
 	  }
+
+/**
+ * Join failed check messages for callers that throw instead of returning
+ * `checks_failed` (bootstrap / packageSave sync). Same messages
+ * `publishFromExternalRef` exposes on `failed_checks`.
+ */
+export function formatFailedRepoCheckMessages(
+	results: ReadonlyArray<RepoCheckResult>,
+	fallback = 'Publish checks failed.',
+) {
+	const failed = results
+		.filter((entry) => !entry.ok)
+		.map((entry) => entry.message)
+		.filter((message) => message.trim().length > 0)
+	return failed.length > 0 ? failed.join('\n') : fallback
+}
+
+/**
+ * In-memory workspace over a path→content map for the same `runRepoChecks`
+ * surface used by external publish and community install.
+ */
+export function createSnapshotFilesWorkspace(files: Record<string, string>) {
+	return {
+		async readFile(path: string) {
+			return files[normalizeRepoWorkspacePath(path)] ?? null
+		},
+		async glob() {
+			return Object.keys(files).map((path) => ({
+				path,
+				type: 'file' as const,
+			}))
+		},
+	}
+}
 
 function toRepoCheckRunResult(input: {
 	results: Array<RepoCheckResult>
@@ -293,11 +327,70 @@ type TypecheckDiagnostic = {
 	start?: number
 	length?: number
 	file?: {
+		fileName?: string
 		text?: string
 		getLineAndCharacterOfPosition(pos: number): {
 			line: number
 			character: number
 		}
+	}
+}
+
+/**
+ * `@typescript/vfs` throws formatted compiler-options diagnostics (for
+ * example TS2688 when a package tsconfig lists `types: ["node"]` and the
+ * check filesystem has no `@types/node`) instead of returning them from
+ * `getSemanticDiagnostics`. Invalid `tsconfig.json` parse errors are
+ * thrown the same way from the worker-bundler host. Authors own those
+ * configs — surface them as typecheck failures so publish returns
+ * `checks_failed` instead of a Sentry-visible internal error.
+ *
+ * Match `error TS####:` anywhere: formatDiagnostics uses a bare
+ * `error TS####:` prefix for config diagnostics without a file, and
+ * `path(line,col): error TS####:` when the diagnostic points at the
+ * author tsconfig (or the synthetic extends base we copy it into).
+ */
+function isTypescriptLanguageServiceCallerErrorMessage(message: string) {
+	const trimmed = message.trimStart()
+	return (
+		/\berror TS\d+:/.test(trimmed) ||
+		trimmed.startsWith('tsconfig.json:') ||
+		trimmed.startsWith('.__kody_repo_tsconfig_base__.json:')
+	)
+}
+
+async function createRepoChecksTypescriptLanguageService(input: {
+	fileSystem: RepoChecksFileSystem
+}): Promise<
+	| {
+			ok: true
+			fileSystem: {
+				write(path: string, content: string): void
+			}
+			languageService: {
+				dispose(): void
+				getSemanticDiagnostics(path: string): Array<TypecheckDiagnostic>
+			}
+	  }
+	| { ok: false; message: string }
+> {
+	const { createTypescriptLanguageService } =
+		await loadWorkerBundlerTypescriptTools()
+	try {
+		const created = await createTypescriptLanguageService({
+			fileSystem: input.fileSystem,
+		})
+		return {
+			ok: true,
+			fileSystem: created.fileSystem,
+			languageService: created.languageService,
+		}
+	} catch (error) {
+		const message = getErrorMessage(error).trimEnd()
+		if (isTypescriptLanguageServiceCallerErrorMessage(message)) {
+			return { ok: false, message }
+		}
+		throw error
 	}
 }
 
@@ -323,8 +416,21 @@ function formatTypecheckDiagnostics(
 	diagnostics: Array<TypecheckDiagnostic>,
 ) {
 	return diagnostics.map((diagnostic) => {
+		const diagnosticFileName =
+			typeof diagnostic.file?.fileName === 'string'
+				? diagnostic.file.fileName.replace(/\\/g, '/')
+				: null
+		// Harness diagnostics are attributed to a callable source path; keep
+		// that path but drop harness coordinates so later callables are not
+		// labeled with shifted generated line numbers.
+		const locationBelongsToReportedFile =
+			diagnosticFileName != null &&
+			(diagnosticFileName === fileName ||
+				diagnosticFileName.endsWith(`/${fileName}`))
 		const location =
-			typeof diagnostic.start === 'number' && diagnostic.file
+			locationBelongsToReportedFile &&
+			typeof diagnostic.start === 'number' &&
+			diagnostic.file
 				? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
 				: null
 		const message = flattenDiagnosticMessageText(diagnostic.messageText)
@@ -422,7 +528,7 @@ declare module "kody:runtime" {
     assetBasePath?: string;
     clientModuleUrl?: string | null;
   } | null;
-  /** Always null: there is no author-facing packages.invoke. */
+  /** Always null leftover so old if (packages) guards keep bundling. */
   export const packages: null;
   export function packageStorage(): KodyStorageRuntime;
   export const email: KodyEmailRuntime;
@@ -625,34 +731,11 @@ function formatNpmDependencyCheckMessage(input: {
 	if (input.dependencies.length === 0) {
 		return 'package.json declares no npm dependencies.'
 	}
-	const declared = `package.json declares ${input.dependencies.length} npm ${pluralize(
+	return `package.json declares ${input.dependencies.length} npm ${pluralize(
 		input.dependencies.length,
 		'dependency',
 		'dependencies',
 	)}: ${formatQuotedList(input.dependencies)}.`
-	return input.dependencies.includes(remixPackageName)
-		? `${declared} Kody supplies "${remixPackageName}" to every package bundle at the platform version, so the declared range is not installed.`
-		: declared
-}
-
-const remixInternalPackageScope = '@remix-run/'
-
-/**
- * `@remix-run/*` are the packages behind the `remix` meta-package. Installing
- * one from npm next to the platform's vendored `remix` yields two copies of
- * the same runtime (two component registries, two context-key modules), so
- * publish names the fix instead.
- */
-function findRemixInternalNpmDependencies(dependencies: Array<string>) {
-	return dependencies.filter((dependency) =>
-		dependency.startsWith(remixInternalPackageScope),
-	)
-}
-
-function formatRemixInternalNpmDependencyMessage(dependencies: Array<string>) {
-	return `package.json#dependencies must not list ${formatQuotedList(
-		dependencies,
-	)}: import Remix as "${remixPackageName}/<subpath>" (for example "${remixPackageName}/router", "${remixPackageName}/component"); Kody supplies that package to every bundle, and a second copy from npm would not share its component runtime.`
 }
 
 function getDeclaredStaticKodyPackageDependencies(
@@ -861,21 +944,49 @@ function getPackageTypecheckDiagnostics(input: {
 		fileName: string
 		diagnostics: Array<TypecheckDiagnostic>
 	}> = []
-	for (const target of input.targets) {
-		if (target.kind === 'module') continue
-		writePrelude(target.emittedEventTopics)
+	const callableTargets = input.targets.filter(
+		(target) => target.kind !== 'module',
+	)
+	if (callableTargets.length > 0) {
+		const entryPoints = callableTargets.map((target) => target.path)
+		writePrelude(callableTargets[0]!.emittedEventTopics)
+		const harnessSource = createRepoCapabilitiesModuleTypecheckHarness({
+			entryPoints,
+		})
 		input.fileSystem.write(
 			repoCapabilitiesModuleTypecheckHarnessPath,
-			createRepoCapabilitiesModuleTypecheckHarness({
-				entryPoint: target.path,
-			}),
+			harnessSource,
 		)
-		results.push({
-			fileName: target.path,
-			diagnostics: input.languageService.getSemanticDiagnostics(
-				repoCapabilitiesModuleTypecheckHarnessPath,
-			),
+		const lineToEntryPoint = mapRepoCapabilitiesModuleTypecheckHarnessLines({
+			entryPoints,
 		})
+		const harnessDiagnostics = input.languageService.getSemanticDiagnostics(
+			repoCapabilitiesModuleTypecheckHarnessPath,
+		)
+		const diagnosticsByEntryPoint = new Map<
+			string,
+			Array<TypecheckDiagnostic>
+		>()
+		for (const entryPoint of entryPoints) {
+			diagnosticsByEntryPoint.set(entryPoint, [])
+		}
+		for (const diagnostic of harnessDiagnostics) {
+			const attributedPath = attributeTypecheckDiagnosticToEntryPoint({
+				diagnostic,
+				entryPoints,
+				lineToEntryPoint,
+			})
+			const bucket =
+				diagnosticsByEntryPoint.get(attributedPath) ??
+				diagnosticsByEntryPoint.get(entryPoints[0]!)
+			bucket?.push(diagnostic)
+		}
+		for (const target of callableTargets) {
+			results.push({
+				fileName: target.path,
+				diagnostics: diagnosticsByEntryPoint.get(target.path) ?? [],
+			})
+		}
 	}
 	if (!input.reachableSourceFilePaths) return results
 	writePrelude(input.targets.flatMap((target) => target.emittedEventTopics))
@@ -890,6 +1001,39 @@ function getPackageTypecheckDiagnostics(input: {
 		})
 	}
 	return results
+}
+
+function attributeTypecheckDiagnosticToEntryPoint(input: {
+	diagnostic: TypecheckDiagnostic
+	entryPoints: ReadonlyArray<string>
+	lineToEntryPoint: Map<number, string>
+}) {
+	const diagnosticFileName =
+		typeof input.diagnostic.file?.fileName === 'string'
+			? input.diagnostic.file.fileName.replace(/\\/g, '/')
+			: null
+	if (diagnosticFileName) {
+		const matchingEntry = input.entryPoints.find(
+			(entryPoint) =>
+				diagnosticFileName === entryPoint ||
+				diagnosticFileName.endsWith(`/${entryPoint}`),
+		)
+		if (matchingEntry) return matchingEntry
+	}
+	if (
+		diagnosticFileName?.endsWith(repoCapabilitiesModuleTypecheckHarnessPath) ||
+		diagnosticFileName === repoCapabilitiesModuleTypecheckHarnessPath ||
+		diagnosticFileName == null
+	) {
+		if (typeof input.diagnostic.start === 'number' && input.diagnostic.file) {
+			const { line } = input.diagnostic.file.getLineAndCharacterOfPosition(
+				input.diagnostic.start,
+			)
+			const fromLine = input.lineToEntryPoint.get(line)
+			if (fromLine) return fromLine
+		}
+	}
+	return input.entryPoints[0]!
 }
 
 function formatPackageTypecheckDiagnostics(
@@ -975,13 +1119,13 @@ export async function typecheckPackageEntrypointsFromSourceFiles(input: {
 		repoChecksSyntheticTsconfigPath,
 		buildRepoChecksTsconfig(baseTsconfig),
 	)
-	const { createTypescriptLanguageService } =
-		await loadWorkerBundlerTypescriptTools()
-	const { fileSystem, languageService } = await createTypescriptLanguageService(
-		{
-			fileSystem: typecheckFileSystem,
-		},
-	)
+	const created = await createRepoChecksTypescriptLanguageService({
+		fileSystem: typecheckFileSystem,
+	})
+	if (!created.ok) {
+		return created
+	}
+	const { fileSystem, languageService } = created
 	try {
 		const diagnostics = getPackageTypecheckDiagnostics({
 			targets: input.entryPoints.map((entryPoint) => ({
@@ -1162,13 +1306,13 @@ export async function runPackageTypecheckLanguageService(input: {
 		repoChecksSyntheticTsconfigPath,
 		buildRepoChecksTsconfig(baseTsconfig),
 	)
-	const { createTypescriptLanguageService } =
-		await loadWorkerBundlerTypescriptTools()
-	const { fileSystem, languageService } = await createTypescriptLanguageService(
-		{
-			fileSystem: typecheckFileSystem,
-		},
-	)
+	const created = await createRepoChecksTypescriptLanguageService({
+		fileSystem: typecheckFileSystem,
+	})
+	if (!created.ok) {
+		return created
+	}
+	const { fileSystem, languageService } = created
 	try {
 		const reachableSourceFilePaths =
 			baseTsconfig == null
@@ -1410,6 +1554,8 @@ export async function runRepoChecks(input: {
 		})
 	}
 	const sourceFiles = sourceWalk.collected
+	// Before any gate that returns early, so owners see it while fixing others.
+	results.push(buildCredentialPatternCheck(sourceFiles))
 	// Cheap static gates for the package-app browser surface run before the
 	// heavy phases so a misconfigured manifest fails fast with one message.
 	const packageAppSurfaceChecks = [
@@ -1450,6 +1596,22 @@ export async function runRepoChecks(input: {
 			})
 		}
 	}
+	const skillsCheck = await validatePackageSkills({
+		files: sourceFiles,
+		kodyId: manifest.name,
+	})
+	results.push({
+		kind: 'skills',
+		ok: skillsCheck.ok,
+		message: skillsCheck.message,
+	})
+	if (!skillsCheck.ok) {
+		return toRepoCheckRunResult({
+			results,
+			manifest,
+			sourceFiles,
+		})
+	}
 	const lintCheck = buildLintCheck(sourceFiles)
 	const { createFileSystemSnapshot } = await loadWorkerBundlerSnapshotTools()
 	const snapshot = await createFileSystemSnapshot(
@@ -1462,49 +1624,6 @@ export async function runRepoChecks(input: {
 
 	const packageJson = snapshot.read('package.json')
 	const declaredNpmDependencies = parseDeclaredNpmDependencies(packageJson)
-	if (input.env?.APP_DB && input.userId) {
-		const publisherIsPlatform = await isPlatformAccountStableUserId(
-			input.env.APP_DB,
-			input.userId,
-		)
-		if (!publisherIsPlatform) {
-			const platformReference = await findPersonPackagePlatformReference({
-				db: input.env.APP_DB,
-				manifestDependencies: manifest.kody.dependencies,
-				sourceFiles,
-			})
-			if (platformReference) {
-				results.push({
-					kind: 'dependencies',
-					ok: false,
-					message:
-						formatPersonPackagePlatformDependencyMessage(platformReference),
-				})
-				return toRepoCheckRunResult({
-					results,
-					manifest,
-					sourceFiles,
-				})
-			}
-		}
-	}
-	const remixInternalDependencies = findRemixInternalNpmDependencies(
-		declaredNpmDependencies,
-	)
-	if (remixInternalDependencies.length > 0) {
-		results.push({
-			kind: 'dependencies',
-			ok: false,
-			message: formatRemixInternalNpmDependencyMessage(
-				remixInternalDependencies,
-			),
-		})
-		return toRepoCheckRunResult({
-			results,
-			manifest,
-			sourceFiles,
-		})
-	}
 	const staticKodyDependencyCheck =
 		validateStaticKodyPackageDependencyDeclarations({
 			manifest,
@@ -1540,19 +1659,26 @@ export async function runRepoChecks(input: {
 			}
 		}
 	}
+	const bundleTargets = collectPackageBundleTargets(manifest)
+	const barePackageImportCheck = validateBarePackageImportDeclarations({
+		manifest,
+		sourceFiles,
+		entryPoints: bundleTargets,
+		declaredDependencies: declaredNpmDependencies,
+	})
 	results.push({
 		kind: 'dependencies',
-		ok: staticKodyDependencyOk,
+		ok: staticKodyDependencyOk && barePackageImportCheck.ok,
 		message: [
 			formatNpmDependencyCheckMessage({
 				packageJsonMissing: packageJson == null,
 				dependencies: declaredNpmDependencies,
 			}),
 			staticKodyDependencyMessage,
+			barePackageImportCheck.message,
 		].join(' '),
 	})
 
-	const bundleTargets = collectPackageBundleTargets(manifest)
 	const packageTypecheckTargets = collectPackageTypecheckTargets(manifest)
 	const typecheckTargets =
 		snapshot.read(repoChecksSyntheticTsconfigPath) == null
@@ -1776,7 +1902,6 @@ export async function runRepoChecks(input: {
 		ok: lintCheck.ok,
 		message: lintCheck.message,
 	})
-
 	return toRepoCheckRunResult({
 		results,
 		manifest,

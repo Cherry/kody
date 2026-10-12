@@ -11,6 +11,7 @@ import {
 } from '@kody-internal/shared/outbound-email.ts'
 import { createMockCloudflareArtifactsState } from './mock-artifacts-do.ts'
 import { createMockCloudflareEmailState } from './mock-email-messages-do.ts'
+import { routeRehearsal } from './rehearsal-routes.ts'
 
 type MockCloudflareEnv = {
 	MOCK_API_TOKEN?: string
@@ -98,7 +99,8 @@ const dashboardEndpoints: Array<DashboardEndpoint> = [
 	{
 		method: 'POST',
 		path: `/client/v4/accounts/${fixtureAccount.id}/email/sending/send`,
-		description: 'Send an outbound email',
+		description:
+			'Send an outbound email. The route accepts any account id; the fixture id is only an example.',
 		requiresAuth: true,
 	},
 	{
@@ -1029,6 +1031,9 @@ export default {
 		if (request.method === 'POST' && url.pathname === '/__mocks/clear') {
 			return handleClear(request, env, url)
 		}
+
+		const rehearsalResponse = await routeRehearsal(request, url)
+		if (rehearsalResponse) return rehearsalResponse
 
 		const apiResponse = await routeApi(request, env, url)
 		if (apiResponse) return apiResponse

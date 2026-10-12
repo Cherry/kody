@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import {
 	collectUserSecretRefsFromPackageSource,
@@ -15,6 +16,7 @@ export type PendingPackageSecretApproval = {
 export type PendingPackageSecretApprovalsSummary = {
 	package_id: string
 	kody_id: string
+	slug: string
 	secrets: Array<PendingPackageSecretApproval>
 	bulk_approval_url: string | null
 }
@@ -22,9 +24,10 @@ export type PendingPackageSecretApprovalsSummary = {
 export async function buildPendingPackageSecretApprovalsSummary(input: {
 	env: Env
 	baseUrl: string
-	userId: string
+	userId: OwnerId
 	packageId: string
 	kodyId: string
+	orgSlug?: string | null
 	secretMounts?: Record<
 		string,
 		{
@@ -50,6 +53,7 @@ export async function buildPendingPackageSecretApprovalsSummary(input: {
 	const missing = await findMissingPackageApprovals({
 		env: input.env,
 		baseUrl: input.baseUrl,
+		orgSlug: input.orgSlug,
 		userId: input.userId,
 		packageId: input.packageId,
 		mounts: toSecretMountsFromUserRefs(refs),
@@ -61,16 +65,35 @@ export async function buildPendingPackageSecretApprovalsSummary(input: {
 		secret_name: entry.secretName,
 		approval_url: entry.approvalUrl,
 	}))
+	const firstApprovalUrl = missing[0]?.approvalUrl?.trim() ?? ''
+	const orgSlug = firstApprovalUrl
+		? (() => {
+				try {
+					return (
+						/^\/@([^/]+)\/-\/secrets(?:\/|$)/.exec(
+							new URL(firstApprovalUrl).pathname,
+						)?.[1] ?? null
+					)
+				} catch {
+					return null
+				}
+			})()
+		: null
 	return {
 		package_id: input.packageId,
 		kody_id: input.kodyId,
+		slug: input.kodyId,
 		secrets,
-		bulk_approval_url: buildSecretPackageBulkApprovalUrlIfNeeded({
-			baseUrl: input.baseUrl,
-			packageId: input.packageId,
-			kodyId: input.kodyId,
-			names: secrets.map((secret) => secret.secret_name),
-		}),
+		bulk_approval_url:
+			orgSlug == null
+				? null
+				: buildSecretPackageBulkApprovalUrlIfNeeded({
+						baseUrl: input.baseUrl,
+						orgSlug,
+						packageId: input.packageId,
+						kodyId: input.kodyId,
+						names: secrets.map((secret) => secret.secret_name),
+					}),
 	}
 }
 

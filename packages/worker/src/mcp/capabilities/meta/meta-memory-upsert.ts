@@ -1,3 +1,5 @@
+import { authorize, orgResource } from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -11,7 +13,7 @@ import {
 	memorySummaryField,
 	memoryTagsField,
 } from '#mcp/capabilities/meta/meta-memory-shared.ts'
-import { requireMcpUser } from './require-user.ts'
+import { requireMcpRequest, requireMcpUser } from './require-user.ts'
 
 const inputSchema = z.object({
 	memory_id: z
@@ -68,6 +70,7 @@ export const metaMemoryUpsertCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'metaMemoryUpsert',
+		orgPermission: 'memory:write',
 		description:
 			'Create a new memory when `memory_id` is omitted, or update an existing memory when `memory_id` is provided. Agents must run `metaMemoryVerify` first and decide the next action themselves. Do not blindly write durable memory without verification. If the candidate is really package- or export-scoped guidance, do not upsert — update package docs or JSDoc instead (see search({ entity: "guide:agent_guidance" }), Where agent guidance lives / /docs/agent-guidance).',
 		keywords: [
@@ -93,9 +96,19 @@ export const metaMemoryUpsertCapability = defineDomainCapability(
 					'Agents must run metaMemoryVerify before calling metaMemoryUpsert. Set verified_by_agent=true only after review.',
 				)
 			}
+			const request = requireMcpRequest(ctx.callerContext)
+			if (args.memory_id) {
+				await authorize(
+					{ env: ctx.env, request },
+					'memory:write',
+					orgResource(request, 'memory', args.memory_id),
+				)
+			} else {
+				await authorize({ env: ctx.env, request }, 'memory:create')
+			}
 			const result = await upsertMemory({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				userEmail: user.email,
 				memoryId: args.memory_id ?? null,
 				category: args.category ?? null,

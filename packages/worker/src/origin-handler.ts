@@ -2,28 +2,32 @@ import * as Sentry from '@sentry/cloudflare'
 import { OAuthProvider } from '@cloudflare/workers-oauth-provider'
 import { getWorkerSentryOptions } from './sentry-options.ts'
 import { handleRequest } from '#app/handler.ts'
+import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
-	apiHandler,
 	handleAuthorizeRouteException,
 	handleAuthorizeRequest,
 	handleAuthorizeInfo,
 	handleOAuthCallback,
+	handleOAuthProtectedApiMe,
 	oauthPaths,
 } from './oauth-handlers.ts'
-import { sharedOAuthProviderOptions } from '#worker/oauth-provider-options.ts'
 import {
+	createSharedOAuthProviderOptions,
+	mcpOAuthResourceUri,
+} from '#worker/oauth-provider-options.ts'
+import {
+	createMcpBrowserLandingResponse,
+	createMcpMissingCredentialResponse,
 	handleMcpRequest,
-	handleProtectedResourceMetadata,
-	isProtectedResourceMetadataRequest,
+	hasMcpBearerCredential,
+	isBrowserMcpNavigation,
+	mcpCorsHeadersForRequest,
 	mcpResourcePath,
 	protectedResourceMetadataPath,
+	withMcpCors,
 } from './mcp-auth.ts'
 import { handleMcpClientIdMetadataRequest } from './mcp-client/client-id-metadata.ts'
 import { handleCliClientIdMetadataRequest } from './cli-client-metadata.ts'
-import {
-	handlePackageInvocationApiRequest,
-	isPackageInvocationApiRequest,
-} from './package-invocations/http.ts'
 import {
 	handleWebhookIngressRequest,
 	isWebhookIngressRequest,
@@ -37,6 +41,7 @@ import { normalizeRedirectTo } from '#app/auth-redirect.ts'
 import { checkAuthRateLimit } from '#app/rate-limit.ts'
 import { getRequestIp } from '#worker/audit-log.ts'
 import { discardUnreadRequestBody } from '#worker/request-body.ts'
+import { isRecord } from '@kody-internal/shared/is-record.ts'
 import { handleCapabilityReindexRequest } from './capability-maintenance.ts'
 import { handleExecuteSmokeRequest } from './execute-maintenance.ts'
 import {
@@ -62,11 +67,15 @@ import { handleStatusIncidentEventRequest } from '#worker/status-incidents/maint
 import { verifyPublicFormProtection } from '#app/public-form-protection.ts'
 import { getLegacyHostRedirectResponse } from '#worker/app-legacy-redirect.ts'
 import { isRuntimeWorkerOwnedRequest } from '#worker/runtime-worker-routing.ts'
-import { fetchPreservingWebSocketUpgrade } from '#worker/package-runtime/websocket-upgrade.ts'
+import {
+	forwardRuntimeWorkerFetch,
+	stripPackageAppRuntimeRunId,
+} from '#worker/package-runtime/package-app-diagnostics.ts'
 import {
 	isNamespacedAppEndpointPath,
-	isNamespacedPackageInvocationEndpointPath,
+	retiredConnectorsPathPrefix,
 } from '#worker/user-namespace-routes.ts'
+import { requestSkipsAssetProbe } from './static-asset-probe.ts'
 import { handleOpenIdConfigurationRequest } from '#worker/oidc/discovery.ts'
 import { handleOidcJwksRequest } from '#worker/oidc/jwks.ts'
 import { handleOidcUserinfoRequest } from '#worker/oidc/userinfo.ts'
@@ -148,20 +157,14 @@ const appHandler = withCors({
 		// Remote MCP clients in browser hosts (Gemini custom apps, etc.) call
 		// `/mcp` cross-origin. Reflect any Origin and expose WWW-Authenticate so
 		// the client can read the OAuth challenge; same-origin stays the default
-		// for the rest of the app.
+		// for the rest of the app. Authenticated `/mcp` traffic goes through
+		// OAuthProvider's apiHandler (library CORS); this covers defaultHandler
+		// fallthrough and other same-origin paths that still hit appHandler.
 		if (
 			url.pathname === mcpResourcePath ||
 			url.pathname === `${mcpResourcePath}/`
 		) {
-			return {
-				'Access-Control-Allow-Origin': origin,
-				'Access-Control-Allow-Methods': 'GET, HEAD, POST, DELETE, OPTIONS',
-				'Access-Control-Allow-Headers':
-					'Authorization, Content-Type, Accept, MCP-Protocol-Version, Last-Event-ID, Mcp-Session-Id',
-				'Access-Control-Expose-Headers':
-					'WWW-Authenticate, MCP-Session-Id, Content-Type',
-				Vary: 'Origin',
-			}
+			return mcpCorsHeadersForRequest(request)
 		}
 		if (origin !== requestOrigin) return null
 		return {
@@ -346,45 +349,33 @@ const appHandler = withCors({
 			return new Response(null, { status: 204 })
 		}
 
-		if (isProtectedResourceMetadataRequest(url.pathname)) {
-			return handleProtectedResourceMetadata(request, env)
-		}
-
 		// Trailing-slash variants 404 otherwise; some MCP client docs (and paste
 		// habits) include the slash. Keep the protected resource at `/mcp`.
+		// Authenticated `/mcp` is owned by OAuthProvider's apiHandler; this is
+		// fallthrough only.
 		if (url.pathname === `${mcpResourcePath}/`) {
 			const canonical = new URL(request.url)
 			canonical.pathname = mcpResourcePath
 			return Response.redirect(canonical.toString(), 308)
 		}
 
-		if (url.pathname === mcpResourcePath) {
-			return handleMcpRequest({
-				request,
-				env,
-				ctx,
-				fetchMcp: (mcpRequest, mcpEnv, mcpContext) =>
-					loadLegacyMcpFetch().then((fetchLegacy) =>
-						fetchLegacy(mcpRequest, mcpEnv, mcpContext),
-					),
-			})
+		if (url.pathname === '/api/me') {
+			return handleOAuthProtectedApiMe(request, env)
 		}
 
 		// Non-production inline package apps. Production requests normally redirect
 		// in handlePackageAppOriginRequest; this handler independently returns 500
 		// rather than executing package code if that routing invariant is broken.
 		if (isPackageAppRequestPath(url.pathname)) {
-			return handlePackageAppRequest(request, env)
+			const response = await handlePackageAppRequest(request, env)
+			return stripPackageAppRuntimeRunId(response).response
 		}
 
-		if (
-			isNamespacedAppEndpointPath(url.pathname) ||
-			isNamespacedPackageInvocationEndpointPath(url.pathname)
-		) {
+		if (isNamespacedAppEndpointPath(url.pathname)) {
 			return new Response('Not Found', { status: 404 })
 		}
 
-		if (url.pathname.startsWith('/connectors/')) {
+		if (url.pathname.startsWith(`${retiredConnectorsPathPrefix}/`)) {
 			return new Response('Not Found', { status: 404 })
 		}
 
@@ -392,7 +383,13 @@ const appHandler = withCors({
 		// (including 304 Not Modified for conditional requests) must be passed
 		// through; treating 304 as a miss would fall through to the app router
 		// and return 404 for every browser revalidation request.
-		if (env.ASSETS && (request.method === 'GET' || request.method === 'HEAD')) {
+		// Dynamic prefixes owned by the route table (and pre-router mounts such
+		// as /mcp) never have a public/ twin, so skip the probe on those GETs.
+		if (
+			env.ASSETS &&
+			(request.method === 'GET' || request.method === 'HEAD') &&
+			!requestSkipsAssetProbe(url.pathname)
+		) {
 			const response = await env.ASSETS.fetch(request)
 			if (response.status !== 404) {
 				if (shouldApplyLongLivedAssetCaching(url.pathname, env)) {
@@ -412,19 +409,70 @@ const appHandler = withCors({
 	},
 })
 
-// Endpoints, scopes, TTLs, CIMD, and onError live in
+// Endpoints, scopes, TTLs, CIMD, resource, and onError live in
 // `#worker/oauth-provider-options.ts` so the handler-less `getOAuthApi`
 // fallback (`#worker/oauth-helpers.ts`) is configured identically.
-const oauthProvider = new OAuthProvider({
-	...sharedOAuthProviderOptions,
-	apiHandler,
-	defaultHandler: {
-		fetch(request, env, ctx) {
-			// @ts-expect-error https://github.com/cloudflare/workers-oauth-provider/issues/71
-			return appHandler(request, env, ctx)
-		},
+// v1 pins `resourceMetadata.resource` per origin (preview/local/production),
+// so providers are created lazily and cached by resource URI.
+const oauthProvidersByResource = new Map<string, OAuthProvider>()
+
+const mcpApiHandler = {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		return handleMcpRequest({
+			request,
+			env,
+			ctx,
+			fetchMcp: (mcpRequest, mcpEnv, mcpContext) =>
+				loadLegacyMcpFetch().then((fetchLegacy) =>
+					fetchLegacy(mcpRequest, mcpEnv, mcpContext),
+				),
+		})
 	},
-})
+} satisfies ExportedHandler<Env>
+
+function isLoopbackHostname(hostname: string) {
+	return (
+		hostname === 'localhost' ||
+		hostname.endsWith('.localhost') ||
+		/^127(?:\.\d{1,3}){3}$/.test(hostname) ||
+		hostname === '[::1]' ||
+		hostname === '::1'
+	)
+}
+
+/**
+ * Returns a 308 redirect to the HTTPS equivalent of `url` when the resolved
+ * app origin is plain `http:` on a non-loopback host; otherwise `null`.
+ * Loopback hosts stay on HTTP for local development.
+ */
+function getInsecureOriginRedirect(appOrigin: string, url: URL) {
+	const origin = new URL(appOrigin)
+	if (origin.protocol !== 'http:' || isLoopbackHostname(origin.hostname)) {
+		return null
+	}
+	const secureUrl = new URL(url)
+	secureUrl.protocol = 'https:'
+	// An explicit HTTP port does not imply a TLS listener on the same port;
+	// target the default HTTPS port (443) instead.
+	secureUrl.port = ''
+	return Response.redirect(secureUrl.toString(), 308)
+}
+
+function getOriginOAuthProvider(resource: string) {
+	const existing = oauthProvidersByResource.get(resource)
+	if (existing) return existing
+	const provider = new OAuthProvider({
+		...createSharedOAuthProviderOptions(resource),
+		apiHandler: mcpApiHandler,
+		defaultHandler: {
+			fetch(request, env, ctx) {
+				return appHandler(request, env, ctx)
+			},
+		},
+	})
+	oauthProvidersByResource.set(resource, provider)
+	return provider
+}
 
 /**
  * Aligns with @cloudflare/workers-oauth-provider's addCorsHeaders for well-known routes.
@@ -452,6 +500,12 @@ function addOAuthDiscoveryCorsHeaders(
 	})
 }
 
+function isMcpResourceOwnedPath(pathname: string) {
+	return (
+		pathname === mcpResourcePath || pathname.startsWith(`${mcpResourcePath}/`)
+	)
+}
+
 function isOAuthProviderOwnedPath(pathname: string) {
 	return (
 		pathname === oauthPaths.token ||
@@ -459,7 +513,7 @@ function isOAuthProviderOwnedPath(pathname: string) {
 		pathname === oauthPaths.discovery ||
 		pathname === protectedResourceMetadataPath ||
 		pathname.startsWith(`${protectedResourceMetadataPath}/`) ||
-		pathname.startsWith(oauthPaths.apiPrefix)
+		isMcpResourceOwnedPath(pathname)
 	)
 }
 
@@ -471,6 +525,224 @@ function isMalformedOAuthClientException(error: unknown, pathname: string) {
 		pathname === oauthPaths.token &&
 		message.includes("Cannot read properties of undefined (reading 'some')")
 	)
+}
+
+/**
+ * Catchable throws on `/mcp` must stay on the connection as JSON-RPC so MCP
+ * clients treat the call as a failed request instead of an OAuth token error
+ * (or a Cloudflare 1101 if the error is rethrown). Real OAuth routes keep the
+ * RFC 6749 error object. This does not cover isolate kills.
+ *
+ * Request IDs are peeked from a clone before `oauthProvider.fetch` so the error
+ * can correlate with the pending call. Peeking is capped so large execute
+ * bodies are not doubled in memory (memory-limit faults are out of scope).
+ * When a clone was created, the catch path discards the original body so an
+ * unread tee cannot terminate the isolate.
+ */
+const mcpJsonRpcIdPeekLimitBytes = 64_000
+const mcpJsonRpcIdPeekDeadlineMs = 250
+
+type McpJsonRpcPeek =
+	| { kind: 'unknown' }
+	| { kind: 'notifications' }
+	| { kind: 'requests'; ids: Array<string | number>; batch: boolean }
+
+type McpJsonRpcPeekResult = {
+	peek: McpJsonRpcPeek
+	/** True when `request.clone()` ran (a tee exists that may need draining). */
+	cloned: boolean
+}
+
+function isJsonRpcId(value: unknown): value is string | number {
+	return typeof value === 'string' || typeof value === 'number'
+}
+
+function isValidJsonRpcMessage(message: Record<string, unknown>) {
+	if (message['jsonrpc'] !== '2.0') return false
+	if (typeof message['method'] !== 'string') return false
+	if ('id' in message && !isJsonRpcId(message['id'])) return false
+	return true
+}
+
+/**
+ * Read at most `maxBytes` from a request body within `deadlineMs`. Returns
+ * `null` when the body exceeds the cap, the deadline expires, or the stream
+ * cannot be read — callers then skip JSON-RPC id peeking.
+ */
+async function readRequestTextUpTo(
+	request: {
+		body: ReadableStream<Uint8Array> | null
+		text(): Promise<string>
+	},
+	maxBytes: number,
+	deadlineMs: number,
+): Promise<string | null> {
+	const body = request.body
+	if (!body) {
+		const text = await Promise.race([
+			request.text(),
+			new Promise<null>((resolve) => {
+				setTimeout(() => resolve(null), deadlineMs)
+			}),
+		])
+		if (text === null) return null
+		return text.length > maxBytes ? null : text
+	}
+	const reader = body.getReader()
+	const chunks: Array<Uint8Array> = []
+	let total = 0
+	let timedOut = false
+	const timeoutId = setTimeout(() => {
+		timedOut = true
+		void reader.cancel()
+	}, deadlineMs)
+	try {
+		for (;;) {
+			const { done, value } = await reader.read()
+			if (timedOut) return null
+			if (done) break
+			if (!value) continue
+			total += value.byteLength
+			if (total > maxBytes) {
+				// Do not await cancel: tee-branch cancellation can stay pending
+				// until the sibling branch is consumed, which would stall
+				// oauthProvider.fetch on the original request.
+				void reader.cancel()
+				return null
+			}
+			chunks.push(value)
+		}
+	} catch {
+		if (timedOut) return null
+		throw new Error('MCP JSON-RPC id peek body read failed')
+	} finally {
+		clearTimeout(timeoutId)
+		try {
+			reader.releaseLock()
+		} catch {
+			// Already canceled/released after deadline or over-limit cancel.
+		}
+	}
+	const merged = new Uint8Array(total)
+	let offset = 0
+	for (const chunk of chunks) {
+		merged.set(chunk, offset)
+		offset += chunk.byteLength
+	}
+	return new TextDecoder().decode(merged)
+}
+
+function classifyParsedMcpJsonRpcBody(parsed: unknown): McpJsonRpcPeek {
+	if (Array.isArray(parsed)) {
+		if (parsed.length === 0) return { kind: 'unknown' }
+		const messages = parsed.filter(isRecord)
+		if (messages.length !== parsed.length) return { kind: 'unknown' }
+		if (!messages.every(isValidJsonRpcMessage)) return { kind: 'unknown' }
+		const ids = messages
+			.filter((message) => 'id' in message)
+			.map((message) => message['id'] as string | number)
+		if (ids.length === 0) return { kind: 'notifications' }
+		return { kind: 'requests', ids, batch: true }
+	}
+	if (!isRecord(parsed) || !isValidJsonRpcMessage(parsed)) {
+		return { kind: 'unknown' }
+	}
+	if (!('id' in parsed)) return { kind: 'notifications' }
+	return {
+		kind: 'requests',
+		ids: [parsed['id'] as string | number],
+		batch: false,
+	}
+}
+
+async function peekMcpJsonRpcRequestIds(
+	request: Request,
+): Promise<McpJsonRpcPeekResult> {
+	const contentLengthHeader = request.headers.get('Content-Length')
+	if (contentLengthHeader !== null) {
+		const contentLength = Number(contentLengthHeader)
+		if (
+			!Number.isFinite(contentLength) ||
+			contentLength <= 0 ||
+			contentLength > mcpJsonRpcIdPeekLimitBytes
+		) {
+			return { peek: { kind: 'unknown' }, cloned: false }
+		}
+	}
+	try {
+		const text = await readRequestTextUpTo(
+			request.clone(),
+			mcpJsonRpcIdPeekLimitBytes,
+			mcpJsonRpcIdPeekDeadlineMs,
+		)
+		if (text === null || text === '') {
+			return { peek: { kind: 'unknown' }, cloned: true }
+		}
+		return {
+			peek: classifyParsedMcpJsonRpcBody(JSON.parse(text)),
+			cloned: true,
+		}
+	} catch {
+		return { peek: { kind: 'unknown' }, cloned: true }
+	}
+}
+
+function createMcpJsonRpcInternalError(id: string | number | null) {
+	return {
+		jsonrpc: '2.0' as const,
+		id,
+		error: {
+			code: -32603,
+			message: 'Internal error',
+		},
+	}
+}
+
+function createMcpProviderExceptionResponse(
+	request: Request,
+	peek: McpJsonRpcPeek,
+) {
+	const headers = {
+		'Cache-Control': 'no-store',
+		'Content-Type': 'application/json',
+	}
+	switch (peek.kind) {
+		case 'unknown':
+			return withMcpCors(
+				request,
+				new Response(JSON.stringify(createMcpJsonRpcInternalError(null)), {
+					status: 500,
+					headers,
+				}),
+			)
+		case 'notifications':
+			// Notifications have a method but no id — JSON-RPC forbids a response body.
+			return withMcpCors(
+				request,
+				new Response(null, {
+					status: 500,
+					headers: { 'Cache-Control': 'no-store' },
+				}),
+			)
+		case 'requests': {
+			const body = peek.batch
+				? peek.ids.map((id) => createMcpJsonRpcInternalError(id))
+				: createMcpJsonRpcInternalError(peek.ids[0]!)
+			return withMcpCors(
+				request,
+				new Response(JSON.stringify(body), {
+					status: 500,
+					headers,
+				}),
+			)
+		}
+		default: {
+			const exhaustive: never = peek
+			throw new Error(
+				`unexpected MCP JSON-RPC peek kind: ${JSON.stringify(exhaustive)}`,
+			)
+		}
+	}
 }
 
 function createOAuthProviderExceptionResponse(
@@ -503,6 +775,18 @@ function createOAuthProviderExceptionResponse(
 		}),
 		{ status: pathname === oauthPaths.register ? 400 : 500, headers },
 	)
+}
+
+function createProviderOwnedPathExceptionResponse(
+	error: unknown,
+	pathname: string,
+	request: Request,
+	mcpPeek: McpJsonRpcPeek,
+) {
+	if (isMcpResourceOwnedPath(pathname)) {
+		return createMcpProviderExceptionResponse(request, mcpPeek)
+	}
+	return createOAuthProviderExceptionResponse(error, pathname)
 }
 
 const workerHandler = {
@@ -554,7 +838,7 @@ async function fetchWithDynamicWorkerBudget(
 	if (env.RUNTIME_WORKER && isRuntimeWorkerOwnedRequest(request, env)) {
 		// Sentry instruments Fetcher.fetch and rebuilds Requests, dropping the
 		// forbidden Upgrade header. Preserve WebSocket upgrades explicitly.
-		return fetchPreservingWebSocketUpgrade(env.RUNTIME_WORKER, request)
+		return forwardRuntimeWorkerFetch(env.RUNTIME_WORKER, request)
 	}
 
 	// Host isolation for hosted package apps before first-party surfaces,
@@ -594,22 +878,14 @@ async function handleOriginAppFetch(
 	)
 	if (packageAppOriginResponse) return packageAppOriginResponse
 
-	if (isPackageInvocationApiRequest(url.pathname)) {
-		return handlePackageInvocationApiRequest(request, env, ctx)
-	}
 	if (isWebhookIngressRequest(url.pathname)) {
 		return handleWebhookIngressRequest(request, env, ctx)
 	}
 
-	if (isNamespacedPackageInvocationEndpointPath(url.pathname)) {
-		return new Response('Not Found', { status: 404 })
-	}
-
 	// Domain-migration redirect for safe browser navigation from legacy app
-	// hosts. Runs after the API-shaped surfaces (package apps, invocation
-	// API, webhooks) so those keep serving on every attached
-	// host, and skips MCP/OAuth/auth/health paths itself. No-op unless
-	// APP_LEGACY_REDIRECT is enabled.
+	// hosts. Runs after the API-shaped surfaces (package apps, webhooks) so
+	// those keep serving on every attached host, and skips MCP/OAuth/auth/
+	// health paths itself. No-op unless APP_LEGACY_REDIRECT is enabled.
 	const legacyHostRedirect = getLegacyHostRedirectResponse({ request, env })
 	if (legacyHostRedirect) return legacyHostRedirect
 
@@ -664,44 +940,55 @@ async function handleOriginAppFetch(
 		return handleOidcLogoutRequest(request, env)
 	}
 
-	// Serve both RFC 9728 PRM paths before OAuthProvider: the root document
-	// and the path-aware `.../mcp` document. 0.10+ would otherwise publish
-	// origin-only resource metadata on the path-aware URL and disagree with
-	// `<origin>/mcp` token audiences.
-	if (isProtectedResourceMetadataRequest(url.pathname)) {
+	// RFC 9728 PRM for `/mcp` is served by OAuthProvider once
+	// `resourceMetadata.resource` is set (path-aware URL only:
+	// `/.well-known/oauth-protected-resource/mcp`). Do not serve a second
+	// custom document here — it would diverge from the library's audience.
+
+	// OAuthProvider v1 rejects a non-loopback `http:` resource URI, and the
+	// resource is derived from the request origin. Upgrade plain-HTTP requests
+	// (crawlers hitting `http://kody.codes/...`) to HTTPS instead of throwing.
+	const appOrigin = getAppBaseUrl({ env, requestUrl: request.url })
+	const insecureRedirect = getInsecureOriginRedirect(appOrigin, url)
+	if (insecureRedirect) return insecureRedirect
+
+	const resource = mcpOAuthResourceUri(appOrigin)
+	const oauthProvider = getOriginOAuthProvider(resource)
+
+	// Gemini (and other browser MCP hosts) treat an empty-bodied 401 as a hard
+	// failure. The library's missing-bearer challenge has no JSON body, so
+	// short-circuit that case with Kody's JSON challenge before OAuthProvider.
+	// Browser HTML navigations to `/mcp` get a landing page instead of 401.
+	if (url.pathname === `${mcpResourcePath}/`) {
+		const canonical = new URL(request.url)
+		canonical.pathname = mcpResourcePath
+		return Response.redirect(canonical.toString(), 308)
+	}
+	if (url.pathname === mcpResourcePath) {
 		if (request.method === 'OPTIONS') {
-			return addOAuthDiscoveryCorsHeaders(
+			return withMcpCors(
+				request,
 				new Response(null, {
 					status: 204,
 					headers: { 'Content-Length': '0' },
 				}),
-				request,
 			)
 		}
-		if (request.method === 'GET' || request.method === 'HEAD') {
-			const metadataRequest =
-				request.method === 'GET'
-					? request
-					: new Request(request.url, {
-							method: 'GET',
-							headers: request.headers,
-						})
-			const metadataResponse = handleProtectedResourceMetadata(
-				metadataRequest,
-				env,
+		if (isBrowserMcpNavigation(request)) {
+			return createMcpBrowserLandingResponse(request)
+		}
+		if (!hasMcpBearerCredential(request)) {
+			return withMcpCors(
+				request,
+				createMcpMissingCredentialResponse(
+					getAppBaseUrl({ env, requestUrl: request.url }),
+				),
 			)
-			if (request.method === 'HEAD') {
-				return addOAuthDiscoveryCorsHeaders(
-					new Response(null, {
-						status: metadataResponse.status,
-						headers: metadataResponse.headers,
-					}),
-					request,
-				)
-			}
-			return addOAuthDiscoveryCorsHeaders(metadataResponse, request)
 		}
 	}
+
+	let mcpPeek: McpJsonRpcPeek = { kind: 'unknown' }
+	let mcpPeekCloned = false
 	try {
 		if (url.pathname === oauthPaths.token && request.method === 'POST') {
 			const { response, grantType } = await handleMcpOAuthTokenRequest({
@@ -714,11 +1001,28 @@ async function handleOriginAppFetch(
 				grantType,
 			})
 		}
+		if (isMcpResourceOwnedPath(url.pathname) && request.method === 'POST') {
+			const peeked = await peekMcpJsonRpcRequestIds(request)
+			mcpPeek = peeked.peek
+			mcpPeekCloned = peeked.cloned
+		}
 		return await oauthProvider.fetch(request, env, ctx)
 	} catch (error) {
 		if (!isOAuthProviderOwnedPath(url.pathname)) throw error
 		Sentry.captureException(error)
-		return createOAuthProviderExceptionResponse(error, url.pathname)
+		if (mcpPeekCloned) {
+			// Only discard when a clone tee exists. Skipping avoids buffering a
+			// large body that was never cloned (Content-Length over the peek
+			// limit). When cloned, drain the original so workerd does not kill
+			// the isolate for an unread tee branch.
+			await discardUnreadRequestBody(request)
+		}
+		return createProviderOwnedPathExceptionResponse(
+			error,
+			url.pathname,
+			request,
+			mcpPeek,
+		)
 	}
 }
 

@@ -5,7 +5,10 @@ import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
 import { resolveDisplayName } from '#worker/identity/username.ts'
 import { resolveSavedPackageWithFreshnessCache } from '#worker/package-invocations/invoke-contract-cache.ts'
@@ -14,13 +17,10 @@ import {
 	packageIdLookupDescription,
 	packageNameLookupDescription,
 } from '#worker/package-registry/package-name.ts'
-import {
-	packageScopeInputDescription,
-	resolvePackageOwnerContext,
-} from '#worker/package-registry/package-owner.ts'
+import { resolvePackageOwnerContext } from '#worker/package-registry/package-owner.ts'
 import {
 	getSavedPackageById,
-	getSavedPackageByKodyId,
+	resolveSavedPackageRef,
 } from '#worker/package-registry/repo.ts'
 import {
 	buildPlainRepoPromotionErrorMessage,
@@ -289,9 +289,10 @@ async function resolveOwnedSavedPackage(input: {
 					packageId: input.packageId,
 				})
 			}
-			return await getSavedPackageByKodyId(input.db, {
+			return await resolveSavedPackageRef(input.db, {
 				userId: input.userId,
-				kodyId: requestedKodyId ?? '',
+				ref: requestedKodyId ?? '',
+				match: 'slug',
 			})
 		},
 	})
@@ -301,6 +302,7 @@ export const packageAppFetchCapability = defineDomainCapability(
 	capabilityDomainNames.packages,
 	{
 		name: packageAppFetchCapabilityName,
+		orgPermission: 'app:execute',
 		description:
 			'Invoke a published package app fetch handler with a synthetic HTTP request for post-publish smoke tests. Runs on the app_fetch surface with normal package context, packageStorage(), and secret mounts; handler side effects are real. Does not replace hosted-URL checks for browser UI, cookies, OAuth redirects, or websocket realtime flows.',
 		keywords: [
@@ -329,11 +331,6 @@ export const packageAppFetchCapability = defineDomainCapability(
 					.min(1)
 					.optional()
 					.describe(packageNameLookupDescription),
-				package_scope: z
-					.string()
-					.min(1)
-					.optional()
-					.describe(packageScopeInputDescription),
 				path: z
 					.string()
 					.optional()
@@ -407,11 +404,16 @@ export const packageAppFetchCapability = defineDomainCapability(
 			const restPath = normalizePackageAppFetchPath(args.path)
 			const restPathOnly = restPath.split(/[?#]/, 1)[0] || '/'
 
-			const owner = await resolvePackageOwnerContext(
-				ctx.env,
+			const callerRequest = requireMcpRequest(ctx.callerContext)
+			if (!callerRequest.actor) {
+				throw new McpCallerError(
+					`${packageAppFetchCapabilityName} needs a signed-in caller, who the app acts as.`,
+				)
+			}
+			const owner = await resolvePackageOwnerContext(ctx.env, {
 				user,
-				args.package_scope,
-			)
+				request: callerRequest,
+			})
 			const lookupId = args.package_id ?? args.kody_id ?? ''
 			const savedPackage = await resolveOwnedSavedPackage({
 				db: ctx.env.APP_DB,
@@ -477,6 +479,11 @@ export const packageAppFetchCapability = defineDomainCapability(
 						email: owner.ownerEmail,
 						username: owner.ownerScope,
 					}),
+				},
+				visitor: {
+					userId: callerRequest.actor.userId,
+					username: callerRequest.actor.username ?? user.username ?? '',
+					role: callerRequest.membership?.role ?? null,
 				},
 				packagePath,
 				dispatch: { synthetic: true },

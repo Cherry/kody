@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -17,6 +18,7 @@ export const emailReplyCapability = defineDomainCapability(
 	capabilityDomainNames.email,
 	{
 		name: 'emailReply',
+		orgPermission: 'email:send',
 		description:
 			'Reply to a stored inbound email from your platform-assigned {username}@<platform domain> address, preserving thread headers and optionally attaching files (base64 content). The recipient always comes from the stored message.',
 		keywords: ['email', 'reply', 'thread', 'message', 'attachment'],
@@ -39,12 +41,15 @@ export const emailReplyCapability = defineDomainCapability(
 			const user = await requireVerifiedEmailAccountUser(ctx)
 			const originalRecord = await mailboxRpc({
 				env: ctx.env,
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
 			}).getMessage({
 				messageId: args.message_id,
 			})
 			const original = originalRecord
-				? mailboxMessageToEmailMessageRecord(originalRecord, user.userId)
+				? mailboxMessageToEmailMessageRecord(
+						originalRecord,
+						personalOrgId(user.userId),
+					)
 				: null
 			if (!original)
 				throw new Error(`Email message not found: ${args.message_id}`)
@@ -52,7 +57,8 @@ export const emailReplyCapability = defineDomainCapability(
 			// sendOutboundEmail; this capability never chooses it.
 			const result = await sendOutboundEmail({
 				env: ctx.env,
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
+				request: ctx.callerContext.request,
 				accountEmail: user.email,
 				recipientPolicy: 'reply',
 				replyToMessageId: original.id,

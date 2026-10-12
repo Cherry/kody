@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	buildEntityRepoId,
 	hasArtifactsAccess,
@@ -21,7 +22,7 @@ export type EnsuredEntitySource = EntitySourceRow & {
 
 function buildEntitySourceRow(input: {
 	id?: string
-	userId: string
+	userId: OwnerId
 	entityKind: EntityKind
 	entityId: string
 	repoId?: string
@@ -45,11 +46,7 @@ function buildEntitySourceRow(input: {
 			}),
 		published_commit: input.publishedCommit ?? null,
 		indexed_commit: input.indexedCommit ?? null,
-		manifest_path:
-			input.manifestPath ??
-			(input.entityKind === 'package' || input.entityKind === 'repo'
-				? 'package.json'
-				: 'kody.json'),
+		manifest_path: input.manifestPath ?? 'package.json',
 		source_root: input.sourceRoot ?? '/',
 		last_external_check_at: null,
 		external_check_until: null,
@@ -62,7 +59,7 @@ export async function ensureEntitySource(input: {
 	db: D1Database
 	env: Env
 	id?: string
-	userId: string
+	userId: OwnerId
 	entityKind: EntityKind
 	entityId: string
 	repoId?: string

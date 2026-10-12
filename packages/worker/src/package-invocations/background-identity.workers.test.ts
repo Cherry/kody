@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test, vi } from 'vitest'
 import { metaGetCurrentUserCapability } from '#mcp/capabilities/meta/meta-get-current-user.ts'
@@ -23,12 +24,12 @@ vi.mock('#mcp/run-kody-registry.ts', async (importOriginal) => ({
 }))
 
 test('subscription execution exposes the owner account identity to metaGetCurrentUser', async () => {
-	const userId = 'a'.repeat(64)
+	const userId = ownerIdFromStored('a').repeat(64)
 	const email = 'subscription-owner@example.com'
 	const displayName = 'Subscription Owner'
 	await ensureUsersTestSchema({
 		db: env.APP_DB,
-		columns: ['stripe_plan'],
+		columns: ['email_verified_at'],
 	})
 	await env.APP_DB.prepare(
 		`INSERT INTO users (
@@ -97,12 +98,17 @@ test('subscription execution exposes the owner account identity to metaGetCurren
 		env,
 		baseUrl: 'https://kody.dev',
 		actor: {
-			tokenId: 'internal:email-subscriptions',
-			userId,
+			sourceId: 'internal:email-subscriptions',
+			orgId: ownerIdFromStored(userId),
+			request: {
+				kind: 'inbound-email',
+				sourceId: 'inbox-1',
+				sender: { kind: 'inbox-owner' },
+			},
 		},
 		savedPackage: {
 			id: 'package-1',
-			userId,
+			userId: ownerIdFromStored(userId),
 			name: '@example/article-to-audio',
 			kodyId: 'article-to-audio',
 			description: 'Article to audio',
@@ -110,6 +116,7 @@ test('subscription execution exposes the owner account identity to metaGetCurren
 			searchText: null,
 			sourceId: 'source-1',
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: true,
 			createdAt: '2026-08-08T00:00:00.000Z',

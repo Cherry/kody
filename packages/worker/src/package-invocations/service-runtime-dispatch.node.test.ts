@@ -1,6 +1,10 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as packageSourceModule from '#worker/package-registry/source.ts'
-import { consoleError } from '#worker/test-support/console-spies.ts'
+import {
+	consoleError,
+	consoleWarn,
+} from '#worker/test-support/console-spies.ts'
 import { deliverPackageEvent } from './service.ts'
 import {
 	packageInvocationsRepoMockModule as repoMockModule,
@@ -13,8 +17,8 @@ import {
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		repoMockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		repoMockModule.resolveSavedPackageRef(...args),
 	getSavedPackageByName: (...args: Array<unknown>) =>
 		repoMockModule.getSavedPackageByName(...args),
 	listSavedPackagesByUserId: (...args: Array<unknown>) =>
@@ -64,6 +68,31 @@ vi.mock('#worker/usage/agent-package-conversation-uses.ts', () => ({
 vi.mock('#worker/run-records/package-subscriptions.ts', () => ({
 	dispatchRunErrorSubscriptionEvents: (...args: Array<unknown>) =>
 		repoMockModule.dispatchRunErrorSubscriptionEvents(...args),
+}))
+
+const fanOutMocks = vi.hoisted(() => ({
+	fanOutPackageEventToMcpSubscriptions: vi.fn(async () => ({
+		status: 'skipped_not_mcp',
+		delivered: 0,
+		failed: 0,
+		denied: 0,
+	})),
+}))
+
+vi.mock('#mcp/events/fan-out.ts', () => fanOutMocks)
+
+// Every trigger runs as its enabler; here the personal org's own person.
+vi.mock('#worker/enablements/run-gate.ts', () => ({
+	planEnablementRuns: async (input: { orgId: string }) => ({
+		runs: [
+			{
+				id: `enablement-${input.orgId}`,
+				enabler: { userId: input.orgId, username: 'owner' },
+				role: 'owner',
+			},
+		],
+		skipped: [],
+	}),
 }))
 
 vi.mock('#worker/identity/background-mcp-user.ts', () => ({
@@ -139,12 +168,25 @@ test('package runtime dispatch enqueues declared events and validates payloadSch
 
 	expect(send).toHaveBeenCalledTimes(1)
 	expect(send).toHaveBeenCalledWith({
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		topic: messageCreated,
 		idempotencyKey: 'discord:message-create:123',
 		payload: { messageId: '123', channelId: '456' },
 		source: { packageId: 'pkg-gateway', kodyId: 'discord-gateway' },
 		invokeDepth: 1,
+		emittedAt: expect.any(String),
+		lineage: {
+			actor: { userId: ownerIdFromStored('user-123'), username: null },
+			attribution: { kind: 'user', userId: ownerIdFromStored('user-123') },
+			credential: {
+				kind: 'mcp-oauth',
+				id: null,
+				orgId: ownerIdFromStored('user-123'),
+				scopes: null,
+				profileName: null,
+			},
+			membership: { role: 'owner' },
+		},
 	})
 	// Queued delivery never invokes subscribers inside the emitting request.
 	expect(repoMockModule.runBundledModuleWithRegistry).not.toHaveBeenCalled()
@@ -237,6 +279,69 @@ test('package runtime dispatch enqueues declared events and validates payloadSch
 		}),
 	).resolves.toMatchObject({ status: 'enqueued' })
 	expect(send).toHaveBeenCalledTimes(1)
+
+	patchSeededManifest(seed, 'source-gateway', {
+		emits: {
+			[messageCreated]: {
+				description: 'A Discord message was created.',
+				mcp: true,
+			},
+		},
+	})
+	send.mockClear()
+	await eventTools().dispatch({
+		topic: messageCreated,
+		idempotencyKey: 'discord:message-create:mcp',
+		payload: { messageId: '123' },
+	})
+	expect(send).toHaveBeenCalledWith(
+		expect.objectContaining({ mcp: true, emittedAt: expect.any(String) }),
+	)
+})
+
+test('package event delivery fans out to MCP subscriptions on the same consumer path', async () => {
+	const db = createDatabase()
+	seedRuntimeDispatchPackages()
+	repoMockModule.runBundledModuleWithRegistry.mockResolvedValue({
+		result: { handled: true },
+		logs: [],
+	})
+	const message = {
+		userId: ownerIdFromStored('user-123'),
+		topic: messageCreated,
+		idempotencyKey: 'discord:message-create:mcp-fan-out',
+		payload: { messageId: '123', channelId: '456' },
+		source: { packageId: 'pkg-gateway', kodyId: 'discord-gateway' },
+		invokeDepth: 1,
+		mcp: true as const,
+		emittedAt: '2026-10-07T12:00:00.000Z',
+	}
+	fanOutMocks.fanOutPackageEventToMcpSubscriptions.mockClear()
+
+	await expect(deliver(db, message)).resolves.toMatchObject({
+		delivered: 1,
+		failed: 0,
+	})
+	expect(fanOutMocks.fanOutPackageEventToMcpSubscriptions).toHaveBeenCalledWith(
+		{
+			env: expect.anything(),
+			baseUrl: expect.any(String),
+			message,
+		},
+	)
+
+	// An MCP fan-out failure is logged and never fails package delivery.
+	consoleError.mockImplementation(() => {})
+	fanOutMocks.fanOutPackageEventToMcpSubscriptions.mockRejectedValueOnce(
+		new Error('fan-out exploded'),
+	)
+	await expect(
+		deliver(db, { ...message, idempotencyKey: 'discord:mcp-fan-out-error' }),
+	).resolves.toMatchObject({ delivered: 1, failed: 0 })
+	expect(consoleError).toHaveBeenCalledWith(
+		'mcp-events-fan-out-failed',
+		expect.objectContaining({ topic: messageCreated }),
+	)
 })
 
 test('package events deliver with filters, idempotent replay, and retryable failures', async () => {
@@ -259,7 +364,7 @@ test('package events deliver with filters, idempotent replay, and retryable fail
 		}),
 	)
 	const baseMessage = {
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		topic: messageCreated,
 		source: { packageId: 'pkg-gateway', kodyId: 'discord-gateway' },
 		invokeDepth: 1,
@@ -314,10 +419,15 @@ test('package events deliver with filters, idempotent replay, and retryable fail
 	})
 
 	failSubscriberManifestLoads(seed)
+	consoleWarn.mockImplementation(() => {})
 	await expect(
 		deliver(db, { ...message, idempotencyKey: 'discord:manifest-error' }),
 	).rejects.toThrow(
 		/Failed to load package manifest for package event dispatch/,
+	)
+	expect(consoleWarn).toHaveBeenCalledWith(
+		'admin-package-subscription-manifest-load-failed',
+		expect.objectContaining({ packageId: 'pkg-subscriber' }),
 	)
 
 	patchSeededManifest(seedRuntimeDispatchPackages(), 'source-subscriber', {
@@ -388,6 +498,7 @@ test('package events fall back to inline delivery without a queue binding', asyn
 
 	// Inline delivery failures are logged, never surfaced to the emitter.
 	failSubscriberManifestLoads(seedRuntimeDispatchPackages())
+	consoleWarn.mockImplementation(() => {})
 	consoleError.mockImplementation(() => {})
 	await expect(
 		tools.dispatch({
@@ -396,6 +507,10 @@ test('package events fall back to inline delivery without a queue binding', asyn
 			payload: { messageId: 'inline-2' },
 		}),
 	).resolves.toMatchObject({ status: 'delivered_inline' })
+	expect(consoleWarn).toHaveBeenCalledWith(
+		'admin-package-subscription-manifest-load-failed',
+		expect.objectContaining({ topic: messageCreated }),
+	)
 	expect(consoleError).toHaveBeenCalledWith(
 		'package-events-inline-delivery-failed',
 		expect.objectContaining({ topic: messageCreated }),

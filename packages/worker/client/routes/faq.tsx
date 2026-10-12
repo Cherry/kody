@@ -77,10 +77,11 @@ const faqItems: ReadonlyArray<FaqItem> = [
 					small web app.
 				</p>
 				<p>
-					A <strong>memory</strong> is a durable fact or preference Kody keeps
-					about you. Memories follow the account across every connected agent.
-					Facts saved only in a host — a Claude Project, or Cursor rules that
-					are not also Kody memories — stay invisible to your other agents.
+					Use <strong>memory</strong> sparingly for durable facts that don’t
+					have a better home, like a project nickname. Connected agents can
+					retrieve those facts from Kody. Put repeatable behavior and task
+					defaults in the package’s code and documentation, so running the
+					workflow doesn’t depend on an agent remembering an instruction.
 				</p>
 			</>
 		),
@@ -157,11 +158,13 @@ const faqItems: ReadonlyArray<FaqItem> = [
 					{count.format(freeLimits.maxSavedPackages)} saved packages,{' '}
 					{count.format(freeLimits.maxScheduledJobs)} scheduled jobs (no faster
 					than every {formatMinJobInterval(freeLimits.minJobIntervalMs)}),{' '}
-					{count.format(freeLimits.maxExecuteCallsPerDay)} execute calls per day
-					({count.format(freeLimits.maxExecuteCallsPerWeek ?? 0)} this week),
-					and the rest of the entitlements on Pricing. Free stops at those caps.
-					Pro adds a larger monthly include, plus prepaid credits when you need
-					more.
+					{count.format(freeLimits.maxExecuteUniqueWorkersPerDay)} unique
+					execute workers per day (
+					{count.format(freeLimits.maxExecuteUniqueWorkersPerWeek ?? 0)} this
+					week), and the rest of the entitlements on Pricing. Free stops at its
+					execute caps and other hard limits. Monthly Worker compute on Free is
+					a guideline that never charges you or stops runs. Pro adds a larger
+					monthly include, plus prepaid credits when you need more.
 				</p>
 				<p>
 					<a href={routes.pricing.href()}>Plans and pricing</a>

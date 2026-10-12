@@ -1,22 +1,30 @@
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { z } from 'zod'
+import { denyProfileBoundPackageCreate } from '#worker/authorization/authorize.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { assertWithinEntitlement } from '#worker/entitlements/service.ts'
 import { buildSavedPackageEmbedText } from '#worker/package-registry/embed.ts'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
 import { stampFirstSavedPackage } from '#worker/identity/activation-stamps.ts'
+import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
 import {
 	getSavedPackageById,
-	getSavedPackageByKodyId,
+	resolveSavedPackageRef,
 	insertSavedPackage,
 } from '#worker/package-registry/repo.ts'
 import { refreshSavedPackageProjection } from '#worker/package-registry/service.ts'
 import { assertKodyDescriptionLength } from '#worker/package-registry/types.ts'
 import { upsertSavedPackageVector } from '#worker/package-registry/vectorize.ts'
-import { getMcpUserPackageScope } from '#worker/package-registry/user-scope.ts'
+import {
+	packageOwnerEntitlementEmail,
+	resolvePackageOwnerContext,
+} from '#worker/package-registry/package-owner.ts'
 import { readArtifactFileAtCommit } from '#worker/repo/artifact-file.ts'
 import { resolveArtifactSourceHead } from '#worker/repo/artifacts.ts'
 import { updateEntitySource } from '#worker/repo/entity-sources.ts'
@@ -24,6 +32,7 @@ import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { deleteUserRepo } from '#worker/repo/user-repos.ts'
 import { publishCommunityListing } from '#worker/community/service.ts'
 import { resolveOwnedUserRepo } from './resolve-user-repo.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 const repoIdentitySchema = z
 	.object({
@@ -46,6 +55,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoPromoteToPackage',
+		orgPermission: 'package:create',
 		description:
 			'Promote a package-shaped plain repo (root package.json at HEAD) into a saved package. Runs the full external-push publish checks; on success creates the saved-package projection and removes the plain-repo row.',
 		keywords: ['repo', 'promote', 'package', 'activate'],
@@ -62,15 +72,22 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			message: z.string().optional(),
 		}),
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			const owner = await resolvePackageOwnerContext(ctx.env, {
+				user: requireMcpUser(ctx.callerContext),
+				request: requireMcpRequest(ctx.callerContext),
+			})
+			await denyProfileBoundPackageCreate({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+			})
 			const { userRepo, source } = await resolveOwnedUserRepo({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				args,
 			})
 			if (source.entity_kind !== 'repo') {
 				const existingPackage = await getSavedPackageById(ctx.env.APP_DB, {
-					userId: user.userId,
+					userId: owner.ownerUserId,
 					packageId: source.entity_id,
 				})
 				if (existingPackage) {
@@ -99,7 +116,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 					`Plain repo "${userRepo.name}" is not package-shaped: root package.json was not found at HEAD.`,
 				)
 			}
-			const packageScope = await getMcpUserPackageScope(ctx.env.APP_DB, user)
+			const packageScope = owner.ownerScope
 			let manifest: ReturnType<typeof parseAuthoredPackageJson>
 			try {
 				manifest = parseAuthoredPackageJson({
@@ -111,9 +128,10 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			} catch (error) {
 				throw new McpCallerError(getErrorMessage(error), { cause: error })
 			}
-			const kodyIdCollision = await getSavedPackageByKodyId(ctx.env.APP_DB, {
-				userId: user.userId,
-				kodyId: manifest.kody.id,
+			const kodyIdCollision = await resolveSavedPackageRef(ctx.env.APP_DB, {
+				userId: owner.ownerUserId,
+				ref: manifest.kody.id,
+				match: 'slug',
 			})
 			if (kodyIdCollision) {
 				throw new McpCallerError(
@@ -122,8 +140,8 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			}
 			await assertWithinEntitlement({
 				db: ctx.env.APP_DB,
-				userId: user.userId,
-				email: user.email,
+				userId: owner.ownerUserId,
+				email: packageOwnerEntitlementEmail(owner),
 				resource: 'saved_packages',
 			})
 			const sessionId = `repo-promote-${source.id}-${crypto.randomUUID()}`
@@ -131,17 +149,17 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			const opened = await session.openSession({
 				sessionId,
 				sourceId: source.id,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				baseUrl: ctx.callerContext.baseUrl,
 			})
 			const checkRun = await session.runChecks({
 				sessionId,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				expectedPackageScope: packageScope,
 			})
 			if (!checkRun.ok) {
 				await session
-					.discardSession({ sessionId, userId: user.userId })
+					.discardSession({ sessionId, userId: owner.ownerUserId })
 					.catch(() => undefined)
 				const failed = checkRun.results
 					.filter((entry) => !entry.ok)
@@ -157,7 +175,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 				ctx.env.APP_DB,
 				{
 					id: packageId,
-					user_id: user.userId,
+					user_id: owner.ownerUserId,
 					name: manifest.name,
 					kody_id: manifest.kody.id,
 					description: manifest.kody.description,
@@ -165,6 +183,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 					search_text: manifest.kody.searchText ?? null,
 					source_id: source.id,
 					has_app: manifest.kody.app !== undefined ? 1 : 0,
+					has_skills: 0,
 					hidden: 0,
 					is_private: userRepo.isPrivate ? 1 : 0,
 					created_at: now,
@@ -180,7 +199,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			// though this is the first package publish.
 			await updateEntitySource(ctx.env.APP_DB, {
 				id: source.id,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				entityKind: 'package',
 				entityId: packageId,
 				manifestPath: 'package.json',
@@ -189,18 +208,18 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 			})
 			const publishResult = await session.publishSession({
 				sessionId,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				expectedPackageScope: packageScope,
 			})
 			if (publishResult.status !== 'ok') {
 				await ctx.env.APP_DB.prepare(
-					`DELETE FROM saved_packages WHERE user_id = ? AND id = ?`,
+					`DELETE FROM saved_packages WHERE user_id = ? AND id = ?${andLiveDeletedAtSql()}`,
 				)
-					.bind(user.userId, packageId)
+					.bind(owner.ownerUserId, packageId)
 					.run()
 				await updateEntitySource(ctx.env.APP_DB, {
 					id: source.id,
-					userId: user.userId,
+					userId: owner.ownerUserId,
 					entityKind: 'repo',
 					entityId: userRepo.id,
 					// Restore the exact pre-promotion columns so a failed promote
@@ -210,29 +229,36 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 					publishedCommit: source.published_commit,
 				})
 				await session
-					.discardSession({ sessionId, userId: user.userId })
+					.discardSession({ sessionId, userId: owner.ownerUserId })
 					.catch(() => undefined)
 				throw new McpCallerError(
 					publishResult.message || 'Failed to publish promoted package source.',
 				)
 			}
-			await stampFirstSavedPackage(
+			const stamped = await stampFirstSavedPackage(
 				ctx.env.APP_DB,
-				{ stableUserId: user.userId, at: now },
+				{ stableUserId: owner.actorUserId, at: now },
 				ctx.env,
 			)
+			if (stamped) {
+				scheduleKitSubscriberSync({
+					env: ctx.env,
+					stableUserId: owner.actorUserId,
+				})
+			}
 			// Best-effort projections after the publish committed: a vector or
 			// search-projection failure must not strand a half-promoted repo.
 			// Reindex lanes converge both later.
 			await upsertSavedPackageVector(ctx.env, {
 				packageId,
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				embedText: buildSavedPackageEmbedText(manifest),
 			}).catch(() => undefined)
 			await refreshSavedPackageProjection({
 				env: ctx.env,
 				baseUrl: ctx.callerContext.baseUrl,
-				userId: user.userId,
+				userId: owner.ownerUserId,
+				actorUserId: owner.actorUserId,
 				packageId,
 				sourceId: source.id,
 			}).catch(() => undefined)
@@ -246,8 +272,8 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 					await publishCommunityListing({
 						env: ctx.env,
 						baseUrl: ctx.callerContext.baseUrl,
-						userId: user.userId,
-						actorUserId: user.userId,
+						userId: owner.ownerUserId,
+						actorUserId: owner.actorUserId,
 						packageId,
 					})
 				} catch (error) {
@@ -255,7 +281,7 @@ export const repoPromoteToPackageCapability = defineDomainCapability(
 				}
 			}
 			await deleteUserRepo(ctx.env.APP_DB, {
-				userId: user.userId,
+				userId: owner.ownerUserId,
 				repoId: userRepo.id,
 			})
 			return {

@@ -12,7 +12,7 @@ bring-your-own. Per-user access and refresh tokens live encrypted on the
 connection (`access_token_encrypted` / `refresh_token_encrypted`). User-lane
 client secrets live encrypted on the app (`client_secret_encrypted`). Those
 values are not stored in `secret_entries` and do not appear on
-`/account/secrets`, `secretList`, or search. Authenticated fetch attaches
+`/@<slug>/-/secrets`, `secretList`, or search. Authenticated fetch attaches
 `{{integration-token:<connection-name>}}`; the fetch gateway resolves that
 placeholder from connection ciphertext.
 
@@ -172,17 +172,21 @@ token persists clear that snapshot and dispatch `integration.auth.succeeded`.
 Sequential classified attempts each emit; the platform does not coalesce those
 repeats. Concurrent in-flight refreshes of the same connection share one
 provider POST, persist, and event so a 401 stampede cannot rotate the refresh
-token out from under itself. Provider HTTP 5xx and token endpoint timeouts
-persist `provider_unavailable` for Integrations / `integrationGet` without
-emitting failed and without a Waiting card. Missing connections do not write or
-emit failed. Both payloads are metadata-first (connection name, lane, account
-label, description, scopes, connect/refresh timestamps, and for failed: reason,
-optional provider error fields, trusted `reconnect_url` and `account_url`; for
-succeeded: `source` and trusted `account_url`) and never include token or secret
-values. When `account_label` is an email, `reconnect_url` includes `loginHint`
-so the provider account chooser can preselect it. A successful Google refresh
-that still has no `account_label` persists `userinfo.email` onto the connection.
-See [Package subscriptions](../../guides/package-subscriptions.md).
+token out from under itself. Within an isolate they share one promise; across
+isolates a lease on `user_integrations` (claimed by compare-and-swap on
+`token_refreshed_at`) admits one refresher, and the others return the token it
+stored without calling the provider. Provider HTTP 5xx and token endpoint
+timeouts persist `provider_unavailable` for Integrations / `integrationGet`
+without emitting failed and without a Waiting card. Missing connections do not
+write or emit failed. Both payloads are metadata-first (connection name, lane,
+account label, description, scopes, connect/refresh timestamps, and for failed:
+reason, optional provider error fields, trusted `reconnect_url` and
+`account_url`; for succeeded: `source` and trusted `account_url`) and never
+include token or secret values. When `account_label` is an email,
+`reconnect_url` includes `loginHint` so the provider account chooser can
+preselect it. A successful Google refresh that still has no `account_label`
+persists `userinfo.email` onto the connection. See
+[Package subscriptions](../../guides/package-subscriptions.md).
 
 On 401, `createAuthenticatedFetch` calls `integrationTokenRefresh` then retries
 with a `{{secret:…}}` placeholder `Authorization` header, so raw tokens never
@@ -223,8 +227,8 @@ over HTTPS with manual redirects, prefer `apple-touch-icon` then `rel=icon`,
 accept `/favicon.ico` only when it embeds a PNG, and store a raster under
 `user-oauth-app-logos/{userId}/{slug}/`. Display order is explicit upload,
 operator-curated provider mark, auto-favicon, then the letter fallback.
-User-added MCP servers on `/account/mcp-servers` use the same order (matched by
-server name or `url` host). The same `/integrations/logos/:slug` route serves
+User-added MCP servers on `/@<slug>/-/mcp-servers` use the same order (matched
+by server name or `url` host). The same `/integrations/logos/:slug` route serves
 user assets only to the signed-in owner after a platform miss.
 
 Operator-curated provider marks live in `platform_provider_marks` (slug, label,
@@ -341,7 +345,7 @@ client-secret values.
 
 ## Account UI
 
-`/account/integrations` is a list of integrations (the services you connect:
+`/@<slug>/-/integrations` is a list of integrations (the services you connect:
 Google, GitHub). Selecting a row shows that integration and the connections
 (signed-in accounts) on it. Each connection shows how many scopes it requests
 versus the built-in menu when one exists, and a copy-prompt asks an agent to
@@ -351,18 +355,18 @@ Reconnect and add-account links resolve to the built-in lane while the app is
 discoverable and to bring-your-own `/connect/oauth` setup otherwise. A **Connect
 with Kody** section lists discoverable built-ins the user has not connected; it
 renders nothing while every app is draft. Deep links to a connection
-(`/account/integrations/:name`) open the parent integration and highlight that
+(`/@<slug>/-/integrations/:name`) open the parent integration and highlight that
 connection. User-registered integrations also have
-`/account/integrations/apps/:appSlug` (a connection named `apps` resolves at
-`/account/integrations/apps`). Endpoints, host allowlists, flow / PKCE /
+`/@<slug>/-/integrations/apps/:appSlug` (a connection named `apps` resolves at
+`/@<slug>/-/integrations/apps`). Endpoints, host allowlists, flow / PKCE /
 exchange style, and credential rotation stay behind an advanced disclosure. Each
 connection also shows a usage grant: **any context** (execute and every package)
 or **specific packages** only. Agents tighten that grant with `integrationLock`
 (switch to packages mode and add a saved package id; unlocking or removing a
 grant is website-only). One-click approval lives at
-`/account/integrations/approve?name=&package_id=`; approving a package while the
-connection is still `any` leaves it `any` so execute stays usable. The rotate
-form posts to `/account/integrations.json` with
+`/@<slug>/-/integrations/approve?name=&package_id=`; approving a package while
+the connection is still `any` leaves it `any` so execute stays usable. The
+rotate form posts to `/account/integrations.json` with
 `action: "rotate_oauth_app_credentials"`: it stores a new client-secret value on
 the app, then calls `rotateOauthAppClientCredentials` so every sibling
 connection picks up the new client id on the next join. Each connection has a

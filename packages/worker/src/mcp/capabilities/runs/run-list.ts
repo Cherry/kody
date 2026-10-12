@@ -1,7 +1,16 @@
+import {
+	authorizeOrgWide,
+	listScopeIncludes,
+	loadResourceListScope,
+} from '#worker/authorization/authorize.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
-import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import {
+	requireMcpRequest,
+	requireMcpUser,
+} from '#mcp/capabilities/meta/require-user.ts'
 import { listRunRecords } from '#worker/run-records/service.ts'
 import {
 	formatRunRecord,
@@ -31,6 +40,13 @@ const inputSchema = z.object({
 		.min(1)
 		.optional()
 		.describe('Optional job id to list runs for one scheduled job.'),
+	workflow_id: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"Optional workflow run id (dynwf-… or pkgwf-…) from workflows.create. Returns that workflow's run, whose metadata.result holds the return value once it succeeds.",
+		),
 	since: z
 		.string()
 		.min(1)
@@ -65,6 +81,7 @@ export const runListCapability = defineDomainCapability(
 	capabilityDomainNames.runs,
 	{
 		name: 'runList',
+		orgPermission: 'job:read',
 		description:
 			'List recent execution history across jobs, webhooks, package apps, workflows, ad-hoc execute, and other runtimes so you can debug failures or inspect what ran. Ad-hoc execute runs are included for both success and error. Terminal rows may include a bounded metadata.result snapshot. By default, ignored/resolved error runs are hidden (error_triage defaults to open); use runUpdate or runUpdateBulk to triage noise, or pass error_triage all/ignored/resolved to inspect those rows. Pass status success (or omit status with error_triage all) for a recent "what ran" list. Records are retained about 30 days, capped per user, and cap-pruned in this order: handled errors, successes, then open errors.',
 		keywords: [
@@ -96,15 +113,25 @@ export const runListCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const auth = {
+				env: ctx.env,
+				request: requireMcpRequest(ctx.callerContext),
+			}
+			const scope = await loadResourceListScope(auth, 'job:read', 'job')
+			// A job grant covers that job's runs, never the org's run history.
+			if (!args.job_id || !listScopeIncludes(scope, args.job_id)) {
+				await authorizeOrgWide(auth, 'job:read')
+			}
 			const page = await listRunRecords({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				filter: {
 					surface: args.surface ?? null,
 					status: args.status ?? null,
 					packageId: args.package_id ?? null,
 					jobId: args.job_id ?? null,
+					workflowId: args.workflow_id ?? null,
 					since: args.since ?? null,
 					errorTriage: args.error_triage ?? 'open',
 				},

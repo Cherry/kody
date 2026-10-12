@@ -18,7 +18,8 @@ import {
 	setFeatureFlagGlobalState,
 	setFeatureFlagUserOverride,
 } from '#worker/feature-flags/service.ts'
-import { isStableUserId, normalizeStableUserId } from '#worker/user-id.ts'
+import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export function createAdminFeatureFlagsHandler(env: Env) {
 	return {
@@ -255,20 +256,20 @@ async function handleClearUserOverrideAction(input: {
 		)
 	}
 
-	const stableUserId = readStableUserIdField(input.body)
-	if (stableUserId === null) {
-		return jsonResponse({ ok: false, error: 'stableUserId is required.' }, 400)
+	const resolvedUserId = await resolveOverrideUserId(
+		input.env.APP_DB,
+		input.body,
+	)
+	if (resolvedUserId.status === 'invalid') {
+		return jsonResponse({ ok: false, error: resolvedUserId.error }, 400)
 	}
-	const target = await resolveOverrideUserId(input.env.APP_DB, {
-		stableUserId,
-	})
-	if (target.status !== 'ok') {
+	if (resolvedUserId.status === 'not_found') {
 		return jsonResponse({ ok: false, error: 'User not found.' }, 404)
 	}
 
 	const cleared = await clearFeatureFlagUserOverride(input.env.APP_DB, {
 		key,
-		userId: target.dbUserId,
+		userId: resolvedUserId.dbUserId,
 	})
 	if (!cleared) {
 		return jsonResponse({ ok: false, error: 'User override not found.' }, 404)
@@ -283,7 +284,10 @@ async function handleClearUserOverrideAction(input: {
 		email: input.actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
-		reason: [`key=${key}`, `target_stable_user_id=${stableUserId}`].join(';'),
+		reason: [
+			`key=${key}`,
+			`target_stable_user_id=${resolvedUserId.stableUserId}`,
+		].join(';'),
 	})
 
 	return jsonResponse(await loadAdminFeatureFlagsData(input.env))
@@ -377,7 +381,9 @@ async function resolveOverrideUserId(
 			}
 		}
 		const row = await db
-			.prepare(`SELECT id, stable_user_id FROM users WHERE stable_user_id = ?`)
+			.prepare(
+				`SELECT id, stable_user_id FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+			)
 			.bind(stableUserId)
 			.first<{ id: number; stable_user_id: string }>()
 		if (!row) {
@@ -397,7 +403,9 @@ async function resolveOverrideUserId(
 		}
 	}
 	const row = await db
-		.prepare(`SELECT id, stable_user_id FROM users WHERE username = ?`)
+		.prepare(
+			`SELECT id, stable_user_id FROM users WHERE username = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(username)
 		.first<{ id: number; stable_user_id: string }>()
 	if (!row) {
@@ -440,8 +448,5 @@ function readBoolean(body: object, key: string): boolean | null {
 }
 
 function readStableUserIdField(body: object): string | null {
-	const value = (body as Record<string, unknown>).stableUserId
-	const stableUserId =
-		typeof value === 'string' ? normalizeStableUserId(value) : ''
-	return isStableUserId(stableUserId) ? stableUserId : null
+	return parsePersonId((body as Record<string, unknown>).stableUserId)
 }

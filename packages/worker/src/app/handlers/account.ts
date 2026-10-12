@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type Action } from 'remix/router'
 import { loadAccountConnectionsData } from '#app/account-connections-data.ts'
 import { loadAccountProfileData } from '#app/account-profile-data.ts'
@@ -7,7 +8,11 @@ import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 
-export function createAccountHandler(env: Env) {
+/** Profile, Security, and Data & deletion are views of one account page. */
+export function createAccountHandler(
+	env: Env,
+	title: 'Profile' | 'Security' | 'Data & deletion',
+) {
 	return {
 		middleware: [],
 		async handler({ request }) {
@@ -23,7 +28,7 @@ export function createAccountHandler(env: Env) {
 					loadOnboardingData({
 						env,
 						requestUrl: request.url,
-						stableUserId: user.mcpUser.userId,
+						stableUserId: personalOrgId(user.mcpUser.userId),
 						username: user.username,
 						emailVerified: user.emailVerified,
 					}),
@@ -33,7 +38,7 @@ export function createAccountHandler(env: Env) {
 			if (user.emailVerified) {
 				onboarding.checklist = await loadChecklist(
 					env,
-					user.mcpUser.userId,
+					personalOrgId(user.mcpUser.userId),
 					user.username,
 					onboarding.hasMcpClient,
 					{
@@ -44,7 +49,7 @@ export function createAccountHandler(env: Env) {
 			return renderAppPage({
 				request,
 				env,
-				title: 'Account',
+				title,
 				loaderData: {
 					accountProfile,
 					accountConnections,

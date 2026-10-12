@@ -33,6 +33,7 @@ import {
 	readCreditWallet,
 	sumCreditAutoRefillCents,
 	toAccountCreditsLedgerItem,
+	type CreditWallet,
 } from '#worker/billing/credit-wallet.ts'
 import {
 	isPayingForCreditsPro,
@@ -40,30 +41,47 @@ import {
 	userEntitlementColumnsSql,
 	type UserEntitlementRow,
 } from '#worker/entitlements/service.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 const recentLedgerLimit = 10
 
 /**
- * The Pro include and how far credits can carry usage past it, for the rate
- * limits credits apply to. Numbers only, framed as a ceiling on credits (not
- * a tier a balance unlocks). Stock is on the Pro subscription, not listed.
+ * The org's Pro include (pooled across `seats`) and how far credits can
+ * carry usage past it, for the rate limits credits apply to. Numbers only,
+ * framed as a ceiling on credits (not a tier a balance unlocks). Stock is on
+ * the Pro subscription, not listed.
  */
-export function listCreditsCeilingLimits(): Array<AccountCreditsLimit> {
+export function listCreditsCeilingLimits(
+	seats = 1,
+): Array<AccountCreditsLimit> {
 	const limits: Array<AccountCreditsLimit> = []
 	for (const resource of creditsUnlockedResources) {
 		limits.push({
 			resource,
 			label: entitlementResourceLabels[resource],
-			included: resolvePlanLimit('pro', resource, 'public', 'empty'),
-			creditsCeiling: resolvePlanLimit('pro', resource, 'public', 'funded'),
+			included: resolvePlanLimit('pro', resource, 'public', 'empty', seats),
+			creditsCeiling: resolvePlanLimit(
+				'pro',
+				resource,
+				'public',
+				'funded',
+				seats,
+			),
 		})
 		if (!isWeeklyComputeWindowResource(resource)) continue
-		const included = resolveWeeklyPlanLimit('pro', resource, 'public', 'empty')
+		const included = resolveWeeklyPlanLimit(
+			'pro',
+			resource,
+			'public',
+			'empty',
+			seats,
+		)
 		const creditsCeiling = resolveWeeklyPlanLimit(
 			'pro',
 			resource,
 			'public',
 			'funded',
+			seats,
 		)
 		if (included === null || creditsCeiling === null) continue
 		limits.push({
@@ -105,8 +123,10 @@ export async function loadAccountCreditsUser(input: {
 	now?: Date
 }): Promise<AccountCreditsUser | null> {
 	const row = await input.env.APP_DB.prepare(
-		`SELECT id, stable_user_id, stripe_customer_id, ${userEntitlementColumnsSql()}
-		 FROM users WHERE id = ?`,
+		`SELECT u.id, u.stable_user_id, o.stripe_customer_id, ${userEntitlementColumnsSql('o')}
+		 FROM users u
+		 INNER JOIN orgs o ON o.id = u.stable_user_id
+		 WHERE u.id = ?${andLiveDeletedAtSql('u')}${andLiveDeletedAtSql('o')}`,
 	)
 		.bind(input.userId)
 		.first<
@@ -137,6 +157,8 @@ export async function loadAccountCreditsUser(input: {
  * The Credits section of `/account/usage`, plus the wallet read the usage
  * story's alarm needs so the page reads the wallet once. Operator plans get
  * no section; accounts without a wallet get only the switch-to-Pro prompt.
+ * Pass {@link wallet} when `/account/usage` already loaded it for entitlement
+ * resolution so the page does not query `credit_wallets` again.
  */
 export async function loadAccountUsageCredits(input: {
 	env: Env
@@ -146,9 +168,16 @@ export async function loadAccountUsageCredits(input: {
 	canBuyCredits: boolean
 	computeOverage: AccountUsageComputeOverage | null
 	now: Date
+	/** When set, skip the credit_wallets read. */
+	wallet?: CreditWallet
+	/** Signup organization billing page. Required for the switch-to-Pro link. */
+	billingHref: string
 }): Promise<{
 	credits: AccountUsageCredits | null
-	wallet: { balanceMicroUsd: number; autoRefill: CreditsAlarmAutoRefill } | null
+	wallet: {
+		balanceMicroUsd: number
+		autoRefill: CreditsAlarmAutoRefill
+	} | null
 }> {
 	if (input.entitlement.plan === 'max') return { credits: null, wallet: null }
 	const configured = isBillingConfigured(input.env)
@@ -159,14 +188,16 @@ export async function loadAccountUsageCredits(input: {
 			credits: {
 				eligible: false,
 				canSwitchToPro,
-				billingHref: '/account/billing',
+				billingHref: input.billingHref,
 			},
 			wallet: null,
 		}
 	}
 	const db = input.env.APP_DB
 	const [wallet, refilledThisMonthCents, recent] = await Promise.all([
-		readCreditWallet(db, input.stableUserId),
+		input.wallet
+			? Promise.resolve(input.wallet)
+			: readCreditWallet(db, input.stableUserId),
 		sumCreditAutoRefillCents({
 			db,
 			userId: input.stableUserId,
@@ -196,7 +227,7 @@ export async function loadAccountUsageCredits(input: {
 				hasPaymentMethod: Boolean(wallet.autoRefillPaymentMethodId),
 			},
 			notify: wallet.notify,
-			limits: listCreditsCeilingLimits(),
+			limits: listCreditsCeilingLimits(input.entitlement.seats),
 			debitMeters: input.computeOverage
 				? toCreditsDebitMeters(input.computeOverage.meters)
 				: [],

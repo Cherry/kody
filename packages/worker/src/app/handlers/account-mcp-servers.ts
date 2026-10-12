@@ -1,3 +1,5 @@
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { waitUntil } from 'cloudflare:workers'
 import { jsonResponse } from '#worker/json-response.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
@@ -14,7 +16,12 @@ import {
 	mcpOAuthReturnCookie,
 	readMcpOAuthReturnCookie,
 } from '#universal/mcp-oauth-return.ts'
+import { orgSectionRestPath } from '#universal/org-section-hrefs.ts'
 import { routes } from '#universal/routes.ts'
+import { extractMcpServerIdFromOAuthState } from '#worker/mcp-client/oauth-state.ts'
+import { getMcpServerOwnerId } from '#worker/mcp-client/settings-repo.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
+import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { createMcpClientHubClient } from '#worker/mcp-client/hub-client.ts'
 import { enrichMcpOAuthProviderError } from '#worker/mcp-client/oauth-provider-error.ts'
 import {
@@ -24,8 +31,18 @@ import {
 	resolveMcpServerOAuthClientUrls,
 	setMcpServerEnabled,
 	setMcpServerLastError,
+	setMcpServerPreRegisteredOAuthClient,
 	setMcpServerUsage,
 } from '#worker/mcp-client/settings-service.ts'
+import { normalizeMcpPreRegisteredOAuthClientInput } from '#worker/mcp-client/preregistered-oauth-client.ts'
+import {
+	authorize,
+	AuthorizationError,
+} from '#worker/authorization/authorize.ts'
+import {
+	orgAuditWriterFromRequest,
+	recordOrgAuditEvent,
+} from '#worker/orgs/org-audit.ts'
 import { type McpServerLastError } from '#worker/mcp-client/types.ts'
 
 type AuthenticatedUser = NonNullable<
@@ -35,7 +52,7 @@ type AuthenticatedUser = NonNullable<
 export function createAccountMcpServersHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request }) {
+		async handler({ request }: { request: Request }) {
 			const user = await requireAuthenticatedPageUser(request, env)
 			if (user instanceof Response) {
 				return user
@@ -54,11 +71,7 @@ export function createAccountMcpServersHandler(env: Env) {
 				loaderData: { accountMcpServers },
 			})
 		},
-	} satisfies Action<
-		| typeof routes.accountMcpServers
-		| typeof routes.accountMcpServerNew
-		| typeof routes.accountMcpServerDetail
-	>
+	}
 }
 
 export function createAccountMcpServersApiHandler(env: Env) {
@@ -122,7 +135,19 @@ export function createAccountMcpServersApiHandler(env: Env) {
 				if (action === 'delete') {
 					return await handleDeleteAction({ env, user, body, request })
 				}
+				if (action === 'set-oauth-client' || action === 'remove-oauth-client') {
+					return await handleOAuthClientAction({
+						env,
+						user,
+						body,
+						request,
+						kind: action === 'set-oauth-client' ? 'set' : 'remove',
+					})
+				}
 			} catch (error) {
+				if (error instanceof AuthorizationError) {
+					return jsonResponse({ ok: false, error: error.message }, 403)
+				}
 				return jsonResponse(
 					{
 						ok: false,
@@ -141,9 +166,47 @@ export function createAccountMcpServersApiHandler(env: Env) {
 }
 
 /**
+ * The request to finish an MCP OAuth callback as. The callback URL has no
+ * org, so the session binds the person's signup org; the pending state lives
+ * in the hub of the org that owns the server named in `state`. That org is
+ * used when the person can write its integrations, the same check the
+ * consent page made before sending them to the provider. Rejects when the
+ * person cannot, so the caller falls back to the session request.
+ */
+async function callbackRequestForServer(input: {
+	env: Env
+	url: URL
+	user: AuthenticatedUser
+}): Promise<RequestContext> {
+	const fallback = input.user.request
+	const serverId = extractMcpServerIdFromOAuthState(
+		input.url.searchParams.get('state'),
+	)
+	if (!serverId) return fallback
+	const ownerId = await getMcpServerOwnerId({
+		db: input.env.APP_DB,
+		id: serverId,
+	})
+	if (!ownerId || ownerId === fallback.org.id) return fallback
+	const orgBinding = await loadOrgBindingForOrg(
+		input.env.APP_DB,
+		input.user.mcpUser.userId,
+		ownerId,
+	)
+	if (!orgBinding) return fallback
+	const request = deriveRequestContext({
+		user: input.user.mcpUser,
+		source: { kind: 'session' },
+		orgBinding,
+	})
+	await authorize({ env: input.env, request }, 'integration:write')
+	return request
+}
+
+/**
  * Completes the OAuth authorization redirect from a remote MCP server. The
- * browser session cookie identifies the user, whose per-user hub DO holds the
- * pending OAuth state matching the `state` query parameter.
+ * browser session cookie identifies the user; the hub of the org that owns
+ * the server holds the pending OAuth state matching the `state` parameter.
  */
 export function createAccountMcpServersOauthCallbackHandler(env: Env) {
 	return {
@@ -158,9 +221,18 @@ export function createAccountMcpServersOauthCallbackHandler(env: Env) {
 				return user
 			}
 
+			const callbackRequest = await callbackRequestForServer({
+				env,
+				url: new URL(request.url),
+				user,
+			}).catch(() => user.request)
+			const ownerId = ownerIdFromCaller({
+				request: callbackRequest,
+				user: user.mcpUser,
+			})
 			const hub = createMcpClientHubClient({
 				env,
-				userId: user.mcpUser.userId,
+				userId: ownerId,
 				waitUntil,
 			})
 			let authSuccess = false
@@ -196,14 +268,14 @@ export function createAccountMcpServersOauthCallbackHandler(env: Env) {
 			if (serverId && authSuccess && !lastError) {
 				await setMcpServerLastError({
 					env,
-					userId: user.mcpUser.userId,
+					userId: ownerId,
 					id: serverId,
 					lastError: null,
 				}).catch(() => {})
 			} else if (serverId && lastError) {
 				await setMcpServerLastError({
 					env,
-					userId: user.mcpUser.userId,
+					userId: ownerId,
 					id: serverId,
 					lastError,
 				}).catch(() => {})
@@ -211,14 +283,17 @@ export function createAccountMcpServersOauthCallbackHandler(env: Env) {
 
 			const returnToOnboarding =
 				readMcpOAuthReturnCookie(request.headers.get('Cookie')) != null
+			const orgSlug = callbackRequest.org.slug?.trim() || user.username
 			const target = returnToOnboarding
 				? new URL(routes.onboardingStep2.href(), request.url)
-				: serverId
-					? new URL(
-							routes.accountMcpServerDetail.href({ serverId }),
-							request.url,
-						)
-					: new URL(routes.accountMcpServers.href(), request.url)
+				: new URL(
+						orgSectionRestPath(
+							orgSlug,
+							'mcp-servers',
+							serverId ? serverId : '',
+						),
+						request.url,
+					)
 			if (authorizationNeeded) {
 				target.searchParams.set('auth', serverId ? 'required' : 'retry')
 			} else if (authSuccess) {
@@ -257,7 +332,10 @@ async function handleAddAction(input: {
 	})
 	const { setting } = await addMcpServer({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		name: readTrimmedStringOrEmpty(input.body, 'name'),
 		url: readTrimmedStringOrEmpty(input.body, 'url'),
 		baseUrl: oauth.clientOrigin,
@@ -286,7 +364,10 @@ async function handleConnectionAction(input: {
 	const setting = await requireSetting(input)
 	const hub = createMcpClientHubClient({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		waitUntil,
 	})
 	const result =
@@ -302,14 +383,20 @@ async function handleConnectionAction(input: {
 	if (result.state === 'ready') {
 		await setMcpServerLastError({
 			env: input.env,
-			userId: input.user.mcpUser.userId,
+			userId: ownerIdFromCaller({
+				request: input.user.request,
+				user: input.user.mcpUser,
+			}),
 			id: setting.id,
 			lastError: null,
 		}).catch(() => {})
 	} else if (result.lastError) {
 		await setMcpServerLastError({
 			env: input.env,
-			userId: input.user.mcpUser.userId,
+			userId: ownerIdFromCaller({
+				request: input.user.request,
+				user: input.user.mcpUser,
+			}),
 			id: setting.id,
 			lastError: result.lastError,
 		}).catch(() => {})
@@ -335,7 +422,10 @@ async function handleSetEnabledAction(input: {
 	const setting = await requireSetting(input)
 	const updated = await setMcpServerEnabled({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		id: setting.id,
 		enabled: readBoolean(input.body, 'enabled', true),
 	})
@@ -368,7 +458,10 @@ async function handleSetUsageAction(input: {
 			: []
 	const updated = await setMcpServerUsage({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		id: setting.id,
 		usageMode,
 		allowedPackageIds,
@@ -394,7 +487,10 @@ async function handleDeleteAction(input: {
 	const setting = await requireSetting(input)
 	const deleted = await deleteMcpServer({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		id: setting.id,
 	})
 	if (!deleted) {
@@ -410,6 +506,88 @@ async function handleDeleteAction(input: {
 	)
 }
 
+/**
+ * Save, replace, or remove a server's pre-registered OAuth client. Only this
+ * settings page can do it; no capability takes a client secret. The secret
+ * is never echoed: responses carry the client id alone.
+ */
+async function handleOAuthClientAction(input: {
+	env: Env
+	user: AuthenticatedUser
+	body: object
+	request: Request
+	kind: 'set' | 'remove'
+}) {
+	await authorize(
+		{ env: input.env, request: input.user.request },
+		'integration:write',
+	)
+	const setting = await requireSetting(input)
+	let client: { clientId: string; clientSecret: string } | null = null
+	if (input.kind === 'set') {
+		const parsed = normalizeMcpPreRegisteredOAuthClientInput({
+			clientId: (input.body as Record<string, unknown>)['clientId'],
+			clientSecret: (input.body as Record<string, unknown>)['clientSecret'],
+		})
+		if (!parsed.ok) {
+			return jsonResponse({ ok: false, error: parsed.error }, 400)
+		}
+		client = { clientId: parsed.clientId, clientSecret: parsed.clientSecret }
+	}
+	const change = await setMcpServerPreRegisteredOAuthClient({
+		env: input.env,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
+		id: setting.id,
+		callbackUrl: resolveMcpServerOAuthClientUrls({
+			env: input.env,
+			requestUrl: input.request.url,
+		}).callbackUrl,
+		client,
+	})
+	if (!change.changed) {
+		return jsonResponse(
+			{ ok: false, error: 'This server has no OAuth client configured.' },
+			400,
+		)
+	}
+	await recordOrgAuditEvent(
+		orgAuditWriterFromRequest(input.env, input.user.request),
+		{
+			orgId: input.user.request.org.id,
+			action: client
+				? change.previousClientId
+					? 'mcp_server.oauth_client_replaced'
+					: 'mcp_server.oauth_client_set'
+				: 'mcp_server.oauth_client_removed',
+			resourceType: 'mcp_server',
+			resourceId: setting.id,
+			details: {
+				serverName: setting.name,
+				clientId: client?.clientId ?? change.previousClientId,
+			},
+		},
+	)
+	const payload = await loadAccountMcpServersData({
+		env: input.env,
+		user: input.user,
+		requestUrl: input.request.url,
+		waitUntil,
+	})
+	return jsonResponse({
+		...payload,
+		// The hub reply is authoritative even if the snapshot read failed.
+		servers: payload.servers.map((server) =>
+			server.id === setting.id
+				? { ...server, oauthClientId: client?.clientId ?? null }
+				: server,
+		),
+		selectedServerId: setting.id,
+	})
+}
+
 async function requireSetting(input: {
 	env: Env
 	user: AuthenticatedUser
@@ -421,7 +599,10 @@ async function requireSetting(input: {
 	}
 	const setting = await getMcpServerSettingById({
 		env: input.env,
-		userId: input.user.mcpUser.userId,
+		userId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
 		id,
 	})
 	if (!setting) {

@@ -91,6 +91,18 @@ Optional Wrangler `var` (public, non-secret; see
   is required for `sendBeacon` duration/events, not for the image pageview
   beacon.
 
+## Scarf
+
+No Wrangler var. The client pixel id lives in
+`packages/worker/client/scarf-analytics.ts`. It fires only on
+`https://kody.codes` public marketing and docs paths (homepage, pricing, FAQ,
+case studies, community, blog catalog slugs, and official docs slugs). Preview,
+local, and other hosts never send. The pixel includes the public path and no
+query string, fragment, referrer, or account id. Global Privacy Control and Do
+Not Track skip the request. The CSP in
+`packages/worker/src/app/security-headers.ts` allowlists
+`https://static.scarf.sh` in `img-src` only.
+
 ## YouTube watch overlay
 
 Optional Wrangler vars (public, non-secret; see
@@ -211,9 +223,8 @@ confirmed non-production runtimes; see `packages/worker/src/app-base-url.ts` and
 
 MCP `execute` runs sandboxed JavaScript with a global `fetch`. Calls to
 third-party APIs can use stored secrets via `{{secret:name}}` placeholders in
-URLs and headers where the MCP runtime supports them. Host allowlists and
-capability policies apply per secret. There are no GitHub-specific Worker
-environment variables.
+request headers over HTTPS. Host allowlists and capability policies apply per
+secret. There are no GitHub-specific Worker environment variables.
 
 ## Social login (GitHub / Google / X / Discord)
 
@@ -229,7 +240,7 @@ Optional Worker secrets (see `packages/worker/src/app/oauth-providers.ts` and
   Discord guild join and role sync. Bot token + guild id enable Add Guild Member
   during Discord social login; at least one role id enables role writes. The bot
   needs Create Instant Invite and Manage Roles. Standard/Pro follow
-  `users.stripe_plan`.)
+  `orgs.stripe_plan`.)
 
 A provider's login button only renders when both of its values are set. A
 `MOCK_`-prefixed client id activates the in-worker mock provider flow on
@@ -257,10 +268,10 @@ See [`architecture/authentication.md`](./architecture/authentication.md).
 ## Stripe billing
 
 Optional Worker secret and vars for account subscription billing
-(`packages/worker/src/billing/`, routes under `/account/billing`). When
+(`packages/worker/src/billing/`, routes under `/@<slug>/-/billing`). When
 `STRIPE_SECRET_KEY` is unset, billing is disabled: the account billing page
 shows plan info plus a "not configured" notice, and success/portal/cron skip
-safely. Manual `users.plan` grants apply regardless.
+safely. Manual `orgs.plan` grants apply regardless.
 
 - `STRIPE_SECRET_KEY` — Stripe secret API key. Required for checkout linking,
   portal sessions, and `stripe_plan` refresh. Synced as a Worker secret from the
@@ -274,7 +285,7 @@ safely. Manual `users.plan` grants apply regardless.
 - `STRIPE_PRO_PRICE_ID` — Stripe Price id for the purchasable $12/month Pro
   (`price_1UKHxZLAQpAnsYszwwqZTCCT` on `prod_VKxtLxMdjEkOdu` in production), the
   only self-serve paid plan and the only Stripe price that grants the prepaid
-  credit wallet (`users.stripe_credits_eligible`). Reusing a retired Standard or
+  credit wallet (`orgs.stripe_credits_eligible`). Reusing a retired Standard or
   Pro id here would make those subscribers wallet-eligible.
 - `STRIPE_PRO_YEARLY_PRICE_ID` — Stripe Price id for the purchasable $120/year
   Pro (`price_1UKHxaLAQpAnsYszlsVHHXjK`).
@@ -341,7 +352,8 @@ secrets at rest in D1.
 Worker bindings (see `packages/worker/wrangler.jsonc`):
 
 - **`CAPABILITY_VECTOR_INDEX`** — Cloudflare Vectorize index for semantic
-  retrieval (`kody-capabilities-prod` / `kody-capabilities-preview`). Create
+  retrieval (`kody-capabilities-prod`; each preview gets its own
+  `<preview-worker-name>-vectors` from `tools/ci/preview-resources.ts`). Create
   indexes with **`--dimensions=384 --metric=cosine`** to match
   `@cf/baai/bge-small-en-v1.5` with `cls` pooling (see
   `packages/worker/src/vectorize/embedding.ts`). The **`test`** Wrangler
@@ -392,9 +404,11 @@ Worker secrets:
   which fans `status.incident.opened` / `status.incident.resolved` to admin
   package subscriptions, and for status
   `POST /__maintenance/incidents/:id/retrospective`, which attaches a public
-  writeup to a resolved probe-derived incident. When unset, the origin endpoint
-  returns not-configured, the status worker skips emit, and the retrospective
-  route returns 503; packages can reconcile open/resolve from public
+  writeup to a resolved probe-derived incident, and status
+  `DELETE /__maintenance/incidents/:id`, which removes a resolved
+  health-check-only incident. When unset, the origin endpoint returns
+  not-configured, the status worker skips emit, and both incident maintenance
+  routes return 503; packages can reconcile open/resolve from public
   `/status.json`. Synced from the GitHub Actions secret of the same name on
   production deploy.
 
@@ -409,12 +423,14 @@ Optional Worker secrets/vars (see `packages/worker/src/env-schema.ts` and
   modules use saved secrets and secret-aware `fetch` (see
   `docs/contributing/packages-and-manifests.md`). Local `npm run dev` sets this
   to the Cloudflare mock token unless `SKIP_CLOUDFLARE_MOCK=1`. Production
-  workers do not share one value: `kody-runtime` receives the narrower
-  `CLOUDFLARE_RUNTIME_API_TOKEN` GitHub secret (Email Sending + Artifacts only)
-  via
-  `--set-from-env-optional CLOUDFLARE_API_TOKEN=CLOUDFLARE_RUNTIME_API_TOKEN` in
-  `.github/workflows/deploy.yml`; see `docs/contributing/setup-manifest.md` for
-  the permission list.
+  workers never receive the deploy token and do not share one value:
+  `kody-production` and `kody-platform` receive `CLOUDFLARE_APP_API_TOKEN`,
+  `kody-runtime` receives `CLOUDFLARE_RUNTIME_API_TOKEN` (Email Sending +
+  Artifacts only), and `kody-status` receives `CLOUDFLARE_STATUS_API_TOKEN`
+  (Email Sending only), each via a required
+  `--set-from-env CLOUDFLARE_API_TOKEN=<GitHub secret>` alias in
+  `.github/workflows/deploy.yml`. See `docs/contributing/setup-manifest.md` for
+  the permission lists.
 - `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account id required by the Cloudflare
   Email Service REST API fallback used by local mocks and preview deploys. This
   is a Worker var (not a secret) and should match the account behind

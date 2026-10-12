@@ -1,10 +1,17 @@
 import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	assertAccountWritableDb,
 	withAccountWriteLease,
 } from '#worker/account/deletion-state.ts'
 import { getStaticRegistry } from '#mcp/capabilities/registry.ts'
 import { redeemCliCredentialBootstrap } from '#worker/api-tokens/cli-credential-bootstrap.ts'
-import { recordUsage } from '#worker/usage/record-usage.ts'
+import {
+	recordUsage,
+	usageAttributionFieldsFromRequest,
+} from '#worker/usage/record-usage.ts'
 import { authenticateApiRequest } from './authenticate.ts'
 import {
 	buildOpenApiDocument,
@@ -18,21 +25,40 @@ import {
 	notFound,
 	toApiError,
 } from './errors.ts'
+import { authorizeSurface } from '#worker/authorization/authorize.ts'
 import {
-	assertApiScope,
 	capabilityProxyObservationEntityId,
 	invokeApiOperation,
 	isCapabilityProxyOperation,
 	isCliCredentialBootstrapRedeemOperation,
 } from './invoke.ts'
+import { parseNativeInput } from './native-operation-helpers.ts'
 import { apiOperationUsesQueryInputs, matchApiRoute } from './operations.ts'
 import {
 	mergeApiParams,
 	readJsonBody,
 	readQueryParams,
 } from './request-params.ts'
+import { bootstrapRedeemInputSchema } from './token-operations.ts'
 
 export const openApiDocumentPath = '/openapi.json'
+
+function operationNeedsAccountWriteLease(resolved: {
+	readOnly: boolean
+	permission: string
+}) {
+	if (!resolved.readOnly) return true
+	const { permission } = resolved
+	if (permission === 'none' || permission.endsWith(':read')) return false
+	return (
+		permission.endsWith(':write') ||
+		permission.endsWith(':delete') ||
+		permission.endsWith(':create') ||
+		permission.endsWith(':use') ||
+		permission.endsWith(':send') ||
+		permission.endsWith(':publish')
+	)
+}
 
 function json(body: unknown, init: ResponseInit = {}) {
 	return Response.json(body ?? null, {
@@ -123,16 +149,20 @@ async function handleOperation(input: {
 			match,
 			inputSchema: resolved.inputSchema,
 		})
-		const code =
-			typeof params === 'object' &&
-			params !== null &&
-			'code' in params &&
-			typeof (params as { code: unknown }).code === 'string'
-				? (params as { code: string }).code
-				: ''
+		const redeemInput = parseNativeInput(bootstrapRedeemInputSchema, params)
 		const redeemed = await redeemCliCredentialBootstrap({
 			db: input.env.APP_DB,
-			code,
+			code: redeemInput.code,
+			env: input.env,
+			...(redeemInput.lifetime === undefined
+				? {}
+				: { lifetime: redeemInput.lifetime }),
+			...(redeemInput.idle_ttl_seconds === undefined
+				? {}
+				: { idleTtlSeconds: redeemInput.idle_ttl_seconds }),
+			...(redeemInput.max_lifetime_seconds === undefined
+				? {}
+				: { maxLifetimeSeconds: redeemInput.max_lifetime_seconds }),
 		})
 		input.waitUntil(
 			recordUsage(
@@ -151,8 +181,9 @@ async function handleOperation(input: {
 	}
 
 	function recordCapabilityProxyObservation(observation: {
-		userId: string
+		userId: OwnerId
 		failureCode: string
+		request?: Parameters<typeof usageAttributionFieldsFromRequest>[0]
 	}) {
 		if (!isCapabilityProxyOperation(matchedOperation)) return
 		input.waitUntil(
@@ -168,6 +199,7 @@ async function handleOperation(input: {
 					}),
 					durationMs: Date.now() - startedAt,
 					outcome: 'error',
+					...usageAttributionFieldsFromRequest(observation.request),
 				},
 				{ waitUntil: input.waitUntil },
 			),
@@ -197,17 +229,22 @@ async function handleOperation(input: {
 		matchedOperation,
 		await getStaticRegistry(),
 	)
-	// Scope before param parse so unscoped tokens get 403 insufficient_scope
-	// instead of 400 parse errors. CapabilityProxy preflight failures meter here
-	// (one event); invoke still meters the hop after params are accepted.
+	// Authorize before param parse so under-scoped tokens get 403
+	// insufficient_scope instead of 400 parse errors. CapabilityProxy
+	// preflight failures meter here (one event); invoke still meters the hop
+	// after params are accepted.
 	try {
-		assertApiScope(ctx, resolved.scope)
+		await authorizeSurface(
+			{ env: ctx.env, request: ctx.callerContext.request },
+			resolved.permission,
+		)
 	} catch (error) {
 		const apiError = toApiError(error)
 		if (apiError instanceof ApiError) {
 			recordCapabilityProxyObservation({
-				userId: ctx.callerContext.user.userId,
+				userId: personalOrgId(ctx.callerContext.user.userId),
 				failureCode: apiError.code,
+				request: ctx.callerContext.request,
 			})
 		}
 		throw error
@@ -218,15 +255,14 @@ async function handleOperation(input: {
 		match,
 		inputSchema: resolved.inputSchema,
 	})
-	const userId = ctx.callerContext.user.userId
+	const userId = personalOrgId(ctx.callerContext.user.userId)
 	const run = () =>
 		invokeApiOperation({
 			operationId: matchedOperation.operationId,
 			params,
 			ctx,
 		})
-	const writes =
-		!resolved.readOnly || resolved.scope?.endsWith(':write') === true
+	const writes = operationNeedsAccountWriteLease(resolved)
 	if (!writes) {
 		await assertAccountWritableDb(input.env.APP_DB, userId)
 		return json(await run())

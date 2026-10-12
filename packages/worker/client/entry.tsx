@@ -10,6 +10,8 @@ import { ensureConstructableStylesheets } from './ensure-constructable-styleshee
 import { ensureCryptoRandomUUID } from './ensure-crypto-random-uuid.ts'
 import { ensureObjectHasOwn } from './ensure-object-has-own.ts'
 import { ensurePromiseWithResolvers } from './ensure-promise-with-resolvers.ts'
+import { pinCssFontFaces } from './pin-css-font-faces.ts'
+import { releaseRemixBootHistoryEntry } from './release-remix-boot-history-entry.ts'
 
 // Remix frame ids call crypto.randomUUID(); some in-app browsers omit it.
 ensureCryptoRandomUUID()
@@ -22,6 +24,9 @@ ensureObjectHasOwn()
 // Remix frame/reconcile use Promise.withResolvers. Mid-tier browsers omit it;
 // this is not Safari 11 support (KODY-7P remains unsupported).
 ensurePromiseWithResolvers()
+// Chrome rebuilds CSS-connected FontFace objects on Remix cascade changes;
+// pinning JS twins stops font-display: swap flashes on SPA navigations.
+pinCssFontFaces()
 initSentryClient(document)
 
 const clientRegistry: Record<string, typeof AppRoot> = {
@@ -95,6 +100,9 @@ async function boot() {
 			return resolveClientFrame(src, options)
 		},
 	})
+	// `run()` tagged the boot entry synchronously; the client router owns
+	// top-level Back/Forward.
+	releaseRemixBootHistoryEntry()
 
 	app.addEventListener('error', (event) => {
 		console.error('Client hydration error:', event.error)

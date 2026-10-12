@@ -1,5 +1,7 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers'
 import { expect, test, vi } from 'vitest'
+import { sessionRequestLineage } from '#worker/test-support/request-context.ts'
 import type * as PackageInvocationsService from '#worker/package-invocations/service.ts'
 import type * as RunKodyRegistry from '#mcp/run-kody-registry.ts'
 import type * as RunRecordsServiceModule from '#worker/run-records/service.ts'
@@ -8,7 +10,6 @@ import { planLimits } from '#universal/plans.ts'
 import { activeWorkflowStatusValues } from '#worker/package-runtime/workflow-statuses.ts'
 import { creatingWorkflowProjectionStatus } from '#worker/run-records/workflow-projection.ts'
 import { type WorkflowProjectionUpsertInput } from '#worker/run-records/service.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	DynamicCallableWorkflowBase,
 	cancelWorkflowRunForUser,
@@ -25,6 +26,7 @@ import {
 	createStatefulWorkflowBinding,
 	createWorkflowRunsDatabase,
 } from '#worker/test-support/package-workflows.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 vi.mock('#worker/package-invocations/service.ts', () => ({
 	invokePackageExport: (
@@ -63,6 +65,10 @@ vi.mock('#worker/run-records/service.ts', () => ({
 					projection: WorkflowProjectionUpsertInput
 				},
 			]),
+		),
+	releaseWorkflowProjectionIdempotencyKey: (...args: Array<unknown>) =>
+		runRecordMocks.releaseWorkflowProjectionIdempotencyKey(
+			...(args as [{ env: Env; userId: string; id: string }]),
 		),
 	getWorkflowProjection: (...args: Array<unknown>) =>
 		runRecordMocks.getWorkflowProjection(
@@ -138,7 +144,8 @@ function createInline(
 ) {
 	return createDynamicCallableWorkflow({
 		env,
-		userId,
+		userId: ownerIdFromStored(userId),
+		lineage: sessionRequestLineage(userId),
 		body: { code: inlineCode, ...body } as never,
 	})
 }
@@ -183,7 +190,8 @@ test('createDynamicCallableWorkflow verifies package ownership before queueing p
 
 	const created = await createDynamicCallableWorkflow({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
+		lineage: sessionRequestLineage('user-1'),
 		packageContext: null,
 		body: {
 			...packageBody,
@@ -216,7 +224,8 @@ test('createDynamicCallableWorkflow verifies package ownership before queueing p
 				binding,
 				createWorkflowRunsDatabase({ savedPackage: null }),
 			),
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			lineage: sessionRequestLineage('user-1'),
 			body: {
 				packageId: 'not-owned',
 				exportName: './run-event',
@@ -247,7 +256,8 @@ test('createDynamicCallableWorkflow dedupes queued runs by user and idempotency 
 	const packageRun = (runAt: string, idempotencyKey = 'idempotency-repro') =>
 		createDynamicCallableWorkflow({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			lineage: sessionRequestLineage('user-1'),
 			body: {
 				...packageBody,
 				runAt,
@@ -276,7 +286,8 @@ test('createDynamicCallableWorkflow dedupes queued runs by user and idempotency 
 		}),
 	])
 
-	// Terminal (errored) projections still satisfy the same-key replay.
+	// Terminal (errored) projections still satisfy same-key replay until the
+	// key is released (durable escalation releases after a dead terminal).
 	runRecordMocks.resetProjections()
 	const erroredFirst = await packageRun(
 		'2026-05-08T19:30:00.000Z',
@@ -292,6 +303,42 @@ test('createDynamicCallableWorkflow dedupes queued runs by user and idempotency 
 	expect(erroredReplay.id).toBe(erroredFirst.id)
 	expect(erroredReplay.status).toBe('errored')
 	expect(binding.create).toHaveBeenCalledTimes(2)
+
+	await runRecordMocks.releaseWorkflowProjectionIdempotencyKey({
+		env,
+		userId: ownerIdFromStored('user-1'),
+		id: erroredFirst.id,
+	})
+	const afterRelease = await packageRun(
+		'2026-05-08T19:32:00.000Z',
+		'terminal-key',
+	)
+	expect(afterRelease.id).not.toBe(erroredFirst.id)
+	expect(afterRelease.status).toBe('queued')
+	expect(binding.create).toHaveBeenCalledTimes(3)
+	expect(findRun(erroredFirst.id)?.idempotencyKey).toBe(
+		`released:${erroredFirst.id}`,
+	)
+	expect(findRun(afterRelease.id)?.idempotencyKey).toBe('terminal-key')
+
+	// A second terminal failure must walk the successor chain (not reuse B).
+	const secondStored = findRun(afterRelease.id)
+	if (!secondStored) throw new Error('Expected second workflow projection.')
+	secondStored.status = 'errored'
+	await runRecordMocks.releaseWorkflowProjectionIdempotencyKey({
+		env,
+		userId: ownerIdFromStored('user-1'),
+		id: afterRelease.id,
+	})
+	const afterSecondRelease = await packageRun(
+		'2026-05-08T19:33:00.000Z',
+		'terminal-key',
+	)
+	expect(afterSecondRelease.id).not.toBe(erroredFirst.id)
+	expect(afterSecondRelease.id).not.toBe(afterRelease.id)
+	expect(afterSecondRelease.status).toBe('queued')
+	expect(binding.create).toHaveBeenCalledTimes(4)
+	expect(findRun(afterSecondRelease.id)?.idempotencyKey).toBe('terminal-key')
 
 	// The key is scoped per user.
 	runRecordMocks.resetProjections()
@@ -317,7 +364,8 @@ test('createDynamicCallableWorkflow dedupes queued runs by user and idempotency 
 						},
 					}),
 				),
-				userId,
+				userId: ownerIdFromStored(userId),
+				lineage: sessionRequestLineage(userId),
 				body: {
 					...packageBody,
 					runAt: '2026-05-08T19:30:00.000Z',
@@ -332,7 +380,10 @@ test('createDynamicCallableWorkflow dedupes queued runs by user and idempotency 
 	// An existing engine instance short-circuits before entitlement checks.
 	runRecordMocks.resetProjections()
 	const existingOverLimitBinding = createWorkflowBinding({})
-	await seedActiveWorkflowProjections({ userId: 'user-1', count: 100 })
+	await seedActiveWorkflowProjections({
+		userId: ownerIdFromStored('user-1'),
+		count: 100,
+	})
 	await expect(
 		createInline(createWorkflowEnv(existingOverLimitBinding), {
 			idempotencyKey: 'existing-over-limit-key',
@@ -418,7 +469,7 @@ test('RunLog-only list, cancel, idempotency, and concurrency stay D1-free', asyn
 	const seed = (id: string, idempotencyKey: string, status: string) =>
 		runRecordMocks.upsertWorkflowProjection({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			projection: {
 				id,
 				bindingName: dynamicCallableWorkflowsBindingName,
@@ -446,7 +497,7 @@ test('RunLog-only list, cancel, idempotency, and concurrency stay D1-free', asyn
 
 	const listed = await listWorkflowRunsForUser({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		limit: 25,
 	})
 	expect(listed.map((row) => row.id).sort()).toEqual(
@@ -466,7 +517,7 @@ test('RunLog-only list, cancel, idempotency, and concurrency stay D1-free', asyn
 
 	const cancelled = await cancelWorkflowRunForUser({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		workflowRunId: activeIds[0]!,
 	})
 	expect(cancelled).toMatchObject({
@@ -490,7 +541,7 @@ test('RunLog terminal stickiness blocks later active regression after cancel', a
 		await withClock('2026-05-08T19:31:00.000Z', () =>
 			cancelWorkflowRunForUser({
 				env,
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				workflowRunId: created.id,
 			}),
 		)
@@ -505,7 +556,7 @@ test('RunLog terminal stickiness blocks later active regression after cancel', a
 		// A later queued write must not regress the terminal projection.
 		await runRecordMocks.upsertWorkflowProjection({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			projection: {
 				...cancelled,
 				status: 'queued',
@@ -531,7 +582,7 @@ test('createDynamicCallableWorkflow enforces concurrent workflow entitlements ac
 	// Two racing creates for the last free slot: exactly one wins.
 	runRecordMocks.resetProjections()
 	await seedActiveWorkflowProjections({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		count: freeLimit - 1,
 	})
 	const concurrentBinding = createStatefulWorkflowBinding()
@@ -591,7 +642,10 @@ test('createDynamicCallableWorkflow enforces concurrent workflow entitlements ac
 	// A full free plan is denied from RunLog capacity alone and leaves no
 	// reservation behind.
 	runRecordMocks.resetProjections()
-	await seedActiveWorkflowProjections({ userId: 'user-1', count: freeLimit })
+	await seedActiveWorkflowProjections({
+		userId: ownerIdFromStored('user-1'),
+		count: freeLimit,
+	})
 	runRecordMocks.upsertWorkflowProjection.mockClear()
 	runRecordMocks.reserveWorkflowProjectionSlot.mockClear()
 	runRecordMocks.deleteWorkflowProjectionIfCreating.mockClear()
@@ -601,14 +655,14 @@ test('createDynamicCallableWorkflow enforces concurrent workflow entitlements ac
 			runAt,
 			idempotencyKey: 'inline-key',
 		}),
-		{ plan: 'free', limit: freeLimit, userId: 'user-1' },
+		{ plan: 'free', limit: freeLimit, userId: ownerIdFromStored('user-1') },
 	)
 	expect(fullFreeBinding.create).not.toHaveBeenCalled()
 	expect(countWhere((status) => status === 'queued')).toBe(freeLimit)
 	expect(activeWorkflowStatusValues).toContain('queued')
 
 	const email = 'plan-user@example.com'
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
 	const planEnv = (plan: string) =>
 		createWorkflowEnv(
 			createStatefulWorkflowBinding(),
@@ -619,7 +673,8 @@ test('createDynamicCallableWorkflow enforces concurrent workflow entitlements ac
 	const planRun = (plan: string, idempotencyKey: string) =>
 		createDynamicCallableWorkflow({
 			env: planEnv(plan),
-			userId,
+			userId: ownerIdFromStored(userId),
+			lineage: sessionRequestLineage(userId),
 			userEmail: email,
 			body: { code: inlineCode, runAt, idempotencyKey },
 		})
@@ -661,7 +716,11 @@ test('listWorkflowRunsForUser returns recent workflow statuses', async () => {
 		idempotencyKey: 'inline-key',
 	}
 	const list = () =>
-		listWorkflowRunsForUser({ env, userId: 'user-1', limit: 10 })
+		listWorkflowRunsForUser({
+			env,
+			userId: ownerIdFromStored('user-1'),
+			limit: 10,
+		})
 	expect(await list()).toEqual([
 		expect.objectContaining({ ...listed, sourceType: 'inline' }),
 	])
@@ -699,7 +758,8 @@ test('DynamicCallableWorkflowBase records workflow_run usage on terminal transit
 			vi.setSystemTime(new Date('2026-05-03T12:34:00.000Z'))
 			const created = await createDynamicCallableWorkflow({
 				env,
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
+				lineage: sessionRequestLineage('user-1'),
 				packageContext: null,
 				body: {
 					code,
@@ -737,7 +797,9 @@ test('DynamicCallableWorkflowBase records workflow_run usage on terminal transit
 			}
 			expect(recordUsageSpy).toHaveBeenCalledTimes(1)
 			expect(recordUsageSpy).toHaveBeenCalledWith(env, {
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
+				actorUserId: '',
+				automationSource: 'schedule',
 				eventType: 'workflow_run',
 				entityId: created.id,
 				durationMs: expect.any(Number),
@@ -778,7 +840,8 @@ test('workflow_run usage is recorded once across replays and never on failed ter
 	const queueInline = async (idempotencyKey: string) => {
 		const created = await createDynamicCallableWorkflow({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
+			lineage: sessionRequestLineage('user-1'),
 			packageContext: null,
 			body: {
 				code: 'export default async function main(){ return { ok: true }; }',

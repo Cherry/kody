@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -47,7 +48,7 @@ const jevRerankTelemetrySchema = z
 			.enum(jevSearchKeepPaths)
 			.optional()
 			.describe(
-				'Adaptive keep path after Jev Score (`kept-high` | `kept-lowered` | `empty`). Present when Score ran and mean confidence cleared the floor.',
+				'Adaptive keep path after Jev Score (`kept-high` | `kept-lowered` | `kept-identity` | `empty`). Present when Score ran and mean confidence cleared the floor. `kept-identity` keeps package name, kody id, or leaf hits when every Score misses the floors.',
 			),
 		errorReason: z
 			.string()
@@ -132,6 +133,7 @@ export const searchCapability = defineDomainCapability(
 	capabilityDomainNames.meta,
 	{
 		name: 'search',
+		orgPermission: 'search:read',
 		description:
 			'Search Kody capabilities, saved packages, integrations, and secret references using natural language or exact user-scoped package identity. An empty call returns the domain index. Pass "domain" to rank or list one capability domain. Use this inside package and execute runtimes when reusable code needs the same discovery surface as the public MCP search tool.',
 		keywords: [
@@ -191,7 +193,9 @@ export const searchCapability = defineDomainCapability(
 			const query = args.query?.trim() ?? ''
 			const domainFilter = args.domain?.trim() || undefined
 			const conversationId = resolveConversationId(args.conversationId)
-			const userId = ctx.callerContext.user?.userId ?? null
+			const userId = ctx.callerContext.user
+				? personalOrgId(ctx.callerContext.user.userId)
+				: null
 			const includeHiddenPackages = !!args.includeHiddenPackages
 			const startedAt = performance.now()
 			// Deliberately dynamic: search-execution loads the capability registry,

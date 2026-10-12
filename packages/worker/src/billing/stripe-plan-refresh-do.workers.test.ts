@@ -1,13 +1,15 @@
 import { expect, test, vi, type Mock } from 'vitest'
 import { env, runInDurableObject } from 'cloudflare:test'
 import { consoleError } from '#worker/test-support/console-spies.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import {
 	scheduleStripePlanRefreshBackstop,
 	stripePlanRefreshBackstopDelayMs,
 } from './stripe-plan-refresh-client.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureCreditWalletTestSchema } from './test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 function stubFetch<T extends Mock>(fetchMock: T) {
 	vi.stubGlobal('fetch', fetchMock)
 	return Object.assign(fetchMock, {
@@ -18,21 +20,21 @@ function stubFetch<T extends Mock>(fetchMock: T) {
 async function seedStripeRefreshUser(prefix: string, stripeCustomerId: string) {
 	await ensureCreditWalletTestSchema(env.APP_DB)
 	const email = `${prefix}-${crypto.randomUUID()}@example.com`
-	const userId = await createStableUserIdFromEmail(email)
+	const userId = testStableUserIdFromEmail(email)
+	const username = `${prefix}-${crypto.randomUUID().slice(0, 8)}`
 	await env.APP_DB.prepare(
 		`INSERT INTO users (
-			username, email, password_hash, email_verified_at, stable_user_id,
-			plan, stripe_customer_id, stripe_plan, stripe_plan_refreshed_at
-		) VALUES (?, ?, 'test-password-hash', ?, ?, 'free', ?, NULL, NULL)`,
+			username, email, password_hash, email_verified_at, stable_user_id
+		) VALUES (?, ?, 'test-password-hash', ?, ?)`,
 	)
-		.bind(
-			`${prefix}-${crypto.randomUUID().slice(0, 8)}`,
-			email,
-			new Date().toISOString(),
-			userId,
-			stripeCustomerId,
-		)
+		.bind(username, email, new Date().toISOString(), userId)
 		.run()
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username,
+		plan: 'free',
+		stripeCustomerId,
+	})
 	const stub = env.STRIPE_PLAN_REFRESH.get(
 		env.STRIPE_PLAN_REFRESH.idFromName(userId),
 	)
@@ -61,7 +63,11 @@ test('plan-relevant activity arms a per-user alarm that refreshes Stripe once', 
 
 	const scheduledBetween = Date.now()
 	await expect(
-		scheduleStripePlanRefreshBackstop({ env, userId, now }),
+		scheduleStripePlanRefreshBackstop({
+			env,
+			userId: ownerIdFromStored(userId),
+			now,
+		}),
 	).resolves.toBe(true)
 	const alarmAt = await readAlarm()
 	expect(alarmAt).toBeTypeOf('number')
@@ -90,8 +96,8 @@ test('plan-relevant activity arms a per-user alarm that refreshes Stripe once', 
 
 	const row = await env.APP_DB.prepare(
 		`SELECT stripe_plan, stripe_plan_refreshed_at
-		 FROM users
-		 WHERE stable_user_id = ?`,
+		 FROM orgs
+		 WHERE id = ?`,
 	)
 		.bind(userId)
 		.first<{
@@ -109,7 +115,10 @@ test('refresh failures re-arm, while account deletion prevents re-arming after p
 		'stripe-alarm-retry',
 		'cus_alarm_retry',
 	)
-	await scheduleStripePlanRefreshBackstop({ env, userId })
+	await scheduleStripePlanRefreshBackstop({
+		env,
+		userId: ownerIdFromStored(userId),
+	})
 	consoleError.mockImplementation(() => {})
 	using _fetch = stubFetch(
 		vi.fn(async () => Response.json({ error: 'stripe down' }, { status: 500 })),
@@ -132,7 +141,10 @@ test('refresh failures re-arm, while account deletion prevents re-arming after p
 		.bind(new Date().toISOString(), userId)
 		.run()
 	await expect(
-		scheduleStripePlanRefreshBackstop({ env, userId }),
+		scheduleStripePlanRefreshBackstop({
+			env,
+			userId: ownerIdFromStored(userId),
+		}),
 	).resolves.toBe(false)
 	expect(await readAlarm()).toBeNull()
 })

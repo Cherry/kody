@@ -52,23 +52,10 @@ export function rewritePackageManifestForFork(input: {
 export function scanCrossScopeReferences(input: {
 	files: Record<string, string>
 	expectedPackageScope: string
-	/**
-	 * Extra scopes treated as same-account. Unused for official platform
-	 * scopes: person-owned forks must not keep `kody:@kody/…` references
-	 * (decision 0035).
-	 */
-	allowedForeignScopes?: ReadonlyArray<string>
 }): Array<CrossScopeReference> {
 	const expectedScope = normalizePackageScope(input.expectedPackageScope)
-	const allowedScopes = new Set(
-		(input.allowedForeignScopes ?? []).map((scope) =>
-			normalizePackageScope(scope),
-		),
-	)
-	const isForeign = (scope: string) => {
-		const normalized = normalizePackageScope(scope)
-		return normalized !== expectedScope && !allowedScopes.has(normalized)
-	}
+	const isForeign = (scope: string) =>
+		normalizePackageScope(scope) !== expectedScope
 	const seen = new Set<string>()
 	const results: Array<CrossScopeReference> = []
 
@@ -109,6 +96,53 @@ export function scanCrossScopeReferences(input: {
 		const fileCompare = left.file.localeCompare(right.file)
 		if (fileCompare !== 0) return fileCompare
 		return left.specifier.localeCompare(right.specifier)
+	})
+}
+
+const scopedReferenceEnds = {
+	/** A whole `@scope/name`: then a subpath, quote, space, comma, or end. */
+	name: `(?=/|["'\`\\s,]|$)`,
+	/** A bare `@scope` only where a package name follows. */
+	scope: '(?=/)',
+} as const
+
+/**
+ * Replace `origin` (`@scope/name`, or `@scope` with `end: 'scope'`) with
+ * `next` in every file, only where the reference ends at a name boundary, so
+ * `@kody/alpha` never rewrites inside `@kody/alpha-beta`.
+ */
+export function rewriteScopedReferences(input: {
+	files: Record<string, string>
+	origin: string
+	next: string
+	end: keyof typeof scopedReferenceEnds
+}): Record<string, string> {
+	const origin = input.origin.trim()
+	const next = input.next.trim()
+	if (!origin || origin === next) {
+		return { ...input.files }
+	}
+	const escaped = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	const pattern = new RegExp(`${escaped}${scopedReferenceEnds[input.end]}`, 'g')
+	const files: Record<string, string> = {}
+	for (const [path, content] of Object.entries(input.files)) {
+		files[path] = content.includes(origin)
+			? content.replace(pattern, next)
+			: content
+	}
+	return files
+}
+
+export function rewriteForkedPackageSelfReferences(input: {
+	files: Record<string, string>
+	originPackageName: string
+	nextPackageName: string
+}): Record<string, string> {
+	return rewriteScopedReferences({
+		files: input.files,
+		origin: input.originPackageName,
+		next: input.nextPackageName,
+		end: 'name',
 	})
 }
 

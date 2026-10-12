@@ -1,6 +1,9 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import type * as InfrastructureCodes from '#worker/package-invocations/infrastructure-codes.ts'
+import type * as PackageManifest from '#worker/package-registry/manifest.ts'
 import type * as WebhookDelivery from './delivery.ts'
 import type * as WebhookHeaders from './headers.ts'
 import type * as WebhookParams from './params.ts'
@@ -63,7 +66,8 @@ vi.mock('#worker/package-registry/source.ts', () => ({
 		mocks.loadPackageManifestBySourceId(...args),
 }))
 
-vi.mock('#worker/package-registry/manifest.ts', () => ({
+vi.mock('#worker/package-registry/manifest.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof PackageManifest>()),
 	listPackageWebhooks: (...args: Array<unknown>) =>
 		mocks.listPackageWebhooks(...args),
 }))
@@ -134,7 +138,7 @@ function mockPackage(
 ) {
 	mocks.resolveSavedPackage.mockResolvedValue({
 		id: 'pkg-1',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceId: 'source-1',
 		kodyId: 'demo',
 		name: '@user/demo',
@@ -150,7 +154,7 @@ function mockPackage(
 			? null
 			: {
 					id: 'endpoint-1',
-					userId: 'user-1',
+					userId: ownerIdFromStored('user-1'),
 					packageId: 'pkg-1',
 					webhookName: 'hook',
 					enabled: true,
@@ -166,7 +170,8 @@ function mockPackage(
 function dispatch(input: Partial<DispatchInput>) {
 	return dispatchSyntheticWebhookForUser({
 		env: { APP_DB: {} } as Env,
-		userId: 'user-1',
+		requestContext: sessionRequestContext('user-1'),
+		userId: ownerIdFromStored('user-1'),
 		baseUrl: 'https://heykody.dev',
 		kodyId: 'demo',
 		webhookName: 'hook',
@@ -252,7 +257,10 @@ test('dispatchSyntheticWebhookForUser rejects unminted, mismatched, foreign, and
 
 	mocks.resolveSavedPackage.mockResolvedValue(null)
 	await expect(
-		dispatch({ userId: 'other-user', request: { json: {} } }),
+		dispatch({
+			userId: ownerIdFromStored('other-user'),
+			request: { json: {} },
+		}),
 	).rejects.toThrow(/not found for this user/)
 
 	mockPackage({ inputMode: 'request' })

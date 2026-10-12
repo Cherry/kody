@@ -1,3 +1,7 @@
+import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import * as Sentry from '@sentry/cloudflare'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
 import { stampFirstSearch } from '#worker/identity/activation-stamps.ts'
@@ -106,7 +110,7 @@ function resolveListGuidance(input: {
 
 async function stampFirstSearchIfAuthenticated(
 	agent: McpRegistrationAgent,
-	userId: string | null,
+	userId: OwnerId | null,
 ) {
 	if (!userId) return
 	const db = agent.getEnv().APP_DB
@@ -135,7 +139,11 @@ export async function runSearchTool(input: {
 		userId: callerUserId,
 		storageId,
 	} = callerContextFields(callerContext)
-	const userId = callerUserId ?? null
+	// Package/secret/integration discovery and Waiting are keyed by the bound
+	// org. Stamps and onboarding still use the acting person's personal org
+	// (team orgs have no users row for activation columns).
+	const personOwnerId = callerUserId ? personalOrgId(callerUserId) : null
+	const userId = callerContext.request?.org.id ?? personOwnerId
 	const mcpCallerFields = {
 		baseUrl,
 		hasUser,
@@ -212,7 +220,7 @@ export async function runSearchTool(input: {
 			Object.assign(endToEndPhaseTimings, execution.phaseTimings)
 			signal.throwIfAborted()
 			const stampStart = performance.now()
-			await stampFirstSearchIfAuthenticated(agent, userId)
+			await stampFirstSearchIfAuthenticated(agent, personOwnerId)
 			endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 			const structuredWarnings = [...warnings]
 			const onboardingStart = performance.now()
@@ -229,14 +237,14 @@ export async function runSearchTool(input: {
 				onboardingNoticeLastShownAtMs !== null &&
 				Date.now() - onboardingNoticeLastShownAtMs < onboardingNoticeCooldownMs
 			const considerOnboardingNotice =
-				userId !== null &&
+				personOwnerId !== null &&
 				!withinNoticeCooldown &&
 				!onboardingNoticeConversationIds.includes(conversationId)
 			if (considerOnboardingNotice) {
 				const settlement = await settleWithBudget(
 					buildOnboardingSearchNotice({
 						env: agent.getEnv(),
-						userId,
+						userId: personOwnerId,
 						baseUrl,
 					}),
 					SEARCH_ONBOARDING_NOTICE_BUDGET_MS,
@@ -264,19 +272,20 @@ export async function runSearchTool(input: {
 				execution.result.matches.length > 0 &&
 				execution.result.matches.every((match) => match.type === 'domain')
 			const shouldInjectWaiting =
-				userId !== null &&
+				personOwnerId !== null &&
 				trimmedQuery.length > 0 &&
 				!domainFilter &&
 				!returnsDomainIndex
 			const waitingStart = performance.now()
 			let waitingMarkdown: string | null = null
 			let waitingStructured: ReturnType<typeof toSearchWaitingStructured> = null
-			if (shouldInjectWaiting) {
+			if (shouldInjectWaiting && callerUserId) {
 				try {
 					const waiting = await settleWithBudget(
 						deriveWaitingItemsForStableUser({
 							env: agent.getEnv(),
-							stableUserId: userId,
+							personId: callerUserId,
+							orgId: callerContext.request?.org.id ?? null,
 							email: callerContext.user?.email ?? '',
 						}),
 						SEARCH_WAITING_ITEMS_BUDGET_MS,
@@ -308,11 +317,18 @@ export async function runSearchTool(input: {
 			}
 		}
 		const usernameStart = performance.now()
-		username = await resolvePublicUsername({
-			db: agent.getEnv().APP_DB,
-			username: callerContext.user?.username ?? null,
-			email: callerContext.user?.email ?? null,
-		})
+		const boundOrgSlug = callerContext.request?.org.slug?.trim() || null
+		const boundToTeamOrg =
+			Boolean(boundOrgSlug) &&
+			Boolean(callerUserId) &&
+			callerContext.request?.org.id !== personOwnerId
+		username = boundToTeamOrg
+			? boundOrgSlug
+			: await resolvePublicUsername({
+					db: agent.getEnv().APP_DB,
+					username: callerContext.user?.username ?? null,
+					email: callerContext.user?.email ?? null,
+				})
 		endToEndPhaseTimings.usernameLookupMs = elapsedMs(usernameStart)
 		const rowAndRegistryLoadStart = performance.now()
 		const rowsPromise = loadSearchRowsAndRegistry({
@@ -364,7 +380,7 @@ export async function runSearchTool(input: {
 			signal.throwIfAborted()
 			if (batchResults.some((entry) => entry.ok)) {
 				const stampStart = performance.now()
-				await stampFirstSearchIfAuthenticated(agent, userId)
+				await stampFirstSearchIfAuthenticated(agent, personOwnerId)
 				endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 			}
 			return {
@@ -384,7 +400,7 @@ export async function runSearchTool(input: {
 		endToEndPhaseTimings.entityResolveMs = elapsedMs(entityResolveStart)
 		signal.throwIfAborted()
 		const stampStart = performance.now()
-		await stampFirstSearchIfAuthenticated(agent, userId)
+		await stampFirstSearchIfAuthenticated(agent, personOwnerId)
 		endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 		return {
 			mode: 'entity' as const,

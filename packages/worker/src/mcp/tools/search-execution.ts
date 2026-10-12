@@ -1,3 +1,7 @@
+import {
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import {
 	callerHasRole,
@@ -18,6 +22,7 @@ import { consumeSearchRateLimit } from '#worker/search-rate-limit.ts'
 import { getUserPlan } from '#worker/entitlements/service.ts'
 import { isPaidPlan, type PlanName } from '#universal/plans.ts'
 import { recordPaidRankedSearchFlagExposure } from '#worker/feature-flags/paid-ranked-search-exposure.ts'
+import { entitlementEmailForOwner } from '#worker/request-context/owner-id.ts'
 
 import { resolvePackageIdentitySearch } from './package-search-identity.ts'
 import { buildExactPackageSearchResult, searchUnified } from './search-core.ts'
@@ -55,7 +60,7 @@ type ExecuteSearchListInput = {
 	query: string
 	memoryQuery?: string
 	limit: number
-	userId: string | null
+	userId: OwnerId | null
 	includeHiddenPackages: boolean
 	memoryContext?: SearchToolArgs['memoryContext']
 	/** Optional capability domain id; scopes ranked results to that domain's capabilities. */
@@ -85,6 +90,12 @@ async function executeSearchListWithinBudget(
 	input: ExecuteSearchListInput,
 ): Promise<SearchListExecutionResult> {
 	const phaseTimings: Partial<SearchPhaseTimings> = input.phaseTimings ?? {}
+	// Team-bound search keys discovery to request.org.id; pair that OwnerId with
+	// a blank email so plan / rate-limit reverse-resolve the org (member email
+	// against a team id always misses and falls through to public free).
+	const entitlementEmail = input.userId
+		? entitlementEmailForOwner(input.callerContext, input.userId)
+		: null
 	// Jev eligibility reads the plan fresh, alongside the rate-limit writes;
 	// only the abuse ceilings use the cached plan. A failed read keeps hybrid
 	// order, like any other Jev failure, instead of failing the search.
@@ -92,7 +103,7 @@ async function executeSearchListWithinBudget(
 		input.userId && input.env.APP_DB
 			? getUserPlan(input.env.APP_DB, {
 					userId: input.userId,
-					email: input.callerContext.user?.email ?? null,
+					email: entitlementEmail,
 				}).catch(() => 'free')
 			: Promise.resolve('free')
 	const rateLimitStart = performance.now()
@@ -100,16 +111,26 @@ async function executeSearchListWithinBudget(
 	await consumeSearchRateLimit({
 		db: input.env.APP_DB,
 		userId: input.userId,
-		email: input.callerContext.user?.email ?? null,
+		email: entitlementEmail,
 	})
 	phaseTimings.rateLimitMs = elapsedMs(rateLimitStart)
 	const domainFilter = input.domain?.trim() || undefined
 	const usernameStart = performance.now()
-	const username = await resolvePublicUsername({
-		db: input.env.APP_DB,
-		username: input.callerContext.user?.username ?? null,
-		email: input.callerContext.user?.email ?? null,
-	})
+	// Team-bound search must label packages with the org slug, not the actor
+	// person handle (otherwise exact URLs and hosted app links go to /@actor/…).
+	const boundOrg = input.callerContext.request?.org
+	const actorUserId = input.callerContext.user?.userId
+	const boundToTeamOrg =
+		Boolean(boundOrg?.slug?.trim()) &&
+		Boolean(actorUserId) &&
+		boundOrg!.id !== personalOrgId(actorUserId!)
+	const username = boundToTeamOrg
+		? boundOrg!.slug!.trim()
+		: await resolvePublicUsername({
+				db: input.env.APP_DB,
+				username: input.callerContext.user?.username ?? null,
+				email: input.callerContext.user?.email ?? null,
+			})
 	phaseTimings.usernameLookupMs = elapsedMs(usernameStart)
 	// Domain-scoped searches rank capabilities only; exact package identity
 	// resolution does not apply.
@@ -225,12 +246,13 @@ async function executeSearchListWithinBudget(
 		return rows
 	})
 	const retrieversStart = performance.now()
-	const retrieverRunPromise =
+	const retrieverRunStarted =
 		input.userId && input.query && !domainFilter
 			? runPackageRetrievers({
 					env: input.env,
 					baseUrl: input.callerContext.baseUrl,
 					userId: input.userId,
+					request: input.callerContext.request,
 					scope: 'search',
 					query: input.query,
 					includeHiddenPackages: input.includeHiddenPackages,
@@ -239,40 +261,55 @@ async function executeSearchListWithinBudget(
 						memoryContext: input.memoryContext,
 					}),
 					conversationId: input.conversationId,
-				}).then((retrieverRun) => {
-					phaseTimings.retrieversMs = elapsedMs(retrieversStart)
-					return retrieverRun
 				})
-			: Promise.resolve({ results: [], warnings: [] }).then((retrieverRun) => {
-					phaseTimings.retrieversMs = elapsedMs(retrieversStart)
-					return retrieverRun
-				})
-	const [searchRows] = await Promise.all([rowsPromise, retrieverRunPromise])
+			: Promise.resolve({ results: [], warnings: [] })
+	// Rows and flags still have to finish before ranking. Observe a retriever
+	// rejection now so that gap cannot surface as an unhandled rejection.
+	// Awaiting `retrieverRunPromise` later still throws.
+	void retrieverRunStarted.catch(() => {})
+	const retrieverRunPromise = retrieverRunStarted.then(
+		(settled) => {
+			phaseTimings.retrieversMs = elapsedMs(retrieversStart)
+			return settled
+		},
+		(error: unknown) => {
+			phaseTimings.retrieversMs = elapsedMs(retrieversStart)
+			throw error
+		},
+	)
+	void retrieverRunPromise.catch(() => {})
+	const featureFlagsStart = performance.now()
+	// Flag reads overlap row load and retrievers. Recall width needs the
+	// evaluation before candidate generation; retriever hits are merged later.
+	const evaluationsPromise = (async () => {
+		await resolveCallerFeatureFlags(input.env, input.callerContext)
+		return await resolveCallerFeatureFlagEvaluations(
+			input.env,
+			input.callerContext,
+		)
+	})().then((evaluations) => {
+		phaseTimings.featureFlagsMs = elapsedMs(featureFlagsStart)
+		return evaluations
+	})
+	const [searchRows, evaluations, jevPlan] = await Promise.all([
+		rowsPromise,
+		evaluationsPromise,
+		jevPlanPromise,
+	])
 	input.signal?.throwIfAborted()
 	warnings = searchRows.warnings
-	const retrieverRun = await retrieverRunPromise
-	warnings.push(...retrieverRun.warnings)
-	const featureFlagsStart = performance.now()
-	// Warm the per-request evaluation cache and record evaluation-site
-	// exposures for other measured flags.
-	await resolveCallerFeatureFlags(input.env, input.callerContext)
-	const evaluations = await resolveCallerFeatureFlagEvaluations(
-		input.env,
-		input.callerContext,
-	)
-	phaseTimings.featureFlagsMs = elapsedMs(featureFlagsStart)
 	const jevEvaluation = evaluations?.[jevSearchRerankFlagKey]
 	const jevRerankEnabled = jevEvaluation?.enabled === true
-	const jevRerankPlanEligible = isPaidPlan(await jevPlanPromise)
+	const jevRerankPlanEligible = isPaidPlan(jevPlan)
 	const searchUnifiedStart = performance.now()
-	result = await searchUnified({
+	const rankedPromise = searchUnified({
 		env: input.env,
 		query: input.query,
 		limit: input.limit,
 		userId: input.userId ?? undefined,
 		registry: searchRows.registry,
 		optionalRows: searchRows,
-		retrieverResults: retrieverRun.results,
+		retrieverResults: retrieverRunPromise.then((run) => run.results),
 		embedText: embeddingCache.embedText,
 		...(domainFilter ? { domain: domainFilter } : {}),
 		...(callerHasRole(input.callerContext, 'admin')
@@ -282,6 +319,12 @@ async function executeSearchListWithinBudget(
 		...(jevRerankPlanEligible ? { jevRerankPlanEligible: true } : {}),
 		...(input.signal ? { signal: input.signal } : {}),
 	})
+	const [ranked, retrieverRun] = await Promise.all([
+		rankedPromise,
+		retrieverRunPromise,
+	])
+	result = ranked
+	warnings.push(...retrieverRun.warnings)
 	input.signal?.throwIfAborted()
 	phaseTimings.searchUnifiedMs = elapsedMs(searchUnifiedStart)
 	// Only ranked-path results include jevRerank telemetry. Domain index /

@@ -67,6 +67,55 @@ test('export-only packages with a tsconfig fail publish typecheck on type errors
 	})
 })
 
+test('missing type definition packages from author tsconfig fail as typecheck, not a thrown error', async () => {
+	// KODY-8R: @typescript/vfs throws TS2688 for types:["node"] when the
+	// check filesystem has no @types/node. Publish must return checks_failed
+	// with that diagnostic instead of wrapping it as an internal ApiError.
+	const files = withRequiredPackageDocs(
+		new Map(
+			Object.entries({
+				'package.json': createManifest({}),
+				'tsconfig.json': JSON.stringify({
+					compilerOptions: {
+						types: ['node'],
+						strict: true,
+						noEmit: true,
+						module: 'esnext',
+						moduleResolution: 'bundler',
+						target: 'es2022',
+					},
+				}),
+				'src/index.ts':
+					'export default async function main() {\n  return 1\n}\n',
+			}),
+		),
+	)
+	const result = await runRepoChecks({
+		workspace: {
+			async readFile(path: string) {
+				return files.get(path) ?? null
+			},
+			async glob() {
+				return Array.from(files.keys()).map((path) => ({ path, type: 'file' }))
+			},
+		},
+		manifestPath: 'package.json',
+		sourceRoot: '/',
+	})
+	expect(result.ok).toBe(false)
+	const typecheck = result.results.find((entry) => entry.kind === 'typecheck')
+	expect(typecheck).toMatchObject({
+		kind: 'typecheck',
+		ok: false,
+	})
+	expect(typecheck?.message).toMatch(
+		/error TS2688: Cannot find type definition file for 'node'/,
+	)
+	expect(typecheck?.message).toMatch(
+		/Entry point of type library 'node' specified in compilerOptions/,
+	)
+})
+
 test('publish typecheck follows exported code into reachable local modules only', async () => {
 	const typecheck = await runTypecheck({
 		'package.json': createManifest({}),
@@ -217,4 +266,22 @@ test('runtime rebuild typecheck of published source only verifies the callable c
 		ok: true,
 		message: 'No semantic diagnostics for 1 package runtime entrypoint(s).',
 	})
+})
+
+test('multi-callable typecheck keeps per-entrypoint diagnostics from one harness program', async () => {
+	const result = await typecheckPackageEntrypointsFromSourceFiles({
+		sourceFiles: {
+			'package.json': createManifest({}),
+			'src/job-a.ts': 'export default async function run() { return "a" }\n',
+			'src/job-b.ts': 'export default 42\n',
+		},
+		entryPoints: [{ path: 'src/job-a.ts' }, { path: 'src/job-b.ts' }],
+	})
+	expect(result.ok).toBe(false)
+	// Harness contract failures keep the attributed source path without
+	// attaching shifted harness line/column coordinates.
+	expect(result.message).toMatch(/src\/job-b\.ts /)
+	expect(result.message).toMatch(/not assignable|Argument of type/i)
+	expect(result.message).not.toMatch(/src\/job-b\.ts:\d+:\d+/)
+	expect(result.message).not.toMatch(/src\/job-a\.ts/)
 })

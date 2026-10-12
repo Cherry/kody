@@ -1,3 +1,5 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { authorizeRepoSessionPackageRead } from './authorize-repo-session-package.ts'
 import {
 	getErrorCauseChain,
 	getErrorMessage,
@@ -41,6 +43,7 @@ export const repoTreeCapability = defineDomainCapability(
 	capabilityDomainNames.repo,
 	{
 		name: 'repoTree',
+		orgPermission: 'package:read',
 		description:
 			'Summarize a repo session subtree so the model can understand file layout before reading or editing specific files.',
 		keywords: ['repo', 'tree', 'workspace', 'files', 'directories', 'summary'],
@@ -50,12 +53,19 @@ export const repoTreeCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			const ownerId = ownerIdFromCaller(ctx.callerContext)
+			await authorizeRepoSessionPackageRead({
+				env: ctx.env,
+				request: ctx.callerContext.request,
+				userId: ownerId,
+				sessionId: args.session_id,
+			})
 			let result
 			try {
 				result = await repoSessionRpc(ctx.env, args.session_id).tree({
 					sessionId: args.session_id,
-					userId: user.userId,
+					userId: ownerId,
 					path: args.path ?? null,
 					maxDepth: args.max_depth,
 				})

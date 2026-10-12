@@ -1,3 +1,4 @@
+import { viewerCanManageSavedPackage } from '#app/package-viewer-access.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { createMatcher } from 'remix/route-pattern/match'
@@ -7,7 +8,8 @@ import { loadPackagePage } from '#app/package-page.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { routes } from '#universal/routes.ts'
-import { getSavedPackageById } from '#worker/package-registry/repo.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
+import { getSavedPackageByIdInAnyOrg } from '#worker/package-registry/repo.ts'
 
 const communityPackageMatcher = createMatcher(routes.communityPackage.pattern)
 
@@ -100,11 +102,19 @@ export function createAccountPackageApprovePublishHandler(env: Env) {
 
 			const packageId = readPackageId(params)
 			if (packageId) {
-				const savedPackage = await getSavedPackageById(env.APP_DB, {
-					userId: user.mcpUser.userId,
+				const savedPackage = await getSavedPackageByIdInAnyOrg(
+					env.APP_DB,
 					packageId,
-				})
-				if (!savedPackage) {
+				)
+				if (
+					!savedPackage ||
+					!(await viewerCanManageSavedPackage({
+						env,
+						viewer: user.mcpUser,
+						ownerId: savedPackage.userId,
+						packageId: savedPackage.id,
+					}))
+				) {
 					return renderAppPage({
 						request,
 						env,
@@ -113,9 +123,14 @@ export function createAccountPackageApprovePublishHandler(env: Env) {
 						status: 404,
 					})
 				}
+				const binding = await loadOrgBindingForOrg(
+					env.APP_DB,
+					user.mcpUser.userId,
+					savedPackage.userId,
+				)
 				return redirectToCanonicalApproval({
 					request,
-					username: user.username,
+					username: binding?.org.slug ?? user.username,
 					kodyId: savedPackage.kodyId,
 				})
 			}
@@ -141,7 +156,7 @@ export function createAccountPackageApprovePublishHandler(env: Env) {
 					},
 				})
 			}
-			if (page.kind !== 'page' || !page.viewerIsOwner || !page.ownerPackage) {
+			if (page.kind !== 'page' || !page.viewerCanManage || !page.ownerPackage) {
 				return renderAppPage({
 					request,
 					env,
@@ -200,7 +215,7 @@ export function createAccountPackageApprovePublishApiHandler(env: Env) {
 					})
 					if (redirect) return redirect
 				}
-				if (page.kind === 'page' && page.viewerIsOwner && page.ownerPackage) {
+				if (page.kind === 'page' && page.viewerCanManage && page.ownerPackage) {
 					packageId = page.ownerPackage.id
 				}
 			}

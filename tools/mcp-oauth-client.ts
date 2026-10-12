@@ -4,6 +4,7 @@ import {
 } from '@modelcontextprotocol/client'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { mcpOauthScopes } from '#worker/mcp-oauth-scopes.ts'
 
 export type AppAuthUser = {
 	email: string
@@ -32,6 +33,48 @@ const defaultRedirectUri = 'http://127.0.0.1/oauth/callback'
 const defaultOAuthClientName = 'Kody MCP E2E Test Client'
 const defaultMcpClientName = 'kody-mcp-e2e-client'
 const defaultControlKodyClientName = 'kody-control-kody'
+/** `/auth` and `/oauth/authorize` share the per-IP 10/60s bucket. */
+const authRateLimitAttempts = 3
+const authRateLimitFallbackMs = 60_000
+
+const sleep = (ms: number) =>
+	new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+export class AuthRateLimitedError extends Error {
+	readonly status = 429
+	constructor(message: string) {
+		super(message)
+		this.name = 'AuthRateLimitedError'
+	}
+}
+
+/**
+ * Honor `Retry-After` seconds. Missing or unparsable headers wait the
+ * limiter window; the cap keeps a bad header from parking a job.
+ */
+export function authRetryAfterDelayMs(
+	response: Response,
+	fallbackMs = authRateLimitFallbackMs,
+	maxMs = authRateLimitFallbackMs,
+) {
+	const header = response.headers.get('Retry-After')?.trim()
+	if (header && /^\d+$/.test(header)) {
+		return Math.min(Number(header) * 1000, maxMs)
+	}
+	return fallbackMs
+}
+
+async function fetchAuthRateLimited(fetchOnce: () => Promise<Response>) {
+	let attempt = 0
+	for (;;) {
+		attempt += 1
+		const response = await fetchOnce()
+		if (response.status !== 429 || attempt >= authRateLimitAttempts) {
+			return response
+		}
+		await sleep(authRetryAfterDelayMs(response))
+	}
+}
 
 export function usernameFromEmail(email: string) {
 	const local = email.split('@')[0]?.trim()
@@ -63,6 +106,14 @@ export async function loginToApp(
 	if (loginResponse.ok) {
 		return readCookieHeader(loginResponse)
 	}
+	// 429 is the shared auth bucket, not a missing account. Signup would
+	// burn more slots and still fail.
+	if (loginResponse.status === 429) {
+		const loginBody = await loginResponse.text()
+		throw new AuthRateLimitedError(
+			`Failed to authenticate test user.\nLogin: ${loginResponse.status} ${loginBody}`,
+		)
+	}
 
 	const signupResponse = await authenticateAppUser(
 		origin,
@@ -78,6 +129,12 @@ export async function loginToApp(
 		signupResponse.headers.get('Set-Cookie')?.includes('kody_session=')
 	) {
 		return readCookieHeader(signupResponse)
+	}
+	if (signupResponse.status === 429) {
+		const signupBody = await signupResponse.text()
+		throw new AuthRateLimitedError(
+			`Failed to authenticate test user.\nSignup: ${signupResponse.status} ${signupBody}`,
+		)
 	}
 
 	const retryLoginResponse = await authenticateAppUser(
@@ -140,28 +197,37 @@ export async function authorizeOAuthClient(
 	client: OAuthClientRegistration,
 	cookieHeader: string,
 	fetchImpl: FetchLike = fetch,
+	orgSlug?: string,
 ) {
 	const authorizeUrl = new URL('/oauth/authorize', origin)
 	const resource = new URL('/mcp', origin).toString()
 	authorizeUrl.searchParams.set('response_type', 'code')
 	authorizeUrl.searchParams.set('client_id', client.clientId)
 	authorizeUrl.searchParams.set('redirect_uri', client.redirectUri)
-	authorizeUrl.searchParams.set('scope', 'profile email')
+	authorizeUrl.searchParams.set('scope', mcpOauthScopes.join(' '))
 	authorizeUrl.searchParams.set('state', 'kody-mcp-e2e-state')
 	authorizeUrl.searchParams.set('resource', resource)
+	if (orgSlug) authorizeUrl.searchParams.set('org', orgSlug)
 
-	const response = await fetchImpl(authorizeUrl, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			Cookie: cookieHeader,
-			'Content-Type': 'application/x-www-form-urlencoded',
-		},
-		body: new URLSearchParams({
-			decision: 'approve',
+	const response = await fetchAuthRateLimited(() =>
+		fetchImpl(authorizeUrl, {
+			method: 'POST',
+			headers: {
+				Accept: 'application/json',
+				Cookie: cookieHeader,
+				'Content-Type': 'application/x-www-form-urlencoded',
+			},
+			body: new URLSearchParams({
+				decision: 'approve',
+			}),
 		}),
-	})
+	)
 	const rawBody = await response.text()
+	if (response.status === 429) {
+		throw new AuthRateLimitedError(
+			`OAuth authorize request failed with ${response.status}: ${rawBody}`,
+		)
+	}
 	if (!response.ok) {
 		throw new Error(
 			`OAuth authorize request failed with ${response.status}: ${rawBody}`,
@@ -245,6 +311,8 @@ export async function resolveAppMcpAuth(
 		fetchImpl?: FetchLike
 		cookieHeader?: string
 		oauth?: AppMcpOAuthSession
+		/** Bind the connection to this org (`?org=` on authorize). */
+		orgSlug?: string
 	} = {},
 ): Promise<{ cookieHeader: string; oauth: AppMcpOAuthSession }> {
 	if (options.cookieHeader && options.oauth) {
@@ -277,11 +345,14 @@ export async function resolveAppMcpAuth(
 					clientRegistration,
 					cookieHeader,
 					fetchImpl,
+					options.orgSlug,
 				),
 			},
 		}
 	} catch (error) {
-		if (!options.cookieHeader) throw error
+		if (!options.cookieHeader || error instanceof AuthRateLimitedError) {
+			throw error
+		}
 		cookieHeader = await loginToApp(origin, user, fetchImpl)
 		return {
 			cookieHeader,
@@ -292,6 +363,7 @@ export async function resolveAppMcpAuth(
 					clientRegistration,
 					cookieHeader,
 					fetchImpl,
+					options.orgSlug,
 				),
 			},
 		}
@@ -303,12 +375,14 @@ async function mintAccessToken(
 	client: OAuthClientRegistration,
 	cookieHeader: string,
 	fetchImpl: FetchLike,
+	orgSlug?: string,
 ) {
 	const code = await authorizeOAuthClient(
 		origin,
 		client,
 		cookieHeader,
 		fetchImpl,
+		orgSlug,
 	)
 	return exchangeAuthorizationCode(origin, client, code, fetchImpl)
 }
@@ -322,6 +396,7 @@ export async function connectAppMcpClient(
 		fetchImpl?: FetchLike
 		cookieHeader?: string
 		oauth?: AppMcpOAuthSession
+		orgSlug?: string
 	} = {},
 ) {
 	const session = await resolveAppMcpAuth(origin, user, options)
@@ -347,6 +422,7 @@ export async function connectAppMcpClient(
 				extraHeaders: options.extraHeaders,
 				clientName: options.clientName,
 				fetchImpl: options.fetchImpl,
+				orgSlug: options.orgSlug,
 			})
 		}
 		const detail = error instanceof Error ? error.message : String(error)
@@ -366,7 +442,7 @@ export async function connectAppMcpClient(
 export async function connectStatelessMcpClient(
 	origin: string,
 	headers: Record<string, string>,
-	options: { name?: string; version?: string } = {},
+	options: { name?: string; version?: string; fetch?: typeof fetch } = {},
 ) {
 	const client = new ModernClient(
 		{
@@ -378,6 +454,7 @@ export async function connectStatelessMcpClient(
 	const transport = new ModernStreamableHTTPClientTransport(
 		new URL('/mcp', origin),
 		{
+			...(options.fetch ? { fetch: options.fetch } : {}),
 			requestInit: {
 				headers,
 			},
@@ -393,19 +470,21 @@ async function authenticateAppUser(
 	mode: 'login' | 'signup',
 	fetchImpl: FetchLike,
 ) {
-	return fetchImpl(new URL('/auth', origin), {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			email: user.email,
-			...(mode === 'signup' ? { username: user.username } : {}),
-			password: user.password,
-			mode,
+	return fetchAuthRateLimited(() =>
+		fetchImpl(new URL('/auth', origin), {
+			method: 'POST',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				email: user.email,
+				...(mode === 'signup' ? { username: user.username } : {}),
+				password: user.password,
+				mode,
+			}),
 		}),
-	})
+	)
 }
 
 export function readCookieHeader(response: Response) {

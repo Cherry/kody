@@ -287,18 +287,9 @@ function adaptNativeRepoHandle(
 				const info = await restRepo.info()
 				if (info?.remote) return info
 			}
-			return {
-				id: repo.id,
-				name: repo.name,
-				description: repo.description,
-				defaultBranch: repo.defaultBranch,
-				createdAt: repo.createdAt,
-				updatedAt: repo.updatedAt,
-				lastPushAt: repo.lastPushAt,
-				source: repo.source,
-				readOnly: repo.readOnly,
-				remote: repo.remote,
-			}
+			// workerd exposes repo metadata from info(), not as properties on
+			// the capability stub.
+			return await repo.info()
 		},
 		createToken: async (scope = 'write', ttl = 3600) => {
 			// Native createToken still throws `undefined.split` across JSRPC
@@ -382,15 +373,9 @@ function adaptNativeArtifactsBinding(
 				defaultBranch: created.defaultBranch,
 				remote: created.remote,
 				token: created.token,
-				// Provider create currently omits tokenExpiresAt despite the
-				// generated binding type. Prefer the field when present; else
-				// parse `?expires=` from the token; else leave empty.
 				expiresAt: resolveCreatedTokenExpiry({
 					token: created.token,
-					tokenExpiresAt:
-						typeof created.tokenExpiresAt === 'string'
-							? created.tokenExpiresAt
-							: null,
+					tokenExpiresAt: readOptionalTokenExpiresAt(created),
 				}),
 			}
 		},
@@ -440,10 +425,7 @@ function adaptNativeArtifactsBinding(
 				token: created.token,
 				expiresAt: resolveCreatedTokenExpiry({
 					token: created.token,
-					tokenExpiresAt:
-						typeof created.tokenExpiresAt === 'string'
-							? created.tokenExpiresAt
-							: null,
+					tokenExpiresAt: readOptionalTokenExpiresAt(created),
 				}),
 			}
 		},
@@ -810,6 +792,13 @@ function readArtifactTokenPlaintext(token: {
 	throw new Error('Artifacts createToken result is missing plaintext.')
 }
 
+function readOptionalTokenExpiresAt(created: object) {
+	if (!('tokenExpiresAt' in created)) return null
+	return typeof created.tokenExpiresAt === 'string'
+		? created.tokenExpiresAt
+		: null
+}
+
 function resolveCreatedTokenExpiry(input: {
 	token: string
 	tokenExpiresAt?: string | null
@@ -1020,8 +1009,12 @@ async function waitForArtifactRepoReadyAfterCreateConflict(input: {
 	maxAttempts?: number
 	delayMs?: number
 }): Promise<ArtifactRepoReadyResult> {
-	const maxAttempts = input.maxAttempts ?? 5
-	const delayMs = input.delayMs ?? 50
+	// Cloudflare can return ALREADY_EXISTS from create while get still reports
+	// not_found (post-delete ghost reservation, or fork provision lag). Retry
+	// create when get stays absent so callers that need bootstrapAccess (community
+	// fork fallback) are not stuck with a permanent not_found conflict.
+	const maxAttempts = input.maxAttempts ?? 10
+	const delayMs = input.delayMs ?? 100
 	let lastStatus = 'not_found'
 	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 		const result = await input.binding.get(input.repoId)
@@ -1033,6 +1026,27 @@ async function waitForArtifactRepoReadyAfterCreateConflict(input: {
 			throw new Error(
 				`Artifacts repo "${input.repoId}" is importing. Retry after ${result.retryAfter}s.`,
 			)
+		}
+		if (result.status === 'not_found') {
+			try {
+				const created = await input.binding.create(input.repoId, {
+					readOnly: false,
+				})
+				return {
+					recreated: true,
+					bootstrapAccess: {
+						defaultBranch: created.defaultBranch,
+						remote: created.remote,
+						token: created.token,
+						expiresAt: created.expiresAt,
+					},
+					repo: input.binding.repo(created.name),
+				}
+			} catch (error) {
+				if (!isArtifactRepoAlreadyExistsError(error)) {
+					throw error
+				}
+			}
 		}
 		if (attempt < maxAttempts) {
 			await waitForArtifactRepoCheck(delayMs)

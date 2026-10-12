@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 
@@ -15,9 +19,10 @@ const { workflowCancelCapability } = await import('./workflow-cancel.ts')
 test('workflowRunCancel maps service outcomes for the signed-in user', async () => {
 	const env = {} as Env
 	const callerContext = createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://example.com',
 		user: {
-			userId: 'user-123',
+			userId: personIdFromStored('user-123'),
 			email: 'user@example.com',
 			displayName: 'User Example',
 		},
@@ -34,7 +39,7 @@ test('workflowRunCancel maps service outcomes for the signed-in user', async () 
 	).rejects.toThrow('was not found for the current user')
 	expect(mockModule.cancelWorkflowRunForUser).toHaveBeenCalledWith({
 		env,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		workflowRunId: 'dynwf-missing',
 	})
 
@@ -42,7 +47,7 @@ test('workflowRunCancel maps service outcomes for the signed-in user', async () 
 		outcome: 'cancelled',
 		run: {
 			id: 'dynwf-123',
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			sourceType: 'inline',
 			packageId: null,
 			kodyId: null,
@@ -75,7 +80,7 @@ test('workflowRunCancel maps service outcomes for the signed-in user', async () 
 		outcome: 'already_terminal',
 		run: {
 			id: 'dynwf-done',
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			sourceType: 'inline',
 			packageId: null,
 			kodyId: null,

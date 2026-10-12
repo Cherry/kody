@@ -30,6 +30,10 @@ Use `package.json` as the canonical source of truth for saved package metadata.
   dependency's latest published commit, captured when this package publishes.
   Arrays are rejected. Repo checks reject cycles in this graph at publish time,
   and fail closed if a reachable saved package manifest cannot be loaded.
+- `kody.credentials` — optional credential slots (`kind`, `provider`,
+  `multiple`, `description`); see
+  [Credential slots](../use/packages.md#credential-slots-kodycredentials).
+  Declaring slots does not change resolution
 - `kody.secretMounts` — optional package-scoped secret mount declarations
 - `kody.secretProvider` — optional `{ id }` declaring this package can serve
   that external secret provider. Metadata alone does not bind the provider; see
@@ -73,9 +77,20 @@ Important behavior:
   and publish-time artifact rebuilds.
 - Published bundle artifacts are what package exports, jobs, subscriptions,
   retrievers, and apps execute at runtime.
+- External publish flips `published_commit` before the per-target npm bundle
+  rebuild finishes. While that rebuild is in flight, invoke may serve the
+  previous npm-backed bundle for two minutes, keyed to the published source
+  snapshot `createdAt` from finalize (not `entity_sources.updated_at`, which
+  also moves on indexed_commit and reconcile writes). After the window, missing
+  bundles fail as retryable `artifact_preparation_failed`.
 - If a package declares a dependency that the bundler cannot resolve or bundle,
   repo checks fail with the underlying bundling error instead of allowing a
   publish that will only fail later at runtime.
+- Undeclared bare package imports on entry points fail the dependencies check
+  before `published_commit` advances, including when check-time esbuild is
+  deferred. Add them to `package.json#dependencies` or vendor
+  `node_modules/<name>` in the snapshot. Unparseable entry source fails the same
+  way so publish cannot skip the check.
 - An isolate memory or CPU reset during bundle validation is the same class of
   failure: the npm graph does not fit a Worker isolate. The check message points
   at `search({ entity: "guide:heavy_work_offload" })`.
@@ -152,8 +167,7 @@ A saved package is a repo with the package extension activated. Four concepts:
 - Computed `import(specifier)` is the name-as-data path for caller-owned and
   forked modules. The bundler rewrites non-literal `import(...)` expressions
   through a host `__kodyComputedPackageImport` bridge that loads `kody:@`
-  specifiers. There is no author-facing `packages.invoke`. Prefer a static
-  import when the name is known at write time.
+  specifiers. Prefer a static import when the name is known at write time.
 - `kody:runtime` is a reserved host-external virtual module. The bundler may add
   a placeholder so author code can keep `import { kody } from "kody:runtime"`,
   but published bundle artifacts must not persist the host runtime
@@ -187,12 +201,11 @@ A saved package is a repo with the package extension activated. Four concepts:
   (`packageId` on `BundleArtifactDependency`, `collectPackageStorageGrantIds` in
   `#mcp/run-kody-registry.ts`, and `createPackageStorageKodyTools` in
   `#worker/storage-runner.ts`). Cross-user access stays structurally impossible
-  because storage runner names are keyed by the calling user's id.
-  Platform-owned **dependencies** are excluded from that grant set
-  (`platformOwned`). Person accounts must `communityFork` an official package
-  before importing it (decision 0036). User secrets locked to A are usable from
-  A's stamped module when B imports A; B's own code still cannot read them.
-  Writes stay fail-closed (`allowed_packages` required).
+  because storage runner names are keyed by the calling user's id. Imports
+  resolve only in the caller's org, so a package from another org (including
+  `@kody/*`) is `communityFork`ed before it is imported. User secrets locked to
+  A are usable from A's stamped module when B imports A; B's own code still
+  cannot read them. Writes stay fail-closed (`allowed_packages` required).
 - The author-facing storage prescription is one rule per context: saved-package
   code always uses `packageStorage()` for the package's own data; ad hoc execute
   has no scratch SQLite helper; another package's data goes through a static
@@ -228,19 +241,19 @@ await handleEvent({ event })
 
 `kody:runtime` exports `packages` only as an always-`null` leftover so old
 `if (packages)` guards keep bundling
-([#1750](https://github.com/kentcdodds/kody/issues/1750)). There is no
-author-facing `packages.invoke`. Computed `import(specifier)` loads caller-owned
-modules through a separate host bridge. Fleet source migrates with package
-codemod `0008-packages-invoke-to-static-import`. See
+([#1750](https://github.com/kentcdodds/kody/issues/1750)). Computed
+`import(specifier)` loads caller-owned modules through a separate host bridge.
+Fleet source migrates with package codemod
+`0008-packages-invoke-to-static-import`. See
 [0037](./decisions/0037-no-author-packages-invoke.md). Interactive MCP
 `packageSubscriptionDispatch` is the post-publish subscription smoke test
 ([0013](./decisions/0013-synthetic-package-requests.md)), not a composition
 primitive.
 
-Exact scoped resolution avoids bare-id collisions. A `kody:@person/...` target
-resolves that caller-owned person package. A `kody:@kody/...` target is not
-runnable in a person account (`communityFork` first). Foreign person accounts
-remain unresolvable. Platform-account packages may compose with each other.
+Exact scoped resolution avoids bare-id collisions. A `kody:@scope/...` target
+resolves only to a package in the caller's org. A package from another org,
+including `kody:@kody/...`, is not runnable until `communityFork` copies it into
+the caller's org.
 
 Literal `import("kody:@...")` is a teaching error: known names are static
 imports. Computed `import(specifier)` is the name-as-data path. Exactly-once
@@ -272,15 +285,13 @@ A package app is a hosted Worker entry running in the package-app isolate:
   remount the Request when the route contract includes `appBasePath`, and pass
   explicit `clientEntry` ids (`kody:app#Name`). A handler that borrows
   `remix/headers` or `remix/html-template` needs none of that
-- Remix itself is an optional convenience:
-  `tools/build-worker-bundler-modules.ts` pre-bundles the Workers-safe
-  `remix/<subpath>` set (`packageAppRemixSubpaths`) with code splitting into the
-  deferred module `package-app-remix.mjs`, and `withPlatformRemixFiles`
-  (`package-app-remix.ts`) mounts it at `node_modules/remix/` in the bundler
-  file system for every package bundle (app, app-client, callable, importable,
-  ad hoc execute). The bundler skips the npm install for a package whose
-  `node_modules/<name>/package.json` exists, so a `remix` dependency is inert;
-  publish checks reject `@remix-run/*` dependencies outright
+- Frameworks are ordinary package dependencies. The platform does not vendor,
+  mount, inject, sniff, or stamp version metadata for Remix (or TanStack,
+  Preact, or any other library) onto package bundles; the dirty check for
+  artifact reuse is file-content-only
+  ([decision 0057](./decisions/0057-no-framework-platform-affordance.md)).
+  Bundling asserts that every `node_modules/` path in the bundler file set
+  already exists in the package snapshot (`assertNoPlatformSuppliedNodeModules`)
 - `kody:runtime` exports `KodyRuntime`, a frozen `{ defaultValue }` object that
   Remix's `RequestContext.get()` returns when nothing called `set()`; the value
   is the module's default export (late-bound to the current run), and the
@@ -351,6 +362,18 @@ bundle artifacts for subscription handlers during repo checks and package
 publish. At runtime, event dispatch invokes the handler through the package
 execution path with package context, package-owned storage, package secrets, and
 the host-owned `kody:runtime` module.
+
+Wake discovery prefers a normalized source of truth (each package's
+`package.json#kody.subscriptions`) plus a per-user KV cache of the computed
+topic→package-id map
+(`packages/worker/src/package-invocations/subscription-topic-cache.ts`). A wake
+reads that one key; on a miss it scans manifests once, fills KV, and uses the
+result. Publish and unpublish bump a generation stamp then delete-and-recompute
+the map in the same write path so a failed delete or a late wake write cannot
+leave wakes matching a stale projection. Incomplete scans (manifest load
+failures) never write the map. There is no TTL — a TTL could hide a newly
+published subscription. Do not add a denormalized topic-index table; the
+manifest stays authoritative.
 
 The built-in `packageSubscriptionsList` capability is the generic discovery
 surface for declared subscriptions. It reads the signed-in user's saved package

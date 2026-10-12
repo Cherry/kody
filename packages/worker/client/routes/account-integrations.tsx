@@ -1,8 +1,10 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountIntegrationsLoaderData,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { type Handle, css } from 'remix/component'
 import { navigate, readCurrentRouterHref } from '#client/client-router.tsx'
@@ -81,6 +83,7 @@ export function AccountIntegrationsRoute(handle: Handle) {
 			const response = await fetch(buildIntegrationsApiHref(href), {
 				headers: { Accept: 'application/json' },
 				credentials: 'include',
+				referrer: orgAccountApiReferrer(href),
 				signal,
 			})
 			if (response.status === 401) return routeDataRedirect('/login')
@@ -134,7 +137,10 @@ export function AccountIntegrationsRoute(handle: Handle) {
 	}
 
 	function listHref() {
-		return `${routes.accountIntegrations.href()}${getCurrentSearch()}`
+		return relocateAccountHref(
+			`/account/integrations${getCurrentSearch()}`,
+			getCurrentHref(),
+		)
 	}
 
 	function currentSelectionMissing() {
@@ -264,7 +270,7 @@ export function AccountIntegrationsRoute(handle: Handle) {
 				}
 			})
 			approval = approval ? { ...approval, alreadyGranted: true } : approval
-			navigate(routes.accountIntegrations.href())
+			navigate(listHref())
 		} catch (error) {
 			message =
 				error instanceof Error
@@ -465,6 +471,7 @@ export function AccountIntegrationsRoute(handle: Handle) {
 							approval,
 							submitting: approvalSubmitting,
 							onApprove: () => void submitApproval(),
+							listHref: listHref(),
 						})
 					: null}
 
@@ -505,7 +512,11 @@ export function AccountIntegrationsRoute(handle: Handle) {
 							]}
 							rows={filteredApps.map((app) => ({
 								id: integrationListId(app),
-								href: buildIntegrationHref(app, getCurrentSearch()),
+								href: buildIntegrationHref(
+									app,
+									getCurrentSearch(),
+									getCurrentHref(),
+								),
 								cells: {
 									name: renderNamedProvider({
 										providerKey: app.provider || app.slug,

@@ -1,11 +1,18 @@
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { PromiseLruCache } from '#worker/package-registry/published-package-cache.ts'
 import { mcpClientHubDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { type McpServerConnectionEvent } from './connection-episodes.ts'
+import { type SealedMcpPreRegisteredOAuthClient } from './preregistered-oauth-client.ts'
 import {
 	type McpClientHubSnapshot,
+	type McpHubConnectResult,
+	type McpHubServerSnapshot,
 	type McpServerConnectResult,
 	type McpServerOAuthCallbackOutcome,
+	type McpServerOAuthClientChange,
+	type McpServerPendingAuthorization,
+	type McpServerSnapshot,
 } from './types.ts'
 
 export const mcpClientHubSnapshotCacheTtlMs = 30_000
@@ -13,16 +20,16 @@ export const mcpClientHubSnapshotCacheLimit = 100
 
 type McpClientHubClientInput = {
 	env: Env
-	userId: string
+	userId: OwnerId
 	waitUntil?: (promise: Promise<unknown>) => void
 }
 
 /** Cache/DO key alias for {@link mcpClientHubDurableObjectName}. */
-export function mcpClientHubKey(userId: string) {
+export function mcpClientHubKey(userId: OwnerId) {
 	return mcpClientHubDurableObjectName(userId)
 }
 
-function getMcpClientHubStub(input: { env: Env; userId: string }) {
+function getMcpClientHubStub(input: { env: Env; userId: OwnerId }) {
 	const key = mcpClientHubDurableObjectName(input.userId)
 	return input.env.MCP_CLIENT_HUB.get(input.env.MCP_CLIENT_HUB.idFromName(key))
 }
@@ -59,16 +66,46 @@ export type McpClientHubClient = {
 	}): Promise<McpServerConnectResult>
 	refreshServer(input: { serverId: string }): Promise<McpServerConnectResult>
 	removeServer(input: { serverId: string }): Promise<void>
+	setPreRegisteredOAuthClient(input: {
+		serverId: string
+		callbackUrl: string
+		client: SealedMcpPreRegisteredOAuthClient | null
+	}): Promise<McpServerOAuthClientChange>
 	handleOAuthCallback(input: {
 		url: string
 		callbackUrl: string
 	}): Promise<McpServerOAuthCallbackOutcome>
 	getSnapshot(): Promise<McpClientHubSnapshot>
-	callTool(input: {
+	readPendingAuthorization(input: {
+		serverId: string
+	}): Promise<McpServerPendingAuthorization | null>
+}
+
+/**
+ * Call a tool with the org's stored MCP OAuth credentials. Only
+ * `resolveCredential` may call this (credential-storage-boundary test).
+ */
+export async function callMcpServerTool(
+	input: McpClientHubClientInput & {
 		serverId: string
 		toolName: string
 		args: Record<string, unknown>
-	}): Promise<CallToolResult>
+	},
+): Promise<CallToolResult> {
+	const stub = getMcpClientHubStub(input)
+	try {
+		const result = (await stub.callTool({
+			serverId: input.serverId,
+			toolName: input.toolName,
+			args: input.args,
+		})) as CallToolResult
+		await emitPendingConnectionEvents(input, stub)
+		return result
+	} catch (error) {
+		invalidateMcpClientHubSnapshotCache(input)
+		await emitPendingConnectionEvents(input, stub)
+		throw error
+	}
 }
 
 export function createMcpClientHubClient(
@@ -80,23 +117,34 @@ export function createMcpClientHubClient(
 			invalidateMcpClientHubSnapshotCache(input)
 			const result = await stub.addServer(addInput)
 			await emitPendingConnectionEvents(input, stub)
-			return result
+			return toMcpServerConnectResult(result)
 		},
 		async reconnectServer(reconnectInput) {
 			invalidateMcpClientHubSnapshotCache(input)
 			const result = await stub.reconnectServer(reconnectInput)
 			await emitPendingConnectionEvents(input, stub)
-			return result
+			return toMcpServerConnectResult(result)
 		},
 		async refreshServer(refreshInput) {
 			invalidateMcpClientHubSnapshotCache(input)
 			const result = await stub.refreshServer(refreshInput)
 			await emitPendingConnectionEvents(input, stub)
-			return result
+			return toMcpServerConnectResult(result)
 		},
 		async removeServer(removeInput) {
 			invalidateMcpClientHubSnapshotCache(input)
 			await stub.removeServer(removeInput)
+		},
+		async setPreRegisteredOAuthClient(clientInput) {
+			invalidateMcpClientHubSnapshotCache(input)
+			const change = await stub.setPreRegisteredOAuthClient(clientInput)
+			// A read during the change may have cached the old client.
+			invalidateMcpClientHubSnapshotCache(input)
+			await emitPendingConnectionEvents(input, stub)
+			return {
+				...change,
+				connection: toMcpServerConnectResult(change.connection),
+			}
 		},
 		async handleOAuthCallback(callbackInput) {
 			invalidateMcpClientHubSnapshotCache(input)
@@ -107,18 +155,33 @@ export function createMcpClientHubClient(
 		async getSnapshot() {
 			return getCachedMcpClientHubSnapshot(input)
 		},
-		async callTool(callInput) {
-			try {
-				const result = (await stub.callTool(callInput)) as CallToolResult
-				await emitPendingConnectionEvents(input, stub)
-				return result
-			} catch (error) {
-				invalidateMcpClientHubSnapshotCache(input)
-				await emitPendingConnectionEvents(input, stub)
-				throw error
-			}
+		async readPendingAuthorization(readInput) {
+			return await stub.readPendingAuthorization(readInput)
 		},
 	}
+}
+
+/**
+ * The provider authorization URL stays in the hub. Callers learn that
+ * approval is pending and link the Kody consent page instead.
+ */
+export function isAuthorizationPending(result: {
+	state: McpHubConnectResult['state']
+	authUrl: string | null
+}) {
+	return result.state === 'authenticating' && Boolean(result.authUrl)
+}
+
+function toMcpServerConnectResult(
+	result: McpHubConnectResult,
+): McpServerConnectResult {
+	const { authUrl: _authUrl, ...rest } = result
+	return { ...rest, authorizationPending: isAuthorizationPending(result) }
+}
+
+function toMcpServerSnapshot(server: McpHubServerSnapshot): McpServerSnapshot {
+	const { authUrl: _authUrl, ...rest } = server
+	return { ...rest, authorizationPending: isAuthorizationPending(server) }
 }
 
 async function emitPendingConnectionEvents(
@@ -154,7 +217,7 @@ function createMcpClientHubSnapshotCache() {
 	})
 }
 
-let mcpClientHubSnapshotCache = createMcpClientHubSnapshotCache()
+const mcpClientHubSnapshotCache = createMcpClientHubSnapshotCache()
 
 export function getCachedMcpClientHubSnapshot(
 	input: McpClientHubClientInput,
@@ -170,12 +233,12 @@ export function getCachedMcpClientHubSnapshot(
 				stub,
 				snapshot.connectionEvents ?? [],
 			)
-			return { servers: snapshot.servers }
+			return { servers: snapshot.servers.map(toMcpServerSnapshot) }
 		},
 	})
 }
 
-function mcpClientHubServersCacheKey(userId: string) {
+function mcpClientHubServersCacheKey(userId: OwnerId) {
 	return `${mcpClientHubKey(userId)}:servers`
 }
 
@@ -195,17 +258,15 @@ export function getCachedMcpClientHubServers(
 			const stub = getMcpClientHubStub(input)
 			const peeked = await stub.peekServers()
 			await emitPendingConnectionEvents(input, stub)
-			return peeked
+			return { servers: peeked.servers.map(toMcpServerSnapshot) }
 		},
 	})
 }
 
-export function invalidateMcpClientHubSnapshotCache(input: { userId: string }) {
+export function invalidateMcpClientHubSnapshotCache(input: {
+	userId: OwnerId
+}) {
 	const key = mcpClientHubKey(input.userId)
 	mcpClientHubSnapshotCache.delete(key)
 	mcpClientHubSnapshotCache.delete(mcpClientHubServersCacheKey(input.userId))
-}
-
-export function clearMcpClientHubSnapshotCacheForTests() {
-	mcpClientHubSnapshotCache = createMcpClientHubSnapshotCache()
 }

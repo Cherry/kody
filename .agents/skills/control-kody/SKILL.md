@@ -12,18 +12,23 @@ Do not invent a throwaway curl script, scrape PR comments by hand, or rediscover
 account routes from `routes.ts`. Use the CLI and the Feature Map.
 
 ```bash
-node tools/control-kody.ts doctor
-node tools/control-kody.ts dev
-node tools/control-kody.ts login
-node tools/control-kody.ts request GET /account/waiting.json
-node tools/control-kody.ts request GET /account/waiting --dump --contains 'Waiting'
-node tools/control-kody.ts map waiting
-node tools/control-kody.ts map --check
-node tools/control-kody.ts health --sha <merge-sha>
-node tools/control-kody.ts preview --pr 42 --request 'GET /account/waiting.json' --check /account/waiting
-node tools/control-kody.ts package-create --origin <preview> --package-name <leaf-or-@scope/leaf> [--head-ahead]
-node tools/control-kody.ts execute --origin <preview> --code-file fixture.ts [--params-file params.json]
-node tools/control-kody.ts search --origin <preview> --query "packageSave" [--domain packages]
+npm run control-kody -- doctor
+npm run control-kody -- dev
+npm run control-kody -- login
+npm run control-kody -- request GET /account/waiting.json
+npm run control-kody -- request GET /@user-me/-/waiting --dump --contains 'Waiting'
+npm run control-kody -- request POST /account/organizations/new --form slug=x-org --form displayName=X
+npm run control-kody -- request POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png
+npm run control-kody -- request GET /account/connected-agents.json --header 'Referer: <origin>/@<slug>/-/connections'
+npm run control-kody -- preview --pr 42 --request 'POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org'
+npm run control-kody -- map waiting
+npm run control-kody -- map --check
+npm run control-kody -- health --sha <merge-sha>
+npm run control-kody -- preview --pr 42 --request 'GET /account/waiting.json' --check /account/waiting
+npm run control-kody -- browse --origin <preview> --path /@user-me/pkg [--record]
+npm run control-kody -- package-create --origin <preview> --package-name <leaf-or-@scope/leaf> [--head-ahead] [--org <slug>]
+npm run control-kody -- execute --origin <preview> --code-file fixture.ts [--params-file params.json] [--org <slug>]
+npm run control-kody -- search --origin <preview> --query "packageSave" [--domain packages] [--org <slug>]
 ```
 
 `--kody-id` is an alias for `--package-name`.
@@ -41,6 +46,40 @@ methods log in first when no cookie exists.
 A `--` separator is optional. `--request` specs take trailing `--dump` /
 `--contains <text>` like `request`:
 `preview --pr 42 --request 'GET /pricing --dump --contains Worker compute'`.
+
+JSON is the default body. Repeat `--form name=value` for
+`application/x-www-form-urlencoded`. Add `--multipart` for
+`multipart/form-data`; a value that starts with `@` is a file path. Create
+organization is form-only (`request.formData()`), so script it as:
+
+```bash
+npm run control-kody -- preview --pr 42 --request 'POST /account/organizations/new 302 --form slug=x-org --form displayName=X --contains /@x-org'
+```
+
+`preview --request` does not follow redirects. `--contains` also searches the
+`Location` header, which is `/@x-org` after a successful create and the error
+URL when the form is rejected. Avatar upload is the multipart route:
+
+```bash
+npm run control-kody -- request POST /account/profile/avatar.json --multipart --form avatar=@./avatar.png
+```
+
+Org-owned `/account/<section>.json` routes bind the org from a same-origin
+`Referer` and fall back to the personal org without one. Pass it with repeatable
+`--header 'Name: value'` (not `Cookie` or `Content-Type`); session handling is
+unchanged, and `preview --request` specs accept the same flag:
+
+```bash
+npm run control-kody -- request GET /account/connected-agents.json --header 'Referer: <origin>/@<slug>/-/connections'
+```
+
+`browse` reuses the seed cookie from `.tmp/control-kody-cookie` (after `login`
+or `preview`) and injects it into headed Playwright Chromium the same way E2E
+does (`addCookies`). Opens `--path` already signed in. Optional `--record`
+writes video under `.tmp/control-kody-browse`. Prefer MCP/API/`execute` for
+proof; use `browse` only when UI is under test. Cursor `computerUse` drives its
+own browser and cannot attach to the CLI Chromium window — for computerUse, open
+`/login?redirectTo=<path>` with the public seed credentials instead.
 
 `doctor` (and a failed local `login`) print `npm run migrate:local` plus
 `node tools/seed-test-data.ts --local` when local APP_DB was never migrated or
@@ -60,12 +99,21 @@ before opening a Feature Map PR.
 
 - Local: `jane@example.com` / `ilikecode` (non-admin)
 - Preview: `me@kentcdodds.com` / `ilikecode` (non-admin, empty until you create
-  data through JSON APIs, or `package-create` for a saved package)
+  data through JSON APIs, or `package-create` for a saved package). Experimenter
+  flags stay off unless the PR is labeled `preview-flag:<key>` for a key in
+  `tools/preview-seed-flag-allowlist.ts`. Example: label
+  `preview-flag:connection-profiles`, wait for 🔎 Preview, then
+  `npm run control-kody -- request GET /account/connected-agents.json --origin <preview> --dump --contains '"connectionProfilesEnabled":true'`.
 - `/admin` 403 and `/mcp` 401 are expected for those seeds
 - Admin-gated states cannot be preview-tested with the public seed; use the
   local admin account plus Workers or unit tests
 - `execute` / `search` reuse the same seed session on preview or local; they
   refuse `https://kody.codes`
+- After the seed user creates a team org, pass `--org <slug>` on `execute`,
+  `search`, and `package-create`. OAuth otherwise fails with "Choose an
+  organization before approving this connection." The cached bearer token is
+  keyed by origin, email, and org, so switching `--org` mints a new token and
+  keeps the login cookie.
 - `packageSave`, publish, and `packageGetGitRemote` / `package-create` need the
   remote `ARTIFACTS` binding. Use a PR preview origin, not `npm run dev`. See
   [Local limitations](../../../docs/contributing/cloud-agents.md#local-limitations).
@@ -77,7 +125,9 @@ CI green is not enough for a user-visible account change. Prefer:
 1. `doctor` then `dev` or `preview`
 2. `request` (`--dump` / `--contains`) or `--check` as the seed user **with data
    for this change**
-3. A computerUse video or screenshot of the same page
+3. When UI is under test: `browse --origin <origin> --path <path>` (or
+   computerUse with `/login?redirectTo=<path>` and the public seed credentials).
+   Prefer MCP/API otherwise.
 4. After merge, `health --origin https://kody.codes --sha <merge>` (full SHA,
    unique short SHA, or a later descendant HEAD that contains the merge)
 

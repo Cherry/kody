@@ -1,3 +1,8 @@
+import { listPublicSitemapEntries } from '#app/agent-discovery.ts'
+import {
+	listPublicWebsitePages,
+	listPublicBlogPages,
+} from '#app/public-content.ts'
 import { expect, test, vi } from 'vitest'
 import { highlightSnippetKey } from '#universal/highlighted-code.ts'
 import { howKodyWorksPackageFiles } from '#universal/how-kody-works-transcript.ts'
@@ -17,6 +22,7 @@ import {
 	createDocsConnectMarkdownHandler,
 	createDocsMarkdownHandler,
 	createLlmsTxtHandler,
+	createDocsLlmsTxtHandler,
 } from './docs.tsx'
 import { resolveLegacyGuidesLocation } from './legacy-guides-redirect.ts'
 
@@ -79,11 +85,7 @@ test('docs API lists every advertised doc by section and the markdown root is in
 	expect(payload.guides.map((guide) => guide.slug)).toEqual(
 		listDocsNavSlugs({ includeAdmin: false }),
 	)
-	expect(
-		payload.guides.filter((guide) =>
-			['values', 'package_invocation_token_setup'].includes(guide.id),
-		),
-	).toEqual([])
+	expect(payload.guides.filter((guide) => guide.id === 'values')).toEqual([])
 	expect(payload.guides.every((guide) => guide.section !== null)).toBe(true)
 	expect(payload.sections.map((section) => section.id)).toEqual(
 		visibleDocsNav(false).map((section) => section.id),
@@ -119,6 +121,8 @@ test('docs API lists every advertised doc by section and the markdown root is in
 	const llms = await call(createLlmsTxtHandler, '/llms.txt')
 	expect(llms.status).toBe(200)
 	expect(llms.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+	expect(llms.headers.get('Cache-Control')).toBe(publicCache)
+	expect(llms.headers.get('Vary')).toBe('Cookie')
 	const llmsBody = await llms.text()
 	expect(llmsBody.startsWith('# Kody\n')).toBe(true)
 	expect(llmsBody).not.toContain('/docs/values.md')
@@ -150,6 +154,11 @@ test('legacy /guides URLs resolve to their /docs twins and merged doc slugs 308 
 			'/docs/package-apps#after-an-integration-smoke-test',
 		],
 		['/guides/integration-backed-app-happy-path.md', '/docs/package-apps.md'],
+		[
+			'/guides/webhooks',
+			'/docs/triggers#inbound-webhooks-the-external-http-knock',
+		],
+		['/guides/webhooks.md', '/docs/triggers.md'],
 		['/guides/nope', '/docs/nope'],
 	]
 	expect(
@@ -416,4 +425,35 @@ test('admin-only docs 404 for anonymous viewers and stay out of public subscript
 	expect(
 		adminIndexPayload.sections.some((section) => section.id === 'admin'),
 	).toBe(true)
+})
+
+test('AI discovery covers every sitemap URL and shares website and blog metadata', async () => {
+	const response = await call(createLlmsTxtHandler, '/llms.txt')
+	const body = await response.text()
+	const alias = await call(createDocsLlmsTxtHandler, '/docs/llms.txt')
+	expect(await alias.text()).toBe(body)
+	const links = [...body.matchAll(/\]\(https:\/\/kody\.example([^)]*)\)/g)].map(
+		(match) => match[1],
+	)
+	for (const entry of listPublicSitemapEntries()) {
+		const path =
+			entry.path.startsWith('/docs/') && entry.path !== '/docs/connect'
+				? `${entry.path}.md`
+				: entry.path
+		expect(links).toContain(path)
+	}
+	for (const page of [...listPublicWebsitePages(), ...listPublicBlogPages()]) {
+		expect(body).toContain(page.description.replace(/\s+/g, ' ').trim())
+	}
+	for (const path of [
+		'/login',
+		'/signup',
+		'/reset-password',
+		'/docs/admin-events.md',
+	]) {
+		expect(links).not.toContain(path)
+	}
+	expect(
+		new Set(listPublicSitemapEntries().map((entry) => entry.path)).size,
+	).toBe(listPublicSitemapEntries().length)
 })

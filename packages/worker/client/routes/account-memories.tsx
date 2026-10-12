@@ -1,3 +1,4 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { type Handle, css } from 'remix/component'
 import { on } from '#client/event-mixin.ts'
 import { navigate, readCurrentRouterHref } from '#client/client-router.tsx'
@@ -53,7 +54,7 @@ const clampedCellCss = css(recordCellClamp(30))
 
 const accountMemoriesApiPath = routes.accountMemoriesApi.href()
 const accountMemoriesExportPath = routes.accountMemoriesExport.href()
-const memoriesRoute = createListDetailRoute(routes.accountMemories.href())
+const memoriesRoute = createListDetailRoute('/account/memories')
 
 type MessageTone = 'info' | 'error'
 type DeleteMode = 'soft' | 'hard' | null
@@ -122,6 +123,7 @@ export async function accountMemoriesRouteLoader(
 	const response = await fetch(buildMemoriesApiRequestUrl(url.href), {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(url.href),
 		signal,
 	})
 	if (response.status === 401) {
@@ -183,6 +185,7 @@ export function AccountMemoriesRoute(handle: Handle) {
 			const response = await fetch(buildMemoriesApiRequestUrl(href), {
 				headers: { Accept: 'application/json' },
 				credentials: 'include',
+				referrer: orgAccountApiReferrer(href),
 				signal,
 			})
 			if (response.status === 401) return routeDataRedirect('/login')
@@ -265,7 +268,9 @@ export function AccountMemoriesRoute(handle: Handle) {
 			setMessage(
 				input.force ? 'Permanently deleted memory.' : 'Soft-deleted memory.',
 			)
-			navigate(memoriesRoute.buildListHref(getCurrentSearch()))
+			navigate(
+				memoriesRoute.buildListHref(getCurrentSearch(), getCurrentHref()),
+			)
 			handle.update()
 		} catch (error) {
 			actionState = 'idle'
@@ -425,7 +430,11 @@ export function AccountMemoriesRoute(handle: Handle) {
 								// the row being mutated would strand the confirmation.
 								href: isMutating
 									? undefined
-									: memoriesRoute.buildDetailHref(item.id, getCurrentSearch()),
+									: memoriesRoute.buildDetailHref(
+											item.id,
+											getCurrentSearch(),
+											getCurrentHref(),
+										),
 								cells: {
 									subject: <span mix={clampedCellCss}>{item.subject}</span>,
 									status: (

@@ -1,5 +1,9 @@
 import { z } from 'zod'
 import {
+	parseOwnerId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	auditDatabaseFromEnv,
 	logAuditEvent,
 	redactEmailRecipient,
@@ -12,19 +16,23 @@ import { roleNames } from '#universal/permissions.ts'
 import { planNames } from '#universal/plans.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
-import { normalizeStableUserId } from '#worker/user-id.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
+/**
+ * Site-admin tools: the `admin` role gates them, not org permissions. A job,
+ * webhook, subscription, or package run may call them when the person it acts
+ * for holds the role (see `triggered-site-access.ts`).
+ */
 export const adminCapabilityAccess = {
+	orgPermission: 'none',
 	requiredRole: 'admin',
 	readOnly: true,
 	idempotent: true,
 	destructive: false,
 } as const
 
-// Admin mutations stay callable from admin-owned background package/job/webhook
-// callers (no executionOrigin gate). Accepted residual: cross-user / fleet blast
-// such as adminPackageCodemodApply. See docs/contributing/security.md.
 export const adminMutationCapabilityAccess = {
+	orgPermission: 'none',
 	requiredRole: 'admin',
 	readOnly: false,
 	idempotent: false,
@@ -34,6 +42,14 @@ export const adminMutationCapabilityAccess = {
 export const roleNameSchema = z.enum(roleNames)
 
 export const planNameSchema = z.enum(planNames)
+
+export function adminStableOwnerId(value: string): OwnerId {
+	const ownerId = parseOwnerId(value)
+	if (!ownerId) {
+		throw new Error('stable_user_id is invalid.')
+	}
+	return ownerId
+}
 
 export const stableUserIdSchema = z
 	.string()
@@ -52,19 +68,48 @@ export const adminUserMetadataSchema = z.object({
 		.nullable()
 		.describe('Raw users.email_verified_at timestamp, or null if unverified.'),
 	plan: planNameSchema.describe(
-		'Manual entitlement grant (users.plan). Manage plan writes this column. Ordinary Stripe subscribers keep this as free.',
+		'Manual entitlement grant (orgs.plan on the personal org). Manage plan writes this column. Ordinary Stripe subscribers keep this as free.',
 	),
 	manualPlan: planNameSchema.describe(
-		'Same as plan: the admin/manual grant on users.plan.',
+		'Same as plan: the admin/manual grant on orgs.plan.',
 	),
 	stripePlan: planNameSchema
 		.nullable()
 		.describe(
-			'Stripe-derived paid tier from users.stripe_plan, or null when none.',
+			'Stripe-derived paid tier from orgs.stripe_plan, or null when none.',
 		),
 	effectivePlan: planNameSchema.describe(
-		'Higher of the manual grant and Stripe subscription. This is the plan entitlements enforce.',
+		'Entitlement plan after manual grant, Stripe, and unexpired Pro overlays (second-agent gift / referral credit).',
 	),
+	secondAgentGiftExpiresAt: z
+		.string()
+		.nullable()
+		.describe(
+			'Raw orgs.second_agent_standard_gift_expires_at ISO timestamp, or null.',
+		),
+	referralCreditExpiresAt: z
+		.string()
+		.nullable()
+		.describe(
+			'Raw orgs.referral_standard_credit_expires_at ISO timestamp, or null.',
+		),
+	overlayExpiresAt: z
+		.string()
+		.nullable()
+		.describe(
+			'Later of the two overlay expiry columns (or null). Same value gating uses for the temporary Pro raise.',
+		),
+	isProOverlay: z
+		.boolean()
+		.describe(
+			'True while a temporary Pro overlay currently raises Free. False for paid or manual plans even when expiry columns remain set.',
+		),
+	overlayType: z
+		.enum(['second_agent_gift', 'referral_credit'])
+		.nullable()
+		.describe(
+			'Which overlay classifies the current Pro raise. When both are active, the later expiry wins; equal timestamps prefer second_agent_gift. Null unless isProOverlay.',
+		),
 	entitlementLadder: z
 		.enum(['public', 'legacy'])
 		.describe(
@@ -72,7 +117,7 @@ export const adminUserMetadataSchema = z.object({
 		),
 	stripeCustomerLinked: z
 		.boolean()
-		.describe('True when users.stripe_customer_id is set.'),
+		.describe('True when orgs.stripe_customer_id is set.'),
 	suspended_at: z
 		.string()
 		.nullable()
@@ -170,6 +215,8 @@ export async function auditAdminCapabilityInvocation<TResult>(
 	run: () => Promise<TResult>,
 	options: {
 		successReason?: (result: TResult) => string
+		/** A resolved result that reports its own failure (default: success). */
+		resultOf?: (result: TResult) => 'success' | 'failure'
 	} = {},
 ): Promise<TResult> {
 	const actorEmail = ctx.callerContext.user?.email
@@ -179,7 +226,7 @@ export async function auditAdminCapabilityInvocation<TResult>(
 			db: auditDatabaseFromEnv(ctx.env),
 			category: 'admin',
 			action: capabilityName,
-			result: 'success',
+			result: options.resultOf?.(result) ?? 'success',
 			email: actorEmail,
 			path: '/mcp',
 			reason: options.successReason?.(result) ?? 'mcp_admin_capability',
@@ -213,12 +260,12 @@ export async function resolveActingAdminUserId(
 	ctx: CapabilityContext,
 ): Promise<number> {
 	const user = requireMcpUser(ctx.callerContext)
-	const stableUserId = normalizeStableUserId(user.userId)
+	const stableUserId = user.userId.trim()
 	if (!stableUserId) {
 		throw new Error('Authenticated admin account was not found.')
 	}
 	const row = await ctx.env.APP_DB.prepare(
-		`SELECT id FROM users WHERE stable_user_id = ?`,
+		`SELECT id FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
 	)
 		.bind(stableUserId)
 		.first<{ id: number }>()

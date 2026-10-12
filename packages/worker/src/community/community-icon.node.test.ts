@@ -1,7 +1,8 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import {
 	getCommunityPublicCacheVersion,
-	resetDataCacheForTests,
+	invalidateCommunityPublicCache,
 } from '#app/data-cache.ts'
 import {
 	deleteCommunityIconAssets,
@@ -132,10 +133,11 @@ function createCommunityIconDeletionRaceDbMock() {
 	let deleting = false
 	// After mirror retirement, the DO-authority path no longer calls DB batch for
 	// lease acquire/release. We simulate the account-deletion race by counting
-	// SELECT deleting_at queries: the first two are from the icon-generation
-	// withAccountWriteLease flow; from the third onward we report deletion so that
-	// isServableIconCommit (called by cache.set after icon creation) returns false
-	// and skips the KV write.
+	// SELECT deleting_at queries. assertAccountWritableDb now issues two per
+	// gate (live users + personal-org row). Lease acquire uses the first pair;
+	// createCommunityIconDescriptor's post-R2 isServableIconCommit uses the
+	// second pair while still writable; cache.set's isServableIconCommit is
+	// the fifth query and must see deletion so the KV write is skipped.
 	let deletingAtSelectCount = 0
 	return {
 		prepare(query: string) {
@@ -146,8 +148,11 @@ function createCommunityIconDeletionRaceDbMock() {
 						async first<T>() {
 							if (normalized.includes('SELECT deleting_at')) {
 								deletingAtSelectCount++
-								if (deletingAtSelectCount >= 3) deleting = true
-								return { deleting_at: deleting ? 'now' : null } as T
+								if (deletingAtSelectCount >= 5) deleting = true
+								return {
+									deleting_at: deleting ? 'now' : null,
+									deleted_at: null,
+								} as T
 							}
 							return null
 						},
@@ -166,7 +171,7 @@ function createCommunityIconDeletionRaceDbMock() {
 
 const listing = {
 	id: 'listing-1',
-	ownerUserId: 'owner-1',
+	ownerUserId: ownerIdFromStored('owner-1'),
 	packageId: 'package-1',
 	sourceId: 'source-1',
 	kodyId: 'github-tools',
@@ -363,8 +368,8 @@ test('community icon cache write loses the race to account deletion', async () =
 	mockArtifactIcon('community-icon.png', createPngHeader(128, 128))
 	await getPinnedIcon(env)
 	// The deletion race is detected via the D1 deleting_at point gate:
-	// isServableIconCommit sees deleting_at set (on its third SELECT query,
-	// after icon generation completes) and skips the KV write.
+	// isServableIconCommit sees deleting_at set (on the fifth SELECT query,
+	// during cache.set after icon generation) and skips the KV write.
 	expect(kvValues.size).toBe(0)
 })
 
@@ -420,7 +425,8 @@ test('deleteCommunityIconAssets removes superseded revisions and keeps servable 
 })
 
 test('refreshCommunityIconForPackagePublish drops superseded icon caches for active listings', async () => {
-	resetDataCacheForTests()
+	invalidateCommunityPublicCache()
+	const versionAfterClear = getCommunityPublicCacheVersion()
 	const { env, ...stores } = createIconEnv()
 	seedIconAssets(stores, listing.id, [
 		listing.pinnedCommit,
@@ -448,7 +454,7 @@ test('refreshCommunityIconForPackagePublish drops superseded icon caches for act
 	expect(Array.from(stores.r2Values.keys()).sort()).toEqual(
 		kept.map((commit) => r2IconKey('v3', listing.id, commit)).sort(),
 	)
-	expect(getCommunityPublicCacheVersion()).toBe(1)
+	expect(getCommunityPublicCacheVersion()).toBe(versionAfterClear + 1)
 
 	// Without an active listing the hook must be a no-op.
 	mocks.getCommunityListingByOwnerAndPackage.mockResolvedValue(null)
@@ -456,6 +462,6 @@ test('refreshCommunityIconForPackagePublish drops superseded icon caches for act
 	stores.r2Values.set(oldR2Key, Uint8Array.from([1]))
 	await refresh('newest-publish')
 	expect(stores.r2Values.has(oldR2Key)).toBe(true)
-	expect(getCommunityPublicCacheVersion()).toBe(1)
-	resetDataCacheForTests()
+	expect(getCommunityPublicCacheVersion()).toBe(versionAfterClear + 1)
+	invalidateCommunityPublicCache()
 })

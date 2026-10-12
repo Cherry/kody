@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { buildCommunityIconR2Key } from '#worker/community/community-icon.ts'
 import {
@@ -19,6 +20,7 @@ import {
 // v1 traversed D1 email rows, so its continuation cannot be translated to the
 // Mailbox keyset without risking duplicate bytes. Signed v1 cursors fail with
 // an explicit restart instruction instead.
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const accountR2CursorVersion = 3
 const accountR2ChunkBytes = 256 * 1024
 
@@ -92,7 +94,7 @@ async function cursorHmacKey(env: Env) {
 	)
 }
 
-async function encodeCursor(env: Env, userId: string, cursor: R2Cursor) {
+async function encodeCursor(env: Env, userId: OwnerId, cursor: R2Cursor) {
 	const payload = encodeBase64Url(JSON.stringify({ userId, cursor }))
 	const signature = await crypto.subtle.sign(
 		'HMAC',
@@ -123,7 +125,7 @@ function isScanState(value: unknown): value is R2ScanState {
 
 async function decodeCursor(
 	env: Env,
-	userId: string,
+	userId: OwnerId,
 	value: string | undefined,
 ): Promise<R2Cursor> {
 	if (!value) {
@@ -162,7 +164,7 @@ function bucketFor(env: Env, binding: AccountR2Binding) {
 
 async function findNextRef(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 	cursor: R2Cursor
 }): Promise<R2Cursor> {
@@ -178,7 +180,7 @@ async function findNextRef(input: {
 		switch (cursor.state.stage) {
 			case 'avatar': {
 				const row = await input.env.APP_DB.prepare(
-					`SELECT avatar_key FROM users WHERE id = ?`,
+					`SELECT avatar_key FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
 				)
 					.bind(input.dbUserId)
 					.first<{ avatar_key: string | null }>()
@@ -212,10 +214,10 @@ async function findNextRef(input: {
 						AND entity_sources.user_id = community_listings.owner_user_id
 						AND entity_sources.entity_kind = 'package'
 						AND entity_sources.entity_id = community_listings.package_id
+						AND entity_sources.deleted_at IS NULL
 					WHERE community_listings.owner_user_id = ?
-						AND community_listings.rowid > ?
-					ORDER BY community_listings.rowid
-					LIMIT 1`,
+						AND community_listings.rowid > ?${andLiveDeletedAtSql('community_listings')}
+					ORDER BY community_listings.rowid LIMIT 1`,
 				)
 					.bind(input.userId, cursor.state.afterRowid)
 					.first<{
@@ -271,9 +273,8 @@ async function findNextRef(input: {
 						entity_sources.indexed_commit
 					FROM entity_sources
 					WHERE entity_sources.user_id = ?
-						AND entity_sources.rowid > ?
-					ORDER BY entity_sources.rowid
-					LIMIT 1`,
+						AND entity_sources.rowid > ?${andLiveDeletedAtSql('entity_sources')}
+					ORDER BY entity_sources.rowid LIMIT 1`,
 				)
 					.bind(input.userId, cursor.state.afterRowid)
 					.first<{
@@ -382,14 +383,14 @@ async function findNextRef(input: {
 
 async function resolveCurrentRef(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 	ref: StableR2Ref
 }): Promise<AccountR2ObjectRef | null> {
 	switch (input.ref.source.kind) {
 		case 'avatar': {
 			const row = await input.env.APP_DB.prepare(
-				`SELECT avatar_key FROM users WHERE id = ?`,
+				`SELECT avatar_key FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
 			)
 				.bind(input.dbUserId)
 				.first<{ avatar_key: string | null }>()
@@ -405,9 +406,10 @@ async function resolveCurrentRef(input: {
 					AND entity_sources.user_id = community_listings.owner_user_id
 					AND entity_sources.entity_kind = 'package'
 					AND entity_sources.entity_id = community_listings.package_id
+					AND entity_sources.deleted_at IS NULL
 				WHERE community_listings.owner_user_id = ?
 					AND community_listings.rowid = ?
-					AND community_listings.id = ?`,
+					AND community_listings.id = ?${andLiveDeletedAtSql('community_listings')}`,
 			)
 				.bind(input.userId, input.ref.source.rowid, input.ref.source.listingId)
 				.first<{
@@ -435,7 +437,7 @@ async function resolveCurrentRef(input: {
 				FROM entity_sources
 				WHERE entity_sources.user_id = ?
 					AND entity_sources.rowid = ?
-					AND entity_sources.repo_id = ?`,
+					AND entity_sources.repo_id = ?${andLiveDeletedAtSql('entity_sources')}`,
 			)
 				.bind(input.userId, input.ref.source.rowid, input.ref.source.repoId)
 				.first<{
@@ -492,7 +494,7 @@ function encodeBytesBase64(bytes: Uint8Array) {
 
 export async function readAccountR2ExportPage(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 	startAfter?: string
 	warnings: Array<string>
@@ -639,7 +641,7 @@ export async function readAccountR2ExportPage(input: {
 
 export async function countAccountR2ObjectRefs(input: {
 	env: Env
-	userId: string
+	userId: OwnerId
 	dbUserId: number
 }) {
 	const [emailBlobs, icons, identityIcons, avatar] = await Promise.all([
@@ -661,7 +663,8 @@ export async function countAccountR2ObjectRefs(input: {
 				AND entity_sources.user_id = community_listings.owner_user_id
 				AND entity_sources.entity_kind = 'package'
 				AND entity_sources.entity_id = community_listings.package_id
-			WHERE community_listings.owner_user_id = ?`,
+				AND entity_sources.deleted_at IS NULL
+			WHERE community_listings.owner_user_id = ?${andLiveDeletedAtSql('community_listings')}`,
 		)
 			.bind(input.userId)
 			.first<{ count: number }>(),
@@ -677,14 +680,14 @@ export async function countAccountR2ObjectRefs(input: {
 							entity_sources.indexed_commit,
 							entity_sources.published_commit
 						) IS NOT NULL)
-				)`,
+				)${andLiveDeletedAtSql('entity_sources')}`,
 		)
 			.bind(input.userId)
 			.first<{ count: number }>(),
 		input.env.APP_DB.prepare(
 			`SELECT CASE WHEN avatar_key IS NULL OR TRIM(avatar_key) = ''
 				THEN 0 ELSE 1 END AS count
-			FROM users WHERE id = ?`,
+			FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
 		)
 			.bind(input.dbUserId)
 			.first<{ count: number }>(),

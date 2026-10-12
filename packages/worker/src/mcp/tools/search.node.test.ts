@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -65,6 +69,7 @@ function createJoinedIntegration(input: {
 		},
 		connection: {
 			userId,
+			credentialId: 'cred-integration',
 			name: input.name,
 			appSlug,
 			platformAppSlug: null,
@@ -96,6 +101,8 @@ function cap(
 		readOnly: true,
 		idempotent: true,
 		destructive: false,
+		orgPermission: 'none',
+		requiresLivePerson: 'never',
 		source: 'builtin',
 		inputSchema: { type: 'object' as const, properties: {} },
 		inputTypeDefinition: '',
@@ -131,7 +138,7 @@ function search(
 	return searchUnified({
 		env: {} as Env,
 		limit: 5,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		registry: buildCapabilityRegistry([]),
 		optionalRows: emptyOptionalSearchRows,
 		...input,
@@ -161,7 +168,7 @@ function packageRecord(
 ): PackageSearchRow['record'] {
 	return {
 		id,
-		userId,
+		userId: ownerIdFromStored(userId),
 		name: id,
 		kodyId: id,
 		description: '',
@@ -169,6 +176,7 @@ function packageRecord(
 		searchText: null,
 		sourceId: `source-${id}`,
 		hasApp: false,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: false,
 		lockedAt: null,
@@ -247,6 +255,7 @@ test('searchUnified ranks mixed search rows through one shared pipeline', async 
 			],
 			userSecretRows: [
 				{
+					credentialId: 'cred-alpha-secret',
 					name: 'alpha-secret',
 					scope: 'user',
 					description: 'beta gamma delta secret',
@@ -387,9 +396,9 @@ test('searchUnified matches integrations by name, scope, and host, keeps shared-
 		]),
 	)
 	expect(
-		(await search({ query: 'github', userId: 'user-2' })).matches.filter(
-			(match) => match.type === 'integration',
-		),
+		(
+			await search({ query: 'github', userId: ownerIdFromStored('user-2') })
+		).matches.filter((match) => match.type === 'integration'),
 	).toEqual([])
 })
 
@@ -401,6 +410,7 @@ test('searchUnified hides admin capabilities from non-admins in offline search',
 			capabilities: [
 				defineDomainCapability('admin', {
 					name: 'adminUserList',
+					orgPermission: 'none',
 					description: 'List admin user account metadata and roles',
 					keywords: ['admin', 'users', 'roles', 'accounts'],
 					readOnly: true,
@@ -417,6 +427,7 @@ test('searchUnified hides admin capabilities from non-admins in offline search',
 			capabilities: [
 				defineDomainCapability('meta', {
 					name: 'publicDocsSearch',
+					orgPermission: 'none',
 					description: 'Search public docs',
 					keywords: ['public', 'docs', 'search'],
 					readOnly: true,
@@ -435,9 +446,10 @@ test('searchUnified hides admin capabilities from non-admins in offline search',
 			registry: filterCapabilityRegistryForCaller(
 				registry,
 				createMcpCallerContext({
+					source: { kind: 'mcp-oauth' },
 					baseUrl: 'https://example.com',
 					user: {
-						userId: `${roles[0]}-1`,
+						userId: personIdFromStored(`${roles[0]}-1`),
 						email: `${roles[0]}@example.com`,
 						displayName: roles[0]!,
 						roles,
@@ -451,6 +463,95 @@ test('searchUnified hides admin capabilities from non-admins in offline search',
 	}
 	expect(await findsAdminCapability(['user'])).toBe(false)
 	expect(await findsAdminCapability(['admin'])).toBe(true)
+})
+
+test('searchUnified ranks the same when retrievers settle during candidate generation', async () => {
+	const retrieverResult = {
+		id: 'note-1',
+		title: 'Target lookup note',
+		summary: 'Target can be reached at 555-1234.',
+		score: 0.9,
+		source: 'notes inbox',
+		packageId: 'package-1',
+		kodyId: 'notes-package',
+		retrieverKey: 'notes',
+		retrieverName: 'Notes retriever',
+	}
+	const fixtures = {
+		query: 'target lookup note',
+		limit: 5,
+		userId: ownerIdFromStored('user-1'),
+		registry: registryOf('meta', [
+			cap('target_lookup', 'meta', 'Find target details'),
+		]),
+		optionalRows: rows({
+			packageRows: [
+				leanPackageRow('pkg-target', 'user-1', {
+					name: '@user/target-lookup',
+					kodyId: 'target-lookup',
+					description: 'Lookup a target from notes.',
+				}),
+			],
+		}),
+		env: {
+			SENTRY_ENVIRONMENT: 'production',
+			CAPABILITY_VECTOR_INDEX: {
+				async query() {
+					return { matches: [] }
+				},
+			},
+		} as unknown as Env,
+	}
+	const embedText = async (text: string) => [...deterministicEmbedding(text)]
+	const rankedIds = (result: Awaited<ReturnType<typeof search>>) =>
+		result.matches.map((match) =>
+			match.type === 'capability'
+				? `capability:${match.name}`
+				: match.type === 'package'
+					? `package:${match.kodyId}`
+					: match.type === 'retriever_result'
+						? `retriever_result:${match.id}`
+						: `${match.type}`,
+		)
+
+	const sequential = await search({
+		...fixtures,
+		embedText,
+		retrieverResults: [retrieverResult],
+	})
+
+	let embeddingStarted = false
+	let releaseRetrievers = (_results: Array<typeof retrieverResult>) => {}
+	const retrieverResults = new Promise<Array<typeof retrieverResult>>(
+		(resolve) => {
+			releaseRetrievers = resolve
+		},
+	)
+	const overlappedPromise = search({
+		...fixtures,
+		embedText: async (text) => {
+			embeddingStarted = true
+			return await embedText(text)
+		},
+		retrieverResults,
+	})
+	await vi.waitFor(() => {
+		expect(embeddingStarted).toBe(true)
+	})
+	releaseRetrievers([retrieverResult])
+	const overlapped = await overlappedPromise
+
+	expect(rankedIds(overlapped)).toEqual(rankedIds(sequential))
+	expect(rankedIds(overlapped)).toEqual(
+		expect.arrayContaining([
+			expect.stringContaining('retriever_result:note-1'),
+			expect.stringContaining('package:target-lookup'),
+			expect.stringContaining('capability:target_lookup'),
+		]),
+	)
+	expect(overlapped.telemetry.candidateCounts).toEqual(
+		sequential.telemetry.candidateCounts,
+	)
 })
 
 test('searchUnified ranks package retriever results alongside capabilities', async () => {
@@ -509,7 +610,7 @@ test('optional search rows load packages and values without partial fallbacks', 
 		overrides: Partial<Parameters<typeof loadOptionalSearchRows>[0]> = {},
 	) =>
 		loadOptionalSearchRows({
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			loadPackages: async () => [],
 			loadUserSecrets: async () => [],
 			loadUserValues: async () => [],
@@ -531,6 +632,7 @@ test('optional search rows load packages and values without partial fallbacks', 
 		name: '@kody/roku-remote',
 		kodyId: 'roku-remote',
 		hasApp: true,
+		hasSkills: false,
 	})
 	const savedPackage = await loaders({ loadPackages: async () => [roku] })
 	expect(savedPackage).toEqual({
@@ -579,14 +681,14 @@ test('buildSavedPackageSearchRows defers source loading and hydrates only top ma
 		buildSavedPackageSearchRows({
 			env: {} as Env,
 			baseUrl: 'http://localhost',
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			records: [record],
 		})
 	const searchRows = (packageRows: Array<PackageSearchRow>, query: string) =>
 		search({
 			query,
 			limit: 3,
-			userId: 'user-123',
+			userId: ownerIdFromStored('user-123'),
 			optionalRows: rows({ packageRows }),
 		})
 
@@ -643,6 +745,7 @@ test('buildSavedPackageSearchRows defers source loading and hydrates only top ma
 			searchText: 'search text',
 			sourceId: 'missing-source',
 			hasApp: true,
+			hasSkills: false,
 		}),
 	)
 	const degraded = await searchRows(failedHydration.rows, 'observed package')
@@ -978,6 +1081,7 @@ test('searchUnified inspect affinity: live-status, package-oriented, and generic
 			'Home automation package management wrappers and workflow helpers.',
 		tags: ['home', 'workflow', 'wrapper', 'package'],
 		hasApp: true,
+		hasSkills: false,
 	})
 	opsPackage.projection.appEntry = './app.tsx'
 
@@ -1019,6 +1123,7 @@ test('searchUnified inspect affinity: live-status, package-oriented, and generic
 		optionalRows: rows({
 			userSecretRows: [
 				{
+					credentialId: 'cred-webhook_api_key',
 					name: 'webhook_api_key',
 					scope: 'user',
 					description: 'Webhook API key for outbound hooks',
@@ -1043,6 +1148,7 @@ test('searchUnified domain scoping: filter, browse, reject unknown, and overview
 			capabilities: [
 				defineDomainCapability('email', {
 					name: 'emailSend',
+					orgPermission: 'none',
 					description: 'Send an email message from the per-user inbox',
 					keywords: ['email', 'send', 'mail'],
 					readOnly: false,
@@ -1056,6 +1162,7 @@ test('searchUnified domain scoping: filter, browse, reject unknown, and overview
 				}),
 				defineDomainCapability('email', {
 					name: 'emailMessageList',
+					orgPermission: 'none',
 					description: 'List stored email messages',
 					keywords: ['email', 'list', 'mail'],
 					readOnly: true,
@@ -1071,6 +1178,7 @@ test('searchUnified domain scoping: filter, browse, reject unknown, and overview
 			capabilities: [
 				defineDomainCapability('jobs', {
 					name: 'jobUpdate',
+					orgPermission: 'none',
 					description:
 						'Update metadata on a durable job that can send email reminders',
 					keywords: ['email', 'schedule', 'job', 'update'],
@@ -1171,40 +1279,7 @@ test('searchUnified domain scoping: filter, browse, reject unknown, and overview
 	expect(capabilityNames(taskQuery.matches)).toContain('emailSend')
 })
 
-test('searchUnified ranks platform (built-in) package rows and drops unmarked foreign rows', async () => {
-	const withPlatform = await search({
-		query: 'github helpers',
-		optionalRows: rows({
-			packageRows: [
-				leanPackageRow('pkg-own', 'user-1', {
-					name: '@user/notes',
-					kodyId: 'notes',
-					description: 'Notes helper',
-				}),
-				{
-					...leanPackageRow('platform-pkg-1', 'platform-user', {
-						name: '@kody/github',
-						kodyId: 'github',
-						description: 'Official GitHub helpers',
-						tags: ['github'],
-					}),
-					platformScope: 'kody',
-				},
-			],
-		}),
-	})
-	expect(
-		withPlatform.matches.find(
-			(match) => match.type === 'package' && match.kodyId === 'github',
-		),
-	).toMatchObject({
-		type: 'package',
-		name: '@kody/github',
-		platformScope: 'kody',
-	})
-
-	// An unmarked foreign row still fails the package lane closed (and logs
-	// the tripwire warning).
+test('searchUnified drops package rows owned by another org', async () => {
 	consoleWarn.mockImplementation(() => {})
 	const withForeign = await search({
 		query: 'github helpers',
@@ -1224,6 +1299,29 @@ test('searchUnified ranks platform (built-in) package rows and drops unmarked fo
 	expect(consoleWarn).toHaveBeenCalledWith(
 		expect.stringContaining('row userId mismatch'),
 	)
+})
+
+test('searchUnified keeps team-org package rows when userId is the bound org', async () => {
+	const teamOrgId = 'org-kody-platform'
+	const withTeamPackages = await search({
+		query: 'agent mail add-rule',
+		userId: ownerIdFromStored(teamOrgId),
+		optionalRows: rows({
+			packageRows: [
+				leanPackageRow('agent-mail-pkg', teamOrgId, {
+					name: '@kody/agent-mail',
+					kodyId: 'agent-mail',
+					description: 'AgentMail inboxes for agents',
+				}),
+			],
+		}),
+	})
+	expect(
+		withTeamPackages.matches.some(
+			(match) =>
+				match.type === 'package' && match.packageId === 'agent-mail-pkg',
+		),
+	).toBe(true)
 })
 
 test('searchUnified embeds each distinct query text once online through a shared embedding cache', async () => {

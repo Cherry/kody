@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
@@ -7,7 +11,14 @@ const mockModule = vi.hoisted(() => ({
 	getMcpUserPackageScope: vi.fn(),
 	rebuildPublishedPackageArtifactsViaRepoSession: vi.fn(),
 	getEntitySourceByIdForUser: vi.fn(),
+	getRepoSessionById: vi.fn(),
 	absorbCommunityForkUpstream: vi.fn(),
+	getSavedPackageById: vi.fn(),
+}))
+
+vi.mock('#worker/package-registry/repo.ts', () => ({
+	getSavedPackageById: (...args: Array<unknown>) =>
+		mockModule.getSavedPackageById(...args),
 }))
 
 vi.mock('#worker/repo/repo-session-rpc.ts', () => ({
@@ -30,6 +41,11 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 		mockModule.getEntitySourceByIdForUser(...args),
 }))
 
+vi.mock('#worker/repo/repo-sessions.ts', () => ({
+	getRepoSessionById: (...args: Array<unknown>) =>
+		mockModule.getRepoSessionById(...args),
+}))
+
 vi.mock('#worker/community/service.ts', () => ({
 	absorbCommunityForkUpstream: (...args: Array<unknown>) =>
 		mockModule.absorbCommunityForkUpstream(...args),
@@ -42,8 +58,9 @@ function createCtx() {
 	return {
 		env: { APP_DB: {} } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			user: {
-				userId: 'user-1',
+				userId: personIdFromStored('user-1'),
 				email: 'user@test.invalid',
 				displayName: 'User',
 				username: 'user',
@@ -61,8 +78,15 @@ function resetMocks() {
 	mockModule.rebuildPublishedPackageArtifactsViaRepoSession.mockResolvedValue(
 		undefined,
 	)
+	mockModule.getRepoSessionById.mockResolvedValue({
+		id: 'session-1',
+		user_id: ownerIdFromStored('user-1'),
+		source_id: 'source-1',
+	})
 	mockModule.getEntitySourceByIdForUser.mockResolvedValue({
 		id: 'source-1',
+		user_id: ownerIdFromStored('user-1'),
+		entity_kind: 'package',
 		entity_id: 'package-1',
 	})
 	mockModule.absorbCommunityForkUpstream.mockResolvedValue(undefined)
@@ -115,10 +139,49 @@ test('repoPublishSession keeps a successful publish when fork absorb fails and s
 		expect(result).toEqual(expected)
 		expect(mockModule.absorbCommunityForkUpstream).toHaveBeenCalledWith(
 			expect.objectContaining({
-				userId: 'user-1',
+				userId: ownerIdFromStored('user-1'),
 				packageId: 'package-1',
 				originCommit: 'origin-head',
 			}),
 		)
 	}
+})
+
+test('repoPublishSession keeps the credential notice on a locked publish', async () => {
+	resetMocks()
+	mockModule.getSavedPackageById.mockResolvedValue({
+		id: 'package-1',
+		kodyId: 'demo',
+	})
+	const credentialNotice =
+		'Legacy credential patterns remain in src/index.ts (line 3).'
+	mockModule.repoSessionRpc.mockReturnValue({
+		getSessionInfo: vi.fn(async () => ({
+			entity_type: 'package',
+			source_id: 'source-1',
+		})),
+		publishSession: vi.fn(async () => ({
+			status: 'locked',
+			sessionId: 'session-1',
+			publishedCommit: null,
+			pendingCommit: 'commit-2',
+			currentPublishedCommit: 'commit-1',
+			packageId: 'package-1',
+			packageName: '@user/demo',
+			message: 'Package is locked.',
+			credentialNotice,
+		})),
+	})
+
+	const result = await repoPublishSessionCapability.handler(
+		{ session_id: 'session-1' },
+		createCtx(),
+	)
+
+	expect(result).toMatchObject({
+		status: 'locked',
+		pending_commit: 'commit-2',
+	})
+	expect(result.message).toMatch(/^Package "@user\/demo" is locked\./)
+	expect(result.message).toContain(`\n\n${credentialNotice}`)
 })

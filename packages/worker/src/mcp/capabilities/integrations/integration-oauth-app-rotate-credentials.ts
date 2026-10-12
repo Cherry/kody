@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeIntegrationOrgWide } from '#mcp/capabilities/integrations/authorize-integration.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import {
 	getOauthApp,
@@ -27,6 +29,7 @@ const outputSchema = z.object({
 export const integrationOauthAppRotateCredentialsCapability =
 	defineDomainCapability(capabilityDomainNames.integrations, {
 		name: 'integrationOauthAppRotateCredentials',
+		orgPermission: 'integration:write',
 		description:
 			'Rotate the client id on a shared OAuth app. Every connection on that app sees the new client id on the next join — one write instead of updating each connection. Rotate the client secret value from /account/integrations.',
 		keywords: [
@@ -45,10 +48,11 @@ export const integrationOauthAppRotateCredentialsCapability =
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeIntegrationOrgWide(ctx, 'integration:write')
 			const existing = await getOauthApp({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				slug: args.slug,
 			})
 			if (!existing) {
@@ -58,13 +62,13 @@ export const integrationOauthAppRotateCredentialsCapability =
 			}
 			const rotated = await rotateOauthAppClientCredentials({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				slug: args.slug,
 				clientId: args.clientId,
 			})
 			const joined = await listJoinedIntegrations({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 			})
 			const connections = joined
 				.filter(

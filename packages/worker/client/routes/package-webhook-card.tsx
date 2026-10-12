@@ -11,7 +11,6 @@ import {
 import {
 	packageWebhookCardId,
 	type WebhookIntent,
-	webhookDeliveriesHref,
 	webhookModeLabel,
 	webhookStatusColor,
 	webhookStatusLabel,
@@ -68,7 +67,8 @@ const statusPillCss = {
 
 function verificationValue(webhook: PackageWebhookListItem) {
 	const verification = webhook.verification
-	if (!verification) return 'URL secret only (no HMAC)'
+	if (!verification) return 'URL secret only (no HMAC; not declared)'
+	if (verification.type === 'url-secret') return 'URL secret only (no HMAC)'
 	return (
 		<span mix={css({ display: 'grid', gap: spacing.xs })}>
 			<span>
@@ -109,12 +109,9 @@ function replayValue(webhook: PackageWebhookListItem) {
 function challengeSecretName(
 	challenge: NonNullable<PackageWebhookListItem['challenge']>,
 ) {
-	if (challenge.type === 'subscription-challenge') {
-		const prove = challenge.prove
-		if (!prove || prove.kind === 'none') return undefined
-		return prove.secretName
-	}
-	return challenge.secretName
+	const prove = challenge.prove
+	if (!prove || prove.kind === 'none') return undefined
+	return prove.secretName
 }
 
 function challengeValue(webhook: PackageWebhookListItem) {
@@ -148,6 +145,7 @@ export function renderPackageWebhookCard(input: {
 	disableCheck: DoubleCheck
 	onIntent: (intent: WebhookIntent) => void
 	onHideUrl: () => void
+	deliveriesHref: string
 }) {
 	const {
 		webhook,
@@ -157,6 +155,7 @@ export function renderPackageWebhookCard(input: {
 		disableCheck,
 		onIntent,
 		onHideUrl,
+		deliveriesHref,
 	} = input
 	const webhookLabel = `${webhook.packageKodyId}/${webhook.name}`
 	const titleId = `${packageWebhookCardId(webhook.name)}-title`
@@ -300,7 +299,7 @@ export function renderPackageWebhookCard(input: {
 					>
 						{rotateCheck.doubleCheck ? 'Confirm rotate' : 'Rotate URL'}
 					</button>
-					<a href={webhookDeliveriesHref} mix={css(mutedLinkCss)}>
+					<a href={deliveriesHref} mix={css(mutedLinkCss)}>
 						Recent deliveries
 					</a>
 				</div>

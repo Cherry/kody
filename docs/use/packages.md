@@ -29,11 +29,13 @@ Packages are the saved-entity unit across search, execute, repo editing, and UI
 hosting. The package page tabs are **Repo**, **Files**
 (`/@username/:name/tree/:ref` — the same URL whether the package is public or
 private), and **Settings**. Visibility keeps private source off the public web.
-Owner controls (lock, visibility, share, webhooks, delete) live at
+Owner controls (lock, visibility, webhooks, delete) live at
 `/@username/:name/settings`. Public listings also expose a read-only
 [`.git` clone URL](./community-packages.md#clone-a-public-package-read-only-git).
-Inbound HTTP uses [webhooks](./webhooks.md). To let another paid account use a
-package without getting a copy, [share it](../guides/package-sharing.md).
+Inbound HTTP uses [webhooks](./webhooks.md). To let someone use a package
+without getting a copy, [grant them access](../guides/package-sharing.md). To
+ship Agent Skills with a package, see
+[package skills](../guides/package-skills.md).
 
 ## Package state model
 
@@ -92,6 +94,8 @@ Important fields:
 - `kody.searchText` — optional longer search text beyond the short description
 - `kody.dependencies` — map of direct saved package names imported through
   static `kody:@...` imports (`{ "@scope/package": "*" }`)
+- `kody.credentials` — optional credential slots the package needs (see
+  [Credential slots](#credential-slots-kodycredentials))
 - `kody.secretMounts` — optional package-scoped secret mount declarations
 - `kody.secretProvider` — optional `{ id }` declaring this package can serve
   that external secret provider. Metadata alone does not bind the provider; see
@@ -116,6 +120,65 @@ the new `@{username}/…` name (including same-account `kody:@` imports and
 republishes to Community any public package that was already pinned to that
 package's latest commit. Third-party integrations and dynamic invocations that
 hard-code a previous `@{username}` scope need updates from their owners.
+
+### Credential slots (`kody.credentials`)
+
+`kody.credentials` names each credential the package needs. Publish validates
+the block. A slot does not pick the credential: `{{secret:NAME}}` reads the
+secret stored as `NAME` and `{{integration-token:NAME}}` the integration named
+`NAME`, with the same package access rules as a package without slots. Name each
+slot after the secret or integration the code references. These placeholders
+keep working permanently; more secure credential types that a package can opt
+into are described in
+[ADR 0068](../contributing/decisions/0068-credentials-own-placement-scoped-clients.md).
+
+```json
+{
+	"name": "@acme/calendar-digest",
+	"exports": { ".": "./index.ts" },
+	"kody": {
+		"description": "Email a weekly digest of Google Calendar events.",
+		"credentials": {
+			"GOOGLE": {
+				"kind": "oauth",
+				"provider": "google",
+				"multiple": true,
+				"description": "Google accounts whose calendars go in the digest."
+			},
+			"RESEND_API_KEY": {
+				"kind": "secret",
+				"provider": "resend",
+				"description": "Resend API key that sends the digest email."
+			}
+		}
+	}
+}
+```
+
+- Slot names start with a letter and use letters, numbers, `.`, `_`, or `-` (max
+  64).
+- `kind` is `secret`, `oauth`, or `mcp`. `provider` is a free-form label.
+  `description` says what the slot is for. `multiple: true` means the package
+  picks among several accounts.
+- Publish rejects any other key or a missing field and names the slot. If a
+  later rule rejects a slot in a version that is already published, the package
+  still loads with its other slots.
+- Slots take no `placement`. Publish rejects one with a message to remove it.
+  Published versions that include it load with it ignored. The fetch gateway
+  fills `{{secret:NAME}}` and `{{integration-token:NAME}}` anywhere in a request
+  (a header, the URL path or query, or a text body) when the request is HTTPS
+  and its host is one the secret or integration allows, the same as for a
+  package without slots. See
+  [Placeholders in `fetch`](./secrets-and-values.md#placeholders-in-fetch).
+
+To list credential references that match the detect-only scan, run
+`repoRunChecks`. Its `credentials` result lists each file with the codemod 0010
+pattern labels it matches (for example `- src/index.ts: literal secret`),
+without credential names. `repoPublishSession` and `packageSave` repeat that
+list in their output, and `packagePublishExternalPush` includes the result in
+`checks`. It never fails a check or blocks a publish. The labels are described
+in
+[package codemods](../contributing/package-codemods.md#0010-detect-legacy-credential-patterns).
 
 ### npm dependencies
 
@@ -156,16 +219,12 @@ exhaustive.
   package's name is known when the code is written. Static imports are typed,
   publish-verified, dependency-graph-visible, and add zero per-call platform
   cost.
-- **Platform (built-in) scopes are fork-only.** When a scope's username belongs
-  to a platform account (for example `@kody`), person accounts must not
-  statically import that package from ad hoc `execute` or from a saved
-  person-owned package. Official `@kody` packages may still compose with each
-  other. Publish checks reject `kody:@kody/…` static imports and
-  `kody.dependencies` entries in person-owned package source. Execute fails the
-  same way. Fork the official package into your scope (`communityFork`) and
-  import that copy. Dynamic `import("kody:@kody/…")` is unsupported. Platform
-  packages appear in `search` results (marked with their platform scope) so
-  agents can discover them and fork.
+- **Imports resolve only in your org.** A package from another org (including
+  the public community packages from the `@kody` org) cannot be imported from ad
+  hoc `execute` or from a saved package, even with a grant. Publish checks
+  reject a static import or `kody.dependencies` entry for another org's package,
+  and execute fails the same way. Fork the package into your org
+  (`communityFork`) and import that copy.
 - Static `kody:@...` imports in saved package code are bundled into published
   runtime artifacts as snapshots of the imported package's published bundle.
   Republishing the imported package does not change already-published
@@ -240,29 +299,29 @@ const account = await profile({})
 ```
 
 Declare every static `kody:@` import in `package.json#kody.dependencies`.
-Person-owned packages must not import a platform scope; `communityFork` first.
-`packageStorage()` on a static import reaches the declaring package's bucket for
-**caller-owned** packages.
+Imports resolve only in your org; `communityFork` another org's package first.
+`packageStorage()` on a static import reaches the declaring package's bucket.
 
-There is no author-facing `packages.invoke`. Interactive MCP
-`packageSubscriptionDispatch` is the post-publish subscription smoke test, not a
-composition primitive. External trusted clients that must call a named export
-over HTTP use inbound webhooks: declare one webhook per export, mint a handle
-with `webhookUrlMint`, register it with `webhookUrlApply` when a provider needs
-the URL, and POST JSON (`inputMode: "params"` and `Idempotency-Key` for
-first-party clients). See [Inbound webhooks](./webhooks.md).
+Interactive MCP `packageSubscriptionDispatch` is the post-publish subscription
+smoke test, not a composition primitive. External trusted clients that must call
+a named export over HTTP use inbound webhooks: declare one webhook per export,
+mint a handle with `webhookUrlMint`, register it with `webhookUrlApply` when a
+provider needs the URL, and POST JSON (`inputMode: "params"` and
+`Idempotency-Key` for first-party clients). See
+[Inbound webhooks](./webhooks.md).
 
-Scoped resolution is exact: `kody:@kentcdodds/google` selects a package under
-that person scope that the caller owns or has an accepted
-[share grant](../guides/package-sharing.md) to use. A platform specifier such as
-`kody:@kody/google` is not runnable in a person account — `communityFork` it
-first.
+Scoped resolution is exact: `kody:@kentcdodds/google` selects that package only
+when it belongs to the caller's org. A package from another org, such as
+`kody:@kody/google`, is not runnable until you `communityFork` it into your org.
+To run someone else's live package, they
+[grant you access](../guides/package-sharing.md) and you connect to their org.
 
 ## Package storage
 
-Every saved package owns one durable storage bucket per user
+Every saved package owns one durable storage bucket in the org that owns it
 (`storageId = package:{encodeURIComponent(packageId)}`), reached via
-`packageStorage()` from `kody:runtime`. One rule per context:
+`packageStorage()` from `kody:runtime`. Every member, job, and app of that org
+reads the same bucket. One rule per context:
 
 - **Writing a saved package?** Use `packageStorage()` for the package's own data
   — from package apps, exports, subscriptions, jobs, and workflows. Retrievers
@@ -284,13 +343,10 @@ bucket no matter where the code runs:
   run-scoped state in that bucket under run-scoped keys.
 - When the module is statically imported (`kody:@scope/package/export`) into an
   ad hoc `execute` call or into another package, each module reads and writes
-  the bucket of the package it came from. For caller-owned packages that is the
-  calling user's account. For an accepted
-  [share grant](../guides/package-sharing.md), `packageStorage()` uses the
-  owner's bucket so guests share one package state. Grants are per-bundle, not
-  per-module: statically importing a package grants the whole bundle read/write
-  access to that package's bucket, so treat static imports of unadopted
-  community forks as a trust decision (adopt after review).
+  the bucket of the package it came from, in the calling user's account. Grants
+  are per-bundle, not per-module: statically importing a package grants the
+  whole bundle read/write access to that package's bucket, so treat static
+  imports of unadopted community forks as a trust decision (adopt after review).
 
 ```ts
 import { packageStorage } from 'kody:runtime'
@@ -385,8 +441,8 @@ A package app is a hosted Worker entry:
   handler (a function, `{ fetch }`, or a named `fetch` export). The host strips
   the app mount before forwarding. There is no runtime field; publish rejects
   `kody.app.runtime`. A leftover field on a published snapshot is ignored. Remix
-  is a recipe (`guide:package_apps#remix-recipe`): the platform supplies
-  `remix/<subpath>` at the origin version as an optional convenience
+  is a recipe (`guide:package_apps#remix-recipe`): declare `remix` in
+  `dependencies` like any other package; the platform does not supply frameworks
 - Kody's runtime is available from `kody:runtime` (`packageStorage()`,
   `packageSecrets`, `kody`, `createAuthenticatedFetch`, `workflows`, and
   `packageContext`). Remix controllers can also `get(KodyRuntime)`
@@ -405,7 +461,7 @@ A package app is a hosted Worker entry:
 
 ## Attached MCP servers
 
-Enabled MCP servers from `/account/mcp-servers` are available as
+Enabled MCP servers from `/@<slug>/-/mcp-servers` are available as
 `kody.mcp["name"]` in execute and in package runtimes that build caller context:
 package apps (when capabilities or nested package imports need them), package
 subscription handlers, package-owned jobs, workflows, and webhook delivery.
@@ -501,7 +557,7 @@ snapshot. Recovery to ready dispatches `mcp.server.reconnected` with the same
 episode id. The payload is metadata-first (server id/name/state, `account_url`).
 See the [package subscriptions guide](../guides/package-subscriptions.md).
 
-Artifacts-backed plain repos, packages, and job sources also emit `repo.pushed`,
+Artifacts-backed plain repos and packages also emit `repo.pushed`,
 `repo.created`, and `repo.deleted` when Cloudflare Artifacts reports those
 lifecycle events. Session workspace branch pushes (`sessions/<id>`) and publish
 git-notes (`refs/notes/commits`) do not fan out. See [Plain repos](./repos.md)
@@ -531,6 +587,9 @@ Recurring schedules belong on a saved package:
 - Package config (secrets and manifest mounts) stays keyed by the saved package
   id
 - Shared durable data goes through `packageStorage()`
+- Each run, including `jobRunNow`, gets a 5-minute sandbox budget on every plan,
+  including package exports the job imports. Outbound `fetch` keeps its own
+  5-minute deadline and 60s idle timeout
 
 Jobs are part of the package definition. Deferred one-shot work uses
 `workflows.create({ runAt })` from `execute` or package runtime — see
@@ -538,12 +597,10 @@ Jobs are part of the package definition. Deferred one-shot work uses
 
 `jobUpdate` adjusts metadata on an existing job: schedule, timezone, enabled
 state, kill-switch state, params, `expires_at` (UTC ISO auto-disable; null
-clears), and `preserved`. Package-owned jobs keep name and source in the package
-repo — change the job entry there and publish. `jobDelete` is rejected for
-package-owned jobs for the same reason. `jobRunNow` triggers an existing package
-job immediately for debugging. When `expires_at` is reached the platform stops
-scheduling and auto-disables the job; that is separate from `preserved`, which
-only skips retention deletion.
+clears). Jobs keep name and source in the package repo — change, add, or remove
+the job entry there and publish. `jobRunNow` triggers an existing package job
+immediately for debugging. When `expires_at` is reached the platform stops
+scheduling and auto-disables the job.
 
 ## Save and edit packages
 
@@ -628,9 +685,9 @@ Use:
   is missing or wrong.
 
 Delete removes the package from discovery, stops its jobs, clears package
-storage and package-scoped secrets, drops invocation tokens, and unlists a
-public catalog entry if one exists. Artifact repos are cleaned up best-effort.
-Existing forks keep their copies.
+storage and package-scoped secrets, and unlists a public catalog entry if one
+exists. Artifact repos are cleaned up best-effort. Existing forks keep their
+copies.
 
 Hiding and making a package private are not deletion. Use those when the package
 should stay saved.

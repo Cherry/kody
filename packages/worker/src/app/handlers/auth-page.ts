@@ -1,11 +1,7 @@
 import { normalizeRedirectTo } from '#app/auth-redirect.ts'
-import {
-	getEnabledOauthProviders,
-	oauthProviderDefinitions,
-} from '#app/oauth-providers.ts'
+import { publicAuthProvidersLoaderData } from '#app/public-auth-providers.ts'
 import { loadSessionInfo } from '#app/session-info.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
-import { getTurnstileSiteKey } from '#app/public-form-protection.ts'
 
 export function createAuthPageHandler(
 	env: Env,
@@ -41,20 +37,16 @@ export function createAuthPageHandler(
 			// page: the enabled-provider list is deployment configuration,
 			// not per-user data, so there is nothing to lazily load.
 			// Document title/OG come from the shared registry by pathname
-			// (`/login` vs `/signup`).
+			// (`/login` vs `/signup`). Anonymous HTML is viewer-independent
+			// (no CSRF token, no session embed) and shares the marketing
+			// edge-cache path; a session cookie redirects above or forces
+			// no-store via resolveAppPageCacheControl.
 			return renderAppPage({
 				request,
 				env,
 				extraSetCookies: setCookie ? [setCookie] : undefined,
 				loaderData: {
-					authProviders: {
-						ok: true,
-						turnstileSiteKey: getTurnstileSiteKey(env),
-						providers: getEnabledOauthProviders(env).map((provider) => ({
-							id: provider,
-							label: oauthProviderDefinitions[provider].label,
-						})),
-					},
+					authProviders: publicAuthProvidersLoaderData(env),
 				},
 			})
 		},

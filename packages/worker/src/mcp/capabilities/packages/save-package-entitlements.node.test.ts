@@ -1,12 +1,22 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import type * as sourceSafetyPolicyModule from '#worker/repo/source-safety-policy.ts'
+import type * as packageRegistryRepoModule from '#worker/package-registry/repo.ts'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { isEntitlementLimitError } from '#worker/entitlements/errors.ts'
 import { planLimits } from '#universal/plans.ts'
 import { maxRepoSourceFileBytes } from '#worker/repo/large-file-policy.ts'
 import { PackagePublishLockedError } from '#worker/package-registry/package-publish-lock.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+
+const migrationsDirectory = new URL('../../../../migrations/', import.meta.url)
 
 const mockModule = vi.hoisted(() => ({
 	ensureEntitySource: vi.fn(),
@@ -16,6 +26,10 @@ const mockModule = vi.hoisted(() => ({
 	getEntitySourceByEntity: vi.fn(),
 	deleteEntitySource: vi.fn(),
 	loadPriorPackageManifestContent: vi.fn(),
+	insertSavedPackage: vi.fn(),
+	realInsertSavedPackage: null as
+		| null
+		| typeof packageRegistryRepoModule.insertSavedPackage,
 }))
 
 vi.mock('#worker/repo/source-service.ts', () => ({
@@ -55,6 +69,16 @@ vi.mock('#worker/repo/source-safety-policy.ts', async (importOriginal) => {
 	}
 })
 
+vi.mock('#worker/package-registry/repo.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof packageRegistryRepoModule>()
+	mockModule.realInsertSavedPackage = actual.insertSavedPackage
+	return {
+		...actual,
+		insertSavedPackage: (...args: Array<unknown>) =>
+			mockModule.insertSavedPackage(...args),
+	}
+})
+
 const {
 	buildSavedPackageIdMismatchMessage,
 	buildSavedPackageNameCollisionMessage,
@@ -63,106 +87,103 @@ const {
 
 type Row = Record<string, unknown>
 const now = '2026-04-18T00:00:00.000Z'
-const savedPackageInsertColumns = [
-	'id',
-	'user_id',
-	'name',
-	'kody_id',
-	'description',
-	'tags_json',
-	'search_text',
-	'source_id',
-	'has_app',
-	'hidden',
-	'is_private',
-	'created_at',
-	'updated_at',
-]
 
 function createDatabase(
 	users: Array<Row>,
 	savedPackages: Array<Row>,
-	{ failInsertWithUniqueName = false } = {},
+	{
+		failInsertWithUniqueName = false,
+		orgs = [],
+	}: { failInsertWithUniqueName?: boolean; orgs?: Array<Row> } = {},
 ) {
-	const find = (rows: Array<Row>, predicate: (row: Row) => boolean) =>
-		structuredClone(rows.find(predicate) ?? null)
-	return {
-		prepare(query: string) {
-			return {
-				bind(...params: Array<unknown>) {
-					const [first, second] = params
-					const lookupColumn =
-						/WHERE (id|kody_id|name) = \? AND user_id = \?/.exec(query)?.[1]
-					return {
-						async first() {
-							if (query.includes('SELECT plan, stripe_plan')) {
-								return find(
-									users,
-									(row) =>
-										row['email'] === first && row['stable_user_id'] === second,
-								)
-							}
-							if (
-								query.includes('SELECT username') &&
-								query.includes('FROM users') &&
-								query.includes('stable_user_id')
-							) {
-								return find(users, (row) => row['stable_user_id'] === first)
-							}
-							if (
-								query.includes('SELECT COUNT(*) AS count FROM saved_packages')
-							) {
-								return {
-									count: savedPackages.filter((row) => row['user_id'] === first)
-										.length,
-								}
-							}
-							if (query.includes('FROM saved_packages') && lookupColumn) {
-								return find(
-									savedPackages,
-									(row) =>
-										row[lookupColumn] === first && row['user_id'] === second,
-								)
-							}
-							throw new Error(`Unsupported first query: ${query}`)
-						},
-						async all() {
-							if (
-								query.includes('FROM saved_packages') &&
-								query.includes('WHERE user_id = ?')
-							) {
-								return {
-									results: structuredClone(
-										savedPackages.filter((row) => row['user_id'] === first),
-									),
-								}
-							}
-							throw new Error(`Unsupported all query: ${query}`)
-						},
-						async run() {
-							if (!query.includes('INSERT INTO saved_packages')) {
-								throw new Error(`Unsupported run query: ${query}`)
-							}
-							if (failInsertWithUniqueName) {
-								throw new Error(
-									'D1_ERROR: UNIQUE constraint failed: saved_packages.user_id, saved_packages.name: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)',
-								)
-							}
-							savedPackages.push(
-								Object.fromEntries(
-									savedPackageInsertColumns.map((column, index) => [
-										column,
-										params[index],
-									]),
-								),
-							)
-							return { meta: { changes: 1 } }
-						},
-					}
-				},
-			}
-		},
-	} as unknown as D1Database
+	const sqlite = new DatabaseSync(':memory:')
+	applyAllMigrations(sqlite, migrationsDirectory)
+	const db = createD1FromSqlite(sqlite)
+	for (const user of users) {
+		sqlite
+			.prepare(
+				`INSERT INTO users (
+					username, email, password_hash, email_verified_at, stable_user_id
+				) VALUES (?, ?, 'x', ?, ?)`,
+			)
+			.run(
+				String(user['username']),
+				String(user['email']),
+				now,
+				String(user['stable_user_id']),
+			)
+		const stableUserId = String(user['stable_user_id'])
+		if (!orgs.some((org) => String(org['id']) === stableUserId)) {
+			sqlite
+				.prepare(
+					`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, ?)`,
+				)
+				.run(
+					stableUserId,
+					String(user['username']),
+					String(user['plan'] ?? 'free'),
+					now,
+					now,
+				)
+		}
+	}
+	for (const org of orgs) {
+		sqlite
+			.prepare(
+				`INSERT INTO orgs (id, slug, plan, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`,
+			)
+			.run(
+				String(org['id']),
+				String(org['slug']),
+				String(org['plan'] ?? 'free'),
+				now,
+				now,
+			)
+	}
+	for (const row of savedPackages) {
+		sqlite
+			.prepare(
+				`INSERT INTO saved_packages (
+					id, user_id, name, kody_id, description, tags_json, search_text,
+					source_id, has_app, hidden, is_private, locked_at, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			)
+			.run(
+				String(row['id']),
+				String(row['user_id']),
+				String(row['name']),
+				String(row['kody_id']),
+				String(row['description'] ?? ''),
+				String(row['tags_json'] ?? '[]'),
+				row['search_text'] == null ? null : String(row['search_text']),
+				String(row['source_id']),
+				Number(row['has_app'] ?? 0),
+				Number(row['hidden'] ?? 0),
+				Number(row['is_private'] ?? 1),
+				row['locked_at'] == null ? null : String(row['locked_at']),
+				String(row['created_at'] ?? now),
+				String(row['updated_at'] ?? now),
+			)
+	}
+	const realInsert = mockModule.realInsertSavedPackage
+	if (!realInsert) {
+		throw new Error('Expected real insertSavedPackage from importOriginal.')
+	}
+	mockModule.insertSavedPackage.mockImplementation(async (...args) => {
+		if (failInsertWithUniqueName) {
+			throw new Error(
+				'D1_ERROR: UNIQUE constraint failed: saved_packages.user_id, saved_packages.name: SQLITE_CONSTRAINT (extended: SQLITE_CONSTRAINT_UNIQUE)',
+			)
+		}
+		return await realInsert(
+			...(args as Parameters<
+				typeof packageRegistryRepoModule.insertSavedPackage
+			>),
+		)
+	})
+	return { db, sqlite }
 }
 
 function savedPackageRow(
@@ -241,14 +262,27 @@ async function setup({
 	username = 'planned',
 	savedPackages = () => [],
 	failInsertWithUniqueName = false,
+	teamOrg,
 }: {
 	email?: string
 	plan?: string
 	username?: string
 	savedPackages?: (userId: string) => Array<Row>
 	failInsertWithUniqueName?: boolean
+	teamOrg?: { id: string; slug: string; plan: string }
 } = {}) {
-	for (const mock of Object.values(mockModule)) mock.mockReset()
+	for (const mock of [
+		mockModule.ensureEntitySource,
+		mockModule.syncArtifactSourceSnapshot,
+		mockModule.refreshSavedPackageProjection,
+		mockModule.upsertSavedPackageVector,
+		mockModule.getEntitySourceByEntity,
+		mockModule.deleteEntitySource,
+		mockModule.loadPriorPackageManifestContent,
+		mockModule.insertSavedPackage,
+	]) {
+		mock.mockReset()
+	}
 	mockModule.ensureEntitySource.mockImplementation(async (input) => ({
 		...sourceRow(input),
 		bootstrapAccess: null,
@@ -281,23 +315,46 @@ async function setup({
 	mockModule.deleteEntitySource.mockResolvedValue(true)
 	mockModule.loadPriorPackageManifestContent.mockResolvedValue(null)
 
-	const userId = await createStableUserIdFromEmail(email)
-	const rows = savedPackages(userId)
-	const db = createDatabase(
+	const userId = testStableUserIdFromEmail(email)
+	const ownerUserId = teamOrg ? ownerIdFromStored(teamOrg.id) : userId
+	const seedRows = savedPackages(ownerUserId)
+	const { db, sqlite } = createDatabase(
 		[{ email, plan, username, stable_user_id: userId }],
-		rows,
-		{ failInsertWithUniqueName },
+		seedRows,
+		{
+			failInsertWithUniqueName,
+			orgs: teamOrg
+				? [{ id: teamOrg.id, slug: teamOrg.slug, plan: teamOrg.plan }]
+				: [],
+		},
 	)
 	const ctx = {
 		env: { APP_DB: db } as Env,
 		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
 			baseUrl: 'https://example.com',
-			user: { userId, email, displayName: 'Planned User' },
+			user: {
+				userId: personIdFromStored(userId),
+				email,
+				displayName: 'Planned User',
+			},
+			orgBinding: teamOrg
+				? {
+						org: { id: ownerIdFromStored(teamOrg.id), slug: teamOrg.slug },
+						role: 'owner',
+					}
+				: undefined,
 		}),
 	}
 	const save = (args: Record<string, unknown>) =>
 		savePackageCapability.handler(args, ctx)
-	return { userId, rows, save }
+	const latestPackage = () =>
+		sqlite
+			.prepare(
+				`SELECT * FROM saved_packages WHERE user_id = ? ORDER BY rowid DESC LIMIT 1`,
+			)
+			.get(ownerUserId) as Row | null
+	return { userId, ownerUserId, save, latestPackage }
 }
 
 const rejection = (promise: Promise<unknown>) =>
@@ -312,6 +369,31 @@ function readSyncedPackageJson() {
 	const files = (syncCall[0] as { files: Record<string, string> }).files
 	return JSON.parse(files['package.json'] ?? '{}') as Record<string, unknown>
 }
+
+test('packageSave under a paid team org enforces the org plan, not free', async () => {
+	const teamOrgId = 'c'.repeat(64)
+	const freeLimit = planLimits.free.maxSavedPackages
+	const { save, ownerUserId } = await setup({
+		email: 'member@example.com',
+		plan: 'free',
+		username: 'member',
+		teamOrg: { id: teamOrgId, slug: 'acme', plan: 'max' },
+		savedPackages: (ownerId) => filledPackages(ownerId, freeLimit),
+	})
+	expect(ownerUserId).toBe(ownerIdFromStored(teamOrgId))
+	// At the free ceiling under a max org: the old actor-email pairing denied
+	// this create; blank entitlement email resolves the org's max plan.
+	await save({
+		files: buildPackageFiles('team-org-package', { username: 'acme' }),
+	})
+	expect(mockModule.ensureEntitySource).toHaveBeenCalled()
+	expect(mockModule.refreshSavedPackageProjection).toHaveBeenCalledWith(
+		expect.objectContaining({
+			userId: ownerIdFromStored(teamOrgId),
+			userEmail: null,
+		}),
+	)
+})
 
 test('packageSave allows below-limit creates and denies creates at the pro and max plan ceilings', async () => {
 	const below = await setup({
@@ -371,7 +453,7 @@ test('packageSave does not gate updates to an existing package at the limit', as
 	expect(mockModule.syncArtifactSourceSnapshot).toHaveBeenCalled()
 })
 
-test('packageSave maps id mismatch, legacy name collision, and UNIQUE insert races to caller errors', async () => {
+test('packageSave maps id mismatch, rename name collision, and UNIQUE insert races to caller errors', async () => {
 	const privateCreate = {
 		confirm_destructive_overwrite: false,
 		confirm_private_visibility_change: false,
@@ -416,14 +498,17 @@ test('packageSave maps id mismatch, legacy name collision, and UNIQUE insert rac
 	expect(mockModule.ensureEntitySource).not.toHaveBeenCalled()
 	expect(mockModule.syncArtifactSourceSnapshot).not.toHaveBeenCalled()
 
-	const sharedName = '@collision/new-kody'
-	const legacy = await setup({
-		email: 'legacy@example.com',
+	const sharedName = '@collision/taken'
+	const rename = await setup({
+		email: 'rename@example.com',
 		username: 'collision',
 		savedPackages: (userId) => [
-			// Legacy row: name leaf no longer matches kody_id, so kody_id
-			// lookup misses while (user_id, name) still conflicts.
-			savedPackageRow(userId, 'legacy-package-id', 'legacy-other', {
+			savedPackageRow(userId, 'renaming-package-id', 'renaming', {
+				name: '@collision/renaming',
+				hidden: 0,
+				is_private: 1,
+			}),
+			savedPackageRow(userId, 'taken-package-id', 'taken', {
 				name: sharedName,
 				hidden: 0,
 				is_private: 1,
@@ -431,14 +516,15 @@ test('packageSave maps id mismatch, legacy name collision, and UNIQUE insert rac
 		],
 	})
 	await expectCallerError(
-		legacy.save({
+		rename.save({
 			...privateCreate,
-			files: buildPackageFiles('new-kody', { name: sharedName, private: true }),
+			package_id: 'renaming-package-id',
+			files: buildPackageFiles('taken', { name: sharedName, private: true }),
 		}),
 		buildSavedPackageNameCollisionMessage({
 			name: sharedName,
-			existingKodyId: 'legacy-other',
-			existingPackageId: 'legacy-package-id',
+			existingKodyId: 'taken',
+			existingPackageId: 'taken-package-id',
 		}),
 	)
 	expect(mockModule.ensureEntitySource).not.toHaveBeenCalled()
@@ -480,7 +566,7 @@ test('packageSave keeps new packages private unless an explicit private:false is
 		confirm_private_visibility_change: true,
 	})
 	expect(readSyncedPackageJson()['private']).toBe(true)
-	expect(omitted.rows.at(-1)?.['is_private']).toBe(1)
+	expect(omitted.latestPackage()?.['is_private']).toBe(1)
 
 	// Leftover private:false stays in the manifest but not catalog visibility.
 	const leftover = await setup(visibilityUser)
@@ -492,7 +578,7 @@ test('packageSave keeps new packages private unless an explicit private:false is
 		confirm_private_visibility_change: true,
 	})
 	expect(readSyncedPackageJson()['private']).toBe(false)
-	expect(leftover.rows.at(-1)?.['is_private']).toBe(1)
+	expect(leftover.latestPackage()?.['is_private']).toBe(1)
 
 	const unconfirmed = await setup(visibilityUser)
 	await expect(
@@ -601,4 +687,48 @@ test('packageSave responses steer coding agents toward the git lane', async () =
 	expect(result.next_steps).toContain('packagePublishExternalPush')
 	expect(result.next_steps).toContain(JSON.stringify(result.package_id))
 	expect(result.pending_secret_package_approvals).toBeNull()
+	expect(result.next_steps).not.toContain('Credential placeholder references')
+})
+
+test('packageSave responses list credential placeholder references by path and pattern', async () => {
+	const { save } = await setup({ plan: 'max' })
+
+	const result = await save({
+		files: [
+			...buildPackageFiles('legacy-credentials-package'),
+			{
+				path: 'src/send.ts',
+				content:
+					"export const headers = { Authorization: 'Bearer {{secret:RESEND_KEY}}' }\n",
+			},
+		],
+	})
+
+	expect(result.next_steps).toContain(
+		'Credential placeholder references (codemod 0010-detect-legacy-credential-patterns, informational; publish is unaffected):\n- src/send.ts: literal secret',
+	)
+	expect(result.next_steps).not.toContain('RESEND_KEY')
+})
+
+test('packageSave lists placeholder references from the published files, not only the submitted ones', async () => {
+	const { save } = await setup({ plan: 'max' })
+	const submitted = buildPackageFiles('kept-file-package')
+	const refresh =
+		mockModule.refreshSavedPackageProjection.getMockImplementation()!
+	mockModule.refreshSavedPackageProjection.mockImplementationOnce(
+		async (input) => ({
+			...(await refresh(input)),
+			files: {
+				...Object.fromEntries(
+					submitted.map((file) => [file.path, file.content]),
+				),
+				'src/kept.ts': "export const h = { a: '{{secret:OLD_KEY}}' }\n",
+			},
+		}),
+	)
+
+	const result = await save({ files: submitted })
+
+	expect(result.next_steps).toContain('- src/kept.ts: literal secret')
+	expect(result.next_steps).not.toContain('OLD_KEY')
 })

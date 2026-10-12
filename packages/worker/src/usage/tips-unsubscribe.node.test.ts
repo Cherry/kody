@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
@@ -23,9 +24,12 @@ function createDb() {
 }
 
 test('tips unsubscribe tokens verify, opt-out is idempotent, and headers are RFC one-click', async () => {
-	const token = await createTipsUnsubscribeToken({ env, userId: 'user-tips' })
+	const token = await createTipsUnsubscribeToken({
+		env,
+		userId: ownerIdFromStored('user-tips'),
+	})
 	expect(await verifyTipsUnsubscribeToken({ env, token })).toEqual({
-		userId: 'user-tips',
+		userId: ownerIdFromStored('user-tips'),
 	})
 	expect(
 		await verifyTipsUnsubscribeToken({
@@ -43,7 +47,7 @@ test('tips unsubscribe tokens verify, opt-out is idempotent, and headers are RFC
 	const url = await mintTipsUnsubscribeUrl({
 		env,
 		appBaseUrl: 'https://kody.codes',
-		userId: 'user-tips',
+		userId: ownerIdFromStored('user-tips'),
 	})
 	expect(url).toContain('/unsubscribe/tips?token=')
 	expect(tipsUnsubscribeHeaders(url)).toEqual({
@@ -59,28 +63,36 @@ test('tips unsubscribe tokens verify, opt-out is idempotent, and headers are RFC
 	const { db } = createDb()
 	await db
 		.prepare(
-			`INSERT INTO users (username, email, password_hash, stable_user_id, plan, account_type)
-			 VALUES ('tips', 'tips@example.com', 'x', 'user-tips', 'free', 'person')`,
+			`INSERT INTO users (username, email, password_hash, stable_user_id)
+			 VALUES ('tips', 'tips@example.com', 'x', 'user-tips')`,
 		)
 		.run()
-	expect(await isTipsEmailsOptedOut({ db, userId: 'user-tips' })).toBe(false)
+	expect(
+		await isTipsEmailsOptedOut({ db, userId: ownerIdFromStored('user-tips') }),
+	).toBe(false)
 	expect(
 		await optOutTipsEmails({
 			db,
-			userId: 'user-tips',
+			userId: ownerIdFromStored('user-tips'),
 			now: new Date('2026-09-07T12:00:00.000Z'),
 		}),
 	).toEqual({ optedOut: true, alreadyOptedOut: false })
-	expect(await isTipsEmailsOptedOut({ db, userId: 'user-tips' })).toBe(true)
+	expect(
+		await isTipsEmailsOptedOut({ db, userId: ownerIdFromStored('user-tips') }),
+	).toBe(true)
 	expect(
 		await optOutTipsEmails({
 			db,
-			userId: 'user-tips',
+			userId: ownerIdFromStored('user-tips'),
 			now: new Date('2026-09-08T12:00:00.000Z'),
 		}),
 	).toEqual({ optedOut: true, alreadyOptedOut: true })
 	expect(
-		await optOutTipsEmails({ db, userId: 'missing', now: new Date() }),
+		await optOutTipsEmails({
+			db,
+			userId: ownerIdFromStored('missing'),
+			now: new Date(),
+		}),
 	).toEqual({ optedOut: false, alreadyOptedOut: false })
 })
 
@@ -98,17 +110,27 @@ test('0053 creates user_tips_email_opt_outs when rewritten 0050 was already appl
 	const db = createD1FromSqlite(sqlite)
 	await db
 		.prepare(
-			`INSERT INTO users (username, email, password_hash, stable_user_id, plan, account_type)
-			 VALUES ('catchup', 'catchup@example.com', 'x', 'user-catchup', 'free', 'person')`,
+			`INSERT INTO users (username, email, password_hash, stable_user_id)
+			 VALUES ('catchup', 'catchup@example.com', 'x', 'user-catchup')`,
 		)
 		.run()
-	expect(await isTipsEmailsOptedOut({ db, userId: 'user-catchup' })).toBe(false)
+	expect(
+		await isTipsEmailsOptedOut({
+			db,
+			userId: ownerIdFromStored('user-catchup'),
+		}),
+	).toBe(false)
 	expect(
 		await optOutTipsEmails({
 			db,
-			userId: 'user-catchup',
+			userId: ownerIdFromStored('user-catchup'),
 			now: new Date('2026-09-07T12:00:00.000Z'),
 		}),
 	).toEqual({ optedOut: true, alreadyOptedOut: false })
-	expect(await isTipsEmailsOptedOut({ db, userId: 'user-catchup' })).toBe(true)
+	expect(
+		await isTipsEmailsOptedOut({
+			db,
+			userId: ownerIdFromStored('user-catchup'),
+		}),
+	).toBe(true)
 })

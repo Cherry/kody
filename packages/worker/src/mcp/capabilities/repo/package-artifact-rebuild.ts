@@ -1,4 +1,5 @@
 import { chunkArray } from '@kody-internal/shared/chunk.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	errorCauseChainIncludes,
 	formatErrorCauseChain,
@@ -10,6 +11,11 @@ import {
 	reusePublishedPackageArtifactIfUnchanged,
 	type PublishedPackageArtifactReuseSnapshotCache,
 } from '#worker/package-runtime/published-bundle-artifacts.ts'
+import {
+	hasPublishedRuntimeArtifacts,
+	readPublishedSourceSnapshot,
+	type PublishedSourceSnapshot,
+} from '#worker/package-runtime/published-runtime-artifacts.ts'
 import { type PublishedPackageArtifactBuildTarget } from '#worker/package-runtime/package-artifact-targets.ts'
 import {
 	createIsolatedArtifactRebuildRunner,
@@ -18,6 +24,7 @@ import {
 } from '#worker/repo/isolated-artifact-rebuild.ts'
 import { repoSessionRpc } from '#worker/repo/repo-session-rpc.ts'
 import { isDurableObjectIsolateResetMessage } from '#worker/sentry-options.ts'
+import { isUserCodeError, UserCodeError } from '#worker/user-code-error.ts'
 
 /**
  * Same-session rebuild RPCs hit one Durable Object, which serializes
@@ -117,6 +124,51 @@ function buildRebuildFailureMessage(input: {
 	return `Package source publish succeeded, but bundle artifact rebuild failed for source "${input.sourceId}" at commit "${input.publishedCommit}". Succeeded: ${succeededSummary}. Failed: ${failedSummary}. Re-run the publish capability to repair artifacts.`
 }
 
+/**
+ * Rebuild wrap that keeps undeclared-bare-import (and other UserCodeError)
+ * failures as caller errors for Sentry, while leaving platform rebuild
+ * failures as plain Errors.
+ */
+function throwRebuildFailure(input: {
+	sourceId: string
+	publishedCommit: string
+	succeeded: ReadonlyArray<PublishedPackageArtifactBuildTarget>
+	failed: ReadonlyArray<{
+		target: PublishedPackageArtifactBuildTarget
+		error: unknown
+	}>
+	error?: unknown
+}): never {
+	const message = buildRebuildFailureMessage(input)
+	const causes = [
+		...input.failed.map((entry) => entry.error),
+		...(input.error !== undefined ? [input.error] : []),
+	]
+	const callerOnly =
+		causes.length > 0 && causes.every((cause) => isUserCodeError(cause))
+	if (callerOnly) {
+		throw new UserCodeError(message, { cause: causes[0] })
+	}
+	// Prefer a platform cause so a mixed wave (caller + platform) still
+	// reaches Sentry via isUserCodeError / beforeSend. Attaching a
+	// UserCodeError cause would drop the whole rebuild failure.
+	const platformCause = causes.find((cause) => !isUserCodeError(cause))
+	throw new Error(message, { cause: platformCause ?? causes[0] })
+}
+
+function rebuildFailureFromTargetResult(input: {
+	target: PublishedPackageArtifactBuildTarget
+	message: string
+	callerFailure?: boolean
+}) {
+	return {
+		target: input.target,
+		error: input.callerFailure
+			? new UserCodeError(input.message)
+			: new Error(input.message),
+	}
+}
+
 async function filterTargetsNeedingRebuild(input: {
 	env: Env
 	userId: string
@@ -133,6 +185,24 @@ async function filterTargetsNeedingRebuild(input: {
 	}
 	const remaining: Array<PublishedPackageArtifactBuildTarget> = []
 	const alreadyBuilt: Array<PublishedPackageArtifactBuildTarget> = []
+	if (input.targets.length === 0) {
+		return { remaining, alreadyBuilt }
+	}
+	// Load this rebuild's published snapshot once and pass that value to every
+	// target. A later rebuild loads again. Prior-commit snapshots are shared
+	// for this call. Dependency source rows are not: a dependency can publish
+	// between sequential targets, and a shared row would let later targets
+	// copy a bundle that still embeds the older dependency commit.
+	const publishedSnapshot: PublishedSourceSnapshot | null | undefined =
+		hasPublishedRuntimeArtifacts(input.env)
+			? await readPublishedSourceSnapshot({
+					env: input.env,
+					sourceId: input.sourceId,
+					publishedCommit: input.publishedCommit,
+				})
+			: undefined
+	const sharedSnapshot =
+		publishedSnapshot !== undefined ? { publishedSnapshot } : {}
 	const snapshotCache: PublishedPackageArtifactReuseSnapshotCache = new Map()
 	for (const target of input.targets) {
 		const built = await isPublishedPackageArtifactBuiltForCommit({
@@ -141,6 +211,7 @@ async function filterTargetsNeedingRebuild(input: {
 			sourceId: input.sourceId,
 			publishedCommit: input.publishedCommit,
 			target,
+			...sharedSnapshot,
 		})
 		if (built) {
 			alreadyBuilt.push(target)
@@ -153,6 +224,7 @@ async function filterTargetsNeedingRebuild(input: {
 			publishedCommit: input.publishedCommit,
 			target,
 			snapshotCache,
+			...sharedSnapshot,
 		})
 		if (reused) {
 			alreadyBuilt.push(target)
@@ -177,16 +249,13 @@ async function listTargetsOrThrow(input: {
 			userId: input.userId,
 		})
 	} catch (error) {
-		throw new Error(
-			buildRebuildFailureMessage({
-				sourceId: input.sourceId,
-				publishedCommit: input.publishedCommit,
-				succeeded: [],
-				failed: [],
-				error,
-			}),
-			{ cause: error },
-		)
+		throwRebuildFailure({
+			sourceId: input.sourceId,
+			publishedCommit: input.publishedCommit,
+			succeeded: [],
+			failed: [],
+			error,
+		})
 	}
 }
 
@@ -251,15 +320,30 @@ async function rebuildPublishedPackageArtifactsOnSession(input: {
 
 	if (failed.length === 0) return
 
-	throw new Error(
-		buildRebuildFailureMessage({
-			sourceId: input.sourceId,
-			publishedCommit: input.publishedCommit,
-			succeeded,
-			failed,
-		}),
-		{ cause: failed[0]?.error },
-	)
+	throwRebuildFailure({
+		sourceId: input.sourceId,
+		publishedCommit: input.publishedCommit,
+		succeeded,
+		failed,
+	})
+}
+
+async function resolveRebuildTargets(input: {
+	session: ReturnType<typeof repoSessionRpc>
+	repoSessionId?: string
+	sourceId: string
+	userId: OwnerId
+	publishedCommit: string
+	targets?: ReadonlyArray<PublishedPackageArtifactBuildTarget>
+}): Promise<ReadonlyArray<PublishedPackageArtifactBuildTarget>> {
+	if (input.targets) return input.targets
+	return await listTargetsOrThrow({
+		session: input.session,
+		repoSessionId: input.repoSessionId,
+		sourceId: input.sourceId,
+		userId: input.userId,
+		publishedCommit: input.publishedCommit,
+	})
 }
 
 async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
@@ -267,21 +351,23 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 	rpcSessionId: string
 	repoSessionId?: string
 	sourceId: string
-	userId: string
+	userId: OwnerId
 	publishedCommit: string
 	baseUrl: string
+	targets?: ReadonlyArray<PublishedPackageArtifactBuildTarget>
 	force?: boolean
 }) {
 	const session = repoSessionRpc(input.env, input.rpcSessionId)
 	const isolatedRunner = createIsolatedArtifactRebuildRunner(input.env)
 
 	if (!isolatedRunner) {
-		const targets = await listTargetsOrThrow({
+		const targets = await resolveRebuildTargets({
 			session,
 			repoSessionId: input.repoSessionId,
 			sourceId: input.sourceId,
 			userId: input.userId,
 			publishedCommit: input.publishedCommit,
+			targets: input.targets,
 		})
 		await rebuildPublishedPackageArtifactsOnSession({
 			...input,
@@ -292,13 +378,15 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 
 	// List + skip before staging so already_published / repair resumes and
 	// unchanged prior-commit targets do not pay collectWorkspaceFiles + KV
-	// stage when nothing remains to rebuild.
-	const targets = await listTargetsOrThrow({
+	// stage when nothing remains to rebuild. Callers such as the importable
+	// backfill may pass a filtered target list to stay in scope.
+	const targets = await resolveRebuildTargets({
 		session,
 		repoSessionId: input.repoSessionId,
 		sourceId: input.sourceId,
 		userId: input.userId,
 		publishedCommit: input.publishedCommit,
+		targets: input.targets,
 	})
 
 	const { remaining, alreadyBuilt } = await filterTargetsNeedingRebuild({
@@ -320,18 +408,16 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 			sessionId: input.repoSessionId,
 			sourceId: input.sourceId,
 			userId: input.userId,
+			publishedCommit: input.publishedCommit,
 		}))
 	} catch (error) {
-		throw new Error(
-			buildRebuildFailureMessage({
-				sourceId: input.sourceId,
-				publishedCommit: input.publishedCommit,
-				succeeded,
-				failed: [],
-				error,
-			}),
-			{ cause: error },
-		)
+		throwRebuildFailure({
+			sourceId: input.sourceId,
+			publishedCommit: input.publishedCommit,
+			succeeded,
+			failed: [],
+			error,
+		})
 	}
 
 	const failed: Array<{
@@ -386,10 +472,13 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 							succeeded.push(targetResult.target)
 							continue
 						}
-						failed.push({
-							target: targetResult.target,
-							error: new Error(targetResult.message),
-						})
+						failed.push(
+							rebuildFailureFromTargetResult({
+								target: targetResult.target,
+								message: targetResult.message,
+								callerFailure: targetResult.callerFailure,
+							}),
+						)
 					}
 					continue
 				}
@@ -408,15 +497,12 @@ async function rebuildPublishedPackageArtifactsViaRepoSessionOnce(input: {
 
 	if (failed.length === 0) return
 
-	throw new Error(
-		buildRebuildFailureMessage({
-			sourceId: input.sourceId,
-			publishedCommit: input.publishedCommit,
-			succeeded,
-			failed,
-		}),
-		{ cause: failed[0]?.error },
-	)
+	throwRebuildFailure({
+		sourceId: input.sourceId,
+		publishedCommit: input.publishedCommit,
+		succeeded,
+		failed,
+	})
 }
 
 export async function rebuildPublishedPackageArtifactsViaRepoSession(input: {
@@ -424,9 +510,11 @@ export async function rebuildPublishedPackageArtifactsViaRepoSession(input: {
 	rpcSessionId: string
 	repoSessionId?: string
 	sourceId: string
-	userId: string
+	userId: OwnerId
 	publishedCommit: string
 	baseUrl: string
+	/** When set, rebuild only these targets instead of every package target. */
+	targets?: ReadonlyArray<PublishedPackageArtifactBuildTarget>
 	force?: boolean
 }) {
 	const maxAttempts = publishedPackageArtifactRebuildRetryDelaysMs.length + 1

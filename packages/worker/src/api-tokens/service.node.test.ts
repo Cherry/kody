@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import {
@@ -7,13 +8,15 @@ import {
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { apiTokenScopeSatisfies } from './scopes.ts'
+import { apiTokenScopeIncludes } from './scopes.ts'
 import {
+	apiTokenLifetimeAliases,
 	apiTokenPolicy,
 	authenticateApiToken,
 	getApiTokenRecord,
 	listApiTokens,
 	mintApiToken,
+	resolveApiTokenLifetime,
 	revokeApiToken,
 	rotateApiToken,
 	slideApiTokenExpiry,
@@ -21,8 +24,9 @@ import {
 } from './service.ts'
 
 const migrationsDirectory = new URL('../../migrations/', import.meta.url)
-const userId = 'stable-user-1'
+const userId = ownerIdFromStored('stable-user-1')
 const start = new Date('2026-09-30T12:00:00.000Z')
+const shortLife = apiTokenLifetimeAliases.short
 
 function createDb() {
 	const sqlite = new DatabaseSync(':memory:')
@@ -47,19 +51,21 @@ test('mint returns the plaintext once, stores only a hash, and authenticates', a
 		db,
 		userId,
 		name: '  cli  ',
-		scopes: ['packages:read', 'secrets:write', 'packages:read'],
+		scopes: ['package:read', 'secret:use', 'package:read'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
 		createdVia: 'api',
 		now: start,
 	})
 
 	expect(minted).toMatchObject({
 		name: 'cli',
-		scopes: ['packages:read', 'secrets:write'],
+		scopes: ['package:read', 'secret:use'],
 		status: 'active',
 		token_type: 'Bearer',
-		idle_ttl_seconds: 15 * 60,
-		expires_at: at(15 * 60).toISOString(),
-		max_expires_at: at(24 * 60 * 60).toISOString(),
+		idle_ttl_seconds: shortLife.idleTtlSeconds,
+		expires_at: at(shortLife.idleTtlSeconds).toISOString(),
+		max_expires_at: at(shortLife.maxLifetimeSeconds).toISOString(),
 	})
 	const parsed = parseApiToken(minted.token)
 	expect(parsed?.tokenId).toBe(minted.id)
@@ -84,14 +90,21 @@ test('mint returns the plaintext once, stores only a hash, and authenticates', a
 	expect(JSON.stringify(listed)).not.toContain(stored.token_hash)
 })
 
+test('resolveApiTokenLifetime rejects prototype keys as aliases', () => {
+	expect(() => resolveApiTokenLifetime({ lifetime: 'toString' })).toThrow(
+		/lifetime must be "short" or "long"/,
+	)
+})
+
 test('authentication rejects malformed, wrong-secret, expired, and revoked tokens', async () => {
 	const { db } = createDb()
 	const minted = await mintApiToken({
 		db,
 		userId,
 		name: 'short',
-		scopes: ['account:read'],
+		scopes: ['org:read'],
 		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 60,
 		createdVia: 'api',
 		now: start,
 	})
@@ -122,7 +135,7 @@ test('use slides expiry forward, debounced, and never past the absolute expiry',
 		db,
 		userId,
 		name: 'sliding',
-		scopes: ['runs:read'],
+		scopes: ['job:read'],
 		idleTtlSeconds: 300,
 		maxLifetimeSeconds: 600,
 		createdVia: 'api',
@@ -154,8 +167,9 @@ test('a token used at its minimum idle TTL keeps at least three quarters of it',
 		db,
 		userId,
 		name: 'minimum',
-		scopes: ['runs:read'],
+		scopes: ['job:read'],
 		idleTtlSeconds: apiTokenPolicy.minIdleTtlSeconds,
+		maxLifetimeSeconds: apiTokenLifetimeAliases.short.maxLifetimeSeconds,
 		createdVia: 'api',
 		now: start,
 	})
@@ -181,7 +195,9 @@ test('rotate invalidates the old secret and keeps scopes and absolute expiry', a
 		db,
 		userId,
 		name: 'rotating',
-		scopes: ['jobs:write'],
+		scopes: ['job:write'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
 		createdVia: 'mcp-api',
 		now: start,
 	})
@@ -194,7 +210,7 @@ test('rotate invalidates the old secret and keeps scopes and absolute expiry', a
 
 	expect(rotated).toMatchObject({
 		id: minted.id,
-		scopes: ['jobs:write'],
+		scopes: ['job:write'],
 		max_expires_at: minted.max_expires_at,
 		rotated_at: at(30).toISOString(),
 	})
@@ -209,16 +225,22 @@ test('rotate invalidates the old secret and keeps scopes and absolute expiry', a
 	})
 	expect(auth.ok).toBe(true)
 	expect(
-		await rotateApiToken({ db, userId: 'someone-else', tokenId: minted.id }),
+		await rotateApiToken({
+			db,
+			userId: ownerIdFromStored('someone-else'),
+			tokenId: minted.id,
+		}),
 	).toBeNull()
 })
 
-test('mint validates scopes, ttl bounds, local-execute access, and parent limits', async () => {
+test('mint validates scopes, ttl bounds, org:execute access, and parent limits', async () => {
 	const { db } = createDb()
 	const base = {
 		db,
 		userId,
 		name: 'bad',
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
 		createdVia: 'api' as const,
 		now: start,
 	}
@@ -231,61 +253,279 @@ test('mint validates scopes, ttl bounds, local-execute access, and parent limits
 	)
 	expect(
 		await rejection(
-			mintApiToken({ ...base, scopes: ['runs:read'], idleTtlSeconds: 5 }),
+			mintApiToken({
+				...base,
+				scopes: ['job:read'],
+				idleTtlSeconds: 5,
+				maxLifetimeSeconds: 60,
+			}),
 		),
 	).toBeInstanceOf(McpCallerError)
 	const localExecute = await mintApiToken({
 		...base,
-		scopes: ['local-execute'],
+		scopes: ['org:execute'],
 	})
-	expect(localExecute.scopes).toEqual(['local-execute'])
+	expect(localExecute.scopes).toEqual(['org:execute'])
 
 	const parent = {
-		scopes: ['packages:write', 'tokens:write'] as const,
+		scopes: ['package:write', 'token:delete'] as const,
 		maxExpiresAt: at(3600).toISOString(),
 	}
 	expect(
-		await rejection(
-			mintApiToken({ ...base, scopes: ['secrets:read'], parent }),
-		),
+		await rejection(mintApiToken({ ...base, scopes: ['secret:use'], parent })),
 	).toBeInstanceOf(McpCallerError)
 	const child = await mintApiToken({
 		...base,
-		scopes: ['packages:read'],
+		scopes: ['package:write'],
 		parent,
 	})
 	expect(child.max_expires_at).toBe(at(3600).toISOString())
 })
 
-test('mint caps active tokens per account and prunes long-dead rows', async () => {
+test('at the active-token cap, mint reclaims the soonest-to-expire token', async () => {
+	const { db } = createDb()
+	const base = {
+		db,
+		userId,
+		scopes: ['org:read'] as const,
+		createdVia: 'api' as const,
+		now: start,
+	}
+	const longLife = apiTokenLifetimeAliases.long
+	const mintedIds: Array<string> = []
+	for (
+		let index = 0;
+		index < apiTokenPolicy.maxActiveTokensPerUser - 1;
+		index++
+	) {
+		const minted = await mintApiToken({
+			...base,
+			name: `bulk-${index}`,
+			idleTtlSeconds: longLife.idleTtlSeconds,
+			maxLifetimeSeconds: longLife.maxLifetimeSeconds,
+		})
+		mintedIds.push(minted.id)
+	}
+	const soonest = await mintApiToken({
+		...base,
+		name: 'soonest',
+		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 120,
+	})
+	mintedIds.push(soonest.id)
+
+	const next = await mintApiToken({
+		...base,
+		name: 'after-cap',
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		now: at(1),
+	})
+	expect(next.status).toBe('active')
+	expect(
+		await getApiTokenRecord({ db, userId, tokenId: soonest.id }),
+	).toMatchObject({ revoked_at: at(1).toISOString() })
+	const active = await listApiTokens({ db, userId, now: at(1) })
+	expect(active).toHaveLength(apiTokenPolicy.maxActiveTokensPerUser)
+	expect(active.some((token) => token.id === soonest.id)).toBe(false)
+	expect(active.some((token) => token.id === next.id)).toBe(true)
+})
+
+test('reclaim never revokes the caller token even when it is soonest to expire', async () => {
+	const { db } = createDb()
+	const caller = await mintApiToken({
+		db,
+		userId,
+		name: 'caller',
+		scopes: ['token:delete', 'org:read'],
+		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 120,
+		createdVia: 'api',
+		now: start,
+	})
+	for (
+		let index = 0;
+		index < apiTokenPolicy.maxActiveTokensPerUser - 1;
+		index++
+	) {
+		await mintApiToken({
+			db,
+			userId,
+			name: `other-${index}`,
+			scopes: ['org:read'],
+			idleTtlSeconds: apiTokenLifetimeAliases.long.idleTtlSeconds,
+			maxLifetimeSeconds: apiTokenLifetimeAliases.long.maxLifetimeSeconds,
+			createdVia: 'api',
+			now: start,
+		})
+	}
+
+	const next = await mintApiToken({
+		db,
+		userId,
+		name: 'protected-mint',
+		scopes: ['org:read'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		createdVia: 'api',
+		excludeTokenId: caller.id,
+		now: at(1),
+	})
+	expect(next.status).toBe('active')
+	expect(
+		await getApiTokenRecord({ db, userId, tokenId: caller.id }),
+	).toMatchObject({ revoked_at: null })
+	const active = await listApiTokens({ db, userId, now: at(1) })
+	expect(active.some((token) => token.id === caller.id)).toBe(true)
+	expect(active).toHaveLength(apiTokenPolicy.maxActiveTokensPerUser)
+})
+
+test('reclaim ranks by expires_at so a recently rotated token is not preferred', async () => {
+	const { db } = createDb()
+	const longLife = apiTokenLifetimeAliases.long
+	for (
+		let index = 0;
+		index < apiTokenPolicy.maxActiveTokensPerUser - 2;
+		index++
+	) {
+		await mintApiToken({
+			db,
+			userId,
+			name: `bulk-${index}`,
+			scopes: ['org:read'],
+			idleTtlSeconds: longLife.idleTtlSeconds,
+			maxLifetimeSeconds: longLife.maxLifetimeSeconds,
+			createdVia: 'api',
+			now: start,
+		})
+	}
+	const aged = await mintApiToken({
+		db,
+		userId,
+		name: 'aged-then-rotated',
+		scopes: ['org:read'],
+		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 24 * 60 * 60,
+		createdVia: 'api',
+		now: start,
+	})
+	const soon = await mintApiToken({
+		db,
+		userId,
+		name: 'soon',
+		scopes: ['org:read'],
+		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 90,
+		createdVia: 'api',
+		now: start,
+	})
+	// Rotation slides expires_at to now+idle (110s). The old created_at+idle
+	// formula would still rank this token first; expires_at ranking must not.
+	const rotated = await rotateApiToken({
+		db,
+		userId,
+		tokenId: aged.id,
+		now: at(50),
+	})
+	expect(rotated?.expires_at).toBe(at(110).toISOString())
+
+	const next = await mintApiToken({
+		db,
+		userId,
+		name: 'after-cap',
+		scopes: ['org:read'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		createdVia: 'api',
+		now: at(51),
+	})
+	expect(next.status).toBe('active')
+	expect(
+		await getApiTokenRecord({ db, userId, tokenId: soon.id }),
+	).toMatchObject({ revoked_at: at(51).toISOString() })
+	expect(
+		await getApiTokenRecord({ db, userId, tokenId: aged.id }),
+	).toMatchObject({ revoked_at: null })
+})
+
+test('mint prunes long-dead rows before reclaim', async () => {
 	const { sqlite, db } = createDb()
 	const base = {
 		db,
 		userId,
 		name: 'bulk',
-		scopes: ['account:read'],
+		scopes: ['org:read'],
+		idleTtlSeconds: 60,
+		maxLifetimeSeconds: 120,
 		createdVia: 'api' as const,
 	}
-	for (let index = 0; index < apiTokenPolicy.maxActiveTokensPerUser; index++) {
-		await mintApiToken({ ...base, now: start })
+	for (let index = 0; index < 3; index++) {
+		await mintApiToken({ ...base, name: `dead-${index}`, now: start })
 	}
-	expect(await rejection(mintApiToken({ ...base, now: at(1) }))).toBeInstanceOf(
-		McpCallerError,
-	)
 
 	const later = at(apiTokenPolicy.inactiveRetentionSeconds + 2 * 86_400)
-	await mintApiToken({ ...base, now: later })
+	await mintApiToken({
+		...base,
+		name: 'survivor',
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		now: later,
+	})
 	const remaining = sqlite
 		.prepare(`SELECT COUNT(*) AS count FROM api_tokens WHERE user_id = ?`)
 		.get(userId) as { count: number }
 	expect(remaining.count).toBe(1)
 })
 
-test('write scopes satisfy the matching read scope only', () => {
-	expect(apiTokenScopeSatisfies(['packages:write'], 'packages:read')).toBe(true)
-	expect(apiTokenScopeSatisfies(['packages:read'], 'packages:write')).toBe(
-		false,
+test('a token row with a blank org_id fails closed instead of using user_id', async () => {
+	const { sqlite, db } = createDb()
+	const minted = await mintApiToken({
+		db,
+		userId,
+		name: 'bound',
+		scopes: ['org:read'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		createdVia: 'api',
+		now: start,
+	})
+	expect(minted.org_id).toBe(userId)
+
+	const teamOrgId = ownerIdFromStored('org-team-token')
+	const team = await mintApiToken({
+		db,
+		userId,
+		orgId: `  ${teamOrgId}  `,
+		name: 'team',
+		scopes: ['org:read'],
+		idleTtlSeconds: shortLife.idleTtlSeconds,
+		maxLifetimeSeconds: shortLife.maxLifetimeSeconds,
+		createdVia: 'api',
+		now: start,
+	})
+	expect(team.org_id).toBe(teamOrgId)
+	expect(
+		(await getApiTokenRecord({ db, userId, tokenId: team.id }))?.org_id,
+	).toBe(teamOrgId)
+
+	// Schema stores org_id NOT NULL; blank strings still fail closed in mapRow.
+	sqlite
+		.prepare(`UPDATE api_tokens SET org_id = '   ' WHERE id = ?`)
+		.run(minted.id)
+	await expect(
+		getApiTokenRecord({ db, userId, tokenId: minted.id }),
+	).rejects.toThrow(/org_id is required/)
+	await expect(
+		authenticateApiToken({ db, token: minted.token, now: at(1) }),
+	).rejects.toThrow(/org_id is required/)
+	await expect(listApiTokens({ db, userId, now: at(1) })).rejects.toThrow(
+		/org_id is required/,
 	)
-	expect(apiTokenScopeSatisfies(['secrets:write'], 'packages:read')).toBe(false)
-	expect(apiTokenScopeSatisfies(['local-execute'], 'local-execute')).toBe(true)
+})
+
+test('org-permission scopes do not imply a write-to-read hierarchy', () => {
+	expect(apiTokenScopeIncludes(['package:write'], 'package:read')).toBe(false)
+	expect(apiTokenScopeIncludes(['package:read'], 'package:write')).toBe(false)
+	expect(apiTokenScopeIncludes(['secret:write'], 'package:read')).toBe(false)
+	expect(apiTokenScopeIncludes(['org:execute'], 'org:execute')).toBe(true)
 })

@@ -47,11 +47,16 @@ const githubPackage = {
 	sourceId: 'src-github',
 }
 
-test('resolveViewerListingInstalls prefers kody matches, then forks, and classifies outdated vs ahead from ancestry', () => {
+test('resolveViewerListingInstalls requires a fork row; same-leaf alone is not installed', () => {
 	const resolved = resolveViewerListingInstalls({
-		listings: ['github', 'cloudflare', 'notion', 'slack', 'dropbox'].map(
-			(kodyId) => ({ id: `listing-${kodyId}`, kodyId }),
-		),
+		listings: [
+			'github',
+			'cloudflare',
+			'notion',
+			'slack',
+			'dropbox',
+			'discord',
+		].map((kodyId) => ({ id: `listing-${kodyId}`, kodyId })),
 		packageScope: 'burhan',
 		savedPackages: [
 			githubPackage,
@@ -60,6 +65,12 @@ test('resolveViewerListingInstalls prefers kody matches, then forks, and classif
 				kodyId: 'my-notion',
 				name: '@burhan/my-notion',
 				sourceId: 'src-notion',
+			},
+			{
+				id: 'pkg-discord-own',
+				kodyId: 'discord',
+				name: '@burhan/discord',
+				sourceId: 'src-discord-own',
 			},
 		],
 		forks: [
@@ -98,11 +109,20 @@ test('resolveViewerListingInstalls prefers kody matches, then forks, and classif
 				'src-dropbox-new',
 				'2026-08-03T00:00:00.000Z',
 			),
+			fork(
+				'listing-github',
+				'github',
+				'pkg-github',
+				'src-github',
+				'2026-08-01T00:00:00.000Z',
+				'commit-same',
+			),
 		],
 	})
 	expect(Object.fromEntries(resolved)).toEqual({
 		'listing-github': install('github', 'src-github', {
 			packageId: 'pkg-github',
+			originCommit: 'commit-same',
 		}),
 		'listing-cloudflare': install('cloudflare', 'src-cf', {
 			status: 'adaptation_required',
@@ -113,6 +133,52 @@ test('resolveViewerListingInstalls prefers kody matches, then forks, and classif
 		'listing-dropbox': install('my-dropbox', 'src-dropbox-new', {
 			status: 'adaptation_required',
 		}),
+	})
+	expect(resolved.has('listing-discord')).toBe(false)
+	expect(resolved.has('listing-slack')).toBe(false)
+
+	const discordListing = {
+		id: 'listing-discord',
+		kodyId: 'discord',
+		pinnedCommit: 'pin-1',
+	}
+	const discordOwn = {
+		id: 'pkg-discord-own',
+		kodyId: 'discord',
+		name: '@burhan/discord',
+		sourceId: 'src-discord-own',
+	}
+	const discordForked = {
+		id: 'pkg-forked-discord',
+		kodyId: 'discord',
+		name: '@burhan/discord-from-community',
+		sourceId: 'src-forked-discord',
+	}
+	expect(
+		resolveViewerListingInstalls({
+			listings: [discordListing],
+			packageScope: 'burhan',
+			savedPackages: [discordOwn, discordForked],
+			forks: [
+				fork(
+					'listing-discord',
+					'discord',
+					discordForked.id,
+					discordForked.sourceId,
+					'2026-08-01T00:00:00.000Z',
+					'pin-1',
+				),
+			],
+		}).get('listing-discord'),
+	).toEqual({
+		status: 'installed',
+		targetName: discordForked.name,
+		sourceId: discordForked.sourceId,
+		packageId: discordForked.id,
+		listingAhead: false,
+		forkAhead: false,
+		originCommit: 'pin-1',
+		listingPinnedCommit: 'pin-1',
 	})
 
 	const githubCases: Array<{
@@ -151,7 +217,7 @@ test('resolveViewerListingInstalls prefers kody matches, then forks, and classif
 			expected: { forkAhead: true, originCommit: 'commit-tip' },
 		},
 		{
-			name: 'self-authored',
+			name: 'renamed-fork-wins-over-same-leaf-non-fork',
 			pinnedCommit: 'commit-new',
 			fork: fork(
 				'listing-github',
@@ -161,7 +227,14 @@ test('resolveViewerListingInstalls prefers kody matches, then forks, and classif
 				'2026-08-02T00:00:00.000Z',
 				'commit-old',
 			),
-			expected: {},
+			expected: {
+				status: 'adaptation_required',
+				targetName: '@burhan/github-custom',
+				sourceId: 'src-github-custom',
+				packageId: null,
+				forkAhead: true,
+				originCommit: 'commit-old',
+			},
 		},
 	]
 	for (const {

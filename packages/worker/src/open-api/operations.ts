@@ -1,7 +1,4 @@
-import {
-	type ApiTokenResource,
-	type ApiTokenScope,
-} from '#worker/api-tokens/scopes.ts'
+import { type SurfacePermission } from '#worker/authorization/authorize.ts'
 
 export const apiOperationMethods = [
 	'GET',
@@ -13,7 +10,26 @@ export const apiOperationMethods = [
 
 export type ApiOperationMethod = (typeof apiOperationMethods)[number]
 
-export type ApiOperationTag = ApiTokenResource | 'search' | 'capability-proxy'
+export const apiOperationTags = [
+	'account',
+	'search',
+	'memories',
+	'secrets',
+	'packages',
+	'repos',
+	'jobs',
+	'webhooks',
+	'email',
+	'integrations',
+	'mcp-servers',
+	'runs',
+	'storage',
+	'community',
+	'tokens',
+	'capability-proxy',
+] as const
+
+export type ApiOperationTag = (typeof apiOperationTags)[number]
 
 type ApiOperationBase = {
 	operationId: string
@@ -26,16 +42,13 @@ type ApiOperationBase = {
 /**
  * An operation backed by a registry capability. `operationId` is the
  * capability name, inputs are the capability's input schema (path params
- * map to same-named inputs), and the scope follows the capability's
- * `readOnly` flag unless the capability is listed in
- * `writeScopeCapabilityNames`.
+ * map to same-named inputs), and its org permission is the capability's
+ * `orgPermission`.
  */
 export type CapabilityApiOperation = ApiOperationBase & {
 	kind: 'capability'
 	/** Inputs that cannot be encoded in this method's query string. */
 	omitInputs?: ReadonlyArray<string>
-	/** Explicit scope; defaults from the tag and the capability. */
-	scope?: ApiTokenScope
 }
 
 export const nativeApiOperationIds = [
@@ -59,28 +72,17 @@ export type NativeApiOperationId = (typeof nativeApiOperationIds)[number]
 export type NativeApiOperation = ApiOperationBase & {
 	kind: 'native'
 	operationId: NativeApiOperationId
-	/** `null` means any valid token may call it (it acts on itself). */
-	scope: ApiTokenScope | null
+	/** Org permission, published as `x-kody-permission`. */
+	permission: SurfacePermission
 }
 
 export type ApiOperation = CapabilityApiOperation | NativeApiOperation
-
-/**
- * Capabilities whose registry `readOnly` flag is true but that sign, lock, or
- * run caller-supplied queries, so an API token needs the write scope.
- */
-export const writeScopeCapabilityNames: ReadonlySet<string> = new Set([
-	'secretLock',
-	'secretJwtSign',
-	'secretProviderLock',
-	'storageQuery',
-])
 
 type CapabilityRoute = [
 	method: ApiOperationMethod,
 	path: string,
 	capabilityName: string,
-	options?: Pick<CapabilityApiOperation, 'omitInputs' | 'scope'>,
+	options?: Pick<CapabilityApiOperation, 'omitInputs'>,
 ]
 
 function capabilityRoutes(
@@ -101,10 +103,17 @@ function nativeRoute(
 	method: ApiOperationMethod,
 	path: string,
 	operationId: NativeApiOperationId,
-	scope: ApiTokenScope | null,
+	permission: SurfacePermission,
 	options: Pick<NativeApiOperation, 'tag'> = { tag: 'tokens' },
 ): NativeApiOperation {
-	return { kind: 'native', operationId, method, path, scope, ...options }
+	return {
+		kind: 'native',
+		operationId,
+		method,
+		path,
+		permission,
+		...options,
+	}
 }
 
 const capabilityProxyRoute = {
@@ -118,25 +127,45 @@ const capabilityProxyRoute = {
  *
  * Deliberately absent: `execute` (use MCP or local execute), secret
  * plaintext reads, inbound webhook receive, package-app HTTP/WebSocket
- * traffic, admin, and runtime-only capabilities (values, invocation tokens,
- * package-app fetch, synthetic dispatch).
+ * traffic, admin, and runtime-only capabilities (values, package-app fetch,
+ * synthetic dispatch).
  */
 export const apiOperations: ReadonlyArray<ApiOperation> = [
 	...capabilityRoutes('account', [
 		['GET', '/v1/me', 'metaGetCurrentUser'],
 		['GET', '/v1/account/usage', 'usageGet'],
+		['GET', '/v1/account/usage/trend', 'usageTrendGet'],
+		['GET', '/v1/account/usage/by-package', 'usageByPackageGet'],
 		['GET', '/v1/account/waiting', 'waitingSummary'],
 		['GET', '/v1/account/export', 'accountExportManifest'],
 		['GET', '/v1/account/export/{section}', 'accountExportSection'],
+		['GET', '/v1/account/feedback', 'metaPlatformFeedbackList'],
+		['GET', '/v1/account/feedback/{feedback_id}', 'metaPlatformFeedbackGet'],
 		['POST', '/v1/account/feedback', 'metaPlatformFeedbackSubmit'],
+		// Teams access (grants, invites, orgs, teams). Tagged account until
+		// token scopes move to the org vocabulary (P4/P5).
+		['GET', '/v1/access/grants', 'accessList'],
+		['POST', '/v1/access/grants', 'accessGrant'],
+		['POST', '/v1/access/grants/{grant_id}/revoke', 'accessRevoke'],
+		['POST', '/v1/access/invites', 'inviteCreate'],
+		['POST', '/v1/access/invites/accept', 'inviteAccept'],
+		['POST', '/v1/access/invites/{invite_id}/revoke', 'inviteRevoke'],
+		['POST', '/v1/orgs', 'orgCreate'],
+		['PATCH', '/v1/orgs', 'orgUpdate'],
+		['GET', '/v1/orgs/members', 'orgMemberList'],
+		['PATCH', '/v1/orgs/members/{user_id}', 'orgMemberUpdate'],
+		['DELETE', '/v1/orgs/members/{user_id}', 'orgMemberRemove'],
+		['GET', '/v1/orgs/teams', 'teamList'],
+		['POST', '/v1/orgs/teams', 'teamCreate'],
+		['POST', '/v1/orgs/teams/{team_id}/members', 'teamMemberAdd'],
+		[
+			'DELETE',
+			'/v1/orgs/teams/{team_id}/members/{user_id}',
+			'teamMemberRemove',
+		],
 	]),
 	...capabilityRoutes('search', [
-		[
-			'GET',
-			'/v1/search',
-			'search',
-			{ scope: 'search:read', omitInputs: ['memoryContext'] },
-		],
+		['GET', '/v1/search', 'search', { omitInputs: ['memoryContext'] }],
 	]),
 	...capabilityRoutes('memories', [
 		['GET', '/v1/memories', 'metaMemorySearch'],
@@ -172,17 +201,9 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 			'packagePublishExternalPush',
 		],
 		['GET', '/v1/package-subscriptions', 'packageSubscriptionsList'],
-		['GET', '/v1/package-shares', 'packageShareList'],
-		['POST', '/v1/package-shares', 'packageShareInvite'],
-		['POST', '/v1/package-shares/accept', 'packageShareAccept'],
-		['GET', '/v1/package-shares/{grant_id}', 'packageShareInspect'],
-		['POST', '/v1/package-shares/{grant_id}/revoke', 'packageShareRevoke'],
-		['POST', '/v1/package-shares/{grant_id}/leave', 'packageShareLeave'],
-		[
-			'POST',
-			'/v1/package-shares/{grant_id}/acknowledge-update',
-			'packageShareAcknowledgeUpdate',
-		],
+		['GET', '/v1/enablements', 'enablementList'],
+		['POST', '/v1/enablements', 'enablementEnable'],
+		['POST', '/v1/enablements/{enablementId}/disable', 'enablementDisable'],
 	]),
 	...capabilityRoutes('repos', [
 		['GET', '/v1/repos', 'repoList'],
@@ -216,7 +237,6 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		['GET', '/v1/jobs', 'jobList'],
 		['GET', '/v1/jobs/{id}', 'jobGet'],
 		['PATCH', '/v1/jobs/{id}', 'jobUpdate'],
-		['DELETE', '/v1/jobs/{id}', 'jobDelete'],
 		['POST', '/v1/jobs/{id}/run', 'jobRunNow'],
 		['GET', '/v1/workflow-runs', 'workflowRunList'],
 		['POST', '/v1/workflow-runs/{id}/cancel', 'workflowRunCancel'],
@@ -305,52 +325,55 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		['GET', '/v1/community/profile', 'communityProfileGet'],
 		['PATCH', '/v1/community/profile', 'communityProfileUpdate'],
 	]),
-	nativeRoute('GET', '/v1/tokens', 'tokenList', 'tokens:read'),
-	nativeRoute('POST', '/v1/tokens', 'tokenCreate', 'tokens:write'),
+	// Own-token create needs no org permission (spec §5.3). List/get/revoke of
+	// account tokens require token:read / token:delete so authorize step 4
+	// still narrows API-token callers (replaces pre-P4 x-kody-scope).
+	nativeRoute('GET', '/v1/tokens', 'tokenList', 'token:read'),
+	nativeRoute('POST', '/v1/tokens', 'tokenCreate', 'none'),
 	...capabilityRoutes('tokens', [
-		[
-			'POST',
-			'/v1/tokens/bootstrap',
-			'cliCredentialBootstrap',
-			{ scope: 'tokens:write' },
-		],
+		['POST', '/v1/tokens/bootstrap', 'cliCredentialBootstrap'],
 	]),
 	nativeRoute(
 		'POST',
 		'/v1/tokens/bootstrap/redeem',
 		'cliCredentialBootstrapRedeem',
-		null,
+		'none',
 	),
-	nativeRoute('GET', '/v1/tokens/current', 'tokenGetCurrent', null),
-	nativeRoute('POST', '/v1/tokens/current/rotate', 'tokenRotateCurrent', null),
-	nativeRoute('DELETE', '/v1/tokens/current', 'tokenRevokeCurrent', null),
-	nativeRoute('GET', '/v1/tokens/{token_id}', 'tokenGet', 'tokens:read'),
+	nativeRoute('GET', '/v1/tokens/current', 'tokenGetCurrent', 'none'),
+	nativeRoute(
+		'POST',
+		'/v1/tokens/current/rotate',
+		'tokenRotateCurrent',
+		'none',
+	),
+	nativeRoute('DELETE', '/v1/tokens/current', 'tokenRevokeCurrent', 'none'),
+	nativeRoute('GET', '/v1/tokens/{token_id}', 'tokenGet', 'token:read'),
 	nativeRoute(
 		'POST',
 		'/v1/tokens/{token_id}/rotate',
 		'tokenRotate',
-		'tokens:write',
+		'token:delete',
 	),
-	nativeRoute('DELETE', '/v1/tokens/{token_id}', 'tokenRevoke', 'tokens:write'),
+	nativeRoute('DELETE', '/v1/tokens/{token_id}', 'tokenRevoke', 'token:delete'),
 	nativeRoute(
 		'GET',
 		'/v1/capability-proxy/session',
 		'capabilityProxySession',
-		'local-execute',
+		'org:execute',
 		capabilityProxyRoute,
 	),
 	nativeRoute(
 		'POST',
 		'/v1/capability-proxy/call',
 		'capabilityProxyCall',
-		'local-execute',
+		'org:execute',
 		capabilityProxyRoute,
 	),
 	nativeRoute(
 		'POST',
 		'/v1/local-execute/package-graph',
 		'localExecutePackageGraph',
-		'local-execute',
+		'org:execute',
 		capabilityProxyRoute,
 	),
 ]
@@ -365,23 +388,6 @@ export function getApiOperationPathParams(path: string) {
 
 export function apiOperationUsesQueryInputs(method: ApiOperationMethod) {
 	return method === 'GET' || method === 'DELETE'
-}
-
-/**
- * Required scope for a capability operation. `readOnly` capabilities need
- * `<tag>:read`; everything else (and `writeScopeCapabilityNames`) needs
- * `<tag>:write`.
- */
-export function resolveCapabilityOperationScope(
-	operation: CapabilityApiOperation,
-	capability: { name: string; readOnly: boolean },
-): ApiTokenScope {
-	if (operation.scope) return operation.scope
-	const access =
-		capability.readOnly && !writeScopeCapabilityNames.has(capability.name)
-			? 'read'
-			: 'write'
-	return `${operation.tag}:${access}` as ApiTokenScope
 }
 
 type RouteSegment =

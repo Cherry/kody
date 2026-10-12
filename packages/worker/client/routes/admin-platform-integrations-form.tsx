@@ -1,5 +1,6 @@
 import { css } from 'remix/component'
 import { on } from '#client/event-mixin.ts'
+import { PasswordRevealInput } from '#client/password-reveal-input.tsx'
 import {
 	type ActionState,
 	formatExtraAuthorizeParams,
@@ -221,18 +222,21 @@ export function renderIntegrationForm(input: {
 							mix={css(accountInputCss)}
 						/>
 					</label>
-					<label mix={css(fieldCss)}>
-						<span mix={css(fieldLabelCss)}>Client secret</span>
-						<input
+					<div mix={css(fieldCss)}>
+						<label for="admin-platform-client-secret" mix={css(fieldLabelCss)}>
+							Client secret
+						</label>
+						<PasswordRevealInput
+							id="admin-platform-client-secret"
 							data-field-ring
 							name="clientSecret"
-							type="password"
 							autoComplete="new-password"
 							placeholder="unchanged when empty"
 							disabled={actionState !== 'idle'}
+							revealNoun="client secret"
 							mix={css(accountInputCss)}
 						/>
-					</label>
+					</div>
 					<label mix={css(fieldCss)}>
 						<span mix={css(fieldLabelCss)}>Flow</span>
 						<select

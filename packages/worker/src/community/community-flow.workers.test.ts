@@ -1,3 +1,8 @@
+import {
+	personIdFromStored,
+	type PersonId,
+	personalOrgId,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -28,7 +33,6 @@ import { writeArtifactSourceSnapshot } from '#worker/repo/artifact-source-snapsh
 import { getArtifactsBinding } from '#worker/repo/artifacts.ts'
 import { insertEntitySource } from '#worker/repo/entity-sources.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { createArtifactsMswHandlers } from '#worker/test-support/artifacts-msw-handlers.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { type CommunityActivityDispatchQueueMessage } from './activity-dispatch-queue-producer.ts'
@@ -38,14 +42,16 @@ import {
 	type CommunityListingPublishedDispatchQueueMessage,
 } from './listing-published-dispatch-queue-producer.ts'
 import { createMswWorkerServer } from '#worker/test-support/msw-worker-server.ts'
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { ensureCommunityFlowSchema } from './community-flow-test-schema.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockAccountId = 'cf_account_mock_123'
 const artifactsApiBaseUrl = 'https://artifacts-mock.test'
 const baseUrl = 'https://test.kody.dev'
 
 type TestUser = {
-	userId: string
+	userId: PersonId
 	email: string
 	username: string
 	displayName: string
@@ -62,20 +68,23 @@ async function insertTestUser(input: {
 	username: string
 }): Promise<TestUser> {
 	await ensureCommunityFlowSchema(env.APP_DB)
-	const userId = await createStableUserIdFromEmail(input.email)
+	const userId = testStableUserIdFromEmail(input.email)
 	await runSql(
 		`INSERT INTO users
-			(username, email, stable_user_id, password_hash, plan, account_type)
-			VALUES (?, ?, ?, ?, ?, ?)`,
+			(username, email, stable_user_id, password_hash)
+			VALUES (?, ?, ?, ?)`,
 		input.username,
 		input.email,
 		userId,
 		'test-password-hash',
-		'max',
-		'person',
 	)
+	await provisionPersonalOrg(env.APP_DB, {
+		stableUserId: userId,
+		username: input.username,
+		plan: 'max',
+	})
 	return {
-		userId,
+		userId: personIdFromStored(userId),
 		email: input.email,
 		username: input.username,
 		displayName: input.username,
@@ -85,7 +94,11 @@ async function insertTestUser(input: {
 function createCapabilityContext(testEnv: Env, user: TestUser) {
 	return {
 		env: testEnv,
-		callerContext: createMcpCallerContext({ baseUrl, user }),
+		callerContext: createMcpCallerContext({
+			source: { kind: 'mcp-oauth' },
+			baseUrl,
+			user,
+		}),
 	}
 }
 
@@ -102,12 +115,14 @@ function createFlowHarness() {
 	// Publish checks and artifact rebuilds run the real worker bundler, which
 	// warns that it is experimental.
 	silenceIncidentalRuntimeWarnings()
+	// Default `onUnhandledFrame: 'error'` keeps workerd off the network.
+	// `bypass` attempted real DNS for artifacts-mock.test and flooded the
+	// Workers suite.
 	const artifactsMock = createMswWorkerServer(
 		createArtifactsMswHandlers({
 			accountId: mockAccountId,
 			apiBaseUrl: artifactsApiBaseUrl,
 		}),
-		{ onUnhandledFrame: 'bypass' },
 	)
 	const queuedActivity: Array<CommunityActivityDispatchQueueMessage> = []
 	const queuedListingPublished: Array<
@@ -182,7 +197,7 @@ async function seedOwnerPackage(input: {
 
 	await insertSavedPackage(env.APP_DB, {
 		id: input.packageId,
-		user_id: input.owner.userId,
+		user_id: personalOrgId(input.owner.userId),
 		name: packageName,
 		kody_id: input.kodyId,
 		description: 'Community flow integration test package',
@@ -190,6 +205,7 @@ async function seedOwnerPackage(input: {
 		search_text: 'community flow integration websocket',
 		source_id: input.sourceId,
 		has_app: 0,
+		has_skills: 0,
 		hidden: 0,
 		is_private: 0,
 		created_at: now,
@@ -198,7 +214,7 @@ async function seedOwnerPackage(input: {
 
 	const entitySource: EntitySourceRow = {
 		id: input.sourceId,
-		user_id: input.owner.userId,
+		user_id: personalOrgId(input.owner.userId),
 		entity_kind: 'package',
 		entity_id: input.packageId,
 		repo_id: `package-${input.packageId}`,
@@ -513,7 +529,7 @@ test('public package flow works end-to-end through capability handlers', async (
 	await banCommunityUser({
 		env: testEnv,
 		adminUserId: admin.userId,
-		userId: reporter.userId,
+		userId: personalOrgId(reporter.userId),
 		reason: 'Repeated abusive reports',
 	})
 	await expect(
@@ -558,7 +574,7 @@ test('one-click install publishes clean listings and keeps unresolvable forks in
 		installCommunityListing({
 			env: testEnv,
 			baseUrl,
-			userId: installer.userId,
+			userId: personalOrgId(installer.userId),
 			userEmail: installer.email,
 			expectedPackageScope: installer.username,
 			listingId,

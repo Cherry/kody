@@ -1,7 +1,5 @@
-import {
-	getSavedPackageById,
-	getSavedPackageByKodyId,
-} from '#worker/package-registry/repo.ts'
+import { resolveSavedPackageRef } from '#worker/package-registry/repo.ts'
+import { getPackageNameLeaf } from '#worker/package-registry/package-name.ts'
 import {
 	loadPackageManifestForSource,
 	loadPackageSourceBySourceId,
@@ -18,7 +16,12 @@ import {
 	loadPublishedBundleArtifactByIdentity,
 	persistPublishedBundleArtifact,
 } from '#worker/package-runtime/published-bundle-artifacts.ts'
-import { assertPublishedSourceCanRebuildWithoutInstallingDeps } from '#worker/package-runtime/published-source-dependencies.ts'
+import {
+	assertPublishedSourceCanRebuildWithoutInstallingDeps,
+	canKeepPreviousNpmBundleDuringRebuild,
+	isPublishedRuntimeBundleMissingError,
+	listMissingPublishedSourceInstalledDependencies,
+} from '#worker/package-runtime/published-source-dependencies.ts'
 import {
 	buildPackageSubscriptionArtifactName,
 	normalizePackageSubscriptionTopic,
@@ -36,8 +39,10 @@ import {
 import {
 	loadModuleArtifactWithCommitCache,
 	loadSourceRowWithFreshnessCache,
+	resolvePackageAppSlugWithFreshnessCache,
 	resolveSavedPackageWithFreshnessCache,
 	type CachedInvokeModuleArtifact,
+	type PackageAppSlugLookup,
 } from './invoke-contract-cache.ts'
 import { isRetryableD1LockError } from '#worker/d1-retry.ts'
 
@@ -49,19 +54,39 @@ export async function resolveSavedPackage(input: {
 	return await resolveSavedPackageWithFreshnessCache({
 		userId: input.userId,
 		packageIdOrKodyId: input.packageIdOrKodyId,
-		load: async () => {
-			const byKodyId = getSavedPackageByKodyId(input.db, {
+		load: async () =>
+			await resolveSavedPackageRef(input.db, {
 				userId: input.userId,
-				kodyId: input.packageIdOrKodyId,
+				ref: input.packageIdOrKodyId,
+			}),
+	})
+}
+
+/**
+ * Package-app host resolution: follow slug redirects and report whether the
+ * URL slug is retired so the host can permanent-308 to the canonical path.
+ * Live-only {@link resolveSavedPackage} stays redirect-blind for invoke paths.
+ */
+export async function resolveSavedPackageForPackageAppSlug(input: {
+	db: D1Database
+	userId: string
+	slug: string
+}): Promise<PackageAppSlugLookup | null> {
+	return await resolvePackageAppSlugWithFreshnessCache({
+		userId: input.userId,
+		slug: input.slug,
+		load: async () => {
+			const savedPackage = await resolveSavedPackageRef(input.db, {
+				userId: input.userId,
+				ref: input.slug,
+				match: 'slug',
+				followRedirects: true,
 			})
-			// Only surfaces when the id lookup misses and awaits it below.
-			byKodyId.catch(() => {})
-			return (
-				(await getSavedPackageById(input.db, {
-					userId: input.userId,
-					packageId: input.packageIdOrKodyId,
-				})) ?? (await byKodyId)
-			)
+			if (!savedPackage) return null
+			return {
+				savedPackage,
+				retired: getPackageNameLeaf(savedPackage.name) !== input.slug,
+			}
 		},
 	})
 }
@@ -70,7 +95,6 @@ export async function resolveSavedPackageBySpecifier(input: {
 	db: D1Database
 	userId: string
 	specifier: string
-	allowPlatformScopes?: boolean
 }): Promise<SavedPackageRecord | null> {
 	const parsed = parseKodyPackageSpecifier(input.specifier)
 	const cacheKey = `kody:${parsed.packageName}`
@@ -83,7 +107,6 @@ export async function resolveSavedPackageBySpecifier(input: {
 					db: input.db,
 					userId: input.userId,
 					specifier: parsed,
-					allowPlatformScopes: input.allowPlatformScopes,
 				})
 			)?.row ?? null,
 	})
@@ -206,6 +229,38 @@ async function ensureModuleArtifactUncached(input: {
 		manifest: packageSource.manifest,
 		selector: input.selector,
 	})
+	// External publish flips `published_commit` before the per-target rebuild
+	// finishes. Invoke-contract-cache already serves a cross-commit identity
+	// hit without retaining it; do the same here when source cannot rebuild
+	// (npm deps live only in the published runtime bundle), and only while
+	// the published snapshot `createdAt` (the finalize clock) is still inside
+	// the rebuild window — or is unknown. A null clock is the finalize race
+	// (`published_commit` flipped before `writePublishedSourceSnapshot`) and
+	// Artifacts backfill (intentional: backfill is not a publish clock).
+	// `entity_sources.updated_at` is the wrong clock: any later row write
+	// would reopen stale serving. After the window the missing-bundle error
+	// is retryable so a failed rebuild stays visible.
+	if (
+		listMissingPublishedSourceInstalledDependencies(packageSource.files)
+			.length > 0
+	) {
+		if (
+			loaded?.artifact &&
+			canKeepPreviousNpmBundleDuringRebuild({
+				publishedAt: packageSource.snapshotCreatedAt,
+			})
+		) {
+			return {
+				artifact: loaded.artifact,
+				source: packageSource.source,
+				entryPoint: loaded.artifact.entryPoint,
+			}
+		}
+		assertPublishedSourceCanRebuildWithoutInstallingDeps({
+			sourceFiles: packageSource.files,
+			bundleLabel: `Saved package export "${freshResolution.artifactName}"`,
+		})
+	}
 	const typecheckResult = await typecheckPackageEntrypointsFromSourceFiles({
 		sourceFiles: packageSource.files,
 		entryPoints: [{ path: freshResolution.entryPoint }],
@@ -214,10 +269,6 @@ async function ensureModuleArtifactUncached(input: {
 	if (!typecheckResult.ok) {
 		throw new Error(typecheckResult.message)
 	}
-	assertPublishedSourceCanRebuildWithoutInstallingDeps({
-		sourceFiles: packageSource.files,
-		bundleLabel: `Saved package export "${freshResolution.artifactName}"`,
-	})
 	const { buildKodyModuleBundle } =
 		await import('#worker/package-runtime/module-graph.ts')
 	const bundle = await buildKodyModuleBundle({
@@ -320,6 +371,7 @@ export function isMissingPackageModuleError(error: unknown) {
 
 export function isTransientModuleArtifactError(error: unknown) {
 	if (isRetryableD1LockError(error)) return true
+	if (isPublishedRuntimeBundleMissingError(error)) return true
 	if (!(error instanceof Error)) return false
 	return /(?:\bD1\b|\bKV\b|bindings? (?:are|is) not available|timeout|temporar|network|fetch|could not be loaded after rebuild)/i.test(
 		error.message,

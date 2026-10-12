@@ -8,6 +8,8 @@ import {
 	type InferOutput,
 	union,
 } from 'remix/data-schema'
+import { type OwnerId, type PersonId } from './owner-person-ids.ts'
+import { type OrgRole, type RequestContext } from './request-context.ts'
 
 export const mcpUserContextSchema = object({
 	userId: string(),
@@ -42,20 +44,53 @@ export const mcpExecutionOriginSchema = union([
 	literal('background'),
 ])
 
+export const mcpOrgBindingSchema = object({
+	org: object({
+		id: string(),
+		slug: nullable(string()),
+	}),
+	/** Null for grant-only outside collaborators. */
+	role: nullable(
+		union([literal('owner'), literal('member'), literal('billing')]),
+	),
+})
+
 export const mcpCallerContextSchema = object({
 	baseUrl: string(),
 	executionOrigin: optional(mcpExecutionOriginSchema),
 	user: optional(nullable(mcpUserContextSchema)),
 	storageContext: optional(nullable(mcpStorageContextSchema)),
 	repoContext: optional(nullable(mcpRepoContextSchema)),
+	/**
+	 * Named connection profile bound to this MCP OAuth grant or API token.
+	 * Absent / null = unlimited (today's default connection). Present = the
+	 * profile's grant allowlist (empty allowlist denies everything).
+	 */
+	connectionProfileName: optional(nullable(string())),
+	/**
+	 * OAuth client the bearer grant was issued to (MCP host or `kody login`
+	 * CLI). Becomes the request credential id so usage can be attributed to
+	 * the connection. Absent for sessions, API tokens, and Automation.
+	 */
+	oauthClientId: optional(nullable(string())),
+	/**
+	 * DB-backed org membership the request acts in. Absent / null derives the
+	 * person's personal org from `user`.
+	 */
+	orgBinding: optional(nullable(mcpOrgBindingSchema)),
 })
 
 type McpUserContextInferred = InferOutput<typeof mcpUserContextSchema>
 
 export type McpUserContext = Omit<
 	McpUserContextInferred,
-	'roles' | 'permissions' | 'username'
+	'userId' | 'roles' | 'permissions' | 'username'
 > & {
+	/**
+	 * The signed-in person, or the org's owning account for Automation runs.
+	 * Read `McpCallerContext.request` for the org and the actor.
+	 */
+	userId: PersonId
 	username?: string
 	roles?: Array<string>
 	permissions?: Array<string>
@@ -63,8 +98,34 @@ export type McpUserContext = Omit<
 export type McpStorageContext = InferOutput<typeof mcpStorageContextSchema>
 export type McpRepoContext = InferOutput<typeof mcpRepoContextSchema>
 export type McpExecutionOrigin = InferOutput<typeof mcpExecutionOriginSchema>
+export type McpOrgBinding = {
+	org: { id: OwnerId; slug: string | null }
+	role: OrgRole | null
+}
 type McpCallerContextInferred = InferOutput<typeof mcpCallerContextSchema>
 
-export type McpCallerContext = Omit<McpCallerContextInferred, 'user'> & {
+/**
+ * The serializable caller context: what crosses worker boundaries and what
+ * jobs persist in `caller_context_json`. Carries no derived identity.
+ */
+export type McpCallerContextWire = Omit<
+	McpCallerContextInferred,
+	'user' | 'connectionProfileName' | 'oauthClientId' | 'orgBinding'
+> & {
 	user?: McpUserContext | null
+	connectionProfileName?: string | null
+	oauthClientId?: string | null
+	orgBinding?: McpOrgBinding | null
+}
+
+/**
+ * A caller context with its resolved request context: the org whose data the
+ * call reads and writes, the acting person (if any), attribution, and the
+ * credential. `createMcpCallerContext` and `parseMcpCallerContext` derive it
+ * from `user` (plus the optional wire `orgBinding`) and the request source;
+ * `request` itself is never serialized or read from serialized input. Null
+ * only when there is no signed-in user.
+ */
+export type McpCallerContext = McpCallerContextWire & {
+	request: RequestContext | null
 }

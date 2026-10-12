@@ -5,7 +5,11 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { z } from 'zod'
-import { resolveCallerFeatureFlags } from '#mcp/capabilities/access-control.ts'
+import {
+	callerFeatureFlagEvaluationFailed,
+	resolveCallerFeatureFlags,
+} from '#mcp/capabilities/access-control.ts'
+import { runWithRequestPermissions } from '#worker/authorization/authorize.ts'
 import {
 	executeInvokeFieldDescription,
 	executeInvokeFlagKey,
@@ -58,7 +62,22 @@ import {
 	createRawFetchHostSink,
 	type RawFetchHostNudgeState,
 } from '#mcp/raw-fetch-host-nudge.ts'
-import { consumeDailyEntitlement } from '#worker/entitlements/service.ts'
+import { isPreRunUsageDenial } from '#worker/entitlements/errors.ts'
+import {
+	getCachedUserEntitlement,
+	readExecuteUniqueWorkerUsage,
+} from '#worker/entitlements/service.ts'
+import {
+	admitHostedExecuteCall,
+	buildExecuteUsageReport,
+	claimedUsageForNow,
+	type ClaimedExecuteUsage,
+	createExecuteWorkerDayClaim,
+	executeAdmissionStructuredContent,
+	executeLoopDetectedErrorCode,
+	executeRateLimitedErrorCode,
+	executeRepeatKey,
+} from '#mcp/execute-admission.ts'
 import {
 	abandonRunRecord,
 	claimRunRecord,
@@ -72,6 +91,11 @@ import {
 	type RunRecordHandle,
 } from '#worker/run-records/types.ts'
 import { scheduleFleetExecuteLastSuccess } from '#worker/execute-health-heartbeat.ts'
+import {
+	entitlementEmailForOwner,
+	ownerIdFromCaller,
+} from '#worker/request-context/owner-id.ts'
+import { type StructuredContentFromFields } from './mcp-tool-output.ts'
 
 export const executeTool = {
 	name: 'execute',
@@ -89,11 +113,12 @@ export const executeTool = {
 
 /**
  * Advertised MCP output schema for the execute tool's `structuredContent`
- * envelope. Deliberately loose: every field is optional and compound values
- * are `z.unknown()`, so server-side output validation (which runs on every
- * successful call once a schema is advertised) can never reject a real
- * response. The module's own return value is arbitrary caller JSON and stays
- * `unknown` by construction.
+ * envelope. This record is the single source of truth for tools/list JSON
+ * Schema and {@link ExecuteToolStructuredContent}. Keep every top-level key
+ * responses emit here — strict clients (Claude Code, MCP SDK Ajv) reject
+ * undeclared fields with `additionalProperties: false`. Compound values stay
+ * `z.unknown()` so server-side Zod validation never rejects a real response;
+ * the module return value stays `unknown` by construction.
  */
 export const executeToolOutputSchema = {
 	conversationId: z
@@ -154,6 +179,21 @@ export const executeToolOutputSchema = {
 		.describe(
 			'Focused plan-limit or quota fields when a call is denied. Omitted from ordinary successes.',
 		),
+	usage: z
+		.unknown()
+		.optional()
+		.describe(
+			'Hosted execute allowance after this call: unit, and per window (day, plus week when the plan has one) used, limit, remaining, resetsAt. Repeats of code already run today do not count.',
+		),
+	admission: z
+		.object({
+			code: z.enum([executeRateLimitedErrorCode, executeLoopDetectedErrorCode]),
+			retryAfterMs: z.number(),
+		})
+		.optional()
+		.describe(
+			'Set when a runaway or loop brake refused the call before it ran: the refusal code and how long to wait before the same call is admitted.',
+		),
 	logs: z
 		.array(z.unknown())
 		.optional()
@@ -167,6 +207,10 @@ export const executeToolOutputSchema = {
 		.optional()
 		.describe('Relevant stored memories surfaced for this call.'),
 }
+
+export type ExecuteToolStructuredContent = StructuredContentFromFields<
+	typeof executeToolOutputSchema
+>
 
 const executeCodeFieldDescription =
 	'Single ESM module string with imports/exports and a default export to execute. Imports may be arbitrary npm packages compatible with the Cloudflare Workers runtime; prefer packages over rewriting helpers.'
@@ -212,7 +256,7 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 					.min(1)
 					.optional()
 					.describe(
-						`Soft cap on the default export's JSON/text result. Defaults to ~100 KB (${defaultExecutionResponseLimitBytes.toLocaleString()} bytes); oversized results are truncated. Project large API payloads before returning. Protocol __mcpContent blocks use a separate limit and fail explicitly when oversized.`,
+						`Soft cap on the default export's JSON/text result. Defaults to ~100 KB (${defaultExecutionResponseLimitBytes.toLocaleString()} bytes); oversized results are truncated. Project large API payloads before returning. Protocol __mcpContent media uses a separate limit and fails explicitly when oversized; oversized text-only protocol content is truncated.`,
 					),
 				conversationId: conversationIdInputField,
 				memoryContext: memoryContextInputField,
@@ -271,63 +315,103 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 				...(activeStorageId ? { storageId: activeStorageId } : {}),
 			}
 			let claimedRunHandle: RunRecordHandle | null = null
-			try {
-				return await runExecuteTool()
-			} catch (cause) {
-				// Setup failures (registry build, module bundling, executor
-				// creation) must return a structured MCP error instead of an
-				// unhandled rejection, mirroring the search tool boundary.
-				// Finalize any pre-claimed keyed run so retries can replay the
-				// error instead of seeing a stuck `running` row.
-				// Nested-function assignments are invisible to TS control-flow
-				// analysis on the outer `let`, so reassert the declared type.
-				const claimedHandle = claimedRunHandle as RunRecordHandle | null
-				// Setup failures happen before sandbox work: release the key so
-				// a later retry is not poisoned by a non-sandbox error.
-				if (claimedHandle) {
-					await abandonRunRecord({ env, handle: claimedHandle })
-				}
-				const timing = finishToolTiming(timingStart)
-				const error = cause instanceof Error ? cause : new Error(String(cause))
-				const { errorName, errorMessage } = errorFields(error)
-				const errorDetails = getExecutionErrorDetails(error)
-				logMcpEvent({
-					category: 'mcp',
-					tool: 'execute',
-					toolName: 'execute',
-					outcome: 'failure',
-					durationMs: timing.durationMs,
-					...mcpCallerFields,
-					sandboxError: false,
-					errorName,
-					errorMessage,
-					cause: error,
-				})
+			let claimedExecuteUsage: ClaimedExecuteUsage | null = null
+			return await attachExecuteUsage(await runExecuteToolWithErrorBoundary())
+
+			async function attachExecuteUsage<
+				Response extends { structuredContent: Record<string, unknown> },
+			>(response: Response): Promise<Response> {
+				const ownerId = ownerIdFromCaller(callerContext)
+				if (!callerContext.user?.userId || !ownerId) return response
+				const now = new Date()
+				const usage =
+					claimedUsageForNow(claimedExecuteUsage, now) ??
+					(await readExecuteUniqueWorkerUsage({
+						db: env.APP_DB,
+						env,
+						userId: ownerId,
+						email: entitlementEmailForOwner(callerContext, ownerId),
+						now,
+					}).catch((error: unknown) => {
+						console.warn('execute-usage-read-failed', error)
+						return null
+					}))
+				if (!usage) return response
 				return {
-					content: prependToolMetadataContent(resolvedConversationId, [
-						{ type: 'text', text: `Error: ${error.message}` },
-					]),
+					...response,
 					structuredContent: {
-						conversationId: resolvedConversationId,
-						timing,
-						error: error.message,
-						...(errorDetails ? { errorDetails } : {}),
-						...entitlementStructuredContent(error),
+						...response.structuredContent,
+						usage: buildExecuteUsageReport(usage, now),
 					},
-					isError: true,
+				}
+			}
+
+			async function runExecuteToolWithErrorBoundary() {
+				try {
+					return await runExecuteTool()
+				} catch (cause) {
+					// Setup failures (registry build, module bundling, executor
+					// creation) must return a structured MCP error instead of an
+					// unhandled rejection, mirroring the search tool boundary.
+					// Finalize any pre-claimed keyed run so retries can replay the
+					// error instead of seeing a stuck `running` row.
+					// Nested-function assignments are invisible to TS control-flow
+					// analysis on the outer `let`, so reassert the declared type.
+					const claimedHandle = claimedRunHandle as RunRecordHandle | null
+					// Setup failures happen before sandbox work: release the key so
+					// a later retry is not poisoned by a non-sandbox error.
+					if (claimedHandle) {
+						await abandonRunRecord({ env, handle: claimedHandle })
+					}
+					const timing = finishToolTiming(timingStart)
+					const error =
+						cause instanceof Error ? cause : new Error(String(cause))
+					const { errorName, errorMessage } = errorFields(error)
+					const errorDetails = getExecutionErrorDetails(error)
+					logMcpEvent({
+						category: 'mcp',
+						tool: 'execute',
+						toolName: 'execute',
+						outcome: 'failure',
+						durationMs: timing.durationMs,
+						...mcpCallerFields,
+						sandboxError: false,
+						errorName,
+						errorMessage,
+						cause: error,
+					})
+					return {
+						content: prependToolMetadataContent(resolvedConversationId, [
+							{ type: 'text', text: `Error: ${error.message}` },
+						]),
+						structuredContent: {
+							conversationId: resolvedConversationId,
+							timing,
+							error: error.message,
+							...(errorDetails ? { errorDetails } : {}),
+							...entitlementStructuredContent(error),
+							...executeAdmissionStructuredContent(error),
+						},
+						isError: true,
+					}
 				}
 			}
 
 			async function runExecuteTool() {
 				const normalizedIdempotencyKey =
 					normalizeExecuteIdempotencyKey(idempotencyKey)
-				// Look up an existing keyed execute run before consuming quota
-				// so transport-timeout retries can replay / report in-progress
-				// without burning another daily slot.
-				if (normalizedIdempotencyKey && callerContext.user?.userId) {
+				// Look up an existing keyed execute run before admission so
+				// transport-timeout retries can replay / report in-progress
+				// without spending the runaway brake or loading a worker.
+				const storageOwnerId = ownerIdFromCaller(callerContext)
+				const entitlementEmail = entitlementEmailForOwner(
+					callerContext,
+					storageOwnerId,
+				)
+				if (normalizedIdempotencyKey && storageOwnerId) {
 					const existing = await getRunRecordByIdempotencyKey({
 						env,
-						userId: callerContext.user.userId,
+						userId: storageOwnerId,
 						idempotencyKey: normalizedIdempotencyKey,
 						surface: 'execute',
 					})
@@ -344,7 +428,32 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 				// Schema omit/advertise is decided at register. Re-read the
 				// flag here so a kill-switch applies on the next call even
 				// when a legacy session still has invoke in its tool list.
-				const liveFlags = await resolveCallerFeatureFlags(env, callerContext)
+				// Plan lookup overlaps that read. The daily counter is spent
+				// only after the read succeeds — an evaluation failure is
+				// fail-closed and must not consume quota.
+				const liveFlagsPromise = resolveCallerFeatureFlags(env, callerContext)
+				const entitlementPrefetch = callerContext.user?.userId
+					? getCachedUserEntitlement(env.APP_DB, {
+							userId: storageOwnerId,
+							email: entitlementEmail,
+						}).then(
+							() => undefined,
+							() => undefined,
+						)
+					: null
+				const liveFlags = await liveFlagsPromise
+				if (await callerFeatureFlagEvaluationFailed(env, callerContext)) {
+					throw new Error('Feature flag evaluation failed')
+				}
+				void entitlementPrefetch
+				// Registry assembly overlaps the quota check. Context retrievers
+				// stay after quota and a fresh idempotency claim so a denied
+				// call does not run bundled package code.
+				const registryPromise = getCapabilityRegistryForContext({
+					env,
+					callerContext,
+				})
+				void registryPromise.catch(() => {})
 				const resolvedModule = resolveExecuteModule({
 					code,
 					invoke,
@@ -359,22 +468,59 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 					...executeAttribution,
 				}
 
-				// Daily execute quota, consumed before claim/bundling/sandbox
-				// so over-limit calls cost nothing and do not poison a key.
-				if (callerContext.user?.userId) {
-					await consumeDailyEntitlement({
-						db: env.APP_DB,
-						env,
-						userId: callerContext.user.userId,
-						email: callerContext.user.email,
-						resource: 'execute_calls_per_day',
-					})
-				}
+				// Runaway and loop brakes before claim/bundling/sandbox so a refused call
+				// costs nothing and does not poison a key. The plan cap counts
+				// unique workers and is spent inside the executor, once the
+				// worker id is known and before that worker loads.
+				const claimWorkerDay =
+					callerContext.user?.userId && storageOwnerId
+						? createExecuteWorkerDayClaim({
+								env,
+								ownerId: storageOwnerId,
+								email: entitlementEmail,
+								onUsage: (claimed) => {
+									claimedExecuteUsage = claimed
+								},
+								waitUntil,
+								orgBudget: callerContext.request
+									? {
+											orgId: callerContext.request.org.id,
+											orgSlug: callerContext.request.org.slug,
+											actorUserId: callerContext.request.actor?.userId ?? null,
+											actorUsername:
+												callerContext.request.actor?.username ?? null,
+										}
+									: undefined,
+							})
+						: undefined
+				// Admission is a UserMeter round trip that only gates work below it,
+				// so let it overlap the registry read; nothing that writes, retrieves
+				// memories, or runs sandbox code proceeds until it has admitted.
+				const admissionPromise = claimWorkerDay
+					? admitHostedExecuteCall({
+							env,
+							ownerId: storageOwnerId,
+							email: entitlementEmail,
+							repeatKey: await executeRepeatKey({
+								credential: callerContext.request?.credential ?? null,
+								actorUserId:
+									callerContext.request?.actor?.userId ??
+									callerContext.user?.userId ??
+									null,
+								conversationId,
+								code,
+								invoke,
+								params,
+							}),
+						})
+					: null
+				void admissionPromise?.catch(() => {})
 
-				if (normalizedIdempotencyKey && callerContext.user?.userId) {
+				if (normalizedIdempotencyKey && storageOwnerId) {
+					await admissionPromise
 					const claim = await claimRunRecord({
 						env,
-						userId: callerContext.user.userId,
+						userId: storageOwnerId,
 						context: {
 							surface: 'execute',
 							name: null,
@@ -399,18 +545,18 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 					claimedRunHandle = claim.handle
 				}
 
-				const [registry, surfacedMemories] = await Promise.all([
-					getCapabilityRegistryForContext({
-						env,
-						callerContext,
-					}),
-					surfaceToolMemories({
-						env,
-						callerContext,
-						conversationId: resolvedConversationId,
-						retrievalQuery: buildMemoryRetrievalQuery(memoryContext),
-					}),
+				// Only the pure registry read overlaps admission. Memory retrievers
+				// can run package code, so they start after the call is admitted.
+				const [registry] = await Promise.all([
+					registryPromise,
+					admissionPromise,
 				])
+				const surfacedMemories = await surfaceToolMemories({
+					env,
+					callerContext,
+					conversationId: resolvedConversationId,
+					retrievalQuery: buildMemoryRetrievalQuery(memoryContext),
+				})
 				const registeredCapabilityCount = Object.keys(
 					registry.capabilityHandlers,
 				).length
@@ -426,28 +572,33 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 					async () => {
 						try {
 							const inboundSignal = getInboundRequestSignal()
-							const execution = runModuleWithRegistry(
-								env,
-								callerContext,
-								resolvedModule.code,
-								params,
-								{
-									executorExports: agent.getLoopbackExports(),
-									capabilityRegistry: registry,
-									rawFetchHostSink: rawFetchHosts.sink,
-									conversationId: resolvedConversationId,
-									runRecordHandle: claimedRunHandle,
-									waitUntil,
-									reportProgress: reportProgress ?? undefined,
-									signal: inboundSignal,
-									runRecord: {
-										surface: 'execute',
-										name: null,
-										storageId: activeStorageId,
-										idempotencyKey: normalizedIdempotencyKey,
-										metadata: executeRunMetadata,
-									},
-								},
+							const execution = runWithRequestPermissions(
+								{ env, request: callerContext.request },
+								async () =>
+									runModuleWithRegistry(
+										env,
+										callerContext,
+										resolvedModule.code,
+										params,
+										{
+											executorExports: agent.getLoopbackExports(),
+											capabilityRegistry: registry,
+											rawFetchHostSink: rawFetchHosts.sink,
+											conversationId: resolvedConversationId,
+											runRecordHandle: claimedRunHandle,
+											claimWorkerDay,
+											waitUntil,
+											reportProgress: reportProgress ?? undefined,
+											signal: inboundSignal,
+											runRecord: {
+												surface: 'execute',
+												name: null,
+												storageId: activeStorageId,
+												idempotencyKey: normalizedIdempotencyKey,
+												metadata: executeRunMetadata,
+											},
+										},
+									),
 							)
 							// Client disconnect cancels the request task. Keep
 							// the sandbox promise alive so its abort handler can
@@ -460,6 +611,10 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 							)
 							return await execution
 						} catch (cause) {
+							// A usage denial happens before the worker loads: the
+							// outer boundary releases the key, as for any other
+							// pre-sandbox refusal.
+							if (isPreRunUsageDenial(cause)) throw cause
 							// Bundling the caller-provided module (syntax errors,
 							// unresolved imports) throws before the sandbox runs;
 							// route it through the sandbox-error result path so it
@@ -639,6 +794,14 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 									responseLimitBytes,
 								)
 					const isError = passthrough?.isError ?? false
+					const truncationNote =
+						contentLimited.truncated && companionLimited?.truncated
+							? `${contentLimited.note} ${companionLimited.note}`
+							: contentLimited.truncated
+								? contentLimited.note
+								: companionLimited?.truncated
+									? companionLimited.note
+									: undefined
 					if (!isError) {
 						await scheduleFleetExecuteLastSuccess({
 							waitUntil,
@@ -659,10 +822,10 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 							returnedBytes:
 								contentLimited.returnedBytes +
 								(companionLimited?.returnedBytes ?? 0),
-							...(companionLimited?.truncated
+							...(truncationNote
 								? {
 										truncated: true,
-										note: companionLimited.note,
+										note: truncationNote,
 									}
 								: {}),
 							result: companionLimited

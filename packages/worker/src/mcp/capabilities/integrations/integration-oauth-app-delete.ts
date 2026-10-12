@@ -1,7 +1,9 @@
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
 import { requireMcpUser } from '#mcp/capabilities/meta/require-user.ts'
+import { authorizeIntegrationOrgWide } from '#mcp/capabilities/integrations/authorize-integration.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { deleteOauthAppWithConnections } from '#worker/integrations/service.ts'
 
@@ -23,6 +25,7 @@ export const integrationOauthAppDeleteCapability = defineDomainCapability(
 	capabilityDomainNames.integrations,
 	{
 		name: 'integrationOauthAppDelete',
+		orgPermission: 'integration:delete',
 		description:
 			'Delete a user-registered OAuth app and every connection on it. Built-in (platform) apps cannot be deleted this way — disconnect their connections with integrationDelete instead.',
 		keywords: ['integration', 'oauth', 'app', 'delete', 'remove', 'connection'],
@@ -32,10 +35,11 @@ export const integrationOauthAppDeleteCapability = defineDomainCapability(
 		inputSchema,
 		outputSchema,
 		async handler(args, ctx: CapabilityContext) {
-			const user = requireMcpUser(ctx.callerContext)
+			requireMcpUser(ctx.callerContext)
+			await authorizeIntegrationOrgWide(ctx, 'integration:delete')
 			return deleteOauthAppWithConnections({
 				env: ctx.env,
-				userId: user.userId,
+				userId: ownerIdFromCaller(ctx.callerContext),
 				slug: args.slug,
 			})
 		},

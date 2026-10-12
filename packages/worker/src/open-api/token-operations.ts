@@ -1,16 +1,18 @@
 import { z } from 'zod'
 import {
 	apiTokenScopeDescriptions,
-	apiTokenScopeSatisfies,
+	apiTokenScopeIncludes,
 	apiTokenScopes,
 	type ApiTokenScope,
 } from '#worker/api-tokens/scopes.ts'
 import {
 	apiTokenIdleTtlDescription,
+	apiTokenLifetimeAliasNames,
 	apiTokenPolicy,
 	getApiTokenRecord,
 	listApiTokens,
 	mintApiToken,
+	resolveApiTokenLifetime,
 	revokeApiToken,
 	rotateApiToken,
 	toApiTokenView,
@@ -24,7 +26,16 @@ import {
 	type NativeApiOperationDefinition,
 } from './native-operation-helpers.ts'
 import { type NativeApiOperationId } from './operations.ts'
+import { connectionProfilesFlagKey } from '#universal/feature-flags/registry.ts'
+import { isFeatureEnabled } from '#worker/feature-flags/service.ts'
+import { getConnectionProfileByName } from '#worker/connection-profiles/repo.ts'
+import {
+	connectionProfileNameErrorMessage,
+	getConnectionProfileNameValidationError,
+	normalizeConnectionProfileName,
+} from '#universal/connection-profiles/names.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const scopeSchema = z.enum(
 	apiTokenScopes as [ApiTokenScope, ...Array<ApiTokenScope>],
 )
@@ -41,6 +52,11 @@ const tokenIdSchema = z
 const tokenViewSchema = z.object({
 	id: z.string(),
 	name: z.string(),
+	org_id: z
+		.string()
+		.describe(
+			'Org this token is bound to. Defaults to the owner personal org.',
+		),
 	scopes: z.array(scopeSchema),
 	status: z.enum(['active', 'expired', 'revoked']),
 	idle_ttl_seconds: z.number().int(),
@@ -55,6 +71,12 @@ const tokenViewSchema = z.object({
 	last_used_at: z.string().nullable(),
 	rotated_at: z.string().nullable(),
 	revoked_at: z.string().nullable(),
+	profile_name: z
+		.string()
+		.nullable()
+		.describe(
+			'Named connection profile this token is bound to, or null for unlimited.',
+		),
 })
 
 const tokenSecretViewSchema = tokenViewSchema.extend({
@@ -68,6 +90,10 @@ const tokenSecretViewSchema = tokenViewSchema.extend({
 
 export const emptyInputSchema = z.object({}).strict()
 
+const lifetimeAliasSchema = z.enum(
+	apiTokenLifetimeAliasNames as [string, ...Array<string>],
+)
+
 const tokenCreateInputSchema = z
 	.object({
 		name: z
@@ -79,7 +105,20 @@ const tokenCreateInputSchema = z
 			.array(scopeSchema)
 			.min(1)
 			.describe(
-				`Scopes to grant. \`<resource>:write\` also grants \`<resource>:read\`. A token can only mint tokens with scopes it holds.\n${scopeListDescription}`,
+				`Org-permission scopes to grant. There is no write-implies-read hierarchy. A token can only mint tokens with scopes it holds.\n${scopeListDescription}`,
+			),
+		profile: z
+			.string()
+			.min(1)
+			.max(64)
+			.optional()
+			.describe(
+				'Optional connection profile name. The token’s package access is limited to that profile’s grants. Experimenters only.',
+			),
+		lifetime: lifetimeAliasSchema
+			.optional()
+			.describe(
+				'Required unless idle_ttl_seconds and max_lifetime_seconds are both set. `short` = 1h idle / 24h max. `long` = 14d idle / 3mo max. Single-task agents should use `short`.',
 			),
 		idle_ttl_seconds: z
 			.number()
@@ -88,7 +127,7 @@ const tokenCreateInputSchema = z
 			.max(apiTokenPolicy.maxIdleTtlSeconds)
 			.optional()
 			.describe(
-				`Seconds without use before the token expires (default ${apiTokenPolicy.defaultIdleTtlSeconds}).`,
+				'Seconds without use before the token expires. Required with max_lifetime_seconds when lifetime is omitted.',
 			),
 		max_lifetime_seconds: z
 			.number()
@@ -97,7 +136,7 @@ const tokenCreateInputSchema = z
 			.max(apiTokenPolicy.maxMaxLifetimeSeconds)
 			.optional()
 			.describe(
-				`Absolute lifetime cap in seconds (default ${apiTokenPolicy.defaultMaxLifetimeSeconds}).`,
+				'Absolute lifetime cap in seconds. Required with idle_ttl_seconds when lifetime is omitted.',
 			),
 	})
 	.strict()
@@ -141,16 +180,21 @@ async function assertCallerMayRotate(
 	})
 	if (!target) return
 	const missing = target.scopes.filter(
-		(scope) => !apiTokenScopeSatisfies(caller.scopes, scope),
+		(scope) => !apiTokenScopeIncludes(caller.scopes, scope),
 	)
 	const outlives =
 		Date.parse(target.max_expires_at) > Date.parse(caller.max_expires_at)
-	if (missing.length === 0 && !outlives) return
+	const callerProfile = caller.profile_name ?? null
+	const targetProfile = target.profile_name ?? null
+	const profileEscalation =
+		callerProfile != null && callerProfile !== targetProfile
+	if (missing.length === 0 && !outlives && !profileEscalation) return
 	throw new ApiError({
 		status: 403,
 		code: 'insufficient_scope',
-		message:
-			missing.length > 0
+		message: profileEscalation
+			? 'This profile-bound API token cannot rotate a token for a different connection profile (or an unlimited token).'
+			: missing.length > 0
 				? `This API token cannot rotate a token with scopes it does not hold: ${missing.join(', ')}.`
 				: 'This API token cannot rotate a token that outlives it.',
 		details: { missing_scopes: missing },
@@ -203,32 +247,103 @@ export const tokenOperationDefinitions: Record<
 	},
 	tokenCreate: {
 		summary: 'Mint a scoped API token',
-		description: `Mint a short-lived, scoped API token for this account. The token value is returned once. ${ttlDescription} A token-authenticated caller can only grant scopes it holds and cannot outlive its own max_expires_at.`,
+		description: `Mint a scoped API token for this account. The token value is returned once. ${ttlDescription} A token-authenticated caller can only grant scopes it holds and cannot outlive its own max_expires_at.`,
 		inputSchema: tokenCreateInputSchema,
 		outputSchema: tokenSecretViewSchema,
 		readOnly: false,
 		async handler(params, ctx) {
 			const input = parseNativeInput(tokenCreateInputSchema, params)
+			const lifetime = resolveApiTokenLifetime({
+				lifetime: input.lifetime,
+				idleTtlSeconds: input.idle_ttl_seconds,
+				maxLifetimeSeconds: input.max_lifetime_seconds,
+			})
 			const parent =
 				ctx.principal.kind === 'token'
 					? {
 							scopes: ctx.principal.token.scopes,
 							maxExpiresAt: ctx.principal.token.max_expires_at,
+							profileName: ctx.principal.token.profile_name ?? null,
 						}
 					: undefined
+			const callerProfileName =
+				ctx.callerContext.request?.credential.profileName ?? null
+			let profileName: string | null = null
+			if (input.profile !== undefined) {
+				profileName = normalizeConnectionProfileName(input.profile)
+				const nameError = getConnectionProfileNameValidationError(profileName)
+				if (nameError) {
+					throw invalidRequest(connectionProfileNameErrorMessage(nameError))
+				}
+				const userRow = await ctx.env.APP_DB.prepare(
+					`SELECT id FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+				)
+					.bind(userIdOf(ctx))
+					.first<{ id: number }>()
+				const enabled =
+					userRow != null &&
+					(await isFeatureEnabled(
+						ctx.env.APP_DB,
+						connectionProfilesFlagKey,
+						userRow.id,
+					))
+				if (!enabled) {
+					throw new ApiError({
+						status: 404,
+						code: 'not_found',
+						message: 'Connection profiles are not enabled for this account.',
+					})
+				}
+				const profile = await getConnectionProfileByName({
+					db: ctx.env.APP_DB,
+					userId: userIdOf(ctx),
+					orgId: ctx.callerContext.request?.org.id,
+					name: profileName,
+				})
+				if (!profile) {
+					throw notFound(`Connection profile "${profileName}" not found.`)
+				}
+				profileName = profile.name
+			} else if (parent?.profileName) {
+				profileName = parent.profileName
+			} else if (callerProfileName) {
+				// MCP OAuth / session callers inherit their stamped profile so they
+				// cannot mint an unlimited token by omitting `profile`.
+				profileName = callerProfileName
+			}
+			if (
+				callerProfileName &&
+				profileName &&
+				callerProfileName !== profileName
+			) {
+				throw new ApiError({
+					status: 403,
+					code: 'insufficient_scope',
+					message: `This connection profile can only mint tokens for profile "${callerProfileName}".`,
+				})
+			}
+			if (callerProfileName && !profileName) {
+				throw new ApiError({
+					status: 403,
+					code: 'insufficient_scope',
+					message:
+						'This connection profile cannot mint an unlimited API token.',
+				})
+			}
 			return mintApiToken({
 				db: ctx.env.APP_DB,
 				userId: userIdOf(ctx),
+				orgId: ctx.callerContext.request?.org.id ?? userIdOf(ctx),
 				name: input.name,
 				scopes: input.scopes,
-				...(input.idle_ttl_seconds === undefined
-					? {}
-					: { idleTtlSeconds: input.idle_ttl_seconds }),
-				...(input.max_lifetime_seconds === undefined
-					? {}
-					: { maxLifetimeSeconds: input.max_lifetime_seconds }),
+				idleTtlSeconds: lifetime.idleTtlSeconds,
+				maxLifetimeSeconds: lifetime.maxLifetimeSeconds,
 				createdVia: ctx.principal.kind === 'token' ? 'api' : 'mcp-api',
 				...(parent ? { parent } : {}),
+				...(ctx.principal.kind === 'token'
+					? { excludeTokenId: ctx.principal.token.id }
+					: {}),
+				profileName,
 			})
 		},
 	},
@@ -310,13 +425,36 @@ export const tokenOperationDefinitions: Record<
 	},
 }
 
-const bootstrapRedeemInputSchema = z
+export const bootstrapRedeemInputSchema = z
 	.object({
 		code: z
 			.string()
 			.min(1)
 			.describe(
 				'One-shot `kody_bc_…` bootstrap code from `cliCredentialBootstrap`.',
+			),
+		lifetime: lifetimeAliasSchema
+			.optional()
+			.describe(
+				'Required unless idle_ttl_seconds and max_lifetime_seconds are both set. `short` = 1h idle / 24h max. `long` = 14d idle / 3mo max. Single-task agents should use `short`.',
+			),
+		idle_ttl_seconds: z
+			.number()
+			.int()
+			.min(apiTokenPolicy.minIdleTtlSeconds)
+			.max(apiTokenPolicy.maxIdleTtlSeconds)
+			.optional()
+			.describe(
+				'Seconds without use before the redeemed token expires. Required with max_lifetime_seconds when lifetime is omitted.',
+			),
+		max_lifetime_seconds: z
+			.number()
+			.int()
+			.min(apiTokenPolicy.minIdleTtlSeconds)
+			.max(apiTokenPolicy.maxMaxLifetimeSeconds)
+			.optional()
+			.describe(
+				'Absolute lifetime cap for the redeemed token in seconds. Required with idle_ttl_seconds when lifetime is omitted.',
 			),
 	})
 	.strict()
@@ -328,21 +466,24 @@ const bootstrapRedeemInputSchema = z
 export const cliCredentialBootstrapRedeemDefinition: NativeApiOperationDefinition =
 	{
 		summary: 'Redeem a CLI credential bootstrap code',
-		description:
-			'Exchange a one-shot `kody_bc_…` bootstrap code for a scoped `kody_at_…` API token. For `@kodycodes/cli auth bootstrap` only — not the MCP `api` tool. No Authorization header; the code is the credential. The code burns on first successful redeem.',
+		description: `Exchange a one-shot \`kody_bc_…\` bootstrap code for a scoped \`kody_at_…\` API token. For \`@kodycodes/cli auth bootstrap\` only — not the MCP \`api\` tool. No Authorization header; the code is the credential. The code burns on first successful redeem. Lifetime is required on redeem (CLI flags). ${ttlDescription}`,
 		inputSchema: bootstrapRedeemInputSchema,
 		outputSchema: tokenSecretViewSchema,
 		readOnly: false,
 		async handler(params, ctx) {
 			if (ctx.principal.kind === 'mcp') {
 				throw invalidRequest(
-					'cliCredentialBootstrapRedeem is HTTP/CLI only. Call cliCredentialBootstrap for a one-shot code, then run `npx @kodycodes/cli auth bootstrap --code …` — do not redeem through MCP `api` (that would return a kody_at_ into chat).',
+					'cliCredentialBootstrapRedeem is HTTP/CLI only. Call cliCredentialBootstrap for a one-shot code, then run `npx @kodycodes/cli auth bootstrap --code … --lifetime short` — do not redeem through MCP `api` (that would return a kody_at_ into chat).',
 				)
 			}
 			const input = parseNativeInput(bootstrapRedeemInputSchema, params)
 			const redeemed = await redeemCliCredentialBootstrap({
 				db: ctx.env.APP_DB,
 				code: input.code,
+				env: ctx.env,
+				lifetime: input.lifetime,
+				idleTtlSeconds: input.idle_ttl_seconds,
+				maxLifetimeSeconds: input.max_lifetime_seconds,
 			})
 			return redeemed.token
 		},

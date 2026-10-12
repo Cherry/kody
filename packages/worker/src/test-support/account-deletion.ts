@@ -4,6 +4,11 @@ import { createInMemoryRepoSessionIndexEnv } from '#worker/test-support/repo-ses
 
 export type RowMap = Record<string, Array<Record<string, unknown>>>
 
+/** Production queries append live-delete filters; mocks match the legacy shape. */
+function stripLiveDeletedFilter(sql: string): string {
+	return sql.replace(/\s+and deleted_at is null/g, '')
+}
+
 export function createTestDb(
 	initial: RowMap,
 	options?: {
@@ -58,7 +63,7 @@ export function createTestDb(
 	const db = {
 		prepare(query: string) {
 			const trimmed = query.replace(/\s+/g, ' ').trim()
-			const lower = trimmed.toLowerCase()
+			const lower = stripLiveDeletedFilter(trimmed.toLowerCase())
 			return {
 				bind(...params: Array<unknown>) {
 					return {
@@ -264,8 +269,9 @@ export function createTestDb(
 								return { results: results as Array<T>, meta: { changes: 0 } }
 							}
 							if (
-								lower ===
-								'select stripe_customer_id, email from users where id = ?'
+								lower.includes('stripe_customer_id') &&
+								lower.includes('from users') &&
+								lower.includes('join orgs')
 							) {
 								const numericId = Number(params[0])
 								results = (rows.users ?? [])
@@ -500,15 +506,9 @@ export function createJobsBindingStub(
 				.all<{ id: string }>()
 			return (results ?? []).map((row) => row.id)
 		},
-		listJobStorageIdsForUser: async (input: { userId: string }) => [
-			...(await listStorageIds('jobs', input.userId)),
-			...(await listStorageIds('archived_job_artifacts', input.userId)),
-		],
+		listJobStorageIdsForUser: async (input: { userId: string }) =>
+			listStorageIds('jobs', input.userId),
 		purgeUser: async (input: { userId: string }) => {
-			await db
-				.prepare(`DELETE FROM archived_job_artifacts WHERE user_id = ?`)
-				.bind(input.userId)
-				.run()
 			await db
 				.prepare(`DELETE FROM jobs WHERE user_id = ?`)
 				.bind(input.userId)
@@ -552,6 +552,10 @@ export function createSuccessfulDeletionEnv(
 			get: () => ({
 				clearAll: async () => ({ ok: true as const }),
 				listStorageIds: async () => [] as Array<string>,
+				listWorkflowProjections: async () => ({
+					projections: [],
+					nextCursor: null,
+				}),
 			}),
 		},
 		USER_METER: userMeter.env.USER_METER,

@@ -1,3 +1,7 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
@@ -41,8 +45,13 @@ function createEnv() {
 
 function caller(userId: string) {
 	return createMcpCallerContext({
+		source: { kind: 'mcp-oauth' },
 		baseUrl: 'https://heykody.dev',
-		user: { userId, email: `${userId}@example.com`, displayName: userId },
+		user: {
+			userId: personIdFromStored(userId),
+			email: `${userId}@example.com`,
+			displayName: userId,
+		},
 	})
 }
 
@@ -128,6 +137,7 @@ test('mergeIntegrationConfig and integrationSave create, canonicalize identity, 
 
 	expect(result.integration).toEqual({
 		name: 'spotify',
+		credentialId: expect.any(String),
 		tokenUrl: 'https://accounts.spotify.com/api/token',
 		apiBaseUrl: 'https://api.spotify.com/v1',
 		flow: 'pkce',
@@ -231,7 +241,7 @@ test('mergeIntegrationConfig and integrationSave create, canonicalize identity, 
 
 test('integrationSave reuses an existing app when credentials match and preserves unspecified fields on partial update', async () => {
 	const { env } = createEnv()
-	const userId = 'user-reuse'
+	const userId = ownerIdFromStored('user-reuse')
 
 	await integrationSaveCapability.handler(googleBase, ctx(env, userId))
 	await integrationSaveCapability.handler(
@@ -399,7 +409,10 @@ test('integration capabilities deny cross-user reads and require authentication'
 	await expect(
 		integrationSaveCapability.handler(spotifyBase, {
 			env,
-			callerContext: createMcpCallerContext({ baseUrl: 'https://heykody.dev' }),
+			callerContext: createMcpCallerContext({
+				source: { kind: 'mcp-oauth' },
+				baseUrl: 'https://heykody.dev',
+			}),
 		}),
 	).rejects.toThrow('Authenticated MCP user is required for this capability.')
 })
@@ -422,7 +435,7 @@ test('integrationSave refuses platform (built-in) connections and persists accou
 	})
 	await upsertPlatformIntegration({
 		env,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		platformAppSlug: 'github',
 		scopes: ['read:user'],
 	})
@@ -442,7 +455,7 @@ test('integrationSave refuses platform (built-in) connections and persists accou
 	)
 	const joined = await getJoinedIntegration({
 		env,
-		userId: 'user-123',
+		userId: ownerIdFromStored('user-123'),
 		name: 'spotify',
 	})
 	expect(joined?.connection.accountLabel).toBe('me@kentcdodds.com')

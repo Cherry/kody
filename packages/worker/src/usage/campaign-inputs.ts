@@ -1,9 +1,13 @@
 import { utcMonthKey } from '@kody-internal/shared/date-keys.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { resolveUserEntitlementFromRow } from '#worker/entitlements/service.ts'
 import { jobsData } from '#worker/jobs/jobs-data.ts'
 import { resolveOAuthHelpers } from '#worker/oauth-helpers.ts'
 import { type OAuthGrantListHelpers } from '#worker/oauth-grants.ts'
-import { parseStripePlanName, resolvePlanLimits } from '#universal/plans.ts'
+import {
+	parseStripePlanName,
+	resolveEntitlementLimits,
+} from '#universal/plans.ts'
 import { countDistinctInboundClientIds } from './campaign-inbound-clients.ts'
 import {
 	usageCampaignLimitAwareThreshold,
@@ -11,9 +15,10 @@ import {
 	usageCampaignStrongUseMinExecuteEvents,
 } from './campaign-states.ts'
 import { type UsageCampaignSnapshot } from './campaign-evaluator.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export type UsageCampaignCandidate = {
-	stable_user_id: string
+	stable_user_id: OwnerId
 	username: string
 	email: string
 	email_verified_at: string
@@ -99,7 +104,7 @@ export function isStrongRecentUse(input: {
 	return input.now.getTime() - lastActive < usageCampaignStrongUseActiveMs
 }
 
-async function countDistinctInboundClients(env: Env, userId: string) {
+async function countDistinctInboundClients(env: Env, userId: OwnerId) {
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(env)
 	return countDistinctInboundClientIds(helpers, userId)
 }
@@ -171,15 +176,11 @@ async function readNearStockCap(input: {
 			row: input.user,
 			now: input.now,
 		})
-		const limits = resolvePlanLimits(
-			entitlement.plan,
-			entitlement.ladder,
-			entitlement.creditWallet,
-		)
+		const limits = resolveEntitlementLimits(entitlement, input.now)
 		const [packages, secrets] = await Promise.all([
 			input.db
 				.prepare(
-					`SELECT COUNT(*) AS count FROM saved_packages WHERE user_id = ?`,
+					`SELECT COUNT(*) AS count FROM saved_packages WHERE user_id = ?${andLiveDeletedAtSql()}`,
 				)
 				.bind(input.user.stable_user_id)
 				.first<{ count: number }>(),
@@ -188,7 +189,7 @@ async function readNearStockCap(input: {
 					`SELECT COUNT(*) AS count FROM secret_entries se
 					 JOIN secret_buckets sb ON sb.id = se.bucket_id
 					 WHERE sb.user_id = ?
-					   AND (sb.expires_at IS NULL OR sb.expires_at > ?)`,
+					   AND (sb.expires_at IS NULL OR sb.expires_at > ?)${andLiveDeletedAtSql('se')}${andLiveDeletedAtSql('sb')}`,
 				)
 				.bind(input.user.stable_user_id, input.now.toISOString())
 				.first<{ count: number }>(),

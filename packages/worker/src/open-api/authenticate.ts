@@ -1,4 +1,9 @@
 import {
+	ownerIdFromStored,
+	personalOrgId,
+	type OwnerId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import {
 	parseApiToken,
 	readBearerApiToken,
 } from '@kody-internal/shared/api-token-format.ts'
@@ -10,6 +15,8 @@ import {
 	touchApiToken,
 	type ApiTokenAuthenticationFailure,
 } from '#worker/api-tokens/service.ts'
+import { loadOrgBindingFromGrantProps } from '#worker/orgs/grant-binding.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 import { cliClientIdMetadataPath } from '#worker/cli-client-metadata.ts'
 import { buildMcpUserContextFromGrantProps } from '#worker/mcp-auth-user-context.ts'
 import { resolveOAuthHelpers } from '#worker/oauth-helpers.ts'
@@ -19,6 +26,7 @@ import {
 	type ApiInvocationContext,
 } from './context.ts'
 import { ApiError } from './errors.ts'
+import { readConnectionProfileNameFromGrantProps } from '#worker/connection-profiles/oauth.ts'
 
 type McpOauthGrantProps = {
 	userId?: unknown
@@ -48,7 +56,7 @@ type McpOauthHelpers = {
 function unauthorized(
 	message: string,
 	invalidToken: boolean,
-	meteringUserId?: string,
+	meteringUserId?: OwnerId,
 ) {
 	return new ApiError({
 		status: 401,
@@ -69,7 +77,7 @@ function describeFailure(reason: ApiTokenAuthenticationFailure) {
 		case 'unknown':
 			return 'Invalid API token.'
 		case 'expired':
-			return 'API token expired. Mint a new one (MCP api tool: tokenCreate).'
+			return 'API token expired. Agents on MCP: call cliCredentialBootstrap with lifetime short|long, then `npx @kodycodes/cli auth bootstrap --code …`. CI/headless: mint with tokenCreate.'
 		case 'revoked':
 			return 'API token was revoked.'
 		default: {
@@ -110,7 +118,9 @@ async function authenticateWithApiToken(input: {
 		throw unauthorized(
 			describeFailure(authentication.reason),
 			true,
-			authentication.record?.user_id,
+			authentication.record?.user_id
+				? ownerIdFromStored(authentication.record.user_id)
+				: undefined,
 		)
 	}
 	const { record } = authentication
@@ -118,13 +128,17 @@ async function authenticateWithApiToken(input: {
 		userId: record.user_id,
 	})
 	if (!authContext)
-		throw unauthorized('Invalid API token.', true, record.user_id)
+		throw unauthorized(
+			'Invalid API token.',
+			true,
+			ownerIdFromStored(record.user_id),
+		)
 	if (!authContext.emailVerified) {
 		throw new ApiError({
 			status: 403,
 			code: 'email_verification_required',
 			message: `Your account email address is not verified, so API access is disabled. Verify it from ${input.appOrigin}/account.`,
-			meteringUserId: authContext.user.userId,
+			meteringUserId: personalOrgId(authContext.user.userId),
 		})
 	}
 	if (authContext.suspended) {
@@ -133,7 +147,7 @@ async function authenticateWithApiToken(input: {
 			code: 'account_suspended',
 			message:
 				'This account is suspended, so API access is disabled. Contact the operator of this Kody deployment to appeal.',
-			meteringUserId: authContext.user.userId,
+			meteringUserId: personalOrgId(authContext.user.userId),
 		})
 	}
 	if (
@@ -145,7 +159,7 @@ async function authenticateWithApiToken(input: {
 		throw unauthorized(
 			'API token predates a password change. Mint a new one.',
 			true,
-			authContext.user.userId,
+			personalOrgId(authContext.user.userId),
 		)
 	}
 	const slid = slideApiTokenExpiry(record, now)
@@ -158,13 +172,30 @@ async function authenticateWithApiToken(input: {
 			),
 		)
 	}
+	const orgId = record.org_id.trim() || record.user_id
+	const orgBinding = await loadOrgBindingForOrg(
+		input.env.APP_DB,
+		authContext.user.userId,
+		orgId,
+	)
+	if (!orgBinding) {
+		throw unauthorized(
+			'API token is not bound to an org you can access.',
+			true,
+			personalOrgId(authContext.user.userId),
+		)
+	}
 	return createApiInvocationContext({
 		env: input.env,
 		callerContext: {
 			...createMcpCallerContext({
 				baseUrl: input.appOrigin,
+				source: { kind: 'api-token', tokenId: record.id },
 				executionOrigin: 'interactive',
 				user: authContext.user,
+				connectionProfileName: record.profile_name ?? null,
+				orgBinding,
+				scopes: record.scopes,
 			}),
 			user: authContext.user,
 		},
@@ -201,7 +232,7 @@ async function authenticateWithMcpOauth(input: {
 			status: 403,
 			code: 'email_verification_required',
 			message: `Your account email address is not verified, so API access is disabled. Verify it from ${input.appOrigin}/account.`,
-			meteringUserId: authContext.user.userId,
+			meteringUserId: personalOrgId(authContext.user.userId),
 		})
 	}
 	if (authContext.suspended) {
@@ -210,7 +241,7 @@ async function authenticateWithMcpOauth(input: {
 			code: 'account_suspended',
 			message:
 				'This account is suspended, so API access is disabled. Contact the operator of this Kody deployment to appeal.',
-			meteringUserId: authContext.user.userId,
+			meteringUserId: personalOrgId(authContext.user.userId),
 		})
 	}
 	if (
@@ -222,19 +253,37 @@ async function authenticateWithMcpOauth(input: {
 		throw unauthorized(
 			'Access token predates a password change. Run kody login again.',
 			true,
-			authContext.user.userId,
+			personalOrgId(authContext.user.userId),
 		)
 	}
 	const grantScopes =
 		tokenSummary.scope ??
 		(Array.isArray(tokenSummary.grant.scope) ? tokenSummary.grant.scope : [])
+	const orgBinding = await loadOrgBindingFromGrantProps({
+		db: input.env.APP_DB,
+		personId: authContext.user.userId,
+		grantProps: tokenSummary.grant.props,
+	})
+	if (!orgBinding) {
+		throw unauthorized(
+			'Access token is not bound to an org you can access.',
+			true,
+			personalOrgId(authContext.user.userId),
+		)
+	}
 	return createApiInvocationContext({
 		env: input.env,
 		callerContext: {
 			...createMcpCallerContext({
 				baseUrl: input.appOrigin,
+				source: { kind: 'cli' },
 				executionOrigin: 'interactive',
 				user: authContext.user,
+				connectionProfileName: readConnectionProfileNameFromGrantProps(
+					tokenSummary.grant.props,
+				),
+				oauthClientId: tokenSummary.grant.clientId,
+				orgBinding,
 			}),
 			user: authContext.user,
 		},

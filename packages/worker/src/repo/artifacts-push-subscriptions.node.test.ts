@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
@@ -15,7 +16,7 @@ const queueId = 'queue-artifacts-repo-events'
 const repoName = 'package-package-1'
 const subscriptionName = 'kody-push-default-package-package-1'
 const sourceId = 'source-1'
-const userId = 'user-1'
+const userId = ownerIdFromStored('user-1')
 
 const queuesPath = `/client/v4/accounts/${accountId}/queues`
 const subscriptionsPath = `/client/v4/accounts/${accountId}/event_subscriptions/subscriptions`
@@ -77,10 +78,12 @@ function createDb() {
 			repo_id TEXT NOT NULL,
 			published_commit TEXT,
 			indexed_commit TEXT,
-			manifest_path TEXT NOT NULL DEFAULT 'kody.json',
+			manifest_path TEXT NOT NULL DEFAULT 'package.json',
 			source_root TEXT NOT NULL DEFAULT '/',
 			last_external_check_at TEXT,
 			external_check_until TEXT,
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);

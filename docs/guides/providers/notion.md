@@ -52,7 +52,7 @@ Once connected, you can ask Kody things like:
 Save it through the account secrets page — never paste the token into chat:
 
 ```text
-https://kody.codes/account/secrets/new?name=notionToken&description=Notion%20internal%20connection%20token&allowedHosts=api.notion.com&scope=user
+https://kody.codes/connect/secret-set?name=notionToken&description=Notion%20internal%20connection%20token&allowedHosts=api.notion.com&scope=user
 ```
 
 Approve the `api.notion.com` host on the same page after saving.
@@ -158,15 +158,15 @@ internal connection, edit the page's **Connections** menu.
 - Installation scope wrong on a public connection: it cannot be edited after
   creation; create a new public connection instead.
 
-## Use the official package and verify (Lane B / OAuth)
+## Use the `@kody/notion` package and verify (Lane B / OAuth)
 
-Lane A stays on the raw `notionToken` fetch above. The official `@kody/notion`
-listing is the Lane B finish after you fork it: it uses the saved `notion` OAuth
-integration and does not read `notionToken`.
+Lane A stays on the raw `notionToken` fetch above. `@kody/notion`, a public
+community package from the `@kody` org, is the Lane B finish after you fork it:
+it uses the saved `notion` OAuth integration and does not read `notionToken`.
 
 1. Search for `@kody/notion`. It wraps pages, databases, and a generic request
    escape hatch.
-2. `communityFork` it into your scope (or click **Install** on the listing).
+2. `communityFork` it into your org (or click **Install** on the listing).
 3. Check the fork's README **Required setup**: it expects an OAuth integration
    named `notion` — the default name this guide's Lane B connect link uses, so
    no adaptation is needed.

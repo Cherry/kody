@@ -1,3 +1,4 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { userMeterDurableObjectName } from '#worker/user-scoped-durable-object-name.ts'
 import { type UserMeterRpc } from './user-meter-do.ts'
 
@@ -11,10 +12,14 @@ export function userMeterNamespace(
 	return env.USER_METER ?? null
 }
 
-/** Typed per-user UserMeter RPC stub; throws when `USER_METER` is missing. */
+/**
+ * Typed UserMeter RPC stub; throws when `USER_METER` is missing.
+ * `userId` is the durable object name key (org id for team billing; for
+ * personal orgs the org id equals the owner user id).
+ */
 export function userMeterRpc(input: {
 	env: UserMeterEnv
-	userId: string
+	userId: OwnerId
 }): UserMeterRpc {
 	const namespace = userMeterNamespace(input.env)
 	if (!namespace) {

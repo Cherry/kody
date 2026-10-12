@@ -1,4 +1,5 @@
 import { errorCauseChainIncludes } from '@kody-internal/shared/error-message.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type PublishedPackageArtifactBuildTarget } from '#worker/package-runtime/published-bundle-artifacts.ts'
 import { isDurableObjectIsolateResourceLimitResetMessage } from '#worker/sentry-options.ts'
 import { isolatedRunnerResourceLimitAdvice } from './isolated-runner-limit-message.ts'
@@ -50,7 +51,7 @@ export const isolatedArtifactRebuildChunkConcurrency = 2
 export type IsolatedArtifactRebuildRequest = {
 	stagingKey: string
 	sourceId: string
-	userId: string
+	userId: OwnerId
 	publishedCommit: string
 	targets: Array<PublishedPackageArtifactBuildTarget>
 	baseUrl?: string
@@ -84,6 +85,12 @@ export function isolatedArtifactRebuildStagingKeyBelongsToUser(input: {
 export type IsolatedArtifactRebuildTargetResult = {
 	ok: boolean
 	message: string
+	/**
+	 * True when the failure is a caller-fixable package mistake (for example
+	 * undeclared bare imports). Orchestrators rehydrate as UserCodeError so
+	 * Sentry drops the event after the DO serializes the error to a string.
+	 */
+	callerFailure?: boolean
 	skipped?: boolean
 	kvKey?: string | null
 	target: PublishedPackageArtifactBuildTarget

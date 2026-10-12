@@ -5,6 +5,10 @@ import {
 } from '@cloudflare/codemode'
 import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
 import {
+	entitlementEmailForOwner,
+	ownerIdFromCaller,
+} from '#worker/request-context/owner-id.ts'
+import {
 	createExecuteHelperPrelude,
 	getExecuteHelperCapabilityNames,
 } from '#mcp/execute-modules/kody-runtime-utils.ts'
@@ -41,11 +45,6 @@ export type PackageStorageToolOptions = {
 	 * SQL.
 	 */
 	writable?: boolean
-	/**
-	 * When a granted package is share-owned, StorageRunner and storage
-	 * entitlement use the owner's user id instead of the guest caller.
-	 */
-	storageOwnerByPackageId?: ReadonlyMap<string, string>
 }
 
 export type PackageSecretToolOptions = {
@@ -498,15 +497,14 @@ const runtimeHelperManifest: Array<RuntimeHelperManifestEntry> = [
 			}),
 		createKodyTools: (context) => {
 			const packageStorageTools = context.packageStorageTools
-			const packageStorageUserId = context.callerContext.user?.userId ?? ''
-			if (!packageStorageTools || !packageStorageUserId) return {}
+			const ownerId = ownerIdFromCaller(context.callerContext)
+			if (!packageStorageTools || !ownerId) return {}
 			return createPackageStorageKodyTools({
 				env: context.env,
-				userId: packageStorageUserId,
-				email: context.callerContext.user?.email,
+				userId: ownerId,
+				email: entitlementEmailForOwner(context.callerContext, ownerId),
 				grantedPackageIds: packageStorageTools.grantedPackageIds,
 				writable: packageStorageTools.writable,
-				storageOwnerByPackageId: packageStorageTools.storageOwnerByPackageId,
 			})
 		},
 	},

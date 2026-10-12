@@ -1,6 +1,8 @@
 /**
  * Workers-unit D1 does not apply migrations. Suites that call packageGet
- * (which lists package-scoped secret metadata) need these tables.
+ * (which lists package-scoped secret metadata) need these tables. Production
+ * assigns credential ids with an insert trigger (migration 0110); a column
+ * default gives inserts and upserts the same ids here.
  */
 export async function ensureSecretBucketsTestSchema(db: D1Database) {
 	await db
@@ -11,6 +13,7 @@ export async function ensureSecretBucketsTestSchema(db: D1Database) {
 				scope TEXT NOT NULL CHECK (scope IN ('session', 'package', 'user')),
 				binding_key TEXT NOT NULL,
 				expires_at TEXT,
+				deleted_at TEXT,
 				created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				UNIQUE(user_id, scope, binding_key)
@@ -20,14 +23,19 @@ export async function ensureSecretBucketsTestSchema(db: D1Database) {
 	await db
 		.prepare(
 			`CREATE TABLE IF NOT EXISTS secret_entries (
+				id TEXT UNIQUE DEFAULT (lower(hex(randomblob(16)))),
 				bucket_id TEXT NOT NULL,
 				name TEXT NOT NULL,
 				description TEXT NOT NULL DEFAULT '',
 				encrypted_value TEXT NOT NULL,
+				kind TEXT NOT NULL DEFAULT 'secret',
+				inject_json TEXT NOT NULL DEFAULT '{"kind":"header","name":"Authorization","format":"Bearer {value}"}',
+				config_json TEXT,
 				allowed_hosts TEXT NOT NULL DEFAULT '[]',
 				allowed_packages TEXT NOT NULL DEFAULT '[]',
 				lookup_hash TEXT,
 				expires_at TEXT,
+				deleted_at TEXT,
 				created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				PRIMARY KEY (bucket_id, name)
@@ -37,11 +45,13 @@ export async function ensureSecretBucketsTestSchema(db: D1Database) {
 	await db
 		.prepare(
 			`CREATE TABLE IF NOT EXISTS secret_provider_bindings (
+				id TEXT UNIQUE DEFAULT (lower(hex(randomblob(16)))),
 				user_id TEXT NOT NULL,
 				provider_id TEXT NOT NULL,
 				package_id TEXT NOT NULL,
 				door_secret_name TEXT NOT NULL,
 				config_json TEXT NOT NULL DEFAULT '{}',
+				deleted_at TEXT,
 				created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
 				PRIMARY KEY (user_id, provider_id)

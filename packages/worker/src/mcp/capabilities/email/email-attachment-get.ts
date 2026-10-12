@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
 import { capabilityDomainNames } from '#mcp/capabilities/domain-metadata.ts'
@@ -19,6 +20,7 @@ export const emailAttachmentGetCapability = defineDomainCapability(
 	capabilityDomainNames.email,
 	{
 		name: 'emailAttachmentGet',
+		orgPermission: 'email:read',
 		description:
 			'Get one stored email attachment by id, returning metadata plus the attachment bytes as base64.',
 		keywords: ['email', 'attachment', 'get', 'download'],
@@ -33,7 +35,7 @@ export const emailAttachmentGetCapability = defineDomainCapability(
 			const user = await requireVerifiedEmailAccountUser(ctx)
 			const attachment = await getOwnerEmailAttachmentById({
 				env: ctx.env,
-				ownerId: user.userId,
+				ownerId: personalOrgId(user.userId),
 				blobs: ctx.env.EMAIL_BLOBS,
 				attachmentId: args.attachment_id,
 			})

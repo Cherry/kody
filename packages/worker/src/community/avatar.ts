@@ -1,4 +1,5 @@
 import { toHex } from '@kody-internal/shared/hex.ts'
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { utcSqliteTimestamp } from '@kody-internal/shared/date-keys.ts'
 import {
 	normalizeUserAvatarContentType,
@@ -19,6 +20,7 @@ import {
 	readWebpDimensions,
 } from './community-icon.ts'
 
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const userAvatarR2KeyPrefix = 'user-avatars/'
 const userAvatarCacheControl = 'public, max-age=31536000, immutable'
 
@@ -45,7 +47,7 @@ function extensionForContentType(contentType: UserAvatarContentType) {
 }
 
 export function buildUserAvatarR2Key(input: {
-	stableUserId: string
+	stableUserId: OwnerId
 	contentHash: string
 	contentType: UserAvatarContentType
 }) {
@@ -147,7 +149,7 @@ async function sha256Hex(bytes: Uint8Array) {
 export async function saveUserAvatar(input: {
 	env: Pick<Env, 'APP_DB' | 'COMMUNITY_ASSETS'> & UserMeterEnv
 	numericUserId: number
-	stableUserId: string
+	stableUserId: OwnerId
 	bytes: Uint8Array
 	contentType: UserAvatarContentType
 }): Promise<string> {
@@ -165,7 +167,7 @@ export async function saveUserAvatar(input: {
 			})
 
 			const existing = await input.env.APP_DB.prepare(
-				`SELECT avatar_key FROM users WHERE id = ? AND stable_user_id = ?`,
+				`SELECT avatar_key FROM users WHERE id = ? AND stable_user_id = ?${andLiveDeletedAtSql()}`,
 			)
 				.bind(input.numericUserId, input.stableUserId)
 				.first<{ avatar_key: string | null }>()
@@ -192,7 +194,7 @@ export async function saveUserAvatar(input: {
 			const update = await input.env.APP_DB.prepare(
 				`UPDATE users
 		SET avatar_key = ?, updated_at = ?
-		WHERE id = ? AND stable_user_id = ? AND deleting_at IS NULL`,
+		WHERE id = ? AND stable_user_id = ? AND deleting_at IS NULL${andLiveDeletedAtSql()}`,
 			)
 				.bind(
 					r2Key,
@@ -228,7 +230,7 @@ export async function saveUserAvatar(input: {
 export async function deleteUserAvatar(input: {
 	env: Pick<Env, 'APP_DB' | 'COMMUNITY_ASSETS'> & UserMeterEnv
 	numericUserId: number
-	stableUserId: string
+	stableUserId: OwnerId
 }): Promise<void> {
 	await withAccountWriteLease({
 		db: input.env.APP_DB,
@@ -237,7 +239,7 @@ export async function deleteUserAvatar(input: {
 		async write() {
 			await assertAccountWritableDb(input.env.APP_DB, input.stableUserId)
 			const existing = await input.env.APP_DB.prepare(
-				`SELECT avatar_key FROM users WHERE id = ? AND stable_user_id = ?`,
+				`SELECT avatar_key FROM users WHERE id = ? AND stable_user_id = ?${andLiveDeletedAtSql()}`,
 			)
 				.bind(input.numericUserId, input.stableUserId)
 				.first<{ avatar_key: string | null }>()
@@ -247,7 +249,7 @@ export async function deleteUserAvatar(input: {
 			const update = await input.env.APP_DB.prepare(
 				`UPDATE users
 				SET avatar_key = NULL, updated_at = ?
-				WHERE id = ? AND stable_user_id = ? AND deleting_at IS NULL`,
+				WHERE id = ? AND stable_user_id = ? AND deleting_at IS NULL${andLiveDeletedAtSql()}`,
 			)
 				.bind(utcSqliteTimestamp(), input.numericUserId, input.stableUserId)
 				.run()

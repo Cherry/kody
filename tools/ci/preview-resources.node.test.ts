@@ -11,11 +11,14 @@ import {
 	deletePreviewKvNamespace,
 	deletePreviewQueue,
 	deletePreviewR2Bucket,
+	deletePreviewVectorizeIndex,
 	deletePreviewWorkerScript,
 	previewResourceNamePattern,
 	removePreviewQueueConsumers,
+	resetPreviewD1Databases,
 	type PreviewResourceKind,
 } from './preview-resources.ts'
+import { planPreviewOriginQueues } from './preview-queue-plan.ts'
 import { parseJsonc } from './resource-utils.ts'
 
 // Never launch a real wrangler from this suite: a guard regression must show
@@ -126,6 +129,7 @@ const resourceNameKeys = new Set([
 	'dead_letter_queue',
 	'title',
 	'script_name',
+	'index_name',
 	'service',
 	'from_script',
 ])
@@ -230,6 +234,8 @@ test('assertPreviewResourceName rejects committed production names and names out
 			'kody-webhook-dispatch',
 			'kody-scheduled-dispatch',
 			'kody-preview-jobs',
+			'kody-capabilities-prod',
+			'kody-capabilities-preview',
 		]),
 	)
 	expect(
@@ -257,6 +263,31 @@ test('assertPreviewResourceName rejects committed production names and names out
 	)
 })
 
+test('resetPreviewD1Databases deletes only per-PR app, audit, and jobs D1 names', async () => {
+	consoleError.mockImplementation(() => {})
+	spawnSync.mockReset()
+	spawnSync.mockImplementation(() =>
+		wranglerResult(0, '', JSON.stringify([{ name: 'kody-pr-99-db' }])),
+	)
+
+	await resetPreviewD1Databases({ workerName: 'kody-pr-99', dryRun: true })
+
+	expect(loggedMessages()).toEqual(
+		expect.arrayContaining([
+			'[dry-run] delete D1 database: kody-pr-99-jobs-db',
+			'[dry-run] delete D1 database: kody-pr-99-audit-db',
+			'[dry-run] delete D1 database: kody-pr-99-db',
+			expect.stringContaining('Preview D1 reset for kody-pr-99'),
+		]),
+	)
+	await expect(
+		resetPreviewD1Databases({ workerName: 'kody', dryRun: true }),
+	).rejects.toThrow(/limited to kody-pr-<number>/)
+	await expect(
+		resetPreviewD1Databases({ workerName: 'kody-branch-feat', dryRun: true }),
+	).rejects.toThrow(/limited to kody-pr-<number>/)
+})
+
 test('assertPreviewResourceName accepts every derived preview name kind, including 63-character truncation', () => {
 	for (const workerName of acceptedWorkerNames) {
 		const derived = buildPreviewResourceNames(workerName)
@@ -270,11 +301,14 @@ test('assertPreviewResourceName accepts every derived preview name kind, includi
 			[`${workerName}-mock-cloudflare`, 'worker'],
 			[derived.d1DatabaseName, 'd1'],
 			[derived.auditD1DatabaseName, 'd1'],
+			[derived.jobsD1DatabaseName, 'd1'],
+			[derived.vectorizeIndexName, 'vectorize'],
 			[derived.oauthKvTitle, 'kv'],
 			[derived.bundleArtifactsKvTitle, 'kv'],
 			[derived.communityAssetsBucketName, 'r2'],
 			[derived.emailBlobsBucketName, 'r2'],
 			[derived.repoSessionBlobsBucketName, 'r2'],
+			[derived.operatorBackupsBucketName, 'r2'],
 			[derived.webhookDispatchQueueName, 'queue'],
 			[derived.webhookDispatchDeadLetterQueueName, 'queue'],
 			[derived.artifactsNamespace, 'artifacts'],
@@ -352,6 +386,22 @@ test('cleanup and each guarded delete refuse production names before any wrangle
 		],
 		[
 			() =>
+				deletePreviewVectorizeIndex({
+					...queueClient,
+					name: 'kody-capabilities-prod',
+				}),
+			'vectorize "kody-capabilities-prod"',
+		],
+		[
+			() =>
+				deletePreviewVectorizeIndex({
+					...queueClient,
+					name: 'kody-capabilities-preview',
+				}),
+			'vectorize "kody-capabilities-preview"',
+		],
+		[
+			() =>
 				deletePreviewArtifactsNamespace({
 					namespace: 'production',
 					dryRun: false,
@@ -397,14 +447,20 @@ test('dry-run cleanup of a PR preview walks every resource without Cloudflare cr
 			'[dry-run] delete R2 bucket: kody-pr-42-community-assets',
 			'[dry-run] delete R2 bucket: kody-pr-42-email-blobs',
 			'[dry-run] delete R2 bucket: kody-pr-42-repo-session-blobs',
+			'[dry-run] delete R2 bucket: kody-pr-42-operator-backups',
 			'[dry-run] delete KV namespace: kody-pr-42-bundle-artifacts-kv',
 			'[dry-run] delete KV namespace: kody-pr-42-oauth-kv',
+			'[dry-run] delete D1 database: kody-pr-42-jobs-db',
 			'[dry-run] delete D1 database: kody-pr-42-audit-db',
 			'[dry-run] delete D1 database: kody-pr-42-db',
+			'[dry-run] delete Vectorize index: kody-pr-42-vectors',
 			'[dry-run] delete Artifacts namespace: kody-pr-42',
 		]),
 	)
 	expect(logged.some((line) => line.includes('kody-preview-jobs'))).toBe(false)
+	expect(
+		logged.some((line) => line.includes('kody-capabilities-preview')),
+	).toBe(false)
 	expect(spawnSync).not.toHaveBeenCalled()
 	expect(cloudflare.fetchMock).not.toHaveBeenCalled()
 })
@@ -500,8 +556,13 @@ test('permanent queue auth failure still attempts later independent resources an
 		return alreadyMissingWrangler(argv)
 	})
 
+	const queueCount = planPreviewOriginQueues('kody-pr-1999').queueNames.length
+	// Each queue fails twice (consumers, then the queue itself), plus the
+	// highlight worker, the Vectorize index, and the Artifacts namespace.
 	await expect(cleanup('kody-pr-1999')).rejects.toThrow(
-		/Preview cleanup failed for 6 resource\(s\)/,
+		new RegExp(
+			`Preview cleanup failed for ${String(queueCount * 2 + 3)} resource\\(s\\)`,
+		),
 	)
 	expect(
 		attemptedWorkers.filter((name) => name === 'kody-pr-1999-highlight'),
@@ -568,7 +629,9 @@ test('cleanup preserves queue-consumer then worker then queue order', async () =
 	expect(firstQueueList).toBeGreaterThanOrEqual(0)
 	expect(firstWorker).toBeGreaterThan(firstQueueList)
 	expect(firstR2).toBeGreaterThan(firstWorker)
-	expect(events.filter((event) => event === 'list-queues').length).toBe(4)
+	expect(events.filter((event) => event === 'list-queues').length).toBe(
+		planPreviewOriginQueues('kody-pr-9').queueNames.length * 2,
+	)
 })
 
 test('non-empty preview R2 buckets are emptied then deleted', async () => {

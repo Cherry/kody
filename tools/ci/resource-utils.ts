@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -28,7 +29,7 @@ type KvNamespaceListEntry = {
 	title: string
 }
 
-export type CloudflareApiEnvelope<T> = {
+type CloudflareApiEnvelope<T> = {
 	success?: boolean
 	result?: T
 	errors?: Array<{ code?: number | string; message?: string }>
@@ -83,6 +84,9 @@ export function isRetryableCloudflareFailure(message: string) {
 	return (
 		(message.includes('Malformed Cloudflare response') &&
 			!/Malformed Cloudflare response \(200\).*--/u.test(message)) ||
+		// Wrangler uses this phrasing for truncated JSON on 200 GET /deployments,
+		// not only 5xx connect resets. Keep the multipart-200 exclusion above.
+		message.includes('Received a malformed response from the API') ||
 		message.includes('upstream connect error') ||
 		message.includes('Cloudflare API request failed (429)') ||
 		/Cloudflare API request failed \(5\d\d\)/.test(message) ||
@@ -122,7 +126,7 @@ export const emailSendingEventTypes = [
 	'message.complained',
 ] as const
 
-export const artifactsAccountEventTypes = [
+const artifactsAccountEventTypes = [
 	'repo.created',
 	'repo.deleted',
 	'repo.pushed',
@@ -505,6 +509,43 @@ export function truncateWithSuffix(
 	return `${trimmed}${suffix}`
 }
 
+/** Cloudflare Workflow binding `name` max length (wrangler rejects longer). */
+export const cloudflareWorkflowNameMaxLength = 64
+
+const dynamicCallableWorkflowNameSuffix = '-dynamic-callable-workflows'
+
+/** Hex chars kept from a digest when a workflow name must be truncated. */
+const dynamicCallableWorkflowNameDigestLength = 8
+
+/**
+ * Per-worker dynamic-callable workflow name, within Cloudflare's 64-char
+ * limit so long branch preview names (e.g. local-execute-parity-0092) still
+ * deploy. When truncation is required, a short digest of the full runtime
+ * worker name is embedded so two long slugs that share a prefix do not
+ * collide. Runtime and platform/main configs must use the same helper so the
+ * cross-script binding name matches.
+ */
+export function dynamicCallableWorkflowName(runtimeWorkerName: string) {
+	const suffix = dynamicCallableWorkflowNameSuffix
+	if (
+		runtimeWorkerName.length + suffix.length <=
+		cloudflareWorkflowNameMaxLength
+	) {
+		return `${runtimeWorkerName}${suffix}`
+	}
+	const digest = createHash('sha256')
+		.update(runtimeWorkerName)
+		.digest('hex')
+		.slice(0, dynamicCallableWorkflowNameDigestLength)
+	const digestPart = `-${digest}`
+	const maxBase = Math.max(
+		1,
+		cloudflareWorkflowNameMaxLength - digestPart.length - suffix.length,
+	)
+	const trimmed = runtimeWorkerName.slice(0, maxBase).replace(/-+$/g, '')
+	return `${trimmed}${digestPart}${suffix}`
+}
+
 export function listD1Databases(): Array<D1DatabaseListEntry> {
 	const result = runWrangler(['d1', 'list', '--json'], { quiet: true })
 	if (result.status !== 0) {
@@ -721,7 +762,7 @@ export function encodeR2ObjectKey(key: string) {
 	return key.split('/').map(encodeURIComponent).join('/')
 }
 
-export async function listR2BucketObjects(input: {
+async function listR2BucketObjects(input: {
 	accountId: string
 	apiToken: string
 	name: string
@@ -1137,7 +1178,7 @@ export function packageAppWildcardRoutePattern(packageAppHostname: string) {
 	return `*.${packageAppHostname}/*`
 }
 
-export function packageAppWildcardDnsRecordName(packageAppHostname: string) {
+function packageAppWildcardDnsRecordName(packageAppHostname: string) {
 	return `*.${packageAppHostname}`
 }
 
@@ -1149,7 +1190,7 @@ export function packageAppWildcardDnsRecordName(packageAppHostname: string) {
  * publishes gets detached (and its DNS record deleted) when the routes are
  * replaced.
  */
-export function packageAppDnsRecordNames(packageAppHostname: string) {
+function packageAppDnsRecordNames(packageAppHostname: string) {
 	return [
 		packageAppHostname,
 		packageAppWildcardDnsRecordName(packageAppHostname),
@@ -1456,7 +1497,7 @@ export async function removeCloudflareQueueConsumers(input: {
  * asynchronously, so a just-deleted Worker can briefly keep the queue
  * undeletable.
  */
-export function isQueueStillReferencedError(error: unknown) {
+function isQueueStillReferencedError(error: unknown) {
 	return (
 		error instanceof Error &&
 		error.message.includes('still referenced by a binding in a Worker')
@@ -2169,6 +2210,7 @@ export async function writeGeneratedWranglerConfig({
 	communityAssetsBucketName,
 	emailBlobsBucketName,
 	repoSessionBlobsBucketName,
+	operatorBackupsBucketName,
 	artifactsNamespace,
 	workerVars,
 	queueBindings,
@@ -2189,6 +2231,7 @@ export async function writeGeneratedWranglerConfig({
 	communityAssetsBucketName: string
 	emailBlobsBucketName: string
 	repoSessionBlobsBucketName: string
+	operatorBackupsBucketName: string
 	/** When set, rewrites env ARTIFACTS binding + ARTIFACTS_NAMESPACE var. */
 	artifactsNamespace?: string
 	mainEntryPath?: string
@@ -2344,6 +2387,13 @@ export async function writeGeneratedWranglerConfig({
 		r2Buckets,
 		binding: 'REPO_SESSION_BLOBS',
 		bucketName: repoSessionBlobsBucketName,
+		baseConfigPath,
+		envName,
+	})
+	setGeneratedR2BucketName({
+		r2Buckets,
+		binding: 'OPERATOR_BACKUPS',
+		bucketName: operatorBackupsBucketName,
 		baseConfigPath,
 		envName,
 	})

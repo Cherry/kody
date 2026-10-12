@@ -1,3 +1,4 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	routeLoaderRedirect,
@@ -17,9 +18,6 @@ const accountWebhooksApiPath = routes.accountWebhooksApi.href()
 
 /** The triggers guide section on inbound webhooks (`docs/guides/triggers.md`). */
 export const webhooksDocHref = `${docHref('triggers')}#inbound-webhooks-the-external-http-knock`
-
-/** Activity filtered to webhook deliveries (metadata only; bodies are never stored). */
-export const webhookDeliveriesHref = `${routes.accountActivity.href()}?view=recent&status=all&surface=webhook`
 
 export type WebhookIntent = 'mint' | 'rotate' | 'reveal' | 'enable' | 'disable'
 
@@ -78,7 +76,9 @@ export function webhookModeLabel(
 export function webhookVerificationLabel(
 	webhook: Pick<PackageWebhookListItem, 'verification'>,
 ) {
-	if (!webhook.verification) return 'URL secret only'
+	if (!webhook.verification || webhook.verification.type === 'url-secret') {
+		return 'URL secret only'
+	}
 	return `${webhook.verification.type} · ${webhook.verification.header}`
 }
 
@@ -120,10 +120,11 @@ export function webhookFailureMessage(intent: WebhookIntent) {
 	}
 }
 
-export async function fetchAccountWebhooks(signal: AbortSignal) {
+export async function fetchAccountWebhooks(href: string, signal: AbortSignal) {
 	const response = await fetch(accountWebhooksApiPath, {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(href),
 		signal,
 	})
 	if (response.status === 401) return { kind: 'unauthorized' as const }
@@ -135,10 +136,10 @@ export async function fetchAccountWebhooks(signal: AbortSignal) {
 }
 
 export async function accountWebhooksRouteLoader(
-	_url: URL,
+	url: URL,
 	signal: AbortSignal,
 ): Promise<RouteLoaderResult> {
-	const result = await fetchAccountWebhooks(signal)
+	const result = await fetchAccountWebhooks(url.href, signal)
 	if (result.kind === 'unauthorized') {
 		return routeLoaderRedirect('/login')
 	}

@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import {
@@ -5,8 +6,9 @@ import {
 	createAccountWebhooksHandler,
 } from '#app/handlers/account-webhooks.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { type AccountWebhooksLoaderData } from '#universal/loader-data.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -31,7 +33,7 @@ vi.mock('#app/ssr-render.tsx', () => ({
 const savedPackages = [
 	{
 		id: 'pkg-1',
-		userId: 'set-per-test',
+		userId: ownerIdFromStored('set-per-test'),
 		name: '@owner/sentry-bridge',
 		kodyId: 'sentry-bridge',
 		description: 'Sentry bridge',
@@ -46,7 +48,7 @@ const savedPackages = [
 	},
 	{
 		id: 'pkg-2',
-		userId: 'set-per-test',
+		userId: ownerIdFromStored('set-per-test'),
 		name: '@owner/raycast',
 		kodyId: 'raycast',
 		description: 'Raycast bridge',
@@ -62,8 +64,14 @@ const savedPackages = [
 ]
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByUserId: vi.fn(async () => savedPackages),
-	getSavedPackageByKodyId: vi.fn(),
+	listSavedPackagesByUserId: vi.fn(
+		async (_db: unknown, input: { userId: string }) =>
+			savedPackages.map((entry) => ({
+				...entry,
+				userId: ownerIdFromStored(input.userId),
+			})),
+	),
+	resolveSavedPackageRef: vi.fn(),
 }))
 
 vi.mock('#worker/package-registry/source.ts', () => ({
@@ -119,6 +127,8 @@ function createEnv() {
 			previous_url_secret_hash TEXT,
 			previous_url_secret_expires_at TEXT,
 			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+			deleted_at TEXT,
+
 			created_at TEXT NOT NULL,
 			rotated_at TEXT NOT NULL
 		);
@@ -148,11 +158,12 @@ const owner = {
 }
 
 test('account webhooks page embeds every package’s declared webhooks (never a URL) and redirects anonymous visitors', async () => {
-	const userId = await createStableUserIdFromEmail(owner.email)
+	const userId = testStableUserIdFromEmail(owner.email)
 	const handler = createAccountWebhooksHandler(createEnv())
 	mockModule.requireAuthenticatedPageUser.mockResolvedValue({
 		...owner,
 		mcpUser: { userId },
+		request: sessionRequestContext(userId),
 	})
 	mockModule.renderAppPage.mockImplementation(async () => new Response('ok'))
 
@@ -187,10 +198,11 @@ test('account webhooks page embeds every package’s declared webhooks (never a 
 })
 
 test('account webhooks API lists across packages and is read-only: mutations belong to the package API', async () => {
-	const userId = await createStableUserIdFromEmail(owner.email)
+	const userId = testStableUserIdFromEmail(owner.email)
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		...owner,
 		mcpUser: { userId },
+		request: sessionRequestContext(userId),
 	})
 	const handler = createAccountWebhooksApiHandler(createEnv())
 	const apiUrl = 'https://kody.example/account/webhooks.json'

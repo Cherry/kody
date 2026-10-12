@@ -2,10 +2,7 @@
 /** @jsxRuntime automatic */
 import { type RemixNode, css } from 'remix/component'
 import { type ViewerListingInstall } from '#universal/community-public-types.ts'
-import {
-	getCommunityPackageHrefFromName,
-	isOfficialCommunityListing,
-} from '#universal/community-links.ts'
+import { getCommunityPackageHrefFromName } from '#universal/community-links.ts'
 import {
 	FORK_OUTDATED_COPY_TOOLTIP,
 	copyPromptTooltipCss,
@@ -34,8 +31,6 @@ type PackageTitleActionsInput = {
 	loggedIn: boolean
 	returnTo: string
 	listingId: string
-	listingName: string
-	ownerUsername: string
 	trusted: boolean
 	viewerInstall: ViewerListingInstall | null
 }
@@ -65,8 +60,7 @@ function renderStatusControl(input: PackageTitleActionsInput) {
 	}
 	if (install) {
 		const href =
-			getCommunityPackageHrefFromName(install.targetName) ??
-			routes.accountPackages.href()
+			getCommunityPackageHrefFromName(install.targetName) ?? '/account/packages'
 		return renderIconControl({
 			href,
 			status: 'open',
@@ -76,34 +70,15 @@ function renderStatusControl(input: PackageTitleActionsInput) {
 			testId: 'package-title-status',
 		})
 	}
-	const official = isOfficialCommunityListing({
-		name: input.listingName,
-		ownerUsername: input.ownerUsername,
-	})
 	const loginHref = routes.login.href(null, {
 		searchParams: { redirectTo: input.returnTo || routes.community.href() },
 	})
-	if (official) {
-		return renderInstallControl({
-			kind: 'fork',
-			icon: 'git-fork',
-			label: FORK_TITLE_TOOLTIP,
-			tooltip: FORK_TITLE_TOOLTIP,
-			loggedIn: input.loggedIn,
-			loginHref,
-			official: true,
-			trusted: input.trusted,
-			listingId: input.listingId,
-		})
-	}
 	return renderInstallControl({
-		kind: 'verify',
 		icon: 'git-fork',
 		label: FORK_TITLE_TOOLTIP,
 		tooltip: OTHER_ACCOUNT_FORK_TOOLTIP,
 		loggedIn: input.loggedIn,
 		loginHref,
-		official: false,
 		trusted: input.trusted,
 		listingId: input.listingId,
 	})
@@ -141,25 +116,22 @@ function renderOutdatedControl(install: ViewerListingInstall) {
 }
 
 function renderInstallControl(input: {
-	kind: 'fork' | 'verify'
 	icon: IconName
 	label: string
 	tooltip: string
 	loggedIn: boolean
 	loginHref: string
-	official: boolean
 	trusted: boolean
 	listingId: string
 }) {
 	const shared = {
 		'data-testid': 'community-detail-install',
-		'data-package-title-status': input.kind,
-		'data-package-title-idle': input.kind,
+		'data-package-title-status': 'verify',
+		'data-package-title-idle': 'verify',
 		'data-package-title-listing': input.listingId,
 		'data-title-idle-label': input.label,
 		'data-title-idle-tooltip': input.tooltip,
 		'data-community-install': '',
-		'data-official': input.official ? 'true' : 'false',
 		'data-trusted': input.trusted ? 'true' : 'false',
 		'aria-label': input.label,
 		'aria-describedby': statusTooltipId,

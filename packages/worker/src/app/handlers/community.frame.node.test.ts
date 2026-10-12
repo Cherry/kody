@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { createCommunityHandler } from './community.tsx'
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
@@ -9,7 +10,7 @@ const mockModule = vi.hoisted(() => ({
 	searchCommunityListings: vi.fn(),
 	readAuthenticatedAppUser: vi.fn(),
 	listCommunityForksByListingIdsAndUser: vi.fn(),
-	listSavedPackagesByKodyIds: vi.fn(),
+	listSavedPackagesBySlugs: vi.fn(),
 	listSavedPackagesByIds: vi.fn(),
 	getMcpUserPackageScope: vi.fn(),
 }))
@@ -36,8 +37,8 @@ vi.mock('#worker/community/repo.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByKodyIds: (...args: Array<unknown>) =>
-		mockModule.listSavedPackagesByKodyIds(...args),
+	listSavedPackagesBySlugs: (...args: Array<unknown>) =>
+		mockModule.listSavedPackagesBySlugs(...args),
 	listSavedPackagesByIds: (...args: Array<unknown>) =>
 		mockModule.listSavedPackagesByIds(...args),
 }))
@@ -49,7 +50,7 @@ vi.mock('#worker/package-registry/user-scope.ts', () => ({
 
 const sampleListing = {
 	id: 'listing-1',
-	ownerUserId: 'owner-mcp-id',
+	ownerUserId: ownerIdFromStored('owner-mcp-id'),
 	packageId: 'pkg-1',
 	sourceId: 'src-1',
 	kodyId: 'github-triage',
@@ -123,12 +124,12 @@ test('community page handler returns bare listings frame HTML for target header'
 	)
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
-		mcpUser: { userId: 'viewer-1', username: 'burhan' },
+		mcpUser: { userId: ownerIdFromStored('viewer-1'), username: 'burhan' },
 		roles: [],
 	})
 	mockModule.getMcpUserPackageScope.mockResolvedValue('burhan')
 	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([])
-	mockModule.listSavedPackagesByKodyIds.mockResolvedValue([
+	mockModule.listSavedPackagesBySlugs.mockResolvedValue([
 		{
 			id: 'pkg-github',
 			kodyId: 'github-triage',
@@ -137,6 +138,29 @@ test('community page handler returns bare listings frame HTML for target header'
 		},
 	])
 	mockModule.listSavedPackagesByIds.mockResolvedValue([])
+	const sameLeafOnlyResponse = await handler.handler({
+		request: new Request('https://example.com/community', {
+			headers: { 'x-remix-target': 'community-listings' },
+		}),
+		params: {},
+		url: new URL('https://example.com/community'),
+	} as never)
+	const sameLeafOnlyHtml = await sameLeafOnlyResponse.text()
+	expect(sameLeafOnlyHtml).not.toContain(
+		'data-testid="community-listing-viewer-install-listing-1"',
+	)
+	expect(sameLeafOnlyHtml).not.toContain('Installed')
+
+	mockModule.listCommunityForksByListingIdsAndUser.mockResolvedValue([
+		{
+			listingId: 'listing-1',
+			targetKodyId: 'github-triage',
+			forkedPackageId: 'pkg-github',
+			forkedSourceId: 'src-github',
+			createdAt: '2026-08-01T00:00:00.000Z',
+			originCommit: 'abc1234567890',
+		},
+	])
 	const signedInResponse = await handler.handler({
 		request: new Request('https://example.com/community', {
 			headers: { 'x-remix-target': 'community-listings' },

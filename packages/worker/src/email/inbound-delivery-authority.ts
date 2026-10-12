@@ -1,7 +1,9 @@
+import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import {
 	buildEntitlementUpgradeHint,
 	EntitlementLimitError,
 } from '#worker/entitlements/errors.ts'
+import { entitlementBillingPath } from '#worker/entitlements/service.ts'
 import { type PlanName } from '#universal/plans.ts'
 import {
 	userMeterRpc,
@@ -45,7 +47,7 @@ export type UserInboundDeliveryAuthorityEnv = {
 
 export type CreateUserInboundDeliveryAuthorityInput = {
 	env: UserInboundDeliveryAuthorityEnv
-	userId: string
+	userId: OwnerId
 }
 
 export type UserInboundDeliveryChargeInput = {
@@ -328,10 +330,12 @@ export function createUserInboundDeliveryAuthority(
 				plan: chargeInput.plan,
 				limit: chargeInput.limit,
 				current: meterResult.count,
-				upgradeHint: buildEntitlementUpgradeHint(
-					'email_receives_per_day',
-					chargeInput.plan,
-				),
+				upgradeHint: buildEntitlementUpgradeHint({
+					resource: 'email_receives_per_day',
+					plan: chargeInput.plan,
+					billingPath: await entitlementBillingPath(env.APP_DB, userId),
+					now: chargeInput.now,
+				}),
 			})
 		}
 		const result = await mailbox.insertChargedPendingInboundDelivery({

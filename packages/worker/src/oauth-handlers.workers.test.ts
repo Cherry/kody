@@ -4,6 +4,7 @@ import {
 	type AuthRequest,
 	type ClientInfo,
 	type CompleteAuthorizationOptions,
+	OAuthProvider,
 	type OAuthHelpers,
 } from '@cloudflare/workers-oauth-provider'
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
@@ -25,13 +26,13 @@ import {
 	oauthEmailVerificationRequiredMessage,
 	oauthScopes,
 } from './oauth-handlers.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
 import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import { seedAccount } from '#worker/test-support/workers-seed.ts'
 import {
 	TEST_OIDC_SIGNING_KEY_ID,
 	TEST_OIDC_SIGNING_PRIVATE_KEY_PEM,
 } from '#worker/oidc/test-signing-key.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const callbackUri = 'https://example.com/callback'
 const mcpResource = 'https://heykody.dev/mcp'
@@ -109,6 +110,38 @@ function createHelpers(overrides: Partial<OAuthHelpers> = {}): OAuthHelpers {
 		completeAuthorization: async () => ({
 			redirectTo: 'https://example.com/callback?code=demo',
 		}),
+		describeConsent: async () => ({
+			clientId: baseClient.clientId,
+			clientName: baseClient.clientName ?? baseClient.clientId,
+			redirectUri: baseAuthRequest.redirectUri,
+			redirectHost: 'example.com',
+			redirectIsLoopback: false,
+			scope: baseAuthRequest.scope,
+		}),
+		isConsentRemembered: async () => false,
+		beginConsent: async () => ({
+			handle: 'handle',
+			headers: new Headers(),
+		}),
+		approveConsent: async () => ({
+			request: baseAuthRequest,
+			headers: new Headers(),
+		}),
+		denyConsent: async () => ({
+			request: baseAuthRequest,
+			redirectTo: 'https://example.com/denied',
+			headers: new Headers({ Location: 'https://example.com/denied' }),
+		}),
+		beginUpstream: async () => ({
+			state: 'state',
+			headers: new Headers(),
+		}),
+		finishUpstream: async <Data = unknown>() =>
+			({
+				request: baseAuthRequest,
+				data: undefined as Data,
+				headers: new Headers(),
+			}) as never,
 		async createClient() {
 			throw new Error('Not implemented')
 		},
@@ -143,11 +176,12 @@ async function createDatabase(
 	options: {
 		emailVerifiedAt?: string | null
 		ownedClientIds?: ReadonlyArray<string>
+		writes?: Array<{ query: string; bound: Array<unknown> }>
 	} = {},
 ) {
 	const passwordHash = await createPasswordHash(password)
 	const email = 'user@example.com'
-	const stableUserId = await createStableUserIdFromEmail(email)
+	const stableUserId = testStableUserIdFromEmail(email)
 	const emailVerifiedAt =
 		options.emailVerifiedAt === undefined
 			? new Date(0).toISOString()
@@ -160,6 +194,15 @@ async function createDatabase(
 		email_verified_at: emailVerifiedAt,
 		stable_user_id: stableUserId,
 	}
+	const personalOrg = {
+		id: stableUserId,
+		org_id: stableUserId,
+		slug: 'test-user',
+		display_name: null,
+		role: 'owner',
+		plan: 'free',
+		entitlement_ladder: 'public',
+	}
 	return {
 		prepare(query: string) {
 			// The 2FA gate queries verifications during inline OAuth login; the
@@ -168,6 +211,15 @@ async function createDatabase(
 			const isOwnedClientQuery = query.includes('FROM user_mcp_oauth_clients')
 			const isEmailVerifiedQuery =
 				query.includes('email_verified_at') && !query.includes('stable_user_id')
+			const isOrgQuery =
+				query.includes('FROM orgs') ||
+				query.includes('FROM org_memberships') ||
+				query.includes('FROM grants')
+			// listOrgsForPerson mentions grants in an EXISTS subquery but still
+			// returns memberships. Only the grant-only binding lookup is empty.
+			const isGrantsOnlyQuery =
+				query.includes('FROM grants') &&
+				!query.includes('LEFT JOIN org_memberships')
 			let bound: Array<unknown> = []
 			const statement = {
 				bind(...params: Array<unknown>) {
@@ -175,8 +227,17 @@ async function createDatabase(
 					return statement
 				},
 				async all() {
+					if (isVerificationsQuery) {
+						return { results: [], meta: { changes: 0, last_row_id: 0 } }
+					}
+					if (isOrgQuery) {
+						return {
+							results: isGrantsOnlyQuery ? [] : [personalOrg],
+							meta: { changes: 0, last_row_id: 0 },
+						}
+					}
 					return {
-						results: isVerificationsQuery ? [] : [userRow],
+						results: [userRow],
 						meta: { changes: 0, last_row_id: 0 },
 					}
 				},
@@ -195,9 +256,14 @@ async function createDatabase(
 					if (isEmailVerifiedQuery) {
 						return { email_verified_at: emailVerifiedAt }
 					}
+					if (isOrgQuery) {
+						if (isGrantsOnlyQuery) return null
+						return personalOrg
+					}
 					return userRow
 				},
 				async run() {
+					options.writes?.push({ query, bound })
 					return { meta: { changes: 1, last_row_id: 1 } }
 				},
 			}
@@ -338,7 +404,7 @@ async function sessionCookie(
 	setAuthSessionSecret(cookieSecret)
 	return createAuthCookie(
 		{
-			stableUserId: await createStableUserIdFromEmail(stableUserEmail),
+			stableUserId: testStableUserIdFromEmail(stableUserEmail),
 			email,
 			rememberMe: false,
 		},
@@ -480,6 +546,8 @@ test('authorize info, denial, approval, and default scopes follow the OAuth work
 		scopes: baseAuthRequest.scope,
 		emailVerified: null,
 		requireCredentials: true,
+		orgs: [],
+		selectedOrgSlug: null,
 	})
 
 	const authorizeHtml = await readAuthorizePage(
@@ -489,7 +557,83 @@ test('authorize info, denial, approval, and default scopes follow the OAuth work
 		),
 	)
 	expect(authorizeHtml).toContain(baseClient.clientName ?? '')
-	expect(authorizeHtml).not.toContain('Loading authorization details')
+	expect(authorizeHtml).toContain('data-testid="oauth-authorize-passkey"')
+	expect(authorizeHtml).not.toContain('Continue with GitHub')
+
+	const providerHtml = await readAuthorizePage(
+		await handleAuthorizeRequest(
+			new Request(exampleOAuthUrl('authorize', baseAuthorizeParams)),
+			{
+				...createEnv(createHelpers()),
+				GITHUB_CLIENT_ID: 'github-client-id',
+				GITHUB_CLIENT_SECRET: 'github-client-secret',
+				GOOGLE_CLIENT_ID: 'google-client-id',
+				GOOGLE_CLIENT_SECRET: 'google-client-secret',
+			},
+		),
+	)
+	expect(providerHtml).toContain('"authProviders"')
+	expect(providerHtml).toContain('aria-label="Continue with GitHub"')
+	expect(providerHtml).toContain('data-testid="social-sign-in-github"')
+	expect(providerHtml).toContain('aria-label="Continue with Google"')
+	expect(providerHtml).toContain('data-testid="social-sign-in-google"')
+
+	const signedInInfo = await handleAuthorizeInfo(
+		new Request(exampleOAuthUrl('authorize-info', baseAuthorizeParams), {
+			headers: { ...jsonAccept, Cookie: await sessionCookie() },
+		}),
+		createEnv(createHelpers(), await createDatabase('password123')),
+	)
+	expect(signedInInfo.status).toBe(200)
+	await expect(signedInInfo.json()).resolves.toMatchObject({
+		ok: true,
+		orgs: [{ slug: 'test-user', displayName: null, role: 'owner' }],
+		selectedOrgSlug: 'test-user',
+	})
+
+	const resourceOrgInfo = await handleAuthorizeInfo(
+		new Request(exampleOAuthUrl('authorize-info', baseAuthorizeParams), {
+			headers: { ...jsonAccept, Cookie: await sessionCookie() },
+		}),
+		createEnv(
+			createHelpers({
+				parseAuthRequest: async () => ({
+					...baseAuthRequest,
+					resource: `${mcpResource}?org=test-user`,
+				}),
+			}),
+			await createDatabase('password123'),
+		),
+	)
+	expect(resourceOrgInfo.status).toBe(200)
+	await expect(resourceOrgInfo.json()).resolves.toMatchObject({
+		ok: true,
+		selectedOrgSlug: 'test-user',
+	})
+
+	const orgMismatchInfo = await handleAuthorizeInfo(
+		new Request(
+			exampleOAuthUrl('authorize-info', {
+				...baseAuthorizeParams,
+				org: 'test-user',
+			}),
+			{ headers: { ...jsonAccept, Cookie: await sessionCookie() } },
+		),
+		createEnv(
+			createHelpers({
+				parseAuthRequest: async () => ({
+					...baseAuthRequest,
+					resource: `${mcpResource}?org=other-org`,
+				}),
+			}),
+			await createDatabase('password123'),
+		),
+	)
+	expect(orgMismatchInfo.status).toBe(400)
+	await expect(orgMismatchInfo.json()).resolves.toMatchObject({
+		ok: false,
+		error: expect.stringMatching(/do not match/i),
+	})
 
 	const mismatchResponse = await handleAuthorizeInfo(
 		new Request(
@@ -560,6 +704,15 @@ test('authorize info, denial, approval, and default scopes follow the OAuth work
 	expect(sessionCompletion.mock.lastCall?.[0].request.issuer).toBe(
 		'https://example.com',
 	)
+	const sessionUserId = testStableUserIdFromEmail('user@example.com')
+	expect(sessionCompletion.mock.lastCall?.[0].props).toMatchObject({
+		orgId: sessionUserId,
+		personId: sessionUserId,
+	})
+	expect(sessionCompletion.mock.lastCall?.[0].metadata).toMatchObject({
+		orgId: sessionUserId,
+		personId: sessionUserId,
+	})
 
 	const defaultScopeCompletion = completingWith(
 		'https://example.com/callback?code=ok',
@@ -643,7 +796,7 @@ test('session approval uses stable user id when cookie email is stale', async ()
 		),
 	).resolves.toMatchObject({
 		session: {
-			stableUserId: await createStableUserIdFromEmail(currentEmail),
+			stableUserId: testStableUserIdFromEmail(currentEmail),
 			email: currentEmail,
 		},
 	})
@@ -773,21 +926,22 @@ test('worker entrypoint completes Claude-shaped dynamic registration and token e
 })
 
 test('worker entrypoint advertises OAuth, OIDC, and RFC 9728 resource metadata plus jwks', async () => {
-	for (const path of [
-		'/.well-known/oauth-protected-resource',
-		'/.well-known/oauth-protected-resource/mcp',
-	]) {
-		const response = await workerFetch(
-			new Request(`https://heykody.dev${path}`),
-		)
-		expect(response.status).toBe(200)
-		await expect(response.json()).resolves.toEqual({
-			resource: mcpResource,
-			authorization_servers: ['https://heykody.dev'],
-			scopes_supported: oauthScopes,
-			bearer_methods_supported: ['header'],
-		})
-	}
+	const rootPrm = await workerFetch(
+		new Request('https://heykody.dev/.well-known/oauth-protected-resource'),
+	)
+	// v1 serves only the path-aware document for resource `<origin>/mcp`.
+	expect(rootPrm.status).toBe(404)
+
+	const prm = await workerFetch(
+		new Request('https://heykody.dev/.well-known/oauth-protected-resource/mcp'),
+	)
+	expect(prm.status).toBe(200)
+	await expect(prm.json()).resolves.toEqual({
+		resource: mcpResource,
+		authorization_servers: ['https://heykody.dev'],
+		scopes_supported: oauthScopes,
+		bearer_methods_supported: ['header'],
+	})
 
 	const discovery = await workerFetch(
 		new Request('https://heykody.dev/.well-known/oauth-authorization-server'),
@@ -914,7 +1068,7 @@ test('worker entrypoint treats a failed ChatGPT CIMD fetch as an unknown client'
 	captureException.mockRestore()
 })
 
-test('worker entrypoint returns OAuth errors for provider-owned route exceptions', async () => {
+test('worker entrypoint returns OAuth errors for provider-owned route exceptions and JSON-RPC for /mcp', async () => {
 	const registerResponse = await workerFetch(
 		new Request('https://heykody.dev/oauth/register', {
 			method: 'POST',
@@ -978,6 +1132,120 @@ test('worker entrypoint returns OAuth errors for provider-owned route exceptions
 		error_description: 'Invalid OAuth client registration.',
 	})
 	expect(captureException).toHaveBeenCalledOnce()
+
+	// Catchable throws on `/mcp` must be JSON-RPC, not the OAuth token error
+	// shape — MCP clients drop or mis-handle OAuth `{ error: "server_error" }`.
+	const providerFetch = OAuthProvider.prototype.fetch
+	const mcpThrow = vi
+		.spyOn(OAuthProvider.prototype, 'fetch')
+		.mockImplementation(async function (this: OAuthProvider, request, ...rest) {
+			if (new URL(request.url).pathname === '/mcp') {
+				throw new Error('simulated mcp provider failure')
+			}
+			return providerFetch.call(this, request, ...rest)
+		})
+	const mcpResponse = await workerFetch(
+		new Request('https://heykody.dev/mcp', {
+			method: 'POST',
+			headers: {
+				Authorization: 'Bearer test-token',
+				'Content-Type': 'application/json',
+				Accept: 'application/json, text/event-stream',
+				Origin: 'https://gemini.google.com',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'initialize',
+				params: {},
+			}),
+		}),
+	)
+	expect(mcpResponse.status).toBe(500)
+	expect(mcpResponse.headers.get('Content-Type')).toContain('application/json')
+	expect(mcpResponse.headers.get('Access-Control-Allow-Origin')).toBe(
+		'https://gemini.google.com',
+	)
+	const mcpBody = await mcpResponse.json()
+	expect(mcpBody).toEqual({
+		jsonrpc: '2.0',
+		id: 1,
+		error: {
+			code: -32603,
+			message: 'Internal error',
+		},
+	})
+	expect(captureException).toHaveBeenCalledTimes(2)
+
+	const notificationResponse = await workerFetch(
+		new Request('https://heykody.dev/mcp', {
+			method: 'POST',
+			headers: {
+				Authorization: 'Bearer test-token',
+				'Content-Type': 'application/json',
+				Accept: 'application/json, text/event-stream',
+			},
+			body: JSON.stringify({
+				jsonrpc: '2.0',
+				method: 'notifications/initialized',
+			}),
+		}),
+	)
+	expect(notificationResponse.status).toBe(500)
+	expect(notificationResponse.headers.get('Content-Type')).toBeNull()
+	expect(await notificationResponse.text()).toBe('')
+	expect(captureException).toHaveBeenCalledTimes(3)
+
+	const invalidBodyResponse = await workerFetch(
+		new Request('https://heykody.dev/mcp', {
+			method: 'POST',
+			headers: {
+				Authorization: 'Bearer test-token',
+				'Content-Type': 'application/json',
+				Accept: 'application/json, text/event-stream',
+			},
+			body: JSON.stringify({}),
+		}),
+	)
+	expect(invalidBodyResponse.status).toBe(500)
+	await expect(invalidBodyResponse.json()).resolves.toEqual({
+		jsonrpc: '2.0',
+		id: null,
+		error: {
+			code: -32603,
+			message: 'Internal error',
+		},
+	})
+	expect(captureException).toHaveBeenCalledTimes(4)
+
+	const batchResponse = await workerFetch(
+		new Request('https://heykody.dev/mcp', {
+			method: 'POST',
+			headers: {
+				Authorization: 'Bearer test-token',
+				'Content-Type': 'application/json',
+				Accept: 'application/json, text/event-stream',
+			},
+			body: JSON.stringify([
+				{ jsonrpc: '2.0', id: 1, method: 'ping' },
+				{ jsonrpc: '2.0', method: 'notifications/cancelled' },
+			]),
+		}),
+	)
+	expect(batchResponse.status).toBe(500)
+	await expect(batchResponse.json()).resolves.toEqual([
+		{
+			jsonrpc: '2.0',
+			id: 1,
+			error: {
+				code: -32603,
+				message: 'Internal error',
+			},
+		},
+	])
+	expect(captureException).toHaveBeenCalledTimes(5)
+
+	mcpThrow.mockRestore()
 	captureException.mockRestore()
 })
 
@@ -1085,8 +1353,11 @@ function resetSucceeded(
 }
 
 test("reset client revokes only this user's matching grants and deletes only owned client registrations", async () => {
-	const userId = await createStableUserIdFromEmail('user@example.com')
-	const sharedClientDb = await createDatabase('password123')
+	const userId = testStableUserIdFromEmail('user@example.com')
+	const sharedClientWrites: Array<{ query: string; bound: Array<unknown> }> = []
+	const sharedClientDb = await createDatabase('password123', {
+		writes: sharedClientWrites,
+	})
 	const cookie = await sessionCookie()
 	const invalidRedirectUrl = exampleOAuthUrl('authorize', {
 		client_id: 'client-123',
@@ -1161,8 +1432,10 @@ test("reset client revokes only this user's matching grants and deletes only own
 		[['grant-owned', 'client-123', 'profile']],
 		redirectUriMismatchMessage,
 	)
+	const ownedClientWrites: Array<{ query: string; bound: Array<unknown> }> = []
 	const ownedClientDb = await createDatabase('password123', {
 		ownedClientIds: ['client-123'],
+		writes: ownedClientWrites,
 	})
 	expect(
 		await resetClient(invalidRedirectUrl, ownedClient, ownedClientDb, cookie),
@@ -1173,6 +1446,21 @@ test("reset client revokes only this user's matching grants and deletes only own
 			['client-123'],
 		),
 	)
+
+	// MCP event subscriptions follow the grants: a shared client only loses
+	// this user's rows; a deleted owned registration loses all of them.
+	const mcpEventDeletes = (
+		writes: Array<{ query: string; bound: Array<unknown> }>,
+	) =>
+		writes
+			.filter((write) => write.query.includes('mcp_event_subscriptions'))
+			.map((write) => write.bound)
+	expect(mcpEventDeletes(sharedClientWrites)).toEqual([
+		['client-123', userId],
+		['client-123', userId],
+		['client-123', userId],
+	])
+	expect(mcpEventDeletes(ownedClientWrites)).toEqual([['client-123']])
 })
 
 test('reset client rejects requests without a stale or mismatched client registration', async () => {

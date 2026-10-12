@@ -34,6 +34,8 @@ import {
 import { describeEmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
 import { formatUsageLimit, formatUsagePercent } from './admin-users-shared.ts'
 import { AdminUserCreditsPanel } from './admin-users-credits.tsx'
+import { AdminOrgLimitsPanel } from './admin-users-limits.tsx'
+import { AdminUserDestinationPanel } from './admin-users-destination-panel.tsx'
 import {
 	costVsPayFootnote,
 	formatDynamicWorkerUsd,
@@ -385,9 +387,13 @@ export function renderAdminUserDetail(props: AdminUserDetailProps) {
 					) : null}
 				</AccountManagementPanel>
 			) : null}
+			<AdminUserDestinationPanel
+				key={selectedUser.stableUserId}
+				stableUserId={selectedUser.stableUserId}
+			/>
 			<AccountManagementPanel
 				title="Manage plan"
-				description="Sets the admin grant (users.plan). Ordinary Stripe subscribers keep this as free; their paid tier lives on the subscription plan. The effective plan is the higher of the two."
+				description="Sets the admin grant (orgs.plan on the personal org). Ordinary Stripe subscribers keep this as free; their paid tier lives on the subscription plan. The effective plan is the higher of the two."
 			>
 				<div
 					mix={css({
@@ -443,6 +449,10 @@ export function renderAdminUserDetail(props: AdminUserDetailProps) {
 				key={selectedUser.stableUserId}
 				stableUserId={selectedUser.stableUserId}
 				onGranted={props.onCreditsGranted}
+			/>
+			<AdminOrgLimitsPanel
+				key={`limits-${selectedUser.stableUserId}`}
+				orgId={selectedUser.stableUserId}
 			/>
 			<AccountManagementPanel
 				title="Moderation"

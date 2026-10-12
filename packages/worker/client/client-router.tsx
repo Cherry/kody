@@ -1,19 +1,14 @@
 import { type Handle } from 'remix/component'
 import { createMultiMatcher } from 'remix/route-pattern/match'
 import { type AppLoaderData } from '#universal/loader-data.ts'
-import {
-	persistentShellNavSelector,
-	shouldUseViewTransition,
-} from '#universal/navigation-motion.ts'
-export {
-	persistentShellNavSelector,
-	shouldUseViewTransition,
-	isSameShellAreaNavigation,
-} from '#universal/navigation-motion.ts'
+import { isOnboardingPagePath } from '#universal/onboarding-process.ts'
+import { isSamePackageRepoChromeHref } from '#universal/package-files.ts'
+import { isProfilePathname } from '#universal/profile-path.ts'
 import { isProfilePackageFilterOnlyHrefChange } from '#universal/profile-search.ts'
 import { clearOnboardingPayloadCache } from '#client/routes/onboarding-payload.ts'
-import { applyDocumentHead } from './document-head.ts'
+import { prepareDocumentHead } from './document-head.ts'
 import { installFileDropNavigationGuard } from './file-drop-navigation.ts'
+import { syncPasswordManagerPageIgnore } from './password-manager-page-ignore.ts'
 import {
 	abortIntentPrefetch,
 	prefetchEachRouteOnRender,
@@ -112,6 +107,63 @@ export function syncLastNotifiedDocumentPath() {
 	lastNotifiedDocumentPath = getCurrentDocumentPath()
 }
 
+/**
+ * Areas whose pages sit inside a persistent shell (a sticky rail beside the
+ * content). Moving between them is tab switching, not page-to-page
+ * navigation: it is frequent, the chrome around the content does not change,
+ * and the rail is a full-height element whose box tracks the page — so a
+ * transition would scale its snapshot between two different heights and the
+ * rail would visibly squash. These navigations swap instantly.
+ *
+ * `/docs` is the same kind of shell: the sidebar lives inside `<main>`
+ * (`view-transition-name: page`), so a page transition would fade and slide
+ * unchanged nav chrome on every guide click.
+ */
+const shellAreas = ['/account', '/admin', '/docs']
+
+/**
+ * Live persistent-shell chrome. Present only while a shell page is on
+ * screen — account/admin rail or the docs sidebar.
+ */
+export const persistentShellNavSelector = '[data-account-nav], [data-docs-nav]'
+
+function isWithinArea(pathname: string, area: string) {
+	return pathname === area || pathname.startsWith(`${area}/`)
+}
+
+function pathnameOf(path: string) {
+	return path.split('?')[0] ?? ''
+}
+
+function isShellAreaPath(path: string) {
+	const pathname = pathnameOf(path)
+	return shellAreas.some((area) => isWithinArea(pathname, area))
+}
+
+/** Both paths may carry a search string; only the pathname decides the area. */
+export function isSameShellAreaNavigation(from: string | null, to: string) {
+	if (!from) return false
+	return shellAreas.some(
+		(area) =>
+			isWithinArea(pathnameOf(from), area) &&
+			isWithinArea(pathnameOf(to), area),
+	)
+}
+
+function isSameOnboardingNavigation(from: string | null, to: string) {
+	if (!from) return isOnboardingPagePath(pathnameOf(to))
+	return (
+		isOnboardingPagePath(pathnameOf(from)) &&
+		isOnboardingPagePath(pathnameOf(to))
+	)
+}
+
+function isSameProfilePathnameNavigation(from: string | null, to: string) {
+	if (from == null) return false
+	const fromPathname = pathnameOf(from)
+	return fromPathname === pathnameOf(to) && isProfilePathname(fromPathname)
+}
+
 export function documentHasPersistentShell(
 	root: {
 		querySelector: (selector: string) => Element | null
@@ -120,8 +172,60 @@ export function documentHasPersistentShell(
 	return Boolean(root?.querySelector(persistentShellNavSelector))
 }
 
-function swapDom(onSwapped?: () => void) {
+/**
+ * View transitions are for real page changes. Tab switches inside a
+ * persistent shell stay instant — even when `from` was never recorded
+ * (first click after a full document load used to animate because
+ * `lastNotifiedDocumentPath` was still null).
+ */
+export function shouldUseViewTransition(input: {
+	from: string | null
+	to: string
+	canStart: boolean
+	prefersReducedMotion: boolean
+	hasPersistentShell?: boolean
+	historyAction?: RouterHistoryAction
+}) {
+	if (!input.canStart) return false
+	if (input.prefersReducedMotion) return false
+	// Back/Forward lands on a page the user already saw, at its saved scroll
+	// position. Fading and sliding it in reads as the page moving into place.
+	if (input.historyAction === 'pop') return false
+	if (input.from === input.to) return false
+	if (isSameShellAreaNavigation(input.from, input.to)) return false
+	if (isSameOnboardingNavigation(input.from, input.to)) return false
+	if (isSameProfilePathnameNavigation(input.from, input.to)) return false
+	if (input.from != null && isSamePackageRepoChromeHref(input.from, input.to)) {
+		return false
+	}
+	// Full document load never recorded `from`. If the rail is already on
+	// screen and the destination is still a shell page, this is a tab click.
+	if (
+		input.from === null &&
+		input.hasPersistentShell &&
+		isShellAreaPath(input.to)
+	) {
+		return false
+	}
+	return true
+}
+
+type SwapHooks = {
+	historyAction?: RouterHistoryAction
+	/**
+	 * Runs in the same task as the DOM update — inside the view transition
+	 * update callback, after the old snapshot was captured.
+	 */
+	beforeSwap?: () => void
+	onSwapped?: () => void
+}
+
+function swapDom({ beforeSwap, onSwapped }: SwapHooks) {
+	beforeSwap?.()
 	lastNotifiedDocumentPath = getCurrentDocumentPath()
+	// `<body>` is outside `#root`, so SPA navigations must add or remove
+	// 1Password's page ignore as the route changes.
+	syncPasswordManagerPageIgnore(window.location.pathname)
 	// First SPA swap onward: suppresses the [data-rise] page-open
 	// choreography (public/styles.css) — the view transition is the
 	// entrance for SPA navigations.
@@ -157,7 +261,7 @@ const viewTransitionScheduler = createViewTransitionScheduler(
 	resolveViewTransitionStarter,
 )
 
-function notify(onSwapped?: () => void) {
+function notify(hooks: SwapHooks = {}) {
 	const to = getCurrentDocumentPath()
 	if (
 		!shouldUseViewTransition({
@@ -167,18 +271,19 @@ function notify(onSwapped?: () => void) {
 			prefersReducedMotion: matchMedia('(prefers-reduced-motion: reduce)')
 				.matches,
 			hasPersistentShell: documentHasPersistentShell(),
+			historyAction: hooks.historyAction,
 		})
 	) {
 		// Instant path: drop any in-flight/queued VT so a superseded chain
 		// step cannot restart a transition after this swap.
 		viewTransitionScheduler.cancelPending()
-		void swapDom(onSwapped)
+		void swapDom(hooks)
 		return
 	}
 	// Serialize superseding navigations: skip the active animation, then wait
 	// for its update callback to settle before starting the next transition
 	// (Chrome InvalidStateError / unhandledrejection — KODY-CLOUDFLARE-3Y).
-	viewTransitionScheduler.run(() => swapDom(onSwapped))
+	viewTransitionScheduler.run(() => swapDom(hooks))
 }
 
 function createNavigationEventDetail(
@@ -644,38 +749,39 @@ function shouldReplaceHistory(options?: NavigationRunOptions) {
 	return options?.replace === true || options?.historyAction === 'replace'
 }
 
-function commitNavigation(nextPath: string, onSwapped?: () => void) {
+function commitNavigation(nextPath: string, hooks?: SwapHooks) {
 	window.history.pushState(
 		createScrollRestorationHistoryState(window.history.state),
 		'',
 		nextPath,
 	)
-	notify(onSwapped)
+	notify(hooks)
 }
 
-function commitReplaceNavigation(nextPath: string, onSwapped?: () => void) {
+function commitReplaceNavigation(nextPath: string, hooks: SwapHooks) {
 	window.history.replaceState(
 		createScrollRestorationHistoryState(window.history.state),
 		'',
 		nextPath,
 	)
-	notify(onSwapped)
+	notify(hooks)
 }
 
 function commitHistory(
 	nextPath: string,
-	options?: NavigationRunOptions,
-	onSwapped?: () => void,
+	options: NavigationRunOptions | undefined,
+	hooks: Omit<SwapHooks, 'historyAction'>,
 ) {
+	const swapHooks = { ...hooks, historyAction: options?.historyAction }
 	if (options?.skipPushState) {
-		notify(onSwapped)
+		notify(swapHooks)
 		return
 	}
 	if (shouldReplaceHistory(options)) {
-		commitReplaceNavigation(nextPath, onSwapped)
+		commitReplaceNavigation(nextPath, swapHooks)
 		return
 	}
-	commitNavigation(nextPath, onSwapped)
+	commitNavigation(nextPath, swapHooks)
 }
 
 function commitImmediateNavigation(
@@ -713,6 +819,15 @@ async function runNavigationWithLoader(
 
 	const nextPath = getPathWithSearchAndHashFromUrl(destination)
 	const navigationEndDetail = createNavigationEventDetail(nextPath, options)
+	// The SPA cannot commit this destination intact (route chunk or route
+	// stylesheet missing): recover with a full document navigation.
+	const leaveForDocument = () => {
+		dispatchNavigationEnd({
+			...navigationEndDetail,
+			preventScrollReset: true,
+		})
+		window.location.assign(nextPath)
+	}
 	const loader = matchRouteLoader(destination)
 	activeNavigationPath = nextPath
 	const timeoutId = globalThis.setTimeout(() => {
@@ -781,11 +896,24 @@ async function runNavigationWithLoader(
 		if (signal.aborted) return
 
 		if (chunkLoadFailed) {
-			dispatchNavigationEnd({
-				...navigationEndDetail,
-				preventScrollReset: true,
-			})
-			window.location.assign(nextPath)
+			leaveForDocument()
+			return
+		}
+
+		// Document head lives outside the hydrated `#root` tree, so SSR
+		// `<title>` / OG / canonical tags would otherwise stick across SPA
+		// navigations. Resolve from the shared registry (+ loader data for
+		// dynamic routes) here so every route stays in sync without per-page
+		// wiring.
+		const commitHead = await prepareDocumentHead(
+			destination.pathname,
+			loadedData,
+			destination.search,
+			signal,
+		)
+		if (signal.aborted) return
+		if (!commitHead) {
+			leaveForDocument()
 			return
 		}
 
@@ -796,15 +924,10 @@ async function runNavigationWithLoader(
 			setPreloadedNavigationData(nextPath, loadedData)
 		}
 
-		// Document head lives outside the hydrated `#root` tree, so SSR
-		// `<title>` / OG / canonical tags would otherwise stick across SPA
-		// navigations. Resolve from the shared registry (+ loader data for
-		// dynamic routes) here so every route stays in sync without per-page
-		// wiring.
-		applyDocumentHead(destination.pathname, loadedData, destination.search)
-
-		const finish = () => dispatchNavigationEnd(navigationEndDetail)
-		commitHistory(nextPath, options, finish)
+		commitHistory(nextPath, options, {
+			beforeSwap: commitHead,
+			onSwapped: () => dispatchNavigationEnd(navigationEndDetail),
+		})
 	} catch {
 		// Promise.all rejects as soon as the loader fails, even if the lazy chunk
 		// retry is still pending. Do not commit under the destination URL until
@@ -816,11 +939,18 @@ async function runNavigationWithLoader(
 		if (chunkLoadFailed) {
 			// The loader also failed, but the missing chunk is what makes SPA
 			// commit impossible — recover with a full document navigation.
-			dispatchNavigationEnd({
-				...navigationEndDetail,
-				preventScrollReset: true,
-			})
-			window.location.assign(nextPath)
+			leaveForDocument()
+			return
+		}
+		const commitHead = await prepareDocumentHead(
+			destination.pathname,
+			undefined,
+			destination.search,
+			signal,
+		)
+		if (signal.aborted) return
+		if (!commitHead) {
+			leaveForDocument()
 			return
 		}
 		// The loader failed, so no preloaded data exists for the committed
@@ -828,9 +958,10 @@ async function runNavigationWithLoader(
 		// current URL) have no href change to trigger a route's fallback
 		// refetch, so mark the destination stale for routes to consume.
 		markNavigationDataStale(nextPath)
-		applyDocumentHead(destination.pathname, undefined, destination.search)
-		const finish = () => dispatchNavigationEnd(navigationEndDetail)
-		commitHistory(nextPath, options, finish)
+		commitHistory(nextPath, options, {
+			beforeSwap: commitHead,
+			onSwapped: () => dispatchNavigationEnd(navigationEndDetail),
+		})
 	} finally {
 		globalThis.clearTimeout(timeoutId)
 		// A superseding navigation owns the marker now; only clear our own.
@@ -1022,6 +1153,7 @@ function ensureRouter() {
 	routerInitialized = true
 	ensureCurrentScrollRestorationKey()
 	lastNotifiedDocumentPath = getCurrentDocumentPath()
+	syncPasswordManagerPageIgnore(window.location.pathname)
 	window.addEventListener('popstate', handlePopState)
 	document.addEventListener('click', handleDocumentClick)
 	document.addEventListener('submit', handleDocumentSubmit)

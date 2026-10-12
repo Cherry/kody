@@ -1,11 +1,13 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import {
 	decryptWebhookUrlSecret,
 	userWebhookUrlSecretContext,
 } from '#mcp/secrets/crypto.ts'
+import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
 import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
 import { hashWebhookUrlSecret } from './crypto.ts'
@@ -19,53 +21,69 @@ import {
 	rotateWebhookUrlForUser,
 	setWebhookEnabledForUser,
 } from './service.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
-vi.mock('#mcp/secrets/service.ts', () => ({
-	resolveSecret: vi.fn(async () => ({
+vi.mock('#mcp/secrets/service.ts', () => {
+	const resolveSecret = vi.fn(async (_input: unknown) => ({
 		found: true,
+		credentialId: 'cred-legacy-webhook-secret',
 		value: 'legacy-sentry-webhook-secret',
 		allowedHosts: [],
+		allowedPackages: ['pkg-1'],
 		scope: 'user',
-	})),
-}))
+	}))
+	return {
+		resolveSecret,
+		findSecretForUse: vi.fn(async (input: unknown) => {
+			const resolved = await resolveSecret(input)
+			const { value: _value, ...found } = resolved
+			return { found, readValue: async () => resolved }
+		}),
+	}
+})
 
 vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
-	resolveSavedPackage: vi.fn(async (input: { packageIdOrKodyId: string }) => {
-		if (
-			input.packageIdOrKodyId === 'pkg-1' ||
-			input.packageIdOrKodyId === 'sentry-bridge'
-		) {
-			return {
-				id: 'pkg-1',
-				kodyId: 'sentry-bridge',
-				name: '@owner/sentry-bridge',
-				userId: 'ignored',
-				sourceId: 'src-1',
+	resolveSavedPackage: vi.fn(
+		async (input: { userId: string; packageIdOrKodyId: string }) => {
+			if (
+				input.packageIdOrKodyId === 'pkg-1' ||
+				input.packageIdOrKodyId === 'sentry-bridge'
+			) {
+				return {
+					id: 'pkg-1',
+					kodyId: 'sentry-bridge',
+					name: '@owner/sentry-bridge',
+					userId: input.userId,
+					sourceId: 'src-1',
+				}
 			}
-		}
-		return null
-	}),
+			return null
+		},
+	),
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
-	listSavedPackagesByUserId: vi.fn(async () => [
-		{
-			id: 'pkg-1',
-			userId: 'will-set',
-			name: '@owner/sentry-bridge',
-			kodyId: 'sentry-bridge',
-			description: 'Sentry bridge',
-			tags: [],
-			searchText: null,
-			sourceId: 'src-1',
-			hasApp: false,
-			hidden: false,
-			isPrivate: true,
-			createdAt: '2026-07-24T00:00:00.000Z',
-			updatedAt: '2026-07-24T00:00:00.000Z',
-		},
-	]),
-	getSavedPackageByKodyId: vi.fn(),
+	listSavedPackagesByUserId: vi.fn(
+		async (_db: unknown, input: { userId: string }) => [
+			{
+				id: 'pkg-1',
+				userId: ownerIdFromStored(input.userId),
+				name: '@owner/sentry-bridge',
+				kodyId: 'sentry-bridge',
+				description: 'Sentry bridge',
+				tags: [],
+				searchText: null,
+				sourceId: 'src-1',
+				hasApp: false,
+				hidden: false,
+				isPrivate: true,
+				createdAt: '2026-07-24T00:00:00.000Z',
+				updatedAt: '2026-07-24T00:00:00.000Z',
+			},
+		],
+	),
+	resolveSavedPackageRef: vi.fn(),
 }))
 
 vi.mock('#worker/package-registry/source.ts', () => ({
@@ -98,49 +116,22 @@ vi.mock('#worker/package-registry/source.ts', () => ({
 
 function createEnv() {
 	const sqlite = new DatabaseSync(':memory:')
-	// Mirrors the webhook_endpoints schema in
-	// packages/worker/migrations/0001-squashed-init.sql.
-	sqlite.exec(`
-		CREATE TABLE webhook_endpoints (
-			id TEXT PRIMARY KEY,
-			user_id TEXT NOT NULL,
-			package_id TEXT NOT NULL,
-			webhook_name TEXT NOT NULL,
-			url_secret_hash TEXT NOT NULL,
-			url_secret_encrypted TEXT,
-			hmac_secret_encrypted TEXT,
-			previous_url_secret_hash TEXT,
-			previous_url_secret_expires_at TEXT,
-			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-			created_at TEXT NOT NULL,
-			rotated_at TEXT NOT NULL
-		);
-		CREATE UNIQUE INDEX idx_webhook_endpoints_user_package_name
-		ON webhook_endpoints(user_id, package_id, webhook_name);
-		CREATE INDEX idx_webhook_endpoints_user_created_at
-		ON webhook_endpoints(user_id, created_at);
-		CREATE TABLE users (
-			id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-			username TEXT NOT NULL UNIQUE,
-			email TEXT NOT NULL UNIQUE,
-			password_hash TEXT NOT NULL,
-			stable_user_id TEXT NOT NULL
-		);
-	`)
+	applyAllMigrations(sqlite, new URL('../../migrations/', import.meta.url))
 	const db = createD1FromSqlite(sqlite)
 	const env = {
 		APP_DB: db,
 		APP_BASE_URL: 'https://heykody.dev',
 		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
-	} as Env
-	return { env, db }
+		SENTRY_ENVIRONMENT: 'test',
+	} as unknown as Env
+	return { env, db, sqlite }
 }
 
 const sentryHook = { kodyId: 'sentry-bridge', webhookName: 'sentry' }
 
 async function setupOwner(email: string, username: string) {
-	const userId = await createStableUserIdFromEmail(email)
-	const { env, db } = createEnv()
+	const userId = testStableUserIdFromEmail(email)
+	const { env, db, sqlite } = createEnv()
 	await db
 		.prepare(
 			`INSERT INTO users (username, email, password_hash, stable_user_id)
@@ -148,7 +139,17 @@ async function setupOwner(email: string, username: string) {
 		)
 		.bind(username, email, userId)
 		.run()
-	const input = { env, userId, username, ...sentryHook }
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId: userId,
+		username,
+	})
+	const input = {
+		env,
+		request: sessionRequestContext(userId),
+		userId: ownerIdFromStored(userId),
+		username,
+		...sentryHook,
+	}
 	return {
 		env,
 		db,
@@ -158,8 +159,9 @@ async function setupOwner(email: string, username: string) {
 		list: (forUserId = userId) =>
 			listWebhooksForUser({
 				env,
+				request: sessionRequestContext(forUserId),
 				baseUrl: 'https://heykody.dev',
-				userId: forUserId,
+				userId: ownerIdFromStored(forUserId),
 			}),
 		readEndpoint: <T>(endpointId: string, columns: string) =>
 			db
@@ -174,7 +176,7 @@ const urlSecretOf = (url: string) => url.slice(url.lastIndexOf('/') + 1)
 test('mint/list/rotate/enable/disable webhooks are package-centered and user-scoped', async () => {
 	const owner = await setupOwner('owner@example.com', 'owner')
 	const { env, userId } = owner
-	const otherUserId = await createStableUserIdFromEmail('other@example.com')
+	const otherUserId = testStableUserIdFromEmail('other@example.com')
 
 	const listedBefore = await owner.list()
 	expect(listedBefore).toHaveLength(1)
@@ -188,7 +190,8 @@ test('mint/list/rotate/enable/disable webhooks are package-centered and user-sco
 
 	const minted = await mintWebhookUrlForUser({
 		env,
-		userId,
+		request: sessionRequestContext(userId),
+		userId: ownerIdFromStored(userId),
 		email: 'owner@example.com',
 		username: 'owner',
 		...sentryHook,
@@ -207,10 +210,17 @@ test('mint/list/rotate/enable/disable webhooks are package-centered and user-sco
 
 	const reveal = (
 		target: Parameters<typeof revealWebhookUrlForWebsite>[0]['target'],
-	) => revealWebhookUrlForWebsite({ env, userId, username: 'owner', target })
+	) =>
+		revealWebhookUrlForWebsite({
+			env,
+			userId: ownerIdFromStored(userId),
+			username: 'owner',
+			target,
+		})
 	const revealed = await reveal({ handle: minted.handle })
 	expect(revealed.url).toContain('/@owner/webhooks/sentry-bridge/sentry/')
 	expect(revealed.urlHost).toBe('heykody.dev')
+	expect(revealed).not.toHaveProperty('signingSecret')
 	// The account UI addresses a webhook by package + name rather than by
 	// handle; both paths resolve the same minted URL.
 	expect(await reveal(sentryHook)).toMatchObject({
@@ -257,7 +267,7 @@ test('mint/list/rotate/enable/disable webhooks are package-centered and user-sco
 	const rotatedSecret = await decryptWebhookUrlSecret(
 		env,
 		stored!.url_secret_encrypted,
-		userWebhookUrlSecretContext(userId, endpointId),
+		userWebhookUrlSecretContext(ownerIdFromStored(userId), endpointId),
 	)
 	const previousSecret = urlSecretOf(revealed.url)
 	expect(rotatedSecret).not.toBe(previousSecret)
@@ -276,7 +286,8 @@ test('mint/list/rotate/enable/disable webhooks are package-centered and user-sco
 
 	const disabled = await setWebhookEnabledForUser({
 		env,
-		userId,
+		request: sessionRequestContext(userId),
+		userId: ownerIdFromStored(userId),
 		...sentryHook,
 		enabled: false,
 	})
@@ -336,8 +347,12 @@ test('clearing rotate overlap ignores a stale current-hash snapshot', async () =
 })
 
 test('first mint that loses the id race retries with the persisted endpoint id', async () => {
-	const userId = await createStableUserIdFromEmail('race@example.com')
-	const { env, db } = createEnv()
+	const userId = testStableUserIdFromEmail('race@example.com')
+	const { env, db, sqlite } = createEnv()
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId: userId,
+		username: 'racer',
+	})
 	const winnerId = '11111111-1111-1111-1111-111111111111'
 	await db
 		.prepare(
@@ -377,7 +392,8 @@ test('first mint that loses the id race retries with the persisted endpoint id',
 
 	const minted = await mintWebhookUrlForUser({
 		env,
-		userId,
+		request: sessionRequestContext(userId),
+		userId: ownerIdFromStored(userId),
 		email: 'race@example.com',
 		username: 'racer',
 		...sentryHook,
@@ -399,7 +415,7 @@ test('first mint that loses the id race retries with the persisted endpoint id',
 	const mintedSecret = await decryptWebhookUrlSecret(
 		env,
 		stored!.url_secret_encrypted,
-		userWebhookUrlSecretContext(userId, winnerId),
+		userWebhookUrlSecretContext(ownerIdFromStored(userId), winnerId),
 	)
 	expect(stored?.url_secret_hash).toBe(await hashWebhookUrlSecret(mintedSecret))
 
@@ -408,23 +424,96 @@ test('first mint that loses the id race retries with the persisted endpoint id',
 })
 
 test('concurrent first mints converge on one handle', async () => {
-	const userId = await createStableUserIdFromEmail('parallel@example.com')
-	const { env } = createEnv()
+	const userId = testStableUserIdFromEmail('parallel@example.com')
+	const { env, sqlite } = createEnv()
+	await provisionPersonalOrgForSqliteUser(sqlite, {
+		stableUserId: userId,
+		username: 'parallel',
+	})
 	const mint = () =>
-		mintWebhookUrlForUser({ env, userId, username: 'parallel', ...sentryHook })
+		mintWebhookUrlForUser({
+			env,
+			request: sessionRequestContext(userId),
+			userId: ownerIdFromStored(userId),
+			username: 'parallel',
+			...sentryHook,
+		})
 	const [first, second] = await Promise.all([mint(), mint()])
 	expect(first.handle).toBe(second.handle)
 	expect(first.urlHost).toBe('heykody.dev')
 	expect(second).not.toHaveProperty('url')
 })
 
+test.each([
+	{ label: 'no verification', handle: 'signer', verification: {} },
+	{
+		label: 'url-secret verification',
+		handle: 'url-signer',
+		verification: { verification: { type: 'url-secret' } },
+	},
+])(
+	'an unsigned webhook ($label) keeps a stored signing secret that reveal does not expose',
+	async ({ handle, verification }) => {
+		const owner = await setupOwner(`${handle}@example.com`, handle)
+		const { env, userId } = owner
+		const sentryManifest = vi
+			.mocked(loadPackageManifestBySourceId)
+			.getMockImplementation()!
+		const unsignedManifest = async () => ({
+			manifest: {
+				name: '@owner/sentry-bridge',
+				exports: {
+					'./handle-sentry-webhook': './src/handle-sentry-webhook.ts',
+				},
+				kody: {
+					id: 'sentry-bridge',
+					description: 'Sentry bridge',
+					webhooks: [
+						{
+							name: 'sentry',
+							export: './handle-sentry-webhook',
+							responseMode: 'ack',
+							...verification,
+						},
+					],
+				},
+			},
+		})
+		vi.mocked(loadPackageManifestBySourceId).mockImplementation(
+			unsignedManifest as never,
+		)
+		const reveal = () =>
+			revealWebhookUrlForWebsite({
+				env,
+				userId: ownerIdFromStored(userId),
+				username: handle,
+				target: sentryHook,
+			})
+		try {
+			const minted = await owner.mint()
+			const endpointId = parseWebhookUrlHandle(minted.handle)!
+			const stored = await owner.readEndpoint<{
+				hmac_secret_encrypted: string | null
+			}>(endpointId, 'hmac_secret_encrypted')
+			expect(stored?.hmac_secret_encrypted).toBeTruthy()
+			expect(await reveal()).not.toHaveProperty('signingSecret')
+			await owner.rotate()
+			expect(await reveal()).not.toHaveProperty('signingSecret')
+		} finally {
+			vi.mocked(loadPackageManifestBySourceId).mockImplementation(
+				sentryManifest,
+			)
+		}
+	},
+)
+
 test('listing webhooks loads package manifests concurrently', async () => {
-	const userId = await createStableUserIdFromEmail('many@example.com')
+	const userId = testStableUserIdFromEmail('many@example.com')
 	const { env } = createEnv()
 	const kodyIdFor = (index: number) => `many-${String(index).padStart(2, '0')}`
 	const packages = Array.from({ length: 20 }, (_, index) => ({
 		id: `pkg-many-${index}`,
-		userId,
+		userId: ownerIdFromStored(userId),
 		name: `@owner/many-${index}`,
 		kodyId: kodyIdFor(index),
 		description: 'Many',
@@ -432,6 +521,7 @@ test('listing webhooks loads package manifests concurrently', async () => {
 		searchText: null,
 		sourceId: `src-many-${index}`,
 		hasApp: false,
+		hasSkills: false,
 		hidden: false,
 		isPrivate: true,
 		lockedAt: null,
@@ -466,8 +556,9 @@ test('listing webhooks loads package manifests concurrently', async () => {
 
 	const listed = await listWebhooksForUser({
 		env,
+		request: sessionRequestContext(userId),
 		baseUrl: 'https://heykody.dev',
-		userId,
+		userId: ownerIdFromStored(userId),
 	})
 
 	warn.mockRestore()

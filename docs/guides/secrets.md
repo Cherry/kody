@@ -47,9 +47,12 @@ the value is shared with none of them.
 Code refers to a secret by name. Kody substitutes the value at the network
 boundary, on the final serialized request, and only for hosts you approved.
 
-- **Placeholders in `fetch`** — `{{secret:githubAccessToken}}` in a URL, header,
-  or body of an outbound `fetch` resolves when the request leaves Kody. External
-  providers use the same boundary; see
+- **Placeholders in `fetch`** — `{{secret:githubAccessToken}}` anywhere in an
+  outbound HTTPS `fetch` (a header, the URL path or query, or a text body)
+  resolves when the request leaves Kody, if the host is one you approved for
+  that secret. On plain `http://` or an unapproved host the request is refused
+  with an error naming the secret and host; a placeholder is never sent
+  unfilled. External providers use the same boundary; see
   [Custom secret providers](./secret-providers.md). This is not general string
   interpolation; it works only in secret-aware `fetch`.
 - **Derived headers** — when an API wants Basic Auth built from two secrets,
@@ -87,13 +90,13 @@ Saving a secret does not by itself let anything use it.
   forks you adopted after reviewing the source get read/use automatically.
   Unadopted forks need an explicit grant. Updating or deleting a user secret
   from package code always needs the grant. Only the account owner can add a
-  package to that grant on `/account/secrets/user/:name` or
-  `/account/secrets/approve` — a focused Allow page, the same spirit as host
+  package to that grant on `/@<slug>/-/secrets/user/:name` or
+  `/@<slug>/-/secrets/approve` — a focused Allow page, the same spirit as host
   approval on `/connect/secrets`. `secretLock` returns that approval URL for the
   owner to click; it does not change `allowed_packages`. Send the link and wait.
   Removing a grant is also website-only.
 
-Bulk approval URLs (`/account/secrets/approve?package_id=…&names=a,b`) let you
+Bulk approval URLs (`/@<slug>/-/secrets/approve?package_id=…&names=a,b`) let you
 approve several pending secrets for one package in a click.
 
 ## Scopes
@@ -105,6 +108,11 @@ approve several pending secrets for one package in a click.
   outside an active package run. Search does not return or rank those
   references.
 
+A Use collaborator running your package in **your** org uses **your** org's
+secrets and integrations under the same host and package allowlists — they still
+cannot read secret values. Details:
+[Share a package](/docs/package-sharing#secrets-and-integrations-on-a-granted-run).
+
 OAuth access and refresh tokens are different: they live on the integration,
 rotate through `createAuthenticatedFetch`, and do not appear in the secrets
 list. A pasted API key is a secret; a Slack login is an integration. See
@@ -114,7 +122,7 @@ list. A pasted API key is a secret; a Slack login is an integration. See
 
 A secret can carry an expiry (`expires_at`). Expired secrets stay listed with
 `ttl_ms: 0`, and placeholders treat them as missing so Kody stops sending the
-value. Agents prefilling `/account/secrets/new` can set `expiresAt` in the query
+value. Agents prefilling `/connect/secret-set` can set `expiresAt` in the query
 string so the person pastes the token without typing a date.
 
 ## When a token is coarser than the job
@@ -129,7 +137,7 @@ on connected tool servers.
 
 ## Adding a secret
 
-- Pasting a key or PAT: the agent sends you a prefilled `/account/secrets/new`
+- Pasting a key or PAT: the agent sends you a prefilled `/connect/secret-set`
   link; you paste the value into the page, never into chat. URL shape and
   parameters: [Secret setup URL reference](./account-secret-setup.md).
 - Building an integration around one or more secrets:

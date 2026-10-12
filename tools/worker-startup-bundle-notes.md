@@ -114,15 +114,13 @@ Listing-only helpers live in the shared secrets service module
 (resolveSecretListScopeOrder / listSecretBucketsByScope). Runtime does not call
 them, but they sit in the same module as resolve and add a few KB. Share-grant
 import/storage routing added more. secretJwtSign JWA families (HMAC/PSS/ES plus
-extra RSA hashes) add ~0.5KB. Split listing out of service.ts or the share-grant
-runtime path if this budget is raised again.
+extra RSA hashes) add ~0.5KB. Split listing out of service.ts if this budget is
+raised again.
 
 - Package-app `/_assets/*` serving (fingerprinted client module, static assets
-  directory) runs here: local dry-run 3_701_307 bytes. The Remix package-app
-  runtime (mounted-URL dispatch in the wrapper source, runtime resolution, and
-  the deferred-module loader for the vendored remix file set — the ~0.5 MB file
-  set itself stays in `package-app-remix.mjs`) adds ~11 KB: local dry-run
-  3_712_214 bytes.
+  directory) runs here: local dry-run 3_701_307 bytes. Package-app runtime
+  (mounted-URL dispatch in the wrapper source and runtime resolution) adds ~11
+  KB: local dry-run 3_712_214 bytes.
 - emailSend destination resolution (verified extras plus default) lives on the
   shared outbound send path: local dry-run 3_725_245 bytes.
 - Repo/package list marks (`refreshIdentityIconForSource` on `repo.pushed`) add
@@ -369,7 +367,7 @@ runtime path if this budget is raised again.
 - Startup byte overages no longer fail Static / block Deploy: the checker warns
   and upserts a deduped GitHub tracking issue on main CI pushes instead.
 - Drop unused Zod v4 locale barrels from Worker bundles
-  (`patches/zod+4.4.3.patch`): `zod/v4/classic/external.js` re-exports
+  (`patches/zod+4.6.5.patch`): `zod/v4/classic/external.js` re-exports
   `../locales/index.js`, which previously pulled ~50 locale modules into every
   Worker that imports `zod`. Kody only applies English via that classic entry.
   Local dry-run runtime 3_720_975 against the previous 3_914_000 budget (closes
@@ -382,3 +380,55 @@ runtime path if this budget is raised again.
   carries those templates or the rewrite AST walk. Clears #2831 overage
   (measured 5_123_062). Local dry-run platform 5_104_954 against the previous
   5_108_000 budget, reviewed ceiling 5_106_000.
+- Teams access (grants, invites, members, teams), org soft-delete, and org
+  billing sit on the platform entry. Those domains already load through dynamic
+  import() in `builtin-domains.ts`, which defers startup CPU, and esbuild keeps
+  the modules in this same entry. Local dry-run 5_118_387 against the previous
+  5_106_000 budget (#3092). Reviewed ceiling 5_120_000.
+- Credentials, orgs, entitlements, and admin MCP work since that teams ceiling
+  (#3122, `02d71171e`) landed on the platform and runtime entries. A rebuild of
+  that SHA with this checker measures platform 5_064_015 and runtime 3_627_141.
+  The ledger's 5_118_387 for the same SHA does not reproduce here;
+  `packages/shared` grew only ~0.6 KB, so that gap is not the shared package.
+  Entry growth from that rebuild to `c225c1136` is platform +160_156 and runtime
+  +146_603, in code those entries already evaluate. esbuild keeps MCP capability
+  domains in the same entry (dynamic `import()` defers startup CPU only), and
+  the fetch gateway, package codemod registry, entitlements, and package runtime
+  are static. Largest clusters on both workers: MCP capabilities (admin
+  enablements migrate and importable-artifact backfill, secret placement, echo
+  redaction, org/access/repo updates, downstream MCP truncation) ~38–44 KB; orgs
+  (offboarding, soft-delete, repo) ~16 KB; enablements backfill ~15 KB;
+  `resolveCredential` plus placement and audit ~11 KB; codemod `0010` on the
+  existing codemod registry ~10 KB; entitlements (plans, limit overrides, meter,
+  execute admission on platform) ~11–15 KB; package runtime and
+  hub/email/integrations the rest. No one import is accidental or large enough
+  to remove without splitting that graph. Local dry-run matches CI on
+  `c225c1136`: platform 5_224_171 against the previous 5_120_000 budget, runtime
+  3_773_744 against the previous 3_722_000 budget (still the Zod-locale ceiling;
+  #3122 did not remeasure runtime). Reviewed ceilings platform 5_226_000 and
+  runtime 3_775_000.
+- Enablements run-as-enabler (#3334) merged to main after that measurement and
+  before the #3360 squash (`dd443918e`, parent `e3437fec5`). It sits on both
+  entries with subscription dispatch, jobs, request context, and webhook
+  delivery. `resolveCredential` shrank when raw credential slots reverted
+  (#3351). Local dry-run of `ff1a50c84`: platform 5_242_175 (+18_004 over the
+  5_224_171 measurement, 16_175 over the 5_226_000 ceiling) and runtime
+  3_791_764 (+18_020 over 3_773_744, 16_764 over the 3_775_000 ceiling).
+  Reviewed ceilings platform 5_244_000 and runtime 3_793_500.
+- Org resource transfer (`adminOrgResourceTransfer`, `org-transfer/`, codemod
+  `0011`) adds platform +42_788 (5_296_799 → 5_339_587) and runtime +40_776
+  (4_000_556 → 4_041_332) over main `763ceeba1`, which was already over both
+  ceilings. The engine sits in the lazily evaluated admin capability domain, so
+  it adds bytes, not startup CPU. Ceilings unchanged; main's existing overage
+  issues track the reset.
+- Reset under both ceilings without raising them (#3367, #3368). The Ajv MCP
+  output validator is test-only and moved to `test-support/` (production tools
+  type-import `mcp-tool-output.ts`, which kept its top-level validator on
+  runtime, about 145 KB with ajv's deps). postal-mime and codemode's
+  acorn-backed `normalizeCode` load from deferred additional modules, and
+  `patches/acorn+8.17.0.patch` marks acorn side-effect free (about 80 KB and 123
+  KB on each entry). Local dry-run of main `40280a610`: platform 5_328_864 and
+  runtime 4_029_466. After: platform 5_124_654 and runtime 3_680_395.
+  `wrangler check startup` best-of-3 active CPU drops from about 116 to about
+  104–112 ms on platform and from about 63 to about 57–58 ms on runtime.
+  Ceilings unchanged.

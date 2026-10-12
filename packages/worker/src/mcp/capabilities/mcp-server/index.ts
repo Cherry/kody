@@ -9,9 +9,9 @@ import {
 } from '#mcp/capabilities/synthesized-domain.ts'
 import { type Capability, type DomainSpec } from '#mcp/capabilities/types.ts'
 import { wrapDownstreamMcpToolResult } from '#mcp/downstream-mcp-result.ts'
-import { resolveCallerSecretAuthority } from '#mcp/secrets/secret-authority.ts'
-import { createMcpClientHubClient } from '#worker/mcp-client/hub-client.ts'
-import { assertCanUseMcpServer } from '#worker/mcp-client/package-access.ts'
+import { attestedPackageStampFromCaller } from '#worker/credentials/package-stamp.ts'
+import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	mcpServerCapabilityId,
 	mcpServerDomainId,
@@ -78,6 +78,7 @@ function createCapabilityFromTool(input: {
 			`MCP server tool ${tool.name}.`,
 		keywords: buildKeywords(tool, ref),
 		...annotationHints,
+		orgPermission: 'integration:use',
 		source: 'mcp-server',
 		mcpServer: {
 			serverId: ref.serverId,
@@ -89,8 +90,8 @@ function createCapabilityFromTool(input: {
 		inputSchema: tool.inputSchema ?? { type: 'object', properties: {} },
 		...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
 		async handler(args, ctx) {
-			const userId = ctx.callerContext.user?.userId
-			if (!userId) {
+			const orgUserId = ownerIdFromCaller(ctx.callerContext)
+			if (!orgUserId) {
 				throw new McpCallerError(
 					`MCP server capability "${ref.name}:${tool.name}" requires an authenticated user.`,
 				)
@@ -99,26 +100,25 @@ function createCapabilityFromTool(input: {
 			// callerContext (no storageContext.packageId). The bundler stamp
 			// installs ALS secret authority for the callee package id; honor
 			// that so mcpServerLock grants still allow the approved package.
-			const { authorityPackageId } = resolveCallerSecretAuthority({
+			const { packageStamp } = attestedPackageStampFromCaller({
 				storageContext: ctx.callerContext.storageContext,
 			})
-			await assertCanUseMcpServer({
+			const connection = await resolveCredential({
 				env: ctx.env,
+				orgId: orgUserId,
+				actor: ctx.callerContext.request,
+				packageStamp,
 				baseUrl: ctx.callerContext.baseUrl,
-				userId,
-				serverId: binding.serverId,
-				serverName: ref.name,
-				packageId: authorityPackageId,
-			})
-			const hub = createMcpClientHubClient({
-				env: ctx.env,
-				userId,
-				waitUntil: ctx.waitUntil,
-			})
-			let result: Awaited<ReturnType<typeof hub.callTool>>
-			try {
-				result = await hub.callTool({
+				credential: {
+					use: 'mcp-connection',
 					serverId: binding.serverId,
+					serverName: ref.name,
+					waitUntil: ctx.waitUntil,
+				},
+			})
+			let result: Awaited<ReturnType<typeof connection.callTool>>
+			try {
+				result = await connection.callTool({
 					toolName: tool.name,
 					args: (args ?? {}) as Record<string, unknown>,
 				})
@@ -128,7 +128,7 @@ function createCapabilityFromTool(input: {
 				// Keep those on mcp-event; they are not Kody platform defects.
 				const status = await getMcpServerStatus({
 					env: ctx.env,
-					userId,
+					userId: orgUserId,
 					ref,
 				}).catch(() => null)
 				if (status && (!status.ready || status.toolCount === 0)) {

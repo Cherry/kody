@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as CloudflareWorkers from 'cloudflare:workers'
 import type * as PushSubscriptions from './artifacts-push-subscriptions.ts'
@@ -36,7 +37,7 @@ const { ensureEntitySource } = await import('./source-service.ts')
 function createEntitySourceRow() {
 	return {
 		id: 'source-1',
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		entity_kind: 'package',
 		entity_id: 'package-1',
 		repo_id: 'package-package-1',
@@ -155,9 +156,9 @@ test('ensureEntitySource workflow: fail-closed, bootstrap, recreate missing repo
 		ensureEntitySource({
 			db: empty.db,
 			env: { APP_DB: empty.db } as Env,
-			userId: 'user-1',
-			entityKind: 'job',
-			entityId: 'job-1',
+			userId: ownerIdFromStored('user-1'),
+			entityKind: 'package',
+			entityId: 'pkg-new',
 			sourceRoot: '/',
 			requirePersistence: true,
 		}),
@@ -166,24 +167,25 @@ test('ensureEntitySource workflow: fail-closed, bootstrap, recreate missing repo
 	)
 	expect(empty.runs).toEqual([])
 
-	const newJob = makeDb(null)
-	const newJobFetch = mockArtifactsFetch('job-job-1', true)
+	const newPackage = makeDb(null)
+	const newPackageFetch = mockArtifactsFetch('package-pkg-new', true)
 	const serverTiming: Array<{ name: string; durationMs: number }> = []
 	const newSource = await ensureEntitySource({
-		db: newJob.db,
-		env: artifactsEnv(newJob.db),
-		userId: 'user-1',
-		entityKind: 'job',
-		entityId: 'job-1',
+		db: newPackage.db,
+		env: artifactsEnv(newPackage.db),
+		userId: ownerIdFromStored('user-1'),
+		entityKind: 'package',
+		entityId: 'pkg-new',
 		sourceRoot: '/',
 		serverTiming,
 	})
-	expect(newJobFetch).toHaveBeenCalledTimes(2)
-	expect(newJob.runs).toEqual([
+	expect(newPackageFetch).toHaveBeenCalledTimes(2)
+	expect(newPackage.runs).toEqual([
 		expect.stringContaining('INSERT INTO entity_sources'),
 	])
-	expect(newSource.repo_id).toBe('job-job-1')
-	expect(newSource.bootstrapAccess).toEqual(createdAccess('job-job-1'))
+	expect(newSource.repo_id).toBe('package-pkg-new')
+	expect(newSource.manifest_path).toBe('package.json')
+	expect(newSource.bootstrapAccess).toEqual(createdAccess('package-pkg-new'))
 	expect(serverTiming.map((entry) => entry.name)).toEqual([
 		'artifacts-repo-ready',
 		'entity-source-insert',
@@ -194,7 +196,7 @@ test('ensureEntitySource workflow: fail-closed, bootstrap, recreate missing repo
 	const recreate = makeDb(existingRow)
 	const recreateFetch = mockArtifactsFetch('package-package-1', true)
 	const packageInput = {
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		entityKind: 'package',
 		entityId: 'package-1',
 		sourceRoot: '/',

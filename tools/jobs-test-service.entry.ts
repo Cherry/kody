@@ -5,6 +5,9 @@ import {
 } from '../packages/shared/src/jobs/store.ts'
 // Bundled as text by tools/build-jobs-test-service.ts (esbuild `.sql` loader).
 import jobsInitSql from '../packages/jobs-worker/migrations/0001-jobs-init.sql'
+import jobsSoftDeleteSql from '../packages/jobs-worker/migrations/0002-teams-expand-actor-and-soft-delete.sql'
+import jobsEnabledBeforeSoftDeleteSql from '../packages/jobs-worker/migrations/0003-job-enabled-before-soft-delete.sql'
+import jobsDropPreservedSql from '../packages/jobs-worker/migrations/0005-drop-preserved-and-archived-artifacts.sql'
 
 /**
  * Auxiliary worker for the workers-unit vitest pool: the main worker's test
@@ -17,13 +20,26 @@ import jobsInitSql from '../packages/jobs-worker/migrations/0001-jobs-init.sql'
 
 type StubEnv = { JOBS_DB: D1Database }
 
-const schemaStatements = jobsInitSql
-	.split('\n')
-	.filter((line) => !line.trim().startsWith('--'))
-	.join('\n')
-	.split(';')
-	.map((statement) => statement.trim())
-	.filter((statement) => statement.length > 0)
+function migrationStatements(sql: string) {
+	return sql
+		.split('\n')
+		.filter((line) => !line.trim().startsWith('--'))
+		.join('\n')
+		.split(';')
+		.map((statement) => statement.trim())
+		.filter((statement) => statement.length > 0)
+}
+
+const schemaStatements = [
+	// 0005 drops `jobs.preserved` and this index. Re-applying 0001 cannot
+	// recreate the index once the column is gone, and tests do not query it.
+	...migrationStatements(jobsInitSql).filter(
+		(statement) => !/idx_jobs_retention_candidates/i.test(statement),
+	),
+	...migrationStatements(jobsSoftDeleteSql),
+	...migrationStatements(jobsEnabledBeforeSoftDeleteSql),
+	...migrationStatements(jobsDropPreservedSql),
+]
 
 // Runs on every call (not memoized): the pool's isolated storage can reset
 // the aux worker's D1 between tests while module state survives.
@@ -32,7 +48,22 @@ async function ensureSchema(db: D1Database) {
 		try {
 			await db.prepare(statement).run()
 		} catch (error) {
-			if (!String(error).includes('already exists')) throw error
+			const message = String(error)
+			// 0005 drops `jobs.preserved` on every call. SQLite has no
+			// DROP COLUMN IF EXISTS, so the repeat is "no such column".
+			// Do not swallow that error from earlier statements (0002
+			// updates archived columns); a missing column there is drift.
+			const repeatedColumnDrop =
+				message.includes('no such column') &&
+				/^alter\s+table\s+\w+\s+drop\s+column\b/i.test(statement)
+			if (
+				message.includes('already exists') ||
+				message.includes('duplicate column name') ||
+				repeatedColumnDrop
+			) {
+				continue
+			}
+			throw error
 		}
 	}
 }
@@ -51,15 +82,10 @@ const storeMethodNames = [
 	'refreshPackageJobIdentity',
 	'deleteJob',
 	'disableExpiredJobsForUser',
-	'listJobRetentionCandidates',
-	'upsertArchivedJobArtifact',
-	'listArchivedJobArtifactsDueBefore',
-	'deleteArchivedJobArtifact',
 	'countJobsForUser',
 	'countJobsBySourceId',
 	'sumJobsStorageBytesForUser',
 	'listJobStorageIdsForUser',
-	'listArchivedJobArtifactsForUser',
 	'listAllJobStorageOwners',
 	'getJobInsights',
 	'purgeUserJobsData',

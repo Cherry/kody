@@ -1,3 +1,4 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { type Handle, css } from 'remix/component'
 import { on } from '#client/event-mixin.ts'
 import { navigate, readCurrentRouterHref } from '#client/client-router.tsx'
@@ -68,12 +69,13 @@ function getDataLatchKey(_href: string) {
 }
 
 export async function accountMcpServersRouteLoader(
-	_url: URL,
+	url: URL,
 	signal: AbortSignal,
 ): Promise<RouteLoaderResult> {
 	const response = await fetch(accountMcpServersApiPath, {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(url.href),
 		signal,
 	})
 	if (response.status === 401) {
@@ -107,10 +109,11 @@ export function AccountMcpServersRoute(handle: Handle) {
 	const serversData = createRouteData({
 		key: 'accountMcpServers',
 		locationKey: getDataLatchKey,
-		async load(_href, signal) {
+		async load(href, signal) {
 			const response = await fetch(accountMcpServersApiPath, {
 				headers: { Accept: 'application/json' },
 				credentials: 'include',
+				referrer: orgAccountApiReferrer(href),
 				signal,
 			})
 			if (response.status === 401) return routeDataRedirect('/login')
@@ -184,8 +187,8 @@ export function AccountMcpServersRoute(handle: Handle) {
 		successMessage: (payload: AccountMcpServersPayload) => string | null
 		failureMessage: string
 		afterSuccess?: (payload: AccountMcpServersPayload) => void
-	}) {
-		if (actionState !== 'idle') return
+	}): Promise<boolean> {
+		if (actionState !== 'idle') return false
 		actionState = 'busy'
 		setMessage(null)
 		handle.update()
@@ -201,7 +204,7 @@ export function AccountMcpServersRoute(handle: Handle) {
 			})
 			if (response.status === 401) {
 				window.location.assign('/login')
-				return
+				return false
 			}
 			const payload = await readJson<
 				AccountMcpServersPayload & { error?: string; ok?: boolean }
@@ -214,6 +217,7 @@ export function AccountMcpServersRoute(handle: Handle) {
 			setMessage(input.successMessage(payload))
 			input.afterSuccess?.(payload)
 			handle.update()
+			return true
 		} catch (error) {
 			actionState = 'idle'
 			usageSavingId = null
@@ -222,6 +226,7 @@ export function AccountMcpServersRoute(handle: Handle) {
 				'error',
 			)
 			handle.update()
+			return false
 		}
 	}
 
@@ -274,6 +279,7 @@ export function AccountMcpServersRoute(handle: Handle) {
 					mcpServersRoute.buildDetailHref(
 						payload.selectedServerId,
 						getCurrentSearch(),
+						getCurrentHref(),
 					),
 				)
 			},
@@ -335,7 +341,12 @@ export function AccountMcpServersRoute(handle: Handle) {
 									if (isMutating) return
 									deleteServerCheck.reset()
 									setMessage(null)
-									navigate(mcpServersRoute.buildNewHref(getCurrentSearch()))
+									navigate(
+										mcpServersRoute.buildNewHref(
+											getCurrentSearch(),
+											getCurrentHref(),
+										),
+									)
 								}),
 								css(primaryButtonCss),
 							]}
@@ -411,7 +422,10 @@ export function AccountMcpServersRoute(handle: Handle) {
 								? {
 										href: isMutating
 											? undefined
-											: mcpServersRoute.buildNewHref(getCurrentSearch()),
+											: mcpServersRoute.buildNewHref(
+													getCurrentSearch(),
+													getCurrentHref(),
+												),
 										label: 'New server',
 									}
 								: undefined
@@ -422,7 +436,11 @@ export function AccountMcpServersRoute(handle: Handle) {
 							// editor owns the selection until it settles.
 							href: isMutating
 								? undefined
-								: mcpServersRoute.buildDetailHref(item.id, getCurrentSearch()),
+								: mcpServersRoute.buildDetailHref(
+										item.id,
+										getCurrentSearch(),
+										getCurrentHref(),
+									),
 							cells: {
 								name: renderNamedServer(item),
 								state: (
@@ -532,6 +550,38 @@ export function AccountMcpServersRoute(handle: Handle) {
 											failureMessage: 'Unable to update MCP server.',
 										})
 									},
+									onOAuthClientSave: (client) =>
+										postAction({
+											body: {
+												action: 'set-oauth-client',
+												id: server.id,
+												clientId: client.clientId,
+												clientSecret: client.clientSecret,
+											},
+											successMessage: (payload) => {
+												const updated = payload.servers.find(
+													(item) => item.id === server.id,
+												)
+												return updated?.authUrl
+													? 'Saved the OAuth client. Authorize the server to finish connecting.'
+													: 'Saved the OAuth client.'
+											},
+											failureMessage: 'Unable to save the OAuth client.',
+										}),
+									onOAuthClientRemove: () => {
+										void postAction({
+											body: { action: 'remove-oauth-client', id: server.id },
+											successMessage: (payload) => {
+												const updated = payload.servers.find(
+													(item) => item.id === server.id,
+												)
+												return updated?.authUrl
+													? 'Removed the OAuth client. Authorize the server again to reconnect.'
+													: 'Removed the OAuth client.'
+											},
+											failureMessage: 'Unable to remove the OAuth client.',
+										})
+									},
 									onDelete: () => {
 										void postAction({
 											body: { action: 'delete', id: server.id },
@@ -539,7 +589,10 @@ export function AccountMcpServersRoute(handle: Handle) {
 											failureMessage: 'Unable to remove MCP server.',
 											afterSuccess: () => {
 												navigate(
-													mcpServersRoute.buildListHref(getCurrentSearch()),
+													mcpServersRoute.buildListHref(
+														getCurrentSearch(),
+														getCurrentHref(),
+													),
 												)
 											},
 										})

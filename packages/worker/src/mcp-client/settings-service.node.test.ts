@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const repo = vi.hoisted(() => ({
@@ -28,8 +29,8 @@ vi.mock('./hub-client.ts', () => ({
 
 const {
 	addMcpServer,
-	clearEnabledMcpServerRefsCacheForTests,
 	enabledMcpServerRefsCacheTtlMs,
+	invalidateEnabledMcpServerRefsCache,
 	listEnabledMcpServerRefsCached,
 	resolveMcpServerOAuthClientUrls,
 	listVisibleEnabledMcpServerRefsCached,
@@ -44,7 +45,7 @@ const env = { APP_DB: {} } as Env
 function createSettingRow(id = 'server-1') {
 	return {
 		id,
-		user_id: 'user-1',
+		user_id: ownerIdFromStored('user-1'),
 		name: `server-${id}`,
 		url: `https://mcp.example.com/${id}`,
 		enabled: true,
@@ -83,7 +84,7 @@ function persistLastError(
 ) {
 	return persistMcpServerLastErrorIfChanged({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		state,
 		lastError,
@@ -91,10 +92,17 @@ function persistLastError(
 }
 
 test('listEnabledMcpServerRefsCached warms per user, expires, and invalidates on mutation', async () => {
-	clearEnabledMcpServerRefsCacheForTests()
+	invalidateEnabledMcpServerRefsCache({ userId: ownerIdFromStored('user-1') })
+	invalidateEnabledMcpServerRefsCache({ userId: ownerIdFromStored('user-2') })
 	repo.listEnabledMcpServerSettingRows.mockResolvedValue([createSettingRow()])
-	const first = await listEnabledMcpServerRefsCached({ env, userId: 'user-1' })
-	const second = await listEnabledMcpServerRefsCached({ env, userId: 'user-1' })
+	const first = await listEnabledMcpServerRefsCached({
+		env,
+		userId: ownerIdFromStored('user-1'),
+	})
+	const second = await listEnabledMcpServerRefsCached({
+		env,
+		userId: ownerIdFromStored('user-1'),
+	})
 	expect(first).toEqual([
 		{
 			serverId: 'server-1',
@@ -106,16 +114,22 @@ test('listEnabledMcpServerRefsCached warms per user, expires, and invalidates on
 	expect(second).toBe(first)
 	expect(repo.listEnabledMcpServerSettingRows).toHaveBeenCalledTimes(1)
 
-	await listEnabledMcpServerRefsCached({ env, userId: 'user-2' })
+	await listEnabledMcpServerRefsCached({
+		env,
+		userId: ownerIdFromStored('user-2'),
+	})
 	expect(repo.listEnabledMcpServerSettingRows).toHaveBeenCalledTimes(2)
 	expect(repo.listEnabledMcpServerSettingRows).toHaveBeenLastCalledWith(
-		expect.objectContaining({ userId: 'user-2' }),
+		expect.objectContaining({ userId: ownerIdFromStored('user-2') }),
 	)
 
 	vi.useFakeTimers()
 	try {
 		vi.setSystemTime(Date.now() + enabledMcpServerRefsCacheTtlMs + 1)
-		await listEnabledMcpServerRefsCached({ env, userId: 'user-1' })
+		await listEnabledMcpServerRefsCached({
+			env,
+			userId: ownerIdFromStored('user-1'),
+		})
 		expect(repo.listEnabledMcpServerSettingRows).toHaveBeenCalledTimes(3)
 	} finally {
 		vi.useRealTimers()
@@ -125,13 +139,16 @@ test('listEnabledMcpServerRefsCached warms per user, expires, and invalidates on
 	repo.updateMcpServerSettingRow.mockResolvedValue(true)
 	await setMcpServerEnabled({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		enabled: false,
 	})
 	repo.listEnabledMcpServerSettingRows.mockResolvedValue([])
 	expect(
-		await listEnabledMcpServerRefsCached({ env, userId: 'user-1' }),
+		await listEnabledMcpServerRefsCached({
+			env,
+			userId: ownerIdFromStored('user-1'),
+		}),
 	).toEqual([])
 	expect(repo.listEnabledMcpServerSettingRows).toHaveBeenCalledTimes(4)
 })
@@ -169,19 +186,19 @@ test('resolveMcpServerOAuthClientUrls prefers APP_BASE_URL over the request host
 })
 
 test('addMcpServer forwards bearer tokens as Authorization headers and persists a discover-timeout lastError', async () => {
-	clearEnabledMcpServerRefsCacheForTests()
+	invalidateEnabledMcpServerRefsCache({ userId: ownerIdFromStored('user-1') })
 	repo.getMcpServerSettingRowByName.mockResolvedValue(null)
 	repo.insertMcpServerSettingRow.mockResolvedValue(undefined)
 	mockModule.hubClient.addServer.mockResolvedValue({
 		serverId: 'ignored',
 		state: 'ready',
-		authUrl: null,
+		authorizationPending: false,
 		error: null,
 		toolCount: 1,
 	})
 	const result = await addMcpServer({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: 'linear',
 		url: 'https://mcp.example.com/mcp',
 		baseUrl: 'https://heykody.app',
@@ -201,7 +218,7 @@ test('addMcpServer forwards bearer tokens as Authorization headers and persists 
 			row: expect.objectContaining({
 				name: 'linear',
 				url: 'https://mcp.example.com/mcp',
-				user_id: 'user-1',
+				user_id: ownerIdFromStored('user-1'),
 			}),
 		}),
 	)
@@ -223,14 +240,14 @@ test('addMcpServer forwards bearer tokens as Authorization headers and persists 
 	mockModule.hubClient.addServer.mockResolvedValue({
 		serverId: 'ignored',
 		state: 'connected',
-		authUrl: null,
+		authorizationPending: false,
 		error: lastError.message,
 		toolCount: 0,
 		lastError,
 	})
 	const timedOut = await addMcpServer({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		name: 'posthog',
 		url: 'https://mcp.example.com/mcp',
 		baseUrl: 'https://kody.codes',
@@ -239,7 +256,7 @@ test('addMcpServer forwards bearer tokens as Authorization headers and persists 
 	expect(timedOut.setting.lastError).toContain("tool discovery didn't finish")
 	expect(repo.updateMcpServerSettingLastErrorRow).toHaveBeenCalledWith(
 		expect.objectContaining({
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			lastError: expect.stringContaining('"phase":"server/discover"'),
 		}),
 	)
@@ -259,7 +276,7 @@ test('persistMcpServerLastErrorIfChanged writes token-recovery errors, skips unc
 	})
 	await persistLastError('authenticating', lastError)
 	expect(lastWrite()).toMatchObject({
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		lastError: expect.stringContaining('"phase":"token exchange"'),
 	})
@@ -306,7 +323,7 @@ test('persistMcpServerLastErrorIfChanged writes token-recovery errors, skips unc
 })
 
 test('MCP server usage lock hides the server from execute and grants a package', async () => {
-	clearEnabledMcpServerRefsCacheForTests()
+	invalidateEnabledMcpServerRefsCache({ userId: ownerIdFromStored('user-1') })
 	const lockedRow = {
 		...createSettingRow(),
 		usage_mode: 'packages' as const,
@@ -320,7 +337,7 @@ test('MCP server usage lock hides the server from execute and grants a package',
 	})
 	const locked = await lockMcpServerToPackage({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		packageId: 'pkg-drafts',
 	})
@@ -337,7 +354,7 @@ test('MCP server usage lock hides the server from execute and grants a package',
 	repo.getMcpServerSettingRowById.mockResolvedValue(lockedRow)
 	const unlocked = await setMcpServerUsage({
 		env,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		id: 'server-1',
 		usageMode: 'any',
 	})
@@ -348,7 +365,7 @@ test('MCP server usage lock hides the server from execute and grants a package',
 	const visibleTo = (packageId?: string) =>
 		listVisibleEnabledMcpServerRefsCached({
 			env,
-			userId: 'user-1',
+			userId: ownerIdFromStored('user-1'),
 			...(packageId ? { packageId } : {}),
 		})
 	expect(await visibleTo()).toEqual([])

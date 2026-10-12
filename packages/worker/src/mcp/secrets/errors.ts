@@ -1,3 +1,4 @@
+import { stripCredentialPlacementRefusalTag } from '#worker/credentials/placement-refusal.ts'
 import { type SecretScope } from './types.ts'
 
 const hostApprovalRequiredRegex =
@@ -67,6 +68,23 @@ export function createSecretScopeUnavailableMessage(
 	const editorUrl = matches.find((match) => match.editorUrl)?.editorUrl ?? null
 	const editorSuffix = editorUrl ? ` Editor link: ${editorUrl}` : ''
 	return `Secret "${first.secretName}" exists in ${describeSecretScopeLocation(first)} and is not visible from this runtime.${extra}${guidance}${editorSuffix}`
+}
+
+/** A resolved secret is not approved for the host it is about to be sent to. */
+export class SecretHostNotApprovedError extends Error {
+	readonly secretName: string
+	readonly host: string
+	readonly scope: SecretScope
+
+	constructor(input: { secretName: string; host: string; scope: SecretScope }) {
+		super(
+			`Secret "${input.secretName}" is not allowed for host "${input.host}".`,
+		)
+		this.name = 'SecretHostNotApprovedError'
+		this.secretName = input.secretName
+		this.host = input.host
+		this.scope = input.scope
+	}
 }
 
 export type HostApprovalEntry = {
@@ -156,7 +174,9 @@ export function parseHostApprovalRequiredBatchMessage(message: string): {
 	bulkApprovalUrl: string | null
 } | null {
 	if (!message.startsWith(hostBatchDeniedPrefix)) return null
-	const raw = message.slice(hostBatchDeniedPrefix.length).trim()
+	const raw = stripCredentialPlacementRefusalTag(
+		message.slice(hostBatchDeniedPrefix.length),
+	).trim()
 	if (!raw) return null
 	try {
 		const parsed = JSON.parse(raw)

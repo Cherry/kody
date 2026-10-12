@@ -1,3 +1,4 @@
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { defineDomainCapability } from '#mcp/capabilities/define-domain-capability.ts'
@@ -13,6 +14,7 @@ export const emailMessageGetCapability = defineDomainCapability(
 	capabilityDomainNames.email,
 	{
 		name: 'emailMessageGet',
+		orgPermission: 'email:read',
 		description:
 			'Get one stored email message, including parsed bodies, headers, attachment metadata, and processing state.',
 		keywords: ['email', 'message', 'get', 'headers', 'attachments'],
@@ -27,7 +29,7 @@ export const emailMessageGetCapability = defineDomainCapability(
 			const user = await requireVerifiedEmailAccountUser(ctx)
 			const message = await getOwnerEmailMessageById({
 				env: ctx.env,
-				ownerId: user.userId,
+				ownerId: personalOrgId(user.userId),
 				messageId: args.message_id,
 			})
 			if (!message) {
@@ -35,7 +37,7 @@ export const emailMessageGetCapability = defineDomainCapability(
 			}
 			const attachments = await listOwnerEmailAttachmentsForMessage({
 				env: ctx.env,
-				ownerId: user.userId,
+				ownerId: personalOrgId(user.userId),
 				messageId: message.id,
 			})
 			return toMessageDetail(message, attachments)

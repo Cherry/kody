@@ -10,12 +10,14 @@ import { exportRunRecords } from '#worker/run-records/service.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import {
 	assignAdminRole,
+	enableSubscriptionForOwner,
 	ensurePackageSubscriptionTestSchema,
 	ensureRbacTestSchema,
 	seedAccount,
 } from '#worker/test-support/workers-seed.ts'
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const platformBaseUrl = 'https://kody.example.com'
 const systemDomain = 'kody.example.com'
 const systemTopic = 'email.system-message.received'
@@ -63,6 +65,13 @@ async function seedSubscribedPackage(input: {
 				now,
 			),
 	])
+
+	const enablement = await enableSubscriptionForOwner({
+		db: env.APP_DB,
+		userId: input.userId,
+		packageId,
+		topic: systemTopic,
+	})
 
 	const manifest = {
 		name,
@@ -116,7 +125,7 @@ export default async function main(input = {}) {
 			createdAt: now,
 		}),
 	)
-	return { packageId, sourceId }
+	return { packageId, sourceId, enablementId: enablement.id }
 }
 
 async function seedMaxAccount(prefix: string) {
@@ -127,7 +136,7 @@ async function seedMaxAccount(prefix: string) {
 		username: `${prefix}-${crypto.randomUUID().slice(0, 8)}`,
 		plan: 'max',
 	})
-	return { accountId, stableUserId: await createStableUserIdFromEmail(email) }
+	return { accountId, stableUserId: testStableUserIdFromEmail(email) }
 }
 
 function useBundleKv(bundleKv: Map<string, string>) {
@@ -218,13 +227,21 @@ test(
 		using _kv = useBundleKv(bundleKv)
 
 		await deliverSystemMailAndDrain('postmaster', 'Delivery report')
-		const [stored] = await listSystemEmailMessages({ db: env.APP_DB, limit: 1 })
+		const [stored] = await listSystemEmailMessages({
+			db: env.APP_DB,
+			limit: 1,
+		})
 		if (!stored) throw new Error('Expected stored system message')
 
 		// The keyed idempotency ledger lives in each owner's RunLog DO now.
 		const invocationsFor = async (userId: string) =>
-			(await exportRunRecords({ env, userId, pageSize: 100 }))
-				.packageInvocations
+			(
+				await exportRunRecords({
+					env,
+					userId: ownerIdFromStored(userId),
+					pageSize: 100,
+				})
+			).packageInvocations
 		expect(await invocationsFor(regularStableId)).toHaveLength(0)
 		const adminInvocations = await invocationsFor(adminStableId)
 		expect(adminInvocations).toHaveLength(1)
@@ -234,7 +251,7 @@ test(
 			exportName: `subscription:${systemTopic}`,
 			topic: systemTopic,
 			source: 'email',
-			idempotencyKey: `email:${stored.id}:${adminPackage.packageId}:${systemTopic}`,
+			idempotencyKey: `email:${stored.id}:${adminPackage.packageId}:${systemTopic}:enablement:${adminPackage.enablementId}`,
 		})
 		const responseJson = invocation?.responseJson
 		if (!responseJson) {

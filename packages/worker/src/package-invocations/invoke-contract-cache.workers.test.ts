@@ -5,9 +5,11 @@ import { persistPublishedBundleArtifact } from '#worker/package-runtime/publishe
 import { persistPublishedSourceSnapshot } from '#worker/package-runtime/published-runtime-artifacts.ts'
 import { silenceIncidentalRuntimeWarnings } from '#worker/test-support/incidental-runtime-warnings.ts'
 import { type EntitySourceRow } from '#worker/repo/types.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
 import { checkPackageInvokeForRuntimeWithPreloads } from './invoke-check.ts'
 import { invalidateInvokeContractFreshness } from './invoke-contract-cache.ts'
 
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 async function runSql(sql: string, ...values: Array<unknown>) {
 	await env.APP_DB.prepare(sql)
 		.bind(...values)
@@ -38,6 +40,7 @@ async function ensureSavedPackageArtifactSchema() {
 		search_text TEXT,
 		source_id TEXT NOT NULL,
 		has_app INTEGER NOT NULL DEFAULT 0 CHECK (has_app IN (0, 1)),
+		has_skills INTEGER NOT NULL DEFAULT 0 CHECK (has_skills IN (0, 1)),
 		hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
 		is_private INTEGER NOT NULL DEFAULT 1 CHECK (is_private IN (0, 1)),
 		locked_at TEXT,
@@ -62,6 +65,7 @@ async function ensureSavedPackageArtifactSchema() {
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`)
+	await ensureSoftDeleteTestColumns(env.APP_DB)
 }
 
 function createSourceRow(input: {
@@ -72,7 +76,7 @@ function createSourceRow(input: {
 }): EntitySourceRow {
 	return {
 		id: input.sourceId,
-		user_id: input.userId,
+		user_id: ownerIdFromStored(input.userId),
 		entity_kind: 'package' as const,
 		entity_id: input.packageId,
 		repo_id: `repo-${input.sourceId}`,

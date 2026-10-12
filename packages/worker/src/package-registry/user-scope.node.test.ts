@@ -1,5 +1,12 @@
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
-import { getMcpUserPackageScope } from './user-scope.ts'
+import {
+	getMcpUserPackageScope,
+	getPackageScopeByUserId,
+} from './user-scope.ts'
 
 type UsernameRow = {
 	username: string | null
@@ -8,6 +15,7 @@ type UsernameRow = {
 function createMockAppDb(options: {
 	rowByStableUserId?: UsernameRow | null
 	rowByEmail?: UsernameRow | null
+	orgSlugById?: string | null
 }) {
 	const queries: Array<{ sql: string; params: Array<unknown> }> = []
 	const db = {
@@ -23,6 +31,13 @@ function createMockAppDb(options: {
 							}
 							if (normalized.includes('where lower(email) = lower(?)')) {
 								return (options.rowByEmail ?? null) as T | null
+							}
+							if (
+								normalized.includes('from orgs') &&
+								normalized.includes('where id = ?')
+							) {
+								const slug = options.orgSlugById
+								return (slug ? { slug } : null) as T | null
 							}
 							throw new Error(`Unsupported query: ${sql}`)
 						},
@@ -41,7 +56,7 @@ test('getMcpUserPackageScope uses context username, then stable user id — neve
 	})
 	await expect(
 		getMcpUserPackageScope(fromContext.db, {
-			userId: 'stable-1',
+			userId: personIdFromStored('stable-1'),
 			email: 'stale@example.com',
 			displayName: 'Caller',
 			username: 'From-Context',
@@ -56,7 +71,7 @@ test('getMcpUserPackageScope uses context username, then stable user id — neve
 	})
 	await expect(
 		getMcpUserPackageScope(fromStableId.db, {
-			userId: 'stable-2',
+			userId: personIdFromStored('stable-2'),
 			email: 'no-longer-this@example.com',
 			displayName: 'Caller',
 		}),
@@ -68,10 +83,11 @@ test('getMcpUserPackageScope uses context username, then stable user id — neve
 	const missing = createMockAppDb({
 		rowByStableUserId: null,
 		rowByEmail: { username: 'email-only-hit' },
+		orgSlugById: null,
 	})
 	await expect(
 		getMcpUserPackageScope(missing.db, {
-			userId: 'orphan-stable',
+			userId: personIdFromStored('orphan-stable'),
 			email: 'orphan@example.com',
 			displayName: 'Orphan',
 		}),
@@ -79,4 +95,16 @@ test('getMcpUserPackageScope uses context username, then stable user id — neve
 		'Cannot validate package scope because the signed-in user record was not found.',
 	)
 	expect(missing.queries[0]?.params).toEqual(['orphan-stable'])
+})
+
+test('getPackageScopeByUserId falls back to the org slug for team owners', async () => {
+	const teamOrg = createMockAppDb({
+		rowByStableUserId: null,
+		orgSlugById: 'rocket-co',
+	})
+	await expect(
+		getPackageScopeByUserId(teamOrg.db, ownerIdFromStored('org-team')),
+	).resolves.toBe('rocket-co')
+	expect(teamOrg.queries).toHaveLength(2)
+	expect(teamOrg.queries[1]?.sql).toMatch(/from orgs/i)
 })

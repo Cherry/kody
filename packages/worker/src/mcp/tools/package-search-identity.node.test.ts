@@ -1,19 +1,20 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
 	getSavedPackageById: vi.fn(),
-	getSavedPackageByKodyId: vi.fn(),
+	resolveSavedPackageRef: vi.fn(),
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRef: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 	getSavedPackageWithCommunityProvenanceById: (...args: Array<unknown>) =>
 		mockModule.getSavedPackageById(...args),
-	getSavedPackageWithCommunityProvenanceByKodyId: (...args: Array<unknown>) =>
-		mockModule.getSavedPackageByKodyId(...args),
+	resolveSavedPackageRefWithCommunityProvenance: (...args: Array<unknown>) =>
+		mockModule.resolveSavedPackageRef(...args),
 }))
 
 const { parsePackageSearchIdentity, resolvePackageIdentitySearch } =
@@ -166,7 +167,7 @@ function resolve(
 ) {
 	return resolvePackageIdentitySearch({
 		db: {} as D1Database,
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		query: packageId,
 		baseUrl: 'https://heykody.dev',
 		username: 'user',
@@ -184,7 +185,7 @@ test('package identity resolution is user-scoped, gates hidden matches, and skip
 		.mockResolvedValueOnce(hidden)
 		.mockResolvedValueOnce(hidden)
 		.mockResolvedValueOnce(null)
-	mockModule.getSavedPackageByKodyId
+	mockModule.resolveSavedPackageRef
 		.mockResolvedValueOnce(createSavedPackage())
 		.mockResolvedValueOnce(null)
 
@@ -205,7 +206,10 @@ test('package identity resolution is user-scoped, gates hidden matches, and skip
 		},
 	)
 	await expect(
-		resolve({ userId: 'user-2', includeHiddenPackages: true }),
+		resolve({
+			userId: ownerIdFromStored('user-2'),
+			includeHiddenPackages: true,
+		}),
 	).resolves.toEqual(noMatch)
 	await expect(resolve({ query: 'daily-notes' })).resolves.toMatchObject({
 		recognized: true,
@@ -217,7 +221,7 @@ test('package identity resolution is user-scoped, gates hidden matches, and skip
 	expect(mockModule.getSavedPackageById).toHaveBeenNthCalledWith(
 		4,
 		{},
-		{ userId: 'user-2', packageId },
+		{ userId: ownerIdFromStored('user-2'), packageId },
 	)
 
 	for (const input of [
@@ -230,7 +234,7 @@ test('package identity resolution is user-scoped, gates hidden matches, and skip
 		).resolves.toEqual(noMatch)
 	}
 	expect(mockModule.getSavedPackageById).toHaveBeenCalledTimes(4)
-	expect(mockModule.getSavedPackageByKodyId).toHaveBeenCalledTimes(2)
+	expect(mockModule.resolveSavedPackageRef).toHaveBeenCalledTimes(2)
 })
 
 test('package identity match includes listingAhead only when the fork is behind', async () => {

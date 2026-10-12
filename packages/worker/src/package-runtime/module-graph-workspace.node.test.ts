@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
 import { resolveKodyDependenciesForEntryPoint } from './module-graph-workspace.ts'
@@ -6,10 +7,8 @@ function createLoadedPackage(input: {
 	kodyId: string
 	exports: Record<string, string>
 	files: Record<string, string>
-	ownerUserId?: string
-	shareOwned?: boolean
 }) {
-	const ownerUserId = input.ownerUserId ?? 'user-1'
+	const ownerUserId = ownerIdFromStored('user-1')
 	const name = `@kentcdodds/${input.kodyId}`
 	const packageId = `pkg-${input.kodyId}-${ownerUserId}`
 	const sourceId = `source-${input.kodyId}-${ownerUserId}`
@@ -24,6 +23,7 @@ function createLoadedPackage(input: {
 			searchText: null,
 			sourceId,
 			hasApp: false,
+			hasSkills: false,
 			hidden: false,
 			isPrivate: true,
 			lockedAt: null,
@@ -54,11 +54,6 @@ function createLoadedPackage(input: {
 		}),
 		files: input.files,
 		prefix: `.__kody_packages__/${name}`,
-		sourceOwnerUserId: ownerUserId,
-		platformScope: null,
-		...(input.shareOwned
-			? { shareOwned: true, storageOwnerUserId: ownerUserId }
-			: {}),
 	}
 }
 
@@ -69,7 +64,7 @@ function resolveDependencies(input: {
 	return resolveKodyDependenciesForEntryPoint({
 		env: {} as Env,
 		baseUrl: 'https://kody.dev',
-		userId: 'user-1',
+		userId: ownerIdFromStored('user-1'),
 		sourceFiles: { 'entry.ts': input.entrySource },
 		entryPoint: 'entry.ts',
 		loadedPackages: input.loadedPackages,
@@ -133,44 +128,4 @@ export default async function main() { return [await run(), await whoami()] }`,
 		wake.row.id,
 	])
 	expect(dependencies.some((dependency) => dependency.transitive)).toBe(false)
-})
-
-test('imports inside a share-owned package resolve under the share owner', async () => {
-	const shared = createLoadedPackage({
-		kodyId: 'shared',
-		ownerUserId: 'owner-1',
-		shareOwned: true,
-		exports: { './run': './src/run.ts' },
-		files: {
-			'src/run.ts': `import whoami from 'kody:@kentcdodds/wake/whoami'
-export default async function run() { return await whoami() }`,
-		},
-	})
-	const ownerWake = createLoadedPackage({
-		kodyId: 'wake',
-		ownerUserId: 'owner-1',
-		shareOwned: true,
-		exports: { './whoami': './src/whoami.ts' },
-		files: {
-			'src/whoami.ts': 'export default async function whoami() { return 2 }',
-		},
-	})
-	const dependencies = await resolveDependencies({
-		entrySource: `import run from 'kody:@kentcdodds/shared/run'
-export default async function main() { return await run() }`,
-		loadedPackages: new Map([
-			['@kentcdodds/shared', shared],
-			['@kentcdodds/wake', wake],
-			['@kentcdodds/wake#owner-1', ownerWake],
-		]),
-	})
-	expect(dependencies).toEqual([
-		expect.objectContaining({ packageId: shared.row.id, shareOwned: true }),
-		expect.objectContaining({
-			packageId: ownerWake.row.id,
-			transitive: true,
-			shareOwned: true,
-			storageOwnerUserId: 'owner-1',
-		}),
-	])
 })

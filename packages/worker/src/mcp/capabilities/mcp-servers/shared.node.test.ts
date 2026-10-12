@@ -1,3 +1,4 @@
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { type McpServerSettingMetadata } from '#worker/mcp-client/settings-types.ts'
@@ -14,8 +15,11 @@ vi.mock('#worker/mcp-client/settings-service.ts', () => ({
 		mockModule.listMcpServerSettings(...args),
 }))
 
-const { buildMcpServerStatusView, resolveMcpServerSetting } =
-	await import('./shared.ts')
+const {
+	buildMcpServerStatusView,
+	mcpServerStatusSchema,
+	resolveMcpServerSetting,
+} = await import('./shared.ts')
 
 function setting(
 	overrides: Partial<McpServerSettingMetadata> = {},
@@ -44,7 +48,7 @@ function snapshot(overrides: Record<string, unknown>) {
 		name: 'ha',
 		url: 'https://example.com/mcp',
 		state: 'ready' as const,
-		authUrl: null,
+		authorizationPending: false,
 		error: null,
 		instructions: null,
 		tools: [{ name: 'ping', inputSchema: { type: 'object' as const } }],
@@ -52,7 +56,12 @@ function snapshot(overrides: Record<string, unknown>) {
 	}
 }
 
-const owner = { env: { APP_DB: {} as D1Database }, userId: 'user-1' }
+const authorizeLink = { appOrigin: 'https://heykody.app', orgSlug: 'acme' }
+
+const owner = {
+	env: { APP_DB: {} as D1Database },
+	userId: ownerIdFromStored('user-1'),
+}
 
 test('resolveMcpServerSetting resolves by id/name and rejects blank or unknown servers', async () => {
 	const blank = resolveMcpServerSetting({
@@ -100,10 +109,21 @@ test('buildMcpServerStatusView defaults missing usage to any context', () => {
 			allowedPackageIds: undefined as never,
 		},
 		snapshot: null,
+		authorizeLink,
 	})
 	expect(view.usageMode).toBe('any')
 	expect(view.allowedPackageIds).toEqual([])
 	expect(view.connected).toBe(false)
+})
+
+test('capability status views leave out the pre-registered OAuth client', () => {
+	const view = buildMcpServerStatusView({
+		setting: setting(),
+		snapshot: snapshot({ oauthClientId: 'Iv1.github-app-client' }),
+		authorizeLink,
+	})
+	expect(mcpServerStatusSchema.strict().parse(view)).toEqual(view)
+	expect(JSON.stringify(view)).not.toContain('Iv1.github-app-client')
 })
 
 test('buildMcpServerStatusView surfaces durable lastError when live connection error is missing', () => {
@@ -112,6 +132,7 @@ test('buildMcpServerStatusView surfaces durable lastError when live connection e
 	const hung = buildMcpServerStatusView({
 		setting: setting({ lastError }),
 		snapshot: snapshot({ state: 'connected', tools: [] }),
+		authorizeLink,
 	})
 	expect(hung.connected).toBe(false)
 	expect(hung.error).toBe(lastError)
@@ -120,6 +141,7 @@ test('buildMcpServerStatusView surfaces durable lastError when live connection e
 	const ready = buildMcpServerStatusView({
 		setting: setting({ lastError }),
 		snapshot: snapshot({}),
+		authorizeLink,
 	})
 	expect(ready.connected).toBe(true)
 	expect(ready.error).toBeNull()
@@ -142,8 +164,43 @@ test('buildMcpServerStatusView surfaces durable lastError when live connection e
 			},
 			hasRefreshToken: false,
 		}),
+		authorizeLink,
 	})
 	expect(warned.connected).toBe(true)
 	expect(warned.error).toBeTruthy()
 	expect(warned.hasRefreshToken).toBe(false)
+})
+
+test('buildMcpServerStatusView links pending authorization to the Kody consent page', () => {
+	const pending = buildMcpServerStatusView({
+		setting: setting(),
+		snapshot: snapshot({
+			state: 'authenticating',
+			authorizationPending: true,
+			tools: [],
+		}),
+		authorizeLink,
+	})
+	expect(pending.authUrl).toBe(
+		'https://heykody.app/@acme/-/mcp-servers/server-1/authorize',
+	)
+	expect(pending.connected).toBe(false)
+
+	const ready = buildMcpServerStatusView({
+		setting: setting(),
+		snapshot: snapshot({}),
+		authorizeLink,
+	})
+	expect(ready.authUrl).toBeNull()
+
+	const noSlug = buildMcpServerStatusView({
+		setting: setting(),
+		snapshot: snapshot({
+			state: 'authenticating',
+			authorizationPending: true,
+			tools: [],
+		}),
+		authorizeLink: { ...authorizeLink, orgSlug: ' ' },
+	})
+	expect(noSlug.authUrl).toBeNull()
 })

@@ -1,5 +1,10 @@
-import { createStableUserIdFromEmail } from '#worker/user-id.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { insertEnablement } from '#worker/enablements/repo.ts'
 import { ensureEntitlementTestSchema } from '#worker/entitlements/test-schema.ts'
+import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
+import { ensureSoftDeleteTestColumns } from '#worker/soft-delete/test-schema.ts'
+import { ensurePersonalOrg } from '#worker/orgs/provision.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 /**
  * Explicit-import factories for `*.workers.test.ts` suites that need a local
@@ -44,11 +49,27 @@ export async function ensurePackageSubscriptionTestSchema(db: D1Database) {
 			search_text TEXT,
 			source_id TEXT NOT NULL,
 			has_app INTEGER NOT NULL DEFAULT 0,
+			has_skills INTEGER NOT NULL DEFAULT 0,
 			hidden INTEGER NOT NULL DEFAULT 0,
 			is_private INTEGER NOT NULL DEFAULT 1,
 			locked_at TEXT,
+			deleted_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS package_kody_id_redirects (
+			user_id TEXT NOT NULL,
+			old_kody_id TEXT NOT NULL,
+			package_id TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+			PRIMARY KEY (user_id, old_kody_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS package_slug_redirects (
+			user_id TEXT NOT NULL,
+			old_slug TEXT NOT NULL,
+			package_id TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+			PRIMARY KEY (user_id, old_slug)
 		)`,
 		`CREATE TABLE IF NOT EXISTS entity_sources (
 			id TEXT PRIMARY KEY,
@@ -62,6 +83,7 @@ export async function ensurePackageSubscriptionTestSchema(db: D1Database) {
 			source_root TEXT NOT NULL,
 			last_external_check_at TEXT,
 			external_check_until TEXT,
+			deleted_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -100,6 +122,7 @@ export async function ensurePackageSubscriptionTestSchema(db: D1Database) {
 	} catch {
 		// Column already present on newer schemas.
 	}
+	await ensureSoftDeleteTestColumns(db)
 }
 
 /**
@@ -116,53 +139,44 @@ export async function seedAccount(input: {
 	stableUserId?: string
 }): Promise<number> {
 	const stableUserId =
-		input.stableUserId ?? (await createStableUserIdFromEmail(input.email))
+		input.stableUserId ?? testStableUserIdFromEmail(input.email)
 	const emailVerifiedAt =
 		input.emailVerifiedAt === undefined
 			? new Date().toISOString()
 			: input.emailVerifiedAt
 	const passwordHash = input.passwordHash ?? 'test-password-hash'
-	if (input.plan === undefined) {
+	await input.db
+		.prepare(
+			`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
+			 VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(email) DO UPDATE SET
+				username = excluded.username,
+				email_verified_at = excluded.email_verified_at,
+				stable_user_id = COALESCE(users.stable_user_id, excluded.stable_user_id),
+				updated_at = CURRENT_TIMESTAMP`,
+		)
+		.bind(
+			input.username,
+			input.email,
+			passwordHash,
+			emailVerifiedAt,
+			stableUserId,
+		)
+		.run()
+	await ensurePersonalOrg(input.db, {
+		stableUserId,
+		username: input.username,
+		...(input.plan === undefined ? {} : { plan: input.plan }),
+	})
+	if (input.plan !== undefined) {
 		await input.db
 			.prepare(
-				`INSERT INTO users (username, email, password_hash, email_verified_at, stable_user_id)
-				 VALUES (?, ?, ?, ?, ?)
-				 ON CONFLICT(email) DO UPDATE SET
-					username = excluded.username,
-					email_verified_at = excluded.email_verified_at,
-					stable_user_id = COALESCE(users.stable_user_id, excluded.stable_user_id),
-					updated_at = CURRENT_TIMESTAMP`,
+				`UPDATE orgs SET plan = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			)
-			.bind(
-				input.username,
-				input.email,
-				passwordHash,
-				emailVerifiedAt,
-				stableUserId,
-			)
-			.run()
-	} else {
-		await input.db
-			.prepare(
-				`INSERT INTO users (username, email, password_hash, email_verified_at, plan, stable_user_id)
-				 VALUES (?, ?, ?, ?, ?, ?)
-				 ON CONFLICT(email) DO UPDATE SET
-					username = excluded.username,
-					email_verified_at = excluded.email_verified_at,
-					plan = excluded.plan,
-					stable_user_id = COALESCE(users.stable_user_id, excluded.stable_user_id),
-					updated_at = CURRENT_TIMESTAMP`,
-			)
-			.bind(
-				input.username,
-				input.email,
-				passwordHash,
-				emailVerifiedAt,
-				input.plan,
-				stableUserId,
-			)
+			.bind(input.plan, stableUserId)
 			.run()
 	}
+
 	const row = await input.db
 		.prepare(`SELECT id FROM users WHERE email = ?`)
 		.bind(input.email)
@@ -182,4 +196,29 @@ export async function assignAdminRole(input: {
 		)
 		.bind(input.userId)
 		.run()
+}
+
+/**
+ * Turns a saved package's subscription on for the owner of the personal org
+ * that saved it, so its events run as that person.
+ */
+export async function enableSubscriptionForOwner(input: {
+	db: D1Database
+	userId: string
+	packageId: string
+	topic: string
+}) {
+	await ensureOrgsTestSchema(input.db)
+	return await insertEnablement({
+		db: input.db,
+		enablement: {
+			orgId: ownerIdFromStored(input.userId),
+			packageId: input.packageId,
+			triggerKind: 'subscription',
+			triggerName: input.topic,
+			instanceId: input.packageId,
+			enablerUserId: input.userId,
+			origin: 'enabled',
+		},
+	})
 }

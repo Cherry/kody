@@ -4,14 +4,14 @@
  * `users.suspended_at` is an operator-set kill switch checked at the
  * browser-session, MCP, package-app, webhook-ingress, background-identity
  * (`resolveBackgroundMcpUser`), and email chokepoints (unlike a community
- * ban, which only blocks community-surface actions). `users.email_outbound_paused_at`
+ * ban, which only blocks community-surface actions). `orgs.email_outbound_paused_at`
  * is the automatic outbound-email pause set by the delivery-event abuse
  * monitor (see `#worker/email/outbound-abuse.ts`); both are cleared by an
  * admin from the admin users page.
  */
 
 import { normalizeEmail } from '#worker/identity/normalize-email.ts'
-import { normalizeStableUserId } from '#worker/user-id.ts'
+import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
 export const accountSuspendedMessage =
 	'This account is suspended. Email support@kody.codes to appeal.'
@@ -52,12 +52,14 @@ export async function getAccountRestrictionsByStableUserId(input: {
 	db: D1Database
 	stableUserId: string
 }): Promise<AccountRestrictions | null> {
-	const stableUserId = normalizeStableUserId(input.stableUserId)
+	const stableUserId = input.stableUserId.trim()
 	if (!stableUserId) return null
 	const row = await input.db
 		.prepare(
-			`SELECT suspended_at, email_outbound_paused_at FROM users
-			 WHERE stable_user_id = ?`,
+			`SELECT u.suspended_at, o.email_outbound_paused_at
+			 FROM users u
+			 LEFT JOIN orgs o ON o.id = u.stable_user_id${andLiveDeletedAtSql('o')}
+			 WHERE u.stable_user_id = ?${andLiveDeletedAtSql('u')}`,
 		)
 		.bind(stableUserId)
 		.first<{
@@ -90,7 +92,7 @@ export async function isAccountSuspended(input: {
 		const row = await input.db
 			.prepare(
 				`SELECT suspended_at FROM users
-				 WHERE email = ? AND stable_user_id = ?`,
+				 WHERE email = ? AND stable_user_id = ?${andLiveDeletedAtSql()}`,
 			)
 			.bind(normalizedEmail, stableUserId)
 			.first<{ suspended_at: string | null }>()
@@ -99,7 +101,9 @@ export async function isAccountSuspended(input: {
 
 	if (normalizedEmail) {
 		const row = await input.db
-			.prepare(`SELECT suspended_at FROM users WHERE email = ?`)
+			.prepare(
+				`SELECT suspended_at FROM users WHERE email = ?${andLiveDeletedAtSql()}`,
+			)
 			.bind(normalizedEmail)
 			.first<{ suspended_at: string | null }>()
 		return Boolean(row?.suspended_at)
@@ -107,7 +111,9 @@ export async function isAccountSuspended(input: {
 
 	if (!stableUserId) return false
 	const row = await input.db
-		.prepare(`SELECT suspended_at FROM users WHERE stable_user_id = ?`)
+		.prepare(
+			`SELECT suspended_at FROM users WHERE stable_user_id = ?${andLiveDeletedAtSql()}`,
+		)
 		.bind(stableUserId)
 		.first<{ suspended_at: string | null }>()
 	return Boolean(row?.suspended_at)

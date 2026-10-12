@@ -1,20 +1,28 @@
 import { canonicalJsonStringify } from '@kody-internal/shared/canonical-json.ts'
+import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { listJsonSchemaSubsetValueErrors } from '@kody-internal/shared/json-schema-subset.ts'
 import { toHex } from '@kody-internal/shared/hex.ts'
 import { runQueueableDynamicWorkerWork } from '#worker/dynamic-worker-evaluation-budget.ts'
 import { type createMcpCallerContext } from '#mcp/context.ts'
 import {
+	requestLineage,
+	type EnablementRun,
+	type RequestSource,
+} from '#worker/request-context/request-context.ts'
+import {
+	planEnablementRuns,
+	type EnablementAudience,
+} from '#worker/enablements/run-gate.ts'
+import { loadEarliestLiveOwnerId } from '#worker/enablements/repo.ts'
+import { fanOutPackageEventToMcpSubscriptions } from '#mcp/events/fan-out.ts'
+import {
 	type PackageEventDispatchInput,
 	type PackageEventTools,
 } from '#mcp/run-kody-registry.ts'
 import { type RunRecordContext } from '#worker/run-records/types.ts'
-import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
 import { type SavedPackageRecord } from '#worker/package-registry/types.ts'
 import { loadPackageManifestBySourceId } from '#worker/package-registry/source.ts'
-import {
-	listPackageEmittedEvents,
-	listPackageSubscriptions,
-} from '#worker/package-registry/manifest.ts'
+import { listPackageEmittedEvents } from '#worker/package-registry/manifest.ts'
 import { type PackageEventsDispatchQueueMessage } from '#worker/package-events/dispatch-queue-producer.ts'
 import {
 	buildPackageSubscriptionArtifactName,
@@ -39,6 +47,7 @@ import {
 } from './common.ts'
 import { invokeSavedPackageModule } from './idempotent-module-invocation.ts'
 import { buildJsonErrorResponse } from './responses.ts'
+import { loadMatchingPackageSubscriptions } from './admin-package-subscriptions.ts'
 
 /**
  * Package event payloads ride inside a Queue message (128 KiB limit), so
@@ -139,39 +148,25 @@ async function loadMatchingPackageEventSubscriptions(input: {
 	topic: string
 	payload: Record<string, unknown>
 }) {
-	const savedPackages = await listSavedPackagesByUserId(input.env.APP_DB, {
-		userId: input.userId,
-	})
-	const settled = await Promise.all(
-		savedPackages.map(async (savedPackage) => {
-			const loaded = await loadPackageManifestBySourceId({
-				env: input.env,
-				baseUrl: input.baseUrl,
-				userId: input.userId,
-				sourceId: savedPackage.sourceId,
-			}).catch((error) => {
-				throw new Error(
-					`Failed to load package manifest for package event dispatch: ${savedPackage.kodyId} (${savedPackage.id}).`,
-					{ cause: error },
-				)
-			})
-			const subscription = listPackageSubscriptions(loaded.manifest).find(
-				(candidate) =>
-					candidate.topic === input.topic &&
-					packageEventFiltersMatchPayload({
-						filters: candidate.filters,
-						payload: input.payload,
-					}),
-			)
-			if (!subscription) return null
-			return {
-				savedPackage,
-				subscription,
-			}
-		}),
-	)
-	return settled.filter(
-		(entry): entry is LoadedPackageEventSubscription => entry !== null,
+	const { subscriptions, discoveryErrors } =
+		await loadMatchingPackageSubscriptions({
+			env: input.env,
+			baseUrl: input.baseUrl,
+			userId: input.userId,
+			topic: input.topic,
+		})
+	if (discoveryErrors.length > 0) {
+		throw new Error(
+			`Failed to load package manifest for package event dispatch: ${String(discoveryErrors[0])}`,
+			{ cause: discoveryErrors[0] },
+		)
+	}
+	return subscriptions.filter(
+		(entry): entry is LoadedPackageEventSubscription =>
+			packageEventFiltersMatchPayload({
+				filters: entry.subscription.filters,
+				payload: input.payload,
+			}),
 	)
 }
 
@@ -206,13 +201,41 @@ export async function deliverPackageEventWithToolFactories(input: {
 	waitUntil?: (promise: Promise<unknown>) => void
 }): Promise<PackageEventDeliveryResult> {
 	const message = input.message
-	const subscriptions = await loadMatchingPackageEventSubscriptions({
-		env: input.env,
-		baseUrl: input.baseUrl,
-		userId: message.userId,
-		topic: message.topic,
-		payload: message.payload,
-	})
+	// MCP fan-out is independent of package-subscriber discovery: a broken
+	// package manifest must not hold webhook delivery hostage (queue retries
+	// and inline dispatch both reach this path).
+	const fanOutMcp = async () => {
+		try {
+			await fanOutPackageEventToMcpSubscriptions({
+				env: input.env,
+				baseUrl: input.baseUrl,
+				message,
+			})
+		} catch (error) {
+			console.error('mcp-events-fan-out-failed', {
+				topic: message.topic,
+				sourcePackageId: message.source.packageId,
+				error,
+			})
+		}
+	}
+
+	let subscriptions: Awaited<
+		ReturnType<typeof loadMatchingPackageEventSubscriptions>
+	>
+	try {
+		subscriptions = await loadMatchingPackageEventSubscriptions({
+			env: input.env,
+			baseUrl: input.baseUrl,
+			userId: message.userId,
+			topic: message.topic,
+			payload: message.payload,
+		})
+	} catch (discoveryError) {
+		await fanOutMcp()
+		throw discoveryError
+	}
+
 	const envelope = stripUntrustedSubscriptionEnvelopeFields({
 		event: message.topic,
 		source: {
@@ -241,6 +264,7 @@ export async function deliverPackageEventWithToolFactories(input: {
 				}),
 				source: `package:${message.source.kodyId}`,
 				actorTokenId: `${internalPackageEventSubscriptionTokenId}:${message.source.packageId}`,
+				request: packageEventRequestSource(message),
 				runtimeInvokeDepth: message.invokeDepth,
 				toolFactories: input.toolFactories,
 				waitUntil: input.waitUntil,
@@ -274,6 +298,10 @@ export async function deliverPackageEventWithToolFactories(input: {
 			})
 		}
 	})
+	// Runs before the incomplete-dispatch throw so MCP subscribers are not
+	// held hostage by a package subscriber's infrastructure retry; a queue
+	// redelivery re-sends with the same eventId for receiver dedupe.
+	await fanOutMcp()
 	if (retryableInfrastructureErrors.length > 0) {
 		throw new Error('Package event dispatch was incomplete.', {
 			cause: retryableInfrastructureErrors[0],
@@ -294,6 +322,22 @@ export async function deliverPackageEventWithToolFactories(input: {
 		delivered: subscribers.length - failed,
 		failed,
 	}
+}
+
+/**
+ * Messages enqueued before they carried lineage have no person behind them.
+ * They reach every enablement of the topic, like a platform event, and each
+ * runs as its own enabler.
+ */
+function packageEventRequestSource(
+	message: PackageEventsDispatchQueueMessage,
+): RequestSource {
+	return message.lineage
+		? { kind: 'inherited', lineage: message.lineage }
+		: {
+				kind: 'platform-event',
+				sourceId: `${internalPackageEventSubscriptionTokenId}:${message.source.packageId}`,
+			}
 }
 
 export function createPackageEventToolsWithToolFactories(input: {
@@ -361,7 +405,7 @@ export function createPackageEventToolsWithToolFactories(input: {
 				)
 			}
 			const message: PackageEventsDispatchQueueMessage = {
-				userId: user.userId,
+				userId: personalOrgId(user.userId),
 				topic: request.topic,
 				idempotencyKey: request.idempotencyKey,
 				payload: request.payload,
@@ -370,6 +414,11 @@ export function createPackageEventToolsWithToolFactories(input: {
 					kodyId: packageContext.kodyId,
 				},
 				invokeDepth: packageInvokeDepth + 1,
+				...(declaredEvent.mcp ? { mcp: true as const } : {}),
+				emittedAt: new Date().toISOString(),
+				...(input.callerContext.request
+					? { lineage: requestLineage(input.callerContext.request) }
+					: {}),
 			}
 			const queue = (input.env as Partial<Env>).PACKAGE_EVENTS_DISPATCH_QUEUE
 			let enqueued = false
@@ -423,7 +472,7 @@ export function createPackageEventToolsWithToolFactories(input: {
 	}
 }
 
-export async function invokePackageSubscriptionWithToolFactories(input: {
+type SubscriptionInvocationInput = {
 	env: Env
 	baseUrl: string
 	savedPackage: SavedPackageRecord
@@ -433,10 +482,95 @@ export async function invokePackageSubscriptionWithToolFactories(input: {
 	source?: string | null
 	trustedSyntheticDispatch?: TrustedSyntheticSubscriptionDispatch
 	actorTokenId?: string
+	request: RequestSource
+	/** What an org-wide event is about, for the enablement audience rule. */
+	audience?: EnablementAudience | null
 	runtimeInvokeDepth?: number
 	toolFactories: PackageRuntimeToolFactories
 	waitUntil?: (promise: Promise<unknown>) => void
-}) {
+}
+
+/**
+ * Who a subscription event may reach:
+ * `{ onlyEnablerId }` narrows to one person, `null` reaches nobody.
+ *
+ * - An event raised by a run (and the smoke test) reaches only the run's
+ *   person, and nobody when the run had no person. A member-sent email
+ *   reaches only the sender.
+ * - Mail from a verified non-member reaches the inbox owner: the person in a
+ *   personal org, else the org's earliest current Owner.
+ * - Platform topics reach every enablement, narrowed by the audience rule.
+ */
+async function subscriptionEnablerScope(input: {
+	env: Env
+	orgId: string
+	request: RequestSource
+}): Promise<{ onlyEnablerId: string | null } | null> {
+	const { request } = input
+	switch (request.kind) {
+		case 'inherited': {
+			const actorId = request.lineage.actor?.userId
+			return actorId ? { onlyEnablerId: actorId } : null
+		}
+		case 'inbound-email': {
+			if (request.sender.kind === 'member') {
+				return { onlyEnablerId: request.sender.actor.userId }
+			}
+			const owner = await loadEarliestLiveOwnerId(input.env.APP_DB, input.orgId)
+			return owner ? { onlyEnablerId: owner } : null
+		}
+		case 'schedule':
+		case 'webhook': {
+			const enablerId = request.enablement?.enabler.userId
+			return enablerId ? { onlyEnablerId: enablerId } : null
+		}
+		case 'platform-event':
+			return {
+				onlyEnablerId: request.enablement?.enabler.userId ?? null,
+			}
+		case 'session':
+		case 'mcp-oauth':
+		case 'cli':
+		case 'api-token':
+		case 'package-app':
+			return null
+		default: {
+			const exhaustive: never = request
+			throw new Error(`Unhandled request source: ${String(exhaustive)}`)
+		}
+	}
+}
+
+/** The request source one enablement's run of a subscription uses. */
+function subscriptionEnablementSource(input: {
+	request: RequestSource
+	sourceId: string
+	run: EnablementRun
+}): RequestSource {
+	if (input.request.kind === 'inbound-email') {
+		return { ...input.request, enablement: input.run }
+	}
+	return {
+		kind: 'platform-event',
+		sourceId: input.sourceId,
+		enablement: input.run,
+	}
+}
+
+function isSuccessfulInvocation(response: PackageInvocationResponse) {
+	return response.status >= 200 && response.status < 400
+}
+
+/**
+ * Invoke one package subscription handler. It runs once per on enablement in
+ * scope, each as its enabler with its own
+ * idempotency key; with none, the event is dropped (the smoke test gets a
+ * 409 telling the caller to turn the subscription on for themselves).
+ * Returns the first failed run's response, else the last run's.
+ */
+export async function invokePackageSubscriptionWithToolFactories(
+	input: SubscriptionInvocationInput,
+): Promise<PackageInvocationResponse> {
 	const topic = normalizePackageSubscriptionTopic(input.topic)
 	const idempotencyKey = input.idempotencyKey.trim()
 	if (!idempotencyKey) {
@@ -447,6 +581,65 @@ export async function invokePackageSubscriptionWithToolFactories(input: {
 				'Package subscription invocations require a non-empty idempotencyKey.',
 		})
 	}
+	const synthetic = isTrustedSyntheticSubscriptionDispatch(
+		input.trustedSyntheticDispatch,
+	)
+	const orgId = input.savedPackage.userId
+	const scope = await subscriptionEnablerScope({
+		env: input.env,
+		orgId,
+		request: input.request,
+	})
+	const plan = await planEnablementRuns({
+		env: input.env,
+		orgId,
+		packageId: input.savedPackage.id,
+		trigger: {
+			kind: 'subscription',
+			instanceId: input.savedPackage.id,
+			triggerName: topic,
+		},
+		onlyEnablerId: scope?.onlyEnablerId,
+		audience: input.audience,
+	})
+	const runs = scope ? plan.runs : []
+	if (runs.length === 0) {
+		if (synthetic) {
+			return buildJsonErrorResponse({
+				status: 409,
+				code: 'enablement_not_on',
+				message: `You have no on enablement of subscription "${topic}" on package "${input.savedPackage.kodyId}". Turn it on for yourself with enablementEnable, then dispatch again.`,
+				idempotencyKey,
+			})
+		}
+		return {
+			status: 202,
+			body: {
+				ok: true,
+				skipped: { reason: 'no_enablement_on', enablements: plan.skipped },
+			},
+		}
+	}
+	const sourceId = input.actorTokenId ?? internalEmailSubscriptionTokenId
+	let selected: PackageInvocationResponse | null = null
+	for (const run of runs) {
+		const response = await invokeSubscriptionOnce(
+			input,
+			subscriptionEnablementSource({ request: input.request, sourceId, run }),
+			`${idempotencyKey}:enablement:${run.id}`,
+		)
+		if (!selected || isSuccessfulInvocation(selected)) selected = response
+	}
+	if (!selected) throw new Error('Expected at least one enablement run.')
+	return selected
+}
+
+async function invokeSubscriptionOnce(
+	input: SubscriptionInvocationInput,
+	request: RequestSource,
+	idempotencyKey: string,
+) {
+	const topic = normalizePackageSubscriptionTopic(input.topic)
 	const synthetic = isTrustedSyntheticSubscriptionDispatch(
 		input.trustedSyntheticDispatch,
 	)
@@ -463,8 +656,9 @@ export async function invokePackageSubscriptionWithToolFactories(input: {
 		env: input.env,
 		baseUrl: input.baseUrl,
 		actor: {
-			tokenId: input.actorTokenId ?? internalEmailSubscriptionTokenId,
-			userId: input.savedPackage.userId,
+			sourceId: input.actorTokenId ?? internalEmailSubscriptionTokenId,
+			orgId: input.savedPackage.userId,
+			request,
 		},
 		savedPackage: input.savedPackage,
 		invocationName: buildPackageSubscriptionArtifactName(topic),

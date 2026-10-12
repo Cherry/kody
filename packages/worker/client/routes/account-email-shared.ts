@@ -1,4 +1,6 @@
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { accountAliasPath } from '#universal/org-pages.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	routeLoaderRedirect,
@@ -138,6 +140,7 @@ export async function accountEmailRouteLoader(
 	const response = await fetch(buildEmailApiRequestUrl(href), {
 		headers: { Accept: 'application/json' },
 		credentials: 'include',
+		referrer: orgAccountApiReferrer(href),
 		signal,
 	})
 	if (response.status === 401) {
@@ -147,7 +150,7 @@ export async function accountEmailRouteLoader(
 	if (!response.ok || !payload?.ok) {
 		throw new Error('Unable to load your email inbox.')
 	}
-	if (url.pathname !== '/account/email') {
+	if (accountAliasPath(url.pathname) !== '/account/email') {
 		return { accountEmail: payload }
 	}
 	const destinations = await fetchAccountEmailDestinations(signal)
