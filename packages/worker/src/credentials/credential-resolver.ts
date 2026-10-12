@@ -23,6 +23,10 @@ import {
 	missingCredentialResource,
 } from './credential-ids.ts'
 import { type PackageStamp } from './package-stamp.ts'
+import {
+	type SigningOperation,
+	type SigningResult,
+} from './signing-resolver.ts'
 import { type ResolvedCredentialUrl } from './url-resolver.ts'
 
 /**
@@ -97,6 +101,19 @@ export type CredentialTarget =
 	 * credential clients ship (T).
 	 */
 	| { use: 'url'; credentialId: string; path: string }
+	/**
+	 * A `signing` credential picked by id: a JWT or HMAC signature made with
+	 * its key, for a request to `requestHost`, which must be one of the
+	 * credential's hosts. The caller places the signature only on a request
+	 * to that host. Not reachable from package code until the credential
+	 * clients ship (T).
+	 */
+	| {
+			use: 'signing'
+			credentialId: string
+			requestHost: string
+			operation: SigningOperation
+	  }
 
 export type CredentialUse = CredentialTarget['use']
 
@@ -126,6 +143,7 @@ export type ResolvedCredentialByUse = {
 	'integration-refresh': IntegrationTokenRefreshResult
 	'mcp-connection': McpServerConnection
 	url: ResolvedCredentialUrl
+	signing: SigningResult
 }
 
 export type ResolvedCredential<T extends CredentialTarget> =
@@ -183,6 +201,7 @@ export function permissionForUse(use: CredentialUse): OrgPermission {
 		case 'webhook-secret':
 		case 'provider-secret':
 		case 'url':
+		case 'signing':
 			return 'secret:use'
 		case 'integration-token':
 		case 'integration-refresh':
