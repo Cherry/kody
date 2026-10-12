@@ -1,3 +1,4 @@
+import { type AppPageResult } from '#app/page-result.ts'
 import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
@@ -37,78 +38,83 @@ function getVerifyEmailChangeError(
 	}
 }
 
+export async function loadVerifyEmailChangePage(
+	request: Request,
+	env: Env,
+): Promise<AppPageResult> {
+	const url = new URL(request.url)
+	setAuthSessionSecret(env.COOKIE_SECRET)
+	const result = await verifyEmailChangeToken({
+		db: env.APP_DB,
+		token: url.searchParams.get('token'),
+	})
+	const requestIp = getRequestIp(request) ?? undefined
+
+	if (!result.ok) {
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_change_verify',
+			result: 'failure',
+			ip: requestIp,
+			path: url.pathname,
+			reason: result.reason,
+		})
+		return {
+			title: 'Verify email change',
+			status: 400,
+			loaderData: {
+				emailVerification: {
+					ok: false,
+					error: getVerifyEmailChangeError(result.reason),
+				},
+			},
+		}
+	}
+
+	const { session } = await readAuthSessionResult(request)
+	const setCookie =
+		session?.stableUserId === result.stableUserId
+			? await createAuthCookie(
+					{
+						stableUserId: session.stableUserId,
+						email: result.newEmail,
+						rememberMe: session.rememberMe,
+					},
+					isSecureRequest(request),
+				)
+			: null
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'account',
+		action: 'email_change_verify',
+		result: 'success',
+		email: result.newEmail,
+		ip: requestIp,
+		path: url.pathname,
+		reason: `old_email=${result.oldEmail}`,
+	})
+	return {
+		title: 'Email changed',
+		extraSetCookies: setCookie ? [setCookie] : undefined,
+		loaderData: {
+			emailVerification: {
+				ok: true,
+				kind: 'email_change',
+				message:
+					'Your account email has been changed and verified. The previous address stays tied to this account until you release it from Account settings → Former addresses.',
+			},
+		},
+	}
+}
+
 export function createVerifyEmailChangeHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request, url }) {
-			setAuthSessionSecret(env.COOKIE_SECRET)
-			const result = await verifyEmailChangeToken({
-				db: env.APP_DB,
-				token: url.searchParams.get('token'),
-			})
-			const requestIp = getRequestIp(request) ?? undefined
-
-			if (!result.ok) {
-				void logAuditEvent({
-					db: auditDatabaseFromEnv(env),
-					category: 'account',
-					action: 'email_change_verify',
-					result: 'failure',
-					ip: requestIp,
-					path: url.pathname,
-					reason: result.reason,
-				})
-				return renderAppPage({
-					request,
-					env,
-					title: 'Verify email change',
-					status: 400,
-					loaderData: {
-						emailVerification: {
-							ok: false,
-							error: getVerifyEmailChangeError(result.reason),
-						},
-					},
-				})
-			}
-
-			const { session } = await readAuthSessionResult(request)
-			const setCookie =
-				session?.stableUserId === result.stableUserId
-					? await createAuthCookie(
-							{
-								stableUserId: session.stableUserId,
-								email: result.newEmail,
-								rememberMe: session.rememberMe,
-							},
-							isSecureRequest(request),
-						)
-					: null
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'email_change_verify',
-				result: 'success',
-				email: result.newEmail,
-				ip: requestIp,
-				path: url.pathname,
-				reason: `old_email=${result.oldEmail}`,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Email changed',
-				extraSetCookies: setCookie ? [setCookie] : undefined,
-				loaderData: {
-					emailVerification: {
-						ok: true,
-						kind: 'email_change',
-						message:
-							'Your account email has been changed and verified. The previous address stays tied to this account until you release it from Account settings → Former addresses.',
-					},
-				},
-			})
+		async handler({ request }) {
+			const result = await loadVerifyEmailChangePage(request, env)
+			return renderAppPage({ request, env, ...result })
 		},
 	} satisfies Action<typeof routes.verifyEmailChange>
 }

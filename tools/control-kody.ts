@@ -976,11 +976,9 @@ async function runCommand(options: ControlKodyOptions) {
 			}
 			const origin = await resolveOrigin(options)
 			const requestedEmail = options.email
-			let cookieHeader = readCookieFile(
-				options.cookieFile,
-				origin,
-				requestedEmail,
-			)
+			let cookieHeader = options.skipLogin
+				? null
+				: readCookieFile(options.cookieFile, origin, requestedEmail)
 			const method = options.request.method.toUpperCase()
 			if (
 				!options.skipLogin &&

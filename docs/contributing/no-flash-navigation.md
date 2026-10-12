@@ -184,8 +184,13 @@ where content goes.
   `prefetch="render"`) for links the visitor is likely to click next.
   Destinations that share a **matcher** and not a payload (every `/docs/:slug`)
   must pass `{ independent: true }` — a shared warmup would attach one article
-  JSON to every slug. The docs shell does that for every sidebar href after
-  hydrate (`DocsNavPrefetch`).
+  JSON to every slug. The Remix docs shell does that for every sidebar href
+  after hydrate (`DocsNavPrefetch`). The Start docs shell uses intent preloading
+  instead: hover, focus, or touch warms only the chosen destination. An idle
+  docs visit does not fetch every article. Its blocking Router loader waits for
+  missing Query data before committing, so a click without prior intent keeps
+  the previous article visible while the destination loads. Retained stale Query
+  data can render immediately while refreshing in the background.
 - **Stream / defer**: when one region is genuinely slow and the rest is not,
   split it into its own loader key or a Remix `<Frame>` (see
   [frames](./frames.md)) with a `fallback` that reserves the region's height, so

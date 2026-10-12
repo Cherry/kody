@@ -1,3 +1,4 @@
+import { type AppPageResult } from '#app/page-result.ts'
 import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
@@ -33,104 +34,107 @@ function getVerifyEmailError(
 	}
 }
 
+export async function loadVerifyEmailPage(
+	request: Request,
+	env: Env,
+): Promise<AppPageResult> {
+	const url = new URL(request.url)
+	const result = await verifyEmailToken({
+		db: env.APP_DB,
+		token: url.searchParams.get('token'),
+	})
+	const requestIp = getRequestIp(request) ?? undefined
+
+	if (!result.ok) {
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'auth',
+			action: 'email_verify',
+			result: 'failure',
+			ip: requestIp,
+			path: url.pathname,
+			reason: result.reason,
+		})
+		return {
+			title: 'Verify email',
+			status: 400,
+			loaderData: {
+				emailVerification: {
+					ok: false,
+					error: getVerifyEmailError(result.reason),
+				},
+			},
+		}
+	}
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'auth',
+		action: 'email_verify',
+		result: 'success',
+		email: result.email,
+		ip: requestIp,
+		path: url.pathname,
+	})
+	if (result.newlyVerified) {
+		recordOnboardingFunnelEvent(env, {
+			stage: 'email_verified',
+			userId: result.stableUserId,
+		})
+	}
+	await attachPendingPackageShareInvitesSafely({
+		db: env.APP_DB,
+		userId: result.stableUserId,
+		email: result.email,
+	})
+	if (result.newlyVerified) {
+		void sendConnectAgentEmail({
+			env,
+			email: result.email,
+			userId: result.stableUserId,
+		}).catch((error) => {
+			console.warn('connect-agent-email-failed', error)
+		})
+		scheduleKitSubscriberSync({
+			env,
+			email: result.email,
+			stableUserId: result.stableUserId,
+		})
+		waitUntil(
+			maybeRewardHeldReferralAfterEmailVerified({
+				db: env.APP_DB,
+				stableUserId: result.stableUserId,
+				resolveReferrerPaidPeriodEnd: (referrerStableUserId) =>
+					latestReferrerPaidPeriodEnd({
+						env,
+						referrerStableUserId,
+					}),
+			}).catch((error) => {
+				console.warn('referral-held-reward-failed', error)
+			}),
+		)
+	}
+	const cta = resolveVerifyEmailSuccessCta(url.searchParams.get('redirectTo'))
+	return {
+		title: 'Email verified',
+		loaderData: {
+			emailVerification: {
+				ok: true,
+				kind: 'email_verify',
+				message: cta.message,
+				ctaHref: cta.href,
+				ctaLabel: cta.label,
+			},
+		},
+	}
+}
+
 export function createVerifyEmailHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request, url }) {
-			const result = await verifyEmailToken({
-				db: env.APP_DB,
-				token: url.searchParams.get('token'),
-			})
-			const requestIp = getRequestIp(request) ?? undefined
-
-			if (!result.ok) {
-				void logAuditEvent({
-					db: auditDatabaseFromEnv(env),
-					category: 'auth',
-					action: 'email_verify',
-					result: 'failure',
-					ip: requestIp,
-					path: url.pathname,
-					reason: result.reason,
-				})
-				return renderAppPage({
-					request,
-					env,
-					title: 'Verify email',
-					status: 400,
-					loaderData: {
-						emailVerification: {
-							ok: false,
-							error: getVerifyEmailError(result.reason),
-						},
-					},
-				})
-			}
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'auth',
-				action: 'email_verify',
-				result: 'success',
-				email: result.email,
-				ip: requestIp,
-				path: url.pathname,
-			})
-			if (result.newlyVerified) {
-				recordOnboardingFunnelEvent(env, {
-					stage: 'email_verified',
-					userId: result.stableUserId,
-				})
-			}
-			await attachPendingPackageShareInvitesSafely({
-				db: env.APP_DB,
-				userId: result.stableUserId,
-				email: result.email,
-			})
-			if (result.newlyVerified) {
-				void sendConnectAgentEmail({
-					env,
-					email: result.email,
-					userId: result.stableUserId,
-				}).catch((error) => {
-					console.warn('connect-agent-email-failed', error)
-				})
-				scheduleKitSubscriberSync({
-					env,
-					email: result.email,
-					stableUserId: result.stableUserId,
-				})
-				waitUntil(
-					maybeRewardHeldReferralAfterEmailVerified({
-						db: env.APP_DB,
-						stableUserId: result.stableUserId,
-						resolveReferrerPaidPeriodEnd: (referrerStableUserId) =>
-							latestReferrerPaidPeriodEnd({
-								env,
-								referrerStableUserId,
-							}),
-					}).catch((error) => {
-						console.warn('referral-held-reward-failed', error)
-					}),
-				)
-			}
-			const cta = resolveVerifyEmailSuccessCta(
-				url.searchParams.get('redirectTo'),
-			)
-			return renderAppPage({
-				request,
-				env,
-				title: 'Email verified',
-				loaderData: {
-					emailVerification: {
-						ok: true,
-						kind: 'email_verify',
-						message: cta.message,
-						ctaHref: cta.href,
-						ctaLabel: cta.label,
-					},
-				},
-			})
+		async handler({ request }) {
+			const result = await loadVerifyEmailPage(request, env)
+			return renderAppPage({ request, env, ...result })
 		},
 	} satisfies Action<typeof routes.verifyEmail>
 }

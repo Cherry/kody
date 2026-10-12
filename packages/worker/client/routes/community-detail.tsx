@@ -114,6 +114,7 @@ export function CommunityDetailRoute(handle: Handle) {
 	let shareBusy = false
 	let shareMessage: string | null = null
 	let shellNotFound = false
+	let awaitingAuthorizedSnapshot = false
 
 	// Re-lexing markdown on every handle.update() would be wasted work; cache
 	// the rendered README per markdown string (same policy as MarkdownView).
@@ -152,6 +153,7 @@ export function CommunityDetailRoute(handle: Handle) {
 		snapshot: CommunityShellSnapshot,
 		pathname: string,
 	) {
+		awaitingAuthorizedSnapshot = false
 		loggedIn = snapshot.loggedIn
 		viewerIsAdmin = snapshot.viewerIsAdmin
 		featured = snapshot.featured
@@ -346,7 +348,10 @@ export function CommunityDetailRoute(handle: Handle) {
 			return
 		}
 		shareGrant = result.grant
-		handle.update()
+		await loadDetailShell()
+		if (readRouterPathname(handle) !== pathname) return
+		const frame = handle.frames.get(COMMUNITY_DETAIL_TARGET)
+		if (frame) void frame.reload()
 	}
 
 	async function submitShareLeave() {
@@ -373,7 +378,16 @@ export function CommunityDetailRoute(handle: Handle) {
 			return
 		}
 		shareGrant = result.grant.status === 'left' ? null : result.grant
+		// Access changed. Remove the old source and title frame immediately,
+		// including when the authoritative refresh fails or becomes a 404.
+		awaitingAuthorizedSnapshot = true
+		readmeContent = null
+		readmeFences = []
+		hasAgentsDocs = false
+		readmeImageBaseHref = null
+		shellStatus = 'loading'
 		handle.update()
+		await loadDetailShell()
 	}
 
 	async function submitFeature(nextFeatured: boolean) {
@@ -708,7 +722,9 @@ export function CommunityDetailRoute(handle: Handle) {
 					on('focusout', handleCommunityInstallFocusOut),
 				]}
 			>
-				<Frame name={COMMUNITY_DETAIL_TARGET} src={frameSrc} />
+				{awaitingAuthorizedSnapshot ? null : (
+					<Frame name={COMMUNITY_DETAIL_TARGET} src={frameSrc} />
+				)}
 
 				{showShellReady &&
 				isFeatureFlagEnabled(

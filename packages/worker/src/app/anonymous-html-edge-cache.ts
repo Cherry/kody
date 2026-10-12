@@ -1,3 +1,4 @@
+import { prepareNonceHtmlForDelivery } from './anonymous-html-nonce.ts'
 import { getCanonicalAppBaseUrl } from '#worker/app-base-url.ts'
 import {
 	anonymousHtmlCacheControl,
@@ -12,10 +13,12 @@ import { prefersMarkdown } from '#app/markdown-negotiation.ts'
 export const anonymousHtmlEdgeCacheHeader = 'X-Kody-Cache'
 export const anonymousHtmlCacheAcceptParam = '__accept'
 export const anonymousHtmlCacheAcceptHtml = 'html'
+export const anonymousHtmlCacheVersionParam = '__worker_version'
 
 const browserVaryStorageHeader = 'X-Kody-Browser-Vary'
 
 type AnonymousHtmlCacheEnv = {
+	CF_VERSION_METADATA?: { id: string }
 	APP_BASE_URL?: string | null
 	PACKAGE_APP_BASE_URL?: string | null
 	PACKAGE_APP_LEGACY_HOSTS?: string | null
@@ -37,6 +40,9 @@ export function isAnonymousHtmlCacheRequest(
 	// that changed it by minutes: the browser reload Vite triggers after an
 	// HMR update carries no `no-cache` and would replay the pre-edit page.
 	if (env.WRANGLER_IS_LOCAL_DEV === 'true') return false
+	// A previous release may reference assets removed by the current deploy.
+	// Without a deployment identity, rendering is safer than sharing HTML.
+	if (!env.CF_VERSION_METADATA?.id.trim()) return false
 	if (request.method !== 'GET' && request.method !== 'HEAD') return false
 	if (request.headers.has('Authorization')) return false
 	if (requestHasSessionCookie(request)) return false
@@ -63,7 +69,10 @@ export function buildAnonymousHtmlCacheKey(
 	request: Request,
 	env: AnonymousHtmlCacheEnv,
 ) {
+	const versionId = env.CF_VERSION_METADATA?.id.trim()
+	if (!versionId) throw new Error('HTML cache requires Worker version metadata')
 	const url = new URL(request.url)
+	url.searchParams.set(anonymousHtmlCacheVersionParam, versionId)
 	const origin = getCanonicalAppBaseUrl({ env, requestUrl: url })
 	url.searchParams.set(
 		anonymousHtmlCacheAcceptParam,
@@ -183,35 +192,37 @@ export async function serveAnonymousHtmlFromCache(
 	next: () => Promise<Response>,
 ): Promise<Response> {
 	const eligible = isAnonymousHtmlCacheRequest(request, env)
-	if (!eligible) return next()
+	if (!eligible)
+		return prepareNonceHtmlForDelivery(await next(), { cached: false })
 
 	const cacheKey = buildAnonymousHtmlCacheKey(request, env)
 	const cache = workerDefaultCache()
 	if (cache) {
 		const cached = await cache.match(cacheKey).catch(() => undefined)
 		if (cached) {
-			return withAnonymousHtmlCacheLookup(cached, 'HIT', request.method)
+			return prepareNonceHtmlForDelivery(
+				withAnonymousHtmlCacheLookup(cached, 'HIT', request.method),
+				{ cached: true },
+			)
 		}
 	}
 
 	const response = await next()
-	const withMiss = withAnonymousHtmlCacheLookup(
-		response,
-		'MISS',
-		request.method,
-	)
 	if (
 		request.method === 'GET' &&
 		cache &&
-		isAnonymousHtmlCacheStoreable(withMiss)
+		isAnonymousHtmlCacheStoreable(response)
 	) {
 		ctx.waitUntil(
-			storeCompleteAnonymousHtml(cache, cacheKey, withMiss.clone()).catch(
+			storeCompleteAnonymousHtml(cache, cacheKey, response.clone()).catch(
 				(error: unknown) => {
 					console.debug('anonymous-html-cache-put-failed', error)
 				},
 			),
 		)
 	}
-	return withMiss
+	return prepareNonceHtmlForDelivery(
+		withAnonymousHtmlCacheLookup(response, 'MISS', request.method),
+		{ cached: false },
+	)
 }

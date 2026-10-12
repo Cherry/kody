@@ -1,0 +1,497 @@
+/** @jsxImportSource @emotion/react */
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useHydrated } from '../components/use-hydrated.ts'
+import {
+	formatNullableTimestamp,
+	formatTimestamp,
+} from '../components/local-timestamp.tsx'
+import {
+	startRegistration,
+	WebAuthnAbortService,
+} from '@simplewebauthn/browser'
+import { useState, useEffect, useRef } from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import { readJson } from '#client/routes/account-approval-shared.ts'
+import {
+	AccountManagementMessage,
+	AccountManagementShell,
+	AccountPageHeader,
+	accountInputCss,
+} from './account-management-components.tsx'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import {
+	cardCss,
+	cardTitleCss,
+	descriptionCss,
+	getDangerPillCss,
+	getGhostButtonCss,
+	getPillButtonCss,
+	layoutMaxWidths,
+	primaryLinkCss,
+} from '#universal/styles/style-primitives.ts'
+
+type PasskeyListItem = {
+	id: string
+	name: string
+	deviceType: string
+	backedUp: boolean
+	createdAt: string
+	lastUsedAt: string | null
+}
+
+export type AccountPasskeysPayload = {
+	ok: true
+	passkeys: Array<PasskeyListItem>
+}
+
+const passkeysApiPath = '/account/passkeys.json'
+const webauthnRegistrationPath = '/webauthn/registration'
+
+function describeDeviceType(deviceType: string) {
+	return deviceType === 'multiDevice'
+		? 'Synced passkey'
+		: 'Device-bound passkey'
+}
+
+export function AccountPasskeysPage({
+	payload,
+	currentHref,
+}: {
+	payload: AccountPasskeysPayload
+	currentHref: string
+}) {
+	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
+	const [passkeys, setPasskeys] = useState<Array<PasskeyListItem>>(
+		payload.passkeys,
+	)
+	const [message, setMessage] = useState<string | null>(null)
+	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
+	const [renamingPasskeyId, setRenamingPasskeyId] = useState<string | null>(
+		null,
+	)
+	const [renameDraft, setRenameDraft] = useState('')
+	const invalidatePages = usePageInvalidation(mutationResources, {
+		refreshShell: true,
+	})
+	const lifetime = useRef<AbortController | null>(null)
+	useEffect(() => {
+		const controller = new AbortController()
+		lifetime.current = controller
+		return () => {
+			controller.abort()
+			WebAuthnAbortService.cancelCeremony()
+		}
+	}, [])
+
+	async function handleRegisterPasskey() {
+		setActionStatus('busy')
+		setMessage(null)
+
+		try {
+			const optionsResponse = await fetch(webauthnRegistrationPath, {
+				headers: { Accept: 'application/json' },
+				credentials: 'include',
+				signal: lifetime.current?.signal,
+			})
+			if (optionsResponse.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const optionsPayload = await readJson<{
+				ok?: boolean
+				options?: Parameters<typeof startRegistration>[0]['optionsJSON']
+				error?: string
+			}>(optionsResponse)
+			if (
+				!optionsResponse.ok ||
+				!optionsPayload?.ok ||
+				!optionsPayload.options
+			) {
+				throw new Error(
+					optionsPayload?.error || 'Unable to start passkey registration.',
+				)
+			}
+
+			const registrationResponse = await startRegistration({
+				optionsJSON: optionsPayload.options,
+			})
+
+			lifetime.current?.signal.throwIfAborted()
+			const verificationResponse = await fetch(webauthnRegistrationPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				signal: lifetime.current?.signal,
+				body: JSON.stringify({ response: registrationResponse }),
+			})
+			if (verificationResponse.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const verificationPayload = await readJson<{
+				ok?: boolean
+				error?: string
+			}>(verificationResponse)
+			if (!verificationResponse.ok || !verificationPayload?.ok) {
+				throw new Error(
+					verificationPayload?.error || 'Unable to register the passkey.',
+				)
+			}
+
+			setMessage('Passkey registered.')
+			setMessageTone('info')
+			await refreshPasskeys()
+		} catch (error) {
+			setMessage(
+				error instanceof Error && error.name === 'NotAllowedError'
+					? 'Passkey registration was cancelled.'
+					: error instanceof Error
+						? error.message
+						: 'Unable to register the passkey.',
+			)
+			setMessageTone('error')
+		} finally {
+			if (!lifetime.current?.signal.aborted) void invalidatePages()
+			setActionStatus('idle')
+		}
+	}
+
+	async function refreshPasskeys() {
+		const response = await fetch(passkeysApiPath, {
+			headers: { Accept: 'application/json' },
+			credentials: 'include',
+			signal: lifetime.current?.signal,
+		})
+		const payload = await readJson<AccountPasskeysPayload>(response)
+		if (response.ok && payload?.ok) {
+			setPasskeys(payload.passkeys)
+		}
+	}
+
+	function beginRename(passkey: PasskeyListItem) {
+		setRenamingPasskeyId(passkey.id)
+		setRenameDraft(passkey.name)
+		setMessage(null)
+	}
+
+	function cancelRename() {
+		setRenamingPasskeyId(null)
+		setRenameDraft('')
+	}
+
+	async function handleRenamePasskey(passkeyId: string) {
+		setActionStatus('busy')
+		setMessage(null)
+
+		try {
+			const response = await fetch(passkeysApiPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				signal: lifetime.current?.signal,
+				body: JSON.stringify({
+					intent: 'rename',
+					passkeyId,
+					name: renameDraft,
+				}),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const payload = await readJson<
+				AccountPasskeysPayload & { error?: string }
+			>(response)
+			if (!response.ok || !payload?.ok) {
+				throw new Error(payload?.error || 'Unable to rename the passkey.')
+			}
+			setPasskeys(payload.passkeys)
+			setRenamingPasskeyId(null)
+			setRenameDraft('')
+			setMessage('Passkey renamed.')
+			setMessageTone('info')
+		} catch (error) {
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Unable to rename the passkey.',
+			)
+			setMessageTone('error')
+		} finally {
+			setActionStatus('idle')
+		}
+	}
+
+	async function handleDeletePasskey(passkeyId: string) {
+		setActionStatus('busy')
+		setMessage(null)
+
+		try {
+			const response = await fetch(passkeysApiPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				signal: lifetime.current?.signal,
+				body: JSON.stringify({ intent: 'delete', passkeyId }),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const payload = await readJson<
+				AccountPasskeysPayload & { error?: string }
+			>(response)
+			if (!response.ok || !payload?.ok) {
+				throw new Error(payload?.error || 'Unable to delete the passkey.')
+			}
+			setPasskeys(payload.passkeys)
+			if (renamingPasskeyId === passkeyId) {
+				setRenamingPasskeyId(null)
+				setRenameDraft('')
+			}
+			setMessage('Passkey deleted.')
+			setMessageTone('info')
+		} catch (error) {
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Unable to delete the passkey.',
+			)
+			setMessageTone('error')
+		} finally {
+			setActionStatus('idle')
+		}
+	}
+
+	const status = 'ready'
+	const [lastPayload, setLastPayload] = useState(payload)
+	if (lastPayload !== payload) {
+		setLastPayload(payload)
+		setPasskeys(payload.passkeys)
+	}
+
+	const hydrated = useHydrated()
+	const isBusy = !hydrated || actionStatus === 'busy'
+
+	return (
+		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
+			<AccountPageHeader
+				title="Passkeys"
+				description="Sign in with your device's screen lock, a hardware key, or a synced passkey instead of your password."
+				currentHref={currentHref}
+			/>
+
+			{message ? (
+				<AccountManagementMessage tone={messageTone}>
+					{message}
+				</AccountManagementMessage>
+			) : null}
+
+			{status === 'ready' ? (
+				<>
+					<section css={cardCss}>
+						<h2 css={cardTitleCss}>Register a passkey</h2>
+						<p css={descriptionCss}>
+							Your browser will prompt you to create a passkey with your device.
+							Passkey sign-in skips the two-factor code because the passkey
+							itself already satisfies multi-factor authentication.
+						</p>
+						<div>
+							<button
+								type="button"
+								disabled={isBusy}
+								css={primaryButtonCss}
+								onClick={handleRegisterPasskey}
+							>
+								{isBusy ? 'Working...' : 'Register a passkey'}
+							</button>
+						</div>
+					</section>
+
+					{passkeys.length === 0 ? (
+						<section css={cardCss}>
+							<h2 css={cardTitleCss}>No passkeys yet</h2>
+							<p css={descriptionCss}>
+								Registered passkeys appear here. You can sign in with a passkey
+								from the login page.
+							</p>
+						</section>
+					) : (
+						<section css={cardCss} aria-label="Registered passkeys">
+							<h2 css={cardTitleCss}>Registered passkeys</h2>
+							<ul
+								css={{
+									listStyle: 'none',
+									padding: 0,
+									margin: 0,
+									display: 'grid',
+									gap: spacing.md,
+								}}
+							>
+								{passkeys.map((passkey) => {
+									const isRenaming = renamingPasskeyId === passkey.id
+									return (
+										<li
+											key={passkey.id}
+											css={{
+												display: 'flex',
+												justifyContent: 'space-between',
+												alignItems: 'flex-start',
+												gap: spacing.md,
+												flexWrap: 'wrap',
+												paddingBottom: spacing.md,
+												borderBottom: `1px solid ${colors.border}`,
+											}}
+										>
+											<div
+												css={{
+													display: 'grid',
+													gap: spacing.xs,
+													flex: '1 1 16rem',
+													minWidth: 0,
+												}}
+											>
+												{isRenaming ? (
+													<label
+														css={{
+															display: 'grid',
+															gap: spacing.xs,
+														}}
+													>
+														<span
+															css={{
+																fontSize: typography.fontSize.sm,
+																color: colors.textMuted,
+															}}
+														>
+															Nickname
+														</span>
+														<input
+															data-field-ring
+															type="text"
+															value={renameDraft}
+															maxLength={80}
+															disabled={isBusy}
+															aria-label="Passkey nickname"
+															css={accountInputCss}
+															onInput={(event) => {
+																setRenameDraft(
+																	(event.currentTarget as HTMLInputElement)
+																		.value,
+																)
+															}}
+														/>
+													</label>
+												) : (
+													<span
+														css={{
+															fontWeight: typography.fontWeight.medium,
+															color: colors.text,
+														}}
+													>
+														{passkey.name}
+													</span>
+												)}
+												<span
+													css={{
+														color: colors.textMuted,
+														fontSize: typography.fontSize.sm,
+													}}
+												>
+													{describeDeviceType(passkey.deviceType)}
+												</span>
+												<span
+													css={{
+														color: colors.textMuted,
+														fontSize: typography.fontSize.sm,
+													}}
+												>
+													Created {formatTimestamp(passkey.createdAt)}
+												</span>
+												<span
+													css={{
+														color: colors.textMuted,
+														fontSize: typography.fontSize.sm,
+													}}
+												>
+													Last used{' '}
+													{formatNullableTimestamp(passkey.lastUsedAt, 'Never')}
+												</span>
+											</div>
+											<div
+												css={{
+													display: 'flex',
+													gap: spacing.sm,
+													flexWrap: 'wrap',
+												}}
+											>
+												{isRenaming ? (
+													<>
+														<button
+															type="button"
+															disabled={isBusy}
+															css={primaryButtonCss}
+															onClick={() => handleRenamePasskey(passkey.id)}
+														>
+															Save
+														</button>
+														<button
+															type="button"
+															disabled={isBusy}
+															css={secondaryButtonCss}
+															onClick={cancelRename}
+														>
+															Cancel
+														</button>
+													</>
+												) : (
+													<button
+														type="button"
+														disabled={isBusy}
+														css={secondaryButtonCss}
+														onClick={() => beginRename(passkey)}
+													>
+														Rename
+													</button>
+												)}
+												<button
+													type="button"
+													disabled={isBusy}
+													css={dangerButtonCss}
+													onClick={() => handleDeletePasskey(passkey.id)}
+												>
+													Delete
+												</button>
+											</div>
+										</li>
+									)
+								})}
+							</ul>
+						</section>
+					)}
+				</>
+			) : null}
+
+			<p css={{ margin: 0 }}>
+				<SiteLink href="/account" css={primaryLinkCss}>
+					Back to account
+				</SiteLink>
+			</p>
+		</AccountManagementShell>
+	)
+}
+
+const primaryButtonCss = getPillButtonCss({ size: 'sm' })
+const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
+const dangerButtonCss = getDangerPillCss({ size: 'sm' })
+
+const mutationResources = ['loadAccountSecurity', 'loadAccountPage'] as const

@@ -31,6 +31,7 @@ interface __BaseEnv_Env {
 	APP_LOADER: WorkerLoader;
 	AI: Ai;
 	IMAGES: ImagesBinding;
+	CF_VERSION_METADATA: WorkerVersionMetadata;
 	ASSETS: Fetcher;
 	SENTRY_ENVIRONMENT: "production";
 	SENTRY_TRACES_SAMPLE_RATE: 0;

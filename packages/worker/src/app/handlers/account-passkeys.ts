@@ -153,7 +153,7 @@ function displayPasskeyName(passkey: PasskeyRow) {
 	})
 }
 
-async function loadPasskeysPayload(
+export async function loadPasskeysPayload(
 	db: D1Database,
 	userId: number,
 ): Promise<AccountPasskeysLoaderData> {

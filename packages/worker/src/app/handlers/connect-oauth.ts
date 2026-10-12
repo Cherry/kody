@@ -35,7 +35,7 @@ export function isBareConnectOauthVisit(url: URL): boolean {
  * (`code`/`error`) restore config from sessionStorage, so their query
  * carries no provider and only the redirect URI is embedded.
  */
-async function loadConnectOauthLoaderData(
+export async function loadConnectOauthLoaderData(
 	env: Env,
 	request: Request,
 	requestUrl: URL,

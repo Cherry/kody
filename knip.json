@@ -3,20 +3,35 @@
 	"include": ["files", "exports", "types"],
 	"workspaces": {
 		".": {
-			"entry": ["tools/**/*.{ts,js,mjs}", "e2e/**/*.ts", "vitest*.ts"],
+			"entry": [
+				"tools/**/*.{ts,js,mjs}",
+				"e2e/**/*.ts",
+				"vitest*.ts",
+				"vite.start.config.ts",
+				"playwright.start.config.ts"
+			],
 			"project": ["tools/**/*.{ts,js,mjs}", "*.ts", "e2e/**/*.ts"]
 		},
 		"packages/worker": {
 			"entry": [
 				"client/entry.tsx",
 				"src/mcp/capabilities/**/*.ts",
-				"src/mcp/instructions/**/*.ts"
+				"src/mcp/instructions/**/*.ts",
+				"start/client.tsx",
+				"start/server.ts",
+				"start/router.tsx",
+				"start/oauth-page.ts"
 			],
 			"project": [
 				"src/**/*.{ts,tsx}",
 				"client/**/*.{ts,tsx}",
-				"universal/**/*.{ts,tsx}"
-			]
+				"universal/**/*.{ts,tsx}",
+				"start/**/*.{ts,tsx}"
+			],
+			"paths": {
+				"#start/server/*": ["start/server/*.ts"]
+			},
+			"ignore": ["start/routeTree.gen.ts"]
 		},
 		"packages/jobs-worker": {
 			"project": ["src/**/*.ts"]

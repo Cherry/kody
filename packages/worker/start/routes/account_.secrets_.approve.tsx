@@ -1,0 +1,20 @@
+/** @jsxImportSource @emotion/react */
+import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { AccountSecretsPage } from '../pages/account-secrets.tsx'
+import { loadSecretsPage } from '#start/server/account-collections'
+import { documentHead } from '../components/document-head.ts'
+export const Route = createFileRoute('/account_/secrets_/approve')({
+	loaderDeps: ({ search }) => search,
+	loader: ({ abortController, location }) =>
+		loadSecretsPage({
+			signal: abortController.signal,
+			data: location.pathname + location.searchStr,
+		}),
+	head: ({ loaderData }) => documentHead(loaderData?.head),
+	component: SecretsPage,
+})
+function SecretsPage() {
+	const { payload } = Route.useLoaderData()
+	const location = useLocation()
+	return <AccountSecretsPage payload={payload} currentHref={location.href} />
+}

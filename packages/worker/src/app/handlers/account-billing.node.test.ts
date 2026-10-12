@@ -473,3 +473,93 @@ test('billing success renders a thank-you page instead of redirecting', async ()
 	})
 	expect(success.headers.get('location')).toBeNull()
 })
+
+test('native checkout completion renders the verified result without the Remix renderer', async () => {
+	const { completeAccountBillingCheckout } =
+		await import('../account-billing-completion.ts')
+	const { AccountBillingSuccessPage } =
+		await import('../../../start/pages/account-billing-success.tsx')
+	const { createElement } = await import('react')
+	const { renderToStaticMarkup } = await import('react-dom/server')
+	mockModule.requireAuthenticatedPageUser.mockResolvedValue({
+		...authenticatedUser,
+		emailVerified: true,
+	})
+	mockModule.userHasMcpOAuthGrants.mockResolvedValue(true)
+	mockModule.linkStripeCustomerFromCheckoutSessionAttribution.mockResolvedValue(
+		{},
+	)
+	mockModule.renderAppPage.mockClear()
+	const result = await completeAccountBillingCheckout(
+		new Request(
+			'https://example.com/account/billing/success?session_id=cs_owned',
+		),
+		createEnv(),
+	)
+	expect(result).toEqual({ ok: true, needsOnboarding: false })
+	if (result instanceof Response)
+		throw new Error('Expected verified checkout result')
+	expect(
+		mockModule.linkStripeCustomerFromCheckoutSessionAttribution,
+	).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			sessionId: 'cs_owned',
+			user: {
+				id: authenticatedUser.userId,
+				email: authenticatedUser.email,
+				stableUserId: authenticatedUser.mcpUser.userId,
+			},
+		}),
+	)
+	const html = renderToStaticMarkup(
+		createElement(AccountBillingSuccessPage, { data: result }),
+	)
+	expect(html).toContain('You’re in')
+	expect(html).toContain('Manage billing')
+	expect(html).not.toContain('Connect your agent')
+	expect(html).not.toContain('page-init.js')
+	expect(html).not.toContain('client-entry.js')
+	expect(mockModule.renderAppPage).not.toHaveBeenCalled()
+})
+
+test('checkout completion preserves auth cookies and rejects missing or foreign sessions', async () => {
+	const { completeAccountBillingCheckout } =
+		await import('../account-billing-completion.ts')
+	const { BillingLinkError } =
+		await import('#worker/billing/subscription-sync.ts')
+	const request = new Request(
+		'https://example.com/account/billing/success?session_id=cs_foreign',
+	)
+	const denied = new Response(null, {
+		status: 302,
+		headers: { Location: '/login', 'Set-Cookie': 'session=; Max-Age=0' },
+	})
+	mockModule.linkStripeCustomerFromCheckoutSessionAttribution.mockClear()
+	mockModule.requireAuthenticatedPageUser.mockResolvedValue(denied)
+	expect(await completeAccountBillingCheckout(request, createEnv())).toBe(
+		denied,
+	)
+	expect(
+		mockModule.linkStripeCustomerFromCheckoutSessionAttribution,
+	).not.toHaveBeenCalled()
+	mockModule.requireAuthenticatedPageUser.mockResolvedValue(authenticatedUser)
+	const missing = await completeAccountBillingCheckout(
+		new Request('https://example.com/account/billing/success'),
+		createEnv(),
+	)
+	expect(missing).toBeInstanceOf(Response)
+	expect(
+		mockModule.linkStripeCustomerFromCheckoutSessionAttribution,
+	).not.toHaveBeenCalled()
+	mockModule.linkStripeCustomerFromCheckoutSessionAttribution.mockRejectedValueOnce(
+		new BillingLinkError('client_reference_mismatch', 'Wrong owner'),
+	)
+	const rejected = await completeAccountBillingCheckout(request, createEnv())
+	expect(rejected).toBeInstanceOf(Response)
+	if (!(rejected instanceof Response))
+		throw new Error('Expected ownership rejection')
+	expect(rejected.status).toBe(302)
+	expect(rejected.headers.get('Location')).toBe(
+		'https://example.com/account/billing?error=client_reference_mismatch',
+	)
+})

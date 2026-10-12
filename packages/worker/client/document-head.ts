@@ -1,6 +1,6 @@
+import { CANONICAL_ORIGIN_META_NAME } from '#universal/document-head-markers.ts'
 import {
 	absolutizeDocumentHead,
-	CANONICAL_ORIGIN_META_NAME,
 	DOCUMENT_HEAD_ATTR,
 	resolveDocumentHead,
 	type ResolvedDocumentHead,

@@ -1,3 +1,4 @@
+import { type AppPageResult } from '#app/page-result.ts'
 import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
@@ -28,75 +29,81 @@ function getVerifyEmailDestinationError(reason: VerifyEmailDestinationReason) {
 	}
 }
 
+export async function loadVerifyEmailDestinationPage(
+	request: Request,
+	env: Env,
+): Promise<AppPageResult | Response> {
+	const url = new URL(request.url)
+	const consume = request.method !== 'HEAD'
+	const result = await verifyEmailDestinationToken({
+		db: env.APP_DB,
+		token: url.searchParams.get('token'),
+		consume,
+	})
+
+	if (request.method === 'HEAD') {
+		return new Response(null, { status: result.ok ? 200 : 400 })
+	}
+
+	const requestIp = getRequestIp(request) ?? undefined
+
+	if (!result.ok) {
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_destination_verify',
+			result: 'failure',
+			ip: requestIp,
+			path: url.pathname,
+			reason: result.reason,
+		})
+		return {
+			title: 'Verify email destination',
+			status: 400,
+			loaderData: {
+				emailVerification: {
+					ok: false,
+					kind: 'email_destination',
+					reason: result.reason,
+					error: getVerifyEmailDestinationError(result.reason),
+					ctaHref: emailDestinationsHref,
+					ctaLabel: 'Resend from email inbox',
+				},
+			},
+		}
+	}
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'account',
+		action: 'email_destination_verify',
+		result: 'success',
+		email: result.email,
+		ip: requestIp,
+		path: url.pathname,
+	})
+	return {
+		title: 'Email destination verified',
+		loaderData: {
+			emailVerification: {
+				ok: true,
+				kind: 'email_destination',
+				message:
+					'emailSend can now use this address. Mail comes from your platform inbox. Set it as the default from the email inbox if you want omitted `to` to use it.',
+				ctaHref: emailDestinationsHref,
+				ctaLabel: 'Go to email inbox',
+			},
+		},
+	}
+}
+
 export function createVerifyEmailDestinationHandler(env: Env) {
 	return {
 		middleware: [],
-		async handler({ request, url }) {
-			const consume = request.method !== 'HEAD'
-			const result = await verifyEmailDestinationToken({
-				db: env.APP_DB,
-				token: url.searchParams.get('token'),
-				consume,
-			})
-
-			if (request.method === 'HEAD') {
-				return new Response(null, { status: result.ok ? 200 : 400 })
-			}
-
-			const requestIp = getRequestIp(request) ?? undefined
-
-			if (!result.ok) {
-				void logAuditEvent({
-					db: auditDatabaseFromEnv(env),
-					category: 'account',
-					action: 'email_destination_verify',
-					result: 'failure',
-					ip: requestIp,
-					path: url.pathname,
-					reason: result.reason,
-				})
-				return renderAppPage({
-					request,
-					env,
-					title: 'Verify email destination',
-					status: 400,
-					loaderData: {
-						emailVerification: {
-							ok: false,
-							kind: 'email_destination',
-							reason: result.reason,
-							error: getVerifyEmailDestinationError(result.reason),
-							ctaHref: emailDestinationsHref,
-							ctaLabel: 'Resend from email inbox',
-						},
-					},
-				})
-			}
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'email_destination_verify',
-				result: 'success',
-				email: result.email,
-				ip: requestIp,
-				path: url.pathname,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Email destination verified',
-				loaderData: {
-					emailVerification: {
-						ok: true,
-						kind: 'email_destination',
-						message:
-							'emailSend can now use this address. Mail comes from your platform inbox. Set it as the default from the email inbox if you want omitted `to` to use it.',
-						ctaHref: emailDestinationsHref,
-						ctaLabel: 'Go to email inbox',
-					},
-				},
-			})
+		async handler({ request }) {
+			const result = await loadVerifyEmailDestinationPage(request, env)
+			if (result instanceof Response) return result
+			return renderAppPage({ request, env, ...result })
 		},
 	} satisfies Action<typeof routes.verifyEmailDestination>
 }

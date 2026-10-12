@@ -1,0 +1,515 @@
+/** @jsxImportSource @emotion/react */
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { readJson } from '#client/routes/account-approval-shared.ts'
+import {
+	adminPlatformIntegrationsApiPath,
+	buildHrefWithUpdatedSearch,
+	filterApps,
+	getCurrentSearch,
+	parseExtraAuthorizeParams,
+	platformIntegrationsRoute,
+	readSearchFilter,
+	splitListInput,
+	type ActionState,
+} from '#client/routes/admin-platform-integrations-shared.ts'
+import {
+	type AdminPlatformIntegrationApp,
+	type AdminPlatformIntegrationsLoaderData,
+} from '#universal/loader-data.ts'
+import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
+import { colors, typography } from '#universal/styles/tokens.ts'
+import { css } from '@emotion/react'
+import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
+import { useRouter } from '@tanstack/react-router'
+import {
+	useEffect,
+	useRef,
+	useState,
+	type ChangeEvent,
+	type FormEvent,
+} from 'react'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
+import {
+	AccountManagementMessage,
+	AccountManagementShell,
+	AdminPageHeader,
+} from './account-management-components.tsx'
+import { IntegrationForm } from './admin-platform-integrations-form.tsx'
+import {
+	RecordDot,
+	RecordTable,
+	RecordTableSearch,
+	recordCellClamp,
+	recordStampCss,
+} from './record-table.tsx'
+const clampedCellCss = css(recordCellClamp(28))
+export function AdminPlatformIntegrationsPage(props: {
+	payload: AdminPlatformIntegrationsLoaderData
+	currentHref: string
+}) {
+	const [editedData, setEditedData] = useState<{
+		source: AdminPlatformIntegrationsLoaderData
+		value: AdminPlatformIntegrationsLoaderData
+	} | null>(null)
+	const { apps } =
+		editedData?.source === props.payload ? editedData.value : props.payload
+	const invalidatePages = usePageInvalidation(mutationResources)
+	const router = useRouter()
+	const replaceLocation = (href: string) =>
+		void router.navigate({ href, replace: true })
+	const lifetime = useRef<AbortController | null>(null)
+	const readerRef = useRef<FileReader | null>(null)
+	useEffect(() => {
+		const controller = new AbortController()
+		lifetime.current = controller
+		return () => {
+			controller.abort()
+			readerRef.current?.abort()
+		}
+	}, [])
+	const [message, setMessage] = useState<string | null>(null)
+	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
+	const [actionState, setActionState] = useState<ActionState>(
+		'idle',
+		/** Slug of the row an action is running against, for per-row labels. */
+	)
+	const [pendingSlug, setPendingSlug] = useState<string | null>(null)
+	const [pendingLogoBase64, setPendingLogoBase64] = useState<
+		string | undefined
+	>(undefined)
+	const [removeLogoChecked, setRemoveLogoChecked] = useState(
+		false,
+		/** Bumped after a successful edit save so uncontrolled fields remount. */
+	)
+	const [formRevision, setFormRevision] = useState(0)
+	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
+	function applyData(payload: AdminPlatformIntegrationsLoaderData) {
+		setEditedData({ source: props.payload, value: payload })
+		void invalidatePages()
+		setMessage(null)
+		setMessageTone('info')
+	}
+	function resetFormState() {
+		setPendingLogoBase64(undefined)
+		setRemoveLogoChecked(false)
+	}
+	function resetSelectionState() {
+		resetFormState()
+		setMessage(null)
+		setMessageTone('info')
+	}
+	async function submitAdminAction(
+		body: Record<string, unknown>,
+		nextActionState: Exclude<ActionState, 'idle'>,
+		successMessage: string,
+	): Promise<boolean> {
+		setActionState(nextActionState)
+		setPendingSlug(typeof body.slug === 'string' ? body.slug : null)
+		setMessage(null)
+		setMessageTone('info')
+		try {
+			const response = await fetch(adminPlatformIntegrationsApiPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				signal: lifetime.current?.signal,
+				body: JSON.stringify(body),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return false
+			}
+			const payload = await readJson<
+				AdminPlatformIntegrationsLoaderData & {
+					ok?: boolean
+					error?: string
+				}
+			>(response)
+			if (!response.ok || !payload?.ok) {
+				throw new Error(
+					payload?.error ?? 'Unable to update platform integrations.',
+				)
+			}
+			applyData(payload)
+			setMessage(successMessage)
+			setMessageTone('info')
+			return true
+		} catch (error) {
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Unable to update platform integrations.',
+			)
+			setMessageTone('error')
+			return false
+		} finally {
+			setActionState('idle')
+			setPendingSlug(null)
+		}
+	}
+	function handleLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
+		const input = event.currentTarget
+		if (!(input instanceof HTMLInputElement)) return
+		const file = input.files?.[0]
+		if (!file) {
+			setPendingLogoBase64(undefined)
+			return
+		}
+		setRemoveLogoChecked(false)
+		readerRef.current?.abort()
+		const reader = new FileReader()
+		readerRef.current = reader
+		reader.onload = () => {
+			if (typeof reader.result !== 'string') return
+			const commaIndex = reader.result.indexOf(',')
+			setPendingLogoBase64(
+				commaIndex >= 0 ? reader.result.slice(commaIndex + 1) : reader.result,
+			)
+		}
+		reader.readAsDataURL(file)
+	}
+	function handleSaveFormSubmit(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault()
+		if (!(event.currentTarget instanceof HTMLFormElement)) return
+		const form = event.currentTarget
+		const formData = new FormData(form)
+		const selection = platformIntegrationsRoute.getSelection(props.currentHref)
+		const isEditing = !selection.isCreating && selection.selectedId != null
+		// When editing, the URL selection is the row identity; an edited slug
+		// input becomes a rename-in-place (newSlug) rather than a new row.
+		// Compare canonicalized (the server does): a case-only edit is not a
+		// rename.
+		const inputSlug = String(formData.get('slug') ?? '').trim()
+		const slug = (
+			isEditing && selection.selectedId ? selection.selectedId : inputSlug
+		).trim()
+		const newSlug =
+			isEditing &&
+			inputSlug &&
+			normalizeProviderKey(inputSlug) !== normalizeProviderKey(slug)
+				? inputSlug
+				: null
+		const clientId = String(formData.get('clientId') ?? '').trim()
+		const tokenUrl = String(formData.get('tokenUrl') ?? '').trim()
+		const authorizeUrl = String(formData.get('authorizeUrl') ?? '').trim()
+		const flow = String(formData.get('flow') ?? '').trim()
+		if (!slug || !clientId || !tokenUrl || !authorizeUrl) {
+			setMessage('Slug, client id, token URL, and authorize URL are required.')
+			setMessageTone('error')
+			return
+		}
+		if (flow !== 'pkce' && flow !== 'confidential') {
+			setMessage('Choose a valid OAuth flow.')
+			setMessageTone('error')
+			return
+		}
+		const body: Record<string, unknown> = {
+			action: 'save',
+			slug,
+			...(newSlug ? { newSlug } : {}),
+			clientId,
+			tokenUrl,
+			authorizeUrl,
+			flow,
+			provider: String(formData.get('provider') ?? '').trim() || null,
+			label: String(formData.get('label') ?? '').trim() || null,
+			description: String(formData.get('description') ?? '').trim() || null,
+			apiBaseUrl: String(formData.get('apiBaseUrl') ?? '').trim() || null,
+			scopeSeparator:
+				String(formData.get('scopeSeparator') ?? '').trim() || null,
+			enabled: formData.get('enabled') === 'on',
+			allowedScopes: splitListInput(
+				String(formData.get('allowedScopes') ?? ''),
+			),
+			defaultScopes: splitListInput(
+				String(formData.get('defaultScopes') ?? ''),
+			),
+			requiredHosts: splitListInput(
+				String(formData.get('requiredHosts') ?? ''),
+			),
+			extraAuthorizeParams: parseExtraAuthorizeParams(
+				String(formData.get('extraAuthorizeParams') ?? ''),
+			),
+		}
+		// Always include the key: the handler maps non-literal values (the
+		// "default" option) to null, which clears a stored style — omitting
+		// the key would retain it instead.
+		body.tokenExchangeStyle = String(
+			formData.get('tokenExchangeStyle') ?? 'default',
+		)
+		const clientSecret = String(formData.get('clientSecret') ?? '').trim()
+		if (clientSecret) {
+			body.clientSecret = clientSecret
+		}
+		if (removeLogoChecked) {
+			body.logoBase64 = ''
+		} else if (pendingLogoBase64 !== undefined) {
+			body.logoBase64 = pendingLogoBase64
+		}
+		void submitAdminAction(
+			body,
+			'saving-form',
+			newSlug
+				? `Renamed platform integration ${slug} to ${newSlug}.`
+				: isEditing
+					? `Saved platform integration ${slug}.`
+					: `Created platform integration ${slug}.`,
+		).then((ok) => {
+			if (!ok) return
+			resetFormState()
+			const search = getCurrentSearch(props.currentHref)
+			if (isEditing && !newSlug) {
+				setFormRevision((current) => current + 1)
+				return
+			}
+			// Creation and rename both land on the row's (new) detail URL.
+			replaceLocation(
+				platformIntegrationsRoute.buildDetailHref(newSlug ?? slug, search),
+			)
+		})
+	}
+	function handleToggleEnabled(app: AdminPlatformIntegrationApp) {
+		void submitAdminAction(
+			{
+				action: 'save',
+				slug: app.slug,
+				clientId: app.clientId,
+				tokenUrl: app.tokenUrl,
+				authorizeUrl: app.authorizeUrl,
+				flow: app.flow,
+				enabled: !app.enabled,
+			},
+			'toggling-enabled',
+			`${app.enabled ? 'Disabled' : 'Enabled'} ${app.slug}.`,
+		)
+	}
+	function handleToggleVisibility(app: AdminPlatformIntegrationApp) {
+		const visibility = app.visibility === 'published' ? 'draft' : 'published'
+		void submitAdminAction(
+			{
+				action: 'save',
+				slug: app.slug,
+				clientId: app.clientId,
+				tokenUrl: app.tokenUrl,
+				authorizeUrl: app.authorizeUrl,
+				flow: app.flow,
+				visibility,
+			},
+			'toggling-visibility',
+			visibility === 'published'
+				? `Published ${app.slug}.`
+				: `Moved ${app.slug} to draft.`,
+		)
+	}
+	function handleDelete(app: AdminPlatformIntegrationApp) {
+		void submitAdminAction(
+			{
+				action: 'delete',
+				slug: app.slug,
+			},
+			'deleting',
+			`Deleted platform integration ${app.slug}.`,
+		).then((ok) => {
+			if (!ok) return
+			const href = props.currentHref
+			const selection = platformIntegrationsRoute.getSelection(href)
+			const search = getCurrentSearch(href)
+			resetFormState()
+			if (selection.selectedId === app.slug || selection.isCreating) {
+				replaceLocation(platformIntegrationsRoute.buildListHref(search))
+			}
+		})
+	}
+	function cancelEditor() {
+		const search = getCurrentSearch(props.currentHref)
+		resetSelectionState()
+		replaceLocation(platformIntegrationsRoute.buildListHref(search))
+	}
+	function startCreateIntegration() {
+		if (actionState !== 'idle') return
+		const search = getCurrentSearch(props.currentHref)
+		resetSelectionState()
+		replaceLocation(platformIntegrationsRoute.buildNewHref(search))
+	}
+	const currentHref = props.currentHref
+	const pending = false
+	const status: string = 'ready'
+	const selection = platformIntegrationsRoute.getSelection(currentHref)
+	const search = readSearchFilter(currentHref)
+	const filteredApps = filterApps(apps, search)
+	const editingApp = selection.isCreating
+		? null
+		: (apps.find((app) => app.slug === selection.selectedId) ?? null)
+	const isMutating = actionState !== 'idle'
+	const showEditor = selection.isCreating || editingApp != null
+	const showNotFound =
+		selection.selectedId != null &&
+		!selection.isCreating &&
+		editingApp == null &&
+		status === 'ready'
+	return (
+		<AccountManagementShell busy={pending}>
+			<AdminPageHeader
+				title="Admin platform integrations"
+				description="Manage operator-provisioned OAuth apps stored in the platform_oauth_apps table. Users only discover and newly connect apps that are both enabled and published; drafts keep serving existing connections."
+				currentHref={currentHref}
+			/>
+			{status === 'loading' ? (
+				<p css={{ color: colors.textMuted, margin: 0 }}>
+					Loading platform integrations…
+				</p>
+			) : null}
+			{message ? (
+				<AccountManagementMessage tone={messageTone}>
+					{message}
+				</AccountManagementMessage>
+			) : null}
+			{status === 'ready' ? (
+				<RecordTable
+					mode="expand"
+					busy={pending}
+					ariaLabel="Platform integrations"
+					selectedId={selection.selectedId}
+					createRow={
+						selection.isCreating
+							? {
+									href: isMutating
+										? undefined
+										: platformIntegrationsRoute.buildNewHref(
+												getCurrentSearch(currentHref),
+											),
+									label: 'New integration',
+								}
+							: undefined
+					}
+					onNavigate={() => {
+						resetSelectionState()
+					}}
+					countLabel={`${filteredApps.length} of ${apps.length} integrations`}
+					emptyLabel={
+						apps.length === 0
+							? 'No platform integrations yet. Create one to get started.'
+							: 'No integrations match the current search.'
+					}
+					toolbar={
+						<>
+							<RecordTableSearch
+								label="Search integrations"
+								placeholder="Search slug, provider, or label"
+								value={search}
+								onInput={(value) => {
+									replaceLocation(
+										buildHrefWithUpdatedSearch(currentHref, value),
+									)
+								}}
+							/>
+							<button
+								type="button"
+								disabled={isMutating}
+								onClick={startCreateIntegration}
+								css={primaryButtonCss}
+							>
+								Create integration
+							</button>
+						</>
+					}
+					columns={[
+						{ key: 'slug', label: 'Slug', primary: true },
+						{ key: 'provider', label: 'Provider' },
+						{ key: 'label', label: 'Label', drop: 1 },
+						{ key: 'enabled', label: 'Enabled' },
+						{ key: 'visibility', label: 'Visibility' },
+						{
+							key: 'connections',
+							label: 'Connections',
+							align: 'end',
+							drop: 2,
+						},
+						{ key: 'updated', label: 'Updated', drop: 3 },
+					]}
+					rows={filteredApps.map((app) => ({
+						id: app.slug,
+						href: isMutating
+							? undefined
+							: platformIntegrationsRoute.buildDetailHref(
+									app.slug,
+									new URL(currentHref, 'http://localhost').search,
+								),
+						cells: {
+							slug: (
+								<code
+									css={{
+										fontSize: typography.fontSize.sm,
+										...recordCellClamp(24),
+									}}
+								>
+									{app.slug}
+								</code>
+							),
+							provider: <span css={clampedCellCss}>{app.provider || '—'}</span>,
+							label: <span css={clampedCellCss}>{app.label || '—'}</span>,
+							enabled: (
+								<RecordDot
+									active={app.enabled}
+									title={app.enabled ? 'Enabled' : 'Disabled'}
+								/>
+							),
+							visibility: (
+								<span
+									data-testid={`platform-integration-visibility-${app.slug}`}
+								>
+									{app.visibility === 'published' ? 'Published' : 'Draft'}
+								</span>
+							),
+							connections: String(app.connectionCount),
+							updated: (
+								<span css={recordStampCss}>
+									{formatTimestampDate(app.updatedAt)}
+								</span>
+							),
+						},
+					}))}
+					record={
+						showEditor ? (
+							<IntegrationForm
+								{...{
+									editingApp,
+									formRevision,
+									actionState,
+									pendingSlug,
+									removeLogoChecked,
+									onSubmit: handleSaveFormSubmit,
+									onLogoFileChange: handleLogoFileChange,
+									onRemoveLogoChange: (checked) => {
+										setRemoveLogoChecked(checked)
+										if (removeLogoChecked) {
+											setPendingLogoBase64(undefined)
+										}
+									},
+									onToggleEnabled: handleToggleEnabled,
+									onToggleVisibility: handleToggleVisibility,
+									onDelete: handleDelete,
+									onCancel: cancelEditor,
+								}}
+							/>
+						) : showNotFound ? (
+							<p css={{ margin: 0, color: colors.textMuted }}>
+								Platform integration not found.
+							</p>
+						) : null
+					}
+				/>
+			) : null}
+		</AccountManagementShell>
+	)
+}
+
+const mutationResources = [
+	'loadAdminPlatformIntegrations',
+	'loadIntegrationsPage',
+	'loadOnboarding',
+	'loadAccountPage',
+] as const

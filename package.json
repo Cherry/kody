@@ -88,14 +88,14 @@
     "maintenance-mode": "node tools/maintenance-mode.ts",
     "site-perf": "node tools/site-perf/collect.ts",
     "generate-types": "node --env-file=packages/worker/.env ./wrangler-env.ts types ./packages/worker/worker-configuration.d.ts && node tools/strip-worker-process-env-types.ts ./packages/worker/worker-configuration.d.ts",
-    "typecheck": "node tools/run-nx.ts run worker:typecheck && tsc -p tsconfig-tools-typecheck.json && tsc --noEmit -p packages/backup-control-plane/tsconfig.json && tsc --noEmit -p packages/status/tsconfig.json && tsc --noEmit -p packages/jobs-worker/tsconfig.json && tsc --noEmit -p packages/highlight-worker/tsconfig.json && tsc --noEmit -p packages/api-worker/tsconfig.json && tsc --noEmit -p packages/api-docs-worker/tsconfig.json && tsc --noEmit -p packages/nx-cache/tsconfig.json",
+    "typecheck": "node tools/run-nx.ts run worker:typecheck && tsc -p tsconfig-tools-typecheck.json && tsc --noEmit -p packages/backup-control-plane/tsconfig.json && tsc --noEmit -p packages/status/tsconfig.json && tsc --noEmit -p packages/jobs-worker/tsconfig.json && tsc --noEmit -p packages/highlight-worker/tsconfig.json && tsc --noEmit -p packages/api-worker/tsconfig.json && tsc --noEmit -p packages/api-docs-worker/tsconfig.json && tsc --noEmit -p packages/nx-cache/tsconfig.json && npm run typecheck:start",
     "test": "node tools/run-nx.ts run worker:test",
     "test:node": "node tools/run-nx.ts run worker:test-node",
     "test:workers": "node tools/run-nx.ts run worker:test-workers",
     "test:push": "CI=1 npm run test:node && CI=1 npm run test:workers",
     "inspect": "npx -y @mcpjam/inspector inspector",
     "prevalidate": "node tools/build-worker-bundler-modules.ts && node tools/build-guide-catalog-modules.ts",
-    "validate": "concurrently -n format,lint,typecheck,test-node,test-workers,e2e,mcp,backup-build,status-build,nx-cache-build,jobs-build,highlight-build,api-build,api-docs-build,runtime-build,platform-build,startup,primitives,migrations,deploy-guardrails,workflows,origin-production-exports,docs-temporal,docs-decisions,docs-invoke,mermaid,slop-ratchet,knip,audit,lockfile,overrides -c green,yellow,magenta,blue,cyan,red,blueBright,yellowBright,cyanBright,cyan,white,gray,gray,gray,redBright,greenBright,magentaBright,whiteBright,black,white,cyanBright,gray,white,cyan,white,yellow,magenta,red,blue,green,greenBright \"npm run format:check\" \"npm run lint\" \"npm run typecheck\" \"CI=1 npm run test:node\" \"CI=1 npm run test:workers\" \"CI=1 npm run test:e2e:run\" \"CI=1 npm run test:mcp\" \"npm run backup:build\" \"npm run status:build\" \"npm run nx-cache:build\" \"npm run jobs:build\" \"npm run highlight:build\" \"npm run api:build\" \"npm run api-docs:build\" \"npm run runtime:build\" \"npm run platform:build\" \"npm run worker-startup-bundles:check && npm run worker-startup-time:check\" \"npm run primitives:check\" \"npm run migrations:check\" \"npm run deploy-guardrails:check\" \"npm run workflows:check\" \"npm run origin-production-exports:check\" \"npm run docs:check-temporal\" \"npm run docs:check-decisions\" \"npm run docs:check-no-packages-invoke\" \"npm run mermaid:check\" \"npm run slop-ratchet:check\" \"npm run knip\" \"npm run audit:prod\" \"npm run lockfile:check\" \"npm run overrides:check\"",
+    "validate": "concurrently -n format,lint,typecheck,test-node,test-workers,e2e,mcp,backup-build,status-build,nx-cache-build,jobs-build,highlight-build,api-build,api-docs-build,runtime-build,platform-build,startup,primitives,migrations,deploy-guardrails,workflows,origin-production-exports,docs-temporal,docs-decisions,docs-invoke,mermaid,slop-ratchet,knip,audit,lockfile,overrides -c green,yellow,magenta,blue,cyan,red,blueBright,yellowBright,cyanBright,cyan,white,gray,gray,gray,redBright,greenBright,magentaBright,whiteBright,black,white,cyanBright,gray,white,cyan,white,yellow,magenta,red,blue,green,greenBright \"npm run format:check\" \"npm run lint\" \"npm run typecheck\" \"CI=1 npm run test:node\" \"CI=1 npm run test:workers\" \"node tools/framework-comparison/validate-e2e.mjs\" \"CI=1 npm run test:mcp\" \"npm run backup:build\" \"npm run status:build\" \"npm run nx-cache:build\" \"npm run jobs:build\" \"npm run highlight:build\" \"npm run api:build\" \"npm run api-docs:build\" \"npm run runtime:build\" \"npm run platform:build\" \"npm run worker-startup-bundles:check && npm run worker-startup-time:check\" \"npm run primitives:check\" \"npm run migrations:check\" \"npm run deploy-guardrails:check\" \"npm run workflows:check\" \"npm run origin-production-exports:check\" \"npm run docs:check-temporal\" \"npm run docs:check-decisions\" \"npm run docs:check-no-packages-invoke\" \"npm run mermaid:check\" \"npm run slop-ratchet:check\" \"npm run knip\" \"npm run audit:prod\" \"npm run lockfile:check\" \"npm run overrides:check\"",
     "validate:fix": "npm run format && npm run lint:fix",
     "test:e2e:ensure": "node tools/ensure-playwright-browser.ts",
     "test:e2e:a11y": "playwright test e2e/a11y.spec.ts",
@@ -108,7 +108,11 @@
     "postinstall": "patch-package",
     "nx:graph": "nx graph",
     "nx:show-projects": "nx show projects",
-    "audit:prod": "npm audit --omit=dev --audit-level=moderate"
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "dev:start": "node --env-file=packages/worker/.env node_modules/vite/bin/vite.js --config vite.start.config.ts",
+    "build:start": "vite build --config vite.start.config.ts && node tools/framework-comparison/verify-redact-build.mjs",
+    "typecheck:start": "tsc -p packages/worker/tsconfig-start-server.json && tsc -p packages/worker/tsconfig-start.json",
+    "test:e2e:start": "npm run test:e2e:ensure && playwright test --config playwright.start.config.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -123,8 +127,12 @@
     "@pitlane/dev": "^0.7.0",
     "@playwright/test": "^1.62.1",
     "@sentry/cli": "^3.7.0",
+    "@tanstack/intent": "0.5.5",
     "@types/node": "^26.4.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "@types/semver": "^7.8.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.5",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.2",
@@ -190,5 +198,17 @@
     "sharp": true,
     "unrs-resolver": true,
     "workerd": true
+  },
+  "intent": {
+    "skills": [
+      "@tanstack/react-start",
+      "@tanstack/react-router",
+      "@tanstack/router-core",
+      "@tanstack/start-client-core",
+      "@tanstack/start-server-core",
+      "@tanstack/router-plugin",
+      "@tanstack/virtual-file-routes",
+      "@tanstack/redact"
+    ]
   }
 }

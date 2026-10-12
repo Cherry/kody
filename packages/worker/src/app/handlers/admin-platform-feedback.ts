@@ -28,7 +28,7 @@ function sanitizeFeedbackIdForAudit(feedbackId: string) {
 		.slice(0, maxAuditFeedbackIdLength)
 }
 
-async function auditPlatformFeedbackRead(input: {
+export async function auditPlatformFeedbackRead(input: {
 	env: Env
 	request: Request
 	actorEmail?: string | null

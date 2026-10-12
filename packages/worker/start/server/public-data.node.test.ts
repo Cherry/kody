@@ -1,0 +1,119 @@
+import { beforeEach, expect, test, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+	response: () => new Response(),
+	moved: { kind: 'redirect', to: '/@owner/new', shared: true },
+	headers: new Headers(),
+	status: 200,
+	request: new Request('https://kody.test/_server/test', {
+		headers: { Cookie: 'kody_session=test' },
+	}),
+}))
+
+// Exercise the real validator and handler without a Start HTTP transport.
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: () => {
+		let validate = (data: unknown) => data
+		const builder = {
+			validator(next: (data: unknown) => unknown) {
+				validate = next
+				return builder
+			},
+			handler(run: (input: { data: unknown }) => Promise<unknown>) {
+				return (input: { data: unknown }) => run({ data: validate(input.data) })
+			},
+		}
+		return builder
+	},
+}))
+vi.mock('cloudflare:workers', () => ({ env: { COOKIE_SECRET: 'test' } }))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => mocks.request,
+	setResponseHeader: (name: string, value: string) =>
+		mocks.headers.set(name, value),
+	setResponseStatus: (status: number) => {
+		mocks.status = status
+	},
+}))
+vi.mock('../../src/app/env.ts', () => ({ getEnv: (env: unknown) => env }))
+vi.mock('../../src/app/auth-session.ts', () => ({
+	setAuthSessionSecret: () => {},
+}))
+vi.mock('../../src/app/handlers/community-detail.tsx', () => ({
+	createCommunityPackageApiHandler: () => ({
+		handler: async () => mocks.response(),
+	}),
+	createCommunityDetailApiHandler: () => ({
+		handler: async () => mocks.response(),
+	}),
+}))
+vi.mock('./document-head.ts', () => ({
+	loadDocumentHead: () => ({ title: 'Package' }),
+}))
+vi.mock('../../src/app/session-info.ts', () => ({
+	loadSessionInfo: async () => ({ session: null, setCookie: null }),
+}))
+vi.mock('../../universal/identity-icon-urls.ts', () => ({
+	resolvePackageListIconUrl: () => null,
+}))
+vi.mock('../../src/package-registry/package-publish-lock.ts', () => ({
+	buildPackagePublishApprovalPath: () => '/approval',
+}))
+vi.mock('../../src/app/package-page.ts', () => ({
+	loadPackagePage: async () => mocks.moved,
+}))
+const { loadPackage } = await import('./public-data.ts')
+
+beforeEach(() => {
+	mocks.headers = new Headers()
+	mocks.status = 200
+	mocks.moved = { kind: 'redirect', to: '/@owner/new', shared: true }
+})
+
+test('accepted shares cannot enter owner settings even when they include package metadata', async () => {
+	mocks.response = () =>
+		Response.json({
+			ok: true,
+			viewerIsOwner: false,
+			ownerPackage: { id: 'owned-by-someone-else' },
+		})
+	await expect(
+		loadPackage({
+			data: { username: 'owner', kodyId: 'package', page: 'settings' },
+		}),
+	).rejects.toMatchObject({ isNotFound: true })
+})
+test('unauthorized packages retain HTTP 401 instead of a successful document', async () => {
+	mocks.response = () =>
+		Response.json({ ok: false, error: 'Unauthorized.' }, { status: 401 })
+	await expect(
+		loadPackage({ data: { username: 'owner', kodyId: 'private' } }),
+	).resolves.toEqual({ kind: 'unauthorized' })
+	expect(mocks.status).toBe(401)
+})
+test.each([true, false])(
+	'moved packages preserve queries and public/private redirect policy, public=%s',
+	async (shared) => {
+		mocks.moved.shared = shared
+		mocks.response = () =>
+			Response.json({ ok: false, redirectTo: '/@owner/new' }, { status: 404 })
+		await expect(
+			loadPackage({
+				data: {
+					username: 'owner',
+					kodyId: 'old',
+					page: 'settings',
+					search: '?commit=abc&view=diff',
+				},
+			}),
+		).rejects.toMatchObject({
+			options: {
+				href: '/@owner/new/settings?commit=abc&view=diff',
+				statusCode: shared ? 301 : 302,
+			},
+		})
+		expect(mocks.headers.get('Cache-Control')).toBe(
+			shared ? 'public, max-age=3600' : 'private, no-store',
+		)
+	},
+)

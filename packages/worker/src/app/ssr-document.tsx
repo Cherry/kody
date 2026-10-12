@@ -1,5 +1,6 @@
 /** @jsxImportSource remix/component */
 /** @jsxRuntime automatic */
+import { CANONICAL_ORIGIN_META_NAME } from '#universal/document-head-markers.ts'
 import { type Handle } from 'remix/component'
 import { HMR } from '#app/hmr.ts'
 import { AppRoot, type AppRootProps } from '#client/app-root.tsx'
@@ -8,7 +9,6 @@ import {
 	buildStylesheetHref,
 } from '#app/client-build-id.ts'
 import {
-	CANONICAL_ORIGIN_META_NAME,
 	DEFAULT_DOCUMENT_TITLE,
 	DOCUMENT_HEAD_ATTR,
 	type ResolvedDocumentHead,

@@ -237,7 +237,7 @@ export function createAccountTwoFactorApiHandler(env: Env) {
 	} satisfies Action<typeof routes.accountTwoFactorApi>
 }
 
-async function loadTwoFactorStatus(
+export async function loadTwoFactorStatus(
 	db: D1Database,
 	userId: number,
 ): Promise<AccountTwoFactorLoaderData> {

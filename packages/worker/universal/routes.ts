@@ -1,4 +1,4 @@
-import { post, route } from 'remix/routes'
+import { get, post, route } from 'remix/routes'
 
 export const routes = route({
 	home: '/',
@@ -294,7 +294,7 @@ export const routes = route({
 	sentryTunnel: post('/sentry-tunnel'),
 	login: '/login',
 	ogPageImage: '/og/:page.png',
-	pricing: '/pricing',
+	pricing: get('/pricing'),
 	faq: '/faq',
 	caseStudies: '/case-studies',
 	support: '/support',

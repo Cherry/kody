@@ -194,7 +194,7 @@ export function createAccountMcpOauthClientsApiHandler(env: Env) {
 	} satisfies Action<typeof routes.accountMcpOauthClientsApi>
 }
 
-async function loadClientsPayload(
+export async function loadClientsPayload(
 	db: D1Database,
 	userId: number,
 ): Promise<AccountMcpOauthClientsLoaderData> {

@@ -34,6 +34,19 @@ test('does not serialize Worker secrets or a live Cloudflare token', () => {
 	})
 })
 
+test('forwards explicitly configured local email domains without inventing them', () => {
+	expect(
+		collectLocalOriginDevVars({
+			USER_EMAIL_DOMAIN: 'inbox.localhost',
+			SYSTEM_EMAIL_DOMAIN: 'localhost',
+		}),
+	).toEqual({
+		WRANGLER_IS_LOCAL_DEV: 'true',
+		USER_EMAIL_DOMAIN: 'inbox.localhost',
+		SYSTEM_EMAIL_DOMAIN: 'localhost',
+	})
+})
+
 test('always injects WRANGLER_IS_LOCAL_DEV and copies mock Cloudflare vars', () => {
 	expect(
 		collectLocalOriginDevVars(

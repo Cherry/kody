@@ -1,0 +1,185 @@
+/** @jsxImportSource @emotion/react */
+import { type CSSObject } from '@emotion/react'
+import { useNavigate } from '@tanstack/react-router'
+import {
+	type ProfileLoaderData,
+	toProfileShellLoaderData,
+} from '#universal/loader-data.ts'
+import { routes } from '#universal/routes.ts'
+import {
+	defaultProfilePackageSortDirection,
+	readProfilePackageFiltersFromHref,
+} from '#universal/profile-search.ts'
+import { ProfileContent } from '../components/profile-content.tsx'
+import { renderProfileIdentity } from '../components/profile-identity.tsx'
+import { ProfileRepositorySearchInput } from '../components/profile-search-field.tsx'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import {
+	fieldCss,
+	fieldLabelCss,
+	getPrimaryButtonCss,
+	layoutMaxWidths,
+	pageGutter,
+} from '#universal/styles/style-primitives.ts'
+export function ProfileRoute({
+	data,
+	currentHref,
+}: {
+	data: ProfileLoaderData
+	currentHref: string
+}) {
+	const readyShell = toProfileShellLoaderData(data)
+	const visibleList = data
+	const username = data.profile.username
+	const filters = readProfilePackageFiltersFromHref(currentHref, {
+		allowOwnerFilters: data.isSelf,
+	})
+	const searchQuery = filters.query
+	const queryAppliedByLoader = new URL(
+		currentHref,
+		'https://kody.local',
+	).searchParams.has('limit')
+	const navigate = useNavigate()
+	return (
+		<section css={pageCss} data-testid="profile-page">
+			<div css={layoutCss}>
+				{readyShell ? renderProfileIdentity(readyShell) : null}
+
+				<div css={mainCss}>
+					<h2 css={packagesHeadingCss}>Repositories</h2>
+					<form
+						method="get"
+						action={routes.profile.href({ username })}
+						role="search"
+						onSubmit={(event) => {
+							event.preventDefault()
+							const search = new URLSearchParams()
+							for (const [key, value] of new FormData(event.currentTarget))
+								if (typeof value === 'string') search.append(key, value)
+							void navigate({ to: `/@${username}?${search}` })
+						}}
+						css={searchFormCss}
+					>
+						{filters.visibility !== 'all' ? (
+							<input
+								type="hidden"
+								name="visibility"
+								value={filters.visibility}
+							/>
+						) : null}
+						{filters.listing !== 'all' ? (
+							<input type="hidden" name="listing" value={filters.listing} />
+						) : null}
+						{filters.hidden !== 'all' ? (
+							<input type="hidden" name="hidden" value={filters.hidden} />
+						) : null}
+						{filters.app !== 'all' ? (
+							<input type="hidden" name="app" value={filters.app} />
+						) : null}
+						{filters.package !== 'all' ? (
+							<input type="hidden" name="package" value={filters.package} />
+						) : null}
+						{filters.sort !== 'updated' ? (
+							<input type="hidden" name="sort" value={filters.sort} />
+						) : null}
+						{filters.dir !==
+						defaultProfilePackageSortDirection(filters.sort) ? (
+							<input type="hidden" name="dir" value={filters.dir} />
+						) : null}
+						<label css={searchFieldCss}>
+							<span css={fieldLabelCss}>Search repositories</span>
+							<ProfileRepositorySearchInput
+								username={username}
+								filters={filters}
+							/>
+						</label>
+						<button
+							type="submit"
+							css={{ ...getPrimaryButtonCss(), alignSelf: 'end' }}
+						>
+							Search
+						</button>
+					</form>
+
+					{visibleList ? (
+						<ProfileContent
+							profile={visibleList.profile}
+							packages={visibleList.packages}
+							activity={visibleList.activity}
+							query={searchQuery || null}
+							visibility={filters.visibility}
+							listing={filters.listing}
+							hidden={filters.hidden}
+							app={filters.app}
+							package={filters.package}
+							sort={filters.sort}
+							dir={filters.dir}
+							isSelf={readyShell?.isSelf === true}
+							queryAppliedByLoader={queryAppliedByLoader}
+						/>
+					) : null}
+				</div>
+			</div>
+		</section>
+	)
+}
+
+const pageCss = {
+	maxWidth: layoutMaxWidths.extended,
+	marginInline: 'auto',
+	width: '100%',
+	boxSizing: 'border-box' as const,
+	padding: `clamp(2rem, 5vw, 3.5rem) ${pageGutter} clamp(4rem, 8vw, 6.5rem)`,
+} satisfies CSSObject
+
+const layoutCss = {
+	display: 'grid',
+	gap: 'clamp(1.75rem, 4vw, 3rem)',
+	alignItems: 'start',
+	'@media (min-width: 821px)': {
+		gridTemplateColumns: '17.5rem minmax(0, 1fr)',
+		gap: '2.75rem',
+	},
+} satisfies CSSObject
+
+const mainCss = {
+	display: 'grid',
+	gap: spacing.lg,
+	minWidth: 0,
+} satisfies CSSObject
+
+const packagesHeadingCss = {
+	margin: 0,
+	fontFamily: typography.fontFamilyDisplay,
+	fontSize: 'clamp(1.35rem, 2.4vw, 1.7rem)',
+	fontWeight: 720,
+	letterSpacing: '-0.018em',
+	color: colors.text,
+} satisfies CSSObject
+
+const unavailableTitleCss = {
+	margin: 0,
+	fontSize: typography.fontSize['2xl'],
+	fontWeight: typography.fontWeight.semibold,
+} satisfies CSSObject
+
+const searchFormCss = {
+	display: 'flex',
+	gap: spacing.md,
+	alignItems: 'end',
+	flexWrap: 'wrap' as const,
+} satisfies CSSObject
+
+const searchFieldCss = {
+	...fieldCss,
+	flex: '1 1 16rem',
+	minWidth: '12rem',
+} satisfies CSSObject
+
+export function ProfileUnavailable() {
+	return (
+		<section css={pageCss} data-testid="profile-unavailable">
+			<h1 css={unavailableTitleCss}>This profile isn't available.</h1>
+		</section>
+	)
+}

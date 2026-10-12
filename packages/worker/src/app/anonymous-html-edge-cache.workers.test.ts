@@ -8,7 +8,10 @@ import {
 } from '#app/anonymous-html-edge-cache.ts'
 import { silenceExpectedConsoleWarns } from '#worker/test-support/console-spies.ts'
 
-const env = { APP_BASE_URL: 'https://test.kody.dev' }
+const env = {
+	CF_VERSION_METADATA: { id: 'version-1' },
+	APP_BASE_URL: 'https://test.kody.dev',
+}
 const encoder = new TextEncoder()
 
 function defaultCache() {
@@ -110,4 +113,117 @@ test('a body that errors mid-stream is never stored', async () => {
 			buildAnonymousHtmlCacheKey(new Request(url), env),
 		),
 	).toBeUndefined()
+})
+
+test('cached nonce documents get a fresh policy and matching trusted script nonce on every delivery', async () => {
+	const url = `https://test.kody.dev/pricing?nonce=${crypto.randomUUID()}`
+	const originalNonce = 'originalnonce0123456789'
+	const originalHtml = `<!DOCTYPE html><html><head><meta property="csp-nonce" content="${originalNonce}"></head><body><script nonce="${originalNonce}">void 0</script><script>untrusted()</script><script nonce="wrong">untrusted()</script></body></html>`
+	const miss = await serve(new Request(url), () => {
+		const response = storeableHtml(originalHtml)
+		response.headers.set(
+			'Content-Security-Policy',
+			`script-src 'self' 'nonce-${originalNonce}'`,
+		)
+		return response
+	})
+	const hit = await serve(new Request(url), () => {
+		throw new Error('cached document should be reused')
+	})
+	const nonces = [miss, hit].map(({ response, text }) => {
+		const nonce = response.headers
+			.get('Content-Security-Policy')
+			?.match(/'nonce-([^']+)'/)?.[1]
+		expect(nonce).toBeTruthy()
+		expect(text).toContain(`<script nonce="${nonce}">void 0</script>`)
+		expect(text).toContain(`property="csp-nonce" content="${nonce}"`)
+		expect(text).toContain('<script>untrusted()</script>')
+		expect(text).toContain('<script nonce="wrong">untrusted()</script>')
+		expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+		return nonce
+	})
+	expect(nonces[0]).toBe(originalNonce)
+	expect(nonces[1]).not.toBe(originalNonce)
+	expect(nonces[0]).not.toBe(nonces[1])
+	await expect(miss.cached?.text()).resolves.toBe(originalHtml)
+	expect(hit.response.headers.get(anonymousHtmlEdgeCacheHeader)).toBe('HIT')
+})
+
+test('server function JSON is never parsed or rewritten as HTML', async () => {
+	const request = new Request('https://test.kody.dev/_serverFn/test')
+	const body = JSON.stringify({
+		value: '<script nonce="known">literal text</script>',
+	})
+	const result = await serve(
+		request,
+		() =>
+			new Response(body, {
+				headers: {
+					'Content-Type': 'application/json',
+					'Cache-Control': 'private, no-store',
+					'Content-Security-Policy': "script-src 'self' 'nonce-known'",
+				},
+			}),
+	)
+	expect(result.text).toBe(body)
+	expect(result.cached).toBeUndefined()
+})
+
+test('large nonce documents retain their closing markup on cache miss and hit', async () => {
+	const url = `https://test.kody.dev/pricing?large=${crypto.randomUUID()}`
+	const html = `<!DOCTYPE html><html><body>${'<p>content</p>'.repeat(30_000)}<footer>complete document</footer><script nonce="originalnonce">void 0</script></body></html>`
+	const miss = await serve(new Request(url), () => {
+		const response = storeableHtml(html)
+		response.headers.set(
+			'Content-Security-Policy',
+			"script-src 'self' 'nonce-originalnonce'",
+		)
+		return response
+	})
+	const hit = await serve(new Request(url), () => {
+		throw new Error('expected cache hit')
+	})
+	for (const result of [miss, hit]) {
+		expect(result.text).toContain('<footer>complete document</footer>')
+		expect(result.text.endsWith('</html>')).toBe(true)
+		expect(result.text.length).toBeGreaterThanOrEqual(html.length)
+	}
+	expect(hit.response.headers.get(anonymousHtmlEdgeCacheHeader)).toBe('HIT')
+})
+
+test('a deployment cannot replay previous assets or accept a caller-selected version', async () => {
+	const url = `https://test.kody.dev/pricing?campaign=${crypto.randomUUID()}`
+	async function fetchVersion(id: string | undefined, requestUrl = url) {
+		const ctx = createExecutionContext()
+		const response = await serveAnonymousHtmlFromCache(
+			new Request(requestUrl),
+			{ ...env, CF_VERSION_METADATA: id ? { id } : undefined },
+			ctx,
+			async () =>
+				storeableHtml(
+					`<html><body><script src="/assets/${id ?? 'uncached'}.js"></script></body></html>`,
+				),
+		)
+		const body = await response.text()
+		await waitOnExecutionContext(ctx)
+		return { body, lookup: response.headers.get(anonymousHtmlEdgeCacheHeader) }
+	}
+	expect((await fetchVersion('v1')).lookup).toBe('MISS')
+	expect((await fetchVersion('v1')).lookup).toBe('HIT')
+	const deployed = await fetchVersion('v2')
+	expect(deployed.lookup).toBe('MISS')
+	expect(deployed.body).toContain('/assets/v2.js')
+	const forged = await fetchVersion(
+		'v2',
+		`${url}&__worker_version=v1&__worker_version=v1`,
+	)
+	expect(forged.lookup).toBe('HIT')
+	expect(forged.body).toContain('/assets/v2.js')
+	expect((await fetchVersion('v2', `${url}&content=different`)).lookup).toBe(
+		'MISS',
+	)
+	const missing = await fetchVersion(undefined, `${url}&__worker_version=v1`)
+	expect(missing.lookup).toBeNull()
+	expect(missing.body).toContain('/assets/uncached.js')
+	expect((await fetchVersion(undefined)).lookup).toBeNull()
 })

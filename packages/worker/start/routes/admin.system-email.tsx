@@ -1,0 +1,40 @@
+/** @jsxImportSource @emotion/react */
+import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { AdminSystemEmailPage } from '../pages/admin-system-email.tsx'
+import { loadAdminSystemEmail } from '#start/server/admin-system-email'
+import { documentHead } from '../components/document-head.ts'
+const pageQuery = createPageQuery(
+	'loadAdminSystemEmail',
+	loadAdminSystemEmail,
+	{ freshAuthorization: true },
+)
+
+export const Route = createFileRoute('/admin/system-email')({
+	loaderDeps: ({ search }) => search,
+	context: ({ location }) => ({
+		pageQueryInput: location.pathname + location.searchStr,
+	}),
+	loader: ({ context, preload }) =>
+		loadPageQuery(
+			context.queryClient,
+			pageQuery(context.actorKey, context.pageQueryInput),
+			preload,
+		),
+	head: ({ loaderData }) => documentHead(loaderData?.head),
+	component: SystemEmailPage,
+})
+function SystemEmailPage() {
+	const data = usePageData()
+	const location = useLocation()
+	return data.forbidden ? (
+		<p>Forbidden</p>
+	) : (
+		<AdminSystemEmailPage payload={data.payload} currentHref={location.href} />
+	)
+}
+
+function usePageData() {
+	const { actorKey, pageQueryInput } = Route.useRouteContext()
+	return usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+}

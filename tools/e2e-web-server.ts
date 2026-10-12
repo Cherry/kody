@@ -75,6 +75,10 @@ async function startE2eWebServer() {
 		CLOUDFLARE_ACCOUNT_ID: e2eCloudflareMockAccountId,
 		CLOUDFLARE_API_SOURCE_SNAPSHOTS: 'true',
 		WRANGLER_IS_LOCAL_DEV: 'true',
+		// Local event injection needs inbox addresses, without changing domains
+		// in the separate Worker unit-test fixtures or sending external mail.
+		USER_EMAIL_DOMAIN: 'inbox.localhost',
+		SYSTEM_EMAIL_DOMAIN: 'localhost',
 		WRANGLER_PERSIST_TO: '.wrangler/state/e2e',
 		X_LOCAL_EXPLORER: 'false',
 	}
@@ -87,6 +91,8 @@ async function startE2eWebServer() {
 				'node_modules/vite/bin/vite.js',
 				'--host',
 				'127.0.0.1',
+				// Fail on a busy port rather than testing another checkout's server.
+				'--strictPort',
 				...extraArgs,
 			],
 			{

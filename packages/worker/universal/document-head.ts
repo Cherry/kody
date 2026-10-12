@@ -20,14 +20,6 @@ export const INTERNAL_ERROR_DOCUMENT_TITLE = 'Something went wrong'
 /** Stable marker so SPA navigation can upsert/remove managed head tags. */
 export const DOCUMENT_HEAD_ATTR = 'data-kody-head'
 
-/**
- * Meta tag carrying the canonical origin the server rendered head URLs with
- * (`getCanonicalAppBaseUrl`). SPA navigations read it so canonical/OG URLs
- * keep pointing at the canonical domain when the page is dual-served from a
- * legacy host, instead of reverting to `window.location.origin`.
- */
-export const CANONICAL_ORIGIN_META_NAME = 'kody:canonical-origin'
-
 const documentHeadOrigin = 'https://kody.local'
 
 type DocumentHeadLink = {

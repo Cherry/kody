@@ -1,0 +1,343 @@
+import { randomUUID } from 'node:crypto'
+import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
+
+test('expired admin session redirects during revalidation without a render error', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `expired-${id}@example.com`,
+		username: `expired-${id}`,
+		admin: true,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto('/admin/feature-flags')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', { name: 'Admin feature flags' }),
+	).toBeVisible()
+	const errors: string[] = []
+	page.on('pageerror', (error) => errors.push(error.message))
+	page.on('console', (message) => {
+		if (message.type() === 'error') errors.push(message.text())
+	})
+	const refreshed = page.waitForResponse(
+		async (response) =>
+			response.request().headers()['x-tsr-serverfn'] !== undefined &&
+			(await response.text()).includes('forbidden'),
+	)
+	await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
+	const authenticated = await refreshed
+	expect(authenticated.ok()).toBe(true)
+	await page.waitForLoadState('networkidle')
+	await page.context().clearCookies()
+	// A bound browser first resets its document. The resulting document request
+	// and unbound RPC callers still go through the handler's login redirect.
+	const rpcHeaders = await authenticated.request().allHeaders()
+	delete rpcHeaders.cookie
+	const mismatched = await page.request.get(authenticated.url(), {
+		headers: rpcHeaders,
+	})
+	const reset = await mismatched.json()
+	expect(reset.isSerializedRedirect).toBe(true)
+	expect(reset.reloadDocument).toBe(true)
+	expect(new URL(reset.href, page.url()).pathname).toBe('/admin/feature-flags')
+	delete rpcHeaders['x-kody-document-actor']
+	delete rpcHeaders['x-kody-document-destination']
+	// Absolute handler redirects previously constructed a router outside the
+	// request middleware's ALS scope. Keep checking that direct RPC contract.
+	const signedOut = await page.request.get(authenticated.url(), {
+		headers: rpcHeaders,
+	})
+	expect(signedOut.status(), await signedOut.text()).toBe(200)
+	const redirect = await signedOut.json()
+	expect(redirect.isSerializedRedirect).toBe(true)
+	expect(new URL(redirect.href, page.url()).pathname).toBe('/login')
+	await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
+	await expect(page).toHaveURL(/\/login\?/)
+	await expect(
+		page.getByRole('heading', { name: 'Admin feature flags' }),
+	).toHaveCount(0)
+	await waitForClientHydration(page)
+	await page.waitForLoadState('networkidle')
+	expect(errors).toEqual([])
+})
+
+test('overlapping SSR documents retain distinct matching request nonces', async ({
+	request,
+}) => {
+	const responses = await Promise.all(
+		['/pricing', '/faq'].map((path) => request.get(path)),
+	)
+	const nonces = []
+	for (const response of responses) {
+		expect(response.status()).toBe(200)
+		const csp = response.headers()['content-security-policy']
+		const nonce = csp?.match(/'nonce-([^']+)'/)?.[1]
+		expect(nonce).toBeTruthy()
+		nonces.push(nonce)
+		const html = await response.text()
+		const scriptNonces = [
+			...html.matchAll(/<script\b[^>]*\bnonce="([^"]+)"/g),
+		].map((match) => match[1])
+		expect(scriptNonces.length).toBeGreaterThan(0)
+		expect(scriptNonces.every((value) => value === nonce)).toBe(true)
+	}
+	expect(nonces[0]).not.toBe(nonces[1])
+})
+
+test('revoking the same user admin role blocks a warm cached revisit', async ({
+	page,
+	browser,
+	baseURL,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `role-a-${id}@example.com`,
+		username: `role-a-${id}`,
+		admin: true,
+	})
+	const operator = await seedE2eUser({
+		email: `role-b-${id}@example.com`,
+		username: `role-b-${id}`,
+		admin: true,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto('/admin/feature-flags')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', { name: 'Admin feature flags' }),
+	).toBeVisible()
+	await page.evaluate(() => {
+		document.documentElement.dataset.permissionDocument = 'original'
+		window.history.pushState(null, '', '/account')
+	})
+	await expect(
+		page.getByRole('heading', { name: 'Account', exact: true }),
+	).toBeVisible()
+	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+		user.username,
+	)
+	const other = await browser.newContext({ baseURL })
+	try {
+		const signedIn = await other.request.post('/auth', {
+			data: { ...operator, mode: 'login' },
+		})
+		expect(signedIn.ok()).toBe(true)
+		const users = await other.request.get(
+			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
+		)
+		expect(users.ok()).toBe(true)
+		const payload = await users.json()
+		const target = payload.users.find(
+			(entry: { email: string; stableUserId: string }) =>
+				entry.email === user.email,
+		)
+		expect(target).toBeTruthy()
+		const revoked = await other.request.post('/admin/users.json', {
+			data: {
+				action: 'remove_role',
+				stableUserId: target.stableUserId,
+				role: 'admin',
+			},
+		})
+		expect(revoked.ok(), await revoked.text()).toBe(true)
+		await page.evaluate(() =>
+			window.history.pushState(null, '', '/admin/feature-flags'),
+		)
+		await expect(page.getByText('Forbidden', { exact: true })).toBeVisible()
+		await expect(
+			page.getByRole('heading', { name: 'Admin feature flags' }),
+		).toHaveCount(0)
+		await expect(page.locator('html')).toHaveAttribute(
+			'data-permission-document',
+			'original',
+		)
+	} finally {
+		await other.close()
+	}
+})
+
+test('revoking admin role removes cached banner preview on a public revisit', async ({
+	page,
+	browser,
+	baseURL,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `role-a-${id}@example.com`,
+		username: `role-a-${id}`,
+		admin: true,
+	})
+	const operator = await seedE2eUser({
+		email: `role-b-${id}@example.com`,
+		username: `role-b-${id}`,
+		admin: true,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto('/pricing?siteBannerLook=card')
+	await waitForClientHydration(page)
+	await expect(
+		page.locator('[data-testid="site-banner"][data-look="card"]'),
+	).toBeVisible()
+	await page.evaluate(() => {
+		document.documentElement.dataset.permissionDocument = 'original'
+		window.history.pushState(null, '', '/support')
+	})
+	await expect(page).toHaveURL(/\/support$/)
+	const other = await browser.newContext({ baseURL })
+	try {
+		const signedIn = await other.request.post('/auth', {
+			data: { ...operator, mode: 'login' },
+		})
+		expect(signedIn.ok()).toBe(true)
+		const users = await other.request.get(
+			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
+		)
+		expect(users.ok()).toBe(true)
+		const payload = await users.json()
+		const target = payload.users.find(
+			(entry: { email: string; stableUserId: string }) =>
+				entry.email === user.email,
+		)
+		expect(target).toBeTruthy()
+		const revoked = await other.request.post('/admin/users.json', {
+			data: {
+				action: 'remove_role',
+				stableUserId: target.stableUserId,
+				role: 'admin',
+			},
+		})
+		expect(revoked.ok(), await revoked.text()).toBe(true)
+		await page.evaluate(() => {
+			const check = () => {
+				if (
+					document.documentElement.dataset.stalePreview !== 'visible' &&
+					document.querySelector(
+						'[data-testid="site-banner"][data-look="card"]',
+					)
+				)
+					document.documentElement.dataset.stalePreview = 'visible'
+			}
+			new MutationObserver(check).observe(document, {
+				childList: true,
+				subtree: true,
+				attributes: true,
+			})
+		})
+		await page.evaluate(() =>
+			window.history.pushState(null, '', '/pricing?siteBannerLook=card'),
+		)
+		await expect(page).toHaveURL(/siteBannerLook=card/)
+		await expect(
+			page.locator('[data-testid="site-banner"][data-look="card"]'),
+		).toHaveCount(0)
+		await expect(page.locator('html')).not.toHaveAttribute(
+			'data-stale-preview',
+			'visible',
+		)
+		await expect(page.locator('html')).toHaveAttribute(
+			'data-permission-document',
+			'original',
+		)
+	} finally {
+		await other.close()
+	}
+})
+
+test('revoking admin role blocks a warm cached admin-only guide', async ({
+	page,
+	browser,
+	baseURL,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `role-a-${id}@example.com`,
+		username: `role-a-${id}`,
+		admin: true,
+	})
+	const operator = await seedE2eUser({
+		email: `role-b-${id}@example.com`,
+		username: `role-b-${id}`,
+		admin: true,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto('/docs/admin-events')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', { name: 'Admin events' }),
+	).toBeVisible()
+	await page.evaluate(() => {
+		document.documentElement.dataset.permissionDocument = 'original'
+		window.history.pushState(null, '', '/account')
+	})
+	await expect(
+		page.getByRole('heading', { name: 'Account', exact: true }),
+	).toBeVisible()
+	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+		user.username,
+	)
+	const other = await browser.newContext({ baseURL })
+	try {
+		const signedIn = await other.request.post('/auth', {
+			data: { ...operator, mode: 'login' },
+		})
+		expect(signedIn.ok()).toBe(true)
+		const users = await other.request.get(
+			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
+		)
+		expect(users.ok()).toBe(true)
+		const payload = await users.json()
+		const target = payload.users.find(
+			(entry: { email: string; stableUserId: string }) =>
+				entry.email === user.email,
+		)
+		expect(target).toBeTruthy()
+		const revoked = await other.request.post('/admin/users.json', {
+			data: {
+				action: 'remove_role',
+				stableUserId: target.stableUserId,
+				role: 'admin',
+			},
+		})
+		expect(revoked.ok(), await revoked.text()).toBe(true)
+		await page.evaluate(() => {
+			const check = () => {
+				if (
+					[...document.querySelectorAll('h1')].some(
+						(heading) => heading.textContent === 'Admin events',
+					) &&
+					document.documentElement.dataset.staleAdminGuide !== 'visible'
+				)
+					document.documentElement.dataset.staleAdminGuide = 'visible'
+			}
+			new MutationObserver(check).observe(document, {
+				childList: true,
+				subtree: true,
+			})
+			window.history.pushState(null, '', '/docs/admin-events')
+		})
+		await expect(page.getByTestId('not-found-page')).toBeVisible()
+		await expect(page.locator('html')).not.toHaveAttribute(
+			'data-stale-admin-guide',
+			'visible',
+		)
+		await expect(
+			page.getByRole('heading', { name: 'Admin events' }),
+		).toHaveCount(0)
+		await expect(page.locator('html')).toHaveAttribute(
+			'data-permission-document',
+			'original',
+		)
+	} finally {
+		await other.close()
+	}
+})

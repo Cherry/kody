@@ -1,0 +1,243 @@
+/** @jsxImportSource @emotion/react */
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { type CSSObject } from '@emotion/react'
+import { useState, useEffect, useRef } from 'react'
+import { useLocation } from '@tanstack/react-router'
+
+import { type ConnectWebhookApplyLoaderData } from '#universal/loader-data.ts'
+
+import { colors, spacing } from '#universal/styles/tokens.ts'
+import {
+	cardCss,
+	getAccentCalloutCss,
+	getPrimaryButtonCss,
+	getSecondaryButtonCss,
+	pageDescriptionCss,
+	pageEyebrowCss,
+	pageHeaderCss,
+	pageTitleCss,
+	stackedPageCss,
+} from '#universal/styles/style-primitives.ts'
+import { routes } from '#universal/routes.ts'
+
+const pageCss: CSSObject = {
+	...stackedPageCss,
+	maxWidth: '36rem',
+	margin: '0 auto',
+}
+
+const headerCss: CSSObject = {
+	...pageHeaderCss,
+	justifyItems: 'center',
+	textAlign: 'center' as const,
+}
+
+const primaryButtonCss = getPrimaryButtonCss({
+	size: 'lg',
+	weight: 'semibold',
+})
+
+const secondaryButtonCss = getSecondaryButtonCss({
+	size: 'lg',
+	weight: 'semibold',
+})
+
+const metaListCss: CSSObject = {
+	display: 'grid',
+	gap: spacing.xs,
+	margin: 0,
+	padding: 0,
+	listStyle: 'none',
+	fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+	fontSize: '0.85rem',
+	color: colors.textMuted,
+	overflowWrap: 'anywhere' as const,
+}
+
+function buildApproveApplyApiPath(href: string) {
+	const pageUrl = new URL(href, 'http://localhost')
+	const apiUrl = new URL(
+		routes.accountWebhooksApproveApplyApi.href(),
+		'http://localhost',
+	)
+	apiUrl.search = pageUrl.search
+	return `${apiUrl.pathname}${apiUrl.search}`
+}
+
+export function ConnectWebhookApplyRoute({
+	initialData,
+}: {
+	initialData: ConnectWebhookApplyLoaderData
+}) {
+	const invalidatePages = usePageInvalidation(mutationResources, {
+		refreshRoute: true,
+	})
+	const href = useLocation({ select: (l) => l.href })
+	const [data, setData] = useState(initialData),
+		[message, setMessage] = useState<string | null>(null)
+	const [previousData, setPreviousData] = useState(initialData)
+	if (previousData !== initialData) {
+		setPreviousData(initialData)
+		setData(initialData)
+	}
+	const mounted = useRef(false),
+		busy = useRef(false)
+	useEffect(() => {
+		mounted.current = true
+		return () => {
+			mounted.current = false
+		}
+	}, [])
+	const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(
+		null,
+	)
+	async function submit(action: 'approve' | 'reject') {
+		if (busy.current || !data.ok) return
+		busy.current = true
+		setSubmitting(action)
+		setMessage(null)
+		try {
+			const response = await fetch(buildApproveApplyApiPath(href), {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ action }),
+			})
+			if (response.status === 401) {
+				window.location.assign('/login')
+				return
+			}
+			const payload = (await response.json()) as ConnectWebhookApplyLoaderData
+			if (!mounted.current) return
+			setData(payload)
+			setMessage(
+				action === 'approve' && payload.ok
+					? 'Destination approved. Return to your agent and retry webhookUrlApply.'
+					: payload.ok
+						? null
+						: payload.error,
+			)
+			void invalidatePages()
+		} catch (error) {
+			if (mounted.current)
+				setMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to process approval.',
+				)
+		} finally {
+			busy.current = false
+			if (mounted.current) setSubmitting(null)
+		}
+	}
+
+	const payload = data
+
+	return (
+		<section css={pageCss} data-testid="connect-webhook-apply">
+			<header css={headerCss}>
+				<p css={pageEyebrowCss}>Webhook apply approval</p>
+				<h1 css={pageTitleCss}>Approve outbound destination</h1>
+				<p css={pageDescriptionCss}>
+					Same account approval flow as secret host approval
+					(`/connect/secrets`), secret package grants, and locked-package
+					publish approval. Allow only if you trust this exact registration
+					request.
+				</p>
+			</header>
+
+			{message ? (
+				<p
+					css={getAccentCalloutCss()}
+					data-testid="connect-webhook-apply-message"
+				>
+					{message}
+				</p>
+			) : null}
+
+			{!payload ? (
+				<p css={{ color: colors.textMuted, textAlign: 'center' }}>
+					Loading approval…
+				</p>
+			) : !payload.ok ? (
+				<section css={cardCss} data-testid="connect-webhook-apply-error">
+					<p css={{ margin: 0 }}>{payload.error}</p>
+				</section>
+			) : (
+				<section css={cardCss} data-testid="connect-webhook-apply-card">
+					<p css={{ marginTop: 0 }}>
+						Package <strong>{payload.packageName}</strong> (
+						<code>{payload.packageKodyId}</code>) wants to register webhook{' '}
+						<code>{payload.webhookName}</code> at this destination.
+					</p>
+					<ul css={metaListCss}>
+						<li>method: {payload.destination.method}</li>
+						<li>url: {payload.destination.url}</li>
+						<li>
+							injection sites:{' '}
+							{payload.destination.injectionSites.join(', ') || '(none)'}
+						</li>
+						<li>
+							headers:{' '}
+							{payload.destination.headers.length > 0
+								? payload.destination.headers
+										.map((header) => `${header.name}=${header.value}`)
+										.join('; ')
+								: '(none)'}
+						</li>
+						<li>
+							body:{' '}
+							{payload.destination.body.length > 0
+								? payload.destination.body
+								: '(none)'}
+						</li>
+						<li>auth: {payload.destination.auth}</li>
+						<li>fingerprint: {payload.fingerprint}</li>
+					</ul>
+					{payload.alreadyGranted ? (
+						<p css={{ marginBottom: 0 }}>
+							This exact destination is already approved. Ask your agent to
+							retry <code>webhookUrlApply</code>.
+						</p>
+					) : (
+						<div
+							css={{
+								display: 'flex',
+								gap: spacing.sm,
+								flexWrap: 'wrap',
+								marginTop: spacing.md,
+							}}
+						>
+							<button
+								type="button"
+								disabled={submitting != null}
+								data-testid="connect-webhook-apply-allow"
+								onClick={() => {
+									void submit('approve')
+								}}
+								css={primaryButtonCss}
+							>
+								{submitting === 'approve' ? 'Approving…' : 'Allow destination'}
+							</button>
+							<button
+								type="button"
+								disabled={submitting != null}
+								data-testid="connect-webhook-apply-reject"
+								onClick={() => {
+									void submit('reject')
+								}}
+								css={secondaryButtonCss}
+							>
+								{submitting === 'reject' ? 'Rejecting…' : 'Reject'}
+							</button>
+						</div>
+					)}
+				</section>
+			)}
+		</section>
+	)
+}
+
+const mutationResources = ['loadWebhooksPage', 'loadPackage'] as const

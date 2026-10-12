@@ -1,0 +1,41 @@
+import { type QueryClient } from '@tanstack/react-query'
+
+/** Verify the document actor before refreshing only the data currently in use. */
+export async function refreshActiveQueries(
+	client: QueryClient,
+	actorKey: string | null,
+	verify: () => Promise<unknown>,
+) {
+	await verify()
+	await client.refetchQueries({
+		type: 'active',
+		predicate: (query) => {
+			const [kind, actor, search] = query.queryKey
+			if (actor !== actorKey || (kind !== 'page' && kind !== 'shell'))
+				return false
+			// Permissions can change while ordinary presentation data remains fresh.
+			const shellSearch = new URLSearchParams(
+				kind === 'shell' && typeof search === 'string' ? search : '',
+			)
+			// Recompute age at activation. A hidden tab can defer the observer's
+			// stale timer, leaving its cached result.isStale behind wall-clock time.
+			const stale = query.observers.some(({ options }) => {
+				const enabled =
+					typeof options.enabled === 'function'
+						? options.enabled(query)
+						: options.enabled
+				const staleTime =
+					typeof options.staleTime === 'function'
+						? options.staleTime(query)
+						: options.staleTime
+				return enabled !== false && query.isStaleByTime(staleTime)
+			})
+			return (
+				stale ||
+				query.meta?.freshAuthorization === true ||
+				shellSearch.has('siteBannerPreview') ||
+				shellSearch.has('siteBannerLook')
+			)
+		},
+	})
+}

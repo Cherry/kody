@@ -21,7 +21,7 @@ import {
 import { isAccountEmailVerified } from '#worker/identity/email-verification-state.ts'
 import { getEnv } from '#app/env.ts'
 import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
+import { renderOAuthPage } from '#app/oauth-page.ts'
 import { resolveUserStableId } from '#worker/user-id.ts'
 import { recordMcpConnectFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
 import { createDb, usersTable } from './db.ts'
@@ -115,25 +115,6 @@ async function evaluateSecondAgentGiftAfterAuthorize(
 type OAuthClientResetVerification = {
 	clientId: string
 	reason: 'invalid-client-id-mismatch'
-}
-
-function renderSpaShell(
-	request: Request,
-	env: Env,
-	options: {
-		status?: number
-		loaderData?: { oauthAuthorize: OAuthAuthorizeLoaderData }
-		setCookie?: string | null
-	} = {},
-) {
-	const { status = 200, loaderData, setCookie } = options
-	return renderAppPage({
-		request,
-		env,
-		status,
-		loaderData,
-		extraSetCookies: setCookie ? [setCookie] : undefined,
-	})
 }
 
 const dummyPasswordHash =
@@ -1200,7 +1181,7 @@ export async function handleAuthorizeRequest(
 		const silentOrError = await tryHandleSilentOidcAuthorize(request, env)
 		if (silentOrError) return silentOrError
 		const { data, setCookie } = await loadOAuthAuthorizeData(request, env)
-		return renderSpaShell(request, env, {
+		return renderOAuthPage(request, env, {
 			loaderData: { oauthAuthorize: data },
 			setCookie,
 		})
@@ -1597,7 +1578,7 @@ export function handleOAuthCallback(
 	const url = new URL(request.url)
 	const hasError =
 		url.searchParams.has('error') || url.searchParams.has('error_description')
-	return renderSpaShell(request, env, { status: hasError ? 400 : 200 })
+	return renderOAuthPage(request, env, { status: hasError ? 400 : 200 })
 }
 
 export const apiHandler = {

@@ -11,7 +11,7 @@ import { requireUserWithRole } from '#app/permissions-server.ts'
 import { type routes } from '#universal/routes.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 
-async function auditSystemEmailRead(input: {
+export async function auditSystemEmailRead(input: {
 	env: Env
 	request: Request
 	actorEmail?: string | null
