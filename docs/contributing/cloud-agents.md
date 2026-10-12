@@ -125,6 +125,52 @@ before you install anything yourself. Leave that diff unstaged. Restore it with
 `git restore package-lock.json` when you did not change dependencies. A pin
 update that `lockfile:check` asks for belongs in its own commit.
 
+## Git worktrees
+
+A worktree lets one VM work on several branches without a second `npm install`.
+Do not symlink the whole `node_modules` directory into the worktree.
+`node_modules/@kody/*` and `node_modules/@kody-internal/shared` are relative
+links to `../../packages/*`. Through a whole-directory symlink they resolve to
+the main checkout's `packages/`, so typecheck and tests read the main checkout's
+branch instead of the worktree's (#3404).
+
+From the main checkout, link every entry except those workspace scopes, which
+are copied as links so they point at the worktree's own `packages/`. The repo
+root is often not writable, so put worktrees under `~`:
+
+```sh
+main="$(git rev-parse --show-toplevel)"
+git worktree add ~/wt/my-branch -b cursor/my-branch origin/main
+cd ~/wt/my-branch
+mkdir node_modules
+for entry in "$main"/node_modules/* "$main"/node_modules/.bin \
+  "$main"/node_modules/.package-lock.json; do
+  if [ -d "$entry" ] &&
+    find "$entry" -maxdepth 1 -type l -lname '../../packages/*' | grep -q .; then
+    cp -PR "$entry" node_modules/
+  else
+    ln -s "$entry" "node_modules/$(basename "$entry")"
+  fi
+done
+ln -s "$main/packages/worker/node_modules" packages/worker/node_modules
+```
+
+`realpath node_modules/@kody-internal/shared` should print the worktree path.
+Tool caches (`node_modules/.vite`, `.mf`, `.tmp`) stay per worktree. The
+worktree's `node_modules` holds only links, copied scope links, and those
+caches. After `npm ci` in the main checkout adds or removes a package, run
+`rm -rf node_modules` in the worktree and redo the loop. A worktree whose
+`package-lock.json` differs from the main checkout's needs its own `npm ci`.
+
+Git hooks are shared. The Cursor dispatcher's `.cursor-original-hooks-path`
+names one Husky directory for every checkout, so `git push` from the worktree
+runs the main checkout's `.husky` scripts with the worktree as the working
+directory (`test:push` tests the worktree). `npm run hooks:ensure`, `npm ci`,
+and `npm install` (through `prepare`) rewrite that file to the checkout they run
+in. After running one of them in a worktree, run `npm run hooks:ensure` in the
+main checkout before `git worktree remove ~/wt/my-branch`, or the main
+checkout's commits and pushes lose their Husky hooks.
+
 ## GitHub CLI
 
 Cloud Agent `gh` can read issues, PRs, and checks (`gh issue view`,
