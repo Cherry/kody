@@ -22,6 +22,11 @@ function isMissingKindColumn(error: unknown) {
 	return /no such column: (?:\w+\.)?kind\b/i.test(message)
 }
 
+function isMissingConfigColumn(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error)
+	return /no such column: (?:\w+\.)?config_json\b/i.test(message)
+}
+
 /**
  * 0117 adds `secret_entries.kind`. A rehearsal restore (or a preview still on
  * the previous schema) can drop that column while this worker is already
@@ -146,6 +151,8 @@ export type StoredCredentialRow = {
 	kind: StoredCredentialKind
 	encrypted_value: string
 	allowed_hosts: string
+	inject_json: string
+	config_json: string | null
 }
 
 /**
@@ -167,25 +174,27 @@ export async function getStoredCredentialEntry(input: {
 				AND (e.expires_at IS NULL OR e.expires_at > ?)
 				AND (b.expires_at IS NULL OR b.expires_at > ?)
 			LIMIT 1`
+	const select = (columns: string) =>
+		input.db
+			.prepare(`SELECT ${columns} ${from}`)
+			.bind(input.ownerId, input.credentialId, now, now)
+			.first<Record<string, unknown>>()
+	const columns = `e.id AS id, e.name AS name,
+				e.encrypted_value AS encrypted_value, e.allowed_hosts AS allowed_hosts,
+				e.inject_json AS inject_json`
+	// 0118 adds `config_json`; before it no row has an exchange.
 	const row = await firstRowWithOptionalKind(
-		() =>
-			input.db
-				.prepare(
-					`SELECT e.id AS id, e.name AS name, e.kind AS kind,
-				e.encrypted_value AS encrypted_value, e.allowed_hosts AS allowed_hosts
-			${from}`,
+		async () => {
+			try {
+				return await select(
+					`${columns}, e.kind AS kind, e.config_json AS config_json`,
 				)
-				.bind(input.ownerId, input.credentialId, now, now)
-				.first<Record<string, unknown>>(),
-		() =>
-			input.db
-				.prepare(
-					`SELECT e.id AS id, e.name AS name,
-				e.encrypted_value AS encrypted_value, e.allowed_hosts AS allowed_hosts
-			${from}`,
-				)
-				.bind(input.ownerId, input.credentialId, now, now)
-				.first<Record<string, unknown>>(),
+			} catch (error) {
+				if (!isMissingConfigColumn(error)) throw error
+				return await select(`${columns}, e.kind AS kind`)
+			}
+		},
+		() => select(columns),
 	)
 	if (!row) return null
 	return {
@@ -194,6 +203,8 @@ export async function getStoredCredentialEntry(input: {
 		kind: storedKindFromRow(row),
 		encrypted_value: String(row['encrypted_value']),
 		allowed_hosts: String(row['allowed_hosts']),
+		inject_json: String(row['inject_json']),
+		config_json: row['config_json'] == null ? null : String(row['config_json']),
 	}
 }
 

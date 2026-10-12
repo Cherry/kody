@@ -191,3 +191,39 @@ test('secret reads treat a pre-0117 schema as kind secret so placeholders still 
 		}),
 	).resolves.toEqual(expect.objectContaining({ kind: 'url' }))
 })
+
+test('stored credential reads keep the kind on a pre-0118 schema and report no exchange', async () => {
+	const sqlite = applyMigrationsBeforeCredentialKinds()
+	sqlite.exec(
+		readFileSync(
+			new URL(credentialKindsMigration, migrationsDirectory),
+			'utf8',
+		),
+	)
+	sqlite.exec(`UPDATE secret_entries SET kind = 'url' WHERE id = 'cred-openai'`)
+	const db = createD1FromSqlite(sqlite)
+	const read = () =>
+		getStoredCredentialEntry({
+			db,
+			ownerId: 'org-user',
+			credentialId: 'cred-openai',
+			now: '2026-10-12T00:00:00.000Z',
+		})
+
+	await expect(read()).resolves.toEqual(
+		expect.objectContaining({ kind: 'url', config_json: null }),
+	)
+
+	sqlite.exec(
+		readFileSync(
+			new URL('0118-credential-login-config.sql', migrationsDirectory),
+			'utf8',
+		),
+	)
+	sqlite.exec(
+		`UPDATE secret_entries SET kind = 'login', config_json = '{}' WHERE id = 'cred-openai'`,
+	)
+	await expect(read()).resolves.toEqual(
+		expect.objectContaining({ kind: 'login', config_json: '{}' }),
+	)
+})

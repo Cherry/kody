@@ -23,6 +23,7 @@ import {
 	missingCredentialResource,
 } from './credential-ids.ts'
 import { type PackageStamp } from './package-stamp.ts'
+import { type ResolvedLoginSession } from './login-resolver.ts'
 import {
 	type SigningOperation,
 	type SigningResult,
@@ -102,6 +103,14 @@ export type CredentialTarget =
 	 */
 	| { use: 'url'; credentialId: string; path: string }
 	/**
+	 * A `login` credential picked by id: its session, from the exchange it
+	 * runs, placed for the HTTPS request to `requestUrl`, whose host must be
+	 * one of the credential's hosts. The caller places it only on that
+	 * request. Not reachable from package code until the credential clients
+	 * ship (T).
+	 */
+	| { use: 'login'; credentialId: string; requestUrl: URL }
+	/**
 	 * A `signing` credential picked by id: a JWT or HMAC signature made with
 	 * its key, for a request to `requestHost`, which must be one of the
 	 * credential's hosts. The caller places the signature only on a request
@@ -143,6 +152,7 @@ export type ResolvedCredentialByUse = {
 	'integration-refresh': IntegrationTokenRefreshResult
 	'mcp-connection': McpServerConnection
 	url: ResolvedCredentialUrl
+	login: ResolvedLoginSession
 	signing: SigningResult
 }
 
@@ -201,6 +211,7 @@ export function permissionForUse(use: CredentialUse): OrgPermission {
 		case 'webhook-secret':
 		case 'provider-secret':
 		case 'url':
+		case 'login':
 		case 'signing':
 			return 'secret:use'
 		case 'integration-token':
