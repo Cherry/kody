@@ -1,6 +1,4 @@
-import { RequestContext } from 'remix/router'
 import { expect, test } from 'vitest'
-import { createHomeHandler } from './home-document.ts'
 import {
 	createAgentSkillMarkdownHandler,
 	createAgentSkillsIndexHandler,
@@ -140,19 +138,6 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(openaiChallenge.headers.get('location')).toBeNull()
 	expect(openaiChallenge.headers.get('access-control-allow-origin')).toBe('*')
 	expect(await openaiChallenge.text()).toBe(expectedOpenaiAppsChallengeToken)
-
-	const homeMarkdown = await createHomeHandler(env).handler(
-		new RequestContext(
-			new Request('https://kody.example/', {
-				headers: { accept: 'text/markdown' },
-			}),
-		),
-	)
-	expect(homeMarkdown.headers.get('content-type')).toBe(
-		'text/markdown; charset=utf-8',
-	)
-	expect(homeMarkdown.headers.get('link')).toContain('rel="api-catalog"')
-	expect(await homeMarkdown.text()).toMatch(/^# Kody\n/)
 })
 
 test('openai apps challenge stays unauthenticated and returns exact token bytes', async () => {

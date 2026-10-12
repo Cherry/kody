@@ -45,6 +45,7 @@
     "react-dom": "^19.3.0"
   },
   "imports": {
+    "#app/oauth-page.ts": "./start/oauth-page.ts",
     "#app/*": "./src/app/*",
     "#client/*": "./client/*",
     "#universal/*": "./universal/*",

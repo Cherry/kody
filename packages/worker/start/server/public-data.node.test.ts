@@ -1,7 +1,9 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-	response: () => new Response(),
+	payload: {} as Record<string, unknown>,
+	kind: 'page',
+	canonical: null as string | null,
 	moved: { kind: 'redirect', to: '/@owner/new', shared: true },
 	headers: new Headers(),
 	status: 200,
@@ -39,13 +41,23 @@ vi.mock('../../src/app/env.ts', () => ({ getEnv: (env: unknown) => env }))
 vi.mock('../../src/app/auth-session.ts', () => ({
 	setAuthSessionSecret: () => {},
 }))
-vi.mock('../../src/app/handlers/community-detail.tsx', () => ({
-	createCommunityPackageApiHandler: () => ({
-		handler: async () => mocks.response(),
+vi.mock('../../src/app/community-package-payload.ts', () => ({
+	loadCommunityPackagePayload: async () =>
+		mocks.kind === 'redirect'
+			? mocks.moved
+			: { kind: mocks.kind, data: mocks.payload },
+	loadCommunityDetailPayload: async () => ({
+		kind: 'page',
+		data: mocks.payload,
 	}),
-	createCommunityDetailApiHandler: () => ({
-		handler: async () => mocks.response(),
+}))
+vi.mock('../../src/app/community-data.ts', () => ({
+	loadCommunityDetailData: async () => ({
+		listing: { ownerUsername: 'owner', kodyId: 'package' },
 	}),
+}))
+vi.mock('../../src/app/community-package-route.ts', () => ({
+	resolveCanonicalListingPath: async () => mocks.canonical,
 }))
 vi.mock('./document-head.ts', () => ({
 	loadDocumentHead: () => ({ title: 'Package' }),
@@ -59,24 +71,22 @@ vi.mock('../../universal/identity-icon-urls.ts', () => ({
 vi.mock('../../src/package-registry/package-publish-lock.ts', () => ({
 	buildPackagePublishApprovalPath: () => '/approval',
 }))
-vi.mock('../../src/app/package-page.ts', () => ({
-	loadPackagePage: async () => mocks.moved,
-}))
 const { loadPackage } = await import('./public-data.ts')
 
 beforeEach(() => {
 	mocks.headers = new Headers()
 	mocks.status = 200
+	mocks.kind = 'page'
+	mocks.canonical = null
 	mocks.moved = { kind: 'redirect', to: '/@owner/new', shared: true }
 })
 
 test('accepted shares cannot enter owner settings even when they include package metadata', async () => {
-	mocks.response = () =>
-		Response.json({
-			ok: true,
-			viewerIsOwner: false,
-			ownerPackage: { id: 'owned-by-someone-else' },
-		})
+	mocks.payload = {
+		ok: true,
+		viewerIsOwner: false,
+		ownerPackage: { id: 'owned-by-someone-else' },
+	}
 	await expect(
 		loadPackage({
 			data: { username: 'owner', kodyId: 'package', page: 'settings' },
@@ -84,8 +94,7 @@ test('accepted shares cannot enter owner settings even when they include package
 	).rejects.toMatchObject({ isNotFound: true })
 })
 test('unauthorized packages retain HTTP 401 instead of a successful document', async () => {
-	mocks.response = () =>
-		Response.json({ ok: false, error: 'Unauthorized.' }, { status: 401 })
+	mocks.kind = 'unauthorized'
 	await expect(
 		loadPackage({ data: { username: 'owner', kodyId: 'private' } }),
 	).resolves.toEqual({ kind: 'unauthorized' })
@@ -95,8 +104,7 @@ test.each([true, false])(
 	'moved packages preserve queries and public/private redirect policy, public=%s',
 	async (shared) => {
 		mocks.moved.shared = shared
-		mocks.response = () =>
-			Response.json({ ok: false, redirectTo: '/@owner/new' }, { status: 404 })
+		mocks.kind = 'redirect'
 		await expect(
 			loadPackage({
 				data: {
@@ -117,3 +125,34 @@ test.each([true, false])(
 		)
 	},
 )
+
+test('listing UUID URLs preserve query on canonical redirect and render when canonical resolution is unavailable', async () => {
+	mocks.canonical = '/@owner/package'
+	await expect(
+		loadPackage({
+			data: {
+				username: '',
+				kodyId: '',
+				listingId: 'listing-1',
+				search: '?source=share',
+			},
+		}),
+	).rejects.toMatchObject({
+		options: { href: '/@owner/package?source=share', statusCode: 301 },
+	})
+	expect(mocks.headers.get('Cache-Control')).toBe('public, max-age=3600')
+	expect(mocks.headers.get('Vary')).toBeNull()
+	mocks.canonical = null
+	mocks.payload = {
+		ok: true,
+		username: 'owner',
+		kodyId: 'package',
+		listing: { id: 'listing-1' },
+	}
+	await expect(
+		loadPackage({ data: { username: '', kodyId: '', listingId: 'listing-1' } }),
+	).resolves.toMatchObject({
+		kind: 'page',
+		data: { listing: { id: 'listing-1' } },
+	})
+})

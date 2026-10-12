@@ -8,7 +8,7 @@ import {
 
 /**
  * Paints a pre-tokenized code block. Origin (or the highlight worker) owns
- * Shiki; this module only turns serializable spans into Remix JSX text and
+ * Shiki; this module only turns serializable spans into JSX text and
  * inline styles — never `innerHTML`.
  */
 function rootStyleFromTokens(fg: string | undefined, bg: string | undefined) {

@@ -10,7 +10,7 @@ import {
 	type CSSProperties,
 } from 'react'
 import { useRouter, useLocation } from '@tanstack/react-router'
-import { type OnboardingPayload } from '../onboarding-types.ts'
+import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 import {
 	onboardingWizardStepHref,
 	onboardingWizardStepByNumber,

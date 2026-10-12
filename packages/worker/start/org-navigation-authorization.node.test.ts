@@ -45,7 +45,7 @@ vi.mock('../src/app/org-request-binding.ts', () => ({
 		return state.denied
 	},
 }))
-import { verifySession } from './server/shell.ts'
+import { verifySession } from '#start/server/shell'
 
 test('foreground org entry rechecks permission while an authorized warm entry reuses its payload', async () => {
 	const client = new QueryClient()

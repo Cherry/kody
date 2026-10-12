@@ -6,7 +6,7 @@
 		"module": "ESNext",
 		"moduleResolution": "Bundler",
 		"jsx": "react-jsx",
-		"jsxImportSource": "remix/component",
+		"jsxImportSource": "@emotion/react",
 		"types": ["vite/client"],
 		"allowImportingTsExtensions": true,
 		"noEmit": true,
@@ -29,7 +29,6 @@
 		"start/**/*.tsx",
 		"start/start.ts",
 		"start/components/**/*.ts",
-		"start/migrated-routes.ts",
 		"client/types/**/*.d.ts"
 	],
 	"exclude": ["start/server/**/*.ts"]

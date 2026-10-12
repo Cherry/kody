@@ -10,6 +10,7 @@ import { captureClientException } from '#client/sentry-client.ts'
 import { installNavigationMotion } from './navigation-motion.ts'
 import { persistentShellNavSelector } from '#universal/navigation-motion.ts'
 import { readDocumentActor } from './document-actor.ts'
+import { shouldDehydrateAppQuery } from './query-dehydration.ts'
 import { routeTree } from './routeTree.gen'
 
 export function getRouter() {
@@ -46,6 +47,7 @@ export function getRouter() {
 		defaultErrorComponent: InternalErrorPage,
 		defaultOnCatch: captureClientException,
 		scrollRestoration: true,
+		scrollRestorationBehavior: 'instant',
 		defaultPreload: 'intent',
 		defaultStaleTime: 0,
 		// Router retains head metadata, but Query owns payload readiness. Wait
@@ -55,7 +57,11 @@ export function getRouter() {
 		// Query owns freshness, including intent preloads.
 		defaultPreloadStaleTime: 0,
 	})
-	setupRouterSsrQueryIntegration({ router, queryClient })
+	setupRouterSsrQueryIntegration({
+		router,
+		queryClient,
+		dehydrateOptions: { shouldDehydrateQuery: shouldDehydrateAppQuery },
+	})
 	if (typeof document !== 'undefined') {
 		installNavigationMotion(router, {
 			canStart: () => typeof document.startViewTransition === 'function',

@@ -1,31 +1,6 @@
-/**
- * Scroll restoration storage and the pre-hydration restore script.
- *
- * Mirrors React Router's `<ScrollRestoration />`: positions are a
- * `{ [historyKey]: y }` map in sessionStorage, and an inline script in the
- * SSR body applies `window.scrollTo` before paint so a refresh does not flash
- * the top of the page. When there is no saved Y, the same script scrolls an
- * expanded list/detail record (`[data-record-focus]`) into view so a deep
- * link does not strand the reader at the toolbar.
- */
+const scrollRestorationStorageKey = 'kody:router-scroll-positions'
 
-export const scrollRestorationStorageKey = 'kody:router-scroll-positions'
-
-/** History state field React Router uses (`window.history.state.key`). */
-export const historyStateScrollKey = 'key'
-
-/**
- * Expanded list/detail record (the selected accordion row, or the off-window
- * pane). RecordTable marks the focused element; scroll restoration finds it.
- */
-export const recordFocusSelector = '[data-record-focus]'
-
-/**
- * Selected list/detail id whose record has not rendered yet. Restoration
- * retries while this is present so a client-loaded detail can still land on
- * the row; it must not be set for a not-found selection or a plain list.
- */
-export const recordFocusPendingSelector = '[data-record-focus-pending]'
+const recordFocusSelector = '[data-record-focus]'
 
 export function isRecordFocusInViewport(
 	rect: { top: number; bottom: number },

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
@@ -77,7 +78,7 @@ export function AccountMcpServersPage({
 		)
 	}
 	const mutation = useMutation({
-		mutationKey: ['mcpServers', actorKey, currentHref],
+		mutationKey: ['mcpServers', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async (input: {
 			body: Record<string, unknown>
 			href: string

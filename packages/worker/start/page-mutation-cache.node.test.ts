@@ -226,3 +226,93 @@ it.each([
 		client.clear()
 	},
 )
+
+it.each([
+	['loadJobsPage', 'jobs'],
+	['loadValuesPage', 'values'],
+	['loadEmailPage', 'email'],
+	['loadWorkflowsPage', 'workflows'],
+	['loadConnectionsPage', 'connectedAgents'],
+	['loadConnectionsPage', 'connectionProfiles'],
+	['loadMcpServersPage', 'mcpServers'],
+	['loadSecretProvidersPage', 'secretProviders'],
+	['loadIntegrationsPage', 'integrations'],
+])(
+	'a held %s write blocks its organization, not another organization',
+	async (resource, family) => {
+		const client = new QueryClient()
+		let finish!: () => void
+		const write = client
+			.getMutationCache()
+			.build(client, {
+				mutationKey: [family, 'alice', 'one'],
+				mutationFn: () =>
+					new Promise<void>((resolve) => {
+						finish = resolve
+					}),
+			})
+			.execute(undefined)
+		await Promise.resolve()
+		let ready = false
+		const controller = new AbortController()
+		const own = waitForPageMutations(
+			client,
+			'alice',
+			resource,
+			controller.signal,
+			'/@one/-/jobs',
+		).then(() => {
+			ready = true
+		})
+		await waitForPageMutations(
+			client,
+			'alice',
+			resource,
+			controller.signal,
+			'/@two/-/jobs',
+		)
+		expect(ready).toBe(false)
+		finish()
+		await write
+		await own
+		expect(ready).toBe(true)
+		client.clear()
+	},
+)
+
+it('a pending webhook write only blocks reads of its package', async () => {
+	const client = new QueryClient()
+	let finish!: () => void
+	const write = client
+		.getMutationCache()
+		.build(client, {
+			mutationKey: ['packageWebhooks', 'alice', 'owner', 'one'],
+			mutationFn: () =>
+				new Promise<void>((resolve) => {
+					finish = resolve
+				}),
+		})
+		.execute(undefined)
+	await Promise.resolve()
+	let ready = false
+	const signal = new AbortController().signal
+	const own = waitForPageMutations(
+		client,
+		'alice',
+		'loadPackageWebhooks',
+		signal,
+		{ username: 'owner', kodyId: 'one' },
+	).then(() => {
+		ready = true
+	})
+	await waitForPageMutations(client, 'alice', 'loadPackageWebhooks', signal, {
+		username: 'owner',
+		kodyId: 'two',
+	})
+	expect(ready).toBe(false)
+	finish()
+	await write
+	await own
+	expect(ready).toBe(true)
+	client.clear()
+})

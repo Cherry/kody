@@ -618,9 +618,12 @@ export function OAuthAuthorizeRoute({
 									css={inputCss}
 								/>
 							</label>
-							<label css={fieldCss}>
-								<span css={fieldLabelCss}>Password</span>
+							<div css={fieldCss}>
+								<label htmlFor="oauth-authorize-password" css={fieldLabelCss}>
+									Password
+								</label>
 								<PasswordRevealInput
+									id="oauth-authorize-password"
 									name="password"
 									required
 									autoComplete="current-password"
@@ -628,7 +631,7 @@ export function OAuthAuthorizeRoute({
 									disabled={actionsDisabled}
 									css={inputCss}
 								/>
-							</label>
+							</div>
 						</>
 					) : null}
 					{!isLoggedIn && isSessionReady ? (

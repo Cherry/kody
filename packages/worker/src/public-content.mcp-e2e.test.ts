@@ -366,3 +366,25 @@ test('homepage OG variants preserve a clean canonical and reject unknown variant
 	)
 	expect(unknown).not.toContain('/og/home.png?og=')
 })
+
+test('native home Markdown retains agent discovery headers and content', async () => {
+	const server = await getSharedMcpE2eServer()
+	const response = await fetch(server.origin, {
+		headers: { Accept: 'text/markdown' },
+	})
+	expect(response.status).toBe(200)
+	expect(response.headers.get('content-type')).toBe(
+		'text/markdown; charset=utf-8',
+	)
+	expect(response.headers.get('link')).toContain('rel="api-catalog"')
+	expect(response.headers.get('vary')).toMatch(/accept/i)
+	expect(await response.text()).toMatch(/^# Kody\n/)
+})
+
+test('blog artwork retains canonical social image metadata', async () => {
+	const { html, url } = await document('/blog/openclaw-2-needs-a-home')
+	expect(html).toContain('src="/images/openclaw-2-needs-a-home.webp"')
+	expect(html).toContain(
+		`property="og:image" content="${url.origin}/blog/openclaw-2-needs-a-home/og.png"`,
+	)
+})

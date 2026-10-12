@@ -71,12 +71,6 @@ const claudeAuthRequest: AuthRequest = {
 	codeChallengeMethod: 'S256',
 	resource: mcpResource,
 }
-const claudeClient: ClientInfo = {
-	clientId: claudeAuthRequest.clientId,
-	redirectUris: [claudeAuthRequest.redirectUri],
-	clientName: 'Claude',
-	tokenEndpointAuthMethod: 'none',
-}
 // Gemini Spark custom MCP apps omit RFC 8707 `resource` on authorize.
 const geminiAuthorizeUrl =
 	'https://heykody.dev/oauth/authorize?response_type=code&client_id=QuXak4ugdtPZncjp&redirect_uri=https%3A%2F%2Foauth-redirect.googleusercontent.com%2Fr%2Fuser_bound_custom-mcp-106664623666703652842-heykody_dev&scope=profile+email&code_challenge=uMIae0HtFCz1_e_KxVlJ_W2oz1eT87iC0h4WkBB4tEc&code_challenge_method=S256&state=gemini-demo-state'
@@ -442,14 +436,6 @@ async function expectApprovedRedirect(
 	expectRedirect(payload.redirectTo, originPath, params, iss)
 }
 
-async function readAuthorizePage(response: Response) {
-	expect(response.status).toBe(200)
-	expect(response.headers.get('Content-Type')).toContain('text/html')
-	const html = await response.text()
-	expect(html).toContain('"oauthAuthorize"')
-	return html
-}
-
 async function registerClient(metadata: Record<string, unknown>) {
 	const response = await workerFetch(
 		new Request('https://heykody.dev/oauth/register', {
@@ -550,34 +536,7 @@ test('authorize info, denial, approval, and default scopes follow the OAuth work
 		selectedOrgSlug: null,
 	})
 
-	const authorizeHtml = await readAuthorizePage(
-		await handleAuthorizeRequest(
-			new Request(exampleOAuthUrl('authorize', baseAuthorizeParams)),
-			createEnv(createHelpers()),
-		),
-	)
-	expect(authorizeHtml).toContain(baseClient.clientName ?? '')
-	expect(authorizeHtml).toContain('data-testid="oauth-authorize-passkey"')
-	expect(authorizeHtml).not.toContain('Continue with GitHub')
-
-	const providerHtml = await readAuthorizePage(
-		await handleAuthorizeRequest(
-			new Request(exampleOAuthUrl('authorize', baseAuthorizeParams)),
-			{
-				...createEnv(createHelpers()),
-				GITHUB_CLIENT_ID: 'github-client-id',
-				GITHUB_CLIENT_SECRET: 'github-client-secret',
-				GOOGLE_CLIENT_ID: 'google-client-id',
-				GOOGLE_CLIENT_SECRET: 'google-client-secret',
-			},
-		),
-	)
-	expect(providerHtml).toContain('"authProviders"')
-	expect(providerHtml).toContain('aria-label="Continue with GitHub"')
-	expect(providerHtml).toContain('data-testid="social-sign-in-github"')
-	expect(providerHtml).toContain('aria-label="Continue with Google"')
-	expect(providerHtml).toContain('data-testid="social-sign-in-google"')
-
+	// Initial HTML and social controls are covered by oauth-documents.mcp-e2e.
 	const signedInInfo = await handleAuthorizeInfo(
 		new Request(exampleOAuthUrl('authorize-info', baseAuthorizeParams), {
 			headers: { ...jsonAccept, Cookie: await sessionCookie() },
@@ -862,32 +821,6 @@ test('authorize rejects unverified accounts before creating a grant', async () =
 	expect(completeAuthorization).toHaveBeenCalledTimes(1)
 })
 
-test('worker entrypoint renders Claude-shaped authorize GET and recoverable errors for missing or malformed clients', async () => {
-	const clientKey = `client:${claudeClient.clientId}`
-	const snakeCaseClient = {
-		client_id: claudeClient.clientId,
-		redirect_uris: [claudeAuthRequest.redirectUri],
-		client_name: claudeClient.clientName,
-		token_endpoint_auth_method: 'none',
-	}
-	for (const [storedClient, text] of [
-		[claudeClient, 'Claude'],
-		[snakeCaseClient, 'Invalid OAuth client registration.'],
-		[null, 'Invalid client'],
-	] as const) {
-		if (storedClient) {
-			await env.OAUTH_KV.put(clientKey, JSON.stringify(storedClient))
-		} else {
-			await env.OAUTH_KV.delete(clientKey)
-		}
-		expect(
-			await readAuthorizePage(
-				await workerFetch(new Request(claudeAuthorizeUrl)),
-			),
-		).toContain(text)
-	}
-})
-
 test('worker entrypoint completes Claude-shaped dynamic registration and token exchange', async () => {
 	const email = `claude-oauth-${crypto.randomUUID()}@example.com`
 	await seedWorkerUser(email)
@@ -906,9 +839,14 @@ test('worker entrypoint completes Claude-shaped dynamic registration and token e
 		await createS256CodeChallenge(verifier),
 	)
 
-	const authorizeResponse = await workerFetch(new Request(authorizeUrl))
+	const infoUrl = new URL(authorizeUrl)
+	infoUrl.pathname = '/oauth/authorize-info'
+	const authorizeResponse = await workerFetch(new Request(infoUrl))
 	expect(authorizeResponse.status).toBe(200)
-	expect(await authorizeResponse.text()).toContain('Claude')
+	await expect(authorizeResponse.json()).resolves.toMatchObject({
+		ok: true,
+		client: { name: 'Claude' },
+	})
 
 	const { code } = await workerApprove(authorizeUrl, email)
 	const tokenResponse = await exchangeCode({
@@ -1016,9 +954,14 @@ test('worker entrypoint completes ChatGPT-shaped CIMD authorize and token exchan
 		verifier,
 	)
 
-	const authorizeResponse = await workerFetch(new Request(authorizeUrl))
+	const infoUrl = new URL(authorizeUrl)
+	infoUrl.pathname = '/oauth/authorize-info'
+	const authorizeResponse = await workerFetch(new Request(infoUrl))
 	expect(authorizeResponse.status).toBe(200)
-	expect(await authorizeResponse.text()).toContain('ChatGPT')
+	await expect(authorizeResponse.json()).resolves.toMatchObject({
+		ok: true,
+		client: { name: 'ChatGPT' },
+	})
 
 	const { callbackUrl, code } = await workerApprove(authorizeUrl, email)
 	expect(callbackUrl.searchParams.get('iss')).toBe('https://heykody.dev')
@@ -1590,22 +1533,14 @@ test('worker entrypoint returns id_token when openid scope is granted and serves
 	})
 })
 
-test('malformed max_age does not redirect authorize GET to itself', async () => {
+test('malformed max_age returns an OAuth error for silent authorization', async () => {
 	const authorizeUrl = exampleOAuthUrl('authorize', {
 		...baseAuthorizeParams,
 		scope: 'openid',
 		max_age: 'not-a-number',
 	})
 
-	const interactive = await handleAuthorizeRequest(
-		new Request(authorizeUrl),
-		createEnv(createHelpers()),
-	)
-	expect(interactive.headers.get('Location')).toBeNull()
-	expect(await readAuthorizePage(interactive)).toMatch(
-		/max_age must be a non-negative integer/i,
-	)
-
+	// Interactive recovery HTML is covered by the compiled native document test.
 	const silent = await handleAuthorizeRequest(
 		new Request(`${authorizeUrl}&prompt=none`),
 		createEnv(createHelpers()),
@@ -1631,16 +1566,7 @@ test('authorize recovers when a pre-hydration submit clobbers the OAuth query', 
 		}),
 	)
 
-	const htmlResponse = await handleAuthorizeRequest(
-		new Request(`https://example.com/oauth/authorize?${honeypotFieldName}=`),
-		envWithHelpers,
-	)
-	expect(htmlResponse.status).toBe(200)
-	const html = await htmlResponse.text()
-	expect(html).toContain(oauthAuthorizeClobberedResubmitMessage)
-	expect(html).not.toContain('client_id is required')
-	expect(html).not.toContain('data-testid="oauth-authorize-approve"')
-
+	// Pre-hydration recovery HTML is covered by the compiled native document test.
 	const infoResponse = await handleAuthorizeInfo(
 		new Request(
 			`https://example.com/oauth/authorize-info?${honeypotFieldName}=`,

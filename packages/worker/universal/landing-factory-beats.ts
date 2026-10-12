@@ -1,4 +1,4 @@
-import { type IconName } from '#universal/icon.tsx'
+import { type IconName } from '#universal/icon-names.ts'
 
 /**
  * Homepage “Trigger it / No inference” example cards. Each tile is a

@@ -1,3 +1,7 @@
+import {
+	absolutizeDocumentHead,
+	resolveDocumentHead,
+} from '#universal/document-head.ts'
 import { expect, it, vi } from 'vitest'
 import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query'
 import { activityQuery, loadActivityQuery } from './activity-query.ts'
@@ -7,24 +11,66 @@ vi.mock('#start/server/account-collections', () => ({
 	loadActivityPage: vi.fn(),
 }))
 
+function activityPage(
+	id: string | null,
+	nextCursor: string | null,
+): Awaited<ReturnType<typeof loadActivityPage>> {
+	return {
+		payload: {
+			ok: true,
+			viewFilter: 'recent',
+			statusFilter: 'all',
+			surfaceFilter: 'all',
+			triageFilter: 'all',
+			summary: {
+				since: '2026-01-01',
+				total: 0,
+				errors: 0,
+				ignored: 0,
+				resolved: 0,
+				running: 0,
+			},
+			runs:
+				id === null
+					? []
+					: [
+							{
+								id,
+								surface: 'execute',
+								status: 'success',
+								name: null,
+								startedAt: '2026-01-01',
+								finishedAt: null,
+								durationMs: null,
+								errorName: null,
+								errorMessage: null,
+								errorTriage: null,
+								packageId: null,
+								jobId: null,
+								logCount: 0,
+								idempotencyKey: null,
+								entry: null,
+								workerId: null,
+							},
+						],
+			nextCursor,
+			selectedRun: null,
+			selectedRunId: null,
+			retentionDays: 30,
+		},
+		head: absolutizeDocumentHead(
+			resolveDocumentHead('/account/activity'),
+			'https://example.com',
+		),
+	}
+}
 it('reuses loader data and preserves org and filters across cursor pages', async () => {
 	const read = vi.mocked(loadActivityPage)
-	read.mockImplementation(
-		async ({ data }) =>
-			({
-				payload: {
-					runs: [
-						{
-							id:
-								new URL(data, 'https://kody.local').searchParams.get(
-									'cursor',
-								) ?? 'first',
-						},
-					],
-					nextCursor: data.includes('cursor=second') ? null : 'second',
-				},
-				head: { title: 'Activity' },
-			}) as Awaited<ReturnType<typeof loadActivityPage>>,
+	read.mockImplementation(async ({ data }) =>
+		activityPage(
+			new URL(data, 'https://kody.local').searchParams.get('cursor') ?? 'first',
+			data.includes('cursor=second') ? null : 'second',
+		),
 	)
 	const client = new QueryClient()
 	const href = '/@team-one/-/activity?status=error&surface=execute'
@@ -62,10 +108,7 @@ it('foreground entry cancels an old preload and rechecks revoked membership', as
 		defaultOptions: { queries: { retry: false } },
 	})
 	const href = '/@team-one/-/activity'
-	const cached = {
-		payload: { runs: [], nextCursor: null },
-		head: { title: 'Activity' },
-	} as Awaited<ReturnType<typeof loadActivityPage>>
+	const cached = activityPage(null, null)
 	client.setQueryData(activityQuery('actor', href).queryKey, {
 		pages: [cached],
 		pageParams: [null],

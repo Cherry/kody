@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { loadOnboarding } from '#start/server/onboarding'
 import { loadOnboardingRoute, onboardingQuery } from './onboarding-query.ts'
-import { type OnboardingPayload } from './onboarding-types.ts'
+import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 
 vi.mock('#start/server/onboarding', () => ({ loadOnboarding: vi.fn() }))
 

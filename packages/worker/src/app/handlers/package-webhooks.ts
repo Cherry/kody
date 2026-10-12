@@ -73,6 +73,50 @@ export function createCommunityPackageWebhooksApiHandler(env: Env) {
 	} satisfies Action<typeof routes.communityPackageWebhooksApi>
 }
 
+async function authorizePackageWebhooks(
+	request: Request,
+	params: { username: string; kodyId: string },
+	env: Env,
+) {
+	const user = await readAuthenticatedAppUser(request, env)
+	if (!user) {
+		return { status: 401 as const, error: 'Unauthorized.' }
+	}
+	if (normalizeUsername(params.username) !== normalizeUsername(user.username)) {
+		return { status: 404 as const, error: 'Package not found.' }
+	}
+	const savedPackage = await resolveSavedPackage({
+		db: env.APP_DB,
+		userId: ownerIdFromCaller({
+			request: user.request,
+			user: user.mcpUser,
+		}),
+		packageIdOrKodyId: params.kodyId.trim(),
+	})
+	if (!savedPackage) {
+		return { status: 404 as const, error: 'Package not found.' }
+	}
+	return { status: 200 as const, user, packageKodyId: savedPackage.kodyId }
+}
+
+export async function readPackageWebhooksData(
+	request: Request,
+	params: { username: string; kodyId: string },
+	env: Env,
+) {
+	const access = await authorizePackageWebhooks(request, params, env)
+	if (access.status !== 200) return access
+	return {
+		status: 200 as const,
+		data: await loadPackageWebhooksData({
+			env,
+			requestUrl: request.url,
+			user: access.user,
+			kodyId: access.packageKodyId,
+		}),
+	}
+}
+
 export async function handlePackageWebhooksRequest(
 	{
 		request,
@@ -85,36 +129,17 @@ export async function handlePackageWebhooksRequest(
 	},
 	env: Env,
 ) {
-	const user = await readAuthenticatedAppUser(request, env)
-	if (!user) {
-		return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-	}
-	if (normalizeUsername(params.username) !== normalizeUsername(user.username)) {
-		return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
-	}
-	const savedPackage = await resolveSavedPackage({
-		db: env.APP_DB,
-		userId: ownerIdFromCaller({
-			request: user.request,
-			user: user.mcpUser,
-		}),
-		packageIdOrKodyId: params.kodyId.trim(),
-	})
-	if (!savedPackage) {
-		return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
-	}
-	const packageKodyId = savedPackage.kodyId
-
 	if (request.method === 'GET') {
-		return jsonResponse(
-			await loadPackageWebhooksData({
-				env,
-				requestUrl: request.url,
-				user,
-				kodyId: packageKodyId,
-			}),
-		)
+		const result = await readPackageWebhooksData(request, params, env)
+		return result.status === 200
+			? jsonResponse(result.data)
+			: jsonResponse({ ok: false, error: result.error }, result.status)
 	}
+	const access = await authorizePackageWebhooks(request, params, env)
+	if (access.status !== 200) {
+		return jsonResponse({ ok: false, error: access.error }, access.status)
+	}
+	const { user, packageKodyId } = access
 
 	if (request.method !== 'POST') {
 		return jsonResponse(

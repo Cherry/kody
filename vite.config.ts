@@ -202,17 +202,6 @@ export default defineConfig(async ({ command }) => {
 					find: /^#start\/server\/(.*)$/,
 					replacement: path.resolve(root, 'packages/worker/start/server/$1.ts'),
 				},
-				{
-					find: /^#app\/hmr\.ts$/,
-					replacement: path.resolve(root, 'packages/worker/src/app/hmr.ts'),
-				},
-				{
-					find: /^#app\/client-entry-assets\.ts$/,
-					replacement: path.resolve(
-						root,
-						'packages/worker/src/app/client-entry-assets.ts',
-					),
-				},
 				alias('#app', path.resolve(root, 'packages/worker/src/app')),
 				alias('#client', path.resolve(root, 'packages/worker/client')),
 				alias('#universal', path.resolve(root, 'packages/worker/universal')),

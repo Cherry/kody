@@ -2,19 +2,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
 import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
+import { connectedAgentMutationOptions } from '../connected-agent-mutation.ts'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { connectedAgentsApiPath } from '#client/routes/account-page-data.ts'
 import {
 	AccountManagementPanel,
 	TimestampValue,
 	accountActionsCss,
 } from './account-management-components.tsx'
-import { toast } from '#client/toast.ts'
 import {
 	accountConnectionsNewHref,
 	isAccountConnectionAgent,
@@ -23,10 +19,7 @@ import {
 	connectedAgentConnectionLabel,
 	groupConnectedAgents,
 } from '#universal/connected-mcp-agents.ts'
-import {
-	type AccountConnectedAgentListItem,
-	type AccountConnectedAgentsLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import { renderIcon } from '../components/icon.tsx'
 import {
 	colors,
@@ -56,93 +49,11 @@ export function useAccountConnectedAgents(
 				new URL(currentHref, 'http://localhost').pathname,
 			),
 		],
-		mutationFn: async ({
-			clientId,
-			href,
-		}: {
-			clientId: string
-			href: string
-		}) => {
-			const response = await fetch(connectedAgentsApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(href),
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'revoke', clientId }),
-			})
-			const accepted = await readJson<
-				AccountConnectedAgentsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(accepted?.error ?? 'Unable to revoke this agent.')
-		},
-		onMutate: async ({ clientId, href }) => {
-			const filters = orgPageFilters(actorKey, 'loadConnectionsPage', href)
-			await queryClient.cancelQueries(filters)
-			const removed = queryClient
-				.getQueriesData<{ payload: AccountConnectedAgentsLoaderData }>(filters)
-				.map(([key, data]) => ({
-					key,
-					agent: data?.payload.agents.find(
-						(agent) => agent.clientId === clientId,
-					),
-				}))
-			updateOrgPagePayload<AccountConnectedAgentsLoaderData>(
-				queryClient,
-				actorKey,
-				'loadConnectionsPage',
-				href,
-				(payload) => ({
-					...payload,
-					agents: payload.agents.filter((agent) => agent.clientId !== clientId),
-				}),
-			)
-			return removed
-		},
-		onSuccess: () => {
-			toast.success('Agent disconnected.')
-		},
-		onError: (error, _variables, removed) => {
-			for (const { key, agent } of removed ?? [])
-				if (agent)
-					queryClient.setQueryData<{
-						payload: AccountConnectedAgentsLoaderData
-					}>(key, (data) =>
-						data &&
-						!data.payload.agents.some(
-							(item) => item.clientId === agent.clientId,
-						)
-							? {
-									...data,
-									payload: {
-										...data.payload,
-										agents: [...data.payload.agents, agent],
-									},
-								}
-							: data,
-					)
-			toast.error(error.message)
-		},
-		onSettled: (_data, _error, { href }) => {
-			const orgSlug = orgSlugFromOrgOwnedPath(
-				new URL(href, 'http://localhost').pathname,
-			)
-			if (
-				queryClient.isMutating({
-					mutationKey: ['connectedAgents', actorKey, orgSlug],
-				}) === 1
-			)
-				void queryClient.invalidateQueries(
-					orgPageFilters(actorKey, 'loadConnectionsPage', href),
-				)
-		},
+		...connectedAgentMutationOptions(queryClient),
 	})
 	function revokeAgent(clientId: string) {
 		setRevokeArmed(null)
-		mutation.mutate({ clientId, href: currentHref })
+		mutation.mutate({ clientId, href: currentHref, actorKey })
 	}
 
 	return {

@@ -18,7 +18,7 @@ is `/@<slug>/-/packages`, distinct from the public profile at `/@<slug>`. The
 signup org's Overview (`/@<slug>/-/overview`) is a card for every workspace
 section; a team org's overview URL redirects to its home at `/@<slug>`. Both
 rails come from `account-rail.ts` and render through `AccountPageHeader` in
-`packages/worker/client/routes/account-management-components.tsx`. Below 860px a
+`packages/worker/start/pages/account-management-components.tsx`. Below 860px a
 rail collapses to a `<details>` menu.
 
 The site header has one avatar: the org switcher (`data-testid="org-switcher"`).

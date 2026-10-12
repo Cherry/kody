@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useState } from 'react'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
 import {
@@ -97,6 +98,7 @@ export function AccountJobsPage({
 	}
 
 	const queryClient = useQueryClient()
+	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = ['jobs', actorKey, pageQueryOrg(currentHref)] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
@@ -108,6 +110,7 @@ export function AccountJobsPage({
 			href: string
 			failureMessage: string
 		}) => {
+			const isCurrentSubmitter = captureSubmitter()
 			const response = await fetch(accountJobsApiPath, {
 				method: 'POST',
 				headers: {
@@ -118,7 +121,10 @@ export function AccountJobsPage({
 				referrer: orgAccountApiReferrer(input.href),
 				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) window.location.assign('/login')
+			if (response.status === 401) {
+				if (isCurrentSubmitter()) window.location.assign('/login')
+				throw new Error('Please sign in again.')
+			}
 			const result = await readJson<
 				AccountJobsActionPayload & { error?: string; ok?: boolean }
 			>(response)

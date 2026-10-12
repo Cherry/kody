@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { useMutation } from '@tanstack/react-query'
@@ -134,12 +135,19 @@ export function AccountMemoriesPage({
 	const [messageTone, setMessageTone] = useState<MessageTone>('info')
 	const [deleteMode, setDeleteMode] = useState<DeleteMode>(null)
 	const invalidatePages = usePageInvalidation(mutationResources)
+	const captureSubmitter = useSubmitterScope()
 	const deleteMutation = useMutation({
 		mutationKey: ['memories', currentHref],
-		mutationFn: async (input: { memoryId: string; force: boolean }) => {
+		mutationFn: async (input: {
+			memoryId: string
+			force: boolean
+			href: string
+			isCurrentSubmitter: () => boolean
+		}) => {
+			const { isCurrentSubmitter } = input
 			const response = await fetch(accountMemoriesApiPath, {
 				method: 'POST',
-				referrer: orgAccountApiReferrer(currentHref),
+				referrer: orgAccountApiReferrer(input.href),
 				headers: {
 					Accept: 'application/json',
 					'Content-Type': 'application/json',
@@ -152,8 +160,8 @@ export function AccountMemoriesPage({
 				}),
 			})
 			if (response.status === 401) {
-				window.location.assign('/login')
-				return
+				if (isCurrentSubmitter()) window.location.assign('/login')
+				throw new Error('Please sign in again.')
 			}
 			const payload = await readJson<
 				AccountMemoriesLoaderData & { error?: string; ok?: boolean }
@@ -164,7 +172,8 @@ export function AccountMemoriesPage({
 
 			return payload
 		},
-		onSuccess: () => invalidatePages(),
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 		onError: (error) => toast.error(error.message),
 	})
 	const router = useRouter()
@@ -219,9 +228,14 @@ export function AccountMemoriesPage({
 		if (actionState !== 'idle') return
 		setActionState('busy')
 		showMessage(null)
+		const isCurrentSubmitter = captureSubmitter()
 		try {
-			await deleteMutation.mutateAsync(input)
-			if (router.state.location.href !== currentHref) return
+			await deleteMutation.mutateAsync({
+				...input,
+				href: currentHref,
+				isCurrentSubmitter,
+			})
+			if (!isCurrentSubmitter()) return
 			clearDeleteMode()
 			setActionState('idle')
 			showMessage(
@@ -229,6 +243,7 @@ export function AccountMemoriesPage({
 			)
 			navigate(memoriesRoute.buildListHref(getCurrentSearch()))
 		} catch (error) {
+			if (!isCurrentSubmitter()) return
 			setActionState('idle')
 			setDeleteMode(null)
 			showMessage(

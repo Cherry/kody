@@ -1,4 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { useMutation } from '@tanstack/react-query'
+import { useLocation } from '@tanstack/react-router'
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
@@ -276,6 +281,45 @@ export function RotateCredentialsForm(props: {
 	app: AccountOauthAppListItem
 	onRotated: (app: AccountOauthAppListItem) => void
 }) {
+	const href = useLocation({ select: (location) => location.href })
+	const captureSubmitter = useSubmitterScope()
+	const invalidate = usePageInvalidation([
+		'loadIntegrationsPage',
+		'loadConnectionsPage',
+	])
+	const mutation = useMutation({
+		mutationFn: async (input: {
+			href: string
+			body: Record<string, unknown>
+		}) => {
+			const isCurrentSubmitter = captureSubmitter()
+			const response = await fetch(accountIntegrationsApiPath, {
+				method: 'POST',
+				referrer: orgAccountApiReferrer(input.href),
+				headers: {
+					'Content-Type': 'application/json',
+					Accept: 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify(input.body),
+			})
+			if (response.status === 401) {
+				if (isCurrentSubmitter()) window.location.assign('/login')
+				throw new Error('Please sign in again.')
+			}
+			const payload = await readJson<{
+				ok: boolean
+				error?: string
+				app?: AccountOauthAppListItem
+			}>(response)
+			if (!response.ok || !payload?.ok || !payload.app)
+				throw new Error(payload?.error || 'Unable to rotate credentials.')
+			return payload.app
+		},
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+		gcTime: 0,
+	})
 	const [clientId, setClientId] = useState(props.app.clientId)
 	const [clientSecret, setClientSecret] = useState('')
 	const [confirmed, setConfirmed] = useState(false)
@@ -317,40 +361,25 @@ export function RotateCredentialsForm(props: {
 		}
 		setStatus('saving')
 		setMessage(null)
+		const isCurrentSubmitter = captureSubmitter()
 		try {
-			const response = await fetch(accountIntegrationsApiPath, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
+			const rotatedApp = await mutation.mutateAsync({
+				href,
+				body: {
 					action: 'rotate_oauth_app_credentials',
 					appSlug: app.slug,
 					...(nextClientId ? { clientId: nextClientId } : {}),
 					...(nextClientSecret ? { clientSecret: nextClientSecret } : {}),
 					confirm: true,
-				}),
+				},
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<{
-				ok: boolean
-				error?: string
-				app?: AccountOauthAppListItem
-			}>(response)
-			if (!response.ok || !payload?.ok || !payload.app) {
-				throw new Error(payload?.error || 'Unable to rotate credentials.')
-			}
-			const rotatedApp = payload.app
+			if (!isCurrentSubmitter()) return
 			reset(rotatedApp)
 			setMessage('Rotated shared credentials for this integration.')
 			setMessageTone('info')
 			props.onRotated(rotatedApp)
 		} catch (error) {
+			if (!isCurrentSubmitter()) return
 			setStatus('idle')
 			setMessage(
 				error instanceof Error

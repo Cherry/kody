@@ -321,75 +321,74 @@ export async function withOnboardingHighlights(
 	}
 }
 
+export async function readOnboardingPageData(env: Env, request: Request) {
+	const serverTiming: Array<ServerTimingEntry> = []
+	const user = await readAuthenticatedAppUser(request, env)
+	if (!user) {
+		const { persistContext: _persistContext, ...chooser } =
+			await pushServerTiming(serverTiming, 'listings', () =>
+				loadOnboardingChooserFields(env, request),
+			)
+		const payload = await withOnboardingHighlights(
+			env,
+			{
+				...loadPublicOnboardingData({ env, requestUrl: request.url }),
+				...chooser,
+			},
+			serverTiming,
+		)
+		return {
+			payload,
+			serverTiming,
+			headers: anonymousPersonalizedJsonCacheHeaders({
+				personalized: false,
+				request,
+			}),
+		}
+	}
+	// Keep unverified callers' setup fields empty until verification succeeds.
+	const chooser = user.emailVerified
+		? await pushServerTiming(serverTiming, 'listings', () =>
+				loadOnboardingChooserFields(
+					env,
+					request,
+					personalOrgId(user.mcpUser.userId),
+				),
+			)
+		: null
+	const onboarding = await loadOnboardingData({
+		env,
+		requestUrl: request.url,
+		stableUserId: personalOrgId(user.mcpUser.userId),
+		username: user.username,
+		emailVerified: user.emailVerified,
+		...chooser,
+	})
+	if (user.emailVerified)
+		await attachOnboardingProgress(
+			env,
+			personalOrgId(user.mcpUser.userId),
+			user.username,
+			onboarding,
+		)
+	return {
+		payload: await withOnboardingHighlights(env, onboarding, serverTiming),
+		serverTiming,
+		headers: undefined,
+	}
+}
+
 export function createOnboardingApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler({ request }) {
-			if (request.method !== 'GET') {
+			if (request.method !== 'GET')
 				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				const { persistContext: _persistContext, ...chooser } =
-					await pushServerTiming(serverTiming, 'listings', () =>
-						loadOnboardingChooserFields(env, request),
-					)
-				return jsonResponse(
-					await withOnboardingHighlights(
-						env,
-						{
-							...loadPublicOnboardingData({
-								env,
-								requestUrl: request.url,
-							}),
-							...chooser,
-						},
-						serverTiming,
-					),
-					{
-						serverTiming,
-						headers: anonymousPersonalizedJsonCacheHeaders({
-							personalized: false,
-							request,
-						}),
-					},
-				)
-			}
-
-			// Unverified callers still get a payload so clients can detect the
-			// gate; MCP URL/setup and featured fields stay empty until
-			// verification succeeds.
-			const chooser = user.emailVerified
-				? await pushServerTiming(serverTiming, 'listings', () =>
-						loadOnboardingChooserFields(
-							env,
-							request,
-							personalOrgId(user.mcpUser.userId),
-						),
-					)
-				: null
-			const onboarding = await loadOnboardingData({
+			const { payload, serverTiming, headers } = await readOnboardingPageData(
 				env,
-				requestUrl: request.url,
-				stableUserId: personalOrgId(user.mcpUser.userId),
-				username: user.username,
-				emailVerified: user.emailVerified,
-				...chooser,
-			})
-			if (user.emailVerified) {
-				await attachOnboardingProgress(
-					env,
-					personalOrgId(user.mcpUser.userId),
-					user.username,
-					onboarding,
-				)
-			}
-			return jsonResponse(
-				await withOnboardingHighlights(env, onboarding, serverTiming),
-				{ serverTiming },
+				request,
 			)
+			return jsonResponse(payload, { serverTiming, headers })
 		},
 	} satisfies Action<typeof routes.onboardingApi>
 }

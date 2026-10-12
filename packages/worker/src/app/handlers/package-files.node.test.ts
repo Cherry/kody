@@ -5,7 +5,6 @@ import type * as CommunityPackageRoute from '#app/community-package-route.ts'
 import type * as PackageFilesData from '#app/package-files-data.ts'
 import type * as PackagePage from '#app/package-page.ts'
 import type * as PageAuth from '#app/page-auth.ts'
-import type * as SsrRender from '#app/ssr-render.tsx'
 import type * as PackageRegistryRepo from '#worker/package-registry/repo.ts'
 
 const mockModule = vi.hoisted(() => ({
@@ -63,9 +62,6 @@ const mockModule = vi.hoisted(() => ({
 				>
 			) => Promise<unknown>
 		>(),
-	renderAppPage: vi.fn<typeof SsrRender.renderAppPage>(
-		async () => new Response('ok'),
-	),
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
@@ -103,9 +99,21 @@ vi.mock('#app/community-package-route.ts', () => ({
 }))
 
 vi.mock('#worker/package-registry/repo.ts', () => ({
+	getSavedPackageByIdInAnyOrg: async () => ({
+		id: 'pkg-1',
+		userId: ownerIdFromStored('stable-user-1'),
+		kodyId: 'demo',
+	}),
 	getSavedPackageById: (
 		...args: Parameters<typeof PackageRegistryRepo.getSavedPackageById>
 	) => mockModule.getSavedPackageById(...args),
+}))
+
+vi.mock('#app/package-viewer-access.ts', () => ({
+	viewerCanReadSavedPackage: async () => true,
+}))
+vi.mock('#worker/orgs/repo.ts', () => ({
+	loadOrgBindingForOrg: async () => ({ org: { slug: 'owner' } }),
 }))
 
 vi.mock('#app/package-files-data.ts', () => ({
@@ -127,17 +135,45 @@ vi.mock('#app/package-files-data.ts', () => ({
 	},
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (...args: Parameters<typeof SsrRender.renderAppPage>) =>
-		mockModule.renderAppPage(...args),
+const native = vi.hoisted(() => ({
+	env: {} as Env,
+	request: new Request('https://example.com/login'),
+	setResponseHeader: vi.fn(),
 }))
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: () => {
+		let validate = (data: unknown) => data
+		const builder = {
+			validator: (fn: typeof validate) => {
+				validate = fn
+				return builder
+			},
+			handler:
+				(fn: (input: { data: unknown }) => unknown) =>
+				(input: { data: unknown }) =>
+					fn({ data: validate(input.data) }),
+		}
+		return builder
+	},
+}))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	get env() {
+		return native.env
+	},
+}))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => native.request,
+	setResponseHeader: native.setResponseHeader,
+}))
+vi.mock('#app/env.ts', () => ({ getEnv: () => native.env }))
 
 const {
 	createAccountPackageFilesApiHandler,
 	createCommunityPackageFilesApiHandler,
 } = await import('./package-files.ts')
-const { createAccountPackageFilesHandler, createCommunityPackageFilesHandler } =
-	await import('./package-files-document.ts')
+const { loadPackageFiles } =
+	await import('../../../start/server/package-files.ts')
 
 const filesPayload = {
 	ok: true,
@@ -218,7 +254,6 @@ test('community files API resolves the package page and rejects traversal', asyn
 })
 
 test('account files HTML and JSON redirect to the package tree', async () => {
-	const htmlHandler = createAccountPackageFilesHandler({} as Env)
 	const apiHandler = createAccountPackageFilesApiHandler({} as Env)
 	const params = { packageId: 'pkg-1' }
 
@@ -252,15 +287,21 @@ test('account files HTML and JSON redirect to the package tree', async () => {
 	})
 	expect(mockModule.loadAccountPackageFilesData).not.toHaveBeenCalled()
 
-	const html = await call(htmlHandler, '/account/packages/pkg-1/files', params)
-	expect(html.status).toBe(302)
-	expect(html.headers.get('location')).toBe(
-		'https://example.com/@owner/demo/tree/main',
-	)
+	native.env = {
+		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+	} as Env
+	await expect(
+		loadPackageFiles({ data: { pathname: '/account/packages/pkg-1/files' } }),
+	).rejects.toMatchObject({
+		status: 302,
+		options: { href: '/@owner/demo/tree/main' },
+	})
 })
 
 test('unlisted leftover tree redirects stay private; listed leftovers stay public', async () => {
-	const handler = createCommunityPackageFilesHandler({} as Env)
+	native.env = {
+		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+	} as Env
 	const cases = [
 		{
 			kodyId: 'friction-log',
@@ -281,17 +322,17 @@ test('unlisted leftover tree redirects stay private; listed leftovers stay publi
 			to: `/@owner/${kodyId}/tree/main`,
 			shared,
 		})
-		const hop = await handler.handler({
-			request: new Request(`https://example.com/@owner/${kodyId}/files`),
-		} as never)
-		expect({
-			status: hop.status,
-			location: hop.headers.get('location'),
-			cacheControl: hop.headers.get('cache-control'),
-		}).toEqual({
+		native.request = new Request(`https://example.com/@owner/${kodyId}/files`)
+		native.setResponseHeader.mockClear()
+		await expect(
+			loadPackageFiles({ data: { pathname: `/@owner/${kodyId}/files` } }),
+		).rejects.toMatchObject({
 			status,
-			location: `https://example.com/@owner/${kodyId}/tree/main`,
-			cacheControl,
+			options: { href: `https://example.com/@owner/${kodyId}/tree/main` },
 		})
+		expect(native.setResponseHeader).toHaveBeenCalledWith(
+			'Cache-Control',
+			cacheControl,
+		)
 	}
 })

@@ -10,7 +10,25 @@ test('page navigation preserves selective motion and suppresses repeated homepag
 }) => {
 	await page.emulateMedia({ reducedMotion: 'no-preference' })
 	await page.addInitScript(() => {
-		Object.assign(window, { motionAnimations: [] as Array<string> })
+		const transitions: Array<{ href: string; finished: Promise<void> }> = []
+		Object.assign(window, {
+			motionAnimations: [] as Array<string>,
+			motionTransitions: transitions,
+		})
+		if (document.startViewTransition) {
+			const original = document.startViewTransition.bind(document)
+			document.startViewTransition = (...args) => {
+				const transition = original(...args)
+				transitions.push({
+					href: location.pathname,
+					finished: transition.finished.then(
+						() => {},
+						() => {},
+					),
+				})
+				return transition
+			}
+		}
 		document.addEventListener('animationstart', (event) => {
 			;(
 				window as unknown as { motionAnimations: Array<string> }
@@ -44,30 +62,27 @@ test('page navigation preserves selective motion and suppresses repeated homepag
 		'none',
 	)
 	expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin)
-	if (supported)
-		await page.evaluate(() => {
-			const original = document.startViewTransition.bind(document)
-			let finish!: () => void
-			const finished = new Promise<void>((resolve) => {
-				finish = resolve
-			})
-			Object.assign(window, { enteringDocsFinished: finished })
-			document.startViewTransition = (...args) => {
-				document.startViewTransition = original
-				const transition = original(...args)
-				void transition.finished.then(finish, finish)
-				return transition
-			}
-		})
 	await page.locator('a[href="/docs"]').first().click()
 	await expect(page).toHaveURL(/\/docs$/)
-	// URL changes can precede animation creation. Wait for the actual transition.
-	if (supported)
-		await page.evaluate(
-			() =>
-				(window as unknown as { enteringDocsFinished: Promise<void> })
-					.enteringDocsFinished,
+	await expect(page.locator('[data-docs-nav]')).toBeVisible()
+	// Await every recorded transition, including one whose start raced an
+	// earlier URL assertion, and drain its queued animation events before reset.
+	await page.evaluate(async () => {
+		const transitions = (
+			window as unknown as {
+				motionTransitions: Array<{ finished: Promise<void> }>
+			}
+		).motionTransitions
+		await Promise.all(transitions.map((transition) => transition.finished))
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
 		)
+	})
+	const transitionsBeforeGuide = await page.evaluate(
+		() =>
+			(window as unknown as { motionTransitions: Array<unknown> })
+				.motionTransitions.length,
+	)
 	await page.evaluate(() => {
 		;(
 			window as unknown as { motionAnimations: Array<string> }
@@ -81,6 +96,19 @@ test('page navigation preserves selective motion and suppresses repeated homepag
 	await expect.poll(() => new URL(page.url()).pathname).toBe(guideHref)
 	await page.waitForLoadState('networkidle')
 	const afterHeading = await page.locator('main h1').textContent()
+	const guideTransitions = await page.evaluate(
+		(before) =>
+			(
+				window as unknown as { motionTransitions: Array<{ href: string }> }
+			).motionTransitions
+				.slice(before)
+				.map((transition) => transition.href),
+		transitionsBeforeGuide,
+	)
+	expect(
+		guideTransitions,
+		'docs navigation must not start a new view transition',
+	).toEqual([])
 	expectSingleCommitTransition(await readMainTransitions(page), {
 		fromHeading: beforeHeading!,
 		toHeading: afterHeading!,

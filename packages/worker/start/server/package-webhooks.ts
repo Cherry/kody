@@ -1,6 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { type PackageWebhooksLoaderData } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
 export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 	.validator((input: { username: string; kodyId: string }) => {
@@ -20,7 +19,7 @@ export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 			{ getRequest, setResponseHeader },
 			{ getEnv },
 			{ setAuthSessionSecret },
-			{ handlePackageWebhooksRequest },
+			{ readPackageWebhooksData },
 		] = await Promise.all([
 			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
@@ -36,16 +35,12 @@ export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 			routes.communityPackageWebhooksApi.href(data),
 			original.url,
 		)
-		const response = await handlePackageWebhooksRequest(
-			{
-				request: new Request(url, { headers: original.headers }),
-				url,
-				params: data,
-			},
+		const result = await readPackageWebhooksData(
+			new Request(url, { headers: original.headers }),
+			data,
 			bindings,
 		)
-		if (response.status === 401) throw redirect({ href: '/login' })
-		if (response.status === 404) throw notFound()
-		if (!response.ok) throw new Error('Unable to load webhooks.')
-		return (await response.json()) as PackageWebhooksLoaderData
+		if (result.status === 401) throw redirect({ href: '/login' })
+		if (result.status === 404) throw notFound()
+		return result.data
 	})

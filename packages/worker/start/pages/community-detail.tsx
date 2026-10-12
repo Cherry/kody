@@ -1,7 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import {
 	type CommunityDetailApiPayload,
 	type CommunityInstallApiPayload,
@@ -34,16 +35,8 @@ export function CommunityDetailRoute({
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshRoute: true,
 	})
+	const invalidateReports = usePageInvalidation(reportResources)
 	const capture = useSubmitterScope()
-	const mounted = useRef(true)
-	const busy = useRef(new Set<string>())
-	useEffect(() => {
-		mounted.current = true
-		return () => {
-			mounted.current = false
-		}
-	}, [])
-	const [installBusy, setInstallBusy] = useState(false)
 	const [confirmed, setConfirmed] = useState(false)
 	useEffect(() => {
 		if (!confirmed) return
@@ -111,59 +104,86 @@ export function CommunityDetailRoute({
 			throw new Error(result.error ?? 'Unable to complete this action.')
 		return result
 	}
+	// Capture reconciliation when submitted, so a later navigation cannot move
+	// the write's cache work to another actor or organization. A lost response
+	// still requires reconciliation because the server may have committed it.
+	const lifecycle = {
+		gcTime: 0,
+		onMutate: () => ({ reconcile: invalidatePages }),
+		onSettled: (
+			_data: unknown,
+			_error: Error | null,
+			_variables: unknown,
+			context: { reconcile: () => Promise<void> } | undefined,
+		) => context?.reconcile(),
+	}
+	const installMutation = useMutation({
+		...lifecycle,
+		mutationFn: (id: string) =>
+			post<CommunityInstallApiPayload>(
+				routes.communityInstallApiPost.href({ listingId: id }),
+				{ acknowledged: true },
+			),
+	})
+	const featureMutation = useMutation({
+		...lifecycle,
+		mutationFn: (input: { id: string; featured: boolean }) =>
+			post(routes.communityFeatureApiPost.href({ listingId: input.id }), {
+				featured: input.featured,
+			}),
+	})
+	const reportMutation = useMutation({
+		...lifecycle,
+		onMutate: () => ({ reconcile: invalidateReports }),
+		mutationFn: (input: { id: string; reason: string }) =>
+			post(routes.communityReportApiPost.href({ listingId: input.id }), {
+				reason: input.reason,
+			}),
+	})
 	async function install() {
-		if (!listing || busy.current.has('install') || installOutcome) return
+		if (!listing || installMutation.isPending || installOutcome) return
 		if (!confirmed) {
 			setConfirmed(true)
 			return
 		}
+		const isCurrent = capture()
 		setConfirmed(false)
-		busy.current.add('install')
-		setInstallBusy(true)
 		setInstallMessage(null)
 		try {
-			const result = await post<CommunityInstallApiPayload>(
-				routes.communityInstallApiPost.href({ listingId: listing.id }),
-				{ acknowledged: true },
-			)
+			const result = await installMutation.mutateAsync(listing.id)
+			if (!isCurrent()) return
 			if (!result.status || !result.targetName || !result.agentPrompt)
 				throw new Error('Unable to install this public package.')
-			if (mounted.current)
-				setInstallOutcome({
-					status: result.status,
-					targetName: result.targetName,
-					agentPrompt: result.agentPrompt,
-					packageId:
-						result.status === 'installed' ? (result.packageId ?? null) : null,
-					failedChecks: result.failedChecks ?? [],
-				})
-			await invalidatePages()
+			setInstallOutcome({
+				status: result.status,
+				targetName: result.targetName,
+				agentPrompt: result.agentPrompt,
+				packageId:
+					result.status === 'installed' ? (result.packageId ?? null) : null,
+				failedChecks: result.failedChecks ?? [],
+			})
 		} catch (error) {
-			if (mounted.current)
+			if (isCurrent())
 				setInstallMessage(
 					error instanceof Error
 						? error.message
 						: 'Unable to install this public package.',
 				)
-		} finally {
-			busy.current.delete('install')
-			if (mounted.current) setInstallBusy(false)
 		}
 	}
 	async function feature() {
-		if (!listing || busy.current.has('feature')) return
-		busy.current.add('feature')
+		if (!listing || featureMutation.isPending) return
+		const isCurrent = capture()
 		setFeatureState('submitting')
 		setFeatureMessage(null)
 		try {
-			await post(
-				routes.communityFeatureApiPost.href({ listingId: listing.id }),
-				{ featured: !listing.featured },
-			)
-			await invalidatePages()
-			if (mounted.current) setFeatureState('idle')
+			await featureMutation.mutateAsync({
+				id: listing.id,
+				featured: !listing.featured,
+			})
+			if (isCurrent()) setFeatureState('idle')
 		} catch (error) {
-			if (mounted.current) {
+			if (isCurrent()) {
 				setFeatureState('error')
 				setFeatureMessage(
 					error instanceof Error
@@ -171,39 +191,33 @@ export function CommunityDetailRoute({
 						: 'Unable to update featured status.',
 				)
 			}
-		} finally {
-			busy.current.delete('feature')
 		}
 	}
 	async function report() {
-		if (!listingId || busy.current.has('report')) return
-		busy.current.add('report')
+		if (!listingId || reportMutation.isPending) return
+		const isCurrent = capture()
 		setReportState('submitting')
 		setReportMessage(null)
 		try {
-			await post(routes.communityReportApiPost.href({ listingId }), {
-				reason: reportReason,
-			})
-			if (mounted.current) {
+			await reportMutation.mutateAsync({ id: listingId, reason: reportReason })
+			if (isCurrent()) {
 				setReportState('success')
 				setReportMessage('Report submitted. Thank you.')
 				setReportReason('')
 			}
 		} catch (error) {
-			if (mounted.current) {
+			if (isCurrent()) {
 				setReportState('error')
 				setReportMessage(
 					error instanceof Error ? error.message : 'Unable to submit report.',
 				)
 			}
-		} finally {
-			busy.current.delete('report')
 		}
 	}
 	return (
 		<PackageInstallContext.Provider
 			value={{
-				busy: installBusy,
+				busy: installMutation.isPending,
 				confirmed,
 				onInstall: () => void install(),
 				onDisarm: () => setConfirmed(false),
@@ -253,3 +267,5 @@ const mutationResources = [
 	'loadAccountPage',
 	'loadUsagePage',
 ] as const
+
+const reportResources = ['loadAdminCommunityReports'] as const

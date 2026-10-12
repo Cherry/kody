@@ -1,4 +1,5 @@
 import { type QueryClient } from '@tanstack/react-query'
+import { parseOrgResourcePath } from '#universal/org-pages.ts'
 
 export function pageResourceKey(actorKey: string | null, resource: string) {
 	return ['page', actorKey, resource] as const
@@ -32,6 +33,7 @@ export function hasPendingPageMutation(
 	client: QueryClient,
 	actorKey: unknown,
 	resource: unknown,
+	input?: unknown,
 ) {
 	const mutations: Record<string, string[]> = {
 		loadAccountPage: ['profile', 'accountConnections'],
@@ -51,7 +53,30 @@ export function hasPendingPageMutation(
 		typeof resource === 'string' &&
 		(mutations[resource] ?? []).some(
 			(mutation) =>
-				client.isMutating({ mutationKey: [mutation, actorKey] }) > 0,
+				client.isMutating({
+					mutationKey: [mutation, actorKey],
+					predicate: ({ options }) => {
+						if (mutation === 'profile' || mutation === 'accountConnections')
+							return true
+						const key = options.mutationKey
+						if (
+							mutation === 'packageWebhooks' &&
+							input &&
+							typeof input === 'object' &&
+							'username' in input &&
+							'kodyId' in input
+						)
+							return key?.[2] === input.username && key?.[3] === input.kodyId
+						if (typeof input === 'string') {
+							const org =
+								parseOrgResourcePath(
+									new URL(input, 'https://kody.local').pathname,
+								)?.slug ?? null
+							return key?.[2] === org
+						}
+						return true
+					},
+				}) > 0,
 		)
 	)
 }
@@ -62,8 +87,10 @@ export async function waitForPageMutations(
 	actorKey: string | null,
 	resource: string,
 	signal: AbortSignal,
+	input?: unknown,
 ) {
-	const pending = () => hasPendingPageMutation(client, actorKey, resource)
+	const pending = () =>
+		hasPendingPageMutation(client, actorKey, resource, input)
 	if (signal.aborted) throw signal.reason
 	if (!pending()) return
 	await new Promise<void>((resolve, reject) => {

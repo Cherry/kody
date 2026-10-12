@@ -24,7 +24,7 @@ export type PackageStatusSignifiersInput = {
  * already not a community listing, so a second unpublished mark would
  * misread as "never published" when it may have a published commit.
  */
-function listPackageStatusSignifiers(
+export function listPackageStatusSignifiers(
 	input: PackageStatusSignifiersInput,
 ): Array<PackageStatusSignifier> {
 	if (input.isPrivate) {

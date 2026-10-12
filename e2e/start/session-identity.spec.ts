@@ -14,7 +14,11 @@ async function switchUser(
 	try {
 		await other.goto('/account')
 		await waitForClientHydration(other)
-		await other.getByRole('button', { name: 'Log out', exact: true }).click()
+		await other.getByTestId('org-switcher').click()
+		await other
+			.getByTestId('org-switcher-logout')
+			.filter({ visible: true })
+			.click()
 		await expect(other).not.toHaveURL(/\/account$/)
 		const response = await other.request.post('/auth', {
 			data: { email: user.email, password: user.password, mode: 'login' },
@@ -30,10 +34,8 @@ async function watchForOldProfile(page: Page, oldUsername: string) {
 	// A final toHaveValue assertion alone can miss an incorrect first frame.
 	function watch(username: string) {
 		const check = () => {
-			const field = document.querySelector<HTMLInputElement>(
-				'input[name="username"]',
-			)
-			if (field?.value === username)
+			const field = document.querySelector('[data-testid="account-username"]')
+			if (field?.textContent?.trim().endsWith(`/@${username}`))
 				sessionStorage.setItem('old-profile-rendered', 'true')
 		}
 		new MutationObserver(check).observe(document, {
@@ -128,7 +130,7 @@ for (const delayOldShell of [false, true]) {
 			await watchForOldProfile(page, first.username)
 			// Do not depend on the activation debounce running before navigation.
 			await account.evaluate((anchor: HTMLAnchorElement) => anchor.click())
-			await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+			await expect(page.getByTestId('account-username')).toContainText(
 				second.username,
 			)
 			await expect(page.locator('html')).not.toHaveAttribute(
@@ -147,7 +149,7 @@ for (const delayOldShell of [false, true]) {
 					sessionStorage.getItem('old-profile-rendered'),
 				),
 			).toBeNull()
-			await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+			await expect(page.getByTestId('account-username')).toContainText(
 				second.username,
 			)
 		} finally {
@@ -200,7 +202,7 @@ test('switching identity clears private drafts, while same-user activation prese
 		window.dispatchEvent(new FocusEvent('focus'))
 		window.dispatchEvent(new Event('online'))
 	})
-	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+	await expect(page.getByTestId('account-username')).toContainText(
 		second.username,
 	)
 	await expect(
@@ -276,7 +278,7 @@ test('a preload made under another cookie identity cannot poison the original do
 		.first()
 		.click()
 
-	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
+	await expect(page.getByTestId('account-username')).toContainText(
 		first.username,
 	)
 	await waitForClientHydration(page)
@@ -350,7 +352,7 @@ test('an identity switch cannot reuse a cached admin-only guide', async ({
 	await expect(
 		page.getByRole('heading', { name: 'Admin events', exact: true }),
 	).toBeVisible()
-	await page.evaluate(() => window.history.pushState(null, '', '/support'))
+	await page.locator('a[href="/support"]').first().click()
 	await expect(page).toHaveURL(/\/support$/)
 	await expect(
 		page.getByRole('heading', { name: 'Admin events', exact: true }),
@@ -374,8 +376,8 @@ test('an identity switch cannot reuse a cached admin-only guide', async ({
 	await page.evaluate(watch)
 	await page.evaluate(() => {
 		document.documentElement.dataset.originalAdminDocument = 'true'
-		window.history.pushState(null, '', '/docs/admin-events')
 	})
+	await page.goBack()
 	await expect(page.getByTestId('not-found-page')).toBeVisible()
 	await waitForClientHydration(page)
 	await expect(page.locator('html')).not.toHaveAttribute(

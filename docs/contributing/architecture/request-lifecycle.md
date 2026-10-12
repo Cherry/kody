@@ -332,91 +332,19 @@ highlighter version.
 
 ## Client-side navigation flow
 
-The browser app intercepts same-origin `<a>` clicks and same-origin form
-submissions (`GET`/`POST`) and routes them in-place through the client router.
-Normal app navigations stay in-place through the client router instead of
-requiring a full document refresh.
+TanStack Router owns app navigation, route matching, preloading, history, and
+scroll restoration. Internal links use
+`packages/worker/start/components/site-link.tsx`. Route loaders ensure
+destination Query data before rendering. Query owns cached server state, with
+actor and organization scope included in resource keys. Mutations update or
+invalidate the affected resources through their Query lifecycle, including when
+the initiating component unmounts.
 
-### Preload-then-commit
-
-SPA navigations use a **preload-then-commit** model (similar to React Router
-data routers): before `history.pushState` and the route swap, the client router
-runs a registered **route loader** for the destination URL, fetches JSON API
-data, and stores it in a single-slot preloaded navigation store. Only after the
-loader finishes (or is skipped when no loader matches) does the router commit
-the URL change and notify subscribers. Route components consume that payload
-synchronously on first render via `tryConsumeRouteLoaderData`, so the UI updates
-once with data already present instead of swapping routes into a loading state.
-Because consumption mutates route closure state mid-render, a successful consume
-also schedules one follow-up render of the consuming component (flushed in the
-same microtask, before paint); values a route derived before the consume call
-therefore cannot persist stale. Routes should still consume before deriving
-list/detail state — the follow-up render is a safety net, not the primary
-ordering contract.
-
-Route loaders are registered in `packages/worker/client/routes/index.tsx` under
-`clientRouteLoaders`, keyed by `routePattern(routes.<name>)`. The same keying
-scheme is used by `clientRoutes` and `document-head.ts`, so pathname renames
-flow from `packages/worker/universal/routes.ts` instead of duplicated literal
-strings. OAuth authorize/callback are the exception: those shells use
-`oauthPaths.authorize` and `oauthPaths.callback` because the Cloudflare OAuth
-provider wrapper, not `routes.ts`, owns those pathnames. Loaders still match
-with the same Remix route-pattern specificity as `clientRoutes`. They return a
-`RouteLoaderRedirect` (via `routeLoaderRedirect`) to abort the SPA navigation
-with a full-document redirect (for example, `401` → login). The router performs
-the redirect, never the loader itself, so speculative loader runs stay side-
-effect free. Loader errors still commit the navigation so the destination route
-can fall back to its own fetch; the router marks the destination stale
-(`markNavigationDataStale`) so same-path refreshes — where no href change would
-otherwise trigger a refetch — still reload. Hash-only changes commit immediately
-without a loader. Back/forward (`popstate`) and same-path refreshes after form
-POST also run loaders before notifying, keeping the previous UI visible until
-data is ready.
-
-### Intent prefetch
-
-Like React Router's `prefetch="intent"`, the client router speculatively runs
-the destination's route loader when the user shows intent to navigate —
-`mouseover`, `focusin`, or `touchstart` on a same-origin link with a registered
-loader (`intent-prefetch.ts`). A single latest-wins slot holds the speculative
-run; hovering a different link aborts the previous prefetch. When the click
-lands, the navigation adopts the in-flight or freshly settled prefetch instead
-of starting the loader from scratch; results expire after a short TTL and
-failures fall back to a normal loader run. Form POSTs abort any pending prefetch
-so pre-mutation data is never shown. Opt a link out with `data-prefetch="none"`.
-Rendered lists can also warm many destinations at once (`prefetchRouteHrefs`).
-Onboarding chips share one `/onboarding.json` payload; docs sidebar slugs do
-not, so they pass `{ independent: true }` and run one loader per href.
-
-A thin top-of-viewport **navigation progress bar** listens for `navigationstart`
-/ `navigationend` on `routerEvents` and appears only when a navigation is still
-pending after a short delay.
-
-The app shell also mounts **scroll restoration**. Each history entry's
-`window.scrollY` is stored in `sessionStorage` keyed by `history.state.key` (the
-same `{ [key]: y }` map React Router uses). A blocking inline script in the SSR
-document body restores that Y before first paint on a full document load, so a
-refresh does not flash the top of the page. After hydration the restorer keeps
-applying the same saved Y until the document is tall enough to reach it, then
-keeps pinning that Y through a short settle window so late layout (images,
-fonts, scroll anchoring) cannot persist a drifted position. User input ends the
-pin early. A persist of the current `scrollY` does not replace a taller saved Y
-while that Y is still unreachable, so a clamped early `scrollTo` cannot
-overwrite the intended position. `history.scrollRestoration` is `manual` so the
-browser does not fight the restorer. SPA back/forward still restores the saved
-position, hash targets scroll into view, and new navigations go to the top after
-the destination route commits. Same-document hash links are intercepted like
-other same-origin links so restoration can scroll to the target. Preserve the
-current scroll for a specific intercepted link or form with
-`data-prevent-scroll-reset`, or for programmatic navigation with
-`navigate(to, { preventScrollReset: true })`.
-
-Full page navigations occur for:
-
-- Explicit browser reloads/new tab loads
-- Cross-origin links/forms
-- Non-`_self` form targets (for example, `_blank`)
-- Explicit code paths that intentionally call `window.location.assign(...)`
+See [web app rendering and server state](../tanstack-start.md) for cache policy,
+authorization, and mutation ownership, and
+[no-flash navigation](../no-flash-navigation.md) for stylesheet readiness and
+Back/Forward behavior. The native route tree lives in
+`packages/worker/start/routes/`.
 
 ## CORS behavior
 
@@ -524,14 +452,15 @@ current traffic).
 ### Browser errors and session replay
 
 The client bundle initializes `@sentry/browser` from a `kody:sentry` meta tag
-that `ssr-document.tsx` renders when `SENTRY_DSN` is configured (the DSN is a
-publishable client key), except under `WRANGLER_IS_LOCAL_DEV` so Vite HMR noise
-does not report as production. Capture is errors plus **error-only Session
-Replay**: `replaysSessionSampleRate` is `0` and `replaysOnErrorSampleRate` is
-`1`, so nothing is recorded to Sentry unless an error occurs, and replays mask
-all text and block all media (`packages/worker/client/sentry-client.ts`) because
-Kody sessions contain personal content. Envelopes are sent through the
-same-origin `POST /sentry-tunnel` route
+that `packages/worker/start/routes/__root.tsx` renders when `SENTRY_DSN` is
+configured (the DSN is a publishable client key), except under
+`WRANGLER_IS_LOCAL_DEV` so Vite HMR noise does not report as production. Capture
+is errors plus **error-only Session Replay**: `replaysSessionSampleRate` is `0`
+and `replaysOnErrorSampleRate` is `1`, so nothing is recorded to Sentry unless
+an error occurs, and replays mask all text and block all media
+(`packages/worker/client/sentry-client.ts`) because Kody sessions contain
+personal content. Envelopes are sent through the same-origin
+`POST /sentry-tunnel` route
 (`packages/worker/src/app/handlers/sentry-tunnel.ts`), which only forwards
 envelopes whose DSN matches the Worker's own `SENTRY_DSN` — this keeps the
 first-party CSP at `connect-src 'self'`. Because that DSN is public, the route

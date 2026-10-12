@@ -1,32 +1,20 @@
-import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type * as CreditTopUps from '#worker/billing/credit-top-ups.ts'
 import { CreditTopUpError } from '#worker/billing/credit-top-ups.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
-import { createAccountUsageHandler } from './account-usage-document.ts'
+import { loadAccountUsagePageResult } from '../account-usage-page.ts'
 
 const mockModule = vi.hoisted(() => ({
-	requireAuthenticatedPageUser: vi.fn<() => Promise<unknown>>(),
 	loadAccountUsageData: vi.fn<(input: unknown) => Promise<unknown>>(),
 	applyCreditTopUpFromCheckoutSession:
 		vi.fn<(input: unknown) => Promise<unknown>>(),
-	renderAppPage: vi.fn(async ({ loaderData }: { loaderData?: unknown }) =>
-		Response.json({ ok: true, loaderData }),
-	),
-}))
-
-vi.mock('#app/page-auth.ts', () => ({
-	requireAuthenticatedPageUser: () => mockModule.requireAuthenticatedPageUser(),
 }))
 
 vi.mock('#app/account-usage-data.ts', () => ({
 	loadAccountUsageData: (input: unknown) =>
 		mockModule.loadAccountUsageData(input),
-}))
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (input: { loaderData?: unknown }) =>
-		mockModule.renderAppPage(input),
 }))
 
 vi.mock('#worker/billing/credit-top-ups.ts', async (importOriginal) => {
@@ -42,20 +30,30 @@ const env = {} as Env
 
 beforeEach(() => {
 	vi.clearAllMocks()
-	mockModule.requireAuthenticatedPageUser.mockResolvedValue({
-		userId: 7,
-		mcpUser: { userId: ownerIdFromStored('stable-7') },
-	})
 	mockModule.loadAccountUsageData.mockResolvedValue({ ok: true })
 })
 
 async function getUsage(search: string) {
 	const request = new Request(`https://kody.codes/account/usage${search}`)
-	return createAccountUsageHandler(env).handler({
-		request,
-		url: new URL(request.url),
-		params: {},
-	} as never)
+	return loadAccountUsagePageResult(env, request, {
+		sessionUserId: '7',
+		userId: 7,
+		username: 'usage-user',
+		email: 'usage@example.com',
+		emailVerified: true,
+		emailVerificationDelivery: null,
+		displayName: 'Usage',
+		roles: ['user'],
+		permissions: [],
+		artifactOwnerIds: [],
+		request: sessionRequestContext('stable-7'),
+		mcpUser: {
+			userId: personIdFromStored('stable-7'),
+			email: 'usage@example.com',
+			username: 'usage-user',
+			displayName: 'Usage',
+		},
+	})
 }
 
 test('a confirmed Stripe return lands on the Credits section with the added notice', async () => {
@@ -66,6 +64,9 @@ test('a confirmed Stripe return lands on the Credits section with the added noti
 			expectedStableUserId: 'stable-7',
 		}),
 	)
+	expect(response).toBeInstanceOf(Response)
+	if (!(response instanceof Response))
+		throw new Error('Expected billing redirect')
 	expect(response.status).toBe(302)
 	expect(response.headers.get('Location')).toBe(
 		'https://kody.codes/account/usage?credits=added#credits',
@@ -78,6 +79,8 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 		new CreditTopUpError('not_paid', 'Not paid.'),
 	)
 	const notPaid = await getUsage('?topup=success&session_id=cs_1')
+	if (!(notPaid instanceof Response))
+		throw new Error('Expected billing redirect')
 	expect(notPaid.headers.get('Location')).toBe(
 		'https://kody.codes/account/usage?error=not_paid#credits',
 	)
@@ -86,6 +89,8 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 		new CreditTopUpError('user_not_found', 'Missing.'),
 	)
 	const unknown = await getUsage('?topup=success&session_id=cs_2')
+	if (!(unknown instanceof Response))
+		throw new Error('Expected billing redirect')
 	expect(unknown.headers.get('Location')).toBe(
 		'https://kody.codes/account/usage?error=topup_failed#credits',
 	)

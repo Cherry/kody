@@ -16,10 +16,8 @@ import { publicOgPages, type PublicOgPageId } from '#universal/og-pages.ts'
 
 export const DEFAULT_DOCUMENT_TITLE = 'Kody'
 export const NOT_FOUND_DOCUMENT_TITLE = 'Not found'
-export const INTERNAL_ERROR_DOCUMENT_TITLE = 'Something went wrong'
 
-/** Stable marker so SPA navigation can upsert/remove managed head tags. */
-export const DOCUMENT_HEAD_ATTR = 'data-kody-head'
+const INTERNAL_ERROR_DOCUMENT_TITLE = 'Something went wrong'
 
 const documentHeadOrigin = 'https://kody.local'
 
@@ -596,13 +594,6 @@ export function resolveDocumentHead(
 	const description = descriptor.description ?? descriptor.og?.description
 	if (description === undefined) return descriptor
 	return { ...descriptor, description }
-}
-
-export function resolveDocumentTitle(
-	pathname: string,
-	loaderData?: Partial<AppLoaderData>,
-): string {
-	return resolveDocumentHead(pathname, loaderData).title
 }
 
 export function absolutizeDocumentHead(

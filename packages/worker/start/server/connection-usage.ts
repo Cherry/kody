@@ -1,7 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { accountAliasPath } from '#universal/org-pages.ts'
-import { type AccountConnectionUsageLoaderData } from '#universal/connection-usage.ts'
 
 export const loadConnectionUsagePage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
@@ -23,7 +22,7 @@ export const loadConnectionUsagePage = createServerFn({ method: 'GET' })
 			{ getRequest, setResponseHeader },
 			{ getEnv },
 			{ setAuthSessionSecret },
-			{ readAccountConnectionUsage },
+			{ loadAccountConnectionUsageData },
 		] = await Promise.all([
 			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
@@ -41,10 +40,9 @@ export const loadConnectionUsagePage = createServerFn({ method: 'GET' })
 			new URL('/account/connection-usage.json', original.url),
 			{ headers },
 		)
-		const response = await readAccountConnectionUsage(request, bindings)
-		if (response.status === 401)
+		const result = await loadAccountConnectionUsageData(request, bindings)
+		if (result.status === 401)
 			throw redirect({ href: `/login?redirectTo=${encodeURIComponent(href)}` })
-		if (response.status === 404) throw notFound()
-		if (!response.ok) throw new Error('Unable to load connection usage.')
-		return (await response.json()) as AccountConnectionUsageLoaderData
+		if (result.status === 404) throw notFound()
+		return result.data
 	})

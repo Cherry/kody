@@ -40,9 +40,6 @@ vi.mock('#app/page-auth.ts', () => ({
 	requireAuthenticatedPageUser: (...args: Array<unknown>) =>
 		mocks.requireAuthenticatedPageUser(...args),
 }))
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (input: never) => mocks.renderAppPage(input),
-}))
 vi.mock('#worker/orgs/soft-delete.ts', () => ({
 	softDeleteOrg: (...args: Array<unknown>) => mocks.softDeleteOrg(...args),
 }))

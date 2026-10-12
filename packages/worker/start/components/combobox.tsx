@@ -28,8 +28,9 @@ export function Combobox(props: ComboboxProps) {
 	const listId = useId()
 	const input = useRef<HTMLInputElement>(null)
 	const list = useRef<HTMLDivElement>(null)
-	const label =
-		props.options.find((option) => option.id === props.value)?.label ?? ''
+	const label = props.value
+		? (props.options.find((option) => option.id === props.value)?.label ?? '')
+		: ''
 	const [external, setExternal] = useState(label)
 	const [draft, setDraft] = useState(label)
 	const [open, setOpen] = useState(false)

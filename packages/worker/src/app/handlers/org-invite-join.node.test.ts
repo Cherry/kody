@@ -24,13 +24,6 @@ import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 const mocks = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
 	syncSeatsAfterMembershipChange: vi.fn(),
-	renderAppPage: vi.fn(
-		async (input: { loaderData?: unknown; status?: number }) =>
-			new Response(JSON.stringify(input.loaderData ?? null), {
-				status: input.status ?? 200,
-				headers: { 'Content-Type': 'application/json' },
-			}),
-	),
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
@@ -41,14 +34,9 @@ vi.mock('#worker/orgs/seat-sync-after-membership.ts', () => ({
 	syncSeatsAfterMembershipChange: (...args: Array<unknown>) =>
 		mocks.syncSeatsAfterMembershipChange(...args),
 }))
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (...args: Array<unknown>) =>
-		mocks.renderAppPage(args[0] as { loaderData?: unknown; status?: number }),
-}))
 
-const { createOrgInviteJoinPostHandler } = await import('./org-invite-join.ts')
-const { createOrgInviteJoinHandler } =
-	await import('./org-invite-join-document.ts')
+const { createOrgInviteJoinPostHandler, loadJoinPageData } =
+	await import('./org-invite-join.ts')
 
 const owner = { id: 1, personId: 'a'.repeat(64) }
 const joiner = { id: 2, personId: 'b'.repeat(64) }
@@ -144,33 +132,24 @@ function signInJoiner(emailVerified = true) {
 beforeEach(async () => {
 	mocks.readAuthenticatedAppUser.mockReset()
 	mocks.syncSeatsAfterMembershipChange.mockClear()
-	mocks.renderAppPage.mockClear()
 	await seed()
 })
 
 test('join page shows org confirmation without members for a valid link', async () => {
 	mocks.readAuthenticatedAppUser.mockResolvedValue(null)
-	const response = await createOrgInviteJoinHandler(createEnv()).handler({
+	const data = await loadJoinPageData({
+		env: createEnv(),
 		request: new Request(`https://kody.test/join/${token}`),
-		params: { token },
-	} as never)
-	expect(response.status).toBe(200)
-	const body = (await response.json()) as {
-		orgInviteJoin: {
-			ok: true
-			org: { slug: string; displayName: string | null }
-			authenticated: boolean
-			alreadyMember: boolean
-		}
-	}
-	expect(body.orgInviteJoin).toMatchObject({
+		token,
+	})
+	expect(data).toMatchObject({
 		ok: true,
 		org: { slug: 'join-co', displayName: 'Join Co' },
 		authenticated: false,
 		alreadyMember: false,
 	})
-	expect(JSON.stringify(body)).not.toContain(owner.personId)
-	expect(JSON.stringify(body)).not.toContain('ada@example.com')
+	expect(JSON.stringify(data)).not.toContain(owner.personId)
+	expect(JSON.stringify(data)).not.toContain('ada@example.com')
 })
 
 test('join post adds the member and returns the org redirect', async () => {
@@ -198,16 +177,14 @@ test('expired links show a clear error on the join page', async () => {
 		)
 		.run()
 	mocks.readAuthenticatedAppUser.mockResolvedValue(null)
-	const response = await createOrgInviteJoinHandler(createEnv()).handler({
+	const data = await loadJoinPageData({
+		env: createEnv(),
 		request: new Request(`https://kody.test/join/${token}`),
-		params: { token },
-	} as never)
-	expect(response.status).toBe(400)
-	expect(await response.json()).toMatchObject({
-		orgInviteJoin: {
-			ok: false,
-			reason: 'expired',
-			error: 'This invite link has expired.',
-		},
+		token,
+	})
+	expect(data).toMatchObject({
+		ok: false,
+		reason: 'expired',
+		error: 'This invite link has expired.',
 	})
 })

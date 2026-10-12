@@ -59,9 +59,9 @@ All paths below are relative to
 - Brand grounding: `packages/worker/universal/landing-home-copy.ts` positions
   secrets as “Keys and tokens the model never sees.”
   `packages/worker/universal/landing-lantern.ts` supplies the secrets orb asset;
-  `packages/worker/client/routes/landing-primitives.tsx` supplies the existing
-  interaction and no-JS accessibility baseline. Do not change locked homepage
-  strings.
+  `packages/worker/start/components/landing-primitives.tsx` supplies the
+  existing interaction and no-JS accessibility baseline. Do not change locked
+  homepage strings.
 
 Avoid unsupported claims about encryption algorithms, zero knowledge,
 certifications, SOC 2, HIPAA, data residency, customer-managed encryption, audit

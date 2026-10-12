@@ -1,8 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createVerifyEmailHandler } from '#app/handlers/verify-email-document.ts'
+import { loadVerifyEmailPage } from '#app/handlers/verify-email.ts'
 import { verifyEmailToken } from '#app/email-verification.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { sendConnectAgentEmail } from '#app/user-account-emails.ts'
 import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
 import { maybeRewardHeldReferralAfterEmailVerified } from '#worker/entitlements/referral-program.ts'
@@ -22,12 +21,6 @@ vi.mock('cloudflare:workers', async (importOriginal) => {
 
 vi.mock('#app/email-verification.ts', () => ({
 	verifyEmailToken: vi.fn(),
-}))
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: vi.fn(async ({ loaderData }) =>
-		Response.json({ ok: true, loaderData }),
-	),
 }))
 
 vi.mock('#app/user-account-emails.ts', () => ({
@@ -55,22 +48,18 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		stableUserId: ownerIdFromStored('user_verified'),
 		newlyVerified: false,
 	})
-	const handler = createVerifyEmailHandler({
+	const env = {
 		APP_DB: {} as D1Database,
-	} as Env)
+	} as Env
 
 	const oauthResume = '/oauth/authorize?client_id=demo'
-	const oauthResponse = await handler.handler({
-		request: new Request(
+	const oauthResponse = await loadVerifyEmailPage(
+		new Request(
 			`https://example.com/verify-email?token=ok&redirectTo=${encodeURIComponent(oauthResume)}`,
 		),
-		url: new URL(
-			`https://example.com/verify-email?token=ok&redirectTo=${encodeURIComponent(oauthResume)}`,
-		),
-		params: {},
-	} as never)
-	expect(await oauthResponse.json()).toEqual({
-		ok: true,
+		env,
+	)
+	expect(oauthResponse).toMatchObject({
 		loaderData: {
 			emailVerification: {
 				ok: true,
@@ -82,17 +71,13 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		},
 	})
 
-	const maliciousResponse = await handler.handler({
-		request: new Request(
+	const maliciousResponse = await loadVerifyEmailPage(
+		new Request(
 			'https://example.com/verify-email?token=ok&redirectTo=https%3A%2F%2Fevil.example',
 		),
-		url: new URL(
-			'https://example.com/verify-email?token=ok&redirectTo=https%3A%2F%2Fevil.example',
-		),
-		params: {},
-	} as never)
-	expect(await maliciousResponse.json()).toEqual({
-		ok: true,
+		env,
+	)
+	expect(maliciousResponse).toMatchObject({
 		loaderData: {
 			emailVerification: {
 				ok: true,
@@ -104,7 +89,6 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		},
 	})
 
-	expect(renderAppPage).toHaveBeenCalled()
 	expect(sendConnectAgentEmail).not.toHaveBeenCalled()
 	expect(waitUntilImpl).not.toHaveBeenCalled()
 	expect(scheduleKitSubscriberSync).not.toHaveBeenCalled()
@@ -126,24 +110,26 @@ test('verify-email sends the connect-agent mail only on newly verified accounts'
 		stableUserId: ownerIdFromStored('user_verified'),
 		newlyVerified: true,
 	})
-	const handler = createVerifyEmailHandler({
+	const env = {
 		APP_DB: {} as D1Database,
-	} as Env)
-	const handled = handler.handler({
-		request: new Request('https://example.com/verify-email?token=ok'),
-		url: new URL('https://example.com/verify-email?token=ok'),
-		params: {},
-	} as never)
+	} as Env
+	const handled = loadVerifyEmailPage(
+		new Request('https://example.com/verify-email?token=ok'),
+		env,
+	)
 	const response = await Promise.race([
 		handled,
-		new Promise<Response>((_, reject) => {
-			setTimeout(
-				() => reject(new Error('verify page waited on the connect-agent send')),
-				1_000,
-			)
-		}),
+		new Promise<Awaited<ReturnType<typeof loadVerifyEmailPage>>>(
+			(_, reject) => {
+				setTimeout(
+					() =>
+						reject(new Error('verify page waited on the connect-agent send')),
+					1_000,
+				)
+			},
+		),
 	])
-	expect(response.ok).toBe(true)
+	expect(response.loaderData?.emailVerification?.ok).toBe(true)
 	expect(sendConnectAgentEmail).toHaveBeenCalledWith({
 		env: expect.anything(),
 		email: 'verified@example.com',

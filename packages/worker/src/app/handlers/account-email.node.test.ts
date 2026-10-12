@@ -211,10 +211,6 @@ vi.mock('#app/auth-redirect.ts', () => ({
 	redirectToLoginWhenUnauthenticated: () => new Response(null, { status: 302 }),
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: async () => new Response('ok'),
-}))
-
 vi.mock('#app/email-verification.ts', () => ({
 	emailVerificationRequiredMessage:
 		'Account email is not verified. Open the verification link sent to your account email, or resend it from /pending-verification or /account.',

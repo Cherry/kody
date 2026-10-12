@@ -12,7 +12,7 @@ test('accepted response reconciles the submitted actor and org after unmount', a
 	let finish!: (value: { ok: boolean; revision: number }) => void
 	const mutation = new MutationObserver(
 		client,
-		acceptedPageMutationOptions(client, {
+		acceptedPageMutationOptions<unknown, { ok: boolean }>(client, {
 			resource: 'loadValuesPage',
 			send: () =>
 				new Promise<{ ok: boolean; revision: number }>((resolve) => {
@@ -184,7 +184,7 @@ test('lost permission-write responses reconcile submitted dependencies and shell
 	})
 	await ready
 	observer.setOptions(
-		acceptedPageMutationOptions(client, {
+		acceptedPageMutationOptions<unknown, { ok: boolean }>(client, {
 			resource: 'loadValuesPage',
 			send: async () => ({ ok: true }),
 		}),

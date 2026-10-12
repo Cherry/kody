@@ -88,6 +88,10 @@ test('confirming setup supersedes an older disabled loader response', async ({
 		await page.getByRole('button', { name: 'Enable 2FA' }).click()
 		const secret = await page.getByTestId('totp-secret').textContent()
 		expect(secret).toBeTruthy()
+		// Setup no longer refetches the unchanged enabled state. Start a real
+		// activation refresh after the cache ages, then hold its old response.
+		await page.clock.setFixedTime(new Date(Date.now() + 61_000))
+		await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
 		await staleResponseReady
 		await page
 			.getByLabel('Verification code')
@@ -113,7 +117,7 @@ test('confirming setup supersedes an older disabled loader response', async ({
 			})
 			Object.assign(window, { twoFactorTransition: state })
 		})
-		await page.getByRole('button', { name: 'Confirm' }).click()
+		await page.getByRole('button', { name: 'Confirm', exact: true }).click()
 		await expect(
 			page.getByText('Two-factor authentication is enabled.', { exact: true }),
 		).toBeVisible()

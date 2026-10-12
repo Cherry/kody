@@ -30,18 +30,6 @@ export type SessionInfo = {
 	lastUsedOrganization?: string | null
 }
 
-export type SessionStatus = 'idle' | 'loading' | 'ready'
-
-let sessionRefreshHandler: (() => void) | null = null
-
-export function setSessionRefreshHandler(handler: (() => void) | null) {
-	sessionRefreshHandler = handler
-}
-
-export function queueSessionRefresh() {
-	sessionRefreshHandler?.()
-}
-
 export function getSessionDisplayName(session: SessionInfo | null) {
 	return session?.username || session?.email || ''
 }

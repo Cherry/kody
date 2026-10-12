@@ -169,7 +169,7 @@ Evidence: `document-head.node.test.ts`, `router-scroll-state.node.test.ts`,
       heading order, contrast, reduced motion, and small-screen overflow
       manually.
 
-Evidence: `docs/contributing/frames.md`, frame registry/handler/resolver tests,
+Evidence: `docs/contributing/no-flash-navigation.md`, native navigation tests,
 anonymous HTML cache node/worker tests, cross-origin-protection tests, and
 `e2e/a11y.spec.ts`. Paths above beginning `src/` are under `packages/worker/`.
 

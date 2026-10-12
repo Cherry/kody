@@ -14,7 +14,7 @@ import { youtubeThumbPath } from '#universal/youtube-watch.ts'
  * walked in either direction from wherever the visitor is. Both axes are
  * accepted so up/down feel natural on a touch-scrolled strip too.
  */
-function nextChooserIndex(
+export function nextChooserIndex(
 	current: number,
 	key: string,
 	count: number,
@@ -40,7 +40,7 @@ function nextChooserIndex(
  * Which edges of a horizontal scroller have more content past them. Drives
  * the fade masks so an edge only fades when there is something to scroll to.
  */
-function chooserOverflow(input: {
+export function chooserOverflow(input: {
 	scrollLeft: number
 	clientWidth: number
 	scrollWidth: number

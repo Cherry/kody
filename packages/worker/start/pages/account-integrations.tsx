@@ -1,7 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import {
 	type AccountIntegrationListItem,
@@ -10,7 +11,6 @@ import {
 } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import { useRouter } from '@tanstack/react-router'
 import { SiteLink } from '../components/site-link.tsx'
 import { useUndoableAction } from '../components/use-undoable-action.ts'
 import { UndoToast } from '../components/undo-toast.tsx'
@@ -82,7 +82,7 @@ export function AccountIntegrationsPage({
 	const setApproval = (value: AccountIntegrationsLoaderData['approval']) =>
 		updatePayload((data) => ({ ...data, approval: value }))
 	const mutation = useMutation({
-		mutationKey: ['integrations', actorKey],
+		mutationKey: ['integrations', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async ({
 			body,
 			href,

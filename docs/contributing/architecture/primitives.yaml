@@ -319,7 +319,7 @@ primitives:
       - packages/worker/src/mcp/capabilities/community/
       - packages/worker/src/app/handlers/community
       - packages/worker/src/app/handlers/admin-community-reports
-      - packages/worker/client/routes/community
+      - packages/worker/start/pages/community
     docs:
       - docs/use/community-packages.md
       - docs/contributing/community-packages.md
@@ -446,9 +446,9 @@ primitives:
       - packages/worker/src/app/handlers/package-webhooks.ts
       - packages/worker/src/app/handlers/account-webhooks.ts
       - packages/worker/src/app/package-webhooks-data.ts
-      - packages/worker/client/routes/package-webhook-settings.tsx
-      - packages/worker/client/routes/package-webhook-card.tsx
-      - packages/worker/client/routes/account-webhooks.tsx
+      - packages/worker/start/pages/package-webhook-settings.tsx
+      - packages/worker/start/pages/package-webhook-card.tsx
+      - packages/worker/start/pages/account-webhooks.tsx
       - packages/worker/client/routes/webhooks-shared.ts
       - packages/worker/src/package-registry/
     docs:

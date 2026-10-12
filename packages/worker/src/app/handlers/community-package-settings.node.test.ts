@@ -1,169 +1,75 @@
 import { expect, test, vi } from 'vitest'
-import type * as PackagePage from '#app/package-page.ts'
-import type * as SsrRender from '#app/ssr-render.tsx'
-
-const mockModule = vi.hoisted(() => ({
-	loadPackagePage:
-		vi.fn<
-			(
-				...args: Parameters<typeof PackagePage.loadPackagePage>
-			) => Promise<unknown>
-		>(),
-	renderAppPage: vi.fn<typeof SsrRender.renderAppPage>(
-		async (input) =>
-			new Response('ok', {
-				status: input.status ?? 200,
-			}),
-	),
+import { loadPackage } from '../../../start/server/public-data.ts'
+const state = vi.hoisted(() => ({ payload: {} as Record<string, unknown> }))
+vi.mock('@tanstack/react-start', async () => ({
+	createServerFn: (
+		await import('#worker/test-support/start-server-function.ts')
+	).createTestServerFn,
 }))
-
-vi.mock('#app/package-page.ts', () => ({
-	loadPackagePage: (...args: Parameters<typeof PackagePage.loadPackagePage>) =>
-		mockModule.loadPackagePage(...args),
+vi.mock('cloudflare:workers', () => ({ env: { COOKIE_SECRET: 'test' } }))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => new Request('https://example.com/_serverFn/package'),
+	setResponseHeader: vi.fn(),
+	setResponseStatus: vi.fn(),
 }))
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (...args: Parameters<typeof SsrRender.renderAppPage>) =>
-		mockModule.renderAppPage(...args),
+vi.mock('#app/env.ts', () => ({ getEnv: (env: unknown) => env }))
+vi.mock('#app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
+vi.mock('#app/session-info.ts', () => ({
+	loadSessionInfo: async () => ({ session: null, setCookie: null }),
 }))
-
-vi.mock('#app/frame-registrations.ts', () => ({}))
-vi.mock('#app/frame-registry.ts', () => ({
-	handleFrameRequest: async () => null,
+vi.mock('../../../start/server/document-head.ts', () => ({
+	loadDocumentHead: () => ({ title: 'Package settings' }),
 }))
-
-const { createCommunityPackageSettingsHandler } =
-	await import('./community-detail-document.tsx')
-
-test('package settings 404 unless the viewer can manage the package', async () => {
-	const handler = createCommunityPackageSettingsHandler({} as Env)
-	mockModule.loadPackagePage.mockResolvedValue({
+vi.mock('#app/community-package-payload.ts', () => ({
+	loadCommunityPackagePayload: async () => ({
 		kind: 'page',
-		username: 'kentcdodds',
-		kodyId: 'friction-log',
-		listing: null,
-		ownerPackage: { id: 'pkg-1', name: 'friction-log', isPrivate: true },
-		viewerIsOwner: false,
-		viewerCanManage: false,
-		loggedIn: true,
-		invocationUrlOrigin: 'https://example.com',
+		data: state.payload,
+	}),
+	loadCommunityDetailPayload: vi.fn(),
+}))
+
+const settings = () =>
+	loadPackage({
+		data: { username: 'kentcdodds', kodyId: 'packages', page: 'settings' },
 	})
-	const requestSettings = () =>
-		handler.handler({
-			request: new Request(
-				'https://example.com/@kentcdodds/friction-log/settings',
-			),
-			params: { username: 'kentcdodds', kodyId: 'friction-log' },
-			url: new URL('https://example.com/@kentcdodds/friction-log/settings'),
-		} as never)
-
-	const stranger = await requestSettings()
-	expect(mockModule.renderAppPage).toHaveBeenCalledWith(
-		expect.objectContaining({ notFound: true, status: 404 }),
-	)
-	expect(stranger.status).toBe(404)
-
-	mockModule.renderAppPage.mockClear()
-	mockModule.loadPackagePage.mockResolvedValue({
-		kind: 'page',
-		username: 'acme',
-		kodyId: 'friction-log',
-		listing: null,
-		ownerPackage: { id: 'pkg-1', name: 'friction-log', isPrivate: true },
-		viewerIsOwner: true,
-		viewerCanManage: false,
-		loggedIn: true,
-		invocationUrlOrigin: 'https://example.com',
-	})
-	const reader = await requestSettings()
-	expect(reader.status).toBe(404)
-
-	mockModule.renderAppPage.mockClear()
-	mockModule.loadPackagePage.mockResolvedValue({
-		kind: 'page',
-		username: 'kentcdodds',
-		kodyId: 'friction-log',
-		listing: null,
-		ownerPackage: {
-			id: 'pkg-1',
-			name: 'friction-log',
-			description: '',
-			isPrivate: true,
-			kodyId: 'friction-log',
-		},
-		viewerIsOwner: true,
-		viewerCanManage: true,
-		loggedIn: true,
-		invocationUrlOrigin: 'https://example.com',
-	})
-	const owner = await handler.handler({
-		request: new Request(
-			'https://example.com/@kentcdodds/friction-log/settings',
-		),
-		params: { username: 'kentcdodds', kodyId: 'friction-log' },
-		url: new URL('https://example.com/@kentcdodds/friction-log/settings'),
-	} as never)
-	expect(owner.status).toBe(200)
-	expect(mockModule.renderAppPage).toHaveBeenCalledWith(
-		expect.objectContaining({
-			title: 'friction-log settings',
-			loaderData: expect.objectContaining({
-				communityDetailShell: expect.objectContaining({
-					kodyId: 'friction-log',
-					viewerIsOwner: true,
-					viewerCanManage: true,
-					isPrivate: true,
-					listingId: null,
-					defaultBranch: null,
-				}),
-			}),
-		}),
-	)
-})
-
-test('package settings Files tab uses the listing default branch and id', async () => {
-	const handler = createCommunityPackageSettingsHandler({} as Env)
-	mockModule.loadPackagePage.mockResolvedValue({
-		kind: 'page',
+test('native package settings require manage permission even when a readable package is present', async () => {
+	state.payload = {
+		ok: true,
 		username: 'kentcdodds',
 		kodyId: 'packages',
-		listing: {
-			listing: {
-				id: 'listing-1',
-				kodyId: 'packages',
-				defaultBranch: 'develop',
-			},
-			ownerProfilePublic: false,
-		},
-		ownerPackage: {
-			id: 'pkg-1',
-			name: 'packages',
-			description: 'Reserved kody id',
-			isPrivate: true,
-			kodyId: 'packages',
-		},
+		ownerPackage: { id: 'pkg-1' },
+		viewerIsOwner: false,
+		viewerCanManage: false,
+	}
+	await expect(settings()).rejects.toMatchObject({ isNotFound: true })
+	state.payload.viewerIsOwner = true
+	await expect(settings()).rejects.toMatchObject({ isNotFound: true })
+	state.payload.viewerCanManage = true
+	const result = await settings()
+	expect(result).toMatchObject({
+		kind: 'page',
+		data: { ownerPackage: { id: 'pkg-1' }, viewerCanManage: true },
+		header: { username: 'kentcdodds', kodyId: 'packages' },
+	})
+})
+test('native settings preserve the listing branch, identifier and private owner visibility', async () => {
+	state.payload = {
+		ok: true,
+		username: 'kentcdodds',
+		kodyId: 'packages',
+		ownerPackage: { id: 'pkg-1', isPrivate: true },
 		viewerIsOwner: true,
 		viewerCanManage: true,
-		loggedIn: true,
-		invocationUrlOrigin: 'https://example.com',
+		isPrivate: true,
 		ownerProfilePublic: false,
+		listing: { id: 'listing-1', kodyId: 'packages', defaultBranch: 'develop' },
+	}
+	expect(await settings()).toMatchObject({
+		kind: 'page',
+		header: {
+			listing: { id: 'listing-1', defaultBranch: 'develop' },
+			ownerProfilePublic: false,
+			isPrivate: true,
+		},
 	})
-	const owner = await handler.handler({
-		request: new Request('https://example.com/@kentcdodds/packages/settings'),
-		params: { username: 'kentcdodds', kodyId: 'packages' },
-		url: new URL('https://example.com/@kentcdodds/packages/settings'),
-	} as never)
-	expect(owner.status).toBe(200)
-	expect(mockModule.renderAppPage).toHaveBeenCalledWith(
-		expect.objectContaining({
-			loaderData: expect.objectContaining({
-				communityDetailShell: expect.objectContaining({
-					kodyId: 'packages',
-					listingId: 'listing-1',
-					defaultBranch: 'develop',
-					ownerProfilePublic: false,
-				}),
-			}),
-		}),
-	)
 })

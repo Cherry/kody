@@ -56,8 +56,8 @@ decorative labels.
   across hosts and uses “Your agents’ cloud.” Preserve its locked homepage copy.
   This new page can deepen the memory story without replacing those strings.
 - `packages/worker/universal/landing-lantern.ts` and
-  `packages/worker/client/routes/landing-primitives.tsx`: memory already belongs
-  to the lantern primitive system, with
+  `packages/worker/start/components/landing-primitives.tsx`: memory already
+  belongs to the lantern primitive system, with
   `/images/lantern/kody-primitives-orb-memory.webp` as existing art.
 
 Do not promise full chat-history sync, unlimited recall, perfect retrieval,

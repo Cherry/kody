@@ -52,6 +52,10 @@ export type SharedMcpE2eServer = {
 	assignRole(email: string, role: string): Promise<void>
 	clearAuthRateLimits(): Promise<void>
 	seedHeroVideos(videos: Array<LandingHeroVideo>): Promise<void>
+	seedOAuthClient(
+		clientId: string,
+		registration: Record<string, unknown> | null,
+	): Promise<void>
 }
 
 type SharedMcpE2eServerHandle = SharedMcpE2eServer & {
@@ -92,6 +96,8 @@ export async function getSharedMcpE2eServer(): Promise<SharedMcpE2eServer> {
 		assignRole: (email, role) => server.assignRole(email, role),
 		clearAuthRateLimits: () => server.clearAuthRateLimits(),
 		seedHeroVideos: (videos) => server.seedHeroVideos(videos),
+		seedOAuthClient: (id, registration) =>
+			server.seedOAuthClient(id, registration),
 	}
 }
 
@@ -132,6 +138,7 @@ async function startSharedMcpE2eServer(): Promise<SharedMcpE2eServerHandle> {
 		assignRole: started.assignRole,
 		clearAuthRateLimits: started.clearAuthRateLimits,
 		seedHeroVideos: started.seedHeroVideos,
+		seedOAuthClient: started.seedOAuthClient,
 		close: started.close,
 	}
 }
@@ -182,6 +189,7 @@ async function startHarnessWithCloudflareMock() {
 			APP_DB: D1Database
 			AUDIT_DB: D1Database
 			BUNDLE_ARTIFACTS_KV: KVNamespace
+			OAUTH_KV: KVNamespace
 		}>()
 		await worker.applyD1Migrations('APP_DB')
 		await worker.applyD1Migrations('AUDIT_DB')
@@ -216,6 +224,14 @@ WHERE u.email = ? AND r.name = ?`,
 				)
 					.bind(email, role)
 					.run()
+			},
+			async seedOAuthClient(
+				clientId: string,
+				registration: Record<string, unknown> | null,
+			) {
+				const key = `client:${clientId}`
+				if (registration === null) await env.OAUTH_KV.delete(key)
+				else await env.OAUTH_KV.put(key, JSON.stringify(registration))
 			},
 			async seedHeroVideos(videos: Array<LandingHeroVideo>) {
 				await createKvCachifiedCache(env.BUNDLE_ARTIFACTS_KV).set(

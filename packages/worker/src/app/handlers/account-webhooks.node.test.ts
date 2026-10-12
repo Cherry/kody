@@ -1,31 +1,23 @@
-import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { type AccountWebhooksLoaderData } from '#universal/loader-data.ts'
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import { createAccountWebhooksApiHandler } from '#app/handlers/account-webhooks.ts'
-import { createAccountWebhooksHandler } from '#app/handlers/account-webhooks-document.ts'
+import { loadAccountWebhooksData } from '#app/package-webhooks-data.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { type AccountWebhooksLoaderData } from '#universal/loader-data.ts'
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
-	requireAuthenticatedPageUser: vi.fn(),
-	renderAppPage: vi.fn(),
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
 	readAuthenticatedAppUser: (...args: Array<unknown>) =>
 		mockModule.readAuthenticatedAppUser(...args),
-}))
-
-vi.mock('#app/page-auth.ts', () => ({
-	requireAuthenticatedPageUser: (...args: Array<unknown>) =>
-		mockModule.requireAuthenticatedPageUser(...args),
-}))
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (...args: Array<unknown>) => mockModule.renderAppPage(...args),
 }))
 
 const savedPackages = [
@@ -155,51 +147,41 @@ const owner = {
 	username: 'owner',
 }
 
-test('account webhooks page embeds every package’s declared webhooks (never a URL) and redirects anonymous visitors', async () => {
+test('webhook index data includes every package declaration without revealing URLs', async () => {
 	const userId = testStableUserIdFromEmail(owner.email)
-	const handler = createAccountWebhooksHandler(createEnv())
-	mockModule.requireAuthenticatedPageUser.mockResolvedValue({
-		...owner,
-		mcpUser: { userId },
-		request: sessionRequestContext(userId),
+	const data = await loadAccountWebhooksData({
+		env: createEnv(),
+		requestUrl: 'https://kody.example/account/webhooks',
+		user: {
+			...owner,
+			mcpUser: {
+				userId: personIdFromStored(userId),
+				email: owner.email,
+				username: owner.username,
+				displayName: owner.username,
+			},
+			request: sessionRequestContext(userId),
+		},
 	})
-	mockModule.renderAppPage.mockImplementation(async () => new Response('ok'))
-
-	const page = await runHandler(
-		handler,
-		new Request('https://kody.example/account/webhooks'),
-	)
-	expect(page.status).toBe(200)
-	expect(mockModule.renderAppPage).toHaveBeenCalledTimes(1)
-	const renderInput = mockModule.renderAppPage.mock.calls[0]?.[0] as {
-		title: string
-		loaderData: { accountWebhooks: AccountWebhooksLoaderData }
-	}
-	expect(renderInput.title).toBe('Webhooks')
-	expect(renderInput.loaderData.accountWebhooks.username).toBe('owner')
-	expect(
-		renderInput.loaderData.accountWebhooks.webhooks.map(
-			(webhook) => webhook.id,
-		),
-	).toEqual(['raycast/list-commands', 'raycast/run', 'sentry-bridge/sentry'])
-	expect(JSON.stringify(renderInput.loaderData)).not.toContain('"url"')
-
-	mockModule.requireAuthenticatedPageUser.mockResolvedValue(
-		new Response(null, { status: 302, headers: { Location: '/login' } }),
-	)
-	const anonymous = await runHandler(
-		handler,
-		new Request('https://kody.example/account/webhooks'),
-	)
-	expect(anonymous.status).toBe(302)
-	expect(mockModule.renderAppPage).toHaveBeenCalledTimes(1)
+	expect(data.username).toBe('owner')
+	expect(data.webhooks.map((webhook) => webhook.id)).toEqual([
+		'raycast/list-commands',
+		'raycast/run',
+		'sentry-bridge/sentry',
+	])
+	expect(JSON.stringify(data)).not.toContain('"url"')
 })
 
 test('account webhooks API lists across packages and is read-only: mutations belong to the package API', async () => {
 	const userId = testStableUserIdFromEmail(owner.email)
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		...owner,
-		mcpUser: { userId },
+		mcpUser: {
+			userId: ownerIdFromStored(userId),
+			email: owner.email,
+			username: owner.username,
+			displayName: owner.username,
+		},
 		request: sessionRequestContext(userId),
 	})
 	const handler = createAccountWebhooksApiHandler(createEnv())

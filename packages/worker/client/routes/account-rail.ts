@@ -15,13 +15,9 @@ import {
 	type OrgOwnedAccountSection,
 } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
-import { type IconName } from '#universal/icon.tsx'
+import { type IconName } from '#universal/icon-names.ts'
 
-/**
- * The repository list for an organization. Without a slug yet, the link
- * opens the person hub instead of a removed `/account/packages` page.
- */
-export function accountPackagesNavHref(orgSlug: string | null | undefined) {
+function accountPackagesNavHref(orgSlug: string | null | undefined) {
 	return orgSlug ? orgResourcePath(orgSlug, 'packages') : routes.account.href()
 }
 

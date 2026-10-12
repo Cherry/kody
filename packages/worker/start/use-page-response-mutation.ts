@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useSubmitterScope } from './use-submitter-scope.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import {
 	useMutation,
@@ -34,15 +34,7 @@ export function usePageResponseMutation<
 	const client = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const href = useLocation({ select: (location) => location.href })
-	const submitter = useRef<{ actorKey: string | null; href: string } | null>(
-		null,
-	)
-	useEffect(() => {
-		submitter.current = { actorKey, href }
-		return () => {
-			submitter.current = null
-		}
-	}, [actorKey, href])
+	const captureSubmitter = useSubmitterScope()
 	const queryKey = useMatches({
 		select: (matches) => {
 			for (const match of [...matches].reverse()) {
@@ -92,13 +84,13 @@ export function usePageResponseMutation<
 		submit: (body: Record<string, unknown>) => {
 			if (!queryKey)
 				throw new Error(`Missing submitted query key for ${resource}`)
+			const isCurrentSubmitter = captureSubmitter()
 			return mutation
 				.mutateAsync({ body, actorKey, href, queryKey, apiPath })
 				.catch((error) => {
 					if (
 						error instanceof MutationAuthenticationError &&
-						submitter.current?.actorKey === actorKey &&
-						submitter.current.href === href
+						isCurrentSubmitter()
 					)
 						window.location.assign(
 							`/login?redirectTo=${encodeURIComponent(href)}`,

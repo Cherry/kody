@@ -5,6 +5,7 @@ import {
 	createRoute,
 	createRouter,
 	redirect,
+	type AnyRoute,
 } from '@tanstack/react-router'
 import { installNavigationMotion } from './navigation-motion.ts'
 
@@ -14,7 +15,7 @@ function fixture() {
 	const slow = new Promise<void>((resolve) => {
 		releaseSlow = resolve
 	})
-	const children = [
+	const children: AnyRoute[] = [
 		'/',
 		'/pricing',
 		'/docs/one',

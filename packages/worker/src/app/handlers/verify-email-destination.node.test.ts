@@ -1,16 +1,9 @@
 import { expect, test, vi } from 'vitest'
-import { createVerifyEmailDestinationHandler } from '#app/handlers/verify-email-destination-document.ts'
+import { loadVerifyEmailDestinationPage } from '#app/handlers/verify-email-destination.ts'
 import { verifyEmailDestinationToken } from '#worker/email/destination-verification.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 
 vi.mock('#worker/email/destination-verification.ts', () => ({
 	verifyEmailDestinationToken: vi.fn(),
-}))
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: vi.fn(async ({ loaderData }) =>
-		Response.json({ ok: true, loaderData }),
-	),
 }))
 
 vi.mock('#worker/audit-log.ts', () => ({
@@ -25,20 +18,16 @@ test('verified destination CTA returns to the email inbox destinations panel', a
 		userId: 1,
 		email: 'pager@example.com',
 	})
-	const handler = createVerifyEmailDestinationHandler({
+	const env = {
 		APP_DB: {} as D1Database,
-	} as Env)
+	} as Env
 
-	const response = await handler.handler({
-		request: new Request(
-			'https://example.com/verify-email-destination?token=ok',
-		),
-		url: new URL('https://example.com/verify-email-destination?token=ok'),
-		params: {},
-	} as never)
+	const response = await loadVerifyEmailDestinationPage(
+		new Request('https://example.com/verify-email-destination?token=ok'),
+		env,
+	)
 
-	expect(await response.json()).toMatchObject({
-		ok: true,
+	expect(response).toMatchObject({
 		loaderData: {
 			emailVerification: {
 				ok: true,
@@ -47,7 +36,6 @@ test('verified destination CTA returns to the email inbox destinations panel', a
 			},
 		},
 	})
-	expect(renderAppPage).toHaveBeenCalled()
 })
 
 test('destination verify HEAD peeks without consuming and failures offer a resend path', async () => {
@@ -56,18 +44,18 @@ test('destination verify HEAD peeks without consuming and failures offer a resen
 		userId: 1,
 		email: 'pager@example.com',
 	})
-	const handler = createVerifyEmailDestinationHandler({
+	const env = {
 		APP_DB: {} as D1Database,
-	} as Env)
+	} as Env
 
-	const head = await handler.handler({
-		request: new Request(
-			'https://example.com/verify-email-destination?token=ok',
-			{ method: 'HEAD' },
-		),
-		url: new URL('https://example.com/verify-email-destination?token=ok'),
-		params: {},
-	} as never)
+	const head = await loadVerifyEmailDestinationPage(
+		new Request('https://example.com/verify-email-destination?token=ok', {
+			method: 'HEAD',
+		}),
+		env,
+	)
+	expect(head).toBeInstanceOf(Response)
+	if (!(head instanceof Response)) throw new Error('Expected HEAD response')
 	expect(head.status).toBe(200)
 	expect(await head.text()).toBe('')
 	expect(verifyEmailDestinationToken).toHaveBeenCalledWith({
@@ -80,15 +68,11 @@ test('destination verify HEAD peeks without consuming and failures offer a resen
 		ok: false,
 		reason: 'invalid_token',
 	})
-	const failed = await handler.handler({
-		request: new Request(
-			'https://example.com/verify-email-destination?token=nope',
-		),
-		url: new URL('https://example.com/verify-email-destination?token=nope'),
-		params: {},
-	} as never)
-	expect(await failed.json()).toMatchObject({
-		ok: true,
+	const failed = await loadVerifyEmailDestinationPage(
+		new Request('https://example.com/verify-email-destination?token=nope'),
+		env,
+	)
+	expect(failed).toMatchObject({
 		loaderData: {
 			emailVerification: {
 				ok: false,

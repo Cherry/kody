@@ -7,7 +7,7 @@ or runtime changes.
 ## First test: critical resource order
 
 The migration changed document resource ordering. Original
-`packages/worker/src/app/ssr-document.tsx` places the blocking `/page-init.js`
+`packages/worker/start/routes/__root.tsx` places the blocking `/page-init.js`
 script first, then the two font preloads, then module preloads. Native
 `packages/worker/start/routes/__root.tsx` puts `<HeadContent />` first, which
 includes module preloads and the font links, followed by inline global styles

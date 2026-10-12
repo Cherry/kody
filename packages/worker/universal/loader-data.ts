@@ -323,7 +323,7 @@ export function toProfileListLoaderData(
 	}
 }
 
-export type ProfileUnavailableLoaderData = {
+type ProfileUnavailableLoaderData = {
 	ok: false
 	unavailable: true
 }
@@ -425,8 +425,7 @@ export type AdminCreditWalletSummary = {
 	recent: Array<AdminCreditLedgerItem>
 }
 
-/** One overridable cap on the admin org limits panel. */
-export type AdminOrgLimitRow = {
+type AdminOrgLimitRow = {
 	key: LimitOverrideKey
 	label: string
 	/** The plan's limit (seat pool and credits ceiling); null = no window. */
@@ -1369,7 +1368,7 @@ export type OrgCollaboratorsLoaderData = {
 	canManage: boolean
 }
 
-export type AccountConnectionListItem = {
+type AccountConnectionListItem = {
 	provider: string
 	label: string
 	displayName: string | null
@@ -2306,7 +2305,7 @@ export type AccountWorkflowListItem = {
 	lastError: string | null
 }
 
-export type AccountWorkflowDetail = AccountWorkflowListItem
+type AccountWorkflowDetail = AccountWorkflowListItem
 
 export type AccountWorkflowsLoaderData = {
 	ok: true
@@ -2361,7 +2360,7 @@ export type AccountActivityRunDetail = AccountActivityRunListItem & {
 	logs: Array<AccountActivityRunLog>
 }
 
-export type AccountActivitySummary = {
+type AccountActivitySummary = {
 	since: string
 	total: number
 	errors: number
@@ -2370,7 +2369,7 @@ export type AccountActivitySummary = {
 	running: number
 }
 
-export type AccountActivityLoaderData = {
+type AccountActivityLoaderData = {
 	ok: true
 	viewFilter: AccountActivityViewFilter
 	statusFilter: AccountActivityStatusFilter
@@ -2396,7 +2395,7 @@ export type AccountMemoryListItem = {
 	updatedAt: string
 }
 
-export type AccountMemoryDetail = AccountMemoryListItem & {
+type AccountMemoryDetail = AccountMemoryListItem & {
 	details: string
 	sourceUris: Array<string>
 	dedupeKey: string | null

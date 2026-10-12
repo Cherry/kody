@@ -6,8 +6,10 @@ services and HTTP API handlers remain the server boundary.
 [`getRouter`](../../packages/worker/start/router.tsx) creates a QueryClient for
 each server request and each browser router, then installs Router's SSR Query
 integration. Router owns matching, navigation, preloading, scroll restoration,
-and document assets. Query owns page payloads. Route loaders retain a head
-fallback and the exact Query key, rather than a second copy of the payload.
+and document assets. Query owns reusable page payloads. Route loaders retain a
+head fallback and the exact Query key, rather than a second copy of the payload.
+One-time authorization, verification, and approval pages use foreground Router
+loaders so their token results do not become reusable server-state caches.
 
 ## Reads and navigation
 
@@ -29,7 +31,8 @@ cached payload without a second permission request. Permission-sensitive queries
 use `freshAuthorization` to require a foreground server check even after
 preload. This is a deliberate security cost, so a warm private navigation is not
 a promise of zero server requests. Server functions independently enforce
-access.
+access. Presentation-only Jobs and Values filters reuse the committed page
+authorization. Known static public pages skip that verification request.
 
 The app disables Query's default focus and reconnect refetches. Its
 [`activation handler`](../../packages/worker/start/refresh-on-activation.ts)
@@ -52,6 +55,7 @@ have different shapes cannot overwrite each other.
 Optimistic resources use
 [`mutation barriers`](../../packages/worker/start/page-mutation-cache.ts) to
 prevent a background read from replacing optimistic data with pre-write data.
+Organization and package barriers only delay reads of the matching resource.
 Forms retain local drafts; saved server data comes from Query. Secrets and
 one-time revealed credentials stay outside reusable page caches.
 
@@ -59,16 +63,32 @@ one-time revealed credentials stay outside reusable page caches.
 
 Actor verification, organization scoping, mutation dependencies, and
 cache-driven head updates express Kody behavior. These are application code, not
-features that adopting Start removes. The HTTP router still uses Remix, and
-user-authored package apps may use Remix independently of Kody's web UI.
+features that adopting Start removes. The HTTP router and shared URL builders
+still use Remix. Those builders only construct paths, they do not own browser
+navigation. User-authored package apps may also use Remix independently of
+Kody's web UI.
 
 Local [Redact](../../patches/@tanstack+redact+0.1.4.patch) and
 [Router](../../patches/@tanstack+router-core+1.171.34.patch) patches are part of
-the dependency maintenance cost. Browser regressions under
-[`e2e/start`](../../e2e/start) cover cache freshness, identity changes,
+the dependency maintenance cost. The Redact patch removes its global hydration
+scroll interceptor, which suppressed legitimate Router restoration after user
+scrolling. The hydration scroll regression compares the same behavior against
+React, including immediate navigation after a real wheel event. It also sends
+queued updates through their Suspense boundary when an earlier ancestor update
+has retained the subtree. Without that check, a departing Router match could
+render after its store was cleared while the replacement route suspended. The
+[paired Router regression](../../e2e/start/router-retained-match.spec.ts) passes
+with React, fails with uncorrected Redact, and passes with the fix, including
+resuming the replacement. The failed feature module recovery test also checks
+that document recovery emits no unexpected client errors. Browser regressions
+under [`e2e/start`](../../e2e/start) cover cache freshness, identity changes,
 background errors, metadata, and renderer behavior.
 
 `npm run build` verifies Redact in both bundles and rejects Kody's retired
-renderer and client router. `npm run validate` runs the complete local gate.
+renderer and client router. `npm run validate` runs the complete local gate. SSR
+Query dehydration includes successful and pending queries, preserving streaming,
+and excludes settled errors such as authorization redirects. Auxiliary protected
+reads start only after their parent resource authorizes.
+
 Passing that gate does not replace authenticated preview testing or matched
 production performance measurements.

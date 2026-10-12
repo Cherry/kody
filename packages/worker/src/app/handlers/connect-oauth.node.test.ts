@@ -1,12 +1,11 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { RequestContext } from 'remix/router'
 import type * as AccountIntegrationsData from '#app/account-integrations-data.ts'
 import type * as AuthenticatedUser from '#app/authenticated-user.ts'
 import type * as ConnectOauthChooser from '#app/connect-oauth-chooser.ts'
 import type * as PageAuth from '#app/page-auth.ts'
 import { isBareConnectOauthVisit } from '#app/handlers/connect-oauth.ts'
-import { createConnectOauthHandler } from '#app/handlers/connect-oauth-document.ts'
+import { loadConnectOauth } from '../../../start/server/connect.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser:
@@ -37,7 +36,6 @@ const mockModule = vi.hoisted(() => ({
 			appSlug: appParam || undefined,
 		}
 	},
-	renderAppPage: vi.fn<(input: unknown) => Promise<Response>>(),
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
@@ -78,18 +76,49 @@ vi.mock('#app/account-integrations-data.ts', () => ({
 		mockModule.readConnectOauthLookupOptions(searchParams),
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (input: unknown) => mockModule.renderAppPage(input),
+const native = vi.hoisted(() => ({
+	env: {} as Env,
+	request: new Request('https://example.com/login'),
+	setResponseHeader: vi.fn(),
 }))
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: () => {
+		let validate = (data: unknown) => data
+		const builder = {
+			validator: (fn: typeof validate) => {
+				validate = fn
+				return builder
+			},
+			handler:
+				(fn: (input: { data: unknown }) => unknown) =>
+				(input: { data: unknown }) =>
+					fn({ data: validate(input.data) }),
+		}
+		return builder
+	},
+}))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	get env() {
+		return native.env
+	},
+}))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => native.request,
+	setResponseHeader: native.setResponseHeader,
+}))
+vi.mock('#app/env.ts', () => ({ getEnv: () => native.env }))
 
-const env = {} as Env
+const env = {
+	COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+} as Env
 
-function visit(search = '') {
-	return createConnectOauthHandler(env).handler(
-		new RequestContext(
-			new Request(`https://example.com/connect/oauth${search}`),
-		),
-	)
+let loaded: Awaited<ReturnType<typeof loadConnectOauth>> | undefined
+async function visit(search = '') {
+	native.env = env
+	native.request = new Request(`https://example.com/connect/oauth${search}`)
+	loaded = await loadConnectOauth({ data: `/connect/oauth${search}` })
+	return loaded
 }
 
 function signIn() {
@@ -97,14 +126,10 @@ function signIn() {
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		mcpUser: { userId: ownerIdFromStored('user-1') },
 	})
-	mockModule.renderAppPage.mockResolvedValue(new Response('ok'))
 }
 
 function renderedConnectOauth() {
-	const input = mockModule.renderAppPage.mock.calls.at(-1)?.[0] as {
-		loaderData: { connectOauth: unknown }
-	}
-	return input.loaderData.connectOauth
+	return loaded?.payload
 }
 
 test('bare and provider visits require a session; signed-in bare visits render the chooser', async () => {
@@ -129,9 +154,10 @@ test('bare and provider visits require a session; signed-in bare visits render t
 		),
 	)
 	for (const search of ['', '?provider=github']) {
-		const gated = await visit(search)
-		expect(gated.status).toBe(302)
-		expect(gated.headers.get('location')).toContain('/login')
+		await expect(visit(search)).rejects.toMatchObject({
+			status: 302,
+			options: { href: expect.stringContaining('/login') },
+		})
 	}
 
 	signIn()
@@ -191,7 +217,6 @@ test('provider visits embed SSR loader data and ignore platform lookup flags', a
 
 test('callback embeds only the redirect URI without an integration lookup', async () => {
 	mockModule.requirePageSession.mockResolvedValue(null)
-	mockModule.renderAppPage.mockResolvedValue(new Response('ok'))
 
 	await visit('?code=auth-code&state=abc')
 	expect(mockModule.loadAccountIntegrationByName).not.toHaveBeenCalled()

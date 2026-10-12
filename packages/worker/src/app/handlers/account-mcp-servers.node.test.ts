@@ -182,10 +182,6 @@ vi.mock('#app/auth-redirect.ts', () => ({
 	redirectToLoginWhenUnauthenticated: () => new Response(null, { status: 302 }),
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: async () => new Response('ok'),
-}))
-
 vi.mock('#worker/mcp-client/settings-service.ts', () => ({
 	listMcpServerSettings: (
 		...args: Parameters<typeof settingsService.listMcpServerSettings>

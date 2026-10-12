@@ -41,7 +41,7 @@ Feature route: `/features/packages`.
 - `packages/worker/universal/landing-home-copy.ts`: existing Packages definition
   is “Durable software you own. An agent writes it once; any connected agent can
   run it.” Keep the continuity with the homepage's agent-neutral home.
-- `packages/worker/client/routes/home.tsx`: existing art has Kody handing over a
+- `packages/worker/start/pages/home.tsx`: existing art has Kody handing over a
   wrapped package at a parcel counter. Existing ecosystem copy says “Your own
   git and npm.” Expand this into a workbench, not another grid of benefits.
 

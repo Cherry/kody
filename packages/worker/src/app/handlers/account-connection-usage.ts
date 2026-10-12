@@ -40,9 +40,19 @@ export function createAccountConnectionUsageApiHandler(env: Env) {
 }
 
 export async function readAccountConnectionUsage(request: Request, env: Env) {
+	const result = await loadAccountConnectionUsageData(request, env)
+	return result.status === 200
+		? jsonResponse(result.data)
+		: jsonResponse({ ok: false, error: result.error }, result.status)
+}
+
+export async function loadAccountConnectionUsageData(
+	request: Request,
+	env: Env,
+) {
 	const user = await readAuthenticatedAppUser(request, env)
 	if (!user) {
-		return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+		return { status: 401 as const, error: 'Unauthorized.' }
 	}
 	const resolution = await loadRequestOrgResolution(
 		request,
@@ -50,7 +60,7 @@ export async function readAccountConnectionUsage(request: Request, env: Env) {
 		user.mcpUser.userId,
 	)
 	if (resolution === 'denied') {
-		return jsonResponse({ ok: false, error: 'Organization not found.' }, 404)
+		return { status: 404 as const, error: 'Organization not found.' }
 	}
 	const orgId = ownerIdFromCaller({
 		request: user.request,
@@ -60,8 +70,9 @@ export async function readAccountConnectionUsage(request: Request, env: Env) {
 		env,
 		request: user.request,
 	})
-	return jsonResponse(
-		await loadConnectionUsage({
+	return {
+		status: 200 as const,
+		data: await loadConnectionUsage({
 			env,
 			orgId,
 			orgSlug: user.request.org.slug ?? user.username,
@@ -73,5 +84,5 @@ export async function readAccountConnectionUsage(request: Request, env: Env) {
 					packageResource({ id: packageId, userId: orgId }),
 				),
 		}),
-	)
+	}
 }

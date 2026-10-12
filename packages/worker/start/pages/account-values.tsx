@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	useIsMutating,
 	useMutation,
@@ -92,6 +93,7 @@ export function AccountValuesPage({
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const queryClient = useQueryClient()
+	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = ['values', actorKey, pageQueryOrg(currentHref)] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
@@ -135,6 +137,7 @@ export function AccountValuesPage({
 			queryClient,
 			actorKey,
 			async ({ name, href }) => {
+				const isCurrentSubmitter = captureSubmitter()
 				const response = await fetch(accountValuesApiPath, {
 					method: 'POST',
 					headers: {
@@ -145,7 +148,10 @@ export function AccountValuesPage({
 					referrer: orgAccountApiReferrer(href),
 					body: JSON.stringify({ action: 'delete', name }),
 				})
-				if (response.status === 401) window.location.assign('/login')
+				if (response.status === 401) {
+					if (isCurrentSubmitter()) window.location.assign('/login')
+					throw new Error('Please sign in again.')
+				}
 				const accepted = await readJson<
 					AccountValuesLoaderData & { error?: string }
 				>(response)

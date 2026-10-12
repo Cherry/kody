@@ -98,10 +98,6 @@ vi.mock('#app/auth-redirect.ts', () => ({
 	redirectToLoginWhenUnauthenticated: () => new Response(null, { status: 302 }),
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: async () => new Response('ok'),
-}))
-
 vi.mock('#mcp/memory/repo.ts', () => ({
 	listMemoriesByUserId: (
 		...args: Parameters<typeof memoryRepo.listMemoriesByUserId>

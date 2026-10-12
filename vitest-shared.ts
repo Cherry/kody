@@ -21,6 +21,10 @@ export const sharedProjectConfig = {
 	resolve: {
 		alias: [
 			{
+				find: /^#app\/oauth-page\.ts$/,
+				replacement: resolve(rootDir, 'packages/worker/start/oauth-page.ts'),
+			},
+			{
 				find: /^pitlane:dev$/,
 				replacement: resolve(
 					rootDir,

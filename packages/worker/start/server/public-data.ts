@@ -78,6 +78,19 @@ export const loadProfile = createServerFn({ method: 'GET' })
 				(org) => org.slug === data.username && !org.personal,
 			)
 			if (!orgHome) throw notFound()
+			const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
+				await Promise.all([
+					import('../../universal/org-last-used-cookie.ts'),
+					import('../../src/app/auth-session.ts'),
+				])
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: orgHome.slug,
+					secure: isSecureRequest(request),
+				}),
+			)
+
 			setResponseHeader('Cache-Control', 'no-store')
 			return {
 				data: null,
@@ -134,8 +147,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			{ getEnv },
 			{ getRequest, setResponseHeader, setResponseStatus },
 			{ setAuthSessionSecret },
-			{ createCommunityPackageApiHandler, createCommunityDetailApiHandler },
-			{ RequestContext },
+			{ loadCommunityPackagePayload, loadCommunityDetailPayload },
 			{ loadDocumentHead },
 			{ loadSessionInfo },
 			{ resolvePackageListIconUrl },
@@ -147,8 +159,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			import('../../src/app/env.ts'),
 			import('@tanstack/react-start/server'),
 			import('../../src/app/auth-session.ts'),
-			import('../../src/app/handlers/community-detail.tsx'),
-			import('remix/router'),
+			import('../../src/app/community-package-payload.ts'),
 			import('./document-head.ts'),
 			import('../../src/app/session-info.ts'),
 			import('../../universal/identity-icon-urls.ts'),
@@ -170,11 +181,9 @@ export const loadPackage = createServerFn({ method: 'GET' })
 				headers: original.headers,
 			},
 		)
-		const context = new RequestContext<{ username: string; kodyId: string }>(
-			request,
-		)
-		context.params = data
-		let response: Response
+		let loaded:
+			| Awaited<ReturnType<typeof loadCommunityPackagePayload>>
+			| Awaited<ReturnType<typeof loadCommunityDetailPayload>>
 		if (data.listingId) {
 			const { loadCommunityDetailData } =
 				await import('../../src/app/community-data.ts')
@@ -194,56 +203,46 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			})
 			if (canonical) {
 				setResponseHeader('Cache-Control', 'public, max-age=3600')
-				setResponseHeader('Vary', 'x-remix-target')
 				throw redirect({
 					href: canonical + (data.search ?? ''),
 					statusCode: 301,
 				})
 			}
-			const listingContext = new RequestContext<{ listingId: string }>(request)
-			listingContext.params = { listingId: data.listingId }
-			response =
-				await createCommunityDetailApiHandler(bindings).handler(listingContext)
+			loaded = await loadCommunityDetailPayload(
+				bindings,
+				request,
+				data.listingId,
+				detail,
+			)
 		} else
-			response =
-				await createCommunityPackageApiHandler(bindings).handler(context)
-
-		const result = (await response.json()) as
-			| CommunityDetailApiPayload
-			| { ok: false; redirectTo?: string }
-		if (!result.ok && result.redirectTo) {
-			const { loadPackagePage } = await import('../../src/app/package-page.ts')
-			const moved = await loadPackagePage({
+			loaded = await loadCommunityPackagePayload({
 				env: bindings,
 				request,
 				username: data.username,
 				kodyId: data.kodyId,
 			})
-			const isPublic = moved.kind === 'redirect' && moved.shared
+		if (loaded.kind === 'redirect') {
+			const isPublic = loaded.shared
 			setResponseHeader(
 				'Cache-Control',
 				isPublic ? 'public, max-age=3600' : 'private, no-store',
 			)
-			setResponseHeader(
-				'Vary',
-				isPublic ? 'x-remix-target' : 'x-remix-target, Cookie',
-			)
+			if (!isPublic) setResponseHeader('Vary', 'Cookie')
 			throw redirect({
 				href:
-					result.redirectTo +
+					loaded.to +
 					(data.page === 'settings' ? '/settings' : '') +
 					(data.search ?? ''),
 				statusCode: isPublic ? 301 : 302,
 			})
 		}
-		if (response.status === 401) {
+		if (loaded.kind === 'unauthorized') {
 			setResponseStatus(401)
 			return { kind: 'unauthorized' as const }
 		}
 
-		if (response.status === 404) throw notFound()
-		if (!response.ok || !result.ok)
-			throw new Error('Unable to load public package.')
+		if (loaded.kind === 'not_found') throw notFound()
+		const result: CommunityDetailApiPayload = loaded.data
 		if (
 			data.page === 'settings' &&
 			(!result.viewerCanManage || !result.ownerPackage)

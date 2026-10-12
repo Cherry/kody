@@ -85,6 +85,16 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 		return href
 	})
 	.handler(async ({ data: href }) => {
+		const setupUrl = new URL(href, 'https://kody.local')
+		if (
+			accountAliasPath(setupUrl.pathname) === '/account/secrets/new' &&
+			setupUrl.searchParams.get('name')?.trim()
+		)
+			throw redirect({
+				href: `/connect/secret-set${setupUrl.search}`,
+				statusCode: 302,
+			})
+
 		const { bindings, request, user } = await loadCollection(href)
 		const [{ loadAccountSecretsData }, { loadDocumentHead }] =
 			await Promise.all([

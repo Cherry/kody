@@ -7,15 +7,10 @@ import {
 } from 'react'
 import { useLocation } from '@tanstack/react-router'
 import { SiteLink } from './site-link.tsx'
-import {
-	teamOrgManagementItems,
-	type AccountRailItem,
-} from '#client/routes/account-rail.ts'
 import { type IconName, renderIcon } from './icon.tsx'
 import { UserAvatar } from './user-avatar.tsx'
 import {
 	currentSwitcherSlug,
-	orgBillingPath,
 	orgIdentity,
 	orgOverviewPath,
 	orgRoleLabel,
@@ -167,20 +162,6 @@ function teamOrgSwitchHref(input: {
 		return orgSettingsPath(input.slug)
 	}
 	return next
-}
-
-/** Prefer the team org already in context; otherwise last-used or first team. */
-function manageOrganization(
-	organizations: ReadonlyArray<OrganizationSummary>,
-	current: OrganizationSummary | undefined,
-	lastUsedSlug: string | null | undefined,
-) {
-	if (current && !current.personal && current.role !== null) return current
-	const teams = organizations.filter(
-		(org) => !org.personal && org.role !== null,
-	)
-	if (teams.length === 0) return null
-	return teams.find((org) => org.slug === lastUsedSlug) ?? teams[0] ?? null
 }
 
 export function OrgSwitcher({
@@ -335,64 +316,6 @@ export function OrgSwitcher({
 					...orgRowsFromSession,
 				]
 			: orgRowsFromSession
-	// Prefer the team org in context so Settings/Members/… stay one click
-	// away from account pages. Fall back to last-used / first team org.
-	// Personal-only sessions get the signup org's Overview and Billing.
-	// Overview leads either way: the workspace, not Billing, is the door.
-	const manageOrg = manageOrganization(
-		organizations,
-		current,
-		props.lastUsedOrganization,
-	)
-	const signupOrg = manageOrg
-		? null
-		: current?.personal
-			? current
-			: organizations.find((org) => org.personal)
-	const manageTarget = manageOrg ?? signupOrg ?? null
-	const manageItems: Array<AccountRailItem> = manageOrg
-		? [
-				{ href: `/@${manageOrg.slug}`, label: 'Overview', icon: 'home' },
-				...teamOrgManagementItems({
-					orgSlug: manageOrg.slug,
-					role: manageOrg.role,
-				}),
-			]
-		: signupOrg
-			? [
-					{
-						href: orgOverviewPath(signupOrg.slug),
-						label: 'Overview',
-						icon: 'home',
-					},
-					...(orgRoleManagesBilling(signupOrg.role)
-						? [
-								{
-									href: orgBillingPath(signupOrg.slug),
-									label: 'Billing',
-									icon: 'wallet' as const,
-								},
-							]
-						: []),
-				]
-			: []
-	const manageDetailHandle = manageTarget
-		? orgIdentity(manageTarget, viewer).handle
-		: null
-	const manageRows: Array<SwitcherRow> =
-		manageDetailHandle && manageItems.length > 0
-			? manageItems.map((item) => ({
-					key: `org-manage-${item.label.toLowerCase()}`,
-					href: item.href,
-					label: item.label,
-					detail: manageDetailHandle,
-					ariaCurrent:
-						props.currentPathname === item.href ? ('page' as const) : undefined,
-					selected: false,
-					leading: renderIconWell(item.icon),
-					badge: null,
-				}))
-			: []
 	const actionRows = entries.filter((entry) => entry.kind !== 'org').map(toRow)
 	const pageCurrent = (href: string) =>
 		props.currentPathname === href ? ('page' as const) : undefined
@@ -431,17 +354,6 @@ export function OrgSwitcher({
 					<li key={row.key}>{renderSwitcherRow(row)}</li>
 				))}
 			</ul>
-			{manageRows.length > 0 && manageDetailHandle ? (
-				<div
-					role="group"
-					aria-label={`Manage ${manageDetailHandle}`}
-					data-testid="org-switcher-manage-group"
-					css={switcherActionsCss}
-				>
-					<p css={switcherEyebrowCss}>Manage {manageDetailHandle}</p>
-					{manageRows.map(renderSwitcherRow)}
-				</div>
-			) : null}
 			{actionRows.length > 0 ? (
 				<div css={switcherActionsCss}>{actionRows.map(renderSwitcherRow)}</div>
 			) : null}
@@ -481,11 +393,7 @@ export function OrgSwitcher({
 				type="button"
 				popoverTarget={orgSwitcherPanelId}
 				aria-controls={orgSwitcherPanelId}
-				aria-label={
-					manageRows.length > 0
-						? `${label}: organizations, manage, and account`
-						: `${label}: organizations and account`
-				}
+				aria-label={`${label}: organizations and account`}
 				aria-expanded={open ? 'true' : 'false'}
 				data-open={open ? '' : undefined}
 				data-testid="org-switcher"

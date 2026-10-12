@@ -4,6 +4,7 @@ import { createPreviewPackage } from '../tools/control-kody/package-create.ts'
 import { executeE2eD1Command } from './d1-utils.ts'
 import {
 	expect,
+	request as playwrightRequest,
 	test,
 	waitForClientHydration,
 	type APIRequestContext,
@@ -32,7 +33,7 @@ async function expectPrivateContentDenied(
 	await expect(page.getByText(marker, { exact: true })).toHaveCount(0)
 }
 
-test('private package source and settings stay isolated across owner, shared guest, stranger, and anonymous navigation', async ({
+test('private package source and settings stay isolated across owner, granted guest, stranger, and anonymous navigation', async ({
 	page,
 	browser,
 	baseURL,
@@ -139,23 +140,27 @@ test('private package source and settings stay isolated across owner, shared gue
 			expect(source.status()).toBe(404)
 			expect(await source.text()).not.toContain(marker)
 		}
-		const share = page.getByTestId('package-share-settings')
-		await share.getByLabel('Username', { exact: true }).fill(guest.username)
-		await share
-			.getByRole('button', { name: 'Send invite', exact: true })
-			.click()
-		await expect(
-			share.getByText(`@${guest.username}`, { exact: true }),
-		).toBeVisible()
+		// Personal organizations intentionally have no grant-management UI.
+		// Seed the current Use grant contract, including its access-cache epoch.
+		executeE2eD1Command(`
+			INSERT INTO grants (
+				id, org_id, resource_type, resource_id, subject_type, subject_id,
+				preset, created_by_user_id, created_at, updated_at
+			)
+			SELECT ${quoteSqlString(`access-${id}`)}, orgs.id, 'package',
+				${quoteSqlString(packageId)}, 'user', guest.stable_user_id, 'use', owner.stable_user_id,
+				CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			FROM orgs JOIN users owner ON owner.username = orgs.slug
+			JOIN users guest ON guest.username = ${quoteSqlString(guest.username)}
+			WHERE orgs.slug = ${quoteSqlString(owner.username)};
+			INSERT INTO grant_permissions (grant_id, permission) VALUES
+				(${quoteSqlString(`access-${id}`)}, 'package:read'),
+				(${quoteSqlString(`access-${id}`)}, 'package:execute');
+			UPDATE orgs SET access_epoch = access_epoch + 1
+			WHERE slug = ${quoteSqlString(owner.username)};
+		`)
 		await guestPage.goto(path)
 		await waitForClientHydration(guestPage)
-		await expect(
-			guestPage.getByTestId('package-share-accept-banner'),
-		).toBeVisible()
-		await guestPage.getByTestId('package-share-accept-follow').click()
-		await expect(
-			guestPage.getByTestId('package-share-accepted-status'),
-		).toBeVisible()
 		await expect(
 			guestPage.getByText(marker, { exact: true }).first(),
 		).toBeVisible()
@@ -177,10 +182,12 @@ test('private package source and settings stay isolated across owner, shared gue
 		})
 		expect(guestWrite.ok()).toBe(false)
 
-		await share.getByRole('button', { name: 'Revoke', exact: true }).click()
-		await expect(
-			share.getByText(`@${guest.username}`, { exact: true }),
-		).toHaveCount(0)
+		executeE2eD1Command(`
+			UPDATE grants SET deleted_at = CURRENT_TIMESTAMP,
+				updated_at = CURRENT_TIMESTAMP WHERE id = ${quoteSqlString(`access-${id}`)};
+			UPDATE orgs SET access_epoch = access_epoch + 1
+			WHERE slug = ${quoteSqlString(owner.username)};
+		`)
 		await expectPrivateContentDenied(guestPage, path, marker)
 		const revokedSource = await guestPage.request.get(
 			`${apiPath}/files.json?path=README.md`,
@@ -193,15 +200,32 @@ test('private package source and settings stay isolated across owner, shared gue
 		expect(ownerSource.ok()).toBe(true)
 		expect(await ownerSource.text()).toContain(marker)
 	} finally {
-		if (packageId)
-			await page.request.post('/account/packages.json', {
-				data: { action: 'delete', packageId, confirmName: packageName },
-			})
-		await Promise.all([
-			guestContext.close(),
-			strangerContext.close(),
-			anonymousContext.close(),
-		])
+		// An independent, bounded context can clean up even when the test's
+		// request fixture has timed out. Cleanup must not hide the first failure.
+		try {
+			if (packageId) {
+				const cleanup = await playwrightRequest.newContext({
+					baseURL,
+					storageState: await page.context().storageState(),
+					timeout: 10_000,
+				})
+				try {
+					await cleanup.post('/account/packages.json', {
+						data: { action: 'delete', packageId, confirmName: packageName },
+					})
+				} finally {
+					await cleanup.dispose()
+				}
+			}
+		} catch (error) {
+			console.warn('Package access fixture cleanup failed:', error)
+		} finally {
+			await Promise.allSettled([
+				guestContext.close(),
+				strangerContext.close(),
+				anonymousContext.close(),
+			])
+		}
 	}
 	expect(pageErrors).toEqual([])
 })

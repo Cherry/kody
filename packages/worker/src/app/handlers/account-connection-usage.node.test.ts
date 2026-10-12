@@ -28,8 +28,10 @@ vi.mock('#worker/usage/connection-usage.ts', () => ({
 		mocks.loadConnectionUsage(input),
 }))
 
-const { createAccountConnectionUsageApiHandler } =
-	await import('./account-connection-usage.ts')
+const {
+	createAccountConnectionUsageApiHandler,
+	loadAccountConnectionUsageData,
+} = await import('./account-connection-usage.ts')
 
 const now = '2026-10-07T00:00:00.000Z'
 
@@ -209,5 +211,23 @@ test('the org Connections page binds its org through Referer, and non-members ge
 	signInAs('dan')
 	const response = await getUsage(fromAcme)
 	expect(response.status).toBe(404)
+	expect(mocks.loadConnectionUsage).not.toHaveBeenCalled()
+})
+
+test('native data service preserves signed-out and denied organization results without reading usage', async () => {
+	const request = new Request(
+		'https://example.com/account/connection-usage.json',
+		{ headers: { referer: 'https://example.com/@acme/-/connections/usage' } },
+	)
+	signInAs(null)
+	expect(await loadAccountConnectionUsageData(request, createEnv())).toEqual({
+		status: 401,
+		error: 'Unauthorized.',
+	})
+	signInAs('dan')
+	expect(await loadAccountConnectionUsageData(request, createEnv())).toEqual({
+		status: 404,
+		error: 'Organization not found.',
+	})
 	expect(mocks.loadConnectionUsage).not.toHaveBeenCalled()
 })

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { type ReactNode, useState } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -80,7 +81,7 @@ export function ConnectionProfiles({
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutation = useMutation({
-		mutationKey: ['connectionProfiles', actorKey, currentHref],
+		mutationKey: ['connectionProfiles', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async ({
 			body,
 			href,

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { pageQueryOrg } from '../page-query-scope.ts'
@@ -134,14 +135,22 @@ export function AccountEmailPage({
 		return `${nextUrl.pathname}${nextUrl.search}`
 	}
 
+	const resendMutation = useMutation({
+		mutationFn: requestResendVerification,
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _variables, reconcile) => reconcile?.(),
+		gcTime: 0,
+	})
+
 	async function handleResendVerification() {
+		const isCurrentSubmitter = captureSubmitter()
 		setResendStatus('sending')
 		setResendMessage(null)
 		setResendTone('info')
 
 		try {
-			const result = await requestResendVerification()
-			if (result.ok) void invalidatePages()
+			const result = await resendMutation.mutateAsync()
+			if (!isCurrentSubmitter()) return
 			if (!result.ok && result.unauthorized) {
 				window.location.assign('/login')
 				return
@@ -152,14 +161,16 @@ export function AccountEmailPage({
 				setResendAccepted(true)
 			}
 		} catch {
+			if (!isCurrentSubmitter()) return
 			setResendTone('error')
 			setResendMessage('Unable to send the verification email.')
 		} finally {
-			setResendStatus('idle')
+			if (isCurrentSubmitter()) setResendStatus('idle')
 		}
 	}
 
 	const queryClient = useQueryClient()
+	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = ['email', actorKey, pageQueryOrg(currentHref)] as const
 	const pendingActions = useMutationState({
@@ -173,6 +184,7 @@ export function AccountEmailPage({
 			queryClient,
 			actorKey,
 			async (action) => {
+				const isCurrentSubmitter = captureSubmitter()
 				const response = await fetch(buildEmailApiRequestUrl(action.href), {
 					method: 'POST',
 					referrer: orgAccountApiReferrer(action.href),
@@ -189,7 +201,10 @@ export function AccountEmailPage({
 							: {}),
 					}),
 				})
-				if (response.status === 401) window.location.assign('/login')
+				if (response.status === 401) {
+					if (isCurrentSubmitter()) window.location.assign('/login')
+					throw new Error('Please sign in again.')
+				}
 				const accepted = await readJson<
 					AccountEmailLoaderData & { error?: string }
 				>(response)

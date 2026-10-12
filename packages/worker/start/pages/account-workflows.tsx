@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	useMutation,
 	useQueryClient,
@@ -189,6 +190,7 @@ export function AccountWorkflowsPage({
 	const [messageTone, setMessageTone] = useState<MessageTone>('info')
 	const [cancelArmed, setCancelArmed] = useState(false)
 	const queryClient = useQueryClient()
+	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = [
 		'workflows',
@@ -245,6 +247,7 @@ export function AccountWorkflowsPage({
 			href: string
 			failureMessage: string
 		}) => {
+			const isCurrentSubmitter = captureSubmitter()
 			const response = await fetch(accountWorkflowsApiPath, {
 				method: 'POST',
 				headers: {
@@ -255,7 +258,10 @@ export function AccountWorkflowsPage({
 				referrer: orgAccountApiReferrer(input.href),
 				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) window.location.assign('/login')
+			if (response.status === 401) {
+				if (isCurrentSubmitter()) window.location.assign('/login')
+				throw new Error('Please sign in again.')
+			}
 			const accepted = await readJson<ActionResult & { error?: string }>(
 				response,
 			)

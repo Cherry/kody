@@ -205,10 +205,6 @@ vi.mock('#app/auth-redirect.ts', () => ({
 	redirectToLogin: () => new Response(null, { status: 302 }),
 }))
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: async () => new Response('ok'),
-}))
-
 vi.mock('#mcp/secrets/service.ts', () => ({
 	listSecrets: (...args: Parameters<typeof secretsService.listSecrets>) =>
 		mockModule.listSecrets(...args),

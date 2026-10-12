@@ -7,12 +7,6 @@ import {
 	type PublicFormProtectionFields,
 } from '#universal/public-form-protection.ts'
 
-export type AuthProviderInfo = { id: string; label: string }
-export type PublicAuthConfig = {
-	providers: Array<AuthProviderInfo>
-	turnstileSiteKey: string | null
-}
-
 export function buildProviderStartPath(
 	providerId: string,
 	redirectTo: string | null,
@@ -23,35 +17,6 @@ export function buildProviderStartPath(
 	appendAttributionQueryParams(params, attribution)
 	const query = params.toString()
 	return query ? `/auth/${providerId}?${query}` : `/auth/${providerId}`
-}
-
-export async function fetchPublicAuthConfig(
-	signal?: AbortSignal,
-): Promise<PublicAuthConfig | null> {
-	try {
-		const response = await fetch('/auth/providers.json', {
-			headers: { Accept: 'application/json' },
-			signal,
-		})
-		const payload = await response.json().catch(() => null)
-		if (!response.ok || payload?.ok !== true) return null
-		const providers = (
-			Array.isArray(payload.providers) ? payload.providers : []
-		).filter(
-			(provider: unknown): provider is AuthProviderInfo =>
-				typeof provider === 'object' &&
-				provider !== null &&
-				typeof (provider as AuthProviderInfo).id === 'string' &&
-				typeof (provider as AuthProviderInfo).label === 'string',
-		)
-		const turnstileSiteKey =
-			typeof payload.turnstileSiteKey === 'string'
-				? payload.turnstileSiteKey
-				: null
-		return { providers, turnstileSiteKey }
-	} catch {
-		return null
-	}
 }
 
 /**

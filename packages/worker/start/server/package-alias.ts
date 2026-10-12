@@ -22,7 +22,9 @@ export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 			{ getRequest, setResponseHeader },
 			{ setAuthSessionSecret },
 			{ requireAuthenticatedPageUser },
-			{ getSavedPackageById },
+			{ getSavedPackageByIdInAnyOrg },
+			{ viewerCanReadSavedPackage, viewerCanManageSavedPackage },
+			{ loadOrgBindingForOrg },
 			{ routes },
 		] = await Promise.all([
 			import('cloudflare:workers'),
@@ -31,6 +33,8 @@ export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 			import('../../src/app/auth-session.ts'),
 			import('../../src/app/page-auth.ts'),
 			import('../../src/package-registry/repo.ts'),
+			import('../../src/app/package-viewer-access.ts'),
+			import('../../src/orgs/repo.ts'),
 			import('../../universal/routes.ts'),
 		])
 		const bindings = getEnv(env)
@@ -48,16 +52,34 @@ export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 			if (location) throw redirect({ href: location, statusCode: user.status })
 			throw notFound()
 		}
-		const saved = await getSavedPackageById(bindings.APP_DB, {
-			userId: user.mcpUser.userId,
-			packageId: data.packageId,
-		})
+		const saved = await getSavedPackageByIdInAnyOrg(
+			bindings.APP_DB,
+			data.packageId,
+		)
 		if (!saved) throw notFound()
+		const canAccess = data.approval
+			? viewerCanManageSavedPackage
+			: viewerCanReadSavedPackage
+		if (
+			!(await canAccess({
+				env: bindings,
+				viewer: user.mcpUser,
+				ownerId: saved.userId,
+				packageId: saved.id,
+			}))
+		)
+			throw notFound()
+		const binding = await loadOrgBindingForOrg(
+			bindings.APP_DB,
+			user.mcpUser.userId,
+			saved.userId,
+		)
+
 		setResponseHeader('Cache-Control', 'private, no-store')
 		throw redirect({
 			href:
 				routes.communityPackage.href({
-					username: user.username,
+					username: binding?.org.slug ?? user.username,
 					kodyId: saved.kodyId,
 				}) +
 				(data.approval ? '/approve-publish' : '') +

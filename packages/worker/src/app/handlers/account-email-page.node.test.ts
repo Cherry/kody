@@ -1,10 +1,10 @@
+import type * as CloudflareWorkers from 'cloudflare:workers'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as EmailDestinations from '#worker/email/destinations.ts'
-import { createAccountEmailHandler } from '#app/handlers/account-email-document.ts'
+import { loadEmailPage } from '../../../start/server/account-collections.ts'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	listEmailNotificationDestinations,
 	maxAdditionalEmailNotificationDestinations,
@@ -27,10 +27,23 @@ vi.mock('#worker/email/destinations.ts', async (importOriginal) => {
 	}
 })
 
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: vi.fn(async ({ loaderData }) =>
-		Response.json({ ok: true, loaderData }),
-	),
+vi.mock('@tanstack/react-start', async () => ({
+	createServerFn: (
+		await import('#worker/test-support/start-server-function.ts')
+	).createTestServerFn,
+}))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<typeof CloudflareWorkers>()),
+	env: { APP_DB: {}, COOKIE_SECRET: 'test' },
+}))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => new Request('https://example.com/_serverFn/email'),
+	setResponseHeader: vi.fn(),
+}))
+vi.mock('#app/env.ts', () => ({ getEnv: (env: unknown) => env }))
+vi.mock('#app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
+vi.mock('#app/org-request-binding.ts', () => ({
+	isOrgRequestDenied: async () => false,
 }))
 
 test('email inbox SSR includes destinations and not just the message list', async () => {
@@ -79,29 +92,22 @@ test('email inbox SSR includes destinations and not just the message list', asyn
 		},
 	])
 
-	const response = await createAccountEmailHandler({} as Env).handler({
-		request: new Request('https://example.com/account/email'),
-		params: {},
-	} as never)
-	expect(await response.json()).toEqual({
-		ok: true,
-		loaderData: {
-			accountEmail: expect.objectContaining({
-				ok: true,
-				email: 'user@example.com',
-			}),
-			accountEmailDestinations: {
-				ok: true,
-				destinations: [
-					expect.objectContaining({
-						id: identityEmailDestinationId,
-						email: 'user@example.com',
-					}),
-				],
-				additionalLimit: maxAdditionalEmailNotificationDestinations,
-				additionalRemaining: maxAdditionalEmailNotificationDestinations,
-			},
+	const response = await loadEmailPage({ data: '/account/email' })
+	expect(response).toMatchObject({
+		payload: expect.objectContaining({
+			ok: true,
+			email: 'user@example.com',
+		}),
+		destinations: {
+			ok: true,
+			destinations: [
+				expect.objectContaining({
+					id: identityEmailDestinationId,
+					email: 'user@example.com',
+				}),
+			],
+			additionalLimit: maxAdditionalEmailNotificationDestinations,
+			additionalRemaining: maxAdditionalEmailNotificationDestinations,
 		},
 	})
-	expect(renderAppPage).toHaveBeenCalled()
 })

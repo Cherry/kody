@@ -71,7 +71,7 @@ function formatUsagePercent(value: number | null) {
 }
 
 /** Whichever window is closer to its cap — daily or weekly — is what blocks. */
-function hotterUsagePercent(
+export function hotterUsagePercent(
 	item: Pick<AccountUsageEntitlementConsumption, 'percentOfLimit' | 'week'>,
 ) {
 	const percents = [item.percentOfLimit, item.week?.percentOfLimit].filter(
@@ -86,7 +86,7 @@ function hotterUsagePercent(
  * Monthly compute includes (`group: 'monthly'`) are not hard caps, so they
  * never count as a hard "Limit reached."
  */
-function hasReachedEntitlementLimit(
+export function hasReachedEntitlementLimit(
 	item: Pick<
 		AccountUsageEntitlementConsumption,
 		'percentOfLimit' | 'week' | 'group'
@@ -99,7 +99,7 @@ function hasReachedEntitlementLimit(
 	)
 }
 
-function accountUsageWarningsPanelTitle(
+export function accountUsageWarningsPanelTitle(
 	warnings: ReadonlyArray<
 		Pick<
 			AccountUsageEntitlementConsumption,
@@ -112,7 +112,7 @@ function accountUsageWarningsPanelTitle(
 		: 'Approaching limits'
 }
 
-function formatEntitlementUsedPercent(
+export function formatEntitlementUsedPercent(
 	item: Pick<AccountUsageEntitlementConsumption, 'percentOfLimit' | 'week'>,
 ) {
 	if (item.week) {
@@ -189,7 +189,7 @@ type UsageResourceNameProps = {
  * popover. The table stays scannable; the explanation stays one click away
  * and is not clipped by the cell's overflow.
  */
-function UsageResourceName({
+export function UsageResourceName({
 	id,
 	label,
 	whatCounts,

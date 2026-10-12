@@ -259,11 +259,38 @@ test('a superseding feature navigation waits for the shared styled component', a
 test('a feature component that fails to load recovers through a document load', async ({
 	page,
 }) => {
+	const unexpectedErrors: string[] = []
+	let abortedFeatureUrl: string | undefined
+	page.on('pageerror', (error) => unexpectedErrors.push(error.message))
+	page.on('console', (message) => {
+		// Vite can report the failed dependency through its generated route chunk.
+		const failedImportPrefix =
+			'React client error: TypeError: Failed to fetch dynamically imported module: '
+		if (message.text().startsWith(failedImportPrefix)) {
+			const failedUrl = message.text().slice(failedImportPrefix.length)
+			const memoryRouteChunk = new URL(
+				'/packages/worker/start/routes/features_.memory.tsx?tsr-split=component',
+				page.url(),
+			).href
+			if (
+				abortedFeatureUrl &&
+				(failedUrl === abortedFeatureUrl || failedUrl === memoryRouteChunk)
+			)
+				return
+		}
+		if (
+			message.type() === 'error' &&
+			message.text().includes('React client error:')
+		) {
+			unexpectedErrors.push(message.text())
+		}
+	})
 	await openWarmHomepage(page)
 	let componentRequests = 0
 	await page.route(isFeatureModule, async (route) => {
 		componentRequests += 1
 		if (componentRequests === 1) {
+			abortedFeatureUrl = route.request().url()
 			await route.abort('failed')
 			return
 		}
@@ -282,4 +309,5 @@ test('a feature component that fails to load recovers through a document load', 
 	await expectFeatureStylesheetApplied(page)
 	await waitForClientHydration(page)
 	await expect.poll(() => componentRequests).toBe(2)
+	expect(unexpectedErrors).toEqual([])
 })

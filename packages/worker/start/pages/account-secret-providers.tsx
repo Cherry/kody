@@ -1,11 +1,11 @@
 /** @jsxImportSource @emotion/react */
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { orgPageFilters } from '../org-page-cache.ts'
 import { useState } from 'react'
-import { useRouter } from '@tanstack/react-router'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	AccountManagementMessage,
@@ -57,7 +57,7 @@ export function AccountSecretProvidersPage({
 	}
 
 	const mutation = useMutation({
-		mutationKey: ['secretProviders', actorKey, currentHref],
+		mutationKey: ['secretProviders', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async ({
 			body,
 			href,

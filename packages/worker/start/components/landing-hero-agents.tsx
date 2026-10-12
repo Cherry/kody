@@ -45,21 +45,25 @@ const hostAgentMotion = [
 	{ dur: '9.5s', del: '-3.5s', cycle: 5.1, phase: 3.4, travel: 2.2 },
 ] as const
 
-const landingHeroSlots = landingOrbitAgents.map((agent, index) => ({
+export const landingHeroSlots = landingOrbitAgents.map((agent, index) => ({
 	x: agent.x,
 	y: agent.y,
 	...hostAgentMotion[index]!,
 }))
 
 /** Always on the homepage ring. Everyone else competes for leftover slots. */
-const landingHeroPinnedHostIds = ['grok-bot', 'chatgpt', 'claude-code'] as const
+export const landingHeroPinnedHostIds = [
+	'grok-bot',
+	'chatgpt',
+	'claude-code',
+] as const
 
 export type LandingHeroAgent = (typeof landingHeroSlots)[number] & {
 	label: string
 	icon: string
 }
 
-function pickLandingHeroRing(
+export function pickLandingHeroRing(
 	allRow: ReadonlyArray<WalkthroughHost>,
 	slotCount: number = landingHeroSlots.length,
 ): Array<WalkthroughHost> {
@@ -73,7 +77,7 @@ function pickLandingHeroRing(
 	return order.filter((host) => selectedIds.has(host.id))
 }
 
-function placeLandingHeroAgents(
+export function placeLandingHeroAgents(
 	hosts?: WalkthroughHostPick | null,
 ): Array<LandingHeroAgent> {
 	const identities = pickLandingHeroRing(
@@ -98,7 +102,7 @@ type LandingHeroLightDirection = 'in' | 'out'
  *  token slowly and is pulled in faster, shrinking as it nears the lantern.
  *  Outbound is the reverse: small at the lantern, growing toward the token.
  *  Fades in leaving and out arriving. `null` while it rests. */
-function landingHeroLightAt(
+export function landingHeroLightAt(
 	agent: Pick<LandingHeroAgent, 'cycle' | 'phase' | 'travel'>,
 	seconds: number,
 	direction: LandingHeroLightDirection = 'in',
@@ -118,10 +122,10 @@ function landingHeroLightAt(
 }
 
 /** Wall-clock multiplier for the light clock. `proximity` is 0 far, 1 close. */
-const landingHeroLightRateFar = 0.54
-const landingHeroLightRateNear = 2.31
+export const landingHeroLightRateFar = 0.54
+export const landingHeroLightRateNear = 2.31
 
-function landingHeroLightRate(proximity: number) {
+export function landingHeroLightRate(proximity: number) {
 	const t = Math.min(1, Math.max(0, proximity))
 	const ease = t * t * (3 - 2 * t)
 	return (
@@ -132,7 +136,7 @@ function landingHeroLightRate(proximity: number) {
 
 /** How close the controlling point is to the lantern, 0–1. Fine pointers
  *  use the mouse; coarse pointers use the viewport centre (scroll). */
-function landingHeroLightProximity(input: {
+export function landingHeroLightProximity(input: {
 	lantern: { x: number; y: number }
 	pointer: { x: number; y: number } | null
 	viewport: { width: number; height: number }

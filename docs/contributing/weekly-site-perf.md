@@ -91,7 +91,7 @@ on production and the collector agrees.
 
 `htmlBytes` counts the full anonymous document, including the intentionally
 inlined `styles.css` `<style>` block (see
-[`inline-stylesheet.ts`](../../packages/worker/src/app/inline-stylesheet.ts)).
+[the native document shell](../../packages/worker/start/routes/__root.tsx)).
 That trade removes a render-blocking stylesheet round trip; do not "fix" an
 `html-over-budget` finding by switching back to a `<link rel="stylesheet">`
 without a product call. When landing CSS or below-fold marketing markup grows

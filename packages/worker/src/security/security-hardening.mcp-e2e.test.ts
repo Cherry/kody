@@ -60,3 +60,14 @@ test('explicit error documents preserve status, illustration and title', async (
 		expect(html).toContain(`data-testid="${testId}"`)
 	}
 })
+
+test('anonymous denied package settings preserve the native 404 document', async () => {
+	const response = await workerFetch(
+		createRequest('/@missing-owner/missing-package/settings'),
+	)
+	expect(response.status).toBe(404)
+	const html = await response.text()
+	expect(html).toContain('data-testid="not-found-page"')
+	expect(html).not.toContain('data-testid="internal-error-page"')
+	expect(html).not.toContain('Package webhooks')
+})

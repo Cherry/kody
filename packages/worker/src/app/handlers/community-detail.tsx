@@ -3,13 +3,10 @@ import { jsonResponse as buildJsonResponse } from '#worker/json-response.ts'
 import { z } from 'zod'
 import { type Action } from 'remix/router'
 import { toPublicCommunityListing } from '#app/community-public.ts'
-import { loadCommunityDetailData } from '#app/community-data.ts'
-import { loadPackagePage, packagePageIsPrivate } from '#app/package-page.ts'
 import {
-	loadOwnerPackageReadme,
-	loadPackagePageHasAgentsDocs,
-	resolvePackagePageReadmeImageBaseHref,
-} from '#app/package-files-data.ts'
+	loadCommunityDetailPayload,
+	loadCommunityPackagePayload,
+} from '#app/community-package-payload.ts'
 import { REMIX_FRAME_TARGET_HEADER } from '#universal/frame-constants.ts'
 import { type routes } from '#universal/routes.ts'
 import { getRequestDataCacheLookup } from '#app/request-cache.ts'
@@ -28,12 +25,7 @@ import {
 } from '#worker/community/service.ts'
 import { type CommunityListingRecord } from '#worker/community/types.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
-import { highlightMarkdownFences } from '#app/highlight-code.ts'
-import { type HighlightedCode } from '#universal/highlighted-code.ts'
-import {
-	collectServerTiming,
-	recordServerTiming,
-} from '#worker/request-context.ts'
+import { collectServerTiming } from '#worker/request-context.ts'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
 
 const reportReasonSchema = z
@@ -70,103 +62,33 @@ export function redirectToCanonicalPath(input: {
 	})
 }
 
-export async function highlightReadmeFences(
-	env: Env,
-	readmeContent: string | null,
-	serverTiming?: Array<ServerTimingEntry>,
-): Promise<Array<HighlightedCode>> {
-	if (!readmeContent) return []
-	return highlightMarkdownFences(env, readmeContent, { serverTiming })
-}
-
-export async function readmeForPackagePage(
-	input: {
-		env: Env
-		request: Request
-		listingReadme: string | null | undefined
-		ownerSourceId: string | null | undefined
-		viewerIsOwner: boolean
-		ownerUserId?: string
-	},
-	serverTiming?: Array<ServerTimingEntry>,
-) {
-	let readmeContent = input.listingReadme ?? null
-	const ownerSourceId = input.ownerSourceId
-	const ownerUserId = input.ownerUserId
-	if (!readmeContent && input.viewerIsOwner && ownerSourceId && ownerUserId) {
-		readmeContent = await recordServerTiming(
-			'owner-readme',
-			() =>
-				loadOwnerPackageReadme({
-					env: input.env,
-					request: input.request,
-					userId: ownerUserId,
-					sourceId: ownerSourceId,
-				}),
-			input.request,
-		)
-	}
-	return {
-		readmeContent,
-		readmeFences: await highlightReadmeFences(
-			input.env,
-			readmeContent,
-			serverTiming,
-		),
-	}
-}
+export {
+	highlightReadmeFences,
+	readmeForPackagePage,
+} from '#app/community-package-payload.ts'
 
 export function createCommunityDetailApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler({ request, params }) {
-			const listingId = params.listingId
-			const detail = await loadCommunityDetailData(env, request, listingId)
-			if (!detail?.listing) {
+			const result = await loadCommunityDetailPayload(
+				env,
+				request,
+				params.listingId,
+			)
+			if (result.kind === 'not_found')
 				return jsonResponse(
 					request,
 					{ ok: false, error: 'Catalog entry not found.' },
 					404,
 				)
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const [readmeFences, hasAgentsDocs, imageBaseHref] = await Promise.all([
-				highlightReadmeFences(env, detail.listing.readmeContent, serverTiming),
-				recordServerTiming(
-					'agents-docs',
-					() =>
-						loadPackagePageHasAgentsDocs({
-							env,
-							request,
-							listingId,
-							ownerSourceId: detail.ownerPackage?.sourceId,
-							viewerIsOwner: detail.viewerIsOwner,
-						}),
-					request,
-				),
-				resolvePackagePageReadmeImageBaseHref({
-					listingId,
-					ownerUsername: detail.username,
-					kodyId: detail.listing.kodyId,
-					usedListingReadme: true,
-				}),
-			])
 			return jsonResponse(
 				request,
-				{
-					...detail,
-					readmeContent: detail.listing.readmeContent,
-					kodyId: detail.listing.kodyId,
-					isPrivate: false,
-					readmeFences,
-					hasAgentsDocs,
-					imageBaseHref,
-				},
+				result.data,
 				200,
-				serverTiming,
+				result.serverTiming,
 				anonymousPersonalizedJsonCacheHeaders({
-					personalized: detail.loggedIn,
+					personalized: result.data.loggedIn,
 					request,
 					visibilityGated: true,
 				}),
@@ -174,103 +96,37 @@ export function createCommunityDetailApiHandler(env: Env) {
 		},
 	} satisfies Action<typeof routes.communityDetailApi>
 }
-
 export function createCommunityPackageApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler({ request, params }) {
-			const page = await loadPackagePage({
+			const result = await loadCommunityPackagePayload({
 				env,
 				request,
 				username: params.username,
 				kodyId: params.kodyId,
 			})
-			if (page.kind === 'redirect') {
+			if (result.kind === 'redirect')
 				return jsonResponse(
 					request,
-					{
-						ok: false,
-						error: 'Public package moved.',
-						redirectTo: page.to,
-					},
+					{ ok: false, error: 'Public package moved.', redirectTo: result.to },
 					404,
 				)
-			}
-			if (page.kind === 'not_found') {
+			if (result.kind === 'not_found')
 				return jsonResponse(
 					request,
 					{ ok: false, error: 'Catalog entry not found.' },
 					404,
 				)
-			}
-			if (page.kind === 'unauthorized') {
+			if (result.kind === 'unauthorized')
 				return jsonResponse(request, { ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const [readme, hasAgentsDocs, imageBaseHref] = await Promise.all([
-				readmeForPackagePage(
-					{
-						env,
-						request,
-						listingReadme: page.listing?.listing?.readmeContent,
-						ownerSourceId: page.ownerPackage?.sourceId,
-						viewerIsOwner: page.viewerIsOwner,
-						ownerUserId: page.ownerUserId,
-					},
-					serverTiming,
-				),
-				recordServerTiming(
-					'agents-docs',
-					() =>
-						loadPackagePageHasAgentsDocs({
-							env,
-							request,
-							listingId: page.listing?.listing?.id,
-							ownerSourceId: page.ownerPackage?.sourceId,
-							viewerIsOwner: page.viewerIsOwner,
-							ownerUserId: page.ownerUserId,
-						}),
-					request,
-				),
-				resolvePackagePageReadmeImageBaseHref({
-					listingId: page.listing?.listing?.id,
-					ownerUsername: page.username,
-					kodyId: page.kodyId,
-					usedListingReadme: Boolean(page.listing?.listing?.readmeContent),
-					publishedCommit: page.ownerPackage?.publishedCommit,
-					pinnedCommit: page.listing?.listing?.pinnedCommit,
-				}),
-			])
 			return jsonResponse(
 				request,
-				{
-					ok: true,
-					listing: page.listing?.listing ?? null,
-					ownerProfilePublic: page.ownerProfilePublic,
-					viewerIsOwner: page.viewerIsOwner,
-					viewerCanManage: page.viewerCanManage,
-					viewerCanPublish: page.viewerCanPublish,
-					viewerCanDelete: page.viewerCanDelete,
-					viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,
-					loggedIn: page.loggedIn,
-					viewerIsAdmin: page.listing?.viewerIsAdmin ?? false,
-					forkPrompt: page.listing?.forkPrompt ?? '',
-					viewerInstall: page.listing?.viewerInstall ?? null,
-					readmeContent: readme.readmeContent,
-					readmeFences: readme.readmeFences,
-					hasAgentsDocs,
-					imageBaseHref,
-					ownerPackage: page.ownerPackage,
-					username: page.username,
-					kodyId: page.kodyId,
-					isPrivate: packagePageIsPrivate(page),
-					invocationUrlOrigin: page.invocationUrlOrigin,
-				},
+				result.data,
 				200,
-				serverTiming,
+				result.serverTiming,
 				anonymousPersonalizedJsonCacheHeaders({
-					personalized: page.loggedIn,
+					personalized: result.data.loggedIn,
 					request,
 					visibilityGated: true,
 				}),

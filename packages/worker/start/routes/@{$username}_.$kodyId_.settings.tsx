@@ -20,19 +20,17 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/settings')({
 		},
 	}),
 	loader: async ({ context, preload }) => {
-		const [page] = await Promise.all([
-			loadPageQuery(
-				context.queryClient,
-				pageQuery(context.actorKey, context.pageQueryInput),
-				preload,
-			),
-			context.queryClient.prefetchQuery(
+		const options = pageQuery(context.actorKey, context.pageQueryInput)
+		const page = await loadPageQuery(context.queryClient, options, preload)
+		// Webhook access depends on the package permission check above.
+		if (context.queryClient.getQueryData(options.queryKey)?.kind === 'page') {
+			await context.queryClient.prefetchQuery(
 				packageWebhooksQuery(context.actorKey, {
 					username: context.pageQueryInput.username,
 					kodyId: context.pageQueryInput.kodyId,
 				}),
-			),
-		])
+			)
+		}
 		return page
 	},
 	head: ({ loaderData }) => documentHead(loaderData?.head),

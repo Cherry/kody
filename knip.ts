@@ -16,12 +16,11 @@ export default defineConfig({
 			entry: [
 				'start/client.tsx',
 				'start/server.ts',
-				// Vite replaces the HTTP OAuth renderer with this native Start entry.
+				// HTTP OAuth responses share the native Start document entry.
 				'start/oauth-page.ts',
 				'start/router.tsx',
 				'start/routeTree.gen.ts',
 				'start/routes/**/*.{ts,tsx}',
-				'client/entry.tsx',
 				'src/mcp/capabilities/**/*.ts',
 				'src/mcp/instructions/**/*.ts',
 			],

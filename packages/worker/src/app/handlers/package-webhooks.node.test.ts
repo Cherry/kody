@@ -1,7 +1,10 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
-import { createCommunityPackageWebhooksApiHandler } from '#app/handlers/package-webhooks.ts'
+import {
+	createCommunityPackageWebhooksApiHandler,
+	readPackageWebhooksData,
+} from '#app/handlers/package-webhooks.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
@@ -148,11 +151,12 @@ async function setup(sessionUsername = 'owner') {
 		);
 	`)
 	const db = createD1FromSqlite(sqlite)
-	const handler = createCommunityPackageWebhooksApiHandler({
+	const env = {
 		APP_DB: db,
 		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
 		SENTRY_ENVIRONMENT: 'test',
-	} as unknown as Env)
+	} as unknown as Env
+	const handler = createCommunityPackageWebhooksApiHandler(env)
 	const run = (request: Request, params = ownerParams) =>
 		handler.handler({ request, url: new URL(request.url), params } as never)
 	const get = (params = ownerParams) =>
@@ -181,7 +185,7 @@ async function setup(sessionUsername = 'owner') {
 			},
 		}
 	}
-	return { db, userId, run, get, post, act }
+	return { db, userId, run, get, post, act, env }
 }
 
 function launcherOf(body: { webhooks: PackageWebhooksLoaderData['webhooks'] }) {
@@ -383,4 +387,30 @@ test('package webhooks API rejects unknown webhooks, bad bodies, and anonymous c
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	expect((await get()).status).toBe(401)
+})
+
+test('native webhook reads share API data and owner-only denials', async () => {
+	const { env, get } = await setup()
+	const request = new Request(apiUrl)
+	const result = await readPackageWebhooksData(request, ownerParams, env)
+	expect(result.status).toBe(200)
+	if (result.status !== 200) throw new Error('Expected authorized webhook data')
+	expect(result.data).toEqual(await (await get()).json())
+	expect(result.data).not.toHaveProperty('revealed')
+	expect(await readPackageWebhooksData(request, otherParams, env)).toEqual({
+		status: 404,
+		error: 'Package not found.',
+	})
+	expect(
+		await readPackageWebhooksData(
+			request,
+			{ ...ownerParams, kodyId: 'missing' },
+			env,
+		),
+	).toEqual({ status: 404, error: 'Package not found.' })
+	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(null)
+	expect(await readPackageWebhooksData(request, ownerParams, env)).toEqual({
+		status: 401,
+		error: 'Unauthorized.',
+	})
 })

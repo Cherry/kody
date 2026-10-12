@@ -5,6 +5,7 @@
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "imports": {
+    "#app/oauth-page.ts": "./packages/worker/start/oauth-page.ts",
     "#app/*": "./packages/worker/src/app/*",
     "#client/*": "./packages/worker/client/*",
     "#universal/*": "./packages/worker/universal/*",
@@ -111,7 +112,7 @@
     "nx:show-projects": "nx show projects",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "soft-delete-read-filter:check": "node tools/soft-delete-read-filter.ts",
-    "typecheck:start": "tsc -p packages/worker/tsconfig-start-server.json && tsc -p packages/worker/tsconfig-start.json",
+    "typecheck:start": "tsc -p packages/worker/tsconfig-start-server.json && tsc -p packages/worker/tsconfig-start.json && tsc -p packages/worker/tsconfig-start-tests.json && tsc -p packages/worker/tsconfig-start-server-tests.json",
     "build:client": "npm run build",
     "build:client:web": "npm run build"
   },

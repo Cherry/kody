@@ -1,24 +1,17 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
-import { expect, test, vi } from 'vitest'
+import { expect, test } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { createRouter } from 'remix/router'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testCookieSecret } from '#worker/test-support/auth-provider-harness.ts'
-import { createUnsubscribeTipsHandler } from '#app/handlers/unsubscribe-tips-document.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
+import { loadUnsubscribeTipsPage } from '#app/handlers/unsubscribe-tips.ts'
 import { routes } from '#universal/routes.ts'
 import {
 	createTipsUnsubscribeToken,
 	isTipsEmailsOptedOut,
 	tipsUnsubscribeOneClickBody,
 } from '#worker/usage/tips-unsubscribe.ts'
-
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: vi.fn(async ({ loaderData, status }) =>
-		Response.json({ ok: true, status: status ?? 200, loaderData }),
-	),
-}))
 
 function createDb() {
 	const sqlite = new DatabaseSync(':memory:')
@@ -47,19 +40,17 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	const db = createDb()
 	await insertUser(db)
 	const env = createEnv(db)
-	const handler = createUnsubscribeTipsHandler(env)
+
 	const token = await createTipsUnsubscribeToken({
 		env,
 		userId: ownerIdFromStored('user-tips'),
 	})
 
-	const missing = await handler.handler({
-		request: new Request('https://example.com/unsubscribe/tips'),
-		url: new URL('https://example.com/unsubscribe/tips'),
-		params: {},
-	} as never)
-	expect(await missing.json()).toEqual({
-		ok: true,
+	const missing = await loadUnsubscribeTipsPage(
+		new Request('https://example.com/unsubscribe/tips'),
+		env,
+	)
+	expect(missing).toMatchObject({
 		status: 400,
 		loaderData: {
 			tipsUnsubscribe: {
@@ -70,14 +61,8 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	})
 
 	const getUrl = `https://example.com/unsubscribe/tips?token=${encodeURIComponent(token)}`
-	const first = await handler.handler({
-		request: new Request(getUrl),
-		url: new URL(getUrl),
-		params: {},
-	} as never)
-	expect(await first.json()).toEqual({
-		ok: true,
-		status: 200,
+	const first = await loadUnsubscribeTipsPage(new Request(getUrl), env)
+	expect(first).toMatchObject({
 		loaderData: {
 			tipsUnsubscribe: {
 				ok: true,
@@ -90,13 +75,8 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 		await isTipsEmailsOptedOut({ db, userId: ownerIdFromStored('user-tips') }),
 	).toBe(true)
 
-	vi.mocked(renderAppPage).mockClear()
-	const again = await handler.handler({
-		request: new Request(getUrl),
-		url: new URL(getUrl),
-		params: {},
-	} as never)
-	expect(await again.json()).toMatchObject({
+	const again = await loadUnsubscribeTipsPage(new Request(getUrl), env)
+	expect(again).toMatchObject({
 		loaderData: {
 			tipsUnsubscribe: { ok: true, alreadyOptedOut: true },
 		},
@@ -105,21 +85,22 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 	const otherDb = createDb()
 	await insertUser(otherDb, 'user-one-click')
 	const otherEnv = createEnv(otherDb)
-	const otherHandler = createUnsubscribeTipsHandler(otherEnv)
+
 	const postToken = await createTipsUnsubscribeToken({
 		env: otherEnv,
 		userId: ownerIdFromStored('user-one-click'),
 	})
 	const postUrl = `https://example.com/unsubscribe/tips?token=${encodeURIComponent(postToken)}`
-	const posted = await otherHandler.handler({
-		request: new Request(postUrl, {
+	const posted = await loadUnsubscribeTipsPage(
+		new Request(postUrl, {
 			method: 'POST',
 			headers: { 'content-type': 'application/x-www-form-urlencoded' },
 			body: tipsUnsubscribeOneClickBody,
 		}),
-		url: new URL(postUrl),
-		params: {},
-	} as never)
+		otherEnv,
+	)
+	expect(posted).toBeInstanceOf(Response)
+	if (!(posted instanceof Response)) throw new Error('Expected POST response')
 	expect(posted.status).toBe(200)
 	expect(await posted.text()).toContain('unsubscribed from Kody tips')
 	expect(

@@ -188,10 +188,22 @@ const defaultScrollHeight = '22rem'
  * whole table becomes cards. Each threshold is its own class so a cell can
  * carry exactly one.
  */
+const dropHiddenTableCss = {
+	width: 0,
+	minWidth: 0,
+	maxWidth: 0,
+	paddingInline: 0,
+	border: 'none',
+	overflow: 'hidden',
+	visibility: 'hidden',
+	fontSize: 0,
+	lineHeight: 0,
+} as const
+
 const dropCss: CSSObject = {
-	1: { '@container (max-width: 680px)': { display: 'none' } },
-	2: { '@container (max-width: 780px)': { display: 'none' } },
-	3: { '@container (max-width: 900px)': { display: 'none' } },
+	1: { '@container (max-width: 680px)': dropHiddenTableCss },
+	2: { '@container (max-width: 780px)': dropHiddenTableCss },
+	3: { '@container (max-width: 900px)': dropHiddenTableCss },
 } as const
 
 const numericCss: CSSObject = {
@@ -308,6 +320,7 @@ const cardFallbackCss: CSSObject = {
 			gap: spacing.sm,
 			alignItems: 'baseline',
 		},
+		'& td[data-drop]': { display: 'none' },
 		'& td::before': {
 			content: 'attr(data-label)',
 			flex: 'none',
@@ -454,6 +467,7 @@ export function RecordTable(props: RecordTableProps) {
 							<th
 								key={column.key}
 								scope="col"
+								data-drop={column.drop ? String(column.drop) : undefined}
 								css={[headCellCss, ...columnCss(column)]}
 							>
 								{column.label}
@@ -522,6 +536,7 @@ export function RecordTable(props: RecordTableProps) {
 										<td
 											key={column.key}
 											data-label={column.label}
+											data-drop={column.drop ? String(column.drop) : undefined}
 											data-primary={column.primary ? 'true' : undefined}
 											css={[
 												column.primary ? primaryCellCss : cellCss,

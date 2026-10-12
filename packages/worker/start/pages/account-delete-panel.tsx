@@ -182,9 +182,15 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 							/>
 						</label>
 						{props.hasUsablePassword ? (
-							<label css={accountFieldCss}>
-								<span css={accountFieldLabelCss}>Current password</span>
+							<div css={accountFieldCss}>
+								<label
+									htmlFor="delete-account-current-password"
+									css={accountFieldLabelCss}
+								>
+									Current password
+								</label>
 								<PasswordRevealInput
+									id="delete-account-current-password"
 									name="password"
 									data-testid="delete-account-password"
 									data-field-ring
@@ -194,7 +200,7 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 									css={accountInputCss}
 									onInput={updatePassword}
 								/>
-							</label>
+							</div>
 						) : null}
 						{error ? (
 							<p

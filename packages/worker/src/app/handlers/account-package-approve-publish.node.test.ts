@@ -1,15 +1,12 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import type * as ssrRender from '#app/ssr-render.tsx'
 
 const mockModule = vi.hoisted(() => ({
 	getSavedPackageByIdInAnyOrg: vi.fn(),
 	loadAccountPackageApprovePublishData: vi.fn(),
 	loadPackagePage: vi.fn(),
 	readAuthenticatedAppUser: vi.fn(),
-	renderAppPage: vi.fn<typeof ssrRender.renderAppPage>(
-		async () => new Response('ok'),
-	),
+
 	requireAuthenticatedPageUser: vi.fn(),
 }))
 
@@ -29,12 +26,9 @@ vi.mock('#app/page-auth.ts', () => ({
 	requireAuthenticatedPageUser: (...args: Array<unknown>) =>
 		mockModule.requireAuthenticatedPageUser(...args),
 }))
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (...args: Parameters<typeof ssrRender.renderAppPage>) =>
-		mockModule.renderAppPage(...args),
-}))
 vi.mock('#app/package-viewer-access.ts', () => ({
 	viewerCanManageSavedPackage: vi.fn(async () => true),
+	viewerCanReadSavedPackage: vi.fn(async () => true),
 }))
 
 vi.mock('#worker/orgs/repo.ts', () => ({
@@ -51,8 +45,43 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 
 const { createAccountPackageApprovePublishApiHandler } =
 	await import('./account-package-approve-publish.ts')
-const { createAccountPackageApprovePublishHandler } =
-	await import('./account-package-approve-publish-document.ts')
+const { loadPublishReview } =
+	await import('../../../start/server/package-review.ts')
+const { loadAccountPackageAlias } =
+	await import('../../../start/server/package-alias.ts')
+
+const native = vi.hoisted(() => ({
+	env: {} as Env,
+	request: new Request('https://example.com/login'),
+	setResponseHeader: vi.fn(),
+}))
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: () => {
+		let validate = (data: unknown) => data
+		const builder = {
+			validator: (fn: typeof validate) => {
+				validate = fn
+				return builder
+			},
+			handler:
+				(fn: (input: { data: unknown }) => unknown) =>
+				(input: { data: unknown }) =>
+					fn({ data: validate(input.data) }),
+		}
+		return builder
+	},
+}))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	get env() {
+		return native.env
+	},
+}))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => native.request,
+	setResponseHeader: native.setResponseHeader,
+}))
+vi.mock('#app/env.ts', () => ({ getEnv: () => native.env }))
 
 const user = {
 	username: 'kentcdodds',
@@ -67,20 +96,20 @@ test('legacy package approval links redirect and the canonical owner URL renders
 		userId: ownerIdFromStored('user-1'),
 		kodyId: 'github-triage',
 	})
-	const handler = createAccountPackageApprovePublishHandler({
+	native.env = {
 		APP_DB: {},
-	} as Env)
-
-	const legacy = await handler.handler({
-		request: new Request(
-			'https://example.com/account/packages/pkg-1/approve-publish?commit=abc1234',
-		),
-		params: { packageId: 'pkg-1' },
-	} as never)
-	expect(legacy.status).toBe(302)
-	expect(legacy.headers.get('location')).toBe(
-		'https://example.com/@kentcdodds/github-triage/approve-publish?commit=abc1234',
-	)
+		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+	} as Env
+	await expect(
+		loadAccountPackageAlias({
+			data: { packageId: 'pkg-1', approval: true, search: '?commit=abc1234' },
+		}),
+	).rejects.toMatchObject({
+		status: 302,
+		options: {
+			href: '/@kentcdodds/github-triage/approve-publish?commit=abc1234',
+		},
+	})
 
 	const ownerPackage = {
 		id: 'pkg-1',
@@ -88,12 +117,13 @@ test('legacy package approval links redirect and the canonical owner URL renders
 		name: '@kentcdodds/github-triage',
 	}
 	const requestApproval = () =>
-		handler.handler({
-			request: new Request(
-				'https://example.com/@kentcdodds/github-triage/approve-publish?commit=abc1234',
-			),
-			params: { username: 'kentcdodds', kodyId: 'github-triage' },
-		} as never)
+		loadPublishReview({
+			data: {
+				username: 'kentcdodds',
+				kodyId: 'github-triage',
+				commit: 'abc1234',
+			},
+		})
 	mockModule.loadAccountPackageApprovePublishData.mockResolvedValue({
 		ok: true,
 		package: ownerPackage,
@@ -105,11 +135,7 @@ test('legacy package approval links redirect and the canonical owner URL renders
 		viewerCanManage: false,
 		ownerPackage,
 	})
-	mockModule.renderAppPage.mockClear()
-	await requestApproval()
-	expect(mockModule.renderAppPage).toHaveBeenCalledWith(
-		expect.objectContaining({ notFound: true, status: 404 }),
-	)
+	await expect(requestApproval()).rejects.toMatchObject({ isNotFound: true })
 	expect(mockModule.loadAccountPackageApprovePublishData).not.toHaveBeenCalled()
 
 	mockModule.loadPackagePage.mockResolvedValue({
@@ -119,21 +145,13 @@ test('legacy package approval links redirect and the canonical owner URL renders
 		ownerPackage,
 	})
 	const canonical = await requestApproval()
-	expect(canonical.status).toBe(200)
+	expect(canonical.payload.ok).toBe(true)
 	expect(mockModule.loadAccountPackageApprovePublishData).toHaveBeenCalledWith({
 		env: expect.any(Object),
 		request: expect.any(Request),
 		user,
 		packageId: 'pkg-1',
 	})
-	expect(mockModule.renderAppPage).toHaveBeenCalledWith(
-		expect.objectContaining({
-			title: 'Approve package publish',
-			loaderData: expect.objectContaining({
-				accountPackageApprovePublish: expect.objectContaining({ ok: true }),
-			}),
-		}),
-	)
 })
 
 test('canonical approval API follows package URL normalization and resolves the owner package', async () => {

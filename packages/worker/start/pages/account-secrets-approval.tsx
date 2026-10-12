@@ -360,7 +360,7 @@ export function isPackageSecretApprovalAlreadyGranted(input: {
 	)
 }
 
-function readPackageSecretApprovalView(input: {
+export function readPackageSecretApprovalView(input: {
 	completed: ApprovalAction | null
 	alreadyGranted: boolean
 }) {

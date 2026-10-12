@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { createScarfPageTracker } from '#client/scarf-analytics.ts'
+import { FathomTracker } from '../components/fathom-tracker.tsx'
 import {
 	isPresentationNavigation,
 	type CommittedPage,
@@ -12,6 +14,8 @@ import {
 	Outlet,
 	Scripts,
 	useLocation,
+	useLoaderData,
+	useRouteContext,
 	useRouter,
 	useRouterState,
 } from '@tanstack/react-router'
@@ -173,8 +177,8 @@ export const Route = createRootRouteWithContext<{
 })
 
 export function useShellData() {
-	const { actorKey } = Route.useRouteContext()
-	const { shellLocation } = Route.useLoaderData()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { shellLocation } = useLoaderData({ from: '__root__' })
 	return useSuspenseQuery(shellQuery(actorKey, shellLocation.searchStr)).data
 }
 
@@ -274,10 +278,23 @@ function LoadedAppLayout() {
 
 /** The document must render even when beforeLoad prevents every loader. */
 function DocumentShell({ children }: { children: ReactNode }) {
+	const scarfTracker = useRef<ReturnType<typeof createScarfPageTracker> | null>(
+		null,
+	)
+	const scarfLocation = useRouterState({
+		select: (state) =>
+			state.status === 'idle' ? state.resolvedLocation?.href : undefined,
+	})
+
 	const loaded = Route.useLoaderData()
 	const failure = useRouterState({
 		select: (state) => state.matches.find((match) => match.error)?.error,
 	})
+	useEffect(() => {
+		if (failure || scarfLocation === undefined) return
+		scarfTracker.current ??= createScarfPageTracker()
+		scarfTracker.current()
+	}, [scarfLocation, failure])
 	const identity = isNotFound(failure)
 		? failure.data
 		: failure instanceof Error
@@ -362,17 +379,7 @@ function DocumentShell({ children }: { children: ReactNode }) {
 				) : null}
 				<meta name={documentActorMetaName} content={JSON.stringify(actorKey)} />
 				<PageHead overrideHead={failureHead} />
-				{loaded?.fathomSiteId ? (
-					<>
-						<link rel="preconnect" href="https://cdn.usefathom.com" />
-						<script
-							src="https://cdn.usefathom.com/script.js"
-							data-site={loaded.fathomSiteId}
-							data-spa="auto"
-							defer
-						/>
-					</>
-				) : null}
+				<FathomTracker siteId={loaded?.fathomSiteId} />
 				<style dangerouslySetInnerHTML={{ __html: stylesheet }} />
 			</head>
 			<body>

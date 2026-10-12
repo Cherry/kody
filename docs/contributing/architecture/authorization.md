@@ -518,11 +518,12 @@ account creation can be retried once the environment is fixed.
 `POST /session` (`packages/worker/src/app/handlers/session.ts`) includes `roles`
 and `permissions` in the session payload when the cookie is valid.
 
-The client session store (`packages/worker/client/session.ts`) parses and
-exposes them as `SessionInfo`. Pure helpers `userHasPermission` and
-`userHasRole` from `permissions.ts` work on the client payload for conditional
-rendering — for example, the Admin nav link in `packages/worker/client/app.tsx`
-is shown only when `userHasRole(session, 'admin')`.
+The Start root loads request-scoped identity and shell data through
+`packages/worker/start/routes/__root.tsx` and
+`packages/worker/start/server/shell.ts`. Query keys include the actor, and
+identity changes clear actor-owned cached data. The native header in
+`packages/worker/start/components/site-header.tsx` uses the authorized shell
+presentation to decide whether to show administrative navigation.
 
 Client checks are cosmetic only; every mutation is re-checked server-side.
 

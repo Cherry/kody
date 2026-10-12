@@ -1,8 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { createMatcher } from 'remix/route-pattern/match'
 import { routes } from '#universal/routes.ts'
-import { type AccountPackageApprovePublishLoaderData } from '#universal/loader-data.ts'
 function validate(data: { username: string; kodyId: string; commit?: string }) {
 	if (
 		!data ||
@@ -19,67 +17,69 @@ async function review(data: ReturnType<typeof validate>) {
 	const [
 		{ env },
 		{ getEnv },
-		{ getRequest },
+		{ getRequest, setResponseHeader },
 		{ setAuthSessionSecret },
-		{ RequestContext },
-		publish,
+		{ requireAuthenticatedPageUser },
+		{ loadPackagePage },
+		{ loadAccountPackageApprovePublishData },
 		{ loadDocumentHead },
 	] = await Promise.all([
 		import('cloudflare:workers'),
 		import('../../src/app/env.ts'),
 		import('@tanstack/react-start/server'),
 		import('../../src/app/auth-session.ts'),
-		import('remix/router'),
-		import('../../src/app/handlers/account-package-approve-publish.ts'),
+		import('../../src/app/page-auth.ts'),
+		import('../../src/app/package-page.ts'),
+		import('../../src/app/account-package-publish-lock.ts'),
 		import('./document-head.ts'),
 	])
 	const bindings = getEnv(env)
 	setAuthSessionSecret(bindings.COOKIE_SECRET)
-	const original = getRequest(),
-		api = routes.communityPackageApprovePublishApi
-	const url = new URL(api.href(data), original.url)
+	const original = getRequest()
+	const url = new URL(
+		routes.communityPackageApprovePublish.href(data),
+		original.url,
+	)
 	if (data.commit) url.searchParams.set('commit', data.commit)
-	const context = new RequestContext<{ username: string; kodyId: string }>(
-		new Request(url, { headers: original.headers }),
-	)
-	context.params = { username: data.username, kodyId: data.kodyId }
-	const response = await publish
-		.createAccountPackageApprovePublishApiHandler(bindings)
-		.handler(context)
-	if (response.status === 401) throw redirect({ href: '/login' })
-	if (response.status >= 300 && response.status < 400) {
-		const location = response.headers.get('Location')
-		if (location) {
-			const destination = new URL(location, original.url)
-			const match = createMatcher(
-				routes.communityPackageApprovePublishApi.pattern,
-			).match(destination)
-			if (match)
-				throw redirect({
-					href:
-						routes.communityPackageApprovePublish.href(match.params) +
-						destination.search,
-				})
-		}
-		throw new Error('Invalid package review redirect.')
+	const request = new Request(url, { headers: original.headers })
+	const user = await requireAuthenticatedPageUser(request, bindings)
+	if (user instanceof Response) {
+		const cookies = user.headers.getSetCookie()
+		if (cookies.length) setResponseHeader('Set-Cookie', cookies)
+		throw redirect({
+			href: user.headers.get('Location') ?? '/login',
+			statusCode: user.status,
+		})
 	}
-
-	if (
-		response.status === 404 ||
-		response.status === 400 ||
-		response.status === 403
-	)
+	const page = await loadPackagePage({
+		env: bindings,
+		request,
+		username: data.username,
+		kodyId: data.kodyId,
+	})
+	if (page.kind === 'redirect') {
+		const destination = new URL(`${page.to}/approve-publish`, url)
+		destination.search = url.search
+		setResponseHeader('Cache-Control', 'private, no-store')
+		throw redirect({ href: destination.toString(), statusCode: 302 })
+	}
+	if (page.kind !== 'page' || !page.viewerCanManage || !page.ownerPackage)
 		throw notFound()
-	if (!response.ok) throw new Error('Unable to load package review.')
-	const payload =
-		(await response.json()) as AccountPackageApprovePublishLoaderData
+	const payload = await loadAccountPackageApprovePublishData({
+		env: bindings,
+		request,
+		user,
+		packageId: page.ownerPackage.id,
+	})
+	if (!payload.ok) throw notFound()
 	return {
 		payload,
-		head: loadDocumentHead(routes.communityPackageApprovePublish.href(data), {
+		head: loadDocumentHead(url.pathname, {
 			accountPackageApprovePublish: payload,
 		}),
 	}
 }
+
 export const loadPublishReview = createServerFn({ method: 'GET' })
 	.validator(validate)
 	.handler(async ({ data }) => review(data))

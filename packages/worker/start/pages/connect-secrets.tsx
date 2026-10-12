@@ -297,7 +297,7 @@ export function ConnectSecretsRoute({
 	)
 }
 
-function readConnectSecretsView(input: {
+export function readConnectSecretsView(input: {
 	hostCount: number
 	rejectedCount: number
 	completed: ApprovalAction | null
@@ -326,7 +326,7 @@ function readConnectSecretsView(input: {
 	}
 }
 
-function isConnectSecretsAlreadyAllowed(input: {
+export function isConnectSecretsAlreadyAllowed(input: {
 	secrets: AccountSecretsLoaderData['secrets']
 	approval: ApprovalView
 }) {
