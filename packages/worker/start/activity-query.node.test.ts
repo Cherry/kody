@@ -54,3 +54,39 @@ it('reuses loader data and preserves org and filters across cursor pages', async
 	unsubscribe()
 	client.clear()
 })
+
+it('foreground entry cancels an old preload and rechecks revoked membership', async () => {
+	const read = vi.mocked(loadActivityPage)
+	read.mockReset()
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	})
+	const href = '/@team-one/-/activity'
+	const cached = {
+		payload: { runs: [], nextCursor: null },
+		head: { title: 'Activity' },
+	} as Awaited<ReturnType<typeof loadActivityPage>>
+	client.setQueryData(activityQuery('actor', href).queryKey, {
+		pages: [cached],
+		pageParams: [null],
+	})
+	await client.invalidateQueries({
+		queryKey: activityQuery('actor', href).queryKey,
+	})
+	let completeOldRead!: (value: typeof cached) => void
+	read.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				completeOldRead = resolve
+			}),
+	)
+	read.mockRejectedValueOnce(new Error('Membership revoked'))
+	await loadActivityQuery(client, 'actor', href, true)
+	await expect(loadActivityQuery(client, 'actor', href, false)).rejects.toThrow(
+		'Membership revoked',
+	)
+	expect(read).toHaveBeenCalledTimes(2)
+	expect(read.mock.calls[0]?.[0].signal?.aborted).toBe(true)
+	completeOldRead(cached)
+	client.clear()
+})

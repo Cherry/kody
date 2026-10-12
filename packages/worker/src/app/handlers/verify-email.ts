@@ -1,5 +1,4 @@
 import { type AppPageResult } from '#app/page-result.ts'
-import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -9,8 +8,6 @@ import { verifyEmailToken } from '#app/email-verification.ts'
 import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
 import { sendConnectAgentEmail } from '#app/user-account-emails.ts'
 import { resolveVerifyEmailSuccessCta } from '#universal/safe-redirect.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
-import { type routes } from '#universal/routes.ts'
 import { waitUntil } from 'cloudflare:workers'
 import { maybeRewardHeldReferralAfterEmailVerified } from '#worker/entitlements/referral-program.ts'
 import { latestReferrerPaidPeriodEnd } from '#worker/billing/stripe-webhooks.ts'
@@ -124,14 +121,4 @@ export async function loadVerifyEmailPage(
 			},
 		},
 	}
-}
-
-export function createVerifyEmailHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const result = await loadVerifyEmailPage(request, env)
-			return renderAppPage({ request, env, ...result })
-		},
-	} satisfies Action<typeof routes.verifyEmail>
 }

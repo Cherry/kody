@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePackageMutation } from '../package-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter, useLocation } from '@tanstack/react-router'
@@ -26,9 +27,8 @@ export function AccountPackageApprovePublishRoute({
 	username: string
 	kodyId: string
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
+	const mutation = usePackageMutation(payload.package.id)
+	const capture = useSubmitterScope()
 	const router = useRouter(),
 		currentHref = useLocation({ select: (l) => l.href })
 	const [busy, setBusy] = useState(false),
@@ -44,7 +44,6 @@ export function AccountPackageApprovePublishRoute({
 	async function promoteCommit() {
 		if (!payload.pendingCommit || busyRef.current) return
 		await submit(
-			'/account/packages.json',
 			{
 				action: 'approve-publish',
 				packageId: payload.package.id,
@@ -53,32 +52,17 @@ export function AccountPackageApprovePublishRoute({
 			payload.packageHref,
 		)
 	}
-	async function submit(href: string, body: unknown, destination: string) {
+	async function submit(body: Record<string, unknown>, destination: string) {
 		if (busyRef.current) return
 		busyRef.current = true
 		setBusy(true)
 		setMessage(null)
+		const isCurrent = capture()
 		try {
-			const response = await fetch(href, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify(body),
-			})
-			if (!mounted.current) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const next = (await response.json()) as { ok?: boolean; error?: string }
-			if (!response.ok || !next.ok)
-				throw new Error(next.error ?? 'Unable to approve these changes.')
-			await invalidatePages()
-			if (mounted.current) await router.navigate({ to: destination })
+			await mutation.submit(body)
+			if (isCurrent()) await router.navigate({ to: destination })
 		} catch (error) {
-			if (mounted.current)
+			if (isCurrent())
 				setMessage(
 					error instanceof Error
 						? error.message
@@ -310,10 +294,3 @@ const diffPatchCss: CSSObject = {
 	whiteSpace: 'pre-wrap' as const,
 	color: colors.text,
 }
-
-const mutationResources = [
-	'loadPackage',
-	'loadPackageFiles',
-	'loadProfile',
-	'loadCommunity',
-] as const

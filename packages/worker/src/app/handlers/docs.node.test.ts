@@ -15,7 +15,6 @@ import { listDocsNavSlugs, visibleDocsNav } from '#universal/docs-nav.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	createDocDetailApiHandler,
-	createDocDetailHandler,
 	createDocDetailMarkdownHandler,
 	createDocsApiHandler,
 	createDocsConnectApiHandler,
@@ -398,16 +397,6 @@ test('admin-only docs 404 for anonymous viewers and stay out of public subscript
 	expect(adminMarkdown.status).toBe(200)
 	expect(adminMarkdown.headers.get('Cache-Control')).toBe('no-store')
 	expect(await adminMarkdown.text()).toContain('fleet.entitlement.crossed')
-
-	asAdminOnce()
-	const adminNegotiated = await call(createDocDetailHandler, `/docs/${slug}`, {
-		slug,
-		headers: { ...cookie, Accept: 'text/markdown' },
-	})
-	expect(adminNegotiated.status).toBe(200)
-	expect(adminNegotiated.headers.get('Cache-Control')).toBe('no-store')
-	expect(adminNegotiated.headers.get('Vary')).toBe('Accept')
-	expect(await adminNegotiated.text()).toContain('fleet.entitlement.crossed')
 
 	asAdminOnce()
 	const adminIndex = await call(createDocsApiHandler, '/docs.json', {

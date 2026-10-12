@@ -1,8 +1,7 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
 import { type CSSObject } from '@emotion/react'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import { writeClipboardText } from '#client/clipboard.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import {
@@ -41,15 +40,22 @@ export function AccountMcpOauthClientsPage({
 	currentHref: string
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
-	const [clients, setClients] = useState<
-		AccountMcpOauthClientsLoaderData['clients']
-	>(payload.clients)
+	const clients = payload.clients
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
 	const [labelDraft, setLabelDraft] = useState('Open WebUI')
 	const [redirectUrisDraft, setRedirectUrisDraft] = useState('')
 	const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null)
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const mutation = usePageResponseMutation<
+		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient }
+	>('loadMcpOauthClientsPage', clientsApiPath, {
+		dependencies: mutationResources,
+		dependencyScope: 'actor',
+		merge: (page, accepted) => ({
+			...page,
+			payload: { ok: accepted.ok, clients: accepted.clients },
+		}),
+	})
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 
@@ -61,34 +67,13 @@ export function AccountMcpOauthClientsPage({
 		setActionStatus('busy')
 		setMessage(null)
 		try {
-			const response = await fetch(clientsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					intent: 'create',
-					label: labelDraft,
-					redirectUris: redirectUrisDraft,
-				}),
+			const payload = await mutation.submit({
+				intent: 'create',
+				label: labelDraft,
+				redirectUris: redirectUrisDraft,
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountMcpOauthClientsLoaderData & {
-					error?: string
-					createdClient?: CreatedClient
-				}
-			>(response)
-			if (!response.ok || !payload?.ok || !payload.createdClient) {
-				throw new Error(payload?.error || 'Unable to create the OAuth client.')
-			}
-			setClients(payload.clients)
-			void invalidatePages()
+			if (!payload.createdClient)
+				throw new Error('Unable to create the OAuth client.')
 			setCreatedClient(payload.createdClient)
 			setMessage(
 				'Copy the client secret now. Kody does not store it after this page.',
@@ -110,27 +95,7 @@ export function AccountMcpOauthClientsPage({
 		setActionStatus('busy')
 		setMessage(null)
 		try {
-			const response = await fetch(clientsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'revoke', id }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountMcpOauthClientsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to revoke the OAuth client.')
-			}
-			setClients(payload.clients)
-			void invalidatePages()
+			await mutation.submit({ intent: 'revoke', id })
 			if (createdClient?.id === id) setCreatedClient(null)
 			setRevokeArmed(null)
 			setMessage('OAuth client revoked.')
@@ -159,11 +124,6 @@ export function AccountMcpOauthClientsPage({
 	}
 
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload && actionStatus === 'idle') {
-		setLastPayload(payload)
-		setClients(payload.clients)
-	}
 
 	const isBusy = actionStatus === 'busy'
 
@@ -449,7 +409,4 @@ const inlineCodeCss: CSSObject = {
 	color: colors.text,
 }
 
-const mutationResources = [
-	'loadMcpOauthClientsPage',
-	'loadConnectionsPage',
-] as const
+const mutationResources = ['loadConnectionsPage'] as const

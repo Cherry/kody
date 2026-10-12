@@ -51,7 +51,7 @@ async function saveProfile(page: Page, name: string, bio: string) {
 	).toBeDisabled()
 }
 
-test('external profile edits refresh body and metadata together on focus, reconnect and age SWR', async ({
+test('external profile edits refresh body and metadata together on focus, reconnect and authorized reentry', async ({
 	page,
 	seedE2eUser,
 	login,
@@ -121,6 +121,10 @@ test('external profile edits refresh body and metadata together on focus, reconn
 		}
 		await reader.evaluate(() => window.history.pushState(null, '', '/pricing'))
 		await expect(reader.locator('main')).toContainText('Worker compute')
+		const pricingTitle = await reader.title()
+		const pricingDescription = await reader
+			.locator('head meta[name="description"]')
+			.getAttribute('content')
 		await saveProfile(page, `SWR ${id}`, `SWR bio ${id}`)
 		await reader.clock.fastForward(31_000)
 		let release!: () => void
@@ -146,7 +150,14 @@ test('external profile edits refresh body and metadata together on focus, reconn
 				`/@${user.username}`,
 			)
 			await reading
-			await expectProfileHead(reader, `online ${id}`, `online bio ${id}`)
+			// This route also serves private organization homes and profiles whose
+			// visibility can change. Reentry must confirm access before cache reuse.
+			await expect(reader.locator('main')).toContainText('Worker compute')
+			await expect(reader.getByTestId('profile-display-name')).toHaveCount(0)
+			await expect(reader).toHaveTitle(pricingTitle)
+			await expect(
+				reader.locator('head meta[name="description"]'),
+			).toHaveAttribute('content', pricingDescription!)
 			release()
 			await expectProfileHead(reader, `SWR ${id}`, `SWR bio ${id}`)
 			await reader.waitForLoadState('networkidle')

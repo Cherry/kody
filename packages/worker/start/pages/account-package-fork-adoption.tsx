@@ -1,6 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
 import { useState, type FormEvent } from 'react'
+import { usePackageMutation } from '../package-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 
 import {
 	communityForkAdoptionReviewNoteMinLength,
@@ -9,7 +11,6 @@ import {
 import {
 	type AccountPackageCommunityFork,
 	type AccountPackageDetail,
-	type AccountPackagesLoaderData,
 } from '#universal/loader-data.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -28,8 +29,9 @@ import {
 export function AccountPackageForkAdoption(props: {
 	packageDetail: AccountPackageDetail
 	communityFork: AccountPackageCommunityFork
-	onPackagesPayload: (payload: AccountPackagesLoaderData) => void
 }) {
+	const mutation = usePackageMutation(props.packageDetail.id)
+	const capture = useSubmitterScope()
 	const [reviewNote, setReviewNote] = useState('')
 	const [submitting, setSubmitting] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -40,30 +42,17 @@ export function AccountPackageForkAdoption(props: {
 		setSubmitting(true)
 		setError(null)
 
+		const isCurrent = capture()
 		try {
-			const response = await fetch('/account/packages.json', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'adopt-community-fork',
-					packageId: props.packageDetail.id,
-					reviewNote: reviewNote.trim(),
-				}),
+			await mutation.submit({
+				action: 'adopt-community-fork',
+				reviewNote: reviewNote.trim(),
 			})
-			const payload = (await response.json().catch(() => null)) as
-				| (AccountPackagesLoaderData & { error?: string })
-				| null
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error ?? 'Could not adopt this fork.')
-			}
+			if (!isCurrent()) return
 			setReviewNote('')
 			setSubmitting(false)
-			props.onPackagesPayload(payload)
 		} catch (caught) {
+			if (!isCurrent()) return
 			setSubmitting(false)
 			setError(
 				caught instanceof Error ? caught.message : 'Could not adopt this fork.',

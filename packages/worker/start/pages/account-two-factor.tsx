@@ -1,10 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { toDataURL } from 'qrcode'
-import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -51,51 +50,27 @@ export function AccountTwoFactorPage({
 	currentHref: string
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
-	const [enabled, setEnabled] = useState(payload.enabled)
+	const enabled = payload.enabled
 	const [setup, setSetup] = useState<TwoFactorSetup | null>(null)
 	const [confirmCode, setConfirmCode] = useState('')
 	const [disableCode, setDisableCode] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
-	const invalidatePages = usePageInvalidation(mutationResources, {
+	const mutation = usePageResponseMutation<{
+		ok?: boolean
+		enabled?: boolean
+		otpUri?: string
+		secret?: string
+		error?: string
+	}>('loadAccountSecurity', twoFactorApiPath, {
+		dependencies: ['loadAccountPage'],
 		refreshShell: true,
+		merge: (page, accepted) =>
+			page.page === 'two-factor' && typeof accepted.enabled === 'boolean'
+				? { ...page, payload: { ...page.payload, enabled: accepted.enabled } }
+				: page,
 	})
-	const lifetime = useRef<AbortController | null>(null)
-	useEffect(() => {
-		const controller = new AbortController()
-		lifetime.current = controller
-		return () => {
-			controller.abort()
-		}
-	}, [])
-
-	async function postTwoFactorAction(body: Record<string, unknown>) {
-		const response = await fetch(twoFactorApiPath, {
-			method: 'POST',
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-			},
-			credentials: 'include',
-			signal: lifetime.current?.signal,
-			body: JSON.stringify(body),
-		})
-		if (response.status === 401) {
-			window.location.assign('/login')
-			return null
-		}
-		const payload = await readJson<{
-			ok?: boolean
-			enabled?: boolean
-			otpUri?: string
-			secret?: string
-			error?: string
-		}>(response)
-		if (!response.ok || !payload?.ok) {
-			throw new Error(payload?.error || 'Unable to update two-factor settings.')
-		}
-		return payload
-	}
+	const postTwoFactorAction = mutation.submit
 
 	async function handleStartSetup() {
 		setActionStatus('busy')
@@ -130,7 +105,6 @@ export function AccountTwoFactorPage({
 			)
 			setMessageTone('error')
 		} finally {
-			if (!lifetime.current?.signal.aborted) void invalidatePages()
 			setActionStatus('idle')
 		}
 	}
@@ -151,8 +125,6 @@ export function AccountTwoFactorPage({
 			const payload = await postTwoFactorAction({ intent: 'confirm', code })
 			if (!payload) return
 			// Retire older setup loads before publishing the confirmed state.
-			await invalidatePages()
-			setEnabled(payload.enabled === true)
 			setSetup(null)
 			setConfirmCode('')
 			setMessage('Two-factor authentication is enabled.')
@@ -206,8 +178,6 @@ export function AccountTwoFactorPage({
 		try {
 			const payload = await postTwoFactorAction({ intent: 'disable', code })
 			if (!payload) return
-			await invalidatePages()
-			setEnabled(payload.enabled === true)
 			setDisableCode('')
 			setMessage('Two-factor authentication is disabled.')
 			setMessageTone('info')
@@ -234,11 +204,6 @@ export function AccountTwoFactorPage({
 	}
 
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload) {
-		setLastPayload(payload)
-		setEnabled(payload.enabled)
-	}
 
 	const hydrated = useHydrated()
 	const isBusy = !hydrated || actionStatus === 'busy'
@@ -398,5 +363,3 @@ export function AccountTwoFactorPage({
 const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 const dangerButtonCss = getDangerPillCss({ size: 'sm' })
-
-const mutationResources = ['loadAccountSecurity', 'loadAccountPage'] as const

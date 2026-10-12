@@ -1,5 +1,4 @@
 import { type AppPageResult } from '#app/page-result.ts'
-import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -9,8 +8,6 @@ import {
 	verifyEmailDestinationToken,
 	type VerifyEmailDestinationReason,
 } from '#worker/email/destination-verification.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
-import { type routes } from '#universal/routes.ts'
 
 const emailDestinationsHref = '/account/email#email-destinations'
 
@@ -95,15 +92,4 @@ export async function loadVerifyEmailDestinationPage(
 			},
 		},
 	}
-}
-
-export function createVerifyEmailDestinationHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const result = await loadVerifyEmailDestinationPage(request, env)
-			if (result instanceof Response) return result
-			return renderAppPage({ request, env, ...result })
-		},
-	} satisfies Action<typeof routes.verifyEmailDestination>
 }

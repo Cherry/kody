@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { type AdminReservedUsernamesLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
@@ -11,7 +10,7 @@ import {
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -27,59 +26,22 @@ export function AdminReservedUsernamesPage(props: {
 	payload: AdminReservedUsernamesLoaderData
 	currentHref: string
 }) {
-	const [editedData, setEditedData] = useState<{
-		source: AdminReservedUsernamesLoaderData
-		value: AdminReservedUsernamesLoaderData
-	} | null>(null)
-	const { builtIn, added, removed, conflicts } =
-		editedData?.source === props.payload ? editedData.value : props.payload
-	const invalidatePages = usePageInvalidation(mutationResources)
-	const lifetime = useRef<AbortController | null>(null)
-	useEffect(() => {
-		const controller = new AbortController()
-		lifetime.current = controller
-		return () => controller.abort()
-	}, [])
+	const { builtIn, added, removed, conflicts } = props.payload
+	const mutation = usePageResponseMutation<AdminReservedUsernamesLoaderData>(
+		'loadAdminReservedUsernames',
+		adminReservedUsernamesApiPath,
+	)
 	const [builtInQuery, setBuiltInQuery] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
-	function applyData(payload: AdminReservedUsernamesLoaderData) {
-		setEditedData({ source: props.payload, value: payload })
-		void invalidatePages()
-	}
 	async function submitAdminAction(body: Record<string, unknown>) {
 		if (actionState !== 'idle') return false
 		setActionState(body.action === 'add' ? 'adding' : 'removing')
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			const response = await fetch(adminReservedUsernamesApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify(body),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AdminReservedUsernamesLoaderData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(
-					payload?.error ?? 'Unable to update reserved usernames.',
-				)
-			}
-			applyData(payload)
+			await mutation.submit(body)
 			setMessage(
 				body.action === 'add'
 					? 'Reserved usernames updated.'
@@ -349,5 +311,3 @@ export function AdminReservedUsernamesPage(props: {
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = ['loadAdminReservedUsernames'] as const

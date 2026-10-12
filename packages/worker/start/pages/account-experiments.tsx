@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState } from 'react'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -16,7 +15,7 @@ import { routes } from '#universal/routes.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 export function AccountExperimentsPage({
-	payload: initialPayload,
+	payload,
 	currentHref,
 }: {
 	payload: AccountExperimentsLoaderData
@@ -24,45 +23,20 @@ export function AccountExperimentsPage({
 }) {
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [saving, setSaving] = useState(false)
-	const [payload, setPayload] =
-		useState<AccountExperimentsLoaderData>(initialPayload)
-	const invalidatePages = usePageInvalidation('permissions', {
-		refreshShell: true,
-	})
-
+	const mutation = usePageResponseMutation<AccountExperimentsLoaderData>(
+		'loadExperimentsPage',
+		routes.accountExperimentsApiPost.href(),
+		{ dependencies: 'permissions', refreshShell: true },
+	)
+	const saving = mutation.isPending
+	const optedIn = mutation.isPending
+		? mutation.variables?.body.experimentsOptIn === true
+		: payload.experimentsOptIn
 	async function saveOptIn(enabled: boolean) {
 		if (saving) return
-		const previous = payload
-		setSaving(true)
 		setMessage(null)
-		if (payload?.ok) {
-			setPayload({ ...payload, experimentsOptIn: enabled })
-		}
 		try {
-			const response = await fetch(routes.accountExperimentsApiPost.href(), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ experimentsOptIn: enabled }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const next = await readJson<AccountExperimentsLoaderData>(response)
-			if (!response.ok || !next?.ok) {
-				throw new Error(
-					(next && 'error' in next && typeof next.error === 'string'
-						? next.error
-						: null) ?? 'Unable to update experiments preference.',
-				)
-			}
-			setPayload(next)
-			void invalidatePages()
+			await mutation.submit({ experimentsOptIn: enabled })
 			setMessage(
 				enabled
 					? 'You are opted into experiments. You can turn this off anytime.'
@@ -70,22 +44,13 @@ export function AccountExperimentsPage({
 			)
 			setMessageTone('info')
 		} catch (error) {
-			setPayload(previous)
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to update experiments preference.',
 			)
 			setMessageTone('error')
-		} finally {
-			setSaving(false)
 		}
-	}
-
-	const [lastPayload, setLastPayload] = useState(initialPayload)
-	if (lastPayload !== initialPayload && !saving) {
-		setLastPayload(initialPayload)
-		setPayload(initialPayload)
 	}
 
 	return (
@@ -117,7 +82,7 @@ export function AccountExperimentsPage({
 					>
 						<input
 							type="checkbox"
-							checked={payload.experimentsOptIn}
+							checked={optedIn}
 							disabled={saving}
 							onChange={(event) => {
 								if (!(event.currentTarget instanceof HTMLInputElement)) {
@@ -149,7 +114,7 @@ export function AccountExperimentsPage({
 							</span>
 						</span>
 					</label>
-					{payload.experimentsOptIn ? (
+					{optedIn ? (
 						<p
 							css={{
 								margin: 0,

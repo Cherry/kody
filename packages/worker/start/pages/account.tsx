@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { avatarMutationOptions } from './account-avatar-query.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import {
 	useEffect,
@@ -16,7 +17,6 @@ import {
 import {
 	pageResourceKey,
 	snapshotPageResource,
-	restorePageResource,
 } from '../page-mutation-cache.ts'
 import { type loadAccountPage } from '#start/server/account-page'
 import { type loadProfile } from '#start/server/public-data'
@@ -27,8 +27,6 @@ import {
 	type AccountProfileLoaderData,
 	type ProfileVisibility,
 } from '#universal/loader-data.ts'
-import { acceptedEmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
-import { routes } from '#universal/routes.ts'
 import {
 	colors,
 	radius,
@@ -50,13 +48,11 @@ import {
 } from '#client/routes/account-approval-shared.ts'
 import { type AccountPagePayloads } from '#client/routes/account-page-data.ts'
 import { AccountDeletePanel } from './account-delete-panel.tsx'
-import { renderAccountLogoutPanel } from './account-logout-panel.tsx'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
 	AccountManagementShell,
 	AccountPageHeader,
-	accountActionsCss,
 } from './account-management-components.tsx'
 import { useAccountEmailClaims } from './account-email-claims.ts'
 import { AccountFormerEmailsPanel } from './account-former-emails-panel.tsx'
@@ -79,6 +75,28 @@ export function AccountPage({
 	payloads: AccountPagePayloads
 	currentHref: string
 }) {
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const avatarSubmitter = useRef<{
+		actorKey: string | null
+		href: string
+	} | null>(null)
+	function isAvatarSubmitterCurrent() {
+		return (
+			avatarSubmitter.current?.actorKey === actorKey &&
+			avatarSubmitter.current.href === currentHref
+		)
+	}
+	useEffect(() => {
+		avatarSubmitter.current = { actorKey, href: currentHref }
+		setAvatarPreview(undefined)
+		setAvatarStatus('idle')
+		setEditorFile(null)
+		return () => {
+			avatarSubmitter.current = null
+			releaseOptimisticAvatar()
+		}
+	}, [actorKey, currentHref])
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 		refreshRoute: true,
@@ -121,13 +139,24 @@ export function AccountPage({
 	const needsOnboarding = payloads.onboarding?.needsOnboarding === true
 	const onboardingChecklist = payloads.onboarding?.checklist ?? null
 
-	function publishProfile(profile: AccountProfileLoaderData) {
+	function publishProfile(
+		profile: AccountProfileLoaderData,
+		submittedActor: string | null,
+	) {
 		queryClient.setQueriesData<AccountQueryData>(
-			{ queryKey: pageResourceKey(actorKey, 'loadAccountPage') },
+			{ queryKey: pageResourceKey(submittedActor, 'loadAccountPage') },
 			(data) =>
 				data && {
 					...data,
-					payloads: { ...data.payloads, accountProfile: profile },
+					payloads: {
+						...data.payloads,
+						accountProfile: {
+							...data.payloads.accountProfile,
+							displayName: profile.displayName,
+							bio: profile.bio,
+							profileVisibility: profile.profileVisibility,
+						},
+					},
 				},
 		)
 	}
@@ -158,6 +187,7 @@ export function AccountPage({
 			controller.abort()
 			if (optimisticAvatar.current)
 				URL.revokeObjectURL(optimisticAvatar.current)
+			optimisticAvatar.current = null
 		}
 	}, [])
 
@@ -174,46 +204,32 @@ export function AccountPage({
 		}
 	}
 
-	async function uploadPreparedAvatar(prepared: File) {
+	function uploadPreparedAvatar(prepared: File) {
 		setEditorFile(null)
 		releaseOptimisticAvatar()
 		optimisticAvatar.current = URL.createObjectURL(prepared)
 		setAvatarPreview(optimisticAvatar.current)
 		setAvatarStatus('uploading')
 
-		try {
-			const body = new FormData()
-			body.set('avatar', prepared)
-			const response = await fetch(accountAvatarApiPath, {
-				method: 'POST',
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
-				body,
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountProfileLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to upload avatar.')
-			}
-			releaseOptimisticAvatar()
-			publishProfile(payload)
-			setAvatarPreview(undefined)
-			void invalidatePages()
-			toast.success('Avatar updated.')
-		} catch (error) {
-			releaseOptimisticAvatar()
-			setAvatarPreview(undefined)
-			toast.error(
-				error instanceof Error ? error.message : 'Unable to upload avatar.',
-			)
-		} finally {
-			setAvatarStatus('idle')
-		}
+		avatarMutation.mutate(
+			{ actorKey, href: currentHref, username, file: prepared },
+			{
+				onSuccess: () => {
+					if (isAvatarSubmitterCurrent()) toast.success('Avatar updated.')
+				},
+				onError: (error) =>
+					isAvatarSubmitterCurrent() &&
+					toast.error(
+						error instanceof Error ? error.message : 'Unable to upload avatar.',
+					),
+				onSettled: () => {
+					if (!isAvatarSubmitterCurrent()) return
+					releaseOptimisticAvatar()
+					setAvatarPreview(undefined)
+					setAvatarStatus('idle')
+				},
+			},
+		)
 	}
 
 	function handleAvatarSelected(event: FormEvent<HTMLElement>) {
@@ -226,86 +242,84 @@ export function AccountPage({
 		}
 	}
 
-	async function handleRemoveAvatar() {
+	function handleRemoveAvatar() {
 		releaseOptimisticAvatar()
 		setAvatarPreview(null)
 		setAvatarStatus('removing')
 
-		try {
-			const response = await fetch(accountAvatarApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+		avatarMutation.mutate(
+			{ actorKey, href: currentHref, username },
+			{
+				onSuccess: () => {
+					if (isAvatarSubmitterCurrent()) toast.success('Avatar removed.')
 				},
-				credentials: 'include',
-				body: JSON.stringify({ remove: true }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountProfileLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to remove avatar.')
-			}
-			publishProfile(payload)
-			setAvatarPreview(undefined)
-			void invalidatePages()
-			toast.success('Avatar removed.')
-		} catch (error) {
-			setAvatarPreview(undefined)
-			toast.error(
-				error instanceof Error ? error.message : 'Unable to remove avatar.',
-			)
-		} finally {
-			setAvatarStatus('idle')
-		}
+				onError: (error) =>
+					isAvatarSubmitterCurrent() &&
+					toast.error(
+						error instanceof Error ? error.message : 'Unable to remove avatar.',
+					),
+				onSettled: () => {
+					if (!isAvatarSubmitterCurrent()) return
+					setAvatarPreview(undefined)
+					setAvatarStatus('idle')
+				},
+			},
+		)
 	}
 
+	const resendMutation = useMutation({
+		gcTime: 0,
+		mutationFn: requestResendVerification,
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _variables, reconcile) => reconcile?.(),
+	})
 	async function handleResendVerification() {
+		const submittedScope = avatarSubmitter.current
 		setResendStatus('sending')
 		setResendMessage(null)
 		setResendTone('info')
-
 		try {
-			const result = await requestResendVerification()
-			if (result.ok) void invalidatePages()
+			const result = await resendMutation.mutateAsync()
+			if (!submittedScope || avatarSubmitter.current !== submittedScope) return
 			if (!result.ok && result.unauthorized) {
 				window.location.assign('/login')
 				return
 			}
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
-			if (result.ok) {
-				queryClient.setQueriesData<AccountQueryData>(
-					{ queryKey: pageResourceKey(actorKey, 'loadAccountPage') },
-					(data) =>
-						data && {
-							...data,
-							payloads: {
-								...data.payloads,
-								accountProfile: {
-									...data.payloads.accountProfile,
-									emailVerificationDelivery:
-										acceptedEmailVerificationDelivery(),
-								},
-							},
-						},
-				)
-			}
 		} catch {
+			if (!submittedScope || avatarSubmitter.current !== submittedScope) return
 			setResendTone('error')
 			setResendMessage('Unable to send the verification email.')
 		} finally {
-			setResendStatus('idle')
+			if (submittedScope && avatarSubmitter.current === submittedScope)
+				setResendStatus('idle')
 		}
 	}
 
-	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const avatarMutation = useMutation(
+		avatarMutationOptions(queryClient, async ({ file }) => {
+			const body = file ? new FormData() : null
+			if (file && body) body.set('avatar', file)
+			const response = await fetch(accountAvatarApiPath, {
+				method: 'POST',
+				credentials: 'include',
+				headers: body
+					? { Accept: 'application/json' }
+					: { Accept: 'application/json', 'Content-Type': 'application/json' },
+				body: body ?? JSON.stringify({ remove: true }),
+			})
+			if (response.status === 401)
+				throw new Error('Please sign in again to update your avatar.')
+			const result = await readJson<
+				AccountProfileLoaderData & { error?: string }
+			>(response)
+			if (!response.ok || !result?.ok)
+				throw new Error(result?.error || 'Unable to update avatar.')
+			return result
+		}),
+	)
+
 	const isSaving = useIsMutating({ mutationKey: ['profile', actorKey] }) > 0
 	type AccountQueryData = Awaited<ReturnType<typeof loadAccountPage>>
 	type PublicProfileQueryData = Awaited<ReturnType<typeof loadProfile>>
@@ -341,7 +355,8 @@ export function AccountPage({
 				credentials: 'include',
 				body: JSON.stringify(input),
 			})
-			if (response.status === 401) window.location.assign('/login')
+			if (response.status === 401)
+				throw new Error('Please sign in again to save your profile.')
 			const result = await readJson<ProfileResult>(response)
 			if (!response.ok || !result || result.error)
 				throw new Error(result?.error || 'Unable to save profile.')
@@ -384,26 +399,72 @@ export function AccountPage({
 						: data,
 				[{ username }],
 			)
-			return { account, publicProfile }
+			return {
+				account,
+				publicProfile,
+				actorKey,
+				ownProfileKey,
+				reconcile: invalidateProfileDependents,
+			}
 		},
 		onError: async (error, _input, snapshot) => {
 			// onMutate retired older reads. New reads wait for this mutation,
 			// including uncached navigations which must survive a rejected write.
-			restorePageResource(queryClient, snapshot?.account)
-			restorePageResource(queryClient, snapshot?.publicProfile)
-			void queryClient.invalidateQueries({ queryKey: ownProfileKey })
+			for (const [key, previous] of snapshot?.account ?? []) {
+				if (!previous) continue
+				queryClient.setQueryData<AccountQueryData>(key, (current) =>
+					current
+						? {
+								...current,
+								payloads: {
+									...current.payloads,
+									accountProfile: {
+										...current.payloads.accountProfile,
+										displayName: previous.payloads.accountProfile.displayName,
+										bio: previous.payloads.accountProfile.bio,
+									},
+								},
+							}
+						: current,
+				)
+			}
+			for (const [key, previous] of snapshot?.publicProfile ?? []) {
+				if (!previous?.data) continue
+				const profile = previous.data.profile
+				queryClient.setQueryData<PublicProfileQueryData>(key, (current) =>
+					current?.data
+						? {
+								...current,
+								data: {
+									...current.data,
+									profile: {
+										...current.data.profile,
+										displayName: profile.displayName,
+										bio: profile.bio,
+									},
+								},
+							}
+						: current,
+				)
+			}
 			void queryClient.invalidateQueries({
-				queryKey: pageResourceKey(actorKey, 'loadAccountPage'),
+				queryKey: snapshot?.ownProfileKey ?? ownProfileKey,
+			})
+			void queryClient.invalidateQueries({
+				queryKey: pageResourceKey(
+					snapshot?.actorKey ?? actorKey,
+					'loadAccountPage',
+				),
 			})
 			// A failed save still needs feedback after navigating away from the form.
 			toast.error(
 				error instanceof Error ? error.message : 'Unable to save profile.',
 			)
 		},
-		onSuccess: async (profile) => {
-			publishProfile(profile)
+		onSuccess: async (profile, _input, snapshot) => {
+			publishProfile(profile, snapshot.actorKey)
 			queryClient.setQueriesData<PublicProfileQueryData>(
-				{ queryKey: ownProfileKey },
+				{ queryKey: snapshot.ownProfileKey },
 				(data) =>
 					data && data.data?.isSelf
 						? {
@@ -420,7 +481,7 @@ export function AccountPage({
 						: data,
 			)
 			// Cache work belongs to the mutation and survives a page unmount.
-			void invalidateProfileDependents()
+			void snapshot.reconcile()
 		},
 	})
 
@@ -632,8 +693,6 @@ export function AccountPage({
 					</AccountManagementPanel>
 				</>
 			) : null}
-
-			{renderAccountLogoutPanel()}
 
 			{editorFile ? (
 				<AccountAvatarEditor

@@ -15,7 +15,7 @@ export const Route = createFileRoute('/discord')({
 			preload,
 		),
 	staleTime: 0,
-	head: () => ({ meta: [{ title: 'Discord | Kody' }] }),
+	head: () => ({ meta: [{ title: 'Discord' }] }),
 	component: Discord,
 })
 function Discord() {

@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest'
-import { createVerifyEmailDestinationHandler } from '#app/handlers/verify-email-destination.ts'
+import { createVerifyEmailDestinationHandler } from '#app/handlers/verify-email-destination-document.ts'
 import { verifyEmailDestinationToken } from '#worker/email/destination-verification.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 

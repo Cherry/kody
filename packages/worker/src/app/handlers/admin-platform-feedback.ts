@@ -8,15 +8,13 @@ import {
 	loadAdminPlatformFeedbackData,
 	readAdminPlatformFeedbackId,
 } from '#app/admin-platform-feedback-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { jsonResponse } from '#worker/json-response.ts'
 
 const maxAuditFeedbackIdLength = 200
 
-function readRequestedFeedbackId(request: Request) {
+export function readRequestedFeedbackId(request: Request) {
 	return readAdminPlatformFeedbackId(
 		new URL(request.url).searchParams.get('feedbackId'),
 	)
@@ -50,43 +48,6 @@ export async function auditPlatformFeedbackRead(input: {
 				}`
 			: 'platform_feedback_list',
 	})
-}
-
-export function createAdminPlatformFeedbackHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const actor = await requirePageUserWithRole(request, env, 'admin')
-			if (actor instanceof Response) {
-				return actor
-			}
-
-			const adminPlatformFeedback = await loadAdminPlatformFeedbackData(
-				env,
-				request.url,
-			)
-			const requestedFeedbackId = readRequestedFeedbackId(request)
-			await auditPlatformFeedbackRead({
-				env,
-				request,
-				actorEmail: actor.email,
-				action: requestedFeedbackId
-					? 'adminPlatformFeedbackGet'
-					: 'adminPlatformFeedbackList',
-				feedbackId: requestedFeedbackId,
-				notFound:
-					requestedFeedbackId !== null &&
-					adminPlatformFeedback.selectedFeedback === null,
-			})
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin platform feedback',
-				loaderData: { adminPlatformFeedback },
-			})
-		},
-	} satisfies Action<typeof routes.adminPlatformFeedback>
 }
 
 export function createAdminPlatformFeedbackApiHandler(env: Env) {

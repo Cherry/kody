@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { type FormEvent } from 'react'
 import {
 	handlePermanentNote,
@@ -248,9 +249,9 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 					)}
 				</p>
 				<p css={{ margin: 0 }}>
-					<a href={routes.profile.href({ username })} css={mutedLinkCss}>
+					<SiteLink href={routes.profile.href({ username })} css={mutedLinkCss}>
 						View public profile
-					</a>
+					</SiteLink>
 				</p>
 				<div>
 					<button

@@ -33,7 +33,7 @@ vi.mock('#app/frame-registry.ts', () => ({
 }))
 
 const { createCommunityPackageSettingsHandler } =
-	await import('./community-detail.tsx')
+	await import('./community-detail-document.tsx')
 
 test('package settings 404 unless the viewer can manage the package', async () => {
 	const handler = createCommunityPackageSettingsHandler({} as Env)

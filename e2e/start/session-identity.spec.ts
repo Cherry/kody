@@ -74,6 +74,7 @@ for (const delayOldShell of [false, true]) {
 		await login({ ...first, mode: 'login' })
 		await page.goto('/account/jobs')
 		await waitForClientHydration(page)
+		await page.getByTestId('org-switcher').click()
 		const account = page
 			.locator('a[href="/account"]')
 			.filter({ visible: true })
@@ -231,6 +232,7 @@ test('a preload made under another cookie identity cannot poison the original do
 	await page.mouse.move(0, 0)
 	await switchUser(page, second)
 	await watchForOldProfile(page, second.username)
+	await page.getByTestId('org-switcher').click()
 	const account = page
 		.locator('a[href="/account"]')
 		.filter({ visible: true })
@@ -267,6 +269,7 @@ test('a preload made under another cookie identity cannot poison the original do
 		releaseRedirect()
 		await page.unrouteAll({ behavior: 'wait' })
 	}
+	await page.getByTestId('org-switcher').click()
 	await page
 		.locator('a[href="/account"]')
 		.filter({ visible: true })

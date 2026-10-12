@@ -19,10 +19,8 @@ import {
 	adminUserMatchesListFilters,
 	loadAdminUsersData,
 	loadRolesByUserIds,
-	adminUserListItemFieldNames,
 	updateAdminUserPlan,
 	updateAdminUserSuspension,
-	type AdminUserListItem,
 } from '#worker/admin/users-data.ts'
 import {
 	AdminEmailVerificationError,
@@ -40,7 +38,6 @@ import {
 	type PlanName,
 } from '#universal/plans.ts'
 import { requirePageUserWithRole } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	assignUserRole,
 	removeAdminRolePreservingLastAdmin,
@@ -52,7 +49,10 @@ import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
 import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
 
-export { adminUserListItemFieldNames, type AdminUserListItem }
+export {
+	adminUserListItemFieldNames,
+	type AdminUserListItem,
+} from '#worker/admin/users-data.ts'
 
 export function createAdminHandler(env: Env) {
 	return {
@@ -65,43 +65,6 @@ export function createAdminHandler(env: Env) {
 			return Response.redirect(new URL('/admin/users', request.url), 302)
 		},
 	} satisfies Action<typeof routes.admin>
-}
-
-export function createAdminUsersHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-
-			// The HTML page always seeds the first window; infinite scroll owns
-			// later pages through the JSON API, so a stale `?page=N` link must
-			// not anchor the list past the rows it can never load.
-			const pageUrl = new URL(request.url)
-			pageUrl.searchParams.delete('page')
-			const pathStableUserId =
-				typeof params === 'object' &&
-				params !== null &&
-				'stableUserId' in params &&
-				typeof params.stableUserId === 'string'
-					? params.stableUserId
-					: undefined
-			const adminUsers = await loadAdminUsersData(
-				env,
-				pageUrl.toString(),
-				pathStableUserId,
-			)
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin users',
-				loaderData: { adminUsers },
-			})
-		},
-	} satisfies Action<typeof routes.adminUsers | typeof routes.adminUserDetail>
 }
 
 export function createAdminUsersApiHandler(env: Env) {

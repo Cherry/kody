@@ -1,6 +1,6 @@
 # Feature pages
 
-The production site has a `/features` overview and six native Remix detail
+The production site has a `/features` overview and six native Start detail
 pages. Each detail page combines a hero, interactive examples, illustrated
 product stories, documentation links, and an onboarding action. The briefs here
 record the design direction and the evidence behind product claims.
@@ -17,22 +17,22 @@ record the design direction and the evidence behind product claims.
 ## Implementation
 
 - `packages/worker/universal/routes.ts` owns the public route paths.
-- `packages/worker/client/routes/features.tsx` provides the route components and
+- `packages/worker/start/pages/features.tsx` provides the route components and
   layout dimensions.
-- `packages/worker/client/routes/features/` contains the overview, six detail
+- `packages/worker/start/pages/features/` contains the overview, six detail
   components, and their supporting components and example data.
 - `packages/worker/public/feature-pages.css` owns the shared visual styles,
   responsive layouts, theme colors, and reduced-motion behavior.
-- `packages/worker/client/app.tsx` supplies the existing site header and footer.
+- `packages/worker/start/routes/__root.tsx` supplies the site header and footer.
   The pages use the site's light, dark, and system theme controls.
-- `packages/worker/src/app/ssr-render-features.node.test.ts` checks the
+- `packages/worker/src/public-content.mcp-e2e.test.ts` checks the
   server-rendered feature pages.
 
-Components use native Remix JSX, local state, and event handlers. Examples use
-fictional data and identify themselves as examples or demos. Account selectors
-do not change real connections, package publishing does not publish real code,
-and the intake app keeps records only in the current page session. Documentation
-and onboarding links lead to real site routes.
+Components use React-compatible JSX through Redact, local state, and event
+handlers. Examples use fictional data and identify themselves as examples or
+demos. Account selectors do not change real connections, package publishing does
+not publish real code, and the intake app keeps records only in the current page
+session. Documentation and onboarding links lead to real site routes.
 
 ## Shared design
 

@@ -34,9 +34,11 @@ vi.mock('@tanstack/react-start/server', () => ({
 	getResponseStatus: () => 200,
 }))
 vi.mock('../src/app/env.ts', () => ({ getEnv: (env: unknown) => env }))
-vi.mock('../src/app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
+vi.mock('../src/app/auth-session.ts', () => ({
+	setAuthSessionSecret: vi.fn(),
+}))
 
-import { handleRequest } from './server.ts'
+import { handleRequest } from './http-entry.ts'
 
 test('cached backend routing creates a fresh matching nonce for overlapping requests', async () => {
 	const env = {

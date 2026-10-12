@@ -120,10 +120,10 @@ Avoid `page.locator('css')` unless no accessible alternative exists.
   Wrangler config.
 - Ensure `packages/worker/.env` includes a `COOKIE_SECRET` var for local
   sessions.
-- Client routes live in `packages/worker/client/app.tsx` and
-  `packages/worker/client/routes/index.tsx`.
+- Client routes live in `packages/worker/start/routes/` and use
+  `packages/worker/start/router.tsx`.
 - API endpoints are defined in `packages/worker/universal/routes.ts` and mapped
-  in `packages/worker/src/app/router.ts`.
+  in `packages/worker/start/backend-router.ts`.
 
 When adding endpoints that accept bodies, ensure POST/PUT requests are not
 handled by the static asset fetcher in `packages/worker/src/index.ts`.

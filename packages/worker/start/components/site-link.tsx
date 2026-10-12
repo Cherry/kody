@@ -19,6 +19,9 @@ export function SiteLink({ href, children, ...props }: ComponentProps<'a'>) {
 	return (
 		<Link
 			to={href}
+			// Section navigation supplies its own current state for descendants.
+			// Ordinary links should not mark their parent URL as the current page.
+			activeOptions={{ exact: true }}
 			preload={actionPagePaths.has(destination.pathname) ? false : undefined}
 			reloadDocument={
 				destination.pathname.startsWith('/oauth/') || !matchesPage

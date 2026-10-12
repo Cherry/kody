@@ -50,10 +50,10 @@ vi.mock('#worker/mcp-client/hub-client.ts', () => ({
 		}) as Partial<McpClientHubClient>,
 }))
 
-const {
-	createOrgMcpServerAuthorizeHandler,
-	createOrgMcpServerAuthorizePostHandler,
-} = await import('./org-mcp-server-authorize.ts')
+const { createOrgMcpServerAuthorizePostHandler } =
+	await import('./org-mcp-server-authorize.ts')
+const { createOrgMcpServerAuthorizeHandler } =
+	await import('./org-mcp-server-authorize-document.ts')
 
 const cookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 const origin = 'https://kody.test'

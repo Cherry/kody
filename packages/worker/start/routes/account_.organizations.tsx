@@ -1,11 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
-import { loadOrganizations } from '#start/server/org-organizations'
-import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
+import { organizationsQuery as pageQuery } from '../organizations-query.ts'
+import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { OrganizationsPage } from '../pages/org-organizations.tsx'
-const pageQuery = createPageQuery('loadOrganizations', loadOrganizations, {
-	freshAuthorization: true,
-})
+
 export const Route = createFileRoute('/account_/organizations')({
 	loader: ({ context, preload }) =>
 		loadPageQuery(

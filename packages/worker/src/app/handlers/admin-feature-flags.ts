@@ -6,10 +6,8 @@ import {
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 import { isFeatureFlagKey } from '#universal/feature-flags/registry.ts'
 import {
@@ -20,27 +18,6 @@ import {
 } from '#worker/feature-flags/service.ts'
 import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
 import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
-
-export function createAdminFeatureFlagsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-
-			const adminFeatureFlags = await loadAdminFeatureFlagsData(env)
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin feature flags',
-				loaderData: { adminFeatureFlags },
-			})
-		},
-	} satisfies Action<typeof routes.adminFeatureFlags>
-}
 
 export function createAdminFeatureFlagsApiHandler(env: Env) {
 	return {

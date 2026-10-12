@@ -6,21 +6,22 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from '../pages/account-management-components.tsx'
+import { repositoryPageSearch } from '../page-search.ts'
 import { ProfileRoute } from '../pages/profile.tsx'
 const pageQuery = createPageQuery('loadOrgRepositories', loadOrgRepositories, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/packages')({
-	validateSearch: (search: Record<string, unknown>) => ({
-		q: typeof search.q === 'string' ? search.q : undefined,
-		limit:
-			typeof search.limit === 'string' || typeof search.limit === 'number'
-				? String(search.limit)
-				: undefined,
+	validateSearch: (search: Record<string, unknown>) => search,
+	loaderDeps: ({ search }) => ({
+		limit: search.limit,
+		q: search.limit != null ? search.q : undefined,
 	}),
-	loaderDeps: ({ search }) => search,
 	context: ({ params, location }) => ({
-		pageQueryInput: { slug: params.orgSlug, search: location.searchStr },
+		pageQueryInput: {
+			slug: params.orgSlug,
+			search: repositoryPageSearch(location.searchStr),
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
@@ -42,7 +43,11 @@ function Page() {
 				description="Every repository in this workspace, private ones included. Your public profile shows visitors the public ones."
 				currentHref={href}
 			/>
-			<ProfileRoute data={data} currentHref={href} />
+			<ProfileRoute
+				data={data}
+				currentHref={href}
+				basePath={new URL(href, 'https://kody.local').pathname}
+			/>
 		</AccountManagementShell>
 	)
 }

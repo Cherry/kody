@@ -1,10 +1,8 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
-import {
-	createAccountWebhooksApiHandler,
-	createAccountWebhooksHandler,
-} from '#app/handlers/account-webhooks.ts'
+import { createAccountWebhooksApiHandler } from '#app/handlers/account-webhooks.ts'
+import { createAccountWebhooksHandler } from '#app/handlers/account-webhooks-document.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { type AccountWebhooksLoaderData } from '#universal/loader-data.ts'
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'

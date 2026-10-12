@@ -7,9 +7,11 @@ import { inputCss } from '#universal/styles/style-primitives.ts'
 
 export function ProfileRepositorySearchInput({
 	username,
+	basePath,
 	filters,
 }: {
 	username: string
+	basePath?: string
 	filters: ProfilePackageFilters
 }) {
 	const [query, setQuery] = useState(filters.query)
@@ -37,6 +39,7 @@ export function ProfileRepositorySearchInput({
 				const value = event.currentTarget.value
 				setQuery(value)
 				const to = buildProfileHref({
+					basePath,
 					username,
 					...filters,
 					query: value,

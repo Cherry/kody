@@ -5,7 +5,7 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createPendingVerificationHandler } from '#app/handlers/pending-verification.ts'
+import { createPendingVerificationHandler } from '#app/handlers/pending-verification-document.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
 import {

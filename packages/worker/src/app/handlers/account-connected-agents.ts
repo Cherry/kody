@@ -13,8 +13,6 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	countConnectedAgentEcosystems,
 	hasSecondConnectedMcpClient,
@@ -31,7 +29,6 @@ import {
 } from '#worker/oauth-grants.ts'
 import { buildMcpServerUrl } from '#worker/onboarding-prompts.ts'
 import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
-import { parseAccountConnectionsPathname } from '#universal/account-connections.ts'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import { type routes } from '#universal/routes.ts'
 import {
@@ -100,50 +97,6 @@ export async function loadAccountConnectedAgentsData(input: {
 					connectionProfiles: [],
 					connectionProfilePackageOptions: [],
 				}),
-	}
-}
-
-/**
- * `/account/connections`, `/account/connections/new`, and
- * `/account/connections/new/:agent` share one payload; the client renders
- * each pathname as its own page (the list does not wrap the add views).
- * An unknown agent segment is a 404 page.
- */
-export function createAccountConnectionsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const view = parseAccountConnectionsPathname(
-				new URL(request.url).pathname,
-			)
-			if (!view) {
-				return renderAppPage({
-					request,
-					env,
-					title: 'Connection not found',
-					notFound: true,
-					status: 404,
-				})
-			}
-
-			const accountConnectedAgents = await loadAccountConnectedAgentsData({
-				env,
-				requestUrl: request.url,
-				user,
-			})
-			// Titles come from the document-head registry so SPA navigation
-			// between the list, grid, and per-agent views agrees with SSR.
-			return renderAppPage({
-				request,
-				env,
-				loaderData: { accountConnectedAgents },
-			})
-		},
 	}
 }
 

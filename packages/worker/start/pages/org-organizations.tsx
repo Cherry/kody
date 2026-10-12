@@ -104,14 +104,13 @@ export function CreateOrganizationPage() {
 	const mutation = useMutation({
 		mutationFn: (data: { displayName: string; slug: string }) =>
 			createOrganization({ data }),
-		onSuccess: async (result) => {
+		onSuccess: async () => {
 			await Promise.all([
 				invalidateShellQueries(client, actorKey),
 				client.invalidateQueries({
 					queryKey: ['page', actorKey, 'loadOrganizations'],
 				}),
 			])
-			await router.navigate({ href: `/@${result.slug}` })
 		},
 	})
 	return (
@@ -130,7 +129,14 @@ export function CreateOrganizationPage() {
 							setConfirming(true)
 							return
 						}
-						mutation.mutate({ displayName, slug })
+						mutation.mutate(
+							{ displayName, slug },
+							{
+								onSuccess: (result) => {
+									void router.navigate({ href: `/@${result.slug}` })
+								},
+							},
+						)
 					}}
 					css={{ display: 'grid', gap: '1rem' }}
 				>
@@ -176,7 +182,7 @@ export function CreateOrganizationPage() {
 					<p>{handleUrlPreview(slug)}</p>
 					<p>{handlePermanentNote}</p>
 					{confirming ? (
-						<p role="status" data-testid="create-organization-confirmation">
+						<p role="status" data-testid="create-organization-confirm">
 							Create {handleUrlPreview(slug)}? This handle is permanent.
 						</p>
 					) : null}

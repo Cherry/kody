@@ -68,120 +68,127 @@ export function createCommunityPackageWebhooksApiHandler(env: Env) {
 	return {
 		middleware: [],
 		async handler({ request, url, params }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			if (
-				normalizeUsername(params.username) !== normalizeUsername(user.username)
-			) {
-				return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
-			}
-			const savedPackage = await resolveSavedPackage({
-				db: env.APP_DB,
-				userId: ownerIdFromCaller({
-					request: user.request,
-					user: user.mcpUser,
-				}),
-				packageIdOrKodyId: params.kodyId.trim(),
-			})
-			if (!savedPackage) {
-				return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
-			}
-			const packageKodyId = savedPackage.kodyId
-
-			if (request.method === 'GET') {
-				return jsonResponse(
-					await loadPackageWebhooksData({
-						env,
-						requestUrl: request.url,
-						user,
-						kodyId: packageKodyId,
-					}),
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse(
-					{ ok: false, error: 'Method not allowed.' },
-					{ status: 405, headers: { Allow: 'GET, POST' } },
-				)
-			}
-
-			const body = await request.json().catch(() => null)
-			const parsed = parseSafe(webhookActionSchema, body)
-			if (!parsed.success) {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-			const webhookName = parsed.value.webhookName.trim()
-			if (!webhookName) {
-				return jsonResponse(
-					{ ok: false, error: 'webhookName is required.' },
-					400,
-				)
-			}
-
-			const intent = parsed.value.intent
-			const audit = (result: 'success' | 'failure', reason?: string) => {
-				void logAuditEvent({
-					db: auditDatabaseFromEnv(env),
-					category: 'account',
-					action: auditActionFor(intent),
-					result,
-					email: user.email,
-					ip: getRequestIp(request) ?? undefined,
-					path: url.pathname,
-					reason: [
-						`package=${packageKodyId}`,
-						`webhook=${webhookName}`,
-						...(reason ? [reason] : []),
-					].join(' '),
-				})
-			}
-
-			try {
-				const revealed = await runWebhookAction({
-					env,
-					request,
-					user,
-					intent,
-					packageKodyId,
-					webhookName,
-				})
-				audit('success')
-				const payload: PackageWebhooksActionPayload = {
-					...(await loadPackageWebhooksData({
-						env,
-						requestUrl: request.url,
-						user,
-						kodyId: packageKodyId,
-					})),
-					...(revealed ? { revealed } : {}),
-				}
-				return jsonResponse(payload)
-			} catch (error) {
-				const detail =
-					error instanceof Error ? error.message : failureMessageFor(intent)
-				audit('failure', detail)
-				// Caller mistakes (undeclared webhook, not minted, legacy secret)
-				// carry safe messages. Anything else is an infrastructure failure
-				// whose text must not reach the browser.
-				if (isMcpCallerError(error)) {
-					return jsonResponse({ ok: false, error: detail }, 400)
-				}
-				console.error('package webhooks action failed', {
-					intent,
-					packageKodyId,
-					webhookName,
-					error,
-				})
-				return jsonResponse(
-					{ ok: false, error: failureMessageFor(intent) },
-					500,
-				)
-			}
+			return handlePackageWebhooksRequest({ request, url, params }, env)
 		},
 	} satisfies Action<typeof routes.communityPackageWebhooksApi>
+}
+
+export async function handlePackageWebhooksRequest(
+	{
+		request,
+		url,
+		params,
+	}: {
+		request: Request
+		url: URL
+		params: { username: string; kodyId: string }
+	},
+	env: Env,
+) {
+	const user = await readAuthenticatedAppUser(request, env)
+	if (!user) {
+		return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+	}
+	if (normalizeUsername(params.username) !== normalizeUsername(user.username)) {
+		return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+	}
+	const savedPackage = await resolveSavedPackage({
+		db: env.APP_DB,
+		userId: ownerIdFromCaller({
+			request: user.request,
+			user: user.mcpUser,
+		}),
+		packageIdOrKodyId: params.kodyId.trim(),
+	})
+	if (!savedPackage) {
+		return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+	}
+	const packageKodyId = savedPackage.kodyId
+
+	if (request.method === 'GET') {
+		return jsonResponse(
+			await loadPackageWebhooksData({
+				env,
+				requestUrl: request.url,
+				user,
+				kodyId: packageKodyId,
+			}),
+		)
+	}
+
+	if (request.method !== 'POST') {
+		return jsonResponse(
+			{ ok: false, error: 'Method not allowed.' },
+			{ status: 405, headers: { Allow: 'GET, POST' } },
+		)
+	}
+
+	const body = await request.json().catch(() => null)
+	const parsed = parseSafe(webhookActionSchema, body)
+	if (!parsed.success) {
+		return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
+	}
+	const webhookName = parsed.value.webhookName.trim()
+	if (!webhookName) {
+		return jsonResponse({ ok: false, error: 'webhookName is required.' }, 400)
+	}
+
+	const intent = parsed.value.intent
+	const audit = (result: 'success' | 'failure', reason?: string) => {
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: auditActionFor(intent),
+			result,
+			email: user.email,
+			ip: getRequestIp(request) ?? undefined,
+			path: url.pathname,
+			reason: [
+				`package=${packageKodyId}`,
+				`webhook=${webhookName}`,
+				...(reason ? [reason] : []),
+			].join(' '),
+		})
+	}
+
+	try {
+		const revealed = await runWebhookAction({
+			env,
+			request,
+			user,
+			intent,
+			packageKodyId,
+			webhookName,
+		})
+		audit('success')
+		const payload: PackageWebhooksActionPayload = {
+			...(await loadPackageWebhooksData({
+				env,
+				requestUrl: request.url,
+				user,
+				kodyId: packageKodyId,
+			})),
+			...(revealed ? { revealed } : {}),
+		}
+		return jsonResponse(payload)
+	} catch (error) {
+		const detail =
+			error instanceof Error ? error.message : failureMessageFor(intent)
+		audit('failure', detail)
+		// Caller mistakes (undeclared webhook, not minted, legacy secret)
+		// carry safe messages. Anything else is an infrastructure failure
+		// whose text must not reach the browser.
+		if (isMcpCallerError(error)) {
+			return jsonResponse({ ok: false, error: detail }, 400)
+		}
+		console.error('package webhooks action failed', {
+			intent,
+			packageKodyId,
+			webhookName,
+			error,
+		})
+		return jsonResponse({ ok: false, error: failureMessageFor(intent) }, 500)
+	}
 }
 
 async function runWebhookAction(input: {

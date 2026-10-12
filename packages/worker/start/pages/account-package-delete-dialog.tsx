@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePackageMutation } from '../package-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import {
 	useState,
@@ -50,9 +51,8 @@ export function AccountPackageDeleteDialog(props: {
 	const [status, setStatus] = useState<DeleteStatus>('idle')
 	const [error, setError] = useState<string | null>(null)
 	const dialogRef = useRef<HTMLDialogElement>(null)
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
+	const mutation = usePackageMutation(props.packageDetail.id)
+	const capture = useSubmitterScope()
 	const router = useRouter()
 	const busyRef = useRef(false),
 		mounted = useRef(false)
@@ -120,41 +120,21 @@ export function AccountPackageDeleteDialog(props: {
 		setStatus('deleting')
 		setError(null)
 
+		const isCurrent = capture()
 		try {
-			const response = await fetch('/account/packages.json', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'delete',
-					packageId: packageDetail.id,
-					confirmName: confirmation.trim(),
-				}),
+			const payload = await mutation.submit({
+				action: 'delete',
+				confirmName: confirmation.trim(),
 			})
-			const payload = (await response.json().catch(() => null)) as {
-				ok?: boolean
-				deleted?: boolean
-				error?: string
-			} | null
-			if (response.status === 401 && !payload?.error) {
-				window.location.assign('/login')
-				return
-			}
-			if (!response.ok || !payload?.ok || !payload.deleted) {
-				throw new Error(payload?.error || 'Unable to delete this package.')
-			}
-			await invalidatePages()
-			if (!mounted.current) return
+			if (!payload.deleted) throw new Error('Unable to delete this package.')
+			if (!isCurrent()) return
 			busyRef.current = false
 			closeDialog()
 			void router.navigate({
 				to: routes.profile.href({ username: props.ownerUsername }),
 			})
 		} catch (caught) {
-			if (!mounted.current) return
+			if (!isCurrent()) return
 			setError(
 				caught instanceof Error
 					? caught.message
@@ -349,14 +329,3 @@ const packageDeleteCopyButtonCss = mergeCss(copyPromptTooltipCss, {
 		outlineOffset: '2px',
 	},
 })
-
-const mutationResources = [
-	'loadPackage',
-	'loadPackageFiles',
-	'loadProfile',
-	'loadCommunity',
-	'loadOnboarding',
-	'loadAccountPage',
-	'loadUsagePage',
-	'loadWebhooksPage',
-] as const

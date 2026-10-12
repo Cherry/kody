@@ -8,50 +8,14 @@ import {
 	readAccountMemoriesIncludeDeleted,
 } from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { deleteMemory } from '#mcp/memory/service.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-/**
- * Page + API handlers for `/account/memories`.
- */
-export function createAccountMemoriesHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({
-			request,
-			params,
-		}: {
-			request: Request
-			params?: { memoryId?: string }
-		}) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountMemories = await loadAccountMemoriesData({
-				env,
-				request,
-				user,
-				pathMemoryId: readPathMemoryId(params),
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Memories',
-				loaderData: { accountMemories },
-			})
-		},
-	}
-}
 
 /**
  * GET /account/memories-export.json for the org whose Memories page sent it
@@ -177,7 +141,7 @@ async function handleDeleteAction(input: {
 	return jsonResponse(payload)
 }
 
-function readPathMemoryId(params: unknown) {
+export function readPathMemoryId(params: unknown) {
 	if (
 		typeof params === 'object' &&
 		params !== null &&

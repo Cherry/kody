@@ -11,7 +11,6 @@ import {
 	readNonEmptyTrimmedString,
 	readTrimmedStringOrEmpty,
 } from '#app/request-body.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	mcpOAuthReturnCookie,
 	readMcpOAuthReturnCookie,
@@ -48,31 +47,6 @@ import { type McpServerLastError } from '#worker/mcp-client/types.ts'
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-export function createAccountMcpServersHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountMcpServers = await loadAccountMcpServersData({
-				env,
-				user,
-				requestUrl: request.url,
-				waitUntil,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'MCP servers',
-				loaderData: { accountMcpServers },
-			})
-		},
-	}
-}
 
 export function createAccountMcpServersApiHandler(env: Env) {
 	return {

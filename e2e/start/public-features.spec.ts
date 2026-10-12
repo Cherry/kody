@@ -8,7 +8,7 @@ test('home to memory and Back keeps outgoing feature CSS until its content leave
 	const origin = await page.evaluate(() => performance.timeOrigin)
 	await page.locator('a[href="/features/memory"]').first().click()
 	await expect(page.locator('.feature-detail .memory')).toBeVisible()
-	await expect(page.locator('.feature-detail')).toHaveCSS('--hue', '148')
+	await expect(page.locator('.feature-detail')).toHaveCSS('--hue', '29')
 	await page.evaluate(() => {
 		const samples: boolean[] = []
 		Object.assign(window, { featureStyleSamples: samples })
@@ -16,7 +16,7 @@ test('home to memory and Back keeps outgoing feature CSS until its content leave
 			const feature = document.querySelector('.feature-detail')
 			if (!feature) return
 			samples.push(
-				getComputedStyle(feature).getPropertyValue('--hue').trim() === '148',
+				getComputedStyle(feature).getPropertyValue('--hue').trim() === '29',
 			)
 			requestAnimationFrame(sample)
 		}

@@ -2,7 +2,6 @@ import { type Action } from 'remix/router'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	getBlogPost,
 	getReadNextBlogPost,
@@ -12,31 +11,10 @@ import {
 import { type BlogPost } from '#worker/blog/parse-frontmatter.ts'
 import { buildBlogRssXml } from '#worker/blog/rss.ts'
 import { jsonResponse } from '#worker/json-response.ts'
-import {
-	markdownResponse,
-	prefersMarkdown,
-	withVaryAccept,
-} from '#app/markdown-negotiation.ts'
+import { markdownResponse } from '#app/markdown-negotiation.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
 import { highlightMarkdownFences } from '#app/highlight-code.ts'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
-
-export function createBlogHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const posts = listBlogPosts().map(toBlogPostSummary)
-
-			return renderAppPage({
-				request,
-				env,
-				loaderData: {
-					blog: { ok: true, posts },
-				},
-			})
-		},
-	} satisfies Action<typeof routes.blog>
-}
 
 export function createBlogApiHandler(_env: Env) {
 	return {
@@ -50,8 +28,7 @@ export function createBlogApiHandler(_env: Env) {
 	} satisfies Action<typeof routes.blogApi>
 }
 
-/** Loader payload shared by the SSR page and the JSON API. */
-async function toBlogPostLoaderData(
+export async function toBlogPostLoaderData(
 	env: Env,
 	post: BlogPost,
 	serverTiming?: Array<ServerTimingEntry>,
@@ -70,45 +47,6 @@ async function toBlogPostLoaderData(
 		bodyFences: await highlightMarkdownFences(env, post.body, { serverTiming }),
 		readNext: getReadNextBlogPost(post.slug),
 	}
-}
-
-export function createBlogPostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const post = getBlogPost(params.slug)
-			if (!post) {
-				if (prefersMarkdown(request)) {
-					return markdownResponse('# Blog post not found\n', 404)
-				}
-				return withVaryAccept(
-					await renderAppPage({
-						request,
-						env,
-						title: 'Blog post not found',
-						notFound: true,
-						status: 404,
-					}),
-				)
-			}
-			if (prefersMarkdown(request)) {
-				return markdownResponse(post.body)
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const blogPost = await toBlogPostLoaderData(env, post, serverTiming)
-			return withVaryAccept(
-				await renderAppPage({
-					request,
-					env,
-					loaderData: {
-						blogPost,
-					},
-					serverTiming,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.blogPost>
 }
 
 export function createBlogPostApiHandler(env: Env) {

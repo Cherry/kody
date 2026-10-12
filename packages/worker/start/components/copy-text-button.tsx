@@ -169,7 +169,7 @@ export function CopyTextButton(props: CopyTextButtonProps) {
 			{renderLabel('error', 'Copy failed')}
 			<span id={`${id}-copy-status`} role="status" css={visuallyHiddenCss}>
 				{copyState === 'copied'
-					? 'Copied'
+					? (props.copiedLabel ?? 'Copied')
 					: copyState === 'error'
 						? 'Copy failed'
 						: ''}

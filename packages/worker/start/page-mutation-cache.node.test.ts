@@ -183,6 +183,7 @@ it.each([
 	['loadConnectionsPage', 'connectionProfiles'],
 	['loadConnectionUsagePage', 'connectionProfiles'],
 	['loadMcpServersPage', 'mcpServers'],
+	['loadPackageWebhooks', 'packageWebhooks'],
 	['loadSecretProvidersPage', 'secretProviders'],
 	['loadIntegrationsPage', 'integrations'],
 	['loadAccountPage', 'accountConnections'],

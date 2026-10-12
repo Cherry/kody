@@ -4,11 +4,11 @@ import { RequestContext } from 'remix/router'
 import { setAuthSessionSecret } from '#app/auth-session.ts'
 import {
 	createOnboardingApiHandler,
-	createOnboardingHandler,
 	loadOnboardingCustomMcpServers,
 	loadOnboardingFeaturedMcpServers,
 	loadPersistedPackageName,
 } from '#app/handlers/onboarding.ts'
+import { createOnboardingHandler } from '#app/handlers/onboarding-document.ts'
 import { type OnboardingLoaderData } from '#universal/loader-data.ts'
 import type * as McpServersShared from '#mcp/capabilities/mcp-servers/shared.ts'
 import type * as OnboardingChecklist from '#mcp/onboarding-checklist.ts'

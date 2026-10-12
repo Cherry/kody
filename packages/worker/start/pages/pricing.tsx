@@ -1,21 +1,25 @@
 /** @jsxImportSource @emotion/react */
-import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
+import { SiteLink } from '../components/site-link.tsx'
 import { revealRef } from '../components/reveal.ts'
+import { useShellData } from '../routes/__root.tsx'
 import {
 	creditsUnlockMultiplier,
 	formatDurableObjectRowsRead,
 	formatMinJobInterval,
-	planLimits,
-	proCreditsPlanLimits,
 	weeklyComputeWindowNote,
 	type PlanLimits,
 } from '#universal/plans.ts'
+import {
+	pricingLimitColumns,
+	type PricingLimitColumn,
+} from '#universal/pricing-limits.ts'
 import {
 	publicSignupPrimaryCta,
 	type PublicSignupCta,
 } from '#universal/public-signup-copy.ts'
 import { docHref } from '#universal/docs-nav.ts'
+import { orgBillingPath } from '#universal/org-pages.ts'
 import { colors, radius, typography } from '#universal/styles/tokens.ts'
 import {
 	getGhostButtonCss,
@@ -30,7 +34,7 @@ import {
  * Pricing page, ported from the redesign prototype (`landing/pricing.html`).
  * Two flat plan panels (Free and Pro) over a 44rem spec-sheet measure; Pro's
  * green border is the only loud element. Limits render as one honest table grouped under
- * display-face section titles – every value comes from `plans.ts`, never
+ * display-face section titles - every value comes from `plans.ts`, never
  * hardcoded here.
  */
 
@@ -43,6 +47,8 @@ type LimitRow = {
 	label: string
 	key: keyof PlanLimits
 	format?: (value: number) => LimitValue
+	/** Monthly meter that keeps running past the include, debiting credits. */
+	chargedPastInclude?: true
 }
 
 type LimitGroup = {
@@ -91,9 +97,15 @@ const limitGroups: ReadonlyArray<LimitGroup> = [
 				key: 'maxAutomationInvocationsPerDay',
 			},
 			{
+				label: 'Worker compute per month',
+				key: 'maxUniqueWorkerDaysPerMonth',
+				chargedPastInclude: true,
+			},
+			{
 				label: 'Durable Object rows read per month',
 				key: 'maxDurableObjectRowsReadPerMonth',
 				format: (value) => ({ text: formatDurableObjectRowsRead(value) }),
+				chargedPastInclude: true,
 			},
 		],
 	},
@@ -130,6 +142,7 @@ export function PricingPage({
 	isSignedIn: boolean
 	showImprovedSearch: boolean
 }) {
+	const { session } = useShellData()
 	const signedOutCta = publicSignupPrimaryCta()
 	const improvedSearchNote = showImprovedSearch
 		? ' Improved search when the candidate pool is ambiguous.'
@@ -143,9 +156,9 @@ export function PricingPage({
 					Pay when Kody <em>earns it</em>.
 				</h1>
 				<p>
-					The home your agents share is a factory: it turns the work they do
-					once into durable software that keeps running. Every plan is the whole
-					factory. You pay for volume.
+					Your agents' cloud is a factory: it turns the work they do once into
+					durable software that keeps running. Every plan is the whole factory.
+					You pay for volume.
 				</p>
 			</header>
 
@@ -191,12 +204,16 @@ export function PricingPage({
 						volume, with a monthly include. Need more? Add prepaid credits.
 						{improvedSearchNote}
 					</p>
-					{renderPaidPlanCta(isSignedIn, signedOutCta)}
+					{renderPaidPlanCta(
+						isSignedIn,
+						signedOutCta,
+						personalBillingHref(session),
+					)}
 				</section>
 
 				{/*
 				 * Contact strip, not a third SKU. No price, no extra
-				 * column, no feature-matrix cells – Teams/Enterprise stays
+				 * column, no feature-matrix cells - Teams/Enterprise stays
 				 * manual.
 				 */}
 				<section
@@ -209,7 +226,7 @@ export function PricingPage({
 							Teams / Enterprise
 						</h2>
 						<p css={teamsInviteCopyCss}>
-							Running Kody across a team or with higher needs? Email us –
+							Running Kody across a team or with higher needs? Email us -
 							we&rsquo;re shaping that offering and want to hear your needs.
 						</p>
 					</div>
@@ -230,33 +247,38 @@ export function PricingPage({
 								<th scope="col">
 									<span css={visuallyHiddenCss}>Resource</span>
 								</th>
-								<th scope="col">
-									<span data-limits-plan>Free</span>
-									<span data-limits-price>$0</span>
-								</th>
-								<th scope="col">
-									<span data-limits-plan>Pro</span>
-									<span data-limits-price>$12/mo</span>
-									<span data-limits-annual>or $120/yr</span>
-								</th>
+								{pricingLimitColumns.map((column) => (
+									<th scope="col" key={column.id}>
+										<span data-limits-plan>{column.plan}</span>
+										<span data-limits-price>{column.price}</span>
+										{column.priceNote ? (
+											<span data-limits-annual>{column.priceNote}</span>
+										) : null}
+									</th>
+								))}
 							</tr>
 						</thead>
 						<tbody>
 							{limitGroups.flatMap((group) => [
 								<tr key={group.title} data-group>
-									<th colSpan={3}>{group.title}</th>
+									<th colSpan={pricingLimitColumns.length + 1}>
+										{group.title}
+									</th>
 								</tr>,
 								...group.rows.map((row) => (
 									<tr key={row.key}>
 										<th scope="row">{row.label}</th>
-										{renderLimitCell(row, planLimits.free)}
-										{renderLimitCell(row, proCreditsPlanLimits)}
+										{pricingLimitColumns.map((column) =>
+											renderLimitCell(row, column),
+										)}
 									</tr>
 								)),
 								...(group.note
 									? [
 											<tr key={`${group.title}-note`} data-note>
-												<td colSpan={3}>{group.note}</td>
+												<td colSpan={pricingLimitColumns.length + 1}>
+													{group.note}
+												</td>
 											</tr>,
 										]
 									: []),
@@ -269,18 +291,29 @@ export function PricingPage({
 				</h3>
 				<p css={limitsFootnoteCss} data-credits-story>
 					Pro includes the usage in the table. Need more? Add prepaid credits
-					and keep going until they run out. Free stops at its limits.
+					and keep going until they run out. Free stops at its execute caps and
+					other hard limits (fetches, job runs, email, and storage). On Free,
+					monthly Worker compute and Rows read are guidelines: they never charge
+					you or stop runs.
 				</p>
 				<p css={limitsFootnoteCss} data-credits-small-print>
 					Usage past the include is charged from credits (Worker compute and
-					Rows read). Daily and weekly limits can go up to{' '}
-					{creditsUnlockMultiplier}× Pro&rsquo;s included limits on credits.
-					When credits run out, usage past the include stops. No overage
-					invoices.
+					Rows read). On credits, daily and weekly limits go up to{' '}
+					{creditsUnlockMultiplier}× Pro&rsquo;s include, capped at the
+					&ldquo;Pro + credits&rdquo; column. When credits run out, usage past
+					the include stops. No overage invoices.
+				</p>
+				<p css={limitsFootnoteCss} data-credits-seats>
+					In an organization, daily and weekly limits are one shared pool for
+					everyone. Each paid seat adds the Pro unique execute workers, outbound
+					fetches, job runs, and automation invocations (and their &ldquo;Pro +
+					credits&rdquo; caps) to the pool, and raises the execute runaway brake
+					(300 calls per minute per seat). Credits come from one organization
+					wallet.
 				</p>
 				<p css={limitsFootnoteCss}>
-					Execute calls and outbound fetches count per day and per week;
-					whichever window fills first applies. Durable Object duration is
+					Unique execute workers and outbound fetches count per day and per
+					week; whichever window fills first applies. Durable Object duration is
 					unmetered.
 				</p>
 			</section>
@@ -304,10 +337,23 @@ function factoryGuideLink() {
 	return <SiteLink href={factoryGuideHref}>factory</SiteLink>
 }
 
-function renderPaidPlanCta(isSignedIn: boolean, signedOutCta: PublicSignupCta) {
+function personalBillingHref(
+	session: {
+		organizations?: ReadonlyArray<{ slug: string; personal: boolean }>
+	} | null,
+) {
+	const slug = session?.organizations?.find((org) => org.personal)?.slug
+	return slug ? orgBillingPath(slug) : '/account'
+}
+
+function renderPaidPlanCta(
+	isSignedIn: boolean,
+	signedOutCta: PublicSignupCta,
+	signedInBillingHref: string,
+) {
 	if (isSignedIn) {
 		return (
-			<SiteLink href="/account/billing" css={planGhostButtonCss}>
+			<SiteLink href={signedInBillingHref} css={planGhostButtonCss}>
 				Upgrade in billing
 			</SiteLink>
 		)
@@ -319,18 +365,28 @@ function renderPaidPlanCta(isSignedIn: boolean, signedOutCta: PublicSignupCta) {
 	)
 }
 
-function renderLimitCell(row: LimitRow, limits: PlanLimits) {
-	const value = limits[row.key]
+function renderLimitCell(row: LimitRow, column: PricingLimitColumn) {
+	const value = column.limits[row.key]
 	if (value == null) {
-		return <td>–</td>
+		return <td>-</td>
 	}
-	const cell = row.format ? row.format(value) : { text: count.format(value) }
+	const formatted = row.format
+		? row.format(value)
+		: { text: count.format(value) }
+	const isGuideline = row.chargedPastInclude && column.monthlyIncludeIsGuideline
+	const cell = isGuideline
+		? { text: `${formatted.text} guideline`, muted: true }
+		: formatted
+	const text =
+		row.chargedPastInclude && column.chargesPastInclude
+			? `${cell.text} + credits`
+			: cell.text
 	return (
 		<td>
 			{cell.muted ? (
-				<span css={{ color: colors.textMuted }}>{cell.text}</span>
+				<span css={{ color: colors.textMuted }}>{text}</span>
 			) : (
-				cell.text
+				text
 			)}
 		</td>
 	)
@@ -497,7 +553,7 @@ const teamsInviteButtonCss: CSSObject = {
 	},
 }
 
-/* One honest table, no marketing checkmarks. Spec-sheet measure – narrow
+/* One honest table, no marketing checkmarks. Spec-sheet measure - narrow
    enough that the eye never loses the row between label and value. */
 const limitsCss: CSSObject = {
 	width: 'min(100%, 44rem)',
@@ -547,13 +603,13 @@ const limitsTableCss: CSSObject = {
 	},
 	/* Labels and values sit flush with the hairline edges; the plan columns
 	   share one width so the tiers compare down a steady axis. */
-	'& th:first-of-type, & tr[data-note] td': {
+	'& th:first-child, & td:first-child': {
 		paddingLeft: '0.2rem',
 	},
 	'& th:last-child, & td:last-child': {
 		paddingRight: '0.2rem',
 	},
-	'& thead th:not(:first-of-type), & td': {
+	'& thead th:not(:first-child), & td': {
 		width: '7.5rem',
 	},
 	'& thead th': {
@@ -570,8 +626,8 @@ const limitsTableCss: CSSObject = {
 		display: 'block',
 		color: colors.text,
 	},
-	/* Third column is Pro, the featured plan – the accent follows its panel. */
-	'& thead th:nth-of-type(3) [data-limits-plan]': {
+	/* Pro columns are the featured plan - the accent follows its panel. */
+	'& thead th:nth-child(n + 3) [data-limits-plan]': {
 		color: colors.primaryText,
 	},
 	'& [data-limits-price]': {
@@ -599,7 +655,7 @@ const limitsTableCss: CSSObject = {
 		textTransform: 'none' as const,
 		color: colors.text,
 	},
-	'& tbody tr:first-of-type th': {
+	'& tbody tr:first-child th': {
 		paddingTop: '1.1rem',
 	},
 	'& tbody th': {

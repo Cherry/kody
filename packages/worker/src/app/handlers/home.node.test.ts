@@ -5,7 +5,7 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createHomeHandler } from '#app/handlers/home.ts'
+import { createHomeHandler } from '#app/handlers/home-document.ts'
 import { loadOnboardingData } from '#app/onboarding-data.ts'
 import { loadSessionInfo } from '#app/session-info.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'

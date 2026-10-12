@@ -1,8 +1,13 @@
 /** @jsxImportSource @emotion/react */
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import {
+	adminCreditWalletQuery,
+	adminCreditGrantOptions,
+} from '../admin-user-credits-query.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	formatSignedMicroUsd,
 	parseDollarsToCents,
@@ -14,10 +19,7 @@ import {
 	signupWelcomeCreditLedgerIdPrefix,
 	validateCreditAdminGrantCents,
 } from '#universal/credits.ts'
-import {
-	type AccountCreditsLedgerItem,
-	type AdminCreditWalletSummary,
-} from '#universal/loader-data.ts'
+import { type AccountCreditsLedgerItem } from '#universal/loader-data.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	fieldCss,
@@ -30,7 +32,6 @@ import {
 	AccountManagementPanel,
 	MetadataGrid,
 } from './account-management-components.tsx'
-import { adminUserCreditsApiPath } from '#client/routes/admin-users-shared.ts'
 const ledgerKindLabels: Record<AccountCreditsLedgerItem['kind'], string> = {
 	top_up: 'Top-up',
 	auto_refill: 'Auto-refill',
@@ -48,62 +49,24 @@ export function AdminUserCreditsPanel(props: {
 	onGranted?: () => void
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources)
-	const [status, setStatus] = useState<CreditsStatus>('loading')
-	const [wallet, setWallet] = useState<AdminCreditWalletSummary | null>(null)
-	const lifetime = useRef<AbortController | null>(null)
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const client = useQueryClient()
+	const walletQuery = useQuery(
+		adminCreditWalletQuery(actorKey, props.stableUserId),
+	)
+	const wallet = walletQuery.data
+	const status: CreditsStatus = walletQuery.isPending
+		? 'loading'
+		: walletQuery.isError
+			? 'error'
+			: 'ready'
+	const grant = useMutation(adminCreditGrantOptions(client, invalidatePages))
 
 	const [amountText, setAmountText] = useState('')
 	const [noteText, setNoteText] = useState('')
-	const [granting, setGranting] = useState(false)
+	const granting = grant.isPending
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	async function loadWallet(stableUserId: string) {
-		try {
-			const response = await fetch(
-				`${adminUserCreditsApiPath}?stableUserId=${encodeURIComponent(stableUserId)}`,
-				{
-					headers: { Accept: 'application/json' },
-					credentials: 'include',
-					signal: lifetime.current?.signal,
-				},
-			)
-			if (lifetime.current?.signal.aborted) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				| AdminCreditWalletSummary
-				| {
-						ok: false
-						error?: string
-				  }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(
-					(payload && 'error' in payload ? payload.error : null) ||
-						'Unable to load credits for this account.',
-				)
-			}
-			setWallet(payload)
-			setStatus('ready')
-		} catch (error) {
-			if (lifetime.current?.signal.aborted) return
-			setStatus('error')
-			setMessage(
-				error instanceof Error
-					? error.message
-					: 'Unable to load credits for this account.',
-			)
-			setMessageTone('error')
-		}
-	}
-	useEffect(() => {
-		const controller = new AbortController()
-		lifetime.current = controller
-		void loadWallet(props.stableUserId)
-		return () => controller.abort()
-	}, [props.stableUserId])
 	async function submitGrant(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		if (granting) return
@@ -125,58 +88,28 @@ export function AdminUserCreditsPanel(props: {
 
 			return
 		}
-		setGranting(true)
 		setMessage(null)
-
-		try {
-			const response = await fetch(adminUserCreditsApiPath, {
-				method: 'POST',
-				signal: lifetime.current?.signal,
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+		grant.mutate(
+			{
+				stableUserId: props.stableUserId,
+				amountCents: amount.cents,
+				note: note || undefined,
+				actorKey,
+			},
+			{
+				onSuccess: () => {
+					setAmountText('')
+					setNoteText('')
+					setMessage(`Granted ${formatCents(amount.cents)}.`)
+					setMessageTone('info')
+					props.onGranted?.()
 				},
-				credentials: 'include',
-				body: JSON.stringify({
-					stableUserId: props.stableUserId,
-					amountCents: amount.cents,
-					...(note ? { note } : {}),
-				}),
-			})
-			if (lifetime.current?.signal.aborted) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				| AdminCreditWalletSummary
-				| {
-						ok: false
-						error?: string
-				  }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(
-					(payload && 'error' in payload ? payload.error : null) ||
-						'Unable to grant credits.',
-				)
-			}
-			setWallet(payload)
-			setStatus('ready')
-			setAmountText('')
-			setNoteText('')
-			setMessage(`Granted ${formatCents(amount.cents)}.`)
-			setMessageTone('info')
-			void invalidatePages()
-			props.onGranted?.()
-		} catch (error) {
-			if (lifetime.current?.signal.aborted) return
-			setMessage(
-				error instanceof Error ? error.message : 'Unable to grant credits.',
-			)
-			setMessageTone('error')
-		}
-		setGranting(false)
+				onError: (error) => {
+					setMessage(error.message)
+					setMessageTone('error')
+				},
+			},
+		)
 	}
 
 	return (
@@ -187,9 +120,9 @@ export function AdminUserCreditsPanel(props: {
 			{status === 'loading' && !wallet ? (
 				<p css={{ margin: 0, color: colors.textMuted }}>Loading credits…</p>
 			) : null}
-			{message ? (
+			{message || walletQuery.error ? (
 				<AccountManagementMessage tone={messageTone}>
-					{message}
+					{message ?? walletQuery.error?.message}
 				</AccountManagementMessage>
 			) : null}
 			{wallet ? (

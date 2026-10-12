@@ -18,7 +18,6 @@ import {
 import { userHasMcpOAuthGrants } from '#app/onboarding-data.ts'
 import { loadRequestOrgResolution } from '#app/org-request-binding.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	authorize,
 	AuthorizationError,
@@ -160,51 +159,6 @@ export async function loadOrgBillingPageData(input: {
 		errorCode: searchParams.get('error'),
 		noticeCode: searchParams.get('billing'),
 	})
-}
-
-function renderBillingDenied(
-	request: Request,
-	env: Env,
-	access: Extract<OrgBillingAccess, { ok: false }>,
-) {
-	return renderAppPage({
-		request,
-		env,
-		title: access.status === 404 ? 'Organization unavailable' : 'Billing',
-		...(access.status === 404 ? { notFound: true } : { unauthorized: true }),
-		status: access.status,
-	})
-}
-
-export function createOrgBillingHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-			const access = await resolveOrgBillingAccess({
-				request,
-				env,
-				user,
-				permission: 'billing:read',
-			})
-			if (!access.ok) return renderBillingDenied(request, env, access)
-			const accountBilling = await loadOrgBillingPageData({
-				request,
-				env,
-				user,
-				org: access.org,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Billing',
-				loaderData: { accountBilling },
-			})
-		},
-	} satisfies Action<typeof routes.orgBilling>
 }
 
 export function createOrgBillingApiHandler(env: Env) {
@@ -589,24 +543,13 @@ export function createAccountBillingCancellationFeedbackApiHandler(env: Env) {
 	} satisfies Action<typeof routes.accountBillingCancellationFeedbackPost>
 }
 
-export function createOrgBillingSuccessHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const result = await completeOrgBillingCheckout(request, env)
-			if (result instanceof Response) return result
-			if (!result.ok) return renderBillingDenied(request, env, result)
-			return renderAppPage({
-				request,
-				env,
-				title: "You're in",
-				loaderData: { accountBillingSuccess: result },
-			})
-		},
-	} satisfies Action<typeof routes.orgBillingSuccess>
-}
-
-export function createOrgBillingPortalHandler(env: Env) {
+export function createOrgBillingPortalHandler(
+	env: Env,
+	renderDenied: (
+		request: Request,
+		access: Extract<OrgBillingAccess, { ok: false }>,
+	) => Promise<Response>,
+) {
 	return {
 		middleware: [],
 		async handler({ request }) {
@@ -620,7 +563,7 @@ export function createOrgBillingPortalHandler(env: Env) {
 				user,
 				permission: 'billing:write',
 			})
-			if (!access.ok) return renderBillingDenied(request, env, access)
+			if (!access.ok) return renderDenied(request, access)
 			const { org } = access
 
 			if (!isBillingConfigured(env)) {

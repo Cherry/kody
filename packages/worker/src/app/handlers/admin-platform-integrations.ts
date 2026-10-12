@@ -2,10 +2,8 @@ import { base64ToBytes } from '@kody-internal/shared/base64.ts'
 import { type Action } from 'remix/router'
 import { canonicalIntegrationName } from '#mcp/capabilities/integrations/integration-shared.ts'
 import { loadAdminPlatformIntegrationsData } from '#app/admin-platform-integrations-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { readNonEmptyTrimmedString as readString } from '#app/request-body.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 import {
 	auditDatabaseFromEnv,
@@ -24,26 +22,6 @@ import {
 	type PlatformOauthAppVisibility,
 } from '#worker/integrations/platform-apps.ts'
 import { jsonResponse } from '#worker/json-response.ts'
-
-export function createAdminPlatformIntegrationsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-			const adminPlatformIntegrations =
-				await loadAdminPlatformIntegrationsData(env)
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin platform integrations',
-				loaderData: { adminPlatformIntegrations },
-			})
-		},
-	} satisfies Action<typeof routes.adminPlatformIntegrations>
-}
 
 export function createAdminPlatformIntegrationsApiHandler(env: Env) {
 	return {

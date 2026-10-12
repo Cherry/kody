@@ -1,9 +1,21 @@
 import { buildSsrSentryClientConfig } from '#universal/sentry-config.ts'
 import { createServerFn } from '@tanstack/react-start'
+import { notFound } from '@tanstack/react-router'
 
 /** Fresh foreground verification, without presentation or feature-flag reads. */
-export const verifySession = createServerFn({ method: 'GET' }).handler(
-	async () => {
+export const verifySession = createServerFn({ method: 'GET' })
+	.validator((data: { pathname: string } | undefined) => {
+		if (
+			data !== undefined &&
+			(typeof data.pathname !== 'string' ||
+				!data.pathname.startsWith('/') ||
+				data.pathname.startsWith('//') ||
+				/[\\?#]/.test(data.pathname))
+		)
+			throw new Error('Invalid verification destination')
+		return data
+	})
+	.handler(async ({ data }) => {
 		const [
 			{ env },
 			{ getRequest },
@@ -18,15 +30,24 @@ export const verifySession = createServerFn({ method: 'GET' }).handler(
 			import('../../src/app/env.ts'),
 		])
 		setAuthSessionSecret(getEnv(env).COOKIE_SECRET)
-		const { user } = await loadResolvedRequestAuth(getRequest(), env)
+		const original = getRequest()
+		const { user } = await loadResolvedRequestAuth(original, env)
+		if (data && user && !user.accountSuspended && !user.accountDeleting) {
+			const { isOrgRequestDenied } =
+				await import('../../src/app/org-request-binding.ts')
+			const destination = new Request(new URL(data.pathname, original.url), {
+				headers: original.headers,
+			})
+			if (await isOrgRequestDenied(destination, env, user.mcpUser.userId))
+				throw notFound()
+		}
 		return {
 			actorKey:
 				user && !user.accountSuspended && !user.accountDeleting
 					? user.mcpUser.userId
 					: null,
 		}
-	},
-)
+	})
 
 export const loadShell = createServerFn({ method: 'GET' })
 	.validator((data: { pathname: string; search: string }) => {

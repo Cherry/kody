@@ -1,6 +1,13 @@
 /** @jsxImportSource @emotion/react */
 import {
+	isPresentationNavigation,
+	type CommittedPage,
+} from '../presentation-navigation.ts'
+import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
+import {
 	createRootRouteWithContext,
+	notFound,
+	isNotFound,
 	isRedirect,
 	Outlet,
 	Scripts,
@@ -8,7 +15,7 @@ import {
 	useRouter,
 	useRouterState,
 } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useSuspenseQuery, type QueryClient } from '@tanstack/react-query'
 import { readDocumentActor } from '../document-actor.ts'
 import {
@@ -25,6 +32,9 @@ import { InternalErrorPage } from '../components/internal-error-page.tsx'
 import { Toaster } from '../components/toaster.tsx'
 import { YouTubeWatchOverlay } from '../components/youtube-watch-overlay.tsx'
 
+import { readDocumentFailure } from '#start/server/document-failure'
+import { documentForbiddenMessage } from '../document-failure.ts'
+import { SiteLink } from '../components/site-link.tsx'
 import { verifySession } from '#start/server/shell'
 import {
 	shellQuery,
@@ -32,6 +42,7 @@ import {
 	requiresSessionVerification,
 } from '../shell-query.ts'
 import {
+	NOT_FOUND_DOCUMENT_TITLE,
 	absolutizeDocumentHead,
 	resolveDocumentHead,
 } from '#universal/document-head.ts'
@@ -45,94 +56,121 @@ import { appFrameCss, appMainCss } from '../components/app-layout.ts'
 import { AppBrowserEffects } from '../components/app-browser-effects.tsx'
 import stylesheet from '../../public/styles.css?raw'
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
-	{
-		// Query owns shell presentation freshness. Private foreground navigation
-		// independently verifies the immutable document actor before committing.
-		preload: false,
-		shouldReload: true,
-		notFoundComponent: NotFoundPage,
-		// Only these search values affect shell content or root head metadata.
-		// Session verification is independent of presentation cache freshness.
-		loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
-			youtubeId: search.youtubeId,
-			og: search.og,
-		}),
-		beforeLoad: async ({ location, abortController, preload }) => {
-			if (typeof document === 'undefined') {
-				return verifySession({ signal: abortController.signal })
-			}
-			const actorKey = parseDocumentActor(readDocumentActor())
-			if (!preload && requiresSessionVerification(location.pathname)) {
-				await verifySession({ signal: abortController.signal })
-				abortController.signal.throwIfAborted()
-			}
-			return { actorKey }
-		},
-		loader: {
-			staleReloadMode: 'blocking',
-			handler: async ({ context, location }) => {
-				const shell = await ensureShellQuery(
-					context.queryClient,
-					context.actorKey,
-					location.searchStr,
-				)
-				return {
-					actorKey: shell.actorKey,
-					shellLocation: {
-						pathname: location.pathname,
-						searchStr: location.searchStr,
-					},
-					sentryConfig: shell.sentryConfig,
-					head: absolutizeDocumentHead(
-						resolveDocumentHead(
-							location.pathname,
-							undefined,
-							location.searchStr,
-						),
-						shell.canonicalOrigin,
-					),
-				}
-			},
-		},
-		head: ({ loaderData }) => ({
-			meta: [
-				{
-					name: documentActorMetaName,
-					content: JSON.stringify(loaderData?.actorKey ?? null),
-				},
-				...documentHead(loaderData?.head).meta,
-				...(loaderData?.sentryConfig
-					? [
-							{
-								name: SENTRY_CONFIG_META_NAME,
-								content: JSON.stringify(loaderData.sentryConfig),
-							},
-						]
-					: []),
-			],
-			links: documentHead(loaderData?.head).links ?? [],
-		}),
-		component: Root,
-		errorComponent: () => (
-			<html lang="en" suppressHydrationWarning>
-				<head>
-					<title>Something went wrong | Kody</title>
-					<meta name={documentActorMetaName} content="null" />
-					<style dangerouslySetInnerHTML={{ __html: stylesheet }} />
-					<meta name="viewport" content="width=device-width, initial-scale=1" />
-				</head>
-				<body>
-					<main>
-						<InternalErrorPage />
-					</main>
-					<Toaster />
-					<Scripts />
-				</body>
-			</html>
-		),
+export const Route = createRootRouteWithContext<{
+	queryClient: QueryClient
+	getCommittedPage: () => CommittedPage | null
+}>()({
+	// Query owns shell presentation freshness. Private foreground navigation
+	// independently verifies the immutable document actor before committing.
+	preload: false,
+	shouldReload: true,
+	notFoundComponent: NotFoundPage,
+	shellComponent: DocumentShell,
+	// Only these search values affect shell content or root head metadata.
+	// Session verification is independent of presentation cache freshness.
+	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
+		youtubeId: search.youtubeId,
+		og: search.og,
+	}),
+	beforeLoad: async ({
+		location,
+		abortController,
+		preload,
+		context,
+		matches,
+	}) => {
+		if (typeof document === 'undefined') {
+			const identity = await verifySession({
+				data: orgSlugFromOrgOwnedPath(location.pathname)
+					? { pathname: location.pathname }
+					: undefined,
+				signal: abortController.signal,
+			})
+			const failure = readDocumentFailure()
+			if (failure?.status === 404)
+				throw notFound({ routeId: '__root__', data: identity })
+			if (failure?.status === 403)
+				throw new Error(documentForbiddenMessage, { cause: identity })
+			if (failure?.status === 500)
+				throw new Error('The request could not be completed.', {
+					cause: identity,
+				})
+			return identity
+		}
+		const actorKey = parseDocumentActor(readDocumentActor())
+		if (
+			!preload &&
+			requiresSessionVerification(location.pathname) &&
+			!isPresentationNavigation({
+				committed: context.getCommittedPage(),
+				location,
+				matches,
+				actorKey,
+			})
+		) {
+			await verifySession({
+				data: orgSlugFromOrgOwnedPath(location.pathname)
+					? { pathname: location.pathname }
+					: undefined,
+				signal: abortController.signal,
+			})
+			abortController.signal.throwIfAborted()
+		}
+		return { actorKey }
 	},
-)
+	loader: {
+		staleReloadMode: 'blocking',
+		handler: async ({ context, location }) => {
+			const shell = await ensureShellQuery(
+				context.queryClient,
+				context.actorKey,
+				location.searchStr,
+			)
+			return {
+				actorKey: shell.actorKey,
+				shellLocation: {
+					pathname: location.pathname,
+					searchStr: location.searchStr,
+				},
+				sentryConfig: shell.sentryConfig,
+				canonicalOrigin: shell.canonicalOrigin,
+				fathomSiteId: shell.fathomSiteId,
+				head: absolutizeDocumentHead(
+					resolveDocumentHead(location.pathname, undefined, location.searchStr),
+					shell.canonicalOrigin,
+				),
+			}
+		},
+	},
+	head: ({ loaderData }) => ({
+		meta: [
+			...documentHead(loaderData?.head).meta,
+			...(loaderData?.sentryConfig
+				? [
+						{
+							name: SENTRY_CONFIG_META_NAME,
+							content: JSON.stringify(loaderData.sentryConfig),
+						},
+					]
+				: []),
+		],
+		links: documentHead(loaderData?.head).links ?? [],
+	}),
+	component: Root,
+	errorComponent: ({ error }) => (
+		<main id="main">
+			{error instanceof Error && error.message === documentForbiddenMessage ? (
+				<section data-testid="unauthorized-page">
+					<h1>Unauthorized</h1>
+					<p>{documentForbiddenMessage}</p>
+					<SiteLink href="/">Go home</SiteLink>
+				</section>
+			) : (
+				<InternalErrorPage />
+			)}
+		</main>
+	),
+})
 
 export function useShellData() {
 	const { actorKey } = Route.useRouteContext()
@@ -141,14 +179,21 @@ export function useShellData() {
 }
 
 function Root() {
+	const loaded = Route.useLoaderData()
+	return loaded ? (
+		<LoadedAppLayout />
+	) : (
+		<main id="main">
+			<Outlet />
+		</main>
+	)
+}
+
+function LoadedAppLayout() {
 	const { shellLocation } = Route.useLoaderData()
-	const { session, youtubeWatch, fathomSiteId, canonicalOrigin } =
-		useShellData()
+	const { session, youtubeWatch } = useShellData()
 	const router = useRouter()
 	const { queryClient, actorKey } = Route.useRouteContext()
-	useEffect(() => {
-		document.documentElement.dataset.hydrated = 'true'
-	}, [])
 	useEffect(
 		() =>
 			refreshOnActivation({
@@ -194,6 +239,72 @@ function Root() {
 		pathname === '/oauth/authorize' ? authReturnHref : null,
 	)
 	const authShell = pathname === '/login' || pathname === '/signup'
+	return (
+		<div data-app-frame css={appFrameCss}>
+			<a href="#main" css={visuallyHiddenUntilFocusedCss}>
+				Skip to content
+			</a>
+			{authShell ? null : (
+				<SiteHeader
+					loggedIn={session !== null}
+					organizationSession={session}
+					displayName={session?.username || session?.email || ''}
+					username={session?.username ?? ''}
+					avatarUrl={session?.avatarUrl ?? null}
+					showAdminLink={session?.roles.includes('admin') ?? false}
+					showDemoIndicator={session?.featureFlags?.['demo-indicator'] === true}
+					loginHref={loginHref}
+					currentPathname={pathname}
+				/>
+			)}
+			<main
+				id="main"
+				tabIndex={-1}
+				css={appMainCss(pathname, illustratedError)}
+			>
+				<Outlet />
+			</main>
+			{authShell ? null : (
+				<SiteFooter loggedIn={session !== null} loginHref={loginHref} />
+			)}
+			<YouTubeWatchOverlay snapshot={youtubeWatch} location={shellLocation} />
+		</div>
+	)
+}
+
+/** The document must render even when beforeLoad prevents every loader. */
+function DocumentShell({ children }: { children: ReactNode }) {
+	const loaded = Route.useLoaderData()
+	const failure = useRouterState({
+		select: (state) => state.matches.find((match) => match.error)?.error,
+	})
+	const identity = isNotFound(failure)
+		? failure.data
+		: failure instanceof Error
+			? failure.cause
+			: undefined
+	const actorKey = loaded
+		? loaded.actorKey
+		: identity &&
+			  typeof identity === 'object' &&
+			  'actorKey' in identity &&
+			  typeof identity.actorKey === 'string'
+			? identity.actorKey
+			: null
+	const failureHead = isNotFound(failure)
+		? { title: NOT_FOUND_DOCUMENT_TITLE }
+		: failure
+			? {
+					title:
+						failure instanceof Error &&
+						failure.message === documentForbiddenMessage
+							? 'Unauthorized | Kody'
+							: 'Something went wrong | Kody',
+				}
+			: undefined
+	useEffect(() => {
+		document.documentElement.dataset.hydrated = 'true'
+	}, [])
 	return (
 		<html lang="en" suppressHydrationWarning>
 			<head>
@@ -243,16 +354,20 @@ function Root() {
 					href="/fonts/wix-madefor-text-latin.woff2"
 					crossOrigin="anonymous"
 				/>
-				{canonicalOrigin ? (
-					<meta name={CANONICAL_ORIGIN_META_NAME} content={canonicalOrigin} />
+				{loaded?.canonicalOrigin ? (
+					<meta
+						name={CANONICAL_ORIGIN_META_NAME}
+						content={loaded.canonicalOrigin}
+					/>
 				) : null}
-				<PageHead />
-				{fathomSiteId ? (
+				<meta name={documentActorMetaName} content={JSON.stringify(actorKey)} />
+				<PageHead overrideHead={failureHead} />
+				{loaded?.fathomSiteId ? (
 					<>
 						<link rel="preconnect" href="https://cdn.usefathom.com" />
 						<script
 							src="https://cdn.usefathom.com/script.js"
-							data-site={fathomSiteId}
+							data-site={loaded.fathomSiteId}
 							data-spa="auto"
 							defer
 						/>
@@ -262,41 +377,8 @@ function Root() {
 			</head>
 			<body>
 				<AppBrowserEffects />
-				<div data-app-frame css={appFrameCss}>
-					<a href="#main" css={visuallyHiddenUntilFocusedCss}>
-						Skip to content
-					</a>
-					{authShell ? null : (
-						<SiteHeader
-							loggedIn={session !== null}
-							organizationSession={session}
-							displayName={session?.username || session?.email || ''}
-							username={session?.username ?? ''}
-							avatarUrl={session?.avatarUrl ?? null}
-							showAdminLink={session?.roles.includes('admin') ?? false}
-							showDemoIndicator={
-								session?.featureFlags?.['demo-indicator'] === true
-							}
-							loginHref={loginHref}
-							currentPathname={pathname}
-						/>
-					)}
-					<main
-						id="main"
-						tabIndex={-1}
-						css={appMainCss(pathname, illustratedError)}
-					>
-						<Outlet />
-					</main>
-					{authShell ? null : (
-						<SiteFooter loggedIn={session !== null} loginHref={loginHref} />
-					)}
-					<YouTubeWatchOverlay
-						snapshot={youtubeWatch}
-						location={shellLocation}
-					/>
-					<Toaster />
-				</div>
+				{children}
+				<Toaster />
 				<Scripts />
 			</body>
 		</html>

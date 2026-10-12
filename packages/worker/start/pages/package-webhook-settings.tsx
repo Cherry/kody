@@ -1,10 +1,12 @@
 /** @jsxImportSource @emotion/react */
 import { orgResourcePath } from '#universal/org-pages.ts'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { packageWebhooksQuery } from '../package-webhooks-query.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type PackageWebhookListItem } from '#universal/loader-data.ts'
 import {
-	fetchPackageWebhooks,
 	postPackageWebhookIntent,
 	type WebhookIntent,
 	webhookFailureMessage,
@@ -26,87 +28,82 @@ export function PackageWebhookSettings({
 	kodyId: string
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources)
-	const mounted = useRef(false),
-		mutatingRef = useRef(false)
-	const [webhooks, setWebhooks] = useState<PackageWebhookListItem[]>([])
-	const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-	const [message, setMessage] = useState<string | null>(null),
-		[messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [mutating, setMutating] = useState(false),
-		[revealedUrls, setRevealedUrls] = useState<Map<string, string>>(new Map())
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const query = packageWebhooksQuery(actorKey, { username, kodyId })
+	const read = useQuery({ ...query, retry: false, retryOnMount: false })
+	const webhooks = read.data?.webhooks ?? []
+	const status = read.isError ? 'error' : read.data ? 'ready' : 'loading'
+	const [message, setMessage] = useState<string | null>(null)
+	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
+	const [revealedUrls, setRevealedUrls] = useState<Map<string, string>>(
+		new Map(),
+	)
 	const [confirmed, setConfirmed] = useState<string | null>(null)
-	useEffect(() => {
-		mounted.current = true
-		let active = true
-		void fetchPackageWebhooks({ username, kodyId })
-			.then((result) => {
-				if (!active) return
-				if (result.kind === 'unauthorized') {
-					window.location.assign('/login')
-					return
-				}
-				setWebhooks(result.payload.webhooks)
-				setStatus('ready')
-			})
-			.catch((error) => {
-				if (active) {
-					setStatus('error')
-					setMessage(
-						error instanceof Error ? error.message : 'Unable to load webhooks.',
-					)
-					setMessageTone('error')
-				}
-			})
-		return () => {
-			active = false
-			mounted.current = false
-		}
-	}, [username, kodyId])
+	const mutation = useMutation({
+		mutationKey: ['packageWebhooks', actorKey, username, kodyId],
+		mutationFn: async (input: {
+			username: string
+			kodyId: string
+			webhookName: string
+			webhookId: string
+			intent: WebhookIntent
+			queryKey: typeof query.queryKey
+			invalidate: typeof invalidatePages
+		}) => {
+			const result = await postPackageWebhookIntent(input)
+			if (result.kind === 'unauthorized')
+				throw new Error('Sign in again to manage webhooks.')
+			if (result.kind === 'error')
+				throw new Error(result.message || webhookFailureMessage(input.intent))
+			return result.payload
+		},
+		onMutate: async ({ queryKey }) => {
+			await queryClient.cancelQueries({ queryKey, exact: true })
+		},
+		onSuccess: async (accepted, input) => {
+			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			// Never place revealed credential URLs in the shared query cache.
+			const { revealed: _revealed, ...safePayload } = accepted
+			queryClient.setQueryData(input.queryKey, safePayload)
+			void input.invalidate()
+		},
+		onError: (_error, { queryKey }) => {
+			void queryClient.invalidateQueries({ queryKey, exact: true })
+		},
+	})
+	const mutating = mutation.isPending
 	async function runIntent(
 		webhook: PackageWebhookListItem,
 		intent: WebhookIntent,
 	) {
-		if (mutatingRef.current) return
-		mutatingRef.current = true
-		setMutating(true)
+		if (mutating) return
 		setMessage(null)
 		try {
-			const result = await postPackageWebhookIntent({
+			const accepted = await mutation.mutateAsync({
 				username,
 				kodyId,
 				webhookName: webhook.name,
+				webhookId: webhook.id,
 				intent,
+				queryKey: query.queryKey,
+				invalidate: invalidatePages,
 			})
-			if (!mounted.current) return
-			if (result.kind === 'unauthorized') {
-				window.location.assign('/login')
-				return
-			}
-			if (result.kind === 'error') {
-				setMessage(result.message || webhookFailureMessage(intent))
-				setMessageTone('error')
-				return
-			}
-			setWebhooks(result.payload.webhooks)
 			setConfirmed(null)
 			setRevealedUrls((previous) => {
 				const next = new Map(previous)
 				if (intent === 'rotate') next.delete(webhook.id)
-				if (result.payload.revealed)
-					next.set(result.payload.revealed.id, result.payload.revealed.url)
+				if (accepted.revealed)
+					next.set(accepted.revealed.id, accepted.revealed.url)
 				return next
 			})
 			setMessage(webhookSuccessMessage(intent))
 			setMessageTone('info')
-			void invalidatePages()
-		} catch {
-			if (mounted.current) {
-				setMessage(webhookFailureMessage(intent))
-				setMessageTone('error')
-			}
-		} finally {
-			mutatingRef.current = false
-			if (mounted.current) setMutating(false)
+		} catch (error) {
+			setMessage(
+				error instanceof Error ? error.message : webhookFailureMessage(intent),
+			)
+			setMessageTone('error')
 		}
 	}
 	function confirmation(
@@ -141,11 +138,18 @@ export function PackageWebhookSettings({
 				overlap so providers can finish switching. Agents connected over MCP can
 				mint and apply handles but never see these URLs.
 			</p>
+
 			{status === 'loading' ? (
 				<p role="status" css={mutedCss}>
 					Loading webhooks…
 				</p>
 			) : null}
+			{read.isError ? (
+				<AccountManagementMessage tone="error">
+					Unable to load webhooks.
+				</AccountManagementMessage>
+			) : null}
+
 			{message ? (
 				<div css={{ marginTop: spacing.md }}>
 					<AccountManagementMessage tone={messageTone}>

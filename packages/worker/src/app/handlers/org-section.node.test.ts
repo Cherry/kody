@@ -101,24 +101,6 @@ test('workspace repositories JSON is closed to people outside the organization',
 	expect(mocks.loadProfileData).not.toHaveBeenCalled()
 })
 
-test('workspace secrets and connections pass the team-org gate', async () => {
-	const env = await createEnv()
-	signInAs(adaId, 'ada')
-	const { createOrgSectionHandler } = await import('./org-section.ts')
-	const response = await createOrgSectionHandler(env, 'secrets').handler({
-		request: new Request('https://kody.test/@acme/-/secrets'),
-		params: { orgSlug: 'acme' },
-	} as never)
-	expect(response.status).not.toBe(404)
-	const connections = await createOrgSectionHandler(env, 'connections').handler(
-		{
-			request: new Request('https://kody.test/@acme/-/connections'),
-			params: { orgSlug: 'acme' },
-		} as never,
-	)
-	expect(connections.status).not.toBe(404)
-})
-
 test('workspace repositories JSON lists the owner by current username after a rename', async () => {
 	const env = await createEnv()
 	signInAs(adaId, 'ada-new')

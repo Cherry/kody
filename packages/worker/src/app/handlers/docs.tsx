@@ -13,11 +13,7 @@ import {
 	listProviderGuides,
 	toGuideSummary,
 } from '#worker/guides/catalog.ts'
-import {
-	markdownResponse,
-	prefersMarkdown,
-	withVaryAccept,
-} from '#app/markdown-negotiation.ts'
+import { markdownResponse } from '#app/markdown-negotiation.ts'
 import { type routes } from '#universal/routes.ts'
 import {
 	docMarkdownHref,
@@ -29,7 +25,6 @@ import {
 	publicSharedJsonCacheHeaders,
 } from '#app/anonymous-html-cache.ts'
 import { requestIsDocsAdmin, viewerCanAccessGuide } from '#app/docs-access.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { jsonResponse } from '#worker/json-response.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
 import {
@@ -192,7 +187,7 @@ async function highlightWalkthrough(
 	)
 }
 
-async function toDocDetail(
+export async function toDocDetail(
 	env: Env,
 	guide: Guide,
 	serverTiming?: Array<ServerTimingEntry>,
@@ -234,13 +229,7 @@ function withSearch(pathname: string, request: Request): string {
 	return `${pathname}${new URL(request.url).search}`
 }
 
-/**
- * Old slugs (merged docs) redirect to the absorbing page. Returns null when
- * `slug` should be served as-is. The introduction is served at both `/docs`
- * and `/docs/what-is-kody` (canonical `/docs`) rather than redirected, so
- * agent fetchers that do not follow redirects still get the markdown.
- */
-function docDetailRedirect(
+export function docDetailRedirect(
 	slug: string,
 	request: Request,
 	twin: '' | '.md' | '.json' | '/og.png',
@@ -253,54 +242,16 @@ function docDetailRedirect(
 	)
 }
 
-async function renderDocPage(
-	env: Env,
-	request: Request,
-	guide: Guide,
-): Promise<Response> {
-	const serverTiming: Array<ServerTimingEntry> = []
-	return withVaryAccept(
-		await renderAppPage({
-			request,
-			env,
-			loaderData: {
-				docDetail: await toDocDetail(env, guide, serverTiming),
-			},
-			serverTiming,
-		}),
-	)
-}
-
-async function renderMissingDocPage(
-	env: Env,
-	request: Request,
-): Promise<Response> {
-	return withVaryAccept(
-		await renderAppPage({
-			request,
-			env,
-			title: 'Doc not found',
-			notFound: true,
-			status: 404,
-		}),
-	)
-}
-
-async function missingDocResponse(
-	env: Env,
-	request: Request,
-	kind: 'html' | 'markdown' | 'json',
+export async function missingDocResponse(
+	kind: 'markdown' | 'json',
 ): Promise<Response> {
 	if (kind === 'markdown') {
 		return markdownResponse('# Doc not found\n', 404)
 	}
-	if (kind === 'json') {
-		return jsonResponse({ ok: false, error: 'Doc not found.' }, 404)
-	}
-	return renderMissingDocPage(env, request)
+	return jsonResponse({ ok: false, error: 'Doc not found.' }, 404)
 }
 
-async function resolveAccessibleGuide(
+export async function resolveAccessibleGuide(
 	request: Request,
 	env: Env,
 	slug: string,
@@ -327,25 +278,12 @@ export async function loadAccessibleDocDetail(
 	}
 }
 
-function guideMarkdownResponse(guide: Guide): Response {
+export function guideMarkdownResponse(guide: Guide): Response {
 	const response = markdownResponse(guide.body)
 	if (guide.adminOnly) {
 		response.headers.set('Cache-Control', 'no-store')
 	}
 	return response
-}
-
-export function createDocsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			if (prefersMarkdown(request)) {
-				const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
-				return markdownResponse(buildDocsIndexMarkdown(baseUrl))
-			}
-			return renderDocPage(env, request, getIntroGuide())
-		},
-	} satisfies Action<typeof routes.docs>
 }
 
 export function createDocsApiHandler(env: Env) {
@@ -419,32 +357,6 @@ export function createDocsLlmsTxtHandler(env: Env) {
 	} satisfies Action<typeof routes.docsLlmsTxt>
 }
 
-export function createDocsConnectHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			if (prefersMarkdown(request)) {
-				const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
-				return markdownResponse(buildDocsConnectMarkdown(baseUrl))
-			}
-			// Title comes from the document-head registry so a full load and an
-			// in-app navigation agree.
-			return withVaryAccept(
-				await renderAppPage({
-					request,
-					env,
-					loaderData: {
-						docsConnect: {
-							ok: true,
-							guides: listProviderGuides().map(toGuideSummary),
-						},
-					},
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.docsConnect>
-}
-
 export function createDocsConnectApiHandler(_env: Env) {
 	return {
 		middleware: [],
@@ -467,29 +379,6 @@ export function createDocsConnectMarkdownHandler(env: Env) {
 	} satisfies Action<typeof routes.docsConnectMarkdown>
 }
 
-export function createDocDetailHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const markdown = prefersMarkdown(request)
-			const redirect = docDetailRedirect(
-				params.slug,
-				request,
-				markdown ? '.md' : '',
-			)
-			if (redirect) return redirect
-			const guide = await resolveAccessibleGuide(request, env, params.slug)
-			if (!guide) {
-				return missingDocResponse(env, request, markdown ? 'markdown' : 'html')
-			}
-			if (markdown) {
-				return guideMarkdownResponse(guide)
-			}
-			return renderDocPage(env, request, guide)
-		},
-	} satisfies Action<typeof routes.docDetail>
-}
-
 export function createDocDetailApiHandler(env: Env) {
 	return {
 		middleware: [],
@@ -503,7 +392,7 @@ export function createDocDetailApiHandler(env: Env) {
 				params.slug,
 				serverTiming,
 			)
-			if (!detail) return missingDocResponse(env, request, 'json')
+			if (!detail) return missingDocResponse('json')
 			return jsonResponse(detail.doc, {
 				serverTiming,
 				headers: detail.adminOnly
@@ -522,7 +411,7 @@ export function createDocDetailMarkdownHandler(env: Env) {
 			if (redirect) return redirect
 			const guide = await resolveAccessibleGuide(request, env, params.slug)
 			if (!guide) {
-				return missingDocResponse(env, request, 'markdown')
+				return missingDocResponse('markdown')
 			}
 			return guideMarkdownResponse(guide)
 		},

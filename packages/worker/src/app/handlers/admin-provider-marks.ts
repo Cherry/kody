@@ -1,10 +1,8 @@
 import { base64ToBytes } from '@kody-internal/shared/base64.ts'
 import { type Action } from 'remix/router'
 import { loadAdminProviderMarksData } from '#app/admin-provider-marks-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { readNonEmptyTrimmedString as readString } from '#app/request-body.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 import {
 	auditDatabaseFromEnv,
@@ -20,26 +18,6 @@ import {
 	upsertPlatformProviderMark,
 } from '#worker/integrations/provider-marks.ts'
 import { jsonResponse } from '#worker/json-response.ts'
-
-export function createAdminProviderMarksHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin provider marks',
-				loaderData: {
-					adminProviderMarks: await loadAdminProviderMarksData(env),
-				},
-			})
-		},
-	} satisfies Action<typeof routes.adminProviderMarks>
-}
 
 export function createAdminProviderMarksApiHandler(env: Env) {
 	return {

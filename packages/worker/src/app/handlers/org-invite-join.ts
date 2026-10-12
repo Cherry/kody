@@ -1,6 +1,5 @@
 import { type Action } from 'remix/router'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { getRequestIp } from '#worker/audit-log.ts'
 import {
 	checkRateLimit,
@@ -111,32 +110,9 @@ export async function loadJoinPageData(input: {
 	}
 }
 
-function wantsJson(request: Request) {
+export function wantsJson(request: Request) {
 	const accept = request.headers.get('Accept') ?? ''
 	return accept.includes('application/json')
-}
-
-export function createOrgInviteJoinHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const token =
-				typeof params.token === 'string' ? params.token : String(params.token)
-			const data = await loadJoinPageData({ env, request, token })
-			if (wantsJson(request)) {
-				return jsonResponse({ orgInviteJoin: data }, data.ok ? 200 : 400)
-			}
-			return renderAppPage({
-				request,
-				env,
-				title: data.ok
-					? `Join ${data.org.displayName?.trim() || data.org.slug}`
-					: 'Invite link',
-				status: data.ok ? 200 : 400,
-				loaderData: { orgInviteJoin: data },
-			})
-		},
-	} satisfies Action<typeof routes.orgInviteJoin>
 }
 
 export function createOrgInviteJoinPostHandler(env: Env) {

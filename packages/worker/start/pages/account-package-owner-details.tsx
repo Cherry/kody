@@ -1,6 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
+import { usePackageMutation } from '../package-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { routes } from '#universal/routes.ts'
 
@@ -30,10 +33,7 @@ import {
 import { RecordChips, recordBodyCss } from './record-table.tsx'
 import { AccountPackageDeleteDialog } from './account-package-delete-dialog.tsx'
 import { AccountPackageForkAdoption } from './account-package-fork-adoption.tsx'
-import {
-	type AccountPackageDetail,
-	type AccountPackagesLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountPackageDetail } from '#universal/loader-data.ts'
 
 function isPackageLocked(lockedAt: string | null | undefined) {
 	return typeof lockedAt === 'string' && lockedAt.trim().length > 0
@@ -44,8 +44,9 @@ export function AccountPackageOwnerDetails(props: {
 	packageDetail: AccountPackageDetail
 	lockInFlight: boolean
 	onToggleLock: () => void
-	onPackagesPayload: (payload: AccountPackagesLoaderData) => void
 }) {
+	const mutation = usePackageMutation(props.packageDetail.id)
+	const capture = useSubmitterScope()
 	const [confirmName, setConfirmName] = useState('')
 	const [visibilityState, setVisibilityState] = useState<
 		'idle' | 'submitting' | 'error'
@@ -72,33 +73,18 @@ export function AccountPackageOwnerDetails(props: {
 		setVisibilityState('submitting')
 		setVisibilityMessage(null)
 
+		const isCurrent = capture()
 		try {
-			const response = await fetch('/account/packages.json', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'set-visibility',
-					packageId: packageDetail.id,
-					visibility,
-					confirmName: confirmName.trim(),
-				}),
+			await mutation.submit({
+				action: 'set-visibility',
+				visibility,
+				confirmName: confirmName.trim(),
 			})
-			const payload = (await response.json()) as AccountPackagesLoaderData & {
-				error?: string
-			}
-			if (!response.ok || !payload?.ok) {
-				throw new Error(
-					payload?.error ?? 'Could not update package visibility.',
-				)
-			}
+			if (!isCurrent()) return
 			setVisibilityState('idle')
 			setConfirmName('')
-			props.onPackagesPayload(payload)
 		} catch (error) {
+			if (!isCurrent()) return
 			setVisibilityState('error')
 			setVisibilityMessage(
 				error instanceof Error
@@ -273,7 +259,28 @@ export function AccountPackageOwnerDetails(props: {
 					},
 					{
 						label: 'App',
-						value: packageDetail.hasApp ? 'Declares a package app' : 'No app',
+						value: packageDetail.hasApp ? (
+							<a
+								href={buildPackageAppPath({
+									username: props.ownerUsername,
+									kodyId: packageDetail.kodyId,
+								})}
+								data-testid="open-package-app"
+								css={{
+									display: 'inline-flex',
+									alignItems: 'center',
+									gap: '0.35rem',
+									color: colors.primaryText,
+									fontWeight: typography.fontWeight.semibold,
+									textDecoration: 'none',
+									'&:hover': { color: colors.text },
+								}}
+							>
+								{renderIcon('share', { size: '1em' })} Open Package App
+							</a>
+						) : (
+							'No app'
+						),
 					},
 					{
 						label: 'Source id',
@@ -334,7 +341,6 @@ export function AccountPackageOwnerDetails(props: {
 				<AccountPackageForkAdoption
 					packageDetail={packageDetail}
 					communityFork={packageDetail.communityFork}
-					onPackagesPayload={props.onPackagesPayload}
 				/>
 			) : null}
 			<AccountPackageDeleteDialog

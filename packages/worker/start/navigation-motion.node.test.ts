@@ -55,9 +55,17 @@ function fixture() {
 			marked++
 		},
 	})
+	// Mirror Router's mounted history subscription. A history observer alone
+	// disables the router's no-subscriber fallback used by headless fixtures.
+	const stopHistory = router.history.subscribe(({ action }) => {
+		void router.load({ action })
+	})
 	return {
 		router,
-		stop,
+		stop: () => {
+			stop()
+			stopHistory()
+		},
 		releaseSlow,
 		marked: () => marked,
 		reduce: () => {
@@ -119,6 +127,22 @@ test('superseded slow navigation never mounts or marks its stale destination', a
 	await navigation
 	expect(f.router.state.location.pathname).toBe('/docs/one')
 	expect(f.marked()).toBe(marks)
+	expect(f.router.options.defaultViewTransition).toBe(true)
+	f.stop()
+})
+
+test('history traversal never starts a view transition', async () => {
+	const f = fixture()
+	await f.router.load()
+	await f.router.navigate({ to: '/pricing' })
+	expect(f.router.options.defaultViewTransition).toBe(true)
+	f.router.history.back()
+	await f.router.load()
+	expect(f.router.options.defaultViewTransition).toBe(false)
+	f.router.history.forward()
+	await f.router.load()
+	expect(f.router.options.defaultViewTransition).toBe(false)
+	await f.router.navigate({ to: '/docs/one' })
 	expect(f.router.options.defaultViewTransition).toBe(true)
 	f.stop()
 })

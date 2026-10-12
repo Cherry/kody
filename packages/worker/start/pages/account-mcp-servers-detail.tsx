@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import {
+	McpServerOAuthClientSection,
+	type McpServerOAuthClientInput,
+} from './account-mcp-servers-oauth-client.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { ProviderMark } from '../components/provider-icons.tsx'
 import {
@@ -176,6 +180,8 @@ export type McpServerDetailProps = {
 	onRefresh: () => void
 	onToggleEnabled: () => void
 	onDelete: () => void
+	onOAuthClientSave: (client: McpServerOAuthClientInput) => Promise<boolean>
+	onOAuthClientRemove: () => void
 }
 
 export function renderMcpServerDetail(props: McpServerDetailProps) {
@@ -197,6 +203,8 @@ export function renderMcpServerDetail(props: McpServerDetailProps) {
 		onRefresh,
 		onToggleEnabled,
 		onDelete,
+		onOAuthClientSave,
+		onOAuthClientRemove,
 	} = props
 	return (
 		<section css={recordBodyCss}>
@@ -322,6 +330,17 @@ export function renderMcpServerDetail(props: McpServerDetailProps) {
 				saving={usageSaving}
 				onDraftChange={onUsageDraftChange}
 				onSave={onUsageSave}
+			/>
+
+			<McpServerOAuthClientSection
+				key={server.id}
+				server={server}
+				isMutating={isMutating}
+				primaryButtonCss={primaryButtonCss}
+				secondaryButtonCss={secondaryButtonCss}
+				dangerButtonCss={dangerButtonCss}
+				onSave={onOAuthClientSave}
+				onRemove={onOAuthClientRemove}
 			/>
 
 			{server.connected && server.tools.length > 0 ? (

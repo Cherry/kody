@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
 import { useShellData } from '../routes/__root.tsx'
 import { SiteLink } from '../components/site-link.tsx'
@@ -87,8 +89,6 @@ type AccountUsageCreditsSectionProps = {
 	/** Page-load outcome for credits (top-up added, top-up failed). */
 	notice?: string
 	error?: string
-	/** Saving credit settings returns the whole refreshed usage payload. */
-	onUsageChange: (next: AccountUsageLoaderData) => void
 }
 
 /**
@@ -101,7 +101,13 @@ type AccountUsageCreditsSectionProps = {
 export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
+	const capture = useSubmitterScope()
 	const { session } = useShellData()
+	const settingsMutation = usePageResponseMutation<AccountUsageLoaderData>(
+		'loadUsagePage',
+		settingsApiPath,
+		{ dependencies: ['loadBillingPage'] },
+	)
 	const [appliedCredits, setAppliedCredits] = useState(props.credits)
 	const [message, setMessage] = useState<string | null>(
 		props.error ?? props.notice ?? null,
@@ -138,6 +144,7 @@ export function AccountUsageCreditsSection(
 			showMessage(amount.error, 'error')
 			return
 		}
+		const isCurrent = capture()
 		setTopUpPendingCents(amount.cents)
 		setMessage(null)
 		try {
@@ -147,6 +154,7 @@ export function AccountUsageCreditsSection(
 				credentials: 'include',
 				body: JSON.stringify({ amountCents: amount.cents }),
 			})
+			if (!isCurrent()) return
 			if (response.status === 401) {
 				window.location.assign('/login')
 				return
@@ -156,6 +164,7 @@ export function AccountUsageCreditsSection(
 				url?: string
 				error?: string
 			}>(response)
+			if (!isCurrent()) return
 			if (response.ok && result?.ok && typeof result.url === 'string') {
 				window.location.assign(result.url)
 				return
@@ -165,6 +174,7 @@ export function AccountUsageCreditsSection(
 				'error',
 			)
 		} catch (error) {
+			if (!isCurrent()) return
 			showMessage(
 				error instanceof Error
 					? error.message
@@ -187,31 +197,11 @@ export function AccountUsageCreditsSection(
 		setSaving(true)
 		setMessage(null)
 		try {
-			const response = await fetch(settingsApiPath, {
-				method: 'POST',
-				headers: jsonRequestHeaders,
-				credentials: 'include',
-				body: JSON.stringify({
-					autoRefill: autoRefill.value,
-					notify: draft.notify,
-				}),
+			await settingsMutation.submit({
+				autoRefill: autoRefill.value,
+				notify: draft.notify,
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const next = await readJson<
-				AccountUsageLoaderData | { ok: false; error?: string }
-			>(response)
-			if (!response.ok || !next?.ok) {
-				throw new Error(
-					(next && 'error' in next ? next.error : null) ||
-						'Unable to save credit settings.',
-				)
-			}
 			setSaving(false)
-			if (next.credits) applyCredits(next.credits)
-			props.onUsageChange(next)
 			return
 		} catch (error) {
 			showMessage(
@@ -234,7 +224,9 @@ export function AccountUsageCreditsSection(
 			showMessage('Sign in again to switch plans.', 'error')
 			return
 		}
+		const isCurrent = capture()
 		const result = await requestProCheckout({ orgSlug })
+		if (!isCurrent()) return
 		if (result.ok) {
 			window.location.assign(result.url)
 			return

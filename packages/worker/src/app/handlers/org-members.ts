@@ -7,8 +7,6 @@ import {
 	resolveOrgManagementAccess,
 	type ManagedOrg,
 } from '#app/org-management-access.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { computeEffectivePermissions } from '#worker/authorization/authorize.ts'
 import { normalizeEmailAddress } from '#worker/email/address.ts'
 import {
@@ -77,7 +75,11 @@ function inviteAcceptPrompt(input: { orgSlug: string; token: string }) {
 	return `You are invited to the ${input.orgSlug} organization. Call inviteAccept with this token: ${input.token}. The token is shown once and cannot be looked up later.`
 }
 
-function withLastUsedOrg(request: Request, slug: string, response: Response) {
+export function withLastUsedOrg(
+	request: Request,
+	slug: string,
+	response: Response,
+) {
 	const headers = new Headers(response.headers)
 	headers.append(
 		'Set-Cookie',
@@ -90,20 +92,6 @@ function withLastUsedOrg(request: Request, slug: string, response: Response) {
 		status: response.status,
 		statusText: response.statusText,
 		headers,
-	})
-}
-
-function renderDenied(
-	request: Request,
-	env: Env,
-	access: { status: 403 | 404 },
-) {
-	return renderAppPage({
-		request,
-		env,
-		title: access.status === 404 ? 'Organization unavailable' : 'Members',
-		...(access.status === 404 ? { notFound: true } : { unauthorized: true }),
-		status: access.status,
 	})
 }
 
@@ -210,39 +198,6 @@ function personalOrgMembershipWriteResponse() {
 		},
 		400,
 	)
-}
-
-export function createOrgMembersHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) return user
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:read',
-			})
-			if (!access.ok) return renderDenied(request, env, access)
-			return withLastUsedOrg(
-				request,
-				access.org.slug,
-				await renderAppPage({
-					request,
-					env,
-					title: 'Members',
-					loaderData: {
-						orgMembers: await loadOrgMembersData({
-							env,
-							user,
-							org: access.org,
-						}),
-					},
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.orgMembers>
 }
 
 export function createOrgMembersApiHandler(env: Env) {

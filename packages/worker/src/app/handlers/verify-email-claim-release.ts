@@ -1,13 +1,10 @@
 import { type AppPageResult } from '#app/page-result.ts'
-import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { verifyEmailClaimReleaseToken } from '#app/email-claim-release.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
-import { type routes } from '#universal/routes.ts'
 
 function getVerifyEmailClaimReleaseError(
 	reason:
@@ -93,14 +90,4 @@ export async function loadVerifyEmailClaimReleasePage(
 			},
 		},
 	}
-}
-
-export function createVerifyEmailClaimReleaseHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const result = await loadVerifyEmailClaimReleasePage(request, env)
-			return renderAppPage({ request, env, ...result })
-		},
-	} satisfies Action<typeof routes.verifyEmailClaimRelease>
 }

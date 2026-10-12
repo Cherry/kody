@@ -1,9 +1,15 @@
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
-import { loadOrganizations } from '#start/server/org-organizations'
+import { organizationsQuery } from '../organizations-query.ts'
+import { loadPageQuery } from '../page-query.ts'
 import { CreateOrganizationPage } from '../pages/org-organizations.tsx'
 export const Route = createFileRoute('/account_/organizations_/new')({
-	loader: () => loadOrganizations(),
+	loader: ({ context, preload }) =>
+		loadPageQuery(
+			context.queryClient,
+			organizationsQuery(context.actorKey, undefined),
+			preload,
+		),
 	head: () => ({ meta: [{ title: 'Create organization' }] }),
 	component: CreateOrganizationPage,
 })

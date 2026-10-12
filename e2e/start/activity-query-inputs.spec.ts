@@ -1,3 +1,5 @@
+import { orgResourcePath } from '../../packages/worker/universal/org-pages.ts'
+import { waitForDestinationRead } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
@@ -12,16 +14,14 @@ test('activity navigation sends server filters and pagination while ignoring att
 		username: `activity-input-${id}`,
 	})
 	await login({ ...user, mode: 'login' })
-	await page.goto('/account/activity')
+	const activityPath = orgResourcePath(user.username, 'activity')
+	await page.goto(activityPath)
 	await waitForClientHydration(page)
 	await page.waitForLoadState('networkidle')
 	const cursor = Buffer.from(
 		JSON.stringify({ startedAt: new Date().toISOString(), id: 'previous-run' }),
 	).toString('base64')
-	for (const pathname of [
-		'/account/activity',
-		'/account/activity/missing-run',
-	]) {
+	for (const pathname of [activityPath, `${activityPath}/missing-run`]) {
 		const search = new URLSearchParams({
 			view: 'recent',
 			status: 'success',
@@ -30,12 +30,9 @@ test('activity navigation sends server filters and pagination while ignoring att
 			cursor,
 			utm_source: 'regression',
 		})
-		const response = page.waitForResponse(
-			(response) =>
-				response.url().includes('/_serverFn/') &&
-				decodeURIComponent(response.url()).includes(pathname) &&
-				decodeURIComponent(response.url()).includes('status=success'),
-		)
+		const dataSearch = new URLSearchParams(search)
+		dataSearch.delete('utm_source')
+		const response = waitForDestinationRead(page, `${pathname}?${dataSearch}`)
 		await page.evaluate(
 			(href) => window.history.pushState(null, '', href),
 			`${pathname}?${search}`,

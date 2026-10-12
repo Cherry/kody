@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import type {} from './request-context.ts'
+import { type CommittedPage } from './presentation-navigation.ts'
 import { readRouterNonce } from '#start/server/router-nonce'
 import { createRouter } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
@@ -31,7 +32,16 @@ export function getRouter() {
 	const router = createRouter({
 		ssr: { nonce },
 		routeTree,
-		context: { queryClient },
+		context: {
+			queryClient,
+			getCommittedPage: (): CommittedPage | null =>
+				router.state.resolvedLocation
+					? {
+							location: router.state.resolvedLocation,
+							matches: router.state.matches,
+						}
+					: null,
+		},
 		caseSensitive: true,
 		defaultErrorComponent: InternalErrorPage,
 		defaultOnCatch: captureClientException,

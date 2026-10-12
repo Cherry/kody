@@ -217,8 +217,10 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 	) => mockModule.getEntitySourceById(...args),
 }))
 
-const { createAccountPackagesApiHandler, createAccountPackagesHandler } =
+const { createAccountPackagesApiHandler } =
 	await import('./account-packages.ts')
+const { createAccountPackagesHandler } =
+	await import('./account-packages-document.ts')
 
 function createEnv() {
 	return {

@@ -116,12 +116,10 @@ test('revoking the same user admin role blocks a warm cached revisit', async ({
 		document.documentElement.dataset.permissionDocument = 'original'
 		window.history.pushState(null, '', '/account')
 	})
+	await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
 	await expect(
-		page.getByRole('heading', { name: 'Account', exact: true }),
-	).toBeVisible()
-	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
-		user.username,
-	)
+		page.getByRole('link', { name: 'View public profile', exact: true }),
+	).toHaveAttribute('href', `/@${user.username}`)
 	const other = await browser.newContext({ baseURL })
 	try {
 		const signedIn = await other.request.post('/auth', {
@@ -190,12 +188,10 @@ test('revoking admin role blocks a warm cached admin-only guide', async ({
 		document.documentElement.dataset.permissionDocument = 'original'
 		window.history.pushState(null, '', '/account')
 	})
+	await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
 	await expect(
-		page.getByRole('heading', { name: 'Account', exact: true }),
-	).toBeVisible()
-	await expect(page.getByLabel('Username', { exact: true })).toHaveValue(
-		user.username,
-	)
+		page.getByRole('link', { name: 'View public profile', exact: true }),
+	).toHaveAttribute('href', `/@${user.username}`)
 	const other = await browser.newContext({ baseURL })
 	try {
 		const signedIn = await other.request.post('/auth', {

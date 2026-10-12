@@ -67,6 +67,13 @@ test('an org the person cannot use is a 404 on every section, never their own da
 	for (const section of ['memories', 'workflows', 'webhooks', 'mcp-servers']) {
 		const response = await page.goto(`/@${vault}/-/${section}`)
 		expect(response?.status(), section).toBe(404)
+		await expect(page).toHaveURL(`${origin}/@${vault}/-/${section}`)
+		expect(response?.headers()['cache-control']).toContain('no-store')
+		expect(response?.headers()['content-security-policy']).toMatch(
+			/script-src[^;]*'nonce-[^']+'/,
+		)
+		await expect(page.getByTestId('not-found-page')).toBeVisible()
+		await waitForClientHydration(page)
 	}
 
 	for (const [api, section] of orgSectionApis) {

@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
 	adminPlatformIntegrationsApiPath,
 	buildHrefWithUpdatedSearch,
@@ -47,13 +46,12 @@ export function AdminPlatformIntegrationsPage(props: {
 	payload: AdminPlatformIntegrationsLoaderData
 	currentHref: string
 }) {
-	const [editedData, setEditedData] = useState<{
-		source: AdminPlatformIntegrationsLoaderData
-		value: AdminPlatformIntegrationsLoaderData
-	} | null>(null)
-	const { apps } =
-		editedData?.source === props.payload ? editedData.value : props.payload
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const { apps } = props.payload
+	const mutation = usePageResponseMutation<AdminPlatformIntegrationsLoaderData>(
+		'loadAdminPlatformIntegrations',
+		adminPlatformIntegrationsApiPath,
+		{ dependencies: mutationResources },
+	)
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
 		void router.navigate({ href, replace: true })
@@ -83,9 +81,7 @@ export function AdminPlatformIntegrationsPage(props: {
 	)
 	const [formRevision, setFormRevision] = useState(0)
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
-	function applyData(payload: AdminPlatformIntegrationsLoaderData) {
-		setEditedData({ source: props.payload, value: payload })
-		void invalidatePages()
+	function applyData() {
 		setMessage(null)
 		setMessageTone('info')
 	}
@@ -108,32 +104,9 @@ export function AdminPlatformIntegrationsPage(props: {
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			const response = await fetch(adminPlatformIntegrationsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify(body),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return false
-			}
-			const payload = await readJson<
-				AdminPlatformIntegrationsLoaderData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(
-					payload?.error ?? 'Unable to update platform integrations.',
-				)
-			}
-			applyData(payload)
+			await mutation.submit(body)
+			if (lifetime.current?.signal.aborted) return false
+			applyData()
 			setMessage(successMessage)
 			setMessageTone('info')
 			return true

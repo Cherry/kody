@@ -4,20 +4,27 @@ import { heroBaseImage } from '#universal/landing-images.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadHome } from '#start/server/home'
 import { HomeRoute } from '../pages/home.tsx'
+import { homeDocumentHead } from '../components/home-document-head.ts'
 import { documentHead } from '../components/document-head.ts'
 
 const pageQuery = createPageQuery('loadHome', loadHome, { staleTime: 60_000 })
 
 export const Route = createFileRoute('/')({
+	validateSearch: (search: Record<string, unknown>) => search,
 	context: () => ({ pageQueryInput: undefined }),
-	loader: ({ context, preload }) =>
-		loadPageQuery(
+	loader: async ({ context, preload }) => {
+		const { head } = await loadPageQuery(
 			context.queryClient,
 			pageQuery(context.actorKey, context.pageQueryInput),
 			preload,
-		),
-	head: ({ loaderData }) => {
-		const head = documentHead(loaderData?.head)
+		)
+		// Static metadata belongs to the route, independent of background data refresh.
+		return { head }
+	},
+	head: ({ loaderData, match }) => {
+		const head = documentHead(
+			homeDocumentHead(loaderData?.head, match.search.og),
+		)
 		return {
 			...head,
 			links: [

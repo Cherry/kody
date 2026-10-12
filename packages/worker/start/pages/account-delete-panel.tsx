@@ -1,7 +1,12 @@
 /** @jsxImportSource @emotion/react */
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useState, useRef, type FormEvent } from 'react'
-import { accountDeletionConfirmationPhrase } from '#universal/account-deletion-confirmation.ts'
+import {
+	accountDeletedHomePath,
+	accountDeletionConfirmationPhrase,
+} from '#universal/account-deletion-confirmation.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import { routes } from '#universal/routes.ts'
 import {
@@ -24,47 +29,26 @@ import {
 	accountInputCss,
 } from './account-management-components.tsx'
 
-type DeleteStatus = 'idle' | 'deleting' | 'deleted'
-
-type AccountDeleteRefundSummary = { amount: string; currency: string }
-
-type AccountDeletePayload = {
-	error?: string
-	ok?: boolean
-	refunds?: Array<AccountDeleteRefundSummary>
-} | null
-
-function formatRefundAmounts(refunds: Array<AccountDeleteRefundSummary>) {
-	const amounts = refunds.map((refund) => refund.amount)
-	if (amounts.length <= 1) return amounts[0] ?? ''
-	return `${amounts.slice(0, -1).join(', ')} and ${amounts[amounts.length - 1]}`
-}
+type AccountDeletePayload = { error?: string; ok?: boolean } | null
 
 export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 	const [confirmation, setConfirmation] = useState('')
 	const [password, setPassword] = useState('')
-	const [status, setStatus] = useState<DeleteStatus>('idle')
-	const [error, setError] = useState<string | null>(null)
-	const [refundNotice, setRefundNotice] = useState<string | null>(null)
+	const queryClient = useQueryClient()
 	const dialogNode = useRef<HTMLDialogElement>(null)
 
 	function closeDialog() {
-		if (status === 'deleted') {
-			window.location.assign('/')
-			return
-		}
+		if (deletion.isPending) return
 		setConfirmation('')
 		setPassword('')
-		setError(null)
-		setStatus('idle')
+		deletion.reset()
 		dialogNode.current?.close()
 	}
 
 	function openDialog() {
 		setConfirmation('')
 		setPassword('')
-		setError(null)
-		setStatus('idle')
+		deletion.reset()
 		dialogNode.current?.showModal()
 	}
 
@@ -78,12 +62,9 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 		setPassword(event.currentTarget.value)
 	}
 
-	async function handleDeleteSubmit(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault()
-		setStatus('deleting')
-		setError(null)
-
-		try {
+	const deletion = useMutation({
+		retry: false,
+		mutationFn: async (input: { confirmation: string; password?: string }) => {
 			const response = await fetch(routes.accountDelete.href(), {
 				method: 'POST',
 				headers: {
@@ -91,44 +72,41 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 					'Content-Type': 'application/json',
 				},
 				credentials: 'include',
-				body: JSON.stringify({
-					confirmation,
-					...(props.hasUsablePassword ? { password } : {}),
-				}),
+				body: JSON.stringify(input),
 			})
 			const payload = (await response
 				.json()
 				.catch(() => null)) as AccountDeletePayload
-			if (response.status === 401 && !payload?.error) {
-				window.location.assign('/login')
-				return
-			}
-			if (!response.ok || !payload?.ok) {
+			if (response.status === 401 && !payload?.error) return '/login'
+			if (!response.ok || !payload?.ok)
 				throw new Error(payload?.error || 'Unable to delete your account.')
-			}
-			const refunds = payload.refunds ?? []
-			if (refunds.length === 0) {
-				window.location.assign('/')
-				return
-			}
-			// A refund is worth a moment of the user's attention before they are
-			// sent home; the session cookie is already gone at this point.
-			setRefundNotice(
-				`A prorated refund of ${formatRefundAmounts(refunds)} for unused time has been issued to your original payment method; it can take 5–10 business days to appear.`,
-			)
-			setStatus('deleted')
-		} catch (caught) {
-			setError(
-				caught instanceof Error
-					? caught.message
-					: 'Unable to delete your account.',
-			)
-			setStatus('idle')
-		}
+			return accountDeletedHomePath()
+		},
+		onSuccess: async (href) => {
+			// Stop outstanding reads before discarding the signed-in browser cache.
+			await queryClient.cancelQueries()
+			queryClient.clear()
+			window.location.assign(href)
+		},
+	})
+
+	function handleDeleteSubmit(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault()
+		if (
+			deletion.isPending ||
+			confirmation.trim() !== accountDeletionConfirmationPhrase ||
+			(props.hasUsablePassword && !password)
+		)
+			return
+		deletion.mutate({
+			confirmation,
+			...(props.hasUsablePassword ? { password } : {}),
+		})
 	}
 
 	{
-		const isDeleting = status === 'deleting'
+		const isDeleting = deletion.isPending
+		const error = deletion.error?.message
 		const confirmationMatches =
 			confirmation.trim() === accountDeletionConfirmationPhrase
 		const canSubmit =
@@ -168,111 +146,87 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 						if (event.target === event.currentTarget) closeDialog()
 					}}
 				>
-					{status === 'deleted' ? (
+					<form
+						method="dialog"
+						css={deleteDialogFormCss}
+						onSubmit={handleDeleteSubmit}
+					>
+						<h3 id="delete-account-title" css={deleteDialogTitleCss}>
+							Delete your Kody account?
+						</h3>
 						<div
-							data-testid="delete-account-refund-notice"
-							css={deleteDialogFormCss}
+							css={getAccentCalloutCss({
+								accentColor: colors.error,
+							})}
 						>
-							<h3 id="delete-account-title" css={deleteDialogTitleCss}>
-								Your Kody account has been deleted
-							</h3>
-							<p css={{ margin: 0 }}>{refundNotice}</p>
-							<div css={accountActionsCss}>
-								<button
-									type="button"
-									data-testid="delete-account-done"
-									css={getGhostButtonCss({ size: 'sm' })}
-									onClick={() => window.location.assign('/')}
-								>
-									Return home
-								</button>
-							</div>
+							<p css={{ margin: 0 }}>
+								This cannot be undone. Type{' '}
+								<strong>{accountDeletionConfirmationPhrase}</strong> to confirm.
+							</p>
 						</div>
-					) : (
-						<form
-							method="dialog"
-							css={deleteDialogFormCss}
-							onSubmit={handleDeleteSubmit}
-						>
-							<h3 id="delete-account-title" css={deleteDialogTitleCss}>
-								Delete your Kody account?
-							</h3>
-							<div
-								css={getAccentCalloutCss({
-									accentColor: colors.error,
-								})}
-							>
-								<p css={{ margin: 0 }}>
-									This cannot be undone. Type{' '}
-									<strong>{accountDeletionConfirmationPhrase}</strong> to
-									confirm.
-								</p>
-							</div>
+						<label css={accountFieldCss}>
+							<span css={accountFieldLabelCss}>
+								Type {accountDeletionConfirmationPhrase}
+							</span>
+							<input
+								type="text"
+								name="confirmation"
+								data-testid="delete-account-confirmation"
+								data-field-ring
+								autoComplete="off"
+								spellCheck={false}
+								required
+								value={confirmation}
+								css={accountInputCss}
+								onInput={updateConfirmation}
+							/>
+						</label>
+						{props.hasUsablePassword ? (
 							<label css={accountFieldCss}>
-								<span css={accountFieldLabelCss}>
-									Type {accountDeletionConfirmationPhrase}
-								</span>
-								<input
-									type="text"
-									name="confirmation"
-									data-testid="delete-account-confirmation"
+								<span css={accountFieldLabelCss}>Current password</span>
+								<PasswordRevealInput
+									name="password"
+									data-testid="delete-account-password"
 									data-field-ring
-									autoComplete="off"
-									spellCheck={false}
 									required
-									value={confirmation}
+									{...passwordManagerIgnoreProps}
+									value={password}
 									css={accountInputCss}
-									onInput={updateConfirmation}
+									onInput={updatePassword}
 								/>
 							</label>
-							{props.hasUsablePassword ? (
-								<label css={accountFieldCss}>
-									<span css={accountFieldLabelCss}>Current password</span>
-									<input
-										type="password"
-										name="password"
-										data-testid="delete-account-password"
-										data-field-ring
-										required
-										{...passwordManagerIgnoreProps}
-										value={password}
-										css={accountInputCss}
-										onInput={updatePassword}
-									/>
-								</label>
-							) : null}
-							{error ? (
-								<p
-									role="alert"
-									css={{
-										margin: 0,
-										color: colors.error,
-										fontSize: typography.fontSize.sm,
-									}}
-								>
-									{error}
-								</p>
-							) : null}
-							<div css={accountActionsCss}>
-								<button
-									type="button"
-									disabled={isDeleting}
-									css={getGhostButtonCss({ size: 'sm' })}
-									onClick={closeDialog}
-								>
-									Cancel
-								</button>
-								<button
-									type="submit"
-									disabled={!canSubmit}
-									data-testid="delete-account-confirm"
-									css={getDangerPillCss({ size: 'sm' })}
-								>
-									{isDeleting ? 'Deleting…' : 'Delete account'}
-								</button>
-							</div>
-						</form>
-					)}
+						) : null}
+						{error ? (
+							<p
+								role="alert"
+								css={{
+									margin: 0,
+									color: colors.error,
+									fontSize: typography.fontSize.sm,
+								}}
+							>
+								{error}
+							</p>
+						) : null}
+						<div css={accountActionsCss}>
+							<button
+								type="button"
+								disabled={isDeleting}
+								css={getGhostButtonCss({ size: 'sm' })}
+								onClick={closeDialog}
+							>
+								Cancel
+							</button>
+							<button
+								type="submit"
+								disabled={!canSubmit}
+								data-testid="delete-account-confirm"
+								css={getDangerPillCss({ size: 'sm' })}
+							>
+								{isDeleting ? 'Deleting…' : 'Delete account'}
+							</button>
+						</div>
+					</form>
 				</dialog>
 			</>
 		)

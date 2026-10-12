@@ -6,8 +6,6 @@ import {
 	resolveOrgManagementAccess,
 	type ManagedOrg,
 } from '#app/org-management-access.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { processUserAvatar } from '#worker/community/avatar.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import {
@@ -21,7 +19,11 @@ import { type OrgSettingsLoaderData } from '#universal/loader-data.ts'
 import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
 import { routes } from '#universal/routes.ts'
 
-function withLastUsedOrg(request: Request, slug: string, response: Response) {
+export function withLastUsedOrg(
+	request: Request,
+	slug: string,
+	response: Response,
+) {
 	const headers = new Headers(response.headers)
 	headers.append(
 		'Set-Cookie',
@@ -34,20 +36,6 @@ function withLastUsedOrg(request: Request, slug: string, response: Response) {
 		status: response.status,
 		statusText: response.statusText,
 		headers,
-	})
-}
-
-function renderDenied(
-	request: Request,
-	env: Env,
-	access: { status: 403 | 404 },
-) {
-	return renderAppPage({
-		request,
-		env,
-		title: access.status === 404 ? 'Organization unavailable' : 'Settings',
-		...(access.status === 404 ? { notFound: true } : { unauthorized: true }),
-		status: access.status,
 	})
 }
 
@@ -67,39 +55,6 @@ export async function loadOrgSettingsData(input: {
 		canDelete:
 			teamOrg && (await orgHasPermission(input.env, input.user, 'org:delete')),
 	}
-}
-
-export function createOrgSettingsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) return user
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'org:read',
-			})
-			if (!access.ok) return renderDenied(request, env, access)
-			return withLastUsedOrg(
-				request,
-				access.org.slug,
-				await renderAppPage({
-					request,
-					env,
-					title: 'Settings',
-					loaderData: {
-						orgSettings: await loadOrgSettingsData({
-							env,
-							user,
-							org: access.org,
-						}),
-					},
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.orgSettings>
 }
 
 export function createOrgSettingsApiHandler(env: Env) {

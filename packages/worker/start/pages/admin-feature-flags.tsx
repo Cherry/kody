@@ -1,8 +1,7 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
-import { useState, useEffect, useRef, type FormEvent } from 'react'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { useState, type FormEvent } from 'react'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	cardCss,
@@ -109,67 +108,29 @@ export function AdminFeatureFlagsPage({
 	payload: AdminFeatureFlagsLoaderData
 	currentHref: string
 }) {
-	const invalidatePages = usePageInvalidation('permissions', {
-		refreshShell: true,
-	})
-	const pendingRequest = useRef<AbortController | null>(null)
-	useEffect(() => () => pendingRequest.current?.abort(), [])
-	const [editedData, setEditedData] = useState<{
-		source: typeof payload
-		rows: typeof payload.featureFlags
-	} | null>(null)
-	const featureFlags =
-		editedData?.source === payload ? editedData.rows : payload.featureFlags
+	const mutation = usePageResponseMutation<AdminFeatureFlagsLoaderData>(
+		'loadAdminFeatureFlags',
+		adminFeatureFlagsApiPath,
+		{ dependencies: 'permissions', refreshShell: true },
+	)
+	const featureFlags = payload.featureFlags
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
-	function applyData(nextPayload: AdminFeatureFlagsLoaderData) {
-		setEditedData({ source: payload, rows: nextPayload.featureFlags })
-		setMessage(null)
-		setMessageTone('info')
-	}
 	async function submitAdminAction(
 		body: Record<string, unknown>,
 		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
 	): Promise<boolean> {
-		pendingRequest.current?.abort()
-		const controller = new AbortController()
-		pendingRequest.current = controller
 		setActionState(nextActionState)
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			const response = await fetch(adminFeatureFlagsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(body),
-				signal: controller.signal,
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return false
-			}
-			const payload = await readJson<
-				AdminFeatureFlagsLoaderData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error ?? 'Unable to update feature flags.')
-			}
-			applyData(payload)
-			void invalidatePages()
+			await mutation.submit(body)
 			setMessage(successMessage)
 			setMessageTone('info')
 			return true
 		} catch (error) {
-			if (controller.signal.aborted) return false
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -178,7 +139,7 @@ export function AdminFeatureFlagsPage({
 			setMessageTone('error')
 			return false
 		} finally {
-			if (!controller.signal.aborted) setActionState('idle')
+			setActionState('idle')
 		}
 	}
 	function handleSaveGlobalSubmit(

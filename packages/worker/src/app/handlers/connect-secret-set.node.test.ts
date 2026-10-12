@@ -3,7 +3,7 @@ import { expect, test, vi } from 'vitest'
 import { RequestContext } from 'remix/router'
 import type * as AccountSecretsData from '#app/account-secrets-data.ts'
 import type * as PageAuth from '#app/page-auth.ts'
-import { createConnectSecretSetHandler } from '#app/handlers/connect-secret-set.ts'
+import { createConnectSecretSetHandler } from '#app/handlers/connect-secret-set-document.ts'
 
 const mockModule = vi.hoisted(() => ({
 	requireAuthenticatedPageUser:

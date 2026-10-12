@@ -3,7 +3,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import type * as CreditTopUps from '#worker/billing/credit-top-ups.ts'
 import { CreditTopUpError } from '#worker/billing/credit-top-ups.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
-import { createAccountUsageHandler } from './account-usage.ts'
+import { createAccountUsageHandler } from './account-usage-document.ts'
 
 const mockModule = vi.hoisted(() => ({
 	requireAuthenticatedPageUser: vi.fn<() => Promise<unknown>>(),

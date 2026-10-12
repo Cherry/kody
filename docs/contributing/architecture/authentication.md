@@ -70,7 +70,7 @@ that refresh then hit the revoked grant and must start a new OAuth flow.
 stable id and only then uses the numeric primary key for internal D1 joins.
 Version-1 cookies fail closed and require a fresh login.
 
-`packages/worker/src/app/handler.ts` calls `setAuthSessionSecret` on each
+`packages/worker/start/http-entry.ts` calls `setAuthSessionSecret` on each
 request so cookie signing and verification are available to handlers.
 
 ## Login and signup
@@ -430,28 +430,24 @@ after the restore window is `hardPurgeSoftDeletedUser`
 
 Related handlers:
 
-- `GET /login` and `GET /signup`:
-  `packages/worker/src/app/handlers/auth-page.ts`
+- `GET /login` and `GET /signup`: `packages/worker/start/routes/login.tsx` and
+  `packages/worker/start/routes/signup.tsx`
 - `POST /logout`: `packages/worker/src/app/handlers/logout.ts`
 - `POST /session`: `packages/worker/src/app/handlers/session.ts` for session
   status checks
-- `GET /account`: `packages/worker/src/app/handlers/account.ts` (redirects to
-  login if missing session)
+- `GET /account`: `packages/worker/start/routes/account.tsx` (redirects to login
+  if missing session)
 
 ### Client session refresh behavior
 
-The app shell (`packages/worker/client/app.tsx`) refreshes session state after
-initial load and on client-side navigation events. Navigation-triggered
-refreshes are throttled (30s) to avoid a `/session` round trip on every SPA
-navigation, but the throttle never applies to refreshes that follow a mutation:
-the client router (`packages/worker/client/client-router.tsx`) emits a
-`mutation` event after every form POST it submits (exposed as
-`listenToRouterMutations`), and the shell marks its session state stale so the
-follow-up redirect navigation refreshes it regardless of the throttle —
-auth-changing POSTs like `/logout` update the top nav immediately. If an
-in-flight refresh is aborted, the client keeps the last known ready session
-instead of overwriting it with `null`. This prevents transient logged-out UI
-during concurrent re-renders.
+The Start root route (`packages/worker/start/routes/__root.tsx`) verifies
+identity for foreground private navigation. Query caches include the actor in
+their keys. Document-bound server functions reject actor changes before
+returning another account's payload. Activation refresh verifies identity before
+refreshing private queries; mutations reconcile the submitting actor's cache
+even after navigation. See
+[web app rendering and server state](../tanstack-start.md) for cache ownership
+and freshness policies.
 
 ## Password reset
 

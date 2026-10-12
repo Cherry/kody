@@ -13,8 +13,6 @@ import {
 } from '#app/account-integrations-data.ts'
 import { loadConnectOauthChooser } from '#app/connect-oauth-chooser.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { toOauthAppPublic } from '#mcp/capabilities/integrations/oauth-app-shared.ts'
 import {
 	deleteIntegration,
@@ -84,29 +82,6 @@ const accountIntegrationsActionSchema = z
 		]),
 	})
 	.passthrough()
-
-export function createAccountIntegrationsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountIntegrations = await loadAccountIntegrationsData(env, user, {
-				waitUntil,
-				searchParams: new URL(request.url).searchParams,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Integrations',
-				loaderData: { accountIntegrations },
-			})
-		},
-	}
-}
 
 export function createAccountIntegrationsApiHandler(env: Env) {
 	return {

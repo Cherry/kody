@@ -1,6 +1,5 @@
 import { waitUntil } from 'cloudflare:workers'
 import { type Action } from 'remix/router'
-import { redirectToLogin } from '#app/auth-redirect.ts'
 import {
 	type AuthenticatedAppUser,
 	readAuthenticatedAppUser,
@@ -9,7 +8,6 @@ import {
 	orgSectionDenial,
 	loadRequestOrgResolution,
 } from '#app/org-request-binding.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	authorize,
 	AuthorizationError,
@@ -34,6 +32,7 @@ type AuthorizeParams = { orgSlug: string; serverId: string }
 
 const expiredFormMessage =
 	'This approval form expired. Review the details and click Continue again.'
+
 const notPendingMessage =
 	'This server is not waiting for approval. Reconnect it to start a new authorization.'
 
@@ -49,11 +48,7 @@ type ConsentRefusal =
 	| { kind: 'not-found'; title: string }
 	| { kind: 'forbidden'; title: string }
 
-/**
- * Resolve the signed-in member, the organization in the URL, and the server
- * it owns, or why this request may not see them.
- */
-async function loadConsentContext(input: {
+export async function loadConsentContext(input: {
 	env: Env
 	request: Request
 	params: AuthorizeParams
@@ -96,13 +91,13 @@ async function loadConsentContext(input: {
 	}
 }
 
-function isConsentRefusal(
+export function isConsentRefusal(
 	value: ConsentContext | ConsentRefusal,
 ): value is ConsentRefusal {
 	return 'kind' in value
 }
 
-function refusalStatus(refusal: ConsentRefusal) {
+export function refusalStatus(refusal: ConsentRefusal) {
 	switch (refusal.kind) {
 		case 'signed-out':
 			return 401
@@ -129,7 +124,7 @@ function consentTokenBinding(
 	}
 }
 
-async function buildConsentLoaderData(input: {
+export async function buildConsentLoaderData(input: {
 	env: Env
 	context: ConsentContext
 	error?: string | null
@@ -159,38 +154,6 @@ async function buildConsentLoaderData(input: {
 			: null,
 		error: input.error ?? null,
 	}
-}
-
-/**
- * The page every MCP server `authUrl` opens. It names the server, the
- * authorization server host, and the client mode, and sends nobody to the
- * provider until they click Continue.
- */
-export function createOrgMcpServerAuthorizeHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const context = await loadConsentContext({ env, request, params })
-			if (isConsentRefusal(context)) {
-				if (context.kind === 'signed-out') return redirectToLogin(request)
-				return renderAppPage({
-					request,
-					env,
-					title: context.title,
-					notFound: true,
-					status: refusalStatus(context),
-				})
-			}
-			return renderAppPage({
-				request,
-				env,
-				title: `Authorize ${context.setting.name}`,
-				loaderData: {
-					mcpServerAuthorize: await buildConsentLoaderData({ env, context }),
-				},
-			})
-		},
-	} satisfies Action<typeof routes.orgMcpServerAuthorize>
 }
 
 /**

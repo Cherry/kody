@@ -10,3 +10,11 @@ export function pageSearch(search: string, keys: readonly string[]) {
 	const value = output.toString()
 	return value ? `?${value}` : ''
 }
+
+/** Uncapped repository lists filter locally. Only a capped inventory reads q. */
+export function repositoryPageSearch(search: string) {
+	return pageSearch(
+		search,
+		new URLSearchParams(search).has('limit') ? ['limit', 'q'] : [],
+	)
+}

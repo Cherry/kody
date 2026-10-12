@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useState, useRef } from 'react'
 import {
 	useMutation,
 	useQueryClient,
@@ -85,6 +85,7 @@ export function OrgAction({
 	label,
 	confirm = false,
 	multipart = false,
+	disabled = false,
 	onDone,
 }: {
 	href: string
@@ -93,6 +94,7 @@ export function OrgAction({
 	label: string
 	confirm?: boolean
 	multipart?: boolean
+	disabled?: boolean
 	onDone?: (href: string) => void
 }) {
 	const client = useQueryClient()
@@ -152,7 +154,7 @@ export function OrgAction({
 			{children}
 			<button
 				type="submit"
-				disabled={mutation.isPending}
+				disabled={disabled || mutation.isPending}
 				css={getPillButtonCss()}
 			>
 				{mutation.isPending
@@ -391,6 +393,86 @@ export function OrgTeamsPage({
 		</OrgShell>
 	)
 }
+function DeleteOrganization({
+	slug,
+	href,
+	queryKey,
+	onDone,
+}: {
+	slug: string
+	href: string
+	queryKey: QueryKey
+	onDone: (href: string) => void
+}) {
+	const dialog = useRef<HTMLDialogElement>(null)
+	const [confirmation, setConfirmation] = useState('')
+	return (
+		<>
+			<p>
+				This soft-deletes the organization. Members lose access immediately.
+				Restoration is possible for 30 days.
+			</p>
+			<button
+				type="button"
+				data-testid="delete-org"
+				css={getPillButtonCss()}
+				onClick={() => {
+					setConfirmation('')
+					dialog.current?.showModal()
+				}}
+			>
+				Delete organization
+			</button>
+			<dialog
+				ref={dialog}
+				aria-labelledby="delete-org-title"
+				data-testid="delete-org-dialog"
+				onClick={(event) => {
+					if (event.target === event.currentTarget) dialog.current?.close()
+				}}
+				css={{
+					border: 0,
+					borderRadius: '1rem',
+					padding: '1.5rem',
+					maxWidth: '28rem',
+					'::backdrop': { background: 'rgb(0 0 0 / 0.5)' },
+				}}
+			>
+				<h3 id="delete-org-title">Delete @{slug}?</h3>
+				<p>
+					Type <strong>{slug}</strong> or <strong>DELETE</strong> to confirm.
+				</p>
+				<OrgAction
+					href={href}
+					queryKey={queryKey}
+					label="Delete organization"
+					disabled={confirmation !== slug && confirmation !== 'DELETE'}
+					onDone={onDone}
+				>
+					<label css={accountFieldCss}>
+						<span css={accountFieldLabelCss}>Confirmation</span>
+						<input
+							css={accountInputCss}
+							name="confirmation"
+							autoComplete="off"
+							required
+							value={confirmation}
+							onChange={(event) => setConfirmation(event.currentTarget.value)}
+						/>
+					</label>
+					<button
+						type="button"
+						css={getPillButtonCss()}
+						onClick={() => dialog.current?.close()}
+					>
+						Cancel
+					</button>
+				</OrgAction>
+			</dialog>
+		</>
+	)
+}
+
 export function OrgSettingsPage({
 	data,
 	queryKey,
@@ -455,19 +537,12 @@ export function OrgSettingsPage({
 			</AccountManagementPanel>
 			{data.canDelete && !data.org.personal ? (
 				<AccountManagementPanel title="Delete organization">
-					<OrgAction
+					<DeleteOrganization
+						slug={data.org.slug}
 						href={routes.orgSettingsDeletePost.href(args)}
 						queryKey={queryKey}
-						label="Delete organization"
-						confirm
 						onDone={(href) => void router.navigate({ href })}
-					>
-						<OrgField
-							label={`Enter ${data.org.slug} to confirm`}
-							name="confirmation"
-							required
-						/>
-					</OrgAction>
+					/>
 				</AccountManagementPanel>
 			) : null}
 		</OrgShell>

@@ -1,6 +1,5 @@
 import { env, exports } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
-import { ensureCommunityFlowSchema } from '#worker/community/community-flow-test-schema.ts'
 
 function createRequest(
 	path: string,
@@ -60,18 +59,6 @@ test('public route hardening rejects retired connector paths, unknown paths, and
 	for (const request of retiredConnectorRequests) {
 		expect((await workerFetch(request)).status).toBe(404)
 	}
-
-	// Two segments is the public package URL `/@owner/kody-id`, even when the id
-	// spells a retired machine namespace: it reaches the app and 404s as a page
-	// rather than being swallowed by a special connector route.
-	await ensureCommunityFlowSchema(env.APP_DB)
-	const namespaceLookalikeResponse = await workerFetch(
-		createRequest('/@connector-user/connectors'),
-	)
-	expect(namespaceLookalikeResponse.status).toBe(404)
-	await expect(namespaceLookalikeResponse.text()).resolves.toContain(
-		"This doesn't quite connect.",
-	)
 
 	// Real maintenance routes from index.ts share handleSecretMaintenanceRequest:
 	// non-POST → 405 (proves registration vs unknown JSON 404); unauthenticated

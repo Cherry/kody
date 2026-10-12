@@ -1,5 +1,4 @@
 import { type AppPageResult } from '#app/page-result.ts'
-import { type Action } from 'remix/router'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -12,8 +11,6 @@ import {
 	setAuthSessionSecret,
 } from '#app/auth-session.ts'
 import { verifyEmailChangeToken } from '#app/email-change.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
-import { type routes } from '#universal/routes.ts'
 
 function getVerifyEmailChangeError(
 	reason:
@@ -107,14 +104,4 @@ export async function loadVerifyEmailChangePage(
 			},
 		},
 	}
-}
-
-export function createVerifyEmailChangeHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const result = await loadVerifyEmailChangePage(request, env)
-			return renderAppPage({ request, env, ...result })
-		},
-	} satisfies Action<typeof routes.verifyEmailChange>
 }

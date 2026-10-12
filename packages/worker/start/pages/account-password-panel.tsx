@@ -1,7 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useLocation, useRouteContext } from '@tanstack/react-router'
 import { SiteLink } from '../components/site-link.tsx'
 import { toast } from '#client/toast.ts'
 import {
@@ -31,6 +33,23 @@ export function AccountPasswordPanel(props: {
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const href = useLocation({ select: (location) => location.href })
+	const scope = useRef<object | null>(null)
+	useEffect(() => {
+		scope.current = {}
+		return () => {
+			scope.current = null
+		}
+	}, [actorKey, href])
+	const mutation = useMutation({
+		gcTime: 0,
+		mutationFn: ({ url, init }: { url: string; init: RequestInit }) =>
+			fetch(url, init),
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+
 	const hydrated = useHydrated()
 	const [currentPassword, setCurrentPassword] = useState('')
 	const [newPassword, setNewPassword] = useState('')
@@ -76,19 +95,24 @@ export function AccountPasswordPanel(props: {
 		setMessage(null)
 		setMessageTone('info')
 
+		const submittedScope = scope.current
 		try {
-			const response = await fetch(routes.accountPassword.href(), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			const response = await mutation.mutateAsync({
+				url: routes.accountPassword.href(),
+				init: {
+					method: 'POST',
+					headers: {
+						Accept: 'application/json',
+						'Content-Type': 'application/json',
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						...(props.hasUsablePassword ? { currentPassword } : {}),
+						newPassword,
+					}),
 				},
-				credentials: 'include',
-				body: JSON.stringify({
-					...(props.hasUsablePassword ? { currentPassword } : {}),
-					newPassword,
-				}),
 			})
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (response.status === 401) {
 				const payload = await readJson<{ code?: string; error?: string }>(
 					response,
@@ -96,7 +120,8 @@ export function AccountPasswordPanel(props: {
 				if (payload?.code === 'invalid_password') {
 					throw new Error(payload.error)
 				}
-				window.location.assign('/login')
+				if (submittedScope && scope.current === submittedScope)
+					window.location.assign('/login')
 				return
 			}
 			const payload = await readJson<{
@@ -104,6 +129,7 @@ export function AccountPasswordPanel(props: {
 				message?: string
 				error?: string
 			}>(response)
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (!response.ok || !payload?.ok) {
 				throw new Error(payload?.error || 'Unable to update your password.')
 			}
@@ -115,9 +141,9 @@ export function AccountPasswordPanel(props: {
 			if (!props.hasUsablePassword) {
 				props.onPasswordSet()
 			}
-			void invalidatePages()
 			toast.success('Password updated.')
 		} catch (error) {
+			if (!submittedScope || scope.current !== submittedScope) return
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -125,7 +151,7 @@ export function AccountPasswordPanel(props: {
 			)
 			setMessageTone('error')
 		} finally {
-			setStatus('idle')
+			if (submittedScope && scope.current === submittedScope) setStatus('idle')
 		}
 	}
 

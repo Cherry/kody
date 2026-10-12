@@ -1,3 +1,5 @@
+import { orgResourcePath } from '../../packages/worker/universal/org-pages.ts'
+import { requestNamesDestination } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
@@ -31,36 +33,37 @@ test('job presentation filters reuse the same payload but selected records remai
 		username: `cache-${id}`,
 	})
 	await login({ ...user, mode: 'login' })
-	await page.goto('/account/jobs')
+	const resourcePath = orgResourcePath(user.username, 'jobs')
+	await page.goto(resourcePath)
 	await waitForClientHydration(page)
 	await page.waitForLoadState('networkidle')
+	const allReads: string[] = []
 	const reads: string[] = []
 	page.on('request', (request) => {
+		if (request.url().includes('/_serverFn/')) allReads.push(request.url())
 		if (
-			request.url().includes('/_serverFn/') &&
-			decodeURIComponent(request.url()).includes('/account/jobs')
+			requestNamesDestination(request, resourcePath) ||
+			requestNamesDestination(
+				request,
+				`${resourcePath}?selected=missing-test-job`,
+			)
 		)
 			reads.push(request.url())
 	})
-	await page.evaluate(() =>
-		window.history.pushState(
-			null,
-			'',
-			'/account/jobs?q=example&view=enabled&utm_source=test',
-		),
-	)
+	await page
+		.getByRole('searchbox', { name: 'Search jobs', exact: true })
+		.pressSequentially('example')
+	await page.getByLabel('Jobs view filter', { exact: true }).selectOption('all')
 	await expect(page).toHaveURL(/q=example/)
 	await expect(
 		page.getByRole('heading', { name: 'Jobs', exact: true }),
 	).toBeVisible()
 	await page.waitForLoadState('networkidle')
 	expect(reads).toEqual([])
-	await page.evaluate(() =>
-		window.history.pushState(
-			null,
-			'',
-			'/account/jobs?selected=missing-test-job',
-		),
+	expect(allReads).toEqual([])
+	await page.evaluate(
+		(href) => window.history.pushState(null, '', href),
+		`${resourcePath}?selected=missing-test-job`,
 	)
 	await expect.poll(() => reads.length).toBe(1)
 })
@@ -324,33 +327,31 @@ test('value search stays local while changing the selected record reads its own 
 		username: `value-cache-${id}`,
 	})
 	await login({ ...user, mode: 'login' })
-	await page.goto('/account/values')
+	const resourcePath = orgResourcePath(user.username, 'values')
+	await page.goto(resourcePath)
 	await waitForClientHydration(page)
 	await page.waitForLoadState('networkidle')
 	const reads: Array<string> = []
 	page.on('request', (request) => {
 		const url = decodeURIComponent(request.url())
-		if (url.includes('/_serverFn/') && url.includes('/account/values'))
+		if (
+			requestNamesDestination(request, resourcePath) ||
+			requestNamesDestination(request, `${resourcePath}?selected=missing-value`)
+		)
 			reads.push(url)
 	})
-	await page.evaluate(() =>
-		window.history.pushState(
-			null,
-			'',
-			'/account/values?q=example&utm_source=test',
-		),
+	await page.evaluate(
+		(href) => window.history.pushState(null, '', href),
+		`${resourcePath}?q=example&utm_source=test`,
 	)
 	await expect(
 		page.getByRole('heading', { name: 'Values', exact: true }),
 	).toBeVisible()
 	await page.waitForLoadState('networkidle')
 	expect(reads).toEqual([])
-	await page.evaluate(() =>
-		window.history.pushState(
-			null,
-			'',
-			'/account/values?selected=missing-value&q=example',
-		),
+	await page.evaluate(
+		(href) => window.history.pushState(null, '', href),
+		`${resourcePath}?selected=missing-value&q=example`,
 	)
 	await expect.poll(() => reads.length).toBe(1)
 	expect(reads[0]).toContain('selected=missing-value')

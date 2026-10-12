@@ -1,7 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'
-import { createCommunityDetailHandler } from './community-detail.tsx'
+import { createCommunityDetailHandler } from './community-detail-document.tsx'
 import { invalidateCommunityPublicCache } from '#app/data-cache.ts'
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
 

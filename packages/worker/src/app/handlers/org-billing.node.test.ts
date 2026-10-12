@@ -1,3 +1,4 @@
+import { completeOrgBillingCheckout } from './org-billing.ts'
 import { DatabaseSync } from 'node:sqlite'
 import {
 	ownerIdFromStored,
@@ -40,22 +41,6 @@ const mocks = vi.hoisted(() => ({
 		vi.fn<(...args: Array<unknown>) => Promise<Array<unknown>>>(),
 	findActivePromotionCode:
 		vi.fn<(...args: Array<unknown>) => Promise<unknown>>(),
-	renderAppPage: vi.fn(
-		async (input: {
-			loaderData?: unknown
-			status?: number
-			notFound?: boolean
-			unauthorized?: boolean
-		}) =>
-			Response.json(
-				{
-					loaderData: input.loaderData ?? null,
-					notFound: input.notFound ?? false,
-					unauthorized: input.unauthorized ?? false,
-				},
-				{ status: input.status ?? 200 },
-			),
-	),
 	submitPlatformFeedback:
 		vi.fn<(...args: Array<unknown>) => Promise<{ id: string }>>(),
 	enqueuePlatformFeedbackDispatch:
@@ -76,9 +61,6 @@ vi.mock('#app/onboarding-data.ts', () => ({
 vi.mock('#app/account-billing-data.ts', () => ({
 	loadAccountBillingData: (input: Record<string, unknown>) =>
 		mocks.loadAccountBillingData(input),
-}))
-vi.mock('#app/ssr-render.tsx', () => ({
-	renderAppPage: (input: never) => mocks.renderAppPage(input),
 }))
 vi.mock('#worker/billing/subscription-sync.ts', () => ({
 	BillingLinkError: class BillingLinkError extends Error {
@@ -119,7 +101,6 @@ const {
 	createOrgBillingApiHandler,
 	createOrgBillingCheckoutApiHandler,
 	createOrgBillingPortalHandler,
-	createOrgBillingSuccessHandler,
 } = await import('./org-billing.ts')
 
 const retiredStandardPriceId = 'price_1U3sg6LAQpAnsYszGeL2nc8O'
@@ -686,20 +667,19 @@ test('checkout return links the Stripe customer onto the org in the URL', async 
 	mocks.linkStripeCustomerFromCheckoutSessionAttribution.mockResolvedValue({})
 	const env = createEnv()
 	const getSuccess = (path: string) =>
-		call(createOrgBillingSuccessHandler, env, path)
+		completeOrgBillingCheckout(new Request(`https://example.com${path}`), env)
 
 	signInAs('ada')
 	const missing = await getSuccess('/@acme/-/billing/success')
+	if (!(missing instanceof Response))
+		throw new Error('Expected checkout redirect')
 	expect(missing.status).toBe(302)
 	expect(missing.headers.get('location')).toBe(
 		'https://example.com/@acme/-/billing?error=missing_session',
 	)
 
 	const linked = await getSuccess('/@acme/-/billing/success?session_id=cs_test')
-	expect(linked.status).toBe(200)
-	expect(await linked.json()).toMatchObject({
-		loaderData: { accountBillingSuccess: { ok: true, needsOnboarding: true } },
-	})
+	expect(linked).toMatchObject({ ok: true, needsOnboarding: true })
 	expect(
 		mocks.linkStripeCustomerFromCheckoutSessionAttribution,
 	).toHaveBeenCalledWith(
@@ -711,7 +691,7 @@ test('checkout return links the Stripe customer onto the org in the URL', async 
 
 	signInAs('bob')
 	const member = await getSuccess('/@acme/-/billing/success?session_id=cs_test')
-	expect(member.status).toBe(403)
+	expect(member).toMatchObject({ ok: false, status: 403 })
 	expect(
 		mocks.linkStripeCustomerFromCheckoutSessionAttribution,
 	).toHaveBeenCalledTimes(1)
@@ -721,7 +701,16 @@ test('the Stripe portal opens for the org in the URL and only for managers', asy
 	linkCustomer('org-acme', 'cus_acme')
 	const env = createEnv()
 	const getPortal = () =>
-		call(createOrgBillingPortalHandler, env, '/@acme/-/billing/portal')
+		call(
+			(bindings) =>
+				createOrgBillingPortalHandler(
+					bindings,
+					async (_request, access) =>
+						new Response('Denied', { status: access.status }),
+				),
+			env,
+			'/@acme/-/billing/portal',
+		)
 
 	signInAs('cara')
 	const opened = await getPortal()

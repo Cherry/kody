@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -33,6 +34,7 @@ export function CommunityDetailRoute({
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshRoute: true,
 	})
+	const capture = useSubmitterScope()
 	const mounted = useRef(true)
 	const busy = useRef(new Set<string>())
 	useEffect(() => {
@@ -90,6 +92,7 @@ export function CommunityDetailRoute({
 		href: string,
 		payload: unknown,
 	): Promise<T> {
+		const isCurrent = capture()
 		const response = await fetch(href, {
 			method: 'POST',
 			credentials: 'include',
@@ -100,7 +103,7 @@ export function CommunityDetailRoute({
 			body: JSON.stringify(payload),
 		})
 		if (response.status === 401) {
-			window.location.assign('/login')
+			if (isCurrent()) window.location.assign('/login')
 			throw new Error('Please log in.')
 		}
 		const result = (await response.json()) as T

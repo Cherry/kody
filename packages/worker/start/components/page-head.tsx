@@ -95,7 +95,9 @@ export function mergePageHeadTags(
 }
 
 /** Subscribe to the presented page's cache without starting another request. */
-export function PageHead() {
+export function PageHead({
+	overrideHead,
+}: { overrideHead?: ResolvedDocumentHead } = {}) {
 	const tags = useTags()
 	const reference = useRouterState({
 		select: (state) => {
@@ -113,7 +115,9 @@ export function PageHead() {
 				: undefined
 		},
 	})
-	return reference ? (
+	return overrideHead ? (
+		<HeadTags tags={mergePageHeadTags(tags, overrideHead, undefined)} />
+	) : reference ? (
 		<QueryPageHead reference={reference} tags={tags} />
 	) : (
 		<HeadTags tags={tags} />

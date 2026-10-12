@@ -3,10 +3,8 @@ import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { loadAccountSecretProvidersData } from '#app/account-secret-providers-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	bindSecretProvider,
 	grantSecretProviderToPackage,
@@ -17,33 +15,6 @@ import {
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-export function createAccountSecretProvidersHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-			const accountSecretProviders = await loadAccountSecretProvidersData({
-				env,
-				userId: ownerIdFromCaller({
-					request: user.request,
-					user: user.mcpUser,
-				}),
-				email: user.email,
-				url: request.url,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Secret providers',
-				loaderData: { accountSecretProviders },
-			})
-		},
-	}
-}
 
 export function createAccountSecretProvidersApiHandler(env: Env) {
 	return {

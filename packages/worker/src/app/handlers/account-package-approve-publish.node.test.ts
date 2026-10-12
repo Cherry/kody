@@ -49,10 +49,10 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 		mockModule.getSavedPackageByIdInAnyOrg(...args),
 }))
 
-const {
-	createAccountPackageApprovePublishApiHandler,
-	createAccountPackageApprovePublishHandler,
-} = await import('./account-package-approve-publish.ts')
+const { createAccountPackageApprovePublishApiHandler } =
+	await import('./account-package-approve-publish.ts')
+const { createAccountPackageApprovePublishHandler } =
+	await import('./account-package-approve-publish-document.ts')
 
 const user = {
 	username: 'kentcdodds',

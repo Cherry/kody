@@ -11,14 +11,7 @@ import {
 } from './auth-session.ts'
 import { createOrgBindingGuardMiddleware } from './org-binding-guard-middleware.ts'
 import { isOrgBoundPath } from './org-request-binding.ts'
-import { createAppRouter } from './router.ts'
-
-// The illustrated page needs the full worker env; only its status matters here.
-vi.mock('#app/handlers/error-pages.ts', async (importOriginal) => ({
-	...(await importOriginal<Record<string, unknown>>()),
-	renderIllustratedNotFoundPage: () =>
-		new Response('illustrated not found', { status: 404 }),
-}))
+import { createBackendRouter } from '../../start/backend-router.ts'
 
 const origin = 'https://kody.test'
 const cookieSecret = 'LOCAL_TEST_COOKIE_SECRET_32_CHARS_MINIMUM'
@@ -212,7 +205,10 @@ function deniedRequest(entry: RouteEntry, method: string, cookie: string) {
 
 test('every org-scoped route 404s for an org the person cannot use', async () => {
 	const { env } = createEnv()
-	const router = createAppRouter(env)
+	const router = createBackendRouter(env, async (_request, failure) => {
+		expect(failure?.status).toBe(404)
+		return new Response('not found', { status: 404 })
+	})
 	const cookie = await adaCookie()
 	const bound = orgBoundRoutes(routeEntries())
 	expect(bound.map(({ name }) => name)).toEqual(
@@ -267,7 +263,10 @@ test('the guard hands off to the route for orgs the person can use', async () =>
 			 VALUES ('grant-1', 'org-ghost', 'credential', 'secret-1', 'user', ?, 'use', 'org-ghost', ?, ?)`,
 		)
 		.run(adaPersonId, now, now)
-	const guard = createOrgBindingGuardMiddleware(env)
+	const guard = createOrgBindingGuardMiddleware(
+		env,
+		async () => new Response('Not found', { status: 404 }),
+	)
 	const cookie = await adaCookie()
 	const run = async (path: string, referer?: string) => {
 		const next = vi.fn(async () => new Response('route'))
@@ -304,7 +303,10 @@ test('the guard hands off to the route for orgs the person can use', async () =>
 
 test('signed-out requests reach the route for its own login handling', async () => {
 	const { env } = createEnv()
-	const guard = createOrgBindingGuardMiddleware(env)
+	const guard = createOrgBindingGuardMiddleware(
+		env,
+		async () => new Response('Not found', { status: 404 }),
+	)
 	const next = vi.fn(async () => new Response('route'))
 	const request = new Request(`${origin}/@ghost/-/memories`)
 	const response = await guard(

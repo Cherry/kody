@@ -6,43 +6,13 @@ import {
 	userScopedStorageContext,
 } from '#app/account-values-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { deleteValue } from '#mcp/values/service.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-/**
- * Page handler for `/account/values`, `/account/values/new`, and
- * `/account/values/:valueId`.
- */
-export function createAccountValuesHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountValues = await loadAccountValuesData({
-				env,
-				user,
-				url: request.url,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Values',
-				loaderData: { accountValues },
-			})
-		},
-	}
-}
 
 /**
  * JSON API for `/account/values.json` (GET + POST). Action: `delete`.

@@ -1,12 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePackageMutation } from '../package-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
-import {
-	type AccountPackageDetail,
-	type AccountPackagesLoaderData,
-} from '#universal/loader-data.ts'
 import { renderPackageRepoChrome } from '../components/package-repo-nav.tsx'
 import {
 	detailArticleCss,
@@ -24,80 +21,32 @@ export function PackageSettingsRoute({
 }: {
 	data: CommunityDetailApiPayload
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
-	const mounted = useRef(false),
-		busyRef = useRef(false)
-	const [ownerPackage, setOwnerPackage] = useState<AccountPackageDetail | null>(
-		data.ownerPackage ?? null,
-	)
-	const [lockBusy, setLockBusy] = useState(false),
-		[message, setMessage] = useState<string | null>(null)
+	const ownerPackage = data.ownerPackage ?? null
+	const capture = useSubmitterScope()
+	const lock = usePackageMutation(ownerPackage?.id ?? '')
+	const [message, setMessage] = useState<string | null>(null)
 	const username = data.username,
 		kodyId = data.kodyId
-	useEffect(() => {
-		mounted.current = true
-		return () => {
-			mounted.current = false
-		}
-	}, [])
-	const [snapshot, setSnapshot] = useState(data.ownerPackage)
-	if (snapshot !== data.ownerPackage) {
-		setSnapshot(data.ownerPackage)
-		setOwnerPackage(data.ownerPackage ?? null)
-	}
-	function apply(payload: AccountPackagesLoaderData) {
-		if (payload.selectedPackage?.id === ownerPackage?.id)
-			setOwnerPackage(payload.selectedPackage)
-		void invalidatePages()
-	}
+	const lockBusy = lock.pendingAction !== undefined
+	const optimisticLockedAt =
+		lock.pendingAction === 'lock'
+			? lock.pendingLockedAt
+			: lock.pendingAction === 'unlock'
+				? null
+				: ownerPackage?.lockedAt
 	async function toggleLock() {
-		if (!ownerPackage || busyRef.current) return
-		busyRef.current = true
-		setLockBusy(true)
+		if (!ownerPackage || lockBusy) return
 		setMessage(null)
-		const previous = ownerPackage
-		const locked = !ownerPackage.lockedAt
-		setOwnerPackage({
-			...ownerPackage,
-			lockedAt: locked ? new Date().toISOString() : null,
-		})
+		const isCurrent = capture()
 		try {
-			const response = await fetch('/account/packages.json', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({
-					action: locked ? 'lock' : 'unlock',
-					packageId: previous.id,
-				}),
-			})
-			if (!mounted.current) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = (await response.json()) as AccountPackagesLoaderData & {
-				error?: string
-			}
-			if (!response.ok || !payload.ok)
-				throw new Error(payload.error ?? 'Could not update the publish lock.')
-			apply(payload)
+			await lock.submit({ action: ownerPackage.lockedAt ? 'unlock' : 'lock' })
 		} catch (error) {
-			if (mounted.current) {
-				setOwnerPackage(previous)
-				setMessage(
-					error instanceof Error
-						? error.message
-						: 'Could not update the publish lock.',
-				)
-			}
-		} finally {
-			busyRef.current = false
-			if (mounted.current) setLockBusy(false)
+			if (!isCurrent()) return
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Could not update the publish lock.',
+			)
 		}
 	}
 	if (!ownerPackage)
@@ -137,10 +86,12 @@ export function PackageSettingsRoute({
 				{message ? <p role="alert">{message}</p> : null}
 				<AccountPackageOwnerDetails
 					ownerUsername={username}
-					packageDetail={ownerPackage}
+					packageDetail={{
+						...ownerPackage,
+						lockedAt: optimisticLockedAt ?? null,
+					}}
 					lockInFlight={lockBusy}
 					onToggleLock={() => void toggleLock()}
-					onPackagesPayload={apply}
 				/>
 			</section>
 			<PackageWebhookSettings
@@ -151,10 +102,3 @@ export function PackageSettingsRoute({
 		</article>
 	)
 }
-
-const mutationResources = [
-	'loadPackage',
-	'loadPackageFiles',
-	'loadProfile',
-	'loadCommunity',
-] as const

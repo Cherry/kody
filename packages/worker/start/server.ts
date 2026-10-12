@@ -2,21 +2,16 @@ import { getGlobalStartContext } from '@tanstack/react-start'
 import { withAgentDiscoveryLinkHeaders } from '../src/app/agent-discovery.ts'
 import { getAppBaseUrl } from '../src/app-base-url.ts'
 import { isNegotiatedDocumentPath } from './document-negotiation.ts'
-import { createBackendRouter } from './backend-router.ts'
 import { dispatchDocumentMethod } from './action-page-method.ts'
 import { resolveAppPageCacheControl } from '../src/app/anonymous-html-cache.ts'
 import type {} from './request-context.ts'
 import { type OAuthPageOptions } from '#universal/oauth-page.ts'
-import { setAuthSessionSecret } from '../src/app/auth-session.ts'
-import { getEnv } from '../src/app/env.ts'
 import {
 	createStartHandler,
 	defaultStreamHandler,
 	getResponseStatus,
 } from '@tanstack/react-start/server'
 import { firstPartySecurityHeaders } from '../src/app/security-headers.ts'
-import { runWithRequestContext } from '../src/request-context.ts'
-import { runWithDeferredWork } from '../src/deferred-work.ts'
 
 const startHandler = createStartHandler(async (context) => {
 	const nonce = getGlobalStartContext()?.nonce
@@ -36,10 +31,11 @@ const startHandler = createStartHandler(async (context) => {
 		: { ...result, response: withStatus }
 })
 
-async function renderNativeDocument(
+export async function renderNativeDocument(
 	request: Request,
 	env: Env,
 	oauthPage?: OAuthPageOptions,
+	documentFailure?: { status: 403 | 404 | 500 },
 ) {
 	return dispatchDocumentMethod({
 		request,
@@ -65,6 +61,7 @@ async function renderNativeDocument(
 				return startHandler(request, {
 					context: {
 						nonce,
+						documentFailure,
 						oauthPage: oauthPage
 							? { ...oauthPage, href: request.url }
 							: undefined,
@@ -87,7 +84,7 @@ async function renderNativeDocument(
 				session: request.headers.has('Authorization') ? {} : null,
 				responseSetsCookie:
 					headers.has('Set-Cookie') || Boolean(oauthPage?.setCookie),
-				status: oauthPage?.status ?? response.status,
+				status: documentFailure?.status ?? oauthPage?.status ?? response.status,
 				localDev: env.WRANGLER_IS_LOCAL_DEV === 'true',
 			})
 			if (response.status === 200 || !headers.has('Cache-Control'))
@@ -110,7 +107,8 @@ async function renderNativeDocument(
 			const documentResponse = new Response(
 				request.method === 'HEAD' ? null : response.body,
 				{
-					status: oauthPage?.status ?? response.status,
+					status:
+						documentFailure?.status ?? oauthPage?.status ?? response.status,
 					statusText: response.statusText,
 					headers,
 				},
@@ -124,48 +122,6 @@ async function renderNativeDocument(
 				: documentResponse
 		},
 	})
-}
-
-// Cache only immutable route registrations and environment bindings. Each call
-// to the renderer creates its own nonce and Start request context.
-const backendRouters = new WeakMap<
-	Env,
-	ReturnType<typeof createBackendRouter>
->()
-function getBackendRouter(env: Env) {
-	let router = backendRouters.get(env)
-	if (!router) {
-		router = createBackendRouter(env, (request) =>
-			renderNativeDocument(request, env),
-		)
-		backendRouters.set(env, router)
-	}
-	return router
-}
-
-export async function handleRequest(
-	request: Request,
-	env: Env,
-	ctx?: Pick<ExecutionContext, 'waitUntil'>,
-	oauthPage?: OAuthPageOptions,
-) {
-	const appEnv = getEnv(env)
-	setAuthSessionSecret(appEnv.COOKIE_SECRET)
-	return runWithDeferredWork(
-		ctx ? (promise) => ctx.waitUntil(promise) : undefined,
-		() =>
-			runWithRequestContext(request, () => {
-				// OAuth page options are trusted output of the origin OAuth handshake.
-				// Its one-shot router keeps the same middleware without retaining those
-				// options in the isolate's reusable route table.
-				const router = oauthPage
-					? createBackendRouter(appEnv, (request) =>
-							renderNativeDocument(request, appEnv, oauthPage),
-						)
-					: getBackendRouter(appEnv)
-				return router.fetch(request)
-			}),
-	)
 }
 
 export default { fetch: startHandler }

@@ -1,6 +1,6 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createCommunityHandler } from './community.tsx'
+import { createCommunityHandler } from './community-document.tsx'
 import { type CommunityListingWithAggregates } from '#worker/community/types.ts'
 
 const mockModule = vi.hoisted(() => ({

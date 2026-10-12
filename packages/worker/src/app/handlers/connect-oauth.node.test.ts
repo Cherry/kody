@@ -5,10 +5,8 @@ import type * as AccountIntegrationsData from '#app/account-integrations-data.ts
 import type * as AuthenticatedUser from '#app/authenticated-user.ts'
 import type * as ConnectOauthChooser from '#app/connect-oauth-chooser.ts'
 import type * as PageAuth from '#app/page-auth.ts'
-import {
-	createConnectOauthHandler,
-	isBareConnectOauthVisit,
-} from '#app/handlers/connect-oauth.ts'
+import { isBareConnectOauthVisit } from '#app/handlers/connect-oauth.ts'
+import { createConnectOauthHandler } from '#app/handlers/connect-oauth-document.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser:

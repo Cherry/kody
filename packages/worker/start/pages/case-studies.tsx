@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import {
 	caseStudies,
@@ -28,9 +29,9 @@ export function CaseStudiesRoute() {
 				<p>
 					Longer notes from people using Kody — how it shows up in their work,
 					in their words. The same stories also live on the{' '}
-					<a href={routes.blogPost.href({ slug: 'early-kody-users' })}>
+					<SiteLink href={routes.blogPost.href({ slug: 'early-kody-users' })}>
 						case studies blog post
-					</a>
+					</SiteLink>
 					.
 				</p>
 			</header>
@@ -42,9 +43,9 @@ export function CaseStudiesRoute() {
 						<section key={study.id} css={studyCss}>
 							<h2 id={study.id} css={studyTitleCss}>
 								{study.href ? (
-									<a href={study.href} css={nameLinkCss}>
+									<SiteLink href={study.href} css={nameLinkCss}>
 										{study.name}
-									</a>
+									</SiteLink>
 								) : (
 									study.name
 								)}
@@ -61,9 +62,9 @@ export function CaseStudiesRoute() {
 			</div>
 
 			<p css={footCss}>
-				<a href={routes.home.href()} css={backLinkCss}>
+				<SiteLink href={routes.home.href()} css={backLinkCss}>
 					← Home
-				</a>
+				</SiteLink>
 			</p>
 		</article>
 	)

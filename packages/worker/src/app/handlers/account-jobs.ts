@@ -6,11 +6,8 @@ import {
 } from '#app/account-jobs-data.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { type AccountJobsLoaderData as AppAccountJobsLoaderData } from '#universal/loader-data.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { runJobNowViaManager } from '#worker/jobs/manager-client.ts'
@@ -21,7 +18,7 @@ type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-function readPathJobId(params: unknown) {
+export function readPathJobId(params: unknown) {
 	if (
 		typeof params === 'object' &&
 		params !== null &&
@@ -31,45 +28,6 @@ function readPathJobId(params: unknown) {
 		return params.jobId
 	}
 	return undefined
-}
-
-/**
- * Page handler for `/account/jobs` and `/account/jobs/:jobId`.
- */
-export function createAccountJobsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({
-			request,
-			params,
-		}: {
-			request: Request
-			params?: { jobId?: string }
-		}) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const accountJobs = await loadAccountJobsData({
-				env,
-				request,
-				user,
-				pathJobId: readPathJobId(params),
-				serverTiming,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Jobs',
-				loaderData: {
-					accountJobs: accountJobs as AppAccountJobsLoaderData,
-				},
-				serverTiming,
-			})
-		},
-	}
 }
 
 /**

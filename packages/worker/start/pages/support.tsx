@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import {
 	mutedLinkCss,
@@ -15,9 +16,9 @@ export function SupportRoute() {
 				<h1 css={pageTitleCss}>Support</h1>
 				<p css={pageDescriptionCss}>
 					For help with the hosted Kody service at kody.codes, email{' '}
-					<a href="mailto:support@kody.codes" css={mutedLinkCss}>
+					<SiteLink href="mailto:support@kody.codes" css={mutedLinkCss}>
 						support@kody.codes
-					</a>
+					</SiteLink>
 					.
 				</p>
 				<p css={pageDescriptionCss}>
@@ -29,17 +30,17 @@ export function SupportRoute() {
 			</header>
 
 			<p css={{ margin: 0 }}>
-				<a href="/faq" css={mutedLinkCss}>
+				<SiteLink href="/faq" css={mutedLinkCss}>
 					FAQ
-				</a>
+				</SiteLink>
 				{' · '}
-				<a href="/discord" css={mutedLinkCss}>
+				<SiteLink href="/discord" css={mutedLinkCss}>
 					Discord
-				</a>
+				</SiteLink>
 				{' · '}
-				<a href="/privacy" css={mutedLinkCss}>
+				<SiteLink href="/privacy" css={mutedLinkCss}>
 					Privacy
-				</a>
+				</SiteLink>
 			</p>
 		</section>
 	)

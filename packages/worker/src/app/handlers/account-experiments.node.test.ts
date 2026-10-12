@@ -3,10 +3,8 @@ import { expect, test, vi } from 'vitest'
 import type * as accountExperimentsData from '#app/account-experiments-data.ts'
 import type * as ssrRender from '#app/ssr-render.tsx'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
-import {
-	createAccountExperimentsApiHandler,
-	createAccountExperimentsHandler,
-} from './account-experiments.ts'
+import { createAccountExperimentsApiHandler } from './account-experiments.ts'
+import { createAccountExperimentsHandler } from './account-experiments-document.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),

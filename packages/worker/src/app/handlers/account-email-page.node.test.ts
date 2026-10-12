@@ -1,7 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as EmailDestinations from '#worker/email/destinations.ts'
-import { createAccountEmailHandler } from '#app/handlers/account-email.ts'
+import { createAccountEmailHandler } from '#app/handlers/account-email-document.ts'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'

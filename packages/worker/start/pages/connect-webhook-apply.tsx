@@ -1,7 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { connectWebhookApplyQuery } from '../connect-approval-queries.ts'
 import { useLocation } from '@tanstack/react-router'
 
 import { type ConnectWebhookApplyLoaderData } from '#universal/loader-data.ts'
@@ -69,34 +72,23 @@ export function ConnectWebhookApplyRoute({
 }: {
 	initialData: ConnectWebhookApplyLoaderData
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
-	const href = useLocation({ select: (l) => l.href })
-	const [data, setData] = useState(initialData),
-		[message, setMessage] = useState<string | null>(null)
-	const [previousData, setPreviousData] = useState(initialData)
-	if (previousData !== initialData) {
-		setPreviousData(initialData)
-		setData(initialData)
-	}
-	const mounted = useRef(false),
-		busy = useRef(false)
-	useEffect(() => {
-		mounted.current = true
-		return () => {
-			mounted.current = false
-		}
-	}, [])
-	const [submitting, setSubmitting] = useState<'approve' | 'reject' | null>(
-		null,
-	)
-	async function submit(action: 'approve' | 'reject') {
-		if (busy.current || !data.ok) return
-		busy.current = true
-		setSubmitting(action)
-		setMessage(null)
-		try {
+	const invalidatePages = usePageInvalidation(mutationResources)
+	const href = useLocation({ select: (l) => l.pathname + l.searchStr })
+	const data = initialData
+	const [message, setMessage] = useState<string | null>(null)
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const mutation = useMutation({
+		mutationKey: ['connectWebhookApply', actorKey],
+		mutationFn: async ({
+			action,
+			href,
+		}: {
+			action: 'approve' | 'reject'
+			href: string
+			invalidate: typeof invalidatePages
+			queryKey: ReturnType<typeof connectWebhookApplyQuery>['queryKey']
+		}) => {
 			const response = await fetch(buildApproveApplyApiPath(href), {
 				method: 'POST',
 				headers: {
@@ -105,13 +97,29 @@ export function ConnectWebhookApplyRoute({
 				},
 				body: JSON.stringify({ action }),
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = (await response.json()) as ConnectWebhookApplyLoaderData
-			if (!mounted.current) return
-			setData(payload)
+			if (response.status === 401)
+				throw new Error('Sign in again to process this approval.')
+			return (await response.json()) as ConnectWebhookApplyLoaderData
+		},
+		onSuccess: async (payload, input) => {
+			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			queryClient.setQueryData(input.queryKey, (previous) =>
+				previous ? { ...previous, payload } : previous,
+			)
+			void input.invalidate()
+		},
+	})
+	const submitting = mutation.isPending ? mutation.variables.action : null
+	async function submit(action: 'approve' | 'reject') {
+		if (mutation.isPending || !data.ok) return
+		setMessage(null)
+		try {
+			const payload = await mutation.mutateAsync({
+				action,
+				href,
+				invalidate: invalidatePages,
+				queryKey: connectWebhookApplyQuery(actorKey, href).queryKey,
+			})
 			setMessage(
 				action === 'approve' && payload.ok
 					? 'Destination approved. Return to your agent and retry webhookUrlApply.'
@@ -119,17 +127,10 @@ export function ConnectWebhookApplyRoute({
 						? null
 						: payload.error,
 			)
-			void invalidatePages()
 		} catch (error) {
-			if (mounted.current)
-				setMessage(
-					error instanceof Error
-						? error.message
-						: 'Unable to process approval.',
-				)
-		} finally {
-			busy.current = false
-			if (mounted.current) setSubmitting(null)
+			setMessage(
+				error instanceof Error ? error.message : 'Unable to process approval.',
+			)
 		}
 	}
 

@@ -144,7 +144,7 @@ Requests are handled in this order:
    `PACKAGE_APP_BASE_URL` is unset.
 10. App server routes:
 
-- Everything else is handled by `packages/worker/src/app/handler.ts`
+- Everything else is handled by `packages/worker/start/http-entry.ts`
 - Public agent-discovery documents (Worker-first, origin-aware) include
   `/robots.txt`, `/sitemap.xml`, `/auth.md`,
   `/.well-known/mcp/server-card.json`, `/.well-known/api-catalog`,
@@ -207,23 +207,24 @@ there is no separate context-specific Workflow class.
 
 ## App server flow
 
-`packages/worker/src/app/handler.ts` validates environment variables and
+`packages/worker/start/http-entry.ts` validates environment variables and
 configures session cookie signing (`COOKIE_SECRET`) before creating the app
 router.
 
-Authenticated HTML requests resolve the user row and RBAC roles in one D1
-`batch`, start feature-flag evaluation (global flags + per-user overrides in a
-second `batch`) as soon as the user id is known, and `renderAppPage` awaits that
-already-started promise after page data instead of opening a new D1 wave.
-Anonymous callers still receive registry flag defaults without touching D1.
+Authenticated requests share request-scoped identity resolution. The Start root
+route verifies identity and loads shell presentation through Query. Server
+functions enforce page and resource authorization before returning payloads.
+Anonymous callers receive registry flag defaults without touching D1.
 
-`packages/worker/src/app/router.ts` maps route patterns from
-`packages/worker/universal/routes.ts` to handler modules (home, auth, account,
-session, logout, password reset, health).
+`packages/worker/start/backend-router.ts` maps API, action, protocol, and
+negotiated Markdown routes to existing services. Web documents render through
+`packages/worker/start/server.ts` and the native route tree. See
+[web app rendering and server state](../tanstack-start.md) for navigation and
+cache ownership.
 
 ## Anonymous marketing HTML cache
 
-`renderAppPage` sets
+The native HTTP entry sets
 `Cache-Control: public, max-age=60, stale-while-revalidate=300` and
 `Vary: Cookie` for anonymous `/`, `/pricing`, `/blog`, `/community`,
 `/onboarding`, `/docs`, and `/docs/:slug`. Origin `fetch` stores those

@@ -21,7 +21,6 @@ import {
 } from '#app/account-secrets-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { buildConnectOauthNextSteps } from '#app/connect-oauth-next-steps.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { normalizeBulkPackageSecretApprovalNames } from '#mcp/secrets/package-approval-url.ts'
 import {
 	deleteSecret,
@@ -34,7 +33,6 @@ import {
 import { type SecretScope } from '#mcp/secrets/types.ts'
 import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
-import { accountAliasPath } from '#universal/org-pages.ts'
 import { type routes } from '#universal/routes.ts'
 import { normalizeAllowedPackages } from '#mcp/secrets/allowed-packages.ts'
 import { normalizeAllowedHosts } from '#mcp/secrets/allowed-hosts.ts'
@@ -61,7 +59,6 @@ import {
 } from '#worker/integrations/credentials.ts'
 import { dispatchIntegrationAuthSucceededSubscriptionEvents } from '#worker/integrations/package-subscriptions.ts'
 import { inferIntegrationRefreshPolicy } from '#worker/integrations/refresh-policy.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
 	buildOAuthTokenExchangeFailurePayload,
 	buildOAuthTokenExchangeRequest,
@@ -89,44 +86,6 @@ type ConnectOauthHostApprovalLink = {
 }
 
 type SecretApprovalAction = 'approve' | 'reject'
-
-export function createAccountSecretsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }: { request: Request }) {
-			const requestUrl = new URL(request.url)
-			// Prefill agent links use the focused /connect/secret-set page.
-			// Bare /account/secrets/new stays on the account list editor.
-			if (
-				accountAliasPath(requestUrl.pathname) === '/account/secrets/new' &&
-				requestUrl.searchParams.get('name')?.trim()
-			) {
-				const redirectUrl = new URL(
-					`/connect/secret-set${requestUrl.search}`,
-					requestUrl.origin,
-				)
-				return Response.redirect(redirectUrl, 302)
-			}
-
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountSecrets = await loadAccountSecretsData({
-				request,
-				env,
-				user,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Secrets',
-				loaderData: { accountSecrets },
-			})
-		},
-	}
-}
 
 export function createAccountSecretsApiHandler(env: Env) {
 	return {

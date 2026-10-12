@@ -25,9 +25,11 @@ import {
 export function ProfileRoute({
 	data,
 	currentHref,
+	basePath,
 }: {
 	data: ProfileLoaderData
 	currentHref: string
+	basePath?: string
 }) {
 	const { session } = useShellData()
 	const readyShell = toProfileShellLoaderData(data)
@@ -42,6 +44,86 @@ export function ProfileRoute({
 		'https://kody.local',
 	).searchParams.has('limit')
 	const navigate = useNavigate()
+	const repositoryList = (
+		<>
+			<form
+				method="get"
+				action={basePath ?? routes.profile.href({ username })}
+				role="search"
+				onSubmit={(event) => {
+					event.preventDefault()
+					const search = new URLSearchParams()
+					for (const [key, value] of new FormData(event.currentTarget))
+						if (typeof value === 'string') search.append(key, value)
+					void navigate({
+						to: `${basePath ?? routes.profile.href({ username })}?${search}`,
+					})
+				}}
+				css={searchFormCss}
+			>
+				{filters.visibility !== 'all' ? (
+					<input type="hidden" name="visibility" value={filters.visibility} />
+				) : null}
+				{filters.listing !== 'all' ? (
+					<input type="hidden" name="listing" value={filters.listing} />
+				) : null}
+				{filters.hidden !== 'all' ? (
+					<input type="hidden" name="hidden" value={filters.hidden} />
+				) : null}
+				{filters.app !== 'all' ? (
+					<input type="hidden" name="app" value={filters.app} />
+				) : null}
+				{filters.package !== 'all' ? (
+					<input type="hidden" name="package" value={filters.package} />
+				) : null}
+				{filters.sort !== 'updated' ? (
+					<input type="hidden" name="sort" value={filters.sort} />
+				) : null}
+				{filters.dir !== defaultProfilePackageSortDirection(filters.sort) ? (
+					<input type="hidden" name="dir" value={filters.dir} />
+				) : null}
+				<label css={searchFieldCss}>
+					<span css={fieldLabelCss}>Search repositories</span>
+					<ProfileRepositorySearchInput
+						username={username}
+						basePath={basePath}
+						filters={filters}
+					/>
+				</label>
+				<button
+					type="submit"
+					css={{ ...getPrimaryButtonCss(), alignSelf: 'end' }}
+				>
+					Search
+				</button>
+			</form>
+
+			{visibleList ? (
+				<ProfileContent
+					basePath={basePath}
+					profile={visibleList.profile}
+					packages={visibleList.packages}
+					activity={visibleList.activity}
+					query={searchQuery || null}
+					visibility={filters.visibility}
+					listing={filters.listing}
+					hidden={filters.hidden}
+					app={filters.app}
+					package={filters.package}
+					sort={filters.sort}
+					dir={filters.dir}
+					isSelf={readyShell?.isSelf === true}
+					queryAppliedByLoader={queryAppliedByLoader}
+				/>
+			) : null}
+		</>
+	)
+	if (basePath)
+		return (
+			<div css={mainCss} data-testid="workspace-repositories">
+				{repositoryList}
+			</div>
+		)
 	return (
 		<section css={pageCss} data-testid="profile-page">
 			<div css={layoutCss}>
@@ -55,77 +137,7 @@ export function ProfileRoute({
 
 				<div css={mainCss}>
 					<h2 css={packagesHeadingCss}>Repositories</h2>
-					<form
-						method="get"
-						action={routes.profile.href({ username })}
-						role="search"
-						onSubmit={(event) => {
-							event.preventDefault()
-							const search = new URLSearchParams()
-							for (const [key, value] of new FormData(event.currentTarget))
-								if (typeof value === 'string') search.append(key, value)
-							void navigate({ to: `/@${username}?${search}` })
-						}}
-						css={searchFormCss}
-					>
-						{filters.visibility !== 'all' ? (
-							<input
-								type="hidden"
-								name="visibility"
-								value={filters.visibility}
-							/>
-						) : null}
-						{filters.listing !== 'all' ? (
-							<input type="hidden" name="listing" value={filters.listing} />
-						) : null}
-						{filters.hidden !== 'all' ? (
-							<input type="hidden" name="hidden" value={filters.hidden} />
-						) : null}
-						{filters.app !== 'all' ? (
-							<input type="hidden" name="app" value={filters.app} />
-						) : null}
-						{filters.package !== 'all' ? (
-							<input type="hidden" name="package" value={filters.package} />
-						) : null}
-						{filters.sort !== 'updated' ? (
-							<input type="hidden" name="sort" value={filters.sort} />
-						) : null}
-						{filters.dir !==
-						defaultProfilePackageSortDirection(filters.sort) ? (
-							<input type="hidden" name="dir" value={filters.dir} />
-						) : null}
-						<label css={searchFieldCss}>
-							<span css={fieldLabelCss}>Search repositories</span>
-							<ProfileRepositorySearchInput
-								username={username}
-								filters={filters}
-							/>
-						</label>
-						<button
-							type="submit"
-							css={{ ...getPrimaryButtonCss(), alignSelf: 'end' }}
-						>
-							Search
-						</button>
-					</form>
-
-					{visibleList ? (
-						<ProfileContent
-							profile={visibleList.profile}
-							packages={visibleList.packages}
-							activity={visibleList.activity}
-							query={searchQuery || null}
-							visibility={filters.visibility}
-							listing={filters.listing}
-							hidden={filters.hidden}
-							app={filters.app}
-							package={filters.package}
-							sort={filters.sort}
-							dir={filters.dir}
-							isSelf={readyShell?.isSelf === true}
-							queryAppliedByLoader={queryAppliedByLoader}
-						/>
-					) : null}
+					{repositoryList}
 				</div>
 			</div>
 		</section>

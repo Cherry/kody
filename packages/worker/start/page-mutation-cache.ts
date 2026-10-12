@@ -45,6 +45,7 @@ export function hasPendingPageMutation(
 		loadMcpServersPage: ['mcpServers'],
 		loadSecretProvidersPage: ['secretProviders'],
 		loadIntegrationsPage: ['integrations'],
+		loadPackageWebhooks: ['packageWebhooks'],
 	}
 	return (
 		typeof resource === 'string' &&

@@ -97,14 +97,14 @@ test('activation, reconnect and history refresh account data without leaking acc
 			'data-freshness-document',
 			'original',
 		)
-		await expect(second.getByLabel('Username', { exact: true })).toHaveValue(
-			a.username,
-		)
+		await expect(
+			second.getByRole('link', { name: 'View public profile', exact: true }),
+		).toHaveAttribute('href', `/@${a.username}`)
 
-		await second
-			.getByRole('navigation', { name: 'Account sections' })
-			.getByRole('link', { name: 'Memories', exact: true })
-			.click()
+		await second.evaluate(
+			(href) => window.history.pushState(null, '', href),
+			`/@${a.username}/-/memories`,
+		)
 		await expect(
 			second.getByRole('heading', { name: 'Memories', exact: true }),
 		).toBeVisible()
@@ -116,9 +116,10 @@ test('activation, reconnect and history refresh account data without leaking acc
 		await expect(
 			second.getByRole('heading', { name: 'Memories', exact: true }),
 		).toBeVisible()
+		await second.getByTestId('org-switcher').click()
 		await second
-			.getByRole('navigation', { name: 'Account sections' })
-			.getByRole('link', { name: 'Overview', exact: true })
+			.getByTestId('org-switcher-panel')
+			.getByRole('link', { name: 'Account settings', exact: true })
 			.click()
 		await expect(
 			second.getByLabel('Display name', { exact: true }),
@@ -167,9 +168,9 @@ test('activation, reconnect and history refresh account data without leaking acc
 		await expect(other.getByLabel('Display name', { exact: true })).toHaveValue(
 			bName,
 		)
-		await expect(other.getByLabel('Username', { exact: true })).toHaveValue(
-			b.username,
-		)
+		await expect(
+			other.getByRole('link', { name: 'View public profile', exact: true }),
+		).toHaveAttribute('href', `/@${b.username}`)
 		await expect(other.locator('html')).toHaveAttribute(
 			'data-freshness-document',
 			'other-account',

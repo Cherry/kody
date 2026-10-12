@@ -6,11 +6,9 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { loadAdminSystemEmailData } from '#worker/admin/system-email-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { deleteSystemEmailMessageById } from '#worker/email/system-email-graph-store.ts'
 
 export async function auditSystemEmailAccess(input: {
@@ -34,38 +32,6 @@ export async function auditSystemEmailAccess(input: {
 		path: new URL(input.request.url).pathname,
 		reason: input.reason,
 	})
-}
-
-export function createAdminSystemEmailHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const actor = await requirePageUserWithRole(request, env, 'admin')
-			if (actor instanceof Response) {
-				return actor
-			}
-
-			const adminSystemEmail = await loadAdminSystemEmailData(env, request.url)
-			await auditSystemEmailAccess({
-				env,
-				request,
-				actorEmail: actor.email,
-				action: adminSystemEmail.selectedMessage
-					? 'adminSystemEmailGet'
-					: 'adminSystemEmailList',
-				reason: adminSystemEmail.selectedMessage
-					? `target_message_id=${adminSystemEmail.selectedMessage.id}`
-					: 'system_email_list',
-			})
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin system email',
-				loaderData: { adminSystemEmail },
-			})
-		},
-	} satisfies Action<typeof routes.adminSystemEmail>
 }
 
 export function createAdminSystemEmailApiHandler(env: Env) {

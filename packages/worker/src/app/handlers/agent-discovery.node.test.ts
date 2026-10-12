@@ -1,6 +1,6 @@
 import { RequestContext } from 'remix/router'
 import { expect, test } from 'vitest'
-import { createHomeHandler } from './home.ts'
+import { createHomeHandler } from './home-document.ts'
 import {
 	createAgentSkillMarkdownHandler,
 	createAgentSkillsIndexHandler,

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { formatTimestampDate as formatCancelDate } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -169,6 +170,7 @@ export function AccountBillingPage({
 	payload: AccountBillingLoaderData
 	currentHref: string
 }) {
+	const capture = useSubmitterScope()
 	const [promoCode, setPromoCode] = useState('')
 	const [message, setMessage] = useState<string | null>(
 		payload.error ?? payload.notice ?? null,
@@ -197,11 +199,13 @@ export function AccountBillingPage({
 		if (checkoutPending) return
 		setCheckoutPending({ plan, interval })
 		setMessage(null)
+		const isCurrent = capture()
 		const result = await requestProCheckout({
 			orgSlug: payload.org.slug,
 			interval,
 			promoCode,
 		})
+		if (!isCurrent()) return
 		if (result.ok) {
 			if (result.mode === 'portal') {
 				// More than one active subscription: the portal update flow

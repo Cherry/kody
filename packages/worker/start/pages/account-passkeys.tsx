@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useMutation } from '@tanstack/react-query'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
 import {
@@ -61,8 +63,11 @@ export function AccountPasskeysPage({
 	currentHref: string
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
-	const [passkeys, setPasskeys] = useState<Array<PasskeyListItem>>(
-		payload.passkeys,
+	const passkeys = payload.passkeys
+	const changePasskey = usePageResponseMutation<AccountPasskeysPayload>(
+		'loadAccountSecurity',
+		passkeysApiPath,
+		{ refreshShell: true },
 	)
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
@@ -73,6 +78,31 @@ export function AccountPasskeysPage({
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
+	const registration = useMutation({
+		gcTime: 0,
+		mutationFn: async ({
+			response,
+		}: {
+			response: Awaited<ReturnType<typeof startRegistration>>
+			invalidate: () => Promise<void>
+		}) => {
+			const result = await fetch(webauthnRegistrationPath, {
+				method: 'POST',
+				credentials: 'include',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ response }),
+			})
+			const accepted = await readJson<{ ok?: boolean; error?: string }>(result)
+			if (!result.ok || !accepted?.ok)
+				throw new Error(accepted?.error || 'Unable to register the passkey.')
+		},
+		// A lost response can follow a committed registration. Reconcile either way.
+		onSettled: (_data, _error, submission) => submission.invalidate(),
+	})
+
 	const lifetime = useRef<AbortController | null>(null)
 	useEffect(() => {
 		const controller = new AbortController()
@@ -117,33 +147,13 @@ export function AccountPasskeysPage({
 			})
 
 			lifetime.current?.signal.throwIfAborted()
-			const verificationResponse = await fetch(webauthnRegistrationPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify({ response: registrationResponse }),
+			await registration.mutateAsync({
+				response: registrationResponse,
+				invalidate: invalidatePages,
 			})
-			if (verificationResponse.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const verificationPayload = await readJson<{
-				ok?: boolean
-				error?: string
-			}>(verificationResponse)
-			if (!verificationResponse.ok || !verificationPayload?.ok) {
-				throw new Error(
-					verificationPayload?.error || 'Unable to register the passkey.',
-				)
-			}
 
 			setMessage('Passkey registered.')
 			setMessageTone('info')
-			await refreshPasskeys()
 		} catch (error) {
 			setMessage(
 				error instanceof Error && error.name === 'NotAllowedError'
@@ -154,20 +164,7 @@ export function AccountPasskeysPage({
 			)
 			setMessageTone('error')
 		} finally {
-			if (!lifetime.current?.signal.aborted) void invalidatePages()
 			setActionStatus('idle')
-		}
-	}
-
-	async function refreshPasskeys() {
-		const response = await fetch(passkeysApiPath, {
-			headers: { Accept: 'application/json' },
-			credentials: 'include',
-			signal: lifetime.current?.signal,
-		})
-		const payload = await readJson<AccountPasskeysPayload>(response)
-		if (response.ok && payload?.ok) {
-			setPasskeys(payload.passkeys)
 		}
 	}
 
@@ -187,31 +184,11 @@ export function AccountPasskeysPage({
 		setMessage(null)
 
 		try {
-			const response = await fetch(passkeysApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify({
-					intent: 'rename',
-					passkeyId,
-					name: renameDraft,
-				}),
+			await changePasskey.submit({
+				intent: 'rename',
+				passkeyId,
+				name: renameDraft,
 			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountPasskeysPayload & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to rename the passkey.')
-			}
-			setPasskeys(payload.passkeys)
 			setRenamingPasskeyId(null)
 			setRenameDraft('')
 			setMessage('Passkey renamed.')
@@ -233,27 +210,7 @@ export function AccountPasskeysPage({
 		setMessage(null)
 
 		try {
-			const response = await fetch(passkeysApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify({ intent: 'delete', passkeyId }),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AccountPasskeysPayload & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to delete the passkey.')
-			}
-			setPasskeys(payload.passkeys)
+			await changePasskey.submit({ intent: 'delete', passkeyId })
 			if (renamingPasskeyId === passkeyId) {
 				setRenamingPasskeyId(null)
 				setRenameDraft('')
@@ -273,12 +230,6 @@ export function AccountPasskeysPage({
 	}
 
 	const status = 'ready'
-	const [lastPayload, setLastPayload] = useState(payload)
-	if (lastPayload !== payload) {
-		setLastPayload(payload)
-		setPasskeys(payload.passkeys)
-	}
-
 	const hydrated = useHydrated()
 	const isBusy = !hydrated || actionStatus === 'busy'
 

@@ -1,6 +1,4 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon } from '../components/icon.tsx'
@@ -349,12 +347,7 @@ export function AccountUsagePage({
 	payload: AccountUsageLoaderData
 	currentHref: string
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources)
-	const [savedUsage, setSavedUsage] = useState<{
-		from: AccountUsageLoaderData
-		next: AccountUsageLoaderData
-	} | null>(null)
-	const usage = savedUsage?.from === payload ? savedUsage.next : payload
+	const usage = payload
 
 	const groupedRows = usage
 		? groupEntitlementRows(usage.entitlementConsumption)
@@ -555,10 +548,6 @@ export function AccountUsagePage({
 							credits={usage.credits}
 							notice={usage.notice}
 							error={usage.error}
-							onUsageChange={(next) => {
-								setSavedUsage({ from: payload, next })
-								void invalidatePages()
-							}}
 						/>
 					) : null}
 				</>
@@ -566,5 +555,3 @@ export function AccountUsagePage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = ['loadUsagePage', 'loadBillingPage'] as const

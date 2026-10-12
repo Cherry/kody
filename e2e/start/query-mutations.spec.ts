@@ -7,7 +7,7 @@ for (const { outcome, prewarm } of [
 	{ outcome: 'accepted', prewarm: false },
 	{ outcome: 'rejected', prewarm: false },
 ] as const) {
-	test(`profile optimism survives navigation and ${outcome === 'accepted' ? 'persists after' : 'rolls back after'} a held write${prewarm ? '' : ' on an uncached profile'}`, async ({
+	test(`profile writes reconcile after unmount and ${outcome === 'accepted' ? 'persists after' : 'rolls back after'} a held write${prewarm ? '' : ' on an uncached profile'}`, async ({
 		page,
 		seedE2eUser,
 		login,
@@ -88,35 +88,23 @@ for (const { outcome, prewarm } of [
 			await page
 				.getByRole('link', { name: 'View public profile', exact: true })
 				.click()
-			if (!prewarm) release()
-			const intermediateName =
-				!prewarm && outcome === 'rejected' ? original : nextName
-			const intermediateBio =
-				!prewarm && outcome === 'rejected' ? originalBio : nextBio
-			await expect(page.getByTestId('profile-display-name')).toHaveText(
-				intermediateName,
-			)
-			if (intermediateBio)
-				await expect(page.getByTestId('profile-bio')).toHaveText(
-					intermediateBio,
-				)
-			else await expect(page.getByTestId('profile-bio')).toHaveCount(0)
-			await page.clock.fastForward(61_000)
-			await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
-			await page
-				.getByRole('link', { name: 'Edit profile', exact: true })
-				.click()
+			// Cached profiles still require a fresh visibility check. That read waits
+			// for this write, so keep the current form until access is confirmed.
 			await expect(
 				page.getByLabel('Display name', { exact: true }),
-			).toHaveValue(intermediateName)
-			await page
-				.getByRole('link', { name: 'View public profile', exact: true })
-				.click()
-			await expect(page.getByTestId('profile-display-name')).toHaveText(
-				intermediateName,
-			)
+			).toHaveValue(nextName)
+			await expect(page.getByTestId('profile-display-name')).toHaveCount(0)
+			// Supersede the waiting profile navigation and unmount the submitter.
+			await page.evaluate(() => window.history.pushState(null, '', '/pricing'))
+			await expect(page.locator('main')).toContainText('Worker compute')
+			await page.clock.fastForward(61_000)
+			await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
 			release()
 			await writeResponse
+			await page.evaluate(
+				(href) => window.history.pushState(null, '', href),
+				`/@${user.username}`,
+			)
 			await expect(page.getByTestId('profile-display-name')).toHaveText(
 				outcome === 'accepted' ? nextName : original,
 			)

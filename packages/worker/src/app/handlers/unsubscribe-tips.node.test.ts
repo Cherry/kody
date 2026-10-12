@@ -5,7 +5,7 @@ import { createRouter } from 'remix/router'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testCookieSecret } from '#worker/test-support/auth-provider-harness.ts'
-import { createUnsubscribeTipsHandler } from '#app/handlers/unsubscribe-tips.ts'
+import { createUnsubscribeTipsHandler } from '#app/handlers/unsubscribe-tips-document.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { routes } from '#universal/routes.ts'
 import {

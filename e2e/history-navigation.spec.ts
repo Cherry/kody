@@ -9,7 +9,7 @@ type HistoryFrame = {
 	path: string
 	scrollY: number
 	featureOnScreen: boolean
-	featureStylesheetApplied: boolean
+	featureStylesApplied: boolean
 	homeOnScreen: boolean
 }
 
@@ -37,14 +37,24 @@ async function startHistoryRecording(page: Page) {
 		let recordingActive = true
 		const sample = () => {
 			if (!recordingActive) return
-			const stylesheet = document.querySelector<HTMLLinkElement>(
-				'link[rel="stylesheet"][href="/feature-pages.css"]',
+			const feature = document.querySelector('.feature-detail')
+			const study = feature?.querySelector('.study')
+			const split = feature?.querySelector('.split, .boundary')
+			const expectedHue = feature?.querySelector('.memory') ? '29' : '300'
+			const styled = Boolean(
+				feature &&
+				study &&
+				split &&
+				getComputedStyle(feature).getPropertyValue('--hue').trim() ===
+					expectedHue &&
+				getComputedStyle(split).display === 'grid' &&
+				parseFloat(getComputedStyle(study).paddingTop) > 0,
 			)
 			recording.frames.push({
 				path: location.pathname,
 				scrollY: Math.round(window.scrollY),
 				featureOnScreen: Boolean(document.querySelector('.feature-detail')),
-				featureStylesheetApplied: Boolean(stylesheet?.sheet),
+				featureStylesApplied: styled,
 				homeOnScreen: Boolean(
 					document.querySelector('main a[href="/features/memory"]'),
 				),
@@ -71,23 +81,52 @@ function stopHistoryRecording(page: Page) {
 	)
 }
 
-function expectFeatureStylesheetApplied(page: Page) {
-	return expect
+async function expectFeatureStylesheetApplied(page: Page) {
+	await expect(
+		page.locator('.feature-detail .split, .feature-detail .boundary'),
+	).toHaveCSS('display', 'grid')
+	await expect
 		.poll(() =>
-			page.evaluate(() =>
-				Boolean(
-					document.querySelector<HTMLLinkElement>(
-						'link[rel="stylesheet"][href="/feature-pages.css"]',
-					)?.sheet,
+			page
+				.locator('.feature-detail')
+				.evaluate((element) =>
+					getComputedStyle(element).getPropertyValue('--hue').trim(),
 				),
-			),
 		)
-		.toBe(true)
+		.toBe(new URL(page.url()).pathname.endsWith('/memory') ? '29' : '300')
+	// Ensure the recorder observes the rendered destination, not only pending frames.
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) =>
+				requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+			),
+	)
+}
+
+function isFeatureModule(url: URL) {
+	return (
+		/\/assets\/features-[^/]+\.js$/.test(url.pathname) ||
+		url.pathname.endsWith('/start/pages/features.tsx')
+	)
+}
+
+async function holdFeatureModule(page: Page) {
+	let release!: () => void
+	const gate = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	let requested = false
+	await page.route(isFeatureModule, async (route) => {
+		requested = true
+		await gate
+		await route.continue()
+	})
+	return { release, wait: () => expect.poll(() => requested).toBe(true) }
 }
 
 function unstyledFeatureFrames(recording: HistoryRecording) {
 	return recording.frames.filter(
-		(frame) => frame.featureOnScreen && !frame.featureStylesheetApplied,
+		(frame) => frame.featureOnScreen && !frame.featureStylesApplied,
 	)
 }
 
@@ -111,11 +150,7 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 	page,
 }) => {
 	await openWarmHomepage(page)
-	// A slow route stylesheet must hold the swap, not paint the page bare.
-	await page.route('**/feature-pages.css', async (route) => {
-		await new Promise((resolve) => setTimeout(resolve, 400))
-		await route.continue()
-	})
+	const held = await holdFeatureModule(page)
 
 	const lanternLink = page
 		.getByRole('main')
@@ -128,6 +163,10 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 
 	await startHistoryRecording(page)
 	await lanternLink.click()
+	await held.wait()
+	await expect(lanternLink).toBeVisible()
+	await expect(page.locator('.feature-detail')).toHaveCount(0)
+	held.release()
 	await expect(page).toHaveURL(/\/features\/memory$/)
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
@@ -136,6 +175,7 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 		await page.evaluate(() => '__kodyBootDocument' in window),
 		'the lantern click stayed in the SPA',
 	).toBe(true)
+	expect(click.frames.some((frame) => frame.featureOnScreen)).toBe(true)
 	expect(unstyledFeatureFrames(click), 'click painted unstyled').toEqual([])
 
 	const documentRefetches: Array<string> = []
@@ -173,6 +213,7 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
 	const forward = await stopHistoryRecording(page)
+	expect(forward.frames.some((frame) => frame.featureOnScreen)).toBe(true)
 	expect(unstyledFeatureFrames(forward), 'Forward painted unstyled').toEqual([])
 	expect(
 		forward.frames.filter(
@@ -183,14 +224,11 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 	expect(forward.viewTransitions).toBe(0)
 })
 
-test('a superseding feature navigation waits for the stylesheet already loading', async ({
+test('a superseding feature navigation waits for the shared styled component', async ({
 	page,
 }) => {
 	await openWarmHomepage(page, ['/features/memory', '/features/secrets'])
-	await page.route('**/feature-pages.css', async (route) => {
-		await new Promise((resolve) => setTimeout(resolve, 2_500))
-		await route.continue()
-	})
+	const held = await holdFeatureModule(page)
 	const lantern = page.getByRole('main')
 	await lantern
 		.getByRole('link', { name: 'memory', exact: true })
@@ -198,28 +236,34 @@ test('a superseding feature navigation waits for the stylesheet already loading'
 
 	await startHistoryRecording(page)
 	await lantern.getByRole('link', { name: 'memory', exact: true }).click()
-	// The first navigation is now waiting on the stylesheet it inserted.
-	await expect(
-		page.locator('link[rel="stylesheet"][href="/feature-pages.css"]'),
-	).toBeAttached()
+	await held.wait()
+	await expect(page.locator('.feature-detail')).toHaveCount(0)
 	await lantern.getByRole('link', { name: 'secrets', exact: true }).click()
+	await expect(page.locator('.feature-detail')).toHaveCount(0)
+	held.release()
 	await expect(page).toHaveURL(/\/features\/secrets$/)
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
 	const recording = await stopHistoryRecording(page)
 
 	expect(await page.evaluate(() => '__kodyBootDocument' in window)).toBe(true)
+	expect(recording.frames.some((frame) => frame.featureOnScreen)).toBe(true)
+	expect(
+		recording.frames.filter(
+			(frame) => frame.featureOnScreen && frame.path !== '/features/secrets',
+		),
+	).toEqual([])
 	expect(unstyledFeatureFrames(recording), 'painted unstyled').toEqual([])
 })
 
-test('a route stylesheet that fails to load falls back to a document load', async ({
+test('a feature component that fails to load recovers through a document load', async ({
 	page,
 }) => {
 	await openWarmHomepage(page)
-	let stylesheetRequests = 0
-	await page.route('**/feature-pages.css', async (route) => {
-		stylesheetRequests += 1
-		if (stylesheetRequests === 1) {
+	let componentRequests = 0
+	await page.route(isFeatureModule, async (route) => {
+		componentRequests += 1
+		if (componentRequests === 1) {
 			await route.abort('failed')
 			return
 		}
@@ -236,5 +280,6 @@ test('a route stylesheet that fails to load falls back to a document load', asyn
 		.toBe(false)
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
-	expect(stylesheetRequests).toBe(2)
+	await waitForClientHydration(page)
+	await expect.poll(() => componentRequests).toBe(2)
 })

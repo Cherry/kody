@@ -213,10 +213,6 @@ export default defineConfig(async ({ command }) => {
 						'packages/worker/src/app/client-entry-assets.ts',
 					),
 				},
-				{
-					find: /^#app\/handler\.ts$/,
-					replacement: path.resolve(root, 'packages/worker/start/server.ts'),
-				},
 				alias('#app', path.resolve(root, 'packages/worker/src/app')),
 				alias('#client', path.resolve(root, 'packages/worker/client')),
 				alias('#universal', path.resolve(root, 'packages/worker/universal')),

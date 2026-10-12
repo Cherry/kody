@@ -111,11 +111,11 @@ arguments.
    open access, so configure a fresh MOCK_API_TOKEN before exposing it. Existing
    full-app external integrations still require corresponding test credentials.
 8. Build with `NODE_ENV=production`, `CLOUDFLARE_ENV=preview`, and
-   `KODY_WRANGLER_CONFIG=CHECKED_ORIGIN`. Run `npm run build` for baseline or
-   `npm run build:start` for candidate. Audit the emitted Vite config with this
-   tool, preserve slim-origin migration stripping, then deploy that checked
-   emitted config directly. Do not use `npm run deploy` for candidate origin:
-   its existing implementation hard-codes `dist/ssr/wrangler.json`.
+   `KODY_WRANGLER_CONFIG=CHECKED_ORIGIN`. Run `npm run build` in each checkout.
+   Audit the emitted Vite config with this tool, preserve slim-origin migration
+   stripping, then deploy that checked emitted config directly. The Start origin
+   emits `dist/server/wrangler.json`; the archived Remix baseline emits
+   `dist/ssr/wrangler.json`.
 9. Deploy full jobs after origin exists. Seed equivalent disposable users/data
    using `tools/seed-test-data.ts --remote --config CHECKED_ORIGIN` with private
    credentials. Record source/build hashes and resulting deployed version IDs.

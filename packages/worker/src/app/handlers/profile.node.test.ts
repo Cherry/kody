@@ -1,6 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createProfileApiHandler, createProfileHandler } from './profile.tsx'
+import { createProfileApiHandler } from './profile.tsx'
+import { createProfileHandler } from './profile-document.tsx'
 import { type CommunityProfileRecord } from '#worker/community/types.ts'
 import type * as FrameRegistry from '#app/frame-registry.ts'
 

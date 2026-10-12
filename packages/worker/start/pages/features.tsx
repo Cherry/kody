@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { Global } from '@emotion/react'
+import featureStyles from '../../public/feature-pages.css?raw'
 import { type ReactNode } from 'react'
 import {
 	layoutMaxWidths,
@@ -12,14 +14,17 @@ export function FeaturePage({
 	overview?: boolean
 }) {
 	return (
-		<div
-			className={overview ? 'feature-overview' : 'feature-detail'}
-			css={{
-				'--feature-max-width': layoutMaxWidths.extended,
-				'--feature-gutter': pageGutter,
-			}}
-		>
-			{children}
-		</div>
+		<>
+			<Global styles={featureStyles} />
+			<div
+				className={overview ? 'feature-overview' : 'feature-detail'}
+				css={{
+					'--feature-max-width': layoutMaxWidths.extended,
+					'--feature-gutter': pageGutter,
+				}}
+			>
+				{children}
+			</div>
+		</>
 	)
 }

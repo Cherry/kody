@@ -7,24 +7,22 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createAccountHandler } from '#app/handlers/account.ts'
-import { createAccountConnectionsHandler } from '#app/handlers/account-connected-agents.ts'
-import { createAccountPasskeysHandler } from '#app/handlers/account-passkeys.ts'
-import { createAccountMcpOauthClientsHandler } from '#app/handlers/account-mcp-oauth-clients.ts'
-import {
-	createAccountOrganizationsApiHandler,
-	createAccountOrganizationsHandler,
-} from '#app/handlers/account-organizations.ts'
-import { createAccountTwoFactorHandler } from '#app/handlers/account-two-factor.ts'
-import { createAccountWaitingHandler } from '#app/handlers/account-waiting.ts'
-import { createCommunityHandler } from '#app/handlers/community.tsx'
+import { createAccountHandler } from '#app/handlers/account-document.ts'
+import { createAccountConnectionsHandler } from '#app/handlers/account-connected-agents-document.ts'
+import { createAccountPasskeysHandler } from '#app/handlers/account-passkeys-document.ts'
+import { createAccountMcpOauthClientsHandler } from '#app/handlers/account-mcp-oauth-clients-document.ts'
+import { createAccountOrganizationsApiHandler } from '#app/handlers/account-organizations.ts'
+import { createAccountOrganizationsHandler } from '#app/handlers/account-organizations-document.ts'
+import { createAccountTwoFactorHandler } from '#app/handlers/account-two-factor-document.ts'
+import { createAccountWaitingHandler } from '#app/handlers/account-waiting-document.ts'
+import { createCommunityHandler } from '#app/handlers/community-document.tsx'
 import {
 	createCommunityDetailHandler,
 	createCommunityPackageHandler,
-} from '#app/handlers/community-detail.tsx'
-import { createOnboardingHandler } from '#app/handlers/onboarding.ts'
-import { createPendingVerificationHandler } from '#app/handlers/pending-verification.ts'
-import { createResetPasswordHandler } from '#app/handlers/reset-password.ts'
+} from '#app/handlers/community-detail-document.tsx'
+import { createOnboardingHandler } from '#app/handlers/onboarding-document.ts'
+import { createPendingVerificationHandler } from '#app/handlers/pending-verification-document.ts'
+import { createResetPasswordHandler } from '#app/handlers/reset-password-document.ts'
 import { resetInlineStylesheetCache } from '#app/inline-stylesheet.ts'
 import {
 	renderAppPage,

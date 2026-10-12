@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test'
 import { env } from 'cloudflare:workers'
 import { originWorkerHandler } from './origin-handler.ts'
+import { requestSkipsAssetProbe } from './static-asset-probe.ts'
 
 function trackAssetFetches(base: Env) {
 	const pathnames: Array<string> = []
@@ -53,9 +54,13 @@ test('a public file is served from ASSETS and a dynamic prefix never fetches tha
 	expect(assetBytes.byteLength).toBeGreaterThan(0)
 	expect(tracked.pathnames).toContain('/favicon.ico')
 
+	expect(requestSkipsAssetProbe('/account')).toBe(true)
+	expect(requestSkipsAssetProbe('/@acme/-/jobs')).toBe(true)
 	const beforeAccount = tracked.pathnames.length
 	const accountResponse = await workerFetch(
-		new Request('https://test.kody.dev/account'),
+		new Request('https://test.kody.dev/account/jobs.json', {
+			headers: { Accept: 'application/json' },
+		}),
 		tracked.env,
 	)
 	await accountResponse.body?.cancel()
@@ -68,7 +73,9 @@ test('a public file is served from ASSETS and a dynamic prefix never fetches tha
 
 	const beforeOrg = tracked.pathnames.length
 	const orgResponse = await workerFetch(
-		new Request('https://test.kody.dev/@acme/-/jobs'),
+		new Request('https://test.kody.dev/@acme/connectors/home', {
+			headers: { Accept: 'application/json' },
+		}),
 		tracked.env,
 	)
 	await orgResponse.body?.cancel()

@@ -2,31 +2,7 @@ import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { loadAccountUsageData } from '#app/account-usage-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
-import { loadAccountUsagePageResult } from '../account-usage-page.ts'
-
-export function createAccountUsageHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountUsage = await loadAccountUsagePageResult(env, request, user)
-			if (accountUsage instanceof Response) return accountUsage
-			return renderAppPage({
-				request,
-				env,
-				title: 'Usage',
-				loaderData: { accountUsage },
-			})
-		},
-	} satisfies Action<typeof routes.accountUsage>
-}
 
 export function createAccountUsageApiHandler(env: Env) {
 	return {

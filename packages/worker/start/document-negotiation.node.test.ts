@@ -4,6 +4,9 @@ import { isNegotiatedDocumentPath } from './document-negotiation.ts'
 test('only document routes with Markdown variants vary by Accept', () => {
 	for (const pathname of [
 		'/',
+		'/use-cases',
+		'/use-cases/mcp-gateway',
+		'/compare/n8n-alternatives',
 		'/docs',
 		'/docs/',
 		'/docs/connect',

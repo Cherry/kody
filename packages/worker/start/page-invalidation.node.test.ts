@@ -151,3 +151,28 @@ it('an organization write only invalidates that organization resource', async ()
 	expect(client.getQueryState(other)?.isInvalidated).toBe(false)
 	client.clear()
 })
+
+it('cross-surface writes without org identity invalidate named resources across the actor caches', async () => {
+	const client = new QueryClient()
+	const keys = [
+		['page', 'actor', 'loadSecretsPage', '/@acme/-/secrets'],
+		['page', 'actor', 'loadSecretsPage', '/@other/-/secrets'],
+		['page', 'other-actor', 'loadSecretsPage', '/@acme/-/secrets'],
+		['page', 'actor', 'loadJobsPage', '/@acme/-/jobs'],
+	]
+	for (const key of keys) client.setQueryData(key, {})
+	await invalidatePageResources(
+		client,
+		'actor',
+		['loadSecretsPage'],
+		'none',
+		'/connect/secrets?state=opaque',
+	)
+	expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([
+		true,
+		true,
+		false,
+		false,
+	])
+	client.clear()
+})

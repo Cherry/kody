@@ -49,6 +49,7 @@ import {
 } from '#universal/styles/style-primitives.ts'
 
 export type ProfileContentProps = {
+	basePath?: string
 	profile: PublicCommunityProfile
 	packages: Array<PublicProfilePackageItem>
 	activity: Array<PublicCommunityActivityItem> | null
@@ -154,12 +155,13 @@ function renderProfileFilterNav<Filter extends string>(input: {
  * republish" describe owner-only inventory the client ignores for them anyway.
  */
 function renderProfilePackageFilters(input: {
+	basePath?: string
 	username: string
 	filters: ProfilePackageFilters
 	isSelf: boolean
 	filtersActive: boolean
 }) {
-	const { username, filters, isSelf } = input
+	const { username, filters, isSelf, basePath } = input
 	const listingChoices: Array<
 		ProfileFilterChoice<ProfilePackageListingFilter>
 	> = [
@@ -195,7 +197,12 @@ function renderProfilePackageFilters(input: {
 								{ value: 'private', label: 'Private' },
 							],
 							hrefFor: (visibility) =>
-								buildProfileHref({ username, ...filters, visibility }),
+								buildProfileHref({
+									basePath,
+									username,
+									...filters,
+									visibility,
+								}),
 						})
 					: null}
 				{renderProfileFilterNav<ProfilePackageListingFilter>({
@@ -206,7 +213,7 @@ function renderProfilePackageFilters(input: {
 					selected: filters.listing,
 					choices: listingChoices,
 					hrefFor: (listing) =>
-						buildProfileHref({ username, ...filters, listing }),
+						buildProfileHref({ basePath, username, ...filters, listing }),
 				})}
 				{isSelf
 					? renderProfileFilterNav<ProfilePackageHiddenFilter>({
@@ -220,7 +227,7 @@ function renderProfilePackageFilters(input: {
 								{ value: 'no', label: 'Visible' },
 							],
 							hrefFor: (hidden) =>
-								buildProfileHref({ username, ...filters, hidden }),
+								buildProfileHref({ basePath, username, ...filters, hidden }),
 						})
 					: null}
 				{renderProfileFilterNav<ProfilePackagePresenceFilter>({
@@ -235,6 +242,7 @@ function renderProfilePackageFilters(input: {
 					],
 					hrefFor: (packagePresence) =>
 						buildProfileHref({
+							basePath,
 							username,
 							...filters,
 							package: packagePresence,
@@ -250,7 +258,8 @@ function renderProfilePackageFilters(input: {
 						{ value: 'yes', label: 'Has app' },
 						{ value: 'no', label: 'No app' },
 					],
-					hrefFor: (app) => buildProfileHref({ username, ...filters, app }),
+					hrefFor: (app) =>
+						buildProfileHref({ basePath, username, ...filters, app }),
 				})}
 				{renderProfileFilterNav<ProfilePackageSort>({
 					label: 'Sort',
@@ -264,6 +273,7 @@ function renderProfilePackageFilters(input: {
 					],
 					hrefFor: (sort) =>
 						buildProfileHref({
+							basePath,
 							username,
 							...filters,
 							sort,
@@ -279,7 +289,8 @@ function renderProfilePackageFilters(input: {
 						{ value: 'asc', label: 'Ascending' },
 						{ value: 'desc', label: 'Descending' },
 					],
-					hrefFor: (dir) => buildProfileHref({ username, ...filters, dir }),
+					hrefFor: (dir) =>
+						buildProfileHref({ basePath, username, ...filters, dir }),
 				})}
 			</div>
 		</details>
@@ -390,6 +401,7 @@ export function ProfileContent(props: ProfileContentProps) {
 				{showFilters
 					? renderProfilePackageFilters({
 							username: profile.username,
+							basePath: props.basePath,
 							filters,
 							isSelf,
 							filtersActive: toolbarActive,

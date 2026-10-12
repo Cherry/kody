@@ -12,32 +12,9 @@ import {
 	PermanentlyReservedUsernameError,
 	removeReservedUsernames,
 } from '#worker/identity/reserved-username-settings.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
-
-export function createAdminReservedUsernamesHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-
-			const adminReservedUsernames = await loadAdminReservedUsernamesData(env)
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin reserved usernames',
-				loaderData: { adminReservedUsernames },
-			})
-		},
-	} satisfies Action<typeof routes.adminReservedUsernames>
-}
 
 export function createAdminReservedUsernamesApiHandler(env: Env) {
 	return {

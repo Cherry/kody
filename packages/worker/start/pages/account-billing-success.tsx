@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { kodyDiscordInviteUrl } from '#universal/community-links.ts'
 import { type AccountBillingSuccessLoaderData } from '#universal/loader-data.ts'
 import {
@@ -35,17 +36,17 @@ export function AccountBillingSuccessPage({
 					Thanks for paying for the volume you actually use.
 				</p>
 				<div css={ctaRowCss}>
-					<a href={kodyDiscordInviteUrl} css={primaryCtaCss}>
+					<SiteLink href={kodyDiscordInviteUrl} css={primaryCtaCss}>
 						Join the Kody Discord
-					</a>
+					</SiteLink>
 					{data.needsOnboarding ? (
-						<a href={onboardingPath} css={secondaryCtaCss}>
+						<SiteLink href={onboardingPath} css={secondaryCtaCss}>
 							Connect your agent
-						</a>
+						</SiteLink>
 					) : null}
-					<a href={billingPath} css={mutedLinkCss}>
+					<SiteLink href={billingPath} css={mutedLinkCss}>
 						Manage billing
-					</a>
+					</SiteLink>
 				</div>
 			</div>
 		</section>

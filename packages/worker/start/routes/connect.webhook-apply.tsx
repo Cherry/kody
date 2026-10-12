@@ -1,25 +1,30 @@
 /** @jsxImportSource @emotion/react */
 import { createFileRoute, useLocation } from '@tanstack/react-router'
-import { loadConnectWebhookApply } from '#start/server/connect'
+import { connectWebhookApplyQuery } from '../connect-approval-queries.ts'
+import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { ConnectWebhookApplyRoute } from '../pages/connect-webhook-apply.tsx'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/connect/webhook-apply')({
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => search,
-	loader: ({ abortController, location }) =>
-		loadConnectWebhookApply({
-			signal: abortController.signal,
-			data: location.pathname + location.searchStr,
-		}),
+	context: ({ location }) => ({
+		pageQueryInput: location.pathname + location.searchStr,
+	}),
+	loader: ({ context, preload }) =>
+		loadPageQuery(
+			context.queryClient,
+			connectWebhookApplyQuery(context.actorKey, context.pageQueryInput),
+			preload,
+		),
+
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })
 function Page() {
 	const href = useLocation({ select: (l) => l.href })
-	return (
-		<ConnectWebhookApplyRoute
-			key={href}
-			initialData={Route.useLoaderData().payload}
-		/>
+	const { actorKey, pageQueryInput } = Route.useRouteContext()
+	const { data } = usePageQuery(
+		connectWebhookApplyQuery(actorKey, pageQueryInput),
 	)
+	return <ConnectWebhookApplyRoute key={href} initialData={data.payload} />
 }

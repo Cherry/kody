@@ -18,10 +18,15 @@ export async function loadActivityQuery(
 	client: QueryClient,
 	actorKey: string | null,
 	href: string,
+	preload = false,
 ) {
 	const options = activityQuery(actorKey, href)
-	const data = client.getQueryState(options.queryKey)?.isInvalidated
-		? await client.fetchInfiniteQuery(options)
+	// A foreground entry must recheck organization membership. An older
+	// preload flight must not satisfy that authorization check.
+	if (!preload)
+		await client.cancelQueries({ queryKey: options.queryKey, exact: true })
+	const data = !preload
+		? await client.fetchInfiniteQuery({ ...options, staleTime: 0 })
 		: await client.ensureInfiniteQueryData({
 				...options,
 				revalidateIfStale: true,

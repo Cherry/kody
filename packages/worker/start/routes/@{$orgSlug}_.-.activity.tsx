@@ -28,11 +28,12 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/activity')({
 				'cursor',
 			]),
 	}),
-	loader: ({ context }) =>
+	loader: ({ context, preload }) =>
 		loadActivityQuery(
 			context.queryClient,
 			context.actorKey,
 			context.pageQueryInput,
+			preload,
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,

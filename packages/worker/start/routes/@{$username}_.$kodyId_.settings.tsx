@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { loadPackage } from '#start/server/public-data'
 import { PackageSettingsRoute } from '../pages/package-settings.tsx'
 import { renderMissingListing } from '../components/community-detail-sections.tsx'
+import { packageWebhooksQuery } from '../package-webhooks-query.ts'
 import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadPackage', loadPackage, {
 	freshAuthorization: true,
@@ -18,12 +19,22 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/settings')({
 			search: location.searchStr,
 		},
 	}),
-	loader: ({ context, preload }) =>
-		loadPageQuery(
-			context.queryClient,
-			pageQuery(context.actorKey, context.pageQueryInput),
-			preload,
-		),
+	loader: async ({ context, preload }) => {
+		const [page] = await Promise.all([
+			loadPageQuery(
+				context.queryClient,
+				pageQuery(context.actorKey, context.pageQueryInput),
+				preload,
+			),
+			context.queryClient.prefetchQuery(
+				packageWebhooksQuery(context.actorKey, {
+					username: context.pageQueryInput.username,
+					kodyId: context.pageQueryInput.kodyId,
+				}),
+			),
+		])
+		return page
+	},
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })

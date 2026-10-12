@@ -146,39 +146,29 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					.filter({ hasText: /^Quarantined$/ })
 					.first(),
 			).toBeVisible()
+			await page.getByTestId('org-switcher').click()
 			await page
-				.locator('a[href="/account"]')
-				.first()
-				.evaluate((node) => {
-					if (!(node instanceof HTMLAnchorElement))
-						throw new Error('Expected navigation link')
-					node.click()
-				})
+				.getByTestId('org-switcher-panel')
+				.getByRole('link', { name: 'Account settings', exact: true })
+				.click()
 			await expect(
 				page.getByLabel('Display name', { exact: true }),
 			).toBeVisible()
-			await page
-				.locator('a[href="/account/email"]')
-				.first()
-				.evaluate((node) => {
-					if (!(node instanceof HTMLAnchorElement))
-						throw new Error('Expected navigation link')
-					node.click()
-				})
+			await page.evaluate(
+				(href) => window.history.pushState(null, '', href),
+				`/@${user.username}/-/email`,
+			)
 			await expect(
 				page
 					.locator('span')
 					.filter({ hasText: /^Quarantined$/ })
 					.first(),
 			).toBeVisible()
+			await page.getByTestId('org-switcher').click()
 			await page
-				.locator('a[href="/account"]')
-				.first()
-				.evaluate((node) => {
-					if (!(node instanceof HTMLAnchorElement))
-						throw new Error('Expected navigation link')
-					node.click()
-				})
+				.getByTestId('org-switcher-panel')
+				.getByRole('link', { name: 'Account settings', exact: true })
+				.click()
 			await expect(
 				page.getByLabel('Display name', { exact: true }),
 			).toBeVisible()
@@ -189,14 +179,10 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					page.getByText('Controlled email rejection', { exact: true }),
 				).toBeVisible()
 			await page.unrouteAll({ behavior: 'wait' })
-			await page
-				.locator('a[href="/account/email"]')
-				.first()
-				.evaluate((node) => {
-					if (!(node instanceof HTMLAnchorElement))
-						throw new Error('Expected navigation link')
-					node.click()
-				})
+			await page.evaluate(
+				(href) => window.history.pushState(null, '', href),
+				`/@${user.username}/-/email`,
+			)
 			await page
 				.getByRole('combobox', { name: 'Filter messages by classification' })
 				.selectOption('quarantined')

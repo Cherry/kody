@@ -3,23 +3,35 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import { Honeypot } from '../components/honeypot-field.tsx'
-import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
-import { useRef, useState, type FormEvent } from 'react'
+import { startAuthentication } from '@simplewebauthn/browser'
+import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
+import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
+import { ProviderIcon } from '../components/provider-icons.tsx'
+import { AuthorizeOrgField } from './oauth-authorize-org-picker.tsx'
+import { buildAuthLink } from '#client/auth-links.ts'
+import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
+import { resolveSignInStatusAfterPageshow } from '#client/routes/oauth-authorize-bfcache.ts'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { useLocation } from '@tanstack/react-router'
 import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
 import {
+	renderTurnstileWidgets,
+	resetTurnstileWidgets,
+	emptyPublicFormProtection,
 	honeypotFieldName,
 	readPublicFormProtection,
 	turnstileResponseFieldName,
 	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
 import {
-	renderEmailVerificationPrompt,
+	renderEmailVerificationPrompt as EmailVerificationPrompt,
 	requestResendVerification,
 } from './email-verification-prompt.tsx'
 import { resolveAuthorizeEmailVerified } from '#client/routes/oauth-authorize-email-verified.ts'
 import {
+	oauthAuthorizeOrgField,
+	oauthAuthorizeGrantHeading,
 	oauthAuthorizeActionsDisabled,
 	oauthAuthorizeApproveAriaLabel,
 	oauthAuthorizeConsentDecision,
@@ -80,13 +92,19 @@ function oauthAuthorizeAccessLead(
 function renderOauthAuthorizeGrant(input: {
 	clientLabel: string
 	scopes: ReadonlyArray<string>
+	selectedOrgSlug: string | null
 }) {
 	return (
 		<section data-testid="oauth-authorize-grant" css={cardCss}>
-			<h2 css={sectionTitleCss}>This agent gets full access</h2>
+			<h2 css={sectionTitleCss}>
+				{oauthAuthorizeGrantHeading(input.selectedOrgSlug)}
+			</h2>
 			<p css={descriptionCss}>
-				Approving lets {input.clientLabel} use everything in this Kody account:
-				packages, memories, secrets, email, connected services, and anything
+				Approving lets {input.clientLabel} use everything in this Kody
+				{input.selectedOrgSlug
+					? ` organization @${input.selectedOrgSlug}`
+					: ' account'}
+				: packages, memories, secrets, email, connected services, and anything
 				else your assistant can do.
 			</p>
 			{input.scopes.length > 0 ? (
@@ -125,9 +143,11 @@ function renderOauthAuthorizeGrant(input: {
 export function OAuthAuthorizeRoute({
 	data,
 	session,
+	authProviders,
 }: {
 	data: OAuthAuthorizeLoaderData
 	session: SessionInfo | null
+	authProviders: PublicAuthConfig
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
@@ -151,7 +171,126 @@ export function OAuthAuthorizeRoute({
 	const [resendMessage, setResendMessage] = useState<string | null>(null)
 	const [resendTone, setResendTone] = useState<'error' | 'info'>('info')
 	const consentInteractive = useHydrated()
-	const turnstileSiteKey = usePublicAuthProtection()
+	const { turnstileSiteKey } = authProviders
+	const formRef = useRef<HTMLFormElement>(null)
+	const mounted = useRef(false)
+	const signInController = useRef<AbortController | null>(null)
+	const [signInStatus, setSignInStatus] = useState<'idle' | 'submitting'>(
+		'idle',
+	)
+	const signInBusy = useRef(false)
+	const [pickedOrgSlug, setPickedOrgSlug] = useState<
+		string | null | undefined
+	>()
+	const displayedOrgSlug =
+		pickedOrgSlug === undefined
+			? (info?.selectedOrgSlug ?? null)
+			: pickedOrgSlug
+	useEffect(() => {
+		mounted.current = true
+		function pageshow(event: PageTransitionEvent) {
+			if (
+				resolveSignInStatusAfterPageshow(
+					event.persisted,
+					signInBusy.current ? 'submitting' : 'idle',
+				) === 'idle' &&
+				event.persisted
+			) {
+				signInBusy.current = false
+				setSignInStatus('idle')
+				resetTurnstileWidgets()
+			}
+		}
+		window.addEventListener('pageshow', pageshow)
+		return () => {
+			mounted.current = false
+			signInController.current?.abort()
+			window.removeEventListener('pageshow', pageshow)
+		}
+	}, [])
+	useEffect(() => {
+		if (turnstileSiteKey) void renderTurnstileWidgets(turnstileSiteKey)
+	}, [turnstileSiteKey, session?.email, info?.requireCredentials])
+	function protection() {
+		const form = formRef.current
+		return form
+			? readPublicFormProtection(new FormData(form), form)
+			: emptyPublicFormProtection()
+	}
+	function signInError(text: string | null) {
+		if (!mounted.current) return
+		signInBusy.current = false
+		setSignInStatus('idle')
+		if (text) {
+			resetTurnstileWidgets()
+			setMessage({ type: 'error', text })
+		}
+	}
+	async function signIn(provider?: string) {
+		if (signInBusy.current || submitting.current) return
+		signInBusy.current = true
+		setSignInStatus('submitting')
+		const controller = new AbortController()
+		signInController.current = controller
+		const redirectTo = readOAuthResumeTarget()
+		try {
+			if (provider) {
+				const error = await startSocialSignIn(
+					provider,
+					redirectTo,
+					protection(),
+					null,
+					controller.signal,
+				)
+				if (error) signInError(error)
+				return
+			}
+			const optionsResponse = await fetch('/webauthn/authentication', {
+				headers: { Accept: 'application/json' },
+				credentials: 'include',
+				signal: controller.signal,
+			})
+			const options = await optionsResponse.json().catch(() => null)
+			if (!optionsResponse.ok || options?.ok !== true || !options.options) {
+				signInError('Unable to start passkey sign-in.')
+				return
+			}
+			let response
+			try {
+				response = await startAuthentication({ optionsJSON: options.options })
+			} catch {
+				signInError(null)
+				return
+			}
+			controller.signal.throwIfAborted()
+			const verificationResponse = await fetch('/webauthn/authentication', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ response, rememberMe: false, ...protection() }),
+			})
+			const result = await verificationResponse.json().catch(() => null)
+			controller.signal.throwIfAborted()
+			if (!verificationResponse.ok || result?.ok !== true) {
+				signInError(
+					typeof result?.error === 'string'
+						? result.error
+						: 'Passkey sign-in failed.',
+				)
+				return
+			}
+			window.location.assign(
+				resolvePasswordAuthRedirect({
+					mode: 'login',
+					requiresTwoFactor: result.requiresTwoFactor === true,
+					redirectTo,
+				}),
+			)
+		} catch {
+			if (!controller.signal.aborted)
+				signInError('Network error. Please try again.')
+		}
+	}
 	function readOAuthResumeTarget() {
 		return normalizeRedirectTo(currentHref)
 	}
@@ -166,6 +305,7 @@ export function OAuthAuthorizeRoute({
 		setResendTone('info')
 		try {
 			const result = await requestResendVerification(readOAuthResumeTarget())
+			if (!mounted.current) return
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
 			if (result.ok) await refreshSession()
@@ -179,6 +319,7 @@ export function OAuthAuthorizeRoute({
 	async function handleContinueAfterVerify() {
 		try {
 			const nextSession = await refreshSession()
+			if (!mounted.current) return
 			setResendTone('info')
 			setResendMessage(
 				nextSession?.emailVerified
@@ -195,7 +336,7 @@ export function OAuthAuthorizeRoute({
 		decision: OAuthAuthorizeDecision,
 		form?: HTMLFormElement,
 	) {
-		if (submitting.current) return
+		if (submitting.current || signInBusy.current) return
 		submitting.current = true
 		setSubmittingDecision(decision)
 
@@ -204,24 +345,27 @@ export function OAuthAuthorizeRoute({
 			body.set('decision', decision)
 			if (decision === 'approve' && form) {
 				const formData = new FormData(form)
+				const org = String(formData.get('org') ?? '').trim()
+				if (org) body.set('org', org)
 				const email = String(formData.get('email') ?? '').trim()
 				const password = String(formData.get('password') ?? '')
-				if (!email || !password) {
-					setMessage({
-						type: 'error',
-						text: 'Email and password are required.',
-					})
-					setSubmittingDecision(null)
-					return
+				if (email || password) {
+					if (!email || !password) {
+						setMessage({
+							type: 'error',
+							text: 'Email and password are required.',
+						})
+						return
+					}
+					body.set('email', email)
+					body.set('password', password)
+					const protection = readPublicFormProtection(formData, form)
+					body.set(honeypotFieldName, protection[honeypotFieldName])
+					body.set(
+						turnstileResponseFieldName,
+						protection[turnstileResponseFieldName],
+					)
 				}
-				body.set('email', email)
-				body.set('password', password)
-				const protection = readPublicFormProtection(formData, form)
-				body.set(honeypotFieldName, protection[honeypotFieldName])
-				body.set(
-					turnstileResponseFieldName,
-					protection[turnstileResponseFieldName],
-				)
 			}
 			const response = await fetch(window.location.href, {
 				method: 'POST',
@@ -233,7 +377,9 @@ export function OAuthAuthorizeRoute({
 				body,
 			})
 			const payload = await response.json().catch(() => null)
+			if (!mounted.current) return
 			if (!response.ok) {
+				resetTurnstileWidgets()
 				const errorText =
 					typeof payload?.error === 'string'
 						? payload.error
@@ -257,25 +403,22 @@ export function OAuthAuthorizeRoute({
 			}
 			setMessage({ type: 'error', text: 'Missing redirect response.' })
 		} catch {
+			if (!mounted.current) return
+			resetTurnstileWidgets()
 			setMessage({
 				type: 'error',
 				text: 'Network error. Please try again.',
 			})
 		} finally {
 			submitting.current = false
-			setSubmittingDecision(null)
+			if (mounted.current) setSubmittingDecision(null)
 		}
 	}
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		if (!(event.currentTarget instanceof HTMLFormElement)) return
-		const requireCredentials = info?.requireCredentials === true
-		const hasSession = Boolean(session?.email) && !requireCredentials
-		await submitDecision(
-			'approve',
-			hasSession ? undefined : event.currentTarget,
-		)
+		await submitDecision('approve', event.currentTarget)
 	}
 
 	const clientLabel = info?.client?.name ?? 'Unknown client'
@@ -298,13 +441,21 @@ export function OAuthAuthorizeRoute({
 		!resetCompleted && !needsEmailVerification && status !== 'error'
 	const hydrated = consentInteractive
 	const consentForm = oauthAuthorizeConsentFormAttrs(currentHref)
-	const actionsDisabled = oauthAuthorizeActionsDisabled({
-		hydrated,
-		statusReady: status === 'ready',
-		submitting: Boolean(submittingDecision),
-		sessionLoading: isSessionLoading,
-		needsEmailVerification,
+	const orgField = oauthAuthorizeOrgField({
+		orgs: info?.orgs ?? [],
+		selectedOrgSlug: displayedOrgSlug,
+		signedIn: isLoggedIn,
 	})
+	const actionsDisabled =
+		orgField.kind === 'missing' ||
+		signInStatus === 'submitting' ||
+		oauthAuthorizeActionsDisabled({
+			hydrated,
+			statusReady: status === 'ready',
+			submitting: Boolean(submittingDecision),
+			sessionLoading: isSessionLoading,
+			needsEmailVerification,
+		})
 	const resetClientDisabled =
 		Boolean(submittingDecision) || isSessionLoading || !isLoggedIn
 	const formReady = hydrated && status === 'ready' && !isSessionLoading
@@ -331,7 +482,11 @@ export function OAuthAuthorizeRoute({
 				{accessLead ? <p css={pageDescriptionCss}>{accessLead}</p> : null}
 			</header>
 			{status === 'ready'
-				? renderOauthAuthorizeGrant({ clientLabel, scopes })
+				? renderOauthAuthorizeGrant({
+						clientLabel,
+						scopes,
+						selectedOrgSlug: displayedOrgSlug,
+					})
 				: null}
 			{isLoggedIn ? (
 				<section css={insetCardCss}>
@@ -353,24 +508,19 @@ export function OAuthAuthorizeRoute({
 					</p>
 				</section>
 			) : null}
-			{needsEmailVerification
-				? renderEmailVerificationPrompt({
-						email: sessionEmail,
-						description:
-							'MCP authorization cannot finish until this account email is verified. Resend the link here if needed. Keep this page open, verify in another tab, then continue without restarting the host connection.',
-						delivery: session?.emailVerificationDelivery ?? null,
-						resendStatus,
-						resendMessage,
-						resendTone,
-						onResend: () => {
-							void handleResendVerification()
-						},
-						continueLabel: "I've verified - continue",
-						onContinue: () => {
-							void handleContinueAfterVerify()
-						},
-					})
-				: null}
+			{needsEmailVerification ? (
+				<EmailVerificationPrompt
+					email={sessionEmail}
+					description="MCP authorization cannot finish until this account email is verified. Resend the link here if needed. Keep this page open, verify in another tab, then continue without restarting the host connection."
+					delivery={session?.emailVerificationDelivery ?? null}
+					resendStatus={resendStatus}
+					resendMessage={resendMessage}
+					resendTone={resendTone}
+					onResend={() => void handleResendVerification()}
+					continueLabel="I've verified - continue"
+					onContinue={() => void handleContinueAfterVerify()}
+				/>
+			) : null}
 			{needsEmailVerification && !resetCompleted ? (
 				<div css={{ marginBottom: spacing.md }}>
 					<button
@@ -426,6 +576,7 @@ export function OAuthAuthorizeRoute({
 			) : null}
 			{showAuthorizeForm ? (
 				<form
+					ref={formRef}
 					method={consentForm.method}
 					action={consentForm.action}
 					data-testid="oauth-authorize-form"
@@ -446,6 +597,12 @@ export function OAuthAuthorizeRoute({
 						name="decision"
 						value={oauthAuthorizeConsentDecision}
 					/>
+					<AuthorizeOrgField
+						orgs={info?.orgs ?? []}
+						selectedOrgSlug={displayedOrgSlug}
+						signedIn={isLoggedIn}
+						onChange={setPickedOrgSlug}
+					/>
 					<Honeypot />
 					{!isLoggedIn && isSessionReady ? (
 						<>
@@ -463,8 +620,7 @@ export function OAuthAuthorizeRoute({
 							</label>
 							<label css={fieldCss}>
 								<span css={fieldLabelCss}>Password</span>
-								<input
-									type="password"
+								<PasswordRevealInput
 									name="password"
 									required
 									autoComplete="current-password"
@@ -473,6 +629,57 @@ export function OAuthAuthorizeRoute({
 									css={inputCss}
 								/>
 							</label>
+						</>
+					) : null}
+					{!isLoggedIn && isSessionReady ? (
+						<>
+							{authProviders.providers.length ? (
+								<>
+									<div role="separator" aria-label="or continue with">
+										or continue with
+									</div>
+									<div
+										css={{
+											display: 'flex',
+											gap: spacing.sm,
+											justifyContent: 'center',
+										}}
+									>
+										{authProviders.providers.map((provider) => (
+											<button
+												key={provider.id}
+												type="button"
+												disabled={actionsDisabled}
+												aria-label={`Continue with ${provider.label}`}
+												data-testid={`social-sign-in-${provider.id}`}
+												css={secondaryButtonCss}
+												onClick={() => void signIn(provider.id)}
+											>
+												<ProviderIcon providerId={provider.id} size="1.4rem" />
+											</button>
+										))}
+									</div>
+								</>
+							) : null}
+							<button
+								type="button"
+								disabled={actionsDisabled}
+								data-testid="oauth-authorize-passkey"
+								css={secondaryButtonCss}
+								onClick={() => void signIn()}
+							>
+								Sign in with a passkey
+							</button>
+							{!sessionEmail ? (
+								<p css={descriptionCss}>
+									<SiteLink
+										href={buildAuthLink('/login', readOAuthResumeTarget())}
+										css={mutedLinkCss}
+									>
+										Use the full sign-in page
+									</SiteLink>
+								</p>
+							) : null}
 						</>
 					) : null}
 					{!isLoggedIn && turnstileSiteKey ? (

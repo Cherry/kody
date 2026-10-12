@@ -2,7 +2,7 @@ import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import { RequestContext } from 'remix/router'
 import type * as PageAuth from '#app/page-auth.ts'
-import { createAccountSecretsHandler } from '#app/handlers/account-secrets.ts'
+import { createAccountSecretsHandler } from '#app/handlers/account-secrets-document.ts'
 
 const mockModule = vi.hoisted(() => ({
 	requireAuthenticatedPageUser:

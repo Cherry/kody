@@ -10,8 +10,6 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 
 function readExperimentsOptInBody(body: object): boolean | null {
@@ -19,29 +17,6 @@ function readExperimentsOptInBody(body: object): boolean | null {
 	const value = (body as { experimentsOptIn: unknown }).experimentsOptIn
 	if (typeof value !== 'boolean') return null
 	return value
-}
-
-export function createAccountExperimentsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountExperiments = await loadAccountExperimentsData({
-				db: env.APP_DB,
-				userId: user.userId,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Experiments',
-				loaderData: { accountExperiments },
-			})
-		},
-	} satisfies Action<typeof routes.accountExperiments>
 }
 
 export function createAccountExperimentsApiHandler(env: Env) {

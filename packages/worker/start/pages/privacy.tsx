@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -34,9 +35,9 @@ export function PrivacyRoute() {
 				<p css={descriptionCss}>
 					Kent C. Dodds, operator of Kody at kody.codes, is the data controller
 					for the hosted service. You can reach the operator at{' '}
-					<a href="mailto:support@kody.codes" css={mutedLinkCss}>
+					<SiteLink href="mailto:support@kody.codes" css={mutedLinkCss}>
 						support@kody.codes
-					</a>
+					</SiteLink>
 					. A separately operated Kody deployment has its own operator and data
 					controller.
 				</p>
@@ -391,9 +392,9 @@ export function PrivacyRoute() {
 					modal, and to re-enter your password when the account has one. You can
 					also ask to access, correct, delete, restrict, or receive your
 					personal data, or object to its processing, by emailing{' '}
-					<a href="mailto:support@kody.codes" css={mutedLinkCss}>
+					<SiteLink href="mailto:support@kody.codes" css={mutedLinkCss}>
 						support@kody.codes
-					</a>
+					</SiteLink>
 					. Which rights apply depends on where you live. We may need to verify
 					your identity before acting on a request.
 				</p>
@@ -419,17 +420,17 @@ export function PrivacyRoute() {
 			</section>
 
 			<p css={{ margin: 0 }}>
-				<a href="/pricing" css={mutedLinkCss}>
+				<SiteLink href="/pricing" css={mutedLinkCss}>
 					Pricing
-				</a>
+				</SiteLink>
 				{' · '}
-				<a href="/terms" css={mutedLinkCss}>
+				<SiteLink href="/terms" css={mutedLinkCss}>
 					Terms
-				</a>
+				</SiteLink>
 				{' · '}
-				<a href="/" css={mutedLinkCss}>
+				<SiteLink href="/" css={mutedLinkCss}>
 					Back home
-				</a>
+				</SiteLink>
 			</p>
 		</section>
 	)

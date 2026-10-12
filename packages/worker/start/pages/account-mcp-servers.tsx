@@ -1,11 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState, useEffect } from 'react'
-import { useRouter } from '@tanstack/react-router'
+import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import { useState, useEffect, useRef } from 'react'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
@@ -53,11 +52,6 @@ const clampedCellCss = recordCellClamp(26)
 const accountMcpServersApiPath = '/account/mcp-servers.json'
 const mcpServersRoute = createListDetailRoute('/account/mcp-servers')
 
-/**
- * Latch key for the list payload. Selection segments and the client-side `q`
- * filter do not change the GET response, so keying the latch on the base path
- * avoids spurious refetches when only those URL parts change.
- */
 export function AccountMcpServersPage({
 	payload,
 	currentHref,
@@ -67,11 +61,27 @@ export function AccountMcpServersPage({
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
+	const currentScope = useRef<{ actorKey: string | null; href: string } | null>(
+		null,
+	)
+	useEffect(() => {
+		currentScope.current = { actorKey, href: currentHref }
+		return () => {
+			currentScope.current = null
+		}
+	}, [actorKey, currentHref])
+	function isSubmitterCurrent() {
+		return (
+			currentScope.current?.actorKey === actorKey &&
+			currentScope.current.href === currentHref
+		)
+	}
 	const mutation = useMutation({
 		mutationKey: ['mcpServers', actorKey, currentHref],
 		mutationFn: async (input: {
 			body: Record<string, unknown>
 			href: string
+			actorKey: string | null
 			failureMessage: string
 		}) => {
 			const response = await fetch(accountMcpServersApiPath, {
@@ -92,12 +102,12 @@ export function AccountMcpServersPage({
 				throw new Error(accepted?.error || input.failureMessage)
 			return accepted
 		},
-		onMutate: async ({ href }) => {
+		onMutate: async ({ href, actorKey }) => {
 			await queryClient.cancelQueries(
 				orgPageFilters(actorKey, 'loadMcpServersPage', href),
 			)
 		},
-		onSuccess: async (accepted, { href }) => {
+		onSuccess: async (accepted, { href, actorKey }) => {
 			await queryClient.cancelQueries(
 				orgPageFilters(actorKey, 'loadMcpServersPage', href),
 			)
@@ -108,9 +118,17 @@ export function AccountMcpServersPage({
 				href,
 				() => accepted,
 			)
-			void invalidatePages()
 		},
-		onError: (_error, { href }) => {
+		onSettled: (_data, _error, { href, actorKey }) => {
+			void invalidatePageResources(
+				queryClient,
+				actorKey,
+				mutationResources,
+				'active',
+				href,
+			)
+		},
+		onError: (_error, { href, actorKey }) => {
 			void queryClient.invalidateQueries(
 				orgPageFilters(actorKey, 'loadMcpServersPage', href),
 			)
@@ -135,7 +153,6 @@ export function AccountMcpServersPage({
 		readOAuthResultFromHref(currentHref)?.tone ?? 'info',
 	)
 	const [deleteArmed, setDeleteArmed] = useState(false)
-	const invalidatePages = usePageInvalidation(mutationResources)
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
@@ -212,23 +229,28 @@ export function AccountMcpServersPage({
 		failureMessage: string
 		afterSuccess?: (payload: AccountMcpServersPayload) => void
 	}) {
-		if (actionState !== 'idle') return
+		if (actionState !== 'idle') return false
 		showMessage(null)
 		try {
 			const payload = await mutation.mutateAsync({
 				...input,
 				href: currentHref,
+				actorKey,
 			})
-			if (router.state.location.href !== currentHref) return
+			if (!isSubmitterCurrent() || router.state.location.href !== currentHref)
+				return false
 			applyPayload(payload)
 			showMessage(input.successMessage(payload))
 			input.afterSuccess?.(payload)
+			return true
 		} catch (error) {
+			if (!isSubmitterCurrent()) return false
 			setUsageSavingId(null)
 			showMessage(
 				error instanceof Error ? error.message : input.failureMessage,
 				'error',
 			)
+			return false
 		}
 	}
 
@@ -275,9 +297,6 @@ export function AccountMcpServersPage({
 			failureMessage: 'Unable to add MCP server.',
 			afterSuccess: (payload) => {
 				if (!payload.selectedServerId) return
-				// Do not pre-mark the destination as loaded: `navigate` is async
-				// (preload-then-commit). The commit render consumes preloaded data
-				// (or the stale marker) and marks the latch itself.
 				navigate(
 					mcpServersRoute.buildDetailHref(
 						payload.selectedServerId,
@@ -524,6 +543,27 @@ export function AccountMcpServersPage({
 												? 'Disabled MCP server.'
 												: 'Enabled MCP server.',
 										failureMessage: 'Unable to update MCP server.',
+									})
+								},
+								onOAuthClientSave: (client) =>
+									postAction({
+										body: {
+											action: 'set-oauth-client',
+											id: server.id,
+											...client,
+										},
+										successMessage: (accepted) =>
+											accepted.servers.find((item) => item.id === server.id)
+												?.authUrl
+												? 'Saved the OAuth client. Authorize the server to finish connecting.'
+												: 'Saved the OAuth client.',
+										failureMessage: 'Unable to save the OAuth client.',
+									}),
+								onOAuthClientRemove: () => {
+									void postAction({
+										body: { action: 'remove-oauth-client', id: server.id },
+										successMessage: () => 'Removed the OAuth client.',
+										failureMessage: 'Unable to remove the OAuth client.',
 									})
 								},
 								onDelete: () => {

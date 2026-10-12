@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { type CSSObject } from '@emotion/react'
 import {
 	useState,
@@ -12,7 +12,6 @@ import { useLocation } from '@tanstack/react-router'
 
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
 
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	adminProviderMarksApiPath,
 	filterMarks,
@@ -98,9 +97,7 @@ export function AdminProviderMarksRoute({
 }: {
 	initialData: AdminProviderMarksLoaderData
 }) {
-	const [marks, setMarks] = useState<Array<AdminProviderMark>>(
-		initialData.marks,
-	)
+	const marks = initialData.marks
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
@@ -127,7 +124,11 @@ export function AdminProviderMarksRoute({
 				: 'smooth',
 		})
 	}, [formRevision])
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const mutation = usePageResponseMutation<AdminProviderMarksLoaderData>(
+		'loadAdminProviderMarks',
+		adminProviderMarksApiPath,
+		{ dependencies: mutationResources, dependencyScope: 'actor' },
+	)
 	const currentHref = useLocation({ select: (l) => l.href })
 	useEffect(() => {
 		mounted.current = true
@@ -136,11 +137,6 @@ export function AdminProviderMarksRoute({
 			logoReader.current?.abort()
 		}
 	}, [])
-	const [previousData, setPreviousData] = useState(initialData)
-	if (previousData !== initialData) {
-		setPreviousData(initialData)
-		setMarks(initialData.marks)
-	}
 	function setGroup(key: string, open: boolean) {
 		setOpenGroups((previous) => {
 			if (previous.has(key) === open) return previous
@@ -154,12 +150,6 @@ export function AdminProviderMarksRoute({
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 	const ghostButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
-
-	function applyData(payload: AdminProviderMarksLoaderData) {
-		setMarks(payload.marks)
-		setMessage(null)
-		setMessageTone('info')
-	}
 
 	function resetFormState() {
 		setPendingLogoBase64(undefined)
@@ -214,27 +204,11 @@ export function AdminProviderMarksRoute({
 		setMessage(null)
 
 		try {
-			const response = await fetch(adminProviderMarksApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(body),
-			})
-			const payload = await readJson<
-				AdminProviderMarksLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to save provider mark.')
-			}
+			await mutation.submit(body)
 			if (!mounted.current) return false
-			applyData(payload)
 			setMessage(successMessage)
 			setMessageTone('info')
 			resetFormState()
-			void invalidatePages()
 			return true
 		} catch (error) {
 			if (!mounted.current) return false
@@ -632,7 +606,6 @@ export function AdminProviderMarksRoute({
 }
 
 const mutationResources = [
-	'loadAdminProviderMarks',
 	'loadIntegrationsPage',
 	'loadMcpServersPage',
 	'loadOnboarding',

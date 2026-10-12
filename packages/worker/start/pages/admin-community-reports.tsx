@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMutation } from '@tanstack/react-query'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 import { type AdminCommunityReportsLoaderData } from '#universal/loader-data.ts'
@@ -11,7 +12,7 @@ import {
 	getGhostButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { formatTimestamp } from '../components/local-timestamp.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import {
@@ -61,14 +62,26 @@ export function AdminCommunityReportsPage({
 }) {
 	const { reports, statusFilter } = payload
 	const invalidatePages = usePageInvalidation(mutationResources)
-	const lifetime = useRef<AbortController | null>(null)
-	useEffect(() => {
-		const controller = new AbortController()
-		lifetime.current = controller
-		return () => controller.abort()
-	}, [])
+	const mutation = useMutation({
+		mutationFn: async (body: Record<string, unknown>) => {
+			const response = await fetch(adminCommunityReportsApiPath, {
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					'Content-Type': 'application/json',
+				},
+				credentials: 'include',
+				body: JSON.stringify(body),
+			})
+			const payload = await readJson<{ ok: boolean; error?: string }>(response)
+			if (!response.ok || !payload?.ok)
+				throw new Error(payload?.error ?? 'Unable to complete action.')
+		},
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _body, reconcile) => reconcile?.(),
+		gcTime: 0,
+	})
 	const [message, setMessage] = useState<string | null>(null)
-	const [actionState, setActionState] = useState<'idle' | 'acting'>('idle')
 	const [noteByReportId, setNoteByReportId] = useState(
 		new Map<string, string>(),
 	)
@@ -88,48 +101,19 @@ export function AdminCommunityReportsPage({
 	function setNote(reportId: string, value: string) {
 		setNoteByReportId((previous) => new Map(previous).set(reportId, value))
 	}
-	async function submitReportAction(reportId: string, intent: ReportIntent) {
-		if (actionState !== 'idle') return
-		setActionState('acting')
+	function submitReportAction(reportId: string, intent: ReportIntent) {
+		if (mutation.isPending) return
 		setMessage(null)
-		try {
-			const response = await fetch(adminCommunityReportsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				signal: lifetime.current?.signal,
-				body: JSON.stringify({
-					intent,
-					reportId,
-					note: getNote(reportId) || undefined,
-				}),
-			})
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<{
-				ok: boolean
-				error?: string
-			}>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error ?? 'Unable to complete action.')
-			}
-			setActionState('idle')
-			await invalidatePages()
-		} catch (error) {
-			setActionState('idle')
-			setMessage(
-				error instanceof Error ? error.message : 'Unable to complete action.',
-			)
-		}
+		mutation.mutate(
+			{ intent, reportId, note: getNote(reportId) || undefined },
+			{
+				onError: (error) => setMessage(error.message),
+			},
+		)
 	}
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
-	const isMutating = actionState !== 'idle'
+	const isMutating = mutation.isPending
 	const pending = false
 	const status: string = 'ready'
 	return (

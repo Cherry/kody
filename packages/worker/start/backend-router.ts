@@ -212,6 +212,8 @@ import {
 	createOrgSettingsDeletePostHandler,
 	createOrgSettingsPostHandler,
 } from '#app/handlers/org-settings.ts'
+import { acquisitionPages } from '#universal/acquisition/catalog.ts'
+import { renderAcquisitionMarkdown } from '#app/acquisition-markdown.ts'
 import { prefersMarkdown, markdownResponse } from '#app/markdown-negotiation.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
@@ -220,7 +222,10 @@ import {
 } from '#app/agent-discovery.ts'
 export function createBackendRouter(
 	env: Env,
-	renderDocument: (request: Request) => Promise<Response>,
+	renderDocument: (
+		request: Request,
+		failure?: { status: 403 | 404 },
+	) => Promise<Response>,
 ) {
 	const markdownRouter = createRouter({
 		defaultHandler: ({ request }) => renderDocument(request),
@@ -252,11 +257,22 @@ export function createBackendRouter(
 			},
 		},
 	)
+	for (const path of [
+		'/use-cases',
+		...acquisitionPages.map((page) => page.path),
+	]) {
+		markdownRouter.get(path, {
+			middleware: [],
+			handler: ({ request }) => renderAcquisitionMarkdown(request),
+		})
+	}
 	const router = createRouter({
 		middleware: [
 			remixCrossOriginProtection,
 			createReferralCookieMiddleware(),
-			createOrgBindingGuardMiddleware(env),
+			createOrgBindingGuardMiddleware(env, (request) =>
+				renderDocument(request, { status: 404 }),
+			),
 			createAccountWriteLeaseMiddleware(env),
 		],
 		async defaultHandler({ request }) {
@@ -265,6 +281,20 @@ export function createBackendRouter(
 				: renderDocument(request)
 		},
 	})
+	// These document URLs also have backend POST handlers. Register their GET
+	// explicitly because the HTTP router returns 405 instead of its fallback
+	// when a pathname exists for another method.
+	for (const route of [
+		routes.accountOrganizationsNew,
+		routes.orgInviteJoin,
+		routes.orgMcpServerAuthorize,
+	]) {
+		router.get(route, {
+			middleware: [],
+			handler: ({ request }) => renderDocument(request),
+		})
+	}
+
 	router.map(
 		{
 			landingHeroVideosApi: routes.landingHeroVideosApi,
@@ -629,7 +659,11 @@ export function createBackendRouter(
 				communityInstallApiPost: createCommunityInstallApiPostHandler(env),
 				orgBillingApi: createOrgBillingApiHandler(env),
 				orgBillingCheckoutPost: createOrgBillingCheckoutApiHandler(env),
-				orgBillingPortal: createOrgBillingPortalHandler(env),
+				orgBillingPortal: createOrgBillingPortalHandler(
+					env,
+					(request, access) =>
+						renderDocument(request, { status: access.status }),
+				),
 				orgMcpServerAuthorizePost: createOrgMcpServerAuthorizePostHandler(env),
 				orgPackagesApi: createOrgPackagesApiHandler(env),
 				orgSettingsApi: createOrgSettingsApiHandler(env),

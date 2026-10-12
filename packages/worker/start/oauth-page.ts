@@ -1,4 +1,4 @@
-import { handleRequest } from './server.ts'
+import { handleRequest } from './http-entry.ts'
 import { type OAuthPageOptions } from '#universal/oauth-page.ts'
 
 export function renderOAuthPage(

@@ -6,7 +6,7 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createAccountHandler } from '#app/handlers/account.ts'
+import { createAccountHandler } from '#app/handlers/account-document.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { loadSessionInfo } from '#app/session-info.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'

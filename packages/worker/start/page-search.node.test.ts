@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pageSearch } from './page-search.ts'
+import { pageSearch, repositoryPageSearch } from './page-search.ts'
 
 describe('page resource search inputs', () => {
 	it('keeps data selection while ignoring presentation and attribution', () => {
@@ -24,4 +24,12 @@ describe('page resource search inputs', () => {
 		)
 		expect(pageSearch('?utm_source=test', [])).toBe('')
 	})
+})
+
+it('repository cache inputs ignore local filters and only send search for capped inventory', () => {
+	expect(repositoryPageSearch('?q=local&visibility=private&sort=name')).toBe('')
+	expect(
+		repositoryPageSearch('?sort=name&q=server&limit=20&utm_source=email'),
+	).toBe('?limit=20&q=server')
+	expect(repositoryPageSearch('?limit=20')).toBe('?limit=20')
 })

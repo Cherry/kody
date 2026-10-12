@@ -1,8 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
-import { useState, useEffect, useRef } from 'react'
-import { useLocation } from '@tanstack/react-router'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useLocation, useRouteContext } from '@tanstack/react-router'
+import { connectSecretsQuery } from '../connect-approval-queries.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 
@@ -28,7 +30,6 @@ import {
 	pageTitleCss,
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
-import { routes } from '#universal/routes.ts'
 
 const connectSecretsPageCss: CSSObject = {
 	...stackedPageCss,
@@ -57,55 +58,56 @@ export function ConnectSecretsRoute({
 }: {
 	initialData: AccountSecretsLoaderData
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
-	const href = useLocation({ select: (l) => l.href })
-	const [data, setData] = useState(initialData),
-		[message, setMessage] = useState<string | null>(null)
-	const [previousData, setPreviousData] = useState(initialData)
-	if (previousData !== initialData) {
-		setPreviousData(initialData)
-		setData(initialData)
-	}
-	const mounted = useRef(false),
-		busy = useRef(false)
-	useEffect(() => {
-		mounted.current = true
-		return () => {
-			mounted.current = false
-		}
-	}, [])
-	const [completed, setCompleted] = useState<ApprovalAction | null>(null),
-		[submittingAction, setSubmittingAction] = useState<ApprovalAction | null>(
-			null,
-		)
-	async function submitApproval(action: ApprovalAction) {
-		if (busy.current || !data.approval) return
-		busy.current = true
-		setSubmittingAction(action)
-		setMessage(null)
-		try {
+	const invalidatePages = usePageInvalidation(mutationResources)
+	const href = useLocation({ select: (l) => l.pathname + l.searchStr })
+	const data = initialData
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const [message, setMessage] = useState<string | null>(null)
+	const [completed, setCompleted] = useState<ApprovalAction | null>(null)
+	const mutation = useMutation({
+		mutationKey: ['connectSecrets', actorKey],
+		mutationFn: async ({
+			action,
+			href,
+		}: {
+			action: ApprovalAction
+			href: string
+			invalidate: typeof invalidatePages
+			queryKey: ReturnType<typeof connectSecretsQuery>['queryKey']
+		}) => {
 			const url = new URL(accountSecretsApiPath, 'http://localhost')
 			url.search = new URL(href, 'http://localhost').search
 			const payload = await submitApprovalRequest<
 				AccountSecretsLoaderData & { error?: string; ok?: boolean }
 			>(action, url.pathname + url.search)
-			if (payload && mounted.current) {
-				setData(payload)
-				setCompleted(action)
-				void invalidatePages()
-			}
+			if (!payload) throw new Error('Unable to process approval.')
+			return payload
+		},
+		onSuccess: async (payload, input) => {
+			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			queryClient.setQueryData(input.queryKey, (previous) =>
+				previous ? { ...previous, payload } : previous,
+			)
+			void input.invalidate()
+		},
+	})
+	const submittingAction = mutation.isPending ? mutation.variables.action : null
+	async function submitApproval(action: ApprovalAction) {
+		if (mutation.isPending || !data.approval) return
+		setMessage(null)
+		try {
+			await mutation.mutateAsync({
+				action,
+				href,
+				invalidate: invalidatePages,
+				queryKey: connectSecretsQuery(actorKey, href).queryKey,
+			})
+			setCompleted(action)
 		} catch (error) {
-			if (mounted.current)
-				setMessage(
-					error instanceof Error
-						? error.message
-						: 'Unable to process approval.',
-				)
-		} finally {
-			busy.current = false
-			if (mounted.current) setSubmittingAction(null)
+			setMessage(
+				error instanceof Error ? error.message : 'Unable to process approval.',
+			)
 		}
 	}
 

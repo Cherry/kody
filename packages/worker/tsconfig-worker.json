@@ -30,6 +30,14 @@
 		"noUncheckedSideEffectImports": true
 	},
 	"include": [
+		"./start/http-entry.ts",
+		"./start/backend-router.ts",
+		"./start/server.ts",
+		"./start/request-context.ts",
+		"./start/document-negotiation.ts",
+		"./start/action-page-method.ts",
+		"./start/action-pages.ts",
+
 		"./env.d.ts",
 		"./worker-configuration.d.ts",
 		"./src/**/*.d.ts",

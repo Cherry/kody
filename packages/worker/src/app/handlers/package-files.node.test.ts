@@ -134,10 +134,10 @@ vi.mock('#app/ssr-render.tsx', () => ({
 
 const {
 	createAccountPackageFilesApiHandler,
-	createAccountPackageFilesHandler,
 	createCommunityPackageFilesApiHandler,
-	createCommunityPackageFilesHandler,
 } = await import('./package-files.ts')
+const { createAccountPackageFilesHandler, createCommunityPackageFilesHandler } =
+	await import('./package-files-document.ts')
 
 const filesPayload = {
 	ok: true,

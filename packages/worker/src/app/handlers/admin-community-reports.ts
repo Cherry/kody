@@ -2,8 +2,6 @@ import { jsonResponse } from '#worker/json-response.ts'
 import { z } from 'zod'
 import { type Action } from 'remix/router'
 import { loadAdminCommunityReportsData } from '#app/admin-community-reports-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { type routes } from '#universal/routes.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
@@ -24,30 +22,6 @@ const adminCommunityReportPostSchema = z.object({
 	reportId: z.string().min(1),
 	note: z.string().optional(),
 })
-
-export function createAdminCommunityReportsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-
-			const adminCommunityReports = await loadAdminCommunityReportsData(
-				env,
-				request.url,
-			)
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Community reports',
-				loaderData: { adminCommunityReports },
-			})
-		},
-	} satisfies Action<typeof routes.adminCommunityReports>
-}
 
 export function createAdminCommunityReportsApiHandler(env: Env) {
 	return {

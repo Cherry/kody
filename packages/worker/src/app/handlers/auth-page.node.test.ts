@@ -6,7 +6,7 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createAuthPageHandler } from '#app/handlers/auth-page.ts'
+import { createAuthPageHandler } from '#app/handlers/auth-page-document.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'

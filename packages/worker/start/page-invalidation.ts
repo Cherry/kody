@@ -34,7 +34,9 @@ export function usePageInvalidation(
 		)
 		await Promise.all([
 			refreshShell ? invalidateShellQueries(queryClient, actorKey) : undefined,
-			refreshRoute
+			refreshRoute &&
+			router.state.location.href === href &&
+			router.state.matches[0]?.context.actorKey === actorKey
 				? router.invalidate({ filter: (match) => match.routeId !== '__root__' })
 				: undefined,
 		])

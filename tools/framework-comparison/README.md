@@ -105,15 +105,15 @@ admin screens. Start owns document rendering and unknown-page responses.
 protocol handlers. No page falls back to the original Remix frontend, and the
 candidate no longer needs original compiled assets.
 
-The original frontend and default build scripts remain available for comparison.
-Use these explicit candidate commands with Node 26 on PATH:
+Start is the default application build. Run the baseline from its separate
+checkout. Use these commands with Node 26 on PATH:
 
 ```sh
-npm run dev:start
-npm run build:start
+npm run dev
+npm run build
 npm run typecheck:start
 node tools/framework-comparison/verify-redact-build.mjs
-npm run test:e2e:start
+npm run test:e2e:run
 ```
 
 For local test data:
@@ -122,7 +122,7 @@ For local test data:
 node tools/prepare-e2e-env.ts
 CLOUDFLARE_ENV=test node tools/apply-local-app-migrations.ts
 CLOUDFLARE_ENV=test node tools/seed-test-data.ts --local --env test
-PORT=5174 CLOUDFLARE_ENV=test node --env-file=packages/worker/.env node_modules/vite/bin/vite.js --config vite.start.config.ts --host 127.0.0.1 --port 5174
+PORT=5174 CLOUDFLARE_ENV=test node --env-file=packages/worker/.env node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5174
 ```
 
 Verify authentication with
@@ -130,8 +130,7 @@ Verify authentication with
 load supplies local cookie signing and other required bindings. Development and
 migration tools share `.wrangler/state` unless `WRANGLER_PERSIST_TO` selects
 another directory. Do not run dev and E2E servers while both rewrite the same
-local Worker configuration. Start has a separate Vite optimizer cache from
-Remix.
+local Worker configuration.
 
 `npm run typecheck:start` compiles worker-side server functions into ignored
 generated declarations, then checks native browser components with DOM types
@@ -139,17 +138,15 @@ against those contracts. This keeps Cloudflare HTMLRewriter's global `Element`
 type out of browser code. Native routes import server functions through
 `#start/server/*`; Vite resolves the implementation and browser type checking
 resolves its generated declaration. The authoritative `npm run validate` also
-runs native type checking through `npm run typecheck`, then runs original and
-native browser suites in sequence. Native E2E uses the same parity specs and
-fixture server as Remix, with a separate port and results directory. Additional
-Start freshness tests live under `e2e/start` because they assert the new focus
-refresh policy, beyond the original frontend behavior.
+runs native type checking through `npm run typecheck`. The default Playwright
+suite runs both the existing parity specs and the additional Start tests against
+Start. Tests under `e2e/start` cover cache freshness, mutation reconciliation,
+document metadata, and Redact behavior.
 
-Candidate production output defaults to `dist-start`. Build timings can select
-its script and output directory:
+Production output uses `dist`. Measure the default build with:
 
 ```sh
-node tools/framework-comparison/measure-build.mjs /path/to/checkout start /tmp/results 3 build:start dist-start
+node tools/framework-comparison/measure-build.mjs /path/to/checkout start /tmp/results 3
 ```
 
 Keep baseline and candidate artifacts separate. Production-mode local benchmarks
@@ -166,6 +163,6 @@ Its default full preset aliases React APIs, DOM, scheduler and JSX entry points.
 Explicit server-variant aliases and SSR bundling keep Cloudflare on the same
 runtime. Application imports and React type declarations stay unchanged.
 
-Every `build:start` runs `verify-redact-build.mjs` to check client and server
-source maps for Redact and rejects upstream React runtime modules. Old
-measurements remain separate from the new `reports/measurements/redact` results.
+Every `build` runs `verify-redact-build.mjs` to check client and server source
+maps for Redact and rejects upstream React runtime modules. Old measurements
+remain separate from the new `reports/measurements/redact` results.

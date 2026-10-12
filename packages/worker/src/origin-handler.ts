@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/cloudflare'
 import { OAuthProvider } from '@cloudflare/workers-oauth-provider'
 import { getWorkerSentryOptions } from './sentry-options.ts'
-import { handleRequest } from '#app/handler.ts'
+import { handleRequest } from '../start/http-entry.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
 	handleAuthorizeRouteException,

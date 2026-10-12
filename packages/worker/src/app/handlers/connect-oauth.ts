@@ -1,4 +1,3 @@
-import { type Action } from 'remix/router'
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
 import {
 	hasStoredConnectClientSecret,
@@ -8,11 +7,8 @@ import {
 } from '#app/account-integrations-data.ts'
 import { loadConnectOauthChooser } from '#app/connect-oauth-chooser.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requirePageSession } from '#app/page-auth.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { joinAppUrl } from '#worker/app-base-url.ts'
 import { type ConnectOauthLoaderData } from '#universal/loader-data.ts'
-import { type routes } from '#universal/routes.ts'
 
 /**
  * Every working visit to /connect/oauth carries at least one of these:
@@ -94,27 +90,4 @@ export async function loadConnectOauthLoaderData(
 		hasStoredClientSecret,
 		redirectUri,
 	}
-}
-
-export function createConnectOauthHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const requestUrl = new URL(request.url)
-			const sessionRedirect = await requirePageSession(request)
-			if (sessionRedirect) {
-				return sessionRedirect
-			}
-			const connectOauth = await loadConnectOauthLoaderData(
-				env,
-				request,
-				requestUrl,
-			)
-			return renderAppPage({
-				request,
-				env,
-				loaderData: { connectOauth },
-			})
-		},
-	} satisfies Action<typeof routes.connectOauth>
 }

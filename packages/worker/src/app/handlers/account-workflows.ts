@@ -6,18 +6,15 @@ import {
 	type AccountWorkflowsLoaderData,
 } from '#app/account-workflows-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { type AccountWorkflowsLoaderData as AppAccountWorkflowsLoaderData } from '#universal/loader-data.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { cancelWorkflowRunForUser } from '#worker/package-runtime/package-workflows.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-function readPathWorkflowId(params: unknown) {
+export function readPathWorkflowId(params: unknown) {
 	if (
 		typeof params === 'object' &&
 		params !== null &&
@@ -27,42 +24,6 @@ function readPathWorkflowId(params: unknown) {
 		return params.workflowId
 	}
 	return undefined
-}
-
-/**
- * Page handler for `/account/workflows` and `/account/workflows/:workflowId`.
- */
-export function createAccountWorkflowsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({
-			request,
-			params,
-		}: {
-			request: Request
-			params?: { workflowId?: string }
-		}) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const accountWorkflows = await loadAccountWorkflowsData({
-				env,
-				request,
-				user,
-				pathWorkflowId: readPathWorkflowId(params),
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Workflows',
-				loaderData: {
-					accountWorkflows: accountWorkflows as AppAccountWorkflowsLoaderData,
-				},
-			})
-		},
-	}
 }
 
 /**

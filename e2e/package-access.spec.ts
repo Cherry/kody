@@ -56,20 +56,9 @@ test('private package source and settings stay isolated across owner, shared gue
 	})
 	// Paid membership is a fixture prerequisite, not a billing operation.
 	executeE2eD1Command(
-		`UPDATE users SET plan='standard' WHERE email IN (${quoteSqlString(owner.email)},${quoteSqlString(guest.email)});`,
+		`UPDATE orgs SET plan='standard' WHERE slug IN (${quoteSqlString(owner.username)},${quoteSqlString(guest.username)});`,
 	)
 	await login({ ...owner, mode: 'login' })
-	for (const username of [owner.username, guest.username]) {
-		const response = await page.request.post('/admin/feature-flags.json', {
-			data: {
-				action: 'set_user_override',
-				key: 'package-share-grants',
-				username,
-				enabled: true,
-			},
-		})
-		expect(response.ok(), await response.text()).toBe(true)
-	}
 	const guestContext = await browser.newContext({ baseURL })
 	const strangerContext = await browser.newContext({ baseURL })
 	const anonymousContext = await browser.newContext({ baseURL })

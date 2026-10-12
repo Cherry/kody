@@ -5,14 +5,12 @@ import {
 	type AdminCodemodRunItemsLoaderData,
 	type AdminCodemodsLoaderData,
 } from '#universal/loader-data.ts'
-import { requirePageUserWithRole } from '#app/page-auth.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import {
 	readNonEmptyTrimmedString,
 	readNonEmptyTrimmedStringOrNumber,
 } from '#app/request-body.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -38,8 +36,11 @@ import {
 import { readPositiveInt } from '#worker/query-params.ts'
 
 const recentRunsLimit = 50
+
 const defaultRunItemsLimit = 50
+
 const maxRunItemsLimit = 200
+
 // Every engine step re-asserts `running` (heartbeat), and a step is a single
 // Workers request, so a `running` run untouched for this long has no caller
 // paging it anymore.
@@ -72,27 +73,6 @@ export async function loadAdminCodemodsData(
 		codemods,
 		runs,
 	}
-}
-
-export function createAdminCodemodsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const admin = await requirePageUserWithRole(request, env, 'admin')
-			if (admin instanceof Response) {
-				return admin
-			}
-
-			const adminCodemods = await loadAdminCodemodsData(env)
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Admin codemods',
-				loaderData: { adminCodemods },
-			})
-		},
-	} satisfies Action<typeof routes.adminCodemods>
 }
 
 export function createAdminCodemodsApiHandler(env: Env) {

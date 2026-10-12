@@ -7,7 +7,6 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
 	getOAuthClientHelpers,
 	listUserMcpOauthClients,
@@ -17,33 +16,8 @@ import {
 	revokeUserMcpOauthClient,
 	type UserMcpOauthClientListItem,
 } from '#app/account-mcp-oauth-clients.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type AccountMcpOauthClientsLoaderData } from '#universal/loader-data.ts'
 import { type routes } from '#universal/routes.ts'
-
-export function createAccountMcpOauthClientsHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'MCP OAuth clients',
-				loaderData: {
-					accountMcpOauthClients: await loadClientsPayload(
-						env.APP_DB,
-						user.userId,
-					),
-				},
-			})
-		},
-	} satisfies Action<typeof routes.accountMcpOauthClients>
-}
 
 const clientActionSchema = object({
 	intent: enum_(['create', 'revoke'] as const),

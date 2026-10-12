@@ -1,5 +1,7 @@
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, useRef, type FormEvent } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { useLocation, useRouteContext } from '@tanstack/react-router'
 import { type AccountFormerEmail } from '#universal/loader-data.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 
@@ -13,6 +15,23 @@ export function useAccountEmailClaims(
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const href = useLocation({ select: (location) => location.href })
+	const scope = useRef<object | null>(null)
+	useEffect(() => {
+		scope.current = {}
+		return () => {
+			scope.current = null
+		}
+	}, [actorKey, href])
+	const mutation = useMutation({
+		gcTime: 0,
+		mutationFn: ({ url, init }: { url: string; init: RequestInit }) =>
+			fetch(url, init),
+		onMutate: () => invalidatePages,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+
 	const [emailChangeStatus, setEmailChangeStatus] = useState<
 		'idle' | 'sending'
 	>('idle')
@@ -98,19 +117,24 @@ export function useAccountEmailClaims(
 		setReleaseMessage(null)
 		setReleaseTone('info')
 
+		const submittedScope = scope.current
 		try {
-			const response = await fetch(emailClaimReleaseApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			const response = await mutation.mutateAsync({
+				url: emailClaimReleaseApiPath,
+				init: {
+					method: 'POST',
+					headers: {
+						Accept: 'application/json',
+						'Content-Type': 'application/json',
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						email: nextEmail,
+						password: releasePassword,
+					}),
 				},
-				credentials: 'include',
-				body: JSON.stringify({
-					email: nextEmail,
-					password: releasePassword,
-				}),
 			})
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (response.status === 401) {
 				const payload = await readJson<{ code?: string; error?: string }>(
 					response,
@@ -118,7 +142,8 @@ export function useAccountEmailClaims(
 				if (payload?.code === 'invalid_password') {
 					throw new Error(payload.error)
 				}
-				window.location.assign('/login')
+				if (submittedScope && scope.current === submittedScope)
+					window.location.assign('/login')
 				return
 			}
 			const payload = await readJson<{
@@ -126,18 +151,19 @@ export function useAccountEmailClaims(
 				message?: string
 				error?: string
 			}>(response)
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (!response.ok || !payload?.ok) {
 				throw new Error(
 					payload?.error || 'Unable to send the release verification.',
 				)
 			}
-			void invalidatePages()
 			setReleasePassword('')
 			setReleaseMessage(
 				payload.message ?? 'Verification email sent to that former address.',
 			)
 			setReleaseTone('info')
 		} catch (error) {
+			if (!submittedScope || scope.current !== submittedScope) return
 			setReleaseMessage(
 				error instanceof Error
 					? error.message
@@ -145,7 +171,8 @@ export function useAccountEmailClaims(
 			)
 			setReleaseTone('error')
 		} finally {
-			setReleaseStatus('idle')
+			if (submittedScope && scope.current === submittedScope)
+				setReleaseStatus('idle')
 		}
 	}
 
@@ -170,19 +197,24 @@ export function useAccountEmailClaims(
 		setEmailChangeMessage(null)
 		setEmailChangeTone('info')
 
+		const submittedScope = scope.current
 		try {
-			const response = await fetch(emailChangeApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			const response = await mutation.mutateAsync({
+				url: emailChangeApiPath,
+				init: {
+					method: 'POST',
+					headers: {
+						Accept: 'application/json',
+						'Content-Type': 'application/json',
+					},
+					credentials: 'include',
+					body: JSON.stringify({
+						email: nextEmail,
+						password: emailChangePassword,
+					}),
 				},
-				credentials: 'include',
-				body: JSON.stringify({
-					email: nextEmail,
-					password: emailChangePassword,
-				}),
 			})
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (response.status === 401) {
 				const payload = await readJson<{ code?: string; error?: string }>(
 					response,
@@ -190,7 +222,8 @@ export function useAccountEmailClaims(
 				if (payload?.code === 'invalid_password') {
 					throw new Error(payload.error)
 				}
-				window.location.assign('/login')
+				if (submittedScope && scope.current === submittedScope)
+					window.location.assign('/login')
 				return
 			}
 			const payload = await readJson<{
@@ -198,18 +231,19 @@ export function useAccountEmailClaims(
 				message?: string
 				error?: string
 			}>(response)
+			if (!submittedScope || scope.current !== submittedScope) return
 			if (!response.ok || !payload?.ok) {
 				throw new Error(
 					payload?.error || 'Unable to send the email change verification.',
 				)
 			}
-			void invalidatePages()
 			setEmailChangePassword('')
 			setEmailChangeMessage(
 				payload.message ?? 'Verification email sent to your new address.',
 			)
 			setEmailChangeTone('info')
 		} catch (error) {
+			if (!submittedScope || scope.current !== submittedScope) return
 			setEmailChangeMessage(
 				error instanceof Error
 					? error.message
@@ -217,7 +251,8 @@ export function useAccountEmailClaims(
 			)
 			setEmailChangeTone('error')
 		} finally {
-			setEmailChangeStatus('idle')
+			if (submittedScope && scope.current === submittedScope)
+				setEmailChangeStatus('idle')
 		}
 	}
 

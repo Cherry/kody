@@ -2,13 +2,10 @@ import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { loadAccountActivityData } from '#app/account-activity-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { type AccountActivityLoaderData as AppAccountActivityLoaderData } from '#universal/loader-data.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import { type routes } from '#universal/routes.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
 
-function readPathRunId(params: unknown) {
+export function readPathRunId(params: unknown) {
 	if (
 		typeof params === 'object' &&
 		params !== null &&
@@ -18,45 +15,6 @@ function readPathRunId(params: unknown) {
 		return params.runId
 	}
 	return undefined
-}
-
-/**
- * Page handler for `/account/activity` and `/account/activity/:runId`.
- */
-export function createAccountActivityHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({
-			request,
-			params,
-		}: {
-			request: Request
-			params?: { runId?: string }
-		}) {
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			const accountActivity = await loadAccountActivityData({
-				env,
-				request,
-				user,
-				pathRunId: readPathRunId(params),
-				serverTiming,
-			})
-			return renderAppPage({
-				request,
-				env,
-				title: 'Activity',
-				loaderData: {
-					accountActivity: accountActivity as AppAccountActivityLoaderData,
-				},
-				serverTiming,
-			})
-		},
-	}
 }
 
 /**

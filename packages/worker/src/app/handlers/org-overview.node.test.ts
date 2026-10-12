@@ -17,7 +17,7 @@ vi.mock('#app/ssr-render.tsx', () => ({
 	renderAppPage: (...args: Array<unknown>) => mocks.renderAppPage(...args),
 }))
 
-const { createOrgOverviewHandler } = await import('./org-overview.ts')
+const { createOrgOverviewHandler } = await import('./org-overview-document.ts')
 
 const adaId = 'person-ada'
 const bobId = 'person-bob'

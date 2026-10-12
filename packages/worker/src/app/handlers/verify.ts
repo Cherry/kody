@@ -6,13 +6,11 @@ import {
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
-import { normalizeRedirectTo } from '#app/auth-redirect.ts'
 import {
 	createAuthCookie,
 	isSecureRequest,
 	setAuthSessionSecret,
 } from '#app/auth-session.ts'
-import { renderAppPage } from '#app/ssr-render.tsx'
 import { type routes } from '#universal/routes.ts'
 import {
 	twoFactorVerificationType,
@@ -31,32 +29,6 @@ import {
 import { createDb, usersTable } from '#worker/db.ts'
 import { touchLastActiveAt } from '#worker/identity/activation-stamps.ts'
 import { reconcileSignupWelcomeCreditsIfPending } from '#worker/billing/signup-welcome-credits.ts'
-
-export function createVerifyHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			setVerifySessionSecret(env.COOKIE_SECRET)
-			const pendingSession = await readVerifySession(request)
-			if (!pendingSession) {
-				// Preserve the destination so a re-login still lands the user
-				// where they were originally headed.
-				const loginUrl = new URL('/login', request.url)
-				const redirectTo = normalizeRedirectTo(
-					new URL(request.url).searchParams.get('redirectTo'),
-				)
-				if (redirectTo) loginUrl.searchParams.set('redirectTo', redirectTo)
-				return Response.redirect(loginUrl, 302)
-			}
-
-			return renderAppPage({
-				request,
-				env,
-				title: 'Two-factor authentication',
-			})
-		},
-	} satisfies Action<typeof routes.verify>
-}
 
 const verifyRequestSchema = object({
 	code: string(),

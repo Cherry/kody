@@ -31,7 +31,17 @@ for (const environment of ['client', 'server']) {
 			`${environment}: expected Redact source maps without upstream React runtime modules; found ${redact.length} Redact entries and ${JSON.stringify(upstream)}`,
 		)
 	}
+	const retiredWebsiteRuntime = modules.filter((source) =>
+		/(?:^|\/)packages\/worker\/(?:src\/app\/(?:ssr-render|ssr-document)\.tsx|client\/(?:client-router|app-root|app)\.tsx)$/.test(
+			source,
+		),
+	)
+	if (retiredWebsiteRuntime.length > 0) {
+		throw new Error(
+			`${environment}: retired website rendering runtime remains in the build: ${JSON.stringify(retiredWebsiteRuntime)}`,
+		)
+	}
 	console.log(
-		`${environment}: ${redact.length} Redact source entries, no upstream React runtime entries`,
+		`${environment}: ${redact.length} Redact source entries, no upstream React or retired website runtime entries`,
 	)
 }

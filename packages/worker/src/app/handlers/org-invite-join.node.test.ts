@@ -46,8 +46,9 @@ vi.mock('#app/ssr-render.tsx', () => ({
 		mocks.renderAppPage(args[0] as { loaderData?: unknown; status?: number }),
 }))
 
-const { createOrgInviteJoinHandler, createOrgInviteJoinPostHandler } =
-	await import('./org-invite-join.ts')
+const { createOrgInviteJoinPostHandler } = await import('./org-invite-join.ts')
+const { createOrgInviteJoinHandler } =
+	await import('./org-invite-join-document.ts')
 
 const owner = { id: 1, personId: 'a'.repeat(64) }
 const joiner = { id: 2, personId: 'b'.repeat(64) }

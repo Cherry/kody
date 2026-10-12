@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { revealRef } from '../components/reveal.ts'
 import { type ReactNode, type CSSProperties } from 'react'
@@ -40,7 +41,7 @@ const faqItems: ReadonlyArray<FaqItem> = [
 					talking to the agent you already pay for.
 				</p>
 				<p>
-					<a href={whatIsKodyHref}>What is Kody?</a>
+					<SiteLink href={whatIsKodyHref}>What is Kody?</SiteLink>
 				</p>
 			</>
 		),
@@ -104,11 +105,14 @@ const faqItems: ReadonlyArray<FaqItem> = [
 				</p>
 				<p>
 					Trying to run Kody across a team, or have other multi-user needs?
-					Email <a href="mailto:support@kody.codes">support@kody.codes</a> —
-					we&rsquo;re shaping that and want to hear what you need.
+					Email{' '}
+					<SiteLink href="mailto:support@kody.codes">
+						support@kody.codes
+					</SiteLink>{' '}
+					— we&rsquo;re shaping that and want to hear what you need.
 				</p>
 				<p>
-					<a href={routes.community.href()}>Public packages</a>
+					<SiteLink href={routes.community.href()}>Public packages</SiteLink>
 				</p>
 			</>
 		),
@@ -139,8 +143,8 @@ const faqItems: ReadonlyArray<FaqItem> = [
 				<p>
 					Packages, secrets, jobs, memories, and the rest of your assistant stay
 					on the account. Connect the new host from{' '}
-					<a href={routes.onboarding.href()}>Get started</a>. The same assistant
-					is available from every MCP-capable agent you connect.
+					<SiteLink href={routes.onboarding.href()}>Get started</SiteLink>. The
+					same assistant is available from every MCP-capable agent you connect.
 				</p>
 				<p>
 					Host-only context — a Claude Project, local Cursor rules, or notes
@@ -168,7 +172,7 @@ const faqItems: ReadonlyArray<FaqItem> = [
 					monthly include, plus prepaid credits when you need more.
 				</p>
 				<p>
-					<a href={routes.pricing.href()}>Plans and pricing</a>
+					<SiteLink href={routes.pricing.href()}>Plans and pricing</SiteLink>
 				</p>
 			</>
 		),
@@ -180,19 +184,19 @@ const faqItems: ReadonlyArray<FaqItem> = [
 			<>
 				<p>
 					You can download a JSON export of your account from{' '}
-					<a href={routes.account.href()}>Account</a> settings. Secret values
-					are never included; secret entries export metadata such as names,
-					hosts, and allowlists only.
+					<SiteLink href={routes.account.href()}>Account</SiteLink> settings.
+					Secret values are never included; secret entries export metadata such
+					as names, hosts, and allowlists only.
 				</p>
 				<p>
 					Kody is Fair Source. The{' '}
-					<a
+					<SiteLink
 						href="https://github.com/kentcdodds/kody"
 						target="_blank"
 						rel="noreferrer noopener"
 					>
 						source is on GitHub
-					</a>
+					</SiteLink>
 					: you can read it, fork it, and run your own deployment.
 				</p>
 			</>
@@ -229,12 +233,14 @@ function renderGetStartedAnswer() {
 	return (
 		<>
 			<p>
-				Read <a href={whatIsKodyHref}>What is Kody?</a> — it needs no account.
-				Then open <a href={routes.onboarding.href()}>Get started</a>, pick the
-				agent you want to connect, and complete OAuth.
+				Read <SiteLink href={whatIsKodyHref}>What is Kody?</SiteLink> — it needs
+				no account. Then open{' '}
+				<SiteLink href={routes.onboarding.href()}>Get started</SiteLink>, pick
+				the agent you want to connect, and complete OAuth.
 			</p>
 			<p>
-				Create a free account from <a href={publicSignupHref}>Sign up</a>.
+				Create a free account from{' '}
+				<SiteLink href={publicSignupHref}>Sign up</SiteLink>.
 			</p>
 		</>
 	)

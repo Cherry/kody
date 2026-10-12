@@ -1,6 +1,6 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createVerifyEmailHandler } from '#app/handlers/verify-email.ts'
+import { createVerifyEmailHandler } from '#app/handlers/verify-email-document.ts'
 import { verifyEmailToken } from '#app/email-verification.ts'
 import { renderAppPage } from '#app/ssr-render.tsx'
 import { sendConnectAgentEmail } from '#app/user-account-emails.ts'
