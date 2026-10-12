@@ -99,7 +99,8 @@ it does, permanently:
   ([0021](./0021-publish-gated-package-composition.md)) keep working.
 - Body, other, and computed placements are fine. Publish, `packageGet`, and
   `repoRunChecks` never warn in a way that implies breakage. Where a more secure
-  type fits a placement, they may gently suggest it.
+  type fits a placement, they may gently suggest it (see
+  [Which more secure type fits](#which-more-secure-type-fits)).
 - A Key can also be used through `credential(key)`, which places it by its
   `inject` rule. The same Key keeps filling placeholders.
 
@@ -116,7 +117,7 @@ it does, permanently:
 - `apply(handle, request)` injects the credential. It runs only in the gateway
   and only after `authorize` returns `ok`. It is the only step that reads a
   value, so a refused host never triggers a token refresh. For `signing`, it
-  produces or verifies a signature.
+  produces a signature.
 - `audit(outcome)` writes one row per resolution, including denials: person,
   oauthClientId, package, need key, credential id, and outcome. Never a value.
 
@@ -127,8 +128,10 @@ owners opt into them:
 - `login`: the gateway runs the login exchange and injects only the session
   token; the login response never reaches code.
 - `url`: a whole-URL secret pinned to its own host, over HTTPS.
-- `signing`: signs or verifies requests. Webhook signature verification can use
-  it; today's webhook verification types keep working.
+- `signing`: signs requests (a JWT or an HMAC) for one of its hosts; code gets
+  the signature, never the key. Today's webhook verification keeps working with
+  Keys; a `verify` operation can be added if an owner wants a signing-type
+  webhook secret.
 
 ### Credential fields
 
@@ -403,6 +406,33 @@ gate, publish refusal of placeholders, window, or owner email. The gateway keeps
 parsing placeholders, and by-name grants stay.
 
 **P9:** drop the grant-props fallbacks.
+
+### Which more secure type fits
+
+A guide for suggestions, not a requirement: every placement below keeps working
+as a Key. Publish, `packageGet`, and suggested rewrites use it to point an owner
+at a more secure type when one fits; where none fits, they say nothing.
+
+From the production credential inventory scan of 2026-10-12 (1034 packages). The
+rows count placeholder references; with the 213 variable definitions the scan
+also records (not placements), they add up to its 881 references.
+
+| Placement (references)                                                                | More secure type that fits                            |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Header (355)                                                                          | Key with a `header` inject, through a scoped client   |
+| Query parameter (1)                                                                   | Key with a `query` inject                             |
+| Basic auth with a literal username and a secret password (0)                          | Key with a `basic` inject                             |
+| URL path, such as `/bot<token>/` (20)                                                 | `url`                                                 |
+| A password or refresh token posted to get a session (13)                              | `login`, or OAuth when the provider is an integration |
+| Signing key (2)                                                                       | `signing`                                             |
+| Webhook verification secret (4)                                                       | None needed; Keys verify webhooks                     |
+| Other body fields, mostly identifiers such as a chat id (19)                          | None needed                                           |
+| Values the scan cannot follow to a request: objects, returns, arguments, arrays (254) | None needed                                           |
+
+Counted separately: 17 `secretJwtSign` calls (`signing` fits them too), and 256
+computed and 10 vault placeholders, whose name or placement is known only at run
+time (none needed). When a new placement shows up that no type fits, it stays a
+Key, and the revisit-if below applies only if someone wants it covered.
 
 ## Consequences
 
