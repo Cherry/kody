@@ -1,3 +1,4 @@
+import { isOrgDocumentRequest } from './org-document-request.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -58,13 +59,15 @@ export const loadOrgMembers = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: access.org.slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: access.org.slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return loadOrgMembersData({ ...input, org: access.org })
 	})
 
@@ -93,13 +96,15 @@ export const loadOrgSettings = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: access.org.slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: access.org.slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return loadOrgSettingsData({ ...input, org: access.org })
 	})
 
@@ -128,13 +133,15 @@ export const loadOrgTeams = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: access.org.slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: access.org.slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return loadOrgTeamsData({ ...input, org: access.org })
 	})
 
@@ -163,13 +170,15 @@ export const loadOrgGrants = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: access.org.slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: access.org.slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return loadOrgGrantsData({ ...input, org: access.org })
 	})
 
@@ -198,13 +207,15 @@ export const loadOrgCollaborators = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: access.org.slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: access.org.slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return loadOrgCollaboratorsData({ ...input, org: access.org })
 	})
 
@@ -260,13 +271,15 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 		const slug = resolution.org.slug ?? data.slug
 		if (resolution.org.id !== personalOrgId(input.user.mcpUser.userId))
 			throw redirect({ href: `/@${encodeURIComponent(slug)}` })
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug,
-				secure: isSecureRequest(input.request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug,
+					secure: isSecureRequest(input.request),
+				}),
+			)
+		}
 		return { slug }
 	})
 

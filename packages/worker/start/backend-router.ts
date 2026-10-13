@@ -1,3 +1,4 @@
+import { createAccountLastUsedOrgApiHandler } from '#app/handlers/account-last-used-org.ts'
 import { createRouter } from 'remix/router'
 import {
 	createAdminHandler,
@@ -337,6 +338,7 @@ export function createBackendRouter(
 			onboardingApi: routes.onboardingApi,
 			onboardingChecklistDismissPost: routes.onboardingChecklistDismissPost,
 			youtubeThumb: routes.youtubeThumb,
+			accountLastUsedOrgApi: routes.accountLastUsedOrgApi,
 			accountOrganizationsApi: routes.accountOrganizationsApi,
 			accountOrganizationsNewPost: routes.accountOrganizationsNewPost,
 			accountDelete: routes.accountDelete,
@@ -538,6 +540,7 @@ export function createBackendRouter(
 				onboardingChecklistDismissPost:
 					createOnboardingChecklistDismissHandler(env),
 				youtubeThumb: createYoutubeThumbHandler(env),
+				accountLastUsedOrgApi: createAccountLastUsedOrgApiHandler(env),
 				accountOrganizationsApi: createAccountOrganizationsApiHandler(env),
 				accountOrganizationsNewPost:
 					createAccountOrganizationsNewPostHandler(env),

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { installOrgNavigationCommit } from './org-navigation-commit.ts'
 import type {} from './request-context.ts'
 import { type CommittedPage } from './presentation-navigation.ts'
 import { readRouterNonce } from '#start/server/router-nonce'
@@ -63,6 +64,7 @@ export function getRouter() {
 		dehydrateOptions: { shouldDehydrateQuery: shouldDehydrateAppQuery },
 	})
 	if (typeof document !== 'undefined') {
+		installOrgNavigationCommit(router, fetch, window.location.origin)
 		installNavigationMotion(router, {
 			canStart: () => typeof document.startViewTransition === 'function',
 			prefersReducedMotion: () =>

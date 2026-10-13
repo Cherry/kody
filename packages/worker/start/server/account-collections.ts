@@ -1,3 +1,4 @@
+import { isOrgDocumentRequest } from './org-document-request.ts'
 import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { readJsonRecord } from './json-value.ts'
@@ -62,13 +63,15 @@ async function loadCollection(href: string) {
 				import('#universal/org-last-used-cookie.ts'),
 				import('../../src/app/auth-session.ts'),
 			])
-		setResponseHeader(
-			'Set-Cookie',
-			serializeLastUsedOrgCookie({
-				slug: orgPath.slug,
-				secure: isSecureRequest(request),
-			}),
-		)
+		if (isOrgDocumentRequest()) {
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: orgPath.slug,
+					secure: isSecureRequest(request),
+				}),
+			)
+		}
 	}
 	setResponseHeader('Cache-Control', 'no-store')
 	return { bindings, request, user }

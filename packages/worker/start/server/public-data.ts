@@ -1,3 +1,4 @@
+import { isOrgDocumentRequest } from './org-document-request.ts'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound } from '@tanstack/react-router'
@@ -83,13 +84,15 @@ export const loadProfile = createServerFn({ method: 'GET' })
 					import('../../universal/org-last-used-cookie.ts'),
 					import('../../src/app/auth-session.ts'),
 				])
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: orgHome.slug,
-					secure: isSecureRequest(request),
-				}),
-			)
+			if (isOrgDocumentRequest()) {
+				setResponseHeader(
+					'Set-Cookie',
+					serializeLastUsedOrgCookie({
+						slug: orgHome.slug,
+						secure: isSecureRequest(request),
+					}),
+				)
+			}
 
 			setResponseHeader('Cache-Control', 'no-store')
 			return {
