@@ -49,7 +49,10 @@ vi.mock('#app/package-page.ts', async (importOriginal) => ({
 	}),
 }))
 vi.mock('#app/package-files-data.ts', () => ({
-	loadOwnerPackageReadme: async () => '# Notes',
+	loadOwnerPackageReadme: async () => ({
+		content: '# Notes',
+		commit: 'head-commit',
+	}),
 	loadPackagePageHasAgentsDocs: async () => false,
 	resolvePackagePageReadmeImageBaseHref: () => null,
 }))
@@ -72,7 +75,7 @@ test('plain repository native payload strips guest source IDs and preserves auth
 		expect(result.data.ownerPackage?.sourceId).toBe(
 			viewerIsOwner ? 'internal-source-id' : '',
 		)
-		expect(result.data.readmeContent).toBe(viewerIsOwner ? '# Notes' : null)
+		expect(result.data.readmeContent).toBe('# Notes')
 	}
 })
 

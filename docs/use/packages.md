@@ -211,8 +211,9 @@ await resend.fetch('/emails', { method: 'POST', body: JSON.stringify(email) })
 - `credential(key)` picks the one credential you can Use with the need's kind
   and provider (an undeclared key is read as a provider). It rejects with an
   Error carrying `code` (`credential_unbound`, `credential_ambiguous`,
-  `credential_not_found`, `credential_denied`, `host_not_allowed`,
-  `insecure_transport`) and `retryWith`, a list of picks to retry with.
+  `credential_not_found`, `credential_denied`, `invalid_request`,
+  `host_not_allowed`, `insecure_transport`) and `retryWith`, a list of picks to
+  retry with.
 - The client has `name`, `scope`, `kind`, and `hosts`, plus `fetch` (secret,
   oauth, url, and login credentials), `sign` (signing), or `callTool` (an org
   MCP server). A relative URL resolves against the first host. A header the
@@ -226,6 +227,18 @@ await resend.fetch('/emails', { method: 'POST', body: JSON.stringify(email) })
 - `credential.named(name, { scope })` picks by exact name. It works only in ad
   hoc execute and in packages of your personal org that are not listed in
   Community.
+- The caller picks among several matches with a `credentials` map on `execute`
+  (for `code` or `invoke`):
+  `{ github: 'work', google: ['work', 'personal'], x: { name: 'work', scope: 'org' } }`.
+  A pick's kind must match when the need declares one, and its provider must
+  match when both have one. `credentials(key)` returns every pick for the key
+  (`[]` picks none on purpose); without a map entry it returns the one match,
+  never "all of them". The map is checked before code runs: a key no package in
+  an invoked run declares fails the run with `credential_need_unknown`, and in
+  ad hoc code it is a warning. A package's `credential(key)` resolves the same
+  need the check used, pinned by the entry package. A pick with no provider
+  opens with a `hint` to set one. A pick grants nothing; it chooses only among
+  credentials you can Use.
 - A client works only in the run that opened it. Under `kody execute --local`,
   published `kody:@…` modules and ad hoc / unpublished `--code` / `--file`
   modules both use `credential` / `credentials` from `kody:runtime` with the

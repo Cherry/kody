@@ -29,15 +29,22 @@ export async function readmeForPackagePage(
 		listingReadme: string | null | undefined
 		ownerSourceId: string | null | undefined
 		viewerIsOwner: boolean
+		isPrivate: boolean
 		ownerUserId?: string
 	},
 	serverTiming?: Array<ServerTimingEntry>,
 ) {
 	let readmeContent = input.listingReadme ?? null
+	let readmeCommit: string | null = null
 	const ownerSourceId = input.ownerSourceId
 	const ownerUserId = input.ownerUserId
-	if (!readmeContent && input.viewerIsOwner && ownerSourceId && ownerUserId) {
-		readmeContent = await recordServerTiming(
+	if (
+		!readmeContent &&
+		ownerSourceId &&
+		ownerUserId &&
+		(input.viewerIsOwner || !input.isPrivate)
+	) {
+		const loaded = await recordServerTiming(
 			'owner-readme',
 			() =>
 				loadOwnerPackageReadme({
@@ -48,9 +55,12 @@ export async function readmeForPackagePage(
 				}),
 			input.request,
 		)
+		readmeContent = loaded.content
+		readmeCommit = loaded.commit
 	}
 	return {
 		readmeContent,
+		readmeCommit,
 		readmeFences: await highlightReadmeFences(
 			input.env,
 			readmeContent,
@@ -117,7 +127,7 @@ export async function loadCommunityPackagePayload(input: {
 	const page = await loadPackagePage(input)
 	if (page.kind !== 'page') return page
 	const serverTiming: Array<ServerTimingEntry> = []
-	const [readme, hasAgentsDocs, imageBaseHref] = await Promise.all([
+	const [readme, hasAgentsDocs] = await Promise.all([
 		readmeForPackagePage(
 			{
 				env,
@@ -126,6 +136,7 @@ export async function loadCommunityPackagePayload(input: {
 				ownerSourceId: page.ownerPackage?.sourceId,
 				viewerIsOwner: page.viewerIsOwner,
 				ownerUserId: page.ownerUserId,
+				isPrivate: packagePageIsPrivate(page),
 			},
 			serverTiming,
 		),
@@ -142,15 +153,16 @@ export async function loadCommunityPackagePayload(input: {
 				}),
 			request,
 		),
-		resolvePackagePageReadmeImageBaseHref({
-			listingId: page.listing?.listing?.id,
-			ownerUsername: page.username,
-			kodyId: page.kodyId,
-			usedListingReadme: Boolean(page.listing?.listing?.readmeContent),
-			publishedCommit: page.ownerPackage?.publishedCommit,
-			pinnedCommit: page.listing?.listing?.pinnedCommit,
-		}),
 	])
+	const imageBaseHref = resolvePackagePageReadmeImageBaseHref({
+		listingId: page.listing?.listing?.id,
+		ownerUsername: page.username,
+		kodyId: page.kodyId,
+		usedListingReadme: Boolean(page.listing?.listing?.readmeContent),
+		readmeCommit: readme.readmeCommit,
+		publishedCommit: page.ownerPackage?.publishedCommit,
+		pinnedCommit: page.listing?.listing?.pinnedCommit,
+	})
 	return {
 		kind: 'page' as const,
 		serverTiming,
