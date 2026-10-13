@@ -1,3 +1,4 @@
+import { LandingPrimitiveCards } from './landing-primitive-cards.tsx'
 /** @jsxImportSource @emotion/react */
 import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
 import { useLocation } from '@tanstack/react-router'
@@ -206,6 +207,7 @@ export function HomeRoute({
 			</section>
 
 			<LandingPrimitives />
+			<LandingPrimitiveCards />
 
 			<section aria-labelledby="vs-title" className="landing-vs">
 				<h2 id="vs-title" className="landing-section-heading">

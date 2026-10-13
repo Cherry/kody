@@ -226,9 +226,13 @@ await resend.fetch('/emails', { method: 'POST', body: JSON.stringify(email) })
 - `credential.named(name, { scope })` picks by exact name. It works only in ad
   hoc execute and in packages of your personal org that are not listed in
   Community.
-- A client works only in the run that opened it. Under `kody execute --local`, a
-  saved package that imports `credential` works the same; ad hoc local code
-  needs a CLI release that adds `credential` to its `kody:runtime`.
+- A client works only in the run that opened it. Under `kody execute --local`,
+  published `kody:@…` modules and ad hoc / unpublished `--code` / `--file`
+  modules both use `credential` / `credentials` from `kody:runtime` with the
+  same CapabilityProxy resolution and gateway placement as hosted (secret values
+  never enter local workerd). CLI releases before the
+  [local credential runtime contract](../contributing/contracts/cli-local-credential-runtime.md)
+  lack the host export and fail at import time — upgrade `@kodycodes/cli`.
 
 To list credential references that match the detect-only scan, run
 `repoRunChecks`. Its `credentials` result lists each file with the codemod 0010
@@ -784,9 +788,14 @@ resolved default-branch HEAD, and publish that SHA with **Publish HEAD**.
 Visitors see the badge but not the link. The five-minute reconcile job still
 auto-publishes unlocked packages; this page is the explicit website path.
 
-Fleet package-codemod apply does the same HEAD write on locked packages: the
-transform commits and pushes so you can review it the next time you publish. It
-does not skip locked packages, and it does not move `published_commit`.
+Fleet package-codemod apply for `head-and-published` codemods does the same HEAD
+write on locked packages: the transform commits and pushes so you can review it
+the next time you publish. It does not skip locked packages, and it does not
+move `published_commit`. Codemods with `applyMode: 'published-only'` (today:
+`0012`) finalize `published_commit` even when locked (`allowLockedPublish`). If
+that leaves pending HEAD as a sibling of the new published tip, **Publish HEAD**
+/ approve-publish still promotes that commit (`allowForce` with the owner click
+as overwrite confirmation).
 
 When a provider token is coarser than the job — Gmail has `gmail.send` but no
 drafts-only scope — the lock is the real grant. Worked example:

@@ -70,19 +70,23 @@ Kody's web UI.
 
 Local [Redact](../../patches/@tanstack+redact+0.1.4.patch) and
 [Router](../../patches/@tanstack+router-core+1.171.34.patch) patches are part of
-the dependency maintenance cost. The Redact patch removes its global hydration
-scroll interceptor, which suppressed legitimate Router restoration after user
-scrolling. The hydration scroll regression compares the same behavior against
-React, including immediate navigation after a real wheel event. It also sends
-queued updates through their Suspense boundary when an earlier ancestor update
-has retained the subtree. Without that check, a departing Router match could
-render after its store was cleared while the replacement route suspended. The
-[paired Router regression](../../e2e/start/router-retained-match.spec.ts) passes
-with React, fails with uncorrected Redact, and passes with the fix, including
-resuming the replacement. The failed feature module recovery test also checks
-that document recovery emits no unexpected client errors. Browser regressions
-under [`e2e/start`](../../e2e/start) cover cache freshness, identity changes,
-background errors, metadata, and renderer behavior.
+the dependency maintenance cost. Upstream reviews are open for the
+[Redact fixes](https://github.com/TanStack/redact/pull/43) and
+[Router transition rejection](https://github.com/TanStack/router/pull/8703). The
+Router proposal is narrower than the local patch: it handles a skipped animation
+without retrying the navigation callback. The Redact patch removes its global
+hydration scroll interceptor, which suppressed legitimate Router restoration
+after user scrolling. The hydration scroll regression compares the same behavior
+against React, including immediate navigation after a real wheel event. It also
+sends queued updates through their Suspense boundary when an earlier ancestor
+update has retained the subtree. Without that check, a departing Router match
+could render after its store was cleared while the replacement route suspended.
+The [paired Router regression](../../e2e/start/router-retained-match.spec.ts)
+passes with React, fails with uncorrected Redact, and passes with the fix,
+including resuming the replacement. The failed feature module recovery test also
+checks that document recovery emits no unexpected client errors. Browser
+regressions under [`e2e/start`](../../e2e/start) cover cache freshness, identity
+changes, background errors, metadata, and renderer behavior.
 
 `npm run build` verifies Redact in both bundles and rejects Kody's retired
 renderer and client router. `npm run validate` runs the complete local gate. SSR
