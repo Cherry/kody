@@ -8,6 +8,10 @@ import {
 	isScopedApiToken,
 	rejectedOauthBearerMessage,
 } from './api-token.js'
+import {
+	formatCredentialClientError,
+	type CredentialCallMapInput,
+} from './credential-call-map.js'
 import { apiTokenEnvVar, cliName } from './defaults.js'
 import { describeNetworkError } from './network-error.js'
 import { readPackageVersion } from './package-info.js'
@@ -19,11 +23,13 @@ import { readPackageVersion } from './package-info.js'
  * OAuth access token.
  *
  * - `GET  /v1/capability-proxy/session` validates the token before workerd
- *   starts. 200 → `{ scopes?: string[], expiresAt?: string }`.
- * - `POST /v1/capability-proxy/call` with `{ path, args, conversationId? }`
- *   where `path` is the runtime property path (`['kody', 'emailSend']`,
- *   `['kody', 'mcp', server, tool]`, `['workflows', 'create']`) and `args`
- *   is the positional argument list. 200 → `{ result }`.
+ *   starts. 200 → `{ scopes?: string[], expiresAt?: string, features?: string[] }`.
+ * - `POST /v1/capability-proxy/call` with
+ *   `{ path, args, conversationId?, credentials? }` where `path` is the runtime
+ *   property path (`['kody', 'emailSend']`, `['kody', 'mcp', server, tool]`,
+ *   `['workflows', 'create']`) and `args` is the positional argument list.
+ *   `credentials` is the ADR 0068 call map (CLI `--credential`); local code
+ *   controls only `args`, so it cannot pick by name. 200 → `{ result }`.
  *
  * Errors use `{ error: { code, message } }` (a bare string is accepted too).
  * 401 means the token is expired/revoked (or MCP OAuth until the platform
@@ -80,12 +86,16 @@ function capabilityProxyAgent(): Promise<Dispatcher> {
 export type CapabilityProxySession = {
 	scopes: Array<string>
 	expiresAt: string | null
+	/** Host features, e.g. `credential-call-map` for `--credential`. */
+	features: Array<string>
 }
 
 export type CapabilityProxyCall = {
 	path: Array<string>
 	args: Array<unknown>
 	conversationId?: string
+	/** ADR 0068 call map; top-level only (never nested under `args`). */
+	credentials?: CredentialCallMapInput
 }
 
 export type CapabilityProxyClientInput = {
@@ -149,6 +159,9 @@ export async function openCapabilityProxySession(
 			? record.scopes.filter((scope): scope is string => typeof scope === 'string')
 			: [],
 		expiresAt: typeof record.expiresAt === 'string' ? record.expiresAt : null,
+		features: Array.isArray(record.features)
+			? record.features.filter((feature): feature is string => typeof feature === 'string')
+			: [],
 	}
 }
 
@@ -158,6 +171,7 @@ export async function callCapabilityProxy(
 	const url = capabilityProxyUrl(input.apiUrl, capabilityProxyCallPath)
 	const payload: CapabilityProxyCall = { path: input.path, args: input.args }
 	if (input.conversationId !== undefined) payload.conversationId = input.conversationId
+	if (input.credentials !== undefined) payload.credentials = input.credentials
 	const response = await send(input, url, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -172,6 +186,49 @@ export async function callCapabilityProxy(
 		throw new CapabilityProxyError(failure.message, { status: response.status, code: failure.code })
 	}
 	return isRecord(body) ? body.result : undefined
+}
+
+/**
+ * Preflight ADR 0068 call-map picks via `kody.credentialClientCheck` before
+ * local code runs. Throws on a structured check failure; returns warnings for
+ * ad hoc (non-strict) unknown keys.
+ */
+export async function checkCredentialCallMap(
+	input: CapabilityProxyClientInput & {
+		credentials: CredentialCallMapInput
+		conversationId?: string
+		/** Invoke / package entry: unknown keys are errors. */
+		strict?: boolean
+		packageId?: string
+	},
+): Promise<{ warnings: Array<string> }> {
+	const args: Record<string, unknown> = {}
+	if (input.strict === true) args.strict = true
+	if (input.packageId !== undefined) args.packageId = input.packageId
+	const result = await callCapabilityProxy({
+		apiUrl: input.apiUrl,
+		token: input.token,
+		fetchFn: input.fetchFn,
+		signal: input.signal,
+		dispatcher: input.dispatcher,
+		path: ['kody', 'credentialClientCheck'],
+		args: [args],
+		conversationId: input.conversationId,
+		credentials: input.credentials,
+	})
+	if (!isRecord(result)) {
+		throw new CapabilityProxyError('credentialClientCheck returned an unexpected result.')
+	}
+	if (result.ok === false) {
+		const error = isRecord(result.error) ? result.error : {}
+		const code = typeof error.code === 'string' ? error.code : 'credential_error'
+		throw new CapabilityProxyError(formatCredentialClientError(error), { code })
+	}
+	const value = isRecord(result.value) ? result.value : null
+	const warnings = Array.isArray(value?.warnings)
+		? value.warnings.filter((warning): warning is string => typeof warning === 'string')
+		: []
+	return { warnings }
 }
 
 async function send(
