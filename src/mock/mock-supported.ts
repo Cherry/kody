@@ -26,9 +26,21 @@ export const mockCapabilityPaths = [
 	'kody.__mockPackageStorageSet',
 	'kody.__mockPackageStorageDelete',
 	'kody.__mockPackageStorageList',
-	// Credential client open returns fake metadata only (never prod secrets).
+	// Published package-app-kit / packageStorage helpers may hop these names
+	// directly (same scratch store as the __mock* bridges above).
+	'kody.packageStorageGet',
+	'kody.packageStorageSet',
+	'kody.packageStorageDelete',
+	'kody.packageStorageList',
+	// Credential client: fake metadata + handles only (never prod secrets).
 	'kody.credentialClientOpen',
+	'kody.credentialClientOpenAll',
 	'kody.credentialClientCheck',
+	'kody.credentialClientRefresh',
+	// OAuth integration fetch hop used by createAuthenticatedFetch.
+	'kody.authenticatedFetch',
+	// Read-only admin fixture so gift-cliff-ops-style packages can smoke locally.
+	'kody.adminUserList',
 ] as const
 
 export type MockOpenApiOperationId = (typeof mockOpenApiOperationIds)[number]
