@@ -1,24 +1,67 @@
 import { apiTokenEnvVar, defaultApiUrl, defaultMcpUrl, onboardingUrl } from './defaults.js'
 import { hostIds } from './host-catalog.js'
+import { orgEnvVar } from './org-slug.js'
 import { readPackageVersion } from './package-info.js'
+import {
+	listStoredOrgs,
+	type ListedOrg,
+	type SecretBackend,
+	type StoreResolution,
+} from './store.js'
 
-export const usage = `Kody CLI ${readPackageVersion()}
+function formatOrgsHelpBlock(orgs: Array<ListedOrg>, indent = '  '): string {
+	if (orgs.length === 0) {
+		return `${indent}Not logged in. Run \`kody login\`.\n`
+	}
+	const lines = [`${indent}Logged-in orgs:`]
+	for (const org of orgs) {
+		const mark = org.active ? '*' : ' '
+		const pending = org.pending
+			? '  (slug pending — run any authenticated command)'
+			: ''
+		lines.push(
+			`${indent}  ${mark} ${org.slug}${org.active ? '  (active)' : ''}${pending}`,
+		)
+	}
+	return `${lines.join('\n')}\n`
+}
+
+export function buildUsage(input: {
+	mcpUrl?: string
+	backend?: SecretBackend
+	resolution?: StoreResolution
+	orgs?: Array<ListedOrg>
+} = {}): string {
+	const mcpUrl = input.mcpUrl ?? defaultMcpUrl
+	let orgs = input.orgs
+	if (!orgs) {
+		try {
+			orgs = listStoredOrgs(mcpUrl, input.backend, input.resolution)
+		} catch {
+			orgs = []
+		}
+	}
+	const orgBlock = formatOrgsHelpBlock(orgs)
+
+	return `Kody CLI ${readPackageVersion()}
 
 Install Kody as a remote MCP server in local agents, or use this CLI as a local client.
 
 Usage:
   kody login [--mcp-url <url>] [--org <slug>] [--no-browser]
-  kody logout [--mcp-url <url>] [--api-url <url>]
+  kody logout [--org <slug>] [--mcp-url <url>] [--api-url <url>]
+  kody org list [--json] [--mcp-url <url>]
+  kody org use [<slug>] [--mcp-url <url>]
   kody status [--mcp-url <url>] [--api-url <url>]
   kody auth bootstrap (--code <kody_bc_…> | --scopes <list>) (--lifetime short|long | --idle-ttl-seconds <n> --max-lifetime-seconds <n>)
                       [--token <token>] [--mcp-url <url>] [--api-url <url>]
   kody auth setup-git [--lifetime long|short] [--scopes <list>] [--token <token>] [--mcp-url <url>] [--api-url <url>]
   kody auth remove-git [--mcp-url <url>] [--api-url <url>]
   kody git-credential <get|store|erase>
-  kody whoami [--mcp-url <url>] [--token <token>] [--api-url <url>] [--json]
-  kody search [query] [--entity <ref>] [--domain <id>] [--limit <n>] [--token <token>] [--api-url <url>] [--json]
-  kody api <operationId> [--params <json>] [--token <token>] [--api-url <url>] [--json]
-  kody execute [--invoke <ref> | --code <esm> | --file <path>] [--params <json>] [--conversation-id <id>] [--json]
+  kody whoami [--org <slug>] [--mcp-url <url>] [--token <token>] [--api-url <url>] [--json]
+  kody search [query] [--org <slug>] [--entity <ref>] [--domain <id>] [--limit <n>] [--token <token>] [--api-url <url>] [--json]
+  kody api <operationId> [--org <slug>] [--params <json>] [--token <token>] [--api-url <url>] [--json]
+  kody execute [--org <slug>] [--invoke <ref> | --code <esm> | --file <path>] [--params <json>] [--conversation-id <id>] [--json]
                [--credential <key=name>]… [--token <token>] [--api-url <url>] [--local] [--allow-private-network]
   kody install [--mcp-url <url>] [--clients <ids>] [--yes] [--project] [--json]
   kody skill install [--project]
@@ -27,10 +70,31 @@ Usage:
   VS Code, Goose, and others). For web-based clients (ChatGPT, Claude.ai, Grok),
   see ${onboardingUrl(defaultMcpUrl)}
 
+Orgs (local store, offline):
+${orgBlock}
   --org <slug>
-             Bind this login to an organization.
-             Example: \`kody login --org acme\`
-             Omit \`--org\` and the server binds your only organization.
+             For \`kody login\` / \`kody logout\`: only the flag counts
+             (${orgEnvVar} is ignored). Login binds the browser grant to
+             this organization (adds/replaces that org's stored login;
+             other orgs stay). Example: \`kody login --org acme\`
+             Omit and the server picker binds one org.
+             For org-scoped commands (whoami, search, api, execute, …):
+             run as this org for one call. Precedence: flag, then
+             ${orgEnvVar}, then the active org (\`kody org use\`).
+
+  kody org list
+             Show logged-in orgs and mark the active one. \`--json\` for agents.
+
+  kody org use [<slug>]
+             Switch the active org. With a slug (agents), switches directly.
+             With no slug on a TTY (humans), opens an interactive chooser.
+             Without a TTY, pass a slug.
+
+  kody logout
+             Without \`--org\`, removes the active org login only (or the
+             pending legacy session). With \`--org <slug>\`, removes just
+             that org. Other org logins stay. Also clears a stored
+             bootstrap/API token when present.
 
   --clients  Comma-separated ids: ${hostIds.join(', ')}
 
@@ -71,8 +135,9 @@ Usage:
              at least \`package:read\` and \`package:write\` (default
              \`--lifetime long\`; reuses a suitable stored token). That token
              authorizes every repo you can access across all orgs — login
-             \`--org\` only scopes the MCP mint session, not git. Requires a
-             server that advertises \`org_binding\`. Configures a stable
+             \`--org\` only scopes the MCP mint session, not git. User-wide:
+             one setup covers every org. Requires a server that advertises
+             \`org_binding\`. Configures a stable
              \`credential.https://<host>.helper\` (global \`kody\` only when
              its version supports \`git-credential\`, else
              \`npx -y @kodycodes/cli@<exact>\` — never a major-only range or
@@ -119,7 +184,8 @@ Usage:
              \`org:execute\` plus the capability scopes you need.
              For \`execute --local\`, a valid \`kody login\` session can also
              supply Bearer when no scoped token is available (no tokenCreate
-             exchange).
+             exchange). User-owned tokens (\`org_binding: user\`) honor
+             \`--org\` / ${orgEnvVar} as \`?org=\` on API calls.
 
   --local    Run the execute module on this machine (workerd, Linux/macOS).
              Requires Node.js 22 or newer. \`--file\` entries are bundled
@@ -153,8 +219,19 @@ Usage:
 
 Environment:
   KODY_MCP_URL        Override the default MCP URL (${defaultMcpUrl})
+  ${orgEnvVar}             Default org slug for org-scoped commands (overridden by --org)
   ${apiTokenEnvVar}      Scoped API token for token-auth search / whoami / api / execute
   KODY_API_URL        Override the Kody API URL (${defaultApiUrl})
   KODY_CACHE_DIR      Where execute --local caches workerd (default: user cache dir)
   KODY_WORKERD_PATH   Use this workerd binary instead of the pinned download
 `
+}
+
+/**
+ * Build usage on demand. Do not call at module load: reading the credential
+ * store (and pulling keyring) on every `kody --version` blows the startup
+ * budget. Callers that need the offline org list pass `mcpUrl` / `backend`.
+ */
+export function usage(input?: Parameters<typeof buildUsage>[0]): string {
+	return buildUsage(input)
+}

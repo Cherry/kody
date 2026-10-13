@@ -31,6 +31,7 @@ function urlOriginOrValue(value: string): string {
 export async function resolveLocalExecuteBearer(
 	input: ResolveScopedApiTokenInput & {
 		mcpUrl?: string
+		org?: string
 		backend?: SecretBackend
 		fetchFn?: typeof fetch
 		now?: number
@@ -57,12 +58,20 @@ export async function resolveLocalExecuteBearer(
 	try {
 		const credentials = await ensure({
 			mcpUrl: input.mcpUrl,
+			org: input.org,
 			backend: input.backend,
 			fetchFn: input.fetchFn,
 			now: input.now,
 		})
 		return credentials.accessToken
-	} catch {
+	} catch (error) {
+		// Preserve org-specific guidance from ensureFreshCredentials.
+		if (
+			error instanceof Error &&
+			/^No login stored for org "/.test(error.message)
+		) {
+			throw error
+		}
 		throw new Error(missingLocalExecuteAuthMessage(input.purpose ?? 'execute --local'))
 	}
 }
