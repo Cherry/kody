@@ -157,3 +157,70 @@ test('internet-visible approval-required failures preserve the review URL', asyn
 	})
 	client.clear()
 })
+
+test.each([true, false])(
+	'credential approval preserves server ownership and reconciles package reads (accepted: %s)',
+	async (accepted) => {
+		const client = new QueryClient()
+		const key = [
+			'page',
+			'owner',
+			'loadPackage',
+			{ username: 'team', kodyId: 'example', page: 'settings' },
+		]
+		const initial = {
+			kind: 'page',
+			data: { ownerPackage: { id: 'pkg', publishedCommit: 'previous' } },
+		}
+		client.setQueryData(key, initial)
+		let respond!: (response: Response) => void
+		const request = vi.fn(
+			() =>
+				new Promise<Response>((resolve) => {
+					respond = resolve
+				}),
+		)
+		vi.stubGlobal('fetch', request)
+		const observer = new MutationObserver(
+			client,
+			packageMutationOptions(client),
+		)
+		const write = observer.mutate({
+			actorKey: 'owner',
+			packageId: 'pkg',
+			apiPath: '/@team/example/approve-capabilities.json',
+			body: {
+				action: 'approve-credential-needs',
+				requestId: 'reviewed-request',
+			},
+		})
+		const result = accepted
+			? expect(write).resolves.toMatchObject({ ok: true })
+			: expect(write).rejects.toThrow('Approval is stale')
+		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce())
+		expect(request).toHaveBeenCalledWith(
+			'/@team/example/approve-capabilities.json',
+			expect.objectContaining({
+				method: 'POST',
+				credentials: 'include',
+				body: JSON.stringify({
+					action: 'approve-credential-needs',
+					requestId: 'reviewed-request',
+					packageId: 'pkg',
+				}),
+			}),
+		)
+		// Approval is a security decision. Never show a new published version before the server accepts it.
+		expect(client.getQueryData(key)).toEqual(initial)
+		respond(
+			Response.json(
+				accepted ? { ok: true } : { ok: false, error: 'Approval is stale' },
+				{ status: accepted ? 200 : 409 },
+			),
+		)
+		await result
+		expect(client.getQueryData(key)).toEqual(initial)
+		expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+		client.clear()
+	},
+)

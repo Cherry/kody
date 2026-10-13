@@ -5,6 +5,7 @@ import { AccountPackageApproveCapabilitiesRoute } from './pages/account-package-
 import { type AccountPackageApproveCapabilitiesLoaderData } from '#universal/loader-data.ts'
 const payload: AccountPackageApproveCapabilitiesLoaderData = {
 	ok: true,
+	pendingApprovals: [],
 	email: 'owner@example.com',
 	package: {
 		id: 'pkg',
@@ -67,4 +68,52 @@ test('unpublished native capability review cannot approve and explains why', asy
 	expect(html).toMatch(
 		/<button[^>]*disabled[^>]*data-testid="package-approve-capabilities"/,
 	)
+})
+
+test('pending publish review shows credential changes and only offers supported approvals', async () => {
+	const html = await renderStartPage(
+		jsx(AccountPackageApproveCapabilitiesRoute, {
+			payload: {
+				...payload,
+				pendingApprovals: [
+					{
+						id: 'request-1',
+						reason: 'credential_needs_changed',
+						reasonLabel: 'Credential access changed',
+						pendingCommit: 'paused-commit',
+						createdAt: '2026-10-13T00:00:00Z',
+						changes: ['Add mail credential for api.example.com'],
+						approveAction: 'approve-credential-needs',
+					},
+					{
+						id: 'request-2',
+						reason: 'went_public',
+						reasonLabel: 'Package became public',
+						pendingCommit: 'public-commit',
+						createdAt: '2026-10-13T00:00:00Z',
+						changes: [],
+						approveAction: null,
+					},
+				],
+			},
+			username: 'owner',
+			kodyId: 'example',
+		}),
+		payload.approveHref,
+	)
+	for (const value of [
+		'Approve package changes',
+		'previously published version keeps running',
+		'Credential access changed',
+		'paused-commit',
+		'Add mail credential for api.example.com',
+		'Package became public',
+		'public-commit',
+		'Internet-visible serving',
+	])
+		expect(html).toContain(value)
+	expect(
+		html.match(/data-testid="package-pending-approval-approve"/g),
+	).toHaveLength(1)
+	expect(html).toContain('Approve and publish')
 })
