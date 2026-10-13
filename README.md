@@ -85,7 +85,8 @@ keychain credentials migrate silently into the multi-org store as the active org
 | `kody whoami` | Confirms the CLI MCP connection and lists tools. With a scoped API token (and no login), shows token identity via the Open API. |
 | `kody search [query]` | Calls Kody `search` from the CLI (prefer the host MCP tool). Token-only auth uses Open API `GET /v1/search`. |
 | `kody api <operationId>` | Thin Open API wrapper matching the MCP `api` tool: `operationId` + flat `--params` JSON. Auth: `--token` / `KODY_API_TOKEN` / stored `auth bootstrap` token. The parsed `/openapi.json` route map is cached under the Kody cache dir keyed by the document's `ETag` and revalidated with `If-None-Match` on each run. |
-| `kody execute` | Calls Kody `execute` from the CLI (`--invoke`, `--code`, `--file`, or stdin via `--file -`). With a scoped API token and no login (or with `--token`), cloud execute goes through CapabilityProxy → `kody.execute` — no `kody login`. Add `--local` to run the module (and static `kody:@…` package modules) on this machine instead. `--credential key=name` (repeatable; `org:name` / `personal:name` / empty `=` for none) picks ADR 0068 credentials for `--local` or a `kody login` MCP session. `--allow-private-network` opts local execution into private and local network access. |
+| `kody execute` | Calls Kody `execute` from the CLI (`--invoke`, `--code`, `--file`, or stdin via `--file -`). With a scoped API token and no login (or with `--token`), cloud execute goes through CapabilityProxy → `kody.execute` — no `kody login`. Add `--local` to run the module (and static `kody:@…` package modules) on this machine instead. `--credential key=name` (repeatable; `org:name` / `personal:name` / empty `=` for none) picks ADR 0068 credentials for `--local` or a `kody login` MCP session. `--allow-private-network` opts local execution into private and local network access. `--target prod\|mock` (default `prod`) sends CapabilityProxy / search hops to prod or the built-in CLI mock; `--target mock` implies local workerd. |
+| `kody dev` | Local testing for unpublished packages. Serves `kody.app.entry` on localhost via workerd with hot reload. Subcommands: `fetch`, `job`, `webhook`, `emit`, `check`. Default `--target mock` (scratch storage, fake credentials). Covers exports, webhooks, schedules (run-once), and subscriptions. See [Local package testing](#local-package-testing-kody-dev). |
 
 `--json` prints structured MCP results.
 
@@ -203,6 +204,37 @@ expired or within an hour of expiry, so you should not need to re-run
 config helpers, revokes and deletes the stored API token; leaves login alone).
 Push moves live HEAD only (packages do not auto-publish). Existing `kody login`
 / `auth bootstrap` flows are unchanged.
+
+## Local package testing (`kody dev`)
+
+Test an unpublished package (app, exports, jobs, webhooks, subscriptions)
+before publish. Bundling reuses the same esbuild path as `execute --file` /
+publish (`local-bundle.ts`). One shared flag:
+
+| Command | `--target prod` (default for execute/search) | `--target mock` (default for `kody dev`) |
+| --- | --- | --- |
+| `kody dev` | Local app against real Kody | Local app against the CLI mock |
+| `execute` / `search` | Real capabilities, storage, secrets | Mock catalog / scratch storage / fake credentials |
+
+The mock is built into the CLI (no kody-celld). It refuses unimplemented routes
+with `not_implemented_in_mock` rather than faking success. `--reset-storage`
+wipes the mock session's scratch store. Share previews are out of scope;
+`execute --local` behavior is unchanged when `--target` is omitted (prod).
+
+```bash
+cd ./my-package
+kody dev                         # serve kody.app.entry; hot reload; --target mock
+kody dev fetch /health           # agent-friendly HTTP probe
+kody dev job heartbeat           # run a declared job once (never schedules locally)
+kody dev webhook ping --body ./fixture.json
+kody dev emit demo.event --body ./event.json   # subscription delivery shape
+kody dev check                   # bundle + light publish validations
+
+# Four surfaces against mock then prod:
+kody execute --target mock --invoke ./greet --params '{"name":"kent"}'
+kody execute --target prod --invoke ./greet --params '{"name":"kent"}'
+kody search --target mock local
+```
 
 ## Local execute
 
