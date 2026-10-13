@@ -32,6 +32,7 @@ import {
 } from './account-management-components.tsx'
 import { RecordChips, recordBodyCss } from './record-table.tsx'
 import { AccountPackageDeleteDialog } from './account-package-delete-dialog.tsx'
+import { AccountPackageUpdatePublicListing } from './account-package-update-public-listing.tsx'
 import { AccountPackageForkAdoption } from './account-package-fork-adoption.tsx'
 import { type AccountPackageDetail } from '#universal/loader-data.ts'
 
@@ -282,6 +283,9 @@ export function AccountPackageOwnerDetails(props: {
 				css={{ display: 'grid', gap: spacing.md }}
 				data-testid="package-visibility-controls"
 			>
+				<AccountPackageUpdatePublicListing
+					packageDetail={props.packageDetail}
+				/>
 				<div css={{ display: 'grid', gap: spacing.xs }}>
 					<p css={{ margin: 0, color: colors.textMuted }}>
 						{packageDetail.isPrivate

@@ -224,7 +224,19 @@ export function CommunityDetailRoute({
 			}}
 		>
 			<article css={detailArticleCss}>
-				<CommunityDetailContent {...header} />
+				<CommunityDetailContent
+					{...header}
+					listing={
+						header.listing
+							? {
+									...header.listing,
+									listingBehind:
+										data.viewerCanManage &&
+										data.ownerPackage?.listingNeedsRepublish === true,
+								}
+							: null
+					}
+				/>
 				{listingId
 					? renderInstallStrip({ installMessage, installOutcome })
 					: null}

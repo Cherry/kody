@@ -21,6 +21,7 @@ const ownerPackage: AccountPackageDetail = {
 	hidden: false,
 	isPrivate: false,
 	hasCommunityListing: false,
+	listingNeedsRepublish: false,
 	listingAhead: null,
 	forkAhead: null,
 	searchText: null,

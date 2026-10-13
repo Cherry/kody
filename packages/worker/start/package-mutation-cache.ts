@@ -4,10 +4,14 @@ import {
 	type Query,
 } from '@tanstack/react-query'
 import { type loadPackage } from '#start/server/public-data'
-import { type AccountPackagesLoaderData } from '#universal/loader-data.ts'
+import {
+	type AccountPackageListingBehindHint,
+	type AccountPackagesLoaderData,
+} from '#universal/loader-data.ts'
 import { invalidatePageResources } from './page-invalidation-cache.ts'
 type PackagePage = Awaited<ReturnType<typeof loadPackage>>
 type PackageResult = AccountPackagesLoaderData & {
+	listing?: AccountPackageListingBehindHint | null
 	error?: string
 	approvalUrl?: string
 	deleted?: boolean

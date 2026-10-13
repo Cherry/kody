@@ -27,6 +27,7 @@ import {
 import { renderPackageRepoChrome } from './package-repo-nav.tsx'
 
 import { colors } from '#universal/styles/tokens.ts'
+import { buildUpdatePublicListingHref } from '#universal/update-public-listing.ts'
 
 /**
  * Server-rendered package head (the `community-detail` frame): GitHub-style
@@ -135,6 +136,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 						loggedIn,
 						returnTo,
 						viewerIsOwner,
+						viewerCanManage,
 						publishCompareHref,
 					})
 				: null}
@@ -248,6 +250,7 @@ function renderListingHead(input: {
 	loggedIn: boolean
 	returnTo: string
 	viewerIsOwner: boolean
+	viewerCanManage: boolean
 	publishCompareHref?: string | null
 }) {
 	const viewerBadge = renderCommunityViewerInstallBadge({
@@ -257,7 +260,19 @@ function renderListingHead(input: {
 		returnTo: input.returnTo,
 		viewerIsOwner: input.viewerIsOwner,
 	})
-	if (!input.listing.sourceAhead && !input.listing.featured && !viewerBadge) {
+	const updateListingHref =
+		input.viewerCanManage && input.listing.listingBehind
+			? buildUpdatePublicListingHref({
+					username: input.listing.ownerUsername,
+					kodyId: input.listing.kodyId,
+				})
+			: null
+	if (
+		!input.listing.sourceAhead &&
+		!input.listing.featured &&
+		!viewerBadge &&
+		!updateListingHref
+	) {
 		return null
 	}
 	return (
@@ -286,6 +301,16 @@ function renderListingHead(input: {
 							HEAD ahead of published
 						</span>
 					)
+				) : null}
+				{updateListingHref ? (
+					<SiteLink
+						href={updateListingHref}
+						data-testid="community-detail-update-public-listing"
+						title="Publish and promote do not move the catalog listing. Open settings to republish the public snapshot."
+						css={badgeLinkCss}
+					>
+						Update public listing
+					</SiteLink>
 				) : null}
 				{input.listing.featured ? (
 					<span

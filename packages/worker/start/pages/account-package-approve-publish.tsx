@@ -22,7 +22,10 @@ import {
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { type AccountPackageApprovePublishLoaderData } from '#universal/loader-data.ts'
+import {
+	type AccountPackageListingBehindHint,
+	type AccountPackageApprovePublishLoaderData,
+} from '#universal/loader-data.ts'
 function approvePublishMetadataItems(
 	payload: AccountPackageApprovePublishLoaderData,
 ) {
@@ -54,6 +57,63 @@ function approvePublishMetadataItems(
 	return items
 }
 
+function renderListingBehindPrompt(input: {
+	listing?: AccountPackageListingBehindHint | null
+	willLagAfterPromote?: boolean
+}) {
+	if (input.listing?.behind) {
+		return (
+			<div
+				data-testid="approve-publish-update-public-listing"
+				css={{
+					display: 'grid',
+					gap: spacing.xs,
+					padding: spacing.sm,
+					borderRadius: '0.55rem',
+					border: `1px solid ${colors.border}`,
+					backgroundColor: colors.surface,
+				}}
+			>
+				<p css={{ margin: 0, color: colors.text }}>
+					The public community listing stays on its pinned snapshot until you
+					republish it. Publish and promote only move the package runtime.
+				</p>
+				<SiteLink
+					href={input.listing.updateUrl}
+					data-testid="approve-publish-update-public-listing-link"
+					css={{
+						...getPillButtonCss({ size: 'sm' }),
+						display: 'inline-flex',
+						textDecoration: 'none',
+						width: 'fit-content',
+					}}
+				>
+					Update public listing
+				</SiteLink>
+			</div>
+		)
+	}
+	if (!input.willLagAfterPromote) return null
+	return (
+		<div
+			data-testid="approve-publish-listing-will-lag"
+			css={{
+				display: 'grid',
+				gap: spacing.xs,
+				padding: spacing.sm,
+				borderRadius: '0.55rem',
+				border: `1px solid ${colors.border}`,
+				backgroundColor: colors.surface,
+			}}
+		>
+			<p css={{ margin: 0, color: colors.text }}>
+				After you promote, the public community listing will still show its
+				pinned snapshot until you update it from package settings.
+			</p>
+		</div>
+	)
+}
+
 export function AccountPackageApprovePublishRoute({
 	payload,
 }: {
@@ -67,6 +127,8 @@ export function AccountPackageApprovePublishRoute({
 		currentHref = useLocation({ select: (l) => l.href })
 	const [busy, setBusy] = useState(false),
 		[message, setMessage] = useState<string | null>(null)
+	const [promotedListing, setPromotedListing] =
+		useState<AccountPackageListingBehindHint | null>(null)
 	const busyRef = useRef(false),
 		mounted = useRef(false)
 	useEffect(() => {
@@ -93,8 +155,11 @@ export function AccountPackageApprovePublishRoute({
 		setMessage(null)
 		const isCurrent = capture()
 		try {
-			await mutation.submit(body)
-			if (isCurrent()) await router.navigate({ to: destination })
+			const accepted = await mutation.submit(body)
+			if (isCurrent()) {
+				if (accepted.listing?.behind) setPromotedListing(accepted.listing)
+				else await router.navigate({ to: destination })
+			}
 		} catch (error) {
 			if (isCurrent())
 				setMessage(
@@ -125,26 +190,30 @@ export function AccountPackageApprovePublishRoute({
 		<AccountManagementShell busy={busy}>
 			<AccountPageHeader
 				title={
-					headUpToDate
-						? `Nothing to publish: the public version is up to date at ${upToDateShort}`
-						: pinnedCommitAlreadyPublished
-							? `This commit is already published at ${upToDateShort}`
-							: nothingToPublish
-								? 'Nothing to publish'
-								: payload?.package.lockedAt
-									? 'Approve package publish'
-									: 'Publish HEAD'
+					promotedListing
+						? 'Published'
+						: headUpToDate
+							? `Nothing to publish: the public version is up to date at ${upToDateShort}`
+							: pinnedCommitAlreadyPublished
+								? `This commit is already published at ${upToDateShort}`
+								: nothingToPublish
+									? 'Nothing to publish'
+									: payload?.package.lockedAt
+										? 'Approve package publish'
+										: 'Publish HEAD'
 				}
 				description={
-					headUpToDate
-						? 'No unpublished commit is waiting. Nothing was approved or changed.'
-						: pinnedCommitAlreadyPublished
-							? 'The commit in this link matches the public version. Open Approve without a commit pin to review default-branch HEAD if it has moved.'
-							: nothingToPublish
-								? 'No commit is available to publish from this page.'
-								: payload?.package.lockedAt
-									? 'Review the files that changed since the last publish, then promote this commit. The package stays locked.'
-									: 'Review the files that changed since the last publish, then publish default-branch HEAD. Runtime keeps using the published commit until you do.'
+					promotedListing
+						? 'The package runtime is on this commit. Update the public community listing if you want the catalog snapshot to match.'
+						: headUpToDate
+							? 'No unpublished commit is waiting. Nothing was approved or changed.'
+							: pinnedCommitAlreadyPublished
+								? 'The commit in this link matches the public version. Open Approve without a commit pin to review default-branch HEAD if it has moved.'
+								: nothingToPublish
+									? 'No commit is available to publish from this page.'
+									: payload?.package.lockedAt
+										? 'Review the files that changed since the last publish, then promote this commit. The package stays locked.'
+										: 'Review the files that changed since the last publish, then publish default-branch HEAD. Runtime keeps using the published commit until you do.'
 				}
 				currentHref={currentHref}
 			/>
@@ -168,7 +237,25 @@ export function AccountPackageApprovePublishRoute({
 				</>
 			) : null}
 
-			{payload ? (
+			{promotedListing ? (
+				<section
+					data-testid="package-approve-publish-success"
+					css={getAccentCalloutCss()}
+				>
+					<p>
+						{payload.package.name} is published at{' '}
+						<code>{shortCommunityCommit(payload.pendingCommit ?? '')}</code>.
+					</p>
+					{renderListingBehindPrompt({ listing: promotedListing })}
+					<SiteLink
+						href={payload.packageHref}
+						css={getPillButtonCss({ size: 'sm' })}
+					>
+						Back to package
+					</SiteLink>
+				</section>
+			) : null}
+			{payload && !promotedListing ? (
 				<section
 					data-testid="package-approve-publish-card"
 					css={getAccentCalloutCss()}
@@ -190,6 +277,10 @@ export function AccountPackageApprovePublishRoute({
 								: 'This package is not locked. Lock it from the package page if you want later publishes to require approval.'}
 						</p>
 					</div>
+					{renderListingBehindPrompt({
+						listing: payload.listing,
+						willLagAfterPromote: payload.listingWillLagAfterPromote,
+					})}
 					<MetadataGrid items={approvePublishMetadataItems(payload)} />
 					<div
 						css={{

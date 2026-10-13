@@ -224,3 +224,48 @@ test.each([true, false])(
 		client.clear()
 	},
 )
+
+test('republishing replaces the fresh owner listing state while reconciling the catalog', async () => {
+	const client = new QueryClient()
+	const key = [
+		'page',
+		'actor-a',
+		'loadPackage',
+		{ username: 'a', kodyId: 'repo', page: 'settings' },
+	]
+	client.setQueryData(key, {
+		kind: 'page',
+		data: { ownerPackage: { id: 'repo-id', listingNeedsRepublish: true } },
+	})
+	vi.stubGlobal(
+		'fetch',
+		vi.fn().mockResolvedValue(
+			Response.json({
+				ok: true,
+				selectedPackage: { id: 'repo-id', listingNeedsRepublish: false },
+			}),
+		),
+	)
+	const observer = new MutationObserver(client, packageMutationOptions(client))
+	await observer.mutate({
+		actorKey: 'actor-a',
+		packageId: 'repo-id',
+		body: {
+			action: 'set-visibility',
+			visibility: 'public',
+			confirmName: 'repo',
+		},
+	})
+	expect(client.getQueryData(key)).toMatchObject({
+		data: { ownerPackage: { listingNeedsRepublish: false } },
+	})
+	expect(
+		JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string),
+	).toEqual({
+		action: 'set-visibility',
+		visibility: 'public',
+		confirmName: 'repo',
+		packageId: 'repo-id',
+	})
+	client.clear()
+})
