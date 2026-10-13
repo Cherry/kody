@@ -592,13 +592,13 @@ export function OrgGrantsPage({
 			<AccountManagementPanel title="Resource grants">
 				{data.grants.length ? (
 					data.grants.map((grant) => (
-						<article key={grant.id}>
+						<article key={grant.id} data-grant-id={grant.id}>
 							<h3>{grant.resourceLabel}</h3>
 							<p>
 								{grant.subjectLabel} ·{' '}
 								{grant.presetLabel || grant.permissions.join(', ')}
 							</p>
-							{data.canManage ? (
+							{data.canManage && grant.canRevoke ? (
 								<OrgAction
 									href={routes.orgGrantsRevokePost.href({
 										orgSlug: data.org.slug,
