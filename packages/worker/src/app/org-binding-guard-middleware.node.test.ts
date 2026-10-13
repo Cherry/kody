@@ -208,6 +208,7 @@ function deniedRequest(entry: RouteEntry, method: string, cookie: string) {
 			/^\/account\/([^/.]+)/
 				.exec(url.pathname)?.[1]
 				?.replace(/^(connected-agents|connection-usage)$/, 'agents')
+				?.replace(/^credentials$/, 'secrets')
 				?.replace(/^last-used-org$/, 'waiting')
 				?.replace(/-export$/, '') ?? ''
 		headers.set('Referer', `${origin}/@ghost/-/${section}`)
