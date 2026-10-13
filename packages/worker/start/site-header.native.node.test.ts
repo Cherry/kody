@@ -28,7 +28,7 @@ function SiteHeader(props: HeaderInput) {
 const renderToString = (element: ReturnType<typeof jsx<HeaderInput>>) =>
 	renderStartPage(element, element.props.currentPathname)
 
-test('logged-in header has one menu: the organization, then your own links and Log out', async () => {
+test('logged-in header has an organization switcher and a separate account menu with Log out', async () => {
 	const html = await renderToString(
 		jsx(SiteHeader, {
 			loggedIn: true,
@@ -42,11 +42,30 @@ test('logged-in header has one menu: the organization, then your own links and L
 		}),
 	)
 
-	// No separate Account link or profile avatar beside the switcher.
-	expect(html).not.toContain('data-testid="site-header-account"')
-	expect(html).not.toContain('data-testid="site-header-profile"')
-	expect(html).not.toContain('data-testid="site-header-account-menu"')
-	expect(html).toContain('aria-label="@ada: organizations and account"')
+	expect(html).toContain('aria-label="@ada: switch organization"')
+	expect(html).toContain('aria-label="Ada Lovelace: your account"')
+	// The switcher popover lists organizations only; the person's own links
+	// live in the account menu.
+	const switcherPanel = html.slice(
+		html.indexOf('data-testid="org-switcher-panel"'),
+		html.indexOf('data-testid="account-menu"'),
+	)
+	expect(switcherPanel).not.toContain('>Account settings<')
+	expect(switcherPanel).not.toContain('action="/logout"')
+	const accountPanel = html.slice(
+		html.indexOf('data-testid="account-menu-panel"'),
+		html.indexOf('data-testid="org-switcher-menu"'),
+	)
+	expect(accountPanel).toContain('>@ada<')
+	expect(accountPanel).not.toContain('>Your account<')
+	expect(accountPanel).toMatch(/href="\/@ada"[^>]*>[\s\S]*?>Your profile</)
+	expect(accountPanel).toMatch(
+		/<a(?=[^>]*href="\/account")(?=[^>]*aria-current="page")[^>]*>[\s\S]*?>Account settings</,
+	)
+	expect(accountPanel).toMatch(
+		/href="\/account\/usage"[^>]*>[\s\S]*?>Usage &amp; credits</,
+	)
+	expect(accountPanel).toContain('action="/logout"')
 	// From an account page, the signup org row opens the overview too, not
 	// the public profile (that is "Your profile").
 	const adaRowAt = html.indexOf('data-testid="org-switcher-ada"')
@@ -78,8 +97,10 @@ test('logged-in header has one menu: the organization, then your own links and L
 	const account = menu.slice(
 		menu.indexOf('data-testid="org-switcher-account-group"'),
 	)
+	// The phone menu has one panel: organizations, then the account links.
 	expect(account).toContain('>Your account<')
 	expect(account).toMatch(/href="\/@ada"[^>]*>[\s\S]*?>Your profile</)
+	expect(account).toContain('>Usage &amp; credits<')
 	expect(account).toMatch(
 		/<a(?=[^>]*href="\/account")(?=[^>]*aria-current="page")[^>]*>[\s\S]*?>Account settings</,
 	)
@@ -127,7 +148,7 @@ test('org switcher lists the signup organization, then others with roles, then c
 	expect(createAt).toBeGreaterThan(acmeAt)
 	expect(invitesAt).toBeGreaterThan(createAt)
 	expect(menu.slice(invitesAt)).toMatch(/^>Invites<\/span>[\s\S]*?>2</)
-	expect(html).toContain('aria-label="@acme: organizations and account"')
+	expect(html).toContain('aria-label="@acme: switch organization"')
 	// Secrets stays on the org row. Settings is a different page's row.
 	expect(menu).not.toContain('href="/@acme/-/settings"')
 	expect(menu).toContain('href="/account/organizations#invites"')
@@ -173,7 +194,7 @@ test('org switcher on team settings stays on the URL org when session lists only
 			lastUsedOrganization: 'ada',
 		}),
 	)
-	expect(html).toContain('aria-label="@acme: organizations and account"')
+	expect(html).toContain('aria-label="@acme: switch organization"')
 	const menu = html.slice(html.indexOf('data-testid="org-switcher-menu"'))
 	// Synthesized current appears as its own row (session list was personal-only).
 	expect(menu).toContain('data-testid="org-switcher-acme"')
@@ -223,7 +244,7 @@ test('org switcher from account pages opens the team home and the signup overvie
 	expect(adaRow).toContain('href="/@ada/-/overview"')
 })
 
-test('org switcher sends collaborators to org home and billing off Teams', async () => {
+test('org switcher opens the org home when the current page is not open to that role there', async () => {
 	const collaborator = await renderToString(
 		jsx(SiteHeader, {
 			loggedIn: true,
@@ -299,14 +320,16 @@ test('org switcher sends collaborators to org home and billing off Teams', async
 		billing.indexOf('>', billing.indexOf('data-testid="org-switcher-acme"')) +
 			1,
 	)
-	expect(billingRow).toContain('href="/@acme/-/settings"')
+	expect(billingRow).toContain('href="/@acme"')
 	expect(billing).not.toContain('href="/@acme/-/teams"')
+	// The signup org has no Teams page either, so it opens its overview.
+	expect(billing).toContain('href="/@cara/-/overview"')
 })
 
 test('org switcher keeps every org-owned section when switching between orgs', async () => {
 	const sections = [
 		'activity',
-		'connections',
+		'agents',
 		'email',
 		'integrations',
 		'jobs',

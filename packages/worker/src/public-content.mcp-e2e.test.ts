@@ -36,7 +36,7 @@ function contains(html: string, markers: string[]) {
 	for (const marker of markers) expect(html).toContain(marker)
 }
 
-test('authorized team Secrets and Connections are real native documents', async () => {
+test('authorized team Secrets and Agents are real native documents', async () => {
 	const server = await getSharedMcpE2eServer()
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
@@ -52,7 +52,7 @@ test('authorized team Secrets and Connections are real native documents', async 
 	expect(created.headers.get('Location')).toBe(`${server.origin}/@${slug}`)
 	for (const [section, heading] of [
 		['secrets', 'Secrets'],
-		['connections', 'Connections'],
+		['agents', 'Agents'],
 	]) {
 		const { html } = await document(`/@${slug}/-/${section}`, cookie)
 		expect(html).toMatch(new RegExp(`<h1[^>]*>${heading}</h1>`))

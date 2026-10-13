@@ -81,9 +81,17 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		'href',
 		`/@pinned-${runId}/-/repositories`,
 	)
-	// No invites waiting, so no Invites row; the person's own links follow.
+	// No invites waiting, so no Invites row. The person's own links live in
+	// the account menu, not the org switcher.
 	await expect(wide.panel.getByTestId('org-switcher-invites')).toHaveCount(0)
-	const accountGroup = wide.panel.getByRole('group', { name: 'Your account' })
+	await expect(wide.panel.getByTestId('org-switcher-logout')).toHaveCount(0)
+	await page.keyboard.press('Escape')
+	await expect(wide.panel).toBeHidden()
+	const accountMenu = page.getByTestId('account-menu')
+	await accountMenu.click()
+	const accountPanel = page.getByTestId('account-menu-panel')
+	await expect(accountPanel).toBeVisible()
+	const accountGroup = accountPanel.getByRole('group', { name: 'Your account' })
 	await expect(
 		accountGroup.getByRole('link', { name: 'Your profile' }),
 	).toHaveAttribute('href', `/@${user.username}`)
@@ -91,8 +99,14 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		accountGroup.getByRole('link', { name: 'Account settings' }),
 	).toHaveAttribute('href', '/account')
 	await expect(
+		accountGroup.getByRole('link', { name: 'Usage & credits' }),
+	).toHaveAttribute('href', '/account/usage')
+	await expect(
 		accountGroup.getByRole('button', { name: 'Log out' }),
 	).toBeVisible()
+	await page.keyboard.press('Escape')
+	await expect(accountPanel).toBeHidden()
+	await openSwitcher(page)
 
 	// Arrow keys walk the rows; Escape closes and returns focus to the trigger.
 	await wide.trigger.focus()
@@ -101,7 +115,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		wide.panel.getByTestId(`org-switcher-${user.username}`),
 	).toBeFocused()
 	await page.keyboard.press('End')
-	await expect(wide.panel.getByTestId('org-switcher-logout')).toBeFocused()
+	await expect(wide.panel.getByTestId('org-switcher-create')).toBeFocused()
 	await page.keyboard.press('Escape')
 	await expect(wide.panel).toBeHidden()
 	await expect(wide.trigger).toBeFocused()
@@ -119,30 +133,24 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await page.goto(`/@pinned-${runId}/-/settings`)
 	await waitForClientHydration(page)
 	// Team workspace rail matches the personal shape: same resource sections
-	// (MCP servers, Integrations, …) plus Organization management links.
+	// (MCP servers, Integrations, …) plus Members, Settings, and Billing.
 	const teamRail = page.getByRole('navigation', { name: 'Workspace sections' })
 	for (const label of [
 		'Overview',
 		'Repositories',
 		'Jobs',
-		'Workflows',
 		'Webhooks',
-		'Connections',
+		'Secrets',
 		'Integrations',
 		'MCP servers',
-		'Secrets',
 		'Secret providers',
+		'Agents',
 		'Memories',
 		'Email',
 		'Activity',
-		'Waiting',
-		'Settings',
 		'Members',
-		'Teams',
-		'Grants',
-		'Collaborators',
+		'Settings',
 		'Billing',
-		'Usage',
 	] as const) {
 		await expect(
 			teamRail.getByRole('link', { name: label, exact: true }),
@@ -155,14 +163,29 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		teamRail.getByRole('link', { name: 'MCP servers', exact: true }),
 	).toHaveAttribute('href', `/@pinned-${runId}/-/mcp-servers`)
 	await expect(page.getByTestId('org-switcher')).toHaveAccessibleName(
-		`@pinned-${runId}: organizations and account`,
+		`@pinned-${runId}: switch organization`,
 	)
 	await expect(
 		page.getByLabel('Workspace sections').getByText(`@pinned-${runId}`),
 	).toBeVisible()
 	await expect(page.getByTestId('delete-org')).toBeVisible()
 
-	// Team orgs own their secrets, jobs, connections, and repositories, so the
+	// Teams, Collaborators, and Grants are tabs on Members.
+	await teamRail.getByRole('link', { name: 'Members', exact: true }).click()
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/members$`))
+	const memberTabs = page.getByRole('navigation', { name: 'Members pages' })
+	for (const label of ['Members', 'Teams', 'Collaborators', 'Grants']) {
+		await expect(
+			memberTabs.getByRole('link', { name: label, exact: true }),
+		).toBeVisible()
+	}
+	await memberTabs.getByRole('link', { name: 'Grants', exact: true }).click()
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/grants$`))
+	await expect(
+		teamRail.getByRole('link', { name: 'Members', exact: true }),
+	).toHaveAttribute('aria-current', 'page')
+
+	// Team orgs own their secrets, jobs, agents, and repositories, so the
 	// rail opens each of them on the team org.
 	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
 	await rail.getByRole('link', { name: 'Secrets', exact: true }).click()
@@ -188,14 +211,14 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		rail.getByRole('link', { name: 'Overview', exact: true }),
 	).not.toHaveAttribute('aria-current')
 
-	// Connections list only agents approved for the team org (none yet).
-	await rail.getByRole('link', { name: 'Connections', exact: true }).click()
-	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/connections$`))
+	// Agents lists only agents approved for the team org (none yet).
+	await rail.getByRole('link', { name: 'Agents', exact: true }).click()
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/agents$`))
 	await expect(
 		page.getByRole('region', { name: 'Connected agents' }),
 	).toBeVisible()
 	await expect(
-		rail.getByRole('link', { name: 'Connections', exact: true }),
+		rail.getByRole('link', { name: 'Agents', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 	await expect(page.getByTestId('not-found-page')).toHaveCount(0)
 
@@ -228,10 +251,17 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(page.getByTestId('not-found-page')).toHaveCount(0)
 
 	// A full load of each team page is a 200, not the old 404.
-	for (const section of ['connections', 'repositories']) {
+	for (const section of ['agents', 'repositories']) {
 		const response = await page.goto(`/@pinned-${runId}/-/${section}`)
 		expect(response?.status(), section).toBe(200)
 	}
+	const legacyConnections = await page.goto(
+		`/@pinned-${runId}/-/connections/new?q=legacy`,
+	)
+	expect(legacyConnections?.status(), 'legacy /-/connections').toBe(200)
+	await expect(page).toHaveURL(
+		new RegExp(`/@pinned-${runId}/-/agents/new\\?q=legacy$`),
+	)
 	const legacy = await page.goto(`/@pinned-${runId}/-/packages?q=legacy`)
 	expect(legacy?.status(), 'legacy /-/packages').toBe(200)
 	await expect(page).toHaveURL(
@@ -353,6 +383,7 @@ test('the switcher keeps each org section and reads the destination org through 
 	for (const section of [
 		'memories',
 		'workflows',
+		'waiting',
 		'webhooks',
 		'mcp-servers',
 		'values',
@@ -373,6 +404,7 @@ test('the switcher keeps each org section and reads the destination org through 
 		const labels: Record<string, string> = {
 			memories: 'Memories',
 			workflows: 'Workflows',
+			waiting: 'Waiting',
 			webhooks: 'Webhooks',
 			'mcp-servers': 'MCP servers',
 			values: 'Values',
@@ -391,6 +423,18 @@ test('the switcher keeps each org section and reads the destination org through 
 			// The shared upstream rail intentionally omits the retiring Values
 			// primitive. Its existing URL still keeps org context and loads above.
 			await expect(sectionLink).toHaveCount(0)
+		} else if (section === 'workflows' || section === 'waiting') {
+			await expect(sectionLink).toHaveCount(0)
+			await expect(
+				page
+					.getByRole('navigation', { name: 'Workspace sections' })
+					.getByRole('link', { name: 'Activity', exact: true }),
+			).toHaveAttribute('aria-current', 'page')
+			await expect(
+				page
+					.getByRole('navigation', { name: 'Activity pages' })
+					.getByRole('link', { name: labels[section], exact: true }),
+			).toHaveAttribute('aria-current', 'page')
 		} else {
 			await expect(sectionLink).toHaveAttribute('aria-current', 'page')
 		}

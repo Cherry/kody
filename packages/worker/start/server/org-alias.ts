@@ -41,7 +41,13 @@ export const resolveOrgAlias = createServerFn({ method: 'GET' })
 		const personal = session.organizations.find((org) => org.personal)
 		if (!personal) throw notFound()
 		const url = new URL(request.url)
-		const path = orgResourcePathForAccountPath(url.pathname, personal.slug)
+		const path = orgResourcePathForAccountPath(
+			url.pathname.replace(
+				/^\/account\/connections(?=\/|$)/,
+				'/account/agents',
+			),
+			personal.slug,
+		)
 		if (!path) throw notFound()
 		throw redirect({ href: path + url.search + url.hash, statusCode: 302 })
 	})

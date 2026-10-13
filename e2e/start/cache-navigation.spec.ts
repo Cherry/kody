@@ -357,7 +357,7 @@ test('value search stays local while changing the selected record reads its own 
 	expect(reads[0]).toContain('selected=missing-value')
 })
 
-test('retained Connections keeps its own view while navigating back to Profile', async ({
+test('retained Agents keeps its own view while navigating back to Profile', async ({
 	page,
 	seedE2eUser,
 	login,
@@ -373,7 +373,7 @@ test('retained Connections keeps its own view while navigating back to Profile',
 	await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
 	await page.evaluate(
 		(href) => window.history.pushState(null, '', href),
-		orgResourcePath(user.username, 'connections'),
+		orgResourcePath(user.username, 'agents'),
 	)
 	await expect(page.getByTestId('account-connections-add')).toBeVisible()
 	await page.waitForLoadState('networkidle')
@@ -395,7 +395,7 @@ test('retained Connections keeps its own view while navigating back to Profile',
 		await reading
 		await expect(page).toHaveURL(/\/account$/)
 		// Session verification holds the destination pending. The retained
-		// Connections view must still describe its own matched route.
+		// Agents view must still describe its own matched route.
 		await expect(page.getByTestId('account-connections-add')).toBeVisible()
 		await expect(
 			page.getByRole('heading', { name: 'Unknown agent' }),

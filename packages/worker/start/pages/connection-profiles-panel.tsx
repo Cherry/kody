@@ -53,7 +53,7 @@ type MessageTarget =
 			profileId: string
 	  }
 /**
- * Named connection profiles on `/account/connections`. A profile lists only
+ * Named connection profiles on the Agents page (`/@slug/-/agents`). A profile lists only
  * the packages it grants, each with read/execute toggles, and adds more
  * through a package combobox — the same shape as a secret's allowed
  * packages — so an account with hundreds of packages does not render one

@@ -116,9 +116,9 @@ test('activation, reconnect and history refresh account data without leaking acc
 		await expect(
 			second.getByRole('heading', { name: 'Memories', exact: true }),
 		).toBeVisible()
-		await second.getByTestId('org-switcher').click()
+		await second.getByTestId('account-menu').click()
 		await second
-			.getByTestId('org-switcher-panel')
+			.getByTestId('account-menu-panel')
 			.getByRole('link', { name: 'Account settings', exact: true })
 			.click()
 		await expect(

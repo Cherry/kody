@@ -146,9 +146,9 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					.filter({ hasText: /^Quarantined$/ })
 					.first(),
 			).toBeVisible()
-			await page.getByTestId('org-switcher').click()
+			await page.getByTestId('account-menu').click()
 			await page
-				.getByTestId('org-switcher-panel')
+				.getByTestId('account-menu-panel')
 				.getByRole('link', { name: 'Account settings', exact: true })
 				.click()
 			await expect(
@@ -164,9 +164,9 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					.filter({ hasText: /^Quarantined$/ })
 					.first(),
 			).toBeVisible()
-			await page.getByTestId('org-switcher').click()
+			await page.getByTestId('account-menu').click()
 			await page
-				.getByTestId('org-switcher-panel')
+				.getByTestId('account-menu-panel')
 				.getByRole('link', { name: 'Account settings', exact: true })
 				.click()
 			await expect(

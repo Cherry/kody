@@ -186,3 +186,14 @@ test('an uncaught backend error uses native 500 rendering before the static fall
 		status: 500,
 	})
 })
+
+test('legacy org connection bookmarks redirect before Start rendering', async () => {
+	const response = await handleRequest(
+		new Request('https://example.com/@acme/-/connections/usage?connection=abc'),
+		createEnv(),
+	)
+	expect(response.status).toBe(301)
+	expect(response.headers.get('Location')).toBe(
+		'/@acme/-/agents/usage?connection=abc',
+	)
+})

@@ -9,7 +9,7 @@ export const loadConnectionUsagePage = createServerFn({ method: 'GET' })
 			!href.startsWith('/') ||
 			href.startsWith('//') ||
 			href.includes('\\') ||
-			!/^\/account\/connections(?:\/usage)?$/.test(
+			!/^\/account\/agents(?:\/usage)?$/.test(
 				accountAliasPath(new URL(href, 'https://kody.local').pathname),
 			)
 		)

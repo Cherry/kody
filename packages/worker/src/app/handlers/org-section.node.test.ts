@@ -123,12 +123,10 @@ test('team Connections are open to every member role and to grant-only collabora
 	const { orgSectionDenial } = await import('#app/org-request-binding.ts')
 	const team = { id: 'org-acme', slug: 'acme' } as never
 	for (const role of ['owner', 'member', 'billing', null] as const) {
-		expect(orgSectionDenial({ org: team, role }, 'connections')).toBeNull()
+		expect(orgSectionDenial({ org: team, role }, 'agents')).toBeNull()
 	}
 	expect(orgSectionDenial({ org: team, role: null }, 'secrets')).toBe(
 		'Organization resources unavailable',
 	)
-	expect(orgSectionDenial('denied', 'connections')).toBe(
-		'Organization unavailable',
-	)
+	expect(orgSectionDenial('denied', 'agents')).toBe('Organization unavailable')
 })

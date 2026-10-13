@@ -463,7 +463,7 @@ export const loadConnectionsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/connections(?:\/(?:usage|new(?:\/[^/?#]+)?))?(?:\?[^#]*)?$/.test(
+			!/^\/account\/agents(?:\/(?:usage|new(?:\/[^/?#]+)?))?(?:\?[^#]*)?$/.test(
 				collectionAliasHref(href),
 			)
 		)

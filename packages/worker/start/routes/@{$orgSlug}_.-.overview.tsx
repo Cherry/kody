@@ -39,7 +39,7 @@ function Page() {
 						<ul
 							css={cardGridCss}
 							aria-label={group.label ?? undefined}
-							data-testid={`org-overview-${group.label?.toLowerCase()}`}
+							data-testid={`org-overview-${group.label?.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
 						>
 							{group.items.map((item) => (
 								<li key={item.href}>

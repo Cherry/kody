@@ -55,7 +55,7 @@ test('native account documents render authorized initial state and protect anony
 			['Waiting', 'Connect your agent', 'data-testid="waiting-item-first-use"'],
 		],
 		[
-			`/@${user.username}/-/connections`,
+			`/@${user.username}/-/agents`,
 			[
 				'aria-label="Connected agents"',
 				'aria-label="MCP URL"',
@@ -63,10 +63,10 @@ test('native account documents render authorized initial state and protect anony
 			],
 		],
 		[
-			`/@${user.username}/-/connections/new`,
+			`/@${user.username}/-/agents/new`,
 			['data-testid="account-connections-back"'],
 		],
-		[`/@${user.username}/-/connections/new/cursor`, ['Connect Cursor']],
+		[`/@${user.username}/-/agents/new/cursor`, ['Connect Cursor']],
 	] as const
 	for (const [path, markers] of cases) {
 		const response = await fetch(new URL(path, server.origin), {
@@ -107,7 +107,7 @@ test('native account documents render authorized initial state and protect anony
 	)
 	expect(anonymousApi.status).toBe(401)
 	const unknown = await fetch(
-		`${server.origin}/@${user.username}/-/connections/new/not-a-client`,
+		`${server.origin}/@${user.username}/-/agents/new/not-a-client`,
 		{ headers: { Cookie: cookie } },
 	)
 	expect(unknown.status).toBe(404)

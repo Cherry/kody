@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type FormEvent } from 'react'
+import { organizationsWithSignupFallback } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
@@ -24,11 +25,13 @@ import {
 	accountRailOrgSlug,
 	isAccountNavItemActive,
 	isAccountRailPath,
+	railTabsForPath,
 	workspaceRailGroups,
 	type AccountRailGroup,
 } from '#client/routes/account-rail.ts'
 import { type IconName } from '../components/icon.tsx'
 import { EntityExplainer, resolveEntityExplainer } from './entity-explainer.tsx'
+import { AccountSectionTabs } from './account-section-tabs.tsx'
 import {
 	AccountManagementLinkNav,
 	accountManagementNarrowMq,
@@ -411,10 +414,9 @@ function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
 			label: 'Account sections',
 			heading: { eyebrow: 'Account' },
 			groups: accountRailGroups({
-				workspaceSlug: accountRailOrgSlug({
-					pathname: input.currentPath,
+				organizations: organizationsWithSignupFallback({
 					organizations,
-					username: input.session?.username,
+					username: input.session?.username ?? '',
 				}),
 			}),
 		}
@@ -470,6 +472,7 @@ export function AccountPageHeader(props: AccountPageHeaderProps) {
 		const session = useShellData().session
 		const explainer = resolveEntityExplainer(currentPath)
 		const rail = pageRail({ session, currentPath })
+		const tabs = railTabsForPath(rail.groups, currentPath)
 
 		return (
 			<>
@@ -486,6 +489,9 @@ export function AccountPageHeader(props: AccountPageHeaderProps) {
 					actions={props.actions}
 					titleAside={explainer ? <EntityExplainer copy={explainer} /> : null}
 				/>
+				{tabs ? (
+					<AccountSectionTabs label={tabs.label} tabs={tabs.tabs} />
+				) : null}
 			</>
 		)
 	}

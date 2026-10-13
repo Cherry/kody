@@ -6,21 +6,16 @@ import {
 	type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { useLocation } from '@tanstack/react-router'
+import { workspaceSwitchHref } from '#client/routes/account-rail.ts'
 import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
 import { UserAvatar } from './user-avatar.tsx'
 import {
 	currentSwitcherSlug,
 	orgIdentity,
-	orgOverviewPath,
 	orgRoleLabel,
-	orgRoleManagesBilling,
-	orgSettingsPath,
 	orgSwitcherEntries,
-	orgTeamsPath,
 	organizationsWithSignupFallback,
-	parseOrgBillingPath,
-	switchOrgPath,
 	type OrganizationSummary,
 	type OrgSwitcherEntry,
 } from '#universal/org-pages.ts'
@@ -136,34 +131,6 @@ function moveSwitcherFocus(
 	next.focus()
 }
 
-function teamOrgSwitchHref(input: {
-	pathname: string
-	slug: string
-	role: OrganizationSummary['role']
-	personal: boolean
-	onBillingPage: boolean
-	managesBilling: boolean
-}) {
-	const home = `/@${input.slug}`
-	if (input.personal) {
-		// The signup org's home is the public profile; its workspace door is
-		// the overview.
-		const next = switchOrgPath(input.pathname, input.slug)
-		return next === home ? orgOverviewPath(input.slug) : next
-	}
-	// Grant-only collaborators can open the org home, not Settings/Teams.
-	if (input.role === null) return home
-	if (input.onBillingPage && !input.managesBilling) {
-		return orgSettingsPath(input.slug)
-	}
-	const next = switchOrgPath(input.pathname, input.slug)
-	// Billing has member:read but not team:read.
-	if (input.role === 'billing' && next === orgTeamsPath(input.slug)) {
-		return orgSettingsPath(input.slug)
-	}
-	return next
-}
-
 export function OrgSwitcher({
 	session,
 	displayName,
@@ -230,7 +197,6 @@ export function OrgSwitcher({
 	const currentIdentity = current ? orgIdentity(current, viewer) : null
 	const label = currentIdentity?.handle ?? 'Organizations'
 	const avatarSize = props.menu ? 32 : 28
-	const onBillingPage = parseOrgBillingPath(props.currentPathname) !== null
 	const toRow = (entry: OrgSwitcherEntry): SwitcherRow => {
 		switch (entry.kind) {
 			case 'create':
@@ -264,19 +230,7 @@ export function OrgSwitcher({
 				const selected = entry.org.slug === currentSlug
 				return {
 					key: entry.org.slug,
-					// An org keeps the current section, repositories and
-					// connections included. Pages without an org section open
-					// the org's overview (a team org's home, the signup org's
-					// `/-/overview`). Billing opens Settings for roles that do
-					// not manage it.
-					href: teamOrgSwitchHref({
-						pathname: props.currentPathname,
-						slug: entry.org.slug,
-						role: entry.org.role,
-						personal: entry.org.personal,
-						onBillingPage,
-						managesBilling: orgRoleManagesBilling(entry.org.role),
-					}),
+					href: workspaceSwitchHref(props.currentPathname, entry.org),
 					label: identity.name,
 					detail: identity.hasName
 						? [identity.handle, role].filter(Boolean).join(' · ')
@@ -317,34 +271,6 @@ export function OrgSwitcher({
 				]
 			: orgRowsFromSession
 	const actionRows = entries.filter((entry) => entry.kind !== 'org').map(toRow)
-	const pageCurrent = (href: string) =>
-		props.currentPathname === href ? ('page' as const) : undefined
-	const accountRows: Array<SwitcherRow> = [
-		...(props.username
-			? [
-					{
-						key: 'account-profile',
-						href: routes.profile.href({ username: props.username }),
-						label: 'Your profile',
-						detail: null,
-						ariaCurrent: undefined,
-						selected: false,
-						leading: renderIconWell('globe'),
-						badge: null,
-					},
-				]
-			: []),
-		{
-			key: 'account-settings',
-			href: routes.account.href(),
-			label: 'Account settings',
-			detail: null,
-			ariaCurrent: pageCurrent(routes.account.href()),
-			selected: false,
-			leading: renderIconWell('user'),
-			badge: null,
-		},
-	]
 
 	const body = (
 		<>
@@ -357,16 +283,6 @@ export function OrgSwitcher({
 			{actionRows.length > 0 ? (
 				<div css={switcherActionsCss}>{actionRows.map(renderSwitcherRow)}</div>
 			) : null}
-			<div
-				role="group"
-				aria-label="Your account"
-				data-testid="org-switcher-account-group"
-				css={switcherActionsCss}
-			>
-				<p css={switcherEyebrowCss}>Your account</p>
-				{accountRows.map(renderSwitcherRow)}
-				{renderLogoutRow()}
-			</div>
 		</>
 	)
 
@@ -378,6 +294,11 @@ export function OrgSwitcher({
 				css={switcherMenuGroupCss}
 			>
 				{body}
+				{renderAccountGroup({
+					username: props.username,
+					currentPathname: props.currentPathname,
+					heading: true,
+				})}
 			</div>
 		)
 	}
@@ -393,7 +314,7 @@ export function OrgSwitcher({
 				type="button"
 				popoverTarget={orgSwitcherPanelId}
 				aria-controls={orgSwitcherPanelId}
-				aria-label={`${label}: organizations and account`}
+				aria-label={`${label}: switch organization`}
 				aria-expanded={open ? 'true' : 'false'}
 				data-open={open ? '' : undefined}
 				data-testid="org-switcher"
@@ -422,6 +343,127 @@ export function OrgSwitcher({
 		</div>
 	)
 }
+function accountRows(input: {
+	username: string
+	currentPathname: string
+}): Array<SwitcherRow> {
+	const pageCurrent = (href: string) =>
+		input.currentPathname === href ? ('page' as const) : undefined
+	const row = (
+		key: string,
+		href: string,
+		label: string,
+		icon: IconName,
+	): SwitcherRow => ({
+		key,
+		href,
+		label,
+		detail: null,
+		ariaCurrent: pageCurrent(href),
+		selected: false,
+		leading: renderIconWell(icon),
+		badge: null,
+	})
+	return [
+		...(input.username
+			? [
+					row(
+						'account-profile',
+						routes.profile.href({ username: input.username }),
+						'Your profile',
+						'globe',
+					),
+				]
+			: []),
+		row('account-settings', routes.account.href(), 'Account settings', 'user'),
+		row(
+			'account-usage',
+			routes.accountUsage.href(),
+			'Usage & credits',
+			'chart',
+		),
+	]
+}
+
+function renderAccountGroup(input: {
+	username: string
+	currentPathname: string
+	heading: boolean
+}) {
+	return (
+		<div
+			role="group"
+			aria-label="Your account"
+			data-testid="org-switcher-account-group"
+			css={input.heading ? switcherActionsCss : switcherAccountListCss}
+		>
+			{input.heading ? <p css={switcherEyebrowCss}>Your account</p> : null}
+			{accountRows(input).map(renderSwitcherRow)}
+			{renderLogoutRow()}
+		</div>
+	)
+}
+
+export function AccountMenu(props: {
+	username: string
+	displayName: string
+	avatarUrl: string | null
+}) {
+	const [open, setOpen] = useState(false)
+	const href = useLocation({ select: (location) => location.href })
+	const pathname = useLocation({ select: (location) => location.pathname })
+	useEffect(() => {
+		const panel = document.getElementById(accountMenuPanelId)
+		if (panel?.matches(':popover-open')) panel.hidePopover()
+	}, [href])
+	const name = props.displayName.trim() || props.username
+	return (
+		<div
+			css={orgSwitcherCss}
+			onKeyDown={(event) =>
+				moveSwitcherFocus(event, document.getElementById(accountMenuPanelId))
+			}
+		>
+			<button
+				type="button"
+				popoverTarget={accountMenuPanelId}
+				aria-controls={accountMenuPanelId}
+				aria-label={`${name}: your account`}
+				aria-expanded={open ? 'true' : 'false'}
+				data-open={open ? '' : undefined}
+				data-testid="account-menu"
+				css={accountMenuButtonCss}
+			>
+				<UserAvatar
+					displayName={name}
+					avatarUrl={props.avatarUrl}
+					size={34}
+					variant="well"
+				/>
+			</button>
+			<div
+				id={accountMenuPanelId}
+				popover="auto"
+				data-testid="account-menu-panel"
+				css={accountMenuPanelCss}
+				onToggle={(event) => setOpen(event.nativeEvent.newState === 'open')}
+			>
+				<div css={accountMenuIdentityCss}>
+					<span css={switcherRowLabelCss}>{name}</span>
+					{props.username ? (
+						<span css={switcherRowDetailCss}>{`@${props.username}`}</span>
+					) : null}
+				</div>
+				{renderAccountGroup({
+					username: props.username,
+					currentPathname: pathname,
+					heading: false,
+				})}
+			</div>
+		</div>
+	)
+}
+const accountMenuPanelId = 'account-menu'
 const menuGroupDividerCss = {
 	'[data-menu-group] + &': {
 		marginTop: '0.35rem',
@@ -652,4 +694,48 @@ const switcherCheckCss = {
 	display: 'inline-flex',
 	flexShrink: 0,
 	color: colors.primaryText,
+}
+
+const accountMenuAnchor = '--account-menu'
+
+const accountMenuButtonCss = {
+	anchorName: accountMenuAnchor,
+	display: 'inline-flex',
+	alignItems: 'center',
+	justifyContent: 'center',
+	width: '44px',
+	height: '44px',
+	padding: 0,
+	borderRadius: radius.full,
+	border: `1.5px solid ${colors.border}`,
+	background: 'transparent',
+	cursor: 'pointer',
+	transition: `border-color ${transitions.fast}`,
+	'&[data-open]': { borderColor: colors.textMuted },
+	[hoverMq]: {
+		'&:hover': { borderColor: colors.textMuted },
+	},
+}
+
+const accountMenuIdentityCss = {
+	display: 'grid',
+	gap: '0.15rem',
+	padding: '0.5rem 0.6rem 0.6rem',
+	borderBottom: `1px solid ${colors.border}`,
+	minWidth: 0,
+}
+
+const switcherAccountListCss = {
+	display: 'grid',
+	gap: '0.1rem',
+	paddingTop: '0.35rem',
+}
+
+const accountMenuPanelCss = {
+	...orgSwitcherPanelCss,
+	width: 'min(16rem, calc(100vw - 2rem))',
+	'@supports (anchor-name: --a)': {
+		...orgSwitcherPanelCss['@supports (anchor-name: --a)'],
+		positionAnchor: accountMenuAnchor,
+	},
 }

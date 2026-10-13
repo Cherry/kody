@@ -156,9 +156,7 @@ test('readAuthenticatedAppUser prefetches flags only when HTML pages opt in', as
 	const counts = { batch: 0, flagPrepares: 0 }
 	const env = createUsersDb({ user: { username: 'html-user' }, counts })
 
-	const apiRequest = await sessionRequest(
-		'https://example.com/account/connections',
-	)
+	const apiRequest = await sessionRequest('https://example.com/account/agents')
 	const apiUser = await readAuthenticatedAppUser(apiRequest, env)
 	expect(apiUser?.username).toBe('html-user')
 	expect(hasResolvedRequestFeatureFlags(apiRequest)).toBe(false)

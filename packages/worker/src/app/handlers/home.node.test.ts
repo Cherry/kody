@@ -136,6 +136,7 @@ test('native home prefetches flags once across page and session reads', async ()
 		'connection-profiles': false,
 		'mcp-skills-extension': false,
 		'mcp-events-extension': false,
+		'package-app-custom-domains': false,
 	})
 	expect(counts.batchSizes).toEqual([2, 3])
 	expect(loadOnboardingData).not.toHaveBeenCalled()

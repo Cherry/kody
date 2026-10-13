@@ -195,7 +195,7 @@ it.each([
 		const write = client
 			.getMutationCache()
 			.build(client, {
-				mutationKey: [mutationKey, 'alice', '/@one/-/connections'],
+				mutationKey: [mutationKey, 'alice', '/@one/-/agents'],
 				mutationFn: () =>
 					new Promise<void>((resolve) => {
 						finish = resolve

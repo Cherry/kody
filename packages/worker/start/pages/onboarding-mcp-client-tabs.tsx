@@ -298,7 +298,7 @@ export function OnboardingMcpClientTabs(props: OnboardingMcpClientTabsProps) {
  * One host's install path: desktop and phone surfaces both render and CSS
  * shows the one that matches the viewport, followed by the help link, any
  * host caveat, and the authenticate callout. Shared with Add connection on
- * `/account/connections/new`.
+ * `/@slug/-/agents/new`.
  */
 export function AgentSurfaceInstructions(props: {
 	agent: McpClientKind
@@ -361,7 +361,7 @@ export function AgentSurfaceInstructions(props: {
  * The client wall. Entries given as bare ids follow the onboarding
  * viewport split (desktop-only hosts hide on a phone); pass
  * `{ id, viewport: 'both' }` entries to show every card everywhere, which
- * is what Add connection on `/account/connections/new` does.
+ * is what Connect an agent on `/@slug/-/agents/new` does.
  *
  * `greyedAgents` marks hosts Kody already knows are connected. Those cards
  * stay selectable so someone can re-view connect steps (second login, new

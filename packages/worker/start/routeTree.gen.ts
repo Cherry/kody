@@ -36,6 +36,7 @@ import { Route as VerifyEmailClaimReleaseRouteImport } from './routes/verify-ema
 import { Route as VerifyEmailDestinationRouteImport } from './routes/verify-email-destination'
 import { Route as AtChar123usernameChar125KodyIdRouteImport } from './routes/@{$username}_.$kodyId'
 import { Route as AccountActivityRouteImport } from './routes/account_.activity'
+import { Route as AccountAgentsRouteImport } from './routes/account_.agents'
 import { Route as AccountBillingRouteImport } from './routes/account_.billing'
 import { Route as AccountConnectionsRouteImport } from './routes/account_.connections'
 import { Route as AccountDataRouteImport } from './routes/account_.data'
@@ -104,9 +105,9 @@ import { Route as UseCasesMcpGatewayRouteImport } from './routes/use-cases_.mcp-
 import { Route as UseCasesScheduledWorkflowsRouteImport } from './routes/use-cases_.scheduled-workflows'
 import { Route as UseCasesSharedAgentMemoryRouteImport } from './routes/use-cases_.shared-agent-memory'
 import { Route as AtChar123orgSlugChar125ActivityRouteImport } from './routes/@{$orgSlug}_.-.activity'
+import { Route as AtChar123orgSlugChar125AgentsRouteImport } from './routes/@{$orgSlug}_.-.agents'
 import { Route as AtChar123orgSlugChar125BillingRouteImport } from './routes/@{$orgSlug}_.-.billing'
 import { Route as AtChar123orgSlugChar125CollaboratorsRouteImport } from './routes/@{$orgSlug}_.-.collaborators'
-import { Route as AtChar123orgSlugChar125ConnectionsRouteImport } from './routes/@{$orgSlug}_.-.connections'
 import { Route as AtChar123orgSlugChar125EmailRouteImport } from './routes/@{$orgSlug}_.-.email'
 import { Route as AtChar123orgSlugChar125GrantsRouteImport } from './routes/@{$orgSlug}_.-.grants'
 import { Route as AtChar123orgSlugChar125IntegrationsRouteImport } from './routes/@{$orgSlug}_.-.integrations'
@@ -129,8 +130,11 @@ import { Route as AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport }
 import { Route as AtChar123usernameChar125KodyIdApprovePublishRouteImport } from './routes/@{$username}_.$kodyId_.approve-publish'
 import { Route as AtChar123usernameChar125KodyIdSettingsRouteImport } from './routes/@{$username}_.$kodyId_.settings'
 import { Route as AccountActivityRunIdRouteImport } from './routes/account_.activity_.$runId'
+import { Route as AccountAgentsNewRouteImport } from './routes/account_.agents_.new'
+import { Route as AccountAgentsUsageRouteImport } from './routes/account_.agents_.usage'
 import { Route as AccountBillingSuccessRouteImport } from './routes/account_.billing_.success'
 import { Route as AccountConnectionsNewRouteImport } from './routes/account_.connections_.new'
+import { Route as AccountConnectionsUsageRouteImport } from './routes/account_.connections_.usage'
 import { Route as AccountEmailMessageIdRouteImport } from './routes/account_.email_.$messageId'
 import { Route as AccountIntegrationsIntegrationNameRouteImport } from './routes/account_.integrations_.$integrationName'
 import { Route as AccountIntegrationsApproveRouteImport } from './routes/account_.integrations_.approve'
@@ -154,9 +158,9 @@ import { Route as OnboardingStep1AgentRouteImport } from './routes/onboarding.st
 import { Route as OnboardingStep2ServiceRouteImport } from './routes/onboarding.step-2_.$service'
 import { Route as OnboardingStep3AgentRouteImport } from './routes/onboarding.step-3_.$agent'
 import { Route as AtChar123orgSlugChar125ActivityRunIdRouteImport } from './routes/@{$orgSlug}_.-.activity_.$runId'
+import { Route as AtChar123orgSlugChar125AgentsNewRouteImport } from './routes/@{$orgSlug}_.-.agents_.new'
+import { Route as AtChar123orgSlugChar125AgentsUsageRouteImport } from './routes/@{$orgSlug}_.-.agents_.usage'
 import { Route as AtChar123orgSlugChar125BillingSuccessRouteImport } from './routes/@{$orgSlug}_.-.billing_.success'
-import { Route as AtChar123orgSlugChar125ConnectionsNewRouteImport } from './routes/@{$orgSlug}_.-.connections_.new'
-import { Route as AtChar123orgSlugChar125ConnectionsUsageRouteImport } from './routes/@{$orgSlug}_.-.connections_.usage'
 import { Route as AtChar123orgSlugChar125EmailMessageIdRouteImport } from './routes/@{$orgSlug}_.-.email_.$messageId'
 import { Route as AtChar123orgSlugChar125IntegrationsIntegrationNameRouteImport } from './routes/@{$orgSlug}_.-.integrations_.$integrationName'
 import { Route as AtChar123orgSlugChar125IntegrationsApproveRouteImport } from './routes/@{$orgSlug}_.-.integrations_.approve'
@@ -171,13 +175,14 @@ import { Route as AtChar123orgSlugChar125ValuesValueIdRouteImport } from './rout
 import { Route as AtChar123orgSlugChar125ValuesNewRouteImport } from './routes/@{$orgSlug}_.-.values_.new'
 import { Route as AtChar123orgSlugChar125WorkflowsWorkflowIdRouteImport } from './routes/@{$orgSlug}_.-.workflows_.$workflowId'
 import { Route as AtChar123usernameChar125KodyIdFilesSplatRouteImport } from './routes/@{$username}_.$kodyId_.files.$'
+import { Route as AccountAgentsNewAgentRouteImport } from './routes/account_.agents_.new_.$agent'
 import { Route as AccountConnectionsNewAgentRouteImport } from './routes/account_.connections_.new_.$agent'
 import { Route as AccountIntegrationsAppsAppSlugRouteImport } from './routes/account_.integrations_.apps.$appSlug'
 import { Route as AccountPackagesPackageIdApproveCapabilitiesRouteImport } from './routes/account_.packages.$packageId_.approve-capabilities'
 import { Route as AccountPackagesPackageIdApprovePublishRouteImport } from './routes/account_.packages.$packageId_.approve-publish'
 import { Route as AccountSecretsUserSecretNameRouteImport } from './routes/account_.secrets_.user.$secretName'
 import { Route as CommunityListingIdFilesSplatRouteImport } from './routes/community_.$listingId.files.$'
-import { Route as AtChar123orgSlugChar125ConnectionsNewAgentRouteImport } from './routes/@{$orgSlug}_.-.connections_.new_.$agent'
+import { Route as AtChar123orgSlugChar125AgentsNewAgentRouteImport } from './routes/@{$orgSlug}_.-.agents_.new_.$agent'
 import { Route as AtChar123orgSlugChar125IntegrationsAppsAppSlugRouteImport } from './routes/@{$orgSlug}_.-.integrations_.apps.$appSlug'
 import { Route as AtChar123orgSlugChar125McpServersServerIdAuthorizeRouteImport } from './routes/@{$orgSlug}_.-.mcp-servers_.$serverId_.authorize'
 import { Route as AtChar123orgSlugChar125SecretsUserSecretNameRouteImport } from './routes/@{$orgSlug}_.-.secrets_.user.$secretName'
@@ -323,6 +328,11 @@ const AtChar123usernameChar125KodyIdRoute =
 const AccountActivityRoute = AccountActivityRouteImport.update({
   id: '/account_/activity',
   path: '/account/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountAgentsRoute = AccountAgentsRouteImport.update({
+  id: '/account_/agents',
+  path: '/account/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountBillingRoute = AccountBillingRouteImport.update({
@@ -672,6 +682,12 @@ const AtChar123orgSlugChar125ActivityRoute =
     path: '/@{$orgSlug}/-/activity',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125AgentsRoute =
+  AtChar123orgSlugChar125AgentsRouteImport.update({
+    id: '/@{$orgSlug}_/-/agents',
+    path: '/@{$orgSlug}/-/agents',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125BillingRoute =
   AtChar123orgSlugChar125BillingRouteImport.update({
     id: '/@{$orgSlug}_/-/billing',
@@ -682,12 +698,6 @@ const AtChar123orgSlugChar125CollaboratorsRoute =
   AtChar123orgSlugChar125CollaboratorsRouteImport.update({
     id: '/@{$orgSlug}_/-/collaborators',
     path: '/@{$orgSlug}/-/collaborators',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AtChar123orgSlugChar125ConnectionsRoute =
-  AtChar123orgSlugChar125ConnectionsRouteImport.update({
-    id: '/@{$orgSlug}_/-/connections',
-    path: '/@{$orgSlug}/-/connections',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125EmailRoute =
@@ -821,6 +831,16 @@ const AccountActivityRunIdRoute = AccountActivityRunIdRouteImport.update({
   path: '/account/activity/$runId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountAgentsNewRoute = AccountAgentsNewRouteImport.update({
+  id: '/account_/agents_/new',
+  path: '/account/agents/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountAgentsUsageRoute = AccountAgentsUsageRouteImport.update({
+  id: '/account_/agents_/usage',
+  path: '/account/agents/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountBillingSuccessRoute = AccountBillingSuccessRouteImport.update({
   id: '/account_/billing_/success',
   path: '/account/billing/success',
@@ -829,6 +849,11 @@ const AccountBillingSuccessRoute = AccountBillingSuccessRouteImport.update({
 const AccountConnectionsNewRoute = AccountConnectionsNewRouteImport.update({
   id: '/account_/connections_/new',
   path: '/account/connections/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountConnectionsUsageRoute = AccountConnectionsUsageRouteImport.update({
+  id: '/account_/connections_/usage',
+  path: '/account/connections/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountEmailMessageIdRoute = AccountEmailMessageIdRouteImport.update({
@@ -955,22 +980,22 @@ const AtChar123orgSlugChar125ActivityRunIdRoute =
     path: '/@{$orgSlug}/-/activity/$runId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125AgentsNewRoute =
+  AtChar123orgSlugChar125AgentsNewRouteImport.update({
+    id: '/@{$orgSlug}_/-/agents_/new',
+    path: '/@{$orgSlug}/-/agents/new',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123orgSlugChar125AgentsUsageRoute =
+  AtChar123orgSlugChar125AgentsUsageRouteImport.update({
+    id: '/@{$orgSlug}_/-/agents_/usage',
+    path: '/@{$orgSlug}/-/agents/usage',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125BillingSuccessRoute =
   AtChar123orgSlugChar125BillingSuccessRouteImport.update({
     id: '/@{$orgSlug}_/-/billing_/success',
     path: '/@{$orgSlug}/-/billing/success',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AtChar123orgSlugChar125ConnectionsNewRoute =
-  AtChar123orgSlugChar125ConnectionsNewRouteImport.update({
-    id: '/@{$orgSlug}_/-/connections_/new',
-    path: '/@{$orgSlug}/-/connections/new',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AtChar123orgSlugChar125ConnectionsUsageRoute =
-  AtChar123orgSlugChar125ConnectionsUsageRouteImport.update({
-    id: '/@{$orgSlug}_/-/connections_/usage',
-    path: '/@{$orgSlug}/-/connections/usage',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125EmailMessageIdRoute =
@@ -1057,6 +1082,11 @@ const AtChar123usernameChar125KodyIdFilesSplatRoute =
     path: '/@{$username}/$kodyId/files/$',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AccountAgentsNewAgentRoute = AccountAgentsNewAgentRouteImport.update({
+  id: '/account_/agents_/new_/$agent',
+  path: '/account/agents/new/$agent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountConnectionsNewAgentRoute =
   AccountConnectionsNewAgentRouteImport.update({
     id: '/account_/connections_/new_/$agent',
@@ -1093,10 +1123,10 @@ const CommunityListingIdFilesSplatRoute =
     path: '/files/$',
     getParentRoute: () => CommunityListingIdRoute,
   } as any)
-const AtChar123orgSlugChar125ConnectionsNewAgentRoute =
-  AtChar123orgSlugChar125ConnectionsNewAgentRouteImport.update({
-    id: '/@{$orgSlug}_/-/connections_/new_/$agent',
-    path: '/@{$orgSlug}/-/connections/new/$agent',
+const AtChar123orgSlugChar125AgentsNewAgentRoute =
+  AtChar123orgSlugChar125AgentsNewAgentRouteImport.update({
+    id: '/@{$orgSlug}_/-/agents_/new_/$agent',
+    path: '/@{$orgSlug}/-/agents/new/$agent',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute =
@@ -1182,6 +1212,7 @@ export interface FileRoutesByFullPath {
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
   '/@{$username}/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account/activity': typeof AccountActivityRoute
+  '/account/agents': typeof AccountAgentsRoute
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
   '/account/data': typeof AccountDataRoute
@@ -1250,9 +1281,9 @@ export interface FileRoutesByFullPath {
   '/docs/': typeof DocsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
   '/@{$orgSlug}/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
+  '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
-  '/@{$orgSlug}/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1275,8 +1306,11 @@ export interface FileRoutesByFullPath {
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
+  '/account/agents/new': typeof AccountAgentsNewRoute
+  '/account/agents/usage': typeof AccountAgentsUsageRoute
   '/account/billing/success': typeof AccountBillingSuccessRoute
   '/account/connections/new': typeof AccountConnectionsNewRoute
+  '/account/connections/usage': typeof AccountConnectionsUsageRoute
   '/account/email/$messageId': typeof AccountEmailMessageIdRoute
   '/account/integrations/$integrationName': typeof AccountIntegrationsIntegrationNameRoute
   '/account/integrations/approve': typeof AccountIntegrationsApproveRoute
@@ -1300,9 +1334,9 @@ export interface FileRoutesByFullPath {
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
   '/account/packages/': typeof AccountPackagesIndexRoute
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
+  '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
+  '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
-  '/@{$orgSlug}/-/connections/new': typeof AtChar123orgSlugChar125ConnectionsNewRoute
-  '/@{$orgSlug}/-/connections/usage': typeof AtChar123orgSlugChar125ConnectionsUsageRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}/-/integrations/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}/-/integrations/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1317,13 +1351,14 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/account/agents/new/$agent': typeof AccountAgentsNewAgentRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
   '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
-  '/@{$orgSlug}/-/connections/new/$agent': typeof AtChar123orgSlugChar125ConnectionsNewAgentRoute
+  '/@{$orgSlug}/-/agents/new/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}/-/integrations/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}/-/mcp-servers/$serverId/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}/-/secrets/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
@@ -1361,6 +1396,7 @@ export interface FileRoutesByTo {
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
   '/@{$username}/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account/activity': typeof AccountActivityRoute
+  '/account/agents': typeof AccountAgentsRoute
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
   '/account/data': typeof AccountDataRoute
@@ -1429,9 +1465,9 @@ export interface FileRoutesByTo {
   '/docs': typeof DocsIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
   '/@{$orgSlug}/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
+  '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
-  '/@{$orgSlug}/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1454,8 +1490,11 @@ export interface FileRoutesByTo {
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
+  '/account/agents/new': typeof AccountAgentsNewRoute
+  '/account/agents/usage': typeof AccountAgentsUsageRoute
   '/account/billing/success': typeof AccountBillingSuccessRoute
   '/account/connections/new': typeof AccountConnectionsNewRoute
+  '/account/connections/usage': typeof AccountConnectionsUsageRoute
   '/account/email/$messageId': typeof AccountEmailMessageIdRoute
   '/account/integrations/$integrationName': typeof AccountIntegrationsIntegrationNameRoute
   '/account/integrations/approve': typeof AccountIntegrationsApproveRoute
@@ -1479,9 +1518,9 @@ export interface FileRoutesByTo {
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
   '/account/packages': typeof AccountPackagesIndexRoute
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
+  '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
+  '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
-  '/@{$orgSlug}/-/connections/new': typeof AtChar123orgSlugChar125ConnectionsNewRoute
-  '/@{$orgSlug}/-/connections/usage': typeof AtChar123orgSlugChar125ConnectionsUsageRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}/-/integrations/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}/-/integrations/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1496,13 +1535,14 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/account/agents/new/$agent': typeof AccountAgentsNewAgentRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
   '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
-  '/@{$orgSlug}/-/connections/new/$agent': typeof AtChar123orgSlugChar125ConnectionsNewAgentRoute
+  '/@{$orgSlug}/-/agents/new/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}/-/integrations/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}/-/mcp-servers/$serverId/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}/-/secrets/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
@@ -1542,6 +1582,7 @@ export interface FileRoutesById {
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
   '/@{$username}_/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account_/activity': typeof AccountActivityRoute
+  '/account_/agents': typeof AccountAgentsRoute
   '/account_/billing': typeof AccountBillingRoute
   '/account_/connections': typeof AccountConnectionsRoute
   '/account_/data': typeof AccountDataRoute
@@ -1610,9 +1651,9 @@ export interface FileRoutesById {
   '/docs/': typeof DocsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
   '/@{$orgSlug}_/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
+  '/@{$orgSlug}_/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}_/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}_/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
-  '/@{$orgSlug}_/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}_/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}_/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}_/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1635,8 +1676,11 @@ export interface FileRoutesById {
   '/@{$username}_/$kodyId_/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}_/$kodyId_/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account_/activity_/$runId': typeof AccountActivityRunIdRoute
+  '/account_/agents_/new': typeof AccountAgentsNewRoute
+  '/account_/agents_/usage': typeof AccountAgentsUsageRoute
   '/account_/billing_/success': typeof AccountBillingSuccessRoute
   '/account_/connections_/new': typeof AccountConnectionsNewRoute
+  '/account_/connections_/usage': typeof AccountConnectionsUsageRoute
   '/account_/email_/$messageId': typeof AccountEmailMessageIdRoute
   '/account_/integrations_/$integrationName': typeof AccountIntegrationsIntegrationNameRoute
   '/account_/integrations_/approve': typeof AccountIntegrationsApproveRoute
@@ -1660,9 +1704,9 @@ export interface FileRoutesById {
   '/onboarding/step-3_/$agent': typeof OnboardingStep3AgentRoute
   '/account_/packages/': typeof AccountPackagesIndexRoute
   '/@{$orgSlug}_/-/activity_/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
+  '/@{$orgSlug}_/-/agents_/new': typeof AtChar123orgSlugChar125AgentsNewRoute
+  '/@{$orgSlug}_/-/agents_/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}_/-/billing_/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
-  '/@{$orgSlug}_/-/connections_/new': typeof AtChar123orgSlugChar125ConnectionsNewRoute
-  '/@{$orgSlug}_/-/connections_/usage': typeof AtChar123orgSlugChar125ConnectionsUsageRoute
   '/@{$orgSlug}_/-/email_/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}_/-/integrations_/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}_/-/integrations_/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1677,13 +1721,14 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/values_/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}_/-/workflows_/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}_/$kodyId_/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/account_/agents_/new_/$agent': typeof AccountAgentsNewAgentRoute
   '/account_/connections_/new_/$agent': typeof AccountConnectionsNewAgentRoute
   '/account_/integrations_/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
   '/account_/packages/$packageId_/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account_/packages/$packageId_/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account_/secrets_/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community_/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
-  '/@{$orgSlug}_/-/connections_/new_/$agent': typeof AtChar123orgSlugChar125ConnectionsNewAgentRoute
+  '/@{$orgSlug}_/-/agents_/new_/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}_/-/integrations_/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}_/-/secrets_/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
@@ -1724,6 +1769,7 @@ export interface FileRouteTypes {
     | '/verify-email-destination'
     | '/@{$username}/$kodyId'
     | '/account/activity'
+    | '/account/agents'
     | '/account/billing'
     | '/account/connections'
     | '/account/data'
@@ -1792,9 +1838,9 @@ export interface FileRouteTypes {
     | '/docs/'
     | '/onboarding/'
     | '/@{$orgSlug}/-/activity'
+    | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
-    | '/@{$orgSlug}/-/connections'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
@@ -1817,8 +1863,11 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/approve-publish'
     | '/@{$username}/$kodyId/settings'
     | '/account/activity/$runId'
+    | '/account/agents/new'
+    | '/account/agents/usage'
     | '/account/billing/success'
     | '/account/connections/new'
+    | '/account/connections/usage'
     | '/account/email/$messageId'
     | '/account/integrations/$integrationName'
     | '/account/integrations/approve'
@@ -1842,9 +1891,9 @@ export interface FileRouteTypes {
     | '/onboarding/step-3/$agent'
     | '/account/packages/'
     | '/@{$orgSlug}/-/activity/$runId'
+    | '/@{$orgSlug}/-/agents/new'
+    | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
-    | '/@{$orgSlug}/-/connections/new'
-    | '/@{$orgSlug}/-/connections/usage'
     | '/@{$orgSlug}/-/email/$messageId'
     | '/@{$orgSlug}/-/integrations/$integrationName'
     | '/@{$orgSlug}/-/integrations/approve'
@@ -1859,13 +1908,14 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
     | '/@{$username}/$kodyId/files/$'
+    | '/account/agents/new/$agent'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
     | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
-    | '/@{$orgSlug}/-/connections/new/$agent'
+    | '/@{$orgSlug}/-/agents/new/$agent'
     | '/@{$orgSlug}/-/integrations/apps/$appSlug'
     | '/@{$orgSlug}/-/mcp-servers/$serverId/authorize'
     | '/@{$orgSlug}/-/secrets/user/$secretName'
@@ -1903,6 +1953,7 @@ export interface FileRouteTypes {
     | '/verify-email-destination'
     | '/@{$username}/$kodyId'
     | '/account/activity'
+    | '/account/agents'
     | '/account/billing'
     | '/account/connections'
     | '/account/data'
@@ -1971,9 +2022,9 @@ export interface FileRouteTypes {
     | '/docs'
     | '/onboarding'
     | '/@{$orgSlug}/-/activity'
+    | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
-    | '/@{$orgSlug}/-/connections'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
@@ -1996,8 +2047,11 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/approve-publish'
     | '/@{$username}/$kodyId/settings'
     | '/account/activity/$runId'
+    | '/account/agents/new'
+    | '/account/agents/usage'
     | '/account/billing/success'
     | '/account/connections/new'
+    | '/account/connections/usage'
     | '/account/email/$messageId'
     | '/account/integrations/$integrationName'
     | '/account/integrations/approve'
@@ -2021,9 +2075,9 @@ export interface FileRouteTypes {
     | '/onboarding/step-3/$agent'
     | '/account/packages'
     | '/@{$orgSlug}/-/activity/$runId'
+    | '/@{$orgSlug}/-/agents/new'
+    | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
-    | '/@{$orgSlug}/-/connections/new'
-    | '/@{$orgSlug}/-/connections/usage'
     | '/@{$orgSlug}/-/email/$messageId'
     | '/@{$orgSlug}/-/integrations/$integrationName'
     | '/@{$orgSlug}/-/integrations/approve'
@@ -2038,13 +2092,14 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
     | '/@{$username}/$kodyId/files/$'
+    | '/account/agents/new/$agent'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
     | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
-    | '/@{$orgSlug}/-/connections/new/$agent'
+    | '/@{$orgSlug}/-/agents/new/$agent'
     | '/@{$orgSlug}/-/integrations/apps/$appSlug'
     | '/@{$orgSlug}/-/mcp-servers/$serverId/authorize'
     | '/@{$orgSlug}/-/secrets/user/$secretName'
@@ -2083,6 +2138,7 @@ export interface FileRouteTypes {
     | '/verify-email-destination'
     | '/@{$username}_/$kodyId'
     | '/account_/activity'
+    | '/account_/agents'
     | '/account_/billing'
     | '/account_/connections'
     | '/account_/data'
@@ -2151,9 +2207,9 @@ export interface FileRouteTypes {
     | '/docs/'
     | '/onboarding/'
     | '/@{$orgSlug}_/-/activity'
+    | '/@{$orgSlug}_/-/agents'
     | '/@{$orgSlug}_/-/billing'
     | '/@{$orgSlug}_/-/collaborators'
-    | '/@{$orgSlug}_/-/connections'
     | '/@{$orgSlug}_/-/email'
     | '/@{$orgSlug}_/-/grants'
     | '/@{$orgSlug}_/-/integrations'
@@ -2176,8 +2232,11 @@ export interface FileRouteTypes {
     | '/@{$username}_/$kodyId_/approve-publish'
     | '/@{$username}_/$kodyId_/settings'
     | '/account_/activity_/$runId'
+    | '/account_/agents_/new'
+    | '/account_/agents_/usage'
     | '/account_/billing_/success'
     | '/account_/connections_/new'
+    | '/account_/connections_/usage'
     | '/account_/email_/$messageId'
     | '/account_/integrations_/$integrationName'
     | '/account_/integrations_/approve'
@@ -2201,9 +2260,9 @@ export interface FileRouteTypes {
     | '/onboarding/step-3_/$agent'
     | '/account_/packages/'
     | '/@{$orgSlug}_/-/activity_/$runId'
+    | '/@{$orgSlug}_/-/agents_/new'
+    | '/@{$orgSlug}_/-/agents_/usage'
     | '/@{$orgSlug}_/-/billing_/success'
-    | '/@{$orgSlug}_/-/connections_/new'
-    | '/@{$orgSlug}_/-/connections_/usage'
     | '/@{$orgSlug}_/-/email_/$messageId'
     | '/@{$orgSlug}_/-/integrations_/$integrationName'
     | '/@{$orgSlug}_/-/integrations_/approve'
@@ -2218,13 +2277,14 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/values_/new'
     | '/@{$orgSlug}_/-/workflows_/$workflowId'
     | '/@{$username}_/$kodyId_/files/$'
+    | '/account_/agents_/new_/$agent'
     | '/account_/connections_/new_/$agent'
     | '/account_/integrations_/apps/$appSlug'
     | '/account_/packages/$packageId_/approve-capabilities'
     | '/account_/packages/$packageId_/approve-publish'
     | '/account_/secrets_/user/$secretName'
     | '/community_/$listingId/files/$'
-    | '/@{$orgSlug}_/-/connections_/new_/$agent'
+    | '/@{$orgSlug}_/-/agents_/new_/$agent'
     | '/@{$orgSlug}_/-/integrations_/apps/$appSlug'
     | '/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize'
     | '/@{$orgSlug}_/-/secrets_/user/$secretName'
@@ -2264,6 +2324,7 @@ export interface RootRouteChildren {
   VerifyEmailDestinationRoute: typeof VerifyEmailDestinationRoute
   AtChar123usernameChar125KodyIdRoute: typeof AtChar123usernameChar125KodyIdRoute
   AccountActivityRoute: typeof AccountActivityRoute
+  AccountAgentsRoute: typeof AccountAgentsRoute
   AccountBillingRoute: typeof AccountBillingRoute
   AccountConnectionsRoute: typeof AccountConnectionsRoute
   AccountDataRoute: typeof AccountDataRoute
@@ -2328,9 +2389,9 @@ export interface RootRouteChildren {
   BlogIndexRoute: typeof BlogIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
   AtChar123orgSlugChar125ActivityRoute: typeof AtChar123orgSlugChar125ActivityRoute
+  AtChar123orgSlugChar125AgentsRoute: typeof AtChar123orgSlugChar125AgentsRoute
   AtChar123orgSlugChar125BillingRoute: typeof AtChar123orgSlugChar125BillingRoute
   AtChar123orgSlugChar125CollaboratorsRoute: typeof AtChar123orgSlugChar125CollaboratorsRoute
-  AtChar123orgSlugChar125ConnectionsRoute: typeof AtChar123orgSlugChar125ConnectionsRoute
   AtChar123orgSlugChar125EmailRoute: typeof AtChar123orgSlugChar125EmailRoute
   AtChar123orgSlugChar125GrantsRoute: typeof AtChar123orgSlugChar125GrantsRoute
   AtChar123orgSlugChar125IntegrationsRoute: typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -2353,8 +2414,11 @@ export interface RootRouteChildren {
   AtChar123usernameChar125KodyIdApprovePublishRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   AtChar123usernameChar125KodyIdSettingsRoute: typeof AtChar123usernameChar125KodyIdSettingsRoute
   AccountActivityRunIdRoute: typeof AccountActivityRunIdRoute
+  AccountAgentsNewRoute: typeof AccountAgentsNewRoute
+  AccountAgentsUsageRoute: typeof AccountAgentsUsageRoute
   AccountBillingSuccessRoute: typeof AccountBillingSuccessRoute
   AccountConnectionsNewRoute: typeof AccountConnectionsNewRoute
+  AccountConnectionsUsageRoute: typeof AccountConnectionsUsageRoute
   AccountEmailMessageIdRoute: typeof AccountEmailMessageIdRoute
   AccountIntegrationsIntegrationNameRoute: typeof AccountIntegrationsIntegrationNameRoute
   AccountIntegrationsApproveRoute: typeof AccountIntegrationsApproveRoute
@@ -2375,9 +2439,9 @@ export interface RootRouteChildren {
   AdminUsersStableUserIdRoute: typeof AdminUsersStableUserIdRoute
   AccountPackagesIndexRoute: typeof AccountPackagesIndexRoute
   AtChar123orgSlugChar125ActivityRunIdRoute: typeof AtChar123orgSlugChar125ActivityRunIdRoute
+  AtChar123orgSlugChar125AgentsNewRoute: typeof AtChar123orgSlugChar125AgentsNewRoute
+  AtChar123orgSlugChar125AgentsUsageRoute: typeof AtChar123orgSlugChar125AgentsUsageRoute
   AtChar123orgSlugChar125BillingSuccessRoute: typeof AtChar123orgSlugChar125BillingSuccessRoute
-  AtChar123orgSlugChar125ConnectionsNewRoute: typeof AtChar123orgSlugChar125ConnectionsNewRoute
-  AtChar123orgSlugChar125ConnectionsUsageRoute: typeof AtChar123orgSlugChar125ConnectionsUsageRoute
   AtChar123orgSlugChar125EmailMessageIdRoute: typeof AtChar123orgSlugChar125EmailMessageIdRoute
   AtChar123orgSlugChar125IntegrationsIntegrationNameRoute: typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   AtChar123orgSlugChar125IntegrationsApproveRoute: typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -2392,12 +2456,13 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125ValuesNewRoute: typeof AtChar123orgSlugChar125ValuesNewRoute
   AtChar123orgSlugChar125WorkflowsWorkflowIdRoute: typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   AtChar123usernameChar125KodyIdFilesSplatRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  AccountAgentsNewAgentRoute: typeof AccountAgentsNewAgentRoute
   AccountConnectionsNewAgentRoute: typeof AccountConnectionsNewAgentRoute
   AccountIntegrationsAppsAppSlugRoute: typeof AccountIntegrationsAppsAppSlugRoute
   AccountPackagesPackageIdApproveCapabilitiesRoute: typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   AccountPackagesPackageIdApprovePublishRoute: typeof AccountPackagesPackageIdApprovePublishRoute
   AccountSecretsUserSecretNameRoute: typeof AccountSecretsUserSecretNameRoute
-  AtChar123orgSlugChar125ConnectionsNewAgentRoute: typeof AtChar123orgSlugChar125ConnectionsNewAgentRoute
+  AtChar123orgSlugChar125AgentsNewAgentRoute: typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute: typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute: typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   AtChar123orgSlugChar125SecretsUserSecretNameRoute: typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
@@ -2597,6 +2662,13 @@ declare module '@tanstack/react-router' {
       path: '/account/activity'
       fullPath: '/account/activity'
       preLoaderRoute: typeof AccountActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/agents': {
+      id: '/account_/agents'
+      path: '/account/agents'
+      fullPath: '/account/agents'
+      preLoaderRoute: typeof AccountAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/billing': {
@@ -3075,6 +3147,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125ActivityRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/agents': {
+      id: '/@{$orgSlug}_/-/agents'
+      path: '/@{$orgSlug}/-/agents'
+      fullPath: '/@{$orgSlug}/-/agents'
+      preLoaderRoute: typeof AtChar123orgSlugChar125AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/billing': {
       id: '/@{$orgSlug}_/-/billing'
       path: '/@{$orgSlug}/-/billing'
@@ -3087,13 +3166,6 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/collaborators'
       fullPath: '/@{$orgSlug}/-/collaborators'
       preLoaderRoute: typeof AtChar123orgSlugChar125CollaboratorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/@{$orgSlug}_/-/connections': {
-      id: '/@{$orgSlug}_/-/connections'
-      path: '/@{$orgSlug}/-/connections'
-      fullPath: '/@{$orgSlug}/-/connections'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/email': {
@@ -3250,6 +3322,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountActivityRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account_/agents_/new': {
+      id: '/account_/agents_/new'
+      path: '/account/agents/new'
+      fullPath: '/account/agents/new'
+      preLoaderRoute: typeof AccountAgentsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/agents_/usage': {
+      id: '/account_/agents_/usage'
+      path: '/account/agents/usage'
+      fullPath: '/account/agents/usage'
+      preLoaderRoute: typeof AccountAgentsUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/billing_/success': {
       id: '/account_/billing_/success'
       path: '/account/billing/success'
@@ -3262,6 +3348,13 @@ declare module '@tanstack/react-router' {
       path: '/account/connections/new'
       fullPath: '/account/connections/new'
       preLoaderRoute: typeof AccountConnectionsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/connections_/usage': {
+      id: '/account_/connections_/usage'
+      path: '/account/connections/usage'
+      fullPath: '/account/connections/usage'
+      preLoaderRoute: typeof AccountConnectionsUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/email_/$messageId': {
@@ -3425,25 +3518,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125ActivityRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/agents_/new': {
+      id: '/@{$orgSlug}_/-/agents_/new'
+      path: '/@{$orgSlug}/-/agents/new'
+      fullPath: '/@{$orgSlug}/-/agents/new'
+      preLoaderRoute: typeof AtChar123orgSlugChar125AgentsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$orgSlug}_/-/agents_/usage': {
+      id: '/@{$orgSlug}_/-/agents_/usage'
+      path: '/@{$orgSlug}/-/agents/usage'
+      fullPath: '/@{$orgSlug}/-/agents/usage'
+      preLoaderRoute: typeof AtChar123orgSlugChar125AgentsUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/billing_/success': {
       id: '/@{$orgSlug}_/-/billing_/success'
       path: '/@{$orgSlug}/-/billing/success'
       fullPath: '/@{$orgSlug}/-/billing/success'
       preLoaderRoute: typeof AtChar123orgSlugChar125BillingSuccessRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/@{$orgSlug}_/-/connections_/new': {
-      id: '/@{$orgSlug}_/-/connections_/new'
-      path: '/@{$orgSlug}/-/connections/new'
-      fullPath: '/@{$orgSlug}/-/connections/new'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/@{$orgSlug}_/-/connections_/usage': {
-      id: '/@{$orgSlug}_/-/connections_/usage'
-      path: '/@{$orgSlug}/-/connections/usage'
-      fullPath: '/@{$orgSlug}/-/connections/usage'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/email_/$messageId': {
@@ -3544,6 +3637,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account_/agents_/new_/$agent': {
+      id: '/account_/agents_/new_/$agent'
+      path: '/account/agents/new/$agent'
+      fullPath: '/account/agents/new/$agent'
+      preLoaderRoute: typeof AccountAgentsNewAgentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/connections_/new_/$agent': {
       id: '/account_/connections_/new_/$agent'
       path: '/account/connections/new/$agent'
@@ -3586,11 +3686,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CommunityListingIdFilesSplatRouteImport
       parentRoute: typeof CommunityListingIdRoute
     }
-    '/@{$orgSlug}_/-/connections_/new_/$agent': {
-      id: '/@{$orgSlug}_/-/connections_/new_/$agent'
-      path: '/@{$orgSlug}/-/connections/new/$agent'
-      fullPath: '/@{$orgSlug}/-/connections/new/$agent'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsNewAgentRouteImport
+    '/@{$orgSlug}_/-/agents_/new_/$agent': {
+      id: '/@{$orgSlug}_/-/agents_/new_/$agent'
+      path: '/@{$orgSlug}/-/agents/new/$agent'
+      fullPath: '/@{$orgSlug}/-/agents/new/$agent'
+      preLoaderRoute: typeof AtChar123orgSlugChar125AgentsNewAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/integrations_/apps/$appSlug': {
@@ -3737,6 +3837,7 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyEmailDestinationRoute: VerifyEmailDestinationRoute,
   AtChar123usernameChar125KodyIdRoute: AtChar123usernameChar125KodyIdRoute,
   AccountActivityRoute: AccountActivityRoute,
+  AccountAgentsRoute: AccountAgentsRoute,
   AccountBillingRoute: AccountBillingRoute,
   AccountConnectionsRoute: AccountConnectionsRoute,
   AccountDataRoute: AccountDataRoute,
@@ -3801,11 +3902,10 @@ const rootRouteChildren: RootRouteChildren = {
   BlogIndexRoute: BlogIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
   AtChar123orgSlugChar125ActivityRoute: AtChar123orgSlugChar125ActivityRoute,
+  AtChar123orgSlugChar125AgentsRoute: AtChar123orgSlugChar125AgentsRoute,
   AtChar123orgSlugChar125BillingRoute: AtChar123orgSlugChar125BillingRoute,
   AtChar123orgSlugChar125CollaboratorsRoute:
     AtChar123orgSlugChar125CollaboratorsRoute,
-  AtChar123orgSlugChar125ConnectionsRoute:
-    AtChar123orgSlugChar125ConnectionsRoute,
   AtChar123orgSlugChar125EmailRoute: AtChar123orgSlugChar125EmailRoute,
   AtChar123orgSlugChar125GrantsRoute: AtChar123orgSlugChar125GrantsRoute,
   AtChar123orgSlugChar125IntegrationsRoute:
@@ -3835,8 +3935,11 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123usernameChar125KodyIdSettingsRoute:
     AtChar123usernameChar125KodyIdSettingsRoute,
   AccountActivityRunIdRoute: AccountActivityRunIdRoute,
+  AccountAgentsNewRoute: AccountAgentsNewRoute,
+  AccountAgentsUsageRoute: AccountAgentsUsageRoute,
   AccountBillingSuccessRoute: AccountBillingSuccessRoute,
   AccountConnectionsNewRoute: AccountConnectionsNewRoute,
+  AccountConnectionsUsageRoute: AccountConnectionsUsageRoute,
   AccountEmailMessageIdRoute: AccountEmailMessageIdRoute,
   AccountIntegrationsIntegrationNameRoute:
     AccountIntegrationsIntegrationNameRoute,
@@ -3859,12 +3962,11 @@ const rootRouteChildren: RootRouteChildren = {
   AccountPackagesIndexRoute: AccountPackagesIndexRoute,
   AtChar123orgSlugChar125ActivityRunIdRoute:
     AtChar123orgSlugChar125ActivityRunIdRoute,
+  AtChar123orgSlugChar125AgentsNewRoute: AtChar123orgSlugChar125AgentsNewRoute,
+  AtChar123orgSlugChar125AgentsUsageRoute:
+    AtChar123orgSlugChar125AgentsUsageRoute,
   AtChar123orgSlugChar125BillingSuccessRoute:
     AtChar123orgSlugChar125BillingSuccessRoute,
-  AtChar123orgSlugChar125ConnectionsNewRoute:
-    AtChar123orgSlugChar125ConnectionsNewRoute,
-  AtChar123orgSlugChar125ConnectionsUsageRoute:
-    AtChar123orgSlugChar125ConnectionsUsageRoute,
   AtChar123orgSlugChar125EmailMessageIdRoute:
     AtChar123orgSlugChar125EmailMessageIdRoute,
   AtChar123orgSlugChar125IntegrationsIntegrationNameRoute:
@@ -3891,6 +3993,7 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125WorkflowsWorkflowIdRoute,
   AtChar123usernameChar125KodyIdFilesSplatRoute:
     AtChar123usernameChar125KodyIdFilesSplatRoute,
+  AccountAgentsNewAgentRoute: AccountAgentsNewAgentRoute,
   AccountConnectionsNewAgentRoute: AccountConnectionsNewAgentRoute,
   AccountIntegrationsAppsAppSlugRoute: AccountIntegrationsAppsAppSlugRoute,
   AccountPackagesPackageIdApproveCapabilitiesRoute:
@@ -3898,8 +4001,8 @@ const rootRouteChildren: RootRouteChildren = {
   AccountPackagesPackageIdApprovePublishRoute:
     AccountPackagesPackageIdApprovePublishRoute,
   AccountSecretsUserSecretNameRoute: AccountSecretsUserSecretNameRoute,
-  AtChar123orgSlugChar125ConnectionsNewAgentRoute:
-    AtChar123orgSlugChar125ConnectionsNewAgentRoute,
+  AtChar123orgSlugChar125AgentsNewAgentRoute:
+    AtChar123orgSlugChar125AgentsNewAgentRoute,
   AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute:
     AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute,
   AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute:
@@ -3920,13 +4023,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

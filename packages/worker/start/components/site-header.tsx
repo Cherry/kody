@@ -1,9 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from './site-link.tsx'
-import { useEffect, useState } from 'react'
-import { OrgSwitcher } from './org-switcher.tsx'
-import { type ComponentProps } from 'react'
+import { useEffect, useState, type ComponentProps } from 'react'
+import { OrgSwitcher, AccountMenu } from './org-switcher.tsx'
 import {
 	colors,
 	shadows,
@@ -111,6 +110,11 @@ export function SiteHeader(props: SiteHeaderProps) {
 					) : null}
 					{props.loggedIn ? (
 						<>
+							<AccountMenu
+								username={props.username}
+								displayName={props.displayName}
+								avatarUrl={props.avatarUrl}
+							/>
 							{props.showDemoIndicator ? (
 								<span data-testid="demo-indicator" css={demoIndicatorCss}>
 									Demo

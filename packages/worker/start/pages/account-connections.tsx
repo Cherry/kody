@@ -52,8 +52,8 @@ function readView(href: string): AccountConnectionsView | null {
 }
 
 /**
- * `/account/connections` — the durable home for inbound MCP hosts. The
- * connected list is the same panel Overview used to host. Add connection
+ * `/@slug/-/agents` — the durable home for inbound MCP hosts. The
+ * connected list is the same panel Overview used to host. Connect an agent
  * is its own page (`/new`): the full client wall from onboarding Step 1
  * with no phone/desktop split and nothing folded under Not listed, not a
  * nested child of the list. `/new/:agent` shows that host's install
@@ -82,7 +82,7 @@ export function AccountConnectionsPage({
 	return (
 		<AccountManagementShell>
 			<AccountPageHeader
-				title="Connections"
+				title="Agents"
 				description="The agents connected to this Kody account, and how to connect another."
 				currentHref={currentHref}
 			/>
@@ -105,7 +105,7 @@ function renderBackToConnections(currentHref: string) {
 			data-testid="account-connections-back"
 			css={backLinkCss}
 		>
-			← back to connections
+			← back to agents
 		</SiteLink>
 	)
 }
@@ -137,7 +137,7 @@ function renderReadyView(input: {
 								data-testid="account-connections-add"
 								css={primaryButtonCss}
 							>
-								Add connection
+								Connect an agent
 							</SiteLink>
 						),
 					})}
@@ -228,7 +228,7 @@ function renderMcpUrlPanel(input: { mcpServerUrl: string }) {
 	return (
 		<AccountManagementPanel
 			title="MCP URL"
-			description="Every host reaches the same account through one MCP URL. Add connection walks through a specific agent; any other agent that speaks MCP can paste this URL and approve the Kody OAuth window."
+			description="Every host reaches the same account through one MCP URL. Connect an agent walks through a specific one; any other agent that speaks MCP can paste this URL and approve the Kody OAuth window."
 			ariaLabel="MCP URL"
 		>
 			{input.mcpServerUrl ? (
@@ -260,9 +260,9 @@ function renderAgentGrid(input: {
 	)
 	return (
 		<AccountManagementPanel
-			title="Add connection"
+			title="Connect an agent"
 			description="Pick the agent you want to connect — including ones already connected, when you need the steps again for a second login, new machine, or reinstall. Every agent Kody knows how to connect is listed here, on every device; the next step shows that host's install path."
-			ariaLabel="Add connection"
+			ariaLabel="Connect an agent"
 		>
 			{input.mcpServerUrl ? (
 				<div
@@ -313,7 +313,7 @@ function renderAgentInstructions(input: {
 	return (
 		<AccountManagementPanel
 			title={`Connect ${label}`}
-			description="Follow the steps for this host, then approve the Kody OAuth window when it opens. The new connection appears on the connections list once the host authorizes."
+			description="Follow the steps for this host, then approve the Kody OAuth window when it opens. The new connection appears on the Agents list once the host authorizes."
 			ariaLabel={`Connect ${label}`}
 		>
 			<div css={accountActionsCss}>

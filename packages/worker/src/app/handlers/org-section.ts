@@ -31,7 +31,7 @@ export function sectionParams(
 			return first ? { messageId: first } : {}
 		case 'values':
 			return first && first !== 'new' ? { valueId: first } : {}
-		case 'connections':
+		case 'agents':
 			return first === 'new' && parts[1] ? { agent: parts[1] } : {}
 		case 'integrations':
 			if (first === 'apps' && parts[1]) return { appSlug: parts[1] }

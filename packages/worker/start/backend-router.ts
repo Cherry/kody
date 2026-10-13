@@ -187,6 +187,7 @@ import {
 	createAccountOrganizationsNewPostHandler,
 } from '#app/handlers/account-organizations.ts'
 import { createLegacyOrgPackagesApiRedirectHandler } from '#app/handlers/legacy-org-packages-redirect.ts'
+import { createLegacyOrgConnectionsRedirectHandler } from '#app/handlers/legacy-org-connections-redirect.ts'
 import { createOrgRepositoriesApiHandler } from '#app/handlers/org-section.ts'
 import { createOrgAvatarHandler } from '#app/handlers/org-avatar.ts'
 import { createOrgInviteJoinPostHandler } from '#app/handlers/org-invite-join.ts'
@@ -460,6 +461,7 @@ export function createBackendRouter(
 			orgBillingPortal: routes.orgBillingPortal,
 			orgMcpServerAuthorizePost: routes.orgMcpServerAuthorizePost,
 			orgPackagesApi: routes.orgPackagesApi,
+			orgConnections: routes.orgConnections,
 			orgRepositoriesApi: routes.orgRepositoriesApi,
 			orgSettingsApi: routes.orgSettingsApi,
 			orgSettingsPost: routes.orgSettingsPost,
@@ -680,6 +682,7 @@ export function createBackendRouter(
 				),
 				orgMcpServerAuthorizePost: createOrgMcpServerAuthorizePostHandler(env),
 				orgPackagesApi: createLegacyOrgPackagesApiRedirectHandler(env),
+				orgConnections: createLegacyOrgConnectionsRedirectHandler(env),
 				orgRepositoriesApi: createOrgRepositoriesApiHandler(env),
 				orgSettingsApi: createOrgSettingsApiHandler(env),
 				orgSettingsPost: createOrgSettingsPostHandler(env),

@@ -72,14 +72,11 @@ function groupBlock(html: string, label: string, nextLabel?: string) {
 }
 
 function Panel() {
-	return useAccountConnectedAgents(
-		listedAgents,
-		'/account/connections',
-	).render()
+	return useAccountConnectedAgents(listedAgents, '/account/agents').render()
 }
 test('connected agents panel groups same-name hosts, shows logos, and keeps revoke inside details', async () => {
 	const html = (
-		await renderStartPage(jsx(Panel, {}), '/account/connections')
+		await renderStartPage(jsx(Panel, {}), '/account/agents')
 	).replaceAll('<!-- -->', '')
 	expect(html).toContain('data-testid="connected-agent-group"')
 	expect(html).toContain('/images/icons/cursor.svg')
@@ -95,7 +92,7 @@ test('connected agents panel groups same-name hosts, shows logos, and keeps revo
 	const cursorBlock = groupBlock(html, 'Cursor', 'Acme Agent')
 	expect(cursorBlock).toContain('data-testid="connected-agent-view-steps"')
 	expect(cursorBlock).toContain('data-agent-kind="cursor"')
-	expect(cursorBlock).toContain('href="/account/connections/new/cursor"')
+	expect(cursorBlock).toContain('href="/account/agents/new/cursor"')
 	expect(cursorBlock).toContain('<details')
 	expect(cursorBlock).toContain('<summary')
 	expect(cursorBlock.indexOf('cursor-old')).toBeLessThan(
@@ -109,7 +106,7 @@ test('connected agents panel groups same-name hosts, shows logos, and keeps revo
 	const chatgptBlock = groupBlock(html, 'ChatGPT.com')
 	expect(chatgptBlock).toContain('data-testid="connected-agent-view-steps"')
 	expect(chatgptBlock).toContain('data-agent-kind="chatgpt"')
-	expect(chatgptBlock).toContain('href="/account/connections/new/chatgpt"')
+	expect(chatgptBlock).toContain('href="/account/agents/new/chatgpt"')
 	expect(chatgptBlock).toContain(
 		'aria-label="Revoke ChatGPT.com (chatgpt.com · vG4)"',
 	)

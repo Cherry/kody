@@ -198,8 +198,8 @@ test('team org: only owners and billing admins see teammates and Automation', as
 	}
 })
 
-test('the org Connections page binds its org through Referer, and non-members get 404', async () => {
-	const fromAcme = { referer: 'https://example.com/@acme/-/connections/usage' }
+test('the org Agents page binds its org through Referer, and non-members get 404', async () => {
+	const fromAcme = { referer: 'https://example.com/@acme/-/agents/usage' }
 	const request = new Request(
 		'https://example.com/account/connection-usage.json',
 		{ headers: fromAcme },
@@ -217,7 +217,7 @@ test('the org Connections page binds its org through Referer, and non-members ge
 test('native data service preserves signed-out and denied organization results without reading usage', async () => {
 	const request = new Request(
 		'https://example.com/account/connection-usage.json',
-		{ headers: { referer: 'https://example.com/@acme/-/connections/usage' } },
+		{ headers: { referer: 'https://example.com/@acme/-/agents/usage' } },
 	)
 	signInAs(null)
 	expect(await loadAccountConnectionUsageData(request, createEnv())).toEqual({

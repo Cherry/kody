@@ -8,9 +8,7 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 	staleTime: 60_000,
 })
 
-export const Route = createFileRoute(
-	'/@{$orgSlug}_/-/connections_/new_/$agent',
-)({
+export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: location.pathname + location.searchStr,
