@@ -128,6 +128,7 @@ function parseKnown(args: Array<string>) {
 			target: { type: 'string' },
 			'reset-storage': { type: 'boolean' },
 			'dry-run': { type: 'boolean' },
+			passthrough: { type: 'string' },
 			port: { type: 'string' },
 			'app-base-path': { type: 'string' },
 			method: { type: 'string' },
@@ -272,6 +273,15 @@ async function dispatch(
 	if (parsed.values['dry-run'] === true && parsed.command !== 'dev') {
 		throw new Error(
 			'`--dry-run` is only used with `kody dev job|webhook|emit` (shows the plan without invoking).',
+		)
+	}
+	if (
+		typeof parsed.values.passthrough === 'string' &&
+		parsed.command !== 'dev' &&
+		parsed.command !== 'execute'
+	) {
+		throw new Error(
+			'`--passthrough` is only used with `execute --target mock` or `kody dev` when `.kody/mocks.ts` is active.',
 		)
 	}
 	const orgFlag =
@@ -802,6 +812,17 @@ async function dispatch(
 						: undefined,
 			})
 			let apiUrl = prodApiUrl
+			const { parsePassthroughHosts } = await import('./mock/mock-fetch-gateway.js')
+			const passthroughHosts = parsePassthroughHosts(
+				typeof parsed.values.passthrough === 'string'
+					? parsed.values.passthrough
+					: undefined,
+			)
+			if (passthroughHosts.length > 0 && target !== 'mock') {
+				throw new Error(
+					'`--passthrough` only applies to `--target mock` (ignored on prod; outbound fetch mocking is mock-only).',
+				)
+			}
 			let closeMock: (() => Promise<void>) | undefined
 			let mockToken: string | undefined
 			let mockDepResolve:
@@ -848,8 +869,12 @@ async function dispatch(
 							kodyId: localPackageInvoke.kodyId,
 							hostedUrl: 'http://127.0.0.1:0',
 						}),
+						packageRoot: localPackageInvoke.packageRoot,
 						...(org ? { org } : {}),
 						...(mockDepResolve ? { depResolve: mockDepResolve } : {}),
+						...(passthroughHosts.length > 0
+							? { passthroughHosts }
+							: {}),
 						allowPrivateNetwork:
 							parsed.values['allow-private-network'] === true,
 						onStatus: (message) => writeErr(`${message}\n`),
@@ -866,6 +891,15 @@ async function dispatch(
 						allowEnvWithoutLogin: true,
 						...(org ? { org } : {}),
 					})
+				let packageRootForMocks: string | undefined
+				if (target === 'mock') {
+					try {
+						const { loadPackageManifest } = await import('./package-manifest.js')
+						packageRootForMocks = (await loadPackageManifest(process.cwd())).root
+					} catch {
+						packageRootForMocks = undefined
+					}
+				}
 				const result = local
 					? await (await import('./local-execute.js')).runLocalExecute({
 							code: args.code as string,
@@ -883,8 +917,15 @@ async function dispatch(
 									...(org ? { org } : {}),
 								})),
 							apiUrl,
+							target,
 							...(org ? { org } : {}),
 							...(mockDepResolve ? { depResolve: mockDepResolve } : {}),
+							...(packageRootForMocks
+								? { packageRoot: packageRootForMocks }
+								: {}),
+							...(passthroughHosts.length > 0
+								? { passthroughHosts }
+								: {}),
 							allowPrivateNetwork:
 								parsed.values['allow-private-network'] === true,
 							onStatus: (message) => writeErr(`${message}\n`),
@@ -962,6 +1003,63 @@ async function dispatch(
 					'`--dry-run` applies to `kody dev job|webhook|emit` only (shows the plan without invoking).',
 				)
 			}
+			// Plan-only dry-run: no login, no mock listen, no --reset-storage.
+			if (dryRun) {
+				const dryAuth = { token: 'dry-run', apiUrl: prodApiUrl }
+				switch (subcommand) {
+					case 'job': {
+						const jobName = rest[0]
+						if (!jobName) throw new Error('Usage: kody dev job <name>')
+						return await runDevJob({
+							target,
+							auth: dryAuth,
+							jobName,
+							json,
+							dryRun: true,
+							io,
+						})
+					}
+					case 'webhook': {
+						const webhookName = rest[0]
+						if (!webhookName || !bodyPath) {
+							throw new Error(
+								'Usage: kody dev webhook <name> --body file.json',
+							)
+						}
+						return await runDevWebhook({
+							target,
+							auth: dryAuth,
+							webhookName,
+							bodyPath,
+							json,
+							dryRun: true,
+							io,
+						})
+					}
+					case 'emit': {
+						const event = rest[0]
+						if (!event || !bodyPath) {
+							throw new Error(
+								'Usage: kody dev emit <event> --body event.json',
+							)
+						}
+						return await runDevEmit({
+							target,
+							auth: dryAuth,
+							event,
+							bodyPath,
+							json,
+							dryRun: true,
+							io,
+						})
+					}
+					default: {
+						throw new Error(
+							'`--dry-run` applies to `kody dev job|webhook|emit` only (shows the plan without invoking).',
+						)
+					}
+				}
+			}
 			const token =
 				target === 'prod'
 					? await resolveLocalExecuteBearer({
@@ -983,12 +1081,25 @@ async function dispatch(
 							...(org ? { org } : {}),
 						})
 					: undefined
+			const { parsePassthroughHosts } = await import('./mock/mock-fetch-gateway.js')
+			const passthroughHosts = parsePassthroughHosts(
+				typeof parsed.values.passthrough === 'string'
+					? parsed.values.passthrough
+					: undefined,
+			)
+			if (passthroughHosts.length > 0 && target !== 'mock') {
+				throw new Error(
+					'`--passthrough` only applies to `--target mock` (outbound fetch mocking is mock-only).',
+				)
+			}
+			const allowPrivateNetwork = parsed.values['allow-private-network'] === true
 			const auth = await resolveDevAuth({
 				target,
 				token,
 				apiUrl: prodApiUrl,
 				...(org ? { org } : {}),
 				...(mockDepResolve ? { depResolve: mockDepResolve } : {}),
+				...(passthroughHosts.length > 0 ? { passthroughHosts } : {}),
 				resetStorage: parsed.values['reset-storage'] === true,
 			})
 			const port =
@@ -1005,8 +1116,7 @@ async function dispatch(
 							auth,
 							port,
 							appBasePath,
-							allowPrivateNetwork:
-								parsed.values['allow-private-network'] === true,
+							allowPrivateNetwork,
 							io,
 						})
 					case 'fetch': {
@@ -1029,6 +1139,7 @@ async function dispatch(
 							body,
 							port,
 							appBasePath,
+							allowPrivateNetwork,
 							json,
 							io,
 						})
@@ -1041,7 +1152,7 @@ async function dispatch(
 							auth,
 							jobName,
 							json,
-							dryRun,
+							allowPrivateNetwork,
 							io,
 						})
 					}
@@ -1058,7 +1169,7 @@ async function dispatch(
 							webhookName,
 							bodyPath,
 							json,
-							dryRun,
+							allowPrivateNetwork,
 							io,
 						})
 					}
@@ -1075,7 +1186,7 @@ async function dispatch(
 							event,
 							bodyPath,
 							json,
-							dryRun,
+							allowPrivateNetwork,
 							io,
 						})
 					}
@@ -1198,7 +1309,7 @@ async function readStdin(): Promise<string> {
 
 async function tryResolveLocalPackageInvoke(
 	invoke: string,
-): Promise<{ modulePath: string; kodyId: string } | null> {
+): Promise<{ modulePath: string; kodyId: string; packageRoot: string } | null> {
 	const trimmed = invoke.trim()
 	if (!trimmed || trimmed.startsWith('kody:@')) return null
 	try {
@@ -1206,7 +1317,7 @@ async function tryResolveLocalPackageInvoke(
 			await import('./package-manifest.js')
 		const manifest = await loadPackageManifest(process.cwd())
 		const modulePath = resolveExportModulePath(manifest, trimmed)
-		return { modulePath, kodyId: manifest.kodyId }
+		return { modulePath, kodyId: manifest.kodyId, packageRoot: manifest.root }
 	} catch {
 		return null
 	}
