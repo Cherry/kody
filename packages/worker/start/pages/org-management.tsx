@@ -6,7 +6,8 @@ import {
 	type QueryKey,
 } from '@tanstack/react-query'
 import { z } from 'zod'
-import { useRouter } from '@tanstack/react-router'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { invalidateShellQueries } from '../shell-query.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import {
 	AccountManagementShell,
@@ -87,6 +88,7 @@ export function OrgAction({
 	multipart = false,
 	disabled = false,
 	onDone,
+	onSaved,
 }: {
 	href: string
 	queryKey: QueryKey
@@ -96,6 +98,7 @@ export function OrgAction({
 	multipart?: boolean
 	disabled?: boolean
 	onDone?: (href: string) => void
+	onSaved?: () => Promise<unknown>
 }) {
 	const client = useQueryClient()
 	const [confirmed, setConfirmed] = useState(false)
@@ -124,18 +127,21 @@ export function OrgAction({
 			return data
 		},
 		onSuccess: async (data) => {
-			await client.invalidateQueries({
-				predicate: (query) =>
-					query.queryKey[0] === queryKey[0] &&
-					query.queryKey[1] === queryKey[1] &&
-					typeof query.queryKey[3] === 'object' &&
-					query.queryKey[3] !== null &&
-					'slug' in query.queryKey[3] &&
-					typeof queryKey[3] === 'object' &&
-					queryKey[3] !== null &&
-					'slug' in queryKey[3] &&
-					query.queryKey[3].slug === queryKey[3].slug,
-			})
+			await Promise.all([
+				onSaved?.(),
+				client.invalidateQueries({
+					predicate: (query) =>
+						query.queryKey[0] === queryKey[0] &&
+						query.queryKey[1] === queryKey[1] &&
+						typeof query.queryKey[3] === 'object' &&
+						query.queryKey[3] !== null &&
+						'slug' in query.queryKey[3] &&
+						typeof queryKey[3] === 'object' &&
+						queryKey[3] !== null &&
+						'slug' in queryKey[3] &&
+						query.queryKey[3].slug === queryKey[3].slug,
+				}),
+			])
 			if (data.redirectTo) onDone?.(data.redirectTo)
 		},
 	})
@@ -481,7 +487,10 @@ export function OrgSettingsPage({
 	queryKey: QueryKey
 }) {
 	const router = useRouter(),
+		client = useQueryClient(),
+		{ actorKey } = useRouteContext({ from: '__root__' }),
 		args = { orgSlug: data.org.slug }
+	const refreshShell = () => invalidateShellQueries(client, actorKey)
 	return (
 		<OrgShell title="Settings" slug={data.org.slug}>
 			<AccountManagementPanel title={data.org.displayName || data.org.slug}>
@@ -496,6 +505,7 @@ export function OrgSettingsPage({
 							href={routes.orgSettingsPost.href(args)}
 							queryKey={queryKey}
 							label="Save name"
+							onSaved={refreshShell}
 						>
 							<OrgField
 								name="displayName"
@@ -515,6 +525,7 @@ export function OrgSettingsPage({
 							href={routes.orgSettingsAvatarPost.href(args)}
 							queryKey={queryKey}
 							label="Upload avatar"
+							onSaved={refreshShell}
 							multipart
 						>
 							<label>
@@ -526,6 +537,7 @@ export function OrgSettingsPage({
 							href={routes.orgSettingsAvatarPost.href(args)}
 							queryKey={queryKey}
 							label="Remove avatar"
+							onSaved={refreshShell}
 							confirm
 						>
 							<input type="hidden" name="remove" value="true" />
