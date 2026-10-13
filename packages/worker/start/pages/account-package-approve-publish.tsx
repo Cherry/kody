@@ -4,7 +4,8 @@ import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-promp
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
+import { shortCommunityCommit } from '#universal/community-display.ts'
 import { useRouter, useLocation } from '@tanstack/react-router'
 
 import {
@@ -22,6 +23,37 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { type AccountPackageApprovePublishLoaderData } from '#universal/loader-data.ts'
+function approvePublishMetadataItems(
+	payload: AccountPackageApprovePublishLoaderData,
+) {
+	const items: Array<{ label: string; value: ReactNode }> = [
+		{
+			label: 'Kody id',
+			value: <IdValue value={payload.package.kodyId} label="Kody id" />,
+		},
+	]
+	// Title already names the short public commit when nothing is pending,
+	// do not repeat it in the metadata grid.
+	if (payload.alreadyPublished || !payload.pendingCommit) {
+		return items
+	}
+	items.push(
+		{
+			label: 'Current published commit',
+			value: payload.publishedCommit ? (
+				<IdValue value={payload.publishedCommit} label="published commit" />
+			) : (
+				'None'
+			),
+		},
+		{
+			label: payload.package.lockedAt ? 'Commit to promote' : 'HEAD to publish',
+			value: <IdValue value={payload.pendingCommit} label="pending commit" />,
+		},
+	)
+	return items
+}
+
 export function AccountPackageApprovePublishRoute({
 	payload,
 }: {
@@ -75,16 +107,44 @@ export function AccountPackageApprovePublishRoute({
 			if (mounted.current) setBusy(false)
 		}
 	}
+	const nothingToPublish =
+		payload != null && (payload.alreadyPublished || !payload.pendingCommit)
+	const upToDateShort =
+		payload?.alreadyPublished && payload.publishedCommit
+			? shortCommunityCommit(payload.publishedCommit)
+			: null
+	const headUpToDate =
+		Boolean(payload?.alreadyPublished) &&
+		Boolean(payload?.pendingIsDefaultHead) &&
+		upToDateShort != null
+	const pinnedCommitAlreadyPublished =
+		Boolean(payload?.alreadyPublished) &&
+		payload?.pendingIsDefaultHead === false &&
+		upToDateShort != null
 	return (
 		<AccountManagementShell busy={busy}>
 			<AccountPageHeader
 				title={
-					payload?.package.lockedAt ? 'Approve package publish' : 'Publish HEAD'
+					headUpToDate
+						? `Nothing to publish: the public version is up to date at ${upToDateShort}`
+						: pinnedCommitAlreadyPublished
+							? `This commit is already published at ${upToDateShort}`
+							: nothingToPublish
+								? 'Nothing to publish'
+								: payload?.package.lockedAt
+									? 'Approve package publish'
+									: 'Publish HEAD'
 				}
 				description={
-					payload?.package.lockedAt
-						? 'Review the files that changed since the last publish, then promote this commit. The package stays locked.'
-						: 'Review the files that changed since the last publish, then publish default-branch HEAD. Runtime keeps using the published commit until you do.'
+					headUpToDate
+						? 'No unpublished commit is waiting. Nothing was approved or changed.'
+						: pinnedCommitAlreadyPublished
+							? 'The commit in this link matches the public version. Open Approve without a commit pin to review default-branch HEAD if it has moved.'
+							: nothingToPublish
+								? 'No commit is available to publish from this page.'
+								: payload?.package.lockedAt
+									? 'Review the files that changed since the last publish, then promote this commit. The package stays locked.'
+									: 'Review the files that changed since the last publish, then publish default-branch HEAD. Runtime keeps using the published commit until you do.'
 				}
 				currentHref={currentHref}
 			/>
@@ -130,40 +190,7 @@ export function AccountPackageApprovePublishRoute({
 								: 'This package is not locked. Lock it from the package page if you want later publishes to require approval.'}
 						</p>
 					</div>
-					<MetadataGrid
-						items={[
-							{
-								label: 'Kody id',
-								value: (
-									<IdValue value={payload.package.kodyId} label="Kody id" />
-								),
-							},
-							{
-								label: 'Current published commit',
-								value: payload.publishedCommit ? (
-									<IdValue
-										value={payload.publishedCommit}
-										label="published commit"
-									/>
-								) : (
-									'None'
-								),
-							},
-							{
-								label: payload.package.lockedAt
-									? 'Commit to promote'
-									: 'HEAD to publish',
-								value: payload.pendingCommit ? (
-									<IdValue
-										value={payload.pendingCommit}
-										label="pending commit"
-									/>
-								) : (
-									'No unpublished commit'
-								),
-							},
-						]}
-					/>
+					<MetadataGrid items={approvePublishMetadataItems(payload)} />
 					<div
 						css={{
 							display: 'flex',
