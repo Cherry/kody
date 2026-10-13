@@ -480,3 +480,41 @@ test('logged-out header shows Log in without an Account link', async () => {
 	expect(html).not.toContain('data-testid="site-header-account"')
 	expect(html).not.toContain('data-testid="site-header-account-menu"')
 })
+
+test('desktop and mobile headers include the complete Features navigation', async () => {
+	const html = await renderToString(
+		jsx(SiteHeader, {
+			loggedIn: false,
+			displayName: '',
+			username: '',
+			avatarUrl: null,
+			showAdminLink: false,
+			showDemoIndicator: false,
+			loginHref: '/login',
+			currentPathname: '/features/memory',
+		}),
+	)
+	expect(html).toMatch(/popovertarget="features-navigation"/i)
+	expect(html).toContain('id="features-navigation"')
+	expect(html).toContain('id="features-navigation-mobile"')
+	expect(html.match(/href="\/features"/g)).toHaveLength(2)
+	for (const id of [
+		'memory',
+		'secrets',
+		'packages',
+		'triggers',
+		'integrations',
+		'apps',
+	]) {
+		expect(html.match(new RegExp(`href="/features/${id}"`, 'g'))).toHaveLength(
+			2,
+		)
+		expect(html).toContain(`/images/lantern/kody-primitives-orb-${id}.webp`)
+	}
+	expect(
+		html.match(
+			/<a(?=[^>]*href="\/features\/memory")(?=[^>]*aria-current="page")[^>]*>/g,
+		),
+	).toHaveLength(2)
+	expect(html).toContain('Context that comes with you.')
+})

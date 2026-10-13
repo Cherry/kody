@@ -6,7 +6,7 @@ test('home to memory and Back keeps outgoing feature CSS until its content leave
 	await page.goto('/')
 	await waitForClientHydration(page)
 	const origin = await page.evaluate(() => performance.timeOrigin)
-	await page.locator('a[href="/features/memory"]').first().click()
+	await page.locator('main a[href="/features/memory"]').first().click()
 	await expect(page.locator('.feature-detail .memory')).toBeVisible()
 	await expect(page.locator('.feature-detail')).toHaveCSS('--hue', '29')
 	await page.evaluate(() => {
@@ -60,3 +60,69 @@ test('memory demo updates both views and app intake saves a trimmed brief with f
 	await page.locator('.study form button[type="submit"]').click()
 	await expect(page.locator('#saved-brief-heading')).toHaveText('Second demo')
 })
+
+for (const mobile of [false, true]) {
+	test(`Features menu supports ${mobile ? 'mobile' : 'desktop'} navigation and Back`, async ({
+		page,
+	}) => {
+		await page.setViewportSize(
+			mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+		)
+		await page.goto('/')
+		await waitForClientHydration(page)
+		const origin = await page.evaluate(() => performance.timeOrigin)
+		const nav = page.getByRole('navigation', { name: 'Main', exact: true })
+		const panel = page.locator(
+			mobile ? '#features-navigation-mobile' : '#features-navigation',
+		)
+		const trigger = mobile
+			? panel.locator('summary')
+			: nav.getByRole('button', { name: 'Features', exact: true })
+		async function openFeatures() {
+			if (mobile)
+				await nav.getByRole('button', { name: 'Menu', exact: true }).click()
+			await trigger.click()
+		}
+		await openFeatures()
+		for (const name of [
+			'Memory',
+			'Secrets',
+			'Packages',
+			'Triggers',
+			'Integrations',
+			'Apps',
+		]) {
+			await expect(panel.getByRole('link', { name, exact: true })).toBeVisible()
+		}
+		await expect(
+			panel.getByRole('link', { name: 'Explore all features' }),
+		).toBeVisible()
+		if (!mobile) {
+			await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+			await page.keyboard.press('Escape')
+			await expect(panel).not.toBeVisible()
+			await expect(trigger).toBeFocused()
+			await trigger.click()
+		}
+		await panel.getByRole('link', { name: 'Memory', exact: true }).click()
+		await expect(page).toHaveURL(/\/features\/memory$/)
+		await expect(page.locator('.feature-detail .memory')).toBeVisible()
+		if (mobile) {
+			await expect(page.locator('#site-menu')).not.toBeVisible()
+			await expect(panel).not.toHaveAttribute('open', '')
+		} else {
+			await expect(panel).not.toBeVisible()
+			await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+		}
+		await openFeatures()
+		await expect(
+			panel.getByRole('link', { name: 'Memory', exact: true }),
+		).toHaveAttribute('aria-current', 'page')
+		await panel.getByRole('link', { name: 'Explore all features' }).click()
+		await expect(page).toHaveURL(/\/features$/)
+		await page.goBack()
+		await expect(page).toHaveURL(/\/features\/memory$/)
+		await expect(page.locator('.feature-detail .memory')).toBeVisible()
+		expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin)
+	})
+}

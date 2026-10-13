@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
+import { FeaturesMenu } from './features-menu.tsx'
 import { SiteLink } from './site-link.tsx'
 import { useEffect, useState, type ComponentProps } from 'react'
 import { OrgSwitcher, AccountMenu } from './org-switcher.tsx'
@@ -30,7 +31,7 @@ export type SiteHeaderProps = {
 
 /**
  * Sticky site header from the 2026 landing redesign: brand, marketing nav
- * (Community · Docs · Pricing · Blog), and the organization and account menu. The bottom hairline is a static CSS border so
+ * (Features · Community · Docs · Pricing · Blog), and the organization and account menu. The bottom hairline is a static CSS border so
  * it paints before JS.
  */
 const marketingLinks = [
@@ -82,6 +83,7 @@ export function SiteHeader(props: SiteHeaderProps) {
 					<span>Kody</span>
 				</SiteLink>
 				<div css={navLinksCss}>
+					<FeaturesMenu currentPathname={props.currentPathname} />
 					{marketingLinks.map((link) => (
 						<SiteLink
 							key={link.href}
@@ -148,6 +150,7 @@ export function SiteHeader(props: SiteHeaderProps) {
 					onToggle={(event) => onMenuToggle(event.nativeEvent)}
 				>
 					<div css={menuGroupCss}>
+						<FeaturesMenu currentPathname={props.currentPathname} mobile />
 						{marketingLinks.map((link) => (
 							<SiteLink
 								key={link.href}
@@ -206,6 +209,7 @@ const navCss: CSSObject = {
 	alignItems: 'center',
 	gap: '1.8rem',
 	flexWrap: 'wrap' as const,
+	'@media (min-width: 821px) and (max-width: 1000px)': { gap: '0.8rem' },
 }
 
 const brandCss: CSSObject = {
@@ -229,17 +233,19 @@ const headerNavMq = '@media (max-width: 820px)'
 
 const navLinksCss: CSSObject = {
 	display: 'flex',
+	alignItems: 'center',
+	'@media (min-width: 821px) and (max-width: 1000px)': { gap: '0.8rem' },
 	gap: '1.6rem',
 	marginRight: 'auto',
-	'& a': {
+	'& > a': {
 		color: colors.textMuted,
 		textDecoration: 'none',
 		fontWeight: 500,
 		fontSize: '0.98rem',
 		transition: `color ${transitions.fast}`,
 	},
-	'& a:hover': { color: colors.text },
-	'& a[aria-current="page"]': { color: colors.text },
+	'& > a:hover': { color: colors.text },
+	'& > a[aria-current="page"]': { color: colors.text },
 	[headerNavMq]: { display: 'none' },
 }
 
@@ -374,7 +380,7 @@ const menuGroupCss: CSSObject = {
 		paddingTop: '0.5rem',
 		borderTop: `1px solid ${colors.border}`,
 	},
-	'& a': {
+	'& > a': {
 		display: 'flex',
 		alignItems: 'center',
 		// Comfortable target on a phone, not a cramped text link.
@@ -387,13 +393,13 @@ const menuGroupCss: CSSObject = {
 		fontSize: '1rem',
 		transition: `background-color ${transitions.fast}, color ${transitions.fast}`,
 	},
-	'& a[aria-current="page"]': {
+	'& > a[aria-current="page"]': {
 		color: colors.primaryText,
 		backgroundColor: colors.primarySoft,
 	},
-	'& a:active': { backgroundColor: colors.primarySoftest },
+	'& > a:active': { backgroundColor: colors.primarySoftest },
 	[hoverMq]: {
-		'& a:hover': { backgroundColor: colors.primarySoftest },
+		'& > a:hover': { backgroundColor: colors.primarySoftest },
 	},
 }
 
