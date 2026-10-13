@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { WhereItWentPanel } from './account-usage-where-it-went.tsx'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon } from '../components/icon.tsx'
@@ -441,6 +442,7 @@ export function AccountUsagePage({
 						meters: usage.includedCompute,
 						summary: usage.includedComputeSummary,
 					})}
+					<WhereItWentPanel breakdown={usage.whereItWent} />
 					{usage.warnings.length > 0 ? (
 						<AccountManagementPanel
 							title={accountUsageWarningsPanelTitle(usage.warnings)}

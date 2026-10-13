@@ -18,5 +18,11 @@ function OnboardingLayout() {
 	const refresh = useCallback(() => {
 		if (data.payload.loggedIn) void refetch({ cancelRefetch: false })
 	}, [data.payload.loggedIn, refetch])
-	return <OnboardingRoute payload={data.payload} refresh={refresh} />
+	return (
+		<OnboardingRoute
+			payload={data.payload}
+			initialAgentChooser={data.onboardingAgentChooser}
+			refresh={refresh}
+		/>
+	)
 }

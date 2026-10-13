@@ -8,6 +8,7 @@ import {
 import { z } from 'zod'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { invalidateShellQueries } from '../shell-query.ts'
+import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import {
 	AccountManagementShell,
@@ -186,11 +187,20 @@ export function OrgAction({
 				/>
 			) : null}
 			{mutation.data?.inviteLink?.url ? (
-				<input
-					readOnly
-					aria-label="Invitation link"
-					value={mutation.data.inviteLink.url}
-				/>
+				<>
+					<input
+						readOnly
+						aria-label="Invitation link"
+						value={mutation.data.inviteLink.url}
+					/>
+					<CopyTextButton
+						value={mutation.data.inviteLink.url}
+						idleLabel="Copy invite link"
+						ariaLabel="Copy invite link"
+						variant="ghost"
+						size="sm"
+					/>
+				</>
 			) : null}
 			{mutation.isSuccess &&
 			!mutation.data.invite &&

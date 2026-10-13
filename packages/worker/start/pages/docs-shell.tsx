@@ -90,6 +90,7 @@ function renderDocsNavSections(
 			<h2>
 				{section.id === 'providers' ? (
 					<SiteLink
+						preload="render"
 						href={routes.docsConnect.href()}
 						aria-current={current === 'connect' ? 'page' : undefined}
 					>
@@ -103,6 +104,7 @@ function renderDocsNavSections(
 				{section.items.map((item) => (
 					<li key={item.slug}>
 						<SiteLink
+							preload="render"
 							href={docHref(item.slug)}
 							aria-current={item.slug === current ? 'page' : undefined}
 							data-section-current={
@@ -125,13 +127,21 @@ export function renderDocsPager(slug: string, isAdmin = false) {
 	return (
 		<nav aria-label="Docs order" css={docsPagerCss}>
 			{prev ? (
-				<SiteLink href={docHref(prev.slug)} css={docsPagerLinkCss}>
+				<SiteLink
+					preload="render"
+					href={docHref(prev.slug)}
+					css={docsPagerLinkCss}
+				>
 					<span>Previous</span>
 					<strong>{prev.label}</strong>
 				</SiteLink>
 			) : null}
 			{next ? (
-				<SiteLink href={docHref(next.slug)} css={docsPagerNextLinkCss}>
+				<SiteLink
+					preload="render"
+					href={docHref(next.slug)}
+					css={docsPagerNextLinkCss}
+				>
 					<span>Next</span>
 					<strong>{next.label}</strong>
 				</SiteLink>
@@ -169,7 +179,7 @@ export function renderDocListItem(doc: DocSummaryLoaderData, index: number) {
 			data-rise
 			style={{ '--rise': String(index + 2) } as CSSProperties}
 		>
-			<SiteLink href={docHref(doc.slug)} css={docListLinkCss}>
+			<SiteLink preload="render" href={docHref(doc.slug)} css={docListLinkCss}>
 				<strong>{doc.title}</strong>
 				{doc.lastVerified ? (
 					<span css={docListMetaCss}>

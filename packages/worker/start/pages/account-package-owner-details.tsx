@@ -85,6 +85,9 @@ export function AccountPackageOwnerDetails(props: {
 	ownerUsername: string
 	packageDetail: AccountPackageDetail
 	lockInFlight: boolean
+	viewerCanPublish: boolean
+	viewerCanDelete: boolean
+	viewerCanAdoptCommunityFork: boolean
 	onToggleLock: () => void
 }) {
 	const mutation = usePackageMutation(props.packageDetail.id)
@@ -271,183 +274,188 @@ export function AccountPackageOwnerDetails(props: {
 				{!packageDetail.isPrivate ? (
 					<span css={communityBadgeCss}>Forkable</span>
 				) : (
-					<span css={statusBadgeCss}>Not listed</span>
+					<span css={statusBadgeCss}>Not forkable</span>
 				)}
 				{packageDetail.isInternetVisible ? (
 					<span css={communityBadgeCss}>Internet-visible</span>
 				) : (
 					<span css={statusBadgeCss}>Private app</span>
 				)}
+				<span css={statusBadgeCss}>
+					{packageDetail.hasCommunityListing ? 'Listed' : 'Not listed'}
+				</span>
 			</div>
-			<div
-				css={{ display: 'grid', gap: spacing.md }}
-				data-testid="package-visibility-controls"
-			>
-				<AccountPackageUpdatePublicListing
-					packageDetail={props.packageDetail}
-				/>
-				<div css={{ display: 'grid', gap: spacing.xs }}>
-					<p css={{ margin: 0, color: colors.textMuted }}>
-						{packageDetail.isPrivate
-							? "Lists the source on /community so anyone can read and fork it. Doesn't host your app."
-							: 'Turning off forkable unlists the package from /community and 404s public source URLs. Existing forks keep their copies. Does not change internet-visible app hosting. Type the slug to confirm.'}
-					</p>
-					<label css={{ display: 'grid', gap: spacing.xs }}>
-						<span css={visuallyHiddenCss}>
-							Type {packageDetail.kodyId} to change forkable
-						</span>
-						<input
-							value={confirmName}
-							placeholder={packageDetail.kodyId}
-							data-testid={
-								packageDetail.isPrivate
-									? 'package-make-public-confirm'
-									: 'package-make-private-confirm'
-							}
-							css={{
-								padding: spacing.sm,
-								borderRadius: radius.md,
-								border: `1px solid ${colors.border}`,
-								backgroundColor: colors.surface,
-								color: colors.text,
-							}}
-							onChange={(event) => {
-								if (!(event.currentTarget instanceof HTMLInputElement)) {
-									return
-								}
-								setConfirmName(event.currentTarget.value)
-							}}
-						/>
-					</label>
-					<button
-						type="button"
-						disabled={visibilityState === 'submitting'}
-						data-testid={
-							packageDetail.isPrivate
-								? 'package-make-public'
-								: 'package-make-private'
-						}
-						css={getGhostButtonCss()}
-						onClick={() =>
-							void submitVisibility(
-								packageDetail,
-								packageDetail.isPrivate ? 'public' : 'private',
-							)
-						}
-					>
-						{visibilityState === 'submitting'
-							? 'Saving…'
-							: packageDetail.isPrivate
-								? 'Make forkable'
-								: 'Turn off forkable'}
-					</button>
-					{visibilityMessage ? (
-						<p css={{ margin: 0, color: colors.danger }} role="alert">
-							{visibilityMessage}
-						</p>
-					) : null}
-				</div>
+			{props.viewerCanPublish ? (
 				<div
-					css={{ display: 'grid', gap: spacing.xs }}
-					data-testid="package-internet-visible-controls"
+					css={{ display: 'grid', gap: spacing.md }}
+					data-testid="package-visibility-controls"
 				>
-					<p css={{ margin: 0, color: colors.textMuted }}>
-						{packageDetail.isInternetVisible
-							? 'Turning off internet-visible returns the app to owner-session serving. Community listing stays unchanged.'
-							: "Kody hosts your app at a public URL anyone can open without signing in. This is separate from Community listing. Don't use it for apps that show your private data."}
-					</p>
-					{packageDetail.hasApp ? null : (
+					<AccountPackageUpdatePublicListing
+						packageDetail={props.packageDetail}
+					/>
+					<div css={{ display: 'grid', gap: spacing.xs }}>
 						<p css={{ margin: 0, color: colors.textMuted }}>
-							This package has no app yet. You can still approve capabilities
-							after publish; serving stays inactive until an app exists.
+							{packageDetail.isPrivate
+								? "Lists the source on /community so anyone can read and fork it. Doesn't host your app."
+								: 'Turning off forkable unlists the package from /community and 404s public source URLs. Existing forks keep their copies. Does not change internet-visible app hosting. Type the slug to confirm.'}
 						</p>
-					)}
-					<label css={{ display: 'grid', gap: spacing.xs }}>
-						<span css={visuallyHiddenCss}>
-							Type {packageDetail.kodyId} to change internet-visible
-						</span>
-						<input
-							value={internetVisibleConfirmName}
-							placeholder={packageDetail.kodyId}
-							data-testid={
-								packageDetail.isInternetVisible
-									? 'package-internet-visible-off-confirm'
-									: 'package-internet-visible-on-confirm'
-							}
-							css={{
-								padding: spacing.sm,
-								borderRadius: radius.md,
-								border: `1px solid ${colors.border}`,
-								backgroundColor: colors.surface,
-								color: colors.text,
-							}}
-							onChange={(event) => {
-								if (!(event.currentTarget instanceof HTMLInputElement)) {
-									return
+						<label css={{ display: 'grid', gap: spacing.xs }}>
+							<span css={visuallyHiddenCss}>
+								Type {packageDetail.kodyId} to change forkable
+							</span>
+							<input
+								value={confirmName}
+								placeholder={packageDetail.kodyId}
+								data-testid={
+									packageDetail.isPrivate
+										? 'package-make-public-confirm'
+										: 'package-make-private-confirm'
 								}
-								setInternetVisibleConfirmName(event.currentTarget.value)
-							}}
-						/>
-					</label>
-					<div
-						css={{
-							display: 'flex',
-							flexWrap: 'wrap',
-							gap: spacing.xs,
-						}}
-					>
+								css={{
+									padding: spacing.sm,
+									borderRadius: radius.md,
+									border: `1px solid ${colors.border}`,
+									backgroundColor: colors.surface,
+									color: colors.text,
+								}}
+								onChange={(event) => {
+									if (!(event.currentTarget instanceof HTMLInputElement)) {
+										return
+									}
+									setConfirmName(event.currentTarget.value)
+								}}
+							/>
+						</label>
 						<button
 							type="button"
-							disabled={internetVisibleState === 'submitting'}
+							disabled={visibilityState === 'submitting'}
 							data-testid={
-								packageDetail.isInternetVisible
-									? 'package-internet-visible-off'
-									: 'package-internet-visible-on'
+								packageDetail.isPrivate
+									? 'package-make-public'
+									: 'package-make-private'
 							}
 							css={getGhostButtonCss()}
 							onClick={() =>
-								void submitInternetVisible(
+								void submitVisibility(
 									packageDetail,
-									!packageDetail.isInternetVisible,
+									packageDetail.isPrivate ? 'public' : 'private',
 								)
 							}
 						>
-							{internetVisibleState === 'submitting'
+							{visibilityState === 'submitting'
 								? 'Saving…'
-								: packageDetail.isInternetVisible
-									? 'Turn off internet-visible'
-									: 'Make internet-visible'}
+								: packageDetail.isPrivate
+									? 'Make forkable'
+									: 'Turn off forkable'}
 						</button>
-						<SiteLink
-							href={routes.communityPackageApproveCapabilities.href({
-								username: props.ownerUsername,
-								kodyId: packageDetail.kodyId,
-							})}
-							data-testid="package-approve-capabilities-link"
+						{visibilityMessage ? (
+							<p css={{ margin: 0, color: colors.danger }} role="alert">
+								{visibilityMessage}
+							</p>
+						) : null}
+					</div>
+					<div
+						css={{ display: 'grid', gap: spacing.xs }}
+						data-testid="package-internet-visible-controls"
+					>
+						<p css={{ margin: 0, color: colors.textMuted }}>
+							{packageDetail.isInternetVisible
+								? 'Turning off internet-visible returns the app to owner-session serving. Community listing stays unchanged.'
+								: "Kody hosts your app at a public URL anyone can open without signing in. This is separate from Community listing. Don't use it for apps that show your private data."}
+						</p>
+						{packageDetail.hasApp ? null : (
+							<p css={{ margin: 0, color: colors.textMuted }}>
+								This package has no app yet. You can still approve capabilities
+								after publish; serving stays inactive until an app exists.
+							</p>
+						)}
+						<label css={{ display: 'grid', gap: spacing.xs }}>
+							<span css={visuallyHiddenCss}>
+								Type {packageDetail.kodyId} to change internet-visible
+							</span>
+							<input
+								value={internetVisibleConfirmName}
+								placeholder={packageDetail.kodyId}
+								data-testid={
+									packageDetail.isInternetVisible
+										? 'package-internet-visible-off-confirm'
+										: 'package-internet-visible-on-confirm'
+								}
+								css={{
+									padding: spacing.sm,
+									borderRadius: radius.md,
+									border: `1px solid ${colors.border}`,
+									backgroundColor: colors.surface,
+									color: colors.text,
+								}}
+								onChange={(event) => {
+									if (!(event.currentTarget instanceof HTMLInputElement)) {
+										return
+									}
+									setInternetVisibleConfirmName(event.currentTarget.value)
+								}}
+							/>
+						</label>
+						<div
 							css={{
-								...getPillButtonCss({ size: 'sm' }),
-								display: 'inline-flex',
-								textDecoration: 'none',
+								display: 'flex',
+								flexWrap: 'wrap',
+								gap: spacing.xs,
 							}}
 						>
-							Review capabilities
-						</SiteLink>
+							<button
+								type="button"
+								disabled={internetVisibleState === 'submitting'}
+								data-testid={
+									packageDetail.isInternetVisible
+										? 'package-internet-visible-off'
+										: 'package-internet-visible-on'
+								}
+								css={getGhostButtonCss()}
+								onClick={() =>
+									void submitInternetVisible(
+										packageDetail,
+										!packageDetail.isInternetVisible,
+									)
+								}
+							>
+								{internetVisibleState === 'submitting'
+									? 'Saving…'
+									: packageDetail.isInternetVisible
+										? 'Turn off internet-visible'
+										: 'Make internet-visible'}
+							</button>
+							<SiteLink
+								href={routes.communityPackageApproveCapabilities.href({
+									username: props.ownerUsername,
+									kodyId: packageDetail.kodyId,
+								})}
+								data-testid="package-approve-capabilities-link"
+								css={{
+									...getPillButtonCss({ size: 'sm' }),
+									display: 'inline-flex',
+									textDecoration: 'none',
+								}}
+							>
+								Review capabilities
+							</SiteLink>
+						</div>
+						{internetVisibleMessage ? (
+							<p css={{ margin: 0, color: colors.danger }} role="alert">
+								{internetVisibleMessage}
+								{internetVisibleApprovalUrl ? (
+									<>
+										{' '}
+										<SiteLink href={internetVisibleApprovalUrl}>
+											Open approval page
+										</SiteLink>
+									</>
+								) : null}
+							</p>
+						) : null}
 					</div>
-					{internetVisibleMessage ? (
-						<p css={{ margin: 0, color: colors.danger }} role="alert">
-							{internetVisibleMessage}
-							{internetVisibleApprovalUrl ? (
-								<>
-									{' '}
-									<SiteLink href={internetVisibleApprovalUrl}>
-										Open approval page
-									</SiteLink>
-								</>
-							) : null}
-						</p>
-					) : null}
 				</div>
-			</div>{' '}
+			) : null}
 			{packageDetail.tags.length > 0 ? (
 				<RecordChips items={packageDetail.tags} />
 			) : null}
@@ -552,16 +560,18 @@ export function AccountPackageOwnerDetails(props: {
 					</div>
 				) : null}
 			</div>
-			{packageDetail.communityFork ? (
+			{props.viewerCanAdoptCommunityFork && packageDetail.communityFork ? (
 				<AccountPackageForkAdoption
 					packageDetail={packageDetail}
 					communityFork={packageDetail.communityFork}
 				/>
 			) : null}
-			<AccountPackageDeleteDialog
-				ownerUsername={props.ownerUsername}
-				packageDetail={packageDetail}
-			/>
+			{props.viewerCanDelete ? (
+				<AccountPackageDeleteDialog
+					ownerUsername={props.ownerUsername}
+					packageDetail={packageDetail}
+				/>
+			) : null}
 			{packageDetail.searchText ? (
 				<details css={accountDisclosureCss}>
 					<summary>Search text</summary>

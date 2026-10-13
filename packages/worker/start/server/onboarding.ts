@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { pickOnboardingAgentChooser } from '#universal/onboarding-mcp-clients.ts'
 
 /** Progress belongs to the user, not to a particular wizard URL. */
 export const loadOnboarding = createServerFn({ method: 'GET' }).handler(
@@ -24,6 +25,7 @@ export const loadOnboarding = createServerFn({ method: 'GET' }).handler(
 		const { payload } = await readOnboardingPageData(bindings, request)
 		return {
 			payload,
+			onboardingAgentChooser: pickOnboardingAgentChooser(),
 			canonicalBaseUrl: getCanonicalAppBaseUrl({
 				env: bindings,
 				requestUrl: request.url,

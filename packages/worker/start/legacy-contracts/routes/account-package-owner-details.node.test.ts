@@ -1,6 +1,7 @@
 import { jsx } from 'react/jsx-runtime'
 import { renderStartPage as renderToString } from '../../test-support/render-start-page.ts'
 import { expect, test } from 'vitest'
+import { PackageSettingsRoute } from '../../pages/package-settings.tsx'
 import { AccountPackageOwnerDetails } from '../../pages/account-package-owner-details.tsx'
 import { type AccountPackageDetail } from '#universal/loader-data.ts'
 
@@ -41,6 +42,8 @@ test('owner details link Open Package App when the package declares an app', asy
 			ownerUsername: 'kentcdodds',
 			packageDetail: packageDetail({ hasApp: true }),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			viewerCanAdoptCommunityFork: true,
 			onToggleLock: () => {},
 		}),
@@ -58,6 +61,8 @@ test('owner details show No app when the package has no app', async () => {
 			ownerUsername: 'kentcdodds',
 			packageDetail: packageDetail({ hasApp: false }),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			viewerCanAdoptCommunityFork: true,
 			onToggleLock: () => {},
 		}),
@@ -78,6 +83,8 @@ test('owner details expose independent forkable and internet-visible controls', 
 				hasApp: true,
 			}),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			onToggleLock: () => {},
 		}),
 	)
@@ -109,6 +116,8 @@ test('owner details show publish state and demote Approve when up to date', asyn
 				pendingCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
 			}),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			onToggleLock: () => {},
 		}),
 	)
@@ -128,6 +137,8 @@ test('owner details show publish state and demote Approve when up to date', asyn
 				pendingCommit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
 			}),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			onToggleLock: () => {},
 		}),
 	)
@@ -146,6 +157,8 @@ test('owner details show publish state and demote Approve when up to date', asyn
 				pendingCommitKnown: false,
 			}),
 			lockInFlight: false,
+			viewerCanPublish: true,
+			viewerCanDelete: true,
 			onToggleLock: () => {},
 		}),
 	)
@@ -180,4 +193,57 @@ test('owner details offer Update public listing when the catalog pin lags', asyn
 	expect(html).toContain(
 		'Publish and promote update the package runtime. The public',
 	)
+})
+
+test('package managers without publish, delete, or adoption permission do not see those controls', async () => {
+	const html = await renderToString(
+		jsx(AccountPackageOwnerDetails, {
+			ownerUsername: 'kentcdodds',
+			packageDetail: packageDetail(),
+			lockInFlight: false,
+			viewerCanPublish: false,
+			viewerCanDelete: false,
+			viewerCanAdoptCommunityFork: false,
+			onToggleLock: () => {},
+		}),
+	)
+	expect(html).not.toContain('data-testid="package-visibility-controls"')
+	expect(html).not.toContain('data-testid="account-package-delete"')
+	expect(html).not.toContain('Delete package')
+	expect(html).toContain('Not listed')
+	expect(html).toContain('Forkable')
+})
+
+test('package settings forwards each server permission independently', async () => {
+	for (const canPublish of [false, true]) {
+		const html = await renderToString(
+			jsx(PackageSettingsRoute, {
+				data: {
+					ok: true,
+					listing: null,
+					ownerProfilePublic: true,
+					loggedIn: true,
+					viewerIsAdmin: false,
+					viewerIsOwner: false,
+					viewerCanManage: true,
+					viewerCanPublish: canPublish,
+					viewerCanDelete: false,
+					viewerCanAdoptCommunityFork: false,
+					forkPrompt: '',
+					viewerInstall: null,
+					readmeContent: null,
+					ownerPackage: packageDetail(),
+					username: 'kentcdodds',
+					kodyId: 'demo-app',
+					isPrivate: false,
+					invocationUrlOrigin: 'https://example.com',
+				},
+			}),
+			'/@kentcdodds/demo-app/settings',
+		)
+		expect(html.includes('data-testid="package-visibility-controls"')).toBe(
+			canPublish,
+		)
+		expect(html).not.toContain('Delete package')
+	}
 })

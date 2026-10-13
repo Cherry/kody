@@ -17,6 +17,15 @@ test('onboarding polls one shared query across steps and pauses while hidden', a
 	await page.goto('/onboarding/step-1')
 	await waitForClientHydration(page)
 	await page.waitForLoadState('networkidle')
+	const chooserCards = page
+		.getByRole('list', {
+			name: 'Choose the agent you want to connect first. You can add others later.',
+		})
+		.getByRole('link')
+	await expect.poll(() => chooserCards.count()).toBeGreaterThan(1)
+	const chooserOrder = await chooserCards.evaluateAll((nodes) =>
+		nodes.map((node) => node.getAttribute('href')),
+	)
 	const reads: Array<string> = []
 	page.on('request', (request) => {
 		if (request.url().includes('/_serverFn/')) reads.push(request.url())
@@ -37,6 +46,11 @@ test('onboarding polls one shared query across steps and pauses while hidden', a
 		await page.waitForLoadState('networkidle')
 	}
 	expect(reads.filter((url) => url === progressUrl)).toHaveLength(1)
+	expect(
+		await chooserCards.evaluateAll((nodes) =>
+			nodes.map((node) => node.getAttribute('href')),
+		),
+	).toEqual(chooserOrder)
 	await page.evaluate(() => {
 		Object.defineProperty(document, 'visibilityState', {
 			configurable: true,
@@ -50,4 +64,46 @@ test('onboarding polls one shared query across steps and pauses while hidden', a
 	})
 	await page.clock.runFor(12_000)
 	expect(reads.filter((url) => url === progressUrl)).toHaveLength(1)
+})
+
+test('onboarding preserves the server-rendered agent order through hydration', async ({
+	page,
+}) => {
+	let hydrationHeld = false
+	let release!: () => void
+	const scripts = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	await page.route('**/*', async (route) => {
+		// Leave head scripts free to run so the HTML parser can reach the body.
+		if (new URL(route.request().url()).pathname.endsWith('/start/client.tsx')) {
+			hydrationHeld = true
+			await scripts
+		}
+		await route.continue()
+	})
+	try {
+		await page.goto('/onboarding/step-1', { waitUntil: 'commit' })
+		const cards = page
+			.getByRole('list', {
+				name: 'Choose the agent you want to connect first. You can add others later.',
+			})
+			.getByRole('link')
+		await expect.poll(() => cards.count()).toBeGreaterThan(1)
+		await expect.poll(() => hydrationHeld).toBe(true)
+		const serverOrder = await cards.evaluateAll((nodes) =>
+			nodes.map((node) => node.getAttribute('href')),
+		)
+		release()
+		await waitForClientHydration(page)
+		await page.waitForLoadState('networkidle')
+		expect(
+			await cards.evaluateAll((nodes) =>
+				nodes.map((node) => node.getAttribute('href')),
+			),
+		).toEqual(serverOrder)
+	} finally {
+		release()
+		await page.unrouteAll({ behavior: 'wait' })
+	}
 })

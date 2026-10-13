@@ -37,9 +37,11 @@ export function SiteFooter(props: SiteFooterProps) {
 					)}
 				</p>
 				<nav aria-label="Footer" css={footerNavCss}>
+					<SiteLink href="/features">Features</SiteLink>
 					<SiteLink href="/community">Community</SiteLink>
 					<SiteLink href="/discord">Discord</SiteLink>
 					<SiteLink href="/docs">Docs</SiteLink>
+					<SiteLink href="/use-cases">Use cases</SiteLink>
 					<SiteLink href="/pricing">Pricing</SiteLink>
 					<SiteLink href="/faq">FAQ</SiteLink>
 					<SiteLink href="/support">Support</SiteLink>
@@ -58,6 +60,10 @@ export function SiteFooter(props: SiteFooterProps) {
 					) : (
 						<SiteLink href={props.loginHref}>Log in</SiteLink>
 					)}
+					<section aria-labelledby="footer-for-heading" css={footerAudienceCss}>
+						<h2 id="footer-for-heading">For</h2>
+						<SiteLink href="/for/business">Business</SiteLink>
+					</section>
 				</nav>
 			</div>
 		</footer>
@@ -152,5 +158,19 @@ const footerNavCss: CSSObject = {
 			minHeight: '44px',
 			padding: '0.55rem 0.75rem',
 		},
+	},
+}
+
+const footerAudienceCss: CSSObject = {
+	gridColumn: '1 / -1',
+	marginTop: '1rem',
+	'& h2': {
+		margin: '0 0 0.5rem',
+		color: colors.text,
+		font: `600 0.92rem/1.4 ${typography.fontFamily}`,
+	},
+	[footerStackMq]: {
+		textAlign: 'center' as const,
+		'& a': { display: 'inline-flex' },
 	},
 }

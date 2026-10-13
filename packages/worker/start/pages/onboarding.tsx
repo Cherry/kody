@@ -22,9 +22,13 @@ import {
 import { resolveOnboardingStep3SelectedAgent } from '#universal/onboarding-agent-ecosystems.ts'
 import {
 	type McpClientKind,
+	type OnboardingAgentChooserPick,
 	onboardingAgentLabel,
 } from '#universal/onboarding-mcp-clients.ts'
-import { resolveOnboardingAgentChooser } from '#client/routes/onboarding-agent-chooser-session.ts'
+import {
+	readRememberedOnboardingAgentChooser,
+	rememberOnboardingAgentChooser,
+} from '#client/routes/onboarding-agent-chooser-session.ts'
 import {
 	readRememberedOnboardingSelectedAgent,
 	rememberOnboardingSelectedAgent,
@@ -50,9 +54,11 @@ import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
 const subscribeHydration = () => () => {}
 export function OnboardingRoute({
 	payload,
+	initialAgentChooser,
 	refresh,
 }: {
 	payload: OnboardingPayload
+	initialAgentChooser: OnboardingAgentChooserPick
 	refresh: () => void
 }) {
 	const router = useRouter()
@@ -63,10 +69,14 @@ export function OnboardingRoute({
 		() => true,
 		() => false,
 	)
-	const agentChooser = useMemo(
-		() => (hydrated ? resolveOnboardingAgentChooser() : null),
-		[hydrated],
+	// SSR and hydration use the same server pick. Later SPA mounts reuse the
+	// remembered order, while progress polls cannot reshuffle this wizard.
+	const [agentChooser] = useState(() =>
+		hydrated
+			? (readRememberedOnboardingAgentChooser() ?? initialAgentChooser)
+			: initialAgentChooser,
 	)
+	useEffect(() => rememberOnboardingAgentChooser(agentChooser), [agentChooser])
 	const storedAgent = useMemo(
 		() => (hydrated ? readRememberedOnboardingSelectedAgent() : null),
 		[hydrated],

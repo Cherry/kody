@@ -1,4 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useRouteContext } from '@tanstack/react-router'
+import { AdminOrgLimitsPanel } from './admin-users-limits.tsx'
+import { AdminUserDestinationPanel } from './admin-users-destination-panel.tsx'
 import { useState } from 'react'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -87,6 +90,7 @@ export type AdminUserDetailProps = {
 }
 export function AdminUserDetail(props: AdminUserDetailProps) {
 	const { selectedUser, actionState, selectedUsage } = props
+	const { actorKey } = useRouteContext({ from: '__root__' })
 	const [markVerifiedArmed, setMarkVerifiedArmed] = useState(false)
 	const isMutating = actionState !== 'idle'
 	const usageMonthsAscending = selectedUsage
@@ -376,6 +380,10 @@ export function AdminUserDetail(props: AdminUserDetailProps) {
 					) : null}
 				</AccountManagementPanel>
 			) : null}
+			<AdminUserDestinationPanel
+				key={`destination-${actorKey}-${selectedUser.stableUserId}`}
+				stableUserId={selectedUser.stableUserId}
+			/>
 			<AccountManagementPanel
 				title="Manage plan"
 				description="Sets the admin grant (users.plan). Ordinary Stripe subscribers keep this as free; their paid tier lives on the subscription plan. The effective plan is the higher of the two."
@@ -427,6 +435,10 @@ export function AdminUserDetail(props: AdminUserDetailProps) {
 				key={selectedUser.stableUserId}
 				stableUserId={selectedUser.stableUserId}
 				onGranted={props.onCreditsGranted}
+			/>
+			<AdminOrgLimitsPanel
+				key={`limits-${actorKey}-${selectedUser.stableUserId}`}
+				orgId={selectedUser.stableUserId}
 			/>
 			<AccountManagementPanel
 				title="Moderation"

@@ -4,7 +4,14 @@ import { type ComponentProps } from 'react'
 import { actionPagePaths } from '../action-pages.ts'
 
 /** Protocol handshakes and non-page endpoints use document navigation. */
-export function SiteLink({ href, children, ...props }: ComponentProps<'a'>) {
+export function SiteLink({
+	href,
+	children,
+	preload,
+	...props
+}: ComponentProps<'a'> & {
+	preload?: false | 'intent' | 'viewport' | 'render'
+}) {
 	const router = useRouter()
 	if (!href?.startsWith('/') || href.startsWith('//')) {
 		return (
@@ -22,7 +29,7 @@ export function SiteLink({ href, children, ...props }: ComponentProps<'a'>) {
 			// Section navigation supplies its own current state for descendants.
 			// Ordinary links should not mark their parent URL as the current page.
 			activeOptions={{ exact: true }}
-			preload={actionPagePaths.has(destination.pathname) ? false : undefined}
+			preload={actionPagePaths.has(destination.pathname) ? false : preload}
 			reloadDocument={
 				destination.pathname.startsWith('/oauth/') || !matchesPage
 			}

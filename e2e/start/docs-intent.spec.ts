@@ -7,31 +7,29 @@ import {
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
 for (const intent of ['hover', 'focus', 'touch'] as const) {
-	test(`docs idle does not fetch the sidebar, ${intent} warms only the chosen article`, async ({
+	test(`docs render warms the sidebar and ${intent} reuses the chosen article`, async ({
 		page,
 	}) => {
 		const reads = collectJsonRequests(page)
-		await page.goto('/docs/memory')
-		await waitForClientHydration(page)
-		await page.waitForLoadState('networkidle')
-		// Count from document startup so eager reads during hydration cannot hide.
-		expect(reads.paths).toEqual([])
-		const link = page
-			.getByRole('navigation', { name: 'Docs' })
-			.first()
-			.getByRole('link', { name: 'Secrets', exact: true })
 		const loaded = page.waitForResponse(
 			(response) =>
 				response.url().includes('/_serverFn/') &&
 				decodeURIComponent(response.url()).includes('"secrets"'),
 		)
-		if (intent === 'hover') await link.hover()
-		else if (intent === 'focus') await link.focus()
-		else await link.dispatchEvent('touchstart')
+		await page.goto('/docs/memory')
+		await waitForClientHydration(page)
 		await (await loaded).finished()
 		await page.waitForLoadState('networkidle')
 		expect(reads.forDoc('secrets')).toHaveLength(1)
-		expect(reads.paths).toHaveLength(1)
+		const link = page
+			.getByRole('navigation', { name: 'Docs' })
+			.first()
+			.getByRole('link', { name: 'Secrets', exact: true })
+		if (intent === 'hover') await link.hover()
+		else if (intent === 'focus') await link.focus()
+		else await link.dispatchEvent('touchstart')
+		await page.waitForLoadState('networkidle')
+		expect(reads.forDoc('secrets')).toHaveLength(1)
 		await observeMainTransitions(page)
 		await link.click()
 		await expect(
@@ -43,16 +41,12 @@ for (const intent of ['hover', 'focus', 'touch'] as const) {
 			toHeading: 'Secrets',
 		})
 		expect(reads.forDoc('secrets')).toHaveLength(1)
-		expect(reads.paths).toHaveLength(1)
 	})
 }
 
-test('a direct docs click without intent keeps its article until the cold read completes', async ({
+test('a docs click during an unfinished render preload keeps its article until the read completes', async ({
 	page,
 }) => {
-	await page.goto('/docs/memory')
-	await waitForClientHydration(page)
-	await page.waitForLoadState('networkidle')
 	let release!: () => void
 	const held = new Promise<void>((resolve) => {
 		release = resolve
@@ -69,6 +63,9 @@ test('a direct docs click without intent keeps its article until the cold read c
 		await route.continue()
 	})
 	try {
+		await page.goto('/docs/memory')
+		await waitForClientHydration(page)
+		await reading
 		await observeMainTransitions(page)
 		// Native click activation without pointer hover or focus prewarming.
 		await page

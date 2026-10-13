@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { loadOnboarding } from '#start/server/onboarding'
 import { loadOnboardingRoute, onboardingQuery } from './onboarding-query.ts'
+import { canonicalOnboardingAgentChooser } from '#universal/onboarding-mcp-clients.ts'
 import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 
 vi.mock('#start/server/onboarding', () => ({ loadOnboarding: vi.fn() }))
@@ -40,7 +41,11 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 	})
 	const options = onboardingQuery('alice', undefined)
 	const read = vi.mocked(loadOnboarding)
-	read.mockResolvedValue({ payload, canonicalBaseUrl: 'https://example.com' })
+	read.mockResolvedValue({
+		payload,
+		canonicalBaseUrl: 'https://example.com',
+		onboardingAgentChooser: canonicalOnboardingAgentChooser(),
+	})
 	const observer = new QueryObserver(client, options)
 	const seen: Array<boolean> = []
 	const unsubscribe = observer.subscribe((result) => {
@@ -64,6 +69,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 		read.mockResolvedValue({
 			payload: { ...payload, hasMcpClient: true },
 			canonicalBaseUrl: 'https://example.com',
+			onboardingAgentChooser: canonicalOnboardingAgentChooser(),
 		})
 		await observer.refetch()
 		await loadOnboardingRoute(
@@ -92,6 +98,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 		read.mockResolvedValue({
 			payload: { ...payload, emailVerified: false },
 			canonicalBaseUrl: 'https://example.com',
+			onboardingAgentChooser: canonicalOnboardingAgentChooser(),
 		})
 		await observer.refetch()
 		await expect(

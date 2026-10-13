@@ -15,6 +15,7 @@ import {
 	fallbackDefaultBranchName,
 } from '#universal/package-files.ts'
 import { AccountPackageOwnerDetails } from './account-package-owner-details.tsx'
+import { PackageCreditAttributionPanel } from './account-usage-where-it-went.tsx'
 import { PackageWebhookSettings } from './package-webhook-settings.tsx'
 export function PackageSettingsRoute({
 	data,
@@ -84,8 +85,16 @@ export function PackageSettingsRoute({
 			>
 				<h2 id="package-owner-details-title">Package details</h2>
 				{message ? <p role="alert">{message}</p> : null}
+				{ownerPackage.creditAttribution ? (
+					<PackageCreditAttributionPanel row={ownerPackage.creditAttribution} />
+				) : null}
 				<AccountPackageOwnerDetails
 					ownerUsername={username}
+					viewerCanPublish={data.viewerCanPublish === true}
+					viewerCanDelete={data.viewerCanDelete === true}
+					viewerCanAdoptCommunityFork={
+						data.viewerCanAdoptCommunityFork === true
+					}
 					packageDetail={{
 						...ownerPackage,
 						lockedAt: optimisticLockedAt ?? null,

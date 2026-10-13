@@ -12,6 +12,9 @@ export type CommunityDetailApiPayload = {
 	viewerIsAdmin: boolean
 	viewerIsOwner: boolean
 	viewerCanManage: boolean
+	viewerCanPublish?: boolean
+	viewerCanDelete?: boolean
+	viewerCanAdoptCommunityFork?: boolean
 	forkPrompt: string
 	viewerInstall: ViewerListingInstall | null
 	readmeContent: string | null

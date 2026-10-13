@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { css } from '@emotion/react'
+import { useState } from 'react'
+import { useRouter } from '@tanstack/react-router'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { buildAdminEmailHtmlPreviewDocument } from '#client/email-html-preview.ts'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
 import { Tab, TabList, TabPanel, Tabs } from '../components/tabs.tsx'
@@ -9,7 +13,10 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import { cardCss } from '#universal/styles/style-primitives.ts'
+import {
+	cardCss,
+	getDangerPillCss,
+} from '#universal/styles/style-primitives.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -56,9 +63,38 @@ export function AdminSystemEmailPage({
 	payload: AdminSystemEmailLoaderData
 	currentHref: string
 }) {
-	const pending = false
-	const message = null
-	const status: string = 'ready'
+	const router = useRouter()
+	const captureSubmitter = useSubmitterScope()
+	const mutation = usePageResponseMutation<AdminSystemEmailLoaderData>(
+		'loadAdminSystemEmail',
+		'/admin/system-email.json',
+	)
+	const [armedId, setArmedId] = useState<string | null>(null)
+	const [message, setMessage] = useState<string | null>(null)
+	const pending = mutation.isPending
+	async function deleteMessage(id: string) {
+		if (pending) return
+		if (armedId !== id) {
+			setArmedId(id)
+			return
+		}
+		const isCurrent = captureSubmitter()
+		setMessage(null)
+		try {
+			await mutation.submit({ action: 'delete', message_id: id })
+			if (!isCurrent()) return
+			setArmedId(null)
+			await router.navigate({ href: '/admin/system-email' })
+		} catch (error) {
+			if (!isCurrent()) return
+			setArmedId(null)
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Unable to delete system email.',
+			)
+		}
+	}
 	const totalPages = data
 		? Math.max(1, Math.ceil(data.total / data.pageSize))
 		: 1
@@ -70,13 +106,9 @@ export function AdminSystemEmailPage({
 				description="Operator-owned inboxes for reserved platform addresses. These messages are not user account data."
 				currentHref={currentHref}
 			/>
-			{status === 'loading' ? (
-				<p css={{ color: colors.textMuted, margin: 0 }}>
-					Loading system email…
-				</p>
-			) : null}
+
 			{message ? (
-				<AccountManagementMessage tone={status === 'error' ? 'error' : 'info'}>
+				<AccountManagementMessage tone="error">
 					{message}
 				</AccountManagementMessage>
 			) : null}
@@ -166,13 +198,29 @@ export function AdminSystemEmailPage({
 											>
 												{selectedMessage.subject || '(no subject)'}
 											</h2>
+											<button
+												type="button"
+												css={getDangerPillCss({ size: 'sm' })}
+												disabled={pending}
+												aria-label={`${armedId === selectedMessage.id ? 'Confirm delete' : 'Delete'} message "${selectedMessage.subject || '(no subject)'}"`}
+												title="Delete this system email message and its attachments"
+												onBlur={() => setArmedId(null)}
+												onClick={() => void deleteMessage(selectedMessage.id)}
+											>
+												{pending
+													? 'Deleting…'
+													: armedId === selectedMessage.id
+														? 'Confirm delete'
+														: 'Delete'}
+											</button>
 											<p
 												css={{
 													margin: 0,
 													color: colors.textMuted,
 												}}
 											>
-												Admin reads of message content are audit logged.
+												Admin reads and deletes of message content are audit
+												logged.
 											</p>
 										</div>
 										<MetadataGrid
