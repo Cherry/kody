@@ -57,7 +57,15 @@ test('workerd network access is public-only by default and keeps the loopback br
 type ProxyRequest = { method: string; url: string; authorization: string | null; body: unknown }
 
 const proxyRequests: Array<ProxyRequest> = []
-let sessionStatus: { status: number; body: unknown } = { status: 200, body: { scopes: [] } }
+let sessionStatus: { status: number; body: unknown } = {
+	status: 200,
+	body: {
+		scopes: ['capability-proxy'],
+		expiresAt: null,
+		features: ['credential-call-map'],
+	},
+}
+let packageGraphStatus: { status: number; body: unknown } | null = null
 let apiUrl = ''
 let server: Server
 
@@ -136,6 +144,10 @@ before(async () => {
 			return
 		}
 		if (request.url === `/${localPackageGraphPath}`) {
+			if (packageGraphStatus) {
+				send(packageGraphStatus.status, packageGraphStatus.body)
+				return
+			}
 			const payload = body as { code?: string; imports?: Array<string> }
 			const imports = payload.imports ?? []
 			if (imports.some((specifier) => specifier.includes('@missing/'))) {
@@ -231,6 +243,7 @@ function reset() {
 			features: ['credential-call-map'],
 		},
 	}
+	packageGraphStatus = null
 }
 
 test('hasSavedPackageImports detects static and dynamic kody:@ imports', () => {
@@ -276,7 +289,7 @@ export default async function main(params) {
 			hello: 'kent',
 			fromPackage: true,
 		})
-		assert.equal(proxyRequests[0]?.url, '/v1/capability-proxy/session')
+		assert.equal(proxyRequests[0]?.url, `/${localPackageGraphPath}`)
 		assert.equal(
 			proxyRequests.some((request) => request.url === `/${localPackageGraphPath}`),
 			true,
@@ -430,13 +443,12 @@ export default async function main(params) {
 		})
 		assert.deepEqual(structured.logs, ['hello kent', '[warn] careful'])
 		assert.equal(structured.conversationId, 'conv-local')
-		assert.equal(proxyRequests[0]?.url, '/v1/capability-proxy/session')
-		assert.equal(proxyRequests[1]?.url, `/${localPackageGraphPath}`)
-		assert.equal(proxyRequests.length, 6)
+		assert.equal(proxyRequests[0]?.url, `/${localPackageGraphPath}`)
+		assert.equal(proxyRequests.length, 5)
 		for (const request of proxyRequests) {
 			assert.equal(request.authorization, `Bearer ${goodToken}`)
 		}
-		assert.deepEqual(proxyRequests[2]?.body, {
+		assert.deepEqual(proxyRequests[1]?.body, {
 			path: ['kody', 'emailSend'],
 			args: [{ to: 'kent' }],
 			conversationId: 'conv-local',
@@ -783,9 +795,14 @@ test('runLocalExecute stops before starting workerd when the token or flag is re
 				apiUrl,
 				workerdPath: neverRuns,
 			}),
-		/rejected the API token/,
+		(error: Error) => {
+			assert.match(error.message, /rejected the API token \(expired, revoked, or malformed\)/)
+			assert.match(error.message, /Mint a fresh scoped token/)
+			assert.match(error.message, /--token or KODY_API_TOKEN/)
+			return true
+		},
 	)
-	sessionStatus = {
+	packageGraphStatus = {
 		status: 403,
 		body: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
 	}
@@ -799,7 +816,27 @@ test('runLocalExecute stops before starting workerd when the token or flag is re
 			}),
 		/feature flag `local-execute`/,
 	)
-	assert.ok(proxyRequests.every((request) => request.url === '/v1/capability-proxy/session'))
+	packageGraphStatus = {
+		status: 403,
+		body: { error: { code: 'forbidden', message: 'token cannot execute' } },
+	}
+	await assert.rejects(
+		() =>
+			runLocalExecute({
+				code: 'export default () => 1',
+				token: goodToken,
+				apiUrl,
+				workerdPath: neverRuns,
+			}),
+		(error: Error) => {
+			assert.match(error.message, /not allowed to use CapabilityProxy \(forbidden\)/)
+			assert.match(error.message, /cliCredentialBootstrap|auth bootstrap|tokenCreate/)
+			assert.equal(error.message.includes('saved package import'), false)
+			return true
+		},
+	)
+	assert.equal(proxyRequests.length, 3)
+	assert.ok(proxyRequests.every((request) => request.url === `/${localPackageGraphPath}`))
 })
 
 test(
