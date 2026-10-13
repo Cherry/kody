@@ -897,6 +897,7 @@ test('account secrets payload includes all packages and package titles and allow
 		hasApp,
 		hidden: false,
 		isPrivate: false,
+		isInternetVisible: false,
 		createdAt: epoch,
 		updatedAt: epoch,
 	})

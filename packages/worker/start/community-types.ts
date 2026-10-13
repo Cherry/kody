@@ -20,6 +20,7 @@ export type CommunityDetailApiPayload = {
 	imageBaseHref?: string | null
 	ownerPackage: AccountPackageDetail | null
 	hasPackage?: boolean
+	packageShaped?: boolean
 	username: string
 	kodyId: string
 	isPrivate: boolean

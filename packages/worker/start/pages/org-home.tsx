@@ -155,7 +155,7 @@ function renderOrgHomeMain(input: {
 							action: (
 								<div css={stepActionsCss}>
 									<SiteLink
-										href={orgResourcePath(input.slug, 'packages')}
+										href={orgResourcePath(input.slug, 'repositories')}
 										css={getGhostButtonCss({ size: 'sm' })}
 									>
 										Repositories

@@ -34,12 +34,15 @@ const personScopedAccountRoutes: Record<string, string> = {
 	accountBillingCancellationFeedbackPost: 'feedback from the person',
 	accountMcpServerLogo: 'logos are stored on the signup org',
 	accountMcpServersOauthCallback: 'OAuth state carries the server owner',
-	accountPackagesApi: 'no per-package authz; teams use /@slug/-/packages.json',
+	accountPackagesApi:
+		'no per-package authz; teams use /@slug/-/repositories.json',
 	accountPackagesApiPost:
-		'no per-package authz; teams use /@slug/-/packages.json',
+		'no per-package authz; teams use /@slug/-/repositories.json',
 	accountPackageDetail: 'package authz, not request org',
 	accountPackageApprovePublish: 'package authz, not request org',
 	accountPackageApprovePublishApi: 'package authz, not request org',
+	accountPackageApproveCapabilities: 'package authz, not request org',
+	accountPackageApproveCapabilitiesApi: 'package authz, not request org',
 	accountPackageFiles: 'package authz, not request org',
 	accountPackageFilesApi: 'package authz, not request org',
 	accountWebhooksApproveApplyApi: 'approval link carries the webhook owner',
@@ -97,13 +100,21 @@ function orgBoundRoutes(entries: Array<RouteEntry>) {
 	return entries.filter(({ href }) => isOrgBoundPath(href))
 }
 
+/** Legacy `/@slug/-/packages` (+ `.json`) only 301 to `/repositories`. */
+const legacyOrgListRedirectRoutes = new Set(['orgPackages', 'orgPackagesApi'])
+
 test('every org-scoped route in the route table is bound to its org', () => {
 	const entries = routeEntries()
 	const orgRoutes = entries.filter(({ source }) =>
 		source.startsWith('/@:orgSlug/'),
 	)
 	expect(
-		orgRoutes.filter(({ href }) => !isOrgBoundPath(href)).map((r) => r.name),
+		orgRoutes
+			.filter(
+				({ name, href }) =>
+					!isOrgBoundPath(href) && !legacyOrgListRedirectRoutes.has(name),
+			)
+			.map((r) => r.name),
 	).toEqual([])
 
 	const accountRoutes = accountRoutesNamedLikeOrgSections(entries)

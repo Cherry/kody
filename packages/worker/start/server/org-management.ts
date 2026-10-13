@@ -273,7 +273,7 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 export const loadOrgRepositories = createServerFn({ method: 'GET' })
 	.validator(slugInput.extend({ search: z.string().default('') }))
 	.handler(async ({ data }) => {
-		const input = await orgContext(data.slug, 'packages')
+		const input = await orgContext(data.slug, 'repositories')
 		const [
 			{ loadRequestOrgResolution, orgSectionDenial },
 			{ personalOrgId },
@@ -290,7 +290,10 @@ export const loadOrgRepositories = createServerFn({ method: 'GET' })
 			input.env,
 			input.user.mcpUser.userId,
 		)
-		if (typeof binding === 'string' || orgSectionDenial(binding, 'packages'))
+		if (
+			typeof binding === 'string' ||
+			orgSectionDenial(binding, 'repositories')
+		)
 			throw notFound()
 		const url = new URL(input.request.url)
 		const search = new URLSearchParams(data.search)

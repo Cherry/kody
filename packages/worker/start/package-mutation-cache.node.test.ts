@@ -87,3 +87,73 @@ test('a lost visibility response invalidates affected reads even after the form 
 	)
 	client.clear()
 })
+
+test('capability approval submits the reviewed fingerprint to its captured canonical API and reconciles an uncertain response', async () => {
+	const client = new QueryClient()
+	const key = [
+		'page',
+		'owner',
+		'loadPackage',
+		{ username: 'team', kodyId: 'example', page: 'settings' },
+	]
+	client.setQueryData(key, {
+		kind: 'page',
+		data: { ownerPackage: { id: 'pkg' } },
+	})
+	const request = vi.fn().mockRejectedValue(new Error('Response lost'))
+	vi.stubGlobal('fetch', request)
+	const observer = new MutationObserver(client, packageMutationOptions(client))
+	await expect(
+		observer.mutate({
+			actorKey: 'owner',
+			packageId: 'pkg',
+			apiPath: '/@team/example/approve-capabilities.json',
+			body: { action: 'approve-capabilities', fingerprint: 'reviewed' },
+		}),
+	).rejects.toThrow('Response lost')
+	expect(request).toHaveBeenCalledWith(
+		'/@team/example/approve-capabilities.json',
+		expect.objectContaining({
+			body: JSON.stringify({
+				action: 'approve-capabilities',
+				fingerprint: 'reviewed',
+				packageId: 'pkg',
+			}),
+		}),
+	)
+	expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+	client.clear()
+})
+
+test('internet-visible approval-required failures preserve the review URL', async () => {
+	vi.stubGlobal(
+		'fetch',
+		vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					ok: false,
+					error: 'Review required',
+					approvalUrl: '/@team/example/approve-capabilities',
+				}),
+				{ status: 409 },
+			),
+		),
+	)
+	const client = new QueryClient()
+	const observer = new MutationObserver(client, packageMutationOptions(client))
+	await expect(
+		observer.mutate({
+			actorKey: 'owner',
+			packageId: 'pkg',
+			body: {
+				action: 'set-internet-visible',
+				internetVisible: true,
+				confirmName: 'example',
+			},
+		}),
+	).rejects.toMatchObject({
+		message: 'Review required',
+		approvalUrl: '/@team/example/approve-capabilities',
+	})
+	client.clear()
+})

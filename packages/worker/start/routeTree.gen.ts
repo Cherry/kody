@@ -116,6 +116,7 @@ import { Route as AtChar123orgSlugChar125MembersRouteImport } from './routes/@{$
 import { Route as AtChar123orgSlugChar125MemoriesRouteImport } from './routes/@{$orgSlug}_.-.memories'
 import { Route as AtChar123orgSlugChar125OverviewRouteImport } from './routes/@{$orgSlug}_.-.overview'
 import { Route as AtChar123orgSlugChar125PackagesRouteImport } from './routes/@{$orgSlug}_.-.packages'
+import { Route as AtChar123orgSlugChar125RepositoriesRouteImport } from './routes/@{$orgSlug}_.-.repositories'
 import { Route as AtChar123orgSlugChar125SecretProvidersRouteImport } from './routes/@{$orgSlug}_.-.secret-providers'
 import { Route as AtChar123orgSlugChar125SecretsRouteImport } from './routes/@{$orgSlug}_.-.secrets'
 import { Route as AtChar123orgSlugChar125SettingsRouteImport } from './routes/@{$orgSlug}_.-.settings'
@@ -124,6 +125,7 @@ import { Route as AtChar123orgSlugChar125ValuesRouteImport } from './routes/@{$o
 import { Route as AtChar123orgSlugChar125WaitingRouteImport } from './routes/@{$orgSlug}_.-.waiting'
 import { Route as AtChar123orgSlugChar125WebhooksRouteImport } from './routes/@{$orgSlug}_.-.webhooks'
 import { Route as AtChar123orgSlugChar125WorkflowsRouteImport } from './routes/@{$orgSlug}_.-.workflows'
+import { Route as AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport } from './routes/@{$username}_.$kodyId_.approve-capabilities'
 import { Route as AtChar123usernameChar125KodyIdApprovePublishRouteImport } from './routes/@{$username}_.$kodyId_.approve-publish'
 import { Route as AtChar123usernameChar125KodyIdSettingsRouteImport } from './routes/@{$username}_.$kodyId_.settings'
 import { Route as AccountActivityRunIdRouteImport } from './routes/account_.activity_.$runId'
@@ -171,6 +173,7 @@ import { Route as AtChar123orgSlugChar125WorkflowsWorkflowIdRouteImport } from '
 import { Route as AtChar123usernameChar125KodyIdFilesSplatRouteImport } from './routes/@{$username}_.$kodyId_.files.$'
 import { Route as AccountConnectionsNewAgentRouteImport } from './routes/account_.connections_.new_.$agent'
 import { Route as AccountIntegrationsAppsAppSlugRouteImport } from './routes/account_.integrations_.apps.$appSlug'
+import { Route as AccountPackagesPackageIdApproveCapabilitiesRouteImport } from './routes/account_.packages.$packageId_.approve-capabilities'
 import { Route as AccountPackagesPackageIdApprovePublishRouteImport } from './routes/account_.packages.$packageId_.approve-publish'
 import { Route as AccountSecretsUserSecretNameRouteImport } from './routes/account_.secrets_.user.$secretName'
 import { Route as CommunityListingIdFilesSplatRouteImport } from './routes/community_.$listingId.files.$'
@@ -741,6 +744,12 @@ const AtChar123orgSlugChar125PackagesRoute =
     path: '/@{$orgSlug}/-/packages',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125RepositoriesRoute =
+  AtChar123orgSlugChar125RepositoriesRouteImport.update({
+    id: '/@{$orgSlug}_/-/repositories',
+    path: '/@{$orgSlug}/-/repositories',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125SecretProvidersRoute =
   AtChar123orgSlugChar125SecretProvidersRouteImport.update({
     id: '/@{$orgSlug}_/-/secret-providers',
@@ -787,6 +796,12 @@ const AtChar123orgSlugChar125WorkflowsRoute =
   AtChar123orgSlugChar125WorkflowsRouteImport.update({
     id: '/@{$orgSlug}_/-/workflows',
     path: '/@{$orgSlug}/-/workflows',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123usernameChar125KodyIdApproveCapabilitiesRoute =
+  AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport.update({
+    id: '/@{$username}_/$kodyId_/approve-capabilities',
+    path: '/@{$username}/$kodyId/approve-capabilities',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123usernameChar125KodyIdApprovePublishRoute =
@@ -1054,6 +1069,12 @@ const AccountIntegrationsAppsAppSlugRoute =
     path: '/account/integrations/apps/$appSlug',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AccountPackagesPackageIdApproveCapabilitiesRoute =
+  AccountPackagesPackageIdApproveCapabilitiesRouteImport.update({
+    id: '/account_/packages/$packageId_/approve-capabilities',
+    path: '/account/packages/$packageId/approve-capabilities',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AccountPackagesPackageIdApprovePublishRoute =
   AccountPackagesPackageIdApprovePublishRouteImport.update({
     id: '/account_/packages/$packageId_/approve-publish',
@@ -1241,6 +1262,7 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/memories': typeof AtChar123orgSlugChar125MemoriesRoute
   '/@{$orgSlug}/-/overview': typeof AtChar123orgSlugChar125OverviewRoute
   '/@{$orgSlug}/-/packages': typeof AtChar123orgSlugChar125PackagesRoute
+  '/@{$orgSlug}/-/repositories': typeof AtChar123orgSlugChar125RepositoriesRoute
   '/@{$orgSlug}/-/secret-providers': typeof AtChar123orgSlugChar125SecretProvidersRoute
   '/@{$orgSlug}/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
@@ -1249,6 +1271,7 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
+  '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
@@ -1296,6 +1319,7 @@ export interface FileRoutesByFullPath {
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
@@ -1417,6 +1441,7 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/memories': typeof AtChar123orgSlugChar125MemoriesRoute
   '/@{$orgSlug}/-/overview': typeof AtChar123orgSlugChar125OverviewRoute
   '/@{$orgSlug}/-/packages': typeof AtChar123orgSlugChar125PackagesRoute
+  '/@{$orgSlug}/-/repositories': typeof AtChar123orgSlugChar125RepositoriesRoute
   '/@{$orgSlug}/-/secret-providers': typeof AtChar123orgSlugChar125SecretProvidersRoute
   '/@{$orgSlug}/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
@@ -1425,6 +1450,7 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
+  '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
@@ -1472,6 +1498,7 @@ export interface FileRoutesByTo {
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
@@ -1595,6 +1622,7 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/memories': typeof AtChar123orgSlugChar125MemoriesRoute
   '/@{$orgSlug}_/-/overview': typeof AtChar123orgSlugChar125OverviewRoute
   '/@{$orgSlug}_/-/packages': typeof AtChar123orgSlugChar125PackagesRoute
+  '/@{$orgSlug}_/-/repositories': typeof AtChar123orgSlugChar125RepositoriesRoute
   '/@{$orgSlug}_/-/secret-providers': typeof AtChar123orgSlugChar125SecretProvidersRoute
   '/@{$orgSlug}_/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}_/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
@@ -1603,6 +1631,7 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}_/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}_/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
+  '/@{$username}_/$kodyId_/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}_/$kodyId_/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   '/@{$username}_/$kodyId_/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/account_/activity_/$runId': typeof AccountActivityRunIdRoute
@@ -1650,6 +1679,7 @@ export interface FileRoutesById {
   '/@{$username}_/$kodyId_/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
   '/account_/connections_/new_/$agent': typeof AccountConnectionsNewAgentRoute
   '/account_/integrations_/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account_/packages/$packageId_/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account_/packages/$packageId_/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account_/secrets_/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community_/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
@@ -1774,6 +1804,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/memories'
     | '/@{$orgSlug}/-/overview'
     | '/@{$orgSlug}/-/packages'
+    | '/@{$orgSlug}/-/repositories'
     | '/@{$orgSlug}/-/secret-providers'
     | '/@{$orgSlug}/-/secrets'
     | '/@{$orgSlug}/-/settings'
@@ -1782,6 +1813,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
+    | '/@{$username}/$kodyId/approve-capabilities'
     | '/@{$username}/$kodyId/approve-publish'
     | '/@{$username}/$kodyId/settings'
     | '/account/activity/$runId'
@@ -1829,6 +1861,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/files/$'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
+    | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
@@ -1950,6 +1983,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/memories'
     | '/@{$orgSlug}/-/overview'
     | '/@{$orgSlug}/-/packages'
+    | '/@{$orgSlug}/-/repositories'
     | '/@{$orgSlug}/-/secret-providers'
     | '/@{$orgSlug}/-/secrets'
     | '/@{$orgSlug}/-/settings'
@@ -1958,6 +1992,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
+    | '/@{$username}/$kodyId/approve-capabilities'
     | '/@{$username}/$kodyId/approve-publish'
     | '/@{$username}/$kodyId/settings'
     | '/account/activity/$runId'
@@ -2005,6 +2040,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/files/$'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
+    | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
@@ -2127,6 +2163,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/memories'
     | '/@{$orgSlug}_/-/overview'
     | '/@{$orgSlug}_/-/packages'
+    | '/@{$orgSlug}_/-/repositories'
     | '/@{$orgSlug}_/-/secret-providers'
     | '/@{$orgSlug}_/-/secrets'
     | '/@{$orgSlug}_/-/settings'
@@ -2135,6 +2172,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/waiting'
     | '/@{$orgSlug}_/-/webhooks'
     | '/@{$orgSlug}_/-/workflows'
+    | '/@{$username}_/$kodyId_/approve-capabilities'
     | '/@{$username}_/$kodyId_/approve-publish'
     | '/@{$username}_/$kodyId_/settings'
     | '/account_/activity_/$runId'
@@ -2182,6 +2220,7 @@ export interface FileRouteTypes {
     | '/@{$username}_/$kodyId_/files/$'
     | '/account_/connections_/new_/$agent'
     | '/account_/integrations_/apps/$appSlug'
+    | '/account_/packages/$packageId_/approve-capabilities'
     | '/account_/packages/$packageId_/approve-publish'
     | '/account_/secrets_/user/$secretName'
     | '/community_/$listingId/files/$'
@@ -2301,6 +2340,7 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125MemoriesRoute: typeof AtChar123orgSlugChar125MemoriesRoute
   AtChar123orgSlugChar125OverviewRoute: typeof AtChar123orgSlugChar125OverviewRoute
   AtChar123orgSlugChar125PackagesRoute: typeof AtChar123orgSlugChar125PackagesRoute
+  AtChar123orgSlugChar125RepositoriesRoute: typeof AtChar123orgSlugChar125RepositoriesRoute
   AtChar123orgSlugChar125SecretProvidersRoute: typeof AtChar123orgSlugChar125SecretProvidersRoute
   AtChar123orgSlugChar125SecretsRoute: typeof AtChar123orgSlugChar125SecretsRoute
   AtChar123orgSlugChar125SettingsRoute: typeof AtChar123orgSlugChar125SettingsRoute
@@ -2309,6 +2349,7 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125WaitingRoute: typeof AtChar123orgSlugChar125WaitingRoute
   AtChar123orgSlugChar125WebhooksRoute: typeof AtChar123orgSlugChar125WebhooksRoute
   AtChar123orgSlugChar125WorkflowsRoute: typeof AtChar123orgSlugChar125WorkflowsRoute
+  AtChar123usernameChar125KodyIdApproveCapabilitiesRoute: typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   AtChar123usernameChar125KodyIdApprovePublishRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRoute
   AtChar123usernameChar125KodyIdSettingsRoute: typeof AtChar123usernameChar125KodyIdSettingsRoute
   AccountActivityRunIdRoute: typeof AccountActivityRunIdRoute
@@ -2353,6 +2394,7 @@ export interface RootRouteChildren {
   AtChar123usernameChar125KodyIdFilesSplatRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRoute
   AccountConnectionsNewAgentRoute: typeof AccountConnectionsNewAgentRoute
   AccountIntegrationsAppsAppSlugRoute: typeof AccountIntegrationsAppsAppSlugRoute
+  AccountPackagesPackageIdApproveCapabilitiesRoute: typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   AccountPackagesPackageIdApprovePublishRoute: typeof AccountPackagesPackageIdApprovePublishRoute
   AccountSecretsUserSecretNameRoute: typeof AccountSecretsUserSecretNameRoute
   AtChar123orgSlugChar125ConnectionsNewAgentRoute: typeof AtChar123orgSlugChar125ConnectionsNewAgentRoute
@@ -3117,6 +3159,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125PackagesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/repositories': {
+      id: '/@{$orgSlug}_/-/repositories'
+      path: '/@{$orgSlug}/-/repositories'
+      fullPath: '/@{$orgSlug}/-/repositories'
+      preLoaderRoute: typeof AtChar123orgSlugChar125RepositoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/secret-providers': {
       id: '/@{$orgSlug}_/-/secret-providers'
       path: '/@{$orgSlug}/-/secret-providers'
@@ -3171,6 +3220,13 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/workflows'
       fullPath: '/@{$orgSlug}/-/workflows'
       preLoaderRoute: typeof AtChar123orgSlugChar125WorkflowsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$username}_/$kodyId_/approve-capabilities': {
+      id: '/@{$username}_/$kodyId_/approve-capabilities'
+      path: '/@{$username}/$kodyId/approve-capabilities'
+      fullPath: '/@{$username}/$kodyId/approve-capabilities'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$username}_/$kodyId_/approve-publish': {
@@ -3502,6 +3558,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountIntegrationsAppsAppSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account_/packages/$packageId_/approve-capabilities': {
+      id: '/account_/packages/$packageId_/approve-capabilities'
+      path: '/account/packages/$packageId/approve-capabilities'
+      fullPath: '/account/packages/$packageId/approve-capabilities'
+      preLoaderRoute: typeof AccountPackagesPackageIdApproveCapabilitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/packages/$packageId_/approve-publish': {
       id: '/account_/packages/$packageId_/approve-publish'
       path: '/account/packages/$packageId/approve-publish'
@@ -3754,6 +3817,8 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125MemoriesRoute: AtChar123orgSlugChar125MemoriesRoute,
   AtChar123orgSlugChar125OverviewRoute: AtChar123orgSlugChar125OverviewRoute,
   AtChar123orgSlugChar125PackagesRoute: AtChar123orgSlugChar125PackagesRoute,
+  AtChar123orgSlugChar125RepositoriesRoute:
+    AtChar123orgSlugChar125RepositoriesRoute,
   AtChar123orgSlugChar125SecretProvidersRoute:
     AtChar123orgSlugChar125SecretProvidersRoute,
   AtChar123orgSlugChar125SecretsRoute: AtChar123orgSlugChar125SecretsRoute,
@@ -3763,6 +3828,8 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125WaitingRoute: AtChar123orgSlugChar125WaitingRoute,
   AtChar123orgSlugChar125WebhooksRoute: AtChar123orgSlugChar125WebhooksRoute,
   AtChar123orgSlugChar125WorkflowsRoute: AtChar123orgSlugChar125WorkflowsRoute,
+  AtChar123usernameChar125KodyIdApproveCapabilitiesRoute:
+    AtChar123usernameChar125KodyIdApproveCapabilitiesRoute,
   AtChar123usernameChar125KodyIdApprovePublishRoute:
     AtChar123usernameChar125KodyIdApprovePublishRoute,
   AtChar123usernameChar125KodyIdSettingsRoute:
@@ -3826,6 +3893,8 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123usernameChar125KodyIdFilesSplatRoute,
   AccountConnectionsNewAgentRoute: AccountConnectionsNewAgentRoute,
   AccountIntegrationsAppsAppSlugRoute: AccountIntegrationsAppsAppSlugRoute,
+  AccountPackagesPackageIdApproveCapabilitiesRoute:
+    AccountPackagesPackageIdApproveCapabilitiesRoute,
   AccountPackagesPackageIdApprovePublishRoute:
     AccountPackagesPackageIdApprovePublishRoute,
   AccountSecretsUserSecretNameRoute: AccountSecretsUserSecretNameRoute,

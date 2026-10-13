@@ -2,14 +2,20 @@ import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 	.validator(
-		(data: { packageId: string; approval?: boolean; search: string }) => {
+		(data: {
+			packageId: string
+			approval?: 'publish' | 'capabilities'
+			search: string
+		}) => {
 			if (
 				!data ||
 				typeof data.packageId !== 'string' ||
 				!data.packageId ||
 				typeof data.search !== 'string' ||
 				(data.search !== '' && !data.search.startsWith('?')) ||
-				(data.approval !== undefined && typeof data.approval !== 'boolean')
+				(data.approval !== undefined &&
+					data.approval !== 'publish' &&
+					data.approval !== 'capabilities')
 			)
 				throw notFound()
 			return data
@@ -41,7 +47,7 @@ export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const path =
 			routes.accountPackageDetail.href({ packageId: data.packageId }) +
-			(data.approval ? '/approve-publish' : '')
+			(data.approval ? `/approve-${data.approval}` : '')
 		const user = await requireAuthenticatedPageUser(getRequest(), bindings, {
 			redirectTo: path + data.search,
 		})
@@ -82,7 +88,7 @@ export const loadAccountPackageAlias = createServerFn({ method: 'GET' })
 					username: binding?.org.slug ?? user.username,
 					kodyId: saved.kodyId,
 				}) +
-				(data.approval ? '/approve-publish' : '') +
+				(data.approval ? `/approve-${data.approval}` : '') +
 				data.search,
 			statusCode: 302,
 		})

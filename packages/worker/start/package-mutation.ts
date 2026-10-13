@@ -28,7 +28,7 @@ export function usePackageMutation(packageId: string) {
 		pendingLockedAt: pending.length
 			? new Date(pending.at(-1)!.submittedAt).toISOString()
 			: null,
-		submit: (body: Record<string, unknown>) =>
-			mutation.mutateAsync({ body, actorKey, packageId }),
+		submit: (body: Record<string, unknown>, apiPath?: string) =>
+			mutation.mutateAsync({ body, actorKey, packageId, apiPath }),
 	}
 }

@@ -83,7 +83,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(wide.panel.getByText(/^Manage /)).toHaveCount(0)
 	await expect(page.getByTestId('org-home-nav-workspace')).toHaveAttribute(
 		'href',
-		`/@pinned-${runId}/-/packages`,
+		`/@pinned-${runId}/-/repositories`,
 	)
 	// No invites waiting, so no Invites row; the person's own links follow.
 	await expect(wide.panel.getByTestId('org-switcher-invites')).toHaveCount(0)
@@ -205,23 +205,25 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 
 	// Repositories list what the team org owns (nothing yet).
 	await rail.getByRole('link', { name: 'Repositories', exact: true }).click()
-	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/packages$`))
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/repositories$`))
 	await expect(page.getByTestId('workspace-repositories')).toBeVisible()
 	await expect(page.getByTestId('profile-packages-empty')).toBeVisible()
 	// Searching inside a workspace must retain its authorization scope.
 	await page.getByTestId('profile-repository-search').fill('workspace-search')
 	await expect(page).toHaveURL(
-		new RegExp(`/@pinned-${runId}/-/packages\\?q=workspace-search$`),
+		new RegExp(`/@pinned-${runId}/-/repositories\\?q=workspace-search$`),
 	)
 	await expect(page.getByTestId('workspace-repositories')).toBeVisible()
 	await page.getByTestId('profile-repository-search').fill('')
-	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/packages$`))
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/repositories$`))
 	const filterLinks = page.getByTestId('profile-package-filters').locator('a')
 	expect(await filterLinks.count()).toBeGreaterThan(0)
 	for (const href of await filterLinks.evaluateAll((links) =>
 		links.map((link) => link.getAttribute('href')),
 	)) {
-		expect(href).toMatch(new RegExp(`^/@pinned-${runId}/-/packages(?:\\?|$)`))
+		expect(href).toMatch(
+			new RegExp(`^/@pinned-${runId}/-/repositories(?:\\?|$)`),
+		)
 	}
 
 	await expect(
@@ -230,10 +232,15 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(page.getByTestId('not-found-page')).toHaveCount(0)
 
 	// A full load of each team page is a 200, not the old 404.
-	for (const section of ['connections', 'packages']) {
+	for (const section of ['connections', 'repositories']) {
 		const response = await page.goto(`/@pinned-${runId}/-/${section}`)
 		expect(response?.status(), section).toBe(200)
 	}
+	const legacy = await page.goto(`/@pinned-${runId}/-/packages?q=legacy`)
+	expect(legacy?.status(), 'legacy /-/packages').toBe(200)
+	await expect(page).toHaveURL(
+		new RegExp(`/@pinned-${runId}/-/repositories\\?q=legacy$`),
+	)
 })
 
 test('switching orgs from Secrets loads the destination org, not the one you left', async ({

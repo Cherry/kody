@@ -27,6 +27,7 @@ const mockModule = vi.hoisted(() => {
 		hasSkills: false,
 		hidden: false,
 		isPrivate: false,
+		isInternetVisible: false,
 		lockedAt: null,
 		createdAt: new Date(0).toISOString(),
 		updatedAt: new Date(0).toISOString(),
@@ -434,7 +435,7 @@ test('native package alias redirects accessible team packages to their owning or
 	vi.mocked(viewerCanManageSavedPackage).mockResolvedValueOnce(false)
 	await expect(
 		loadAccountPackageAlias({
-			data: { packageId: 'pkg-1', approval: true, search: '' },
+			data: { packageId: 'pkg-1', approval: 'publish', search: '' },
 		}),
 	).rejects.toMatchObject({ isNotFound: true })
 	vi.mocked(viewerCanReadSavedPackage).mockResolvedValueOnce(false)

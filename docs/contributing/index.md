@@ -44,7 +44,9 @@ style, tests, MCP capabilities, and runtime architecture.
   Validate unit-job timing, ship-pr review-bot sort)
 - Local CLI execute (when, command, failure):
   [guide:local_execute](../guides/local-execute.md) and
-  [prefer-local-cli-execute](../../.agents/skills/prefer-local-cli-execute/SKILL.md)
+  [prefer-local-cli-execute](../../.agents/skills/prefer-local-cli-execute/SKILL.md).
+  Streaming placeholder-fill hop:
+  [CLI streaming gateway-fetch contract](./contracts/cli-streaming-gateway-fetch.md)
 - PR system recaps (visual plan/recap blocks in PR descriptions):
   [visual-recap skill](../../.agents/skills/visual-recap/SKILL.md)
 
@@ -57,7 +59,6 @@ style, tests, MCP capabilities, and runtime architecture.
   [dependency overrides](./dependency-overrides.md)
   (`typescript/no-explicit-any`, `TODO`/`FIXME`/`HACK`, file-size ratchet,
   vanished-copy `kody-custom/no-tautological-absence`, knip)
-- [Web app rendering and server state](./tanstack-start.md)
 - [Web app rendering and server state](./tanstack-start.md)
 - [No-flash navigation](./no-flash-navigation.md) (load-before-commit router,
   `createRouteData` keeps the previous page until the next one is ready)
@@ -82,6 +83,8 @@ style, tests, MCP capabilities, and runtime architecture.
   (stamp/grant model when imports resolve only in the caller's org)
 - [Package codemods](./package-codemods.md)
 - [Public packages](./community-packages.md)
+- [Internet-visible packages](./internet-visible-packages.md) (forkable vs
+  internet-visible; capability approval; accepted ADR 0069)
 - [Inbound webhooks](../use/webhooks.md) (external HTTP knock)
 - [Adding capabilities](./adding-capabilities.md)
 - [Search entity plugins](./search-entity-plugins.md) (plugin module + registry,
@@ -112,6 +115,10 @@ style, tests, MCP capabilities, and runtime architecture.
 
 - [Architecture](./architecture/index.md) — production worker fleet, request
   lifecycle, [authorization](./architecture/authorization.md) (RBAC)
+- [CLI streaming gateway-fetch contract](./contracts/cli-streaming-gateway-fetch.md)
+  — native Open API hop for local `kody.gatewayFetchStream`
+- [Direct-upload host token](./design-notes/direct-upload-host-token.md) —
+  two-way door design note; gateway remains the default
 
 Served usage docs are [`docs/guides/`](../guides/README.md) (`guide:{id}`,
 [kody.codes/docs](https://kody.codes/docs)). MCP field reference is

@@ -9,6 +9,7 @@ import { invalidatePageResources } from './page-invalidation-cache.ts'
 type PackagePage = Awaited<ReturnType<typeof loadPackage>>
 type PackageResult = AccountPackagesLoaderData & {
 	error?: string
+	approvalUrl?: string
 	deleted?: boolean
 }
 export function packageMutationOptions(client: QueryClient) {
@@ -28,8 +29,9 @@ export function packageMutationOptions(client: QueryClient) {
 			body: Record<string, unknown>
 			actorKey: string | null
 			packageId: string
+			apiPath?: string
 		}) => {
-			const response = await fetch('/account/packages.json', {
+			const response = await fetch(input.apiPath ?? '/account/packages.json', {
 				method: 'POST',
 				credentials: 'include',
 				headers: {
@@ -42,11 +44,14 @@ export function packageMutationOptions(client: QueryClient) {
 				.json()
 				.catch(() => null)) as PackageResult | null
 			if (!response.ok || !payload?.ok)
-				throw new Error(
-					payload?.error ||
-						(response.status === 401
-							? 'Please sign in again.'
-							: 'Unable to update this package.'),
+				throw Object.assign(
+					new Error(
+						payload?.error ||
+							(response.status === 401
+								? 'Please sign in again.'
+								: 'Unable to update this package.'),
+					),
+					{ approvalUrl: payload?.approvalUrl },
 				)
 			return payload
 		},

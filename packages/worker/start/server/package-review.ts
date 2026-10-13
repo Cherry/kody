@@ -42,7 +42,10 @@ async function review(data: ReturnType<typeof validate>) {
 	)
 	if (data.commit) url.searchParams.set('commit', data.commit)
 	const request = new Request(url, { headers: original.headers })
-	const user = await requireAuthenticatedPageUser(request, bindings)
+	setResponseHeader('Cache-Control', 'private, no-store')
+	const user = await requireAuthenticatedPageUser(original, bindings, {
+		redirectTo: `${url.pathname}${url.search}`,
+	})
 	if (user instanceof Response) {
 		const cookies = user.headers.getSetCookie()
 		if (cookies.length) setResponseHeader('Set-Cookie', cookies)
@@ -53,7 +56,7 @@ async function review(data: ReturnType<typeof validate>) {
 	}
 	const page = await loadPackagePage({
 		env: bindings,
-		request,
+		request: original,
 		username: data.username,
 		kodyId: data.kodyId,
 	})

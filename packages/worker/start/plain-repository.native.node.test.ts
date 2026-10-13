@@ -13,6 +13,7 @@ const ownerPackage: AccountPackageDetail = {
 	description: 'Notes',
 	tags: [],
 	hasApp: false,
+	isInternetVisible: false,
 	sourceId: 'internal-source-id',
 	lockedAt: null,
 	createdAt: '2026-01-01',
@@ -75,7 +76,7 @@ test('plain repository native payload strips guest source IDs and preserves auth
 	}
 })
 
-test('plain repository chrome has a Repo mark and omits unsupported Files and Settings actions', async () => {
+test('plain repository chrome has a Repo mark and shows Files and omits unsupported Settings actions', async () => {
 	const html = await renderStartPage(
 		createElement(CommunityDetailContent, {
 			listing: null,
@@ -96,6 +97,38 @@ test('plain repository chrome has a Repo mark and omits unsupported Files and Se
 	expect(html).toContain('data-signifier="private"')
 	expect(html).not.toContain('data-signifier="package"')
 	expect(html).not.toContain('data-signifier="unpublished"')
-	expect(html).not.toContain('data-testid="package-repo-nav-files"')
+	expect(html).toContain('data-testid="package-repo-nav-files"')
 	expect(html).not.toContain('data-testid="package-repo-nav-settings"')
+})
+
+test('plain repository promotion guidance is limited to members with package-shaped sources', async () => {
+	for (const [viewerIsOwner, packageShaped] of [
+		[true, true],
+		[true, false],
+		[false, true],
+	] as const) {
+		const html = await renderStartPage(
+			createElement(CommunityDetailContent, {
+				listing: null,
+				username: 'owner',
+				kodyId: 'notes',
+				description: 'Notes',
+				isPrivate: false,
+				ownerProfilePublic: true,
+				loggedIn: viewerIsOwner,
+				viewerIsOwner,
+				viewerCanManage: false,
+				returnTo: '/@owner/notes',
+				hasPackage: false,
+				packageShaped,
+			}),
+			'/@owner/notes',
+		)
+		expect(html.includes('data-testid="plain-repo-git-remote-hint"')).toBe(
+			viewerIsOwner,
+		)
+		expect(html.includes('data-testid="plain-repo-promote-prompt"')).toBe(
+			viewerIsOwner && packageShaped,
+		)
+	}
 })

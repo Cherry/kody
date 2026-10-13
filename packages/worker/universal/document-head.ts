@@ -226,6 +226,9 @@ const routeDocumentHeads = {
 	[routePattern(routes.communityPackageApprovePublish)]: titleOnly(
 		'Approve package publish',
 	),
+	[routePattern(routes.communityPackageApproveCapabilities)]: titleOnly(
+		'Approve internet-visible capabilities',
+	),
 	[routePattern(routes.accountPackageFiles)]: ({ loaderData }) => {
 		const files = loaderData?.packageFiles
 		return titleOnly(files?.ok ? `${files.title} files` : 'Package files')
@@ -541,7 +544,7 @@ const orgDocumentHeads: Record<string, DocumentHeadResolver> = {
 	[routePattern(routes.orgMcpServers)]: titleOnly('MCP servers'),
 	[routePattern(routes.orgMemories)]: titleOnly('Memories'),
 	[routePattern(routes.orgOverview)]: titleOnly('Overview'),
-	[routePattern(routes.orgPackages)]: titleOnly('Repositories'),
+	[routePattern(routes.orgRepositories)]: titleOnly('Repositories'),
 	[routePattern(routes.orgSecretProviders)]: titleOnly('Secret providers'),
 	[routePattern(routes.orgSecrets)]: titleOnly('Secrets'),
 	[routePattern(routes.orgValues)]: titleOnly('Values'),

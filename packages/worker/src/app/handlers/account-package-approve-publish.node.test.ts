@@ -102,7 +102,11 @@ test('legacy package approval links redirect and the canonical owner URL renders
 	} as Env
 	await expect(
 		loadAccountPackageAlias({
-			data: { packageId: 'pkg-1', approval: true, search: '?commit=abc1234' },
+			data: {
+				packageId: 'pkg-1',
+				approval: 'publish',
+				search: '?commit=abc1234',
+			},
 		}),
 	).rejects.toMatchObject({
 		status: 302,

@@ -12,7 +12,7 @@ export const Route = createFileRoute(
 			data: {
 				packageId: params.packageId,
 				search: location.searchStr,
-				approval: true,
+				approval: 'publish',
 			},
 		}),
 	notFoundComponent: NotFoundPage,

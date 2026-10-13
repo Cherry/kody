@@ -40,6 +40,7 @@ import {
 	createAccountMemoriesApiHandler,
 	createAccountMemoriesExportHandler,
 } from '#app/handlers/account-memories.ts'
+import { createAccountPackageApproveCapabilitiesApiHandler } from '#app/handlers/account-package-approve-capabilities.ts'
 import { createAccountPackageApprovePublishApiHandler } from '#app/handlers/account-package-approve-publish.ts'
 import { createAccountPackagesApiHandler } from '#app/handlers/account-packages.ts'
 import {
@@ -184,7 +185,8 @@ import {
 	createAccountOrganizationsApiHandler,
 	createAccountOrganizationsNewPostHandler,
 } from '#app/handlers/account-organizations.ts'
-import { createOrgPackagesApiHandler } from '#app/handlers/org-section.ts'
+import { createLegacyOrgPackagesApiRedirectHandler } from '#app/handlers/legacy-org-packages-redirect.ts'
+import { createOrgRepositoriesApiHandler } from '#app/handlers/org-section.ts'
 import { createOrgAvatarHandler } from '#app/handlers/org-avatar.ts'
 import { createOrgInviteJoinPostHandler } from '#app/handlers/org-invite-join.ts'
 import {
@@ -345,6 +347,10 @@ export function createBackendRouter(
 			accountMcpServersOauthCallback: routes.accountMcpServersOauthCallback,
 			accountMcpServersApi: routes.accountMcpServersApi,
 			accountMcpServersApiPost: routes.accountMcpServersApiPost,
+			accountPackageApproveCapabilitiesApi:
+				routes.accountPackageApproveCapabilitiesApi,
+			communityPackageApproveCapabilitiesApi:
+				routes.communityPackageApproveCapabilitiesApi,
 			accountPackageApprovePublishApi: routes.accountPackageApprovePublishApi,
 			communityPackageApprovePublishApi:
 				routes.communityPackageApprovePublishApi,
@@ -452,6 +458,7 @@ export function createBackendRouter(
 			orgBillingPortal: routes.orgBillingPortal,
 			orgMcpServerAuthorizePost: routes.orgMcpServerAuthorizePost,
 			orgPackagesApi: routes.orgPackagesApi,
+			orgRepositoriesApi: routes.orgRepositoriesApi,
 			orgSettingsApi: routes.orgSettingsApi,
 			orgSettingsPost: routes.orgSettingsPost,
 			orgSettingsAvatarPost: routes.orgSettingsAvatarPost,
@@ -543,6 +550,10 @@ export function createBackendRouter(
 					createAccountMcpServersOauthCallbackHandler(env),
 				accountMcpServersApi: createAccountMcpServersApiHandler(env),
 				accountMcpServersApiPost: createAccountMcpServersApiHandler(env),
+				accountPackageApproveCapabilitiesApi:
+					createAccountPackageApproveCapabilitiesApiHandler(env),
+				communityPackageApproveCapabilitiesApi:
+					createAccountPackageApproveCapabilitiesApiHandler(env),
 				accountPackageApprovePublishApi:
 					createAccountPackageApprovePublishApiHandler(env),
 				communityPackageApprovePublishApi:
@@ -665,7 +676,8 @@ export function createBackendRouter(
 						renderDocument(request, { status: access.status }),
 				),
 				orgMcpServerAuthorizePost: createOrgMcpServerAuthorizePostHandler(env),
-				orgPackagesApi: createOrgPackagesApiHandler(env),
+				orgPackagesApi: createLegacyOrgPackagesApiRedirectHandler(env),
+				orgRepositoriesApi: createOrgRepositoriesApiHandler(env),
 				orgSettingsApi: createOrgSettingsApiHandler(env),
 				orgSettingsPost: createOrgSettingsPostHandler(env),
 				orgSettingsAvatarPost: createOrgSettingsAvatarPostHandler(env),

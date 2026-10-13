@@ -172,6 +172,14 @@ into are described in
   publish. A key that the package and a dependency declare with a different
   `kind` or `provider` fails the publish and names both; give one a different
   key.
+- `packageGet` returns that closure as `credentials.needs`, each need with how
+  it resolves for you: `status` is `ready` (exactly one credential you can Use
+  has the need's kind and provider; `autoPick` names it), `ambiguous` (several
+  do), or `unbound` (none). `yourOptions` lists what you could pick (name, `org`
+  or `personal` scope, hosts): the matches plus same-kind credentials with no
+  provider, which resolve automatically once their provider is set
+  (`credentialUpdate`). Only credentials you can Use are listed, and needs
+  inherited from a dependency carry `from`.
 - Slots take no `placement`. Publish rejects one with a message to remove it.
   Published versions that include it load with it ignored. The fetch gateway
   fills `{{secret:NAME}}` and `{{integration-token:NAME}}` anywhere in a request
@@ -179,6 +187,41 @@ into are described in
   and its host is one the secret or integration allows, the same as for a
   package without slots. See
   [Placeholders in `fetch`](./secrets-and-values.md#placeholders-in-fetch).
+
+#### Opt-in: credential clients
+
+A package (or ad hoc execute) can ask for a client instead of writing a
+placeholder. The client never holds the value: the credential decides where its
+value goes, and it is sent only to the credential's hosts over HTTPS.
+
+```ts
+import { credential } from 'kody:runtime'
+
+const resend = await credential('RESEND_API_KEY')
+await resend.fetch('/emails', { method: 'POST', body: JSON.stringify(email) })
+```
+
+- `credential(key)` picks the one credential you can Use with the need's kind
+  and provider (an undeclared key is read as a provider). It rejects with an
+  Error carrying `code` (`credential_unbound`, `credential_ambiguous`,
+  `credential_not_found`, `credential_denied`, `host_not_allowed`,
+  `insecure_transport`) and `retryWith`, a list of picks to retry with.
+- The client has `name`, `scope`, `kind`, and `hosts`, plus `fetch` (secret,
+  oauth, url, and login credentials), `sign` (signing), or `callTool` (an org
+  MCP server). A relative URL resolves against the first host. A header the
+  credential places replaces one the code set, and a placeholder in that header
+  is never filled. `fetch` follows redirects itself and keeps the credential off
+  any other host; an OAuth client refreshes once on a 401. A `url` credential's
+  client returns a redirect response as it is instead of following it, and its
+  request path and query can't carry placeholders. A 401 or 403 carries
+  `x-kody-credential-hint` naming only the credential's shape (for example
+  `header Authorization Bearer`).
+- `credential.named(name, { scope })` picks by exact name. It works only in ad
+  hoc execute and in packages of your personal org that are not listed in
+  Community.
+- A client works only in the run that opened it. Under `kody execute --local`, a
+  saved package that imports `credential` works the same; ad hoc local code
+  needs a CLI release that adds `credential` to its `kody:runtime`.
 
 To list credential references that match the detect-only scan, run
 `repoRunChecks`. Its `credentials` result lists each file with the codemod 0010

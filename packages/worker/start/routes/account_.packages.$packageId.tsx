@@ -10,7 +10,6 @@ export const Route = createFileRoute('/account_/packages/$packageId')({
 			data: {
 				packageId: params.packageId,
 				search: location.searchStr,
-				approval: false,
 			},
 		}),
 	notFoundComponent: NotFoundPage,

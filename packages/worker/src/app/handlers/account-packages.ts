@@ -5,6 +5,7 @@ import { handleAccountPackageAdoptAction } from '#app/account-package-adopt.ts'
 import { handleAccountPackageDeleteAction } from '#app/account-package-delete.ts'
 import { handleAccountPackagePublishLockAction } from '#app/account-package-publish-lock.ts'
 import { handleAccountPackageVisibilityAction } from '#app/account-package-visibility.ts'
+import { handleAccountPackageInternetVisibleAction } from '#app/account-package-capability-approval.ts'
 import {
 	loadAccountPackagesData,
 	reloadAccountPackagesAfterWrite,
@@ -13,7 +14,7 @@ import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import { absorbCommunityForkUpstream } from '#worker/community/service.ts'
-import { routes } from '#universal/routes.ts'
+import { type routes } from '#universal/routes.ts'
 
 export function createAccountPackagesApiHandler(env: Env) {
 	return {
@@ -54,6 +55,15 @@ export function createAccountPackagesApiHandler(env: Env) {
 				body,
 			})
 			if (visibilityResponse) return visibilityResponse
+
+			const internetVisibleResponse =
+				await handleAccountPackageInternetVisibleAction({
+					env,
+					request,
+					user,
+					body,
+				})
+			if (internetVisibleResponse) return internetVisibleResponse
 
 			const deleteResponse = await handleAccountPackageDeleteAction({
 				env,

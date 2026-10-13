@@ -96,6 +96,8 @@ export async function loadCommunityDetailPayload(
 		serverTiming,
 		data: {
 			...detail,
+			hasPackage: true,
+			packageShaped: false,
 			readmeContent: detail.listing.readmeContent,
 			kodyId: detail.listing.kodyId,
 			isPrivate: false,
@@ -171,6 +173,7 @@ export async function loadCommunityPackagePayload(input: {
 			imageBaseHref,
 			ownerPackage: ownerPackageForClient(page),
 			hasPackage: page.hasPackage,
+			packageShaped: page.packageShaped === true,
 			username: page.username,
 			kodyId: page.kodyId,
 			isPrivate: packagePageIsPrivate(page),

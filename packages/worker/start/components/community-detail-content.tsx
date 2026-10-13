@@ -34,6 +34,10 @@ import { colors } from '#universal/styles/tokens.ts'
  * public catalog extras (install badges, tags, facts) when a listing exists.
  */
 
+/** GitHub-rendered agent docs for plain repos (not a /docs catalog guide). */
+const plainReposPromoteDocsHref =
+	'https://github.com/kentcdodds/kody/blob/main/docs/use/repos.md#promote-flow'
+
 export type CommunityDetailContentProps = {
 	listing: PublicCommunityListing | null
 	username: string
@@ -48,8 +52,13 @@ export type CommunityDetailContentProps = {
 	treeRef?: string
 	publishCompareHref?: string | null
 	hasApp?: boolean
-	/** Defaults to true. Plain repos pass false for Repo mark + no Files tab. */
+	/** Defaults to true. Plain repos pass false for the Repo mark. */
 	hasPackage?: boolean
+	/**
+	 * Plain repos only (owners/members): root package.json at the indexed
+	 * commit. Surfaces promote-to-package guidance — no website promote API.
+	 */
+	packageShaped?: boolean
 	iconUrl?: string | null
 }
 
@@ -69,6 +78,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		publishCompareHref,
 		hasApp,
 		hasPackage,
+		packageShaped,
 		iconUrl,
 	} = props
 	const packageAppHref = resolvePackageAppHref({
@@ -79,6 +89,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 	})
 	const markUrl = listing?.iconUrl ?? iconUrl ?? null
 	const isPackage = hasPackage !== false
+	const showPlainRepoOwnerHints = !isPackage && viewerIsOwner
 
 	const filesHref = getPackageTreeHref({
 		username,
@@ -125,6 +136,13 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 						returnTo,
 						viewerIsOwner,
 						publishCompareHref,
+					})
+				: null}
+
+			{showPlainRepoOwnerHints
+				? renderPlainRepoOwnerHints({
+						kodyId,
+						packageShaped: packageShaped === true,
 					})
 				: null}
 
@@ -330,6 +348,120 @@ function resolvePackageAppHref(input: {
 		username: input.username,
 		kodyId: input.kodyId,
 	})
+}
+
+function buildPromoteToPackagePrompt(kodyId: string) {
+	return `Promote my plain Kody repo "${kodyId}" to a saved package. Open search({ entity: "capability:repoPromoteToPackage" }) if needed, then call repoPromoteToPackage({ name: "${kodyId}" }). Root package.json is already at HEAD.`
+}
+
+/**
+ * Plain repos have no public smart-HTTP clone URL (that lane is packages /
+ * listings only). Owners mint a short-lived Artifacts remote via MCP.
+ * Promote is MCP/Open API only — no website mutate endpoint.
+ */
+function renderPlainRepoOwnerHints(input: {
+	kodyId: string
+	packageShaped: boolean
+}) {
+	return (
+		<section
+			data-rise
+			style={{ '--rise': '2' } as CSSProperties}
+			data-testid="plain-repo-owner-hints"
+			css={plainRepoHintsCss}
+		>
+			{input.packageShaped ? (
+				<details css={plainRepoPromoteCss}>
+					<summary css={plainRepoPromoteSummaryCss}>Promote to package</summary>
+					<div css={plainRepoPromptPanelCss}>
+						<p css={plainRepoHintTextCss}>
+							Root <code>package.json</code> is at HEAD. Ask your agent to run{' '}
+							<code>repoPromoteToPackage</code>, or follow the{' '}
+							<a
+								href={plainReposPromoteDocsHref}
+								data-testid="plain-repo-promote-docs"
+								rel="noopener noreferrer"
+								target="_blank"
+							>
+								promote docs
+							</a>
+							.
+						</p>
+						<pre
+							css={plainRepoPromptCss}
+							data-testid="plain-repo-promote-prompt"
+						>
+							<code>{buildPromoteToPackagePrompt(input.kodyId)}</code>
+						</pre>
+					</div>
+				</details>
+			) : null}
+			<p data-testid="plain-repo-git-remote-hint" css={plainRepoHintTextCss}>
+				Clone or push with a short-lived remote from{' '}
+				<code>repoGetGitRemote</code> (plain repos are not on public{' '}
+				<code>.git</code> smart HTTP).
+			</p>
+		</section>
+	)
+}
+
+const plainRepoHintsCss = {
+	marginTop: '1.1rem',
+	display: 'flex',
+	flexDirection: 'column' as const,
+	gap: '0.65rem',
+}
+
+const plainRepoPromoteCss = {
+	border: `1px solid ${colors.border}`,
+	borderRadius: '0.55rem',
+	padding: '0.55rem 0.75rem',
+	backgroundColor: colors.surface,
+}
+
+const plainRepoPromoteSummaryCss = {
+	cursor: 'pointer',
+	fontWeight: 600,
+	fontSize: '0.92rem',
+	color: colors.text,
+	listStyle: 'none' as const,
+	'&::-webkit-details-marker': { display: 'none' },
+}
+
+const plainRepoPromptPanelCss = {
+	marginTop: '0.65rem',
+	display: 'flex',
+	flexDirection: 'column' as const,
+	gap: '0.55rem',
+}
+
+const plainRepoHintTextCss = {
+	margin: 0,
+	fontSize: '0.88rem',
+	lineHeight: 1.45,
+	color: colors.textMuted,
+	'& code': {
+		font: '500 0.84em/1.2 ui-monospace, "SF Mono", Menlo, monospace',
+		color: colors.text,
+	},
+	'& a': {
+		color: colors.primaryText,
+		fontWeight: 550,
+		textDecoration: 'underline',
+		textUnderlineOffset: '0.18em',
+	},
+}
+
+const plainRepoPromptCss = {
+	margin: 0,
+	padding: '0.65rem 0.75rem',
+	borderRadius: '0.45rem',
+	backgroundColor: colors.background,
+	border: `1px solid ${colors.border}`,
+	overflowX: 'auto' as const,
+	font: '500 0.8rem/1.4 ui-monospace, "SF Mono", Menlo, monospace',
+	color: colors.text,
+	whiteSpace: 'pre-wrap' as const,
 }
 
 const packageAppLinkRowCss = {

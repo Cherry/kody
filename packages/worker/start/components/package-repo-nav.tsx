@@ -16,7 +16,7 @@ function renderPackageRepoNav(input: {
 	kodyId: string
 	filesHref: string
 	viewerCanManage: boolean
-	/** Plain repos hide Files until the tree loader accepts user_repos ids. */
+	/** Defaults to true. Pass false only to hide Files intentionally. */
 	showFilesNav?: boolean
 	active: PackageRepoNavActive
 }) {
@@ -158,7 +158,6 @@ export function renderPackageRepoChrome(input: {
 					kodyId: input.kodyId,
 					filesHref: input.filesHref,
 					viewerCanManage: input.viewerCanManage,
-					showFilesNav: hasPackage,
 					active: input.active,
 				})}
 			</div>
