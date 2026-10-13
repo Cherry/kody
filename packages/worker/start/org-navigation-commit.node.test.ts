@@ -14,7 +14,9 @@ import {
 const origin = 'https://kody.test'
 
 test('commits only org destinations and does not reread page payloads', async () => {
-	const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+	const fetcher = vi
+		.fn<typeof fetch>()
+		.mockImplementation(async () => new Response('{}'))
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	await commit('/account')
 	expect(fetcher).not.toHaveBeenCalled()
@@ -43,7 +45,7 @@ test('rapid org switches serialize cookie responses even when an earlier write i
 					release = resolve
 				}),
 		)
-		.mockResolvedValue(new Response('{}'))
+		.mockImplementation(async () => new Response('{}'))
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	const first = commit('/@acme/-/jobs')
 	const second = commit('/@other/-/jobs')
@@ -59,7 +61,7 @@ test('a failed cookie commit can be retried without failing navigation', async (
 	const fetcher = vi
 		.fn<typeof fetch>()
 		.mockRejectedValueOnce(new Error('offline'))
-		.mockResolvedValue(new Response('{}'))
+		.mockImplementation(async () => new Response('{}'))
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	await commit('/@acme/-/jobs')
 	await commit('/@acme/-/jobs')
@@ -104,7 +106,9 @@ test('Router preloads do not commit, cached Query navigation does, failed routes
 		isServer: false,
 		origin,
 	})
-	const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('{}'))
+	const fetcher = vi
+		.fn<typeof fetch>()
+		.mockImplementation(async () => new Response('{}'))
 	const stop = installOrgNavigationCommit(router, fetcher, origin)
 	await router.load()
 	await router.preloadRoute({ to: '/@acme/-/jobs' })
@@ -123,4 +127,12 @@ test('Router preloads do not commit, cached Query navigation does, failed routes
 	expect(fetcher).toHaveBeenCalledTimes(1)
 	stop()
 	query.clear()
+})
+
+test('drains each commit response before completing the queued write', async () => {
+	const response = new Response('{"ok":true}')
+	const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response)
+	const commit = createOrgNavigationCommit(fetcher, origin)
+	await commit('/@acme/-/jobs')
+	expect(response.bodyUsed).toBe(true)
 })

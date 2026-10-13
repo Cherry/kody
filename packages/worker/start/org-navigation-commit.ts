@@ -21,6 +21,9 @@ export function createOrgNavigationCommit(
 					credentials: 'include',
 					referrer: url.href,
 				})
+				// Drain the small JSON response before releasing the queued commit.
+				// An unread streamed body can keep the browser request open.
+				await response.text()
 				if (!response.ok && previousSlug === slug) previousSlug = null
 			} catch {
 				if (previousSlug === slug) previousSlug = null
