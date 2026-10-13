@@ -159,6 +159,7 @@ import { createConnectOauthHandler } from '#app/handlers/connect-oauth.ts'
 import { createConnectSecretsHandler } from '#app/handlers/connect-secrets.ts'
 import { createConnectSecretSetHandler } from '#app/handlers/connect-secret-set.ts'
 import { createConnectWebhookApplyHandler } from '#app/handlers/connect-webhook-apply.ts'
+import { createConnectCredentialHandler } from '#app/handlers/connect-credential.ts'
 import { createAccountWebhooksApproveApplyApiHandler } from '#app/handlers/account-webhooks-approve-apply.ts'
 import {
 	createCommunityApiHandler,
@@ -683,6 +684,7 @@ export function createAppRouter(env: Env) {
 			connectOauth: createConnectOauthHandler(env),
 			connectSecrets: createConnectSecretsHandler(env),
 			connectSecretSet: createConnectSecretSetHandler(env),
+			connectCredential: createConnectCredentialHandler(env),
 			connectWebhookApply: createConnectWebhookApplyHandler(env),
 			auth: createAuthHandler(env),
 			authProvidersApi: createAuthProvidersApiHandler(env),

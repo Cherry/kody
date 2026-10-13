@@ -18,11 +18,16 @@ import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { type CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { AuthorizationError } from '#worker/authorization/authorize.ts'
+import { getDiscoverablePlatformOauthApp } from '#worker/integrations/platform-apps.ts'
 import { getSavedPackageById } from '#worker/package-registry/repo.ts'
 import {
 	isFetchCapableCredentialKind,
 	type PackageCredentialKind,
 } from '#worker/package-registry/types.ts'
+import {
+	buildCredentialCreateUrl,
+	type CredentialCreateLinkInput,
+} from '#universal/credential-contracts.ts'
 import {
 	CredentialClientHandleError,
 	signCredentialClientHandle,
@@ -86,6 +91,8 @@ export type CredentialClientErrorBody = {
 	retryWith: Array<CredentialClientRetry>
 	options?: Array<CredentialClientOption>
 	possibleMatches?: Array<CredentialClientOption>
+	/** Absolute creation link; always set for unbound and not-found errors. */
+	createUrl?: string
 }
 
 export class CredentialClientError extends McpCallerError {
@@ -104,17 +111,38 @@ function refusal(
 	message: string,
 	extra: Partial<CredentialClientErrorBody> = {},
 ) {
-	return new CredentialClientError({ code, message, retryWith: [], ...extra })
+	// The link rides in the message too: a fetch rejection carries only that.
+	const text = extra.createUrl
+		? `${message} Create one at ${extra.createUrl}`
+		: message
+	return new CredentialClientError({
+		code,
+		message: text,
+		retryWith: [],
+		...extra,
+	})
 }
 
-/** The structured error for a failure from the door, else null. */
-export function toCredentialClientError(error: unknown) {
+/**
+ * The structured error for a failure from the door, else null. With a
+ * `baseUrl`, a not-found error from the door carries a creation link.
+ */
+export function toCredentialClientError(
+	error: unknown,
+	options: { baseUrl?: string } = {},
+) {
 	if (error instanceof CredentialClientError) return error
 	if (error instanceof CredentialRequestRefusedError) {
 		return refusal(error.code, error.message)
 	}
 	if (error instanceof CredentialNotFoundError) {
-		return refusal('credential_not_found', error.message)
+		return refusal(
+			'credential_not_found',
+			error.message,
+			options.baseUrl
+				? { createUrl: buildCredentialCreateUrl(options.baseUrl, {}) }
+				: {},
+		)
 	}
 	if (error instanceof CredentialLoginFailedError) {
 		return refusal('login_failed', error.message)
@@ -254,6 +282,47 @@ async function loadNeed(ctx: CredentialClientContext, key: string) {
 	return needs.find((need) => need.key === key) ?? null
 }
 
+const providerSlugPattern = /^[a-z0-9-]+$/
+
+/**
+ * The creation link for an unbound need. A declared kind is locked; without
+ * one the page suggests OAuth when a built-in app exists for the provider,
+ * else a Key, and shows the kind chooser.
+ */
+async function createUrlForNeed(
+	ctx: CredentialClientContext,
+	input: { key: string; provider: string; need: CredentialNeed | null },
+) {
+	const declaredKind: PackageCredentialKind | null = input.need?.kind ?? null
+	const providerSlug = providerSlugPattern.test(input.provider)
+		? input.provider
+		: null
+	const [builtInOauth, saved] = await Promise.all([
+		(declaredKind === null || declaredKind === 'oauth') && providerSlug
+			? getDiscoverablePlatformOauthApp({
+					db: ctx.env.APP_DB,
+					slug: providerSlug,
+				}).catch(() => null)
+			: null,
+		ctx.packageId
+			? getSavedPackageById(ctx.env.APP_DB, {
+					userId: requireActorRequest(ctx).org.id,
+					packageId: ctx.packageId,
+				}).catch(() => null)
+			: null,
+	])
+	return buildCredentialCreateUrl(ctx.callerContext.baseUrl, {
+		kind: declaredKind ?? (builtInOauth ? 'oauth' : 'secret'),
+		kindMode: declaredKind ? 'required' : 'hint',
+		name: input.key,
+		provider: providerSlug,
+		description: input.need?.description,
+		packageKodyId: saved?.kodyId ?? null,
+		needKey: input.need ? input.key : null,
+		extra: builtInOauth && providerSlug ? { platform: providerSlug } : {},
+	})
+}
+
 function needTarget(key: string, need: CredentialNeed | null): NeedTarget {
 	if (!need) {
 		return {
@@ -305,11 +374,36 @@ async function assertNamedAllowed(ctx: CredentialClientContext) {
 	}
 }
 
+/**
+ * No page creates these kinds yet, so the creation link lands on the
+ * Secrets list; the agent can create one with secretSet instead.
+ */
+function secretSetHint(kind: PackageCredentialKind | null, provider: string) {
+	switch (kind) {
+		case 'url':
+		case 'login':
+		case 'signing':
+			return `To create it, call secretSet with kind "${kind}" and provider "${provider}".`
+		case 'secret':
+		case 'oauth':
+		case 'mcp':
+		case null:
+			return null
+		default: {
+			const exhaustive: never = kind
+			throw new Error(`Unhandled credential kind: ${String(exhaustive)}`)
+		}
+	}
+}
+
 function pickOne(input: {
 	key: string | null
 	candidates: Array<UsableCredential>
 	possibleMatches: Array<UsableCredential>
 	describe: string
+	hint?: string | null
+	/** Set when there are no candidates: the unbound error's creation link. */
+	createUrl?: string
 }) {
 	const [only, second] = input.candidates
 	if (only && !second) return only
@@ -320,12 +414,13 @@ function pickOne(input: {
 				input.possibleMatches.length > 0
 					? ' Some matching credentials have no provider; pick one by name, or set its provider with credentialUpdate so it resolves on its own.'
 					: ''
-			}`,
+			}${input.hint ? ` ${input.hint}` : ''}`,
 			{
 				retryWith: input.possibleMatches.map((match) =>
 					retryFor(input.key, match),
 				),
 				possibleMatches: input.possibleMatches.map(toOption),
+				...(input.createUrl ? { createUrl: input.createUrl } : {}),
 			},
 		)
 	}
@@ -341,10 +436,12 @@ function pickOne(input: {
 	)
 }
 
+/** With a `link`, a name with no match carries a creation link. */
 function findByName(
 	usable: ReadonlyArray<UsableCredential>,
 	pick: CredentialPick,
 	key: string | null,
+	link?: { baseUrl: string } & CredentialCreateLinkInput,
 ) {
 	const matches = usable.filter(
 		(credential) =>
@@ -355,6 +452,14 @@ function findByName(
 		throw refusal(
 			'credential_not_found',
 			`No credential named "${pick.name}" that you can use${pick.scope ? ` in ${pick.scope} scope` : ''}.`,
+			link
+				? {
+						createUrl: buildCredentialCreateUrl(link.baseUrl, {
+							...link,
+							name: pick.name,
+						}),
+					}
+				: {},
 		)
 	}
 	return pickOne({
@@ -374,9 +479,15 @@ function pickExplicit(input: {
 	pick: CredentialPick
 	usable: ReadonlyArray<UsableCredential>
 	target: NeedTarget
+	baseUrl: string
 }): Picked {
-	const credential = findByName(input.usable, input.pick, input.key)
 	const { kind, provider, match } = input.target
+	const credential = findByName(input.usable, input.pick, input.key, {
+		baseUrl: input.baseUrl,
+		...(match === 'exact' && kind
+			? { kind, kindMode: 'required' as const }
+			: {}),
+	})
 	if (match === 'exact' && kind && credential.kind !== kind) {
 		throw refusal(
 			'invalid_request',
@@ -416,23 +527,29 @@ async function resolveKey(
 	const target = needTarget(key, need)
 	const picks = ctx.callMap?.get(key)
 	if (!picks) {
-		if (need) {
-			const resolution = resolveNeedCandidates(need, usable)
-			const credential = pickOne({
-				key,
-				candidates: resolution.candidates,
-				possibleMatches: resolution.possibleMatches,
-				describe: target.describe,
-			})
-			return [{ credential, hint: null }]
-		}
+		const { candidates, possibleMatches } = need
+			? resolveNeedCandidates(need, usable)
+			: {
+					candidates: usable.filter(
+						(candidate) => candidate.provider === target.provider,
+					),
+					possibleMatches: [],
+				}
+		const createUrl =
+			candidates.length === 0
+				? await createUrlForNeed(ctx, {
+						key,
+						provider: target.provider,
+						need,
+					})
+				: undefined
 		const credential = pickOne({
 			key,
-			candidates: usable.filter(
-				(candidate) => candidate.provider === target.provider,
-			),
-			possibleMatches: [],
+			candidates,
+			possibleMatches,
 			describe: target.describe,
+			hint: secretSetHint(target.kind, target.provider),
+			createUrl,
 		})
 		return [{ credential, hint: null }]
 	}
@@ -440,11 +557,24 @@ async function resolveKey(
 		throw refusal(
 			'credential_unbound',
 			`The credentials map picks no credential for "${key}".`,
+			{
+				createUrl: await createUrlForNeed(ctx, {
+					key,
+					provider: target.provider,
+					need,
+				}),
+			},
 		)
 	}
 	const picked = new Map<string, Picked>()
 	for (const pick of picks) {
-		const one = pickExplicit({ key, pick, usable, target })
+		const one = pickExplicit({
+			key,
+			pick,
+			usable,
+			target,
+			baseUrl: ctx.callerContext.baseUrl,
+		})
 		picked.set(one.credential.id, one)
 	}
 	const all = [...picked.values()].map((one) => one.credential)
@@ -509,7 +639,9 @@ export async function openCredentialClient(
 			scope: readScope(input.scope),
 		}
 		return await issueClient(ctx, null, {
-			credential: findByName(usable, pick, null),
+			credential: findByName(usable, pick, null, {
+				baseUrl: ctx.callerContext.baseUrl,
+			}),
 			hint: null,
 		})
 	}
@@ -567,8 +699,10 @@ export async function validateCredentialCallMap(input: {
 	map: CredentialCallMap
 	packageIds: ReadonlyArray<string>
 	strict: boolean
+	/** Origin for creation links on a pick with no match. */
+	baseUrl: string
 }): Promise<{ warnings: Array<string> }> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(input.baseUrl, async () => {
 		const request = input.request
 		if (!request?.actor) {
 			throw refusal(
@@ -603,7 +737,7 @@ export async function validateCredentialCallMap(input: {
 			}
 			const target = needTarget(key, need)
 			for (const pick of picks) {
-				pickExplicit({ key, pick, usable, target })
+				pickExplicit({ key, pick, usable, target, baseUrl: input.baseUrl })
 			}
 		}
 		return { warnings }
@@ -646,11 +780,14 @@ function doorInput<T extends CredentialTarget>(
 	}
 }
 
-async function withClientErrors<T>(run: () => Promise<T>) {
+async function withClientErrors<T>(
+	baseUrl: string | undefined,
+	run: () => Promise<T>,
+) {
 	try {
 		return await run()
 	} catch (error) {
-		throw toCredentialClientError(error) ?? error
+		throw toCredentialClientError(error, { baseUrl }) ?? error
 	}
 }
 
@@ -658,7 +795,7 @@ export async function signWithCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown; host?: unknown; operation?: unknown },
 ) {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext.baseUrl, async () => {
 		const handle = await readHandle(ctx, input.handle, ['signing'], 'sign()')
 		const host = readText(input.host, 'sign() host')
 		const operation = input.operation as SigningOperation | undefined
@@ -687,7 +824,7 @@ export async function callToolWithCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown; tool?: unknown; args?: unknown },
 ): Promise<CallToolResult> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext.baseUrl, async () => {
 		const handle = await readHandle(ctx, input.handle, ['mcp'], 'callTool()')
 		const toolName = readText(input.tool, 'callTool() tool name')
 		const args =
@@ -717,7 +854,7 @@ export async function refreshCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown },
 ) {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext.baseUrl, async () => {
 		const handle = await readHandle(ctx, input.handle, ['oauth'], 'refresh')
 		return await resolveCredential(
 			doorInput(ctx, {
@@ -767,7 +904,7 @@ export async function applyCredentialClient(input: {
 	token: string
 	requestUrl: URL
 }): Promise<AppliedCredentialClient> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(input.baseUrl, async () => {
 		const handle = await verifyCredentialClientHandle({
 			env: input.env,
 			token: input.token,

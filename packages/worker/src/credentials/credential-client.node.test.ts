@@ -11,6 +11,7 @@ import { expect, test, vi } from 'vitest'
 import { executeGatewayFetch } from '#mcp/fetch-gateway.ts'
 import { credentialClientHintHeaderName } from '#mcp/credential-client-gateway.ts'
 import { saveSecret } from '#mcp/secrets/service.ts'
+import { upsertPlatformOauthApp } from '#worker/integrations/platform-apps.ts'
 import { upsertGrant } from '#worker/orgs/access-writes.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
@@ -438,6 +439,114 @@ test('a declared need picks by its kind and provider, and offers same-kind crede
 	).resolves.toMatchObject({ key: 'MAIL', name: 'resend-prod' })
 })
 
+test('unbound and not-found errors always carry a creation link, locking a declared kind', async () => {
+	const t = await setup()
+	const bea = t.requestAs('bea', 'owner')
+	const adHoc = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { key: 'resend' }),
+	)
+	const adHocUrl =
+		'https://example.com/connect/credential?kind=secret&name=resend&provider=resend'
+	expect(adHoc.body).toMatchObject({
+		code: 'credential_unbound',
+		createUrl: adHocUrl,
+	})
+	expect(adHoc.message).toContain(`Create one at ${adHocUrl}`)
+
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/digest',
+	})
+	mockNeeds([
+		{
+			key: 'github',
+			kind: 'oauth',
+			description: 'Read PRs to summarize them',
+		},
+	])
+	const declared = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'github',
+		}),
+	)
+	const declaredUrl = new URL(
+		(declared.body as { createUrl: string }).createUrl,
+	)
+	expect(declaredUrl.pathname).toBe('/connect/credential')
+	expect(Object.fromEntries(declaredUrl.searchParams)).toEqual({
+		kind: 'oauth',
+		kindMode: 'required',
+		name: 'github',
+		provider: 'github',
+		description: 'Read PRs to summarize them',
+		forPackage: expect.any(String),
+		need: 'github',
+	})
+
+	const named = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { name: 'missing' }),
+	)
+	expect(named.body).toMatchObject({
+		code: 'credential_not_found',
+		createUrl: 'https://example.com/connect/credential?name=missing',
+	})
+})
+
+test('an unbound link selects a built-in OAuth app, and kinds with no form point at secretSet', async () => {
+	const t = await setup()
+	const bea = t.requestAs('bea', 'owner')
+	await upsertPlatformOauthApp({
+		db: t.db,
+		env: t.env,
+		app: {
+			slug: 'github',
+			clientId: 'platform-github-client-id',
+			clientSecret: 'platform-github-client-secret',
+			tokenUrl: 'https://github.com/login/oauth/access_token',
+			authorizeUrl: 'https://github.com/login/oauth/authorize',
+			flow: 'confidential',
+			visibility: 'published',
+		},
+	})
+	const builtIn = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { key: 'github' }),
+	)
+	const builtInUrl = new URL((builtIn.body as { createUrl: string }).createUrl)
+	expect(Object.fromEntries(builtInUrl.searchParams)).toEqual({
+		kind: 'oauth',
+		name: 'github',
+		provider: 'github',
+		platform: 'github',
+	})
+
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/hooks',
+	})
+	mockNeeds([{ key: 'github', kind: 'oauth', provider: 'github' }])
+	const declaredOauth = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'github',
+		}),
+	)
+	const declaredOauthUrl = new URL(
+		(declaredOauth.body as { createUrl: string }).createUrl,
+	)
+	expect(declaredOauthUrl.searchParams.get('kindMode')).toBe('required')
+	expect(declaredOauthUrl.searchParams.get('platform')).toBe('github')
+
+	mockNeeds([{ key: 'deploy-hook', kind: 'url', provider: 'vercel' }])
+	const urlNeed = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'deploy-hook',
+		}),
+	)
+	expect(urlNeed.message).toContain(
+		'To create it, call secretSet with kind "url" and provider "vercel".',
+	)
+	expect(urlNeed.message).toMatch(/Create one at https:\/\/\S+kind=url/)
+})
+
 test('a declared need with no kind opens any fetch-capable credential for the provider', async () => {
 	const t = await setup()
 	const packageId = await t.savePackage({
@@ -804,6 +913,7 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 			map: normalizeCredentialCallMap(credentials)!,
 			packageIds,
 			strict,
+			baseUrl: 'https://example.com',
 		})
 	await expect(validate({ MAIL: 'resend-prod' }, true)).resolves.toEqual({
 		warnings: [],
@@ -818,9 +928,23 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 	expect(adHoc.warnings).toEqual([
 		expect.stringContaining('credentials.resend is not a need of this code'),
 	])
-	await expect(
-		rejection(validate({ MAIL: 'missing' }, true)),
-	).resolves.toMatchObject({ body: { code: 'credential_not_found' } })
+	const missing = await rejection(validate({ MAIL: 'missing' }, true))
+	expect(missing.body).toMatchObject({ code: 'credential_not_found' })
+	expect(
+		Object.fromEntries(
+			new URL((missing.body as { createUrl: string }).createUrl).searchParams,
+		),
+	).toEqual({ kind: 'secret', kindMode: 'required', name: 'missing' })
+	const emptyPick = await rejection(
+		openCredentialClient(
+			t.contextFor({ request, packageId, credentials: { MAIL: [] } }),
+			{ key: 'MAIL' },
+		),
+	)
+	expect(emptyPick.body).toMatchObject({
+		code: 'credential_unbound',
+		createUrl: expect.stringContaining('need=MAIL'),
+	})
 	await expect(
 		rejection(
 			validateCredentialCallMap({
@@ -829,6 +953,7 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 				map: normalizeCredentialCallMap({ MAIL: 'resend-prod' })!,
 				packageIds: [],
 				strict: false,
+				baseUrl: 'https://example.com',
 			}),
 		),
 	).resolves.toMatchObject({ body: { code: 'credential_denied' } })
@@ -860,6 +985,7 @@ test('call map validation keeps the entry package pinned needs over a dependency
 			map: normalizeCredentialCallMap({ MAIL: 'resend-prod' })!,
 			packageIds: [entryId, depId],
 			strict: true,
+			baseUrl: 'https://example.com',
 		}),
 	).resolves.toEqual({ warnings: [] })
 })
