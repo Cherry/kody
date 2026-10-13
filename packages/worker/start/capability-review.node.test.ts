@@ -49,7 +49,7 @@ test('native capability review displays reachable credentials, hosts, paths and 
 		'api.example.com',
 		'credential-id',
 		'storage-id',
-		'Approve and make internet-visible',
+		'Approve capability set',
 		'How it is reached',
 	])
 		expect(html).toContain(value)
@@ -70,7 +70,7 @@ test('unpublished native capability review cannot approve and explains why', asy
 	)
 })
 
-test('pending publish review shows credential changes and only offers supported approvals', async () => {
+test('pending review offers separate credential and public-serving approvals', async () => {
 	const html = await renderStartPage(
 		jsx(AccountPackageApproveCapabilitiesRoute, {
 			payload: {
@@ -92,7 +92,7 @@ test('pending publish review shows credential changes and only offers supported 
 						pendingCommit: 'public-commit',
 						createdAt: '2026-10-13T00:00:00Z',
 						changes: [],
-						approveAction: null,
+						approveAction: 'approve-went-public',
 					},
 				],
 			},
@@ -114,6 +114,36 @@ test('pending publish review shows credential changes and only offers supported 
 		expect(html).toContain(value)
 	expect(
 		html.match(/data-testid="package-pending-approval-approve"/g),
-	).toHaveLength(1)
+	).toHaveLength(2)
 	expect(html).toContain('Approve and publish')
+})
+
+test('public serving approval is distinct from approving the capability set', async () => {
+	const html = await renderStartPage(
+		jsx(AccountPackageApproveCapabilitiesRoute, {
+			payload: {
+				...payload,
+				pendingApprovals: [
+					{
+						id: 'public-request',
+						reason: 'went_public',
+						reasonLabel: 'Package became public',
+						pendingCommit: 'published-commit',
+						createdAt: '2026-10-13T00:00:00Z',
+						changes: [],
+						approveAction: 'approve-went-public',
+					},
+				],
+			},
+			username: 'owner',
+			kodyId: 'example',
+		}),
+		payload.approveHref,
+	)
+	expect(html).toContain(
+		'Internet-visible serving stays off until you approve.',
+	)
+	expect(html).toContain('Published commit')
+	expect(html).toContain('Approve and make internet-visible')
+	expect(html).toContain('Approve capability set')
 })

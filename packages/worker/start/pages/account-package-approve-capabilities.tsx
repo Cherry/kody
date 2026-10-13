@@ -44,7 +44,9 @@ export function AccountPackageApproveCapabilitiesRoute({
 	const [approvingRequestId, setApprovingRequestId] = useState<string | null>(
 		null,
 	)
-	const busy = mutation.isPending || approvingRequestId !== null
+	const [approvingCapabilities, setApprovingCapabilities] = useState(false)
+	const busy =
+		mutation.isPending || approvingRequestId !== null || approvingCapabilities
 	const pendingApprovals = payload.pendingApprovals ?? []
 	const [message, setMessage] = useState<string | null>(null)
 	const credentialEntries = payload.entries.filter(
@@ -80,6 +82,7 @@ export function AccountPackageApproveCapabilitiesRoute({
 	}
 	async function approveCapabilities() {
 		if (!payload.publishedCommit || busy) return
+		setApprovingCapabilities(true)
 		const isCurrent = capture()
 		setMessage(null)
 		try {
@@ -90,7 +93,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 					kodyId,
 				}),
 			)
-			if (isCurrent()) await router.navigate({ to: payload.settingsHref })
+			if (isCurrent()) {
+				if (payload.package.isInternetVisible)
+					await router.navigate({ to: payload.settingsHref })
+				else await router.invalidate({ sync: true })
+			}
 		} catch (error) {
 			if (isCurrent())
 				setMessage(
@@ -98,6 +105,8 @@ export function AccountPackageApproveCapabilitiesRoute({
 						? error.message
 						: 'Could not approve capabilities.',
 				)
+		} finally {
+			if (isCurrent()) setApprovingCapabilities(false)
 		}
 	}
 	return (
@@ -131,7 +140,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 						Waiting for your approval
 					</h2>
 					<p css={{ margin: 0, color: colors.textMuted }}>
-						The previously published version keeps running until you approve.
+						{pendingApprovals.some(
+							(approval) => approval.reason === 'credential_needs_changed',
+						)
+							? 'The previously published version keeps running until you approve.'
+							: 'Internet-visible serving stays off until you approve.'}
 					</p>
 					<ul
 						css={{
@@ -152,10 +165,16 @@ export function AccountPackageApproveCapabilitiesRoute({
 									{approval.reasonLabel}
 								</strong>
 								<span css={{ color: colors.textMuted }}>
-									Paused commit{' '}
+									{approval.reason === 'went_public'
+										? 'Published commit '
+										: 'Paused commit '}
 									<IdValue
 										value={approval.pendingCommit}
-										label="paused commit"
+										label={
+											approval.reason === 'went_public'
+												? 'published commit'
+												: 'paused commit'
+										}
 									/>
 								</span>
 								{approval.changes.length > 0 ? (
@@ -176,7 +195,9 @@ export function AccountPackageApproveCapabilitiesRoute({
 										>
 											{approvingRequestId === approval.id
 												? 'Approving…'
-												: 'Approve and publish'}
+												: approval.reason === 'went_public'
+													? 'Approve and make internet-visible'
+													: 'Approve and publish'}
 										</button>
 									</div>
 								) : null}
@@ -357,11 +378,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 						css={getPrimaryButtonCss()}
 						onClick={() => void approveCapabilities()}
 					>
-						{mutation.isPending && approvingRequestId === null
+						{approvingCapabilities
 							? 'Approving…'
 							: payload.package.isInternetVisible
 								? 'Re-approve capability set'
-								: 'Approve and make internet-visible'}
+								: 'Approve capability set'}
 					</button>
 					<SiteLink
 						href={payload.settingsHref}
