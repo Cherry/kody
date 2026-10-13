@@ -1,11 +1,12 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
+import { useRouteContext, useLocation } from '@tanstack/react-router'
 import { connectWebhookApplyQuery } from '../connect-approval-queries.ts'
-import { useLocation } from '@tanstack/react-router'
 
 import { type ConnectWebhookApplyLoaderData } from '#universal/loader-data.ts'
 
@@ -102,7 +103,10 @@ export function ConnectWebhookApplyRoute({
 			return (await response.json()) as ConnectWebhookApplyLoaderData
 		},
 		onSuccess: async (payload, input) => {
-			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			await queryClient.cancelQueries({
+				queryKey: input.queryKey,
+				exact: true,
+			})
 			queryClient.setQueryData(input.queryKey, (previous) =>
 				previous ? { ...previous, payload } : previous,
 			)
@@ -150,12 +154,31 @@ export function ConnectWebhookApplyRoute({
 			</header>
 
 			{message ? (
-				<p
-					css={getAccentCalloutCss()}
-					data-testid="connect-webhook-apply-message"
-				>
-					{message}
-				</p>
+				<>
+					<p
+						css={getAccentCalloutCss()}
+						data-testid="connect-webhook-apply-message"
+					>
+						{message}
+					</p>
+					{payload?.ok !== false &&
+					!(payload?.ok && message.includes('Destination approved')) ? (
+						<ErrorAgentPromptButton
+							prompt={buildHumanApprovalErrorAgentPrompt({
+								activity:
+									'Approving an outbound webhook destination in the browser.',
+								errorMessage: message,
+								ids: {
+									packageName:
+										payload && payload.ok ? payload.packageName : null,
+									packageKodyId:
+										payload && payload.ok ? payload.packageKodyId : null,
+									path: '/connect/webhook-apply',
+								},
+							})}
+						/>
+					) : null}
+				</>
 			) : null}
 
 			{!payload ? (
@@ -165,6 +188,14 @@ export function ConnectWebhookApplyRoute({
 			) : !payload.ok ? (
 				<section css={cardCss} data-testid="connect-webhook-apply-error">
 					<p css={{ margin: 0 }}>{payload.error}</p>
+					<ErrorAgentPromptButton
+						prompt={buildHumanApprovalErrorAgentPrompt({
+							activity:
+								'Approving an outbound webhook destination in the browser.',
+							errorMessage: payload.error,
+							ids: { path: '/connect/webhook-apply' },
+						})}
+					/>
 				</section>
 			) : (
 				<section css={cardCss} data-testid="connect-webhook-apply-card">

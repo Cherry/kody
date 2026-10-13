@@ -356,3 +356,57 @@ test('value search stays local while changing the selected record reads its own 
 	await expect.poll(() => reads.length).toBe(1)
 	expect(reads[0]).toContain('selected=missing-value')
 })
+
+test('retained Connections keeps its own view while navigating back to Profile', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `connections-retained-${id}@example.com`,
+		username: `connections-retained-${id}`,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto('/account')
+	await waitForClientHydration(page)
+	await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
+	await page.evaluate(
+		(href) => window.history.pushState(null, '', href),
+		orgResourcePath(user.username, 'connections'),
+	)
+	await expect(page.getByTestId('account-connections-add')).toBeVisible()
+	await page.waitForLoadState('networkidle')
+	let release!: () => void
+	const held = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	let started!: () => void
+	const reading = new Promise<void>((resolve) => {
+		started = resolve
+	})
+	await page.route('**/_serverFn/**', async (route) => {
+		started()
+		await held
+		await route.continue()
+	})
+	try {
+		await page.evaluate(() => window.history.back())
+		await reading
+		await expect(page).toHaveURL(/\/account$/)
+		// Session verification holds the destination pending. The retained
+		// Connections view must still describe its own matched route.
+		await expect(page.getByTestId('account-connections-add')).toBeVisible()
+		await expect(
+			page.getByRole('heading', { name: 'Unknown agent' }),
+		).toHaveCount(0)
+		release()
+		await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
+		await expect(
+			page.getByRole('heading', { name: 'Unknown agent' }),
+		).toHaveCount(0)
+	} finally {
+		release()
+		await page.unrouteAll({ behavior: 'wait' })
+	}
+})

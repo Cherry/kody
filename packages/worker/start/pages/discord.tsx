@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildErrorAgentPrompt } from '#universal/error-agent-prompt.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
@@ -36,20 +38,47 @@ import { buildAuthLink } from '#client/auth-links.ts'
 
 const discordPath = routes.discord.href()
 
-function readCallbackMessage(href: string) {
+type DiscordPageMessage = {
+	text: string
+	tone: 'error' | 'info'
+	oauthErrorCode?: string | null
+}
+
+function readCallbackMessage(href: string): DiscordPageMessage | null {
 	const searchParams = new URL(href, 'http://localhost').searchParams
 	const linkedProvider = searchParams.get('oauthLinked')
 	if (linkedProvider === 'discord') {
 		return {
 			text: 'Discord connected.',
-			tone: 'info' as const,
+			tone: 'info',
 		}
 	}
-	const error = getOauthLoginErrorMessage(searchParams.get('oauthError'))
+	const oauthErrorCode = searchParams.get('oauthError')
+	const error = getOauthLoginErrorMessage(oauthErrorCode)
 	if (error) {
-		return { text: error, tone: 'error' as const }
+		return { text: error, tone: 'error', oauthErrorCode }
 	}
 	return null
+}
+
+function discordErrorAgentPrompt(input: {
+	errorMessage: string
+	oauthErrorCode?: string | null
+}) {
+	return buildErrorAgentPrompt({
+		activity: 'Connecting Discord on /discord.',
+		errorCode: input.oauthErrorCode ?? 'discord_error',
+		errorMessage: input.errorMessage,
+		ids: { path: '/discord', provider: 'discord' },
+		likelyCause:
+			'OAuth callback failed, Discord is not configured, or the connection status could not be loaded.',
+		nextSteps: [
+			'Open guide:oauth and retry the Discord connect from /discord.',
+			'Tell me whether to reconnect Discord or check provider configuration.',
+		],
+		kodyTools: ['search({ entity: "guide:oauth" })'],
+		docs: ['search({ entity: "guide:oauth" })'],
+	})
 }
 
 function discordMemberRoleMessage(status: string) {
@@ -77,10 +106,9 @@ export function DiscordPage({
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const [busy, setBusy] = useState(false)
-	const [actionMessage, setActionMessage] = useState<{
-		text: string
-		tone: 'error' | 'info'
-	} | null>(null)
+	const [actionMessage, setActionMessage] = useState<DiscordPageMessage | null>(
+		null,
+	)
 	const turnstileSiteKey = page.turnstileSiteKey
 	useEffect(() => {
 		if (!page.signedIn && turnstileSiteKey)
@@ -187,15 +215,26 @@ export function DiscordPage({
 			</header>
 
 			{message ? (
-				<p
-					role={message.tone === 'error' ? 'alert' : 'status'}
-					css={{
-						...descriptionCss,
-						color: message.tone === 'error' ? colors.danger : colors.textMuted,
-					}}
-				>
-					{message.text}
-				</p>
+				<>
+					<p
+						role={message.tone === 'error' ? 'alert' : 'status'}
+						css={{
+							...descriptionCss,
+							color:
+								message.tone === 'error' ? colors.danger : colors.textMuted,
+						}}
+					>
+						{message.text}
+					</p>
+					{message.tone === 'error' ? (
+						<ErrorAgentPromptButton
+							prompt={discordErrorAgentPrompt({
+								errorMessage: message.text,
+								oauthErrorCode: message.oauthErrorCode,
+							})}
+						/>
+					) : null}
+				</>
 			) : null}
 
 			<section css={cardCss}>

@@ -26,6 +26,7 @@ import {
 	type OrgCollaboratorsLoaderData,
 } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
+import { mq } from '#universal/styles/tokens.ts'
 const mutationResult = z.object({
 	ok: z.boolean(),
 	error: z.string().optional(),
@@ -89,6 +90,7 @@ export function OrgAction({
 	disabled = false,
 	onDone,
 	onSaved,
+	renderError,
 }: {
 	href: string
 	queryKey: QueryKey
@@ -99,6 +101,7 @@ export function OrgAction({
 	disabled?: boolean
 	onDone?: (href: string) => void
 	onSaved?: () => Promise<unknown>
+	renderError?: (error: Error) => ReactNode
 }) {
 	const client = useQueryClient()
 	const [confirmed, setConfirmed] = useState(false)
@@ -169,7 +172,12 @@ export function OrgAction({
 						? `Confirm ${label.toLowerCase()}`
 						: label}
 			</button>
-			{mutation.error ? <p role="alert">{mutation.error.message}</p> : null}
+			{mutation.error ? (
+				<>
+					<p role="alert">{mutation.error.message}</p>
+					{renderError?.(mutation.error)}
+				</>
+			) : null}
 			{mutation.data?.invite?.prompt ? (
 				<textarea
 					readOnly
@@ -202,9 +210,13 @@ function RoleSelect({
 	owners?: boolean
 }) {
 	return (
-		<label>
+		<label css={{ minWidth: 0 }}>
 			Role
-			<select name={name} defaultValue={value} css={accountInputCss}>
+			<select
+				name={name}
+				defaultValue={value}
+				css={[accountInputCss, { maxWidth: '100%', minWidth: 0 }]}
+			>
 				{owners ? <option value="owner">Owner</option> : null}
 				<option value="member">Member</option>
 				<option value="billing">Billing</option>
@@ -212,6 +224,14 @@ function RoleSelect({
 		</label>
 	)
 }
+const memberRowCss = {
+	minWidth: 0,
+	[mq.mobile]: {
+		overflowWrap: 'anywhere' as const,
+		'& form': { minWidth: 0 },
+	},
+}
+
 export function OrgMembersPage({
 	data,
 	queryKey,
@@ -224,7 +244,7 @@ export function OrgMembersPage({
 		<OrgShell title="Members" slug={data.org.slug}>
 			<AccountManagementPanel title="Members">
 				{data.members.map((member) => (
-					<article key={member.userId}>
+					<article key={member.userId} css={memberRowCss}>
 						<h3>{member.displayName || member.username || member.userId}</h3>
 						<p>{member.roleLabel}</p>
 						{data.canManage ? (
@@ -265,7 +285,7 @@ export function OrgMembersPage({
 			<AccountManagementPanel title="Pending invitations">
 				{data.invites.length ? (
 					data.invites.map((invite) => (
-						<p key={invite.id}>
+						<p key={invite.id} css={memberRowCss}>
 							{invite.inviteeEmail || invite.inviteeUsername} ·{' '}
 							{invite.roleLabel} · Expires {invite.expiresAt}
 						</p>
@@ -276,7 +296,7 @@ export function OrgMembersPage({
 			</AccountManagementPanel>
 			<AccountManagementPanel title="Invite links">
 				{data.inviteLinks.map((link) => (
-					<article key={link.id}>
+					<article key={link.id} css={memberRowCss}>
 						<p>
 							{link.roleLabel} · {link.useCount}
 							{link.maxUses ? ` / ${link.maxUses}` : ''} uses · Expires{' '}

@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
@@ -85,7 +87,10 @@ export function ConnectSecretsRoute({
 			return payload
 		},
 		onSuccess: async (payload, input) => {
-			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			await queryClient.cancelQueries({
+				queryKey: input.queryKey,
+				exact: true,
+			})
 			queryClient.setQueryData(input.queryKey, (previous) =>
 				previous ? { ...previous, payload } : previous,
 			)
@@ -169,11 +174,31 @@ export function ConnectSecretsRoute({
 					data-testid="connect-secrets-error"
 				>
 					<p css={{ margin: 0, color: colors.danger }}>{data.approvalError}</p>
+					<ErrorAgentPromptButton
+						prompt={buildHumanApprovalErrorAgentPrompt({
+							activity:
+								'Allowing secret hosts from a /connect/secrets approval link.',
+							errorMessage: data.approvalError,
+							ids: { path: '/connect/secrets' },
+						})}
+					/>
 				</section>
 			) : null}
 
 			{message ? (
-				<p css={{ margin: 0, color: colors.danger }}>{message}</p>
+				<>
+					<p css={{ margin: 0, color: colors.danger }}>{message}</p>
+					{data?.approvalError ? null : (
+						<ErrorAgentPromptButton
+							prompt={buildHumanApprovalErrorAgentPrompt({
+								activity:
+									'Allowing secret hosts from a /connect/secrets approval link.',
+								errorMessage: message,
+								ids: { path: '/connect/secrets' },
+							})}
+						/>
+					)}
+				</>
 			) : null}
 
 			{approval && (hosts.length > 0 || rejectedHosts.length > 0) ? (

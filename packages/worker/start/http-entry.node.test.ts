@@ -117,6 +117,7 @@ test('invalid bindings return the static illustrated 500 with document title, la
 	expect(body).toContain('lang="en"')
 	expect(body).toContain('<title>Something went wrong — Kody</title>')
 	expect(body).toContain('data-testid="internal-error-page"')
+	expect(body).toContain('data-error-agent-prompt')
 	expect(body).toContain('We got a little zapped.')
 	expect(body).toContain('src="/images/kody-500-zapped.png"')
 	expect(body).toContain('Try again')

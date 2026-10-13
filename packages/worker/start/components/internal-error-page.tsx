@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from './error-agent-prompt-button.tsx'
+import { buildInternalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { SiteLink } from './site-link.tsx'
 import { routes } from '#universal/routes.ts'
 import {
@@ -50,6 +52,9 @@ export function InternalErrorPage() {
 					Go home
 				</SiteLink>
 			</nav>
+			<ErrorAgentPromptButton
+				prompt={buildInternalErrorAgentPrompt({ path: retryHref })}
+			/>
 		</section>
 	)
 }

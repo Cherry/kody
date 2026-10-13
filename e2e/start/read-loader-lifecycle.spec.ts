@@ -89,6 +89,7 @@ test('blog cache keeps slug identity, ignores tracking search, and expires', asy
 }) => {
 	await page.goto('/blog')
 	await waitForClientHydration(page)
+	const indexHeading = await page.locator('main h1').innerText()
 	const links = await page
 		.locator('main a[href^="/blog/"]:not([href="/blog/rss.xml"])')
 		.evaluateAll((anchors) => [
@@ -109,6 +110,9 @@ test('blog cache keeps slug identity, ignores tracking search, and expires', asy
 	await page.clock.install()
 	await navigate(page, `${first}?utm_source=first`)
 	await expect(page).toHaveURL(new RegExp(`${first}\\?`))
+	// pushState updates the URL synchronously, before the asynchronous loader
+	// starts. An already-idle network does not prove that navigation committed.
+	await expect(page.locator('main h1')).not.toHaveText(indexHeading)
 	await page.waitForLoadState('networkidle')
 	const firstHeading = await page.locator('main h1').innerText()
 	expect(reads).toHaveLength(1)

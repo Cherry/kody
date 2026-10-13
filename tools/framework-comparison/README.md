@@ -1,36 +1,15 @@
 # Framework comparison
 
-The current [private decision evaluation](reports/PRIVATE-DECISION-PROGRESS.md)
-records matched app save and freshness experiments, remaining gaps, and the
-Access credential needed for updated edge measurements. Its
-[decision protocol](PRIVATE-DECISION-PROTOCOL.md) treats app experience as the
-main benefit and public-page delivery and SEO as guardrails.
+This directory contains the migration's reproducible harnesses and protocols.
+The [decision protocol](PRIVATE-DECISION-PROTOCOL.md) treats app experience as
+the main benefit and public-page delivery and SEO as guardrails.
 
-The latest [TkDodo refactor](reports/TKDODO-REFACTOR.md) records the changes
-based on all 91 published blog posts, with a
-[reading record](reports/TKDODO-READING.json). The earlier
-[cache comparison](reports/QUERY-CACHE-COMPARISON.md) records the v3
-implementation and its measurements. Its timings are historical evidence, not
-results for the latest refactor. The
-[implementation details](reports/QUERY-CACHE-IMPLEMENTATION.md),
-[validation evidence](reports/QUERY-CACHE-VALIDATION.md), and
-[source accounting](reports/QUERY-CACHE-COMPLEXITY.md) describe that earlier
-pass.
-
-The earlier [Query comparison](reports/QUERY-COMPARISON.md) remains historical
-evidence, not a measurement of the subsequent cache and renderer changes. The
-private previews below still run the earlier builds.
-
-Read the [comparison and recommendation](reports/COMPARISON.md),
-[verification results](reports/VERIFICATION.md), and
-[route audit](reports/ROUTE-COVERAGE.md).
-
-The [Router follow-up](reports/ROUTER-FOLLOW-UP.md) covers the contained
-freshness and cancellation changes,
-[type and complexity checks](reports/TYPE-COMPLEXITY.md),
-[matched agent experiment](reports/AGENT-COMPARISON.md), and
-[Intent setup](reports/INTENT-SETUP.md). Its long-session measurements are
-tracked separately from the earlier edge comparison.
+Historical comparison reports, TkDodo reading notes, and raw measurements are
+local experiment output and are not included in this checkout. They describe
+older revisions, not the current migration. Published claims need separately
+attached, sanitized artifacts tied to the exact measured commits. Current
+implementation details live in the
+[Start architecture guide](../../docs/contributing/tanstack-start.md).
 
 Private Cloudflare previews, restricted to Tanner's Access identity:
 

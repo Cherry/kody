@@ -134,6 +134,7 @@ vi.mock('#app/authenticated-user.ts', () => ({
 
 vi.mock('#app/auth-session.ts', () => ({
 	readAuthSessionResult: async () => ({ session: null, setCookie: null }),
+	setAuthSessionSecret: vi.fn(),
 }))
 
 vi.mock('#app/auth-redirect.ts', () => ({
@@ -168,7 +169,6 @@ vi.mock('@tanstack/react-start/server', () => ({
 	setResponseHeader: vi.fn(),
 }))
 vi.mock('#app/env.ts', () => ({ getEnv: (env: unknown) => env }))
-vi.mock('#app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
 
 vi.mock('#worker/app-base-url.ts', () => ({
 	getAppBaseUrl: () => mockModule.getAppBaseUrl(),

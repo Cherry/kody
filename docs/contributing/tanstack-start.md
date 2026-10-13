@@ -96,3 +96,18 @@ reads start only after their parent resource authorizes.
 
 Passing that gate does not replace authenticated preview testing or matched
 production performance measurements.
+
+### Pending navigation audit
+
+Connections uses its matched route context for page identity. Reading the global
+location while the previous page remains visible can combine its retained data
+with the destination URL. The browser regression in
+[`cache-navigation.spec.ts`](../../e2e/start/cache-navigation.spec.ts) holds the
+destination request pending and checks that Connections stays valid on Back.
+
+The same global-location pattern still needs regression coverage and correction
+in Secrets, Jobs, Values, Workflows, Memories, Email, MCP servers, admin users,
+and authentication forms. These are source-audit findings, not confirmed browser
+reproductions. Keep the full matched page URL separate from the normalized Query
+input: Jobs deliberately excludes local `q` and `view` filters from its server
+cache key, so substituting that key as its display URL would lose those filters.

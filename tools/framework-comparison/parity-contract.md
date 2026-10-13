@@ -13,9 +13,9 @@ error-boundary and document replacement also have regression-tested fixes. All
 29 native browser tests pass after a two-factor response-order fix. The
 intermittent pre-click form disappearance was subsequently reproduced as a Vite
 dependency-discovery document reload and fixed with explicit client prebundling.
-Three independent cold starts passed without retries. See
-[cold-start evidence](reports/TWO-FACTOR-COLD-RELOAD.md) and
-[current runtime verification](reports/REDACT.md).
+Three independent cold starts passed without retries. The detailed cold-start
+and runtime reports are local experiment output, not checked-in evidence for the
+current revision.
 
 No finite test suite establishes 100% correctness. A defensible parity claim
 names the revision, routes, fixtures, browsers, checks, and limitations that

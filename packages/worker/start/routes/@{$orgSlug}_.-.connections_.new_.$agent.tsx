@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountConnectionsPage } from '../pages/account-connections.tsx'
 import { loadConnectionsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -26,9 +26,9 @@ export const Route = createFileRoute(
 })
 function Page() {
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageQueryInput } = Route.useRouteContext()
 	return (
-		<AccountConnectionsPage payload={payload} currentHref={location.href} />
+		<AccountConnectionsPage payload={payload} currentHref={pageQueryInput} />
 	)
 }
 

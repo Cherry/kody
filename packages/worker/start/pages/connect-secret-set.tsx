@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import {
 	readConnectSecretSetView,
 	findMatchingSecretForSetup,
@@ -198,16 +200,36 @@ export function ConnectSecretSetRoute({
 					data-testid="connect-secret-set-error"
 				>
 					<p css={{ margin: 0, color: colors.danger }}>{setupError}</p>
+					<ErrorAgentPromptButton
+						prompt={buildHumanApprovalErrorAgentPrompt({
+							activity:
+								'Setting a secret value from a /connect/secret-set setup link.',
+							errorMessage: setupError,
+							ids: { path: '/connect/secret-set' },
+						})}
+					/>
 				</section>
 			) : null}
 
 			{message ? (
-				<p
-					css={{ margin: 0, color: colors.danger }}
-					data-testid="connect-secret-set-message"
-				>
-					{message}
-				</p>
+				<>
+					<p
+						css={{ margin: 0, color: colors.danger }}
+						data-testid="connect-secret-set-message"
+					>
+						{message}
+					</p>
+					{setupError ? null : (
+						<ErrorAgentPromptButton
+							prompt={buildHumanApprovalErrorAgentPrompt({
+								activity:
+									'Setting a secret value from a /connect/secret-set setup link.',
+								errorMessage: message,
+								ids: { path: '/connect/secret-set' },
+							})}
+						/>
+					)}
+				</>
 			) : null}
 
 			{view.showForm && !setupError ? (

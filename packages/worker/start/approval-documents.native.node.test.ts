@@ -198,11 +198,15 @@ test('native pages server-renders connect-oauth provider visits without a loadin
 	expectHtml(missingHtml, [
 		'role="alert"',
 		'data-testid="connect-oauth-incomplete"',
+		'data-error-agent-prompt',
+		'Copy prompt for your agent',
 	])
 	expect(
 		missingHtml.split('Missing required OAuth configuration parameters.')
 			.length - 1,
 	).toBe(1)
+
+	expect(missingHtml.match(/data-error-agent-prompt=/g)).toHaveLength(1)
 
 	// The chooser only adds a filter once it lists more than six options.
 	const chooserOptions = [

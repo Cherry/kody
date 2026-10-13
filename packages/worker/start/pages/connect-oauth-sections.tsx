@@ -3,7 +3,8 @@
 import { SiteLink } from '../components/site-link.tsx'
 import { type ConnectOauthExistingConnection } from '#universal/loader-data.ts'
 import { docHref } from '#universal/docs-nav.ts'
-import { CopyTextButton } from '../components/copy-text-button.tsx'
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildConnectOauthFailureAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { buildIncompleteConnectOauthPrompt } from '#universal/oauth-scopes.ts'
 import { isConnectOauthCallbackUrl } from '#universal/oauth-connect.ts'
 
@@ -210,9 +211,8 @@ export function renderIncompleteConfig(provider: string) {
 				Copy this prompt for your agent so it can fill in the authorize and
 				token URLs and send you a complete link.
 			</p>
-			<CopyTextButton
-				value={buildIncompleteConnectOauthPrompt({ provider })}
-				idleLabel="Copy setup prompt"
+			<ErrorAgentPromptButton
+				prompt={buildIncompleteConnectOauthPrompt({ provider })}
 				variant="primary"
 			/>
 			<p css={descriptionCss}>
@@ -230,6 +230,9 @@ export function renderStatusCallout(input: {
 	statusTone: ConnectOauthStatusTone
 	statusMessage: string
 	currentStep: ConnectOauthStep
+	provider?: string | null
+	connectionName?: string | null
+	includePrompt?: boolean
 }) {
 	if (input.statusTone === 'error') {
 		return (
@@ -240,6 +243,15 @@ export function renderStatusCallout(input: {
 				})}
 			>
 				<p css={{ margin: 0, color: colors.error }}>{input.statusMessage}</p>
+				{input.includePrompt === false ? null : (
+					<ErrorAgentPromptButton
+						prompt={buildConnectOauthFailureAgentPrompt({
+							statusMessage: input.statusMessage,
+							provider: input.provider,
+							connectionName: input.connectionName,
+						})}
+					/>
+				)}
 			</div>
 		)
 	}

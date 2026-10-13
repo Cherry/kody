@@ -126,6 +126,17 @@ export function evaluateMarkdownFileReferences(input: {
 	const issues: Array<MarkdownFileRefIssue> = []
 	for (const reference of input.references) {
 		if (isIgnoredMarkdownFileReference(reference.repoPath)) continue
+		// These ignored experiment outputs may exist locally but are absent in CI
+		// and fresh checkouts. Maintained docs must not link to them as repo files.
+		if (reference.repoPath.startsWith('tools/framework-comparison/reports/')) {
+			issues.push({
+				file: reference.file,
+				line: reference.line,
+				reference: reference.repoPath,
+				message: `\`${reference.repoPath}\` is local-only experiment output, not a checked-in document.`,
+			})
+			continue
+		}
 		if (input.lookup.fileExists(reference.repoPath)) continue
 		if (!shouldReportMissing(reference, input.lookup)) continue
 		issues.push({

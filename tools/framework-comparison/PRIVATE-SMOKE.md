@@ -73,13 +73,13 @@ values, cookies, headers, raw errors, screenshots, HARs or traces.
 
 The final deployed candidate passed all 16 journey checks with zero browser
 errors and the original display name restored. Actual browser activation
-delivered focus, no event simulation was used. Evidence is
-[the final candidate report](reports/measurements/cloudflare/final-start-browser-smoke-active-tabs.json).
-The baseline passed 15 of 16 checks. Its second tab did not receive the changed
-profile on browser focus, while navigation, history, mutation, restoration and
-logout checks passed. It had zero browser errors. The failed freshness assertion
-remains a failure even though the harness continues independent checks. See
-[the final baseline report](reports/measurements/cloudflare/final-remix-browser-smoke-complete.json).
+delivered focus, no event simulation was used. The raw candidate report is local
+experiment output, not a checked-in artifact. The baseline passed 15 of 16
+checks. Its second tab did not receive the changed profile on browser focus,
+while navigation, history, mutation, restoration and logout checks passed. It
+had zero browser errors. The failed freshness assertion remains a failure even
+though the harness continues independent checks. The raw baseline report is also
+local-only. These historical results do not validate the current PR preview.
 
 The harness uses an explicit desktop viewport, visible account navigation,
 completed hydration, and activates the relevant tab before editing. Earlier

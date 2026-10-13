@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildOauthLoginErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import {
 	startAuthentication,
 	WebAuthnAbortService,
@@ -363,9 +365,17 @@ export function LoginPage({
 					</header>
 
 					{oauthErrorMessage ? (
-						<p aria-live="polite" data-tone="error" css={formMessageCss}>
-							{oauthErrorMessage}
-						</p>
+						<>
+							<p aria-live="polite" data-tone="error" css={formMessageCss}>
+								{oauthErrorMessage}
+							</p>
+							<ErrorAgentPromptButton
+								prompt={buildOauthLoginErrorAgentPrompt({
+									errorCode: searchParams.get('oauthError') ?? 'provider-error',
+									errorMessage: oauthErrorMessage,
+								})}
+							/>
+						</>
 					) : null}
 
 					<AuthForm

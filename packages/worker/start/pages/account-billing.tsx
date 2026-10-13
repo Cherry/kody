@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildBillingFailureAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { formatTimestampDate as formatCancelDate } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
@@ -331,9 +333,22 @@ export function AccountBillingPage({
 						</p>
 					) : null}
 					{statusInfo?.tone === 'action' ? (
-						<AccountManagementMessage tone="error">
-							{statusInfo.detail}
-						</AccountManagementMessage>
+						<>
+							<AccountManagementMessage tone="error">
+								{statusInfo.detail}
+							</AccountManagementMessage>
+							<ErrorAgentPromptButton
+								prompt={buildBillingFailureAgentPrompt({
+									kind:
+										subscriptionStatus === 'past_due'
+											? 'past_due'
+											: 'payment_failed',
+									errorMessage: statusInfo.detail,
+									orgSlug: payload.org.slug,
+									path: currentHref,
+								})}
+							/>
+						</>
 					) : null}
 
 					<AccountManagementPanel title="Current plan">

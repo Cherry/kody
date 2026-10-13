@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
@@ -87,9 +89,23 @@ export function AccountPackageApprovePublishRoute({
 				currentHref={currentHref}
 			/>
 			{message ? (
-				<AccountManagementMessage tone="error">
-					{message}
-				</AccountManagementMessage>
+				<>
+					<AccountManagementMessage tone="error">
+						{message}
+					</AccountManagementMessage>
+					<ErrorAgentPromptButton
+						prompt={buildHumanApprovalErrorAgentPrompt({
+							activity:
+								'Approving a package publish from the browser approval page.',
+							errorMessage: message,
+							ids: {
+								packageName: payload?.package.name,
+								packageKodyId: payload?.package.kodyId,
+								path: currentHref,
+							},
+						})}
+					/>
+				</>
 			) : null}
 
 			{payload ? (

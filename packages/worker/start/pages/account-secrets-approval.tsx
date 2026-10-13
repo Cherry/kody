@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import { parseAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { type CSSObject } from '@emotion/react'
@@ -440,11 +442,37 @@ export function renderPackageSecretApprovalPage(props: {
 					data-testid="account-secrets-package-approval-error"
 				>
 					<p css={{ margin: 0, color: colors.danger }}>{approvalError}</p>
+					<ErrorAgentPromptButton
+						prompt={buildHumanApprovalErrorAgentPrompt({
+							activity:
+								'Allowing a package to use saved secrets from an approval link.',
+							errorMessage: approvalError,
+							ids: {
+								packageKodyId: packageLabel,
+								path: '/account/secrets/approve',
+							},
+						})}
+					/>
 				</section>
 			) : null}
 
 			{message ? (
-				<p css={{ margin: 0, color: colors.danger }}>{message}</p>
+				<>
+					<p css={{ margin: 0, color: colors.danger }}>{message}</p>
+					{approvalError ? null : (
+						<ErrorAgentPromptButton
+							prompt={buildHumanApprovalErrorAgentPrompt({
+								activity:
+									'Allowing a package to use saved secrets from an approval link.',
+								errorMessage: message,
+								ids: {
+									packageKodyId: packageLabel,
+									path: '/account/secrets/approve',
+								},
+							})}
+						/>
+					)}
+				</>
 			) : null}
 
 			{approval && packageId ? (

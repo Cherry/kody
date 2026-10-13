@@ -297,14 +297,17 @@ test('a feature component that fails to load recovers through a document load', 
 		await route.continue()
 	})
 
-	await page
-		.getByRole('main')
-		.getByRole('link', { name: 'memory', exact: true })
-		.click()
+	// The router changes the URL before its failed import triggers a document
+	// reload. Wait for that load, not the earlier same-document URL change.
+	await Promise.all([
+		page.waitForEvent('load'),
+		page
+			.getByRole('main')
+			.getByRole('link', { name: 'memory', exact: true })
+			.click(),
+	])
 	await expect(page).toHaveURL(/\/features\/memory$/)
-	await expect
-		.poll(() => page.evaluate(() => '__kodyBootDocument' in window))
-		.toBe(false)
+	expect(await page.evaluate(() => '__kodyBootDocument' in window)).toBe(false)
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
 	await waitForClientHydration(page)

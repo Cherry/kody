@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildMcpAuthorizeErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
@@ -549,6 +551,13 @@ export function OAuthAuthorizeRoute({
 				>
 					{message.text}
 				</p>
+			) : null}
+			{message?.type === 'error' ? (
+				<ErrorAgentPromptButton
+					prompt={buildMcpAuthorizeErrorAgentPrompt({
+						errorMessage: message.text,
+					})}
+				/>
 			) : null}
 			{showResetClientCard ? (
 				<section css={cardCss}>

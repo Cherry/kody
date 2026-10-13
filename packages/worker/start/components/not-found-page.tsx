@@ -1,4 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from './error-agent-prompt-button.tsx'
+import { buildNotFoundErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
+import { useLocation } from '@tanstack/react-router'
 import { SiteLink } from './site-link.tsx'
 import { routes } from '#universal/routes.ts'
 import {
@@ -22,6 +25,7 @@ const notFoundPageImageSrc = '/images/kody-404-disappointed.png'
  * differently; both now render this page.
  */
 export function NotFoundPage() {
+	const path = useLocation({ select: (location) => location.pathname })
 	return (
 		<section data-testid="not-found-page" css={illustratedErrorPageCss}>
 			<img
@@ -47,6 +51,9 @@ export function NotFoundPage() {
 					Browse packages
 				</SiteLink>
 			</nav>
+			<ErrorAgentPromptButton
+				prompt={buildNotFoundErrorAgentPrompt({ path: path })}
+			/>
 		</section>
 	)
 }

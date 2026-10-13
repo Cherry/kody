@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { buildUnauthorizedErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { createScarfPageTracker } from '#client/scarf-analytics.ts'
 import { FathomTracker } from '../components/fathom-tracker.tsx'
 import {
@@ -167,6 +169,7 @@ export const Route = createRootRouteWithContext<{
 				<section data-testid="unauthorized-page">
 					<h1>Unauthorized</h1>
 					<p>{documentForbiddenMessage}</p>
+					<UnauthorizedAgentPrompt />
 					<SiteLink href="/">Go home</SiteLink>
 				</section>
 			) : (
@@ -389,5 +392,14 @@ function DocumentShell({ children }: { children: ReactNode }) {
 				<Scripts />
 			</body>
 		</html>
+	)
+}
+
+function UnauthorizedAgentPrompt() {
+	const pathname = useLocation({ select: (location) => location.pathname })
+	return (
+		<ErrorAgentPromptButton
+			prompt={buildUnauthorizedErrorAgentPrompt({ path: pathname })}
+		/>
 	)
 }

@@ -626,7 +626,13 @@ export function ConnectOauthRoute({
 					<h1 css={pageTitleCss}>{title}</h1>
 					{description ? <p css={pageDescriptionCss}>{description}</p> : null}
 				</header>
-				{renderStatusCallout({ statusTone, statusMessage, currentStep })}
+				{renderStatusCallout({
+					statusTone,
+					statusMessage,
+					currentStep,
+					provider: requestedProvider,
+					includePrompt: !(requestedProvider && hasConfigError),
+				})}
 				{requestedProvider && hasConfigError
 					? renderIncompleteConfig(requestedProvider)
 					: isConnectOauthCallbackUrl(
@@ -659,7 +665,13 @@ export function ConnectOauthRoute({
 				<h1 css={pageTitleCss}>{title}</h1>
 				{description ? <p css={pageDescriptionCss}>{description}</p> : null}
 			</header>
-			{renderStatusCallout({ statusTone, statusMessage, currentStep })}
+			{renderStatusCallout({
+				statusTone,
+				statusMessage,
+				currentStep,
+				provider: currentConfig.provider,
+				connectionName: currentConfig.providerKey,
+			})}
 			{currentStep === 'setup'
 				? renderRedirectUriCard({
 						config: currentConfig,
