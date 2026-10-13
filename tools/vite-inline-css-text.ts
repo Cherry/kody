@@ -2,6 +2,15 @@ import { readFile } from 'node:fs/promises'
 import { transform } from 'esbuild'
 import { type Plugin } from 'vite'
 
+export async function minifyInlineCss(source: string) {
+	// CSS input preprocessing treats CRLF as one newline, including after escapes.
+	const { code } = await transform(source.replace(/\r\n?|\f/g, '\n'), {
+		loader: 'css',
+		minify: true,
+	})
+	return code
+}
+
 /** Minify inline CSS at build time without rewriting public asset URLs. */
 export function inlineCssText(): Plugin {
 	return {
@@ -12,10 +21,7 @@ export function inlineCssText(): Plugin {
 			if (!id.endsWith('.css?raw')) return null
 			const filePath = id.slice(0, -'?raw'.length)
 			this.addWatchFile(filePath)
-			const { code } = await transform(await readFile(filePath, 'utf8'), {
-				loader: 'css',
-				minify: true,
-			})
+			const code = await minifyInlineCss(await readFile(filePath, 'utf8'))
 			return `export default ${JSON.stringify(code)}`
 		},
 	}
