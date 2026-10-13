@@ -491,6 +491,10 @@
 		{
 			"filename": "0133-package-app-custom-hostnames.sql",
 			"sha256": "4789df598f18f9ba9082cad29e680c15c14f61cd298f299a4519e79ecd8599fb"
+		},
+		{
+			"filename": "0134-credential-mappings.sql",
+			"sha256": "26fe1858ca6ca59fefd18ac9981f2787fe966dcf4d3fddbd5ef3b9f6e434293a"
 		}
 	]
 }
