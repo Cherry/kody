@@ -11,10 +11,10 @@ including the 2026-10-12 amendments and the
 MCP servers, and the opt-in `url`, `login`, and `signing` kinds are all
 credentials.
 
-Shapes here are the API contract. Step 2 of the [build order](#build-order) adds
-the TypeScript types and URL codecs as the worker's universal
-`credential-contracts` module, so the client and server import the same
-definitions.
+Shapes here are the API contract. The TypeScript types and URL codecs live in
+[`credential-contracts.ts`](../../../packages/worker/universal/credential-contracts.ts)
+so the client and the server import the same definitions; its test holds sample
+payloads for UI fixtures.
 
 ## Rules every surface keeps
 
@@ -355,7 +355,9 @@ Each mapping param is repeatable, one value per credential:
   `daily]backup` is `trigger[cron:daily%5Dbackup][github]` after query decoding.
   The codecs do this; hand-built links only need it for those three characters.
 
-At most 64 mapping params. Example:
+At most 64 mapping params (a param's repeated values count once). Param names
+that decode to the same target and need (`default[github]` and
+`default[git%68ub]`) are one param. Example:
 
 ```
 /@acme/pr-digest/approve-credentials?default[github]=org:acme-bot&trigger[cron:daily][slack]=team-slack&reason=Daily%20digest%20posts%20to%20Slack
