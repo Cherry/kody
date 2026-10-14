@@ -68,7 +68,7 @@ test('approve-publish SSR renders the promote card without a browser location', 
 	)
 })
 
-test('approve-publish shows the fresh listing hint', async () => {
+test('approve-publish notes listing sync when the catalog pin still lags', async () => {
 	const html = await renderToString(
 		jsx(AccountPackageApprovePublishRoute, {
 			payload: {
@@ -77,7 +77,7 @@ test('approve-publish shows the fresh listing hint', async () => {
 					pinnedVersion: '1.4.0',
 					promotedVersion: '1.5.0',
 					behind: true,
-					updateHint: 'Republish',
+					updateHint: 'Background sync is catching up.',
 					updateUrl: '/@kodykoala/gmail-drafts/settings#update-public-listing',
 				},
 			},
@@ -86,24 +86,25 @@ test('approve-publish shows the fresh listing hint', async () => {
 		}),
 		approvePublishHref,
 	)
-	expect(html).toContain('data-testid="approve-publish-update-public-listing"')
-	expect(html).toContain(
-		'href="/@kodykoala/gmail-drafts/settings#update-public-listing"',
-	)
+	expect(html).toContain('data-testid="approve-publish-listing-syncing"')
+	expect(html).toContain('catching up to this published version')
+	expect(html).not.toContain('Update public listing')
 })
-test('approve-publish warns before promotion without an early settings link', async () => {
+test('approve-publish does not warn that promote leaves the listing behind', async () => {
 	const html = await renderToString(
 		jsx(AccountPackageApprovePublishRoute, {
-			payload: { ...loaderData, listingWillLagAfterPromote: true },
+			payload: {
+				...loaderData,
+				listing: null,
+				listingWillLagAfterPromote: false,
+			},
 			username: 'kodykoala',
 			kodyId: 'gmail-drafts',
 		}),
 		approvePublishHref,
 	)
-	expect(html).toContain('data-testid="approve-publish-listing-will-lag"')
-	expect(html).not.toContain(
-		'data-testid="approve-publish-update-public-listing-link"',
-	)
+	expect(html).not.toContain('data-testid="approve-publish-listing-will-lag"')
+	expect(html).not.toContain('data-testid="approve-publish-listing-syncing"')
 })
 
 test('unlocked approve-publish SSR offers Publish HEAD', async () => {
@@ -144,6 +145,8 @@ test('approve-publish with nothing pending uses a plain up-to-date title', async
 		'Nothing to publish: the public version is up to date at aaaaaaa',
 	)
 	expect(html).toContain('No unpublished commit is waiting')
+	expect(html).toContain('data-testid="approve-publish-empty-state"')
+	expect(html).toContain('You are all caught up.')
 	expect(html).not.toContain('Public version')
 	expect(html).not.toContain('Current published commit')
 	expect(html).not.toContain('Commit to promote')

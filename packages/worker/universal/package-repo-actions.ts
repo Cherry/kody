@@ -17,8 +17,6 @@ export type PackageRepoActions = {
 	fork: PackageRepoForkAction | null
 	/** Owner: default-branch HEAD is ahead of the last publish. */
 	publishHref: string | null
-	/** Owner: the public listing is pinned behind the published commit. */
-	updateListingHref: string | null
 	/** Owner: the package declares an app. */
 	packageAppHref: string | null
 }

@@ -29,6 +29,9 @@ const ownerPackage: AccountPackageDetail = {
 	publishedCommit: null,
 	pendingCommit: null,
 	pendingCommitKnown: false,
+	publishedVersion: null,
+	unpublishedChangeCount: null,
+	ownerIsPersonal: true,
 	communityFork: null,
 }
 vi.mock('#app/package-page.ts', async (importOriginal) => ({

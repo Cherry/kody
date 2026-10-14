@@ -160,3 +160,35 @@ test('listing UUID URLs preserve query on canonical redirect and render when can
 		data: { listing: { id: 'listing-1' } },
 	})
 })
+
+test.each([true, false])(
+	'private packages expose unpublished changes only to managers, manager=%s',
+	async (viewerCanManage) => {
+		mocks.payload = {
+			ok: true,
+			username: 'owner',
+			kodyId: 'private',
+			listing: null,
+			isPrivate: true,
+			viewerIsOwner: viewerCanManage,
+			viewerCanManage,
+			loggedIn: true,
+			ownerPackage: {
+				id: 'owned-package',
+				hasApp: false,
+				pendingCommitKnown: true,
+				pendingCommit: 'new-head',
+				publishedCommit: 'published-head',
+			},
+		}
+		const result = await loadPackage({
+			data: { username: 'owner', kodyId: 'private' },
+		})
+		expect(result).toMatchObject({
+			kind: 'page',
+			header: {
+				repoActions: { publishHref: viewerCanManage ? '/approval' : null },
+			},
+		})
+	},
+)

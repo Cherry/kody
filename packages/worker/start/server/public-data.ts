@@ -269,6 +269,17 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			packageShaped: result.packageShaped === true,
 			repoActions: buildPackageRepoActions({
 				...result,
+				ownerPackage: result.ownerPackage
+					? {
+							hasApp: result.ownerPackage.hasApp,
+							sourceAhead:
+								result.ownerPackage.pendingCommitKnown &&
+								Boolean(result.ownerPackage.pendingCommit) &&
+								result.ownerPackage.pendingCommit !==
+									result.ownerPackage.publishedCommit,
+							headCommit: result.ownerPackage.pendingCommit,
+						}
+					: null,
 				viewerInstall: listing?.viewerInstall ?? null,
 			}),
 			iconUrl:
