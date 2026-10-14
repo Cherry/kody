@@ -79,10 +79,10 @@ fixtures use `control-kody execute` / `search` against the same origin.
 
 ## Transport
 
-Package reads, settings, individual and bundled approvals, and Collaborators use native Start server
-functions. Collaborator changes require `package:manage_access` and support
-granting or revoking access and sending or revoking invitations. Raw files,
-assets, and icons remain HTTP resources:
+Package reads, settings, individual and bundled approvals, and Collaborators use
+native Start server functions. Collaborator changes require
+`package:manage_access` and support granting or revoking access and sending or
+revoking invitations. Raw files, assets, and icons remain HTTP resources:
 
 - `GET /@:username/:kodyId/icon/:iconCommit`
 - `GET /account/repos/:repoId/icon/:iconCommit`

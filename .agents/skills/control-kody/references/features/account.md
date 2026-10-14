@@ -10,17 +10,18 @@ Pages about the person, split from the org workspace:
 - `/account/experiments`: experiments opt-in.
 - `/account/data`: export and delete account.
 
-Usage lives at `/@:orgSlug/-/usage`, with funding controls in `#credits`.
-The credits ledger lives at `/@:orgSlug/-/credits`. Legacy `/account/usage`
-and `/account/credits` redirect to the corresponding personal-org page.
+Usage lives at `/@:orgSlug/-/usage`, with funding controls in `#credits`. The
+credits ledger lives at `/@:orgSlug/-/credits`. Legacy `/account/usage` and
+`/account/credits` redirect to the corresponding personal-org page.
 
 The account rail ("Account sections") lists only those pages; it has no
 workspaces group. From account pages, orgs are reached through the avatar menu's
 Manage group (below) and the Organizations page. Every workspace section is on a
 separate "Workspace sections" rail under `/@<slug>/-/…`. That rail groups Build
-(Repositories, Jobs, Webhooks), Credentials (Credentials, Secret providers), Agents & data (Agents, Memories, Email), Activity, and
-Organization (Usage & credits and Billing for owners/billing admins). Activity
-has Activity, Workflows, and Waiting as tabs under the page title
+(Repositories, Jobs, Webhooks), Credentials (Credentials, Secret providers),
+Agents & data (Agents, Memories, Email), Activity, and Organization (Usage &
+credits and Billing for owners/billing admins). Activity has Activity,
+Workflows, and Waiting as tabs under the page title
 (`data-testid="account-section-tabs"`, labelled "Activity pages"); the rail item
 stays current on all three. Repositories is `/@<slug>/-/repositories`, distinct
 from the public profile at `/@<slug>`. Former `/@<slug>/-/packages` URLs 301 to

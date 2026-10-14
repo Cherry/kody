@@ -151,7 +151,7 @@ export function parseOrgUsagePath(pathname: string): { slug: string } | null {
  * `/@acme/-/approvals/:bundleId` and its `.json`: an approval bundle made for
  * one person in the organization.
  */
-export function parseOrgApprovalBundlePath(
+function parseOrgApprovalBundlePath(
 	pathname: string,
 ): { slug: string; bundleId: string } | null {
 	const match = /^\/@([^/]+)\/-\/approvals\/([^/.]+)(?:\.json)?\/?$/.exec(
