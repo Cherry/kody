@@ -1,11 +1,13 @@
 /** @jsxImportSource @emotion/react */
 import { useCallback } from 'react'
+import { staticDocumentHead } from '../components/document-head.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { usePageQuery } from '../page-query.ts'
 import { onboardingQuery, onboardingNeedsRefresh } from '../onboarding-query.ts'
 import { OnboardingRoute } from '../pages/onboarding.tsx'
 
 export const Route = createFileRoute('/onboarding')({
+	head: staticDocumentHead('onboarding'),
 	component: OnboardingLayout,
 })
 function OnboardingLayout() {

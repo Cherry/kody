@@ -1,6 +1,25 @@
 import { saveKeyThroughUi } from './account-fixtures.ts'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
 
+test('Start matches unknown admin paths before any admin authorization redirect', async ({
+	page,
+}) => {
+	for (const path of [
+		'/administrator',
+		'/admin/missing-route',
+		'/admin/users/missing/extra',
+	]) {
+		const response = await page.request.get(path, { maxRedirects: 0 })
+		expect(response.status(), path).toBe(404)
+		expect(response.headers().location, path).toBeUndefined()
+	}
+	for (const path of ['/admin', '/admin/', '/admin/users']) {
+		const response = await page.request.get(path, { maxRedirects: 0 })
+		expect(response.status(), path).toBe(302)
+		expect(response.headers().location, path).toContain('/login?')
+	}
+})
+
 test('admin RBAC controls access, role assignment, and privacy boundaries', async ({
 	page,
 	seedE2eUser,
@@ -26,7 +45,10 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 		password: memberUser.password,
 		mode: 'login',
 	})
-	await page.goto('/admin/users')
+	const forbiddenDocument = await page.goto('/admin/users')
+	expect(forbiddenDocument?.status()).toBe(403)
+	const forbiddenIndex = await page.request.get('/admin', { maxRedirects: 0 })
+	expect(forbiddenIndex.status()).toBe(403)
 	await expect(page.getByRole('heading', { name: 'Admin users' })).toBeHidden()
 	await expect(page.getByText('Forbidden')).toBeVisible()
 	const memberUsageResponse = await page.request.get('/admin/users/forbidden')

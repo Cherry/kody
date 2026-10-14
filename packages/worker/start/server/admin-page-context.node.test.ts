@@ -6,6 +6,22 @@ const state = vi.hoisted(() => ({
 	status: vi.fn(),
 	request: new Request('https://kody.test/_serverFn/admin'),
 }))
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: () => {
+		let validate = (value: unknown) => value
+		const builder = {
+			validator(parser: (value: unknown) => unknown) {
+				validate = parser
+				return builder
+			},
+			handler(run: (input: { data: unknown }) => Promise<unknown>) {
+				return async (input: { data: unknown }) =>
+					run({ data: validate(input.data) })
+			},
+		}
+		return builder
+	},
+}))
 vi.mock('cloudflare:workers', () => ({ env: { COOKIE_SECRET: 'test' } }))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => state.request,
@@ -22,6 +38,7 @@ vi.mock('../../src/app/authenticated-user.ts', () => ({
 vi.mock('../../src/app/request-auth-cache.ts', () => ({
 	loadResolvedRequestAuth: state.resolved,
 }))
+import { loadAdminIndex } from './admin-index.ts'
 import { readAdminPageContext } from './admin-page-context.ts'
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -61,3 +78,44 @@ test('admin reads use the original authenticated request and private cache polic
 		'private, no-store',
 	)
 })
+
+test('admin index checks authentication before redirecting to the user list', async () => {
+	state.read.mockResolvedValue(null)
+	const failure = await loadAdminIndex({ data: '/admin/' }).catch(
+		(error) => error,
+	)
+	expect(failure.options.href).toBe('/login?redirectTo=%2Fadmin%2F')
+	expect(state.header).toHaveBeenCalledWith(
+		'Set-Cookie',
+		'kody_session=; Max-Age=0',
+	)
+})
+test('admin index renders a native forbidden result with HTTP 403 for members', async () => {
+	state.read.mockResolvedValue({ roles: ['user'] })
+	await expect(loadAdminIndex({ data: '/admin' })).resolves.toEqual({
+		forbidden: true,
+	})
+	expect(state.status).toHaveBeenCalledWith(403)
+})
+test('admin index redirects authorized administrators using Router redirect', async () => {
+	state.read.mockResolvedValue({ roles: ['admin'] })
+	const failure = await loadAdminIndex({ data: '/admin' }).catch(
+		(error) => error,
+	)
+	expect(failure.options.to).toBe('/admin/users')
+	expect(failure.options.statusCode).toBe(302)
+})
+test.each([
+	'/administrator',
+	'/admin/missing',
+	'//other.test/admin',
+	'/admin/../login',
+])(
+	'admin index refuses an unrelated destination %s before authentication',
+	async (href) => {
+		await expect(loadAdminIndex({ data: href })).rejects.toThrow(
+			'Invalid admin index destination',
+		)
+		expect(state.read).not.toHaveBeenCalled()
+	},
+)

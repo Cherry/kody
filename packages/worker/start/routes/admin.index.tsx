@@ -1,7 +1,13 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+/** @jsxImportSource @emotion/react */
+import { staticDocumentHead } from '../components/document-head.ts'
+import { createFileRoute } from '@tanstack/react-router'
+import { loadAdminIndex } from '#start/server/admin-index'
 
 export const Route = createFileRoute('/admin/')({
-	beforeLoad: () => {
-		throw redirect({ to: '/admin/users', statusCode: 302 })
-	},
+	head: staticDocumentHead('admin'),
+	preload: false,
+	shouldReload: true,
+	loader: ({ location }) =>
+		loadAdminIndex({ data: location.pathname + location.searchStr }),
+	component: () => <p>Forbidden</p>,
 })
