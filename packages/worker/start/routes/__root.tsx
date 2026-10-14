@@ -223,7 +223,8 @@ function LoadedAppLayout() {
 			}),
 		[actorKey, queryClient, router],
 	)
-	const pathname = useLocation({ select: (location) => location.pathname })
+	// Loader data commits with the displayed matches, unlike the pending URL.
+	const pathname = shellLocation.pathname
 	const previousPathname = useRef(pathname)
 	useEffect(() => {
 		if (previousPathname.current === pathname) return
@@ -242,9 +243,7 @@ function LoadedAppLayout() {
 				(match) => match.status === 'notFound' || match.status === 'error',
 			),
 	})
-	const authReturnHref = useLocation({
-		select: (location) => `${location.pathname}${location.searchStr}`,
-	})
+	const authReturnHref = `${shellLocation.pathname}${shellLocation.searchStr}`
 	const loginHref = buildAuthLink(
 		'/login',
 		pathname === '/oauth/authorize' ? authReturnHref : null,
