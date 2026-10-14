@@ -3,6 +3,8 @@ import {
 	loadAccountMemoriesData,
 	loadAccountMemoriesExport,
 	readAccountMemoriesIncludeDeleted,
+	readAccountMemoriesQuery,
+	readAccountMemoriesSelectedMemoryId,
 } from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
@@ -77,8 +79,10 @@ async function handleDeleteAction(input: {
 	}
 	const payload: AccountMemoriesLoaderData = await loadAccountMemoriesData({
 		env: input.env,
-		request: input.request,
 		user: input.user,
+		query: readAccountMemoriesQuery(input.request.url),
+		includeDeleted: readAccountMemoriesIncludeDeleted(input.request.url),
+		selectedMemoryId: readAccountMemoriesSelectedMemoryId(input.request.url),
 	})
 	return operationResult(payload)
 }

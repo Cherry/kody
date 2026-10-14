@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
+import { adminUsersReadInput } from './admin-users-input.ts'
 
 async function adminContext(permission?: 'read:user:any' | 'update:user:any') {
 	const [
@@ -128,16 +129,12 @@ export const grantAdminCredits = createServerFn({ method: 'POST' })
 
 export const readAdminUsersPage = createServerFn({ method: 'GET' })
 	.inputValidator(
-		z.object({ search: z.string(), page: z.number().int().positive() }),
+		adminUsersReadInput.extend({ page: z.number().int().positive() }),
 	)
 	.handler(async ({ data }) => {
-		const { env, request } = await adminContext('read:user:any')
-		const { loadAdminUsersData } = await import('../../src/admin/users-data.ts')
-		const url = new URL('/admin/users', request.url)
-		url.search = data.search
-		url.searchParams.set('page', String(data.page))
-		url.searchParams.delete('selected')
-		return loadAdminUsersData(env, url.toString())
+		const { env } = await adminContext('read:user:any')
+		const { readAdminUsersData } = await import('../../src/admin/users-data.ts')
+		return readAdminUsersData(env, data)
 	})
 
 export const readAdminUserUsage = createServerFn({ method: 'GET' })

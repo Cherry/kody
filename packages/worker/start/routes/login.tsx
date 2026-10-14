@@ -7,7 +7,12 @@ export const Route = createFileRoute('/login')({
 	head: staticDocumentHead('login'),
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location }) =>
-		loadAuthPage({ signal: abortController.signal, data: location.href }),
+		loadAuthPage({
+			signal: abortController.signal,
+			data: {
+				redirectTo: new URLSearchParams(location.searchStr).get('redirectTo'),
+			},
+		}),
 	component: AuthPage,
 })
 function AuthPage() {

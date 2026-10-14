@@ -696,11 +696,20 @@ test('billing data is readable by owners and billing admins of the org in the UR
 test('checkout return links the Stripe customer onto the org in the URL', async () => {
 	mocks.linkStripeCustomerFromCheckoutSessionAttribution.mockResolvedValue({})
 	const env = createEnv()
-	const getSuccess = (path: string) =>
-		completeOrgBillingCheckout(new Request(`https://example.com${path}`), env)
+	const getSuccess = async (sessionId: string | null = null) => {
+		const request = new Request('https://example.com/@acme/-/billing/success')
+		const user = await mocks.readAuthenticatedAppUser(request, env)
+		return completeOrgBillingCheckout({
+			request,
+			env,
+			user,
+			orgSlug: 'acme',
+			sessionId,
+		})
+	}
 
 	signInAs('ada')
-	const missing = await getSuccess('/@acme/-/billing/success')
+	const missing = await getSuccess()
 	if (!(missing instanceof Response))
 		throw new Error('Expected checkout redirect')
 	expect(missing.status).toBe(302)
@@ -708,7 +717,7 @@ test('checkout return links the Stripe customer onto the org in the URL', async 
 		'https://example.com/@acme/-/billing?error=missing_session',
 	)
 
-	const linked = await getSuccess('/@acme/-/billing/success?session_id=cs_test')
+	const linked = await getSuccess('cs_test')
 	expect(linked).toMatchObject({ ok: true, needsOnboarding: true })
 	expect(
 		mocks.linkStripeCustomerFromCheckoutSessionAttribution,
@@ -720,7 +729,7 @@ test('checkout return links the Stripe customer onto the org in the URL', async 
 	)
 
 	signInAs('bob')
-	const member = await getSuccess('/@acme/-/billing/success?session_id=cs_test')
+	const member = await getSuccess('cs_test')
 	expect(member).toMatchObject({ ok: false, status: 403 })
 	expect(
 		mocks.linkStripeCustomerFromCheckoutSessionAttribution,

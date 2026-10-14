@@ -1,4 +1,4 @@
-import { pageQueryOrg } from './page-query-scope.ts'
+import { pageQueryOrg, pageQueryInputOrg } from './page-query-scope.ts'
 import { type QueryClient, type Query } from '@tanstack/react-query'
 import { type PageResource } from './page-resources.ts'
 
@@ -23,8 +23,9 @@ export async function invalidatePageResources(
 				// Cross-surface actions may omit org identity. Invalidate their named
 				// actor resources rather than silently missing every org cache.
 				(org === null ||
-					typeof query.queryKey[3] !== 'string' ||
-					pageQueryOrg(query.queryKey[3]) === org)),
+					(typeof query.queryKey[3] !== 'string' &&
+						pageQueryInputOrg(query.queryKey[3]) === null) ||
+					pageQueryInputOrg(query.queryKey[3]) === org)),
 	}
 	// A read started before the write must not satisfy its confirming refresh.
 	// Keep uncached reads waiting on a pending mutation barrier alive, because

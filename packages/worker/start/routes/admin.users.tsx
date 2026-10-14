@@ -3,6 +3,7 @@ import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AdminUsersPage } from '../pages/admin-users.tsx'
 import { loadAdminUsers } from '#start/server/admin-users'
+import { adminUsersFilters } from '../admin-users-input.ts'
 import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadAdminUsers', loadAdminUsers, {
 	freshAuthorization: true,
@@ -11,7 +12,14 @@ const pageQuery = createPageQuery('loadAdminUsers', loadAdminUsers, {
 export const Route = createFileRoute('/admin/users')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: {
+			...adminUsersFilters(location.searchStr),
+			selectedStableUserId: new URLSearchParams(location.searchStr).get(
+				'selected',
+			),
+			detail: false,
+			returnTo: location.pathname + location.searchStr,
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

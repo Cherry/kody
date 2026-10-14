@@ -30,17 +30,15 @@ export const resolveOrgAlias = createServerFn({ method: 'GET' })
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const original = getRequest()
-		const request = new Request(new URL(href, original.url), {
-			headers: original.headers,
-		})
+		const destination = new URL(href, original.url)
 		setResponseHeader('Cache-Control', 'no-store')
-		const { session, setCookie } = await loadSessionInfo(request, bindings)
+		const { session, setCookie } = await loadSessionInfo(original, bindings)
 		if (setCookie) setResponseHeader('Set-Cookie', setCookie)
 		if (!session)
 			throw redirect({ href: `/login?redirectTo=${encodeURIComponent(href)}` })
 		const personal = session.organizations.find((org) => org.personal)
 		if (!personal) throw notFound()
-		const url = new URL(request.url)
+		const url = destination
 		const path = orgResourcePathForAccountPath(
 			url.pathname.replace(
 				/^\/account\/connections(?=\/|$)/,

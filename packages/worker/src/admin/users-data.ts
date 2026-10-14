@@ -277,18 +277,55 @@ export async function loadAdminUsersData(
 	pathStableUserId?: string,
 ): Promise<AdminUsersLoaderData> {
 	const url = new URL(requestUrl, 'http://localhost')
-	const { page, pageSize, offset } = readPagination(url, {
+	const { page, pageSize } = readPagination(url, {
 		defaultPageSize,
 		maxPageSize,
 	})
-	const filters = readAdminUserListFilters(url)
+	return readAdminUsersData(env, {
+		...readAdminUserListFilters(url),
+		page,
+		pageSize,
+		selectedStableUserId: readAdminUsersSelectedStableUserId(
+			requestUrl,
+			pathStableUserId,
+		),
+	})
+}
+
+/** The domain read accepts data, independent of page URLs or HTTP transport. */
+export async function readAdminUsersData(
+	env: Env,
+	input: {
+		query: string
+		role: string | null
+		verification: string | null
+		page: number
+		pageSize: number
+		selectedStableUserId?: string | null
+	},
+): Promise<AdminUsersLoaderData> {
+	const page = Math.max(1, Math.floor(input.page))
+	const pageSize = Math.min(
+		maxPageSize,
+		Math.max(1, Math.floor(input.pageSize)),
+	)
+	const offset = (page - 1) * pageSize
+	const role = input.role?.trim() ?? ''
+	const verification = input.verification?.trim() ?? ''
+	const filters: AdminUserListFilters = {
+		query: input.query.trim(),
+		role: isRoleName(role) ? role : null,
+		verification: isAdminUserVerificationFilter(verification)
+			? verification
+			: null,
+	}
+
 	const { whereClause, params } = buildAdminUserListWhereClause(
 		filters,
 		new Date(),
 	)
-	const selectedStableUserId = readAdminUsersSelectedStableUserId(
-		requestUrl,
-		pathStableUserId,
+	const selectedStableUserId = parseSelectedStableUserId(
+		input.selectedStableUserId,
 	)
 
 	const [totalResult, userRows, selectedUser] = await Promise.all([

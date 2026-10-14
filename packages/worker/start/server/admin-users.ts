@@ -1,44 +1,43 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
+import { adminUsersReadInput } from './admin-users-input.ts'
 
 export const loadAdminUsers = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/users(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const [{ loadAdminUsersData }, { loadDocumentHead }] = await Promise.all([
+	.validator(
+		adminUsersReadInput.extend({
+			selectedStableUserId: z.string().nullable(),
+			detail: z.boolean(),
+			returnTo: z
+				.string()
+				.regex(/^\/admin\/users(?:\/[^/?#\\]+)?(?:\?[^#\\]*)?$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ readAdminUsersData },
+			{ loadDocumentHead },
+			{ readAdminPageContext },
+		] = await Promise.all([
 			import('../../src/admin/users-data.ts'),
 			import('./document-head.ts'),
+			import('./admin-page-context.ts'),
 		])
-		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
-		if (!user) {
-			return {
-				forbidden: true as const,
-				head: loadDocumentHead(
-					url.pathname.split('/')[3] ? 'adminUserDetail' : 'adminUsers',
-					href,
-				),
-			}
-		}
+		const { bindings, user } = await readAdminPageContext(data.returnTo)
+		const head = loadDocumentHead(
+			data.detail ? 'adminUserDetail' : 'adminUsers',
+			data.returnTo,
+		)
+		if (!user) return { forbidden: true as const, head }
 		return {
 			forbidden: false as const,
-			payload: await loadAdminUsersData(
-				bindings,
-				(() => {
-					const filters = new URL(url)
-					filters.searchParams.delete('page')
-					return filters.toString()
-				})(),
-				url.pathname.split('/')[3],
-			),
-			head: loadDocumentHead(
-				url.pathname.split('/')[3] ? 'adminUserDetail' : 'adminUsers',
-				href,
-			),
+			payload: await readAdminUsersData(bindings, {
+				query: data.query,
+				role: data.role,
+				verification: data.verification,
+				pageSize: data.pageSize,
+				selectedStableUserId: data.selectedStableUserId,
+				page: 1,
+			}),
+			head,
 		}
 	})

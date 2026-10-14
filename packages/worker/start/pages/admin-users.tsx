@@ -13,12 +13,12 @@ import {
 	useRef,
 	useState,
 } from 'react'
+import { adminUsersFilters } from '../admin-users-input.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 
 import {
 	type AdminUserFilterState,
 	buildUserDetailHrefFrom,
-	getListKey,
 	getSelection,
 	parseSelectedStableUserId,
 	readFilterState,
@@ -81,8 +81,11 @@ export function AdminUsersPage(props: {
 	const availablePlans = props.payload.availablePlans
 	const selectedUserFallback = props.payload.selectedUser
 	const [loadAdditionalPages, setLoadAdditionalPages] = useState(false)
+	const listFilters = adminUsersFilters(
+		new URL(props.currentHref, 'http://localhost').search,
+	)
 	const additional = useInfiniteQuery({
-		queryKey: ['admin-users-pages', actorKey, getListKey(props.currentHref)],
+		queryKey: ['admin-users-pages', actorKey, listFilters],
 		initialPageParam: props.payload.page + 1,
 		enabled:
 			loadAdditionalPages &&
@@ -90,7 +93,7 @@ export function AdminUsersPage(props: {
 		queryFn: ({ pageParam, signal }) =>
 			readAdminUsersPage({
 				data: {
-					search: new URL(props.currentHref, 'http://localhost').search,
+					...listFilters,
 					page: pageParam,
 				},
 				signal,

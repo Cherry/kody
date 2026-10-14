@@ -11,8 +11,13 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/billing_/success')({
 	staleTime: Infinity,
 	shouldReload: false,
 	loaderDeps: ({ search }) => search,
-	loader: ({ location }) =>
-		loadBillingCompletion({ data: location.pathname + location.searchStr }),
+	loader: ({ location, params }) =>
+		loadBillingCompletion({
+			data: {
+				orgSlug: params.orgSlug,
+				sessionId: new URLSearchParams(location.searchStr).get('session_id'),
+			},
+		}),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })

@@ -168,21 +168,17 @@ export function memoryMatchesQuery(
 
 export async function loadAccountMemoriesData(input: {
 	env: Env
-	request: Request
 	user: AuthenticatedUser
-	pathMemoryId?: string
+	query: string
+	includeDeleted: boolean
+	selectedMemoryId: string | null
 }): Promise<AccountMemoriesLoaderData> {
 	const userId = ownerIdFromCaller({
 		request: input.user.request,
 		user: input.user.mcpUser,
 	})
 	const legacyReadOnly = !(await isPersonalOrg(input.env.APP_DB, userId))
-	const query = readAccountMemoriesQuery(input.request.url)
-	const includeDeleted = readAccountMemoriesIncludeDeleted(input.request.url)
-	const selectedMemoryId = readAccountMemoriesSelectedMemoryId(
-		input.request.url,
-		input.pathMemoryId,
-	)
+	const { query, includeDeleted, selectedMemoryId } = input
 	const statuses = memoryStatusesForExport(includeDeleted)
 
 	const rows = await listMemoriesByUserId(input.env.APP_DB, userId, {

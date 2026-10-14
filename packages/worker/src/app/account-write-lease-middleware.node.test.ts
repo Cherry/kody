@@ -117,7 +117,6 @@ test('nonmutating documents preserve the native middleware result without auth o
 test.each([
 	['POST', '/auth'],
 	['GET', '/account/mcp-servers/oauth/callback'],
-	['GET', '/@acme/-/billing/success'],
 	['GET', '/@acme/-/billing/portal'],
 ])(
 	'deleting accounts cannot enter mutating protocol %s %s',
@@ -144,3 +143,15 @@ test.each([
 		expect(next).not.toHaveBeenCalled()
 	},
 )
+
+test('checkout success documents defer leasing to their native function exactly once', async () => {
+	authMock.loadResolvedRequestAuth.mockClear()
+	const next = vi.fn(async () => ({ response: new Response('checkout') }))
+	await withProtocolAccountWriteLease(
+		new Request('https://example.com/@acme/-/billing/success'),
+		{} as Env,
+		next,
+	)
+	expect(next).toHaveBeenCalledOnce()
+	expect(authMock.loadResolvedRequestAuth).not.toHaveBeenCalled()
+})

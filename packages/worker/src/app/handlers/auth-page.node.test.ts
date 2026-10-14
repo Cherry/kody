@@ -100,7 +100,7 @@ test('auth page renders login for a stale session instead of redirecting away', 
 		'https://example.com/login?redirectTo=%2Faccount',
 		{ headers: { Cookie: cookie } },
 	)
-	const response = await loadAuthPage({ data: '/login?redirectTo=%2Faccount' })
+	const response = await loadAuthPage({ data: { redirectTo: '/account' } })
 	expect(response.session).toBeNull()
 	expect(response.authConfig.ok).toBe(true)
 })
@@ -170,7 +170,7 @@ test('auth page renders login for a deleting account instead of redirecting to /
 		'https://example.com/login?redirectTo=%2Faccount',
 		{ headers: { Cookie: cookie } },
 	)
-	const response = await loadAuthPage({ data: '/login?redirectTo=%2Faccount' })
+	const response = await loadAuthPage({ data: { redirectTo: '/account' } })
 	expect(response.session).toBeNull()
 	expect(response.authConfig.ok).toBe(true)
 	expect(native.setResponseHeader).toHaveBeenCalledWith(

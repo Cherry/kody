@@ -1,0 +1,76 @@
+import { createServerOnlyFn } from '@tanstack/react-start'
+import { notFound, redirect } from '@tanstack/react-router'
+import { type OrgOwnedAccountSection } from '#universal/org-pages.ts'
+import { isOrgDocumentRequest } from './org-document-request.ts'
+
+/** Resource scope is explicit. The request remains the authenticated RPC/document. */
+export const loadScopedCollection = createServerOnlyFn(
+	async (input: {
+		orgSlug: string
+		section: OrgOwnedAccountSection
+		returnTo: string
+	}) => {
+		const [
+			{ env },
+			{ getRequest, setResponseHeader },
+			{ getEnv },
+			{ requireAuthenticatedPageUser },
+			{ loadOrgBindingForSlug },
+			{ deriveRequestContext },
+			{ orgSectionDenial },
+		] = await Promise.all([
+			import('cloudflare:workers'),
+			import('@tanstack/react-start/server'),
+			import('#app/env.ts'),
+			import('#app/page-auth.ts'),
+			import('#worker/orgs/repo.ts'),
+			import('#worker/request-context/request-context.ts'),
+			import('#app/org-request-binding.ts'),
+		])
+		const bindings = getEnv(env)
+		const request = getRequest()
+		const authenticated = await requireAuthenticatedPageUser(
+			request,
+			bindings,
+			{ redirectTo: input.returnTo },
+		)
+		if (authenticated instanceof Response) {
+			const cookies = authenticated.headers.getSetCookie()
+			if (cookies.length) setResponseHeader('Set-Cookie', cookies)
+			throw redirect({
+				href: authenticated.headers.get('Location') ?? '/login',
+				statusCode: authenticated.status,
+			})
+		}
+		const binding = await loadOrgBindingForSlug(
+			bindings.APP_DB,
+			authenticated.mcpUser.userId,
+			input.orgSlug,
+		)
+		if (!binding || orgSectionDenial(binding, input.section)) throw notFound()
+		const user = {
+			...authenticated,
+			request: deriveRequestContext({
+				user: authenticated.mcpUser,
+				source: { kind: 'session' },
+				orgBinding: binding,
+			}),
+		}
+		if (isOrgDocumentRequest()) {
+			const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
+				await Promise.all([
+					import('#universal/org-last-used-cookie.ts'),
+					import('#app/auth-session.ts'),
+				])
+			setResponseHeader(
+				'Set-Cookie',
+				serializeLastUsedOrgCookie({
+					slug: input.orgSlug,
+					secure: isSecureRequest(request),
+				}),
+			)
+		}
+		setResponseHeader('Cache-Control', 'private, no-store')
+		return { bindings, request, user }
+	},
+)

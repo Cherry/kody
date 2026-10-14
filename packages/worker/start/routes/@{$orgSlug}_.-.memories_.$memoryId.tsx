@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
+import { memoriesInput } from '../memories-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountMemoriesPage } from '../pages/account-memories.tsx'
 import { loadMemoriesPage } from '#start/server/account-collections'
@@ -15,10 +15,12 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/memories_/$memoryId')({
 		q: search.q,
 		includeDeleted: search.includeDeleted,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, ['selected', 'q', 'includeDeleted']),
+	context: ({ location, params }) => ({
+		pageQueryInput: memoriesInput(
+			params.orgSlug,
+			location.searchStr,
+			params.memoryId,
+		),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -8,8 +8,8 @@ import { loadResolvedRequestAuth } from './request-auth-cache.ts'
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const mutatingGetPaths = new Set(['/account/mcp-servers/oauth/callback'])
-/** Checkout return links the Stripe customer; the portal can change plans. */
-const mutatingBillingGetPath = /^\/@[^/]+\/-\/billing\/(?:success|portal)$/
+/** Checkout completion owns its native lease; the portal remains a protocol. */
+const mutatingBillingGetPath = /^\/@[^/]+\/-\/billing\/portal$/
 
 function accountDeletingResponse(status: number) {
 	return Response.json(
@@ -42,8 +42,18 @@ export async function withProtocolAccountWriteLease<T>(
 	) {
 		return await next()
 	}
+	return withAccountRequestWriteLease(request, env, next)
+}
+
+/** Share deletion fencing between explicit native writes and HTTP protocols. */
+export async function withAccountRequestWriteLease<T>(
+	request: Request,
+	env: Env,
+	write: () => Promise<T>,
+): Promise<T | Response> {
+	const url = new URL(request.url)
 	const auth = await loadResolvedRequestAuth(request, env)
-	if (!auth.user) return await next()
+	if (!auth.user) return await write()
 	if (auth.user.accountDeleting) return accountDeletingResponse(409)
 	try {
 		return await withAccountWriteLease({
@@ -51,7 +61,7 @@ export async function withProtocolAccountWriteLease<T>(
 			stableUserId: personalOrgIdForPerson(auth.user.mcpUser),
 			holder: `web:${request.method} ${url.pathname}`,
 			env,
-			write: next,
+			write,
 		})
 	} catch (error) {
 		if (error instanceof AccountDeletionInProgressError) {

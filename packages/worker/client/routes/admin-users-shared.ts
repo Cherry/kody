@@ -39,15 +39,6 @@ export function readFilterState(href: string): AdminUserFilterState {
 	}
 }
 
-/**
- * The list window only depends on the filters, not on which user is
- * selected — selection-only navigations keep the loaded scroll window.
- */
-export function getListKey(href: string) {
-	const filters = readFilterState(href)
-	return `q=${filters.search}&role=${filters.role}&verification=${filters.verification}`
-}
-
 export function buildUserDetailHrefFrom(
 	currentHref: string,
 	stableUserId: string,

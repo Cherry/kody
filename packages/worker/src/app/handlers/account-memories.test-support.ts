@@ -1,4 +1,9 @@
-import { loadAccountMemoriesData } from '#app/account-memories-data.ts'
+import {
+	loadAccountMemoriesData,
+	readAccountMemoriesQuery,
+	readAccountMemoriesIncludeDeleted,
+	readAccountMemoriesSelectedMemoryId,
+} from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { mutateAccountMemories } from './account-memories.ts'
@@ -16,8 +21,10 @@ export function testAccountMemoriesApiHandler(env: Env) {
 				return operationResult(
 					await loadAccountMemoriesData({
 						env,
-						request,
 						user,
+						query: readAccountMemoriesQuery(request.url),
+						includeDeleted: readAccountMemoriesIncludeDeleted(request.url),
+						selectedMemoryId: readAccountMemoriesSelectedMemoryId(request.url),
 					}),
 				)
 			}

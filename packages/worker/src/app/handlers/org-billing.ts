@@ -14,7 +14,6 @@ import {
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { userHasMcpOAuthGrants } from '#app/onboarding-data.ts'
 import { loadRequestOrgResolution } from '#app/org-request-binding.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
 	authorize,
 	AuthorizationError,
@@ -213,16 +212,25 @@ export async function openWebsiteBillingPortal(input: {
 	}
 }
 
-export async function completeOrgBillingCheckout(request: Request, env: Env) {
-	const user = await requireAuthenticatedPageUser(request, env)
-	if (user instanceof Response) {
-		return user
-	}
+export async function completeOrgBillingCheckout({
+	request,
+	env,
+	user,
+	orgSlug,
+	sessionId,
+}: {
+	request: Request
+	env: Env
+	user: AuthenticatedAppUser
+	orgSlug: string
+	sessionId: string | null
+}) {
 	const access = await resolveOrgBillingAccess({
 		request,
 		env,
 		user,
 		permission: 'billing:write',
+		orgSlug,
 	})
 	if (!access.ok) return access
 	const { org } = access
@@ -231,8 +239,7 @@ export async function completeOrgBillingCheckout(request: Request, env: Env) {
 		return billingErrorRedirect(request, org.slug, 'billing_not_configured')
 	}
 
-	const sessionId =
-		new URL(request.url).searchParams.get('session_id')?.trim() ?? ''
+	sessionId = sessionId?.trim() ?? ''
 	if (!sessionId) {
 		return billingErrorRedirect(request, org.slug, 'missing_session')
 	}
@@ -253,7 +260,7 @@ export async function completeOrgBillingCheckout(request: Request, env: Env) {
 			result: 'success',
 			email: user.email,
 			ip: requestIp,
-			path: new URL(request.url).pathname,
+			path: `${orgBillingPath(orgSlug)}/success`,
 		})
 		const hasMcpClient = await userHasMcpOAuthGrants(
 			env,
@@ -270,7 +277,7 @@ export async function completeOrgBillingCheckout(request: Request, env: Env) {
 			result: 'failure',
 			email: user.email,
 			ip: requestIp,
-			path: new URL(request.url).pathname,
+			path: `${orgBillingPath(orgSlug)}/success`,
 			reason: code,
 		})
 		return billingErrorRedirect(request, org.slug, code)

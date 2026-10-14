@@ -2,16 +2,16 @@ import { createServerFn } from '@tanstack/react-start'
 import { redirect } from '@tanstack/react-router'
 
 export const loadAuthPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
+	.validator((input: { redirectTo?: string | null }) => {
 		if (
-			typeof href !== 'string' ||
-			!/^\/(login|signup)(?:\?|$)/.test(href) ||
-			href.includes('\\')
+			!input ||
+			typeof input !== 'object' ||
+			(input.redirectTo != null && typeof input.redirectTo !== 'string')
 		)
-			throw new Error('Invalid auth URL')
-		return href
+			throw new Error('Invalid auth return destination')
+		return { redirectTo: input.redirectTo ?? null }
 	})
-	.handler(async ({ data: href }) => {
+	.handler(async ({ data }) => {
 		const [
 			{ env },
 			{ getRequest, setResponseHeader },
@@ -37,10 +37,7 @@ export const loadAuthPage = createServerFn({ method: 'GET' })
 		if (setCookie) setResponseHeader('Set-Cookie', setCookie)
 		if (session)
 			throw redirect({
-				href:
-					normalizeRedirectTo(
-						new URL(href, getRequest().url).searchParams.get('redirectTo'),
-					) ?? '/account',
+				href: normalizeRedirectTo(data.redirectTo) ?? '/account',
 				statusCode: 302,
 			})
 		return {

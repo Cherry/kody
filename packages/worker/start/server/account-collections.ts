@@ -1,3 +1,5 @@
+import { z } from 'zod'
+import { routes } from '#universal/routes.ts'
 import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { notFound, redirect } from '@tanstack/react-router'
@@ -11,10 +13,10 @@ function collectionAliasHref(href: string) {
 	const url = new URL(href, 'https://kody.local')
 	return accountAliasPath(url.pathname) + url.search + url.hash
 }
-function validateCollectionHref(href: string) {
+function validateValuesHref(href: string) {
 	if (
 		typeof href !== 'string' ||
-		!/^\/account\/(memories|values)(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
+		!/^\/account\/values(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
 			collectionAliasHref(href),
 		)
 	)
@@ -140,40 +142,57 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 	})
 
 export const loadMemoriesPage = createServerFn({ method: 'GET' })
-	.validator(validateCollectionHref)
-	.handler(async ({ data: href }) => {
-		if (
-			!accountAliasPath(
-				new URL(href, 'https://kody.local').pathname,
-			).startsWith('/account/memories')
-		)
-			throw new Error('Invalid memories URL')
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountMemoriesData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-memories-data.ts'),
-				import('./document-head.ts'),
-			])
-		const url = new URL(request.url)
-		const pathMemoryId = accountAliasPath(url.pathname).split('/')[3]
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			memoryId: z.string().trim().min(1).optional(),
+			selected: z.string().trim().min(1).optional(),
+			query: z.string().default(''),
+			includeDeleted: z.boolean().default(false),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountMemoriesData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-memories-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname =
+			routes.orgMemories.href({ orgSlug: data.orgSlug }) +
+			(data.memoryId ? `/${encodeURIComponent(data.memoryId)}` : '')
+		const params = new URLSearchParams()
+		if (data.selected) params.set('selected', data.selected)
+		if (data.query) params.set('q', data.query)
+		if (data.includeDeleted) params.set('includeDeleted', 'true')
+		const search = params.size ? `?${params}` : ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'memories',
+			returnTo: pathname + search,
+		})
 		const payload = await loadAccountMemoriesData({
 			env: bindings,
-			request,
 			user,
-			pathMemoryId: pathMemoryId ? decodeURIComponent(pathMemoryId) : undefined,
+			query: data.query,
+			includeDeleted: data.includeDeleted,
+			selectedMemoryId: data.memoryId ?? data.selected ?? null,
 		})
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgMemories',
-				url.pathname,
+				pathname,
 				{ accountMemories: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 export const loadValuesPage = createServerFn({ method: 'GET' })
-	.validator(validateCollectionHref)
+	.validator(validateValuesHref)
 	.handler(async ({ data: href }) => {
 		if (
 			!accountAliasPath(

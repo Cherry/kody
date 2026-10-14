@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, test } from 'vitest'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
 import { invalidatePageResources } from './page-invalidation-cache.ts'
 
@@ -173,6 +173,31 @@ it('cross-surface writes without org identity invalidate named resources across 
 		['loadSecretsPage'],
 		'none',
 		'/connect/secrets?state=opaque',
+	)
+	expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([
+		true,
+		true,
+		false,
+		false,
+	])
+	client.clear()
+})
+
+test('typed collection inputs invalidate the submitting actor and org only', async () => {
+	const client = new QueryClient()
+	const keys = [
+		['page', 'alice', 'loadMemoriesPage', { orgSlug: 'team', query: '' }],
+		['page', 'alice', 'loadMemoriesPage', { orgSlug: 'team', memoryId: 'one' }],
+		['page', 'alice', 'loadMemoriesPage', { orgSlug: 'other', query: '' }],
+		['page', 'bob', 'loadMemoriesPage', { orgSlug: 'team', query: '' }],
+	]
+	for (const key of keys) client.setQueryData(key, {})
+	await invalidatePageResources(
+		client,
+		'alice',
+		['loadMemoriesPage'],
+		'none',
+		'/@team/-/memories',
 	)
 	expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([
 		true,
