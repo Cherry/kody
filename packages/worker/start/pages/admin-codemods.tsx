@@ -400,7 +400,7 @@ export function AdminCodemodsPage(props: {
 	const revertFormConfirmActive =
 		pendingConfirmKey === getConfirmKey('revert-form', selectedCodemodId)
 	return (
-		<AccountManagementShell busy={pending}>
+		<AccountManagementShell currentHref={currentHref} busy={pending}>
 			<AdminPageHeader
 				title="Admin codemods"
 				description="Scan, dry-run, apply, and revert package codemods across the fleet."

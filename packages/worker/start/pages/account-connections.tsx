@@ -80,7 +80,7 @@ export function AccountConnectionsPage({
 			? { kind: 'error', message: usage.error.message }
 			: { kind: 'loading' }
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={currentHref}>
 			<AccountPageHeader
 				title="Agents"
 				description="The agents connected to this Kody account, and how to connect another."

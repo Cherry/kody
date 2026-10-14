@@ -37,7 +37,7 @@ function Page() {
 	const { data } = usePageQuery(pageQuery(actorKey, pageQueryInput))
 	const href = Route.useRouteContext().pageLocation.href
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={href}>
 			<AccountPageHeader
 				title="Repositories"
 				description="Every repository in this workspace, private ones included. Your public profile shows visitors the public ones."

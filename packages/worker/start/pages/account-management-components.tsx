@@ -35,7 +35,6 @@ import { AccountSectionTabs } from './account-section-tabs.tsx'
 import {
 	AccountManagementLinkNav,
 	accountManagementNarrowMq,
-	accountRailHeightVar,
 } from './account-management-link-nav.tsx'
 
 export {
@@ -163,6 +162,7 @@ export const accountDisclosureCss: CSSObject = {
 type AccountManagementSlot = ReactNode
 
 type AccountManagementShellProps = {
+	currentHref?: string
 	/**
 	 * Optional cap on the content column (not the whole grid). Useful for
 	 * pages whose forms read better on a narrower measure.
@@ -183,74 +183,107 @@ type AccountManagementShellProps = {
 const accountSectionGap = 'clamp(2rem, 4vw, 2.75rem)'
 
 export function AccountManagementShell(props: AccountManagementShellProps) {
+	const hasNavigation = Boolean(props.currentHref)
 	return (
 		<section
 			data-account-shell
 			aria-busy={props.busy ? 'true' : undefined}
 			css={{
 				width: '100%',
-				maxWidth: layoutMaxWidths.extended,
+				maxWidth: hasNavigation
+					? layoutMaxWidths.extended
+					: (props.maxWidth ?? layoutMaxWidths.extended),
 				margin: '0 auto',
-				// `<main>` is a flex column for this shell (public/styles.css).
-				// Growing into it keeps the footer at the viewport bottom on a
-				// short page without leaving an empty band outside the shell;
-				// a tall page stays content-sized and scrolls to the footer.
-				// Rows pack to the top so the growth never spreads sections.
 				flexGrow: 1,
-				alignContent: 'start',
-				// Prototype `.account` padding. The inline gutter is the one every
-				// other page container carries, so the content column lines up
-				// with the header's 72rem content box instead of running wider
-				// than the nav above it; the bottom clamp keeps the last section
-				// off the footer hairline. `<main>`'s generic padding is zeroed
-				// for this shell in public/styles.css so the two don't stack.
-				padding: `clamp(2rem, 5vw, 3.5rem) ${pageGutter} clamp(3rem, 7vw, 5rem)`,
-				boxSizing: 'border-box' as const,
+				boxSizing: 'border-box',
 				display: 'grid',
-				gap: spacing.xl,
-				alignItems: 'start',
-				// The measured rail sets a minimum shell height so its links cannot cover the footer.
-				'&:has(> [data-account-nav])': {
-					position: 'relative',
-					gap: accountSectionGap,
-					minHeight: `calc(var(${accountRailHeightVar}, 0px) + clamp(3rem, 7vw, 5rem))`,
-					paddingLeft: `calc(${pageGutter} + 200px + clamp(2rem, 5vw, 4.5rem))`,
-					...(props.maxWidth
-						? {
-								'& > *:not([data-account-nav])': {
-									maxWidth: props.maxWidth,
-								},
-							}
-						: {}),
-					[accountManagementNarrowMq]: {
-						paddingLeft: pageGutter,
-						gap: spacing.xl,
-					},
-				},
-				...(props.maxWidth
+				alignContent: 'start',
+				padding: `0 ${pageGutter} clamp(3rem, 7vw, 5rem)`,
+				...(hasNavigation
 					? {
-							'&:not(:has(> [data-account-nav]))': {
-								maxWidth: props.maxWidth,
-							},
+							gridTemplateColumns: '200px minmax(0, 1fr)',
+							columnGap: 'clamp(2rem, 5vw, 4.5rem)',
 						}
 					: {}),
+				[accountManagementNarrowMq]: { gridTemplateColumns: 'minmax(0, 1fr)' },
 			}}
 		>
-			{props.busy ? (
-				<p
-					role="status"
-					css={{
-						position: 'absolute',
-						width: 1,
-						height: 1,
-						overflow: 'hidden',
-					}}
-				>
-					Loading…
-				</p>
+			{props.currentHref ? (
+				<ShellNavigation currentHref={props.currentHref} />
 			) : null}
-			{props.children}
+			<div
+				data-account-content
+				css={{
+					minWidth: 0,
+					paddingTop: 'clamp(2rem, 5vw, 3.5rem)',
+					display: 'grid',
+					alignContent: 'start',
+					alignItems: 'start',
+					gap: hasNavigation ? accountSectionGap : spacing.xl,
+					...(props.maxWidth ? { '& > *': { maxWidth: props.maxWidth } } : {}),
+					[accountManagementNarrowMq]: {
+						gap: spacing.xl,
+						paddingTop: hasNavigation ? spacing.xl : 'clamp(2rem, 5vw, 3.5rem)',
+					},
+				}}
+			>
+				{props.busy ? (
+					<p
+						role="status"
+						css={{
+							position: 'absolute',
+							width: 1,
+							height: 1,
+							overflow: 'hidden',
+						}}
+					>
+						Loading…
+					</p>
+				) : null}
+				{props.children}
+			</div>
 		</section>
+	)
+}
+
+function ShellNavigation({ currentHref }: { currentHref: string }) {
+	const currentPath = new URL(currentHref, 'http://localhost').pathname
+	const session = useShellData().session
+	const admin = currentPath === '/admin' || currentPath.startsWith('/admin/')
+	const rail = pageRail({ session, currentPath })
+	return (
+		<div
+			data-account-navigation
+			css={{
+				minWidth: 0,
+				[accountManagementNarrowMq]: { paddingTop: 'clamp(2rem, 5vw, 3.5rem)' },
+			}}
+		>
+			<AccountManagementLinkNav
+				label={admin ? 'Admin sections' : rail.label}
+				heading={admin ? undefined : rail.heading}
+				groups={
+					admin
+						? [
+								{
+									label: null,
+									items: adminNavItems.map((item) => ({
+										href: item.href,
+										label: item.label,
+										icon: item.icon,
+										active: item.paths.some(
+											(path) =>
+												path === currentPath ||
+												(path !== '/admin' &&
+													currentPath.startsWith(`${path}/`)),
+										),
+									})),
+								},
+							]
+						: railLinkGroups(rail.groups, currentPath)
+				}
+			/>
+		</div>
 	)
 }
 
@@ -258,7 +291,6 @@ type AccountManagementHeaderProps = {
 	title: string
 	description: string
 	actions?: AccountManagementSlot
-	/** Sits beside the H1. Account pages pass the entity-explainer button. */
 	titleAside?: AccountManagementSlot
 }
 
@@ -461,8 +493,8 @@ function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
  * Section rail plus the page title. Person settings (profile, security,
  * organizations) take the account rail; everything an organization owns
  * takes the workspace rail, headed by the organization it belongs to. The
- * desktop rail is absolutely positioned in the shell, so it stays in the
- * left track. The phone menu is in normal flow and comes first, above the
+ * desktop rail occupies its own grid column and sets the shell height from
+ * the first server-rendered frame. The phone menu is in normal flow and comes first, above the
  * H1. An entity explainer, when this page has one, is the info button
  * beside the H1.
  */
@@ -476,13 +508,6 @@ export function AccountPageHeader(props: AccountPageHeaderProps) {
 
 		return (
 			<>
-				{rail.groups.length > 0 ? (
-					<AccountManagementLinkNav
-						label={rail.label}
-						heading={rail.heading}
-						groups={railLinkGroups(rail.groups, currentPath)}
-					/>
-				) : null}
 				<AccountManagementHeader
 					title={props.title}
 					description={props.description}
@@ -504,39 +529,12 @@ type AdminPageHeaderProps = {
 }
 
 export function AdminPageHeader(props: AdminPageHeaderProps) {
-	{
-		const currentPath = new URL(props.currentHref, 'http://localhost').pathname
-
-		return (
-			<>
-				<AccountManagementHeader
-					title={props.title}
-					description={props.description}
-				/>
-				<AccountManagementLinkNav
-					label="Admin sections"
-					groups={[
-						{
-							label: null,
-							items: adminNavItems.map((item) => ({
-								href: item.href,
-								label: item.label,
-								icon: item.icon,
-								// Prefix-aware like account nav so `/admin/users/42`
-								// keeps Users highlighted. `/admin` stays exact-only
-								// so sibling pages (`/admin/roles`, …) are unaffected.
-								active: item.paths.some(
-									(path) =>
-										path === currentPath ||
-										(path !== '/admin' && currentPath.startsWith(`${path}/`)),
-								),
-							})),
-						},
-					]}
-				/>
-			</>
-		)
-	}
+	return (
+		<AccountManagementHeader
+			title={props.title}
+			description={props.description}
+		/>
+	)
 }
 
 type AccountManagementMessageProps = {

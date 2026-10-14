@@ -131,7 +131,11 @@ export function AccountMcpOauthClientsPage({
 	const isBusy = actionStatus === 'busy'
 
 	return (
-		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth={layoutMaxWidths.content}
+			busy={false}
+		>
 			<AccountPageHeader
 				title="MCP OAuth clients"
 				description="Pre-register a confidential client when a host cannot finish dynamic OAuth registration. Most hosts do not need this."

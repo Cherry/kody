@@ -113,7 +113,10 @@ export function AccountSecretProvidersPage({
 
 	const approval = payload.approval
 	return (
-		<AccountManagementShell busy={status === 'saving'}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			busy={status === 'saving'}
+		>
 			<AccountPageHeader
 				title="Secret providers"
 				description="Bind a saved package to a provider id such as 1password, and grant other packages use of canonical item refs. Values never appear here."

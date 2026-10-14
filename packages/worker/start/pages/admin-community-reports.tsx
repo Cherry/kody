@@ -117,7 +117,7 @@ export function AdminCommunityReportsPage({
 	const pending = false
 	const status: string = 'ready'
 	return (
-		<AccountManagementShell busy={pending}>
+		<AccountManagementShell currentHref={currentHref} busy={pending}>
 			<AdminPageHeader
 				title="Community reports"
 				description="Review open reports and moderate community listings."

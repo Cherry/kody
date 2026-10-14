@@ -47,8 +47,9 @@ function row(html: string, grantId: string) {
 	const marker = `data-grant-id="${grantId}"`
 	const start = html.indexOf(marker)
 	expect(start).toBeGreaterThan(-1)
-	const next = html.indexOf('data-grant-id=', start + marker.length)
-	return html.slice(start, next === -1 ? undefined : next)
+	const end = html.indexOf('</li>', start)
+	expect(end).toBeGreaterThan(start)
+	return html.slice(start, end)
 }
 
 test('revoke is offered only for grants the viewer may revoke', async () => {
@@ -59,10 +60,15 @@ test('revoke is offered only for grants the viewer may revoke', async () => {
 		grants: [grant('grant-ok', true), grant('grant-denied', false)],
 	})
 
-	expect(row(html, 'grant-ok')).toContain('Revoke grant')
-	expect(row(html, 'grant-ok')).toContain('>Revoke grant<')
-	expect(row(html, 'grant-denied')).not.toContain('Revoke grant')
-	expect(row(html, 'grant-denied')).not.toContain('>Revoke grant<')
+	expect(row(html, 'grant-ok')).toMatch(
+		/<button(?=[^>]*type="button")(?=[^>]*data-testid="org-grant-revoke")[^>]*>/,
+	)
+	expect(row(html, 'grant-ok')).toMatch(/Revoke<\/button>/)
+	expect(row(html, 'grant-denied')).toContain('@grant-denied')
+	expect(row(html, 'grant-denied')).not.toContain(
+		'data-testid="org-grant-revoke"',
+	)
+	expect(html.match(/data-testid="org-grant-revoke"/g)).toHaveLength(1)
 })
 
 test('a viewer who cannot manage members sees no revoke buttons', async () => {
@@ -73,5 +79,6 @@ test('a viewer who cannot manage members sees no revoke buttons', async () => {
 		grants: [grant('grant-resource-ok', true)],
 	})
 	expect(html).toContain('data-grant-id="grant-resource-ok"')
-	expect(html).not.toContain('Revoke grant')
+	expect(html).toContain('@grant-resource-ok')
+	expect(html).not.toContain('data-testid="org-grant-revoke"')
 })

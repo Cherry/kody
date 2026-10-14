@@ -546,7 +546,7 @@ export function AccountSecretsPage({
 			? approval
 			: null
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Secrets"
 				description="Passwords and tokens Kody can use for you."

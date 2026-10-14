@@ -327,7 +327,7 @@ export function AdminPlatformIntegrationsPage(props: {
 		editingApp == null &&
 		status === 'ready'
 	return (
-		<AccountManagementShell busy={pending}>
+		<AccountManagementShell currentHref={currentHref} busy={pending}>
 			<AdminPageHeader
 				title="Admin platform integrations"
 				description="Manage operator-provisioned OAuth apps stored in the platform_oauth_apps table. Users only discover and newly connect apps that are both enabled and published; drafts keep serving existing connections."

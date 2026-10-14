@@ -200,7 +200,10 @@ export function AdminFeatureFlagsPage({
 	const registryFlags = featureFlags.filter((flag) => !flag.stale)
 	const staleFlags = featureFlags.filter((flag) => flag.stale)
 	return (
-		<AccountManagementShell busy={actionState !== 'idle'}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			busy={actionState !== 'idle'}
+		>
 			<AdminPageHeader
 				title="Admin feature flags"
 				description="Toggle registry feature flags, set percentage rollouts, and manage per-user overrides."

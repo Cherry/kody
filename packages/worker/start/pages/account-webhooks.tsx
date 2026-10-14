@@ -37,7 +37,7 @@ export function AccountWebhooksPage({
 	const mintedCount = webhooks.filter((webhook) => webhook.minted).length
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Webhooks"
 				description="Every inbound webhook your packages declare, in one list. Webhooks belong to the package that declares them, so open a row to mint, reveal, copy, rotate, or disable its URL in that package's settings."

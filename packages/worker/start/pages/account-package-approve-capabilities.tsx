@@ -111,7 +111,7 @@ export function AccountPackageApproveCapabilitiesRoute({
 		}
 	}
 	return (
-		<AccountManagementShell busy={busy}>
+		<AccountManagementShell currentHref={currentHref} busy={busy}>
 			<AccountPageHeader
 				title={
 					pendingApprovals.length > 0

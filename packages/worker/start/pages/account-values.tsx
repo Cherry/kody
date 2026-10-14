@@ -214,7 +214,7 @@ export function AccountValuesPage({
 	}
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Values"
 				description="Leftover named rows from an older storage model. New work uses secrets and package storage."

@@ -212,7 +212,11 @@ export function AccountTwoFactorPage({
 	const isBusy = !hydrated || actionStatus === 'busy'
 
 	return (
-		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth={layoutMaxWidths.content}
+			busy={false}
+		>
 			<AccountPageHeader
 				title="Two-factor authentication"
 				description="Add a one-time code from an authenticator app as a second step when signing in."

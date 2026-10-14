@@ -311,7 +311,11 @@ export function AccountBillingPage({
 		: []
 
 	return (
-		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth={layoutMaxWidths.content}
+			busy={false}
+		>
 			<AccountPageHeader
 				title="Billing"
 				description={

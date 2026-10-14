@@ -238,7 +238,11 @@ export function AccountPasskeysPage({
 	const isBusy = !hydrated || actionStatus === 'busy'
 
 	return (
-		<AccountManagementShell maxWidth={layoutMaxWidths.content} busy={false}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth={layoutMaxWidths.content}
+			busy={false}
+		>
 			<AccountPageHeader
 				title="Passkeys"
 				description="Sign in with your device's screen lock, a hardware key, or a synced passkey instead of your password."
@@ -267,7 +271,7 @@ export function AccountPasskeysPage({
 								css={primaryButtonCss}
 								onClick={handleRegisterPasskey}
 							>
-								{isBusy ? 'Working...' : 'Register a passkey'}
+								{actionStatus === 'busy' ? 'Working...' : 'Register a passkey'}
 							</button>
 						</div>
 					</section>

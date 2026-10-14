@@ -1,14 +1,20 @@
 import { createElement } from 'react'
 import { expect, test } from 'vitest'
 import { renderStartPage } from './test-support/render-start-page.ts'
-import { AccountPageHeader } from './pages/account-management-components.tsx'
+import {
+	AccountPageHeader,
+	AccountManagementShell,
+} from './pages/account-management-components.tsx'
 
 async function header(path: string) {
 	return renderStartPage(
-		createElement(AccountPageHeader, {
-			title: 'Test',
-			description: '',
+		createElement(AccountManagementShell, {
 			currentHref: path,
+			children: createElement(AccountPageHeader, {
+				title: 'Test',
+				description: '',
+				currentHref: path,
+			}),
 		}),
 		path,
 	)
@@ -41,4 +47,35 @@ test('personal account rail keeps account chrome without legacy usage links', as
 	expect(html).not.toContain('href="/account/usage"')
 	expect(html).not.toContain('Usage &amp; credits')
 	expect(html).not.toContain('account-section-tabs')
+})
+
+test('empty workspace shells reserve the navigation column in server-rendered markup', async () => {
+	const html = await header('/@acme/-/jobs')
+	expect(
+		html.match(/<div(?=[^>]*data-account-navigation(?:[\s=>]))[^>]*>/g),
+	).toHaveLength(1)
+	expect(
+		html.match(/<nav(?=[^>]*data-account-nav(?:[\s=>]))[^>]*>/g),
+	).toHaveLength(1)
+	expect(
+		html.match(/<div(?=[^>]*data-account-content(?:[\s=>]))[^>]*>/g),
+	).toHaveLength(1)
+	expect(html.indexOf('data-account-navigation')).toBeLessThan(
+		html.indexOf('data-account-content'),
+	)
+	expect(html).toMatch(/grid-template-columns:200px minmax\(0,\s*1fr\)/)
+	expect(html).not.toContain('--account-rail-height')
+	expect(html).toContain('href="/@acme/-/agents"')
+})
+
+test('navless shells do not acquire workspace navigation', async () => {
+	const html = await renderStartPage(
+		createElement(AccountManagementShell, {
+			children: createElement('h1', null, 'Verify your email'),
+		}),
+		'/pending-verification',
+	)
+	expect(html).not.toContain('data-account-nav')
+	expect(html).toContain('data-account-content')
+	expect(html).toContain('Verify your email')
 })

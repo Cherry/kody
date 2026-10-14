@@ -92,7 +92,7 @@ function OrgGrantsContent({
 		},
 	})
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={`/@${data.org.slug}/-/grants`}>
 			<AccountPageHeader
 				title="Grants"
 				description="Who can use packages and other resources in this organization."

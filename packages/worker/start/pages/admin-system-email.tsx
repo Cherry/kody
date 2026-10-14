@@ -104,7 +104,11 @@ export function AdminSystemEmailPage({
 		: 1
 	const selectedMessage = data?.selectedMessage ?? null
 	return (
-		<AccountManagementShell maxWidth="min(100%, 92rem)" busy={pending}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth="min(100%, 92rem)"
+			busy={pending}
+		>
 			<AdminPageHeader
 				title="Admin system email"
 				description="Operator-owned inboxes for reserved platform addresses. These messages are not user account data."

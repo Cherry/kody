@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import { createPageQuery, ensurePageQuery } from './page-query.ts'
+import {
+	createPageQuery,
+	ensurePageQuery,
+	loadPageQuery,
+} from './page-query.ts'
 
 const clients: QueryClient[] = []
 function client() {
@@ -283,4 +287,23 @@ it('uses the QueryClient retry policy for transient reads', async () => {
 	} finally {
 		cache.clear()
 	}
+})
+
+it('leaves route metadata ownership intact for shared resources without a head', async () => {
+	const cache = client()
+	const account = createPageQuery('loadAccountPage', async () => ({
+		payloads: { displayName: 'Pat' },
+	}))('actor-a', '')
+	expect(await loadPageQuery(cache, account, false)).toEqual({
+		head: undefined,
+	})
+	const head = { title: 'Package name' }
+	const detail = createPageQuery('loadPackage', async () => ({ head }))(
+		'actor-a',
+		'package',
+	)
+	expect(await loadPageQuery(cache, detail, false)).toEqual({
+		head,
+		pageHeadQueryKey: detail.queryKey,
+	})
 })

@@ -543,7 +543,7 @@ export function AccountIntegrationsPage({
 		: null
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Integrations"
 				description="Services you connect so Kody can use them."

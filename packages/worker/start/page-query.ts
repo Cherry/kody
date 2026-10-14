@@ -92,10 +92,10 @@ export async function loadPageQuery<
 	preload: boolean,
 ) {
 	const data = await ensurePageQuery(client, options, preload)
-	return {
-		head: ('head' in data ? data.head : undefined) as
-			| ResolvedDocumentHead
-			| undefined,
-		pageHeadQueryKey: options.queryKey,
-	}
+	const head = ('head' in data ? data.head : undefined) as
+		| ResolvedDocumentHead
+		| undefined
+	// Only content resources own reactive metadata. Shared resources leave it
+	// to the matched route, such as Profile, Security and Data using one account read.
+	return { head, ...(head ? { pageHeadQueryKey: options.queryKey } : {}) }
 }

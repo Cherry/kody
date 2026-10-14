@@ -191,7 +191,7 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 		setConfirmation('')
 	}
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={`/@${data.org.slug}/-/settings`}>
 			<AccountPageHeader
 				title="Settings"
 				description="The organization's name, handle, and photo."

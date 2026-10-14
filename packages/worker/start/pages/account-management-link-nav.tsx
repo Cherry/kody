@@ -5,7 +5,7 @@ import { useEffect, useRef } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon, type IconName } from '../components/icon.tsx'
 import { colors, transitions } from '#universal/styles/tokens.ts'
-import { hoverMq, pageGutter } from '#universal/styles/style-primitives.ts'
+import { hoverMq } from '#universal/styles/style-primitives.ts'
 
 /** Account nav collapses to a wrapping row below this width (prototype 860px). */
 export const accountManagementNarrowMq = '@media (max-width: 860px)'
@@ -34,9 +34,6 @@ type AccountManagementInlineLinkNavProps = {
 	label: string
 	items: Array<AccountManagementLinkNavItem>
 }
-
-/** Set on the shell so it is at least as tall as the rail's link column. */
-export const accountRailHeightVar = '--account-rail-height'
 
 const railHeadingCss = {
 	display: 'grid',
@@ -215,22 +212,7 @@ function renderAccountNavLinks(
 
 export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 	const mobileMenu = useRef<HTMLDetailsElement>(null)
-	const rail = useRef<HTMLDivElement>(null)
-	useEffect(() => {
-		const node = rail.current
-		const shell = node?.closest<HTMLElement>('[data-account-shell]')
-		if (!node || !shell || typeof ResizeObserver === 'undefined') return
-		function sync() {
-			shell!.style.setProperty(accountRailHeightVar, `${node!.scrollHeight}px`)
-		}
-		const observer = new ResizeObserver(sync)
-		observer.observe(node)
-		sync()
-		return () => {
-			observer.disconnect()
-			shell.style.removeProperty(accountRailHeightVar)
-		}
-	}, [])
+
 	const href = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		if (mobileMenu.current) mobileMenu.current.open = false
@@ -245,27 +227,9 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 					aria-label={props.label}
 					data-account-nav
 					css={{
-						// Prototype `.account-nav`: a 200px rail beside the
-						// content. The nav fills the shell's left track (top
-						// and bottom), so it runs down to the footer and cannot
-						// paint over it. `overflow: clip`
-						// hides any link that would spill out without becoming
-						// a scroll container, which would trap the sticky
-						// column below. Named so a view transition lifts it out
-						// of `<main>` / `page`. Intra-shell tab clicks skip VT.
-						// Leaving/entering the shell fades this name
-						// (styles.css) so the old rail is not pinned as a ghost
-						// on the destination. The group stays still so
-						// account↔admin (rail on both sides) does not morph.
-						// Below 860px the rail hides and the details menu below
-						// takes over — wrapping twelve pills ate a screen of
-						// vertical room on a phone.
-						position: 'absolute',
-						left: pageGutter,
-						top: 0,
-						bottom: 0,
+						// Normal flow reserves the full rail height in server-rendered HTML.
+						height: '100%',
 						width: '200px',
-						overflow: 'clip',
 						viewTransitionName: 'account-nav',
 						[accountManagementNarrowMq]: {
 							display: 'none',
@@ -273,19 +237,14 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 					}}
 				>
 					<div
-						ref={rail}
 						css={{
 							// Sticks under the site header on a long page. The
-							// shell tracks the full rail height, while a shorter
-							// viewport allows the rail itself to scroll.
+							// rail determines the shell height without a client-side measurement.
 							position: 'sticky',
 							top: '5rem',
 							display: 'flex',
 							flexDirection: 'column',
 							gap: '0.15rem',
-							maxHeight: 'min(100%, calc(100dvh - 6.5rem))',
-							overflowY: 'auto',
-							overscrollBehavior: 'contain',
 						}}
 					>
 						{renderRailHeading(props.heading)}
@@ -314,8 +273,7 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 /**
  * In-flow pill row for filters and other secondary link sets. Do not use
  * `AccountManagementLinkNav` for this — that component is the unique
- * `[data-account-nav]` rail the shell absolutely positions, so a second
- * instance stacks on top of the admin/account sections.
+ * `[data-account-nav]` rail rendered in the shell navigation column.
  */
 export function AccountManagementInlineLinkNav(
 	props: AccountManagementInlineLinkNavProps,

@@ -344,7 +344,7 @@ export function AccountMcpServersPage({
 		selection.selectedId != null && !server && status === 'ready'
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="MCP servers"
 				description="Connect remote MCP servers so their tools are available to Kody as kody.mcp capabilities. Use a bearer token for static Authorization, or complete OAuth when the server requires it."

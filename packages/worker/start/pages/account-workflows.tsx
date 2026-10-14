@@ -381,7 +381,7 @@ export function AccountWorkflowsPage({
 	const canCancel = detail ? isActiveAccountWorkflow(detail) : false
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Workflows"
 				description="Inspect deferred and long-running workflow runs — inline or package-backed — including status, schedule time, and errors. Cancel a run that has not finished yet."

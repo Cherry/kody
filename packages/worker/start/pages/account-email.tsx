@@ -341,7 +341,11 @@ export function AccountEmailPage({
 	const showUnverified = data != null && !data.emailVerified
 
 	return (
-		<AccountManagementShell maxWidth="min(100%, 92rem)" busy={false}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth="min(100%, 92rem)"
+			busy={false}
+		>
 			<AccountPageHeader
 				title="Email inbox"
 				description="Browse inbound and outbound messages for your platform email address. Compose and reply through Kody agents. Manage the addresses emailSend may use here."

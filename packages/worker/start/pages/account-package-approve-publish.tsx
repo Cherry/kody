@@ -155,7 +155,7 @@ export function AccountPackageApprovePublishRoute({
 		payload?.pendingIsDefaultHead === false &&
 		upToDateShort != null
 	return (
-		<AccountManagementShell busy={busy}>
+		<AccountManagementShell currentHref={currentHref} busy={busy}>
 			<AccountPageHeader
 				title={
 					promotedListing

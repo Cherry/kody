@@ -1,8 +1,11 @@
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
 import { loadOrgOverview } from '#start/server/org-management'
-import { OrgShell } from '../pages/org-management.tsx'
-import { AccountManagementPanel } from '../pages/account-management-components.tsx'
+import {
+	AccountManagementShell,
+	AccountPageHeader,
+	AccountManagementPanel,
+} from '../pages/account-management-components.tsx'
 import { workspaceRailGroups } from '#client/routes/account-rail.ts'
 import { useShellData } from './__root.tsx'
 import { type CSSObject } from '@emotion/react'
@@ -26,7 +29,12 @@ function Page() {
 				? ('owner' as const)
 				: ('member' as const)
 	return (
-		<OrgShell title="Overview" slug={slug}>
+		<AccountManagementShell currentHref={`/@${slug}/-/overview`}>
+			<AccountPageHeader
+				title="Overview"
+				description={`Everything @${slug} holds: repositories, agents, credentials, jobs, memories, and the rest.`}
+				currentHref={`/@${slug}/-/overview`}
+			/>
 			{workspaceRailGroups({ orgSlug: slug, personal, role })
 				.filter((group) => group.label !== null)
 				.map((group) => (
@@ -59,7 +67,7 @@ function Page() {
 						</ul>
 					</AccountManagementPanel>
 				))}
-		</OrgShell>
+		</AccountManagementShell>
 	)
 }
 

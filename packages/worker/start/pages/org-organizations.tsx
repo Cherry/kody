@@ -1,6 +1,20 @@
 /** @jsxImportSource @emotion/react */
 import { useServerFn } from '@tanstack/react-start'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { type CSSObject } from '@emotion/react'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
+import { renderIcon } from '../components/icon.tsx'
+import { UserAvatar } from '../components/user-avatar.tsx'
+import { routes } from '#universal/routes.ts'
+import {
+	colors,
+	radius,
+	spacing,
+	transitions,
+	typography,
+} from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
 import { createOrg } from '#start/server/org-organizations'
@@ -12,6 +26,8 @@ import {
 	orgRoleLabel,
 	orgOverviewPath,
 	orderOrganizations,
+	currentSwitcherSlug,
+	organizationsWithSignupFallback,
 } from '#universal/org-pages.ts'
 import {
 	handlePermanentNote,
@@ -22,89 +38,84 @@ import {
 	AccountManagementPanel,
 	AccountPageHeader,
 	accountInputCss,
+	AccountManagementMessage,
+	accountActionsCss,
+	accountFieldCss,
+	accountFieldLabelCss,
+	accountFieldNoteCss,
+	noticeCardCss,
 } from './account-management-components.tsx'
-import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
+import {
+	getPillButtonCss,
+	getGhostButtonCss,
+	hoverMq,
+} from '#universal/styles/style-primitives.ts'
 export function OrganizationsPage({
 	data,
 }: {
 	data: AccountOrganizationsLoaderData
 }) {
+	const { pageLocation } = useMatchedPageScope()
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={pageLocation.href}>
 			<AccountPageHeader
 				title="Organizations"
-				description="Each organization has its own repositories, secrets, and members."
-				currentHref="/account/organizations"
+				description="Each organization has its own repositories, secrets, and members. Switch between them from the header."
+				currentHref={pageLocation.href}
 				actions={
-					<SiteLink href="/account/organizations/new">
-						Create organization
+					<SiteLink
+						href={routes.accountOrganizationsNew.href()}
+						data-testid="account-organizations-create"
+						css={getPillButtonCss({ size: 'sm' })}
+					>
+						{renderIcon('plus', { size: '1.05rem' })}Create organization
 					</SiteLink>
 				}
 			/>
-			<AccountManagementPanel title="Your organizations">
-				<ul data-testid="account-organizations">
-					{orderOrganizations(data.organizations).map((org) => {
-						const identity = orgIdentity(org, data.viewer)
-						return (
-							<li key={org.slug} data-testid="account-organization">
-								<SiteLink
-									href={
-										org.personal ? orgOverviewPath(org.slug) : `/@${org.slug}`
-									}
-								>
-									{identity.avatarUrl ? (
-										<img
-											src={identity.avatarUrl}
-											alt=""
-											width={44}
-											height={44}
-										/>
-									) : null}
-									{identity.name} · {identity.handle}
-								</SiteLink>
-								<p>
-									{orgRoleLabel(org.role)}
-									{data.lastUsedOrganization === org.slug ? ' · Current' : ''}
-								</p>
-							</li>
-						)
-					})}
-				</ul>
+			<AccountManagementPanel
+				title="Your organizations"
+				ariaLabel="Your organizations"
+			>
+				{renderOrganizationList(
+					data,
+					new URL(pageLocation.href, 'https://kody.local').pathname,
+				)}
 			</AccountManagementPanel>
-			<section id="invites">
-				<AccountManagementPanel title="Invitations">
-					{data.invites.length ? (
-						<ul data-testid="invites-list">
-							{data.invites.map((invite) => (
-								<li key={invite.id} data-testid="invite">
-									{invite.orgDisplayName || `@${invite.orgSlug}`} ·{' '}
-									{invite.role || invite.kind} · Expires {invite.expiresAt}
-								</li>
-							))}
-						</ul>
-					) : (
-						<p data-testid="invites-empty">No invites waiting.</p>
-					)}
-				</AccountManagementPanel>
-			</section>
+			<AccountManagementPanel
+				id="invites"
+				title="Invites"
+				description="To accept an invite, paste the invite prompt you were sent into your agent."
+				ariaLabel="Invites"
+			>
+				{renderInvites(data.invites)}
+			</AccountManagementPanel>
 		</AccountManagementShell>
 	)
 }
 export function CreateOrganizationPage() {
+	const { actorKey, pageLocation } = useMatchedPageScope()
+	return <CreateOrganizationForm key={`${actorKey}:${pageLocation.href}`} />
+}
+function CreateOrganizationForm() {
 	const client = useQueryClient(),
 		router = useRouter(),
 		{ actorKey } = useRouteContext({ from: '__root__' })
-	const draft = new URL(router.state.location.href, 'https://kody.local')
-		.searchParams
+	const capture = useSubmitterScope()
+	const { pageLocation } = useMatchedPageScope()
+	const draft = new URL(pageLocation.href, 'https://kody.local').searchParams
 	const [displayName, setDisplayName] = useState(draft.get('displayName') ?? '')
 	const [slug, setSlug] = useState(draft.get('slug') ?? '')
-	const [slugEdited, setSlugEdited] = useState(draft.has('slug'))
+	const [slugEdited, setSlugEdited] = useState(Boolean(draft.get('slug')))
 	const [confirming, setConfirming] = useState(false)
 	const createOrganization = useServerFn(createOrg)
 	const mutation = useMutation({
-		mutationFn: (data: { displayName: string; slug: string }) =>
-			createOrganization({ data }),
-		onSuccess: async () => {
+		mutationFn: ({
+			data,
+		}: {
+			data: { displayName: string; slug: string }
+			actorKey: string | null
+		}) => createOrganization({ data }),
+		onSuccess: async (_result, { actorKey }) => {
 			await Promise.all([
 				invalidateShellQueries(client, actorKey),
 				client.invalidateQueries({
@@ -114,35 +125,47 @@ export function CreateOrganizationPage() {
 		},
 	})
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell
+			currentHref="/account/organizations/new"
+			maxWidth="40rem"
+		>
 			<AccountPageHeader
 				title="Create organization"
-				description="Choose a permanent handle and a name for your team."
+				description="An organization owns its own packages, secrets, and members, separate from your personal account."
 				currentHref="/account/organizations/new"
 			/>
-			<AccountManagementPanel title="Organization details">
+			{mutation.error || draft.get('error') ? (
+				<AccountManagementMessage tone="error">
+					{mutation.error?.message ?? draft.get('error')}
+				</AccountManagementMessage>
+			) : null}
+			<AccountManagementPanel title="Details">
 				<form
 					data-testid="create-organization-form"
 					onSubmit={(event) => {
 						event.preventDefault()
+						if (mutation.isPending) return
 						if (!confirming) {
 							setConfirming(true)
 							return
 						}
+						const isCurrent = capture()
 						mutation.mutate(
-							{ displayName, slug },
+							{ data: { displayName, slug }, actorKey },
 							{
 								onSuccess: (result) => {
-									void router.navigate({ href: `/@${result.slug}` })
+									if (isCurrent())
+										void router.navigate({ href: `/@${result.slug}` })
 								},
 							},
 						)
 					}}
-					css={{ display: 'grid', gap: '1rem' }}
+					css={formCss}
 				>
-					<label>
-						Name
+					<label css={accountFieldCss}>
+						<span css={accountFieldLabelCss}>Name</span>
 						<input
+							data-field-ring
 							css={accountInputCss}
 							name="displayName"
 							required
@@ -158,47 +181,75 @@ export function CreateOrganizationPage() {
 								}
 							}}
 						/>
+						<p css={accountFieldNoteCss}>
+							Shown in the header and to members. You can change it later.
+						</p>
 					</label>
-					<label>
-						Handle
-						<input
-							css={accountInputCss}
-							name="slug"
-							value={slug}
-							onChange={(event) => {
-								setSlugEdited(true)
-								setSlug(event.currentTarget.value.toLowerCase())
-								setConfirming(false)
-							}}
-							minLength={3}
-							maxLength={32}
-							pattern="[a-z0-9][a-z0-9\-]{1,30}[a-z0-9]"
-							autoCapitalize="none"
-							autoComplete="off"
-							spellCheck={false}
-							required
-						/>
+					<label css={accountFieldCss}>
+						<span css={accountFieldLabelCss}>Handle</span>
+						<span css={slugFieldCss}>
+							<span aria-hidden="true" css={slugPrefixCss}>
+								kody.codes/@
+							</span>
+							<input
+								data-field-ring
+								css={slugInputCss}
+								aria-describedby="create-organization-slug-note"
+								name="slug"
+								value={slug}
+								onChange={(event) => {
+									setSlugEdited(event.currentTarget.value.length > 0)
+									setSlug(event.currentTarget.value.toLowerCase())
+									setConfirming(false)
+								}}
+								minLength={3}
+								maxLength={32}
+								pattern="[a-z0-9][a-z0-9\-]{1,30}[a-z0-9]"
+								autoCapitalize="none"
+								autoComplete="off"
+								spellCheck={false}
+								required
+							/>
+						</span>
+						<p id="create-organization-slug-note" css={accountFieldNoteCss}>
+							3 to 32 letters, numbers, and hyphens. {handlePermanentNote} Your
+							organization's URL will be{' '}
+							<strong data-testid="create-organization-url-preview">
+								{handleUrlPreview(slug || 'your-handle')}
+							</strong>
+							.
+						</p>
 					</label>
-					<p>{handleUrlPreview(slug)}</p>
-					<p>{handlePermanentNote}</p>
 					{confirming ? (
-						<p role="status" data-testid="create-organization-confirm">
-							Create {handleUrlPreview(slug)}? This handle is permanent.
+						<p
+							css={accountFieldNoteCss}
+							role="status"
+							data-testid="create-organization-confirm"
+						>
+							Your organization URL will be{' '}
+							<strong>{handleUrlPreview(slug)}</strong>. This can't be changed.
+							Create it?
 						</p>
 					) : null}
-					<button
-						type="submit"
-						disabled={mutation.isPending}
-						css={getPillButtonCss()}
-					>
-						{mutation.isPending
-							? 'Creating…'
-							: confirming
-								? 'Yes, create organization'
-								: 'Create organization'}
-					</button>
-					<SiteLink href="/account/organizations">Cancel</SiteLink>
-					{mutation.error ? <p role="alert">{mutation.error.message}</p> : null}
+					<div css={accountActionsCss}>
+						<button
+							type="submit"
+							disabled={mutation.isPending}
+							css={getPillButtonCss({ size: 'sm' })}
+						>
+							{mutation.isPending
+								? 'Creating…'
+								: confirming
+									? 'Yes, create organization'
+									: 'Create organization'}
+						</button>
+						<SiteLink
+							href="/account/organizations"
+							css={getGhostButtonCss({ size: 'sm' })}
+						>
+							Cancel
+						</SiteLink>
+					</div>
 				</form>
 			</AccountManagementPanel>
 		</AccountManagementShell>
@@ -214,4 +265,322 @@ function slugFromName(name: string) {
 		.replace(/^-+|-+$/g, '')
 		.slice(0, 32)
 		.replace(/-+$/g, '')
+}
+
+type OrgViewer = { displayName: string; avatarUrl: string | null }
+
+/**
+ * One organization as a row: avatar, name, handle, and trailing pills. A row
+ * with an `href` is a link card; without one it is a plain listing (invites
+ * point at organizations the person cannot open yet).
+ */
+function renderOrgRow(input: {
+	key: string
+	slug: string
+	displayName: string | null
+	personal: boolean
+	viewer: OrgViewer
+	detail: ReactNode
+	pills: Array<{ label: string; tone: 'accent' | 'quiet' }>
+	href?: string
+	testId: string
+	trailing?: ReactNode
+}) {
+	const identity = orgIdentity(input, input.viewer)
+	const detail = (
+		<>
+			{identity.hasName ? identity.handle : null}
+			{identity.hasName && input.detail ? ' · ' : null}
+			{input.detail}
+		</>
+	)
+	const body = (
+		<>
+			<UserAvatar
+				displayName={identity.avatarName}
+				avatarUrl={identity.avatarUrl}
+				size={44}
+				variant="well"
+			/>
+			<span css={orgRowTextCss}>
+				<span css={orgRowNameCss}>{identity.name}</span>
+				{detail ? <span css={orgRowDetailCss}>{detail}</span> : null}
+			</span>
+			{input.pills.length > 0 ? (
+				<span css={orgRowPillsCss}>
+					{input.pills.map((pill) => (
+						<span
+							key={pill.label}
+							css={pill.tone === 'accent' ? accentPillCss : quietPillCss}
+						>
+							{pill.label}
+						</span>
+					))}
+				</span>
+			) : null}
+			{input.trailing ?? null}
+		</>
+	)
+	return (
+		<li key={input.key} data-testid={input.testId} css={orgRowItemCss}>
+			{input.href ? (
+				<SiteLink href={input.href} css={[orgRowCss, orgRowLinkCss]}>
+					{body}
+					<span aria-hidden="true" css={orgRowChevronCss}>
+						{renderIcon('chevron-right', { size: '1.1rem' })}
+					</span>
+				</SiteLink>
+			) : (
+				<div css={orgRowCss}>{body}</div>
+			)}
+		</li>
+	)
+}
+
+function inviteRoleLabel(
+	invite: AccountOrganizationsLoaderData['invites'][number],
+) {
+	if (invite.kind !== 'membership') return 'Access grant'
+	switch (invite.role) {
+		case 'owner':
+		case 'member':
+		case 'billing':
+			return `${orgRoleLabel(invite.role)} invite`
+		default:
+			return 'Membership invite'
+	}
+}
+
+function renderOrganizationList(
+	data: AccountOrganizationsLoaderData,
+	currentPathname: string,
+) {
+	const organizations = orderOrganizations(
+		organizationsWithSignupFallback({
+			organizations: data.organizations,
+			username: data.username,
+		}),
+	)
+	const currentSlug = currentSwitcherSlug({
+		pathname: currentPathname,
+		organizations,
+		lastUsedSlug: data.lastUsedOrganization,
+	})
+	return (
+		<ul css={orgListCss} data-testid="account-organizations">
+			{organizations.map((org) =>
+				renderOrgRow({
+					key: org.slug,
+					slug: org.slug,
+					displayName: org.displayName,
+					personal: org.personal,
+					viewer: data.viewer,
+					detail: orgRoleLabel(org.role),
+					pills:
+						org.slug === currentSlug
+							? [{ label: 'Current', tone: 'accent' }]
+							: [],
+					// Each org opens its overview: a team org's home (which
+					// links Settings, Members, and its sections), the signup
+					// org's workspace overview.
+					href: org.personal
+						? orgOverviewPath(org.slug)
+						: routes.profile.href({ username: org.slug }),
+					testId: 'account-organization',
+				}),
+			)}
+		</ul>
+	)
+}
+
+function renderInvites(invites: AccountOrganizationsLoaderData['invites']) {
+	if (invites.length === 0) {
+		return (
+			<div css={emptyStateCss} data-testid="invites-empty">
+				<span aria-hidden="true" css={emptyIconCss}>
+					{renderIcon('inbox', { size: '1.5rem' })}
+				</span>
+				<div css={{ display: 'grid', gap: spacing.xs }}>
+					<p css={emptyTitleCss}>No invites waiting</p>
+					<p css={mutedCopyCss}>
+						When someone invites you to an organization, it shows up here.
+					</p>
+				</div>
+			</div>
+		)
+	}
+	return (
+		<ul css={orgListCss} data-testid="invites-list">
+			{invites.map((invite) =>
+				renderOrgRow({
+					key: invite.id,
+					slug: invite.orgSlug,
+					displayName: invite.orgDisplayName,
+					personal: false,
+					viewer: { displayName: '', avatarUrl: null },
+					detail: <>Expires {formatTimestampDate(invite.expiresAt)}</>,
+					pills: [{ label: inviteRoleLabel(invite), tone: 'quiet' }],
+					testId: 'invite',
+				}),
+			)}
+		</ul>
+	)
+}
+
+const orgListCss: CSSObject = {
+	listStyle: 'none',
+	margin: 0,
+	padding: 0,
+	display: 'grid',
+	gap: spacing.sm,
+}
+
+const orgRowItemCss: CSSObject = {
+	minWidth: 0,
+}
+
+const orgRowCss: CSSObject = {
+	display: 'flex',
+	alignItems: 'center',
+	gap: spacing.md,
+	minWidth: 0,
+	padding: '0.85rem 1rem',
+	borderRadius: radius.card,
+	border: `1.5px solid ${colors.border}`,
+	backgroundColor: colors.surface,
+	color: colors.text,
+	textDecoration: 'none',
+}
+
+const orgRowLinkCss: CSSObject = {
+	transition: `border-color ${transitions.fast}, transform ${transitions.fast}`,
+	'&:active': { transform: 'scale(0.995)' },
+	[hoverMq]: {
+		'&:hover': { borderColor: colors.textMuted, color: colors.text },
+	},
+	'@media (prefers-reduced-motion: reduce)': {
+		'&:active': { transform: 'none' },
+	},
+}
+
+const orgRowTextCss: CSSObject = {
+	display: 'grid',
+	gap: '0.15rem',
+	minWidth: 0,
+	flex: '1 1 auto',
+}
+
+const orgRowNameCss: CSSObject = {
+	fontWeight: 650,
+	fontSize: '1rem',
+	lineHeight: 1.25,
+	overflow: 'hidden',
+	textOverflow: 'ellipsis',
+	whiteSpace: 'nowrap' as const,
+}
+
+const orgRowDetailCss: CSSObject = {
+	fontSize: typography.fontSize.sm,
+	color: colors.textMuted,
+	lineHeight: 1.3,
+	overflowWrap: 'anywhere' as const,
+}
+
+const orgRowPillsCss: CSSObject = {
+	display: 'flex',
+	flexWrap: 'wrap' as const,
+	justifyContent: 'flex-end',
+	gap: spacing.xs,
+	flexShrink: 0,
+}
+
+const pillBaseCss: CSSObject = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	fontSize: '0.8rem',
+	fontWeight: 600,
+	lineHeight: 1.4,
+	borderRadius: radius.full,
+	padding: '0.1rem 0.6rem',
+	whiteSpace: 'nowrap' as const,
+}
+
+const accentPillCss: CSSObject = {
+	...pillBaseCss,
+	color: colors.primaryText,
+	backgroundColor: colors.primarySoft,
+}
+
+const quietPillCss: CSSObject = {
+	...pillBaseCss,
+	color: colors.textMuted,
+	boxShadow: `inset 0 0 0 1px ${colors.border}`,
+}
+
+const orgRowChevronCss: CSSObject = {
+	display: 'inline-flex',
+	flexShrink: 0,
+	color: colors.textMuted,
+}
+
+const formCss: CSSObject = {
+	display: 'grid',
+	gap: spacing.lg,
+}
+
+const slugFieldCss: CSSObject = {
+	display: 'flex',
+	alignItems: 'stretch',
+	minWidth: 0,
+}
+
+const slugPrefixCss: CSSObject = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	paddingInline: '0.85rem',
+	borderRadius: '12px 0 0 12px',
+	border: `1.5px solid ${colors.fieldBorder}`,
+	borderRight: 'none',
+	backgroundColor: colors.background,
+	color: colors.textMuted,
+	fontSize: typography.fontSize.sm,
+	whiteSpace: 'nowrap' as const,
+}
+
+const slugInputCss: CSSObject = {
+	...accountInputCss,
+	flex: '1 1 auto',
+	minWidth: 0,
+	borderTopLeftRadius: 0,
+	borderBottomLeftRadius: 0,
+}
+
+const mutedCopyCss: CSSObject = {
+	margin: 0,
+	color: colors.textMuted,
+}
+
+const emptyStateCss: CSSObject = {
+	...noticeCardCss,
+	display: 'flex',
+	alignItems: 'center',
+	gap: spacing.md,
+}
+
+const emptyIconCss: CSSObject = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	justifyContent: 'center',
+	flexShrink: 0,
+	width: '3rem',
+	height: '3rem',
+	borderRadius: radius.full,
+	border: `1px dashed ${colors.border}`,
+	color: colors.textMuted,
+}
+
+const emptyTitleCss: CSSObject = {
+	margin: 0,
+	fontWeight: 650,
+	color: colors.text,
 }

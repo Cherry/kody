@@ -90,7 +90,7 @@ function OrgTeamsContent({
 		)
 	}
 	return (
-		<AccountManagementShell>
+		<AccountManagementShell currentHref={routes.orgTeams.href(args)}>
 			<AccountPageHeader
 				title="Teams"
 				description="Groups inside this organization for package grants and shared work."

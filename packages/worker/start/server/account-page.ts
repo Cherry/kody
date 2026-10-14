@@ -22,7 +22,6 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			{ loadAccountProfileData },
 			{ loadOnboardingData },
 			{ loadChecklist },
-			{ loadDocumentHead },
 		] = await Promise.all([
 			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
@@ -33,7 +32,6 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			import('../../src/app/account-profile-data.ts'),
 			import('../../src/app/onboarding-data.ts'),
 			import('../../src/app/handlers/onboarding.ts'),
-			import('./document-head.ts'),
 		])
 		const appEnv = getEnv(env)
 		setAuthSessionSecret(appEnv.COOKIE_SECRET)
@@ -73,5 +71,6 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 				{ hasSecondMcpClient: onboarding.hasSecondMcpClient },
 			)
 		const payloads = { accountProfile, accountConnections, onboarding }
-		return { payloads, head: loadDocumentHead('/account', payloads, search) }
+		// Profile, Security and Data share this resource, but own distinct route heads.
+		return { payloads }
 	})

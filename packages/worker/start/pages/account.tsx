@@ -548,7 +548,7 @@ export function AccountPage({
 		draftProfileVisibility === savedProfileVisibility
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title={
 					view === 'profile'

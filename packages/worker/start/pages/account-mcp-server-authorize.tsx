@@ -114,7 +114,7 @@ export function AccountMcpServerAuthorizePage({
 	const { pending } = data
 	const mode = pending ? clientModeCopy(pending.clientMode) : null
 	return (
-		<AccountManagementShell maxWidth="40rem">
+		<AccountManagementShell currentHref={href} maxWidth="40rem">
 			<AccountPageHeader
 				title={`Authorize ${data.serverName}`}
 				description="Review where Kody is sending you before you approve access. Nothing is approved until you click Continue."

@@ -372,7 +372,7 @@ export function AccountUsagePage({
 		: null
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Usage"
 				description="Activity, included compute, plan limits, and credits: what counts and how close you are."

@@ -283,7 +283,7 @@ export function AccountMemoriesPage({
 		status === 'ready'
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Memories"
 				description={

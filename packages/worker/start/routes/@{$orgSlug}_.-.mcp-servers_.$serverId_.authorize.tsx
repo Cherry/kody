@@ -2,6 +2,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
 import { loadMcpServerAuthorizePage } from '#start/server/mcp-server-authorize'
+import { NotFoundPage } from '../components/not-found-page.tsx'
 import { documentHead } from '../components/document-head.ts'
 import { AccountMcpServerAuthorizePage } from '../pages/account-mcp-server-authorize.tsx'
 const pageQuery = createPageQuery(
@@ -32,8 +33,6 @@ function Page() {
 			currentHref={location.href}
 		/>
 	) : (
-		<main>
-			<h1>{data.error}</h1>
-		</main>
+		<NotFoundPage />
 	)
 }

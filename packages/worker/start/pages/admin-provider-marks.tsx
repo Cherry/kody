@@ -458,7 +458,10 @@ export function AdminProviderMarksRoute({
 		: (marks.find((item) => item.slug === selectedSlug) ?? null)
 	const isMutating = actionState !== 'idle'
 	return (
-		<AccountManagementShell busy={actionState !== 'idle'}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			busy={actionState !== 'idle'}
+		>
 			<AdminPageHeader
 				title="Admin provider marks"
 				description="Operator-owned brand marks for saved integrations. Open a letter, pick a mark, and edit it in that group. Login and onboarding keep their inline icons."

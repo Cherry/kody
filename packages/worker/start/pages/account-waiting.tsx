@@ -34,7 +34,7 @@ export function AccountWaitingPage({
 	const data = initialPayload
 
 	return (
-		<AccountManagementShell busy={false}>
+		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
 				title="Waiting"
 				description="Things that need you."

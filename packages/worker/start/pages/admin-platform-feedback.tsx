@@ -123,7 +123,11 @@ export function AdminPlatformFeedbackPage({
 		: 1
 	const hasActiveFilters = Boolean(filters.status || filters.category)
 	return (
-		<AccountManagementShell maxWidth="min(100%, 92rem)" busy={pending}>
+		<AccountManagementShell
+			currentHref={currentHref}
+			maxWidth="min(100%, 92rem)"
+			busy={pending}
+		>
 			<AdminPageHeader
 				title="Platform feedback"
 				description="Read attributed feedback that users explicitly approved for admin review."

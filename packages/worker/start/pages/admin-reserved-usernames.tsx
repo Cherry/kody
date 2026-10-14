@@ -86,7 +86,7 @@ export function AdminReservedUsernamesPage(props: {
 		? builtIn.filter((name) => name.includes(normalizedQuery))
 		: builtIn
 	return (
-		<AccountManagementShell busy={pending}>
+		<AccountManagementShell currentHref={currentHref} busy={pending}>
 			<AdminPageHeader
 				title="Reserved usernames"
 				description="Usernames become {username}.kody.run subdomains and {username}@ mail locals. Built-in names stay locked unless explicitly unreserved; system-email locals and kody-prefixed names cannot be unreserved."
