@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { type AdminReservedUsernamesLoaderData } from '#universal/loader-data.ts'
 import {
@@ -23,11 +24,13 @@ import {
 type ActionState = 'idle' | 'adding' | 'removing'
 const adminReservedUsernamesApiPath = '/admin/reserved-usernames.json'
 export function AdminReservedUsernamesPage(props: {
+	queryKey: QueryKey
 	payload: AdminReservedUsernamesLoaderData
 	currentHref: string
 }) {
 	const { builtIn, added, removed, conflicts } = props.payload
 	const mutation = usePageResponseMutation<AdminReservedUsernamesLoaderData>(
+		props.queryKey,
 		'loadAdminReservedUsernames',
 		adminReservedUsernamesApiPath,
 	)

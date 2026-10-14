@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useRef } from 'react'
-import { useLocation } from '@tanstack/react-router'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon, type IconName } from '../components/icon.tsx'
 import { colors, transitions } from '#universal/styles/tokens.ts'
@@ -231,7 +231,7 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 			shell.style.removeProperty(accountRailHeightVar)
 		}
 	}, [])
-	const href = useLocation({ select: (location) => location.href })
+	const href = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		if (mobileMenu.current) mobileMenu.current.open = false
 	}, [href])

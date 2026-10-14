@@ -178,6 +178,7 @@ function usage(
 async function renderUsagePage(accountUsage: AccountUsageLoaderData) {
 	const html = await renderToString(
 		jsx(AccountUsagePage, {
+			queryKey: ['page', null, 'loadUsagePage', orgUsagePath(session.username)],
 			payload: accountUsage,
 			currentHref: orgUsagePath(session.username),
 		}),

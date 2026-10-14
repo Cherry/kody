@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePackageMutation } from '../package-mutation.ts'
@@ -6,7 +7,7 @@ import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState, useRef, useEffect, type ReactNode } from 'react'
 import { shortCommunityCommit } from '#universal/community-display.ts'
-import { useRouter, useLocation } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 
 import {
 	AccountManagementMessage,
@@ -124,7 +125,7 @@ export function AccountPackageApprovePublishRoute({
 	const mutation = usePackageMutation(payload.package.id)
 	const capture = useSubmitterScope()
 	const router = useRouter(),
-		currentHref = useLocation({ select: (l) => l.href })
+		currentHref = useMatchedPageScope().pageLocation.href
 	const [busy, setBusy] = useState(false),
 		[message, setMessage] = useState<string | null>(null)
 	const [promotedListing, setPromotedListing] =

@@ -478,7 +478,6 @@ export function SecretsVaultScene(props: {
 }
 const draftHeight = 216
 export function SecretsDraftScene() {
-	void props
 	const mid = draftHeight / 2
 	return (
 		<PrimitiveWidgetFrame

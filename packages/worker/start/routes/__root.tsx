@@ -105,37 +105,53 @@ export const Route = createRootRouteWithContext<{
 				throw new Error('The request could not be completed.', {
 					cause: identity,
 				})
-			return identity
+			return {
+				...identity,
+				pageLocation: location,
+				verifyAccess: false,
+				presentationOnly: false,
+			}
 		}
 		const actorKey = parseDocumentActor(readDocumentActor())
-		if (
-			!preload &&
-			requiresSessionVerification(location.pathname) &&
-			!isPresentationNavigation({
-				committed: context.getCommittedPage(),
-				location,
-				matches,
-				actorKey,
-			})
-		) {
-			await verifySession({
-				data: orgSlugFromOrgOwnedPath(location.pathname)
-					? { pathname: location.pathname }
-					: undefined,
-				signal: abortController.signal,
-			})
-			abortController.signal.throwIfAborted()
+		const presentationOnly = isPresentationNavigation({
+			committed: context.getCommittedPage(),
+			location,
+			matches,
+			actorKey,
+		})
+		return {
+			actorKey,
+			pageLocation: location,
+			presentationOnly,
+			verifyAccess:
+				!preload &&
+				requiresSessionVerification(location.pathname) &&
+				!presentationOnly,
 		}
-		return { actorKey }
 	},
 	loader: {
 		staleReloadMode: 'blocking',
-		handler: async ({ context, location }) => {
-			const shell = await ensureShellQuery(
-				context.queryClient,
-				context.actorKey,
-				location.searchStr,
-			)
+		handler: async ({ context, location, abortController }) => {
+			// Root and leaf loaders run concurrently. Every leaf RPC authorizes its
+			// own read; this gate additionally protects navigation to cached data.
+			// Router cannot commit the destination until both loaders succeed.
+			const [shell] = await Promise.all([
+				ensureShellQuery(
+					context.queryClient,
+					context.actorKey,
+					location.searchStr,
+					!context.presentationOnly,
+				),
+				context.verifyAccess
+					? verifySession({
+							data: orgSlugFromOrgOwnedPath(location.pathname)
+								? { pathname: location.pathname }
+								: undefined,
+							signal: abortController.signal,
+						})
+					: undefined,
+			])
+			abortController.signal.throwIfAborted()
 			return {
 				actorKey: shell.actorKey,
 				shellLocation: {

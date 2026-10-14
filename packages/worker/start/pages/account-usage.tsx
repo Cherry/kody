@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { WhereItWentPanel } from './account-usage-where-it-went.tsx'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -342,9 +343,11 @@ function renderUsageProgressBar(item: AccountUsageEntitlementConsumption) {
 }
 
 export function AccountUsagePage({
+	queryKey,
 	payload,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AccountUsageLoaderData
 	currentHref: string
 }) {
@@ -554,6 +557,7 @@ export function AccountUsagePage({
 					))}
 					{usage.credits ? (
 						<AccountUsageCreditsSection
+							queryKey={queryKey}
 							key={orgSlug}
 							orgSlug={orgSlug}
 							credits={usage.credits}

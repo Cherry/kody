@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState } from 'react'
-import { useLocation, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
@@ -40,7 +41,7 @@ export function AccountPackageApproveCapabilitiesRoute({
 	const mutation = usePackageMutation(payload.package.id)
 	const capture = useSubmitterScope()
 	const router = useRouter()
-	const currentHref = useLocation({ select: (l) => l.href })
+	const currentHref = useMatchedPageScope().pageLocation.href
 	const [approvingRequestId, setApprovingRequestId] = useState<string | null>(
 		null,
 	)

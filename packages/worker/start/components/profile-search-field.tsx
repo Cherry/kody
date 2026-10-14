@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState } from 'react'
-import { useLocation, useNavigate } from '@tanstack/react-router'
+import { useNavigate } from '@tanstack/react-router'
 import { type ProfilePackageFilters } from '#universal/community-public-types.ts'
 import { buildProfileHref } from '#universal/profile-search.ts'
 import { inputCss } from '#universal/styles/style-primitives.ts'
@@ -16,7 +17,7 @@ export function ProfileRepositorySearchInput({
 }) {
 	const [query, setQuery] = useState(filters.query)
 	const navigate = useNavigate()
-	const href = useLocation({ select: (location) => location.href })
+	const href = useMatchedPageScope().pageLocation.href
 	const [previousQuery, setPreviousQuery] = useState(filters.query)
 	if (previousQuery !== filters.query) {
 		setPreviousQuery(filters.query)

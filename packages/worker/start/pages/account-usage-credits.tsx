@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
@@ -85,6 +86,7 @@ function readAutoRefillDraft(draft: SettingsDraft): CreditAutoRefillSettings {
 }
 
 type AccountUsageCreditsSectionProps = {
+	queryKey: QueryKey
 	credits: AccountUsageCredits
 	/** Organization this usage page is showing (checkout + top-up target). */
 	orgSlug: string
@@ -105,6 +107,7 @@ export function AccountUsageCreditsSection(
 ) {
 	const capture = useSubmitterScope()
 	const settingsMutation = usePageResponseMutation<AccountUsageLoaderData>(
+		props.queryKey,
 		'loadUsagePage',
 		settingsApiPath,
 		{ dependencies: ['loadBillingPage'] },

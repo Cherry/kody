@@ -154,8 +154,10 @@ test('lost permission-write responses reconcile submitted dependencies and shell
 	const dependency = ['page', 'a', 'loadValuesPage', '/@team/-/values']
 	const shell = ['shell', 'a', 'default']
 	const otherActor = ['page', 'b', 'loadValuesPage', '/@team/-/values']
-	for (const key of [queryKey, dependency, shell, otherActor])
+	for (const key of [queryKey, dependency, shell, otherActor]) {
+		client.setQueryDefaults(key, { meta: { actorKey: key[1] } })
 		client.setQueryData(key, { payload: { ok: true } })
+	}
 	let fail!: (error: Error) => void
 	let started!: () => void
 	const ready = new Promise<void>((resolve) => {

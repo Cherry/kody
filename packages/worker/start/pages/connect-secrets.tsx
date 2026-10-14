@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -6,7 +7,7 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useRouteContext } from '@tanstack/react-router'
+import { useRouteContext } from '@tanstack/react-router'
 import { connectSecretsQuery } from '../connect-approval-queries.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
@@ -62,7 +63,8 @@ export function ConnectSecretsRoute({
 	initialData: AccountSecretsLoaderData
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources)
-	const href = useLocation({ select: (l) => l.pathname + l.searchStr })
+	const { pageLocation } = useMatchedPageScope()
+	const href = pageLocation.pathname + pageLocation.searchStr
 	const data = initialData
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })

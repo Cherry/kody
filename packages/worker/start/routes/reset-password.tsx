@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { ResetPasswordRoute } from '../pages/reset-password.tsx'
 
 export const Route = createFileRoute('/reset-password')({
@@ -7,6 +7,6 @@ export const Route = createFileRoute('/reset-password')({
 })
 
 function ResetPassword() {
-	const search = useLocation({ select: (location) => location.searchStr })
+	const search = Route.useRouteContext().pageLocation.searchStr
 	return <ResetPasswordRoute key={search} />
 }

@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountMcpServersPage } from '../pages/account-mcp-servers.tsx'
 import { loadMcpServersPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -24,7 +24,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/new')({
 })
 function Page() {
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return <AccountMcpServersPage payload={payload} currentHref={location.href} />
 }
 

@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -15,7 +15,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations_/approve')({
 })
 function Page() {
 	const { payload } = Route.useLoaderData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<AccountIntegrationsPage payload={payload} currentHref={location.href} />
 	)

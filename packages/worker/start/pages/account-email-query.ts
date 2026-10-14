@@ -1,8 +1,11 @@
-import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
 import { type QueryClient } from '@tanstack/react-query'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { type AccountEmailLoaderData } from '#universal/loader-data.ts'
-import { restorePageResource } from '../page-mutation-cache.ts'
+import {
+	emailKeys,
+	emailResourceInput,
+	type EmailListData,
+	type EmailDetail,
+} from './email-resources.ts'
 
 export type EmailAction = {
 	href: string
@@ -11,8 +14,6 @@ export type EmailAction = {
 	| { action: 'classify'; classification: 'accepted' | 'quarantined' }
 	| { action: 'delete' }
 )
-export type EmailQueryData = { payload: AccountEmailLoaderData }
-const emailRoute = createListDetailRoute('/account/email')
 
 /** Update known rows only. A newly matching filtered page needs its ordered,
  * paginated server result; guessing an insertion can duplicate or skip rows. */
@@ -51,91 +52,56 @@ export function optimisticEmail(
 	}
 }
 
-function sameEmailList(a: AccountEmailLoaderData, b: AccountEmailLoaderData) {
-	return (
-		a.page === b.page &&
-		a.pageSize === b.pageSize &&
-		a.query === b.query &&
-		a.classification === b.classification
-	)
-}
-
-/** POST includes a complete list for one filter/page, and only its selected
- * detail. Publish what it proves, then refresh other variants after settlement. */
+/** Responses prove the affected entity, not the freshness of unrelated rows.
+ * Never replace another concurrent write with the response's list snapshot. */
 export async function publishEmailResponse(
 	client: QueryClient,
 	actorKey: string | null,
 	accepted: AccountEmailLoaderData,
 	action: EmailAction,
 ) {
-	const filters = scopedPageResource(actorKey, 'loadEmailPage', action.href)
-	await client.cancelQueries({
-		...filters,
-		predicate: (query) =>
-			filters.predicate(query) && query.state.data !== undefined,
-	})
-	const incomplete = new Set<string>()
-	for (const query of client.getQueryCache().findAll(filters)) {
-		const data = query.state.data as EmailQueryData | undefined
-		if (!data) continue
-		const href = query.queryKey[3]
-		const selectedId =
-			typeof href === 'string'
-				? emailRoute.getSelection(href).selectedId
-				: undefined
-		const sameList = sameEmailList(data.payload, accepted)
-		const completeDetail =
-			selectedId === null ||
-			selectedId === accepted.selectedMessage?.id ||
-			(action.action === 'delete' && selectedId === action.messageId)
-		if (!sameList || !completeDetail) incomplete.add(query.queryHash)
-		const updated = optimisticEmail(data.payload, action)
-		client.setQueryData(query.queryKey, {
-			...data,
-			payload: sameList
+	const {
+		list: { org },
+	} = emailResourceInput(action.href)
+	await client.cancelQueries({ queryKey: emailKeys.all(actorKey, org) })
+	client.setQueriesData<EmailListData>(
+		{ queryKey: emailKeys.lists(actorKey, org) },
+		(data) => {
+			if (!data) return data
+			const patched = optimisticEmail(
+				{ ...data, selectedMessage: null },
+				action,
+			)
+			const { selectedMessage: _selection, ...list } = patched
+			if (action.action !== 'delete') return list
+			return {
+				...list,
+				messages: list.messages.filter(
+					(message) => message.id !== action.messageId,
+				),
+				total: list.messages.some((message) => message.id === action.messageId)
+					? Math.max(0, list.total - 1)
+					: list.total,
+			}
+		},
+	)
+	const key = emailKeys.detail(actorKey, org, action.messageId)
+	if (action.action === 'delete') client.setQueryData(key, null)
+	else if (accepted.selectedMessage?.id === action.messageId)
+		client.setQueryData(key, accepted.selectedMessage)
+	else
+		client.setQueryData<EmailDetail>(key, (detail) =>
+			detail
 				? {
-						...accepted,
-						selectedMessage:
-							selectedId === null
-								? null
-								: selectedId === accepted.selectedMessage?.id
-									? accepted.selectedMessage
-									: action.action === 'delete' &&
-										  selectedId === action.messageId
-										? null
-										: updated.selectedMessage,
+						...detail,
+						classification: action.classification,
+						classification_reason:
+							action.classification === 'quarantined'
+								? 'Reclassified by user.'
+								: null,
 					}
-				: {
-						...updated,
-						selectedMessage:
-							selectedId === accepted.selectedMessage?.id
-								? accepted.selectedMessage
-								: action.action === 'delete' && selectedId === action.messageId
-									? null
-									: updated.selectedMessage,
-						// Never keep a deleted row visible while another filter reloads.
-						messages:
-							action.action === 'delete'
-								? updated.messages.filter(
-										(message) => message.id !== action.messageId,
-									)
-								: updated.messages,
-						total:
-							action.action === 'delete' &&
-							updated.messages.some(
-								(message) => message.id === action.messageId,
-							)
-								? Math.max(0, updated.total - 1)
-								: updated.total,
-					},
-		})
-	}
-	// Do not await a confirming read inside the mutation lifecycle. Email reads
-	// wait for this mutation to settle before fetching authoritative data.
-	void client.invalidateQueries({
-		...filters,
-		predicate: (query) => incomplete.has(query.queryHash),
-	})
+				: detail,
+		)
 }
 
 export function emailMutationOptions(
@@ -145,38 +111,24 @@ export function emailMutationOptions(
 	onFailure: (error: Error) => void,
 	href = '/account/email',
 ) {
+	const {
+		list: { org },
+	} = emailResourceInput(href)
 	return {
-		mutationKey: ['email', actorKey, pageQueryOrg(href)] as const,
+		mutationKey: emailKeys.mutations(actorKey, org),
 		mutationFn: send,
-		onMutate: async (action: EmailAction) => {
-			const filters = scopedPageResource(actorKey, 'loadEmailPage', action.href)
-			await client.cancelQueries(filters)
-			const snapshot = client.getQueriesData<EmailQueryData>(filters)
-			client.setQueriesData<EmailQueryData>(
-				filters,
-				(data) =>
-					data && { ...data, payload: optimisticEmail(data.payload, action) },
-			)
-			return { snapshot }
-		},
 		onSuccess: (accepted: AccountEmailLoaderData, action: EmailAction) =>
 			publishEmailResponse(client, actorKey, accepted, action),
-		onError: (
-			error: Error,
-			action: EmailAction,
-			context:
-				| {
-						snapshot: Array<
-							readonly [readonly unknown[], EmailQueryData | undefined]
-						>
-				  }
-				| undefined,
-		) => {
-			restorePageResource(client, context?.snapshot)
-			void client.invalidateQueries({
-				...scopedPageResource(actorKey, 'loadEmailPage', action.href),
-			})
-			onFailure(error)
-		},
+		onError: (error: Error) => onFailure(error),
+		// Also reconcile a lost response: the server may have committed. Query
+		// reads never wait for writes, and the mutation-state overlay remains
+		// visible until this confirming read completes, even after unmount.
+		onSettled: (_data: unknown, _error: unknown, action: EmailAction) =>
+			client.invalidateQueries({
+				queryKey: emailKeys.all(
+					actorKey,
+					emailResourceInput(action.href).list.org,
+				),
+			}),
 	}
 }

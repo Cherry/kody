@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { type CSSObject } from '@emotion/react'
 import {
@@ -8,7 +10,6 @@ import {
 	type FormEvent,
 	type ChangeEvent,
 } from 'react'
-import { useLocation } from '@tanstack/react-router'
 
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
 
@@ -93,8 +94,10 @@ const markTileCss = {
 } satisfies CSSObject
 
 export function AdminProviderMarksRoute({
+	queryKey,
 	initialData,
 }: {
+	queryKey: QueryKey
 	initialData: AdminProviderMarksLoaderData
 }) {
 	const marks = initialData.marks
@@ -125,11 +128,12 @@ export function AdminProviderMarksRoute({
 		})
 	}, [formRevision])
 	const mutation = usePageResponseMutation<AdminProviderMarksLoaderData>(
+		queryKey,
 		'loadAdminProviderMarks',
 		adminProviderMarksApiPath,
 		{ dependencies: mutationResources, dependencyScope: 'actor' },
 	)
-	const currentHref = useLocation({ select: (l) => l.href })
+	const currentHref = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		mounted.current = true
 		return () => {

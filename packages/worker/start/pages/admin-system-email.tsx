@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { css } from '@emotion/react'
 import { useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
@@ -57,15 +58,18 @@ function messageHref(messageId: string) {
 	return `/admin/system-email?messageId=${encodeURIComponent(messageId)}`
 }
 export function AdminSystemEmailPage({
+	queryKey,
 	payload: data,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AdminSystemEmailLoaderData
 	currentHref: string
 }) {
 	const router = useRouter()
 	const captureSubmitter = useSubmitterScope()
 	const mutation = usePageResponseMutation<AdminSystemEmailLoaderData>(
+		queryKey,
 		'loadAdminSystemEmail',
 		'/admin/system-email.json',
 	)

@@ -12,6 +12,7 @@ export function adminCreditWalletQuery(
 	stableUserId: string,
 ) {
 	return queryOptions({
+		meta: { actorKey },
 		queryKey: ['admin-user', actorKey, stableUserId, 'credits'] as const,
 		queryFn: async ({ signal }) => {
 			const response = await fetch(

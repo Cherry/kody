@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useMutation } from '@tanstack/react-query'
-import { useLocation } from '@tanstack/react-router'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -281,7 +281,7 @@ export function RotateCredentialsForm(props: {
 	app: AccountOauthAppListItem
 	onRotated: (app: AccountOauthAppListItem) => void
 }) {
-	const href = useLocation({ select: (location) => location.href })
+	const href = useMatchedPageScope().pageLocation.href
 	const captureSubmitter = useSubmitterScope()
 	const invalidate = usePageInvalidation([
 		'loadIntegrationsPage',

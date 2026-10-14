@@ -410,3 +410,60 @@ test('retained Agents keeps its own view while navigating back to Profile', asyn
 		await page.unrouteAll({ behavior: 'wait' })
 	}
 })
+
+test('retained Jobs keeps committed presentation filters while another page is pending', async ({
+	page,
+	seedE2eUser,
+	login,
+}) => {
+	const id = randomUUID().slice(0, 8)
+	const user = await seedE2eUser({
+		email: `jobs-retained-${id}@example.com`,
+		username: `jobs-retained-${id}`,
+	})
+	await login({ ...user, mode: 'login' })
+	await page.goto(orgResourcePath(user.username, 'jobs'))
+	await waitForClientHydration(page)
+	const search = page.getByRole('searchbox', {
+		name: 'Search jobs',
+		exact: true,
+	})
+	const view = page.getByLabel('Jobs view filter', { exact: true })
+	await search.fill('retained job')
+	await view.selectOption('all')
+	await expect(page).toHaveURL(/view=all/)
+	await expect(search).toHaveValue('retained job')
+	await page.waitForLoadState('networkidle')
+	let release!: () => void
+	const held = new Promise<void>((resolve) => {
+		release = resolve
+	})
+	let started!: () => void
+	const reading = new Promise<void>((resolve) => {
+		started = resolve
+	})
+	await page.route('**/_serverFn/**', async (route) => {
+		started()
+		await held
+		await route.continue()
+	})
+	try {
+		await page.evaluate(() =>
+			window.history.pushState(null, '', '/account?q=destination'),
+		)
+		await reading
+		await expect(page).toHaveURL(/\/account\?q=destination$/)
+		// The normalized Jobs query excludes q/view. Its display identity must
+		// retain those filters, without borrowing the pending destination's q.
+		await expect(search).toHaveValue('retained job')
+		await expect(view).toHaveValue('all')
+		release()
+		await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
+		await page.goBack()
+		await expect(search).toHaveValue('retained job')
+		await expect(view).toHaveValue('all')
+	} finally {
+		release()
+		await page.unrouteAll({ behavior: 'wait' })
+	}
+})

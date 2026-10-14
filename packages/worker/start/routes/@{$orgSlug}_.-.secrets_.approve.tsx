@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountSecretsPage } from '../pages/account-secrets.tsx'
 import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -15,6 +15,6 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/approve')({
 })
 function SecretsPage() {
 	const { payload } = Route.useLoaderData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return <AccountSecretsPage payload={payload} currentHref={location.href} />
 }

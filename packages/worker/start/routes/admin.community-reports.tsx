@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AdminCommunityReportsPage } from '../pages/admin-community-reports.tsx'
 import { loadAdminCommunityReports } from '#start/server/admin-community-reports'
 import { documentHead } from '../components/document-head.ts'
@@ -26,7 +26,7 @@ export const Route = createFileRoute('/admin/community-reports')({
 })
 function CommunityReportsPage() {
 	const data = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (

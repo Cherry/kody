@@ -41,8 +41,9 @@ export const loadCollection = createServerOnlyFn(async (href: string) => {
 	const request = new Request(new URL(href, original.url), {
 		headers: original.headers,
 	})
-	const user = await requireAuthenticatedPageUser(request, bindings, {
+	const user = await requireAuthenticatedPageUser(original, bindings, {
 		redirectTo: href,
+		resourceRequest: request,
 	})
 	if (user instanceof Response) {
 		const cookie = user.headers.get('Set-Cookie')
@@ -616,68 +617,6 @@ export const loadSecretProvidersPage = createServerFn({ method: 'GET' })
 			head: loadDocumentHead(
 				url.pathname,
 				{ accountSecretProviders: payload },
-				url.search,
-			),
-		}
-	})
-
-export const loadEmailPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/email(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid inbox URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const [
-			{ loadAccountEmailData },
-			{ listEmailNotificationDestinations, buildEmailDestinationsLoaderData },
-			{ loadDocumentHead },
-		] = await Promise.all([
-			import('../../src/app/account-email-data.ts'),
-			import('../../src/email/destinations.ts'),
-			import('./document-head.ts'),
-		])
-		const url = new URL(request.url)
-		const [data, rows] = await Promise.all([
-			loadAccountEmailData({
-				env: bindings,
-				request,
-				user,
-				pathMessageId: accountAliasPath(url.pathname).split('/')[3]
-					? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
-					: undefined,
-			}),
-			listEmailNotificationDestinations({
-				db: bindings.APP_DB,
-				dbUserId: user.userId,
-				accountEmail: user.email,
-				accountEmailVerified: user.emailVerified,
-			}),
-		])
-		const payload = {
-			...data,
-			selectedMessage: data.selectedMessage
-				? {
-						...data.selectedMessage,
-						headers: data.selectedMessage.headers
-							? readJsonRecord(data.selectedMessage.headers)
-							: null,
-					}
-				: null,
-		}
-		const destinations = buildEmailDestinationsLoaderData(rows)
-		return {
-			payload,
-			destinations,
-			head: loadDocumentHead(
-				url.pathname,
-				{ accountEmail: payload, accountEmailDestinations: destinations },
 				url.search,
 			),
 		}

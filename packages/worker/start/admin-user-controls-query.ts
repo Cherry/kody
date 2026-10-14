@@ -28,6 +28,7 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 export function adminOrgLimitsQuery(actorKey: string | null, orgId: string) {
 	return queryOptions({
+		meta: { actorKey },
 		queryKey: ['admin-org', actorKey, orgId, 'limits'] as const,
 		queryFn: ({ signal }) =>
 			fetch(

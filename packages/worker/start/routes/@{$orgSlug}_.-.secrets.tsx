@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { redirect, createFileRoute, useLocation } from '@tanstack/react-router'
+import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountSecretsPage } from '../pages/account-secrets.tsx'
 import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -37,7 +37,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
 })
 function SecretsPage() {
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return <AccountSecretsPage payload={payload} currentHref={location.href} />
 }
 

@@ -1,7 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useEffect, useState } from 'react'
-import { useLocation, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import { fetchSessionInfo } from '#client/session.ts'
 import { resolveContinueVerificationFeedback } from '#client/routes/pending-verification-continue.ts'
@@ -30,7 +31,7 @@ export function PendingVerificationPage({
 		refreshShell: true,
 		refreshRoute: true,
 	})
-	const search = useLocation({ select: (location) => location.searchStr })
+	const search = useMatchedPageScope().pageLocation.searchStr
 	const redirectTo = normalizeRedirectTo(
 		new URLSearchParams(search).get('redirectTo'),
 	)

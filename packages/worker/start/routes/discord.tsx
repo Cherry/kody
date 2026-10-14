@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { loadDiscord } from '#start/server/discord'
 import { DiscordPage } from '../pages/discord.tsx'
 
@@ -20,7 +20,7 @@ export const Route = createFileRoute('/discord')({
 })
 function Discord() {
 	const page = usePageData()
-	const href = useLocation({ select: (location) => location.href })
+	const href = Route.useRouteContext().pageLocation.href
 	return <DiscordPage page={page} currentHref={href} />
 }
 

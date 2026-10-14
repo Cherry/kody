@@ -6,10 +6,11 @@ services and HTTP API handlers remain the server boundary.
 [`getRouter`](../../packages/worker/start/router.tsx) creates a QueryClient for
 each server request and each browser router, then installs Router's SSR Query
 integration. Router owns matching, navigation, preloading, scroll restoration,
-and document assets. Query owns reusable page payloads. Route loaders retain a
-head fallback and the exact Query key, rather than a second copy of the payload.
-One-time authorization, verification, and approval pages use foreground Router
-loaders so their token results do not become reusable server-state caches.
+and document assets. Query owns reusable resources and remaining page payloads.
+Route loaders retain a head fallback and the exact Query key, rather than a
+second copy of the payload. One-time authorization, verification, and approval
+pages use foreground Router loaders so their token results do not become
+reusable server-state caches.
 
 ## Reads and navigation
 
@@ -25,18 +26,24 @@ payload. Explicit invalidation waits for authoritative data unless an optimistic
 write is still pending. Query receives its own cancellation signal, so canceling
 one navigation does not abort a read needed by another observer.
 
-Private navigation also verifies identity. That same request checks access to
-the destination organization, so an authorized warm navigation can reuse its
-cached payload without a second permission request. Permission-sensitive queries
-use `freshAuthorization` to require a foreground server check even after
-preload. This is a deliberate security cost, so a warm private navigation is not
-a promise of zero server requests. Server functions independently enforce
-access. Presentation-only Jobs and Values filters reuse the committed page
+Private navigation also verifies identity in a blocking root loader,
+concurrently with the destination loaders. Router waits for that gate before
+committing. Every data RPC independently authorizes its own read. The root check
+protects cached data without forcing cold reads to wait for a separate round
+trip. That same verification request checks access to the destination
+organization, so an authorized warm navigation can reuse its cached payload
+without a second permission request. Permission-sensitive queries use
+`freshAuthorization` to require a foreground server check even after preload.
+This is a deliberate security cost, so a warm private navigation is not a
+promise of zero server requests. Server functions independently enforce access.
+Presentation-only Credentials, Jobs, and Values filters reuse the committed page
 authorization. Known static public pages skip that verification request.
 
 The app disables Query's default focus and reconnect refetches. Its
 [`activation handler`](../../packages/worker/start/refresh-on-activation.ts)
-checks identity before refreshing private data. This avoids returning a new
+checks identity before refreshing private data. Query options declare
+`meta.actorKey`, so refresh and permission invalidation cover resource queries
+without a registry of page or domain names. This avoids returning a new
 account's data into a previous account's mounted document.
 
 ## Writes
@@ -48,11 +55,13 @@ remain tied to the mounted submitter.
 
 [`acceptedPageMutationOptions`](../../packages/worker/start/accepted-page-mutation.ts)
 publishes accepted responses to the exact submitted cache entry and invalidates
-related resources. A lost response still triggers reconciliation because the
-server may have committed the write. Payloads that share a resource name but
-have different shapes cannot overwrite each other.
+related resources. Callers pass their actual query key explicitly; mutation
+identity does not come from document-head metadata. A lost response still
+triggers reconciliation because the server may have committed the write.
+Payloads that share a resource name but have different shapes cannot overwrite
+each other.
 
-Optimistic resources use
+Remaining page-shaped optimistic resources use
 [`mutation barriers`](../../packages/worker/start/page-mutation-cache.ts) to
 prevent a background read from replacing optimistic data with pre-write data.
 Organization and package barriers only delay reads of the matching resource.
@@ -97,17 +106,48 @@ reads start only after their parent resource authorizes.
 Passing that gate does not replace authenticated preview testing or matched
 production performance measurements.
 
-### Pending navigation audit
+## Matched page identity
 
-Connections uses its matched route context for page identity. Reading the global
-location while the previous page remains visible can combine its retained data
-with the destination URL. The browser regression in
-[`cache-navigation.spec.ts`](../../e2e/start/cache-navigation.spec.ts) holds the
-destination request pending and checks that Connections stays valid on Back.
+The root `beforeLoad` returns `pageLocation` on every navigation. A rendered
+route reads that value from its own matched context, including while it is
+retained during pending navigation. Shared page components use
+[`useMatchedPageScope`](../../packages/worker/start/use-matched-page-scope.ts).
+The full displayed URL is separate from normalized Query inputs. Jobs filters
+and Credentials filters therefore retain their URL state without changing their
+server data identity. The shell uses its committed loader location; only
+navigation-close effects and requested-destination error displays use the global
+location. The held-navigation regression is in
+[`cache-navigation.spec.ts`](../../e2e/start/cache-navigation.spec.ts).
 
-The same global-location pattern still needs regression coverage and correction
-in Secrets, Jobs, Values, Workflows, Memories, Email, MCP servers, admin users,
-and authentication forms. These are source-audit findings, not confirmed browser
-reproductions. Keep the full matched page URL separate from the normalized Query
-input: Jobs deliberately excludes local `q` and `view` filters from its server
-cache key, so substituting that key as its display URL would lose those filters.
+## Resource queries
+
+Credentials filters are typed presentation search parameters. They share the
+same actor/org/selection cache entry and do not remount the page. Confirmed
+presentation-only changes skip both the access check and payload loader; actual
+page entries retain fresh authorization. Credentials detail visibility depends
+on the authorized list, so that aggregate stays in one RPC rather than splitting
+it into two calls that repeat the same permission work.
+
+Email has separate actor/org/filter list queries, actor/org/message detail
+queries, and actor notification-destination queries. The loader starts
+independent reads together. Selecting another message reuses the list and
+destinations; returning to a fresh detail reuses that detail too. Cold detail
+navigation uses three parallel RPCs rather than one aggregate RPC, a transport
+tradeoff that must be measured rather than called a universal speedup.
+
+Email optimistic classification is derived from Query mutation state. It does
+not overwrite the shared server cache or block reads behind pending writes.
+Accepted responses patch only the affected entity, and settlement reconciles
+both successful and lost responses, including after unmount. Other messages can
+be updated concurrently. Email no longer uses the page mutation barrier.
+
+The collection server boundary authenticates the original HTTP request, sharing
+its request-scoped authentication lookup with middleware. A separate resource
+request binds the destination organization and is checked for denial before data
+access. Resource headers never establish the caller's identity.
+
+See
+[`authorization-waterfall.spec.ts`](../../e2e/start/authorization-waterfall.spec.ts)
+for the delayed authorization/data concurrency regression and
+[`email-resource-queries.node.test.ts`](../../packages/worker/start/pages/email-resource-queries.node.test.ts)
+for resource reuse and independent request startup.

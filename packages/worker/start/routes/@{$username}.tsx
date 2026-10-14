@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { ProfileRoute, ProfileUnavailable } from '../pages/profile.tsx'
 import { documentHead } from '../components/document-head.ts'
 import { loadProfile } from '#start/server/public-data'
@@ -38,7 +38,7 @@ export const Route = createFileRoute('/@{$username}')({
 })
 function Profile() {
 	const { data, orgHome } = usePageData()
-	const href = useLocation({ select: (location) => location.href })
+	const href = Route.useRouteContext().pageLocation.href
 	if (orgHome) return <OrgHomePage org={orgHome} />
 	if (!data) return <ProfileUnavailable />
 	return <ProfileRoute data={data} currentHref={href} />

@@ -61,18 +61,24 @@ describe('mutation resource invalidation', () => {
 		client.clear()
 	})
 
-	it('explicit permission changes invalidate every page for that actor only', async () => {
+	it('explicit permission changes invalidate every owned resource for that actor only', async () => {
 		const client = new QueryClient()
 		const keys = [
 			['page', 'alice', 'loadSecretsPage'],
 			['page', 'alice', 'loadPackage'],
 			['page', 'bob', 'loadPackage'],
 			['shell', 'alice'],
+			['email', 'alice', 'team', 'list'],
+			['email-destinations', 'alice'],
+			['email', 'bob', 'team', 'list'],
 		]
-		for (const key of keys) client.setQueryData(key, {})
+		for (const key of keys) {
+			client.setQueryDefaults(key, { meta: { actorKey: key[1] } })
+			client.setQueryData(key, {})
+		}
 		await invalidatePageResources(client, 'alice', 'permissions', 'none')
 		expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual(
-			[true, true, false, false],
+			[true, true, false, true, true, true, false],
 		)
 		client.clear()
 	})
@@ -136,16 +142,16 @@ describe('mutation resource invalidation', () => {
 
 it('an organization write only invalidates that organization resource', async () => {
 	const client = new QueryClient()
-	const acme = ['page', 'actor', 'loadEmailPage', '/@acme/-/email'] as const
-	const other = ['page', 'actor', 'loadEmailPage', '/@other/-/email'] as const
+	const acme = ['page', 'actor', 'loadJobsPage', '/@acme/-/jobs'] as const
+	const other = ['page', 'actor', 'loadJobsPage', '/@other/-/jobs'] as const
 	client.setQueryData(acme, { messages: [] })
 	client.setQueryData(other, { messages: [] })
 	await invalidatePageResources(
 		client,
 		'actor',
-		['loadEmailPage'],
+		['loadJobsPage'],
 		'none',
-		'/@acme/-/email/one',
+		'/@acme/-/jobs/one',
 	)
 	expect(client.getQueryState(acme)?.isInvalidated).toBe(true)
 	expect(client.getQueryState(other)?.isInvalidated).toBe(false)

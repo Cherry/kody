@@ -16,6 +16,7 @@ export function shellSearch(search: string) {
 export function shellQuery(actorKey: string | null, search: string) {
 	const relevantSearch = shellSearch(search)
 	return queryOptions({
+		meta: { actorKey },
 		queryKey: ['shell', actorKey, relevantSearch] as const,
 		queryFn: ({ signal }) =>
 			loadShell({ data: { pathname: '/', search: relevantSearch }, signal }),
@@ -28,9 +29,10 @@ export async function ensureShellQuery(
 	client: QueryClient,
 	actorKey: string | null,
 	search: string,
+	revalidateIfStale = true,
 ) {
 	const options = shellQuery(actorKey, search)
-	return client.ensureQueryData({ ...options, revalidateIfStale: true })
+	return client.ensureQueryData({ ...options, revalidateIfStale })
 }
 
 export function invalidateShellQueries(

@@ -27,6 +27,8 @@ export type AuthenticatedAppUser = {
 
 export type ReadAuthenticatedAppUserOptions = {
 	prefetchFeatureFlags?: boolean
+	/** Bind organization access to this resource while authenticating the original HTTP request. */
+	resourceRequest?: Request
 }
 
 async function readAuthenticatedAppUserInternal(
@@ -34,6 +36,7 @@ async function readAuthenticatedAppUserInternal(
 	env: Env,
 	allowDeleting: boolean,
 	prefetchFeatureFlags: boolean,
+	resourceRequest: Request = request,
 ) {
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	const resolved = await loadResolvedRequestAuth(request, env)
@@ -44,7 +47,7 @@ async function readAuthenticatedAppUserInternal(
 	if (resolved.user.accountSuspended) return null
 
 	const resolution = await loadRequestOrgResolution(
-		request,
+		resourceRequest,
 		env,
 		resolved.user.mcpUser.userId,
 	)
@@ -71,7 +74,7 @@ async function readAuthenticatedAppUserInternal(
 		}),
 	} satisfies AuthenticatedAppUser
 	if (prefetchFeatureFlags) {
-		prefetchRequestFeatureFlagsForHtmlPage(request, env, {
+		prefetchRequestFeatureFlagsForHtmlPage(resourceRequest, env, {
 			userId: user.userId,
 			stableUserId: user.mcpUser.userId,
 		})
@@ -89,6 +92,7 @@ export async function readAuthenticatedAppUser(
 		env,
 		false,
 		options?.prefetchFeatureFlags === true,
+		options?.resourceRequest,
 	)
 }
 

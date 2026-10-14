@@ -1,9 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { useState, type FormEvent } from 'react'
 import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
-import { useLocation } from '@tanstack/react-router'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -36,7 +36,7 @@ export function VerifyRoute() {
 	const [status, setStatus] = useState<'idle' | 'submitting'>('idle')
 	const [message, setMessage] = useState<string | null>(null)
 	const turnstileSiteKey = usePublicAuthProtection()
-	const search = useLocation({ select: (location) => location.searchStr })
+	const search = useMatchedPageScope().pageLocation.searchStr
 
 	function getRedirectTo() {
 		const params = new URLSearchParams(search)

@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
-import { useLocation } from '@tanstack/react-router'
 import {
 	cardCss,
 	mutedLinkCss,
@@ -12,7 +12,7 @@ import {
 } from '#universal/styles/style-primitives.ts'
 
 export function OAuthCallbackRoute() {
-	const search = useLocation({ select: (location) => location.searchStr })
+	const search = useMatchedPageScope().pageLocation.searchStr
 	const params = new URLSearchParams(search)
 	const error = params.get('error')
 	const description = params.get('error_description')

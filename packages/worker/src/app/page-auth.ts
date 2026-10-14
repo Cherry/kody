@@ -29,7 +29,7 @@ export async function requirePageSession(
 export async function requireAuthenticatedPageUser(
 	request: Request,
 	env: Env,
-	options: { redirectTo?: string } = {},
+	options: { redirectTo?: string; resourceRequest?: Request } = {},
 ): Promise<AuthenticatedAppUser | Response> {
 	const { session } = await readAuthSessionResult(request)
 	if (!session) {
@@ -38,6 +38,7 @@ export async function requireAuthenticatedPageUser(
 
 	const user = await readAuthenticatedAppUser(request, env, {
 		prefetchFeatureFlags: true,
+		resourceRequest: options.resourceRequest,
 	})
 	if (user) {
 		return user

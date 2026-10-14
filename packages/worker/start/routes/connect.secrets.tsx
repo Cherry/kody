@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { connectSecretsQuery } from '../connect-approval-queries.ts'
 import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { ConnectSecretsRoute } from '../pages/connect-secrets.tsx'
@@ -21,7 +21,7 @@ export const Route = createFileRoute('/connect/secrets')({
 	component: Page,
 })
 function Page() {
-	const href = useLocation({ select: (l) => l.href })
+	const href = Route.useRouteContext().pageLocation.href
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
 	const { data } = usePageQuery(connectSecretsQuery(actorKey, pageQueryInput))
 	return <ConnectSecretsRoute key={href} initialData={data.payload} />

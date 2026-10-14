@@ -1,10 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import { useState, type FormEvent } from 'react'
 import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
-import { useLocation } from '@tanstack/react-router'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	cardCss,
@@ -33,7 +33,7 @@ export function ResetPasswordRoute() {
 	const [status, setStatus] = useState<ResetStatus>('idle')
 	const [message, setMessage] = useState<string | null>(null)
 	const turnstileSiteKey = usePublicAuthProtection()
-	const search = useLocation({ select: (location) => location.searchStr })
+	const search = useMatchedPageScope().pageLocation.searchStr
 
 	function setState(
 		nextStatus: ResetStatus,

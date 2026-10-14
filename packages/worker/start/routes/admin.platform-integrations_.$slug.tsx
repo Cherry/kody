@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AdminPlatformIntegrationsPage } from '../pages/admin-platform-integrations.tsx'
 import { loadAdminPlatformIntegrations } from '#start/server/admin-platform-integrations'
 import { documentHead } from '../components/document-head.ts'
@@ -25,12 +25,18 @@ export const Route = createFileRoute('/admin/platform-integrations_/$slug')({
 	component: PlatformIntegrationsPage,
 })
 function PlatformIntegrationsPage() {
+	const mutationContext = Route.useRouteContext()
+	const mutationQueryKey = pageQuery(
+		mutationContext.actorKey,
+		mutationContext.pageQueryInput,
+	).queryKey
 	const data = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
 		<AdminPlatformIntegrationsPage
+			queryKey={mutationQueryKey}
 			payload={data.payload}
 			currentHref={location.href}
 		/>

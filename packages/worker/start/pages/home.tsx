@@ -1,7 +1,7 @@
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { LandingPrimitiveCards } from './landing-primitive-cards.tsx'
 /** @jsxImportSource @emotion/react */
 import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
-import { useLocation } from '@tanstack/react-router'
 import {
 	accountDeletedConfirmationMessage,
 	isAccountDeletedHome,
@@ -116,7 +116,7 @@ export function HomeRoute({
 	initialHosts: WalkthroughHostPick
 	landingHeroVideos: Array<LandingHeroVideoItem>
 }) {
-	const location = useLocation()
+	const { pageLocation: location } = useMatchedPageScope()
 	const [walkthroughHosts, setWalkthroughHosts] = useState(initialHosts)
 	const isSignedIn = loggedIn
 	const connectHref = isSignedIn ? onboardingPath : homepageSignupPath

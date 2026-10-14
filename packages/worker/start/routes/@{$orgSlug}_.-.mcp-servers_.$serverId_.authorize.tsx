@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
 import { loadMcpServerAuthorizePage } from '#start/server/mcp-server-authorize'
 import { documentHead } from '../components/document-head.ts'
@@ -25,7 +25,7 @@ export const Route = createFileRoute(
 function Page() {
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
 	const { data } = usePageQuery(pageQuery(actorKey, pageQueryInput))
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return data.payload ? (
 		<AccountMcpServerAuthorizePage
 			payload={data.payload}

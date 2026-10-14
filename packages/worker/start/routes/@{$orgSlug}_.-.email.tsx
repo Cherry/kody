@@ -1,55 +1,40 @@
 /** @jsxImportSource @emotion/react */
-import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountEmailPage } from '../pages/account-email.tsx'
-import { loadEmailPage } from '#start/server/account-collections'
-import { documentHead } from '../components/document-head.ts'
-const pageQuery = createPageQuery('loadEmailPage', loadEmailPage, {
-	staleTime: 10_000,
-})
+import { emailSearch } from '../pages/email-resources.ts'
+import {
+	loadEmailResources,
+	useEmailResources,
+} from '../pages/email-resource-queries.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/email')({
-	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
-		selected: search.selected,
-		classification: search.classification,
+	validateSearch: emailSearch,
+	loaderDeps: ({ search }) => ({
 		q: search.q,
+		classification: search.classification,
 		page: search.page,
 		pageSize: search.pageSize,
+		selected: search.selected,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, [
-				'selected',
-				'classification',
-				'q',
-				'page',
-				'pageSize',
-			]),
-	}),
-	loader: ({ context, preload }) =>
-		loadPageQuery(
+	loader: async ({ context }) => {
+		await loadEmailResources(
 			context.queryClient,
-			pageQuery(context.actorKey, context.pageQueryInput),
-			preload,
-		),
-	head: ({ loaderData }) => documentHead(loaderData?.head),
+			context.actorKey,
+			context.pageLocation.href,
+		)
+	},
+	head: () => ({ meta: [{ title: 'Email inbox' }] }),
 	component: Page,
 })
 function Page() {
-	const { payload, destinations } = usePageData()
-	const location = useLocation()
+	const { actorKey, pageLocation } = Route.useRouteContext()
+	const emailHref = pageLocation.href
+	const { payload, destinations } = useEmailResources(actorKey, emailHref)
 	return (
 		<AccountEmailPage
 			payload={payload}
 			destinations={destinations}
-			currentHref={location.href}
+			currentHref={emailHref}
 		/>
 	)
-}
-
-function usePageData() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	return usePageQuery(pageQuery(actorKey, pageQueryInput)).data
 }

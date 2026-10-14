@@ -29,7 +29,10 @@ export async function renderStartPage(
 	const root = createRootRouteWithContext<{
 		queryClient: QueryClient
 		actorKey: string | null
-	}>()({ loader: () => ({ shellLocation: { searchStr } }) })
+	}>()({
+		beforeLoad: ({ location }) => ({ pageLocation: location }),
+		loader: () => ({ shellLocation: { searchStr } }),
+	})
 	const route = createRoute({
 		getParentRoute: () => root,
 		path: '$',

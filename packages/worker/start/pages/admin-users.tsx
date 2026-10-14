@@ -524,6 +524,7 @@ export function AdminUsersPage(props: {
 	const isMutating = actionState !== 'idle'
 	const selectedUsageId = selectedUser?.stableUserId ?? null
 	const usageQuery = useQuery({
+		meta: { actorKey },
 		queryKey: ['admin-user', actorKey, selectedUsageId, 'usage'],
 		enabled: selectedUsageId !== null,
 		queryFn: async ({ signal }) => {

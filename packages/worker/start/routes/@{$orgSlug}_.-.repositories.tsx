@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
 import { loadOrgRepositories } from '#start/server/org-management'
 import {
@@ -35,7 +35,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/repositories')({
 function Page() {
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
 	const { data } = usePageQuery(pageQuery(actorKey, pageQueryInput))
-	const href = useLocation({ select: (location) => location.href })
+	const href = Route.useRouteContext().pageLocation.href
 	return (
 		<AccountManagementShell>
 			<AccountPageHeader

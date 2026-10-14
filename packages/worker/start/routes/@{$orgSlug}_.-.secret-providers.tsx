@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountSecretProvidersPage } from '../pages/account-secret-providers.tsx'
 import { loadSecretProvidersPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -25,7 +25,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secret-providers')({
 })
 function Page() {
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<AccountSecretProvidersPage payload={payload} currentHref={location.href} />
 	)

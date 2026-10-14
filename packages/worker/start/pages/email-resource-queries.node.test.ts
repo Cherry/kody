@@ -1,0 +1,91 @@
+import { expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/react-query'
+import { loadEmailResources } from './email-resource-queries.ts'
+import {
+	loadEmailList,
+	loadEmailDetail,
+	loadEmailDestinations,
+} from '#start/server/email'
+
+vi.mock('#start/server/email', () => ({
+	loadEmailList: vi.fn(),
+	loadEmailDetail: vi.fn(),
+	loadEmailDestinations: vi.fn(),
+}))
+
+it('starts independent reads together and reuses list and destinations when selecting another message', async () => {
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	})
+	let resolveList!: (value: Awaited<ReturnType<typeof loadEmailList>>) => void
+	let resolveDetail!: (
+		value: Awaited<ReturnType<typeof loadEmailDetail>>,
+	) => void
+	let resolveDestinations!: (
+		value: Awaited<ReturnType<typeof loadEmailDestinations>>,
+	) => void
+	vi.mocked(loadEmailList).mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				resolveList = resolve
+			}),
+	)
+	vi.mocked(loadEmailDetail).mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				resolveDetail = resolve
+			}),
+	)
+	vi.mocked(loadEmailDestinations).mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				resolveDestinations = resolve
+			}),
+	)
+	const first = loadEmailResources(
+		client,
+		'actor',
+		'/@acme/-/email/one?q=hello',
+	)
+	await vi.waitFor(() => {
+		expect(loadEmailList).toHaveBeenCalledOnce()
+		expect(loadEmailDetail).toHaveBeenCalledOnce()
+		expect(loadEmailDestinations).toHaveBeenCalledOnce()
+	})
+	resolveList({
+		ok: true,
+		emailVerified: true,
+		email: 'a@example.com',
+		username: 'a',
+		inboxAddress: null,
+		verificationMessage: null,
+		inboxes: [],
+		messages: [],
+		usage: null,
+		page: 1,
+		pageSize: 25,
+		total: 0,
+		query: 'hello',
+		classification: null,
+	})
+	resolveDetail(null)
+	resolveDestinations({
+		ok: true,
+		destinations: [],
+		additionalLimit: 3,
+		additionalRemaining: 3,
+	})
+	await first
+	vi.mocked(loadEmailDetail).mockResolvedValue(null)
+	await loadEmailResources(
+		client,
+		'actor',
+		'/@acme/-/email/two?q=%20hello%20&page=01',
+	)
+	expect(loadEmailList).toHaveBeenCalledOnce()
+	expect(loadEmailDestinations).toHaveBeenCalledOnce()
+	expect(loadEmailDetail).toHaveBeenCalledTimes(2)
+	await loadEmailResources(client, 'actor', '/@acme/-/email/one?q=hello')
+	expect(loadEmailDetail).toHaveBeenCalledTimes(2)
+	client.clear()
+})

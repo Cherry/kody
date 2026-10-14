@@ -27,7 +27,10 @@ function setup() {
 			queryKey,
 			queryFn: read,
 			staleTime: stale ? 0 : 60_000,
-			meta: { freshAuthorization },
+			meta: {
+				freshAuthorization,
+				...(queryKey[0] === 'other' ? {} : { actorKey: queryKey[1] }),
+			},
 		}
 		client.setQueryData(queryKey, 'cached')
 		if (active) {
@@ -136,4 +139,15 @@ test('no resource read starts before actor verification or after it fails', asyn
 		}),
 	).rejects.toBe(failure)
 	expect(read).toHaveBeenCalledTimes(1)
+})
+
+test('domain resources refresh after identity verification without a page-name registry', async () => {
+	const { client, query } = setup()
+	const list = query(['email', 'a', 'team', 'list'], { stale: true })
+	const destinations = query(['email-destinations', 'a'], { stale: true })
+	const anotherActor = query(['email', 'b', 'team', 'list'], { stale: true })
+	await refreshActiveQueries(client, 'a', async () => {})
+	expect(list).toHaveBeenCalledTimes(1)
+	expect(destinations).toHaveBeenCalledTimes(1)
+	expect(anotherActor).not.toHaveBeenCalled()
 })

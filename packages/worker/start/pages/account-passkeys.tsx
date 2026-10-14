@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { useMutation } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -56,15 +57,18 @@ function describeDeviceType(deviceType: string) {
 }
 
 export function AccountPasskeysPage({
+	queryKey,
 	payload,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AccountPasskeysPayload
 	currentHref: string
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const passkeys = payload.passkeys
 	const changePasskey = usePageResponseMutation<AccountPasskeysPayload>(
+		queryKey,
 		'loadAccountSecurity',
 		passkeysApiPath,
 		{ refreshShell: true },

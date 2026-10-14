@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import { useEffect } from 'react'
-import { useLocation } from '@tanstack/react-router'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon } from '../components/icon.tsx'
 import { accountAliasPath, parseOrgUsagePath } from '#universal/org-pages.ts'
@@ -263,7 +263,7 @@ type EntityExplainerProps = {
  */
 export function EntityExplainer(props: EntityExplainerProps) {
 	const panelId = `entity-explainer-${props.copy.id}`
-	const href = useLocation({ select: (location) => location.href })
+	const href = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		document.getElementById(panelId)?.hidePopover()
 	}, [href, panelId])

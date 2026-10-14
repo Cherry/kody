@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
 import { useState, type FormEvent } from 'react'
@@ -102,13 +103,16 @@ function summarizeEffectiveSource(flag: AdminFeatureFlag): string {
 	return `on for ${flag.global.rolloutPercent}% of users${audienceSuffix}`
 }
 export function AdminFeatureFlagsPage({
+	queryKey,
 	payload,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AdminFeatureFlagsLoaderData
 	currentHref: string
 }) {
 	const mutation = usePageResponseMutation<AdminFeatureFlagsLoaderData>(
+		queryKey,
 		'loadAdminFeatureFlags',
 		adminFeatureFlagsApiPath,
 		{ dependencies: 'permissions', refreshShell: true },

@@ -1,3 +1,4 @@
+import { useMatchedPageScope } from './use-matched-page-scope.ts'
 import { useSubmitterScope } from './use-submitter-scope.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import {
@@ -5,11 +6,6 @@ import {
 	useQueryClient,
 	type QueryKey,
 } from '@tanstack/react-query'
-import {
-	useLocation,
-	useRouteContext,
-	useMatches,
-} from '@tanstack/react-router'
 import { acceptedPageMutationOptions } from './accepted-page-mutation.ts'
 import { type PageResource } from './page-resources.ts'
 import { type PageMutationDependencies } from './page-invalidation-cache.ts'
@@ -19,6 +15,7 @@ class MutationAuthenticationError extends Error {}
 export function usePageResponseMutation<
 	TResponse extends { ok?: boolean; error?: string },
 >(
+	queryKey: QueryKey,
 	resource: PageResource,
 	apiPath: string,
 	options: {
@@ -32,27 +29,10 @@ export function usePageResponseMutation<
 	} = {},
 ) {
 	const client = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const href = useLocation({ select: (location) => location.href })
+	const { actorKey, pageLocation } = useMatchedPageScope()
+	const href = pageLocation.href
 	const captureSubmitter = useSubmitterScope()
-	const queryKey = useMatches({
-		select: (matches) => {
-			for (const match of [...matches].reverse()) {
-				const data: unknown = match.loaderData
-				if (!data || typeof data !== 'object' || !('pageHeadQueryKey' in data))
-					continue
-				const key = data.pageHeadQueryKey
-				if (
-					Array.isArray(key) &&
-					key[0] === 'page' &&
-					key[1] === actorKey &&
-					key[2] === resource
-				)
-					return key as QueryKey
-			}
-			return undefined
-		},
-	})
+
 	const mutation = useMutation(
 		acceptedPageMutationOptions<Record<string, unknown>, TResponse>(client, {
 			resource,
@@ -82,8 +62,6 @@ export function usePageResponseMutation<
 	return {
 		...mutation,
 		submit: (body: Record<string, unknown>) => {
-			if (!queryKey)
-				throw new Error(`Missing submitted query key for ${resource}`)
 			const isCurrentSubmitter = captureSubmitter()
 			return mutation
 				.mutateAsync({ body, actorKey, href, queryKey, apiPath })

@@ -37,6 +37,7 @@ export function createPageQuery<TInput, TData>(
 			staleTime: policy.staleTime ?? 30_000,
 			gcTime: policy.gcTime ?? 5 * 60_000,
 			meta: {
+				actorKey,
 				freshAuthorization:
 					typeof policy.freshAuthorization === 'function'
 						? policy.freshAuthorization(input)

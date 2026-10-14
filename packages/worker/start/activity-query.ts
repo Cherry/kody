@@ -3,6 +3,7 @@ import { loadActivityPage } from '#start/server/account-collections'
 
 export function activityQuery(actorKey: string | null, href: string) {
 	return infiniteQueryOptions({
+		meta: { actorKey },
 		queryKey: ['page', actorKey, 'loadActivityPage', href] as const,
 		initialPageParam: null as string | null,
 		queryFn: ({ pageParam, signal }) => {

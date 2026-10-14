@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState } from 'react'
 import {
@@ -15,15 +16,18 @@ import { routes } from '#universal/routes.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 export function AccountExperimentsPage({
+	queryKey,
 	payload,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AccountExperimentsLoaderData
 	currentHref: string
 }) {
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const mutation = usePageResponseMutation<AccountExperimentsLoaderData>(
+		queryKey,
 		'loadExperimentsPage',
 		routes.accountExperimentsApiPost.href(),
 		{ dependencies: 'permissions', refreshShell: true },

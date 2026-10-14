@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useRouteContext } from '@tanstack/react-router'
 import { adminDestinationMutationOptions } from '../admin-user-controls-query.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { mq, spacing } from '#universal/styles/tokens.ts'
@@ -19,8 +19,8 @@ export function AdminUserDestinationPanel({
 }: {
 	stableUserId: string
 }) {
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const href = useLocation({ select: (location) => location.href })
+	const { actorKey } = useMatchedPageScope()
+	const href = useMatchedPageScope().pageLocation.href
 	const mutation = useMutation(
 		adminDestinationMutationOptions(useQueryClient()),
 	)

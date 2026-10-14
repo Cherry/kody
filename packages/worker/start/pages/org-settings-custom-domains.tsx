@@ -42,7 +42,10 @@ export function OrgSettingsCustomDomains({
 	const [packageId, setPackageId] = useState('')
 	const [sslMethod, setSslMethod] = useState<'http' | 'txt'>('txt')
 	const mutation = useMutation({
-		onMutate: () => client.cancelQueries({ queryKey, exact: true }),
+		onMutate: async () => {
+			await client.cancelQueries({ queryKey, exact: true })
+			return { queryKey }
+		},
 		mutationFn: async (body: DomainWrite) => {
 			const response = await fetch(
 				routes.orgSettingsCustomHostnamesPost.href({ orgSlug: data.org.slug }),
@@ -63,12 +66,22 @@ export function OrgSettingsCustomDomains({
 				throw new Error(payload.error || 'Unable to update custom domains.')
 			return payload
 		},
-		onSuccess: async (payload) => {
+		onSuccess: async (payload, _body, submission) => {
 			// A pre-mutation settings read must not replace the authoritative write reply.
-			await client.cancelQueries({ queryKey, exact: true })
-			client.setQueryData<OrgSettingsLoaderData>(queryKey, (previous) =>
-				previous ? payload : undefined,
+			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
+			client.setQueryData<OrgSettingsLoaderData>(
+				submission.queryKey,
+				(previous) => (previous ? payload : undefined),
 			)
+		},
+		onError: async (_error, _body, submission) => {
+			// The server may have committed before the response was lost. Keep
+			// reconciliation bound to the submitted org after navigation.
+			if (submission)
+				await client.invalidateQueries({
+					queryKey: submission.queryKey,
+					exact: true,
+				})
 		},
 	})
 	const domains = data.customDomains

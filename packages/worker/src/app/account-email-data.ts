@@ -396,6 +396,31 @@ function emptyVerifiedShell(input: {
 	}
 }
 
+/** Read one message without reloading the inbox list, usage, or destinations.
+ * The caller supplies an authenticated, organization-bound user. */
+export async function loadAccountEmailDetail(input: {
+	env: Env
+	user: AuthenticatedUser
+	messageId: string
+}): Promise<AccountEmailMessageDetail | null> {
+	const verified =
+		input.user.emailVerified ||
+		(await isAccountEmailVerified({
+			db: input.env.APP_DB,
+			email: input.user.email,
+			stableUserId: input.user.mcpUser.userId,
+		}))
+	if (!verified) return null
+	return loadSelectedMessage({
+		env: input.env,
+		stableUserId: ownerIdFromCaller({
+			request: input.user.request,
+			user: input.user.mcpUser,
+		}),
+		messageId: input.messageId,
+	})
+}
+
 export async function loadAccountEmailData(input: {
 	env: Env
 	request: Request

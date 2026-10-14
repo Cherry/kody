@@ -1,10 +1,10 @@
+import { useMatchedPageScope } from './use-matched-page-scope.ts'
 import { useEffect, useRef } from 'react'
-import { useLocation, useRouteContext } from '@tanstack/react-router'
 
 /** UI effects belong to the form that submitted, even after leaving and returning. */
 export function useSubmitterScope() {
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const href = useLocation({ select: (location) => location.href })
+	const { actorKey, pageLocation } = useMatchedPageScope()
+	const href = pageLocation.href
 	const current = useRef<object | null>(null)
 	useEffect(() => {
 		current.current = {}

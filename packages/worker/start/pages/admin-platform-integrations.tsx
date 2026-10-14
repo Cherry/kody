@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
 	adminPlatformIntegrationsApiPath,
@@ -43,11 +44,13 @@ import {
 } from './record-table.tsx'
 const clampedCellCss = css(recordCellClamp(28))
 export function AdminPlatformIntegrationsPage(props: {
+	queryKey: QueryKey
 	payload: AdminPlatformIntegrationsLoaderData
 	currentHref: string
 }) {
 	const { apps } = props.payload
 	const mutation = usePageResponseMutation<AdminPlatformIntegrationsLoaderData>(
+		props.queryKey,
 		'loadAdminPlatformIntegrations',
 		adminPlatformIntegrationsApiPath,
 		{ dependencies: mutationResources },

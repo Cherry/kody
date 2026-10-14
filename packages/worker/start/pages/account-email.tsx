@@ -3,7 +3,8 @@ import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { pageQueryOrg } from '../page-query-scope.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { invalidateShellQueries } from '../shell-query.ts'
+import { emailKeys } from './email-resources.ts'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
 import {
@@ -14,6 +15,7 @@ import {
 import { toast } from '#client/toast.ts'
 import {
 	emailMutationOptions,
+	optimisticEmail,
 	type EmailAction,
 } from './account-email-query.ts'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
@@ -70,7 +72,20 @@ export function AccountEmailPage({
 	destinations: AccountEmailDestinationsLoaderData
 	currentHref: string
 }) {
-	const data = payload
+	const queryClient = useQueryClient()
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const org = pageQueryOrg(currentHref)
+	const mutationKey = emailKeys.mutations(actorKey, org)
+	const pendingActions = useMutationState({
+		filters: {
+			mutationKey: emailKeys.mutations(actorKey, org),
+			status: 'pending',
+		},
+		select: (mutation) => mutation.state.variables as EmailAction,
+	})
+	// Overlay intent instead of replacing the shared server cache. Background
+	// reads and another mutation's rollback cannot erase an in-flight edit.
+	const data = pendingActions.reduce(optimisticEmail, payload)
 	const [notice, setNotice] = useState<{ href: string; text: string } | null>(
 		null,
 	)
@@ -84,11 +99,19 @@ export function AccountEmailPage({
 	const [resendMessage, setResendMessage] = useState<string | null>(null)
 	const [resendTone, setResendTone] = useState<'error' | 'info'>('info')
 	const [resendAccepted, setResendAccepted] = useState(false)
-	const accountEmailDestinations = useAccountEmailDestinations(destinations)
+	const accountEmailDestinations = useAccountEmailDestinations(
+		destinations,
+		actorKey,
+	)
 	const { session } = useShellData()
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshShell: true,
-	})
+	const invalidatePages = () =>
+		Promise.all([
+			queryClient.invalidateQueries({ queryKey: emailKeys.all(actorKey, org) }),
+			queryClient.invalidateQueries({
+				queryKey: emailKeys.destinations(actorKey),
+			}),
+			invalidateShellQueries(queryClient, actorKey),
+		])
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({
@@ -169,16 +192,21 @@ export function AccountEmailPage({
 		}
 	}
 
-	const queryClient = useQueryClient()
 	const captureSubmitter = useSubmitterScope()
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const mutationKey = ['email', actorKey, pageQueryOrg(currentHref)] as const
-	const pendingActions = useMutationState({
-		filters: { mutationKey, status: 'pending' },
-		select: (mutation) => (mutation.state.variables as EmailAction).action,
-	})
-	const classifyState = pendingActions.includes('classify') ? 'saving' : 'idle'
-	const deleteState = pendingActions.includes('delete') ? 'deleting' : 'idle'
+	const classifyState = pendingActions.some(
+		(action) =>
+			action.action === 'classify' &&
+			action.messageId === data.selectedMessage?.id,
+	)
+		? 'saving'
+		: 'idle'
+	const deleteState = pendingActions.some(
+		(action) =>
+			action.action === 'delete' &&
+			action.messageId === data.selectedMessage?.id,
+	)
+		? 'deleting'
+		: 'idle'
 	const emailMutation = useMutation(
 		emailMutationOptions(
 			queryClient,
@@ -224,7 +252,16 @@ export function AccountEmailPage({
 
 	function deleteSelectedMessage() {
 		const selected = data.selectedMessage
-		if (!selected || queryClient.isMutating({ mutationKey })) return
+		if (
+			!selected ||
+			queryClient.isMutating({
+				mutationKey,
+				predicate: (mutation) =>
+					(mutation.state.variables as EmailAction | undefined)?.messageId ===
+					selected?.id,
+			})
+		)
+			return
 		setMessage(null)
 		const listHref = emailRoute.buildListHref(getCurrentSearch(), currentHref)
 		emailMutation.mutate(
@@ -246,7 +283,12 @@ export function AccountEmailPage({
 		if (
 			!selected ||
 			selected.direction !== 'inbound' ||
-			queryClient.isMutating({ mutationKey })
+			queryClient.isMutating({
+				mutationKey,
+				predicate: (mutation) =>
+					(mutation.state.variables as EmailAction | undefined)?.messageId ===
+					selected?.id,
+			})
 		)
 			return
 		setMessage(null)
@@ -545,5 +587,3 @@ export function AccountEmailPage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = ['loadEmailPage', 'loadAccountPage'] as const

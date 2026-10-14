@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import {
 	useEffect,
@@ -9,7 +10,7 @@ import {
 	useSyncExternalStore,
 	type CSSProperties,
 } from 'react'
-import { useRouter, useLocation } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 import {
 	onboardingWizardStepHref,
@@ -62,7 +63,7 @@ export function OnboardingRoute({
 	refresh: () => void
 }) {
 	const router = useRouter()
-	const currentHref = useLocation({ select: (l) => l.href })
+	const currentHref = useMatchedPageScope().pageLocation.href
 	const search = new URL(currentHref, 'http://localhost').search
 	const hydrated = useSyncExternalStore(
 		subscribeHydration,

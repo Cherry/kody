@@ -2,7 +2,7 @@
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { pageSearch } from '../page-search.ts'
-import { redirect, createFileRoute, useLocation } from '@tanstack/react-router'
+import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -45,7 +45,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
 })
 function Page() {
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<AccountIntegrationsPage payload={payload} currentHref={location.href} />
 	)

@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountPasskeysPage } from '../pages/account-passkeys.tsx'
 import { loadAccountSecurity } from '#start/server/account-security'
 import { documentHead } from '../components/document-head.ts'
@@ -20,11 +20,20 @@ export const Route = createFileRoute('/account_/passkeys')({
 	component: SecurityPage,
 })
 function SecurityPage() {
+	const mutationContext = Route.useRouteContext()
+	const mutationQueryKey = pageQuery(
+		mutationContext.actorKey,
+		mutationContext.pageQueryInput,
+	).queryKey
 	const data = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	if (data.page !== 'passkeys') throw new Error('Unexpected security page')
 	return (
-		<AccountPasskeysPage payload={data.payload} currentHref={location.href} />
+		<AccountPasskeysPage
+			queryKey={mutationQueryKey}
+			payload={data.payload}
+			currentHref={location.href}
+		/>
 	)
 }
 

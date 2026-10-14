@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AdminCodemodsPage } from '../pages/admin-codemods.tsx'
 import { loadAdminCodemods } from '#start/server/admin-codemods'
 import { documentHead } from '../components/document-head.ts'
@@ -24,7 +24,7 @@ export const Route = createFileRoute('/admin/codemods')({
 })
 function CodemodsPage() {
 	const data = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (

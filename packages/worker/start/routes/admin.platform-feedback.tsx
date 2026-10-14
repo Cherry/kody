@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AdminPlatformFeedbackPage } from '../pages/admin-platform-feedback.tsx'
 import { loadAdminPlatformFeedback } from '#start/server/admin-platform-feedback'
 import { documentHead } from '../components/document-head.ts'
@@ -26,7 +26,7 @@ export const Route = createFileRoute('/admin/platform-feedback')({
 })
 function PlatformFeedbackPage() {
 	const data = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (

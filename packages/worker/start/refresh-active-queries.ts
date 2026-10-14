@@ -10,9 +10,7 @@ export async function refreshActiveQueries(
 	await client.refetchQueries({
 		type: 'active',
 		predicate: (query) => {
-			const [kind, actor] = query.queryKey
-			if (actor !== actorKey || (kind !== 'page' && kind !== 'shell'))
-				return false
+			if (query.meta?.actorKey !== actorKey) return false
 			// Recompute age at activation. A hidden tab can defer the observer's
 			// stale timer, leaving its cached result.isStale behind wall-clock time.
 			const stale = query.observers.some(({ options }) => {

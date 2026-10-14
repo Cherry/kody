@@ -15,10 +15,11 @@ export async function invalidatePageResources(
 ) {
 	const org = href === undefined ? null : pageQueryOrg(href)
 	const filters = {
-		queryKey: ['page', actorKey],
+		queryKey: resources === 'permissions' ? undefined : ['page', actorKey],
 		predicate: (query: Query) =>
-			resources === 'permissions' ||
-			(resources.some((resource) => query.queryKey[2] === resource) &&
+			(resources === 'permissions' && query.meta?.actorKey === actorKey) ||
+			(resources !== 'permissions' &&
+				resources.some((resource) => query.queryKey[2] === resource) &&
 				// Cross-surface actions may omit org identity. Invalidate their named
 				// actor resources rather than silently missing every org cache.
 				(org === null ||

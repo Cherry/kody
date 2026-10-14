@@ -8,12 +8,12 @@ declare module '@tanstack/router-core' {
 type Location = { pathname: string; searchStr: string; hash: string }
 type Match = {
 	id: string
-	routeId: string
+	routeId: unknown
 	loaderDeps: unknown
 	invalid: boolean
 	status: string
 	error: unknown
-	context: { actorKey?: unknown }
+	context: unknown
 	staticData: { presentationSearchKeys?: readonly string[] }
 }
 export type CommittedPage = { location: Location; matches: readonly Match[] }
@@ -27,11 +27,18 @@ export function isPresentationNavigation(input: {
 }) {
 	const { committed, location, matches, actorKey } = input
 	if (!committed || committed.matches.length !== matches.length) return false
+	const committedContext = committed.matches[0]?.context
+	const committedActor =
+		committedContext &&
+		typeof committedContext === 'object' &&
+		'actorKey' in committedContext
+			? committedContext.actorKey
+			: undefined
 	if (
 		committed.location.pathname !== location.pathname ||
 		committed.location.hash !== location.hash ||
 		committed.location.searchStr === location.searchStr ||
-		committed.matches[0]?.context.actorKey !== actorKey
+		committedActor !== actorKey
 	)
 		return false
 	if (

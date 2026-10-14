@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { useLocation } from '@tanstack/react-router'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type AdminInsightsLoaderData } from '#universal/loader-data.ts'
 import {
 	AccountManagementShell,
@@ -11,7 +11,7 @@ export function AdminInsightsRoute({
 }: {
 	data: AdminInsightsLoaderData
 }) {
-	const currentHref = useLocation({ select: (l) => l.href })
+	const currentHref = useMatchedPageScope().pageLocation.href
 	return (
 		<AccountManagementShell maxWidth="min(100%, 92rem)">
 			<AdminPageHeader

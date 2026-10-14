@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { connectWebhookApplyQuery } from '../connect-approval-queries.ts'
 import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { ConnectWebhookApplyRoute } from '../pages/connect-webhook-apply.tsx'
@@ -21,7 +21,7 @@ export const Route = createFileRoute('/connect/webhook-apply')({
 	component: Page,
 })
 function Page() {
-	const href = useLocation({ select: (l) => l.href })
+	const href = Route.useRouteContext().pageLocation.href
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
 	const { data } = usePageQuery(
 		connectWebhookApplyQuery(actorKey, pageQueryInput),

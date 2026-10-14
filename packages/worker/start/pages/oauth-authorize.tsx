@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildMcpAuthorizeErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -15,7 +16,6 @@ import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-aut
 import { resolveSignInStatusAfterPageshow } from '#client/routes/oauth-authorize-bfcache.ts'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useHydrated } from '../components/use-hydrated.ts'
-import { useLocation } from '@tanstack/react-router'
 import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
 import {
 	renderTurnstileWidgets,
@@ -155,7 +155,7 @@ export function OAuthAuthorizeRoute({
 		refreshShell: true,
 		refreshRoute: true,
 	})
-	const currentHref = useLocation({ select: (location) => location.href })
+	const currentHref = useMatchedPageScope().pageLocation.href
 	const [messageOverride, setMessage] = useState<OAuthAuthorizeMessage | null>(
 		null,
 	)

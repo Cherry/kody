@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { LoginPage } from '../pages/login.tsx'
 import { loadAuthPage } from '#start/server/auth-page'
 export const Route = createFileRoute('/signup')({
@@ -10,7 +10,7 @@ export const Route = createFileRoute('/signup')({
 })
 function AuthPage() {
 	const data = Route.useLoaderData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<LoginPage
 			key={location.href}

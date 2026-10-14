@@ -5,7 +5,7 @@ import {
 	type ReactNode,
 	type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
-import { useLocation } from '@tanstack/react-router'
+import { useLoaderData, useLocation } from '@tanstack/react-router'
 import { workspaceSwitchHref } from '#client/routes/account-rail.ts'
 import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
@@ -151,7 +151,9 @@ export function OrgSwitcher({
 	avatarUrl: string | null
 	menu?: boolean
 }) {
-	const pathname = useLocation({ select: (location) => location.pathname })
+	const {
+		shellLocation: { pathname },
+	} = useLoaderData({ from: '__root__' })
 	const href = useLocation({ select: (location) => location.href })
 	const props = {
 		...session,
@@ -445,7 +447,9 @@ export function AccountMenu(props: {
 }) {
 	const [open, setOpen] = useState(false)
 	const href = useLocation({ select: (location) => location.href })
-	const pathname = useLocation({ select: (location) => location.pathname })
+	const {
+		shellLocation: { pathname },
+	} = useLoaderData({ from: '__root__' })
 	useEffect(() => {
 		const panel = document.getElementById(accountMenuPanelId)
 		if (panel?.matches(':popover-open')) panel.hidePopover()

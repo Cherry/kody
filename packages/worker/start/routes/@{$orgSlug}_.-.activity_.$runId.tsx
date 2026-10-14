@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadActivityQuery } from '../activity-query.ts'
 import { pageSearch } from '../page-search.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountActivityPage } from '../pages/account-activity.tsx'
 import { documentHead } from '../components/document-head.ts'
 
@@ -40,7 +40,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/activity_/$runId')({
 })
 function Page() {
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<AccountActivityPage
 			actorKey={actorKey}

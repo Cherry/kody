@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { loadConnectOauth } from '#start/server/connect'
 import { ConnectOauthRoute } from '../pages/connect-oauth.tsx'
 import { documentHead } from '../components/document-head.ts'
@@ -15,7 +15,7 @@ export const Route = createFileRoute('/connect/oauth')({
 	component: Page,
 })
 function Page() {
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	const href = location.href
 	return (
 		<ConnectOauthRoute

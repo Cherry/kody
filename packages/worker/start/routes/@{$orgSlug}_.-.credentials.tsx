@@ -1,34 +1,35 @@
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
-import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
+import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { AccountCredentialsRoute } from '../pages/account-credentials.tsx'
-import { loadCredentialsPage } from '#start/server/credentials'
+import {
+	credentialsPageQuery as pageQuery,
+	credentialPresentationSearchKeys,
+	validateCredentialSearch,
+} from '../credentials-query.ts'
 import { documentHead } from '../components/document-head.ts'
-const pageQuery = createPageQuery('loadCredentialsPage', loadCredentialsPage, {
-	freshAuthorization: true,
-})
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials')({
-	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
-	}),
+	validateSearch: validateCredentialSearch,
+	staticData: { presentationSearchKeys: credentialPresentationSearchKeys },
+	shouldReload: ({ context }) => !context.presentationOnly,
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,
-			pageQuery(context.actorKey, context.pageQueryInput),
+			pageQuery(context.actorKey, context.pageLocation.pathname),
 			preload,
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })
 function Page() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	const { payload } = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	const { actorKey, pageLocation } = Route.useRouteContext()
+	const { payload } = usePageQuery(
+		pageQuery(actorKey, pageLocation.pathname),
+	).data
 	return (
 		<AccountCredentialsRoute
-			key={pageQueryInput}
 			payload={payload}
-			currentHref={pageQueryInput}
+			currentHref={pageLocation.href}
 		/>
 	)
 }

@@ -45,6 +45,16 @@ test('Credentials lists a key, filters by kind, and opens its detail pane withou
 			.getByRole('link', { name: 'Secret providers' }),
 	).toHaveAttribute('href', `/@${user.username}/-/secret-providers`)
 
+	// A filter changes only the displayed rows. Keep the same mounted table and
+	// do not invoke either a page loader or the session verifier.
+	const requests: string[] = []
+	const collectRequest = (request: { url(): string }) => {
+		if (request.url().includes('/_serverFn/')) requests.push(request.url())
+	}
+	page.on('request', collectRequest)
+	await table.evaluate((element) =>
+		element.setAttribute('data-filter-mount', 'same'),
+	)
 	await page
 		.getByRole('combobox', { name: 'Filter credentials by kind' })
 		.selectOption('oauth')
@@ -54,6 +64,9 @@ test('Credentials lists a key, filters by kind, and opens its detail pane withou
 		.getByRole('combobox', { name: 'Filter credentials by kind' })
 		.selectOption('secret')
 	await expect(row).toBeVisible()
+	await expect(table).toHaveAttribute('data-filter-mount', 'same')
+	page.off('request', collectRequest)
+	expect(requests).toEqual([])
 
 	await row.click()
 	await expect(page).toHaveURL(

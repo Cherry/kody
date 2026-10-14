@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
 import { type CSSObject } from '@emotion/react'
@@ -33,9 +34,11 @@ type CreatedClient = AccountMcpOauthClientsLoaderData['clients'][number] & {
 }
 
 export function AccountMcpOauthClientsPage({
+	queryKey,
 	payload,
 	currentHref,
 }: {
+	queryKey: QueryKey
 	payload: AccountMcpOauthClientsLoaderData
 	currentHref: string
 }) {
@@ -48,7 +51,7 @@ export function AccountMcpOauthClientsPage({
 	const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null)
 	const mutation = usePageResponseMutation<
 		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient }
-	>('loadMcpOauthClientsPage', clientsApiPath, {
+	>(queryKey, 'loadMcpOauthClientsPage', clientsApiPath, {
 		dependencies: mutationResources,
 		dependencyScope: 'actor',
 		merge: (page, accepted) => ({

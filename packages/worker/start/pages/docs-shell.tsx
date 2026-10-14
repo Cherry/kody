@@ -1,9 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { mergeCss } from '../components/merge-css.ts'
 import { type ReactNode, type CSSProperties, useEffect, useRef } from 'react'
-import { useLocation } from '@tanstack/react-router'
 import { type DocSummaryLoaderData } from '#universal/loader-data.ts'
 import {
 	docHref,
@@ -45,7 +45,7 @@ function DocsShell(input: {
 	isAdmin?: boolean
 }) {
 	const menuRef = useRef<HTMLDetailsElement>(null)
-	const href = useLocation({ select: (location) => location.href })
+	const href = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		if (menuRef.current) menuRef.current.open = false
 	}, [href])

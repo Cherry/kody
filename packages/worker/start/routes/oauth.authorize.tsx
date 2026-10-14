@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { loadOAuthPage } from '#start/server/oauth'
 import { OAuthAuthorizeRoute } from '../pages/oauth-authorize.tsx'
 
@@ -11,7 +11,7 @@ export const Route = createFileRoute('/oauth/authorize')({
 })
 
 function Page() {
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<OAuthAuthorizeRoute key={location.searchStr} {...Route.useLoaderData()} />
 	)

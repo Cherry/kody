@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { pageSearch } from '../page-search.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { AccountMcpOauthClientsPage } from '../pages/account-mcp-oauth-clients.tsx'
 import { loadMcpOauthClientsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -24,10 +24,19 @@ export const Route = createFileRoute('/account_/mcp-oauth-clients')({
 	component: Page,
 })
 function Page() {
+	const mutationContext = Route.useRouteContext()
+	const mutationQueryKey = pageQuery(
+		mutationContext.actorKey,
+		mutationContext.pageQueryInput,
+	).queryKey
 	const { payload } = usePageData()
-	const location = useLocation()
+	const { pageLocation: location } = Route.useRouteContext()
 	return (
-		<AccountMcpOauthClientsPage payload={payload} currentHref={location.href} />
+		<AccountMcpOauthClientsPage
+			queryKey={mutationQueryKey}
+			payload={payload}
+			currentHref={location.href}
+		/>
 	)
 }
 
