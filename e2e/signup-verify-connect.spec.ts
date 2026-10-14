@@ -179,8 +179,10 @@ test('a new user signs up, verifies email from the message, and reaches MCP conn
 		await expect(page.getByTestId('onboarding-agent-picker')).toBeVisible()
 
 		await stepsNav.getByRole('link', { name: '1 Connect your agent' }).click()
-		await expect(page.getByTestId('onboarding-agent-picker')).toBeVisible()
-		await page
+		// Step 3 retains its own picker until Step 1 commits.
+		const firstAgentPanel = page.getByTestId('onboarding-connect-agent')
+		await expect(firstAgentPanel).toBeVisible()
+		await firstAgentPanel
 			.getByTestId('onboarding-agent-picker')
 			.getByRole('link', { name: 'Claude Code', exact: true })
 			.click()
