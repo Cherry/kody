@@ -283,6 +283,16 @@ type CommunityPackageNotFoundLoaderData = {
 	notFound: true
 }
 
+/** Signed-in viewer cannot open this saved package (private/hidden, no grant). */
+type CommunityPackageNoAccessLoaderData = {
+	ok: false
+	noAccess: true
+	username: string
+	kodyId: string
+	packageName: string
+	viewerUsername: string
+}
+
 export type ProfileLoaderData = {
 	ok: true
 	profile: PublicCommunityProfile
@@ -2781,6 +2791,7 @@ export type AppLoaderData = {
 		| CommunityDetailShellLoaderData
 		| CommunityPackageUnauthorizedLoaderData
 		| CommunityPackageNotFoundLoaderData
+		| CommunityPackageNoAccessLoaderData
 	packageFiles?: PackageFilesLoaderData
 	profileShell?: ProfileShellLoaderData | ProfileUnavailableLoaderData
 	profileList?: ProfileListLoaderData
