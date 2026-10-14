@@ -4,7 +4,6 @@ import {
 } from '#app/account-values-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { deleteValue } from '#mcp/values/service.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
@@ -15,9 +14,9 @@ type AuthenticatedUser = NonNullable<
 async function handleDeleteAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	name: string
 }) {
-	const name = readTrimmedStringOrEmpty(input.body, 'name')
+	const name = input.name.trim()
 	if (!name) {
 		throw new Error('Value name is required.')
 	}
@@ -43,21 +42,18 @@ async function handleDeleteAction(input: {
 	)
 }
 
-export async function mutateAccountValues({
+export async function deleteAccountValueRecord({
 	env,
 	user,
-	body,
+	name,
 }: {
 	env: Env
 	user: AuthenticatedUser
 	request: Request
-	body: object
+	name: string
 }) {
-	const action = readTrimmedStringOrEmpty(body, 'action')
 	try {
-		if (action === 'delete') {
-			return await handleDeleteAction({ env, user, body })
-		}
+		return await handleDeleteAction({ env, user, name })
 	} catch (error) {
 		return operationResult(
 			{
@@ -68,6 +64,4 @@ export async function mutateAccountValues({
 			400,
 		)
 	}
-
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

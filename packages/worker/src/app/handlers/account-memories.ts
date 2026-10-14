@@ -6,7 +6,6 @@ import {
 } from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { memoryLegacyWriteFrozenMessage } from '#mcp/memory/memory-owner.ts'
 import { deleteMemory } from '#mcp/memory/service.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
@@ -55,18 +54,19 @@ export function createAccountMemoriesExportHandler(env: Env) {
 async function handleDeleteAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	memoryId: string
+	force: boolean
 	refresh: {
 		query: string
 		includeDeleted: boolean
 		selectedMemoryId: string | null
 	}
 }) {
-	const memoryId = readTrimmedStringOrEmpty(input.body, 'memoryId')
+	const memoryId = input.memoryId.trim()
 	if (!memoryId) {
 		return operationResult({ ok: false, error: 'Memory id is required.' }, 400)
 	}
-	const force = readBoolean(input.body, 'force', false)
+	const force = input.force
 	const deleted = await deleteMemory({
 		env: input.env,
 		userId: ownerIdFromCaller({
@@ -87,28 +87,12 @@ async function handleDeleteAction(input: {
 	return operationResult(payload)
 }
 
-export function readPathMemoryId(params: unknown) {
-	if (
-		typeof params === 'object' &&
-		params !== null &&
-		'memoryId' in params &&
-		typeof params.memoryId === 'string'
-	) {
-		return params.memoryId
-	}
-	return undefined
-}
-
-function readBoolean(body: object, key: string, defaultValue: boolean) {
-	const value = (body as Record<string, unknown>)[key]
-	return typeof value === 'boolean' ? value : defaultValue
-}
-
-export async function mutateAccountMemories({
+export async function deleteAccountMemoryRecord({
 	env,
 	user,
 	refresh,
-	body,
+	memoryId,
+	force,
 }: {
 	env: Env
 	user: AuthenticatedUser
@@ -117,28 +101,27 @@ export async function mutateAccountMemories({
 		includeDeleted: boolean
 		selectedMemoryId: string | null
 	}
-	body: object
+	memoryId: string
+	force: boolean
 }) {
-	const action = readTrimmedStringOrEmpty(body, 'action')
 	try {
-		if (action === 'delete') {
-			const ownerId = ownerIdFromCaller({
-				request: user.request,
-				user: user.mcpUser,
-			})
-			if (!(await isPersonalOrg(env.APP_DB, ownerId))) {
-				return operationResult(
-					{ ok: false, error: memoryLegacyWriteFrozenMessage },
-					400,
-				)
-			}
-			return await handleDeleteAction({
-				env,
-				user,
-				body,
-				refresh,
-			})
+		const ownerId = ownerIdFromCaller({
+			request: user.request,
+			user: user.mcpUser,
+		})
+		if (!(await isPersonalOrg(env.APP_DB, ownerId))) {
+			return operationResult(
+				{ ok: false, error: memoryLegacyWriteFrozenMessage },
+				400,
+			)
 		}
+		return await handleDeleteAction({
+			env,
+			user,
+			memoryId,
+			force,
+			refresh,
+		})
 	} catch (error) {
 		return operationResult(
 			{
@@ -149,6 +132,4 @@ export async function mutateAccountMemories({
 			400,
 		)
 	}
-
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

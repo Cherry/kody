@@ -4,7 +4,12 @@ import {
 	buildEmailDestinationsLoaderData,
 	listEmailNotificationDestinations,
 } from '#worker/email/destinations.ts'
-import { mutateAccountEmailDestinations } from './account-email-destinations.ts'
+import {
+	addAccountEmailDestination,
+	resendAccountEmailDestination,
+	setDefaultAccountEmailDestination,
+	removeAccountEmailDestination,
+} from './account-email-destinations.ts'
 export * from './account-email-destinations.ts'
 export function testAccountEmailDestinationsHandler(env: Env) {
 	return {
@@ -38,12 +43,46 @@ export function testAccountEmailDestinationsHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountEmailDestinations({
-				request,
-				env,
-				user,
-				body,
-			})
+			const input = body as {
+				action?: unknown
+				email?: unknown
+				id?: unknown
+			} | null
+			if (
+				!input ||
+				typeof input !== 'object' ||
+				!['add', 'resend', 'setDefault', 'remove'].includes(
+					String(input.action),
+				) ||
+				(input.email !== undefined && typeof input.email !== 'string') ||
+				(input.id !== undefined && typeof input.id !== 'string')
+			)
+				return operationResult(
+					{ ok: false, error: 'Invalid request body.' },
+					400,
+				)
+			const context = { request, env, user }
+			const result =
+				input.action === 'add'
+					? await addAccountEmailDestination({
+							...context,
+							email: String(input.email ?? ''),
+						})
+					: input.action === 'resend'
+						? await resendAccountEmailDestination({
+								...context,
+								destinationId: String(input.id ?? ''),
+							})
+						: input.action === 'setDefault'
+							? await setDefaultAccountEmailDestination({
+									...context,
+									destinationId: String(input.id ?? ''),
+								})
+							: await removeAccountEmailDestination({
+									...context,
+									destinationId: String(input.id ?? ''),
+								})
+
 			return operationResult(result.data, {
 				status: result.status,
 				headers: result.headers,

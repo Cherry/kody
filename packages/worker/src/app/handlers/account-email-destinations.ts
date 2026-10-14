@@ -17,36 +17,24 @@ import {
 	removeEmailNotificationDestination,
 	setDefaultEmailNotificationDestination,
 } from '#worker/email/destinations.ts'
-import { enum_, object, optional, parseSafe, string } from 'remix/data-schema'
 
 export { emailDestinationRateLimitConfig }
 
-const destinationMutationSchema = object({
-	action: enum_(['add', 'resend', 'setDefault', 'remove'] as const),
-	email: optional(string()),
-	id: optional(string()),
-})
-
 const destinationListPayload = buildEmailDestinationsLoaderData
 
-export async function mutateAccountEmailDestinations({
-	request,
-	env,
-	user,
-	body,
-}: {
+type DestinationContext = {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: unknown
-}) {
-	const parsed = parseSafe(destinationMutationSchema, body)
-	if (!parsed.success) {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
-	const action = parsed.value.action
-	const email = parsed.value.email?.trim() ?? ''
-	const destinationId = parsed.value.id?.trim() ?? ''
+}
+type DestinationPayload = ReturnType<
+	typeof buildEmailDestinationsLoaderData
+> & { message: string }
+async function runDestinationOperation(
+	{ request, env, user }: DestinationContext,
+	action: 'add' | 'resend' | 'setDefault' | 'remove',
+	run: () => Promise<DestinationPayload>,
+) {
 	const requestIp = getRequestIp(request) ?? undefined
 
 	if (!user.emailVerified) {
@@ -57,7 +45,7 @@ export async function mutateAccountEmailDestinations({
 			result: 'failure',
 			email: user.email,
 			ip: requestIp,
-			path: new URL(request.url).pathname,
+			path: '/account/email',
 			reason: 'email_unverified',
 		})
 		return operationResult(
@@ -70,107 +58,7 @@ export async function mutateAccountEmailDestinations({
 	}
 
 	try {
-		if (action === 'add' || action === 'resend') {
-			if (action === 'add') {
-				const result = await createEmailDestinationVerification({
-					env,
-					userId: user.userId,
-					email,
-					requestUrl: new URL(request.url),
-				})
-				const destinations = await listEmailNotificationDestinations({
-					db: env.APP_DB,
-					dbUserId: user.userId,
-					accountEmail: user.email,
-					accountEmailVerified: user.emailVerified,
-				})
-				void logAuditEvent({
-					db: auditDatabaseFromEnv(env),
-					category: 'account',
-					action: 'email_destination',
-					result: 'success',
-					email: user.email,
-					ip: requestIp,
-					path: new URL(request.url).pathname,
-					reason: `add=${result.destination.email}`,
-				})
-				return operationResult({
-					...destinationListPayload(destinations),
-					message: result.created
-						? 'Verification email sent. Open the link to start using this address.'
-						: 'Verification email sent again. Open the latest link to start using this address.',
-				})
-			}
-
-			const destination = await resendEmailDestinationVerification({
-				env,
-				userId: user.userId,
-				destinationId,
-				requestUrl: new URL(request.url),
-			})
-			const destinations = await listEmailNotificationDestinations({
-				db: env.APP_DB,
-				dbUserId: user.userId,
-				accountEmail: user.email,
-				accountEmailVerified: user.emailVerified,
-			})
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'email_destination',
-				result: 'success',
-				email: user.email,
-				ip: requestIp,
-				path: new URL(request.url).pathname,
-				reason: `resend=${destination.email}`,
-			})
-			return operationResult({
-				...destinationListPayload(destinations),
-				message: 'Verification email sent again.',
-			})
-		}
-
-		if (action === 'setDefault') {
-			const destinations = await setDefaultEmailNotificationDestination({
-				db: env.APP_DB,
-				dbUserId: user.userId,
-				destinationId,
-			})
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'email_destination',
-				result: 'success',
-				email: user.email,
-				ip: requestIp,
-				path: new URL(request.url).pathname,
-				reason: `set_default=${destinationId}`,
-			})
-			return operationResult({
-				...destinationListPayload(destinations),
-				message: 'Default email destination updated.',
-			})
-		}
-
-		const destinations = await removeEmailNotificationDestination({
-			db: env.APP_DB,
-			dbUserId: user.userId,
-			destinationId,
-		})
-		void logAuditEvent({
-			db: auditDatabaseFromEnv(env),
-			category: 'account',
-			action: 'email_destination',
-			result: 'success',
-			email: user.email,
-			ip: requestIp,
-			path: new URL(request.url).pathname,
-			reason: `remove=${destinationId}`,
-		})
-		return operationResult({
-			...destinationListPayload(destinations),
-			message: 'Email destination removed.',
-		})
+		return operationResult(await run())
 	} catch (error) {
 		if (error instanceof EmailDestinationError) {
 			if (error.code === 'rate_limited') {
@@ -181,7 +69,7 @@ export async function mutateAccountEmailDestinations({
 					result: 'rate_limited',
 					email: user.email,
 					ip: requestIp,
-					path: new URL(request.url).pathname,
+					path: '/account/email',
 					reason: action,
 				})
 				return operationResult(
@@ -215,7 +103,7 @@ export async function mutateAccountEmailDestinations({
 			result: 'failure',
 			email: user.email,
 			ip: requestIp,
-			path: new URL(request.url).pathname,
+			path: '/account/email',
 			reason: 'send_failed',
 		})
 		return operationResult(
@@ -226,4 +114,136 @@ export async function mutateAccountEmailDestinations({
 			502,
 		)
 	}
+}
+
+export async function addAccountEmailDestination(
+	input: DestinationContext & { email: string },
+) {
+	const { request, env, user } = input
+	const email = input.email.trim()
+	const requestIp = getRequestIp(request) ?? undefined
+	return runDestinationOperation(input, 'add', async () => {
+		const result = await createEmailDestinationVerification({
+			env,
+			userId: user.userId,
+			email,
+			requestUrl: new URL(request.url),
+		})
+		const destinations = await listEmailNotificationDestinations({
+			db: env.APP_DB,
+			dbUserId: user.userId,
+			accountEmail: user.email,
+			accountEmailVerified: user.emailVerified,
+		})
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_destination',
+			result: 'success',
+			email: user.email,
+			ip: requestIp,
+			path: '/account/email',
+			reason: `add=${result.destination.email}`,
+		})
+		return {
+			...destinationListPayload(destinations),
+			message: result.created
+				? 'Verification email sent. Open the link to start using this address.'
+				: 'Verification email sent again. Open the latest link to start using this address.',
+		}
+	})
+}
+
+export async function resendAccountEmailDestination(
+	input: DestinationContext & { destinationId: string },
+) {
+	const { request, env, user } = input
+	const destinationId = input.destinationId.trim()
+	const requestIp = getRequestIp(request) ?? undefined
+	return runDestinationOperation(input, 'resend', async () => {
+		const destination = await resendEmailDestinationVerification({
+			env,
+			userId: user.userId,
+			destinationId,
+			requestUrl: new URL(request.url),
+		})
+		const destinations = await listEmailNotificationDestinations({
+			db: env.APP_DB,
+			dbUserId: user.userId,
+			accountEmail: user.email,
+			accountEmailVerified: user.emailVerified,
+		})
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_destination',
+			result: 'success',
+			email: user.email,
+			ip: requestIp,
+			path: '/account/email',
+			reason: `resend=${destination.email}`,
+		})
+		return {
+			...destinationListPayload(destinations),
+			message: 'Verification email sent again.',
+		}
+	})
+}
+
+export async function setDefaultAccountEmailDestination(
+	input: DestinationContext & { destinationId: string },
+) {
+	const { request, env, user } = input
+	const destinationId = input.destinationId.trim()
+	const requestIp = getRequestIp(request) ?? undefined
+	return runDestinationOperation(input, 'setDefault', async () => {
+		const destinations = await setDefaultEmailNotificationDestination({
+			db: env.APP_DB,
+			dbUserId: user.userId,
+			destinationId,
+		})
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_destination',
+			result: 'success',
+			email: user.email,
+			ip: requestIp,
+			path: '/account/email',
+			reason: `set_default=${destinationId}`,
+		})
+		return {
+			...destinationListPayload(destinations),
+			message: 'Default email destination updated.',
+		}
+	})
+}
+
+export async function removeAccountEmailDestination(
+	input: DestinationContext & { destinationId: string },
+) {
+	const { request, env, user } = input
+	const destinationId = input.destinationId.trim()
+	const requestIp = getRequestIp(request) ?? undefined
+	return runDestinationOperation(input, 'remove', async () => {
+		const destinations = await removeEmailNotificationDestination({
+			db: env.APP_DB,
+			dbUserId: user.userId,
+			destinationId,
+		})
+		void logAuditEvent({
+			db: auditDatabaseFromEnv(env),
+			category: 'account',
+			action: 'email_destination',
+			result: 'success',
+			email: user.email,
+			ip: requestIp,
+			path: '/account/email',
+			reason: `remove=${destinationId}`,
+		})
+		return {
+			...destinationListPayload(destinations),
+			message: 'Email destination removed.',
+		}
+	})
 }

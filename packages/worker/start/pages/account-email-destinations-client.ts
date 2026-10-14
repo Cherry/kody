@@ -1,4 +1,9 @@
-import { updateEmailDestinations } from '#start/server/account-mutations'
+import {
+	addEmailDestination,
+	resendEmailDestination,
+	setDefaultEmailDestination,
+	removeEmailDestination,
+} from '#start/server/account-mutations'
 import { type AccountEmailDestinationsLoaderData } from '#universal/loader-data.ts'
 import {
 	useMutation,
@@ -8,6 +13,9 @@ import {
 import { useState, type FormEvent } from 'react'
 import { emailKeys } from './email-resources.ts'
 
+type DestinationWrite =
+	| { action: 'add'; email: string }
+	| { action: 'resend' | 'setDefault' | 'remove'; id: string }
 export function useAccountEmailDestinations(
 	payload: AccountEmailDestinationsLoaderData,
 	actorKey: string | null,
@@ -26,8 +34,19 @@ export function useAccountEmailDestinations(
 	const busy = pendingWrites.length > 0
 	const mutation = useMutation({
 		mutationKey: ['email-destination-write', actorKey],
-		mutationFn: async (body: Record<string, string>) => {
-			return updateEmailDestinations({ data: { body } })
+		mutationFn: async (body: DestinationWrite) => {
+			switch (body.action) {
+				case 'add':
+					return addEmailDestination({ data: { email: body.email } })
+				case 'resend':
+					return resendEmailDestination({ data: { destinationId: body.id } })
+				case 'setDefault':
+					return setDefaultEmailDestination({
+						data: { destinationId: body.id },
+					})
+				case 'remove':
+					return removeEmailDestination({ data: { destinationId: body.id } })
+			}
 		},
 		onSuccess: async (accepted) => {
 			await client.cancelQueries({
@@ -46,7 +65,7 @@ export function useAccountEmailDestinations(
 	function updateDraftEmail(event: FormEvent<HTMLInputElement>) {
 		setDraftEmail(event.currentTarget.value)
 	}
-	function mutate(body: Record<string, string>) {
+	function mutate(body: DestinationWrite) {
 		if (busy) return
 		setMessage(null)
 		mutation.mutate(body, {

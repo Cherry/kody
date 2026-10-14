@@ -1,7 +1,7 @@
 import { loadAccountValuesData } from '#app/account-values-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { mutateAccountValues } from './account-values.ts'
+import { deleteAccountValueRecord } from './account-values.ts'
 export * from './account-values.ts'
 
 export function testAccountValuesApiHandler(env: Env) {
@@ -34,7 +34,15 @@ export function testAccountValuesApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountValues({ env, user, request, body })
+			if (!('action' in body) || body.action !== 'delete')
+				return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+
+			const result = await deleteAccountValueRecord({
+				env,
+				user,
+				request,
+				name: 'name' in body && typeof body.name === 'string' ? body.name : '',
+			})
 			return operationResult(result.data, result.status)
 		},
 	}

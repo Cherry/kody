@@ -6,7 +6,7 @@ import {
 } from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { mutateAccountMemories } from './account-memories.ts'
+import { deleteAccountMemoryRecord } from './account-memories.ts'
 export * from './account-memories.ts'
 
 export function testAccountMemoriesApiHandler(env: Env) {
@@ -41,10 +41,20 @@ export function testAccountMemoriesApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountMemories({
+			if (!('action' in body) || body.action !== 'delete')
+				return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+
+			const result = await deleteAccountMemoryRecord({
 				env,
 				user,
-				body,
+				memoryId:
+					'memoryId' in body && typeof body.memoryId === 'string'
+						? body.memoryId
+						: '',
+				force:
+					'force' in body && typeof body.force === 'boolean'
+						? body.force
+						: false,
 				refresh: {
 					query: readAccountMemoriesQuery(request.url),
 					includeDeleted: readAccountMemoriesIncludeDeleted(request.url),

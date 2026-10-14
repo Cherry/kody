@@ -1,6 +1,5 @@
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import {
 	bindSecretProvider,
 	grantSecretProviderToPackage,
@@ -13,10 +12,13 @@ type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-async function handleBind(input: {
+export async function bindAccountSecretProvider(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	provider: string
+	packageId: string
+	doorSecretName: string
+	config: Record<string, string>
 	requestUrl: string
 }) {
 	const bound = await bindSecretProvider({
@@ -26,18 +28,18 @@ async function handleBind(input: {
 			request: input.user.request,
 			user: input.user.mcpUser,
 		}),
-		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
-		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),
-		doorSecretName: readTrimmedStringOrEmpty(input.body, 'doorSecretName'),
-		config: readConfig(input.body),
+		providerId: input.provider.trim(),
+		packageId: input.packageId.trim(),
+		doorSecretName: input.doorSecretName.trim(),
+		config: input.config,
 	})
 	return operationResult({ ok: true, bound })
 }
 
-async function handleUnbind(input: {
+export async function unbindAccountSecretProvider(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	provider: string
 }) {
 	await unbindSecretProvider({
 		env: input.env,
@@ -45,15 +47,17 @@ async function handleUnbind(input: {
 			request: input.user.request,
 			user: input.user.mcpUser,
 		}),
-		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
+		providerId: input.provider.trim(),
 	})
 	return operationResult({ ok: true })
 }
 
-async function handleGrant(input: {
+export async function grantAccountSecretProvider(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	provider: string
+	ref: string
+	packageId: string
 }) {
 	const granted = await grantSecretProviderToPackage({
 		env: input.env,
@@ -61,17 +65,19 @@ async function handleGrant(input: {
 			request: input.user.request,
 			user: input.user.mcpUser,
 		}),
-		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
-		ref: readTrimmedStringOrEmpty(input.body, 'ref'),
-		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),
+		providerId: input.provider.trim(),
+		ref: input.ref.trim(),
+		packageId: input.packageId.trim(),
 	})
 	return operationResult({ ok: true, granted })
 }
 
-async function handleRevoke(input: {
+export async function revokeAccountSecretProvider(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	provider: string
+	ref: string
+	packageId: string
 }) {
 	await revokeSecretProviderGrant({
 		env: input.env,
@@ -79,59 +85,9 @@ async function handleRevoke(input: {
 			request: input.user.request,
 			user: input.user.mcpUser,
 		}),
-		providerId: readTrimmedStringOrEmpty(input.body, 'provider'),
-		ref: readTrimmedStringOrEmpty(input.body, 'ref'),
-		packageId: readTrimmedStringOrEmpty(input.body, 'packageId'),
+		providerId: input.provider.trim(),
+		ref: input.ref.trim(),
+		packageId: input.packageId.trim(),
 	})
 	return operationResult({ ok: true })
-}
-
-function readConfig(body: object) {
-	const value = (body as Record<string, unknown>).config
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-	const config: Record<string, string> = {}
-	for (const [key, entry] of Object.entries(value)) {
-		if (typeof entry === 'string') config[key] = entry
-	}
-	return config
-}
-
-export async function mutateAccountSecretProviders({
-	request,
-	env,
-	user,
-	body,
-}: {
-	request: Request
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
-}) {
-	const action = readTrimmedStringOrEmpty(body, 'action')
-	try {
-		if (action === 'bind') {
-			return await handleBind({ env, user, body, requestUrl: request.url })
-		}
-		if (action === 'unbind') {
-			return await handleUnbind({ env, user, body })
-		}
-		if (action === 'grant') {
-			return await handleGrant({ env, user, body })
-		}
-		if (action === 'revoke') {
-			return await handleRevoke({ env, user, body })
-		}
-	} catch (error) {
-		return operationResult(
-			{
-				ok: false,
-				error:
-					error instanceof Error
-						? error.message
-						: 'Unable to update secret providers.',
-			},
-			400,
-		)
-	}
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

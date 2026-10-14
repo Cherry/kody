@@ -1,6 +1,9 @@
 import { loadAccountConnectionsData } from '#app/account-connections-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { isOauthProviderId } from '#app/oauth-providers.ts'
+import {
+	isOauthProviderId,
+	type OauthProviderId,
+} from '#app/oauth-providers.ts'
 import { operationResult } from '#app/operation-result.ts'
 import {
 	auditDatabaseFromEnv,
@@ -12,78 +15,61 @@ import {
 	maybeSyncDiscordGuildRolesForUser,
 	summarizeDiscordGuildRoleSync,
 } from '#worker/discord/guild-role.ts'
-import { object, parseSafe, string } from 'remix/data-schema'
-
-const disconnectSchema = object({
-	intent: string(),
-	provider: string(),
-})
-
-const syncDiscordRoleSchema = object({
-	intent: string(),
-})
-
-export async function mutateAccountConnections({
-	request,
-	env,
-	user,
-	body,
-}: {
+type ConnectionContext = {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: unknown
-}) {
-	const syncParsed = parseSafe(syncDiscordRoleSchema, body)
-	if (syncParsed.success && syncParsed.value.intent === 'sync-discord-role') {
-		const connection = await env.APP_DB.prepare(
-			`SELECT provider_id FROM oauth_connections
+}
+export async function syncAccountDiscordRole({
+	request,
+	env,
+	user,
+}: ConnectionContext) {
+	const connection = await env.APP_DB.prepare(
+		`SELECT provider_id FROM oauth_connections
 		 WHERE user_id = ? AND provider_name = 'discord'`,
+	)
+		.bind(user.userId)
+		.first<{ provider_id: string }>()
+	if (!connection) {
+		return operationResult(
+			{ ok: false, error: 'Discord is not connected.' },
+			404,
 		)
-			.bind(user.userId)
-			.first<{ provider_id: string }>()
-		if (!connection) {
-			return operationResult(
-				{ ok: false, error: 'Discord is not connected.' },
-				404,
-			)
-		}
-		const summary = await maybeSyncDiscordGuildRolesForUser({
+	}
+	const summary = await maybeSyncDiscordGuildRolesForUser({
+		env,
+		userId: user.userId,
+		discordUserId: connection.provider_id,
+	})
+	const result =
+		'status' in summary ? summary : summarizeDiscordGuildRoleSync(summary)
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'auth',
+		action: 'discord_member_role_sync',
+		result: result.status === 'assigned' ? 'success' : 'failure',
+		email: user.email,
+		ip: getRequestIp(request) ?? undefined,
+		path: new URL(request.url).pathname,
+		reason: `status=${result.status}`,
+	})
+	return operationResult({
+		...(await loadAccountConnectionsData({
 			env,
 			userId: user.userId,
-			discordUserId: connection.provider_id,
-		})
-		const result =
-			'status' in summary ? summary : summarizeDiscordGuildRoleSync(summary)
-		void logAuditEvent({
-			db: auditDatabaseFromEnv(env),
-			category: 'auth',
-			action: 'discord_member_role_sync',
-			result: result.status === 'assigned' ? 'success' : 'failure',
-			email: user.email,
-			ip: getRequestIp(request) ?? undefined,
-			path: new URL(request.url).pathname,
-			reason: `status=${result.status}`,
-		})
-		return operationResult({
-			...(await loadAccountConnectionsData({
-				env,
-				userId: user.userId,
-			})),
-			discordMemberRole: result,
-		})
-	}
-
-	const parsed = parseSafe(disconnectSchema, body)
-	if (
-		!parsed.success ||
-		parsed.value.intent !== 'disconnect' ||
-		!isOauthProviderId(parsed.value.provider)
-	) {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
-	const provider = parsed.value.provider
-
+		})),
+		discordMemberRole: result,
+	})
+}
+export async function disconnectAccountProvider({
+	request,
+	env,
+	user,
+	provider,
+}: ConnectionContext & { provider: OauthProviderId }) {
+	if (!isOauthProviderId(provider))
+		return operationResult({ ok: false, error: 'Invalid provider.' }, 400)
 	const existing = await env.APP_DB.prepare(
 		`SELECT id, provider_id FROM oauth_connections
 	 WHERE user_id = ? AND provider_name = ?`,

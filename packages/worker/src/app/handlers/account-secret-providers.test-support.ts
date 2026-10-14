@@ -2,7 +2,12 @@ import { loadAccountSecretProvidersData } from '#app/account-secret-providers-da
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { mutateAccountSecretProviders } from './account-secret-providers.ts'
+import {
+	bindAccountSecretProvider,
+	unbindAccountSecretProvider,
+	grantAccountSecretProvider,
+	revokeAccountSecretProvider,
+} from './account-secret-providers.ts'
 export * from './account-secret-providers.ts'
 export function testAccountSecretProvidersApiHandler(env: Env) {
 	return {
@@ -43,12 +48,61 @@ export function testAccountSecretProvidersApiHandler(env: Env) {
 					400,
 				)
 			}
-			const result = await mutateAccountSecretProviders({
-				request,
+			const values = body as Record<string, unknown>
+			const field = (key: string) =>
+				typeof values[key] === 'string' ? values[key].trim() : ''
+			const input = {
 				env,
 				user,
-				body: body as Record<string, unknown>,
-			})
+				provider: field('provider'),
+				packageId: field('packageId'),
+				ref: field('ref'),
+			}
+			let result
+			try {
+				switch (values.action) {
+					case 'bind':
+						result = await bindAccountSecretProvider({
+							...input,
+							requestUrl: request.url,
+							doorSecretName: field('doorSecretName'),
+							config: Object.fromEntries(
+								Object.entries(
+									values.config && typeof values.config === 'object'
+										? values.config
+										: {},
+								).filter(
+									(entry): entry is [string, string] =>
+										typeof entry[1] === 'string',
+								),
+							),
+						})
+						break
+					case 'unbind':
+						result = await unbindAccountSecretProvider(input)
+						break
+					case 'grant':
+						result = await grantAccountSecretProvider(input)
+						break
+					case 'revoke':
+						result = await revokeAccountSecretProvider(input)
+						break
+					default:
+						return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+				}
+			} catch (error) {
+				return operationResult(
+					{
+						ok: false,
+						error:
+							error instanceof Error
+								? error.message
+								: 'Unable to update secret providers.',
+					},
+					400,
+				)
+			}
+
 			return operationResult(result.data, result.status)
 		},
 	}

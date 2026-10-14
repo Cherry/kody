@@ -1,5 +1,8 @@
 /** @jsxImportSource @emotion/react */
-import { updateConnections } from '#start/server/account-mutations'
+import {
+	disconnectAccountProvider,
+	syncDiscordMemberRole as syncDiscordRole,
+} from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'
 import { kodyDiscordInviteUrl } from '#universal/community-links.ts'
 import { type AccountConnectionsLoaderData } from '#universal/loader-data.ts'
@@ -94,7 +97,16 @@ export function useAccountConnections(
 				| { intent: 'disconnect'; provider: string }
 				| { intent: 'sync-discord-role' },
 		) => {
-			return updateConnections({ data: { body: input } })
+			if (input.intent === 'sync-discord-role')
+				return syncDiscordRole({ data: {} })
+			if (
+				input.provider !== 'github' &&
+				input.provider !== 'google' &&
+				input.provider !== 'x' &&
+				input.provider !== 'discord'
+			)
+				throw new Error('Invalid provider.')
+			return disconnectAccountProvider({ data: { provider: input.provider } })
 		},
 		onMutate: () =>
 			queryClient.cancelQueries({

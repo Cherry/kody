@@ -69,7 +69,7 @@ export const deleteAccountValue = createServerFn({ method: 'POST' })
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountValues },
+			{ deleteAccountValueRecord },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -82,9 +82,9 @@ export const deleteAccountValue = createServerFn({ method: 'POST' })
 			},
 			async (context) =>
 				requireOperationResult(
-					await mutateAccountValues({
+					await deleteAccountValueRecord({
 						...context,
-						body: { action: 'delete', name: data.name },
+						name: data.name,
 					}),
 				),
 		)
@@ -104,7 +104,7 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountMemories },
+			{ deleteAccountMemoryRecord },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -117,14 +117,11 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 			},
 			async (context) => {
 				return requireOperationResult(
-					await mutateAccountMemories({
+					await deleteAccountMemoryRecord({
 						...context,
 						refresh: data.refresh,
-						body: {
-							action: 'delete',
-							memoryId: data.memoryId,
-							force: data.force,
-						},
+						memoryId: data.memoryId,
+						force: data.force,
 					}),
 				)
 			},
@@ -237,29 +234,202 @@ export const cancelWorkflowRun = createServerFn({ method: 'POST' })
 			},
 		)
 	})
-export const updateSecretProviders = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const bindSecretProvider = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			provider: z.string(),
+			packageId: z.string(),
+			doorSecretName: z.string(),
+			config: z.record(z.string(), z.string()).default({}),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountSecretProviders },
-			{ requireOperationResult },
+			{ bindAccountSecretProvider },
+			{ requireOperationResult, operationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
 			import('../../src/app/handlers/account-secret-providers.ts'),
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
 			async (context) => {
-				return requireOperationResult(
-					await mutateAccountSecretProviders({
-						...context,
-						body: data.body,
-					}),
-				)
+				try {
+					return requireOperationResult(
+						await bindAccountSecretProvider({
+							...context,
+							...data,
+							requestUrl: context.request.url,
+						}),
+					)
+				} catch (error) {
+					return requireOperationResult(
+						operationResult(
+							{
+								ok: false,
+								error:
+									error instanceof Error
+										? error.message
+										: 'Unable to update secret providers.',
+							},
+							400,
+						),
+					)
+				}
+			},
+		)
+	})
+
+export const unbindSecretProvider = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			provider: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ unbindAccountSecretProvider },
+			{ requireOperationResult, operationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secret-providers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) => {
+				try {
+					return requireOperationResult(
+						await unbindAccountSecretProvider({
+							...context,
+							...data,
+						}),
+					)
+				} catch (error) {
+					return requireOperationResult(
+						operationResult(
+							{
+								ok: false,
+								error:
+									error instanceof Error
+										? error.message
+										: 'Unable to update secret providers.',
+							},
+							400,
+						),
+					)
+				}
+			},
+		)
+	})
+
+export const grantSecretProvider = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			provider: z.string(),
+			packageId: z.string(),
+			ref: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ grantAccountSecretProvider },
+			{ requireOperationResult, operationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secret-providers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) => {
+				try {
+					return requireOperationResult(
+						await grantAccountSecretProvider({
+							...context,
+							...data,
+						}),
+					)
+				} catch (error) {
+					return requireOperationResult(
+						operationResult(
+							{
+								ok: false,
+								error:
+									error instanceof Error
+										? error.message
+										: 'Unable to update secret providers.',
+							},
+							400,
+						),
+					)
+				}
+			},
+		)
+	})
+
+export const revokeSecretProvider = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			provider: z.string(),
+			packageId: z.string(),
+			ref: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ revokeAccountSecretProvider },
+			{ requireOperationResult, operationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secret-providers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) => {
+				try {
+					return requireOperationResult(
+						await revokeAccountSecretProvider({
+							...context,
+							...data,
+						}),
+					)
+				} catch (error) {
+					return requireOperationResult(
+						operationResult(
+							{
+								ok: false,
+								error:
+									error instanceof Error
+										? error.message
+										: 'Unable to update secret providers.',
+							},
+							400,
+						),
+					)
+				}
 			},
 		)
 	})
@@ -291,33 +461,43 @@ export const updateIntegrations = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateConnections = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const disconnectAccountProvider = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ provider: z.enum(['github', 'google', 'x', 'discord']) }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountConnections },
+			{ disconnectAccountProvider: operation },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
 			import('../../src/app/handlers/account-connections.ts'),
 			import('../../src/app/operation-result.ts'),
 		])
-		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) => {
-				return requireOperationResult(
-					await mutateAccountConnections({
-						...context,
-						body: data.body,
-					}),
-				)
-			},
+		return withWebsiteMutation({}, async (context) =>
+			requireOperationResult(
+				await operation({ ...context, provider: data.provider }),
+			),
 		)
 	})
 
+export const syncDiscordMemberRole = createServerFn({ method: 'POST' })
+	.validator(z.object({}))
+	.handler(async () => {
+		const [
+			{ withWebsiteMutation },
+			{ syncAccountDiscordRole: operation },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-connections.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation({}, async (context) =>
+			requireOperationResult(await operation({ ...context })),
+		)
+	})
 export const updateMcpServers = createServerFn({ method: 'POST' })
 	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
 	.handler(async ({ data }) => {
@@ -345,10 +525,10 @@ export const updateMcpServers = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateEmail = createServerFn({ method: 'POST' })
+export const deleteEmailMessage = createServerFn({ method: 'POST' })
 	.validator(
 		resourceInput.omit({ search: true }).extend({
-			body: z.record(z.string(), z.unknown()),
+			messageId: z.string().trim().min(1),
 			refresh: z.object({
 				query: z.string(),
 				classification: z.enum(['accepted', 'quarantined']).nullable(),
@@ -360,7 +540,7 @@ export const updateEmail = createServerFn({ method: 'POST' })
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountEmail },
+			{ deleteAccountEmailMessage },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -373,10 +553,10 @@ export const updateEmail = createServerFn({ method: 'POST' })
 			},
 			async (context) => {
 				const result = requireOperationResult(
-					await mutateAccountEmail({
+					await deleteAccountEmailMessage({
 						...context,
 						refresh: data.refresh,
-						body: data.body,
+						messageId: data.messageId,
 					}),
 				)
 				const { readJsonRecord } = await import('./json-value.ts')
@@ -395,16 +575,27 @@ export const updateEmail = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateEmailDestinations = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const classifyEmailMessage = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput.omit({ search: true }).extend({
+			messageId: z.string().trim().min(1),
+			classification: z.enum(['accepted', 'quarantined']),
+			refresh: z.object({
+				query: z.string(),
+				classification: z.enum(['accepted', 'quarantined']).nullable(),
+				page: z.number().int().positive(),
+				pageSize: z.number().int().positive().max(100),
+			}),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountEmailDestinations },
+			{ classifyAccountEmailMessage },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
-			import('../../src/app/handlers/account-email-destinations.ts'),
+			import('../../src/app/handlers/account-email.ts'),
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
@@ -412,18 +603,132 @@ export const updateEmailDestinations = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const result = await mutateAccountEmailDestinations({
-					...context,
-					body: data.body,
-				})
-				const { setResponseHeader } =
-					await import('@tanstack/react-start/server')
-				new Headers(result.headers).forEach((value, key) =>
-					setResponseHeader(key, value),
+				const result = requireOperationResult(
+					await classifyAccountEmailMessage({
+						...context,
+						refresh: data.refresh,
+						messageId: data.messageId,
+						classification: data.classification,
+					}),
 				)
-				return requireOperationResult(result)
+				const { readJsonRecord } = await import('./json-value.ts')
+				return {
+					...result,
+					selectedMessage: result.selectedMessage
+						? {
+								...result.selectedMessage,
+								headers: result.selectedMessage.headers
+									? readJsonRecord(result.selectedMessage.headers)
+									: null,
+							}
+						: null,
+				}
 			},
 		)
+	})
+
+export const addEmailDestination = createServerFn({ method: 'POST' })
+	.validator(z.object({ email: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ addAccountEmailDestination },
+			{ requireOperationResult },
+			{ setResponseHeader },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-email-destinations.ts'),
+			import('../../src/app/operation-result.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await addAccountEmailDestination({
+				...context,
+				email: data.email,
+			})
+			new Headers(result.headers).forEach((value, key) =>
+				setResponseHeader(key, value),
+			)
+			return requireOperationResult(result)
+		})
+	})
+
+export const resendEmailDestination = createServerFn({ method: 'POST' })
+	.validator(z.object({ destinationId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ resendAccountEmailDestination },
+			{ requireOperationResult },
+			{ setResponseHeader },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-email-destinations.ts'),
+			import('../../src/app/operation-result.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await resendAccountEmailDestination({
+				...context,
+				destinationId: data.destinationId,
+			})
+			new Headers(result.headers).forEach((value, key) =>
+				setResponseHeader(key, value),
+			)
+			return requireOperationResult(result)
+		})
+	})
+
+export const setDefaultEmailDestination = createServerFn({ method: 'POST' })
+	.validator(z.object({ destinationId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setDefaultAccountEmailDestination },
+			{ requireOperationResult },
+			{ setResponseHeader },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-email-destinations.ts'),
+			import('../../src/app/operation-result.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await setDefaultAccountEmailDestination({
+				...context,
+				destinationId: data.destinationId,
+			})
+			new Headers(result.headers).forEach((value, key) =>
+				setResponseHeader(key, value),
+			)
+			return requireOperationResult(result)
+		})
+	})
+
+export const removeEmailDestination = createServerFn({ method: 'POST' })
+	.validator(z.object({ destinationId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ removeAccountEmailDestination },
+			{ requireOperationResult },
+			{ setResponseHeader },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-email-destinations.ts'),
+			import('../../src/app/operation-result.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await removeAccountEmailDestination({
+				...context,
+				destinationId: data.destinationId,
+			})
+			new Headers(result.headers).forEach((value, key) =>
+				setResponseHeader(key, value),
+			)
+			return requireOperationResult(result)
+		})
 	})
 
 export const updateAvatar = createServerFn({ method: 'POST' })

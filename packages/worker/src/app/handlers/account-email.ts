@@ -1,7 +1,6 @@
 import { readAccountEmailData } from '#app/account-email-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { authorize } from '#worker/authorization/authorize.ts'
 import {
 	deleteEmailMessage,
@@ -13,88 +12,63 @@ import {
 } from '#worker/email/types.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
-export function readPathMessageId(params: unknown) {
-	if (
-		typeof params === 'object' &&
-		params !== null &&
-		'messageId' in params &&
-		typeof params.messageId === 'string'
-	) {
-		return params.messageId
-	}
-	return undefined
-}
-
-function parseClassification(value: string): EmailClassification | null {
-	return (emailClassificationValues as ReadonlyArray<string>).includes(value)
-		? (value as EmailClassification)
-		: null
-}
-
-export async function mutateAccountEmail({
-	refresh,
-	env,
-	user,
-	body,
-}: {
+type EmailMutationContext = {
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	refresh: {
 		query: string
 		classification: EmailClassification | null
 		page: number
 		pageSize: number
 	}
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
-}) {
+	messageId: string
+}
+export async function deleteAccountEmailMessage({
+	env,
+	user,
+	refresh,
+	messageId,
+}: EmailMutationContext) {
 	await authorize({ env, request: user.request }, 'email:read')
-	const action = readTrimmedStringOrEmpty(body, 'action')
-	if (action !== 'classify' && action !== 'delete') {
-		return operationResult({ ok: false, error: 'Invalid action.' }, 400)
-	}
-
-	const messageId = readTrimmedStringOrEmpty(body, 'message_id')
-	if (!messageId) {
+	if (!messageId.trim())
 		return operationResult({ ok: false, error: 'Message id is required.' }, 400)
+	const deleted = await deleteEmailMessage({
+		env,
+		db: env.APP_DB,
+		userId: ownerIdFromCaller({
+			request: user.request,
+			user: user.mcpUser,
+		}),
+		messageId,
+	})
+	if (!deleted) {
+		return operationResult({ ok: false, error: 'Message not found.' }, 404)
 	}
 
-	if (action === 'delete') {
-		const deleted = await deleteEmailMessage({
+	return operationResult(
+		await readAccountEmailData({
 			env,
-			db: env.APP_DB,
-			userId: ownerIdFromCaller({
-				request: user.request,
-				user: user.mcpUser,
-			}),
-			messageId,
-		})
-		if (!deleted) {
-			return operationResult({ ok: false, error: 'Message not found.' }, 404)
-		}
-
-		return operationResult(
-			await readAccountEmailData({
-				env,
-				...refresh,
-				selectedMessageId: null,
-				user,
-			}),
-		)
-	}
-
-	const classification = parseClassification(
-		readTrimmedStringOrEmpty(body, 'classification'),
+			...refresh,
+			selectedMessageId: null,
+			user,
+		}),
 	)
-	if (!classification) {
+}
+export async function classifyAccountEmailMessage({
+	env,
+	user,
+	refresh,
+	messageId,
+	classification,
+}: EmailMutationContext & { classification: EmailClassification }) {
+	await authorize({ env, request: user.request }, 'email:read')
+	if (!messageId.trim())
+		return operationResult({ ok: false, error: 'Message id is required.' }, 400)
+	if (!emailClassificationValues.includes(classification))
 		return operationResult(
-			{
-				ok: false,
-				error: 'Classification must be accepted or quarantined.',
-			},
+			{ ok: false, error: 'Classification must be accepted or quarantined.' },
 			400,
 		)
-	}
-
 	const updated = await setEmailMessageClassification({
 		env,
 		db: env.APP_DB,

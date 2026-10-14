@@ -9,7 +9,10 @@ import {
 	AuthorizationError,
 	authorize,
 } from '#worker/authorization/authorize.ts'
-import { mutateAccountEmail } from './account-email.ts'
+import {
+	classifyAccountEmailMessage,
+	deleteAccountEmailMessage,
+} from './account-email.ts'
 export * from './account-email.ts'
 export function testAccountEmailApiHandler(env: Env) {
 	return {
@@ -44,7 +47,7 @@ export function testAccountEmailApiHandler(env: Env) {
 			}
 
 			const url = new URL(request.url)
-			const result = await mutateAccountEmail({
+			const context = {
 				refresh: {
 					...readPagination(url, { defaultPageSize: 25, maxPageSize: 100 }),
 					query: url.searchParams.get('q')?.trim() ?? '',
@@ -52,8 +55,32 @@ export function testAccountEmailApiHandler(env: Env) {
 				},
 				env,
 				user,
-				body: body as Record<string, unknown>,
-			})
+				messageId: '',
+			}
+			const fields = body as Record<string, unknown>
+			context.messageId =
+				typeof fields.message_id === 'string' ? fields.message_id.trim() : ''
+			const result =
+				fields.action === 'delete'
+					? await deleteAccountEmailMessage(context)
+					: fields.action === 'classify' &&
+						  (fields.classification === 'accepted' ||
+								fields.classification === 'quarantined')
+						? await classifyAccountEmailMessage({
+								...context,
+								classification: fields.classification,
+							})
+						: operationResult(
+								{
+									ok: false,
+									error:
+										fields.action === 'classify'
+											? 'Classification must be accepted or quarantined.'
+											: 'Invalid action.',
+								},
+								400,
+							)
+
 			return operationResult(result.data, result.status)
 		},
 	}

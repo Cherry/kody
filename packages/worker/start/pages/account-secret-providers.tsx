@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
-import { updateSecretProviders } from '#start/server/account-mutations'
+import {
+	bindSecretProvider,
+	unbindSecretProvider,
+	grantSecretProvider,
+	revokeSecretProvider,
+} from '#start/server/account-mutations'
 import { type AccountSecretProvidersLoaderData } from '#universal/loader-data.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import {
@@ -24,6 +29,22 @@ import {
 	AccountPageHeader,
 	accountInputCss,
 } from './account-management-components.tsx'
+
+type ProviderChange =
+	| {
+			action: 'bind'
+			provider: string
+			packageId: string
+			doorSecretName: string
+			config: Record<string, string>
+	  }
+	| { action: 'unbind'; provider: string }
+	| {
+			action: 'grant' | 'revoke'
+			provider: string
+			ref: string
+			packageId: string
+	  }
 
 export function AccountSecretProvidersPage({
 	payload,
@@ -58,12 +79,44 @@ export function AccountSecretProvidersPage({
 			body,
 			href,
 		}: {
-			body: Record<string, unknown>
+			body: ProviderChange
 			href: string
 		}) => {
-			return updateSecretProviders({
-				data: { body, orgSlug: pageQueryOrg(href) ?? undefined },
-			})
+			const orgSlug = pageQueryOrg(href) ?? undefined
+			switch (body.action) {
+				case 'bind':
+					return bindSecretProvider({
+						data: {
+							orgSlug,
+							provider: body.provider,
+							packageId: body.packageId,
+							doorSecretName: body.doorSecretName,
+							config: body.config,
+						},
+					})
+				case 'unbind':
+					return unbindSecretProvider({
+						data: { orgSlug, provider: body.provider },
+					})
+				case 'grant':
+					return grantSecretProvider({
+						data: {
+							orgSlug,
+							provider: body.provider,
+							ref: body.ref,
+							packageId: body.packageId,
+						},
+					})
+				case 'revoke':
+					return revokeSecretProvider({
+						data: {
+							orgSlug,
+							provider: body.provider,
+							ref: body.ref,
+							packageId: body.packageId,
+						},
+					})
+			}
 		},
 		onSuccess: (_result, { href }) => {
 			void Promise.all(
@@ -80,7 +133,7 @@ export function AccountSecretProvidersPage({
 		: mutation.isError
 			? 'error'
 			: 'idle'
-	async function submit(body: Record<string, unknown>, successHref: string) {
+	async function submit(body: ProviderChange, successHref: string) {
 		if (mutation.isPending) return
 		setMessage(null)
 		try {

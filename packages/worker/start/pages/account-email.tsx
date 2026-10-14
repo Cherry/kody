@@ -1,6 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { toast } from '#client/toast.ts'
-import { updateEmail } from '#start/server/account-mutations'
+import {
+	classifyEmailMessage,
+	deleteEmailMessage,
+} from '#start/server/account-mutations'
 import { acceptedEmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
 import {
 	type AccountEmailDestinationsLoaderData,
@@ -224,19 +227,16 @@ export function AccountEmailPage({
 			actorKey,
 			async (action) => {
 				const { org: _org, ...refresh } = emailResourceInput(action.href).list
-				return updateEmail({
-					data: {
-						orgSlug: pageQueryOrg(action.href) ?? undefined,
-						refresh,
-						body: {
-							action: action.action,
-							message_id: action.messageId,
-							...(action.action === 'classify'
-								? { classification: action.classification }
-								: {}),
-						},
-					},
-				})
+				const data = {
+					orgSlug: pageQueryOrg(action.href) ?? undefined,
+					refresh,
+					messageId: action.messageId,
+				}
+				return action.action === 'classify'
+					? classifyEmailMessage({
+							data: { ...data, classification: action.classification },
+						})
+					: deleteEmailMessage({ data })
 			},
 			(error) => toast.error(error.message),
 			currentHref,

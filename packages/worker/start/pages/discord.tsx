@@ -6,7 +6,7 @@ import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useState } from 'react'
 import { startSocialSignIn } from '../social-sign-in.ts'
-import { updateConnections } from '#start/server/account-mutations'
+import { syncDiscordMemberRole } from '#start/server/account-mutations'
 import {
 	emptyPublicFormProtection,
 	readPublicFormProtection,
@@ -31,7 +31,6 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { honeypotFieldName } from '#universal/public-form-protection.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import { buildAuthLink } from '#client/auth-links.ts'
 
 const discordPath = routes.discord.href()
 
@@ -147,8 +146,8 @@ export function DiscordPage({
 		setBusy(true)
 		setActionMessage(null)
 		try {
-			const payload = await updateConnections({
-				data: { body: { intent: 'sync-discord-role' } },
+			const payload = await syncDiscordMemberRole({
+				data: {},
 			})
 			void invalidatePages()
 			const syncStatus =
