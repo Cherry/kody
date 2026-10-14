@@ -10,9 +10,10 @@
  * - Raw HTML tokens (block and inline) are rendered as escaped literal text,
  *   never as markup. First-party guides (`linkPolicy: 'first-party'`) may
  *   additionally emit allowlisted `<details>` / `<summary>`, GitHub-style
- *   `> [!TIP]` callouts, and `> [!WATCH]` YouTube figures (validated video
- *   id, privacy-enhanced embed, click to play). Untrusted markdown never
- *   takes that path.
+ *   `> [!TIP]` callouts, `> [!WATCH]` YouTube figures (validated video
+ *   id, privacy-enhanced embed, click to play), and `> [!DIAGRAM] <id>`
+ *   figures drawn from a fixed first-party registry. Untrusted markdown
+ *   never takes that path.
  * - Fenced code paints pre-tokenized highlight data as JSX text and
  *   inline styles — never `innerHTML` — so highlighting cannot introduce
  *   markup. Missing tokens fall back to escaped plaintext.
@@ -43,12 +44,15 @@ import { type ReactNode } from 'react'
 import { CopyCodeBlock } from './copy-code-block.tsx'
 import { DocYoutubeEmbed } from './doc-youtube-embed.tsx'
 import { renderMarkdownHeadingAnchor } from './markdown-heading-anchor.tsx'
+import { renderDocDiagram } from './doc-diagrams.tsx'
 import {
 	coalesceFirstPartyDetails,
 	firstPartyAlertKind,
 	firstPartyAlertLabel,
+	firstPartyDiagramId,
 	isFirstPartyDetailsToken,
 	stripFirstPartyAlertMarker,
+	stripFirstPartyDiagramMarker,
 } from '#client/markdown-first-party.ts'
 import { renderHighlightedCode } from './syntax-highlight.tsx'
 import { parseDocWatchBlock } from '#universal/doc-youtube.ts'
@@ -448,6 +452,18 @@ function renderToken(
 						/>
 					)
 				}
+				const diagramId = firstPartyDiagramId(token)
+				const diagram = diagramId
+					? renderDocDiagram({
+							id: diagramId,
+							key,
+							caption: renderTokens(
+								stripFirstPartyDiagramMarker(token.tokens),
+								options,
+							),
+						})
+					: null
+				if (diagram) return diagram
 				const alertKind = firstPartyAlertKind(token)
 				if (alertKind) {
 					const accentColor =

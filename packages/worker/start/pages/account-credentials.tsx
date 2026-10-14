@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { docHref } from '#universal/docs-nav.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
 import { css } from '@emotion/react'
@@ -296,22 +297,30 @@ export function AccountCredentialsRoute({
 				description="Keys, OAuth connections, MCP servers, and every other way Kody reaches a service for you. Kody places each value at the network boundary; values never appear here."
 				currentHref={currentHref}
 				actions={
-					orgSlug ? (
-						<div css={headerActionsCss}>
-							<SiteLink
-								href={orgCredentialCreatePath(orgSlug)}
-								css={getPillButtonCss({ size: 'sm' })}
-							>
-								Add credential
-							</SiteLink>
-							<SiteLink
-								href={orgResourcePath(orgSlug, 'secret-providers')}
-								css={getGhostButtonCss({ size: 'sm' })}
-							>
-								Secret providers
-							</SiteLink>
-						</div>
-					) : null
+					<div css={headerActionsCss}>
+						{orgSlug ? (
+							<>
+								<SiteLink
+									href={orgCredentialCreatePath(orgSlug)}
+									css={getPillButtonCss({ size: 'sm' })}
+								>
+									Add credential
+								</SiteLink>
+								<SiteLink
+									href={orgResourcePath(orgSlug, 'secret-providers')}
+									css={getGhostButtonCss({ size: 'sm' })}
+								>
+									Secret providers
+								</SiteLink>
+							</>
+						) : null}
+						<SiteLink
+							href={docHref('credentials')}
+							css={getGhostButtonCss({ size: 'sm' })}
+						>
+							How credentials work
+						</SiteLink>
+					</div>
 				}
 			/>
 
