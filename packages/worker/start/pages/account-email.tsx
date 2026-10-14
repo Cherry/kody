@@ -50,7 +50,8 @@ import { renderAccountEmailDetail } from './account-email-detail.tsx'
 import {
 	type ClassificationFilter,
 	buildEmailApiRequestUrl,
-	clampedCellCss,
+	senderBadgeCss,
+	senderClassificationLabel,
 	directionLabel,
 	emailRoute,
 	messageDate,
@@ -492,10 +493,26 @@ export function AccountEmailPage({
 									</span>
 								),
 								from: (
-									<span css={clampedCellCss}>
-										{emailMessage.from_address ??
-											emailMessage.envelope_from ??
-											'Unknown sender'}
+									<span css={subjectCellCss}>
+										<span css={truncatedTextCss}>
+											{emailMessage.from_address ??
+												emailMessage.envelope_from ??
+												'Unknown sender'}
+										</span>
+										{senderClassificationLabel(
+											emailMessage.sender_classification,
+										) ? (
+											<span
+												title={
+													emailMessage.sender_classification_reason ?? undefined
+												}
+												css={senderBadgeCss}
+											>
+												{senderClassificationLabel(
+													emailMessage.sender_classification,
+												)}
+											</span>
+										) : null}
 									</span>
 								),
 								direction: directionLabel(emailMessage.direction),
@@ -555,6 +572,9 @@ export function AccountEmailPage({
 						record={
 							selectedMessage
 								? renderAccountEmailDetail({
+										onNavigate: (href) => {
+											void router.navigate({ to: href })
+										},
 										selectedMessage,
 										classifyState,
 										deleteState,

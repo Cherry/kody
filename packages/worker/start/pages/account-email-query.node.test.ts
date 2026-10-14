@@ -34,6 +34,8 @@ const message: AccountEmailMessageDetail = {
 	processing_status: 'stored',
 	classification: 'quarantined',
 	classification_reason: 'Original reason',
+	sender_classification: null,
+	sender_classification_reason: null,
 	provider_message_id: null,
 	delivery_status: null,
 	delivery_status_at: null,
@@ -54,6 +56,7 @@ const message: AccountEmailMessageDetail = {
 	raw_size: null,
 	attachments: [],
 	delivery_events: [],
+	enable_sender: null,
 }
 const payload = (
 	overrides: Partial<AccountEmailLoaderData> = {},

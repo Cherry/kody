@@ -1,4 +1,8 @@
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import {
+	AuthorizationError,
+	authorize,
+} from '#worker/authorization/authorize.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { type Action } from 'remix/router'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
@@ -43,6 +47,12 @@ export function createAccountEmailApiHandler(env: Env) {
 			const user = await readAuthenticatedAppUser(request, env)
 			if (!user) {
 				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+			}
+			try {
+				await authorize({ env, request: user.request }, 'email:read')
+			} catch (error) {
+				if (!(error instanceof AuthorizationError)) throw error
+				return jsonResponse({ ok: false, error: error.message }, 403)
 			}
 
 			if (request.method === 'GET') {

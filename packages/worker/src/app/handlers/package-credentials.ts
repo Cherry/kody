@@ -125,6 +125,7 @@ export function createPackageCredentialsApiHandler(env: Env) {
 				if (
 					error instanceof MappingWriteRefused &&
 					error.code !== 'webhook_other_enabler' &&
+					error.code !== 'email_sender_conflict' &&
 					error.change
 				) {
 					return jsonResponse(
@@ -142,7 +143,7 @@ export function createPackageCredentialsApiHandler(env: Env) {
 						400,
 					)
 				}
-				// A webhook someone else turned on between resolve and write.
+				// A webhook or email sender someone else turned on between resolve and write.
 				if (
 					!(error instanceof MappingWriteRefused) &&
 					!(isMcpCallerError(error) && error instanceof Error)
