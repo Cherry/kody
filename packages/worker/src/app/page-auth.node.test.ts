@@ -8,8 +8,11 @@ import {
 } from './request-feature-flags-cache.ts'
 import { executePreparedD1Batch } from '#worker/test-support/d1-prepared-batch.ts'
 
+import { isOrgBindingMembershipQuery } from '#worker/test-support/org-binding-query.ts'
+
 const secret = 'test-cookie-secret-0123456789abcdef0123456789'
 const stableUserId = 'f'.repeat(64)
+const personalOrgId = 'a'.repeat(64)
 
 function authFixture() {
 	const state = {
@@ -18,6 +21,7 @@ function authFixture() {
 			email: 'page-auth@example.com',
 			username: 'page-user',
 			stable_user_id: stableUserId,
+			personal_org_id: personalOrgId,
 		} as Record<string, unknown> | null,
 		authBatches: 0,
 	}
@@ -30,10 +34,8 @@ function authFixture() {
 					query,
 					bind: () => statement,
 					first: async () =>
-						query.toLowerCase().includes('from org_memberships') &&
-						query.toLowerCase().includes('inner join orgs') &&
-						state.user
-							? { org_id: stableUserId, org_slug: 'page-user', role: 'owner' }
+						isOrgBindingMembershipQuery(query.toLowerCase()) && state.user
+							? { org_id: personalOrgId, org_slug: 'page-user', role: 'owner' }
 							: null,
 					run: async () => ({ meta: { changes: 0 } }),
 					all: async () => ({
@@ -79,7 +81,12 @@ test('page authorization shares the middleware request lookup and still prefetch
 		}),
 	])
 	expect(resolved.user?.username).toBe('page-user')
-	expect(user).toMatchObject({ username: 'page-user', userId: 7 })
+	expect(user).toMatchObject({
+		username: 'page-user',
+		userId: 7,
+		mcpUser: { userId: stableUserId, personalOrgId },
+		request: { org: { id: personalOrgId, slug: 'page-user' } },
+	})
 	expect(state.authBatches).toBe(1)
 	expect(hasResolvedRequestFeatureFlags(original)).toBe(true)
 	await loadRequestFeatureFlags(original, env, { userId: 7, stableUserId })
