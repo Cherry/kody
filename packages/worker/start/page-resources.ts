@@ -36,7 +36,7 @@ import type * as verify from '#start/server/verify'
 import type * as credentials from '#start/server/credentials'
 
 export type PageResource =
- | keyof typeof credentials
+	| keyof typeof credentials
 	| keyof typeof account_collections
 	| keyof typeof account_page
 	| keyof typeof account_security

@@ -2,7 +2,7 @@ import { isOrgDocumentRequest } from './org-document-request.ts'
 import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { readJsonRecord } from './json-value.ts'
-import { createServerFn } from '@tanstack/react-start'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 
 function collectionAliasHref(href: string) {
@@ -21,7 +21,7 @@ function validateCollectionHref(href: string) {
 		throw new Error('Invalid account collection URL')
 	return href
 }
-export async function loadCollection(href: string) {
+export const loadCollection = createServerOnlyFn(async (href: string) => {
 	const [
 		{ env },
 		{ getRequest, setResponseHeader },
@@ -75,7 +75,7 @@ export async function loadCollection(href: string) {
 	}
 	setResponseHeader('Cache-Control', 'no-store')
 	return { bindings, request, user }
-}
+})
 export const loadSecretsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (

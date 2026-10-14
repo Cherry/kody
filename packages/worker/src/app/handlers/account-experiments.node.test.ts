@@ -34,6 +34,7 @@ vi.mock('#app/account-experiments-data.ts', () => ({
 }))
 
 vi.mock('@tanstack/react-start', async () => ({
+	createServerOnlyFn: <T>(fn: T) => fn,
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,

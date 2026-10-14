@@ -19,9 +19,10 @@ with one row per org (`@<slug>`, signup org first). A row opens that org's home:
 the signup org's `/@<slug>/-/overview`, or a team org's `/@<slug>`. Every
 workspace section is on a separate "Workspace sections" rail under
 `/@<slug>/-/…`, so any section is two clicks from `/account`. That rail groups
-Build (Repositories, Jobs, Webhooks), Credentials (Credentials, Secret providers), Agents & data (Agents, Memories, Email), Activity,
-and Organization (Usage & credits and Billing for owners/billing admins).
-Activity has Activity, Workflows, and Waiting as tabs under the page title
+Build (Repositories, Jobs, Webhooks), Credentials (Credentials, Secret
+providers), Agents & data (Agents, Memories, Email), Activity, and Organization
+(Usage & credits and Billing for owners/billing admins). Activity has Activity,
+Workflows, and Waiting as tabs under the page title
 (`data-testid="account-section-tabs"`, labelled "Activity pages"); the rail item
 stays current on all three. Repositories is `/@<slug>/-/repositories`, distinct
 from the public profile at `/@<slug>`. Former `/@<slug>/-/packages` URLs 301 to
