@@ -61,12 +61,11 @@ group). Own profile (`/@<username>`) also links **Workspace** (lands on
 ## How to get there
 
 `/account` after login. Create an organization at `/account/organizations/new`
-by submitting the organization form; it navigates to the org
-home at `/@<slug>`. Account deletion is on `/account/data`. Both actions use
-Start server functions. Team-org settings,
-members, teams, grants, and collaborators are `/@<slug>/-/settings`,
-`/@<slug>/-/members`, `/@<slug>/-/teams`, `/@<slug>/-/grants`, and
-`/@<slug>/-/collaborators`.
+by submitting the organization form; it navigates to the org home at `/@<slug>`.
+Account deletion is on `/account/data`. Both actions use Start server functions.
+Team-org settings, members, teams, grants, and collaborators are
+`/@<slug>/-/settings`, `/@<slug>/-/members`, `/@<slug>/-/teams`,
+`/@<slug>/-/grants`, and `/@<slug>/-/collaborators`.
 
 A non-personal org handle (`/@<slug>`) renders the org home for its members and
 404s for everyone else. Secrets, jobs, and the other org resource pages read
