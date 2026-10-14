@@ -219,7 +219,6 @@ const memoryCss = {
 	'& *': { boxSizing: 'border-box' },
 	'& h1, & h2, & p, & dl': { margin: 0 },
 	'& h1, & h2': { fontFamily: 'var(--font-display)', fontWeight: 600 },
-	':where(&) a': { color: 'inherit', textUnderlineOffset: '5px' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: '3px solid light-dark(#bb582f, var(--color-field-border))',
 		outlineOffset: '5px',

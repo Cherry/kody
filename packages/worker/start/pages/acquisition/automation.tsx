@@ -274,7 +274,6 @@ const pageCss = {
 	'& h1': { fontSize: '4.4rem', lineHeight: 1.04, maxWidth: '12ch' },
 	'& h2': { fontSize: '2.7rem', lineHeight: 1.15 },
 	'& h3': { fontSize: '1.35rem', lineHeight: 1.3 },
-	':where(&) a': { color: 'inherit', textUnderlineOffset: '0.25em' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: `3px solid ${colors.primary}`,
 		outlineOffset: '5px',

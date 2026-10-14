@@ -289,7 +289,6 @@ const styles: CSSObject = {
 	'& h2': { fontSize: '2.35rem', lineHeight: 1.15, textWrap: 'balance' },
 	'& h3': { fontSize: '1.35rem', lineHeight: 1.3 },
 	'& p, & li, & dd': { lineHeight: 1.7 },
-	':where(&) a': { color: colors.primaryText, textUnderlineOffset: '0.2em' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: `3px solid ${colors.primaryText}`,
 		outlineOffset: '4px',
@@ -393,7 +392,6 @@ const styles: CSSObject = {
 		color: colors.textMuted,
 		marginBottom: '0.4rem',
 	},
-	':where(&) button': { cursor: 'pointer', font: 'inherit', color: 'inherit' },
 	'& fieldset button': {
 		padding: '0.55rem 0.75rem',
 		border: `1px solid ${colors.border}`,

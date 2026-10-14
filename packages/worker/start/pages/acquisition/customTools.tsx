@@ -285,7 +285,6 @@ const toolCss = {
 	},
 	'& h2': { fontSize: '38px', lineHeight: '1.15', fontWeight: 600 },
 	'& h3': { fontSize: '18px' },
-	':where(&) a': { color: 'inherit', textUnderlineOffset: '5px' },
 	'& button, & a': { WebkitTapHighlightColor: 'transparent' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: '3px solid light-dark(#b54b27, var(--color-field-border))',

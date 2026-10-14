@@ -53,7 +53,6 @@ const styles = {
 	'& h3': { fontSize: '1.2rem', margin: '0 0 .7rem' },
 	'& p': { lineHeight: 1.65 },
 	'& .lead': { maxWidth: '660px', fontSize: '1.15rem', marginBottom: '1.5rem' },
-	':where(&) a': { color: 'inherit', textUnderlineOffset: '4px' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: '3px solid light-dark(#bd512f, var(--color-field-border))',
 		outlineOffset: '5px',

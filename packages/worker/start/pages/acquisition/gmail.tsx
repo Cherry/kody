@@ -283,7 +283,6 @@ const pageCss = {
 	'& h1': { fontSize: '3.7rem', lineHeight: 1.05, maxWidth: '640px' },
 	'& h2': { fontSize: '2.25rem', lineHeight: 1.15 },
 	'& p': { lineHeight: 1.7 },
-	':where(&) a': { color: colors.primaryText, textUnderlineOffset: '0.22em' },
 	'& button': { font: 'inherit', cursor: 'pointer' },
 	'& button:focus-visible, & a:focus-visible': {
 		outline: `3px solid ${colors.primaryText}`,

@@ -266,7 +266,6 @@ const styles = {
 	'& h2': { fontSize: '2.7rem', lineHeight: 1.12 },
 	'& h3': { fontSize: '1.55rem', lineHeight: 1.25 },
 	'& p': { lineHeight: 1.7 },
-	':where(&) a': { color: colors.primaryText, textUnderlineOffset: '4px' },
 	'& button': { font: 'inherit', cursor: 'pointer' },
 	'& button:focus-visible, & a:focus-visible': {
 		outline: `2px solid ${colors.primaryText}`,

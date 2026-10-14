@@ -288,7 +288,6 @@ const styles = {
 	'& h2': { fontSize: '2.35rem', lineHeight: 1.12 },
 	'& h3': { fontSize: '1.4rem', lineHeight: 1.2 },
 	'& p': { lineHeight: 1.7, color: colors.textMuted },
-	':where(&) a': { color: colors.primaryText, textUnderlineOffset: '0.25em' },
 	'& button:focus-visible, & a:focus-visible': {
 		outline: `3px solid ${colors.primaryText}`,
 		outlineOffset: '5px',

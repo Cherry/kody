@@ -201,7 +201,6 @@ const styles: CSSObject = {
 	'& h1': { fontSize: '3.6rem', lineHeight: 1.08, maxWidth: '17ch' },
 	'& h2': { fontSize: '2rem', lineHeight: 1.15 },
 	'& p': { lineHeight: 1.7 },
-	':where(&) a': { color: colors.primaryText, textUnderlineOffset: '0.2em' },
 	'& a:focus-visible, & button:focus-visible': {
 		outline: `3px solid ${colors.primary}`,
 		outlineOffset: '5px',

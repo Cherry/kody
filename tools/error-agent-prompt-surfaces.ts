@@ -31,7 +31,7 @@ export const errorAgentPromptAdoptFiles = [
 	'packages/worker/start/pages/account-billing.tsx',
 	'packages/worker/start/pages/discord.tsx',
 	'packages/worker/start/pages/verify-email.tsx',
-	'packages/worker/start/routes/join.$token.tsx',
+	'packages/worker/start/pages/org-invite-join.tsx',
 	'packages/worker/src/app/internal-error-page.ts',
 	'packages/worker/src/package-runtime/package-app-serve.ts',
 	'packages/worker/src/app/email/messages.ts',
