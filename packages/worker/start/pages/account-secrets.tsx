@@ -104,7 +104,7 @@ export function AccountSecretsPage({
 	)
 	const [savedEditorState, setSavedEditorState] = useState(editorState)
 	const [message, setMessage] = useState<string | null>(
-		payload.approvalError ?? null,
+		payload.providerLinkError ?? payload.approvalError ?? null,
 	)
 	const [submittingApprovalAction, setSubmittingApprovalAction] =
 		useState<ApprovalAction | null>(null)
@@ -234,7 +234,8 @@ export function AccountSecretsPage({
 			setSavedEditorState(freshEditor)
 		}
 		setMessage(
-			nextMessage ??
+			payload.providerLinkError ??
+				nextMessage ??
 				payload.approvalError ??
 				(selection.selectedId && !payload.selectedSecret && !payload.approval
 					? 'Secret not found.'
