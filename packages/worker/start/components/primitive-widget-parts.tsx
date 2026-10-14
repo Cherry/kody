@@ -3,7 +3,7 @@ import { type ReactNode, type CSSProperties } from 'react'
 import { usePrimitiveWidgetMotion } from './primitive-widget-motion.ts'
 import { type LandingPrimitiveId } from '#universal/landing-lantern.ts'
 
-export type PrimitiveWidgetSize = 'full' | 'mini'
+type PrimitiveWidgetSize = 'full' | 'mini'
 
 export function PrimitiveWidgetFrame({
 	id,
