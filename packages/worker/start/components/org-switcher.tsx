@@ -6,13 +6,18 @@ import {
 	type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { useLoaderData, useLocation } from '@tanstack/react-router'
-import { workspaceSwitchHref } from '#client/routes/account-rail.ts'
+import {
+	workspaceHomeHref,
+	workspaceSwitchHref,
+} from '#client/routes/account-rail.ts'
 import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
 import { UserAvatar } from './user-avatar.tsx'
 import {
 	currentSwitcherSlug,
 	orgIdentity,
+	orderOrganizations,
+	orgOverviewPath,
 	orgRoleLabel,
 	orgRoleManagesBilling,
 	orgSlugFromOrgOwnedPath,
@@ -293,6 +298,11 @@ export function OrgSwitcher({
 	)
 
 	if (props.menu) {
+		const overview = accountMenuManageLinks({
+			pathname,
+			organizations,
+			lastUsedSlug: props.lastUsedOrganization,
+		}).slice(0, 1)
 		return (
 			<div
 				data-menu-group
@@ -300,11 +310,17 @@ export function OrgSwitcher({
 				css={switcherMenuGroupCss}
 			>
 				{body}
+				{renderManageGroup({
+					links: overview,
+					currentPathname: pathname,
+					divided: true,
+				})}
 				{renderAccountGroup({
 					username: props.username,
 					currentPathname: props.currentPathname,
 					organizations,
 					heading: true,
+					divided: true,
 				})}
 			</div>
 		)
@@ -419,18 +435,98 @@ function accountRows(input: {
 	]
 }
 
+export type AccountMenuManageLink = {
+	key: string
+	href: string
+	label: string
+	detail: string | null
+	icon: IconName
+}
+
+/**
+ * The account menu's Manage links: the current workspace's Overview first,
+ * then every other workspace's home. Each workspace rail lists every
+ * section, so any section stays two clicks from the avatar. Unlike switcher
+ * rows, which keep the current page, these always open a workspace home.
+ */
+export function accountMenuManageLinks(input: {
+	pathname: string
+	organizations: ReadonlyArray<OrganizationSummary>
+	lastUsedSlug: string | null
+}): Array<AccountMenuManageLink> {
+	const currentSlug = currentSwitcherSlug({
+		pathname: input.pathname,
+		organizations: input.organizations,
+		lastUsedSlug: input.lastUsedSlug,
+	})
+	if (!currentSlug) return []
+	const current = input.organizations.find((org) => org.slug === currentSlug)
+	return [
+		{
+			key: 'manage-overview',
+			// A URL org missing from a stale session list could be a renamed
+			// person's signup org, so its kind is unknown. `/-/overview` serves
+			// the signup org and redirects a team to its home.
+			href: current ? workspaceHomeHref(current) : orgOverviewPath(currentSlug),
+			label: 'Overview',
+			detail: `@${currentSlug}`,
+			icon: 'home',
+		},
+		...orderOrganizations(input.organizations)
+			.filter((org) => org.slug !== currentSlug)
+			.map((org): AccountMenuManageLink => ({
+				key: `manage-${org.slug}`,
+				href: workspaceHomeHref(org),
+				label: `@${org.slug}`,
+				detail: null,
+				icon: org.personal ? 'user' : 'users',
+			})),
+	]
+}
+
+function renderManageGroup(input: {
+	links: ReadonlyArray<AccountMenuManageLink>
+	currentPathname: string
+	divided: boolean
+}) {
+	if (input.links.length === 0) return null
+	return (
+		<div
+			role="group"
+			aria-label="Manage"
+			data-testid="account-menu-manage-group"
+			css={input.divided ? switcherActionsCss : switcherAccountListCss}
+		>
+			<p css={switcherEyebrowCss}>Manage</p>
+			{input.links.map((link) =>
+				renderSwitcherRow({
+					key: link.key,
+					href: link.href,
+					label: link.label,
+					detail: link.detail,
+					ariaCurrent: input.currentPathname === link.href ? 'page' : undefined,
+					selected: false,
+					leading: renderIconWell(link.icon),
+					badge: null,
+				}),
+			)}
+		</div>
+	)
+}
+
 function renderAccountGroup(input: {
 	username: string
 	currentPathname: string
 	organizations: ReadonlyArray<OrganizationSummary>
 	heading: boolean
+	divided: boolean
 }) {
 	return (
 		<div
 			role="group"
 			aria-label="Your account"
 			data-testid="org-switcher-account-group"
-			css={input.heading ? switcherActionsCss : switcherAccountListCss}
+			css={input.divided ? switcherActionsCss : switcherAccountListCss}
 		>
 			{input.heading ? <p css={switcherEyebrowCss}>Your account</p> : null}
 			{accountRows(input).map(renderSwitcherRow)}
@@ -440,6 +536,7 @@ function renderAccountGroup(input: {
 }
 
 export function AccountMenu(props: {
+	lastUsedOrganization?: string | null
 	organizations?: Array<OrganizationSummary>
 	username: string
 	displayName: string
@@ -454,6 +551,15 @@ export function AccountMenu(props: {
 		const panel = document.getElementById(accountMenuPanelId)
 		if (panel?.matches(':popover-open')) panel.hidePopover()
 	}, [href])
+	const organizations = organizationsWithSignupFallback({
+		organizations: props.organizations ?? [],
+		username: props.username,
+	})
+	const manageLinks = accountMenuManageLinks({
+		pathname,
+		organizations,
+		lastUsedSlug: props.lastUsedOrganization ?? null,
+	})
 	const name = props.displayName.trim() || props.username
 	return (
 		<div
@@ -492,14 +598,17 @@ export function AccountMenu(props: {
 						<span css={switcherRowDetailCss}>{`@${props.username}`}</span>
 					) : null}
 				</div>
+				{renderManageGroup({
+					links: manageLinks,
+					currentPathname: pathname,
+					divided: false,
+				})}
 				{renderAccountGroup({
 					username: props.username,
 					currentPathname: pathname,
-					organizations: organizationsWithSignupFallback({
-						organizations: props.organizations ?? [],
-						username: props.username,
-					}),
+					organizations,
 					heading: false,
+					divided: manageLinks.length > 0,
 				})}
 			</div>
 		</div>
