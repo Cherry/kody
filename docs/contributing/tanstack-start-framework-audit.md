@@ -57,7 +57,7 @@ fetches or a remaining Remix dispatcher:
 | `shell.ts`, `org-alias.ts`                                     | Destination URLs carry organization selection, redirect intent or auth view state.                                                    | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience.                                                     |
 | `static-page.ts`, metadata helpers                             | Pathnames identify static presentation/canonical URLs.                                                                                | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                                                                                  |
 
-Account collections, connection usage, credentials, and email now take explicit
+Account collections, connection usage, credentials, and email take explicit
 organization, record, selection and filter fields. The `loadCollection(href)`
 helper and its fabricated destination Request are removed. Scoped and personal
 read contexts keep the original authenticated request. Domain authorization
@@ -70,7 +70,7 @@ parameters. Location is separate and used for canonical redirects, login return
 URLs and metadata, not resource selection. The unused packages-index read
 function was deleted, its native alias route already owns that redirect.
 
-Admin users now uses explicit filters, page size, selected user and a separate
+The admin users reader uses explicit filters, page size, selected user and a separate
 return destination. Pagination keys include actor and page size. Billing
 completion takes organization and checkout session fields, checks the original
 principal, and owns a write lease for both SSR and RPC. The outer protocol
@@ -100,7 +100,7 @@ website route matching, hydration, data loading or navigation.
 A repository-wide search also finds Remix component/router imports inside
 `src/test-support/remix-package-app-fixture.ts`. Those are source strings for a
 hosted package-app fixture, not Kody website runtime imports. The client and
-worker TypeScript configurations now use React JSX defaults; references to the
+worker TypeScript configurations use React JSX defaults; references to the
 deleted backend router and SSR document have been removed.
 
 ## Evidence and limits
