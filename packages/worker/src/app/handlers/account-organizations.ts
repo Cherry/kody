@@ -12,10 +12,9 @@ import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
 export async function loadAccountOrganizationsData(
 	env: Env,
 	user: AuthenticatedAppUser,
-	request: Request,
 ): Promise<AccountOrganizationsLoaderData> {
 	const [snapshot, profile] = await Promise.all([
-		loadAccountOrganizationSnapshot(env, user, request),
+		loadAccountOrganizationSnapshot(env, user),
 		loadAccountProfileData(user, env),
 	])
 	return {
@@ -23,7 +22,6 @@ export async function loadAccountOrganizationsData(
 		username: profile.username,
 		viewer: { displayName: profile.displayName, avatarUrl: profile.avatarUrl },
 		organizations: snapshot.organizations,
-		lastUsedOrganization: snapshot.lastUsedOrganization,
 		invites: snapshot.invites,
 	}
 }

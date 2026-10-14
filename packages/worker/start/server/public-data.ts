@@ -1,4 +1,3 @@
-import { isOrgDocumentRequest } from './org-document-request.ts'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound } from '@tanstack/react-router'
@@ -85,21 +84,6 @@ export const loadProfile = createServerFn({ method: 'GET' })
 				(org) => org.slug === data.username && !org.personal,
 			)
 			if (!orgHome) throw notFound()
-			const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
-				await Promise.all([
-					import('../../universal/org-last-used-cookie.ts'),
-					import('../../src/app/auth-session.ts'),
-				])
-			if (isOrgDocumentRequest()) {
-				setResponseHeader(
-					'Set-Cookie',
-					serializeLastUsedOrgCookie({
-						slug: orgHome.slug,
-						secure: isSecureRequest(request),
-					}),
-				)
-			}
-
 			setResponseHeader('Cache-Control', 'no-store')
 			return {
 				data: null,

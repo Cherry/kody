@@ -56,3 +56,6 @@ the browser. Raw files and README assets remain explicit HTTP resources.
   tab.
 - Own-profile **Needs republish** (`listing=ahead`) is listing pin behind
   `published_commit`. Guests do not see that filter.
+
+Web installs target the personal organization. Team forks use the org-scoped MCP
+communityFork capability.

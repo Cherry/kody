@@ -366,7 +366,7 @@ test('an organization handle is a home for everyone its switcher lists and a 404
 	})
 })
 
-test('an organization home remembers the org as last used; a public profile does not', async () => {
+test('organization homes and public profiles never remember an org in a cookie', async () => {
 	setupPublicProfileMocks()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		userId: 1,
@@ -384,9 +384,9 @@ test('an organization home remembers the org as last used; a public profile does
 	)
 	mockModule.getCommunityProfileByUsername.mockResolvedValue(null)
 	await nativeProfile('acme')
-	expect(native.setResponseHeader).toHaveBeenCalledWith(
+	expect(native.setResponseHeader).not.toHaveBeenCalledWith(
 		'Set-Cookie',
-		expect.stringContaining('kody_last_org=acme'),
+		expect.anything(),
 	)
 	native.setResponseHeader.mockClear()
 	await expect(nativeProfile('zeta')).rejects.toMatchObject({

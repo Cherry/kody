@@ -1,4 +1,3 @@
-import { isSecureRequest } from '#app/auth-session.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import {
@@ -12,7 +11,6 @@ import {
 	type OrgTeamView,
 	type OrgTeamsLoaderData,
 } from '#universal/loader-data.ts'
-import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
 import { orgRoleLabel } from '#universal/org-pages.ts'
 import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
 import {
@@ -27,26 +25,6 @@ import {
 import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
 import { listOrgMembers } from '#worker/orgs/org-members-list.ts'
 import { listTeamsWithMembers } from '#worker/orgs/org-teams-list.ts'
-
-export function withLastUsedOrg(
-	request: Request,
-	slug: string,
-	response: Response,
-) {
-	const headers = new Headers(response.headers)
-	headers.append(
-		'Set-Cookie',
-		serializeLastUsedOrgCookie({
-			slug,
-			secure: isSecureRequest(request),
-		}),
-	)
-	return new Response(response.body, {
-		status: response.status,
-		statusText: response.statusText,
-		headers,
-	})
-}
 
 function toTeamMemberView(member: {
 	userId: string

@@ -1,4 +1,3 @@
-import { isSecureRequest } from '#app/auth-session.ts'
 import {
 	type AuthenticatedAppUser,
 	type readAuthenticatedAppUser,
@@ -12,7 +11,6 @@ import {
 import { McpCallerError } from '#mcp/caller-error.ts'
 import { authorizeGrantRevoke } from '#mcp/capabilities/access/shared.ts'
 import { type OrgGrantsLoaderData } from '#universal/loader-data.ts'
-import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
 import { AuthorizationError } from '#worker/authorization/authorize.ts'
 import {
 	getGrantById,
@@ -21,26 +19,6 @@ import {
 } from '#worker/orgs/access-writes.ts'
 import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
 import { listOrgGrantsForView } from '#worker/orgs/org-grants-view.ts'
-
-export function withLastUsedOrg(
-	request: Request,
-	slug: string,
-	response: Response,
-) {
-	const headers = new Headers(response.headers)
-	headers.append(
-		'Set-Cookie',
-		serializeLastUsedOrgCookie({
-			slug,
-			secure: isSecureRequest(request),
-		}),
-	)
-	return new Response(response.body, {
-		status: response.status,
-		statusText: response.statusText,
-		headers,
-	})
-}
 
 /**
  * Same resource check as grant revoke. Authorization and caller denials mean

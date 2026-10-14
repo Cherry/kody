@@ -1,4 +1,3 @@
-import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { z } from 'zod'
 import { waitUntil } from 'cloudflare:workers'
@@ -8,11 +7,6 @@ import {
 	buildInstallAdaptPrompt,
 	buildInstallSuccessPrompt,
 } from '#app/community-public.ts'
-import { readLastUsedOrgSlug } from '#universal/org-last-used-cookie.ts'
-import {
-	checkPermission,
-	computeEffectivePermissions,
-} from '#worker/authorization/authorize.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import {
 	CommunityForkResourceLimitError,
@@ -23,43 +17,10 @@ import { installCommunityListing } from '#worker/community/install.ts'
 import { getCommunityListingById } from '#worker/community/repo.ts'
 import { EntitlementLimitError } from '#worker/entitlements/errors.ts'
 import { toApiError } from '#worker/open-api/errors.ts'
-import { loadOrgBindingForSlug } from '#worker/orgs/repo.ts'
 import { entitlementEmailForOwner } from '#worker/request-context/owner-id.ts'
-import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { getPackageScopeByUserId } from '#worker/package-registry/user-scope.ts'
 import { resolveArtifactSourceHead } from '#worker/repo/artifacts.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
-
-/**
- * Community pages are not org-bound, so install into the last-used org when
- * the person still belongs there and holds `package:create`; otherwise their
- * personal org (where they are Owner).
- */
-async function resolveCommunityInstallOwnerId(input: {
-	env: Env
-	user: AuthenticatedAppUser
-	request: Request
-}): Promise<OwnerId> {
-	const personalId = personalOrgIdForPerson(input.user.mcpUser)
-	const remembered = readLastUsedOrgSlug(input.request.headers.get('cookie'))
-	if (!remembered) return personalId
-	const binding = await loadOrgBindingForSlug(
-		input.env.APP_DB,
-		input.user.mcpUser.userId,
-		remembered,
-	)
-	if (!binding || binding.org.id === personalId) return personalId
-	const access = await computeEffectivePermissions({
-		env: input.env,
-		request: deriveRequestContext({
-			user: input.user.mcpUser,
-			source: { kind: 'session' },
-			orgBinding: binding,
-		}),
-	})
-	if (!checkPermission(access, 'package:create').allowed) return personalId
-	return binding.org.id
-}
 
 const communityInstallPostSchema = z.object({
 	acknowledged: z.boolean().optional(),
@@ -104,11 +65,8 @@ export async function installWebsiteCommunityPackage(input: {
 	}
 
 	try {
-		const installOwnerId = await resolveCommunityInstallOwnerId({
-			env,
-			user,
-			request,
-		})
+		// Unscoped community installs always belong to the person's personal org.
+		const installOwnerId = personalOrgIdForPerson(user.mcpUser)
 		const expectedPackageScope = await getPackageScopeByUserId(
 			env.APP_DB,
 			installOwnerId,

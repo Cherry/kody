@@ -14,7 +14,6 @@ type HeaderInput = Omit<
 > & {
 	organizations?: Array<OrganizationSummary>
 	inviteCount?: number
-	lastUsedOrganization?: string | null
 }
 function SiteHeader(props: HeaderInput) {
 	return jsx(NativeSiteHeader, {
@@ -24,7 +23,6 @@ function SiteHeader(props: HeaderInput) {
 					username: props.username,
 					organizations: props.organizations ?? [],
 					inviteCount: props.inviteCount ?? 0,
-					lastUsedOrganization: props.lastUsedOrganization ?? null,
 				}
 			: null,
 	})
@@ -249,21 +247,21 @@ test('account menu Manage lists every workspace by handle, the current one first
 		},
 		{ slug: 'acme', displayName: 'Acme', role: null, personal: false },
 	]
-	const links = (pathname: string, lastUsedSlug: string | null = null) =>
-		accountMenuManageLinks({
-			pathname,
-			organizations,
-			lastUsedSlug,
-		}).map((link) => [link.label, link.href, link.detail, link.icon])
+	const links = (pathname: string) =>
+		accountMenuManageLinks({ pathname, organizations }).map((link) => [
+			link.label,
+			link.href,
+			link.detail,
+			link.icon,
+		])
 	// The org in the URL is the one Manage lists first.
 	expect(links('/@kody/-/credentials')).toEqual([
 		['@kody', '/@kody', null, 'users'],
 		['@kentcdodds', '/@kentcdodds/-/overview', null, 'user'],
 		['@acme', '/@acme', null, 'users'],
 	])
-	// Off an org page, the switcher's org (last used) leads.
-	expect(links('/account', 'kody')).toEqual(links('/@kody'))
-	// The signup org reads like every other row: its handle, no Overview.
+	// Off an org page there is no current org: the signup org leads, and it
+	// reads like every other row (its handle, no Overview).
 	expect(links('/account')).toEqual([
 		['@kentcdodds', '/@kentcdodds/-/overview', null, 'user'],
 		['@acme', '/@acme', null, 'users'],
@@ -276,7 +274,6 @@ test('account menu Manage lists every workspace by handle, the current one first
 		accountMenuManageLinks({
 			pathname: '/@kent-old/-/overview',
 			organizations: [],
-			lastUsedSlug: null,
 		}).map((link) => [link.label, link.href, link.detail]),
 	).toEqual([['@kent-old', '/@kent-old/-/overview', null]])
 })
@@ -301,7 +298,6 @@ test('account menu shows a Manage section before the person links, in the phone 
 					personal: true,
 				},
 			],
-			lastUsedOrganization: 'kody',
 		}),
 	)
 	const accountPanel = html.slice(

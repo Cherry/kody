@@ -1,7 +1,6 @@
 import { createServerOnlyFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { type OrgOwnedAccountSection } from '#universal/org-pages.ts'
-import { isOrgDocumentRequest } from './org-document-request.ts'
 
 /** Resource scope is explicit. The request remains the authenticated RPC/document. */
 export const loadScopedCollection = createServerOnlyFn(
@@ -62,20 +61,7 @@ export const loadScopedCollection = createServerOnlyFn(
 				orgBinding: binding,
 			}),
 		}
-		if (isOrgDocumentRequest()) {
-			const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
-				await Promise.all([
-					import('#universal/org-last-used-cookie.ts'),
-					import('#app/auth-session.ts'),
-				])
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: input.orgSlug,
-					secure: isSecureRequest(request),
-				}),
-			)
-		}
+
 		setResponseHeader('Cache-Control', 'private, no-store')
 		return { bindings, request, user }
 	},

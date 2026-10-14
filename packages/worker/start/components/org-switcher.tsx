@@ -12,7 +12,7 @@ import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
 import { UserAvatar } from './user-avatar.tsx'
 import {
-	currentSwitcherSlug,
+	urlOrgSlug,
 	orderOrganizations,
 	orgOverviewPath,
 	orgRoleManagesBilling,
@@ -150,7 +150,6 @@ function moveSwitcherFocus(
 export type OrganizationSession = {
 	organizations: Array<OrganizationSummary>
 	inviteCount: number
-	lastUsedOrganization: string | null
 	username: string
 }
 export function PhoneAccountGroups(props: {
@@ -167,7 +166,6 @@ export function PhoneAccountGroups(props: {
 				links: accountMenuManageLinks({
 					pathname: props.currentPathname,
 					organizations,
-					lastUsedSlug: props.session.lastUsedOrganization,
 				}),
 				currentPathname: props.currentPathname,
 				divided: false,
@@ -269,36 +267,36 @@ export type AccountMenuManageLink = {
 export function accountMenuManageLinks(input: {
 	pathname: string
 	organizations: ReadonlyArray<OrganizationSummary>
-	lastUsedSlug: string | null
 }): Array<AccountMenuManageLink> {
-	const currentSlug = currentSwitcherSlug({
-		pathname: input.pathname,
-		organizations: input.organizations,
-		lastUsedSlug: input.lastUsedSlug,
-	})
-	if (!currentSlug) return []
-	const current = input.organizations.find((org) => org.slug === currentSlug)
+	const ordered = orderOrganizations(input.organizations)
+	const currentSlug = urlOrgSlug(input)
+	if (!currentSlug) return ordered.map(manageLink)
+	const current = ordered.find((org) => org.slug === currentSlug)
 	return [
-		{
-			key: `manage-${currentSlug}`,
-			// A URL org missing from a stale session list could be a renamed
-			// person's signup org, so its kind is unknown. `/-/overview` serves
-			// the signup org and redirects a team to its home.
-			href: current ? workspaceHomeHref(current) : orgOverviewPath(currentSlug),
-			label: `@${currentSlug}`,
-			detail: null,
-			icon: current ? (current.personal ? 'user' : 'users') : 'home',
-		},
-		...orderOrganizations(input.organizations)
-			.filter((org) => org.slug !== currentSlug)
-			.map((org): AccountMenuManageLink => ({
-				key: `manage-${org.slug}`,
-				href: workspaceHomeHref(org),
-				label: `@${org.slug}`,
-				detail: null,
-				icon: org.personal ? 'user' : 'users',
-			})),
+		current
+			? manageLink(current)
+			: {
+					key: `manage-${currentSlug}`,
+					// A URL org missing from a stale session list could be a renamed
+					// person's signup org, so its kind is unknown. `/-/overview`
+					// serves the signup org and redirects a team to its home.
+					href: orgOverviewPath(currentSlug),
+					label: `@${currentSlug}`,
+					detail: null,
+					icon: 'home',
+				},
+		...ordered.filter((org) => org.slug !== currentSlug).map(manageLink),
 	]
+}
+
+function manageLink(org: OrganizationSummary): AccountMenuManageLink {
+	return {
+		key: `manage-${org.slug}`,
+		href: workspaceHomeHref(org),
+		label: `@${org.slug}`,
+		detail: null,
+		icon: org.personal ? 'user' : 'users',
+	}
 }
 
 function renderManageGroup(input: {
@@ -353,7 +351,6 @@ function renderAccountGroup(input: {
 }
 
 export function AccountMenu(props: {
-	lastUsedOrganization?: string | null
 	organizations?: Array<OrganizationSummary>
 	username: string
 	displayName: string
@@ -375,7 +372,6 @@ export function AccountMenu(props: {
 	const manageLinks = accountMenuManageLinks({
 		pathname,
 		organizations,
-		lastUsedSlug: props.lastUsedOrganization ?? null,
 	})
 	const name = props.displayName.trim() || props.username
 	return (

@@ -35,7 +35,7 @@ export const loadOrganizations = createServerFn({ method: 'GET' }).handler(
 		const { env, request, user } = await accountContext()
 		const { loadAccountOrganizationsData } =
 			await import('../../src/app/handlers/account-organizations.ts')
-		return loadAccountOrganizationsData(env, user, request)
+		return loadAccountOrganizationsData(env, user)
 	},
 )
 export const createOrg = createServerFn({ method: 'POST' })

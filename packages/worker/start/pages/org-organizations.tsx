@@ -32,7 +32,6 @@ import {
 	orgRoleLabel,
 	orgOverviewPath,
 	orderOrganizations,
-	currentSwitcherSlug,
 	organizationsWithSignupFallback,
 } from '#universal/org-pages.ts'
 import {
@@ -82,10 +81,7 @@ export function OrganizationsPage({
 				title="Your organizations"
 				ariaLabel="Your organizations"
 			>
-				{renderOrganizationList(
-					data,
-					new URL(pageLocation.href, 'https://kody.local').pathname,
-				)}
+				{renderOrganizationList(data)}
 			</AccountManagementPanel>
 			<AccountManagementPanel
 				id="invites"
@@ -394,21 +390,13 @@ function inviteRoleLabel(
 	}
 }
 
-function renderOrganizationList(
-	data: AccountOrganizationsLoaderData,
-	currentPathname: string,
-) {
+function renderOrganizationList(data: AccountOrganizationsLoaderData) {
 	const organizations = orderOrganizations(
 		organizationsWithSignupFallback({
 			organizations: data.organizations,
 			username: data.username,
 		}),
 	)
-	const currentSlug = currentSwitcherSlug({
-		pathname: currentPathname,
-		organizations,
-		lastUsedSlug: data.lastUsedOrganization,
-	})
 	return (
 		<ul css={orgListCss} data-testid="account-organizations">
 			{organizations.map((org) =>
@@ -419,10 +407,7 @@ function renderOrganizationList(
 					personal: org.personal,
 					viewer: data.viewer,
 					detail: orgRoleLabel(org.role),
-					pills:
-						org.slug === currentSlug
-							? [{ label: 'Current', tone: 'accent' }]
-							: [],
+					pills: [],
 					// Each org opens its overview: a team org's home (which
 					// links Settings, Members, and its sections), the signup
 					// org's workspace overview.

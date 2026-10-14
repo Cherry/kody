@@ -27,7 +27,6 @@ export type SessionInfo = {
 	featureFlags: Record<FeatureFlagKey, boolean>
 	organizations?: Array<OrganizationSummary>
 	inviteCount?: number
-	lastUsedOrganization?: string | null
 }
 
 export function getSessionDisplayName(session: SessionInfo | null) {
@@ -77,10 +76,6 @@ export function parseSessionInfo(value: unknown): SessionInfo | null {
 				featureFlags,
 				organizations: readOrganizations(payload?.session?.organizations),
 				inviteCount: readInviteCount(payload?.session?.inviteCount),
-				lastUsedOrganization:
-					typeof payload?.session?.lastUsedOrganization === 'string'
-						? payload.session.lastUsedOrganization
-						: null,
 			}
 		: null
 }

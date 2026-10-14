@@ -1,4 +1,3 @@
-import { isOrgDocumentRequest } from './org-document-request.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
@@ -40,19 +39,11 @@ export const loadOrgMembers = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'members')
-		const [
-			{ resolveOrgManagementAccess },
-			{ loadOrgMembersData },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
-			import('../../src/app/org-management-access.ts'),
-			import('../../src/app/handlers/org-members.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
-		])
+		const [{ resolveOrgManagementAccess }, { loadOrgMembersData }] =
+			await Promise.all([
+				import('../../src/app/org-management-access.ts'),
+				import('../../src/app/handlers/org-members.ts'),
+			])
 		const access = await resolveOrgManagementAccess({
 			...input,
 			permission: 'member:read',
@@ -61,15 +52,7 @@ export const loadOrgMembers = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: access.org.slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return loadOrgMembersData({ ...input, org: access.org })
 	})
 
@@ -77,19 +60,11 @@ export const loadOrgSettings = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'settings')
-		const [
-			{ resolveOrgManagementAccess },
-			{ loadOrgSettingsData },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
-			import('../../src/app/org-management-access.ts'),
-			import('../../src/app/handlers/org-settings.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
-		])
+		const [{ resolveOrgManagementAccess }, { loadOrgSettingsData }] =
+			await Promise.all([
+				import('../../src/app/org-management-access.ts'),
+				import('../../src/app/handlers/org-settings.ts'),
+			])
 		const access = await resolveOrgManagementAccess({
 			...input,
 			permission: 'org:read',
@@ -98,15 +73,7 @@ export const loadOrgSettings = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: access.org.slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return loadOrgSettingsData({ ...input, org: access.org })
 	})
 
@@ -114,19 +81,11 @@ export const loadOrgTeams = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'teams')
-		const [
-			{ resolveOrgManagementAccess },
-			{ loadOrgTeamsData },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
-			import('../../src/app/org-management-access.ts'),
-			import('../../src/app/handlers/org-teams.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
-		])
+		const [{ resolveOrgManagementAccess }, { loadOrgTeamsData }] =
+			await Promise.all([
+				import('../../src/app/org-management-access.ts'),
+				import('../../src/app/handlers/org-teams.ts'),
+			])
 		const access = await resolveOrgManagementAccess({
 			...input,
 			permission: 'team:read',
@@ -135,15 +94,7 @@ export const loadOrgTeams = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: access.org.slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return loadOrgTeamsData({ ...input, org: access.org })
 	})
 
@@ -151,19 +102,11 @@ export const loadOrgGrants = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'grants')
-		const [
-			{ resolveOrgManagementAccess },
-			{ loadOrgGrantsData },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
-			import('../../src/app/org-management-access.ts'),
-			import('../../src/app/handlers/org-grants.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
-		])
+		const [{ resolveOrgManagementAccess }, { loadOrgGrantsData }] =
+			await Promise.all([
+				import('../../src/app/org-management-access.ts'),
+				import('../../src/app/handlers/org-grants.ts'),
+			])
 		const access = await resolveOrgManagementAccess({
 			...input,
 			permission: 'member:read',
@@ -172,15 +115,7 @@ export const loadOrgGrants = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: access.org.slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return loadOrgGrantsData({ ...input, org: access.org })
 	})
 
@@ -188,19 +123,11 @@ export const loadOrgCollaborators = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'collaborators')
-		const [
-			{ resolveOrgManagementAccess },
-			{ loadOrgCollaboratorsData },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
-			import('../../src/app/org-management-access.ts'),
-			import('../../src/app/handlers/org-collaborators.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
-		])
+		const [{ resolveOrgManagementAccess }, { loadOrgCollaboratorsData }] =
+			await Promise.all([
+				import('../../src/app/org-management-access.ts'),
+				import('../../src/app/handlers/org-collaborators.ts'),
+			])
 		const access = await resolveOrgManagementAccess({
 			...input,
 			permission: 'member:read',
@@ -209,15 +136,7 @@ export const loadOrgCollaborators = createServerFn({ method: 'GET' })
 			if (access.status === 404) throw notFound()
 			throw new Response(access.error, { status: 403 })
 		}
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: access.org.slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return loadOrgCollaboratorsData({ ...input, org: access.org })
 	})
 
@@ -251,30 +170,14 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 	.validator(slugInput)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'overview')
-		const [
-			{ personalOrgIdForPerson },
-			{ serializeLastUsedOrgCookie },
-			{ isSecureRequest },
-			{ setResponseHeader },
-		] = await Promise.all([
+		const [{ personalOrgIdForPerson }] = await Promise.all([
 			import('../../src/orgs/personal-org-id.ts'),
-			import('#universal/org-last-used-cookie.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('@tanstack/react-start/server'),
 		])
 		const resolution = input.binding
 		const slug = resolution.org.slug ?? data.slug
 		if (resolution.org.id !== personalOrgIdForPerson(input.user.mcpUser))
 			throw redirect({ href: `/@${encodeURIComponent(slug)}` })
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug,
-					secure: isSecureRequest(input.request),
-				}),
-			)
-		}
+
 		return { slug }
 	})
 

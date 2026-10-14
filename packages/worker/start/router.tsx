@@ -1,6 +1,4 @@
 /** @jsxImportSource @emotion/react */
-import { rememberOrganization } from '#start/server/org-navigation'
-import { installOrgNavigationCommit } from './org-navigation-commit.ts'
 import type {} from './request-context.ts'
 import { type CommittedPage } from './presentation-navigation.ts'
 import { readRouterNonce } from '#start/server/router-nonce'
@@ -65,12 +63,6 @@ export function getRouter() {
 		dehydrateOptions: { shouldDehydrateQuery: shouldDehydrateAppQuery },
 	})
 	if (typeof document !== 'undefined') {
-		installOrgNavigationCommit(
-			router,
-			(orgSlug) => rememberOrganization({ data: { orgSlug } }),
-			window.location.origin,
-			window.location.href,
-		)
 		installNavigationMotion(router, {
 			canStart: () => typeof document.startViewTransition === 'function',
 			prefersReducedMotion: () =>

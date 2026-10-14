@@ -114,12 +114,9 @@ beforeEach(() => {
 	})
 })
 
-test('the signup org overview renders and remembers the org', async () => {
+test('the signup org overview renders without remembering the org', async () => {
 	expect(await getOverview(await createEnv(), 'ada')).toEqual({ slug: 'ada' })
-	expect(native.setResponseHeader).toHaveBeenCalledWith(
-		'Set-Cookie',
-		expect.stringContaining('kody_last_org=ada'),
-	)
+	expect(native.setResponseHeader).not.toHaveBeenCalled()
 })
 test('a team org overview redirects to the team home', async () => {
 	await expect(getOverview(await createEnv(), 'acme')).rejects.toMatchObject({

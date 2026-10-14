@@ -84,9 +84,6 @@ export function SiteHeader(props: SiteHeaderProps) {
 								displayName={props.displayName}
 								avatarUrl={props.avatarUrl}
 								organizations={props.organizationSession?.organizations ?? []}
-								lastUsedOrganization={
-									props.organizationSession?.lastUsedOrganization ?? null
-								}
 							/>
 						) : (
 							<SiteLink href={props.loginHref} css={navLoginCss}>
@@ -129,9 +126,6 @@ export function SiteHeader(props: SiteHeaderProps) {
 					{props.loggedIn ? (
 						<>
 							<AccountMenu
-								lastUsedOrganization={
-									props.organizationSession?.lastUsedOrganization ?? null
-								}
 								organizations={props.organizationSession?.organizations ?? []}
 								username={props.username}
 								displayName={props.displayName}
