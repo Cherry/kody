@@ -13,7 +13,10 @@ test('Start matches unknown admin paths before any admin authorization redirect'
 		expect(response.status(), path).toBe(404)
 		expect(response.headers().location, path).toBeUndefined()
 	}
-	for (const path of ['/admin', '/admin/', '/admin/users']) {
+	const trailingSlash = await page.request.get('/admin/', { maxRedirects: 0 })
+	expect(trailingSlash.status()).toBe(307)
+	expect(trailingSlash.headers().location).toBe('/admin')
+	for (const path of ['/admin', '/admin/users']) {
 		const response = await page.request.get(path, { maxRedirects: 0 })
 		expect(response.status(), path).toBe(302)
 		expect(response.headers().location, path).toContain('/login?')
