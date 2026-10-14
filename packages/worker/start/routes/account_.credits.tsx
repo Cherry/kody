@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { redirectAccountCredits } from '../server/org-navigation.ts'
+import { redirectAccountCredits } from '#start/server/org-navigation'
 export const Route = createFileRoute('/account_/credits')({
 	validateSearch: (search: Record<string, unknown>) => search,
 	beforeLoad: ({ location }) =>
