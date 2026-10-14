@@ -128,6 +128,7 @@ test('revoking the same user admin role blocks a warm cached revisit', async ({
 		expect(signedIn.ok()).toBe(true)
 		const operatorPage = await other.newPage()
 		await operatorPage.goto(`/admin/users?q=${encodeURIComponent(user.email)}`)
+		await waitForClientHydration(operatorPage)
 		await operatorPage
 			.getByRole('row')
 			.filter({ hasText: user.email })
@@ -137,9 +138,22 @@ test('revoking the same user admin role blocks a warm cached revisit', async ({
 		await operatorPage
 			.getByRole('combobox', { name: 'Role', exact: true })
 			.selectOption('admin')
+		await expect(
+			operatorPage.getByRole('combobox', { name: 'Role', exact: true }),
+		).toHaveValue('admin')
+		const roleChangeResponse = operatorPage.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
+				response.request().method() === 'POST' &&
+				response.request().postData()?.includes('remove_role') === true,
+		)
 		await operatorPage
 			.getByRole('button', { name: 'Remove', exact: true })
 			.click()
+		const changed = await roleChangeResponse
+		const changeResult = await changed.text()
+		expect(changed.status(), changeResult).toBe(200)
+		expect(changeResult).toContain('updatedUser')
 		await expect
 			.poll(async () => operatorPage.locator('main').innerText())
 			.toContain('Removed admin role.')
@@ -199,6 +213,7 @@ test('revoking admin role blocks a warm cached admin-only guide', async ({
 		expect(signedIn.ok()).toBe(true)
 		const operatorPage = await other.newPage()
 		await operatorPage.goto(`/admin/users?q=${encodeURIComponent(user.email)}`)
+		await waitForClientHydration(operatorPage)
 		await operatorPage
 			.getByRole('row')
 			.filter({ hasText: user.email })
@@ -208,9 +223,22 @@ test('revoking admin role blocks a warm cached admin-only guide', async ({
 		await operatorPage
 			.getByRole('combobox', { name: 'Role', exact: true })
 			.selectOption('admin')
+		await expect(
+			operatorPage.getByRole('combobox', { name: 'Role', exact: true }),
+		).toHaveValue('admin')
+		const roleChangeResponse = operatorPage.waitForResponse(
+			(response) =>
+				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
+				response.request().method() === 'POST' &&
+				response.request().postData()?.includes('remove_role') === true,
+		)
 		await operatorPage
 			.getByRole('button', { name: 'Remove', exact: true })
 			.click()
+		const changed = await roleChangeResponse
+		const changeResult = await changed.text()
+		expect(changed.status(), changeResult).toBe(200)
+		expect(changeResult).toContain('updatedUser')
 		await expect
 			.poll(async () => operatorPage.locator('main').innerText())
 			.toContain('Removed admin role.')
