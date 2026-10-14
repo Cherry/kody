@@ -14,7 +14,7 @@ test('package no-access page names the package and offers a request-access copy'
 	)
 
 	expect(html).toContain('data-testid="package-no-access-page"')
-	expect(html).toContain("You don't have access")
+	expect(html).toContain('You don&#x27;t have access')
 	expect(html).toContain('@kody/mau-chart')
 	expect(html).toContain('@tannerlinsley')
 	expect(html).toContain('app:execute')
@@ -22,5 +22,5 @@ test('package no-access page names the package and offers a request-access copy'
 	expect(html).toContain('href="/docs/package-sharing"')
 	expect(html).toContain('Copy access request')
 	expect(html).toContain('data-error-agent-prompt')
-	expect(html).not.toContain("This doesn't quite connect.")
+	expect(html).not.toContain('This doesn&#x27;t quite connect.')
 })
