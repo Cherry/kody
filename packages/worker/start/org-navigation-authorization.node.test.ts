@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
 	destinations: [] as string[],
 }))
 vi.mock('@tanstack/react-start', () => ({
+	createServerOnlyFn: <T>(fn: T) => fn,
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {

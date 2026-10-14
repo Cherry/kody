@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 // Exercise the real validator and handler without a Start HTTP transport.
 vi.mock('@tanstack/react-start', () => ({
+	createServerOnlyFn: <T>(fn: T) => fn,
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
@@ -28,7 +29,10 @@ vi.mock('@tanstack/react-start', () => ({
 		return builder
 	},
 }))
-vi.mock('cloudflare:workers', () => ({ env: { COOKIE_SECRET: 'test' } }))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<typeof import('cloudflare:workers')>()),
+	env: { COOKIE_SECRET: 'test' },
+}))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => mocks.request,
 	setResponseHeader: (name: string, value: string) =>

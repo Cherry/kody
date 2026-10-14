@@ -92,6 +92,7 @@ vi.mock('@tanstack/react-start', async () => ({
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,
+	createServerOnlyFn: <T>(fn: T) => fn,
 }))
 
 type Rows = Array<Record<string, unknown>>

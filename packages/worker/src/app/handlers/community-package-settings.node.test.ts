@@ -5,8 +5,12 @@ vi.mock('@tanstack/react-start', async () => ({
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,
+	createServerOnlyFn: <T>(fn: T) => fn,
 }))
-vi.mock('cloudflare:workers', () => ({ env: { COOKIE_SECRET: 'test' } }))
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<typeof import('cloudflare:workers')>()),
+	env: { COOKIE_SECRET: 'test' },
+}))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => new Request('https://example.com/_serverFn/package'),
 	setResponseHeader: vi.fn(),

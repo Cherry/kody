@@ -56,6 +56,7 @@ const native = vi.hoisted(() => ({
 	setResponseHeader: vi.fn(),
 }))
 vi.mock('@tanstack/react-start', () => ({
+	createServerOnlyFn: <T>(fn: T) => fn,
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {

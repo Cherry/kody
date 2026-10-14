@@ -64,7 +64,7 @@ test('logged-in header has an organization switcher and a separate account menu 
 		/<a(?=[^>]*href="\/account")(?=[^>]*aria-current="page")[^>]*>[\s\S]*?>Account settings</,
 	)
 	expect(accountPanel).toMatch(
-		/href="\/account\/usage"[^>]*>[\s\S]*?>Usage &amp; credits</,
+		/href="\/@ada\/-\/usage"[^>]*>[\s\S]*?>Usage &amp; credits</,
 	)
 	expect(accountPanel).toContain('action="/logout"')
 	// From an account page, the signup org row opens the overview too, not

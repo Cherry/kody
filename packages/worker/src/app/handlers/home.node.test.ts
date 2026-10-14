@@ -46,6 +46,7 @@ vi.mock('@tanstack/react-start', async () => ({
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,
+	createServerOnlyFn: <T>(fn: T) => fn,
 }))
 
 test('native home prefetches flags once across page and session reads', async () => {

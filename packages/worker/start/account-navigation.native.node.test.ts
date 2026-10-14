@@ -34,9 +34,11 @@ test('workspace settings do not duplicate Activity tabs in the rail', async () =
 	expect(html).not.toContain('href="/account/usage"')
 })
 
-test('personal account rail owns usage and credits', async () => {
+test('personal account rail keeps account chrome without legacy usage links', async () => {
 	const html = await header('/account')
-	expect(html).toContain('href="/account/usage"')
-	expect(html).toContain('Usage &amp; credits')
+	expect(html).toContain('href="/account/security"')
+	expect(html).toContain('href="/account/organizations"')
+	expect(html).not.toContain('href="/account/usage"')
+	expect(html).not.toContain('Usage &amp; credits')
 	expect(html).not.toContain('account-section-tabs')
 })

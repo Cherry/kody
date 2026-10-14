@@ -9,7 +9,10 @@ const env = vi.hoisted(() => ({
 	COOKIE_SECRET: 'test',
 	FATHOM_SITE_ID: undefined as string | undefined,
 }))
-vi.mock('@tanstack/react-start', () => ({ createServerFn: createTestServerFn }))
+vi.mock('@tanstack/react-start', () => ({
+	createServerFn: createTestServerFn,
+	createServerOnlyFn: <T>(fn: T) => fn,
+}))
 vi.mock('cloudflare:workers', () => ({ env }))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => new Request('https://kody.test/'),
