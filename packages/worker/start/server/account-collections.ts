@@ -37,7 +37,9 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 		if (data.create && data.setupName?.trim()) {
 			const query = new URLSearchParams()
 			for (const name of data.approval.names) query.append('name', name)
-			for (const host of data.approval.hosts) query.append('hosts', host)
+			// secret-set / credential redirects read allowedHosts (and aliases),
+			// not the internal approval.hosts field name.
+			for (const host of data.approval.hosts) query.append('allowedHosts', host)
 			query.set('scope', data.approval.scope)
 			query.set('org', data.orgSlug)
 			if (data.provider) query.set('provider', data.provider)

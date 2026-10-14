@@ -81,7 +81,9 @@ test('native secret connection redirects preserve prefill and destination authen
 		cookie,
 	)
 	expect(prefilled.response.status).toBe(302)
-	expect(prefilled.response.headers.get('Location')).toBe(legacyPath)
+	expect(prefilled.response.headers.get('Location')).toBe(
+		`/connect/secret-set?name=exampleApiKey&allowedHosts=api.example.com&scope=user&org=${user.username}`,
+	)
 	const bare = await readDocument(`/@${user.username}/-/secrets/new`, cookie)
 	expect(bare.response.status).toBe(200)
 	expect(bare.html).toContain('Secrets')
