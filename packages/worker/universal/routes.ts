@@ -26,7 +26,7 @@ export const routes = route({
 	accountMcpServerLogo: '/account/mcp-servers/logos/:serverId',
 	accountMcpServersOauthCallback: '/account/mcp-servers/oauth/callback',
 	// Package detail still redirects to the canonical `/@user/:kodyId` page.
-	// The JSON endpoints remain account-scoped mutation/read APIs.
+	// Website reads and mutations use Start server functions.
 	accountRepoIcon: '/account/repos/:repoId/icon/:iconCommit',
 	accountPackageDetail: '/account/packages/:packageId',
 	accountPackageApprovePublish: '/account/packages/:packageId/approve-publish',
@@ -40,7 +40,7 @@ export const routes = route({
 	accountMcpOauthClients: '/account/mcp-oauth-clients',
 	accountTwoFactor: '/account/two-factor',
 	// Old `/account/credits` and `/account/usage` links redirect to the
-	// signed-in person's personal-org usage page (and its Credits section).
+	// signed-in person's personal-org credits and usage pages.
 	accountCredits: '/account/credits',
 	accountUsage: '/account/usage',
 	accountExport: '/account/export.json',
@@ -101,6 +101,7 @@ export const routes = route({
 	orgBilling: get('/@:orgSlug/-/billing'),
 	orgBillingSuccess: get('/@:orgSlug/-/billing/success'),
 	orgBillingPortal: get('/@:orgSlug/-/billing/portal'),
+	orgCredits: get('/@:orgSlug/-/credits'),
 	orgCredentials: get('/@:orgSlug/-/credentials(/*rest)'),
 	// The credential creation one-pager for this org.
 	orgCredentialNew: get('/@:orgSlug/-/credentials/new'),

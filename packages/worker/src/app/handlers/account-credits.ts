@@ -1,3 +1,4 @@
+import { personalOrgUsageRedirectUrl } from '#app/handlers/org-usage.ts'
 import { operationResult } from '../operation-result.ts'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { loadAccountCreditsUser } from '#app/account-credits-data.ts'
@@ -8,7 +9,6 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { personalOrgUsageRedirectUrl } from '#app/handlers/org-usage.ts'
 import { loadRequestOrgResolution } from '#app/org-request-binding.ts'
 import {
 	authorize,
@@ -38,11 +38,11 @@ export function accountCreditsRedirectUrl(
 	requestUrl: string,
 	slug: string,
 ): string {
-	return personalOrgUsageRedirectUrl({
-		requestUrl,
-		slug,
-		credits: true,
-	})
+	const url = new URL(requestUrl)
+	if (url.searchParams.has('topup'))
+		return personalOrgUsageRedirectUrl({ requestUrl, slug, credits: true })
+	url.pathname = `/@${slug}/-/credits`
+	return url.toString()
 }
 
 function readNotifySettings(value: unknown): CreditNotifySettings | null {

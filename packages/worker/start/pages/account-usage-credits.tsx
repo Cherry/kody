@@ -3,7 +3,6 @@ import {
 	startCreditTopUp,
 	saveCreditSettings,
 } from '#start/server/billing-mutations'
-/** @jsxImportSource @emotion/react */
 import { type QueryKey } from '@tanstack/react-query'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
@@ -43,7 +42,7 @@ import {
 	type AccountUsageCreditsWallet,
 	type AccountUsageLoaderData,
 } from '#universal/loader-data.ts'
-import { parseOrgBillingPath } from '#universal/org-pages.ts'
+import { orgCreditsPath, parseOrgBillingPath } from '#universal/org-pages.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	descriptionCss,
@@ -316,6 +315,20 @@ export function AccountUsageCreditsSection(
 		)
 	}
 
+	function renderLedgerLink(label: string) {
+		return props.orgSlug ? (
+			<p css={descriptionCss}>
+				<SiteLink
+					href={orgCreditsPath(props.orgSlug)}
+					data-credits-ledger-link
+					css={primaryLinkCss}
+				>
+					{label}
+				</SiteLink>
+			</p>
+		) : null
+	}
+
 	function renderIneligible(
 		credits: Extract<AccountUsageCredits, { eligible: false }>,
 	) {
@@ -335,6 +348,7 @@ export function AccountUsageCreditsSection(
 						</SiteLink>
 					)}
 				</div>
+				{renderLedgerLink('See your balance and credit history')}
 			</AccountManagementPanel>
 		)
 	}
@@ -610,6 +624,7 @@ export function AccountUsageCreditsSection(
 				})}
 
 				<AccountManagementPanel title="Credit history">
+					{renderLedgerLink('View the full ledger')}
 					{credits.recent.length === 0 ? (
 						<p css={descriptionCss}>No credit activity yet.</p>
 					) : (

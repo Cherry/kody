@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { whereItWentSectionId } from '#universal/org-pages.ts'
 import { useState } from 'react'
 import { AreaChart } from '../charts/area-chart.tsx'
 import { chartColor, formatIntegerNumber } from '#client/charts/chart-theme.ts'
@@ -100,6 +101,7 @@ export function WhereItWentPanel({
 	const rows = [...visiblePackages, ...(adHocRow ? [adHocRow] : [])]
 	return (
 		<AccountManagementPanel
+			id={whereItWentSectionId}
 			title="Where it went"
 			description={
 				breakdown.totalCreditsMicroUsd > 0

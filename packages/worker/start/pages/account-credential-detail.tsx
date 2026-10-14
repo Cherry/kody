@@ -8,6 +8,7 @@ import {
 	MetadataGrid,
 	TimestampValue,
 } from './account-management-components.tsx'
+import { CredentialHostsEditor } from './account-credential-hosts-editor.tsx'
 import { RecordChips, recordBodyCss } from './record-table.tsx'
 import {
 	type CredentialInjectView,
@@ -188,12 +189,9 @@ export function renderCredentialDetail(input: {
 	detail: AccountCredentialDetail | null
 	manageHref: string
 	teamOrg: boolean
-	packagesById: ReadonlyMap<
-		string,
-		{
-			kodyId: string
-		}
-	>
+	packagesById: ReadonlyMap<string, { kodyId: string }>
+	/** The page href, so host edits bind this page's org. */
+	href: string
 }) {
 	const { credential, detail, packagesById } = input
 	const lockedTo = credential.lockedToPackageIds.map((id) =>
@@ -268,11 +266,22 @@ export function renderCredentialDetail(input: {
 
 			{renderField(
 				'Hosts',
-				hint ? (
-					<p css={mutedCss}>{hint}</p>
-				) : (
-					<RecordChips items={credential.hosts} empty="—" />
-				),
+				<div css={css({ display: 'grid', gap: spacing.sm })}>
+					{hint ? (
+						<p css={mutedCss}>{hint}</p>
+					) : (
+						<RecordChips items={credential.hosts} empty="—" />
+					)}
+					{detail?.hostSettings ? (
+						<CredentialHostsEditor
+							key={credential.id}
+							credentialId={credential.id}
+							credentialName={credential.name}
+							settings={detail.hostSettings}
+							href={input.href}
+						/>
+					) : null}
+				</div>,
 			)}
 
 			{renderField(

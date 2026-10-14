@@ -2,8 +2,12 @@
 import { type CSSObject } from '@emotion/react'
 import { FeaturesMenu } from './features-menu.tsx'
 import { SiteLink } from './site-link.tsx'
-import { useEffect, useState, type ComponentProps } from 'react'
-import { OrgSwitcher, AccountMenu } from './org-switcher.tsx'
+import { useEffect, useState } from 'react'
+import {
+	PhoneAccountGroups,
+	AccountMenu,
+	type OrganizationSession,
+} from './org-switcher.tsx'
 import {
 	colors,
 	shadows,
@@ -19,7 +23,7 @@ import {
 
 export type SiteHeaderProps = {
 	loggedIn: boolean
-	organizationSession: ComponentProps<typeof OrgSwitcher>['session'] | null
+	organizationSession: OrganizationSession | null
 	displayName: string
 	username: string
 	avatarUrl: string | null
@@ -103,13 +107,6 @@ export function SiteHeader(props: SiteHeaderProps) {
 					) : null}
 				</div>
 				<div css={navActionsCss}>
-					{props.organizationSession ? (
-						<OrgSwitcher
-							session={props.organizationSession}
-							displayName={props.displayName}
-							avatarUrl={props.avatarUrl}
-						/>
-					) : null}
 					{props.loggedIn ? (
 						<>
 							<AccountMenu
@@ -177,11 +174,9 @@ export function SiteHeader(props: SiteHeaderProps) {
 						) : null}
 					</div>
 					{props.organizationSession ? (
-						<OrgSwitcher
+						<PhoneAccountGroups
 							session={props.organizationSession}
-							displayName={props.displayName}
-							avatarUrl={props.avatarUrl}
-							menu
+							currentPathname={props.currentPathname}
 						/>
 					) : (
 						<div css={menuGroupCss}>

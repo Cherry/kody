@@ -9,15 +9,27 @@ Plan, checkout, portal, prepaid credits, and entitlement usage.
 `#credits` section). Billing and usage belong to the organization in the URL.
 Owners and billing admins subscribe and manage; members get 403 from checkout,
 the portal, and usage. Team organizations buy one Pro seat per owner and member.
-`/account/usage` and `/account/credits` redirect to the personal org's usage
-page (credits keeps `#credits` and the query). Billing also shows the signed-in
-user's referral share link and reward status.
+`/account/usage` redirects to the personal org's usage page. `/account/credits`
+redirects to its credits ledger, preserving the query. Historical top-up return
+URLs still reach the usage Credits section to confirm the Stripe session.
+Billing also shows the signed-in user's referral share link and reward status.
+
+`/@:orgSlug/-/credits` is the organization's credits page and is open to every
+member. Owners and billing admins (`billing:read`) see the balance, the
+organization's default per-person and automation budgets with this month's
+spend, and the full credit ledger (purchases, auto-refills, grants, and usage
+debits with the meter, units, and month) with the balance after each row, newest
+first. **Load older** uses the native credits read with a cursor. Free
+organizations still see any balance and history they have. Members and
+collaborators without `billing:read` see only their own monthly budget and its
+spend. The workspace rail lists **Credits** for everyone in the organization.
 
 ## Drive it
 
 ```bash
 npm run control-kody -- browse --origin <preview> --path /@user-me/-/billing
 npm run control-kody -- browse --origin <preview> --path /@user-me/-/usage
+npm run control-kody -- browse --origin <preview> --path /@user-me/-/credits
 ```
 
 Do not complete a real Stripe checkout or credit top-up from a Cloud Agent.

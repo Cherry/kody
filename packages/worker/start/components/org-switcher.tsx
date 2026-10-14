@@ -6,27 +6,20 @@ import {
 	type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { useLoaderData, useLocation } from '@tanstack/react-router'
-import {
-	workspaceHomeHref,
-	workspaceSwitchHref,
-} from '#client/routes/account-rail.ts'
+import { workspaceHomeHref } from '#client/routes/account-rail.ts'
 import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
 import { UserAvatar } from './user-avatar.tsx'
 import {
 	currentSwitcherSlug,
-	orgIdentity,
 	orderOrganizations,
 	orgOverviewPath,
-	orgRoleLabel,
 	orgRoleManagesBilling,
 	orgSlugFromOrgOwnedPath,
 	orgSlugFromPathname,
 	orgUsagePath,
-	orgSwitcherEntries,
 	organizationsWithSignupFallback,
 	type OrganizationSummary,
-	type OrgSwitcherEntry,
 } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -35,7 +28,6 @@ import {
 	colors,
 	radius,
 	shadows,
-	spacing,
 	transitions,
 	typography,
 } from '#universal/styles/tokens.ts'
@@ -44,8 +36,6 @@ import {
 	layoutMaxWidths,
 	pageGutter,
 } from '#universal/styles/style-primitives.ts'
-
-const orgSwitcherPanelId = 'org-switcher'
 const headerNavMq = '@media (max-width: 820px)'
 type SwitcherRow = {
 	key: string
@@ -156,232 +146,42 @@ function moveSwitcherFocus(
 	next.focus()
 }
 
-export function OrgSwitcher({
-	session,
-	displayName,
-	avatarUrl,
-	menu = false,
-}: {
-	session: {
-		organizations: Array<OrganizationSummary>
-		inviteCount: number
-		lastUsedOrganization: string | null
-		username: string
-	}
-	displayName: string
-	avatarUrl: string | null
-	menu?: boolean
+export type OrganizationSession = {
+	organizations: Array<OrganizationSummary>
+	inviteCount: number
+	lastUsedOrganization: string | null
+	username: string
+}
+export function PhoneAccountGroups(props: {
+	session: OrganizationSession
+	currentPathname: string
 }) {
-	const {
-		shellLocation: { pathname },
-	} = useLoaderData({ from: '__root__' })
-	const href = useLocation({ select: (location) => location.href })
-	const props = {
-		...session,
-		displayName,
-		avatarUrl,
-		menu,
-		currentPathname: pathname,
-	}
-	const [open, setOpen] = useState(false)
-	useEffect(() => {
-		const panel = document.getElementById(orgSwitcherPanelId)
-		if (panel?.matches(':popover-open')) panel.hidePopover()
-	}, [href])
-	function onToggle(event: { newState?: string }) {
-		setOpen(event.newState === 'open')
-	}
-
 	const organizations = organizationsWithSignupFallback({
-		organizations: props.organizations,
-		username: props.username,
+		organizations: props.session.organizations,
+		username: props.session.username,
 	})
-	if (organizations.length === 0) return null
-	const viewer = {
-		displayName: props.displayName,
-		avatarUrl: props.avatarUrl,
-	}
-	const entries = orgSwitcherEntries(organizations, props.inviteCount)
-	const currentSlug = currentSwitcherSlug({
-		pathname: props.currentPathname,
-		organizations,
-		lastUsedSlug: props.lastUsedOrganization,
-	})
-	const listedCurrent = organizations.find((org) => org.slug === currentSlug)
-	// Stale session lists can omit the URL org on `/@slug/-/…`. Synthesize
-	// a member-shaped row for the trigger label and a dedicated switcher
-	// entry — do not invent Owner (Billing) links.
-	const synthesizedCurrent =
-		listedCurrent || !currentSlug
-			? null
-			: {
-					slug: currentSlug,
-					displayName: null,
-					role: 'member' as const,
-					personal: currentSlug === props.username,
-				}
-	const current = listedCurrent ?? synthesizedCurrent ?? undefined
-	const currentIdentity = current ? orgIdentity(current, viewer) : null
-	const label = currentIdentity?.handle ?? 'Organizations'
-	const avatarSize = props.menu ? 32 : 28
-	const toRow = (entry: OrgSwitcherEntry): SwitcherRow => {
-		switch (entry.kind) {
-			case 'create':
-				return {
-					key: 'create',
-					href: routes.accountOrganizationsNew.href(),
-					label: 'Create organization',
-					detail: null,
-					ariaCurrent:
-						props.currentPathname === routes.accountOrganizationsNew.href()
-							? 'page'
-							: undefined,
-					selected: false,
-					leading: renderIconWell('plus'),
-					badge: null,
-				}
-			case 'invites':
-				return {
-					key: 'invites',
-					href: `${routes.accountOrganizations.href()}#invites`,
-					label: 'Invites',
-					detail: null,
-					ariaCurrent: undefined,
-					selected: false,
-					leading: renderIconWell('mail'),
-					badge: entry.count > 0 ? String(entry.count) : null,
-				}
-			case 'org': {
-				const identity = orgIdentity(entry.org, viewer)
-				const role = entry.showRole ? orgRoleLabel(entry.org.role) : null
-				const selected = entry.org.slug === currentSlug
-				return {
-					key: entry.org.slug,
-					href: workspaceSwitchHref(props.currentPathname, entry.org),
-					label: identity.name,
-					detail: identity.hasName
-						? [identity.handle, role].filter(Boolean).join(' · ')
-						: role,
-					ariaCurrent: selected ? 'true' : undefined,
-					selected,
-					leading: (
-						<UserAvatar
-							displayName={identity.avatarName}
-							avatarUrl={identity.avatarUrl}
-							size={avatarSize}
-							variant="well"
-						/>
-					),
-					badge: null,
-				}
-			}
-			default: {
-				const exhaustive: never = entry
-				return exhaustive
-			}
-		}
-	}
-	const orgRowsFromSession = entries
-		.filter((entry) => entry.kind === 'org')
-		.map(toRow)
-	// Dedicated row when the URL org is missing from the session list so
-	// the person can still see and re-select it in the switcher.
-	const orgRows =
-		synthesizedCurrent !== null
-			? [
-					toRow({
-						kind: 'org',
-						org: synthesizedCurrent,
-						showRole: true,
-					}),
-					...orgRowsFromSession,
-				]
-			: orgRowsFromSession
-	const actionRows = entries.filter((entry) => entry.kind !== 'org').map(toRow)
-
-	const body = (
-		<>
-			<p css={switcherEyebrowCss}>Organizations</p>
-			<ul aria-label="Organizations" css={switcherListCss}>
-				{orgRows.map((row) => (
-					<li key={row.key}>{renderSwitcherRow(row)}</li>
-				))}
-			</ul>
-			{actionRows.length > 0 ? (
-				<div css={switcherActionsCss}>{actionRows.map(renderSwitcherRow)}</div>
-			) : null}
-		</>
-	)
-
-	if (props.menu) {
-		const overview = accountMenuManageLinks({
-			pathname,
-			organizations,
-			lastUsedSlug: props.lastUsedOrganization,
-		}).slice(0, 1)
-		return (
-			<div
-				data-menu-group
-				data-testid="org-switcher-menu"
-				css={switcherMenuGroupCss}
-			>
-				{body}
-				{renderManageGroup({
-					links: overview,
-					currentPathname: pathname,
-					divided: true,
-				})}
-				{renderAccountGroup({
-					username: props.username,
-					currentPathname: props.currentPathname,
-					organizations,
-					heading: true,
-					divided: true,
-				})}
-			</div>
-		)
-	}
-
 	return (
-		<div
-			css={orgSwitcherCss}
-			onKeyDown={(event) =>
-				moveSwitcherFocus(event, document.getElementById(orgSwitcherPanelId))
-			}
-		>
-			<button
-				type="button"
-				popoverTarget={orgSwitcherPanelId}
-				aria-controls={orgSwitcherPanelId}
-				aria-label={`${label}: switch organization`}
-				aria-expanded={open ? 'true' : 'false'}
-				data-open={open ? '' : undefined}
-				data-testid="org-switcher"
-				css={orgSwitcherButtonCss}
-			>
-				<UserAvatar
-					displayName={currentIdentity?.avatarName ?? label}
-					avatarUrl={currentIdentity?.avatarUrl ?? null}
-					size={26}
-					variant="well"
-				/>
-				<span css={orgSwitcherLabelCss}>{label}</span>
-				<span aria-hidden="true" css={orgSwitcherChevronCss}>
-					{renderIcon('chevron-down', { size: '1rem' })}
-				</span>
-			</button>
-			<div
-				id={orgSwitcherPanelId}
-				popover="auto"
-				data-testid="org-switcher-panel"
-				css={orgSwitcherPanelCss}
-				onToggle={(event) => onToggle(event.nativeEvent)}
-			>
-				{body}
-			</div>
+		<div data-testid="site-menu-account">
+			{renderManageGroup({
+				links: accountMenuManageLinks({
+					pathname: props.currentPathname,
+					organizations,
+					lastUsedSlug: props.session.lastUsedOrganization,
+				}),
+				currentPathname: props.currentPathname,
+				divided: false,
+			})}
+			{renderAccountGroup({
+				username: props.session.username,
+				currentPathname: props.currentPathname,
+				organizations,
+				heading: true,
+				divided: true,
+			})}
 		</div>
 	)
 }
+
 export function usageHrefForAccountMenu(input: {
 	pathname: string
 	organizations: ReadonlyArray<
@@ -631,58 +431,11 @@ export function AccountMenu(props: {
 	)
 }
 const accountMenuPanelId = 'account-menu'
-const menuGroupDividerCss = {
-	'[data-menu-group] + &': {
-		marginTop: '0.35rem',
-		paddingTop: '0.5rem',
-		borderTop: `1px solid ${colors.border}`,
-	},
-}
 
 const orgSwitcherAnchor = '--org-switcher'
 
 const orgSwitcherCss = {
 	position: 'relative' as const,
-}
-
-const orgSwitcherButtonCss = {
-	anchorName: orgSwitcherAnchor,
-	display: 'inline-flex',
-	alignItems: 'center',
-	gap: '0.45rem',
-	minHeight: '44px',
-	padding: '0.2rem 0.6rem 0.2rem 0.2rem',
-	borderRadius: radius.full,
-	border: `1.5px solid ${colors.border}`,
-	background: 'transparent',
-	color: colors.text,
-	// Buttons do not inherit the page face on their own.
-	font: `600 0.95rem/1 ${typography.fontFamily}`,
-	cursor: 'pointer',
-	transition: `border-color ${transitions.fast}, background-color ${transitions.fast}`,
-	'&[data-open]': {
-		borderColor: colors.textMuted,
-		backgroundColor: colors.surface,
-	},
-	[hoverMq]: {
-		'&:hover': { borderColor: colors.textMuted },
-	},
-}
-
-const orgSwitcherLabelCss = {
-	maxWidth: '14rem',
-	lineHeight: 1.25,
-	overflow: 'hidden',
-	textOverflow: 'ellipsis',
-	whiteSpace: 'nowrap' as const,
-}
-
-const orgSwitcherChevronCss = {
-	display: 'inline-flex',
-	color: colors.textMuted,
-	transition: `rotate 180ms ${transitions.easeOut}`,
-	'[data-open] > &': { rotate: '180deg' },
-	'@media (prefers-reduced-motion: reduce)': { transition: 'none' },
 }
 
 /**
@@ -748,26 +501,12 @@ const switcherEyebrowCss = {
 	color: colors.textMuted,
 }
 
-const switcherListCss = {
-	display: 'grid',
-	gap: '0.15rem',
-	listStyle: 'none',
-	margin: 0,
-	padding: 0,
-}
-
 const switcherActionsCss = {
 	display: 'grid',
 	gap: '0.15rem',
 	marginTop: '0.35rem',
 	paddingTop: '0.4rem',
 	borderTop: `1px solid ${colors.border}`,
-}
-
-/** Mobile menu: the same rows as one of the menu panel's groups. */
-const switcherMenuGroupCss = {
-	display: 'grid',
-	...menuGroupDividerCss,
 }
 
 const switcherRowCss = {

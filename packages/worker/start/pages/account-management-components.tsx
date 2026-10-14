@@ -19,7 +19,7 @@ import {
 	pageGutter,
 } from '#universal/styles/style-primitives.ts'
 import { useShellData } from '../routes/__root.tsx'
-import { type SessionInfo } from '#client/session.ts'
+import { getSessionDisplayName, type SessionInfo } from '#client/session.ts'
 import {
 	accountRailGroups,
 	accountRailOrgSlug,
@@ -260,6 +260,7 @@ function ShellNavigation({ currentHref }: { currentHref: string }) {
 			}}
 		>
 			<AccountManagementLinkNav
+				workspaceSwitcher={admin ? undefined : rail.workspaceSwitcher}
 				label={admin ? 'Admin sections' : rail.label}
 				heading={admin ? undefined : rail.heading}
 				groups={
@@ -445,6 +446,7 @@ function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
 		return {
 			label: 'Account sections',
 			heading: { eyebrow: 'Account' },
+			workspaceSwitcher: undefined,
 			groups: accountRailGroups({
 				organizations: organizationsWithSignupFallback({
 					organizations,
@@ -475,12 +477,28 @@ function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
 				: orgSlug !== null
 					? ('member' as const)
 					: null
+	const session = input.session
 	return {
 		label: 'Workspace sections',
 		heading: {
 			eyebrow: 'Workspace',
 			name: orgSlug ? `@${orgSlug}` : undefined,
 		},
+		workspaceSwitcher:
+			session && orgSlug
+				? {
+						currentSlug: orgSlug,
+						organizations: organizationsWithSignupFallback({
+							organizations,
+							username: session.username,
+						}),
+						inviteCount: session.inviteCount ?? 0,
+						username: session.username,
+						displayName: getSessionDisplayName(session),
+						avatarUrl: session.avatarUrl,
+						currentPathname: input.currentPath,
+					}
+				: undefined,
 		groups: workspaceRailGroups({
 			orgSlug,
 			personal,

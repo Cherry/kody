@@ -233,6 +233,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/@:orgSlug/-/billing/success',
 			'/@:orgSlug/-/billing/portal',
 			'/@:orgSlug/-/usage',
+			'/@:orgSlug/-/credits',
 			'/account/credits',
 			'/account/usage',
 		],

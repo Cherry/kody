@@ -8,6 +8,11 @@ import { type CommunityProfileRecord } from '#worker/community/types.ts'
 import { listOrganizationsForPerson } from '#worker/orgs/repo.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
 
+/**
+ * A non-personal organization has no person profile behind its handle. Its
+ * members and grant-only collaborators (the people its org switcher lists)
+ * get the organization home there; everyone else gets the 404.
+ */
 export async function findMemberOrganization(
 	env: Env,
 	request: Request,

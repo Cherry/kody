@@ -5,7 +5,13 @@ import { useEffect, useRef } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon, type IconName } from '../components/icon.tsx'
 import { colors, transitions } from '#universal/styles/tokens.ts'
-import { hoverMq } from '#universal/styles/style-primitives.ts'
+import { hoverMq, pageGutter } from '#universal/styles/style-primitives.ts'
+import { dismissOpenPopoverPanel } from '../components/switcher-menu.tsx'
+import {
+	WorkspaceSwitcher,
+	workspaceSwitcherPanelId,
+	type WorkspaceSwitcherData,
+} from '../components/workspace-switcher.tsx'
 
 /** Account nav collapses to a wrapping row below this width (prototype 860px). */
 export const accountManagementNarrowMq = '@media (max-width: 860px)'
@@ -27,6 +33,8 @@ type AccountManagementLinkNavProps = {
 	label: string
 	/** Names whose settings these are: "Account", or "Workspace" plus `@slug`. */
 	heading?: { eyebrow: string; name?: string }
+	/** Draws the heading as the organization switcher (workspace rails). */
+	workspaceSwitcher?: WorkspaceSwitcherData
 	groups: Array<AccountManagementLinkNavGroup>
 }
 
@@ -247,11 +255,27 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 							gap: '0.15rem',
 						}}
 					>
-						{renderRailHeading(props.heading)}
+						{props.workspaceSwitcher ? (
+							<WorkspaceSwitcher
+								{...props.workspaceSwitcher}
+								placement="rail"
+							/>
+						) : (
+							renderRailHeading(props.heading)
+						)}
 						{renderRailGroups(props.groups, accountNavLinkCss)}
 					</div>
 				</nav>
-				<details css={accountMobileMenuCss} ref={mobileMenu}>
+				<details
+					css={accountMobileMenuCss}
+					ref={mobileMenu}
+					onToggle={(event) => {
+						if (!event.currentTarget.open)
+							dismissOpenPopoverPanel(
+								document.getElementById(workspaceSwitcherPanelId('drawer')),
+							)
+					}}
+				>
 					<summary>
 						{renderIcon('menu', { size: '1.05em' })}
 						<span>
@@ -262,6 +286,12 @@ export function AccountManagementLinkNav(props: AccountManagementLinkNavProps) {
 						) : null}
 					</summary>
 					<nav aria-label={props.label}>
+						{props.workspaceSwitcher ? (
+							<WorkspaceSwitcher
+								{...props.workspaceSwitcher}
+								placement="drawer"
+							/>
+						) : null}
 						{renderRailGroups(props.groups, accountMobileNavLinkCss)}
 					</nav>
 				</details>
