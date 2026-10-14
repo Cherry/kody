@@ -4,7 +4,16 @@ import {
 	clearOnboardingMcpOAuthReturnCookie,
 	closeOnboardingMcpOAuthPopupIfOpened,
 } from '#client/mcp-oauth-popup.ts'
-import { updateMcpServers } from '#start/server/account-mutations'
+import {
+	addMcpServer,
+	reconnectMcpServer,
+	refreshMcpServer,
+	setMcpServerEnabled,
+	setMcpServerUsage,
+	deleteMcpServer,
+	setMcpServerOAuthClient,
+	removeMcpServerOAuthClient,
+} from '#start/server/account-mutations'
 import {
 	getDangerPillCss,
 	getGhostButtonCss,
@@ -52,6 +61,26 @@ const clampedCellCss = recordCellClamp(26)
 
 const mcpServersRoute = createListDetailRoute('/account/mcp-servers')
 
+type McpServerChange =
+	| { action: 'add'; name: string; url: string; bearerToken?: string }
+	| {
+			action: 'reconnect' | 'refresh' | 'delete' | 'remove-oauth-client'
+			id: string
+	  }
+	| { action: 'set-enabled'; id: string; enabled: boolean }
+	| {
+			action: 'set-usage'
+			id: string
+			usageMode: 'any' | 'packages'
+			allowedPackageIds: string[]
+	  }
+	| {
+			action: 'set-oauth-client'
+			id: string
+			clientId: string
+			clientSecret: string
+	  }
+
 export function AccountMcpServersPage({
 	payload,
 	currentHref,
@@ -80,18 +109,46 @@ export function AccountMcpServersPage({
 	const mutation = useMutation({
 		mutationKey: ['mcpServers', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async (input: {
-			body: Record<string, unknown>
+			body: McpServerChange
 			href: string
 			actorKey: string | null
 			failureMessage: string
 		}) => {
-			return updateMcpServers({
-				data: {
-					body: input.body,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					search: new URL(input.href, 'https://kody.local').search,
-				},
-			})
+			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			switch (input.body.action) {
+				case 'add': {
+					const { action: _action, ...fields } = input.body
+					return addMcpServer({ data: { orgSlug, ...fields } })
+				}
+				case 'reconnect': {
+					const { action: _action, ...fields } = input.body
+					return reconnectMcpServer({ data: { orgSlug, ...fields } })
+				}
+				case 'refresh': {
+					const { action: _action, ...fields } = input.body
+					return refreshMcpServer({ data: { orgSlug, ...fields } })
+				}
+				case 'set-enabled': {
+					const { action: _action, ...fields } = input.body
+					return setMcpServerEnabled({ data: { orgSlug, ...fields } })
+				}
+				case 'set-usage': {
+					const { action: _action, ...fields } = input.body
+					return setMcpServerUsage({ data: { orgSlug, ...fields } })
+				}
+				case 'delete': {
+					const { action: _action, ...fields } = input.body
+					return deleteMcpServer({ data: { orgSlug, ...fields } })
+				}
+				case 'set-oauth-client': {
+					const { action: _action, ...fields } = input.body
+					return setMcpServerOAuthClient({ data: { orgSlug, ...fields } })
+				}
+				case 'remove-oauth-client': {
+					const { action: _action, ...fields } = input.body
+					return removeMcpServerOAuthClient({ data: { orgSlug, ...fields } })
+				}
+			}
 		},
 		onMutate: async ({ href, actorKey }) => {
 			await queryClient.cancelQueries(
@@ -223,7 +280,7 @@ export function AccountMcpServersPage({
 	}
 
 	async function postAction(input: {
-		body: Record<string, unknown>
+		body: McpServerChange
 		successMessage: (payload: AccountMcpServersPayload) => string | null
 		failureMessage: string
 		afterSuccess?: (payload: AccountMcpServersPayload) => void

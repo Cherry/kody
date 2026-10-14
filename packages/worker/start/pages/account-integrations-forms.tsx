@@ -5,7 +5,7 @@ import {
 	nextSuggestedConnectionName,
 	resolveAddAccountConnectionName,
 } from '#client/routes/integration-provider-catalog.ts'
-import { updateIntegrations } from '#start/server/account-mutations'
+import { rotateOauthAppCredentials } from '#start/server/account-mutations'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
@@ -289,11 +289,11 @@ export function RotateCredentialsForm(props: {
 	const mutation = useMutation({
 		mutationFn: async (input: {
 			href: string
-			body: Record<string, unknown>
+			body: Parameters<typeof rotateOauthAppCredentials>[0]['data']['input']
 		}) => {
-			const result = await updateIntegrations({
+			const result = await rotateOauthAppCredentials({
 				data: {
-					body: input.body,
+					input: input.body,
 					orgSlug: pageQueryOrg(input.href) ?? undefined,
 				},
 			})
@@ -350,7 +350,6 @@ export function RotateCredentialsForm(props: {
 			const rotatedApp = await mutation.mutateAsync({
 				href,
 				body: {
-					action: 'rotate_oauth_app_credentials',
 					appSlug: app.slug,
 					...(nextClientId ? { clientId: nextClientId } : {}),
 					...(nextClientSecret ? { clientSecret: nextClientSecret } : {}),

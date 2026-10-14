@@ -8,7 +8,7 @@ import {
 
 const nativeMutation = vi.hoisted(() => vi.fn())
 vi.mock('#start/server/account-mutations', () => ({
-	updateConnectedAgents: nativeMutation,
+	revokeConnectedAgent: nativeMutation,
 }))
 
 function makeAgent(
@@ -82,10 +82,10 @@ function harness() {
 		{ resolve: (value: unknown) => void; reject: (error: Error) => void }
 	>()
 	nativeMutation.mockImplementation(
-		({ data }: { data: { orgSlug: string; body: { clientId: string } } }) =>
+		({ data }: { data: { orgSlug: string; clientId: string } }) =>
 			new Promise((resolve, reject) => {
 				expect(data.orgSlug).toBe('one')
-				resolvers.set(data.body.clientId, { resolve, reject })
+				resolvers.set(data.clientId, { resolve, reject })
 			}),
 	)
 

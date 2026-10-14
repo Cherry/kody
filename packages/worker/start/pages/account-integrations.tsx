@@ -1,4 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import {
+	setIntegrationUsage,
+	approveIntegrationPackage,
+	disconnectIntegration,
+	deleteOauthApp,
+} from '#start/server/account-mutations'
 import { pageQueryOrg } from '../page-query-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -9,7 +15,6 @@ import {
 	type AccountIntegrationsLoaderData,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
-import { routes } from '#universal/routes.ts'
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { useUndoableAction } from '../components/use-undoable-action.ts'
@@ -33,7 +38,6 @@ import {
 	integrationsRoute,
 	isBuiltInApp,
 	oauthAppTitle,
-	postIntegrationsMutation as postIntegration,
 	readSearchFilter,
 	resolveIntegrationsSelection,
 } from './account-integrations-shared.ts'
@@ -84,18 +88,17 @@ export function AccountIntegrationsPage({
 	const mutation = useMutation({
 		mutationKey: ['integrations', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async ({
-			body,
-			href,
+			write,
 			decision,
 		}: {
-			body: Record<string, unknown>
+			write: () => Promise<unknown>
 			href: string
 			decision?: Promise<boolean>
 			optimistic?: () => void
 			rollback?: () => void
 		}) => {
 			if (decision && !(await decision)) return { undone: true as const }
-			return postIntegration(body, href)
+			return write()
 		},
 		onMutate: async ({ href, optimistic }) => {
 			await queryClient.cancelQueries(
@@ -104,7 +107,8 @@ export function AccountIntegrationsPage({
 			optimistic?.()
 		},
 		onSuccess: (result, { rollback }) => {
-			if (result && 'undone' in result) rollback?.()
+			if (result && typeof result === 'object' && 'undone' in result)
+				rollback?.()
 		},
 		onError: (_error, { rollback }) => rollback?.(),
 		onSettled: (_data, _error, { href }) => {
@@ -124,8 +128,7 @@ export function AccountIntegrationsPage({
 	const [usageSavingName, setUsageSavingName] = useState<string | null>(null)
 	const [approvalSubmitting, setApprovalSubmitting] = useState(false)
 	const [message, setMessage] = useState<string | null>(null)
-	const postIntegrationsMutation = (body: Record<string, unknown>) =>
-		mutation.mutateAsync({ body, href: currentHref })
+
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
@@ -316,12 +319,20 @@ export function AccountIntegrationsPage({
 		const draft = usageDraftFor(connection)
 		setUsageSavingName(connection.name)
 		try {
-			await postIntegrationsMutation({
-				action: 'set_usage',
-				name: connection.name,
-				usageMode: draft.usageMode,
-				allowedPackageIds:
-					draft.usageMode === 'packages' ? draft.allowedPackageIds : [],
+			await mutation.mutateAsync({
+				href: currentHref,
+				write: () =>
+					setIntegrationUsage({
+						data: {
+							orgSlug: pageQueryOrg(currentHref) ?? undefined,
+							input: {
+								name: connection.name,
+								usageMode: draft.usageMode,
+								allowedPackageIds:
+									draft.usageMode === 'packages' ? draft.allowedPackageIds : [],
+							},
+						},
+					}),
 			})
 			setIntegrations(
 				integrations.map((entry) =>
@@ -357,10 +368,18 @@ export function AccountIntegrationsPage({
 		if (!approval || approvalSubmitting) return
 		setApprovalSubmitting(true)
 		try {
-			await postIntegrationsMutation({
-				action: 'approve_package',
-				name: approval.name,
-				packageId: approval.packageId,
+			await mutation.mutateAsync({
+				href: currentHref,
+				write: () =>
+					approveIntegrationPackage({
+						data: {
+							orgSlug: pageQueryOrg(currentHref) ?? undefined,
+							input: {
+								name: approval.name,
+								packageId: approval.packageId,
+							},
+						},
+					}),
 			})
 			setIntegrations(
 				integrations.map((entry) => {
@@ -400,7 +419,13 @@ export function AccountIntegrationsPage({
 			decide = resolve
 		})
 		const write = mutation.mutateAsync({
-			body: { action: 'disconnect_connection', name: connection.name },
+			write: () =>
+				disconnectIntegration({
+					data: {
+						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						input: { name: connection.name },
+					},
+				}),
 			href: currentHref,
 			decision,
 			optimistic: () => removeConnectionLocally(connection.name),
@@ -441,7 +466,13 @@ export function AccountIntegrationsPage({
 			decide = resolve
 		})
 		const write = mutation.mutateAsync({
-			body: { action: 'delete_oauth_app', appSlug: app.slug },
+			write: () =>
+				deleteOauthApp({
+					data: {
+						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						input: { appSlug: app.slug },
+					},
+				}),
 			href: currentHref,
 			decision,
 			optimistic: () => removeAppLocally(app),

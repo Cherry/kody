@@ -42,14 +42,25 @@ vi.mock('../../src/app/handlers/account-secret-providers.ts', () => ({
 	revokeAccountSecretProvider: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-integrations.ts', () => ({
-	mutateAccountIntegrations: state.mutate,
+	rotateAccountOauthAppCredentials: state.mutate,
+	disconnectAccountIntegration: state.mutate,
+	deleteAccountOauthApp: state.mutate,
+	setAccountIntegrationUsage: state.mutate,
+	approveAccountIntegrationPackage: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-connections.ts', () => ({
 	disconnectAccountProvider: state.mutate,
 	syncAccountDiscordRole: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-mcp-servers.ts', () => ({
-	mutateAccountMcpServers: state.mutate,
+	addAccountMcpServer: state.mutate,
+	reconnectAccountMcpServer: state.mutate,
+	refreshAccountMcpServer: state.mutate,
+	setAccountMcpServerEnabled: state.mutate,
+	setAccountMcpServerUsage: state.mutate,
+	deleteAccountMcpServer: state.mutate,
+	setAccountMcpServerOAuthClient: state.mutate,
+	removeAccountMcpServerOAuthClient: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-email-destinations.ts', () => ({
 	addAccountEmailDestination: state.mutate,
@@ -65,6 +76,9 @@ vi.mock('../../src/app/handlers/account-experiments.ts', () => ({
 	saveExperimentsPreference: state.mutate,
 }))
 import {
+	addMcpServer,
+	setMcpServerUsage,
+	setMcpServerOAuthClient,
 	updateExperiments,
 	disconnectAccountProvider,
 	syncDiscordMemberRole,
@@ -75,24 +89,17 @@ import {
 	unbindSecretProvider,
 	grantSecretProvider,
 	revokeSecretProvider,
-	updateIntegrations,
-	updateMcpServers,
+	disconnectIntegration,
 } from './account-mutations.ts'
 
-test('mutations preserve the authenticated POST request instead of manufacturing destination GET requests', async () => {
-	for (const mutate of [updateIntegrations, updateMcpServers]) {
-		state.mutate.mockClear()
-		await mutate({
-			data: {
-				orgSlug: 'acme',
-				body: { action: 'test' },
-				search: '?ignored=destination',
-			},
-		})
-		expect(state.mutate).toHaveBeenCalledWith(
-			expect.objectContaining({ request: state.request }),
-		)
-	}
+test('integration operations preserve the authenticated request', async () => {
+	state.mutate.mockClear()
+	await disconnectIntegration({
+		data: { orgSlug: 'acme', input: { name: 'github' } },
+	})
+	expect(state.mutate).toHaveBeenCalledWith(
+		expect.objectContaining({ request: state.request, name: 'github' }),
+	)
 })
 
 test('job and workflow operations pass validated named fields with original request', async () => {
@@ -235,4 +242,58 @@ test('provider mutation validation rejects non-string configuration before domai
 		}),
 	).toThrow()
 	expect(state.mutate).not.toHaveBeenCalled()
+})
+
+test('MCP server operations carry typed fields without UI metadata and preserve callback origin request', async () => {
+	state.mutate.mockClear()
+	await addMcpServer({
+		data: {
+			orgSlug: 'acme',
+			name: 'Tools',
+			url: 'https://tools.test/mcp',
+			bearerToken: 'secret',
+		},
+	})
+	expect(state.mutate).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			request: state.request,
+			name: 'Tools',
+			url: 'https://tools.test/mcp',
+			bearerToken: 'secret',
+		}),
+	)
+	await setMcpServerUsage({
+		data: {
+			orgSlug: 'acme',
+			id: 'server',
+			usageMode: 'packages',
+			allowedPackageIds: ['pkg'],
+		},
+	})
+	expect(state.mutate).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			id: 'server',
+			usageMode: 'packages',
+			allowedPackageIds: ['pkg'],
+		}),
+	)
+	await setMcpServerOAuthClient({
+		data: {
+			orgSlug: 'acme',
+			id: 'server',
+			clientId: 'client',
+			clientSecret: 'secret',
+		},
+	})
+	expect(state.mutate).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			request: state.request,
+			id: 'server',
+			clientId: 'client',
+			clientSecret: 'secret',
+		}),
+	)
+	expect(state.mutate).not.toHaveBeenCalledWith(
+		expect.objectContaining({ body: expect.anything() }),
+	)
 })

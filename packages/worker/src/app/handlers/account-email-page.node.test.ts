@@ -12,10 +12,32 @@ import {
 } from '#worker/email/destinations.ts'
 import { identityEmailDestinationId } from '#universal/email-destinations.ts'
 
-const state = vi.hoisted(() => ({ collection: vi.fn() }))
-vi.mock('../../../start/server/collection-context.ts', () => ({
-	loadScopedCollection: state.collection,
-	loadPersonalCollection: state.collection,
+const state = vi.hoisted(() => ({
+	collection: vi.fn(),
+	authenticate: vi.fn(),
+	env: { APP_DB: {}, SENTRY_ENVIRONMENT: 'test' },
+	request: new Request('https://example.com/_serverFn/read'),
+}))
+vi.mock(
+	'../../../start/server/collection-context.ts',
+	async (importOriginal) => ({
+		...(await importOriginal<
+			typeof import('../../../start/server/collection-context.ts')
+		>()),
+		loadScopedCollection: state.collection,
+	}),
+)
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<typeof import('cloudflare:workers')>()),
+	env: state.env,
+}))
+vi.mock('@tanstack/react-start/server', () => ({
+	getRequest: () => state.request,
+	setResponseHeader: vi.fn(),
+}))
+vi.mock('#app/env.ts', () => ({ getEnv: () => state.env }))
+vi.mock('#app/page-auth.ts', () => ({
+	requireAuthenticatedPageUser: state.authenticate,
 }))
 
 vi.mock('#app/account-email-data.ts', () => ({
@@ -54,11 +76,7 @@ test('email server resources return independent message lists and actor destinat
 			displayName: 'user',
 		},
 	}
-	state.collection.mockResolvedValue({
-		bindings: { APP_DB: {} },
-		request: new Request('https://example.com/_serverFn/read'),
-		user,
-	})
+	state.authenticate.mockResolvedValue(user)
 	vi.mocked(readAccountEmailData).mockResolvedValue({
 		ok: true,
 		emailVerified: true,
@@ -99,10 +117,12 @@ test('email server resources return independent message lists and actor destinat
 		}),
 		loadEmailDestinations(),
 	])
-	expect(state.collection).toHaveBeenCalledWith(
-		'/account/email?q=&page=1&pageSize=25',
-	)
-	expect(state.collection).toHaveBeenCalledWith('/account/email')
+	expect(state.authenticate).toHaveBeenCalledWith(state.request, state.env, {
+		redirectTo: '/account/email?q=&page=1&pageSize=25',
+	})
+	expect(state.authenticate).toHaveBeenCalledWith(state.request, state.env, {
+		redirectTo: '/account/email',
+	})
 	expect(listEmailNotificationDestinations).toHaveBeenCalledWith(
 		expect.objectContaining({
 			dbUserId: 42,

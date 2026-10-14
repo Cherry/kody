@@ -2,7 +2,16 @@ import { loadAccountMcpServersData } from '#app/account-mcp-servers-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { waitUntil } from 'cloudflare:workers'
-import { mutateAccountMcpServers } from './account-mcp-servers.ts'
+import {
+	addAccountMcpServer,
+	reconnectAccountMcpServer,
+	refreshAccountMcpServer,
+	setAccountMcpServerEnabled,
+	setAccountMcpServerUsage,
+	deleteAccountMcpServer,
+	setAccountMcpServerOAuthClient,
+	removeAccountMcpServerOAuthClient,
+} from './account-mcp-servers.ts'
 export * from './account-mcp-servers.ts'
 export function testAccountMcpServersApiHandler(env: Env) {
 	return {
@@ -35,12 +44,68 @@ export function testAccountMcpServersApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountMcpServers({
-				request,
-				env,
-				user,
-				body: body as Record<string, unknown>,
-			})
+			const values = body as Record<string, unknown>
+			const field = (key: string) =>
+				typeof values[key] === 'string' ? values[key].trim() : ''
+			const input = { request, env, user, id: field('id') }
+			let result
+			switch (values.action) {
+				case 'add':
+					result = await addAccountMcpServer({
+						...input,
+						name: field('name'),
+						url: field('url'),
+						bearerToken: field('bearerToken') || undefined,
+					})
+					break
+				case 'reconnect':
+					result = await reconnectAccountMcpServer(input)
+					break
+				case 'refresh':
+					result = await refreshAccountMcpServer(input)
+					break
+				case 'delete':
+					result = await deleteAccountMcpServer(input)
+					break
+				case 'set-enabled':
+					result = await setAccountMcpServerEnabled({
+						...input,
+						enabled:
+							typeof values.enabled === 'boolean' ? values.enabled : true,
+					})
+					break
+				case 'set-usage': {
+					const usageMode = field('usageMode')
+					if (usageMode !== 'any' && usageMode !== 'packages')
+						return operationResult(
+							{ ok: false, error: 'Usage must be any or packages.' },
+							400,
+						)
+					result = await setAccountMcpServerUsage({
+						...input,
+						usageMode,
+						allowedPackageIds: Array.isArray(values.allowedPackageIds)
+							? values.allowedPackageIds.filter(
+									(value): value is string => typeof value === 'string',
+								)
+							: [],
+					})
+					break
+				}
+				case 'set-oauth-client':
+					result = await setAccountMcpServerOAuthClient({
+						...input,
+						clientId: field('clientId'),
+						clientSecret: field('clientSecret'),
+					})
+					break
+				case 'remove-oauth-client':
+					result = await removeAccountMcpServerOAuthClient(input)
+					break
+				default:
+					return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+			}
+
 			return operationResult(result.data, result.status)
 		},
 	}

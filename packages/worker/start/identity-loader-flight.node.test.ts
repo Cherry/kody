@@ -45,10 +45,10 @@ test('blocking root loader sharing does not imply a fresh authority check per na
 	})
 	await router.load()
 	hold = true
-	const first = router.navigate({ to: '/one' })
+	const first = router.navigate({ href: '/one' })
 	await started
 	actor = 'b'
-	const second = router.navigate({ to: '/two' })
+	const second = router.navigate({ href: '/two' })
 	await new Promise((resolve) => setTimeout(resolve, 0))
 	release()
 	await Promise.all([first, second])
@@ -88,8 +88,8 @@ test('root beforeLoad verifies once per foreground navigation and skips intent p
 	await Promise.all(
 		Array.from({ length: 12 }, () => router.preloadRoute({ to: '/two' })),
 	)
-	await router.navigate({ to: '/two' })
+	await router.navigate({ href: '/two' })
 	await router.preloadRoute({ to: '/three' })
-	await router.navigate({ to: '/three' })
+	await router.navigate({ href: '/three' })
 	expect(checks).toEqual(['/one', '/two', '/three'])
 })

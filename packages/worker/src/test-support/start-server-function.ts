@@ -3,8 +3,10 @@
 export function createTestServerFn() {
 	let validate = (data: unknown): unknown => data
 	const builder = {
-		validator(fn: (data: unknown) => unknown) {
-			validate = fn
+		validator(
+			fn: ((data: unknown) => unknown) | { parse: (data: unknown) => unknown },
+		) {
+			validate = typeof fn === 'function' ? fn : (data) => fn.parse(data)
 			return builder
 		},
 		handler(fn: (input: { data: unknown }) => unknown) {

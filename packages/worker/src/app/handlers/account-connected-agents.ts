@@ -17,7 +17,9 @@ import {
 	revokeConnectedMcpAgent,
 } from '#worker/connected-mcp-agents.ts'
 import {
-	applyConnectionProfileMutation,
+	createAccountConnectionProfile,
+	updateAccountConnectionProfile,
+	deleteAccountConnectionProfile,
 	loadConnectionProfilesForAccount,
 } from '#worker/connection-profiles/account.ts'
 import { maybeEvaluateSecondAgentStandardGift } from '#worker/entitlements/second-agent-standard-gift.ts'
@@ -34,7 +36,6 @@ import {
 	type PersonId,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { type RequestContext } from '@kody-internal/shared/request-context.ts'
-import { enum_, object, parseSafe, string } from 'remix/data-schema'
 
 type ConnectedAgentsUser = {
 	mcpUser: { userId: PersonId; personalOrgId?: OwnerId | null }
@@ -108,70 +109,93 @@ export async function loadAccountConnectedAgentsData(input: {
 	}
 }
 
-const revokeSchema = object({
-	intent: enum_(['revoke'] as const),
-	clientId: string(),
-})
-
-export async function mutateAccountConnectedAgents({
-	request,
-	env,
-	user,
-	body,
-}: {
+type AgentMutationContext = {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: unknown
-}) {
-	if (
-		body &&
-		typeof body === 'object' &&
-		'intent' in body &&
-		(body.intent === 'create' ||
-			body.intent === 'update' ||
-			body.intent === 'delete')
-	) {
-		if (!connectedAgentsScope(user).personalOrg) {
-			return operationResult(
-				{
-					ok: false,
-					error:
-						'Connection profiles are only available in your personal organization.',
-				},
-				404,
-			)
-		}
-		const mutation = await applyConnectionProfileMutation({
-			env,
-			requestUrl: request.url,
-			userId: personalOrgId(user.mcpUser.userId),
-			emailVerified: user.emailVerified,
-			body,
-		})
-		if (!mutation.ok) {
-			return operationResult(
-				{ ok: false, error: mutation.error },
-				mutation.status,
-			)
-		}
-		const payload = await loadAccountConnectedAgentsData({
-			env,
-			requestUrl: request.url,
-			user,
-		})
-		return operationResult({
-			...payload,
-			connectionProfiles: mutation.connectionProfiles,
-			connectionProfilePackageOptions: mutation.connectionProfilePackageOptions,
-		})
+}
+async function changeAccountConnectionProfile(
+	{ request, env, user }: AgentMutationContext,
+	write: (context: {
+		env: Env
+		requestUrl: string
+		userId: string
+		emailVerified: boolean
+	}) => ReturnType<typeof createAccountConnectionProfile>,
+) {
+	if (!connectedAgentsScope(user).personalOrg) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					'Connection profiles are only available in your personal organization.',
+			},
+			404,
+		)
 	}
-
-	const parsed = parseSafe(revokeSchema, body)
-	if (!parsed.success || parsed.value.intent !== 'revoke') {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
+	const mutation = await write({
+		env,
+		requestUrl: request.url,
+		userId: personalOrgId(user.mcpUser.userId),
+		emailVerified: user.emailVerified,
+	})
+	if (!mutation.ok) {
+		return operationResult(
+			{ ok: false, error: mutation.error },
+			mutation.status,
+		)
 	}
-
+	const payload = await loadAccountConnectedAgentsData({
+		env,
+		requestUrl: request.url,
+		user,
+	})
+	return operationResult({
+		...payload,
+		connectionProfiles: mutation.connectionProfiles,
+		connectionProfilePackageOptions: mutation.connectionProfilePackageOptions,
+	})
+}
+export function createConnectedAgentProfile(
+	input: AgentMutationContext & { name: string; grants: unknown },
+) {
+	return changeAccountConnectionProfile(input, (context) =>
+		createAccountConnectionProfile({
+			...context,
+			name: input.name,
+			grants: input.grants,
+		}),
+	)
+}
+export function updateConnectedAgentProfile(
+	input: AgentMutationContext & {
+		profileId: string
+		name?: string
+		grants?: unknown
+	},
+) {
+	return changeAccountConnectionProfile(input, (context) =>
+		updateAccountConnectionProfile({
+			...context,
+			profileId: input.profileId,
+			name: input.name,
+			grants: input.grants,
+		}),
+	)
+}
+export function deleteConnectedAgentProfile(
+	input: AgentMutationContext & { profileId: string },
+) {
+	return changeAccountConnectionProfile(input, (context) =>
+		deleteAccountConnectionProfile({ ...context, profileId: input.profileId }),
+	)
+}
+export async function revokeAccountConnectedAgent({
+	request,
+	env,
+	user,
+	clientId,
+}: AgentMutationContext & { clientId: string }) {
 	const helpers = await resolveOAuthHelpers<OAuthGrantHelpers>(env)
 	if (!helpers) {
 		return operationResult(
@@ -184,7 +208,7 @@ export async function mutateAccountConnectedAgents({
 	const revoked = await revokeConnectedMcpAgent({
 		helpers,
 		userId: personId,
-		clientId: parsed.value.clientId.trim(),
+		clientId: clientId,
 		orgId,
 		env,
 	})
@@ -194,7 +218,7 @@ export async function mutateAccountConnectedAgents({
 		if (!revoked.clientRemains) {
 			await deleteMcpEventSubscriptionsForOauthClient({
 				db: env.APP_DB,
-				oauthClientId: parsed.value.clientId.trim(),
+				oauthClientId: clientId,
 				userId: personId,
 			})
 		}
@@ -206,7 +230,7 @@ export async function mutateAccountConnectedAgents({
 	if (!revoked.clientRemains) {
 		await deleteMcpEventSubscriptionsForOauthClient({
 			db: env.APP_DB,
-			oauthClientId: parsed.value.clientId.trim(),
+			oauthClientId: clientId,
 			userId: personId,
 		})
 	}
@@ -219,7 +243,7 @@ export async function mutateAccountConnectedAgents({
 		email: user.email,
 		ip: getRequestIp(request) ?? undefined,
 		path: new URL(request.url).pathname,
-		clientId: parsed.value.clientId.trim(),
+		clientId: clientId,
 	})
 	return operationResult(
 		await loadAccountConnectedAgentsData({

@@ -13,81 +13,29 @@ import {
 } from '#worker/integrations/service.ts'
 import { listSavedPackagesByUserId } from '#worker/package-registry/repo.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { z } from 'zod'
+import { type z } from 'zod'
+import {
+	type rotateOauthAppCredentialsSchema,
+	type setUsageSchema,
+	type approvePackageSchema,
+} from '#universal/integration-mutations.ts'
 
-const rotateOauthAppCredentialsSchema = z
-	.object({
-		action: z.literal('rotate_oauth_app_credentials'),
-		appSlug: z.string().min(1),
-		clientId: z.string().min(1).optional(),
-		clientSecret: z.string().min(1).optional(),
-		confirm: z.literal(true),
-	})
-	.strict()
-	.refine((value) => Boolean(value.clientId || value.clientSecret), {
-		message: 'Provide a new client id and/or client secret.',
-	})
-
-const disconnectConnectionSchema = z
-	.object({
-		action: z.literal('disconnect_connection'),
-		name: z.string().min(1),
-	})
-	.strict()
-
-const deleteOauthAppSchema = z
-	.object({
-		action: z.literal('delete_oauth_app'),
-		appSlug: z.string().min(1),
-	})
-	.strict()
-
-const setUsageSchema = z
-	.object({
-		action: z.literal('set_usage'),
-		name: z.string().min(1),
-		usageMode: z.enum(['any', 'packages']),
-		allowedPackageIds: z.array(z.string()).optional(),
-	})
-	.strict()
-
-const approvePackageSchema = z
-	.object({
-		action: z.literal('approve_package'),
-		name: z.string().min(1),
-		packageId: z.string().min(1),
-	})
-	.strict()
-
-const accountIntegrationsActionSchema = z
-	.object({
-		action: z.enum([
-			'rotate_oauth_app_credentials',
-			'disconnect_connection',
-			'delete_oauth_app',
-			'set_usage',
-			'approve_package',
-		]),
-	})
-	.passthrough()
-
-async function handleSetUsage(input: {
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: z.infer<typeof setUsageSchema>
-}) {
+export async function setAccountIntegrationUsage(
+	input: {
+		env: Env
+		user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	} & z.infer<typeof setUsageSchema>,
+) {
 	const allowedPackageIds =
-		input.body.usageMode === 'packages'
-			? (input.body.allowedPackageIds ?? [])
-			: []
+		input.usageMode === 'packages' ? (input.allowedPackageIds ?? []) : []
 	const updated = await setIntegrationUsage({
 		env: input.env,
 		userId: ownerIdFromCaller({
 			request: input.user.request,
 			user: input.user.mcpUser,
 		}),
-		name: input.body.name,
-		usageMode: input.body.usageMode,
+		name: input.name,
+		usageMode: input.usageMode,
 		allowedPackageIds,
 	})
 	if (!updated) {
@@ -100,11 +48,12 @@ async function handleSetUsage(input: {
 	})
 }
 
-async function handleApprovePackage(input: {
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: z.infer<typeof approvePackageSchema>
-}) {
+export async function approveAccountIntegrationPackage(
+	input: {
+		env: Env
+		user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	} & z.infer<typeof approvePackageSchema>,
+) {
 	const userId = ownerIdFromCaller({
 		request: input.user.request,
 		user: input.user.mcpUser,
@@ -113,7 +62,7 @@ async function handleApprovePackage(input: {
 		await listSavedPackagesByUserId(input.env.APP_DB, {
 			userId,
 		})
-	).find((entry) => entry.id === input.body.packageId)
+	).find((entry) => entry.id === input.packageId)
 	if (!savedPackage) {
 		return operationResult(
 			{ ok: false, error: 'That package is not on this account.' },
@@ -123,8 +72,8 @@ async function handleApprovePackage(input: {
 	const updated = await grantIntegrationPackage({
 		env: input.env,
 		userId,
-		name: input.body.name,
-		packageId: input.body.packageId,
+		name: input.name,
+		packageId: input.packageId,
 	})
 	if (!updated) {
 		return operationResult({ ok: false, error: 'Connection not found.' }, 404)
@@ -133,13 +82,13 @@ async function handleApprovePackage(input: {
 		ok: true,
 		alreadyGranted:
 			updated.usageMode === 'any' ||
-			updated.allowedPackageIds.includes(input.body.packageId),
+			updated.allowedPackageIds.includes(input.packageId),
 		usageMode: updated.usageMode,
 		allowedPackageIds: updated.allowedPackageIds,
 	})
 }
 
-async function handleDisconnectConnection(input: {
+export async function disconnectAccountIntegration(input: {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	name: string
@@ -158,7 +107,7 @@ async function handleDisconnectConnection(input: {
 	return operationResult({ ok: true, deleted: true })
 }
 
-async function handleDeleteOauthApp(input: {
+export async function deleteAccountOauthApp(input: {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	appSlug: string
@@ -190,11 +139,12 @@ async function handleDeleteOauthApp(input: {
 	})
 }
 
-async function handleRotateOauthAppCredentials(input: {
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: z.infer<typeof rotateOauthAppCredentialsSchema>
-}) {
+export async function rotateAccountOauthAppCredentials(
+	input: {
+		env: Env
+		user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	} & z.infer<typeof rotateOauthAppCredentialsSchema>,
+) {
 	const userId = ownerIdFromCaller({
 		request: input.user.request,
 		user: input.user.mcpUser,
@@ -202,21 +152,21 @@ async function handleRotateOauthAppCredentials(input: {
 	const existing = await getOauthApp({
 		env: input.env,
 		userId,
-		slug: input.body.appSlug,
+		slug: input.appSlug,
 	})
 	if (!existing) {
 		return operationResult({ ok: false, error: 'OAuth app not found.' }, 404)
 	}
 
-	const nextClientId = input.body.clientId?.trim() || existing.clientId
+	const nextClientId = input.clientId?.trim() || existing.clientId
 
 	try {
-		if (input.body.clientSecret) {
+		if (input.clientSecret) {
 			await persistUserOauthAppClientSecret({
 				env: input.env,
 				userId,
 				slug: existing.slug,
-				value: input.body.clientSecret,
+				value: input.clientSecret,
 			})
 		}
 
@@ -254,98 +204,5 @@ async function handleRotateOauthAppCredentials(input: {
 			},
 			400,
 		)
-	}
-}
-
-export async function mutateAccountIntegrations({
-	env,
-	user,
-	body,
-}: {
-	request: Request
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
-}) {
-	const actionParsed = accountIntegrationsActionSchema.safeParse(body)
-	if (!actionParsed.success) {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
-
-	switch (actionParsed.data.action) {
-		case 'rotate_oauth_app_credentials': {
-			const parsed = rotateOauthAppCredentialsSchema.safeParse(body)
-			if (!parsed.success) {
-				return operationResult(
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
-			return handleRotateOauthAppCredentials({
-				env,
-				user,
-				body: parsed.data,
-			})
-		}
-		case 'disconnect_connection': {
-			const parsed = disconnectConnectionSchema.safeParse(body)
-			if (!parsed.success) {
-				return operationResult(
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
-			return handleDisconnectConnection({
-				env,
-				user,
-				name: parsed.data.name,
-			})
-		}
-		case 'delete_oauth_app': {
-			const parsed = deleteOauthAppSchema.safeParse(body)
-			if (!parsed.success) {
-				return operationResult(
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
-			return handleDeleteOauthApp({
-				env,
-				user,
-				appSlug: parsed.data.appSlug,
-			})
-		}
-		case 'set_usage': {
-			const parsed = setUsageSchema.safeParse(body)
-			if (!parsed.success) {
-				return operationResult(
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
-			return handleSetUsage({
-				env,
-				user,
-				body: parsed.data,
-			})
-		}
-		case 'approve_package': {
-			const parsed = approvePackageSchema.safeParse(body)
-			if (!parsed.success) {
-				return operationResult(
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
-			return handleApprovePackage({
-				env,
-				user,
-				body: parsed.data,
-			})
-		}
-		default: {
-			const _exhaustive: never = actionParsed.data.action
-			return _exhaustive
-		}
 	}
 }

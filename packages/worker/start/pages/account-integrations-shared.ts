@@ -1,13 +1,11 @@
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
-import { updateIntegrations } from '#start/server/account-mutations'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
 import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
 
 export const integrationsRoute = createListDetailRoute(
 	'/account/integrations',
@@ -229,13 +227,4 @@ export function hostFromUrl(url: string | null | undefined) {
 	} catch {
 		return null
 	}
-}
-
-export async function postIntegrationsMutation(
-	body: Record<string, unknown>,
-	currentHref: string,
-) {
-	await updateIntegrations({
-		data: { body, orgSlug: pageQueryOrg(currentHref) ?? undefined },
-	})
 }

@@ -3,10 +3,6 @@ import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
-	readNonEmptyTrimmedString,
-	readTrimmedStringOrEmpty,
-} from '#app/request-body.ts'
-import {
 	mcpOAuthReturnCookie,
 	readMcpOAuthReturnCookie,
 } from '#universal/mcp-oauth-return.ts'
@@ -203,7 +199,9 @@ export function createAccountMcpServersOauthCallbackHandler(env: Env) {
 async function handleAddAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	name: string
+	url: string
+	bearerToken?: string
 	request: Request
 }) {
 	const oauth = resolveMcpServerOAuthClientUrls({
@@ -217,10 +215,10 @@ async function handleAddAction(input: {
 			user: input.user.mcpUser,
 		}),
 		personId: input.user.mcpUser.userId,
-		name: readTrimmedStringOrEmpty(input.body, 'name'),
-		url: readTrimmedStringOrEmpty(input.body, 'url'),
+		name: input.name.trim(),
+		url: input.url.trim(),
 		baseUrl: oauth.clientOrigin,
-		bearerToken: readNonEmptyTrimmedString(input.body, 'bearerToken'),
+		bearerToken: input.bearerToken?.trim() || undefined,
 		waitUntil,
 	})
 	const payload = await loadAccountMcpServersData({
@@ -238,7 +236,7 @@ async function handleAddAction(input: {
 async function handleConnectionAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
 	request: Request
 	kind: 'reconnect' | 'refresh'
 }) {
@@ -303,7 +301,8 @@ async function handleConnectionAction(input: {
 async function handleSetEnabledAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
+	enabled: boolean
 	request: Request
 }) {
 	const setting = await requireSetting(input)
@@ -314,7 +313,7 @@ async function handleSetEnabledAction(input: {
 			user: input.user.mcpUser,
 		}),
 		id: setting.id,
-		enabled: readBoolean(input.body, 'enabled', true),
+		enabled: input.enabled,
 	})
 	const payload = await loadAccountMcpServersData({
 		env: input.env,
@@ -331,18 +330,18 @@ async function handleSetEnabledAction(input: {
 async function handleSetUsageAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
+	usageMode: 'any' | 'packages'
+	allowedPackageIds: string[]
 	request: Request
 }) {
 	const setting = await requireSetting(input)
-	const usageMode = readTrimmedStringOrEmpty(input.body, 'usageMode')
+	const usageMode = input.usageMode.trim()
 	if (usageMode !== 'any' && usageMode !== 'packages') {
 		throw new Error('Usage must be any or packages.')
 	}
 	const allowedPackageIds =
-		usageMode === 'packages'
-			? readStringArray(input.body, 'allowedPackageIds')
-			: []
+		usageMode === 'packages' ? input.allowedPackageIds : []
 	const updated = await setMcpServerUsage({
 		env: input.env,
 		userId: ownerIdFromCaller({
@@ -368,7 +367,7 @@ async function handleSetUsageAction(input: {
 async function handleDeleteAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
 	request: Request
 }) {
 	const setting = await requireSetting(input)
@@ -401,7 +400,9 @@ async function handleDeleteAction(input: {
 async function handleOAuthClientAction(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
+	clientId?: string
+	clientSecret?: string
 	request: Request
 	kind: 'set' | 'remove'
 }) {
@@ -413,8 +414,8 @@ async function handleOAuthClientAction(input: {
 	let client: { clientId: string; clientSecret: string } | null = null
 	if (input.kind === 'set') {
 		const parsed = normalizeMcpPreRegisteredOAuthClientInput({
-			clientId: (input.body as Record<string, unknown>)['clientId'],
-			clientSecret: (input.body as Record<string, unknown>)['clientSecret'],
+			clientId: input.clientId,
+			clientSecret: input.clientSecret,
 		})
 		if (!parsed.ok) {
 			return operationResult({ ok: false, error: parsed.error }, 400)
@@ -479,9 +480,9 @@ async function handleOAuthClientAction(input: {
 async function requireSetting(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
 }) {
-	const id = readTrimmedStringOrEmpty(input.body, 'id')
+	const id = input.id.trim()
 	if (!id) {
 		throw new Error('MCP server id is required.')
 	}
@@ -499,73 +500,10 @@ async function requireSetting(input: {
 	return setting
 }
 
-function readBoolean(body: object, key: string, defaultValue: boolean) {
-	const value = (body as Record<string, unknown>)[key]
-	return typeof value === 'boolean' ? value : defaultValue
-}
-
-function readStringArray(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	if (!Array.isArray(value)) return []
-	return value.filter((entry): entry is string => typeof entry === 'string')
-}
-
-export async function mutateAccountMcpServers({
-	request,
-	env,
-	user,
-	body,
-}: {
-	request: Request
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
-}) {
-	const action = readTrimmedStringOrEmpty(body, 'action')
+async function mcpSettingsOperation<T>(run: () => Promise<T>) {
 	try {
-		if (action === 'add') {
-			return await handleAddAction({ env, user, body, request })
-		}
-		if (action === 'reconnect') {
-			return await handleConnectionAction({
-				env,
-				user,
-				body,
-				request,
-				kind: 'reconnect',
-			})
-		}
-		if (action === 'refresh') {
-			return await handleConnectionAction({
-				env,
-				user,
-				body,
-				request,
-				kind: 'refresh',
-			})
-		}
-		if (action === 'set-enabled') {
-			return await handleSetEnabledAction({ env, user, body, request })
-		}
-		if (action === 'set-usage') {
-			return await handleSetUsageAction({ env, user, body, request })
-		}
-		if (action === 'delete') {
-			return await handleDeleteAction({ env, user, body, request })
-		}
-		if (action === 'set-oauth-client' || action === 'remove-oauth-client') {
-			return await handleOAuthClientAction({
-				env,
-				user,
-				body,
-				request,
-				kind: action === 'set-oauth-client' ? 'set' : 'remove',
-			})
-		}
+		return await run()
 	} catch (error) {
-		if (error instanceof AuthorizationError) {
-			return operationResult({ ok: false, error: error.message }, 403)
-		}
 		return operationResult(
 			{
 				ok: false,
@@ -574,9 +512,63 @@ export async function mutateAccountMcpServers({
 						? error.message
 						: 'Unable to update MCP server settings.',
 			},
-			400,
+			error instanceof AuthorizationError ? 403 : 400,
 		)
 	}
+}
 
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+export function addAccountMcpServer(
+	input: Parameters<typeof handleAddAction>[0],
+) {
+	return mcpSettingsOperation(() => handleAddAction({ ...input }))
+}
+
+export function reconnectAccountMcpServer(
+	input: Omit<Parameters<typeof handleConnectionAction>[0], 'kind'>,
+) {
+	return mcpSettingsOperation(() =>
+		handleConnectionAction({ ...input, kind: 'reconnect' }),
+	)
+}
+
+export function refreshAccountMcpServer(
+	input: Omit<Parameters<typeof handleConnectionAction>[0], 'kind'>,
+) {
+	return mcpSettingsOperation(() =>
+		handleConnectionAction({ ...input, kind: 'refresh' }),
+	)
+}
+
+export function setAccountMcpServerEnabled(
+	input: Parameters<typeof handleSetEnabledAction>[0],
+) {
+	return mcpSettingsOperation(() => handleSetEnabledAction({ ...input }))
+}
+
+export function setAccountMcpServerUsage(
+	input: Parameters<typeof handleSetUsageAction>[0],
+) {
+	return mcpSettingsOperation(() => handleSetUsageAction({ ...input }))
+}
+
+export function deleteAccountMcpServer(
+	input: Parameters<typeof handleDeleteAction>[0],
+) {
+	return mcpSettingsOperation(() => handleDeleteAction({ ...input }))
+}
+
+export function setAccountMcpServerOAuthClient(
+	input: Omit<Parameters<typeof handleOAuthClientAction>[0], 'kind'>,
+) {
+	return mcpSettingsOperation(() =>
+		handleOAuthClientAction({ ...input, kind: 'set' }),
+	)
+}
+
+export function removeAccountMcpServerOAuthClient(
+	input: Omit<Parameters<typeof handleOAuthClientAction>[0], 'kind'>,
+) {
+	return mcpSettingsOperation(() =>
+		handleOAuthClientAction({ ...input, kind: 'remove' }),
+	)
 }

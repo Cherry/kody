@@ -1,4 +1,11 @@
 import {
+	rotateOauthAppCredentialsSchema,
+	disconnectConnectionSchema,
+	deleteOauthAppSchema,
+	setUsageSchema,
+	approvePackageSchema,
+} from '#universal/integration-mutations.ts'
+import {
 	hasStoredConnectClientSecret,
 	loadAccountIntegrationByName,
 	loadAccountIntegrationsData,
@@ -11,7 +18,13 @@ import { loadConnectOauthChooser } from '#app/connect-oauth-chooser.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { waitUntil } from 'cloudflare:workers'
-import { mutateAccountIntegrations } from './account-integrations.ts'
+import {
+	rotateAccountOauthAppCredentials,
+	disconnectAccountIntegration,
+	deleteAccountOauthApp,
+	setAccountIntegrationUsage,
+	approveAccountIntegrationPackage,
+} from './account-integrations.ts'
 export * from './account-integrations.ts'
 export function testAccountIntegrationsApiHandler(env: Env) {
 	return {
@@ -87,12 +100,87 @@ export function testAccountIntegrationsApiHandler(env: Env) {
 			}
 
 			const body = await request.json().catch(() => null)
-			const result = await mutateAccountIntegrations({
-				request,
-				env,
-				user,
-				body: body as Record<string, unknown>,
-			})
+			if (!body || typeof body !== 'object')
+				return operationResult(
+					{ ok: false, error: 'Invalid request body.' },
+					400,
+				)
+			const { action, ...fields } = body as Record<string, unknown>
+			const context = { env, user }
+			let result
+			switch (action) {
+				case 'rotate_oauth_app_credentials': {
+					const parsed = rotateOauthAppCredentialsSchema.safeParse(fields)
+					if (!parsed.success)
+						return operationResult(
+							{ ok: false, error: 'Invalid request body.' },
+							400,
+						)
+					result = await rotateAccountOauthAppCredentials({
+						...context,
+						...parsed.data,
+					})
+					break
+				}
+				case 'disconnect_connection': {
+					const parsed = disconnectConnectionSchema.safeParse(fields)
+					if (!parsed.success)
+						return operationResult(
+							{ ok: false, error: 'Invalid request body.' },
+							400,
+						)
+					result = await disconnectAccountIntegration({
+						...context,
+						name: parsed.data.name,
+					})
+					break
+				}
+				case 'delete_oauth_app': {
+					const parsed = deleteOauthAppSchema.safeParse(fields)
+					if (!parsed.success)
+						return operationResult(
+							{ ok: false, error: 'Invalid request body.' },
+							400,
+						)
+					result = await deleteAccountOauthApp({
+						...context,
+						appSlug: parsed.data.appSlug,
+					})
+					break
+				}
+				case 'set_usage': {
+					const parsed = setUsageSchema.safeParse(fields)
+					if (!parsed.success)
+						return operationResult(
+							{ ok: false, error: 'Invalid request body.' },
+							400,
+						)
+					result = await setAccountIntegrationUsage({
+						...context,
+						...parsed.data,
+					})
+					break
+				}
+				case 'approve_package': {
+					const parsed = approvePackageSchema.safeParse(fields)
+					if (!parsed.success)
+						return operationResult(
+							{ ok: false, error: 'Invalid request body.' },
+							400,
+						)
+					result = await approveAccountIntegrationPackage({
+						...context,
+						...parsed.data,
+					})
+					break
+				}
+				default:
+					return operationResult(
+						{ ok: false, error: 'Invalid request body.' },
+						400,
+					)
+			}
+
 			return operationResult(result.data, result.status)
 		},
 	}

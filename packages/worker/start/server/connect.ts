@@ -1,5 +1,5 @@
 import { type z } from 'zod'
-import { createServerFn } from '@tanstack/react-start'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { redirect, notFound } from '@tanstack/react-router'
 import {
 	connectSecretsSchema,
@@ -41,29 +41,34 @@ async function context(
 		throw error
 	}
 }
-export async function readConnectSecrets(
-	path: '/connect/secrets' | '/connect/secret-set',
-	data: z.infer<typeof connectSecretsSchema>,
-) {
-	const { bindings, user, loadDocumentHead, search } = await context(path, data)
-	const { loadAccountSecretsSelection } =
-		await import('../../src/app/account-secrets-data.ts')
-	const payload = await loadAccountSecretsSelection({
-		env: bindings,
-		user,
-		selectedSecretId: data.selectedSecretId,
-		approval: data.approval,
-	})
-	return {
-		payload,
-		head: loadDocumentHead(
-			path === '/connect/secrets' ? 'connectSecrets' : 'connectSecretSet',
+export const readConnectSecrets = createServerOnlyFn(
+	async function readConnectSecrets(
+		path: '/connect/secrets' | '/connect/secret-set',
+		data: z.infer<typeof connectSecretsSchema>,
+	) {
+		const { bindings, user, loadDocumentHead, search } = await context(
 			path,
-			{ accountSecrets: payload },
-			search,
-		),
-	}
-}
+			data,
+		)
+		const { loadAccountSecretsSelection } =
+			await import('../../src/app/account-secrets-data.ts')
+		const payload = await loadAccountSecretsSelection({
+			env: bindings,
+			user,
+			selectedSecretId: data.selectedSecretId,
+			approval: data.approval,
+		})
+		return {
+			payload,
+			head: loadDocumentHead(
+				path === '/connect/secrets' ? 'connectSecrets' : 'connectSecretSet',
+				path,
+				{ accountSecrets: payload },
+				search,
+			),
+		}
+	},
+)
 export const loadConnectSecrets = createServerFn({ method: 'GET' })
 	.validator(connectSecretsSchema)
 	.handler(({ data }) => readConnectSecrets('/connect/secrets', data))

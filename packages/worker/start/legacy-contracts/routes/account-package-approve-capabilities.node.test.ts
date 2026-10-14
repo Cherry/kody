@@ -292,7 +292,12 @@ test('security audit shows who audited when, with a link to the summary', async 
 	const field = securityAuditField(html)
 
 	expect(field).toContain('data-audit-status="audited"')
-	expect(field).toMatch(/Audited [^<]+ by Audit Agent/)
+	expect(field.replace(/<[^>]*>/g, '')).toContain(
+		'Audited 2026-10-14 by Audit Agent',
+	)
+	expect(field).toMatch(
+		/<time dateTime="2026-10-14T15:30:00.000Z">2026-10-14<\/time>/,
+	)
 	expect(field).toContain('href="#security-audit"')
 	expect(field).toContain('>Concerns<')
 	expect(field).toContain('Security audit summary')

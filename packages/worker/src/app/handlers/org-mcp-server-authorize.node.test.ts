@@ -405,7 +405,7 @@ test('consent read binds explicit org independently of the RPC URL and HEAD neve
 	expect(mocks.bindOAuthAttemptActor).not.toHaveBeenCalled()
 	expect(
 		await openConsent(env, {
-			person: 'dan',
+			person: 'bob',
 			orgSlug: 'acme',
 			requestPath: '/_serverFn/consent',
 		}),

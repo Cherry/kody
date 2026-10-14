@@ -1,5 +1,5 @@
 import { toast } from '#client/toast.ts'
-import { updateConnectedAgents } from '#start/server/account-mutations'
+import { revokeConnectedAgent } from '#start/server/account-mutations'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 import { mutationOptions, type QueryClient } from '@tanstack/react-query'
@@ -16,10 +16,10 @@ export function connectedAgentMutationOptions(queryClient: QueryClient) {
 			href: string
 			actorKey: string | null
 		}) => {
-			await updateConnectedAgents({
+			await revokeConnectedAgent({
 				data: {
 					orgSlug: pageQueryOrg(href) ?? undefined,
-					body: { intent: 'revoke', clientId },
+					clientId,
 				},
 			})
 		},

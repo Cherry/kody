@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { updateConnectedAgents } from '#start/server/account-mutations'
+import {
+	createConnectionProfile,
+	updateConnectionProfile,
+	deleteConnectionProfile,
+} from '#start/server/account-mutations'
 import { connectionProfileNameMaxLength } from '#universal/connection-profiles/names.ts'
 import {
 	type AccountConnectedAgentListItem,
@@ -81,16 +85,11 @@ export function ConnectionProfiles({
 	const mutation = useMutation({
 		mutationKey: ['connectionProfiles', actorKey, pageQueryOrg(currentHref)],
 		mutationFn: async ({
-			body,
-			href,
+			write,
 		}: {
-			body: Record<string, unknown>
+			write: () => Promise<AccountConnectedAgentsLoaderData>
 			href: string
-		}) => {
-			return updateConnectedAgents({
-				data: { orgSlug: pageQueryOrg(href) ?? undefined, body },
-			})
-		},
+		}) => write(),
 		onMutate: async ({ href }) => {
 			await queryClient.cancelQueries(
 				orgPageFilters(actorKey, 'loadConnectionsPage', href),
@@ -125,13 +124,13 @@ export function ConnectionProfiles({
 	})
 	const busy = mutation.isPending
 	async function postMutation(
-		body: Record<string, unknown>,
+		write: () => Promise<AccountConnectedAgentsLoaderData>,
 		target: MessageTarget,
 	) {
 		if (busy) return false
 		setMessage(null)
 		try {
-			await mutation.mutateAsync({ body, href: currentHref })
+			await mutation.mutateAsync({ write, href: currentHref })
 			return true
 		} catch (error) {
 			setMessage({
@@ -144,11 +143,14 @@ export function ConnectionProfiles({
 	}
 	async function createProfile() {
 		const saved = await postMutation(
-			{
-				intent: 'create',
-				name: createName,
-				grants: toGrantPayload(createGrants),
-			},
+			() =>
+				createConnectionProfile({
+					data: {
+						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						name: createName,
+						grants: toGrantPayload(createGrants),
+					},
+				}),
 			{ kind: 'create' },
 		)
 		if (saved) {
@@ -166,7 +168,14 @@ export function ConnectionProfiles({
 			knownPackageIds.has(grant.resourceId),
 		)
 		const saved = await postMutation(
-			{ intent: 'update', profileId, grants: toGrantPayload(grants) },
+			() =>
+				updateConnectionProfile({
+					data: {
+						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						profileId,
+						grants: toGrantPayload(grants),
+					},
+				}),
 			{ kind: 'profile', profileId },
 		)
 		if (saved) {
@@ -305,7 +314,14 @@ export function ConnectionProfiles({
 													aria-label={`Delete profile ${profile.name}`}
 													onClick={() => {
 														void postMutation(
-															{ intent: 'delete', profileId: profile.id },
+															() =>
+																deleteConnectionProfile({
+																	data: {
+																		orgSlug:
+																			pageQueryOrg(currentHref) ?? undefined,
+																		profileId: profile.id,
+																	},
+																}),
 															{ kind: 'profile', profileId: profile.id },
 														)
 													}}
@@ -426,7 +442,7 @@ function toGrantPayload(grants: Array<DraftGrant>) {
 	return grants
 		.filter((grant) => grant.read || grant.execute)
 		.map((grant) => ({
-			resourceType: 'package',
+			resourceType: 'package' as const,
 			resourceId: grant.resourceId,
 			actions: [
 				...(grant.read ? (['read'] as const) : []),

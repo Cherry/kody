@@ -128,3 +128,17 @@ server-test TypeScript checks and lint checks; browser regressions were added to
 request. Deployment parity, HTTP status behavior and visual results still need
 the corresponding CI and preview evidence. No claim of universal parity or a
 measured performance gain follows from this ownership inventory.
+
+## Remaining mutation API cleanup
+
+Account integrations, connected agents, MCP server management and secrets require
+operation-level review. Outside account collections, package mutations,
+organization settings and several admin forms also retain broad body records or
+operation selection inside native functions. Transport ownership alone does not
+prove these APIs are idiomatic. Shared validation and business authorization are
+useful; generic dispatch over unrelated actions is the cleanup target.
+
+Against main `b24bb2ba2`, the deleted client router contains 1,352 lines, intent
+prefetch contains 277 lines, and the deleted backend router contains 782 lines.
+That is 2,411 lines across those three retired files, not a net migration size
+claim. Native routes and operation code replace their responsibilities.

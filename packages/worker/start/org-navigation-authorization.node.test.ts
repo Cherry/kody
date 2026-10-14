@@ -87,15 +87,15 @@ test('foreground org entry rechecks permission while an authorized warm entry re
 		defaultPreloadStaleTime: 0,
 	})
 	await router.load()
-	await router.navigate({ to: href })
+	await router.navigate({ href: href })
 	expect(read).toHaveBeenCalledTimes(1)
-	await router.navigate({ to: '/' })
-	await router.navigate({ to: href })
+	await router.navigate({ href: '/' })
+	await router.navigate({ href: href })
 	expect(read).toHaveBeenCalledTimes(1)
 	expect(state.destinations).toEqual(['team', 'team'])
-	await router.navigate({ to: '/' })
+	await router.navigate({ href: '/' })
 	state.denied = true
-	await router.navigate({ to: href })
+	await router.navigate({ href: href })
 	expect(state.destinations).toEqual(['team', 'team', 'team'])
 	expect(
 		router.state.matches.some(

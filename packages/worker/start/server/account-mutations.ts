@@ -1,3 +1,10 @@
+import {
+	rotateOauthAppCredentialsSchema,
+	disconnectConnectionSchema,
+	deleteOauthAppSchema,
+	setUsageSchema,
+	approvePackageSchema,
+} from '#universal/integration-mutations.ts'
 import { connectSecretsSchema } from '../connect-input.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
@@ -434,33 +441,155 @@ export const revokeSecretProvider = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateIntegrations = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const rotateOauthAppCredentials = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			input: rotateOauthAppCredentialsSchema,
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountIntegrations },
+			{ rotateAccountOauthAppCredentials },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
 			import('../../src/app/handlers/account-integrations.ts'),
 			import('../../src/app/operation-result.ts'),
 		])
+		const input = data.input
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) => {
-				return requireOperationResult(
-					await mutateAccountIntegrations({
-						...context,
-						body: data.body,
-					}),
-				)
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await rotateAccountOauthAppCredentials({ ...context, ...input }),
+				),
 		)
 	})
 
+export const disconnectIntegration = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			input: disconnectConnectionSchema,
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ disconnectAccountIntegration },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-integrations.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		const input = data.input
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await disconnectAccountIntegration({ ...context, name: input.name }),
+				),
+		)
+	})
+
+export const deleteOauthApp = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			input: deleteOauthAppSchema,
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ deleteAccountOauthApp },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-integrations.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		const input = data.input
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await deleteAccountOauthApp({ ...context, appSlug: input.appSlug }),
+				),
+		)
+	})
+
+export const setIntegrationUsage = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			input: setUsageSchema,
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setAccountIntegrationUsage },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-integrations.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		const input = data.input
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await setAccountIntegrationUsage({ ...context, ...input }),
+				),
+		)
+	})
+
+export const approveIntegrationPackage = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			input: approvePackageSchema,
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountIntegrationPackage },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-integrations.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		const input = data.input
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await approveAccountIntegrationPackage({ ...context, ...input }),
+				),
+		)
+	})
 export const disconnectAccountProvider = createServerFn({ method: 'POST' })
 	.validator(
 		z.object({ provider: z.enum(['github', 'google', 'x', 'discord']) }),
@@ -498,12 +627,22 @@ export const syncDiscordMemberRole = createServerFn({ method: 'POST' })
 			requireOperationResult(await operation({ ...context })),
 		)
 	})
-export const updateMcpServers = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const addMcpServer = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			name: z.string(),
+			url: z.string(),
+			bearerToken: z.string().optional(),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountMcpServers },
+			{ addAccountMcpServer },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -511,17 +650,219 @@ export const updateMcpServers = createServerFn({ method: 'POST' })
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) => {
-				return requireOperationResult(
-					await mutateAccountMcpServers({
-						...context,
-						body: data.body,
-					}),
-				)
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await addAccountMcpServer({ ...context, ...data }),
+				),
+		)
+	})
+
+export const reconnectMcpServer = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ reconnectAccountMcpServer },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await reconnectAccountMcpServer({ ...context, ...data }),
+				),
+		)
+	})
+
+export const refreshMcpServer = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ refreshAccountMcpServer },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await refreshAccountMcpServer({ ...context, ...data }),
+				),
+		)
+	})
+
+export const setMcpServerEnabled = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+			enabled: z.boolean(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setAccountMcpServerEnabled },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await setAccountMcpServerEnabled({ ...context, ...data }),
+				),
+		)
+	})
+
+export const setMcpServerUsage = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+			usageMode: z.enum(['any', 'packages']),
+			allowedPackageIds: z.array(z.string()),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setAccountMcpServerUsage },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await setAccountMcpServerUsage({ ...context, ...data }),
+				),
+		)
+	})
+
+export const deleteMcpServer = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ deleteAccountMcpServer },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await deleteAccountMcpServer({ ...context, ...data }),
+				),
+		)
+	})
+
+export const setMcpServerOAuthClient = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+			clientId: z.string(),
+			clientSecret: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setAccountMcpServerOAuthClient },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await setAccountMcpServerOAuthClient({ ...context, ...data }),
+				),
+		)
+	})
+
+export const removeMcpServerOAuthClient = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			id: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ removeAccountMcpServerOAuthClient },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-servers.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await removeAccountMcpServerOAuthClient({ ...context, ...data }),
+				),
 		)
 	})
 
@@ -755,12 +1096,23 @@ export const updateAvatar = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateConnectedAgents = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+const profileGrants = z.array(
+	z.object({
+		resourceType: z.literal('package'),
+		resourceId: z.string(),
+		actions: z.array(z.enum(['read', 'execute'])),
+	}),
+)
+export const revokeConnectedAgent = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ clientId: z.string().trim().min(1) }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountConnectedAgents },
+			{ revokeAccountConnectedAgent },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -768,18 +1120,105 @@ export const updateConnectedAgents = createServerFn({ method: 'POST' })
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug, requireMembership: false }
-					: undefined,
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
 			async (context) =>
 				requireOperationResult(
-					await mutateAccountConnectedAgents({ ...context, body: data.body }),
+					await revokeAccountConnectedAgent({
+						...context,
+						clientId: data.clientId,
+					}),
 				),
 		)
 	})
 
+export const createConnectionProfile = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ name: z.string(), grants: profileGrants }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ createConnectedAgentProfile },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-connected-agents.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await createConnectedAgentProfile({
+						...context,
+						name: data.name,
+						grants: data.grants,
+					}),
+				),
+		)
+	})
+
+export const updateConnectionProfile = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput.omit({ search: true }).extend({
+			profileId: z.string().trim().min(1),
+			name: z.string().optional(),
+			grants: profileGrants.optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ updateConnectedAgentProfile },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-connected-agents.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await updateConnectedAgentProfile({
+						...context,
+						profileId: data.profileId,
+						name: data.name,
+						grants: data.grants,
+					}),
+				),
+		)
+	})
+
+export const deleteConnectionProfile = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ profileId: z.string().trim().min(1) }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ deleteConnectedAgentProfile },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-connected-agents.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await deleteConnectedAgentProfile({
+						...context,
+						profileId: data.profileId,
+					}),
+				),
+		)
+	})
 export const continueMcpAuthorization = createServerFn({ method: 'POST' })
 	.validator(
 		z.object({
