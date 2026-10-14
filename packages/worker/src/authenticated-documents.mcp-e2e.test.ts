@@ -92,20 +92,13 @@ test('native account documents render authorized initial state and protect anony
 			)
 			.toBe('/login')
 	}
-	const organizations = await fetch(
-		`${server.origin}/account/organizations.json`,
-		{ headers: { Cookie: cookie } },
-	)
-	expect(organizations.status).toBe(200)
-	expect(await organizations.json()).toMatchObject({
-		ok: true,
-		username: user.username,
-		invites: [],
-	})
-	const anonymousApi = await fetch(
-		`${server.origin}/account/organizations.json`,
-	)
-	expect(anonymousApi.status).toBe(401)
+	// Website reads belong to Start. Removed JSON endpoints must not expose account data.
+	for (const headers of [{ Cookie: cookie }, {}]) {
+		const retired = await fetch(`${server.origin}/account/organizations.json`, {
+			headers,
+		})
+		expect(retired.status).toBe(404)
+	}
 	const unknown = await fetch(
 		`${server.origin}/@${user.username}/-/agents/new/not-a-client`,
 		{ headers: { Cookie: cookie } },

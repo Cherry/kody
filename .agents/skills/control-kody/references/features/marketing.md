@@ -16,10 +16,10 @@ overflow anchoring so replacing the article does not bump the rail. After
 hydrate it independently prefetches every sidebar href (one loader request per
 slug, including `/docs/connect`) so a click adopts a warm payload instead of
 waiting on a cold fetch. `/docs/package-skills` opens with a flag callout for
-`mcp-skills-extension`: signed-in visitors POST `/docs/package-skills/opt-in` to
-turn it on for themselves; signed-out visitors log in with `redirectTo` back to
-that page. `/docs/mcp-events` does the same for `mcp-events-extension` via
-`/docs/mcp-events/opt-in`. Custom secret providers are documented at
+`mcp-skills-extension`: signed-in visitors use its opt-in control to turn it on
+for themselves; signed-out visitors log in with `redirectTo` back to that page.
+`/docs/mcp-events` does the same for `mcp-events-extension` through its native
+opt-in server function. Custom secret providers are documented at
 `/docs/secret-providers`. Open API is documented at `/docs/open-api`; local CLI
 execute at `/docs/local-execute`.
 
@@ -27,7 +27,7 @@ execute at `/docs/local-execute`.
 
 ```bash
 node tools/control-kody.ts health --origin https://kody.codes
-node tools/control-kody.ts request GET /docs.json --skip-login --origin https://kody.codes
+node tools/control-kody.ts request GET /docs --skip-login --origin https://kody.codes
 ```
 
 Anonymous HTML on `/` and several marketing routes is short-CDN-cached. The
@@ -42,16 +42,14 @@ same-origin links to `/docs/flake-hunter`, `/docs/sentry-issues`,
 `/docs/agent-inbox`, and `/docs/purchase-thanks` (pointer and focus ring only;
 no extra labels or hover chrome). Signed-in visitors still see the player and
 chooser. Chooser membership and order come from the unlisted playlist
-`PLBPBUA8boGLA`. Client navigations load `GET /landing-hero-videos.json`. The
-lite player embeds the selected chooser video only, without a playlist id, so
-YouTube chrome uses that video's title. Chooser ids are on the YouTube allowlist
-for `/youtube-thumb` without a playlist round-trip on plain documents.
+`PLBPBUA8boGLA`. Client navigations use the native landing video read. The lite
+player embeds the selected chooser video only, without a playlist id, so YouTube
+chrome uses that video's title. Chooser ids are on the YouTube allowlist for
+`/youtube-thumb` without a playlist round-trip on plain documents.
 `/?youtubeId=<id>` opens the site-wide allowlisted YouTube overlay on those
 routes; unknown or disallowed ids do not open the player.
 
-## APIs
+## Transport
 
-- `GET /docs.json`
-- `GET /blog.json`
-- `GET /discord.json`
-- `GET /landing-hero-videos.json`
+Docs, blog, Discord, and landing videos use native Start reads. Markdown, RSS,
+sitemap, robots, images, and discovery files remain explicit HTTP resources.

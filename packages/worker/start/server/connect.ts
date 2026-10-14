@@ -9,7 +9,8 @@ function validateHref(href: string) {
 	return href
 }
 async function context(href: string) {
-	const { withWebsiteRead } = await import('./mutation-context.ts')
+	const { withWebsiteRead, WebsiteAuthenticationError } =
+		await import('./mutation-context.ts')
 	const { loadDocumentHead } = await import('./document-head.ts')
 	const url = new URL(href, 'https://kody.test')
 	const orgSlug = url.searchParams.get('org') ?? undefined
@@ -25,8 +26,11 @@ async function context(href: string) {
 			}),
 		)
 	} catch (error) {
-		if (error instanceof Error && error.message === 'Sign in required.')
-			throw redirect({ href: '/login', search: { redirectTo: href } })
+		if (error instanceof WebsiteAuthenticationError)
+			throw redirect({
+				href: `/login?redirectTo=${encodeURIComponent(href)}`,
+				statusCode: 302,
+			})
 		throw error
 	}
 }

@@ -80,57 +80,27 @@ Resource pages (packages, secrets, jobs, and the rest) live under
 ## Drive it
 
 ```bash
-node tools/control-kody.ts login
-node tools/control-kody.ts request GET /account/profile.json
-node tools/control-kody.ts request GET /account/organizations.json
-node tools/control-kody.ts request GET /@<slug>/-/settings.json
-node tools/control-kody.ts request GET /@<slug>/-/members.json
-node tools/control-kody.ts request GET /@<slug>/-/teams.json
-node tools/control-kody.ts request GET /@<slug>/-/grants.json
-node tools/control-kody.ts request GET /@<slug>/-/collaborators.json
-node tools/control-kody.ts request GET /account/connections.json
+npm run control-kody -- browse --origin <preview> --path /account
+npm run control-kody -- request GET /session --origin <preview>
 ```
 
-## APIs
-
-- `GET|POST /account/profile.json`
-- `GET /account/organizations.json` (orgs, last-used org, pending invites)
-- `GET|POST /@<slug>/-/settings.json` (team org profile; personal orgs point at
-  Account)
-- `POST /@<slug>/-/settings/avatar.json`
-- `POST /@<slug>/-/settings/delete.json`
-- `GET /@<slug>/-/members.json`
-- `POST /@<slug>/-/members/role.json`
-- `POST /@<slug>/-/members/remove.json`
-- `POST /@<slug>/-/members/invite.json`
-- `GET /@<slug>/-/teams.json`
-- `POST /@<slug>/-/teams/create.json`
-- `POST /@<slug>/-/teams/member-add.json`
-- `POST /@<slug>/-/teams/member-remove.json`
-- `GET /@<slug>/-/grants.json`
-- `POST /@<slug>/-/grants/revoke.json`
-- `GET /@<slug>/-/collaborators.json`
-- `POST /account/profile/avatar.json`
-- `POST /account/email-change.json`
-- `POST /account/email-claim-release.json`
-- `GET /account/export.json`
-- `POST /account/delete`
-- `GET|POST /account/connections.json` (sign-in providers: GitHub, Google, X,
-  Discord)
-- `POST /logout` (Log out in the account menu)
+Profile, organization membership, avatar, email, deletion, and logout actions
+use native Start server functions. Test the relevant forms and confirmations in
+the signed-in browser. `GET /account/export.json` remains the metadata export
+protocol.
 
 ## Gotchas
 
 - Seed users start empty. Profile fields exist; packages/secrets/jobs do not
   until you create them.
-- A successful `POST /account/delete` clears the session and the account page
+- A successful account deletion clears the session and the account page
   navigates to `/?accountDeleted=1`. The homepage status
   `data-testid="account-deleted-notice"` reads "Your Kody account has been
   deleted". Do not delete the shared preview seed to prove this.
 - Connected agents (inbound MCP hosts) are a workspace page:
   [connections](./connections.md) at `/@<slug>/-/agents`.
 - Linking a sign-in provider returns to `/account/security?oauthLinked=<id>`.
-- Former-address release is `POST /account/email-claim-release.json`, then
-  confirm at `/verify-email-claim-release`. It drops the claim without reminting
+- Former-address release starts in the account UI, then confirm at
+  `/verify-email-claim-release`. It drops the claim without reminting
   `users.stable_user_id`.
 - Email destinations are managed on the [email inbox](./email.md).

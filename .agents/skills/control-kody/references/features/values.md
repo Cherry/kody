@@ -11,10 +11,11 @@ integrations. See `docs/guides/values.md`.
 ## Drive it
 
 ```bash
-node tools/control-kody.ts request GET /account/values.json
+npm run control-kody -- browse --origin <preview> --path /@<slug>/-/values
 ```
 
-## APIs
+The page uses native Start server functions for website reads and mutations. Use
+supported MCP capabilities through `control-kody search` and
+`control-kody execute` when fixture data is needed.
 
-- `GET /account/values.json`
-- `POST /account/values.json` — `delete` only
+Delete remaining values through the UI. Do not create new value rows.

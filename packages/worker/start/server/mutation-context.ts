@@ -15,13 +15,20 @@ type WebsiteContext = {
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 }
 
+export class WebsiteAuthenticationError extends Error {
+	constructor() {
+		super('Please sign in again.')
+		this.name = 'WebsiteAuthenticationError'
+	}
+}
+
 /** Explicit scope is checked against the session principal, never the Referer. */
 async function websiteContext(options: WebsiteScope): Promise<WebsiteContext> {
 	const request = getRequest()
 	const env = getEnv(workerEnv)
 	setResponseHeader('Cache-Control', 'private, no-store')
 	const authenticated = await readAuthenticatedAppUser(request, env)
-	if (!authenticated) throw new Error('Please sign in again.')
+	if (!authenticated) throw new WebsiteAuthenticationError()
 	// Request auth is cached. Never mutate it while binding an independent operation.
 	const user = { ...authenticated }
 	if (options.scope) {

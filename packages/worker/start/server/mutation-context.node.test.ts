@@ -31,7 +31,11 @@ vi.mock('#worker/request-context/request-context.ts', () => ({
 vi.mock('#worker/account/deletion-state.ts', () => ({
 	withAccountWriteLease: state.lease,
 }))
-import { withWebsiteRead, withWebsiteMutation } from './mutation-context.ts'
+import {
+	withWebsiteRead,
+	withWebsiteMutation,
+	WebsiteAuthenticationError,
+} from './mutation-context.ts'
 beforeEach(() => {
 	vi.clearAllMocks()
 	state.authenticated.mockResolvedValue({
@@ -47,7 +51,9 @@ beforeEach(() => {
 test('unauthenticated or suspended sessions fail before reading or writing', async () => {
 	state.authenticated.mockResolvedValue(null)
 	const operation = vi.fn()
-	await expect(withWebsiteRead({}, operation)).rejects.toThrow('sign in')
+	await expect(withWebsiteRead({}, operation)).rejects.toBeInstanceOf(
+		WebsiteAuthenticationError,
+	)
 	await expect(withWebsiteMutation({}, operation)).rejects.toThrow('sign in')
 	expect(operation).not.toHaveBeenCalled()
 	expect(state.lease).not.toHaveBeenCalled()

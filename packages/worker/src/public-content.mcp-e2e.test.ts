@@ -11,6 +11,7 @@ import {
 	listBlogPosts,
 } from '#worker/blog/catalog.ts'
 import {
+	createMcpClient,
 	createUniqueTestUser,
 	getSharedMcpE2eServer,
 } from '../../../tools/mcp-test-support.ts'
@@ -42,14 +43,22 @@ test('legacy team Secrets redirects to native Credentials and Agents remains aut
 	await server.ensureUser(user)
 	const cookie = await loginToApp(server.origin, user)
 	const slug = `team-${user.username}`
-	const created = await fetch(`${server.origin}/account/organizations/new`, {
-		method: 'POST',
-		headers: { Cookie: cookie, Origin: server.origin },
-		body: new URLSearchParams({ displayName: 'Native team', slug }),
-		redirect: 'manual',
+	await using mcp = await createMcpClient(server.origin, user, {
+		markEmailVerified: server.markEmailVerified,
+		clearAuthRateLimits: server.clearAuthRateLimits,
 	})
-	expect(created.status).toBe(302)
-	expect(created.headers.get('Location')).toBe(`${server.origin}/@${slug}`)
+	const created = await mcp.client.callTool({
+		name: 'execute',
+		arguments: {
+			code: `import { kody } from 'kody:runtime'
+export default async function main(input) {
+	return await kody.orgCreate({ slug: input.slug, display_name: 'Native team' })
+}`,
+			params: { slug },
+		},
+	})
+	expect(created.isError).not.toBe(true)
+	expect(created.structuredContent).toMatchObject({ result: { org: { slug } } })
 	const legacy = await fetch(`${server.origin}/@${slug}/-/secrets`, {
 		headers: { Cookie: cookie },
 		redirect: 'manual',

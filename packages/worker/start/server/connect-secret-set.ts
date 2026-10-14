@@ -10,7 +10,8 @@ export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 		return href
 	})
 	.handler(async ({ data: href }) => {
-		const { withWebsiteRead } = await import('./mutation-context.ts')
+		const { withWebsiteRead, WebsiteAuthenticationError } =
+			await import('./mutation-context.ts')
 		const search = new URL(href, 'https://kody.local').searchParams
 		const org = search.get('org')?.trim()
 		try {
@@ -38,7 +39,7 @@ export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 				},
 			)
 		} catch (error) {
-			if (error instanceof Error && error.message === 'Please sign in again.')
+			if (error instanceof WebsiteAuthenticationError)
 				throw redirect({
 					href: `/login?redirectTo=${encodeURIComponent(href)}`,
 				})
