@@ -81,7 +81,34 @@ test('native secret connection redirects preserve prefill and destination authen
 		cookie,
 	)
 	expect(prefilled.response.status).toBe(302)
-	expect(prefilled.response.headers.get('Location')).toBe(legacyPath)
+	expect(prefilled.response.headers.get('Location')).toBe(destination)
+	const richPrefill = new URLSearchParams({
+		name: 'billingKey',
+		provider: 'stripe',
+		description: 'Billing access',
+		allowedHosts: 'api.stripe.com,uploads.stripe.com',
+		expiresAt: '2026-12-31',
+		allowedPackages: 'pkg-one,pkg-two',
+		forPackage: 'billing-package',
+		need: 'apiKey',
+		org: 'other-org',
+	})
+	const rich = await readDocument(
+		`/@${user.username}/-/secrets/new?${richPrefill}`,
+		cookie,
+	)
+	expect(rich.response.status).toBe(302)
+	const redirected = new URL(
+		rich.response.headers.get('Location')!,
+		server.origin,
+	)
+	expect(redirected.pathname).toBe(`/@${user.username}/-/credentials/new`)
+	for (const [key, value] of richPrefill) {
+		if (key !== 'org') expect(redirected.searchParams.get(key), key).toBe(value)
+	}
+	expect(redirected.searchParams.get('kind')).toBe('secret')
+	expect(redirected.searchParams.has('hosts')).toBe(false)
+	expect(redirected.searchParams.has('org')).toBe(false)
 	const bare = await readDocument(`/@${user.username}/-/secrets/new`, cookie)
 	expect(bare.response.status).toBe(200)
 	expect(bare.html).toContain('Secrets')

@@ -27,7 +27,17 @@ import {
 	readAdminUsersPage,
 	readAdminUserUsage,
 } from '#start/server/admin-controls'
-import { saveAdminUsers } from '#start/server/admin-mutations'
+import {
+	assignAdminUserRole,
+	removeAdminUserRole,
+	setAdminUserPlan,
+	suspendAdminUser,
+	unsuspendAdminUser,
+	resumeAdminUserEmail,
+	verifyAdminUserEmail,
+	mintAdminUserVerificationUrl,
+	createAdminUser,
+} from '#start/server/admin-mutations'
 import {
 	type AdminCreatedUserSetup,
 	type AdminPlanName,
@@ -119,11 +129,14 @@ export function AdminUsersPage(props: {
 	const write = useMutation({
 		mutationFn: async (input: {
 			search: string
-			body: Record<string, unknown>
+			perform: () =>
+				| ReturnType<typeof createAdminUser>
+				| ReturnType<typeof mintAdminUserVerificationUrl>
+				| ReturnType<typeof assignAdminUserRole>
 			actorKey: string | null
 			target: string | null
 			permissions: boolean
-		}) => saveAdminUsers({ data: { search: input.search, body: input.body } }),
+		}) => input.perform(),
 		onMutate: (input) => ({
 			reconcile: input.permissions ? invalidateOwnPermissions : invalidatePages,
 		}),
@@ -144,13 +157,23 @@ export function AdminUsersPage(props: {
 		},
 		gcTime: 0,
 	})
-	function submitUserChange(href: string, body: Record<string, unknown>) {
+	function submitUserChange(
+		href: string,
+		target: string | null,
+		perform: (
+			search: string,
+		) =>
+			| ReturnType<typeof createAdminUser>
+			| ReturnType<typeof mintAdminUserVerificationUrl>
+			| ReturnType<typeof assignAdminUserRole>,
+	) {
+		const search = new URL(href, 'http://localhost').search
 		return write.mutateAsync({
-			search: new URL(href, 'http://localhost').search,
-			body,
+			search,
+			perform: () => perform(search),
 			actorKey,
-			target: typeof body.stableUserId === 'string' ? body.stableUserId : null,
-			permissions: body.stableUserId === actorKey,
+			target,
+			permissions: target === actorKey,
 		})
 	}
 
@@ -242,11 +265,15 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const payload = await submitUserChange(href, {
-				action,
-				stableUserId: selectedUser.stableUserId,
-				role: selectedRoleToAssign,
-			})
+			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+				(action === 'assign_role' ? assignAdminUserRole : removeAdminUserRole)({
+					data: {
+						search,
+						stableUserId: selectedUser.stableUserId,
+						role: selectedRoleToAssign,
+					},
+				}),
+			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
 			setMessage(
@@ -277,11 +304,11 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const payload = await submitUserChange(href, {
-				action: 'update_plan',
-				stableUserId: selectedUser.stableUserId,
-				plan,
-			})
+			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+				setAdminUserPlan({
+					data: { search, stableUserId: selectedUser.stableUserId, plan },
+				}),
+			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
 			invalidateUsage()
@@ -305,10 +332,16 @@ export function AdminUsersPage(props: {
 		setActionState('verifying')
 		setMessage(null)
 		try {
-			const payload = await submitUserChange(href, {
-				action,
-				stableUserId: selectedUser.stableUserId,
-			})
+			const payload = await submitUserChange(
+				href,
+				selectedUser.stableUserId,
+				(search) =>
+					(action === 'mint_verify_url'
+						? mintAdminUserVerificationUrl
+						: verifyAdminUserEmail)({
+						data: { search, stableUserId: selectedUser.stableUserId },
+					}),
+			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
 			if (
@@ -349,10 +382,15 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const payload = await submitUserChange(href, {
-				action,
-				stableUserId: selectedUser.stableUserId,
-			})
+			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+				(action === 'suspend_user'
+					? suspendAdminUser
+					: action === 'unsuspend_user'
+						? unsuspendAdminUser
+						: resumeAdminUserEmail)({
+					data: { search, stableUserId: selectedUser.stableUserId },
+				}),
+			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
 			setMessage(
@@ -385,11 +423,15 @@ export function AdminUsersPage(props: {
 		setCreatedUser(null)
 		setMessage(null)
 		try {
-			const payload = await submitUserChange(href, {
-				action: 'create_user',
-				email: String(formData.get('email') ?? '').trim(),
-				username: String(formData.get('username') ?? '').trim(),
-			})
+			const payload = await submitUserChange(href, null, (search) =>
+				createAdminUser({
+					data: {
+						search,
+						email: String(formData.get('email') ?? '').trim(),
+						username: String(formData.get('username') ?? '').trim(),
+					},
+				}),
+			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
 			setCreatedUser(

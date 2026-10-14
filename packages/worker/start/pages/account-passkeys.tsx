@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { updatePasskey } from '#start/server/security-mutations'
+import { deletePasskey, renamePasskey } from '#start/server/security-mutations'
 import {
 	webauthnRegistrationOptions,
 	webauthnRegistrationVerify,
@@ -50,8 +50,6 @@ export type AccountPasskeysPayload = {
 	passkeys: Array<PasskeyListItem>
 }
 
-const webauthnRegistrationPath = '/webauthn/registration'
-
 function describeDeviceType(deviceType: string) {
 	return deviceType === 'multiDevice'
 		? 'Synced passkey'
@@ -69,10 +67,15 @@ export function AccountPasskeysPage({
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const passkeys = payload.passkeys
-	const changePasskey = usePageResponseMutation<AccountPasskeysPayload>(
+	const changePasskey = usePageResponseMutation<
+		AccountPasskeysPayload,
+		| { intent: 'delete'; passkeyId: string }
+		| { intent: 'rename'; passkeyId: string; name: string }
+	>(
 		queryKey,
 		'loadAccountSecurity',
-		(body) => updatePasskey({ data: body }),
+		({ intent, ...data }) =>
+			intent === 'delete' ? deletePasskey({ data }) : renamePasskey({ data }),
 		{ refreshShell: true },
 	)
 	const [message, setMessage] = useState<string | null>(null)

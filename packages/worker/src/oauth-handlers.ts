@@ -353,9 +353,16 @@ async function resolveAuthRequest(
 	helpers: OAuthHelpers,
 	request: Request,
 	env: Env,
+	authorizeUrl?: URL,
 ) {
 	try {
-		const authRequest = await helpers.parseAuthRequest(request)
+		// The provider parser consumes an HTTP authorize request. Keep this adapter
+		// local: sessions, cookies, OIDC and organization checks retain the real request.
+		const authRequest = await helpers.parseAuthRequest(
+			authorizeUrl && authorizeUrl.href !== request.url
+				? new Request(authorizeUrl, { headers: request.headers })
+				: request,
+		)
 		if (!authRequest.clientId || !authRequest.redirectUri) {
 			return {
 				error:
@@ -389,8 +396,11 @@ async function resolveAuthRequest(
 	}
 }
 
-function readClientIdFromAuthorizeRequest(request: Request) {
-	const clientId = new URL(request.url).searchParams.get('client_id')?.trim()
+function readClientIdFromAuthorizeRequest(
+	request: Request,
+	authorizeUrl = new URL(request.url),
+) {
+	const clientId = authorizeUrl.searchParams.get('client_id')?.trim()
 	return clientId ? clientId : null
 }
 
@@ -439,8 +449,8 @@ function readRegisteredRedirectUris(client: ClientInfo) {
 async function requestHasRedirectUriMismatch(
 	helpers: OAuthHelpers,
 	request: Request,
+	url = new URL(request.url),
 ) {
-	const url = new URL(request.url)
 	const clientId = url.searchParams.get('client_id')?.trim()
 	const redirectUri = url.searchParams.get('redirect_uri')?.trim()
 	if (!clientId || !redirectUri) return false
@@ -474,12 +484,14 @@ async function resolveAuthorizeInfoResetState(
 	env: Env,
 	helpers: OAuthHelpers,
 	errorMessage: string,
+	authorizeUrl?: URL,
 ) {
 	const shouldClearVerificationCookie =
 		requestHasOAuthClientResetVerificationCookie(request)
 	const redirectUriMismatch = await requestHasRedirectUriMismatch(
 		helpers,
 		request,
+		authorizeUrl,
 	)
 	if (redirectUriMismatch) {
 		return {
@@ -491,7 +503,7 @@ async function resolveAuthorizeInfoResetState(
 	}
 
 	if (errorMessage === invalidClientIdMismatchMessage) {
-		const clientId = readClientIdFromAuthorizeRequest(request)
+		const clientId = readClientIdFromAuthorizeRequest(request, authorizeUrl)
 		if (clientId) {
 			return {
 				allowClientReset: true,
@@ -823,10 +835,11 @@ export type OAuthAuthorizeDataResult = {
 export async function loadOAuthAuthorizeData(
 	request: Request,
 	env: Env,
+	authorizeUrl = new URL(request.url),
 ): Promise<OAuthAuthorizeDataResult> {
 	if (
 		isOAuthAuthorizeClobberedResubmit({
-			searchParams: new URL(request.url).searchParams,
+			searchParams: authorizeUrl.searchParams,
 		})
 	) {
 		return {
@@ -838,7 +851,10 @@ export async function loadOAuthAuthorizeData(
 			setCookie: null,
 		}
 	}
-	const oidcParamsOrError = parseOidcAuthorizeParams(request)
+	const oidcParamsOrError = parseOidcAuthorizeParams(
+		request,
+		authorizeUrl.searchParams,
+	)
 	if (isOidcAuthorizeParamsParseError(oidcParamsOrError)) {
 		return {
 			data: {
@@ -851,7 +867,12 @@ export async function loadOAuthAuthorizeData(
 	}
 	const oidcParams = oidcParamsOrError
 	const helpers = getOAuthHelpers(env)
-	const resolution = await resolveAuthRequest(helpers, request, env)
+	const resolution = await resolveAuthRequest(
+		helpers,
+		request,
+		env,
+		authorizeUrl,
+	)
 	if ('error' in resolution) {
 		const { allowClientReset, setCookie } =
 			await resolveAuthorizeInfoResetState(
@@ -859,6 +880,7 @@ export async function loadOAuthAuthorizeData(
 				env,
 				helpers,
 				resolution.error ?? 'Unable to parse OAuth request.',
+				authorizeUrl,
 			)
 		return {
 			data: {
@@ -929,7 +951,7 @@ export async function loadOAuthAuthorizeData(
 	}
 
 	let orgs: Array<OAuthAuthorizeConsentOrg> = []
-	let selectedOrgSlug: string | null = readOrgSlugFromUrl(request.url)
+	let selectedOrgSlug: string | null = readOrgSlugFromUrl(authorizeUrl.href)
 	if (!requireCredentials && authorizeSession.stableUserId) {
 		// Match approve: resolve `?org=` from the authorize URL and resource
 		// before auto-selecting. Fail closed when the client named an
@@ -938,6 +960,7 @@ export async function loadOAuthAuthorizeData(
 		let resolvedRequested: AuthorizeOrg | null = null
 		try {
 			resolvedRequested = await resolveAuthorizeOrg({
+				authorizeUrl,
 				env,
 				request,
 				authRequest,

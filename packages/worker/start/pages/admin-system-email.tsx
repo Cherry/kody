@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { buildAdminEmailHtmlPreviewDocument } from '#client/email-html-preview.ts'
-import { saveAdminSystemEmail } from '#start/server/admin-mutations'
+import { deleteAdminSystemEmail } from '#start/server/admin-mutations'
 import { type AdminSystemEmailLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
@@ -69,13 +69,13 @@ export function AdminSystemEmailPage({
 }) {
 	const router = useRouter()
 	const captureSubmitter = useSubmitterScope()
-	const mutation = usePageResponseMutation<AdminSystemEmailLoaderData>(
-		queryKey,
-		'loadAdminSystemEmail',
-		(body, href) =>
-			saveAdminSystemEmail({
-				data: { body, search: new URL(href, 'http://localhost').search },
-			}),
+	const mutation = usePageResponseMutation<
+		AdminSystemEmailLoaderData,
+		{ messageId: string }
+	>(queryKey, 'loadAdminSystemEmail', (body, href) =>
+		deleteAdminSystemEmail({
+			data: { ...body, search: new URL(href, 'http://localhost').search },
+		}),
 	)
 	const [armedId, setArmedId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
@@ -89,7 +89,7 @@ export function AdminSystemEmailPage({
 		const isCurrent = captureSubmitter()
 		setMessage(null)
 		try {
-			await mutation.submit({ action: 'delete', message_id: id })
+			await mutation.submit({ messageId: id })
 			if (!isCurrent()) return
 			setArmedId(null)
 			await router.navigate({ href: '/admin/system-email' })

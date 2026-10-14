@@ -1,4 +1,4 @@
-import { type z } from 'zod'
+import { z } from 'zod'
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { redirect, notFound } from '@tanstack/react-router'
 import {
@@ -152,34 +152,27 @@ export const loadConnectOauth = createServerFn({ method: 'GET' })
 		}
 	})
 
-export const decideWebhookApply = createServerFn({ method: 'POST' })
-	.validator(
-		(input: {
-			handle: string
-			fingerprint: string
-			action: 'approve' | 'reject'
-		}) => {
-			if (
-				!input ||
-				typeof input.handle !== 'string' ||
-				!input.handle.trim() ||
-				typeof input.fingerprint !== 'string' ||
-				!input.fingerprint.trim() ||
-				!['approve', 'reject'].includes(input.action)
-			)
-				throw new Error('Invalid approval request.')
-			return input
-		},
-	)
+const webhookApplyDecisionInput = z.object({
+	handle: z.string().trim().min(1),
+	fingerprint: z.string().trim().min(1),
+})
+export const approveWebhookApply = createServerFn({ method: 'POST' })
+	.validator(webhookApplyDecisionInput)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		return withWebsiteMutation({}, async ({ env, user }) => {
-			const { approveConnectWebhookApply, rejectConnectWebhookApply } =
-				await import('../../src/app/connect-webhook-apply-data.ts')
-			return (
-				data.action === 'approve'
-					? approveConnectWebhookApply
-					: rejectConnectWebhookApply
-			)({ env, user, handle: data.handle, fingerprint: data.fingerprint })
-		})
+		const { approveConnectWebhookApply } =
+			await import('../../src/app/connect-webhook-apply-data.ts')
+		return withWebsiteMutation({}, async ({ env, user }) =>
+			approveConnectWebhookApply({ env, user, ...data }),
+		)
+	})
+export const rejectWebhookApply = createServerFn({ method: 'POST' })
+	.validator(webhookApplyDecisionInput)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { rejectConnectWebhookApply } =
+			await import('../../src/app/connect-webhook-apply-data.ts')
+		return withWebsiteMutation({}, async ({ env, user }) =>
+			rejectConnectWebhookApply({ env, user, ...data }),
+		)
 	})

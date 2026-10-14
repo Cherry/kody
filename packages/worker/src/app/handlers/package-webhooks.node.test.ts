@@ -2,7 +2,11 @@ import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import {
-	mutatePackageWebhook,
+	mintPackageWebhook,
+	rotatePackageWebhook,
+	revealPackageWebhook,
+	enablePackageWebhook,
+	disablePackageWebhook,
 	readPackageWebhooksData,
 } from '#app/handlers/package-webhooks.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
@@ -169,9 +173,27 @@ async function setup(sessionUsername = 'owner') {
 			? { status: 200, data: result.data }
 			: { status: result.status, data: { ok: false, error: result.error } }
 	}
-	const post = (body: unknown, params = ownerParams) =>
-		mutatePackageWebhook({ env, request: new Request(apiUrl), params, body })
-	const act = async (intent: string, webhookName = 'launcher') => {
+	const operations = {
+		mint: mintPackageWebhook,
+		rotate: rotatePackageWebhook,
+		reveal: revealPackageWebhook,
+		enable: enablePackageWebhook,
+		disable: disablePackageWebhook,
+	}
+	const post = (
+		body: { intent: keyof typeof operations; webhookName: string },
+		params = ownerParams,
+	) =>
+		operations[body.intent]({
+			env,
+			request: new Request(apiUrl),
+			params,
+			webhookName: body.webhookName,
+		})
+	const act = async (
+		intent: keyof typeof operations,
+		webhookName = 'launcher',
+	) => {
 		const response = await post({ intent, webhookName })
 		return {
 			status: response.status,
@@ -353,7 +375,7 @@ test('package webhooks API is owner-only: another username or an unknown package
 	expect(unknownPackage.status).toBe(404)
 })
 
-test('package webhooks API rejects unknown webhooks, bad bodies, and anonymous callers', async () => {
+test('package webhook operations reject unknown webhooks, empty names, and anonymous callers', async () => {
 	const { db, get, act } = await setup()
 
 	const undeclared = await act('mint', 'nope')
@@ -362,9 +384,8 @@ test('package webhooks API rejects unknown webhooks, bad bodies, and anonymous c
 
 	const rejected = [
 		{ name: 'unminted reveal', intent: 'reveal', webhookName: 'sentry' },
-		{ name: 'unknown intent', intent: 'delete', webhookName: 'sentry' },
 		{ name: 'blank webhook name', intent: 'mint', webhookName: ' ' },
-	]
+	] as const
 	for (const { name, intent, webhookName } of rejected) {
 		const { status } = await act(intent, webhookName)
 		expect({ name, status }).toEqual({ name, status: 400 })

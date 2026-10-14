@@ -36,7 +36,7 @@ vi.mock('#worker/audit-log.ts', async (importOriginal) => {
 	}
 })
 
-const { mutateAdminSystemEmail } =
+const { deleteAdminSystemEmail } =
 	await import('#worker/admin/system-email-operations.ts')
 
 const migrationsDirectory = new URL('../../../migrations/', import.meta.url)
@@ -172,11 +172,14 @@ function createHarness() {
 				headers: { Accept: 'application/json' },
 			})
 			if (input.body)
-				return mutateAdminSystemEmail({
+				return deleteAdminSystemEmail({
 					env,
 					request,
 					url: requestUrl,
-					body: input.body,
+					messageId:
+						typeof input.body.message_id === 'string'
+							? input.body.message_id
+							: '',
 				})
 			const { requireUserWithRole } = await import('#app/permissions-server.ts')
 			const actor = await requireUserWithRole(request, env, 'admin')

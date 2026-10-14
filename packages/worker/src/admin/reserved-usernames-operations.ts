@@ -12,74 +12,31 @@ import {
 	removeReservedUsernames,
 } from '#worker/identity/reserved-username-settings.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
-import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
 
-export async function mutateAdminReservedUsernames({
-	env,
-	request,
-	url,
-	body,
-}: {
+type ReservedUsernamesInput = {
 	env: Env
 	request: Request
-	url: URL
-	body: Record<string, unknown>
-}) {
-	const actor = await requireUserWithRole(request, env, 'admin')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readNonEmptyTrimmedStringOrNumber(body, 'action')
-	if (action === 'add') {
-		return handleMutationAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-			kind: 'add',
-		})
-	}
-	if (action === 'remove') {
-		return handleMutationAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-			kind: 'remove',
-		})
-	}
-
-	return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
+	usernames: string[]
+}
+export async function addAdminReservedUsernames(input: ReservedUsernamesInput) {
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	return updateReservedUsernames({ ...input, actor, kind: 'add' })
+}
+export async function removeAdminReservedUsernames(
+	input: ReservedUsernamesInput,
+) {
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	return updateReservedUsernames({ ...input, actor, kind: 'remove' })
 }
 
-function readUsernames(body: object) {
-	const record = body as Record<string, unknown>
-	if (Array.isArray(record.usernames)) {
-		return record.usernames.filter(
-			(value): value is string => typeof value === 'string',
-		)
-	}
-	const text =
-		readNonEmptyTrimmedStringOrNumber(body, 'usernames') ??
-		readNonEmptyTrimmedStringOrNumber(body, 'text')
-	return text ? [text] : []
-}
-
-async function handleMutationAction(input: {
+async function updateReservedUsernames(input: {
 	env: Env
 	request: Request
-	url: URL
 	actor: Awaited<ReturnType<typeof requireUserWithRole>>
-	body: object
+	usernames: string[]
 	kind: 'add' | 'remove'
 }) {
-	const usernames = readUsernames(input.body)
+	const usernames = input.usernames
 	try {
 		if (input.kind === 'add') {
 			await addReservedUsernames({
@@ -120,7 +77,7 @@ async function handleMutationAction(input: {
 		result: 'success',
 		email: input.actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/reserved-usernames',
 		reason: `usernames=${usernames.join(',')}`,
 	})
 

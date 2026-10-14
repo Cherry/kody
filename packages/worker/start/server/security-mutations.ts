@@ -1,45 +1,74 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 
-export const updatePasskey = createServerFn({ method: 'POST' })
-	.validator((body: Record<string, unknown>) =>
-		z
-			.object({
-				intent: z.enum(['delete', 'rename']),
-				passkeyId: z.string(),
-				name: z.string().optional(),
-			})
-			.parse(body),
-	)
+export const deletePasskey = createServerFn({ method: 'POST' })
+	.validator(z.object({ passkeyId: z.string() }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		const { mutatePasskeys } =
+		const { deleteAccountPasskey } =
 			await import('../../src/app/handlers/account-passkeys.ts')
 		return withWebsiteMutation({}, async (context) => {
-			const result = await mutatePasskeys({ ...context, body: data })
+			const result = await deleteAccountPasskey({ ...context, ...data })
 			if ('error' in result) throw new Error(result.error)
 			return result
 		})
 	})
-
-export const updateTwoFactor = createServerFn({ method: 'POST' })
-	.validator((body: Record<string, unknown>) =>
-		z
-			.object({
-				intent: z.enum(['setup', 'confirm', 'cancel', 'disable']),
-				code: z.string().optional(),
-			})
-			.parse(body),
-	)
+export const renamePasskey = createServerFn({ method: 'POST' })
+	.validator(z.object({ passkeyId: z.string(), name: z.string().optional() }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		const { mutateTwoFactor } =
-			await import('../../src/app/handlers/account-two-factor.ts')
-		return withWebsiteMutation({}, (context) =>
-			mutateTwoFactor({ ...context, body: data }),
-		)
+		const { renameAccountPasskey } =
+			await import('../../src/app/handlers/account-passkeys.ts')
+		return withWebsiteMutation({}, async (context) => {
+			const result = await renameAccountPasskey({ ...context, ...data })
+			if ('error' in result) throw new Error(result.error)
+			return result
+		})
 	})
-
+export const startTwoFactorSetup = createServerFn({ method: 'POST' })
+	.validator(z.object({}))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { startAccountTwoFactorSetup } =
+			await import('../../src/app/handlers/account-two-factor.ts')
+		return withWebsiteMutation({}, async (context) => {
+			const result = await startAccountTwoFactorSetup({ ...context, ...data })
+			return result
+		})
+	})
+export const confirmTwoFactorSetup = createServerFn({ method: 'POST' })
+	.validator(z.object({ code: z.string() }))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { confirmAccountTwoFactorSetup } =
+			await import('../../src/app/handlers/account-two-factor.ts')
+		return withWebsiteMutation({}, async (context) => {
+			const result = await confirmAccountTwoFactorSetup({ ...context, ...data })
+			return result
+		})
+	})
+export const cancelTwoFactorSetup = createServerFn({ method: 'POST' })
+	.validator(z.object({}))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { cancelAccountTwoFactorSetup } =
+			await import('../../src/app/handlers/account-two-factor.ts')
+		return withWebsiteMutation({}, async (context) => {
+			const result = await cancelAccountTwoFactorSetup({ ...context, ...data })
+			return result
+		})
+	})
+export const disableTwoFactor = createServerFn({ method: 'POST' })
+	.validator(z.object({ code: z.string() }))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { disableAccountTwoFactor } =
+			await import('../../src/app/handlers/account-two-factor.ts')
+		return withWebsiteMutation({}, async (context) => {
+			const result = await disableAccountTwoFactor({ ...context, ...data })
+			return result
+		})
+	})
 export const changePassword = createServerFn({ method: 'POST' })
 	.validator(
 		z.object({

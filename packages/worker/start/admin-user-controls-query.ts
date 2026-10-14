@@ -2,7 +2,7 @@ import {
 	readAdminOrgLimits,
 	updateAdminOrgLimits,
 } from '#start/server/admin-controls'
-import { saveAdminUsers } from '#start/server/admin-mutations'
+import { verifyAdminUserEmailDestination } from '#start/server/admin-mutations'
 import {
 	type LimitOverrideKey,
 	type LimitOverrideValue,
@@ -72,14 +72,11 @@ export function adminDestinationMutationOptions(client: QueryClient) {
 			destinationEmail: string
 			href: string
 		}) =>
-			saveAdminUsers({
+			verifyAdminUserEmailDestination({
 				data: {
 					search: new URL(input.href, 'http://localhost').search,
-					body: {
-						action: 'mark_email_destination_verified',
-						stableUserId: input.stableUserId,
-						destinationEmail: input.destinationEmail,
-					},
+					stableUserId: input.stableUserId,
+					destinationEmail: input.destinationEmail,
 				},
 			}),
 		onSettled: async (_data, _error, input) => {

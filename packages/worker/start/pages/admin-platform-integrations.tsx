@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import type { PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
 	buildHrefWithUpdatedSearch,
 	filterApps,
@@ -9,7 +10,10 @@ import {
 	splitListInput,
 	type ActionState,
 } from '#client/routes/admin-platform-integrations-shared.ts'
-import { saveAdminPlatformIntegrations } from '#start/server/admin-mutations'
+import {
+	saveAdminPlatformIntegration,
+	deleteAdminPlatformIntegration,
+} from '#start/server/admin-mutations'
 import {
 	type AdminPlatformIntegrationApp,
 	type AdminPlatformIntegrationsLoaderData,
@@ -43,19 +47,25 @@ import {
 	recordStampCss,
 } from './record-table.tsx'
 const clampedCellCss = css(recordCellClamp(28))
+type AdminWrite =
+	| ({ action: 'save' } & PlatformIntegrationSaveInput)
+	| { action: 'delete'; slug: string }
 export function AdminPlatformIntegrationsPage(props: {
 	queryKey: QueryKey
 	payload: AdminPlatformIntegrationsLoaderData
 	currentHref: string
 }) {
 	const { apps } = props.payload
-	const mutation = usePageResponseMutation<AdminPlatformIntegrationsLoaderData>(
+	const mutation = usePageResponseMutation<
+		AdminPlatformIntegrationsLoaderData,
+		AdminWrite
+	>(
 		props.queryKey,
 		'loadAdminPlatformIntegrations',
-		(body, href) =>
-			saveAdminPlatformIntegrations({
-				data: { body, search: new URL(href, 'http://localhost').search },
-			}),
+		(body) =>
+			body.action === 'delete'
+				? deleteAdminPlatformIntegration({ data: { slug: body.slug } })
+				: saveAdminPlatformIntegration({ data: body }),
 		{ dependencies: mutationResources },
 	)
 	const router = useRouter()
@@ -101,7 +111,7 @@ export function AdminPlatformIntegrationsPage(props: {
 		setMessageTone('info')
 	}
 	async function submitAdminAction(
-		body: Record<string, unknown>,
+		body: AdminWrite,
 		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
 	): Promise<boolean> {
@@ -185,7 +195,7 @@ export function AdminPlatformIntegrationsPage(props: {
 			setMessageTone('error')
 			return
 		}
-		const body: Record<string, unknown> = {
+		const body: AdminWrite = {
 			action: 'save',
 			slug,
 			...(newSlug ? { newSlug } : {}),
@@ -213,12 +223,15 @@ export function AdminPlatformIntegrationsPage(props: {
 				String(formData.get('extraAuthorizeParams') ?? ''),
 			),
 		}
-		// Always include the key: the handler maps non-literal values (the
-		// "default" option) to null, which clears a stored style — omitting
-		// the key would retain it instead.
-		body.tokenExchangeStyle = String(
-			formData.get('tokenExchangeStyle') ?? 'default',
-		)
+		// Send null for the default option to clear a stored style.
+		// Omitting the key retains the current setting.
+		const tokenExchangeStyle = formData.get('tokenExchangeStyle')
+		body.tokenExchangeStyle =
+			tokenExchangeStyle === 'form' ||
+			tokenExchangeStyle === 'basic-form' ||
+			tokenExchangeStyle === 'basic-json'
+				? tokenExchangeStyle
+				: null
 		const clientSecret = String(formData.get('clientSecret') ?? '').trim()
 		if (clientSecret) {
 			body.clientSecret = clientSecret

@@ -1,3 +1,8 @@
+import {
+	type SetGlobalFeatureFlagInput,
+	type SetFeatureFlagOverrideInput,
+	type ClearFeatureFlagOverrideInput,
+} from '#universal/admin-setting-mutations.ts'
 import { adminOperationResult } from './operation-result.ts'
 import { loadAdminFeatureFlagsData } from '#app/admin-feature-flags-data.ts'
 import {
@@ -6,7 +11,6 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
-import { readNonEmptyTrimmedStringOrNumber } from '#app/request-body.ts'
 import { isFeatureFlagKey } from '#universal/feature-flags/registry.ts'
 import {
 	clearFeatureFlagUserOverride,
@@ -17,62 +21,13 @@ import {
 import { parsePersonId } from '@kody-internal/shared/owner-person-ids.ts'
 import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 
-export async function mutateAdminFeatureFlags({
-	env,
-	request,
-	url,
-	body,
-}: {
+export async function setAdminGlobalFeatureFlag(input: {
 	env: Env
 	request: Request
-	url: URL
-	body: Record<string, unknown>
+	fields: SetGlobalFeatureFlagInput
 }) {
-	const actor = await requireUserWithRole(request, env, 'admin')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readNonEmptyTrimmedStringOrNumber(body, 'action')
-	if (action === 'set_global') {
-		return handleSetGlobalAction({ env, request, url, actor, body })
-	}
-	if (action === 'set_user_override') {
-		return handleSetUserOverrideAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'clear_user_override') {
-		return handleClearUserOverrideAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'delete_stale') {
-		return handleDeleteStaleAction({ env, request, url, actor, body })
-	}
-
-	return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
-}
-
-async function handleSetGlobalAction(input: {
-	env: Env
-	request: Request
-	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithRole>>
-	body: object
-}) {
-	const key = readNonEmptyTrimmedStringOrNumber(input.body, 'key')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const key = input.fields.key.trim()
 	if (!key || !isFeatureFlagKey(key)) {
 		return adminOperationResult(
 			{ ok: false, error: 'Unknown or invalid feature flag key.' },
@@ -80,16 +35,21 @@ async function handleSetGlobalAction(input: {
 		)
 	}
 
-	const enabled = readBoolean(input.body, 'enabled')
-	if (enabled === null) {
+	const enabled = input.fields.enabled
+	if (typeof enabled !== 'boolean') {
 		return adminOperationResult(
 			{ ok: false, error: 'enabled must be a boolean.' },
 			400,
 		)
 	}
 
-	const rolloutPercent = readRolloutPercent(input.body)
-	if (rolloutPercent === false) {
+	const rolloutPercent = input.fields.rolloutPercent ?? null
+	if (
+		rolloutPercent !== null &&
+		(!Number.isInteger(rolloutPercent) ||
+			rolloutPercent < 0 ||
+			rolloutPercent > 100)
+	) {
 		return adminOperationResult(
 			{
 				ok: false,
@@ -99,18 +59,18 @@ async function handleSetGlobalAction(input: {
 		)
 	}
 
-	const bodyRecord = input.body as Record<string, unknown>
+	const fields = input.fields
 
 	try {
 		await setFeatureFlagGlobalState(input.env.APP_DB, {
 			key,
 			enabled,
 			rolloutPercent,
-			...(Object.hasOwn(bodyRecord, 'note') ? { note: bodyRecord.note } : {}),
-			...(Object.hasOwn(bodyRecord, 'audience')
-				? { audience: bodyRecord.audience }
+			...(Object.hasOwn(fields, 'note') ? { note: fields.note } : {}),
+			...(Object.hasOwn(fields, 'audience')
+				? { audience: fields.audience }
 				: {}),
-			updatedBy: input.actor.userId,
+			updatedBy: actor.userId,
 		})
 	} catch (error) {
 		return adminOperationResult(
@@ -131,15 +91,15 @@ async function handleSetGlobalAction(input: {
 		category: 'admin',
 		action: 'feature_flag_set_global',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/feature-flags',
 		reason: [
 			`key=${key}`,
 			`enabled=${enabled}`,
 			`rollout_percent=${rolloutPercent === null ? 'null' : String(rolloutPercent)}`,
-			Object.hasOwn(bodyRecord, 'audience')
-				? `audience=${String(bodyRecord.audience)}`
+			Object.hasOwn(fields, 'audience')
+				? `audience=${String(fields.audience)}`
 				: null,
 		]
 			.filter((part) => part !== null)
@@ -149,14 +109,13 @@ async function handleSetGlobalAction(input: {
 	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
 }
 
-async function handleSetUserOverrideAction(input: {
+export async function setAdminFeatureFlagOverride(input: {
 	env: Env
 	request: Request
-	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithRole>>
-	body: object
+	fields: SetFeatureFlagOverrideInput
 }) {
-	const key = readNonEmptyTrimmedStringOrNumber(input.body, 'key')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const key = input.fields.key.trim()
 	if (!key || !isFeatureFlagKey(key)) {
 		return adminOperationResult(
 			{ ok: false, error: 'Unknown or invalid feature flag key.' },
@@ -164,8 +123,8 @@ async function handleSetUserOverrideAction(input: {
 		)
 	}
 
-	const enabled = readBoolean(input.body, 'enabled')
-	if (enabled === null) {
+	const enabled = input.fields.enabled
+	if (typeof enabled !== 'boolean') {
 		return adminOperationResult(
 			{ ok: false, error: 'enabled must be a boolean.' },
 			400,
@@ -174,7 +133,7 @@ async function handleSetUserOverrideAction(input: {
 
 	const resolvedUserId = await resolveOverrideUserId(
 		input.env.APP_DB,
-		input.body,
+		input.fields,
 	)
 	if (resolvedUserId.status === 'invalid') {
 		return adminOperationResult({ ok: false, error: resolvedUserId.error }, 400)
@@ -189,7 +148,7 @@ async function handleSetUserOverrideAction(input: {
 		key,
 		userId: targetUserId,
 		enabled,
-		updatedBy: input.actor.userId,
+		updatedBy: actor.userId,
 	})
 
 	const requestIp = getRequestIp(input.request) ?? undefined
@@ -198,9 +157,9 @@ async function handleSetUserOverrideAction(input: {
 		category: 'admin',
 		action: 'feature_flag_set_user_override',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/feature-flags',
 		reason: [
 			`key=${key}`,
 			`target_stable_user_id=${targetStableUserId}`,
@@ -211,14 +170,13 @@ async function handleSetUserOverrideAction(input: {
 	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
 }
 
-async function handleClearUserOverrideAction(input: {
+export async function clearAdminFeatureFlagOverride(input: {
 	env: Env
 	request: Request
-	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithRole>>
-	body: object
+	fields: ClearFeatureFlagOverrideInput
 }) {
-	const key = readNonEmptyTrimmedStringOrNumber(input.body, 'key')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const key = input.fields.key.trim()
 	if (!key || !isFeatureFlagKey(key)) {
 		return adminOperationResult(
 			{ ok: false, error: 'Unknown or invalid feature flag key.' },
@@ -228,7 +186,7 @@ async function handleClearUserOverrideAction(input: {
 
 	const resolvedUserId = await resolveOverrideUserId(
 		input.env.APP_DB,
-		input.body,
+		input.fields,
 	)
 	if (resolvedUserId.status === 'invalid') {
 		return adminOperationResult({ ok: false, error: resolvedUserId.error }, 400)
@@ -254,9 +212,9 @@ async function handleClearUserOverrideAction(input: {
 		category: 'admin',
 		action: 'feature_flag_clear_user_override',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/feature-flags',
 		reason: [
 			`key=${key}`,
 			`target_stable_user_id=${resolvedUserId.stableUserId}`,
@@ -266,14 +224,13 @@ async function handleClearUserOverrideAction(input: {
 	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
 }
 
-async function handleDeleteStaleAction(input: {
+export async function deleteAdminStaleFeatureFlag(input: {
 	env: Env
 	request: Request
-	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithRole>>
-	body: object
+	fields: { key: string }
 }) {
-	const key = readNonEmptyTrimmedStringOrNumber(input.body, 'key')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const key = input.fields.key.trim()
 	if (!key) {
 		return adminOperationResult(
 			{ ok: false, error: 'Feature flag key is required.' },
@@ -308,9 +265,9 @@ async function handleDeleteStaleAction(input: {
 		category: 'admin',
 		action: 'feature_flag_delete_stale',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/feature-flags',
 		reason: `key=${key}`,
 	})
 
@@ -324,13 +281,13 @@ type ResolveOverrideUserIdResult =
 
 async function resolveOverrideUserId(
 	db: D1Database,
-	body: object,
+	fields: ClearFeatureFlagOverrideInput,
 ): Promise<ResolveOverrideUserIdResult> {
-	const record = body as Record<string, unknown>
-	const stableUserId = readStableUserIdField(body)
+	const record = fields
+	const stableUserId = parsePersonId(fields.stableUserId)
 	const hasStableUserId =
 		Object.hasOwn(record, 'stableUserId') && record.stableUserId != null
-	const username = readNonEmptyTrimmedStringOrNumber(body, 'username')
+	const username = fields.username?.trim() || null
 	const hasUsername = username !== null
 
 	if (!hasStableUserId && !hasUsername) {
@@ -389,37 +346,4 @@ async function resolveOverrideUserId(
 		dbUserId: row.id,
 		stableUserId: row.stable_user_id,
 	}
-}
-
-function readRolloutPercent(body: object): number | null | false {
-	const value = (body as Record<string, unknown>).rolloutPercent
-	if (value === null || value === undefined || value === '') {
-		return null
-	}
-	if (typeof value === 'number') {
-		if (!Number.isInteger(value) || value < 0 || value > 100) {
-			return false
-		}
-		return value
-	}
-	if (typeof value === 'string' && value.trim()) {
-		const parsed = Number(value.trim())
-		if (!Number.isInteger(parsed) || parsed < 0 || parsed > 100) {
-			return false
-		}
-		return parsed
-	}
-	return false
-}
-
-function readBoolean(body: object, key: string): boolean | null {
-	const value = (body as Record<string, unknown>)[key]
-	if (typeof value === 'boolean') return value
-	if (value === 'true') return true
-	if (value === 'false') return false
-	return null
-}
-
-function readStableUserIdField(body: object): string | null {
-	return parsePersonId((body as Record<string, unknown>).stableUserId)
 }

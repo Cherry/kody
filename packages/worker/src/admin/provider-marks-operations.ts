@@ -1,7 +1,7 @@
 import { base64ToBytes } from '@kody-internal/shared/base64.ts'
 import { loadAdminProviderMarksData } from '#app/admin-provider-marks-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
-import { readNonEmptyTrimmedString as readString } from '#app/request-body.ts'
+import type { ProviderMarkSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -17,55 +17,19 @@ import {
 } from '#worker/integrations/provider-marks.ts'
 import { adminOperationResult } from './operation-result.ts'
 
-export async function mutateAdminProviderMarks({
-	env,
-	request,
-	url,
-	body,
-}: {
+export async function saveAdminProviderMark(input: {
 	env: Env
 	request: Request
-	url: URL
-	body: Record<string, unknown>
+	data: ProviderMarkSaveInput
 }) {
-	const actor = await requireUserWithRole(request, env, 'admin')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readString(body, 'action')
-	if (action === 'save') {
-		return await handleSaveAction({ env, request, url, actor, body })
-	}
-	if (action === 'delete') {
-		return await handleDeleteAction({ env, request, url, actor, body })
-	}
-	return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
-}
-
-type AdminActor = Awaited<ReturnType<typeof requireUserWithRole>>
-
-async function handleSaveAction(input: {
-	env: Env
-	request: Request
-	url: URL
-	actor: AdminActor
-	body: object
-}) {
-	const record = input.body as Record<string, unknown>
-	const slug = readString(input.body, 'slug')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const record = input.data
+	const slug = record.slug.trim()
 	if (!slug) {
 		return adminOperationResult({ ok: false, error: 'Slug is required.' }, 400)
 	}
-	const label = readString(input.body, 'label')
-	const aliases = Array.isArray(record.aliases)
-		? record.aliases.filter(
-				(value): value is string => typeof value === 'string',
-			)
-		: undefined
+	const label = record.label?.trim()
+	const aliases = record.aliases
 	let logoBytes: Uint8Array | null | undefined
 	let logoEnv: Pick<Env, 'COMMUNITY_ASSETS' | 'IMAGES'> | undefined
 	if (record.logoBase64 !== undefined) {
@@ -112,9 +76,9 @@ async function handleSaveAction(input: {
 			category: 'admin',
 			action: 'platform_provider_mark_admin_save',
 			result: 'success',
-			email: input.actor.email,
+			email: actor.email,
 			ip: getRequestIp(input.request) ?? undefined,
-			path: input.url.pathname,
+			path: '/admin/provider-marks',
 			reason: `platform_provider_mark=${mark.slug}`,
 		})
 		return adminOperationResult(await loadAdminProviderMarksData(input.env))
@@ -126,14 +90,13 @@ async function handleSaveAction(input: {
 	}
 }
 
-async function handleDeleteAction(input: {
+export async function deleteAdminProviderMark(input: {
 	env: Env
 	request: Request
-	url: URL
-	actor: AdminActor
-	body: object
+	slug: string
 }) {
-	const slug = readString(input.body, 'slug')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const slug = input.slug.trim()
 	if (!slug) {
 		return adminOperationResult({ ok: false, error: 'Slug is required.' }, 400)
 	}
@@ -162,9 +125,9 @@ async function handleDeleteAction(input: {
 		category: 'admin',
 		action: 'platform_provider_mark_admin_delete',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: getRequestIp(input.request) ?? undefined,
-		path: input.url.pathname,
+		path: '/admin/provider-marks',
 		reason: `platform_provider_mark=${slug}`,
 	})
 	return adminOperationResult(await loadAdminProviderMarksData(input.env))

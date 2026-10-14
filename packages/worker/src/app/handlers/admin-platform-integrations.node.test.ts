@@ -1,3 +1,4 @@
+import { platformIntegrationSaveSchema } from '#universal/admin-provider-mutations.ts'
 import type * as AuthenticatedUser from '#app/authenticated-user.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import type * as AuditLog from '#worker/audit-log.ts'
@@ -32,7 +33,7 @@ vi.mock('#worker/audit-log.ts', async (importOriginal) => {
 	}
 })
 
-const { mutateAdminPlatformIntegrations } =
+const { saveAdminPlatformIntegration, deleteAdminPlatformIntegration } =
 	await import('#worker/admin/platform-integrations-operations.ts')
 
 const migrationsDirectory = new URL('../../../migrations/', import.meta.url)
@@ -87,15 +88,24 @@ function createHarness() {
 		IMAGES: createFakeImagesBinding(),
 	} as unknown as Env
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(createActor(['admin']))
-	const url = new URL('https://example.com/admin/platform-integrations.json')
+	const url = new URL('https://example.com/admin/platform-integrations')
 	const invoke = (body: Record<string, unknown>) =>
 		adminOperationOutcome(() =>
-			mutateAdminPlatformIntegrations({
-				env,
-				request: new Request(url, { headers: { Accept: 'application/json' } }),
-				url,
-				body,
-			}),
+			body.action === 'delete'
+				? deleteAdminPlatformIntegration({
+						env,
+						request: new Request(url, {
+							headers: { Accept: 'application/json' },
+						}),
+						slug: String(body.slug ?? ''),
+					})
+				: saveAdminPlatformIntegration({
+						env,
+						request: new Request(url, {
+							headers: { Accept: 'application/json' },
+						}),
+						data: platformIntegrationSaveSchema.parse(body),
+					}),
 		)
 	const connectGithubUser = () =>
 		sqlite
@@ -170,15 +180,13 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 	).toMatchObject({
 		visibility: 'published',
 	})
-	const invalid = await invoke({
-		...editGithubBody,
-		slug: 'github',
-		visibility: 'Draft',
-	})
-	expect(invalid.status).toBe(400)
-	await expect(Promise.resolve(invalid.data)).resolves.toMatchObject({
-		ok: false,
-	})
+	expect(
+		platformIntegrationSaveSchema.safeParse({
+			...editGithubBody,
+			slug: 'github',
+			visibility: 'Draft',
+		}).success,
+	).toBe(false)
 	const unpublish = await invoke({
 		...editGithubBody,
 		slug: 'github',

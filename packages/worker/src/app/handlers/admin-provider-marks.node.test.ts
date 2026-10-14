@@ -1,3 +1,4 @@
+import { providerMarkSaveSchema } from '#universal/admin-provider-mutations.ts'
 import type * as AuthenticatedUser from '#app/authenticated-user.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import type * as AuditLog from '#worker/audit-log.ts'
@@ -36,7 +37,7 @@ vi.mock('#worker/audit-log.ts', async (importOriginal) => {
 	}
 })
 
-const { mutateAdminProviderMarks } =
+const { saveAdminProviderMark, deleteAdminProviderMark } =
 	await import('#worker/admin/provider-marks-operations.ts')
 
 const migrationsDirectory = new URL('../../../migrations/', import.meta.url)
@@ -88,7 +89,7 @@ function createMarksClient() {
 			IMAGES: images,
 		}) as unknown as Env
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(createActor(['admin']))
-	const url = new URL('https://example.com/admin/provider-marks.json')
+	const url = new URL('https://example.com/admin/provider-marks')
 	const call = (
 		body?: Record<string, unknown>,
 		{ storage = true }: { storage?: boolean } = {},
@@ -98,7 +99,18 @@ function createMarksClient() {
 			const request = new Request(url, {
 				headers: { Accept: 'application/json' },
 			})
-			if (body) return mutateAdminProviderMarks({ env, request, url, body })
+			if (body)
+				return body.action === 'delete'
+					? deleteAdminProviderMark({
+							env,
+							request,
+							slug: String(body.slug ?? ''),
+						})
+					: saveAdminProviderMark({
+							env,
+							request,
+							data: providerMarkSaveSchema.parse(body),
+						})
 			const { requireUserWithRole } = await import('#app/permissions-server.ts')
 			await requireUserWithRole(request, env, 'admin')
 			const { loadAdminProviderMarksData } =

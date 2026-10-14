@@ -1,3 +1,7 @@
+import {
+	grantPackageCollaboratorInput,
+	revokePackageCollaboratorInput,
+} from '#universal/package-access-mutations.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
@@ -23,8 +27,11 @@ vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
 		mocks.resolveSavedPackage(...args),
 }))
 
-const { readPackageCollaborators, mutatePackageCollaborators } =
-	await import('./package-collaborators.ts')
+const {
+	readPackageCollaborators,
+	grantPackageCollaborator,
+	revokePackageCollaborator,
+} = await import('./package-collaborators.ts')
 
 let seed: PackageCollaboratorsSeed
 
@@ -70,7 +77,7 @@ function signIn(person: CollaboratorPerson): AuthenticatedAppUser {
 
 async function call(
 	person: CollaboratorPerson,
-	change?: PackageCollaboratorsChange | Record<string, unknown>,
+	change?: PackageCollaboratorsChange,
 ) {
 	const input = {
 		user: signIn(person),
@@ -82,7 +89,15 @@ async function call(
 		kodyId: 'demo-package',
 	}
 	const result = change
-		? await mutatePackageCollaborators({ ...input, body: change })
+		? change.intent === 'grant'
+			? await grantPackageCollaborator({
+					...input,
+					...grantPackageCollaboratorInput.parse({ ...input, ...change }),
+				})
+			: await revokePackageCollaborator({
+					...input,
+					...revokePackageCollaboratorInput.parse({ ...input, ...change }),
+				})
 		: await readPackageCollaborators(input)
 	return {
 		status: result.status,
@@ -212,17 +227,16 @@ test('an outside collaborator is listed and can be removed but not changed', asy
 	expect(await auditActions()).toEqual(['grant.revoked'])
 })
 
-test('invite changes are not accepted', async () => {
-	const result = await call('ada', {
-		intent: 'invite',
-		invitee: '@dan',
-		preset: 'use',
-	})
-	expect(result.status).toBe(400)
-	const invites = await seed.db
-		.prepare(`SELECT COUNT(*) AS count FROM invites`)
-		.first<{ count: number }>()
-	expect(invites?.count).toBe(0)
+test('grant input rejects invitation fields without a member or team identity', () => {
+	expect(
+		grantPackageCollaboratorInput.safeParse({
+			username: 'zeta-co',
+			kodyId: 'demo-package',
+			intent: 'invite',
+			invitee: '@dan',
+			preset: 'use',
+		}).success,
+	).toBe(false)
 })
 
 test('a grant on another package cannot be removed here', async () => {
@@ -275,8 +289,12 @@ test('Manage is required; without read the package is not found', async () => {
 	])
 })
 
-test('a malformed change is rejected', async () => {
-	const result = await call('ada', { intent: 'grant', subjectType: 'user' })
-	expect(result.status).toBe(400)
-	expect(result.body).toMatchObject({ ok: false })
+test('a malformed grant is rejected', () => {
+	expect(
+		grantPackageCollaboratorInput.safeParse({
+			username: 'zeta-co',
+			kodyId: 'demo-package',
+			subjectType: 'user',
+		}).success,
+	).toBe(false)
 })

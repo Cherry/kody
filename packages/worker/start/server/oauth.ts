@@ -27,8 +27,8 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 			import('../../src/app/public-auth-providers.ts'),
 		])
 		const bindings = getEnv(env)
-		const url = new URL(`/oauth/authorize${search}`, getRequest().url)
-		const request = new Request(url, { headers: getRequest().headers })
+		const request = getRequest()
+		const url = new URL(`/oauth/authorize${search}`, request.url)
 		const initial = getGlobalStartContext()?.oauthPage
 		const initialData =
 			initial?.href === url.href
@@ -36,7 +36,7 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 				: undefined
 		const result = initialData
 			? { data: initialData, setCookie: null }
-			: await loadOAuthAuthorizeData(request, bindings)
+			: await loadOAuthAuthorizeData(request, bindings, url)
 		const { session, setCookie } = await loadSessionInfo(request, bindings)
 		const cookies = [result.setCookie, setCookie].filter(
 			(cookie): cookie is string => Boolean(cookie),

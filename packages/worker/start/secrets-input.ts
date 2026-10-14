@@ -1,3 +1,4 @@
+import { parseCredentialCreateQuery } from '#universal/credential-contracts.ts'
 import {
 	buildAccountSecretId,
 	type AccountSecretRouteIdInput,
@@ -10,11 +11,29 @@ export function secretsInput(
 ) {
 	const params = new URLSearchParams(search)
 	const scope = params.get('scope')?.trim()
+	const creationParams = new URLSearchParams(params)
+	for (const value of params.getAll('allowed-host'))
+		creationParams.append('allowedHosts', value)
+	for (const key of ['package', 'package_id']) {
+		for (const value of params.getAll(key))
+			creationParams.append('allowedPackages', value)
+	}
+	const creation = parseCredentialCreateQuery(creationParams)
 	return {
 		orgSlug,
 		create,
-		setupName: params.get('name') ?? undefined,
-		provider: params.get('provider') ?? undefined,
+		creation: {
+			name: creation.name,
+			provider: creation.provider,
+			description: creation.description,
+			allowedHosts: creation.allowedHosts,
+			packageKodyId: creation.packageKodyId,
+			needKey: creation.needKey,
+			packageScopedTo: creation.packageScopedTo,
+			packageScopeMissingId: creation.packageScopeMissingId,
+			expiresAt: creation.expiresAt,
+			allowedPackages: creation.allowedPackages,
+		},
 		selectedSecretId: selection
 			? buildAccountSecretId(selection)
 			: params.get('selected')?.trim() || null,

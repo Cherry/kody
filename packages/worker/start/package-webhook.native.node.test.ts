@@ -10,10 +10,14 @@ import {
 	type PackageWebhookListItem,
 	type PackageWebhooksLoaderData,
 } from '#universal/loader-data.ts'
-const native = vi.hoisted(() => ({ updatePackageWebhook: vi.fn() }))
+const native = vi.hoisted(() => ({
+	revealPackageWebhook: vi.fn(),
+	rotatePackageWebhook: vi.fn(),
+}))
 vi.mock('#start/server/package-webhooks', async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
-	updatePackageWebhook: native.updatePackageWebhook,
+	revealPackageWebhook: native.revealPackageWebhook,
+	rotatePackageWebhook: native.rotatePackageWebhook,
 }))
 const listCommands: PackageWebhookListItem = {
 	id: 'raycast/list-commands',
@@ -134,7 +138,7 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 	const payload = listPayload([run])
 	client.setQueryData(key, listPayload([listCommands]))
 	client.setQueryData(other, { marker: 'other' })
-	native.updatePackageWebhook.mockResolvedValueOnce({
+	native.revealPackageWebhook.mockResolvedValueOnce({
 		...payload,
 		revealed: { id: run.id, url: secretUrl },
 	})
@@ -155,12 +159,11 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 			invalidate,
 		})
 		expect(accepted.revealed?.url).toBe(secretUrl)
-		expect(native.updatePackageWebhook).toHaveBeenLastCalledWith({
+		expect(native.revealPackageWebhook).toHaveBeenLastCalledWith({
 			data: {
 				username: 'jane',
 				kodyId: 'raycast',
 				webhookName: run.name,
-				intent: 'reveal',
 			},
 		})
 		expect(client.getQueryData(key)).toEqual(payload)
@@ -204,7 +207,7 @@ test('failed webhook write retains rows and invalidates only its submitted packa
 	const payload = listPayload([run])
 	client.setQueryData(key, payload)
 	client.setQueryData(other, { marker: 'other' })
-	native.updatePackageWebhook.mockResolvedValueOnce({
+	native.rotatePackageWebhook.mockResolvedValueOnce({
 		ok: false,
 		error: 'Unable to rotate',
 	})

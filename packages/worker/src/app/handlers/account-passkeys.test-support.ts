@@ -1,6 +1,11 @@
+import { z } from 'zod'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { loadPasskeysPayload, mutatePasskeys } from './account-passkeys.ts'
+import {
+	loadPasskeysPayload,
+	deleteAccountPasskey,
+	renameAccountPasskey,
+} from './account-passkeys.ts'
 export function testAccountPasskeysApiHandler(env: Env) {
 	return {
 		async execute({ request }: { request: Request }) {
@@ -19,8 +24,34 @@ export function testAccountPasskeysApiHandler(env: Env) {
 				return operationResult({ ok: false, error: 'Method not allowed.' }, 405)
 			}
 
-			const body = await request.json().catch(() => null)
-			const result = await mutatePasskeys({ env, request, user, body })
+			const body = z
+				.object({
+					intent: z.enum(['delete', 'rename']),
+					passkeyId: z.string(),
+					name: z.string().optional(),
+				})
+				.parse(await request.json())
+			const result = await (async () => {
+				switch (body?.intent) {
+					case 'delete':
+						return deleteAccountPasskey({
+							env,
+							request,
+							user,
+							passkeyId: body.passkeyId,
+						})
+					case 'rename':
+						return renameAccountPasskey({
+							env,
+							request,
+							user,
+							passkeyId: body.passkeyId,
+							name: body.name,
+						})
+					default:
+						throw new Error('Unsupported security fixture intent')
+				}
+			})()
 			return operationResult(
 				result,
 				result.ok

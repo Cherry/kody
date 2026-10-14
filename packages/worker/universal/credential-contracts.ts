@@ -501,7 +501,7 @@ export function parseCredentialCreateQuery(
 // ---------------------------------------------------------------------------
 
 export const maxCredentialProposalValues = 64
-const maxCredentialProposalReasonLength = 500
+export const maxCredentialProposalReasonLength = 500
 
 function credentialApprovalPath(input: {
 	username: string
@@ -714,7 +714,7 @@ function normalizeProposalDomain(value: string) {
 	return domain
 }
 
-function normalizeProposalSenderValue(
+export function normalizeProposalSenderValue(
 	kind: Exclude<CredentialProposalSenderKind, 'any_authenticated'>,
 	value: string,
 ) {

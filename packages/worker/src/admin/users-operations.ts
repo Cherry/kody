@@ -50,121 +50,20 @@ export {
 	type AdminUserListItem,
 } from '#worker/admin/users-data.ts'
 
-export async function mutateAdminUsers({
-	env,
-	request,
-	url,
-	body,
-}: {
+export async function assignAdminUserRole(input: {
 	env: Env
 	request: Request
 	url: URL
-	body: Record<string, unknown>
+	stableUserId?: unknown
+	role?: unknown
 }) {
-	const actor = await requireUserWithPermission(request, env, 'update:user:any')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readNonEmptyTrimmedStringOrNumber(body, 'action')
-	if (action === 'assign_role') {
-		return handleAssignRoleAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'remove_role') {
-		return handleRemoveRoleAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'update_plan') {
-		return handleUpdatePlanAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'suspend_user' || action === 'unsuspend_user') {
-		return handleSuspensionAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-			suspended: action === 'suspend_user',
-		})
-	}
-	if (action === 'resume_email_outbound') {
-		return handleResumeEmailOutboundAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'mark_email_verified') {
-		return handleMarkEmailVerifiedAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'mint_verify_url') {
-		return handleMintVerifyUrlAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'mark_email_destination_verified') {
-		return handleMarkEmailDestinationVerifiedAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-	if (action === 'create_user') {
-		return handleCreateUserAction({
-			env,
-			request,
-			url,
-			actor,
-			body,
-		})
-	}
-
-	return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
-}
-
-async function handleAssignRoleAction(input: {
-	env: Env
-	request: Request
-	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
-}) {
-	const targetStableUserId = readStableUserIdField(input.body)
-	const roleName = readRoleName(input.body, 'role')
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
+	const roleName = readRoleName(input, 'role')
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -195,7 +94,7 @@ async function handleAssignRoleAction(input: {
 		category: 'admin',
 		action: 'assign_role',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId};role=${roleName}`,
@@ -226,15 +125,20 @@ async function buildMutationResponse(
 	return adminOperationResult({ ...payload, updatedUser, ...extra })
 }
 
-async function handleRemoveRoleAction(input: {
+export async function removeAdminUserRole(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
+	role?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
-	const roleName = readRoleName(input.body, 'role')
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
+	const roleName = readRoleName(input, 'role')
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -275,7 +179,7 @@ async function handleRemoveRoleAction(input: {
 					category: 'admin',
 					action: 'remove_role',
 					result: 'failure',
-					email: input.actor.email,
+					email: actor.email,
 					ip: requestIp,
 					path: input.url.pathname,
 					reason: 'last_admin',
@@ -306,7 +210,7 @@ async function handleRemoveRoleAction(input: {
 		category: 'admin',
 		action: 'remove_role',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId};role=${roleName}`,
@@ -319,21 +223,26 @@ async function handleRemoveRoleAction(input: {
 	)
 }
 
-async function handleUpdatePlanAction(input: {
+export async function setAdminUserPlan(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
+	plan?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
 			400,
 		)
 	}
-	const planUpdate = readPlanUpdate(input.body)
+	const planUpdate = readPlanUpdate(input)
 	if (!planUpdate.ok) {
 		return adminOperationResult(
 			{
@@ -358,7 +267,7 @@ async function handleUpdatePlanAction(input: {
 		category: 'admin',
 		action: 'update_plan',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId};plan=${planUpdate.plan}`,
@@ -376,22 +285,26 @@ async function handleUpdatePlanAction(input: {
  * surfaces only), suspension is fail-closed at the browser-session, MCP,
  * and email chokepoints.
  */
-async function handleSuspensionAction(input: {
+export async function setAdminUserSuspension(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
 	suspended: boolean
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
 			400,
 		)
 	}
-	if (input.suspended && targetStableUserId === input.actor.mcpUser.userId) {
+	if (input.suspended && targetStableUserId === actor.mcpUser.userId) {
 		return adminOperationResult(
 			{ ok: false, error: 'You cannot suspend your own account.' },
 			400,
@@ -412,7 +325,7 @@ async function handleSuspensionAction(input: {
 		category: 'admin',
 		action: input.suspended ? 'suspend_user' : 'unsuspend_user',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId}`,
@@ -429,14 +342,18 @@ async function handleSuspensionAction(input: {
  * Clear an automatic outbound-email pause (set by the delivery-event
  * abuse monitor) after reviewing the account's delivery history.
  */
-async function handleResumeEmailOutboundAction(input: {
+export async function resumeAdminUserEmail(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -457,7 +374,7 @@ async function handleResumeEmailOutboundAction(input: {
 		category: 'admin',
 		action: 'resume_email_outbound',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId}`,
@@ -470,14 +387,18 @@ async function handleResumeEmailOutboundAction(input: {
 	)
 }
 
-async function handleMarkEmailVerifiedAction(input: {
+export async function verifyAdminUserEmail(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -505,7 +426,7 @@ async function handleMarkEmailVerifiedAction(input: {
 		category: 'admin',
 		action: 'mark_email_verified',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId}`,
@@ -518,14 +439,18 @@ async function handleMarkEmailVerifiedAction(input: {
 	)
 }
 
-async function handleMintVerifyUrlAction(input: {
+export async function mintAdminUserVerificationUrl(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -556,7 +481,7 @@ async function handleMintVerifyUrlAction(input: {
 		category: 'admin',
 		action: 'mint_verify_url',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId}`,
@@ -573,14 +498,19 @@ async function handleMintVerifyUrlAction(input: {
 	)
 }
 
-async function handleMarkEmailDestinationVerifiedAction(input: {
+export async function verifyAdminUserEmailDestination(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	stableUserId?: unknown
+	destinationEmail?: unknown
 }) {
-	const targetStableUserId = readStableUserIdField(input.body)
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const targetStableUserId = readStableUserIdField(input)
 	if (!targetStableUserId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Stable user id is required.' },
@@ -588,7 +518,7 @@ async function handleMarkEmailDestinationVerifiedAction(input: {
 		)
 	}
 	const destinationEmail =
-		readNonEmptyTrimmedStringOrNumber(input.body, 'destinationEmail') ?? ''
+		readNonEmptyTrimmedStringOrNumber(input, 'destinationEmail') ?? ''
 	if (!destinationEmail) {
 		return adminOperationResult(
 			{ ok: false, error: 'Destination email is required.' },
@@ -619,7 +549,7 @@ async function handleMarkEmailDestinationVerifiedAction(input: {
 		category: 'admin',
 		action: 'mark_email_destination_verified',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: requestIp,
 		path: input.url.pathname,
 		reason: `target_stable_user_id=${targetStableUserId};destination=${marked.destination.email}`,
@@ -632,15 +562,20 @@ async function handleMarkEmailDestinationVerifiedAction(input: {
 	)
 }
 
-async function handleCreateUserAction(input: {
+export async function createAdminUser(input: {
 	env: Env
 	request: Request
 	url: URL
-	actor: Awaited<ReturnType<typeof requireUserWithPermission>>
-	body: object
+	email?: unknown
+	username?: unknown
 }) {
-	const email = readNonEmptyTrimmedStringOrNumber(input.body, 'email') ?? ''
-	const username = readNonEmptyTrimmedStringOrNumber(input.body, 'username')
+	const actor = await requireUserWithPermission(
+		input.request,
+		input.env,
+		'update:user:any',
+	)
+	const email = readNonEmptyTrimmedStringOrNumber(input, 'email') ?? ''
+	const username = readNonEmptyTrimmedStringOrNumber(input, 'username')
 
 	try {
 		const createdUser = await adminCreateUserWithPasswordSetup({
@@ -665,11 +600,11 @@ async function handleCreateUserAction(input: {
 			category: 'admin',
 			action: 'create_user',
 			result: 'success',
-			email: input.actor.email,
+			email: actor.email,
 			ip: requestIp,
 			path: input.url.pathname,
 			reason: [
-				`actor_stable_user_id=${input.actor.mcpUser.userId}`,
+				`actor_stable_user_id=${actor.mcpUser.userId}`,
 				`target_stable_user_id=${createdUser.stableUserId}`,
 				`target_email=${redactEmailRecipient(createdUser.email)}`,
 			].join(';'),

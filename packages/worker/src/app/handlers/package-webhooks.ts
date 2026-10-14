@@ -1,6 +1,5 @@
 import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { enum_, object, parseSafe, string } from 'remix/data-schema'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	loadPackageWebhooksData,
@@ -37,11 +36,6 @@ const webhookActionIntents = [
 ] as const
 
 type WebhookActionIntent = (typeof webhookActionIntents)[number]
-
-const webhookActionSchema = object({
-	intent: enum_(webhookActionIntents),
-	webhookName: string(),
-})
 
 type AuthenticatedUser = WebhooksUser &
 	Pick<
@@ -93,23 +87,80 @@ export async function readPackageWebhooksData(
 	}
 }
 
-export async function mutatePackageWebhook(input: {
+type PackageWebhookInput = {
 	request: Request
 	params: { username: string; kodyId: string }
 	env: Env
-	body: unknown
-}) {
-	const { request, params, env, body } = input
+	webhookName: string
+}
+export function mintPackageWebhook(input: PackageWebhookInput) {
+	return changePackageWebhook(input, 'mint', async (target) => {
+		if (await isWebhookUrlMinted(target))
+			throw new McpCallerError(
+				'This webhook already has a URL. Rotate it to issue a new one.',
+			)
+		const { approvalUrl } = await mintWebhookUrlForUser(target)
+		return { revealed: await revealForUi(target), approvalUrl }
+	})
+}
+export function rotatePackageWebhook(input: PackageWebhookInput) {
+	return changePackageWebhook(input, 'rotate', async (target) => {
+		const { approvalUrl } = await rotateWebhookUrlForUser(target)
+		return { revealed: await revealForUi(target), approvalUrl }
+	})
+}
+export function revealPackageWebhook(input: PackageWebhookInput) {
+	return changePackageWebhook(input, 'reveal', async (target) => ({
+		revealed: await revealForUi(target),
+		approvalUrl: null,
+	}))
+}
+export function enablePackageWebhook(input: PackageWebhookInput) {
+	return changePackageWebhook(input, 'enable', async (target) => {
+		await setWebhookEnabledForUser({ ...target, enabled: true })
+		return { revealed: null, approvalUrl: null }
+	})
+}
+export function disablePackageWebhook(input: PackageWebhookInput) {
+	return changePackageWebhook(input, 'disable', async (target) => {
+		await setWebhookEnabledForUser({ ...target, enabled: false })
+		return { revealed: null, approvalUrl: null }
+	})
+}
+function webhookTarget(
+	env: Env,
+	request: Request,
+	user: AuthenticatedUser,
+	packageKodyId: string,
+	webhookName: string,
+) {
+	return {
+		env,
+		request: user.request,
+		userId: ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
+		email: user.email,
+		username: user.username,
+		kodyId: packageKodyId,
+		packageKodyId,
+		webhookName,
+		requestUrl: request.url,
+	}
+}
+async function changePackageWebhook(
+	input: PackageWebhookInput,
+	intent: WebhookActionIntent,
+	apply: (target: ReturnType<typeof webhookTarget>) => Promise<{
+		revealed: PackageWebhookRevealedUrl | null
+		approvalUrl: string | null
+	}>,
+) {
+	const { request, params, env } = input
 	const access = await authorizePackageWebhooks(request, params, env)
 	if (access.status !== 200)
 		return operationResult({ ok: false, error: access.error }, access.status)
 	const { user, packageKodyId } = access
 
-	const parsed = parseSafe(webhookActionSchema, body)
-	if (!parsed.success) {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
-	const webhookName = parsed.value.webhookName.trim()
+	const webhookName = input.webhookName.trim()
 	if (!webhookName) {
 		return operationResult(
 			{ ok: false, error: 'webhookName is required.' },
@@ -117,7 +168,6 @@ export async function mutatePackageWebhook(input: {
 		)
 	}
 
-	const intent = parsed.value.intent
 	const audit = (result: 'success' | 'failure', reason?: string) => {
 		void logAuditEvent({
 			db: auditDatabaseFromEnv(env),
@@ -136,14 +186,9 @@ export async function mutatePackageWebhook(input: {
 	}
 
 	try {
-		const { revealed, approvalUrl } = await runWebhookAction({
-			env,
-			request,
-			user,
-			intent,
-			packageKodyId,
-			webhookName,
-		})
+		const { revealed, approvalUrl } = await apply(
+			webhookTarget(env, request, user, packageKodyId, webhookName),
+		)
 		audit('success')
 		const payload: PackageWebhooksActionPayload = {
 			...(await loadPackageWebhooksData({
@@ -173,71 +218,6 @@ export async function mutatePackageWebhook(input: {
 			error,
 		})
 		return operationResult({ ok: false, error: failureMessageFor(intent) }, 500)
-	}
-}
-
-async function runWebhookAction(input: {
-	env: Env
-	request: Request
-	user: AuthenticatedUser
-	intent: WebhookActionIntent
-	packageKodyId: string
-	webhookName: string
-}): Promise<{
-	revealed: PackageWebhookRevealedUrl | null
-	approvalUrl: string | null
-}> {
-	const { env, request, user, intent, packageKodyId, webhookName } = input
-	const shared = {
-		env,
-		request: user.request,
-		userId: ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
-		email: user.email,
-		username: user.username,
-		kodyId: packageKodyId,
-		webhookName,
-		requestUrl: request.url,
-	}
-	switch (intent) {
-		case 'mint': {
-			// Mint on an existing row would silently rotate (and re-enable) the
-			// credential; make the owner choose Rotate for that.
-			if (await isWebhookUrlMinted(shared)) {
-				throw new McpCallerError(
-					'This webhook already has a URL. Rotate it to issue a new one.',
-				)
-			}
-			const { approvalUrl } = await mintWebhookUrlForUser(shared)
-			return {
-				revealed: await revealForUi({ ...shared, packageKodyId }),
-				approvalUrl,
-			}
-		}
-		case 'rotate': {
-			const { approvalUrl } = await rotateWebhookUrlForUser(shared)
-			return {
-				revealed: await revealForUi({ ...shared, packageKodyId }),
-				approvalUrl,
-			}
-		}
-		case 'reveal': {
-			return {
-				revealed: await revealForUi({ ...shared, packageKodyId }),
-				approvalUrl: null,
-			}
-		}
-		case 'enable': {
-			await setWebhookEnabledForUser({ ...shared, enabled: true })
-			return { revealed: null, approvalUrl: null }
-		}
-		case 'disable': {
-			await setWebhookEnabledForUser({ ...shared, enabled: false })
-			return { revealed: null, approvalUrl: null }
-		}
-		default: {
-			const exhaustive: never = intent
-			throw new Error(`Unhandled webhook intent: ${String(exhaustive)}`)
-		}
 	}
 }
 

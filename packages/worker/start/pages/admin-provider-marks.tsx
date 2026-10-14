@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { saveAdminProviderMarks } from '#start/server/admin-mutations'
+import type { ProviderMarkSaveInput } from '#universal/admin-provider-mutations.ts'
+import {
+	saveAdminProviderMark,
+	deleteAdminProviderMark,
+} from '#start/server/admin-mutations'
 import { type CSSObject } from '@emotion/react'
 import { type QueryKey } from '@tanstack/react-query'
 import {
@@ -93,6 +97,9 @@ const markTileCss = {
 	},
 } satisfies CSSObject
 
+type AdminWrite =
+	| ({ action: 'save' } & ProviderMarkSaveInput)
+	| { action: 'delete'; slug: string }
 export function AdminProviderMarksRoute({
 	queryKey,
 	initialData,
@@ -127,13 +134,16 @@ export function AdminProviderMarksRoute({
 				: 'smooth',
 		})
 	}, [formRevision])
-	const mutation = usePageResponseMutation<AdminProviderMarksLoaderData>(
+	const mutation = usePageResponseMutation<
+		AdminProviderMarksLoaderData,
+		AdminWrite
+	>(
 		queryKey,
 		'loadAdminProviderMarks',
-		(body, href) =>
-			saveAdminProviderMarks({
-				data: { body, search: new URL(href, 'http://localhost').search },
-			}),
+		(body) =>
+			body.action === 'delete'
+				? deleteAdminProviderMark({ data: { slug: body.slug } })
+				: saveAdminProviderMark({ data: body }),
 		{ dependencies: mutationResources, dependencyScope: 'actor' },
 	)
 	const currentHref = useMatchedPageScope().pageLocation.href
@@ -201,7 +211,7 @@ export function AdminProviderMarksRoute({
 	}
 
 	async function submitAction(
-		body: Record<string, unknown>,
+		body: AdminWrite,
 		nextState: ActionState,
 		successMessage: string,
 	) {
@@ -245,7 +255,7 @@ export function AdminProviderMarksRoute({
 
 			return
 		}
-		const body: Record<string, unknown> = {
+		const body: AdminWrite = {
 			action: 'save',
 			slug,
 			label,

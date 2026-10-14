@@ -1,4 +1,10 @@
-import { updatePackageWebhook } from '#start/server/package-webhooks'
+import {
+	mintPackageWebhook,
+	rotatePackageWebhook,
+	revealPackageWebhook,
+	enablePackageWebhook,
+	disablePackageWebhook,
+} from '#start/server/package-webhooks'
 import {
 	mutationOptions,
 	type QueryClient,
@@ -21,12 +27,18 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			queryKey: QueryKey
 			invalidate: () => Promise<void>
 		}) => {
-			const payload = await updatePackageWebhook({
+			const operation = {
+				mint: mintPackageWebhook,
+				rotate: rotatePackageWebhook,
+				reveal: revealPackageWebhook,
+				enable: enablePackageWebhook,
+				disable: disablePackageWebhook,
+			}[input.intent]
+			const payload = await operation({
 				data: {
 					username: input.username,
 					kodyId: input.kodyId,
 					webhookName: input.webhookName,
-					intent: input.intent,
 				},
 			})
 			if (!payload.ok)

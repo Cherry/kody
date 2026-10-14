@@ -15,13 +15,6 @@ import {
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
-import { enum_, object, optional, parseSafe, string } from 'remix/data-schema'
-
-const passkeyActionSchema = object({
-	intent: enum_(['delete', 'rename'] as const),
-	passkeyId: string(),
-	name: optional(string()),
-})
 
 function displayPasskeyName(passkey: PasskeyRow) {
 	const stored = passkey.name.trim()
@@ -50,87 +43,79 @@ export async function loadPasskeysPayload(
 	}
 }
 
-export async function mutatePasskeys({
+export async function deleteAccountPasskey({
 	env,
 	request,
 	user,
-	body,
+	passkeyId,
 }: {
 	env: Env
 	request: Request
 	user: AuthenticatedAppUser
-	body: unknown
+	passkeyId: string
 }) {
-	const url = new URL(request.url)
-	const parsed = parseSafe(passkeyActionSchema, body)
-	if (!parsed.success) {
-		return { ok: false, error: 'Invalid request body.' }
-	}
-
 	const requestIp = getRequestIp(request) ?? undefined
-	const intent = parsed.value.intent
-
-	switch (intent) {
-		case 'delete': {
-			const deleted = await deletePasskeyForUser(
-				env.APP_DB,
-				parsed.value.passkeyId,
-				user.userId,
-			)
-			if (!deleted) {
-				return {
-					ok: false,
-					code: 'not_found' as const,
-					error: 'Passkey not found.',
-				}
-			}
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'passkey_delete',
-				result: 'success',
-				email: user.email,
-				ip: requestIp,
-				path: url.pathname,
-			})
-			return await loadPasskeysPayload(env.APP_DB, user.userId)
-		}
-		case 'rename': {
-			const validated = validatePasskeyName(parsed.value.name)
-			if (!validated.ok) {
-				return { ok: false, error: validated.error }
-			}
-
-			const renamed = await renamePasskeyForUser(
-				env.APP_DB,
-				parsed.value.passkeyId,
-				user.userId,
-				validated.name,
-			)
-			if (!renamed) {
-				return {
-					ok: false,
-					code: 'not_found' as const,
-					error: 'Passkey not found.',
-				}
-			}
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'account',
-				action: 'passkey_rename',
-				result: 'success',
-				email: user.email,
-				ip: requestIp,
-				path: url.pathname,
-			})
-			return await loadPasskeysPayload(env.APP_DB, user.userId)
-		}
-		default: {
-			const _exhaustive: never = intent
-			void _exhaustive
-			return { ok: false, error: 'Invalid request body.' }
+	const deleted = await deletePasskeyForUser(env.APP_DB, passkeyId, user.userId)
+	if (!deleted) {
+		return {
+			ok: false,
+			code: 'not_found' as const,
+			error: 'Passkey not found.',
 		}
 	}
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'account',
+		action: 'passkey_delete',
+		result: 'success',
+		email: user.email,
+		ip: requestIp,
+		path: '/account/passkeys',
+	})
+	return await loadPasskeysPayload(env.APP_DB, user.userId)
+}
+export async function renameAccountPasskey({
+	env,
+	request,
+	user,
+	passkeyId,
+	name,
+}: {
+	env: Env
+	request: Request
+	user: AuthenticatedAppUser
+	passkeyId: string
+	name?: string
+}) {
+	const requestIp = getRequestIp(request) ?? undefined
+	const validated = validatePasskeyName(name)
+	if (!validated.ok) {
+		return { ok: false, error: validated.error }
+	}
+
+	const renamed = await renamePasskeyForUser(
+		env.APP_DB,
+		passkeyId,
+		user.userId,
+		validated.name,
+	)
+	if (!renamed) {
+		return {
+			ok: false,
+			code: 'not_found' as const,
+			error: 'Passkey not found.',
+		}
+	}
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'account',
+		action: 'passkey_rename',
+		result: 'success',
+		email: user.email,
+		ip: requestIp,
+		path: '/account/passkeys',
+	})
+	return await loadPasskeysPayload(env.APP_DB, user.userId)
 }

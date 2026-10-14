@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
-import { saveAdminFeatureFlags } from '#start/server/admin-mutations'
+import {
+	setAdminGlobalFeatureFlag,
+	setAdminFeatureFlagOverride,
+	clearAdminFeatureFlagOverride,
+	deleteAdminStaleFeatureFlag,
+} from '#start/server/admin-mutations'
 import {
 	missingSuccessMetricNotice,
 	type FeatureFlagSuccessMetricMeasure,
@@ -102,6 +107,17 @@ function summarizeEffectiveSource(flag: AdminFeatureFlag): string {
 	}
 	return `on for ${flag.global.rolloutPercent}% of users${audienceSuffix}`
 }
+type FeatureFlagChange =
+	| ({
+			action: 'set_global'
+	  } & import('#universal/admin-setting-mutations.ts').SetGlobalFeatureFlagInput)
+	| ({
+			action: 'set_user_override'
+	  } & import('#universal/admin-setting-mutations.ts').SetFeatureFlagOverrideInput)
+	| ({
+			action: 'clear_user_override'
+	  } & import('#universal/admin-setting-mutations.ts').ClearFeatureFlagOverrideInput)
+	| { action: 'delete_stale'; key: string }
 export function AdminFeatureFlagsPage({
 	queryKey,
 	payload,
@@ -111,13 +127,30 @@ export function AdminFeatureFlagsPage({
 	payload: AdminFeatureFlagsLoaderData
 	currentHref: string
 }) {
-	const mutation = usePageResponseMutation<AdminFeatureFlagsLoaderData>(
+	const mutation = usePageResponseMutation<
+		AdminFeatureFlagsLoaderData,
+		FeatureFlagChange
+	>(
 		queryKey,
 		'loadAdminFeatureFlags',
-		(body, href) =>
-			saveAdminFeatureFlags({
-				data: { body, search: new URL(href, 'http://localhost').search },
-			}),
+		(change) => {
+			switch (change.action) {
+				case 'set_global': {
+					const { action: _, ...data } = change
+					return setAdminGlobalFeatureFlag({ data })
+				}
+				case 'set_user_override': {
+					const { action: _, ...data } = change
+					return setAdminFeatureFlagOverride({ data })
+				}
+				case 'clear_user_override': {
+					const { action: _, ...data } = change
+					return clearAdminFeatureFlagOverride({ data })
+				}
+				case 'delete_stale':
+					return deleteAdminStaleFeatureFlag({ data: { key: change.key } })
+			}
+		},
 		{ dependencies: 'permissions', refreshShell: true },
 	)
 	const featureFlags = payload.featureFlags
@@ -125,7 +158,7 @@ export function AdminFeatureFlagsPage({
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
 	async function submitAdminAction(
-		body: Record<string, unknown>,
+		body: FeatureFlagChange,
 		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
 	): Promise<boolean> {

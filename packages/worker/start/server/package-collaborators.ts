@@ -1,29 +1,14 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { z } from 'zod'
 import {
-	type PackageCollaboratorsLoaderData,
-	packageCollaboratorPresets,
-} from '#universal/package-collaborators.ts'
+	packageAccessInput,
+	grantPackageCollaboratorInput,
+	revokePackageCollaboratorInput,
+} from '#universal/package-access-mutations.ts'
+import { type PackageCollaboratorsLoaderData } from '#universal/package-collaborators.ts'
 
-const packageInput = z.object({
-	username: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-	kodyId: z.string().min(1),
-})
-const change = z.discriminatedUnion('intent', [
-	z.strictObject({
-		intent: z.literal('grant'),
-		subjectType: z.enum(['user', 'team']),
-		subjectId: z.string().trim().min(1),
-		preset: z.enum(packageCollaboratorPresets),
-	}),
-	z.strictObject({
-		intent: z.literal('revoke'),
-		grantId: z.string().trim().min(1),
-	}),
-])
 export const loadPackageCollaborators = createServerFn({ method: 'GET' })
-	.validator(packageInput)
+	.validator(packageAccessInput)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteRead, WebsiteAuthenticationError },
@@ -93,22 +78,39 @@ export const loadPackageCollaborators = createServerFn({ method: 'GET' })
 			throw error
 		}
 	})
-export const updatePackageCollaborators = createServerFn({ method: 'POST' })
-	.validator(packageInput.extend({ change }))
+export const grantPackageCollaborator = createServerFn({ method: 'POST' })
+	.validator(grantPackageCollaboratorInput)
 	.handler(async ({ data }) => {
-		const [{ withWebsiteMutation }, { mutatePackageCollaborators }] =
+		const [{ withWebsiteMutation }, { grantPackageCollaborator }] =
 			await Promise.all([
 				import('./mutation-context.ts'),
 				import('../../src/app/handlers/package-collaborators.ts'),
 			])
 		return withWebsiteMutation({}, async ({ request, env, user }) => {
-			const result = await mutatePackageCollaborators({
+			const result = await grantPackageCollaborator({
 				request,
 				env,
 				user,
-				username: data.username,
-				kodyId: data.kodyId,
-				body: data.change,
+				...data,
+			})
+			if (!result.data.ok) throw new Error(result.data.error)
+			return result.data
+		})
+	})
+export const revokePackageCollaborator = createServerFn({ method: 'POST' })
+	.validator(revokePackageCollaboratorInput)
+	.handler(async ({ data }) => {
+		const [{ withWebsiteMutation }, { revokePackageCollaborator }] =
+			await Promise.all([
+				import('./mutation-context.ts'),
+				import('../../src/app/handlers/package-collaborators.ts'),
+			])
+		return withWebsiteMutation({}, async ({ request, env, user }) => {
+			const result = await revokePackageCollaborator({
+				request,
+				env,
+				user,
+				...data,
 			})
 			if (!result.data.ok) throw new Error(result.data.error)
 			return result.data

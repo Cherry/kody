@@ -1,7 +1,6 @@
 import { operationResult } from '../operation-result.ts'
-import { z } from 'zod'
 import { loadPackageMappingScopeForViewer } from '#app/package-credentials-access.ts'
-import { credentialPickSchema } from '#worker/credentials/credential-pick-schema.ts'
+import { credentialMappingChangesSchema } from '#universal/credential-mutations.ts'
 import {
 	MappingWriteRefused,
 	resolveMappingChanges,
@@ -13,42 +12,13 @@ import {
 } from '#worker/credentials/package-credential-mappings.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import {
-	credentialTriggerKinds,
-	maxCredentialProposalValues,
 	type CredentialMappingChange,
 	type PackageCredentialsWriteFailure,
 } from '#universal/credential-contracts.ts'
 
-const changeSchema = z.strictObject({
-	target: z.discriminatedUnion('type', [
-		z.strictObject({
-			type: z.literal('default'),
-			layer: z.enum(['org', 'mine']),
-		}),
-		z.strictObject({
-			type: z.literal('trigger'),
-			trigger: z.strictObject({
-				kind: z.enum(credentialTriggerKinds),
-				name: z.string().trim().min(1),
-			}),
-		}),
-	]),
-	needKey: z.string().trim().min(1),
-	credentials: z
-		.array(credentialPickSchema)
-		.max(maxCredentialProposalValues)
-		.nullable(),
-})
-
-const bodySchema = z.strictObject({
-	changes: z.array(changeSchema).min(1).max(maxCredentialProposalValues),
-})
-
 /**
- * `/profiles/:username/packages/:kodyId/credentials.json`: the package
- * Credentials, Default mappings, and Triggers tabs. GET returns the
- * `PackageCredentialsView`; POST `{ changes }` applies every change or none
- * and returns the updated view. Signed-in sessions only; anyone without
+ * Applies package credential mapping changes atomically and returns the
+ * updated view. Signed-in sessions only; anyone without
  * `package:execute` on the package gets a 404.
  */
 export async function mutatePackageCredentialMappings({
@@ -61,7 +31,7 @@ export async function mutatePackageCredentialMappings({
 	body: unknown
 }) {
 	const env = scope.env
-	const parsed = bodySchema.safeParse(body)
+	const parsed = credentialMappingChangesSchema.safeParse(body)
 	if (!parsed.success) {
 		return operationResult(
 			{

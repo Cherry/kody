@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import {
+	parseCredentialApprovalQuery,
+	readCredentialProposalId,
+} from '#universal/credential-contracts.ts'
 import { approvePackageCredentials } from '#start/server/credential-approval-mutation'
 import { SiteLink } from '../components/site-link.tsx'
 
@@ -279,7 +283,17 @@ export function PackageCredentialApprovalRoute({
 		currentHref,
 		({ path, view }: { path: ApprovalPath; view: CredentialApprovalView }) =>
 			approvePackageCredentials({
-				data: { ...path, fingerprint: view.fingerprint },
+				data: {
+					username: path.username,
+					kodyId: path.kodyId,
+					proposal: parseCredentialApprovalQuery(
+						new URLSearchParams(path.search),
+					),
+					proposalId: readCredentialProposalId(
+						new URLSearchParams(path.search),
+					),
+					fingerprint: view.fingerprint,
+				},
 			}),
 	)
 	async function approve(path: ApprovalPath, view: CredentialApprovalView) {

@@ -1,3 +1,4 @@
+import { packageWebhookInput } from '#universal/package-access-mutations.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 export const loadPackageWebhooks = createServerFn({ method: 'GET' })
@@ -37,38 +38,97 @@ export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 		return result.data
 	})
 
-export const updatePackageWebhook = createServerFn({ method: 'POST' })
-	.validator(
-		(data: {
-			username: string
-			kodyId: string
-			intent: string
-			webhookName: string
-		}) => {
-			if (
-				!data ||
-				!data.username ||
-				!data.kodyId ||
-				typeof data.intent !== 'string' ||
-				typeof data.webhookName !== 'string'
-			)
-				throw new Error('Invalid webhook action.')
-			return data
-		},
-	)
+export const mintPackageWebhook = createServerFn({ method: 'POST' })
+	.validator(packageWebhookInput)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		const { mutatePackageWebhook } =
+		const { mintPackageWebhook } =
 			await import('../../src/app/handlers/package-webhooks.ts')
 		return withWebsiteMutation(
 			{},
 			async ({ request, env }) =>
 				(
-					await mutatePackageWebhook({
+					await mintPackageWebhook({
 						request,
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
-						body: { intent: data.intent, webhookName: data.webhookName },
+						webhookName: data.webhookName,
+					})
+				).data,
+		)
+	})
+export const rotatePackageWebhook = createServerFn({ method: 'POST' })
+	.validator(packageWebhookInput)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { rotatePackageWebhook } =
+			await import('../../src/app/handlers/package-webhooks.ts')
+		return withWebsiteMutation(
+			{},
+			async ({ request, env }) =>
+				(
+					await rotatePackageWebhook({
+						request,
+						env,
+						params: { username: data.username, kodyId: data.kodyId },
+						webhookName: data.webhookName,
+					})
+				).data,
+		)
+	})
+export const revealPackageWebhook = createServerFn({ method: 'POST' })
+	.validator(packageWebhookInput)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { revealPackageWebhook } =
+			await import('../../src/app/handlers/package-webhooks.ts')
+		return withWebsiteMutation(
+			{},
+			async ({ request, env }) =>
+				(
+					await revealPackageWebhook({
+						request,
+						env,
+						params: { username: data.username, kodyId: data.kodyId },
+						webhookName: data.webhookName,
+					})
+				).data,
+		)
+	})
+export const enablePackageWebhook = createServerFn({ method: 'POST' })
+	.validator(packageWebhookInput)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { enablePackageWebhook } =
+			await import('../../src/app/handlers/package-webhooks.ts')
+		return withWebsiteMutation(
+			{},
+			async ({ request, env }) =>
+				(
+					await enablePackageWebhook({
+						request,
+						env,
+						params: { username: data.username, kodyId: data.kodyId },
+						webhookName: data.webhookName,
+					})
+				).data,
+		)
+	})
+export const disablePackageWebhook = createServerFn({ method: 'POST' })
+	.validator(packageWebhookInput)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { disablePackageWebhook } =
+			await import('../../src/app/handlers/package-webhooks.ts')
+		return withWebsiteMutation(
+			{},
+			async ({ request, env }) =>
+				(
+					await disablePackageWebhook({
+						request,
+						env,
+						params: { username: data.username, kodyId: data.kodyId },
+						webhookName: data.webhookName,
 					})
 				).data,
 		)

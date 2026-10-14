@@ -1,3 +1,7 @@
+import {
+	credentialProposalSchema,
+	credentialMappingChangesSchema,
+} from '#universal/credential-mutations.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 export const approvePackageCredentials = createServerFn({ method: 'POST' })
@@ -5,7 +9,8 @@ export const approvePackageCredentials = createServerFn({ method: 'POST' })
 		z.object({
 			username: z.string().min(1),
 			kodyId: z.string().min(1),
-			search: z.string(),
+			proposal: credentialProposalSchema,
+			proposalId: z.string().trim().min(1).nullish(),
 			fingerprint: z.string().min(1),
 		}),
 	)
@@ -22,16 +27,13 @@ export const approvePackageCredentials = createServerFn({ method: 'POST' })
 				kodyId: data.kodyId,
 			})
 			if (!scope) throw new Error('Package not found.')
-			const { parseCredentialApprovalQuery, readCredentialProposalId } =
-				await import('../../universal/credential-contracts.ts')
 			const { approveCredentialProposal } =
 				await import('../../src/credentials/credential-approval.ts')
-			const search = new URLSearchParams(data.search)
 			const outcome = await approveCredentialProposal({
 				scope,
-				proposal: parseCredentialApprovalQuery(search),
+				proposal: data.proposal,
 				fingerprint: data.fingerprint,
-				proposalId: readCredentialProposalId(search),
+				proposalId: data.proposalId,
 			})
 			if (outcome.status === 'approved')
 				return { ok: true as const, view: outcome.view }
@@ -52,7 +54,7 @@ export const savePackageCredentialMappings = createServerFn({ method: 'POST' })
 		z.object({
 			username: z.string().min(1),
 			kodyId: z.string().min(1),
-			changes: z.array(z.unknown()),
+			changes: credentialMappingChangesSchema.shape.changes,
 		}),
 	)
 	.handler(async ({ data }) => {

@@ -169,7 +169,7 @@ function createAdminTestEnv(input: {
 	}
 	return { COOKIE_SECRET: 'secret', APP_DB: createD1FromSqlite(sqlite) }
 }
-const { mutateAdminUsers } = await import('#worker/admin/users-operations.ts')
+const userOperations = await import('#worker/admin/users-operations.ts')
 
 function makeUser(
 	id: number,
@@ -201,13 +201,84 @@ function setupAdminUsers(
 			const request = new Request(url, {
 				headers: { Accept: 'application/json' },
 			})
-			if (body)
-				return mutateAdminUsers({
-					env: env as unknown as Env,
-					request,
-					url,
-					body,
-				})
+			if (body) {
+				switch (body.action) {
+					case 'assign_role':
+						return userOperations.assignAdminUserRole({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'remove_role':
+						return userOperations.removeAdminUserRole({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'update_plan':
+						return userOperations.setAdminUserPlan({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'suspend_user':
+						return userOperations.setAdminUserSuspension({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+							suspended: true,
+						})
+					case 'unsuspend_user':
+						return userOperations.setAdminUserSuspension({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+							suspended: false,
+						})
+					case 'resume_email_outbound':
+						return userOperations.resumeAdminUserEmail({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'mark_email_verified':
+						return userOperations.verifyAdminUserEmail({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'mint_verify_url':
+						return userOperations.mintAdminUserVerificationUrl({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'mark_email_destination_verified':
+						return userOperations.verifyAdminUserEmailDestination({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					case 'create_user':
+						return userOperations.createAdminUser({
+							env: env as unknown as Env,
+							request,
+							url,
+							...body,
+						})
+					default:
+						throw new Error('Unsupported admin user fixture action')
+				}
+			}
 			const { requireUserWithPermission } =
 				await import('#app/permissions-server.ts')
 			await requireUserWithPermission(

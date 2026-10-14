@@ -2,7 +2,7 @@ import { base64ToBytes } from '@kody-internal/shared/base64.ts'
 import { canonicalIntegrationName } from '#mcp/capabilities/integrations/integration-shared.ts'
 import { loadAdminPlatformIntegrationsData } from '#app/admin-platform-integrations-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
-import { readNonEmptyTrimmedString as readString } from '#app/request-body.ts'
+import type { PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -17,61 +17,21 @@ import {
 	getPlatformOauthAppBySlug,
 	renamePlatformOauthApp,
 	upsertPlatformOauthApp,
-	type PlatformOauthAppVisibility,
 } from '#worker/integrations/platform-apps.ts'
 import { adminOperationResult } from './operation-result.ts'
 
-export async function mutateAdminPlatformIntegrations({
-	env,
-	request,
-	url,
-	body,
-}: {
+export async function saveAdminPlatformIntegration(input: {
 	env: Env
 	request: Request
-	url: URL
-	body: Record<string, unknown>
+	data: PlatformIntegrationSaveInput
 }) {
-	const actor = await requireUserWithRole(request, env, 'admin')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readString(body, 'action')
-	if (action === 'save') {
-		return await handleSaveAction({ env, request, url, actor, body })
-	}
-	if (action === 'delete') {
-		return await handleDeleteAction({ env, request, url, actor, body })
-	}
-	return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
-}
-
-type AdminActor = Awaited<ReturnType<typeof requireUserWithRole>>
-
-/**
- * Create/update a platform app. Field semantics mirror the
- * `adminPlatformOauthAppSave` capability: `clientSecret` and
- * `logoBase64` are write-only (omit retains, null/empty clears the logo;
- * an empty clientSecret clears only for pkce flow), and omitted optional
- * fields retain stored values through the upsert's retain-on-omit contract.
- */
-async function handleSaveAction(input: {
-	env: Env
-	request: Request
-	url: URL
-	actor: AdminActor
-	body: object
-}) {
-	const record = input.body as Record<string, unknown>
-	const slug = readString(input.body, 'slug')
-	const clientId = readString(input.body, 'clientId')
-	const tokenUrl = readString(input.body, 'tokenUrl')
-	const authorizeUrl = readString(input.body, 'authorizeUrl')
-	const flow = readString(input.body, 'flow')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const record = input.data
+	const slug = record.slug.trim()
+	const clientId = record.clientId.trim()
+	const tokenUrl = record.tokenUrl.trim()
+	const authorizeUrl = record.authorizeUrl.trim()
+	const flow = record.flow
 	if (!slug) {
 		return adminOperationResult({ ok: false, error: 'Slug is required.' }, 400)
 	}
@@ -90,19 +50,13 @@ async function handleSaveAction(input: {
 			400,
 		)
 	}
-	const visibility = readVisibility(record)
-	if (visibility === null) {
-		return adminOperationResult(
-			{ ok: false, error: 'Visibility must be "draft" or "published".' },
-			400,
-		)
-	}
+	const visibility = record.visibility
 
-	// A changed slug renames in place first — carrying the write-only client
-	// secret, logo, and user connections — then the normal upsert applies the
+	// A changed slug renames in place first, carrying the write-only client
+	// secret, logo, and user connections, then the normal upsert applies the
 	// rest of the edit against the new slug. Case-only edits canonicalize to
 	// the same slug and are not renames.
-	const newSlug = readOptionalString(record, 'newSlug')
+	const newSlug = optionalText(record.newSlug)
 	const renameTo =
 		newSlug &&
 		canonicalIntegrationName(newSlug) !== canonicalIntegrationName(slug)
@@ -125,26 +79,23 @@ async function handleSaveAction(input: {
 			env: input.env,
 			app: {
 				slug: targetSlug,
-				provider: readOptionalString(record, 'provider'),
-				label: readOptionalString(record, 'label'),
-				description: readOptionalString(record, 'description'),
+				provider: optionalText(record.provider),
+				label: optionalText(record.label),
+				description: optionalText(record.description),
 				clientId,
-				clientSecret: readWriteOnlyString(record, 'clientSecret'),
+				clientSecret: optionalText(record.clientSecret),
 				tokenUrl,
 				authorizeUrl,
-				apiBaseUrl: readOptionalString(record, 'apiBaseUrl'),
+				apiBaseUrl: optionalText(record.apiBaseUrl),
 				flow,
-				usePkce: readOptionalBoolean(record, 'usePkce'),
-				tokenExchangeStyle: readTokenExchangeStyle(record),
-				scopeSeparator: readOptionalString(record, 'scopeSeparator'),
-				extraAuthorizeParams: readOptionalRecord(
-					record,
-					'extraAuthorizeParams',
-				),
-				allowedScopes: readOptionalStringArray(record, 'allowedScopes'),
-				defaultScopes: readOptionalStringArray(record, 'defaultScopes'),
-				requiredHosts: readOptionalStringArray(record, 'requiredHosts'),
-				enabled: readOptionalBoolean(record, 'enabled') ?? undefined,
+				usePkce: record.usePkce,
+				tokenExchangeStyle: record.tokenExchangeStyle,
+				scopeSeparator: optionalText(record.scopeSeparator),
+				extraAuthorizeParams: record.extraAuthorizeParams,
+				allowedScopes: record.allowedScopes,
+				defaultScopes: record.defaultScopes,
+				requiredHosts: record.requiredHosts,
+				enabled: record.enabled ?? undefined,
 				visibility,
 			},
 		})
@@ -188,9 +139,9 @@ async function handleSaveAction(input: {
 		category: 'admin',
 		action: 'platform_oauth_app_admin_save',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: getRequestIp(input.request) ?? undefined,
-		path: input.url.pathname,
+		path: '/admin/platform-integrations',
 		reason: `platform_oauth_app=${slug}`,
 	})
 	return adminOperationResult(
@@ -198,14 +149,13 @@ async function handleSaveAction(input: {
 	)
 }
 
-async function handleDeleteAction(input: {
+export async function deleteAdminPlatformIntegration(input: {
 	env: Env
 	request: Request
-	url: URL
-	actor: AdminActor
-	body: object
+	slug: string
 }) {
-	const slug = readString(input.body, 'slug')
+	const actor = await requireUserWithRole(input.request, input.env, 'admin')
+	const slug = input.slug.trim()
 	if (!slug) {
 		return adminOperationResult({ ok: false, error: 'Slug is required.' }, 400)
 	}
@@ -247,9 +197,9 @@ async function handleDeleteAction(input: {
 		category: 'admin',
 		action: 'platform_oauth_app_admin_delete',
 		result: 'success',
-		email: input.actor.email,
+		email: actor.email,
 		ip: getRequestIp(input.request) ?? undefined,
-		path: input.url.pathname,
+		path: '/admin/platform-integrations',
 		reason: `platform_oauth_app=${slug}`,
 	})
 	return adminOperationResult(
@@ -257,58 +207,6 @@ async function handleDeleteAction(input: {
 	)
 }
 
-function readOptionalString(record: Record<string, unknown>, key: string) {
-	if (!(key in record)) return undefined
-	const value = record[key]
-	if (value === null) return null
-	return typeof value === 'string' ? value.trim() || null : null
-}
-
-/** Write-only credential: omitted = retain, empty/null = clear. */
-function readWriteOnlyString(record: Record<string, unknown>, key: string) {
-	if (!(key in record)) return undefined
-	const value = record[key]
-	if (value === null) return null
-	return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function readOptionalBoolean(record: Record<string, unknown>, key: string) {
-	if (!(key in record)) return undefined
-	const value = record[key]
-	return typeof value === 'boolean' ? value : null
-}
-
-function readOptionalStringArray(record: Record<string, unknown>, key: string) {
-	if (!(key in record)) return undefined
-	const value = record[key]
-	if (!Array.isArray(value)) return []
-	return value.filter((item): item is string => typeof item === 'string')
-}
-
-function readOptionalRecord(record: Record<string, unknown>, key: string) {
-	if (!(key in record)) return undefined
-	const value = record[key]
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-	return Object.fromEntries(
-		Object.entries(value).filter(
-			(entry): entry is [string, string] => typeof entry[1] === 'string',
-		),
-	)
-}
-
-/** Omitted = retain; anything other than draft/published = invalid (null). */
-function readVisibility(
-	record: Record<string, unknown>,
-): PlatformOauthAppVisibility | undefined | null {
-	const value = record.visibility
-	if (value === undefined) return undefined
-	return value === 'draft' || value === 'published' ? value : null
-}
-
-function readTokenExchangeStyle(record: Record<string, unknown>) {
-	if (!('tokenExchangeStyle' in record)) return undefined
-	const value = record.tokenExchangeStyle
-	return value === 'form' || value === 'basic-json' || value === 'basic-form'
-		? value
-		: null
+function optionalText(value: string | null | undefined) {
+	return value === undefined ? undefined : value?.trim() || null
 }

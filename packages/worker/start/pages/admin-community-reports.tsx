@@ -1,5 +1,11 @@
 /** @jsxImportSource @emotion/react */
-import { saveAdminCommunityReports } from '#start/server/admin-mutations'
+import {
+	dismissAdminCommunityReport,
+	delistAdminCommunityReport,
+	deleteAdminCommunityReport,
+	banAdminReportReporter,
+	banAdminReportOwner,
+} from '#start/server/admin-mutations'
 import { type AdminCommunityReportsLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
@@ -62,8 +68,27 @@ export function AdminCommunityReportsPage({
 	const { reports, statusFilter } = payload
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const mutation = useMutation({
-		mutationFn: (body: Record<string, unknown>) =>
-			saveAdminCommunityReports({ data: { body } }),
+		mutationFn: ({
+			intent,
+			...data
+		}: {
+			intent: ReportIntent
+			reportId: string
+			note?: string
+		}) => {
+			switch (intent) {
+				case 'dismiss':
+					return dismissAdminCommunityReport({ data })
+				case 'delist':
+					return delistAdminCommunityReport({ data })
+				case 'delete':
+					return deleteAdminCommunityReport({ data })
+				case 'ban_reporter':
+					return banAdminReportReporter({ data })
+				case 'ban_reportee':
+					return banAdminReportOwner({ data })
+			}
+		},
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _body, reconcile) => reconcile?.(),
 		gcTime: 0,

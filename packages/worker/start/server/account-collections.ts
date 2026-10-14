@@ -1,3 +1,4 @@
+import { buildCredentialCreateHref } from '#universal/credential-contracts.ts'
 import { z } from 'zod'
 import { routes } from '#universal/routes.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
@@ -11,8 +12,18 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 			selectedSecretId: z.string().nullable(),
 			create: z.boolean(),
-			setupName: z.string().optional(),
-			provider: z.string().optional(),
+			creation: z.object({
+				name: z.string().nullable(),
+				provider: z.string().nullable(),
+				description: z.string().nullable(),
+				allowedHosts: z.array(z.string()),
+				packageKodyId: z.string().nullable(),
+				needKey: z.string().nullable(),
+				packageScopedTo: z.string().nullable(),
+				packageScopeMissingId: z.boolean(),
+				expiresAt: z.string().nullable(),
+				allowedPackages: z.array(z.string()),
+			}),
 			approval: z.object({
 				hosts: z.array(z.string()),
 				names: z.array(z.string()),
@@ -34,20 +45,16 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 			import('./document-head.ts'),
 		])
 		const pathname = routes.orgSecrets.href({ orgSlug: data.orgSlug })
-		if (data.create && data.setupName?.trim()) {
-			const query = new URLSearchParams()
-			for (const name of data.approval.names) query.append('name', name)
-			for (const host of data.approval.hosts) query.append('hosts', host)
-			query.set('scope', data.approval.scope)
-			query.set('org', data.orgSlug)
-			if (data.provider) query.set('provider', data.provider)
-			if (data.approval.packageId)
-				query.set('package_id', data.approval.packageId)
-			if (data.approval.storagePackageId)
-				query.set('packageId', data.approval.storagePackageId)
-			if (data.approval.sessionId)
-				query.set('sessionId', data.approval.sessionId)
-			throw redirect({ href: `/connect/secret-set?${query}`, statusCode: 302 })
+		if (data.create && data.creation.name) {
+			throw redirect({
+				href:
+					buildCredentialCreateHref({
+						...data.creation,
+						orgSlug: data.orgSlug,
+						kind: 'secret',
+					}) + (data.creation.packageScopeMissingId ? '&scope=package' : ''),
+				statusCode: 302,
+			})
 		}
 		const { bindings, user } = await loadScopedCollection({
 			orgSlug: data.orgSlug,

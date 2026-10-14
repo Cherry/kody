@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { connectWebhookInput } from '../connect-input.ts'
-import { decideWebhookApply } from '#start/server/connect'
+import { approveWebhookApply, rejectWebhookApply } from '#start/server/connect'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -84,9 +84,8 @@ export function ConnectWebhookApplyRoute({
 			queryKey: ReturnType<typeof connectWebhookApplyQuery>['queryKey']
 		}) => {
 			const search = new URL(href, 'https://kody.local').searchParams
-			return decideWebhookApply({
+			return (action === 'approve' ? approveWebhookApply : rejectWebhookApply)({
 				data: {
-					action,
 					handle: search.get('handle') ?? '',
 					fingerprint: search.get('fingerprint') ?? '',
 				},

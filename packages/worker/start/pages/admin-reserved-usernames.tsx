@@ -1,5 +1,8 @@
 /** @jsxImportSource @emotion/react */
-import { saveAdminReservedUsernames } from '#start/server/admin-mutations'
+import {
+	addAdminReservedUsernames,
+	removeAdminReservedUsernames,
+} from '#start/server/admin-mutations'
 import { type AdminReservedUsernamesLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
@@ -22,6 +25,7 @@ import {
 	accountInputCss,
 	accountTextareaCss,
 } from './account-management-components.tsx'
+type ReservedUsernamesChange = { action: 'add' | 'remove'; usernames: string[] }
 type ActionState = 'idle' | 'adding' | 'removing'
 export function AdminReservedUsernamesPage(props: {
 	queryKey: QueryKey
@@ -29,19 +33,21 @@ export function AdminReservedUsernamesPage(props: {
 	currentHref: string
 }) {
 	const { builtIn, added, removed, conflicts } = props.payload
-	const mutation = usePageResponseMutation<AdminReservedUsernamesLoaderData>(
-		props.queryKey,
-		'loadAdminReservedUsernames',
-		(body, href) =>
-			saveAdminReservedUsernames({
-				data: { body, search: new URL(href, 'http://localhost').search },
-			}),
+	const mutation = usePageResponseMutation<
+		AdminReservedUsernamesLoaderData,
+		ReservedUsernamesChange
+	>(props.queryKey, 'loadAdminReservedUsernames', (change) =>
+		(change.action === 'add'
+			? addAdminReservedUsernames
+			: removeAdminReservedUsernames)({
+			data: { usernames: change.usernames },
+		}),
 	)
 	const [builtInQuery, setBuiltInQuery] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
-	async function submitAdminAction(body: Record<string, unknown>) {
+	async function submitAdminAction(body: ReservedUsernamesChange) {
 		if (actionState !== 'idle') return false
 		setActionState(body.action === 'add' ? 'adding' : 'removing')
 		setMessage(null)
@@ -74,7 +80,7 @@ export function AdminReservedUsernamesPage(props: {
 		const formData = new FormData(form)
 		const saved = await submitAdminAction({
 			action: 'add',
-			text: String(formData.get('usernames') ?? ''),
+			usernames: [String(formData.get('usernames') ?? '')],
 		})
 		if (saved) form.reset()
 	}

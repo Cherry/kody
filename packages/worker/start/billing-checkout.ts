@@ -9,13 +9,11 @@ export async function requestProCheckout(input: {
 		const result = await startCheckout({
 			data: {
 				orgSlug: input.orgSlug,
-				body: {
-					plan: 'pro',
-					interval: input.interval ?? 'month',
-					...(input.promoCode?.trim()
-						? { promoCode: input.promoCode.trim() }
-						: {}),
-				},
+				plan: 'pro',
+				interval: input.interval ?? 'month',
+				...(input.promoCode?.trim()
+					? { promoCode: input.promoCode.trim() }
+					: {}),
 			},
 		})
 		return { ok: true as const, url: result.url, mode: result.mode ?? null }

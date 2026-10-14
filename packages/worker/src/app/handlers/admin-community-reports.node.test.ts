@@ -1,4 +1,10 @@
-import { mutateAdminCommunityReports } from '#worker/admin/community-reports-operations.ts'
+import {
+	dismissAdminCommunityReport,
+	delistAdminCommunityReport,
+	deleteAdminCommunityReport,
+	banAdminReportReporter,
+	banAdminReportOwner,
+} from '#worker/admin/community-reports-operations.ts'
 import { type CommunityReportRecord } from '#worker/community/types.ts'
 import { adminOperationOutcome } from '#worker/test-support/admin-operation-outcome.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
@@ -58,15 +64,31 @@ test('admin community reports POST dispatches moderation intents', async () => {
 	mockModule.resolveCommunityReport.mockResolvedValue(undefined)
 	mockModule.banCommunityUser.mockResolvedValue(undefined)
 
-	const mutate = (body: Record<string, unknown>) =>
-		adminOperationOutcome(() =>
-			mutateAdminCommunityReports({
+	const mutate = (body: {
+		intent: 'dismiss' | 'delist' | 'delete' | 'ban_reporter' | 'ban_reportee'
+		reportId: string
+		note?: string
+	}) =>
+		adminOperationOutcome(() => {
+			const { intent, ...fields } = body
+			const input = {
 				env,
 				request: new Request('https://example.com/admin/community-reports'),
-				url: new URL('https://example.com/admin/community-reports'),
-				body,
-			}),
-		)
+				...fields,
+			}
+			switch (intent) {
+				case 'dismiss':
+					return dismissAdminCommunityReport(input)
+				case 'delist':
+					return delistAdminCommunityReport(input)
+				case 'delete':
+					return deleteAdminCommunityReport(input)
+				case 'ban_reporter':
+					return banAdminReportReporter(input)
+				case 'ban_reportee':
+					return banAdminReportOwner(input)
+			}
+		})
 
 	const dismiss = await mutate({
 		intent: 'dismiss',

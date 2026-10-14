@@ -102,12 +102,15 @@ export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
 	const capture = useSubmitterScope()
-	const settingsMutation = usePageResponseMutation<AccountUsageLoaderData>(
+	const settingsMutation = usePageResponseMutation<
+		AccountUsageLoaderData,
+		{ autoRefill: CreditAutoRefillSettings; notify: CreditNotifySettings }
+	>(
 		props.queryKey,
 		'loadUsagePage',
 		(body) =>
 			saveCreditSettings({
-				data: { orgSlug: props.orgSlug, body },
+				data: { orgSlug: props.orgSlug, ...body },
 			}) as Promise<AccountUsageLoaderData>,
 		{ dependencies: ['loadBillingPage'] },
 	)
@@ -152,7 +155,7 @@ export function AccountUsageCreditsSection(
 		setMessage(null)
 		try {
 			const result = await startCreditTopUp({
-				data: { orgSlug: props.orgSlug, body: { amountCents: amount.cents } },
+				data: { orgSlug: props.orgSlug, amountCents: amount.cents },
 			})
 			if (!isCurrent()) return
 			window.location.assign(result.url)

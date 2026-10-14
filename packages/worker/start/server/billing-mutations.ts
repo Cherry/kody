@@ -1,11 +1,27 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-const input = z.object({
-	orgSlug: z.string().min(1),
-	body: z.record(z.string(), z.unknown()),
+const orgInput = z.object({ orgSlug: z.string().min(1) })
+const creditSettingsInput = orgInput.extend({
+	autoRefill: z.object({
+		enabled: z.boolean(),
+		thresholdCents: z.number().nullable(),
+		amountCents: z.number().nullable(),
+		monthlyCapCents: z.number().nullable(),
+	}),
+	notify: z.object({
+		autoRefilled: z.boolean(),
+		monthlyCap: z.boolean(),
+		lowBalance: z.boolean(),
+	}),
 })
 export const startCheckout = createServerFn({ method: 'POST' })
-	.validator(input)
+	.validator(
+		orgInput.extend({
+			plan: z.literal('pro'),
+			interval: z.enum(['month', 'year']),
+			promoCode: z.string().optional(),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { startWebsiteCheckout } =
@@ -16,12 +32,16 @@ export const startCheckout = createServerFn({ method: 'POST' })
 			{ scope: { orgSlug: data.orgSlug } },
 			async (context) =>
 				requireOperationResult(
-					await startWebsiteCheckout({ ...context, ...data }),
+					await startWebsiteCheckout({
+						...context,
+						orgSlug: data.orgSlug,
+						body: data,
+					}),
 				),
 		)
 	})
 export const startCreditTopUp = createServerFn({ method: 'POST' })
-	.validator(input)
+	.validator(orgInput.extend({ amountCents: z.number() }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { startWebsiteCreditTopUp } =
@@ -32,12 +52,16 @@ export const startCreditTopUp = createServerFn({ method: 'POST' })
 			{ scope: { orgSlug: data.orgSlug } },
 			async (context) =>
 				requireOperationResult(
-					await startWebsiteCreditTopUp({ ...context, ...data }),
+					await startWebsiteCreditTopUp({
+						...context,
+						orgSlug: data.orgSlug,
+						body: data,
+					}),
 				),
 		)
 	})
 export const saveCreditSettings = createServerFn({ method: 'POST' })
-	.validator(input)
+	.validator(creditSettingsInput)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { saveWebsiteCreditSettings } =
@@ -48,7 +72,11 @@ export const saveCreditSettings = createServerFn({ method: 'POST' })
 			{ scope: { orgSlug: data.orgSlug } },
 			async (context) =>
 				requireOperationResult(
-					await saveWebsiteCreditSettings({ ...context, ...data }),
+					await saveWebsiteCreditSettings({
+						...context,
+						orgSlug: data.orgSlug,
+						body: data,
+					}),
 				),
 		)
 	})

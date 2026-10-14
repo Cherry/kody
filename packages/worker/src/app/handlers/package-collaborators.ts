@@ -1,4 +1,3 @@
-import { z } from 'zod'
 import type { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import {
@@ -21,7 +20,7 @@ import { loadOrgBindingForSlug, type OrgBinding } from '#worker/orgs/repo.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import {
 	type PackageCollaboratorsView,
-	packageCollaboratorPresets,
+	type PackageCollaboratorPreset,
 } from '#universal/package-collaborators.ts'
 
 type AppUser = NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
@@ -32,21 +31,6 @@ type CollaboratorsScope = {
 	orgSlug: string
 	savedPackage: { id: string; kodyId: string; name: string }
 }
-
-const presetSchema = z.enum(packageCollaboratorPresets)
-
-const changeSchema = z.discriminatedUnion('intent', [
-	z.strictObject({
-		intent: z.literal('grant'),
-		subjectType: z.enum(['user', 'team']),
-		subjectId: z.string().trim().min(1),
-		preset: presetSchema,
-	}),
-	z.strictObject({
-		intent: z.literal('revoke'),
-		grantId: z.string().trim().min(1),
-	}),
-])
 
 /**
  * The package as the signed-in person sees it, bound to the `:username` org
@@ -135,38 +119,6 @@ async function buildCollaboratorsView(
 	}
 }
 
-async function applyChange(
-	scope: CollaboratorsScope,
-	change: z.infer<typeof changeSchema>,
-) {
-	const { ctx, savedPackage } = scope
-	const intent = change.intent
-	switch (intent) {
-		case 'grant':
-			await packageCollaboratorSetCapability.handler(
-				{
-					package_id: savedPackage.id,
-					...(change.subjectType === 'team'
-						? { team_id: change.subjectId }
-						: { user_id: change.subjectId }),
-					preset: change.preset,
-				},
-				ctx,
-			)
-			return
-		case 'revoke':
-			await packageCollaboratorRemoveCapability.handler(
-				{ package_id: savedPackage.id, grant_id: change.grantId },
-				ctx,
-			)
-			return
-		default: {
-			const exhaustive: never = intent
-			throw new Error(`Unknown collaborator change: ${String(exhaustive)}`)
-		}
-	}
-}
-
 type CollaboratorsInput = {
 	env: Env
 	request: Request
@@ -201,22 +153,44 @@ export async function readPackageCollaborators(input: CollaboratorsInput) {
 	if (loaded.error) return loaded.error
 	return operationResult(await buildCollaboratorsView(loaded.scope))
 }
-export async function mutatePackageCollaborators(
-	input: CollaboratorsInput & { body: unknown },
+export function grantPackageCollaborator(
+	input: CollaboratorsInput & {
+		subjectType: 'user' | 'team'
+		subjectId: string
+		preset: PackageCollaboratorPreset
+	},
+) {
+	return changeCollaborator(input, async ({ ctx, savedPackage }) => {
+		await packageCollaboratorSetCapability.handler(
+			{
+				package_id: savedPackage.id,
+				...(input.subjectType === 'team'
+					? { team_id: input.subjectId }
+					: { user_id: input.subjectId }),
+				preset: input.preset,
+			},
+			ctx,
+		)
+	})
+}
+export function revokePackageCollaborator(
+	input: CollaboratorsInput & { grantId: string },
+) {
+	return changeCollaborator(input, async ({ ctx, savedPackage }) => {
+		await packageCollaboratorRemoveCapability.handler(
+			{ package_id: savedPackage.id, grant_id: input.grantId },
+			ctx,
+		)
+	})
+}
+async function changeCollaborator(
+	input: CollaboratorsInput,
+	apply: (scope: CollaboratorsScope) => Promise<void>,
 ) {
 	const loaded = await authorizedScope(input)
 	if (loaded.error) return loaded.error
-	const parsed = changeSchema.safeParse(input.body)
-	if (!parsed.success)
-		return operationResult(
-			{
-				ok: false as const,
-				error: `Invalid request body: ${parsed.error.issues[0]?.message ?? 'expected one change'}.`,
-			},
-			400,
-		)
 	try {
-		await applyChange(loaded.scope, parsed.data)
+		await apply(loaded.scope)
 	} catch (error) {
 		if (error instanceof AuthorizationError)
 			return operationResult({ ok: false as const, error: error.message }, 403)
@@ -224,6 +198,5 @@ export async function mutatePackageCollaborators(
 			return operationResult({ ok: false as const, error: error.message }, 400)
 		throw error
 	}
-	const view = await buildCollaboratorsView(loaded.scope)
-	return operationResult(view)
+	return operationResult(await buildCollaboratorsView(loaded.scope))
 }

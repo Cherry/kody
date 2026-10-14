@@ -330,8 +330,12 @@ function createFeatureFlagsTestEnv(
 	}
 }
 
-const { mutateAdminFeatureFlags } =
-	await import('#worker/admin/feature-flags-operations.ts')
+const {
+	setAdminGlobalFeatureFlag,
+	setAdminFeatureFlagOverride,
+	clearAdminFeatureFlagOverride,
+	deleteAdminStaleFeatureFlag,
+} = await import('#worker/admin/feature-flags-operations.ts')
 
 function createFeatureFlagsClient(
 	input: Parameters<typeof createFeatureFlagsTestEnv>[0] = {},
@@ -343,13 +347,43 @@ function createFeatureFlagsClient(
 			const request = new Request(url, {
 				headers: { Accept: 'application/json' },
 			})
-			if (body !== undefined)
-				return mutateAdminFeatureFlags({
-					env,
-					request,
-					url,
-					body: body as Record<string, unknown>,
-				})
+			if (body !== undefined) {
+				const { action, ...fields } = body as Record<string, unknown>
+				switch (action) {
+					case 'set_global':
+						return setAdminGlobalFeatureFlag({
+							env,
+							request,
+							fields: fields as Parameters<
+								typeof setAdminGlobalFeatureFlag
+							>[0]['fields'],
+						})
+					case 'set_user_override':
+						return setAdminFeatureFlagOverride({
+							env,
+							request,
+							fields: fields as Parameters<
+								typeof setAdminFeatureFlagOverride
+							>[0]['fields'],
+						})
+					case 'clear_user_override':
+						return clearAdminFeatureFlagOverride({
+							env,
+							request,
+							fields: fields as Parameters<
+								typeof clearAdminFeatureFlagOverride
+							>[0]['fields'],
+						})
+					case 'delete_stale':
+						return deleteAdminStaleFeatureFlag({
+							env,
+							request,
+							fields: fields as { key: string },
+						})
+					default:
+						throw new Error('Unknown fixture operation')
+				}
+			}
 			const { requireUserWithRole } = await import('#app/permissions-server.ts')
 			await requireUserWithRole(request, env, 'admin')
 			const { loadAdminFeatureFlagsData } =
@@ -545,4 +579,42 @@ test('admin feature flags clear_user_override accepts the same identity as set',
 	await expectFlag(await clearOverride({ stableUserId: stableUserId(2) }), {
 		overrides: [],
 	})
+})
+
+test('each feature flag mutation independently requires admin before resolving targets or changing data', async () => {
+	mockModule.readAuthenticatedAppUser.mockResolvedValue(
+		createAdminActor(['user']),
+	)
+	const { post, expectError } = createFeatureFlagsClient()
+	for (const body of [
+		{ action: 'set_global', key: 'demo-indicator', enabled: true },
+		{
+			action: 'set_user_override',
+			key: 'demo-indicator',
+			username: 'jane',
+			enabled: true,
+		},
+		{ action: 'clear_user_override', key: 'demo-indicator', username: 'jane' },
+		{ action: 'delete_stale', key: 'stale-flag' },
+	])
+		await expectError(await post(body), 403)
+})
+
+test('reserved username operations independently require admin before writing', async () => {
+	const { addAdminReservedUsernames, removeAdminReservedUsernames } =
+		await import('#worker/admin/reserved-usernames-operations.ts')
+	mockModule.readAuthenticatedAppUser.mockResolvedValue(
+		createAdminActor(['user']),
+	)
+	const env = createFeatureFlagsTestEnv() as unknown as Env
+	const request = new Request('https://example.com/_serverFn/admin')
+	for (const operation of [
+		addAdminReservedUsernames,
+		removeAdminReservedUsernames,
+	]) {
+		const outcome = await adminOperationOutcome(() =>
+			operation({ env, request, usernames: ['example'] }),
+		)
+		expect(outcome.status).toBe(403)
+	}
 })

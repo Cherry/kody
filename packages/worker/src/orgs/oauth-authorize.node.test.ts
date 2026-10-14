@@ -249,3 +249,20 @@ test('stripLoginFromAuthorizePrompt drops login and keeps other prompts', () => 
 		),
 	).toBe('https://kody.codes/oauth/authorize?prompt=consent')
 })
+
+test('native consent rejects explicit authorize-org conflicts independently of the RPC URL', async () => {
+	const request = new Request('https://kody.codes/_serverFn/oauth?org=gus')
+	await expect(
+		resolveAuthorizeOrg({
+			env: { APP_DB: await createDb() } as Env,
+			request,
+			authorizeUrl: new URL('https://kody.codes/oauth/authorize?org=ada'),
+			authRequest: authRequest('https://kody.codes/mcp?org=gus'),
+			userId: testStableUserIdFromEmail('ada@example.com'),
+		}),
+	).rejects.toSatisfy(
+		(error: unknown) =>
+			isOrgAuthorizeError(error) && error.message.includes('do not match'),
+	)
+	expect(request.url).toContain('/_serverFn/oauth?org=gus')
+})

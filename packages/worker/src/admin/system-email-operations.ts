@@ -6,7 +6,6 @@ import {
 } from '#worker/audit-log.ts'
 import { loadAdminSystemEmailData } from '#worker/admin/system-email-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { deleteSystemEmailMessageById } from '#worker/email/system-email-graph-store.ts'
 
 export async function auditSystemEmailAccess(input: {
@@ -32,31 +31,19 @@ export async function auditSystemEmailAccess(input: {
 	})
 }
 
-export async function mutateAdminSystemEmail({
+export async function deleteAdminSystemEmail({
 	env,
 	request,
 	url,
-	body,
+	messageId: submittedMessageId,
 }: {
 	env: Env
 	request: Request
 	url: URL
-	body: Record<string, unknown>
+	messageId: string
 }) {
 	const actor = await requireUserWithRole(request, env, 'admin')
-	if (!body || typeof body !== 'object') {
-		return adminOperationResult(
-			{ ok: false, error: 'Invalid request body.' },
-			400,
-		)
-	}
-
-	const action = readTrimmedStringOrEmpty(body, 'action')
-	if (action !== 'delete') {
-		return adminOperationResult({ ok: false, error: 'Invalid action.' }, 400)
-	}
-
-	const messageId = readTrimmedStringOrEmpty(body, 'message_id')
+	const messageId = submittedMessageId.trim()
 	if (!messageId) {
 		return adminOperationResult(
 			{ ok: false, error: 'Message id is required.' },

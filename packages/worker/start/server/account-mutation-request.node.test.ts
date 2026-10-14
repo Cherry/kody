@@ -70,6 +70,7 @@ vi.mock('../../src/app/handlers/account-email-destinations.ts', () => ({
 }))
 vi.mock('@tanstack/react-start/server', () => ({ setResponseHeader: vi.fn() }))
 vi.mock('../../src/app/operation-result.ts', () => ({
+	operationResult: (value: unknown, status = 200) => ({ value, status }),
 	requireOperationResult: (result: { value: unknown }) => result.value,
 }))
 vi.mock('../../src/app/handlers/account-experiments.ts', () => ({

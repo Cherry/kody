@@ -1,3 +1,4 @@
+import { parseCredentialApprovalQuery } from '#universal/credential-contracts.ts'
 import { expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ loadScope: vi.fn(), approve: vi.fn() }))
 vi.mock('@tanstack/react-start', () => ({
@@ -39,7 +40,9 @@ const view = { ok: true, canApprove: true, fingerprint: 'f1' }
 const data = {
 	username: 'acme',
 	kodyId: 'digest',
-	search: 'mine[mail]=resend-prod&reason=Digest',
+	proposal: parseCredentialApprovalQuery(
+		new URLSearchParams('mine[mail]=resend-prod&reason=Digest'),
+	),
 	fingerprint: 'f1',
 }
 test('credential approval validates, enforces execute scope and preserves every outcome', async () => {

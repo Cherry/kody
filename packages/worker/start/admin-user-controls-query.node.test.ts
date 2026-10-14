@@ -25,7 +25,9 @@ vi.mock('#start/server/admin-controls', () => ({
 	readAdminOrgLimits: vi.fn(),
 	updateAdminOrgLimits: limitsRpc,
 }))
-vi.mock('#start/server/admin-mutations', () => ({ saveAdminUsers: userRpc }))
+vi.mock('#start/server/admin-mutations', () => ({
+	verifyAdminUserEmailDestination: userRpc,
+}))
 afterEach(() => {
 	limitsRpc.mockReset()
 	userRpc.mockReset()
@@ -110,8 +112,7 @@ test('destination verification submits the captured user and invalidates only it
 		destinationEmail: 'extra@example.com',
 		href: '/admin/users?q=example&selected=user-a',
 	})
-	expect(userRpc.mock.calls[0]![0].data.body).toEqual({
-		action: 'mark_email_destination_verified',
+	expect(userRpc.mock.calls[0]![0].data).toMatchObject({
 		stableUserId: 'user-a',
 		destinationEmail: 'extra@example.com',
 	})

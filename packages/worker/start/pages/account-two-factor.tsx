@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
-import { updateTwoFactor } from '#start/server/security-mutations'
+import {
+	startTwoFactorSetup,
+	confirmTwoFactorSetup,
+	cancelTwoFactorSetup,
+	disableTwoFactor,
+} from '#start/server/security-mutations'
 import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
@@ -58,16 +63,31 @@ export function AccountTwoFactorPage({
 	const [disableCode, setDisableCode] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
-	const mutation = usePageResponseMutation<{
-		ok?: boolean
-		enabled?: boolean
-		otpUri?: string
-		secret?: string
-		error?: string
-	}>(
+	const mutation = usePageResponseMutation<
+		{
+			ok?: boolean
+			enabled?: boolean
+			otpUri?: string
+			secret?: string
+			error?: string
+		},
+		| { intent: 'setup' | 'cancel' }
+		| { intent: 'confirm' | 'disable'; code: string }
+	>(
 		queryKey,
 		'loadAccountSecurity',
-		(body) => updateTwoFactor({ data: body }),
+		(input) => {
+			switch (input.intent) {
+				case 'setup':
+					return startTwoFactorSetup({ data: {} })
+				case 'cancel':
+					return cancelTwoFactorSetup({ data: {} })
+				case 'confirm':
+					return confirmTwoFactorSetup({ data: { code: input.code } })
+				case 'disable':
+					return disableTwoFactor({ data: { code: input.code } })
+			}
+		},
 		{
 			dependencies: ['loadAccountPage'],
 			refreshShell: true,

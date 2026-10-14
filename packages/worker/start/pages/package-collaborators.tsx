@@ -2,7 +2,10 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { SiteLink } from '../components/site-link.tsx'
-import { updatePackageCollaborators } from '#start/server/package-collaborators'
+import {
+	grantPackageCollaborator,
+	revokePackageCollaborator,
+} from '#start/server/package-collaborators'
 import { invalidatePageResources } from '../page-invalidation-cache.ts'
 import { collaboratorsPageQuery } from '../package-collaborators-query.ts'
 import {
@@ -82,7 +85,18 @@ export function PackageCollaboratorsRoute({
 			key: string
 			change: PackageCollaboratorsChange
 		}) =>
-			updatePackageCollaborators({ data: { ...page, change: input.change } }),
+			input.change.intent === 'grant'
+				? grantPackageCollaborator({
+						data: {
+							...page,
+							subjectType: input.change.subjectType,
+							subjectId: input.change.subjectId,
+							preset: input.change.preset,
+						},
+					})
+				: revokePackageCollaborator({
+						data: { ...page, grantId: input.change.grantId },
+					}),
 		onMutate: () =>
 			client.cancelQueries({ queryKey: query.queryKey, exact: true }),
 		onSuccess: async (result) => {

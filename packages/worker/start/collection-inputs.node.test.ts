@@ -37,8 +37,8 @@ test('secret input retains repeated approval hosts and scoped secret identity', 
 		{ scope: 'session', name: 'TOKEN', sessionId: 'session' },
 	)
 	expect(input.selectedSecretId).toBe('session::session::TOKEN')
-	expect(input.provider).toBe('github')
-	expect(input.setupName).toBe('THREE')
+	expect(input.creation.provider).toBe('github')
+	expect(input.creation.name).toBe('THREE')
 	expect(input.approval).toEqual({
 		hosts: ['a,b', 'c', 'd', 'e'],
 		names: ['ONE,TWO', 'THREE'],
@@ -51,4 +51,34 @@ test('secret input retains repeated approval hosts and scoped secret identity', 
 		selectedSecretId: null,
 		approval: { scope: 'user' },
 	})
+})
+
+test('secret creation prefill remains separate from approval host and package inputs', () => {
+	const { creation, orgSlug } = secretsInput(
+		'team',
+		'?name=KEY&allowed-host=one.test&allowedHosts=two.test,three.test&description=Access&provider=custom&expiresAt=2026-12-31&package_id=locked&forPackage=repo&need=token&org=other',
+		undefined,
+		true,
+	)
+	expect(orgSlug).toBe('team')
+	expect(creation).toEqual({
+		name: 'KEY',
+		provider: 'custom',
+		description: 'Access',
+		allowedHosts: ['two.test', 'three.test', 'one.test'],
+		expiresAt: '2026-12-31',
+		allowedPackages: ['locked'],
+		packageKodyId: 'repo',
+		needKey: 'token',
+		packageScopedTo: null,
+		packageScopeMissingId: false,
+	})
+	expect(
+		secretsInput('team', '?name=KEY&scope=package', undefined, true).creation
+			.packageScopeMissingId,
+	).toBe(true)
+	expect(
+		secretsInput('team', '?name=KEY&packageId=pkg', undefined, true).creation
+			.packageScopedTo,
+	).toBe('pkg')
 })

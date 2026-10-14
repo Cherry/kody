@@ -258,7 +258,10 @@ export const startWebsiteOAuth = createServerFn({ method: 'POST' })
 		z.object({
 			provider: z.string(),
 			search: z.string(),
-			body: z.record(z.string(), z.unknown()),
+			body: z.object({
+				kody_hp: z.string().optional(),
+				turnstileToken: z.string().optional(),
+			}),
 		}),
 	)
 	.handler(async ({ data }) => {

@@ -90,10 +90,9 @@ from navigation destinations. OAuth callback restore preserves its
 no-account-read branch. Organization management binds explicit slugs to the
 original principal; repository reads use explicit filters. Account mutations
 keep the original request and pass typed refresh/approval data to domain
-operations. The obsolete URL-based secrets reader is removed. Shared domain
-action dispatch still exists in several mutation operations and remains a
-follow-up target for operation-level APIs, without reviving HTTP action
-endpoints.
+operations. The obsolete URL-based secrets reader is removed. Website mutations
+use operation-level APIs without reviving HTTP action endpoints. The remaining
+broad leaf input contracts are listed below.
 
 The separate signed-token cleanup slice keeps `start/server/action-page.ts` but
 replaces generic `loadActionPage(href)` dispatch with `loadVerifyEmail`,
@@ -132,11 +131,36 @@ measured performance gain follows from this ownership inventory.
 ## Remaining mutation API cleanup
 
 Account integrations, connected agents, MCP server management, secrets, package
-writes and organization management have named native operations. Several admin
-forms and auth/billing inputs retain broad body records, and admin forms retain
-operation selection inside native functions. Transport ownership alone does not
-prove these APIs are idiomatic. Shared validation and business authorization are
-useful; generic dispatch over unrelated actions is the cleanup target.
+writes and organization management have named native operations. Admin user
+management, feature flags, reserved usernames, provider marks, platform
+integrations, community report moderation and system email also use named
+operations with validated fields. Their domain operations retain independent
+role or permission checks. Operation selection may still happen in a local UI
+callback, but it is not an action discriminator sent to a generic server
+function.
+
+Billing checkout, credit top-up, credit settings and cancellation feedback now
+accept explicit validated fields. Scoped billing writes retain organization
+binding and the domain's billing permissions. All these native admin and billing
+writes use the original authenticated request and `withWebsiteMutation`,
+including its deletion check and account write lease. Provider credentials and
+logos retain omitted-versus-cleared semantics; feature flag note and audience
+fields retain their omission behavior.
+
+This is not a claim that all input contracts are finished. Admin codemod run and
+stop functions still accept broad records. Admin users and system-email writes
+still carry search separately to refresh their current filtered page, and
+construct a canonical URL for the shared data reader and audit path. That URL
+does not replace the authenticated request. Several shared domain helpers still
+accept individual `unknown` fields or a billing `body` argument behind the
+validated native boundary. Shared validation and business authorization remain
+useful, while these broad contracts are further simplification targets.
+
+The mutation hooks keep their existing actor/scope barriers and query
+invalidation. Feature flag changes refresh permissions and shell state; credit
+settings refresh the usage record and invalidate billing data. Source review
+found no new authorization bypass or dropped field in this cleanup, but CI and
+preview verification remain required evidence of runtime behavior.
 
 Against main `b24bb2ba2`, the deleted client router contains 1,352 lines, intent
 prefetch contains 277 lines, and the deleted backend router contains 782 lines.
@@ -148,3 +172,22 @@ credential services and the image renderer out of the browser graph. Package
 operations preserve domain response status and structured recovery fields.
 Organization people mutations invalidate actor-scoped typed organization query
 keys, including the organization in each key.
+
+Passkey deletion and renaming, two-factor
+setup/confirmation/cancellation/disable, package collaborator
+grants/revocations, and five package webhook operations use named native and
+domain functions. Webhook operations share authorization and audit context
+through callbacks, rather than a switch that selects the write. Webhook approval
+and rejection are separate functions. Approval bundle decisions retain their
+typed approve/deny value because it describes one domain decision.
+
+Credential proposals and mapping inputs are validated structured values instead
+of URL search strings and unknown arrays. Signed proposal, fingerprint, scope,
+and atomic-write checks remain in the domain. OAuth session and organization
+reads retain the original request; only the external authorization parser gets
+an adapted protocol request when needed.
+
+The secret creation alias now builds the canonical organization credential URL
+from explicit creation fields. It preserves allowed hosts, package restrictions,
+provider, description and expiry instead of rewriting allowedHosts as hosts. The
+route organization remains authoritative over any query-string org.
