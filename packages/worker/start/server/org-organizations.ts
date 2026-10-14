@@ -32,7 +32,7 @@ async function accountContext() {
 }
 export const loadOrganizations = createServerFn({ method: 'GET' }).handler(
 	async () => {
-		const { env, request, user } = await accountContext()
+		const { env, user } = await accountContext()
 		const { loadAccountOrganizationsData } =
 			await import('../../src/app/handlers/account-organizations.ts')
 		return loadAccountOrganizationsData(env, user)

@@ -162,9 +162,9 @@ settings refresh the usage record and invalidate billing data. Source review
 found no new authorization bypass or dropped field in this cleanup, but CI and
 preview verification remain required evidence of runtime behavior.
 
-Against main `b24bb2ba2`, the deleted client router contains 1,352 lines, intent
-prefetch contains 277 lines, and the deleted backend router contains 782 lines.
-That is 2,411 lines across those three retired files, not a net migration size
+Against main `8b1ff60cc`, the deleted client router contains 1,344 lines, intent
+prefetch contains 265 lines, and the deleted backend router contains 780 lines.
+That is 2,389 lines across those three retired files, not a net migration size
 claim. Native routes and operation code replace their responsibilities.
 
 The exported shared secret reader uses `createServerOnlyFn`. This boundary keeps
@@ -191,3 +191,8 @@ The secret creation alias now builds the canonical organization credential URL
 from explicit creation fields. It preserves allowed hosts, package restrictions,
 provider, description and expiry instead of rewriting allowedHosts as hosts. The
 route organization remains authoritative over any query-string org.
+
+Main’s URL-only organization behavior is ported to native routes. Header ordering
+uses route scope or the personal organization, the Organizations page has no
+current badge, community installation targets the personal organization, and
+no navigation commit writes a remembered-organization cookie.

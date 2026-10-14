@@ -1,3 +1,4 @@
+import { requestHasMutationDataFields } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import {
 	classifyEmailThroughUi,
@@ -195,8 +196,10 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		})
 		await page.route('**/_serverFn/**', async (route) => {
 			if (
-				route.request().method() !== 'POST' ||
-				!route.request().postData()?.includes('classify')
+				!requestHasMutationDataFields(route.request(), {
+					messageId: messageIds[0]!,
+					classification: 'quarantined',
+				})
 			)
 				return route.fallback()
 			capturedWrite = true
@@ -233,11 +236,11 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		await expect(
 			page.getByRole('button', { name: 'Updating…', exact: true }),
 		).toBeVisible()
-		const accepted = page.waitForResponse(
-			(response) =>
-				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
-				response.request().postData()?.includes('classify') === true &&
-				response.request().method() === 'POST',
+		const accepted = page.waitForResponse((response) =>
+			requestHasMutationDataFields(response.request(), {
+				messageId: messageIds[0]!,
+				classification: 'quarantined',
+			}),
 		)
 		releaseWrite()
 		expect((await accepted).ok()).toBe(true)

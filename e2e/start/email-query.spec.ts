@@ -1,3 +1,4 @@
+import { requestHasMutationDataFields } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import {
 	classifyEmailThroughUi,
@@ -114,8 +115,10 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			})
 			await page.route('**/_serverFn/**', async (route) => {
 				if (
-					route.request().method() !== 'POST' ||
-					!route.request().postData()?.includes('classify')
+					!requestHasMutationDataFields(route.request(), {
+						messageId: seededId,
+						classification: 'quarantined',
+					})
 				)
 					return route.fallback()
 				captured()
@@ -128,11 +131,11 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					})
 				else await route.continue()
 			})
-			const response = page.waitForResponse(
-				(value) =>
-					new URL(value.url()).pathname.startsWith('/_serverFn/') &&
-					value.request().postData()?.includes('classify') === true &&
-					value.request().method() === 'POST',
+			const response = page.waitForResponse((value) =>
+				requestHasMutationDataFields(value.request(), {
+					messageId: seededId,
+					classification: 'quarantined',
+				}),
 			)
 			await page
 				.getByRole('button', { name: 'Mark as spam', exact: true })
