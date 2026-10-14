@@ -307,8 +307,8 @@ export function HomeRoute({
 						Your own <em>git</em> and <em>npm</em>.
 					</h2>
 					<p className="landing-split-copy">
-						A personal software ecosystem: isolated repos, packages you publish,
-						then trigger what you save.
+						An ecosystem for individuals and teams: isolated repos, packages you
+						publish, then trigger what you save.
 					</p>
 					<div className="landing-path landing-path-split">
 						{renderLandingPathSteps(
