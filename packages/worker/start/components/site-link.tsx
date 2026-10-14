@@ -1,7 +1,24 @@
 /** @jsxImportSource @emotion/react */
-import { Link, useRouter } from '@tanstack/react-router'
-import { type ComponentProps } from 'react'
+import { createLink, useRouter } from '@tanstack/react-router'
+import { forwardRef, type ComponentProps } from 'react'
 import { actionPagePaths } from '../action-pages.ts'
+
+// Router supplies aria-current="page" for exact active URLs. Section and wizard
+// links can have a more specific current state, which belongs to their caller.
+const RouterAnchor = createLink(
+	forwardRef<
+		HTMLAnchorElement,
+		ComponentProps<'a'> & {
+			current?: ComponentProps<'a'>['aria-current']
+		}
+	>(function RouterAnchor({ current, children, ...props }, ref) {
+		return (
+			<a {...props} ref={ref} aria-current={current ?? props['aria-current']}>
+				{children}
+			</a>
+		)
+	}),
+)
 
 /** Protocol handshakes and non-page endpoints use document navigation. */
 export function SiteLink({
@@ -24,8 +41,9 @@ export function SiteLink({
 	const [, params, route] = router.getMatchedRoutes(destination.pathname)
 	const matchesPage = Boolean(route && !(route.path !== '/' && params['**']))
 	return (
-		<Link
+		<RouterAnchor
 			to={href}
+			current={props['aria-current']}
 			// Section navigation supplies its own current state for descendants.
 			// Ordinary links should not mark their parent URL as the current page.
 			activeOptions={{ exact: true }}
@@ -36,6 +54,6 @@ export function SiteLink({
 			{...props}
 		>
 			{children}
-		</Link>
+		</RouterAnchor>
 	)
 }
