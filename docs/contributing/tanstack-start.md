@@ -139,7 +139,7 @@ Email optimistic classification is derived from Query mutation state. It does
 not overwrite the shared server cache or block reads behind pending writes.
 Accepted responses patch only the affected entity, and settlement reconciles
 both successful and lost responses, including after unmount. Other messages can
-be updated concurrently. Email no longer uses the page mutation barrier.
+be updated concurrently. Email reads run independently of pending writes.
 
 The collection server boundary authenticates the original HTTP request, sharing
 its request-scoped authentication lookup with middleware. A separate resource

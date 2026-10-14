@@ -2,7 +2,12 @@ import type * as CloudflareWorkers from 'cloudflare:workers'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as EmailDestinations from '#worker/email/destinations.ts'
-import { loadEmailPage } from '../../../start/server/account-collections.ts'
+import { QueryClient, dehydrate } from '@tanstack/react-query'
+import { loadEmailResources } from '../../../start/pages/email-resource-queries.ts'
+import {
+	emailKeys,
+	emailResourceInput,
+} from '../../../start/pages/email-resources.ts'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
@@ -93,7 +98,25 @@ test('email inbox SSR includes destinations and not just the message list', asyn
 		},
 	])
 
-	const response = await loadEmailPage({ data: '/account/email' })
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	})
+	await loadEmailResources(client, 'actor', '/account/email')
+	const response = {
+		payload: client.getQueryData(
+			emailKeys.list('actor', emailResourceInput('/account/email').list),
+		),
+		destinations: client.getQueryData(emailKeys.destinations('actor')),
+	}
+	expect(dehydrate(client).queries).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				queryKey: emailKeys.destinations('actor'),
+				state: expect.objectContaining({ data: response.destinations }),
+			}),
+		]),
+	)
+	expect(response.payload).not.toHaveProperty('selectedMessage')
 	expect(response).toMatchObject({
 		payload: expect.objectContaining({
 			ok: true,
@@ -111,4 +134,5 @@ test('email inbox SSR includes destinations and not just the message list', asyn
 			additionalRemaining: maxAdditionalEmailNotificationDestinations,
 		},
 	})
+	client.clear()
 })

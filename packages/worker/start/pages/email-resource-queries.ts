@@ -15,7 +15,7 @@ import {
 	type EmailListInput,
 } from './email-resources.ts'
 
-export function emailListQuery(actor: string | null, input: EmailListInput) {
+function emailListQuery(actor: string | null, input: EmailListInput) {
 	return queryOptions({
 		queryKey: emailKeys.list(actor, input),
 		queryFn: ({ signal }) => loadEmailList({ data: input, signal }),
@@ -23,7 +23,7 @@ export function emailListQuery(actor: string | null, input: EmailListInput) {
 		meta: { actorKey: actor },
 	})
 }
-export function emailDetailQuery(
+function emailDetailQuery(
 	actor: string | null,
 	org: string | null,
 	messageId: string | null,
@@ -38,7 +38,7 @@ export function emailDetailQuery(
 		meta: { actorKey: actor },
 	})
 }
-export function emailDestinationsQuery(actor: string | null) {
+function emailDestinationsQuery(actor: string | null) {
 	return queryOptions({
 		queryKey: emailKeys.destinations(actor),
 		queryFn: ({ signal }) => loadEmailDestinations({ signal }),
