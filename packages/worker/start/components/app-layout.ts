@@ -1,4 +1,5 @@
 import { type CSSObject } from '@emotion/react'
+import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
 import { isDocsPagePath } from '#universal/docs-nav.ts'
 import { isPackageDetailPathname } from '#universal/package-files.ts'
 import { isProfilePathname } from '#universal/profile-path.ts'
@@ -12,6 +13,14 @@ function appPageOwnsGutters(pathname: string, illustratedError: boolean) {
 			'/404',
 			'/500',
 			'/',
+			'/features',
+			'/features/memory',
+			'/features/secrets',
+			'/features/packages',
+			'/features/triggers',
+			'/features/integrations',
+			'/features/apps',
+			'/for/business',
 			'/pricing',
 			'/faq',
 			'/case-studies',
@@ -19,6 +28,7 @@ function appPageOwnsGutters(pathname: string, illustratedError: boolean) {
 			'/community',
 			'/onboarding',
 		].includes(pathname) ||
+		acquisitionPageSummaries.some((page) => page.path === pathname) ||
 		pathname.startsWith('/onboarding/step-') ||
 		isDocsPagePath(pathname) ||
 		isProfilePathname(pathname) ||
