@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { dismissOpenPopoverPanel } from '#client/popover-open.ts'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from '@tanstack/react-router'
@@ -44,13 +45,7 @@ export function FeaturesMenu(props: Props) {
 	const mobile = useRef<HTMLDetailsElement>(null)
 	const href = useLocation({ select: (location) => location.href })
 	useEffect(() => {
-		const element = panel.current
-		if (
-			element &&
-			typeof element.hidePopover === 'function' &&
-			element.matches(':popover-open')
-		)
-			element.hidePopover()
+		dismissOpenPopoverPanel(panel.current)
 		if (mobile.current) mobile.current.open = false
 	}, [href])
 

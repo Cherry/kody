@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { dismissOpenPopoverPanel } from '#client/popover-open.ts'
 import { type CSSObject } from '@emotion/react'
 import { FeaturesMenu } from './features-menu.tsx'
 import { SiteLink } from './site-link.tsx'
@@ -57,18 +58,6 @@ function ariaCurrent(currentPathname: string, href: string) {
 
 /** One id: the invoker points at the panel with `popovertarget`. */
 const menuPanelId = 'site-menu'
-
-/**
- * Dismiss an open popover panel on client-side navigation. Older browsers
- * throw from `matches(':popover-open')` when the Popover API is unavailable.
- */
-function dismissOpenPopoverPanel(panel: Element | null) {
-	if (!panel || typeof (panel as HTMLElement).hidePopover !== 'function') return
-	const element = panel as HTMLElement
-	if (element.matches(':popover-open')) {
-		element.hidePopover()
-	}
-}
 
 export function SiteHeader(props: SiteHeaderProps) {
 	const [menuOpen, setMenuOpen] = useState(false)

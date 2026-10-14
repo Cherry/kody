@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { dismissOpenPopoverPanel, isPopoverOpen } from '#client/popover-open.ts'
 import { type ReactNode, type KeyboardEvent } from 'react'
 import { SiteLink } from './site-link.tsx'
 import { type IconName, renderIcon } from './icon.tsx'
@@ -11,23 +12,13 @@ import {
 } from '#universal/styles/tokens.ts'
 import { hoverMq } from '#universal/styles/style-primitives.ts'
 
+export { dismissOpenPopoverPanel }
+
 /**
  * Below this the site header folds its nav and session corner into the menu
  * panel, so rows grow to phone-sized targets.
  */
 const headerNavMq = '@media (max-width: 820px)'
-
-/**
- * Dismiss an open popover panel on client-side navigation. Older browsers
- * throw from `matches(':popover-open')` when the Popover API is unavailable.
- */
-export function dismissOpenPopoverPanel(panel: Element | null) {
-	if (!panel || typeof (panel as HTMLElement).hidePopover !== 'function') return
-	const element = panel as HTMLElement
-	if (element.matches(':popover-open')) {
-		element.hidePopover()
-	}
-}
 
 export type SwitcherRow = {
 	key: string
@@ -81,7 +72,7 @@ export function moveSwitcherFocus(
 	event: KeyboardEvent,
 	panel: HTMLElement | null,
 ) {
-	if (!panel || !panel.matches(':popover-open')) return
+	if (!panel || !isPopoverOpen(panel)) return
 	const rows = Array.from(
 		panel.querySelectorAll<HTMLElement>('a[href], button'),
 	)

@@ -1,3 +1,4 @@
+import { dismissOpenPopoverPanel } from '#client/popover-open.ts'
 /** @jsxImportSource @emotion/react */
 import { useEffect, useId, useRef, useState } from 'react'
 import { colors, radius, shadows, spacing } from '#universal/styles/tokens.ts'
@@ -57,7 +58,7 @@ export function Combobox(props: ComboboxProps) {
 		const field = input.current
 		if (!panel || !field) return
 		if (!open || props.disabled) {
-			if (panel.matches(':popover-open')) panel.hidePopover()
+			dismissOpenPopoverPanel(panel)
 			return
 		}
 		panel.showPopover()
@@ -76,7 +77,7 @@ export function Combobox(props: ComboboxProps) {
 		return () => {
 			window.removeEventListener('resize', position)
 			window.removeEventListener('scroll', position, true)
-			if (panel.matches(':popover-open')) panel.hidePopover()
+			dismissOpenPopoverPanel(panel)
 		}
 	}, [open, props.disabled, options.length])
 	useEffect(() => {

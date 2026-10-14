@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { dismissOpenPopoverPanel, isPopoverOpen } from '#client/popover-open.ts'
 import {
 	useState,
 	useEffect,
@@ -125,7 +126,7 @@ function moveSwitcherFocus(
 	event: ReactKeyboardEvent,
 	panel: HTMLElement | null,
 ) {
-	if (!panel || !panel.matches(':popover-open')) return
+	if (!panel || !isPopoverOpen(panel)) return
 	const rows = Array.from(
 		panel.querySelectorAll<HTMLElement>('a[href], button'),
 	)
@@ -365,7 +366,7 @@ export function AccountMenu(props: {
 	} = useLoaderData({ from: '__root__' })
 	useEffect(() => {
 		const panel = document.getElementById(accountMenuPanelId)
-		if (panel?.matches(':popover-open')) panel.hidePopover()
+		dismissOpenPopoverPanel(panel)
 	}, [href])
 	const organizations = organizationsWithSignupFallback({
 		organizations: props.organizations ?? [],
