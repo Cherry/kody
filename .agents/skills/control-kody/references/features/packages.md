@@ -44,12 +44,14 @@ lock, forkable visibility, internet-visible, webhooks, delete),
 their preset; add, change preset, remove, invite, revoke invite),
 `/@username/:kodyId/approve-publish` (published-vs-HEAD review), and
 `/@username/:kodyId/approve-capabilities` (credential/capability summary before
-internet-visible). Opening an allowlisted image or video in the tree renders a
-preview; the bytes come from `/@username/:kodyId/raw/:ref/…` (same authz as the
-tree, 404 on every denial). Every file view links that URL as **Raw**; agents
-can fetch it with `Authorization: Bearer kody_at_…` (`package:read`).
-`/account/packages` 404s. `/account/packages/:packageId` redirects to the
-canonical package page.
+internet-visible). `/@:orgSlug/-/approvals/:bundleId` is an agent-prefilled
+bundle of pending approvals across packages (`approvalBundleCreate`), with
+Approve all and per-item Approve or Deny; only the person it was made for can
+open it. Opening an allowlisted image or video in the tree renders a preview;
+the bytes come from `/@username/:kodyId/raw/:ref/…` (same authz as the tree, 404
+on every denial). Every file view links that URL as **Raw**; agents can fetch it
+with `Authorization: Bearer kody_at_…` (`package:read`). `/account/packages`
+404s. `/account/packages/:packageId` redirects to the canonical package page.
 
 ## Drive it
 
@@ -77,7 +79,7 @@ fixtures use `control-kody execute` / `search` against the same origin.
 
 ## Transport
 
-Package reads, settings, approvals, and Collaborators use native Start server
+Package reads, settings, individual and bundled approvals, and Collaborators use native Start server
 functions. Collaborator changes require `package:manage_access` and support
 granting or revoking access and sending or revoking invitations. Raw files,
 assets, and icons remain HTTP resources:

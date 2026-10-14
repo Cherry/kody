@@ -210,6 +210,7 @@ import { Route as DotwellKnownAgentSkillsSkillIdSKILLDotmdRouteImport } from './
 import { Route as AtChar123orgSlugChar125ActivityRunIdRouteImport } from './routes/@{$orgSlug}_.-.activity_.$runId'
 import { Route as AtChar123orgSlugChar125AgentsNewRouteImport } from './routes/@{$orgSlug}_.-.agents_.new'
 import { Route as AtChar123orgSlugChar125AgentsUsageRouteImport } from './routes/@{$orgSlug}_.-.agents_.usage'
+import { Route as AtChar123orgSlugChar125ApprovalsBundleIdRouteImport } from './routes/@{$orgSlug}_.-.approvals.$bundleId'
 import { Route as AtChar123orgSlugChar125BillingSuccessRouteImport } from './routes/@{$orgSlug}_.-.billing_.success'
 import { Route as AtChar123orgSlugChar125ConnectionsSplatRouteImport } from './routes/@{$orgSlug}_.-.connections_.$'
 import { Route as AtChar123orgSlugChar125CredentialsCredentialIdRouteImport } from './routes/@{$orgSlug}_.-.credentials_.$credentialId'
@@ -1329,6 +1330,12 @@ const AtChar123orgSlugChar125AgentsUsageRoute =
     path: '/@{$orgSlug}/-/agents/usage',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125ApprovalsBundleIdRoute =
+  AtChar123orgSlugChar125ApprovalsBundleIdRouteImport.update({
+    id: '/@{$orgSlug}_/-/approvals/$bundleId',
+    path: '/@{$orgSlug}/-/approvals/$bundleId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125BillingSuccessRoute =
   AtChar123orgSlugChar125BillingSuccessRouteImport.update({
     id: '/@{$orgSlug}_/-/billing_/success',
@@ -1814,6 +1821,7 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
+  '/@{$orgSlug}/-/approvals/$bundleId': typeof AtChar123orgSlugChar125ApprovalsBundleIdRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
   '/@{$orgSlug}/-/connections/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
@@ -2063,6 +2071,7 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
+  '/@{$orgSlug}/-/approvals/$bundleId': typeof AtChar123orgSlugChar125ApprovalsBundleIdRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
   '/@{$orgSlug}/-/connections/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
@@ -2314,6 +2323,7 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/activity_/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}_/-/agents_/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}_/-/agents_/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
+  '/@{$orgSlug}_/-/approvals/$bundleId': typeof AtChar123orgSlugChar125ApprovalsBundleIdRoute
   '/@{$orgSlug}_/-/billing_/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
   '/@{$orgSlug}_/-/connections_/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}_/-/credentials_/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
@@ -2566,6 +2576,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/activity/$runId'
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
+    | '/@{$orgSlug}/-/approvals/$bundleId'
     | '/@{$orgSlug}/-/billing/success'
     | '/@{$orgSlug}/-/connections/$'
     | '/@{$orgSlug}/-/credentials/$credentialId'
@@ -2815,6 +2826,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/activity/$runId'
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
+    | '/@{$orgSlug}/-/approvals/$bundleId'
     | '/@{$orgSlug}/-/billing/success'
     | '/@{$orgSlug}/-/connections/$'
     | '/@{$orgSlug}/-/credentials/$credentialId'
@@ -3065,6 +3077,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/activity_/$runId'
     | '/@{$orgSlug}_/-/agents_/new'
     | '/@{$orgSlug}_/-/agents_/usage'
+    | '/@{$orgSlug}_/-/approvals/$bundleId'
     | '/@{$orgSlug}_/-/billing_/success'
     | '/@{$orgSlug}_/-/connections_/$'
     | '/@{$orgSlug}_/-/credentials_/$credentialId'
@@ -3309,6 +3322,7 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125ActivityRunIdRoute: typeof AtChar123orgSlugChar125ActivityRunIdRoute
   AtChar123orgSlugChar125AgentsNewRoute: typeof AtChar123orgSlugChar125AgentsNewRoute
   AtChar123orgSlugChar125AgentsUsageRoute: typeof AtChar123orgSlugChar125AgentsUsageRoute
+  AtChar123orgSlugChar125ApprovalsBundleIdRoute: typeof AtChar123orgSlugChar125ApprovalsBundleIdRoute
   AtChar123orgSlugChar125BillingSuccessRoute: typeof AtChar123orgSlugChar125BillingSuccessRoute
   AtChar123orgSlugChar125ConnectionsSplatRoute: typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   AtChar123orgSlugChar125CredentialsCredentialIdRoute: typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
@@ -4765,6 +4779,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125AgentsUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/approvals/$bundleId': {
+      id: '/@{$orgSlug}_/-/approvals/$bundleId'
+      path: '/@{$orgSlug}/-/approvals/$bundleId'
+      fullPath: '/@{$orgSlug}/-/approvals/$bundleId'
+      preLoaderRoute: typeof AtChar123orgSlugChar125ApprovalsBundleIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/billing_/success': {
       id: '/@{$orgSlug}_/-/billing_/success'
       path: '/@{$orgSlug}/-/billing/success'
@@ -5362,6 +5383,8 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125AgentsNewRoute: AtChar123orgSlugChar125AgentsNewRoute,
   AtChar123orgSlugChar125AgentsUsageRoute:
     AtChar123orgSlugChar125AgentsUsageRoute,
+  AtChar123orgSlugChar125ApprovalsBundleIdRoute:
+    AtChar123orgSlugChar125ApprovalsBundleIdRoute,
   AtChar123orgSlugChar125BillingSuccessRoute:
     AtChar123orgSlugChar125BillingSuccessRoute,
   AtChar123orgSlugChar125ConnectionsSplatRoute:

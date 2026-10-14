@@ -98,6 +98,10 @@ export const routes = route({
 	// (`/@owner/packages/…`, `/@owner/webhooks/…`) stay put.
 	orgActivity: get('/@:orgSlug/-/activity(/*rest)'),
 	orgAgents: get('/@:orgSlug/-/agents(/*rest)'),
+	// An agent-prefilled bundle of pending approvals (`approvalBundleCreate`).
+	// GET the JSON view; POST `{ action, item, fingerprint }` decides one item.
+	// Session-only: agents never decide.
+	orgApprovalBundle: get('/@:orgSlug/-/approvals/:bundleId'),
 	orgBilling: get('/@:orgSlug/-/billing'),
 	orgBillingSuccess: get('/@:orgSlug/-/billing/success'),
 	orgBillingPortal: get('/@:orgSlug/-/billing/portal'),

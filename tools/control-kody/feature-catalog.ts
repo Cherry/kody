@@ -122,6 +122,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/account/repos/:repoId/icon/:iconCommit',
 			'/@:username/:kodyId/approve-publish',
 			'/@:orgSlug/-/repositories',
+			'/@:orgSlug/-/approvals/:bundleId',
 		],
 		apis: ['/@:username/:kodyId/raw/:ref(/*relativePath)'],
 	},

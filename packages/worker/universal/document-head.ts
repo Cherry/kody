@@ -262,6 +262,7 @@ const routeDocumentHeads = {
 	[routePattern(routes.communityPackageApproveCredentials)]: titleOnly(
 		'Approve credential mappings',
 	),
+	[routePattern(routes.orgApprovalBundle)]: titleOnly('Review approvals'),
 	[routePattern(routes.communityPackageApprovePublish)]: titleOnly(
 		'Approve package publish',
 	),

@@ -93,3 +93,11 @@ test('organization management paths do not consume public package paths', () => 
 		exact: true,
 	})
 })
+
+test('approval bundles bind the organization and bundle independently of public package paths', () => {
+	expect(match('/@acme/-/approvals/bundle-123')).toMatchObject({
+		path: '/@{$orgSlug}/-/approvals/$bundleId',
+		params: { orgSlug: 'acme', bundleId: 'bundle-123' },
+		exact: true,
+	})
+})

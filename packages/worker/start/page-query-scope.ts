@@ -30,3 +30,21 @@ export function scopedPageResource(
 			pageQueryOrg(query.queryKey[3]) === org,
 	}
 }
+
+export function pageQueryInputOrg(value: unknown): string | null {
+	if (typeof value === 'string')
+		return (
+			pageQueryOrg(value) ??
+			/^\/@([^/]+)(?:\/|$)/.exec(
+				new URL(value, 'https://kody.local').pathname,
+			)?.[1] ??
+			null
+		)
+	if (value && typeof value === 'object') {
+		if ('orgSlug' in value && typeof value.orgSlug === 'string')
+			return value.orgSlug
+		if ('href' in value && typeof value.href === 'string')
+			return pageQueryInputOrg(value.href)
+	}
+	return null
+}
