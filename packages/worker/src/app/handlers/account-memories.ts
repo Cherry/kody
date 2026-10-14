@@ -12,6 +12,8 @@ import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
 import { type routes } from '#universal/routes.ts'
 import { deleteMemory } from '#mcp/memory/service.ts'
+import { isPersonalOrg } from '#worker/orgs/is-personal-org.ts'
+import { memoryLegacyWriteFrozenMessage } from '#mcp/memory/memory-owner.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -85,6 +87,16 @@ export function createAccountMemoriesApiHandler(env: Env) {
 			const action = readTrimmedStringOrEmpty(body, 'action')
 			try {
 				if (action === 'delete') {
+					const ownerId = ownerIdFromCaller({
+						request: user.request,
+						user: user.mcpUser,
+					})
+					if (!(await isPersonalOrg(env.APP_DB, ownerId))) {
+						return jsonResponse(
+							{ ok: false, error: memoryLegacyWriteFrozenMessage },
+							400,
+						)
+					}
 					return await handleDeleteAction({
 						env,
 						user,
