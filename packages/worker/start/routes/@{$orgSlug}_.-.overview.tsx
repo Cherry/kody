@@ -32,7 +32,7 @@ function Page() {
 		<AccountManagementShell currentHref={`/@${slug}/-/overview`}>
 			<AccountPageHeader
 				title="Overview"
-				description={`Everything @${slug} holds: repositories, agents, credentials, jobs, memories, and the rest.`}
+				description={`Everything @${slug} holds: repositories, agents, credentials, jobs, and the rest.`}
 				currentHref={`/@${slug}/-/overview`}
 			/>
 			{workspaceRailGroups({ orgSlug: slug, personal, role })
