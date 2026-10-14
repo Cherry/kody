@@ -56,20 +56,8 @@ test('a public file is served from ASSETS and a dynamic prefix never fetches tha
 
 	expect(requestSkipsAssetProbe('/account')).toBe(true)
 	expect(requestSkipsAssetProbe('/@acme/-/jobs')).toBe(true)
-	const beforeAccount = tracked.pathnames.length
-	const accountResponse = await workerFetch(
-		new Request('https://test.kody.dev/account/jobs.json', {
-			headers: { Accept: 'application/json' },
-		}),
-		tracked.env,
-	)
-	await accountResponse.body?.cancel()
-	const accountFetches = tracked.pathnames.slice(beforeAccount)
-	expect(
-		accountFetches.some(
-			(pathname) => pathname === '/account' || pathname.startsWith('/account/'),
-		),
-	).toBe(false)
+	// Document and Start protocol dispatch require the compiled MCP test server.
+	expect(requestSkipsAssetProbe('/account/memories-export.json')).toBe(true)
 
 	const beforeOrg = tracked.pathnames.length
 	const orgResponse = await workerFetch(

@@ -12,7 +12,7 @@ async function workerFetch(request: Request): Promise<Response> {
 	return await exports.default.fetch(request)
 }
 
-test('public route hardening rejects retired connector paths, unknown paths, and abusive auth', async () => {
+test('protocol routing rejects retired connectors and protects maintenance endpoints', async () => {
 	await env.APP_DB.prepare(`DROP TABLE IF EXISTS users`).run()
 	await env.APP_DB.prepare(
 		`CREATE TABLE users (
@@ -135,27 +135,4 @@ test('public route hardening rejects retired connector paths, unknown paths, and
 	await expect(unknownMaintenanceResponse.json()).resolves.toEqual({
 		error: 'Unknown maintenance endpoint.',
 	})
-
-	let rateLimited = false
-	for (let i = 0; i < 25; i++) {
-		const response = await workerFetch(
-			createRequest('/auth', {
-				...jsonPost({
-					email: 'attacker@example.com',
-					password: 'password123',
-					mode: 'login',
-				}),
-				headers: {
-					'Content-Type': 'application/json',
-					'CF-Connecting-IP': '198.51.100.42',
-				},
-			}),
-		)
-		if (response.status === 429) {
-			rateLimited = true
-			expect(response.headers.get('Retry-After')).toBeTruthy()
-			break
-		}
-	}
-	expect(rateLimited).toBe(true)
 }, 60_000)

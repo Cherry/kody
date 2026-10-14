@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { redirectCredentialEntry } from '../server/credential-redirect.ts'
+import { redirectCredentialEntry } from '#start/server/credential-redirect'
 export const Route = createFileRoute('/connect/credential')({
 	validateSearch: (search: Record<string, unknown>) => search,
 	beforeLoad: ({ location }) =>
