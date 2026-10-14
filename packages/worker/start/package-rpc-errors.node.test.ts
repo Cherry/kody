@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { runWithStartContext } from '@tanstack/start-storage-context'
 import { createClientRpc } from '@tanstack/start-client-core/client-rpc'
-import { toJSONAsync } from 'seroval'
+import { toCrossJSONAsync } from 'seroval'
 
 test('Start preserves structured package recovery data on non-success RPC status', async () => {
 	const result = {
@@ -26,7 +26,7 @@ test('Start preserves structured package recovery data on non-success RPC status
 				method: 'POST',
 				data: { packageId: 'package' },
 				fetch: async () =>
-					new Response(JSON.stringify(await toJSONAsync({ result })), {
+					new Response(JSON.stringify(await toCrossJSONAsync({ result })), {
 						status: 409,
 						headers: {
 							'content-type': 'application/json',

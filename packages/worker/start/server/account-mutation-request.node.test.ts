@@ -70,8 +70,29 @@ vi.mock('../../src/app/handlers/account-email-destinations.ts', () => ({
 }))
 vi.mock('@tanstack/react-start/server', () => ({ setResponseHeader: vi.fn() }))
 vi.mock('../../src/app/operation-result.ts', () => ({
-	operationResult: (value: unknown, status = 200) => ({ value, status }),
-	requireOperationResult: (result: { value: unknown }) => result.value,
+	requireOperationResult: (result: {
+		value?: unknown
+		data?: unknown
+		status?: number
+	}) => {
+		if (typeof result.status === 'number' && result.status >= 400) {
+			const data = result.data
+			throw new Error(
+				data &&
+					typeof data === 'object' &&
+					'error' in data &&
+					typeof data.error === 'string'
+					? data.error
+					: 'Unable to complete operation.',
+			)
+		}
+		return result.value ?? result.data
+	},
+	operationResult: <T>(data: T, init: number | ResponseInit = 200) => ({
+		data,
+		status: typeof init === 'number' ? init : (init.status ?? 200),
+		headers: typeof init === 'number' ? undefined : init.headers,
+	}),
 }))
 vi.mock('../../src/app/handlers/account-experiments.ts', () => ({
 	saveExperimentsPreference: state.mutate,
