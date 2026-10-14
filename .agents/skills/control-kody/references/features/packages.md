@@ -41,7 +41,7 @@ pinned commit), `/@username/:kodyId/settings` (**Settings** tab for packages:
 lock, forkable visibility, internet-visible, webhooks, delete),
 `/@username/:kodyId/collaborators` (**Collaborators** tab, shown only with
 `package:manage_access`: teams, org members, and outside collaborators with
-their preset; add, change preset, remove, invite, revoke invite),
+their preset; add a team or org member, change preset, remove),
 `/@username/:kodyId/approve-publish` (published-vs-HEAD review), and
 `/@username/:kodyId/approve-capabilities` (credential/capability summary before
 internet-visible). `/@:orgSlug/-/approvals/:bundleId` is an agent-prefilled
@@ -81,8 +81,10 @@ fixtures use `control-kody execute` / `search` against the same origin.
 
 Package reads, settings, individual and bundled approvals, and Collaborators use
 native Start server functions. Collaborator changes require
-`package:manage_access` and support granting or revoking access and sending or
-revoking invitations. Raw files, assets, and icons remain HTTP resources:
+`package:manage_access` and support granting or revoking internal team/member
+access through `packageCollaboratorSet` and `packageCollaboratorRemove`.
+Existing outside collaborators are listed read-only and can be removed. Raw
+files, assets, and icons remain HTTP resources:
 
 - `GET /@:username/:kodyId/icon/:iconCommit`
 - `GET /account/repos/:repoId/icon/:iconCommit`

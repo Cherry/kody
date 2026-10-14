@@ -251,13 +251,13 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 		const input = await orgContext(data.slug, 'overview')
 		const [
 			{ loadRequestOrgResolution },
-			{ personalOrgId },
+			{ personalOrgIdForPerson },
 			{ serializeLastUsedOrgCookie },
 			{ isSecureRequest },
 			{ setResponseHeader },
 		] = await Promise.all([
 			import('../../src/app/org-request-binding.ts'),
-			import('@kody-internal/shared/owner-person-ids.ts'),
+			import('../../src/orgs/personal-org-id.ts'),
 			import('#universal/org-last-used-cookie.ts'),
 			import('../../src/app/auth-session.ts'),
 			import('@tanstack/react-start/server'),
@@ -269,7 +269,7 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 		)
 		if (typeof resolution === 'string') throw notFound()
 		const slug = resolution.org.slug ?? data.slug
-		if (resolution.org.id !== personalOrgId(input.user.mcpUser.userId))
+		if (resolution.org.id !== personalOrgIdForPerson(input.user.mcpUser))
 			throw redirect({ href: `/@${encodeURIComponent(slug)}` })
 		if (isOrgDocumentRequest()) {
 			setResponseHeader(
@@ -289,12 +289,12 @@ export const loadOrgRepositories = createServerFn({ method: 'GET' })
 		const input = await orgContext(data.slug, 'repositories')
 		const [
 			{ loadRequestOrgResolution, orgSectionDenial },
-			{ personalOrgId },
+			{ personalOrgIdForPerson },
 			{ loadOrgRepositoriesData },
 			{ loadProfileData },
 		] = await Promise.all([
 			import('../../src/app/org-request-binding.ts'),
-			import('@kody-internal/shared/owner-person-ids.ts'),
+			import('../../src/orgs/personal-org-id.ts'),
 			import('../../src/app/org-repositories-data.ts'),
 			import('../../src/app/profile-data.ts'),
 		])
@@ -316,7 +316,7 @@ export const loadOrgRepositories = createServerFn({ method: 'GET' })
 		}
 		const request = new Request(url, { headers: input.request.headers })
 		const payload =
-			binding.org.id === personalOrgId(input.user.mcpUser.userId)
+			binding.org.id === personalOrgIdForPerson(input.user.mcpUser)
 				? await loadProfileData(input.env, request, input.user.username)
 				: await loadOrgRepositoriesData({ ...input, request, binding })
 		if (!payload) throw notFound()

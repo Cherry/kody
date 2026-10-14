@@ -334,6 +334,7 @@ async function usersAndOrgsDb() {
 		.prepare(
 			`CREATE TABLE users (
 				stable_user_id TEXT PRIMARY KEY,
+			personal_org_id TEXT,
 				email TEXT,
 				deleted_at TEXT,
 				deleting_at TEXT

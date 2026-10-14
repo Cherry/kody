@@ -1,3 +1,4 @@
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
@@ -29,13 +30,14 @@ import { buildMcpServerUrl } from '#worker/onboarding-prompts.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	personalOrgId,
+	type OwnerId,
 	type PersonId,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { enum_, object, parseSafe, string } from 'remix/data-schema'
 
 type ConnectedAgentsUser = {
-	mcpUser: { userId: PersonId }
+	mcpUser: { userId: PersonId; personalOrgId?: OwnerId | null }
 	emailVerified: boolean
 	request: RequestContext
 }
@@ -46,12 +48,19 @@ type ConnectedAgentsUser = {
  * org. Connection profiles and the second-agent gift stay on the signup org.
  */
 function connectedAgentsScope(user: ConnectedAgentsUser) {
+	// Grants are person-keyed (legacy OwnerId brand of the person id).
 	const personId = personalOrgId(user.mcpUser.userId)
+	const personalOrgOwnerId = personalOrgIdForPerson(user.mcpUser)
 	const orgId = ownerIdFromCaller({
 		request: user.request,
 		user: user.mcpUser,
 	})
-	return { personId, orgId, personalOrg: orgId === personId }
+	return {
+		personId,
+		orgId,
+		personalOrgOwnerId,
+		personalOrg: orgId === personalOrgOwnerId,
+	}
 }
 
 export async function loadAccountConnectedAgentsData(input: {
@@ -59,7 +68,8 @@ export async function loadAccountConnectedAgentsData(input: {
 	requestUrl: string | URL
 	user: ConnectedAgentsUser
 }): Promise<AccountConnectedAgentsLoaderData> {
-	const { personId, orgId, personalOrg } = connectedAgentsScope(input.user)
+	const { personId, orgId, personalOrg, personalOrgOwnerId } =
+		connectedAgentsScope(input.user)
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(input.env)
 	const state = await loadInboundMcpConnectionState(helpers, personId, {
 		env: input.env,
@@ -72,7 +82,7 @@ export async function loadAccountConnectedAgentsData(input: {
 	) {
 		await maybeEvaluateSecondAgentStandardGift({
 			db: input.env.APP_DB,
-			stableUserId: personId,
+			stableUserId: personalOrgOwnerId,
 			ecosystemCount: countConnectedAgentEcosystems(state.agents),
 			listingFailed: state.listingFailed,
 		})

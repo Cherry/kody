@@ -21,15 +21,6 @@ const change = z.discriminatedUnion('intent', [
 		intent: z.literal('revoke'),
 		grantId: z.string().trim().min(1),
 	}),
-	z.strictObject({
-		intent: z.literal('invite'),
-		invitee: z.string().trim().min(1),
-		preset: z.enum(packageCollaboratorPresets),
-	}),
-	z.strictObject({
-		intent: z.literal('revoke-invite'),
-		inviteId: z.string().trim().min(1),
-	}),
 ])
 export const loadPackageCollaborators = createServerFn({ method: 'GET' })
 	.validator(packageInput)

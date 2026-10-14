@@ -20,7 +20,8 @@ test('protocol routing rejects retired connectors and protects maintenance endpo
 			username TEXT NOT NULL UNIQUE,
 			email TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
-			stable_user_id TEXT NOT NULL
+			stable_user_id TEXT NOT NULL,
+			personal_org_id TEXT
 		)`,
 	).run()
 	await env.APP_DB.prepare(

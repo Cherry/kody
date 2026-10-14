@@ -79,7 +79,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	const wide = await openSwitcher(page)
 	await expect(
 		wide.panel.getByTestId(`org-switcher-pinned-${runId}`),
-	).toHaveAttribute('aria-current', 'page')
+	).toHaveAttribute('aria-current', 'true')
 	await expect(
 		wide.panel.getByTestId(`org-switcher-${user.username}`),
 	).not.toHaveAttribute('aria-current')
@@ -165,7 +165,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(drawerPanel).toBeVisible()
 	await expect(
 		drawerPanel.getByTestId(`org-switcher-pinned-${runId}`),
-	).toHaveAttribute('aria-current', 'page')
+	).toHaveAttribute('aria-current', 'true')
 	await page.mouse.click(4, 400)
 	await expect(drawerPanel).toBeHidden()
 

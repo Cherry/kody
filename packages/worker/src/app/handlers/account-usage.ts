@@ -1,6 +1,6 @@
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { getOrgById } from '#worker/orgs/repo.ts'
-import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 
 /**
  * Legacy `/account/usage` → personal-org `/@slug/-/usage`, keeping the query
@@ -10,7 +10,7 @@ import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 export async function personalUsageSlug(env: Env, user: AuthenticatedAppUser) {
 	const signupOrg = await getOrgById(
 		env.APP_DB,
-		personalOrgId(user.mcpUser.userId),
+		personalOrgIdForPerson(user.mcpUser),
 	)
 	return signupOrg?.slug?.trim() || user.username
 }

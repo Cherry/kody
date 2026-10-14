@@ -1,3 +1,4 @@
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import {
 	personalOrgId,
 	type OwnerId,
@@ -69,6 +70,7 @@ import {
 export async function loadChecklist(
 	env: Env,
 	userId: OwnerId,
+	personId: OwnerId,
 	username: string,
 	hasMcpClient: boolean,
 	options?: { hasAccessWin?: boolean; hasSecondMcpClient?: boolean },
@@ -77,12 +79,13 @@ export async function loadChecklist(
 		deriveOnboardingChecklist({
 			env,
 			userId,
+			personId,
 			emailVerified: true,
 			hasMcpClient,
 			hasAccessWin: options?.hasAccessWin,
 			hasSecondMcpClient: options?.hasSecondMcpClient,
 		}),
-		readOnboardingChecklistDismissed({ env, userId }),
+		readOnboardingChecklistDismissed({ env, personId }),
 	])
 	return { username, items: checklist.items, dismissed }
 }
@@ -90,12 +93,13 @@ export async function loadChecklist(
 export async function attachOnboardingProgress(
 	env: Env,
 	userId: OwnerId,
+	personId: OwnerId,
 	username: string,
 	onboarding: OnboardingLoaderData,
 ) {
 	const [hasAccessWin, persistedPackageName, accessWinMemorySubject] =
 		await Promise.all([
-			loadOnboardingAccessWin(env, userId),
+			loadOnboardingAccessWin(env, userId, personId),
 			loadPersistedPackageName(env, userId),
 			loadOnboardingAccessWinMemorySubject(env, userId),
 		])
@@ -105,6 +109,7 @@ export async function attachOnboardingProgress(
 	onboarding.checklist = await loadChecklist(
 		env,
 		userId,
+		personId,
 		username,
 		onboarding.hasMcpClient,
 		{
@@ -249,11 +254,12 @@ export async function loadOnboardingChooserFields(
 async function loadOnboardingResumeProgress(
 	env: Env,
 	userId: OwnerId,
+	personId: OwnerId,
 ): Promise<OnboardingWizardProgress> {
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(env)
 	const [inbound, hasAccessWin] = await Promise.all([
-		loadInboundMcpConnectionState(helpers, userId),
-		loadOnboardingAccessWin(env, userId),
+		loadInboundMcpConnectionState(helpers, personId),
+		loadOnboardingAccessWin(env, userId, personId),
 	])
 	return {
 		hasMcpClient: inbound.uniqueClientCount > 0,
@@ -278,6 +284,7 @@ export async function redirectOnboardingIndex(env: Env, request: Request) {
 	}
 	const progress = await loadOnboardingResumeProgress(
 		env,
+		personalOrgIdForPerson(user.mcpUser),
 		personalOrgId(user.mcpUser.userId),
 	)
 	return Response.redirect(
@@ -348,14 +355,14 @@ export async function readOnboardingPageData(env: Env, request: Request) {
 				loadOnboardingChooserFields(
 					env,
 					request,
-					personalOrgId(user.mcpUser.userId),
+					personalOrgIdForPerson(user.mcpUser),
 				),
 			)
 		: null
 	const onboarding = await loadOnboardingData({
 		env,
 		requestUrl: request.url,
-		stableUserId: personalOrgId(user.mcpUser.userId),
+		personId: personalOrgId(user.mcpUser.userId),
 		username: user.username,
 		emailVerified: user.emailVerified,
 		...chooser,
@@ -363,6 +370,7 @@ export async function readOnboardingPageData(env: Env, request: Request) {
 	if (user.emailVerified)
 		await attachOnboardingProgress(
 			env,
+			personalOrgIdForPerson(user.mcpUser),
 			personalOrgId(user.mcpUser.userId),
 			user.username,
 			onboarding,

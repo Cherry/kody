@@ -1,6 +1,6 @@
 import { getRequest, setResponseHeader } from '@tanstack/react-start/server'
 import { env as workerEnv } from 'cloudflare:workers'
-import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadResolvedRequestAuth } from '#app/request-auth-cache.ts'
 import { getEnv } from '#app/env.ts'
@@ -67,7 +67,7 @@ export async function withWebsiteMutation<T>(
 		throw new Error('Account deletion is in progress.')
 	return withAccountWriteLease({
 		db: env.APP_DB,
-		stableUserId: personalOrgId(user.mcpUser.userId),
+		stableUserId: personalOrgIdForPerson(user.mcpUser),
 		holder: 'website:server-function',
 		env,
 		write: () => write(context),

@@ -1,3 +1,4 @@
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { redirect } from '@tanstack/react-router'
@@ -61,7 +62,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			loadOnboardingData({
 				env: appEnv,
 				requestUrl: pageUrl.href,
-				stableUserId: personalOrgId(user.mcpUser.userId),
+				personId: personalOrgId(user.mcpUser.userId),
 				username: user.username,
 				emailVerified: user.emailVerified,
 			}),
@@ -69,6 +70,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 		if (user.emailVerified)
 			onboarding.checklist = await loadChecklist(
 				appEnv,
+				personalOrgIdForPerson(user.mcpUser),
 				personalOrgId(user.mcpUser.userId),
 				user.username,
 				onboarding.hasMcpClient,

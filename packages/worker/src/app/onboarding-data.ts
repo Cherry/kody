@@ -147,7 +147,7 @@ export function loadHomePageOnboardingData(input: {
 export async function loadOnboardingData(input: {
 	env: OnboardingEnv
 	requestUrl: string | URL
-	stableUserId: OwnerId
+	personId: OwnerId
 	username: string
 	emailVerified: boolean
 	/**
@@ -177,13 +177,13 @@ export async function loadOnboardingData(input: {
 }): Promise<OnboardingLoaderData> {
 	const inbound = await loadInboundMcpConnectionState(
 		input.env.OAUTH_PROVIDER,
-		input.stableUserId,
+		input.personId,
 	)
 	const connectedAgents = toOnboardingConnectedAgents(inbound.agents)
 	const ecosystemCount = countConnectedAgentEcosystems(connectedAgents)
 	const secondAgentStandardGift = await maybeEvaluateSecondAgentStandardGift({
 		db: input.env.APP_DB,
-		stableUserId: input.stableUserId,
+		stableUserId: input.personId,
 		ecosystemCount,
 		listingFailed: inbound.listingFailed,
 	})

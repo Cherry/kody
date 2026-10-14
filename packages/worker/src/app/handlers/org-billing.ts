@@ -1,5 +1,6 @@
-import { operationResult } from '../operation-result.ts'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
+import { operationResult } from '../operation-result.ts'
 import { type OrgPermission } from '@kody-internal/shared/org-permissions.ts'
 import {
 	loadAccountBillingData,
@@ -124,7 +125,8 @@ export async function resolveOrgBillingAccess(input: {
 			id: resolution.org.id,
 			slug: record.slug,
 			displayName: record.display_name,
-			personal: resolution.org.id === personalOrgId(input.user.mcpUser.userId),
+			personal:
+				resolution.org.id === personalOrgIdForPerson(input.user.mcpUser),
 		},
 	}
 }

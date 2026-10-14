@@ -65,6 +65,7 @@ import {
 } from '#worker/billing/signup-welcome-credits.ts'
 import { attributeReferralAtSignup } from '#worker/entitlements/referral-program.ts'
 import {
+	mintPersonalOrgIdForSignup,
 	provisionPersonalOrgForSignup,
 	rollbackPersonalOrgAfterFailedSignup,
 } from '#worker/orgs/signup-provision.ts'
@@ -316,10 +317,15 @@ export async function authenticateWebsite({
 			)
 		}
 
-		let record: { id: number; stableUserId: string } | null = null
+		let record: {
+			id: number
+			stableUserId: string
+			personalOrgId: string
+		} | null = null
 		const signupCreatedAt = new Date().toISOString()
 		try {
 			const stableUserId = allocated.stableUserId
+			const personalOrgId = mintPersonalOrgIdForSignup()
 			const createdAt = signupCreatedAt
 			const createdUser = await db.create(
 				usersTable,
@@ -327,7 +333,7 @@ export async function authenticateWebsite({
 					username: normalizedUsername,
 					email: normalizedEmail,
 					stable_user_id: stableUserId,
-					personal_org_id: stableUserId,
+					personal_org_id: personalOrgId,
 					password_hash: passwordHash,
 					...firstTouchAttributionCreateFields(signupAttribution),
 					last_active_at: createdAt,
@@ -336,7 +342,7 @@ export async function authenticateWebsite({
 					returnRow: true,
 				},
 			)
-			record = { id: createdUser.id, stableUserId }
+			record = { id: createdUser.id, stableUserId, personalOrgId }
 		} catch (error) {
 			const uniqueField = getUniqueConstraintField(error)
 			if (
@@ -394,6 +400,7 @@ export async function authenticateWebsite({
 		try {
 			await provisionPersonalOrgForSignup(env.APP_DB, {
 				stableUserId: signupUser.stableUserId,
+				orgId: signupUser.personalOrgId,
 				username: normalizedUsername,
 				createdAt: signupCreatedAt,
 				plan: resolvePlanWrite(null),
@@ -408,6 +415,7 @@ export async function authenticateWebsite({
 				await rollbackPersonalOrgAfterFailedSignup(
 					env.APP_DB,
 					signupUser.stableUserId,
+					signupUser.personalOrgId,
 				)
 				await env.APP_DB.prepare(
 					`DELETE FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
@@ -443,6 +451,7 @@ export async function authenticateWebsite({
 			await rollbackPersonalOrgAfterFailedSignup(
 				env.APP_DB,
 				signupUser.stableUserId,
+				signupUser.personalOrgId,
 			)
 			await env.APP_DB.prepare(
 				`DELETE FROM users WHERE id = ?${andLiveDeletedAtSql()}`,
@@ -603,7 +612,7 @@ export async function authenticateWebsite({
 		})
 		await maybeGrantSignupWelcomeCredits({
 			db: env.APP_DB,
-			userId: record.stableUserId,
+			userId: record.personalOrgId,
 		})
 		try {
 			await attributeReferralAtSignup({

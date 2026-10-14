@@ -1,14 +1,10 @@
 import { z } from 'zod'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import type { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import {
-	accessGrantCapability,
-	accessRevokeCapability,
-} from '#mcp/capabilities/access/access-grants.ts'
-import {
-	inviteCreateCapability,
-	inviteRevokeCapability,
-} from '#mcp/capabilities/access/invites.ts'
+	packageCollaboratorRemoveCapability,
+	packageCollaboratorSetCapability,
+} from '#mcp/capabilities/access/package-collaborators.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
@@ -18,21 +14,13 @@ import {
 	computeEffectivePermissions,
 	packageResource,
 } from '#worker/authorization/authorize.ts'
-import { normalizeEmailAddress } from '#worker/email/address.ts'
 import { operationResult } from '../operation-result.ts'
-import {
-	getGrantById,
-	getInviteById,
-	listGrants,
-} from '#worker/orgs/access-writes.ts'
 import { isPersonalOrg } from '#worker/orgs/is-personal-org.ts'
-import { getLiveOrgMembership } from '#worker/orgs/org-members-list.ts'
 import { listPackageCollaborators } from '#worker/orgs/package-collaborators.ts'
 import { loadOrgBindingForSlug, type OrgBinding } from '#worker/orgs/repo.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import {
 	type PackageCollaboratorsView,
-	type PackageCollaboratorsWriteResult,
 	packageCollaboratorPresets,
 } from '#universal/package-collaborators.ts'
 
@@ -58,24 +46,7 @@ const changeSchema = z.discriminatedUnion('intent', [
 		intent: z.literal('revoke'),
 		grantId: z.string().trim().min(1),
 	}),
-	z.strictObject({
-		intent: z.literal('invite'),
-		invitee: z.string().trim().min(1),
-		preset: presetSchema,
-	}),
-	z.strictObject({
-		intent: z.literal('revoke-invite'),
-		inviteId: z.string().trim().min(1),
-	}),
 ])
-
-class CollaboratorChangeRefused extends Error {
-	readonly status: 400 | 404
-	constructor(message: string, status: 400 | 404 = 400) {
-		super(message)
-		this.status = status
-	}
-}
 
 /**
  * The package as the signed-in person sees it, bound to the `:username` org
@@ -164,116 +135,31 @@ async function buildCollaboratorsView(
 	}
 }
 
-/** An email address, or a username with or without its leading `@`. */
-function readInvitee(value: string) {
-	if (/^[^@\s]+@[^@\s]+$/.test(value)) {
-		const email = normalizeEmailAddress(value)
-		if (!email) throw new CollaboratorChangeRefused('Enter a valid email.')
-		return { email }
-	}
-	return { username: value.replace(/^@/, '') }
-}
-
 async function applyChange(
 	scope: CollaboratorsScope,
 	change: z.infer<typeof changeSchema>,
-): Promise<PackageCollaboratorsWriteResult['invite']> {
-	const { ctx, org, savedPackage } = scope
-	const db = ctx.env.APP_DB
+) {
+	const { ctx, savedPackage } = scope
 	const intent = change.intent
 	switch (intent) {
-		case 'grant': {
-			if (change.subjectType === 'user') {
-				// Members are added directly; anyone else needs an invite. A person
-				// who already holds a grant here can have their preset changed.
-				const [membership, existing] = await Promise.all([
-					getLiveOrgMembership(db, org.id, change.subjectId),
-					listGrants({
-						db,
-						orgId: org.id,
-						resourceType: 'package',
-						resourceId: savedPackage.id,
-						subjectType: 'user',
-						subjectId: change.subjectId,
-					}),
-				])
-				if (!membership && existing.length === 0) {
-					throw new CollaboratorChangeRefused(
-						'That person is not a member of this organization. Invite them by email or username instead.',
-					)
-				}
-			}
-			await accessGrantCapability.handler(
+		case 'grant':
+			await packageCollaboratorSetCapability.handler(
 				{
-					resource_type: 'package',
-					resource_id: savedPackage.id,
-					subject_type: change.subjectType,
-					subject_id: change.subjectId,
+					package_id: savedPackage.id,
+					...(change.subjectType === 'team'
+						? { team_id: change.subjectId }
+						: { user_id: change.subjectId }),
 					preset: change.preset,
 				},
 				ctx,
 			)
-			return undefined
-		}
-		case 'revoke': {
-			const grant = await getGrantById({
-				db,
-				orgId: org.id,
-				grantId: change.grantId,
-			})
-			if (
-				!grant ||
-				grant.resourceType !== 'package' ||
-				grant.resourceId !== savedPackage.id
-			) {
-				throw new CollaboratorChangeRefused(
-					'That collaborator no longer has access to this package.',
-					404,
-				)
-			}
-			await accessRevokeCapability.handler({ grant_id: grant.id }, ctx)
-			return undefined
-		}
-		case 'invite': {
-			const invitee = readInvitee(change.invitee)
-			const created = await inviteCreateCapability.handler(
-				{
-					kind: 'grant',
-					...invitee,
-					resource_type: 'package',
-					resource_id: savedPackage.id,
-					preset: change.preset,
-				},
+			return
+		case 'revoke':
+			await packageCollaboratorRemoveCapability.handler(
+				{ package_id: savedPackage.id, grant_id: change.grantId },
 				ctx,
 			)
-			return {
-				id: created.invite.id,
-				expiresAt: created.invite.expires_at,
-				token: created.token,
-				prompt: created.prompt,
-			}
-		}
-		case 'revoke-invite': {
-			const invite = await getInviteById({
-				db,
-				orgId: org.id,
-				inviteId: change.inviteId,
-			})
-			if (
-				!invite ||
-				invite.kind !== 'grant' ||
-				invite.resourceType !== 'package' ||
-				invite.resourceId !== savedPackage.id ||
-				invite.status !== 'pending'
-			) {
-				throw new CollaboratorChangeRefused(
-					'That invite is no longer pending.',
-					404,
-				)
-			}
-			await inviteRevokeCapability.handler({ invite_id: invite.id }, ctx)
-			return undefined
-		}
+			return
 		default: {
 			const exhaustive: never = intent
 			throw new Error(`Unknown collaborator change: ${String(exhaustive)}`)
@@ -329,15 +215,9 @@ export async function mutatePackageCollaborators(
 			},
 			400,
 		)
-	let invite: PackageCollaboratorsWriteResult['invite']
 	try {
-		invite = await applyChange(loaded.scope, parsed.data)
+		await applyChange(loaded.scope, parsed.data)
 	} catch (error) {
-		if (error instanceof CollaboratorChangeRefused)
-			return operationResult(
-				{ ok: false as const, error: error.message },
-				error.status,
-			)
 		if (error instanceof AuthorizationError)
 			return operationResult({ ok: false as const, error: error.message }, 403)
 		if (isMcpCallerError(error) && error instanceof Error)
@@ -345,9 +225,5 @@ export async function mutatePackageCollaborators(
 		throw error
 	}
 	const view = await buildCollaboratorsView(loaded.scope)
-	const result: PackageCollaboratorsWriteResult = {
-		...view,
-		...(invite ? { invite } : {}),
-	}
-	return operationResult(result)
+	return operationResult(view)
 }

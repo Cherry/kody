@@ -5,7 +5,7 @@ import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
 /**
  * Hosted package-app handoff sends visitors without app:execute to the
  * saved-package page. That page must say "you don't have access" for a
- * signed-in outsider — never the generic "doesn't quite connect" 404.
+ * signed-in outsider, never the generic "doesn't quite connect" 404.
  *
  * Cross-origin token mint/exchange lives in
  * `package-app-origin.workers.test.ts` (requires PACKAGE_APP_BASE_URL). This
@@ -32,6 +32,7 @@ test('a signed-in outsider hitting a private package page sees no-access, not a 
 	const sourceId = crypto.randomUUID()
 	const kodyId = `private-demo-${runId}`
 	const packageName = `@${owner.username}/${kodyId}`
+	const privateDescription = `Private package metadata ${crypto.randomUUID()}`
 	const now = new Date().toISOString()
 	const ownerIdSql = `(SELECT personal_org_id FROM users WHERE email = ${quoteSqlString(owner.email)})`
 
@@ -44,7 +45,7 @@ test('a signed-in outsider hitting a private package page sees no-access, not a 
 			${ownerIdSql},
 			${quoteSqlString(packageName)},
 			${quoteSqlString(kodyId)},
-			${quoteSqlString('Private package for no-access E2E')},
+			${quoteSqlString(privateDescription)},
 			'[]',
 			NULL,
 			${quoteSqlString(sourceId)},
@@ -57,9 +58,30 @@ test('a signed-in outsider hitting a private package page sees no-access, not a 
 	)
 
 	const packagePath = `/@${owner.username}/${kodyId}`
-	const anonymous = await page.request.get(packagePath)
-	expect(anonymous.status()).toBe(404)
-	expect(await anonymous.text()).not.toContain(packageName)
+	const anonymous = await page.goto(packagePath)
+	expect(anonymous?.status()).toBe(404)
+	await waitForClientHydration(page)
+	await expect(page).toHaveTitle('Not found')
+	await expect(page.getByTestId('not-found-page')).toBeVisible()
+	await expect(page.getByTestId('package-no-access-page')).toHaveCount(0)
+	await expect(page.locator('body')).not.toContainText(packageName, {
+		useInnerText: true,
+	})
+	// The router serializes the requested URL even on a 404. That is already
+	// known to the caller, but database-only metadata must never reach HTML,
+	// including hydration data and metadata tags.
+	const anonymousHtml = await anonymous!.text()
+	for (const privateValue of [privateDescription, packageId, sourceId]) {
+		expect(anonymousHtml).not.toContain(privateValue)
+	}
+	const metadata = await page
+		.locator('meta')
+		.evaluateAll((elements) =>
+			elements
+				.map((element) => element.getAttribute('content') ?? '')
+				.join('\n'),
+		)
+	expect(metadata).not.toContain(packageName)
 
 	await login({
 		email: stranger.email,

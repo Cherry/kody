@@ -144,3 +144,14 @@ test('domain authorization failures propagate without successful mutation data',
 	).rejects.toBe(denied)
 	expect(state.lease).toHaveBeenCalledOnce()
 })
+
+test('write leases use the stamped personal org instead of the person id', async () => {
+	state.authenticated.mockResolvedValue({
+		mcpUser: { userId: 'person_test', personalOrgId: 'org_distinct' },
+		request: { original: true },
+	})
+	await withWebsiteMutation({}, async () => ({ ok: true }))
+	expect(state.lease).toHaveBeenCalledWith(
+		expect.objectContaining({ stableUserId: 'org_distinct' }),
+	)
+})

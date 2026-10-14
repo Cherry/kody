@@ -1,6 +1,6 @@
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { personalOrgUsageRedirectUrl } from '#app/handlers/org-usage.ts'
 import { operationResult } from '../operation-result.ts'
-import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { loadAccountCreditsUser } from '#app/account-credits-data.ts'
 import { loadAccountUsageData } from '#app/account-usage-data.ts'
 import {
@@ -112,7 +112,7 @@ async function resolveCreditsOrg(input: {
 		}
 	}
 	if (resolution === 'personal') {
-		const id = personalOrgId(input.user.mcpUser.userId)
+		const id = personalOrgIdForPerson(input.user.mcpUser)
 		const record = await getOrgById(input.env.APP_DB, id)
 		return {
 			ok: true,
@@ -134,7 +134,8 @@ async function resolveCreditsOrg(input: {
 			id: resolution.org.id,
 			slug: record.slug,
 			displayName: record.display_name,
-			personal: resolution.org.id === personalOrgId(input.user.mcpUser.userId),
+			personal:
+				resolution.org.id === personalOrgIdForPerson(input.user.mcpUser),
 		},
 	}
 }
