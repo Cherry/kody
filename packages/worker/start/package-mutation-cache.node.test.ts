@@ -1,271 +1,119 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
+const { writePackage } = vi.hoisted(() => ({ writePackage: vi.fn() }))
+vi.mock('#start/server/package-mutations', () => ({
+	mutatePackage: writePackage,
+}))
 import { packageMutationOptions } from './package-mutation-cache.ts'
-
-afterEach(() => vi.unstubAllGlobals())
-test('an accepted package write updates its original cache after the form unmounts, without touching another actor', async () => {
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	})
-	const first = [
-		'page',
-		'actor-a',
-		'loadPackage',
-		{ username: 'a', kodyId: 'repo', page: 'settings' },
-	]
-	const second = [
-		'page',
-		'actor-b',
-		'loadPackage',
-		{ username: 'a', kodyId: 'repo', page: 'settings' },
-	]
-	const initial = {
-		kind: 'page',
-		data: {
-			ownerPackage: { id: 'repo-id', lockedAt: null },
-			username: 'a',
-			kodyId: 'repo',
-		},
-	}
-	client.setQueryData(first, initial)
-	client.setQueryData(second, initial)
-	let release!: (response: Response) => void
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(
-			() =>
-				new Promise<Response>((resolve) => {
-					release = resolve
-				}),
-		),
-	)
-	const observer = new MutationObserver(client, packageMutationOptions(client))
-	const unsubscribe = observer.subscribe(() => {})
-	const write = observer.mutate({
-		actorKey: 'actor-a',
-		packageId: 'repo-id',
-		body: { action: 'lock' },
-	})
-	await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
-	unsubscribe()
-	release(
-		Response.json({
-			ok: true,
-			selectedPackage: { id: 'repo-id', lockedAt: '2026-10-12T00:00:00Z' },
-		}),
-	)
-	await write
-	expect(client.getQueryData(first)).toMatchObject({
-		data: { ownerPackage: { lockedAt: '2026-10-12T00:00:00Z' } },
-	})
-	expect(client.getQueryData(second)).toEqual(initial)
-	await vi.waitFor(() =>
-		expect(client.getQueryState(first)?.isInvalidated).toBe(true),
-	)
-	expect(client.getQueryState(second)?.isInvalidated).toBe(false)
-	client.clear()
-})
-test('a lost visibility response invalidates affected reads even after the form unmounts', async () => {
-	const client = new QueryClient()
-	const key = ['page', 'actor-a', 'loadProfile', { username: 'a' }]
-	client.setQueryData(key, { old: true })
-	vi.stubGlobal(
-		'fetch',
-		vi.fn().mockRejectedValue(new Error('Network connection lost')),
-	)
-	const observer = new MutationObserver(client, packageMutationOptions(client))
-	const unsubscribe = observer.subscribe(() => {})
-	const write = observer.mutate({
-		actorKey: 'actor-a',
-		packageId: 'repo-id',
-		body: { action: 'set-visibility' },
-	})
-	unsubscribe()
-	await expect(write).rejects.toThrow('Network connection lost')
-	await vi.waitFor(() =>
-		expect(client.getQueryState(key)?.isInvalidated).toBe(true),
-	)
-	client.clear()
-})
-
-test('capability approval submits the reviewed fingerprint to its captured canonical API and reconciles an uncertain response', async () => {
+afterEach(() => vi.resetAllMocks())
+test('accepted writes reconcile the submitting actor after unmount', async () => {
 	const client = new QueryClient()
 	const key = [
 		'page',
-		'owner',
+		'actor-a',
 		'loadPackage',
-		{ username: 'team', kodyId: 'example', page: 'settings' },
+		{ username: 'team', kodyId: 'repo' },
 	]
-	client.setQueryData(key, {
+	const other = [
+		'page',
+		'actor-b',
+		'loadPackage',
+		{ username: 'team', kodyId: 'repo' },
+	]
+	const before = {
 		kind: 'page',
-		data: { ownerPackage: { id: 'pkg' } },
-	})
-	const request = vi.fn().mockRejectedValue(new Error('Response lost'))
-	vi.stubGlobal('fetch', request)
-	const observer = new MutationObserver(client, packageMutationOptions(client))
-	await expect(
-		observer.mutate({
-			actorKey: 'owner',
-			packageId: 'pkg',
-			apiPath: '/@team/example/approve-capabilities.json',
-			body: { action: 'approve-capabilities', fingerprint: 'reviewed' },
-		}),
-	).rejects.toThrow('Response lost')
-	expect(request).toHaveBeenCalledWith(
-		'/@team/example/approve-capabilities.json',
-		expect.objectContaining({
-			body: JSON.stringify({
-				action: 'approve-capabilities',
-				fingerprint: 'reviewed',
-				packageId: 'pkg',
+		data: { ownerPackage: { id: 'pkg', lockedAt: null } },
+	}
+	client.setQueryData(key, before)
+	client.setQueryData(other, before)
+	let finish!: (value: unknown) => void
+	writePackage.mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				finish = resolve
 			}),
-		}),
 	)
-	expect(client.getQueryState(key)?.isInvalidated).toBe(true)
-	client.clear()
-})
-
-test('internet-visible approval-required failures preserve the review URL', async () => {
-	vi.stubGlobal(
-		'fetch',
-		vi.fn().mockResolvedValue(
-			new Response(
-				JSON.stringify({
-					ok: false,
-					error: 'Review required',
-					approvalUrl: '/@team/example/approve-capabilities',
-				}),
-				{ status: 409 },
-			),
-		),
-	)
-	const client = new QueryClient()
 	const observer = new MutationObserver(client, packageMutationOptions(client))
-	await expect(
-		observer.mutate({
-			actorKey: 'owner',
-			packageId: 'pkg',
-			body: {
-				action: 'set-internet-visible',
-				internetVisible: true,
-				confirmName: 'example',
-			},
-		}),
-	).rejects.toMatchObject({
-		message: 'Review required',
-		approvalUrl: '/@team/example/approve-capabilities',
+	const unsubscribe = observer.subscribe(() => {})
+	const promise = observer.mutate({
+		actorKey: 'actor-a',
+		packageId: 'pkg',
+		body: { action: 'lock' },
 	})
+	await vi.waitFor(() => expect(writePackage).toHaveBeenCalledOnce())
+	unsubscribe()
+	finish({
+		ok: true,
+		selectedPackage: { id: 'pkg', lockedAt: '2026-10-14T00:00:00Z' },
+	})
+	await promise
+	expect(client.getQueryData(key)).toMatchObject({
+		data: { ownerPackage: { lockedAt: '2026-10-14T00:00:00Z' } },
+	})
+	expect(client.getQueryData(other)).toEqual(before)
+	expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+	expect(client.getQueryState(other)?.isInvalidated).toBe(false)
 	client.clear()
 })
-
-test.each([true, false])(
-	'credential approval preserves server ownership and reconciles package reads (accepted: %s)',
-	async (accepted) => {
+test.each([
+	'approve-capabilities',
+	'approve-credential-needs',
+	'set-visibility',
+])(
+	'uncertain %s reconciles original reads without optimistic permission changes',
+	async (action) => {
 		const client = new QueryClient()
 		const key = [
 			'page',
-			'owner',
+			'actor',
 			'loadPackage',
-			{ username: 'team', kodyId: 'example', page: 'settings' },
+			{ username: 'team', kodyId: 'repo' },
 		]
-		const initial = {
+		const before = {
 			kind: 'page',
-			data: { ownerPackage: { id: 'pkg', publishedCommit: 'previous' } },
+			data: { ownerPackage: { id: 'pkg', publishedCommit: 'old' } },
 		}
-		client.setQueryData(key, initial)
-		let respond!: (response: Response) => void
-		const request = vi.fn(
-			() =>
-				new Promise<Response>((resolve) => {
-					respond = resolve
-				}),
-		)
-		vi.stubGlobal('fetch', request)
+		client.setQueryData(key, before)
+		writePackage.mockRejectedValue(new Error('Response lost'))
 		const observer = new MutationObserver(
 			client,
 			packageMutationOptions(client),
 		)
-		const write = observer.mutate({
-			actorKey: 'owner',
-			packageId: 'pkg',
-			apiPath: '/@team/example/approve-capabilities.json',
-			body: {
-				action: 'approve-credential-needs',
-				requestId: 'reviewed-request',
+		await expect(
+			observer.mutate({
+				actorKey: 'actor',
+				packageId: 'pkg',
+				body: { action, fingerprint: 'reviewed', requestId: 'request' },
+			}),
+		).rejects.toThrow('Response lost')
+		expect(writePackage).toHaveBeenCalledWith({
+			data: {
+				packageId: 'pkg',
+				body: { action, fingerprint: 'reviewed', requestId: 'request' },
 			},
 		})
-		const result = accepted
-			? expect(write).resolves.toMatchObject({ ok: true })
-			: expect(write).rejects.toThrow('Approval is stale')
-		await vi.waitFor(() => expect(request).toHaveBeenCalledOnce())
-		expect(request).toHaveBeenCalledWith(
-			'/@team/example/approve-capabilities.json',
-			expect.objectContaining({
-				method: 'POST',
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'approve-credential-needs',
-					requestId: 'reviewed-request',
-					packageId: 'pkg',
-				}),
-			}),
-		)
-		// Approval is a security decision. Never show a new published version before the server accepts it.
-		expect(client.getQueryData(key)).toEqual(initial)
-		respond(
-			Response.json(
-				accepted ? { ok: true } : { ok: false, error: 'Approval is stale' },
-				{ status: accepted ? 200 : 409 },
-			),
-		)
-		await result
-		expect(client.getQueryData(key)).toEqual(initial)
+		expect(client.getQueryData(key)).toEqual(before)
 		expect(client.getQueryState(key)?.isInvalidated).toBe(true)
 		client.clear()
 	},
 )
-
-test('republishing replaces the fresh owner listing state while reconciling the catalog', async () => {
+test('review-required errors retain the approval URL', async () => {
+	writePackage.mockResolvedValue({
+		ok: false,
+		error: 'Review required',
+		approvalUrl: '/@team/repo/approve-capabilities',
+	})
 	const client = new QueryClient()
-	const key = [
-		'page',
-		'actor-a',
-		'loadPackage',
-		{ username: 'a', kodyId: 'repo', page: 'settings' },
-	]
-	client.setQueryData(key, {
-		kind: 'page',
-		data: { ownerPackage: { id: 'repo-id', listingNeedsRepublish: true } },
-	})
-	vi.stubGlobal(
-		'fetch',
-		vi.fn().mockResolvedValue(
-			Response.json({
-				ok: true,
-				selectedPackage: { id: 'repo-id', listingNeedsRepublish: false },
-			}),
-		),
-	)
 	const observer = new MutationObserver(client, packageMutationOptions(client))
-	await observer.mutate({
-		actorKey: 'actor-a',
-		packageId: 'repo-id',
-		body: {
-			action: 'set-visibility',
-			visibility: 'public',
-			confirmName: 'repo',
-		},
-	})
-	expect(client.getQueryData(key)).toMatchObject({
-		data: { ownerPackage: { listingNeedsRepublish: false } },
-	})
-	expect(
-		JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string),
-	).toEqual({
-		action: 'set-visibility',
-		visibility: 'public',
-		confirmName: 'repo',
-		packageId: 'repo-id',
+	await expect(
+		observer.mutate({
+			actorKey: 'actor',
+			packageId: 'pkg',
+			body: { action: 'set-internet-visible' },
+		}),
+	).rejects.toMatchObject({
+		message: 'Review required',
+		approvalUrl: '/@team/repo/approve-capabilities',
 	})
 	client.clear()
 })

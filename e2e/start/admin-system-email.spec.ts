@@ -24,13 +24,15 @@ test('system email deletion requires confirmation and persists through reload', 
 		await login({ email: user.email, password: user.password, mode: 'login' })
 		await page.goto(`/admin/system-email?messageId=${id}`)
 		await waitForClientHydration(page)
-		const deletes: unknown[] = []
+		const deletes: string[] = []
 		page.on('request', (request) => {
 			if (
 				request.method() === 'POST' &&
-				new URL(request.url()).pathname === '/admin/system-email.json'
+				new URL(request.url()).pathname.startsWith('/_serverFn/') &&
+				(request.postData() ?? '').includes(id) &&
+				(request.postData() ?? '').includes('delete')
 			)
-				deletes.push(request.postDataJSON())
+				deletes.push(request.postData() ?? '')
 		})
 		await page
 			.getByRole('button', { name: `Delete message "${subject}"`, exact: true })
@@ -42,14 +44,21 @@ test('system email deletion requires confirmation and persists through reload', 
 			}),
 		).toBeVisible()
 		expect(deletes).toEqual([])
-		const stillStored = await page.request.get(
-			`/admin/system-email.json?messageId=${id}`,
-		)
-		expect((await stillStored.json()).selectedMessage.id).toBe(id)
+		const observer = await page.context().newPage()
+		await observer.goto(`/admin/system-email?messageId=${id}`)
+		await expect(
+			observer.getByRole('button', {
+				name: `Delete message "${subject}"`,
+				exact: true,
+			}),
+		).toBeVisible()
+		await observer.close()
 		const accepted = page.waitForResponse(
 			(response) =>
 				response.request().method() === 'POST' &&
-				new URL(response.url()).pathname === '/admin/system-email.json',
+				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
+				(response.request().postData() ?? '').includes(id) &&
+				(response.request().postData() ?? '').includes('delete'),
 		)
 		await page
 			.getByRole('button', {
@@ -59,15 +68,14 @@ test('system email deletion requires confirmation and persists through reload', 
 			.click()
 		expect((await accepted).status()).toBe(200)
 		await expect(page).toHaveURL(/\/admin\/system-email$/)
-		expect(deletes).toEqual([{ action: 'delete', message_id: id }])
+		expect(deletes).toHaveLength(1)
 		await expect(
 			page.getByRole('link', { name: subject, exact: true }),
 		).toHaveCount(0)
 		await page.reload()
-		const persisted = await page.request.get(
-			`/admin/system-email.json?messageId=${id}`,
-		)
-		expect((await persisted.json()).selectedMessage).toBeNull()
+		await expect(
+			page.getByRole('link', { name: subject, exact: true }),
+		).toHaveCount(0)
 
 		// A concurrent delete must surface the real server error, not pretend success.
 		await page.goto(`/admin/system-email?messageId=${missingId}`)

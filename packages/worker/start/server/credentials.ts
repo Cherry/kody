@@ -1,8 +1,8 @@
+import { type PackageCredentialsLoaderData } from '#universal/package-credentials-page.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { accountAliasPath } from '#universal/org-pages.ts'
 import { type AccountCredentialsResponse } from '#universal/credentials-list.ts'
-import { type CredentialApprovalView } from '#universal/credential-contracts.ts'
 
 export const loadCredentialsPage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
@@ -57,14 +57,14 @@ export const loadCredentialApprovalPage = createServerFn({ method: 'GET' })
 	.handler(async ({ data: href }) => {
 		const [
 			{ loadCollection },
-			{ createPackageCredentialApprovalApiHandler },
+			{ resolveCredentialApproval },
 			{ loadDocumentHead },
 		] = await Promise.all([
 			import('./account-collections'),
-			import('../../src/app/handlers/package-credential-approval'),
+			import('../../src/credentials/credential-approval'),
 			import('./document-head'),
 		])
-		const { bindings, request } = await loadCollection(href)
+		const { bindings, request, user } = await loadCollection(href)
 		const url = new URL(request.url)
 		const parts = url.pathname.split('/')
 		const { loadPackagePage } = await import('../../src/app/package-page')
@@ -79,21 +79,22 @@ export const loadCredentialApprovalPage = createServerFn({ method: 'GET' })
 				href: `${page.to}/approve-credentials${url.search}`,
 				statusCode: 302,
 			})
-		const response = await createPackageCredentialApprovalApiHandler(
-			bindings,
-		).handler({
+		const { loadPackageMappingScopeForViewer } =
+			await import('../../src/app/package-credentials-access.ts')
+		const { parseCredentialApprovalQuery } =
+			await import('../../universal/credential-contracts.ts')
+		const scope = await loadPackageMappingScopeForViewer({
+			env: bindings,
 			request,
-			url,
-			params: {
-				username: decodeURIComponent(parts[1]!.slice(1)),
-				kodyId: decodeURIComponent(parts[2]!),
-			},
+			user,
+			username: decodeURIComponent(parts[1]!.slice(1)),
+			kodyId: decodeURIComponent(parts[2]!),
 		})
-		if (response.status === 401)
-			throw redirect({ href: `/login?redirectTo=${encodeURIComponent(href)}` })
-		if (response.status === 404) throw notFound()
-		if (!response.ok) throw new Error('Unable to load credential approval')
-		const view = (await response.json()) as CredentialApprovalView
+		if (!scope) throw notFound()
+		const { view } = await resolveCredentialApproval(
+			scope,
+			parseCredentialApprovalQuery(url.searchParams),
+		)
 		return {
 			payload: { ok: true as const, view },
 			head: loadDocumentHead(url.pathname, undefined, url.search),
@@ -116,29 +117,30 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 		const [
 			{ loadCollection },
 			{ loadPackagePage, packagePageIsPrivate },
-			{ createPackageCredentialsApiHandler },
+			{ buildPackageCredentialsView },
 			{ loadDocumentHead },
 		] = await Promise.all([
 			import('./account-collections'),
 			import('../../src/app/package-page'),
-			import('../../src/app/handlers/package-credentials'),
+			import('../../src/credentials/package-credential-mappings'),
 			import('./document-head'),
 		])
-		const { bindings, request } = await loadCollection(href)
+		const { bindings, request, user } = await loadCollection(href)
 		const url = new URL(request.url)
 		const parts = url.pathname.split('/')
 		const params = {
 			username: decodeURIComponent(parts[1]!.slice(1)),
 			kodyId: decodeURIComponent(parts[2]!),
 		}
-		const [page, response] = await Promise.all([
-			loadPackagePage({ env: bindings, request, ...params }),
-			createPackageCredentialsApiHandler(bindings).handler({
-				request,
-				url,
-				params,
-			}),
-		])
+		const page = await loadPackagePage({ env: bindings, request, ...params })
+		const { loadPackageMappingScopeForViewer } =
+			await import('../../src/app/package-credentials-access.ts')
+		const scope = await loadPackageMappingScopeForViewer({
+			env: bindings,
+			request,
+			user,
+			...params,
+		})
 		if (page.kind === 'redirect')
 			throw redirect({
 				href: `${page.to}/${parts[3]}${url.search}`,
@@ -146,37 +148,27 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 			})
 		if (page.kind !== 'page' || !page.ownerPackage || !page.viewerIsOwner)
 			throw notFound()
-		if (response.status === 401)
-			throw redirect({ href: `/login?redirectTo=${encodeURIComponent(href)}` })
-		const body = (await response.json()) as
-			| import('#universal/credential-contracts.ts').PackageCredentialsView
-			| { ok: false; error?: string }
-		const view = response.ok && body.ok ? body : null
-		const payload: import('#universal/package-credentials-page.ts').PackageCredentialsLoaderData =
-			{
-				ok: true,
-				shell: {
-					username: page.username,
-					kodyId: page.kodyId,
-					name: page.ownerPackage.name,
-					description: page.ownerPackage.description ?? '',
-					isPrivate: packagePageIsPrivate(page),
-					isListed: page.ownerPackage.hasCommunityListing === true,
-					listingId: page.listing?.listing?.id ?? null,
-					defaultBranch: page.listing?.listing?.defaultBranch ?? null,
-					publishedCommit: page.ownerPackage.publishedCommit ?? null,
-					ownerProfilePublic: page.ownerProfilePublic,
-					viewerCanManage: page.viewerCanManage,
-				},
-				view,
-				viewError: view
-					? null
-					: response.status === 404
-						? 'You can read this package but not run it, so it has no credentials, mappings, or triggers for you. Ask an org owner for run access.'
-						: !body.ok && body.error
-							? body.error
-							: 'Unable to load package credentials.',
-			}
+		const view = scope ? await buildPackageCredentialsView(scope) : null
+		const payload: PackageCredentialsLoaderData = {
+			ok: true,
+			shell: {
+				username: page.username,
+				kodyId: page.kodyId,
+				name: page.ownerPackage.name,
+				description: page.ownerPackage.description ?? '',
+				isPrivate: packagePageIsPrivate(page),
+				isListed: page.ownerPackage.hasCommunityListing === true,
+				listingId: page.listing?.listing?.id ?? null,
+				defaultBranch: page.listing?.listing?.defaultBranch ?? null,
+				publishedCommit: page.ownerPackage.publishedCommit ?? null,
+				ownerProfilePublic: page.ownerProfilePublic,
+				viewerCanManage: page.viewerCanManage,
+			},
+			view,
+			viewError: view
+				? null
+				: 'You can read this package but not run it, so it has no credentials, mappings, or triggers for you. Ask an org owner for run access.',
+		}
 		return {
 			payload,
 			head: loadDocumentHead(url.pathname, undefined, url.search),

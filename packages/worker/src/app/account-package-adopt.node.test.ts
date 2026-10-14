@@ -36,8 +36,7 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageByIdInAnyOrg: vi.fn(async () => mockModule.savedPackage),
 }))
 
-const { handleAccountPackageAdoptAction } =
-	await import('./account-package-adopt.ts')
+const { mutateAccountPackageAdopt } = await import('./account-package-adopt.ts')
 
 function createUser() {
 	const actor = personIdFromStored('stable-user-1')
@@ -75,7 +74,7 @@ test('the signed-in owner adopts a community fork from the account API', async (
 	})
 
 	expect(
-		await handleAccountPackageAdoptAction({
+		await mutateAccountPackageAdopt({
 			env,
 			request,
 			user,
@@ -83,7 +82,7 @@ test('the signed-in owner adopts a community fork from the account API', async (
 		}),
 	).toBeNull()
 
-	const response = await handleAccountPackageAdoptAction({
+	const response = await mutateAccountPackageAdopt({
 		env,
 		request,
 		user,
@@ -94,7 +93,7 @@ test('the signed-in owner adopts a community fork from the account API', async (
 		},
 	})
 	expect(response?.status).toBe(200)
-	await expect(response?.json()).resolves.toEqual({
+	expect(response?.data).toEqual({
 		ok: true,
 		selectedPackage: { id: 'pkg-1' },
 	})
@@ -120,7 +119,7 @@ test('account adopt requires org owner role on the package owning org', async ()
 		method: 'POST',
 	})
 	mockModule.viewerIsOrgOwner = false
-	const denied = await handleAccountPackageAdoptAction({
+	const denied = await mutateAccountPackageAdopt({
 		env,
 		request,
 		user,
@@ -142,7 +141,7 @@ test('account adopt requires a package id and surfaces caller-clearable errors',
 		method: 'POST',
 	})
 
-	const missingId = await handleAccountPackageAdoptAction({
+	const missingId = await mutateAccountPackageAdopt({
 		env,
 		request,
 		user,
@@ -154,7 +153,7 @@ test('account adopt requires a package id and surfaces caller-clearable errors',
 	mockModule.adoptCommunityFork.mockRejectedValueOnce(
 		new CommunityActionError('Adoption requires a review note of at least 10'),
 	)
-	const shortNote = await handleAccountPackageAdoptAction({
+	const shortNote = await mutateAccountPackageAdopt({
 		env,
 		request,
 		user,
@@ -165,7 +164,7 @@ test('account adopt requires a package id and surfaces caller-clearable errors',
 		},
 	})
 	expect(shortNote?.status).toBe(400)
-	await expect(shortNote?.json()).resolves.toEqual({
+	expect(shortNote?.data).toEqual({
 		ok: false,
 		error: 'Adoption requires a review note of at least 10',
 	})

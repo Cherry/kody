@@ -1,14 +1,8 @@
-import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import {
-	AuthorizationError,
-	authorize,
-} from '#worker/authorization/authorize.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
-import { type routes } from '#universal/routes.ts'
+import { authorize } from '#worker/authorization/authorize.ts'
 import {
 	deleteEmailMessage,
 	setEmailMessageClassification,
@@ -17,6 +11,7 @@ import {
 	emailClassificationValues,
 	type EmailClassification,
 } from '#worker/email/types.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
 export function readPathMessageId(params: unknown) {
 	if (
@@ -36,120 +31,95 @@ function parseClassification(value: string): EmailClassification | null {
 		: null
 }
 
-/**
- * JSON API for `/account/email.json` (GET + POST). Actions: `classify`,
- * `delete`.
- */
-export function createAccountEmailApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			try {
-				await authorize({ env, request: user.request }, 'email:read')
-			} catch (error) {
-				if (!(error instanceof AuthorizationError)) throw error
-				return jsonResponse({ ok: false, error: error.message }, 403)
-			}
+export async function mutateAccountEmail({
+	request,
+	env,
+	user,
+	body,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+}) {
+	await authorize({ env, request: user.request }, 'email:read')
+	const action = readTrimmedStringOrEmpty(body, 'action')
+	if (action !== 'classify' && action !== 'delete') {
+		return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+	}
 
-			if (request.method === 'GET') {
-				return jsonResponse(await loadAccountEmailData({ env, request, user }))
-			}
+	const messageId = readTrimmedStringOrEmpty(body, 'message_id')
+	if (!messageId) {
+		return operationResult({ ok: false, error: 'Message id is required.' }, 400)
+	}
 
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
+	if (action === 'delete') {
+		const deleted = await deleteEmailMessage({
+			env,
+			db: env.APP_DB,
+			userId: ownerIdFromCaller({
+				request: user.request,
+				user: user.mcpUser,
+			}),
+			messageId,
+		})
+		if (!deleted) {
+			return operationResult({ ok: false, error: 'Message not found.' }, 404)
+		}
 
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const action = readTrimmedStringOrEmpty(body, 'action')
-			if (action !== 'classify' && action !== 'delete') {
-				return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
-			}
-
-			const messageId = readTrimmedStringOrEmpty(body, 'message_id')
-			if (!messageId) {
-				return jsonResponse(
-					{ ok: false, error: 'Message id is required.' },
-					400,
-				)
-			}
-
-			if (action === 'delete') {
-				const deleted = await deleteEmailMessage({
-					env,
-					db: env.APP_DB,
-					userId: ownerIdFromCaller({
-						request: user.request,
-						user: user.mcpUser,
-					}),
-					messageId,
-				})
-				if (!deleted) {
-					return jsonResponse({ ok: false, error: 'Message not found.' }, 404)
-				}
-
-				const listUrl = new URL(request.url, 'http://localhost')
-				listUrl.searchParams.delete('selected')
-				return jsonResponse(
-					await loadAccountEmailData({
-						env,
-						request: new Request(listUrl.toString(), { method: 'GET' }),
-						user,
-					}),
-				)
-			}
-
-			const classification = parseClassification(
-				readTrimmedStringOrEmpty(body, 'classification'),
-			)
-			if (!classification) {
-				return jsonResponse(
-					{
-						ok: false,
-						error: 'Classification must be accepted or quarantined.',
-					},
-					400,
-				)
-			}
-
-			const updated = await setEmailMessageClassification({
+		const listUrl = new URL(request.url, 'http://localhost')
+		listUrl.searchParams.delete('selected')
+		return operationResult(
+			await loadAccountEmailData({
 				env,
-				db: env.APP_DB,
-				userId: ownerIdFromCaller({
-					request: user.request,
-					user: user.mcpUser,
-				}),
-				messageId,
-				classification,
-				classificationReason:
-					classification === 'quarantined' ? 'Reclassified by user.' : null,
-			})
-			if (!updated) {
-				return jsonResponse(
-					{
-						ok: false,
-						error: 'Message not found or is not an inbound message.',
-					},
-					404,
-				)
-			}
+				request: new Request(listUrl.toString(), { method: 'GET' }),
+				user,
+			}),
+		)
+	}
 
-			const listUrl = new URL(request.url, 'http://localhost')
-			listUrl.searchParams.set('selected', messageId)
-			return jsonResponse(
-				await loadAccountEmailData({
-					env,
-					request: new Request(listUrl.toString(), { method: 'GET' }),
-					user,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.accountEmailApi>
+	const classification = parseClassification(
+		readTrimmedStringOrEmpty(body, 'classification'),
+	)
+	if (!classification) {
+		return operationResult(
+			{
+				ok: false,
+				error: 'Classification must be accepted or quarantined.',
+			},
+			400,
+		)
+	}
+
+	const updated = await setEmailMessageClassification({
+		env,
+		db: env.APP_DB,
+		userId: ownerIdFromCaller({
+			request: user.request,
+			user: user.mcpUser,
+		}),
+		messageId,
+		classification,
+		classificationReason:
+			classification === 'quarantined' ? 'Reclassified by user.' : null,
+	})
+	if (!updated) {
+		return operationResult(
+			{
+				ok: false,
+				error: 'Message not found or is not an inbound message.',
+			},
+			404,
+		)
+	}
+
+	const listUrl = new URL(request.url, 'http://localhost')
+	listUrl.searchParams.set('selected', messageId)
+	return operationResult(
+		await loadAccountEmailData({
+			env,
+			request: new Request(listUrl.toString(), { method: 'GET' }),
+			user,
+		}),
+	)
 }

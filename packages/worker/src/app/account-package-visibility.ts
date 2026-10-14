@@ -1,5 +1,8 @@
 import { loadWritableAccountSavedPackage } from '#app/account-package-write-access.ts'
-import { jsonResponse } from '#worker/json-response.ts'
+import {
+	packageMutationResult,
+	type PackageMutationResult,
+} from './package-mutation-result.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import {
 	publishCommunityListing,
@@ -15,12 +18,12 @@ type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-export async function handleAccountPackageVisibilityAction(input: {
+export async function mutateAccountPackageVisibility(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
 	body: object
-}): Promise<Response | null> {
+}): Promise<PackageMutationResult | null> {
 	const action = readTrimmedStringOrEmpty(input.body, 'action')
 	if (action !== 'set-visibility') return null
 
@@ -28,10 +31,13 @@ export async function handleAccountPackageVisibilityAction(input: {
 	const visibility = readTrimmedStringOrEmpty(input.body, 'visibility')
 	const confirmName = readTrimmedStringOrEmpty(input.body, 'confirmName')
 	if (!packageId) {
-		return jsonResponse({ ok: false, error: 'Package id is required.' }, 400)
+		return packageMutationResult(
+			{ ok: false, error: 'Package id is required.' },
+			400,
+		)
 	}
 	if (visibility !== 'public' && visibility !== 'private') {
-		return jsonResponse(
+		return packageMutationResult(
 			{ ok: false, error: 'Visibility must be public or private.' },
 			400,
 		)
@@ -43,13 +49,17 @@ export async function handleAccountPackageVisibilityAction(input: {
 		packageId,
 		permission: 'package:publish',
 	})
-	if (!resolved.ok) return resolved.response
+	if (!resolved.ok)
+		return packageMutationResult(
+			{ ok: false, error: 'Package not found.' },
+			404,
+		)
 	const { savedPackage, ownerUserId, actorUserId } = resolved.package
 
 	try {
 		if (visibility === 'public') {
 			if (confirmName !== savedPackage.kodyId) {
-				return jsonResponse(
+				return packageMutationResult(
 					{
 						ok: false,
 						error: savedPackage.isPrivate
@@ -71,7 +81,7 @@ export async function handleAccountPackageVisibilityAction(input: {
 			})
 		} else if (visibility === 'private' && !savedPackage.isPrivate) {
 			if (confirmName !== savedPackage.kodyId) {
-				return jsonResponse(
+				return packageMutationResult(
 					{
 						ok: false,
 						error: `Type the package slug "${savedPackage.kodyId}" to make it private. Public URLs will 404; existing forks keep their copies.`,
@@ -100,18 +110,21 @@ export async function handleAccountPackageVisibilityAction(input: {
 					isPrivate: true,
 				})
 				if (!changed) {
-					return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+					return packageMutationResult(
+						{ ok: false, error: 'Package not found.' },
+						404,
+					)
 				}
 			}
 		}
 	} catch (error) {
 		if (error instanceof CommunityActionError) {
-			return jsonResponse({ ok: false, error: error.message }, 400)
+			return packageMutationResult({ ok: false, error: error.message }, 400)
 		}
 		throw error
 	}
 
-	return jsonResponse(
+	return packageMutationResult(
 		await reloadAccountPackagesAfterWrite({
 			env: input.env,
 			request: input.request,

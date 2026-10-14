@@ -89,6 +89,7 @@ function readSelectedSecretIdFromPath(pathname: string) {
 
 export async function loadAccountSecretsData(input: {
 	request: Request
+	search?: string
 	env: Env
 	user: AuthenticatedUser
 	selectedSecretId?: string | null
@@ -97,7 +98,9 @@ export async function loadAccountSecretsData(input: {
 }): Promise<AccountSecretsLoaderData> {
 	const selectedSecretId =
 		input.selectedSecretId === undefined
-			? readAccountSecretsSelectedSecretId(input.request.url)
+			? readAccountSecretsSelectedSecretId(
+					new URL(input.search ?? '', input.request.url).toString(),
+				)
 			: input.selectedSecretId
 	return buildAccountSecretsPayload({
 		...input,
@@ -107,6 +110,7 @@ export async function loadAccountSecretsData(input: {
 
 async function buildAccountSecretsPayload(input: {
 	request: Request
+	search?: string
 	env: Env
 	user: AuthenticatedUser
 	selectedSecretId?: string | null
@@ -114,6 +118,7 @@ async function buildAccountSecretsPayload(input: {
 	savedPackages?: Array<SavedPackageSummary>
 }): Promise<AccountSecretsLoaderData> {
 	const url = new URL(input.request.url)
+	if (input.search !== undefined) url.search = input.search
 	const requestedApprovalHosts = readApprovalHosts(url)
 	const rejectedApprovalHosts = requestedApprovalHosts.rejected
 	const requestedPackageId = readRequestedPackageId(url)

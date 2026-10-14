@@ -1,7 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import { updateExperiments } from '#start/server/account-mutations'
+import { type AccountExperimentsLoaderData } from '#universal/loader-data.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { type QueryKey } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState } from 'react'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -11,9 +14,6 @@ import {
 	accountFieldLabelCss,
 	accountFieldNoteCss,
 } from './account-management-components.tsx'
-import { type AccountExperimentsLoaderData } from '#universal/loader-data.ts'
-import { routes } from '#universal/routes.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 export function AccountExperimentsPage({
 	queryKey,
@@ -29,7 +29,7 @@ export function AccountExperimentsPage({
 	const mutation = usePageResponseMutation<AccountExperimentsLoaderData>(
 		queryKey,
 		'loadExperimentsPage',
-		routes.accountExperimentsApiPost.href(),
+		(body) => updateExperiments({ data: body }),
 		{ dependencies: 'permissions', refreshShell: true },
 	)
 	const saving = mutation.isPending

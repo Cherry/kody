@@ -1,25 +1,23 @@
 /** @jsxImportSource @emotion/react */
-import { type FormEvent } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { SiteLink } from '../components/site-link.tsx'
-import { type McpOAuthClientMode } from '@kody-internal/shared/mcp-servers.ts'
-import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountActionsCss,
-	MetadataGrid,
-} from './account-management-components.tsx'
-import {
-	type McpServerAuthorizeContinueResponse,
-	type McpServerAuthorizeLoaderData,
-} from '#universal/loader-data.ts'
+import { continueMcpAuthorization } from '#start/server/account-mutations'
+import { type McpServerAuthorizeLoaderData } from '#universal/loader-data.ts'
 import {
 	getGhostButtonCss,
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, typography } from '#universal/styles/tokens.ts'
+import { type McpOAuthClientMode } from '@kody-internal/shared/mcp-servers.ts'
+import { useMutation } from '@tanstack/react-query'
+import { type FormEvent } from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import {
+	accountActionsCss,
+	AccountManagementMessage,
+	AccountManagementPanel,
+	AccountManagementShell,
+	AccountPageHeader,
+	MetadataGrid,
+} from './account-management-components.tsx'
 function clientModeCopy(mode: McpOAuthClientMode) {
 	switch (mode) {
 		case 'cimd':
@@ -77,17 +75,14 @@ export function AccountMcpServerAuthorizePage({
 }) {
 	const mutation = useMutation({
 		mutationKey: ['mcpServerConsent', href],
-		mutationFn: async ({ body, path }: { body: FormData; path: string }) => {
-			const response = await fetch(path, {
-				method: 'POST',
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
-				body,
-			})
-			const result =
-				(await response.json()) as McpServerAuthorizeContinueResponse
-			return result
-		},
+		mutationFn: async ({ body }: { body: FormData; path: string }) =>
+			continueMcpAuthorization({
+				data: {
+					orgSlug: payload.orgSlug,
+					serverId: payload.serverId,
+					token: String(body.get('_csrf') ?? ''),
+				},
+			}),
 		onSuccess: (result) => {
 			if (result.ok) navigateWithoutReferrer(result.authorizationUrl)
 		},
@@ -165,7 +160,7 @@ export function AccountMcpServerAuthorizePage({
 					<p css={noteCss}>{mode.detail}</p>
 					<form
 						method="post"
-						action={new URL(href, 'http://localhost').pathname}
+
 						data-router-skip
 						css={accountActionsCss}
 						onSubmit={submitContinue}

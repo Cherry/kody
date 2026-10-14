@@ -11,7 +11,6 @@ export type ClassifyState = 'idle' | 'saving'
 export type DeleteState = 'idle' | 'deleting'
 export type ClassificationFilter = 'all' | 'quarantined'
 
-const accountEmailApiPath = '/account/email.json'
 export const emailRoute = createListDetailRoute('/account/email')
 
 export function senderClassificationLabel(
@@ -98,23 +97,6 @@ export function readClassificationFilter(href: string): ClassificationFilter {
 	return raw === 'quarantined' ? 'quarantined' : 'all'
 }
 
-export function buildEmailApiRequestUrl(href: string) {
-	const url = new URL(href, 'http://localhost')
-	const requestUrl = new URL(accountEmailApiPath, 'http://localhost')
-	const query = readSearchQuery(href)
-	if (query) requestUrl.searchParams.set('q', query)
-	const page = url.searchParams.get('page')
-	if (page) requestUrl.searchParams.set('page', page)
-	const pageSize = url.searchParams.get('pageSize')
-	if (pageSize) requestUrl.searchParams.set('pageSize', pageSize)
-	const classification = readClassificationFilter(href)
-	if (classification !== 'all') {
-		requestUrl.searchParams.set('classification', classification)
-	}
-	const selectedId = emailRoute.getSelection(href).selectedId
-	if (selectedId) requestUrl.searchParams.set('selected', selectedId)
-	return `${requestUrl.pathname}${requestUrl.search}`
-}
 
 export function messageDate(message: AccountEmailMessageListItem) {
 	return message.received_at ?? message.sent_at ?? message.created_at

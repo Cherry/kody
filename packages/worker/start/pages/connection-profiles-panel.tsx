@@ -1,16 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { pageQueryOrg } from '../page-query-scope.ts'
-import { type ReactNode, useState } from 'react'
-import { type CSSObject } from '@emotion/react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
-import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { accountInputCss } from './account-management-components.tsx'
-import { connectedAgentsApiPath } from '#client/routes/account-page-data.ts'
-import { CopyCard } from './onboarding-mcp-client-cards.tsx'
+import { updateConnectedAgents } from '#start/server/account-mutations'
 import { connectionProfileNameMaxLength } from '#universal/connection-profiles/names.ts'
 import {
 	type AccountConnectedAgentListItem,
@@ -29,6 +18,15 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
+import { type CSSObject } from '@emotion/react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { type ReactNode, useState } from 'react'
+import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
+import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import { accountInputCss } from './account-management-components.tsx'
+import { CopyCard } from './onboarding-mcp-client-cards.tsx'
 type PackageOption = NonNullable<
 	AccountConnectedAgentsLoaderData['connectionProfilePackageOptions']
 >[number]
@@ -89,26 +87,9 @@ export function ConnectionProfiles({
 			body: Record<string, unknown>
 			href: string
 		}) => {
-			const response = await fetch(connectedAgentsApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(href),
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(body),
+			return updateConnectedAgents({
+				data: { orgSlug: pageQueryOrg(href) ?? undefined, body },
 			})
-			const accepted = await readJson<
-				AccountConnectedAgentsLoaderData & {
-					error?: string
-				}
-			>(response)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(
-					accepted?.error ?? 'Unable to update connection profile.',
-				)
-			return accepted
 		},
 		onMutate: async ({ href }) => {
 			await queryClient.cancelQueries(

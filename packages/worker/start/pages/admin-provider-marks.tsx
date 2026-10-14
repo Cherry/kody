@@ -1,52 +1,52 @@
 /** @jsxImportSource @emotion/react */
-import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { type QueryKey } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { saveAdminProviderMarks } from '#start/server/admin-mutations'
 import { type CSSObject } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
 import {
-	useState,
-	useRef,
-	useEffect,
-	type FormEvent,
-	type ChangeEvent,
+useEffect,
+useRef,
+useState,
+type ChangeEvent,
+type FormEvent,
 } from 'react'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
 
 import {
-	adminProviderMarksApiPath,
-	filterMarks,
-	groupMarks,
-	markGroupKey,
-	splitAliasInput,
+filterMarks,
+groupMarks,
+markGroupKey,
+splitAliasInput,
 } from '#client/routes/admin-provider-marks-shared.ts'
 import {
-	accountInputCss,
-	AccountManagementMessage,
-	AccountManagementShell,
-	AdminPageHeader,
-} from './account-management-components.tsx'
-import { RecordTableSearch } from './record-table.tsx'
-import {
-	type AdminProviderMark,
-	type AdminProviderMarksLoaderData,
+type AdminProviderMark,
+type AdminProviderMarksLoaderData,
 } from '#universal/loader-data.ts'
 import {
-	colors,
-	radius,
-	spacing,
-	typography,
+fieldCss,
+fieldLabelCss,
+getDangerPillCss,
+getGhostButtonCss,
+getLogoWellCss,
+getPillButtonCss,
+hoverMq,
+nativeDisclosureCss,
+} from '#universal/styles/style-primitives.ts'
+import {
+colors,
+radius,
+spacing,
+typography,
 } from '#universal/styles/tokens.ts'
 import {
-	fieldCss,
-	fieldLabelCss,
-	getDangerPillCss,
-	getGhostButtonCss,
-	getLogoWellCss,
-	getPillButtonCss,
-	hoverMq,
-	nativeDisclosureCss,
-} from '#universal/styles/style-primitives.ts'
+accountInputCss,
+AccountManagementMessage,
+AccountManagementShell,
+AdminPageHeader,
+} from './account-management-components.tsx'
+import { RecordTableSearch } from './record-table.tsx'
 
 type ActionState = 'idle' | 'saving' | 'deleting'
 
@@ -130,7 +130,10 @@ export function AdminProviderMarksRoute({
 	const mutation = usePageResponseMutation<AdminProviderMarksLoaderData>(
 		queryKey,
 		'loadAdminProviderMarks',
-		adminProviderMarksApiPath,
+		(body, href) =>
+			saveAdminProviderMarks({
+				data: { body, search: new URL(href, 'http://localhost').search },
+			}),
 		{ dependencies: mutationResources, dependencyScope: 'actor' },
 	)
 	const currentHref = useMatchedPageScope().pageLocation.href

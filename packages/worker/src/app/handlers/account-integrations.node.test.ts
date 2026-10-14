@@ -1,16 +1,16 @@
+import type * as authenticatedUserModule from '#app/authenticated-user.ts'
+import type * as secretsService from '#mcp/secrets/service.ts'
+import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
+import type * as IntegrationsRepo from '#worker/integrations/repo.ts'
+import type * as IntegrationsService from '#worker/integrations/service.ts'
+import type * as PackageRegistryRepo from '#worker/package-registry/repo.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 	type OwnerId,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import type * as authenticatedUserModule from '#app/authenticated-user.ts'
-import type * as secretsService from '#mcp/secrets/service.ts'
-import type * as IntegrationsService from '#worker/integrations/service.ts'
-import type * as IntegrationsRepo from '#worker/integrations/repo.ts'
-import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
-import type * as PackageRegistryRepo from '#worker/package-registry/repo.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const mockModule = vi.hoisted(() => {
 	const stamps = {
@@ -298,8 +298,8 @@ vi.mock('#worker/integrations/credentials.ts', async (importOriginal) => {
 	}
 })
 
-const { createAccountIntegrationsApiHandler } =
-	await import('./account-integrations.ts')
+const { testAccountIntegrationsApiHandler } =
+	await import('./account-integrations.test-support.ts')
 
 function createEnv() {
 	return {
@@ -327,15 +327,15 @@ const withEnv = (input: Record<string, unknown>) => ({
 })
 
 function createHandler() {
-	const { handler } = createAccountIntegrationsApiHandler(createEnv())
+	const { execute } = testAccountIntegrationsApiHandler(createEnv())
 	return {
 		get: (search = '') =>
-			handler({
+			execute({
 				request: new Request(`${integrationsUrl}${search}`),
 				params: {},
 			} as never),
 		post: (body: Record<string, unknown>) =>
-			handler({
+			execute({
 				request: new Request(integrationsUrl, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -352,14 +352,13 @@ test('integrations API lists connections with app grouping metadata and serves t
 	const listResponse = await get()
 
 	expect(listResponse.status).toBe(200)
-	expect(listResponse.headers.get('Cache-Control')).toBe('no-store')
 	expect(mockModule.listJoinedIntegrations).toHaveBeenCalledWith(
 		withEnv({ userId: ownerIdFromStored('stable-user-1') }),
 	)
 	expect(mockModule.listOauthApps).toHaveBeenCalledWith(
 		withEnv({ userId: ownerIdFromStored('stable-user-1') }),
 	)
-	const listPayload = (await listResponse.json()) as {
+	const listPayload = listResponse.data as {
 		apps: Array<unknown>
 		integrations: Array<unknown>
 	}
@@ -416,7 +415,7 @@ test('integrations API lists connections with app grouping metadata and serves t
 
 	const chooserResponse = await get('?connectChooser=1')
 	expect(chooserResponse.status).toBe(200)
-	const chooserPayload = (await chooserResponse.json()) as {
+	const chooserPayload = chooserResponse.data as {
 		ok: boolean
 		chooser: { options: Array<unknown> }
 	}
@@ -443,7 +442,7 @@ test('integrations API resolves named connections for connect OAuth, including m
 	expect(mockModule.getJoinedIntegration).toHaveBeenCalledWith(
 		withEnv({ userId: 'stable-user-1' as OwnerId, name: 'GitHub' }),
 	)
-	await expect(githubResponse.json()).resolves.toMatchObject({
+	expect(githubResponse.data).toMatchObject({
 		ok: true,
 		builtInAvailable: false,
 		existingConnection: { lane: 'user', appSlug: 'github' },
@@ -460,7 +459,7 @@ test('integrations API resolves named connections for connect OAuth, including m
 	mockModule.findOauthAppForProviderSetup.mockResolvedValueOnce(null)
 	const missingResponse = await get('?name=missing')
 	expect(missingResponse.status).toBe(200)
-	await expect(missingResponse.json()).resolves.toEqual({
+	expect(missingResponse.data).toEqual({
 		ok: true,
 		builtInAvailable: false,
 		existingConnection: null,
@@ -482,7 +481,7 @@ test('integrations API resolves named connections for connect OAuth, including m
 	} as never)
 	const abandonedResponse = await get('?name=spotify')
 	expect(abandonedResponse.status).toBe(200)
-	await expect(abandonedResponse.json()).resolves.toMatchObject({
+	expect(abandonedResponse.data).toMatchObject({
 		ok: true,
 		integration: {
 			name: 'spotify',
@@ -507,7 +506,7 @@ test('integrations API resolves named connections for connect OAuth, including m
 	} as never)
 	const familyResponse = await get('?name=google-calendar')
 	expect(familyResponse.status).toBe(200)
-	const familyPayload = await familyResponse.json()
+	const familyPayload = familyResponse.data
 	expect(familyPayload).toMatchObject({
 		ok: true,
 		integration: {
@@ -560,7 +559,7 @@ test('integrations API rotates OAuth app credentials with auth scoping and valid
 			clientId: 'shared-google-client-rotated',
 		}),
 	)
-	const rotatePayload = await rotateResponse.json()
+	const rotatePayload = rotateResponse.data
 	expect(rotatePayload).toMatchObject({
 		ok: true,
 		app: {
@@ -601,9 +600,7 @@ test('integrations API rotates OAuth app credentials with auth scoping and valid
 			value: 'rotated-secret-value',
 		}),
 	)
-	expect(JSON.stringify(await mergeResponse.json())).not.toMatch(
-		/rotated-secret-value/,
-	)
+	expect(JSON.stringify(mergeResponse.data)).not.toMatch(/rotated-secret-value/)
 
 	// Rejections below must not reach the app lookup, rotation, or secret
 	// writes beyond what the successful calls already made.
@@ -619,7 +616,7 @@ test('integrations API rotates OAuth app credentials with auth scoping and valid
 		clientSecret: 'secret-value',
 	})
 	expect(missingAppResponse.status).toBe(404)
-	await expect(missingAppResponse.json()).resolves.toEqual({
+	expect(missingAppResponse.data).toEqual({
 		ok: false,
 		error: 'OAuth app not found.',
 	})
@@ -628,7 +625,7 @@ test('integrations API rotates OAuth app credentials with auth scoping and valid
 	const beforeInvalid = callCounts()
 	const invalidResponse = await rotate({ confirm: false })
 	expect(invalidResponse.status).toBe(400)
-	await expect(invalidResponse.json()).resolves.toEqual({
+	expect(invalidResponse.data).toEqual({
 		ok: false,
 		error: 'Invalid request body.',
 	})
@@ -685,7 +682,7 @@ test('integrations API disconnects a connection and deletes a user-lane OAuth ap
 		name: 'google-calendar',
 	})
 	expect(disconnectResponse.status).toBe(200)
-	await expect(disconnectResponse.json()).resolves.toEqual({
+	expect(disconnectResponse.data).toEqual({
 		ok: true,
 		deleted: true,
 	})
@@ -708,7 +705,7 @@ test('integrations API disconnects a connection and deletes a user-lane OAuth ap
 		appSlug: 'google',
 	})
 	expect(deleteAppResponse.status).toBe(200)
-	await expect(deleteAppResponse.json()).resolves.toEqual({
+	expect(deleteAppResponse.data).toEqual({
 		ok: true,
 		deleted: true,
 		connectionNames: ['google', 'google-calendar'],
@@ -764,7 +761,7 @@ test('integrations API sets usage, returns approval payload, and grants a packag
 			allowedPackageIds: ['pkg-mail'],
 		}),
 	)
-	await expect(usageResponse.json()).resolves.toEqual({
+	expect(usageResponse.data).toEqual({
 		ok: true,
 		usageMode: 'packages',
 		allowedPackageIds: ['pkg-mail'],
@@ -772,7 +769,7 @@ test('integrations API sets usage, returns approval payload, and grants a packag
 
 	const approvalGet = await get('?name=google&package_id=pkg-mail')
 	expect(approvalGet.status).toBe(200)
-	const approvalPayload = (await approvalGet.json()) as {
+	const approvalPayload = approvalGet.data as {
 		integration?: unknown
 	}
 	expect(approvalPayload).toMatchObject({
@@ -798,7 +795,7 @@ test('integrations API sets usage, returns approval payload, and grants a packag
 		packageId: 'pkg-mail',
 	})
 	expect(approveAny.status).toBe(200)
-	await expect(approveAny.json()).resolves.toEqual({
+	expect(approveAny.data).toEqual({
 		ok: true,
 		alreadyGranted: true,
 		usageMode: 'any',

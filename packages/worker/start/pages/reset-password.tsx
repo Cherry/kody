@@ -1,30 +1,34 @@
 /** @jsxImportSource @emotion/react */
-import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { useHydrated } from '../components/use-hydrated.ts'
-import { SiteLink } from '../components/site-link.tsx'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import { useState, type FormEvent } from 'react'
-import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
-	cardCss,
-	fieldCss,
-	fieldLabelCss,
-	getPrimaryButtonCss,
-	inputCss,
-	mutedLinkCss,
-	pageDescriptionCss,
-	pageHeaderCss,
-	pageTitleCss,
-	primaryLinkCss,
-	stackedPageCss,
-} from '#universal/styles/style-primitives.ts'
-import { Honeypot } from '../components/honeypot-field.tsx'
-import {
-	readPublicFormProtection,
-	resetTurnstileWidgets,
-	turnstileWidgetClassName,
+readPublicFormProtection,
+resetTurnstileWidgets,
+turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
+import {
+confirmWebsitePasswordReset,
+requestWebsitePasswordReset,
+} from '#start/server/auth-mutations'
+import {
+cardCss,
+fieldCss,
+fieldLabelCss,
+getPrimaryButtonCss,
+inputCss,
+mutedLinkCss,
+pageDescriptionCss,
+pageHeaderCss,
+pageTitleCss,
+primaryLinkCss,
+stackedPageCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import { useState,type FormEvent } from 'react'
+import { Honeypot } from '../components/honeypot-field.tsx'
+import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
+import { SiteLink } from '../components/site-link.tsx'
+import { useHydrated } from '../components/use-hydrated.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 
 type ResetStatus = 'idle' | 'submitting' | 'success' | 'error'
 
@@ -59,16 +63,10 @@ export function ResetPasswordRoute() {
 
 		setState('submitting')
 		try {
-			const response = await fetch('/password-reset', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ email, ...protection }),
+			const payload = await requestWebsitePasswordReset({
+				data: { email, ...protection },
 			})
-			const payload = await response.json().catch(() => null)
-			if (!response.ok) {
+			if (!payload.successful) {
 				const errorMessage =
 					typeof payload?.error === 'string'
 						? payload.error
@@ -103,16 +101,10 @@ export function ResetPasswordRoute() {
 
 		setState('submitting')
 		try {
-			const response = await fetch('/password-reset/confirm', {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ token, password, ...protection }),
+			const payload = await confirmWebsitePasswordReset({
+				data: { token, password, ...protection },
 			})
-			const payload = await response.json().catch(() => null)
-			if (!response.ok) {
+			if (!payload.successful) {
 				const errorMessage =
 					typeof payload?.error === 'string'
 						? payload.error

@@ -1,20 +1,29 @@
 /** @jsxImportSource @emotion/react */
-import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { matchesSearchQuery } from '#client/search-filter.ts'
+import { deleteAccountValue } from '#start/server/account-mutations'
+import {
+	type AccountValueListItem,
+	type AccountValuesLoaderData,
+} from '#universal/loader-data.ts'
+import {
+	cardTitleCss,
+	descriptionCss,
+	fieldCss,
+	fieldLabelCss,
+	getDangerPillCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { type CSSObject } from '@emotion/react'
 import {
 	useIsMutating,
 	useMutation,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { pageQueryOrg } from '../page-query-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { valuesMutationOptions } from './account-values-query.ts'
-import { type CSSObject } from '@emotion/react'
-import { useState } from 'react'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { matchesSearchQuery } from '#client/search-filter.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -24,6 +33,7 @@ import {
 	accountInputCss,
 	accountTextareaCss,
 } from './account-management-components.tsx'
+import { valuesMutationOptions } from './account-values-query.ts'
 import {
 	RecordTable,
 	RecordTableSearch,
@@ -31,22 +41,9 @@ import {
 	recordCellClamp,
 	recordStampCss,
 } from './record-table.tsx'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import {
-	cardTitleCss,
-	descriptionCss,
-	fieldCss,
-	fieldLabelCss,
-	getDangerPillCss,
-} from '#universal/styles/style-primitives.ts'
-import {
-	type AccountValueListItem,
-	type AccountValuesLoaderData,
-} from '#universal/loader-data.ts'
 
 const clampedCellCss = recordCellClamp(28)
 
-const accountValuesApiPath = '/account/values.json'
 const accountValuesPath = '/account/values'
 const valuesRoute = createListDetailRoute(accountValuesPath)
 
@@ -93,7 +90,6 @@ export function AccountValuesPage({
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const queryClient = useQueryClient()
-	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = ['values', actorKey, pageQueryOrg(currentHref)] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
@@ -137,27 +133,9 @@ export function AccountValuesPage({
 			queryClient,
 			actorKey,
 			async ({ name, href }) => {
-				const isCurrentSubmitter = captureSubmitter()
-				const response = await fetch(accountValuesApiPath, {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					credentials: 'include',
-					referrer: orgAccountApiReferrer(href),
-					body: JSON.stringify({ action: 'delete', name }),
+				return deleteAccountValue({
+					data: { name, orgSlug: pageQueryOrg(href) ?? undefined },
 				})
-				if (response.status === 401) {
-					if (isCurrentSubmitter()) window.location.assign('/login')
-					throw new Error('Please sign in again.')
-				}
-				const accepted = await readJson<
-					AccountValuesLoaderData & { error?: string }
-				>(response)
-				if (!response.ok || !accepted?.ok)
-					throw new Error(accepted?.error || 'Unable to delete value.')
-				return accepted
 			},
 			currentHref,
 		),

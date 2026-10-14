@@ -1,3 +1,4 @@
+import { saveKeyThroughUi } from './account-fixtures.ts'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
 
 test('Credentials lists a key, filters by kind, and opens its detail pane without the value', async ({
@@ -14,19 +15,12 @@ test('Credentials lists a key, filters by kind, and opens its detail pane withou
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
 	const value = `sk-never-shown-${runId}`
-	const saved = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: 'DEMO_API_KEY',
-			scope: 'user',
-			value,
-			description: 'Demo key',
-			allowedHosts: ['api.example.com'],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
+	await saveKeyThroughUi(page, {
+		name: 'DEMO_API_KEY',
+		value,
+		description: 'Demo key',
+		allowedHosts: ['api.example.com'],
 	})
-	expect(saved.ok()).toBe(true)
 
 	await page.setViewportSize({ width: 1440, height: 900 })
 	await page.goto(`/@${user.username}/-/credentials`)

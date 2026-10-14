@@ -8,22 +8,13 @@ import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
 	getGuideBySlug,
 	getIntroGuide,
-	listGuides,
 	listGuidesBySection,
 	listProviderGuides,
-	toGuideSummary,
 } from '#worker/guides/catalog.ts'
 import { markdownResponse } from '#app/markdown-negotiation.ts'
 import { type routes } from '#universal/routes.ts'
-import {
-	docMarkdownHref,
-	docsIntroSlug,
-	resolveLegacyDocSlug,
-} from '#universal/docs-nav.ts'
-import {
-	anonymousPersonalizedJsonCacheHeaders,
-	publicSharedJsonCacheHeaders,
-} from '#app/anonymous-html-cache.ts'
+import { docMarkdownHref, resolveLegacyDocSlug } from '#universal/docs-nav.ts'
+import { anonymousPersonalizedJsonCacheHeaders } from '#app/anonymous-html-cache.ts'
 import { requestIsDocsAdmin, viewerCanAccessGuide } from '#app/docs-access.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
@@ -174,7 +165,7 @@ function collectWalkthroughSnippets(slug: string) {
 	}
 }
 
-async function highlightWalkthrough(
+export async function highlightWalkthrough(
 	env: Env,
 	slug: string,
 	serverTiming?: Array<ServerTimingEntry>,
@@ -263,7 +254,7 @@ export async function resolveAccessibleGuide(
 	return viewerCanAccessGuide(guide, isAdmin) ? guide : null
 }
 
-/** Shared data boundary for document routes and the public JSON endpoint. */
+/** Shared data boundary for native website reads and public markdown. */
 export async function loadAccessibleDocDetail(
 	request: Request,
 	env: Env,
@@ -284,36 +275,6 @@ export function guideMarkdownResponse(guide: Guide): Response {
 		response.headers.set('Cache-Control', 'no-store')
 	}
 	return response
-}
-
-export function createDocsApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const includeAdmin = await requestIsDocsAdmin(request, env)
-			return jsonResponse(
-				{
-					ok: true,
-					intro: docsIntroSlug,
-					sections: listGuidesBySection({ includeAdmin }).map(
-						({ section, guides }) => ({
-							id: section.id,
-							label: section.label,
-							description: section.description,
-							slugs: guides.map((guide) => guide.slug),
-						}),
-					),
-					guides: listGuides({ includeAdmin }).map(toGuideSummary),
-				},
-				{
-					headers: anonymousPersonalizedJsonCacheHeaders({
-						personalized: includeAdmin,
-						request,
-					}),
-				},
-			)
-		},
-	} satisfies Action<typeof routes.docsApi>
 }
 
 export function createDocsMarkdownHandler(env: Env) {
@@ -357,18 +318,6 @@ export function createDocsLlmsTxtHandler(env: Env) {
 	} satisfies Action<typeof routes.docsLlmsTxt>
 }
 
-export function createDocsConnectApiHandler(_env: Env) {
-	return {
-		middleware: [],
-		async handler() {
-			return jsonResponse({
-				ok: true,
-				guides: listProviderGuides().map(toGuideSummary),
-			})
-		},
-	} satisfies Action<typeof routes.docsConnectApi>
-}
-
 export function createDocsConnectMarkdownHandler(env: Env) {
 	return {
 		middleware: [],
@@ -377,30 +326,6 @@ export function createDocsConnectMarkdownHandler(env: Env) {
 			return markdownResponse(buildDocsConnectMarkdown(baseUrl))
 		},
 	} satisfies Action<typeof routes.docsConnectMarkdown>
-}
-
-export function createDocDetailApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const redirect = docDetailRedirect(params.slug, request, '.json')
-			if (redirect) return redirect
-			const serverTiming: Array<ServerTimingEntry> = []
-			const detail = await loadAccessibleDocDetail(
-				request,
-				env,
-				params.slug,
-				serverTiming,
-			)
-			if (!detail) return missingDocResponse('json')
-			return jsonResponse(detail.doc, {
-				serverTiming,
-				headers: detail.adminOnly
-					? { 'Cache-Control': 'no-store' }
-					: publicSharedJsonCacheHeaders(),
-			})
-		},
-	} satisfies Action<typeof routes.docDetailApi>
 }
 
 export function createDocDetailMarkdownHandler(env: Env) {

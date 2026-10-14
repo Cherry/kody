@@ -1,32 +1,23 @@
 /** @jsxImportSource @emotion/react */
-import { avatarMutationOptions } from './account-avatar-query.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { listenForAvatarFileDrop } from '#client/listen-for-avatar-file-drop.ts'
+import { type AccountPagePayloads } from '#client/routes/account-page-data.ts'
 import {
-	useEffect,
-	useEffectEvent,
-	useRef,
-	useState,
-	type FormEvent,
-} from 'react'
-import { useRouteContext } from '@tanstack/react-router'
-import {
-	useMutation,
-	useQueryClient,
-	useIsMutating,
-} from '@tanstack/react-query'
-import {
-	pageResourceKey,
-	snapshotPageResource,
-} from '../page-mutation-cache.ts'
+	interpretAccountProfileSave,
+	readProfileFormValues,
+} from '#client/routes/account-profile-save.ts'
+import { shouldShowOnboardingChecklist } from '#client/routes/onboarding-checklist.tsx'
+import { toast } from '#client/toast.ts'
+import { saveProfile, updateAvatar } from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'
 import { type loadProfile } from '#start/server/public-data'
-import { SiteLink } from '../components/site-link.tsx'
-import { listenForAvatarFileDrop } from '#client/listen-for-avatar-file-drop.ts'
-import { AccountAvatarEditor } from './account-avatar-editor.tsx'
 import {
 	type AccountProfileLoaderData,
 	type ProfileVisibility,
 } from '#universal/loader-data.ts'
+import {
+	getGhostButtonCss,
+	mutedLinkCss,
+} from '#universal/styles/style-primitives.ts'
 import {
 	colors,
 	radius,
@@ -34,39 +25,43 @@ import {
 	typography,
 } from '#universal/styles/tokens.ts'
 import {
-	getGhostButtonCss,
-	mutedLinkCss,
-} from '#universal/styles/style-primitives.ts'
-import { toast } from '#client/toast.ts'
+	useIsMutating,
+	useMutation,
+	useQueryClient,
+} from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
 import {
-	interpretAccountProfileSave,
-	readProfileFormValues,
-} from '#client/routes/account-profile-save.ts'
+	useEffect,
+	useEffectEvent,
+	useRef,
+	useState,
+	type FormEvent,
+} from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
 import {
-	accountProfileApiPath,
-	readJson,
-} from '#client/routes/account-approval-shared.ts'
-import { type AccountPagePayloads } from '#client/routes/account-page-data.ts'
+	pageResourceKey,
+	snapshotPageResource,
+} from '../page-mutation-cache.ts'
+import { AccountAvatarEditor } from './account-avatar-editor.tsx'
+import { avatarMutationOptions } from './account-avatar-query.ts'
+import { useAccountConnections } from './account-connections-panel.tsx'
 import { AccountDeletePanel } from './account-delete-panel.tsx'
+import { useAccountEmailClaims } from './account-email-claims.ts'
+import { AccountFormerEmailsPanel } from './account-former-emails-panel.tsx'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
-import { useAccountEmailClaims } from './account-email-claims.ts'
-import { AccountFormerEmailsPanel } from './account-former-emails-panel.tsx'
-import { AccountProfilePanel } from './account-profile-panel.tsx'
 import { AccountPasswordPanel } from './account-password-panel.tsx'
-import { useAccountConnections } from './account-connections-panel.tsx'
-import { renderOnboardingBanner } from './onboarding-banner.tsx'
-import { shouldShowOnboardingChecklist } from '#client/routes/onboarding-checklist.tsx'
+import { AccountProfilePanel } from './account-profile-panel.tsx'
 import {
 	renderEmailVerificationPrompt,
 	requestResendVerification,
 } from './email-verification-prompt.tsx'
-
-const accountAvatarApiPath = '/account/profile/avatar.json'
+import { renderOnboardingBanner } from './onboarding-banner.tsx'
 
 export function AccountPage({
 	payloads,
@@ -83,7 +78,8 @@ export function AccountPage({
 	} | null>(null)
 	function isAvatarSubmitterCurrent() {
 		return (
-			avatarSubmitter.current?.actorKey === actorKey &&
+			avatarSubmitter.current !== null &&
+			avatarSubmitter.current.actorKey === actorKey &&
 			avatarSubmitter.current.href === currentHref
 		)
 	}
@@ -299,24 +295,10 @@ export function AccountPage({
 
 	const avatarMutation = useMutation(
 		avatarMutationOptions(queryClient, async ({ file }) => {
-			const body = file ? new FormData() : null
-			if (file && body) body.set('avatar', file)
-			const response = await fetch(accountAvatarApiPath, {
-				method: 'POST',
-				credentials: 'include',
-				headers: body
-					? { Accept: 'application/json' }
-					: { Accept: 'application/json', 'Content-Type': 'application/json' },
-				body: body ?? JSON.stringify({ remove: true }),
-			})
-			if (response.status === 401)
-				throw new Error('Please sign in again to update your avatar.')
-			const result = await readJson<
-				AccountProfileLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !result?.ok)
-				throw new Error(result?.error || 'Unable to update avatar.')
-			return result
+			const data = new FormData()
+			if (file) data.set('avatar', file)
+			else data.set('remove', 'true')
+			return updateAvatar({ data })
 		}),
 	)
 
@@ -332,13 +314,6 @@ export function AccountPage({
 		{ refreshShell: true },
 	)
 
-	type ProfileResult = AccountProfileLoaderData & {
-		error?: string
-		packagesUpdated?: number
-		communityListingsRepublished?: number
-		packageUpdateMessage?: string
-		communityUpdateWarning?: string
-	}
 	const profileMutation = useMutation({
 		mutationKey: ['profile', actorKey],
 		mutationFn: async (input: {
@@ -346,21 +321,7 @@ export function AccountPage({
 			bio: string
 			profileVisibility: ProfileVisibility
 		}) => {
-			const response = await fetch(accountProfileApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(input),
-			})
-			if (response.status === 401)
-				throw new Error('Please sign in again to save your profile.')
-			const result = await readJson<ProfileResult>(response)
-			if (!response.ok || !result || result.error)
-				throw new Error(result?.error || 'Unable to save profile.')
-			return result
+			return saveProfile({ data: input })
 		},
 		onMutate: async (input) => {
 			const account = await snapshotPageResource<AccountQueryData>(

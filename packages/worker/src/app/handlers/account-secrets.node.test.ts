@@ -1,20 +1,20 @@
+import type * as authenticatedUserModule from '#app/authenticated-user.ts'
+import type * as AllowedHosts from '#mcp/secrets/allowed-hosts.ts'
+import type * as HostApproval from '#mcp/secrets/host-approval.ts'
+import type * as secretsService from '#mcp/secrets/service.ts'
+import type * as valuesService from '#mcp/values/service.ts'
+import type * as CredentialFields from '#worker/credentials/credential-fields.ts'
+import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
+import type * as packageSubscriptions from '#worker/integrations/package-subscriptions.ts'
+import type * as platformApps from '#worker/integrations/platform-apps.ts'
+import type * as IntegrationsService from '#worker/integrations/service.ts'
+import type * as packageRepo from '#worker/package-registry/repo.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import type * as authenticatedUserModule from '#app/authenticated-user.ts'
-import type * as secretsService from '#mcp/secrets/service.ts'
-import type * as valuesService from '#mcp/values/service.ts'
-import type * as packageRepo from '#worker/package-registry/repo.ts'
-import type * as platformApps from '#worker/integrations/platform-apps.ts'
-import type * as packageSubscriptions from '#worker/integrations/package-subscriptions.ts'
-import type * as AllowedHosts from '#mcp/secrets/allowed-hosts.ts'
-import type * as HostApproval from '#mcp/secrets/host-approval.ts'
-import type * as IntegrationsService from '#worker/integrations/service.ts'
-import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
-import type * as CredentialFields from '#worker/credentials/credential-fields.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn<
 		typeof authenticatedUserModule.readAuthenticatedAppUser
@@ -386,18 +386,19 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	) => mockModule.listSavedPackagesByUserId(...args),
 }))
 
-const { createAccountSecretsApiHandler } = await import('./account-secrets.ts')
+const { testAccountSecretsApiHandler } =
+	await import('./account-secrets.test-support.ts')
 
 const secretsUrl = 'https://example.com/account/secrets.json'
 const epoch = new Date(0).toISOString()
 const userStorage = { sessionId: null, appId: null, packageId: null }
 
 function createHandler() {
-	const { handler } = createAccountSecretsApiHandler({
+	const { execute } = testAccountSecretsApiHandler({
 		APP_DB: {} as D1Database,
 		COOKIE_SECRET: 'secret',
 	} as Env)
-	return (request: Request) => handler({ request, params: {} } as never)
+	return (request: Request) => execute({ request, params: {} } as never)
 }
 
 function getRequest(search: string) {
@@ -456,7 +457,7 @@ test('save_oauth_app persists the app (client id + endpoints) before authorize r
 	)
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		app: {
 			slug: 'github',
@@ -537,7 +538,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	)
 
 	expect(githubResponse.status).toBe(200)
-	await expect(githubResponse.json()).resolves.toMatchObject({
+	expect(githubResponse.data).toMatchObject({
 		ok: true,
 		accessTokenSaved: true,
 		refreshTokenSaved: true,
@@ -618,7 +619,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	)
 
 	expect(spotifyResponse.status).toBe(200)
-	await expect(spotifyResponse.json()).resolves.toMatchObject({
+	expect(spotifyResponse.data).toMatchObject({
 		ok: true,
 		accessTokenSaved: true,
 		refreshTokenSaved: false,
@@ -697,7 +698,7 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 	)
 
 	expect(teslaResponse.status).toBe(200)
-	const teslaPayload = (await teslaResponse.json()) as {
+	const teslaPayload = teslaResponse.data as {
 		allowedHosts: Array<string>
 	}
 	expect(teslaPayload).toMatchObject({
@@ -748,7 +749,7 @@ test('host approval view and approve persist normalized hosts for the selected s
 	const viewResponse = await call(getRequest(selected))
 
 	expect(viewResponse.status).toBe(200)
-	await expect(viewResponse.json()).resolves.toMatchObject({
+	expect(viewResponse.data).toMatchObject({
 		ok: true,
 		approval: {
 			name: 'cloudflareToken',
@@ -769,7 +770,7 @@ test('host approval view and approve persist normalized hosts for the selected s
 	const approveResponse = await call(approve(selected))
 
 	expect(approveResponse.status).toBe(200)
-	await expect(approveResponse.json()).resolves.toMatchObject({ ok: true })
+	expect(approveResponse.data).toMatchObject({ ok: true })
 	expect(mockModule.setSecretAllowedHosts).toHaveBeenCalledWith(
 		expect.objectContaining({
 			name: 'cloudflareToken',
@@ -790,7 +791,7 @@ test('host bulk approval adds every requested host to each listed secret', async
 		'?names=cloudflareToken&hosts=api.cloudflare.com,dash.cloudflare.com'
 	const viewResponse = await call(getRequest(bulk))
 	expect(viewResponse.status).toBe(200)
-	await expect(viewResponse.json()).resolves.toMatchObject({
+	expect(viewResponse.data).toMatchObject({
 		ok: true,
 		approval: {
 			name: 'cloudflareToken',
@@ -803,7 +804,7 @@ test('host bulk approval adds every requested host to each listed secret', async
 
 	const approveResponse = await call(approve(bulk))
 	expect(approveResponse.status).toBe(200)
-	await expect(approveResponse.json()).resolves.toMatchObject({ ok: true })
+	expect(approveResponse.data).toMatchObject({ ok: true })
 	expect(mockModule.setSecretAllowedHosts).toHaveBeenCalledWith(
 		expect.objectContaining({
 			name: 'cloudflareToken',
@@ -824,7 +825,7 @@ test('host approval rejects truncated and malformed hosts instead of writing the
 	const mixed = '?names=openaiApiKey&hosts=hooks.slack.com,api.ope'
 	const mixedView = await call(getRequest(mixed))
 	expect(mixedView.status).toBe(200)
-	await expect(mixedView.json()).resolves.toMatchObject({
+	expect(mixedView.data).toMatchObject({
 		ok: true,
 		approval: {
 			name: 'openaiApiKey',
@@ -837,7 +838,7 @@ test('host approval rejects truncated and malformed hosts instead of writing the
 
 	const mixedApprove = await call(approve(mixed))
 	expect(mixedApprove.status).toBe(200)
-	await expect(mixedApprove.json()).resolves.toMatchObject({
+	expect(mixedApprove.data).toMatchObject({
 		ok: true,
 		approval: {
 			requestedHosts: ['hooks.slack.com'],
@@ -856,7 +857,7 @@ test('host approval rejects truncated and malformed hosts instead of writing the
 		getRequest('?names=openaiApiKey&hosts=api.openai.com/v1,%20%20,api.ope'),
 	)
 	expect(invalidOnlyView.status).toBe(200)
-	await expect(invalidOnlyView.json()).resolves.toMatchObject({
+	expect(invalidOnlyView.data).toMatchObject({
 		ok: true,
 		approval: {
 			requestedHosts: [],
@@ -871,7 +872,7 @@ test('host approval rejects truncated and malformed hosts instead of writing the
 		approve('?names=openaiApiKey&hosts=api.ope'),
 	)
 	expect(invalidOnlyApprove.status).toBe(400)
-	await expect(invalidOnlyApprove.json()).resolves.toMatchObject({
+	expect(invalidOnlyApprove.data).toMatchObject({
 		ok: false,
 		error:
 			'None of the requested hosts are valid. The approval link may have been truncated — copy it again.',
@@ -897,7 +898,7 @@ test('approval requests reject invalid targets and ignore stale capability query
 	for (const [search, error] of rejected) {
 		const response = await call(approve(search))
 		expect(response.status).toBe(400)
-		await expect(response.json()).resolves.toMatchObject({ ok: false, error })
+		expect(response.data).toMatchObject({ ok: false, error })
 	}
 	expect(mockModule.setSecretAllowedHosts).not.toHaveBeenCalled()
 	expect(mockModule.setSecretAllowedPackages).not.toHaveBeenCalled()
@@ -909,7 +910,7 @@ test('approval requests reject invalid targets and ignore stale capability query
 		getRequest(`${selected}&capability=secretSet`),
 	)
 	expect(staleCapabilityView.status).toBe(200)
-	await expect(staleCapabilityView.json()).resolves.toMatchObject({
+	expect(staleCapabilityView.data).toMatchObject({
 		ok: true,
 		approval: null,
 		approvalError: null,
@@ -957,7 +958,7 @@ test('account secrets payload includes all packages and package titles and allow
 	const response = await createHandler()(getRequest(''))
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		secrets: expect.arrayContaining([
 			expect.objectContaining({
@@ -997,7 +998,7 @@ test('package approval reject and approve handle missing secrets and deduplicate
 	)
 
 	expect(rejectResponse.status).toBe(200)
-	await expect(rejectResponse.json()).resolves.toMatchObject({
+	expect(rejectResponse.data).toMatchObject({
 		ok: true,
 		secrets: [],
 	})
@@ -1023,7 +1024,7 @@ test('package approval reject and approve handle missing secrets and deduplicate
 	)
 
 	expect(approveResponse.status).toBe(200)
-	await expect(approveResponse.json()).resolves.toMatchObject({ ok: true })
+	expect(approveResponse.data).toMatchObject({ ok: true })
 	expect(mockModule.setSecretAllowedPackages).toHaveBeenCalledWith(
 		expect.objectContaining({
 			name: 'discordBotToken',
@@ -1054,7 +1055,7 @@ test('bulk package approval view and approve grant the package on every listed s
 	const viewResponse = await call(getRequest(bulk))
 
 	expect(viewResponse.status).toBe(200)
-	await expect(viewResponse.json()).resolves.toMatchObject({
+	expect(viewResponse.data).toMatchObject({
 		ok: true,
 		approval: {
 			names: ['discordBotToken', 'xAccessToken'],
@@ -1066,7 +1067,7 @@ test('bulk package approval view and approve grant the package on every listed s
 	const approveResponse = await call(approve(bulk))
 
 	expect(approveResponse.status).toBe(200)
-	await expect(approveResponse.json()).resolves.toMatchObject({ ok: true })
+	expect(approveResponse.data).toMatchObject({ ok: true })
 	expect(mockModule.setSecretAllowedPackages).toHaveBeenCalledTimes(2)
 	for (const name of ['discordBotToken', 'xAccessToken']) {
 		expect(mockModule.setSecretAllowedPackages).toHaveBeenCalledWith(
@@ -1090,7 +1091,7 @@ test('account secrets API loads selected secret values and deletes the selected 
 	const getResponse = await call(getRequest('?selected=user::::myApiKey'))
 
 	expect(getResponse.status).toBe(200)
-	const getPayload = (await getResponse.json()) as {
+	const getPayload = getResponse.data as {
 		ok: boolean
 		selectedSecret: unknown
 	}
@@ -1118,7 +1119,7 @@ test('account secrets API loads selected secret values and deletes the selected 
 	)
 
 	expect(deleteResponse.status).toBe(200)
-	await expect(deleteResponse.json()).resolves.toMatchObject({
+	expect(deleteResponse.data).toMatchObject({
 		ok: true,
 		deleted: true,
 		selectedSecret: null,
@@ -1159,7 +1160,7 @@ test('account secrets save returns the new secret after a successful write', asy
 	)
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		selectedSecret: {
 			id: 'user::::newApiKey',
@@ -1203,7 +1204,7 @@ test('account secrets save sets the provider from a creation link on org Keys on
 	)
 	const linkFailed = await save({ scope: 'user', provider: 'resend' })
 	expect(linkFailed.status).toBe(200)
-	await expect(linkFailed.json()).resolves.toMatchObject({
+	expect(linkFailed.data).toMatchObject({
 		ok: true,
 		providerLinkError: 'credential provider update failed',
 	})
@@ -1257,7 +1258,7 @@ test('account secrets save sets the provider from a creation link on org Keys on
 
 	const invalid = await save({ scope: 'user', provider: 'Not A Slug' })
 	expect(invalid.status).toBe(400)
-	await expect(invalid.json()).resolves.toMatchObject({
+	expect(invalid.data).toMatchObject({
 		ok: false,
 		error: expect.stringContaining('A provider is a slug'),
 	})
@@ -1401,7 +1402,7 @@ test('account secrets save refuses opt-in kinds without a typed value, hosts, or
 		)
 		return {
 			status: response.status,
-			error: ((await response.json()) as { error?: string }).error,
+			error: (response.data as { error?: string }).error,
 		}
 	}
 	mockModule.saveSecret.mockClear()
@@ -1531,7 +1532,7 @@ test('account secrets save refuses to rename or re-host an opt-in credential wit
 	mockModule.saveSecret.mockClear()
 	const renamed = await save({ name: 'webhook2', allowedHosts: [] })
 	expect(renamed.status).toBe(400)
-	await expect(renamed.json()).resolves.toMatchObject({
+	expect(renamed.data).toMatchObject({
 		error: expect.stringContaining('would drop its kind'),
 	})
 	expect(mockModule.readStoredCredentialPlacement.mock.lastCall?.[0].name).toBe(
@@ -1545,7 +1546,7 @@ test('account secrets save refuses to rename or re-host an opt-in credential wit
 		allowedHosts: ['other.example.com'],
 	})
 	expect(rehosted.status).toBe(400)
-	await expect(rehosted.json()).resolves.toMatchObject({
+	expect(rehosted.data).toMatchObject({
 		error: expect.stringContaining('take hosts, not approved hosts'),
 	})
 	expect(mockModule.saveSecret).not.toHaveBeenCalled()
@@ -1580,7 +1581,7 @@ test('account secrets save stays ok when metadata reload fails after write', asy
 	)
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		selectedSecret: {
 			id: 'user::::newApiKey',
@@ -1633,7 +1634,7 @@ test('account secrets save fallback uses the saved record metadata', async () =>
 	)
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		selectedSecret: {
 			id: 'user::::renamedApiKey',
@@ -1689,7 +1690,7 @@ test('oauth_exchange maps provider failures and forwards exchange styles', async
 		notion,
 	)
 	expect(notionSuccess.status).toBe(200)
-	await expect(notionSuccess.json()).resolves.toMatchObject({
+	expect(notionSuccess.data).toMatchObject({
 		access_token: 'notion-access',
 		refresh_token: 'notion-refresh',
 	})
@@ -1708,7 +1709,7 @@ test('oauth_exchange maps provider failures and forwards exchange styles', async
 		},
 	)
 	expect(formSuccess.status).toBe(200)
-	await expect(formSuccess.json()).resolves.toMatchObject({
+	expect(formSuccess.data).toMatchObject({
 		access_token: 'slack-access',
 	})
 
@@ -1728,7 +1729,7 @@ test('oauth_exchange maps provider failures and forwards exchange styles', async
 		{ clientSecret: 'canva-client-secret', allowedHosts: ['api.canva.com'] },
 	)
 	expect(canvaSuccess.status).toBe(200)
-	await expect(canvaSuccess.json()).resolves.toMatchObject({
+	expect(canvaSuccess.data).toMatchObject({
 		access_token: 'canva-access',
 		refresh_token: 'canva-refresh',
 	})
@@ -1749,7 +1750,7 @@ test('oauth_exchange maps provider failures and forwards exchange styles', async
 		notion,
 	)
 	expect(notionFailure.status).toBe(502)
-	const notionFailureBody = await notionFailure.text()
+	const notionFailureBody = JSON.stringify(notionFailure.data)
 	expect(JSON.parse(notionFailureBody)).toEqual({
 		ok: false,
 		error: 'invalid_client',
@@ -1784,7 +1785,7 @@ test('connect oauth persists usePkce for confidential + PKCE providers like Canv
 	)
 
 	expect(canvaResponse.status).toBe(200)
-	await expect(canvaResponse.json()).resolves.toMatchObject({
+	expect(canvaResponse.data).toMatchObject({
 		ok: true,
 		accessTokenSaved: true,
 		refreshTokenSaved: true,
@@ -1862,7 +1863,7 @@ test('platform-lane oauth exchange and connect reject apps that are not discover
 		}),
 	)
 	expect(exchangeResponse.status).toBe(400)
-	await expect(exchangeResponse.json()).resolves.toEqual(unavailable)
+	expect(exchangeResponse.data).toEqual(unavailable)
 	expect(fetchMock).not.toHaveBeenCalled()
 	expect(mockModule.getPlatformOauthAppClientSecret).not.toHaveBeenCalled()
 
@@ -1876,7 +1877,7 @@ test('platform-lane oauth exchange and connect reject apps that are not discover
 		}),
 	)
 	expect(connectResponse.status).toBe(400)
-	await expect(connectResponse.json()).resolves.toEqual(unavailable)
+	expect(connectResponse.data).toEqual(unavailable)
 	expect(mockModule.upsertPlatformIntegration).not.toHaveBeenCalled()
 	expect(mockModule.persistIntegrationTokens).not.toHaveBeenCalled()
 
@@ -1956,7 +1957,7 @@ test('published platform apps exchange with the app row credentials and connect 
 		}),
 	)
 	expect(connectResponse.status).toBe(200)
-	await expect(connectResponse.json()).resolves.toMatchObject({
+	expect(connectResponse.data).toMatchObject({
 		ok: true,
 		integrationName: 'github-platform',
 		refreshTokenSaved: true,

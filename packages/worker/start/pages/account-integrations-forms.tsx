@@ -1,29 +1,16 @@
 /** @jsxImportSource @emotion/react */
-import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { useMutation } from '@tanstack/react-query'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import {
-	type AccountIntegrationListItem,
-	type AccountOauthAppListItem,
-} from '#universal/loader-data.ts'
-import { useState } from 'react'
-import { type CSSObject } from '@emotion/react'
-import { SiteLink } from '../components/site-link.tsx'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import {
-	AccountManagementMessage,
-	accountInputCss,
-} from './account-management-components.tsx'
 import {
 	addAccountAnchorId,
 	nextSuggestedConnectionName,
 	resolveAddAccountConnectionName,
 } from '#client/routes/integration-provider-catalog.ts'
+import { updateIntegrations } from '#start/server/account-mutations'
+import {
+	type AccountIntegrationListItem,
+	type AccountOauthAppListItem,
+} from '#universal/loader-data.ts'
 import { buildConnectOauthHref } from '#universal/oauth-connect.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	descriptionCss,
 	fieldCss,
@@ -31,12 +18,24 @@ import {
 	getPillButtonCss,
 	primaryLinkCss,
 } from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { type CSSObject } from '@emotion/react'
+import { useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	type IntegrationUsageDraft,
-	accountIntegrationsApiPath,
 	dangerButtonCss,
 	integrationListId,
 } from './account-integrations-shared.ts'
+import {
+	AccountManagementMessage,
+	accountInputCss,
+} from './account-management-components.tsx'
 
 const addAccountLinkCss: CSSObject = {
 	...primaryLinkCss,
@@ -292,29 +291,14 @@ export function RotateCredentialsForm(props: {
 			href: string
 			body: Record<string, unknown>
 		}) => {
-			const isCurrentSubmitter = captureSubmitter()
-			const response = await fetch(accountIntegrationsApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(input.href),
-				headers: {
-					'Content-Type': 'application/json',
-					Accept: 'application/json',
+			const result = await updateIntegrations({
+				data: {
+					body: input.body,
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
 				},
-				credentials: 'include',
-				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) {
-				if (isCurrentSubmitter()) window.location.assign('/login')
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<{
-				ok: boolean
-				error?: string
-				app?: AccountOauthAppListItem
-			}>(response)
-			if (!response.ok || !payload?.ok || !payload.app)
-				throw new Error(payload?.error || 'Unable to rotate credentials.')
-			return payload.app
+			if (!('app' in result)) throw new Error('Unable to rotate credentials.')
+			return result.app
 		},
 		onMutate: () => invalidate,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),

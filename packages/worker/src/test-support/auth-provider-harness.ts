@@ -1,12 +1,12 @@
-import { DatabaseSync } from 'node:sqlite'
-import { expect } from 'vitest'
-import { createAuthProviderStartHandler } from '#app/handlers/auth-provider.ts'
+import { startWebsiteOAuth } from '#worker/identity/oauth-start-operation.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
-import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { expect } from 'vitest'
 
 export const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 
@@ -113,13 +113,17 @@ export async function startProviderFlow(
 	provider: string,
 	url: string,
 ) {
-	const startResponse = await runHandler(
-		createAuthProviderStartHandler(env),
-		new Request(url, { method: 'POST' }),
-		{ provider },
-	)
-	expect(startResponse.status).toBe(302)
-	const location = startResponse.headers.get('Location') ?? ''
+	const startResponse = await startWebsiteOAuth({
+		env,
+		provider,
+		url: new URL(url),
+		request: new Request(url),
+		body: {},
+	})
+	expect(startResponse.status).toBe(200)
+	if (!('authorizeUrl' in startResponse.data))
+		throw new Error('Expected OAuth authorization URL')
+	const location = startResponse.data.authorizeUrl
 	const stateCookie = getCookiePair(
 		startResponse.headers.get('Set-Cookie') ?? '',
 	)

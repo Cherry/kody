@@ -12,6 +12,7 @@ import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 import { loadOrgBindingForSlug } from '#worker/orgs/repo.ts'
 import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
+import { resolveOrgManagementAccess } from '#app/org-management-access.ts'
 import { createTestOrgAuditWriter } from '#worker/test-support/create-audit-db.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
 
@@ -57,10 +58,10 @@ vi.mock('#worker/orgs/org-avatar.ts', async (importOriginal) => {
 })
 
 const {
-	createOrgSettingsApiHandler,
-	createOrgSettingsAvatarPostHandler,
-	createOrgSettingsDeletePostHandler,
-	createOrgSettingsPostHandler,
+	loadOrgSettingsData,
+	mutateOrgSettingsAvatarPost,
+	mutateOrgSettingsDeletePost,
+	mutateOrgSettingsPost,
 } = await import('./org-settings.ts')
 
 const people = {
@@ -186,13 +187,50 @@ beforeEach(async () => {
 	await seed()
 })
 
+async function readSettings(env: Env, { request }: { request: Request }) {
+	const user = await mocks.readAuthenticatedAppUser(request, env)
+	const orgSlug = new URL(request.url).pathname.split('/')[1]!.slice(1)
+	const access = await resolveOrgManagementAccess({
+		env,
+		request,
+		user,
+		orgSlug,
+		permission: 'org:read',
+	})
+	return access.ok
+		? {
+				status: 200,
+				data: await loadOrgSettingsData({ env, user, org: access.org }),
+			}
+		: { status: access.status, data: { ok: false, error: access.error } }
+}
+async function callSettings(
+	operation:
+		| typeof mutateOrgSettingsPost
+		| typeof mutateOrgSettingsAvatarPost
+		| typeof mutateOrgSettingsDeletePost,
+	env: Env,
+	{ request }: { request: Request },
+) {
+	const user = await mocks.readAuthenticatedAppUser(request, env)
+	return operation({
+		env,
+		request,
+		user,
+		orgSlug: new URL(request.url).pathname.split('/')[1]!.slice(1),
+		body: request.headers.get('Content-Type')?.includes('application/json')
+			? await request.json()
+			: await request.formData(),
+	})
+}
+
 test('settings JSON is 404 for an unknown slug, collaborator, and 403 for a member write', async () => {
 	const env = createEnv()
 	const unknown = new Request('https://kody.test/@missing/-/settings.json')
 	await signIn('ada', unknown)
 	expect(
 		(
-			await createOrgSettingsApiHandler(env).handler({
+			await readSettings(env, {
 				request: unknown,
 			} as never)
 		).status,
@@ -202,7 +240,7 @@ test('settings JSON is 404 for an unknown slug, collaborator, and 403 for a memb
 	await signIn('dan', collab)
 	expect(
 		(
-			await createOrgSettingsApiHandler(env).handler({
+			await readSettings(env, {
 				request: collab,
 			} as never)
 		).status,
@@ -210,11 +248,11 @@ test('settings JSON is 404 for an unknown slug, collaborator, and 403 for a memb
 
 	const memberGet = new Request('https://kody.test/@zeta-co/-/settings.json')
 	await signIn('bob', memberGet)
-	const readable = await createOrgSettingsApiHandler(env).handler({
+	const readable = await readSettings(env, {
 		request: memberGet,
 	} as never)
 	expect(readable.status).toBe(200)
-	expect(await readable.json()).toMatchObject({
+	expect(readable.data).toMatchObject({
 		ok: true,
 		canManage: false,
 		org: { slug: 'zeta-co', personal: false },
@@ -231,7 +269,7 @@ test('settings JSON is 404 for an unknown slug, collaborator, and 403 for a memb
 	await signIn('bob', memberWrite)
 	expect(
 		(
-			await createOrgSettingsPostHandler(env).handler({
+			await callSettings(mutateOrgSettingsPost, env, {
 				request: memberWrite,
 			} as never)
 		).status,
@@ -246,11 +284,11 @@ test('owner can update team settings and cannot delete a personal org', async ()
 		body: JSON.stringify({ displayName: 'Acme Co' }),
 	})
 	await signIn('ada', update)
-	const updated = await createOrgSettingsPostHandler(env).handler({
+	const updated = await callSettings(mutateOrgSettingsPost, env, {
 		request: update,
 	} as never)
 	expect(updated.status).toBe(200)
-	expect(await updated.json()).toMatchObject({
+	expect(updated.data).toMatchObject({
 		ok: true,
 		org: { displayName: 'Acme Co', slug: 'zeta-co' },
 	})
@@ -264,11 +302,11 @@ test('owner can update team settings and cannot delete a personal org', async ()
 		},
 	)
 	await signIn('ada', personal)
-	const blocked = await createOrgSettingsDeletePostHandler(env).handler({
+	const blocked = await callSettings(mutateOrgSettingsDeletePost, env, {
 		request: personal,
 	} as never)
 	expect(blocked.status).toBe(400)
-	expect(await blocked.json()).toMatchObject({
+	expect(blocked.data).toMatchObject({
 		ok: false,
 		error: expect.stringMatching(/Data & deletion/),
 	})
@@ -282,7 +320,7 @@ test('owner can update team settings and cannot delete a personal org', async ()
 	await signIn('ada', del)
 	expect(
 		(
-			await createOrgSettingsDeletePostHandler(env).handler({
+			await callSettings(mutateOrgSettingsDeletePost, env, {
 				request: del,
 			} as never)
 		).status,
@@ -306,11 +344,11 @@ test('org avatar upload keeps validation as 400 and storage failures as 500', as
 		{ method: 'POST', body: invalidForm },
 	)
 	await signIn('ada', invalid)
-	const invalidResponse = await createOrgSettingsAvatarPostHandler(env).handler(
-		{ request: invalid } as never,
-	)
+	const invalidResponse = await callSettings(mutateOrgSettingsAvatarPost, env, {
+		request: invalid,
+	} as never)
 	expect(invalidResponse.status).toBe(400)
-	expect(await invalidResponse.json()).toMatchObject({
+	expect(invalidResponse.data).toMatchObject({
 		ok: false,
 		error: 'Avatars must be PNG, JPEG, or WebP images.',
 	})
@@ -335,11 +373,11 @@ test('org avatar upload keeps validation as 400 and storage failures as 500', as
 		{ method: 'POST', body: form },
 	)
 	await signIn('ada', failing)
-	const failed = await createOrgSettingsAvatarPostHandler(env).handler({
+	const failed = await callSettings(mutateOrgSettingsAvatarPost, env, {
 		request: failing,
 	} as never)
 	expect(failed.status).toBe(500)
-	expect(await failed.json()).toMatchObject({
+	expect(failed.data).toMatchObject({
 		ok: false,
 		error: 'Unable to save avatar.',
 	})
@@ -360,9 +398,7 @@ test('a second owner still treats a signup org as personal', async () => {
 
 	const get = new Request('https://kody.test/@ada/-/settings.json')
 	await signIn('bob', get)
-	const body = await (
-		await createOrgSettingsApiHandler(env).handler({ request: get } as never)
-	).json()
+	const body = await (await readSettings(env, { request: get } as never)).data
 	expect(body).toMatchObject({
 		ok: true,
 		org: { slug: 'ada', personal: true },
@@ -375,7 +411,7 @@ test('a second owner still treats a signup org as personal', async () => {
 		body: JSON.stringify({ confirmation: 'ada' }),
 	})
 	await signIn('bob', del)
-	const blocked = await createOrgSettingsDeletePostHandler(env).handler({
+	const blocked = await callSettings(mutateOrgSettingsDeletePost, env, {
 		request: del,
 	} as never)
 	expect(blocked.status).toBe(400)
@@ -389,10 +425,10 @@ test('owner sees personal identity lock on their signup org and edits a team org
 	await signIn('ada', personalGet)
 	expect(
 		await (
-			await createOrgSettingsApiHandler(env).handler({
+			await readSettings(env, {
 				request: personalGet,
 			} as never)
-		).json(),
+		).data,
 	).toMatchObject({
 		ok: true,
 		org: { slug: 'ada', personal: true },
@@ -404,10 +440,10 @@ test('owner sees personal identity lock on their signup org and edits a team org
 	await signIn('ada', teamGet)
 	expect(
 		await (
-			await createOrgSettingsApiHandler(env).handler({
+			await readSettings(env, {
 				request: teamGet,
 			} as never)
-		).json(),
+		).data,
 	).toMatchObject({
 		ok: true,
 		org: { slug: 'zeta-co', personal: false },
@@ -448,10 +484,10 @@ test('former platform orgs are not personal for settings identity editing', asyn
 	await signIn('ada', get)
 	expect(
 		await (
-			await createOrgSettingsApiHandler(env).handler({
+			await readSettings(env, {
 				request: get,
 			} as never)
-		).json(),
+		).data,
 	).toMatchObject({
 		ok: true,
 		org: { slug: 'kody', personal: false },
@@ -465,11 +501,11 @@ test('former platform orgs are not personal for settings identity editing', asyn
 		body: JSON.stringify({ displayName: 'Kody' }),
 	})
 	await signIn('ada', update)
-	const updated = await createOrgSettingsPostHandler(env).handler({
+	const updated = await callSettings(mutateOrgSettingsPost, env, {
 		request: update,
 	} as never)
 	expect(updated.status).toBe(200)
-	expect(await updated.json()).toMatchObject({
+	expect(updated.data).toMatchObject({
 		ok: true,
 		org: { slug: 'kody', displayName: 'Kody', personal: false },
 		canManage: true,

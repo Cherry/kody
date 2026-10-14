@@ -1,51 +1,54 @@
 /** @jsxImportSource @emotion/react */
-import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
-import { buildOauthLoginErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
-import {
-	startAuthentication,
-	WebAuthnAbortService,
-	type PublicKeyCredentialRequestOptionsJSON,
-} from '@simplewebauthn/browser'
-import { type CSSObject } from '@emotion/react'
-import {
-	useEffect,
-	useId,
-	useRef,
-	useState,
-	type CSSProperties,
-	type FormEvent,
-} from 'react'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { useHydrated } from '../components/use-hydrated.ts'
-import { SiteLink } from '../components/site-link.tsx'
-import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
-import { ProviderIcon } from '../components/provider-icons.tsx'
-import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
-import { type SessionInfo } from '#client/session.ts'
-import { handleUrlPreview } from '@kody-internal/shared/handle-permanence.ts'
-import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
+import { fathomEventNames,trackFathomEvent } from '#client/fathom-events.ts'
 import {
-	clearStoredFirstTouchAttribution,
-	readSignupFirstTouchAttribution,
+clearStoredFirstTouchAttribution,
+readSignupFirstTouchAttribution,
 } from '#client/first-touch-attribution.ts'
-import { fathomEventNames, trackFathomEvent } from '#client/fathom-events.ts'
-import { serializeFirstTouchAttributionForTransport } from '#universal/first-touch-attribution.ts'
-import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
 import {
-	emptyPublicFormProtection,
-	readPublicFormProtection,
-	renderTurnstileWidgets,
-	resetTurnstileWidgets,
+emptyPublicFormProtection,
+readPublicFormProtection,
+renderTurnstileWidgets,
+resetTurnstileWidgets,
 } from '#client/public-form-protection.ts'
-import { colors } from '#universal/styles/tokens.ts'
 import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
-import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
+import { type SessionInfo } from '#client/session.ts'
 import {
-	formMessageCss,
-	AuthForm,
-	renderLoginVisualPanel,
-	renderMobileBrand,
+authenticateWebsite,
+webauthnAuthenticationOptions,
+webauthnAuthenticationVerify,
+} from '#start/server/auth-mutations'
+import { buildOauthLoginErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
+import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
+import { serializeFirstTouchAttributionForTransport } from '#universal/first-touch-attribution.ts'
+import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
+import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
+import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
+import { colors } from '#universal/styles/tokens.ts'
+import { type CSSObject } from '@emotion/react'
+import { handleUrlPreview } from '@kody-internal/shared/handle-permanence.ts'
+import {
+startAuthentication,
+WebAuthnAbortService
+} from '@simplewebauthn/browser'
+import {
+useEffect,
+useId,
+useRef,
+useState,
+type CSSProperties,
+type FormEvent,
+} from 'react'
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { ProviderIcon } from '../components/provider-icons.tsx'
+import { SiteLink } from '../components/site-link.tsx'
+import { useHydrated } from '../components/use-hydrated.ts'
+import { startSocialSignIn,type PublicAuthConfig } from '../social-sign-in.ts'
+import {
+AuthForm,
+formMessageCss,
+renderLoginVisualPanel,
+renderMobileBrand,
 } from './login-sections.tsx'
 
 export type AuthStatus = 'idle' | 'submitting' | 'success' | 'error'
@@ -152,12 +155,9 @@ export function LoginPage({
 		try {
 			const attribution =
 				mode === 'signup' ? readSignupFirstTouchAttribution() : null
-			const response = await fetch('/auth', {
-				method: 'POST',
+			const payload = await authenticateWebsite({
 				signal: lifecycle.current?.signal,
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'include',
-				body: JSON.stringify({
+				data: {
 					email,
 					password,
 					mode,
@@ -170,16 +170,11 @@ export function LoginPage({
 								...serializeFirstTouchAttributionForTransport(attribution),
 							}
 						: {}),
-				}),
+				},
 			})
-			const payload = await readJson<{
-				error?: string
-				requiresTwoFactor?: boolean
-				emailVerificationRequired?: boolean
-			}>(response)
 			if (lifecycle.current?.signal.aborted) return
 
-			if (!response.ok) {
+			if (!payload.successful) {
 				const errorMessage =
 					typeof payload?.error === 'string'
 						? payload.error
@@ -252,17 +247,9 @@ export function LoginPage({
 		setState('submitting')
 
 		try {
-			const optionsResponse = await fetch('/webauthn/authentication', {
-				signal: lifecycle.current?.signal,
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
-			})
-			const optionsPayload = await readJson<{
-				ok?: boolean
-				options?: PublicKeyCredentialRequestOptionsJSON
-			}>(optionsResponse)
+			const optionsPayload = await webauthnAuthenticationOptions({ data: {} })
 			if (
-				!optionsResponse.ok ||
+				!optionsPayload.successful ||
 				optionsPayload?.ok !== true ||
 				!optionsPayload.options
 			) {
@@ -291,24 +278,15 @@ export function LoginPage({
 				? readPublicFormProtection(new FormData(authForm), authForm)
 				: emptyPublicFormProtection()
 
-			const verificationResponse = await fetch('/webauthn/authentication', {
-				method: 'POST',
-				signal: lifecycle.current?.signal,
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'include',
-				body: JSON.stringify({
+			const verificationPayload = await webauthnAuthenticationVerify({
+				data: {
 					response: authenticationResponse,
 					rememberMe,
 					...protection,
-				}),
+				},
 			})
-			const verificationPayload = await readJson<{
-				ok?: boolean
-				error?: string
-				requiresTwoFactor?: boolean
-			}>(verificationResponse)
 			if (lifecycle.current?.signal.aborted) return
-			if (!verificationResponse.ok || verificationPayload?.ok !== true) {
+			if (!verificationPayload.successful || verificationPayload?.ok !== true) {
 				const errorMessage =
 					typeof verificationPayload?.error === 'string'
 						? verificationPayload.error

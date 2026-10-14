@@ -1,4 +1,7 @@
-import { jsonResponse } from '#worker/json-response.ts'
+import {
+	packageMutationResult,
+	type PackageMutationResult,
+} from './package-mutation-result.ts'
 import {
 	type AuthenticatedAppUser,
 	type readAuthenticatedAppUser,
@@ -109,12 +112,12 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 	}
 }
 
-export async function handleAccountPackageInternetVisibleAction(input: {
+export async function mutateAccountPackageInternetVisible(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
 	body: object
-}): Promise<Response | null> {
+}): Promise<PackageMutationResult | null> {
 	const action =
 		'action' in input.body && typeof input.body.action === 'string'
 			? input.body.action.trim()
@@ -133,7 +136,10 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 			? input.body.packageId.trim()
 			: ''
 	if (!packageId) {
-		return jsonResponse({ ok: false, error: 'Package id is required.' }, 400)
+		return packageMutationResult(
+			{ ok: false, error: 'Package id is required.' },
+			400,
+		)
 	}
 
 	const resolved = await loadWritableAccountSavedPackage({
@@ -142,7 +148,11 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 		packageId,
 		permission: 'package:publish',
 	})
-	if (!resolved.ok) return resolved.response
+	if (!resolved.ok)
+		return packageMutationResult(
+			{ ok: false, error: 'Package not found.' },
+			404,
+		)
 	const { savedPackage, ownerUserId, actorUserId } = resolved.package
 
 	const binding = await loadOrgBindingForOrg(
@@ -166,7 +176,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 				? input.body.requestId.trim()
 				: ''
 		if (!requestId) {
-			return jsonResponse(
+			return packageMutationResult(
 				{ ok: false, error: 'Approval request id is required.' },
 				400,
 			)
@@ -190,12 +200,12 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 						requestId,
 					})
 		if (!approved.ok) {
-			return jsonResponse(
+			return packageMutationResult(
 				{ ok: false, error: approved.error, approvalUrl },
 				approved.status,
 			)
 		}
-		return jsonResponse(
+		return packageMutationResult(
 			await reloadAccountPackagesAfterWrite({
 				env: input.env,
 				request: input.request,
@@ -232,7 +242,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 
 			if (internetVisible) {
 				if (confirmName !== savedPackage.kodyId) {
-					return jsonResponse(
+					return packageMutationResult(
 						{
 							ok: false,
 							error: `Type the package slug "${savedPackage.kodyId}" to continue. Review and approve the capability summary first.`,
@@ -248,7 +258,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 					requestUrl: input.request.url,
 				})
 				if (!summary.publishedCommit) {
-					return jsonResponse(
+					return packageMutationResult(
 						{
 							ok: false,
 							error: 'Publish the package before making it internet-visible.',
@@ -257,7 +267,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 					)
 				}
 				if (!summary.fingerprintMatchesApproval) {
-					return jsonResponse(
+					return packageMutationResult(
 						{
 							ok: false,
 							error:
@@ -278,7 +288,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 					requestUrl: input.request.url,
 					expectedFingerprint: summary.capabilitySet.fingerprint,
 				})
-				return jsonResponse(
+				return packageMutationResult(
 					{
 						ok: false,
 						error:
@@ -289,7 +299,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 				)
 			} else {
 				if (confirmName !== savedPackage.kodyId) {
-					return jsonResponse(
+					return packageMutationResult(
 						{
 							ok: false,
 							error: `Type the package slug "${savedPackage.kodyId}" to turn off internet-visible serving.`,
@@ -304,18 +314,24 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 					actorUserId,
 				})
 				if (!changed) {
-					return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+					return packageMutationResult(
+						{ ok: false, error: 'Package not found.' },
+						404,
+					)
 				}
 			}
 		}
 	} catch (error) {
 		if (error instanceof CapabilityApprovalError) {
-			return jsonResponse({ ok: false, error: error.message, approvalUrl }, 400)
+			return packageMutationResult(
+				{ ok: false, error: error.message, approvalUrl },
+				400,
+			)
 		}
 		throw error
 	}
 
-	return jsonResponse(
+	return packageMutationResult(
 		await reloadAccountPackagesAfterWrite({
 			env: input.env,
 			request: input.request,

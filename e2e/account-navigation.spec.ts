@@ -1,4 +1,5 @@
 import { accountConnectionAgentIds } from '../packages/worker/universal/account-connections.ts'
+import { saveKeyThroughUi } from './account-fixtures.ts'
 import {
 	collectJsonRequests,
 	expectSingleCommitTransition,
@@ -8,9 +9,9 @@ import {
 import {
 	expect,
 	test,
+	waitForClientHydration,
 	type Locator,
 	type Page,
-	waitForClientHydration,
 } from './playwright-utils.ts'
 
 /**
@@ -460,32 +461,18 @@ test('account live search keeps the same focused input while the list filters', 
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
 
-	const alphaSecret = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: `alphaSecret${runId}`,
-			scope: 'user',
-			value: 'alpha-secret-value',
-			description: 'Matches the alpha query',
-			allowedHosts: ['api.example.com'],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
+	await saveKeyThroughUi(page, {
+		name: `alphaSecret${runId}`,
+		value: 'alpha-secret-value',
+		description: 'Matches the alpha query',
+		allowedHosts: ['api.example.com'],
 	})
-	expect(alphaSecret.ok()).toBe(true)
-	const betaSecret = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: `betaSecret${runId}`,
-			scope: 'user',
-			value: 'beta-secret-value',
-			description: 'Does not match the alpha query',
-			allowedHosts: ['api.example.com'],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
+	await saveKeyThroughUi(page, {
+		name: `betaSecret${runId}`,
+		value: 'beta-secret-value',
+		description: 'Does not match the alpha query',
+		allowedHosts: ['api.example.com'],
 	})
-	expect(betaSecret.ok()).toBe(true)
 
 	await page.goto(`/@${user.username}/-/credentials`)
 	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/credentials$`))

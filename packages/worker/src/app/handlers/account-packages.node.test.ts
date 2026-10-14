@@ -258,8 +258,7 @@ vi.mock('#worker/repo/entity-sources.ts', () => ({
 	) => mockModule.getEntitySourceById(...args),
 }))
 
-const { createAccountPackagesApiHandler } =
-	await import('./account-packages.ts')
+const { loadAccountPackagesData } = await import('../account-packages-data.ts')
 const { loadAccountPackageAlias } =
 	await import('../../../start/server/package-alias.ts')
 
@@ -272,30 +271,21 @@ function createEnv() {
 
 function createPackagesClient() {
 	const env = createEnv()
-	const { handler } = createAccountPackagesApiHandler(env)
 	return {
 		env,
-		get: (search = '') =>
-			handler({
-				request: new Request(
-					`https://example.com/account/packages.json${search}`,
-				),
-				params: {},
-			} as never),
-		post: (body: Record<string, unknown>) =>
-			handler({
-				request: new Request('https://example.com/account/packages.json', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(body),
-				}),
-				params: {},
-			} as never),
+		get: async (search = '') => {
+			const request = new Request(
+				`https://example.com/account/packages${search}`,
+			)
+			const user = await mockModule.readAuthenticatedAppUser(request, env)
+			if (!user) throw new Error('Sign in required.')
+			return loadAccountPackagesData({ env, request, user })
+		},
 	}
 }
 
 test('packages API lists with filters, ignores invalid values, and rejects unknown actions', async () => {
-	const { env, get, post } = createPackagesClient()
+	const { env, get } = createPackagesClient()
 	const searchCall = (input: Record<string, unknown>) =>
 		expect(mockModule.searchSavedPackagesByUserId).toHaveBeenLastCalledWith(
 			env.APP_DB,
@@ -303,8 +293,6 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 		)
 
 	const defaults = await get()
-	expect(defaults.status).toBe(200)
-	expect(defaults.headers.get('Cache-Control')).toBe('no-store')
 	searchCall({
 		query: '',
 		hasApp: null,
@@ -313,7 +301,7 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 		offset: 0,
 	})
 	expect(mockModule.getSavedPackageById).not.toHaveBeenCalled()
-	await expect(defaults.json()).resolves.toMatchObject({
+	expect(defaults).toMatchObject({
 		ok: true,
 		email: 'user@example.com',
 		username: 'test-user',
@@ -337,7 +325,6 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 	const filtered = await get(
 		'?q=discord&app=with&sort=name&page=3&pageSize=10&selected=pkg-1',
 	)
-	expect(filtered.status).toBe(200)
 	searchCall({
 		query: 'discord',
 		hasApp: true,
@@ -351,7 +338,7 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 		userId: 'stable-user-1' as OwnerId,
 		packageId: 'pkg-1',
 	})
-	const filteredPayload = await filtered.json()
+	const filteredPayload = filtered
 	expect(filteredPayload).toMatchObject({
 		ok: true,
 		page: 3,
@@ -381,7 +368,7 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 	mockModule.loadPublishedEntityManifest.mockRejectedValueOnce(
 		new Error('Saved package source bindings are not available.'),
 	)
-	await expect((await get('?selected=pkg-1')).json()).resolves.toMatchObject({
+	expect(await get('?selected=pkg-1')).toMatchObject({
 		ok: true,
 		selectedPackage: {
 			id: 'pkg-1',
@@ -394,22 +381,19 @@ test('packages API lists with filters, ignores invalid values, and rejects unkno
 		null as never,
 	)
 	const invalid = await get('?app=bogus&sort=bogus&selected=missing-package')
-	expect(invalid.status).toBe(200)
 	expect(mockModule.searchSavedPackagesByUserId).toHaveBeenLastCalledWith(
 		env.APP_DB,
 		expect.objectContaining({ hasApp: null, sort: 'updated' }),
 	)
-	await expect(invalid.json()).resolves.toMatchObject({
+	expect(invalid).toMatchObject({
 		ok: true,
 		selectedPackage: null,
 		appFilter: 'all',
 		sort: 'updated',
 	})
 
-	expect((await post({ action: 'anything' })).status).toBe(400)
-
 	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(null as never)
-	expect((await get()).status).toBe(401)
+	await expect(get()).rejects.toThrow('Sign in required.')
 })
 
 test('account package detail redirects the owner to the canonical package URL', async () => {
@@ -498,8 +482,7 @@ test('packages API loads the selected package detail while list provenance is st
 	})
 	releaseProvenance()
 	const response = await responding
-	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response).toMatchObject({
 		selectedPackage: expect.objectContaining({
 			id: 'pkg-1',
 			publishedVersion: '1.2.3',

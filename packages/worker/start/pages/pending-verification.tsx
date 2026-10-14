@@ -1,10 +1,11 @@
 /** @jsxImportSource @emotion/react */
+import { fetchSessionInfo } from '../session-info.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useEffect, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
-import { fetchSessionInfo } from '#client/session.ts'
+
 import { resolveContinueVerificationFeedback } from '#client/routes/pending-verification-continue.ts'
 import { resolvePostVerificationRedirect } from '#client/routes/pending-verification-path.ts'
 import { buildAuthLink } from '#client/auth-links.ts'

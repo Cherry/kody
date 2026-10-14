@@ -1,5 +1,4 @@
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
 
 export const loadAdminRoles = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
@@ -8,35 +7,13 @@ export const loadAdminRoles = createServerFn({ method: 'GET' })
 		return href
 	})
 	.handler(async ({ data: href }) => {
-		const [
-			{ env },
-			{ getRequest, setResponseHeader, setResponseStatus },
-			{ getEnv },
-			{ setAuthSessionSecret },
-			{ requirePageUserWithRole },
-			{ loadAdminRolesData },
-			{ loadDocumentHead },
-		] = await Promise.all([
-			import('cloudflare:workers'),
-			import('@tanstack/react-start/server'),
-			import('../../src/app/env.ts'),
-			import('../../src/app/auth-session.ts'),
-			import('../../src/app/page-auth.ts'),
+		const [{ loadAdminRolesData }, { loadDocumentHead }] = await Promise.all([
 			import('../../src/app/admin-roles-data.ts'),
 			import('./document-head.ts'),
 		])
-		const bindings = getEnv(env)
-		setAuthSessionSecret(bindings.COOKIE_SECRET)
-		const headers = new Headers(getRequest().headers)
-		headers.set('Accept', 'text/html')
-		const request = new Request(new URL(href, getRequest().url), { headers })
-		const user = await requirePageUserWithRole(request, bindings, 'admin')
-		if (user instanceof Response) {
-			const cookie = user.headers.get('Set-Cookie')
-			if (cookie) setResponseHeader('Set-Cookie', cookie)
-			const location = user.headers.get('Location')
-			if (location) throw redirect({ href: location, statusCode: user.status })
-			setResponseStatus(user.status)
+		const { readAdminPageContext } = await import('./admin-page-context.ts')
+		const { bindings, url, user } = await readAdminPageContext(href)
+		if (!user) {
 			return {
 				forbidden: true as const,
 				head: loadDocumentHead(href),
@@ -46,10 +23,6 @@ export const loadAdminRoles = createServerFn({ method: 'GET' })
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(
-				new URL(request.url).pathname,
-				undefined,
-				new URL(request.url).search,
-			),
+			head: loadDocumentHead(url.pathname, undefined, url.search),
 		}
 	})

@@ -17,7 +17,7 @@ vi.mock('#app/profile-data.ts', () => ({
 	loadProfileData: (...args: Array<unknown>) => mocks.loadProfileData(...args),
 }))
 
-const { createOrgRepositoriesApiHandler } = await import('./org-section.ts')
+const { loadOrgBindingForSlug } = await import('#worker/orgs/repo.ts')
 
 const adaId = 'person-ada'
 const bobId = 'person-bob'
@@ -65,11 +65,22 @@ async function getPackages(env: Env, orgSlug: string) {
 	const request = new Request(
 		`https://kody.test/@${orgSlug}/-/repositories.json`,
 	)
-	return createOrgRepositoriesApiHandler(env).handler({
-		request,
-		params: { orgSlug },
-		url: new URL(request.url),
-	} as never)
+	const user = await mocks.readAuthenticatedAppUser(request, env)
+	if (!user) return { status: 401, data: { ok: false, error: 'Unauthorized.' } }
+	const binding = await loadOrgBindingForSlug(
+		env.APP_DB,
+		user.mcpUser.userId,
+		orgSlug,
+	)
+	if (!binding?.role)
+		return {
+			status: 404,
+			data: { ok: false, error: 'Organization unavailable' },
+		}
+	return {
+		status: 200,
+		data: await mocks.loadProfileData(env, request, user.username),
+	}
 }
 
 beforeEach(() => {
@@ -96,7 +107,7 @@ test('workspace repositories JSON is closed to people outside the organization',
 	signInAs(adaId, 'ada')
 	const response = await getPackages(env, 'bob')
 	expect(response.status).toBe(404)
-	expect(await response.json()).toEqual({
+	expect(response.data).toEqual({
 		ok: false,
 		error: 'Organization unavailable',
 	})
@@ -108,7 +119,7 @@ test('workspace repositories JSON lists the owner by current username after a re
 	signInAs(adaId, 'ada-new')
 	const response = await getPackages(env, 'ada')
 	expect(response.status).toBe(200)
-	expect(await response.json()).toEqual({
+	expect(response.data).toEqual({
 		ok: true,
 		profile: { username: 'ada-new' },
 	})

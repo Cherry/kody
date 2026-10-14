@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { decideWebhookApply } from '#start/server/connect'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -23,7 +24,6 @@ import {
 	pageTitleCss,
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
-import { routes } from '#universal/routes.ts'
 
 const pageCss: CSSObject = {
 	...stackedPageCss,
@@ -59,16 +59,6 @@ const metaListCss: CSSObject = {
 	overflowWrap: 'anywhere' as const,
 }
 
-function buildApproveApplyApiPath(href: string) {
-	const pageUrl = new URL(href, 'http://localhost')
-	const apiUrl = new URL(
-		routes.accountWebhooksApproveApplyApi.href(),
-		'http://localhost',
-	)
-	apiUrl.search = pageUrl.search
-	return `${apiUrl.pathname}${apiUrl.search}`
-}
-
 export function ConnectWebhookApplyRoute({
 	initialData,
 }: {
@@ -92,17 +82,14 @@ export function ConnectWebhookApplyRoute({
 			invalidate: typeof invalidatePages
 			queryKey: ReturnType<typeof connectWebhookApplyQuery>['queryKey']
 		}) => {
-			const response = await fetch(buildApproveApplyApiPath(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			const search = new URL(href, 'https://kody.local').searchParams
+			return decideWebhookApply({
+				data: {
+					action,
+					handle: search.get('handle') ?? '',
+					fingerprint: search.get('fingerprint') ?? '',
 				},
-				body: JSON.stringify({ action }),
 			})
-			if (response.status === 401)
-				throw new Error('Sign in again to process this approval.')
-			return (await response.json()) as ConnectWebhookApplyLoaderData
 		},
 		onSuccess: async (payload, input) => {
 			await queryClient.cancelQueries({

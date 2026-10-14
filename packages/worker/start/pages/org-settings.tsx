@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import {
+	updateOrganizationSettings,
+	saveOrganizationAvatar,
+} from '#start/server/org-settings-mutations'
 import { type CSSObject } from '@emotion/react'
 import { useRef, useState } from 'react'
 import {
@@ -87,43 +91,29 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
 		},
 		mutationFn: async ({ input, slug }: SettingsSubmission) => {
-			const args = { orgSlug: slug }
-			const url =
-				input.kind === 'profile'
-					? routes.orgSettingsPost.href(args)
-					: input.kind === 'delete'
-						? routes.orgSettingsDeletePost.href(args)
-						: routes.orgSettingsAvatarPost.href(args)
-			const form = new FormData()
-			if (input.kind === 'avatar') form.set('avatar', input.file)
-			const response = await fetch(url, {
-				method: 'POST',
-				credentials: 'include',
-				headers:
-					input.kind === 'avatar'
-						? { Accept: 'application/json' }
-						: {
-								Accept: 'application/json',
-								'Content-Type': 'application/json',
-							},
-				body:
-					input.kind === 'avatar'
-						? form
-						: JSON.stringify(
-								input.kind === 'profile'
-									? { displayName: input.displayName }
-									: input.kind === 'delete'
-										? { confirmation: input.confirmation }
-										: { remove: true },
-							),
-			})
-			const payload = (await response.json()) as OrgSettingsLoaderData & {
-				error?: string
-				redirectTo?: string
+			if (input.kind === 'avatar') {
+				const form = new FormData()
+				form.set('orgSlug', slug)
+				form.set('avatar', input.file)
+				return saveOrganizationAvatar({ data: form }) as Promise<OrgSettingsLoaderData & {redirectTo?:string}>
 			}
-			if (!response.ok || !payload.ok)
-				throw new Error(payload.error || 'Unable to save settings.')
-			return payload
+			return updateOrganizationSettings({
+				data: {
+					orgSlug: slug,
+					kind:
+						input.kind === 'profile'
+							? 'profile'
+							: input.kind === 'delete'
+								? 'delete'
+								: 'remove-avatar',
+					body:
+						input.kind === 'profile'
+							? { displayName: input.displayName }
+							: input.kind === 'delete'
+								? { confirmation: input.confirmation }
+								: { remove: true },
+				},
+			}) as Promise<OrgSettingsLoaderData & { redirectTo?: string }>
 		},
 		onSuccess: async (payload, submitted) => {
 			await client.cancelQueries({ queryKey: submitted.queryKey, exact: true })

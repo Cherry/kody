@@ -29,6 +29,8 @@ import {
 	type OrgSwitcherEntry,
 } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { signOut } from '#start/server/security-mutations'
 import {
 	colors,
 	radius,
@@ -92,16 +94,29 @@ function renderIconWell(name: IconName) {
 	)
 }
 
-function renderLogoutRow() {
+function LogoutRow() {
+	const queryClient = useQueryClient()
+	const mutation = useMutation({
+		mutationFn: () => signOut(),
+		onSuccess: async () => {
+			await queryClient.cancelQueries()
+			queryClient.clear()
+			window.location.assign('/login')
+		},
+	})
 	return (
 		<form
 			key="logout"
 			method="post"
-			action={routes.logout.href()}
+			onSubmit={(event) => {
+				event.preventDefault()
+				mutation.mutate()
+			}}
 			css={{ margin: 0, display: 'grid' }}
 		>
 			<button
 				type="submit"
+				disabled={mutation.isPending}
 				data-testid="org-switcher-logout"
 				css={switcherButtonRowCss}
 			>
@@ -110,6 +125,7 @@ function renderLogoutRow() {
 					<span css={switcherRowLabelCss}>Log out</span>
 				</span>
 			</button>
+			{mutation.error ? <p role="alert">{mutation.error.message}</p> : null}
 		</form>
 	)
 }
@@ -530,7 +546,7 @@ function renderAccountGroup(input: {
 		>
 			{input.heading ? <p css={switcherEyebrowCss}>Your account</p> : null}
 			{accountRows(input).map(renderSwitcherRow)}
-			{renderLogoutRow()}
+			<LogoutRow key="logout" />
 		</div>
 	)
 }

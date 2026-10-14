@@ -23,9 +23,9 @@ export function getTurnstileSiteKey(
 
 export type PublicFormProtectionResult =
 	| { ok: true }
-	| { ok: false; response: Response }
+	| { ok: false; error: string }
 
-export async function verifyPublicFormProtection(input: {
+export async function checkPublicFormProtection(input: {
 	env: Pick<Env, 'TURNSTILE_SITE_KEY' | 'TURNSTILE_SECRET_KEY'>
 	request: Request
 	body: PublicFormBody
@@ -33,10 +33,7 @@ export async function verifyPublicFormProtection(input: {
 	if (readTrimmedString(input.body, honeypotFieldName)) {
 		return {
 			ok: false,
-			response: Response.json(
-				{ error: 'Unable to submit this form.' },
-				{ status: 400 },
-			),
+			error: 'Unable to submit this form.',
 		}
 	}
 
@@ -51,10 +48,7 @@ export async function verifyPublicFormProtection(input: {
 	if (!token) {
 		return {
 			ok: false,
-			response: Response.json(
-				{ error: 'Please complete the human verification challenge.' },
-				{ status: 400 },
-			),
+			error: 'Please complete the human verification challenge.',
 		}
 	}
 
@@ -103,9 +97,18 @@ export async function verifyPublicFormProtection(input: {
 
 	return {
 		ok: false,
-		response: Response.json(
-			{ error: 'Human verification failed. Please try again.' },
-			{ status: 400 },
-		),
+		error: 'Human verification failed. Please try again.',
 	}
+}
+
+export async function verifyPublicFormProtection(
+	input: Parameters<typeof checkPublicFormProtection>[0],
+) {
+	const result = await checkPublicFormProtection(input)
+	return result.ok
+		? result
+		: {
+				ok: false as const,
+				response: Response.json({ error: result.error }, { status: 400 }),
+			}
 }

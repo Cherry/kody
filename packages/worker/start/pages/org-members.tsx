@@ -1,22 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { type CSSObject } from '@emotion/react'
-import { useState } from 'react'
-import { type QueryKey } from '@tanstack/react-query'
-import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountActionsCss,
-	accountFieldCss,
-	accountFieldLabelCss,
-	accountFieldNoteCss,
-	accountInputCss,
-} from './account-management-components.tsx'
-import { OrgMembersInviteLinks } from './org-members-invite-links.tsx'
-import { renderIcon } from '../components/icon.tsx'
-import { UserAvatar } from '../components/user-avatar.tsx'
+import { type OrgPeopleAction } from '#start/server/org-mutations'
 import {
 	type OrgMembersLoaderData,
 	type OrgMemberView,
@@ -34,8 +17,26 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import { useOrgPeopleMutation } from './org-people-mutation.ts'
+import { type CSSObject } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
+import { useState } from 'react'
+import { renderIcon } from '../components/icon.tsx'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
+import { UserAvatar } from '../components/user-avatar.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+	accountActionsCss,
+	accountFieldCss,
+	accountFieldLabelCss,
+	accountFieldNoteCss,
+	accountInputCss,
+	AccountManagementMessage,
+	AccountManagementPanel,
+	AccountManagementShell,
+	AccountPageHeader,
+} from './account-management-components.tsx'
+import { OrgMembersInviteLinks } from './org-members-invite-links.tsx'
+import { useOrgPeopleMutation } from './org-people-mutation.ts'
 const memberRoles = ['owner', 'member', 'billing'] as const
 function memberName(member: OrgMemberView) {
 	return (
@@ -68,20 +69,24 @@ function OrgMembersContent({
 		[confirmed, setConfirmed] = useState<string | null>(null),
 		[inviteRevision, setInviteRevision] = useState(0)
 	const args = { orgSlug: data.org.slug },
-		inviteHref = routes.orgMembersInvitePost.href(args),
-		roleHref = routes.orgMembersRolePost.href(args)
+		inviteHref = 'memberInvite',
+		roleHref = 'memberRole'
 	const ownerCount = data.members.filter(
 		(member) => member.role === 'owner',
 	).length
-	function post(href: string, body: Record<string, unknown>, success: string) {
+	function post(
+		action: OrgPeopleAction,
+		body: Record<string, unknown>,
+		success: string,
+	) {
 		const active = capture()
 		setMessage(null)
 		mutation.mutate(
-			{ href, body },
+			{ action, body },
 			{
 				onSuccess: (result) => {
 					if (!active()) return
-					if (href === inviteHref) {
+					if (action === inviteHref) {
 						setInvitee('')
 						setInvitePrompt(result.invite?.prompt ?? null)
 					}
@@ -130,7 +135,7 @@ function OrgMembersContent({
 						)
 						const updatingRole =
 							mutation.isPending &&
-							mutation.variables?.href === roleHref &&
+							mutation.variables?.action === roleHref &&
 							mutation.variables.body.userId === member.userId
 						return (
 							<li key={member.userId} data-testid="org-member" css={rowItemCss}>
@@ -189,7 +194,7 @@ function OrgMembersContent({
 													}
 													setConfirmed(null)
 													post(
-														routes.orgMembersRemovePost.href(args),
+														'memberRemove',
 														{ userId: member.userId },
 														'Member removed.',
 													)
@@ -271,7 +276,8 @@ function OrgMembersContent({
 									css={getPillButtonCss({ size: 'sm' })}
 								>
 									{renderIcon('plus', { size: '1.05rem' })}
-									{mutation.isPending && mutation.variables?.href === inviteHref
+									{mutation.isPending &&
+									mutation.variables?.action === inviteHref
 										? 'Inviting…'
 										: 'Send invite'}
 								</button>

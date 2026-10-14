@@ -45,19 +45,8 @@ vi.mock('#worker/billing/credit-top-ups.ts', async (importOriginal) => {
 	}
 })
 
-const { createOrgUsageApiHandler, loadOrgUsagePageResult } =
-	await import('./org-usage.ts')
+const { loadOrgUsagePageResult } = await import('./org-usage.ts')
 
-function createOrgUsageHandler(env: Env) {
-	return {
-		async handler({ request }: { request: Request }) {
-			const user = await mocks.requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) return user
-			const result = await loadOrgUsagePageResult(env, request, user)
-			return result instanceof Response ? result : Response.json(result)
-		},
-	}
-}
 const now = '2026-01-01T00:00:00.000Z'
 
 /** Personal org per person, plus `acme` where Ada owns, Bob is a member, and Cara is billing. */
@@ -169,18 +158,21 @@ function signInAs(person: Person | null) {
 	)
 }
 
-function call(
-	createHandler: (env: Env) => { handler: (input: never) => unknown },
-	env: Env,
-	path: string,
-	init?: RequestInit,
-) {
-	const url = new URL(`https://example.com${path}`)
-	return createHandler(env).handler({
-		request: new Request(url, init),
-		params: {},
-		url,
-	} as never) as Promise<Response>
+async function call(env: Env, path: string, init?: RequestInit) {
+	const request = new Request(`https://example.com${path}`, init)
+	const user = await mocks.requireAuthenticatedPageUser(request, env)
+	const result =
+		user instanceof Response
+			? user
+			: await loadOrgUsagePageResult(env, request, user)
+	return result instanceof Response
+		? {
+				status: result.status,
+				headers: result.headers,
+				data: null,
+				error: await result.text(),
+			}
+		: { status: 200, headers: new Headers(), data: result, error: null }
 }
 
 beforeEach(async () => {
@@ -197,13 +189,12 @@ beforeEach(async () => {
 
 test('usage data is readable by owners and billing admins of the org in the URL', async () => {
 	const env = createEnv()
-	const getUsage = (slug: string) =>
-		call(createOrgUsageApiHandler, env, `/@${slug}/-/usage.json`)
+	const getUsage = (slug: string) => call(env, `/@${slug}/-/usage.json`)
 
 	signInAs('cara')
 	const billingAdmin = await getUsage('acme')
 	expect(billingAdmin.status).toBe(200)
-	expect(await billingAdmin.json()).toEqual({
+	expect(billingAdmin.data).toEqual({
 		ok: true,
 		org: {
 			id: 'org-acme',
@@ -224,7 +215,7 @@ test('usage data is readable by owners and billing admins of the org in the URL'
 	)
 
 	signInAs('ada')
-	expect(await (await getUsage('ada')).json()).toMatchObject({
+	expect((await getUsage('ada')).data).toMatchObject({
 		org: { id: 'person-ada', slug: 'ada', personal: true },
 	})
 
@@ -233,18 +224,17 @@ test('usage data is readable by owners and billing admins of the org in the URL'
 	signInAs('dan')
 	expect((await getUsage('acme')).status).toBe(404)
 	signInAs(null)
-	expect((await getUsage('acme')).status).toBe(401)
+	expect((await getUsage('acme')).status).toBe(302)
 })
 
 test('the usage page mirrors the API access matrix', async () => {
 	const env = createEnv()
-	const getPage = (slug: string) =>
-		call(createOrgUsageHandler, env, `/@${slug}/-/usage`)
+	const getPage = (slug: string) => call(env, `/@${slug}/-/usage`)
 
 	signInAs('ada')
 	const owner = await getPage('acme')
 	expect(owner.status).toBe(200)
-	expect(await owner.json()).toMatchObject({
+	expect(owner.data).toMatchObject({
 		ok: true,
 		org: { id: 'org-acme', slug: 'acme', personal: false },
 	})
@@ -255,19 +245,18 @@ test('the usage page mirrors the API access matrix', async () => {
 	signInAs('bob')
 	const member = await getPage('acme')
 	expect(member.status).toBe(403)
-	expect(await member.text()).toContain('Only owners and billing admins')
+	expect(member.error).toContain('Only owners and billing admins')
 
 	signInAs('dan')
 	const outsider = await getPage('acme')
 	expect(outsider.status).toBe(404)
-	expect(await outsider.text()).toContain('Organization unavailable')
+	expect(outsider.error).toContain('Organization unavailable')
 })
 
 test('a confirmed Stripe return lands on the Credits section with the added notice', async () => {
 	const env = createEnv()
 	signInAs('ada')
 	const response = await call(
-		createOrgUsageHandler,
 		env,
 		'/@ada/-/usage?topup=success&session_id=cs_123',
 	)
@@ -291,11 +280,7 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 	mocks.applyCreditTopUpFromCheckoutSession.mockRejectedValueOnce(
 		new CreditTopUpError('not_paid', 'Not paid.'),
 	)
-	const notPaid = await call(
-		createOrgUsageHandler,
-		env,
-		'/@ada/-/usage?topup=success&session_id=cs_1',
-	)
+	const notPaid = await call(env, '/@ada/-/usage?topup=success&session_id=cs_1')
 	expect(notPaid.headers.get('Location')).toBe(
 		'https://example.com/@ada/-/usage?error=not_paid#credits',
 	)
@@ -303,11 +288,7 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 	mocks.applyCreditTopUpFromCheckoutSession.mockRejectedValueOnce(
 		new CreditTopUpError('user_not_found', 'Missing.'),
 	)
-	const unknown = await call(
-		createOrgUsageHandler,
-		env,
-		'/@ada/-/usage?topup=success&session_id=cs_2',
-	)
+	const unknown = await call(env, '/@ada/-/usage?topup=success&session_id=cs_2')
 	expect(unknown.headers.get('Location')).toBe(
 		'https://example.com/@ada/-/usage?error=topup_failed#credits',
 	)
@@ -320,11 +301,7 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 test('notice and error codes map to messages; unknown and prototype keys map to nothing', async () => {
 	const env = createEnv()
 	signInAs('ada')
-	await call(
-		createOrgUsageHandler,
-		env,
-		'/@ada/-/usage?credits=added&error=not_paid',
-	)
+	await call(env, '/@ada/-/usage?credits=added&error=not_paid')
 	expect(mocks.loadAccountUsageData).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			notice: expect.any(String),
@@ -332,11 +309,7 @@ test('notice and error codes map to messages; unknown and prototype keys map to 
 		}),
 	)
 
-	await call(
-		createOrgUsageHandler,
-		env,
-		'/@ada/-/usage?credits=__proto__&error=constructor',
-	)
+	await call(env, '/@ada/-/usage?credits=__proto__&error=constructor')
 	expect(mocks.loadAccountUsageData).toHaveBeenLastCalledWith(
 		expect.objectContaining({ notice: undefined, error: undefined }),
 	)

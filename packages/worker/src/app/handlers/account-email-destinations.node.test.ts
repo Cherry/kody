@@ -1,18 +1,18 @@
-import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
-import { DatabaseSync } from 'node:sqlite'
-import { beforeAll, expect, test } from 'vitest'
 import {
 	createAuthCookie,
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
+import { identityEmailDestinationId } from '#universal/email-destinations.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { consoleWarn } from '#worker/test-support/console-spies.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
-import { identityEmailDestinationId } from '#universal/email-destinations.ts'
-import { createAccountEmailDestinationsHandler } from './account-email-destinations.ts'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { beforeAll, expect, test } from 'vitest'
+import { testAccountEmailDestinationsHandler } from './account-email-destinations.test-support.ts'
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 
@@ -56,14 +56,14 @@ function createAppEnv(db: D1Database) {
 		APP_BASE_URL: 'http://example.com',
 		COOKIE_SECRET: testCookieSecret,
 		SENTRY_ENVIRONMENT: 'test',
-	} as unknown as Parameters<typeof createAccountEmailDestinationsHandler>[0]
+	} as unknown as Parameters<typeof testAccountEmailDestinationsHandler>[0]
 }
 
 async function runHandler(
-	handler: ReturnType<typeof createAccountEmailDestinationsHandler>,
+	handler: ReturnType<typeof testAccountEmailDestinationsHandler>,
 	request: Request,
 ) {
-	return handler.handler({
+	return handler.execute({
 		request,
 		url: new URL(request.url),
 		params: {},
@@ -95,7 +95,7 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 	consoleWarn.mockImplementation(() => {})
 	const { sqlite, db } = createMigratedDb()
 	await seedUser(sqlite)
-	const handler = createAccountEmailDestinationsHandler(createAppEnv(db))
+	const handler = testAccountEmailDestinationsHandler(createAppEnv(db))
 	const session = {
 		stableUserId: testStableUserIdFromEmail('owner@example.com'),
 		email: 'owner@example.com',
@@ -107,7 +107,7 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 		await createRequest({ session, method: 'GET' }),
 	)
 	expect(listed.status).toBe(200)
-	expect(await listed.json()).toMatchObject({
+	expect(listed.data).toMatchObject({
 		ok: true,
 		additionalLimit: 5,
 		additionalRemaining: 5,
@@ -131,7 +131,7 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 		}),
 	)
 	expect(added.status).toBe(200)
-	const addedBody = (await added.json()) as {
+	const addedBody = added.data as {
 		destinations: Array<{ email: string; verified: boolean }>
 		message: string
 	}
@@ -156,7 +156,7 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 		}),
 	)
 	expect(resent.status).toBe(200)
-	const resentBody = (await resent.json()) as { message: string }
+	const resentBody = resent.data as { message: string }
 	expect(resentBody.message).toContain('sent again')
 	expect(
 		sqlite
@@ -168,7 +168,7 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 
 	const { sqlite: unverifiedSqlite, db: unverifiedDb } = createMigratedDb()
 	await seedUser(unverifiedSqlite, { verified: false })
-	const unverifiedHandler = createAccountEmailDestinationsHandler(
+	const unverifiedHandler = testAccountEmailDestinationsHandler(
 		createAppEnv(unverifiedDb),
 	)
 	const unverified = await runHandler(

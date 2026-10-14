@@ -1,6 +1,6 @@
 import { type AdminCreditWalletSummary } from '#universal/loader-data.ts'
-import { afterEach, expect, test, vi } from 'vitest'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
+import { afterEach, expect, test, vi } from 'vitest'
 import {
 	adminCreditGrantOptions,
 	adminCreditWalletQuery,
@@ -19,7 +19,12 @@ function wallet(balanceMicroUsd: number): AdminCreditWalletSummary {
 		recent: [],
 	}
 }
-afterEach(() => vi.unstubAllGlobals())
+const { rpc } = vi.hoisted(() => ({ rpc: vi.fn() }))
+vi.mock('#start/server/admin-controls', () => ({
+	readAdminCreditWallet: vi.fn(),
+	grantAdminCredits: rpc,
+}))
+afterEach(() => rpc.mockReset())
 
 test('a grant finishing after selection and observer changes only reconciles the submitted wallet', async () => {
 	const client = new QueryClient()
@@ -28,15 +33,12 @@ test('a grant finishing after selection and observer changes only reconciles the
 	const switched = adminCreditWalletQuery('operator-b', 'user-a').queryKey
 	for (const key of [first, other, switched])
 		client.setQueryData(key, wallet(1))
-	let finish!: (response: Response) => void
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(
-			() =>
-				new Promise<Response>((resolve) => {
-					finish = resolve
-				}),
-		),
+	let finish!: (response: AdminCreditWalletSummary) => void
+	rpc.mockImplementation(
+		() =>
+			new Promise<AdminCreditWalletSummary>((resolve) => {
+				finish = resolve
+			}),
 	)
 	const reconcile = vi.fn(async () => {})
 	const observer = new MutationObserver(
@@ -49,9 +51,9 @@ test('a grant finishing after selection and observer changes only reconciles the
 		stableUserId: 'user-a',
 		amountCents: 100,
 	})
-	await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+	await vi.waitFor(() => expect(rpc).toHaveBeenCalledOnce())
 	stop()
-	finish(Response.json(wallet(2)))
+	finish(wallet(2))
 	await pending
 	expect(client.getQueryData(first)).toEqual(wallet(2))
 	expect(client.getQueryData(other)).toEqual(wallet(1))
@@ -64,12 +66,7 @@ test('a lost grant response invalidates the submitted wallet and usage without p
 	const client = new QueryClient()
 	const key = adminCreditWalletQuery('operator', 'user').queryKey
 	client.setQueryData(key, wallet(1))
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(async () => {
-			throw new Error('Connection lost')
-		}),
-	)
+	rpc.mockRejectedValue(new Error('Connection lost'))
 	const reconcile = vi.fn(async () => {})
 	const observer = new MutationObserver(
 		client,

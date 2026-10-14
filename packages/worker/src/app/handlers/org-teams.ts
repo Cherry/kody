@@ -1,25 +1,11 @@
-import { type Action } from 'remix/router'
 import { isSecureRequest } from '#app/auth-session.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import {
 	orgHasPermission,
 	resolveOrgManagementAccess,
 	type ManagedOrg,
 } from '#app/org-management-access.ts'
-import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
-import {
-	getUsernameFormatValidationError,
-	normalizeUsername,
-} from '#worker/identity/username.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import {
-	addTeamMember,
-	createTeam,
-	removeTeamMember,
-} from '#worker/orgs/access-writes.ts'
-import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
-import { listOrgMembers } from '#worker/orgs/org-members-list.ts'
-import { listTeamsWithMembers } from '#worker/orgs/org-teams-list.ts'
 import {
 	type OrgMemberView,
 	type OrgTeamMemberView,
@@ -28,7 +14,19 @@ import {
 } from '#universal/loader-data.ts'
 import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
 import { orgRoleLabel } from '#universal/org-pages.ts'
-import { type routes } from '#universal/routes.ts'
+import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
+import {
+	getUsernameFormatValidationError,
+	normalizeUsername,
+} from '#worker/identity/username.ts'
+import {
+	addTeamMember,
+	createTeam,
+	removeTeamMember,
+} from '#worker/orgs/access-writes.ts'
+import { orgAuditWriterFromRequest } from '#worker/orgs/org-audit.ts'
+import { listOrgMembers } from '#worker/orgs/org-members-list.ts'
+import { listTeamsWithMembers } from '#worker/orgs/org-teams-list.ts'
 
 export function withLastUsedOrg(
 	request: Request,
@@ -126,7 +124,7 @@ export async function loadOrgTeamsData(input: {
 }
 
 function personalOrgTeamWriteResponse() {
-	return jsonResponse(
+	return operationResult(
 		{
 			ok: false,
 			error:
@@ -136,199 +134,176 @@ function personalOrgTeamWriteResponse() {
 	)
 }
 
-async function readJsonObject(request: Request) {
+export async function readJsonObject(request: Request) {
 	const body = await request.json().catch(() => null)
 	if (!body || typeof body !== 'object') return null
 	return body as Record<string, unknown>
 }
+export async function mutateOrgTeamsCreate({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'team:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-export function createOrgTeamsApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'team:read',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			return jsonResponse(
-				await loadOrgTeamsData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgTeamsApi>
+	const slugRaw = typeof body?.slug === 'string' ? body.slug : ''
+	const nameRaw = typeof body?.name === 'string' ? body.name : ''
+	const description =
+		typeof body?.description === 'string' ? body.description : undefined
+	const slug = normalizeUsername(slugRaw)
+	const formatError = getUsernameFormatValidationError(slug)
+	if (formatError) {
+		return operationResult({ ok: false, error: formatError }, 400)
+	}
+	const name = nameRaw.trim() || slug
+	if (!name) {
+		return operationResult(
+			{ ok: false, error: 'A team name is required.' },
+			400,
+		)
+	}
+	try {
+		await createTeam({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			slug,
+			name,
+			description,
+			createdByUserId: user.mcpUser.userId,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message : 'Unable to create that team.'
+		const conflict =
+			/UNIQUE|unique|already exists/i.test(message) ||
+			message.includes('constraint')
+		return operationResult(
+			{
+				ok: false,
+				error: conflict ? 'A team with that handle already exists.' : message,
+			},
+			conflict ? 409 : 400,
+		)
+	}
+	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
 }
+export async function mutateOrgTeamsMemberAdd({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'team:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-export function createOrgTeamsCreatePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'team:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgTeamWriteResponse()
-			const body = await readJsonObject(request)
-			const slugRaw = typeof body?.slug === 'string' ? body.slug : ''
-			const nameRaw = typeof body?.name === 'string' ? body.name : ''
-			const description =
-				typeof body?.description === 'string' ? body.description : undefined
-			const slug = normalizeUsername(slugRaw)
-			const formatError = getUsernameFormatValidationError(slug)
-			if (formatError) {
-				return jsonResponse({ ok: false, error: formatError }, 400)
-			}
-			const name = nameRaw.trim() || slug
-			if (!name) {
-				return jsonResponse(
-					{ ok: false, error: 'A team name is required.' },
-					400,
-				)
-			}
-			try {
-				await createTeam({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					slug,
-					name,
-					description,
-					createdByUserId: user.mcpUser.userId,
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : 'Unable to create that team.'
-				const conflict =
-					/UNIQUE|unique|already exists/i.test(message) ||
-					message.includes('constraint')
-				return jsonResponse(
-					{
-						ok: false,
-						error: conflict
-							? 'A team with that handle already exists.'
-							: message,
-					},
-					conflict ? 409 : 400,
-				)
-			}
-			return jsonResponse(
-				await loadOrgTeamsData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgTeamsCreatePost>
+	const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
+	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	if (!teamId || !userId) {
+		return operationResult(
+			{ ok: false, error: 'A team and member are required.' },
+			400,
+		)
+	}
+	try {
+		await addTeamMember({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			teamId,
+			userId,
+			addedByUserId: user.mcpUser.userId,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: 'Unable to add that person to the team.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
 }
+export async function mutateOrgTeamsMemberRemove({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'team:delete',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-export function createOrgTeamsMemberAddPostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'team:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgTeamWriteResponse()
-			const body = await readJsonObject(request)
-			const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
-			const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
-			if (!teamId || !userId) {
-				return jsonResponse(
-					{ ok: false, error: 'A team and member are required.' },
-					400,
-				)
-			}
-			try {
-				await addTeamMember({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					teamId,
-					userId,
-					addedByUserId: user.mcpUser.userId,
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to add that person to the team.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-			return jsonResponse(
-				await loadOrgTeamsData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgTeamsMemberAddPost>
-}
-
-export function createOrgTeamsMemberRemovePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'team:delete',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgTeamWriteResponse()
-			const body = await readJsonObject(request)
-			const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
-			const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
-			if (!teamId || !userId) {
-				return jsonResponse(
-					{ ok: false, error: 'A team and member are required.' },
-					400,
-				)
-			}
-			try {
-				await removeTeamMember({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					teamId,
-					userId,
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to remove that person from the team.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-			return jsonResponse(
-				await loadOrgTeamsData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgTeamsMemberRemovePost>
+	const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
+	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	if (!teamId || !userId) {
+		return operationResult(
+			{ ok: false, error: 'A team and member are required.' },
+			400,
+		)
+	}
+	try {
+		await removeTeamMember({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			teamId,
+			userId,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: 'Unable to remove that person from the team.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
 }

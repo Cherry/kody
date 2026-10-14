@@ -1,11 +1,15 @@
 /** @jsxImportSource @emotion/react */
+import {
+	startCreditTopUp,
+	saveCreditSettings,
+} from '#start/server/billing-mutations'
+/** @jsxImportSource @emotion/react */
 import { type QueryKey } from '@tanstack/react-query'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	accountActionsCss,
 	accountFieldCss,
@@ -17,7 +21,7 @@ import {
 } from './account-management-components.tsx'
 import { renderCreditsDebitRateCard } from './account-credits-rate-card.tsx'
 import { RecordTable } from './record-table.tsx'
-import { requestProCheckout } from '#client/routes/billing-checkout.ts'
+import { requestProCheckout } from '../billing-checkout.ts'
 import {
 	formatCentsForInput,
 	formatSignedMicroUsd,
@@ -40,7 +44,6 @@ import {
 	type AccountUsageLoaderData,
 } from '#universal/loader-data.ts'
 import { parseOrgBillingPath } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	descriptionCss,
@@ -51,12 +54,6 @@ import {
 
 /** Anchor for `/account/usage#credits` (`accountCreditsPath`). */
 const creditsSectionId = 'credits'
-const topUpApiPath = routes.accountCreditsTopUpPost.href()
-const settingsApiPath = routes.accountCreditsSettingsPost.href()
-const jsonRequestHeaders = {
-	Accept: 'application/json',
-	'Content-Type': 'application/json',
-}
 
 type SettingsDraft = {
 	autoRefillEnabled: boolean
@@ -109,7 +106,10 @@ export function AccountUsageCreditsSection(
 	const settingsMutation = usePageResponseMutation<AccountUsageLoaderData>(
 		props.queryKey,
 		'loadUsagePage',
-		settingsApiPath,
+		(body) =>
+			saveCreditSettings({
+				data: { orgSlug: props.orgSlug, body },
+			}) as Promise<AccountUsageLoaderData>,
 		{ dependencies: ['loadBillingPage'] },
 	)
 	const [appliedCredits, setAppliedCredits] = useState(props.credits)
@@ -152,31 +152,12 @@ export function AccountUsageCreditsSection(
 		setTopUpPendingCents(amount.cents)
 		setMessage(null)
 		try {
-			const response = await fetch(topUpApiPath, {
-				method: 'POST',
-				headers: jsonRequestHeaders,
-				credentials: 'include',
-				body: JSON.stringify({ amountCents: amount.cents }),
+			const result = await startCreditTopUp({
+				data: { orgSlug: props.orgSlug, body: { amountCents: amount.cents } },
 			})
 			if (!isCurrent()) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const result = await readJson<{
-				ok?: boolean
-				url?: string
-				error?: string
-			}>(response)
-			if (!isCurrent()) return
-			if (response.ok && result?.ok && typeof result.url === 'string') {
-				window.location.assign(result.url)
-				return
-			}
-			showMessage(
-				result?.error || 'Unable to start checkout. Try again shortly.',
-				'error',
-			)
+			window.location.assign(result.url)
+			return
 		} catch (error) {
 			if (!isCurrent()) return
 			showMessage(

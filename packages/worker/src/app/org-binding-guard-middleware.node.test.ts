@@ -11,7 +11,7 @@ import {
 } from './auth-session.ts'
 import { createOrgBindingGuardMiddleware } from './org-binding-guard-middleware.ts'
 import { isOrgBoundPath } from './org-request-binding.ts'
-import { createBackendRouter } from '../../start/backend-router.ts'
+import { createHttpRequestHandler } from '../../start/http-entry.ts'
 
 const origin = 'https://kody.test'
 const cookieSecret = 'LOCAL_TEST_COOKIE_SECRET_32_CHARS_MINIMUM'
@@ -24,35 +24,15 @@ const adaPersonId = testStableUserIdFromEmail('ada@example.com')
  * fails on entries that no longer match a route.
  */
 const personScopedAccountRoutes: Record<string, string> = {
-	accountConnectionsApi: 'sign-in providers belong to the person',
-	accountConnectionsApiPost: 'sign-in providers belong to the person',
-	accountEmailChange: 'the login email belongs to the person',
-	accountEmailClaimRelease: 'inbox claims belong to the person',
-	accountEmailDestinationsApi: 'notification addresses belong to the person',
-	accountEmailDestinationsApiPost:
-		'notification addresses belong to the person',
-	accountBillingCancellationFeedbackPost: 'feedback from the person',
 	accountMcpServerLogo:
-		'path has no org; handler binds via Referer or request org',
+		'path has no org; handler binds via explicit server owner',
 	accountMcpServersOauthCallback: 'OAuth state carries the server owner',
-	accountPackagesApi:
-		'no per-package authz; teams use /@slug/-/repositories.json',
-	accountPackagesApiPost:
-		'no per-package authz; teams use /@slug/-/repositories.json',
-	accountPackageDetail: 'package authz, not request org',
-	accountPackageApprovePublish: 'package authz, not request org',
-	accountPackageApprovePublishApi: 'package authz, not request org',
-	accountPackageApproveCapabilities: 'package authz, not request org',
-	accountPackageApproveCapabilitiesApi: 'package authz, not request org',
-	accountPackageFiles: 'package authz, not request org',
-	accountPackageFilesApi: 'package authz, not request org',
-	accountWebhooksApproveApplyApi: 'approval link carries the webhook owner',
-	accountWebhooksApproveApplyApiPost: 'approval link carries the webhook owner',
-	accountWaitingClickPost: 'click analytics for the person',
-	// Legacy redirects to the personal org's `/@:slug/-/usage` page.
-	accountUsage: 'redirects to the personal org usage page',
-	accountCredentials: 'redirects to the signup org Credentials list',
-	accountUsageApi: 'redirects to the personal org usage JSON',
+	accountPackageDetail: 'package authorization checks its owner',
+	accountPackageApprovePublish: 'package authorization checks its owner',
+	accountPackageApproveCapabilities: 'package authorization checks its owner',
+	accountPackageFiles: 'package authorization checks its owner',
+	accountUsage: 'redirects to personal org usage',
+	accountCredentials: 'redirects to signup org credentials',
 }
 
 type RouteEntry = {
@@ -109,7 +89,6 @@ function orgBoundRoutes(entries: Array<RouteEntry>) {
 const legacyOrgListRedirectRoutes = new Set([
 	'orgConnections',
 	'orgPackages',
-	'orgPackagesApi',
 ])
 
 test('every org-scoped route in the route table is bound to its org', () => {
@@ -228,10 +207,12 @@ function deniedRequest(entry: RouteEntry, method: string, cookie: string) {
 
 test('every org-scoped route 404s for an org the person cannot use', async () => {
 	const { env } = createEnv()
-	const router = createBackendRouter(env, async (_request, failure) => {
-		expect(failure?.status).toBe(404)
-		return new Response('not found', { status: 404 })
-	})
+	const handle = createHttpRequestHandler(
+		async (_request, _env, _oauth, failure) => {
+			expect(failure?.status).toBe(404)
+			return new Response('not found', { status: 404 })
+		},
+	)
 	const cookie = await adaCookie()
 	const bound = orgBoundRoutes(routeEntries())
 	expect(bound.map(({ name }) => name)).toEqual(
@@ -240,23 +221,12 @@ test('every org-scoped route 404s for an org the person cannot use', async () =>
 			'orgWorkflows',
 			'orgWebhooks',
 			'orgMcpServers',
-			'orgMcpServerAuthorizePost',
-			'orgSettingsPost',
-			'accountMemoriesApi',
-			'accountMemoriesApiPost',
-			'accountMemoriesExport',
-			'accountWorkflowsApiPost',
-			'accountWebhooksApi',
-			'accountMcpServersApiPost',
-			'accountSecretsApiPost',
-			'accountJobsApiPost',
-			'accountConnectedAgentsApiPost',
 		]),
 	)
 	const failures: Array<string> = []
 	for (const entry of bound) {
 		for (const method of methodsFor(entry.method)) {
-			const response = await router.fetch(deniedRequest(entry, method, cookie))
+			const response = await handle(deniedRequest(entry, method, cookie), env)
 			if (response.status !== 404) {
 				failures.push(
 					`${entry.name} ${method} ${entry.href}: ${response.status}`,

@@ -1,9 +1,9 @@
+import { updateSecrets } from '#start/server/account-mutations'
 import {
 	normalizeProviderKey,
 	safeParseHost,
 } from '@kody-internal/shared/url-hosts.ts'
 import { type ConnectOauthLoaderData } from '#universal/loader-data.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { isConnectOauthCallbackUrl } from '#universal/oauth-connect.ts'
 import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
 import { colors, typography } from '#universal/styles/tokens.ts'
@@ -22,7 +22,6 @@ import {
 	type ConnectOauthQueryConfig,
 	createCodeChallenge,
 	createCodeVerifier,
-	formatOAuthExchangeFailure,
 	isSafeExternalUrl,
 	normalizeHosts,
 	parseAllowedHosts,
@@ -43,8 +42,7 @@ export type OAuthExchangeResult =
 	| { ok: false; status: number; error: string }
 
 export type SaveOauthAppResult =
-	| { ok: true; clientId: string }
-	| { ok: false; error: string }
+	{ ok: true; clientId: string } | { ok: false; error: string }
 
 export type OAuthCallback =
 	| { kind: 'none' }
@@ -52,8 +50,7 @@ export type OAuthCallback =
 	| { kind: 'success'; code: string; state: string | null }
 
 export type ConnectOauthQueryConfigResult =
-	| { ok: true; value: ConnectOauthQueryConfig }
-	| { ok: false; error: string }
+	{ ok: true; value: ConnectOauthQueryConfig } | { ok: false; error: string }
 
 export type ConnectOauthChooserOption = NonNullable<
 	ConnectOauthLoaderData['chooser']
@@ -71,18 +68,6 @@ const reservedAuthorizeParams = new Set([
 	'scope',
 	'state',
 ])
-
-export function buildConnectOauthIntegrationLookupHref(
-	providerKey: string,
-	searchParams: URLSearchParams,
-) {
-	const params = new URLSearchParams({ name: providerKey })
-	const platform = searchParams.get('platform')?.trim()
-	if (platform) params.set('platform', platform)
-	const app = searchParams.get('app')?.trim()
-	if (app) params.set('app', app)
-	return `/account/integrations.json?${params.toString()}`
-}
 
 /**
  * Destination org for `/connect/oauth`. The redirect URI stays org-less; the
@@ -154,28 +139,13 @@ export async function approveConnectOauthHosts(input: {
 		[...new Set(input.secretNames)].join(','),
 	)
 	requestUrl.searchParams.set('hosts', [...new Set(input.hosts)].join(','))
-	const response = await fetch(`${requestUrl.pathname}${requestUrl.search}`, {
-		method: 'POST',
-		...connectOauthAccountFetchInit(input.orgSlug),
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
+	await updateSecrets({
+		data: {
+			orgSlug: input.orgSlug ?? undefined,
+			search: requestUrl.search,
+			body: { action: 'approve' },
 		},
-		body: JSON.stringify({ action: 'approve' }),
 	})
-	if (redirectToLoginOn401(response)) {
-		return { ok: false, error: 'Session expired.' }
-	}
-	const payload = (await response.json().catch(() => null)) as {
-		ok?: boolean
-		error?: string
-	} | null
-	if (!response.ok || payload?.ok !== true) {
-		return {
-			ok: false,
-			error: payload?.error || 'Unable to process approval.',
-		}
-	}
 	return { ok: true }
 }
 
@@ -195,73 +165,38 @@ export async function saveConnectOauthConnection(input: {
 	| { ok: false; error: string }
 > {
 	const { config, orgSlug } = input
-	const response = await fetch('/account/secrets.json', {
-		method: 'POST',
-		...connectOauthAccountFetchInit(orgSlug),
-		headers: {
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
+	const payload = (await updateSecrets({
+		data: {
+			orgSlug: orgSlug ?? undefined,
+			body: {
+				action: 'connect_oauth',
+				provider: config.provider,
+				callbackUrl: input.callbackUrl,
+				...(config.platformAppSlug
+					? { platformAppSlug: config.platformAppSlug }
+					: {}),
+				authorizeUrl: config.authorizeUrl,
+				tokenUrl: config.tokenUrl,
+				apiBaseUrl: config.apiBaseUrl,
+				scopes: config.scopes,
+				scopeSeparator: config.scopeSeparator,
+				extraAuthorizeParams: config.extraAuthorizeParams,
+				flow: config.flow,
+				usePkce: config.usePkce,
+				tokenExchangeStyle: config.tokenExchangeStyle,
+				clientId: config.clientId,
+				allowedHosts: config.allowedHosts,
+				tokenPayload: input.tokenPayload,
+			},
 		},
-		body: JSON.stringify({
-			action: 'connect_oauth',
-			provider: config.provider,
-			callbackUrl: input.callbackUrl,
-			...(config.platformAppSlug
-				? { platformAppSlug: config.platformAppSlug }
-				: {}),
-			authorizeUrl: config.authorizeUrl,
-			tokenUrl: config.tokenUrl,
-			apiBaseUrl: config.apiBaseUrl,
-			scopes: config.scopes,
-			scopeSeparator: config.scopeSeparator,
-			extraAuthorizeParams: config.extraAuthorizeParams,
-			flow: config.flow,
-			usePkce: config.usePkce,
-			tokenExchangeStyle: config.tokenExchangeStyle,
-			clientId: config.clientId,
-			allowedHosts: config.allowedHosts,
-			tokenPayload: input.tokenPayload,
-		}),
-	})
-	if (redirectToLoginOn401(response)) {
-		return { ok: false, error: 'Session expired.' }
-	}
-	const payload = await response.json().catch(() => null)
-	if (!response.ok || payload?.ok !== true) {
-		return {
-			ok: false,
-			error: payload?.error || 'Unable to save OAuth tokens.',
-		}
-	}
+	})) as Record<string, unknown>
+
 	return {
 		ok: true,
 		accessTokenSaved: payload.accessTokenSaved === true,
 		refreshTokenSaved: payload.refreshTokenSaved === true,
 		hostApprovalLinks: payload.hostApprovalLinks,
 		nextSteps: payload.nextSteps,
-	}
-}
-
-/**
- * Account JSON for connect OAuth binds the handoff org via Referer, the same
- * way `/connect/secret-set?org=` and org credentials pages do.
- */
-export function connectOauthAccountFetchInit(
-	orgSlug: string | null,
-	signal?: AbortSignal,
-): RequestInit {
-	if (!orgSlug) {
-		return {
-			headers: { Accept: 'application/json' },
-			credentials: 'include',
-			...(signal ? { signal } : {}),
-		}
-	}
-	return {
-		headers: { Accept: 'application/json' },
-		credentials: 'include',
-		referrer: orgAccountApiReferrer(`/@${orgSlug}/-/credentials`),
-		...(signal ? { signal } : {}),
 	}
 }
 
@@ -496,49 +431,24 @@ export async function exchangeConnectOauthCode(
 		}
 		params.set('code_verifier', verifier)
 	}
-	const response = await fetch('/account/secrets.json', {
-		method: 'POST',
-		...connectOauthAccountFetchInit(orgSlug),
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
+	const payload = (await updateSecrets({
+		data: {
+			orgSlug: orgSlug ?? undefined,
+			body: {
+				action: 'oauth_exchange',
+				tokenUrl: nextConfig.tokenUrl,
+				params: params.toString(),
+				flow: nextConfig.flow,
+				tokenExchangeStyle: nextConfig.tokenExchangeStyle,
+				provider: nextConfig.provider,
+				allowedHosts: nextConfig.allowedHosts,
+				...(nextConfig.platformAppSlug
+					? { platformAppSlug: nextConfig.platformAppSlug }
+					: {}),
+			},
 		},
-		body: JSON.stringify({
-			action: 'oauth_exchange',
-			tokenUrl: nextConfig.tokenUrl,
-			params: params.toString(),
-			flow: nextConfig.flow,
-			tokenExchangeStyle: nextConfig.tokenExchangeStyle,
-			provider: nextConfig.provider,
-			allowedHosts: nextConfig.allowedHosts,
-			...(nextConfig.platformAppSlug
-				? { platformAppSlug: nextConfig.platformAppSlug }
-				: {}),
-		}),
-	})
-	const text = await response.text()
-	let data: Record<string, unknown> | null = null
-	try {
-		data = JSON.parse(text)
-	} catch {
-		data = null
-	}
-	const failure = formatOAuthExchangeFailure({
-		status: response.status,
-		data,
-	})
-	if (failure.treatAsSessionExpired) {
-		window.location.assign('/login')
-		return { ok: false, status: 401, error: 'Session expired.' }
-	}
-	if (!response.ok || !data) {
-		return {
-			ok: false,
-			status: response.status,
-			error: failure.error,
-		}
-	}
-	return { ok: true, data, status: response.status }
+	})) as Record<string, unknown>
+	return { ok: true, data: payload, status: 200 }
 }
 
 export async function saveConnectOauthApp(
@@ -546,40 +456,33 @@ export async function saveConnectOauthApp(
 	clientSecret?: string,
 	orgSlug: string | null = null,
 ): Promise<SaveOauthAppResult> {
-	const response = await fetch('/account/secrets.json', {
-		method: 'POST',
-		...connectOauthAccountFetchInit(orgSlug),
-		headers: {
-			'Content-Type': 'application/json',
-			Accept: 'application/json',
+	const payload = (await updateSecrets({
+		data: {
+			orgSlug: orgSlug ?? undefined,
+			body: {
+				action: 'save_oauth_app',
+				provider: nextConfig.provider,
+				authorizeUrl: nextConfig.authorizeUrl,
+				tokenUrl: nextConfig.tokenUrl,
+				apiBaseUrl: nextConfig.apiBaseUrl,
+				flow: nextConfig.flow,
+				usePkce: nextConfig.usePkce,
+				tokenExchangeStyle: nextConfig.tokenExchangeStyle,
+				clientId: nextConfig.clientId,
+				...(clientSecret ? { clientSecret } : {}),
+				scopeSeparator: nextConfig.scopeSeparator,
+				extraAuthorizeParams: nextConfig.extraAuthorizeParams,
+			},
 		},
-		body: JSON.stringify({
-			action: 'save_oauth_app',
-			provider: nextConfig.provider,
-			authorizeUrl: nextConfig.authorizeUrl,
-			tokenUrl: nextConfig.tokenUrl,
-			apiBaseUrl: nextConfig.apiBaseUrl,
-			flow: nextConfig.flow,
-			usePkce: nextConfig.usePkce,
-			tokenExchangeStyle: nextConfig.tokenExchangeStyle,
-			clientId: nextConfig.clientId,
-			...(clientSecret ? { clientSecret } : {}),
-			scopeSeparator: nextConfig.scopeSeparator,
-			extraAuthorizeParams: nextConfig.extraAuthorizeParams,
-		}),
-	})
-	if (redirectToLoginOn401(response)) {
-		return { ok: false, error: 'Session expired.' }
-	}
-	const payload = await response.json().catch(() => null)
-	if (!response.ok || payload?.ok !== true) {
-		return {
-			ok: false,
-			error: payload?.error || 'Unable to save OAuth app configuration.',
-		}
-	}
+	})) as Record<string, unknown>
+
 	const savedClientId =
-		typeof payload.app?.clientId === 'string' ? payload.app.clientId : null
+		payload.app &&
+		typeof payload.app === 'object' &&
+		'clientId' in payload.app &&
+		typeof payload.app.clientId === 'string'
+			? payload.app.clientId
+			: null
 	if (!savedClientId) {
 		return { ok: false, error: 'Unable to save OAuth app configuration.' }
 	}

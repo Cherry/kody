@@ -54,15 +54,6 @@ export function createLegacyGuidesRedirectHandler(_env: Env) {
 	} satisfies Action<typeof routes.legacyGuides>
 }
 
-export function createLegacyGuidesApiRedirectHandler(_env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			return redirectResponse(request)
-		},
-	} satisfies Action<typeof routes.legacyGuidesApi>
-}
-
 export function createLegacyGuidesMarkdownRedirectHandler(_env: Env) {
 	return {
 		middleware: [],

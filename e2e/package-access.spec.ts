@@ -4,7 +4,6 @@ import { createPreviewPackage } from '../tools/control-kody/package-create.ts'
 import { executeE2eD1Command } from './d1-utils.ts'
 import {
 	expect,
-	request as playwrightRequest,
 	test,
 	waitForClientHydration,
 	type APIRequestContext,
@@ -77,6 +76,7 @@ test('private package source and settings stay isolated across owner, granted gu
 
 	let packageId: string | undefined
 	let packageName: string | undefined
+	let packagePath: string | undefined
 	try {
 		const marker = `Private source marker ${id}, only the owner and accepted guest may read this.`
 		const cookieHeader = (await page.context().cookies(baseURL))
@@ -94,7 +94,7 @@ test('private package source and settings stay isolated across owner, granted gu
 		packageId = created.packageId
 		packageName = created.name
 		const path = created.packagePagePath
-		const apiPath = `/profiles/${owner.username}/packages/${created.kodyId}`
+		packagePath = path
 		await page.goto(path)
 		await waitForClientHydration(page)
 		await expect(page.getByText(marker, { exact: true }).first()).toBeVisible()
@@ -134,9 +134,7 @@ test('private package source and settings stay isolated across owner, granted gu
 		for (const denied of [strangerPage, anonymousPage]) {
 			await expectPrivateContentDenied(denied, path, marker)
 			await expectPrivateContentDenied(denied, `${path}/settings`, marker)
-			const source = await denied.request.get(
-				`${apiPath}/files.json?path=README.md`,
-			)
+			const source = await denied.request.get(`${path}/tree/main/README.md`)
 			expect(source.status()).toBe(404)
 			expect(await source.text()).not.toContain(marker)
 		}
@@ -177,10 +175,14 @@ test('private package source and settings stay isolated across owner, granted gu
 		)
 		// Shared metadata is insufficient for owner settings, even on a direct URL.
 		await expectPrivateContentDenied(guestPage, `${path}/settings`, marker)
-		const guestWrite = await guestPage.request.post('/account/packages.json', {
-			data: { action: 'lock', packageId },
-		})
-		expect(guestWrite.ok()).toBe(false)
+		await expect(
+			guestPage.getByTestId('account-package-lock-toggle'),
+		).toHaveCount(0)
+		await expect(guestPage.getByTestId('package-delete')).toHaveCount(0)
+		// Recheck the authoritative owner view after the denied navigation.
+		await page.reload()
+		await waitForClientHydration(page)
+		await expect(lock).toHaveAttribute('data-locked', 'false')
 
 		executeE2eD1Command(`
 			UPDATE grants SET deleted_at = CURRENT_TIMESTAMP,
@@ -190,31 +192,37 @@ test('private package source and settings stay isolated across owner, granted gu
 		`)
 		await expectPrivateContentDenied(guestPage, path, marker)
 		const revokedSource = await guestPage.request.get(
-			`${apiPath}/files.json?path=README.md`,
+			`${path}/tree/main/README.md`,
 		)
 		expect(revokedSource.status()).toBe(404)
 		expect(await revokedSource.text()).not.toContain(marker)
-		const ownerSource = await page.request.get(
-			`${apiPath}/files.json?path=README.md`,
-		)
+		const ownerSource = await page.request.get(`${path}/tree/main/README.md`)
 		expect(ownerSource.ok()).toBe(true)
 		expect(await ownerSource.text()).toContain(marker)
 	} finally {
 		// An independent, bounded context can clean up even when the test's
 		// request fixture has timed out. Cleanup must not hide the first failure.
 		try {
-			if (packageId) {
-				const cleanup = await playwrightRequest.newContext({
+			if (packageId && packagePath && packageName) {
+				const cleanupContext = await browser.newContext({
 					baseURL,
 					storageState: await page.context().storageState(),
-					timeout: 10_000,
 				})
 				try {
-					await cleanup.post('/account/packages.json', {
-						data: { action: 'delete', packageId, confirmName: packageName },
-					})
+					const cleanupPage = await cleanupContext.newPage()
+					cleanupPage.setDefaultTimeout(10_000)
+					await cleanupPage.goto(`${packagePath}/settings`)
+					await waitForClientHydration(cleanupPage)
+					await cleanupPage.getByTestId('package-delete').click()
+					await cleanupPage
+						.getByTestId('package-delete-confirmation')
+						.fill(packageName)
+					await cleanupPage.getByTestId('package-delete-confirm').click()
+					await expect(
+						cleanupPage.getByTestId('package-delete-dialog'),
+					).not.toBeVisible()
 				} finally {
-					await cleanup.dispose()
+					await cleanupContext.close()
 				}
 			}
 		} catch (error) {

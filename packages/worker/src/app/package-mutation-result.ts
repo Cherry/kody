@@ -1,0 +1,23 @@
+import { type RepoSessionCheckStatus } from '../repo/types.ts'
+import {
+	type AccountPackagesLoaderData,
+	type AccountPackageListingBehindHint,
+} from '#universal/loader-data.ts'
+export type PackageMutationPayload = Partial<
+	Omit<AccountPackagesLoaderData, 'ok'>
+> & {
+	ok: boolean
+	error?: string
+	approvalUrl?: string
+	deleted?: boolean
+	packageId?: string
+	listing?: AccountPackageListingBehindHint | null
+	failed_checks?: NonNullable<RepoSessionCheckStatus['results']>
+}
+export function packageMutationResult(
+	data: PackageMutationPayload,
+	status = 200,
+) {
+	return { data, status }
+}
+export type PackageMutationResult = ReturnType<typeof packageMutationResult>

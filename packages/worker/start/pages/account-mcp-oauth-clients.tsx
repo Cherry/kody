@@ -1,18 +1,8 @@
 /** @jsxImportSource @emotion/react */
-import { type QueryKey } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
-import { useState, type FormEvent } from 'react'
-import { type CSSObject } from '@emotion/react'
 import { writeClipboardText } from '#client/clipboard.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import {
-	AccountManagementMessage,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountInputCss,
-	TimestampValue,
-} from './account-management-components.tsx'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { updateMcpOauthClients } from '#start/server/account-mutations'
+import { type AccountMcpOauthClientsLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
 	cardTitleCss,
@@ -25,9 +15,18 @@ import {
 	getPillButtonCss,
 	layoutMaxWidths,
 } from '#universal/styles/style-primitives.ts'
-import { type AccountMcpOauthClientsLoaderData } from '#universal/loader-data.ts'
-
-const clientsApiPath = '/account/mcp-oauth-clients.json'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { type CSSObject } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
+import { useState, type FormEvent } from 'react'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import {
+	accountInputCss,
+	AccountManagementMessage,
+	AccountManagementShell,
+	AccountPageHeader,
+	TimestampValue,
+} from './account-management-components.tsx'
 
 type CreatedClient = AccountMcpOauthClientsLoaderData['clients'][number] & {
 	clientSecret: string
@@ -51,14 +50,19 @@ export function AccountMcpOauthClientsPage({
 	const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null)
 	const mutation = usePageResponseMutation<
 		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient }
-	>(queryKey, 'loadMcpOauthClientsPage', clientsApiPath, {
-		dependencies: mutationResources,
-		dependencyScope: 'actor',
-		merge: (page, accepted) => ({
-			...page,
-			payload: { ok: accepted.ok, clients: accepted.clients },
-		}),
-	})
+	>(
+		queryKey,
+		'loadMcpOauthClientsPage',
+		(body) => updateMcpOauthClients({ data: body }),
+		{
+			dependencies: mutationResources,
+			dependencyScope: 'actor',
+			merge: (page, accepted) => ({
+				...page,
+				payload: { ok: accepted.ok, clients: accepted.clients },
+			}),
+		},
+	)
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 

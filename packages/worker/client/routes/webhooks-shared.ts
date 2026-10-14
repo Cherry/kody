@@ -1,8 +1,4 @@
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import {
-	type PackageWebhookListItem,
-	type PackageWebhooksActionPayload,
-} from '#universal/loader-data.ts'
+import { type PackageWebhookListItem } from '#universal/loader-data.ts'
 import { docHref } from '#universal/docs-nav.ts'
 import { routes } from '#universal/routes.ts'
 import { colors } from '#universal/styles/tokens.ts'
@@ -38,10 +34,6 @@ export function buildPackageWebhooksHref(input: {
 		? packageWebhookCardId(input.webhookName)
 		: packageWebhooksSectionId
 	return `${settingsHref}#${anchor}`
-}
-
-function packageWebhooksApiHref(input: { username: string; kodyId: string }) {
-	return routes.communityPackageWebhooksApi.href(input)
 }
 
 type WebhookStatusInput = Pick<
@@ -117,50 +109,5 @@ export function webhookFailureMessage(intent: WebhookIntent) {
 			const exhaustive: never = intent
 			return String(exhaustive)
 		}
-	}
-}
-
-export type PackageWebhookIntentResult =
-	| { kind: 'unauthorized' }
-	| { kind: 'ok'; payload: PackageWebhooksActionPayload }
-	| { kind: 'error'; message: string }
-
-/**
- * Runs one intent against the package webhooks API. Only `mint`, `rotate`,
- * and `reveal` answers carry `revealed`; the caller keeps that URL in memory
- * and never in a payload it re-renders from.
- */
-export async function postPackageWebhookIntent(input: {
-	username: string
-	kodyId: string
-	webhookName: string
-	intent: WebhookIntent
-}): Promise<PackageWebhookIntentResult> {
-	try {
-		const response = await fetch(packageWebhooksApiHref(input), {
-			method: 'POST',
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-			},
-			credentials: 'include',
-			body: JSON.stringify({
-				intent: input.intent,
-				webhookName: input.webhookName,
-			}),
-		})
-		if (response.status === 401) return { kind: 'unauthorized' }
-		const payload = await readJson<
-			PackageWebhooksActionPayload & { error?: string; ok?: boolean }
-		>(response)
-		if (!response.ok || !payload?.ok) {
-			return {
-				kind: 'error',
-				message: payload?.error || webhookFailureMessage(input.intent),
-			}
-		}
-		return { kind: 'ok', payload }
-	} catch {
-		return { kind: 'error', message: webhookFailureMessage(input.intent) }
 	}
 }

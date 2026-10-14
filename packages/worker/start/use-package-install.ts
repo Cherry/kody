@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useRouteContext } from '@tanstack/react-router'
 import { useMutation } from '@tanstack/react-query'
 import { type PackageRepoForkAction } from '#universal/package-repo-actions.ts'
-import { routes } from '#universal/routes.ts'
+import { installCommunityPackage } from '#start/server/community-mutations'
 import {
 	type CommunityInstallApiPayload,
 	type CommunityInstallOutcome,
@@ -49,21 +49,10 @@ export function usePackageInstall(fork: PackageRepoForkAction | null) {
 	const mutation = useMutation({
 		gcTime: 0,
 		mutationFn: async (listingId: string) => {
-			const response = await fetch(
-				routes.communityInstallApiPost.href({ listingId }),
-				{
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ acknowledged: true }),
-				},
-			)
-			const result = (await response.json()) as CommunityInstallApiPayload
+			const result = (await installCommunityPackage({
+				data: { listingId, acknowledged: true },
+			})) as CommunityInstallApiPayload
 			if (
-				!response.ok ||
 				!result.ok ||
 				!result.status ||
 				!result.targetName ||

@@ -1,44 +1,24 @@
 import {
-	queryOptions,
-	mutationOptions,
-	type QueryClient,
-} from '@tanstack/react-query'
-import { type AdminOrgLimits } from '#universal/loader-data.ts'
+	readAdminOrgLimits,
+	updateAdminOrgLimits,
+} from '#start/server/admin-controls'
+import { saveAdminUsers } from '#start/server/admin-mutations'
 import {
 	type LimitOverrideKey,
 	type LimitOverrideValue,
 } from '#universal/plans.ts'
-import { routes } from '#universal/routes.ts'
-import { buildAdminUsersApiRequestUrl } from '#client/routes/admin-users-shared.ts'
+import {
+	mutationOptions,
+	queryOptions,
+	type QueryClient,
+} from '@tanstack/react-query'
 import { invalidatePageResources } from './page-invalidation-cache.ts'
 
-async function readResponse<T>(response: Response): Promise<T> {
-	const payload = (await response.json()) as T & {
-		ok?: boolean
-		error?: string
-	}
-	if (!response.ok || !payload.ok)
-		throw new Error(
-			payload.error ??
-				(response.status === 401
-					? 'Please sign in again.'
-					: 'Unable to save these changes.'),
-		)
-	return payload
-}
 export function adminOrgLimitsQuery(actorKey: string | null, orgId: string) {
 	return queryOptions({
 		meta: { actorKey },
 		queryKey: ['admin-org', actorKey, orgId, 'limits'] as const,
-		queryFn: ({ signal }) =>
-			fetch(
-				`${routes.adminOrgLimitsApi.href()}?orgId=${encodeURIComponent(orgId)}`,
-				{
-					signal,
-					credentials: 'include',
-					headers: { Accept: 'application/json' },
-				},
-			).then(readResponse<AdminOrgLimits>),
+		queryFn: ({ signal }) => readAdminOrgLimits({ data: { orgId }, signal }),
 	})
 }
 export type LimitChange = {
@@ -56,21 +36,13 @@ export function adminOrgLimitMutationOptions(client: QueryClient) {
 			change: LimitChange
 			reason: string
 		}) =>
-			readResponse<AdminOrgLimits>(
-				await fetch(routes.adminOrgLimitsApi.href(), {
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
-						orgId: input.orgId,
-						changes: [input.change],
-						reason: input.reason,
-					}),
-				}),
-			),
+			updateAdminOrgLimits({
+				data: {
+					orgId: input.orgId,
+					changes: [input.change],
+					reason: input.reason,
+				},
+			}),
 		onSuccess: async (data, input) => {
 			const queryKey = adminOrgLimitsQuery(input.actorKey, input.orgId).queryKey
 			await client.cancelQueries({ queryKey, exact: true })
@@ -100,21 +72,16 @@ export function adminDestinationMutationOptions(client: QueryClient) {
 			destinationEmail: string
 			href: string
 		}) =>
-			readResponse(
-				await fetch(buildAdminUsersApiRequestUrl(input.href), {
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
+			saveAdminUsers({
+				data: {
+					search: new URL(input.href, 'http://localhost').search,
+					body: {
 						action: 'mark_email_destination_verified',
 						stableUserId: input.stableUserId,
 						destinationEmail: input.destinationEmail,
-					}),
-				}),
-			),
+					},
+				},
+			}),
 		onSettled: async (_data, _error, input) => {
 			await Promise.all([
 				invalidatePageResources(client, input.actorKey, ['loadAdminUsers']),

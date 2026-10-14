@@ -100,11 +100,11 @@ vi.mock('#worker/app-base-url.ts', () => ({
 }))
 
 const {
-	handleAccountPackagePublishLockAction,
+	mutateAccountPackagePublishLock,
 	loadAccountPackageApprovePublishData,
 } = await import('./account-package-publish-lock.ts')
 
-type ActionInput = Parameters<typeof handleAccountPackagePublishLockAction>[0]
+type ActionInput = Parameters<typeof mutateAccountPackagePublishLock>[0]
 
 const env = { APP_DB: {} as D1Database } as Env
 const user = {
@@ -154,7 +154,7 @@ function sourceRow(publishedCommit: string) {
 }
 
 function act(body: ActionInput['body']) {
-	return handleAccountPackagePublishLockAction({
+	return mutateAccountPackagePublishLock({
 		env,
 		request: new Request('https://example.com/account/packages.json', {
 			method: 'POST',

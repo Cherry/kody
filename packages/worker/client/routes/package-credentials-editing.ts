@@ -1,4 +1,3 @@
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	type CredentialMappingChange,
 	type CredentialMappingTarget,
@@ -6,12 +5,10 @@ import {
 	type PackageCredentialNeedView,
 	type PackageCredentialsView,
 	type PackageCredentialsWriteError,
-	type PackageCredentialsWriteFailure,
 	type PackageTriggerView,
 	type StoredCredentialMapping,
 } from '#universal/credential-contracts.ts'
 import { describeTrigger } from '#universal/package-credentials-page.ts'
-import { routes } from '#universal/routes.ts'
 
 /** What the editor will write: inherit (`null`), none on purpose (`[]`), or picks. */
 export type MappingDraft =
@@ -169,53 +166,6 @@ export type PackageCredentialsWriteResult =
 	| { kind: 'refused'; errors: Array<PackageCredentialsWriteError> }
 	| { kind: 'error'; message: string }
 	| { kind: 'unauthorized' }
-
-export async function postPackageCredentialChanges(input: {
-	username: string
-	kodyId: string
-	changes: Array<CredentialMappingChange>
-}): Promise<PackageCredentialsWriteResult> {
-	let response: Response
-	try {
-		response = await fetch(
-			routes.communityPackageCredentialsApiPost.href({
-				username: input.username,
-				kodyId: input.kodyId,
-			}),
-			{
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ changes: input.changes }),
-			},
-		)
-	} catch {
-		return { kind: 'error', message: 'Kody could not be reached. Try again.' }
-	}
-	if (response.status === 401) return { kind: 'unauthorized' }
-	const payload = await readJson<
-		| PackageCredentialsView
-		| PackageCredentialsWriteFailure
-		| { ok: false; error?: string }
-	>(response)
-	if (response.ok && payload?.ok) return { kind: 'saved', view: payload }
-	if (payload && !payload.ok && 'errors' in payload && payload.errors.length) {
-		return { kind: 'refused', errors: payload.errors }
-	}
-	const message =
-		payload && !payload.ok && 'error' in payload ? payload.error : null
-	return {
-		kind: 'error',
-		message:
-			message ||
-			(response.status === 409
-				? 'Someone else turned this trigger on while you were editing. Reload to see their mapping.'
-				: `Kody could not save this mapping (HTTP ${response.status}).`),
-	}
-}
 
 export function describeMappingTarget(target: CredentialMappingTarget) {
 	switch (target.type) {

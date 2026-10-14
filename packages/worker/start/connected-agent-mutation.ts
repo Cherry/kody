@@ -1,11 +1,10 @@
-import { mutationOptions, type QueryClient } from '@tanstack/react-query'
-import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { orgPageFilters, updateOrgPagePayload } from './org-page-cache.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { connectedAgentsApiPath } from '#client/routes/account-page-data.ts'
 import { toast } from '#client/toast.ts'
+import { updateConnectedAgents } from '#start/server/account-mutations'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
+import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
+import { mutationOptions, type QueryClient } from '@tanstack/react-query'
+import { orgPageFilters, updateOrgPagePayload } from './org-page-cache.ts'
+import { pageQueryOrg } from './page-query-scope.ts'
 
 export function connectedAgentMutationOptions(queryClient: QueryClient) {
 	return mutationOptions({
@@ -17,21 +16,12 @@ export function connectedAgentMutationOptions(queryClient: QueryClient) {
 			href: string
 			actorKey: string | null
 		}) => {
-			const response = await fetch(connectedAgentsApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(href),
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			await updateConnectedAgents({
+				data: {
+					orgSlug: pageQueryOrg(href) ?? undefined,
+					body: { intent: 'revoke', clientId },
 				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'revoke', clientId }),
 			})
-			const accepted = await readJson<
-				AccountConnectedAgentsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(accepted?.error ?? 'Unable to revoke this agent.')
 		},
 		onMutate: async ({ actorKey, clientId, href }) => {
 			const filters = orgPageFilters(actorKey, 'loadConnectionsPage', href)

@@ -1,11 +1,6 @@
 import { expect, test, vi } from 'vitest'
 
-const { buildRouter, renderStart } = vi.hoisted(() => ({
-	buildRouter: vi.fn(
-		(_env: unknown, render: (request: Request) => Promise<Response>) => ({
-			fetch: render,
-		}),
-	),
+const { renderStart } = vi.hoisted(() => ({
 	renderStart: vi.fn(
 		async (
 			request: Request,
@@ -16,7 +11,7 @@ const { buildRouter, renderStart } = vi.hoisted(() => ({
 				}
 			},
 		) => {
-			// Yield so simultaneous requests overlap across the same cached router.
+			// Yield so simultaneous requests overlap across the same Start handler.
 			await new Promise<void>((resolve) =>
 				setTimeout(resolve, request.url.endsWith('/pricing') ? 5 : 0),
 			)
@@ -27,7 +22,6 @@ const { buildRouter, renderStart } = vi.hoisted(() => ({
 		},
 	),
 }))
-vi.mock('./backend-router.ts', () => ({ createBackendRouter: buildRouter }))
 vi.mock('@tanstack/react-start/server', () => ({
 	createStartHandler: () => renderStart,
 	defaultStreamHandler: vi.fn(),
@@ -40,12 +34,11 @@ vi.mock('../src/app/auth-session.ts', () => ({
 
 import { handleRequest } from './http-entry.ts'
 
-test('cached backend routing creates a fresh matching nonce for overlapping requests', async () => {
+test('Start creates a fresh matching nonce for overlapping requests', async () => {
 	const env = {
 		COOKIE_SECRET: 'test-only',
 		WRANGLER_IS_LOCAL_DEV: 'true',
 	} as Env
-	const before = buildRouter.mock.calls.length
 	const requests = ['/pricing', '/faq'].map(
 		(path) => new Request(`https://kody.test${path}`),
 	)
@@ -62,7 +55,6 @@ test('cached backend routing creates a fresh matching nonce for overlapping requ
 				}>,
 		),
 	)
-	expect(buildRouter.mock.calls.length - before).toBe(1)
 	expect(bodies[0]?.nonce).not.toBe(bodies[1]?.nonce)
 	for (const [index, response] of responses.entries()) {
 		expect(response.headers.get('Content-Security-Policy')).toContain(
@@ -73,7 +65,7 @@ test('cached backend routing creates a fresh matching nonce for overlapping requ
 	}
 })
 
-test('trusted OAuth options and cookies never enter the reusable router', async () => {
+test('trusted OAuth options and cookies never leak between Start requests', async () => {
 	const env = {
 		COOKIE_SECRET: 'test-only',
 		WRANGLER_IS_LOCAL_DEV: 'true',

@@ -1,3 +1,4 @@
+import { mutatePackage } from '#start/server/package-mutations'
 import {
 	mutationOptions,
 	type QueryClient,
@@ -33,29 +34,14 @@ export function packageMutationOptions(client: QueryClient) {
 			body: Record<string, unknown>
 			actorKey: string | null
 			packageId: string
-			apiPath?: string
 		}) => {
-			const response = await fetch(input.apiPath ?? '/account/packages.json', {
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ ...input.body, packageId: input.packageId }),
-			})
-			const payload = (await response
-				.json()
-				.catch(() => null)) as PackageResult | null
-			if (!response.ok || !payload?.ok)
+			const payload = (await mutatePackage({
+				data: { body: input.body, packageId: input.packageId },
+			})) as PackageResult
+			if (!payload.ok)
 				throw Object.assign(
-					new Error(
-						payload?.error ||
-							(response.status === 401
-								? 'Please sign in again.'
-								: 'Unable to update this package.'),
-					),
-					{ approvalUrl: payload?.approvalUrl },
+					new Error(payload.error || 'Unable to update this package.'),
+					{ approvalUrl: payload.approvalUrl },
 				)
 			return payload
 		},

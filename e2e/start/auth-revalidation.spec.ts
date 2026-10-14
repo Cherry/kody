@@ -126,24 +126,23 @@ test('revoking the same user admin role blocks a warm cached revisit', async ({
 			data: { ...operator, mode: 'login' },
 		})
 		expect(signedIn.ok()).toBe(true)
-		const users = await other.request.get(
-			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
-		)
-		expect(users.ok()).toBe(true)
-		const payload = await users.json()
-		const target = payload.users.find(
-			(entry: { email: string; stableUserId: string }) =>
-				entry.email === user.email,
-		)
-		expect(target).toBeTruthy()
-		const revoked = await other.request.post('/admin/users.json', {
-			data: {
-				action: 'remove_role',
-				stableUserId: target.stableUserId,
-				role: 'admin',
-			},
-		})
-		expect(revoked.ok(), await revoked.text()).toBe(true)
+		const operatorPage = await other.newPage()
+		await operatorPage.goto(`/admin/users?q=${encodeURIComponent(user.email)}`)
+		await operatorPage
+			.getByRole('row')
+			.filter({ hasText: user.email })
+			.getByRole('link')
+			.first()
+			.click()
+		await operatorPage
+			.getByRole('combobox', { name: 'Role', exact: true })
+			.selectOption('admin')
+		await operatorPage
+			.getByRole('button', { name: 'Remove', exact: true })
+			.click()
+		await expect(
+			operatorPage.getByText('Removed admin role.', { exact: true }),
+		).toBeVisible()
 		await page.evaluate(() =>
 			window.history.pushState(null, '', '/admin/feature-flags'),
 		)
@@ -198,24 +197,23 @@ test('revoking admin role blocks a warm cached admin-only guide', async ({
 			data: { ...operator, mode: 'login' },
 		})
 		expect(signedIn.ok()).toBe(true)
-		const users = await other.request.get(
-			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
-		)
-		expect(users.ok()).toBe(true)
-		const payload = await users.json()
-		const target = payload.users.find(
-			(entry: { email: string; stableUserId: string }) =>
-				entry.email === user.email,
-		)
-		expect(target).toBeTruthy()
-		const revoked = await other.request.post('/admin/users.json', {
-			data: {
-				action: 'remove_role',
-				stableUserId: target.stableUserId,
-				role: 'admin',
-			},
-		})
-		expect(revoked.ok(), await revoked.text()).toBe(true)
+		const operatorPage = await other.newPage()
+		await operatorPage.goto(`/admin/users?q=${encodeURIComponent(user.email)}`)
+		await operatorPage
+			.getByRole('row')
+			.filter({ hasText: user.email })
+			.getByRole('link')
+			.first()
+			.click()
+		await operatorPage
+			.getByRole('combobox', { name: 'Role', exact: true })
+			.selectOption('admin')
+		await operatorPage
+			.getByRole('button', { name: 'Remove', exact: true })
+			.click()
+		await expect(
+			operatorPage.getByText('Removed admin role.', { exact: true }),
+		).toBeVisible()
 		await page.evaluate(() => {
 			const check = () => {
 				if (

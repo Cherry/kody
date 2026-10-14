@@ -6,7 +6,7 @@ import { expect, test, vi } from 'vitest'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import { durableObjectIsolateMemoryResetMessage } from '#worker/sentry-options.ts'
 import { consoleError } from '#worker/test-support/console-spies.ts'
-import { createCommunityInstallApiPostHandler } from './community-install.ts'
+import { installWebsiteCommunityPackage } from './community-install.ts'
 import type * as CloudflareWorkers from 'cloudflare:workers'
 
 const mockModule = vi.hoisted(() => ({
@@ -98,9 +98,10 @@ function installed(kodyId: string, overrides: Record<string, unknown> = {}) {
 }
 
 test('community install POST enforces gates and maps install outcomes', async () => {
-	const handler = createCommunityInstallApiPostHandler(env)
 	const post = async (body: unknown = { acknowledged: true }) => {
-		const response = await handler.handler({
+		const response = await installWebsiteCommunityPackage({
+			env,
+			user: await mockModule.readAuthenticatedAppUser(),
 			request: new Request(
 				'https://example.com/community/listing-1/install.json',
 				{
@@ -109,18 +110,15 @@ test('community install POST enforces gates and maps install outcomes', async ()
 					body: JSON.stringify(body),
 				},
 			),
-			params: { listingId: 'listing-1' },
+			listingId: 'listing-1',
+			body,
 			url: new URL('https://example.com/community/listing-1/install.json'),
 		} as never)
 		return {
 			status: response.status,
-			payload: (await response.json()) as Record<string, unknown>,
+			payload: response.data as Record<string, unknown>,
 		}
 	}
-
-	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
-	expect((await post({})).status).toBe(401)
-	expect(mockModule.installCommunityListing).not.toHaveBeenCalled()
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'userb@example.com',
@@ -282,7 +280,6 @@ test('community install POST enforces gates and maps install outcomes', async ()
 })
 
 test('community install targets the last-used org when the person holds package:create', async () => {
-	const handler = createCommunityInstallApiPostHandler(env)
 	allowPackageCreate()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'userb@example.com',
@@ -303,7 +300,9 @@ test('community install targets the last-used org when the person holds package:
 		installed('demo', { targetName: '@acme/demo' }),
 	)
 
-	const response = await handler.handler({
+	const response = await installWebsiteCommunityPackage({
+		env,
+		user: await mockModule.readAuthenticatedAppUser(),
 		request: new Request(
 			'https://example.com/community/listing-1/install.json',
 			{
@@ -315,7 +314,8 @@ test('community install targets the last-used org when the person holds package:
 				body: JSON.stringify({ acknowledged: true }),
 			},
 		),
-		params: { listingId: 'listing-1' },
+		listingId: 'listing-1',
+		body: { acknowledged: true },
 		url: new URL('https://example.com/community/listing-1/install.json'),
 	} as never)
 
@@ -343,7 +343,6 @@ test('community install targets the last-used org when the person holds package:
 })
 
 test('community install falls back to personal when last-used org lacks package:create', async () => {
-	const handler = createCommunityInstallApiPostHandler(env)
 	denyPackageCreate()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue({
 		email: 'userb@example.com',
@@ -362,7 +361,9 @@ test('community install falls back to personal when last-used org lacks package:
 	)
 	mockModule.installCommunityListing.mockResolvedValue(installed('demo'))
 
-	const response = await handler.handler({
+	const response = await installWebsiteCommunityPackage({
+		env,
+		user: await mockModule.readAuthenticatedAppUser(),
 		request: new Request(
 			'https://example.com/community/listing-1/install.json',
 			{
@@ -374,7 +375,8 @@ test('community install falls back to personal when last-used org lacks package:
 				body: JSON.stringify({ acknowledged: true }),
 			},
 		),
-		params: { listingId: 'listing-1' },
+		listingId: 'listing-1',
+		body: { acknowledged: true },
 		url: new URL('https://example.com/community/listing-1/install.json'),
 	} as never)
 

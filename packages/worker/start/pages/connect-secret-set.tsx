@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { updateSecrets } from '#start/server/account-mutations'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -19,10 +20,6 @@ import { SiteLink } from '../components/site-link.tsx'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
-import {
-	accountSecretsApiPath,
-	readJson,
-} from '#client/routes/account-approval-shared.ts'
 import {
 	readAccountSecretsSaveWarning,
 	createEditorStateFromNewSecretQuery,
@@ -114,47 +111,28 @@ export function ConnectSecretSetRoute({
 			const org = new URL(href, window.location.origin).searchParams
 				.get('org')
 				?.trim()
-			const response = await fetch(accountSecretsApiPath, {
-				...(org
-					? {
-							referrer: new URL(
-								`/@${encodeURIComponent(org)}/-/secrets`,
-								window.location.origin,
-							).href,
-						}
-					: {}),
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			const payload = (await updateSecrets({
+				data: {
+					orgSlug: org || undefined,
+					body: {
+						action: 'save',
+						currentId: state.currentId ?? existing?.id ?? null,
+						name: state.name,
+						scope: state.scope,
+						packageId: packageResolution.packageId,
+						description: state.description,
+						expiresAt: policy.expiresAt,
+						value: state.value,
+						allowedHosts: policy.allowedHosts,
+						allowedPackages: policy.allowedPackages,
+						provider:
+							new URL(href, 'https://kody.local').searchParams
+								.get('provider')
+								?.trim() || null,
+					},
 				},
-				body: JSON.stringify({
-					action: 'save',
-					currentId: state.currentId ?? existing?.id ?? null,
-					name: state.name,
-					scope: state.scope,
-					packageId: packageResolution.packageId,
-					description: state.description,
-					expiresAt: policy.expiresAt,
-					value: state.value,
-					allowedHosts: policy.allowedHosts,
-					allowedPackages: policy.allowedPackages,
-					provider:
-						new URL(href, 'https://kody.local').searchParams
-							.get('provider')
-							?.trim() || null,
-				}),
-			})
-			if (response.status === 401) {
-				window.location.assign(`/login?redirectTo=${encodeURIComponent(href)}`)
-				throw new Error('Sign in to save this secret.')
-			}
-			const payload = await readJson<
-				AccountSecretsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !payload?.ok)
-				throw new Error(payload?.error || 'Unable to save secret.')
+			})) as AccountSecretsLoaderData
+
 			return payload
 		},
 		onSuccess: async (payload, { href, actorKey }) => {

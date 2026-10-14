@@ -1,37 +1,40 @@
 /** @jsxImportSource @emotion/react */
-import { type QueryKey } from '@tanstack/react-query'
-import { useMutation } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useHydrated } from '../components/use-hydrated.ts'
+import { updatePasskey } from '#start/server/security-mutations'
 import {
-	formatNullableTimestamp,
-	formatTimestamp,
-} from '../components/local-timestamp.tsx'
+webauthnRegistrationOptions,
+webauthnRegistrationVerify,
+} from '#start/server/auth-mutations'
 import {
-	startRegistration,
-	WebAuthnAbortService,
-} from '@simplewebauthn/browser'
-import { useState, useEffect, useRef } from 'react'
-import { SiteLink } from '../components/site-link.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import {
-	AccountManagementMessage,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountInputCss,
-} from './account-management-components.tsx'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import {
-	cardCss,
-	cardTitleCss,
-	descriptionCss,
-	getDangerPillCss,
-	getGhostButtonCss,
-	getPillButtonCss,
-	layoutMaxWidths,
-	primaryLinkCss,
+cardCss,
+cardTitleCss,
+descriptionCss,
+getDangerPillCss,
+getGhostButtonCss,
+getPillButtonCss,
+layoutMaxWidths,
+primaryLinkCss,
 } from '#universal/styles/style-primitives.ts'
+import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import {
+startRegistration,
+WebAuthnAbortService,
+} from '@simplewebauthn/browser'
+import { useMutation,type QueryKey } from '@tanstack/react-query'
+import { useEffect,useRef,useState } from 'react'
+import {
+formatNullableTimestamp,
+formatTimestamp,
+} from '../components/local-timestamp.tsx'
+import { SiteLink } from '../components/site-link.tsx'
+import { useHydrated } from '../components/use-hydrated.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import {
+accountInputCss,
+AccountManagementMessage,
+AccountManagementShell,
+AccountPageHeader,
+} from './account-management-components.tsx'
 
 type PasskeyListItem = {
 	id: string
@@ -47,7 +50,6 @@ export type AccountPasskeysPayload = {
 	passkeys: Array<PasskeyListItem>
 }
 
-const passkeysApiPath = '/account/passkeys.json'
 const webauthnRegistrationPath = '/webauthn/registration'
 
 function describeDeviceType(deviceType: string) {
@@ -70,7 +72,7 @@ export function AccountPasskeysPage({
 	const changePasskey = usePageResponseMutation<AccountPasskeysPayload>(
 		queryKey,
 		'loadAccountSecurity',
-		passkeysApiPath,
+		(body) => updatePasskey({ data: body }),
 		{ refreshShell: true },
 	)
 	const [message, setMessage] = useState<string | null>(null)
@@ -90,17 +92,8 @@ export function AccountPasskeysPage({
 			response: Awaited<ReturnType<typeof startRegistration>>
 			invalidate: () => Promise<void>
 		}) => {
-			const result = await fetch(webauthnRegistrationPath, {
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({ response }),
-			})
-			const accepted = await readJson<{ ok?: boolean; error?: string }>(result)
-			if (!result.ok || !accepted?.ok)
+			const accepted = await webauthnRegistrationVerify({ data: { response } })
+			if (!accepted.successful || !accepted.ok)
 				throw new Error(accepted?.error || 'Unable to register the passkey.')
 		},
 		// A lost response can follow a committed registration. Reconcile either way.
@@ -122,22 +115,12 @@ export function AccountPasskeysPage({
 		setMessage(null)
 
 		try {
-			const optionsResponse = await fetch(webauthnRegistrationPath, {
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
+			const optionsPayload = await webauthnRegistrationOptions({
+				data: {},
 				signal: lifetime.current?.signal,
 			})
-			if (optionsResponse.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const optionsPayload = await readJson<{
-				ok?: boolean
-				options?: Parameters<typeof startRegistration>[0]['optionsJSON']
-				error?: string
-			}>(optionsResponse)
 			if (
-				!optionsResponse.ok ||
+				!optionsPayload.successful ||
 				!optionsPayload?.ok ||
 				!optionsPayload.options
 			) {

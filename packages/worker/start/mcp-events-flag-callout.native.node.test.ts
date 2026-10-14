@@ -18,7 +18,7 @@ test('mcp events flag callout covers logged-out, opt-in, and already-on', async 
 		renderMcpEventsFlagCallout({ loggedIn: true, enabled: false }),
 	)
 	expect(loggedIn).toContain('data-testid="mcp-events-flag-opt-in"')
-	expect(loggedIn).toContain(routes.mcpEventsOptInPost.href())
+	expect(loggedIn).toContain('type="button"')
 	expect(loggedIn).not.toContain('data-testid="mcp-events-flag-login"')
 
 	const alreadyOn = await renderToString(

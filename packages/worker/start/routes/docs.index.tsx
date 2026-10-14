@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { docsMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { docsIntroSlug } from '#universal/docs-nav.ts'
@@ -12,6 +13,7 @@ const pageQuery = createPageQuery('loadDoc', loadDoc, {
 })
 
 export const Route = createFileRoute('/docs/')({
+	server: { handlers: { GET: docsMarkdown } },
 	context: () => ({ pageQueryInput: { slug: docsIntroSlug } }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

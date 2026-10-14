@@ -9,7 +9,7 @@ import {
 	AccountManagementMessage,
 	AccountManagementPanel,
 } from './account-management-components.tsx'
-import { type BillingInterval } from '#client/routes/billing-checkout.ts'
+import { type BillingInterval } from '../billing-checkout.ts'
 import {
 	colors,
 	mq,

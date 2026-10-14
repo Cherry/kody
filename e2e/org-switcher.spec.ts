@@ -1,8 +1,9 @@
+import { addMcpServerThroughUi, saveKeyThroughUi } from './account-fixtures.ts'
 import {
 	expect,
 	test,
-	type Page,
 	waitForClientHydration,
+	type Page,
 } from './playwright-utils.ts'
 
 import { waitForDestinationRead } from './server-function-requests.ts'
@@ -300,18 +301,11 @@ test('switching orgs from Credentials loads the destination org, not the one you
 		password: 'org-switch-secrets-password',
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
-	const saved = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: 'personalOnlySecret',
-			scope: 'user',
-			value: 'personal-secret-value',
-			allowedHosts: [],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
+	await saveKeyThroughUi(page, {
+		name: 'personalOnlySecret',
+		value: 'personal-secret-value',
+		allowedHosts: [],
 	})
-	expect(saved.ok()).toBe(true)
 
 	await page.setViewportSize({ width: 1440, height: 900 })
 	await page.goto('/account/organizations/new')
@@ -389,15 +383,8 @@ test('the switcher keeps each org section and reads the destination org through 
 	for (const [slug, name] of [
 		[user.username, personalServerName],
 		[`sections-${runId}`, teamServerName],
-	]) {
-		const added = await page.request.post('/account/mcp-servers.json', {
-			data: { action: 'add', name, url: 'http://127.0.0.1:9/mcp' },
-			headers: {
-				'Content-Type': 'application/json',
-				Referer: new URL(`/@${slug}/-/mcp-servers`, page.url()).href,
-			},
-		})
-		expect(added.ok(), await added.text()).toBe(true)
+	] as const) {
+		await addMcpServerThroughUi(page, slug, name)
 	}
 
 	// The switcher keeps the section. The destination loader must read the

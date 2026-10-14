@@ -1,38 +1,39 @@
 /** @jsxImportSource @emotion/react */
-import { type QueryKey } from '@tanstack/react-query'
-import { css } from '@emotion/react'
-import { useState } from 'react'
-import { useRouter } from '@tanstack/react-router'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
-import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { buildAdminEmailHtmlPreviewDocument } from '#client/email-html-preview.ts'
-import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
-import { Tab, TabList, TabPanel, Tabs } from '../components/tabs.tsx'
+import { saveAdminSystemEmail } from '#start/server/admin-mutations'
+import { type AdminSystemEmailLoaderData } from '#universal/loader-data.ts'
 import {
-	colors,
-	radius,
-	spacing,
-	typography,
-} from '#universal/styles/tokens.ts'
-import {
-	cardCss,
-	getDangerPillCss,
+cardCss,
+getDangerPillCss,
 } from '#universal/styles/style-primitives.ts'
 import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AdminPageHeader,
-	MetadataGrid,
-	TimestampValue,
+colors,
+radius,
+spacing,
+typography,
+} from '#universal/styles/tokens.ts'
+import { css } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
+import { useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
+import { Tab,TabList,TabPanel,Tabs } from '../components/tabs.tsx'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+AccountManagementMessage,
+AccountManagementPanel,
+AccountManagementShell,
+AdminPageHeader,
+MetadataGrid,
+TimestampValue,
 } from './account-management-components.tsx'
 import {
-	RecordTable,
-	recordBodyCss,
-	recordCellClamp,
-	recordStampCss,
+RecordTable,
+recordBodyCss,
+recordCellClamp,
+recordStampCss,
 } from './record-table.tsx'
-import { type AdminSystemEmailLoaderData } from '#universal/loader-data.ts'
 const clampedCellCss = css(recordCellClamp(30))
 const emailBodyPreCss = css({
 	margin: 0,
@@ -71,7 +72,10 @@ export function AdminSystemEmailPage({
 	const mutation = usePageResponseMutation<AdminSystemEmailLoaderData>(
 		queryKey,
 		'loadAdminSystemEmail',
-		'/admin/system-email.json',
+		(body, href) =>
+			saveAdminSystemEmail({
+				data: { body, search: new URL(href, 'http://localhost').search },
+			}),
 	)
 	const [armedId, setArmedId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)

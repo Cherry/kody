@@ -119,18 +119,18 @@ vi.mock('#worker/orgs/is-personal-org.ts', () => ({
 		orgId === 'stable-user-1',
 }))
 
-const { createAccountMemoriesApiHandler, createAccountMemoriesExportHandler } =
-	await import('./account-memories.ts')
+const { testAccountMemoriesApiHandler, createAccountMemoriesExportHandler } =
+	await import('./account-memories.test-support.ts')
 
 const env = { APP_DB: {} as D1Database } as Env
 
 function createClient(
-	createHandler: (env: Env) => { handler: (input: never) => Promise<Response> },
+	createHandler: typeof testAccountMemoriesApiHandler,
 	path: string,
 ) {
-	const { handler } = createHandler(env)
+	const { execute } = createHandler(env)
 	return (search = '', init?: RequestInit) =>
-		handler({
+		execute({
 			request: new Request(`https://example.com${path}${search}`, init),
 			params: {},
 		} as never)
@@ -144,13 +144,12 @@ const postJson = (body: Record<string, unknown>): RequestInit => ({
 
 test('memories API lists, filters, and selects user-scoped memories', async () => {
 	const request = createClient(
-		createAccountMemoriesApiHandler,
+		testAccountMemoriesApiHandler,
 		'/account/memories.json',
 	)
 
 	const listResponse = await request()
 	expect(listResponse.status).toBe(200)
-	expect(listResponse.headers.get('Cache-Control')).toBe('no-store')
 	expect(mockModule.listMemoriesByUserId).toHaveBeenCalledWith(
 		expect.anything(),
 		'stable-user-1',
@@ -159,7 +158,7 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 			limit: 100,
 		}),
 	)
-	await expect(listResponse.json()).resolves.toEqual({
+	expect(listResponse.data).toEqual({
 		ok: true,
 		email: 'user@example.com',
 		username: 'test-user',
@@ -197,7 +196,7 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 			memoryId: memoryRow.id,
 		}),
 	)
-	await expect(filtered.json()).resolves.toMatchObject({
+	expect(filtered.data).toMatchObject({
 		ok: true,
 		query: 'editor',
 		includeDeleted: true,
@@ -212,7 +211,7 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 
 test('memories API soft/force deletes and rejects invalid delete requests', async () => {
 	const request = createClient(
-		createAccountMemoriesApiHandler,
+		testAccountMemoriesApiHandler,
 		'/account/memories.json',
 	)
 
@@ -255,7 +254,7 @@ test('memories export filename uses the UTC calendar date', () => {
 })
 
 test('memories export downloads the signed-in user memories as JSON', async () => {
-	const request = createClient(
+	const request = createExportClient(
 		createAccountMemoriesExportHandler,
 		'/account/memories-export.json',
 	)
@@ -346,3 +345,8 @@ test('memories export downloads the signed-in user memories as JSON', async () =
 
 	expect((await request('', { method: 'POST' })).status).toBe(405)
 })
+
+function createExportClient(createHandler:typeof createAccountMemoriesExportHandler,path:string) {
+const {handler}=createHandler(env)
+return (search='',init?:RequestInit)=>handler({request:new Request(`https://example.com${path}${search}`,init),params:{}} as never)
+}

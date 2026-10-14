@@ -1,20 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { type CSSObject } from '@emotion/react'
-import { useState } from 'react'
-import { type QueryKey } from '@tanstack/react-query'
-import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountActionsCss,
-	accountFieldCss,
-	accountFieldLabelCss,
-	accountFieldNoteCss,
-	accountInputCss,
-} from './account-management-components.tsx'
-import { renderIcon } from '../components/icon.tsx'
-import { UserAvatar } from '../components/user-avatar.tsx'
+import { type OrgPeopleAction } from '#start/server/org-mutations'
 import { type OrgTeamsLoaderData } from '#universal/loader-data.ts'
 import { orgIdentity } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
@@ -28,8 +13,24 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import { useOrgPeopleMutation } from './org-people-mutation.ts'
+import { type CSSObject } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
+import { useState } from 'react'
+import { renderIcon } from '../components/icon.tsx'
+import { UserAvatar } from '../components/user-avatar.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+	AccountManagementMessage,
+	AccountManagementPanel,
+	AccountManagementShell,
+	AccountPageHeader,
+	accountActionsCss,
+	accountFieldCss,
+	accountFieldLabelCss,
+	accountFieldNoteCss,
+	accountInputCss,
+} from './account-management-components.tsx'
+import { useOrgPeopleMutation } from './org-people-mutation.ts'
 
 function memberLabel(member: {
 	displayName: string | null
@@ -67,7 +68,7 @@ function OrgTeamsContent({
 	const [confirmed, setConfirmed] = useState<string | null>(null)
 	const args = { orgSlug: data.org.slug }
 	function post(
-		href: string,
+		action: OrgPeopleAction,
 		body: Record<string, unknown>,
 		success: string,
 		done?: () => void,
@@ -75,7 +76,7 @@ function OrgTeamsContent({
 		const active = capture()
 		setMessage(null)
 		mutation.mutate(
-			{ href, body },
+			{ action, body },
 			{
 				onSuccess: () => {
 					if (active()) {
@@ -167,7 +168,7 @@ function OrgTeamsContent({
 																	}
 																	setConfirmed(null)
 																	post(
-																		routes.orgTeamsMemberRemovePost.href(args),
+																		'teamMemberRemove',
 																		{ teamId: team.id, userId: member.userId },
 																		'Member removed from the team.',
 																	)
@@ -220,7 +221,7 @@ function OrgTeamsContent({
 											css={getPillButtonCss({ size: 'sm' })}
 											onClick={() =>
 												post(
-													routes.orgTeamsMemberAddPost.href(args),
+													'teamMemberAdd',
 													{ teamId: team.id, userId: addByTeam[team.id] },
 													'Member added to the team.',
 													() =>
@@ -248,7 +249,7 @@ function OrgTeamsContent({
 						onSubmit={(event) => {
 							event.preventDefault()
 							post(
-								routes.orgTeamsCreatePost.href(args),
+								'teamCreate',
 								{
 									slug: createSlug,
 									name: createName,
@@ -308,8 +309,7 @@ function OrgTeamsContent({
 							>
 								{renderIcon('plus', { size: '1.05rem' })}
 								{mutation.isPending &&
-								mutation.variables?.href ===
-									routes.orgTeamsCreatePost.href(args)
+								mutation.variables?.action === 'teamCreate'
 									? 'Creating…'
 									: 'Create team'}
 							</button>

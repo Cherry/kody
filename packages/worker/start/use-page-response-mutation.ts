@@ -1,6 +1,5 @@
 import { useMatchedPageScope } from './use-matched-page-scope.ts'
 import { useSubmitterScope } from './use-submitter-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import {
 	useMutation,
 	useQueryClient,
@@ -10,14 +9,12 @@ import { acceptedPageMutationOptions } from './accepted-page-mutation.ts'
 import { type PageResource } from './page-resources.ts'
 import { type PageMutationDependencies } from './page-invalidation-cache.ts'
 
-class MutationAuthenticationError extends Error {}
-
 export function usePageResponseMutation<
 	TResponse extends { ok?: boolean; error?: string },
 >(
 	queryKey: QueryKey,
 	resource: PageResource,
-	apiPath: string,
+	send: (body: Record<string, unknown>, href: string) => Promise<TResponse>,
 	options: {
 		dependencyScope?: 'actor' | 'org'
 		dependencies?: PageMutationDependencies
@@ -37,23 +34,9 @@ export function usePageResponseMutation<
 		acceptedPageMutationOptions<Record<string, unknown>, TResponse>(client, {
 			resource,
 			...options,
-			send: async ({ body, href, apiPath: submittedApiPath }) => {
-				if (!submittedApiPath) throw new Error('Missing mutation endpoint')
-				const response = await fetch(submittedApiPath, {
-					method: 'POST',
-					referrer: orgAccountApiReferrer(href),
-					credentials: 'include',
-					headers: {
-						'Content-Type': 'application/json',
-						Accept: 'application/json',
-					},
-					body: JSON.stringify(body),
-				})
-				if (response.status === 401)
-					throw new MutationAuthenticationError('Please sign in again.')
-
-				const payload = (await response.json()) as TResponse
-				if (!response.ok || !payload.ok)
+			send: async ({ body, href }) => {
+				const payload = await send(body, href)
+				if (!payload.ok)
 					throw new Error(payload.error || 'Unable to save changes.')
 				return payload
 			},
@@ -64,10 +47,11 @@ export function usePageResponseMutation<
 		submit: (body: Record<string, unknown>) => {
 			const isCurrentSubmitter = captureSubmitter()
 			return mutation
-				.mutateAsync({ body, actorKey, href, queryKey, apiPath })
+				.mutateAsync({ body, actorKey, href, queryKey })
 				.catch((error) => {
 					if (
-						error instanceof MutationAuthenticationError &&
+						error instanceof Error &&
+						error.message === 'Please sign in again.' &&
 						isCurrentSubmitter()
 					)
 						window.location.assign(

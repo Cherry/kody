@@ -1,17 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import {
-	useMutation,
-	useQueryClient,
-	useIsMutating,
-} from '@tanstack/react-query'
-import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { useState } from 'react'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
-import { SiteLink } from '../components/site-link.tsx'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	filterAccountWorkflows,
 	isActiveAccountWorkflow,
@@ -19,6 +7,30 @@ import {
 	readWorkflowsViewFilter,
 	type AccountWorkflowsViewFilter,
 } from '#client/routes/account-workflows-filter.ts'
+import { updateWorkflows } from '#start/server/account-mutations'
+import {
+	type AccountWorkflowListItem,
+	type AccountWorkflowRunStatus,
+	type AccountWorkflowsLoaderData,
+} from '#universal/loader-data.ts'
+import { routes } from '#universal/routes.ts'
+import {
+	cardTitleCss,
+	descriptionCss,
+	getDangerPillCss,
+	getGhostButtonCss,
+	primaryLinkCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import {
+	useIsMutating,
+	useMutation,
+	useQueryClient,
+} from '@tanstack/react-query'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import { pageQueryOrg, scopedPageResource } from '../page-query-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -38,24 +50,9 @@ import {
 	renderInlineWorkflowNameSubtitle,
 	renderWorkflowNameCell,
 } from './workflow-name-display.tsx'
-import {
-	type AccountWorkflowListItem,
-	type AccountWorkflowRunStatus,
-	type AccountWorkflowsLoaderData,
-} from '#universal/loader-data.ts'
-import { routes } from '#universal/routes.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import {
-	cardTitleCss,
-	descriptionCss,
-	getDangerPillCss,
-	getGhostButtonCss,
-	primaryLinkCss,
-} from '#universal/styles/style-primitives.ts'
 
 type MessageTone = 'info' | 'error'
 
-const accountWorkflowsApiPath = '/account/workflows.json'
 const workflowsRoute = createListDetailRoute('/account/workflows')
 
 const viewFilterOptions: Array<{
@@ -190,7 +187,6 @@ export function AccountWorkflowsPage({
 	const [messageTone, setMessageTone] = useState<MessageTone>('info')
 	const [cancelArmed, setCancelArmed] = useState(false)
 	const queryClient = useQueryClient()
-	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = [
 		'workflows',
@@ -222,7 +218,7 @@ export function AccountWorkflowsPage({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				// Keep an in-flight search edit when a second filter changes.
 				// Another page's pending search never belongs to this toolbar.
 				const search: Record<string, unknown> = samePage
@@ -260,27 +256,13 @@ export function AccountWorkflowsPage({
 			href: string
 			failureMessage: string
 		}) => {
-			const isCurrentSubmitter = captureSubmitter()
-			const response = await fetch(accountWorkflowsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			return updateWorkflows({
+				data: {
+					body: input.body,
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					search: new URL(input.href, 'https://kody.local').search,
 				},
-				credentials: 'include',
-				referrer: orgAccountApiReferrer(input.href),
-				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) {
-				if (isCurrentSubmitter()) window.location.assign('/login')
-				throw new Error('Please sign in again.')
-			}
-			const accepted = await readJson<ActionResult & { error?: string }>(
-				response,
-			)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(accepted?.error || input.failureMessage)
-			return accepted
 		},
 		onSuccess: async (accepted, { href }) => {
 			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', href)

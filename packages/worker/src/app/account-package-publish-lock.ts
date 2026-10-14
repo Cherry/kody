@@ -9,7 +9,10 @@ import { type AccountPackageApprovePublishLoaderData } from '#universal/loader-d
 import { getPackageTreeHref } from '#universal/package-files.ts'
 import { routes } from '#universal/routes.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
-import { jsonResponse } from '#worker/json-response.ts'
+import {
+	packageMutationResult,
+	type PackageMutationResult,
+} from './package-mutation-result.ts'
 import {
 	isGitCommitSha,
 	isSavedPackageLocked,
@@ -30,6 +33,7 @@ export async function loadAccountPackageApprovePublishData(input: {
 	request: Request
 	user: AuthenticatedUser
 	packageId: string
+	commit?: string
 }): Promise<
 	AccountPackageApprovePublishLoaderData | { ok: false; error: string }
 > {
@@ -51,7 +55,8 @@ export async function loadAccountPackageApprovePublishData(input: {
 		return { ok: false, error: 'Package source not found.' }
 	}
 	const requestUrl = new URL(input.request.url)
-	const requestedCommit = requestUrl.searchParams.get('commit')?.trim() ?? ''
+	const requestedCommit =
+		input.commit?.trim() ?? requestUrl.searchParams.get('commit')?.trim() ?? ''
 	const pendingIsDefaultHead = !requestedCommit
 	let pendingCommit: string | null = null
 	if (requestedCommit) {
@@ -174,12 +179,12 @@ async function loadPublishCompareTree(input: {
 	}
 }
 
-export async function handleAccountPackagePublishLockAction(input: {
+export async function mutateAccountPackagePublishLock(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
 	body: object
-}): Promise<Response | null> {
+}): Promise<PackageMutationResult | null> {
 	const action = readTrimmedStringOrEmpty(input.body, 'action')
 	if (
 		action !== 'lock' &&
@@ -190,7 +195,10 @@ export async function handleAccountPackagePublishLockAction(input: {
 	}
 	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
 	if (!packageId) {
-		return jsonResponse({ ok: false, error: 'Package id is required.' }, 400)
+		return packageMutationResult(
+			{ ok: false, error: 'Package id is required.' },
+			400,
+		)
 	}
 	const resolved = await loadWritableAccountSavedPackage({
 		env: input.env,
@@ -198,12 +206,16 @@ export async function handleAccountPackagePublishLockAction(input: {
 		packageId,
 		permission: 'package:write',
 	})
-	if (!resolved.ok) return resolved.response
+	if (!resolved.ok)
+		return packageMutationResult(
+			{ ok: false, error: 'Package not found.' },
+			404,
+		)
 	const { savedPackage, ownerUserId, actorUserId } = resolved.package
 
 	if (action === 'lock' || action === 'unlock') {
 		if (action === 'lock' && isSavedPackageLocked(savedPackage.lockedAt)) {
-			return jsonResponse(
+			return packageMutationResult(
 				await reloadAccountPackagesAfterWrite({
 					env: input.env,
 					request: input.request,
@@ -219,9 +231,12 @@ export async function handleAccountPackagePublishLockAction(input: {
 			lockedAt: action === 'lock' ? new Date().toISOString() : null,
 		})
 		if (!changed) {
-			return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+			return packageMutationResult(
+				{ ok: false, error: 'Package not found.' },
+				404,
+			)
 		}
-		return jsonResponse(
+		return packageMutationResult(
 			await reloadAccountPackagesAfterWrite({
 				env: input.env,
 				request: input.request,
@@ -234,7 +249,7 @@ export async function handleAccountPackagePublishLockAction(input: {
 
 	const commit = readTrimmedStringOrEmpty(input.body, 'commit')
 	if (!isGitCommitSha(commit)) {
-		return jsonResponse(
+		return packageMutationResult(
 			{
 				ok: false,
 				error: 'A git commit SHA is required to approve this publish.',
@@ -248,7 +263,10 @@ export async function handleAccountPackagePublishLockAction(input: {
 		savedPackage.sourceId,
 	)
 	if (!source || source.user_id !== ownerUserId) {
-		return jsonResponse({ ok: false, error: 'Package source not found.' }, 404)
+		return packageMutationResult(
+			{ ok: false, error: 'Package source not found.' },
+			404,
+		)
 	}
 	const sessionId = `approve-publish-${savedPackage.id}`
 	const publishResult = await repoSessionRpc(
@@ -297,13 +315,13 @@ export async function handleAccountPackagePublishLockAction(input: {
 				kodyId: savedPackage.kodyId,
 				promotedCommit: commit,
 			})
-			return jsonResponse({
+			return packageMutationResult({
 				...packagesPayload,
 				listing,
 			})
 		}
 		case 'checks_failed':
-			return jsonResponse(
+			return packageMutationResult(
 				{
 					ok: false,
 					error:
@@ -313,9 +331,12 @@ export async function handleAccountPackagePublishLockAction(input: {
 				400,
 			)
 		case 'not_fast_forward':
-			return jsonResponse({ ok: false, error: publishResult.message }, 400)
+			return packageMutationResult(
+				{ ok: false, error: publishResult.message },
+				400,
+			)
 		case 'locked':
-			return jsonResponse(
+			return packageMutationResult(
 				{
 					ok: false,
 					error: 'Could not promote this locked package. Reload and try again.',
@@ -323,7 +344,10 @@ export async function handleAccountPackagePublishLockAction(input: {
 				409,
 			)
 		case 'approval_required':
-			return jsonResponse({ ok: false, error: publishResult.message }, 409)
+			return packageMutationResult(
+				{ ok: false, error: publishResult.message },
+				409,
+			)
 		default: {
 			const exhaustive: never = publishResult
 			throw new Error(`Unknown approve-publish status: ${String(exhaustive)}`)

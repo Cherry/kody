@@ -1,6 +1,6 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createAccountAvatarApiPostHandler } from './account-avatar.ts'
+import { testAccountAvatarApiPostHandler } from './account-avatar.test-support.ts'
 
 const mocks = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -62,10 +62,10 @@ function createEnv() {
 }
 
 test('account avatar API auth, upload, remove, and invalid type', async () => {
-	const handler = createAccountAvatarApiPostHandler(createEnv())
+	const handler = testAccountAvatarApiPostHandler(createEnv())
 
 	mocks.readAuthenticatedAppUser.mockResolvedValue(null)
-	const unauthorized = await handler.handler({
+	const unauthorized = await handler.execute({
 		request: new Request('http://example.com/account/profile/avatar.json', {
 			method: 'POST',
 		}),
@@ -73,7 +73,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		params: {},
 	} as never)
 	expect(unauthorized.status).toBe(401)
-	expect(((await unauthorized.json()) as { ok: boolean }).ok).toBe(false)
+	expect((unauthorized.data as { ok: boolean }).ok).toBe(false)
 
 	mocks.readAuthenticatedAppUser.mockResolvedValue(authedUser)
 	mocks.processUserAvatar.mockReturnValue({
@@ -90,7 +90,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 			type: 'image/png',
 		}),
 	)
-	const upload = await handler.handler({
+	const upload = await handler.execute({
 		request: new Request('http://example.com/account/profile/avatar.json', {
 			method: 'POST',
 			body: form,
@@ -99,7 +99,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		params: {},
 	} as never)
 	expect(upload.status).toBe(200)
-	expect(await upload.json()).toEqual(profilePayload)
+	expect(upload.data).toEqual(profilePayload)
 	expect(mocks.saveUserAvatar).toHaveBeenCalledWith(
 		expect.objectContaining({
 			numericUserId: 1,
@@ -113,7 +113,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		...profilePayload,
 		avatarUrl: null,
 	})
-	const remove = await handler.handler({
+	const remove = await handler.execute({
 		request: new Request('http://example.com/account/profile/avatar.json', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -123,7 +123,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		params: {},
 	} as never)
 	expect(remove.status).toBe(200)
-	expect(await remove.json()).toMatchObject({ avatarUrl: null })
+	expect(remove.data).toMatchObject({ avatarUrl: null })
 	expect(mocks.deleteUserAvatar).toHaveBeenCalledWith(
 		expect.objectContaining({
 			numericUserId: 1,
@@ -139,7 +139,7 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		'avatar',
 		new File([Uint8Array.from([1])], 'avatar.svg', { type: 'image/svg+xml' }),
 	)
-	const invalid = await handler.handler({
+	const invalid = await handler.execute({
 		request: new Request('http://example.com/account/profile/avatar.json', {
 			method: 'POST',
 			body: invalidForm,
@@ -148,5 +148,5 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		params: {},
 	} as never)
 	expect(invalid.status).toBe(400)
-	expect(((await invalid.json()) as { ok: boolean }).ok).toBe(false)
+	expect((invalid.data as { ok: boolean }).ok).toBe(false)
 })

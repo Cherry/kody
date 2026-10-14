@@ -1,8 +1,11 @@
 /** @jsxImportSource @emotion/react */
+import {
+	readConnectIntegration,
+	readConnectChooser,
+} from '#start/server/connect-integration'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
 import {
-	type AccountIntegrationDetailLoaderData,
 	type ConnectOauthExistingConnection,
 	type ConnectOauthLoaderData,
 } from '#universal/loader-data.ts'
@@ -47,14 +50,12 @@ import {
 	type ConnectOauthStatusTone,
 	type ConnectOauthStep,
 	approveConnectOauthHosts,
-	connectOauthAccountFetchInit,
 	persistConnectOauthOrgSlug,
 	readConnectOauthOrgSlug,
 	replaceConnectOauthCallbackUrl,
 	saveConnectOauthConnection,
 	withConnectOauthChooserOrg,
 	buildConnectOauthAuthorizeUrl,
-	buildConnectOauthIntegrationLookupHref,
 	connectOauthHeaderCss,
 	connectOauthEyebrowCss,
 	connectOauthPageCss,
@@ -65,7 +66,6 @@ import {
 	readConnectOauthCallback,
 	readConnectOauthQueryConfig,
 	readStoredConnectOauthConfig,
-	redirectToLoginOn401,
 	saveConnectOauthApp,
 	validateConnectOauthState,
 } from './connect-oauth-shared.ts'
@@ -493,16 +493,16 @@ export function ConnectOauthRoute({
 						new URL(currentHref, window.location.origin),
 					)
 					if (parsed.ok) {
-						const response = await fetch(
-							buildConnectOauthIntegrationLookupHref(
-								parsed.value.providerKey,
-								new URL(currentHref, window.location.origin).searchParams,
-							),
-							connectOauthAccountFetchInit(flowOrg),
-						)
-						if (redirectToLoginOn401(response)) return
-						const payload =
-							(await response.json()) as AccountIntegrationDetailLoaderData
+						const payload = await readConnectIntegration({
+							data: {
+								orgSlug: flowOrg ?? undefined,
+								name: parsed.value.providerKey,
+								app:
+									new URL(currentHref, window.location.origin).searchParams.get(
+										'app',
+									) ?? undefined,
+							},
+						})
 						nextConfig = mergeConnectOauthConfig({
 							queryConfig: parsed.value,
 							storedIntegration: payload.integration
@@ -513,23 +513,15 @@ export function ConnectOauthRoute({
 				}
 				if (!mounted.current) return
 				if (!nextConfig) {
-					const response = await fetch(
-						'/account/integrations.json?connectChooser=1',
-						connectOauthAccountFetchInit(flowOrg),
-					)
-					if (redirectToLoginOn401(response) || !mounted.current) return
-					const fallback = (await response.json().catch(() => null)) as {
-						ok?: boolean
-						chooser?: ConnectOauthLoaderData['chooser']
-					} | null
+					const chooser = await readConnectChooser({
+						data: { orgSlug: flowOrg ?? undefined },
+					})
+					if (!mounted.current) return
 					update({
-						chooserOptions:
-							response.ok && fallback?.ok
-								? withConnectOauthChooserOrg(
-										fallback.chooser?.options ?? [],
-										flowOrg,
-									)
-								: [],
+						chooserOptions: withConnectOauthChooserOrg(
+							chooser.options,
+							flowOrg,
+						),
 					})
 					update({
 						hasConfigError: true,

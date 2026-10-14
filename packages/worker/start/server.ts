@@ -87,7 +87,11 @@ export async function renderNativeDocument(
 				status: documentFailure?.status ?? oauthPage?.status ?? response.status,
 				localDev: env.WRANGLER_IS_LOCAL_DEV === 'true',
 			})
-			if (response.status === 200 || !headers.has('Cache-Control'))
+			if (
+				(headers.get('Content-Type')?.includes('text/html') &&
+					response.status === 200) ||
+				!headers.has('Cache-Control')
+			)
 				headers.set('Cache-Control', cache.cacheControl)
 			if (cache.vary) headers.append('Vary', cache.vary)
 			if (

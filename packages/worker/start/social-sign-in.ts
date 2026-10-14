@@ -1,4 +1,7 @@
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import {
+	readWebsiteAuthProviders,
+	startWebsiteOAuth,
+} from '#start/server/auth-mutations'
 import {
 	appendAttributionQueryParams,
 	type FirstTouchAttribution,
@@ -30,16 +33,7 @@ export async function fetchPublicAuthConfig(
 	signal?: AbortSignal,
 ): Promise<PublicAuthConfig | null> {
 	try {
-		const response = await fetch('/auth/providers.json', {
-			headers: { Accept: 'application/json' },
-			signal,
-		})
-		const payload = await readJson<{
-			ok?: boolean
-			providers?: unknown
-			turnstileSiteKey?: unknown
-		}>(response)
-		if (!response.ok || payload?.ok !== true) return null
+		const payload = await readWebsiteAuthProviders({ signal })
 		const providers = (
 			Array.isArray(payload.providers) ? payload.providers : []
 		).filter(
@@ -76,26 +70,19 @@ export async function startSocialSignIn(
 	attribution: FirstTouchAttribution | null = null,
 	signal?: AbortSignal,
 ): Promise<string | null> {
-	const response = await fetch(
-		buildProviderStartPath(providerId, redirectTo, attribution),
-		{
-			method: 'POST',
-			signal,
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-			},
-			credentials: 'include',
-			body: JSON.stringify(protection),
+	const payload = await startWebsiteOAuth({
+		data: {
+			provider: providerId,
+			search: new URL(
+				buildProviderStartPath(providerId, redirectTo, attribution),
+				'http://localhost',
+			).search,
+			body: { ...protection },
 		},
-	)
-	const payload = await readJson<{
-		ok?: boolean
-		error?: string
-		authorizeUrl?: string
-	}>(response)
+		signal,
+	})
 	if (
-		!response.ok ||
+		!payload.successful ||
 		payload?.ok !== true ||
 		typeof payload.authorizeUrl !== 'string'
 	) {

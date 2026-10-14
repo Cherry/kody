@@ -1,72 +1,16 @@
-import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import {
 	loadAccountValuesData,
 	userScopedStorageContext,
 } from '#app/account-values-data.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
-import { type routes } from '#universal/routes.ts'
 import { deleteValue } from '#mcp/values/service.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-/**
- * JSON API for `/account/values.json` (GET + POST). Action: `delete`.
- */
-export function createAccountValuesApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			if (request.method === 'GET') {
-				return jsonResponse(
-					await loadAccountValuesData({
-						env,
-						user,
-						url: request.url,
-					}),
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const action = readTrimmedStringOrEmpty(body, 'action')
-			try {
-				if (action === 'delete') {
-					return await handleDeleteAction({ env, user, body })
-				}
-			} catch (error) {
-				return jsonResponse(
-					{
-						ok: false,
-						error:
-							error instanceof Error
-								? error.message
-								: 'Unable to update values.',
-					},
-					400,
-				)
-			}
-
-			return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
-		},
-	} satisfies Action<typeof routes.accountValuesApi>
-}
 
 async function handleDeleteAction(input: {
 	env: Env
@@ -88,13 +32,42 @@ async function handleDeleteAction(input: {
 		name,
 	})
 	if (!deleted) {
-		return jsonResponse({ ok: false, error: 'Value not found.' }, 404)
+		return operationResult({ ok: false, error: 'Value not found.' }, 404)
 	}
-	return jsonResponse(
+	return operationResult(
 		await loadAccountValuesData({
 			env: input.env,
 			user: input.user,
 			selectedValueId: null,
 		}),
 	)
+}
+
+export async function mutateAccountValues({
+	env,
+	user,
+	body,
+}: {
+	env: Env
+	user: AuthenticatedUser
+	request: Request
+	body: object
+}) {
+	const action = readTrimmedStringOrEmpty(body, 'action')
+	try {
+		if (action === 'delete') {
+			return await handleDeleteAction({ env, user, body })
+		}
+	} catch (error) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					error instanceof Error ? error.message : 'Unable to update values.',
+			},
+			400,
+		)
+	}
+
+	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

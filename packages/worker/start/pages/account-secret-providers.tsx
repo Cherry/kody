@@ -1,22 +1,7 @@
 /** @jsxImportSource @emotion/react */
-import { pageQueryOrg } from '../page-query-scope.ts'
-import { relocateAccountHref } from '#universal/org-pages.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
-import { orgPageFilters } from '../org-page-cache.ts'
-import { useState } from 'react'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AccountPageHeader,
-	accountInputCss,
-} from './account-management-components.tsx'
-import { routes } from '#universal/routes.ts'
+import { updateSecretProviders } from '#start/server/account-mutations'
 import { type AccountSecretProvidersLoaderData } from '#universal/loader-data.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import {
 	fieldCss,
 	fieldLabelCss,
@@ -26,8 +11,19 @@ import {
 	getSecondaryButtonCss,
 	pageDescriptionCss,
 } from '#universal/styles/style-primitives.ts'
-
-const apiPath = routes.accountSecretProvidersApi.href()
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { orgPageFilters } from '../org-page-cache.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import {
+	AccountManagementMessage,
+	AccountManagementPanel,
+	AccountManagementShell,
+	AccountPageHeader,
+	accountInputCss,
+} from './account-management-components.tsx'
 
 export function AccountSecretProvidersPage({
 	payload,
@@ -65,17 +61,9 @@ export function AccountSecretProvidersPage({
 			body: Record<string, unknown>
 			href: string
 		}) => {
-			const response = await fetch(apiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(href),
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'include',
-				body: JSON.stringify(body),
+			return updateSecretProviders({
+				data: { body, orgSlug: pageQueryOrg(href) ?? undefined },
 			})
-			if (response.status === 401) throw new Error('Please sign in again.')
-			const result = await readJson<{ ok?: boolean; error?: string }>(response)
-			if (!response.ok || !result?.ok)
-				throw new Error(result?.error ?? 'Unable to update secret providers.')
 		},
 		onSuccess: (_result, { href }) => {
 			void Promise.all(

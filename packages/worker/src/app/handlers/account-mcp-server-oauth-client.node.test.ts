@@ -1,7 +1,3 @@
-import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
-import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
-import { DatabaseSync } from 'node:sqlite'
-import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { createAuthCookie, setAuthSessionSecret } from '#app/auth-session.ts'
 import {
 	decryptMcpServerOAuthClientSecret,
@@ -15,6 +11,10 @@ import { createAuditTestDb } from '#worker/test-support/create-audit-db.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
+import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 type HubClientInput = {
 	ownerId: string
@@ -87,8 +87,8 @@ vi.mock('#worker/mcp-client/hub-client.ts', async (importOriginal) => ({
 	},
 }))
 
-const { createAccountMcpServersApiHandler } =
-	await import('./account-mcp-servers.ts')
+const { testAccountMcpServersApiHandler } =
+	await import('./account-mcp-servers.test-support.ts')
 
 const cookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 const secretStoreKey = 'test-secret-store-key-32-chars-minimum'
@@ -210,12 +210,12 @@ async function callApi(
 		},
 		...(input.body ? { body: JSON.stringify(input.body) } : {}),
 	})
-	const response = await createAccountMcpServersApiHandler(env).handler({
+	const response = await testAccountMcpServersApiHandler(env).execute({
 		request,
 		params: {},
 		url: new URL(request.url),
 	} as never)
-	return { status: response.status, text: await response.text() }
+	return { status: response.status, text: JSON.stringify(response.data) }
 }
 
 function storedSetting(sqlite: DatabaseSync) {

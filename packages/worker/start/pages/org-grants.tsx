@@ -1,29 +1,28 @@
 /** @jsxImportSource @emotion/react */
-import { type QueryKey } from '@tanstack/react-query'
 import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AccountPageHeader,
-} from './account-management-components.tsx'
-import { SiteLink } from '../components/site-link.tsx'
+	type OrgGrantsLoaderData,
+	type OrgGrantView,
+} from '#universal/loader-data.ts'
+import { orgCollaboratorsPath, orgTeamsPath } from '#universal/org-pages.ts'
+import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
 import {
 	colors,
 	radius,
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import {
-	type OrgGrantsLoaderData,
-	type OrgGrantView,
-} from '#universal/loader-data.ts'
+import { type QueryKey } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useOrgPeopleMutation } from './org-people-mutation.ts'
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { orgCollaboratorsPath, orgTeamsPath } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
-import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
 import { renderIcon } from '../components/icon.tsx'
+import { SiteLink } from '../components/site-link.tsx'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+	AccountManagementMessage,
+	AccountManagementPanel,
+	AccountManagementShell,
+	AccountPageHeader,
+} from './account-management-components.tsx'
+import { useOrgPeopleMutation } from './org-people-mutation.ts'
 function grantSummary(grant: OrgGrantView) {
 	const access = grant.presetLabel ?? 'Custom permissions'
 	return `${grant.subjectLabel} · ${access} on ${grant.resourceLabel}`
@@ -129,9 +128,7 @@ function OrgGrantsContent({
 														setMessage(null)
 														mutation.mutate(
 															{
-																href: routes.orgGrantsRevokePost.href({
-																	orgSlug: data.org.slug,
-																}),
+																action: 'grantRevoke',
 																body: { grantId: grant.id },
 															},
 															{

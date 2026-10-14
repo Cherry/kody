@@ -1,18 +1,45 @@
 /** @jsxImportSource @emotion/react */
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { createListDetailRoute } from '#client/list-detail-route.ts'
+import {
+	clearOnboardingMcpOAuthReturnCookie,
+	closeOnboardingMcpOAuthPopupIfOpened,
+} from '#client/mcp-oauth-popup.ts'
+import { updateMcpServers } from '#start/server/account-mutations'
+import {
+	getDangerPillCss,
+	getGhostButtonCss,
+	getPillButtonCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { invalidatePageResources } from '../page-invalidation-cache.ts'
-import { useState, useEffect, useRef } from 'react'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
+import { renderMcpServerDetail } from './account-mcp-servers-detail.tsx'
+import {
+	renderAddMcpServerForm,
+	renderOauthCallbackSection,
+} from './account-mcp-servers-forms.tsx'
+import {
+	type AccountMcpServersPayload,
+	type McpServerListItem,
+	type McpServerUsageDraft,
+	type MessageTone,
+	filterServers,
+	readAddServerPrefill,
+	readOAuthResultFromHref,
+	readSearchFilter,
+	renderNamedServer,
+	stateColor,
+	stateLabel,
+} from './account-mcp-servers-shared.tsx'
 import {
 	RecordDot,
 	RecordTable,
@@ -20,38 +47,9 @@ import {
 	recordBodyCss,
 	recordCellClamp,
 } from './record-table.tsx'
-import {
-	type AccountMcpServersPayload,
-	type McpServerListItem,
-	type McpServerUsageDraft,
-	type MessageTone,
-	filterServers,
-	readOAuthResultFromHref,
-	readAddServerPrefill,
-	readSearchFilter,
-	renderNamedServer,
-	stateColor,
-	stateLabel,
-} from './account-mcp-servers-shared.tsx'
-import { renderMcpServerDetail } from './account-mcp-servers-detail.tsx'
-import {
-	renderAddMcpServerForm,
-	renderOauthCallbackSection,
-} from './account-mcp-servers-forms.tsx'
-import {
-	clearOnboardingMcpOAuthReturnCookie,
-	closeOnboardingMcpOAuthPopupIfOpened,
-} from '#client/mcp-oauth-popup.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import {
-	getDangerPillCss,
-	getGhostButtonCss,
-	getPillButtonCss,
-} from '#universal/styles/style-primitives.ts'
 
 const clampedCellCss = recordCellClamp(26)
 
-const accountMcpServersApiPath = '/account/mcp-servers.json'
 const mcpServersRoute = createListDetailRoute('/account/mcp-servers')
 
 export function AccountMcpServersPage({
@@ -74,7 +72,8 @@ export function AccountMcpServersPage({
 	}, [actorKey, currentHref])
 	function isSubmitterCurrent() {
 		return (
-			currentScope.current?.actorKey === actorKey &&
+			currentScope.current !== null &&
+			currentScope.current.actorKey === actorKey &&
 			currentScope.current.href === currentHref
 		)
 	}
@@ -86,23 +85,13 @@ export function AccountMcpServersPage({
 			actorKey: string | null
 			failureMessage: string
 		}) => {
-			const response = await fetch(accountMcpServersApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(input.href),
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			return updateMcpServers({
+				data: {
+					body: input.body,
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					search: new URL(input.href, 'https://kody.local').search,
 				},
-				credentials: 'include',
-				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) throw new Error('Please sign in again.')
-			const accepted = await readJson<
-				AccountMcpServersPayload & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(accepted?.error || input.failureMessage)
-			return accepted
 		},
 		onMutate: async ({ href, actorKey }) => {
 			await queryClient.cancelQueries(

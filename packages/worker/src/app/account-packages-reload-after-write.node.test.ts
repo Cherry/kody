@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test } from 'vitest'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { handleAccountPackagePublishLockAction } from '#app/account-package-publish-lock.ts'
+import { mutateAccountPackagePublishLock } from '#app/account-package-publish-lock.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { sessionRequestContext } from '#worker/test-support/request-context.ts'
@@ -98,14 +98,14 @@ test('reload after team package lock includes selectedPackage from the owning or
 		'https://kody.test/account/packages/pkg-team/settings',
 		{ method: 'POST' },
 	)
-	const response = await handleAccountPackagePublishLockAction({
+	const response = await mutateAccountPackagePublishLock({
 		env,
 		request,
 		user,
 		body: { action: 'lock', packageId: 'pkg-team' },
 	})
 	expect(response?.status).toBe(200)
-	const payload = (await response?.json()) as {
+	const payload = response?.data as {
 		selectedPackage?: {
 			id: string
 			kodyId: string

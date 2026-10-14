@@ -1,23 +1,22 @@
 /** @jsxImportSource @emotion/react */
-import { SiteLink } from '../components/site-link.tsx'
+import { resendWebsiteVerification } from '#start/server/auth-mutations'
 import {
-	describeEmailVerificationDelivery,
-	type EmailVerificationDelivery,
+describeEmailVerificationDelivery,
+type EmailVerificationDelivery,
 } from '#universal/email-verification-delivery.ts'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
-import { colors, spacing } from '#universal/styles/tokens.ts'
 import {
-	cardCss,
-	cardTitleCss,
-	descriptionCss,
-	getPrimaryButtonCss,
-	getSecondaryButtonCss,
-	mutedLinkCss,
+cardCss,
+cardTitleCss,
+descriptionCss,
+getPrimaryButtonCss,
+getSecondaryButtonCss,
+mutedLinkCss,
 } from '#universal/styles/style-primitives.ts'
+import { colors,spacing } from '#universal/styles/tokens.ts'
+import { SiteLink } from '../components/site-link.tsx'
 
 export { buildPendingVerificationPath } from '#client/routes/pending-verification-path.ts'
-
-const resendVerificationApiPath = '/account/resend-verification.json'
 
 export type ResendVerificationResult =
 	| { ok: true; message: string }
@@ -27,28 +26,10 @@ export async function requestResendVerification(
 	redirectTo?: string | null,
 ): Promise<ResendVerificationResult> {
 	const safeRedirectTo = normalizeRedirectTo(redirectTo)
-	const response = await fetch(resendVerificationApiPath, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-		},
-		credentials: 'include',
-		body: JSON.stringify(safeRedirectTo ? { redirectTo: safeRedirectTo } : {}),
+	const payload = await resendWebsiteVerification({
+		data: safeRedirectTo ? { redirectTo: safeRedirectTo } : {},
 	})
-	if (response.status === 401) {
-		return {
-			ok: false,
-			message: 'Sign in again to resend the verification email.',
-			unauthorized: true,
-		}
-	}
-	const payload = (await response.json().catch(() => null)) as {
-		ok?: boolean
-		message?: string
-		error?: string
-	} | null
-	if (!response.ok || !payload?.ok) {
+	if (!payload.successful || !payload.ok) {
 		return {
 			ok: false,
 			message:

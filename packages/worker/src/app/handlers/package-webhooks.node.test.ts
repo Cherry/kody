@@ -2,7 +2,7 @@ import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
 import {
-	createCommunityPackageWebhooksApiHandler,
+	mutatePackageWebhook,
 	readPackageWebhooksData,
 } from '#app/handlers/package-webhooks.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
@@ -159,36 +159,28 @@ async function setup(sessionUsername = 'owner') {
 		SECRET_STORE_KEY: 'test-secret-store-key-32-chars-minimum',
 		SENTRY_ENVIRONMENT: 'test',
 	} as unknown as Env
-	const handler = createCommunityPackageWebhooksApiHandler(env)
-	const run = (request: Request, params = ownerParams) =>
-		handler.handler({ request, url: new URL(request.url), params } as never)
-	const get = (params = ownerParams) =>
-		run(
-			new Request(apiUrl, { headers: { Accept: 'application/json' } }),
+	const get = async (params = ownerParams) => {
+		const result = await readPackageWebhooksData(
+			new Request(apiUrl),
 			params,
+			env,
 		)
+		return result.status === 200
+			? { status: 200, data: result.data }
+			: { status: result.status, data: { ok: false, error: result.error } }
+	}
 	const post = (body: unknown, params = ownerParams) =>
-		run(
-			new Request(apiUrl, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify(body),
-			}),
-			params,
-		)
+		mutatePackageWebhook({ env, request: new Request(apiUrl), params, body })
 	const act = async (intent: string, webhookName = 'launcher') => {
 		const response = await post({ intent, webhookName })
 		return {
 			status: response.status,
-			body: (await response.json()) as PackageWebhooksActionPayload & {
+			body: response.data as PackageWebhooksActionPayload & {
 				error: string
 			},
 		}
 	}
-	return { db, userId, run, get, post, act, env }
+	return { db, userId, get, post, act, env }
 }
 
 function launcherOf(body: { webhooks: PackageWebhooksLoaderData['webhooks'] }) {
@@ -204,7 +196,7 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 
 	const listed = await get()
 	expect(listed.status).toBe(200)
-	const listBody = (await listed.json()) as PackageWebhooksLoaderData
+	const listBody = listed.data as PackageWebhooksLoaderData
 	expect(listBody).toMatchObject({
 		ok: true,
 		username: 'owner',
@@ -261,7 +253,7 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 	)
 
 	// GET never carries the credential; only an explicit reveal does.
-	const relistText = await (await get()).text()
+	const relistText = JSON.stringify((await get()).data)
 	expect(relistText).not.toContain(urlSecretOf(mintedUrl))
 	expect(relistText).not.toContain('"url"')
 
@@ -321,7 +313,7 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 		)
 		.bind(userId)
 		.run()
-	const legacyList = (await (await get()).json()) as PackageWebhooksLoaderData
+	const legacyList = (await get()).data as PackageWebhooksLoaderData
 	expect(launcherOf(legacyList).urlRecoverable).toBe(false)
 	const legacyReveal = await act('reveal')
 	expect(legacyReveal.status).toBe(400)
@@ -341,7 +333,7 @@ test('package webhooks API is owner-only: another username or an unknown package
 
 	const someoneElse = await get(otherParams)
 	expect(someoneElse.status).toBe(404)
-	const someoneElseBody = (await someoneElse.json()) as { error: string }
+	const someoneElseBody = someoneElse.data as { error: string }
 	expect(someoneElseBody.error).toBe('Package not found.')
 	expect(JSON.stringify(someoneElseBody)).not.toContain('sentry')
 
@@ -362,7 +354,7 @@ test('package webhooks API is owner-only: another username or an unknown package
 })
 
 test('package webhooks API rejects unknown webhooks, bad bodies, and anonymous callers', async () => {
-	const { db, run, get, act } = await setup()
+	const { db, get, act } = await setup()
 
 	const undeclared = await act('mint', 'nope')
 	expect(undeclared.status).toBe(400)
@@ -377,10 +369,6 @@ test('package webhooks API rejects unknown webhooks, bad bodies, and anonymous c
 		const { status } = await act(intent, webhookName)
 		expect({ name, status }).toEqual({ name, status: 400 })
 	}
-
-	const wrongMethod = await run(new Request(apiUrl, { method: 'DELETE' }))
-	expect(wrongMethod.status).toBe(405)
-	expect(wrongMethod.headers.get('Allow')).toBe('GET, POST')
 
 	// Infrastructure failures are audited with their detail but reach the
 	// browser only as the generic per-intent message.
@@ -407,7 +395,7 @@ test('native webhook reads share API data and owner-only denials', async () => {
 	const result = await readPackageWebhooksData(request, ownerParams, env)
 	expect(result.status).toBe(200)
 	if (result.status !== 200) throw new Error('Expected authorized webhook data')
-	expect(result.data).toEqual(await (await get()).json())
+	expect(result.data).toEqual((await get()).data)
 	expect(result.data).not.toHaveProperty('revealed')
 	expect(await readPackageWebhooksData(request, otherParams, env)).toEqual({
 		status: 404,

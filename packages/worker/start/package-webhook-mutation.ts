@@ -1,10 +1,10 @@
+import { updatePackageWebhook } from '#start/server/package-webhooks'
 import {
 	mutationOptions,
 	type QueryClient,
 	type QueryKey,
 } from '@tanstack/react-query'
 import {
-	postPackageWebhookIntent,
 	type WebhookIntent,
 	webhookFailureMessage,
 } from '#client/routes/webhooks-shared.ts'
@@ -21,12 +21,10 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			queryKey: QueryKey
 			invalidate: () => Promise<void>
 		}) => {
-			const result = await postPackageWebhookIntent(input)
-			if (result.kind === 'unauthorized')
-				throw new Error('Sign in again to manage webhooks.')
-			if (result.kind === 'error')
-				throw new Error(result.message || webhookFailureMessage(input.intent))
-			return result.payload
+			const payload = await updatePackageWebhook({ data: input })
+			if (!payload.ok)
+				throw new Error(payload.error || webhookFailureMessage(input.intent))
+			return payload
 		},
 		onMutate: async ({ queryKey }) => {
 			await queryClient.cancelQueries({ queryKey, exact: true })

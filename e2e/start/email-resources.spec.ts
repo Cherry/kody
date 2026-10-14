@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import {
+	classifyEmailThroughUi,
+	deleteEmailThroughUi,
+	readEmailThroughUi,
+} from '../account-fixtures.ts'
+import {
 	expect,
 	test,
 	waitForClientHydration,
 	type Request,
 } from '../playwright-utils.ts'
-import { type AccountEmailLoaderData } from '../../packages/worker/universal/loader-data.ts'
 
 /** Inspect the server function's data object, not strings nested in auth
  * context and not a generated function ID that can change between builds. */
@@ -51,11 +55,7 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		username: `email-resources-${id}`,
 	})
 	await login({ ...user, mode: 'login' })
-	const read = async () => {
-		const response = await page.request.get('/account/email.json')
-		expect(response.status()).toBe(200)
-		return response.json() as Promise<AccountEmailLoaderData>
-	}
+	const read = () => readEmailThroughUi(page)
 	const recipient = (await read()).inboxAddress!
 	expect(recipient).toMatch(/@(inbox\.)?(localhost|127\.0\.0\.1|[^@]+\.test)$/)
 	const endpoint = new URL('/cdn-cgi/local/email', origin)
@@ -92,14 +92,7 @@ test('Email reuses resources across selection and preserves optimistic intent th
 				})
 				.not.toBe('')
 			messageIds.push(messageId)
-			const baseline = await page.request.post('/account/email.json', {
-				data: {
-					action: 'classify',
-					message_id: messageId,
-					classification: 'accepted',
-				},
-			})
-			expect(baseline.status()).toBe(200)
+			await classifyEmailThroughUi(page, messageId)
 		}
 		await page.goto('/account')
 		await waitForClientHydration(page)
@@ -200,8 +193,12 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		const writeBarrier = new Promise<void>((resolve) => {
 			releaseWrite = resolve
 		})
-		await page.route('**/account/email.json*', async (route) => {
-			if (route.request().method() !== 'POST') return route.continue()
+		await page.route('**/_serverFn/**', async (route) => {
+			if (
+				route.request().method() !== 'POST' ||
+				!route.request().postData()?.includes('classify')
+			)
+				return route.fallback()
 			capturedWrite = true
 			await writeBarrier
 			await route.continue()
@@ -238,7 +235,8 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		).toBeVisible()
 		const accepted = page.waitForResponse(
 			(response) =>
-				new URL(response.url()).pathname === '/account/email.json' &&
+				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
+				response.request().postData()?.includes('classify') === true &&
 				response.request().method() === 'POST',
 		)
 		releaseWrite()
@@ -256,10 +254,7 @@ test('Email reuses resources across selection and preserves optimistic intent th
 		releaseWrite()
 		await page.unrouteAll({ behavior: 'wait' })
 		for (const messageId of messageIds) {
-			const removed = await page.request.post('/account/email.json', {
-				data: { action: 'delete', message_id: messageId },
-			})
-			expect(removed.status()).toBe(200)
+			await deleteEmailThroughUi(page, messageId)
 		}
 	}
 })

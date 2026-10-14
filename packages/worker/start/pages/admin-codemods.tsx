@@ -1,52 +1,52 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
-	adminCodemodsApiPath,
-	adminCodemodsRunApiPath,
-	adminCodemodsRunStopApiPath,
-	formatSummaryCounts,
-	maxRunSteps,
-	mergeSummaryCounts,
-	parseCommaSeparatedIds,
-	runModes,
-	type LiveRunItem,
-	type RunMode,
-	type RunPhase,
+formatSummaryCounts,
+maxRunSteps,
+mergeSummaryCounts,
+parseCommaSeparatedIds,
+runModes,
+type LiveRunItem,
+type RunMode,
+type RunPhase,
 } from '#client/routes/admin-codemods-shared.ts'
+import { readAdminCodemodItems } from '#start/server/admin-controls'
 import {
-	type AdminCodemodRunItemListItem,
-	type AdminCodemodRunItemsLoaderData,
-	type AdminCodemodRunListItem,
-	type AdminCodemodsLoaderData,
+adminCodemodRun,
+adminCodemodRunStop,
+} from '#start/server/admin-mutations'
+import {
+type AdminCodemodRunItemListItem,
+type AdminCodemodRunListItem,
+type AdminCodemodsLoaderData,
 } from '#universal/loader-data.ts'
 import {
-	fieldCss,
-	fieldLabelCss,
-	getDangerPillCss,
-	getGhostButtonCss,
-	getPillButtonCss,
-	getSelectCss,
+fieldCss,
+fieldLabelCss,
+getDangerPillCss,
+getGhostButtonCss,
+getPillButtonCss,
+getSelectCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors, mq, spacing } from '#universal/styles/tokens.ts'
+import { colors,mq,spacing } from '#universal/styles/tokens.ts'
 import {
-	useEffect,
-	useRef,
-	useState,
-	type FormEvent,
-	type MouseEvent,
+useEffect,
+useRef,
+useState,
+type FormEvent,
+type MouseEvent,
 } from 'react'
+import { usePageInvalidation } from '../page-invalidation.ts'
 import {
-	AccountManagementMessage,
-	AccountManagementPanel,
-	AccountManagementShell,
-	AdminPageHeader,
-	accountInputCss,
+accountInputCss,
+AccountManagementMessage,
+AccountManagementPanel,
+AccountManagementShell,
+AdminPageHeader,
 } from './account-management-components.tsx'
 import {
-	renderCodemodItemsTable,
-	renderRegisteredCodemodsPanel,
-	RunHistoryPanel,
+renderCodemodItemsTable,
+renderRegisteredCodemodsPanel,
+RunHistoryPanel,
 } from './admin-codemods-sections.tsx'
 const selectCss = getSelectCss()
 export function AdminCodemodsPage(props: {
@@ -116,28 +116,10 @@ export function AdminCodemodsPage(props: {
 			setHistoryNextAfterId(null)
 		}
 		try {
-			const url = new URL(adminCodemodsApiPath, window.location.origin)
-			url.searchParams.set('runId', runId)
-			if (append && historyNextAfterId) {
-				url.searchParams.set('afterId', historyNextAfterId)
-			}
-			const response = await fetch(url.pathname + url.search, {
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
+			const payload = await readAdminCodemodItems({
+				data: { runId, afterId: append ? historyNextAfterId : null },
 			})
 			if (requestId !== historyRequestIdRef.current) return
-			if (response.status === 401) {
-				window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<
-				AdminCodemodRunItemsLoaderData & {
-					error?: string
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error ?? 'Unable to load run items.')
-			}
 			setHistoryRun(payload.run)
 			setHistoryItems(
 				append ? [...historyItems, ...payload.items] : payload.items,
@@ -187,46 +169,13 @@ export function AdminCodemodsPage(props: {
 	// forever. Server-side stale reconciliation is the fallback.
 	async function markRunStopped(runId: string) {
 		try {
-			await fetch(adminCodemodsRunStopApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ runId }),
-			})
+			await adminCodemodRunStop({ data: { runId } })
 		} catch {
 			// The stale-run sweep on the next history load covers this.
 		}
 	}
 	async function postRunStep(body: Record<string, unknown>) {
-		const response = await fetch(adminCodemodsRunApiPath, {
-			method: 'POST',
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-			},
-			credentials: 'include',
-			body: JSON.stringify(body),
-		})
-		if (response.status === 401) {
-			window.location.assign('/login')
-			return null
-		}
-		const payload = await readJson<{
-			ok?: boolean
-			error?: string
-			runId?: string
-			codemodId?: string
-			mode?: string
-			items?: Array<LiveRunItem>
-			nextCursor?: string | null
-			summary?: Partial<Record<string, number>>
-		}>(response)
-		if (!response.ok || !payload?.ok) {
-			throw new Error(payload?.error ?? 'Unable to run package codemod step.')
-		}
+		const payload = await adminCodemodRun({ data: body })
 		return payload
 	}
 	async function runPagedCodemod(input: {

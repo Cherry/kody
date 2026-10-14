@@ -1,11 +1,9 @@
-import { DatabaseSync } from 'node:sqlite'
-import { expect, test, vi } from 'vitest'
 import {
 	createAuthCookie,
 	setAuthSessionSecret,
 	type AuthSession,
 } from '#app/auth-session.ts'
-import { createAccountConnectedAgentsApiHandler } from '#app/handlers/account-connected-agents.ts'
+import { testAccountConnectedAgentsApiHandler } from '#app/handlers/account-connected-agents.test-support.ts'
 import {
 	listInboundMcpConnectionLastUsed,
 	recordInboundMcpConnectionLastUsed,
@@ -15,6 +13,8 @@ import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { expect, test, vi } from 'vitest'
 
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
@@ -114,7 +114,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 		userOneSession.stableUserId,
 		'https://chatgpt.com/oauth/vG3/client.json',
 	)
-	const { handler } = createAccountConnectedAgentsApiHandler(
+	const { execute } = testAccountConnectedAgentsApiHandler(
 		createAppEnv(helpers, meter, createD1FromSqlite(sqlite)),
 	)
 	const url = 'https://example.com/account/connected-agents.json'
@@ -123,7 +123,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 			...init,
 			headers: { Cookie: cookie, Accept: 'application/json', ...init.headers },
 		})
-		return handler({ request: req, url: new URL(url), params: {} } as never)
+		return execute({ request: req, url: new URL(url), params: {} } as never)
 	}
 	const revoke = (clientId: string) =>
 		request({
@@ -134,7 +134,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 
 	const listed = await request()
 	expect(listed.status).toBe(200)
-	const listBody = (await listed.json()) as {
+	const listBody = listed.data as {
 		ok: true
 		agents: Array<{
 			clientId: string
@@ -159,9 +159,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	expect(unverified.status).toBe(200)
 	// Same gate as the onboarding payload: no MCP URL until the email is
 	// verified, so the page cannot push a user into the authorize → 403 loop.
-	expect(
-		((await unverified.json()) as { mcpServerUrl: string }).mcpServerUrl,
-	).toBe('')
+	expect((unverified.data as { mcpServerUrl: string }).mcpServerUrl).toBe('')
 	signIn(true)
 
 	await recordInboundMcpConnectionLastUsed({
@@ -182,7 +180,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	expect(listedWithLastUsed.status).toBe(200)
 	expect(
 		(
-			(await listedWithLastUsed.json()) as {
+			listedWithLastUsed.data as {
 				agents: Array<{ clientId: string; lastUsedAt: string | null }>
 			}
 		).agents,
@@ -210,7 +208,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	const revoked = await revoke('client-a')
 	expect(revoked.status).toBe(200)
 	expect(helpers.revokeGrant).toHaveBeenCalledTimes(2)
-	const revokeBody = (await revoked.json()) as {
+	const revokeBody = revoked.data as {
 		ok: true
 		agents: Array<{ clientId: string }>
 	}
@@ -248,7 +246,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	expect(missing.status).toBe(404)
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
-	const unauthorized = await handler({
+	const unauthorized = await execute({
 		request: new Request(url),
 		url: new URL(url),
 		params: {},
@@ -316,12 +314,12 @@ test('connected agents API on a team org lists and revokes only agents approved 
 			) VALUES ('sub_a', ?, 'client-a', 'demo.ping', '{}', 'https://hooks.example.com/kody', 'x')`,
 		)
 		.run(personId)
-	const { handler } = createAccountConnectedAgentsApiHandler(
+	const { execute } = testAccountConnectedAgentsApiHandler(
 		createAppEnv(helpers, undefined, createD1FromSqlite(sqlite)),
 	)
 	const url = 'https://example.com/account/connected-agents.json'
 	const call = async (body?: unknown) => {
-		const response = await handler({
+		const response = await execute({
 			request: new Request(url, {
 				method: body ? 'POST' : 'GET',
 				headers: { 'Content-Type': 'application/json' },
@@ -332,7 +330,7 @@ test('connected agents API on a team org lists and revokes only agents approved 
 		} as never)
 		return {
 			status: response.status,
-			body: (await response.json()) as {
+			body: response.data as {
 				agents?: Array<{ clientId: string; grantIds: Array<string> }>
 				connectionProfilesEnabled?: boolean
 				error?: string

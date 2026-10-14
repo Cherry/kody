@@ -55,16 +55,16 @@ for (const { outcome, prewarm } of [
 		const held = new Promise<void>((resolve) => {
 			captured = resolve
 		})
-		await page.route('**/account/profile.json', async (route) => {
-			if (route.request().method() !== 'POST') return route.continue()
+		await page.route('**/*', async (route) => {
+			if (
+				route.request().method() !== 'POST' ||
+				route.request().headers()['x-tsr-serverfn'] !== 'true' ||
+				!route.request().postData()?.includes('displayName')
+			)
+				return route.continue()
 			captured()
 			await barrier
-			if (outcome === 'rejected')
-				return route.fulfill({
-					status: 500,
-					contentType: 'application/json',
-					body: JSON.stringify({ error: 'Controlled failed profile save' }),
-				})
+			if (outcome === 'rejected') return route.abort('failed')
 			await route.continue()
 		})
 		const errors: string[] = []
@@ -79,12 +79,17 @@ for (const { outcome, prewarm } of [
 				.click()
 			const writeResponse = page.waitForResponse(
 				(response) =>
-					new URL(response.url()).pathname === '/account/profile.json' &&
+					response.request().headers()['x-tsr-serverfn'] === 'true' &&
+					response.request().postData()?.includes('displayName') === true &&
 					response.request().method() === 'POST',
 			)
 			await held
-			const serverBefore = await page.request.get('/account/profile.json')
-			expect((await serverBefore.json()).displayName).toBe(original)
+			const observer = await page.context().newPage()
+			await observer.goto('/account')
+			await expect(
+				observer.getByLabel('Display name', { exact: true }),
+			).toHaveValue(original)
+			await observer.close()
 			await page
 				.getByRole('link', { name: 'View public profile', exact: true })
 				.click()
@@ -115,7 +120,7 @@ for (const { outcome, prewarm } of [
 				await expect(
 					page
 						.getByRole('alert')
-						.filter({ hasText: 'Controlled failed profile save' }),
+						.filter({ hasText: /failed|fetch|network|error/i }),
 				).toBeVisible()
 			await expect(page.locator('html')).toHaveAttribute(
 				'data-query-mutation-document',
@@ -176,18 +181,27 @@ test('profile drafts preserve edits while untouched fields follow background cha
 	const displayName = page.getByLabel('Display name', { exact: true })
 	const bio = page.getByRole('textbox', { name: 'Bio', exact: true })
 	await displayName.fill(`Unsaved ${id}`)
-	const currentResponse = await page.request.get('/account/profile.json')
-	const current = await currentResponse.json()
 	const updatedBio = `Saved in another session ${id}`
-	const response = await page.request.post('/account/profile.json', {
-		data: {
-			username: current.username,
-			displayName: current.displayName,
-			bio: updatedBio,
-			profileVisibility: current.profileVisibility,
-		},
-	})
-	expect(response.ok()).toBe(true)
+	const other = await page.context().newPage()
+	try {
+		await other.goto('/account')
+		await waitForClientHydration(other)
+		await other
+			.getByRole('textbox', { name: 'Bio', exact: true })
+			.fill(updatedBio)
+		await other
+			.getByRole('button', { name: 'Save profile', exact: true })
+			.click()
+		await expect(
+			other.getByRole('button', { name: 'Save profile', exact: true }),
+		).toBeDisabled()
+		await other.reload()
+		await expect(
+			other.getByRole('textbox', { name: 'Bio', exact: true }),
+		).toHaveValue(updatedBio)
+	} finally {
+		await other.close()
+	}
 	await page.clock.fastForward(61_000)
 	await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
 	await expect(bio).toHaveValue(updatedBio)

@@ -1,20 +1,14 @@
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { type OrgPermission } from '@kody-internal/shared/org-permissions.ts'
 import { type BillingPageOrg } from '#app/account-billing-data.ts'
 import { loadAccountUsageData } from '#app/account-usage-data.ts'
-import {
-	readAuthenticatedAppUser,
-	type AuthenticatedAppUser,
-} from '#app/authenticated-user.ts'
+import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadRequestOrgResolution } from '#app/org-request-binding.ts'
 import {
 	authorize,
 	AuthorizationError,
 } from '#worker/authorization/authorize.ts'
 import { orgUsageCreditsPath, orgUsagePath } from '#universal/org-pages.ts'
-import { type routes } from '#universal/routes.ts'
 import {
 	applyCreditTopUpFromCheckoutSession,
 	CreditTopUpError,
@@ -164,40 +158,6 @@ export async function loadOrgUsagePageResult(
 		return new Response('Not found', { status: 404 })
 	}
 	return accountUsage
-}
-
-export function createOrgUsageApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			if (request.method !== 'GET') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-			const access = await resolveOrgUsageAccess({
-				request,
-				env,
-				user,
-				permission: 'billing:read',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			const accountUsage = await loadOrgUsagePageData({
-				request,
-				env,
-				user,
-				org: access.org,
-			})
-			if (!accountUsage) {
-				return jsonResponse({ ok: false, error: 'Not found.' }, 404)
-			}
-			return jsonResponse(accountUsage)
-		},
-	} satisfies Action<typeof routes.orgUsageApi>
 }
 
 /** Personal-org usage URL for legacy `/account/usage` and `/account/credits`. */

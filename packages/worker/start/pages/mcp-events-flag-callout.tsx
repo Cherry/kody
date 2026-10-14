@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { ExperimentOptIn } from '../components/experiment-opt-in.tsx'
 import { type ReactNode } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { buildAuthLink } from '#client/auth-links.ts'
@@ -32,19 +33,9 @@ export function renderMcpEventsFlagCallout(input: {
 					: 'MCP Events is behind a feature flag because the extension is still a draft. Turn it on for your account if you want to try it.'}
 			</p>
 			{input.enabled ? null : input.loggedIn ? (
-				<form
-					method="post"
-					action={routes.mcpEventsOptInPost.href()}
-					css={actionCss}
-				>
-					<button
-						type="submit"
-						data-testid="mcp-events-flag-opt-in"
-						css={getPillButtonCss({ size: 'sm' })}
-					>
-						Try MCP Events
-					</button>
-				</form>
+				<ExperimentOptIn experiment="mcp-events">
+					Try MCP Events
+				</ExperimentOptIn>
 			) : (
 				<p css={actionCss}>
 					<SiteLink

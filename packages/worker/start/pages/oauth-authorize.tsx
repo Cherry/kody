@@ -1,51 +1,35 @@
 /** @jsxImportSource @emotion/react */
-import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
-import { buildMcpAuthorizeErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { SiteLink } from '../components/site-link.tsx'
-import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
-import { Honeypot } from '../components/honeypot-field.tsx'
-import { startAuthentication } from '@simplewebauthn/browser'
-import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
-import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
-import { ProviderIcon } from '../components/provider-icons.tsx'
-import { AuthorizeOrgField } from './oauth-authorize-org-picker.tsx'
+import { fetchSessionInfo } from '../session-info.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
-import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
-import { resolveSignInStatusAfterPageshow } from '#client/routes/oauth-authorize-bfcache.ts'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useHydrated } from '../components/use-hydrated.ts'
-import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
 import {
-	renderTurnstileWidgets,
-	resetTurnstileWidgets,
 	emptyPublicFormProtection,
 	honeypotFieldName,
 	readPublicFormProtection,
+	renderTurnstileWidgets,
+	resetTurnstileWidgets,
 	turnstileResponseFieldName,
 	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
-import {
-	renderEmailVerificationPrompt as EmailVerificationPrompt,
-	requestResendVerification,
-} from './email-verification-prompt.tsx'
+import { resolveSignInStatusAfterPageshow } from '#client/routes/oauth-authorize-bfcache.ts'
 import { resolveAuthorizeEmailVerified } from '#client/routes/oauth-authorize-email-verified.ts'
 import {
-	oauthAuthorizeOrgField,
-	oauthAuthorizeGrantHeading,
 	oauthAuthorizeActionsDisabled,
 	oauthAuthorizeApproveAriaLabel,
 	oauthAuthorizeConsentDecision,
 	oauthAuthorizeConsentFormAttrs,
 	oauthAuthorizeEmailVerificationDenyDisabled,
+	oauthAuthorizeGrantHeading,
+	oauthAuthorizeOrgField,
 } from '#client/routes/oauth-authorize-form.ts'
+import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
+import { getSessionDisplayName, type SessionInfo } from '#client/session.ts'
 import {
-	fetchSessionInfo,
-	getSessionDisplayName,
-	type SessionInfo,
-} from '#client/session.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+	webauthnAuthenticationOptions,
+	webauthnAuthenticationVerify,
+} from '#start/server/auth-mutations'
+import { buildMcpAuthorizeErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
+import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
+import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
 	cardCss,
 	descriptionCss,
@@ -55,8 +39,8 @@ import {
 	getDangerButtonCss,
 	getPrimaryButtonCss,
 	getSecondaryButtonCss,
-	insetCardCss,
 	inputCss,
+	insetCardCss,
 	mutedLinkCss,
 	nativeDisclosureCss,
 	pageDescriptionCss,
@@ -67,6 +51,23 @@ import {
 	stackedPageCss,
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { startAuthentication } from '@simplewebauthn/browser'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
+import { Honeypot } from '../components/honeypot-field.tsx'
+import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
+import { ProviderIcon } from '../components/provider-icons.tsx'
+import { SiteLink } from '../components/site-link.tsx'
+import { useHydrated } from '../components/use-hydrated.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import {
+	renderEmailVerificationPrompt as EmailVerificationPrompt,
+	requestResendVerification,
+} from './email-verification-prompt.tsx'
+import { AuthorizeOrgField } from './oauth-authorize-org-picker.tsx'
 
 type OAuthAuthorizeStatus = 'idle' | 'loading' | 'ready' | 'error'
 type OAuthAuthorizeMessage = { type: 'error' | 'info'; text: string }
@@ -247,13 +248,8 @@ export function OAuthAuthorizeRoute({
 				if (error) signInError(error)
 				return
 			}
-			const optionsResponse = await fetch('/webauthn/authentication', {
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
-				signal: controller.signal,
-			})
-			const options = await optionsResponse.json().catch(() => null)
-			if (!optionsResponse.ok || options?.ok !== true || !options.options) {
+			const options = await webauthnAuthenticationOptions({ data: {} })
+			if (!options.successful || options?.ok !== true || !options.options) {
 				signInError('Unable to start passkey sign-in.')
 				return
 			}
@@ -265,15 +261,11 @@ export function OAuthAuthorizeRoute({
 				return
 			}
 			controller.signal.throwIfAborted()
-			const verificationResponse = await fetch('/webauthn/authentication', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'include',
-				body: JSON.stringify({ response, rememberMe: false, ...protection() }),
+			const result = await webauthnAuthenticationVerify({
+				data: { response, rememberMe: false, ...protection() },
 			})
-			const result = await verificationResponse.json().catch(() => null)
 			controller.signal.throwIfAborted()
-			if (!verificationResponse.ok || result?.ok !== true) {
+			if (!result.successful || result?.ok !== true) {
 				signInError(
 					typeof result?.error === 'string'
 						? result.error

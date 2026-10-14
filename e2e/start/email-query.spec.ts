@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import {
+	classifyEmailThroughUi,
+	deleteEmailThroughUi,
+	readEmailThroughUi,
+} from '../account-fixtures.ts'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
-import { type AccountEmailLoaderData } from '../../packages/worker/universal/loader-data.ts'
 
 for (const outcome of ['accepted', 'rejected'] as const) {
 	test(`email classification survives navigation and ${outcome} writes`, async ({
@@ -17,11 +21,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			username: `email-query-${id}`,
 		})
 		await login({ ...user, mode: 'login' })
-		const read = async () => {
-			const response = await page.request.get('/account/email.json')
-			expect(response.status()).toBe(200)
-			return response.json() as Promise<AccountEmailLoaderData>
-		}
+		const read = () => readEmailThroughUi(page)
 		const initial = await read()
 		expect(initial.emailVerified).toBe(true)
 		const recipient = initial.inboxAddress!
@@ -63,14 +63,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 				})
 				.not.toBe('')
 			messageIds.push(seededId)
-			const baseline = await page.request.post('/account/email.json', {
-				data: {
-					action: 'classify',
-					message_id: seededId,
-					classification: 'accepted',
-				},
-			})
-			expect(baseline.status()).toBe(200)
+			await classifyEmailThroughUi(page, seededId)
 		}
 		const messageId = messageIds[0]!
 		let release = () => {}
@@ -119,21 +112,26 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			const barrier = new Promise<void>((resolve) => {
 				release = resolve
 			})
-			await page.route('**/account/email.json*', async (route) => {
-				if (route.request().method() !== 'POST') return route.continue()
+			await page.route('**/_serverFn/**', async (route) => {
+				if (
+					route.request().method() !== 'POST' ||
+					!route.request().postData()?.includes('classify')
+				)
+					return route.fallback()
 				captured()
 				await barrier
 				if (outcome === 'rejected')
 					await route.fulfill({
 						status: 500,
-						contentType: 'application/json',
-						body: JSON.stringify({ error: 'Controlled email rejection' }),
+						contentType: 'text/plain',
+						body: 'Controlled email rejection',
 					})
 				else await route.continue()
 			})
 			const response = page.waitForResponse(
 				(value) =>
-					new URL(value.url()).pathname === '/account/email.json' &&
+					new URL(value.url()).pathname.startsWith('/_serverFn/') &&
+					value.request().postData()?.includes('classify') === true &&
 					value.request().method() === 'POST',
 			)
 			await page
@@ -204,10 +202,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			release()
 			await page.unrouteAll({ behavior: 'wait' })
 			for (const seededId of messageIds) {
-				const removed = await page.request.post('/account/email.json', {
-					data: { action: 'delete', message_id: seededId },
-				})
-				expect(removed.status()).toBe(200)
+				await deleteEmailThroughUi(page, seededId)
 			}
 		}
 	})

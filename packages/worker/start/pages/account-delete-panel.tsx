@@ -8,7 +8,7 @@ import {
 	accountDeletionConfirmationPhrase,
 } from '#universal/account-deletion-confirmation.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import { routes } from '#universal/routes.ts'
+import { deleteOwnAccount } from '#start/server/security-mutations'
 import {
 	colors,
 	radius,
@@ -29,7 +29,6 @@ import {
 	accountInputCss,
 } from './account-management-components.tsx'
 
-type AccountDeletePayload = { error?: string; ok?: boolean } | null
 
 export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 	const [confirmation, setConfirmation] = useState('')
@@ -65,21 +64,9 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 	const deletion = useMutation({
 		retry: false,
 		mutationFn: async (input: { confirmation: string; password?: string }) => {
-			const response = await fetch(routes.accountDelete.href(), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(input),
-			})
-			const payload = (await response
-				.json()
-				.catch(() => null)) as AccountDeletePayload
-			if (response.status === 401 && !payload?.error) return '/login'
-			if (!response.ok || !payload?.ok)
-				throw new Error(payload?.error || 'Unable to delete your account.')
+			const payload = await deleteOwnAccount({data: input})
+			if ('error' in payload) throw new Error(payload.error)
+
 			return accountDeletedHomePath()
 		},
 		onSuccess: async (href) => {

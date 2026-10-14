@@ -1,10 +1,9 @@
 import { type AnyRouter } from '@tanstack/react-router'
-import { lastUsedOrgCommitApiPath } from '#universal/org-last-used-cookie.ts'
 import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 
 /** Serialize cookie writes so a slower previous org cannot win a rapid switch. */
 export function createOrgNavigationCommit(
-	fetcher: typeof fetch,
+	remember: (slug: string) => Promise<{ ok: boolean }>,
 	origin: string,
 ) {
 	let pending = Promise.resolve()
@@ -16,14 +15,7 @@ export function createOrgNavigationCommit(
 		previousSlug = slug
 		pending = pending.then(async () => {
 			try {
-				const response = await fetcher(lastUsedOrgCommitApiPath, {
-					headers: { Accept: 'application/json' },
-					credentials: 'include',
-					referrer: url.href,
-				})
-				// Drain the small JSON response before releasing the queued commit.
-				// An unread streamed body can keep the browser request open.
-				await response.text()
+				const response = await remember(slug)
 				if (!response.ok && previousSlug === slug) previousSlug = null
 			} catch {
 				if (previousSlug === slug) previousSlug = null
@@ -37,10 +29,10 @@ export function installOrgNavigationCommit(
 	router: Pick<AnyRouter, 'subscribe'> & {
 		state: { matches: ReadonlyArray<{ status: string }> }
 	},
-	fetcher: typeof fetch,
+	remember: (slug: string) => Promise<{ ok: boolean }>,
 	origin: string,
 ) {
-	const commit = createOrgNavigationCommit(fetcher, origin)
+	const commit = createOrgNavigationCommit(remember, origin)
 	return router.subscribe('onResolved', ({ toLocation }) => {
 		if (router.state.matches.some((match) => match.status !== 'success')) return
 		void commit(toLocation.href)

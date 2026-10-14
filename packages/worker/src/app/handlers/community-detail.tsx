@@ -1,17 +1,10 @@
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
-import { jsonResponse as buildJsonResponse } from '#worker/json-response.ts'
 import { z } from 'zod'
 import { type Action } from 'remix/router'
 import { toPublicCommunityListing } from '#app/community-public.ts'
-import {
-	loadCommunityDetailPayload,
-	loadCommunityPackagePayload,
-} from '#app/community-package-payload.ts'
-import { REMIX_FRAME_TARGET_HEADER } from '#universal/frame-constants.ts'
 import { type routes } from '#universal/routes.ts'
-import { getRequestDataCacheLookup } from '#app/request-cache.ts'
-import { anonymousPersonalizedJsonCacheHeaders } from '#app/anonymous-html-cache.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '../operation-result.ts'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import {
@@ -25,8 +18,6 @@ import {
 } from '#worker/community/service.ts'
 import { type CommunityListingRecord } from '#worker/community/types.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
-import { collectServerTiming } from '#worker/request-context.ts'
-import { type ServerTimingEntry } from '#worker/server-timing.ts'
 
 const reportReasonSchema = z
 	.string()
@@ -34,106 +25,10 @@ const reportReasonSchema = z
 	.min(1, 'Report reason is required.')
 	.max(2000, 'Report reason must be at most 2000 characters.')
 
-export function redirectToCanonicalPath(input: {
-	path: string
-	url: URL
-	cache?: 'public' | 'private'
-}) {
-	const destination = new URL(input.path, input.url)
-	destination.search = input.url.search
-	const cache = input.cache ?? 'public'
-	if (cache === 'private') {
-		return new Response(null, {
-			status: 302,
-			headers: {
-				location: destination.toString(),
-				'cache-control': 'private, no-store',
-				vary: `${REMIX_FRAME_TARGET_HEADER}, Cookie`,
-			},
-		})
-	}
-	return new Response(null, {
-		status: 301,
-		headers: {
-			location: destination.toString(),
-			'cache-control': 'public, max-age=3600',
-			vary: REMIX_FRAME_TARGET_HEADER,
-		},
-	})
-}
-
 export {
 	highlightReadmeFences,
 	readmeForPackagePage,
 } from '#app/community-package-payload.ts'
-
-export function createCommunityDetailApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const result = await loadCommunityDetailPayload(
-				env,
-				request,
-				params.listingId,
-			)
-			if (result.kind === 'not_found')
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Catalog entry not found.' },
-					404,
-				)
-			return jsonResponse(
-				request,
-				result.data,
-				200,
-				result.serverTiming,
-				anonymousPersonalizedJsonCacheHeaders({
-					personalized: result.data.loggedIn,
-					request,
-					visibilityGated: true,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.communityDetailApi>
-}
-export function createCommunityPackageApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const result = await loadCommunityPackagePayload({
-				env,
-				request,
-				username: params.username,
-				kodyId: params.kodyId,
-			})
-			if (result.kind === 'redirect')
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Public package moved.', redirectTo: result.to },
-					404,
-				)
-			if (result.kind === 'not_found')
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Catalog entry not found.' },
-					404,
-				)
-			if (result.kind === 'unauthorized')
-				return jsonResponse(request, { ok: false, error: 'Unauthorized.' }, 401)
-			return jsonResponse(
-				request,
-				result.data,
-				200,
-				result.serverTiming,
-				anonymousPersonalizedJsonCacheHeaders({
-					personalized: result.data.loggedIn,
-					request,
-					visibilityGated: true,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.communityPackageApi>
-}
 
 /**
  * Resolve a satori-safe data URI for the package community icon. PNG and JPEG
@@ -221,83 +116,49 @@ export function createCommunityDetailOgImageHandler(env: Env) {
 	} satisfies Action<typeof routes.communityDetailOgImage>
 }
 
-export function createCommunityReportApiPostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			if (request.method !== 'POST') {
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Method not allowed.' },
-					405,
-				)
-			}
+export async function reportWebsiteCommunityPackage(input: {
+	env: Env
+	user: AuthenticatedAppUser
+	listingId: string
+	body: unknown
+}) {
+	const { env, user, listingId } = input
 
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse(request, { ok: false, error: 'Unauthorized.' }, 401)
-			}
+	const body = input.body
+	if (!body || typeof body !== 'object') {
+		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
+	}
 
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Invalid request body.' },
-					400,
-				)
-			}
+	const parsedReason = reportReasonSchema.safeParse(
+		(body as Record<string, unknown>).reason,
+	)
+	if (!parsedReason.success) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					parsedReason.error.issues[0]?.message ?? 'Invalid report reason.',
+			},
+			400,
+		)
+	}
 
-			const parsedReason = reportReasonSchema.safeParse(
-				(body as Record<string, unknown>).reason,
-			)
-			if (!parsedReason.success) {
-				return jsonResponse(
-					request,
-					{
-						ok: false,
-						error:
-							parsedReason.error.issues[0]?.message ?? 'Invalid report reason.',
-					},
-					400,
-				)
-			}
-
-			try {
-				await reportCommunityListing({
-					env,
-					userId: personalOrgId(user.mcpUser.userId),
-					listingId: params.listingId,
-					reason: parsedReason.data,
-				})
-				return jsonResponse(request, { ok: true })
-			} catch (error) {
-				if (error instanceof CommunityActionError) {
-					return jsonResponse(request, { ok: false, error: error.message }, 400)
-				}
-				console.error('Community report submission failed:', error)
-				return jsonResponse(
-					request,
-					{ ok: false, error: 'Unable to submit report.' },
-					500,
-				)
-			}
-		},
-	} satisfies Action<typeof routes.communityReportApiPost>
-}
-
-function jsonResponse(
-	request: Request,
-	body: Record<string, unknown>,
-	status = 200,
-	serverTiming?: Array<ServerTimingEntry>,
-	cacheHeaders?: HeadersInit,
-) {
-	const cacheLookup = getRequestDataCacheLookup(request)
-	const headers = new Headers(cacheHeaders)
-	if (cacheLookup) headers.set('X-Kody-Cache', cacheLookup)
-	return buildJsonResponse(body, {
-		status,
-		headers,
-		serverTiming: collectServerTiming(request, serverTiming),
-	})
+	try {
+		await reportCommunityListing({
+			env,
+			userId: personalOrgId(user.mcpUser.userId),
+			listingId: listingId,
+			reason: parsedReason.data,
+		})
+		return operationResult({ ok: true })
+	} catch (error) {
+		if (error instanceof CommunityActionError) {
+			return operationResult({ ok: false, error: error.message }, 400)
+		}
+		console.error('Community report submission failed:', error)
+		return operationResult(
+			{ ok: false, error: 'Unable to submit report.' },
+			500,
+		)
+	}
 }

@@ -1,40 +1,38 @@
-import {
-	personalOrgId,
-	type PersonId,
-} from '@kody-internal/shared/owner-person-ids.ts'
-import { type RequestContext } from '@kody-internal/shared/request-context.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { type Action } from 'remix/router'
-import { enum_, object, parseSafe, string } from 'remix/data-schema'
-import {
-	auditDatabaseFromEnv,
-	getRequestIp,
-	logAuditEvent,
-} from '#worker/audit-log.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
+import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
+import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import {
 	countConnectedAgentEcosystems,
 	hasSecondConnectedMcpClient,
 } from '#universal/onboarding-agent-ecosystems.ts'
 import {
+	auditDatabaseFromEnv,
+	getRequestIp,
+	logAuditEvent,
+} from '#worker/audit-log.ts'
+import {
 	loadInboundMcpConnectionState,
 	revokeConnectedMcpAgent,
 } from '#worker/connected-mcp-agents.ts'
+import {
+	applyConnectionProfileMutation,
+	loadConnectionProfilesForAccount,
+} from '#worker/connection-profiles/account.ts'
 import { maybeEvaluateSecondAgentStandardGift } from '#worker/entitlements/second-agent-standard-gift.ts'
-import { resolveOAuthHelpers } from '#worker/oauth-helpers.ts'
 import {
 	type OAuthGrantHelpers,
 	type OAuthGrantListHelpers,
 } from '#worker/oauth-grants.ts'
+import { resolveOAuthHelpers } from '#worker/oauth-helpers.ts'
 import { buildMcpServerUrl } from '#worker/onboarding-prompts.ts'
-import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
-import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
-import { type routes } from '#universal/routes.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
-	loadConnectionProfilesForAccount,
-	applyConnectionProfileMutation,
-} from '#worker/connection-profiles/account.ts'
+	personalOrgId,
+	type PersonId,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
+import { enum_, object, parseSafe, string } from 'remix/data-schema'
 
 type ConnectedAgentsUser = {
 	mcpUser: { userId: PersonId }
@@ -100,140 +98,124 @@ export async function loadAccountConnectedAgentsData(input: {
 	}
 }
 
-export function createAccountConnectedAgentsApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, url }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			if (request.method === 'GET') {
-				return jsonResponse(
-					await loadAccountConnectedAgentsData({
-						env,
-						requestUrl: request.url,
-						user,
-					}),
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const body = await request.json().catch(() => null)
-			if (
-				body &&
-				typeof body === 'object' &&
-				'intent' in body &&
-				(body.intent === 'create' ||
-					body.intent === 'update' ||
-					body.intent === 'delete')
-			) {
-				if (!connectedAgentsScope(user).personalOrg) {
-					return jsonResponse(
-						{
-							ok: false,
-							error:
-								'Connection profiles are only available in your personal organization.',
-						},
-						404,
-					)
-				}
-				const mutation = await applyConnectionProfileMutation({
-					env,
-					requestUrl: request.url,
-					userId: personalOrgId(user.mcpUser.userId),
-					emailVerified: user.emailVerified,
-					body,
-				})
-				if (!mutation.ok) {
-					return jsonResponse(
-						{ ok: false, error: mutation.error },
-						mutation.status,
-					)
-				}
-				const payload = await loadAccountConnectedAgentsData({
-					env,
-					requestUrl: request.url,
-					user,
-				})
-				return jsonResponse({
-					...payload,
-					connectionProfiles: mutation.connectionProfiles,
-					connectionProfilePackageOptions:
-						mutation.connectionProfilePackageOptions,
-				})
-			}
-
-			const parsed = parseSafe(revokeSchema, body)
-			if (!parsed.success || parsed.value.intent !== 'revoke') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const helpers = await resolveOAuthHelpers<OAuthGrantHelpers>(env)
-			if (!helpers) {
-				return jsonResponse(
-					{ ok: false, error: 'Connected agent listing is unavailable.' },
-					503,
-				)
-			}
-
-			const { personId, orgId } = connectedAgentsScope(user)
-			const revoked = await revokeConnectedMcpAgent({
-				helpers,
-				userId: personId,
-				clientId: parsed.value.clientId.trim(),
-				orgId,
-				env,
-			})
-			if ('error' in revoked) {
-				// Retry cleanup when grants are already gone but subscription
-				// rows may have survived a prior partial revoke.
-				if (!revoked.clientRemains) {
-					await deleteMcpEventSubscriptionsForOauthClient({
-						db: env.APP_DB,
-						oauthClientId: parsed.value.clientId.trim(),
-						userId: personId,
-					})
-				}
-				return jsonResponse(
-					{ ok: false, error: 'Connected agent not found.' },
-					404,
-				)
-			}
-			if (!revoked.clientRemains) {
-				await deleteMcpEventSubscriptionsForOauthClient({
-					db: env.APP_DB,
-					oauthClientId: parsed.value.clientId.trim(),
-					userId: personId,
-				})
-			}
-
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'oauth',
-				action: 'mcp_inbound_grant_revoke',
-				result: 'success',
-				email: user.email,
-				ip: getRequestIp(request) ?? undefined,
-				path: url.pathname,
-				clientId: parsed.value.clientId.trim(),
-			})
-			return jsonResponse(
-				await loadAccountConnectedAgentsData({
-					env,
-					requestUrl: request.url,
-					user,
-				}),
-			)
-		},
-	} satisfies Action<typeof routes.accountConnectedAgentsApi>
-}
-
 const revokeSchema = object({
 	intent: enum_(['revoke'] as const),
 	clientId: string(),
 })
+
+export async function mutateAccountConnectedAgents({
+	request,
+	env,
+	user,
+	body,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: unknown
+}) {
+	if (
+		body &&
+		typeof body === 'object' &&
+		'intent' in body &&
+		(body.intent === 'create' ||
+			body.intent === 'update' ||
+			body.intent === 'delete')
+	) {
+		if (!connectedAgentsScope(user).personalOrg) {
+			return operationResult(
+				{
+					ok: false,
+					error:
+						'Connection profiles are only available in your personal organization.',
+				},
+				404,
+			)
+		}
+		const mutation = await applyConnectionProfileMutation({
+			env,
+			requestUrl: request.url,
+			userId: personalOrgId(user.mcpUser.userId),
+			emailVerified: user.emailVerified,
+			body,
+		})
+		if (!mutation.ok) {
+			return operationResult(
+				{ ok: false, error: mutation.error },
+				mutation.status,
+			)
+		}
+		const payload = await loadAccountConnectedAgentsData({
+			env,
+			requestUrl: request.url,
+			user,
+		})
+		return operationResult({
+			...payload,
+			connectionProfiles: mutation.connectionProfiles,
+			connectionProfilePackageOptions: mutation.connectionProfilePackageOptions,
+		})
+	}
+
+	const parsed = parseSafe(revokeSchema, body)
+	if (!parsed.success || parsed.value.intent !== 'revoke') {
+		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
+	}
+
+	const helpers = await resolveOAuthHelpers<OAuthGrantHelpers>(env)
+	if (!helpers) {
+		return operationResult(
+			{ ok: false, error: 'Connected agent listing is unavailable.' },
+			503,
+		)
+	}
+
+	const { personId, orgId } = connectedAgentsScope(user)
+	const revoked = await revokeConnectedMcpAgent({
+		helpers,
+		userId: personId,
+		clientId: parsed.value.clientId.trim(),
+		orgId,
+		env,
+	})
+	if ('error' in revoked) {
+		// Retry cleanup when grants are already gone but subscription
+		// rows may have survived a prior partial revoke.
+		if (!revoked.clientRemains) {
+			await deleteMcpEventSubscriptionsForOauthClient({
+				db: env.APP_DB,
+				oauthClientId: parsed.value.clientId.trim(),
+				userId: personId,
+			})
+		}
+		return operationResult(
+			{ ok: false, error: 'Connected agent not found.' },
+			404,
+		)
+	}
+	if (!revoked.clientRemains) {
+		await deleteMcpEventSubscriptionsForOauthClient({
+			db: env.APP_DB,
+			oauthClientId: parsed.value.clientId.trim(),
+			userId: personId,
+		})
+	}
+
+	void logAuditEvent({
+		db: auditDatabaseFromEnv(env),
+		category: 'oauth',
+		action: 'mcp_inbound_grant_revoke',
+		result: 'success',
+		email: user.email,
+		ip: getRequestIp(request) ?? undefined,
+		path: new URL(request.url).pathname,
+		clientId: parsed.value.clientId.trim(),
+	})
+	return operationResult(
+		await loadAccountConnectedAgentsData({
+			env,
+			requestUrl: request.url,
+			user,
+		}),
+	)
+}

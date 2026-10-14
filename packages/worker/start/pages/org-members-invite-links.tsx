@@ -1,20 +1,7 @@
 /** @jsxImportSource @emotion/react */
-import { type CSSObject } from '@emotion/react'
-import { useState } from 'react'
-import { type QueryKey } from '@tanstack/react-query'
-import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import {
-	AccountManagementPanel,
-	accountActionsCss,
-	accountFieldCss,
-	accountFieldLabelCss,
-	accountFieldNoteCss,
-	accountInputCss,
-} from './account-management-components.tsx'
-import { renderIcon } from '../components/icon.tsx'
+import { type OrgPeopleAction } from '#start/server/org-mutations'
 import { type OrgInviteLinkView } from '#universal/loader-data.ts'
 import { orgRoleLabel } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
 import {
 	getDangerPillCss,
 	getPillButtonCss,
@@ -26,8 +13,21 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import { useOrgPeopleMutation } from './org-people-mutation.ts'
+import { type CSSObject } from '@emotion/react'
+import { type QueryKey } from '@tanstack/react-query'
+import { useState } from 'react'
+import { renderIcon } from '../components/icon.tsx'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+	AccountManagementPanel,
+	accountActionsCss,
+	accountFieldCss,
+	accountFieldLabelCss,
+	accountFieldNoteCss,
+	accountInputCss,
+} from './account-management-components.tsx'
+import { useOrgPeopleMutation } from './org-people-mutation.ts'
 async function copyText(text: string) {
 	try {
 		await navigator.clipboard.writeText(text)
@@ -61,19 +61,19 @@ export function OrgMembersInviteLinks({
 		copiedLink?.revision === clearRevision ? copiedLink.url : null
 	const mutation = useOrgPeopleMutation(queryKey),
 		capture = useSubmitterScope()
-	const args = { orgSlug: slug },
-		createHref = routes.orgMembersInviteLinksPost.href(args)
-	const creating = mutation.isPending && mutation.variables?.href === createHref
-	function post(href: string, body: Record<string, unknown>) {
+	const createHref = 'inviteLinkCreate'
+	const creating =
+		mutation.isPending && mutation.variables?.action === createHref
+	function post(action: OrgPeopleAction, body: Record<string, unknown>) {
 		const active = capture()
 		setCopiedLink(null)
 		onMessage('', 'info')
 		mutation.mutate(
-			{ href, body },
+			{ action, body },
 			{
 				onSuccess: async (result) => {
 					if (!active()) return
-					if (href === createHref) {
+					if (action === createHref) {
 						const url = result.inviteLink?.url
 						if (url) {
 							const copied = await copyText(url)
@@ -234,10 +234,7 @@ export function OrgMembersInviteLinks({
 											disabled={mutation.isPending}
 											css={getDangerPillCss({ size: 'sm' })}
 											onClick={() =>
-												post(
-													routes.orgMembersInviteLinksRevokePost.href(args),
-													{ linkId: link.id },
-												)
+												post('inviteLinkRevoke', { linkId: link.id })
 											}
 										>
 											{mutation.isPending &&

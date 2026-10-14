@@ -64,7 +64,7 @@ vi.mock('#app/account-packages-data.ts', () => ({
 		mockModule.reloadAccountPackagesAfterWrite(...args),
 }))
 
-const { handleAccountPackageVisibilityAction } =
+const { mutateAccountPackageVisibility } =
 	await import('./account-package-visibility.ts')
 
 function createUser(): AuthenticatedAppUser {
@@ -117,7 +117,7 @@ test('making a package public or private requires typing the slug', async () => 
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
 	expect(
-		await handleAccountPackageVisibilityAction({
+		await mutateAccountPackageVisibility({
 			env,
 			request,
 			user,
@@ -126,7 +126,7 @@ test('making a package public or private requires typing the slug', async () => 
 	).toBeNull()
 
 	mockModule.writablePackage = createSavedPackage(true)
-	const missingPublicConfirm = await handleAccountPackageVisibilityAction({
+	const missingPublicConfirm = await mutateAccountPackageVisibility({
 		env,
 		request,
 		user,
@@ -137,13 +137,13 @@ test('making a package public or private requires typing the slug', async () => 
 		},
 	})
 	expect(missingPublicConfirm?.status).toBe(400)
-	await expect(missingPublicConfirm?.json()).resolves.toMatchObject({
+	expect(missingPublicConfirm?.data).toMatchObject({
 		ok: false,
 		error: expect.stringContaining('Type the package slug "notes"'),
 	})
 	expect(mockModule.publishCommunityListing).not.toHaveBeenCalled()
 
-	const publicOk = await handleAccountPackageVisibilityAction({
+	const publicOk = await mutateAccountPackageVisibility({
 		env,
 		request,
 		user,
@@ -159,7 +159,7 @@ test('making a package public or private requires typing the slug', async () => 
 
 	mockModule.publishCommunityListing.mockClear()
 	mockModule.writablePackage = createSavedPackage(false)
-	const missingRepublishConfirm = await handleAccountPackageVisibilityAction({
+	const missingRepublishConfirm = await mutateAccountPackageVisibility({
 		env,
 		request,
 		user,
@@ -170,13 +170,13 @@ test('making a package public or private requires typing the slug', async () => 
 		},
 	})
 	expect(missingRepublishConfirm?.status).toBe(400)
-	await expect(missingRepublishConfirm?.json()).resolves.toMatchObject({
+	expect(missingRepublishConfirm?.data).toMatchObject({
 		ok: false,
 		error: expect.stringContaining('update the public community listing'),
 	})
 	expect(mockModule.publishCommunityListing).not.toHaveBeenCalled()
 
-	const republishOk = await handleAccountPackageVisibilityAction({
+	const republishOk = await mutateAccountPackageVisibility({
 		env,
 		request,
 		user,
@@ -191,7 +191,7 @@ test('making a package public or private requires typing the slug', async () => 
 	expect(mockModule.publishCommunityListing).toHaveBeenCalled()
 
 	mockModule.writablePackage = createSavedPackage(false)
-	const missingPrivateConfirm = await handleAccountPackageVisibilityAction({
+	const missingPrivateConfirm = await mutateAccountPackageVisibility({
 		env,
 		request,
 		user,

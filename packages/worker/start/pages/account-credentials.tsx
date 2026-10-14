@@ -222,7 +222,7 @@ export function AccountCredentialsRoute({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				// Consecutive edits compose before navigation commits, but a retained
 				// toolbar cannot inherit another page's pending search or organization.
 				const search: Record<string, unknown> = samePage

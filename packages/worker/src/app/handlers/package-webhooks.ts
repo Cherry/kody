@@ -1,6 +1,5 @@
 import { type OwnerId } from '@kody-internal/shared/owner-person-ids.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { type Action } from 'remix/router'
 import { enum_, object, parseSafe, string } from 'remix/data-schema'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
@@ -15,7 +14,7 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 import { normalizeUsername } from '#worker/identity/username.ts'
-import { jsonResponse } from '#worker/json-response.ts'
+import { operationResult } from '../operation-result.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import {
 	isWebhookUrlMinted,
@@ -28,7 +27,6 @@ import {
 	type PackageWebhookRevealedUrl,
 	type PackageWebhooksActionPayload,
 } from '#universal/loader-data.ts'
-import { type routes } from '#universal/routes.ts'
 
 const webhookActionIntents = [
 	'mint',
@@ -50,28 +48,6 @@ type AuthenticatedUser = WebhooksUser &
 		NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>,
 		'email' | 'request'
 	>
-
-/**
- * JSON API for `/profiles/:username/packages/:kodyId/webhooks.json`, the
- * Webhooks section of package settings. GET lists the package's declared
- * webhooks with minted state; POST mints, rotates, reveals, enables, or
- * disables one.
- *
- * Owner-only: the signed-in user must be `:username` and own `:kodyId`.
- * Anything else is a 404 so the route leaks neither package existence nor
- * webhook names. `reveal` (and the reveal that rides along with mint /
- * rotate) is the only place the credential URL leaves the server. It is
- * owner-session gated and audited; the MCP `webhooks` capabilities never
- * return it.
- */
-export function createCommunityPackageWebhooksApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, url, params }) {
-			return handlePackageWebhooksRequest({ request, url, params }, env)
-		},
-	} satisfies Action<typeof routes.communityPackageWebhooksApi>
-}
 
 async function authorizePackageWebhooks(
 	request: Request,
@@ -117,45 +93,28 @@ export async function readPackageWebhooksData(
 	}
 }
 
-export async function handlePackageWebhooksRequest(
-	{
-		request,
-		url,
-		params,
-	}: {
-		request: Request
-		url: URL
-		params: { username: string; kodyId: string }
-	},
-	env: Env,
-) {
-	if (request.method === 'GET') {
-		const result = await readPackageWebhooksData(request, params, env)
-		return result.status === 200
-			? jsonResponse(result.data)
-			: jsonResponse({ ok: false, error: result.error }, result.status)
-	}
+export async function mutatePackageWebhook(input: {
+	request: Request
+	params: { username: string; kodyId: string }
+	env: Env
+	body: unknown
+}) {
+	const { request, params, env, body } = input
 	const access = await authorizePackageWebhooks(request, params, env)
-	if (access.status !== 200) {
-		return jsonResponse({ ok: false, error: access.error }, access.status)
-	}
+	if (access.status !== 200)
+		return operationResult({ ok: false, error: access.error }, access.status)
 	const { user, packageKodyId } = access
 
-	if (request.method !== 'POST') {
-		return jsonResponse(
-			{ ok: false, error: 'Method not allowed.' },
-			{ status: 405, headers: { Allow: 'GET, POST' } },
-		)
-	}
-
-	const body = await request.json().catch(() => null)
 	const parsed = parseSafe(webhookActionSchema, body)
 	if (!parsed.success) {
-		return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
+		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
 	}
 	const webhookName = parsed.value.webhookName.trim()
 	if (!webhookName) {
-		return jsonResponse({ ok: false, error: 'webhookName is required.' }, 400)
+		return operationResult(
+			{ ok: false, error: 'webhookName is required.' },
+			400,
+		)
 	}
 
 	const intent = parsed.value.intent
@@ -167,7 +126,7 @@ export async function handlePackageWebhooksRequest(
 			result,
 			email: user.email,
 			ip: getRequestIp(request) ?? undefined,
-			path: url.pathname,
+			path: new URL(request.url).pathname,
 			reason: [
 				`package=${packageKodyId}`,
 				`webhook=${webhookName}`,
@@ -196,7 +155,7 @@ export async function handlePackageWebhooksRequest(
 			...(revealed ? { revealed } : {}),
 			...(approvalUrl ? { approvalUrl } : {}),
 		}
-		return jsonResponse(payload)
+		return operationResult(payload)
 	} catch (error) {
 		const detail =
 			error instanceof Error ? error.message : failureMessageFor(intent)
@@ -205,7 +164,7 @@ export async function handlePackageWebhooksRequest(
 		// carry safe messages. Anything else is an infrastructure failure
 		// whose text must not reach the browser.
 		if (isMcpCallerError(error)) {
-			return jsonResponse({ ok: false, error: detail }, 400)
+			return operationResult({ ok: false, error: detail }, 400)
 		}
 		console.error('package webhooks action failed', {
 			intent,
@@ -213,7 +172,7 @@ export async function handlePackageWebhooksRequest(
 			webhookName,
 			error,
 		})
-		return jsonResponse({ ok: false, error: failureMessageFor(intent) }, 500)
+		return operationResult({ ok: false, error: failureMessageFor(intent) }, 500)
 	}
 }
 

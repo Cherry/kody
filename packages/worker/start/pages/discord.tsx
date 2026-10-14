@@ -5,8 +5,8 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useState } from 'react'
-import { startSocialSignIn } from '#client/social-sign-in.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { startSocialSignIn } from '../social-sign-in.ts'
+import { updateConnections } from '#start/server/account-mutations'
 import {
 	emptyPublicFormProtection,
 	readPublicFormProtection,
@@ -15,10 +15,7 @@ import {
 	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
 import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
-import {
-	type AccountConnectionsLoaderData,
-	type DiscordPageLoaderData,
-} from '#universal/loader-data.ts'
+import { type DiscordPageLoaderData } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
 import {
@@ -150,30 +147,14 @@ export function DiscordPage({
 		setBusy(true)
 		setActionMessage(null)
 		try {
-			const response = await fetch(routes.accountConnectionsApi.href(), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({ intent: 'sync-discord-role' }),
+			const payload = await updateConnections({
+				data: { body: { intent: 'sync-discord-role' } },
 			})
-			if (response.status === 401) {
-				window.location.assign(buildAuthLink(routes.login.href(), discordPath))
-				return
-			}
-			const payload = await readJson<
-				AccountConnectionsLoaderData & {
-					error?: string
-					discordMemberRole?: { status: string }
-				}
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to sync Discord roles.')
-			}
 			void invalidatePages()
-			const syncStatus = payload?.discordMemberRole?.status ?? 'error'
+			const syncStatus =
+				('discordMemberRole' in payload
+					? payload.discordMemberRole?.status
+					: undefined) ?? 'error'
 			setActionMessage({
 				text: discordMemberRoleMessage(syncStatus),
 				tone:

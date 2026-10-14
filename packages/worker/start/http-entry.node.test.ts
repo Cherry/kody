@@ -7,8 +7,11 @@ import { silenceExpectedConsoleErrors } from '#worker/test-support/console-spies
 import { testOidcSigningEnv } from '#worker/test-support/oidc-signing-env.ts'
 
 const captureException = vi.fn()
-const renderDocument = vi.fn(async () => {
-	throw new Error('Renderer unavailable')
+const renderDocument = vi.fn(async (request: Request) => {
+	const error = new Error('Renderer unavailable')
+	if (request.headers.get('x-kody-test-reported-error') === '1')
+		markSentryReported(error)
+	throw error
 })
 const handleRequest = createHttpRequestHandler(renderDocument)
 
@@ -17,28 +20,6 @@ vi.mock('@sentry/cloudflare', async () => {
 	return {
 		...stub,
 		captureException: (...args: Array<unknown>) => captureException(...args),
-	}
-})
-
-vi.mock('./backend-router.ts', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('./backend-router.ts')>()
-	return {
-		...actual,
-		createBackendRouter(
-			...args: Parameters<typeof actual.createBackendRouter>
-		) {
-			const router = actual.createBackendRouter(...args)
-			return {
-				fetch(request: Request) {
-					if (request.headers.get('x-kody-test-reported-error') === '1') {
-						const error = new Error('ssr already reported')
-						markSentryReported(error)
-						return Promise.reject(error)
-					}
-					return router.fetch(request)
-				},
-			}
-		},
 	}
 })
 
@@ -57,17 +38,18 @@ function createEnv(overrides: Record<string, unknown> = {}) {
 	} as unknown as Env
 }
 
-test('account secrets api ignores legacy remote connector env secrets', async () => {
-	const response = await handleRequest(
-		new Request('https://example.com/account/secrets.json'),
-		createEnv({}),
-	)
-
-	expect(response.status).toBe(401)
-	await expect(response.json()).resolves.toEqual({
-		ok: false,
-		error: 'Unauthorized.',
+test('server-function requests reach Start without legacy endpoint authorization', async () => {
+	vi.stubEnv('TSS_SERVER_FN_BASE', '/_serverFn/')
+	const render = vi.fn(async () => new Response('rpc'))
+	const handle = createHttpRequestHandler(render)
+	const request = new Request('https://example.com/_serverFn/test', {
+		method: 'POST',
+		headers: { 'x-tsr-serverFn': 'true' },
 	})
+	const response = await handle(request, createEnv())
+	expect(response.status).toBe(200)
+	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined)
+	vi.unstubAllEnvs()
 })
 
 test('getEnv memoizes per env identity and requires AUTH_RATE_LIMITER in production', () => {
@@ -84,19 +66,15 @@ test('getEnv memoizes per env identity and requires AUTH_RATE_LIMITER in product
 	).not.toThrow()
 })
 
-test('handleRequest serves multiple requests from the same env object', async () => {
+test('HTTP boundary dispatches multiple requests from the same env to Start', async () => {
+	const render = vi.fn(async () => Response.json({ ok: true }))
+	const handle = createHttpRequestHandler(render)
 	const env = createEnv()
-	const first = await handleRequest(
-		new Request('https://example.com/health'),
-		env,
-	)
-	const second = await handleRequest(
-		new Request('https://example.com/health'),
-		env,
-	)
-
+	const first = await handle(new Request('https://example.com/health'), env)
+	const second = await handle(new Request('https://example.com/health'), env)
 	expect(first.status).toBe(200)
 	expect(second.status).toBe(200)
+	expect(render).toHaveBeenCalledTimes(2)
 	await expect(second.json()).resolves.toMatchObject({ ok: true })
 })
 
@@ -162,18 +140,21 @@ test('unmapped document requests go to the native renderer with the original URL
 	)
 	const response = await handle(request, createEnv())
 	expect(response.status).toBe(200)
-	expect(render).toHaveBeenCalledWith(
-		request,
-		expect.anything(),
-		undefined,
-		undefined,
-	)
+	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined)
 })
 
 test('an uncaught backend error uses native 500 rendering before the static fallback', async () => {
 	silenceExpectedConsoleErrors(['Native app request failed:'])
 	const render = vi.fn(
-		async () => new Response('native error', { status: 500 }),
+		async (
+			_request: Request,
+			_env: Env,
+			_oauth: unknown,
+			failure?: { status: number },
+		) => {
+			if (!failure) throw new Error('native render failed')
+			return new Response('native error', { status: 500 })
+		},
 	)
 	const handle = createHttpRequestHandler(render)
 	const request = new Request('https://example.com/health', {
@@ -187,11 +168,13 @@ test('an uncaught backend error uses native 500 rendering before the static fall
 	})
 })
 
-test('legacy org connection bookmarks redirect before Start rendering', async () => {
-	const response = await handleRequest(
-		new Request('https://example.com/@acme/-/connections/usage?connection=abc'),
-		createEnv(),
-	)
+test('legacy org connection bookmarks redirect through the native route', async () => {
+	const { connectionsRedirect } = await import('./server/legacy-redirects.ts')
+	const response = connectionsRedirect({
+		request: new Request(
+			'https://example.com/@acme/-/connections/usage?connection=abc',
+		),
+	})
 	expect(response.status).toBe(301)
 	expect(response.headers.get('Location')).toBe(
 		'/@acme/-/agents/usage?connection=abc',

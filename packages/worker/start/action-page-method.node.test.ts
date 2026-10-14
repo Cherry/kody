@@ -57,58 +57,23 @@ test('GET retains the native page loader', async () => {
 	assert.equal(renders, 1)
 })
 
-test('unsupported document methods never execute page or token loaders', async () => {
-	for (const pathname of ['/pricing', ...actionPagePaths]) {
-		for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
-			let calls = 0
-			const response = await dispatchDocumentMethod({
-				request: new Request(`https://kody.test${pathname}?token=example`, {
-					method,
-				}),
-				readDestinationHead: async () => {
-					calls++
-					return new Response()
-				},
-				render: async () => {
-					calls++
-					return new Response()
-				},
-			})
-			assert.equal(response.status, 405)
-			assert.match(response.headers.get('Allow') ?? '', /GET/)
-			assert.equal(calls, 0)
-		}
-	}
-})
-
-test('only the configured native server-function namespace bypasses document method restrictions', async () => {
+test('native RPC bypasses token-page HEAD restrictions', async () => {
 	vi.stubEnv('TSS_SERVER_FN_BASE', '/_serverFn/')
 	try {
 		let calls = 0
-		const render = async () => {
-			calls++
-			return new Response('RPC')
-		}
-		const readDestinationHead = async () => {
-			throw new Error('Unexpected verifier')
-		}
-		const rpc = await dispatchDocumentMethod({
+		const response = await dispatchDocumentMethod({
 			request: new Request('https://kody.test/_serverFn/example', {
 				method: 'POST',
 			}),
-			render,
-			readDestinationHead,
+			readDestinationHead: async () => {
+				throw new Error('Unexpected verifier')
+			},
+			render: async () => {
+				calls++
+				return new Response('RPC')
+			},
 		})
-		assert.equal(rpc.status, 200)
-		assert.equal(calls, 1)
-		const document = await dispatchDocumentMethod({
-			request: new Request('https://kody.test/_serverFn-extra/verify-email', {
-				method: 'POST',
-			}),
-			render,
-			readDestinationHead,
-		})
-		assert.equal(document.status, 405)
+		assert.equal(response.status, 200)
 		assert.equal(calls, 1)
 	} finally {
 		vi.unstubAllEnvs()

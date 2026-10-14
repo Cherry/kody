@@ -1,15 +1,13 @@
-import { type AccountWebhooksLoaderData } from '#universal/loader-data.ts'
+import { loadAccountWebhooksData } from '#app/package-webhooks-data.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
-import { createAccountWebhooksApiHandler } from '#app/handlers/account-webhooks.ts'
-import { loadAccountWebhooksData } from '#app/package-webhooks-data.ts'
-import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
-import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -132,22 +130,7 @@ function createEnv() {
 	} as unknown as Env
 }
 
-type Handler = {
-	handler(context: never): Promise<Response>
-}
-
-async function runHandler(handler: Handler, request: Request) {
-	return handler.handler({
-		request,
-		url: new URL(request.url),
-		params: {},
-	} as never)
-}
-
-const owner = {
-	email: 'owner@example.com',
-	username: 'owner',
-}
+const owner = { email: 'owner@example.com', username: 'owner' }
 
 test('webhook index data includes every package declaration without revealing URLs', async () => {
 	const userId = testStableUserIdFromEmail(owner.email)
@@ -186,38 +169,15 @@ test('account webhooks API lists across packages and is read-only: mutations bel
 		},
 		request: sessionRequestContext(userId),
 	})
-	const handler = createAccountWebhooksApiHandler(createEnv())
-	const apiUrl = 'https://kody.example/account/webhooks.json'
-
-	const listed = await runHandler(
-		handler,
-		new Request(apiUrl, { headers: { Accept: 'application/json' } }),
-	)
-	expect(listed.status).toBe(200)
-	const body = (await listed.json()) as AccountWebhooksLoaderData
+	const body = await loadAccountWebhooksData({
+		env: createEnv(),
+		requestUrl: 'https://kody.example/account/webhooks',
+		user: await mockModule.readAuthenticatedAppUser(),
+	})
 	expect(body.webhooks.map((webhook) => webhook.packageKodyId)).toEqual([
 		'raycast',
 		'raycast',
 		'sentry-bridge',
 	])
 	expect(body.webhooks.every((webhook) => !webhook.minted)).toBe(true)
-
-	const post = await runHandler(
-		handler,
-		new Request(apiUrl, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				intent: 'mint',
-				packageKodyId: 'raycast',
-				webhookName: 'run',
-			}),
-		}),
-	)
-	expect(post.status).toBe(405)
-	expect(post.headers.get('Allow')).toBe('GET')
-
-	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
-	const unauthorized = await runHandler(handler, new Request(apiUrl))
-	expect(unauthorized.status).toBe(401)
 })

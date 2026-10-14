@@ -1,32 +1,33 @@
 /** @jsxImportSource @emotion/react */
-import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { useHydrated } from '../components/use-hydrated.ts'
-import { SiteLink } from '../components/site-link.tsx'
-import { useState, type FormEvent } from 'react'
-import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
 import {
-	normalizeRedirectTo,
-	resolvePostAuthLandingPath,
-} from '#universal/safe-redirect.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import {
-	cardCss,
-	fieldCss,
-	fieldLabelCss,
-	getPrimaryButtonCss,
-	inputCss,
-	mutedLinkCss,
-	pageDescriptionCss,
-	pageHeaderCss,
-	pageTitleCss,
-	stackedPageCss,
-} from '#universal/styles/style-primitives.ts'
-import { Honeypot } from '../components/honeypot-field.tsx'
-import {
-	readPublicFormProtection,
-	resetTurnstileWidgets,
-	turnstileWidgetClassName,
+readPublicFormProtection,
+resetTurnstileWidgets,
+turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
+import { verifyWebsiteTwoFactor } from '#start/server/auth-mutations'
+import {
+normalizeRedirectTo,
+resolvePostAuthLandingPath,
+} from '#universal/safe-redirect.ts'
+import {
+cardCss,
+fieldCss,
+fieldLabelCss,
+getPrimaryButtonCss,
+inputCss,
+mutedLinkCss,
+pageDescriptionCss,
+pageHeaderCss,
+pageTitleCss,
+stackedPageCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import { useState,type FormEvent } from 'react'
+import { Honeypot } from '../components/honeypot-field.tsx'
+import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
+import { SiteLink } from '../components/site-link.tsx'
+import { useHydrated } from '../components/use-hydrated.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 
 function buildLoginHref(redirectTo: string | null) {
 	return redirectTo
@@ -63,14 +64,10 @@ export function VerifyRoute() {
 		setMessage(null)
 
 		try {
-			const response = await fetch('/verify/2fa.json', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				credentials: 'include',
-				body: JSON.stringify({ code, ...protection }),
+			const payload = await verifyWebsiteTwoFactor({
+				data: { code, ...protection },
 			})
-			const payload = await response.json().catch(() => null)
-			if (!response.ok || !payload?.ok) {
+			if (!payload.successful || !payload.ok) {
 				if (payload?.code === 'expired') {
 					window.location.assign(buildLoginHref(getRedirectTo()))
 					return

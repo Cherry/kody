@@ -77,7 +77,7 @@ vi.mock('#worker/orgs/repo.ts', () => ({
 		mockModule.loadOrgBindingForOrg(...args),
 }))
 
-const { handleAccountPackageInternetVisibleAction } =
+const { mutateAccountPackageInternetVisible } =
 	await import('./account-package-capability-approval.ts')
 
 beforeEach(() => {
@@ -152,7 +152,7 @@ test('turning on internet-visible without approval returns approvalUrl', async (
 		isInternetVisible: false,
 	})
 
-	const response = await handleAccountPackageInternetVisibleAction({
+	const response = await mutateAccountPackageInternetVisible({
 		env,
 		request,
 		user,
@@ -164,7 +164,7 @@ test('turning on internet-visible without approval returns approvalUrl', async (
 		},
 	})
 	expect(response?.status).toBe(400)
-	await expect(response?.json()).resolves.toMatchObject({
+	expect(response?.data).toMatchObject({
 		ok: false,
 		error: expect.stringContaining('approve'),
 		approvalUrl: expect.stringContaining('/approve-capabilities'),
@@ -207,7 +207,7 @@ test('turning on internet-visible with matching approval refreshes pin and enque
 		wentPublicRequest: { id: 'req-1' },
 	})
 
-	const response = await handleAccountPackageInternetVisibleAction({
+	const response = await mutateAccountPackageInternetVisible({
 		env,
 		request,
 		user,
@@ -219,7 +219,7 @@ test('turning on internet-visible with matching approval refreshes pin and enque
 		},
 	})
 	expect(response?.status).toBe(400)
-	await expect(response?.json()).resolves.toMatchObject({
+	expect(response?.data).toMatchObject({
 		ok: false,
 		error: expect.stringContaining('internet-visible'),
 		approvalUrl: expect.stringContaining('/approve-capabilities'),
@@ -246,7 +246,7 @@ test('approve-capabilities binds the reviewed fingerprint', async () => {
 	})
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
-	const response = await handleAccountPackageInternetVisibleAction({
+	const response = await mutateAccountPackageInternetVisible({
 		env,
 		request,
 		user,
@@ -275,7 +275,7 @@ test('turning off internet-visible requires the slug and clears the flag', async
 	mockModule.clearInternetVisible.mockResolvedValue(true)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
-	const missing = await handleAccountPackageInternetVisibleAction({
+	const missing = await mutateAccountPackageInternetVisible({
 		env,
 		request,
 		user,
@@ -288,7 +288,7 @@ test('turning off internet-visible requires the slug and clears the flag', async
 	expect(missing?.status).toBe(400)
 	expect(mockModule.clearInternetVisible).not.toHaveBeenCalled()
 
-	const ok = await handleAccountPackageInternetVisibleAction({
+	const ok = await mutateAccountPackageInternetVisible({
 		env,
 		request,
 		user,
@@ -313,7 +313,7 @@ test('approve-credential-needs approves the named request as the acting person',
 	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 	const approve = (body: Record<string, unknown>) =>
-		handleAccountPackageInternetVisibleAction({
+		mutateAccountPackageInternetVisible({
 			env,
 			request,
 			user,
@@ -330,7 +330,7 @@ test('approve-credential-needs approves the named request as the acting person',
 	})
 	const stale = await approve({ requestId: 'request-1' })
 	expect(stale?.status).toBe(409)
-	await expect(stale?.json()).resolves.toMatchObject({
+	expect(stale?.data).toMatchObject({
 		ok: false,
 		error: 'stale',
 		approvalUrl: expect.stringContaining('/approve-capabilities'),
@@ -357,7 +357,7 @@ test('approve-went-public approves the named request as the acting person', asyn
 	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 	const approve = (body: Record<string, unknown>) =>
-		handleAccountPackageInternetVisibleAction({
+		mutateAccountPackageInternetVisible({
 			env,
 			request,
 			user,
@@ -374,7 +374,7 @@ test('approve-went-public approves the named request as the acting person', asyn
 	})
 	const stale = await approve({ requestId: 'request-went-public' })
 	expect(stale?.status).toBe(409)
-	await expect(stale?.json()).resolves.toMatchObject({
+	expect(stale?.data).toMatchObject({
 		ok: false,
 		error: 'stale',
 		approvalUrl: expect.stringContaining('/approve-capabilities'),

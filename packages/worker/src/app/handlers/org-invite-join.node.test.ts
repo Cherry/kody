@@ -35,7 +35,7 @@ vi.mock('#worker/orgs/seat-sync-after-membership.ts', () => ({
 		mocks.syncSeatsAfterMembershipChange(...args),
 }))
 
-const { createOrgInviteJoinPostHandler, loadJoinPageData } =
+const { joinWebsiteOrganization, loadJoinPageData } =
 	await import('./org-invite-join.ts')
 
 const owner = { id: 1, personId: 'a'.repeat(64) }
@@ -154,14 +154,16 @@ test('join page shows org confirmation without members for a valid link', async 
 
 test('join post adds the member and returns the org redirect', async () => {
 	signInJoiner(true)
-	const response = await createOrgInviteJoinPostHandler(createEnv()).handler({
+	const response = await joinWebsiteOrganization({
+		env: createEnv(),
+		user: await mocks.readAuthenticatedAppUser(),
 		request: new Request(`https://kody.test/join/${token}`, {
 			method: 'POST',
 		}),
-		params: { token },
+		token,
 	} as never)
 	expect(response.status).toBe(200)
-	expect(await response.json()).toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		alreadyMember: false,
 		orgSlug: 'join-co',

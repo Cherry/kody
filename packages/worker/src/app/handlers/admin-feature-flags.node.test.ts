@@ -1,7 +1,8 @@
-import { expect, test, vi } from 'vitest'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
-import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
 import type * as AuditLog from '#worker/audit-log.ts'
+import { adminOperationOutcome } from '#worker/test-support/admin-operation-outcome.ts'
+import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
+import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -329,34 +330,41 @@ function createFeatureFlagsTestEnv(
 	}
 }
 
-const { createAdminFeatureFlagsApiHandler } =
-	await import('./admin-feature-flags.ts')
+const { mutateAdminFeatureFlags } =
+	await import('#worker/admin/feature-flags-operations.ts')
 
 function createFeatureFlagsClient(
 	input: Parameters<typeof createFeatureFlagsTestEnv>[0] = {},
 ) {
-	const { handler } = createAdminFeatureFlagsApiHandler(
-		createFeatureFlagsTestEnv(input) as unknown as Env,
-	)
+	const env = createFeatureFlagsTestEnv(input) as unknown as Env
 	const send = (body?: unknown) =>
-		handler({
-			request: new Request('https://example.com/admin/feature-flags.json', {
-				method: body === undefined ? 'GET' : 'POST',
-				headers: {
-					Accept: 'application/json',
-					...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-				},
-				...(body === undefined ? {} : { body: JSON.stringify(body) }),
-			}),
-			params: {},
-			url: new URL('https://example.com/admin/feature-flags.json'),
-		} as never)
+		adminOperationOutcome(async () => {
+			const url = new URL('https://example.com/admin/feature-flags.json')
+			const request = new Request(url, {
+				headers: { Accept: 'application/json' },
+			})
+			if (body !== undefined)
+				return mutateAdminFeatureFlags({
+					env,
+					request,
+					url,
+					body: body as Record<string, unknown>,
+				})
+			const { requireUserWithRole } = await import('#app/permissions-server.ts')
+			await requireUserWithRole(request, env, 'admin')
+			const { loadAdminFeatureFlagsData } =
+				await import('#app/admin-feature-flags-data.ts')
+			return loadAdminFeatureFlagsData(env)
+		})
 	return {
 		get: () => send(),
 		post: (body: Record<string, unknown>) => send(body),
-		async expectFlag(response: Response, flag: Record<string, unknown>) {
+		async expectFlag(
+			response: Awaited<ReturnType<typeof adminOperationOutcome>>,
+			flag: Record<string, unknown>,
+		) {
 			expect(response.status).toBe(200)
-			const body = (await response.json()) as {
+			const body = (await Promise.resolve(response.data)) as {
 				ok: boolean
 				featureFlags: Array<{ key: string }>
 			}
@@ -367,9 +375,12 @@ function createFeatureFlagsClient(
 				]),
 			)
 		},
-		async expectError(response: Response, status: number) {
+		async expectError(
+			response: Awaited<ReturnType<typeof adminOperationOutcome>>,
+			status: number,
+		) {
 			expect(response.status).toBe(status)
-			await expect(response.json()).resolves.toMatchObject({
+			await expect(Promise.resolve(response.data)).resolves.toMatchObject({
 				ok: false,
 				error: expect.any(String),
 			})
@@ -388,7 +399,7 @@ function expectSetGlobalAudit(reason: string) {
 	)
 }
 
-test('admin feature flags HTTP lifecycle: auth, list, set_global, and validation errors', async () => {
+test('admin feature flags operations lifecycle: auth, list, set_global, and validation errors', async () => {
 	const { get, post, expectFlag, expectError } = createFeatureFlagsClient()
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(

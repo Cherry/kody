@@ -68,30 +68,6 @@ function isOrgOwnedAccountSection(
 	return orgOwnedSectionSet.has(section)
 }
 
-/**
- * `/account/secrets.json` and the other org-owned account JSON routes. The
- * Agents page reads `/account/connected-agents.json` and
- * `/account/connection-usage.json`; `/account/connections.json` is the
- * person's sign-in providers. The Memories download is
- * `/account/memories-export.json`. The credentials list
- * (`/account/credentials.json`) shares the Secrets section gate.
- * `/account/packages.json` lists and mutates without per-package authz, so it
- * stays on the person; team Repositories read `/@slug/-/repositories.json`.
- */
-export function orgOwnedAccountApiSection(
-	pathname: string,
-): OrgOwnedAccountSection | null {
-	const match = /^\/account\/([^/.]+)\.json$/.exec(pathname)
-	const name = match?.[1] ?? ''
-	if (name === 'connected-agents' || name === 'connection-usage') {
-		return 'agents'
-	}
-	if (name === 'memories-export') return 'memories'
-	if (name === 'credentials') return 'secrets'
-	if (name === 'connections' || name === 'packages') return null
-	return isOrgOwnedAccountSection(name) ? name : null
-}
-
 export type ParsedOrgResourcePath = {
 	slug: string
 	section: OrgOwnedAccountSection
@@ -141,7 +117,7 @@ export function orgOwnedSectionForPath(
 	return (
 		parseOrgResourcePath(pathname)?.section ??
 		parseOrgResourceApiPath(pathname)?.section ??
-		orgOwnedAccountApiSection(pathname)
+		(pathname === '/account/memories-export.json' ? 'memories' : null)
 	)
 }
 

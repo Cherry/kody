@@ -1,35 +1,22 @@
 /** @jsxImportSource @emotion/react */
 import {
 	useInfiniteQuery,
-	useQuery,
 	useMutation,
+	useQuery,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { usePageInvalidation } from '../page-invalidation.ts'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
 import {
-	useState,
-	useRef,
+	type FormEvent,
 	useEffect,
 	useEffectEvent,
-	type FormEvent,
+	useRef,
+	useState,
 } from 'react'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
+import { usePageInvalidation } from '../page-invalidation.ts'
 
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { colors } from '#universal/styles/tokens.ts'
-import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
-import { type RoleName } from '#universal/permissions.ts'
-import {
-	type AdminCreatedUserSetup,
-	type AdminPlanName,
-	type AdminUsersLoaderData,
-	type AdminUsersMutationData,
-	type AdminUserUsageLoaderData,
-} from '#universal/loader-data.ts'
 import {
 	type AdminUserFilterState,
-	adminUserUsageApiPath,
-	buildAdminUsersApiRequestUrl,
 	buildUserDetailHrefFrom,
 	getListKey,
 	getSelection,
@@ -37,22 +24,35 @@ import {
 	readFilterState,
 } from '#client/routes/admin-users-shared.ts'
 import {
+	readAdminUsersPage,
+	readAdminUserUsage,
+} from '#start/server/admin-controls'
+import { saveAdminUsers } from '#start/server/admin-mutations'
+import {
+	type AdminCreatedUserSetup,
+	type AdminPlanName,
+	type AdminUsersLoaderData,
+} from '#universal/loader-data.ts'
+import { type RoleName } from '#universal/permissions.ts'
+import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
+import { colors } from '#universal/styles/tokens.ts'
+import {
 	AccountManagementMessage,
 	AccountManagementShell,
 	AdminPageHeader,
 } from './account-management-components.tsx'
 import { AdminCreateUserPanel } from './admin-users-create.tsx'
 import {
+	type AdminUsersActionState,
+	AdminUserDetail,
+} from './admin-users-detail.tsx'
+import {
+	recordCellClamp,
 	RecordChips,
 	RecordTable,
 	RecordTableSearch,
 	RecordTableSelect,
-	recordCellClamp,
 } from './record-table.tsx'
-import {
-	type AdminUsersActionState,
-	AdminUserDetail,
-} from './admin-users-detail.tsx'
 const clampedCellCss = recordCellClamp(28)
 type AccountStatus = 'loading' | 'ready' | 'error'
 type UsageStatus = 'loading' | 'ready' | 'error'
@@ -87,23 +87,14 @@ export function AdminUsersPage(props: {
 		enabled:
 			loadAdditionalPages &&
 			props.payload.page * props.payload.pageSize < props.payload.total,
-		queryFn: async ({ pageParam, signal }) => {
-			const response = await fetch(
-				buildAdminUsersApiRequestUrl(props.currentHref, {
+		queryFn: ({ pageParam, signal }) =>
+			readAdminUsersPage({
+				data: {
+					search: new URL(props.currentHref, 'http://localhost').search,
 					page: pageParam,
-					includeSelected: false,
-				}),
-				{
-					headers: { Accept: 'application/json' },
-					credentials: 'include',
-					signal,
 				},
-			)
-			const payload = await readJson<AdminUsersLoaderData>(response)
-			if (!response.ok || !payload?.ok)
-				throw new Error('Unable to load more users.')
-			return payload
-		},
+				signal,
+			}),
 		getNextPageParam: (last) =>
 			last.page * last.pageSize < last.total ? last.page + 1 : undefined,
 	})
@@ -124,12 +115,12 @@ export function AdminUsersPage(props: {
 	}
 	const write = useMutation({
 		mutationFn: async (input: {
-			url: string
-			init: RequestInit
+			search: string
+			body: Record<string, unknown>
 			actorKey: string | null
 			target: string | null
 			permissions: boolean
-		}) => fetch(input.url, input.init),
+		}) => saveAdminUsers({ data: { search: input.search, body: input.body } }),
 		onMutate: (input) => ({
 			reconcile: input.permissions ? invalidateOwnPermissions : invalidatePages,
 		}),
@@ -150,16 +141,12 @@ export function AdminUsersPage(props: {
 		},
 		gcTime: 0,
 	})
-	function post(url: string, init: RequestInit) {
-		const body = JSON.parse(String(init.body)) as {
-			stableUserId?: string
-			action?: string
-		}
+	function submitUserChange(href: string, body: Record<string, unknown>) {
 		return write.mutateAsync({
-			url,
-			init,
+			search: new URL(href, 'http://localhost').search,
+			body,
 			actorKey,
-			target: body.stableUserId ?? null,
+			target: typeof body.stableUserId === 'string' ? body.stableUserId : null,
 			permissions: body.stableUserId === actorKey,
 		})
 	}
@@ -207,7 +194,7 @@ export function AdminUsersPage(props: {
 		return router.navigate({
 			to: matchedUrl.pathname,
 			replace: true,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
 					: Object.fromEntries(matchedUrl.searchParams)
@@ -252,32 +239,12 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const response = await post(buildAdminUsersApiRequestUrl(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action,
-					stableUserId: selectedUser.stableUserId,
-					role: selectedRoleToAssign,
-				}),
+			const payload = await submitUserChange(href, {
+				action,
+				stableUserId: selectedUser.stableUserId,
+				role: selectedRoleToAssign,
 			})
-			if (response.status === 401) {
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AdminUsersMutationData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
 			if (activeScope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to update user roles.')
-			}
 			resetPlanDraft()
 			setMessage(
 				action === 'assign_role'
@@ -307,32 +274,12 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const response = await post(buildAdminUsersApiRequestUrl(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'update_plan',
-					stableUserId: selectedUser.stableUserId,
-					plan,
-				}),
+			const payload = await submitUserChange(href, {
+				action: 'update_plan',
+				stableUserId: selectedUser.stableUserId,
+				plan,
 			})
-			if (response.status === 401) {
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AdminUsersMutationData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
 			if (activeScope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to update user plan.')
-			}
 			resetPlanDraft()
 			invalidateUsage()
 			setMessage(`Updated admin grant to ${plan}.`)
@@ -355,33 +302,17 @@ export function AdminUsersPage(props: {
 		setActionState('verifying')
 		setMessage(null)
 		try {
-			const response = await post(buildAdminUsersApiRequestUrl(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action,
-					stableUserId: selectedUser.stableUserId,
-				}),
+			const payload = await submitUserChange(href, {
+				action,
+				stableUserId: selectedUser.stableUserId,
 			})
-			if (response.status === 401) {
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AdminUsersMutationData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
 			if (activeScope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to update verification.')
-			}
 			resetPlanDraft()
-			if (action === 'mint_verify_url' && payload.verifyUrl) {
+			if (
+				action === 'mint_verify_url' &&
+				'verifyUrl' in payload &&
+				payload.verifyUrl
+			) {
 				setMintedVerifyUrl(payload.verifyUrl)
 				setMintedVerifyUrlForStableUserId(selectedUser.stableUserId)
 				setMessage(
@@ -415,31 +346,11 @@ export function AdminUsersPage(props: {
 		try {
 			// Carry filters + selected so the mutation response refreshes the
 			// same list window and selectedUser fallback the UI is showing.
-			const response = await post(buildAdminUsersApiRequestUrl(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action,
-					stableUserId: selectedUser.stableUserId,
-				}),
+			const payload = await submitUserChange(href, {
+				action,
+				stableUserId: selectedUser.stableUserId,
 			})
-			if (response.status === 401) {
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AdminUsersMutationData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
 			if (activeScope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to update the account.')
-			}
 			resetPlanDraft()
 			setMessage(
 				action === 'suspend_user'
@@ -471,37 +382,19 @@ export function AdminUsersPage(props: {
 		setCreatedUser(null)
 		setMessage(null)
 		try {
-			const response = await post(buildAdminUsersApiRequestUrl(href), {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'create_user',
-					email: String(formData.get('email') ?? '').trim(),
-					username: String(formData.get('username') ?? '').trim(),
-				}),
+			const payload = await submitUserChange(href, {
+				action: 'create_user',
+				email: String(formData.get('email') ?? '').trim(),
+				username: String(formData.get('username') ?? '').trim(),
 			})
-			if (response.status === 401) {
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AdminUsersMutationData & {
-					ok?: boolean
-					error?: string
-				}
-			>(response)
 			if (activeScope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to create user.')
-			}
 			resetPlanDraft()
-			setCreatedUser(payload.createdUser ?? createdUser)
+			setCreatedUser(
+				'createdUser' in payload ? payload.createdUser : createdUser,
+			)
 			setMessage('User created. Copy the setup link below.')
 			setActionState('idle')
-			if (payload.createdUser) form.reset()
+			if ('createdUser' in payload && payload.createdUser) form.reset()
 		} catch (error) {
 			if (activeScope.current !== submittedScope) return
 			setActionState('idle')
@@ -545,20 +438,8 @@ export function AdminUsersPage(props: {
 		meta: { actorKey },
 		queryKey: ['admin-user', actorKey, selectedUsageId, 'usage'],
 		enabled: selectedUsageId !== null,
-		queryFn: async ({ signal }) => {
-			const response = await fetch(
-				`${adminUserUsageApiPath}?stableUserId=${encodeURIComponent(selectedUsageId!)}`,
-				{
-					headers: { Accept: 'application/json' },
-					credentials: 'include',
-					signal,
-				},
-			)
-			const payload = await readJson<AdminUserUsageLoaderData>(response)
-			if (!response.ok || !payload?.ok)
-				throw new Error('Unable to load usage for this account.')
-			return payload
-		},
+		queryFn: ({ signal }) =>
+			readAdminUserUsage({ data: { stableUserId: selectedUsageId! }, signal }),
 	})
 	const usageData = usageQuery.data
 	const usageStatus: UsageStatus = usageQuery.isPending

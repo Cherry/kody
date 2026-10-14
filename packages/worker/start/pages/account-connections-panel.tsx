@@ -1,26 +1,24 @@
 /** @jsxImportSource @emotion/react */
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
-import { pageResourceKey } from '../page-mutation-cache.ts'
+import { updateConnections } from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'
-import { SiteLink } from '../components/site-link.tsx'
-import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
-import { ProviderIcon } from '../components/provider-icons.tsx'
-import { startSocialSignIn } from '../social-sign-in.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { type AccountConnectionsLoaderData } from '#universal/loader-data.ts'
 import { kodyDiscordInviteUrl } from '#universal/community-links.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { type AccountConnectionsLoaderData } from '#universal/loader-data.ts'
+import { getOauthLoginErrorMessage } from '#universal/oauth-login-errors.ts'
 import {
 	getDangerPillCss,
 	getGhostButtonCss,
 	mutedLinkCss,
 } from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouteContext } from '@tanstack/react-router'
+import { useState } from 'react'
+import { ProviderIcon } from '../components/provider-icons.tsx'
+import { SiteLink } from '../components/site-link.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { pageResourceKey } from '../page-mutation-cache.ts'
+import { startSocialSignIn } from '../social-sign-in.ts'
 import { AccountManagementPanel } from './account-management-components.tsx'
-
-const connectionsApiPath = '/account/connections.json'
 
 const providerLabels: Record<string, string> = {
 	github: 'GitHub',
@@ -96,26 +94,7 @@ export function useAccountConnections(
 				| { intent: 'disconnect'; provider: string }
 				| { intent: 'sync-discord-role' },
 		) => {
-			const response = await fetch(connectionsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(input),
-			})
-			const payload = await readJson<
-				AccountConnectionsLoaderData & {
-					error?: string
-					discordMemberRole?: { status: string }
-				}
-			>(response)
-			if (!response.ok || !payload?.ok)
-				throw new Error(
-					payload?.error || 'Unable to update connected accounts.',
-				)
-			return payload
+			return updateConnections({ data: { body: input } })
 		},
 		onMutate: () =>
 			queryClient.cancelQueries({
@@ -159,7 +138,10 @@ export function useAccountConnections(
 			{ intent: 'sync-discord-role' },
 			{
 				onSuccess: (payload) => {
-					const status = payload.discordMemberRole?.status ?? 'error'
+					const status =
+						('discordMemberRole' in payload
+							? payload.discordMemberRole?.status
+							: undefined) ?? 'error'
 					setConnectionsMessage({
 						text: discordMemberRoleMessage(status),
 						tone:

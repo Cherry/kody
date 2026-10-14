@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { postPackageCredentialChanges } from '../package-credential-changes.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
 import { type ReactNode, useState, useRef, useEffect } from 'react'
@@ -23,7 +24,6 @@ import {
 	mappingEditorKey,
 	mappingOptions,
 	mappingSaveAgentPrompt,
-	postPackageCredentialChanges,
 	toggleDraftPick,
 	triggerDraftProblem,
 	triggerWillEnable,

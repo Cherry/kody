@@ -1,21 +1,21 @@
-import { DatabaseSync } from 'node:sqlite'
-import {
-	ownerIdFromStored,
-	personIdFromStored,
-} from '@kody-internal/shared/owner-person-ids.ts'
-import { beforeEach, expect, test, vi } from 'vitest'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { loadOrgBindingForSlug } from '#worker/orgs/repo.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
-import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 import {
 	createAuditTestDb,
 	createTestOrgAuditWriter,
 } from '#worker/test-support/create-audit-db.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { beforeEach, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -47,13 +47,13 @@ vi.mock('#worker/orgs/billing.ts', async (importOriginal) => {
 })
 
 const {
-	createOrgMembersApiHandler,
-	createOrgMembersInviteLinksPostHandler,
-	createOrgMembersInviteLinksRevokePostHandler,
-	createOrgMembersInvitePostHandler,
-	createOrgMembersRemovePostHandler,
-	createOrgMembersRolePostHandler,
-} = await import('./org-members.ts')
+	testOrgMembersApiHandler,
+	testOrgMembersInviteLinksPostHandler,
+	testOrgMembersInviteLinksRevokePostHandler,
+	testOrgMembersInvitePostHandler,
+	testOrgMembersRemovePostHandler,
+	testOrgMembersRolePostHandler,
+} = await import('./org-members.test-support.ts')
 
 const people = {
 	ada: { id: 9, personId: 'a'.repeat(64) },
@@ -180,7 +180,7 @@ test('members JSON is 404 for collaborators and readable by billing', async () =
 	await signIn('dan', collab)
 	expect(
 		(
-			await createOrgMembersApiHandler(env).handler({
+			await testOrgMembersApiHandler(env).execute({
 				request: collab,
 			} as never)
 		).status,
@@ -188,11 +188,11 @@ test('members JSON is 404 for collaborators and readable by billing', async () =
 
 	const billing = new Request('https://kody.test/@zeta-co/-/members.json')
 	await signIn('cara', billing)
-	const readable = await createOrgMembersApiHandler(env).handler({
+	const readable = await testOrgMembersApiHandler(env).execute({
 		request: billing,
 	} as never)
 	expect(readable.status).toBe(200)
-	const payload = (await readable.json()) as {
+	const payload = readable.data as {
 		canManage: boolean
 		members: Array<{ username: string; role: string }>
 	}
@@ -219,7 +219,7 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 	await signIn('bob', roleReq)
 	expect(
 		(
-			await createOrgMembersRolePostHandler(env).handler({
+			await testOrgMembersRolePostHandler(env).execute({
 				request: roleReq,
 			} as never)
 		).status,
@@ -236,7 +236,7 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 	await signIn('cara', billingInvite)
 	expect(
 		(
-			await createOrgMembersInvitePostHandler(env).handler({
+			await testOrgMembersInvitePostHandler(env).execute({
 				request: billingInvite,
 			} as never)
 		).status,
@@ -251,11 +251,11 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 		},
 	)
 	await signIn('ada', invalidRoleInvite)
-	const rejectedRole = await createOrgMembersInvitePostHandler(env).handler({
+	const rejectedRole = await testOrgMembersInvitePostHandler(env).execute({
 		request: invalidRoleInvite,
 	} as never)
 	expect(rejectedRole.status).toBe(400)
-	expect(await rejectedRole.json()).toMatchObject({
+	expect(rejectedRole.data).toMatchObject({
 		ok: false,
 		error: 'Choose a valid role.',
 	})
@@ -269,11 +269,11 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 		},
 	)
 	await signIn('ada', ownerInvite)
-	const invited = await createOrgMembersInvitePostHandler(env).handler({
+	const invited = await testOrgMembersInvitePostHandler(env).execute({
 		request: ownerInvite,
 	} as never)
 	expect(invited.status).toBe(200)
-	expect(await invited.json()).toMatchObject({
+	expect(invited.data).toMatchObject({
 		ok: true,
 		invite: { prompt: expect.stringContaining('inviteAccept') },
 	})
@@ -289,7 +289,7 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 	await signIn('ada', ownerRole)
 	expect(
 		(
-			await createOrgMembersRolePostHandler(env).handler({
+			await testOrgMembersRolePostHandler(env).execute({
 				request: ownerRole,
 			} as never)
 		).status,
@@ -304,11 +304,11 @@ test('member cannot change roles, invite, or remove; owner can; last owner is pr
 		},
 	)
 	await signIn('ada', lastOwner)
-	const blocked = await createOrgMembersRemovePostHandler(env).handler({
+	const blocked = await testOrgMembersRemovePostHandler(env).execute({
 		request: lastOwner,
 	} as never)
 	expect(blocked.status).toBe(400)
-	expect(await blocked.json()).toMatchObject({
+	expect(blocked.data).toMatchObject({
 		error: 'The last Owner cannot be removed.',
 	})
 })
@@ -326,7 +326,7 @@ test('owner can create invite links; member and billing cannot; owner role is re
 	await signIn('cara', billingCreate)
 	expect(
 		(
-			await createOrgMembersInviteLinksPostHandler(env).handler({
+			await testOrgMembersInviteLinksPostHandler(env).execute({
 				request: billingCreate,
 			} as never)
 		).status,
@@ -343,7 +343,7 @@ test('owner can create invite links; member and billing cannot; owner role is re
 	await signIn('bob', memberCreate)
 	expect(
 		(
-			await createOrgMembersInviteLinksPostHandler(env).handler({
+			await testOrgMembersInviteLinksPostHandler(env).execute({
 				request: memberCreate,
 			} as never)
 		).status,
@@ -358,11 +358,11 @@ test('owner can create invite links; member and billing cannot; owner role is re
 		},
 	)
 	await signIn('ada', ownerRole)
-	const rejectedOwner = await createOrgMembersInviteLinksPostHandler(
-		env,
-	).handler({ request: ownerRole } as never)
+	const rejectedOwner = await testOrgMembersInviteLinksPostHandler(env).execute(
+		{ request: ownerRole } as never,
+	)
 	expect(rejectedOwner.status).toBe(400)
-	expect(await rejectedOwner.json()).toMatchObject({
+	expect(rejectedOwner.data).toMatchObject({
 		ok: false,
 		error: 'Invite links cannot grant the Owner role.',
 	})
@@ -381,11 +381,11 @@ test('owner can create invite links; member and billing cannot; owner role is re
 		},
 	)
 	await signIn('ada', create)
-	const created = await createOrgMembersInviteLinksPostHandler(env).handler({
+	const created = await testOrgMembersInviteLinksPostHandler(env).execute({
 		request: create,
 	} as never)
 	expect(created.status).toBe(200)
-	const payload = (await created.json()) as {
+	const payload = created.data as {
 		ok: boolean
 		inviteLinks: Array<{ id: string; useCount: number }>
 		inviteLink: { id: string; url: string; token: string }
@@ -404,11 +404,11 @@ test('owner can create invite links; member and billing cannot; owner role is re
 		},
 	)
 	await signIn('ada', revoke)
-	const revoked = await createOrgMembersInviteLinksRevokePostHandler(
-		env,
-	).handler({ request: revoke } as never)
+	const revoked = await testOrgMembersInviteLinksRevokePostHandler(env).execute(
+		{ request: revoke } as never,
+	)
 	expect(revoked.status).toBe(200)
-	expect(await revoked.json()).toMatchObject({
+	expect(revoked.data).toMatchObject({
 		ok: true,
 		inviteLinks: [],
 	})
@@ -427,8 +427,8 @@ test('signup org membership writes stay off the web even for a second owner', as
 	await signIn('bob', list)
 	expect(
 		await (
-			await createOrgMembersApiHandler(env).handler({ request: list } as never)
-		).json(),
+			await testOrgMembersApiHandler(env).execute({ request: list } as never)
+		).data,
 	).toMatchObject({
 		ok: true,
 		org: { personal: true },
@@ -441,11 +441,11 @@ test('signup org membership writes stay off the web even for a second owner', as
 		body: JSON.stringify({ invitee: 'eve@example.com', role: 'member' }),
 	})
 	await signIn('bob', invite)
-	const invited = await createOrgMembersInvitePostHandler(env).handler({
+	const invited = await testOrgMembersInvitePostHandler(env).execute({
 		request: invite,
 	} as never)
 	expect(invited.status).toBe(400)
-	expect(await invited.json()).toMatchObject({
+	expect(invited.data).toMatchObject({
 		error: expect.stringMatching(/personal organization/),
 	})
 
@@ -458,11 +458,11 @@ test('signup org membership writes stay off the web even for a second owner', as
 		},
 	)
 	await signIn('bob', link)
-	const linked = await createOrgMembersInviteLinksPostHandler(env).handler({
+	const linked = await testOrgMembersInviteLinksPostHandler(env).execute({
 		request: link,
 	} as never)
 	expect(linked.status).toBe(400)
-	expect(await linked.json()).toMatchObject({
+	expect(linked.data).toMatchObject({
 		error: expect.stringMatching(/personal organization/),
 	})
 })

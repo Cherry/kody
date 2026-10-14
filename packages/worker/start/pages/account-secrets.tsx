@@ -1,37 +1,29 @@
 /** @jsxImportSource @emotion/react */
-import { relocateAccountHref } from '#universal/org-pages.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { useMutation } from '@tanstack/react-query'
-import { toast } from '#client/toast.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { type CSSObject } from '@emotion/react'
-import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
-import { useState, type FormEvent } from 'react'
-import { useRouter } from '@tanstack/react-router'
-import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { type ListDetailSelection } from '#client/list-detail-route.ts'
 import {
 	type ApprovalAction,
-	accountSecretsApiPath,
 	getScopeLabel,
-	readJson,
 } from '#client/routes/account-approval-shared.ts'
-import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
 import { getNewSecretValueAutofocusKey } from '#client/routes/new-secret-query.ts'
 import { normalizeAllowedHosts } from '#client/routes/secret-normalization.ts'
+import { toast } from '#client/toast.ts'
+import { updateSecretCollection } from '#start/server/account-mutations'
+import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
+import { type CSSObject } from '@emotion/react'
+import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
+import { useMutation } from '@tanstack/react-query'
+import { useRouter } from '@tanstack/react-router'
+import { type FormEvent, useState } from 'react'
+import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
-import {
-	RecordTable,
-	RecordTableSearch,
-	RecordTableSelect,
-	recordCellClamp,
-	recordStampCss,
-} from './record-table.tsx'
 import {
 	isPackageApprovalHref,
 	isPackageSecretApprovalAlreadyGranted,
@@ -53,11 +45,18 @@ import {
 	formatRelativeTtl,
 	getAlreadyAddedNotice,
 	getDataRefreshKey,
-	readFilterState,
 	readAccountSecretsSaveWarning,
+	readFilterState,
 	secretsBasePath,
 	secretsRoute,
 } from './account-secrets-shared.ts'
+import {
+	RecordTable,
+	RecordTableSearch,
+	RecordTableSelect,
+	recordCellClamp,
+	recordStampCss,
+} from './record-table.tsx'
 
 const clampedCellCss = recordCellClamp(26)
 
@@ -122,26 +121,17 @@ export function AccountSecretsPage({
 	const secretsMutation = useMutation({
 		mutationKey: ['secrets', currentHref],
 		mutationFn: async (input: {
-			url: string
+			search: string
 			href: string
 			body: Record<string, unknown>
 		}) => {
-			const response = await fetch(input.url, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(input.href),
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			return updateSecretCollection({
+				data: {
+					body: input.body,
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					search: input.search,
 				},
-				body: JSON.stringify(input.body),
 			})
-			const result = await readJson<
-				AccountSecretsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !result?.ok)
-				throw new Error(result?.error ?? 'Unable to update secrets.')
-			return result
 		},
 		onSuccess: () => invalidatePages(),
 		onError: (error) => toast.error(error.message),
@@ -261,13 +251,13 @@ export function AccountSecretsPage({
 		try {
 			const currentUrl = new URL(getCurrentHref(), 'http://localhost')
 			const selection = secretsRoute.getSelection(currentUrl.toString())
-			const requestUrl = new URL(accountSecretsApiPath, currentUrl)
+			const requestUrl = new URL(currentUrl)
 			requestUrl.search = currentUrl.search
 			if (selection.selectedId) {
 				requestUrl.searchParams.set('selected', selection.selectedId)
 			}
 			const payload = await secretsMutation.mutateAsync({
-				url: `${requestUrl.pathname}${requestUrl.search}`,
+				search: requestUrl.search,
 				href: currentHref,
 				body: { action },
 			})
@@ -339,8 +329,8 @@ export function AccountSecretsPage({
 							left.localeCompare(right),
 						)
 					: []
-			const payload = await secretsMutation.mutateAsync({
-				url: accountSecretsApiPath,
+			await secretsMutation.mutateAsync({
+				search: '',
 				href: currentHref,
 				body: {
 					action: 'save',
@@ -396,8 +386,8 @@ export function AccountSecretsPage({
 		setMessage(null)
 
 		try {
-			const payload = await secretsMutation.mutateAsync({
-				url: accountSecretsApiPath,
+			await secretsMutation.mutateAsync({
+				search: '',
 				href: currentHref,
 				body: {
 					action: 'delete',

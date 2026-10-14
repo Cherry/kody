@@ -97,10 +97,11 @@ vi.mock('#worker/billing/stripe-client.ts', async (importOriginal) => {
 })
 
 const {
-	createAccountBillingCancellationFeedbackApiHandler,
-	createOrgBillingApiHandler,
-	createOrgBillingCheckoutApiHandler,
-	createOrgBillingPortalHandler,
+	submitWebsiteCancellationFeedback,
+	loadOrgBillingPageData,
+	resolveOrgBillingAccess,
+	startWebsiteCheckout,
+	openWebsiteBillingPortal,
 } = await import('./org-billing.ts')
 
 const retiredStandardPriceId = 'price_1U3sg6LAQpAnsYszGeL2nc8O'
@@ -228,23 +229,50 @@ function signInAs(person: Person | null) {
 	)
 }
 
-function call(
-	createHandler: (env: Env) => { handler: (input: never) => unknown },
+async function readWebsiteBilling(input: {
+	env: Env
+	request: Request
+	user: AuthenticatedAppUser
+	orgSlug: string
+}) {
+	const access = await resolveOrgBillingAccess({
+		...input,
+		permission: 'billing:read',
+	})
+	return access.ok
+		? {
+				status: 200,
+				data: await loadOrgBillingPageData({ ...input, org: access.org }),
+			}
+		: { status: access.status, data: { ok: false, error: access.error } }
+}
+async function call<T>(
+	operation: (input: {
+		env: Env
+		request: Request
+		user: AuthenticatedAppUser
+		orgSlug: string
+		body: unknown
+	}) => Promise<T>,
 	env: Env,
 	path: string,
 	init?: RequestInit,
 ) {
-	const url = new URL(`https://example.com${path}`)
-	return createHandler(env).handler({
-		request: new Request(url, init),
-		params: {},
-		url,
-	} as never) as Promise<Response>
+	const request = new Request(`https://example.com${path}`, init)
+	const user = await mocks.readAuthenticatedAppUser(request, env)
+	if (!user) throw new Error('Sign in required.')
+	return operation({
+		env,
+		request,
+		user,
+		orgSlug: new URL(request.url).pathname.split('/')[1]!.slice(1),
+		body: init?.body ? JSON.parse(String(init.body)) : undefined,
+	})
 }
 
 function postCheckout(env: Env, orgSlug: string, body: unknown) {
 	return call(
-		createOrgBillingCheckoutApiHandler,
+		startWebsiteCheckout,
 		env,
 		`/@${orgSlug}/-/billing/checkout.json`,
 		{
@@ -296,7 +324,7 @@ test('checkout sells only Pro and picks the monthly or annual price', async () =
 	const env = createEnv()
 	const monthly = await postCheckout(env, 'ada', { plan: 'pro' })
 	expect(monthly.status).toBe(200)
-	expect(await monthly.json()).toEqual({
+	expect(monthly.data).toEqual({
 		ok: true,
 		url: 'https://checkout.stripe.com/c/pay/cs_test',
 		mode: 'checkout',
@@ -374,7 +402,7 @@ test('only owners and billing admins can subscribe an organization', async () =>
 	signInAs('bob')
 	const member = await postCheckout(env, 'acme', { plan: 'pro' })
 	expect(member.status).toBe(403)
-	expect(await member.json()).toEqual({
+	expect(member.data).toEqual({
 		ok: false,
 		error: 'Only owners and billing admins can manage billing for @acme.',
 	})
@@ -398,7 +426,7 @@ test('promo codes apply to monthly checkouts only, as a Kody-validated discount'
 		promoCode: 'AGENCY-1',
 	})
 	expect(annual.status).toBe(400)
-	expect(await annual.json()).toEqual({
+	expect(annual.data).toEqual({
 		ok: false,
 		error: annualPromoRejection,
 	})
@@ -480,7 +508,7 @@ test('unusable promo codes get a specific message and never reach Checkout', asy
 			plan: 'pro',
 			promoCode: 'CODE',
 		})
-		expect([response.status, await response.json()]).toEqual([
+		expect([response.status, response.data]).toEqual([
 			400,
 			{ ok: false, error },
 		])
@@ -509,7 +537,7 @@ test('unusable promo codes get a specific message and never reach Checkout', asy
 			plan: 'pro',
 			promoCode: 'OTHER',
 		})
-		expect([rejected.status, await rejected.json()]).toEqual([
+		expect([rejected.status, rejected.data]).toEqual([
 			400,
 			{ ok: false, error: promoRejectedByStripe },
 		])
@@ -528,7 +556,7 @@ test('unusable promo codes get a specific message and never reach Checkout', asy
 		interval: 'month',
 		promoCode: 'AGENCY-2',
 	})
-	expect([subscribed.status, await subscribed.json()]).toEqual([
+	expect([subscribed.status, subscribed.data]).toEqual([
 		409,
 		{ ok: false, error: existingSubscriptionPromoRejection },
 	])
@@ -549,7 +577,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 		}),
 	])
 	const resubscribe = await postCheckout(env, 'ada', { plan: 'pro' })
-	expect(await resubscribe.json()).toMatchObject({ mode: 'checkout' })
+	expect(resubscribe.data).toMatchObject({ mode: 'checkout' })
 	expect(mocks.createCheckoutSession).toHaveBeenLastCalledWith(
 		env,
 		expect.objectContaining({ customerId: 'cus_existing' }),
@@ -566,7 +594,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 		plan: 'pro',
 		interval: 'year',
 	})
-	expect(await upgrade.json()).toEqual({
+	expect(upgrade.data).toEqual({
 		ok: true,
 		url: 'https://billing.stripe.com/p/session/test',
 		mode: 'portal_update',
@@ -590,7 +618,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 		subscription({ id: 'sub_pro', status: 'active', priceId: 'price_pro' }),
 	])
 	const samePlan = await postCheckout(env, 'ada', { plan: 'pro' })
-	expect([samePlan.status, await samePlan.json()]).toEqual([
+	expect([samePlan.status, samePlan.data]).toEqual([
 		409,
 		{ ok: false, error: 'You are already on that plan.' },
 	])
@@ -611,7 +639,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 		}),
 	])
 	const doubled = await postCheckout(env, 'ada', { plan: 'pro' })
-	expect(await doubled.json()).toMatchObject({ mode: 'portal' })
+	expect(doubled.data).toMatchObject({ mode: 'portal' })
 
 	consoleError.mockImplementation(() => {})
 	try {
@@ -621,7 +649,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 			}),
 		)
 		const stripeDown = await postCheckout(env, 'ada', { plan: 'pro' })
-		expect([stripeDown.status, await stripeDown.json()]).toEqual([
+		expect([stripeDown.status, stripeDown.data]).toEqual([
 			502,
 			{ ok: false, error: 'Unable to start checkout. Try again shortly.' },
 		])
@@ -633,12 +661,12 @@ test('existing subscribers switch plans through the portal update flow', async (
 test('billing data is readable by owners and billing admins of the org in the URL', async () => {
 	const env = createEnv()
 	const getBilling = (slug: string) =>
-		call(createOrgBillingApiHandler, env, `/@${slug}/-/billing.json`)
+		call(readWebsiteBilling, env, `/@${slug}/-/billing.json`)
 
 	signInAs('cara')
 	const billingAdmin = await getBilling('acme')
 	expect(billingAdmin.status).toBe(200)
-	expect(await billingAdmin.json()).toEqual({
+	expect(billingAdmin.data).toEqual({
 		ok: true,
 		org: {
 			id: 'org-acme',
@@ -650,7 +678,7 @@ test('billing data is readable by owners and billing admins of the org in the UR
 	})
 
 	signInAs('ada')
-	expect(await (await getBilling('ada')).json()).toMatchObject({
+	expect((await getBilling('ada')).data).toMatchObject({
 		org: { id: 'person-ada', slug: 'ada', personal: true },
 		seats: 1,
 	})
@@ -660,7 +688,7 @@ test('billing data is readable by owners and billing admins of the org in the UR
 	signInAs('dan')
 	expect((await getBilling('acme')).status).toBe(404)
 	signInAs(null)
-	expect((await getBilling('acme')).status).toBe(401)
+	await expect(getBilling('acme')).rejects.toThrow('Sign in required.')
 })
 
 test('checkout return links the Stripe customer onto the org in the URL', async () => {
@@ -701,21 +729,12 @@ test('the Stripe portal opens for the org in the URL and only for managers', asy
 	linkCustomer('org-acme', 'cus_acme')
 	const env = createEnv()
 	const getPortal = () =>
-		call(
-			(bindings) =>
-				createOrgBillingPortalHandler(
-					bindings,
-					async (_request, access) =>
-						new Response('Denied', { status: access.status }),
-				),
-			env,
-			'/@acme/-/billing/portal',
-		)
+		call(openWebsiteBillingPortal, env, '/@acme/-/billing/portal')
 
 	signInAs('cara')
 	const opened = await getPortal()
-	expect(opened.status).toBe(302)
-	expect(opened.headers.get('location')).toBe(
+	expect(opened.status).toBe(200)
+	expect('url' in opened.data ? opened.data.url : null).toBe(
 		'https://billing.stripe.com/p/session/test',
 	)
 	expect(mocks.createBillingPortalSession).toHaveBeenCalledWith(
@@ -739,7 +758,7 @@ test('billing cancellation feedback records platform feedback', async () => {
 	const env = createEnv()
 	const post = (body: unknown) =>
 		call(
-			createAccountBillingCancellationFeedbackApiHandler,
+			submitWebsiteCancellationFeedback,
 			env,
 			'/account/billing/cancellation-feedback.json',
 			{
@@ -755,7 +774,7 @@ test('billing cancellation feedback records platform feedback', async () => {
 	signInAs('ada')
 	expect((await post({ details: '   ' })).status).toBe(400)
 	const success = await post({ details: 'Too expensive for my usage.' })
-	expect([success.status, await success.json()]).toEqual([200, { ok: true }])
+	expect([success.status, success.data]).toEqual([200, { ok: true }])
 	expect(mocks.submitPlatformFeedback).toHaveBeenCalledWith(
 		expect.objectContaining({
 			submitterUserId: 'person-ada',
@@ -791,7 +810,7 @@ test('a person who already claimed a promo code cannot claim one for another org
 		promoCode: 'AGENCY-1',
 	})
 	expect(response.status).toBe(409)
-	expect(await response.json()).toEqual({
+	expect(response.data).toEqual({
 		ok: false,
 		error: promoAlreadyClaimedRejection,
 	})
@@ -852,7 +871,7 @@ test('a promo checkout reserves the claim before Stripe is called, so a parallel
 	})
 	const second = await postCheckout(env, 'acme', body)
 	expect(second.status).toBe(409)
-	expect(await second.json()).toEqual({
+	expect(second.data).toEqual({
 		ok: false,
 		error: promoAlreadyClaimedRejection,
 	})

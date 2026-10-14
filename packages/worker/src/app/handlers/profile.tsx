@@ -1,12 +1,10 @@
 import { type Action } from 'remix/router'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { loadProfileData } from '#app/profile-data.ts'
 import { type routes } from '#universal/routes.ts'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { getUserAvatarObject } from '#worker/community/avatar.ts'
 import { getCommunityProfileByUsername } from '#worker/community/profile-service.ts'
 import { type CommunityProfileRecord } from '#worker/community/types.ts'
-import { jsonResponse } from '#worker/json-response.ts'
 import { listOrganizationsForPerson } from '#worker/orgs/repo.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
 
@@ -22,22 +20,6 @@ export async function findMemberOrganization(
 		user.mcpUser.userId,
 	)
 	return organizations.find((org) => org.slug === slug && !org.personal) ?? null
-}
-
-export function createProfileApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const data = await loadProfileData(env, request, params.username)
-			if (!data) {
-				return jsonResponse(
-					{ ok: false, error: "This profile isn't available." },
-					404,
-				)
-			}
-			return jsonResponse(data)
-		},
-	} satisfies Action<typeof routes.profileApi>
 }
 
 /**

@@ -1,21 +1,17 @@
 /** @jsxImportSource @emotion/react */
+import { updateSecrets } from '#start/server/account-mutations'
+import { pageQueryOrg } from '../page-query-scope.ts'
 import { readAccountSecretsSaveWarning } from './account-secrets-shared.ts'
 import { persistConnectOauthOrgSlug } from './connect-oauth-shared.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
 import { type ReactNode, type FormEvent, useState } from 'react'
-import {
-	useCredentialMutation,
-	credentialPost,
-} from '../credential-mutation.ts'
+import { useCredentialMutation } from '../credential-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
-import {
-	accountSecretsApiPath,
-	readJson,
-} from '#client/routes/account-approval-shared.ts'
+
 import { AccountManagementShell } from './account-management-components.tsx'
 import {
 	credentialCreateHandoffHref,
@@ -57,7 +53,6 @@ import {
 	credentialKindLabel,
 } from '#universal/credentials-list.ts'
 import { orgResourcePath, orgSlugFromPathname } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
 import {
 	cardCss,
 	fieldCss,
@@ -149,8 +144,12 @@ export function ConnectCredentialRoute({
 	const [savedPackageId, setSavedPackageId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
 	const capture = useSubmitterScope()
-	const mutation = useCredentialMutation(href, (body: unknown) =>
-		credentialPost(href, accountSecretsApiPath, body),
+	const mutation = useCredentialMutation(
+		href,
+		(body: Record<string, unknown>) =>
+			updateSecrets({
+				data: { orgSlug: pageQueryOrg(href) ?? undefined, body },
+			}),
 	)
 	async function saveKey(
 		event: FormEvent<HTMLFormElement>,
@@ -191,19 +190,9 @@ export function ConnectCredentialRoute({
 		try {
 			const response = await mutation.mutateAsync(save.body)
 			if (!isCurrent()) return
-			if (response.status === 401) {
-				window.location.assign(`/login?redirectTo=${encodeURIComponent(href)}`)
-				return
-			}
-			const payload = await readJson<{
-				ok?: boolean
-				error?: string
+			const payload = response as {
 				providerLinkError?: string | null
 				renameCleanupError?: string | null
-			}>(response)
-			if (!isCurrent()) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to save this credential.')
 			}
 			setSavedWarning(readAccountSecretsSaveWarning(payload))
 			setSavedName(current.name.trim())

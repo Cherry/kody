@@ -1,20 +1,20 @@
-import { DatabaseSync } from 'node:sqlite'
-import {
-	ownerIdFromStored,
-	personIdFromStored,
-} from '@kody-internal/shared/owner-person-ids.ts'
-import { beforeEach, expect, test, vi } from 'vitest'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { routes } from '#universal/routes.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
-import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
-import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
-import { routes } from '#universal/routes.ts'
 import {
 	createAuditTestDb,
 	createTestOrgAuditWriter,
 } from '#worker/test-support/create-audit-db.ts'
+import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
+import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
+import {
+	ownerIdFromStored,
+	personIdFromStored,
+} from '@kody-internal/shared/owner-person-ids.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { beforeEach, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -36,8 +36,7 @@ vi.mock('#worker/authorization/authorize.ts', async () => {
 	}
 })
 
-const { createAccountOrganizationsNewPostHandler } =
-	await import('./account-organizations.ts')
+const { createWebsiteOrganization } = await import('./account-organizations.ts')
 
 const personId = 'a'.repeat(64)
 const now = '2026-01-01T00:00:00.000Z'
@@ -137,14 +136,14 @@ test('web create organization POST requires org:write like MCP orgCreate', async
 			}),
 		},
 	)
-	const response = await createAccountOrganizationsNewPostHandler({
-		APP_DB: db,
-		AUDIT_DB: createAuditTestDb(),
-	} as Env).handler({ request } as never)
-	expect(response.status).toBe(302)
-	const location = new URL(response.headers.get('Location')!, request.url)
-	expect(location.pathname).toBe(routes.accountOrganizationsNew.href())
-	expect(location.searchParams.get('error')).toMatch(/permission/)
+	const attempt = createFromRequest(
+		{
+			APP_DB: db,
+			AUDIT_DB: createAuditTestDb(),
+		} as Env,
+		request,
+	)
+	await expect(attempt).rejects.toThrow(/permission/)
 	expect(mocks.authorize).toHaveBeenCalledWith(
 		expect.objectContaining({ env: expect.anything() }),
 		'org:write',
@@ -162,15 +161,15 @@ test('web create organization form rejects the reserved `me` handle in any case'
 				body: new URLSearchParams({ displayName: 'Me Co', slug }),
 			},
 		)
-		const response = await createAccountOrganizationsNewPostHandler({
-			APP_DB: db,
-			AUDIT_DB: createAuditTestDb(),
-			BUNDLE_ARTIFACTS_KV: undefined,
-		} as unknown as Env).handler({ request } as never)
-		expect(response.status).toBe(302)
-		const location = new URL(response.headers.get('Location')!, request.url)
-		expect(location.pathname).toBe(routes.accountOrganizationsNew.href())
-		expect(location.searchParams.get('error')).toBe('This name is reserved.')
+		const attempt = createFromRequest(
+			{
+				APP_DB: db,
+				AUDIT_DB: createAuditTestDb(),
+				BUNDLE_ARTIFACTS_KV: undefined,
+			} as unknown as Env,
+			request,
+		)
+		await expect(attempt).rejects.toThrow('This name is reserved.')
 	}
 	expect(
 		await db
@@ -204,15 +203,15 @@ test('web create organization form enforces the free-org ownership cap', async (
 			}),
 		},
 	)
-	const response = await createAccountOrganizationsNewPostHandler({
-		APP_DB: db,
-		AUDIT_DB: createAuditTestDb(),
-		BUNDLE_ARTIFACTS_KV: undefined,
-	} as unknown as Env).handler({ request } as never)
-	expect(response.status).toBe(302)
-	const location = new URL(response.headers.get('Location')!, request.url)
-	expect(location.pathname).toBe(routes.accountOrganizationsNew.href())
-	expect(location.searchParams.get('error')).toMatch(/2 free organizations/)
+	const attempt = createFromRequest(
+		{
+			APP_DB: db,
+			AUDIT_DB: createAuditTestDb(),
+			BUNDLE_ARTIFACTS_KV: undefined,
+		} as unknown as Env,
+		request,
+	)
+	await expect(attempt).rejects.toThrow(/2 free organizations/)
 	expect(
 		await db
 			.prepare(`SELECT COUNT(*) AS count FROM orgs WHERE slug = ?`)
@@ -220,3 +219,14 @@ test('web create organization form enforces the free-org ownership cap', async (
 			.first<{ count: number }>(),
 	).toEqual({ count: 0 })
 })
+
+async function createFromRequest(env: Env, request: Request) {
+	const body = await request.formData()
+	const user = await mocks.readAuthenticatedAppUser()
+	return createWebsiteOrganization({
+		env,
+		user,
+		displayName: String(body.get('displayName') ?? ''),
+		slug: String(body.get('slug') ?? ''),
+	})
+}

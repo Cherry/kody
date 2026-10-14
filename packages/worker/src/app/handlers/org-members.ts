@@ -1,19 +1,27 @@
-import { type Action } from 'remix/router'
-import { type OrgRole } from '@kody-internal/shared/request-context.ts'
 import { isSecureRequest } from '#app/auth-session.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import {
 	orgHasPermission,
 	resolveOrgManagementAccess,
 	type ManagedOrg,
 } from '#app/org-management-access.ts'
+import {
+	type OrgInviteLinkView,
+	type OrgInviteView,
+	type OrgMemberView,
+	type OrgMembersLoaderData,
+} from '#universal/loader-data.ts'
+import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
+import { orgRoleLabel } from '#universal/org-pages.ts'
+import { routes } from '#universal/routes.ts'
 import { computeEffectivePermissions } from '#worker/authorization/authorize.ts'
+import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
 import { normalizeEmailAddress } from '#worker/email/address.ts'
 import {
 	getUsernameFormatValidationError,
 	normalizeUsername,
 } from '#worker/identity/username.ts'
-import { jsonResponse } from '#worker/json-response.ts'
 import {
 	createInvite,
 	updateOrgMemberRole,
@@ -39,18 +47,9 @@ import {
 	type ListedOrgMember,
 } from '#worker/orgs/org-members-list.ts'
 import { syncSeatsAfterMembershipChange } from '#worker/orgs/seat-sync-after-membership.ts'
-import { sha256Hex } from '@kody-internal/shared/sha256.ts'
 import { toHex } from '@kody-internal/shared/hex.ts'
-import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
-import {
-	type OrgInviteLinkView,
-	type OrgInviteView,
-	type OrgMemberView,
-	type OrgMembersLoaderData,
-} from '#universal/loader-data.ts'
-import { serializeLastUsedOrgCookie } from '#universal/org-last-used-cookie.ts'
-import { orgRoleLabel } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
+import { type OrgRole } from '@kody-internal/shared/request-context.ts'
+import { sha256Hex } from '@kody-internal/shared/sha256.ts'
 
 const orgRoleValues = ['owner', 'member', 'billing'] as const
 
@@ -190,7 +189,7 @@ export async function loadOrgMembersData(input: {
 }
 
 function personalOrgMembershipWriteResponse() {
-	return jsonResponse(
+	return operationResult(
 		{
 			ok: false,
 			error:
@@ -200,509 +199,492 @@ function personalOrgMembershipWriteResponse() {
 	)
 }
 
-export function createOrgMembersApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:read',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			return jsonResponse(
-				await loadOrgMembersData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgMembersApi>
-}
-
-async function readJsonObject(request: Request) {
+export async function readJsonObject(request: Request) {
 	const body = await request.json().catch(() => null)
 	if (!body || typeof body !== 'object') return null
 	return body as Record<string, unknown>
 }
+export async function mutateOrgMembersRole({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'member:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
-export function createOrgMembersRolePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgMembershipWriteResponse()
-			const body = await readJsonObject(request)
-			const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
-			const role = body?.role
-			if (!userId || !isOrgRole(role)) {
-				return jsonResponse(
-					{ ok: false, error: 'A member and role are required.' },
-					400,
-				)
-			}
-			const membership = await getLiveOrgMembership(
-				env.APP_DB,
-				access.org.id,
-				userId,
+	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	const role = body?.role
+	if (!userId || !isOrgRole(role)) {
+		return operationResult(
+			{ ok: false, error: 'A member and role are required.' },
+			400,
+		)
+	}
+	const membership = await getLiveOrgMembership(
+		env.APP_DB,
+		access.org.id,
+		userId,
+	)
+	if (!membership) {
+		return operationResult(
+			{
+				ok: false,
+				error: 'That person is not a member of this organization.',
+			},
+			404,
+		)
+	}
+	if (membership.role === 'owner' || role === 'owner') {
+		const permissions = await computeEffectivePermissions({
+			env,
+			request: user.request,
+		})
+		if (!permissions.isOwner) {
+			return operationResult(
+				{ ok: false, error: 'Only an Owner can change the Owner role.' },
+				403,
 			)
-			if (!membership) {
-				return jsonResponse(
-					{
-						ok: false,
-						error: 'That person is not a member of this organization.',
-					},
-					404,
-				)
-			}
-			if (membership.role === 'owner' || role === 'owner') {
-				const permissions = await computeEffectivePermissions({
-					env,
-					request: user.request,
-				})
-				if (!permissions.isOwner) {
-					return jsonResponse(
-						{ ok: false, error: 'Only an Owner can change the Owner role.' },
-						403,
-					)
-				}
-			}
-			const demotingOwner = membership.role === 'owner' && role !== 'owner'
-			if (demotingOwner) {
-				const owners = await countLiveOwners(env.APP_DB, access.org.id)
-				if (owners <= 1) {
-					return jsonResponse(
-						{ ok: false, error: 'The last Owner cannot be demoted.' },
-						400,
-					)
-				}
-			}
-			try {
-				if (role === 'owner' && membership.role !== 'owner') {
-					await assertCanAcceptFreeOrgOwnership({
-						db: env.APP_DB,
-						orgId: access.org.id,
-						userId,
-					})
-				}
-				await updateOrgMemberRole({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					userId,
-					audit: orgAuditWriterFromRequest(env, user.request),
-					role,
-					protectLastOwner: demotingOwner,
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to update that member.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-			if (seatRole(membership.role) !== seatRole(role)) {
-				await syncSeatsAfterMembershipChange({
-					db: env.APP_DB,
-					env,
-					orgId: access.org.id,
-				})
-			}
-			return jsonResponse(
-				await loadOrgMembersData({ env, user, org: access.org }),
+		}
+	}
+	const demotingOwner = membership.role === 'owner' && role !== 'owner'
+	if (demotingOwner) {
+		const owners = await countLiveOwners(env.APP_DB, access.org.id)
+		if (owners <= 1) {
+			return operationResult(
+				{ ok: false, error: 'The last Owner cannot be demoted.' },
+				400,
 			)
-		},
-	} satisfies Action<typeof routes.orgMembersRolePost>
-}
-
-export function createOrgMembersRemovePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:delete',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgMembershipWriteResponse()
-			const body = await readJsonObject(request)
-			const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
-			if (!userId) {
-				return jsonResponse({ ok: false, error: 'A member is required.' }, 400)
-			}
-			const membership = await getLiveOrgMembership(
-				env.APP_DB,
-				access.org.id,
-				userId,
-			)
-			if (!membership) {
-				return jsonResponse(
-					{
-						ok: false,
-						error: 'That person is not a member of this organization.',
-					},
-					404,
-				)
-			}
-			const removingOwner = membership.role === 'owner'
-			if (removingOwner) {
-				const permissions = await computeEffectivePermissions({
-					env,
-					request: user.request,
-				})
-				if (!permissions.isOwner) {
-					return jsonResponse(
-						{ ok: false, error: 'Only an Owner can remove an Owner.' },
-						403,
-					)
-				}
-				const owners = await countLiveOwners(env.APP_DB, access.org.id)
-				if (owners <= 1) {
-					return jsonResponse(
-						{ ok: false, error: 'The last Owner cannot be removed.' },
-						400,
-					)
-				}
-			}
-			try {
-				await onMemberSoftRemoved({
-					env,
-					orgId: access.org.id,
-					userId,
-					deletedAt: new Date().toISOString(),
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to remove that member.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-			if (seatRole(membership.role)) {
-				await syncSeatsAfterMembershipChange({
-					db: env.APP_DB,
-					env,
-					orgId: access.org.id,
-				})
-			}
-			return jsonResponse(
-				await loadOrgMembersData({ env, user, org: access.org }),
-			)
-		},
-	} satisfies Action<typeof routes.orgMembersRemovePost>
-}
-
-export function createOrgMembersInvitePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgMembershipWriteResponse()
-			const body = await readJsonObject(request)
-			const invitee =
-				typeof body?.invitee === 'string' ? body.invitee.trim() : ''
-			const emailInput =
-				typeof body?.email === 'string' ? body.email.trim() : ''
-			const usernameInput =
-				typeof body?.username === 'string' ? body.username.trim() : ''
-			if (body?.role !== undefined && !isOrgRole(body.role)) {
-				return jsonResponse({ ok: false, error: 'Choose a valid role.' }, 400)
-			}
-			const role = isOrgRole(body?.role) ? body.role : 'member'
-			let inviteeEmail: string | null = null
-			let inviteeUsername: string | null = null
-			if (emailInput || (invitee.includes('@') && !usernameInput)) {
-				const email = normalizeEmailAddress(emailInput || invitee)
-				if (!email) {
-					return jsonResponse(
-						{ ok: false, error: 'Enter a valid email address.' },
-						400,
-					)
-				}
-				inviteeEmail = email
-			} else {
-				const username = normalizeUsername(usernameInput || invitee)
-				const formatError = getUsernameFormatValidationError(username)
-				if (formatError) {
-					return jsonResponse(
-						{ ok: false, error: 'Enter an email or a valid username.' },
-						400,
-					)
-				}
-				inviteeUsername = username
-			}
-			if (role === 'owner') {
-				const permissions = await computeEffectivePermissions({
-					env,
-					request: user.request,
-				})
-				if (!permissions.isOwner) {
-					return jsonResponse(
-						{ ok: false, error: 'Only an Owner can invite another Owner.' },
-						403,
-					)
-				}
-			}
-			const token = generateInviteToken()
-			const tokenHash = await sha256Hex(token)
-			const created = await createInvite({
+		}
+	}
+	try {
+		if (role === 'owner' && membership.role !== 'owner') {
+			await assertCanAcceptFreeOrgOwnership({
 				db: env.APP_DB,
 				orgId: access.org.id,
-				kind: 'membership',
-				role,
-				inviteeEmail,
-				inviteeUsername,
-				invitedByUserId: user.mcpUser.userId,
-				tokenHash,
-				audit: orgAuditWriterFromRequest(env, user.request),
+				userId,
 			})
-			const payload = await loadOrgMembersData({ env, user, org: access.org })
-			return jsonResponse({
-				...payload,
-				invite: {
-					id: created.id,
-					expiresAt: created.expiresAt,
-					token,
-					prompt: inviteAcceptPrompt({
-						orgSlug: access.org.slug,
-						token,
-					}),
+		}
+		await updateOrgMemberRole({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			userId,
+			audit: orgAuditWriterFromRequest(env, user.request),
+			role,
+			protectLastOwner: demotingOwner,
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message : 'Unable to update that member.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+	if (seatRole(membership.role) !== seatRole(role)) {
+		await syncSeatsAfterMembershipChange({
+			db: env.APP_DB,
+			env,
+			orgId: access.org.id,
+		})
+	}
+	return operationResult(
+		await loadOrgMembersData({ env, user, org: access.org }),
+	)
+}
+export async function mutateOrgMembersRemove({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'member:delete',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgMembershipWriteResponse()
+
+	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	if (!userId) {
+		return operationResult({ ok: false, error: 'A member is required.' }, 400)
+	}
+	const membership = await getLiveOrgMembership(
+		env.APP_DB,
+		access.org.id,
+		userId,
+	)
+	if (!membership) {
+		return operationResult(
+			{
+				ok: false,
+				error: 'That person is not a member of this organization.',
+			},
+			404,
+		)
+	}
+	const removingOwner = membership.role === 'owner'
+	if (removingOwner) {
+		const permissions = await computeEffectivePermissions({
+			env,
+			request: user.request,
+		})
+		if (!permissions.isOwner) {
+			return operationResult(
+				{ ok: false, error: 'Only an Owner can remove an Owner.' },
+				403,
+			)
+		}
+		const owners = await countLiveOwners(env.APP_DB, access.org.id)
+		if (owners <= 1) {
+			return operationResult(
+				{ ok: false, error: 'The last Owner cannot be removed.' },
+				400,
+			)
+		}
+	}
+	try {
+		await onMemberSoftRemoved({
+			env,
+			orgId: access.org.id,
+			userId,
+			deletedAt: new Date().toISOString(),
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error ? error.message : 'Unable to remove that member.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+	if (seatRole(membership.role)) {
+		await syncSeatsAfterMembershipChange({
+			db: env.APP_DB,
+			env,
+			orgId: access.org.id,
+		})
+	}
+	return operationResult(
+		await loadOrgMembersData({ env, user, org: access.org }),
+	)
+}
+export async function mutateOrgMembersInvite({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'member:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgMembershipWriteResponse()
+
+	const invitee = typeof body?.invitee === 'string' ? body.invitee.trim() : ''
+	const emailInput = typeof body?.email === 'string' ? body.email.trim() : ''
+	const usernameInput =
+		typeof body?.username === 'string' ? body.username.trim() : ''
+	if (body?.role !== undefined && !isOrgRole(body.role)) {
+		return operationResult({ ok: false, error: 'Choose a valid role.' }, 400)
+	}
+	const role = isOrgRole(body?.role) ? body.role : 'member'
+	let inviteeEmail: string | null = null
+	let inviteeUsername: string | null = null
+	if (emailInput || (invitee.includes('@') && !usernameInput)) {
+		const email = normalizeEmailAddress(emailInput || invitee)
+		if (!email) {
+			return operationResult(
+				{ ok: false, error: 'Enter a valid email address.' },
+				400,
+			)
+		}
+		inviteeEmail = email
+	} else {
+		const username = normalizeUsername(usernameInput || invitee)
+		const formatError = getUsernameFormatValidationError(username)
+		if (formatError) {
+			return operationResult(
+				{ ok: false, error: 'Enter an email or a valid username.' },
+				400,
+			)
+		}
+		inviteeUsername = username
+	}
+	if (role === 'owner') {
+		const permissions = await computeEffectivePermissions({
+			env,
+			request: user.request,
+		})
+		if (!permissions.isOwner) {
+			return operationResult(
+				{ ok: false, error: 'Only an Owner can invite another Owner.' },
+				403,
+			)
+		}
+	}
+	const token = generateInviteToken()
+	const tokenHash = await sha256Hex(token)
+	const created = await createInvite({
+		db: env.APP_DB,
+		orgId: access.org.id,
+		kind: 'membership',
+		role,
+		inviteeEmail,
+		inviteeUsername,
+		invitedByUserId: user.mcpUser.userId,
+		tokenHash,
+		audit: orgAuditWriterFromRequest(env, user.request),
+	})
+	const payload = await loadOrgMembersData({ env, user, org: access.org })
+	return operationResult({
+		...payload,
+		invite: {
+			id: created.id,
+			expiresAt: created.expiresAt,
+			token,
+			prompt: inviteAcceptPrompt({
+				orgSlug: access.org.slug,
+				token,
+			}),
+		},
+	})
+}
+export async function mutateOrgMembersInviteLinks({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'member:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgMembershipWriteResponse()
+
+	if (body?.role !== undefined && !isInviteLinkRole(body.role)) {
+		if (body.role === 'owner') {
+			return operationResult(
+				{
+					ok: false,
+					error: 'Invite links cannot grant the Owner role.',
 				},
-			})
-		},
-	} satisfies Action<typeof routes.orgMembersInvitePost>
-}
-
-export function createOrgMembersInviteLinksPostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgMembershipWriteResponse()
-			const body = await readJsonObject(request)
-			if (body?.role !== undefined && !isInviteLinkRole(body.role)) {
-				if (body.role === 'owner') {
-					return jsonResponse(
-						{
-							ok: false,
-							error: 'Invite links cannot grant the Owner role.',
-						},
-						400,
-					)
-				}
-				return jsonResponse({ ok: false, error: 'Choose a valid role.' }, 400)
-			}
-			const role = isInviteLinkRole(body?.role) ? body.role : 'member'
-			const domains = parseDomainList(
-				body?.allowedEmailDomains ?? body?.domains ?? body?.allowedDomains,
+				400,
 			)
-			if (domains == null) {
-				return jsonResponse(
-					{
-						ok: false,
-						error: 'Allowed email domains must be a list or string.',
-					},
-					400,
-				)
-			}
-			let maxUses: number | null = null
-			if (
-				body?.maxUses !== undefined &&
-				body?.maxUses !== null &&
-				body?.maxUses !== ''
-			) {
-				const parsed =
-					typeof body.maxUses === 'number'
-						? body.maxUses
-						: typeof body.maxUses === 'string'
-							? Number(body.maxUses)
-							: NaN
-				if (!Number.isInteger(parsed) || parsed < 1) {
-					return jsonResponse(
-						{ ok: false, error: 'Max uses must be a positive integer.' },
-						400,
-					)
-				}
-				maxUses = parsed
-			}
-			let expiresAt: string | undefined
-			if (typeof body?.expiresAt === 'string' && body.expiresAt.trim()) {
-				const parsed = Date.parse(body.expiresAt)
-				if (Number.isNaN(parsed)) {
-					return jsonResponse(
-						{ ok: false, error: 'Enter a valid expiry date.' },
-						400,
-					)
-				}
-				expiresAt = new Date(parsed).toISOString()
-			} else if (
-				body?.expiresInDays !== undefined &&
-				body?.expiresInDays !== null &&
-				body?.expiresInDays !== ''
-			) {
-				const days =
-					typeof body.expiresInDays === 'number'
-						? body.expiresInDays
-						: typeof body.expiresInDays === 'string'
-							? Number(body.expiresInDays)
-							: NaN
-				if (
-					!Number.isFinite(days) ||
-					days <= 0 ||
-					days > MAX_INVITE_LINK_EXPIRY_DAYS
-				) {
-					return jsonResponse(
-						{
-							ok: false,
-							error: `Expiry days must be between 1 and ${MAX_INVITE_LINK_EXPIRY_DAYS}.`,
-						},
-						400,
-					)
-				}
-				expiresAt = new Date(
-					Date.now() + days * 24 * 60 * 60 * 1000,
-				).toISOString()
-			}
-			const token = generateInviteLinkToken()
-			const tokenHash = await hashInviteLinkToken(token)
-			try {
-				const created = await createOrgInviteLink({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					role,
-					createdByUserId: user.mcpUser.userId,
-					tokenHash,
-					allowedEmailDomains: domains,
-					maxUses,
-					expiresAt,
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-				const payload = await loadOrgMembersData({
-					env,
-					user,
-					org: access.org,
-				})
-				const origin = new URL(request.url).origin
-				const path = routes.orgInviteJoin.href({ token })
-				return jsonResponse({
-					...payload,
-					inviteLink: {
-						id: created.id,
-						expiresAt: created.expiresAt,
-						maxUses: created.maxUses,
-						allowedEmailDomains: created.allowedEmailDomains,
-						role,
-						url: `${origin}${path}`,
-						token,
-					},
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to create that invite link.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-		},
-	} satisfies Action<typeof routes.orgMembersInviteLinksPost>
-}
-
-export function createOrgMembersInviteLinksRevokePostHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			const access = await resolveOrgManagementAccess({
-				request,
-				env,
-				user,
-				permission: 'member:write',
-			})
-			if (!access.ok) {
-				return jsonResponse({ ok: false, error: access.error }, access.status)
-			}
-			if (access.org.personal) return personalOrgMembershipWriteResponse()
-			const body = await readJsonObject(request)
-			const linkId =
-				typeof body?.linkId === 'string'
-					? body.linkId.trim()
-					: typeof body?.id === 'string'
-						? body.id.trim()
-						: ''
-			if (!linkId) {
-				return jsonResponse(
-					{ ok: false, error: 'An invite link is required.' },
-					400,
-				)
-			}
-			try {
-				await revokeOrgInviteLink({
-					db: env.APP_DB,
-					orgId: access.org.id,
-					linkId,
-					audit: orgAuditWriterFromRequest(env, user.request),
-				})
-			} catch (error) {
-				const message =
-					error instanceof Error
-						? error.message
-						: 'Unable to revoke that invite link.'
-				return jsonResponse({ ok: false, error: message }, 400)
-			}
-			return jsonResponse(
-				await loadOrgMembersData({ env, user, org: access.org }),
+		}
+		return operationResult({ ok: false, error: 'Choose a valid role.' }, 400)
+	}
+	const role = isInviteLinkRole(body?.role) ? body.role : 'member'
+	const domains = parseDomainList(
+		body?.allowedEmailDomains ?? body?.domains ?? body?.allowedDomains,
+	)
+	if (domains == null) {
+		return operationResult(
+			{
+				ok: false,
+				error: 'Allowed email domains must be a list or string.',
+			},
+			400,
+		)
+	}
+	let maxUses: number | null = null
+	if (
+		body?.maxUses !== undefined &&
+		body?.maxUses !== null &&
+		body?.maxUses !== ''
+	) {
+		const parsed =
+			typeof body.maxUses === 'number'
+				? body.maxUses
+				: typeof body.maxUses === 'string'
+					? Number(body.maxUses)
+					: NaN
+		if (!Number.isInteger(parsed) || parsed < 1) {
+			return operationResult(
+				{ ok: false, error: 'Max uses must be a positive integer.' },
+				400,
 			)
-		},
-	} satisfies Action<typeof routes.orgMembersInviteLinksRevokePost>
+		}
+		maxUses = parsed
+	}
+	let expiresAt: string | undefined
+	if (typeof body?.expiresAt === 'string' && body.expiresAt.trim()) {
+		const parsed = Date.parse(body.expiresAt)
+		if (Number.isNaN(parsed)) {
+			return operationResult(
+				{ ok: false, error: 'Enter a valid expiry date.' },
+				400,
+			)
+		}
+		expiresAt = new Date(parsed).toISOString()
+	} else if (
+		body?.expiresInDays !== undefined &&
+		body?.expiresInDays !== null &&
+		body?.expiresInDays !== ''
+	) {
+		const days =
+			typeof body.expiresInDays === 'number'
+				? body.expiresInDays
+				: typeof body.expiresInDays === 'string'
+					? Number(body.expiresInDays)
+					: NaN
+		if (
+			!Number.isFinite(days) ||
+			days <= 0 ||
+			days > MAX_INVITE_LINK_EXPIRY_DAYS
+		) {
+			return operationResult(
+				{
+					ok: false,
+					error: `Expiry days must be between 1 and ${MAX_INVITE_LINK_EXPIRY_DAYS}.`,
+				},
+				400,
+			)
+		}
+		expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+	}
+	const token = generateInviteLinkToken()
+	const tokenHash = await hashInviteLinkToken(token)
+	try {
+		const created = await createOrgInviteLink({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			role,
+			createdByUserId: user.mcpUser.userId,
+			tokenHash,
+			allowedEmailDomains: domains,
+			maxUses,
+			expiresAt,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+		const payload = await loadOrgMembersData({
+			env,
+			user,
+			org: access.org,
+		})
+		const origin = new URL(request.url).origin
+		const path = routes.orgInviteJoin.href({ token })
+		return operationResult({
+			...payload,
+			inviteLink: {
+				id: created.id,
+				expiresAt: created.expiresAt,
+				maxUses: created.maxUses,
+				allowedEmailDomains: created.allowedEmailDomains,
+				role,
+				url: `${origin}${path}`,
+				token,
+			},
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: 'Unable to create that invite link.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+}
+export async function mutateOrgMembersInviteLinksRevoke({
+	request,
+	env,
+	user,
+	body,
+	orgSlug,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+	orgSlug?: string
+}) {
+	const access = await resolveOrgManagementAccess({
+		request,
+		orgSlug,
+		env,
+		user,
+		permission: 'member:write',
+	})
+	if (!access.ok) {
+		return operationResult({ ok: false, error: access.error }, access.status)
+	}
+	if (access.org.personal) return personalOrgMembershipWriteResponse()
+
+	const linkId =
+		typeof body?.linkId === 'string'
+			? body.linkId.trim()
+			: typeof body?.id === 'string'
+				? body.id.trim()
+				: ''
+	if (!linkId) {
+		return operationResult(
+			{ ok: false, error: 'An invite link is required.' },
+			400,
+		)
+	}
+	try {
+		await revokeOrgInviteLink({
+			db: env.APP_DB,
+			orgId: access.org.id,
+			linkId,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		const message =
+			error instanceof Error
+				? error.message
+				: 'Unable to revoke that invite link.'
+		return operationResult({ ok: false, error: message }, 400)
+	}
+	return operationResult(
+		await loadOrgMembersData({ env, user, org: access.org }),
+	)
 }

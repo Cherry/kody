@@ -16,6 +16,7 @@
 				"./.generated/start-types/packages/worker/start/server/*.d.ts"
 			],
 			"#app/*.ts": ["./.generated/start-types/packages/worker/src/app/*.d.ts"],
+			"#mcp/*.ts": ["./.generated/start-types/packages/worker/src/mcp/*.d.ts"],
 			"#worker/*.ts": ["./.generated/start-types/packages/worker/src/*.d.ts"],
 			"@kody-internal/shared/*.ts": [
 				"./.generated/start-types/packages/shared/src/*.d.ts"

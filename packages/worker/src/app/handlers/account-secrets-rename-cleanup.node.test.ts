@@ -1,20 +1,20 @@
+import type * as authenticatedUserModule from '#app/authenticated-user.ts'
+import type * as AllowedHosts from '#mcp/secrets/allowed-hosts.ts'
+import type * as HostApproval from '#mcp/secrets/host-approval.ts'
+import type * as secretsService from '#mcp/secrets/service.ts'
+import type * as valuesService from '#mcp/values/service.ts'
+import type * as CredentialFields from '#worker/credentials/credential-fields.ts'
+import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
+import type * as packageSubscriptions from '#worker/integrations/package-subscriptions.ts'
+import type * as platformApps from '#worker/integrations/platform-apps.ts'
+import type * as IntegrationsService from '#worker/integrations/service.ts'
+import type * as packageRepo from '#worker/package-registry/repo.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import type * as authenticatedUserModule from '#app/authenticated-user.ts'
-import type * as secretsService from '#mcp/secrets/service.ts'
-import type * as valuesService from '#mcp/values/service.ts'
-import type * as packageRepo from '#worker/package-registry/repo.ts'
-import type * as platformApps from '#worker/integrations/platform-apps.ts'
-import type * as packageSubscriptions from '#worker/integrations/package-subscriptions.ts'
-import type * as AllowedHosts from '#mcp/secrets/allowed-hosts.ts'
-import type * as HostApproval from '#mcp/secrets/host-approval.ts'
-import type * as IntegrationsService from '#worker/integrations/service.ts'
-import type * as IntegrationsCredentials from '#worker/integrations/credentials.ts'
-import type * as CredentialFields from '#worker/credentials/credential-fields.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn<
 		typeof authenticatedUserModule.readAuthenticatedAppUser
@@ -390,17 +390,18 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	) => mockModule.listSavedPackagesByUserId(...args),
 }))
 
-const { createAccountSecretsApiHandler } = await import('./account-secrets.ts')
+const { testAccountSecretsApiHandler } =
+	await import('./account-secrets.test-support.ts')
 
 const secretsUrl = 'https://example.com/account/secrets.json'
 const epoch = new Date(0).toISOString()
 
 function createHandler() {
-	const { handler } = createAccountSecretsApiHandler({
+	const { execute } = testAccountSecretsApiHandler({
 		APP_DB: {} as D1Database,
 		COOKIE_SECRET: 'secret',
 	} as Env)
-	return (request: Request) => handler({ request, params: {} } as never)
+	return (request: Request) => execute({ request, params: {} } as never)
 }
 
 function postRequest(body: Record<string, unknown>, search = '') {
@@ -469,7 +470,7 @@ test('account secrets save reports rename cleanup failure without failing the sa
 	)
 
 	expect(response.status).toBe(200)
-	await expect(response.json()).resolves.toMatchObject({
+	expect(response.data).toMatchObject({
 		ok: true,
 		renameCleanupError: 'delete prior secret failed',
 		selectedSecret: { name: 'renamedApiKey' },

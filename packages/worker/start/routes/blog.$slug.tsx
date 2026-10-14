@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { blogMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 import { createFileRoute } from '@tanstack/react-router'
@@ -12,6 +13,7 @@ const pageQuery = createPageQuery('loadBlogPost', loadBlogPost, {
 })
 
 export const Route = createFileRoute('/blog/$slug')({
+	server: { handlers: { GET: blogMarkdown } },
 	// Blog content is build-backed and does not depend on search parameters.
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),
 	loader: ({ context, preload }) =>

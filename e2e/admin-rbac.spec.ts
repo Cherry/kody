@@ -28,9 +28,7 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 	await page.goto('/admin/users')
 	await expect(page.getByRole('heading', { name: 'Admin users' })).toBeHidden()
 	await expect(page.getByText('Forbidden')).toBeVisible()
-	const memberUsageResponse = await page.request.get(
-		'/admin/users/usage.json?stableUserId=forbidden',
-	)
+	const memberUsageResponse = await page.request.get('/admin/users/forbidden')
 	expect(memberUsageResponse.status()).toBe(403)
 	await page.goto('/admin/insights')
 	await expect(
@@ -41,19 +39,15 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 		page.getByRole('link', { name: 'Admin', exact: true }),
 	).toHaveCount(0)
 
-	const secretResponse = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: 'memberPrivateSecret',
-			scope: 'user',
-			value: 'super-secret-value',
-			description: 'Seeded for admin privacy test',
-			allowedHosts: ['api.example.com'],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
-	})
-	expect(secretResponse.ok()).toBe(true)
+	await page.goto(`/@${memberUser.username}/-/secrets`)
+	await waitForClientHydration(page)
+	await page.getByRole('button', { name: 'New secret', exact: true }).click()
+	await page.getByLabel('Name', { exact: true }).fill('memberPrivateSecret')
+	await page
+		.getByLabel('Secret value', { exact: true })
+		.fill('super-secret-value')
+	await page.getByRole('button', { name: 'Save', exact: true }).click()
+	await expect(page.getByText('Created secret.', { exact: true })).toBeVisible()
 
 	await page.context().clearCookies()
 	await login({
@@ -78,18 +72,12 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 	await expect(page.getByText('memberPrivateSecret')).toHaveCount(0)
 	await expect(page.getByText('super-secret-value')).toHaveCount(0)
 
-	const usersApiResponse = await page.request.get(
-		`/admin/users.json?q=rbac-${runId}`,
-	)
-	expect(usersApiResponse.ok()).toBe(true)
-	const usersPayload = await usersApiResponse.json()
-	expect(usersPayload.ok).toBe(true)
-	const memberRecord = usersPayload.users.find(
-		(user: { email: string }) => user.email === memberUser.email,
-	)
-	expect(memberRecord).toBeTruthy()
-	expect(JSON.stringify(memberRecord)).not.toContain('memberPrivateSecret')
-	expect(JSON.stringify(memberRecord)).not.toContain('super-secret-value')
+	const usersDocument = await page.request.get(`/admin/users?q=rbac-${runId}`)
+	expect(usersDocument.ok()).toBe(true)
+	const usersHtml = await usersDocument.text()
+	expect(usersHtml).toContain(memberUser.email)
+	expect(usersHtml).not.toContain('memberPrivateSecret')
+	expect(usersHtml).not.toContain('super-secret-value')
 
 	await page.getByRole('link', { name: memberUser.username }).click()
 	await expect(page.getByText('Account metadata only')).toBeVisible()
@@ -98,34 +86,11 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 
 	await page.goto(`/admin/users?q=rbac-${runId}`)
 	await page.getByRole('link', { name: memberUser.username }).click()
-	// Assign is type="button" + on('click'). Without hydration the click is a
-	// silent no-op and waitForResponse burns the 60s CI test timeout.
+	// Assign requires client hydration before its native mutation can run.
 	await waitForClientHydration(page)
 	const roleSelect = page.getByLabel('Role', { exact: true })
 	await roleSelect.selectOption('admin')
-	const assignRoleResponse = page.waitForResponse((response) => {
-		if (response.request().method() !== 'POST') return false
-		let pathname = ''
-		try {
-			pathname = new URL(response.url()).pathname
-		} catch {
-			return false
-		}
-		if (pathname !== '/admin/users.json') return false
-		try {
-			const body: unknown = JSON.parse(response.request().postData() ?? '')
-			return (
-				typeof body === 'object' &&
-				body !== null &&
-				'action' in body &&
-				body.action === 'assign_role'
-			)
-		} catch {
-			return false
-		}
-	})
 	await page.getByRole('button', { name: 'Assign', exact: true }).click()
-	expect((await assignRoleResponse).ok()).toBe(true)
 	await expect(page.getByText('Assigned admin role.')).toBeVisible()
 	await expect(page.getByText('admin, user')).toBeVisible()
 	await expect(
@@ -138,8 +103,8 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 		password: memberUser.password,
 		mode: 'login',
 	})
-	const sessionResponse = await page.request.get('/session')
-	expect(sessionResponse.ok()).toBe(true)
-	const sessionPayload = await sessionResponse.json()
-	expect(sessionPayload.session.roles).toContain('admin')
+	await page.goto('/admin/users')
+	await expect(
+		page.getByRole('heading', { name: 'Admin users', exact: true }),
+	).toBeVisible()
 })

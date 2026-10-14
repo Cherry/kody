@@ -167,134 +167,46 @@ vi.mock('@tanstack/react-start/server', () => ({
 }))
 vi.mock('#app/env.ts', () => ({ getEnv: () => native.env }))
 
-const {
-	createAccountPackageFilesApiHandler,
-	createCommunityPackageFilesApiHandler,
-} = await import('./package-files.ts')
 const { loadPackageFiles } =
 	await import('../../../start/server/package-files.ts')
 
-const filesPayload = {
-	ok: true,
-	title: '@owner/demo',
-	backHref: '/@owner/demo',
-	backLabel: 'Repo',
-	filesBasePath: '/@owner/demo/tree/main',
-	selectedPath: 'src/index.ts',
-	kind: 'file',
-	paths: ['src/index.ts'],
-	children: [],
-	content: 'export const answer = 42\n',
-	contentPath: 'src/index.ts',
-	contentKind: 'code',
-	language: 'ts',
-}
-
-type Handler = { handler(context: never): Promise<Response> }
-
-function call(
-	handler: Handler,
-	path: string,
-	params: Record<string, string>,
-	headers: Record<string, string> = {},
-) {
-	const url = new URL(`https://example.com${path}`)
-	return handler.handler({
-		request: new Request(url, { headers }),
-		params,
-		url,
-	} as never)
-}
-
-test('community files API resolves the package page and rejects traversal', async () => {
-	const handler = createCommunityPackageFilesApiHandler({} as Env)
-	const params = { username: 'owner', kodyId: 'demo' }
-	const filesJson = '/profiles/owner/packages/demo/files.json'
-	mockModule.loadPackagePage.mockResolvedValue({
-		kind: 'page',
-		username: 'owner',
-		kodyId: 'demo',
-		listing: { listing: { id: 'listing-1' } },
-		viewerIsOwner: false,
-	})
-	mockModule.loadAccessiblePackageFilesData.mockResolvedValue(filesPayload)
-
-	const success = await call(handler, `${filesJson}?path=src/index.ts`, params)
-	expect(success.status).toBe(200)
-	expect(await success.json()).toEqual(filesPayload)
-	// Anonymous trees are shared; a session cookie makes the same URL private.
-	expect(success.headers.get('Cache-Control')).toBe('public, max-age=60')
-	expect(success.headers.get('Vary')).toBe('Cookie')
-	const signedIn = await call(
-		handler,
-		`${filesJson}?path=src/index.ts`,
-		params,
-		{
-			Cookie: 'kody_session=abc',
-		},
-	)
-	expect(signedIn.status).toBe(200)
-	expect(signedIn.headers.get('Cache-Control')).toBe('no-store')
-	expect(mockModule.loadAccessiblePackageFilesData).toHaveBeenCalledWith({
-		env: {},
-		request: expect.any(Request),
+test('canonical file reads resolve data and reject missing or invalid trees', async () => {
+	native.env = {} as Env
+	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
+		kind: 'package',
 		username: 'owner',
 		kodyId: 'demo',
 		selectedPath: 'src/index.ts',
-		ref: '',
-		serverTiming: expect.any(Array),
+		ref: 'main',
 	})
-
-	const traversal = await call(handler, `${filesJson}?path=../secret`, params)
-	expect(traversal.status).toBe(400)
-
-	mockModule.loadAccessiblePackageFilesData.mockResolvedValue(null)
-	expect((await call(handler, filesJson, params)).status).toBe(404)
-})
-
-test('account files HTML and JSON redirect to the package tree', async () => {
-	const apiHandler = createAccountPackageFilesApiHandler({} as Env)
-	const params = { packageId: 'pkg-1' }
-
-	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
-	const unauthorized = await call(
-		apiHandler,
-		'/account/packages/pkg-1/files.json',
-		params,
-	)
-	expect(unauthorized.status).toBe(401)
-	expect(mockModule.getSavedPackageById).not.toHaveBeenCalled()
-
-	const owner = {
-		mcpUser: { userId: ownerIdFromStored('stable-user-1') },
-		username: 'owner',
-	}
-	mockModule.readAuthenticatedAppUser.mockResolvedValue(owner)
-	mockModule.requireAuthenticatedPageUser.mockResolvedValue(owner)
-	mockModule.getSavedPackageById.mockResolvedValue({ kodyId: 'demo' })
-
-	const json = await call(
-		apiHandler,
-		'/account/packages/pkg-1/files.json?path=src/index.ts',
-		params,
-	)
-	expect(json.status).toBe(404)
-	expect(await json.json()).toEqual({
-		ok: false,
-		error: 'Package files moved.',
-		redirectTo: '/@owner/demo/tree/main/src/index.ts',
+	mockModule.loadAccessiblePackageFilesData.mockResolvedValue({
+		ok: true,
+		content: 'export const answer = 42',
 	})
-	expect(mockModule.loadAccountPackageFilesData).not.toHaveBeenCalled()
-
-	native.env = {
-		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
-	} as Env
+	const result = await loadPackageFiles({
+		data: { pathname: '/@owner/demo/tree/main/src/index.ts' },
+	})
+	expect(result.data).toMatchObject({
+		ok: true,
+		content: 'export const answer = 42',
+	})
+	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
+		kind: 'invalid-path',
+	})
 	await expect(
-		loadPackageFiles({ data: { pathname: '/account/packages/pkg-1/files' } }),
-	).rejects.toMatchObject({
-		status: 302,
-		options: { href: '/@owner/demo/tree/main' },
+		loadPackageFiles({ data: { pathname: '/@owner/demo/tree/main/secret' } }),
+	).rejects.toBeDefined()
+	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
+		kind: 'package',
+		username: 'owner',
+		kodyId: 'demo',
+		selectedPath: 'missing',
+		ref: 'main',
 	})
+	mockModule.loadAccessiblePackageFilesData.mockResolvedValue(null)
+	await expect(
+		loadPackageFiles({ data: { pathname: '/@owner/demo/tree/main/missing' } }),
+	).rejects.toBeDefined()
 })
 
 test('unlisted leftover tree redirects stay private; listed leftovers stay public', async () => {
@@ -348,7 +260,13 @@ test('canonical listed tree server loader preserves URL package path and reposit
 		ref: 'main',
 		packagePath: { username: 'owner', kodyId: 'demo' },
 	})
-	const withActions = { ...filesPayload, repoActions: null }
+	const withActions = {
+		ok: true,
+		kind: 'tree',
+		paths: [],
+		children: [],
+		repoActions: null,
+	}
 	mockModule.loadListingFilesData.mockResolvedValue(withActions)
 
 	const result = await loadPackageFiles({

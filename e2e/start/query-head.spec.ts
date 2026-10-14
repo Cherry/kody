@@ -41,7 +41,8 @@ async function saveProfile(page: Page, name: string, bio: string) {
 	await page.getByRole('textbox', { name: 'Bio', exact: true }).fill(bio)
 	const saved = page.waitForResponse(
 		(response) =>
-			new URL(response.url()).pathname === '/account/profile.json' &&
+			new URL(response.url()).pathname.startsWith('/_serverFn/') &&
+			(response.request().postData() ?? '').includes(name) &&
 			response.request().method() === 'POST',
 	)
 	await page.getByRole('button', { name: 'Save profile', exact: true }).click()
@@ -265,25 +266,23 @@ test('background permission failure removes cached private document metadata', a
 				})
 			).ok(),
 		).toBe(true)
-		const users = await other.request.get(
-			`/admin/users.json?q=${encodeURIComponent(user.email)}`,
-		)
-		expect(users.ok()).toBe(true)
-		const target = (await users.json()).users.find(
-			(entry: { email: string }) => entry.email === user.email,
-		)
-		expect(target).toBeTruthy()
-		expect(
-			(
-				await other.request.post('/admin/users.json', {
-					data: {
-						action: 'remove_role',
-						stableUserId: target.stableUserId,
-						role: 'admin',
-					},
-				})
-			).ok(),
-		).toBe(true)
+		const operatorPage = await other.newPage()
+		await operatorPage.goto(`/admin/users?q=${encodeURIComponent(user.email)}`)
+		await operatorPage
+			.getByRole('row')
+			.filter({ hasText: user.email })
+			.getByRole('link')
+			.first()
+			.click()
+		await operatorPage
+			.getByRole('combobox', { name: 'Role', exact: true })
+			.selectOption('admin')
+		await operatorPage
+			.getByRole('button', { name: 'Remove', exact: true })
+			.click()
+		await expect(
+			operatorPage.getByText('Removed admin role.', { exact: true }),
+		).toBeVisible()
 		const denied = page.waitForResponse(
 			(response) =>
 				response.url().includes('/_serverFn/') &&

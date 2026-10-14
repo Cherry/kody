@@ -1,20 +1,15 @@
 /** @jsxImportSource @emotion/react */
+import { approvePackageCredentials } from '#start/server/credential-approval-mutation'
 import { SiteLink } from '../components/site-link.tsx'
 
 import { type ReactNode, useState } from 'react'
-import {
-	useCredentialMutation,
-	credentialPost,
-} from '../credential-mutation.ts'
+import { useCredentialMutation } from '../credential-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { NotFoundPage } from '../components/not-found-page.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	type CredentialApprovalChangeView,
 	type CredentialApprovalEnableView,
-	type CredentialApprovalFailure,
-	type CredentialApprovalSuccess,
 	type CredentialApprovalView,
 	type CredentialProposalSender,
 } from '#universal/credential-contracts.ts'
@@ -83,15 +78,6 @@ function readApprovalPath(href: string): ApprovalPath | null {
 	} catch {
 		return null
 	}
-}
-function approvalApiHref(path: ApprovalPath) {
-	return `${routes.communityPackageApproveCredentialsApi.href({
-		username: path.username,
-		kodyId: path.kodyId,
-	})}${path.search}`
-}
-function loginRedirect(href: string) {
-	return `/login?redirectTo=${encodeURIComponent(href)}`
 }
 function needSummary(change: CredentialApprovalChangeView) {
 	if (!change.need) return null
@@ -292,9 +278,8 @@ export function PackageCredentialApprovalRoute({
 	const mutation = useCredentialMutation(
 		currentHref,
 		({ path, view }: { path: ApprovalPath; view: CredentialApprovalView }) =>
-			credentialPost(currentHref, approvalApiHref(path), {
-				action: 'approve',
-				fingerprint: view.fingerprint,
+			approvePackageCredentials({
+				data: { ...path, fingerprint: view.fingerprint },
 			}),
 	)
 	async function approve(path: ApprovalPath, view: CredentialApprovalView) {
@@ -312,30 +297,17 @@ export function PackageCredentialApprovalRoute({
 			setMessage('Kody could not be reached. Try again.')
 			return
 		}
-		if (response.status === 401) {
-			window.location.assign(
-				loginRedirect(`${window.location.pathname}${window.location.search}`),
-			)
-			return
-		}
-		const payload = await readJson<
-			| CredentialApprovalSuccess
-			| CredentialApprovalFailure
-			| {
-					ok: false
-					error?: string
-			  }
-		>(response)
+		const payload = response
 		if (!isCurrent()) return
 		if (payload && 'view' in payload) {
 			setLatest({ base, view: payload.view, submitted: view })
 		}
-		if (response.ok && payload?.ok) {
+		if (payload?.ok) {
 			setApproved(true)
 		} else {
 			setMessage(
 				(payload && !payload.ok ? payload.error : null) ||
-					`Kody could not approve these mappings (HTTP ${response.status}).`,
+					'Kody could not approve these mappings.',
 			)
 		}
 	}

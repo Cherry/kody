@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { updateSecrets } from '#start/server/account-mutations'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
@@ -15,11 +16,9 @@ import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import {
 	type ApprovalAction,
 	type ApprovalView,
-	accountSecretsApiPath,
 	allowHostsButtonLabel,
 	approvalRejectedHosts,
 	approvalRequestedHosts,
-	submitApprovalRequest,
 } from '#client/routes/account-approval-shared.ts'
 
 import { colors, spacing } from '#universal/styles/tokens.ts'
@@ -81,12 +80,16 @@ export function ConnectSecretsRoute({
 			invalidate: typeof invalidatePages
 			queryKey: ReturnType<typeof connectSecretsQuery>['queryKey']
 		}) => {
-			const url = new URL(accountSecretsApiPath, 'http://localhost')
-			url.search = new URL(href, 'http://localhost').search
-			const payload = await submitApprovalRequest<
-				AccountSecretsLoaderData & { error?: string; ok?: boolean }
-			>(action, url.pathname + url.search)
-			if (!payload) throw new Error('Unable to process approval.')
+			const url = new URL(href, 'http://localhost')
+			const payload = (await updateSecrets({
+				data: {
+					orgSlug: url.searchParams.get('org') ?? undefined,
+					search: url.search,
+					body: { action },
+				},
+			})) as AccountSecretsLoaderData & { ok?: boolean; error?: string }
+			if (!payload?.ok)
+				throw new Error(payload?.error || 'Unable to process approval.')
 			return payload
 		},
 		onSuccess: async (payload, input) => {

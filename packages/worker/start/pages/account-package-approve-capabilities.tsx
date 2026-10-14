@@ -5,7 +5,6 @@ import { useRouter } from '@tanstack/react-router'
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
-import { routes } from '#universal/routes.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -31,8 +30,6 @@ import {
 } from '#universal/styles/tokens.ts'
 export function AccountPackageApproveCapabilitiesRoute({
 	payload,
-	username,
-	kodyId,
 }: {
 	payload: AccountPackageApproveCapabilitiesLoaderData
 	username: string
@@ -62,13 +59,10 @@ export function AccountPackageApproveCapabilitiesRoute({
 		setApprovingRequestId(approval.id)
 		setMessage(null)
 		try {
-			await mutation.submit(
-				{ action: approval.approveAction, requestId: approval.id },
-				routes.communityPackageApproveCapabilitiesApi.href({
-					username,
-					kodyId,
-				}),
-			)
+			await mutation.submit({
+				action: approval.approveAction,
+				requestId: approval.id,
+			})
 			if (isCurrent()) await router.invalidate({ sync: true })
 		} catch (error) {
 			if (isCurrent())
@@ -87,13 +81,10 @@ export function AccountPackageApproveCapabilitiesRoute({
 		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.submit(
-				{ action: 'approve-capabilities', fingerprint: payload.fingerprint },
-				routes.communityPackageApproveCapabilitiesApi.href({
-					username,
-					kodyId,
-				}),
-			)
+			await mutation.submit({
+				action: 'approve-capabilities',
+				fingerprint: payload.fingerprint,
+			})
 			if (isCurrent()) {
 				if (payload.package.isInternetVisible)
 					await router.navigate({ to: payload.settingsHref })

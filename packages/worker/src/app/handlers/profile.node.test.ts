@@ -1,6 +1,6 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { createProfileApiHandler } from './profile.tsx'
+import { loadProfileData } from '#app/profile-data.ts'
 import { loadProfile } from '../../../start/server/public-data.ts'
 import {
 	toProfileShellLoaderData,
@@ -161,21 +161,16 @@ function setupPublicProfileMocks() {
 	mockModule.getProfileActivity.mockResolvedValue(activityFixture)
 }
 
-async function call(
-	create: typeof createProfileApiHandler,
-	path: string,
-	username = 'alice',
-) {
+async function call(path: string, username = 'alice') {
 	mockModule.listProfileRepositories.mockClear()
 	const url = new URL(`https://example.com${path}`)
-	const response = await create(env).handler({
-		request: new Request(url),
-		params: { username },
-		url,
-	} as never)
+	const data = await loadProfileData(env, new Request(url), username)
 	return {
-		status: response.status,
-		body: (await response.json()) as ProfileResponseBody,
+		status: data ? 200 : 404,
+		body: (data ?? {
+			ok: false,
+			error: "This profile isn't available.",
+		}) as ProfileResponseBody,
 	}
 }
 
@@ -185,7 +180,7 @@ function lastPackagesQuery() {
 
 test('profile API respects visibility, ignores owner-only filters for guests, and forwards search limits', async () => {
 	setupPublicProfileMocks()
-	const guest = await call(createProfileApiHandler, '/profiles/alice.json')
+	const guest = await call('/profiles/alice.json')
 	expect(guest.status).toBe(200)
 	expect(Object.keys(guest.body).sort()).toEqual(apiKeys)
 	expect(guest.body).toMatchObject({
@@ -205,27 +200,20 @@ test('profile API respects visibility, ignores owner-only filters for guests, an
 	expect(lastPackagesQuery()).not.toHaveProperty('limit')
 
 	const guestFilter = await call(
-		createProfileApiHandler,
 		'/profiles/alice.json?visibility=private&listing=published&hidden=yes',
 	)
 	expect(guestFilter.status).toBe(200)
 	expect(Object.keys(guestFilter.body).sort()).toEqual(apiKeys)
 	expect(lastPackagesQuery()).toMatchObject({ includePrivate: false })
 
-	const search = await call(
-		createProfileApiHandler,
-		'/profiles/alice.json?q=helper',
-	)
+	const search = await call('/profiles/alice.json?q=helper')
 	expect(search.status).toBe(200)
 	expect(search.body.query).toBe('helper')
 	expect(search.body.packages).toHaveLength(1)
 	expect(lastPackagesQuery()).toMatchObject({ includePrivate: false })
 	expect(lastPackagesQuery()).not.toHaveProperty('query')
 
-	const capped = await call(
-		createProfileApiHandler,
-		'/profiles/alice.json?q=helper&limit=10',
-	)
+	const capped = await call('/profiles/alice.json?q=helper&limit=10')
 	expect(capped.status).toBe(200)
 	expect(lastPackagesQuery()).toMatchObject({
 		includePrivate: false,
@@ -237,16 +225,12 @@ test('profile API respects visibility, ignores owner-only filters for guests, an
 		...publicProfile,
 		visibility: 'private',
 	})
-	const hidden = await call(createProfileApiHandler, '/profiles/alice.json')
+	const hidden = await call('/profiles/alice.json')
 	expect(hidden.status).toBe(404)
 	expect(hidden.body.ok).toBe(false)
 
 	mockModule.getCommunityProfileByUsername.mockResolvedValueOnce(null)
-	const unknown = await call(
-		createProfileApiHandler,
-		'/profiles/missing.json',
-		'missing',
-	)
+	const unknown = await call('/profiles/missing.json', 'missing')
 	expect(unknown.status).toBe(404)
 
 	// Own private profile is visible to self, including private packages.
@@ -257,7 +241,6 @@ test('profile API respects visibility, ignores owner-only filters for guests, an
 	mockModule.listProfileRepositories.mockResolvedValue([])
 	mockModule.getProfileActivity.mockResolvedValue([])
 	const own = await call(
-		createProfileApiHandler,
 		'/profiles/alice.json?visibility=private&listing=ahead&hidden=yes',
 	)
 	expect(own.status).toBe(200)

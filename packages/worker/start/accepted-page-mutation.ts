@@ -12,7 +12,6 @@ type Submission<TBody> = {
 	actorKey: string | null
 	href: string
 	queryKey: QueryKey
-	apiPath?: string
 }
 type Page<T> = { payload: T; [key: string]: unknown }
 

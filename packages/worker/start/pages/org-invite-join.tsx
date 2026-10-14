@@ -1,8 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { joinOrganization } from '#start/server/join-organization'
 import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
-import { z } from 'zod'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildErrorAgentPrompt } from '#universal/error-agent-prompt.ts'
 import { renderIcon } from '../components/icon.tsx'
@@ -24,12 +24,6 @@ import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { invalidateShellQueries } from '../shell-query.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 
-const resultSchema = z.object({
-	ok: z.boolean(),
-	error: z.string().optional(),
-	alreadyMember: z.boolean().optional(),
-	redirectTo: z.string().optional(),
-})
 function inviteErrorPrompt(error: string, slug?: string) {
 	return buildErrorAgentPrompt({
 		activity: slug
@@ -61,27 +55,11 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 			token: string
 			actorKey: string | null
 		}) => {
-			const response = await fetch(routes.orgInviteJoinPost.href({ token }), {
-				method: 'POST',
-				headers: { Accept: 'application/json' },
-				credentials: 'include',
-				redirect: 'manual',
-			})
-			if (response.status === 401 || response.type === 'opaqueredirect')
-				return { needsLogin: true, alreadyMember: false, redirectTo: '/' }
-			const result = resultSchema.safeParse(
-				await response.json().catch(() => null),
-			)
-			if (!response.ok || !result.success || !result.data.ok)
-				throw new Error(
-					result.success
-						? (result.data.error ?? 'Unable to join this organization.')
-						: 'Unable to join this organization.',
-				)
+			const result = await joinOrganization({ data: token })
 			return {
 				needsLogin: false,
-				alreadyMember: result.data.alreadyMember === true,
-				redirectTo: result.data.redirectTo || '/',
+				alreadyMember: result.alreadyMember,
+				redirectTo: result.redirectTo,
 			}
 		},
 		onSuccess: async (result, variables) => {

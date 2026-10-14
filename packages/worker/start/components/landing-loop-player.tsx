@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useQueryClient } from '@tanstack/react-query'
 import {
 	useEffect,
 	useCallback,
@@ -18,7 +19,7 @@ import {
 } from '#universal/walkthrough-hosts.ts'
 import { type TranscriptLine } from '#client/routes/interactive-guide-transcript.ts'
 import { renderIcon } from './icon.tsx'
-import { fetchLandingLoopHighlights } from '#client/routes/landing-loop-highlights.ts'
+import { fetchLandingLoopHighlights } from '../landing-loop-highlights.ts'
 import {
 	createLandingLoopPlayer,
 	flattenTranscriptActs,
@@ -38,6 +39,7 @@ import { SiteLink } from './site-link.tsx'
 type LoopLineRenderer = (line: TranscriptLine, actId: string) => ReactNode
 
 export function LandingLoopPlayer({ hosts }: { hosts?: WalkthroughHostPick }) {
+	const queryClient = useQueryClient()
 	const [content, setContent] = useState<{
 		beats: LandingLoopBeat[]
 		renderLine: LoopLineRenderer
@@ -95,7 +97,7 @@ export function LandingLoopPlayer({ hosts }: { hosts?: WalkthroughHostPick }) {
 		void Promise.all([
 			import('#client/routes/how-kody-works-transcript.ts'),
 			import('../pages/interactive-guide-walkthrough.tsx'),
-			fetchLandingLoopHighlights(controller.signal),
+			fetchLandingLoopHighlights(queryClient),
 		])
 			.then(([transcript, walkthrough, highlights]) => {
 				if (controller.signal.aborted) return
@@ -128,7 +130,7 @@ export function LandingLoopPlayer({ hosts }: { hosts?: WalkthroughHostPick }) {
 				if (!controller.signal.aborted) setLoadRequested(false)
 			})
 		return () => controller.abort()
-	}, [loadRequested, hosts])
+	}, [loadRequested, hosts, queryClient])
 	useEffect(() => {
 		const node = loop.current
 		if (!node) return

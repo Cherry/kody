@@ -15,53 +15,47 @@ const origin = 'https://kody.test'
 
 test('commits only org destinations and does not reread page payloads', async () => {
 	const fetcher = vi
-		.fn<typeof fetch>()
-		.mockImplementation(async () => new Response('{}'))
+		.fn<(slug: string) => Promise<{ ok: boolean }>>()
+		.mockResolvedValue({ ok: true })
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	await commit('/account')
 	expect(fetcher).not.toHaveBeenCalled()
 	await commit('/@acme/-/jobs')
 	await commit('/@acme/-/secrets')
 	expect(fetcher).toHaveBeenCalledTimes(1)
-	expect(fetcher).toHaveBeenCalledWith(
-		'/account/last-used-org.json',
-		expect.objectContaining({
-			referrer: `${origin}/@acme/-/jobs`,
-			credentials: 'include',
-		}),
-	)
+	expect(fetcher).toHaveBeenCalledWith('acme')
 	await commit('/@other/-/jobs')
 	await commit('/@acme/-/jobs')
 	expect(fetcher).toHaveBeenCalledTimes(3)
 })
 
 test('rapid org switches serialize cookie responses even when an earlier write is slow', async () => {
-	let release!: (response: Response) => void
+	let release!: (response: { ok: boolean }) => void
 	const fetcher = vi
-		.fn<typeof fetch>()
+		.fn<(slug: string) => Promise<{ ok: boolean }>>()
 		.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
 					release = resolve
 				}),
 		)
-		.mockImplementation(async () => new Response('{}'))
+		.mockResolvedValue({ ok: true })
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	const first = commit('/@acme/-/jobs')
 	const second = commit('/@other/-/jobs')
 	await Promise.resolve()
 	expect(fetcher).toHaveBeenCalledTimes(1)
-	release(new Response('{}'))
+	release({ ok: true })
 	await Promise.all([first, second])
 	expect(fetcher).toHaveBeenCalledTimes(2)
-	expect(fetcher.mock.calls[1]?.[1]?.referrer).toBe(`${origin}/@other/-/jobs`)
+	expect(fetcher.mock.calls[1]?.[0]).toBe('other')
 })
 
 test('a failed cookie commit can be retried without failing navigation', async () => {
 	const fetcher = vi
-		.fn<typeof fetch>()
+		.fn<(slug: string) => Promise<{ ok: boolean }>>()
 		.mockRejectedValueOnce(new Error('offline'))
-		.mockImplementation(async () => new Response('{}'))
+		.mockResolvedValue({ ok: true })
 	const commit = createOrgNavigationCommit(fetcher, origin)
 	await commit('/@acme/-/jobs')
 	await commit('/@acme/-/jobs')
@@ -107,8 +101,8 @@ test('Router preloads do not commit, cached Query navigation does, failed routes
 		origin,
 	})
 	const fetcher = vi
-		.fn<typeof fetch>()
-		.mockImplementation(async () => new Response('{}'))
+		.fn<(slug: string) => Promise<{ ok: boolean }>>()
+		.mockResolvedValue({ ok: true })
 	const stop = installOrgNavigationCommit(router, fetcher, origin)
 	await router.load()
 	await router.preloadRoute({ to: '/@acme/-/jobs' })
@@ -127,12 +121,4 @@ test('Router preloads do not commit, cached Query navigation does, failed routes
 	expect(fetcher).toHaveBeenCalledTimes(1)
 	stop()
 	query.clear()
-})
-
-test('drains each commit response before completing the queued write', async () => {
-	const response = new Response('{"ok":true}')
-	const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response)
-	const commit = createOrgNavigationCommit(fetcher, origin)
-	await commit('/@acme/-/jobs')
-	expect(response.bodyUsed).toBe(true)
 })

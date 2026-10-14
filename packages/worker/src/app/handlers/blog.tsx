@@ -6,27 +6,13 @@ import {
 	getBlogPost,
 	getReadNextBlogPost,
 	listBlogPosts,
-	toBlogPostSummary,
 } from '#worker/blog/catalog.ts'
 import { type BlogPost } from '#worker/blog/parse-frontmatter.ts'
 import { buildBlogRssXml } from '#worker/blog/rss.ts'
-import { jsonResponse } from '#worker/json-response.ts'
 import { markdownResponse } from '#app/markdown-negotiation.ts'
 import { parseOgTheme } from '#worker/og/palette.ts'
 import { highlightMarkdownFences } from '#app/highlight-code.ts'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
-
-export function createBlogApiHandler(_env: Env) {
-	return {
-		middleware: [],
-		async handler() {
-			return jsonResponse({
-				ok: true,
-				posts: listBlogPosts().map(toBlogPostSummary),
-			})
-		},
-	} satisfies Action<typeof routes.blogApi>
-}
 
 export async function toBlogPostLoaderData(
 	env: Env,
@@ -47,23 +33,6 @@ export async function toBlogPostLoaderData(
 		bodyFences: await highlightMarkdownFences(env, post.body, { serverTiming }),
 		readNext: getReadNextBlogPost(post.slug),
 	}
-}
-
-export function createBlogPostApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ params }) {
-			const post = getBlogPost(params.slug)
-			if (!post) {
-				return jsonResponse({ ok: false, error: 'Blog post not found.' }, 404)
-			}
-
-			const serverTiming: Array<ServerTimingEntry> = []
-			return jsonResponse(await toBlogPostLoaderData(env, post, serverTiming), {
-				serverTiming,
-			})
-		},
-	} satisfies Action<typeof routes.blogPostApi>
 }
 
 export function createBlogPostMarkdownHandler(_env: Env) {

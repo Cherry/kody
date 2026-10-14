@@ -1,14 +1,12 @@
-import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import {
 	loadAccountWorkflowsData,
 	type AccountWorkflowsLoaderData,
 } from '#app/account-workflows-data.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
-import { type routes } from '#universal/routes.ts'
 import { cancelWorkflowRunForUser } from '#worker/package-runtime/package-workflows.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -24,62 +22,6 @@ export function readPathWorkflowId(params: unknown) {
 		return params.workflowId
 	}
 	return undefined
-}
-
-/**
- * JSON API for `/account/workflows.json` (GET list/detail + POST cancel).
- */
-export function createAccountWorkflowsApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			if (request.method === 'GET') {
-				return jsonResponse(
-					await loadAccountWorkflowsData({
-						env,
-						request,
-						user,
-					}),
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const action = readTrimmedStringOrEmpty(body, 'action')
-			try {
-				if (action === 'cancel') {
-					return await handleCancelAction({ env, user, body, request })
-				}
-			} catch (error) {
-				return jsonResponse(
-					{
-						ok: false,
-						error:
-							error instanceof Error
-								? error.message
-								: 'Unable to update workflow run.',
-					},
-					400,
-				)
-			}
-
-			return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
-		},
-	} satisfies Action<
-		typeof routes.accountWorkflowsApi | typeof routes.accountWorkflowsApiPost
-	>
 }
 
 async function reloadWorkflowsPayload(input: {
@@ -135,7 +77,7 @@ async function handleCancelAction(input: {
 				...input,
 				selectedWorkflowId: id,
 			})
-			return jsonResponse({
+			return operationResult({
 				...payload,
 				cancel: {
 					cancelled: result.outcome === 'cancelled',
@@ -151,4 +93,36 @@ async function handleCancelAction(input: {
 			)
 		}
 	}
+}
+
+export async function mutateAccountWorkflows({
+	request,
+	env,
+	user,
+	body,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+}) {
+	const action = readTrimmedStringOrEmpty(body, 'action')
+	try {
+		if (action === 'cancel') {
+			return await handleCancelAction({ env, user, body, request })
+		}
+	} catch (error) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					error instanceof Error
+						? error.message
+						: 'Unable to update workflow run.',
+			},
+			400,
+		)
+	}
+
+	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

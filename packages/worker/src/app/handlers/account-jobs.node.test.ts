@@ -1,13 +1,13 @@
+import type * as authenticatedUserModule from '#app/authenticated-user.ts'
+import type * as appBaseUrl from '#worker/app-base-url.ts'
+import type * as packageRepo from '#worker/package-registry/repo.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
-import type * as authenticatedUserModule from '#app/authenticated-user.ts'
-import type * as appBaseUrl from '#worker/app-base-url.ts'
-import type * as packageRepo from '#worker/package-registry/repo.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const packageJob = {
 	id: 'package-job:pkg-1:nightly',
@@ -175,7 +175,8 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	) => mockModule.listSavedPackagesByUserId(...args),
 }))
 
-const { createAccountJobsApiHandler } = await import('./account-jobs.ts')
+const { testAccountJobsApiHandler } =
+	await import('./account-jobs.test-support.ts')
 
 const jobsUrl = 'https://example.com/account/jobs.json'
 
@@ -221,13 +222,13 @@ function stubInspection(
 function createJobsClient() {
 	stubInspection([packageJob, missingPackageJob])
 	const env = { APP_DB: {} as D1Database, COOKIE_SECRET: 'secret' } as Env
-	const { handler } = createAccountJobsApiHandler(env)
+	const { execute } = testAccountJobsApiHandler(env)
 	return {
 		env,
 		get: (search = '') =>
-			handler(new RequestContext(new Request(jobsUrl + search))),
+			execute(new RequestContext(new Request(jobsUrl + search))),
 		post: (body: Record<string, unknown>) =>
-			handler(
+			execute(
 				new RequestContext(
 					new Request(jobsUrl, {
 						method: 'POST',
@@ -237,7 +238,7 @@ function createJobsClient() {
 				),
 			),
 		put: () =>
-			handler(new RequestContext(new Request(jobsUrl, { method: 'PUT' }))),
+			execute(new RequestContext(new Request(jobsUrl, { method: 'PUT' }))),
 	}
 }
 
@@ -246,12 +247,11 @@ test('jobs API lists package jobs and selected detail', async () => {
 
 	const listResponse = await get()
 	expect(listResponse.status).toBe(200)
-	expect(listResponse.headers.get('Cache-Control')).toBe('no-store')
 	expect(mockModule.inspectJobsForUser).toHaveBeenCalledWith({
 		env: expect.anything(),
 		userId: ownerIdFromStored('stable-user-1'),
 	})
-	const listPayload = (await listResponse.json()) as {
+	const listPayload = listResponse.data as {
 		jobs: Array<Record<string, unknown>>
 	}
 	expect(listPayload).not.toHaveProperty('retention')
@@ -295,7 +295,7 @@ test('jobs API lists package jobs and selected detail', async () => {
 		`?selected=${encodeURIComponent(packageJob.id)}`,
 	)
 	expect(detailResponse.status).toBe(200)
-	await expect(detailResponse.json()).resolves.toMatchObject({
+	expect(detailResponse.data).toMatchObject({
 		ok: true,
 		selectedJobId: packageJob.id,
 		selectedJob: expect.objectContaining({
@@ -339,7 +339,7 @@ test('jobs API rejects unauthenticated, unsupported, and removed actions', async
 	]) {
 		const response = await post(body)
 		expect([body.action, response.status]).toEqual([body.action, 400])
-		await expect(response.json()).resolves.toEqual({
+		expect(response.data).toEqual({
 			ok: false,
 			error: 'Invalid action.',
 		})
@@ -386,7 +386,7 @@ test('jobs API kill switch and run now are user-scoped', async () => {
 			jobId: packageJob.id,
 		}),
 	)
-	await expect(runNowResponse.json()).resolves.toMatchObject({
+	expect(runNowResponse.data).toMatchObject({
 		ok: true,
 		runNow: { ok: true, deletedAfterRun: false },
 	})

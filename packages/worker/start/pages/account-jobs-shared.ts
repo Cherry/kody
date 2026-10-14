@@ -6,7 +6,6 @@ import {
 } from '#universal/loader-data.ts'
 import { colors } from '#universal/styles/tokens.ts'
 
-export const accountJobsApiPath = '/account/jobs.json'
 export const jobsRoute = createListDetailRoute('/account/jobs')
 
 export const viewFilterOptions: Array<{

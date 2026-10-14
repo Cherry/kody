@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { homeMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { heroBaseImage } from '#universal/landing-images.ts'
 import { createFileRoute } from '@tanstack/react-router'
@@ -10,6 +11,7 @@ import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadHome', loadHome, { staleTime: 60_000 })
 
 export const Route = createFileRoute('/')({
+	server: { handlers: { GET: homeMarkdown } },
 	validateSearch: (search: Record<string, unknown>) => search,
 	context: () => ({ pageQueryInput: undefined }),
 	loader: async ({ context, preload }) => {

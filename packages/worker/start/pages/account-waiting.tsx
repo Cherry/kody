@@ -1,22 +1,22 @@
 /** @jsxImportSource @emotion/react */
+import { recordWaitingClick } from '#start/server/account-mutations'
 import { SiteLink } from '../components/site-link.tsx'
+import { pageQueryOrg } from '../page-query-scope.ts'
 
+import { type AccountWaitingLoaderData } from '#universal/loader-data.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
+import {
+	getAccentCalloutCss,
+	getPillButtonCss,
+} from '#universal/styles/style-primitives.ts'
+import { colors, spacing } from '#universal/styles/tokens.ts'
+import { type WaitingItem, type WaitingSeverity } from '#universal/waiting.ts'
 import {
 	AccountManagementPanel,
 	AccountManagementShell,
 	AccountPageHeader,
 	noticeCardCss,
 } from './account-management-components.tsx'
-import { type AccountWaitingLoaderData } from '#universal/loader-data.ts'
-import { type WaitingItem, type WaitingSeverity } from '#universal/waiting.ts'
-import { routes } from '#universal/routes.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { relocateAccountHref } from '#universal/org-pages.ts'
-import { colors, spacing } from '#universal/styles/tokens.ts'
-import {
-	getAccentCalloutCss,
-	getPillButtonCss,
-} from '#universal/styles/style-primitives.ts'
 
 const severityAccent: Record<WaitingSeverity, string> = {
 	block: colors.danger,
@@ -111,13 +111,11 @@ function renderWaitingBody(items: Array<WaitingItem>, currentHref: string) {
 					<SiteLink
 						href={relocateAccountHref(item.href, currentHref)}
 						onClick={() => {
-							void fetch(routes.accountWaitingClickPost.href(), {
-								method: 'POST',
-								credentials: 'include',
-								referrer: orgAccountApiReferrer(currentHref),
-								headers: { 'content-type': 'application/json' },
-								body: JSON.stringify({ cardId: item.id }),
-								keepalive: true,
+							void recordWaitingClick({
+								data: {
+									cardId: item.id,
+									orgSlug: pageQueryOrg(currentHref) ?? undefined,
+								},
 							}).catch(() => {})
 						}}
 						css={{

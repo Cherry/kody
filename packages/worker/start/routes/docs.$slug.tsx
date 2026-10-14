@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { docMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 import { createFileRoute, redirect } from '@tanstack/react-router'
@@ -15,6 +16,7 @@ const pageQuery = createPageQuery('loadDoc', loadDoc, {
 })
 
 export const Route = createFileRoute('/docs/$slug')({
+	server: { handlers: { GET: docMarkdown } },
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),
 	beforeLoad: ({ location, params }) => {
 		const alias = resolveLegacyDocSlug(params.slug)

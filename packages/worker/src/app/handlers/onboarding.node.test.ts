@@ -1,9 +1,7 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { RequestContext } from 'remix/router'
 import { setAuthSessionSecret } from '#app/auth-session.ts'
 import {
-	createOnboardingApiHandler,
 	readOnboardingPageData,
 	loadOnboardingCustomMcpServers,
 	loadOnboardingFeaturedMcpServers,
@@ -80,8 +78,9 @@ function signIn(emailVerified = true) {
 }
 
 function fetchApi(env: Env) {
-	return createOnboardingApiHandler(env).handler(
-		new RequestContext(new Request('https://example.com/onboarding.json')),
+	return readOnboardingPageData(
+		env,
+		new Request('https://example.com/onboarding'),
 	)
 }
 
@@ -124,15 +123,14 @@ function expectDisconnectedFeaturedCatalog(
 test('anonymous onboarding API is publicly cacheable setup content with a disconnected featured catalog', async () => {
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
 	const response = await fetchApi(makeEnv())
-	expect(response.status).toBe(200)
-	expect(response.headers.get('Cache-Control')).toBe(
+	expect(new Headers(response.headers).get('Cache-Control')).toBe(
 		'public, max-age=60, stale-while-revalidate=300',
 	)
-	expect(response.headers.get('Vary')).toBe('Cookie')
-	const timing = response.headers.get('Server-Timing') ?? ''
-	expect(timing).toContain('listings;dur=')
-	expect(timing).toContain('highlight;dur=')
-	const payload = (await response.json()) as OnboardingLoaderData
+	expect(new Headers(response.headers).get('Vary')).toBe('Cookie')
+	expect(response.serverTiming.map((entry) => entry.name)).toEqual(
+		expect.arrayContaining(['listings', 'highlight']),
+	)
+	const payload = response.payload as OnboardingLoaderData
 	expect(payload).toMatchObject({
 		ok: true,
 		loggedIn: false,
@@ -286,9 +284,8 @@ test('onboarding persist chrome uses the newest saved-package name in the privat
 	] as const) {
 		signIn(emailVerified)
 		const response = await fetchApi(env)
-		expect(response.status).toBe(200)
-		expect(response.headers.get('Cache-Control')).toBe('no-store')
-		await expect(response.json()).resolves.toMatchObject({
+		expect(response.headers).toBeUndefined()
+		expect(response.payload).toMatchObject({
 			ok: true,
 			loggedIn: true,
 			username: 'u-b',

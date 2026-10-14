@@ -1,10 +1,10 @@
-import type * as CloudflareWorkers from 'cloudflare:workers'
-import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
-import { expect, test, vi } from 'vitest'
 import type * as accountExperimentsData from '#app/account-experiments-data.ts'
 import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
-import { createAccountExperimentsApiHandler } from './account-experiments.ts'
+import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import type * as CloudflareWorkers from 'cloudflare:workers'
+import { expect, test, vi } from 'vitest'
 import { loadExperimentsPage } from '../../../start/server/account-collections.ts'
+import { testAccountExperimentsApiHandler } from './account-experiments.test-support.ts'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
@@ -104,11 +104,11 @@ test('native experiments loader requires authentication and returns persisted op
 
 test('account experiments API persists opt-in and opt-out with audit', async () => {
 	const env = createEnv()
-	const handler = createAccountExperimentsApiHandler(env)
+	const handler = testAccountExperimentsApiHandler(env)
 	const url = new URL('https://kody.example/account/experiments.json')
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(null)
-	const unauthorized = await handler.handler({
+	const unauthorized = await handler.execute({
 		request: new Request(url, { method: 'GET' }),
 		params: {},
 		url,
@@ -121,7 +121,7 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 		ok: true,
 		experimentsOptIn: true,
 	})
-	const optIn = await handler.handler({
+	const optIn = await handler.execute({
 		request: new Request(url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -143,7 +143,7 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 			reason: 'experiments_opt_in=true',
 		}),
 	)
-	await expect(optIn.json()).resolves.toEqual({
+	expect(optIn.data).toEqual({
 		ok: true,
 		experimentsOptIn: true,
 	})
@@ -152,7 +152,7 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 		ok: true,
 		experimentsOptIn: false,
 	})
-	await handler.handler({
+	await handler.execute({
 		request: new Request(url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -172,7 +172,7 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 		}),
 	)
 
-	const badBody = await handler.handler({
+	const badBody = await handler.execute({
 		request: new Request(url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },

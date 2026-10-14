@@ -80,19 +80,19 @@ vi.mock('#mcp/values/service.ts', () => ({
 		mockModule.deleteValue(...args),
 }))
 
-const { createAccountValuesApiHandler } = await import('./account-values.ts')
+const { testAccountValuesApiHandler } = await import('./account-values.test-support.ts')
 
 const valuesUrl = 'https://example.com/account/values.json'
 
 function createValuesClient() {
-	const { handler } = createAccountValuesApiHandler({
+	const { execute } = testAccountValuesApiHandler({
 		APP_DB: {} as D1Database,
 	} as Env)
 	return {
 		get: (search = '') =>
-			handler(new RequestContext(new Request(valuesUrl + search))),
+			execute(new RequestContext(new Request(valuesUrl + search))),
 		post: (body: Record<string, unknown>) =>
-			handler(
+			execute(
 				new RequestContext(
 					new Request(valuesUrl, {
 						method: 'POST',
@@ -109,8 +109,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 
 	const listResponse = await get()
 	expect(listResponse.status).toBe(200)
-	expect(listResponse.headers.get('Cache-Control')).toBe('no-store')
-	await expect(listResponse.json()).resolves.toEqual({
+	expect(listResponse.data).toEqual({
 		ok: true,
 		values: [
 			{
@@ -143,7 +142,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 
 	const selectedResponse = await get('?selected=theme')
 	expect(selectedResponse.status).toBe(200)
-	await expect(selectedResponse.json()).resolves.toMatchObject({
+	expect(selectedResponse.data).toMatchObject({
 		ok: true,
 		selectedValueId: 'theme',
 		selectedValue: expect.objectContaining({
@@ -163,7 +162,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 			name: 'theme',
 		}),
 	)
-	await expect(deleteResponse.json()).resolves.toEqual({
+	expect(deleteResponse.data).toEqual({
 		ok: true,
 		values: [],
 		selectedValue: null,
@@ -186,7 +185,7 @@ test('values API rejects save, missing deletes, invalid actions, and unauthentic
 	for (const [body, status, want] of rejections) {
 		if (status === 404) mockModule.deleteValue.mockResolvedValueOnce(false)
 		const response = await post(body)
-		expect([body, response.status, await response.json()]).toEqual([
+		expect([body, response.status, response.data]).toEqual([
 			body,
 			status,
 			expect.objectContaining(want),

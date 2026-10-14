@@ -1,34 +1,56 @@
 /** @jsxImportSource @emotion/react */
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { toast } from '#client/toast.ts'
+import { updateEmail } from '#start/server/account-mutations'
+import { acceptedEmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
+import {
+	type AccountEmailDestinationsLoaderData,
+	type AccountEmailLoaderData,
+	type AccountEmailMessageDetail,
+} from '#universal/loader-data.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
-import { invalidateShellQueries } from '../shell-query.ts'
-import { emailKeys } from './email-resources.ts'
-import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
-import { useState } from 'react'
+import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	useMutation,
 	useMutationState,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { toast } from '#client/toast.ts'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import { useShellData } from '../routes/__root.tsx'
+import { invalidateShellQueries } from '../shell-query.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { useAccountEmailDestinations } from './account-email-destinations-client.ts'
+import { renderAccountEmailDestinationsPanel } from './account-email-destinations-panel.tsx'
+import { renderAccountEmailDetail } from './account-email-detail.tsx'
 import {
 	emailMutationOptions,
 	optimisticEmail,
 	type EmailAction,
 } from './account-email-query.ts'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
-import { useShellData } from '../routes/__root.tsx'
-import { acceptedEmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { useAccountEmailDestinations } from './account-email-destinations-client.ts'
-import { renderAccountEmailDestinationsPanel } from './account-email-destinations-panel.tsx'
+import {
+	directionLabel,
+	emailRoute,
+	messageDate,
+	quarantinedBadgeCss,
+	readClassificationFilter,
+	readPage,
+	readSearchQuery,
+	senderBadgeCss,
+	senderClassificationLabel,
+	statusLabel,
+	subjectCellCss,
+	truncatedTextCss,
+	type ClassificationFilter,
+} from './account-email-shared.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
+import { emailKeys } from './email-resources.ts'
 import {
 	renderEmailVerificationPrompt,
 	requestResendVerification,
@@ -39,30 +61,6 @@ import {
 	RecordTableSelect,
 	recordStampCss,
 } from './record-table.tsx'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
-import {
-	type AccountEmailDestinationsLoaderData,
-	type AccountEmailLoaderData,
-	type AccountEmailMessageDetail,
-} from '#universal/loader-data.ts'
-import { renderAccountEmailDetail } from './account-email-detail.tsx'
-import {
-	type ClassificationFilter,
-	buildEmailApiRequestUrl,
-	senderBadgeCss,
-	senderClassificationLabel,
-	directionLabel,
-	emailRoute,
-	messageDate,
-	quarantinedBadgeCss,
-	readClassificationFilter,
-	readPage,
-	readSearchQuery,
-	statusLabel,
-	subjectCellCss,
-	truncatedTextCss,
-} from './account-email-shared.ts'
 
 export function AccountEmailPage({
 	payload,
@@ -143,7 +141,7 @@ export function AccountEmailPage({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
 					: Object.fromEntries(matchedUrl.searchParams)
@@ -225,38 +223,19 @@ export function AccountEmailPage({
 			queryClient,
 			actorKey,
 			async (action) => {
-				const isCurrentSubmitter = captureSubmitter()
-				const response = await fetch(buildEmailApiRequestUrl(action.href), {
-					method: 'POST',
-					referrer: orgAccountApiReferrer(action.href),
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
+				return updateEmail({
+					data: {
+						orgSlug: pageQueryOrg(action.href) ?? undefined,
+						search: new URL(action.href, 'https://kody.local').search,
+						body: {
+							action: action.action,
+							message_id: action.messageId,
+							...(action.action === 'classify'
+								? { classification: action.classification }
+								: {}),
+						},
 					},
-					credentials: 'include',
-					body: JSON.stringify({
-						action: action.action,
-						message_id: action.messageId,
-						...(action.action === 'classify'
-							? { classification: action.classification }
-							: {}),
-					}),
 				})
-				if (response.status === 401) {
-					if (isCurrentSubmitter()) window.location.assign('/login')
-					throw new Error('Please sign in again.')
-				}
-				const accepted = await readJson<
-					AccountEmailLoaderData & { error?: string }
-				>(response)
-				if (!response.ok || !accepted?.ok)
-					throw new Error(
-						accepted?.error ||
-							(action.action === 'delete'
-								? 'Unable to delete message.'
-								: 'Unable to update message classification.'),
-					)
-				return accepted
 			},
 			(error) => toast.error(error.message),
 			currentHref,

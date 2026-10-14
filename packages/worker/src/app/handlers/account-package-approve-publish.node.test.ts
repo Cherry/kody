@@ -43,8 +43,6 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 		mockModule.getSavedPackageByIdInAnyOrg(...args),
 }))
 
-const { createAccountPackageApprovePublishApiHandler } =
-	await import('./account-package-approve-publish.ts')
 const { loadPublishReview } =
 	await import('../../../start/server/package-review.ts')
 const { loadAccountPackageAlias } =
@@ -156,57 +154,6 @@ test('legacy package approval links redirect and the canonical owner URL renders
 		request: expect.any(Request),
 		user,
 		packageId: 'pkg-1',
-	})
-})
-
-test('canonical approval API follows package URL normalization and resolves the owner package', async () => {
-	mockModule.readAuthenticatedAppUser.mockResolvedValue(user)
-	const handler = createAccountPackageApprovePublishApiHandler({
-		APP_DB: {},
-	} as Env)
-	mockModule.loadPackagePage.mockResolvedValueOnce({
-		kind: 'redirect',
-		to: '/@kentcdodds/github-triage',
-		shared: false,
-	})
-
-	const normalized = await handler.handler({
-		request: new Request(
-			'https://example.com/profiles/KentCDodds/packages/GitHub-Triage/approve-publish.json?commit=abc1234',
-		),
-		params: { username: 'KentCDodds', kodyId: 'GitHub-Triage' },
-	} as never)
-	expect(normalized.status).toBe(302)
-	expect(normalized.headers.get('location')).toBe(
-		'https://example.com/profiles/kentcdodds/packages/github-triage/approve-publish.json?commit=abc1234',
-	)
-
-	const ownerPackage = {
-		id: 'pkg-1',
-		kodyId: 'github-triage',
-		name: '@kentcdodds/github-triage',
-	}
-	mockModule.loadPackagePage.mockResolvedValueOnce({
-		kind: 'page',
-		viewerIsOwner: true,
-		viewerCanManage: true,
-		ownerPackage,
-	})
-	mockModule.loadAccountPackageApprovePublishData.mockResolvedValueOnce({
-		ok: true,
-		package: ownerPackage,
-	})
-	const canonical = await handler.handler({
-		request: new Request(
-			'https://example.com/profiles/kentcdodds/packages/github-triage/approve-publish.json?commit=abc1234',
-		),
-		params: { username: 'kentcdodds', kodyId: 'github-triage' },
-	} as never)
-	expect(canonical.status).toBe(200)
-	expect(mockModule.loadAccountPackageApprovePublishData).toHaveBeenCalledWith({
-		env: expect.any(Object),
-		request: expect.any(Request),
-		user,
-		packageId: 'pkg-1',
+		commit: 'abc1234',
 	})
 })

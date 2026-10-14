@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import {
+	sendCancellationFeedback,
+	openBillingPortal,
+} from '#start/server/billing-mutations'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildBillingFailureAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -12,7 +16,6 @@ import {
 	type AccountBillingLoaderData,
 	type AdminPlanName,
 } from '#universal/loader-data.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	accountFieldCss,
 	accountFieldLabelCss,
@@ -31,11 +34,8 @@ import {
 	renderAccountBillingPlans,
 	resolveActiveStripePlan,
 } from './account-billing-plans.tsx'
-import { requestProCheckout } from '#client/routes/billing-checkout.ts'
-import {
-	billingPortalPath,
-	navigateBillingPortalOnPrimaryClick,
-} from '#client/routes/billing-portal-navigation.ts'
+import { requestProCheckout } from '../billing-checkout.ts'
+
 import {
 	colors,
 	radius,
@@ -52,12 +52,6 @@ import {
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
 
-const jsonRequestHeaders = {
-	Accept: 'application/json',
-	'Content-Type': 'application/json',
-}
-const billingCancellationFeedbackApiPath =
-	'/account/billing/cancellation-feedback.json'
 
 type SubscriptionStatusTone = 'ok' | 'warn' | 'action' | 'muted'
 
@@ -188,6 +182,7 @@ export function AccountBillingPage({
 		displayName: '',
 		avatarUrl: null,
 	}).name
+	const [portalPending, setPortalPending] = useState(false)
 	const [checkoutPending, setCheckoutPending] = useState<CheckoutPending>(null)
 	const [cancellationFeedbackText, setCancellationFeedbackText] = useState('')
 	const [cancellationFeedbackPending, setCancellationFeedbackPending] =
@@ -251,18 +246,8 @@ export function AccountBillingPage({
 		setCancellationFeedbackPending(true)
 		setCancellationFeedbackError(null)
 		try {
-			const response = await fetch(billingCancellationFeedbackApiPath, {
-				method: 'POST',
-				headers: jsonRequestHeaders,
-				credentials: 'include',
-				body: JSON.stringify({ details }),
-			})
-			const payload = await readJson<{ ok?: boolean; error?: string }>(response)
-			if (response.ok && payload?.ok) {
-				setCancellationFeedbackSent(true)
-			} else {
-				setCancellationFeedbackError(payload?.error || sendFallback)
-			}
+			await sendCancellationFeedback({ data: { details } })
+			setCancellationFeedbackSent(true)
 		} catch (error) {
 			setCancellationFeedbackError(
 				error instanceof Error ? error.message : sendFallback,
@@ -629,14 +614,27 @@ export function AccountBillingPage({
 									alignItems: 'center',
 								}}
 							>
-								{/* Soft-nav fetch follows the Stripe 302 and fails (KODY-88). */}
-								<SiteLink
-									href={billingPortalPath(payload.org.slug)}
-									onClick={(event) => {
-										navigateBillingPortalOnPrimaryClick(
-											event.nativeEvent,
-											payload.org.slug,
-										)
+								<button
+									type="button"
+									disabled={portalPending}
+									onClick={async () => {
+										if (portalPending) return
+										setPortalPending(true)
+										try {
+											const result = await openBillingPortal({
+												data: { orgSlug: payload.org.slug },
+											})
+											window.location.assign(result.url)
+										} catch (error) {
+											setMessage(
+												error instanceof Error
+													? error.message
+													: 'Unable to open billing portal.',
+											)
+											setMessageTone('error')
+										} finally {
+											setPortalPending(false)
+										}
 									}}
 									css={{
 										...(statusInfo?.tone === 'action'
@@ -648,7 +646,7 @@ export function AccountBillingPage({
 									}}
 								>
 									Manage subscription
-								</SiteLink>
+								</button>
 							</div>
 						</AccountManagementPanel>
 					) : null}

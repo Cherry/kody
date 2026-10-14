@@ -4,25 +4,31 @@ import { viewerIsSavedPackageOrgOwner } from '#app/package-viewer-access.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import { adoptCommunityFork } from '#worker/community/service.ts'
-import { jsonResponse } from '#worker/json-response.ts'
+import {
+	packageMutationResult,
+	type PackageMutationResult,
+} from './package-mutation-result.ts'
 import { getSavedPackageByIdInAnyOrg } from '#worker/package-registry/repo.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-export async function handleAccountPackageAdoptAction(input: {
+export async function mutateAccountPackageAdopt(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
 	body: object
-}): Promise<Response | null> {
+}): Promise<PackageMutationResult | null> {
 	const action = readTrimmedStringOrEmpty(input.body, 'action')
 	if (action !== 'adopt-community-fork') return null
 
 	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
 	if (!packageId) {
-		return jsonResponse({ ok: false, error: 'Package id is required.' }, 400)
+		return packageMutationResult(
+			{ ok: false, error: 'Package id is required.' },
+			400,
+		)
 	}
 	const savedPackage = await getSavedPackageByIdInAnyOrg(
 		input.env.APP_DB,
@@ -36,7 +42,10 @@ export async function handleAccountPackageAdoptAction(input: {
 			ownerId: savedPackage.userId,
 		}))
 	) {
-		return jsonResponse({ ok: false, error: 'Package not found.' }, 404)
+		return packageMutationResult(
+			{ ok: false, error: 'Package not found.' },
+			404,
+		)
 	}
 	const ownerUserId = savedPackage.userId
 	try {
@@ -48,11 +57,11 @@ export async function handleAccountPackageAdoptAction(input: {
 		})
 	} catch (error) {
 		if (error instanceof CommunityActionError) {
-			return jsonResponse({ ok: false, error: error.message }, 400)
+			return packageMutationResult({ ok: false, error: error.message }, 400)
 		}
 		throw error
 	}
-	return jsonResponse(
+	return packageMutationResult(
 		await reloadAccountPackagesAfterWrite({
 			env: input.env,
 			request: input.request,

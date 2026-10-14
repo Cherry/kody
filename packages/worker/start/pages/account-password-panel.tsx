@@ -15,9 +15,8 @@ import {
 	accountFieldNoteCss,
 	accountInputCss,
 } from './account-management-components.tsx'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { changePassword } from '#start/server/security-mutations'
 import { minPasswordLength } from '@kody-internal/shared/password-policy.ts'
-import { routes } from '#universal/routes.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
 import {
 	getGhostButtonCss,
@@ -44,8 +43,7 @@ export function AccountPasswordPanel(props: {
 	}, [actorKey, href])
 	const mutation = useMutation({
 		gcTime: 0,
-		mutationFn: ({ url, init }: { url: string; init: RequestInit }) =>
-			fetch(url, init),
+		mutationFn: (data: {currentPassword?:string;newPassword:string}) => changePassword({data}),
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 	})
@@ -97,42 +95,12 @@ export function AccountPasswordPanel(props: {
 
 		const submittedScope = scope.current
 		try {
-			const response = await mutation.mutateAsync({
-				url: routes.accountPassword.href(),
-				init: {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					credentials: 'include',
-					body: JSON.stringify({
-						...(props.hasUsablePassword ? { currentPassword } : {}),
-						newPassword,
-					}),
-				},
+			const payload = await mutation.mutateAsync({
+				...(props.hasUsablePassword ? { currentPassword } : {}),
+				newPassword,
 			})
 			if (!submittedScope || scope.current !== submittedScope) return
-			if (response.status === 401) {
-				const payload = await readJson<{ code?: string; error?: string }>(
-					response,
-				)
-				if (payload?.code === 'invalid_password') {
-					throw new Error(payload.error)
-				}
-				if (submittedScope && scope.current === submittedScope)
-					window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<{
-				ok?: boolean
-				message?: string
-				error?: string
-			}>(response)
-			if (!submittedScope || scope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to update your password.')
-			}
+			if (!payload.ok) throw new Error(payload.error || 'Unable to update your password.')
 			setCurrentPassword('')
 			setNewPassword('')
 			setConfirmPassword('')

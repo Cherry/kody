@@ -1,22 +1,36 @@
 /** @jsxImportSource @emotion/react */
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { relocateAccountHref } from '#universal/org-pages.ts'
-import { useMutation } from '@tanstack/react-query'
-import { toast } from '#client/toast.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState } from 'react'
-import { useRouter } from '@tanstack/react-router'
-import { SiteLink } from '../components/site-link.tsx'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { matchesSearchQuery } from '#client/search-filter.ts'
+import { toast } from '#client/toast.ts'
+import { deleteAccountMemory } from '#start/server/account-mutations'
 import {
-	type AccountMemoryListItem,
 	type AccountMemoriesLoaderData,
+	type AccountMemoryListItem,
 } from '#universal/loader-data.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
-import { matchesSearchQuery } from '#client/search-filter.ts'
+import {
+	cardTitleCss,
+	descriptionCss,
+	fieldCss,
+	fieldLabelCss,
+	getDangerPillCss,
+	getGhostButtonCss,
+} from '#universal/styles/style-primitives.ts'
+import {
+	colors,
+	radius,
+	spacing,
+	typography,
+} from '#universal/styles/tokens.ts'
+import { useMutation } from '@tanstack/react-query'
+import { useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { SiteLink } from '../components/site-link.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -31,24 +45,9 @@ import {
 	recordBodyCss,
 	recordCellClamp,
 } from './record-table.tsx'
-import {
-	colors,
-	radius,
-	spacing,
-	typography,
-} from '#universal/styles/tokens.ts'
-import {
-	cardTitleCss,
-	descriptionCss,
-	fieldCss,
-	fieldLabelCss,
-	getDangerPillCss,
-	getGhostButtonCss,
-} from '#universal/styles/style-primitives.ts'
 
 const clampedCellCss = recordCellClamp(30)
 
-const accountMemoriesApiPath = routes.accountMemoriesApi.href()
 const accountMemoriesExportPath = routes.accountMemoriesExport.href()
 const memoriesRoute = createListDetailRoute('/account/memories')
 
@@ -82,10 +81,11 @@ function filterMemories(
 	)
 }
 
-function buildMemoriesExportHref(includeDeleted: boolean) {
-	if (!includeDeleted) return accountMemoriesExportPath
+function buildMemoriesExportHref(includeDeleted: boolean, currentHref:string) {
 	const requestUrl = new URL(accountMemoriesExportPath, 'http://localhost')
-	requestUrl.searchParams.set('includeDeleted', 'true')
+	if(includeDeleted) requestUrl.searchParams.set('includeDeleted', 'true')
+ const org=pageQueryOrg(currentHref)
+ if(org) requestUrl.searchParams.set('org',org)
 	return `${requestUrl.pathname}${requestUrl.search}`
 }
 
@@ -145,33 +145,14 @@ export function AccountMemoriesPage({
 			href: string
 			isCurrentSubmitter: () => boolean
 		}) => {
-			const { isCurrentSubmitter } = input
-			const response = await fetch(accountMemoriesApiPath, {
-				method: 'POST',
-				referrer: orgAccountApiReferrer(input.href),
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify({
-					action: 'delete',
+			return deleteAccountMemory({
+				data: {
 					memoryId: input.memoryId,
 					force: input.force,
-				}),
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					search: new URL(input.href, 'https://kody.local').search,
+				},
 			})
-			if (response.status === 401) {
-				if (isCurrentSubmitter()) window.location.assign('/login')
-				throw new Error('Please sign in again.')
-			}
-			const payload = await readJson<
-				AccountMemoriesLoaderData & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to delete memory.')
-			}
-
-			return payload
 		},
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
@@ -202,7 +183,7 @@ export function AccountMemoriesPage({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				// Keep an in-flight search edit when a second filter changes.
 				// Another page's pending search never belongs to this toolbar.
 				const search: Record<string, unknown> = samePage
@@ -373,7 +354,7 @@ export function AccountMemoriesPage({
 									Include deleted
 								</label>
 								<SiteLink
-									href={buildMemoriesExportHref(includeDeleted)}
+									href={buildMemoriesExportHref(includeDeleted,currentHref)}
 									download={buildMemoriesExportFilename()}
 									css={secondaryButtonCss}
 								>

@@ -3,10 +3,10 @@ import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type AccountFormerEmail } from '#universal/loader-data.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-
-const emailChangeApiPath = '/account/email-change.json'
-const emailClaimReleaseApiPath = '/account/email-claim-release.json'
+import {
+	requestWebsiteEmailChange,
+	requestWebsiteEmailRelease,
+} from '#start/server/auth-mutations'
 
 export function useAccountEmailClaims(
 	initialEmail: string,
@@ -26,8 +26,18 @@ export function useAccountEmailClaims(
 	}, [actorKey, href])
 	const mutation = useMutation({
 		gcTime: 0,
-		mutationFn: ({ url, init }: { url: string; init: RequestInit }) =>
-			fetch(url, init),
+		mutationFn: ({
+			kind,
+			email,
+			password,
+		}: {
+			kind: 'change' | 'release'
+			email: string
+			password: string
+		}) =>
+			(kind === 'change'
+				? requestWebsiteEmailChange
+				: requestWebsiteEmailRelease)({ data: { email, password } }),
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 	})
@@ -119,40 +129,13 @@ export function useAccountEmailClaims(
 
 		const submittedScope = scope.current
 		try {
-			const response = await mutation.mutateAsync({
-				url: emailClaimReleaseApiPath,
-				init: {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					credentials: 'include',
-					body: JSON.stringify({
-						email: nextEmail,
-						password: releasePassword,
-					}),
-				},
+			const payload = await mutation.mutateAsync({
+				kind: 'release',
+				email: nextEmail,
+				password: releasePassword,
 			})
 			if (!submittedScope || scope.current !== submittedScope) return
-			if (response.status === 401) {
-				const payload = await readJson<{ code?: string; error?: string }>(
-					response,
-				)
-				if (payload?.code === 'invalid_password') {
-					throw new Error(payload.error)
-				}
-				if (submittedScope && scope.current === submittedScope)
-					window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<{
-				ok?: boolean
-				message?: string
-				error?: string
-			}>(response)
-			if (!submittedScope || scope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
+			if (!payload.successful || !payload.ok) {
 				throw new Error(
 					payload?.error || 'Unable to send the release verification.',
 				)
@@ -199,40 +182,13 @@ export function useAccountEmailClaims(
 
 		const submittedScope = scope.current
 		try {
-			const response = await mutation.mutateAsync({
-				url: emailChangeApiPath,
-				init: {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					credentials: 'include',
-					body: JSON.stringify({
-						email: nextEmail,
-						password: emailChangePassword,
-					}),
-				},
+			const payload = await mutation.mutateAsync({
+				kind: 'change',
+				email: nextEmail,
+				password: emailChangePassword,
 			})
 			if (!submittedScope || scope.current !== submittedScope) return
-			if (response.status === 401) {
-				const payload = await readJson<{ code?: string; error?: string }>(
-					response,
-				)
-				if (payload?.code === 'invalid_password') {
-					throw new Error(payload.error)
-				}
-				if (submittedScope && scope.current === submittedScope)
-					window.location.assign('/login')
-				return
-			}
-			const payload = await readJson<{
-				ok?: boolean
-				message?: string
-				error?: string
-			}>(response)
-			if (!submittedScope || scope.current !== submittedScope) return
-			if (!response.ok || !payload?.ok) {
+			if (!payload.successful || !payload.ok) {
 				throw new Error(
 					payload?.error || 'Unable to send the email change verification.',
 				)

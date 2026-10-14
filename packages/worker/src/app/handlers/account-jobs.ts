@@ -1,15 +1,12 @@
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import {
 	loadAccountJobsData,
 	type AccountJobsLoaderData,
 } from '#app/account-jobs-data.ts'
-import { getAppBaseUrl } from '#worker/app-base-url.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
-import { type routes } from '#universal/routes.ts'
-import { type ServerTimingEntry } from '#worker/server-timing.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
+import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import { runJobNowViaManager } from '#worker/jobs/manager-client.ts'
 import { updateJob } from '#worker/jobs/service.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
@@ -28,66 +25,6 @@ export function readPathJobId(params: unknown) {
 		return params.jobId
 	}
 	return undefined
-}
-
-/**
- * JSON API for `/account/jobs.json` (GET list/detail + POST mutations).
- */
-export function createAccountJobsApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			if (request.method === 'GET') {
-				const serverTiming: Array<ServerTimingEntry> = []
-				return jsonResponse(
-					await loadAccountJobsData({
-						env,
-						request,
-						user,
-						serverTiming,
-					}),
-					{ serverTiming },
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const action = readTrimmedStringOrEmpty(body, 'action')
-			try {
-				if (action === 'set_kill_switch') {
-					return await handleSetKillSwitchAction({ env, user, body, request })
-				}
-				if (action === 'run_now') {
-					return await handleRunNowAction({ env, user, body, request })
-				}
-			} catch (error) {
-				return jsonResponse(
-					{
-						ok: false,
-						error:
-							error instanceof Error
-								? error.message
-								: 'Unable to update scheduled job.',
-					},
-					400,
-				)
-			}
-
-			return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
-		},
-	} satisfies Action<typeof routes.accountJobsApi>
 }
 
 async function reloadJobsPayload(input: {
@@ -157,7 +94,7 @@ async function handleSetKillSwitchAction(input: {
 		callerContext: buildCallerContext(input),
 		body: { id, killSwitchEnabled },
 	})
-	return jsonResponse(
+	return operationResult(
 		await reloadJobsPayload({
 			...input,
 			selectedJobId: id,
@@ -185,7 +122,7 @@ async function handleRunNowAction(input: {
 		...input,
 		selectedJobId: result.deletedAfterRun ? null : id,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		runNow: {
 			ok: result.execution.ok,
@@ -198,4 +135,39 @@ async function handleRunNowAction(input: {
 function readBoolean(body: object, key: string) {
 	const value = (body as Record<string, unknown>)[key]
 	return typeof value === 'boolean' ? value : null
+}
+
+export async function mutateAccountJobs({
+	request,
+	env,
+	user,
+	body,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+}) {
+	const action = readTrimmedStringOrEmpty(body, 'action')
+	try {
+		if (action === 'set_kill_switch') {
+			return await handleSetKillSwitchAction({ env, user, body, request })
+		}
+		if (action === 'run_now') {
+			return await handleRunNowAction({ env, user, body, request })
+		}
+	} catch (error) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					error instanceof Error
+						? error.message
+						: 'Unable to update scheduled job.',
+			},
+			400,
+		)
+	}
+
+	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

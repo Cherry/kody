@@ -18,8 +18,7 @@ test('package skills flag callout covers logged-out, opt-in, and already-on', as
 		renderPackageSkillsFlagCallout({ loggedIn: true, enabled: false }),
 	)
 	expect(loggedIn).toContain('data-testid="package-skills-flag-opt-in"')
-	expect(loggedIn).toContain(`action="${routes.packageSkillsOptInPost.href()}"`)
-	expect(loggedIn).toContain('method="post"')
+	expect(loggedIn).toContain('type="button"')
 	expect(loggedIn).not.toContain('data-testid="package-skills-flag-login"')
 
 	const alreadyOn = await renderToString(

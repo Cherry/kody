@@ -1,7 +1,11 @@
 import {
+	updateOrgPeople,
+	type OrgPeopleAction,
+} from '#start/server/org-mutations'
+import {
+	mutationOptions,
 	useMutation,
 	useQueryClient,
-	mutationOptions,
 	type QueryClient,
 	type QueryKey,
 } from '@tanstack/react-query'
@@ -27,33 +31,23 @@ export function orgPeopleMutationOptions(
 	return mutationOptions({
 		onMutate: () => ({ queryKey }),
 		mutationFn: async ({
-			href,
+			action,
 			body,
 		}: {
-			href: string
+			action: OrgPeopleAction
 			body: Record<string, unknown>
 		}) => {
-			const response = await fetch(href, {
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify(body),
-			})
-			const result = resultSchema.safeParse(
-				await response.json().catch(() => null),
+			const input = queryKey[3]
+			if (
+				!input ||
+				typeof input !== 'object' ||
+				!('slug' in input) ||
+				typeof input.slug !== 'string'
 			)
-			if (!response.ok || !result.success || !result.data.ok)
-				throw new Error(
-					response.status === 401
-						? 'Sign in again to continue.'
-						: result.success
-							? (result.data.error ?? 'Unable to save changes.')
-							: 'Unable to save changes.',
-				)
-			return result.data
+				throw new Error('Organization unavailable.')
+			return resultSchema.parse(
+				await updateOrgPeople({ data: { orgSlug: input.slug, action, body } }),
+			)
 		},
 		onSettled: async (_result, _error, _variables, submission) => {
 			if (!submission) return

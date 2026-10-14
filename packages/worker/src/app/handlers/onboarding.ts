@@ -2,11 +2,8 @@ import {
 	personalOrgId,
 	type OwnerId,
 } from '@kody-internal/shared/owner-person-ids.ts'
-import { jsonResponse } from '#worker/json-response.ts'
-import { type Action } from 'remix/router'
 import {
 	deriveOnboardingChecklist,
-	dismissOnboardingChecklist,
 	loadOnboardingAccessWin,
 	loadOnboardingAccessWinMemorySubject,
 	readOnboardingChecklistDismissed,
@@ -50,7 +47,6 @@ import {
 	loadPlatformIntegrationCatalog,
 	onboardingFeaturedPlatformIntegrationSlugs,
 } from '#app/platform-integration-catalog.ts'
-import { type routes } from '#universal/routes.ts'
 import {
 	onboardingIndexRedirectHref,
 	type OnboardingWizardProgress,
@@ -376,36 +372,4 @@ export async function readOnboardingPageData(env: Env, request: Request) {
 		serverTiming,
 		headers: undefined,
 	}
-}
-
-export function createOnboardingApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			if (request.method !== 'GET')
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			const { payload, serverTiming, headers } = await readOnboardingPageData(
-				env,
-				request,
-			)
-			return jsonResponse(payload, { serverTiming, headers })
-		},
-	} satisfies Action<typeof routes.onboardingApi>
-}
-
-export function createOnboardingChecklistDismissHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Sign in required.' }, 401)
-			}
-			await dismissOnboardingChecklist({
-				env,
-				userId: personalOrgId(user.mcpUser.userId),
-			})
-			return jsonResponse({ ok: true })
-		},
-	} satisfies Action<typeof routes.onboardingChecklistDismissPost>
 }

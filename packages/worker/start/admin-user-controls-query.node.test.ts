@@ -1,11 +1,11 @@
-import { afterEach, expect, test, vi } from 'vitest'
-import { MutationObserver, QueryClient } from '@tanstack/react-query'
-import {
-	adminOrgLimitsQuery,
-	adminOrgLimitMutationOptions,
-	adminDestinationMutationOptions,
-} from './admin-user-controls-query.ts'
 import { limitOverrideKeys } from '#universal/plans.ts'
+import { MutationObserver, QueryClient } from '@tanstack/react-query'
+import { afterEach, expect, test, vi } from 'vitest'
+import {
+	adminDestinationMutationOptions,
+	adminOrgLimitMutationOptions,
+	adminOrgLimitsQuery,
+} from './admin-user-controls-query.ts'
 
 import { type AdminOrgLimits } from '#universal/loader-data.ts'
 function limits(orgId: string): AdminOrgLimits {
@@ -17,7 +17,19 @@ function limits(orgId: string): AdminOrgLimits {
 		limits: [],
 	}
 }
-afterEach(() => vi.unstubAllGlobals())
+const { limitsRpc, userRpc } = vi.hoisted(() => ({
+	limitsRpc: vi.fn(),
+	userRpc: vi.fn(),
+}))
+vi.mock('#start/server/admin-controls', () => ({
+	readAdminOrgLimits: vi.fn(),
+	updateAdminOrgLimits: limitsRpc,
+}))
+vi.mock('#start/server/admin-mutations', () => ({ saveAdminUsers: userRpc }))
+afterEach(() => {
+	limitsRpc.mockReset()
+	userRpc.mockReset()
+})
 test('late limit response reconciles only the submitted actor and org after unmount', async () => {
 	const client = new QueryClient()
 	const first = adminOrgLimitsQuery('actor-a', 'org-a').queryKey
@@ -25,15 +37,12 @@ test('late limit response reconciles only the submitted actor and org after unmo
 	const otherActor = adminOrgLimitsQuery('actor-b', 'org-a').queryKey
 	for (const key of [first, other, otherActor])
 		client.setQueryData(key, limits(key[2]))
-	let release!: (response: Response) => void
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(
-			() =>
-				new Promise<Response>((resolve) => {
-					release = resolve
-				}),
-		),
+	let release!: (response: AdminOrgLimits & { ok: true }) => void
+	limitsRpc.mockImplementation(
+		() =>
+			new Promise<AdminOrgLimits & { ok: true }>((resolve) => {
+				release = resolve
+			}),
 	)
 	const observer = new MutationObserver(
 		client,
@@ -46,9 +55,9 @@ test('late limit response reconciles only the submitted actor and org after unmo
 		change: { key: limitOverrideKeys[0], value: 'unlimited', expiresAt: null },
 		reason: 'Approved exception',
 	})
-	await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+	await vi.waitFor(() => expect(limitsRpc).toHaveBeenCalledOnce())
 	unsubscribe()
-	release(Response.json({ ok: true, ...limits('org-a'), seats: 2 }))
+	release({ ok: true, ...limits('org-a'), seats: 2 })
 	await write
 	expect(client.getQueryData(first)).toMatchObject({
 		org: { id: 'org-a' },
@@ -56,9 +65,7 @@ test('late limit response reconciles only the submitted actor and org after unmo
 	})
 	expect(client.getQueryData(other)).toEqual(limits('org-b'))
 	expect(client.getQueryData(otherActor)).toEqual(limits('org-a'))
-	expect(
-		JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string),
-	).toMatchObject({
+	expect(limitsRpc.mock.calls[0]![0].data).toMatchObject({
 		orgId: 'org-a',
 		reason: 'Approved exception',
 		changes: [{ value: 'unlimited' }],
@@ -69,7 +76,7 @@ test('lost limit response invalidates authoritative data without inventing succe
 	const client = new QueryClient()
 	const key = adminOrgLimitsQuery('actor-a', 'org-a').queryKey
 	client.setQueryData(key, limits(key[2]))
-	vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Lost response')))
+	limitsRpc.mockRejectedValue(new Error('Lost response'))
 	const observer = new MutationObserver(
 		client,
 		adminOrgLimitMutationOptions(client),
@@ -92,7 +99,7 @@ test('destination verification submits the captured user and invalidates only it
 	const other = ['admin-users-pages', 'actor-b', 'search']
 	client.setQueryData(first, { old: true })
 	client.setQueryData(other, { old: true })
-	vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: true })))
+	userRpc.mockResolvedValue({ ok: true })
 	const observer = new MutationObserver(
 		client,
 		adminDestinationMutationOptions(client),
@@ -103,9 +110,7 @@ test('destination verification submits the captured user and invalidates only it
 		destinationEmail: 'extra@example.com',
 		href: '/admin/users?q=example&selected=user-a',
 	})
-	expect(
-		JSON.parse(vi.mocked(fetch).mock.calls[0]![1]!.body as string),
-	).toEqual({
+	expect(userRpc.mock.calls[0]![0].data.body).toEqual({
 		action: 'mark_email_destination_verified',
 		stableUserId: 'user-a',
 		destinationEmail: 'extra@example.com',

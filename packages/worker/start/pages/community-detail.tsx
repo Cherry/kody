@@ -1,10 +1,13 @@
 /** @jsxImportSource @emotion/react */
+import {
+	featureCommunityPackage,
+	reportCommunityPackage,
+} from '#start/server/community-mutations'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
-import { routes } from '#universal/routes.ts'
 import { getPackageTreeHref } from '#universal/package-files.ts'
 import {
 	type CommunityDetailContentProps,
@@ -64,29 +67,7 @@ export function CommunityDetailRoute({
 				relativePath: 'AGENTS.md',
 			})
 		: null
-	async function post<T extends { ok: boolean; error?: string }>(
-		href: string,
-		payload: unknown,
-	): Promise<T> {
-		const isCurrent = capture()
-		const response = await fetch(href, {
-			method: 'POST',
-			credentials: 'include',
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify(payload),
-		})
-		if (response.status === 401) {
-			if (isCurrent()) window.location.assign('/login')
-			throw new Error('Please log in.')
-		}
-		const result = (await response.json()) as T
-		if (!response.ok || !result.ok)
-			throw new Error(result.error ?? 'Unable to complete this action.')
-		return result
-	}
+
 	// Capture reconciliation when submitted, so a later navigation cannot move
 	// the write's cache work to another actor or organization. A lost response
 	// still requires reconciliation because the server may have committed it.
@@ -103,17 +84,17 @@ export function CommunityDetailRoute({
 	const featureMutation = useMutation({
 		...lifecycle,
 		mutationFn: (input: { id: string; featured: boolean }) =>
-			post(routes.communityFeatureApiPost.href({ listingId: input.id }), {
-				featured: input.featured,
-			}),
+			featureCommunityPackage({
+				data: { listingId: input.id, featured: input.featured },
+			}).then(requireSuccess),
 	})
 	const reportMutation = useMutation({
 		...lifecycle,
 		onMutate: () => ({ reconcile: invalidateReports }),
 		mutationFn: (input: { id: string; reason: string }) =>
-			post(routes.communityReportApiPost.href({ listingId: input.id }), {
-				reason: input.reason,
-			}),
+			reportCommunityPackage({
+				data: { listingId: input.id, reason: input.reason },
+			}).then(requireSuccess),
 	})
 	async function feature() {
 		if (!listing || featureMutation.isPending) return
@@ -218,3 +199,9 @@ const mutationResources = [
 ] as const
 
 const reportResources = ['loadAdminCommunityReports'] as const
+
+function requireSuccess<T extends { ok: boolean; error?: string }>(result: T) {
+	if (!result.ok)
+		throw new Error(result.error ?? 'Unable to complete this action.')
+	return result
+}

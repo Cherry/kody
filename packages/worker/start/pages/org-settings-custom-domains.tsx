@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { updateOrganizationSettings } from '#start/server/org-settings-mutations'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -8,7 +9,6 @@ import {
 	type QueryKey,
 } from '@tanstack/react-query'
 import { type OrgSettingsLoaderData } from '#universal/loader-data.ts'
-import { routes } from '#universal/routes.ts'
 import {
 	AccountManagementPanel,
 	accountFieldCss,
@@ -59,24 +59,9 @@ export function OrgSettingsCustomDomains({
 			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
 		},
 		mutationFn: async ({ body, slug }: DomainSubmission) => {
-			const response = await fetch(
-				routes.orgSettingsCustomHostnamesPost.href({ orgSlug: slug }),
-				{
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify(body),
-				},
-			)
-			const payload = (await response.json()) as OrgSettingsLoaderData & {
-				error?: string
-			}
-			if (!response.ok || !payload.ok)
-				throw new Error(payload.error || 'Unable to update custom domains.')
-			return payload
+			return updateOrganizationSettings({
+				data: { orgSlug: slug, kind: 'domains', body },
+			}) as Promise<OrgSettingsLoaderData>
 		},
 		onSuccess: async (payload, submission) => {
 			// A pre-mutation settings read must not replace the authoritative write reply.

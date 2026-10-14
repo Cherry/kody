@@ -1,14 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { updateEmailDestinations } from '#start/server/account-mutations'
+import { type AccountEmailDestinationsLoaderData } from '#universal/loader-data.ts'
 import {
 	useMutation,
 	useMutationState,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { type AccountEmailDestinationsLoaderData } from '#universal/loader-data.ts'
+import { useState, type FormEvent } from 'react'
 import { emailKeys } from './email-resources.ts'
-
-const destinationsApiPath = '/account/email-destinations.json'
 
 export function useAccountEmailDestinations(
 	payload: AccountEmailDestinationsLoaderData,
@@ -29,23 +27,7 @@ export function useAccountEmailDestinations(
 	const mutation = useMutation({
 		mutationKey: ['email-destination-write', actorKey],
 		mutationFn: async (body: Record<string, string>) => {
-			const response = await fetch(destinationsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(body),
-			})
-			const accepted = await readJson<
-				AccountEmailDestinationsLoaderData & { error?: string }
-			>(response)
-			if (!response.ok || !accepted?.ok)
-				throw new Error(
-					accepted?.error ?? 'Unable to update email destinations.',
-				)
-			return accepted
+			return updateEmailDestinations({ data: { body } })
 		},
 		onSuccess: async (accepted) => {
 			await client.cancelQueries({

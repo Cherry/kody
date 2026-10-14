@@ -1,11 +1,11 @@
+import type * as authenticatedUserModule from '#app/authenticated-user.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
 import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
-import type * as authenticatedUserModule from '#app/authenticated-user.ts'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
 
 const listedWorkflow = {
 	id: 'dynwf-1',
@@ -72,8 +72,8 @@ vi.mock('#worker/run-records/service.ts', () => ({
 		mockModule.getWorkflowProjection(...args),
 }))
 
-const { createAccountWorkflowsApiHandler } =
-	await import('#app/handlers/account-workflows.ts')
+const { testAccountWorkflowsApiHandler } =
+	await import('#app/handlers/account-workflows.test-support.ts')
 
 function createEnv() {
 	return {} as Env
@@ -89,16 +89,15 @@ function resetList(workflows = [listedWorkflow]) {
 
 test('workflows API lists, cancels, and rejects unauthenticated or invalid requests', async () => {
 	resetList()
-	const handler = createAccountWorkflowsApiHandler(createEnv())
+	const handler = testAccountWorkflowsApiHandler(createEnv())
 
-	const listResponse = await handler.handler(
+	const listResponse = await handler.execute(
 		new RequestContext(
 			new Request('https://example.com/account/workflows.json'),
 		),
 	)
 	expect(listResponse.status).toBe(200)
-	expect(listResponse.headers.get('Cache-Control')).toBe('no-store')
-	await expect(listResponse.json()).resolves.toMatchObject({
+	expect(listResponse.data).toMatchObject({
 		ok: true,
 		selectedWorkflowId: null,
 		selectedWorkflow: null,
@@ -113,7 +112,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 	})
 
 	resetList()
-	const detailResponse = await handler.handler(
+	const detailResponse = await handler.execute(
 		new RequestContext(
 			new Request(
 				'https://example.com/account/workflows.json?selected=dynwf-1',
@@ -121,7 +120,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		),
 	)
 	expect(detailResponse.status).toBe(200)
-	await expect(detailResponse.json()).resolves.toMatchObject({
+	expect(detailResponse.data).toMatchObject({
 		ok: true,
 		selectedWorkflowId: 'dynwf-1',
 		selectedWorkflow: expect.objectContaining({
@@ -135,7 +134,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		outcome: 'cancelled',
 		run: { ...listedWorkflow, status: 'cancelled' },
 	})
-	const cancelResponse = await handler.handler(
+	const cancelResponse = await handler.execute(
 		new RequestContext(
 			new Request('https://example.com/account/workflows.json', {
 				method: 'POST',
@@ -150,7 +149,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		userId: ownerIdFromStored('stable-user-1'),
 		workflowRunId: 'dynwf-1',
 	})
-	await expect(cancelResponse.json()).resolves.toMatchObject({
+	expect(cancelResponse.data).toMatchObject({
 		ok: true,
 		cancel: {
 			cancelled: true,
@@ -160,7 +159,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 	})
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(null)
-	const unauthorized = await handler.handler(
+	const unauthorized = await handler.execute(
 		new RequestContext(
 			new Request('https://example.com/account/workflows.json'),
 		),
@@ -186,7 +185,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		},
 		request: sessionRequestContext('stable-user-1'),
 	})
-	const methodNotAllowed = await handler.handler(
+	const methodNotAllowed = await handler.execute(
 		new RequestContext(
 			new Request('https://example.com/account/workflows.json', {
 				method: 'PUT',
@@ -195,7 +194,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 	)
 	expect(methodNotAllowed.status).toBe(405)
 
-	const invalidAction = await handler.handler(
+	const invalidAction = await handler.execute(
 		new RequestContext(
 			new Request('https://example.com/account/workflows.json', {
 				method: 'POST',
@@ -205,7 +204,7 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		),
 	)
 	expect(invalidAction.status).toBe(400)
-	await expect(invalidAction.json()).resolves.toEqual({
+	expect(invalidAction.data).toEqual({
 		ok: false,
 		error: 'Invalid action.',
 	})

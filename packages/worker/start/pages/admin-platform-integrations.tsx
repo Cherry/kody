@@ -1,46 +1,46 @@
 /** @jsxImportSource @emotion/react */
-import { type QueryKey } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
-	adminPlatformIntegrationsApiPath,
-	buildHrefWithUpdatedSearch,
-	filterApps,
-	getCurrentSearch,
-	parseExtraAuthorizeParams,
-	platformIntegrationsRoute,
-	readSearchFilter,
-	splitListInput,
-	type ActionState,
+buildHrefWithUpdatedSearch,
+filterApps,
+getCurrentSearch,
+parseExtraAuthorizeParams,
+platformIntegrationsRoute,
+readSearchFilter,
+splitListInput,
+type ActionState,
 } from '#client/routes/admin-platform-integrations-shared.ts'
+import { saveAdminPlatformIntegrations } from '#start/server/admin-mutations'
 import {
-	type AdminPlatformIntegrationApp,
-	type AdminPlatformIntegrationsLoaderData,
+type AdminPlatformIntegrationApp,
+type AdminPlatformIntegrationsLoaderData,
 } from '#universal/loader-data.ts'
 import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
-import { colors, typography } from '#universal/styles/tokens.ts'
+import { colors,typography } from '#universal/styles/tokens.ts'
 import { css } from '@emotion/react'
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
+import { type QueryKey } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import {
-	useEffect,
-	useRef,
-	useState,
-	type ChangeEvent,
-	type FormEvent,
+useEffect,
+useRef,
+useState,
+type ChangeEvent,
+type FormEvent,
 } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
+import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
-	AccountManagementMessage,
-	AccountManagementShell,
-	AdminPageHeader,
+AccountManagementMessage,
+AccountManagementShell,
+AdminPageHeader,
 } from './account-management-components.tsx'
 import { IntegrationForm } from './admin-platform-integrations-form.tsx'
 import {
-	RecordDot,
-	RecordTable,
-	RecordTableSearch,
-	recordCellClamp,
-	recordStampCss,
+RecordDot,
+RecordTable,
+RecordTableSearch,
+recordCellClamp,
+recordStampCss,
 } from './record-table.tsx'
 const clampedCellCss = css(recordCellClamp(28))
 export function AdminPlatformIntegrationsPage(props: {
@@ -52,7 +52,10 @@ export function AdminPlatformIntegrationsPage(props: {
 	const mutation = usePageResponseMutation<AdminPlatformIntegrationsLoaderData>(
 		props.queryKey,
 		'loadAdminPlatformIntegrations',
-		adminPlatformIntegrationsApiPath,
+		(body, href) =>
+			saveAdminPlatformIntegrations({
+				data: { body, search: new URL(href, 'http://localhost').search },
+			}),
 		{ dependencies: mutationResources },
 	)
 	const router = useRouter()

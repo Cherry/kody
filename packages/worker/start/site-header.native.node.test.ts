@@ -69,7 +69,7 @@ test('logged-in header has an organization switcher and a separate account menu 
 	expect(accountPanel).toMatch(
 		/href="\/@ada\/-\/usage"[^>]*>[\s\S]*?>Usage &amp; credits</,
 	)
-	expect(accountPanel).toContain('action="/logout"')
+	expect(accountPanel).toContain('data-testid="org-switcher-logout"')
 	// From an account page, the signup org row opens the overview too, not
 	// the public profile (that is "Your profile").
 	const adaRowAt = html.indexOf('data-testid="org-switcher-ada"')
@@ -109,7 +109,7 @@ test('logged-in header has an organization switcher and a separate account menu 
 		/<a(?=[^>]*href="\/account")(?=[^>]*aria-current="page")[^>]*>[\s\S]*?>Account settings</,
 	)
 	expect(account).toMatch(
-		/<form[^>]*action="\/logout"[\s\S]*?data-testid="org-switcher-logout"[\s\S]*?>Log out</,
+		/<button[^>]*data-testid="org-switcher-logout"[\s\S]*?>Log out</,
 	)
 })
 

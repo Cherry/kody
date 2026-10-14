@@ -1,5 +1,5 @@
-import { createServerFn } from '@tanstack/react-start'
 import { redirect } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 
 async function accountContext() {
@@ -18,12 +18,11 @@ async function accountContext() {
 	])
 	const bindings = getEnv(env)
 	setAuthSessionSecret(bindings.COOKIE_SECRET)
-	const request = new Request(
-		new URL('/account/organizations', getRequest().url),
-		{ headers: getRequest().headers },
-	)
+	const request = getRequest()
 	setResponseHeader('Cache-Control', 'no-store')
-	const user = await requireAuthenticatedPageUser(request, bindings)
+	const user = await requireAuthenticatedPageUser(request, bindings, {
+		redirectTo: '/account/organizations',
+	})
 	if (user instanceof Response) {
 		const cookies = user.headers.getSetCookie()
 		if (cookies.length) setResponseHeader('Set-Cookie', cookies)
@@ -42,28 +41,12 @@ export const loadOrganizations = createServerFn({ method: 'GET' }).handler(
 export const createOrg = createServerFn({ method: 'POST' })
 	.validator(z.object({ displayName: z.string(), slug: z.string() }))
 	.handler(async ({ data }) => {
-		const { env, user } = await accountContext()
-		const [
-			{ authorize, AuthorizationError },
-			{ createOrganization },
-			{ orgAuditWriterFromRequest },
-		] = await Promise.all([
-			import('../../src/authorization/authorize.ts'),
-			import('../../src/orgs/create-organization.ts'),
-			import('../../src/orgs/org-audit.ts'),
-		])
-		try {
-			await authorize({ env, request: user.request }, 'org:write')
-		} catch (error) {
-			if (error instanceof AuthorizationError)
-				throw new Error('You do not have permission to create an organization.')
-			throw error
-		}
-		const result = await createOrganization(env.APP_DB, env, {
-			personId: user.mcpUser.userId,
-			audit: orgAuditWriterFromRequest(env, user.request),
-			...data,
-		})
-		if (!result.ok) throw new Error(result.error)
-		return { slug: result.slug }
+		const [{ withWebsiteMutation }, { createWebsiteOrganization }] =
+			await Promise.all([
+				import('./mutation-context.ts'),
+				import('../../src/app/handlers/account-organizations.ts'),
+			])
+		return withWebsiteMutation({}, (context) =>
+			createWebsiteOrganization({ ...context, ...data }),
+		)
 	})

@@ -1,9 +1,9 @@
-import { isOrgDocumentRequest } from './org-document-request.ts'
 import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { readJsonRecord } from './json-value.ts'
-import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
+import { readJsonRecord } from './json-value.ts'
+import { isOrgDocumentRequest } from './org-document-request.ts'
 
 function collectionAliasHref(href: string) {
 	if (!href.startsWith('/') || href.startsWith('//') || href.includes('\\'))
@@ -41,9 +41,8 @@ export const loadCollection = createServerOnlyFn(async (href: string) => {
 	const request = new Request(new URL(href, original.url), {
 		headers: original.headers,
 	})
-	const user = await requireAuthenticatedPageUser(original, bindings, {
+	let user = await requireAuthenticatedPageUser(original, bindings, {
 		redirectTo: href,
-		resourceRequest: request,
 	})
 	if (user instanceof Response) {
 		const cookie = user.headers.get('Set-Cookie')
@@ -53,11 +52,29 @@ export const loadCollection = createServerOnlyFn(async (href: string) => {
 			statusCode: user.status,
 		})
 	}
-	const { isOrgRequestDenied } =
-		await import('../../src/app/org-request-binding.ts')
-	if (await isOrgRequestDenied(request, bindings, user.mcpUser.userId))
-		throw notFound()
-	const orgPath = parseOrgResourcePath(new URL(request.url).pathname)
+	const orgPath = parseOrgResourcePath(new URL(href, original.url).pathname)
+	if (orgPath) {
+		const [{ loadOrgBindingForSlug }, { deriveRequestContext }] =
+			await Promise.all([
+				import('#worker/orgs/repo.ts'),
+				import('#worker/request-context/request-context.ts'),
+			])
+		const binding = await loadOrgBindingForSlug(
+			bindings.APP_DB,
+			user.mcpUser.userId,
+			orgPath.slug,
+		)
+		const {orgSectionDenial}=await import('#app/org-request-binding.ts')
+		if (!binding || orgSectionDenial(binding,orgPath.section)) throw notFound()
+		user = {
+			...user,
+			request: deriveRequestContext({
+				user: user.mcpUser,
+				source: { kind: 'session' },
+				orgBinding: binding,
+			}),
+		}
+	}
 	if (orgPath) {
 		const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
 			await Promise.all([

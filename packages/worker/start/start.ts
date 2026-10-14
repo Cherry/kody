@@ -32,6 +32,18 @@ const documentIdentity = createMiddleware({ type: 'function' })
 		return next()
 	})
 
+const routeMethods = createMiddleware().server(
+	async ({ handlerType, request, next }) => {
+		if (handlerType === 'router') {
+			const { rejectUnsupportedRouteMethod } =
+				await import('#start/server/route-method-policy')
+			const rejected = await rejectUnsupportedRouteMethod(request)
+			if (rejected) return rejected
+		}
+		return next()
+	},
+)
+
 const rpcResponsePolicy = createMiddleware().server(({ handlerType, next }) => {
 	if (handlerType === 'serverFn') markRpcResponsePrivate()
 	return next()
@@ -39,6 +51,7 @@ const rpcResponsePolicy = createMiddleware().server(({ handlerType, next }) => {
 
 export const startInstance = createStart(() => ({
 	requestMiddleware: [
+		routeMethods,
 		rpcResponsePolicy,
 		createCsrfMiddleware({
 			filter: ({ handlerType }) => handlerType === 'serverFn',

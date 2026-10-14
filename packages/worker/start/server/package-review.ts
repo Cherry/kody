@@ -41,7 +41,7 @@ async function review(data: ReturnType<typeof validate>) {
 		original.url,
 	)
 	if (data.commit) url.searchParams.set('commit', data.commit)
-	const request = new Request(url, { headers: original.headers })
+	const request = original
 	setResponseHeader('Cache-Control', 'private, no-store')
 	const user = await requireAuthenticatedPageUser(original, bindings, {
 		redirectTo: `${url.pathname}${url.search}`,
@@ -73,6 +73,7 @@ async function review(data: ReturnType<typeof validate>) {
 		request,
 		user,
 		packageId: page.ownerPackage.id,
+		commit: data.commit ?? '',
 	})
 	if (!payload.ok) throw notFound()
 	return {

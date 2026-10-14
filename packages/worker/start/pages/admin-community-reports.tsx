@@ -1,27 +1,27 @@
 /** @jsxImportSource @emotion/react */
-import { useMutation } from '@tanstack/react-query'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
+import { saveAdminCommunityReports } from '#start/server/admin-mutations'
 import { type AdminCommunityReportsLoaderData } from '#universal/loader-data.ts'
 import {
-	cardCss,
-	descriptionCss,
-	fieldCss,
-	fieldLabelCss,
-	getDangerPillCss,
-	getGhostButtonCss,
+cardCss,
+descriptionCss,
+fieldCss,
+fieldLabelCss,
+getDangerPillCss,
+getGhostButtonCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { useState, type MouseEvent } from 'react'
+import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import { useMutation } from '@tanstack/react-query'
+import { useState,type MouseEvent } from 'react'
 import { formatTimestamp } from '../components/local-timestamp.tsx'
 import { SiteLink } from '../components/site-link.tsx'
+import { usePageInvalidation } from '../page-invalidation.ts'
 import {
-	AccountManagementInlineLinkNav,
-	AccountManagementMessage,
-	AccountManagementShell,
-	AdminPageHeader,
-	IdValue,
-	accountInputCss,
+AccountManagementInlineLinkNav,
+AccountManagementMessage,
+AccountManagementShell,
+AdminPageHeader,
+IdValue,
+accountInputCss,
 } from './account-management-components.tsx'
 /**
  * `IdValue` is a flex row (value plus copy control), so the label beside it
@@ -40,7 +40,6 @@ type ReportIntent =
 	| 'delete'
 	| 'ban_reporter'
 	| 'ban_reportee'
-const adminCommunityReportsApiPath = '/admin/community-reports.json'
 const statusOptions = [
 	{ value: 'open', label: 'Open' },
 	{ value: 'resolved', label: 'Resolved' },
@@ -63,20 +62,8 @@ export function AdminCommunityReportsPage({
 	const { reports, statusFilter } = payload
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const mutation = useMutation({
-		mutationFn: async (body: Record<string, unknown>) => {
-			const response = await fetch(adminCommunityReportsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				credentials: 'include',
-				body: JSON.stringify(body),
-			})
-			const payload = await readJson<{ ok: boolean; error?: string }>(response)
-			if (!response.ok || !payload?.ok)
-				throw new Error(payload?.error ?? 'Unable to complete action.')
-		},
+		mutationFn: (body: Record<string, unknown>) =>
+			saveAdminCommunityReports({ data: { body } }),
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _body, reconcile) => reconcile?.(),
 		gcTime: 0,

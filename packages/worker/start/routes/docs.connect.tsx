@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { docsConnectMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadDocsConnect } from '#start/server/docs'
@@ -11,6 +12,7 @@ const pageQuery = createPageQuery('loadDocsConnect', loadDocsConnect, {
 })
 
 export const Route = createFileRoute('/docs/connect')({
+	server: { handlers: { GET: docsConnectMarkdown } },
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -1,16 +1,14 @@
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
+import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { matchesSearchQuery } from '#client/search-filter.ts'
+import { updateIntegrations } from '#start/server/account-mutations'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
-import { routes } from '#universal/routes.ts'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
-import { matchesSearchQuery } from '#client/search-filter.ts'
+import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
+import { pageQueryOrg } from '../page-query-scope.ts'
 
-export const accountIntegrationsApiPath = routes.accountIntegrationsApi.href()
 export const integrationsRoute = createListDetailRoute(
 	'/account/integrations',
 	{
@@ -199,10 +197,7 @@ export function formatOptional(value: string | null | undefined) {
 }
 
 export type ConnectionStatusLabel =
-	| 'Needs you'
-	| 'Service issue'
-	| 'Connected'
-	| 'Needs setup'
+	'Needs you' | 'Service issue' | 'Connected' | 'Needs setup'
 
 export function connectActionLabel(status: ConnectionStatusLabel) {
 	if (status === 'Needs setup') return 'Connect'
@@ -237,23 +232,7 @@ export async function postIntegrationsMutation(
 	body: Record<string, unknown>,
 	currentHref: string,
 ) {
-	const response = await fetch(accountIntegrationsApiPath, {
-		method: 'POST',
-		referrer: orgAccountApiReferrer(currentHref),
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-		},
-		credentials: 'include',
-		keepalive: true,
-		body: JSON.stringify(body),
+	await updateIntegrations({
+		data: { body, orgSlug: pageQueryOrg(currentHref) ?? undefined },
 	})
-	if (response.status === 401) {
-		window.location.assign('/login')
-		return
-	}
-	const payload = await readJson<{ ok?: boolean; error?: string }>(response)
-	if (!response.ok || !payload?.ok) {
-		throw new Error(payload?.error || 'Unable to complete that action.')
-	}
 }

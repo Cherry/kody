@@ -1,8 +1,10 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
+import { updateOrgPeople } from '#start/server/org-mutations'
+vi.mock('#start/server/org-mutations', () => ({ updateOrgPeople: vi.fn() }))
 import { orgPeopleMutationOptions } from './pages/org-people-mutation.ts'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => vi.clearAllMocks())
 
 test.each(['accepted', 'lost response'])(
 	'organization people writes reconcile their captured scope after unmount: %s',
@@ -33,17 +35,16 @@ test.each(['accepted', 'lost response'])(
 		]
 		for (const entry of [...affected, ...unaffected])
 			client.setQueryData(entry, { members: ['previous-member'] })
-		let resolve!: (response: Response) => void
+		let resolve!: (
+			response: Awaited<ReturnType<typeof updateOrgPeople>>,
+		) => void
 		let reject!: (error: Error) => void
-		vi.stubGlobal(
-			'fetch',
-			vi.fn(
-				() =>
-					new Promise<Response>((yes, no) => {
-						resolve = yes
-						reject = no
-					}),
-			),
+		vi.mocked(updateOrgPeople).mockImplementationOnce(
+			() =>
+				new Promise((yes, no) => {
+					resolve = yes
+					reject = no
+				}),
 		)
 		const observer = new MutationObserver(
 			client,
@@ -51,13 +52,27 @@ test.each(['accepted', 'lost response'])(
 		)
 		const unsubscribe = observer.subscribe(() => {})
 		const write = observer.mutate({
-			href: '/@team-a/-/members',
+			action: 'memberRemove',
 			body: { action: 'remove', memberId: 'previous-member' },
 		})
-		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+		await vi.waitFor(() => expect(updateOrgPeople).toHaveBeenCalledOnce())
 		unsubscribe()
 		if (outcome === 'accepted') {
-			resolve(Response.json({ ok: true }))
+			resolve({
+				ok: true,
+				org: {
+					id: 'org-a',
+					slug: 'team-a',
+					displayName: 'Team A',
+					avatarUrl: null,
+					personal: false,
+					role: 'owner',
+				},
+				members: [],
+				invites: [],
+				inviteLinks: [],
+				canManage: true,
+			})
 			await write
 		} else {
 			reject(new Error('Response lost after write'))

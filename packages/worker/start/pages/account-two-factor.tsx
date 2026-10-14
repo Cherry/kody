@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { updateTwoFactor } from '#start/server/security-mutations'
 import { type QueryKey } from '@tanstack/react-query'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
@@ -41,7 +42,6 @@ type TwoFactorSetup = {
 	qrCodeDataUrl: string | null
 }
 
-const twoFactorApiPath = '/account/two-factor.json'
 
 export function AccountTwoFactorPage({
 	queryKey,
@@ -65,7 +65,7 @@ export function AccountTwoFactorPage({
 		otpUri?: string
 		secret?: string
 		error?: string
-	}>(queryKey, 'loadAccountSecurity', twoFactorApiPath, {
+	}>(queryKey, 'loadAccountSecurity', (body) => updateTwoFactor({ data: body }), {
 		dependencies: ['loadAccountPage'],
 		refreshShell: true,
 		merge: (page, accepted) =>

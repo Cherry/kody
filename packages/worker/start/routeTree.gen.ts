@@ -14,18 +14,30 @@ import { Route as R404RouteImport } from './routes/404'
 import { Route as R500RouteImport } from './routes/500'
 import { Route as AtChar123usernameChar125RouteImport } from './routes/@{$username}'
 import { Route as AccountRouteImport } from './routes/account'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthDotmdRouteImport } from './routes/auth[.]md'
 import { Route as CaseStudiesRouteImport } from './routes/case-studies'
 import { Route as CommunityRouteImport } from './routes/community'
 import { Route as DiscordRouteImport } from './routes/discord'
+import { Route as DocsDotmdRouteImport } from './routes/docs[.]md'
 import { Route as FaqRouteImport } from './routes/faq'
 import { Route as FeaturesRouteImport } from './routes/features'
+import { Route as GuidesRouteImport } from './routes/guides'
+import { Route as GuidesDotjsonRouteImport } from './routes/guides[.]json'
+import { Route as GuidesDotmdRouteImport } from './routes/guides[.]md'
+import { Route as HealthRouteImport } from './routes/health'
+import { Route as LlmsDottxtRouteImport } from './routes/llms[.]txt'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as PendingVerificationRouteImport } from './routes/pending-verification'
 import { Route as PricingRouteImport } from './routes/pricing'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RobotsDottxtRouteImport } from './routes/robots[.]txt'
+import { Route as SentryTunnelRouteImport } from './routes/sentry-tunnel'
+import { Route as SessionRouteImport } from './routes/session'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as SupportRouteImport } from './routes/support'
 import { Route as TermsRouteImport } from './routes/terms'
 import { Route as UseCasesRouteImport } from './routes/use-cases'
@@ -34,6 +46,9 @@ import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as VerifyEmailChangeRouteImport } from './routes/verify-email-change'
 import { Route as VerifyEmailClaimReleaseRouteImport } from './routes/verify-email-claim-release'
 import { Route as VerifyEmailDestinationRouteImport } from './routes/verify-email-destination'
+import { Route as DotwellKnownApiCatalogRouteImport } from './routes/[.]well-known_.api-catalog'
+import { Route as DotwellKnownOpenaiAppsChallengeRouteImport } from './routes/[.]well-known_.openai-apps-challenge'
+import { Route as DotwellKnownSecurityDottxtRouteImport } from './routes/[.]well-known_.security[.]txt'
 import { Route as AtChar123usernameChar125KodyIdRouteImport } from './routes/@{$username}_.$kodyId'
 import { Route as AccountActivityRouteImport } from './routes/account_.activity'
 import { Route as AccountAgentsRouteImport } from './routes/account_.agents'
@@ -42,11 +57,13 @@ import { Route as AccountConnectionsRouteImport } from './routes/account_.connec
 import { Route as AccountDataRouteImport } from './routes/account_.data'
 import { Route as AccountEmailRouteImport } from './routes/account_.email'
 import { Route as AccountExperimentsRouteImport } from './routes/account_.experiments'
+import { Route as AccountExportDotjsonRouteImport } from './routes/account_.export[.]json'
 import { Route as AccountIntegrationsRouteImport } from './routes/account_.integrations'
 import { Route as AccountJobsRouteImport } from './routes/account_.jobs'
 import { Route as AccountMcpOauthClientsRouteImport } from './routes/account_.mcp-oauth-clients'
 import { Route as AccountMcpServersRouteImport } from './routes/account_.mcp-servers'
 import { Route as AccountMemoriesRouteImport } from './routes/account_.memories'
+import { Route as AccountMemoriesExportDotjsonRouteImport } from './routes/account_.memories-export[.]json'
 import { Route as AccountOrganizationsRouteImport } from './routes/account_.organizations'
 import { Route as AccountPasskeysRouteImport } from './routes/account_.passkeys'
 import { Route as AccountSecretProvidersRouteImport } from './routes/account_.secret-providers'
@@ -58,6 +75,7 @@ import { Route as AccountValuesRouteImport } from './routes/account_.values'
 import { Route as AccountWaitingRouteImport } from './routes/account_.waiting'
 import { Route as AccountWebhooksRouteImport } from './routes/account_.webhooks'
 import { Route as AccountWorkflowsRouteImport } from './routes/account_.workflows'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminCodemodsRouteImport } from './routes/admin.codemods'
 import { Route as AdminCommunityReportsRouteImport } from './routes/admin.community-reports'
 import { Route as AdminFeatureFlagsRouteImport } from './routes/admin.feature-flags'
@@ -71,6 +89,8 @@ import { Route as AdminSystemEmailRouteImport } from './routes/admin.system-emai
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as BlogIndexRouteImport } from './routes/blog.index'
 import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
+import { Route as BlogRssDotxmlRouteImport } from './routes/blog_.rss[.]xml'
+import { Route as BlogChar123slugChar125DotmdRouteImport } from './routes/blog_.{$slug}[.]md'
 import { Route as CommunityListingIdRouteImport } from './routes/community_.$listingId'
 import { Route as CompareComposioAlternativesRouteImport } from './routes/compare_.composio-alternatives'
 import { Route as CompareN8nAlternativesRouteImport } from './routes/compare_.n8n-alternatives'
@@ -81,6 +101,9 @@ import { Route as ConnectWebhookApplyRouteImport } from './routes/connect.webhoo
 import { Route as DocsIndexRouteImport } from './routes/docs.index'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as DocsConnectRouteImport } from './routes/docs.connect'
+import { Route as DocsConnectDotmdRouteImport } from './routes/docs_.connect[.]md'
+import { Route as DocsLlmsDottxtRouteImport } from './routes/docs_.llms[.]txt'
+import { Route as DocsChar123slugChar125DotmdRouteImport } from './routes/docs_.{$slug}[.]md'
 import { Route as FeaturesAppsRouteImport } from './routes/features_.apps'
 import { Route as FeaturesIntegrationsRouteImport } from './routes/features_.integrations'
 import { Route as FeaturesMemoryRouteImport } from './routes/features_.memory'
@@ -88,12 +111,15 @@ import { Route as FeaturesPackagesRouteImport } from './routes/features_.package
 import { Route as FeaturesSecretsRouteImport } from './routes/features_.secrets'
 import { Route as FeaturesTriggersRouteImport } from './routes/features_.triggers'
 import { Route as ForBusinessRouteImport } from './routes/for.business'
+import { Route as GuidesSplatRouteImport } from './routes/guides_.$'
+import { Route as HealthComponentsRouteImport } from './routes/health_.components'
 import { Route as IntegrationsClaudeRouteImport } from './routes/integrations_.claude'
 import { Route as IntegrationsGmailRouteImport } from './routes/integrations_.gmail'
 import { Route as IntegrationsSlackRouteImport } from './routes/integrations_.slack'
 import { Route as JoinTokenRouteImport } from './routes/join.$token'
 import { Route as OauthAuthorizeRouteImport } from './routes/oauth.authorize'
 import { Route as OauthCallbackRouteImport } from './routes/oauth.callback'
+import { Route as OgChar123pageChar125DotpngRouteImport } from './routes/og_.{$page}[.]png'
 import { Route as OnboardingIndexRouteImport } from './routes/onboarding.index'
 import { Route as OnboardingStep1RouteImport } from './routes/onboarding.step-1'
 import { Route as OnboardingStep2RouteImport } from './routes/onboarding.step-2'
@@ -104,10 +130,15 @@ import { Route as UseCasesClaudeCodeCustomToolsRouteImport } from './routes/use-
 import { Route as UseCasesMcpGatewayRouteImport } from './routes/use-cases_.mcp-gateway'
 import { Route as UseCasesScheduledWorkflowsRouteImport } from './routes/use-cases_.scheduled-workflows'
 import { Route as UseCasesSharedAgentMemoryRouteImport } from './routes/use-cases_.shared-agent-memory'
+import { Route as WebhooksStripeRouteImport } from './routes/webhooks_.stripe'
+import { Route as YoutubeThumbVideoIdRouteImport } from './routes/youtube-thumb_.$videoId'
+import { Route as DotwellKnownAgentSkillsIndexDotjsonRouteImport } from './routes/[.]well-known_.agent-skills_.index[.]json'
+import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.]well-known_.mcp_.server-card[.]json'
 import { Route as AtChar123orgSlugChar125ActivityRouteImport } from './routes/@{$orgSlug}_.-.activity'
 import { Route as AtChar123orgSlugChar125AgentsRouteImport } from './routes/@{$orgSlug}_.-.agents'
 import { Route as AtChar123orgSlugChar125BillingRouteImport } from './routes/@{$orgSlug}_.-.billing'
 import { Route as AtChar123orgSlugChar125CollaboratorsRouteImport } from './routes/@{$orgSlug}_.-.collaborators'
+import { Route as AtChar123orgSlugChar125ConnectionsRouteImport } from './routes/@{$orgSlug}_.-.connections'
 import { Route as AtChar123orgSlugChar125CredentialsRouteImport } from './routes/@{$orgSlug}_.-.credentials'
 import { Route as AtChar123orgSlugChar125EmailRouteImport } from './routes/@{$orgSlug}_.-.email'
 import { Route as AtChar123orgSlugChar125GrantsRouteImport } from './routes/@{$orgSlug}_.-.grants'
@@ -160,13 +191,22 @@ import { Route as AccountWorkflowsWorkflowIdRouteImport } from './routes/account
 import { Route as AdminPlatformIntegrationsSlugRouteImport } from './routes/admin.platform-integrations_.$slug'
 import { Route as AdminPlatformIntegrationsNewRouteImport } from './routes/admin.platform-integrations_.new'
 import { Route as AdminUsersStableUserIdRouteImport } from './routes/admin.users_.$stableUserId'
+import { Route as AuthProviderCallbackRouteImport } from './routes/auth_.$provider_.callback'
+import { Route as BlogSlugOgDotpngRouteImport } from './routes/blog_.$slug_.og[.]png'
+import { Route as CommunityListingIdOgDotpngRouteImport } from './routes/community_.$listingId_.og[.]png'
+import { Route as DocsSlugOgDotpngRouteImport } from './routes/docs_.$slug_.og[.]png'
+import { Route as IntegrationsLogosIntegrationSlugRouteImport } from './routes/integrations_.logos_.$integrationSlug'
+import { Route as IntegrationsProviderMarksSlugRouteImport } from './routes/integrations_.provider-marks_.$slug'
 import { Route as OnboardingStep1AgentRouteImport } from './routes/onboarding.step-1_.$agent'
 import { Route as OnboardingStep2ServiceRouteImport } from './routes/onboarding.step-2_.$service'
 import { Route as OnboardingStep3AgentRouteImport } from './routes/onboarding.step-3_.$agent'
+import { Route as ProfilesUsernameOgDotpngRouteImport } from './routes/profiles_.$username_.og[.]png'
+import { Route as DotwellKnownAgentSkillsSkillIdSKILLDotmdRouteImport } from './routes/[.]well-known_.agent-skills_.$skillId_.SKILL[.]md'
 import { Route as AtChar123orgSlugChar125ActivityRunIdRouteImport } from './routes/@{$orgSlug}_.-.activity_.$runId'
 import { Route as AtChar123orgSlugChar125AgentsNewRouteImport } from './routes/@{$orgSlug}_.-.agents_.new'
 import { Route as AtChar123orgSlugChar125AgentsUsageRouteImport } from './routes/@{$orgSlug}_.-.agents_.usage'
 import { Route as AtChar123orgSlugChar125BillingSuccessRouteImport } from './routes/@{$orgSlug}_.-.billing_.success'
+import { Route as AtChar123orgSlugChar125ConnectionsSplatRouteImport } from './routes/@{$orgSlug}_.-.connections_.$'
 import { Route as AtChar123orgSlugChar125CredentialsCredentialIdRouteImport } from './routes/@{$orgSlug}_.-.credentials_.$credentialId'
 import { Route as AtChar123orgSlugChar125CredentialsNewRouteImport } from './routes/@{$orgSlug}_.-.credentials_.new'
 import { Route as AtChar123orgSlugChar125EmailMessageIdRouteImport } from './routes/@{$orgSlug}_.-.email_.$messageId'
@@ -182,20 +222,32 @@ import { Route as AtChar123orgSlugChar125SecretsNewRouteImport } from './routes/
 import { Route as AtChar123orgSlugChar125ValuesValueIdRouteImport } from './routes/@{$orgSlug}_.-.values_.$valueId'
 import { Route as AtChar123orgSlugChar125ValuesNewRouteImport } from './routes/@{$orgSlug}_.-.values_.new'
 import { Route as AtChar123orgSlugChar125WorkflowsWorkflowIdRouteImport } from './routes/@{$orgSlug}_.-.workflows_.$workflowId'
+import { Route as AtChar123usernameChar125KodyIdAssetsSplatRouteImport } from './routes/@{$username}_.$kodyId_.assets_.$'
 import { Route as AtChar123usernameChar125KodyIdFilesSplatRouteImport } from './routes/@{$username}_.$kodyId_.files.$'
+import { Route as AtChar123usernameChar125KodyIdIconIconCommitRouteImport } from './routes/@{$username}_.$kodyId_.icon_.$iconCommit'
 import { Route as AccountAgentsNewAgentRouteImport } from './routes/account_.agents_.new_.$agent'
 import { Route as AccountConnectionsNewAgentRouteImport } from './routes/account_.connections_.new_.$agent'
 import { Route as AccountIntegrationsAppsAppSlugRouteImport } from './routes/account_.integrations_.apps.$appSlug'
+import { Route as AccountMcpServersLogosServerIdRouteImport } from './routes/account_.mcp-servers_.logos_.$serverId'
+import { Route as AccountMcpServersOauthCallbackRouteImport } from './routes/account_.mcp-servers_.oauth_.callback'
 import { Route as AccountPackagesPackageIdApproveCapabilitiesRouteImport } from './routes/account_.packages.$packageId_.approve-capabilities'
 import { Route as AccountPackagesPackageIdApprovePublishRouteImport } from './routes/account_.packages.$packageId_.approve-publish'
 import { Route as AccountSecretsUserSecretNameRouteImport } from './routes/account_.secrets_.user.$secretName'
 import { Route as CommunityListingIdFilesSplatRouteImport } from './routes/community_.$listingId.files.$'
+import { Route as CommunityListingIdAssetsSplatRouteImport } from './routes/community_.$listingId_.assets_.$'
+import { Route as CommunityListingIdIconIconCommitRouteImport } from './routes/community_.$listingId_.icon_.$iconCommit'
+import { Route as CommunityListingIdRawSplatRouteImport } from './routes/community_.$listingId_.raw_.$'
+import { Route as OrgsOrgSlugAvatarFileRouteImport } from './routes/orgs_.$orgSlug_.avatar_.$file'
+import { Route as ProfilesUsernameAvatarFileRouteImport } from './routes/profiles_.$username_.avatar_.$file'
 import { Route as AtChar123orgSlugChar125AgentsNewAgentRouteImport } from './routes/@{$orgSlug}_.-.agents_.new_.$agent'
 import { Route as AtChar123orgSlugChar125IntegrationsAppsAppSlugRouteImport } from './routes/@{$orgSlug}_.-.integrations_.apps.$appSlug'
 import { Route as AtChar123orgSlugChar125McpServersServerIdAuthorizeRouteImport } from './routes/@{$orgSlug}_.-.mcp-servers_.$serverId_.authorize'
 import { Route as AtChar123orgSlugChar125SecretsUserSecretNameRouteImport } from './routes/@{$orgSlug}_.-.secrets_.user.$secretName'
+import { Route as AtChar123usernameChar125KodyIdRawRefSplatRouteImport } from './routes/@{$username}_.$kodyId_.raw_.$ref_.$'
 import { Route as AtChar123usernameChar125KodyIdTreeRefSplatRouteImport } from './routes/@{$username}_.$kodyId_.tree.$ref.$'
+import { Route as AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRouteImport } from './routes/@{$username}_.webhooks_.$packageKodyId_.$webhookName_.$urlSecret'
 import { Route as AccountPackagesPackageIdFilesSplatRouteImport } from './routes/account_.packages.$packageId.files.$'
+import { Route as AccountReposRepoIdIconIconCommitRouteImport } from './routes/account_.repos_.$repoId_.icon_.$iconCommit'
 import { Route as AccountSecretsPackagePackageIdSecretNameRouteImport } from './routes/account_.secrets_.package.$packageId.$secretName'
 import { Route as AccountSecretsSessionSessionIdSecretNameRouteImport } from './routes/account_.secrets_.session.$sessionId.$secretName'
 import { Route as AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRouteImport } from './routes/@{$orgSlug}_.-.secrets_.package.$packageId.$secretName'
@@ -227,6 +279,16 @@ const AccountRoute = AccountRouteImport.update({
   path: '/account',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthDotmdRoute = AuthDotmdRouteImport.update({
+  id: '/auth.md',
+  path: '/auth.md',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CaseStudiesRoute = CaseStudiesRouteImport.update({
   id: '/case-studies',
   path: '/case-studies',
@@ -242,6 +304,11 @@ const DiscordRoute = DiscordRouteImport.update({
   path: '/discord',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsDotmdRoute = DocsDotmdRouteImport.update({
+  id: '/docs.md',
+  path: '/docs.md',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FaqRoute = FaqRouteImport.update({
   id: '/faq',
   path: '/faq',
@@ -250,6 +317,31 @@ const FaqRoute = FaqRouteImport.update({
 const FeaturesRoute = FeaturesRouteImport.update({
   id: '/features',
   path: '/features',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuidesRoute = GuidesRouteImport.update({
+  id: '/guides',
+  path: '/guides',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuidesDotjsonRoute = GuidesDotjsonRouteImport.update({
+  id: '/guides.json',
+  path: '/guides.json',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuidesDotmdRoute = GuidesDotmdRouteImport.update({
+  id: '/guides.md',
+  path: '/guides.md',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthRoute = HealthRouteImport.update({
+  id: '/health',
+  path: '/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LlmsDottxtRoute = LlmsDottxtRouteImport.update({
+  id: '/llms.txt',
+  path: '/llms.txt',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -282,9 +374,29 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RobotsDottxtRoute = RobotsDottxtRouteImport.update({
+  id: '/robots.txt',
+  path: '/robots.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SentryTunnelRoute = SentryTunnelRouteImport.update({
+  id: '/sentry-tunnel',
+  path: '/sentry-tunnel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SessionRoute = SessionRouteImport.update({
+  id: '/session',
+  path: '/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
+  id: '/sitemap.xml',
+  path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SupportRoute = SupportRouteImport.update({
@@ -327,6 +439,23 @@ const VerifyEmailDestinationRoute = VerifyEmailDestinationRouteImport.update({
   path: '/verify-email-destination',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DotwellKnownApiCatalogRoute = DotwellKnownApiCatalogRouteImport.update({
+  id: '/.well-known_/api-catalog',
+  path: '/.well-known/api-catalog',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownOpenaiAppsChallengeRoute =
+  DotwellKnownOpenaiAppsChallengeRouteImport.update({
+    id: '/.well-known_/openai-apps-challenge',
+    path: '/.well-known/openai-apps-challenge',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownSecurityDottxtRoute =
+  DotwellKnownSecurityDottxtRouteImport.update({
+    id: '/.well-known_/security.txt',
+    path: '/.well-known/security.txt',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdRoute =
   AtChar123usernameChar125KodyIdRouteImport.update({
     id: '/@{$username}_/$kodyId',
@@ -368,6 +497,11 @@ const AccountExperimentsRoute = AccountExperimentsRouteImport.update({
   path: '/account/experiments',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountExportDotjsonRoute = AccountExportDotjsonRouteImport.update({
+  id: '/account_/export.json',
+  path: '/account/export.json',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountIntegrationsRoute = AccountIntegrationsRouteImport.update({
   id: '/account_/integrations',
   path: '/account/integrations',
@@ -393,6 +527,12 @@ const AccountMemoriesRoute = AccountMemoriesRouteImport.update({
   path: '/account/memories',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountMemoriesExportDotjsonRoute =
+  AccountMemoriesExportDotjsonRouteImport.update({
+    id: '/account_/memories-export.json',
+    path: '/account/memories-export.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AccountOrganizationsRoute = AccountOrganizationsRouteImport.update({
   id: '/account_/organizations',
   path: '/account/organizations',
@@ -446,6 +586,11 @@ const AccountWebhooksRoute = AccountWebhooksRouteImport.update({
 const AccountWorkflowsRoute = AccountWorkflowsRouteImport.update({
   id: '/account_/workflows',
   path: '/account/workflows',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCodemodsRoute = AdminCodemodsRouteImport.update({
@@ -514,6 +659,17 @@ const BlogSlugRoute = BlogSlugRouteImport.update({
   path: '/blog/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BlogRssDotxmlRoute = BlogRssDotxmlRouteImport.update({
+  id: '/blog_/rss.xml',
+  path: '/blog/rss.xml',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlogChar123slugChar125DotmdRoute =
+  BlogChar123slugChar125DotmdRouteImport.update({
+    id: '/blog_/{$slug}.md',
+    path: '/blog/{$slug}.md',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const CommunityListingIdRoute = CommunityListingIdRouteImport.update({
   id: '/community_/$listingId',
   path: '/community/$listingId',
@@ -565,6 +721,22 @@ const DocsConnectRoute = DocsConnectRouteImport.update({
   path: '/docs/connect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsConnectDotmdRoute = DocsConnectDotmdRouteImport.update({
+  id: '/docs_/connect.md',
+  path: '/docs/connect.md',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsLlmsDottxtRoute = DocsLlmsDottxtRouteImport.update({
+  id: '/docs_/llms.txt',
+  path: '/docs/llms.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsChar123slugChar125DotmdRoute =
+  DocsChar123slugChar125DotmdRouteImport.update({
+    id: '/docs_/{$slug}.md',
+    path: '/docs/{$slug}.md',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const FeaturesAppsRoute = FeaturesAppsRouteImport.update({
   id: '/features_/apps',
   path: '/features/apps',
@@ -600,6 +772,16 @@ const ForBusinessRoute = ForBusinessRouteImport.update({
   path: '/for/business',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuidesSplatRoute = GuidesSplatRouteImport.update({
+  id: '/guides_/$',
+  path: '/guides/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HealthComponentsRoute = HealthComponentsRouteImport.update({
+  id: '/health_/components',
+  path: '/health/components',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsClaudeRoute = IntegrationsClaudeRouteImport.update({
   id: '/integrations_/claude',
   path: '/integrations/claude',
@@ -630,6 +812,12 @@ const OauthCallbackRoute = OauthCallbackRouteImport.update({
   path: '/oauth/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OgChar123pageChar125DotpngRoute =
+  OgChar123pageChar125DotpngRouteImport.update({
+    id: '/og_/{$page}.png',
+    path: '/og/{$page}.png',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const OnboardingIndexRoute = OnboardingIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -684,6 +872,28 @@ const UseCasesSharedAgentMemoryRoute =
     path: '/use-cases/shared-agent-memory',
     getParentRoute: () => rootRouteImport,
   } as any)
+const WebhooksStripeRoute = WebhooksStripeRouteImport.update({
+  id: '/webhooks_/stripe',
+  path: '/webhooks/stripe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const YoutubeThumbVideoIdRoute = YoutubeThumbVideoIdRouteImport.update({
+  id: '/youtube-thumb_/$videoId',
+  path: '/youtube-thumb/$videoId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DotwellKnownAgentSkillsIndexDotjsonRoute =
+  DotwellKnownAgentSkillsIndexDotjsonRouteImport.update({
+    id: '/.well-known_/agent-skills_/index.json',
+    path: '/.well-known/agent-skills/index.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownMcpServerCardDotjsonRoute =
+  DotwellKnownMcpServerCardDotjsonRouteImport.update({
+    id: '/.well-known_/mcp_/server-card.json',
+    path: '/.well-known/mcp/server-card.json',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125ActivityRoute =
   AtChar123orgSlugChar125ActivityRouteImport.update({
     id: '/@{$orgSlug}_/-/activity',
@@ -706,6 +916,12 @@ const AtChar123orgSlugChar125CollaboratorsRoute =
   AtChar123orgSlugChar125CollaboratorsRouteImport.update({
     id: '/@{$orgSlug}_/-/collaborators',
     path: '/@{$orgSlug}/-/collaborators',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123orgSlugChar125ConnectionsRoute =
+  AtChar123orgSlugChar125ConnectionsRouteImport.update({
+    id: '/@{$orgSlug}_/-/connections',
+    path: '/@{$orgSlug}/-/connections',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125CredentialsRoute =
@@ -1003,6 +1219,39 @@ const AdminUsersStableUserIdRoute = AdminUsersStableUserIdRouteImport.update({
   path: '/admin/users/$stableUserId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthProviderCallbackRoute = AuthProviderCallbackRouteImport.update({
+  id: '/auth_/$provider_/callback',
+  path: '/auth/$provider/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlogSlugOgDotpngRoute = BlogSlugOgDotpngRouteImport.update({
+  id: '/blog_/$slug_/og.png',
+  path: '/blog/$slug/og.png',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommunityListingIdOgDotpngRoute =
+  CommunityListingIdOgDotpngRouteImport.update({
+    id: '/community_/$listingId_/og.png',
+    path: '/community/$listingId/og.png',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DocsSlugOgDotpngRoute = DocsSlugOgDotpngRouteImport.update({
+  id: '/docs_/$slug_/og.png',
+  path: '/docs/$slug/og.png',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsLogosIntegrationSlugRoute =
+  IntegrationsLogosIntegrationSlugRouteImport.update({
+    id: '/integrations_/logos_/$integrationSlug',
+    path: '/integrations/logos/$integrationSlug',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const IntegrationsProviderMarksSlugRoute =
+  IntegrationsProviderMarksSlugRouteImport.update({
+    id: '/integrations_/provider-marks_/$slug',
+    path: '/integrations/provider-marks/$slug',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const OnboardingStep1AgentRoute = OnboardingStep1AgentRouteImport.update({
   id: '/step-1_/$agent',
   path: '/step-1/$agent',
@@ -1018,6 +1267,18 @@ const OnboardingStep3AgentRoute = OnboardingStep3AgentRouteImport.update({
   path: '/step-3/$agent',
   getParentRoute: () => OnboardingRoute,
 } as any)
+const ProfilesUsernameOgDotpngRoute =
+  ProfilesUsernameOgDotpngRouteImport.update({
+    id: '/profiles_/$username_/og.png',
+    path: '/profiles/$username/og.png',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute =
+  DotwellKnownAgentSkillsSkillIdSKILLDotmdRouteImport.update({
+    id: '/.well-known_/agent-skills_/$skillId_/SKILL.md',
+    path: '/.well-known/agent-skills/$skillId/SKILL.md',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125ActivityRunIdRoute =
   AtChar123orgSlugChar125ActivityRunIdRouteImport.update({
     id: '/@{$orgSlug}_/-/activity_/$runId',
@@ -1040,6 +1301,12 @@ const AtChar123orgSlugChar125BillingSuccessRoute =
   AtChar123orgSlugChar125BillingSuccessRouteImport.update({
     id: '/@{$orgSlug}_/-/billing_/success',
     path: '/@{$orgSlug}/-/billing/success',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123orgSlugChar125ConnectionsSplatRoute =
+  AtChar123orgSlugChar125ConnectionsSplatRouteImport.update({
+    id: '/@{$orgSlug}_/-/connections_/$',
+    path: '/@{$orgSlug}/-/connections/$',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125CredentialsCredentialIdRoute =
@@ -1132,10 +1399,22 @@ const AtChar123orgSlugChar125WorkflowsWorkflowIdRoute =
     path: '/@{$orgSlug}/-/workflows/$workflowId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125KodyIdAssetsSplatRoute =
+  AtChar123usernameChar125KodyIdAssetsSplatRouteImport.update({
+    id: '/@{$username}_/$kodyId_/assets_/$',
+    path: '/@{$username}/$kodyId/assets/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdFilesSplatRoute =
   AtChar123usernameChar125KodyIdFilesSplatRouteImport.update({
     id: '/@{$username}_/$kodyId_/files/$',
     path: '/@{$username}/$kodyId/files/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123usernameChar125KodyIdIconIconCommitRoute =
+  AtChar123usernameChar125KodyIdIconIconCommitRouteImport.update({
+    id: '/@{$username}_/$kodyId_/icon_/$iconCommit',
+    path: '/@{$username}/$kodyId/icon/$iconCommit',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AccountAgentsNewAgentRoute = AccountAgentsNewAgentRouteImport.update({
@@ -1153,6 +1432,18 @@ const AccountIntegrationsAppsAppSlugRoute =
   AccountIntegrationsAppsAppSlugRouteImport.update({
     id: '/account_/integrations_/apps/$appSlug',
     path: '/account/integrations/apps/$appSlug',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AccountMcpServersLogosServerIdRoute =
+  AccountMcpServersLogosServerIdRouteImport.update({
+    id: '/account_/mcp-servers_/logos_/$serverId',
+    path: '/account/mcp-servers/logos/$serverId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AccountMcpServersOauthCallbackRoute =
+  AccountMcpServersOauthCallbackRouteImport.update({
+    id: '/account_/mcp-servers_/oauth_/callback',
+    path: '/account/mcp-servers/oauth/callback',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AccountPackagesPackageIdApproveCapabilitiesRoute =
@@ -1179,6 +1470,35 @@ const CommunityListingIdFilesSplatRoute =
     path: '/files/$',
     getParentRoute: () => CommunityListingIdRoute,
   } as any)
+const CommunityListingIdAssetsSplatRoute =
+  CommunityListingIdAssetsSplatRouteImport.update({
+    id: '/community_/$listingId_/assets_/$',
+    path: '/community/$listingId/assets/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const CommunityListingIdIconIconCommitRoute =
+  CommunityListingIdIconIconCommitRouteImport.update({
+    id: '/community_/$listingId_/icon_/$iconCommit',
+    path: '/community/$listingId/icon/$iconCommit',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const CommunityListingIdRawSplatRoute =
+  CommunityListingIdRawSplatRouteImport.update({
+    id: '/community_/$listingId_/raw_/$',
+    path: '/community/$listingId/raw/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const OrgsOrgSlugAvatarFileRoute = OrgsOrgSlugAvatarFileRouteImport.update({
+  id: '/orgs_/$orgSlug_/avatar_/$file',
+  path: '/orgs/$orgSlug/avatar/$file',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfilesUsernameAvatarFileRoute =
+  ProfilesUsernameAvatarFileRouteImport.update({
+    id: '/profiles_/$username_/avatar_/$file',
+    path: '/profiles/$username/avatar/$file',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125AgentsNewAgentRoute =
   AtChar123orgSlugChar125AgentsNewAgentRouteImport.update({
     id: '/@{$orgSlug}_/-/agents_/new_/$agent',
@@ -1203,17 +1523,37 @@ const AtChar123orgSlugChar125SecretsUserSecretNameRoute =
     path: '/@{$orgSlug}/-/secrets/user/$secretName',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125KodyIdRawRefSplatRoute =
+  AtChar123usernameChar125KodyIdRawRefSplatRouteImport.update({
+    id: '/@{$username}_/$kodyId_/raw_/$ref_/$',
+    path: '/@{$username}/$kodyId/raw/$ref/$',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdTreeRefSplatRoute =
   AtChar123usernameChar125KodyIdTreeRefSplatRouteImport.update({
     id: '/@{$username}_/$kodyId_/tree/$ref/$',
     path: '/@{$username}/$kodyId/tree/$ref/$',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute =
+  AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRouteImport.update(
+    {
+      id: '/@{$username}_/webhooks_/$packageKodyId_/$webhookName_/$urlSecret',
+      path: '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret',
+      getParentRoute: () => rootRouteImport,
+    } as any,
+  )
 const AccountPackagesPackageIdFilesSplatRoute =
   AccountPackagesPackageIdFilesSplatRouteImport.update({
     id: '/files/$',
     path: '/files/$',
     getParentRoute: () => AccountPackagesPackageIdRoute,
+  } as any)
+const AccountReposRepoIdIconIconCommitRoute =
+  AccountReposRepoIdIconIconCommitRouteImport.update({
+    id: '/account_/repos_/$repoId_/icon_/$iconCommit',
+    path: '/account/repos/$repoId/icon/$iconCommit',
+    getParentRoute: () => rootRouteImport,
   } as any)
 const AccountSecretsPackagePackageIdSecretNameRoute =
   AccountSecretsPackagePackageIdSecretNameRouteImport.update({
@@ -1246,18 +1586,30 @@ export interface FileRoutesByFullPath {
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
   '/account': typeof AccountRoute
+  '/auth': typeof AuthRoute
+  '/auth.md': typeof AuthDotmdRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
+  '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
   '/features': typeof FeaturesRoute
+  '/guides': typeof GuidesRoute
+  '/guides.json': typeof GuidesDotjsonRoute
+  '/guides.md': typeof GuidesDotmdRoute
+  '/health': typeof HealthRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRouteWithChildren
   '/pending-verification': typeof PendingVerificationRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sentry-tunnel': typeof SentryTunnelRoute
+  '/session': typeof SessionRoute
   '/signup': typeof SignupRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/support': typeof SupportRoute
   '/terms': typeof TermsRoute
   '/use-cases': typeof UseCasesRoute
@@ -1266,6 +1618,9 @@ export interface FileRoutesByFullPath {
   '/verify-email-change': typeof VerifyEmailChangeRoute
   '/verify-email-claim-release': typeof VerifyEmailClaimReleaseRoute
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
+  '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRoute
+  '/.well-known/openai-apps-challenge': typeof DotwellKnownOpenaiAppsChallengeRoute
+  '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute
   '/@{$username}/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account/activity': typeof AccountActivityRoute
   '/account/agents': typeof AccountAgentsRoute
@@ -1274,11 +1629,13 @@ export interface FileRoutesByFullPath {
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
+  '/account/export.json': typeof AccountExportDotjsonRoute
   '/account/integrations': typeof AccountIntegrationsRoute
   '/account/jobs': typeof AccountJobsRoute
   '/account/mcp-oauth-clients': typeof AccountMcpOauthClientsRoute
   '/account/mcp-servers': typeof AccountMcpServersRoute
   '/account/memories': typeof AccountMemoriesRoute
+  '/account/memories-export.json': typeof AccountMemoriesExportDotjsonRoute
   '/account/organizations': typeof AccountOrganizationsRoute
   '/account/passkeys': typeof AccountPasskeysRoute
   '/account/secret-providers': typeof AccountSecretProvidersRoute
@@ -1302,6 +1659,8 @@ export interface FileRoutesByFullPath {
   '/admin/system-email': typeof AdminSystemEmailRoute
   '/admin/users': typeof AdminUsersRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/blog/rss.xml': typeof BlogRssDotxmlRoute
+  '/blog/{$slug}.md': typeof BlogChar123slugChar125DotmdRoute
   '/community/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare/n8n-alternatives': typeof CompareN8nAlternativesRoute
@@ -1311,6 +1670,9 @@ export interface FileRoutesByFullPath {
   '/connect/webhook-apply': typeof ConnectWebhookApplyRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/docs/connect': typeof DocsConnectRoute
+  '/docs/connect.md': typeof DocsConnectDotmdRoute
+  '/docs/llms.txt': typeof DocsLlmsDottxtRoute
+  '/docs/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features/apps': typeof FeaturesAppsRoute
   '/features/integrations': typeof FeaturesIntegrationsRoute
   '/features/memory': typeof FeaturesMemoryRoute
@@ -1318,12 +1680,15 @@ export interface FileRoutesByFullPath {
   '/features/secrets': typeof FeaturesSecretsRoute
   '/features/triggers': typeof FeaturesTriggersRoute
   '/for/business': typeof ForBusinessRoute
+  '/guides/$': typeof GuidesSplatRoute
+  '/health/components': typeof HealthComponentsRoute
   '/integrations/claude': typeof IntegrationsClaudeRoute
   '/integrations/gmail': typeof IntegrationsGmailRoute
   '/integrations/slack': typeof IntegrationsSlackRoute
   '/join/$token': typeof JoinTokenRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/callback': typeof OauthCallbackRoute
+  '/og/{$page}.png': typeof OgChar123pageChar125DotpngRoute
   '/onboarding/step-1': typeof OnboardingStep1Route
   '/onboarding/step-2': typeof OnboardingStep2Route
   '/onboarding/step-3': typeof OnboardingStep3Route
@@ -1333,13 +1698,19 @@ export interface FileRoutesByFullPath {
   '/use-cases/mcp-gateway': typeof UseCasesMcpGatewayRoute
   '/use-cases/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
+  '/webhooks/stripe': typeof WebhooksStripeRoute
+  '/youtube-thumb/$videoId': typeof YoutubeThumbVideoIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/.well-known/agent-skills/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known/mcp/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/@{$orgSlug}/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
   '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
@@ -1391,14 +1762,23 @@ export interface FileRoutesByFullPath {
   '/admin/platform-integrations/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations/new': typeof AdminPlatformIntegrationsNewRoute
   '/admin/users/$stableUserId': typeof AdminUsersStableUserIdRoute
+  '/auth/$provider/callback': typeof AuthProviderCallbackRoute
+  '/blog/$slug/og.png': typeof BlogSlugOgDotpngRoute
+  '/community/$listingId/og.png': typeof CommunityListingIdOgDotpngRoute
+  '/docs/$slug/og.png': typeof DocsSlugOgDotpngRoute
+  '/integrations/logos/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
+  '/integrations/provider-marks/$slug': typeof IntegrationsProviderMarksSlugRoute
   '/onboarding/step-1/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
+  '/profiles/$username/og.png': typeof ProfilesUsernameOgDotpngRoute
   '/account/packages/': typeof AccountPackagesIndexRoute
+  '/.well-known/agent-skills/$skillId/SKILL.md': typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}/-/connections/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
   '/@{$orgSlug}/-/credentials/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
@@ -1414,20 +1794,32 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/values/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
   '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
+  '/@{$username}/$kodyId/assets/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/@{$username}/$kodyId/icon/$iconCommit': typeof AtChar123usernameChar125KodyIdIconIconCommitRoute
   '/account/agents/new/$agent': typeof AccountAgentsNewAgentRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account/mcp-servers/logos/$serverId': typeof AccountMcpServersLogosServerIdRoute
+  '/account/mcp-servers/oauth/callback': typeof AccountMcpServersOauthCallbackRoute
   '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
+  '/community/$listingId/assets/$': typeof CommunityListingIdAssetsSplatRoute
+  '/community/$listingId/icon/$iconCommit': typeof CommunityListingIdIconIconCommitRoute
+  '/community/$listingId/raw/$': typeof CommunityListingIdRawSplatRoute
+  '/orgs/$orgSlug/avatar/$file': typeof OrgsOrgSlugAvatarFileRoute
+  '/profiles/$username/avatar/$file': typeof ProfilesUsernameAvatarFileRoute
   '/@{$orgSlug}/-/agents/new/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}/-/integrations/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}/-/mcp-servers/$serverId/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}/-/secrets/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
+  '/@{$username}/$kodyId/raw/$ref/$': typeof AtChar123usernameChar125KodyIdRawRefSplatRoute
   '/@{$username}/$kodyId/tree/$ref/$': typeof AtChar123usernameChar125KodyIdTreeRefSplatRoute
+  '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret': typeof AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute
   '/account/packages/$packageId/files/$': typeof AccountPackagesPackageIdFilesSplatRoute
+  '/account/repos/$repoId/icon/$iconCommit': typeof AccountReposRepoIdIconIconCommitRoute
   '/account/secrets/package/$packageId/$secretName': typeof AccountSecretsPackagePackageIdSecretNameRoute
   '/account/secrets/session/$sessionId/$secretName': typeof AccountSecretsSessionSessionIdSecretNameRoute
   '/@{$orgSlug}/-/secrets/package/$packageId/$secretName': typeof AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRoute
@@ -1439,17 +1831,29 @@ export interface FileRoutesByTo {
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
   '/account': typeof AccountRoute
+  '/auth': typeof AuthRoute
+  '/auth.md': typeof AuthDotmdRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
+  '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
   '/features': typeof FeaturesRoute
+  '/guides': typeof GuidesRoute
+  '/guides.json': typeof GuidesDotjsonRoute
+  '/guides.md': typeof GuidesDotmdRoute
+  '/health': typeof HealthRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/login': typeof LoginRoute
   '/pending-verification': typeof PendingVerificationRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sentry-tunnel': typeof SentryTunnelRoute
+  '/session': typeof SessionRoute
   '/signup': typeof SignupRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/support': typeof SupportRoute
   '/terms': typeof TermsRoute
   '/use-cases': typeof UseCasesRoute
@@ -1458,6 +1862,9 @@ export interface FileRoutesByTo {
   '/verify-email-change': typeof VerifyEmailChangeRoute
   '/verify-email-claim-release': typeof VerifyEmailClaimReleaseRoute
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
+  '/.well-known/api-catalog': typeof DotwellKnownApiCatalogRoute
+  '/.well-known/openai-apps-challenge': typeof DotwellKnownOpenaiAppsChallengeRoute
+  '/.well-known/security.txt': typeof DotwellKnownSecurityDottxtRoute
   '/@{$username}/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account/activity': typeof AccountActivityRoute
   '/account/agents': typeof AccountAgentsRoute
@@ -1466,11 +1873,13 @@ export interface FileRoutesByTo {
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
+  '/account/export.json': typeof AccountExportDotjsonRoute
   '/account/integrations': typeof AccountIntegrationsRoute
   '/account/jobs': typeof AccountJobsRoute
   '/account/mcp-oauth-clients': typeof AccountMcpOauthClientsRoute
   '/account/mcp-servers': typeof AccountMcpServersRoute
   '/account/memories': typeof AccountMemoriesRoute
+  '/account/memories-export.json': typeof AccountMemoriesExportDotjsonRoute
   '/account/organizations': typeof AccountOrganizationsRoute
   '/account/passkeys': typeof AccountPasskeysRoute
   '/account/secret-providers': typeof AccountSecretProvidersRoute
@@ -1494,6 +1903,8 @@ export interface FileRoutesByTo {
   '/admin/system-email': typeof AdminSystemEmailRoute
   '/admin/users': typeof AdminUsersRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/blog/rss.xml': typeof BlogRssDotxmlRoute
+  '/blog/{$slug}.md': typeof BlogChar123slugChar125DotmdRoute
   '/community/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare/n8n-alternatives': typeof CompareN8nAlternativesRoute
@@ -1503,6 +1914,9 @@ export interface FileRoutesByTo {
   '/connect/webhook-apply': typeof ConnectWebhookApplyRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/docs/connect': typeof DocsConnectRoute
+  '/docs/connect.md': typeof DocsConnectDotmdRoute
+  '/docs/llms.txt': typeof DocsLlmsDottxtRoute
+  '/docs/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features/apps': typeof FeaturesAppsRoute
   '/features/integrations': typeof FeaturesIntegrationsRoute
   '/features/memory': typeof FeaturesMemoryRoute
@@ -1510,12 +1924,15 @@ export interface FileRoutesByTo {
   '/features/secrets': typeof FeaturesSecretsRoute
   '/features/triggers': typeof FeaturesTriggersRoute
   '/for/business': typeof ForBusinessRoute
+  '/guides/$': typeof GuidesSplatRoute
+  '/health/components': typeof HealthComponentsRoute
   '/integrations/claude': typeof IntegrationsClaudeRoute
   '/integrations/gmail': typeof IntegrationsGmailRoute
   '/integrations/slack': typeof IntegrationsSlackRoute
   '/join/$token': typeof JoinTokenRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/callback': typeof OauthCallbackRoute
+  '/og/{$page}.png': typeof OgChar123pageChar125DotpngRoute
   '/onboarding/step-1': typeof OnboardingStep1Route
   '/onboarding/step-2': typeof OnboardingStep2Route
   '/onboarding/step-3': typeof OnboardingStep3Route
@@ -1525,13 +1942,19 @@ export interface FileRoutesByTo {
   '/use-cases/mcp-gateway': typeof UseCasesMcpGatewayRoute
   '/use-cases/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
+  '/webhooks/stripe': typeof WebhooksStripeRoute
+  '/youtube-thumb/$videoId': typeof YoutubeThumbVideoIdRoute
+  '/admin': typeof AdminIndexRoute
   '/blog': typeof BlogIndexRoute
   '/docs': typeof DocsIndexRoute
   '/onboarding': typeof OnboardingIndexRoute
+  '/.well-known/agent-skills/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known/mcp/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/@{$orgSlug}/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
   '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
@@ -1583,14 +2006,23 @@ export interface FileRoutesByTo {
   '/admin/platform-integrations/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations/new': typeof AdminPlatformIntegrationsNewRoute
   '/admin/users/$stableUserId': typeof AdminUsersStableUserIdRoute
+  '/auth/$provider/callback': typeof AuthProviderCallbackRoute
+  '/blog/$slug/og.png': typeof BlogSlugOgDotpngRoute
+  '/community/$listingId/og.png': typeof CommunityListingIdOgDotpngRoute
+  '/docs/$slug/og.png': typeof DocsSlugOgDotpngRoute
+  '/integrations/logos/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
+  '/integrations/provider-marks/$slug': typeof IntegrationsProviderMarksSlugRoute
   '/onboarding/step-1/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
+  '/profiles/$username/og.png': typeof ProfilesUsernameOgDotpngRoute
   '/account/packages': typeof AccountPackagesIndexRoute
+  '/.well-known/agent-skills/$skillId/SKILL.md': typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute
   '/@{$orgSlug}/-/activity/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}/-/connections/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
   '/@{$orgSlug}/-/credentials/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
@@ -1606,20 +2038,32 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/values/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
   '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
+  '/@{$username}/$kodyId/assets/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/@{$username}/$kodyId/icon/$iconCommit': typeof AtChar123usernameChar125KodyIdIconIconCommitRoute
   '/account/agents/new/$agent': typeof AccountAgentsNewAgentRoute
   '/account/connections/new/$agent': typeof AccountConnectionsNewAgentRoute
   '/account/integrations/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account/mcp-servers/logos/$serverId': typeof AccountMcpServersLogosServerIdRoute
+  '/account/mcp-servers/oauth/callback': typeof AccountMcpServersOauthCallbackRoute
   '/account/packages/$packageId/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account/packages/$packageId/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account/secrets/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
+  '/community/$listingId/assets/$': typeof CommunityListingIdAssetsSplatRoute
+  '/community/$listingId/icon/$iconCommit': typeof CommunityListingIdIconIconCommitRoute
+  '/community/$listingId/raw/$': typeof CommunityListingIdRawSplatRoute
+  '/orgs/$orgSlug/avatar/$file': typeof OrgsOrgSlugAvatarFileRoute
+  '/profiles/$username/avatar/$file': typeof ProfilesUsernameAvatarFileRoute
   '/@{$orgSlug}/-/agents/new/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}/-/integrations/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}/-/mcp-servers/$serverId/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}/-/secrets/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
+  '/@{$username}/$kodyId/raw/$ref/$': typeof AtChar123usernameChar125KodyIdRawRefSplatRoute
   '/@{$username}/$kodyId/tree/$ref/$': typeof AtChar123usernameChar125KodyIdTreeRefSplatRoute
+  '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret': typeof AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute
   '/account/packages/$packageId/files/$': typeof AccountPackagesPackageIdFilesSplatRoute
+  '/account/repos/$repoId/icon/$iconCommit': typeof AccountReposRepoIdIconIconCommitRoute
   '/account/secrets/package/$packageId/$secretName': typeof AccountSecretsPackagePackageIdSecretNameRoute
   '/account/secrets/session/$sessionId/$secretName': typeof AccountSecretsSessionSessionIdSecretNameRoute
   '/@{$orgSlug}/-/secrets/package/$packageId/$secretName': typeof AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRoute
@@ -1632,18 +2076,30 @@ export interface FileRoutesById {
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
   '/account': typeof AccountRoute
+  '/auth': typeof AuthRoute
+  '/auth.md': typeof AuthDotmdRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
+  '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
   '/features': typeof FeaturesRoute
+  '/guides': typeof GuidesRoute
+  '/guides.json': typeof GuidesDotjsonRoute
+  '/guides.md': typeof GuidesDotmdRoute
+  '/health': typeof HealthRoute
+  '/llms.txt': typeof LlmsDottxtRoute
   '/login': typeof LoginRoute
   '/onboarding': typeof OnboardingRouteWithChildren
   '/pending-verification': typeof PendingVerificationRoute
   '/pricing': typeof PricingRoute
   '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/robots.txt': typeof RobotsDottxtRoute
+  '/sentry-tunnel': typeof SentryTunnelRoute
+  '/session': typeof SessionRoute
   '/signup': typeof SignupRoute
+  '/sitemap.xml': typeof SitemapDotxmlRoute
   '/support': typeof SupportRoute
   '/terms': typeof TermsRoute
   '/use-cases': typeof UseCasesRoute
@@ -1652,6 +2108,9 @@ export interface FileRoutesById {
   '/verify-email-change': typeof VerifyEmailChangeRoute
   '/verify-email-claim-release': typeof VerifyEmailClaimReleaseRoute
   '/verify-email-destination': typeof VerifyEmailDestinationRoute
+  '/.well-known_/api-catalog': typeof DotwellKnownApiCatalogRoute
+  '/.well-known_/openai-apps-challenge': typeof DotwellKnownOpenaiAppsChallengeRoute
+  '/.well-known_/security.txt': typeof DotwellKnownSecurityDottxtRoute
   '/@{$username}_/$kodyId': typeof AtChar123usernameChar125KodyIdRoute
   '/account_/activity': typeof AccountActivityRoute
   '/account_/agents': typeof AccountAgentsRoute
@@ -1660,11 +2119,13 @@ export interface FileRoutesById {
   '/account_/data': typeof AccountDataRoute
   '/account_/email': typeof AccountEmailRoute
   '/account_/experiments': typeof AccountExperimentsRoute
+  '/account_/export.json': typeof AccountExportDotjsonRoute
   '/account_/integrations': typeof AccountIntegrationsRoute
   '/account_/jobs': typeof AccountJobsRoute
   '/account_/mcp-oauth-clients': typeof AccountMcpOauthClientsRoute
   '/account_/mcp-servers': typeof AccountMcpServersRoute
   '/account_/memories': typeof AccountMemoriesRoute
+  '/account_/memories-export.json': typeof AccountMemoriesExportDotjsonRoute
   '/account_/organizations': typeof AccountOrganizationsRoute
   '/account_/passkeys': typeof AccountPasskeysRoute
   '/account_/secret-providers': typeof AccountSecretProvidersRoute
@@ -1688,6 +2149,8 @@ export interface FileRoutesById {
   '/admin/system-email': typeof AdminSystemEmailRoute
   '/admin/users': typeof AdminUsersRoute
   '/blog/$slug': typeof BlogSlugRoute
+  '/blog_/rss.xml': typeof BlogRssDotxmlRoute
+  '/blog_/{$slug}.md': typeof BlogChar123slugChar125DotmdRoute
   '/community_/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare_/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare_/n8n-alternatives': typeof CompareN8nAlternativesRoute
@@ -1697,6 +2160,9 @@ export interface FileRoutesById {
   '/connect/webhook-apply': typeof ConnectWebhookApplyRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/docs/connect': typeof DocsConnectRoute
+  '/docs_/connect.md': typeof DocsConnectDotmdRoute
+  '/docs_/llms.txt': typeof DocsLlmsDottxtRoute
+  '/docs_/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features_/apps': typeof FeaturesAppsRoute
   '/features_/integrations': typeof FeaturesIntegrationsRoute
   '/features_/memory': typeof FeaturesMemoryRoute
@@ -1704,12 +2170,15 @@ export interface FileRoutesById {
   '/features_/secrets': typeof FeaturesSecretsRoute
   '/features_/triggers': typeof FeaturesTriggersRoute
   '/for/business': typeof ForBusinessRoute
+  '/guides_/$': typeof GuidesSplatRoute
+  '/health_/components': typeof HealthComponentsRoute
   '/integrations_/claude': typeof IntegrationsClaudeRoute
   '/integrations_/gmail': typeof IntegrationsGmailRoute
   '/integrations_/slack': typeof IntegrationsSlackRoute
   '/join/$token': typeof JoinTokenRoute
   '/oauth/authorize': typeof OauthAuthorizeRoute
   '/oauth/callback': typeof OauthCallbackRoute
+  '/og_/{$page}.png': typeof OgChar123pageChar125DotpngRoute
   '/onboarding/step-1': typeof OnboardingStep1Route
   '/onboarding/step-2': typeof OnboardingStep2Route
   '/onboarding/step-3': typeof OnboardingStep3Route
@@ -1719,13 +2188,19 @@ export interface FileRoutesById {
   '/use-cases_/mcp-gateway': typeof UseCasesMcpGatewayRoute
   '/use-cases_/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases_/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
+  '/webhooks_/stripe': typeof WebhooksStripeRoute
+  '/youtube-thumb_/$videoId': typeof YoutubeThumbVideoIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
   '/onboarding/': typeof OnboardingIndexRoute
+  '/.well-known_/agent-skills_/index.json': typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  '/.well-known_/mcp_/server-card.json': typeof DotwellKnownMcpServerCardDotjsonRoute
   '/@{$orgSlug}_/-/activity': typeof AtChar123orgSlugChar125ActivityRoute
   '/@{$orgSlug}_/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}_/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}_/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}_/-/connections': typeof AtChar123orgSlugChar125ConnectionsRoute
   '/@{$orgSlug}_/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}_/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}_/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
@@ -1777,14 +2252,23 @@ export interface FileRoutesById {
   '/admin/platform-integrations_/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations_/new': typeof AdminPlatformIntegrationsNewRoute
   '/admin/users_/$stableUserId': typeof AdminUsersStableUserIdRoute
+  '/auth_/$provider_/callback': typeof AuthProviderCallbackRoute
+  '/blog_/$slug_/og.png': typeof BlogSlugOgDotpngRoute
+  '/community_/$listingId_/og.png': typeof CommunityListingIdOgDotpngRoute
+  '/docs_/$slug_/og.png': typeof DocsSlugOgDotpngRoute
+  '/integrations_/logos_/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
+  '/integrations_/provider-marks_/$slug': typeof IntegrationsProviderMarksSlugRoute
   '/onboarding/step-1_/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2_/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3_/$agent': typeof OnboardingStep3AgentRoute
+  '/profiles_/$username_/og.png': typeof ProfilesUsernameOgDotpngRoute
   '/account_/packages/': typeof AccountPackagesIndexRoute
+  '/.well-known_/agent-skills_/$skillId_/SKILL.md': typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute
   '/@{$orgSlug}_/-/activity_/$runId': typeof AtChar123orgSlugChar125ActivityRunIdRoute
   '/@{$orgSlug}_/-/agents_/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}_/-/agents_/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}_/-/billing_/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}_/-/connections_/$': typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   '/@{$orgSlug}_/-/credentials_/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
   '/@{$orgSlug}_/-/credentials_/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}_/-/email_/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
@@ -1800,20 +2284,32 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/values_/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
   '/@{$orgSlug}_/-/values_/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}_/-/workflows_/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
+  '/@{$username}_/$kodyId_/assets_/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}_/$kodyId_/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  '/@{$username}_/$kodyId_/icon_/$iconCommit': typeof AtChar123usernameChar125KodyIdIconIconCommitRoute
   '/account_/agents_/new_/$agent': typeof AccountAgentsNewAgentRoute
   '/account_/connections_/new_/$agent': typeof AccountConnectionsNewAgentRoute
   '/account_/integrations_/apps/$appSlug': typeof AccountIntegrationsAppsAppSlugRoute
+  '/account_/mcp-servers_/logos_/$serverId': typeof AccountMcpServersLogosServerIdRoute
+  '/account_/mcp-servers_/oauth_/callback': typeof AccountMcpServersOauthCallbackRoute
   '/account_/packages/$packageId_/approve-capabilities': typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   '/account_/packages/$packageId_/approve-publish': typeof AccountPackagesPackageIdApprovePublishRoute
   '/account_/secrets_/user/$secretName': typeof AccountSecretsUserSecretNameRoute
   '/community_/$listingId/files/$': typeof CommunityListingIdFilesSplatRoute
+  '/community_/$listingId_/assets_/$': typeof CommunityListingIdAssetsSplatRoute
+  '/community_/$listingId_/icon_/$iconCommit': typeof CommunityListingIdIconIconCommitRoute
+  '/community_/$listingId_/raw_/$': typeof CommunityListingIdRawSplatRoute
+  '/orgs_/$orgSlug_/avatar_/$file': typeof OrgsOrgSlugAvatarFileRoute
+  '/profiles_/$username_/avatar_/$file': typeof ProfilesUsernameAvatarFileRoute
   '/@{$orgSlug}_/-/agents_/new_/$agent': typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   '/@{$orgSlug}_/-/integrations_/apps/$appSlug': typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   '/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize': typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   '/@{$orgSlug}_/-/secrets_/user/$secretName': typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
+  '/@{$username}_/$kodyId_/raw_/$ref_/$': typeof AtChar123usernameChar125KodyIdRawRefSplatRoute
   '/@{$username}_/$kodyId_/tree/$ref/$': typeof AtChar123usernameChar125KodyIdTreeRefSplatRoute
+  '/@{$username}_/webhooks_/$packageKodyId_/$webhookName_/$urlSecret': typeof AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute
   '/account_/packages/$packageId/files/$': typeof AccountPackagesPackageIdFilesSplatRoute
+  '/account_/repos_/$repoId_/icon_/$iconCommit': typeof AccountReposRepoIdIconIconCommitRoute
   '/account_/secrets_/package/$packageId/$secretName': typeof AccountSecretsPackagePackageIdSecretNameRoute
   '/account_/secrets_/session/$sessionId/$secretName': typeof AccountSecretsSessionSessionIdSecretNameRoute
   '/@{$orgSlug}_/-/secrets_/package/$packageId/$secretName': typeof AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRoute
@@ -1827,18 +2323,30 @@ export interface FileRouteTypes {
     | '/500'
     | '/@{$username}'
     | '/account'
+    | '/auth'
+    | '/auth.md'
     | '/case-studies'
     | '/community'
     | '/discord'
+    | '/docs.md'
     | '/faq'
     | '/features'
+    | '/guides'
+    | '/guides.json'
+    | '/guides.md'
+    | '/health'
+    | '/llms.txt'
     | '/login'
     | '/onboarding'
     | '/pending-verification'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sentry-tunnel'
+    | '/session'
     | '/signup'
+    | '/sitemap.xml'
     | '/support'
     | '/terms'
     | '/use-cases'
@@ -1847,6 +2355,9 @@ export interface FileRouteTypes {
     | '/verify-email-change'
     | '/verify-email-claim-release'
     | '/verify-email-destination'
+    | '/.well-known/api-catalog'
+    | '/.well-known/openai-apps-challenge'
+    | '/.well-known/security.txt'
     | '/@{$username}/$kodyId'
     | '/account/activity'
     | '/account/agents'
@@ -1855,11 +2366,13 @@ export interface FileRouteTypes {
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
+    | '/account/export.json'
     | '/account/integrations'
     | '/account/jobs'
     | '/account/mcp-oauth-clients'
     | '/account/mcp-servers'
     | '/account/memories'
+    | '/account/memories-export.json'
     | '/account/organizations'
     | '/account/passkeys'
     | '/account/secret-providers'
@@ -1883,6 +2396,8 @@ export interface FileRouteTypes {
     | '/admin/system-email'
     | '/admin/users'
     | '/blog/$slug'
+    | '/blog/rss.xml'
+    | '/blog/{$slug}.md'
     | '/community/$listingId'
     | '/compare/composio-alternatives'
     | '/compare/n8n-alternatives'
@@ -1892,6 +2407,9 @@ export interface FileRouteTypes {
     | '/connect/webhook-apply'
     | '/docs/$slug'
     | '/docs/connect'
+    | '/docs/connect.md'
+    | '/docs/llms.txt'
+    | '/docs/{$slug}.md'
     | '/features/apps'
     | '/features/integrations'
     | '/features/memory'
@@ -1899,12 +2417,15 @@ export interface FileRouteTypes {
     | '/features/secrets'
     | '/features/triggers'
     | '/for/business'
+    | '/guides/$'
+    | '/health/components'
     | '/integrations/claude'
     | '/integrations/gmail'
     | '/integrations/slack'
     | '/join/$token'
     | '/oauth/authorize'
     | '/oauth/callback'
+    | '/og/{$page}.png'
     | '/onboarding/step-1'
     | '/onboarding/step-2'
     | '/onboarding/step-3'
@@ -1914,13 +2435,19 @@ export interface FileRouteTypes {
     | '/use-cases/mcp-gateway'
     | '/use-cases/scheduled-workflows'
     | '/use-cases/shared-agent-memory'
+    | '/webhooks/stripe'
+    | '/youtube-thumb/$videoId'
+    | '/admin/'
     | '/blog/'
     | '/docs/'
     | '/onboarding/'
+    | '/.well-known/agent-skills/index.json'
+    | '/.well-known/mcp/server-card.json'
     | '/@{$orgSlug}/-/activity'
     | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
+    | '/@{$orgSlug}/-/connections'
     | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
@@ -1972,14 +2499,23 @@ export interface FileRouteTypes {
     | '/admin/platform-integrations/$slug'
     | '/admin/platform-integrations/new'
     | '/admin/users/$stableUserId'
+    | '/auth/$provider/callback'
+    | '/blog/$slug/og.png'
+    | '/community/$listingId/og.png'
+    | '/docs/$slug/og.png'
+    | '/integrations/logos/$integrationSlug'
+    | '/integrations/provider-marks/$slug'
     | '/onboarding/step-1/$agent'
     | '/onboarding/step-2/$service'
     | '/onboarding/step-3/$agent'
+    | '/profiles/$username/og.png'
     | '/account/packages/'
+    | '/.well-known/agent-skills/$skillId/SKILL.md'
     | '/@{$orgSlug}/-/activity/$runId'
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
+    | '/@{$orgSlug}/-/connections/$'
     | '/@{$orgSlug}/-/credentials/$credentialId'
     | '/@{$orgSlug}/-/credentials/new'
     | '/@{$orgSlug}/-/email/$messageId'
@@ -1995,20 +2531,32 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/values/$valueId'
     | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
+    | '/@{$username}/$kodyId/assets/$'
     | '/@{$username}/$kodyId/files/$'
+    | '/@{$username}/$kodyId/icon/$iconCommit'
     | '/account/agents/new/$agent'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
+    | '/account/mcp-servers/logos/$serverId'
+    | '/account/mcp-servers/oauth/callback'
     | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
+    | '/community/$listingId/assets/$'
+    | '/community/$listingId/icon/$iconCommit'
+    | '/community/$listingId/raw/$'
+    | '/orgs/$orgSlug/avatar/$file'
+    | '/profiles/$username/avatar/$file'
     | '/@{$orgSlug}/-/agents/new/$agent'
     | '/@{$orgSlug}/-/integrations/apps/$appSlug'
     | '/@{$orgSlug}/-/mcp-servers/$serverId/authorize'
     | '/@{$orgSlug}/-/secrets/user/$secretName'
+    | '/@{$username}/$kodyId/raw/$ref/$'
     | '/@{$username}/$kodyId/tree/$ref/$'
+    | '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret'
     | '/account/packages/$packageId/files/$'
+    | '/account/repos/$repoId/icon/$iconCommit'
     | '/account/secrets/package/$packageId/$secretName'
     | '/account/secrets/session/$sessionId/$secretName'
     | '/@{$orgSlug}/-/secrets/package/$packageId/$secretName'
@@ -2020,17 +2568,29 @@ export interface FileRouteTypes {
     | '/500'
     | '/@{$username}'
     | '/account'
+    | '/auth'
+    | '/auth.md'
     | '/case-studies'
     | '/community'
     | '/discord'
+    | '/docs.md'
     | '/faq'
     | '/features'
+    | '/guides'
+    | '/guides.json'
+    | '/guides.md'
+    | '/health'
+    | '/llms.txt'
     | '/login'
     | '/pending-verification'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sentry-tunnel'
+    | '/session'
     | '/signup'
+    | '/sitemap.xml'
     | '/support'
     | '/terms'
     | '/use-cases'
@@ -2039,6 +2599,9 @@ export interface FileRouteTypes {
     | '/verify-email-change'
     | '/verify-email-claim-release'
     | '/verify-email-destination'
+    | '/.well-known/api-catalog'
+    | '/.well-known/openai-apps-challenge'
+    | '/.well-known/security.txt'
     | '/@{$username}/$kodyId'
     | '/account/activity'
     | '/account/agents'
@@ -2047,11 +2610,13 @@ export interface FileRouteTypes {
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
+    | '/account/export.json'
     | '/account/integrations'
     | '/account/jobs'
     | '/account/mcp-oauth-clients'
     | '/account/mcp-servers'
     | '/account/memories'
+    | '/account/memories-export.json'
     | '/account/organizations'
     | '/account/passkeys'
     | '/account/secret-providers'
@@ -2075,6 +2640,8 @@ export interface FileRouteTypes {
     | '/admin/system-email'
     | '/admin/users'
     | '/blog/$slug'
+    | '/blog/rss.xml'
+    | '/blog/{$slug}.md'
     | '/community/$listingId'
     | '/compare/composio-alternatives'
     | '/compare/n8n-alternatives'
@@ -2084,6 +2651,9 @@ export interface FileRouteTypes {
     | '/connect/webhook-apply'
     | '/docs/$slug'
     | '/docs/connect'
+    | '/docs/connect.md'
+    | '/docs/llms.txt'
+    | '/docs/{$slug}.md'
     | '/features/apps'
     | '/features/integrations'
     | '/features/memory'
@@ -2091,12 +2661,15 @@ export interface FileRouteTypes {
     | '/features/secrets'
     | '/features/triggers'
     | '/for/business'
+    | '/guides/$'
+    | '/health/components'
     | '/integrations/claude'
     | '/integrations/gmail'
     | '/integrations/slack'
     | '/join/$token'
     | '/oauth/authorize'
     | '/oauth/callback'
+    | '/og/{$page}.png'
     | '/onboarding/step-1'
     | '/onboarding/step-2'
     | '/onboarding/step-3'
@@ -2106,13 +2679,19 @@ export interface FileRouteTypes {
     | '/use-cases/mcp-gateway'
     | '/use-cases/scheduled-workflows'
     | '/use-cases/shared-agent-memory'
+    | '/webhooks/stripe'
+    | '/youtube-thumb/$videoId'
+    | '/admin'
     | '/blog'
     | '/docs'
     | '/onboarding'
+    | '/.well-known/agent-skills/index.json'
+    | '/.well-known/mcp/server-card.json'
     | '/@{$orgSlug}/-/activity'
     | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
+    | '/@{$orgSlug}/-/connections'
     | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
@@ -2164,14 +2743,23 @@ export interface FileRouteTypes {
     | '/admin/platform-integrations/$slug'
     | '/admin/platform-integrations/new'
     | '/admin/users/$stableUserId'
+    | '/auth/$provider/callback'
+    | '/blog/$slug/og.png'
+    | '/community/$listingId/og.png'
+    | '/docs/$slug/og.png'
+    | '/integrations/logos/$integrationSlug'
+    | '/integrations/provider-marks/$slug'
     | '/onboarding/step-1/$agent'
     | '/onboarding/step-2/$service'
     | '/onboarding/step-3/$agent'
+    | '/profiles/$username/og.png'
     | '/account/packages'
+    | '/.well-known/agent-skills/$skillId/SKILL.md'
     | '/@{$orgSlug}/-/activity/$runId'
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
+    | '/@{$orgSlug}/-/connections/$'
     | '/@{$orgSlug}/-/credentials/$credentialId'
     | '/@{$orgSlug}/-/credentials/new'
     | '/@{$orgSlug}/-/email/$messageId'
@@ -2187,20 +2775,32 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/values/$valueId'
     | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
+    | '/@{$username}/$kodyId/assets/$'
     | '/@{$username}/$kodyId/files/$'
+    | '/@{$username}/$kodyId/icon/$iconCommit'
     | '/account/agents/new/$agent'
     | '/account/connections/new/$agent'
     | '/account/integrations/apps/$appSlug'
+    | '/account/mcp-servers/logos/$serverId'
+    | '/account/mcp-servers/oauth/callback'
     | '/account/packages/$packageId/approve-capabilities'
     | '/account/packages/$packageId/approve-publish'
     | '/account/secrets/user/$secretName'
     | '/community/$listingId/files/$'
+    | '/community/$listingId/assets/$'
+    | '/community/$listingId/icon/$iconCommit'
+    | '/community/$listingId/raw/$'
+    | '/orgs/$orgSlug/avatar/$file'
+    | '/profiles/$username/avatar/$file'
     | '/@{$orgSlug}/-/agents/new/$agent'
     | '/@{$orgSlug}/-/integrations/apps/$appSlug'
     | '/@{$orgSlug}/-/mcp-servers/$serverId/authorize'
     | '/@{$orgSlug}/-/secrets/user/$secretName'
+    | '/@{$username}/$kodyId/raw/$ref/$'
     | '/@{$username}/$kodyId/tree/$ref/$'
+    | '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret'
     | '/account/packages/$packageId/files/$'
+    | '/account/repos/$repoId/icon/$iconCommit'
     | '/account/secrets/package/$packageId/$secretName'
     | '/account/secrets/session/$sessionId/$secretName'
     | '/@{$orgSlug}/-/secrets/package/$packageId/$secretName'
@@ -2212,18 +2812,30 @@ export interface FileRouteTypes {
     | '/500'
     | '/@{$username}'
     | '/account'
+    | '/auth'
+    | '/auth.md'
     | '/case-studies'
     | '/community'
     | '/discord'
+    | '/docs.md'
     | '/faq'
     | '/features'
+    | '/guides'
+    | '/guides.json'
+    | '/guides.md'
+    | '/health'
+    | '/llms.txt'
     | '/login'
     | '/onboarding'
     | '/pending-verification'
     | '/pricing'
     | '/privacy'
     | '/reset-password'
+    | '/robots.txt'
+    | '/sentry-tunnel'
+    | '/session'
     | '/signup'
+    | '/sitemap.xml'
     | '/support'
     | '/terms'
     | '/use-cases'
@@ -2232,6 +2844,9 @@ export interface FileRouteTypes {
     | '/verify-email-change'
     | '/verify-email-claim-release'
     | '/verify-email-destination'
+    | '/.well-known_/api-catalog'
+    | '/.well-known_/openai-apps-challenge'
+    | '/.well-known_/security.txt'
     | '/@{$username}_/$kodyId'
     | '/account_/activity'
     | '/account_/agents'
@@ -2240,11 +2855,13 @@ export interface FileRouteTypes {
     | '/account_/data'
     | '/account_/email'
     | '/account_/experiments'
+    | '/account_/export.json'
     | '/account_/integrations'
     | '/account_/jobs'
     | '/account_/mcp-oauth-clients'
     | '/account_/mcp-servers'
     | '/account_/memories'
+    | '/account_/memories-export.json'
     | '/account_/organizations'
     | '/account_/passkeys'
     | '/account_/secret-providers'
@@ -2268,6 +2885,8 @@ export interface FileRouteTypes {
     | '/admin/system-email'
     | '/admin/users'
     | '/blog/$slug'
+    | '/blog_/rss.xml'
+    | '/blog_/{$slug}.md'
     | '/community_/$listingId'
     | '/compare_/composio-alternatives'
     | '/compare_/n8n-alternatives'
@@ -2277,6 +2896,9 @@ export interface FileRouteTypes {
     | '/connect/webhook-apply'
     | '/docs/$slug'
     | '/docs/connect'
+    | '/docs_/connect.md'
+    | '/docs_/llms.txt'
+    | '/docs_/{$slug}.md'
     | '/features_/apps'
     | '/features_/integrations'
     | '/features_/memory'
@@ -2284,12 +2906,15 @@ export interface FileRouteTypes {
     | '/features_/secrets'
     | '/features_/triggers'
     | '/for/business'
+    | '/guides_/$'
+    | '/health_/components'
     | '/integrations_/claude'
     | '/integrations_/gmail'
     | '/integrations_/slack'
     | '/join/$token'
     | '/oauth/authorize'
     | '/oauth/callback'
+    | '/og_/{$page}.png'
     | '/onboarding/step-1'
     | '/onboarding/step-2'
     | '/onboarding/step-3'
@@ -2299,13 +2924,19 @@ export interface FileRouteTypes {
     | '/use-cases_/mcp-gateway'
     | '/use-cases_/scheduled-workflows'
     | '/use-cases_/shared-agent-memory'
+    | '/webhooks_/stripe'
+    | '/youtube-thumb_/$videoId'
+    | '/admin/'
     | '/blog/'
     | '/docs/'
     | '/onboarding/'
+    | '/.well-known_/agent-skills_/index.json'
+    | '/.well-known_/mcp_/server-card.json'
     | '/@{$orgSlug}_/-/activity'
     | '/@{$orgSlug}_/-/agents'
     | '/@{$orgSlug}_/-/billing'
     | '/@{$orgSlug}_/-/collaborators'
+    | '/@{$orgSlug}_/-/connections'
     | '/@{$orgSlug}_/-/credentials'
     | '/@{$orgSlug}_/-/email'
     | '/@{$orgSlug}_/-/grants'
@@ -2357,14 +2988,23 @@ export interface FileRouteTypes {
     | '/admin/platform-integrations_/$slug'
     | '/admin/platform-integrations_/new'
     | '/admin/users_/$stableUserId'
+    | '/auth_/$provider_/callback'
+    | '/blog_/$slug_/og.png'
+    | '/community_/$listingId_/og.png'
+    | '/docs_/$slug_/og.png'
+    | '/integrations_/logos_/$integrationSlug'
+    | '/integrations_/provider-marks_/$slug'
     | '/onboarding/step-1_/$agent'
     | '/onboarding/step-2_/$service'
     | '/onboarding/step-3_/$agent'
+    | '/profiles_/$username_/og.png'
     | '/account_/packages/'
+    | '/.well-known_/agent-skills_/$skillId_/SKILL.md'
     | '/@{$orgSlug}_/-/activity_/$runId'
     | '/@{$orgSlug}_/-/agents_/new'
     | '/@{$orgSlug}_/-/agents_/usage'
     | '/@{$orgSlug}_/-/billing_/success'
+    | '/@{$orgSlug}_/-/connections_/$'
     | '/@{$orgSlug}_/-/credentials_/$credentialId'
     | '/@{$orgSlug}_/-/credentials_/new'
     | '/@{$orgSlug}_/-/email_/$messageId'
@@ -2380,20 +3020,32 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/values_/$valueId'
     | '/@{$orgSlug}_/-/values_/new'
     | '/@{$orgSlug}_/-/workflows_/$workflowId'
+    | '/@{$username}_/$kodyId_/assets_/$'
     | '/@{$username}_/$kodyId_/files/$'
+    | '/@{$username}_/$kodyId_/icon_/$iconCommit'
     | '/account_/agents_/new_/$agent'
     | '/account_/connections_/new_/$agent'
     | '/account_/integrations_/apps/$appSlug'
+    | '/account_/mcp-servers_/logos_/$serverId'
+    | '/account_/mcp-servers_/oauth_/callback'
     | '/account_/packages/$packageId_/approve-capabilities'
     | '/account_/packages/$packageId_/approve-publish'
     | '/account_/secrets_/user/$secretName'
     | '/community_/$listingId/files/$'
+    | '/community_/$listingId_/assets_/$'
+    | '/community_/$listingId_/icon_/$iconCommit'
+    | '/community_/$listingId_/raw_/$'
+    | '/orgs_/$orgSlug_/avatar_/$file'
+    | '/profiles_/$username_/avatar_/$file'
     | '/@{$orgSlug}_/-/agents_/new_/$agent'
     | '/@{$orgSlug}_/-/integrations_/apps/$appSlug'
     | '/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize'
     | '/@{$orgSlug}_/-/secrets_/user/$secretName'
+    | '/@{$username}_/$kodyId_/raw_/$ref_/$'
     | '/@{$username}_/$kodyId_/tree/$ref/$'
+    | '/@{$username}_/webhooks_/$packageKodyId_/$webhookName_/$urlSecret'
     | '/account_/packages/$packageId/files/$'
+    | '/account_/repos_/$repoId_/icon_/$iconCommit'
     | '/account_/secrets_/package/$packageId/$secretName'
     | '/account_/secrets_/session/$sessionId/$secretName'
     | '/@{$orgSlug}_/-/secrets_/package/$packageId/$secretName'
@@ -2406,18 +3058,30 @@ export interface RootRouteChildren {
   R500Route: typeof R500Route
   AtChar123usernameChar125Route: typeof AtChar123usernameChar125Route
   AccountRoute: typeof AccountRoute
+  AuthRoute: typeof AuthRoute
+  AuthDotmdRoute: typeof AuthDotmdRoute
   CaseStudiesRoute: typeof CaseStudiesRoute
   CommunityRoute: typeof CommunityRoute
   DiscordRoute: typeof DiscordRoute
+  DocsDotmdRoute: typeof DocsDotmdRoute
   FaqRoute: typeof FaqRoute
   FeaturesRoute: typeof FeaturesRoute
+  GuidesRoute: typeof GuidesRoute
+  GuidesDotjsonRoute: typeof GuidesDotjsonRoute
+  GuidesDotmdRoute: typeof GuidesDotmdRoute
+  HealthRoute: typeof HealthRoute
+  LlmsDottxtRoute: typeof LlmsDottxtRoute
   LoginRoute: typeof LoginRoute
   OnboardingRoute: typeof OnboardingRouteWithChildren
   PendingVerificationRoute: typeof PendingVerificationRoute
   PricingRoute: typeof PricingRoute
   PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  RobotsDottxtRoute: typeof RobotsDottxtRoute
+  SentryTunnelRoute: typeof SentryTunnelRoute
+  SessionRoute: typeof SessionRoute
   SignupRoute: typeof SignupRoute
+  SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   SupportRoute: typeof SupportRoute
   TermsRoute: typeof TermsRoute
   UseCasesRoute: typeof UseCasesRoute
@@ -2426,6 +3090,9 @@ export interface RootRouteChildren {
   VerifyEmailChangeRoute: typeof VerifyEmailChangeRoute
   VerifyEmailClaimReleaseRoute: typeof VerifyEmailClaimReleaseRoute
   VerifyEmailDestinationRoute: typeof VerifyEmailDestinationRoute
+  DotwellKnownApiCatalogRoute: typeof DotwellKnownApiCatalogRoute
+  DotwellKnownOpenaiAppsChallengeRoute: typeof DotwellKnownOpenaiAppsChallengeRoute
+  DotwellKnownSecurityDottxtRoute: typeof DotwellKnownSecurityDottxtRoute
   AtChar123usernameChar125KodyIdRoute: typeof AtChar123usernameChar125KodyIdRoute
   AccountActivityRoute: typeof AccountActivityRoute
   AccountAgentsRoute: typeof AccountAgentsRoute
@@ -2434,11 +3101,13 @@ export interface RootRouteChildren {
   AccountDataRoute: typeof AccountDataRoute
   AccountEmailRoute: typeof AccountEmailRoute
   AccountExperimentsRoute: typeof AccountExperimentsRoute
+  AccountExportDotjsonRoute: typeof AccountExportDotjsonRoute
   AccountIntegrationsRoute: typeof AccountIntegrationsRoute
   AccountJobsRoute: typeof AccountJobsRoute
   AccountMcpOauthClientsRoute: typeof AccountMcpOauthClientsRoute
   AccountMcpServersRoute: typeof AccountMcpServersRoute
   AccountMemoriesRoute: typeof AccountMemoriesRoute
+  AccountMemoriesExportDotjsonRoute: typeof AccountMemoriesExportDotjsonRoute
   AccountOrganizationsRoute: typeof AccountOrganizationsRoute
   AccountPasskeysRoute: typeof AccountPasskeysRoute
   AccountSecretProvidersRoute: typeof AccountSecretProvidersRoute
@@ -2462,6 +3131,8 @@ export interface RootRouteChildren {
   AdminSystemEmailRoute: typeof AdminSystemEmailRoute
   AdminUsersRoute: typeof AdminUsersRoute
   BlogSlugRoute: typeof BlogSlugRoute
+  BlogRssDotxmlRoute: typeof BlogRssDotxmlRoute
+  BlogChar123slugChar125DotmdRoute: typeof BlogChar123slugChar125DotmdRoute
   CommunityListingIdRoute: typeof CommunityListingIdRouteWithChildren
   CompareComposioAlternativesRoute: typeof CompareComposioAlternativesRoute
   CompareN8nAlternativesRoute: typeof CompareN8nAlternativesRoute
@@ -2471,6 +3142,9 @@ export interface RootRouteChildren {
   ConnectWebhookApplyRoute: typeof ConnectWebhookApplyRoute
   DocsSlugRoute: typeof DocsSlugRoute
   DocsConnectRoute: typeof DocsConnectRoute
+  DocsConnectDotmdRoute: typeof DocsConnectDotmdRoute
+  DocsLlmsDottxtRoute: typeof DocsLlmsDottxtRoute
+  DocsChar123slugChar125DotmdRoute: typeof DocsChar123slugChar125DotmdRoute
   FeaturesAppsRoute: typeof FeaturesAppsRoute
   FeaturesIntegrationsRoute: typeof FeaturesIntegrationsRoute
   FeaturesMemoryRoute: typeof FeaturesMemoryRoute
@@ -2478,24 +3152,33 @@ export interface RootRouteChildren {
   FeaturesSecretsRoute: typeof FeaturesSecretsRoute
   FeaturesTriggersRoute: typeof FeaturesTriggersRoute
   ForBusinessRoute: typeof ForBusinessRoute
+  GuidesSplatRoute: typeof GuidesSplatRoute
+  HealthComponentsRoute: typeof HealthComponentsRoute
   IntegrationsClaudeRoute: typeof IntegrationsClaudeRoute
   IntegrationsGmailRoute: typeof IntegrationsGmailRoute
   IntegrationsSlackRoute: typeof IntegrationsSlackRoute
   JoinTokenRoute: typeof JoinTokenRoute
   OauthAuthorizeRoute: typeof OauthAuthorizeRoute
   OauthCallbackRoute: typeof OauthCallbackRoute
+  OgChar123pageChar125DotpngRoute: typeof OgChar123pageChar125DotpngRoute
   UnsubscribeTipsRoute: typeof UnsubscribeTipsRoute
   UseCasesAiWorkflowAutomationRoute: typeof UseCasesAiWorkflowAutomationRoute
   UseCasesClaudeCodeCustomToolsRoute: typeof UseCasesClaudeCodeCustomToolsRoute
   UseCasesMcpGatewayRoute: typeof UseCasesMcpGatewayRoute
   UseCasesScheduledWorkflowsRoute: typeof UseCasesScheduledWorkflowsRoute
   UseCasesSharedAgentMemoryRoute: typeof UseCasesSharedAgentMemoryRoute
+  WebhooksStripeRoute: typeof WebhooksStripeRoute
+  YoutubeThumbVideoIdRoute: typeof YoutubeThumbVideoIdRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   BlogIndexRoute: typeof BlogIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
+  DotwellKnownAgentSkillsIndexDotjsonRoute: typeof DotwellKnownAgentSkillsIndexDotjsonRoute
+  DotwellKnownMcpServerCardDotjsonRoute: typeof DotwellKnownMcpServerCardDotjsonRoute
   AtChar123orgSlugChar125ActivityRoute: typeof AtChar123orgSlugChar125ActivityRoute
   AtChar123orgSlugChar125AgentsRoute: typeof AtChar123orgSlugChar125AgentsRoute
   AtChar123orgSlugChar125BillingRoute: typeof AtChar123orgSlugChar125BillingRoute
   AtChar123orgSlugChar125CollaboratorsRoute: typeof AtChar123orgSlugChar125CollaboratorsRoute
+  AtChar123orgSlugChar125ConnectionsRoute: typeof AtChar123orgSlugChar125ConnectionsRoute
   AtChar123orgSlugChar125CredentialsRoute: typeof AtChar123orgSlugChar125CredentialsRoute
   AtChar123orgSlugChar125EmailRoute: typeof AtChar123orgSlugChar125EmailRoute
   AtChar123orgSlugChar125GrantsRoute: typeof AtChar123orgSlugChar125GrantsRoute
@@ -2547,11 +3230,20 @@ export interface RootRouteChildren {
   AdminPlatformIntegrationsSlugRoute: typeof AdminPlatformIntegrationsSlugRoute
   AdminPlatformIntegrationsNewRoute: typeof AdminPlatformIntegrationsNewRoute
   AdminUsersStableUserIdRoute: typeof AdminUsersStableUserIdRoute
+  AuthProviderCallbackRoute: typeof AuthProviderCallbackRoute
+  BlogSlugOgDotpngRoute: typeof BlogSlugOgDotpngRoute
+  CommunityListingIdOgDotpngRoute: typeof CommunityListingIdOgDotpngRoute
+  DocsSlugOgDotpngRoute: typeof DocsSlugOgDotpngRoute
+  IntegrationsLogosIntegrationSlugRoute: typeof IntegrationsLogosIntegrationSlugRoute
+  IntegrationsProviderMarksSlugRoute: typeof IntegrationsProviderMarksSlugRoute
+  ProfilesUsernameOgDotpngRoute: typeof ProfilesUsernameOgDotpngRoute
   AccountPackagesIndexRoute: typeof AccountPackagesIndexRoute
+  DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute: typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute
   AtChar123orgSlugChar125ActivityRunIdRoute: typeof AtChar123orgSlugChar125ActivityRunIdRoute
   AtChar123orgSlugChar125AgentsNewRoute: typeof AtChar123orgSlugChar125AgentsNewRoute
   AtChar123orgSlugChar125AgentsUsageRoute: typeof AtChar123orgSlugChar125AgentsUsageRoute
   AtChar123orgSlugChar125BillingSuccessRoute: typeof AtChar123orgSlugChar125BillingSuccessRoute
+  AtChar123orgSlugChar125ConnectionsSplatRoute: typeof AtChar123orgSlugChar125ConnectionsSplatRoute
   AtChar123orgSlugChar125CredentialsCredentialIdRoute: typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
   AtChar123orgSlugChar125CredentialsNewRoute: typeof AtChar123orgSlugChar125CredentialsNewRoute
   AtChar123orgSlugChar125EmailMessageIdRoute: typeof AtChar123orgSlugChar125EmailMessageIdRoute
@@ -2567,18 +3259,30 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125ValuesValueIdRoute: typeof AtChar123orgSlugChar125ValuesValueIdRoute
   AtChar123orgSlugChar125ValuesNewRoute: typeof AtChar123orgSlugChar125ValuesNewRoute
   AtChar123orgSlugChar125WorkflowsWorkflowIdRoute: typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
+  AtChar123usernameChar125KodyIdAssetsSplatRoute: typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   AtChar123usernameChar125KodyIdFilesSplatRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRoute
+  AtChar123usernameChar125KodyIdIconIconCommitRoute: typeof AtChar123usernameChar125KodyIdIconIconCommitRoute
   AccountAgentsNewAgentRoute: typeof AccountAgentsNewAgentRoute
   AccountConnectionsNewAgentRoute: typeof AccountConnectionsNewAgentRoute
   AccountIntegrationsAppsAppSlugRoute: typeof AccountIntegrationsAppsAppSlugRoute
+  AccountMcpServersLogosServerIdRoute: typeof AccountMcpServersLogosServerIdRoute
+  AccountMcpServersOauthCallbackRoute: typeof AccountMcpServersOauthCallbackRoute
   AccountPackagesPackageIdApproveCapabilitiesRoute: typeof AccountPackagesPackageIdApproveCapabilitiesRoute
   AccountPackagesPackageIdApprovePublishRoute: typeof AccountPackagesPackageIdApprovePublishRoute
   AccountSecretsUserSecretNameRoute: typeof AccountSecretsUserSecretNameRoute
+  CommunityListingIdAssetsSplatRoute: typeof CommunityListingIdAssetsSplatRoute
+  CommunityListingIdIconIconCommitRoute: typeof CommunityListingIdIconIconCommitRoute
+  CommunityListingIdRawSplatRoute: typeof CommunityListingIdRawSplatRoute
+  OrgsOrgSlugAvatarFileRoute: typeof OrgsOrgSlugAvatarFileRoute
+  ProfilesUsernameAvatarFileRoute: typeof ProfilesUsernameAvatarFileRoute
   AtChar123orgSlugChar125AgentsNewAgentRoute: typeof AtChar123orgSlugChar125AgentsNewAgentRoute
   AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute: typeof AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute
   AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute: typeof AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute
   AtChar123orgSlugChar125SecretsUserSecretNameRoute: typeof AtChar123orgSlugChar125SecretsUserSecretNameRoute
+  AtChar123usernameChar125KodyIdRawRefSplatRoute: typeof AtChar123usernameChar125KodyIdRawRefSplatRoute
   AtChar123usernameChar125KodyIdTreeRefSplatRoute: typeof AtChar123usernameChar125KodyIdTreeRefSplatRoute
+  AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute: typeof AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute
+  AccountReposRepoIdIconIconCommitRoute: typeof AccountReposRepoIdIconIconCommitRoute
   AccountSecretsPackagePackageIdSecretNameRoute: typeof AccountSecretsPackagePackageIdSecretNameRoute
   AccountSecretsSessionSessionIdSecretNameRoute: typeof AccountSecretsSessionSessionIdSecretNameRoute
   AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRoute: typeof AtChar123orgSlugChar125SecretsPackagePackageIdSecretNameRoute
@@ -2622,6 +3326,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth.md': {
+      id: '/auth.md'
+      path: '/auth.md'
+      fullPath: '/auth.md'
+      preLoaderRoute: typeof AuthDotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/case-studies': {
       id: '/case-studies'
       path: '/case-studies'
@@ -2643,6 +3361,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DiscordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs.md': {
+      id: '/docs.md'
+      path: '/docs.md'
+      fullPath: '/docs.md'
+      preLoaderRoute: typeof DocsDotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/faq': {
       id: '/faq'
       path: '/faq'
@@ -2655,6 +3380,41 @@ declare module '@tanstack/react-router' {
       path: '/features'
       fullPath: '/features'
       preLoaderRoute: typeof FeaturesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides': {
+      id: '/guides'
+      path: '/guides'
+      fullPath: '/guides'
+      preLoaderRoute: typeof GuidesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides.json': {
+      id: '/guides.json'
+      path: '/guides.json'
+      fullPath: '/guides.json'
+      preLoaderRoute: typeof GuidesDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides.md': {
+      id: '/guides.md'
+      path: '/guides.md'
+      fullPath: '/guides.md'
+      preLoaderRoute: typeof GuidesDotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health': {
+      id: '/health'
+      path: '/health'
+      fullPath: '/health'
+      preLoaderRoute: typeof HealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/llms.txt': {
+      id: '/llms.txt'
+      path: '/llms.txt'
+      fullPath: '/llms.txt'
+      preLoaderRoute: typeof LlmsDottxtRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -2699,11 +3459,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/robots.txt': {
+      id: '/robots.txt'
+      path: '/robots.txt'
+      fullPath: '/robots.txt'
+      preLoaderRoute: typeof RobotsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sentry-tunnel': {
+      id: '/sentry-tunnel'
+      path: '/sentry-tunnel'
+      fullPath: '/sentry-tunnel'
+      preLoaderRoute: typeof SentryTunnelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/session': {
+      id: '/session'
+      path: '/session'
+      fullPath: '/session'
+      preLoaderRoute: typeof SessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/signup': {
       id: '/signup'
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sitemap.xml': {
+      id: '/sitemap.xml'
+      path: '/sitemap.xml'
+      fullPath: '/sitemap.xml'
+      preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/support': {
@@ -2762,6 +3550,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VerifyEmailDestinationRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/.well-known_/api-catalog': {
+      id: '/.well-known_/api-catalog'
+      path: '/.well-known/api-catalog'
+      fullPath: '/.well-known/api-catalog'
+      preLoaderRoute: typeof DotwellKnownApiCatalogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known_/openai-apps-challenge': {
+      id: '/.well-known_/openai-apps-challenge'
+      path: '/.well-known/openai-apps-challenge'
+      fullPath: '/.well-known/openai-apps-challenge'
+      preLoaderRoute: typeof DotwellKnownOpenaiAppsChallengeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known_/security.txt': {
+      id: '/.well-known_/security.txt'
+      path: '/.well-known/security.txt'
+      fullPath: '/.well-known/security.txt'
+      preLoaderRoute: typeof DotwellKnownSecurityDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId': {
       id: '/@{$username}_/$kodyId'
       path: '/@{$username}/$kodyId'
@@ -2818,6 +3627,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountExperimentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account_/export.json': {
+      id: '/account_/export.json'
+      path: '/account/export.json'
+      fullPath: '/account/export.json'
+      preLoaderRoute: typeof AccountExportDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/integrations': {
       id: '/account_/integrations'
       path: '/account/integrations'
@@ -2851,6 +3667,13 @@ declare module '@tanstack/react-router' {
       path: '/account/memories'
       fullPath: '/account/memories'
       preLoaderRoute: typeof AccountMemoriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/memories-export.json': {
+      id: '/account_/memories-export.json'
+      path: '/account/memories-export.json'
+      fullPath: '/account/memories-export.json'
+      preLoaderRoute: typeof AccountMemoriesExportDotjsonRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/organizations': {
@@ -2928,6 +3751,13 @@ declare module '@tanstack/react-router' {
       path: '/account/workflows'
       fullPath: '/account/workflows'
       preLoaderRoute: typeof AccountWorkflowsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/codemods': {
@@ -3021,6 +3851,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlogSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/blog_/rss.xml': {
+      id: '/blog_/rss.xml'
+      path: '/blog/rss.xml'
+      fullPath: '/blog/rss.xml'
+      preLoaderRoute: typeof BlogRssDotxmlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blog_/{$slug}.md': {
+      id: '/blog_/{$slug}.md'
+      path: '/blog/{$slug}.md'
+      fullPath: '/blog/{$slug}.md'
+      preLoaderRoute: typeof BlogChar123slugChar125DotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/community_/$listingId': {
       id: '/community_/$listingId'
       path: '/community/$listingId'
@@ -3091,6 +3935,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsConnectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs_/connect.md': {
+      id: '/docs_/connect.md'
+      path: '/docs/connect.md'
+      fullPath: '/docs/connect.md'
+      preLoaderRoute: typeof DocsConnectDotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/llms.txt': {
+      id: '/docs_/llms.txt'
+      path: '/docs/llms.txt'
+      fullPath: '/docs/llms.txt'
+      preLoaderRoute: typeof DocsLlmsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/{$slug}.md': {
+      id: '/docs_/{$slug}.md'
+      path: '/docs/{$slug}.md'
+      fullPath: '/docs/{$slug}.md'
+      preLoaderRoute: typeof DocsChar123slugChar125DotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/features_/apps': {
       id: '/features_/apps'
       path: '/features/apps'
@@ -3140,6 +4005,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ForBusinessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guides_/$': {
+      id: '/guides_/$'
+      path: '/guides/$'
+      fullPath: '/guides/$'
+      preLoaderRoute: typeof GuidesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/health_/components': {
+      id: '/health_/components'
+      path: '/health/components'
+      fullPath: '/health/components'
+      preLoaderRoute: typeof HealthComponentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations_/claude': {
       id: '/integrations_/claude'
       path: '/integrations/claude'
@@ -3180,6 +4059,13 @@ declare module '@tanstack/react-router' {
       path: '/oauth/callback'
       fullPath: '/oauth/callback'
       preLoaderRoute: typeof OauthCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/og_/{$page}.png': {
+      id: '/og_/{$page}.png'
+      path: '/og/{$page}.png'
+      fullPath: '/og/{$page}.png'
+      preLoaderRoute: typeof OgChar123pageChar125DotpngRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding/': {
@@ -3252,6 +4138,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UseCasesSharedAgentMemoryRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/webhooks_/stripe': {
+      id: '/webhooks_/stripe'
+      path: '/webhooks/stripe'
+      fullPath: '/webhooks/stripe'
+      preLoaderRoute: typeof WebhooksStripeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/youtube-thumb_/$videoId': {
+      id: '/youtube-thumb_/$videoId'
+      path: '/youtube-thumb/$videoId'
+      fullPath: '/youtube-thumb/$videoId'
+      preLoaderRoute: typeof YoutubeThumbVideoIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known_/agent-skills_/index.json': {
+      id: '/.well-known_/agent-skills_/index.json'
+      path: '/.well-known/agent-skills/index.json'
+      fullPath: '/.well-known/agent-skills/index.json'
+      preLoaderRoute: typeof DotwellKnownAgentSkillsIndexDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known_/mcp_/server-card.json': {
+      id: '/.well-known_/mcp_/server-card.json'
+      path: '/.well-known/mcp/server-card.json'
+      fullPath: '/.well-known/mcp/server-card.json'
+      preLoaderRoute: typeof DotwellKnownMcpServerCardDotjsonRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/activity': {
       id: '/@{$orgSlug}_/-/activity'
       path: '/@{$orgSlug}/-/activity'
@@ -3278,6 +4192,13 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/collaborators'
       fullPath: '/@{$orgSlug}/-/collaborators'
       preLoaderRoute: typeof AtChar123orgSlugChar125CollaboratorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$orgSlug}_/-/connections': {
+      id: '/@{$orgSlug}_/-/connections'
+      path: '/@{$orgSlug}/-/connections'
+      fullPath: '/@{$orgSlug}/-/connections'
+      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/credentials': {
@@ -3644,6 +4565,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersStableUserIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/auth_/$provider_/callback': {
+      id: '/auth_/$provider_/callback'
+      path: '/auth/$provider/callback'
+      fullPath: '/auth/$provider/callback'
+      preLoaderRoute: typeof AuthProviderCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blog_/$slug_/og.png': {
+      id: '/blog_/$slug_/og.png'
+      path: '/blog/$slug/og.png'
+      fullPath: '/blog/$slug/og.png'
+      preLoaderRoute: typeof BlogSlugOgDotpngRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/community_/$listingId_/og.png': {
+      id: '/community_/$listingId_/og.png'
+      path: '/community/$listingId/og.png'
+      fullPath: '/community/$listingId/og.png'
+      preLoaderRoute: typeof CommunityListingIdOgDotpngRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/$slug_/og.png': {
+      id: '/docs_/$slug_/og.png'
+      path: '/docs/$slug/og.png'
+      fullPath: '/docs/$slug/og.png'
+      preLoaderRoute: typeof DocsSlugOgDotpngRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations_/logos_/$integrationSlug': {
+      id: '/integrations_/logos_/$integrationSlug'
+      path: '/integrations/logos/$integrationSlug'
+      fullPath: '/integrations/logos/$integrationSlug'
+      preLoaderRoute: typeof IntegrationsLogosIntegrationSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations_/provider-marks_/$slug': {
+      id: '/integrations_/provider-marks_/$slug'
+      path: '/integrations/provider-marks/$slug'
+      fullPath: '/integrations/provider-marks/$slug'
+      preLoaderRoute: typeof IntegrationsProviderMarksSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/onboarding/step-1_/$agent': {
       id: '/onboarding/step-1_/$agent'
       path: '/step-1/$agent'
@@ -3664,6 +4627,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/onboarding/step-3/$agent'
       preLoaderRoute: typeof OnboardingStep3AgentRouteImport
       parentRoute: typeof OnboardingRoute
+    }
+    '/profiles_/$username_/og.png': {
+      id: '/profiles_/$username_/og.png'
+      path: '/profiles/$username/og.png'
+      fullPath: '/profiles/$username/og.png'
+      preLoaderRoute: typeof ProfilesUsernameOgDotpngRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/.well-known_/agent-skills_/$skillId_/SKILL.md': {
+      id: '/.well-known_/agent-skills_/$skillId_/SKILL.md'
+      path: '/.well-known/agent-skills/$skillId/SKILL.md'
+      fullPath: '/.well-known/agent-skills/$skillId/SKILL.md'
+      preLoaderRoute: typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/activity_/$runId': {
       id: '/@{$orgSlug}_/-/activity_/$runId'
@@ -3691,6 +4668,13 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/billing/success'
       fullPath: '/@{$orgSlug}/-/billing/success'
       preLoaderRoute: typeof AtChar123orgSlugChar125BillingSuccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$orgSlug}_/-/connections_/$': {
+      id: '/@{$orgSlug}_/-/connections_/$'
+      path: '/@{$orgSlug}/-/connections/$'
+      fullPath: '/@{$orgSlug}/-/connections/$'
+      preLoaderRoute: typeof AtChar123orgSlugChar125ConnectionsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/credentials_/$credentialId': {
@@ -3798,11 +4782,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$username}_/$kodyId_/assets_/$': {
+      id: '/@{$username}_/$kodyId_/assets_/$'
+      path: '/@{$username}/$kodyId/assets/$'
+      fullPath: '/@{$username}/$kodyId/assets/$'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdAssetsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId_/files/$': {
       id: '/@{$username}_/$kodyId_/files/$'
       path: '/@{$username}/$kodyId/files/$'
       fullPath: '/@{$username}/$kodyId/files/$'
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$username}_/$kodyId_/icon_/$iconCommit': {
+      id: '/@{$username}_/$kodyId_/icon_/$iconCommit'
+      path: '/@{$username}/$kodyId/icon/$iconCommit'
+      fullPath: '/@{$username}/$kodyId/icon/$iconCommit'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdIconIconCommitRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/agents_/new_/$agent': {
@@ -3824,6 +4822,20 @@ declare module '@tanstack/react-router' {
       path: '/account/integrations/apps/$appSlug'
       fullPath: '/account/integrations/apps/$appSlug'
       preLoaderRoute: typeof AccountIntegrationsAppsAppSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/mcp-servers_/logos_/$serverId': {
+      id: '/account_/mcp-servers_/logos_/$serverId'
+      path: '/account/mcp-servers/logos/$serverId'
+      fullPath: '/account/mcp-servers/logos/$serverId'
+      preLoaderRoute: typeof AccountMcpServersLogosServerIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/mcp-servers_/oauth_/callback': {
+      id: '/account_/mcp-servers_/oauth_/callback'
+      path: '/account/mcp-servers/oauth/callback'
+      fullPath: '/account/mcp-servers/oauth/callback'
+      preLoaderRoute: typeof AccountMcpServersOauthCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/packages/$packageId_/approve-capabilities': {
@@ -3854,6 +4866,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CommunityListingIdFilesSplatRouteImport
       parentRoute: typeof CommunityListingIdRoute
     }
+    '/community_/$listingId_/assets_/$': {
+      id: '/community_/$listingId_/assets_/$'
+      path: '/community/$listingId/assets/$'
+      fullPath: '/community/$listingId/assets/$'
+      preLoaderRoute: typeof CommunityListingIdAssetsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/community_/$listingId_/icon_/$iconCommit': {
+      id: '/community_/$listingId_/icon_/$iconCommit'
+      path: '/community/$listingId/icon/$iconCommit'
+      fullPath: '/community/$listingId/icon/$iconCommit'
+      preLoaderRoute: typeof CommunityListingIdIconIconCommitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/community_/$listingId_/raw_/$': {
+      id: '/community_/$listingId_/raw_/$'
+      path: '/community/$listingId/raw/$'
+      fullPath: '/community/$listingId/raw/$'
+      preLoaderRoute: typeof CommunityListingIdRawSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orgs_/$orgSlug_/avatar_/$file': {
+      id: '/orgs_/$orgSlug_/avatar_/$file'
+      path: '/orgs/$orgSlug/avatar/$file'
+      fullPath: '/orgs/$orgSlug/avatar/$file'
+      preLoaderRoute: typeof OrgsOrgSlugAvatarFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profiles_/$username_/avatar_/$file': {
+      id: '/profiles_/$username_/avatar_/$file'
+      path: '/profiles/$username/avatar/$file'
+      fullPath: '/profiles/$username/avatar/$file'
+      preLoaderRoute: typeof ProfilesUsernameAvatarFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/agents_/new_/$agent': {
       id: '/@{$orgSlug}_/-/agents_/new_/$agent'
       path: '/@{$orgSlug}/-/agents/new/$agent'
@@ -3882,11 +4929,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125SecretsUserSecretNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$username}_/$kodyId_/raw_/$ref_/$': {
+      id: '/@{$username}_/$kodyId_/raw_/$ref_/$'
+      path: '/@{$username}/$kodyId/raw/$ref/$'
+      fullPath: '/@{$username}/$kodyId/raw/$ref/$'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdRawRefSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId_/tree/$ref/$': {
       id: '/@{$username}_/$kodyId_/tree/$ref/$'
       path: '/@{$username}/$kodyId/tree/$ref/$'
       fullPath: '/@{$username}/$kodyId/tree/$ref/$'
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdTreeRefSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$username}_/webhooks_/$packageKodyId_/$webhookName_/$urlSecret': {
+      id: '/@{$username}_/webhooks_/$packageKodyId_/$webhookName_/$urlSecret'
+      path: '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret'
+      fullPath: '/@{$username}/webhooks/$packageKodyId/$webhookName/$urlSecret'
+      preLoaderRoute: typeof AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/packages/$packageId/files/$': {
@@ -3895,6 +4956,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/account/packages/$packageId/files/$'
       preLoaderRoute: typeof AccountPackagesPackageIdFilesSplatRouteImport
       parentRoute: typeof AccountPackagesPackageIdRoute
+    }
+    '/account_/repos_/$repoId_/icon_/$iconCommit': {
+      id: '/account_/repos_/$repoId_/icon_/$iconCommit'
+      path: '/account/repos/$repoId/icon/$iconCommit'
+      fullPath: '/account/repos/$repoId/icon/$iconCommit'
+      preLoaderRoute: typeof AccountReposRepoIdIconIconCommitRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/account_/secrets_/package/$packageId/$secretName': {
       id: '/account_/secrets_/package/$packageId/$secretName'
@@ -3983,18 +5051,30 @@ const rootRouteChildren: RootRouteChildren = {
   R500Route: R500Route,
   AtChar123usernameChar125Route: AtChar123usernameChar125Route,
   AccountRoute: AccountRoute,
+  AuthRoute: AuthRoute,
+  AuthDotmdRoute: AuthDotmdRoute,
   CaseStudiesRoute: CaseStudiesRoute,
   CommunityRoute: CommunityRoute,
   DiscordRoute: DiscordRoute,
+  DocsDotmdRoute: DocsDotmdRoute,
   FaqRoute: FaqRoute,
   FeaturesRoute: FeaturesRoute,
+  GuidesRoute: GuidesRoute,
+  GuidesDotjsonRoute: GuidesDotjsonRoute,
+  GuidesDotmdRoute: GuidesDotmdRoute,
+  HealthRoute: HealthRoute,
+  LlmsDottxtRoute: LlmsDottxtRoute,
   LoginRoute: LoginRoute,
   OnboardingRoute: OnboardingRouteWithChildren,
   PendingVerificationRoute: PendingVerificationRoute,
   PricingRoute: PricingRoute,
   PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  RobotsDottxtRoute: RobotsDottxtRoute,
+  SentryTunnelRoute: SentryTunnelRoute,
+  SessionRoute: SessionRoute,
   SignupRoute: SignupRoute,
+  SitemapDotxmlRoute: SitemapDotxmlRoute,
   SupportRoute: SupportRoute,
   TermsRoute: TermsRoute,
   UseCasesRoute: UseCasesRoute,
@@ -4003,6 +5083,9 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyEmailChangeRoute: VerifyEmailChangeRoute,
   VerifyEmailClaimReleaseRoute: VerifyEmailClaimReleaseRoute,
   VerifyEmailDestinationRoute: VerifyEmailDestinationRoute,
+  DotwellKnownApiCatalogRoute: DotwellKnownApiCatalogRoute,
+  DotwellKnownOpenaiAppsChallengeRoute: DotwellKnownOpenaiAppsChallengeRoute,
+  DotwellKnownSecurityDottxtRoute: DotwellKnownSecurityDottxtRoute,
   AtChar123usernameChar125KodyIdRoute: AtChar123usernameChar125KodyIdRoute,
   AccountActivityRoute: AccountActivityRoute,
   AccountAgentsRoute: AccountAgentsRoute,
@@ -4011,11 +5094,13 @@ const rootRouteChildren: RootRouteChildren = {
   AccountDataRoute: AccountDataRoute,
   AccountEmailRoute: AccountEmailRoute,
   AccountExperimentsRoute: AccountExperimentsRoute,
+  AccountExportDotjsonRoute: AccountExportDotjsonRoute,
   AccountIntegrationsRoute: AccountIntegrationsRoute,
   AccountJobsRoute: AccountJobsRoute,
   AccountMcpOauthClientsRoute: AccountMcpOauthClientsRoute,
   AccountMcpServersRoute: AccountMcpServersRoute,
   AccountMemoriesRoute: AccountMemoriesRoute,
+  AccountMemoriesExportDotjsonRoute: AccountMemoriesExportDotjsonRoute,
   AccountOrganizationsRoute: AccountOrganizationsRoute,
   AccountPasskeysRoute: AccountPasskeysRoute,
   AccountSecretProvidersRoute: AccountSecretProvidersRoute,
@@ -4039,6 +5124,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminSystemEmailRoute: AdminSystemEmailRoute,
   AdminUsersRoute: AdminUsersRoute,
   BlogSlugRoute: BlogSlugRoute,
+  BlogRssDotxmlRoute: BlogRssDotxmlRoute,
+  BlogChar123slugChar125DotmdRoute: BlogChar123slugChar125DotmdRoute,
   CommunityListingIdRoute: CommunityListingIdRouteWithChildren,
   CompareComposioAlternativesRoute: CompareComposioAlternativesRoute,
   CompareN8nAlternativesRoute: CompareN8nAlternativesRoute,
@@ -4048,6 +5135,9 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectWebhookApplyRoute: ConnectWebhookApplyRoute,
   DocsSlugRoute: DocsSlugRoute,
   DocsConnectRoute: DocsConnectRoute,
+  DocsConnectDotmdRoute: DocsConnectDotmdRoute,
+  DocsLlmsDottxtRoute: DocsLlmsDottxtRoute,
+  DocsChar123slugChar125DotmdRoute: DocsChar123slugChar125DotmdRoute,
   FeaturesAppsRoute: FeaturesAppsRoute,
   FeaturesIntegrationsRoute: FeaturesIntegrationsRoute,
   FeaturesMemoryRoute: FeaturesMemoryRoute,
@@ -4055,25 +5145,36 @@ const rootRouteChildren: RootRouteChildren = {
   FeaturesSecretsRoute: FeaturesSecretsRoute,
   FeaturesTriggersRoute: FeaturesTriggersRoute,
   ForBusinessRoute: ForBusinessRoute,
+  GuidesSplatRoute: GuidesSplatRoute,
+  HealthComponentsRoute: HealthComponentsRoute,
   IntegrationsClaudeRoute: IntegrationsClaudeRoute,
   IntegrationsGmailRoute: IntegrationsGmailRoute,
   IntegrationsSlackRoute: IntegrationsSlackRoute,
   JoinTokenRoute: JoinTokenRoute,
   OauthAuthorizeRoute: OauthAuthorizeRoute,
   OauthCallbackRoute: OauthCallbackRoute,
+  OgChar123pageChar125DotpngRoute: OgChar123pageChar125DotpngRoute,
   UnsubscribeTipsRoute: UnsubscribeTipsRoute,
   UseCasesAiWorkflowAutomationRoute: UseCasesAiWorkflowAutomationRoute,
   UseCasesClaudeCodeCustomToolsRoute: UseCasesClaudeCodeCustomToolsRoute,
   UseCasesMcpGatewayRoute: UseCasesMcpGatewayRoute,
   UseCasesScheduledWorkflowsRoute: UseCasesScheduledWorkflowsRoute,
   UseCasesSharedAgentMemoryRoute: UseCasesSharedAgentMemoryRoute,
+  WebhooksStripeRoute: WebhooksStripeRoute,
+  YoutubeThumbVideoIdRoute: YoutubeThumbVideoIdRoute,
+  AdminIndexRoute: AdminIndexRoute,
   BlogIndexRoute: BlogIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
+  DotwellKnownAgentSkillsIndexDotjsonRoute:
+    DotwellKnownAgentSkillsIndexDotjsonRoute,
+  DotwellKnownMcpServerCardDotjsonRoute: DotwellKnownMcpServerCardDotjsonRoute,
   AtChar123orgSlugChar125ActivityRoute: AtChar123orgSlugChar125ActivityRoute,
   AtChar123orgSlugChar125AgentsRoute: AtChar123orgSlugChar125AgentsRoute,
   AtChar123orgSlugChar125BillingRoute: AtChar123orgSlugChar125BillingRoute,
   AtChar123orgSlugChar125CollaboratorsRoute:
     AtChar123orgSlugChar125CollaboratorsRoute,
+  AtChar123orgSlugChar125ConnectionsRoute:
+    AtChar123orgSlugChar125ConnectionsRoute,
   AtChar123orgSlugChar125CredentialsRoute:
     AtChar123orgSlugChar125CredentialsRoute,
   AtChar123orgSlugChar125EmailRoute: AtChar123orgSlugChar125EmailRoute,
@@ -4138,7 +5239,16 @@ const rootRouteChildren: RootRouteChildren = {
   AdminPlatformIntegrationsSlugRoute: AdminPlatformIntegrationsSlugRoute,
   AdminPlatformIntegrationsNewRoute: AdminPlatformIntegrationsNewRoute,
   AdminUsersStableUserIdRoute: AdminUsersStableUserIdRoute,
+  AuthProviderCallbackRoute: AuthProviderCallbackRoute,
+  BlogSlugOgDotpngRoute: BlogSlugOgDotpngRoute,
+  CommunityListingIdOgDotpngRoute: CommunityListingIdOgDotpngRoute,
+  DocsSlugOgDotpngRoute: DocsSlugOgDotpngRoute,
+  IntegrationsLogosIntegrationSlugRoute: IntegrationsLogosIntegrationSlugRoute,
+  IntegrationsProviderMarksSlugRoute: IntegrationsProviderMarksSlugRoute,
+  ProfilesUsernameOgDotpngRoute: ProfilesUsernameOgDotpngRoute,
   AccountPackagesIndexRoute: AccountPackagesIndexRoute,
+  DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute:
+    DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute,
   AtChar123orgSlugChar125ActivityRunIdRoute:
     AtChar123orgSlugChar125ActivityRunIdRoute,
   AtChar123orgSlugChar125AgentsNewRoute: AtChar123orgSlugChar125AgentsNewRoute,
@@ -4146,6 +5256,8 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125AgentsUsageRoute,
   AtChar123orgSlugChar125BillingSuccessRoute:
     AtChar123orgSlugChar125BillingSuccessRoute,
+  AtChar123orgSlugChar125ConnectionsSplatRoute:
+    AtChar123orgSlugChar125ConnectionsSplatRoute,
   AtChar123orgSlugChar125CredentialsCredentialIdRoute:
     AtChar123orgSlugChar125CredentialsCredentialIdRoute,
   AtChar123orgSlugChar125CredentialsNewRoute:
@@ -4174,16 +5286,27 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125ValuesNewRoute: AtChar123orgSlugChar125ValuesNewRoute,
   AtChar123orgSlugChar125WorkflowsWorkflowIdRoute:
     AtChar123orgSlugChar125WorkflowsWorkflowIdRoute,
+  AtChar123usernameChar125KodyIdAssetsSplatRoute:
+    AtChar123usernameChar125KodyIdAssetsSplatRoute,
   AtChar123usernameChar125KodyIdFilesSplatRoute:
     AtChar123usernameChar125KodyIdFilesSplatRoute,
+  AtChar123usernameChar125KodyIdIconIconCommitRoute:
+    AtChar123usernameChar125KodyIdIconIconCommitRoute,
   AccountAgentsNewAgentRoute: AccountAgentsNewAgentRoute,
   AccountConnectionsNewAgentRoute: AccountConnectionsNewAgentRoute,
   AccountIntegrationsAppsAppSlugRoute: AccountIntegrationsAppsAppSlugRoute,
+  AccountMcpServersLogosServerIdRoute: AccountMcpServersLogosServerIdRoute,
+  AccountMcpServersOauthCallbackRoute: AccountMcpServersOauthCallbackRoute,
   AccountPackagesPackageIdApproveCapabilitiesRoute:
     AccountPackagesPackageIdApproveCapabilitiesRoute,
   AccountPackagesPackageIdApprovePublishRoute:
     AccountPackagesPackageIdApprovePublishRoute,
   AccountSecretsUserSecretNameRoute: AccountSecretsUserSecretNameRoute,
+  CommunityListingIdAssetsSplatRoute: CommunityListingIdAssetsSplatRoute,
+  CommunityListingIdIconIconCommitRoute: CommunityListingIdIconIconCommitRoute,
+  CommunityListingIdRawSplatRoute: CommunityListingIdRawSplatRoute,
+  OrgsOrgSlugAvatarFileRoute: OrgsOrgSlugAvatarFileRoute,
+  ProfilesUsernameAvatarFileRoute: ProfilesUsernameAvatarFileRoute,
   AtChar123orgSlugChar125AgentsNewAgentRoute:
     AtChar123orgSlugChar125AgentsNewAgentRoute,
   AtChar123orgSlugChar125IntegrationsAppsAppSlugRoute:
@@ -4192,8 +5315,13 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125McpServersServerIdAuthorizeRoute,
   AtChar123orgSlugChar125SecretsUserSecretNameRoute:
     AtChar123orgSlugChar125SecretsUserSecretNameRoute,
+  AtChar123usernameChar125KodyIdRawRefSplatRoute:
+    AtChar123usernameChar125KodyIdRawRefSplatRoute,
   AtChar123usernameChar125KodyIdTreeRefSplatRoute:
     AtChar123usernameChar125KodyIdTreeRefSplatRoute,
+  AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute:
+    AtChar123usernameChar125WebhooksPackageKodyIdWebhookNameUrlSecretRoute,
+  AccountReposRepoIdIconIconCommitRoute: AccountReposRepoIdIconIconCommitRoute,
   AccountSecretsPackagePackageIdSecretNameRoute:
     AccountSecretsPackagePackageIdSecretNameRoute,
   AccountSecretsSessionSessionIdSecretNameRoute:
@@ -4206,17 +5334,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-
-import type { startInstance } from './start.ts'
-
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-
-    router: Awaited<ReturnType<typeof getRouter>>
-
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

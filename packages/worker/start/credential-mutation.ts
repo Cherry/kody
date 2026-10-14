@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
 import { pageQueryOrg } from './page-query-scope.ts'
 
 /** Credential writes invalidate only the submitting actor and organization. */
@@ -37,14 +36,5 @@ export function useCredentialMutation<TInput, TResult>(
 						scopeOrg(queryKey[3]) === submitted.org),
 			})
 		},
-	})
-}
-export function credentialPost(href: string, apiPath: string, body: unknown) {
-	return fetch(apiPath, {
-		method: 'POST',
-		credentials: 'include',
-		referrer: orgAccountApiReferrer(href),
-		headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-		body: JSON.stringify(body),
 	})
 }

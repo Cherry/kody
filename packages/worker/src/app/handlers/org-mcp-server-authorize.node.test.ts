@@ -1,15 +1,15 @@
-import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
-import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
-import { DatabaseSync } from 'node:sqlite'
-import { expect, test, vi } from 'vitest'
 import { createAuthCookie, setAuthSessionSecret } from '#app/auth-session.ts'
+import { type McpServerAuthorizeContinueResponse } from '#universal/loader-data.ts'
 import { type McpClientHubClient } from '#worker/mcp-client/hub-client.ts'
 import { type McpServerPendingAuthorization } from '#worker/mcp-client/types.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
-import { type McpServerAuthorizeContinueResponse } from '#universal/loader-data.ts'
+import { createPasswordHash } from '@kody-internal/shared/password-hash.ts'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
 	readPendingAuthorization: vi.fn<
@@ -35,8 +35,8 @@ vi.mock('#worker/mcp-client/hub-client.ts', () => ({
 		}) as Partial<McpClientHubClient>,
 }))
 
-const { createOrgMcpServerAuthorizePostHandler, loadMcpServerAuthorizeData } =
-	await import('./org-mcp-server-authorize.ts')
+const { testOrgMcpServerAuthorizePostHandler, loadMcpServerAuthorizeData } =
+	await import('./org-mcp-server-authorize.test-support.ts')
 
 const cookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 const origin = 'https://kody.test'
@@ -184,7 +184,7 @@ async function clickContinue(
 		},
 		body,
 	})
-	return createOrgMcpServerAuthorizePostHandler(env).handler({
+	return testOrgMcpServerAuthorizePostHandler(env).execute({
 		request,
 		params: { orgSlug, serverId },
 		url: new URL(request.url),
@@ -197,8 +197,8 @@ function readPage(result: Awaited<ReturnType<typeof openConsent>>) {
 	return result.payload
 }
 
-async function readContinue(response: Response) {
-	return (await response.json()) as McpServerAuthorizeContinueResponse
+async function readContinue(response: { data: unknown }) {
+	return response.data as McpServerAuthorizeContinueResponse
 }
 
 function refusedConsent(body: McpServerAuthorizeContinueResponse) {
@@ -245,7 +245,7 @@ test('consent page shows the connection and only hands out the provider URL afte
 
 	const missingToken = await clickContinue(env, { person: 'ada' })
 	expect(missingToken.status).toBe(403)
-	expect(missingToken.headers.get('Location')).toBeNull()
+	expect(new Headers(missingToken.headers).get('Location')).toBeNull()
 	const missingBody = refusedConsent(await readContinue(missingToken))
 	expect(missingBody.error).toMatch(/expired/)
 	expect(missingBody.consent?.pending?.csrfToken).toEqual(expect.any(String))
@@ -263,7 +263,9 @@ test('consent page shows the connection and only hands out the provider URL afte
 		csrf: loaded.pending?.csrfToken,
 	})
 	expect(approved.status).toBe(200)
-	expect(approved.headers.get('Cache-Control')).toBe('private, no-store')
+	expect(new Headers(approved.headers).get('Cache-Control')).toBe(
+		'private, no-store',
+	)
 	expect(await readContinue(approved)).toEqual({
 		ok: true,
 		authorizationUrl: providerUrl,
@@ -290,7 +292,7 @@ test('consent form tokens are bound to the person and the pending authorization'
 		csrf: adaToken,
 	})
 	expect(otherOwner.status).toBe(403)
-	expect(otherOwner.headers.get('Location')).toBeNull()
+	expect(new Headers(otherOwner.headers).get('Location')).toBeNull()
 
 	mocks.readPendingAuthorization.mockResolvedValue({
 		serverId: 'server-acme',

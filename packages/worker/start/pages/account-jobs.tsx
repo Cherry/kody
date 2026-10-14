@@ -1,36 +1,37 @@
 /** @jsxImportSource @emotion/react */
-import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { useState } from 'react'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
-import {
-	useMutation,
-	useQueryClient,
-	useIsMutating,
-} from '@tanstack/react-query'
-import { restorePageResource } from '../page-mutation-cache.ts'
-import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
-import { orgAccountApiReferrer } from '#client/org-account-api.ts'
-import { needsJobDetailRefresh } from './account-jobs-query.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 import {
 	filterAccountJobs,
 	readJobsSearchFilter,
 	readJobsViewFilter,
 	type AccountJobsViewFilter,
 } from '#client/routes/account-jobs-filter.ts'
+import { updateJobs } from '#start/server/account-mutations'
+import {
+	type AccountJobListItem,
+	type AccountJobsLoaderData,
+} from '#universal/loader-data.ts'
+import {
+	useIsMutating,
+	useMutation,
+	useQueryClient,
+} from '@tanstack/react-query'
+import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useState } from 'react'
+import { restorePageResource } from '../page-mutation-cache.ts'
+import { pageQueryOrg, scopedPageResource } from '../page-query-scope.ts'
 import {
 	renderAccountJobDetail,
 	renderJobDetailPlaceholder,
 } from './account-jobs-detail.tsx'
+import { needsJobDetailRefresh } from './account-jobs-query.ts'
 import {
-	type AccountJobsActionPayload,
-	accountJobsApiPath,
 	emptyJobsMessage,
 	jobsRoute,
 	packageLabel,
 	statusColor,
 	statusLabel,
 	viewFilterOptions,
+	type AccountJobsActionPayload,
 } from './account-jobs-shared.ts'
 import {
 	AccountManagementMessage,
@@ -44,10 +45,6 @@ import {
 	RecordTableSelect,
 	recordCellClamp,
 } from './record-table.tsx'
-import {
-	type AccountJobListItem,
-	type AccountJobsLoaderData,
-} from '#universal/loader-data.ts'
 
 const clampedCellCss = recordCellClamp(28)
 
@@ -89,7 +86,7 @@ export function AccountJobsPage({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
-			search: (previous) => {
+			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
 					: Object.fromEntries(matchedUrl.searchParams)
@@ -112,7 +109,6 @@ export function AccountJobsPage({
 	}
 
 	const queryClient = useQueryClient()
-	const captureSubmitter = useSubmitterScope()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const mutationKey = ['jobs', actorKey, pageQueryOrg(currentHref)] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
@@ -124,27 +120,13 @@ export function AccountJobsPage({
 			href: string
 			failureMessage: string
 		}) => {
-			const isCurrentSubmitter = captureSubmitter()
-			const response = await fetch(accountJobsApiPath, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
+			return updateJobs({
+				data: {
+					body: input.body,
+					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					search: new URL(input.href, 'https://kody.local').search,
 				},
-				credentials: 'include',
-				referrer: orgAccountApiReferrer(input.href),
-				body: JSON.stringify(input.body),
 			})
-			if (response.status === 401) {
-				if (isCurrentSubmitter()) window.location.assign('/login')
-				throw new Error('Please sign in again.')
-			}
-			const result = await readJson<
-				AccountJobsActionPayload & { error?: string; ok?: boolean }
-			>(response)
-			if (!response.ok || !result?.ok)
-				throw new Error(result?.error || input.failureMessage)
-			return result
 		},
 		onMutate: async ({ body, href }) => {
 			const resource = scopedPageResource(actorKey, 'loadJobsPage', href)

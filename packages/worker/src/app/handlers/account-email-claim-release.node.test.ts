@@ -19,7 +19,7 @@ import {
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { provisionPersonalOrgForSqliteUser } from '#worker/test-support/personal-org-seed.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
-import { createAccountEmailClaimReleaseHandler } from './account-email-claim-release.ts'
+import { requestWebsiteEmailRelease } from '#worker/identity/account-email-claim-release-operations.ts'
 import { createAuthHandler } from './auth.ts'
 
 const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
@@ -72,7 +72,6 @@ function createAppEnv(db: D1Database) {
 }
 
 function createReleaseClient(env: Env, session: AuthSession) {
-	const { handler } = createAccountEmailClaimReleaseHandler(env)
 	return async (email: string) => {
 		const request = new Request(
 			'http://example.com/account/email-claim-release.json',
@@ -85,7 +84,12 @@ function createReleaseClient(env: Env, session: AuthSession) {
 				body: JSON.stringify({ email, password: 'correct-password' }),
 			},
 		)
-		return handler({ request, url: new URL(request.url), params: {} } as never)
+		return requestWebsiteEmailRelease({
+			env,
+			request,
+			url: new URL(request.url),
+			body: { email, password: 'correct-password' },
+		})
 	}
 }
 
@@ -151,7 +155,9 @@ test('release re-verifies a former address then allows a new account without rem
 
 	const requestResponse = await release(formerEmail)
 	expect(requestResponse.status).toBe(200)
-	expect(await requestResponse.json()).toMatchObject({ ok: true })
+	expect(await Promise.resolve(requestResponse.data)).toMatchObject({
+		ok: true,
+	})
 	expect(
 		sqlite
 			.prepare(

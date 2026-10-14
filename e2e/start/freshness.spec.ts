@@ -23,7 +23,8 @@ async function saveDisplayName(page: Page, value: string) {
 	await page.getByLabel('Display name', { exact: true }).fill(value)
 	const saved = page.waitForResponse(
 		(response) =>
-			new URL(response.url()).pathname === '/account/profile.json' &&
+			response.request().headers()['x-tsr-serverfn'] === 'true' &&
+			response.request().postData()?.includes('displayName') === true &&
 			response.request().method() === 'POST',
 	)
 	await page.getByRole('button', { name: 'Save profile', exact: true }).click()
@@ -135,17 +136,10 @@ test('activation, reconnect and history refresh account data without leaking acc
 		// draft. An immediate assertion could pass before a late reset arrived.
 		const refreshed = second.waitForResponse(async (response) => {
 			if (response.request().method() !== 'GET') return false
-			const path = new URL(response.url()).pathname
-			if (
-				path !== '/account/profile.json' &&
-				response.request().headers()['x-tsr-serverfn'] !== 'true'
-			)
+			if (response.request().headers()['x-tsr-serverfn'] !== 'true')
 				return false
 			const body = await response.text()
-			return (
-				body.includes(nextName) &&
-				(path === '/account/profile.json' || body.includes('accountProfile'))
-			)
+			return body.includes(nextName) && body.includes('accountProfile')
 		})
 		// Exercise reconnect independently of focus. The response must contain
 		// the remote edit, while the local draft remains untouched.
@@ -175,7 +169,7 @@ test('activation, reconnect and history refresh account data without leaking acc
 			'data-freshness-document',
 			'other-account',
 		)
-		const otherData = await other.request.get('/account/profile.json')
+		const otherData = await other.request.get('/account')
 		expect(otherData.ok()).toBe(true)
 		const otherText = await otherData.text()
 		expect(otherText).not.toContain(a.email)
@@ -185,11 +179,13 @@ test('activation, reconnect and history refresh account data without leaking acc
 		await expect(
 			second.getByLabel('Display name', { exact: true }),
 		).toHaveValue(draft)
-		const persisted = await page.request.get('/account/profile.json')
-		expect(await persisted.json()).toMatchObject({
-			displayName: nextName,
-			username: a.username,
-		})
+		await page.reload()
+		await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(
+			nextName,
+		)
+		await expect(
+			page.getByRole('link', { name: 'View public profile', exact: true }),
+		).toHaveAttribute('href', `/@${a.username}`)
 	} finally {
 		await second.close()
 		await otherContext.close()

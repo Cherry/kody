@@ -1,104 +1,91 @@
-import { type Action } from 'remix/router'
-import { jsonResponse } from '#worker/json-response.ts'
-import {
-	auditDatabaseFromEnv,
-	getRequestIp,
-	logAuditEvent,
-} from '#worker/audit-log.ts'
+import { applyPasswordChange } from '#app/apply-password-change.ts'
 import { normalizeRedirectTo } from '#app/auth-redirect.ts'
-import {
-	resolvePostAuthLandingPath,
-	defaultPostVerificationRedirect,
-} from '#universal/safe-redirect.ts'
 import {
 	createAuthCookie,
 	destroyAuthCookie,
 	isSecureRequest,
 	readAuthSessionResult,
 } from '#app/auth-session.ts'
-import { getUniqueConstraintField } from '#worker/database-errors.ts'
+import { clearedFactorsAuditReason } from '#app/clear-account-factors.ts'
 import { maybeTagKitSubscriberOnSignup } from '#app/kit-signup.ts'
-import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
-import { getAvailableUsernameFromBase } from '#worker/identity/generated-username.ts'
-import { normalizeEmail } from '#worker/identity/normalize-email.ts'
 import {
-	oauthLoginErrorMessages,
-	type OauthLoginErrorCode,
-} from '#universal/oauth-login-errors.ts'
-import {
-	createOauthLoginStateCookie,
 	destroyOauthLoginStateCookie,
 	readOauthLoginState,
 	setOauthLoginStateSecret,
 } from '#app/oauth-login-state.ts'
 import {
-	buildAuthorizeRedirectUrl,
-	generateOauthRandomValue,
 	getOauthClientConfig,
 	isOauthProviderId,
 	resolveOauthProfile,
 	type OauthProfile,
 	type OauthProviderId,
 } from '#app/oauth-providers.ts'
-import { publicAuthProvidersLoaderData } from '#app/public-auth-providers.ts'
-import { assignUserRole } from '#worker/identity/permissions-db.ts'
-import { routes } from '#universal/routes.ts'
+import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
 import { isTwoFactorEnabled } from '#app/two-factor.ts'
-import { usernameFromEmail } from '#worker/identity/username.ts'
 import {
 	createVerifySessionCookie,
 	setVerifySessionSecret,
 } from '#app/verify-session.ts'
+import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
+import { firstTouchAttributionCreateFields } from '#universal/first-touch-attribution.ts'
+import { type OauthLoginErrorCode } from '#universal/oauth-login-errors.ts'
+import { resolvePlanWrite } from '#universal/plans.ts'
+import {
+	resolveReferralCodeForSignup,
+	serializeReferralCookie,
+} from '#universal/referral-cookie.ts'
+import { routes } from '#universal/routes.ts'
+import {
+	defaultPostVerificationRedirect,
+	resolvePostAuthLandingPath,
+} from '#universal/safe-redirect.ts'
+import {
+	AccountDeletionInProgressError,
+	assertAccountWritableDb,
+} from '#worker/account/deletion-state.ts'
+import {
+	auditDatabaseFromEnv,
+	getRequestIp,
+	logAuditEvent,
+} from '#worker/audit-log.ts'
+import {
+	maybeGrantSignupWelcomeCredits,
+	reconcileSignupWelcomeCreditsIfPending,
+} from '#worker/billing/signup-welcome-credits.ts'
+import { getUniqueConstraintField } from '#worker/database-errors.ts'
 import { createDb, oauthConnectionsTable, usersTable } from '#worker/db.ts'
+import {
+	maybeJoinOfficialDiscordGuild,
+	maybeSyncDiscordGuildRolesForUser,
+} from '#worker/discord/guild-role.ts'
 import { ensureDefaultEmailInbox } from '#worker/email/default-inbox.ts'
 import { getPlatformEmailDomain } from '#worker/email/platform-address.ts'
-import { resolvePlanWrite } from '#universal/plans.ts'
+import { attributeReferralAtSignup } from '#worker/entitlements/referral-program.ts'
+import { touchLastActiveAt } from '#worker/identity/activation-stamps.ts'
 import {
 	allocateSignupIdentity,
 	claimAccountEmail,
 } from '#worker/identity/email-claims.ts'
+import { getAvailableUsernameFromBase } from '#worker/identity/generated-username.ts'
+import { normalizeEmail } from '#worker/identity/normalize-email.ts'
+import { getCallbackRedirectUri } from '#worker/identity/oauth-provider-redirect.ts'
+import { recordOnboardingFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
+import { assignUserRole } from '#worker/identity/permissions-db.ts'
+import { scheduleUserCreatedEvent } from '#worker/identity/schedule-user-lifecycle-event.ts'
+import { unusablePasswordHash } from '#worker/identity/usable-password.ts'
+import { usernameFromEmail } from '#worker/identity/username.ts'
+import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
+import { type OAuthGrantHelpers } from '#worker/oauth-grants.ts'
+import {
+	provisionPersonalOrgForSignup,
+	rollbackPersonalOrgAfterFailedSignup,
+} from '#worker/orgs/signup-provision.ts'
 import {
 	personIdFromStored,
 	personalOrgId,
 	type OwnerId,
 } from '@kody-internal/shared/owner-person-ids.ts'
-import { recordOnboardingFunnelEvent } from '#worker/identity/onboarding-funnel.ts'
-import { verifyPublicFormProtection } from '#app/public-form-protection.ts'
-import {
-	firstTouchAttributionCreateFields,
-	hasFirstTouchAttribution,
-	parseFirstTouchAttribution,
-} from '#universal/first-touch-attribution.ts'
-import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
-import {
-	resolveReferralCodeForSignup,
-	serializeReferralCookie,
-} from '#universal/referral-cookie.ts'
-import { scheduleUserCreatedEvent } from '#worker/identity/schedule-user-lifecycle-event.ts'
-import {
-	maybeGrantSignupWelcomeCredits,
-	reconcileSignupWelcomeCreditsIfPending,
-} from '#worker/billing/signup-welcome-credits.ts'
-import { attributeReferralAtSignup } from '#worker/entitlements/referral-program.ts'
-import {
-	provisionPersonalOrgForSignup,
-	rollbackPersonalOrgAfterFailedSignup,
-} from '#worker/orgs/signup-provision.ts'
-import { touchLastActiveAt } from '#worker/identity/activation-stamps.ts'
-import { parseLegacyHosts } from '#worker/app-legacy-redirect.ts'
-import {
-	maybeJoinOfficialDiscordGuild,
-	maybeSyncDiscordGuildRolesForUser,
-} from '#worker/discord/guild-role.ts'
-import { applyPasswordChange } from '#app/apply-password-change.ts'
-import { invalidatePackageAppOwnerCache } from '#app/package-app-owner.ts'
-import { clearedFactorsAuditReason } from '#app/clear-account-factors.ts'
-import { type OAuthGrantHelpers } from '#worker/oauth-grants.ts'
-import { unusablePasswordHash } from '#worker/identity/usable-password.ts'
-import {
-	AccountDeletionInProgressError,
-	assertAccountWritableDb,
-} from '#worker/account/deletion-state.ts'
+import { type Action } from 'remix/router'
 
 /**
  * Accounts created through social login have no usable password until the
@@ -106,33 +93,6 @@ import {
  */
 import { andLiveDeletedAtSql } from '#worker/soft-delete/live-sql.ts'
 const oauthNoUsablePasswordHash = unusablePasswordHash.oauthCreated
-
-function getCallbackRedirectUri(env: Env, url: URL, provider: OauthProviderId) {
-	// The OAuth login state lives in a host-scoped cookie, so the provider must
-	// call back to the host that started the flow whenever that host has a
-	// registered callback: the canonical APP_BASE_URL host or a dual-served
-	// legacy host (APP_LEGACY_HOSTS, both registered with providers during a
-	// domain migration). Other hosts (the workers.dev backup trigger) keep
-	// using the configured canonical callback as before.
-	const base = (() => {
-		if (!env.APP_BASE_URL) return url
-		let canonical: URL
-		try {
-			canonical = new URL(env.APP_BASE_URL)
-		} catch {
-			return url
-		}
-		const requestHost = url.hostname.toLowerCase()
-		if (
-			requestHost === canonical.hostname.toLowerCase() ||
-			parseLegacyHosts(env.APP_LEGACY_HOSTS).includes(requestHost)
-		) {
-			return url
-		}
-		return canonical
-	})()
-	return new URL(`/auth/${provider}/callback`, base).toString()
-}
 
 function redirect(location: string, cookies: Array<string>) {
 	const headers = new Headers({ Location: location })
@@ -184,112 +144,6 @@ function signedInOauthReturnLocation(
  * a fetch-followed redirect may leave the origin — but a top-level JS
  * navigation may.
  */
-function prefersJsonResponse(request: Request) {
-	return (
-		request.headers
-			.get('Accept')
-			?.toLowerCase()
-			.includes('application/json') === true
-	)
-}
-
-export function createAuthProvidersApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler() {
-			return jsonResponse(publicAuthProvidersLoaderData(env))
-		},
-	} satisfies Action<typeof routes.authProvidersApi>
-}
-
-export function createAuthProviderStartHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, url, params }) {
-			const wantsJson = prefersJsonResponse(request)
-			const redirectTo = normalizeRedirectTo(url.searchParams.get('redirectTo'))
-			const attribution = parseFirstTouchAttribution({
-				searchParams: url.searchParams,
-				body: null,
-			})
-			const { session } = await readAuthSessionResult(request)
-
-			// Always consume the JSON start body. `request.clone().json()` tees
-			// it and leaves the original unread; workerd can then terminate
-			// the isolate ("Network connection lost"), and wrangler's
-			// ProxyController treats that as a fatal `wrangler dev` exit
-			// (workers-sdk#14926). Signed-in Connect-* from /account posts
-			// the same honeypot payload as signed-out Continue-with-*, so
-			// skipping the read here still leaked the unread body after
-			// oauth_connection_linked.
-			const body = (await request.json().catch(() => ({}))) as Record<
-				string,
-				unknown
-			>
-			if (!session) {
-				const protection = await verifyPublicFormProtection({
-					env,
-					request,
-					body: typeof body === 'object' && body !== null ? body : {},
-				})
-				if (!protection.ok) return protection.response
-			}
-
-			function startError(code: OauthLoginErrorCode) {
-				if (wantsJson) {
-					return jsonResponse(
-						{ ok: false, code, error: oauthLoginErrorMessages[code] },
-						400,
-					)
-				}
-				return redirectToLoginWithError(code, [], redirectTo)
-			}
-
-			const providerParam = params.provider
-			if (!isOauthProviderId(providerParam)) {
-				return startError('unknown-provider')
-			}
-			if (!getOauthClientConfig(env, providerParam)) {
-				return startError('not-configured')
-			}
-
-			setOauthLoginStateSecret(env.COOKIE_SECRET)
-			const state = generateOauthRandomValue()
-			const codeVerifier = generateOauthRandomValue()
-			const authorizeUrl = await buildAuthorizeRedirectUrl({
-				env,
-				provider: providerParam,
-				state,
-				codeVerifier,
-				redirectUri: getCallbackRedirectUri(env, url, providerParam),
-			})
-			const stateCookie = await createOauthLoginStateCookie(
-				{
-					provider: providerParam,
-					state,
-					codeVerifier,
-					redirectTo,
-					attribution: hasFirstTouchAttribution(attribution)
-						? attribution
-						: null,
-				},
-				isSecureRequest(request),
-			)
-			// JSON mode: the CSP (`form-action`/`connect-src` locked to 'self')
-			// blocks both form-POST redirects and fetch-followed redirects to
-			// the provider, so the client fetches this endpoint and performs a
-			// top-level navigation to the returned authorize URL itself.
-			if (wantsJson) {
-				return jsonResponse(
-					{ ok: true, authorizeUrl },
-					{ headers: { 'Set-Cookie': stateCookie } },
-				)
-			}
-			return redirect(authorizeUrl, [stateCookie])
-		},
-	} satisfies Action<typeof routes.authProviderStart>
-}
-
 export function createAuthProviderCallbackHandler(env: Env) {
 	const db = createDb(env.APP_DB)
 
@@ -781,6 +635,7 @@ export function createAuthProviderCallbackHandler(env: Env) {
 						username,
 						email,
 						stable_user_id: stableUserId,
+						personal_org_id: stableUserId,
 						password_hash: oauthNoUsablePasswordHash,
 						email_verified_at: createdAt,
 						...firstTouchAttributionCreateFields(signupAttribution),
@@ -801,7 +656,10 @@ export function createAuthProviderCallbackHandler(env: Env) {
 					await rollbackNewUser(newUser.id)
 				}
 				const uniqueField = getUniqueConstraintField(error)
-				if (uniqueField === 'stable_user_id') {
+				if (
+					uniqueField === 'stable_user_id' ||
+					uniqueField === 'personal_org_id'
+				) {
 					return fail('email-claimed', 'former_email_claimed')
 				}
 				if (uniqueField) {

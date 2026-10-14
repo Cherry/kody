@@ -1,14 +1,15 @@
-import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
-import { DatabaseSync } from 'node:sqlite'
-import { sessionRequestContext } from '#worker/test-support/request-context.ts'
-import { expect, test, vi } from 'vitest'
 import type * as AuthenticatedUser from '#app/authenticated-user.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import type * as AuditLog from '#worker/audit-log.ts'
-import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
+import { adminOperationOutcome } from '#worker/test-support/admin-operation-outcome.ts'
 import { applyAllMigrations as applyRepositoryMigrations } from '#worker/test-support/apply-all-migrations.ts'
+import { logAuditEventSpy } from '#worker/test-support/audit-log-spy.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { createFakeImagesBinding } from '#worker/test-support/images-binding.ts'
+import { sessionRequestContext } from '#worker/test-support/request-context.ts'
+import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
+import { DatabaseSync } from 'node:sqlite'
+import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser:
@@ -31,8 +32,8 @@ vi.mock('#worker/audit-log.ts', async (importOriginal) => {
 	}
 })
 
-const { createAdminPlatformIntegrationsApiHandler } =
-	await import('./admin-platform-integrations.ts')
+const { mutateAdminPlatformIntegrations } =
+	await import('#worker/admin/platform-integrations-operations.ts')
 
 const migrationsDirectory = new URL('../../../migrations/', import.meta.url)
 
@@ -86,18 +87,16 @@ function createHarness() {
 		IMAGES: createFakeImagesBinding(),
 	} as unknown as Env
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(createActor(['admin']))
-	const { handler } = createAdminPlatformIntegrationsApiHandler(env)
 	const url = new URL('https://example.com/admin/platform-integrations.json')
 	const invoke = (body: Record<string, unknown>) =>
-		handler({
-			request: new Request(url, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(body),
+		adminOperationOutcome(() =>
+			mutateAdminPlatformIntegrations({
+				env,
+				request: new Request(url, { headers: { Accept: 'application/json' } }),
+				url,
+				body,
 			}),
-			url,
-			params: {},
-		} as never)
+		)
 	const connectGithubUser = () =>
 		sqlite
 			.prepare(
@@ -140,7 +139,7 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 
 	const created = await invoke(saveGithubBody)
 	expect(created.status).toBe(200)
-	const createdPayload = (await created.json()) as AppsPayload
+	const createdPayload = (await Promise.resolve(created.data)) as AppsPayload
 	expect(createdPayload.apps[0]).toMatchObject({
 		slug: 'github',
 		hasClientSecret: true,
@@ -159,12 +158,16 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 		visibility: 'published',
 	})
 	expect(publish.status).toBe(200)
-	expect(((await publish.json()) as AppsPayload).apps[0]).toMatchObject({
+	expect(
+		((await Promise.resolve(publish.data)) as AppsPayload).apps[0],
+	).toMatchObject({
 		enabled: true,
 		visibility: 'published',
 	})
 	const kept = await invoke({ ...editGithubBody, slug: 'github' })
-	expect(((await kept.json()) as AppsPayload).apps[0]).toMatchObject({
+	expect(
+		((await Promise.resolve(kept.data)) as AppsPayload).apps[0],
+	).toMatchObject({
 		visibility: 'published',
 	})
 	const invalid = await invoke({
@@ -173,7 +176,7 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 		visibility: 'Draft',
 	})
 	expect(invalid.status).toBe(400)
-	await expect(invalid.json()).resolves.toMatchObject({
+	await expect(Promise.resolve(invalid.data)).resolves.toMatchObject({
 		ok: false,
 	})
 	const unpublish = await invoke({
@@ -181,7 +184,9 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 		slug: 'github',
 		visibility: 'draft',
 	})
-	expect(((await unpublish.json()) as AppsPayload).apps[0]).toMatchObject({
+	expect(
+		((await Promise.resolve(unpublish.data)) as AppsPayload).apps[0],
+	).toMatchObject({
 		enabled: true,
 		visibility: 'draft',
 	})
@@ -189,7 +194,7 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 	connectGithubUser()
 	const blocked = await invoke({ action: 'delete', slug: 'github' })
 	expect(blocked.status).toBe(400)
-	await expect(blocked.json()).resolves.toMatchObject({
+	await expect(Promise.resolve(blocked.data)).resolves.toMatchObject({
 		ok: false,
 		error: expect.stringContaining('still has 1 user connection'),
 	})
@@ -197,7 +202,9 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 	sqlite.prepare('DELETE FROM user_integrations').run()
 	const deleted = await invoke({ action: 'delete', slug: 'github' })
 	expect(deleted.status).toBe(200)
-	await expect(deleted.json()).resolves.toMatchObject({ apps: [] })
+	await expect(Promise.resolve(deleted.data)).resolves.toMatchObject({
+		apps: [],
+	})
 })
 
 test('save with newSlug renames in place, keeping the secret and connections', async () => {
@@ -214,7 +221,7 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 		label: 'GitHub',
 	})
 	expect(renamed.status).toBe(200)
-	const payload = (await renamed.json()) as AppsPayload
+	const payload = (await Promise.resolve(renamed.data)) as AppsPayload
 	expect(payload.apps.map((app: { slug: string }) => app.slug)).toEqual([
 		'github-platform',
 	])
@@ -239,7 +246,7 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 		newSlug: 'occupied',
 	})
 	expect(collision.status).toBe(400)
-	await expect(collision.json()).resolves.toMatchObject({
+	await expect(Promise.resolve(collision.data)).resolves.toMatchObject({
 		ok: false,
 		error: expect.stringContaining('already exists'),
 	})
@@ -252,7 +259,7 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 		label: 'GitHub (case-only edit)',
 	})
 	expect(caseOnly.status).toBe(200)
-	const caseOnlyPayload = (await caseOnly.json()) as AppsPayload
+	const caseOnlyPayload = (await Promise.resolve(caseOnly.data)) as AppsPayload
 	expect(
 		caseOnlyPayload.apps.find(
 			(app: { slug: string }) => app.slug === 'github-platform',
@@ -271,7 +278,7 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 	})
 	expect(failedEdit.status).toBe(400)
 	const after = await invoke({ ...editGithubBody, slug: 'github-platform' })
-	const slugs = ((await after.json()) as AppsPayload).apps.map(
+	const slugs = ((await Promise.resolve(after.data)) as AppsPayload).apps.map(
 		(app: { slug: string }) => app.slug,
 	)
 	expect(slugs).toContain('github-platform')

@@ -36,6 +36,7 @@ export async function loadConnectOauthLoaderData(
 	env: Env,
 	request: Request,
 	requestUrl: URL,
+	authenticatedUser?: Awaited<ReturnType<typeof readAuthenticatedAppUser>>,
 ): Promise<ConnectOauthLoaderData> {
 	const redirectUri = joinAppUrl({
 		env,
@@ -48,9 +49,11 @@ export async function loadConnectOauthLoaderData(
 		if (!isBareConnectOauthVisit(requestUrl)) {
 			return { ok: true, provider: null, integration: null, redirectUri }
 		}
-		const user = await readAuthenticatedAppUser(request, env, {
-			prefetchFeatureFlags: true,
-		})
+		const user =
+			authenticatedUser ??
+			(await readAuthenticatedAppUser(request, env, {
+				prefetchFeatureFlags: true,
+			}))
 		return {
 			ok: true,
 			provider: null,
@@ -65,9 +68,11 @@ export async function loadConnectOauthLoaderData(
 				: { options: [] },
 		}
 	}
-	const user = await readAuthenticatedAppUser(request, env, {
-		prefetchFeatureFlags: true,
-	})
+	const user =
+		authenticatedUser ??
+		(await readAuthenticatedAppUser(request, env, {
+			prefetchFeatureFlags: true,
+		}))
 	if (!user) {
 		return { ok: true, provider: null, integration: null, redirectUri }
 	}

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { ExperimentOptIn } from '../components/experiment-opt-in.tsx'
 import { type ReactNode } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { buildAuthLink } from '#client/auth-links.ts'
@@ -32,19 +33,9 @@ export function renderPackageSkillsFlagCallout(input: {
 					: 'Serving package skills over MCP is behind a feature flag because it may change or go away. Turn it on for your account if you want to try it.'}
 			</p>
 			{input.enabled ? null : input.loggedIn ? (
-				<form
-					method="post"
-					action={routes.packageSkillsOptInPost.href()}
-					css={actionCss}
-				>
-					<button
-						type="submit"
-						data-testid="package-skills-flag-opt-in"
-						css={getPillButtonCss({ size: 'sm' })}
-					>
-						Try package skills
-					</button>
-				</form>
+				<ExperimentOptIn experiment="package-skills">
+					Try package skills
+				</ExperimentOptIn>
 			) : (
 				<p css={actionCss}>
 					<SiteLink

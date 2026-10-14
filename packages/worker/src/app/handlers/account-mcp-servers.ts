@@ -1,11 +1,6 @@
-import { type RequestContext } from '@kody-internal/shared/request-context.ts'
-import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { waitUntil } from 'cloudflare:workers'
-import { jsonResponse } from '#worker/json-response.ts'
-import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
-import { type Action } from 'remix/router'
 import { loadAccountMcpServersData } from '#app/account-mcp-servers-data.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { operationResult } from '#app/operation-result.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
 	readNonEmptyTrimmedString,
@@ -17,13 +12,16 @@ import {
 } from '#universal/mcp-oauth-return.ts'
 import { orgSectionRestPath } from '#universal/org-section-hrefs.ts'
 import { routes } from '#universal/routes.ts'
-import { extractMcpServerIdFromOAuthState } from '#worker/mcp-client/oauth-state.ts'
-import { getMcpServerOwnerId } from '#worker/mcp-client/settings-repo.ts'
-import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
-import { deriveRequestContext } from '#worker/request-context/request-context.ts'
+import {
+	AuthorizationError,
+	authorize,
+} from '#worker/authorization/authorize.ts'
 import { createMcpClientHubClient } from '#worker/mcp-client/hub-client.ts'
 import { mcpOAuthAttemptActorFromIds } from '#worker/mcp-client/oauth-attempt.ts'
 import { enrichMcpOAuthProviderError } from '#worker/mcp-client/oauth-provider-error.ts'
+import { extractMcpServerIdFromOAuthState } from '#worker/mcp-client/oauth-state.ts'
+import { normalizeMcpPreRegisteredOAuthClientInput } from '#worker/mcp-client/preregistered-oauth-client.ts'
+import { getMcpServerOwnerId } from '#worker/mcp-client/settings-repo.ts'
 import {
 	addMcpServer,
 	deleteMcpServer,
@@ -34,111 +32,22 @@ import {
 	setMcpServerPreRegisteredOAuthClient,
 	setMcpServerUsage,
 } from '#worker/mcp-client/settings-service.ts'
-import { normalizeMcpPreRegisteredOAuthClientInput } from '#worker/mcp-client/preregistered-oauth-client.ts'
-import {
-	authorize,
-	AuthorizationError,
-} from '#worker/authorization/authorize.ts'
+import { type McpServerLastError } from '#worker/mcp-client/types.ts'
 import {
 	orgAuditWriterFromRequest,
 	recordOrgAuditEvent,
 } from '#worker/orgs/org-audit.ts'
-import { type McpServerLastError } from '#worker/mcp-client/types.ts'
+import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
+import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
+import { deriveRequestContext } from '#worker/request-context/request-context.ts'
+import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
+import { type RequestContext } from '@kody-internal/shared/request-context.ts'
+import { waitUntil } from 'cloudflare:workers'
+import { type Action } from 'remix/router'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-export function createAccountMcpServersApiHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-
-			if (request.method === 'GET') {
-				return jsonResponse(
-					await loadAccountMcpServersData({
-						env,
-						user,
-						requestUrl: request.url,
-						waitUntil,
-					}),
-				)
-			}
-
-			if (request.method !== 'POST') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
-
-			const body = await request.json().catch(() => null)
-			if (!body || typeof body !== 'object') {
-				return jsonResponse({ ok: false, error: 'Invalid request body.' }, 400)
-			}
-
-			const action = readTrimmedStringOrEmpty(body, 'action')
-			try {
-				if (action === 'add') {
-					return await handleAddAction({ env, user, body, request })
-				}
-				if (action === 'reconnect') {
-					return await handleConnectionAction({
-						env,
-						user,
-						body,
-						request,
-						kind: 'reconnect',
-					})
-				}
-				if (action === 'refresh') {
-					return await handleConnectionAction({
-						env,
-						user,
-						body,
-						request,
-						kind: 'refresh',
-					})
-				}
-				if (action === 'set-enabled') {
-					return await handleSetEnabledAction({ env, user, body, request })
-				}
-				if (action === 'set-usage') {
-					return await handleSetUsageAction({ env, user, body, request })
-				}
-				if (action === 'delete') {
-					return await handleDeleteAction({ env, user, body, request })
-				}
-				if (action === 'set-oauth-client' || action === 'remove-oauth-client') {
-					return await handleOAuthClientAction({
-						env,
-						user,
-						body,
-						request,
-						kind: action === 'set-oauth-client' ? 'set' : 'remove',
-					})
-				}
-			} catch (error) {
-				if (error instanceof AuthorizationError) {
-					return jsonResponse({ ok: false, error: error.message }, 403)
-				}
-				return jsonResponse(
-					{
-						ok: false,
-						error:
-							error instanceof Error
-								? error.message
-								: 'Unable to update MCP server settings.',
-					},
-					400,
-				)
-			}
-
-			return jsonResponse({ ok: false, error: 'Invalid action.' }, 400)
-		},
-	} satisfies Action<typeof routes.accountMcpServersApi>
-}
 
 /**
  * The request to finish an MCP OAuth callback as. The callback URL has no
@@ -328,7 +237,7 @@ async function handleAddAction(input: {
 		requestUrl: input.request.url,
 		waitUntil,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		selectedServerId: setting.id,
 	})
@@ -393,7 +302,7 @@ async function handleConnectionAction(input: {
 		requestUrl: input.request.url,
 		waitUntil,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		selectedServerId: setting.id,
 	})
@@ -421,7 +330,7 @@ async function handleSetEnabledAction(input: {
 		requestUrl: input.request.url,
 		waitUntil,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		selectedServerId: updated.id,
 	})
@@ -458,7 +367,7 @@ async function handleSetUsageAction(input: {
 		requestUrl: input.request.url,
 		waitUntil,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		selectedServerId: updated.id,
 	})
@@ -480,9 +389,9 @@ async function handleDeleteAction(input: {
 		id: setting.id,
 	})
 	if (!deleted) {
-		return jsonResponse({ ok: false, error: 'MCP server not found.' }, 404)
+		return operationResult({ ok: false, error: 'MCP server not found.' }, 404)
 	}
-	return jsonResponse(
+	return operationResult(
 		await loadAccountMcpServersData({
 			env: input.env,
 			user: input.user,
@@ -516,7 +425,7 @@ async function handleOAuthClientAction(input: {
 			clientSecret: (input.body as Record<string, unknown>)['clientSecret'],
 		})
 		if (!parsed.ok) {
-			return jsonResponse({ ok: false, error: parsed.error }, 400)
+			return operationResult({ ok: false, error: parsed.error }, 400)
 		}
 		client = { clientId: parsed.clientId, clientSecret: parsed.clientSecret }
 	}
@@ -535,7 +444,7 @@ async function handleOAuthClientAction(input: {
 		client,
 	})
 	if (!change.changed) {
-		return jsonResponse(
+		return operationResult(
 			{ ok: false, error: 'This server has no OAuth client configured.' },
 			400,
 		)
@@ -563,7 +472,7 @@ async function handleOAuthClientAction(input: {
 		requestUrl: input.request.url,
 		waitUntil,
 	})
-	return jsonResponse({
+	return operationResult({
 		...payload,
 		// The hub reply is authoritative even if the snapshot read failed.
 		servers: payload.servers.map((server) =>
@@ -607,4 +516,75 @@ function readStringArray(body: object, key: string) {
 	const value = (body as Record<string, unknown>)[key]
 	if (!Array.isArray(value)) return []
 	return value.filter((entry): entry is string => typeof entry === 'string')
+}
+
+export async function mutateAccountMcpServers({
+	request,
+	env,
+	user,
+	body,
+}: {
+	request: Request
+	env: Env
+	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
+	body: Record<string, unknown>
+}) {
+	const action = readTrimmedStringOrEmpty(body, 'action')
+	try {
+		if (action === 'add') {
+			return await handleAddAction({ env, user, body, request })
+		}
+		if (action === 'reconnect') {
+			return await handleConnectionAction({
+				env,
+				user,
+				body,
+				request,
+				kind: 'reconnect',
+			})
+		}
+		if (action === 'refresh') {
+			return await handleConnectionAction({
+				env,
+				user,
+				body,
+				request,
+				kind: 'refresh',
+			})
+		}
+		if (action === 'set-enabled') {
+			return await handleSetEnabledAction({ env, user, body, request })
+		}
+		if (action === 'set-usage') {
+			return await handleSetUsageAction({ env, user, body, request })
+		}
+		if (action === 'delete') {
+			return await handleDeleteAction({ env, user, body, request })
+		}
+		if (action === 'set-oauth-client' || action === 'remove-oauth-client') {
+			return await handleOAuthClientAction({
+				env,
+				user,
+				body,
+				request,
+				kind: action === 'set-oauth-client' ? 'set' : 'remove',
+			})
+		}
+	} catch (error) {
+		if (error instanceof AuthorizationError) {
+			return operationResult({ ok: false, error: error.message }, 403)
+		}
+		return operationResult(
+			{
+				ok: false,
+				error:
+					error instanceof Error
+						? error.message
+						: 'Unable to update MCP server settings.',
+			},
+			400,
+		)
+	}
+
+	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

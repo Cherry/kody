@@ -50,7 +50,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		const url = new URL(data.pathname, original.url)
 		const account = createMatcher(routes.accountPackageFiles.pattern).match(url)
 		if (!account) {
-			const request = new Request(url, { headers: original.headers })
+			const request = original
 			const target = await resolveCommunityFilesRoute({
 				env: bindings,
 				url,
@@ -105,7 +105,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		}
 		const path = normalizePackageFilesPath(account.params.relativePath ?? '')
 		if (path == null) throw notFound()
-		const request = new Request(url, { headers: original.headers })
+		const request = original
 		const user = await requireAuthenticatedPageUser(request, bindings, {
 			redirectTo: data.pathname,
 		})
