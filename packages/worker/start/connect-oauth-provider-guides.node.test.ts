@@ -2,12 +2,12 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { expect, test } from 'vitest'
 import {
 	mergeConnectOauthConfig,
-	parseStoredIntegrationConfig,
-} from './connect-oauth-config.ts'
-import { readConnectOauthQueryConfig } from './connect-oauth-shared.ts'
+	toStoredIntegrationConfig,
+} from '#client/routes/connect-oauth-config.ts'
+import { readConnectOauthQueryConfig } from './pages/connect-oauth-shared.ts'
 
 const providerGuidesDirectory = new URL(
-	'../../../../docs/guides/providers/',
+	'../../../docs/guides/providers/',
 	import.meta.url,
 )
 
@@ -79,20 +79,23 @@ test('the Dropbox preset connects with PKCE, a refresh token, and every Dropbox 
 })
 
 test('reconnecting an api-only Dropbox connection with the preset adds the missing hosts', () => {
-	const stored = parseStoredIntegrationConfig(
-		{
-			name: 'dropbox',
-			tokenUrl: 'https://api.dropboxapi.com/oauth2/token',
-			flow: 'pkce',
-			clientId: 'dropbox-app-key',
-			requiredHosts: ['api.dropboxapi.com', 'files.example.com'],
-			authorization: {
-				authorizeUrl: 'https://www.dropbox.com/oauth2/authorize',
-				scopes: ['files.content.read'],
-			},
+	const stored = toStoredIntegrationConfig({
+		name: 'dropbox',
+		appSlug: 'dropbox',
+		provider: 'dropbox',
+		appLabel: null,
+		accountLabel: null,
+		createdAt: '2026-10-14T00:00:00.000Z',
+		updatedAt: '2026-10-14T00:00:00.000Z',
+		tokenUrl: 'https://api.dropboxapi.com/oauth2/token',
+		flow: 'pkce',
+		clientId: 'dropbox-app-key',
+		requiredHosts: ['api.dropboxapi.com', 'files.example.com'],
+		authorization: {
+			authorizeUrl: 'https://www.dropbox.com/oauth2/authorize',
+			scopes: ['files.content.read'],
 		},
-		'dropbox',
-	)
+	})
 	expect(stored?.requiredHosts).toEqual([
 		'api.dropboxapi.com',
 		'files.example.com',

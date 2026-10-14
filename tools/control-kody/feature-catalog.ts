@@ -88,7 +88,6 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/account',
 			'/account/security',
 			'/account/data',
-			'/account/delete',
 			'/account/organizations',
 			'/account/organizations/new',
 			'/@:orgSlug/-/settings',

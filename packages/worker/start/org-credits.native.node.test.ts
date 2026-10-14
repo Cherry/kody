@@ -2,13 +2,13 @@ import { createElement } from 'react'
 import { expect, test } from 'vitest'
 import { type OrgCreditsLoaderData } from '#universal/loader-data.ts'
 import { orgCreditsPath } from '#universal/org-pages.ts'
-import { renderStartPage } from '../../start/test-support/render-start-page.ts'
+import { renderStartPage } from './test-support/render-start-page.ts'
 import {
 	formatBudgetLine,
 	formatLedgerAmount,
 	formatLedgerMicroUsd,
 	OrgCreditsPage,
-} from '../../start/pages/org-credits.tsx'
+} from './pages/org-credits.tsx'
 async function renderCreditsPage(payload: OrgCreditsLoaderData) {
 	const href = orgCreditsPath(payload.org.slug)
 	const html = await renderStartPage(

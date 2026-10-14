@@ -40,8 +40,19 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 			const bindings = getEnv(env)
 			setAuthSessionSecret(bindings.COOKIE_SECRET)
 			return await inRequest(async () => {
-				if (isServerFunctionRequest(request))
-					return renderDocument(request, bindings, oauthPage)
+				if (isServerFunctionRequest(request)) {
+					const response = await renderDocument(request, bindings, oauthPage)
+					// Start serializes thrown redirects after request middleware finishes.
+					// Enforce RPC privacy on the final response, even when shared document
+					// loaders set public caching for their canonical document redirects.
+					const headers = new Headers(response.headers)
+					headers.set('Cache-Control', 'private, no-store')
+					return new Response(response.body, {
+						status: response.status,
+						statusText: response.statusText,
+						headers,
+					})
+				}
 				const context = new RequestContext(request)
 				const middleware = [
 					remixCrossOriginProtection,

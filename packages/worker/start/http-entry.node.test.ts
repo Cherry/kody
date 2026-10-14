@@ -178,3 +178,56 @@ test('legacy org connection bookmarks redirect through the native route', async 
 		'/@acme/-/agents/usage?connection=abc',
 	)
 })
+
+test.each([200, 301, 403, 500])(
+	'RPC responses enforce private caching after rendering (%i)',
+	async (status) => {
+		vi.stubEnv('TSS_SERVER_FN_BASE', '/_serverFn/')
+		try {
+			const handle = createHttpRequestHandler(
+				async () =>
+					new Response('serialized result', {
+						status,
+						headers: {
+							'Cache-Control': 'public, max-age=3600',
+							Location: '/community/canonical',
+							'Set-Cookie': 'session=refreshed; HttpOnly',
+						},
+					}),
+			)
+			const response = await handle(
+				new Request('https://example.com/_serverFn/read'),
+				createEnv(),
+			)
+			expect(response.status).toBe(status)
+			expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+			expect(response.headers.get('Location')).toBe('/community/canonical')
+			expect(response.headers.get('Set-Cookie')).toBe(
+				'session=refreshed; HttpOnly',
+			)
+			expect(await response.text()).toBe('serialized result')
+		} finally {
+			vi.unstubAllEnvs()
+		}
+	},
+)
+
+test('canonical document redirects retain their public cache policy', async () => {
+	const handle = createHttpRequestHandler(
+		async () =>
+			new Response(null, {
+				status: 301,
+				headers: {
+					'Cache-Control': 'public, max-age=3600',
+					Location: '/community/canonical',
+				},
+			}),
+	)
+	const response = await handle(
+		new Request('https://example.com/community/old'),
+		createEnv(),
+	)
+	expect(response.status).toBe(301)
+	expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600')
+	expect(response.headers.get('Location')).toBe('/community/canonical')
+})
