@@ -1,5 +1,10 @@
 import { expect, test } from 'vitest'
-import { createMemoryHistory, createRouter } from '@tanstack/react-router'
+import {
+	createMemoryHistory,
+	createRouter,
+	interpolatePath,
+} from '@tanstack/react-router'
+import { getRouteSegments } from '@tanstack/router-core'
 import { QueryClient } from '@tanstack/react-query'
 import { routeTree } from './routeTree.gen.ts'
 import {
@@ -52,6 +57,9 @@ function routeEntries(): Array<RouteEntry> {
 		.filter((route) => route.id !== '__root__')
 		.map((route) => {
 			const source = route.fullPath
+			const segments = getRouteSegments(route)
+			if (!segments)
+				throw new Error(`Missing compiled segments for ${route.id}`)
 			const params = Object.fromEntries(
 				[...source.matchAll(/\$([A-Za-z]\w*)/g)].map(([, key]) => [
 					key,
@@ -62,10 +70,13 @@ function routeEntries(): Array<RouteEntry> {
 				name: source,
 				source,
 				method: 'ANY',
-				href: router.buildLocation({
-					to: source,
-					params: { ...params, _splat: 'x' },
-				} as never).href,
+				// This inventories every template, including aliases whose empty-splat
+				// sibling handles the same URL. Navigation destination selection is
+				// covered separately by router-specificity tests.
+				href: interpolatePath(source, segments, {
+					...params,
+					_splat: 'x',
+				}),
 			}
 		})
 }
