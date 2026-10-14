@@ -6,8 +6,8 @@ This document explains how an incoming request moves through the system.
 
 Production has two public HTTP entrypoints:
 
-- **App origin** (`kody.codes`) — `packages/worker/src/index.ts`. Remix, MCP
-  HTTP (`/mcp`), OAuth, inbound email, and queue consumers. Runtime-owned paths
+- **App origin** (`kody.codes`), `packages/worker/src/index.ts`. Start, MCP HTTP
+  (`/mcp`), OAuth, inbound email, and queue consumers. Runtime-owned paths
   (package-app origin hosts and inline `/@{username}/packages/…` on the app
   origin) forward over the `RUNTIME_WORKER` service binding to `kody-runtime`.
 - **Package-app origin** (`kody.run`) — `packages/worker/src/runtime-worker.ts`.
@@ -133,10 +133,10 @@ Requests are handled in this order:
    - Served from `ASSETS` for `GET` and `HEAD` when the path can be a file under
      `packages/worker/public/` (for example `/favicon.ico`, `/images/…`,
      `/fonts/…`, `/styles.css`, `/assets/…`)
-   - The origin skips that probe when the first segment is a Remix route root,
-     an `/@…` org or package path, or a pre-router mount (`/mcp`, `/api`,
-     `/oauth`, `/connectors`). Those prefixes have no static twin. `/og/…` still
-     probes because `public/og/` sits beside the `/og/:page.png` route
+   - The origin skips that probe when the first segment is an app route root, an
+     `/@…` org or package path, or a pre-router mount (`/mcp`, `/api`, `/oauth`,
+     `/connectors`). Those prefixes have no static twin. `/og/…` still probes
+     because `public/og/` sits beside the `/og/:page.png` route
    - Matching files are asset-first at the edge unless listed in
      `assets.run_worker_first`
 9. Hosted package apps served inline on the app origin
@@ -322,12 +322,12 @@ community READMEs, onboarding MCP config snippets, and JSON dumps on account
 jobs/activity — highlight with [Shiki](https://shiki.style/) on the
 `kody-highlight` worker. Origin loaders POST snippets over the `HIGHLIGHT`
 service binding (`POST /highlight`) and attach serializable token trees to
-loader/API data. The browser only paints those tokens as Remix JSX text and
-inline styles — never `innerHTML` — so untrusted README fences stay inside the
-markdown safety model. Light and dark tokens follow `prefers-color-scheme` via
-CSS variables in `packages/worker/public/styles.css`. Shiki grammars are not
-part of the browser bundle; missing tokens render as escaped plaintext in the
-same wrapper. Both origin and the highlight worker cache token batches keyed by
+loader/API data. The browser only paints those tokens as JSX text and inline
+styles — never `innerHTML` — so untrusted README fences stay inside the markdown
+safety model. Light and dark tokens follow `prefers-color-scheme` via CSS
+variables in `packages/worker/public/styles.css`. Shiki grammars are not part of
+the browser bundle; missing tokens render as escaped plaintext in the same
+wrapper. Both origin and the highlight worker cache token batches keyed by
 highlighter version.
 
 ## Client-side navigation flow

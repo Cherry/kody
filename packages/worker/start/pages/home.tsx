@@ -1,6 +1,6 @@
+/** @jsxImportSource @emotion/react */
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { LandingPrimitiveCards } from './landing-primitive-cards.tsx'
-/** @jsxImportSource @emotion/react */
 import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
 import {
 	accountDeletedConfirmationMessage,

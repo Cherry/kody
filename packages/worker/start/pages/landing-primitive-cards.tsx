@@ -1,5 +1,5 @@
-import { PrimitiveWidgetFrame } from '../components/primitive-widget-parts.tsx'
 /** @jsxImportSource @emotion/react */
+import { PrimitiveWidgetFrame } from '../components/primitive-widget-parts.tsx'
 import { type CSSProperties } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { primitiveRestScene } from '../components/primitive-widgets.tsx'

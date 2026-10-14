@@ -1,4 +1,3 @@
-import type * as CloudflareWorkers from 'cloudflare:workers'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as EmailDestinations from '#worker/email/destinations.ts'
@@ -7,15 +6,15 @@ import {
 	loadEmailDestinations,
 } from '../../../start/server/email.ts'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
-import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
 	listEmailNotificationDestinations,
 	maxAdditionalEmailNotificationDestinations,
 } from '#worker/email/destinations.ts'
 import { identityEmailDestinationId } from '#universal/email-destinations.ts'
 
-vi.mock('#app/page-auth.ts', () => ({
-	requireAuthenticatedPageUser: vi.fn(),
+const state = vi.hoisted(() => ({ collection: vi.fn() }))
+vi.mock('../../../start/server/account-collections.ts', () => ({
+	loadCollection: state.collection,
 }))
 
 vi.mock('#app/account-email-data.ts', () => ({
@@ -36,22 +35,8 @@ vi.mock('@tanstack/react-start', async () => ({
 	).createTestServerFn,
 	createServerOnlyFn: <T>(fn: T) => fn,
 }))
-vi.mock('cloudflare:workers', async (importOriginal) => ({
-	...(await importOriginal<typeof CloudflareWorkers>()),
-	env: { APP_DB: {}, COOKIE_SECRET: 'test' },
-}))
-vi.mock('@tanstack/react-start/server', () => ({
-	getRequest: () => new Request('https://example.com/_serverFn/email'),
-	setResponseHeader: vi.fn(),
-}))
-vi.mock('#app/env.ts', () => ({ getEnv: (env: unknown) => env }))
-vi.mock('#app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
-vi.mock('#app/org-request-binding.ts', () => ({
-	isOrgRequestDenied: async () => false,
-}))
-
 test('email server resources return independent message lists and actor destinations', async () => {
-	vi.mocked(requireAuthenticatedPageUser).mockResolvedValue({
+	const user = {
 		sessionUserId: '42',
 		userId: 42,
 		username: 'test-user',
@@ -67,7 +52,12 @@ test('email server resources return independent message lists and actor destinat
 			username: 'test-user',
 			displayName: 'user',
 		},
-	} as never)
+	}
+	state.collection.mockImplementation(async (href: string) => ({
+		bindings: { APP_DB: {} },
+		request: new Request(new URL(href, 'https://example.com')),
+		user,
+	}))
 	vi.mocked(loadAccountEmailData).mockResolvedValue({
 		ok: true,
 		emailVerified: true,
@@ -108,6 +98,17 @@ test('email server resources return independent message lists and actor destinat
 		}),
 		loadEmailDestinations(),
 	])
+	expect(state.collection).toHaveBeenCalledWith(
+		'/account/email?q=&page=1&pageSize=25',
+	)
+	expect(state.collection).toHaveBeenCalledWith('/account/email')
+	expect(listEmailNotificationDestinations).toHaveBeenCalledWith(
+		expect.objectContaining({
+			dbUserId: 42,
+			accountEmail: 'user@example.com',
+			accountEmailVerified: true,
+		}),
+	)
 	const response = { payload, destinations }
 	expect(response.payload).not.toHaveProperty('selectedMessage')
 	expect(response).toMatchObject({

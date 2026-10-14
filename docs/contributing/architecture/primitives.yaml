@@ -36,9 +36,12 @@ primitives:
   # --- Entry points -------------------------------------------------------
   - id: app-ui
     group: surfaces
-    name: Browser app (Remix 3)
-    summary: Server-first Remix UI and Worker-served app routes.
+    name: Browser app (TanStack Start)
+    summary:
+      TanStack Start documents, Router navigation, Query server state, and
+      Worker-served APIs.
     code:
+      - packages/worker/start/
       - packages/worker/client/
       - packages/worker/src/app/
       - packages/worker/universal/
