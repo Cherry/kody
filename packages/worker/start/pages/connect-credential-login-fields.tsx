@@ -1,5 +1,4 @@
 /** @jsxImportSource @emotion/react */
-import { css } from '@emotion/react'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import {
@@ -40,7 +39,7 @@ export function renderLoginFields(input: {
 					update({ loginFields: { ...state.loginFields, [field]: value } })
 				return (
 					<div key={field} css={fieldCss}>
-						<label for={id} css={fieldLabelCss}>
+						<label htmlFor={id} css={fieldLabelCss}>
 							{field.charAt(0).toUpperCase() + field.slice(1)}
 						</label>
 						{isMaskedLoginField(field) ? (
@@ -112,7 +111,7 @@ export function renderLoginExchange(input: {
 			</summary>
 			<div css={{ display: 'grid', gap: spacing.md, paddingTop: spacing.sm }}>
 				<div css={fieldCss}>
-					<label for="connect-credential-exchange-url" css={fieldLabelCss}>
+					<label htmlFor="connect-credential-exchange-url" css={fieldLabelCss}>
 						Login URL
 					</label>
 					<input
@@ -128,7 +127,10 @@ export function renderLoginExchange(input: {
 					/>
 				</div>
 				<div css={fieldCss}>
-					<label for="connect-credential-exchange-format" css={fieldLabelCss}>
+					<label
+						htmlFor="connect-credential-exchange-format"
+						css={fieldLabelCss}
+					>
 						Sent as
 					</label>
 					<select
@@ -147,7 +149,7 @@ export function renderLoginExchange(input: {
 					</select>
 				</div>
 				<div css={fieldCss}>
-					<label for="connect-credential-exchange-body" css={fieldLabelCss}>
+					<label htmlFor="connect-credential-exchange-body" css={fieldLabelCss}>
 						Request body{' '}
 						<span css={labelHintCss}>
 							(JSON; <code>{'{username}'}</code> is replaced by that login
@@ -166,7 +168,10 @@ export function renderLoginExchange(input: {
 					/>
 				</div>
 				<div css={fieldCss}>
-					<label for="connect-credential-exchange-token" css={fieldLabelCss}>
+					<label
+						htmlFor="connect-credential-exchange-token"
+						css={fieldLabelCss}
+					>
 						Token path{' '}
 						<span css={labelHintCss}>(where the response holds it)</span>
 					</label>

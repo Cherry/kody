@@ -37,7 +37,7 @@ export function credentialCreateMode(
 	}
 }
 
-function isValueFormKind(kind: CredentialKind): kind is ValueFormKind {
+export function isValueFormKind(kind: CredentialKind): kind is ValueFormKind {
 	return credentialCreateMode(kind) === 'value-form'
 }
 

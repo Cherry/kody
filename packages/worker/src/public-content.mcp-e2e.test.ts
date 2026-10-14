@@ -36,7 +36,7 @@ function contains(html: string, markers: string[]) {
 	for (const marker of markers) expect(html).toContain(marker)
 }
 
-test('authorized team Secrets and Agents are real native documents', async () => {
+test('legacy team Secrets redirects to native Credentials and Agents remains authorized', async () => {
 	const server = await getSharedMcpE2eServer()
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
@@ -50,8 +50,22 @@ test('authorized team Secrets and Agents are real native documents', async () =>
 	})
 	expect(created.status).toBe(302)
 	expect(created.headers.get('Location')).toBe(`${server.origin}/@${slug}`)
+	const legacy = await fetch(`${server.origin}/@${slug}/-/secrets`, {
+		headers: { Cookie: cookie },
+		redirect: 'manual',
+	})
+	expect(legacy.status).toBe(302)
+	const credentialsPath = `/@${slug}/-/credentials?kind=secret`
+	expect(legacy.headers.get('Location')).toBe(credentialsPath)
+	const anonymous = await fetch(new URL(credentialsPath, server.origin), {
+		redirect: 'manual',
+	})
+	expect(anonymous.status).toBe(302)
+	expect(
+		new URL(anonymous.headers.get('Location')!, server.origin).pathname,
+	).toBe('/login')
 	for (const [section, heading] of [
-		['secrets', 'Secrets'],
+		['credentials?kind=secret', 'Credentials'],
 		['agents', 'Agents'],
 	]) {
 		const { html } = await document(`/@${slug}/-/${section}`, cookie)

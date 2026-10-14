@@ -20,11 +20,12 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
 				statusCode: 302,
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
+		return {
+			pageQueryInput: location.pathname + location.searchStr,
+		}
 	},
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
-	}),
+
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

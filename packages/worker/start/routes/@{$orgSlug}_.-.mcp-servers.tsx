@@ -21,10 +21,11 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers')({
 				statusCode: 302,
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
+		return {
+			pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
+		}
 	},
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
-	}),
+
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

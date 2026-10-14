@@ -17,12 +17,13 @@ export const Route = createFileRoute('/connect/secret-set')({
 				statusCode: 302,
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
+		return {
+			pageQueryInput: location.pathname + location.searchStr,
+		}
 	},
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
-	}),
+
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

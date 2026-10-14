@@ -23,16 +23,17 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
 				statusCode: 302,
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
+		return {
+			pageQueryInput:
+				location.pathname +
+				pageSearch(location.searchStr, ['name', 'package_id']),
+		}
 	},
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		name: search.name,
 		package_id: search.package_id,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, ['name', 'package_id']),
-	}),
+
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

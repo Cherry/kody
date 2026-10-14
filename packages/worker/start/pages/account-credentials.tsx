@@ -5,7 +5,6 @@ import { css } from '@emotion/react'
 import { useRouter } from '@tanstack/react-router'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
-import { type AccountStatus } from '#client/routes/account-approval-shared.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -214,11 +213,6 @@ export function AccountCredentialsRoute({
 			replace: true,
 		})
 	}
-	const pending = false
-	const status: AccountStatus = 'ready'
-	const snapshot: {
-		error: Error | null
-	} = { error: null }
 	const pageUrl =
 		typeof window === 'undefined'
 			? currentHref
@@ -244,11 +238,7 @@ export function AccountCredentialsRoute({
 		selectedItem && !filtered.includes(selectedItem)
 			? [selectedItem, ...filtered]
 			: filtered
-	const selectedMissing =
-		selection.selectedId !== null &&
-		status === 'ready' &&
-		!pending &&
-		!selectedItem
+	const selectedMissing = selection.selectedId !== null && !selectedItem
 	const lockedPackageId =
 		typeof filters.locked === 'string' ? filters.locked : ''
 	const shownProviders = filterProviderBindings(
@@ -264,7 +254,7 @@ export function AccountCredentialsRoute({
 		})),
 	]
 	return (
-		<AccountManagementShell busy={pending && payload !== null}>
+		<AccountManagementShell>
 			<AccountPageHeader
 				title="Credentials"
 				description="Keys, OAuth connections, MCP servers, and every other way Kody reaches a service for you. Kody places each value at the network boundary; values never appear here."
@@ -289,13 +279,6 @@ export function AccountCredentialsRoute({
 				}
 			/>
 
-			{snapshot.error
-				? renderCredentialsError({
-						message: snapshot.error.message,
-						pageUrl,
-					})
-				: null}
-
 			{selectedMissing
 				? renderCredentialsError({
 						message:
@@ -308,7 +291,7 @@ export function AccountCredentialsRoute({
 				mode="expand"
 				ariaLabel="Credentials"
 				selectedId={selectedItem ? selectedItem.id : null}
-				recordLoading={Boolean(selectedItem && !selectedDetail && pending)}
+				recordLoading={false}
 				record={
 					selectedItem
 						? renderCredentialDetail({
@@ -323,19 +306,13 @@ export function AccountCredentialsRoute({
 							})
 						: undefined
 				}
-				countLabel={
-					status === 'ready'
-						? `${shown.length} of ${credentials.length} shown`
-						: undefined
-				}
+				countLabel={`${shown.length} of ${credentials.length} shown`}
 				emptyLabel={
-					status !== 'ready'
-						? 'Loading credentials…'
-						: credentials.length === 0
-							? shownProviders.length > 0
-								? 'No keys, OAuth connections, or MCP servers yet. Your custom secret providers are listed below.'
-								: 'No credentials yet. Add a key, connect an OAuth service, or add an MCP server to get started.'
-							: 'No credentials match the current filters.'
+					credentials.length === 0
+						? shownProviders.length > 0
+							? 'No keys, OAuth connections, or MCP servers yet. Your custom secret providers are listed below.'
+							: 'No credentials yet. Add a key, connect an OAuth service, or add an MCP server to get started.'
+						: 'No credentials match the current filters.'
 				}
 				toolbar={
 					<>

@@ -1,8 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { SiteLink } from '../components/site-link.tsx'
 
-import { css } from '@emotion/react'
-import { type FormEvent, useState } from 'react'
+import { type ReactNode, type FormEvent, useState } from 'react'
 import {
 	useCredentialMutation,
 	credentialPost,
@@ -17,6 +16,9 @@ import {
 } from '#client/routes/account-approval-shared.ts'
 import { AccountManagementShell } from './account-management-components.tsx'
 import {
+	credentialCreateHandoffHref,
+	credentialCreateMode,
+	isValueFormKind,
 	buildKeySaveBody,
 	createKeyFormState,
 	credentialCreateAgentPrompt,
@@ -43,6 +45,7 @@ import {
 	renderPackageAccess,
 } from './connect-credential-parts.tsx'
 import {
+	type CredentialKind,
 	type CredentialListItem,
 	credentialKinds,
 	parseCredentialCreateQuery,
@@ -282,7 +285,7 @@ export function ConnectCredentialRoute({
 					}}
 				>
 					<div css={fieldCss}>
-						<label for="connect-credential-name" css={fieldLabelCss}>
+						<label htmlFor="connect-credential-name" css={fieldLabelCss}>
 							Name
 						</label>
 						<input
@@ -357,7 +360,7 @@ export function ConnectCredentialRoute({
 						renderLoginFields({ state, update })
 					) : (
 						<div css={fieldCss}>
-							<label for="connect-credential-value" css={fieldLabelCss}>
+							<label htmlFor="connect-credential-value" css={fieldLabelCss}>
 								Value
 							</label>
 							<PasswordRevealInput
@@ -383,7 +386,7 @@ export function ConnectCredentialRoute({
 						</div>
 					)}
 					<div css={fieldCss}>
-						<label for="connect-credential-hosts" css={fieldLabelCss}>
+						<label htmlFor="connect-credential-hosts" css={fieldLabelCss}>
 							{isKey ? 'Allowed hosts' : 'Hosts'}{' '}
 							<span css={labelHintCss}>(one per line)</span>
 						</label>
@@ -402,7 +405,7 @@ export function ConnectCredentialRoute({
 					</div>
 					{kind === 'login' ? renderLoginExchange({ state, update }) : null}
 					<div css={fieldCss}>
-						<label for="connect-credential-provider" css={fieldLabelCss}>
+						<label htmlFor="connect-credential-provider" css={fieldLabelCss}>
 							Provider <span css={labelHintCss}>(optional)</span>
 						</label>
 						<input
@@ -416,7 +419,7 @@ export function ConnectCredentialRoute({
 						/>
 					</div>
 					<div css={fieldCss}>
-						<label for="connect-credential-description" css={fieldLabelCss}>
+						<label htmlFor="connect-credential-description" css={fieldLabelCss}>
 							Description <span css={labelHintCss}>(optional)</span>
 						</label>
 						<input
@@ -435,7 +438,7 @@ export function ConnectCredentialRoute({
 						update,
 					})}
 					<div css={fieldCss}>
-						<label for="connect-credential-expires" css={fieldLabelCss}>
+						<label htmlFor="connect-credential-expires" css={fieldLabelCss}>
 							Expires <span css={labelHintCss}>(optional)</span>
 						</label>
 						<input
@@ -605,4 +608,57 @@ export function ConnectCredentialRoute({
 			</section>
 		</AccountManagementShell>
 	)
+}
+
+function renderKindBody(input: {
+	kind: CredentialKind
+	search: URLSearchParams
+	orgSlug: string
+	personalOrgSlug: string | null
+	valueForm: (kind: ValueFormKind) => ReactNode
+}) {
+	const mode = credentialCreateMode(input.kind)
+	switch (mode) {
+		case 'value-form':
+			return isValueFormKind(input.kind) ? input.valueForm(input.kind) : null
+		case 'handoff': {
+			const kind = input.kind === 'oauth' ? 'oauth' : 'mcp'
+			const provider = input.search.get('provider')?.trim()
+			return (
+				<section css={cardCss} data-testid="connect-credential-handoff">
+					<p css={{ margin: 0 }}>
+						{kind === 'oauth'
+							? `Kody sends you to ${provider ? `${provider}'s` : 'the provider’s'} sign-in, then brings you back.`
+							: 'Add the server’s URL. Kody connects to it and asks you to sign in when the server needs it.'}
+					</p>
+					{kind === 'oauth' &&
+					input.personalOrgSlug &&
+					input.orgSlug &&
+					input.personalOrgSlug !== input.orgSlug ? (
+						<p css={mutedCss} data-testid="connect-credential-oauth-personal">
+							Kody saves OAuth connections to your personal account,{' '}
+							<code>@{input.personalOrgSlug}</code>, not to this team.
+						</p>
+					) : null}
+					<SiteLink
+						href={credentialCreateHandoffHref({
+							kind,
+							search: input.search,
+							orgSlug: input.orgSlug,
+						})}
+						css={primaryButtonCss}
+						data-testid="connect-credential-continue"
+					>
+						{kind === 'oauth'
+							? 'Continue to connect'
+							: 'Continue to add server'}
+					</SiteLink>
+				</section>
+			)
+		}
+		default: {
+			const exhaustive: never = mode
+			return exhaustive
+		}
+	}
 }

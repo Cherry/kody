@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { SiteLink } from '../components/site-link.tsx'
 
-import { css } from '@emotion/react'
 import { type ReactNode, useState, useRef, useEffect } from 'react'
 import { useCredentialMutation } from '../credential-mutation.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'

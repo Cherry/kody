@@ -30,36 +30,45 @@ test('native token error documents retain status and actionable recovery', async
 	}
 })
 
-test('native secret connection pages require login and retain setup values', async () => {
-	for (const path of [
-		'/connect/secrets',
-		'/connect/secret-set?name=exampleApiKey',
-	]) {
+test('native secret connection redirects preserve prefill and destination authentication', async () => {
+	const server = await getSharedMcpE2eServer()
+	const legacyPath =
+		'/connect/secret-set?name=exampleApiKey&allowedHosts=api.example.com'
+	const creationPath =
+		'/connect/credential?kind=secret&name=exampleApiKey&allowedHosts=api.example.com'
+	const legacyAnonymous = await readDocument(legacyPath)
+	expect(legacyAnonymous.response.status).toBe(302)
+	expect(legacyAnonymous.response.headers.get('Location')).toBe(creationPath)
+	for (const path of ['/connect/secrets', creationPath]) {
 		const { response } = await readDocument(path)
 		expect(response.status).toBe(302)
-		expect(response.headers.get('Location')).toContain('/login')
+		const login = new URL(response.headers.get('Location')!, server.origin)
+		expect(login.pathname).toBe('/login')
+		expect(login.searchParams.get('redirectTo')).toBe(path)
 	}
-	const server = await getSharedMcpE2eServer()
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
 	const cookie = await loginToApp(server.origin, user)
-	const { response, html } = await readDocument(
-		'/connect/secret-set?name=exampleApiKey&allowedHosts=api.example.com',
-		cookie,
-	)
+	const legacy = await readDocument(legacyPath, cookie)
+	expect(legacy.response.status).toBe(302)
+	expect(legacy.response.headers.get('Location')).toBe(creationPath)
+	const creation = await readDocument(creationPath, cookie)
+	expect(creation.response.status).toBe(302)
+	const destination = `/@${user.username}/-/credentials/new?kind=secret&name=exampleApiKey&allowedHosts=api.example.com`
+	expect(creation.response.headers.get('Location')).toBe(destination)
+	const { response, html } = await readDocument(destination, cookie)
 	expect(response.status).toBe(200)
 	expect(html).toContain('exampleApiKey')
 	expect(html).toContain('api.example.com')
-	expect(html).toContain('Set secret')
+	expect(html).toContain('Add a key')
+	expect(html).toContain('Save key')
 	expect(html).not.toContain('data-testid="internal-error-page"')
 	const prefilled = await readDocument(
 		`/@${user.username}/-/secrets/new?name=exampleApiKey&allowedHosts=api.example.com`,
 		cookie,
 	)
 	expect(prefilled.response.status).toBe(302)
-	expect(prefilled.response.headers.get('Location')).toBe(
-		'/connect/secret-set?name=exampleApiKey&allowedHosts=api.example.com',
-	)
+	expect(prefilled.response.headers.get('Location')).toBe(legacyPath)
 	const bare = await readDocument(`/@${user.username}/-/secrets/new`, cookie)
 	expect(bare.response.status).toBe(200)
 	expect(bare.html).toContain('Secrets')
