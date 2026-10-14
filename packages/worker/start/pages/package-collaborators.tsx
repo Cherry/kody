@@ -99,7 +99,13 @@ export function PackageCollaboratorsRoute({
 			await client.cancelQueries({ queryKey: query.queryKey, exact: true })
 			const { invite: _invite, ...accepted } = result
 			client.setQueryData(query.queryKey, (old) =>
-				old ? { ...old, payload: { ...old.payload, view: accepted } } : old,
+				old?.kind === 'page'
+					? {
+							...old,
+							kind: 'page' as const,
+							payload: { ...old.payload, view: accepted },
+						}
+					: old,
 			)
 		},
 		onSettled: () => {

@@ -49,7 +49,9 @@ vi.mock('../../src/app/community-package-payload.ts', () => ({
 	loadCommunityPackagePayload: async () =>
 		mocks.kind === 'redirect'
 			? mocks.moved
-			: { kind: mocks.kind, data: mocks.payload },
+			: mocks.kind === 'no_access'
+				? { kind: 'no_access', ...mocks.payload }
+				: { kind: mocks.kind, data: mocks.payload },
 	loadCommunityDetailPayload: async () => ({
 		kind: 'page',
 		data: mocks.payload,
@@ -190,5 +192,30 @@ test.each([true, false])(
 				repoActions: { publishHref: viewerCanManage ? '/approval' : null },
 			},
 		})
+	},
+)
+
+test.each([undefined, 'settings'] as const)(
+	'private package denial is a private403 for %s',
+	async (page) => {
+		mocks.kind = 'no_access'
+		mocks.payload = {
+			username: 'owner',
+			kodyId: 'private',
+			packageName: '@owner/private',
+			viewerUsername: 'visitor',
+		}
+		const result = await loadPackage({
+			data: { username: 'owner', kodyId: 'private', ...(page ? { page } : {}) },
+		})
+		expect(result).toMatchObject({
+			kind: 'no_access',
+			username: 'owner',
+			kodyId: 'private',
+			viewerUsername: 'visitor',
+		})
+		expect(mocks.status).toBe(403)
+		expect(mocks.headers.get('Cache-Control')).toBe('private, no-store')
+		expect(mocks.headers.get('X-Robots-Tag')).toBe('noindex, nofollow')
 	},
 )

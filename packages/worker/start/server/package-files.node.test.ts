@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest'
 const state = vi.hoisted(() => ({
 	target: {} as Record<string, unknown>,
 	headers: vi.fn(),
+	status: vi.fn(),
 	auth: vi.fn(),
 }))
 vi.mock('@tanstack/react-start', () => ({
@@ -28,6 +29,7 @@ vi.mock('cloudflare:workers', () => ({ env: {} }))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => new Request('https://kody.test/_serverFn/read'),
 	setResponseHeader: state.headers,
+	setResponseStatus: state.status,
 }))
 vi.mock('../../src/app/env.ts', () => ({ getEnv: () => ({}) }))
 vi.mock('../../src/app/auth-session.ts', () => ({
@@ -125,3 +127,26 @@ test.each(['//evil.test/files', '/\\evil.test/files', '/%5cevil.test/files'])(
 		expect(state.auth).not.toHaveBeenCalled()
 	},
 )
+
+test('signed-in file denial stays403 instead of redirecting to login', async () => {
+	state.target = {
+		kind: 'no_access',
+		username: 'owner',
+		kodyId: 'private',
+		packageName: '@owner/private',
+		viewerUsername: 'visitor',
+	}
+	const result = await loadPackageFiles({
+		data: { pathname: '/@owner/private/tree/main/README.md' },
+	})
+	expect(result).toMatchObject({
+		kind: 'no_access',
+		data: null,
+		viewerUsername: 'visitor',
+	})
+	expect(state.status).toHaveBeenCalledWith(403)
+	expect(state.headers).toHaveBeenCalledWith(
+		'Cache-Control',
+		'private, no-store',
+	)
+})

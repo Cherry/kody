@@ -1,3 +1,4 @@
+import { PackageNoAccessPage } from '../components/package-no-access-page.tsx'
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
@@ -38,6 +39,7 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/settings')({
 })
 function Page() {
 	const data = usePageData()
+	if (data.kind === 'no_access') return <PackageNoAccessPage {...data} />
 	if (data.kind !== 'page')
 		return renderMissingListing(
 			'Unauthorized',

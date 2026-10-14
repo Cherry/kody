@@ -1,3 +1,4 @@
+import { PackageNoAccessPage } from '../components/package-no-access-page.tsx'
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
 import { createPageQuery, loadPageQuery, usePageQuery } from '../page-query.ts'
@@ -25,7 +26,9 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/triggers')({
 })
 function Page() {
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	const { payload } = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	const result = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	if (result.kind === 'no_access') return <PackageNoAccessPage {...result} />
+	const { payload } = result
 	return (
 		<PackageCredentialsRoute
 			key={pageQueryInput}

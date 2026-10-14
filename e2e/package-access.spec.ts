@@ -23,11 +23,15 @@ async function expectPrivateContentDenied(
 	page: Page,
 	path: string,
 	marker: string,
+	status: 403 | 404,
 ) {
 	const response = await page.goto(path)
-	expect(response?.status()).toBe(404)
+	expect(response?.status()).toBe(status)
 	// Check serialized loader data as well as visible text.
 	expect(await response!.text()).not.toContain(marker)
+	await expect(page.getByTestId('package-no-access-page')).toHaveCount(
+		status === 403 ? 1 : 0,
+	)
 	await expect(page.getByTestId('package-owner-details')).toHaveCount(0)
 	await expect(page.getByText(marker, { exact: true })).toHaveCount(0)
 }
@@ -131,11 +135,19 @@ test('private package source and settings stay isolated across owner, granted gu
 		const anonymousPage = await anonymousContext.newPage()
 		await signIn(guestContext.request, guest)
 		await signIn(strangerContext.request, stranger)
-		for (const denied of [strangerPage, anonymousPage]) {
-			await expectPrivateContentDenied(denied, path, marker)
-			await expectPrivateContentDenied(denied, `${path}/settings`, marker)
+		for (const [denied, status] of [
+			[strangerPage, 403],
+			[anonymousPage, 404],
+		] as const) {
+			await expectPrivateContentDenied(denied, path, marker, status)
+			await expectPrivateContentDenied(
+				denied,
+				`${path}/settings`,
+				marker,
+				status,
+			)
 			const source = await denied.request.get(`${path}/tree/main/README.md`)
-			expect(source.status()).toBe(404)
+			expect(source.status()).toBe(status)
 			expect(await source.text()).not.toContain(marker)
 		}
 		// Personal organizations intentionally have no grant-management UI.
@@ -174,7 +186,7 @@ test('private package source and settings stay isolated across owner, granted gu
 			marker,
 		)
 		// Shared metadata is insufficient for owner settings, even on a direct URL.
-		await expectPrivateContentDenied(guestPage, `${path}/settings`, marker)
+		await expectPrivateContentDenied(guestPage, `${path}/settings`, marker, 404)
 		await expect(
 			guestPage.getByTestId('account-package-lock-toggle'),
 		).toHaveCount(0)
@@ -190,11 +202,11 @@ test('private package source and settings stay isolated across owner, granted gu
 			UPDATE orgs SET access_epoch = access_epoch + 1
 			WHERE slug = ${quoteSqlString(owner.username)};
 		`)
-		await expectPrivateContentDenied(guestPage, path, marker)
+		await expectPrivateContentDenied(guestPage, path, marker, 403)
 		const revokedSource = await guestPage.request.get(
 			`${path}/tree/main/README.md`,
 		)
-		expect(revokedSource.status()).toBe(404)
+		expect(revokedSource.status()).toBe(403)
 		expect(await revokedSource.text()).not.toContain(marker)
 		const ownerSource = await page.request.get(`${path}/tree/main/README.md`)
 		expect(ownerSource.ok()).toBe(true)

@@ -57,6 +57,10 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 				request,
 			})
 			if (!target || target.kind === 'invalid-path') throw notFound()
+			if (target.kind === 'no_access') {
+				const { packageNoAccessResult } = await import('./package-no-access.ts')
+				return { ...packageNoAccessResult(target, url.pathname), data: null }
+			}
 			if (target.kind === 'unauthorized')
 				throw redirect({
 					href: `/login?redirectTo=${encodeURIComponent(data.pathname)}`,
@@ -95,6 +99,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 						})
 			if (!payload) throw notFound()
 			return {
+				kind: 'page' as const,
 				data: payload,
 				head: loadDocumentHead(
 					url.pathname,

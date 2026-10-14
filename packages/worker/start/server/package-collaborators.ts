@@ -49,6 +49,11 @@ export const loadPackageCollaborators = createServerFn({ method: 'GET' })
 		try {
 			return await withWebsiteRead({}, async ({ request, env, user }) => {
 				const page = await loadPackagePage({ env, request, ...data })
+				if (page.kind === 'no_access') {
+					const { packageNoAccessResult } =
+						await import('./package-no-access.ts')
+					return { ...packageNoAccessResult(page, href), payload: null }
+				}
 				if (page.kind === 'redirect')
 					throw redirect({ href: `${page.to}/collaborators`, statusCode: 302 })
 				if (
@@ -82,6 +87,7 @@ export const loadPackageCollaborators = createServerFn({ method: 'GET' })
 					view: result.data,
 				}
 				return {
+					kind: 'page' as const,
 					payload,
 					head: loadDocumentHead(href, { packageCollaborators: payload }),
 				}

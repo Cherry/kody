@@ -154,3 +154,16 @@ test('unlisted leftover /files and rename hops stay owner-private', async () => 
 		await resolveRoute('/@kentcdodds/friction-log-two/files', true),
 	).toEqual(redirect('/@kentcdodds/friction-log-two/tree/main', false))
 })
+
+test('signed-in denial retains request-access data for the native files page', async () => {
+	mockModule.resolveCommunityPackageUrl.mockResolvedValue(null)
+	const denial = {
+		kind: 'no_access',
+		username: 'owner',
+		kodyId: 'private',
+		packageName: '@owner/private',
+		viewerUsername: 'visitor',
+	}
+	mockModule.loadPackagePage.mockResolvedValue(denial)
+	expect(await resolveRoute('/@owner/private/tree/main', true)).toEqual(denial)
+})

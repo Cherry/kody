@@ -133,6 +133,10 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 			kodyId: decodeURIComponent(parts[2]!),
 		}
 		const page = await loadPackagePage({ env: bindings, request, ...params })
+		if (page.kind === 'no_access') {
+			const { packageNoAccessResult } = await import('./package-no-access.ts')
+			return { ...packageNoAccessResult(page, url.pathname), payload: null }
+		}
 		const { loadPackageMappingScopeForViewer } =
 			await import('../../src/app/package-credentials-access.ts')
 		const scope = await loadPackageMappingScopeForViewer({
@@ -171,6 +175,7 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 				: 'You can read this package but not run it, so it has no credentials, mappings, or triggers for you. Ask an org owner for run access.',
 		}
 		return {
+			kind: 'page' as const,
 			payload,
 			head: loadDocumentHead(url.pathname, undefined, url.search),
 		}

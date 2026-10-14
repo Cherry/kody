@@ -1,3 +1,4 @@
+import { PackageNoAccessPage } from '../components/package-no-access-page.tsx'
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
@@ -27,7 +28,9 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/files/$')({
 	component: Page,
 })
 function Page() {
-	return <PackageFilesExplorer data={usePageData().data} />
+	const result = usePageData()
+	if (result.kind === 'no_access') return <PackageNoAccessPage {...result} />
+	return <PackageFilesExplorer data={result.data} />
 }
 
 function usePageData() {

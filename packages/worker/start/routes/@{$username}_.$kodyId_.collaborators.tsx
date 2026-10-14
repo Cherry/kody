@@ -1,3 +1,4 @@
+import { PackageNoAccessPage } from '../components/package-no-access-page.tsx'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadPageQuery, usePageQuery } from '../page-query.ts'
 import { collaboratorsPageQuery as pageQuery } from '../package-collaborators-query.ts'
@@ -18,7 +19,9 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/collaborators')({
 })
 function Page() {
 	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	const { payload } = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	const result = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	if (result.kind === 'no_access') return <PackageNoAccessPage {...result} />
+	const { payload } = result
 	return (
 		<PackageCollaboratorsRoute
 			key={`${pageQueryInput.username}/${pageQueryInput.kodyId}`}

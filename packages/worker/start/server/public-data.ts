@@ -239,6 +239,10 @@ export const loadPackage = createServerFn({ method: 'GET' })
 				statusCode: isPublic ? 301 : 302,
 			})
 		}
+		if (loaded.kind === 'no_access') {
+			const { packageNoAccessResult } = await import('./package-no-access.ts')
+			return packageNoAccessResult(loaded, path)
+		}
 		if (loaded.kind === 'unauthorized') {
 			setResponseStatus(401)
 			return { kind: 'unauthorized' as const }
