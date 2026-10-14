@@ -1,4 +1,5 @@
 import { parseAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
+export type AccountStatus = 'loading' | 'ready' | 'error'
 export type ApprovalAction = 'approve' | 'reject'
 export type ApprovalScope = 'session' | 'package' | 'user'
 

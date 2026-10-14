@@ -32,6 +32,8 @@ const listCommands: PackageWebhookListItem = {
 	createdAt: null,
 	rotatedAt: null,
 	previousUrlActiveUntil: null,
+	approved: true,
+	approvalUrl: null,
 }
 
 const run: PackageWebhookListItem = {
