@@ -663,7 +663,7 @@ test('account menu shows a Manage section before the person links; the phone men
 	expect(manage).toContain('aria-label="Manage"')
 	expect(manage).toContain('>Manage<')
 	expect(manage).toMatch(
-		/href="\/@kody"[^>]*aria-current="page"[^>]*>[\s\S]*?>Overview<[\s\S]*?>@kody</,
+		/<a\b(?=[^>]*href="\/@kody")(?=[^>]*aria-current="page")[^>]*>[\s\S]*?>Overview<[\s\S]*?>@kody</,
 	)
 	expect(manage).toMatch(
 		/href="\/@kentcdodds\/-\/overview"[^>]*>[\s\S]*?>@kentcdodds</,
