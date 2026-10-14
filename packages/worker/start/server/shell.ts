@@ -1,20 +1,28 @@
 import { buildSsrSentryClientConfig } from '#universal/sentry-config.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound } from '@tanstack/react-router'
+import {
+	isOrgOwnedAccountSection,
+	type OrgOwnedAccountSection,
+} from '#universal/org-pages.ts'
 
 /** Fresh foreground verification, without presentation or feature-flag reads. */
 export const verifySession = createServerFn({ method: 'GET' })
-	.validator((data: { pathname: string } | undefined) => {
-		if (
-			data !== undefined &&
-			(typeof data.pathname !== 'string' ||
-				!data.pathname.startsWith('/') ||
-				data.pathname.startsWith('//') ||
-				/[\\?#]/.test(data.pathname))
-		)
-			throw new Error('Invalid verification destination')
-		return data
-	})
+	.validator(
+		(
+			data: { orgSlug: string; section?: OrgOwnedAccountSection } | undefined,
+		) => {
+			if (
+				data !== undefined &&
+				(typeof data.orgSlug !== 'string' ||
+					!/^[a-zA-Z0-9_-]+$/.test(data.orgSlug) ||
+					(data.section !== undefined &&
+						!isOrgOwnedAccountSection(data.section)))
+			)
+				throw new Error('Invalid verification scope')
+			return data
+		},
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ env },
@@ -33,12 +41,17 @@ export const verifySession = createServerFn({ method: 'GET' })
 		const original = getRequest()
 		const { user } = await loadResolvedRequestAuth(original, env)
 		if (data && user && !user.accountSuspended && !user.accountDeleting) {
-			const { isOrgRequestDenied } =
-				await import('../../src/app/org-request-binding.ts')
-			const destination = new Request(new URL(data.pathname, original.url), {
-				headers: original.headers,
-			})
-			if (await isOrgRequestDenied(destination, env, user.mcpUser.userId))
+			const [{ loadOrgBindingForSlug }, { orgSectionDenial }] =
+				await Promise.all([
+					import('#worker/orgs/repo.ts'),
+					import('../../src/app/org-request-binding.ts'),
+				])
+			const binding = await loadOrgBindingForSlug(
+				env.APP_DB,
+				user.mcpUser.userId,
+				data.orgSlug,
+			)
+			if (!binding || (data.section && orgSectionDenial(binding, data.section)))
 				throw notFound()
 		}
 		return {

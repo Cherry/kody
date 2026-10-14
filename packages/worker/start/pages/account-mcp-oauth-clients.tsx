@@ -1,7 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { writeClipboardText } from '#client/clipboard.ts'
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
-import { updateMcpOauthClients } from '#start/server/account-mutations'
+import {
+	createMcpOauthClient,
+	revokeMcpOauthClient,
+} from '#start/server/account-mutations'
 import { type AccountMcpOauthClientsLoaderData } from '#universal/loader-data.ts'
 import {
 	cardCss,
@@ -48,12 +51,13 @@ export function AccountMcpOauthClientsPage({
 	const [labelDraft, setLabelDraft] = useState('Open WebUI')
 	const [redirectUrisDraft, setRedirectUrisDraft] = useState('')
 	const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null)
-	const mutation = usePageResponseMutation<
-		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient }
+	const createMutation = usePageResponseMutation<
+		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient },
+		{ label: string; redirectUris: string }
 	>(
 		queryKey,
 		'loadMcpOauthClientsPage',
-		(body) => updateMcpOauthClients({ data: body }),
+		(data) => createMcpOauthClient({ data }),
 		{
 			dependencies: mutationResources,
 			dependencyScope: 'actor',
@@ -63,6 +67,23 @@ export function AccountMcpOauthClientsPage({
 			}),
 		},
 	)
+	const revokeMutation = usePageResponseMutation<
+		AccountMcpOauthClientsLoaderData,
+		{ id: string }
+	>(
+		queryKey,
+		'loadMcpOauthClientsPage',
+		(data) => revokeMcpOauthClient({ data }),
+		{
+			dependencies: mutationResources,
+			dependencyScope: 'actor',
+			merge: (page, accepted) => ({
+				...page,
+				payload: { ok: accepted.ok, clients: accepted.clients },
+			}),
+		},
+	)
+
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 
@@ -74,8 +95,7 @@ export function AccountMcpOauthClientsPage({
 		setActionStatus('busy')
 		setMessage(null)
 		try {
-			const payload = await mutation.submit({
-				intent: 'create',
+			const payload = await createMutation.submit({
 				label: labelDraft,
 				redirectUris: redirectUrisDraft,
 			})
@@ -102,7 +122,7 @@ export function AccountMcpOauthClientsPage({
 		setActionStatus('busy')
 		setMessage(null)
 		try {
-			await mutation.submit({ intent: 'revoke', id })
+			await revokeMutation.submit({ id })
 			if (createdClient?.id === id) setCreatedClient(null)
 			setRevokeArmed(null)
 			setMessage('OAuth client revoked.')

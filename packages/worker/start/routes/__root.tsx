@@ -9,7 +9,7 @@ import {
 	isPresentationNavigation,
 	type CommittedPage,
 } from '../presentation-navigation.ts'
-import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
+import { orgNavigationScope } from '../org-navigation-scope.ts'
 import {
 	createRootRouteWithContext,
 	notFound,
@@ -91,11 +91,10 @@ export const Route = createRootRouteWithContext<{
 		context,
 		matches,
 	}) => {
+		const orgScope = orgNavigationScope(matches)
 		if (typeof document === 'undefined') {
 			const identity = await verifySession({
-				data: orgSlugFromOrgOwnedPath(location.pathname)
-					? { pathname: location.pathname }
-					: undefined,
+				data: orgScope,
 				signal: abortController.signal,
 			})
 			const failure = readDocumentFailure()
@@ -109,6 +108,7 @@ export const Route = createRootRouteWithContext<{
 				})
 			return {
 				...identity,
+				orgScope,
 				pageLocation: location,
 				verifyAccess: false,
 				presentationOnly: false,
@@ -123,6 +123,7 @@ export const Route = createRootRouteWithContext<{
 		})
 		return {
 			actorKey,
+			orgScope,
 			pageLocation: location,
 			presentationOnly,
 			verifyAccess:
@@ -146,9 +147,7 @@ export const Route = createRootRouteWithContext<{
 				),
 				context.verifyAccess
 					? verifySession({
-							data: orgSlugFromOrgOwnedPath(location.pathname)
-								? { pathname: location.pathname }
-								: undefined,
+							data: context.orgScope,
 							signal: abortController.signal,
 						})
 					: undefined,

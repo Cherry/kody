@@ -131,12 +131,16 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateJobs = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const setJobKillSwitch = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ id: z.string().trim().min(1), killSwitchEnabled: z.boolean() }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountJobs },
+			{ setAccountJobKillSwitch },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -144,14 +148,13 @@ export const updateJobs = createServerFn({ method: 'POST' })
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
 			async (context) => {
 				const result = requireOperationResult(
-					await mutateAccountJobs({
+					await setAccountJobKillSwitch({
 						...context,
-						body: data.body,
+						id: data.id,
+						killSwitchEnabled: data.killSwitchEnabled,
 					}),
 				)
 				const { readJsonRecord } = await import('./json-value.ts')
@@ -170,12 +173,54 @@ export const updateJobs = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const updateWorkflows = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+export const runJobNow = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ id: z.string().trim().min(1) }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountWorkflows },
+			{ runAccountJobNow },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-jobs.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) => {
+				const result = requireOperationResult(
+					await runAccountJobNow({ ...context, id: data.id }),
+				)
+				const { readJsonRecord } = await import('./json-value.ts')
+				return {
+					...result,
+					selectedJob: result.selectedJob
+						? {
+								...result.selectedJob,
+								params: result.selectedJob.params
+									? readJsonRecord(result.selectedJob.params)
+									: null,
+							}
+						: null,
+				}
+			},
+		)
+	})
+
+export const cancelWorkflowRun = createServerFn({ method: 'POST' })
+	.validator(
+		resourceInput
+			.omit({ search: true })
+			.extend({ id: z.string().trim().min(1) }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ cancelAccountWorkflowRun },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -183,20 +228,15 @@ export const updateWorkflows = createServerFn({ method: 'POST' })
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
 			async (context) => {
-				return requireOperationResult(
-					await mutateAccountWorkflows({
-						...context,
-						body: data.body,
-					}),
+				const result = requireOperationResult(
+					await cancelAccountWorkflowRun({ ...context, id: data.id }),
 				)
+				return result
 			},
 		)
 	})
-
 export const updateSecretProviders = createServerFn({ method: 'POST' })
 	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
 	.handler(async ({ data }) => {
@@ -549,11 +589,11 @@ export const updateSecretCollection = createServerFn({ method: 'POST' })
 	})
 
 export const updateExperiments = createServerFn({ method: 'POST' })
-	.validator(z.record(z.string(), z.unknown()))
+	.validator(z.object({ experimentsOptIn: z.boolean() }))
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountExperiments },
+			{ saveExperimentsPreference },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -562,17 +602,20 @@ export const updateExperiments = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation({}, async (context) =>
 			requireOperationResult(
-				await mutateAccountExperiments({ ...context, body: data }),
+				await saveExperimentsPreference({
+					...context,
+					experimentsOptIn: data.experimentsOptIn,
+				}),
 			),
 		)
 	})
 
-export const updateMcpOauthClients = createServerFn({ method: 'POST' })
-	.validator(z.record(z.string(), z.unknown()))
+export const createMcpOauthClient = createServerFn({ method: 'POST' })
+	.validator(z.object({ label: z.string(), redirectUris: z.string() }))
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountMcpOauthClients },
+			{ createAccountMcpOauthClient },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -581,7 +624,26 @@ export const updateMcpOauthClients = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation({}, async (context) =>
 			requireOperationResult(
-				await mutateAccountMcpOauthClients({ ...context, body: data }),
+				await createAccountMcpOauthClient({ ...context, ...data }),
+			),
+		)
+	})
+
+export const revokeMcpOauthClient = createServerFn({ method: 'POST' })
+	.validator(z.object({ id: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ revokeAccountMcpOauthClient },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-mcp-oauth-clients.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation({}, async (context) =>
+			requireOperationResult(
+				await revokeAccountMcpOauthClient({ ...context, ...data }),
 			),
 		)
 	})

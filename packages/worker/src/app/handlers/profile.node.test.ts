@@ -45,8 +45,8 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
-			validator: (fn: typeof validate) => {
-				validate = fn
+			validator: (fn: typeof validate | { parse(data: unknown): unknown }) => {
+				validate = typeof fn === 'function' ? fn : (data) => fn.parse(data)
 				return builder
 			},
 			handler:
@@ -80,7 +80,7 @@ async function nativeProfile(username: string) {
 		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
 	} as Env
 	native.request = new Request(`https://example.com/@${username}`)
-	return loadProfile({ data: { username } })
+	return loadProfile({ data: { username, query: '' } })
 }
 
 const publicProfile = {
@@ -164,7 +164,21 @@ function setupPublicProfileMocks() {
 async function call(path: string, username = 'alice') {
 	mockModule.listProfileRepositories.mockClear()
 	const url = new URL(`https://example.com${path}`)
-	const data = await loadProfileData(env, new Request(url), username)
+	const data = await loadProfileData(
+		env,
+		new Request(url),
+		username,
+		undefined,
+		{
+			query: url.searchParams.get('q')?.trim() ?? '',
+			limit: (() => {
+				const value = Number.parseInt(url.searchParams.get('limit') ?? '', 10)
+				return Number.isFinite(value) && value > 0
+					? Math.min(100, value)
+					: undefined
+			})(),
+		},
+	)
 	return {
 		status: data ? 200 : 404,
 		body: (data ?? {

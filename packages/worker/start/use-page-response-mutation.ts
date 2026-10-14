@@ -11,10 +11,11 @@ import { type PageMutationDependencies } from './page-invalidation-cache.ts'
 
 export function usePageResponseMutation<
 	TResponse extends { ok?: boolean; error?: string },
+	TInput extends Record<string, unknown> = Record<string, unknown>,
 >(
 	queryKey: QueryKey,
 	resource: PageResource,
-	send: (body: Record<string, unknown>, href: string) => Promise<TResponse>,
+	send: (body: TInput, href: string) => Promise<TResponse>,
 	options: {
 		dependencyScope?: 'actor' | 'org'
 		dependencies?: PageMutationDependencies
@@ -31,7 +32,7 @@ export function usePageResponseMutation<
 	const captureSubmitter = useSubmitterScope()
 
 	const mutation = useMutation(
-		acceptedPageMutationOptions<Record<string, unknown>, TResponse>(client, {
+		acceptedPageMutationOptions<TInput, TResponse>(client, {
 			resource,
 			...options,
 			send: async ({ body, href }) => {
@@ -44,7 +45,7 @@ export function usePageResponseMutation<
 	)
 	return {
 		...mutation,
-		submit: (body: Record<string, unknown>) => {
+		submit: (body: TInput) => {
 			const isCurrentSubmitter = captureSubmitter()
 			return mutation
 				.mutateAsync({ body, actorKey, href, queryKey })

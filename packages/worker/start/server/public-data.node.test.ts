@@ -2,6 +2,9 @@ import { beforeEach, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
 	payload: {} as Record<string, unknown>,
+	communityRead: vi.fn(async () => ({ packages: [] })),
+	profileRead: vi.fn(async () => null),
+	packageRead: vi.fn(),
 	kind: 'page',
 	canonical: null as string | null,
 	moved: { kind: 'redirect', to: '/@owner/new', shared: true },
@@ -18,8 +21,11 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
-			validator(next: (data: unknown) => unknown) {
-				validate = next
+			validator(
+				next: ((data: unknown) => unknown) | { parse(data: unknown): unknown },
+			) {
+				validate =
+					typeof next === 'function' ? next : (data) => next.parse(data)
 				return builder
 			},
 			handler(run: (input: { data: unknown }) => Promise<unknown>) {
@@ -46,18 +52,24 @@ vi.mock('../../src/app/auth-session.ts', () => ({
 	setAuthSessionSecret: () => {},
 }))
 vi.mock('../../src/app/community-package-payload.ts', () => ({
-	loadCommunityPackagePayload: async () =>
-		mocks.kind === 'redirect'
+	loadCommunityPackagePayload: async (input: unknown) => {
+		mocks.packageRead(input)
+		return mocks.kind === 'redirect'
 			? mocks.moved
 			: mocks.kind === 'no_access'
 				? { kind: 'no_access', ...mocks.payload }
-				: { kind: mocks.kind, data: mocks.payload },
+				: { kind: mocks.kind, data: mocks.payload }
+	},
 	loadCommunityDetailPayload: async () => ({
 		kind: 'page',
 		data: mocks.payload,
 	}),
 }))
+vi.mock('../../src/app/profile-data.ts', () => ({
+	loadProfileData: mocks.profileRead,
+}))
 vi.mock('../../src/app/community-data.ts', () => ({
+	loadCommunityIndexData: mocks.communityRead,
 	loadCommunityDetailData: async () => ({
 		listing: { ownerUsername: 'owner', kodyId: 'package' },
 	}),
@@ -77,9 +89,11 @@ vi.mock('../../universal/identity-icon-urls.ts', () => ({
 vi.mock('../../src/package-registry/package-publish-lock.ts', () => ({
 	buildPackagePublishApprovalPath: () => '/approval',
 }))
-const { loadPackage } = await import('./public-data.ts')
+const { loadPackage, loadCommunity, loadProfile } =
+	await import('./public-data.ts')
 
 beforeEach(() => {
+	vi.clearAllMocks()
 	mocks.headers = new Headers()
 	mocks.status = 200
 	mocks.kind = 'page'
@@ -219,3 +233,41 @@ test.each([undefined, 'settings'] as const)(
 		expect(mocks.headers.get('X-Robots-Tag')).toBe('noindex, nofollow')
 	},
 )
+
+test('community filters are explicit and retain the original authenticated request', async () => {
+	const data = {
+		query: 'tools',
+		sort: 'popular',
+		category: 'development',
+		limit: 20,
+	}
+	await loadCommunity({ data })
+	expect(mocks.communityRead).toHaveBeenCalledWith(
+		expect.anything(),
+		mocks.request,
+		data,
+	)
+})
+test('profile filters and identity are independent of the RPC URL', async () => {
+	await expect(
+		loadProfile({ data: { username: 'owner', query: 'private', limit: 10 } }),
+	).rejects.toMatchObject({ isNotFound: true })
+	expect(mocks.profileRead).toHaveBeenCalledWith(
+		expect.anything(),
+		mocks.request,
+		'owner',
+		undefined,
+		{ query: 'private', limit: 10 },
+	)
+})
+test('package domain authorization sees the original request', async () => {
+	mocks.kind = 'unauthorized'
+	await loadPackage({ data: { username: 'owner', kodyId: 'private' } })
+	expect(mocks.packageRead).toHaveBeenCalledWith(
+		expect.objectContaining({
+			request: mocks.request,
+			username: 'owner',
+			kodyId: 'private',
+		}),
+	)
+})

@@ -7,7 +7,7 @@ import {
 	readWorkflowsViewFilter,
 	type AccountWorkflowsViewFilter,
 } from '#client/routes/account-workflows-filter.ts'
-import { updateWorkflows } from '#start/server/account-mutations'
+import { cancelWorkflowRun } from '#start/server/account-mutations'
 import {
 	type AccountWorkflowListItem,
 	type AccountWorkflowRunStatus,
@@ -256,13 +256,10 @@ export function AccountWorkflowsPage({
 			href: string
 			failureMessage: string
 		}) => {
-			return updateWorkflows({
-				data: {
-					body: input.body,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					search: new URL(input.href, 'https://kody.local').search,
-				},
-			})
+			const id = input.body.id
+			if (typeof id !== 'string') throw new Error('Record id is required.')
+			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			return cancelWorkflowRun({ data: { orgSlug, id } })
 		},
 		onSuccess: async (accepted, { href }) => {
 			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', href)

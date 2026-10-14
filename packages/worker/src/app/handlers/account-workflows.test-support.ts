@@ -4,7 +4,7 @@ import {
 } from '#app/account-workflows-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { mutateAccountWorkflows } from './account-workflows.ts'
+import { cancelAccountWorkflowRun } from './account-workflows.ts'
 export * from './account-workflows.ts'
 export function testAccountWorkflowsApiHandler(env: Env) {
 	return {
@@ -38,12 +38,28 @@ export function testAccountWorkflowsApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountWorkflows({
+			const fields = body as Record<string, unknown>
+			const context = {
 				request,
 				env,
 				user,
-				body: body as Record<string, unknown>,
-			})
+				id: typeof fields.id === 'string' ? fields.id : '',
+			}
+			let result
+			try {
+				result =
+					fields.action === 'cancel'
+						? await cancelAccountWorkflowRun(context)
+						: operationResult({ ok: false, error: 'Invalid action.' }, 400)
+			} catch (error) {
+				result = operationResult(
+					{
+						ok: false,
+						error: error instanceof Error ? error.message : 'Unable to update.',
+					},
+					400,
+				)
+			}
 			return operationResult(result.data, result.status)
 		},
 	}

@@ -5,7 +5,7 @@ import {
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
-import { mutateAccountJobs } from './account-jobs.ts'
+import { setAccountJobKillSwitch, runAccountJobNow } from './account-jobs.ts'
 export * from './account-jobs.ts'
 export function testAccountJobsApiHandler(env: Env) {
 	return {
@@ -39,12 +39,38 @@ export function testAccountJobsApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountJobs({
+			const fields = body as Record<string, unknown>
+			const context = {
 				request,
 				env,
 				user,
-				body: body as Record<string, unknown>,
-			})
+				id: typeof fields.id === 'string' ? fields.id : '',
+			}
+			let result
+			try {
+				if (
+					fields.action === 'set_kill_switch' &&
+					typeof fields.killSwitchEnabled !== 'boolean'
+				)
+					throw new Error('killSwitchEnabled must be a boolean.')
+				result =
+					fields.action === 'set_kill_switch'
+						? await setAccountJobKillSwitch({
+								...context,
+								killSwitchEnabled: fields.killSwitchEnabled === true,
+							})
+						: fields.action === 'run_now'
+							? await runAccountJobNow(context)
+							: operationResult({ ok: false, error: 'Invalid action.' }, 400)
+			} catch (error) {
+				result = operationResult(
+					{
+						ok: false,
+						error: error instanceof Error ? error.message : 'Unable to update.',
+					},
+					400,
+				)
+			}
 			return operationResult(result.data, result.status)
 		},
 	}

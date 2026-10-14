@@ -5,7 +5,7 @@ import { ProfileRoute, ProfileUnavailable } from '../pages/profile.tsx'
 import { documentHead } from '../components/document-head.ts'
 import { loadProfile } from '#start/server/public-data'
 import { OrgHomePage } from '../pages/org-home.tsx'
-import { repositoryPageSearch } from '../page-search.ts'
+import { profileReadInput } from '../public-read-input.ts'
 
 const pageQuery = createPageQuery('loadProfile', loadProfile, {
 	freshAuthorization: true,
@@ -18,10 +18,7 @@ export const Route = createFileRoute('/@{$username}')({
 		q: search.limit != null ? search.q : undefined,
 	}),
 	context: ({ location, params }) => ({
-		pageQueryInput: {
-			username: params.username,
-			search: repositoryPageSearch(location.searchStr),
-		},
+		pageQueryInput: profileReadInput(params.username, location.searchStr),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

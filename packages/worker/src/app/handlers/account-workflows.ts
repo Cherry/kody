@@ -4,25 +4,12 @@ import {
 } from '#app/account-workflows-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { cancelWorkflowRunForUser } from '#worker/package-runtime/package-workflows.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-export function readPathWorkflowId(params: unknown) {
-	if (
-		typeof params === 'object' &&
-		params !== null &&
-		'workflowId' in params &&
-		typeof params.workflowId === 'string'
-	) {
-		return params.workflowId
-	}
-	return undefined
-}
 
 async function reloadWorkflowsPayload(input: {
 	env: Env
@@ -37,13 +24,13 @@ async function reloadWorkflowsPayload(input: {
 	})
 }
 
-async function handleCancelAction(input: {
+export async function cancelAccountWorkflowRun(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
+	id: string
 	request: Request
 }) {
-	const id = readTrimmedStringOrEmpty(input.body, 'id')
+	const id = input.id.trim()
 	if (!id) {
 		throw new Error('Workflow run id is required.')
 	}
@@ -84,36 +71,4 @@ async function handleCancelAction(input: {
 			)
 		}
 	}
-}
-
-export async function mutateAccountWorkflows({
-	request,
-	env,
-	user,
-	body,
-}: {
-	request: Request
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
-}) {
-	const action = readTrimmedStringOrEmpty(body, 'action')
-	try {
-		if (action === 'cancel') {
-			return await handleCancelAction({ env, user, body, request })
-		}
-	} catch (error) {
-		return operationResult(
-			{
-				ok: false,
-				error:
-					error instanceof Error
-						? error.message
-						: 'Unable to update workflow run.',
-			},
-			400,
-		)
-	}
-
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
 }

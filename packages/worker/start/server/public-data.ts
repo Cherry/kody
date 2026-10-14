@@ -3,12 +3,17 @@ import { type CommunityDetailApiPayload } from '../community-types.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound } from '@tanstack/react-router'
 
-function validatePublicSearch(data: { search?: string }) {
-	return { search: typeof data.search === 'string' ? data.search : '' }
-}
+import { z } from 'zod'
 
 export const loadCommunity = createServerFn({ method: 'GET' })
-	.validator(validatePublicSearch)
+	.validator(
+		z.object({
+			query: z.string(),
+			sort: z.string().nullable(),
+			category: z.string().nullable(),
+			limit: z.number().int().positive().max(100),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ env },
@@ -27,23 +32,22 @@ export const loadCommunity = createServerFn({ method: 'GET' })
 		])
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
-		const original = getRequest()
-		const request = new Request(
-			new URL(`/community${data.search}`, original.url),
-			{ headers: original.headers },
-		)
-		const community = await loadCommunityIndexData(bindings, request)
+		const request = getRequest()
+		const community = await loadCommunityIndexData(bindings, request, data)
 		return {
 			data: community,
-			head: loadDocumentHead('community', '/community', undefined, data.search),
+			head: loadDocumentHead('community', '/community'),
 		}
 	})
 
 export const loadProfile = createServerFn({ method: 'GET' })
-	.validator((data: { username: string; search?: string }) => {
-		if (typeof data.username !== 'string' || !data.username) throw notFound()
-		return { username: data.username, ...validatePublicSearch(data) }
-	})
+	.validator(
+		z.object({
+			username: z.string().min(1),
+			query: z.string(),
+			limit: z.number().int().positive().max(100).optional(),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ env },
@@ -64,13 +68,15 @@ export const loadProfile = createServerFn({ method: 'GET' })
 		])
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
-		const original = getRequest()
+		const request = getRequest()
 		const path = `/@${encodeURIComponent(data.username)}`
-		const request = new Request(
-			new URL(`${path}${data.search}`, original.url),
-			{ headers: original.headers },
+		const profile = await loadProfileData(
+			bindings,
+			request,
+			data.username,
+			undefined,
+			{ query: data.query, limit: data.limit },
 		)
-		const profile = await loadProfileData(bindings, request, data.username)
 		if (!profile) {
 			const { loadSessionInfo } = await import('../../src/app/session-info.ts')
 			const { session, setCookie } = await loadSessionInfo(request, bindings)
@@ -107,15 +113,10 @@ export const loadProfile = createServerFn({ method: 'GET' })
 		return {
 			data: profile,
 			orgHome: null,
-			head: loadDocumentHead(
-				'profile',
-				path,
-				{
-					profileShell: toProfileShellLoaderData(profile),
-					profileList: toProfileListLoaderData(profile),
-				},
-				data.search,
-			),
+			head: loadDocumentHead('profile', path, {
+				profileShell: toProfileShellLoaderData(profile),
+				profileList: toProfileListLoaderData(profile),
+			}),
 		}
 	})
 
@@ -179,12 +180,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			: data.page === 'settings'
 				? routes.communityPackageSettings.href(data)
 				: routes.communityPackage.href(data)
-		const request = new Request(
-			new URL(path + (data.search ?? ''), original.url),
-			{
-				headers: original.headers,
-			},
-		)
+		const request = original
 		let loaded:
 			| Awaited<ReturnType<typeof loadCommunityPackagePayload>>
 			| Awaited<ReturnType<typeof loadCommunityDetailPayload>>

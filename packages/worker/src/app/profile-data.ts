@@ -8,7 +8,6 @@ import {
 	toPublicProfilePackageItem,
 } from '#app/community-public.ts'
 import { type ProfileLoaderData } from '#universal/loader-data.ts'
-import { readProfilePackageFiltersFromUrl } from '#universal/profile-search.ts'
 import { getUsernameFormatValidationError } from '#worker/identity/username.ts'
 import {
 	getCommunityProfileByUsername,
@@ -17,15 +16,6 @@ import {
 } from '#worker/community/profile-service.ts'
 
 const defaultProfileActivityLimit = 20
-const maxProfilePackageLimit = 100
-
-function readOptionalProfilePackageLimit(raw: string | null) {
-	if (raw == null || raw === '') return undefined
-	const parsed = Number.parseInt(raw, 10)
-	if (!Number.isFinite(parsed) || parsed < 1) return undefined
-	return Math.min(parsed, maxProfilePackageLimit)
-}
-
 const requestProfileDataStore = new WeakMap<
 	Request,
 	Map<string, Promise<ProfileLoaderData | null>>
@@ -35,15 +25,15 @@ export function loadProfileData(
 	env: Env,
 	request: Request,
 	username: string,
-	options?: ReadAuthenticatedAppUserOptions,
-	resource?: { query: string; limit?: number },
+	options: ReadAuthenticatedAppUserOptions | undefined,
+	resource: { query: string; limit?: number },
 ): Promise<ProfileLoaderData | null> {
 	let byUsername = requestProfileDataStore.get(request)
 	if (!byUsername) {
 		byUsername = new Map()
 		requestProfileDataStore.set(request, byUsername)
 	}
-	const cacheKey = `${username}:${resource ? JSON.stringify(resource) : new URL(request.url).search}`
+	const cacheKey = `${username}:${JSON.stringify(resource)}`
 	let pending = byUsername.get(cacheKey)
 	if (!pending) {
 		pending = loadProfileDataUncached(env, request, username, options, resource)
@@ -56,8 +46,8 @@ async function loadProfileDataUncached(
 	env: Env,
 	request: Request,
 	username: string,
-	options?: ReadAuthenticatedAppUserOptions,
-	resource?: { query: string; limit?: number },
+	options: ReadAuthenticatedAppUserOptions | undefined,
+	resource: { query: string; limit?: number },
 ): Promise<ProfileLoaderData | null> {
 	if (getUsernameFormatValidationError(username)) {
 		return null
@@ -77,17 +67,9 @@ async function loadProfileDataUncached(
 		return null
 	}
 
-	const url = new URL(request.url)
-	const filters =
-		resource ??
-		readProfilePackageFiltersFromUrl(url, {
-			allowOwnerFilters: isSelf,
-		})
-	const packageLimit = resource
-		? resource.limit
-		: readOptionalProfilePackageLimit(url.searchParams.get('limit'))
+	const packageLimit = resource.limit
 	const serverQuery =
-		packageLimit == null ? undefined : filters.query || undefined
+		packageLimit == null ? undefined : resource.query || undefined
 
 	const [packages, activity] = await Promise.all([
 		listProfileRepositories({
@@ -116,7 +98,7 @@ async function loadProfileDataUncached(
 			}),
 		),
 		activity: activity.map(toPublicCommunityActivityItem),
-		query: filters.query || null,
+		query: resource.query || null,
 		isSelf,
 		loggedIn: Boolean(user),
 	}

@@ -29,10 +29,11 @@ vi.mock('./mutation-context.ts', () => ({
 	) => run({ request: state.request, env: {}, user: {} }),
 }))
 vi.mock('../../src/app/handlers/account-jobs.ts', () => ({
-	mutateAccountJobs: state.mutate,
+	setAccountJobKillSwitch: state.mutate,
+	runAccountJobNow: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-workflows.ts', () => ({
-	mutateAccountWorkflows: state.mutate,
+	cancelAccountWorkflowRun: state.mutate,
 }))
 vi.mock('../../src/app/handlers/account-secret-providers.ts', () => ({
 	mutateAccountSecretProviders: state.mutate,
@@ -53,9 +54,11 @@ vi.mock('@tanstack/react-start/server', () => ({ setResponseHeader: vi.fn() }))
 vi.mock('../../src/app/operation-result.ts', () => ({
 	requireOperationResult: (result: { value: unknown }) => result.value,
 }))
+vi.mock('../../src/app/handlers/account-experiments.ts', () => ({ saveExperimentsPreference: state.mutate }))
 import {
-	updateJobs,
-	updateWorkflows,
+	updateExperiments,	setJobKillSwitch,
+	runJobNow,
+	cancelWorkflowRun,
 	updateSecretProviders,
 	updateIntegrations,
 	updateConnections,
@@ -65,8 +68,6 @@ import {
 
 test('mutations preserve the authenticated POST request instead of manufacturing destination GET requests', async () => {
 	for (const mutate of [
-		updateJobs,
-		updateWorkflows,
 		updateSecretProviders,
 		updateIntegrations,
 		updateConnections,
@@ -85,4 +86,40 @@ test('mutations preserve the authenticated POST request instead of manufacturing
 			expect.objectContaining({ request: state.request }),
 		)
 	}
+})
+
+test('job and workflow operations pass validated named fields with original request', async () => {
+	for (const [operation, data] of [
+		[runJobNow, { orgSlug: 'acme', id: 'job' }],
+		[cancelWorkflowRun, { orgSlug: 'acme', id: 'run' }],
+	] as const) {
+		state.mutate.mockClear()
+		await operation({ data })
+		expect(state.mutate).toHaveBeenCalledWith(
+			expect.objectContaining({ id: data.id, request: state.request }),
+		)
+		expect(state.mutate).not.toHaveBeenCalledWith(
+			expect.objectContaining({ body: expect.anything() }),
+		)
+	}
+	state.mutate.mockClear()
+	await setJobKillSwitch({
+		data: { orgSlug: 'acme', id: 'job', killSwitchEnabled: true },
+	})
+	expect(state.mutate).toHaveBeenCalledWith(
+		expect.objectContaining({
+			id: 'job',
+			killSwitchEnabled: true,
+			request: state.request,
+		}),
+	)
+})
+
+
+test('experiments preference rejects untyped input before the domain write', async () => {
+	state.mutate.mockClear()
+	expect(() => updateExperiments({ data: { experimentsOptIn: 'true' } as never })).toThrow()
+	expect(state.mutate).not.toHaveBeenCalled()
+	await updateExperiments({ data: { experimentsOptIn: false } })
+	expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ experimentsOptIn: false, request: state.request }))
 })

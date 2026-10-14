@@ -26,7 +26,10 @@ export function AccountExperimentsPage({
 }) {
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const mutation = usePageResponseMutation<AccountExperimentsLoaderData>(
+	const mutation = usePageResponseMutation<
+		AccountExperimentsLoaderData,
+		{ experimentsOptIn: boolean }
+	>(
 		queryKey,
 		'loadExperimentsPage',
 		(body) => updateExperiments({ data: body }),

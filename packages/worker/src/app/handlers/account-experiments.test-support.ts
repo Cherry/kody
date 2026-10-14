@@ -1,7 +1,7 @@
 import { loadAccountExperimentsData } from '#app/account-experiments-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { mutateAccountExperiments } from './account-experiments.ts'
+import { saveExperimentsPreference } from './account-experiments.ts'
 export * from './account-experiments.ts'
 export function testAccountExperimentsApiHandler(env: Env) {
 	return {
@@ -32,11 +32,17 @@ export function testAccountExperimentsApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountExperiments({
+			if (!('experimentsOptIn' in body) || typeof body.experimentsOptIn !== 'boolean') {
+				return operationResult(
+					{ ok: false, error: 'experimentsOptIn must be a boolean.' },
+					400,
+				)
+			}
+			const result = await saveExperimentsPreference({
 				request,
 				env,
 				user,
-				body: body as Record<string, unknown>,
+				experimentsOptIn: body.experimentsOptIn,
 			})
 			return operationResult(result.data, result.status)
 		},

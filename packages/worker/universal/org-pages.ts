@@ -62,7 +62,7 @@ export function isOrganizationSlug(value: string) {
 	return dnsSafeUsernamePattern.test(value)
 }
 
-function isOrgOwnedAccountSection(
+export function isOrgOwnedAccountSection(
 	section: string,
 ): section is OrgOwnedAccountSection {
 	return orgOwnedSectionSet.has(section)

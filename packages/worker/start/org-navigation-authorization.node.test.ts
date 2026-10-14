@@ -10,6 +10,9 @@ import { createPageQuery, loadPageQuery } from './page-query.ts'
 
 const state = vi.hoisted(() => ({
 	denied: false,
+	suspended: false,
+	deleting: false,
+	grantOnly: false,
 	destinations: [] as string[],
 }))
 vi.mock('@tanstack/react-start', () => ({
@@ -37,13 +40,22 @@ vi.mock('../src/app/env.ts', () => ({ getEnv: (env: unknown) => env }))
 vi.mock('../src/app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
 vi.mock('../src/app/request-auth-cache.ts', () => ({
 	loadResolvedRequestAuth: async () => ({
-		user: { mcpUser: { userId: 'actor' } },
+		user: {
+			mcpUser: { userId: 'actor' },
+			accountSuspended: state.suspended,
+			accountDeleting: state.deleting,
+		},
 	}),
 }))
-vi.mock('../src/app/org-request-binding.ts', () => ({
-	isOrgRequestDenied: async (request: Request) => {
-		state.destinations.push(new URL(request.url).pathname)
+vi.mock('#worker/orgs/repo.ts', () => ({
+	loadOrgBindingForSlug: async (_db: unknown, _actor: string, slug: string) => {
+		state.destinations.push(slug)
 		return state.denied
+			? null
+			: {
+					org: { id: 'org-team', slug },
+					role: state.grantOnly ? null : 'owner',
+				}
 	},
 }))
 import { verifySession } from '#start/server/shell'
@@ -57,7 +69,7 @@ test('foreground org entry rechecks permission while an authorized warm entry re
 		notFoundComponent: () => null,
 		beforeLoad: ({ location, preload }) =>
 			!preload && location.pathname === href
-				? verifySession({ data: { pathname: location.pathname } })
+				? verifySession({ data: { orgSlug: 'team', section: 'jobs' } })
 				: undefined,
 	})
 	const jobs = createRoute({
@@ -80,11 +92,11 @@ test('foreground org entry rechecks permission while an authorized warm entry re
 	await router.navigate({ to: '/' })
 	await router.navigate({ to: href })
 	expect(read).toHaveBeenCalledTimes(1)
-	expect(state.destinations).toEqual([href, href])
+	expect(state.destinations).toEqual(['team', 'team'])
 	await router.navigate({ to: '/' })
 	state.denied = true
 	await router.navigate({ to: href })
-	expect(state.destinations).toEqual([href, href, href])
+	expect(state.destinations).toEqual(['team', 'team', 'team'])
 	expect(
 		router.state.matches.some(
 			(match) => match.status === 'notFound' || match._notFound,
@@ -92,4 +104,31 @@ test('foreground org entry rechecks permission while an authorized warm entry re
 	).toBe(true)
 	expect(read).toHaveBeenCalledTimes(1)
 	client.clear()
+})
+
+test('fresh verification excludes suspended and deleting actors before organization reads', async () => {
+	state.destinations = []
+	state.suspended = true
+	expect(
+		await verifySession({ data: { orgSlug: 'team', section: 'jobs' } }),
+	).toEqual({ actorKey: null })
+	state.suspended = false
+	state.deleting = true
+	expect(
+		await verifySession({ data: { orgSlug: 'team', section: 'jobs' } }),
+	).toEqual({ actorKey: null })
+	expect(state.destinations).toEqual([])
+	state.deleting = false
+})
+
+test('grant-only access can reach own agents but cannot reuse private workspace lists', async () => {
+	state.denied = false
+	state.grantOnly = true
+	await expect(
+		verifySession({ data: { orgSlug: 'team', section: 'jobs' } }),
+	).rejects.toMatchObject({ isNotFound: true })
+	expect(
+		await verifySession({ data: { orgSlug: 'team', section: 'agents' } }),
+	).toEqual({ actorKey: 'actor' })
+	state.grantOnly = false
 })

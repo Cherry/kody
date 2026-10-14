@@ -110,6 +110,7 @@ test('native community initial render preserves cards and exact installed proven
 				data: await loadCommunityIndexData(
 					env,
 					new Request('https://example.com/community'),
+					{ query: '', sort: null, category: null, limit: 50 },
 				),
 			}),
 			'/community',

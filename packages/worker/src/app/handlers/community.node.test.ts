@@ -96,6 +96,7 @@ test('community API lists active listings and searches when q is provided', asyn
 	const listResponse = await loadCommunityIndexData(
 		env,
 		new Request('https://example.com/community.json'),
+		{ query: '', sort: null, category: null, limit: 50 },
 	)
 	const listBody = listResponse as CommunityIndexLoaderData
 
@@ -116,6 +117,7 @@ test('community API lists active listings and searches when q is provided', asyn
 	const searchResponse = await loadCommunityIndexData(
 		env,
 		new Request('https://example.com/community.json?q=github'),
+		{ query: 'github', sort: null, category: null, limit: 50 },
 	)
 	const searchBody = searchResponse as CommunityIndexLoaderData
 
@@ -132,6 +134,7 @@ test('community API lists active listings and searches when q is provided', asyn
 	const newestResponse = await loadCommunityIndexData(
 		env,
 		new Request('https://example.com/community.json?sort=newest'),
+		{ query: '', sort: 'newest', category: null, limit: 50 },
 	)
 	const newestBody = newestResponse as CommunityIndexLoaderData
 	expect(newestBody.sort).toBe('newest')

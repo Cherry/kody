@@ -10,32 +10,17 @@ import {
 	logAuditEvent,
 } from '#worker/audit-log.ts'
 
-function readExperimentsOptInBody(body: object): boolean | null {
-	if (!('experimentsOptIn' in body)) return null
-	const value = (body as { experimentsOptIn: unknown }).experimentsOptIn
-	if (typeof value !== 'boolean') return null
-	return value
-}
-
-export async function mutateAccountExperiments({
+export async function saveExperimentsPreference({
 	request,
 	env,
 	user,
-	body,
+	experimentsOptIn,
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	experimentsOptIn: boolean
 }) {
-	const experimentsOptIn = readExperimentsOptInBody(body)
-	if (experimentsOptIn === null) {
-		return operationResult(
-			{ ok: false, error: 'experimentsOptIn must be a boolean.' },
-			400,
-		)
-	}
-
 	await setExperimentsOptIn(env.APP_DB, {
 		userId: user.userId,
 		enabled: experimentsOptIn,

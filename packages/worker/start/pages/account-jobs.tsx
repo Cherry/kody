@@ -5,7 +5,7 @@ import {
 	readJobsViewFilter,
 	type AccountJobsViewFilter,
 } from '#client/routes/account-jobs-filter.ts'
-import { updateJobs } from '#start/server/account-mutations'
+import { setJobKillSwitch, runJobNow } from '#start/server/account-mutations'
 import {
 	type AccountJobListItem,
 	type AccountJobsLoaderData,
@@ -120,13 +120,23 @@ export function AccountJobsPage({
 			href: string
 			failureMessage: string
 		}) => {
-			return updateJobs({
-				data: {
-					body: input.body,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					search: new URL(input.href, 'https://kody.local').search,
-				},
-			})
+			const id = input.body.id
+			if (typeof id !== 'string') throw new Error('Record id is required.')
+			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			if (input.body.action === 'run_now')
+				return runJobNow({ data: { orgSlug, id } })
+			if (
+				input.body.action === 'set_kill_switch' &&
+				typeof input.body.killSwitchEnabled === 'boolean'
+			)
+				return setJobKillSwitch({
+					data: {
+						orgSlug,
+						id,
+						killSwitchEnabled: input.body.killSwitchEnabled,
+					},
+				})
+			throw new Error('Invalid job operation.')
 		},
 		onMutate: async ({ body, href }) => {
 			const resource = scopedPageResource(actorKey, 'loadJobsPage', href)
