@@ -20,6 +20,8 @@ async function renderCreditsPage(payload: OrgCreditsLoaderData) {
 		}),
 		href,
 	)
+	expect(html).toContain('aria-label="Workspace sections"')
+	expect(html).toContain('href="/@acme/-/credentials"')
 	return html
 		.replaceAll(/<style[\s\S]*?<\/style>/g, ' ')
 		.replaceAll(/<script[\s\S]*?<\/script>/g, ' ')
