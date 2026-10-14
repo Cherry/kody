@@ -49,7 +49,7 @@ test('signup confirms the permanent handle before sending credentials and suppor
 		.getByRole('button', { name: 'Yes, create account', exact: true })
 		.click()
 	await expect.poll(() => submissions).toBe(1)
-	await expect(page.getByRole('status')).toContainText(
+	await expect(page.getByRole('alert')).toContainText(
 		'Test submission received.',
 	)
 })

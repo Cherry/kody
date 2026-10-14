@@ -138,9 +138,9 @@ test('every workspace section is two clicks from the account menu', async ({
 		.getByTestId('account-menu-panel')
 		.getByRole('group', { name: 'Manage' })
 	await expect(manageGroup.getByRole('link').first()).toHaveAccessibleName(
-		`Overview @${user.username}`,
+		`@${user.username}`,
 	)
-	await manageGroup.getByRole('link', { name: /^Overview/ }).click()
+	await manageGroup.getByRole('link').first().click()
 	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/overview$`))
 	await page
 		.getByRole('navigation', { name: 'Workspace sections' })
@@ -211,7 +211,7 @@ test('every workspace section is two clicks from /account', async ({
 	await page
 		.getByTestId('account-menu-panel')
 		.getByRole('group', { name: 'Manage' })
-		.getByRole('link', { name: `Overview @${user.username}` })
+		.getByRole('link', { name: `@${user.username}`, exact: true })
 		.click()
 	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/overview$`))
 	await expect(
