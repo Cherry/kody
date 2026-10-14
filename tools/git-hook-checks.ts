@@ -1,5 +1,16 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { join } from 'node:path'
 import { resolveNpmCommand, isExecutedDirectly } from './node-runtime.ts'
+import {
+	createFileProvenanceStore,
+	hasProvenanceCheck,
+	hasUntrackedFiles,
+	recordProvenanceCheck,
+	treeShaForCommit,
+	treeShaForWorktree,
+	type ProvenanceStore,
+} from './git-hook-provenance.ts'
 
 /**
  * Husky pre-commit and pre-push gates.
@@ -17,6 +28,16 @@ import { resolveNpmCommand, isExecutedDirectly } from './node-runtime.ts'
  *
  * Rename detection is off so a source file renamed to markdown still lists
  * the deleted path.
+ *
+ * Pre-push skips `test:push` when the pushed commit's tree SHA is already
+ * recorded green from `npm run validate` or a prior successful pre-push
+ * (#3653 / #3719). Progress logs tick every 30s so a long workers-unit run is
+ * not a silent hang (#3547). Workers-unit isolation (ADR 0011) is unchanged.
+ *
+ * Pre-commit typecheck runs in a detached git worktree built from
+ * `git write-tree` (the index) so unstaged fixes cannot greenlight a broken
+ * index (#3695). The user's worktree is never mutated — no stash pop, no
+ * checkout -- ., no moving untracked files aside.
  */
 
 export type GitHookName = 'pre-commit' | 'pre-push'
@@ -53,6 +74,9 @@ const licenseBasenamePattern =
 	/^(?:license|licence|copying|notice)(?:\.(?:md|txt))?$/i
 
 const newRefBaseCandidates = ['origin/HEAD', 'origin/main', 'main'] as const
+
+/** Heartbeat while a long hook script (test:push) inherits silence from vitest. */
+export const gitHookProgressIntervalMs = 30_000
 
 function normalizeHookPath(filePath: string) {
 	// Git path output uses `/` even on Windows. A literal backslash is part of
@@ -120,16 +144,244 @@ export function listHookPaths(input: {
 	}
 }
 
+export function pushedCommitShas(stdin: string | null): ReadonlyArray<string> {
+	const updates = parsePrePushUpdates(stdin)
+	if (updates === null) return []
+	return updates
+		.filter((update) => !isZeroSha(update.localSha))
+		.map((update) => update.localSha)
+}
+
+export function shouldSkipTestPushForProvenance(input: {
+	git: GitRunner
+	stdin?: string | null
+	store: ProvenanceStore
+}): { skip: boolean; treeSha: string | null; reason: string | null } {
+	const shas = pushedCommitShas(input.stdin ?? null)
+	if (shas.length === 0) {
+		return { skip: false, treeSha: null, reason: null }
+	}
+	const trees: Array<string> = []
+	for (const sha of shas) {
+		const treeSha = treeShaForCommit(input.git, sha)
+		if (!treeSha) {
+			return { skip: false, treeSha: null, reason: null }
+		}
+		trees.push(treeSha)
+	}
+	const unique = [...new Set(trees)]
+	if (unique.length !== 1) {
+		return { skip: false, treeSha: null, reason: null }
+	}
+	const treeSha = unique[0]!
+	if (!hasProvenanceCheck(input.store, 'test:push', treeSha)) {
+		return { skip: false, treeSha, reason: null }
+	}
+	return {
+		skip: true,
+		treeSha,
+		reason: `pre-push: skipping test:push (tree ${treeSha.slice(0, 12)} already green)`,
+	}
+}
+
+function worktreeHasUnstagedOrUntracked(porcelainStdout: string) {
+	const porcelainLine = /^(?:\?\?|[ MADRCU!][ MADRCU!]) /
+	for (const raw of porcelainStdout.split('\n')) {
+		const line = raw.trimEnd()
+		if (!porcelainLine.test(line)) continue
+		if (line.startsWith('?? ')) return true
+		// Porcelain XY: second column is worktree; space means clean.
+		if (line[1] !== ' ') return true
+	}
+	return false
+}
+
+/**
+ * Typecheck the index (staged tree) in a detached worktree so the user's
+ * worktree is never mutated (#3695). Unstaged / untracked files stay put.
+ */
+export async function withStagedTreeForTypecheck<T>(input: {
+	git: GitRunner
+	/** Optional cwd is the staged-tree worktree path when isolation is active. */
+	run: (cwd?: string) => T | Promise<T>
+	log?: (message: string) => void
+	/** Repo root for the temporary worktree (tests inject a temp root). */
+	repoRoot?: string
+}): Promise<T> {
+	const log = input.log ?? (() => {})
+	const repoRoot = input.repoRoot ?? process.cwd()
+	const status = input.git(['status', '--porcelain', '-uall'])
+	if (status.status !== 0) {
+		log('pre-commit: could not read worktree status; typechecking as-is')
+		return input.run()
+	}
+	if (!worktreeHasUnstagedOrUntracked(status.stdout)) {
+		return input.run()
+	}
+
+	const writeTree = input.git(['write-tree'])
+	if (writeTree.status !== 0) {
+		log(
+			`pre-commit: git write-tree failed (${writeTree.stderr.trim() || 'unknown'}); refusing to typecheck a dirty worktree as-is`,
+		)
+		return 1 as T
+	}
+	const indexTree = writeTree.stdout.trim()
+	if (!/^[0-9a-f]{40}$/i.test(indexTree)) {
+		log(
+			'pre-commit: git write-tree returned no tree SHA; refusing to typecheck a dirty worktree as-is',
+		)
+		return 1 as T
+	}
+
+	// Pin identity via -c so Cloud Agent / fresh clones without user.* still
+	// get a staged tree; never fall back to typechecking the dirty worktree.
+	const commitTree = input.git([
+		'-c',
+		'user.email=kody-pre-commit@localhost',
+		'-c',
+		'user.name=kody-pre-commit',
+		'commit-tree',
+		indexTree,
+		'-m',
+		'kody-pre-commit-typecheck',
+	])
+	if (commitTree.status !== 0) {
+		log(
+			`pre-commit: git commit-tree failed (${commitTree.stderr.trim() || 'unknown'}); refusing to typecheck a dirty worktree as-is`,
+		)
+		return 1 as T
+	}
+	const stagedCommit = commitTree.stdout.trim()
+	if (!/^[0-9a-f]{40}$/i.test(stagedCommit)) {
+		log(
+			'pre-commit: git commit-tree returned no commit; refusing to typecheck a dirty worktree as-is',
+		)
+		return 1 as T
+	}
+
+	const tmpRoot = join(repoRoot, '.tmp')
+	mkdirSync(tmpRoot, { recursive: true })
+	const worktreePath = join(
+		tmpRoot,
+		`pre-commit-typecheck-${process.pid}-${stagedCommit.slice(0, 8)}`,
+	)
+	if (existsSync(worktreePath)) {
+		rmSync(worktreePath, { recursive: true, force: true })
+	}
+
+	log(
+		`pre-commit: typechecking staged tree in ${worktreePath} (index ${indexTree.slice(0, 12)})`,
+	)
+	// worktree add/remove must not inherit pre-commit GIT_INDEX_FILE — that
+	// alternate index can be clobbered while the worktree is initialized, so
+	// the hook would typecheck one tree and commit another.
+	const add = gitWithoutIndexFile(input.git, [
+		'worktree',
+		'add',
+		'--detach',
+		worktreePath,
+		stagedCommit,
+	])
+	if (add.status !== 0) {
+		log(
+			`pre-commit: git worktree add failed (${add.stderr.trim() || add.stdout.trim() || 'unknown'}); refusing to typecheck a dirty worktree as-is`,
+		)
+		return 1 as T
+	}
+
+	const nodeModules = join(repoRoot, 'node_modules')
+	const worktreeNodeModules = join(worktreePath, 'node_modules')
+	if (existsSync(nodeModules) && !existsSync(worktreeNodeModules)) {
+		try {
+			symlinkSync(nodeModules, worktreeNodeModules, 'junction')
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			log(
+				`pre-commit: could not link node_modules into staged worktree (${message})`,
+			)
+			removeStagedTypecheckWorktree(input.git, worktreePath, log)
+			return 1 as T
+		}
+	}
+
+	try {
+		return await input.run(worktreePath)
+	} finally {
+		removeStagedTypecheckWorktree(input.git, worktreePath, log)
+	}
+}
+
+function removeStagedTypecheckWorktree(
+	git: GitRunner,
+	worktreePath: string,
+	log: (message: string) => void,
+) {
+	try {
+		// Drop the junction/symlink first so recursive deletes (and older Git
+		// for Windows worktree remove) cannot traverse into the real
+		// repo node_modules.
+		rmSync(join(worktreePath, 'node_modules'), { force: true })
+	} catch {
+		// Missing link is fine.
+	}
+	const remove = gitWithoutIndexFile(git, [
+		'worktree',
+		'remove',
+		'--force',
+		worktreePath,
+	])
+	if (remove.status !== 0) {
+		log(
+			`pre-commit: warning: git worktree remove failed (${remove.stderr.trim() || remove.stdout.trim() || 'unknown'}); removing ${worktreePath} from disk`,
+		)
+		try {
+			rmSync(worktreePath, { recursive: true, force: true })
+		} catch {
+			// Best-effort.
+		}
+		gitWithoutIndexFile(git, ['worktree', 'prune'])
+	}
+}
+
+/**
+ * Run git with `GIT_INDEX_FILE` cleared. Pre-commit may set an alternate
+ * index; `git worktree add/remove` must not rewrite it.
+ */
+function gitWithoutIndexFile(
+	git: GitRunner,
+	args: ReadonlyArray<string>,
+): GitCommandResult {
+	const previous = process.env.GIT_INDEX_FILE
+	delete process.env.GIT_INDEX_FILE
+	try {
+		return git(args)
+	} finally {
+		if (previous === undefined) {
+			delete process.env.GIT_INDEX_FILE
+		} else {
+			process.env.GIT_INDEX_FILE = previous
+		}
+	}
+}
+
 export async function runGitHookChecks(input: {
 	hook: GitHookName
 	stdin?: string | null
 	git?: GitRunner
-	runScript?: (script: string) => number
+	runScript?: (script: string, cwd?: string) => number | Promise<number>
 	log?: (message: string) => void
+	provenance?: ProvenanceStore
+	now?: () => number
+	progressIntervalMs?: number
 }) {
 	const git = input.git ?? defaultGit
-	const runScript = input.runScript ?? runNpmScript
+	const runScript = input.runScript ?? defaultRunNpmScript
 	const log = input.log ?? console.log
+	const provenance = input.provenance ?? createFileProvenanceStore()
+	const now = input.now ?? Date.now
+	const progressIntervalMs =
+		input.progressIntervalMs ?? gitHookProgressIntervalMs
 	const paths = listHookPaths({
 		hook: input.hook,
 		git,
@@ -137,9 +389,81 @@ export async function runGitHookChecks(input: {
 	})
 	const plan = planGitHookChecks({ hook: input.hook, paths })
 	log(plan.summary)
-	for (const script of hookScripts(plan)) {
-		const status = runScript(script)
+
+	let scripts = hookScripts(plan)
+	if (input.hook === 'pre-push' && scripts.includes('test:push')) {
+		const skip = shouldSkipTestPushForProvenance({
+			git,
+			stdin: input.stdin,
+			store: provenance,
+		})
+		if (skip.skip && skip.reason) {
+			log(skip.reason)
+			scripts = scripts.filter((script) => script !== 'test:push')
+		}
+	}
+
+	for (const script of scripts) {
+		const started = now()
+		log(`hook: starting npm run ${script}`)
+		const heartbeat = setInterval(() => {
+			const elapsedSec = Math.max(1, Math.round((now() - started) / 1000))
+			log(`hook: still running npm run ${script} (${elapsedSec}s)`)
+		}, progressIntervalMs)
+		// Unref so a stuck interval cannot keep the process alive after exit.
+		heartbeat.unref?.()
+		let status: number
+		// Provenance must bind to the tree that was actually tested, not
+		// whatever commit tips appear on stdin (#3745 review). Skip the
+		// fingerprint when stdin has no pushable SHAs (blank / delete-only).
+		const pushShas =
+			script === 'test:push' ? pushedCommitShas(input.stdin ?? null) : []
+		const testedTreeBefore =
+			pushShas.length > 0 ? treeShaForWorktree(git) : null
+		try {
+			if (input.hook === 'pre-commit' && script === 'typecheck') {
+				status = await withStagedTreeForTypecheck({
+					git,
+					log,
+					run: (cwd) => runScript(script, cwd),
+				})
+			} else {
+				status = await runScript(script)
+			}
+		} finally {
+			clearInterval(heartbeat)
+		}
+		const elapsedSec = Math.max(0, Math.round((now() - started) / 1000))
+		log(`hook: finished npm run ${script} in ${elapsedSec}s (exit ${status})`)
 		if (status !== 0) return status
+		if (script === 'test:push' && pushShas.length > 0) {
+			if (hasUntrackedFiles(git)) {
+				log(
+					'pre-push: not recording test:push provenance (untracked files present; stash create cannot fingerprint them)',
+				)
+				continue
+			}
+			const testedTreeAfter = treeShaForWorktree(git)
+			if (
+				!testedTreeBefore ||
+				!testedTreeAfter ||
+				testedTreeBefore !== testedTreeAfter
+			) {
+				log(
+					'pre-push: not recording test:push provenance (worktree changed during the run or could not be fingerprinted)',
+				)
+				continue
+			}
+			for (const sha of pushShas) {
+				const commitTree = treeShaForCommit(git, sha)
+				if (!commitTree || commitTree !== testedTreeAfter) continue
+				recordProvenanceCheck(provenance, {
+					check: 'test:push',
+					treeSha: commitTree,
+					source: 'pre-push',
+				})
+			}
+		}
 	}
 	return 0
 }
@@ -345,7 +669,18 @@ function isZeroSha(sha: string) {
 }
 
 function defaultGit(args: ReadonlyArray<string>): GitCommandResult {
-	const result = spawnSync('git', args, { encoding: 'utf8' })
+	const env =
+		args[0] === 'worktree'
+			? (() => {
+					const next = { ...process.env }
+					delete next.GIT_INDEX_FILE
+					return next
+				})()
+			: undefined
+	const result = spawnSync('git', args, {
+		encoding: 'utf8',
+		...(env ? { env } : {}),
+	})
 	return {
 		status: result.status ?? 1,
 		stdout: result.stdout ?? '',
@@ -367,16 +702,21 @@ export function gitHookScriptEnv(source: NodeJS.ProcessEnv = process.env) {
 	return env
 }
 
-function runNpmScript(script: string) {
-	const result = spawnSync(resolveNpmCommand(), ['run', script], {
-		stdio: 'inherit',
-		env: gitHookScriptEnv(),
+function defaultRunNpmScript(script: string, cwd?: string): Promise<number> {
+	return new Promise((resolve) => {
+		const child = spawn(resolveNpmCommand(), ['run', script], {
+			stdio: 'inherit',
+			env: gitHookScriptEnv(),
+			cwd,
+		})
+		child.once('error', (error) => {
+			console.error(error.message)
+			resolve(1)
+		})
+		child.once('close', (code) => {
+			resolve(code ?? 1)
+		})
 	})
-	if (result.error) {
-		console.error(result.error.message)
-		return 1
-	}
-	return result.status ?? 1
 }
 
 async function readHookStdin() {
