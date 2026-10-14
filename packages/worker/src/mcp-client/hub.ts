@@ -41,6 +41,7 @@ import {
 	isMcpOAuthMissingRefreshGrantLastError,
 	isMcpOAuthTokenRecoveryLastError,
 	mcpOAuthDiscoveryAdvertisesRefresh,
+	mcpOAuthRefreshGrantOmittedStorageKey,
 	mcpOAuthRefreshTokenStorageKey,
 	mcpOAuthTokenRecoveryStorageKey,
 	mcpOAuthTokenRecoveryStoragePrefix,
@@ -125,6 +126,17 @@ function clientIdFromStoredAuthUrl(authUrl: string | null) {
 	}
 }
 
+function withMcpOAuthTransportFetch<T extends Record<string, unknown>>(
+	transport: T,
+): T {
+	const authProvider = transport['authProvider'] as
+		| { coalesceFetch?: typeof fetch }
+		| undefined
+	const coalesceFetch = authProvider?.coalesceFetch
+	if (!coalesceFetch || transport['fetch']) return transport
+	return { ...transport, fetch: coalesceFetch }
+}
+
 export function isRecoverableMcpOAuthStateError(error: string | null) {
 	if (!error) return false
 	const normalized = error.toLowerCase()
@@ -182,6 +194,36 @@ class McpClientHubBase extends DurableObject<Env> {
 		this.manager = new MCPClientManager(mcpClientName, mcpClientVersion, {
 			createAuthProvider: (callbackUrl) => this.createAuthProvider(callbackUrl),
 		})
+		// Restore rebuilds the auth provider but not transport.fetch (functions
+		// cannot persist in server_options). Wire coalesceFetch on every
+		// createConnection — including hibernation restore — before the
+		// StreamableHTTP/SSE transport captures fetch at construction.
+		// MCPClientManager.createConnection is private; patch through a narrow
+		// escape hatch so restore gets the same fetch wiring as registerServer.
+		type McpCreateConnection = (
+			id: string,
+			url: string,
+			options: {
+				client?: unknown
+				transport?: Record<string, unknown>
+				discoverResult?: unknown
+			},
+		) => unknown
+		const managerWithCreate = this.manager as unknown as {
+			createConnection?: McpCreateConnection
+		}
+		const createConnection = managerWithCreate.createConnection
+		if (typeof createConnection === 'function') {
+			const boundCreateConnection = createConnection.bind(managerWithCreate)
+			managerWithCreate.createConnection = (id, url, options) => {
+				const transport = options.transport
+				if (!transport) return boundCreateConnection(id, url, options)
+				return boundCreateConnection(id, url, {
+					...options,
+					transport: withMcpOAuthTransportFetch(transport),
+				})
+			}
+		}
 		// The manager is a lifecycle capability: it receives DO storage from the
 		// lifecycle and restores persisted connections in its `onStart`.
 		this.lifecycle = Lifecycle.install(this).use(this.manager)
@@ -501,11 +543,13 @@ class McpClientHubBase extends DurableObject<Env> {
 				name: input.name,
 				callbackUrl: input.callbackUrl,
 				client: outboundMcpClientOptions(),
-				transport: withStaticTransportHeaders({
-					type: 'auto' as const,
-					authProvider,
-					...(input.headers ? { headers: input.headers } : {}),
-				}),
+				transport: withStaticTransportHeaders(
+					withMcpOAuthTransportFetch({
+						type: 'auto' as const,
+						authProvider,
+						...(input.headers ? { headers: input.headers } : {}),
+					}),
+				),
 			})
 			this.clearSessionBeforeConnect(input.serverId)
 			const connected = await this.connectToServerSerialized(input.serverId)
@@ -588,6 +632,7 @@ class McpClientHubBase extends DurableObject<Env> {
 			mcpLegacyHandshakeStorageKey(input.serverId),
 			mcpOAuthTokenRecoveryStorageKey(input.serverId),
 			mcpOAuthRefreshTokenStorageKey(input.serverId),
+			mcpOAuthRefreshGrantOmittedStorageKey(input.serverId),
 			mcpPreRegisteredOAuthClientStorageKey(input.serverId),
 			mcpOAuthAttemptStorageKey(input.serverId),
 			mcpOAuthAttemptVerifiedStorageKey(input.serverId),
@@ -967,6 +1012,22 @@ class McpClientHubBase extends DurableObject<Env> {
 			if (refreshed.state === 'authenticating' && refreshed.authUrl) {
 				return refreshed
 			}
+			// Authenticated but discovery incomplete: keep tokens. Reminting
+			// would force consent for a tools/list timeout.
+			if (refreshed.state === 'connected') {
+				return refreshed
+			}
+			// authenticating without authUrl (or failed) while tokens remain:
+			// fall through to remint so the user can re-approve. Do not treat
+			// leftover tokens alone as a reason to return a stuck snapshot.
+			const presenceAfter = await this.readTokenPresence(input.serverId)
+			if (
+				refreshed.state !== 'authenticating' &&
+				refreshed.state !== 'failed' &&
+				shouldAttemptMcpOAuthRefresh(presenceAfter)
+			) {
+				return refreshed
+			}
 		}
 
 		const existingConnection = this.manager.mcpConnections[input.serverId]
@@ -984,6 +1045,11 @@ class McpClientHubBase extends DurableObject<Env> {
 		if (sidecarValue !== undefined) {
 			oauthStorageSnapshot.set(sidecarKey, sidecarValue)
 		}
+		const omittedKey = mcpOAuthRefreshGrantOmittedStorageKey(input.serverId)
+		const omittedValue = await this.ctx.storage.get(omittedKey)
+		if (omittedValue !== undefined) {
+			oauthStorageSnapshot.set(omittedKey, omittedValue)
+		}
 		const attemptKey = mcpOAuthAttemptStorageKey(input.serverId)
 		const attemptValue = await this.ctx.storage.get(attemptKey)
 		if (attemptValue !== undefined) {
@@ -995,11 +1061,23 @@ class McpClientHubBase extends DurableObject<Env> {
 			oauthStorageSnapshot.set(attemptVerifiedKey, attemptVerifiedValue)
 		}
 
+		// Read presence before removeServer: tokens() lives on the connection's
+		// authProvider, so a post-remove read always looks empty and would wipe
+		// a leftover refresh token during remint.
+		const presenceBeforeRemint = await this.readTokenPresence(input.serverId)
 		try {
 			await this.manager.removeServer(input.serverId)
+			// Remint for a replacement authorization. Clear token blobs only when
+			// resetting the client registration, or when no usable grant remains.
+			// Do not wipe a live refresh token after a discovery-only failure —
+			// that path returns above. Sibling blobs clear on authorization-code
+			// saveTokens after redirect, not on redirect itself.
 			await this.clearOAuthAuthorizationStorage({
 				serverId: input.serverId,
 				clearClientRegistration,
+				clearTokens:
+					clearClientRegistration ||
+					!shouldAttemptMcpOAuthRefresh(presenceBeforeRemint),
 			})
 
 			const authProvider = this.createAuthProvider(input.callbackUrl)
@@ -1013,11 +1091,13 @@ class McpClientHubBase extends DurableObject<Env> {
 				callbackUrl: input.callbackUrl,
 				...(clientId ? { clientId } : {}),
 				client: reconnected.client,
-				transport: withStaticTransportHeaders({
-					...reconnected.transport,
-					type: reconnected.transport.type ?? 'auto',
-					authProvider,
-				}),
+				transport: withStaticTransportHeaders(
+					withMcpOAuthTransportFetch({
+						...reconnected.transport,
+						type: reconnected.transport.type ?? 'auto',
+						authProvider,
+					}),
+				),
 			})
 		} catch (error) {
 			await this.manager.removeServer(input.serverId).catch(() => {})
@@ -1033,11 +1113,13 @@ class McpClientHubBase extends DurableObject<Env> {
 						name: row.name,
 						callbackUrl: input.callbackUrl,
 						client: fresh.client,
-						transport: withStaticTransportHeaders({
-							...fresh.transport,
-							type: fresh.transport.type ?? 'auto',
-							authProvider: freshAuthProvider,
-						}),
+						transport: withStaticTransportHeaders(
+							withMcpOAuthTransportFetch({
+								...fresh.transport,
+								type: fresh.transport.type ?? 'auto',
+								authProvider: freshAuthProvider,
+							}),
+						),
 					})
 					.catch(() => {})
 				throw error
@@ -1060,11 +1142,13 @@ class McpClientHubBase extends DurableObject<Env> {
 					...(row.client_id ? { clientId: row.client_id } : {}),
 					...(row.auth_url ? { authUrl: row.auth_url } : {}),
 					client: restored.client,
-					transport: withStaticTransportHeaders({
-						...restored.transport,
-						type: restored.transport.type ?? 'auto',
-						authProvider: originalAuthProvider,
-					}),
+					transport: withStaticTransportHeaders(
+						withMcpOAuthTransportFetch({
+							...restored.transport,
+							type: restored.transport.type ?? 'auto',
+							authProvider: originalAuthProvider,
+						}),
+					),
 				})
 				.catch(() => {})
 			throw error
@@ -1086,16 +1170,27 @@ class McpClientHubBase extends DurableObject<Env> {
 	private async clearOAuthAuthorizationStorage(input: {
 		serverId: string
 		clearClientRegistration: boolean
+		/**
+		 * Drop `/token` blobs and the refresh-token sidecar. Remint and
+		 * re-authorize use this so a leftover DCR key cannot shadow a new
+		 * CIMD grant. Refresh-first reconnect keeps tokens (false).
+		 */
+		clearTokens?: boolean
 	}) {
+		const clearTokens =
+			input.clearClientRegistration || input.clearTokens === true
 		const prefix = `/${mcpClientName}/${input.serverId}/`
 		const entries = await this.ctx.storage.list({ prefix })
 		const keys = [...entries.keys()].filter((key) => {
 			if (input.clearClientRegistration) return true
-			if (key.endsWith('/token')) return false
+			if (key.endsWith('/token')) return clearTokens
 			return !key.endsWith('/client_info/') && !key.endsWith('/oauth_discovery')
 		})
-		if (input.clearClientRegistration) {
-			keys.push(mcpOAuthRefreshTokenStorageKey(input.serverId))
+		if (clearTokens) {
+			keys.push(
+				mcpOAuthRefreshTokenStorageKey(input.serverId),
+				mcpOAuthRefreshGrantOmittedStorageKey(input.serverId),
+			)
 		}
 		// A reconnect or client reset retires any in-flight attempt identity.
 		keys.push(
@@ -1207,11 +1302,13 @@ class McpClientHubBase extends DurableObject<Env> {
 				callbackUrl: row.callback_url,
 				...(row.client_id ? { clientId: row.client_id } : {}),
 				client: legacy.client,
-				transport: withStaticTransportHeaders({
-					...legacy.transport,
-					type: legacy.transport.type ?? 'auto',
-					authProvider,
-				}),
+				transport: withStaticTransportHeaders(
+					withMcpOAuthTransportFetch({
+						...legacy.transport,
+						type: legacy.transport.type ?? 'auto',
+						authProvider,
+					}),
+				),
 			})
 		} catch (error) {
 			try {
@@ -1226,11 +1323,13 @@ class McpClientHubBase extends DurableObject<Env> {
 					callbackUrl: row.callback_url,
 					...(row.client_id ? { clientId: row.client_id } : {}),
 					client: restored.client,
-					transport: withStaticTransportHeaders({
-						...restored.transport,
-						type: restored.transport.type ?? 'auto',
-						authProvider,
-					}),
+					transport: withStaticTransportHeaders(
+						withMcpOAuthTransportFetch({
+							...restored.transport,
+							type: restored.transport.type ?? 'auto',
+							authProvider,
+						}),
+					),
 				})
 			} catch {
 				// The incomplete auto discover lastError is the user-visible outcome.
@@ -2050,10 +2149,26 @@ class McpClientHubBase extends DurableObject<Env> {
 	private async stampMissingRefreshGrantIfReady(serverId: string) {
 		const presence = await this.readTokenPresence(serverId)
 		if (presence.hasRefreshToken) {
+			await this.ctx.storage.delete(
+				mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+			)
+			await this.clearTokenRecoveryLastError(serverId)
+			return
+		}
+		// Only warn when saveTokens recorded that this grant omitted an
+		// advertised refresh token. An empty tokens() after a concurrent
+		// refresh wipe (or invalidate) must not look like "AS never sent one".
+		const omittedGrant = await this.ctx.storage.get(
+			mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+		)
+		if (!omittedGrant) {
 			await this.clearTokenRecoveryLastError(serverId)
 			return
 		}
 		if (!(await this.discoveryAdvertisesRefresh(serverId))) {
+			await this.ctx.storage.delete(
+				mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+			)
 			await this.clearTokenRecoveryLastError(serverId)
 			return
 		}
@@ -2224,11 +2339,13 @@ class McpClientHubBase extends DurableObject<Env> {
 			...(staged.row.client_id ? { clientId: staged.row.client_id } : {}),
 			...(staged.row.auth_url ? { authUrl: staged.row.auth_url } : {}),
 			client: options.client,
-			transport: withStaticTransportHeaders({
-				...options.transport,
-				type: transportType,
-				authProvider,
-			}),
+			transport: withStaticTransportHeaders(
+				withMcpOAuthTransportFetch({
+					...options.transport,
+					type: transportType,
+					authProvider,
+				}),
+			),
 		})
 		await this.ctx.storage.delete(mcpTransferStagingStorageKey(serverId))
 		const connection = this.manager.mcpConnections[serverId]

@@ -14,10 +14,18 @@ import {
 import { mcpOAuthAttemptIdentityInvalidMessage } from './oauth-identity.ts'
 import { assertEndpointsOnIssuerOrigin } from './oauth-issuer-endpoints.ts'
 import {
+	releaseMcpOAuthRefreshCoalesce,
+	wrapFetchForMcpOAuthRefreshCoalesce,
+} from './oauth-refresh-coalesce.ts'
+import {
 	clientIdFromMcpOAuthTokenStorageKey,
+	mcpOAuthDiscoveryAdvertisesRefresh,
+	mcpOAuthRefreshGrantOmittedStorageKey,
 	mcpOAuthRefreshTokenStorageKey,
 	mcpOAuthServerStoragePrefix,
 	parseStoredMcpOAuthRefreshToken,
+	preferMcpOAuthStoredClientId,
+	readMcpOAuthTokenPresence,
 	restoreReadableMcpOAuthTokens,
 	withPreservedMcpOAuthRefreshToken,
 } from './oauth-token-recovery.ts'
@@ -109,6 +117,12 @@ export function handleMcpClientIdMetadataRequest(request: Request) {
 
 type McpClientOAuthProvider = DurableObjectOAuthClientProvider & {
 	clientMetadataUrl?: string
+	/**
+	 * Fetch that coalesces concurrent refresh_token POSTs for this provider.
+	 * Wire it onto the MCP transport (`transport.fetch`) so 401-driven
+	 * `auth()` calls share one token-endpoint exchange per refresh token.
+	 */
+	coalesceFetch?: typeof fetch
 }
 
 type McpOAuthTokenContext = Parameters<
@@ -133,14 +147,21 @@ export type ResolveMcpOAuthLiveServerIdentity = (
  * existing refresh token when the authorization server omits one, writes a
  * server-scoped sidecar so restore can find it when SQL `client_id` is
  * missing, and keeps OAuth discovery so the next authorize URL can still
- * advertise scopes. `invalidateCredentials` for `tokens`, `client`, or
- * `all` infers `clientId` when it is missing, deletes leftover `/token`
- * keys and the sidecar so a rejected grant cannot be replayed, and skips a
- * `tokens` wipe when a save completed after the invalidate was requested.
- * With `resolvePreRegisteredClient`, a server's admin-configured OAuth
- * client is presented ahead of CIMD and DCR. With `resolveLiveServerIdentity`,
- * each authorization attempt is bound to the live server row + client,
- * re-checked at callback and again immediately before tokens are persisted.
+ * advertise scopes. A completed authorization-code grant clears leftover
+ * `/token` blobs for other client ids on that server and records whether the
+ * AS omitted an advertised refresh token (so ready-state warnings do not fire
+ * after a later wipe). `redirectToAuthorization` keeps the live grant (a
+ * transient refresh failure must stay recoverable); authorization-code
+ * `saveTokens` clears sibling DCR/CIMD `/token` blobs. `coalesceFetch`
+ * collapses concurrent refresh_token POSTs for this provider.
+ * `invalidateCredentials` for `tokens`, `client`, or `all` infers `clientId`
+ * when it is missing, deletes leftover `/token` keys and the sidecar so a
+ * rejected grant cannot be replayed, and skips a `tokens` wipe when a save
+ * completed after the invalidate was requested. With
+ * `resolvePreRegisteredClient`, a server's admin-configured OAuth client is
+ * presented ahead of CIMD and DCR. With `resolveLiveServerIdentity`, each
+ * authorization attempt is bound to the live server row + client, re-checked
+ * at callback and again immediately before tokens are persisted.
  */
 export function createMcpClientOAuthProvider(
 	storage: DurableObjectStorage,
@@ -176,6 +197,7 @@ export function createMcpClientOAuthProvider(
 	if (clientMetadataUrl) {
 		provider.clientMetadataUrl = clientMetadataUrl
 	}
+	provider.coalesceFetch = wrapFetchForMcpOAuthRefreshCoalesce(provider)
 	return provider
 }
 
@@ -263,6 +285,11 @@ function installMcpOAuthAttemptBinding(
 					mcpOAuthAttemptIdentityInvalidMessage(live.name),
 				)
 			}
+			// Do not wipe the live grant here. The SDK can call redirect after a
+			// transient refresh failure; deleting first would drop a recoverable
+			// token. consumeVerifiedAttempt clears sibling blobs when the new
+			// authorization-code grant is saved.
+			if (clientId) provider.clientId = clientId
 			await redirect(authUrl)
 			try {
 				await writeMcpOAuthAttemptIdentity(provider.storage, identity)
@@ -369,6 +396,11 @@ function installMcpOAuthTokenPreservation(
 				resolveLiveServerIdentity: resolveLive,
 			})
 			tokenWriteGeneration += 1
+			// Do not release coalesce here. The parent refresh token must stay
+			// shareable until grace expires so a concurrent auth() that already
+			// read it still joins the completed exchange. The rotated token is a
+			// different coalesce key, so the next refresh is unblocked. Invalidate
+			// clears the maps when the grant is dropped.
 			return result
 		})
 		saveQueue = run.then(
@@ -398,6 +430,7 @@ function installMcpOAuthTokenPreservation(
 				const serverId = readProviderString(provider, 'serverId')
 				if (!serverId) return
 				await deleteStoredMcpOAuthTokenBlobs(provider, serverId)
+				releaseMcpOAuthRefreshCoalesce(provider)
 				if (scope === 'all' || scope === 'client') {
 					await clearMcpOAuthAttemptIdentity(provider.storage, serverId)
 				}
@@ -474,21 +507,58 @@ async function savePreservedMcpOAuthTokens(input: {
 			consumeVerifiedAttempt = true
 		}
 	}
+	const activeClientId =
+		(consumeVerifiedAttempt && pending?.clientId ? pending.clientId : null) ||
+		readProviderString(input.provider, 'clientId') ||
+		stored.clientId
+	if (activeClientId) {
+		input.provider.clientId = activeClientId
+	}
 	const merged = withPreservedMcpOAuthRefreshToken({
 		incoming: input.incoming,
-		sources: [existing, ...stored.sources],
+		sources: consumeVerifiedAttempt ? [] : [existing, ...stored.sources],
 	})
+	// Save the replacement first. Deleting sibling blobs before saveTokens
+	// would drop a recoverable grant if the write failed mid-exchange.
 	await input.saveTokens(
 		merged && typeof merged === 'object'
 			? (merged as McpOAuthSaveTokens)
 			: input.incoming,
 		input.context,
 	)
+	if (consumeVerifiedAttempt && serverId) {
+		// Authorization-code completion succeeded: drop leftover DCR/CIMD
+		// sibling `/token` blobs so they cannot shadow the new active client.
+		// Keep the just-saved active-client key. Actor-less refresh during a
+		// verified window must not wipe the seed (consumeVerifiedAttempt false).
+		await deleteSiblingMcpOAuthTokenBlobs(
+			input.provider,
+			serverId,
+			activeClientId,
+		)
+	}
 	const refreshToken = parseStoredMcpOAuthRefreshToken(merged)
 	if (serverId && refreshToken) {
 		await input.provider.storage.put(mcpOAuthRefreshTokenStorageKey(serverId), {
 			refresh_token: refreshToken,
 		})
+		await input.provider.storage.delete(
+			mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+		)
+	} else if (serverId && !readMcpOAuthTokenPresence(merged).hasRefreshToken) {
+		if (consumeVerifiedAttempt) {
+			// New authorization-code grant without a refresh token: drop the
+			// prior sidecar so tokens() cannot resurrect the old rotating RT.
+			await input.provider.storage.delete(
+				mcpOAuthRefreshTokenStorageKey(serverId),
+			)
+		}
+		if (mcpOAuthDiscoveryAdvertisesRefresh(discovery)) {
+			await input.provider.storage.put(
+				mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+				{ omitted: true, at: new Date().toISOString() },
+			)
+		}
 	}
 	if (discovery !== undefined) {
 		await input.writeDiscovery(discovery)
@@ -513,8 +583,11 @@ async function collectStoredMcpOAuthTokenSources(
 		serverId,
 	})
 	const entries = await provider.storage.list({ prefix })
-	const siblings: Array<unknown> = []
-	let inferredClientId: string | null = null
+	const siblings: Array<{
+		clientId: string
+		value: unknown
+		hasRefreshToken: boolean
+	}> = []
 	for (const [key, value] of entries) {
 		const clientId = clientIdFromMcpOAuthTokenStorageKey({
 			clientName: mcpClientName,
@@ -522,13 +595,25 @@ async function collectStoredMcpOAuthTokenSources(
 			key,
 		})
 		if (!clientId) continue
-		siblings.push(value)
-		inferredClientId ??= clientId
+		siblings.push({
+			clientId,
+			value,
+			hasRefreshToken: readMcpOAuthTokenPresence(value).hasRefreshToken,
+		})
 	}
+	const preferredClientId =
+		readProviderString(provider, 'clientId') ||
+		(provider as McpClientOAuthProvider).clientMetadataUrl ||
+		null
+	const inferredClientId = preferMcpOAuthStoredClientId({
+		preferredClientId,
+		siblings,
+	})
 	return {
-		sources: [sidecar ? { refresh_token: sidecar } : null, ...siblings].filter(
-			(source) => source != null,
-		),
+		sources: [
+			sidecar ? { refresh_token: sidecar } : null,
+			...siblings.map((sibling) => sibling.value),
+		].filter((source) => source != null),
 		clientId: inferredClientId,
 	}
 }
@@ -537,7 +622,40 @@ async function deleteStoredMcpOAuthTokenBlobs(
 	provider: DurableObjectOAuthClientProvider,
 	serverId: string,
 ) {
-	const keys = [mcpOAuthRefreshTokenStorageKey(serverId)]
+	const keys = [
+		mcpOAuthRefreshTokenStorageKey(serverId),
+		mcpOAuthRefreshGrantOmittedStorageKey(serverId),
+		...(await listMcpOAuthTokenBlobKeys(provider, serverId)),
+	]
+	await provider.storage.delete(keys)
+}
+
+/** After a successful authorization-code save, drop other client-id `/token` keys. */
+async function deleteSiblingMcpOAuthTokenBlobs(
+	provider: DurableObjectOAuthClientProvider,
+	serverId: string,
+	activeClientId: string | null,
+) {
+	const keys = (await listMcpOAuthTokenBlobKeys(provider, serverId)).filter(
+		(key) => {
+			const clientId = clientIdFromMcpOAuthTokenStorageKey({
+				clientName: mcpClientName,
+				serverId,
+				key,
+			})
+			return Boolean(clientId) && clientId !== activeClientId
+		},
+	)
+	if (keys.length > 0) {
+		await provider.storage.delete(keys)
+	}
+}
+
+async function listMcpOAuthTokenBlobKeys(
+	provider: DurableObjectOAuthClientProvider,
+	serverId: string,
+) {
+	const keys: Array<string> = []
 	const prefix = mcpOAuthServerStoragePrefix({
 		clientName: mcpClientName,
 		serverId,
@@ -554,7 +672,7 @@ async function deleteStoredMcpOAuthTokenBlobs(
 			keys.push(key)
 		}
 	}
-	await provider.storage.delete(keys)
+	return keys
 }
 
 function readProviderString(
