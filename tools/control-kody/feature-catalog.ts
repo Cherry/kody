@@ -14,7 +14,7 @@ function pathToFeaturesDir() {
 
 /**
  * User-facing surfaces agents rediscover. Keep `paths` aligned with
- * `packages/worker/universal/routes.ts` HTML routes. Only external HTTP protocols and downloads go in
+ * `packages/worker/start/routeTree.gen.ts` document paths. Only external HTTP protocols and downloads go in
  * `apis`, website reads and mutations use Start server functions.
  */
 export const featureCatalog: ReadonlyArray<Feature> = [
@@ -47,11 +47,11 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		paths: [
 			'/onboarding',
 			'/onboarding/step-1',
-			'/onboarding/step-1/:agent',
+			'/onboarding/step-1/$agent',
 			'/onboarding/step-2',
-			'/onboarding/step-2/:service',
+			'/onboarding/step-2/$service',
 			'/onboarding/step-3',
-			'/onboarding/step-3/:agent',
+			'/onboarding/step-3/$agent',
 		],
 		apis: [],
 	},
@@ -73,11 +73,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'passkeys',
 		title: 'Passkeys',
 		file: 'passkeys.md',
-		paths: [
-			'/account/passkeys',
-			'/webauthn/registration',
-			'/webauthn/authentication',
-		],
+		paths: ['/account/passkeys'],
 		apis: [],
 	},
 	{
@@ -90,12 +86,13 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/account/data',
 			'/account/organizations',
 			'/account/organizations/new',
-			'/@:orgSlug/-/settings',
-			'/@:orgSlug/-/members',
-			'/@:orgSlug/-/teams',
-			'/@:orgSlug/-/grants',
-			'/@:orgSlug/-/collaborators',
-			'/join/:token',
+			'/@{$orgSlug}/-/overview',
+			'/@{$orgSlug}/-/settings',
+			'/@{$orgSlug}/-/members',
+			'/@{$orgSlug}/-/teams',
+			'/@{$orgSlug}/-/grants',
+			'/@{$orgSlug}/-/collaborators',
+			'/join/$token',
 		],
 		apis: ['/account/export.json'],
 	},
@@ -103,7 +100,12 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'connections',
 		title: 'Agents (connected agents)',
 		file: 'connections.md',
-		paths: ['/@:orgSlug/-/agents(/*rest)'],
+		paths: [
+			'/account/agents',
+			'/account/connections',
+			'/@{$orgSlug}/-/connections',
+			'/@{$orgSlug}/-/agents',
+		],
 		apis: [],
 	},
 	{
@@ -111,31 +113,36 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'Packages',
 		file: 'packages.md',
 		paths: [
-			'/account/packages/:packageId',
-			'/account/packages/:packageId/approve-publish',
-			'/account/packages/:packageId/files(/*relativePath)',
-			'/@:username',
-			'/@:username/:kodyId',
-			'/@:username/:kodyId/icon/:iconCommit',
-			'/@:username/:kodyId/settings',
-			'/@:username/:kodyId/collaborators',
-			'/account/repos/:repoId/icon/:iconCommit',
-			'/@:username/:kodyId/approve-publish',
-			'/@:orgSlug/-/repositories',
-			'/@:orgSlug/-/approvals/:bundleId',
+			'/account/packages',
+			'/@{$orgSlug}/-/packages',
+			'/account/packages/$packageId',
+			'/account/packages/$packageId/approve-publish',
+			'/account/packages/$packageId/files/$',
+			'/@{$username}',
+			'/@{$username}/$kodyId',
+			'/@{$username}/$kodyId/icon/$iconCommit',
+			'/@{$username}/$kodyId/settings',
+			'/@{$username}/$kodyId/collaborators',
+			'/account/repos/$repoId/icon/$iconCommit',
+			'/@{$username}/$kodyId/approve-publish',
+			'/@{$orgSlug}/-/repositories',
+			'/@{$orgSlug}/-/approvals/$bundleId',
 		],
-		apis: ['/@:username/:kodyId/raw/:ref(/*relativePath)'],
+		apis: ['/@{$username}/$kodyId/raw/$ref/$'],
 	},
 	{
 		id: 'secrets',
 		title: 'Secrets',
 		file: 'secrets.md',
 		paths: [
+			'/@{$orgSlug}/-/credentials',
+			'/account/secrets',
+			'/account/secret-providers',
 			'/connect/secrets',
 			'/connect/secret-set',
 			'/account/credentials',
-			'/@:orgSlug/-/secrets(/*rest)',
-			'/@:orgSlug/-/secret-providers(/*rest)',
+			'/@{$orgSlug}/-/secrets',
+			'/@{$orgSlug}/-/secret-providers',
 		],
 		apis: [],
 	},
@@ -143,7 +150,11 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'integrations',
 		title: 'Integrations and OAuth connect',
 		file: 'integrations.md',
-		paths: ['/connect/oauth', '/@:orgSlug/-/integrations(/*rest)'],
+		paths: [
+			'/account/integrations',
+			'/connect/oauth',
+			'/@{$orgSlug}/-/integrations',
+		],
 		apis: [],
 	},
 	{
@@ -151,10 +162,11 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'MCP servers',
 		file: 'mcp-servers.md',
 		paths: [
+			'/account/mcp-servers',
 			'/account/mcp-oauth-clients',
 			'/account/mcp-servers/oauth/callback',
-			'/account/mcp-servers/logos/:serverId',
-			'/@:orgSlug/-/mcp-servers(/*rest)',
+			'/account/mcp-servers/logos/$serverId',
+			'/@{$orgSlug}/-/mcp-servers',
 		],
 		apis: [],
 	},
@@ -162,14 +174,14 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'jobs',
 		title: 'Jobs',
 		file: 'jobs.md',
-		paths: ['/@:orgSlug/-/jobs(/*rest)'],
+		paths: ['/account/jobs', '/@{$orgSlug}/-/jobs'],
 		apis: [],
 	},
 	{
 		id: 'workflows',
 		title: 'Workflows',
 		file: 'workflows.md',
-		paths: ['/@:orgSlug/-/workflows(/*rest)'],
+		paths: ['/account/workflows', '/@{$orgSlug}/-/workflows'],
 		apis: [],
 	},
 	{
@@ -177,8 +189,9 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'Webhooks (minted URLs)',
 		file: 'webhooks.md',
 		paths: [
-			'/@:username/:kodyId/settings',
-			'/@:orgSlug/-/webhooks',
+			'/account/webhooks',
+			'/@{$username}/$kodyId/settings',
+			'/@{$orgSlug}/-/webhooks',
 			'/connect/webhook-apply',
 		],
 		apis: [],
@@ -187,14 +200,14 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'activity',
 		title: 'Activity',
 		file: 'activity.md',
-		paths: ['/@:orgSlug/-/activity(/*rest)'],
+		paths: ['/account/activity', '/@{$orgSlug}/-/activity'],
 		apis: [],
 	},
 	{
 		id: 'waiting',
 		title: 'Waiting inbox',
 		file: 'waiting.md',
-		paths: ['/@:orgSlug/-/waiting(/*rest)'],
+		paths: ['/account/waiting', '/@{$orgSlug}/-/waiting'],
 		apis: [],
 	},
 	{
@@ -208,21 +221,21 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'memories',
 		title: 'Memories',
 		file: 'memories.md',
-		paths: ['/@:orgSlug/-/memories(/*rest)'],
+		paths: ['/account/memories', '/@{$orgSlug}/-/memories'],
 		apis: ['/account/memories-export.json'],
 	},
 	{
 		id: 'email',
 		title: 'Email inbox',
 		file: 'email.md',
-		paths: ['/@:orgSlug/-/email(/*rest)'],
+		paths: ['/account/email', '/@{$orgSlug}/-/email'],
 		apis: [],
 	},
 	{
 		id: 'values',
 		title: 'Values',
 		file: 'values.md',
-		paths: ['/@:orgSlug/-/values(/*rest)'],
+		paths: ['/account/values', '/@{$orgSlug}/-/values'],
 		apis: [],
 	},
 	{
@@ -230,11 +243,11 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		title: 'Billing, credits, and usage',
 		file: 'billing.md',
 		paths: [
-			'/@:orgSlug/-/billing',
-			'/@:orgSlug/-/billing/success',
-			'/@:orgSlug/-/billing/portal',
-			'/@:orgSlug/-/usage',
-			'/@:orgSlug/-/credits',
+			'/account/billing',
+			'/@{$orgSlug}/-/billing',
+			'/@{$orgSlug}/-/billing/success',
+			'/@{$orgSlug}/-/usage',
+			'/@{$orgSlug}/-/credits',
 			'/account/credits',
 			'/account/usage',
 		],
@@ -251,11 +264,8 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		id: 'community',
 		title: 'Community listings and profiles',
 		file: 'community.md',
-		paths: ['/community', '/@:username', '/@:username/:kodyId'],
-		apis: [
-			'/@:username/:kodyId/raw/:ref(/*relativePath)',
-			'/community/:listingId/raw(/*relativePath)',
-		],
+		paths: ['/community', '/@{$username}', '/@{$username}/$kodyId'],
+		apis: ['/@{$username}/$kodyId/raw/$ref/$', '/community/$listingId/raw/$'],
 	},
 	{
 		id: 'marketing',
@@ -304,17 +314,26 @@ const requiredHtmlPrefixes = [
 	'/connect/oauth',
 	'/connect/secrets',
 	'/community',
-	'/@:username',
+	'/@{$username}',
+	'/@{$orgSlug}',
 	'/docs',
 ] as const
 
-function extractQuotedPaths(source: string) {
-	const paths = new Set<string>()
-	for (const match of source.matchAll(/['"`](\/[^'"`\s]*)['"`]/g)) {
-		const value = match[1]
-		if (value) paths.add(value)
-	}
-	return [...paths].toSorted()
+// Read the generated native route inventory without importing UI or server modules.
+// This is source inspection for the CLI, not a second route matcher.
+function extractNativePaths(source: string) {
+	const inventory = source.match(
+		/export interface FileRoutesByFullPath \{([\s\S]*?)\n\}/,
+	)?.[1]
+	if (!inventory)
+		throw new Error('Missing generated FileRoutesByFullPath inventory')
+	return [
+		...new Set(
+			[...inventory.matchAll(/^\s*'([^']+)':/gm)].map(
+				(match) => match[1]!.replace(/\/$/, '') || '/',
+			),
+		),
+	].toSorted()
 }
 
 function isHtmlUserPath(routePath: string) {
@@ -386,7 +405,7 @@ export function checkFeatureCatalog(input: {
 	existingFiles: ReadonlyArray<string>
 }): { ok: boolean; issues: Array<CatalogCheckIssue> } {
 	const catalog = input.catalog ?? featureCatalog
-	const routePaths = extractQuotedPaths(input.routeSource)
+	const routePaths = extractNativePaths(input.routeSource)
 	const files = new Set(input.existingFiles)
 	const issues: Array<CatalogCheckIssue> = []
 
@@ -406,7 +425,7 @@ export function checkFeatureCatalog(input: {
 					kind: 'stale-path',
 					id: feature.id,
 					path: owned,
-					detail: `${feature.id} lists ${owned}, which is not in routes.ts`,
+					detail: `${feature.id} lists ${owned}, which is not in the generated Start route tree`,
 				})
 			}
 		}

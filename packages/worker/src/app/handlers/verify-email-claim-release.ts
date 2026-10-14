@@ -35,14 +35,18 @@ function getVerifyEmailClaimReleaseError(
 	}
 }
 
-export async function loadVerifyEmailClaimReleasePage(
-	request: Request,
-	env: Env,
-): Promise<AppPageResult> {
-	const url = new URL(request.url)
+export async function executeVerifyEmailClaimRelease({
+	request,
+	env,
+	token,
+}: {
+	request: Request
+	env: Env
+	token: string | null
+}): Promise<AppPageResult> {
 	const result = await verifyEmailClaimReleaseToken({
 		db: env.APP_DB,
-		token: url.searchParams.get('token'),
+		token: token,
 	})
 	const requestIp = getRequestIp(request) ?? undefined
 
@@ -53,7 +57,7 @@ export async function loadVerifyEmailClaimReleasePage(
 			action: 'email_claim_release_verify',
 			result: result.reason === 'daily_cap' ? 'rate_limited' : 'failure',
 			ip: requestIp,
-			path: url.pathname,
+			path: '/verify-email-claim-release',
 			reason: result.reason,
 		})
 		return {
@@ -74,7 +78,7 @@ export async function loadVerifyEmailClaimReleasePage(
 		action: 'email_claim_release_verify',
 		result: 'success',
 		ip: requestIp,
-		path: url.pathname,
+		path: '/verify-email-claim-release',
 		reason: 'released',
 	})
 	return {

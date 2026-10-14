@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { rejectActionPageHead } from '../action-page-method.ts'
 import { createFileRoute } from '@tanstack/react-router'
-import { loadActionPage } from '#start/server/action-page'
+import { loadVerifyEmailChange } from '#start/server/action-page'
 import { VerifyEmailRoute } from '../pages/verify-email.tsx'
 
 export const Route = createFileRoute('/verify-email-change')({
@@ -10,7 +10,10 @@ export const Route = createFileRoute('/verify-email-change')({
 	staleTime: Infinity,
 	shouldReload: false,
 	loaderDeps: ({ search }) => search,
-	loader: ({ location }) => loadActionPage({ data: location.href }),
+	loader: ({ location }) => {
+		const search = new URLSearchParams(location.searchStr)
+		return loadVerifyEmailChange({ data: { token: search.get('token') } })
+	},
 	head: ({ loaderData }) => ({
 		meta: [{ title: loaderData?.title ?? 'Kody' }],
 	}),

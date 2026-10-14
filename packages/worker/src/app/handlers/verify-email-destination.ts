@@ -31,14 +31,32 @@ export async function loadVerifyEmailDestinationPage(
 	env: Env,
 ): Promise<AppPageResult | Response> {
 	const url = new URL(request.url)
-	const consume = request.method !== 'HEAD'
+	return executeVerifyEmailDestination({
+		request,
+		env,
+		token: url.searchParams.get('token'),
+		consume: request.method !== 'HEAD',
+	})
+}
+
+export async function executeVerifyEmailDestination({
+	request,
+	env,
+	token,
+	consume,
+}: {
+	request: Request
+	env: Env
+	token: string | null
+	consume: boolean
+}): Promise<AppPageResult | Response> {
 	const result = await verifyEmailDestinationToken({
 		db: env.APP_DB,
-		token: url.searchParams.get('token'),
+		token: token,
 		consume,
 	})
 
-	if (request.method === 'HEAD') {
+	if (!consume) {
 		return new Response(null, { status: result.ok ? 200 : 400 })
 	}
 
@@ -51,7 +69,7 @@ export async function loadVerifyEmailDestinationPage(
 			action: 'email_destination_verify',
 			result: 'failure',
 			ip: requestIp,
-			path: url.pathname,
+			path: '/verify-email-destination',
 			reason: result.reason,
 		})
 		return {
@@ -77,7 +95,7 @@ export async function loadVerifyEmailDestinationPage(
 		result: 'success',
 		email: result.email,
 		ip: requestIp,
-		path: url.pathname,
+		path: '/verify-email-destination',
 	})
 	return {
 		title: 'Email destination verified',

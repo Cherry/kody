@@ -1,62 +1,96 @@
 import { createServerFn } from '@tanstack/react-start'
-import { actionPagePaths } from '../action-pages.ts'
+import type { AppPageResult } from '../../src/app/page-result.ts'
 
-export const loadActionPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!href.startsWith('/') ||
-			href.startsWith('//') ||
-			href.includes('\\')
+function tokenInput(data: {
+	token: string | null
+	redirectTo?: string | null
+}) {
+	if (
+		!data ||
+		(data.token !== null && typeof data.token !== 'string') ||
+		(data.redirectTo != null && typeof data.redirectTo !== 'string')
+	)
+		throw new Error('Invalid token input')
+	return { token: data.token, redirectTo: data.redirectTo }
+}
+
+async function tokenContext() {
+	const [{ env }, { getRequest }, { getEnv }] = await Promise.all([
+		import('cloudflare:workers'),
+		import('@tanstack/react-start/server'),
+		import('../../src/app/env.ts'),
+	])
+	return { request: getRequest(), env: getEnv(env) }
+}
+
+async function pageResult(result: AppPageResult | Response) {
+	if (result instanceof Response)
+		throw new Error('Unexpected non-page token result')
+	const { setResponseStatus, setResponseHeader } =
+		await import('@tanstack/react-start/server')
+	setResponseStatus(result.status ?? 200)
+	if (result.extraSetCookies?.length)
+		setResponseHeader('Set-Cookie', result.extraSetCookies)
+	return { title: result.title, loaderData: result.loaderData }
+}
+
+export const loadVerifyEmail = createServerFn({ method: 'GET' })
+	.validator(tokenInput)
+	.handler(async ({ data }) => {
+		const { executeVerifyEmail } =
+			await import('../../src/app/handlers/verify-email.ts')
+		return pageResult(
+			await executeVerifyEmail({ ...(await tokenContext()), ...data }),
 		)
-			throw new Error('Invalid action page')
-		const url = new URL(href, 'https://kody.local')
-		if (!actionPagePaths.has(url.pathname))
-			throw new Error('Invalid action page')
-		return href
 	})
-	.handler(async ({ data: href }) => {
-		const [
-			{ env },
-			{ getRequest, setResponseStatus, setResponseHeader },
-			{ getEnv },
-		] = await Promise.all([
-			import('cloudflare:workers'),
-			import('@tanstack/react-start/server'),
-			import('../../src/app/env.ts'),
-		])
-		const url = new URL(href, getRequest().url)
-		const request = new Request(url, { headers: getRequest().headers })
-		const bindings = getEnv(env)
-		const loaders = {
-			'/verify-email': () =>
-				import('../../src/app/handlers/verify-email.ts').then((m) =>
-					m.loadVerifyEmailPage(request, bindings),
-				),
-			'/verify-email-change': () =>
-				import('../../src/app/handlers/verify-email-change.ts').then((m) =>
-					m.loadVerifyEmailChangePage(request, bindings),
-				),
-			'/verify-email-claim-release': () =>
-				import('../../src/app/handlers/verify-email-claim-release.ts').then(
-					(m) => m.loadVerifyEmailClaimReleasePage(request, bindings),
-				),
-			'/verify-email-destination': () =>
-				import('../../src/app/handlers/verify-email-destination.ts').then((m) =>
-					m.loadVerifyEmailDestinationPage(request, bindings),
-				),
-			'/unsubscribe/tips': () =>
-				import('../../src/app/handlers/unsubscribe-tips.ts').then((m) =>
-					m.loadUnsubscribeTipsPage(request, bindings),
-				),
-		}
-		const operation = loaders[url.pathname as keyof typeof loaders]
-		if (!operation) throw new Error('Unknown action page')
-		const result = await operation()
-		if (result instanceof Response)
-			throw new Error('Unexpected non-page action response')
-		setResponseStatus(result.status ?? 200)
-		if (result.extraSetCookies?.length)
-			setResponseHeader('Set-Cookie', result.extraSetCookies)
-		return { title: result.title, loaderData: result.loaderData }
+
+export const loadVerifyEmailChange = createServerFn({ method: 'GET' })
+	.validator(tokenInput)
+	.handler(async ({ data }) => {
+		const { executeVerifyEmailChange } =
+			await import('../../src/app/handlers/verify-email-change.ts')
+		return pageResult(
+			await executeVerifyEmailChange({ ...(await tokenContext()), ...data }),
+		)
+	})
+
+export const loadVerifyEmailClaimRelease = createServerFn({ method: 'GET' })
+	.validator(tokenInput)
+	.handler(async ({ data }) => {
+		const { executeVerifyEmailClaimRelease } =
+			await import('../../src/app/handlers/verify-email-claim-release.ts')
+		return pageResult(
+			await executeVerifyEmailClaimRelease({
+				...(await tokenContext()),
+				...data,
+			}),
+		)
+	})
+
+export const loadVerifyEmailDestination = createServerFn({ method: 'GET' })
+	.validator(tokenInput)
+	.handler(async ({ data }) => {
+		const { executeVerifyEmailDestination } =
+			await import('../../src/app/handlers/verify-email-destination.ts')
+		return pageResult(
+			await executeVerifyEmailDestination({
+				...(await tokenContext()),
+				...data,
+				consume: true,
+			}),
+		)
+	})
+
+export const loadUnsubscribeTips = createServerFn({ method: 'GET' })
+	.validator(tokenInput)
+	.handler(async ({ data }) => {
+		const { executeUnsubscribeTips } =
+			await import('../../src/app/handlers/unsubscribe-tips.ts')
+		return pageResult(
+			await executeUnsubscribeTips({
+				...(await tokenContext()),
+				...data,
+				oneClick: false,
+			}),
+		)
 	})

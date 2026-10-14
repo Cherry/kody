@@ -1264,7 +1264,7 @@ export function repoRootFromHere(here = import.meta.dirname) {
 }
 
 export function defaultRoutesPath(root: string) {
-	return path.join(root, 'packages/worker/universal/routes.ts')
+	return path.join(root, 'packages/worker/start/routeTree.gen.ts')
 }
 
 export function defaultFeaturesDir(root: string) {
@@ -1767,7 +1767,8 @@ async function runCommand(options: ControlKodyOptions) {
 					featuresDir: defaultFeaturesDir(root),
 				})
 				if (options.json) printJson(report)
-				else if (report.ok) console.log('Feature Map matches routes.ts')
+				else if (report.ok)
+					console.log('Feature Map matches the native Start route tree')
 				else {
 					for (const issue of report.issues) {
 						console.error(issue.detail)

@@ -35,15 +35,19 @@ function getVerifyEmailChangeError(
 	}
 }
 
-export async function loadVerifyEmailChangePage(
-	request: Request,
-	env: Env,
-): Promise<AppPageResult> {
-	const url = new URL(request.url)
+export async function executeVerifyEmailChange({
+	request,
+	env,
+	token,
+}: {
+	request: Request
+	env: Env
+	token: string | null
+}): Promise<AppPageResult> {
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	const result = await verifyEmailChangeToken({
 		db: env.APP_DB,
-		token: url.searchParams.get('token'),
+		token: token,
 	})
 	const requestIp = getRequestIp(request) ?? undefined
 
@@ -54,7 +58,7 @@ export async function loadVerifyEmailChangePage(
 			action: 'email_change_verify',
 			result: 'failure',
 			ip: requestIp,
-			path: url.pathname,
+			path: '/verify-email-change',
 			reason: result.reason,
 		})
 		return {
@@ -89,7 +93,7 @@ export async function loadVerifyEmailChangePage(
 		result: 'success',
 		email: result.newEmail,
 		ip: requestIp,
-		path: url.pathname,
+		path: '/verify-email-change',
 		reason: `old_email=${result.oldEmail}`,
 	})
 	return {

@@ -1333,8 +1333,13 @@ test('control-kody map --check reports unmapped /account pages and stale Feature
 		await writeFile(path.join(temp.dir, feature.file), `# ${feature.file}\n`)
 	}
 	const unmapped = runMapCheck({
-		routeSource: `${readFileSync(defaultRoutesPath(repoRootFromHere()), 'utf8')}
-export const extra = '/account/new-surface'`,
+		routeSource: readFileSync(
+			defaultRoutesPath(repoRootFromHere()),
+			'utf8',
+		).replace(
+			'export interface FileRoutesByFullPath {',
+			"export interface FileRoutesByFullPath {\n  '/account/new-surface': unknown",
+		),
 		featuresDir: temp.dir,
 	})
 	expect(unmapped.ok).toBe(false)
@@ -1349,9 +1354,15 @@ export const extra = '/account/new-surface'`,
 	await using staleDir = await createTempDir()
 	await writeFile(path.join(staleDir.dir, 'waiting.md'), '# Waiting\n')
 	const stale = runMapCheck({
-		routeSource: `export const routes = { waiting: '/account/waiting' }`,
+		routeSource: `export interface FileRoutesByFullPath {\n '/account/waiting': unknown\n}`,
 		featuresDir: staleDir.dir,
 	})
 	expect(stale.ok).toBe(false)
 	expect(stale.issues.some((issue) => issue.kind === 'missing-file')).toBe(true)
+	expect(stale.issues.some((issue) => issue.kind === 'stale-path')).toBe(true)
+	const incidental = runMapCheck({
+		routeSource: `${readFileSync(defaultRoutesPath(repoRootFromHere()), 'utf8')}\nexport const unrelated = '/account/not-a-route'`,
+		featuresDir: temp.dir,
+	})
+	expect(incidental.ok).toBe(true)
 })

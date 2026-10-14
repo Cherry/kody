@@ -28,7 +28,25 @@ export async function loadUnsubscribeTipsPage(
 	env: Env,
 ): Promise<AppPageResult | Response> {
 	const url = new URL(request.url)
-	const token = url.searchParams.get('token')
+	return executeUnsubscribeTips({
+		request,
+		env,
+		token: url.searchParams.get('token'),
+		oneClick: request.method === 'POST',
+	})
+}
+
+export async function executeUnsubscribeTips({
+	request,
+	env,
+	token,
+	oneClick,
+}: {
+	request: Request
+	env: Env
+	token: string | null
+	oneClick: boolean
+}): Promise<AppPageResult | Response> {
 	const claims = await verifyTipsUnsubscribeToken({
 		env,
 		token,
@@ -43,10 +61,10 @@ export async function loadUnsubscribeTipsPage(
 			action: 'tips_unsubscribe',
 			result: 'failure',
 			ip: requestIp,
-			path: url.pathname,
+			path: '/unsubscribe/tips',
 			reason,
 		})
-		if (request.method === 'POST') {
+		if (oneClick) {
 			return new Response(getUnsubscribeError(reason), {
 				status: 400,
 				headers: { 'content-type': 'text/plain; charset=utf-8' },
@@ -64,7 +82,7 @@ export async function loadUnsubscribeTipsPage(
 		}
 	}
 
-	if (request.method === 'POST') {
+	if (oneClick) {
 		const body = (await request.text()).trim()
 		if (body && body !== tipsUnsubscribeOneClickBody) {
 			void logAuditEvent({
@@ -73,7 +91,7 @@ export async function loadUnsubscribeTipsPage(
 				action: 'tips_unsubscribe',
 				result: 'failure',
 				ip: requestIp,
-				path: url.pathname,
+				path: '/unsubscribe/tips',
 				reason: 'invalid_one_click_body',
 			})
 			return new Response('Invalid one-click unsubscribe body.', {
@@ -93,7 +111,7 @@ export async function loadUnsubscribeTipsPage(
 		action: 'tips_unsubscribe',
 		result: result.optedOut ? 'success' : 'failure',
 		ip: requestIp,
-		path: url.pathname,
+		path: '/unsubscribe/tips',
 		reason: result.alreadyOptedOut
 			? 'already_opted_out'
 			: result.optedOut
@@ -102,7 +120,7 @@ export async function loadUnsubscribeTipsPage(
 	})
 
 	if (!result.optedOut) {
-		if (request.method === 'POST') {
+		if (oneClick) {
 			return new Response('Unsubscribe link is invalid.', {
 				status: 400,
 				headers: { 'content-type': 'text/plain; charset=utf-8' },
@@ -123,7 +141,7 @@ export async function loadUnsubscribeTipsPage(
 	const message = result.alreadyOptedOut
 		? 'You were already unsubscribed from Kody tips.'
 		: 'You are unsubscribed from Kody tips. Transactional mail such as verification, billing, and error-rate alerts is unchanged.'
-	if (request.method === 'POST') {
+	if (oneClick) {
 		return new Response(message, {
 			status: 200,
 			headers: { 'content-type': 'text/plain; charset=utf-8' },

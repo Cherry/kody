@@ -1,6 +1,6 @@
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
-import { loadVerifyEmailPage } from '#app/handlers/verify-email.ts'
+import { executeVerifyEmail } from '#app/handlers/verify-email.ts'
 import { verifyEmailToken } from '#app/email-verification.ts'
 import { sendConnectAgentEmail } from '#app/user-account-emails.ts'
 import { scheduleKitSubscriberSync } from '#worker/kit/subscriber-sync.ts'
@@ -53,12 +53,12 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 	} as Env
 
 	const oauthResume = '/oauth/authorize?client_id=demo'
-	const oauthResponse = await loadVerifyEmailPage(
-		new Request(
-			`https://example.com/verify-email?token=ok&redirectTo=${encodeURIComponent(oauthResume)}`,
-		),
+	const oauthResponse = await executeVerifyEmail({
+		request: new Request('https://example.com/_serverFn/verify'),
 		env,
-	)
+		token: 'ok',
+		redirectTo: oauthResume,
+	})
 	expect(oauthResponse).toMatchObject({
 		loaderData: {
 			emailVerification: {
@@ -71,12 +71,12 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		},
 	})
 
-	const maliciousResponse = await loadVerifyEmailPage(
-		new Request(
-			'https://example.com/verify-email?token=ok&redirectTo=https%3A%2F%2Fevil.example',
-		),
+	const maliciousResponse = await executeVerifyEmail({
+		request: new Request('https://example.com/_serverFn/verify'),
 		env,
-	)
+		token: 'ok',
+		redirectTo: 'https://evil.example',
+	})
 	expect(maliciousResponse).toMatchObject({
 		loaderData: {
 			emailVerification: {
@@ -113,21 +113,19 @@ test('verify-email sends the connect-agent mail only on newly verified accounts'
 	const env = {
 		APP_DB: {} as D1Database,
 	} as Env
-	const handled = loadVerifyEmailPage(
-		new Request('https://example.com/verify-email?token=ok'),
+	const handled = executeVerifyEmail({
+		request: new Request('https://example.com/verify-email?token=ok'),
 		env,
-	)
+		token: 'ok',
+	})
 	const response = await Promise.race([
 		handled,
-		new Promise<Awaited<ReturnType<typeof loadVerifyEmailPage>>>(
-			(_, reject) => {
-				setTimeout(
-					() =>
-						reject(new Error('verify page waited on the connect-agent send')),
-					1_000,
-				)
-			},
-		),
+		new Promise<Awaited<ReturnType<typeof executeVerifyEmail>>>((_, reject) => {
+			setTimeout(
+				() => reject(new Error('verify page waited on the connect-agent send')),
+				1_000,
+			)
+		}),
 	])
 	expect(response.loaderData?.emailVerification?.ok).toBe(true)
 	expect(sendConnectAgentEmail).toHaveBeenCalledWith({

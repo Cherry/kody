@@ -30,14 +30,20 @@ function getVerifyEmailError(
 	}
 }
 
-export async function loadVerifyEmailPage(
-	request: Request,
-	env: Env,
-): Promise<AppPageResult> {
-	const url = new URL(request.url)
+export async function executeVerifyEmail({
+	request,
+	env,
+	token,
+	redirectTo,
+}: {
+	request: Request
+	env: Env
+	token: string | null
+	redirectTo?: string | null
+}): Promise<AppPageResult> {
 	const result = await verifyEmailToken({
 		db: env.APP_DB,
-		token: url.searchParams.get('token'),
+		token: token,
 	})
 	const requestIp = getRequestIp(request) ?? undefined
 
@@ -48,7 +54,7 @@ export async function loadVerifyEmailPage(
 			action: 'email_verify',
 			result: 'failure',
 			ip: requestIp,
-			path: url.pathname,
+			path: '/verify-email',
 			reason: result.reason,
 		})
 		return {
@@ -70,7 +76,7 @@ export async function loadVerifyEmailPage(
 		result: 'success',
 		email: result.email,
 		ip: requestIp,
-		path: url.pathname,
+		path: '/verify-email',
 	})
 	if (result.newlyVerified) {
 		recordOnboardingFunnelEvent(env, {
@@ -108,7 +114,7 @@ export async function loadVerifyEmailPage(
 			}),
 		)
 	}
-	const cta = resolveVerifyEmailSuccessCta(url.searchParams.get('redirectTo'))
+	const cta = resolveVerifyEmailSuccessCta(redirectTo ?? null)
 	return {
 		title: 'Email verified',
 		loaderData: {
