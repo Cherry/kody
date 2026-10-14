@@ -140,9 +140,9 @@ test('revoking the same user admin role blocks a warm cached revisit', async ({
 		await operatorPage
 			.getByRole('button', { name: 'Remove', exact: true })
 			.click()
-		await expect(
-			operatorPage.getByText('Removed admin role.', { exact: true }),
-		).toBeVisible()
+		await expect
+			.poll(async () => operatorPage.locator('main').innerText())
+			.toContain('Removed admin role.')
 		await page.evaluate(() =>
 			window.history.pushState(null, '', '/admin/feature-flags'),
 		)
@@ -211,9 +211,9 @@ test('revoking admin role blocks a warm cached admin-only guide', async ({
 		await operatorPage
 			.getByRole('button', { name: 'Remove', exact: true })
 			.click()
-		await expect(
-			operatorPage.getByText('Removed admin role.', { exact: true }),
-		).toBeVisible()
+		await expect
+			.poll(async () => operatorPage.locator('main').innerText())
+			.toContain('Removed admin role.')
 		await page.evaluate(() => {
 			const check = () => {
 				if (

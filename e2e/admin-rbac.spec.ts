@@ -1,3 +1,4 @@
+import { saveKeyThroughUi } from './account-fixtures.ts'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
 
 test('admin RBAC controls access, role assignment, and privacy boundaries', async ({
@@ -39,15 +40,10 @@ test('admin RBAC controls access, role assignment, and privacy boundaries', asyn
 		page.getByRole('link', { name: 'Admin', exact: true }),
 	).toHaveCount(0)
 
-	await page.goto(`/@${memberUser.username}/-/secrets`)
-	await waitForClientHydration(page)
-	await page.getByRole('button', { name: 'New secret', exact: true }).click()
-	await page.getByLabel('Name', { exact: true }).fill('memberPrivateSecret')
-	await page
-		.getByLabel('Secret value', { exact: true })
-		.fill('super-secret-value')
-	await page.getByRole('button', { name: 'Save', exact: true }).click()
-	await expect(page.getByText('Created secret.', { exact: true })).toBeVisible()
+	await saveKeyThroughUi(page, {
+		name: 'memberPrivateSecret',
+		value: 'super-secret-value',
+	})
 
 	await page.context().clearCookies()
 	await login({

@@ -5,9 +5,12 @@ import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 export function createOrgNavigationCommit(
 	remember: (slug: string) => Promise<{ ok: boolean }>,
 	origin: string,
+	initialHref?: string,
 ) {
 	let pending = Promise.resolve()
-	let previousSlug: string | null = null
+	let previousSlug = initialHref
+		? orgSlugFromOrgOwnedPath(new URL(initialHref, origin).pathname)
+		: null
 	return (href: string) => {
 		const url = new URL(href, origin)
 		const slug = orgSlugFromOrgOwnedPath(url.pathname)
@@ -31,8 +34,9 @@ export function installOrgNavigationCommit(
 	},
 	remember: (slug: string) => Promise<{ ok: boolean }>,
 	origin: string,
+	initialHref?: string,
 ) {
-	const commit = createOrgNavigationCommit(remember, origin)
+	const commit = createOrgNavigationCommit(remember, origin, initialHref)
 	return router.subscribe('onResolved', ({ toLocation }) => {
 		if (router.state.matches.some((match) => match.status !== 'success')) return
 		void commit(toLocation.href)

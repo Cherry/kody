@@ -62,17 +62,19 @@ VALUES (
 	await expect(page.getByTestId('not-found-page')).toHaveCount(0)
 })
 
-test('legacy repository document and JSON URLs permanently redirect with their query', async ({
+test('legacy repository documents redirect with their query and retired JSON stays absent', async ({
 	request,
 }) => {
-	for (const suffix of ['', '.json']) {
-		const response = await request.get(
-			`/@legacy/-/packages${suffix}?q=hello&visibility=public`,
-			{ maxRedirects: 0 },
-		)
-		expect(response.status()).toBe(301)
-		const location = new URL(response.headers().location!, response.url())
-		expect(location.pathname).toBe(`/@legacy/-/repositories${suffix}`)
-		expect(location.search).toBe('?q=hello&visibility=public')
-	}
+	const response = await request.get(
+		'/@legacy/-/packages?q=hello&visibility=public',
+		{ maxRedirects: 0 },
+	)
+	expect(response.status()).toBe(301)
+	const location = new URL(response.headers().location!, response.url())
+	expect(location.pathname).toBe('/@legacy/-/repositories')
+	expect(location.search).toBe('?q=hello&visibility=public')
+	const retired = await request.get('/@legacy/-/packages.json?q=hello', {
+		maxRedirects: 0,
+	})
+	expect(retired.status()).toBe(404)
 })

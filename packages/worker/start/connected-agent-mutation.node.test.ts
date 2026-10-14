@@ -6,6 +6,11 @@ import {
 	type AccountConnectedAgentsLoaderData,
 } from '#universal/loader-data.ts'
 
+const nativeMutation = vi.hoisted(() => vi.fn())
+vi.mock('#start/server/account-mutations', () => ({
+	updateConnectedAgents: nativeMutation,
+}))
+
 function makeAgent(
 	clientId: string,
 	label: string,
@@ -72,19 +77,18 @@ function harness() {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	})
-	const resolvers = new Map<string, (response: Response) => void>()
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(
-			(_url: string, init: RequestInit) =>
-				new Promise<Response>((resolve) => {
-					const { clientId } = JSON.parse(String(init.body)) as {
-						clientId: string
-					}
-					resolvers.set(clientId, resolve)
-				}),
-		),
+	const resolvers = new Map<
+		string,
+		{ resolve: (value: unknown) => void; reject: (error: Error) => void }
+	>()
+	nativeMutation.mockImplementation(
+		({ data }: { data: { orgSlug: string; body: { clientId: string } } }) =>
+			new Promise((resolve, reject) => {
+				expect(data.orgSlug).toBe('one')
+				resolvers.set(data.body.clientId, { resolve, reject })
+			}),
 	)
+
 	const key = (org: string, actor = 'actor') =>
 		['page', actor, 'loadConnectionsPage', `/@${org}/-/agents`] as const
 	const seed = (org: string, actor = 'actor') =>
@@ -107,15 +111,12 @@ function harness() {
 				() => null,
 				(error: unknown) => error,
 			)
-	const respond = (id: string, status = 200, agents = allAgents) =>
-		resolvers.get(id)!(
-			Response.json(
-				status === 200
-					? { ...listedAgents, agents }
-					: { ok: false, error: 'Denied.' },
-				{ status },
-			),
-		)
+	const respond = (id: string, status = 200, agents = allAgents) => {
+		const pending = resolvers.get(id)!
+		if (status === 200) pending.resolve({ ...listedAgents, agents })
+		else pending.reject(new Error('Denied.'))
+	}
+
 	return {
 		client,
 		key,
@@ -162,7 +163,7 @@ test('concurrent revokes stay independent and stale success payloads cannot rest
 })
 
 test.each([200, 403])(
-	'late revoke HTTP %s remains scoped to submitted organization and actor',
+	'late revoke outcome %s remains scoped to submitted organization and actor',
 	async (status) => {
 		using h = harness()
 		h.seed('one')

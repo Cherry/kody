@@ -92,7 +92,10 @@ test('an org the person cannot use is a 404 on every section, never their own da
 	})
 	await page.locator('input[name="name"]').fill('forged-org-write')
 	await page.getByLabel('Server URL').fill('http://127.0.0.1:9/mcp')
-	await page.getByRole('button', { name: 'Add server', exact: true }).click()
+	await page
+		.locator('button[type="submit"]')
+		.filter({ hasText: /^Add server$/ })
+		.click()
 	await expect.poll(() => forged).toBe(true)
 	await expect(
 		page.getByText('Organization not found.', { exact: false }).first(),

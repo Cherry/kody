@@ -216,15 +216,19 @@ test('provider visits embed SSR loader data and ignore platform lookup flags', a
 	}
 })
 
-test('callback embeds only the redirect URI without an integration lookup', async () => {
-	mockModule.requirePageSession.mockResolvedValue(null)
+test.each(['?code=auth-code&state=abc', '?error=access_denied&state=abc'])(
+	'callback %s embeds only the redirect URI without an account lookup',
+	async (search) => {
+		mockModule.requirePageSession.mockResolvedValue(null)
 
-	await visit('?code=auth-code&state=abc')
-	expect(mockModule.loadAccountIntegrationByName).not.toHaveBeenCalled()
-	expect(renderedConnectOauth()).toEqual({
-		ok: true,
-		provider: null,
-		integration: null,
-		redirectUri: 'https://example.com/connect/oauth',
-	})
-})
+		await visit(search)
+		expect(mockModule.readAuthenticatedAppUser).not.toHaveBeenCalled()
+		expect(mockModule.loadAccountIntegrationByName).not.toHaveBeenCalled()
+		expect(renderedConnectOauth()).toEqual({
+			ok: true,
+			provider: null,
+			integration: null,
+			redirectUri: 'https://example.com/connect/oauth',
+		})
+	},
+)

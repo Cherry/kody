@@ -69,6 +69,7 @@ export function getRouter() {
 			router,
 			(orgSlug) => rememberOrganization({ data: { orgSlug } }),
 			window.location.origin,
+			window.location.href,
 		)
 		installNavigationMotion(router, {
 			canStart: () => typeof document.startViewTransition === 'function',

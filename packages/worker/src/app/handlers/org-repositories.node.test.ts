@@ -223,6 +223,6 @@ test('team repositories list what each member role can see', async () => {
 	expect(guest.status).toBe(404)
 	expect(guest.body).toEqual({
 		ok: false,
-		error: 'Organization resources unavailable',
+		error: 'Not found.',
 	})
 })

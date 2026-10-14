@@ -40,7 +40,10 @@ export async function addMcpServerThroughUi(
 	await waitForClientHydration(page)
 	await page.locator('input[name="name"]').fill(name)
 	await page.getByLabel('Server URL').fill('http://127.0.0.1:9/mcp')
-	await page.getByRole('button', { name: 'Add server', exact: true }).click()
+	await page
+		.locator('button[type="submit"]')
+		.filter({ hasText: /^Add server$/ })
+		.click()
 	await expect(page).toHaveURL(/\/mcp-servers\/(?!new(?:\?|$))[^/?]+/)
 	return new URL(page.url()).pathname.split('/').at(-1)!
 }
@@ -85,9 +88,7 @@ export async function classifyEmailThroughUi(page: Page, id: string) {
 export async function deleteEmailThroughUi(page: Page, id: string) {
 	await page.goto(`/account/email/${encodeURIComponent(id)}`)
 	await waitForClientHydration(page)
-	await page.getByRole('button', { name: 'Delete', exact: true }).click()
-	await page
-		.getByRole('button', { name: 'Confirm delete', exact: true })
-		.click()
+	await page.getByRole('button', { name: /^Delete message "/ }).click()
+	await page.getByRole('button', { name: /^Confirm delete message "/ }).click()
 	await expect(page).not.toHaveURL(new RegExp(`/email/${id}(?:\\?|$)`))
 }

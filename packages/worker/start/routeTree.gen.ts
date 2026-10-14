@@ -55,6 +55,7 @@ import { Route as AccountAgentsRouteImport } from './routes/account_.agents'
 import { Route as AccountBillingRouteImport } from './routes/account_.billing'
 import { Route as AccountConnectionsRouteImport } from './routes/account_.connections'
 import { Route as AccountCredentialsRouteImport } from './routes/account_.credentials'
+import { Route as AccountCreditsRouteImport } from './routes/account_.credits'
 import { Route as AccountDataRouteImport } from './routes/account_.data'
 import { Route as AccountEmailRouteImport } from './routes/account_.email'
 import { Route as AccountExperimentsRouteImport } from './routes/account_.experiments'
@@ -487,6 +488,11 @@ const AccountConnectionsRoute = AccountConnectionsRouteImport.update({
 const AccountCredentialsRoute = AccountCredentialsRouteImport.update({
   id: '/account_/credentials',
   path: '/account/credentials',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountCreditsRoute = AccountCreditsRouteImport.update({
+  id: '/account_/credits',
+  path: '/account/credits',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountDataRoute = AccountDataRouteImport.update({
@@ -1639,6 +1645,7 @@ export interface FileRoutesByFullPath {
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
   '/account/credentials': typeof AccountCredentialsRoute
+  '/account/credits': typeof AccountCreditsRoute
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
@@ -1885,6 +1892,7 @@ export interface FileRoutesByTo {
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
   '/account/credentials': typeof AccountCredentialsRoute
+  '/account/credits': typeof AccountCreditsRoute
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
@@ -2133,6 +2141,7 @@ export interface FileRoutesById {
   '/account_/billing': typeof AccountBillingRoute
   '/account_/connections': typeof AccountConnectionsRoute
   '/account_/credentials': typeof AccountCredentialsRoute
+  '/account_/credits': typeof AccountCreditsRoute
   '/account_/data': typeof AccountDataRoute
   '/account_/email': typeof AccountEmailRoute
   '/account_/experiments': typeof AccountExperimentsRoute
@@ -2382,6 +2391,7 @@ export interface FileRouteTypes {
     | '/account/billing'
     | '/account/connections'
     | '/account/credentials'
+    | '/account/credits'
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
@@ -2628,6 +2638,7 @@ export interface FileRouteTypes {
     | '/account/billing'
     | '/account/connections'
     | '/account/credentials'
+    | '/account/credits'
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
@@ -2875,6 +2886,7 @@ export interface FileRouteTypes {
     | '/account_/billing'
     | '/account_/connections'
     | '/account_/credentials'
+    | '/account_/credits'
     | '/account_/data'
     | '/account_/email'
     | '/account_/experiments'
@@ -3123,6 +3135,7 @@ export interface RootRouteChildren {
   AccountBillingRoute: typeof AccountBillingRoute
   AccountConnectionsRoute: typeof AccountConnectionsRoute
   AccountCredentialsRoute: typeof AccountCredentialsRoute
+  AccountCreditsRoute: typeof AccountCreditsRoute
   AccountDataRoute: typeof AccountDataRoute
   AccountEmailRoute: typeof AccountEmailRoute
   AccountExperimentsRoute: typeof AccountExperimentsRoute
@@ -3637,6 +3650,13 @@ declare module '@tanstack/react-router' {
       path: '/account/credentials'
       fullPath: '/account/credentials'
       preLoaderRoute: typeof AccountCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account_/credits': {
+      id: '/account_/credits'
+      path: '/account/credits'
+      fullPath: '/account/credits'
+      preLoaderRoute: typeof AccountCreditsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/data': {
@@ -5132,6 +5152,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountBillingRoute: AccountBillingRoute,
   AccountConnectionsRoute: AccountConnectionsRoute,
   AccountCredentialsRoute: AccountCredentialsRoute,
+  AccountCreditsRoute: AccountCreditsRoute,
   AccountDataRoute: AccountDataRoute,
   AccountEmailRoute: AccountEmailRoute,
   AccountExperimentsRoute: AccountExperimentsRoute,

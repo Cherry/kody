@@ -308,8 +308,10 @@ beforeEach(async () => {
 
 test('checkout sells only Pro and picks the monthly or annual price', async () => {
 	signInAs(null)
-	const unauthorized = await postCheckout(createEnv(), 'ada', { plan: 'pro' })
-	expect(unauthorized.status).toBe(401)
+	await expect(
+		postCheckout(createEnv(), 'ada', { plan: 'pro' }),
+	).rejects.toThrow('Sign in required.')
+	expect(mocks.createCheckoutSession).not.toHaveBeenCalled()
 
 	signInAs('ada')
 	for (const body of [
@@ -769,7 +771,10 @@ test('billing cancellation feedback records platform feedback', async () => {
 		)
 
 	signInAs(null)
-	expect((await post({ details: 'Too expensive.' })).status).toBe(401)
+	await expect(post({ details: 'Too expensive.' })).rejects.toThrow(
+		'Sign in required.',
+	)
+	expect(mocks.submitPlatformFeedback).not.toHaveBeenCalled()
 
 	signInAs('ada')
 	expect((await post({ details: '   ' })).status).toBe(400)

@@ -23,14 +23,24 @@ for (const returnToBilling of [false, true]) {
 		const barrier = new Promise<void>((resolve) => {
 			release = resolve
 		})
-		await page.route('**/billing/checkout.json', async (route) => {
+		let checkoutUrl = ''
+		await page.route('**/_serverFn/**', async (route) => {
+			if (
+				route.request().method() !== 'POST' ||
+				!route.request().postData()?.includes('interval') ||
+				!route.request().postData()?.includes('plan')
+			)
+				return route.fallback()
+			checkoutUrl = route.request().url()
 			captured()
 			await barrier
 			await route.fulfill({
 				json: {
-					ok: true,
-					url: 'https://example.com/obsolete-checkout',
-					mode: 'checkout',
+					result: {
+						ok: true,
+						url: 'https://example.com/obsolete-checkout',
+						mode: 'checkout',
+					},
 				},
 			})
 		})
@@ -39,6 +49,7 @@ for (const returnToBilling of [false, true]) {
 				.getByRole('button', { name: 'Subscribe monthly', exact: true })
 				.first()
 				.click()
+			await expect.poll(() => checkoutUrl).not.toBe('')
 			await held
 			await page
 				.getByRole('navigation', { name: 'Main', exact: true })
@@ -52,8 +63,8 @@ for (const returnToBilling of [false, true]) {
 				).toBeVisible()
 			}
 			const expectedUrl = page.url()
-			const response = page.waitForResponse((response) =>
-				new URL(response.url()).pathname.endsWith('/billing/checkout.json'),
+			const response = page.waitForResponse(
+				(response) => response.url() === checkoutUrl,
 			)
 			release()
 			await response

@@ -15,8 +15,10 @@ test('signup confirms the permanent handle before sending credentials and suppor
 			status: 200,
 			contentType: 'application/json',
 			body: JSON.stringify({
-				successful: false,
-				error: 'Test submission received.',
+				result: {
+					successful: false,
+					error: 'Test submission received.',
+				},
 			}),
 		})
 	})

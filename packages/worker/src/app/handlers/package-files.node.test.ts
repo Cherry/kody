@@ -171,7 +171,9 @@ const { loadPackageFiles } =
 	await import('../../../start/server/package-files.ts')
 
 test('canonical file reads resolve data and reject missing or invalid trees', async () => {
-	native.env = {} as Env
+	native.env = {
+		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+	} as Env
 	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
 		kind: 'package',
 		username: 'owner',

@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
+import { testOidcSigningEnv } from '#worker/test-support/oidc-signing-env.ts'
 import { routes } from '#universal/routes.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
@@ -153,6 +154,12 @@ function createEnv() {
 		env: {
 			APP_DB: createD1FromSqlite(sqlite),
 			COOKIE_SECRET: cookieSecret,
+			SECRET_STORE_KEY: 'LOCAL_TEST_SECRET_STORE_KEY_32_CHARS_MINIMUM',
+			...testOidcSigningEnv,
+			BUNDLE_ARTIFACTS_KV: {},
+			STORAGE_RUNNER: {},
+			PACKAGE_REALTIME_SESSION: {},
+			MCP_CLIENT_HUB: {},
 		} as unknown as Env,
 		sqlite,
 	}

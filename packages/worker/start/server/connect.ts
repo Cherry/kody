@@ -79,6 +79,43 @@ export const loadConnectWebhookApply = createServerFn({ method: 'GET' })
 export const loadConnectOauth = createServerFn({ method: 'GET' })
 	.validator(validateHref)
 	.handler(async ({ data: href }) => {
+		const callbackUrl = new URL(href, 'https://kody.local')
+		// Provider callbacks restore configuration in the browser. No account data is read here.
+		if (
+			!callbackUrl.searchParams.get('provider')?.trim() &&
+			(callbackUrl.searchParams.get('code') ||
+				callbackUrl.searchParams.get('error'))
+		) {
+			const [
+				{ getRequest, setResponseHeader },
+				{ env },
+				{ getEnv },
+				{ loadDocumentHead },
+				{ loadConnectOauthLoaderData },
+			] = await Promise.all([
+				import('@tanstack/react-start/server'),
+				import('cloudflare:workers'),
+				import('#app/env.ts'),
+				import('./document-head.ts'),
+				import('../../src/app/handlers/connect-oauth.ts'),
+			])
+			const request = getRequest()
+			const url = new URL(href, request.url)
+			setResponseHeader('Cache-Control', 'private, no-store')
+			const payload = await loadConnectOauthLoaderData(
+				getEnv(env),
+				request,
+				url,
+			)
+			return {
+				payload,
+				head: loadDocumentHead(
+					url.pathname,
+					{ connectOauth: payload },
+					url.search,
+				),
+			}
+		}
 		const { bindings, request, user, url, loadDocumentHead } =
 			await context(href)
 		const { loadConnectOauthLoaderData } =

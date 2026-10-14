@@ -15,7 +15,7 @@ export const loadAdminUsers = createServerFn({ method: 'GET' })
 			import('./document-head.ts'),
 		])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, request, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(href)
 		if (!user) {
 			return {
 				forbidden: true as const,
@@ -27,9 +27,9 @@ export const loadAdminUsers = createServerFn({ method: 'GET' })
 			payload: await loadAdminUsersData(
 				bindings,
 				(() => {
-					const url = new URL(request.url)
-					url.searchParams.delete('page')
-					return url.toString()
+					const filters = new URL(url)
+					filters.searchParams.delete('page')
+					return filters.toString()
 				})(),
 				url.pathname.split('/')[3],
 			),

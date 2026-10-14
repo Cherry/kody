@@ -135,16 +135,13 @@ export async function approveConnectOauthHosts(input: {
 	hosts: ReadonlyArray<string>
 	orgSlug: string | null
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-	const requestUrl = new URL('/account/secrets.json', window.location.origin)
-	requestUrl.searchParams.set(
-		'names',
-		[...new Set(input.secretNames)].join(','),
-	)
-	requestUrl.searchParams.set('hosts', [...new Set(input.hosts)].join(','))
+	const search = new URLSearchParams()
+	search.set('names', [...new Set(input.secretNames)].join(','))
+	search.set('hosts', [...new Set(input.hosts)].join(','))
 	await updateSecrets({
 		data: {
 			orgSlug: input.orgSlug ?? undefined,
-			search: requestUrl.search,
+			search: `?${search}`,
 			body: { action: 'approve' },
 		},
 	})

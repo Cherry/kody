@@ -122,3 +122,13 @@ test('Router preloads do not commit, cached Query navigation does, failed routes
 	stop()
 	query.clear()
 })
+
+test('hydrated org documents do not repeat their cookie commit for presentation-only navigation', async () => {
+	const remember = vi.fn(async (_slug: string) => ({ ok: true }))
+	const commit = createOrgNavigationCommit(remember, origin, '/@acme/-/jobs')
+	await commit('/@acme/-/jobs?q=example&view=all')
+	await commit('/@acme/-/credentials?kind=secret')
+	expect(remember).not.toHaveBeenCalled()
+	await commit('/@other/-/jobs')
+	expect(remember).toHaveBeenCalledExactlyOnceWith('other')
+})

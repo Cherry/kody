@@ -21,7 +21,14 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			queryKey: QueryKey
 			invalidate: () => Promise<void>
 		}) => {
-			const payload = await updatePackageWebhook({ data: input })
+			const payload = await updatePackageWebhook({
+				data: {
+					username: input.username,
+					kodyId: input.kodyId,
+					webhookName: input.webhookName,
+					intent: input.intent,
+				},
+			})
 			if (!payload.ok)
 				throw new Error(payload.error || webhookFailureMessage(input.intent))
 			return payload

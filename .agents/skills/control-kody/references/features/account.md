@@ -51,8 +51,9 @@ team org home lists **Workspace** above its management links.
 ## How to get there
 
 `/account` after login. Create an organization at `/account/organizations/new`
-(`POST` the same path with `displayName` and `slug`); it redirects to the org
-home at `/@<slug>`. Account deletion is `/account/delete`. Team-org settings,
+by submitting the organization form; it navigates to the org
+home at `/@<slug>`. Account deletion is on `/account/data`. Both actions use
+Start server functions. Team-org settings,
 members, teams, grants, and collaborators are `/@<slug>/-/settings`,
 `/@<slug>/-/members`, `/@<slug>/-/teams`, `/@<slug>/-/grants`, and
 `/@<slug>/-/collaborators`.

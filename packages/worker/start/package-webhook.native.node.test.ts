@@ -10,6 +10,11 @@ import {
 	type PackageWebhookListItem,
 	type PackageWebhooksLoaderData,
 } from '#universal/loader-data.ts'
+const native = vi.hoisted(() => ({ updatePackageWebhook: vi.fn() }))
+vi.mock('#start/server/package-webhooks', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	updatePackageWebhook: native.updatePackageWebhook,
+}))
 const listCommands: PackageWebhookListItem = {
 	id: 'raycast/list-commands',
 	packageId: 'pkg-2',
@@ -129,12 +134,10 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 	const payload = listPayload([run])
 	client.setQueryData(key, listPayload([listCommands]))
 	client.setQueryData(other, { marker: 'other' })
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(async () =>
-			Response.json({ ...payload, revealed: { id: run.id, url: secretUrl } }),
-		),
-	)
+	native.updatePackageWebhook.mockResolvedValueOnce({
+		...payload,
+		revealed: { id: run.id, url: secretUrl },
+	})
 	const observer = new MutationObserver(
 		client,
 		packageWebhookMutationOptions(client),
@@ -152,6 +155,14 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 			invalidate,
 		})
 		expect(accepted.revealed?.url).toBe(secretUrl)
+		expect(native.updatePackageWebhook).toHaveBeenLastCalledWith({
+			data: {
+				username: 'jane',
+				kodyId: 'raycast',
+				webhookName: run.name,
+				intent: 'reveal',
+			},
+		})
 		expect(client.getQueryData(key)).toEqual(payload)
 		expect(
 			JSON.stringify(
@@ -193,12 +204,10 @@ test('failed webhook write retains rows and invalidates only its submitted packa
 	const payload = listPayload([run])
 	client.setQueryData(key, payload)
 	client.setQueryData(other, { marker: 'other' })
-	vi.stubGlobal(
-		'fetch',
-		vi.fn(async () => {
-			throw new TypeError('Connection lost')
-		}),
-	)
+	native.updatePackageWebhook.mockResolvedValueOnce({
+		ok: false,
+		error: 'Unable to rotate',
+	})
 	try {
 		const mutation = client
 			.getMutationCache()
