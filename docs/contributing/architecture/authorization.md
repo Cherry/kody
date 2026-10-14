@@ -483,8 +483,8 @@ error, so the request stops. See [MCP context](#mcp-context).
 | `GET /admin/system-email.json`         | `requireUserWithRole('admin')`                     |
 | `POST /admin/system-email.json`        | `requireUserWithRole('admin')`                     |
 
-Handlers: `packages/worker/src/app/handlers/admin-users.ts`,
-`packages/worker/src/app/handlers/admin-roles.ts`.
+Handlers: `packages/worker/src/admin/users-operations.ts`,
+`packages/worker/start/server/admin-roles.ts`.
 
 The users list accepts `q` (username/email substring), `role`, and
 `verification=stalled` (unverified person accounts whose latest signup/verify
@@ -942,8 +942,8 @@ assignment happens through the admin UI.
 - `packages/worker/src/identity/permissions-db.ts` — D1 queries
 - `packages/worker/src/app/permissions-server.ts` — request guards
 - `packages/worker/migrations/0001-squashed-init.sql` — schema and seed data
-- `packages/worker/src/app/handlers/admin-users.ts` — users admin API
-- `packages/worker/src/app/handlers/admin-roles.ts` — roles admin API
+- `packages/worker/src/admin/users-operations.ts` — users admin API
+- `packages/worker/start/server/admin-roles.ts` — roles admin API
 - `packages/worker/src/mcp-auth-user-context.ts` — MCP role loading
 - `packages/worker/src/identity/background-mcp-user.ts` — background package
   caller role loading

@@ -126,8 +126,9 @@ Avoid `page.locator('css')` unless no accessible alternative exists.
   sessions.
 - Client routes live in `packages/worker/start/routes/` and use
   `packages/worker/start/router.tsx`.
-- API endpoints are defined in `packages/worker/universal/routes.ts` and mapped
-  in `packages/worker/start/backend-router.ts`.
+- Native protocol routes live alongside page routes. Their shared handlers are
+  in `packages/worker/start/server/protocol-handlers.ts`. Website reads and
+  writes use Start server functions.
 
 When adding endpoints that accept bodies, ensure POST/PUT requests are not
 handled by the static asset fetcher in `packages/worker/src/index.ts`.

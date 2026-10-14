@@ -171,9 +171,9 @@ delivery-alert bounce/complaint table); they do not write
 
 Signed-in users with an unverified email can request a fresh link with
 `POST /account/resend-verification.json`
-(`packages/worker/src/app/handlers/account-resend-verification.ts`), surfaced as
-a "Resend verification email" button on `/pending-verification`, `/account`,
-`/onboarding`, and `/oauth/authorize`. The endpoint reuses
+(`packages/worker/src/identity/account-resend-verification-operations.ts`),
+surfaced as a "Resend verification email" button on `/pending-verification`,
+`/account`, `/onboarding`, and `/oauth/authorize`. The endpoint reuses
 `createEmailVerification` (invalidating older tokens) and is rate-limited per
 user (3 requests per 15 minutes).
 
@@ -312,9 +312,9 @@ Both are opt-in and adapted from the Epic Stack.
 - When a 2FA account logs in with a password (or social login), the handler does
   **not** issue `kody_session`. It sets the short-lived signed `kody_verify`
   cookie (`packages/worker/src/app/verify-session.ts`, 10 minutes) and the
-  client redirects to `/verify`. `POST /verify/2fa.json`
-  (`packages/worker/src/app/handlers/verify.ts`) checks the TOTP code and only
-  then issues the real session cookie. Passkey sign-in skips this step: a
+  client redirects to `/verify`. The native two-factor verification function
+  (`packages/worker/src/identity/verify-operations.ts`) checks the TOTP code and
+  only then issues the real session cookie. Passkey sign-in skips this step: a
   verified WebAuthn assertion already requires possession of the authenticator
   plus user verification (biometric/PIN), so it is treated as MFA-complete.
 - Disabling 2FA requires a fresh code. The inline OAuth password form
@@ -325,9 +325,9 @@ Both are opt-in and adapted from the Epic Stack.
 `packages/worker/src/app/passkeys.ts`):
 
 - Registration and authentication ceremonies live in
-  `packages/worker/src/app/handlers/webauthn.ts` using `@simplewebauthn/server`;
-  challenges ride in the short-lived signed `kody_webauthn_challenge` cookie, so
-  no server-side ceremony state exists.
+  `packages/worker/src/identity/webauthn-operations.ts` using
+  `@simplewebauthn/server`; challenges ride in the short-lived signed
+  `kody_webauthn_challenge` cookie, so no server-side ceremony state exists.
 - The relying party id/origin derive from the request host. WebAuthn requires a
   registrable domain, so Playwright passkey tests navigate via `localhost`
   rather than `127.0.0.1`.
@@ -432,7 +432,7 @@ Related handlers:
 
 - `GET /login` and `GET /signup`: `packages/worker/start/routes/login.tsx` and
   `packages/worker/start/routes/signup.tsx`
-- `POST /logout`: `packages/worker/src/app/handlers/logout.ts`
+- Native sign-out function: `packages/worker/start/server/security-mutations.ts`
 - `POST /session`: `packages/worker/src/app/handlers/session.ts` for session
   status checks
 - `GET /account`: `packages/worker/start/routes/account.tsx` (redirects to login
@@ -451,8 +451,8 @@ and freshness policies.
 
 ## Password reset
 
-Password reset handlers are in
-`packages/worker/src/app/handlers/password-reset.ts`.
+Password reset operations called by Start server functions are in
+`packages/worker/src/identity/password-reset-operations.ts`.
 
 - `POST /password-reset` creates a one-time token and stores only its hash
 - the response is uniform for registered and unregistered addresses in both body
@@ -864,7 +864,7 @@ intercepts `POST /oauth/token` refresh grants:
   account setup links
 - `packages/worker/src/app/email-verification.ts`,
   `packages/worker/src/app/handlers/verify-email.ts`, and
-  `packages/worker/src/app/handlers/account-resend-verification.ts` for
+  `packages/worker/src/identity/account-resend-verification-operations.ts` for
   verification tokens and resends
 - `packages/worker/src/email/destinations.ts`,
   `packages/worker/src/email/destination-verification.ts`, and

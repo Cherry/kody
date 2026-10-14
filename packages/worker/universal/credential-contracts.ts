@@ -303,18 +303,6 @@ export type CredentialApprovalView = {
 	errors: Array<string>
 }
 
-/** Approve refused; nothing was written. `view` is resolved fresh. */
-export type CredentialApprovalFailure = {
-	ok: false
-	error: string
-	view: CredentialApprovalView
-}
-
-export type CredentialApprovalSuccess = {
-	ok: true
-	view: CredentialApprovalView
-}
-
 /**
  * `pause.resourceType` of an enablement paused because a credential its
  * trigger mapping names is gone or no longer usable by the enabler.

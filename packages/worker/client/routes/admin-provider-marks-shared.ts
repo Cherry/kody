@@ -1,8 +1,6 @@
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { type AdminProviderMark } from '#universal/loader-data.ts'
 
-export const adminProviderMarksApiPath = '/admin/provider-marks.json'
-
 export function splitAliasInput(raw: string): Array<string> {
 	return raw
 		.split(/[\s,]+/)

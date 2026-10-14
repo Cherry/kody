@@ -166,7 +166,7 @@ primitives:
       - packages/worker/src/app/oauth-
       - packages/worker/src/app/handlers/verify
       - packages/worker/src/app/handlers/pending-verification.ts
-      - packages/worker/src/app/handlers/webauthn.ts
+      - packages/worker/src/identity/webauthn-operations.ts
       - packages/worker/src/app/handlers/account-two-factor.ts
       - packages/worker/src/app/handlers/account-passkeys.ts
       - packages/worker/src/app/email-verification.ts
@@ -452,7 +452,7 @@ primitives:
       - packages/worker/src/mcp/capabilities/webhooks/
       - packages/worker/src/app/handlers/webhook-ingress.ts
       - packages/worker/src/app/handlers/package-webhooks.ts
-      - packages/worker/src/app/handlers/account-webhooks.ts
+      - packages/worker/start/server/account-collections.ts
       - packages/worker/src/app/package-webhooks-data.ts
       - packages/worker/start/pages/package-webhook-settings.tsx
       - packages/worker/start/pages/package-webhook-card.tsx

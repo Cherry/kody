@@ -12,11 +12,13 @@ README. Do not vendor copies here.
 ## Kody runtime topology
 
 The origin request path reaches `packages/worker/start/http-entry.ts`, which
-dispatches APIs through `packages/worker/start/backend-router.ts` and documents
-through Start. Wrangler supplies Fetch API requests. Origin does not use the
-Node HTTP server from `remix new`, and Node-only `trustProxy` does not apply.
+dispatches documents, server functions, and protocol routes through Start.
+`packages/worker/start/server/protocol-handlers.ts` adapts retained protocol
+services to native route handlers. Wrangler supplies Fetch API requests. Origin
+does not use the Node HTTP server from `remix new`, and Node-only `trustProxy`
+does not apply.
 
-The backend uses Remix's request router and cross-origin protection middleware.
+The app uses Start routing and retains Remix cross-origin protection utilities.
 Session cookies use `remix/cookie`. D1 access uses `D1DatabaseDriver` with
 `new Database(driver)`. Server authorization stays in the API and data service
 handlers, regardless of client cache state.
@@ -41,8 +43,10 @@ so path matching receives the encoded parameter.
 
 Add web pages through the native routes under `packages/worker/start/routes`.
 Follow [server-state ownership](./tanstack-start.md) and
-[no-flash navigation](./no-flash-navigation.md). HTTP API endpoints belong in
-`packages/worker/start/backend-router.ts`; they do not render an alternate UI.
+[no-flash navigation](./no-flash-navigation.md). Website reads and mutations
+belong in Start server functions. Genuine HTTP protocol endpoints have native
+route handlers under the same route tree, with shared services in
+`packages/worker/start/server/protocol-handlers.ts`.
 
 OAuth authorize/callback paths belong to the Cloudflare OAuth provider wrapper
 and use `packages/worker/universal/oauth-paths.ts`.

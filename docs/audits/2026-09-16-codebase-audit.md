@@ -386,7 +386,7 @@ first-party credential leak to package code) showed up in the surfaces reviewed.
 
 - **Area:** security
 - **Location:**
-  `packages/worker/src/app/handlers/account-resend-verification.ts`
+  `packages/worker/src/identity/account-resend-verification-operations.ts`
 - **Evidence:** Non-JSON requests still send mail; `redirectTo` comes from the
   query string. Rate-limited. SameSite still blocks cross-site POST cookies.
 - **Impact:** Extra verification emails if SameSite fails.

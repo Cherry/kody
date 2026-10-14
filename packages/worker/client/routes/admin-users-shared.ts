@@ -7,10 +7,6 @@ import {
 	type AdminUserVerificationFilter,
 } from '#universal/email-verification-delivery.ts'
 
-const adminUsersApiPath = '/admin/users.json'
-export const adminUserUsageApiPath = '/admin/users/usage.json'
-export const adminUserCreditsApiPath = '/admin/users/credits.json'
-
 const { getSelection, buildDetailHref } = createListDetailRoute('/admin/users')
 
 export { getSelection }
@@ -64,28 +60,4 @@ export function buildUserDetailHrefFrom(
 export function parseSelectedStableUserId(value: string | null): string | null {
 	if (!value || !/^[a-f0-9]{64}$/.test(value)) return null
 	return value
-}
-
-/**
- * Translate a detail pathname into the JSON API's `?selected=` param and
- * drop a stale `?page=` so initial loads always re-anchor at page one.
- */
-export function buildAdminUsersApiRequestUrl(
-	href: string,
-	options?: { page?: number; includeSelected?: boolean },
-) {
-	const pageUrl = new URL(href, 'http://localhost')
-	const requestUrl = new URL(adminUsersApiPath, 'http://localhost')
-	requestUrl.search = pageUrl.search
-	requestUrl.searchParams.delete('page')
-	if (options?.page != null) {
-		requestUrl.searchParams.set('page', String(options.page))
-	}
-	const selectedId = getSelection(href).selectedId
-	if (selectedId && options?.includeSelected !== false) {
-		requestUrl.searchParams.set('selected', selectedId)
-	} else {
-		requestUrl.searchParams.delete('selected')
-	}
-	return `${requestUrl.pathname}${requestUrl.search}`
 }

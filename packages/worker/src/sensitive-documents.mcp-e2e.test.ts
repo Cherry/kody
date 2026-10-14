@@ -39,9 +39,13 @@ test('native secret connection redirects preserve prefill and destination authen
 	const legacyAnonymous = await readDocument(legacyPath)
 	expect(legacyAnonymous.response.status).toBe(302)
 	expect(legacyAnonymous.response.headers.get('Location')).toBe(creationPath)
-	for (const path of ['/connect/secrets', creationPath]) {
+	for (const path of [
+		'/connect/secrets',
+		'/account/credentials',
+		creationPath,
+	]) {
 		const { response } = await readDocument(path)
-		expect(response.status).toBe(302)
+		expect(response.status, `Anonymous document ${path}`).toBe(302)
 		const login = new URL(response.headers.get('Location')!, server.origin)
 		expect(login.pathname).toBe('/login')
 		expect(login.searchParams.get('redirectTo')).toBe(path)
@@ -52,6 +56,15 @@ test('native secret connection redirects preserve prefill and destination authen
 	const legacy = await readDocument(legacyPath, cookie)
 	expect(legacy.response.status).toBe(302)
 	expect(legacy.response.headers.get('Location')).toBe(creationPath)
+	const list = await readDocument('/account/credentials?kind=key', cookie)
+	expect(
+		list.response.status,
+		'/account/credentials authenticated redirect',
+	).toBe(302)
+	expect(list.response.headers.get('Location')).toBe(
+		`/@${user.username}/-/credentials?kind=key`,
+	)
+	expect(list.response.headers.get('Cache-Control')).toContain('no-store')
 	const creation = await readDocument(creationPath, cookie)
 	expect(creation.response.status).toBe(302)
 	const destination = `/@${user.username}/-/credentials/new?kind=secret&name=exampleApiKey&allowedHosts=api.example.com`

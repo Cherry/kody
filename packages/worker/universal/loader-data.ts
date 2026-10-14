@@ -1903,25 +1903,6 @@ export type AccountIntegrationsLoaderData = {
 	platformCatalog?: Array<PlatformIntegrationCatalogItem>
 }
 
-export type AccountIntegrationDetailLoaderData = {
-	ok: true
-	integration: AccountIntegrationListItem | null
-	/**
-	 * Always false. Built-in connects start from `platform=<slug>` discovery
-	 * links instead; the field stays so older clients keep a stable shape.
-	 */
-	builtInAvailable?: boolean
-	/** See {@link ConnectOauthExistingConnection}. */
-	existingConnection?: ConnectOauthExistingConnection | null
-	/**
-	 * True when the user already stores the client-secret secret the connect
-	 * page would use for this name (the stored integration's secret name,
-	 * else `<providerKey>ClientSecret`). Lets the page render its setup /
-	 * ready state without a follow-up secrets fetch.
-	 */
-	hasStoredClientSecret?: boolean
-}
-
 /**
  * The connection currently stored under a requested name — enough for the
  * connect page to warn before an OAuth flow replaces it with a different app.
@@ -1941,11 +1922,11 @@ export type ConnectOauthLoaderData = {
 	ok: true
 	provider: string | null
 	integration: AccountIntegrationListItem | null
-	/** See {@link AccountIntegrationDetailLoaderData.builtInAvailable}. */
+	/** Built-in connections use platform discovery links instead. */
 	builtInAvailable?: boolean
 	/** See {@link ConnectOauthExistingConnection}. */
 	existingConnection?: ConnectOauthExistingConnection | null
-	/** See {@link AccountIntegrationDetailLoaderData.hasStoredClientSecret}. */
+	/** Whether the stored client-secret secret is available for this connection. */
 	hasStoredClientSecret?: boolean
 	/**
 	 * Absolute redirect (callback) URI for this deployment — the page URL

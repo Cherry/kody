@@ -216,9 +216,10 @@ route verifies identity and loads shell presentation through Query. Server
 functions enforce page and resource authorization before returning payloads.
 Anonymous callers receive registry flag defaults without touching D1.
 
-`packages/worker/start/backend-router.ts` maps API, action, protocol, and
-negotiated Markdown routes to existing services. Web documents render through
-`packages/worker/start/server.ts` and the native route tree. See
+`packages/worker/start/server/protocol-handlers.ts` adapts retained HTTP
+protocol services for the native Start routes. Website reads and mutations use
+server functions, with no parallel action route table. Web documents render
+through `packages/worker/start/server.ts` and the native route tree. See
 [web app rendering and server state](../tanstack-start.md) for navigation and
 cache ownership.
 

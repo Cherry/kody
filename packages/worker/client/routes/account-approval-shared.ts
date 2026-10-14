@@ -46,7 +46,3 @@ export function getScopeLabel(scope: ApprovalScope) {
 	if (scope === 'session') return 'Session'
 	return 'User'
 }
-
-export async function readJson<T>(response: Response) {
-	return (await response.json().catch(() => null)) as T | null
-}

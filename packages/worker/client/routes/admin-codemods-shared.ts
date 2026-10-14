@@ -11,10 +11,6 @@ export type LiveRunItem = {
 	findings: Array<{ path: string | null; message: string }>
 	error: string | null
 }
-
-export const adminCodemodsApiPath = '/admin/codemods.json'
-export const adminCodemodsRunApiPath = '/admin/codemods/run.json'
-export const adminCodemodsRunStopApiPath = '/admin/codemods/run/stop.json'
 export const maxRunSteps = 200
 
 export const runModes = [

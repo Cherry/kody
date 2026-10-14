@@ -93,7 +93,7 @@ test('native account documents render authorized initial state and protect anony
 			.toBe('/login')
 	}
 	// Website reads belong to Start. Removed JSON endpoints must not expose account data.
-	for (const headers of [{ Cookie: cookie }, {}]) {
+	for (const headers of [new Headers({ Cookie: cookie }), new Headers()]) {
 		const retired = await fetch(`${server.origin}/account/organizations.json`, {
 			headers,
 		})

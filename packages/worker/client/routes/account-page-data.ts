@@ -4,8 +4,6 @@ import {
 	type AccountProfileLoaderData,
 } from '#universal/loader-data.ts'
 
-export const connectedAgentsApiPath = '/account/connected-agents.json'
-
 export type AccountPagePayloads = {
 	accountProfile: AccountProfileLoaderData
 	accountConnections: AccountConnectionsLoaderData

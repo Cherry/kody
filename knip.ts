@@ -15,6 +15,7 @@ export default defineConfig({
 			},
 			entry: [
 				'start/client.tsx',
+				'start/start.ts',
 				'start/server.ts',
 				'start/router.tsx',
 				'start/routeTree.gen.ts',

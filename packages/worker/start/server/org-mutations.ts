@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 
-export const orgPeopleActionSchema = z.enum([
+const orgPeopleActionSchema = z.enum([
 	'memberRole',
 	'memberRemove',
 	'memberInvite',

@@ -399,16 +399,6 @@ export async function buildConnectOauthAuthorizeUrl(input: {
 	return url.toString()
 }
 
-/**
- * An expired session must land the user on the login page instead of a
- * generic "Unable to save ..." error mid-flow.
- */
-export function redirectToLoginOn401(response: Response) {
-	if (response.status !== 401) return false
-	window.location.assign('/login')
-	return true
-}
-
 export async function exchangeConnectOauthCode(
 	nextConfig: ConnectOauthConfig,
 	code: string,

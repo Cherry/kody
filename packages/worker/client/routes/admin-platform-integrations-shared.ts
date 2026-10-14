@@ -1,9 +1,6 @@
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { type AdminPlatformIntegrationApp } from '#universal/loader-data.ts'
-
-export const adminPlatformIntegrationsApiPath =
-	'/admin/platform-integrations.json'
 export const platformIntegrationsRoute = createListDetailRoute(
 	'/admin/platform-integrations',
 )

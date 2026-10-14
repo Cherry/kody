@@ -226,10 +226,10 @@ so a stray click cannot rotate a provider's URL; `reveal` refuses mints without
 memory only and drops them on Hide or when the settings page changes package.
 
 `/@<slug>/-/webhooks` (`packages/worker/start/pages/account-webhooks.tsx`,
-`packages/worker/src/app/handlers/account-webhooks.ts`) is a thin cross-package
-index. `GET /account/webhooks.json` lists every declared webhook (never a URL)
-and each row deep-links to `/@:username/:kodyId/settings#webhook-<name>`. The
-account API has no mutating intents.
+`packages/worker/start/server/account-collections.ts`) is a thin cross-package
+index. Its native read lists every declared webhook (never a URL) and each row
+deep-links to `/@:username/:kodyId/settings#webhook-<name>`. The account index
+has no mutating intents.
 
 `revealWebhookUrlForWebsite` is website-only: no MCP capability, execute
 binding, or apply result may return the credential URL.

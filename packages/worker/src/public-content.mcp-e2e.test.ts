@@ -24,7 +24,7 @@ async function document(path: string, cookie?: string) {
 		headers: cookie ? { Cookie: cookie } : {},
 		redirect: 'manual',
 	})
-	expect(response.status).toBe(200)
+	expect(response.status, `HTML ${url.href}`).toBe(200)
 	expect(response.headers.get('Content-Type')).toContain('text/html')
 	const html = (await response.text())
 		.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -135,8 +135,8 @@ test('acquisition documents preserve canonical metadata, guide links, sitemap an
 		))
 			expect(getGuideBySlug(source.href.slice('/docs/'.length))).toBeTruthy()
 		const markdown = await fetch(url, { headers: { Accept: 'text/markdown' } })
-		expect(markdown.status).toBe(200)
-		expect(markdown.headers.get('Content-Type')).toBe(
+		expect(markdown.status, `Markdown ${url.href}`).toBe(200)
+		expect(markdown.headers.get('Content-Type'), `Markdown ${url.href}`).toBe(
 			'text/markdown; charset=utf-8',
 		)
 		expect(await markdown.text()).toContain('# ')
@@ -151,7 +151,7 @@ test('use-case index exposes its landing pages in HTML and Markdown', async () =
 		'href="/use-cases/mcp-gateway"',
 	])
 	const markdown = await fetch(url, { headers: { Accept: 'text/markdown' } })
-	expect(markdown.status).toBe(200)
+	expect(markdown.status, `Markdown ${url.href}`).toBe(200)
 	expect(await markdown.text()).toContain('](/compare/n8n-alternatives)')
 })
 

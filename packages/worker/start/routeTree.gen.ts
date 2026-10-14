@@ -54,6 +54,7 @@ import { Route as AccountActivityRouteImport } from './routes/account_.activity'
 import { Route as AccountAgentsRouteImport } from './routes/account_.agents'
 import { Route as AccountBillingRouteImport } from './routes/account_.billing'
 import { Route as AccountConnectionsRouteImport } from './routes/account_.connections'
+import { Route as AccountCredentialsRouteImport } from './routes/account_.credentials'
 import { Route as AccountDataRouteImport } from './routes/account_.data'
 import { Route as AccountEmailRouteImport } from './routes/account_.email'
 import { Route as AccountExperimentsRouteImport } from './routes/account_.experiments'
@@ -94,6 +95,7 @@ import { Route as BlogChar123slugChar125DotmdRouteImport } from './routes/blog_.
 import { Route as CommunityListingIdRouteImport } from './routes/community_.$listingId'
 import { Route as CompareComposioAlternativesRouteImport } from './routes/compare_.composio-alternatives'
 import { Route as CompareN8nAlternativesRouteImport } from './routes/compare_.n8n-alternatives'
+import { Route as ConnectCredentialRouteImport } from './routes/connect.credential'
 import { Route as ConnectOauthRouteImport } from './routes/connect.oauth'
 import { Route as ConnectSecretSetRouteImport } from './routes/connect.secret-set'
 import { Route as ConnectSecretsRouteImport } from './routes/connect.secrets'
@@ -482,6 +484,11 @@ const AccountConnectionsRoute = AccountConnectionsRouteImport.update({
   path: '/account/connections',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountCredentialsRoute = AccountCredentialsRouteImport.update({
+  id: '/account_/credentials',
+  path: '/account/credentials',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountDataRoute = AccountDataRouteImport.update({
   id: '/account_/data',
   path: '/account/data',
@@ -684,6 +691,11 @@ const CompareComposioAlternativesRoute =
 const CompareN8nAlternativesRoute = CompareN8nAlternativesRouteImport.update({
   id: '/compare_/n8n-alternatives',
   path: '/compare/n8n-alternatives',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectCredentialRoute = ConnectCredentialRouteImport.update({
+  id: '/connect/credential',
+  path: '/connect/credential',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConnectOauthRoute = ConnectOauthRouteImport.update({
@@ -1626,6 +1638,7 @@ export interface FileRoutesByFullPath {
   '/account/agents': typeof AccountAgentsRoute
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
+  '/account/credentials': typeof AccountCredentialsRoute
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
@@ -1664,6 +1677,7 @@ export interface FileRoutesByFullPath {
   '/community/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare/n8n-alternatives': typeof CompareN8nAlternativesRoute
+  '/connect/credential': typeof ConnectCredentialRoute
   '/connect/oauth': typeof ConnectOauthRoute
   '/connect/secret-set': typeof ConnectSecretSetRoute
   '/connect/secrets': typeof ConnectSecretsRoute
@@ -1870,6 +1884,7 @@ export interface FileRoutesByTo {
   '/account/agents': typeof AccountAgentsRoute
   '/account/billing': typeof AccountBillingRoute
   '/account/connections': typeof AccountConnectionsRoute
+  '/account/credentials': typeof AccountCredentialsRoute
   '/account/data': typeof AccountDataRoute
   '/account/email': typeof AccountEmailRoute
   '/account/experiments': typeof AccountExperimentsRoute
@@ -1908,6 +1923,7 @@ export interface FileRoutesByTo {
   '/community/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare/n8n-alternatives': typeof CompareN8nAlternativesRoute
+  '/connect/credential': typeof ConnectCredentialRoute
   '/connect/oauth': typeof ConnectOauthRoute
   '/connect/secret-set': typeof ConnectSecretSetRoute
   '/connect/secrets': typeof ConnectSecretsRoute
@@ -2116,6 +2132,7 @@ export interface FileRoutesById {
   '/account_/agents': typeof AccountAgentsRoute
   '/account_/billing': typeof AccountBillingRoute
   '/account_/connections': typeof AccountConnectionsRoute
+  '/account_/credentials': typeof AccountCredentialsRoute
   '/account_/data': typeof AccountDataRoute
   '/account_/email': typeof AccountEmailRoute
   '/account_/experiments': typeof AccountExperimentsRoute
@@ -2154,6 +2171,7 @@ export interface FileRoutesById {
   '/community_/$listingId': typeof CommunityListingIdRouteWithChildren
   '/compare_/composio-alternatives': typeof CompareComposioAlternativesRoute
   '/compare_/n8n-alternatives': typeof CompareN8nAlternativesRoute
+  '/connect/credential': typeof ConnectCredentialRoute
   '/connect/oauth': typeof ConnectOauthRoute
   '/connect/secret-set': typeof ConnectSecretSetRoute
   '/connect/secrets': typeof ConnectSecretsRoute
@@ -2363,6 +2381,7 @@ export interface FileRouteTypes {
     | '/account/agents'
     | '/account/billing'
     | '/account/connections'
+    | '/account/credentials'
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
@@ -2401,6 +2420,7 @@ export interface FileRouteTypes {
     | '/community/$listingId'
     | '/compare/composio-alternatives'
     | '/compare/n8n-alternatives'
+    | '/connect/credential'
     | '/connect/oauth'
     | '/connect/secret-set'
     | '/connect/secrets'
@@ -2607,6 +2627,7 @@ export interface FileRouteTypes {
     | '/account/agents'
     | '/account/billing'
     | '/account/connections'
+    | '/account/credentials'
     | '/account/data'
     | '/account/email'
     | '/account/experiments'
@@ -2645,6 +2666,7 @@ export interface FileRouteTypes {
     | '/community/$listingId'
     | '/compare/composio-alternatives'
     | '/compare/n8n-alternatives'
+    | '/connect/credential'
     | '/connect/oauth'
     | '/connect/secret-set'
     | '/connect/secrets'
@@ -2852,6 +2874,7 @@ export interface FileRouteTypes {
     | '/account_/agents'
     | '/account_/billing'
     | '/account_/connections'
+    | '/account_/credentials'
     | '/account_/data'
     | '/account_/email'
     | '/account_/experiments'
@@ -2890,6 +2913,7 @@ export interface FileRouteTypes {
     | '/community_/$listingId'
     | '/compare_/composio-alternatives'
     | '/compare_/n8n-alternatives'
+    | '/connect/credential'
     | '/connect/oauth'
     | '/connect/secret-set'
     | '/connect/secrets'
@@ -3098,6 +3122,7 @@ export interface RootRouteChildren {
   AccountAgentsRoute: typeof AccountAgentsRoute
   AccountBillingRoute: typeof AccountBillingRoute
   AccountConnectionsRoute: typeof AccountConnectionsRoute
+  AccountCredentialsRoute: typeof AccountCredentialsRoute
   AccountDataRoute: typeof AccountDataRoute
   AccountEmailRoute: typeof AccountEmailRoute
   AccountExperimentsRoute: typeof AccountExperimentsRoute
@@ -3136,6 +3161,7 @@ export interface RootRouteChildren {
   CommunityListingIdRoute: typeof CommunityListingIdRouteWithChildren
   CompareComposioAlternativesRoute: typeof CompareComposioAlternativesRoute
   CompareN8nAlternativesRoute: typeof CompareN8nAlternativesRoute
+  ConnectCredentialRoute: typeof ConnectCredentialRoute
   ConnectOauthRoute: typeof ConnectOauthRoute
   ConnectSecretSetRoute: typeof ConnectSecretSetRoute
   ConnectSecretsRoute: typeof ConnectSecretsRoute
@@ -3606,6 +3632,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountConnectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/account_/credentials': {
+      id: '/account_/credentials'
+      path: '/account/credentials'
+      fullPath: '/account/credentials'
+      preLoaderRoute: typeof AccountCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/data': {
       id: '/account_/data'
       path: '/account/data'
@@ -3884,6 +3917,13 @@ declare module '@tanstack/react-router' {
       path: '/compare/n8n-alternatives'
       fullPath: '/compare/n8n-alternatives'
       preLoaderRoute: typeof CompareN8nAlternativesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect/credential': {
+      id: '/connect/credential'
+      path: '/connect/credential'
+      fullPath: '/connect/credential'
+      preLoaderRoute: typeof ConnectCredentialRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/connect/oauth': {
@@ -5091,6 +5131,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountAgentsRoute: AccountAgentsRoute,
   AccountBillingRoute: AccountBillingRoute,
   AccountConnectionsRoute: AccountConnectionsRoute,
+  AccountCredentialsRoute: AccountCredentialsRoute,
   AccountDataRoute: AccountDataRoute,
   AccountEmailRoute: AccountEmailRoute,
   AccountExperimentsRoute: AccountExperimentsRoute,
@@ -5129,6 +5170,7 @@ const rootRouteChildren: RootRouteChildren = {
   CommunityListingIdRoute: CommunityListingIdRouteWithChildren,
   CompareComposioAlternativesRoute: CompareComposioAlternativesRoute,
   CompareN8nAlternativesRoute: CompareN8nAlternativesRoute,
+  ConnectCredentialRoute: ConnectCredentialRoute,
   ConnectOauthRoute: ConnectOauthRoute,
   ConnectSecretSetRoute: ConnectSecretSetRoute,
   ConnectSecretsRoute: ConnectSecretsRoute,
