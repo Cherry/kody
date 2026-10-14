@@ -22,6 +22,13 @@ export const localWorkerModuleNames = {
 	entry: '__kody_local_entry.js',
 	user: 'main.js',
 	runtime: 'kody:runtime',
+	/**
+	 * Flat alias for `kody:runtime`. Path-like package module names
+	 * (`kody:@scope/pkg/export`) path-join bare `kody:runtime` into
+	 * `kody:@scope/pkg/kody:runtime`; local deps rewrite to this slash-free
+	 * name instead. workerd rejects leading-`/` absolute module names.
+	 */
+	runtimeFlatAlias: '.__kody_runtime__.js',
 } as const
 
 /** Header carrying the per-run secret on workerd → bridge and CLI → workerd hops. */
@@ -30,6 +37,17 @@ export const runSecretEnvVar = 'KODY_RUN_SECRET'
 
 /** Runtime ALS symbol shared with stamped / inlined `kody:runtime` helpers. */
 export const kodyRuntimeStorageSymbolDescription = 'kody.runtimeStorage'
+
+/**
+ * Thin re-export of `kody:runtime` under {@link localWorkerModuleNames.runtimeFlatAlias}.
+ * Must not embed a second runtime copy — entry installs the bridge only on
+ * `kody:runtime`, and local deps need that same module instance.
+ * `export *` omits `default`, so re-export it explicitly.
+ */
+export function createRuntimeFlatAliasSource(): string {
+	const runtime = JSON.stringify(localWorkerModuleNames.runtime)
+	return `export * from ${runtime};\nexport { default } from ${runtime};\n`
+}
 
 export function createLocalRuntimeModuleSource(): string {
 	return `
@@ -372,6 +390,10 @@ export function createWorkerdConfig(input: {
 		)
 		.join('\n')
 	const packageBlock = packageEntries ? `\n${packageEntries}` : ''
+	// Flat re-export of kody:runtime (same module instance). Callers must write
+	// createRuntimeFlatAliasSource() to this filename before serving.
+	const runtimeFlatAliasFile = localWorkerModuleNames.runtimeFlatAlias
+	const runtimeFlatAlias = `    (name = ${JSON.stringify(localWorkerModuleNames.runtimeFlatAlias)}, esModule = embed ${JSON.stringify(runtimeFlatAliasFile)}),`
 	return `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -387,7 +409,8 @@ const kodyWorker :Workerd.Worker = (
   modules = [
     (name = ${JSON.stringify(localWorkerModuleNames.entry)}, esModule = embed ${JSON.stringify(input.files.entry)}),
     (name = ${JSON.stringify(localWorkerModuleNames.user)}, esModule = embed ${JSON.stringify(input.files.user)}),
-    (name = ${JSON.stringify(localWorkerModuleNames.runtime)}, esModule = embed ${JSON.stringify(input.files.runtime)}),${packageBlock}
+    (name = ${JSON.stringify(localWorkerModuleNames.runtime)}, esModule = embed ${JSON.stringify(input.files.runtime)}),
+${runtimeFlatAlias}${packageBlock}
   ],
   compatibilityDate = ${JSON.stringify(localExecuteCompatibilityDate)},
   compatibilityFlags = [${flags}],

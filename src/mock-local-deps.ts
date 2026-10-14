@@ -16,6 +16,7 @@ import {
 	hasLiteralDynamicSavedPackageImports,
 	listSavedPackageImports,
 	LocalPackageGraphError,
+	rewriteBareKodyBuiltinImports,
 } from './local-package-graph.js'
 import {
 	loadPackageManifest,
@@ -122,11 +123,11 @@ export async function resolveLocalPackageModules(input: {
 	selfManifest?: KodyPackageManifest
 	onStatus?: (message: string) => void
 }): Promise<{ modules: Array<LocalPackageModule>; unresolved: Array<string> }> {
-	const imports = listSavedPackageImports(input.code)
+	const imports = await listSavedPackageImports(input.code)
 	if (imports.length === 0) {
 		return { modules: [], unresolved: [] }
 	}
-	if (hasLiteralDynamicSavedPackageImports(input.code)) {
+	if (await hasLiteralDynamicSavedPackageImports(input.code)) {
 		throw new LocalPackageGraphError(
 			`Local execute cannot bind literal dynamic import("kody:@…") yet — use a static import.`,
 			{ code: 'unsupported_dynamic_package_import' },
@@ -183,9 +184,29 @@ export async function resolveLocalPackageModules(input: {
 			)
 		}
 		input.onStatus?.(`Bundling local dep ${specifier} from ${modulePath}…`)
-		const esModule = await bundleLocalUserModule(modulePath)
+		let bundled: string
+		try {
+			bundled = await bundleLocalUserModule(modulePath)
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			// Dep was already mapped; failure is usually a missing relative/npm
+			// import inside that package — not a missing .kody/deps.json entry.
+			const tip = /Could not resolve ["']kody:@/i.test(message)
+				? `Tip: Map the dependency in .kody/deps.json (or package.json#kody.localDeps), ` +
+					`keep it in this package's exports, or log in so published package-graph can supply it.`
+				: /Could not resolve|Cannot find module|ENOENT/i.test(message)
+					? `Tip: Fix the missing import inside the local dep, or run \`npm install\` in that package's directory, then retry.`
+					: `Tip: Check the local dep source at ${modulePath}.`
+			throw new LocalPackageGraphError(
+				`Could not bundle local dep ${specifier} from ${modulePath}. ${message}\n${tip}`,
+				{ code: 'local_dep_bundle_failed' },
+			)
+		}
+		// Path-like workerd module names path-join bare kody: builtins; rewrite
+		// to the flat runtime alias (re-exports the same kody:runtime instance).
+		const esModule = await rewriteBareKodyBuiltinImports(bundled)
 		modules.push({ name: specifier, esModule })
-		for (const nested of listSavedPackageImports(esModule)) {
+		for (const nested of await listSavedPackageImports(esModule)) {
 			await resolveOne(nested)
 		}
 	}

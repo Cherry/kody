@@ -37,7 +37,9 @@ import {
 import {
 	createLocalEntrySource,
 	createLocalRuntimeModuleSource,
+	createRuntimeFlatAliasSource,
 	createWorkerdConfig,
+	localWorkerModuleNames,
 	runSecretEnvVar,
 	runSecretHeader,
 	type WorkerdPackageModuleFile,
@@ -150,7 +152,7 @@ export async function runLocalExecute(input: LocalExecuteInput): Promise<ToolCal
 	// when there are no `kody:@` imports so ambient `{{secret:…}}` fetch hops
 	// (or fails closed) instead of sending a raw placeholder (kody#3020).
 	input.onStatus?.(
-		hasSavedPackageImports(code)
+		(await hasSavedPackageImports(code))
 			? savedPackageImportLocalResolveStatus
 			: localExecutePackageGraphResolveStatus,
 	)
@@ -235,6 +237,10 @@ export async function runLocalExecute(input: LocalExecuteInput): Promise<ToolCal
 		)
 		await writeFile(join(workDir, files.user), code)
 		await writeFile(join(workDir, files.runtime), createLocalRuntimeModuleSource())
+		await writeFile(
+			join(workDir, localWorkerModuleNames.runtimeFlatAlias),
+			createRuntimeFlatAliasSource(),
+		)
 		const configPath = join(workDir, 'config.capnp')
 		await writeFile(
 			configPath,
