@@ -7,7 +7,7 @@ import {
 	maxCredentialProposalReasonLength,
 	normalizeProposalSenderValue,
 } from './credential-contracts.ts'
-export const credentialMappingChangeSchema = z.strictObject({
+const credentialMappingChangeSchema = z.strictObject({
 	target: z.discriminatedUnion('type', [
 		z.strictObject({
 			type: z.literal('default'),
