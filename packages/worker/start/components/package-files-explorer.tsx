@@ -37,6 +37,7 @@ import {
 	typography,
 } from '#universal/styles/tokens.ts'
 import {
+	getGhostButtonCss,
 	packageDetailPageCss,
 	proseCss,
 } from '#universal/styles/style-primitives.ts'
@@ -386,17 +387,29 @@ function renderContent(data: PackageFilesLoaderData): ReactNode {
 						</span>
 					) : null}
 				</div>
-				{body &&
-				data.contentKind !== 'binary' &&
-				!isPackageFilesMediaKind(data.contentKind) ? (
-					<CopyTextButton
-						value={body}
-						idleLabel="Copy"
-						variant="ghost"
-						size="sm"
-						ariaLabel={`Copy ${heading}`}
-					/>
-				) : null}
+				<div css={contentActionsCss}>
+					{data.rawHref ? (
+						<a
+							href={data.rawHref}
+							data-testid="package-files-raw-link"
+							aria-label={`View raw ${heading}`}
+							css={rawLinkCss}
+						>
+							Raw
+						</a>
+					) : null}
+					{body &&
+					data.contentKind !== 'binary' &&
+					!isPackageFilesMediaKind(data.contentKind) ? (
+						<CopyTextButton
+							value={body}
+							idleLabel="Copy"
+							variant="ghost"
+							size="sm"
+							ariaLabel={`Copy ${heading}`}
+						/>
+					) : null}
+				</div>
 			</div>
 			{renderFilePreview(data, heading, body)}
 		</div>
@@ -789,6 +802,17 @@ const contentToolbarCss = {
 	padding: `${spacing.sm} ${spacing.md}`,
 	borderBottom: `1px solid ${colors.border}`,
 } satisfies CSSObject
+
+const contentActionsCss = {
+	display: 'flex',
+	alignItems: 'center',
+	gap: spacing.xs,
+}
+
+const rawLinkCss = {
+	...getGhostButtonCss({ size: 'sm' }),
+	textDecoration: 'none',
+}
 
 const contentHeadingWrapCss = {
 	display: 'flex',
