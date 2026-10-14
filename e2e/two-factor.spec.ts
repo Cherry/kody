@@ -43,18 +43,37 @@ test('two-factor lifecycle: enable, login with code, disable', async ({
 
 	await page.context().clearCookies()
 	clearAuthRateLimitsInE2eDatabase()
-	await page.goto('/login')
+	const resume =
+		'/oauth/authorize?client_id=redirect-audit&state=state-kept&prompt=login%20consent'
+	await page.route('**/oauth/authorize?**', (route) =>
+		route.fulfill({
+			status: 200,
+			contentType: 'text/html',
+			body: '<h1>Authorization resumed</h1>',
+		}),
+	)
+	await page.goto(`/login?redirectTo=${encodeURIComponent(resume)}`)
 	await waitForClientHydration(page)
 	await page.getByLabel('Email').fill(user.email)
 	await page.getByLabel('Password', { exact: true }).fill(user.password)
 	await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-	await expect(page).toHaveURL(/\/verify$/)
+	await expect(page).toHaveURL(/\/verify\?/)
+	expect(new URL(page.url()).searchParams.get('redirectTo')).toBe(resume)
 	await waitForClientHydration(page)
 
 	clearAuthRateLimitsInE2eDatabase()
 	await page.getByLabel('Verification code').fill(await currentCodeFor(secret))
 	await page.getByRole('button', { name: 'Verify' }).click()
-	await expect(page).toHaveURL(/\/account$/)
+	await expect(
+		page.getByRole('heading', { name: 'Authorization resumed' }),
+	).toBeVisible()
+	const resumed = new URL(page.url())
+	expect(resumed.pathname).toBe('/oauth/authorize')
+	expect(resumed.searchParams.get('prompt')).toBe('consent')
+	expect(resumed.searchParams.get('state')).toBe('state-kept')
+	expect(resumed.searchParams.get('client_id')).toBe('redirect-audit')
+	await page.unroute('**/oauth/authorize?**')
+	await page.goto('/account')
 	await expect(page.getByText(`Email: ${user.email}`)).toBeVisible()
 
 	await page.goto('/account/two-factor')

@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { type QueryKey } from '@tanstack/react-query'
 import {
+	AccountManagementMessage,
 	AccountManagementPanel,
 	AccountManagementShell,
 	AccountPageHeader,
@@ -17,13 +18,12 @@ import {
 	type OrgGrantView,
 } from '#universal/loader-data.ts'
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useOrgPeopleMutation } from './org-people-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { orgCollaboratorsPath, orgTeamsPath } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
 import { renderIcon } from '../components/icon.tsx'
-import { AccountManagementMessage } from './account-management-components.tsx'
 function grantSummary(grant: OrgGrantView) {
 	const access = grant.presetLabel ?? 'Custom permissions'
 	return `${grant.subjectLabel} · ${access} on ${grant.resourceLabel}`
@@ -43,54 +43,13 @@ function OrgGrantsContent({
 	data: OrgGrantsLoaderData
 	queryKey: QueryKey
 }) {
-	const client = useQueryClient()
 	const capture = useSubmitterScope()
 	const [armed, setArmed] = useState<string | null>(null)
 	const [message, setMessage] = useState<{
 		tone: 'info' | 'error'
 		text: string
 	} | null>(null)
-	const mutation = useMutation({
-		mutationFn: async (input: {
-			grantId: string
-			slug: string
-			queryKey: QueryKey
-		}) => {
-			const response = await fetch(
-				routes.orgGrantsRevokePost.href({ orgSlug: input.slug }),
-				{
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ grantId: input.grantId }),
-				},
-			)
-			const payload = (await response.json().catch(() => null)) as {
-				ok?: boolean
-				error?: string
-			} | null
-			if (!response.ok || !payload?.ok)
-				throw new Error(
-					response.status === 401
-						? 'Sign in again to continue.'
-						: payload?.error || 'Unable to revoke that grant.',
-				)
-		},
-		onSuccess: async (_, input) => {
-			await client.invalidateQueries({
-				predicate: (query) =>
-					query.queryKey[0] === input.queryKey[0] &&
-					query.queryKey[1] === input.queryKey[1] &&
-					typeof query.queryKey[3] === 'object' &&
-					query.queryKey[3] !== null &&
-					'slug' in query.queryKey[3] &&
-					query.queryKey[3].slug === input.slug,
-			})
-		},
-	})
+	const mutation = useOrgPeopleMutation(queryKey)
 	return (
 		<AccountManagementShell currentHref={`/@${data.org.slug}/-/grants`}>
 			<AccountPageHeader
@@ -170,9 +129,10 @@ function OrgGrantsContent({
 														setMessage(null)
 														mutation.mutate(
 															{
-																grantId: grant.id,
-																slug: data.org.slug,
-																queryKey,
+																href: routes.orgGrantsRevokePost.href({
+																	orgSlug: data.org.slug,
+																}),
+																body: { grantId: grant.id },
 															},
 															{
 																onSuccess: () => {

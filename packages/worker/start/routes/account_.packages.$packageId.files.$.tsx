@@ -11,7 +11,10 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 export const Route = createFileRoute('/account_/packages/$packageId/files/$')({
 	context: ({ location }) => ({
 		pageQueryInput: {
-			pathname: location.pathname,
+			pathname:
+				location.pathname +
+				location.searchStr +
+				(location.hash ? `#${location.hash}` : ''),
 		},
 	}),
 	loader: ({ context, preload }) =>

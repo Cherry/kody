@@ -2,6 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
 import { createMatcher } from 'remix/route-pattern/match'
 import { routes } from '#universal/routes.ts'
+import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
 	normalizePackageFilesPath,
 	getPackageTreeHref,
@@ -12,8 +13,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		if (
 			!data ||
 			typeof data.pathname !== 'string' ||
-			!data.pathname.startsWith('/') ||
-			data.pathname.startsWith('//')
+			!normalizeRedirectTo(data.pathname)
 		)
 			throw notFound()
 		return { pathname: data.pathname }
@@ -57,10 +57,15 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 				request,
 			})
 			if (!target || target.kind === 'invalid-path') throw notFound()
-			if (target.kind === 'unauthorized') throw redirect({ href: '/login' })
+			if (target.kind === 'unauthorized')
+				throw redirect({
+					href: `/login?redirectTo=${encodeURIComponent(data.pathname)}`,
+					statusCode: 302,
+				})
 			if (target.kind === 'redirect') {
 				const destination = new URL(target.to, url)
 				destination.search = url.search
+				destination.hash = url.hash
 				setResponseHeader(
 					'Cache-Control',
 					target.shared ? 'public, max-age=3600' : 'private, no-store',
@@ -91,13 +96,19 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 			if (!payload) throw notFound()
 			return {
 				data: payload,
-				head: loadDocumentHead(data.pathname, { packageFiles: payload }),
+				head: loadDocumentHead(
+					url.pathname,
+					{ packageFiles: payload },
+					url.search,
+				),
 			}
 		}
 		const path = normalizePackageFilesPath(account.params.relativePath ?? '')
 		if (path == null) throw notFound()
 		const request = new Request(url, { headers: original.headers })
-		const user = await requireAuthenticatedPageUser(request, bindings)
+		const user = await requireAuthenticatedPageUser(request, bindings, {
+			redirectTo: data.pathname,
+		})
 		if (user instanceof Response) {
 			const cookie = user.headers.get('Set-Cookie')
 			if (cookie) setResponseHeader('Set-Cookie', cookie)
@@ -127,11 +138,14 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		)
 		setResponseHeader('Cache-Control', 'private, no-store')
 		throw redirect({
-			href: getPackageTreeHref({
-				username: binding?.org.slug ?? user.username,
-				kodyId: saved.kodyId,
-				relativePath: path,
-			}),
+			href:
+				getPackageTreeHref({
+					username: binding?.org.slug ?? user.username,
+					kodyId: saved.kodyId,
+					relativePath: path,
+				}) +
+				url.search +
+				url.hash,
 			statusCode: 302,
 		})
 	})

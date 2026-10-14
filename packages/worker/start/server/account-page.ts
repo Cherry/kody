@@ -1,6 +1,7 @@
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { redirect } from '@tanstack/react-router'
+import { accountReturnLocation } from './auth-return-location.ts'
 
 export const loadAccountPage = createServerFn({ method: 'GET' })
 	.validator((search: string) => {
@@ -41,7 +42,10 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 		pageUrl.pathname = '/account'
 		pageUrl.search = search
 		const user = await requireAuthenticatedPageUser(request, appEnv, {
-			redirectTo: pageUrl.pathname + pageUrl.search,
+			redirectTo: accountReturnLocation(
+				request,
+				pageUrl.pathname + pageUrl.search,
+			),
 		})
 		if (user instanceof Response) {
 			const cookie = user.headers.get('Set-Cookie')

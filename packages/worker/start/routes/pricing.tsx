@@ -6,7 +6,6 @@ import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
 import { jevSearchRerankFlagKey } from '#universal/feature-flags/registry.ts'
 
 export const Route = createFileRoute('/pricing')({
-	head: () => ({ meta: [{ title: 'Pricing | Kody' }] }),
 	component: Pricing,
 })
 function Pricing() {

@@ -4,7 +4,10 @@ import { useHydrated } from '../components/use-hydrated.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { useState, type FormEvent } from 'react'
 import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
-import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
+import {
+	normalizeRedirectTo,
+	resolvePostAuthLandingPath,
+} from '#universal/safe-redirect.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	cardCss,
@@ -82,7 +85,9 @@ export function VerifyRoute() {
 				return
 			}
 
-			window.location.assign(getRedirectTo() ?? '/account')
+			window.location.assign(
+				resolvePostAuthLandingPath(getRedirectTo()) ?? '/account',
+			)
 		} catch {
 			setStatus('idle')
 			setMessage('Network error. Please try again.')
