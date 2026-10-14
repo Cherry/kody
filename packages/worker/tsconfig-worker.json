@@ -37,6 +37,8 @@
 		"./start/document-negotiation.ts",
 		"./start/action-page-method.ts",
 		"./start/action-pages.ts",
+		"./start/connect-input.ts",
+		"./start/secrets-input.ts",
 
 		"./env.d.ts",
 		"./worker-configuration.d.ts",
