@@ -34,7 +34,7 @@ const payload: AccountPackageApproveCapabilitiesLoaderData = {
 	packageHref: '/@owner/example',
 	approveHref: '/@owner/example/approve-capabilities',
 }
-test('native capability review displays reachable credentials, hosts, paths and pinned fingerprint', async () => {
+test('native capability review displays reachable credentials, hosts, dependency attribution and pinned fingerprint', async () => {
 	const html = await renderStartPage(
 		jsx(AccountPackageApproveCapabilitiesRoute, {
 			payload,
@@ -50,9 +50,21 @@ test('native capability review displays reachable credentials, hosts, paths and 
 		'credential-id',
 		'storage-id',
 		'Approve capability set',
-		'How it is reached',
+		'reachable through its dependency mail',
+		'Can only be sent to api.example.com',
 	])
 		expect(html).toContain(value)
+	const detailsIndex = html.indexOf(
+		'data-testid="package-approve-capabilities-details"',
+	)
+	expect(detailsIndex).toBeGreaterThan(-1)
+	const details = html.slice(detailsIndex)
+	expect(details.slice(0, details.indexOf('>'))).not.toContain(' open')
+	expect(details).toContain('<summary>Details</summary>')
+	for (const id of ['reviewed-fingerprint', 'credential-id', 'storage-id']) {
+		expect(html.slice(0, detailsIndex)).not.toContain(id)
+		expect(details).toContain(id)
+	}
 	expect(html).toContain('href="/@owner/example/settings"')
 })
 test('unpublished native capability review cannot approve and explains why', async () => {
@@ -109,13 +121,15 @@ test('pending review offers separate credential and public-serving approvals', a
 		'Add mail credential for api.example.com',
 		'Package became public',
 		'public-commit',
-		'Internet-visible serving',
+		'aria-label="Capability set"',
 	])
 		expect(html).toContain(value)
 	expect(
 		html.match(/data-testid="package-pending-approval-approve"/g),
 	).toHaveLength(2)
 	expect(html).toContain('Approve and publish')
+	expect(html).toContain('Approve and make internet-visible')
+	expect(html).toContain('data-testid="package-approve-capabilities"')
 })
 
 test('public serving approval is distinct from approving the capability set', async () => {
