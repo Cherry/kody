@@ -23,6 +23,7 @@ import {
 } from '#universal/styles/style-primitives.ts'
 
 export type SiteHeaderProps = {
+	focused?: boolean
 	loggedIn: boolean
 	organizationSession: OrganizationSession | null
 	displayName: string
@@ -67,6 +68,35 @@ export function SiteHeader(props: SiteHeaderProps) {
 	function onMenuToggle(event: { newState?: string }) {
 		setMenuOpen(event.newState === 'open')
 	}
+
+	if (props.focused)
+		return (
+			<header className="site-header" data-focused-header css={headerCss}>
+				<div css={navCss}>
+					<SiteLink href="/" css={brandCss}>
+						<img src="/images/kody-mark.png" alt="" width={34} height={34} />
+						<span>Kody</span>
+					</SiteLink>
+					<div css={{ marginLeft: 'auto', display: 'flex' }}>
+						{props.loggedIn ? (
+							<AccountMenu
+								username={props.username}
+								displayName={props.displayName}
+								avatarUrl={props.avatarUrl}
+								organizations={props.organizationSession?.organizations ?? []}
+								lastUsedOrganization={
+									props.organizationSession?.lastUsedOrganization ?? null
+								}
+							/>
+						) : (
+							<SiteLink href={props.loginHref} css={navLoginCss}>
+								Log in
+							</SiteLink>
+						)}
+					</div>
+				</div>
+			</header>
+		)
 
 	return (
 		<header className="site-header" css={headerCss}>

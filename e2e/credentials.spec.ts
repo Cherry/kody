@@ -198,16 +198,12 @@ test('a Key detail pane edits its allowed hosts, HTTPS host names only', async (
 	).toHaveCount(0)
 	await editor.getByRole('button', { name: 'Cancel' }).click()
 
-	const listed = await page.request.get('/account/credentials.json', {
-		headers: { Referer: page.url() },
-	})
-	const payload = (await listed.json()) as {
-		credentials: Array<{ name: string; hosts: Array<string> }>
-	}
-	expect(
-		payload.credentials.find((credential) => credential.name === 'HOSTS_KEY')
-			?.hosts,
-	).toEqual(['uploads.example.com'])
+	// A fresh document must read the saved hosts, independently of the Query cache.
+	await page.reload()
+	await waitForClientHydration(page)
+	await expect(pane.getByText('uploads.example.com')).toBeVisible()
+	await expect(pane.getByText('api.example.com')).toHaveCount(0)
+	await expect(page.getByText(value)).toHaveCount(0)
 })
 
 test('the creation link saves Key, URL, and login credentials from their prefill', async ({

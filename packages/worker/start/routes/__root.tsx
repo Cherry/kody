@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { isFocusedPagePathname } from '#universal/focused-page-path.ts'
 import { routeMethods } from '../route-method-middleware.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildUnauthorizedErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -267,6 +268,7 @@ function LoadedAppLayout() {
 		pathname === '/oauth/authorize' ? authReturnHref : null,
 	)
 	const authShell = pathname === '/login' || pathname === '/signup'
+	const focused = isFocusedPagePathname(pathname)
 	return (
 		<div data-app-frame css={appFrameCss}>
 			<a href="#main" css={visuallyHiddenUntilFocusedCss}>
@@ -274,6 +276,7 @@ function LoadedAppLayout() {
 			</a>
 			{authShell ? null : (
 				<SiteHeader
+					focused={focused}
 					loggedIn={session !== null}
 					organizationSession={session}
 					displayName={session?.username || session?.email || ''}
@@ -292,7 +295,7 @@ function LoadedAppLayout() {
 			>
 				<Outlet />
 			</main>
-			{authShell ? null : (
+			{authShell || focused ? null : (
 				<SiteFooter loggedIn={session !== null} loginHref={loginHref} />
 			)}
 			<YouTubeWatchOverlay snapshot={youtubeWatch} location={shellLocation} />

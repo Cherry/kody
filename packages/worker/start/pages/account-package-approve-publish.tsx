@@ -15,6 +15,7 @@ import {
 	AccountPageHeader,
 	IdValue,
 	MetadataGrid,
+	accountDisclosureCss,
 } from './account-management-components.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import {
@@ -27,15 +28,10 @@ import {
 	type AccountPackageListingBehindHint,
 	type AccountPackageApprovePublishLoaderData,
 } from '#universal/loader-data.ts'
-function approvePublishMetadataItems(
+function approvePublishDetailItems(
 	payload: AccountPackageApprovePublishLoaderData,
 ) {
-	const items: Array<{ label: string; value: ReactNode }> = [
-		{
-			label: 'Kody id',
-			value: <IdValue value={payload.package.kodyId} label="Kody id" />,
-		},
-	]
+	const items: Array<{ label: string; value: ReactNode }> = []
 	// Title already names the short public commit when nothing is pending,
 	// do not repeat it in the metadata grid.
 	if (payload.alreadyPublished || !payload.pendingCommit) {
@@ -154,6 +150,7 @@ export function AccountPackageApprovePublishRoute({
 		Boolean(payload?.alreadyPublished) &&
 		payload?.pendingIsDefaultHead === false &&
 		upToDateShort != null
+	const detailItems = approvePublishDetailItems(payload)
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={busy}>
 			<AccountPageHeader
@@ -255,7 +252,15 @@ export function AccountPackageApprovePublishRoute({
 							agent asks you to approve a locked publish.
 						</p>
 					) : null}
-					<MetadataGrid items={approvePublishMetadataItems(payload)} />
+					{detailItems.length > 0 ? (
+						<details
+							data-testid="package-approve-publish-details"
+							css={accountDisclosureCss}
+						>
+							<summary>Details</summary>
+							<MetadataGrid items={detailItems} />
+						</details>
+					) : null}
 					<div
 						css={{
 							display: 'flex',

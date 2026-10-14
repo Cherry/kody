@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { isFocusedPagePathname } from '#universal/focused-page-path.ts'
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type FormEvent } from 'react'
 import { organizationsWithSignupFallback } from '#universal/org-pages.ts'
@@ -183,7 +184,9 @@ type AccountManagementShellProps = {
 const accountSectionGap = 'clamp(2rem, 4vw, 2.75rem)'
 
 export function AccountManagementShell(props: AccountManagementShellProps) {
-	const hasNavigation = Boolean(props.currentHref)
+	const hasNavigation = Boolean(
+		props.currentHref && !isFocusedPagePathname(props.currentHref),
+	)
 	return (
 		<section
 			data-account-shell
@@ -208,7 +211,7 @@ export function AccountManagementShell(props: AccountManagementShellProps) {
 				[accountManagementNarrowMq]: { gridTemplateColumns: 'minmax(0, 1fr)' },
 			}}
 		>
-			{props.currentHref ? (
+			{hasNavigation && props.currentHref ? (
 				<ShellNavigation currentHref={props.currentHref} />
 			) : null}
 			<div
@@ -289,6 +292,8 @@ function ShellNavigation({ currentHref }: { currentHref: string }) {
 }
 
 type AccountManagementHeaderProps = {
+	/** Context above the H1, such as the package a decision is about. */
+	eyebrow?: AccountManagementSlot
 	title: string
 	description: string
 	actions?: AccountManagementSlot
@@ -307,6 +312,7 @@ export function AccountManagementHeader(props: AccountManagementHeaderProps) {
 			}}
 		>
 			<div css={{ display: 'grid', gap: '0.6rem', minWidth: 0 }}>
+				{props.eyebrow ?? null}
 				<div
 					css={{
 						display: 'flex',
@@ -621,6 +627,8 @@ export function AccountManagementPanel(props: AccountManagementPanelProps) {
 
 type MetadataGridProps = {
 	items: Array<{
+		/** Defaults to `label`; pass one when two rows can share a label. */
+		key?: string
 		label: string
 		value: AccountManagementSlot
 	}>
@@ -645,7 +653,7 @@ export function MetadataGrid(props: MetadataGridProps) {
 			}}
 		>
 			{props.items.map((item) => (
-				<div key={item.label} css={{ minWidth: 0 }}>
+				<div key={item.key ?? item.label} css={{ minWidth: 0 }}>
 					<dt css={accountFieldLabelCss}>{item.label}</dt>
 					<dd
 						css={{
