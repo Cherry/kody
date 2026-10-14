@@ -4,6 +4,7 @@ import { ApprovalBundleRoute } from './pages/approval-bundle.tsx'
 import { renderStartPage } from './test-support/render-start-page.ts'
 import {
 	type ApprovalBundleLoaderData,
+	type ApprovalBundleView,
 	type ApprovalItemView,
 } from '#universal/approval-bundles.ts'
 
@@ -23,6 +24,7 @@ const item: ApprovalItemView = {
 	canApprove: true,
 	canDeny: true,
 	fingerprint: 'reviewed-fingerprint',
+	detailLabel: null,
 	grants: [],
 	reviewHref: '/@acme/tool/approve-publish',
 	decision: null,
@@ -105,4 +107,150 @@ test('decided items cannot be resubmitted and expired links retain their clear s
 	const expired = await render({ ok: false, reason: 'expired' })
 	expect(expired).toContain('This link expired')
 	expect(expired).not.toContain('data-testid="approval-bundle-approve-all"')
+})
+
+const pausedCommit = 'e650a38bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+function credentialNeedsItem(
+	overrides: Partial<ApprovalItemView> = {},
+): ApprovalItemView {
+	return {
+		key: 'publish:req-1',
+		type: 'publish',
+		title: 'Publish with changed credential needs',
+		summary:
+			'Approving publishes this version, which asks for the credentials below. The previously published version keeps serving until you approve. Denying drops this paused publish.',
+		package: {
+			id: 'pkg-1',
+			kodyId: 'nextdns',
+			name: '@kentcdodds/nextdns',
+			href: '/@kentcdodds/nextdns',
+		},
+		status: 'pending',
+		statusMessage: null,
+		canApprove: true,
+		canDeny: true,
+		fingerprint: pausedCommit,
+		detailLabel: 'Paused commit',
+		grants: [
+			{
+				change: 'added',
+				label: 'NEXTDNS_API_KEY',
+				where: null,
+				kind: 'Key',
+				provider: 'nextdns',
+				hosts: ['api.nextdns.io'],
+				before: null,
+				after: 'Key from provider "nextdns"',
+				match:
+					'No credential of yours matches yet; runs fail until you add one.',
+			},
+		],
+		reviewHref: '/@kentcdodds/nextdns/approve-capabilities',
+		decision: null,
+		...overrides,
+	}
+}
+
+function bundleLoaderData(
+	item: ApprovalItemView = credentialNeedsItem(),
+): ApprovalBundleLoaderData {
+	const view: ApprovalBundleView = {
+		ok: true,
+		bundle: {
+			id: 'bundle-1',
+			orgSlug: 'acme',
+			createdAt: '2026-10-14T00:00:00.000Z',
+			expiresAt: '2026-11-13T00:00:00.000Z',
+			note: null,
+			createdVia: 'CLI',
+		},
+		groups: [
+			{
+				package: item.package,
+				items: [item],
+			},
+		],
+	}
+	return { ok: true, view }
+}
+
+test('a credential-needs-only bundle item states the credential change and hides the commit behind Details', async () => {
+	const html = await render(bundleLoaderData())
+
+	expect(html).toContain('1 change waits for you')
+	expect(html).toContain('Publish with changed credential needs')
+	expect(html).toContain(
+		'Approving publishes this version, which asks for the credentials below.',
+	)
+	expect(html).toContain('NEXTDNS_API_KEY')
+	expect(html).toContain('provider nextdns')
+	expect(html).toContain('Credential values are never shown.')
+	expect(html).not.toContain('public internet')
+	expect(html).not.toContain('internet-visible')
+	expect(html).not.toContain('Secret values')
+
+	const item = html.slice(html.indexOf('data-testid="approval-bundle-item"'))
+	const detailsIndex = item.indexOf(
+		'data-testid="approval-bundle-item-details"',
+	)
+	expect(detailsIndex).toBeGreaterThan(-1)
+	const beforeDetails = item.slice(0, detailsIndex)
+	expect(beforeDetails).not.toContain(pausedCommit)
+	expect(beforeDetails).not.toContain(pausedCommit.slice(0, 7))
+	const details = item.slice(detailsIndex)
+	expect(details).toContain(pausedCommit)
+	expect(details).toContain('<summary>Details</summary>')
+	expect(details.slice(0, details.indexOf('>'))).not.toContain(' open')
+})
+
+test('a went_public bundle item still mentions public internet visibility', async () => {
+	const html = await render(
+		bundleLoaderData(
+			credentialNeedsItem({
+				title: 'Serve on the public internet',
+				detailLabel: 'Published commit',
+				summary:
+					'Serve this package on the public internet. Approving turns on internet-visible serving for this version. Denying leaves it off.',
+				grants: [
+					{
+						change: 'added',
+						label: 'Public internet',
+						where: null,
+						kind: null,
+						provider: null,
+						hosts: [],
+						before: 'Not internet-visible',
+						after: 'Anyone on the internet can reach this package’s app',
+						match: null,
+					},
+				],
+			}),
+		),
+	)
+
+	expect(html).toContain('Serve on the public internet')
+	expect(html).toContain('internet-visible serving')
+	expect(html).toContain('Public internet')
+	expect(html).toContain('Published commit')
+	expect(html).not.toContain('Paused commit')
+})
+
+test('credential-picks Details label the approval fingerprint, not a proposal id', async () => {
+	const html = await render(
+		bundleLoaderData(
+			credentialNeedsItem({
+				key: 'credential-picks:prop-1',
+				type: 'credential-picks',
+				title: 'Choose credentials',
+				summary: 'Approving saves these credential mappings.',
+				fingerprint: 'fp-decision-abc',
+				detailLabel: 'Approval fingerprint',
+				grants: [],
+			}),
+		),
+	)
+
+	expect(html).toContain('Approval fingerprint')
+	expect(html).toContain('fp-decision-abc')
+	expect(html).not.toContain('Proposal id')
 })

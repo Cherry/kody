@@ -44,7 +44,6 @@ const originAndPlatformPathPrefixes = [
 ] as const
 
 const originOnlyExactPaths = new Set([
-	'packages/worker/src/app/layout.ts',
 	'packages/worker/universal/blog-display.ts',
 	'vite.config.ts',
 	'tools/deploy.ts',

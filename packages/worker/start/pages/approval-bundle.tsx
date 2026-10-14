@@ -1,4 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import {
+	IdValue,
+	MetadataGrid,
+	accountDisclosureCss,
+} from './account-management-components.tsx'
 import { auditedLabel } from './package-security-audit-field.tsx'
 import { packageSecurityAuditAnchor } from '#universal/package-security-audit-prompt.ts'
 import { useState, useRef, type ReactNode } from 'react'
@@ -369,6 +374,28 @@ export function ApprovalBundleRoute({
 				<p css={{ margin: 0, whiteSpace: 'pre-wrap' }}>{item.summary}</p>
 				{item.grants.length > 0 ? (
 					<ul css={listCss}>{item.grants.map(renderGrant)}</ul>
+				) : null}
+				{item.fingerprint && item.detailLabel ? (
+					<details
+						data-testid="approval-bundle-item-details"
+						css={accountDisclosureCss}
+					>
+						<summary>Details</summary>
+						<MetadataGrid
+							items={[
+								{
+									key: 'id',
+									label: item.detailLabel,
+									value: (
+										<IdValue
+											value={item.fingerprint}
+											label={item.detailLabel.toLowerCase()}
+										/>
+									),
+								},
+							]}
+						/>
+					</details>
 				) : null}
 				{item.statusMessage ? <p css={mutedCss}>{item.statusMessage}</p> : null}
 				{item.securityAudit && item.reviewHref ? (

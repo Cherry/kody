@@ -3,7 +3,9 @@
  * account menu: no site nav, no workspace rail, no footer.
  */
 export function isFocusedPagePathname(pathname: string) {
-	return /^\/(?:@[^/]+\/[^/]+|account\/packages\/[^/]+)\/approve-capabilities\/?$/.test(
-		pathname,
+	return (
+		/^\/(?:@[^/]+\/[^/]+|account\/packages\/[^/]+)\/approve-capabilities\/?$/.test(
+			pathname,
+		) || /^\/@[^/]+\/-\/approvals\/[^/]+\/?$/.test(pathname)
 	)
 }
