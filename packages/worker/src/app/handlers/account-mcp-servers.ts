@@ -43,7 +43,6 @@ import { deriveRequestContext } from '#worker/request-context/request-context.ts
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { waitUntil } from 'cloudflare:workers'
-import { type Action } from 'remix/router'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -93,119 +92,112 @@ async function callbackRequestForServer(input: {
  * the server holds the pending OAuth state matching the `state` parameter.
  */
 export function createAccountMcpServersOauthCallbackHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			if (request.method === 'HEAD') {
-				return new Response(null, { status: 200 })
-			}
+	return async ({ request }: { request: Request }) => {
+		if (request.method === 'HEAD') {
+			return new Response(null, { status: 200 })
+		}
 
-			const user = await requireAuthenticatedPageUser(request, env)
-			if (user instanceof Response) {
-				return user
-			}
+		const user = await requireAuthenticatedPageUser(request, env)
+		if (user instanceof Response) {
+			return user
+		}
 
-			const callbackRequest = await callbackRequestForServer({
-				env,
-				url: new URL(request.url),
-				user,
-			}).catch(() => user.request)
-			const ownerId = ownerIdFromCaller({
-				request: callbackRequest,
-				user: user.mcpUser,
+		const callbackRequest = await callbackRequestForServer({
+			env,
+			url: new URL(request.url),
+			user,
+		}).catch(() => user.request)
+		const ownerId = ownerIdFromCaller({
+			request: callbackRequest,
+			user: user.mcpUser,
+		})
+		const hub = createMcpClientHubClient({
+			env,
+			userId: ownerId,
+			waitUntil,
+		})
+		let authSuccess = false
+		let authError: string | null = null
+		let serverName: string | null = null
+		let serverId: string | null = null
+		let authorizationNeeded = false
+		let lastError: McpServerLastError | null = null
+		const oauth = resolveMcpServerOAuthClientUrls({
+			env,
+			requestUrl: request.url,
+		})
+		try {
+			const outcome = await hub.handleOAuthCallback({
+				url: request.url,
+				callbackUrl: oauth.callbackUrl,
+				actor: mcpOAuthAttemptActorFromIds({
+					ownerOrgId: ownerId,
+					personId: user.mcpUser.userId,
+				}),
 			})
-			const hub = createMcpClientHubClient({
+			authSuccess = outcome.authSuccess
+			authError = outcome.authError
+			serverName = outcome.serverName
+			serverId = outcome.serverId
+			authorizationNeeded = outcome.authorizationNeeded
+			lastError = outcome.lastError
+		} catch (error) {
+			authError = getErrorMessage(error)
+		}
+
+		if (authError) {
+			authError = enrichMcpOAuthProviderError(authError, oauth)
+			if (lastError) lastError = { ...lastError, message: authError }
+		}
+
+		if (serverId && authSuccess && !lastError) {
+			await setMcpServerLastError({
 				env,
 				userId: ownerId,
-				waitUntil,
-			})
-			let authSuccess = false
-			let authError: string | null = null
-			let serverName: string | null = null
-			let serverId: string | null = null
-			let authorizationNeeded = false
-			let lastError: McpServerLastError | null = null
-			const oauth = resolveMcpServerOAuthClientUrls({
+				id: serverId,
+				lastError: null,
+			}).catch(() => {})
+		} else if (serverId && lastError) {
+			await setMcpServerLastError({
 				env,
-				requestUrl: request.url,
-			})
-			try {
-				const outcome = await hub.handleOAuthCallback({
-					url: request.url,
-					callbackUrl: oauth.callbackUrl,
-					actor: mcpOAuthAttemptActorFromIds({
-						ownerOrgId: ownerId,
-						personId: user.mcpUser.userId,
-					}),
-				})
-				authSuccess = outcome.authSuccess
-				authError = outcome.authError
-				serverName = outcome.serverName
-				serverId = outcome.serverId
-				authorizationNeeded = outcome.authorizationNeeded
-				lastError = outcome.lastError
-			} catch (error) {
-				authError = getErrorMessage(error)
-			}
+				userId: ownerId,
+				id: serverId,
+				lastError,
+			}).catch(() => {})
+		}
 
-			if (authError) {
-				authError = enrichMcpOAuthProviderError(authError, oauth)
-				if (lastError) lastError = { ...lastError, message: authError }
-			}
-
-			if (serverId && authSuccess && !lastError) {
-				await setMcpServerLastError({
-					env,
-					userId: ownerId,
-					id: serverId,
-					lastError: null,
-				}).catch(() => {})
-			} else if (serverId && lastError) {
-				await setMcpServerLastError({
-					env,
-					userId: ownerId,
-					id: serverId,
-					lastError,
-				}).catch(() => {})
-			}
-
-			const returnToOnboarding =
-				readMcpOAuthReturnCookie(request.headers.get('Cookie')) != null
-			const orgSlug = callbackRequest.org.slug?.trim() || user.username
-			const target = returnToOnboarding
-				? new URL(routes.onboardingStep2.href(), request.url)
-				: new URL(
-						orgSectionRestPath(
-							orgSlug,
-							'mcp-servers',
-							serverId ? serverId : '',
-						),
-						request.url,
-					)
-			if (authorizationNeeded) {
-				target.searchParams.set('auth', serverId ? 'required' : 'retry')
-			} else if (authSuccess) {
-				target.searchParams.set('auth', 'success')
-				if (serverName) {
-					target.searchParams.set('server', serverName)
-				}
-			} else {
-				target.searchParams.set('auth', 'error')
-				target.searchParams.set('reason', authError ?? 'Authorization failed.')
-			}
-			const headers = new Headers({ Location: target.toString() })
-			if (returnToOnboarding) {
-				headers.append(
-					'Set-Cookie',
-					mcpOAuthReturnCookie({
-						value: '',
-						secure: new URL(request.url).protocol === 'https:',
-					}),
+		const returnToOnboarding =
+			readMcpOAuthReturnCookie(request.headers.get('Cookie')) != null
+		const orgSlug = callbackRequest.org.slug?.trim() || user.username
+		const target = returnToOnboarding
+			? new URL(routes.onboardingStep2.href(), request.url)
+			: new URL(
+					orgSectionRestPath(orgSlug, 'mcp-servers', serverId ? serverId : ''),
+					request.url,
 				)
+		if (authorizationNeeded) {
+			target.searchParams.set('auth', serverId ? 'required' : 'retry')
+		} else if (authSuccess) {
+			target.searchParams.set('auth', 'success')
+			if (serverName) {
+				target.searchParams.set('server', serverName)
 			}
-			return new Response(null, { status: 303, headers })
-		},
-	} satisfies Action<typeof routes.accountMcpServersOauthCallback>
+		} else {
+			target.searchParams.set('auth', 'error')
+			target.searchParams.set('reason', authError ?? 'Authorization failed.')
+		}
+		const headers = new Headers({ Location: target.toString() })
+		if (returnToOnboarding) {
+			headers.append(
+				'Set-Cookie',
+				mcpOAuthReturnCookie({
+					value: '',
+					secure: new URL(request.url).protocol === 'https:',
+				}),
+			)
+		}
+		return new Response(null, { status: 303, headers })
+	}
 }
 
 async function handleAddAction(input: {

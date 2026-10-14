@@ -20,7 +20,7 @@ export const loadAdminPlatformFeedback = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead('adminPlatformFeedback', href),
 			}
 		}
 		const payload = await loadAdminPlatformFeedbackData(bindings, url.href)
@@ -44,6 +44,11 @@ export const loadAdminPlatformFeedback = createServerFn({ method: 'GET' })
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'adminPlatformFeedback',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

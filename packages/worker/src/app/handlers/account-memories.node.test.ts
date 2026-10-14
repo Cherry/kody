@@ -350,7 +350,7 @@ function createExportClient(
 	createHandler: typeof createAccountMemoriesExportHandler,
 	path: string,
 ) {
-	const { handler } = createHandler(env)
+	const handler = createHandler(env)
 	return (search = '', init?: RequestInit) =>
 		handler({
 			request: new Request(`https://example.com${path}${search}`, init),

@@ -78,7 +78,7 @@ async function review(data: ReturnType<typeof validate>) {
 	if (!payload.ok) throw notFound()
 	return {
 		payload,
-		head: loadDocumentHead(url.pathname, {
+		head: loadDocumentHead('communityPackageApprovePublish', url.pathname, {
 			accountPackageApprovePublish: payload,
 		}),
 	}

@@ -2,7 +2,6 @@ import {
 	listPublicWebsitePages,
 	listPublicBlogPages,
 } from '#app/public-content.ts'
-import { type Action } from 'remix/router'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
@@ -12,7 +11,6 @@ import {
 	listProviderGuides,
 } from '#worker/guides/catalog.ts'
 import { markdownResponse } from '#app/markdown-negotiation.ts'
-import { type routes } from '#universal/routes.ts'
 import { docMarkdownHref, resolveLegacyDocSlug } from '#universal/docs-nav.ts'
 import { anonymousPersonalizedJsonCacheHeaders } from '#app/anonymous-html-cache.ts'
 import { requestIsDocsAdmin, viewerCanAccessGuide } from '#app/docs-access.ts'
@@ -278,13 +276,10 @@ export function guideMarkdownResponse(guide: Guide): Response {
 }
 
 export function createDocsMarkdownHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
-			return markdownResponse(buildDocsIndexMarkdown(baseUrl))
-		},
-	} satisfies Action<typeof routes.docsMarkdown>
+	return async ({ request }: { request: Request }) => {
+		const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
+		return markdownResponse(buildDocsIndexMarkdown(baseUrl))
+	}
 }
 
 function llmsTxtResponse(env: Env, request: Request): Response {
@@ -301,93 +296,88 @@ function llmsTxtResponse(env: Env, request: Request): Response {
 }
 
 export function createLlmsTxtHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			return llmsTxtResponse(env, request)
-		},
-	} satisfies Action<typeof routes.llmsTxt>
+	return async ({ request }: { request: Request }) => {
+		return llmsTxtResponse(env, request)
+	}
 }
 
 export function createDocsLlmsTxtHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			return llmsTxtResponse(env, request)
-		},
-	} satisfies Action<typeof routes.docsLlmsTxt>
+	return async ({ request }: { request: Request }) => {
+		return llmsTxtResponse(env, request)
+	}
 }
 
 export function createDocsConnectMarkdownHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
-			return markdownResponse(buildDocsConnectMarkdown(baseUrl))
-		},
-	} satisfies Action<typeof routes.docsConnectMarkdown>
+	return async ({ request }: { request: Request }) => {
+		const baseUrl = getAppBaseUrl({ env, requestUrl: request.url })
+		return markdownResponse(buildDocsConnectMarkdown(baseUrl))
+	}
 }
 
 export function createDocDetailMarkdownHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const redirect = docDetailRedirect(params.slug, request, '.md')
-			if (redirect) return redirect
-			const guide = await resolveAccessibleGuide(request, env, params.slug)
-			if (!guide) {
-				return missingDocResponse('markdown')
-			}
-			return guideMarkdownResponse(guide)
-		},
-	} satisfies Action<typeof routes.docDetailMarkdown>
+	return async ({
+		request,
+		params,
+	}: {
+		request: Request
+		params: { slug: string }
+	}) => {
+		const redirect = docDetailRedirect(params.slug, request, '.md')
+		if (redirect) return redirect
+		const guide = await resolveAccessibleGuide(request, env, params.slug)
+		if (!guide) {
+			return missingDocResponse('markdown')
+		}
+		return guideMarkdownResponse(guide)
+	}
 }
 
 export function createDocDetailOgImageHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const redirect = docDetailRedirect(params.slug, request, '/og.png')
-			if (redirect) return redirect
-			const guide = await resolveAccessibleGuide(request, env, params.slug)
-			const ogImage = guide?.ogImage ?? guide?.image
-			if (!guide || !ogImage) {
-				return new Response('Not found', { status: 404 })
-			}
+	return async ({
+		request,
+		params,
+	}: {
+		request: Request
+		params: { slug: string }
+	}) => {
+		const redirect = docDetailRedirect(params.slug, request, '/og.png')
+		if (redirect) return redirect
+		const guide = await resolveAccessibleGuide(request, env, params.slug)
+		const ogImage = guide?.ogImage ?? guide?.image
+		if (!guide || !ogImage) {
+			return new Response('Not found', { status: 404 })
+		}
 
-			const imageResponse = await env.ASSETS.fetch(
-				new Request(new URL(ogImage, request.url)),
-			)
-			if (!imageResponse.ok) {
-				return new Response('Doc artwork unavailable', { status: 502 })
-			}
-			const contentType =
-				imageResponse.headers.get('content-type') ?? 'image/webp'
-			const imageDataUri = `data:${contentType};base64,${bytesToBase64(
-				new Uint8Array(await imageResponse.arrayBuffer()),
-			)}`
-			const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
+		const imageResponse = await env.ASSETS.fetch(
+			new Request(new URL(ogImage, request.url)),
+		)
+		if (!imageResponse.ok) {
+			return new Response('Doc artwork unavailable', { status: 502 })
+		}
+		const contentType =
+			imageResponse.headers.get('content-type') ?? 'image/webp'
+		const imageDataUri = `data:${contentType};base64,${bytesToBase64(
+			new Uint8Array(await imageResponse.arrayBuffer()),
+		)}`
+		const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
 
-			// Deployment requires this lazy boundary: eagerly importing Satori and
-			// Resvg makes the main Worker exceed Cloudflare's startup CPU limit.
-			const { renderGuideOgImage } = await import('#worker/guides/og-image.ts')
-			const png = await renderGuideOgImage({
-				title: guide.title,
-				description: guide.summary,
-				imageDataUri,
-				theme,
-				assets: env.ASSETS,
-			})
+		// Deployment requires this lazy boundary: eagerly importing Satori and
+		// Resvg makes the main Worker exceed Cloudflare's startup CPU limit.
+		const { renderGuideOgImage } = await import('#worker/guides/og-image.ts')
+		const png = await renderGuideOgImage({
+			title: guide.title,
+			description: guide.summary,
+			imageDataUri,
+			theme,
+			assets: env.ASSETS,
+		})
 
-			return new Response(png, {
-				status: 200,
-				headers: {
-					'Cache-Control': guide.adminOnly
-						? 'no-store'
-						: 'public, max-age=3600',
-					'Content-Type': 'image/png',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.docDetailOgImage>
+		return new Response(png, {
+			status: 200,
+			headers: {
+				'Cache-Control': guide.adminOnly ? 'no-store' : 'public, max-age=3600',
+				'Content-Type': 'image/png',
+			},
+		})
+	}
 }

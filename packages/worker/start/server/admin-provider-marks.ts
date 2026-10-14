@@ -14,13 +14,13 @@ export const loadAdminProviderMarks = createServerFn({ method: 'GET' }).handler(
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('/admin/provider-marks'),
+				head: loadDocumentHead('adminProviderMarks', '/admin/provider-marks'),
 			}
 		}
 		return {
 			forbidden: false as const,
 			payload: await loadAdminProviderMarksData(bindings),
-			head: loadDocumentHead('/admin/provider-marks'),
+			head: loadDocumentHead('adminProviderMarks', '/admin/provider-marks'),
 		}
 	},
 )

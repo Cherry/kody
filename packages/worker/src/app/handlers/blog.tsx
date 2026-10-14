@@ -1,7 +1,5 @@
-import { type Action } from 'remix/router'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
-import { type routes } from '#universal/routes.ts'
 import {
 	getBlogPost,
 	getReadNextBlogPost,
@@ -36,16 +34,13 @@ export async function toBlogPostLoaderData(
 }
 
 export function createBlogPostMarkdownHandler(_env: Env) {
-	return {
-		middleware: [],
-		async handler({ params }) {
-			const post = getBlogPost(params.slug)
-			if (!post) {
-				return markdownResponse('# Blog post not found\n', 404)
-			}
-			return markdownResponse(post.body)
-		},
-	} satisfies Action<typeof routes.blogPostMarkdown>
+	return async ({ params }: { params: { slug: string } }) => {
+		const post = getBlogPost(params.slug)
+		if (!post) {
+			return markdownResponse('# Blog post not found\n', 404)
+		}
+		return markdownResponse(post.body)
+	}
 }
 
 /**
@@ -78,65 +73,65 @@ async function loadBlogOgArtworkDataUri(input: {
 }
 
 export function createBlogPostOgImageHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const post = getBlogPost(params.slug)
-			if (!post) {
-				return new Response('Not found', { status: 404 })
-			}
+	return async ({
+		request,
+		params,
+	}: {
+		request: Request
+		params: { slug: string }
+	}) => {
+		const post = getBlogPost(params.slug)
+		if (!post) {
+			return new Response('Not found', { status: 404 })
+		}
 
-			// `?theme=light` renders the pale variant; anything unrecognised
-			// falls back to the default rather than erroring.
-			const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
+		// `?theme=light` renders the pale variant; anything unrecognised
+		// falls back to the default rather than erroring.
+		const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
 
-			// Lazy import (sanctioned exception to the no-inline-imports rule):
-			// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
-			// binaries, which would otherwise bloat isolate cold starts for a
-			// route that is only hit by social-media crawlers.
-			const { renderBlogPostOgImage } = await import('#worker/blog/og-image.ts')
-			const imageDataUri = await loadBlogOgArtworkDataUri({
-				env,
-				request,
-				post,
-			})
-			const png = await renderBlogPostOgImage({
-				title: post.title,
-				description: post.description,
-				date: post.date,
-				theme,
-				assets: env.ASSETS,
-				...(imageDataUri ? { imageDataUri } : {}),
-			})
+		// Lazy import (sanctioned exception to the no-inline-imports rule):
+		// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
+		// binaries, which would otherwise bloat isolate cold starts for a
+		// route that is only hit by social-media crawlers.
+		const { renderBlogPostOgImage } = await import('#worker/blog/og-image.ts')
+		const imageDataUri = await loadBlogOgArtworkDataUri({
+			env,
+			request,
+			post,
+		})
+		const png = await renderBlogPostOgImage({
+			title: post.title,
+			description: post.description,
+			date: post.date,
+			theme,
+			assets: env.ASSETS,
+			...(imageDataUri ? { imageDataUri } : {}),
+		})
 
-			return new Response(png, {
-				status: 200,
-				headers: {
-					'Cache-Control': 'public, max-age=3600',
-					'Content-Type': 'image/png',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.blogPostOgImage>
+		return new Response(png, {
+			status: 200,
+			headers: {
+				'Cache-Control': 'public, max-age=3600',
+				'Content-Type': 'image/png',
+			},
+		})
+	}
 }
 
 export function createBlogRssHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const origin = getAppBaseUrl({ env, requestUrl: request.url })
-			const xml = buildBlogRssXml({
-				origin,
-				posts: listBlogPosts(),
-			})
+	return async ({ request }: { request: Request }) => {
+		const origin = getAppBaseUrl({ env, requestUrl: request.url })
+		const xml = buildBlogRssXml({
+			origin,
+			posts: listBlogPosts(),
+		})
 
-			return new Response(xml, {
-				status: 200,
-				headers: {
-					'Cache-Control': 'public, max-age=300',
-					'Content-Type': 'application/rss+xml; charset=utf-8',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.blogRss>
+		return new Response(xml, {
+			status: 200,
+			headers: {
+				'Cache-Control': 'public, max-age=300',
+				'Content-Type': 'application/rss+xml; charset=utf-8',
+			},
+		})
+	}
 }

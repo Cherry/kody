@@ -40,7 +40,12 @@ export const loadCredentialsPage = createServerFn({ method: 'GET' })
 			})
 		return {
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				segment === 'new' ? 'orgCredentialNew' : 'orgCredentials',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})
 
@@ -97,7 +102,12 @@ export const loadCredentialApprovalPage = createServerFn({ method: 'GET' })
 		)
 		return {
 			payload: { ok: true as const, view },
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'communityPackageApproveCredentials',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})
 
@@ -177,6 +187,11 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 		return {
 			kind: 'page' as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'communityPackageCredentials',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

@@ -33,14 +33,12 @@ const markdownType = 'text/markdown; charset=utf-8'
 type HandlerArgs = { request: Request; params: { slug: string } }
 
 function call(
-	create: (env: Env) => unknown,
+	create: (env: Env) => (args: HandlerArgs) => Promise<Response>,
 	path: string,
 	options: { slug?: string; headers?: HeadersInit; env?: Env } = {},
 ) {
-	const action = create(options.env ?? env) as {
-		handler: (args: HandlerArgs) => Promise<Response>
-	}
-	return action.handler({
+	const action = create(options.env ?? env)
+	return action({
 		request: new Request(`https://kody.example${path}`, {
 			headers: options.headers,
 		}),

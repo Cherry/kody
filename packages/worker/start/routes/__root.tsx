@@ -57,7 +57,6 @@ import {
 import { SiteHeader } from '../components/site-header.tsx'
 import { SiteFooter } from '../components/site-footer.tsx'
 import { visuallyHiddenUntilFocusedCss } from '#universal/styles/style-primitives.ts'
-import { documentHead } from '../components/document-head.ts'
 import { PageHead } from '../components/page-head.tsx'
 import { buildAuthLink } from '#client/auth-links.ts'
 import {
@@ -164,16 +163,12 @@ export const Route = createRootRouteWithContext<{
 				sentryConfig: shell.sentryConfig,
 				canonicalOrigin: shell.canonicalOrigin,
 				fathomSiteId: shell.fathomSiteId,
-				head: absolutizeDocumentHead(
-					resolveDocumentHead(location.pathname, undefined, location.searchStr),
-					shell.canonicalOrigin,
-				),
 			}
 		},
 	},
 	head: ({ loaderData }) => ({
 		meta: [
-			...documentHead(loaderData?.head).meta,
+			{ title: 'Kody' },
 			...(loaderData?.sentryConfig
 				? [
 						{
@@ -183,7 +178,7 @@ export const Route = createRootRouteWithContext<{
 					]
 				: []),
 		],
-		links: documentHead(loaderData?.head).links ?? [],
+		links: [],
 	}),
 	component: Root,
 	errorComponent: ({ error }) => (

@@ -19,7 +19,10 @@ export const loadAdminUsers = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead(
+					url.pathname.split('/')[3] ? 'adminUserDetail' : 'adminUsers',
+					href,
+				),
 			}
 		}
 		return {
@@ -33,6 +36,9 @@ export const loadAdminUsers = createServerFn({ method: 'GET' })
 				})(),
 				url.pathname.split('/')[3],
 			),
-			head: loadDocumentHead(href),
+			head: loadDocumentHead(
+				url.pathname.split('/')[3] ? 'adminUserDetail' : 'adminUsers',
+				href,
+			),
 		}
 	})

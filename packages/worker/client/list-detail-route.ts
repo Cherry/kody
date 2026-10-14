@@ -1,4 +1,3 @@
-import { createHref } from 'remix/route-pattern/href'
 import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
 
 function decodePathSegment(value: string) {
@@ -88,10 +87,13 @@ export function createListDetailRoute(
 
 	function buildDetailHref(id: string, search = '', currentHref?: string) {
 		// Remix treats `.` as a route delimiter, so `encodeURIComponent` is not
-		// enough. `createHref` percent-encodes dots (`%2E`) the same way
+		// enough. Encode dots (`%2E`) consistently with existing resource links, as
 		// `routes.*.href()` does for named routes.
 		return publish(
-			appendSearch(createHref(`${basePath}/:id`, { id }), search),
+			appendSearch(
+				`${basePath}/${encodeURIComponent(id).replaceAll('.', '%2E')}`,
+				search,
+			),
 			currentHref,
 		)
 	}

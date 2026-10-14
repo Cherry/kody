@@ -1,10 +1,5 @@
 import { isServerFunctionRequest } from './action-page-method.ts'
 import * as Sentry from '@sentry/cloudflare'
-import { RequestContext } from 'remix/router'
-import { createAccountWriteLeaseMiddleware } from '#app/account-write-lease-middleware.ts'
-import { createOrgBindingGuardMiddleware } from '#app/org-binding-guard-middleware.ts'
-import { remixCrossOriginProtection } from '#app/cross-origin-protection.ts'
-import { createReferralCookieMiddleware } from '#app/referral-cookie-middleware.ts'
 import { type OAuthPageOptions } from '#universal/oauth-page.ts'
 import { setAuthSessionSecret } from '../src/app/auth-session.ts'
 import { getEnv } from '../src/app/env.ts'
@@ -53,22 +48,7 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 						headers,
 					})
 				}
-				const context = new RequestContext(request)
-				const middleware = [
-					remixCrossOriginProtection,
-					createReferralCookieMiddleware(),
-					createOrgBindingGuardMiddleware(bindings, (request) =>
-						renderDocument(request, bindings, oauthPage, { status: 404 }),
-					),
-					createAccountWriteLeaseMiddleware(bindings),
-				]
-				const dispatch = (index: number): Promise<Response> => {
-					const current = middleware[index]
-					return current
-						? Promise.resolve(current(context, () => dispatch(index + 1)))
-						: renderDocument(request, bindings, oauthPage)
-				}
-				return dispatch(0)
+				return renderDocument(request, bindings, oauthPage)
 			})
 		} catch (error) {
 			console.error('Native app request failed:', error)

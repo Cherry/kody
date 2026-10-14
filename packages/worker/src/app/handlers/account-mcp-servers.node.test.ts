@@ -330,7 +330,7 @@ function createApiClient() {
 }
 
 function createCallbackClient() {
-	const { handler } = createAccountMcpServersOauthCallbackHandler(env)
+	const handler = createAccountMcpServersOauthCallbackHandler(env)
 	return async (search: string, init?: RequestInit) => {
 		const response = await handler({
 			request: new Request(`${callbackUrl}?${search}`, init),

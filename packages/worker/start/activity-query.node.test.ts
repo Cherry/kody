@@ -59,7 +59,7 @@ function activityPage(
 			retentionDays: 30,
 		},
 		head: absolutizeDocumentHead(
-			resolveDocumentHead('/account/activity'),
+			resolveDocumentHead('orgActivity', '/account/activity'),
 			'https://example.com',
 		),
 	}

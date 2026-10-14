@@ -7,7 +7,7 @@ export const loadInternalErrorPage = createServerFn({ method: 'GET' }).handler(
 			import('./document-head.ts'),
 		])
 		setResponseStatus(500)
-		return { head: loadDocumentHead('/500') }
+		return { head: loadDocumentHead('internalErrorPage', '/500') }
 	},
 )
 
@@ -18,6 +18,6 @@ export const loadNotFoundPage = createServerFn({ method: 'GET' }).handler(
 			import('./document-head.ts'),
 		])
 		setResponseStatus(404)
-		return { head: loadDocumentHead('/404') }
+		return { head: loadDocumentHead('notFoundPage', '/404') }
 	},
 )

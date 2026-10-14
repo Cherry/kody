@@ -20,13 +20,18 @@ export const loadAdminCommunityReports = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead('adminCommunityReports', href),
 			}
 		}
 		const payload = await loadAdminCommunityReportsData(bindings, url.href)
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'adminCommunityReports',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

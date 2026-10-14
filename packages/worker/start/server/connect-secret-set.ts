@@ -31,6 +31,7 @@ export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 					return {
 						payload,
 						head: loadDocumentHead(
+							'connectSecretSet',
 							url.pathname,
 							{ accountSecrets: payload },
 							url.search,

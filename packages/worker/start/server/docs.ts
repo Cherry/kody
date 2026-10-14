@@ -54,7 +54,9 @@ export const loadDoc = createServerFn({ method: 'GET' })
 		return {
 			doc,
 			session,
-			head: loadDocumentHead(docHref(doc.slug), { docDetail: doc }),
+			head: loadDocumentHead('docDetail', docHref(doc.slug), {
+				docDetail: doc,
+			}),
 		}
 	})
 
@@ -86,7 +88,9 @@ export const loadDocsConnect = createServerFn({ method: 'GET' }).handler(
 		return {
 			data,
 			isAdmin: await requestIsDocsAdmin(getRequest(), bindings),
-			head: loadDocumentHead('/docs/connect', { docsConnect: data }),
+			head: loadDocumentHead('docsConnect', '/docs/connect', {
+				docsConnect: data,
+			}),
 		}
 	},
 )

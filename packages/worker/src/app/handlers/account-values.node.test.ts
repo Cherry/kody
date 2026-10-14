@@ -2,7 +2,6 @@ import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
-import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
 import type * as authenticatedUserModule from '#app/authenticated-user.ts'
 import type * as valuesService from '#mcp/values/service.ts'
@@ -90,18 +89,15 @@ function createValuesClient() {
 		APP_DB: {} as D1Database,
 	} as Env)
 	return {
-		get: (search = '') =>
-			execute(new RequestContext(new Request(valuesUrl + search))),
+		get: (search = '') => execute({ request: new Request(valuesUrl + search) }),
 		post: (body: Record<string, unknown>) =>
-			execute(
-				new RequestContext(
-					new Request(valuesUrl, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(body),
-					}),
-				),
-			),
+			execute({
+				request: new Request(valuesUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+			}),
 	}
 }
 

@@ -20,7 +20,7 @@ export const loadAdminSystemEmail = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead('adminSystemEmail', href),
 			}
 		}
 		const payload = await loadAdminSystemEmailData(bindings, url.href)
@@ -40,6 +40,11 @@ export const loadAdminSystemEmail = createServerFn({ method: 'GET' })
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'adminSystemEmail',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

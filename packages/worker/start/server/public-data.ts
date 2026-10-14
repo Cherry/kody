@@ -35,7 +35,7 @@ export const loadCommunity = createServerFn({ method: 'GET' })
 		const community = await loadCommunityIndexData(bindings, request)
 		return {
 			data: community,
-			head: loadDocumentHead('/community', undefined, data.search),
+			head: loadDocumentHead('community', '/community', undefined, data.search),
 		}
 	})
 
@@ -99,7 +99,7 @@ export const loadProfile = createServerFn({ method: 'GET' })
 				data: null,
 				orgHome,
 				head: {
-					...loadDocumentHead(path),
+					...loadDocumentHead('profile', path),
 					title: orgHome.displayName || `@${orgHome.slug}`,
 				},
 			}
@@ -108,6 +108,7 @@ export const loadProfile = createServerFn({ method: 'GET' })
 			data: profile,
 			orgHome: null,
 			head: loadDocumentHead(
+				'profile',
 				path,
 				{
 					profileShell: toProfileShellLoaderData(profile),
@@ -312,6 +313,14 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			data: result,
 			header,
 			session,
-			head: loadDocumentHead(path, { communityDetailShell: shell }),
+			head: loadDocumentHead(
+				data.page === 'settings'
+					? 'communityPackageSettings'
+					: data.listingId
+						? 'communityDetail'
+						: 'communityPackage',
+				path,
+				{ communityDetailShell: shell },
+			),
 		}
 	})

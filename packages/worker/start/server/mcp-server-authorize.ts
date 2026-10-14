@@ -60,13 +60,17 @@ export const loadMcpServerAuthorizePage = createServerFn({ method: 'GET' })
 			return {
 				payload: null,
 				error: result.title,
-				head: loadDocumentHead(new URL(request.url).pathname, {}),
+				head: loadDocumentHead(
+					'orgMcpServers',
+					new URL(request.url).pathname,
+					{},
+				),
 			}
 		}
 		return {
 			payload: result.payload,
 			error: null,
-			head: loadDocumentHead(new URL(request.url).pathname, {
+			head: loadDocumentHead('orgMcpServers', new URL(request.url).pathname, {
 				mcpServerAuthorize: result.payload,
 			}),
 		}

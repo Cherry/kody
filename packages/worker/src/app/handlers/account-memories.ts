@@ -10,11 +10,9 @@ import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { memoryLegacyWriteFrozenMessage } from '#mcp/memory/memory-owner.ts'
 import { deleteMemory } from '#mcp/memory/service.ts'
 import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
-import { type routes } from '#universal/routes.ts'
 import { jsonResponse } from '#worker/json-response.ts'
 import { isPersonalOrg } from '#worker/orgs/is-personal-org.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
-import { type Action } from 'remix/router'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
@@ -27,34 +25,31 @@ type AuthenticatedUser = NonNullable<
  * deleted rows only when that control is on.
  */
 export function createAccountMemoriesExportHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request }) {
-			const user = await readAuthenticatedAppUser(request, env)
-			if (!user) {
-				return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-			}
-			if (request.method !== 'GET') {
-				return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-			}
+	return async ({ request }: { request: Request }) => {
+		const user = await readAuthenticatedAppUser(request, env)
+		if (!user) {
+			return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
+		}
+		if (request.method !== 'GET') {
+			return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
+		}
 
-			const includeDeleted = readAccountMemoriesIncludeDeleted(request.url)
-			const payload = await loadAccountMemoriesExport({
-				env,
-				user,
-				includeDeleted,
-			})
-			const filename = buildMemoriesExportFilename()
-			return new Response(JSON.stringify(payload, null, 2), {
-				status: 200,
-				headers: {
-					'Cache-Control': 'no-store',
-					'Content-Disposition': `attachment; filename="${filename}"`,
-					'Content-Type': 'application/json; charset=utf-8',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.accountMemoriesExport>
+		const includeDeleted = readAccountMemoriesIncludeDeleted(request.url)
+		const payload = await loadAccountMemoriesExport({
+			env,
+			user,
+			includeDeleted,
+		})
+		const filename = buildMemoriesExportFilename()
+		return new Response(JSON.stringify(payload, null, 2), {
+			status: 200,
+			headers: {
+				'Cache-Control': 'no-store',
+				'Content-Disposition': `attachment; filename="${filename}"`,
+				'Content-Type': 'application/json; charset=utf-8',
+			},
+		})
+	}
 }
 
 async function handleDeleteAction(input: {

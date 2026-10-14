@@ -1,8 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import { staticDocumentHead } from '../components/document-head.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { LoginPage } from '../pages/login.tsx'
 import { loadAuthPage } from '#start/server/auth-page'
 export const Route = createFileRoute('/login')({
+	head: staticDocumentHead('login'),
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location }) =>
 		loadAuthPage({ signal: abortController.signal, data: location.href }),

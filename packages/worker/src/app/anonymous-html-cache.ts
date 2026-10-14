@@ -12,9 +12,8 @@
  */
 
 import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
-import { createMatcher } from 'remix/route-pattern/match'
+import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
 import { requestBypassesAnonymousDocumentCache } from '#universal/frame-constants.ts'
-import { routes } from '#universal/routes.ts'
 
 export const sessionCookieName = 'kody_session'
 
@@ -61,21 +60,15 @@ const cacheableAnonymousExactPaths = new Set([
 // Public package surfaces: home, tree, and the listing-uuid shapes they
 // replaced. Anonymous markup for these is viewer-independent, and anonymous
 // traffic is most of what they see.
-const cacheableAnonymousRouteMatchers = [
-	routes.communityPackage,
-	routes.communityPackageTree,
-	routes.communityDetail,
-	routes.communityDetailFiles,
-].map((route) => createMatcher(route.pattern))
-
-const matcherOrigin = 'https://kody.local'
-
 export function isVisibilityGatedAnonymousPath(pathname: string) {
 	// Read-only smart HTTP clone URLs must never enter the HTML edge cache.
 	if (pathname.includes('.git/') || pathname.endsWith('.git')) return false
-	const url = new URL(pathname, matcherOrigin)
-	return cacheableAnonymousRouteMatchers.some(
-		(matcher) => matcher.match(url) !== null,
+	const parsed = parsePackageDocumentPath(pathname)
+	return (
+		parsed != null &&
+		['package', 'package-tree', 'listing', 'listing-files'].includes(
+			parsed.kind,
+		)
 	)
 }
 

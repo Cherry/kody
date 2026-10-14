@@ -8,7 +8,7 @@ export const loadBlog = createServerFn({ method: 'GET' }).handler(async () => {
 		posts: listBlogPosts().map(toBlogPostSummary),
 	}
 	const { loadDocumentHead } = await import('./document-head.ts')
-	return { ...blog, head: loadDocumentHead('/blog', { blog }) }
+	return { ...blog, head: loadDocumentHead('blog', '/blog', { blog }) }
 })
 
 export const loadBlogPost = createServerFn({ method: 'GET' })
@@ -48,8 +48,12 @@ export const loadBlogPost = createServerFn({ method: 'GET' })
 		const { loadDocumentHead } = await import('./document-head.ts')
 		return {
 			...blogPost,
-			head: loadDocumentHead(`/blog/${encodeURIComponent(post.slug)}`, {
-				blogPost,
-			}),
+			head: loadDocumentHead(
+				'blogPost',
+				`/blog/${encodeURIComponent(post.slug)}`,
+				{
+					blogPost,
+				},
+			),
 		}
 	})

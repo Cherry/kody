@@ -6,7 +6,6 @@ import {
 	logAuditEventSpy,
 } from '#worker/test-support/audit-log-spy.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
-import { RequestContext } from 'remix/router'
 import { beforeAll, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -75,7 +74,7 @@ async function requestDelete(body: unknown) {
 		headers: { 'Content-Type': 'application/json' },
 		body: typeof body === 'string' ? body : JSON.stringify(body),
 	})
-	return createHandler().execute(new RequestContext(request) as never)
+	return createHandler().execute({ request: request } as never)
 }
 
 function signInOauthOnlyUser() {

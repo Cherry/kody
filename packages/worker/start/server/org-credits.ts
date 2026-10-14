@@ -35,6 +35,7 @@ export const loadCreditsPage = createServerFn({ method: 'GET' })
 					return {
 						payload,
 						head: loadDocumentHead(
+							'orgCredits',
 							pathname,
 							{ orgCredits: payload },
 							search.toString(),

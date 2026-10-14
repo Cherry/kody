@@ -6,7 +6,7 @@ import {
 import { homeDocumentHead } from './home-document-head.ts'
 
 const base = absolutizeDocumentHead(
-	resolveDocumentHead('/'),
+	resolveDocumentHead('home', '/'),
 	'https://kody.codes',
 )
 test('home share variants preserve canonical origin and use the shared variant metadata', () => {

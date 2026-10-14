@@ -13,13 +13,13 @@ export const loadAdminInsights = createServerFn({ method: 'GET' }).handler(
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('/admin/insights'),
+				head: loadDocumentHead('adminInsights', '/admin/insights'),
 			}
 		}
 		return {
 			forbidden: false as const,
 			payload: await loadAdminInsightsData(bindings),
-			head: loadDocumentHead('/admin/insights'),
+			head: loadDocumentHead('adminInsights', '/admin/insights'),
 		}
 	},
 )

@@ -131,6 +131,7 @@ export const loadSecretsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgSecrets',
 				url.pathname,
 				{ accountSecrets: payload },
 				url.search,
@@ -164,6 +165,7 @@ export const loadMemoriesPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgMemories',
 				url.pathname,
 				{ accountMemories: payload },
 				url.search,
@@ -195,6 +197,7 @@ export const loadValuesPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgValues',
 				url.pathname,
 				{ accountValues: payload },
 				url.search,
@@ -242,6 +245,7 @@ export const loadJobsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgJobs',
 				url.pathname,
 				{ accountJobs: payload },
 				url.search,
@@ -279,6 +283,7 @@ export const loadWorkflowsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgWorkflows',
 				url.pathname,
 				{ accountWorkflows: payload },
 				url.search,
@@ -311,6 +316,7 @@ export const loadWaitingPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgWaiting',
 				url.pathname,
 				{ accountWaiting: payload },
 				url.search,
@@ -342,6 +348,7 @@ export const loadExperimentsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'accountExperiments',
 				url.pathname,
 				{ accountExperiments: payload },
 				url.search,
@@ -393,6 +400,7 @@ export const loadActivityPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgActivity',
 				url.pathname,
 				{ accountActivity: payload },
 				url.search,
@@ -435,6 +443,7 @@ export const loadBillingPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgBilling',
 				url.pathname,
 				{ accountBilling: payload },
 				url.search,
@@ -489,6 +498,7 @@ export const loadUsagePage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgUsage',
 				url.pathname,
 				{ accountUsage: payload },
 				url.search,
@@ -534,6 +544,7 @@ export const loadConnectionsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgAgents',
 				url.pathname,
 				{ accountConnectedAgents: payload },
 				url.search,
@@ -564,6 +575,7 @@ export const loadMcpOauthClientsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'accountMcpOauthClients',
 				url.pathname,
 				{ accountMcpOauthClients: payload },
 				url.search,
@@ -597,6 +609,7 @@ export const loadWebhooksPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgWebhooks',
 				url.pathname,
 				{ accountWebhooks: payload },
 				url.search,
@@ -632,6 +645,7 @@ export const loadSecretProvidersPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgSecretProviders',
 				url.pathname,
 				{ accountSecretProviders: payload },
 				url.search,
@@ -668,6 +682,7 @@ export const loadMcpServersPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgMcpServers',
 				url.pathname,
 				{ accountMcpServers: payload },
 				url.search,
@@ -705,6 +720,7 @@ export const loadIntegrationsPage = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'orgIntegrations',
 				url.pathname,
 				{ accountIntegrations: payload },
 				url.search,

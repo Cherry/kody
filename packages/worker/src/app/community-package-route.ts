@@ -1,4 +1,4 @@
-import { createMatcher } from 'remix/route-pattern/match'
+import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
 import { loadPackagePage } from '#app/package-page.ts'
 import {
 	getCommunityPackageHref,
@@ -15,44 +15,6 @@ import {
 import { getCommunityListingById } from '#worker/community/repo.ts'
 import { resolveCachedArtifactSourceHead } from '#worker/repo/artifact-head-cache.ts'
 import { getEntitySourceById } from '#worker/repo/entity-sources.ts'
-import { routes } from '#universal/routes.ts'
-
-const communityDetailMatcher = createMatcher(routes.communityDetail.pattern)
-const communityPackageMatcher = createMatcher(routes.communityPackage.pattern)
-
-export type CommunityListingRouteTarget =
-	| { kind: 'listing'; listingId: string }
-	// The URL is stale (a rename moved it) and the visitor belongs at `to`.
-	| { kind: 'redirect'; to: string }
-
-/**
- * Resolve a listing page URL in either public shape: the canonical
- * `/@owner/kody-id` and the listing-uuid `/community/:listingId` it replaced.
- * Shared by the page handlers, the JSON companions, and the frame renderer so
- * one URL never resolves differently depending on which entered it.
- */
-export async function resolveCommunityListingRoute(input: {
-	env: Env
-	url: URL
-}): Promise<CommunityListingRouteTarget | null> {
-	const listingId = communityDetailMatcher.match(input.url)?.params.listingId
-	if (listingId) return { kind: 'listing', listingId }
-
-	const params = communityPackageMatcher.match(input.url)?.params
-	if (!params) return null
-
-	const target = await resolveCommunityPackageUrl({
-		db: input.env.APP_DB,
-		username: params.username,
-		kodyId: params.kodyId,
-	})
-	if (!target) return null
-	if (target.kind === 'redirect') {
-		return { kind: 'redirect', to: getCommunityPackageHref(target) }
-	}
-	return { kind: 'listing', listingId: target.listingId }
-}
-
 /**
  * The canonical path for a listing, or null when the owner/`kody.id` pair does
  * not lead back to it. The owner half comes from the listing's scoped name,
@@ -74,16 +36,6 @@ export async function resolveCanonicalListingPath(input: {
 	if (target?.listingId !== input.listingId) return null
 	return getCommunityPackageHref(target)
 }
-
-const communityDetailFilesMatcher = createMatcher(
-	routes.communityDetailFiles.pattern,
-)
-const communityPackageFilesMatcher = createMatcher(
-	routes.communityPackageFiles.pattern,
-)
-const communityPackageTreeMatcher = createMatcher(
-	routes.communityPackageTree.pattern,
-)
 
 export type CommunityFilesRouteTarget =
 	| Extract<
@@ -163,13 +115,11 @@ export function treeHrefFromPackageHome(
 	packageHref: string,
 	input: { ref?: string; relativePath?: string },
 ) {
-	const match = communityPackageMatcher.match(
-		new URL(packageHref, 'http://localhost'),
-	)
-	if (!match) return packageHref
+	const match = parsePackageDocumentPath(packageHref)
+	if (match?.kind !== 'package') return packageHref
 	return getPackageTreeHref({
-		username: match.params.username,
-		kodyId: match.params.kodyId,
+		username: match.username,
+		kodyId: match.kodyId,
 		ref: input.ref,
 		relativePath: input.relativePath,
 	})
@@ -264,37 +214,36 @@ export async function resolveCommunityFilesRoute(input: {
 	url: URL
 	request?: Request
 }): Promise<CommunityFilesRouteTarget | null> {
-	const detailMatch = communityDetailFilesMatcher.match(input.url)
+	const parsed = parsePackageDocumentPath(input.url.pathname)
+	const detailMatch = parsed?.kind === 'listing-files' ? parsed : null
 	if (detailMatch) {
-		const selectedPath = selectedPathFromParams(detailMatch.params.relativePath)
+		const selectedPath = selectedPathFromParams(detailMatch.relativePath)
 		if (selectedPath == null) return { kind: 'invalid-path' }
 		const ref = await canonicalPublicTreeRef({
 			env: input.env,
 			request: input.request,
-			listingId: detailMatch.params.listingId,
+			listingId: detailMatch.listingId,
 			ref: input.url.searchParams.get('ref') ?? '',
 		})
 		return {
 			kind: 'listing',
-			listingId: detailMatch.params.listingId,
+			listingId: detailMatch.listingId,
 			selectedPath,
 			ref,
 		}
 	}
 
-	const leftoverFilesMatch = communityPackageFilesMatcher.match(input.url)
+	const leftoverFilesMatch = parsed?.kind === 'package-files' ? parsed : null
 	if (leftoverFilesMatch) {
-		const selectedPath = selectedPathFromParams(
-			leftoverFilesMatch.params.relativePath,
-		)
+		const selectedPath = selectedPathFromParams(leftoverFilesMatch.relativePath)
 		if (selectedPath == null) return { kind: 'invalid-path' }
-		if (isReservedPackageFilesKodyId(leftoverFilesMatch.params.kodyId)) {
+		if (isReservedPackageFilesKodyId(leftoverFilesMatch.kodyId)) {
 			return { kind: 'invalid-path' }
 		}
 		const target = await resolveCommunityPackageUrl({
 			db: input.env.APP_DB,
-			username: leftoverFilesMatch.params.username,
-			kodyId: leftoverFilesMatch.params.kodyId,
+			username: leftoverFilesMatch.username,
+			kodyId: leftoverFilesMatch.kodyId,
 		})
 		if (target) {
 			const ref = await canonicalPublicTreeRef({
@@ -318,31 +267,31 @@ export async function resolveCommunityFilesRoute(input: {
 		return resolveOwnerPackageFilesTarget({
 			env: input.env,
 			request: input.request,
-			username: leftoverFilesMatch.params.username,
-			kodyId: leftoverFilesMatch.params.kodyId,
+			username: leftoverFilesMatch.username,
+			kodyId: leftoverFilesMatch.kodyId,
 			selectedPath,
 			ref: input.url.searchParams.get('ref') ?? '',
 			pathname: input.url.pathname,
 		})
 	}
 
-	const treeMatch = communityPackageTreeMatcher.match(input.url)
+	const treeMatch = parsed?.kind === 'package-tree' ? parsed : null
 	if (!treeMatch) return null
 
-	const selectedPath = selectedPathFromParams(treeMatch.params.relativePath)
+	const selectedPath = selectedPathFromParams(treeMatch.relativePath)
 	if (selectedPath == null) return { kind: 'invalid-path' }
 
 	const target = await resolveCommunityPackageUrl({
 		db: input.env.APP_DB,
-		username: treeMatch.params.username,
-		kodyId: treeMatch.params.kodyId,
+		username: treeMatch.username,
+		kodyId: treeMatch.kodyId,
 	})
 	if (target) {
 		const ref = await canonicalPublicTreeRef({
 			env: input.env,
 			request: input.request,
 			listingId: target.listingId,
-			ref: treeMatch.params.ref,
+			ref: treeMatch.ref,
 		})
 		const canonicalPath = getCommunityPackageFilesHref({
 			listingId: target.listingId,
@@ -367,10 +316,10 @@ export async function resolveCommunityFilesRoute(input: {
 	return resolveOwnerPackageFilesTarget({
 		env: input.env,
 		request: input.request,
-		username: treeMatch.params.username,
-		kodyId: treeMatch.params.kodyId,
+		username: treeMatch.username,
+		kodyId: treeMatch.kodyId,
 		selectedPath,
-		ref: treeMatch.params.ref,
+		ref: treeMatch.ref,
 		pathname: input.url.pathname,
 	})
 }

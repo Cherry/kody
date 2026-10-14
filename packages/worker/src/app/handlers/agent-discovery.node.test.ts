@@ -20,20 +20,18 @@ const env = { APP_BASE_URL: 'https://kody.example' } as Env
 const expectedOpenaiAppsChallengeToken =
 	'cgisbN1peOFC_FcpE83Zn5gihUckKsjEVj-tItKRkxU'
 
-type Handler = {
-	handler: (args: {
-		request: Request
-		params: { skillId: string }
-	}) => Promise<Response>
-}
+type Handler = (args: {
+	request: Request
+	params: { skillId: string }
+}) => Promise<Response>
 
 function call(
-	action: { handler: Handler['handler'] },
+	action: Handler,
 	url: string,
 	init?: RequestInit,
 	params: { skillId: string } = { skillId: '' },
 ) {
-	return action.handler({
+	return action({
 		request: new Request(url, init),
 		params,
 	})
@@ -41,7 +39,7 @@ function call(
 
 test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills', async () => {
 	const robots = await call(
-		createRobotsTxtHandler(env) as never,
+		createRobotsTxtHandler(env),
 		'https://kody.example/robots.txt',
 	)
 	expect(robots.status).toBe(200)
@@ -50,7 +48,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(await robots.text()).toContain('User-agent: *')
 
 	const sitemap = await call(
-		createSitemapHandler(env) as never,
+		createSitemapHandler(env),
 		'https://kody.example/sitemap.xml',
 	)
 	expect(sitemap.status).toBe(200)
@@ -62,7 +60,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	)
 
 	const card = await call(
-		createMcpServerCardHandler(env) as never,
+		createMcpServerCardHandler(env),
 		'https://kody.example/.well-known/mcp/server-card.json',
 	)
 	expect(card.status).toBe(200)
@@ -74,7 +72,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(cardBody.transport.type).toBe('streamable-http')
 
 	const catalog = await call(
-		createApiCatalogHandler(env) as never,
+		createApiCatalogHandler(env),
 		'https://kody.example/.well-known/api-catalog',
 	)
 	expect(catalog.headers.get('content-type')).toBe(
@@ -86,7 +84,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(catalogBody.linkset[0]?.anchor).toBe('https://kody.example/mcp')
 
 	const authMd = await call(
-		createAuthMarkdownHandler(env) as never,
+		createAuthMarkdownHandler(env),
 		'https://kody.example/auth.md',
 	)
 	expect(authMd.headers.get('content-type')).toBe(
@@ -95,7 +93,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(await authMd.text()).toMatch(/^# auth\.md\n/)
 
 	const skillsIndex = await call(
-		createAgentSkillsIndexHandler(env) as never,
+		createAgentSkillsIndexHandler(env),
 		'https://kody.example/.well-known/agent-skills/index.json',
 	)
 	const skillsBody = (await skillsIndex.json()) as {
@@ -104,7 +102,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(skillsBody.skills.map((skill) => skill.name)).toContain('connect-kody')
 
 	const skillMd = await call(
-		createAgentSkillMarkdownHandler(env) as never,
+		createAgentSkillMarkdownHandler(env),
 		'https://kody.example/.well-known/agent-skills/connect-kody/SKILL.md',
 		undefined,
 		{ skillId: 'connect-kody' },
@@ -113,7 +111,7 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(await skillMd.text()).toMatch(/^# Connect Kody\n/)
 
 	const missingSkill = await call(
-		createAgentSkillMarkdownHandler(env) as never,
+		createAgentSkillMarkdownHandler(env),
 		'https://kody.example/.well-known/agent-skills/nope/SKILL.md',
 		undefined,
 		{ skillId: 'nope' },
@@ -121,13 +119,13 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 	expect(missingSkill.status).toBe(404)
 
 	const securityTxt = await call(
-		createSecurityTxtHandler(env) as never,
+		createSecurityTxtHandler(env),
 		'https://kody.example/.well-known/security.txt',
 	)
 	expect(await securityTxt.text()).toContain('mailto:me@kentcdodds.com')
 
 	const openaiChallenge = await call(
-		createOpenaiAppsChallengeHandler(env) as never,
+		createOpenaiAppsChallengeHandler(env),
 		'https://kody.example/.well-known/openai-apps-challenge',
 	)
 	expect(openaiChallenge.status).toBe(200)
@@ -142,10 +140,9 @@ test('agent discovery handlers serve robots, sitemap, cards, auth.md, and skills
 
 test('openai apps challenge stays unauthenticated and returns exact token bytes', async () => {
 	const action = createOpenaiAppsChallengeHandler(env)
-	expect(action.middleware).toEqual([])
 
 	const response = await call(
-		action as never,
+		action,
 		'https://kody.example/.well-known/openai-apps-challenge',
 		{ method: 'GET' },
 	)

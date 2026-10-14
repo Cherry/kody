@@ -1,3 +1,5 @@
+import { applyDocumentPolicies } from '#start/server/document-policy'
+import { protocolCsrf } from '../src/app/cross-origin-protection.ts'
 import {
 	createCsrfMiddleware,
 	createMiddleware,
@@ -37,9 +39,18 @@ const rpcResponsePolicy = createMiddleware().server(({ handlerType, next }) => {
 	return next()
 })
 
+const documentPolicies = createMiddleware().server(
+	({ request, handlerType, next }) => {
+		if (handlerType === 'serverFn') return next()
+		return applyDocumentPolicies(request, async (options) => next(options))
+	},
+)
+
 export const startInstance = createStart(() => ({
 	requestMiddleware: [
 		rpcResponsePolicy,
+		protocolCsrf,
+		documentPolicies,
 		createCsrfMiddleware({
 			filter: ({ handlerType }) => handlerType === 'serverFn',
 		}),

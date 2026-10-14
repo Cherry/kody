@@ -6,7 +6,6 @@ import {
 	ownerIdFromStored,
 	personIdFromStored,
 } from '@kody-internal/shared/owner-person-ids.ts'
-import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
 
 const packageJob = {
@@ -225,20 +224,16 @@ function createJobsClient() {
 	const { execute } = testAccountJobsApiHandler(env)
 	return {
 		env,
-		get: (search = '') =>
-			execute(new RequestContext(new Request(jobsUrl + search))),
+		get: (search = '') => execute({ request: new Request(jobsUrl + search) }),
 		post: (body: Record<string, unknown>) =>
-			execute(
-				new RequestContext(
-					new Request(jobsUrl, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(body),
-					}),
-				),
-			),
-		put: () =>
-			execute(new RequestContext(new Request(jobsUrl, { method: 'PUT' }))),
+			execute({
+				request: new Request(jobsUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(body),
+				}),
+			}),
+		put: () => execute({ request: new Request(jobsUrl, { method: 'PUT' }) }),
 	}
 }
 

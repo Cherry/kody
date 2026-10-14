@@ -80,7 +80,9 @@ export const loadPackageCollaborators = createServerFn({ method: 'GET' })
 				return {
 					kind: 'page' as const,
 					payload,
-					head: loadDocumentHead(href, { packageCollaborators: payload }),
+					head: loadDocumentHead('communityPackageCollaborators', href, {
+						packageCollaborators: payload,
+					}),
 				}
 			})
 		} catch (error) {

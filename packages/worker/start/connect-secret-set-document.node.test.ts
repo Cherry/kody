@@ -26,7 +26,7 @@ async function renderConnectSecretSet(query: string) {
 					approvalError: null,
 				},
 				head: absolutizeDocumentHead(
-					resolveDocumentHead('/connect/secret-set'),
+					resolveDocumentHead('connectSecretSet', '/connect/secret-set'),
 					'https://example.com',
 				),
 			})

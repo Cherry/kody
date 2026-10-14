@@ -20,13 +20,29 @@ export const loadAdminPlatformIntegrations = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead(
+					url.pathname.split('/')[3] === 'new'
+						? 'adminPlatformIntegrationNew'
+						: url.pathname.split('/')[3]
+							? 'adminPlatformIntegrationDetail'
+							: 'adminPlatformIntegrations',
+					href,
+				),
 			}
 		}
 		const payload = await loadAdminPlatformIntegrationsData(bindings)
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				url.pathname.split('/')[3] === 'new'
+					? 'adminPlatformIntegrationNew'
+					: url.pathname.split('/')[3]
+						? 'adminPlatformIntegrationDetail'
+						: 'adminPlatformIntegrations',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

@@ -10,6 +10,7 @@ export const Route = createFileRoute('/join/$token')({
 		meta: [
 			{
 				title: resolveDocumentHead(
+					'orgInviteJoin',
 					`/join/${encodeURIComponent(params.token)}`,
 					{
 						orgInviteJoin: loaderData,

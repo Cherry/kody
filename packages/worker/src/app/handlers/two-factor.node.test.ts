@@ -392,7 +392,7 @@ function runAuthHandler(
 	handler: ReturnType<typeof createAuthHandler>,
 	request: Request,
 ) {
-	return handler.handler({
+	return handler({
 		request,
 		url: new URL(request.url),
 		params: {},

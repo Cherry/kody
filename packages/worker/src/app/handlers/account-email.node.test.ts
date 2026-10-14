@@ -12,7 +12,6 @@ import type * as EntitlementService from '#worker/entitlements/service.ts'
 import { createInMemoryUserMeterEnv } from '#worker/test-support/user-meter.ts'
 import { utcDayKey } from '@kody-internal/shared/date-keys.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
-import { RequestContext } from 'remix/router'
 import { expect, test, vi } from 'vitest'
 
 const messageRecord: EmailMessageRecord = {
@@ -351,29 +350,26 @@ function createEmailClient(env: Env) {
 	const { execute } = testAccountEmailApiHandler(env)
 	return {
 		get: (search = '') =>
-			execute(
-				new RequestContext(
-					new Request(`https://example.com/account/email.json${search}`),
-				),
-			),
+			execute({
+				request: new Request(`https://example.com/account/email.json${search}`),
+			}),
 		post: (body: Record<string, unknown>, search = '') =>
-			execute(
-				new RequestContext(
-					new Request(`https://example.com/account/email.json${search}`, {
+			execute({
+				request: new Request(
+					`https://example.com/account/email.json${search}`,
+					{
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify(body),
-					}),
+					},
 				),
-			),
+			}),
 		put: () =>
-			execute(
-				new RequestContext(
-					new Request('https://example.com/account/email.json', {
-						method: 'PUT',
-					}),
-				),
-			),
+			execute({
+				request: new Request('https://example.com/account/email.json', {
+					method: 'PUT',
+				}),
+			}),
 	}
 }
 

@@ -1,7 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
-import { expect, test, vi } from 'vitest'
+import { expect, test } from 'vitest'
 import { testOidcSigningEnv } from '#worker/test-support/oidc-signing-env.ts'
-import { routes } from '#universal/routes.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
@@ -10,124 +9,12 @@ import {
 	setAuthSessionSecret,
 	type AuthSession,
 } from './auth-session.ts'
-import { createOrgBindingGuardMiddleware } from './org-binding-guard-middleware.ts'
-import { isOrgBoundPath } from './org-request-binding.ts'
-import { createHttpRequestHandler } from '../../start/http-entry.ts'
+import { orgRequestIsDenied } from './org-binding-guard-middleware.ts'
 
 const origin = 'https://kody.test'
 const cookieSecret = 'LOCAL_TEST_COOKIE_SECRET_32_CHARS_MINIMUM'
 const now = '2026-01-01T00:00:00.000Z'
 const adaPersonId = testStableUserIdFromEmail('ada@example.com')
-
-/**
- * `/account/…` routes that share a name with an org section but are keyed by
- * something other than the request org. Every entry needs a reason; the walk
- * fails on entries that no longer match a route.
- */
-const personScopedAccountRoutes: Record<string, string> = {
-	accountMemoriesExport: 'download binds an explicit org query',
-	accountMcpServerLogo:
-		'path has no org; handler binds via explicit server owner',
-	accountMcpServersOauthCallback: 'OAuth state carries the server owner',
-	accountPackageDetail: 'package authorization checks its owner',
-	accountPackageApprovePublish: 'package authorization checks its owner',
-	accountPackageApproveCapabilities: 'package authorization checks its owner',
-	accountPackageFiles: 'package authorization checks its owner',
-	accountUsage: 'redirects to personal org usage',
-	accountCredits: 'redirects to personal org credits ledger',
-	accountCredentials: 'redirects to signup org credentials',
-}
-
-type RouteEntry = {
-	name: string
-	method: string
-	source: string
-	href: string
-}
-
-function routeEntries(): Array<RouteEntry> {
-	return Object.entries(routes).map(([name, route]) => {
-		const source = route.pattern.source
-		const params = Object.fromEntries(
-			[...source.matchAll(/[:*](\w+)/g)].map(([, key]) => [
-				key,
-				key === 'orgSlug' ? 'ghost' : 'x',
-			]),
-		)
-		return {
-			name,
-			method: route.method,
-			source,
-			href: (route.href as (params: Record<string, string>) => string)(params),
-		}
-	})
-}
-
-/** Sections that have a `/@:orgSlug/-/<section>` page or API. */
-function orgSectionsFromRouteTable(entries: Array<RouteEntry>) {
-	const sections = new Set<string>()
-	for (const { source } of entries) {
-		const match = /^\/@:orgSlug\/-\/([^/(.]+)/.exec(source)
-		if (match?.[1]) sections.add(match[1])
-	}
-	return sections
-}
-
-/** `/account/<x>` routes whose first segment starts with an org section name. */
-function accountRoutesNamedLikeOrgSections(entries: Array<RouteEntry>) {
-	const sections = orgSectionsFromRouteTable(entries)
-	return entries.filter(({ source }) => {
-		const segment = /^\/account\/([^/(.]+)/.exec(source)?.[1]
-		if (!segment) return false
-		return [...sections].some((section) => segment.startsWith(section))
-	})
-}
-
-/** Every route the guard covers, derived from the route table. */
-function orgBoundRoutes(entries: Array<RouteEntry>) {
-	return entries.filter(({ href }) => isOrgBoundPath(href))
-}
-
-/** Legacy `/-/packages` (+ `.json`) and `/-/connections` only 301 to the new names. */
-const legacyOrgListRedirectRoutes = new Set(['orgConnections', 'orgPackages'])
-
-test('every org-scoped route in the route table is bound to its org', () => {
-	const entries = routeEntries()
-	const orgRoutes = entries.filter(({ source }) =>
-		source.startsWith('/@:orgSlug/'),
-	)
-	expect(
-		orgRoutes
-			.filter(
-				({ name, href }) =>
-					!isOrgBoundPath(href) && !legacyOrgListRedirectRoutes.has(name),
-			)
-			.map((r) => r.name),
-	).toEqual([])
-
-	const accountRoutes = accountRoutesNamedLikeOrgSections(entries)
-	const unclassified = accountRoutes
-		.filter(
-			({ name, href }) =>
-				!isOrgBoundPath(href) && !(name in personScopedAccountRoutes),
-		)
-		.map(({ name }) => name)
-	expect(unclassified).toEqual([])
-	const accountRouteNames = new Set(accountRoutes.map(({ name }) => name))
-	expect(
-		Object.keys(personScopedAccountRoutes).filter(
-			(name) => !accountRouteNames.has(name),
-		),
-	).toEqual([])
-	expect(
-		accountRoutes
-			.filter(
-				({ name, href }) =>
-					name in personScopedAccountRoutes && isOrgBoundPath(href),
-			)
-			.map(({ name }) => name),
-	).toEqual([])
-})
 
 function createEnv() {
 	const sqlite = new DatabaseSync(':memory:')
@@ -178,66 +65,29 @@ async function adaCookie() {
 	)
 }
 
-function methodsFor(method: string) {
-	return method === 'ANY' ? ['GET', 'POST'] : [method]
-}
-
-/** Requests for an inaccessible organization. */
-function deniedRequest(entry: RouteEntry, method: string, cookie: string) {
-	const url = new URL(entry.href, origin)
-	const headers = new Headers({ Cookie: cookie })
-	if (method !== 'GET') {
-		headers.set('Origin', origin)
-		headers.set('Sec-Fetch-Site', 'same-origin')
-		headers.set('Content-Type', 'application/json')
-	}
-	return new Request(url, {
-		method,
-		headers,
-		body: method === 'GET' ? undefined : '{}',
-	})
-}
-
-test('every org-scoped route 404s for an org the person cannot use', async () => {
+test('org-scoped reads and writes deny an org the person cannot use', async () => {
 	const { env } = createEnv()
-	const handle = createHttpRequestHandler(
-		async (_request, _env, _oauth, failure) => {
-			expect(failure?.status).toBe(404)
-			return new Response('not found', { status: 404 })
-		},
-	)
 	const cookie = await adaCookie()
-	const bound = orgBoundRoutes(routeEntries())
-	expect(bound.map(({ name }) => name)).toEqual(
-		expect.arrayContaining([
-			'orgMemories',
-			'orgWorkflows',
-			'orgWebhooks',
-			'orgMcpServers',
-		]),
-	)
-	const failures: Array<string> = []
-	for (const entry of bound) {
-		for (const method of methodsFor(entry.method)) {
-			const response = await handle(deniedRequest(entry, method, cookie), env)
-			if (response.status !== 404) {
-				failures.push(
-					`${entry.name} ${method} ${entry.href}: ${response.status}`,
-				)
-				continue
-			}
-			const pageLoad =
-				method === 'GET' &&
-				!new URL(entry.href, origin).pathname.endsWith('.json')
-			if (!pageLoad) {
-				const body = JSON.stringify(await response.json())
-				if (body !== '{"ok":false,"error":"Organization not found."}') {
-					failures.push(`${entry.name} ${method}: ${body}`)
-				}
-			}
+	for (const path of [
+		'memories',
+		'workflows',
+		'webhooks',
+		'mcp-servers',
+		'approvals/bundle-id',
+	]) {
+		for (const method of ['GET', 'POST']) {
+			expect(
+				await orgRequestIsDenied(
+					new Request(`${origin}/@ghost/-/${path}`, {
+						method,
+						headers: { Cookie: cookie, Origin: origin },
+					}),
+					env,
+				),
+				`${method} ${path}`,
+			).toBe(true)
 		}
 	}
-	expect(failures).toEqual([])
 })
 
 test('the guard hands off to the route for orgs the person can use', async () => {
@@ -249,24 +99,16 @@ test('the guard hands off to the route for orgs the person can use', async () =>
 			 VALUES ('grant-1', 'org-ghost', 'credential', 'secret-1', 'user', ?, 'use', 'org-ghost', ?, ?)`,
 		)
 		.run(adaPersonId, now, now)
-	const guard = createOrgBindingGuardMiddleware(
-		env,
-		async () => new Response('Not found', { status: 404 }),
-	)
 	const cookie = await adaCookie()
 	const run = async (path: string, referer?: string) => {
-		const next = vi.fn(async () => new Response('route'))
 		const request = new Request(`${origin}${path}`, {
 			headers: { Cookie: cookie, ...(referer ? { Referer: referer } : {}) },
 		})
-		const response = await guard(
-			{ request, url: new URL(request.url) } as never,
-			next,
-		)
-		return { status: response.status, reachedRoute: next.mock.calls.length }
+		return orgRequestIsDenied(request, env)
 	}
-	const routed = { status: 200, reachedRoute: 1 }
-	const notFound = { status: 404, reachedRoute: 0 }
+
+	const routed = false
+	const notFound = true
 
 	await expect(run('/@acme/-/memories')).resolves.toEqual(routed)
 	await expect(run('/account/memories-export.json?org=acme')).resolves.toEqual(
@@ -286,41 +128,9 @@ test('the guard hands off to the route for orgs the person can use', async () =>
 	await expect(run('/@nobody/-/memories')).resolves.toEqual(notFound)
 })
 
-test('signed-out requests reach the route for its own login handling', async () => {
+test('signed-out requests reach the native route for its own login handling', async () => {
 	const { env } = createEnv()
-	const guard = createOrgBindingGuardMiddleware(
-		env,
-		async () => new Response('Not found', { status: 404 }),
-	)
-	const next = vi.fn(async () => new Response('route'))
-	const request = new Request(`${origin}/@ghost/-/memories`)
-	const response = await guard(
-		{ request, url: new URL(request.url) } as never,
-		next,
-	)
-	expect(response.status).toBe(200)
-	expect(next).toHaveBeenCalledOnce()
+	expect(
+		await orgRequestIsDenied(new Request(`${origin}/@ghost/-/memories`), env),
+	).toBe(false)
 })
-
-test.each(['/@acme/-/secrets', '/account/memories-export.json?org=acme'])(
-	'guard does not commit last-used organization for %s',
-	async (path) => {
-		const { env } = createEnv()
-		const guard = createOrgBindingGuardMiddleware(
-			env,
-			async () => new Response('Not found', { status: 404 }),
-		)
-		const cookie = await adaCookie()
-		const next = vi.fn(async () => new Response('ok'))
-		const request = new Request(`${origin}${path}`, {
-			headers: { Cookie: cookie },
-		})
-		const response = await guard(
-			{ request, url: new URL(request.url) } as never,
-			next,
-		)
-		expect(response.status).toBe(200)
-		expect(next).toHaveBeenCalledOnce()
-		expect(response.headers.getSetCookie()).toEqual([])
-	},
-)

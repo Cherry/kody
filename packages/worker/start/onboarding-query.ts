@@ -57,7 +57,12 @@ export async function loadOnboardingRoute(
 		throw redirect({ href: onboardingWizardStepHref(step.step, search) })
 	return {
 		head: absolutizeDocumentHead(
-			resolveDocumentHead(location.pathname, { onboarding: payload }, search),
+			resolveDocumentHead(
+				'onboarding',
+				location.pathname,
+				{ onboarding: payload },
+				search,
+			),
 			canonicalBaseUrl,
 		),
 	}

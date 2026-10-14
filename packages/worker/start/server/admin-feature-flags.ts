@@ -14,13 +14,13 @@ export const loadAdminFeatureFlags = createServerFn({ method: 'GET' }).handler(
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('/admin/feature-flags'),
+				head: loadDocumentHead('adminFeatureFlags', '/admin/feature-flags'),
 			}
 		}
 		return {
 			forbidden: false as const,
 			payload: await loadAdminFeatureFlagsData(bindings),
-			head: loadDocumentHead('/admin/feature-flags'),
+			head: loadDocumentHead('adminFeatureFlags', '/admin/feature-flags'),
 		}
 	},
 )

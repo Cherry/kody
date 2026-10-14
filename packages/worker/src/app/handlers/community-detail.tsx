@@ -1,8 +1,6 @@
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { z } from 'zod'
-import { type Action } from 'remix/router'
 import { toPublicCommunityListing } from '#app/community-public.ts'
-import { type routes } from '#universal/routes.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '../operation-result.ts'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
@@ -68,52 +66,55 @@ async function loadCommunityOgIconDataUri(input: {
 }
 
 export function createCommunityDetailOgImageHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const listingId = params.listingId
-			const listing = await getCommunityListingWithAggregates({
-				env,
-				listingId,
-				includeDelisted: false,
-			})
-			if (!listing) {
-				return new Response('Not found', { status: 404 })
-			}
+	return async ({
+		request,
+		params,
+	}: {
+		request: Request
+		params: { listingId: string }
+	}) => {
+		const listingId = params.listingId
+		const listing = await getCommunityListingWithAggregates({
+			env,
+			listingId,
+			includeDelisted: false,
+		})
+		if (!listing) {
+			return new Response('Not found', { status: 404 })
+		}
 
-			const publicListing = toPublicCommunityListing(listing)
-			const iconDataUri = await loadCommunityOgIconDataUri({ env, listing })
-			// `?theme=light` renders the pale variant; anything unrecognised
-			// falls back to the default rather than erroring.
-			const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
+		const publicListing = toPublicCommunityListing(listing)
+		const iconDataUri = await loadCommunityOgIconDataUri({ env, listing })
+		// `?theme=light` renders the pale variant; anything unrecognised
+		// falls back to the default rather than erroring.
+		const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
 
-			// Lazy import (sanctioned exception to the no-inline-imports rule):
-			// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
-			// binaries, which would otherwise bloat isolate cold starts for a
-			// route that is only hit by social-media crawlers.
-			const { renderCommunityOgImage } =
-				await import('#worker/community/og-image.ts')
-			const png = await renderCommunityOgImage({
-				name: publicListing.name,
-				description: publicListing.description,
-				ownerUsername: publicListing.ownerUsername,
-				averageStars: publicListing.averageStars,
-				ratingCount: publicListing.ratingCount,
-				forkCount: publicListing.forkCount,
-				iconDataUri,
-				theme,
-				assets: env.ASSETS,
-			})
+		// Lazy import (sanctioned exception to the no-inline-imports rule):
+		// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
+		// binaries, which would otherwise bloat isolate cold starts for a
+		// route that is only hit by social-media crawlers.
+		const { renderCommunityOgImage } =
+			await import('#worker/community/og-image.ts')
+		const png = await renderCommunityOgImage({
+			name: publicListing.name,
+			description: publicListing.description,
+			ownerUsername: publicListing.ownerUsername,
+			averageStars: publicListing.averageStars,
+			ratingCount: publicListing.ratingCount,
+			forkCount: publicListing.forkCount,
+			iconDataUri,
+			theme,
+			assets: env.ASSETS,
+		})
 
-			return new Response(png, {
-				status: 200,
-				headers: {
-					'Cache-Control': 'public, max-age=3600',
-					'Content-Type': 'image/png',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.communityDetailOgImage>
+		return new Response(png, {
+			status: 200,
+			headers: {
+				'Cache-Control': 'public, max-age=3600',
+				'Content-Type': 'image/png',
+			},
+		})
+	}
 }
 
 export async function reportWebsiteCommunityPackage(input: {

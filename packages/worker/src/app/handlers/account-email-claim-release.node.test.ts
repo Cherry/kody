@@ -1,6 +1,5 @@
 import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
 import { DatabaseSync } from 'node:sqlite'
-import { RequestContext } from 'remix/router'
 import { beforeAll, expect, test } from 'vitest'
 import {
 	createAuthCookie,
@@ -130,20 +129,18 @@ test('release re-verifies a former address then allows a new account without rem
 	})
 	const signupHandler = createAuthHandler(env)
 	const signupFormerEmail = () =>
-		signupHandler.handler(
-			new RequestContext(
-				new Request('http://example.com/auth', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						email: formerEmail,
-						username: 'new-jamie',
-						password: 'password123',
-						mode: 'signup',
-					}),
+		signupHandler({
+			request: new Request('http://example.com/auth', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					email: formerEmail,
+					username: 'new-jamie',
+					password: 'password123',
+					mode: 'signup',
 				}),
-			),
-		)
+			}),
+		})
 
 	expect((await release(currentEmail)).status).toBe(400)
 

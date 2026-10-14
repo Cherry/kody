@@ -5,6 +5,16 @@ import {
 	NOT_FOUND_DOCUMENT_TITLE,
 } from '#universal/document-head.ts'
 
+const featureHeads = {
+	'': 'features',
+	'/memory': 'featureMemory',
+	'/secrets': 'featureSecrets',
+	'/packages': 'featurePackages',
+	'/triggers': 'featureTriggers',
+	'/integrations': 'featureIntegrations',
+	'/apps': 'featureApps',
+} as const
+
 test.each([
 	'',
 	'/memory',
@@ -16,7 +26,10 @@ test.each([
 ])('feature page %s has canonical metadata and its stylesheet', (suffix) => {
 	const path = `/features${suffix}`
 	const head = absolutizeDocumentHead(
-		resolveDocumentHead(path),
+		resolveDocumentHead(
+			featureHeads[suffix as keyof typeof featureHeads],
+			path,
+		),
 		'https://kody.codes',
 	)
 	expect(head.title).not.toBe(NOT_FOUND_DOCUMENT_TITLE)

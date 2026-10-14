@@ -45,8 +45,12 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 		if (!result.ok) throw new Response(result.error, { status: result.status })
 		return {
 			payload: result,
-			head: loadDocumentHead(new URL(request.url).pathname, {
-				accountBillingSuccess: result,
-			}),
+			head: loadDocumentHead(
+				'orgBillingSuccess',
+				new URL(request.url).pathname,
+				{
+					accountBillingSuccess: result,
+				},
+			),
 		}
 	})

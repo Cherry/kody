@@ -1,7 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { createMatcher } from 'remix/route-pattern/match'
-import { routes } from '#universal/routes.ts'
+import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
 	normalizePackageFilesPath,
@@ -48,7 +47,8 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const original = getRequest()
 		const url = new URL(data.pathname, original.url)
-		const account = createMatcher(routes.accountPackageFiles.pattern).match(url)
+		const parsed = parsePackageDocumentPath(url.pathname)
+		const account = parsed?.kind === 'account-files' ? parsed : null
 		if (!account) {
 			const request = original
 			const target = await resolveCommunityFilesRoute({
@@ -102,13 +102,18 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 				kind: 'page' as const,
 				data: payload,
 				head: loadDocumentHead(
+					target.kind === 'package'
+						? parsed?.kind === 'package-tree'
+							? 'communityPackageTree'
+							: 'communityPackageFiles'
+						: 'communityDetailFiles',
 					url.pathname,
 					{ packageFiles: payload },
 					url.search,
 				),
 			}
 		}
-		const path = normalizePackageFilesPath(account.params.relativePath ?? '')
+		const path = normalizePackageFilesPath(account.relativePath ?? '')
 		if (path == null) throw notFound()
 		const request = original
 		const user = await requireAuthenticatedPageUser(request, bindings, {
@@ -124,7 +129,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		}
 		const saved = await getSavedPackageByIdInAnyOrg(
 			bindings.APP_DB,
-			account.params.packageId,
+			account.packageId,
 		)
 		if (
 			!saved ||

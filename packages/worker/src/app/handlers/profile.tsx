@@ -1,6 +1,4 @@
-import { type Action } from 'remix/router'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { type routes } from '#universal/routes.ts'
 import { bytesToBase64 } from '@kody-internal/shared/base64.ts'
 import { getUserAvatarObject } from '#worker/community/avatar.ts'
 import { getCommunityProfileByUsername } from '#worker/community/profile-service.ts'
@@ -63,47 +61,50 @@ async function loadProfileOgAvatarDataUri(input: {
 }
 
 export function createProfileOgImageHandler(env: Env) {
-	return {
-		middleware: [],
-		async handler({ request, params }) {
-			const profile = await getCommunityProfileByUsername({
-				env,
-				username: params.username,
-				includePrivate: false,
-			})
-			if (!profile) {
-				return new Response('Not found', { status: 404 })
-			}
+	return async ({
+		request,
+		params,
+	}: {
+		request: Request
+		params: { username: string }
+	}) => {
+		const profile = await getCommunityProfileByUsername({
+			env,
+			username: params.username,
+			includePrivate: false,
+		})
+		if (!profile) {
+			return new Response('Not found', { status: 404 })
+		}
 
-			const avatarDataUri = await loadProfileOgAvatarDataUri({ env, profile })
-			// `?theme=light` renders the pale variant; anything unrecognised
-			// falls back to the default rather than erroring.
-			const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
+		const avatarDataUri = await loadProfileOgAvatarDataUri({ env, profile })
+		// `?theme=light` renders the pale variant; anything unrecognised
+		// falls back to the default rather than erroring.
+		const theme = parseOgTheme(new URL(request.url).searchParams.get('theme'))
 
-			// Lazy import (sanctioned exception to the no-inline-imports rule):
-			// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
-			// binaries, which would otherwise bloat isolate cold starts for a
-			// route that is only hit by social-media crawlers.
-			const { renderProfileOgImage } =
-				await import('#worker/community/profile-og-image.ts')
-			const png = await renderProfileOgImage({
-				displayName: profile.displayName,
-				username: profile.username,
-				bio: profile.bio,
-				publicPackageCount: profile.publicPackageCount,
-				listingCount: profile.listingCount,
-				avatarDataUri,
-				theme,
-				assets: env.ASSETS,
-			})
+		// Lazy import (sanctioned exception to the no-inline-imports rule):
+		// the OG renderer pulls in satori and @resvg/resvg-wasm plus two wasm
+		// binaries, which would otherwise bloat isolate cold starts for a
+		// route that is only hit by social-media crawlers.
+		const { renderProfileOgImage } =
+			await import('#worker/community/profile-og-image.ts')
+		const png = await renderProfileOgImage({
+			displayName: profile.displayName,
+			username: profile.username,
+			bio: profile.bio,
+			publicPackageCount: profile.publicPackageCount,
+			listingCount: profile.listingCount,
+			avatarDataUri,
+			theme,
+			assets: env.ASSETS,
+		})
 
-			return new Response(png, {
-				status: 200,
-				headers: {
-					'Cache-Control': 'public, max-age=3600',
-					'Content-Type': 'image/png',
-				},
-			})
-		},
-	} satisfies Action<typeof routes.profileOgImage>
+		return new Response(png, {
+			status: 200,
+			headers: {
+				'Cache-Control': 'public, max-age=3600',
+				'Content-Type': 'image/png',
+			},
+		})
+	}
 }

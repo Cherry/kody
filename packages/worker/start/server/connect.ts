@@ -50,6 +50,7 @@ export const loadConnectSecrets = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'connectSecrets',
 				url.pathname,
 				{ accountSecrets: payload },
 				url.search,
@@ -70,6 +71,7 @@ export const loadConnectWebhookApply = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'connectWebhookApply',
 				url.pathname,
 				{ connectWebhookApply: payload },
 				url.search,
@@ -110,6 +112,7 @@ export const loadConnectOauth = createServerFn({ method: 'GET' })
 			return {
 				payload,
 				head: loadDocumentHead(
+					'connectOauth',
 					url.pathname,
 					{ connectOauth: payload },
 					url.search,
@@ -129,6 +132,7 @@ export const loadConnectOauth = createServerFn({ method: 'GET' })
 		return {
 			payload,
 			head: loadDocumentHead(
+				'connectOauth',
 				url.pathname,
 				{ connectOauth: payload },
 				url.search,

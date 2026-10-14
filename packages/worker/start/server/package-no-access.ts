@@ -14,6 +14,9 @@ export function packageNoAccessResult(
 	setResponseHeader('X-Robots-Tag', 'noindex, nofollow')
 	return {
 		...page,
-		head: { ...loadDocumentHead(pathname), title: "You don't have access" },
+		head: {
+			...loadDocumentHead('communityPackage', pathname),
+			title: "You don't have access",
+		},
 	}
 }

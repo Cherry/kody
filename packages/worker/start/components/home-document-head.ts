@@ -12,7 +12,7 @@ export function homeDocumentHead(
 	if (!head?.canonicalUrl) return head
 	const search = typeof og === 'string' ? `?${new URLSearchParams({ og })}` : ''
 	return absolutizeDocumentHead(
-		resolveDocumentHead('/', undefined, search),
+		resolveDocumentHead('home', '/', undefined, search),
 		new URL(head.canonicalUrl).origin,
 	)
 }

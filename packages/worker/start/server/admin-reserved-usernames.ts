@@ -20,13 +20,18 @@ export const loadAdminReservedUsernames = createServerFn({ method: 'GET' })
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead(href),
+				head: loadDocumentHead('adminReservedUsernames', href),
 			}
 		}
 		const payload = await loadAdminReservedUsernamesData(bindings)
 		return {
 			forbidden: false as const,
 			payload,
-			head: loadDocumentHead(url.pathname, undefined, url.search),
+			head: loadDocumentHead(
+				'adminReservedUsernames',
+				url.pathname,
+				undefined,
+				url.search,
+			),
 		}
 	})

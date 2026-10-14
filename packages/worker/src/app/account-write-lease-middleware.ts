@@ -1,5 +1,4 @@
 import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
-import { type Middleware } from 'remix/router'
 import {
 	AccountDeletionInProgressError,
 	AccountWriteLeaseLostError,
@@ -25,38 +24,42 @@ function accountDeletingResponse(status: number) {
 	)
 }
 
-export function createAccountWriteLeaseMiddleware(env: Env): Middleware {
-	return async ({ request, url }, next) => {
-		const mutating =
-			unsafeMethods.has(request.method) ||
-			mutatingGetPaths.has(url.pathname) ||
-			mutatingBillingGetPath.test(url.pathname)
-		if (
-			!mutating ||
-			url.pathname === '/account/delete' ||
-			url.pathname === '/logout'
-		) {
-			return await next()
+/** Called only for protocol requests. Native server functions own their write leases. */
+export async function withProtocolAccountWriteLease<T>(
+	request: Request,
+	env: Env,
+	next: () => Promise<T>,
+): Promise<T | Response> {
+	const url = new URL(request.url)
+	const mutating =
+		unsafeMethods.has(request.method) ||
+		mutatingGetPaths.has(url.pathname) ||
+		mutatingBillingGetPath.test(url.pathname)
+	if (
+		!mutating ||
+		url.pathname === '/account/delete' ||
+		url.pathname === '/logout'
+	) {
+		return await next()
+	}
+	const auth = await loadResolvedRequestAuth(request, env)
+	if (!auth.user) return await next()
+	if (auth.user.accountDeleting) return accountDeletingResponse(409)
+	try {
+		return await withAccountWriteLease({
+			db: env.APP_DB,
+			stableUserId: personalOrgIdForPerson(auth.user.mcpUser),
+			holder: `web:${request.method} ${url.pathname}`,
+			env,
+			write: next,
+		})
+	} catch (error) {
+		if (error instanceof AccountDeletionInProgressError) {
+			return accountDeletingResponse(409)
 		}
-		const auth = await loadResolvedRequestAuth(request, env)
-		if (!auth.user) return await next()
-		if (auth.user.accountDeleting) return accountDeletingResponse(409)
-		try {
-			return await withAccountWriteLease({
-				db: env.APP_DB,
-				stableUserId: personalOrgIdForPerson(auth.user.mcpUser),
-				holder: `web:${request.method} ${url.pathname}`,
-				env,
-				write: next,
-			})
-		} catch (error) {
-			if (error instanceof AccountDeletionInProgressError) {
-				return accountDeletingResponse(409)
-			}
-			if (error instanceof AccountWriteLeaseLostError) {
-				return accountDeletingResponse(503)
-			}
-			throw error
+		if (error instanceof AccountWriteLeaseLostError) {
+			return accountDeletingResponse(503)
 		}
+		throw error
 	}
 }

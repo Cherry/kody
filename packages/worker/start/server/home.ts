@@ -24,6 +24,6 @@ export const loadHome = createServerFn({ method: 'GET' }).handler(async () => {
 		loggedIn: user !== null,
 		initialHosts: pickWalkthroughHosts(),
 		landingHeroVideos,
-		head: loadDocumentHead('/'),
+		head: loadDocumentHead('home', '/'),
 	}
 })

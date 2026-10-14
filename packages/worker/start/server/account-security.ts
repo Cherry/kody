@@ -45,11 +45,11 @@ export const loadAccountSecurity = createServerFn({ method: 'GET' })
 			? {
 					page,
 					payload: await loadPasskeysPayload(bindings.APP_DB, user.userId),
-					head: loadDocumentHead(path),
+					head: loadDocumentHead('accountPasskeys', path),
 				}
 			: {
 					page,
 					payload: await loadTwoFactorStatus(bindings.APP_DB, user.userId),
-					head: loadDocumentHead(path),
+					head: loadDocumentHead('accountTwoFactor', path),
 				}
 	})

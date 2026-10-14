@@ -10,10 +10,6 @@ import { expect } from 'vitest'
 
 export const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 
-export type Handler = {
-	handler(context: never): Promise<Response>
-}
-
 export function applyMigrations(db: DatabaseSync) {
 	applyAllMigrations(db, new URL('../../migrations/', import.meta.url))
 }
@@ -90,16 +86,15 @@ export function createMemoryKv(initial?: Record<string, string>) {
 	} as unknown as KVNamespace
 }
 
-export async function runHandler(
-	handler: Handler,
+export async function runHandler<Params extends Record<string, string>>(
+	handler: (input: { request: Request; params: Params }) => Promise<Response>,
 	request: Request,
-	params: Record<string, string> = {},
+	params: Params,
 ): Promise<Response> {
-	return handler.handler({
+	return handler({
 		request,
-		url: new URL(request.url),
 		params,
-	} as never)
+	})
 }
 
 export function getCookiePair(setCookieHeader: string) {
