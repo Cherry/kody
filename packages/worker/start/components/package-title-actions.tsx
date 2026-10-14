@@ -27,7 +27,6 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, mq, typography } from '#universal/styles/tokens.ts'
 
-export const PACKAGE_TITLE_STATUS_SELECTOR = '[data-package-title-status]'
 const OTHER_ACCOUNT_FORK_TOOLTIP =
 	'This was built by another user. Verify it before using. Click again to confirm fork.'
 const FORK_LABEL = 'Fork'

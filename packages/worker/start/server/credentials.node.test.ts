@@ -24,6 +24,9 @@ vi.mock('@tanstack/react-router', () => ({
 	notFound: () => ({ notFound: true }),
 }))
 vi.mock('./account-collections', () => ({ loadCollection: state.collection }))
+vi.mock('../../src/app/account-credentials-data', () => ({
+	loadAccountCredentialsData: vi.fn(),
+}))
 vi.mock('./document-head', () => ({ loadDocumentHead: () => ({}) }))
 vi.mock('../../src/app/package-page', () => ({
 	loadPackagePage: async () => state.page,
@@ -34,7 +37,7 @@ vi.mock('../../src/app/handlers/package-credential-approval', () => ({
 		handler: state.approval,
 	}),
 }))
-import { loadCredentialApprovalPage } from './credentials'
+import { loadCredentialApprovalPage, loadCredentialsPage } from './credentials'
 const href = '/@acme/digest/approve-credentials?default%5Bgithub%5D=org%3Abot'
 beforeEach(() => {
 	state.page = { kind: 'not-found' }
@@ -43,12 +46,10 @@ beforeEach(() => {
 		.mockResolvedValue(
 			Response.json({ ok: true, fingerprint: 'fp', changes: [] }),
 		)
-	state.collection
-		.mockReset()
-		.mockImplementation(async (path: string) => ({
-			bindings: {},
-			request: new Request(`https://kody.test${path}`),
-		}))
+	state.collection.mockReset().mockImplementation(async (path: string) => ({
+		bindings: {},
+		request: new Request(`https://kody.test${path}`),
+	}))
 })
 test('execute-only viewers can review approval without package read access', async () => {
 	const result = await loadCredentialApprovalPage({ data: href })
@@ -82,4 +83,14 @@ test('an expired API session returns to the exact proposal after login', async (
 	await expect(loadCredentialApprovalPage({ data: href })).rejects.toEqual({
 		redirect: { href: `/login?redirectTo=${encodeURIComponent(href)}` },
 	})
+})
+
+test('credential creation gives the authentication boundary the full return URL', async () => {
+	const input = '/@acme/-/credentials/new?kind=secret&name=x'
+	const redirect = {
+		redirect: { href: `/login?redirectTo=${encodeURIComponent(input)}` },
+	}
+	state.collection.mockRejectedValueOnce(redirect)
+	await expect(loadCredentialsPage({ data: input })).rejects.toEqual(redirect)
+	expect(state.collection).toHaveBeenCalledWith(input)
 })

@@ -335,8 +335,11 @@ test('unlisted leftover tree redirects stay private; listed leftovers stay publi
 	}
 })
 
-test('canonical listed tree HTML loads listing files with the URL package path', async () => {
-	const handler = createCommunityPackageFilesHandler({} as Env)
+test('canonical listed tree server loader preserves URL package path and repository actions', async () => {
+	native.env = {
+		COOKIE_SECRET: 'test-cookie-secret-0123456789abcdef0123456789',
+	} as Env
+	native.request = new Request('https://example.com/@owner/demo/tree/main')
 	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
 		kind: 'listing',
 		listingId: 'listing-1',
@@ -344,13 +347,12 @@ test('canonical listed tree HTML loads listing files with the URL package path',
 		ref: 'main',
 		packagePath: { username: 'owner', kodyId: 'demo' },
 	})
-	mockModule.renderAppPage.mockResolvedValue(new Response('ok'))
 	const withActions = { ...filesPayload, repoActions: null }
 	mockModule.loadListingFilesData.mockResolvedValue(withActions)
 
-	await handler.handler({
-		request: new Request('https://example.com/@owner/demo/tree/main'),
-	} as never)
+	const result = await loadPackageFiles({
+		data: { pathname: '/@owner/demo/tree/main' },
+	})
 	expect(mockModule.loadListingFilesData).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			listingId: 'listing-1',
@@ -358,7 +360,5 @@ test('canonical listed tree HTML loads listing files with the URL package path',
 			packagePath: { username: 'owner', kodyId: 'demo' },
 		}),
 	)
-	expect(mockModule.renderAppPage).toHaveBeenLastCalledWith(
-		expect.objectContaining({ loaderData: { packageFiles: withActions } }),
-	)
+	expect(result.data).toEqual(withActions)
 })

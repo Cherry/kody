@@ -1264,7 +1264,7 @@ type OrgSettingsCustomHostnameView = {
 	updatedAt: string
 }
 
-export type OrgSettingsCustomDomainsView = {
+type OrgSettingsCustomDomainsView = {
 	hostnames: Array<OrgSettingsCustomHostnameView>
 	dnsTarget: string | null
 }

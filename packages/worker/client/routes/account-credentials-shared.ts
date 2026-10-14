@@ -1,7 +1,5 @@
 import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
-import { orgAccountApiFetchInit } from '#client/org-account-api.ts'
-import { readJson } from '#client/routes/account-approval-shared.ts'
 
 import {
 	type CredentialListFilters,
@@ -13,7 +11,6 @@ import {
 	writeCredentialListQuery,
 } from '#universal/credentials-list.ts'
 import { orgResourcePath, orgSlugFromPathname } from '#universal/org-pages.ts'
-import { routes } from '#universal/routes.ts'
 
 export const credentialsRoute = createListDetailRoute('/account/credentials')
 
@@ -92,27 +89,4 @@ export function credentialManageHref(
 			return exhaustive
 		}
 	}
-}
-
-const accountCredentialsApiPath = routes.accountCredentialsApi.href()
-
-/** `/account/credentials.json` for the page at `href`, or null when signed out. */
-export async function fetchAccountCredentials(
-	href: string,
-	signal: AbortSignal,
-) {
-	const selectedId = credentialsRoute.getSelection(href).selectedId
-	const requestPath = selectedId
-		? `${accountCredentialsApiPath}?${new URLSearchParams({ selected: selectedId })}`
-		: accountCredentialsApiPath
-	const response = await fetch(
-		requestPath,
-		orgAccountApiFetchInit(href, signal),
-	)
-	if (response.status === 401) return null
-	const payload = await readJson<AccountCredentialsResponse>(response)
-	if (!response.ok || !payload?.ok) {
-		throw new Error('Unable to load credentials.')
-	}
-	return payload
 }

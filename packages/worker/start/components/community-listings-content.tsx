@@ -293,7 +293,7 @@ function renderCommunityListingGrid(
 }
 
 /** Card-only: on the detail page these live in the repository action group. */
-export function renderCommunityViewerInstallBadge(input: {
+function renderCommunityViewerInstallBadge(input: {
 	listing: PublicCommunityListing
 }) {
 	const install = input.listing.viewerInstall
@@ -616,7 +616,7 @@ const listingDescriptionCss = {
 } satisfies CSSObject
 
 /* Hairline tag chips (`.pkg-tags`), shared with the detail head. */
-export const communityTagListCss = {
+const communityTagListCss = {
 	listStyle: 'none',
 	margin: 0,
 	padding: 0,
@@ -625,7 +625,7 @@ export const communityTagListCss = {
 	gap: '0.35rem',
 } satisfies CSSObject
 
-export const communityTagPillCss = {
+const communityTagPillCss = {
 	fontSize: '0.8rem',
 	fontWeight: 550,
 	color: colors.textMuted,

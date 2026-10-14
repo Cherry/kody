@@ -16,8 +16,6 @@ export default defineConfig({
 			entry: [
 				'start/client.tsx',
 				'start/server.ts',
-				// HTTP OAuth responses share the native Start document entry.
-				'start/oauth-page.ts',
 				'start/router.tsx',
 				'start/routeTree.gen.ts',
 				'start/routes/**/*.{ts,tsx}',

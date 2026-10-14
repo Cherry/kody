@@ -67,7 +67,6 @@ import {
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-const accountCredentialsApiPath = routes.accountCredentialsApi.href()
 const primaryButtonCss = getPrimaryButtonCss({ size: 'lg', weight: 'semibold' })
 const secondaryButtonCss = getSecondaryButtonCss({
 	size: 'lg',
