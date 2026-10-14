@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { AccountEmailPage } from '../pages/account-email.tsx'
 import { emailSearch } from '../pages/email-resources.ts'
 import {
@@ -9,6 +9,7 @@ import {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/email')({
 	validateSearch: emailSearch,
+	search: { middlewares: [stripSearchParams(emailSearch({}))] },
 	loaderDeps: ({ search }) => ({
 		q: search.q,
 		classification: search.classification,
