@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { auditedLabel } from './package-security-audit-field.tsx'
+import { packageSecurityAuditAnchor } from '#universal/package-security-audit-prompt.ts'
 import { useState, useRef, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
 import {
@@ -369,6 +371,21 @@ export function ApprovalBundleRoute({
 					<ul css={listCss}>{item.grants.map(renderGrant)}</ul>
 				) : null}
 				{item.statusMessage ? <p css={mutedCss}>{item.statusMessage}</p> : null}
+				{item.securityAudit && item.reviewHref ? (
+					<p data-testid="approval-bundle-security-audit" css={smallMutedCss}>
+						Security audit:{' '}
+						<SiteLink href={`${item.reviewHref}#${packageSecurityAuditAnchor}`}>
+							{item.securityAudit.status === 'not_audited' ? (
+								'No security audit performed'
+							) : (
+								<>
+									{auditedLabel(item.securityAudit)} ·{' '}
+									{item.securityAudit.verdict === 'pass' ? 'Pass' : 'Concerns'}
+								</>
+							)}
+						</SiteLink>
+					</p>
+				) : null}
 				{error ? (
 					<p
 						role="alert"

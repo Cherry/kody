@@ -1,26 +1,40 @@
 import { expect, test } from 'vitest'
-import { requestNamesDestination } from './server-function-requests.ts'
+import { requestHasDataFields } from './server-function-requests.ts'
 
-test('counts a page string input but not authorization for the exact same destination', () => {
-	const destination = '/@team/-/jobs'
-	const string = { t: 1, s: destination }
-	const page = { t: { t: 10, p: { k: ['data'], v: [string] } } }
-	const guard = {
-		t: {
-			t: 10,
-			p: { k: ['data'], v: [{ t: 10, p: { k: ['pathname'], v: [string] } }] },
-		},
-	}
-	function request(payload: unknown) {
-		return {
-			method: () => 'GET',
-			url: () =>
-				`https://kody.test/_serverFn/example?${new URLSearchParams({ payload: JSON.stringify(payload) })}`,
-		}
-	}
-	expect(requestNamesDestination(request(page), destination)).toBe(true)
-	expect(requestNamesDestination(request(guard), destination)).toBe(false)
+test('typed input matcher excludes authorization and reads null auth redirect input exactly', () => {
+	const request = (keys: string[], values: unknown[]) => ({
+		method: () => 'GET',
+		url: () =>
+			`https://kody.test/_serverFn/example?${new URLSearchParams({ payload: JSON.stringify({ t: { t: 10, p: { k: ['data'], v: [{ t: 10, p: { k: keys, v: values } }] } } }) })}`,
+	})
 	expect(
-		requestNamesDestination(request(page), `${destination}?selected=one`),
+		requestHasDataFields(
+			request(['orgSlug'], [{ t: 1, s: 'team' }]),
+			{ orgSlug: 'team' },
+			['section'],
+		),
+	).toBe(true)
+	expect(
+		requestHasDataFields(
+			request(
+				['orgSlug', 'section'],
+				[
+					{ t: 1, s: 'team' },
+					{ t: 1, s: 'jobs' },
+				],
+			),
+			{ orgSlug: 'team' },
+			['section'],
+		),
+	).toBe(false)
+	expect(
+		requestHasDataFields(request(['redirectTo'], [{ t: 2, s: 0 }]), {
+			redirectTo: null,
+		}),
+	).toBe(true)
+	expect(
+		requestHasDataFields(request(['redirectTo'], [{ t: 2, s: 1 }]), {
+			redirectTo: null,
+		}),
 	).toBe(false)
 })

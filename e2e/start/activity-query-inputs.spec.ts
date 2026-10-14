@@ -1,5 +1,5 @@
 import { orgResourcePath } from '../../packages/worker/universal/org-pages.ts'
-import { waitForDestinationRead } from '../server-function-requests.ts'
+import { requestHasDataFields } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
@@ -30,9 +30,21 @@ test('activity navigation sends server filters and pagination while ignoring att
 			cursor,
 			utm_source: 'regression',
 		})
-		const dataSearch = new URLSearchParams(search)
-		dataSearch.delete('utm_source')
-		const response = waitForDestinationRead(page, `${pathname}?${dataSearch}`)
+		const expected = {
+			orgSlug: user.username,
+			selectedRunId: pathname === activityPath ? null : 'missing-run',
+			viewFilter: 'recent',
+			statusFilter: 'success',
+			surfaceFilter: 'job',
+			triageFilter: 'all',
+			cursor,
+		}
+		const response = page.waitForResponse((response) =>
+			requestHasDataFields(response.request(), expected, [
+				'section',
+				'utm_source',
+			]),
+		)
 		await page.evaluate(
 			(href) => window.history.pushState(null, '', href),
 			`${pathname}?${search}`,
@@ -40,14 +52,6 @@ test('activity navigation sends server filters and pagination while ignoring att
 		const read = await response
 		expect(read.ok()).toBe(true)
 		const wireUrl = decodeURIComponent(read.url())
-		for (const input of [
-			'view=recent',
-			'status=success',
-			'surface=job',
-			'error_triage=all',
-			`cursor=${encodeURIComponent(cursor)}`,
-		])
-			expect(wireUrl).toContain(input)
 		expect(wireUrl).not.toContain('utm_source')
 		const body = await read.text()
 		for (const field of [

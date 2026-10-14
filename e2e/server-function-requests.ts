@@ -1,33 +1,39 @@
 import { type Page, type Request } from './playwright-utils.ts'
 
-/** Page loaders accept the destination as a string. Verification accepts an
- * object with pathname, which must not count as a payload read. */
-export function requestNamesDestination(
+/** Match the root RPC input, not nested values from context or another request. */
+export function requestHasDataFields(
 	request: Pick<Request, 'url' | 'method'>,
-	destination: string,
+	fields: Record<string, string | null | undefined>,
+	excludedFields: string[] = [],
 ) {
 	const url = new URL(request.url())
 	if (request.method() !== 'GET' || !url.pathname.startsWith('/_serverFn/'))
 		return false
-	const payload = url.searchParams.get('payload')
-	if (!payload) return false
 	try {
-		const serialized = JSON.parse(payload)
-		// Start serializes { data, context } with Seroval. Read only the root
-		// data property, never unrelated nested strings in context or guards.
-		const properties = serialized?.t?.p
-		const index = Array.isArray(properties?.k)
-			? properties.k.indexOf('data')
-			: -1
-		const data = index >= 0 ? properties?.v?.[index] : undefined
-		return data?.t === 1 && data.s === destination
+		const root = JSON.parse(url.searchParams.get('payload') ?? '').t?.p
+		const input = root?.v?.[root.k.indexOf('data')]?.p
+		if (
+			!Array.isArray(input?.k) ||
+			excludedFields.some((key) => input.k.includes(key))
+		)
+			return false
+		return Object.entries(fields).every(([key, value]) => {
+			const index = input.k.indexOf(key)
+			if (index < 0) return false
+			const node = input.v[index]
+			return value === undefined
+				? node?.t === 2 && node.s === 1
+				: value === null
+					? node?.t === 2 && node.s === 0
+					: node?.t === 1 && node.s === value
+		})
 	} catch {
 		return false
 	}
 }
 
-export function waitForDestinationRead(page: Page, destination: string) {
+export function waitForOrgRead(page: Page, orgSlug: string) {
 	return page.waitForResponse((response) =>
-		requestNamesDestination(response.request(), destination),
+		requestHasDataFields(response.request(), { orgSlug }, ['section']),
 	)
 }

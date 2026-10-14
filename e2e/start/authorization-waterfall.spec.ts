@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { orgResourcePath } from '../../packages/worker/universal/org-pages.ts'
-import { requestNamesDestination } from '../server-function-requests.ts'
+import { requestHasDataFields } from '../server-function-requests.ts'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
 test('private data loads while access verification is pending, but cannot commit ahead of it', async ({
@@ -24,9 +24,12 @@ test('private data loads while access verification is pending, but cannot commit
 	})
 	let verificationStarted = false
 	await page.route('**/_serverFn/**', async (route) => {
-		const payload =
-			new URL(route.request().url()).searchParams.get('payload') ?? ''
-		if (payload.includes('"pathname"') && payload.includes(destination)) {
+		if (
+			requestHasDataFields(route.request(), {
+				orgSlug: user.username,
+				section: 'jobs',
+			})
+		) {
 			verificationStarted = true
 			await held
 		}
@@ -34,7 +37,11 @@ test('private data loads while access verification is pending, but cannot commit
 	})
 	try {
 		const dataRead = page.waitForResponse((response) =>
-			requestNamesDestination(response.request(), destination),
+			requestHasDataFields(
+				response.request(),
+				{ orgSlug: user.username, jobId: undefined },
+				['section'],
+			),
 		)
 		await page.evaluate(
 			(href) => window.history.pushState(null, '', href),

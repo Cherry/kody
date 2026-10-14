@@ -6,7 +6,7 @@ import {
 	type Page,
 } from './playwright-utils.ts'
 
-import { waitForDestinationRead } from './server-function-requests.ts'
+import { waitForOrgRead } from './server-function-requests.ts'
 
 async function openSwitcher(page: Page) {
 	const trigger = page.getByTestId('org-switcher')
@@ -348,10 +348,7 @@ test('switching orgs from Credentials loads the destination org, not the one you
 
 	// The destination travels as server-function input while the current URL
 	// still names the personal org. Verify that transport and the returned data.
-	const teamLoad = waitForDestinationRead(
-		page,
-		`/@switch-${runId}/-/credentials`,
-	)
+	const teamLoad = waitForOrgRead(page, `switch-${runId}`)
 	const { panel } = await openSwitcher(page)
 	await panel.getByTestId(`org-switcher-switch-${runId}`).click()
 	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}/-/credentials$`))
@@ -424,7 +421,7 @@ test('the switcher keeps each org section and reads the destination org through 
 		await page.goto(`/@${user.username}/-/${section}`)
 		await waitForClientHydration(page)
 		const destination = `/@sections-${runId}/-/${section}`
-		const teamLoad = waitForDestinationRead(page, destination)
+		const teamLoad = waitForOrgRead(page, `sections-${runId}`)
 		const { panel } = await openSwitcher(page)
 		const teamRow = panel.getByTestId(`org-switcher-sections-${runId}`)
 		await expect(teamRow).toHaveAttribute('href', destination)

@@ -1,5 +1,5 @@
 import { orgResourcePath } from '../../packages/worker/universal/org-pages.ts'
-import { requestNamesDestination } from '../server-function-requests.ts'
+import { requestHasDataFields } from '../server-function-requests.ts'
 import { randomUUID } from 'node:crypto'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
@@ -42,10 +42,10 @@ test('job presentation filters reuse the same payload but selected records remai
 	page.on('request', (request) => {
 		if (request.url().includes('/_serverFn/')) allReads.push(request.url())
 		if (
-			requestNamesDestination(request, resourcePath) ||
-			requestNamesDestination(
+			requestHasDataFields(
 				request,
-				`${resourcePath}?selected=missing-test-job`,
+				{ orgSlug: user.username, jobId: undefined },
+				['section'],
 			)
 		)
 			reads.push(request.url())
@@ -362,8 +362,11 @@ test('value search stays local while changing the selected record reads its own 
 	page.on('request', (request) => {
 		const url = decodeURIComponent(request.url())
 		if (
-			requestNamesDestination(request, resourcePath) ||
-			requestNamesDestination(request, `${resourcePath}?selected=missing-value`)
+			requestHasDataFields(
+				request,
+				{ orgSlug: user.username, valueId: undefined },
+				['section'],
+			)
 		)
 			reads.push(url)
 	})
@@ -381,7 +384,8 @@ test('value search stays local while changing the selected record reads its own 
 		`${resourcePath}?selected=missing-value&q=example`,
 	)
 	await expect.poll(() => reads.length).toBe(1)
-	expect(reads[0]).toContain('selected=missing-value')
+	expect(reads[0]).toContain('missing-value')
+	expect(reads[0]).toContain('selected')
 })
 
 test('retained Agents keeps its own view while navigating back to Profile', async ({

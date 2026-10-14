@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { PackageSecurityAuditField } from './package-security-audit-field.tsx'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
@@ -400,6 +401,13 @@ export function AccountPackageApproveCapabilitiesRoute({
 							</ul>
 						)}
 					</section>
+					<PackageSecurityAuditField
+						audit={payload.securityAudit}
+						packageName={payload.package.name}
+						hasPausedPublish={pendingApprovals.some(
+							(approval) => approval.pendingCommit !== payload.publishedCommit,
+						)}
+					/>
 					<div
 						css={{
 							display: 'flex',

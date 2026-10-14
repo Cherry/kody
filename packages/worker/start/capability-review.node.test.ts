@@ -6,6 +6,10 @@ import { type AccountPackageApproveCapabilitiesLoaderData } from '#universal/loa
 const payload: AccountPackageApproveCapabilitiesLoaderData = {
 	ok: true,
 	pendingApprovals: [],
+	securityAudit: {
+		status: 'not_audited',
+		prompt: 'Audit this published version',
+	},
 	email: 'owner@example.com',
 	package: {
 		id: 'pkg',
