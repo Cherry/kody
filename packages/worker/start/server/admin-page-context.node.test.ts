@@ -10,8 +10,8 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (value: unknown) => value
 		const builder = {
-			validator(parser: (value: unknown) => unknown) {
-				validate = parser
+			validator(parser: { parse: (value: unknown) => unknown }) {
+				validate = parser.parse
 				return builder
 			},
 			handler(run: (input: { data: unknown }) => Promise<unknown>) {
@@ -81,7 +81,7 @@ test('admin reads use the original authenticated request and private cache polic
 
 test('admin index checks authentication before redirecting to the user list', async () => {
 	state.read.mockResolvedValue(null)
-	const failure = await loadAdminIndex({ data: '/admin/' }).catch(
+	const failure = await loadAdminIndex({ data: { returnTo: '/admin/' } }).catch(
 		(error) => error,
 	)
 	expect(failure.options.href).toBe('/login?redirectTo=%2Fadmin%2F')
@@ -92,14 +92,16 @@ test('admin index checks authentication before redirecting to the user list', as
 })
 test('admin index renders a native forbidden result with HTTP 403 for members', async () => {
 	state.read.mockResolvedValue({ roles: ['user'] })
-	await expect(loadAdminIndex({ data: '/admin' })).resolves.toEqual({
+	await expect(
+		loadAdminIndex({ data: { returnTo: '/admin' } }),
+	).resolves.toEqual({
 		forbidden: true,
 	})
 	expect(state.status).toHaveBeenCalledWith(403)
 })
 test('admin index redirects authorized administrators using Router redirect', async () => {
 	state.read.mockResolvedValue({ roles: ['admin'] })
-	const failure = await loadAdminIndex({ data: '/admin' }).catch(
+	const failure = await loadAdminIndex({ data: { returnTo: '/admin' } }).catch(
 		(error) => error,
 	)
 	expect(failure.options.to).toBe('/admin/users')
@@ -113,9 +115,7 @@ test.each([
 ])(
 	'admin index refuses an unrelated destination %s before authentication',
 	async (href) => {
-		await expect(loadAdminIndex({ data: href })).rejects.toThrow(
-			'Invalid admin index destination',
-		)
+		await expect(loadAdminIndex({ data: { returnTo: href } })).rejects.toThrow()
 		expect(state.read).not.toHaveBeenCalled()
 	},
 )

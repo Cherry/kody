@@ -1,3 +1,4 @@
+import { connectSecretsInput } from './connect-input.ts'
 import { expect, test } from 'vitest'
 import { createElement } from 'react'
 import { renderStartPage } from './test-support/render-start-page.ts'
@@ -14,22 +15,30 @@ async function renderConnectSecretSet(query: string) {
 		currentHref,
 		null,
 		(client) => {
-			client.setQueryData(connectSecretSetQuery(null, currentHref).queryKey, {
-				payload: {
-					ok: true,
-					email: 'user@example.com',
-					packageOptions: [],
-					packages: [],
-					secrets: [],
-					selectedSecret: null,
-					approval: null,
-					approvalError: null,
+			client.setQueryData(
+				connectSecretSetQuery(
+					null,
+					connectSecretsInput(
+						new URL(currentHref, 'https://kody.local').search,
+					),
+				).queryKey,
+				{
+					payload: {
+						ok: true,
+						email: 'user@example.com',
+						packageOptions: [],
+						packages: [],
+						secrets: [],
+						selectedSecret: null,
+						approval: null,
+						approvalError: null,
+					},
+					head: absolutizeDocumentHead(
+						resolveDocumentHead('connectSecretSet', '/connect/secret-set'),
+						'https://example.com',
+					),
 				},
-				head: absolutizeDocumentHead(
-					resolveDocumentHead('connectSecretSet', '/connect/secret-set'),
-					'https://example.com',
-				),
-			})
+			)
 		},
 	)
 	return { html }

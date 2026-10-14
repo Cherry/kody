@@ -1,36 +1,39 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminPlatformFeedback = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/platform-feedback(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const [{ loadAdminPlatformFeedbackData }, { loadDocumentHead }] =
+	.validator(
+		z.object({
+			returnTo: z.string().regex(/^\/admin\/platform-feedback(?:\?[^#\\]*)?$/),
+			page: z.number().int().positive(),
+			pageSize: z.number().int().positive().max(100),
+			status: z.string().nullable(),
+			category: z.string().nullable(),
+			feedbackId: z.string().nullable(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [{ readAdminPlatformFeedbackData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/admin-platform-feedback-data.ts'),
 				import('./document-head.ts'),
 			])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, request, url, user } = await readAdminPageContext(href)
+		const { bindings, request, url, user } = await readAdminPageContext(
+			data.returnTo,
+		)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminPlatformFeedback', href),
+				head: loadDocumentHead('adminPlatformFeedback', data.returnTo),
 			}
 		}
-		const payload = await loadAdminPlatformFeedbackData(bindings, url.href)
+		const payload = await readAdminPlatformFeedbackData(bindings, data)
 		const { auditPlatformFeedbackRead } =
 			await import('../../src/admin/platform-feedback-operations.ts')
 		const { readAdminPlatformFeedbackId } =
 			await import('../../src/app/admin-platform-feedback-data.ts')
-		const feedbackId = readAdminPlatformFeedbackId(
-			url.searchParams.get('feedbackId'),
-		)
+		const feedbackId = readAdminPlatformFeedbackId(data.feedbackId)
 		await auditPlatformFeedbackRead({
 			env: bindings,
 			request,

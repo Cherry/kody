@@ -36,16 +36,17 @@ export function loadProfileData(
 	request: Request,
 	username: string,
 	options?: ReadAuthenticatedAppUserOptions,
+	resource?: { query: string; limit?: number },
 ): Promise<ProfileLoaderData | null> {
 	let byUsername = requestProfileDataStore.get(request)
 	if (!byUsername) {
 		byUsername = new Map()
 		requestProfileDataStore.set(request, byUsername)
 	}
-	const cacheKey = `${username}:${new URL(request.url).search}`
+	const cacheKey = `${username}:${resource ? JSON.stringify(resource) : new URL(request.url).search}`
 	let pending = byUsername.get(cacheKey)
 	if (!pending) {
-		pending = loadProfileDataUncached(env, request, username, options)
+		pending = loadProfileDataUncached(env, request, username, options, resource)
 		byUsername.set(cacheKey, pending)
 	}
 	return pending
@@ -56,6 +57,7 @@ async function loadProfileDataUncached(
 	request: Request,
 	username: string,
 	options?: ReadAuthenticatedAppUserOptions,
+	resource?: { query: string; limit?: number },
 ): Promise<ProfileLoaderData | null> {
 	if (getUsernameFormatValidationError(username)) {
 		return null
@@ -76,12 +78,14 @@ async function loadProfileDataUncached(
 	}
 
 	const url = new URL(request.url)
-	const filters = readProfilePackageFiltersFromUrl(url, {
-		allowOwnerFilters: isSelf,
-	})
-	const packageLimit = readOptionalProfilePackageLimit(
-		url.searchParams.get('limit'),
-	)
+	const filters =
+		resource ??
+		readProfilePackageFiltersFromUrl(url, {
+			allowOwnerFilters: isSelf,
+		})
+	const packageLimit = resource
+		? resource.limit
+		: readOptionalProfilePackageLimit(url.searchParams.get('limit'))
 	const serverQuery =
 		packageLimit == null ? undefined : filters.query || undefined
 

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectSecretsInput } from '../connect-input.ts'
 import { updateSecrets } from '#start/server/account-mutations'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
@@ -66,7 +67,10 @@ export function ConnectSecretSetRoute({
 	currentHref: string
 }) {
 	const client = useQueryClient()
-	const options = connectSecretSetQuery(actorKey, currentHref)
+	const options = connectSecretSetQuery(
+		actorKey,
+		connectSecretsInput(new URL(currentHref, 'https://kody.local').search),
+	)
 	const {
 		data: { payload: data },
 	} = usePageQuery(options)
@@ -136,7 +140,10 @@ export function ConnectSecretSetRoute({
 			return payload
 		},
 		onSuccess: async (payload, { href, actorKey }) => {
-			const queryKey = connectSecretSetQuery(actorKey, href).queryKey
+			const queryKey = connectSecretSetQuery(
+				actorKey,
+				connectSecretsInput(new URL(href, 'https://kody.local').search),
+			).queryKey
 			await client.cancelQueries({ queryKey, exact: true })
 			client.setQueryData(queryKey, (old) => (old ? { ...old, payload } : old))
 			// Refresh the submitting actor without copying one org response into another org cache.

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectSecretsInput } from '../connect-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { connectSecretsQuery } from '../connect-approval-queries.ts'
 import { loadPageQuery, usePageQuery } from '../page-query.ts'
@@ -8,7 +9,7 @@ export const Route = createFileRoute('/connect/secrets')({
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: connectSecretsInput(location.searchStr),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

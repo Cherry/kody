@@ -1,29 +1,32 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminSystemEmail = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/system-email(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const [{ loadAdminSystemEmailData }, { loadDocumentHead }] =
+	.validator(
+		z.object({
+			returnTo: z.string().regex(/^\/admin\/system-email(?:\?[^#\\]*)?$/),
+			page: z.number().int().positive(),
+			pageSize: z.number().int().positive().max(100),
+			messageId: z.string().nullable(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [{ readAdminSystemEmailData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/admin/system-email-data.ts'),
 				import('./document-head.ts'),
 			])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, request, url, user } = await readAdminPageContext(href)
+		const { bindings, request, url, user } = await readAdminPageContext(
+			data.returnTo,
+		)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminSystemEmail', href),
+				head: loadDocumentHead('adminSystemEmail', data.returnTo),
 			}
 		}
-		const payload = await loadAdminSystemEmailData(bindings, url.href)
+		const payload = await readAdminSystemEmailData(bindings, data)
 		const { auditSystemEmailAccess } =
 			await import('../../src/admin/system-email-operations.ts')
 		await auditSystemEmailAccess({

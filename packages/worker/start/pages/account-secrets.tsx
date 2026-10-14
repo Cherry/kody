@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectSecretsInput } from '../connect-input.ts'
 import { type ListDetailSelection } from '#client/list-detail-route.ts'
 import {
 	type ApprovalAction,
@@ -129,7 +130,7 @@ export function AccountSecretsPage({
 				data: {
 					body: input.body,
 					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					search: input.search,
+					refresh: connectSecretsInput(input.search),
 				},
 			})
 		},

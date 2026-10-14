@@ -1,26 +1,24 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminReservedUsernames = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/reserved-usernames(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
+	.validator(
+		z.object({
+			returnTo: z.string().regex(/^\/admin\/reserved-usernames(?:\?[^#\\]*)?$/),
+		}),
+	)
+	.handler(async ({ data }) => {
 		const [{ loadAdminReservedUsernamesData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/admin-reserved-usernames-data.ts'),
 				import('./document-head.ts'),
 			])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(data.returnTo)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminReservedUsernames', href),
+				head: loadDocumentHead('adminReservedUsernames', data.returnTo),
 			}
 		}
 		const payload = await loadAdminReservedUsernamesData(bindings)

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectSecretsInput } from '../connect-input.ts'
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { redirect, createFileRoute } from '@tanstack/react-router'
 import { connectSecretSetQuery } from '../connect-secret-set-query.ts'
@@ -18,7 +19,7 @@ export const Route = createFileRoute('/connect/secret-set')({
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
 		return {
-			pageQueryInput: location.pathname + location.searchStr,
+			pageQueryInput: connectSecretsInput(location.searchStr),
 		}
 	},
 	validateSearch: (search: Record<string, unknown>) => search,
@@ -34,12 +35,12 @@ export const Route = createFileRoute('/connect/secret-set')({
 	component: Page,
 })
 function Page() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
+	const { actorKey, pageLocation } = Route.useRouteContext()
 	return (
 		<ConnectSecretSetRoute
-			key={pageQueryInput}
+			key={pageLocation.href}
 			actorKey={actorKey}
-			currentHref={pageQueryInput}
+			currentHref={pageLocation.href}
 		/>
 	)
 }

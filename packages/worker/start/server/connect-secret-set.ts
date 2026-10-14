@@ -1,51 +1,8 @@
 import { createServerFn } from '@tanstack/react-start'
-import { notFound, redirect } from '@tanstack/react-router'
+import { connectSecretsSchema } from '../connect-input.ts'
 export const loadConnectSecretSet = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/connect\/secret-set(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid secret setup URL.')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { withWebsiteRead, WebsiteAuthenticationError } =
-			await import('./mutation-context.ts')
-		const search = new URL(href, 'https://kody.local').searchParams
-		const org = search.get('org')?.trim()
-		try {
-			return await withWebsiteRead(
-				{ scope: org ? { orgSlug: org } : undefined },
-				async ({ env, request, user }) => {
-					const { loadAccountSecretsData } =
-						await import('../../src/app/account-secrets-data.ts')
-					const { loadDocumentHead } = await import('./document-head.ts')
-					const url = new URL(href, request.url)
-					const payload = await loadAccountSecretsData({
-						env,
-						user,
-						request,
-						search: url.search,
-					})
-					return {
-						payload,
-						head: loadDocumentHead(
-							'connectSecretSet',
-							url.pathname,
-							{ accountSecrets: payload },
-							url.search,
-						),
-					}
-				},
-			)
-		} catch (error) {
-			if (error instanceof WebsiteAuthenticationError)
-				throw redirect({
-					href: `/login?redirectTo=${encodeURIComponent(href)}`,
-				})
-			if (error instanceof Error && error.message === 'Organization not found.')
-				throw notFound()
-			throw error
-		}
+	.validator(connectSecretsSchema)
+	.handler(async ({ data }) => {
+		const { readConnectSecrets } = await import('./connect.ts')
+		return readConnectSecrets('/connect/secret-set', data)
 	})

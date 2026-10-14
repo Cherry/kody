@@ -1,22 +1,21 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminRoles = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (typeof href !== 'string' || !/^\/admin\/roles(?:\?[^#]*)?$/.test(href))
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
+	.validator(
+		z.object({ returnTo: z.string().regex(/^\/admin\/roles(?:\?[^#\\]*)?$/) }),
+	)
+	.handler(async ({ data }) => {
 		const [{ loadAdminRolesData }, { loadDocumentHead }] = await Promise.all([
 			import('../../src/app/admin-roles-data.ts'),
 			import('./document-head.ts'),
 		])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(data.returnTo)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminRoles', href),
+				head: loadDocumentHead('adminRoles', data.returnTo),
 			}
 		}
 		const payload = await loadAdminRolesData(bindings)

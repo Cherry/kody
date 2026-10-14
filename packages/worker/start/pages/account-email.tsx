@@ -50,7 +50,7 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
-import { emailKeys } from './email-resources.ts'
+import { emailKeys, emailResourceInput } from './email-resources.ts'
 import {
 	renderEmailVerificationPrompt,
 	requestResendVerification,
@@ -223,10 +223,11 @@ export function AccountEmailPage({
 			queryClient,
 			actorKey,
 			async (action) => {
+				const { org: _org, ...refresh } = emailResourceInput(action.href).list
 				return updateEmail({
 					data: {
 						orgSlug: pageQueryOrg(action.href) ?? undefined,
-						search: new URL(action.href, 'https://kody.local').search,
+						refresh,
 						body: {
 							action: action.action,
 							message_id: action.messageId,

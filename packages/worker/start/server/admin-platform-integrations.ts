@@ -1,32 +1,35 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminPlatformIntegrations = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/platform-integrations(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
+	.validator(
+		z.object({
+			returnTo: z
+				.string()
+				.regex(
+					/^\/admin\/platform-integrations(?:\/[^/?#\\]+)?(?:\?[^#\\]*)?$/,
+				),
+			view: z.enum(['list', 'new', 'detail']),
+		}),
+	)
+	.handler(async ({ data }) => {
 		const [{ loadAdminPlatformIntegrationsData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/admin-platform-integrations-data.ts'),
 				import('./document-head.ts'),
 			])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(data.returnTo)
 		if (!user) {
 			return {
 				forbidden: true as const,
 				head: loadDocumentHead(
-					url.pathname.split('/')[3] === 'new'
+					data.view === 'new'
 						? 'adminPlatformIntegrationNew'
-						: url.pathname.split('/')[3]
+						: data.view === 'detail'
 							? 'adminPlatformIntegrationDetail'
 							: 'adminPlatformIntegrations',
-					href,
+					data.returnTo,
 				),
 			}
 		}
@@ -35,9 +38,9 @@ export const loadAdminPlatformIntegrations = createServerFn({ method: 'GET' })
 			forbidden: false as const,
 			payload,
 			head: loadDocumentHead(
-				url.pathname.split('/')[3] === 'new'
+				data.view === 'new'
 					? 'adminPlatformIntegrationNew'
-					: url.pathname.split('/')[3]
+					: data.view === 'detail'
 						? 'adminPlatformIntegrationDetail'
 						: 'adminPlatformIntegrations',
 				url.pathname,

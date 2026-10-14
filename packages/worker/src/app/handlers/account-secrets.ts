@@ -1,11 +1,7 @@
 import {
-	getHostApprovalStorageContext,
 	getSecretContextForAccountSecret,
 	listAccountSecrets,
-	loadAccountSecretsData,
-	readAccountSecretsSelectedSecretId,
-	readApprovalHosts,
-	readHostApprovalScope,
+	loadAccountSecretsSelection,
 	resolveApprovalRequest,
 	toPackageOptions,
 } from '#app/account-secrets-data.ts'
@@ -24,6 +20,8 @@ import {
 } from '#mcp/capabilities/secrets/secret-set-opt-in.ts'
 import { normalizeAllowedHosts } from '#mcp/secrets/allowed-hosts.ts'
 import { normalizeAllowedPackages } from '#mcp/secrets/allowed-packages.ts'
+import { classifyBulkApprovalHosts } from '#mcp/secrets/host-approval.ts'
+import { type StorageContext } from '#mcp/storage.ts'
 import { filterValidApprovalHosts } from '#mcp/secrets/approval-host-shape.ts'
 import { normalizeBulkPackageSecretApprovalNames } from '#mcp/secrets/package-approval-url.ts'
 import {
@@ -102,13 +100,20 @@ type ConnectOauthHostApprovalLink = {
 
 type SecretApprovalAction = 'approve' | 'reject'
 
+type SecretRefresh = Pick<
+	Parameters<typeof loadAccountSecretsSelection>[0],
+	'selectedSecretId' | 'approval'
+>
+
 export async function mutateAccountSecrets({
 	request,
+	refresh,
 	env,
 	user,
 	body,
 }: {
 	request: Request
+	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: Record<string, unknown>
@@ -117,6 +122,7 @@ export async function mutateAccountSecrets({
 	if (action === 'approve' || action === 'reject') {
 		return handleApprovalAction({
 			request,
+			refresh,
 			env,
 			user,
 			action,
@@ -125,6 +131,7 @@ export async function mutateAccountSecrets({
 	if (action === 'save') {
 		return handleSaveAction({
 			request,
+			refresh,
 			env,
 			user,
 			body,
@@ -133,6 +140,7 @@ export async function mutateAccountSecrets({
 	if (action === 'delete') {
 		return handleDeleteAction({
 			request,
+			refresh,
 			env,
 			user,
 			body,
@@ -148,6 +156,7 @@ export async function mutateAccountSecrets({
 	if (action === 'connect_oauth') {
 		return handleConnectOauthAction({
 			request,
+			refresh,
 			env,
 			user,
 			body,
@@ -287,6 +296,7 @@ async function handleSaveOauthAppAction(input: {
 
 async function handleConnectOauthAction(input: {
 	request: Request
+	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: object
@@ -860,38 +870,39 @@ function readTokenField(
 	return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function readRequestedPackageId(url: URL) {
-	const value = url.searchParams.get('package_id')
-	return value?.trim() ? value.trim() : null
-}
-
-function readRequestedSecretNames(url: URL) {
-	const values = [
-		...url.searchParams.getAll('names'),
-		...url.searchParams.getAll('name'),
-	]
-	return normalizeBulkPackageSecretApprovalNames(
-		values.flatMap((value) => value.split(',')),
-	)
-}
-
 async function handleApprovalAction(input: {
 	request: Request
+	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	action: SecretApprovalAction
 }) {
 	try {
-		const url = new URL(input.request.url)
-		const classifiedHosts = readApprovalHosts(url)
+		const fields = input.refresh.approval
+		const classifiedHosts = classifyBulkApprovalHosts(
+			fields.hosts.flatMap((value) => value.split(',')),
+		)
+		const scope = fields.scope
+		const storageContext: StorageContext | null =
+			scope === 'package' && fields.storagePackageId?.trim()
+				? {
+						packageId: fields.storagePackageId.trim(),
+						sessionId: null,
+						appId: null,
+					}
+				: scope === 'session' && fields.sessionId?.trim()
+					? { sessionId: fields.sessionId.trim(), packageId: null, appId: null }
+					: null
 		const approval = resolveApprovalRequest({
-			secretId: readAccountSecretsSelectedSecretId(input.request.url),
+			secretId: input.refresh.selectedSecretId,
 			requestedHosts: classifiedHosts.valid,
 			rejectedHosts: classifiedHosts.rejected,
-			requestedPackageId: readRequestedPackageId(url),
-			requestedSecretNames: readRequestedSecretNames(url),
-			requestedHostScope: readHostApprovalScope(url),
-			requestedHostStorageContext: getHostApprovalStorageContext(url),
+			requestedPackageId: fields.packageId?.trim() || null,
+			requestedSecretNames: normalizeBulkPackageSecretApprovalNames(
+				fields.names.flatMap((value) => value.split(',')),
+			),
+			requestedHostScope: scope,
+			requestedHostStorageContext: storageContext,
 		})
 
 		if (approval.kind === 'package_bulk') {
@@ -953,8 +964,8 @@ async function handleApprovalAction(input: {
 					)
 				}
 			}
-			const payload = await loadAccountSecretsData({
-				request: input.request,
+			const payload = await loadAccountSecretsSelection({
+				...input.refresh,
 				env: input.env,
 				user: input.user,
 				selectedSecretId: null,
@@ -1009,11 +1020,11 @@ async function handleApprovalAction(input: {
 					storageContext: approval.storageContext,
 				})
 			}
-			const payload = await loadAccountSecretsData({
-				request: input.request,
+			const payload = await loadAccountSecretsSelection({
+				...input.refresh,
 				env: input.env,
 				user: input.user,
-				selectedSecretId: readAccountSecretsSelectedSecretId(input.request.url),
+				selectedSecretId: input.refresh.selectedSecretId,
 			})
 			return operationResult(payload)
 		}
@@ -1063,11 +1074,11 @@ async function handleApprovalAction(input: {
 				})
 			}
 
-			const payload = await loadAccountSecretsData({
-				request: input.request,
+			const payload = await loadAccountSecretsSelection({
+				...input.refresh,
 				env: input.env,
 				user: input.user,
-				selectedSecretId: readAccountSecretsSelectedSecretId(input.request.url),
+				selectedSecretId: input.refresh.selectedSecretId,
 			})
 			return operationResult(payload)
 		}
@@ -1128,11 +1139,11 @@ async function handleApprovalAction(input: {
 					)
 				}
 			}
-			const payload = await loadAccountSecretsData({
-				request: input.request,
+			const payload = await loadAccountSecretsSelection({
+				...input.refresh,
 				env: input.env,
 				user: input.user,
-				selectedSecretId: readAccountSecretsSelectedSecretId(input.request.url),
+				selectedSecretId: input.refresh.selectedSecretId,
 			})
 			return operationResult(payload)
 		}
@@ -1155,6 +1166,7 @@ async function handleApprovalAction(input: {
 
 async function handleSaveAction(input: {
 	request: Request
+	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: object
@@ -1527,8 +1539,8 @@ async function handleSaveAction(input: {
 	}
 
 	try {
-		const payload = await loadAccountSecretsData({
-			request: input.request,
+		const payload = await loadAccountSecretsSelection({
+			...input.refresh,
 			env: input.env,
 			user: input.user,
 			packageOptions,
@@ -1596,6 +1608,7 @@ async function handleSaveAction(input: {
 
 async function handleDeleteAction(input: {
 	request: Request
+	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: object
@@ -1624,8 +1637,8 @@ async function handleDeleteAction(input: {
 		return operationResult({ ok: false, error: 'Secret not found.' }, 404)
 	}
 
-	const payload = await loadAccountSecretsData({
-		request: input.request,
+	const payload = await loadAccountSecretsSelection({
+		...input.refresh,
 		env: input.env,
 		user: input.user,
 		selectedSecretId: null,

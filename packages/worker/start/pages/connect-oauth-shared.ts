@@ -1,3 +1,4 @@
+import { connectSecretsInput } from '../connect-input.ts'
 import { updateSecrets } from '#start/server/account-mutations'
 import {
 	normalizeProviderKey,
@@ -141,7 +142,7 @@ export async function approveConnectOauthHosts(input: {
 	await updateSecrets({
 		data: {
 			orgSlug: input.orgSlug ?? undefined,
-			search: `?${search}`,
+			refresh: connectSecretsInput(`?${search}`),
 			body: { action: 'approve' },
 		},
 	})

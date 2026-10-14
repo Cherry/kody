@@ -8,6 +8,8 @@ export const Route = createFileRoute('/admin/')({
 	preload: false,
 	shouldReload: true,
 	loader: ({ location }) =>
-		loadAdminIndex({ data: location.pathname + location.searchStr }),
+		loadAdminIndex({
+			data: { returnTo: location.pathname + location.searchStr },
+		}),
 	component: () => <p>Forbidden</p>,
 })

@@ -11,7 +11,7 @@ const pageQuery = createPageQuery('loadAdminRoles', loadAdminRoles, {
 export const Route = createFileRoute('/admin/roles')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: { returnTo: location.pathname + location.searchStr },
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

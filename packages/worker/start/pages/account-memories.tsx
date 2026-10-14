@@ -28,6 +28,7 @@ import { useMutation } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
+import { memoriesInput } from '../memories-input.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { pageQueryOrg } from '../page-query-scope.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -145,12 +146,20 @@ export function AccountMemoriesPage({
 			href: string
 			isCurrentSubmitter: () => boolean
 		}) => {
+			const filters = memoriesInput(
+				'',
+				new URL(input.href, 'https://kody.local').search,
+			)
 			return deleteAccountMemory({
 				data: {
 					memoryId: input.memoryId,
 					force: input.force,
 					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					search: new URL(input.href, 'https://kody.local').search,
+					refresh: {
+						query: filters.query,
+						includeDeleted: filters.includeDeleted,
+						selectedMemoryId: filters.selected ?? null,
+					},
 				},
 			})
 		},

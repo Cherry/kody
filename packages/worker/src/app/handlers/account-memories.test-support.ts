@@ -41,7 +41,16 @@ export function testAccountMemoriesApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountMemories({ env, user, request, body })
+			const result = await mutateAccountMemories({
+				env,
+				user,
+				body,
+				refresh: {
+					query: readAccountMemoriesQuery(request.url),
+					includeDeleted: readAccountMemoriesIncludeDeleted(request.url),
+					selectedMemoryId: readAccountMemoriesSelectedMemoryId(request.url),
+				},
+			})
 			return operationResult(result.data, result.status)
 		},
 	}

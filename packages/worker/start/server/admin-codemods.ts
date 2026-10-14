@@ -1,15 +1,13 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminCodemods = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/codemods(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
+	.validator(
+		z.object({
+			returnTo: z.string().regex(/^\/admin\/codemods(?:\?[^#\\]*)?$/),
+		}),
+	)
+	.handler(async ({ data }) => {
 		const [{ loadAdminCodemodsData }, { loadDocumentHead }] = await Promise.all(
 			[
 				import('../../src/admin/codemods-operations.ts'),
@@ -17,11 +15,11 @@ export const loadAdminCodemods = createServerFn({ method: 'GET' })
 			],
 		)
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(data.returnTo)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminCodemods', href),
+				head: loadDocumentHead('adminCodemods', data.returnTo),
 			}
 		}
 		const payload = await loadAdminCodemodsData(bindings)

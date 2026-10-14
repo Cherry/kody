@@ -3,10 +3,7 @@ import {
 	readAuthenticatedAppUser,
 } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import {
-	loadRequestOrgResolution,
-	orgSectionDenial,
-} from '#app/org-request-binding.ts'
+import { orgSectionDenial } from '#app/org-request-binding.ts'
 import { type McpServerAuthorizeLoaderData } from '#universal/loader-data.ts'
 import { orgSectionRestPath } from '#universal/org-section-hrefs.ts'
 import {
@@ -23,6 +20,7 @@ import { mcpOAuthAttemptIdentityInvalidMessage } from '#worker/mcp-client/oauth-
 import { getMcpServerSettingById } from '#worker/mcp-client/settings-service.ts'
 import { type McpServerPendingAuthorization } from '#worker/mcp-client/types.ts'
 import { loadOrgBindingForSlug } from '#worker/orgs/repo.ts'
+import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { waitUntil } from 'cloudflare:workers'
 
@@ -53,18 +51,32 @@ export async function loadConsentContext(input: {
 	user?: AuthenticatedAppUser
 }): Promise<ConsentContext | ConsentRefusal> {
 	const { env, request, params } = input
-	const user = input.user ?? (await readAuthenticatedAppUser(request, env))
-	if (!user) return { kind: 'signed-out' }
-	const resolution = input.user
-		? ((await loadOrgBindingForSlug(
-				env.APP_DB,
-				user.mcpUser.userId,
-				params.orgSlug,
-			)) ?? 'denied')
-		: await loadRequestOrgResolution(request, env, user.mcpUser.userId)
+	const authenticated =
+		input.user ?? (await readAuthenticatedAppUser(request, env))
+	if (!authenticated) return { kind: 'signed-out' }
+	const resolution =
+		(await loadOrgBindingForSlug(
+			env.APP_DB,
+			authenticated.mcpUser.userId,
+			params.orgSlug,
+		)) ?? 'denied'
+	if (
+		input.user &&
+		typeof resolution !== 'string' &&
+		resolution.org.id !== input.user.request.org.id
+	)
+		return { kind: 'not-found', title: 'Organization unavailable' }
 	const denial = orgSectionDenial(resolution, 'mcp-servers')
 	if (denial || typeof resolution === 'string') {
 		return { kind: 'not-found', title: denial ?? 'Organization unavailable' }
+	}
+	const user = {
+		...authenticated,
+		request: deriveRequestContext({
+			user: authenticated.mcpUser,
+			source: { kind: 'session' },
+			orgBinding: resolution,
+		}),
 	}
 	try {
 		await authorize({ env, request: user.request }, 'integration:write')

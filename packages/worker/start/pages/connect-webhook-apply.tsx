@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectWebhookInput } from '../connect-input.ts'
 import { decideWebhookApply } from '#start/server/connect'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
@@ -111,7 +112,10 @@ export function ConnectWebhookApplyRoute({
 				action,
 				href,
 				invalidate: invalidatePages,
-				queryKey: connectWebhookApplyQuery(actorKey, href).queryKey,
+				queryKey: connectWebhookApplyQuery(
+					actorKey,
+					connectWebhookInput(new URL(href, 'https://kody.local').search),
+				).queryKey,
 			})
 			setMessage(
 				action === 'approve' && payload.ok

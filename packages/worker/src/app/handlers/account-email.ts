@@ -1,4 +1,4 @@
-import { loadAccountEmailData } from '#app/account-email-data.ts'
+import { readAccountEmailData } from '#app/account-email-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
@@ -32,12 +32,17 @@ function parseClassification(value: string): EmailClassification | null {
 }
 
 export async function mutateAccountEmail({
-	request,
+	refresh,
 	env,
 	user,
 	body,
 }: {
-	request: Request
+	refresh: {
+		query: string
+		classification: EmailClassification | null
+		page: number
+		pageSize: number
+	}
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	body: Record<string, unknown>
@@ -67,12 +72,11 @@ export async function mutateAccountEmail({
 			return operationResult({ ok: false, error: 'Message not found.' }, 404)
 		}
 
-		const listUrl = new URL(request.url, 'http://localhost')
-		listUrl.searchParams.delete('selected')
 		return operationResult(
-			await loadAccountEmailData({
+			await readAccountEmailData({
 				env,
-				request: new Request(listUrl.toString(), { method: 'GET' }),
+				...refresh,
+				selectedMessageId: null,
 				user,
 			}),
 		)
@@ -113,12 +117,11 @@ export async function mutateAccountEmail({
 		)
 	}
 
-	const listUrl = new URL(request.url, 'http://localhost')
-	listUrl.searchParams.set('selected', messageId)
 	return operationResult(
-		await loadAccountEmailData({
+		await readAccountEmailData({
 			env,
-			request: new Request(listUrl.toString(), { method: 'GET' }),
+			...refresh,
+			selectedMessageId: messageId,
 			user,
 		}),
 	)

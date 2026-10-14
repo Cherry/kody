@@ -13,7 +13,10 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute('/admin/community-reports')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: {
+			returnTo: location.pathname + location.searchStr,
+			status: new URLSearchParams(location.searchStr).get('status'),
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

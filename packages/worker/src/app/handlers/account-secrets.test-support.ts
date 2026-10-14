@@ -1,4 +1,8 @@
-import { loadAccountSecretsData } from '#app/account-secrets-data.ts'
+import { connectSecretsInput } from '../../../start/connect-input.ts'
+import {
+	loadAccountSecretsSelection,
+	readAccountSecretsSelectedSecretId,
+} from '#app/account-secrets-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { mutateAccountSecrets } from './account-secrets.ts'
@@ -13,8 +17,9 @@ export function testAccountSecretsApiHandler(env: Env) {
 			}
 
 			if (request.method === 'GET') {
-				const payload = await loadAccountSecretsData({
-					request,
+				const payload = await loadAccountSecretsSelection({
+					...connectSecretsInput(new URL(request.url).search),
+					selectedSecretId: readAccountSecretsSelectedSecretId(request.url),
 					env,
 					user,
 				})
@@ -34,6 +39,10 @@ export function testAccountSecretsApiHandler(env: Env) {
 			}
 
 			const result = await mutateAccountSecrets({
+				refresh: {
+					...connectSecretsInput(new URL(request.url).search),
+					selectedSecretId: readAccountSecretsSelectedSecretId(request.url),
+				},
 				request,
 				env,
 				user,

@@ -1,3 +1,4 @@
+import { connectSecretsSchema } from '../connect-input.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 
@@ -26,7 +27,17 @@ const resourceInput = z.object({
 	search: z.string().default(''),
 })
 export const updateSecrets = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+	.validator(
+		resourceInput.omit({ search: true }).extend({
+			body: z.record(z.string(), z.unknown()),
+			refresh: connectSecretsSchema
+				.pick({ selectedSecretId: true, approval: true })
+				.default({
+					selectedSecretId: null,
+					approval: { hosts: [], names: [], scope: 'user' },
+				}),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
@@ -42,11 +53,12 @@ export const updateSecrets = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/secrets', context.request.url)
-				url.search = data.search
-				const request = new Request(url, { headers: context.request.headers })
 				return requireOperationResult(
-					await mutateAccountSecrets({ ...context, request, body: data.body }),
+					await mutateAccountSecrets({
+						...context,
+						refresh: data.refresh,
+						body: data.body,
+					}),
 				)
 			},
 		)
@@ -79,7 +91,12 @@ export const deleteAccountValue = createServerFn({ method: 'POST' })
 	})
 export const deleteAccountMemory = createServerFn({ method: 'POST' })
 	.validator(
-		resourceInput.extend({
+		resourceInput.omit({ search: true }).extend({
+			refresh: z.object({
+				query: z.string(),
+				includeDeleted: z.boolean(),
+				selectedMemoryId: z.string().nullable(),
+			}),
 			memoryId: z.string().trim().min(1),
 			force: z.boolean(),
 		}),
@@ -99,12 +116,10 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/memories', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountMemories({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
+						refresh: data.refresh,
 						body: {
 							action: 'delete',
 							memoryId: data.memoryId,
@@ -133,12 +148,9 @@ export const updateJobs = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/jobs', context.request.url)
-				url.search = data.search
 				const result = requireOperationResult(
 					await mutateAccountJobs({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -175,12 +187,9 @@ export const updateWorkflows = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/workflows', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountWorkflows({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -205,12 +214,9 @@ export const updateSecretProviders = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/secret-providers', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountSecretProviders({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -235,12 +241,9 @@ export const updateIntegrations = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/integrations', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountIntegrations({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -265,12 +268,9 @@ export const updateConnections = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/connections', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountConnections({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -295,12 +295,9 @@ export const updateMcpServers = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/mcp-servers', context.request.url)
-				url.search = data.search
 				return requireOperationResult(
 					await mutateAccountMcpServers({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
 						body: data.body,
 					}),
 				)
@@ -309,7 +306,17 @@ export const updateMcpServers = createServerFn({ method: 'POST' })
 	})
 
 export const updateEmail = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+	.validator(
+		resourceInput.omit({ search: true }).extend({
+			body: z.record(z.string(), z.unknown()),
+			refresh: z.object({
+				query: z.string(),
+				classification: z.enum(['accepted', 'quarantined']).nullable(),
+				page: z.number().int().positive(),
+				pageSize: z.number().int().positive().max(100),
+			}),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
@@ -325,12 +332,10 @@ export const updateEmail = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/email', context.request.url)
-				url.search = data.search
 				const result = requireOperationResult(
 					await mutateAccountEmail({
 						...context,
-						request: new Request(url, { headers: context.request.headers }),
+						refresh: data.refresh,
 						body: data.body,
 					}),
 				)
@@ -367,11 +372,8 @@ export const updateEmailDestinations = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/email-destinations', context.request.url)
-				url.search = data.search
 				const result = await mutateAccountEmailDestinations({
 					...context,
-					request: new Request(url, { headers: context.request.headers }),
 					body: data.body,
 				})
 				const { setResponseHeader } =
@@ -509,7 +511,17 @@ export const recordWaitingClick = createServerFn({ method: 'POST' })
 		)
 	})
 export const updateSecretCollection = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ body: z.record(z.string(), z.unknown()) }))
+	.validator(
+		resourceInput.omit({ search: true }).extend({
+			body: z.record(z.string(), z.unknown()),
+			refresh: connectSecretsSchema
+				.pick({ selectedSecretId: true, approval: true })
+				.default({
+					selectedSecretId: null,
+					approval: { hosts: [], names: [], scope: 'user' },
+				}),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
@@ -525,13 +537,10 @@ export const updateSecretCollection = createServerFn({ method: 'POST' })
 				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
-				const url = new URL('/account/secrets', context.request.url)
-				url.search = data.search
-				const request = new Request(url, { headers: context.request.headers })
 				return requireOperationResult(
 					await mutateAccountSecretCollection({
 						...context,
-						request,
+						refresh: data.refresh,
 						body: data.body,
 					}),
 				)

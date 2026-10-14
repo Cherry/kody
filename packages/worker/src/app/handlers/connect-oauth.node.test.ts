@@ -1,3 +1,4 @@
+import { connectOauthInput } from '../../../start/connect-input.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as AccountIntegrationsData from '#app/account-integrations-data.ts'
@@ -30,12 +31,6 @@ const mockModule = vi.hoisted(() => ({
 	loadConnectOauthChooser: vi.fn<
 		typeof ConnectOauthChooser.loadConnectOauthChooser
 	>(async () => ({ options: [] })),
-	readConnectOauthLookupOptions: (searchParams: URLSearchParams) => {
-		const appParam = searchParams.get('app')?.trim()
-		return {
-			appSlug: appParam || undefined,
-		}
-	},
 }))
 
 vi.mock('#app/authenticated-user.ts', () => ({
@@ -72,8 +67,6 @@ vi.mock('#app/account-integrations-data.ts', () => ({
 			typeof AccountIntegrationsData.hasStoredConnectClientSecret
 		>
 	) => mockModule.hasStoredConnectClientSecret(...args),
-	readConnectOauthLookupOptions: (searchParams: URLSearchParams) =>
-		mockModule.readConnectOauthLookupOptions(searchParams),
 }))
 
 const native = vi.hoisted(() => ({
@@ -86,8 +79,10 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
-			validator: (fn: typeof validate) => {
-				validate = fn
+			validator: (
+				fn: typeof validate | { parse: (data: unknown) => unknown },
+			) => {
+				validate = typeof fn === 'function' ? fn : (data) => fn.parse(data)
 				return builder
 			},
 			handler:
@@ -118,7 +113,7 @@ let loaded: Awaited<ReturnType<typeof loadConnectOauth>> | undefined
 async function visit(search = '') {
 	native.env = env
 	native.request = new Request(`https://example.com/connect/oauth${search}`)
-	loaded = await loadConnectOauth({ data: `/connect/oauth${search}` })
+	loaded = await loadConnectOauth({ data: connectOauthInput(search) })
 	return loaded
 }
 
@@ -171,7 +166,7 @@ test('bare and provider visits require a session; signed-in bare visits render t
 	})
 })
 
-test('provider visits embed SSR loader data and ignore platform lookup flags', async () => {
+test('provider visits embed SSR loader data with explicit app and platform selection', async () => {
 	signIn()
 	const record = { name: 'github', platform: true }
 	mockModule.loadAccountIntegrationByName.mockResolvedValue(record)
@@ -183,7 +178,7 @@ test('provider visits embed SSR loader data and ignore platform lookup flags', a
 		env,
 		expect.anything(),
 		'github',
-		{ appSlug: undefined },
+		{ appSlug: undefined, platformSlug: undefined },
 	)
 	expect(renderedConnectOauth()).toEqual({
 		ok: true,
@@ -201,17 +196,17 @@ test('provider visits embed SSR loader data and ignore platform lookup flags', a
 	})
 	mockModule.hasStoredConnectClientSecret.mockResolvedValue(false)
 	const lookups = [
-		['?provider=google&platform=1', 'google', undefined],
-		['?provider=google-2&platform=google', 'google-2', undefined],
-		['?provider=work&app=google', 'work', 'google'],
+		['?provider=google&platform=1', 'google', undefined, '1'],
+		['?provider=google-2&platform=google', 'google-2', undefined, 'google'],
+		['?provider=work&app=google', 'work', 'google', undefined],
 	] as const
-	for (const [search, name, appSlug] of lookups) {
+	for (const [search, name, appSlug, platformSlug] of lookups) {
 		await visit(search)
 		expect(mockModule.loadAccountIntegrationByName).toHaveBeenLastCalledWith(
 			env,
 			expect.anything(),
 			name,
-			{ appSlug },
+			{ appSlug, platformSlug },
 		)
 	}
 })

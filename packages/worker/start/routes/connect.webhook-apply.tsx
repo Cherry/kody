@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectWebhookInput } from '../connect-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { connectWebhookApplyQuery } from '../connect-approval-queries.ts'
 import { loadPageQuery, usePageQuery } from '../page-query.ts'
@@ -8,7 +9,7 @@ export const Route = createFileRoute('/connect/webhook-apply')({
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: connectWebhookInput(location.searchStr),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

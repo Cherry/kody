@@ -1,29 +1,28 @@
 import { createServerFn } from '@tanstack/react-start'
+import { z } from 'zod'
 
 export const loadAdminCommunityReports = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/admin\/community-reports(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid users URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const [{ loadAdminCommunityReportsData }, { loadDocumentHead }] =
+	.validator(
+		z.object({
+			returnTo: z.string().regex(/^\/admin\/community-reports(?:\?[^#\\]*)?$/),
+			status: z.string().nullable(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [{ readAdminCommunityReportsData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/admin-community-reports-data.ts'),
 				import('./document-head.ts'),
 			])
 		const { readAdminPageContext } = await import('./admin-page-context.ts')
-		const { bindings, url, user } = await readAdminPageContext(href)
+		const { bindings, url, user } = await readAdminPageContext(data.returnTo)
 		if (!user) {
 			return {
 				forbidden: true as const,
-				head: loadDocumentHead('adminCommunityReports', href),
+				head: loadDocumentHead('adminCommunityReports', data.returnTo),
 			}
 		}
-		const payload = await loadAdminCommunityReportsData(bindings, url.href)
+		const payload = await readAdminCommunityReportsData(bindings, data)
 		return {
 			forbidden: false as const,
 			payload,

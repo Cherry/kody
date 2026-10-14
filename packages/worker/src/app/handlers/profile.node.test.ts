@@ -383,3 +383,35 @@ test('an organization home remembers the org as last used; a public profile does
 		expect.anything(),
 	)
 })
+
+test('explicit repository filters ignore RPC URL state and remain distinct in the request cache', async () => {
+	setupPublicProfileMocks()
+	const request = new Request(
+		'https://example.com/_serverFn/profile?q=wrong&limit=99',
+	)
+	const first = await loadProfileData(env, request, 'alice', undefined, {
+		query: 'first',
+		limit: 2,
+	})
+	expect(first?.query).toBe('first')
+	expect(lastPackagesQuery()).toMatchObject({
+		query: 'first',
+		limit: 2,
+		includePrivate: false,
+	})
+	const second = await loadProfileData(env, request, 'alice', undefined, {
+		query: 'second',
+		limit: 3,
+	})
+	expect(second?.query).toBe('second')
+	expect(lastPackagesQuery()).toMatchObject({
+		query: 'second',
+		limit: 3,
+		includePrivate: false,
+	})
+	expect(mockModule.readAuthenticatedAppUser).toHaveBeenLastCalledWith(
+		request,
+		env,
+		undefined,
+	)
+})

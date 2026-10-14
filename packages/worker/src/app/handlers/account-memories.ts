@@ -3,8 +3,6 @@ import {
 	loadAccountMemoriesData,
 	loadAccountMemoriesExport,
 	readAccountMemoriesIncludeDeleted,
-	readAccountMemoriesQuery,
-	readAccountMemoriesSelectedMemoryId,
 } from '#app/account-memories-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
@@ -58,7 +56,11 @@ async function handleDeleteAction(input: {
 	env: Env
 	user: AuthenticatedUser
 	body: object
-	request: Request
+	refresh: {
+		query: string
+		includeDeleted: boolean
+		selectedMemoryId: string | null
+	}
 }) {
 	const memoryId = readTrimmedStringOrEmpty(input.body, 'memoryId')
 	if (!memoryId) {
@@ -80,9 +82,7 @@ async function handleDeleteAction(input: {
 	const payload: AccountMemoriesLoaderData = await loadAccountMemoriesData({
 		env: input.env,
 		user: input.user,
-		query: readAccountMemoriesQuery(input.request.url),
-		includeDeleted: readAccountMemoriesIncludeDeleted(input.request.url),
-		selectedMemoryId: readAccountMemoriesSelectedMemoryId(input.request.url),
+		...input.refresh,
 	})
 	return operationResult(payload)
 }
@@ -107,12 +107,16 @@ function readBoolean(body: object, key: string, defaultValue: boolean) {
 export async function mutateAccountMemories({
 	env,
 	user,
-	request,
+	refresh,
 	body,
 }: {
 	env: Env
 	user: AuthenticatedUser
-	request: Request
+	refresh: {
+		query: string
+		includeDeleted: boolean
+		selectedMemoryId: string | null
+	}
 	body: object
 }) {
 	const action = readTrimmedStringOrEmpty(body, 'action')
@@ -132,7 +136,7 @@ export async function mutateAccountMemories({
 				env,
 				user,
 				body,
-				request,
+				refresh,
 			})
 		}
 	} catch (error) {

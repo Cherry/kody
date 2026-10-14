@@ -5,32 +5,34 @@ import { z } from 'zod'
 
 async function orgContext(slug: string, section: string) {
 	const [
-		{ env },
-		{ getRequest, setResponseHeader },
-		{ getEnv },
-		{ setAuthSessionSecret },
-		{ requireAuthenticatedPageUser },
+		{ loadPersonalCollection },
+		{ loadOrgBindingForSlug },
+		{ deriveRequestContext },
 	] = await Promise.all([
-		import('cloudflare:workers'),
-		import('@tanstack/react-start/server'),
-		import('../../src/app/env.ts'),
-		import('../../src/app/auth-session.ts'),
-		import('../../src/app/page-auth.ts'),
+		import('./collection-context.ts'),
+		import('#worker/orgs/repo.ts'),
+		import('#worker/request-context/request-context.ts'),
 	])
-	const bindings = getEnv(env)
-	setAuthSessionSecret(bindings.COOKIE_SECRET)
-	const request = new Request(
-		new URL(`/@${encodeURIComponent(slug)}/-/${section}`, getRequest().url),
-		{ headers: getRequest().headers },
+	const {
+		bindings,
+		request,
+		user: authenticated,
+	} = await loadPersonalCollection(`/@${encodeURIComponent(slug)}/-/${section}`)
+	const binding = await loadOrgBindingForSlug(
+		bindings.APP_DB,
+		authenticated.mcpUser.userId,
+		slug,
 	)
-	setResponseHeader('Cache-Control', 'no-store')
-	const user = await requireAuthenticatedPageUser(request, bindings)
-	if (user instanceof Response) {
-		const cookies = user.headers.getSetCookie()
-		if (cookies.length) setResponseHeader('Set-Cookie', cookies)
-		throw redirect({ href: user.headers.get('Location') ?? '/login' })
+	if (!binding) throw notFound()
+	const user = {
+		...authenticated,
+		request: deriveRequestContext({
+			user: authenticated.mcpUser,
+			source: { kind: 'session' },
+			orgBinding: binding,
+		}),
 	}
-	return { env: bindings, request, user }
+	return { env: bindings, request, user, binding, orgSlug: slug }
 }
 const slugInput = z.object({ slug: z.string().regex(/^[a-zA-Z0-9_-]+$/) })
 
@@ -250,24 +252,17 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'overview')
 		const [
-			{ loadRequestOrgResolution },
 			{ personalOrgIdForPerson },
 			{ serializeLastUsedOrgCookie },
 			{ isSecureRequest },
 			{ setResponseHeader },
 		] = await Promise.all([
-			import('../../src/app/org-request-binding.ts'),
 			import('../../src/orgs/personal-org-id.ts'),
 			import('#universal/org-last-used-cookie.ts'),
 			import('../../src/app/auth-session.ts'),
 			import('@tanstack/react-start/server'),
 		])
-		const resolution = await loadRequestOrgResolution(
-			input.request,
-			input.env,
-			input.user.mcpUser.userId,
-		)
-		if (typeof resolution === 'string') throw notFound()
+		const resolution = input.binding
 		const slug = resolution.org.slug ?? data.slug
 		if (resolution.org.id !== personalOrgIdForPerson(input.user.mcpUser))
 			throw redirect({ href: `/@${encodeURIComponent(slug)}` })
@@ -284,11 +279,16 @@ export const loadOrgOverview = createServerFn({ method: 'GET' })
 	})
 
 export const loadOrgRepositories = createServerFn({ method: 'GET' })
-	.validator(slugInput.extend({ search: z.string().default('') }))
+	.validator(
+		slugInput.extend({
+			query: z.string().default(''),
+			limit: z.number().int().positive().max(100).optional(),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const input = await orgContext(data.slug, 'repositories')
 		const [
-			{ loadRequestOrgResolution, orgSectionDenial },
+			{ orgSectionDenial },
 			{ personalOrgIdForPerson },
 			{ loadOrgRepositoriesData },
 			{ loadProfileData },
@@ -298,27 +298,23 @@ export const loadOrgRepositories = createServerFn({ method: 'GET' })
 			import('../../src/app/org-repositories-data.ts'),
 			import('../../src/app/profile-data.ts'),
 		])
-		const binding = await loadRequestOrgResolution(
-			input.request,
-			input.env,
-			input.user.mcpUser.userId,
-		)
-		if (
-			typeof binding === 'string' ||
-			orgSectionDenial(binding, 'repositories')
-		)
-			throw notFound()
-		const url = new URL(input.request.url)
-		const search = new URLSearchParams(data.search)
-		for (const key of ['q', 'limit']) {
-			const value = search.get(key)
-			if (value !== null) url.searchParams.set(key, value)
-		}
-		const request = new Request(url, { headers: input.request.headers })
+		const binding = input.binding
+		if (orgSectionDenial(binding, 'repositories')) throw notFound()
 		const payload =
 			binding.org.id === personalOrgIdForPerson(input.user.mcpUser)
-				? await loadProfileData(input.env, request, input.user.username)
-				: await loadOrgRepositoriesData({ ...input, request, binding })
+				? await loadProfileData(
+						input.env,
+						input.request,
+						input.user.username,
+						undefined,
+						{ query: data.query, limit: data.limit },
+					)
+				: await loadOrgRepositoriesData({
+						...input,
+						binding,
+						query: data.query,
+						limit: data.limit,
+					})
 		if (!payload) throw notFound()
 		return payload
 	})

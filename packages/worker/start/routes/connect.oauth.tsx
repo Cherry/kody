@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectOauthInput } from '../connect-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadConnectOauth } from '#start/server/connect'
 import { ConnectOauthRoute } from '../pages/connect-oauth.tsx'
@@ -9,7 +10,7 @@ export const Route = createFileRoute('/connect/oauth')({
 	loader: ({ abortController, location }) =>
 		loadConnectOauth({
 			signal: abortController.signal,
-			data: location.pathname + location.searchStr,
+			data: connectOauthInput(location.searchStr),
 		}),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,

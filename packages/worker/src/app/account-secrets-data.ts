@@ -87,45 +87,6 @@ function readSelectedSecretIdFromPath(pathname: string) {
 	return null
 }
 
-export async function loadAccountSecretsData(input: {
-	request: Request
-	search?: string
-	env: Env
-	user: AuthenticatedUser
-	selectedSecretId?: string | null
-	packageOptions?: Array<SavedPackageOption>
-	savedPackages?: Array<SavedPackageSummary>
-}): Promise<AccountSecretsLoaderData> {
-	const selectedSecretId =
-		input.selectedSecretId === undefined
-			? readAccountSecretsSelectedSecretId(
-					new URL(input.search ?? '', input.request.url).toString(),
-				)
-			: input.selectedSecretId
-	const url = new URL(input.request.url)
-	if (input.search !== undefined) url.search = input.search
-	return loadAccountSecretsSelection({
-		...input,
-		selectedSecretId,
-		approval: {
-			hosts: [
-				...url.searchParams.getAll('hosts'),
-				...url.searchParams.getAll('host'),
-				...url.searchParams.getAll('allowed-host'),
-				...url.searchParams.getAll('allowedHosts'),
-			],
-			names: [
-				...url.searchParams.getAll('names'),
-				...url.searchParams.getAll('name'),
-			],
-			packageId: url.searchParams.get('package_id') ?? undefined,
-			scope: readHostApprovalScope(url),
-			storagePackageId: url.searchParams.get('packageId') ?? undefined,
-			sessionId: url.searchParams.get('sessionId') ?? undefined,
-		},
-	})
-}
-
 export async function loadAccountSecretsSelection(input: {
 	env: Env
 	user: AuthenticatedUser
@@ -669,55 +630,4 @@ export function getSecretContextForAccountSecret(input: {
 	}
 }
 
-function readApprovalHosts(url: URL) {
-	const values = [
-		...url.searchParams.getAll('hosts'),
-		...url.searchParams.getAll('host'),
-		...url.searchParams.getAll('allowed-host'),
-		...url.searchParams.getAll('allowedHosts'),
-	]
-	return classifyBulkApprovalHosts(values.flatMap((value) => value.split(',')))
-}
-
-function readHostApprovalScope(url: URL): SecretScope {
-	const value = url.searchParams.get('scope')?.trim()
-	switch (value) {
-		case 'package':
-		case 'session':
-		case 'user':
-			return value
-		default:
-			return 'user'
-	}
-}
-
-function getHostApprovalStorageContext(url: URL): StorageContext | null {
-	const scope = readHostApprovalScope(url)
-	switch (scope) {
-		case 'package': {
-			const packageId = url.searchParams.get('packageId')?.trim()
-			if (!packageId) return null
-			return { sessionId: null, appId: null, packageId }
-		}
-		case 'session': {
-			const sessionId = url.searchParams.get('sessionId')?.trim()
-			if (!sessionId) return null
-			return { sessionId, appId: null, packageId: null }
-		}
-		case 'user':
-			return null
-		default: {
-			const _exhaustive: never = scope
-			return _exhaustive
-		}
-	}
-}
-
-export {
-	getHostApprovalStorageContext,
-	listAccountSecrets,
-	readApprovalHosts,
-	readHostApprovalScope,
-	resolveApprovalRequest,
-	toPackageOptions,
-}
+export { listAccountSecrets, resolveApprovalRequest, toPackageOptions }

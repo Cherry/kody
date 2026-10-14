@@ -3,12 +3,10 @@ import {
 	hasStoredConnectClientSecret,
 	loadAccountIntegrationByName,
 	loadExistingConnectionSummary,
-	readConnectOauthLookupOptions,
 } from '#app/account-integrations-data.ts'
 import { loadConnectOauthChooser } from '#app/connect-oauth-chooser.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { joinAppUrl } from '#worker/app-base-url.ts'
-import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
 import { type ConnectOauthLoaderData } from '#universal/loader-data.ts'
 
 /**
@@ -35,18 +33,25 @@ export function isBareConnectOauthVisit(url: URL): boolean {
 export async function loadConnectOauthLoaderData(
 	env: Env,
 	request: Request,
-	requestUrl: URL,
+	input: {
+		orgSlug?: string
+		provider?: string
+		code?: string
+		error?: string
+		appSlug?: string
+		platformSlug?: string
+	},
 	authenticatedUser?: Awaited<ReturnType<typeof readAuthenticatedAppUser>>,
 ): Promise<ConnectOauthLoaderData> {
 	const redirectUri = joinAppUrl({
 		env,
-		path: requestUrl.pathname,
+		path: '/connect/oauth',
 		requestUrl: request.url,
 	})
-	const provider = requestUrl.searchParams.get('provider')?.trim()
+	const provider = input.provider?.trim()
 	const providerKey = provider ? normalizeProviderKey(provider) : ''
 	if (!providerKey) {
-		if (!isBareConnectOauthVisit(requestUrl)) {
+		if (input.provider || input.code || input.error) {
 			return { ok: true, provider: null, integration: null, redirectUri }
 		}
 		const user =
@@ -63,7 +68,7 @@ export async function loadConnectOauthLoaderData(
 				? await loadConnectOauthChooser({
 						env,
 						userId: user.mcpUser.userId,
-						orgSlug: readOrgSlugFromUrl(requestUrl),
+						orgSlug: input.orgSlug,
 					})
 				: { options: [] },
 		}
@@ -77,12 +82,19 @@ export async function loadConnectOauthLoaderData(
 		return { ok: true, provider: null, integration: null, redirectUri }
 	}
 	// `app=<slug>` reuses a saved bring-your-own app under `provider`.
-	// `platform=` is ignored: built-in connect is retired.
+	// Explicit platform intent uses the same visibility rules as the integration resolver.
 	const integration = await loadAccountIntegrationByName(
 		env,
 		user,
 		providerKey,
-		readConnectOauthLookupOptions(requestUrl.searchParams),
+		{
+			appSlug: input.appSlug?.trim()
+				? (normalizeProviderKey(input.appSlug.trim()) ?? undefined)
+				: undefined,
+			platformSlug: input.platformSlug?.trim()
+				? (normalizeProviderKey(input.platformSlug.trim()) ?? undefined)
+				: undefined,
+		},
 	)
 	const [existingConnection, hasStoredClientSecret] = await Promise.all([
 		loadExistingConnectionSummary(env, user, providerKey),

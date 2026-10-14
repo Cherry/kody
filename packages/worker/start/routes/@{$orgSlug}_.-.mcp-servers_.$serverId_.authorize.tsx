@@ -13,7 +13,9 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize',
 )({
-	context: ({ location }) => ({ pageQueryInput: location.pathname }),
+	context: ({ params }) => ({
+		pageQueryInput: { orgSlug: params.orgSlug, serverId: params.serverId },
+	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

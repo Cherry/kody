@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { connectSecretsInput } from '../connect-input.ts'
 import { updateSecrets } from '#start/server/account-mutations'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { routes } from '#universal/routes.ts'
@@ -84,7 +85,7 @@ export function ConnectSecretsRoute({
 			const payload = (await updateSecrets({
 				data: {
 					orgSlug: url.searchParams.get('org') ?? undefined,
-					search: url.search,
+					refresh: connectSecretsInput(url.search),
 					body: { action },
 				},
 			})) as AccountSecretsLoaderData & { ok?: boolean; error?: string }
@@ -112,7 +113,10 @@ export function ConnectSecretsRoute({
 				action,
 				href,
 				invalidate: invalidatePages,
-				queryKey: connectSecretsQuery(actorKey, href).queryKey,
+				queryKey: connectSecretsQuery(
+					actorKey,
+					connectSecretsInput(new URL(href, 'https://kody.local').search),
+				).queryKey,
 			})
 			setCompleted(action)
 		} catch (error) {

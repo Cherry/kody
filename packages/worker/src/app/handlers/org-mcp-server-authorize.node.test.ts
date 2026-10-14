@@ -146,13 +146,23 @@ function pagePath(orgSlug: string, serverId: string) {
 
 async function openConsent(
 	env: Env,
-	input: { person: Person | null; orgSlug?: string; serverId?: string },
+	input: {
+		person: Person | null
+		orgSlug?: string
+		serverId?: string
+		method?: 'GET' | 'HEAD'
+		requestPath?: string
+	},
 ) {
 	const orgSlug = input.orgSlug ?? 'acme'
 	const serverId = input.serverId ?? 'server-acme'
-	const request = new Request(`${origin}${pagePath(orgSlug, serverId)}`, {
-		headers: input.person ? { Cookie: await cookieFor(input.person) } : {},
-	})
+	const request = new Request(
+		`${origin}${input.requestPath ?? pagePath(orgSlug, serverId)}`,
+		{
+			method: input.method ?? 'GET',
+			headers: input.person ? { Cookie: await cookieFor(input.person) } : {},
+		},
+	)
 	return loadMcpServerAuthorizeData({
 		env,
 		request,
@@ -372,4 +382,32 @@ test('consent page refuses people outside the org, members without integration w
 		consent: null,
 	})
 	expect(mocks.readPendingAuthorization).not.toHaveBeenCalled()
+})
+
+test('consent read binds explicit org independently of the RPC URL and HEAD never continues OAuth', async () => {
+	const env = await seed()
+	mocks.bindOAuthAttemptActor.mockClear()
+	const page = readPage(
+		await openConsent(env, {
+			person: 'ada',
+			orgSlug: 'acme',
+			serverId: 'server-acme',
+			method: 'HEAD',
+			requestPath: '/_serverFn/consent',
+		}),
+	)
+	expect(page.orgSlug).toBe('acme')
+	expect(page.serverId).toBe('server-acme')
+	expect(mocks.readPendingAuthorization).toHaveBeenCalledWith({
+		ownerId: 'org-acme',
+		serverId: 'server-acme',
+	})
+	expect(mocks.bindOAuthAttemptActor).not.toHaveBeenCalled()
+	expect(
+		await openConsent(env, {
+			person: 'dan',
+			orgSlug: 'acme',
+			requestPath: '/_serverFn/consent',
+		}),
+	).toMatchObject({ kind: 'not-found' })
 })

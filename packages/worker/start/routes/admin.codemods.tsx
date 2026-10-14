@@ -11,7 +11,7 @@ const pageQuery = createPageQuery('loadAdminCodemods', loadAdminCodemods, {
 export const Route = createFileRoute('/admin/codemods')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: { returnTo: location.pathname + location.searchStr },
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

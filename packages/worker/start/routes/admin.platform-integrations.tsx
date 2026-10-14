@@ -13,7 +13,10 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute('/admin/platform-integrations')({
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+		pageQueryInput: {
+			returnTo: location.pathname + location.searchStr,
+			view: 'list' as const,
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

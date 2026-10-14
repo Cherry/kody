@@ -6,7 +6,6 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from '../pages/account-management-components.tsx'
-import { repositoryPageSearch } from '../page-search.ts'
 import { ProfileRoute } from '../pages/profile.tsx'
 const pageQuery = createPageQuery('loadOrgRepositories', loadOrgRepositories, {
 	freshAuthorization: true,
@@ -20,7 +19,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/repositories')({
 	context: ({ params, location }) => ({
 		pageQueryInput: {
 			slug: params.orgSlug,
-			search: repositoryPageSearch(location.searchStr),
+			...repositoryInput(location.searchStr),
 		},
 	}),
 	loader: ({ context, preload }) =>
@@ -50,4 +49,14 @@ function Page() {
 			/>
 		</AccountManagementShell>
 	)
+}
+
+function repositoryInput(search: string) {
+	const params = new URLSearchParams(search)
+	const parsed = Number.parseInt(params.get('limit') ?? '', 10)
+	return {
+		query: params.has('limit') ? (params.get('q') ?? '').trim() : '',
+		limit:
+			Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 100) : undefined,
+	}
 }

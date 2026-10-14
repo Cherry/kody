@@ -1,28 +1,33 @@
+import { type z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
-function validateHref(href: string) {
-	if (
-		typeof href !== 'string' ||
-		!/^\/connect\/(oauth|secrets|webhook-apply)(?:\?[^#]*)?$/.test(href)
-	)
-		throw new Error('Invalid connection URL.')
-	return href
-}
-async function context(href: string) {
+import { redirect, notFound } from '@tanstack/react-router'
+import {
+	connectSecretsSchema,
+	connectOauthSchema,
+	connectWebhookSchema,
+} from '../connect-input.ts'
+async function context(
+	path:
+		| '/connect/secrets'
+		| '/connect/oauth'
+		| '/connect/webhook-apply'
+		| '/connect/secret-set',
+	input: { orgSlug?: string; search: [string, string][] },
+) {
 	const { withWebsiteRead, WebsiteAuthenticationError } =
 		await import('./mutation-context.ts')
 	const { loadDocumentHead } = await import('./document-head.ts')
-	const url = new URL(href, 'https://kody.test')
-	const orgSlug = url.searchParams.get('org') ?? undefined
+	const search = new URLSearchParams(input.search).toString()
+	const href = path + (search ? `?${search}` : '')
 	try {
 		return await withWebsiteRead(
-			{ scope: orgSlug ? { orgSlug } : undefined },
+			{ scope: input.orgSlug ? { orgSlug: input.orgSlug } : undefined },
 			async ({ env: bindings, request, user }) => ({
 				bindings,
 				request,
 				user,
-				url: new URL(href, request.url),
 				loadDocumentHead,
+				search: search ? `?${search}` : '',
 			}),
 		)
 	} catch (error) {
@@ -31,111 +36,113 @@ async function context(href: string) {
 				href: `/login?redirectTo=${encodeURIComponent(href)}`,
 				statusCode: 302,
 			})
+		if (error instanceof Error && error.message === 'Organization not found.')
+			throw notFound()
 		throw error
 	}
 }
-export const loadConnectSecrets = createServerFn({ method: 'GET' })
-	.validator(validateHref)
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user, url, loadDocumentHead } =
-			await context(href)
-		const { loadAccountSecretsData } =
-			await import('../../src/app/account-secrets-data.ts')
-		const payload = await loadAccountSecretsData({
-			env: bindings,
-			request,
-			search: url.search,
-			user,
-		})
-		return {
-			payload,
-			head: loadDocumentHead(
-				'connectSecrets',
-				url.pathname,
-				{ accountSecrets: payload },
-				url.search,
-			),
-		}
+export async function readConnectSecrets(
+	path: '/connect/secrets' | '/connect/secret-set',
+	data: z.infer<typeof connectSecretsSchema>,
+) {
+	const { bindings, user, loadDocumentHead, search } = await context(path, data)
+	const { loadAccountSecretsSelection } =
+		await import('../../src/app/account-secrets-data.ts')
+	const payload = await loadAccountSecretsSelection({
+		env: bindings,
+		user,
+		selectedSecretId: data.selectedSecretId,
+		approval: data.approval,
 	})
+	return {
+		payload,
+		head: loadDocumentHead(
+			path === '/connect/secrets' ? 'connectSecrets' : 'connectSecretSet',
+			path,
+			{ accountSecrets: payload },
+			search,
+		),
+	}
+}
+export const loadConnectSecrets = createServerFn({ method: 'GET' })
+	.validator(connectSecretsSchema)
+	.handler(({ data }) => readConnectSecrets('/connect/secrets', data))
 export const loadConnectWebhookApply = createServerFn({ method: 'GET' })
-	.validator(validateHref)
-	.handler(async ({ data: href }) => {
-		const { bindings, user, url, loadDocumentHead } = await context(href)
+	.validator(connectWebhookSchema)
+	.handler(async ({ data }) => {
+		const { bindings, user, loadDocumentHead, search } = await context(
+			'/connect/webhook-apply',
+			data,
+		)
 		const { loadConnectWebhookApplyData } =
 			await import('../../src/app/connect-webhook-apply-data.ts')
 		const payload = await loadConnectWebhookApplyData({
 			env: bindings,
 			user,
-			requestUrl: url.toString(),
+			handle: data.handle,
+			fingerprint: data.fingerprint,
 		})
 		return {
 			payload,
 			head: loadDocumentHead(
 				'connectWebhookApply',
-				url.pathname,
+				'/connect/webhook-apply',
 				{ connectWebhookApply: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 export const loadConnectOauth = createServerFn({ method: 'GET' })
-	.validator(validateHref)
-	.handler(async ({ data: href }) => {
-		const callbackUrl = new URL(href, 'https://kody.local')
-		// Provider callbacks restore configuration in the browser. No account data is read here.
-		if (
-			!callbackUrl.searchParams.get('provider')?.trim() &&
-			(callbackUrl.searchParams.get('code') ||
-				callbackUrl.searchParams.get('error'))
-		) {
+	.validator(connectOauthSchema)
+	.handler(async ({ data }) => {
+		const { loadConnectOauthLoaderData } =
+			await import('../../src/app/handlers/connect-oauth.ts')
+		if (!data.provider?.trim() && (data.code || data.error)) {
 			const [
 				{ getRequest, setResponseHeader },
 				{ env },
 				{ getEnv },
 				{ loadDocumentHead },
-				{ loadConnectOauthLoaderData },
 			] = await Promise.all([
 				import('@tanstack/react-start/server'),
 				import('cloudflare:workers'),
 				import('#app/env.ts'),
 				import('./document-head.ts'),
-				import('../../src/app/handlers/connect-oauth.ts'),
 			])
-			const request = getRequest()
-			const url = new URL(href, request.url)
 			setResponseHeader('Cache-Control', 'private, no-store')
 			const payload = await loadConnectOauthLoaderData(
 				getEnv(env),
-				request,
-				url,
+				getRequest(),
+				data,
 			)
+			const search = new URLSearchParams(data.search).toString()
 			return {
 				payload,
 				head: loadDocumentHead(
 					'connectOauth',
-					url.pathname,
+					'/connect/oauth',
 					{ connectOauth: payload },
-					url.search,
+					search ? `?${search}` : '',
 				),
 			}
 		}
-		const { bindings, request, user, url, loadDocumentHead } =
-			await context(href)
-		const { loadConnectOauthLoaderData } =
-			await import('../../src/app/handlers/connect-oauth.ts')
+		const { bindings, request, user, loadDocumentHead, search } = await context(
+			'/connect/oauth',
+			data,
+		)
 		const payload = await loadConnectOauthLoaderData(
 			bindings,
 			request,
-			url,
+			data,
 			user,
 		)
 		return {
 			payload,
 			head: loadDocumentHead(
 				'connectOauth',
-				url.pathname,
+				'/connect/oauth',
 				{ connectOauth: payload },
-				url.search,
+				search,
 			),
 		}
 	})

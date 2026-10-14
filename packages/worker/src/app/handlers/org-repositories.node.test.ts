@@ -134,9 +134,8 @@ async function listAs(env: Env, personId: string, search = '') {
 		username: personId,
 		mcpUser: { userId: personId, username: personId },
 	})
-	const request = new Request(
-		`https://kody.test/@acme/-/repositories.json${search}`,
-	)
+	const params = new URLSearchParams(search)
+	const parsedLimit = Number.parseInt(params.get('limit') ?? '', 10)
 	const binding = await loadOrgBindingForSlug(
 		env.APP_DB,
 		personId as never,
@@ -144,7 +143,16 @@ async function listAs(env: Env, personId: string, search = '') {
 	)
 	const user = await mocks.readAuthenticatedAppUser()
 	const data = binding?.role
-		? await loadOrgRepositoriesData({ env, request, user, binding })
+		? await loadOrgRepositoriesData({
+				env,
+				user,
+				binding,
+				query: params.get('q') ?? '',
+				limit:
+					Number.isFinite(parsedLimit) && parsedLimit > 0
+						? Math.min(parsedLimit, 100)
+						: undefined,
+			})
 		: { ok: false, error: 'Not found.' }
 
 	return {

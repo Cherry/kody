@@ -49,13 +49,11 @@ Native transport does not automatically remove the old loader-oriented API
 shape. These are concrete follow-up targets, not evidence of internal HTTP
 fetches or a remaining Remix dispatcher:
 
-| Modules under `start/server/`                                  | Remaining coupling                                                                                                                    | Appropriate next shape                                                                                                                                                                 |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin-platform-integrations.ts`, other filtered admin readers | Admin hrefs carry selected records, search and pagination. `readAdminPageContext` uses the href as the safe login return destination. | Separate typed query/record inputs from the relative return URL. Preserve role checks before domain reads.                                                                             |
-| `connect.ts`, `connect-secret-set.ts`                          | Connection/approval parameters and optional organization scope arrive in a query string.                                              | Validated operation-specific fields with explicit organization scope. Provider callback state still needs protocol validation.                                                         |
-| `mcp-server-authorize.ts`                                      | Hrefs are parsed and reconstructed as Requests for existing consent/checkout operations.                                              | Explicit consent/checkout inputs and shared policy/domain operations. Preserve authenticated organization binding, callback verification, one-time behavior and GET/HEAD distinctions. |
-| `shell.ts`, `org-alias.ts`                                     | Destination URLs carry organization selection, redirect intent or auth view state.                                                    | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience.                                                     |
-| `static-page.ts`, metadata helpers                             | Pathnames identify static presentation/canonical URLs.                                                                                | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                                                                                  |
+| Modules under `start/server/`      | Remaining coupling                                                                                              | Appropriate next shape                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `public-data.ts`                   | Community, profile and package reads still reconstruct destination Requests to carry resource and filter state. | Explicit resource identity and filters, retaining the original request for session and deployment origin.                          |
+| `shell.ts`, `org-alias.ts`         | Destination URLs carry organization selection, redirect intent or auth view state.                              | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience. |
+| `static-page.ts`, metadata helpers | Pathnames identify static presentation/canonical URLs.                                                          | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                              |
 
 Account collections, connection usage, credentials, and email take explicit
 organization, record, selection and filter fields. The `loadCollection(href)`
@@ -70,13 +68,24 @@ parameters. Location is separate and used for canonical redirects, login return
 URLs and metadata, not resource selection. The unused packages-index read
 function was deleted, its native alias route already owns that redirect.
 
-The admin users reader uses explicit filters, page size, selected user and a separate
-return destination. Pagination keys include actor and page size. Billing
-completion takes organization and checkout session fields, checks the original
-principal, and owns a write lease for both SSR and RPC. The outer protocol
-boundary no longer leases billing success a second time. Login/signup accepts
-only an optional return destination. Legacy org aliases retain destination URLs
-because they are redirects, but session lookup uses the original request.
+The admin users reader uses explicit filters, page size, selected user and a
+separate return destination. Pagination keys include actor and page size.
+Billing completion takes organization and checkout session fields, checks the
+original principal, and owns a write lease for both SSR and RPC. The outer
+protocol boundary no longer leases billing success a second time. Login/signup
+accepts only an optional return destination. Legacy org aliases retain
+destination URLs because they are redirects, but session lookup uses the
+original request.
+
+Connect, consent and filtered admin readers separate validated resource inputs
+from navigation destinations. OAuth callback restore preserves its
+no-account-read branch. Organization management binds explicit slugs to the
+original principal; repository reads use explicit filters. Account mutations
+keep the original request and pass typed refresh/approval data to domain
+operations. The obsolete URL-based secrets reader is removed. Shared domain
+action dispatch still exists in several mutation operations and remains a
+follow-up target for operation-level APIs, without reviving HTTP action
+endpoints.
 
 The separate signed-token cleanup slice keeps `start/server/action-page.ts` but
 replaces generic `loadActionPage(href)` dispatch with `loadVerifyEmail`,
