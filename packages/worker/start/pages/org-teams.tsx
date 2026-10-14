@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { type OrgPeopleAction } from '#start/server/org-mutations'
+import { type OrgPeopleAction } from './org-people-mutation.ts'
 import { type OrgTeamsLoaderData } from '#universal/loader-data.ts'
 import { orgIdentity } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'

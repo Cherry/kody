@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type PackageWrite } from '../package-mutation-cache.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -106,13 +107,12 @@ export function AccountPackageApprovePublishRoute({
 		await submit(
 			{
 				action: 'approve-publish',
-				packageId: payload.package.id,
 				commit: payload.pendingCommit,
 			},
 			payload.packageHref,
 		)
 	}
-	async function submit(body: Record<string, unknown>, destination: string) {
+	async function submit(body: PackageWrite, destination: string) {
 		if (busyRef.current) return
 		busyRef.current = true
 		setBusy(true)

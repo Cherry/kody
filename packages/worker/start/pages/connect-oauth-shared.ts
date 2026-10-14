@@ -1,5 +1,10 @@
 import { connectSecretsInput } from '../connect-input.ts'
-import { updateSecrets } from '#start/server/account-mutations'
+import {
+	approveSecretAccess,
+	connectOAuth,
+	exchangeOAuthToken,
+	saveOAuthApp,
+} from '#start/server/account-mutations'
 import {
 	normalizeProviderKey,
 	safeParseHost,
@@ -139,11 +144,10 @@ export async function approveConnectOauthHosts(input: {
 	const search = new URLSearchParams()
 	search.set('names', [...new Set(input.secretNames)].join(','))
 	search.set('hosts', [...new Set(input.hosts)].join(','))
-	await updateSecrets({
+	await approveSecretAccess({
 		data: {
 			orgSlug: input.orgSlug ?? undefined,
 			refresh: connectSecretsInput(`?${search}`),
-			body: { action: 'approve' },
 		},
 	})
 	return { ok: true }
@@ -165,13 +169,11 @@ export async function saveConnectOauthConnection(input: {
 	| { ok: false; error: string }
 > {
 	const { config, orgSlug } = input
-	const payload = (await updateSecrets({
+	const payload = (await connectOAuth({
 		data: {
 			orgSlug: orgSlug ?? undefined,
-			body: {
-				action: 'connect_oauth',
+			fields: {
 				provider: config.provider,
-				callbackUrl: input.callbackUrl,
 				...(config.platformAppSlug
 					? { platformAppSlug: config.platformAppSlug }
 					: {}),
@@ -421,11 +423,10 @@ export async function exchangeConnectOauthCode(
 		}
 		params.set('code_verifier', verifier)
 	}
-	const payload = (await updateSecrets({
+	const payload = (await exchangeOAuthToken({
 		data: {
 			orgSlug: orgSlug ?? undefined,
-			body: {
-				action: 'oauth_exchange',
+			fields: {
 				tokenUrl: nextConfig.tokenUrl,
 				params: params.toString(),
 				flow: nextConfig.flow,
@@ -446,11 +447,10 @@ export async function saveConnectOauthApp(
 	clientSecret?: string,
 	orgSlug: string | null = null,
 ): Promise<SaveOauthAppResult> {
-	const payload = (await updateSecrets({
+	const payload = (await saveOAuthApp({
 		data: {
 			orgSlug: orgSlug ?? undefined,
-			body: {
-				action: 'save_oauth_app',
+			fields: {
 				provider: nextConfig.provider,
 				authorizeUrl: nextConfig.authorizeUrl,
 				tokenUrl: nextConfig.tokenUrl,

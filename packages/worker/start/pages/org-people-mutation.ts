@@ -1,7 +1,35 @@
 import {
-	updateOrgPeople,
-	type OrgPeopleAction,
+	setOrganizationMemberRole,
+	removeOrganizationMember,
+	inviteOrganizationMember,
+	createOrganizationInviteLink,
+	revokeOrganizationInviteLink,
+	createOrganizationTeam,
+	addOrganizationTeamMember,
+	removeOrganizationTeamMember,
+	revokeOrganizationGrant,
 } from '#start/server/org-mutations'
+import {
+	setOrganizationMemberRoleSchema,
+	removeOrganizationMemberSchema,
+	inviteOrganizationMemberSchema,
+	createOrganizationInviteLinkSchema,
+	revokeOrganizationInviteLinkSchema,
+	createOrganizationTeamSchema,
+	addOrganizationTeamMemberSchema,
+	removeOrganizationTeamMemberSchema,
+	revokeOrganizationGrantSchema,
+} from '#universal/org-people-mutations.ts'
+export type OrgPeopleAction =
+	| 'memberRole'
+	| 'memberRemove'
+	| 'memberInvite'
+	| 'inviteLinkCreate'
+	| 'inviteLinkRevoke'
+	| 'teamCreate'
+	| 'teamMemberAdd'
+	| 'teamMemberRemove'
+	| 'grantRevoke'
 import {
 	mutationOptions,
 	useMutation,
@@ -45,9 +73,89 @@ export function orgPeopleMutationOptions(
 				typeof input.slug !== 'string'
 			)
 				throw new Error('Organization unavailable.')
-			return resultSchema.parse(
-				await updateOrgPeople({ data: { orgSlug: input.slug, action, body } }),
-			)
+			switch (action) {
+				case 'memberRole':
+					return resultSchema.parse(
+						await setOrganizationMemberRole({
+							data: {
+								orgSlug: input.slug,
+								...setOrganizationMemberRoleSchema.parse(body),
+							},
+						}),
+					)
+				case 'memberRemove':
+					return resultSchema.parse(
+						await removeOrganizationMember({
+							data: {
+								orgSlug: input.slug,
+								...removeOrganizationMemberSchema.parse(body),
+							},
+						}),
+					)
+				case 'memberInvite':
+					return resultSchema.parse(
+						await inviteOrganizationMember({
+							data: {
+								orgSlug: input.slug,
+								...inviteOrganizationMemberSchema.parse(body),
+							},
+						}),
+					)
+				case 'inviteLinkCreate':
+					return resultSchema.parse(
+						await createOrganizationInviteLink({
+							data: {
+								orgSlug: input.slug,
+								...createOrganizationInviteLinkSchema.parse(body),
+							},
+						}),
+					)
+				case 'inviteLinkRevoke':
+					return resultSchema.parse(
+						await revokeOrganizationInviteLink({
+							data: {
+								orgSlug: input.slug,
+								...revokeOrganizationInviteLinkSchema.parse(body),
+							},
+						}),
+					)
+				case 'teamCreate':
+					return resultSchema.parse(
+						await createOrganizationTeam({
+							data: {
+								orgSlug: input.slug,
+								...createOrganizationTeamSchema.parse(body),
+							},
+						}),
+					)
+				case 'teamMemberAdd':
+					return resultSchema.parse(
+						await addOrganizationTeamMember({
+							data: {
+								orgSlug: input.slug,
+								...addOrganizationTeamMemberSchema.parse(body),
+							},
+						}),
+					)
+				case 'teamMemberRemove':
+					return resultSchema.parse(
+						await removeOrganizationTeamMember({
+							data: {
+								orgSlug: input.slug,
+								...removeOrganizationTeamMemberSchema.parse(body),
+							},
+						}),
+					)
+				case 'grantRevoke':
+					return resultSchema.parse(
+						await revokeOrganizationGrant({
+							data: {
+								orgSlug: input.slug,
+								...revokeOrganizationGrantSchema.parse(body),
+							},
+						}),
+					)
+			}
 		},
 		onSettled: async (_result, _error, _variables, submission) => {
 			if (!submission) return
@@ -75,7 +183,8 @@ export function orgPeopleMutationOptions(
 					return (
 						input !== null &&
 						typeof input === 'object' &&
-						(('slug' in input && input.slug === slug) ||
+						(('orgSlug' in input && input.orgSlug === slug) ||
+							('slug' in input && input.slug === slug) ||
 							('username' in input && input.username === slug))
 					)
 				},

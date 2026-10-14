@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
-import { updateOrgPeople } from '#start/server/org-mutations'
-vi.mock('#start/server/org-mutations', () => ({ updateOrgPeople: vi.fn() }))
+import { removeOrganizationMember } from '#start/server/org-mutations'
+vi.mock('#start/server/org-mutations', () => ({
+	removeOrganizationMember: vi.fn(),
+}))
 import { orgPeopleMutationOptions } from './pages/org-people-mutation.ts'
 
 afterEach(() => vi.clearAllMocks())
@@ -24,6 +26,7 @@ test.each(['accepted', 'lost response'])(
 				'loadPackage',
 				{ username: 'team-a', kodyId: 'example' },
 			],
+			['page', 'actor-a', 'loadJobsPage', { orgSlug: 'team-a' }],
 			['shell', 'actor-a', ''],
 			['page', 'actor-a', 'loadOrganizations', undefined],
 		]
@@ -31,15 +34,16 @@ test.each(['accepted', 'lost response'])(
 			otherOrg,
 			otherActor,
 			['page', 'actor-a', 'loadJobsPage', '/@team-b/-/jobs'],
+			['page', 'actor-a', 'loadJobsPage', { orgSlug: 'team-b' }],
 			['shell', 'actor-b', ''],
 		]
 		for (const entry of [...affected, ...unaffected])
 			client.setQueryData(entry, { members: ['previous-member'] })
 		let resolve!: (
-			response: Awaited<ReturnType<typeof updateOrgPeople>>,
+			response: Awaited<ReturnType<typeof removeOrganizationMember>>,
 		) => void
 		let reject!: (error: Error) => void
-		vi.mocked(updateOrgPeople).mockImplementationOnce(
+		vi.mocked(removeOrganizationMember).mockImplementationOnce(
 			() =>
 				new Promise((yes, no) => {
 					resolve = yes
@@ -53,9 +57,11 @@ test.each(['accepted', 'lost response'])(
 		const unsubscribe = observer.subscribe(() => {})
 		const write = observer.mutate({
 			action: 'memberRemove',
-			body: { action: 'remove', memberId: 'previous-member' },
+			body: { userId: 'previous-member' },
 		})
-		await vi.waitFor(() => expect(updateOrgPeople).toHaveBeenCalledOnce())
+		await vi.waitFor(() =>
+			expect(removeOrganizationMember).toHaveBeenCalledOnce(),
+		)
 		unsubscribe()
 		if (outcome === 'accepted') {
 			resolve({

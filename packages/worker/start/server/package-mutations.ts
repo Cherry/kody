@@ -1,73 +1,277 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 
-export const mutatePackage = createServerFn({ method: 'POST' })
+export const lockPackage = createServerFn({ method: 'POST' })
+	.validator(z.object({ packageId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ lockAccountPackage },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-publish-lock.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await lockAccountPackage({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const unlockPackage = createServerFn({ method: 'POST' })
+	.validator(z.object({ packageId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ unlockAccountPackage },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-publish-lock.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await unlockAccountPackage({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const approvePackagePublish = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), commit: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountPackagePublish },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-publish-lock.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await approveAccountPackagePublish({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const setPackageVisibility = createServerFn({ method: 'POST' })
 	.validator(
 		z.object({
-			packageId: z.string().min(1),
-			body: z.record(z.string(), z.unknown()),
+			packageId: z.string().trim().min(1),
+			visibility: z.enum(['public', 'private']),
+			confirmName: z.string(),
 		}),
 	)
 	.handler(async ({ data }) => {
-		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const [
+			{ withWebsiteMutation },
+			{ setAccountPackageVisibility },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-visibility.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await setAccountPackageVisibility({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const setPackageInternetVisible = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({
+			packageId: z.string().trim().min(1),
+			internetVisible: z.boolean(),
+			confirmName: z.string(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ setAccountPackageInternetVisible },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-capability-approval.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await setAccountPackageInternetVisible({
+				...context,
+				...data,
+			})
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const approvePackageCapabilities = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), fingerprint: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountPackageCapabilities },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-capability-approval.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await approveAccountPackageCapabilities({
+				...context,
+				...data,
+			})
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const approvePackageCredentialNeeds = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), requestId: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountPackageCredentialNeeds },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-capability-approval.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await approveAccountPackageCredentialNeeds({
+				...context,
+				...data,
+			})
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const approvePackageWentPublic = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), requestId: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountPackageWentPublic },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-capability-approval.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await approveAccountPackageWentPublic({
+				...context,
+				...data,
+			})
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const deletePackage = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), confirmName: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ deleteAccountPackage },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-delete.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await deleteAccountPackage({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const adoptPackageFork = createServerFn({ method: 'POST' })
+	.validator(
+		z.object({ packageId: z.string().trim().min(1), reviewNote: z.string() }),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ adoptAccountPackageFork },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-adopt.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await adoptAccountPackageFork({ ...context, ...data })
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
+export const absorbPackageListing = createServerFn({ method: 'POST' })
+	.validator(z.object({ packageId: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const [{ withWebsiteMutation }, { setResponseStatus }] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('@tanstack/react-start/server'),
+		])
 		return withWebsiteMutation({}, async ({ request, env, user }) => {
-			const [lock, visibility, capability, deletion, adoption] =
-				await Promise.all([
-					import('../../src/app/account-package-publish-lock.ts'),
-					import('../../src/app/account-package-visibility.ts'),
-					import('../../src/app/account-package-capability-approval.ts'),
-					import('../../src/app/account-package-delete.ts'),
-					import('../../src/app/account-package-adopt.ts'),
-				])
-			const input = {
+			const { loadWritableAccountSavedPackage } =
+				await import('../../src/app/account-package-write-access.ts')
+			const resolved = await loadWritableAccountSavedPackage({
 				env,
-				request,
 				user,
-				body: { ...data.body, packageId: data.packageId },
+				packageId: data.packageId,
+				permission: 'package:write',
+			})
+			if (!resolved.ok) {
+				setResponseStatus(404)
+				return { ok: false, error: 'Package not found.' }
 			}
-			for (const operation of [
-				lock.mutateAccountPackagePublishLock,
-				visibility.mutateAccountPackageVisibility,
-				capability.mutateAccountPackageInternetVisible,
-				deletion.mutateAccountPackageDelete,
-				adoption.mutateAccountPackageAdopt,
-			]) {
-				const result = await operation(input)
-				if (result) return result.data
-			}
-			if (data.body.action === 'absorb-listing') {
-				const { loadWritableAccountSavedPackage } =
-					await import('../../src/app/account-package-write-access.ts')
-				const resolved = await loadWritableAccountSavedPackage({
+			const { absorbCommunityForkUpstream } =
+				await import('../../src/community/service.ts')
+			const { CommunityActionError } =
+				await import('../../src/community/errors.ts')
+			try {
+				await absorbCommunityForkUpstream({
 					env,
-					user,
+					userId: resolved.package.ownerUserId,
 					packageId: data.packageId,
-					permission: 'package:write',
 				})
-				if (!resolved.ok) return { ok: false, error: 'Package not found.' }
-				const { absorbCommunityForkUpstream } =
-					await import('../../src/community/service.ts')
-				const { CommunityActionError } =
-					await import('../../src/community/errors.ts')
-				try {
-					await absorbCommunityForkUpstream({
-						env,
-						userId: resolved.package.ownerUserId,
-						packageId: data.packageId,
-					})
-				} catch (error) {
-					if (error instanceof CommunityActionError)
-						return { ok: false, error: error.message }
-					throw error
+			} catch (error) {
+				if (error instanceof CommunityActionError) {
+					setResponseStatus(400)
+					return { ok: false, error: error.message }
 				}
-				const { reloadAccountPackagesAfterWrite } =
-					await import('../../src/app/account-packages-data.ts')
-				return reloadAccountPackagesAfterWrite({
-					...input,
-					packageId: data.packageId,
-					ownerUserId: resolved.package.ownerUserId,
-				})
+				throw error
 			}
-			return { ok: false, error: 'Invalid action.' }
+			const { reloadAccountPackagesAfterWrite } =
+				await import('../../src/app/account-packages-data.ts')
+			return reloadAccountPackagesAfterWrite({
+				request,
+				env,
+				user,
+				packageId: data.packageId,
+				ownerUserId: resolved.package.ownerUserId,
+			})
 		})
 	})

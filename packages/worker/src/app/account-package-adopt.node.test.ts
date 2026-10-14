@@ -36,7 +36,7 @@ vi.mock('#worker/package-registry/repo.ts', () => ({
 	getSavedPackageByIdInAnyOrg: vi.fn(async () => mockModule.savedPackage),
 }))
 
-const { mutateAccountPackageAdopt } = await import('./account-package-adopt.ts')
+const { adoptAccountPackageFork } = await import('./account-package-adopt.ts')
 
 function createUser() {
 	const actor = personIdFromStored('stable-user-1')
@@ -73,24 +73,12 @@ test('the signed-in owner adopts a community fork from the account API', async (
 		selectedPackage: { id: 'pkg-1' },
 	})
 
-	expect(
-		await mutateAccountPackageAdopt({
-			env,
-			request,
-			user,
-			body: { action: 'set-visibility' },
-		}),
-	).toBeNull()
-
-	const response = await mutateAccountPackageAdopt({
+	const response = await adoptAccountPackageFork({
 		env,
 		request,
 		user,
-		body: {
-			action: 'adopt-community-fork',
-			packageId: 'pkg-1',
-			reviewNote: '  Read src/ and package.json; no exfiltration.  ',
-		},
+		packageId: 'pkg-1',
+		reviewNote: '  Read src/ and package.json; no exfiltration.  ',
 	})
 	expect(response?.status).toBe(200)
 	expect(response?.data).toEqual({
@@ -119,15 +107,12 @@ test('account adopt requires org owner role on the package owning org', async ()
 		method: 'POST',
 	})
 	mockModule.viewerIsOrgOwner = false
-	const denied = await mutateAccountPackageAdopt({
+	const denied = await adoptAccountPackageFork({
 		env,
 		request,
 		user,
-		body: {
-			action: 'adopt-community-fork',
-			packageId: 'pkg-1',
-			reviewNote: 'Reviewed source and trust this fork.',
-		},
+		packageId: 'pkg-1',
+		reviewNote: 'Reviewed source and trust this fork.',
 	})
 	expect(denied?.status).toBe(404)
 	expect(mockModule.adoptCommunityFork).not.toHaveBeenCalled()
@@ -141,11 +126,12 @@ test('account adopt requires a package id and surfaces caller-clearable errors',
 		method: 'POST',
 	})
 
-	const missingId = await mutateAccountPackageAdopt({
+	const missingId = await adoptAccountPackageFork({
 		env,
 		request,
 		user,
-		body: { action: 'adopt-community-fork', reviewNote: 'Reviewed it all.' },
+		packageId: '',
+		reviewNote: 'Reviewed it all.',
 	})
 	expect(missingId?.status).toBe(400)
 	expect(mockModule.adoptCommunityFork).not.toHaveBeenCalled()
@@ -153,15 +139,12 @@ test('account adopt requires a package id and surfaces caller-clearable errors',
 	mockModule.adoptCommunityFork.mockRejectedValueOnce(
 		new CommunityActionError('Adoption requires a review note of at least 10'),
 	)
-	const shortNote = await mutateAccountPackageAdopt({
+	const shortNote = await adoptAccountPackageFork({
 		env,
 		request,
 		user,
-		body: {
-			action: 'adopt-community-fork',
-			packageId: 'pkg-1',
-			reviewNote: 'short',
-		},
+		packageId: 'pkg-1',
+		reviewNote: 'short',
 	})
 	expect(shortNote?.status).toBe(400)
 	expect(shortNote?.data).toEqual({

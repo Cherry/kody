@@ -77,8 +77,12 @@ vi.mock('#worker/orgs/repo.ts', () => ({
 		mockModule.loadOrgBindingForOrg(...args),
 }))
 
-const { mutateAccountPackageInternetVisible } =
-	await import('./account-package-capability-approval.ts')
+const {
+	setAccountPackageInternetVisible,
+	approveAccountPackageCapabilities,
+	approveAccountPackageCredentialNeeds,
+	approveAccountPackageWentPublic,
+} = await import('./account-package-capability-approval.ts')
 
 beforeEach(() => {
 	mockModule.writablePackage = null
@@ -152,16 +156,13 @@ test('turning on internet-visible without approval returns approvalUrl', async (
 		isInternetVisible: false,
 	})
 
-	const response = await mutateAccountPackageInternetVisible({
+	const response = await setAccountPackageInternetVisible({
 		env,
 		request,
 		user,
-		body: {
-			action: 'set-internet-visible',
-			packageId: 'pkg-1',
-			internetVisible: true,
-			confirmName: 'notes',
-		},
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
 	})
 	expect(response?.status).toBe(400)
 	expect(response?.data).toMatchObject({
@@ -207,16 +208,13 @@ test('turning on internet-visible with matching approval refreshes pin and enque
 		wentPublicRequest: { id: 'req-1' },
 	})
 
-	const response = await mutateAccountPackageInternetVisible({
+	const response = await setAccountPackageInternetVisible({
 		env,
 		request,
 		user,
-		body: {
-			action: 'set-internet-visible',
-			packageId: 'pkg-1',
-			internetVisible: true,
-			confirmName: 'notes',
-		},
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
 	})
 	expect(response?.status).toBe(400)
 	expect(response?.data).toMatchObject({
@@ -246,15 +244,12 @@ test('approve-capabilities binds the reviewed fingerprint', async () => {
 	})
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
-	const response = await mutateAccountPackageInternetVisible({
+	const response = await approveAccountPackageCapabilities({
 		env,
 		request,
 		user,
-		body: {
-			action: 'approve-capabilities',
-			packageId: 'pkg-1',
-			fingerprint: 'reviewed-fp',
-		},
+		packageId: 'pkg-1',
+		fingerprint: 'reviewed-fp',
 	})
 	expect(response?.status).toBe(200)
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
@@ -275,29 +270,24 @@ test('turning off internet-visible requires the slug and clears the flag', async
 	mockModule.clearInternetVisible.mockResolvedValue(true)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
-	const missing = await mutateAccountPackageInternetVisible({
+	const missing = await setAccountPackageInternetVisible({
 		env,
 		request,
 		user,
-		body: {
-			action: 'set-internet-visible',
-			packageId: 'pkg-1',
-			internetVisible: false,
-		},
+		packageId: 'pkg-1',
+		internetVisible: false,
+		confirmName: '',
 	})
 	expect(missing?.status).toBe(400)
 	expect(mockModule.clearInternetVisible).not.toHaveBeenCalled()
 
-	const ok = await mutateAccountPackageInternetVisible({
+	const ok = await setAccountPackageInternetVisible({
 		env,
 		request,
 		user,
-		body: {
-			action: 'set-internet-visible',
-			packageId: 'pkg-1',
-			internetVisible: false,
-			confirmName: 'notes',
-		},
+		packageId: 'pkg-1',
+		internetVisible: false,
+		confirmName: 'notes',
 	})
 	expect(ok?.status).toBe(200)
 	expect(mockModule.clearInternetVisible).toHaveBeenCalled()
@@ -313,11 +303,12 @@ test('approve-credential-needs approves the named request as the acting person',
 	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 	const approve = (body: Record<string, unknown>) =>
-		mutateAccountPackageInternetVisible({
+		approveAccountPackageCredentialNeeds({
 			env,
 			request,
 			user,
-			body: { action: 'approve-credential-needs', packageId: 'pkg-1', ...body },
+			packageId: 'pkg-1',
+			requestId: typeof body.requestId === 'string' ? body.requestId : '',
 		})
 
 	expect((await approve({}))?.status).toBe(400)
@@ -357,11 +348,12 @@ test('approve-went-public approves the named request as the acting person', asyn
 	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 	const approve = (body: Record<string, unknown>) =>
-		mutateAccountPackageInternetVisible({
+		approveAccountPackageWentPublic({
 			env,
 			request,
 			user,
-			body: { action: 'approve-went-public', packageId: 'pkg-1', ...body },
+			packageId: 'pkg-1',
+			requestId: typeof body.requestId === 'string' ? body.requestId : '',
 		})
 
 	expect((await approve({}))?.status).toBe(400)

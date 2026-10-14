@@ -1,6 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { connectSecretsInput } from '../connect-input.ts'
-import { updateSecrets } from '#start/server/account-mutations'
+import {
+	approveSecretAccess,
+	rejectSecretAccess,
+} from '#start/server/account-mutations'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
@@ -82,11 +85,12 @@ export function ConnectSecretsRoute({
 			queryKey: ReturnType<typeof connectSecretsQuery>['queryKey']
 		}) => {
 			const url = new URL(href, 'http://localhost')
-			const payload = (await updateSecrets({
+			const payload = (await (
+				action === 'approve' ? approveSecretAccess : rejectSecretAccess
+			)({
 				data: {
 					orgSlug: url.searchParams.get('org') ?? undefined,
 					refresh: connectSecretsInput(url.search),
-					body: { action },
 				},
 			})) as AccountSecretsLoaderData & { ok?: boolean; error?: string }
 			if (!payload?.ok)

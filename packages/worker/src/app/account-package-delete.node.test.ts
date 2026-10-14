@@ -44,8 +44,7 @@ vi.mock('#worker/package-registry/service.ts', async (importOriginal) => {
 	}
 })
 
-const { mutateAccountPackageDelete } =
-	await import('./account-package-delete.ts')
+const { deleteAccountPackage } = await import('./account-package-delete.ts')
 
 function createUser(): AuthenticatedAppUser {
 	return {
@@ -92,18 +91,12 @@ function createSavedPackage() {
 test('account package delete requires the typed package name then removes the package', async () => {
 	const env = { APP_DB: {} } as Env
 	const user = createUser()
-	expect(
-		await mutateAccountPackageDelete({
-			env,
-			user,
-			body: { action: 'set-visibility' },
-		}),
-	).toBeNull()
 
-	const missingId = await mutateAccountPackageDelete({
+	const missingId = await deleteAccountPackage({
 		env,
 		user,
-		body: { action: 'delete' },
+		packageId: '',
+		confirmName: '',
 	})
 	expect(missingId?.status).toBe(400)
 	expect(missingId?.data).toEqual({
@@ -112,10 +105,11 @@ test('account package delete requires the typed package name then removes the pa
 	})
 
 	mockModule.writablePackage = null
-	const missingPackage = await mutateAccountPackageDelete({
+	const missingPackage = await deleteAccountPackage({
 		env,
 		user,
-		body: { action: 'delete', packageId: 'pkg-1', confirmName: '@user/notes' },
+		packageId: 'pkg-1',
+		confirmName: '@user/notes',
 	})
 	expect(missingPackage?.status).toBe(404)
 	expect(missingPackage?.data).toEqual({
@@ -125,10 +119,11 @@ test('account package delete requires the typed package name then removes the pa
 	expect(mockModule.deleteSavedPackageProjection).not.toHaveBeenCalled()
 
 	mockModule.writablePackage = createSavedPackage()
-	const wrongName = await mutateAccountPackageDelete({
+	const wrongName = await deleteAccountPackage({
 		env,
 		user,
-		body: { action: 'delete', packageId: 'pkg-1', confirmName: 'notes' },
+		packageId: 'pkg-1',
+		confirmName: 'notes',
 	})
 	expect(wrongName?.status).toBe(400)
 	expect(wrongName?.data).toEqual({
@@ -138,14 +133,11 @@ test('account package delete requires the typed package name then removes the pa
 	expect(mockModule.deleteSavedPackageProjection).not.toHaveBeenCalled()
 
 	mockModule.deleteSavedPackageProjection.mockResolvedValue(undefined)
-	const deleted = await mutateAccountPackageDelete({
+	const deleted = await deleteAccountPackage({
 		env,
 		user,
-		body: {
-			action: 'delete',
-			packageId: 'pkg-1',
-			confirmName: '@user/notes',
-		},
+		packageId: 'pkg-1',
+		confirmName: '@user/notes',
 	})
 	expect(deleted?.status).toBe(200)
 	expect(deleted?.data).toEqual({

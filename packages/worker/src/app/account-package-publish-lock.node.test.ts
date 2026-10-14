@@ -100,11 +100,13 @@ vi.mock('#worker/app-base-url.ts', () => ({
 }))
 
 const {
-	mutateAccountPackagePublishLock,
+	lockAccountPackage,
+	unlockAccountPackage,
+	approveAccountPackagePublish,
 	loadAccountPackageApprovePublishData,
 } = await import('./account-package-publish-lock.ts')
 
-type ActionInput = Parameters<typeof mutateAccountPackagePublishLock>[0]
+type ActionInput = Parameters<typeof lockAccountPackage>[0]
 
 const env = { APP_DB: {} as D1Database } as Env
 const user = {
@@ -153,14 +155,20 @@ function sourceRow(publishedCommit: string) {
 	}
 }
 
-function act(body: ActionInput['body']) {
-	return mutateAccountPackagePublishLock({
+function act(input: { action: string; packageId: string; commit?: string }) {
+	const context = {
 		env,
-		request: new Request('https://example.com/account/packages.json', {
+		request: new Request('https://example.com/_serverFn/package', {
 			method: 'POST',
 		}),
 		user,
-		body,
+		packageId: input.packageId,
+	}
+	if (input.action === 'lock') return lockAccountPackage(context)
+	if (input.action === 'unlock') return unlockAccountPackage(context)
+	return approveAccountPackagePublish({
+		...context,
+		commit: input.commit ?? '',
 	})
 }
 
@@ -201,7 +209,6 @@ test('website lock and unlock write locked_at and approve-publish promotes a nam
 	mockModule.writablePackage = unlockedPackage
 	mockModule.setSavedPackageLockedAt.mockResolvedValue(true)
 
-	expect(await act({ action: 'absorb-listing', packageId: 'pkg-1' })).toBeNull()
 	expect(mockModule.setSavedPackageLockedAt).not.toHaveBeenCalled()
 
 	const lockResponse = await act({ action: 'lock', packageId: 'pkg-1' })

@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { updateSecrets } from '#start/server/account-mutations'
+import { type SaveSecretInput } from '#universal/secret-mutations.ts'
+import { saveSecret } from '#start/server/account-mutations'
 import { pageQueryOrg } from '../page-query-scope.ts'
 import { readAccountSecretsSaveWarning } from './account-secrets-shared.ts'
 import { persistConnectOauthOrgSlug } from './connect-oauth-shared.ts'
@@ -144,12 +145,8 @@ export function ConnectCredentialRoute({
 	const [savedPackageId, setSavedPackageId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
 	const capture = useSubmitterScope()
-	const mutation = useCredentialMutation(
-		href,
-		(body: Record<string, unknown>) =>
-			updateSecrets({
-				data: { orgSlug: pageQueryOrg(href) ?? undefined, body },
-			}),
+	const mutation = useCredentialMutation(href, (fields: SaveSecretInput) =>
+		saveSecret({ data: { orgSlug: pageQueryOrg(href) ?? undefined, fields } }),
 	)
 	async function saveKey(
 		event: FormEvent<HTMLFormElement>,
@@ -188,7 +185,9 @@ export function ConnectCredentialRoute({
 		setSaving(true)
 		setMessage(null)
 		try {
-			const response = await mutation.mutateAsync(save.body)
+			const response = await mutation.mutateAsync(
+				(({ action: _action, ...fields }) => fields)(save.body),
+			)
 			if (!isCurrent()) return
 			const payload = response as {
 				providerLinkError?: string | null

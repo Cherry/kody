@@ -134,22 +134,19 @@ function personalOrgTeamWriteResponse() {
 	)
 }
 
-export async function readJsonObject(request: Request) {
-	const body = await request.json().catch(() => null)
-	if (!body || typeof body !== 'object') return null
-	return body as Record<string, unknown>
-}
-export async function mutateOrgTeamsCreate({
+export async function createOrganizationTeam({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	slug?: unknown
+	name?: unknown
+	description?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -164,10 +161,10 @@ export async function mutateOrgTeamsCreate({
 	}
 	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-	const slugRaw = typeof body?.slug === 'string' ? body.slug : ''
-	const nameRaw = typeof body?.name === 'string' ? body.name : ''
+	const slugRaw = typeof fields.slug === 'string' ? fields.slug : ''
+	const nameRaw = typeof fields.name === 'string' ? fields.name : ''
 	const description =
-		typeof body?.description === 'string' ? body.description : undefined
+		typeof fields.description === 'string' ? fields.description : undefined
 	const slug = normalizeUsername(slugRaw)
 	const formatError = getUsernameFormatValidationError(slug)
 	if (formatError) {
@@ -206,17 +203,18 @@ export async function mutateOrgTeamsCreate({
 	}
 	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
 }
-export async function mutateOrgTeamsMemberAdd({
+export async function addOrganizationTeamMember({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	teamId?: unknown
+	userId?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -231,8 +229,8 @@ export async function mutateOrgTeamsMemberAdd({
 	}
 	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-	const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
-	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	const teamId = typeof fields.teamId === 'string' ? fields.teamId.trim() : ''
+	const userId = typeof fields.userId === 'string' ? fields.userId.trim() : ''
 	if (!teamId || !userId) {
 		return operationResult(
 			{ ok: false, error: 'A team and member are required.' },
@@ -257,17 +255,18 @@ export async function mutateOrgTeamsMemberAdd({
 	}
 	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
 }
-export async function mutateOrgTeamsMemberRemove({
+export async function removeOrganizationTeamMember({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	teamId?: unknown
+	userId?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -282,8 +281,8 @@ export async function mutateOrgTeamsMemberRemove({
 	}
 	if (access.org.personal) return personalOrgTeamWriteResponse()
 
-	const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
-	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	const teamId = typeof fields.teamId === 'string' ? fields.teamId.trim() : ''
+	const userId = typeof fields.userId === 'string' ? fields.userId.trim() : ''
 	if (!teamId || !userId) {
 		return operationResult(
 			{ ok: false, error: 'A team and member are required.' },

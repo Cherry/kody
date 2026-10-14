@@ -3,10 +3,9 @@ import { operationResult } from '#app/operation-result.ts'
 import { resolveOrgManagementAccess } from '#app/org-management-access.ts'
 import {
 	loadOrgTeamsData,
-	mutateOrgTeamsCreate,
-	mutateOrgTeamsMemberAdd,
-	mutateOrgTeamsMemberRemove,
-	readJsonObject,
+	createOrganizationTeam,
+	addOrganizationTeamMember,
+	removeOrganizationTeamMember,
 } from './org-teams.ts'
 export * from './org-teams.ts'
 export function testOrgTeamsApiHandler(env: Env) {
@@ -42,7 +41,12 @@ export function testOrgTeamsCreatePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgTeamsCreate({ request, env, user, body })
+			const result = await createOrganizationTeam({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
@@ -55,7 +59,12 @@ export function testOrgTeamsMemberAddPostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgTeamsMemberAdd({ request, env, user, body })
+			const result = await addOrganizationTeamMember({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
@@ -68,13 +77,19 @@ export function testOrgTeamsMemberRemovePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgTeamsMemberRemove({
+			const result = await removeOrganizationTeamMember({
 				request,
 				env,
 				user,
-				body,
+				...body,
 			})
 			return operationResult(result.data, result.status)
 		},
 	}
+}
+
+async function readJsonObject(request: Request) {
+	const body = await request.json().catch(() => null)
+	if (!body || typeof body !== 'object') return null
+	return body as Record<string, unknown>
 }

@@ -1,4 +1,11 @@
 import {
+	saveSecretSchema,
+	deleteSecretSchema,
+	saveOAuthAppSchema,
+	connectOAuthSchema,
+	exchangeOAuthTokenSchema,
+} from '#universal/secret-mutations.ts'
+import {
 	rotateOauthAppCredentialsSchema,
 	disconnectConnectionSchema,
 	deleteOauthAppSchema,
@@ -33,22 +40,21 @@ const resourceInput = z.object({
 		.optional(),
 	search: z.string().default(''),
 })
-export const updateSecrets = createServerFn({ method: 'POST' })
-	.validator(
-		resourceInput.omit({ search: true }).extend({
-			body: z.record(z.string(), z.unknown()),
-			refresh: connectSecretsSchema
-				.pick({ selectedSecretId: true, approval: true })
-				.default({
-					selectedSecretId: null,
-					approval: { hosts: [], names: [], scope: 'user' },
-				}),
-		}),
-	)
+const secretRefreshSchema = connectSecretsSchema
+	.pick({ selectedSecretId: true, approval: true })
+	.default({
+		selectedSecretId: null,
+		approval: { hosts: [], names: [], scope: 'user' },
+	})
+const secretMutationScope = resourceInput
+	.omit({ search: true })
+	.extend({ refresh: secretRefreshSchema })
+export const saveSecret = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope.extend({ fields: saveSecretSchema }))
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
-			{ mutateAccountSecrets },
+			{ saveAccountSecret },
 			{ requireOperationResult },
 		] = await Promise.all([
 			import('./mutation-context.ts'),
@@ -56,18 +62,137 @@ export const updateSecrets = createServerFn({ method: 'POST' })
 			import('../../src/app/operation-result.ts'),
 		])
 		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) => {
-				return requireOperationResult(
-					await mutateAccountSecrets({
-						...context,
-						refresh: data.refresh,
-						body: data.body,
-					}),
-				)
-			},
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await saveAccountSecret({ ...context, ...data }),
+				),
+		)
+	})
+
+export const deleteSecret = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope.extend({ fields: deleteSecretSchema }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ deleteAccountSecret },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await deleteAccountSecret({ ...context, ...data }),
+				),
+		)
+	})
+
+export const approveSecretAccess = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountSecretAccess },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await approveAccountSecretAccess({ ...context, ...data }),
+				),
+		)
+	})
+
+export const rejectSecretAccess = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ rejectAccountSecretAccess },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await rejectAccountSecretAccess({ ...context, ...data }),
+				),
+		)
+	})
+
+export const saveOAuthApp = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope.extend({ fields: saveOAuthAppSchema }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ saveAccountOAuthApp },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await saveAccountOAuthApp({ ...context, ...data }),
+				),
+		)
+	})
+
+export const connectOAuth = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope.extend({ fields: connectOAuthSchema }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ connectAccountOAuth },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await connectAccountOAuth({ ...context, ...data }),
+				),
+		)
+	})
+
+export const exchangeOAuthToken = createServerFn({ method: 'POST' })
+	.validator(secretMutationScope.extend({ fields: exchangeOAuthTokenSchema }))
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ exchangeAccountOAuthToken },
+			{ requireOperationResult },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/handlers/account-secrets.ts'),
+			import('../../src/app/operation-result.ts'),
+		])
+		return withWebsiteMutation(
+			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
+			async (context) =>
+				requireOperationResult(
+					await exchangeAccountOAuthToken({ ...context, ...data }),
+				),
 		)
 	})
 
@@ -1294,44 +1419,6 @@ export const recordWaitingClick = createServerFn({ method: 'POST' })
 			},
 		)
 	})
-export const updateSecretCollection = createServerFn({ method: 'POST' })
-	.validator(
-		resourceInput.omit({ search: true }).extend({
-			body: z.record(z.string(), z.unknown()),
-			refresh: connectSecretsSchema
-				.pick({ selectedSecretId: true, approval: true })
-				.default({
-					selectedSecretId: null,
-					approval: { hosts: [], names: [], scope: 'user' },
-				}),
-		}),
-	)
-	.handler(async ({ data }) => {
-		const [
-			{ withWebsiteMutation },
-			{ mutateAccountSecretCollection },
-			{ requireOperationResult },
-		] = await Promise.all([
-			import('./mutation-context.ts'),
-			import('../../src/app/handlers/account-secrets.ts'),
-			import('../../src/app/operation-result.ts'),
-		])
-		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) => {
-				return requireOperationResult(
-					await mutateAccountSecretCollection({
-						...context,
-						refresh: data.refresh,
-						body: data.body,
-					}),
-				)
-			},
-		)
-	})
-
 export const updateExperiments = createServerFn({ method: 'POST' })
 	.validator(z.object({ experimentsOptIn: z.boolean() }))
 	.handler(async ({ data }) => {

@@ -129,29 +129,63 @@ export async function loadAccountPackageApproveCapabilitiesData(input: {
 	}
 }
 
-export async function mutateAccountPackageInternetVisible(input: {
+type CapabilityMutationContext = {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
-	body: object
-}): Promise<PackageMutationResult | null> {
-	const action =
-		'action' in input.body && typeof input.body.action === 'string'
-			? input.body.action.trim()
-			: ''
-	if (
-		action !== 'set-internet-visible' &&
-		action !== 'approve-capabilities' &&
-		action !== 'approve-credential-needs' &&
-		action !== 'approve-went-public'
-	) {
-		return null
-	}
-
-	const packageId =
-		'packageId' in input.body && typeof input.body.packageId === 'string'
-			? input.body.packageId.trim()
-			: ''
+	packageId: string
+}
+type CapabilityChange =
+	| {
+			action: 'set-internet-visible'
+			internetVisible: boolean
+			confirmName: string
+	  }
+	| { action: 'approve-capabilities'; fingerprint: string }
+	| {
+			action: 'approve-credential-needs' | 'approve-went-public'
+			requestId: string
+	  }
+export function setAccountPackageInternetVisible(
+	input: CapabilityMutationContext & {
+		internetVisible: boolean
+		confirmName: string
+	},
+) {
+	return changePackageCapabilityApproval({
+		...input,
+		action: 'set-internet-visible',
+	})
+}
+export function approveAccountPackageCapabilities(
+	input: CapabilityMutationContext & { fingerprint: string },
+) {
+	return changePackageCapabilityApproval({
+		...input,
+		action: 'approve-capabilities',
+	})
+}
+export function approveAccountPackageCredentialNeeds(
+	input: CapabilityMutationContext & { requestId: string },
+) {
+	return changePackageCapabilityApproval({
+		...input,
+		action: 'approve-credential-needs',
+	})
+}
+export function approveAccountPackageWentPublic(
+	input: CapabilityMutationContext & { requestId: string },
+) {
+	return changePackageCapabilityApproval({
+		...input,
+		action: 'approve-went-public',
+	})
+}
+async function changePackageCapabilityApproval(
+	input: CapabilityMutationContext & CapabilityChange,
+): Promise<PackageMutationResult> {
+	const action = input.action
+	const packageId = input.packageId.trim()
 	if (!packageId) {
 		return packageMutationResult(
 			{ ok: false, error: 'Package id is required.' },
@@ -188,10 +222,7 @@ export async function mutateAccountPackageInternetVisible(input: {
 		action === 'approve-credential-needs' ||
 		action === 'approve-went-public'
 	) {
-		const requestId =
-			'requestId' in input.body && typeof input.body.requestId === 'string'
-				? input.body.requestId.trim()
-				: ''
+		const requestId = 'requestId' in input ? input.requestId.trim() : ''
 		if (!requestId) {
 			return packageMutationResult(
 				{ ok: false, error: 'Approval request id is required.' },
@@ -236,10 +267,7 @@ export async function mutateAccountPackageInternetVisible(input: {
 	try {
 		if (action === 'approve-capabilities') {
 			const expectedFingerprint =
-				'fingerprint' in input.body &&
-				typeof input.body.fingerprint === 'string'
-					? input.body.fingerprint.trim()
-					: ''
+				'fingerprint' in input ? input.fingerprint.trim() : ''
 			await approvePackageCapabilitySet({
 				env: input.env,
 				ownerUserId,
@@ -250,12 +278,8 @@ export async function mutateAccountPackageInternetVisible(input: {
 			})
 		} else {
 			const internetVisible =
-				'internetVisible' in input.body && input.body.internetVisible === true
-			const confirmName =
-				'confirmName' in input.body &&
-				typeof input.body.confirmName === 'string'
-					? input.body.confirmName.trim()
-					: ''
+				'internetVisible' in input && input.internetVisible
+			const confirmName = 'confirmName' in input ? input.confirmName.trim() : ''
 
 			if (internetVisible) {
 				if (confirmName !== savedPackage.kodyId) {

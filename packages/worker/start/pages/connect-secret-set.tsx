@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { connectSecretsInput } from '../connect-input.ts'
-import { updateSecrets } from '#start/server/account-mutations'
+import { saveSecret as saveSecretRecord } from '#start/server/account-mutations'
 import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -115,11 +115,10 @@ export function ConnectSecretSetRoute({
 			const org = new URL(href, window.location.origin).searchParams
 				.get('org')
 				?.trim()
-			const payload = (await updateSecrets({
+			const payload = (await saveSecretRecord({
 				data: {
 					orgSlug: org || undefined,
-					body: {
-						action: 'save',
+					fields: {
 						currentId: state.currentId ?? existing?.id ?? null,
 						name: state.name,
 						scope: state.scope,

@@ -1,4 +1,10 @@
 import {
+	type SaveSecretInput,
+	type SaveOAuthAppInput,
+	type ConnectOAuthInput,
+	type ExchangeOAuthTokenInput,
+} from '#universal/secret-mutations.ts'
+import {
 	getSecretContextForAccountSecret,
 	listAccountSecrets,
 	loadAccountSecretsSelection,
@@ -8,7 +14,6 @@ import {
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { buildConnectOauthNextSteps } from '#app/connect-oauth-next-steps.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { readNonEmptyTrimmedString as readString } from '#app/request-body.ts'
 import {
 	canonicalIntegrationName,
 	integrationConfigSchema,
@@ -105,91 +110,20 @@ type SecretRefresh = Pick<
 	'selectedSecretId' | 'approval'
 >
 
-export async function mutateAccountSecrets({
-	request,
-	refresh,
-	env,
-	user,
-	body,
-}: {
-	request: Request
-	refresh: SecretRefresh
+export async function saveAccountOAuthApp(input: {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	fields: SaveOAuthAppInput
 }) {
-	const action = readString(body, 'action')
-	if (action === 'approve' || action === 'reject') {
-		return handleApprovalAction({
-			request,
-			refresh,
-			env,
-			user,
-			action,
-		})
-	}
-	if (action === 'save') {
-		return handleSaveAction({
-			request,
-			refresh,
-			env,
-			user,
-			body,
-		})
-	}
-	if (action === 'delete') {
-		return handleDeleteAction({
-			request,
-			refresh,
-			env,
-			user,
-			body,
-		})
-	}
-	if (action === 'save_oauth_app') {
-		return handleSaveOauthAppAction({
-			env,
-			user,
-			body,
-		})
-	}
-	if (action === 'connect_oauth') {
-		return handleConnectOauthAction({
-			request,
-			refresh,
-			env,
-			user,
-			body,
-		})
-	}
-	if (action === 'oauth_exchange') {
-		return handleOAuthExchangeAction({
-			env,
-			user,
-			body,
-		})
-	}
-
-	return operationResult({ ok: false, error: 'Invalid action.' }, 400)
-}
-
-async function handleSaveOauthAppAction(input: {
-	env: Env
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: object
-}) {
-	const provider = readString(input.body, 'provider')
-	const tokenUrl = readOptionalString(input.body, 'tokenUrl')
-	const apiBaseUrl = readOptionalString(input.body, 'apiBaseUrl')
-	const authorizeUrl = readOptionalString(input.body, 'authorizeUrl')
-	const flow = readOptionalString(input.body, 'flow')
-	const usePkce = readOptionalBoolean(input.body, 'usePkce')
-	const clientId = readOptionalString(input.body, 'clientId')
-	const scopeSeparator = readRawOptionalString(input.body, 'scopeSeparator')
-	const extraAuthorizeParams = readStringRecord(
-		input.body,
-		'extraAuthorizeParams',
-	)
+	const provider = input.fields.provider?.trim() || null
+	const tokenUrl = input.fields.tokenUrl?.trim() ?? null
+	const apiBaseUrl = input.fields.apiBaseUrl?.trim() ?? null
+	const authorizeUrl = input.fields.authorizeUrl?.trim() ?? null
+	const flow = input.fields.flow?.trim() ?? null
+	const usePkce = input.fields.usePkce ?? null
+	const clientId = input.fields.clientId?.trim() ?? null
+	const scopeSeparator = input.fields.scopeSeparator ?? null
+	const extraAuthorizeParams = input.fields.extraAuthorizeParams ?? {}
 
 	if (!provider) {
 		return operationResult({ ok: false, error: 'Provider is required.' }, 400)
@@ -230,10 +164,7 @@ async function handleSaveOauthAppAction(input: {
 				clientId,
 				tokenExchangeStyle: resolveTokenExchangeStyle({
 					tokenUrl,
-					tokenExchangeStyle: readOptionalString(
-						input.body,
-						'tokenExchangeStyle',
-					),
+					tokenExchangeStyle: input.fields.tokenExchangeStyle?.trim() ?? null,
 				}),
 				authorization: authorizeUrl
 					? {
@@ -252,7 +183,7 @@ async function handleSaveOauthAppAction(input: {
 				user: input.user.mcpUser,
 			}),
 			provider,
-			clientSecret: readOptionalString(input.body, 'clientSecret'),
+			clientSecret: input.fields.clientSecret?.trim() ?? null,
 		})
 		if (clientSecret) {
 			await persistUserOauthAppClientSecret({
@@ -294,15 +225,15 @@ async function handleSaveOauthAppAction(input: {
 	}
 }
 
-async function handleConnectOauthAction(input: {
+export async function connectAccountOAuth(input: {
 	request: Request
 	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: object
+	fields: ConnectOAuthInput
 }) {
-	const provider = readString(input.body, 'provider')
-	const platformAppSlug = readOptionalString(input.body, 'platformAppSlug')
+	const provider = input.fields.provider?.trim() || null
+	const platformAppSlug = input.fields.platformAppSlug?.trim() ?? null
 	const platformApp = platformAppSlug
 		? await getAvailablePlatformApp({ env: input.env, slug: platformAppSlug })
 		: null
@@ -316,22 +247,22 @@ async function handleConnectOauthAction(input: {
 	// app row, not the request body.
 	const tokenUrl = platformApp
 		? platformApp.tokenUrl
-		: readOptionalString(input.body, 'tokenUrl')
+		: (input.fields.tokenUrl?.trim() ?? null)
 	const apiBaseUrl = platformApp
 		? platformApp.apiBaseUrl
-		: readOptionalString(input.body, 'apiBaseUrl')
+		: (input.fields.apiBaseUrl?.trim() ?? null)
 	const authorizeUrl = platformApp
 		? platformApp.authorizeUrl
-		: readOptionalString(input.body, 'authorizeUrl')
+		: (input.fields.authorizeUrl?.trim() ?? null)
 	const flow = platformApp
 		? platformApp.flow
-		: readOptionalString(input.body, 'flow')
+		: (input.fields.flow?.trim() ?? null)
 	const usePkce = platformApp
 		? platformApp.usePkce
-		: readOptionalBoolean(input.body, 'usePkce')
+		: (input.fields.usePkce ?? null)
 	const clientId = platformApp
 		? platformApp.clientId
-		: readOptionalString(input.body, 'clientId')
+		: (input.fields.clientId?.trim() ?? null)
 	const allowedHosts = normalizeAllowedHosts(
 		platformApp
 			? [
@@ -340,16 +271,12 @@ async function handleConnectOauthAction(input: {
 						? [safeParseHost(platformApp.apiBaseUrl) ?? '']
 						: []),
 				]
-			: readStringArray(input.body, 'allowedHosts'),
+			: (input.fields.allowedHosts ?? []),
 	)
-	const scopes = readStringArray(input.body, 'scopes')
-	const scopeSeparator = readRawOptionalString(input.body, 'scopeSeparator')
-	const extraAuthorizeParams = readStringRecord(
-		input.body,
-		'extraAuthorizeParams',
-	)
-	const tokenPayload =
-		(input.body as Record<string, unknown>)['tokenPayload'] ?? null
+	const scopes = input.fields.scopes ?? []
+	const scopeSeparator = input.fields.scopeSeparator ?? null
+	const extraAuthorizeParams = input.fields.extraAuthorizeParams ?? {}
+	const tokenPayload = input.fields.tokenPayload
 
 	if (!provider) {
 		return operationResult({ ok: false, error: 'Provider is required.' }, 400)
@@ -435,10 +362,7 @@ async function handleConnectOauthAction(input: {
 				clientId,
 				tokenExchangeStyle: resolveTokenExchangeStyle({
 					tokenUrl,
-					tokenExchangeStyle: readOptionalString(
-						input.body,
-						'tokenExchangeStyle',
-					),
+					tokenExchangeStyle: input.fields.tokenExchangeStyle?.trim() ?? null,
 				}),
 				allowedHosts,
 				authorization: authorizeUrl
@@ -472,7 +396,7 @@ async function handleConnectOauthAction(input: {
 			env: input.env,
 			userId: ownerId,
 			provider: integrationName,
-			clientSecret: readOptionalString(input.body, 'clientSecret'),
+			clientSecret: input.fields.clientSecret?.trim() ?? null,
 		})
 		if (clientSecret && connected?.lane === 'user') {
 			await persistUserOauthAppClientSecret({
@@ -563,19 +487,19 @@ async function emitConnectOauthAuthSucceeded(input: {
 	}
 }
 
-async function handleOAuthExchangeAction(input: {
+export async function exchangeAccountOAuthToken(input: {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: object
+	fields: ExchangeOAuthTokenInput
 }) {
-	const paramsRaw = readOptionalString(input.body, 'params')
+	const paramsRaw = input.fields.params?.trim() ?? null
 	if (!paramsRaw) {
 		return operationResult(
 			{ ok: false, error: 'Token params are required.' },
 			400,
 		)
 	}
-	const platformAppSlug = readOptionalString(input.body, 'platformAppSlug')
+	const platformAppSlug = input.fields.platformAppSlug?.trim() ?? null
 	if (platformAppSlug) {
 		return handlePlatformOAuthExchange({
 			env: input.env,
@@ -584,11 +508,9 @@ async function handleOAuthExchangeAction(input: {
 		})
 	}
 
-	const tokenUrl = readOptionalString(input.body, 'tokenUrl')
-	const flow = readOptionalString(input.body, 'flow') ?? 'pkce'
-	const allowedHosts = normalizeAllowedHosts(
-		readStringArray(input.body, 'allowedHosts'),
-	)
+	const tokenUrl = input.fields.tokenUrl?.trim() ?? null
+	const flow = input.fields.flow?.trim() ?? 'pkce'
+	const allowedHosts = normalizeAllowedHosts(input.fields.allowedHosts ?? [])
 	let clientSecret: string | null = null
 
 	if (!tokenUrl) {
@@ -610,7 +532,7 @@ async function handleOAuthExchangeAction(input: {
 
 	const tokenExchangeStyle = resolveTokenExchangeStyle({
 		tokenUrl,
-		tokenExchangeStyle: readOptionalString(input.body, 'tokenExchangeStyle'),
+		tokenExchangeStyle: input.fields.tokenExchangeStyle?.trim() ?? null,
 	})
 
 	if (flow === 'confidential') {
@@ -620,8 +542,8 @@ async function handleOAuthExchangeAction(input: {
 				request: input.user.request,
 				user: input.user.mcpUser,
 			}),
-			provider: readOptionalString(input.body, 'provider') ?? '',
-			clientSecret: readOptionalString(input.body, 'clientSecret'),
+			provider: input.fields.provider?.trim() ?? '',
+			clientSecret: input.fields.clientSecret?.trim() ?? null,
 		})
 		if (!clientSecret) {
 			return operationResult(
@@ -1164,19 +1086,22 @@ async function handleApprovalAction(input: {
 	}
 }
 
-async function handleSaveAction(input: {
+export async function saveAccountSecret(input: {
 	request: Request
 	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: object
+	fields: SaveSecretInput
 }) {
-	const currentId = readOptionalString(input.body, 'currentId')
-	const name = readString(input.body, 'name')
-	let value = readString(input.body, 'value')
-	const scope = readAccountSecretScope(input.body)
-	const description = readOptionalString(input.body, 'description') ?? ''
-	const expiresAt = readOptionalExpiresAt(input.body)
+	const currentId = input.fields.currentId?.trim() ?? null
+	const name = input.fields.name?.trim() || null
+	let value = input.fields.value?.trim() || null
+	const scope =
+		input.fields.scope === 'user' || input.fields.scope === 'package'
+			? input.fields.scope
+			: null
+	const description = input.fields.description?.trim() ?? ''
+	const expiresAt = readOptionalExpiresAt(input.fields)
 	if (expiresAt === false) {
 		return operationResult(
 			{
@@ -1187,13 +1112,11 @@ async function handleSaveAction(input: {
 			400,
 		)
 	}
-	const allowedHosts = normalizeAllowedHosts(
-		readStringArray(input.body, 'allowedHosts'),
-	)
+	const allowedHosts = normalizeAllowedHosts(input.fields.allowedHosts ?? [])
 	const allowedPackages = normalizeAllowedPackages(
-		readStringArray(input.body, 'allowedPackages'),
+		input.fields.allowedPackages ?? [],
 	)
-	const providerText = readOptionalString(input.body, 'provider')
+	const providerText = input.fields.provider?.trim() ?? null
 	const provider = providerText
 		? credentialProviderSchema.safeParse(providerText)
 		: null
@@ -1205,7 +1128,7 @@ async function handleSaveAction(input: {
 			400,
 		)
 	}
-	const optIn = readOptInCredentialInput(input.body)
+	const optIn = readOptInCredentialInput(input.fields)
 	if (!optIn.ok) {
 		return operationResult({ ok: false, error: optIn.error }, 400)
 	}
@@ -1291,7 +1214,7 @@ async function handleSaveAction(input: {
 	})
 	const packageOptions = toPackageOptions(savedPackages)
 	const packageId = readPackageIdForScope({
-		body: input.body,
+		packageId: input.fields.packageId,
 		scope,
 		packageOptions,
 	})
@@ -1606,14 +1529,14 @@ async function handleSaveAction(input: {
 	}
 }
 
-async function handleDeleteAction(input: {
+export async function deleteAccountSecret(input: {
 	request: Request
 	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: object
+	fields: { currentId: string }
 }) {
-	const currentId = readString(input.body, 'currentId')
+	const currentId = input.fields.currentId?.trim() || null
 	if (!currentId) {
 		return operationResult({ ok: false, error: 'Secret id is required.' }, 400)
 	}
@@ -1649,11 +1572,6 @@ async function handleDeleteAction(input: {
 	})
 }
 
-function readOptionalString(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	return typeof value === 'string' ? value.trim() : null
-}
-
 function readOptionalExpiresAt(body: object) {
 	if (!Object.hasOwn(body, 'expiresAt')) return undefined
 	const value = (body as Record<string, unknown>).expiresAt
@@ -1666,39 +1584,11 @@ function readOptionalExpiresAt(body: object) {
 	}
 }
 
-function readOptionalBoolean(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	return typeof value === 'boolean' ? value : null
-}
-
-function readRawOptionalString(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	return typeof value === 'string' ? value : null
-}
-
-function readStringArray(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	if (!Array.isArray(value)) return []
-	return value.filter((item): item is string => typeof item === 'string')
-}
-
 function sameHostList(left: Array<string>, right: Array<string>) {
 	const rightSet = new Set(right.map((host) => host.toLowerCase()))
 	return (
 		left.length === rightSet.size &&
 		left.every((host) => rightSet.has(host.toLowerCase()))
-	)
-}
-
-function readStringRecord(body: object, key: string) {
-	const value = (body as Record<string, unknown>)[key]
-	if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-	return Object.fromEntries(
-		Object.entries(value)
-			.filter(
-				(entry): entry is [string, string] => typeof entry[1] === 'string',
-			)
-			.map(([recordKey, recordValue]) => [recordKey, recordValue]),
 	)
 }
 
@@ -1746,20 +1636,13 @@ function readOptInCredentialInput(body: object):
 	}
 }
 
-function readAccountSecretScope(
-	body: object,
-): AccountEditableSecretScope | null {
-	const raw = readString(body, 'scope')
-	return raw === 'package' || raw === 'user' ? raw : null
-}
-
 function readPackageIdForScope(input: {
-	body: object
+	packageId?: string | null
 	scope: AccountEditableSecretScope
 	packageOptions: Array<SavedPackageOption>
 }) {
 	if (input.scope !== 'package') return null
-	const packageId = readString(input.body, 'packageId')
+	const packageId = input.packageId?.trim() || null
 	if (!packageId) return null
 	return input.packageOptions.some(
 		(packageOption) => packageOption.id === packageId,
@@ -1768,19 +1651,13 @@ function readPackageIdForScope(input: {
 		: null
 }
 
-export async function mutateAccountSecretCollection(
-	input: Parameters<typeof mutateAccountSecrets>[0],
+export function approveAccountSecretAccess(
+	input: Omit<Parameters<typeof handleApprovalAction>[0], 'action'>,
 ) {
-	const action = readString(input.body, 'action')
-	switch (action) {
-		case 'save':
-			return handleSaveAction(input)
-		case 'delete':
-			return handleDeleteAction(input)
-		case 'approve':
-		case 'reject':
-			return handleApprovalAction({ ...input, action })
-		default:
-			throw new Error('Invalid secret collection action.')
-	}
+	return handleApprovalAction({ ...input, action: 'approve' })
+}
+export function rejectAccountSecretAccess(
+	input: Omit<Parameters<typeof handleApprovalAction>[0], 'action'>,
+) {
+	return handleApprovalAction({ ...input, action: 'reject' })
 }

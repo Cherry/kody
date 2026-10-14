@@ -4,7 +4,10 @@ import {
 	useMutationState,
 } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
-import { packageMutationOptions } from './package-mutation-cache.ts'
+import {
+	packageMutationOptions,
+	type PackageWrite,
+} from './package-mutation-cache.ts'
 export function usePackageMutation(packageId: string) {
 	const client = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
@@ -14,7 +17,7 @@ export function usePackageMutation(packageId: string) {
 			status: 'pending',
 		},
 		select: (mutation) => ({
-			...(mutation.state.variables as { body: Record<string, unknown> }),
+			...(mutation.state.variables as { body: PackageWrite }),
 			submittedAt: mutation.state.submittedAt,
 		}),
 	})
@@ -28,7 +31,7 @@ export function usePackageMutation(packageId: string) {
 		pendingLockedAt: pending.length
 			? new Date(pending.at(-1)!.submittedAt).toISOString()
 			: null,
-		submit: (body: Record<string, unknown>) =>
+		submit: (body: PackageWrite) =>
 			mutation.mutateAsync({ body, actorKey, packageId }),
 	}
 }

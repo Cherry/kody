@@ -9,22 +9,19 @@ import {
 	PackageStorageCleanupError,
 } from '#worker/package-registry/service.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-export async function mutateAccountPackageDelete(input: {
+export async function deleteAccountPackage(input: {
 	env: Env
 	user: AuthenticatedUser
-	body: object
-}): Promise<PackageMutationResult | null> {
-	const action = readTrimmedStringOrEmpty(input.body, 'action')
-	if (action !== 'delete') return null
-
-	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
-	const confirmName = readTrimmedStringOrEmpty(input.body, 'confirmName')
+	packageId: string
+	confirmName: string
+}): Promise<PackageMutationResult> {
+	const packageId = input.packageId.trim()
+	const confirmName = input.confirmName.trim()
 	if (!packageId) {
 		return packageMutationResult(
 			{ ok: false, error: 'Package id is required.' },

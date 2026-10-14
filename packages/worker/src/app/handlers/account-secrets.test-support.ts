@@ -5,7 +5,15 @@ import {
 } from '#app/account-secrets-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
-import { mutateAccountSecrets } from './account-secrets.ts'
+import {
+	saveAccountSecret,
+	deleteAccountSecret,
+	approveAccountSecretAccess,
+	rejectAccountSecretAccess,
+	saveAccountOAuthApp,
+	connectAccountOAuth,
+	exchangeAccountOAuthToken,
+} from './account-secrets.ts'
 export * from './account-secrets.ts'
 
 export function testAccountSecretsApiHandler(env: Env) {
@@ -38,16 +46,66 @@ export function testAccountSecretsApiHandler(env: Env) {
 				)
 			}
 
-			const result = await mutateAccountSecrets({
+			const context = {
+				request,
+				env,
+				user,
 				refresh: {
 					...connectSecretsInput(new URL(request.url).search),
 					selectedSecretId: readAccountSecretsSelectedSecretId(request.url),
 				},
-				request,
-				env,
-				user,
-				body: body as Record<string, unknown>,
-			})
+			}
+			const values = body as Record<string, unknown>
+			let result
+			switch (values.action) {
+				case 'approve':
+					result = await approveAccountSecretAccess(context)
+					break
+				case 'reject':
+					result = await rejectAccountSecretAccess(context)
+					break
+				case 'save':
+					result = await saveAccountSecret({
+						...context,
+						fields: values as Parameters<typeof saveAccountSecret>[0]['fields'],
+					})
+					break
+				case 'delete':
+					result = await deleteAccountSecret({
+						...context,
+						fields: values as Parameters<
+							typeof deleteAccountSecret
+						>[0]['fields'],
+					})
+					break
+				case 'save_oauth_app':
+					result = await saveAccountOAuthApp({
+						...context,
+						fields: values as Parameters<
+							typeof saveAccountOAuthApp
+						>[0]['fields'],
+					})
+					break
+				case 'connect_oauth':
+					result = await connectAccountOAuth({
+						...context,
+						fields: values as Parameters<
+							typeof connectAccountOAuth
+						>[0]['fields'],
+					})
+					break
+				case 'oauth_exchange':
+					result = await exchangeAccountOAuthToken({
+						...context,
+						fields: values as Parameters<
+							typeof exchangeAccountOAuthToken
+						>[0]['fields'],
+					})
+					break
+				default:
+					return operationResult({ ok: false, error: 'Invalid action.' }, 400)
+			}
+
 			return operationResult(result.data, result.status)
 		},
 	}

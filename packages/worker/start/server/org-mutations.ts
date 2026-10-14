@@ -1,82 +1,193 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-
-const orgPeopleActionSchema = z.enum([
-	'memberRole',
-	'memberRemove',
-	'memberInvite',
-	'inviteLinkCreate',
-	'inviteLinkRevoke',
-	'teamCreate',
-	'teamMemberAdd',
-	'teamMemberRemove',
-	'grantRevoke',
-])
-export type OrgPeopleAction = z.infer<typeof orgPeopleActionSchema>
-export const updateOrgPeople = createServerFn({ method: 'POST' })
+import {
+	setOrganizationMemberRoleSchema,
+	removeOrganizationMemberSchema,
+	inviteOrganizationMemberSchema,
+	createOrganizationInviteLinkSchema,
+	revokeOrganizationInviteLinkSchema,
+	createOrganizationTeamSchema,
+	addOrganizationTeamMemberSchema,
+	removeOrganizationTeamMemberSchema,
+	revokeOrganizationGrantSchema,
+} from '#universal/org-people-mutations.ts'
+export const setOrganizationMemberRole = createServerFn({ method: 'POST' })
 	.validator(
-		z.object({
+		setOrganizationMemberRoleSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-			action: orgPeopleActionSchema,
-			body: z.record(z.string(), z.unknown()),
 		}),
 	)
 	.handler(async ({ data }) => {
-		const [
-			{ withWebsiteMutation },
-			members,
-			teams,
-			grants,
-			{ requireOperationResult },
-		] = await Promise.all([
-			import('./mutation-context.ts'),
-			import('../../src/app/handlers/org-members.ts'),
-			import('../../src/app/handlers/org-teams.ts'),
-			import('../../src/app/handlers/org-grants.ts'),
-			import('../../src/app/operation-result.ts'),
-		])
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { setOrganizationMemberRole } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
 		return withWebsiteMutation(
 			{ scope: { orgSlug: data.orgSlug } },
-			async (context) => {
-				const input = { ...context, orgSlug: data.orgSlug, body: data.body }
-				switch (data.action) {
-					case 'memberRole':
-						return requireOperationResult(
-							await members.mutateOrgMembersRole(input),
-						)
-					case 'memberRemove':
-						return requireOperationResult(
-							await members.mutateOrgMembersRemove(input),
-						)
-					case 'memberInvite':
-						return requireOperationResult(
-							await members.mutateOrgMembersInvite(input),
-						)
-					case 'inviteLinkCreate':
-						return requireOperationResult(
-							await members.mutateOrgMembersInviteLinks(input),
-						)
-					case 'inviteLinkRevoke':
-						return requireOperationResult(
-							await members.mutateOrgMembersInviteLinksRevoke(input),
-						)
-					case 'teamCreate':
-						return requireOperationResult(
-							await teams.mutateOrgTeamsCreate(input),
-						)
-					case 'teamMemberAdd':
-						return requireOperationResult(
-							await teams.mutateOrgTeamsMemberAdd(input),
-						)
-					case 'teamMemberRemove':
-						return requireOperationResult(
-							await teams.mutateOrgTeamsMemberRemove(input),
-						)
-					case 'grantRevoke':
-						return requireOperationResult(
-							await grants.mutateOrgGrantsRevoke(input),
-						)
-				}
-			},
+			async (context) =>
+				requireOperationResult(
+					await setOrganizationMemberRole({ ...context, ...data }),
+				),
+		)
+	})
+export const removeOrganizationMember = createServerFn({ method: 'POST' })
+	.validator(
+		removeOrganizationMemberSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { removeOrganizationMember } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await removeOrganizationMember({ ...context, ...data }),
+				),
+		)
+	})
+export const inviteOrganizationMember = createServerFn({ method: 'POST' })
+	.validator(
+		inviteOrganizationMemberSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { inviteOrganizationMember } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await inviteOrganizationMember({ ...context, ...data }),
+				),
+		)
+	})
+export const createOrganizationInviteLink = createServerFn({ method: 'POST' })
+	.validator(
+		createOrganizationInviteLinkSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { createOrganizationInviteLink } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await createOrganizationInviteLink({ ...context, ...data }),
+				),
+		)
+	})
+export const revokeOrganizationInviteLink = createServerFn({ method: 'POST' })
+	.validator(
+		revokeOrganizationInviteLinkSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { revokeOrganizationInviteLink } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await revokeOrganizationInviteLink({ ...context, ...data }),
+				),
+		)
+	})
+export const createOrganizationTeam = createServerFn({ method: 'POST' })
+	.validator(
+		createOrganizationTeamSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { createOrganizationTeam } =
+			await import('../../src/app/handlers/org-teams.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await createOrganizationTeam({ ...context, ...data }),
+				),
+		)
+	})
+export const addOrganizationTeamMember = createServerFn({ method: 'POST' })
+	.validator(
+		addOrganizationTeamMemberSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { addOrganizationTeamMember } =
+			await import('../../src/app/handlers/org-teams.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await addOrganizationTeamMember({ ...context, ...data }),
+				),
+		)
+	})
+export const removeOrganizationTeamMember = createServerFn({ method: 'POST' })
+	.validator(
+		removeOrganizationTeamMemberSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { removeOrganizationTeamMember } =
+			await import('../../src/app/handlers/org-teams.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await removeOrganizationTeamMember({ ...context, ...data }),
+				),
+		)
+	})
+export const revokeOrganizationGrant = createServerFn({ method: 'POST' })
+	.validator(
+		revokeOrganizationGrantSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { revokeOrganizationGrant } =
+			await import('../../src/app/handlers/org-grants.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await revokeOrganizationGrant({ ...context, ...data }),
+				),
 		)
 	})

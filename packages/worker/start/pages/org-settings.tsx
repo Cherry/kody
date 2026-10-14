@@ -1,6 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import {
-	updateOrganizationSettings,
+	updateOrganizationProfile,
+	deleteOrganization,
+	removeOrganizationPhoto,
 	saveOrganizationAvatar,
 } from '#start/server/org-settings-mutations'
 import { type CSSObject } from '@emotion/react'
@@ -99,23 +101,17 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 					OrgSettingsLoaderData & { redirectTo?: string }
 				>
 			}
-			return updateOrganizationSettings({
-				data: {
-					orgSlug: slug,
-					kind:
-						input.kind === 'profile'
-							? 'profile'
-							: input.kind === 'delete'
-								? 'delete'
-								: 'remove-avatar',
-					body:
-						input.kind === 'profile'
-							? { displayName: input.displayName }
-							: input.kind === 'delete'
-								? { confirmation: input.confirmation }
-								: { remove: true },
-				},
-			}) as Promise<OrgSettingsLoaderData & { redirectTo?: string }>
+			return (
+				input.kind === 'profile'
+					? updateOrganizationProfile({
+							data: { orgSlug: slug, displayName: input.displayName },
+						})
+					: input.kind === 'delete'
+						? deleteOrganization({
+								data: { orgSlug: slug, confirmation: input.confirmation },
+							})
+						: removeOrganizationPhoto({ data: { orgSlug: slug } })
+			) as Promise<OrgSettingsLoaderData & { redirectTo?: string }>
 		},
 		onSuccess: async (payload, submitted) => {
 			await client.cancelQueries({ queryKey: submitted.queryKey, exact: true })

@@ -199,22 +199,18 @@ function personalOrgMembershipWriteResponse() {
 	)
 }
 
-export async function readJsonObject(request: Request) {
-	const body = await request.json().catch(() => null)
-	if (!body || typeof body !== 'object') return null
-	return body as Record<string, unknown>
-}
-export async function mutateOrgMembersRole({
+export async function setOrganizationMemberRole({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	userId?: unknown
+	role?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -229,8 +225,8 @@ export async function mutateOrgMembersRole({
 	}
 	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
-	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
-	const role = body?.role
+	const userId = typeof fields.userId === 'string' ? fields.userId.trim() : ''
+	const role = fields.role
 	if (!userId || !isOrgRole(role)) {
 		return operationResult(
 			{ ok: false, error: 'A member and role are required.' },
@@ -305,17 +301,17 @@ export async function mutateOrgMembersRole({
 		await loadOrgMembersData({ env, user, org: access.org }),
 	)
 }
-export async function mutateOrgMembersRemove({
+export async function removeOrganizationMember({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	userId?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -330,7 +326,7 @@ export async function mutateOrgMembersRemove({
 	}
 	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
-	const userId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+	const userId = typeof fields.userId === 'string' ? fields.userId.trim() : ''
 	if (!userId) {
 		return operationResult({ ok: false, error: 'A member is required.' }, 400)
 	}
@@ -392,17 +388,20 @@ export async function mutateOrgMembersRemove({
 		await loadOrgMembersData({ env, user, org: access.org }),
 	)
 }
-export async function mutateOrgMembersInvite({
+export async function inviteOrganizationMember({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	invitee?: unknown
+	email?: unknown
+	username?: unknown
+	role?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -417,14 +416,15 @@ export async function mutateOrgMembersInvite({
 	}
 	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
-	const invitee = typeof body?.invitee === 'string' ? body.invitee.trim() : ''
-	const emailInput = typeof body?.email === 'string' ? body.email.trim() : ''
+	const invitee =
+		typeof fields.invitee === 'string' ? fields.invitee.trim() : ''
+	const emailInput = typeof fields.email === 'string' ? fields.email.trim() : ''
 	const usernameInput =
-		typeof body?.username === 'string' ? body.username.trim() : ''
-	if (body?.role !== undefined && !isOrgRole(body.role)) {
+		typeof fields.username === 'string' ? fields.username.trim() : ''
+	if (fields.role !== undefined && !isOrgRole(fields.role)) {
 		return operationResult({ ok: false, error: 'Choose a valid role.' }, 400)
 	}
-	const role = isOrgRole(body?.role) ? body.role : 'member'
+	const role = isOrgRole(fields.role) ? fields.role : 'member'
 	let inviteeEmail: string | null = null
 	let inviteeUsername: string | null = null
 	if (emailInput || (invitee.includes('@') && !usernameInput)) {
@@ -486,17 +486,23 @@ export async function mutateOrgMembersInvite({
 		},
 	})
 }
-export async function mutateOrgMembersInviteLinks({
+export async function createOrganizationInviteLink({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	role?: unknown
+	allowedEmailDomains?: unknown
+	domains?: unknown
+	allowedDomains?: unknown
+	maxUses?: unknown
+	expiresAt?: unknown
+	expiresInDays?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -511,8 +517,8 @@ export async function mutateOrgMembersInviteLinks({
 	}
 	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
-	if (body?.role !== undefined && !isInviteLinkRole(body.role)) {
-		if (body.role === 'owner') {
+	if (fields.role !== undefined && !isInviteLinkRole(fields.role)) {
+		if (fields.role === 'owner') {
 			return operationResult(
 				{
 					ok: false,
@@ -523,9 +529,9 @@ export async function mutateOrgMembersInviteLinks({
 		}
 		return operationResult({ ok: false, error: 'Choose a valid role.' }, 400)
 	}
-	const role = isInviteLinkRole(body?.role) ? body.role : 'member'
+	const role = isInviteLinkRole(fields.role) ? fields.role : 'member'
 	const domains = parseDomainList(
-		body?.allowedEmailDomains ?? body?.domains ?? body?.allowedDomains,
+		fields.allowedEmailDomains ?? fields.domains ?? fields.allowedDomains,
 	)
 	if (domains == null) {
 		return operationResult(
@@ -538,15 +544,15 @@ export async function mutateOrgMembersInviteLinks({
 	}
 	let maxUses: number | null = null
 	if (
-		body?.maxUses !== undefined &&
-		body?.maxUses !== null &&
-		body?.maxUses !== ''
+		fields.maxUses !== undefined &&
+		fields.maxUses !== null &&
+		fields.maxUses !== ''
 	) {
 		const parsed =
-			typeof body.maxUses === 'number'
-				? body.maxUses
-				: typeof body.maxUses === 'string'
-					? Number(body.maxUses)
+			typeof fields.maxUses === 'number'
+				? fields.maxUses
+				: typeof fields.maxUses === 'string'
+					? Number(fields.maxUses)
 					: NaN
 		if (!Number.isInteger(parsed) || parsed < 1) {
 			return operationResult(
@@ -557,8 +563,8 @@ export async function mutateOrgMembersInviteLinks({
 		maxUses = parsed
 	}
 	let expiresAt: string | undefined
-	if (typeof body?.expiresAt === 'string' && body.expiresAt.trim()) {
-		const parsed = Date.parse(body.expiresAt)
+	if (typeof fields.expiresAt === 'string' && fields.expiresAt.trim()) {
+		const parsed = Date.parse(fields.expiresAt)
 		if (Number.isNaN(parsed)) {
 			return operationResult(
 				{ ok: false, error: 'Enter a valid expiry date.' },
@@ -567,15 +573,15 @@ export async function mutateOrgMembersInviteLinks({
 		}
 		expiresAt = new Date(parsed).toISOString()
 	} else if (
-		body?.expiresInDays !== undefined &&
-		body?.expiresInDays !== null &&
-		body?.expiresInDays !== ''
+		fields.expiresInDays !== undefined &&
+		fields.expiresInDays !== null &&
+		fields.expiresInDays !== ''
 	) {
 		const days =
-			typeof body.expiresInDays === 'number'
-				? body.expiresInDays
-				: typeof body.expiresInDays === 'string'
-					? Number(body.expiresInDays)
+			typeof fields.expiresInDays === 'number'
+				? fields.expiresInDays
+				: typeof fields.expiresInDays === 'string'
+					? Number(fields.expiresInDays)
 					: NaN
 		if (
 			!Number.isFinite(days) ||
@@ -633,17 +639,18 @@ export async function mutateOrgMembersInviteLinks({
 		return operationResult({ ok: false, error: message }, 400)
 	}
 }
-export async function mutateOrgMembersInviteLinksRevoke({
+export async function revokeOrganizationInviteLink({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	linkId?: unknown
+	id?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -659,10 +666,10 @@ export async function mutateOrgMembersInviteLinksRevoke({
 	if (access.org.personal) return personalOrgMembershipWriteResponse()
 
 	const linkId =
-		typeof body?.linkId === 'string'
-			? body.linkId.trim()
-			: typeof body?.id === 'string'
-				? body.id.trim()
+		typeof fields.linkId === 'string'
+			? fields.linkId.trim()
+			: typeof fields.id === 'string'
+				? fields.id.trim()
 				: ''
 	if (!linkId) {
 		return operationResult(

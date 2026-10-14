@@ -96,22 +96,17 @@ export async function loadOrgGrantsData(input: {
 	}
 }
 
-export async function readJsonObject(request: Request) {
-	const body = await request.json().catch(() => null)
-	if (!body || typeof body !== 'object') return null
-	return body as Record<string, unknown>
-}
-export async function mutateOrgGrantsRevoke({
+export async function revokeOrganizationGrant({
 	request,
 	env,
 	user,
-	body,
 	orgSlug,
+	...fields
 }: {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	body: Record<string, unknown>
+	grantId?: unknown
 	orgSlug?: string
 }) {
 	const access = await resolveOrgManagementAccess({
@@ -125,7 +120,8 @@ export async function mutateOrgGrantsRevoke({
 		return operationResult({ ok: false, error: access.error }, access.status)
 	}
 
-	const grantId = typeof body?.grantId === 'string' ? body.grantId.trim() : ''
+	const grantId =
+		typeof fields.grantId === 'string' ? fields.grantId.trim() : ''
 	if (!grantId) {
 		return operationResult({ ok: false, error: 'A grant id is required.' }, 400)
 	}

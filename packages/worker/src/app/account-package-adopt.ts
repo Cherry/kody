@@ -1,7 +1,6 @@
 import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { viewerIsSavedPackageOrgOwner } from '#app/package-viewer-access.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
 import { adoptCommunityFork } from '#worker/community/service.ts'
 import {
@@ -14,16 +13,14 @@ type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-export async function mutateAccountPackageAdopt(input: {
+export async function adoptAccountPackageFork(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
-	body: object
-}): Promise<PackageMutationResult | null> {
-	const action = readTrimmedStringOrEmpty(input.body, 'action')
-	if (action !== 'adopt-community-fork') return null
-
-	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
+	packageId: string
+	reviewNote: string
+}): Promise<PackageMutationResult> {
+	const packageId = input.packageId.trim()
 	if (!packageId) {
 		return packageMutationResult(
 			{ ok: false, error: 'Package id is required.' },
@@ -53,7 +50,7 @@ export async function mutateAccountPackageAdopt(input: {
 			env: input.env,
 			userId: ownerUserId,
 			packageId,
-			reviewSummary: readTrimmedStringOrEmpty(input.body, 'reviewNote'),
+			reviewSummary: input.reviewNote.trim(),
 		})
 	} catch (error) {
 		if (error instanceof CommunityActionError) {

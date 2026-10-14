@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
-import { updateOrganizationSettings } from '#start/server/org-settings-mutations'
+import {
+	addOrganizationDomain,
+	syncOrganizationDomain,
+	deleteOrganizationDomain,
+} from '#start/server/org-settings-mutations'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -23,14 +27,15 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
-type DomainWrite = {
-	action: 'add' | 'sync' | 'delete'
-	hostname?: string
-	id?: string
-	binding_kind?: 'app' | 'org'
-	package_id?: string
-	ssl_method?: 'http' | 'txt'
-}
+type DomainWrite =
+	| {
+			action: 'add'
+			hostname: string
+			binding_kind: 'app' | 'org'
+			package_id?: string
+			ssl_method?: 'http' | 'txt'
+	  }
+	| { action: 'sync' | 'delete'; hostname?: string; id?: string }
 
 type DomainSubmission = Readonly<{
 	body: DomainWrite
@@ -59,9 +64,25 @@ export function OrgSettingsCustomDomains({
 			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
 		},
 		mutationFn: async ({ body, slug }: DomainSubmission) => {
-			return updateOrganizationSettings({
-				data: { orgSlug: slug, kind: 'domains', body },
-			}) as Promise<OrgSettingsLoaderData>
+			return (
+				body.action === 'add'
+					? addOrganizationDomain({
+							data: {
+								orgSlug: slug,
+								hostname: body.hostname,
+								bindingKind: body.binding_kind,
+								packageId: body.package_id,
+								sslMethod: body.ssl_method,
+							},
+						})
+					: body.action === 'sync'
+						? syncOrganizationDomain({
+								data: { orgSlug: slug, hostname: body.hostname, id: body.id },
+							})
+						: deleteOrganizationDomain({
+								data: { orgSlug: slug, hostname: body.hostname, id: body.id },
+							})
+			) as Promise<OrgSettingsLoaderData>
 		},
 		onSuccess: async (payload, submission) => {
 			// A pre-mutation settings read must not replace the authoritative write reply.

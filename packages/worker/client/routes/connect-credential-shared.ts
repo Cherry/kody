@@ -1,3 +1,4 @@
+import { type SaveSecretInput } from '#universal/secret-mutations.ts'
 import { buildAccountSecretId } from '@kody-internal/shared/account-secret-route.ts'
 import { normalizeSecretExpiresAt } from '@kody-internal/shared/secret-expires-at.ts'
 import {
@@ -353,7 +354,7 @@ export function isMaskedLoginField(name: string) {
 }
 
 export type CredentialSaveBody =
-	| { ok: true; body: Record<string, unknown> }
+	| { ok: true; body: SaveSecretInput & { action: 'save' } }
 	| { ok: false; error: string }
 
 /**
@@ -432,14 +433,14 @@ export function buildKeySaveBody(input: {
 	const replacing = form.replaceExisting && input.existing !== null
 	const hosts = parseHostsInput(form.hosts)
 	const packageId = keyFormPackageId(form, input.kind)
-	const scope = packageId ? 'package' : 'user'
+	const scope: 'package' | 'user' = packageId ? 'package' : 'user'
 	const allowedPackages = packageId
 		? []
 		: [...new Set(form.allowedPackages)].sort((left, right) =>
 				left.localeCompare(right),
 			)
 	const common = {
-		action: 'save',
+		action: 'save' as const,
 		currentId: replacing
 			? buildAccountSecretId({ name, scope, packageId })
 			: null,

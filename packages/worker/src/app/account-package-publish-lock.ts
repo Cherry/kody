@@ -4,7 +4,6 @@ import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadPublicTreeFiles } from '#app/package-files-data.ts'
 import { buildPublishCommitDiff } from '#app/package-publish-diff.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 import { type AccountPackageApprovePublishLoaderData } from '#universal/loader-data.ts'
 import { getPackageTreeHref } from '#universal/package-files.ts'
 import { routes } from '#universal/routes.ts'
@@ -179,21 +178,32 @@ async function loadPublishCompareTree(input: {
 	}
 }
 
-export async function mutateAccountPackagePublishLock(input: {
+type PublishMutationContext = {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
-	body: object
-}): Promise<PackageMutationResult | null> {
-	const action = readTrimmedStringOrEmpty(input.body, 'action')
-	if (
-		action !== 'lock' &&
-		action !== 'unlock' &&
-		action !== 'approve-publish'
-	) {
-		return null
-	}
-	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
+	packageId: string
+}
+export function lockAccountPackage(input: PublishMutationContext) {
+	return changePackagePublishState({ ...input, action: 'lock' })
+}
+export function unlockAccountPackage(input: PublishMutationContext) {
+	return changePackagePublishState({ ...input, action: 'unlock' })
+}
+export function approveAccountPackagePublish(
+	input: PublishMutationContext & { commit: string },
+) {
+	return changePackagePublishState({ ...input, action: 'approve-publish' })
+}
+async function changePackagePublishState(
+	input: PublishMutationContext &
+		(
+			| { action: 'lock' | 'unlock' }
+			| { action: 'approve-publish'; commit: string }
+		),
+): Promise<PackageMutationResult> {
+	const action = input.action
+	const packageId = input.packageId.trim()
 	if (!packageId) {
 		return packageMutationResult(
 			{ ok: false, error: 'Package id is required.' },
@@ -247,7 +257,7 @@ export async function mutateAccountPackagePublishLock(input: {
 		)
 	}
 
-	const commit = readTrimmedStringOrEmpty(input.body, 'commit')
+	const commit = ('commit' in input ? input.commit : '').trim()
 	if (!isGitCommitSha(commit)) {
 		return packageMutationResult(
 			{

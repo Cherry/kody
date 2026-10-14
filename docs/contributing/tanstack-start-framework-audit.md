@@ -131,9 +131,9 @@ measured performance gain follows from this ownership inventory.
 
 ## Remaining mutation API cleanup
 
-Account integrations, connected agents, MCP server management and secrets require
-operation-level review. Outside account collections, package mutations,
-organization settings and several admin forms also retain broad body records or
+Account integrations, connected agents, MCP server management, secrets, package
+writes and organization management have named native operations. Several admin
+forms and auth/billing inputs retain broad body records, and admin forms retain
 operation selection inside native functions. Transport ownership alone does not
 prove these APIs are idiomatic. Shared validation and business authorization are
 useful; generic dispatch over unrelated actions is the cleanup target.
@@ -142,3 +142,9 @@ Against main `b24bb2ba2`, the deleted client router contains 1,352 lines, intent
 prefetch contains 277 lines, and the deleted backend router contains 782 lines.
 That is 2,411 lines across those three retired files, not a net migration size
 claim. Native routes and operation code replace their responsibilities.
+
+The exported shared secret reader uses `createServerOnlyFn`. This boundary keeps
+credential services and the image renderer out of the browser graph. Package
+operations preserve domain response status and structured recovery fields.
+Organization people mutations invalidate actor-scoped typed organization query
+keys, including the organization in each key.

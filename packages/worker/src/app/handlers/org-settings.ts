@@ -1,5 +1,5 @@
 import { operationResult } from '../operation-result.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	orgHasPermission,
 	resolveOrgManagementAccess,
@@ -97,13 +97,16 @@ async function readFileBytes(file: File): Promise<Uint8Array> {
 	return new Uint8Array(await file.arrayBuffer())
 }
 
-export async function mutateOrgSettingsPost(input: {
+type OrganizationWriteContext = {
 	env: Env
 	request: Request
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	orgSlug?: string
-	body: unknown
-}) {
+}
+
+export async function updateOrganizationProfile(
+	input: OrganizationWriteContext & { displayName?: string; slug?: string },
+) {
 	const { env, request, user } = input
 	const access = await resolveOrgManagementAccess({
 		request,
@@ -124,18 +127,10 @@ export async function mutateOrgSettingsPost(input: {
 			400,
 		)
 	}
-	const body = input.body as {
-		displayName?: unknown
-		slug?: unknown
-	} | null
-	if (!body || typeof body !== 'object') {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
 	const updated = await updateOrgProfile(env.APP_DB, {
 		orgId: access.org.id,
-		displayName:
-			typeof body.displayName === 'string' ? body.displayName : undefined,
-		slug: typeof body.slug === 'string' ? body.slug : undefined,
+		displayName: input.displayName,
+		slug: input.slug,
 	})
 	if (!updated.ok) {
 		return operationResult({ ok: false, error: updated.error }, 400)
@@ -148,13 +143,35 @@ export async function mutateOrgSettingsPost(input: {
 	return operationResult(await loadOrgSettingsData({ env, user, org: next }))
 }
 
-export async function mutateOrgSettingsAvatarPost(input: {
-	env: Env
-	request: Request
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	orgSlug?: string
-	body: unknown
-}) {
+export async function removeOrganizationPhoto(input: OrganizationWriteContext) {
+	const { env, request, user } = input
+	const access = await resolveOrgManagementAccess({
+		request,
+		env,
+		user,
+		orgSlug: input.orgSlug,
+		permission: 'org:write',
+	})
+	if (!access.ok)
+		return operationResult({ ok: false, error: access.error }, access.status)
+	if (access.org.personal)
+		return operationResult(
+			{ ok: false, error: 'Your photo lives on your account profile.' },
+			400,
+		)
+	await deleteOrgAvatar({ env, orgId: access.org.id })
+	return operationResult(
+		await loadOrgSettingsData({
+			env,
+			user,
+			org: { ...access.org, avatarUrl: null },
+		}),
+	)
+}
+
+export async function saveOrganizationPhoto(
+	input: OrganizationWriteContext & { avatar: File | null },
+) {
 	const { env, request, user } = input
 	const access = await resolveOrgManagementAccess({
 		request,
@@ -176,39 +193,7 @@ export async function mutateOrgSettingsAvatarPost(input: {
 		)
 	}
 
-	if (!(input.body instanceof FormData)) {
-		const body = input.body
-		if (
-			!body ||
-			typeof body !== 'object' ||
-			(body as Record<string, unknown>).remove !== true
-		) {
-			return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-		}
-		await deleteOrgAvatar({ env, orgId: access.org.id })
-		return operationResult(
-			await loadOrgSettingsData({
-				env,
-				user,
-				org: { ...access.org, avatarUrl: null },
-			}),
-		)
-	}
-
-	let formData: FormData
-	try {
-		if (!(input.body instanceof FormData)) throw new Error('Expected form data')
-		formData = input.body
-	} catch {
-		return operationResult(
-			{
-				ok: false,
-				error: 'Expected multipart form data with an avatar file.',
-			},
-			400,
-		)
-	}
-	const avatar = formData.get('avatar')
+	const avatar = input.avatar
 	if (!(avatar instanceof File) || avatar.size === 0) {
 		return operationResult(
 			{ ok: false, error: 'Avatar file is required.' },
@@ -259,13 +244,9 @@ export async function mutateOrgSettingsAvatarPost(input: {
 	}
 }
 
-export async function mutateOrgSettingsDeletePost(input: {
-	env: Env
-	request: Request
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	orgSlug?: string
-	body: unknown
-}) {
+export async function deleteOrganization(
+	input: OrganizationWriteContext & { confirmation: string },
+) {
 	const { env, request, user } = input
 	const access = await resolveOrgManagementAccess({
 		request,
@@ -287,11 +268,7 @@ export async function mutateOrgSettingsDeletePost(input: {
 			400,
 		)
 	}
-	const body = input.body as {
-		confirmation?: unknown
-	} | null
-	const confirmation =
-		typeof body?.confirmation === 'string' ? body.confirmation.trim() : ''
+	const confirmation = input.confirmation.trim()
 	if (confirmation !== access.org.slug && confirmation !== 'DELETE') {
 		return operationResult(
 			{
@@ -312,13 +289,14 @@ export async function mutateOrgSettingsDeletePost(input: {
 	})
 }
 
-export async function mutateOrgSettingsCustomHostnamesPost(input: {
-	env: Env
-	request: Request
-	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	orgSlug?: string
-	body: unknown
-}) {
+async function writeOrganizationDomain(
+	input: OrganizationWriteContext,
+	write: (access: {
+		orgId: string
+		actingUserId: number
+		createdByUserId: string
+	}) => Promise<unknown>,
+) {
 	const { env, request, user } = input
 	const access = await resolveOrgManagementAccess({
 		request,
@@ -350,74 +328,12 @@ export async function mutateOrgSettingsCustomHostnamesPost(input: {
 			404,
 		)
 	}
-	const body = input.body as {
-		action?: unknown
-		hostname?: unknown
-		id?: unknown
-		binding_kind?: unknown
-		package_id?: unknown
-		ssl_method?: unknown
-	} | null
-	if (!body || typeof body !== 'object') {
-		return operationResult({ ok: false, error: 'Invalid request body.' }, 400)
-	}
-	const action = typeof body.action === 'string' ? body.action.trim() : ''
 	try {
-		switch (action) {
-			case 'add': {
-				const hostname = typeof body.hostname === 'string' ? body.hostname : ''
-				const bindingKind = body.binding_kind
-				if (bindingKind !== 'app' && bindingKind !== 'org') {
-					return operationResult(
-						{ ok: false, error: 'binding_kind must be app or org.' },
-						400,
-					)
-				}
-				const sslMethod =
-					body.ssl_method === 'txt' || body.ssl_method === 'http'
-						? body.ssl_method
-						: undefined
-				await addPackageAppCustomHostname({
-					env,
-					orgId: access.org.id,
-					actingUserId: user.userId,
-					createdByUserId: user.mcpUser.userId,
-					bindingKind,
-					hostname,
-					packageId:
-						typeof body.package_id === 'string' ? body.package_id : undefined,
-					sslMethod,
-				})
-				break
-			}
-			case 'sync': {
-				await syncPackageAppCustomHostname({
-					env,
-					orgId: access.org.id,
-					actingUserId: user.userId,
-					hostname:
-						typeof body.hostname === 'string' ? body.hostname : undefined,
-					id: typeof body.id === 'string' ? body.id : undefined,
-				})
-				break
-			}
-			case 'delete': {
-				await deletePackageAppCustomHostname({
-					env,
-					orgId: access.org.id,
-					actingUserId: user.userId,
-					hostname:
-						typeof body.hostname === 'string' ? body.hostname : undefined,
-					id: typeof body.id === 'string' ? body.id : undefined,
-				})
-				break
-			}
-			default:
-				return operationResult(
-					{ ok: false, error: 'action must be add, sync, or delete.' },
-					400,
-				)
-		}
+		await write({
+			orgId: access.org.id,
+			actingUserId: user.userId,
+			createdByUserId: user.mcpUser.userId,
+		})
 	} catch (error) {
 		if (error instanceof PackageAppCustomHostnameError) {
 			return operationResult({ ok: false, error: error.message }, 400)
@@ -426,5 +342,49 @@ export async function mutateOrgSettingsCustomHostnamesPost(input: {
 	}
 	return operationResult(
 		await loadOrgSettingsData({ env, user, org: access.org }),
+	)
+}
+
+export async function addOrganizationDomain(
+	input: OrganizationWriteContext & {
+		hostname: string
+		bindingKind: 'app' | 'org'
+		packageId?: string
+		sslMethod?: 'txt' | 'http'
+	},
+) {
+	return writeOrganizationDomain(input, (access) =>
+		addPackageAppCustomHostname({
+			env: input.env,
+			...access,
+			hostname: input.hostname,
+			bindingKind: input.bindingKind,
+			packageId: input.packageId,
+			sslMethod: input.sslMethod,
+		}),
+	)
+}
+export async function syncOrganizationDomain(
+	input: OrganizationWriteContext & { hostname?: string; id?: string },
+) {
+	return writeOrganizationDomain(input, (access) =>
+		syncPackageAppCustomHostname({
+			env: input.env,
+			...access,
+			hostname: input.hostname,
+			id: input.id,
+		}),
+	)
+}
+export async function deleteOrganizationDomain(
+	input: OrganizationWriteContext & { hostname?: string; id?: string },
+) {
+	return writeOrganizationDomain(input, (access) =>
+		deletePackageAppCustomHostname({
+			env: input.env,
+			...access,
+			hostname: input.hostname,
+			id: input.id,
+		}),
 	)
 }

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type SaveSecretInput } from '#universal/secret-mutations.ts'
 import { connectSecretsInput } from '../connect-input.ts'
 import { type ListDetailSelection } from '#client/list-detail-route.ts'
 import {
@@ -8,7 +9,12 @@ import {
 import { getNewSecretValueAutofocusKey } from '#client/routes/new-secret-query.ts'
 import { normalizeAllowedHosts } from '#client/routes/secret-normalization.ts'
 import { toast } from '#client/toast.ts'
-import { updateSecretCollection } from '#start/server/account-mutations'
+import {
+	saveSecret,
+	deleteSecret,
+	approveSecretAccess,
+	rejectSecretAccess,
+} from '#start/server/account-mutations'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
@@ -124,15 +130,29 @@ export function AccountSecretsPage({
 		mutationFn: async (input: {
 			search: string
 			href: string
-			body: Record<string, unknown>
+			body:
+				| ({ action: 'save' } & SaveSecretInput)
+				| { action: 'delete'; currentId: string }
+				| { action: 'approve' | 'reject' }
 		}) => {
-			return updateSecretCollection({
-				data: {
-					body: input.body,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
-					refresh: connectSecretsInput(input.search),
-				},
-			})
+			const scope = {
+				orgSlug: pageQueryOrg(input.href) ?? undefined,
+				refresh: connectSecretsInput(input.search),
+			}
+			switch (input.body.action) {
+				case 'approve':
+					return approveSecretAccess({ data: scope })
+				case 'reject':
+					return rejectSecretAccess({ data: scope })
+				case 'save': {
+					const { action: _action, ...fields } = input.body
+					return saveSecret({ data: { ...scope, fields } })
+				}
+				case 'delete':
+					return deleteSecret({
+						data: { ...scope, fields: { currentId: input.body.currentId } },
+					})
+			}
 		},
 		onSuccess: () => invalidatePages(),
 		onError: (error) => toast.error(error.message),

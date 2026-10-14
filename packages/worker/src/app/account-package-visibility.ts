@@ -12,24 +12,22 @@ import { getCommunityListingByOwnerAndPackage } from '#worker/community/repo.ts'
 import { updateSavedPackage } from '#worker/package-registry/repo.ts'
 import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { readTrimmedStringOrEmpty } from '#app/request-body.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
 
-export async function mutateAccountPackageVisibility(input: {
+export async function setAccountPackageVisibility(input: {
 	env: Env
 	request: Request
 	user: AuthenticatedUser
-	body: object
-}): Promise<PackageMutationResult | null> {
-	const action = readTrimmedStringOrEmpty(input.body, 'action')
-	if (action !== 'set-visibility') return null
-
-	const packageId = readTrimmedStringOrEmpty(input.body, 'packageId')
-	const visibility = readTrimmedStringOrEmpty(input.body, 'visibility')
-	const confirmName = readTrimmedStringOrEmpty(input.body, 'confirmName')
+	packageId: string
+	visibility: string
+	confirmName: string
+}): Promise<PackageMutationResult> {
+	const packageId = input.packageId.trim()
+	const visibility = input.visibility.trim()
+	const confirmName = input.confirmName.trim()
 	if (!packageId) {
 		return packageMutationResult(
 			{ ok: false, error: 'Package id is required.' },

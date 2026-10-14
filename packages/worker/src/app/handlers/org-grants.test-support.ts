@@ -1,11 +1,7 @@
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { resolveOrgManagementAccess } from '#app/org-management-access.ts'
-import {
-	loadOrgGrantsData,
-	mutateOrgGrantsRevoke,
-	readJsonObject,
-} from './org-grants.ts'
+import { loadOrgGrantsData, revokeOrganizationGrant } from './org-grants.ts'
 export * from './org-grants.ts'
 export function testOrgGrantsApiHandler(env: Env) {
 	return {
@@ -40,8 +36,19 @@ export function testOrgGrantsRevokePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgGrantsRevoke({ request, env, user, body })
+			const result = await revokeOrganizationGrant({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
+}
+
+async function readJsonObject(request: Request) {
+	const body = await request.json().catch(() => null)
+	if (!body || typeof body !== 'object') return null
+	return body as Record<string, unknown>
 }

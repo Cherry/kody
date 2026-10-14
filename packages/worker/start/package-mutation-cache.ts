@@ -1,4 +1,16 @@
-import { mutatePackage } from '#start/server/package-mutations'
+import {
+	lockPackage,
+	unlockPackage,
+	approvePackagePublish,
+	setPackageVisibility,
+	setPackageInternetVisible,
+	approvePackageCapabilities,
+	approvePackageCredentialNeeds,
+	approvePackageWentPublic,
+	deletePackage,
+	adoptPackageFork,
+	absorbPackageListing,
+} from '#start/server/package-mutations'
 import {
 	mutationOptions,
 	type QueryClient,
@@ -17,6 +29,76 @@ type PackageResult = AccountPackagesLoaderData & {
 	approvalUrl?: string
 	deleted?: boolean
 }
+export type PackageWrite =
+	| { action: 'lock' | 'unlock' | 'absorb-listing' }
+	| { action: 'approve-publish'; commit: string }
+	| {
+			action: 'set-visibility'
+			visibility: 'public' | 'private'
+			confirmName: string
+	  }
+	| {
+			action: 'set-internet-visible'
+			internetVisible: boolean
+			confirmName: string
+	  }
+	| { action: 'approve-capabilities'; fingerprint: string }
+	| {
+			action: 'approve-credential-needs' | 'approve-went-public'
+			requestId: string
+	  }
+	| { action: 'delete'; confirmName: string }
+	| { action: 'adopt-community-fork'; reviewNote: string }
+async function writePackage(packageId: string, input: PackageWrite) {
+	switch (input.action) {
+		case 'lock':
+			return lockPackage({ data: { packageId } })
+		case 'unlock':
+			return unlockPackage({ data: { packageId } })
+		case 'absorb-listing':
+			return absorbPackageListing({ data: { packageId } })
+		case 'approve-publish':
+			return approvePackagePublish({
+				data: { packageId, commit: input.commit },
+			})
+		case 'set-visibility':
+			return setPackageVisibility({
+				data: {
+					packageId,
+					visibility: input.visibility,
+					confirmName: input.confirmName,
+				},
+			})
+		case 'set-internet-visible':
+			return setPackageInternetVisible({
+				data: {
+					packageId,
+					internetVisible: input.internetVisible,
+					confirmName: input.confirmName,
+				},
+			})
+		case 'approve-capabilities':
+			return approvePackageCapabilities({
+				data: { packageId, fingerprint: input.fingerprint },
+			})
+		case 'approve-credential-needs':
+			return approvePackageCredentialNeeds({
+				data: { packageId, requestId: input.requestId },
+			})
+		case 'approve-went-public':
+			return approvePackageWentPublic({
+				data: { packageId, requestId: input.requestId },
+			})
+		case 'delete':
+			return deletePackage({
+				data: { packageId, confirmName: input.confirmName },
+			})
+		case 'adopt-community-fork':
+			return adoptPackageFork({
+				data: { packageId, reviewNote: input.reviewNote },
+			})
+	}
+}
 export function packageMutationOptions(client: QueryClient) {
 	function packageQueries(actorKey: string | null, packageId: string) {
 		return {
@@ -31,13 +113,14 @@ export function packageMutationOptions(client: QueryClient) {
 		retry: false,
 		gcTime: 0,
 		mutationFn: async (input: {
-			body: Record<string, unknown>
+			body: PackageWrite
 			actorKey: string | null
 			packageId: string
 		}) => {
-			const payload = (await mutatePackage({
-				data: { body: input.body, packageId: input.packageId },
-			})) as PackageResult
+			const payload = (await writePackage(
+				input.packageId,
+				input.body,
+			)) as PackageResult
 			if (!payload.ok)
 				throw Object.assign(
 					new Error(payload.error || 'Unable to update this package.'),

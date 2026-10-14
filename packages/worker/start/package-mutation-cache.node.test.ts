@@ -2,7 +2,17 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { MutationObserver, QueryClient } from '@tanstack/react-query'
 const { writePackage } = vi.hoisted(() => ({ writePackage: vi.fn() }))
 vi.mock('#start/server/package-mutations', () => ({
-	mutatePackage: writePackage,
+	lockPackage: writePackage,
+	unlockPackage: writePackage,
+	approvePackagePublish: writePackage,
+	setPackageVisibility: writePackage,
+	setPackageInternetVisible: writePackage,
+	approvePackageCapabilities: writePackage,
+	approvePackageCredentialNeeds: writePackage,
+	approvePackageWentPublic: writePackage,
+	deletePackage: writePackage,
+	adoptPackageFork: writePackage,
+	absorbPackageListing: writePackage,
 }))
 import { packageMutationOptions } from './package-mutation-cache.ts'
 afterEach(() => vi.resetAllMocks())
@@ -56,12 +66,12 @@ test('accepted writes reconcile the submitting actor after unmount', async () =>
 	client.clear()
 })
 test.each([
-	'approve-capabilities',
-	'approve-credential-needs',
-	'set-visibility',
-])(
+	{ action: 'approve-capabilities', fingerprint: 'reviewed' },
+	{ action: 'approve-credential-needs', requestId: 'request' },
+	{ action: 'set-visibility', visibility: 'public', confirmName: 'repo' },
+] as const)(
 	'uncertain %s reconciles original reads without optimistic permission changes',
-	async (action) => {
+	async (body) => {
 		const client = new QueryClient()
 		const key = [
 			'page',
@@ -83,13 +93,15 @@ test.each([
 			observer.mutate({
 				actorKey: 'actor',
 				packageId: 'pkg',
-				body: { action, fingerprint: 'reviewed', requestId: 'request' },
+				body,
 			}),
 		).rejects.toThrow('Response lost')
 		expect(writePackage).toHaveBeenCalledWith({
 			data: {
 				packageId: 'pkg',
-				body: { action, fingerprint: 'reviewed', requestId: 'request' },
+				...Object.fromEntries(
+					Object.entries(body).filter(([key]) => key !== 'action'),
+				),
 			},
 		})
 		expect(client.getQueryData(key)).toEqual(before)
@@ -109,7 +121,11 @@ test('review-required errors retain the approval URL', async () => {
 		observer.mutate({
 			actorKey: 'actor',
 			packageId: 'pkg',
-			body: { action: 'set-internet-visible' },
+			body: {
+				action: 'set-internet-visible',
+				internetVisible: true,
+				confirmName: 'repo',
+			},
 		}),
 	).rejects.toMatchObject({
 		message: 'Review required',

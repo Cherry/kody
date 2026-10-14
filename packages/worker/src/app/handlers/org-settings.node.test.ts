@@ -59,9 +59,9 @@ vi.mock('#worker/orgs/org-avatar.ts', async (importOriginal) => {
 
 const {
 	loadOrgSettingsData,
-	mutateOrgSettingsAvatarPost,
-	mutateOrgSettingsDeletePost,
-	mutateOrgSettingsPost,
+	saveOrganizationPhoto,
+	deleteOrganization,
+	updateOrganizationProfile,
 } = await import('./org-settings.ts')
 
 const people = {
@@ -206,21 +206,40 @@ async function readSettings(env: Env, { request }: { request: Request }) {
 }
 async function callSettings(
 	operation:
-		| typeof mutateOrgSettingsPost
-		| typeof mutateOrgSettingsAvatarPost
-		| typeof mutateOrgSettingsDeletePost,
+		| typeof updateOrganizationProfile
+		| typeof saveOrganizationPhoto
+		| typeof deleteOrganization,
 	env: Env,
 	{ request }: { request: Request },
 ) {
 	const user = await mocks.readAuthenticatedAppUser(request, env)
-	return operation({
+	const context = {
 		env,
 		request,
 		user,
 		orgSlug: new URL(request.url).pathname.split('/')[1]!.slice(1),
-		body: request.headers.get('Content-Type')?.includes('application/json')
-			? await request.json()
-			: await request.formData(),
+	}
+	if (operation === saveOrganizationPhoto) {
+		const avatar = (await request.formData()).get('avatar')
+		return saveOrganizationPhoto({
+			...context,
+			avatar: avatar instanceof File ? avatar : null,
+		})
+	}
+	const body = (await request.json()) as {
+		displayName?: string
+		slug?: string
+		confirmation?: string
+	}
+	if (operation === deleteOrganization)
+		return deleteOrganization({
+			...context,
+			confirmation: body.confirmation ?? '',
+		})
+	return updateOrganizationProfile({
+		...context,
+		displayName: body.displayName,
+		slug: body.slug,
 	})
 }
 
@@ -269,7 +288,7 @@ test('settings JSON is 404 for an unknown slug, collaborator, and 403 for a memb
 	await signIn('bob', memberWrite)
 	expect(
 		(
-			await callSettings(mutateOrgSettingsPost, env, {
+			await callSettings(updateOrganizationProfile, env, {
 				request: memberWrite,
 			} as never)
 		).status,
@@ -284,7 +303,7 @@ test('owner can update team settings and cannot delete a personal org', async ()
 		body: JSON.stringify({ displayName: 'Acme Co' }),
 	})
 	await signIn('ada', update)
-	const updated = await callSettings(mutateOrgSettingsPost, env, {
+	const updated = await callSettings(updateOrganizationProfile, env, {
 		request: update,
 	} as never)
 	expect(updated.status).toBe(200)
@@ -302,7 +321,7 @@ test('owner can update team settings and cannot delete a personal org', async ()
 		},
 	)
 	await signIn('ada', personal)
-	const blocked = await callSettings(mutateOrgSettingsDeletePost, env, {
+	const blocked = await callSettings(deleteOrganization, env, {
 		request: personal,
 	} as never)
 	expect(blocked.status).toBe(400)
@@ -320,7 +339,7 @@ test('owner can update team settings and cannot delete a personal org', async ()
 	await signIn('ada', del)
 	expect(
 		(
-			await callSettings(mutateOrgSettingsDeletePost, env, {
+			await callSettings(deleteOrganization, env, {
 				request: del,
 			} as never)
 		).status,
@@ -344,7 +363,7 @@ test('org avatar upload keeps validation as 400 and storage failures as 500', as
 		{ method: 'POST', body: invalidForm },
 	)
 	await signIn('ada', invalid)
-	const invalidResponse = await callSettings(mutateOrgSettingsAvatarPost, env, {
+	const invalidResponse = await callSettings(saveOrganizationPhoto, env, {
 		request: invalid,
 	} as never)
 	expect(invalidResponse.status).toBe(400)
@@ -373,7 +392,7 @@ test('org avatar upload keeps validation as 400 and storage failures as 500', as
 		{ method: 'POST', body: form },
 	)
 	await signIn('ada', failing)
-	const failed = await callSettings(mutateOrgSettingsAvatarPost, env, {
+	const failed = await callSettings(saveOrganizationPhoto, env, {
 		request: failing,
 	} as never)
 	expect(failed.status).toBe(500)
@@ -411,7 +430,7 @@ test('a second owner still treats a signup org as personal', async () => {
 		body: JSON.stringify({ confirmation: 'ada' }),
 	})
 	await signIn('bob', del)
-	const blocked = await callSettings(mutateOrgSettingsDeletePost, env, {
+	const blocked = await callSettings(deleteOrganization, env, {
 		request: del,
 	} as never)
 	expect(blocked.status).toBe(400)
@@ -501,7 +520,7 @@ test('former platform orgs are not personal for settings identity editing', asyn
 		body: JSON.stringify({ displayName: 'Kody' }),
 	})
 	await signIn('ada', update)
-	const updated = await callSettings(mutateOrgSettingsPost, env, {
+	const updated = await callSettings(updateOrganizationProfile, env, {
 		request: update,
 	} as never)
 	expect(updated.status).toBe(200)

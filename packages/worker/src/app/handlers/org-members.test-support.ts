@@ -3,12 +3,11 @@ import { operationResult } from '#app/operation-result.ts'
 import { resolveOrgManagementAccess } from '#app/org-management-access.ts'
 import {
 	loadOrgMembersData,
-	mutateOrgMembersInvite,
-	mutateOrgMembersInviteLinks,
-	mutateOrgMembersInviteLinksRevoke,
-	mutateOrgMembersRemove,
-	mutateOrgMembersRole,
-	readJsonObject,
+	inviteOrganizationMember,
+	createOrganizationInviteLink,
+	revokeOrganizationInviteLink,
+	removeOrganizationMember,
+	setOrganizationMemberRole,
 } from './org-members.ts'
 export * from './org-members.ts'
 export function testOrgMembersApiHandler(env: Env) {
@@ -44,7 +43,12 @@ export function testOrgMembersRolePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgMembersRole({ request, env, user, body })
+			const result = await setOrganizationMemberRole({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
@@ -57,7 +61,12 @@ export function testOrgMembersRemovePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgMembersRemove({ request, env, user, body })
+			const result = await removeOrganizationMember({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
@@ -70,7 +79,12 @@ export function testOrgMembersInvitePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgMembersInvite({ request, env, user, body })
+			const result = await inviteOrganizationMember({
+				request,
+				env,
+				user,
+				...body,
+			})
 			return operationResult(result.data, result.status)
 		},
 	}
@@ -83,11 +97,11 @@ export function testOrgMembersInviteLinksPostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgMembersInviteLinks({
+			const result = await createOrganizationInviteLink({
 				request,
 				env,
 				user,
-				body,
+				...body,
 			})
 			return operationResult(result.data, result.status)
 		},
@@ -101,13 +115,19 @@ export function testOrgMembersInviteLinksRevokePostHandler(env: Env) {
 			if (!user)
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			const body = (await readJsonObject(request)) ?? {}
-			const result = await mutateOrgMembersInviteLinksRevoke({
+			const result = await revokeOrganizationInviteLink({
 				request,
 				env,
 				user,
-				body,
+				...body,
 			})
 			return operationResult(result.data, result.status)
 		},
 	}
+}
+
+async function readJsonObject(request: Request) {
+	const body = await request.json().catch(() => null)
+	if (!body || typeof body !== 'object') return null
+	return body as Record<string, unknown>
 }
