@@ -315,7 +315,7 @@ test('signed-in profile opens the workspace rail through to Activity', async ({
 	).toHaveAttribute('aria-current', 'page')
 })
 
-test('credits live on the usage page: /account/credits redirects there', async ({
+test('the legacy credits URL opens the personal workspace ledger', async ({
 	page,
 	seedE2eUser,
 	login,
@@ -329,21 +329,17 @@ test('credits live on the usage page: /account/credits redirects there', async (
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
 	await page.goto('/account/credits')
-	await expect(page).toHaveURL(
-		new RegExp(`/@${user.username}/-/usage#credits$`),
-	)
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/credits$`))
 	await expect(
-		page.getByRole('heading', { level: 1, name: 'Usage' }),
+		page.getByRole('heading', { level: 1, name: 'Credits' }),
 	).toBeVisible()
 	await expect(
-		page
-			.locator('#credits')
-			.getByRole('heading', { level: 2, name: 'Credits' }),
+		page.getByRole('heading', { level: 2, name: 'Ledger' }),
 	).toBeVisible()
 
 	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
 	await expect(
-		rail.getByRole('link', { name: 'Usage', exact: true }),
+		rail.getByRole('link', { name: 'Credits', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 })
 

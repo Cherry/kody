@@ -28,6 +28,7 @@ export function useCredentialMutation<TInput, TResult>(
 						'loadCredentialsPage',
 						'loadPackageCredentialsPage',
 						'loadSecretsPage',
+						'loadIntegrationsPage',
 						'loadJobsPage',
 						'loadWorkflowsPage',
 						'loadWebhooksPage',

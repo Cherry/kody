@@ -30,7 +30,7 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (v: unknown) => v
 		const builder = {
-			inputValidator: (schema: { parse: (v: unknown) => unknown }) => {
+			validator: (schema: { parse: (v: unknown) => unknown }) => {
 				validate = schema.parse.bind(schema)
 				return builder
 			},
@@ -237,4 +237,26 @@ test('grant-only collaborators see their own budget without billing access', asy
 			canReadBilling: false,
 		}),
 	)
+})
+
+test('cursor redirects preserve unrelated search and login retains the requested cursor', async () => {
+	mocks.env = createEnv()
+	await expect(
+		loadCreditsPage({
+			data: { orgSlug: 'acme', cursor: 'nope', search: '?cursor=nope&x=1' },
+		}),
+	).rejects.toMatchObject({ options: { href: '/@acme/-/credits?x=1' } })
+	expect(mocks.loadOrgCreditsData).not.toHaveBeenCalled()
+	signInAs(null)
+	await expect(
+		loadCreditsPage({
+			data: { orgSlug: 'acme', cursor: 'nope', search: '?cursor=nope&x=1' },
+		}),
+	).rejects.toMatchObject({
+		options: {
+			href:
+				'/login?redirectTo=' +
+				encodeURIComponent('/@acme/-/credits?cursor=nope&x=1'),
+		},
+	})
 })

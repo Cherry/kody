@@ -167,7 +167,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(drawerPanel).toBeVisible()
 	await expect(
 		drawerPanel.getByTestId(`org-switcher-pinned-${runId}`),
-	).toHaveAttribute('aria-current', 'true')
+	).toHaveAttribute('aria-current', 'page')
 	await page.mouse.click(4, 400)
 	await expect(drawerPanel).toBeHidden()
 
@@ -447,9 +447,9 @@ test('the switcher keeps each org section and reads the destination org through 
 		const sectionLink = page
 			.getByRole('navigation', { name: 'Workspace sections' })
 			.getByRole('link', { name: label, exact: true })
-		if (section === 'values') {
-			// The shared upstream rail intentionally omits the retiring Values
-			// primitive. Its existing URL still keeps org context and loads above.
+		if (section === 'values' || section === 'memories') {
+			// The rail omits retiring Values and personal-only Memories for teams.
+			// Legacy URLs retain org context and remain readable.
 			await expect(sectionLink).toHaveCount(0)
 		} else if (section === 'workflows' || section === 'waiting') {
 			await expect(sectionLink).toHaveCount(0)

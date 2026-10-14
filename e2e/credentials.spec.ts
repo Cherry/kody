@@ -142,19 +142,11 @@ test('a Key detail pane edits its allowed hosts, HTTPS host names only', async (
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
 	const value = `sk-hosts-never-shown-${runId}`
-	const saved = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: 'HOSTS_KEY',
-			scope: 'user',
-			value,
-			description: '',
-			allowedHosts: ['api.example.com'],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
+	await saveKeyThroughUi(page, {
+		name: 'HOSTS_KEY',
+		value,
+		allowedHosts: ['api.example.com'],
 	})
-	expect(saved.ok()).toBe(true)
 
 	await page.setViewportSize({ width: 1440, height: 900 })
 	await page.goto(`/@${user.username}/-/credentials`)
