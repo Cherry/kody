@@ -34,8 +34,7 @@ export const routes = route({
 		'/account/packages/:packageId/approve-capabilities',
 	accountPackageFiles: '/account/packages/:packageId/files(/*relativePath)',
 	accountExperiments: '/account/experiments',
-	// Sibling of `/account/memories.json` so a page segment cannot claim the
-	// signed-in user's memories download. The page is `/@:orgSlug/-/memories`.
+	// Authenticated download, separate from the organization memories page.
 	accountMemoriesExport: '/account/memories-export.json',
 	accountPasskeys: '/account/passkeys',
 	accountMcpOauthClients: '/account/mcp-oauth-clients',
@@ -43,13 +42,7 @@ export const routes = route({
 	// Old `/account/credits` and `/account/usage` links redirect to the
 	// signed-in person's personal-org usage page (and its Credits section).
 	accountCredits: '/account/credits',
-	accountCreditsTopUpPost: post('/account/credits/top-up.json'),
-	accountCreditsSettingsPost: post('/account/credits/settings.json'),
 	accountUsage: '/account/usage',
-	accountEmailChange: post('/account/email-change.json'),
-	accountEmailClaimRelease: post('/account/email-claim-release.json'),
-	accountPassword: post('/account/password.json'),
-	accountResendVerification: post('/account/resend-verification.json'),
 	accountExport: '/account/export.json',
 	admin: '/admin',
 	adminUsers: '/admin/users',
@@ -73,7 +66,7 @@ export const routes = route({
 	blogPostMarkdown: '/blog/:slug.md',
 	blogPostOgImage: '/blog/:slug/og.png',
 	// `/docs` renders the introduction article (`what-is-kody`); the other
-	// docs live at `/docs/:slug`. Every HTML page has `.md` and `.json` twins.
+	// Docs live at `/docs/:slug`, with public Markdown at `.md`.
 	docs: '/docs',
 	docsMarkdown: '/docs.md',
 	// Static companions must win over `/docs/:slug` so `connect` and
@@ -85,9 +78,7 @@ export const routes = route({
 	docDetailMarkdown: '/docs/:slug.md',
 	docDetailOgImage: '/docs/:slug/og.png',
 	// Signed-in opt-in for the mcp-skills-extension flag from the package skills docs.
-	packageSkillsOptInPost: post('/docs/package-skills/opt-in'),
 	// Signed-in opt-in for the mcp-events-extension flag from the MCP Events docs.
-	mcpEventsOptInPost: post('/docs/mcp-events/opt-in'),
 	llmsTxt: '/llms.txt',
 	// The docs used to live under `/guides`. Everything there 308s to `/docs`
 	// (see `#app/handlers/legacy-guides-redirect.ts`).
@@ -230,15 +221,9 @@ export const routes = route({
 	accountData: '/account/data',
 	accountOrganizations: '/account/organizations',
 	accountOrganizationsNew: get('/account/organizations/new'),
-	accountOrganizationsNewPost: post('/account/organizations/new'),
-	accountDelete: post('/account/delete'),
 	auth: post('/auth'),
-	authProviderStart: post('/auth/:provider'),
 	authProviderCallback: '/auth/:provider/callback',
 	session: '/session',
-	logout: post('/logout'),
-	passwordResetRequest: post('/password-reset'),
-	passwordResetConfirm: post('/password-reset/confirm'),
 	webauthnRegistration: '/webauthn/registration',
 	webauthnAuthentication: '/webauthn/authentication',
 })

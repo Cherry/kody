@@ -197,7 +197,10 @@ export function formatOptional(value: string | null | undefined) {
 }
 
 export type ConnectionStatusLabel =
-	'Needs you' | 'Service issue' | 'Connected' | 'Needs setup'
+	| 'Needs you'
+	| 'Service issue'
+	| 'Connected'
+	| 'Needs setup'
 
 export function connectActionLabel(status: ConnectionStatusLabel) {
 	if (status === 'Needs setup') return 'Connect'

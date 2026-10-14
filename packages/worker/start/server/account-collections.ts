@@ -64,8 +64,8 @@ export const loadCollection = createServerOnlyFn(async (href: string) => {
 			user.mcpUser.userId,
 			orgPath.slug,
 		)
-		const {orgSectionDenial}=await import('#app/org-request-binding.ts')
-		if (!binding || orgSectionDenial(binding,orgPath.section)) throw notFound()
+		const { orgSectionDenial } = await import('#app/org-request-binding.ts')
+		if (!binding || orgSectionDenial(binding, orgPath.section)) throw notFound()
 		user = {
 			...user,
 			request: deriveRequestContext({

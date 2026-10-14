@@ -108,7 +108,7 @@ function parseOrgResourceApiPath(
 
 /**
  * The org section an org-bound URL belongs to: `/@slug/-/<section>…`, its
- * `.json` twin, or org-owned `/account/<section>.json`. Billing, usage, and
+ * legacy `.json` twin, or the memories download. Billing, usage, and
  * management URLs are org-bound but are not sections.
  */
 export function orgOwnedSectionForPath(

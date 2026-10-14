@@ -16,7 +16,7 @@ export function createOrgBindingGuardMiddleware(
 		const auth = await loadResolvedRequestAuth(request, env)
 		if (!auth.user || auth.user.accountSuspended) return await next()
 		if (await isOrgRequestDenied(request, env, auth.user.mcpUser.userId)) {
-			// Page form posts (MCP consent) read JSON too; only page loads get HTML.
+			// Downloads return a machine-readable denial; document loads render HTML.
 			if (request.method === 'GET' && !url.pathname.endsWith('.json')) {
 				return renderNotFound(request)
 			}

@@ -65,7 +65,11 @@ export function getRouter() {
 		dehydrateOptions: { shouldDehydrateQuery: shouldDehydrateAppQuery },
 	})
 	if (typeof document !== 'undefined') {
-		installOrgNavigationCommit(router, (orgSlug) => rememberOrganization({data:{orgSlug}}), window.location.origin)
+		installOrgNavigationCommit(
+			router,
+			(orgSlug) => rememberOrganization({ data: { orgSlug } }),
+			window.location.origin,
+		)
 		installNavigationMotion(router, {
 			canStart: () => typeof document.startViewTransition === 'function',
 			prefersReducedMotion: () =>

@@ -81,11 +81,11 @@ function filterMemories(
 	)
 }
 
-function buildMemoriesExportHref(includeDeleted: boolean, currentHref:string) {
+function buildMemoriesExportHref(includeDeleted: boolean, currentHref: string) {
 	const requestUrl = new URL(accountMemoriesExportPath, 'http://localhost')
-	if(includeDeleted) requestUrl.searchParams.set('includeDeleted', 'true')
- const org=pageQueryOrg(currentHref)
- if(org) requestUrl.searchParams.set('org',org)
+	if (includeDeleted) requestUrl.searchParams.set('includeDeleted', 'true')
+	const org = pageQueryOrg(currentHref)
+	if (org) requestUrl.searchParams.set('org', org)
 	return `${requestUrl.pathname}${requestUrl.search}`
 }
 
@@ -354,7 +354,7 @@ export function AccountMemoriesPage({
 									Include deleted
 								</label>
 								<SiteLink
-									href={buildMemoriesExportHref(includeDeleted,currentHref)}
+									href={buildMemoriesExportHref(includeDeleted, currentHref)}
 									download={buildMemoriesExportFilename()}
 									css={secondaryButtonCss}
 								>

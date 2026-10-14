@@ -80,7 +80,8 @@ vi.mock('#mcp/values/service.ts', () => ({
 		mockModule.deleteValue(...args),
 }))
 
-const { testAccountValuesApiHandler } = await import('./account-values.test-support.ts')
+const { testAccountValuesApiHandler } =
+	await import('./account-values.test-support.ts')
 
 const valuesUrl = 'https://example.com/account/values.json'
 

@@ -2,26 +2,26 @@
 import { saveAdminCommunityReports } from '#start/server/admin-mutations'
 import { type AdminCommunityReportsLoaderData } from '#universal/loader-data.ts'
 import {
-cardCss,
-descriptionCss,
-fieldCss,
-fieldLabelCss,
-getDangerPillCss,
-getGhostButtonCss,
+	cardCss,
+	descriptionCss,
+	fieldCss,
+	fieldLabelCss,
+	getDangerPillCss,
+	getGhostButtonCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation } from '@tanstack/react-query'
-import { useState,type MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import { formatTimestamp } from '../components/local-timestamp.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import {
-AccountManagementInlineLinkNav,
-AccountManagementMessage,
-AccountManagementShell,
-AdminPageHeader,
-IdValue,
-accountInputCss,
+	AccountManagementInlineLinkNav,
+	AccountManagementMessage,
+	AccountManagementShell,
+	AdminPageHeader,
+	IdValue,
+	accountInputCss,
 } from './account-management-components.tsx'
 /**
  * `IdValue` is a flex row (value plus copy control), so the label beside it

@@ -39,9 +39,7 @@ export const updateSecrets = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/secrets', context.request.url)
@@ -68,9 +66,7 @@ export const deleteAccountValue = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) =>
 				requireOperationResult(
@@ -100,9 +96,7 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/memories', context.request.url)
@@ -136,9 +130,7 @@ export const updateJobs = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/jobs', context.request.url)
@@ -180,9 +172,7 @@ export const updateWorkflows = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/workflows', context.request.url)
@@ -212,9 +202,7 @@ export const updateSecretProviders = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/secret-providers', context.request.url)
@@ -244,9 +232,7 @@ export const updateIntegrations = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/integrations', context.request.url)
@@ -276,9 +262,7 @@ export const updateConnections = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/connections', context.request.url)
@@ -308,9 +292,7 @@ export const updateMcpServers = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/mcp-servers', context.request.url)
@@ -340,9 +322,7 @@ export const updateEmail = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/email', context.request.url)
@@ -384,9 +364,7 @@ export const updateEmailDestinations = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/email-destinations', context.request.url)
@@ -518,9 +496,7 @@ export const recordWaitingClick = createServerFn({ method: 'POST' })
 		if (!cardId) throw new Error('Unknown card.')
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async ({ env, user }) => {
 				recordOnboardingFunnelEvent(env, {
@@ -546,9 +522,7 @@ export const updateSecretCollection = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{
-				scope: data.orgSlug
-					? { orgSlug: data.orgSlug }
-					: undefined,
+				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
 			},
 			async (context) => {
 				const url = new URL('/account/secrets', context.request.url)

@@ -1,39 +1,39 @@
 /** @jsxImportSource @emotion/react */
 import { updatePasskey } from '#start/server/security-mutations'
 import {
-webauthnRegistrationOptions,
-webauthnRegistrationVerify,
+	webauthnRegistrationOptions,
+	webauthnRegistrationVerify,
 } from '#start/server/auth-mutations'
 import {
-cardCss,
-cardTitleCss,
-descriptionCss,
-getDangerPillCss,
-getGhostButtonCss,
-getPillButtonCss,
-layoutMaxWidths,
-primaryLinkCss,
+	cardCss,
+	cardTitleCss,
+	descriptionCss,
+	getDangerPillCss,
+	getGhostButtonCss,
+	getPillButtonCss,
+	layoutMaxWidths,
+	primaryLinkCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors,spacing,typography } from '#universal/styles/tokens.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import {
-startRegistration,
-WebAuthnAbortService,
+	startRegistration,
+	WebAuthnAbortService,
 } from '@simplewebauthn/browser'
-import { useMutation,type QueryKey } from '@tanstack/react-query'
-import { useEffect,useRef,useState } from 'react'
+import { useMutation, type QueryKey } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
 import {
-formatNullableTimestamp,
-formatTimestamp,
+	formatNullableTimestamp,
+	formatTimestamp,
 } from '../components/local-timestamp.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import {
-accountInputCss,
-AccountManagementMessage,
-AccountManagementShell,
-AccountPageHeader,
+	accountInputCss,
+	AccountManagementMessage,
+	AccountManagementShell,
+	AccountPageHeader,
 } from './account-management-components.tsx'
 
 type PasskeyListItem = {

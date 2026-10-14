@@ -215,7 +215,6 @@ test('trigger rows cover every need, using the trigger’s own row when sent', (
 	])
 })
 
-
 test('the agent prompt names the mapping and never asks for a value', () => {
 	expect(
 		mappingSaveAgentPrompt({

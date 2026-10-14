@@ -31,7 +31,6 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 		ctx?: Pick<ExecutionContext, 'waitUntil'>,
 		oauthPage?: OAuthPageOptions,
 	) {
-		let appEnv: Env | undefined
 		const inRequest = <T>(run: () => Promise<T>) =>
 			runWithDeferredWork(
 				ctx ? (promise) => ctx.waitUntil(promise) : undefined,
@@ -39,7 +38,6 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 			)
 		try {
 			const bindings = getEnv(env)
-			appEnv = bindings
 			setAuthSessionSecret(bindings.COOKIE_SECRET)
 			return await inRequest(async () => {
 				if (isServerFunctionRequest(request))
@@ -75,16 +73,8 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 					/* Reporting must not prevent an error response. */
 				}
 			}
-			if (appEnv) {
-				const bindings = appEnv
-				try {
-					return await inRequest(() =>
-						renderDocument(request, bindings, undefined, { status: 500 }),
-					)
-				} catch (renderError) {
-					console.error('Native error document failed:', renderError)
-				}
-			}
+			// Never redispatch a failed request. It may already have committed a write,
+			// and Start also owns webhook, callback, and server-function dispatch.
 			const response = renderInternalServerErrorPage(
 				retryHrefFromRequest(request),
 			)

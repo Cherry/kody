@@ -199,17 +199,19 @@ async function callApi(
 		},
 		false,
 	)
-	const request = new Request(`${origin}/account/mcp-servers.json`, {
-		method: input.method ?? 'POST',
-		headers: {
-			Cookie: cookie,
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			Origin: origin,
-			Referer: `${origin}/@${orgSlug}/-/mcp-servers/server-acme`,
+	const request = new Request(
+		`${origin}/@${orgSlug}/-/mcp-servers/server-acme`,
+		{
+			method: input.method ?? 'POST',
+			headers: {
+				Cookie: cookie,
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				Origin: origin,
+			},
+			...(input.body ? { body: JSON.stringify(input.body) } : {}),
 		},
-		...(input.body ? { body: JSON.stringify(input.body) } : {}),
-	})
+	)
 	const response = await testAccountMcpServersApiHandler(env).execute({
 		request,
 		params: {},

@@ -1,22 +1,22 @@
 /** @jsxImportSource @emotion/react */
 import { buildAuthLink } from '#client/auth-links.ts'
-import { fathomEventNames,trackFathomEvent } from '#client/fathom-events.ts'
+import { fathomEventNames, trackFathomEvent } from '#client/fathom-events.ts'
 import {
-clearStoredFirstTouchAttribution,
-readSignupFirstTouchAttribution,
+	clearStoredFirstTouchAttribution,
+	readSignupFirstTouchAttribution,
 } from '#client/first-touch-attribution.ts'
 import {
-emptyPublicFormProtection,
-readPublicFormProtection,
-renderTurnstileWidgets,
-resetTurnstileWidgets,
+	emptyPublicFormProtection,
+	readPublicFormProtection,
+	renderTurnstileWidgets,
+	resetTurnstileWidgets,
 } from '#client/public-form-protection.ts'
 import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
 import { type SessionInfo } from '#client/session.ts'
 import {
-authenticateWebsite,
-webauthnAuthenticationOptions,
-webauthnAuthenticationVerify,
+	authenticateWebsite,
+	webauthnAuthenticationOptions,
+	webauthnAuthenticationVerify,
 } from '#start/server/auth-mutations'
 import { buildOauthLoginErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
@@ -28,27 +28,27 @@ import { colors } from '#universal/styles/tokens.ts'
 import { type CSSObject } from '@emotion/react'
 import { handleUrlPreview } from '@kody-internal/shared/handle-permanence.ts'
 import {
-startAuthentication,
-WebAuthnAbortService
+	startAuthentication,
+	WebAuthnAbortService,
 } from '@simplewebauthn/browser'
 import {
-useEffect,
-useId,
-useRef,
-useState,
-type CSSProperties,
-type FormEvent,
+	useEffect,
+	useId,
+	useRef,
+	useState,
+	type CSSProperties,
+	type FormEvent,
 } from 'react'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { useHydrated } from '../components/use-hydrated.ts'
-import { startSocialSignIn,type PublicAuthConfig } from '../social-sign-in.ts'
+import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
 import {
-AuthForm,
-formMessageCss,
-renderLoginVisualPanel,
-renderMobileBrand,
+	AuthForm,
+	formMessageCss,
+	renderLoginVisualPanel,
+	renderMobileBrand,
 } from './login-sections.tsx'
 
 export type AuthStatus = 'idle' | 'submitting' | 'success' | 'error'

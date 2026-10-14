@@ -11,7 +11,6 @@ import {
 	type OrgGrantView,
 } from '#universal/loader-data.ts'
 
-
 export async function loadOrgCollaboratorsData(input: {
 	env: Env
 	user: Parameters<typeof orgHasPermission>[1]

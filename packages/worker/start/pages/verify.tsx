@@ -1,28 +1,28 @@
 /** @jsxImportSource @emotion/react */
 import {
-readPublicFormProtection,
-resetTurnstileWidgets,
-turnstileWidgetClassName,
+	readPublicFormProtection,
+	resetTurnstileWidgets,
+	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
 import { verifyWebsiteTwoFactor } from '#start/server/auth-mutations'
 import {
-normalizeRedirectTo,
-resolvePostAuthLandingPath,
+	normalizeRedirectTo,
+	resolvePostAuthLandingPath,
 } from '#universal/safe-redirect.ts'
 import {
-cardCss,
-fieldCss,
-fieldLabelCss,
-getPrimaryButtonCss,
-inputCss,
-mutedLinkCss,
-pageDescriptionCss,
-pageHeaderCss,
-pageTitleCss,
-stackedPageCss,
+	cardCss,
+	fieldCss,
+	fieldLabelCss,
+	getPrimaryButtonCss,
+	inputCss,
+	mutedLinkCss,
+	pageDescriptionCss,
+	pageHeaderCss,
+	pageTitleCss,
+	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors,spacing,typography } from '#universal/styles/tokens.ts'
-import { useState,type FormEvent } from 'react'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { useState, type FormEvent } from 'react'
 import { Honeypot } from '../components/honeypot-field.tsx'
 import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
 import { SiteLink } from '../components/site-link.tsx'

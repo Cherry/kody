@@ -1,5 +1,4 @@
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
-import { routes } from '#universal/routes.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
@@ -125,17 +124,14 @@ test('web create organization POST requires org:write like MCP orgCreate', async
 		}),
 	)
 	signIn()
-	const request = new Request(
-		`https://kody.test${routes.accountOrganizationsNewPost.href()}`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-			body: new URLSearchParams({
-				displayName: 'Zeta Co',
-				slug: 'zeta-co',
-			}),
-		},
-	)
+	const request = new Request('https://kody.test/account/organizations/new', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body: new URLSearchParams({
+			displayName: 'Zeta Co',
+			slug: 'zeta-co',
+		}),
+	})
 	const attempt = createFromRequest(
 		{
 			APP_DB: db,
@@ -153,14 +149,11 @@ test('web create organization POST requires org:write like MCP orgCreate', async
 test('web create organization form rejects the reserved `me` handle in any case', async () => {
 	signIn()
 	for (const slug of ['me', 'ME']) {
-		const request = new Request(
-			`https://kody.test${routes.accountOrganizationsNewPost.href()}`,
-			{
-				method: 'POST',
-				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-				body: new URLSearchParams({ displayName: 'Me Co', slug }),
-			},
-		)
+		const request = new Request('https://kody.test/account/organizations/new', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+			body: new URLSearchParams({ displayName: 'Me Co', slug }),
+		})
 		const attempt = createFromRequest(
 			{
 				APP_DB: db,
@@ -192,17 +185,14 @@ test('web create organization form enforces the free-org ownership cap', async (
 		}),
 	).toEqual({ ok: true, slug: 'team-one' })
 
-	const request = new Request(
-		`https://kody.test${routes.accountOrganizationsNewPost.href()}`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-			body: new URLSearchParams({
-				displayName: 'Team Two',
-				slug: 'team-two',
-			}),
-		},
-	)
+	const request = new Request('https://kody.test/account/organizations/new', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+		body: new URLSearchParams({
+			displayName: 'Team Two',
+			slug: 'team-two',
+		}),
+	})
 	const attempt = createFromRequest(
 		{
 			APP_DB: db,

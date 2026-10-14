@@ -1,19 +1,19 @@
 /** @jsxImportSource @emotion/react */
 import { resendWebsiteVerification } from '#start/server/auth-mutations'
 import {
-describeEmailVerificationDelivery,
-type EmailVerificationDelivery,
+	describeEmailVerificationDelivery,
+	type EmailVerificationDelivery,
 } from '#universal/email-verification-delivery.ts'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
-cardCss,
-cardTitleCss,
-descriptionCss,
-getPrimaryButtonCss,
-getSecondaryButtonCss,
-mutedLinkCss,
+	cardCss,
+	cardTitleCss,
+	descriptionCss,
+	getPrimaryButtonCss,
+	getSecondaryButtonCss,
+	mutedLinkCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors,spacing } from '#universal/styles/tokens.ts'
+import { colors, spacing } from '#universal/styles/tokens.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
 export { buildPendingVerificationPath } from '#client/routes/pending-verification-path.ts'

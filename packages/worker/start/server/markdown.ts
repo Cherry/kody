@@ -1,5 +1,4 @@
-import { prefersMarkdown } from '#app/markdown-negotiation.ts'
-import { markdownResponse } from '#app/markdown-negotiation.ts'
+import { prefersMarkdown, markdownResponse } from '#app/markdown-negotiation.ts'
 import {
 	buildHomeMarkdown,
 	withAgentDiscoveryLinkHeaders,

@@ -423,7 +423,8 @@ function readExecuteResult(toolResult: unknown) {
 	}
 	const record = toolResult as CallToolResult
 	const structured = record.structuredContent as
-		{ result?: unknown; error?: unknown } | undefined
+		| { result?: unknown; error?: unknown }
+		| undefined
 	if (record.isError || structured?.error) {
 		const text = executeErrorText(record, structured?.error)
 		throw new Error(`execute failed: ${text}`)

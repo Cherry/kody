@@ -97,7 +97,6 @@ export function readClassificationFilter(href: string): ClassificationFilter {
 	return raw === 'quarantined' ? 'quarantined' : 'all'
 }
 
-
 export function messageDate(message: AccountEmailMessageListItem) {
 	return message.received_at ?? message.sent_at ?? message.created_at
 }

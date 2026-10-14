@@ -43,7 +43,8 @@ export function AccountPasswordPanel(props: {
 	}, [actorKey, href])
 	const mutation = useMutation({
 		gcTime: 0,
-		mutationFn: (data: {currentPassword?:string;newPassword:string}) => changePassword({data}),
+		mutationFn: (data: { currentPassword?: string; newPassword: string }) =>
+			changePassword({ data }),
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 	})
@@ -100,7 +101,8 @@ export function AccountPasswordPanel(props: {
 				newPassword,
 			})
 			if (!submittedScope || scope.current !== submittedScope) return
-			if (!payload.ok) throw new Error(payload.error || 'Unable to update your password.')
+			if (!payload.ok)
+				throw new Error(payload.error || 'Unable to update your password.')
 			setCurrentPassword('')
 			setNewPassword('')
 			setConfirmPassword('')

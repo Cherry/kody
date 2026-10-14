@@ -42,7 +42,8 @@ export type OAuthExchangeResult =
 	| { ok: false; status: number; error: string }
 
 export type SaveOauthAppResult =
-	{ ok: true; clientId: string } | { ok: false; error: string }
+	| { ok: true; clientId: string }
+	| { ok: false; error: string }
 
 export type OAuthCallback =
 	| { kind: 'none' }
@@ -50,7 +51,8 @@ export type OAuthCallback =
 	| { kind: 'success'; code: string; state: string | null }
 
 export type ConnectOauthQueryConfigResult =
-	{ ok: true; value: ConnectOauthQueryConfig } | { ok: false; error: string }
+	| { ok: true; value: ConnectOauthQueryConfig }
+	| { ok: false; error: string }
 
 export type ConnectOauthChooserOption = NonNullable<
 	ConnectOauthLoaderData['chooser']

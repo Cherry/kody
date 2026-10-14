@@ -42,7 +42,6 @@ type TwoFactorSetup = {
 	qrCodeDataUrl: string | null
 }
 
-
 export function AccountTwoFactorPage({
 	queryKey,
 	payload,
@@ -65,14 +64,19 @@ export function AccountTwoFactorPage({
 		otpUri?: string
 		secret?: string
 		error?: string
-	}>(queryKey, 'loadAccountSecurity', (body) => updateTwoFactor({ data: body }), {
-		dependencies: ['loadAccountPage'],
-		refreshShell: true,
-		merge: (page, accepted) =>
-			page.page === 'two-factor' && typeof accepted.enabled === 'boolean'
-				? { ...page, payload: { ...page.payload, enabled: accepted.enabled } }
-				: page,
-	})
+	}>(
+		queryKey,
+		'loadAccountSecurity',
+		(body) => updateTwoFactor({ data: body }),
+		{
+			dependencies: ['loadAccountPage'],
+			refreshShell: true,
+			merge: (page, accepted) =>
+				page.page === 'two-factor' && typeof accepted.enabled === 'boolean'
+					? { ...page, payload: { ...page.payload, enabled: accepted.enabled } }
+					: page,
+		},
+	)
 	const postTwoFactorAction = mutation.submit
 
 	async function handleStartSetup() {

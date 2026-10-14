@@ -346,7 +346,14 @@ test('memories export downloads the signed-in user memories as JSON', async () =
 	expect((await request('', { method: 'POST' })).status).toBe(405)
 })
 
-function createExportClient(createHandler:typeof createAccountMemoriesExportHandler,path:string) {
-const {handler}=createHandler(env)
-return (search='',init?:RequestInit)=>handler({request:new Request(`https://example.com${path}${search}`,init),params:{}} as never)
+function createExportClient(
+	createHandler: typeof createAccountMemoriesExportHandler,
+	path: string,
+) {
+	const { handler } = createHandler(env)
+	return (search = '', init?: RequestInit) =>
+		handler({
+			request: new Request(`https://example.com${path}${search}`, init),
+			params: {},
+		} as never)
 }

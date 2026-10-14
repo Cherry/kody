@@ -52,7 +52,6 @@ import {
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
 
-
 type SubscriptionStatusTone = 'ok' | 'warn' | 'action' | 'muted'
 
 const multipleSubscriptionsMessage =

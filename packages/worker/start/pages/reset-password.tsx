@@ -1,29 +1,29 @@
 /** @jsxImportSource @emotion/react */
 import { passwordManagerIgnoreProps } from '#client/password-manager-ignore.ts'
 import {
-readPublicFormProtection,
-resetTurnstileWidgets,
-turnstileWidgetClassName,
+	readPublicFormProtection,
+	resetTurnstileWidgets,
+	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
 import {
-confirmWebsitePasswordReset,
-requestWebsitePasswordReset,
+	confirmWebsitePasswordReset,
+	requestWebsitePasswordReset,
 } from '#start/server/auth-mutations'
 import {
-cardCss,
-fieldCss,
-fieldLabelCss,
-getPrimaryButtonCss,
-inputCss,
-mutedLinkCss,
-pageDescriptionCss,
-pageHeaderCss,
-pageTitleCss,
-primaryLinkCss,
-stackedPageCss,
+	cardCss,
+	fieldCss,
+	fieldLabelCss,
+	getPrimaryButtonCss,
+	inputCss,
+	mutedLinkCss,
+	pageDescriptionCss,
+	pageHeaderCss,
+	pageTitleCss,
+	primaryLinkCss,
+	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
-import { colors,spacing,typography } from '#universal/styles/tokens.ts'
-import { useState,type FormEvent } from 'react'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
+import { useState, type FormEvent } from 'react'
 import { Honeypot } from '../components/honeypot-field.tsx'
 import { usePublicAuthProtection } from '../components/public-auth-protection.ts'
 import { SiteLink } from '../components/site-link.tsx'

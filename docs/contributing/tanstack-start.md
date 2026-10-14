@@ -1,7 +1,8 @@
 # Web app rendering and server state
 
 The web app uses TanStack Start, Router, Query, and Redact. The existing worker
-services and HTTP API handlers remain the server boundary.
+services remain shared business logic. Website reads and mutations use native
+Start server functions.
 
 [`getRouter`](../../packages/worker/start/router.tsx) creates a QueryClient for
 each server request and each browser router, then installs Router's SSR Query
@@ -68,14 +69,33 @@ Organization and package barriers only delay reads of the matching resource.
 Forms retain local drafts; saved server data comes from Query. Secrets and
 one-time revealed credentials stay outside reusable page caches.
 
+## HTTP boundary
+
+Website forms call `createServerFn` functions, not JSON companion URLs. Function
+middleware applies CSRF and document identity checks. Domain boundaries enforce
+session status, organization and resource authorization, rate limits, write
+leases, and audit events. Organization selection is explicit input, never a
+Referer hint. Deletion acquires its own exclusive lifecycle lock. Callback and
+protocol requests keep their existing security checks.
+
+Start file routes own the remaining HTTP protocols. Unsupported methods are
+rejected using the matched route's own metadata before any document loader runs.
+HEAD cannot consume signed verification links. A failed request is never
+redispatched to render its error, because a write may already have committed.
+
+The [HTTP inventory](./tanstack-start-http-contracts.md) records the retained
+endpoints. The official API worker, MCP, OIDC, OAuth, and package-app protocols
+keep their existing external contracts.
+
 ## Remaining custom code and checks
 
 Actor verification, organization scoping, mutation dependencies, and
 cache-driven head updates express Kody behavior. These are application code, not
-features that adopting Start removes. The HTTP router and shared URL builders
-still use Remix. Those builders only construct paths, they do not own browser
-navigation. User-authored package apps may also use Remix independently of
-Kody's web UI.
+features that adopting Start removes. Start owns HTTP and browser routing.
+Shared URL builders and the request-context utility for retained protocol
+handlers still use Remix, without a Remix router or website action dispatcher.
+Those builders only construct paths. User-authored package apps may also use
+Remix independently of Kody's web UI.
 
 Local [Redact](../../patches/@tanstack+redact+0.1.4.patch) and
 [Router](../../patches/@tanstack+router-core+1.171.34.patch) patches are part of

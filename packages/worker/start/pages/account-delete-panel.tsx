@@ -29,7 +29,6 @@ import {
 	accountInputCss,
 } from './account-management-components.tsx'
 
-
 export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 	const [confirmation, setConfirmation] = useState('')
 	const [password, setPassword] = useState('')
@@ -64,7 +63,7 @@ export function AccountDeletePanel(props: { hasUsablePassword: boolean }) {
 	const deletion = useMutation({
 		retry: false,
 		mutationFn: async (input: { confirmation: string; password?: string }) => {
-			const payload = await deleteOwnAccount({data: input})
+			const payload = await deleteOwnAccount({ data: input })
 			if ('error' in payload) throw new Error(payload.error)
 
 			return accountDeletedHomePath()

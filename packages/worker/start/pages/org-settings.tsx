@@ -95,7 +95,9 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 				const form = new FormData()
 				form.set('orgSlug', slug)
 				form.set('avatar', input.file)
-				return saveOrganizationAvatar({ data: form }) as Promise<OrgSettingsLoaderData & {redirectTo?:string}>
+				return saveOrganizationAvatar({ data: form }) as Promise<
+					OrgSettingsLoaderData & { redirectTo?: string }
+				>
 			}
 			return updateOrganizationSettings({
 				data: {

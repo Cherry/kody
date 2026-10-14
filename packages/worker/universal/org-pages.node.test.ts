@@ -7,7 +7,6 @@ import {
 	currentSwitcherSlug,
 	orderOrganizations,
 	orgIdentity,
-	orgOwnedAccountApiSection,
 	orgOwnedSectionForPath,
 	orgOverviewPath,
 	orgSlugFromOrgOwnedPath,
@@ -357,32 +356,15 @@ test('usage paths bind to the organization in the URL', () => {
 	expect(orgSlugFromOrgOwnedPath('/@acme/-/usage.json')).toBe('acme')
 })
 
-test('org account JSON names the section', () => {
-	expect(orgOwnedAccountApiSection('/account/secrets.json')).toBe('secrets')
-	expect(orgOwnedAccountApiSection('/account/jobs.json')).toBe('jobs')
-	expect(orgOwnedAccountApiSection('/account/connected-agents.json')).toBe(
-		'agents',
-	)
-	expect(orgOwnedAccountApiSection('/account/connection-usage.json')).toBe(
-		'agents',
-	)
-	// Sign-in providers belong to the person, not the Agents page.
-	expect(orgOwnedAccountApiSection('/account/connections.json')).toBeNull()
-	expect(orgOwnedAccountApiSection('/account/packages.json')).toBeNull()
-	expect(orgOwnedAccountApiSection('/account/passkeys.json')).toBeNull()
-	expect(orgOwnedAccountApiSection('/@acme/-/secrets')).toBeNull()
-	// The Memories download exports the page's org, like the list.
-	expect(orgOwnedAccountApiSection('/account/memories-export.json')).toBe(
-		'memories',
-	)
-})
-
 test('every org-bound URL names its section, or none for billing and management', () => {
 	expect(orgOwnedSectionForPath('/@acme/-/memories/m-1')).toBe('memories')
 	expect(orgOwnedSectionForPath('/@acme/-/repositories.json')).toBe(
 		'repositories',
 	)
-	expect(orgOwnedSectionForPath('/account/workflows.json')).toBe('workflows')
+	expect(orgOwnedSectionForPath('/account/workflows.json')).toBeNull()
+	expect(orgOwnedSectionForPath('/account/memories-export.json')).toBe(
+		'memories',
+	)
 	expect(orgOwnedSectionForPath('/@acme/-/settings.json')).toBeNull()
 	expect(orgOwnedSectionForPath('/@acme/-/billing')).toBeNull()
 	expect(orgOwnedSectionForPath('/@acme/-/nope.json')).toBeNull()

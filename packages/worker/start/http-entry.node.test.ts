@@ -143,29 +143,27 @@ test('unmapped document requests go to the native renderer with the original URL
 	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined)
 })
 
-test('an uncaught backend error uses native 500 rendering before the static fallback', async () => {
+test('a failed native mutation is never dispatched again to render an error', async () => {
 	silenceExpectedConsoleErrors(['Native app request failed:'])
-	const render = vi.fn(
-		async (
-			_request: Request,
-			_env: Env,
-			_oauth: unknown,
-			failure?: { status: number },
-		) => {
-			if (!failure) throw new Error('native render failed')
-			return new Response('native error', { status: 500 })
-		},
-	)
-	const handle = createHttpRequestHandler(render)
-	const request = new Request('https://example.com/health', {
-		headers: { 'x-kody-test-reported-error': '1' },
-	})
-	const response = await handle(request, createEnv())
-	expect(response.status).toBe(500)
-	await expect(response.text()).resolves.toBe('native error')
-	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined, {
-		status: 500,
-	})
+	vi.stubEnv('TSS_SERVER_FN_BASE', '/_serverFn/')
+	try {
+		let committedWrites = 0
+		const render = vi.fn(async () => {
+			committedWrites++
+			throw new Error('failed after commit')
+		})
+		const handle = createHttpRequestHandler(render)
+		const response = await handle(
+			new Request('https://example.com/_serverFn/mutation', { method: 'POST' }),
+			createEnv(),
+		)
+		expect(response.status).toBe(500)
+		expect(await response.text()).toContain('/images/kody-500-zapped.png')
+		expect(committedWrites).toBe(1)
+		expect(render).toHaveBeenCalledTimes(1)
+	} finally {
+		vi.unstubAllEnvs()
+	}
 })
 
 test('legacy org connection bookmarks redirect through the native route', async () => {

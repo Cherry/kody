@@ -44,7 +44,9 @@ export function orgSectionDenial(
 }
 
 /** Organization-owned document and protocol paths. */
-export function isOrgBoundPath(pathname:string):boolean {return orgSlugFromPageUrl(pathname)!==null}
+export function isOrgBoundPath(pathname: string): boolean {
+	return orgSlugFromPageUrl(pathname) !== null
+}
 /**
  * True when this request can bind a non-signup org: an org-bound path, or
  * `/connect/oauth?org=<slug>` (the OAuth redirect URI stays path-org-less).
@@ -95,8 +97,15 @@ function orgSlugFromPageUrl(pathname: string): string | null {
 }
 
 /** OAuth uses a fixed callback URL, downloads use an explicit org query. */
-function hasExplicitOrgQuery(pathname:string) {return pathname===routes.connectOauth.href() || pathname===routes.accountMemoriesExport.href()}
-function orgSlugFromExplicitOrgUrl(url:URL):string|null {return hasExplicitOrgQuery(url.pathname)?readOrgSlugFromUrl(url):null}
+function hasExplicitOrgQuery(pathname: string) {
+	return (
+		pathname === routes.connectOauth.href() ||
+		pathname === routes.accountMemoriesExport.href()
+	)
+}
+function orgSlugFromExplicitOrgUrl(url: URL): string | null {
+	return hasExplicitOrgQuery(url.pathname) ? readOrgSlugFromUrl(url) : null
+}
 
 async function resolveRequestOrg(
 	request: Request,
@@ -105,7 +114,8 @@ async function resolveRequestOrg(
 ): Promise<RequestOrgResolution> {
 	const url = new URL(request.url)
 	if (hasInvalidExplicitOrg(url)) return 'denied'
-	const slug = orgSlugFromPageUrl(url.pathname) ?? orgSlugFromExplicitOrgUrl(url)
+	const slug =
+		orgSlugFromPageUrl(url.pathname) ?? orgSlugFromExplicitOrgUrl(url)
 	if (!slug) return 'personal'
 	const binding = await loadOrgBindingForSlug(env.APP_DB, personId, slug)
 	return binding ?? 'denied'
