@@ -4,13 +4,20 @@ test('signup confirms the permanent handle before sending credentials and suppor
 	page,
 }) => {
 	let submissions = 0
-	await page.route('**/auth', async (route) => {
-		if (route.request().method() !== 'POST') return route.continue()
+	await page.route('**/_serverFn/**', async (route) => {
+		if (
+			route.request().method() !== 'POST' ||
+			!route.request().postData()?.includes('password')
+		)
+			return route.fallback()
 		submissions += 1
 		await route.fulfill({
-			status: 400,
+			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({ error: 'Test submission received.' }),
+			body: JSON.stringify({
+				successful: false,
+				error: 'Test submission received.',
+			}),
 		})
 	})
 	await page.goto('/signup')
@@ -40,4 +47,7 @@ test('signup confirms the permanent handle before sending credentials and suppor
 		.getByRole('button', { name: 'Yes, create account', exact: true })
 		.click()
 	await expect.poll(() => submissions).toBe(1)
+	await expect(
+		page.getByText('Test submission received.', { exact: true }),
+	).toBeVisible()
 })

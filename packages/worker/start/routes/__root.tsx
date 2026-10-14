@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { routeMethods } from '../route-method-middleware.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildUnauthorizedErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { createScarfPageTracker } from '#client/scarf-analytics.ts'
@@ -70,6 +71,7 @@ export const Route = createRootRouteWithContext<{
 	queryClient: QueryClient
 	getCommittedPage: () => CommittedPage | null
 }>()({
+	server: { middleware: [routeMethods] },
 	// Query owns shell presentation freshness. Private foreground navigation
 	// independently verifies the immutable document actor before committing.
 	preload: false,

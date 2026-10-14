@@ -64,7 +64,12 @@ for (const { outcome, prewarm } of [
 				return route.continue()
 			captured()
 			await barrier
-			if (outcome === 'rejected') return route.abort('failed')
+			if (outcome === 'rejected')
+				return route.fulfill({
+					status: 500,
+					contentType: 'text/plain',
+					body: 'Controlled profile write failed',
+				})
 			await route.continue()
 		})
 		const errors: string[] = []
@@ -74,15 +79,15 @@ for (const { outcome, prewarm } of [
 			await page
 				.getByRole('textbox', { name: 'Bio', exact: true })
 				.fill(nextBio)
-			await page
-				.getByRole('button', { name: 'Save profile', exact: true })
-				.click()
 			const writeResponse = page.waitForResponse(
 				(response) =>
 					response.request().headers()['x-tsr-serverfn'] === 'true' &&
 					response.request().postData()?.includes('displayName') === true &&
 					response.request().method() === 'POST',
 			)
+			await page
+				.getByRole('button', { name: 'Save profile', exact: true })
+				.click()
 			await held
 			const observer = await page.context().newPage()
 			await observer.goto('/account')
@@ -105,7 +110,9 @@ for (const { outcome, prewarm } of [
 			await page.clock.fastForward(61_000)
 			await page.evaluate(() => window.dispatchEvent(new FocusEvent('focus')))
 			release()
-			await writeResponse
+			expect((await writeResponse).status()).toBe(
+				outcome === 'accepted' ? 200 : 500,
+			)
 			await page.evaluate(
 				(href) => window.history.pushState(null, '', href),
 				`/@${user.username}`,
