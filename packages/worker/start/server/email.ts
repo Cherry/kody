@@ -24,7 +24,7 @@ function validateList(input: EmailListInput): EmailListInput {
 	})
 	return {
 		org: input.org,
-		query: search.q,
+		query: search.q.trim(),
 		classification: search.classification,
 		page: search.page,
 		pageSize: search.pageSize,

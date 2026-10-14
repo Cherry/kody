@@ -29,7 +29,7 @@ export function emailSearch(search: Record<string, unknown>): {
 	selected: string
 } {
 	return {
-		q: typeof search.q === 'string' ? search.q.trim() : '',
+		q: typeof search.q === 'string' ? search.q : '',
 		classification:
 			search.classification === 'accepted' ||
 			search.classification === 'quarantined'
@@ -47,7 +47,7 @@ export function emailResourceInput(href: string) {
 	return {
 		list: {
 			org: parseOrgResourcePath(url.pathname)?.slug ?? null,
-			query: search.q,
+			query: search.q.trim(),
 			classification: search.classification,
 			page: search.page,
 			pageSize: search.pageSize,

@@ -52,7 +52,19 @@ test('job presentation filters reuse the same payload but selected records remai
 	})
 	await page
 		.getByRole('searchbox', { name: 'Search jobs', exact: true })
-		.pressSequentially('example')
+		.pressSequentially('example ')
+	const typing = page.getByRole('searchbox', {
+		name: 'Search jobs',
+		exact: true,
+	})
+	// Let the trailing-space navigation commit before typing the next word.
+	// A normalized query value must never replace this presentation value.
+	await expect
+		.poll(() => new URL(page.url()).searchParams.get('q'))
+		.toBe('example ')
+	await page.waitForLoadState('networkidle')
+	await expect(typing).toHaveValue('example ')
+	await typing.pressSequentially('workflow')
 	await page.getByLabel('Jobs view filter', { exact: true }).selectOption('all')
 	await expect(page).toHaveURL(/q=example/)
 	await expect(
@@ -65,7 +77,7 @@ test('job presentation filters reuse the same payload but selected records remai
 		name: 'Search jobs',
 		exact: true,
 	})
-	await expect(searchbox).toHaveValue('example')
+	await expect(searchbox).toHaveValue('example workflow')
 	await searchbox.focus()
 	await page.evaluate(
 		(href) => window.history.pushState(null, '', href),
@@ -73,7 +85,7 @@ test('job presentation filters reuse the same payload but selected records remai
 	)
 	await expect(searchbox).toHaveValue('history')
 	await page.goBack()
-	await expect(searchbox).toHaveValue('example')
+	await expect(searchbox).toHaveValue('example workflow')
 	await page.goForward()
 	await expect(searchbox).toHaveValue('history')
 	await page.evaluate(

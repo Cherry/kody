@@ -152,12 +152,6 @@ export function AccountSecretsPage({
 			to: relocateAccountHref(href, currentHref),
 			resetScroll: false,
 		})
-	const replaceLocation = (href: string) =>
-		router.navigate({
-			to: relocateAccountHref(href, currentHref),
-			replace: true,
-			resetScroll: false,
-		})
 
 	function getCurrentHref() {
 		return currentHref
@@ -188,6 +182,35 @@ export function AccountSecretsPage({
 			nextUrl.searchParams.set('package', filters.packageId)
 		else nextUrl.searchParams.delete('package')
 		return `${nextUrl.pathname}${nextUrl.search}`
+	}
+
+	function updateFilters(next: Partial<ReturnType<typeof readFilterState>>) {
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		return router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous: Record<string, unknown>) => {
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				if (next.search !== undefined) {
+					if (next.search) search.q = next.search
+					else delete search.q
+				}
+				if (next.scope !== undefined) {
+					if (next.scope === 'all') delete search.scope
+					else search.scope = next.scope
+					if (next.scope === 'user') delete search.package
+				}
+				if (next.packageId !== undefined) {
+					if (next.packageId) search.package = next.packageId
+					else delete search.package
+				}
+				return search
+			},
+		})
 	}
 
 	function applyPayload(
@@ -587,11 +610,13 @@ export function AccountSecretsPage({
 						<RecordTableSearch
 							label="Search secrets"
 							placeholder="Search secrets"
-							value={filters.search}
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
 							onInput={(value) => {
-								return replaceLocation(
-									buildHrefWithUpdatedFilters({ search: value }),
-								)
+								return updateFilters({ search: value })
 							}}
 						/>
 						<RecordTableSelect
@@ -599,12 +624,7 @@ export function AccountSecretsPage({
 							value={filters.scope}
 							onChange={(value) => {
 								const nextScope = value as SecretFilterScope
-								replaceLocation(
-									buildHrefWithUpdatedFilters({
-										scope: nextScope,
-										packageId: nextScope === 'user' ? '' : filters.packageId,
-									}),
-								)
+								updateFilters({ scope: nextScope })
 							}}
 						>
 							<option value="all">All scopes</option>
@@ -623,11 +643,7 @@ export function AccountSecretsPage({
 									disabled={filters.scope === 'user'}
 									options={filterPackageOptions}
 									onChange={(packageId) => {
-										replaceLocation(
-											buildHrefWithUpdatedFilters({
-												packageId,
-											}),
-										)
+										updateFilters({ packageId })
 									}}
 								/>
 							</span>

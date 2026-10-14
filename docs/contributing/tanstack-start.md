@@ -114,9 +114,12 @@ retained during pending navigation. Shared page components use
 [`useMatchedPageScope`](../../packages/worker/start/use-matched-page-scope.ts).
 The full displayed URL is separate from normalized Query inputs. Jobs filters
 and Credentials filters therefore retain their URL state without changing their
-server data identity. The shell uses its committed loader location; only
-navigation-close effects and requested-destination error displays use the global
-location. The held-navigation regression is in
+server data identity. Search controls keep an immediate React draft until their
+navigation completes; functional search updates compose rapid filter changes.
+Typed whitespace stays in presentation state while resource inputs normalize it.
+The shell uses its committed loader location; only navigation-close effects and
+requested-destination error displays use the global location. The
+held-navigation regression is in
 [`cache-navigation.spec.ts`](../../e2e/start/cache-navigation.spec.ts).
 
 ## Resource queries

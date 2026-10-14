@@ -244,7 +244,11 @@ export function AccountValuesPage({
 						<RecordTableSearch
 							label="Search values"
 							placeholder="Search values"
-							value={search}
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
 							onInput={(value) => {
 								return replaceLocation(buildHrefWithUpdatedSearch(value))
 							}}

@@ -409,7 +409,11 @@ export function AccountMcpServersPage({
 						<RecordTableSearch
 							label="Search servers"
 							placeholder="Search servers"
-							value={search}
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
 							onInput={(value) => {
 								return replaceLocation(buildHrefWithUpdatedSearch(value))
 							}}

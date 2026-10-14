@@ -138,7 +138,7 @@ export function AccountEmailPage({
 		// Consecutive edits compose before the prior read settles, but a
 		// retained inbox cannot borrow search from a different destination.
 		const samePage = router.latestLocation.pathname === matchedUrl.pathname
-		void router.navigate({
+		return router.navigate({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
@@ -435,7 +435,11 @@ export function AccountEmailPage({
 								<RecordTableSearch
 									label="Search messages"
 									placeholder="Search subject or from"
-									value={searchQuery}
+									value={
+										new URL(currentHref, 'http://localhost').searchParams.get(
+											'q',
+										) ?? ''
+									}
 									onInput={(value) => {
 										return updateFilters({ query: value })
 									}}

@@ -182,12 +182,6 @@ export function AccountMemoriesPage({
 			to: relocateAccountHref(href, currentHref),
 			resetScroll: false,
 		})
-	const replaceLocation = (href: string) =>
-		router.navigate({
-			to: relocateAccountHref(href, currentHref),
-			replace: true,
-			resetScroll: false,
-		})
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
@@ -200,19 +194,30 @@ export function AccountMemoriesPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedParams(input: {
-		search?: string
-		includeDeleted?: boolean
-	}) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		const search = input.search ?? readSearchFilter(nextUrl.href)
-		const includeDeleted =
-			input.includeDeleted ?? readIncludeDeleted(nextUrl.href)
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		if (includeDeleted) nextUrl.searchParams.set('includeDeleted', 'true')
-		else nextUrl.searchParams.delete('includeDeleted')
-		return `${nextUrl.pathname}${nextUrl.search}`
+	function updateFilters(next: { search?: string; includeDeleted?: boolean }) {
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		return router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous) => {
+				// Keep an in-flight search edit when a second filter changes.
+				// Another page's pending search never belongs to this toolbar.
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				if (next.search !== undefined) {
+					if (next.search) search.q = next.search
+					else delete search.q
+				}
+				if (next.includeDeleted !== undefined) {
+					if (next.includeDeleted) search.includeDeleted = 'true'
+					else delete search.includeDeleted
+				}
+				return search
+			},
+		})
 	}
 
 	function showMessage(nextMessage: string | null, tone: MessageTone = 'info') {
@@ -322,11 +327,13 @@ export function AccountMemoriesPage({
 								<RecordTableSearch
 									label="Search memories"
 									placeholder="Search subject, category, tags, summary"
-									value={search}
+									value={
+										new URL(currentHref, 'http://localhost').searchParams.get(
+											'q',
+										) ?? ''
+									}
 									onInput={(value) => {
-										return replaceLocation(
-											buildHrefWithUpdatedParams({ search: value }),
-										)
+										return updateFilters({ search: value })
 									}}
 								/>
 								<label
@@ -345,11 +352,9 @@ export function AccountMemoriesPage({
 										checked={includeDeleted}
 										disabled={isMutating}
 										onChange={(event) => {
-											replaceLocation(
-												buildHrefWithUpdatedParams({
-													includeDeleted: event.currentTarget.checked,
-												}),
-											)
+											updateFilters({
+												includeDeleted: event.currentTarget.checked,
+											})
 										}}
 									/>
 									Include deleted

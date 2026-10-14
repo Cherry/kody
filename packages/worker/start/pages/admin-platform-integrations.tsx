@@ -375,7 +375,11 @@ export function AdminPlatformIntegrationsPage(props: {
 							<RecordTableSearch
 								label="Search integrations"
 								placeholder="Search slug, provider, or label"
-								value={search}
+								value={
+									new URL(currentHref, 'http://localhost').searchParams.get(
+										'q',
+									) ?? ''
+								}
 								onInput={(value) => {
 									return replaceLocation(
 										buildHrefWithUpdatedSearch(currentHref, value),

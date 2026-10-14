@@ -228,7 +228,13 @@ export function AccountCredentialsRoute({
 					? { ...previous }
 					: { ...router.options.parseSearch!(matchedUrl.search) }
 				const params = new URLSearchParams()
-				writeCredentialListQuery(params, next(readFilters(search)))
+				writeCredentialListQuery(
+					params,
+					next({
+						...readFilters(search),
+						q: typeof search.q === 'string' ? search.q : undefined,
+					}),
+				)
 				for (const key of ['q', 'kind', 'scope', 'packageScoped', 'locked']) {
 					const values = params.getAll(key)
 					if (!values.length) delete search[key]
@@ -349,7 +355,11 @@ export function AccountCredentialsRoute({
 						<RecordTableSearch
 							label="Search credentials"
 							placeholder="Search credentials"
-							value={filters.q ?? ''}
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
 							onInput={(q) =>
 								updateFilters((current) => ({
 									...current,

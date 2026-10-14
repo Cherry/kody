@@ -85,7 +85,7 @@ export function AccountJobsPage({
 		// before the previous navigation commits. Pin the destination to this
 		// rendered page so a retained toolbar cannot edit a different page.
 		const samePage = router.latestLocation.pathname === matchedUrl.pathname
-		void router.navigate({
+		return router.navigate({
 			to: matchedUrl.pathname,
 			replace: true,
 			resetScroll: false,
@@ -288,7 +288,11 @@ export function AccountJobsPage({
 							<RecordTableSearch
 								label="Search jobs"
 								placeholder="Search jobs"
-								value={search}
+								value={
+									new URL(currentHref, 'http://localhost').searchParams.get(
+										'q',
+									) ?? ''
+								}
 								onInput={(value) => {
 									return updateFilters({ search: value })
 								}}

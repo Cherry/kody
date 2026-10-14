@@ -200,8 +200,6 @@ export function AccountWorkflowsPage({
 
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
-	const replaceLocation = (href: string) =>
-		router.navigate({ to: href, replace: true, resetScroll: false })
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
@@ -214,18 +212,33 @@ export function AccountWorkflowsPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedFilters(next: {
+	function updateFilters(next: {
 		search?: string
 		view?: AccountWorkflowsViewFilter
 	}) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		const search = next.search ?? nextUrl.searchParams.get('q')?.trim() ?? ''
-		const view = next.view ?? readWorkflowsViewFilter(nextUrl.href)
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		if (view === 'active') nextUrl.searchParams.delete('view')
-		else nextUrl.searchParams.set('view', view)
-		return `${nextUrl.pathname}${nextUrl.search}`
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		return router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous) => {
+				// Keep an in-flight search edit when a second filter changes.
+				// Another page's pending search never belongs to this toolbar.
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				if (next.search !== undefined) {
+					if (next.search) search.q = next.search
+					else delete search.q
+				}
+				if (next.view !== undefined) {
+					if (next.view === 'active') delete search.view
+					else search.view = next.view
+				}
+				return search
+			},
+		})
 	}
 
 	function showMessage(nextMessage: string | null, tone: MessageTone = 'info') {
@@ -402,11 +415,13 @@ export function AccountWorkflowsPage({
 							<RecordTableSearch
 								label="Search workflows"
 								placeholder="Search workflows"
-								value={search}
+								value={
+									new URL(currentHref, 'http://localhost').searchParams.get(
+										'q',
+									) ?? ''
+								}
 								onInput={(value) => {
-									return replaceLocation(
-										buildHrefWithUpdatedFilters({ search: value }),
-									)
+									return updateFilters({ search: value })
 								}}
 							/>
 							<RecordTableSelect
@@ -420,7 +435,7 @@ export function AccountWorkflowsPage({
 									) {
 										return
 									}
-									replaceLocation(buildHrefWithUpdatedFilters({ view: value }))
+									updateFilters({ view: value })
 								}}
 							>
 								{viewFilterOptions.map((option) => (

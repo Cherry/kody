@@ -30,7 +30,6 @@ import {
 	type AdminUserFilterState,
 	adminUserUsageApiPath,
 	buildAdminUsersApiRequestUrl,
-	buildFilteredListHref,
 	buildUserDetailHrefFrom,
 	getListKey,
 	getSelection,
@@ -67,8 +66,6 @@ export function AdminUsersPage(props: {
 	})
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const router = useRouter()
-	const replaceLocation = (href: string) =>
-		router.navigate({ href, replace: true })
 	const client = useQueryClient()
 	const activeScope = useRef<object | null>(null)
 	useEffect(() => {
@@ -204,11 +201,32 @@ export function AdminUsersPage(props: {
 		)
 	}
 
-	function buildHrefWithUpdatedFilters(
-		nextFilters: Partial<AdminUserFilterState>,
-	) {
-		return buildFilteredListHref(getCurrentHref(), nextFilters)
+	function updateFilters(next: Partial<AdminUserFilterState>) {
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		return router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			search: (previous) => {
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				for (const [filter, key] of [
+					['search', 'q'],
+					['role', 'role'],
+					['verification', 'verification'],
+				] as const) {
+					const value = next[filter]
+					if (value === undefined) continue
+					if (value) search[key] = value
+					else delete search[key]
+				}
+				delete search.page
+				return search
+			},
+		})
 	}
+
 	function buildUserDetailHref(stableUserId: string) {
 		return buildUserDetailHrefFrom(getCurrentHref(), stableUserId)
 	}
@@ -615,18 +633,20 @@ export function AdminUsersPage(props: {
 						<RecordTableSearch
 							label="Search users"
 							placeholder="Search by username or email"
-							value={filters.search}
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
 							onInput={(value) => {
-								return replaceLocation(
-									buildHrefWithUpdatedFilters({ search: value }),
-								)
+								return updateFilters({ search: value })
 							}}
 						/>
 						<RecordTableSelect
 							label="Filter users by role"
 							value={filters.role}
 							onChange={(value) => {
-								replaceLocation(buildHrefWithUpdatedFilters({ role: value }))
+								updateFilters({ role: value })
 							}}
 						>
 							<option value="">All roles</option>
@@ -640,11 +660,9 @@ export function AdminUsersPage(props: {
 							label="Filter users by verification"
 							value={filters.verification}
 							onChange={(value) => {
-								replaceLocation(
-									buildHrefWithUpdatedFilters({
-										verification: value === 'stalled' ? 'stalled' : '',
-									}),
-								)
+								updateFilters({
+									verification: value === 'stalled' ? 'stalled' : '',
+								})
 							}}
 						>
 							<option value="">All verification</option>

@@ -586,7 +586,11 @@ export function AccountIntegrationsPage({
 							<RecordTableSearch
 								label="Search integrations"
 								placeholder="Search names, hosts, or accounts"
-								value={search}
+								value={
+									new URL(currentHref, 'http://localhost').searchParams.get(
+										'q',
+									) ?? ''
+								}
 								onInput={(value) => {
 									return replaceLocation(buildHrefWithUpdatedSearch(value))
 								}}

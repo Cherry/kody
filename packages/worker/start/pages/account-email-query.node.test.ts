@@ -16,6 +16,7 @@ import {
 } from './account-email-query.ts'
 import {
 	emailKeys,
+	emailSearch,
 	emailResourceInput,
 	type EmailListData,
 } from './email-resources.ts'
@@ -304,4 +305,17 @@ it('a failed concurrent classification never rolls back another accepted message
 	).toEqual(['quarantined', 'accepted'])
 	expect(client.getQueryState(keys.listKey)?.isInvalidated).toBe(true)
 	client.clear()
+})
+
+it('keeps search editing whitespace in the URL while normalizing only resource identity', () => {
+	const editing = emailSearch({ q: '  hello ' })
+	expect(editing.q).toBe('  hello ')
+	const raw = emailResourceInput('/@acme/-/email?q=%20%20hello%20')
+	const normalized = emailResourceInput('/@acme/-/email?q=hello')
+	expect(raw.list.query).toBe('hello')
+	expect(emailKeys.list('actor', raw.list)).toEqual(
+		emailKeys.list('actor', normalized.list),
+	)
+	expect(emailSearch({ q: ' ' }).q).toBe(' ')
+	expect(emailResourceInput('/@acme/-/email?q=%20').list.query).toBe('')
 })
