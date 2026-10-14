@@ -112,3 +112,49 @@ createRoot(document.getElementById('fixture')).render(h(App));
 	await expect.poll(() => page.evaluate('window.cleanups')).toBe(1)
 	expect(errors).toEqual([])
 })
+
+test('Redact treats noscript fallback markup as opaque during hydration and client rendering', async ({
+	page,
+}) => {
+	const client = bundle(`
+import {createElement as h,useState} from '@tanstack/redact';
+import {hydrateRoot,createRoot} from '@tanstack/redact/dom-client';
+window.hydrationErrors=[];
+function Fallback(){throw new Error('noscript children must not render in the browser')}
+function App(){const [count,setCount]=useState(0);return h('div',null,h('noscript',null,h(Fallback)),h('button',{onClick:()=>setCount(count+1)},String(count)))}
+window.originalFallback=document.querySelector('noscript').firstChild;
+window.originalButton=document.querySelector('button');
+hydrateRoot(document.getElementById('fixture'),h(App),{onRecoverableError:error=>window.hydrationErrors.push(error.message)});
+createRoot(document.getElementById('client')).render(h('noscript',null,h(Fallback)));
+`)
+	await page.setContent(
+		'<div id="fixture"><div><noscript><div>Enable JavaScript</div></noscript><button>0</button></div></div><div id="client"></div>',
+	)
+	expect(
+		await page
+			.locator('noscript')
+			.evaluate((node) => node.firstChild?.nodeType),
+	).toBe(3)
+	await page.addScriptTag({ content: client })
+	await page.getByRole('button', { name: '0', exact: true }).click()
+	await expect(
+		page.getByRole('button', { name: '1', exact: true }),
+	).toBeVisible()
+	expect(await page.evaluate('window.hydrationErrors')).toEqual([])
+	expect(
+		await page.evaluate(
+			'window.originalFallback === document.querySelector("#fixture noscript").firstChild',
+		),
+	).toBe(true)
+	expect(
+		await page.evaluate(
+			'window.originalButton === document.querySelector("button")',
+		),
+	).toBe(true)
+	await expect(page.locator('#client noscript')).toHaveCount(1)
+	expect(
+		await page
+			.locator('#client noscript')
+			.evaluate((node) => node.childNodes.length),
+	).toBe(0)
+})
