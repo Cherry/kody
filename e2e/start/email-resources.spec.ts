@@ -153,7 +153,14 @@ test('Email reuses resources across selection and preserves optimistic intent th
 			await expect(
 				page.getByRole('button', { name: 'Mark as spam', exact: true }),
 			).toBeVisible()
-			await expect(page).toHaveURL(new RegExp(`${messageIds[index]}(?:\\?|$)`))
+			await expect(page).toHaveURL(
+				(url) =>
+					decodeURIComponent(url.pathname) ===
+					`/@${user.username}/-/email/${messageIds[index]}`,
+			)
+			await expect(
+				page.getByRole('heading', { name: subjects[index]!, exact: true }),
+			).toBeVisible()
 			await page.waitForLoadState('networkidle')
 		}
 		expect(reads.filter((read) => read?.kind === 'list')).toHaveLength(1)
@@ -178,6 +185,7 @@ test('Email reuses resources across selection and preserves optimistic intent th
 			// Capture an actual authorized response before the write, then deliver
 			// that stale result after optimism is visible.
 			const response = await route.fetch()
+			expect(response.ok()).toBe(true)
 			capturedReads.push(resource.kind)
 			await readBarrier
 			await route.fulfill({ response })
@@ -221,6 +229,9 @@ test('Email reuses resources across selection and preserves optimistic intent th
 			.click()
 		await expect(page.getByLabel('Display name', { exact: true })).toBeVisible()
 		await page.goBack()
+		await expect(
+			page.getByRole('heading', { name: subjects[0]!, exact: true }),
+		).toBeVisible()
 		await expect(quarantined).toBeVisible()
 		await expect(
 			page.getByRole('button', { name: 'Updating…', exact: true }),
