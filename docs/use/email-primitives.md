@@ -227,16 +227,21 @@ Inbound mail is classified at receive time. Each stored message carries
 `classification` (`accepted` or `quarantined`) and an optional human-readable
 `classification_reason`. Decision order:
 
-1. **Per-user sender rules** — exact address or domain match (domain rules also
-   match subdomains). Address rules beat domain rules. Effects:
-   - `block` rejects at SMTP before any receive quota is charged.
+1. **Authentication-Results verdict** — Kody parses the stored SPF/DKIM/DMARC
+   results first. DMARC `fail`, or SPF `fail`/`softfail` without a DKIM `pass`,
+   marks the message suspect. A missing Authentication-Results header fails open
+   (not authenticated, not suspect).
+2. **Per-user sender rules** — at classification time, rules match the RFC5322
+   From address (exact address or domain, including subdomains; address beats
+   domain). Early SMTP `block` still uses the envelope sender. Effects:
+   - `block` rejects at SMTP before any receive quota is charged (envelope
+     match), and quarantines at classification when From matches.
    - `quarantine` stores the message as quarantined.
-   - `allow` stores the message as accepted and bypasses the auth-verdict
-     quarantine step below.
-2. **Authentication-Results verdict** — when no sender rule decides the outcome,
-   Kody parses the stored SPF/DKIM/DMARC results. DMARC `fail`, or SPF
-   `fail`/`softfail` without a DKIM `pass`, quarantines the message. A missing
-   Authentication-Results header fails open to `accepted`.
+   - `allow` stores the message as accepted only when From authenticates (DMARC
+     `pass`, or SPF `pass` with the envelope on the From domain). Spoofed or
+     unaligned From is never accepted because of an allow rule.
+3. **Default** — when no sender rule decides the outcome, suspect mail is
+   quarantined and everything else is accepted.
 
 Each user may store at most 200 sender rules. Manage them with
 `emailSenderRuleList`, `emailSenderRuleSet` (kind / value / effect / note), and
@@ -288,10 +293,10 @@ does not authenticate From.
   SPF `fail`/`softfail` without DKIM `pass`), mail with no From address, mail
   whose From did not authenticate (including DKIM-only), and mail that claims a
   member address without authenticating it (or from a member whose account email
-  is unverified or whose account is suspended) runs nothing, even when a sender
-  `allow` rule accepted it. The message is still stored and visible on
-  `/@<slug>/-/email`, and the worker logs `inbound-email-sender-unverified` with
-  the reason.
+  is unverified or whose account is suspended) runs nothing. An `allow` rule
+  never accepts auth-failed mail; other stored messages (including fail-open
+  missing Authentication-Results) still stay visible on `/@<slug>/-/email`, and
+  the worker logs `inbound-email-sender-unverified` with the reason.
 
 Personal orgs' existing live `email.message.received` and
 `email.message.quarantined` enablements were migrated to `any_authenticated` so
