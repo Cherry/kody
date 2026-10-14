@@ -34,17 +34,17 @@ test('onboarding polls one shared query across steps and pauses while hidden', a
 	await expect.poll(() => reads.length).toBe(1)
 	await page.waitForLoadState('networkidle')
 	const progressUrl = reads[0]
+	const steps = page.getByRole('navigation', { name: 'Onboarding steps' })
 	for (const step of [2, 3, 1]) {
-		await page.evaluate(
-			(step) => window.history.pushState(null, '', `/onboarding/step-${step}`),
-			step,
-		)
+		const destination = steps.getByTestId(`onboarding-step-${step}`)
+		await destination.click()
 		await expect(page).toHaveURL(new RegExp(`/onboarding/step-${step}$`))
-		await expect(
-			page.getByRole('navigation', { name: 'Onboarding steps' }),
-		).toBeVisible()
-		await page.waitForLoadState('networkidle')
+		await expect(destination).toHaveAttribute('aria-current', 'step')
+		// The shared navigation survives transitions. Wait for the destination's
+		// actual panel, rather than accepting a URL update before React commits.
+		await expect(page.locator(`section#onboarding-step-${step}`)).toBeVisible()
 	}
+	await expect(chooserCards).toHaveCount(chooserOrder.length)
 	expect(reads.filter((url) => url === progressUrl)).toHaveLength(1)
 	expect(
 		await chooserCards.evaluateAll((nodes) =>
