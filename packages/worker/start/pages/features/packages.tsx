@@ -2,19 +2,70 @@
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
-import { PackagePublishArt, PackageShareArt } from './packages-art.tsx'
 import { FeatureRelated } from './feature-related.tsx'
+import {
+	PackagePublishScene,
+	PackageShareScene,
+	PackageWorkbenchScene,
+	type PackageAccess,
+	type PackageSharing,
+	type PackageTab,
+} from './packages-scenes.tsx'
 const examplePackageSource = 'README.md\nAGENTS.md\npackage.json\nsrc/brief.ts'
+const packageTabs = ['Intent', 'Source', 'Result'] as const
+type PackageTabLabel = (typeof packageTabs)[number]
+function tabFromLabel(label: PackageTabLabel): PackageTab {
+	switch (label) {
+		case 'Intent':
+			return 'intent'
+		case 'Source':
+			return 'source'
+		case 'Result':
+			return 'result'
+		default: {
+			const exhaustive: never = label
+			return exhaustive
+		}
+	}
+}
+function tabStatus(tab: PackageTab) {
+	switch (tab) {
+		case 'intent':
+			return 'Showing the request that became the weekly-brief package.'
+		case 'source':
+			return 'Showing the package source in src/brief.ts.'
+		case 'result':
+			return 'Showing the result of running weekly-brief.'
+		default: {
+			const exhaustive: never = tab
+			return exhaustive
+		}
+	}
+}
+function accessFromValue(value: string): PackageAccess {
+	switch (value) {
+		case 'use':
+		case 'contribute':
+		case 'manage':
+			return value
+		default:
+			return 'use'
+	}
+}
 export function PackagesFeature() {
-	const [tab, setTab] = useState('intent')
+	const [tab, setTab] = useState<PackageTab>('intent')
+	const [heroShot, setHeroShot] = useState(0)
 	const [questions, setQuestions] = useState(false)
 	const [previewQuestions, setPreviewQuestions] = useState(false)
 	const [previewed, setPreviewed] = useState(false)
 	const [live, setLive] = useState(false)
-	const [sharing, setSharing] = useState('share')
-	const [access, setAccess] = useState('use')
+	const [publishShot, setPublishShot] = useState(0)
+	const [version, setVersion] = useState(1)
+	const [sharing, setSharing] = useState<PackageSharing>('share')
+	const [access, setAccess] = useState<PackageAccess>('use')
 	const [copyEdited, setCopyEdited] = useState(false)
 	const [forkArtStatus, setForkArtStatus] = useState('')
+	const [shareShot, setShareShot] = useState(0)
 	const [status, setStatus] = useState(
 		'Example package. The published brief has no open questions.',
 	)
@@ -55,43 +106,33 @@ export function PackagesFeature() {
 							<span className="ui-state">Published</span>
 						</div>
 						<div className="controls" aria-label="Package contents">
-							{['Intent', 'Source', 'Result'].map((label) => (
-								<button
-									key={label}
-									type="button"
-									aria-pressed={tab === label.toLowerCase()}
-									onClick={() => {
-										setTab(label.toLowerCase())
-									}}
-								>
-									{label}
-								</button>
-							))}
+							{packageTabs.map((label) => {
+								const next = tabFromLabel(label)
+								return (
+									<button
+										key={label}
+										type="button"
+										aria-pressed={tab === next}
+										onClick={() => {
+											setTab(next)
+											setHeroShot((value) => value + 1)
+										}}
+									>
+										{label}
+									</button>
+								)
+							})}
 						</div>
-						<div className="contents" id="package-content" aria-live="polite">
-							{tab === 'intent' ? (
-								<p>
-									Collect the project updates I choose and turn them into a
-									weekly brief.
-								</p>
-							) : tab === 'source' ? (
-								<>
-									<pre>{examplePackageSource}</pre>
-									<SiteLink href="/docs/package-skills">
-										Packages can also include Agent Skills
-									</SiteLink>
-								</>
-							) : (
-								<>
-									<h3>Weekly brief</h3>
-									<p>
-										Orchard: design review is ready.
-										<br />
-										Fieldwork: kickoff is booked.
-									</p>
-									{live && <p>Open question: Who approves the final copy?</p>}
-								</>
-							)}
+						<p className="visually-hidden" aria-live="polite">
+							{tabStatus(tab)}
+						</p>
+						<div className="contents" id="package-content">
+							<PackageWorkbenchScene tab={tab} live={live} shot={heroShot} />
+							{tab === 'source' ? (
+								<SiteLink className="pw-pkg-skills" href="/docs/package-skills">
+									Packages can also include Agent Skills
+								</SiteLink>
+							) : null}
 						</div>
 						{/* Tab panels need JS; keep example source readable without it. */}
 						<noscript>
@@ -131,6 +172,7 @@ export function PackagesFeature() {
 								onChange={(event) => {
 									setQuestions(event.currentTarget.checked)
 									setPreviewed(false)
+									setPublishShot((value) => value + 1)
 									setStatus(
 										'Source changed. Preview it to compare with the current published output.',
 									)
@@ -143,6 +185,7 @@ export function PackagesFeature() {
 							onClick={() => {
 								setPreviewed(true)
 								setPreviewQuestions(questions)
+								setPublishShot((value) => value + 1)
 								setStatus(
 									questions
 										? 'Example output includes open questions. The published output has not changed.'
@@ -157,6 +200,8 @@ export function PackagesFeature() {
 							disabled={!previewed || questions === live}
 							onClick={() => {
 								setLive(questions)
+								setVersion((value) => value + 1)
+								setPublishShot((value) => value + 1)
 								setStatus('Example change is now published.')
 							}}
 						>
@@ -171,31 +216,14 @@ export function PackagesFeature() {
 					</SiteLink>
 				</div>
 				<div className="pt-proof">
-					<PackagePublishArt />
-					<div className="pt-sheets">
-						<article hidden={!previewed}>
-							<small>Proposed output</small>
-							<h3>Weekly brief</h3>
-							<p>
-								Orchard: design review is ready.
-								<br />
-								Fieldwork: kickoff is booked.
-							</p>
-							<p hidden={!previewQuestions}>
-								Open question: Who approves the final copy?
-							</p>
-						</article>
-						<article>
-							<small>Current published output</small>
-							<h3>Weekly brief</h3>
-							<p>
-								Orchard: design review is ready.
-								<br />
-								Fieldwork: kickoff is booked.
-							</p>
-							<p hidden={!live}>Open question: Who approves the final copy?</p>
-						</article>
-					</div>
+					<PackagePublishScene
+						questions={questions}
+						previewed={previewed}
+						previewQuestions={previewQuestions}
+						live={live}
+						version={version}
+						shot={publishShot}
+					/>
 				</div>
 			</section>
 			<section className="story-section story-split pt-sharing">
@@ -215,6 +243,7 @@ export function PackagesFeature() {
 							aria-pressed={sharing === 'share'}
 							onClick={() => {
 								setSharing('share')
+								setShareShot((value) => value + 1)
 							}}
 						>
 							Share access
@@ -224,6 +253,7 @@ export function PackagesFeature() {
 							aria-pressed={sharing === 'fork'}
 							onClick={() => {
 								setSharing('fork')
+								setShareShot((value) => value + 1)
 							}}
 						>
 							Make a copy
@@ -235,7 +265,8 @@ export function PackagesFeature() {
 							id="pt-access"
 							value={access}
 							onChange={(event) => {
-								setAccess(event.currentTarget.value)
+								setAccess(accessFromValue(event.currentTarget.value))
+								setShareShot((value) => value + 1)
 							}}
 						>
 							<option value="use">Use: read and run</option>
@@ -253,6 +284,7 @@ export function PackagesFeature() {
 						onClick={() => {
 							setCopyEdited(!copyEdited)
 							setForkArtStatus('Change the copy’s focus')
+							setShareShot((value) => value + 1)
 						}}
 					>
 						Change the copy’s focus
@@ -274,7 +306,12 @@ export function PackagesFeature() {
 					</SiteLink>
 				</div>
 				<div className="pt-share-art">
-					<PackageShareArt sharing={sharing} copyEdited={copyEdited} />
+					<PackageShareScene
+						sharing={sharing}
+						access={access}
+						copyEdited={copyEdited}
+						shot={shareShot}
+					/>
 				</div>
 			</section>
 			<FeatureRelated

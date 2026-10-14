@@ -3,6 +3,13 @@ import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { SecretsVault } from './secrets-vault.tsx'
 import { FeatureRelated } from './feature-related.tsx'
+import {
+	SecretsAccessScene,
+	SecretsTripScene,
+	tripResultCopy,
+	type SecretApproval,
+	type SecretHost,
+} from './secrets-scenes.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
 const approvals = {
 	host: 'An approved destination can receive the credential. An empty host allowlist blocks requests that use secret references.',
@@ -12,118 +19,83 @@ const approvals = {
 		'An expired secret stays listed, but Kody stops resolving it. This does not revoke the token at the service that issued it.',
 }
 export function SecretsFeature() {
-	const [host, setHost] = useState<'approved' | 'blocked'>('approved')
+	const [host, setHost] = useState<SecretHost>('approved')
 	const [sent, setSent] = useState(false)
-	const [approval, setApproval] = useState<keyof typeof approvals>('host')
+	const [tripShot, setTripShot] = useState(0)
+	const [approval, setApproval] = useState<SecretApproval>('host')
+	const [approvalShot, setApprovalShot] = useState(0)
 	return (
 		<div className="study secrets">
-			<img
-				className="feature-orb"
-				src="/images/lantern/kody-primitives-orb-secrets.webp"
-				alt=""
-				width="80"
-				height="80"
-			/>
-			<h1>
-				Your agent can use the key.
-				<br />
-				<em>It can't read it.</em>
-			</h1>
-			<p className="lead">
-				Give your agent the API access it needs. Kody sends the credential only
-				to hosts you approve.
-			</p>
-			<SiteLink className="action" href="/onboarding">
-				Connect your agent
-			</SiteLink>
-			<div className="boundary ui-stage">
-				<div className="envelope ui-window">
-					<div className="ui-title">
-						<span className="ui-symbol">⌑</span>
-						<strong>Agent sees</strong>
-						<span className="ui-state">Reference only</span>
-					</div>
-					<div className="ui-row">
-						<small>In prompts</small>
-						<code>{'{{secret:<name>}}'}</code>
-					</div>
-					<div className="ui-row">
-						<small>Allowed host</small>
-						<code>api.example.com</code>
-					</div>
+			<div className="split">
+				<div>
+					<img
+						className="feature-orb"
+						src="/images/lantern/kody-primitives-orb-secrets.webp"
+						alt=""
+						width="80"
+						height="80"
+					/>
+					<h1>
+						Your agent can use the key.
+						<br />
+						<em>It can't read it.</em>
+					</h1>
+					<p className="lead">
+						Give your agent the API access it needs. Kody sends the credential
+						only to hosts you approve.
+					</p>
+					<SiteLink className="action" href="/onboarding">
+						Connect your agent
+					</SiteLink>
 				</div>
-				<div className="gate">
-					<svg viewBox="0 0 140 80" aria-hidden="true">
-						<path className="ui-request-line" d="M4 40H136" />
-						<path d="m124 32 12 8-12 8" />
-						<rect x="51" y="24" width="34" height="32" rx="5" />
-						<path d="M59 24v-6a9 9 0 0 1 18 0v6" />
-					</svg>
-					<small>Resolved by Kody</small>
-				</div>
-				<div className="envelope ui-window">
-					<div className="ui-title">
-						<span className="ui-symbol">↗</span>
-						<strong>API request</strong>
+				<div className="ms-trip">
+					<SecretsTripScene host={host} sent={sent} shot={tripShot} />
+					<div className="controls" aria-label="Example request">
+						<button
+							type="button"
+							aria-pressed={host === 'approved'}
+							onClick={() => {
+								setHost('approved')
+								setSent(false)
+								setTripShot((value) => value + 1)
+							}}
+						>
+							Approved host
+						</button>
+						<button
+							type="button"
+							aria-pressed={host === 'blocked'}
+							onClick={() => {
+								setHost('blocked')
+								setSent(false)
+								setTripShot((value) => value + 1)
+							}}
+						>
+							Unapproved host
+						</button>
+						<button
+							type="button"
+							className="run"
+							id="send-request"
+							onClick={() => {
+								setSent(true)
+								setTripShot((value) => value + 1)
+							}}
+						>
+							Send example request
+						</button>
 					</div>
-					<strong id="destination">
-						{host === 'approved' ? 'Approved API host' : 'Unapproved host'}
-					</strong>
-					<div className="ui-row">
-						<small>Authorization</small>
-						<span id="ui-auth-status">
-							{sent && host === 'approved'
-								? 'Added at request boundary'
-								: 'Not sent'}
-						</span>
-					</div>
-					<p className="result" id="secret-result" role="status">
-						{sent
-							? host === 'approved'
-								? 'Request sent to the approved host.'
-								: 'Blocked. This host is not approved.'
-							: 'Ready to send an example request.'}
+					<p id="secret-result" role="status">
+						{tripResultCopy(host, sent)}
+					</p>
+					<p className="smallprint">
+						Illustration only. The approved API receives the credential. The
+						agent does not.
 					</p>
 				</div>
 			</div>
-			<div className="controls">
-				<button
-					type="button"
-					aria-pressed={host === 'approved'}
-					onClick={() => {
-						setHost('approved')
-						setSent(false)
-					}}
-				>
-					Approved host
-				</button>
-				<button
-					type="button"
-					aria-pressed={host === 'blocked'}
-					onClick={() => {
-						setHost('blocked')
-						setSent(false)
-					}}
-				>
-					Unapproved host
-				</button>
-				<button
-					type="button"
-					className="run"
-					id="send-request"
-					onClick={() => {
-						setSent(true)
-					}}
-				>
-					Send example request
-				</button>
-			</div>
-			<p className="smallprint">
-				Illustration only. The approved API receives the credential. The agent
-				does not.
-			</p>
 			<section className="story-section">
-				<div className="story-split">
+				<div className="story-split ms-access-split">
 					<div>
 						<h2>
 							Approve the destination.
@@ -144,6 +116,7 @@ export function SecretsFeature() {
 								aria-pressed={approval === 'host'}
 								onClick={() => {
 									setApproval('host')
+									setApprovalShot((value) => value + 1)
 								}}
 							>
 								Host approval
@@ -153,6 +126,7 @@ export function SecretsFeature() {
 								aria-pressed={approval === 'package'}
 								onClick={() => {
 									setApproval('package')
+									setApprovalShot((value) => value + 1)
 								}}
 							>
 								Package access
@@ -162,6 +136,7 @@ export function SecretsFeature() {
 								aria-pressed={approval === 'expiry'}
 								onClick={() => {
 									setApproval('expiry')
+									setApprovalShot((value) => value + 1)
 								}}
 							>
 								Expiry
@@ -172,36 +147,7 @@ export function SecretsFeature() {
 						</p>
 						<SiteLink href="/docs/secrets">How approvals work</SiteLink>
 					</div>
-					<div>
-						<div className="ui-window ui-policy">
-							<div className="ui-title">
-								<span className="ui-symbol">⌑</span>
-								<strong>Credential access</strong>
-								<span className="ui-state">Example</span>
-							</div>
-							<div
-								className={`ms-slip ui-policy-row ${approval === 'host' ? 'ms-active' : ''}`}
-							>
-								<span>Allowed host</span>
-								<code>api.example.com</code>
-								<b>✓</b>
-							</div>
-							<div
-								className={`ms-slip ui-policy-row ${approval === 'package' ? 'ms-active' : ''}`}
-							>
-								<span>Package</span>
-								<code>weekly-brief</code>
-								<b>✓</b>
-							</div>
-							<div
-								className={`ms-slip ui-policy-row ${approval === 'expiry' ? 'ms-active' : ''}`}
-							>
-								<span>Expiry</span>
-								<span>Checked before use</span>
-								<b>✓</b>
-							</div>
-						</div>
-					</div>
+					<SecretsAccessScene approval={approval} shot={approvalShot} />
 				</div>
 			</section>
 			<SecretsVault />

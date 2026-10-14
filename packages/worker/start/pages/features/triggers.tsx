@@ -1,19 +1,27 @@
-/** @jsxImportSource @emotion/react */
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
 import { FeatureRelated } from './feature-related.tsx'
-import { TriggerSignalsArt, TriggerScanArt } from './triggers-art.tsx'
+import {
+	TriggerHeroScene,
+	TriggerScanScene,
+	TriggerSignalsScene,
+	type ScanResult,
+	type SignalId,
+	type TriggerExampleId,
+} from './triggers-scenes.tsx'
 import { triggerExamples, signals } from './triggers-data.ts'
 export function TriggersFeature() {
-	const [selected, setSelected] =
-		useState<keyof typeof triggerExamples>('purchase')
-	const [signal, setSignal] = useState<keyof typeof signals>('webhook')
+	const [selected, setSelected] = useState<TriggerExampleId>('purchase')
+	const [signal, setSignal] = useState<SignalId>('webhook')
 	const [ran, setRan] = useState(false)
 	const [otherAddress, setOtherAddress] = useState(false)
 	const [showFlake, setShowFlake] = useState(false)
 	const [scanFlake, setScanFlake] = useState(false)
-	const [scanResult, setScanResult] = useState('')
+	const [scanResult, setScanResult] = useState<ScanResult>('')
+	const [heroShot, setHeroShot] = useState(0)
+	const [signalShot, setSignalShot] = useState(0)
+	const [scanShot, setScanShot] = useState(0)
 	const event = triggerExamples[selected]
 	const result =
 		selected === 'email' && otherAddress
@@ -29,130 +37,130 @@ export function TriggersFeature() {
 				: event.detail
 	return (
 		<div className="study triggers">
-			<img
-				className="feature-orb"
-				src="/images/lantern/kody-primitives-orb-triggers.webp"
-				alt=""
-				width="80"
-				height="80"
-			/>
-			<h1>
-				Give the next step
-				<br />a starting signal.
-			</h1>
-			<p className="lead">
-				A purchase lands. An issue opens. An email arrives. Your package runs,
-				even when the chat is closed.
-			</p>
-			<SiteLink className="action" href="/onboarding">
-				Connect your agent
-			</SiteLink>
-			<div className="controls" aria-label="Example trigger">
-				<button
-					type="button"
-					aria-pressed={selected === 'purchase'}
-					onClick={() => {
-						setSelected('purchase')
-						setRan(false)
-					}}
-				>
-					A purchase
-				</button>
-				<button
-					type="button"
-					aria-pressed={selected === 'issue'}
-					onClick={() => {
-						setSelected('issue')
-						setRan(false)
-					}}
-				>
-					An issue
-				</button>
-				<button
-					type="button"
-					aria-pressed={selected === 'email'}
-					onClick={() => {
-						setSelected('email')
-						setRan(false)
-					}}
-				>
-					An email
-				</button>
-				<button
-					type="button"
-					aria-pressed={selected === 'schedule'}
-					onClick={() => {
-						setSelected('schedule')
-						setRan(false)
-					}}
-				>
-					A daily check
-				</button>
-			</div>
-			<div className="ledger ui-stage">
-				<div className="ui-window">
-					<small>
-						<span className="ui-symbol">↗</span> When
-					</small>
-					<strong>{event.when}</strong>
-				</div>
-				<div className="ui-window">
-					<small>
-						<span className="ui-symbol">ƒ</span> Run package
-					</small>
-					<strong>{event.package}</strong>
-				</div>
-				<div className="ui-window">
-					<small>
-						<span className="ui-symbol">✓</span> Result
-					</small>
-					<strong>{result}</strong>
+			<div className="split">
+				<div>
+					<img
+						className="feature-orb"
+						src="/images/lantern/kody-primitives-orb-triggers.webp"
+						alt=""
+						width="80"
+						height="80"
+					/>
+					<h1>
+						Give the next step
+						<br />a starting signal.
+					</h1>
+					<p className="lead">
+						A purchase lands. An issue opens. An email arrives. Your package
+						runs, even when the chat is closed.
+					</p>
+					<SiteLink className="action" href="/onboarding">
+						Connect your agent
+					</SiteLink>
+					<div className="controls trg-examples" aria-label="Example trigger">
+						<button
+							type="button"
+							aria-pressed={selected === 'purchase'}
+							onClick={() => {
+								setSelected('purchase')
+								setRan(false)
+								setHeroShot((shot) => shot + 1)
+							}}
+						>
+							A purchase
+						</button>
+						<button
+							type="button"
+							aria-pressed={selected === 'issue'}
+							onClick={() => {
+								setSelected('issue')
+								setRan(false)
+								setHeroShot((shot) => shot + 1)
+							}}
+						>
+							An issue
+						</button>
+						<button
+							type="button"
+							aria-pressed={selected === 'email'}
+							onClick={() => {
+								setSelected('email')
+								setRan(false)
+								setHeroShot((shot) => shot + 1)
+							}}
+						>
+							An email
+						</button>
+						<button
+							type="button"
+							aria-pressed={selected === 'schedule'}
+							onClick={() => {
+								setSelected('schedule')
+								setRan(false)
+								setHeroShot((shot) => shot + 1)
+							}}
+						>
+							A daily check
+						</button>
+					</div>
+					<div className="controls trg-run">
+						{selected === 'email' && (
+							<label>
+								<input
+									type="checkbox"
+									checked={otherAddress}
+									onChange={(event) => {
+										setOtherAddress(event.currentTarget.checked)
+										setRan(false)
+										setHeroShot((shot) => shot + 1)
+									}}
+								/>{' '}
+								Use another address
+							</label>
+						)}
+						{selected === 'schedule' && (
+							<label>
+								<input
+									type="checkbox"
+									checked={showFlake}
+									onChange={(event) => {
+										setShowFlake(event.currentTarget.checked)
+										setRan(false)
+										setHeroShot((shot) => shot + 1)
+									}}
+								/>{' '}
+								Show a flake
+							</label>
+						)}
+						<button
+							type="button"
+							className="run"
+							onClick={() => {
+								setRan(true)
+								setHeroShot((shot) => shot + 1)
+							}}
+						>
+							Run example
+						</button>
+					</div>
 					<p className="result" id="trigger-detail" aria-live="polite">
 						{ran ? detail : 'Run the example to follow the event.'}
 					</p>
 				</div>
+				<div className="trg-hero-scene">
+					<TriggerHeroScene
+						example={selected}
+						result={result}
+						otherAddress={otherAddress}
+						showFlake={showFlake}
+						shot={heroShot}
+					/>
+					<p className="smallprint">
+						Illustrative events. Ordinary code can do the watching and call an
+						agent when needed.
+					</p>
+				</div>
 			</div>
-			<div className="controls">
-				{selected === 'email' && (
-					<label>
-						<input
-							type="checkbox"
-							checked={otherAddress}
-							onChange={(event) => {
-								setOtherAddress(event.currentTarget.checked)
-								setRan(false)
-							}}
-						/>{' '}
-						Use another address
-					</label>
-				)}
-				{selected === 'schedule' && (
-					<label>
-						<input
-							type="checkbox"
-							checked={showFlake}
-							onChange={(event) => {
-								setShowFlake(event.currentTarget.checked)
-								setRan(false)
-							}}
-						/>{' '}
-						Show a flake
-					</label>
-				)}
-				<button
-					type="button"
-					className="run"
-					onClick={() => {
-						setRan(true)
-					}}
-				>
-					Run example
-				</button>
-			</div>
-			<p className="smallprint">
-				Illustrative events. Ordinary code can do the watching and call an agent
-				when needed.
-			</p>
 			<section className="story-section story-split pt-signals">
 				<div>
 					<h2>
@@ -170,6 +178,7 @@ export function TriggersFeature() {
 							aria-pressed={signal === 'webhook'}
 							onClick={() => {
 								setSignal('webhook')
+								setSignalShot((shot) => shot + 1)
 							}}
 						>
 							<strong>Your tools can call it.</strong>
@@ -180,6 +189,7 @@ export function TriggersFeature() {
 							aria-pressed={signal === 'inbox'}
 							onClick={() => {
 								setSignal('inbox')
+								setSignalShot((shot) => shot + 1)
 							}}
 						>
 							<strong>Your inbox can start it.</strong>
@@ -190,6 +200,7 @@ export function TriggersFeature() {
 							aria-pressed={signal === 'package'}
 							onClick={() => {
 								setSignal('package')
+								setSignalShot((shot) => shot + 1)
 							}}
 						>
 							<strong>Your packages can pass it on.</strong>
@@ -200,6 +211,7 @@ export function TriggersFeature() {
 							aria-pressed={signal === 'clock'}
 							onClick={() => {
 								setSignal('clock')
+								setSignalShot((shot) => shot + 1)
 							}}
 						>
 							<strong>The clock works too.</strong>
@@ -209,7 +221,7 @@ export function TriggersFeature() {
 					<SiteLink href="/docs/triggers">Read the trigger guide ↗</SiteLink>
 				</div>
 				<div className="pt-switch-illustration">
-					<TriggerSignalsArt signal={signal} />
+					<TriggerSignalsScene signal={signal} shot={signalShot} />
 					<div className="pt-signal-outcome" aria-live="polite">
 						<strong>{signals[signal].name}</strong>
 						<p id="pt-signal-detail">{signals[signal].detail}</p>
@@ -237,6 +249,8 @@ export function TriggersFeature() {
 								checked={scanFlake}
 								onChange={(event) => {
 									setScanFlake(event.currentTarget.checked)
+									setScanResult('')
+									setScanShot((shot) => shot + 1)
 								}}
 							/>{' '}
 							Include a flaky test in this example
@@ -245,6 +259,7 @@ export function TriggersFeature() {
 							type="button"
 							onClick={() => {
 								setScanResult(scanFlake ? 'flake' : 'clean')
+								setScanShot((shot) => shot + 1)
 							}}
 						>
 							Run example scan
@@ -262,7 +277,11 @@ export function TriggersFeature() {
 					</SiteLink>
 				</div>
 				<div className="pt-decision" data-result={scanResult}>
-					<TriggerScanArt />
+					<TriggerScanScene
+						flake={scanFlake}
+						result={scanResult}
+						shot={scanShot}
+					/>
 					<p className="pt-example-caption">
 						Example scan. An agent is called only on the branch that needs
 						investigation.

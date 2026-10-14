@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { PrimitiveWidgetFrame } from '../../components/primitive-widget-parts.tsx'
 import { useState, type ReactNode } from 'react'
 import {
 	appPrompts,
@@ -14,7 +15,6 @@ import {
 	packageChanges,
 	packagesScene,
 	type PackageCallerId,
-	PrimitiveWidgetFrame,
 	secretHosts,
 	secretsScene,
 	type SecretHostId,

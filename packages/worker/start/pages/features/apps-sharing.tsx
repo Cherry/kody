@@ -1,14 +1,17 @@
 /** @jsxImportSource @emotion/react */
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
+import { type Brief } from './apps-intake.tsx'
+import { AppsShareScene, type AccessRole } from './apps-scenes.tsx'
 const roles = {
 	Use: 'Can read the source and run the package.',
 	Contribute: 'Can read the source, run, and edit the package.',
 	Manage:
 		'Can read the source, run, edit, publish, delete, and manage access to the package.',
 }
-export function AppsSharing() {
-	const [role, setRole] = useState<keyof typeof roles>('Use')
+export function AppsSharing(props: { preview: Brief }) {
+	const [role, setRole] = useState<AccessRole>('Use')
+	const [shot, setShot] = useState(0)
 	return (
 		<section className="story-section">
 			<div className="story-split">
@@ -44,8 +47,10 @@ export function AppsSharing() {
 										next === 'Use' ||
 										next === 'Contribute' ||
 										next === 'Manage'
-									)
+									) {
 										setRole(next)
+										setShot((value) => value + 1)
+									}
 								}}
 							>
 								<option>Use</option>
@@ -61,34 +66,7 @@ export function AppsSharing() {
 					>
 						{roles[role]}
 					</p>
-					<svg
-						className="ia-share-art"
-						viewBox="0 0 560 185"
-						aria-hidden="true"
-					>
-						<path className="ia-track" d="M80 140H480" />
-						<g className="ia-capability">
-							<circle cx="80" cy="80" r="36" />
-							<path d="m66 80 10 10 20-23" />
-							<text x="80" y="174" textAnchor="middle">
-								Read + run
-							</text>
-						</g>
-						<g className="ia-capability" opacity={role === 'Use' ? 0.3 : 1}>
-							<circle cx="280" cy="80" r="36" />
-							<path d="m265 94 6-18 18-18 12 12-18 18Z" />
-							<text x="280" y="174" textAnchor="middle">
-								Edit
-							</text>
-						</g>
-						<g className="ia-capability" opacity={role === 'Manage' ? 1 : 0.3}>
-							<circle cx="480" cy="80" r="36" />
-							<path d="M480 95V64m-12 12 12-12 12 12M464 97h32" />
-							<text x="480" y="174" textAnchor="middle">
-								Publish + access
-							</text>
-						</g>
-					</svg>
+					<AppsShareScene role={role} brief={props.preview} shot={shot} />
 					<p className="ia-note">
 						Package access does not reveal secret values.
 					</p>

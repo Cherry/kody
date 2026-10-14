@@ -1,8 +1,13 @@
 /** @jsxImportSource @emotion/react */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { AppsSharing } from './apps-sharing.tsx'
 import { AppsIntake, type Brief } from './apps-intake.tsx'
+import {
+	AppsHeroScene,
+	AppsReturnScene,
+	tomorrowBrief,
+} from './apps-scenes.tsx'
 import { FeatureRelated } from './feature-related.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
 const initialBrief: Brief = {
@@ -19,26 +24,41 @@ export function AppsFeature() {
 	const [opened, setOpened] = useState<Brief | undefined>()
 	const [saved, setSaved] = useState(false)
 	const [nextId, setNextId] = useState(1)
+	const [promptShot, setPromptShot] = useState(0)
+	const [saveShot, setSaveShot] = useState(0)
+	const [flyingName, setFlyingName] = useState(initialBrief.name)
+	const savedBriefHeading = useRef<HTMLHeadingElement>(null)
 	useEffect(() => {
-		if (view === 'detail')
-			document.getElementById('saved-brief-heading')?.focus()
+		if (view === 'detail') savedBriefHeading.current?.focus()
 	}, [view, opened])
 	function save() {
 		if (!draft.name.trim()) return
-		const accepted = { ...draft, name: draft.name.trim() }
-		setDraft(accepted)
+		const savedDraft = { ...draft, name: draft.name.trim() }
+		setDraft(savedDraft)
 		const exists = records.some((record) => record.id === draft.id)
 		setRecords(
 			exists
-				? records.map((record) => (record.id === draft.id ? accepted : record))
-				: [...records, accepted],
+				? records.map((record) =>
+						record.id === draft.id ? savedDraft : record,
+					)
+				: [...records, savedDraft],
 		)
-		setOpened(accepted)
+		setOpened(savedDraft)
 		setSaved(true)
+		setFlyingName(savedDraft.name)
+		setSaveShot((value) => value + 1)
 		setView('detail')
 	}
+	function showForm() {
+		setView('form')
+		setPromptShot((value) => value + 1)
+	}
+	function showRecords() {
+		setView('records')
+		setPromptShot((value) => value + 1)
+	}
 	function newBrief() {
-		setNextId((id) => id + 1)
+		setNextId((value) => value + 1)
 		setDraft({
 			id: nextId,
 			name: '',
@@ -98,78 +118,75 @@ export function AppsFeature() {
 					<span className="example">
 						Interactive demo, saved only in this page session
 					</span>
-					<div className="appwindow ui-window">
-						<div className="bar">
-							<span>
-								<span className="ui-browser-dots" aria-hidden="true">
-									● ● ●
-								</span>{' '}
-								project-intake
-							</span>
-							<span>Demo app</span>
-						</div>
-						<div className="appbody" id="intake-demo">
-							<div className="tabs" aria-label="Demo views">
-								<button
-									type="button"
-									aria-pressed={view === 'form'}
-									onClick={() => {
-										setView('form')
-									}}
-								>
-									Intake form
-								</button>
-								<button
-									type="button"
-									aria-pressed={view === 'records'}
-									onClick={() => {
-										setView('records')
-									}}
-								>
-									Saved briefs
-								</button>
+					<AppsHeroScene
+						promptShot={promptShot}
+						saveShot={saveShot}
+						count={records.length}
+						flyingName={flyingName}
+						formPressed={view === 'form'}
+						recordsPressed={view === 'records'}
+						onShowForm={showForm}
+						onShowRecords={showRecords}
+					>
+						{view === 'form' ? (
+							<AppsIntake
+								draft={draft}
+								onSave={save}
+								onChange={(next) => {
+									setDraft(next)
+								}}
+							/>
+						) : view === 'records' ? (
+							<div className="pw-apx-records">
+								<h3>Saved briefs</h3>
+								{recordList()}
 							</div>
-							{view === 'form' ? (
-								<AppsIntake
-									draft={draft}
-									onSave={save}
-									onChange={(next) => {
-										setDraft(next)
-									}}
-								/>
-							) : view === 'records' ? (
-								<div>
-									<h3>Saved briefs</h3>
-									{recordList()}
-								</div>
-							) : (
-								<div>
-									<h3 id="saved-brief-heading" tabIndex={-1}>
-										{draft.name}
-									</h3>
-									<p>
-										{draft.kind} · {draft.deadline}
-									</p>
-									<p>{draft.copy}</p>
-									<p role="status">
-										{saved ? 'Saved in this demo' : 'Example brief'}
-									</p>
+						) : (
+							<div className="pw-apx-detail">
+								<h3
+									ref={savedBriefHeading}
+									id="saved-brief-heading"
+									tabIndex={-1}
+								>
+									{draft.name}
+								</h3>
+								<p>
+									{draft.kind} · {draft.deadline}
+								</p>
+								<p>{draft.copy}</p>
+								<p role="status">
+									{saved ? 'Saved in this demo' : 'Example brief'}
+								</p>
+								<div className="pw-apx-actions">
 									<button
 										type="button"
 										className="run"
 										onClick={() => {
 											setView('form')
+											setPromptShot((value) => value + 1)
 										}}
 									>
 										Edit brief
 									</button>
-									<button type="button" className="run" onClick={newBrief}>
+									<button
+										type="button"
+										className="run"
+										onClick={() => {
+											setPromptShot((value) => value + 1)
+											newBrief()
+										}}
+									>
 										New brief
 									</button>
 								</div>
-							)}
-						</div>
-					</div>
+							</div>
+						)}
+					</AppsHeroScene>
+					<p className="visually-hidden" aria-live="polite">
+						{saveShot > 0
+							? `${flyingName} saved. ${records.length} in Saved briefs.`
+							: ''}
+					</p>
 				</div>
 			</div>
 			<section className="story-section">
@@ -190,48 +207,10 @@ export function AppsFeature() {
 						<SiteLink href="/docs/package-apps">How app data works ↗</SiteLink>
 					</div>
 					<div className="ia-return-scene">
-						<svg
-							className="ia-return-art"
-							viewBox="0 0 560 150"
-							aria-hidden="true"
-						>
-							<path d="M95 100C95 10 460 10 460 100" className="ia-track" />
-							<path
-								d="m444 85 16 17 15-18"
-								fill="none"
-								stroke="var(--accent)"
-								strokeWidth="3"
-							/>
-							<g transform="translate(68 70) rotate(-8)">
-								<rect
-									width="64"
-									height="77"
-									rx="6"
-									fill="var(--selected)"
-									stroke="var(--accent)"
-								/>
-								<path
-									d="M16 22h32M16 34h32M16 46h22"
-									stroke="var(--accent)"
-									strokeWidth="3"
-								/>
-							</g>
-							<g transform="translate(430 75) rotate(7)">
-								<rect
-									width="64"
-									height="77"
-									rx="6"
-									fill="var(--surface)"
-									stroke="var(--accent)"
-								/>
-								<path
-									d="m15 38 12 12 23-25"
-									fill="none"
-									stroke="var(--accent)"
-									strokeWidth="4"
-								/>
-							</g>
-						</svg>
+						<AppsReturnScene records={records} openedId={opened?.id} />
+						<p className="visually-hidden">
+							{`Tomorrow, ${records.map((record) => record.name).join(', ')} ${records.length === 1 ? 'is' : 'are'} still saved, and ${tomorrowBrief.name} was added.`}
+						</p>
 						<div className="ia-saved-head">
 							<h3>Saved briefs</h3>
 							<span>Page-session demo</span>
@@ -249,25 +228,28 @@ export function AppsFeature() {
 									{opened.kind} · {opened.deadline}
 								</p>
 								<p>{opened.copy}</p>
-								<button
-									type="button"
-									className="run"
-									onClick={() => {
-										if (opened) {
-											setDraft({ ...opened })
-											setView('form')
-										}
-									}}
-								>
-									Edit this brief
-								</button>
-								<SiteLink href="#intake-demo">Go to intake form ↑</SiteLink>
+								<div className="ia-record-actions">
+									<button
+										type="button"
+										className="run"
+										onClick={() => {
+											if (opened) {
+												setDraft({ ...opened })
+												setView('form')
+												setPromptShot((value) => value + 1)
+											}
+										}}
+									>
+										Edit this brief
+									</button>
+									<SiteLink href="#intake-demo">Go to intake form ↑</SiteLink>
+								</div>
 							</div>
 						)}
 					</div>
 				</div>
 			</section>
-			<AppsSharing />
+			<AppsSharing preview={opened ?? records[0] ?? initialBrief} />
 			<FeatureRelated
 				links={[
 					{ href: '/features/packages', label: 'Reusable packages' },

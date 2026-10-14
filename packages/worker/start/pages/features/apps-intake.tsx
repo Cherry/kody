@@ -14,6 +14,7 @@ export function AppsIntake(props: {
 	const { draft } = props
 	return (
 		<form
+			className="pw-apx-form"
 			onSubmit={(event) => {
 				event.preventDefault()
 				props.onSave()
@@ -29,7 +30,7 @@ export function AppsIntake(props: {
 						pattern={String.raw`.*\S.*`}
 						title="Enter a project name."
 						value={draft.name}
-						onInput={(event) => {
+						onChange={(event) => {
 							props.onChange({
 								...draft,
 								name: event.currentTarget.value,
@@ -82,7 +83,7 @@ export function AppsIntake(props: {
 					<br />
 					<textarea
 						value={draft.copy}
-						onInput={(event) => {
+						onChange={(event) => {
 							props.onChange({
 								...draft,
 								copy: event.currentTarget.value,
