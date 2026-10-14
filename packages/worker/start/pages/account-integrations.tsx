@@ -130,7 +130,7 @@ export function AccountIntegrationsPage({
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		router.navigate({ to: href, replace: true, resetScroll: false })
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const [disconnectArmed, setDisconnectArmed] = useState<string | null>(null)
 	const deleteAppConfirmation = {
@@ -588,7 +588,7 @@ export function AccountIntegrationsPage({
 								placeholder="Search names, hosts, or accounts"
 								value={search}
 								onInput={(value) => {
-									replaceLocation(buildHrefWithUpdatedSearch(value))
+									return replaceLocation(buildHrefWithUpdatedSearch(value))
 								}}
 							/>
 						}

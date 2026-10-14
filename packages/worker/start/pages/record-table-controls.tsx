@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import {
 	colors,
 	radius,
@@ -11,12 +11,6 @@ import {
 	getAuthInputCss,
 	getSelectCss,
 } from '#universal/styles/style-primitives.ts'
-import {
-	acknowledgeRecordTableSearchInput,
-	reconcileRecordTableSearchExternalValue,
-	writeUncontrolledSearchInput,
-	type RecordTableSearchSync,
-} from '#client/routes/record-table-search-sync.ts'
 
 type Slot = ReactNode
 
@@ -26,46 +20,32 @@ type Slot = ReactNode
  * they cost 48px, so the label becomes the control's accessible name.
  */
 
-/**
- * Live filter fields write the query into the URL on every keystroke. A
- * Remix-controlled `value` lets the first character schedule a restore of the
- * previous (empty) query, which drops focus. `type="search"` is worse: the
- * native cancel control appears on that same keystroke and steals focus even
- * when CSS tries to hide it. The field stays uncontrolled `type="text"` with
- * `role="searchbox"`. URL/back-button updates apply immediately when it is not
- * focused, and on blur if they arrived while it was. Focus is tracked from
- * focus/blur, not `document.activeElement` during render — Remix captures
- * selection before the render phase, so the input is often not active then
- * and a racy read would write the URL string back over the keystroke.
- */
+/** Keep typing immediate while the owning navigation commits its search value. */
 export function RecordTableSearch(props: {
 	label: string
 	placeholder: string
 	value: string
-	onInput: (value: string) => void
+	onInput: (value: string) => void | Promise<void>
 }) {
-	const input = useRef<HTMLInputElement>(null)
-	const focused = useRef(false)
-	const sync = useRef<RecordTableSearchSync>({
-		lastExternalValue: props.value,
-		pendingExternalValue: null,
-	})
-	function apply(value: string) {
-		writeUncontrolledSearchInput(input.current, value)
-		sync.current = acknowledgeRecordTableSearchInput(value)
+	const [draft, setDraft] = useState<string | null>(null)
+	const edit = useRef(0)
+	function update(value: string) {
+		const submitted = ++edit.current
+		setDraft(value)
+		const settled = () => {
+			if (edit.current === submitted) setDraft(null)
+		}
+		try {
+			const pending = props.onInput(value)
+			if (pending) void pending.then(settled, settled)
+			else settled()
+		} catch (error) {
+			settled()
+			throw error
+		}
 	}
-	useEffect(() => {
-		const next = reconcileRecordTableSearchExternalValue(
-			sync.current,
-			props.value,
-			focused.current,
-		)
-		sync.current = next.state
-		if (next.applyValue !== null) apply(next.applyValue)
-	}, [props.value])
 	return (
 		<input
-			ref={input}
 			type="text"
 			role="searchbox"
 			inputMode="search"
@@ -73,22 +53,10 @@ export function RecordTableSearch(props: {
 			autoCorrect="off"
 			spellCheck={false}
 			data-field-ring
-			defaultValue={props.value}
+			value={draft ?? props.value}
 			placeholder={props.placeholder}
 			aria-label={props.label}
-			onFocus={() => {
-				focused.current = true
-			}}
-			onInput={(event) => {
-				const value = event.currentTarget.value
-				sync.current = acknowledgeRecordTableSearchInput(value)
-				props.onInput(value)
-			}}
-			onBlur={() => {
-				focused.current = false
-				if (sync.current.pendingExternalValue !== null)
-					apply(sync.current.pendingExternalValue)
-			}}
+			onChange={(event) => update(event.currentTarget.value)}
 			css={{
 				...getAuthInputCss(),
 				appearance: 'none',

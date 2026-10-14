@@ -1,7 +1,7 @@
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import { useLocation, useRouteContext } from '@tanstack/react-router'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type AccountFormerEmail } from '#universal/loader-data.ts'
 import { readJson } from '#client/routes/account-approval-shared.ts'
 
@@ -15,8 +15,8 @@ export function useAccountEmailClaims(
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const href = useLocation({ select: (location) => location.href })
+	const { actorKey, pageLocation } = useMatchedPageScope()
+	const href = pageLocation.href
 	const scope = useRef<object | null>(null)
 	useEffect(() => {
 		scope.current = {}

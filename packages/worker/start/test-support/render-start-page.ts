@@ -23,7 +23,6 @@ export async function renderStartPage(
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	})
-	const searchStr = new URL(href, 'https://example.com').search
 	queryClient.setQueryData(['shell', null, ''], { session })
 	seedQueries?.(queryClient)
 	const root = createRootRouteWithContext<{
@@ -31,7 +30,12 @@ export async function renderStartPage(
 		actorKey: string | null
 	}>()({
 		beforeLoad: ({ location }) => ({ pageLocation: location }),
-		loader: () => ({ shellLocation: { searchStr } }),
+		loader: ({ location }) => ({
+			shellLocation: {
+				pathname: location.pathname,
+				searchStr: location.searchStr,
+			},
+		}),
 	})
 	const route = createRoute({
 		getParentRoute: () => root,

@@ -15,8 +15,6 @@ import { renderCredentialDetail } from './account-credential-detail.tsx'
 import {
 	credentialManageHref,
 	credentialsRoute,
-	readCredentialListFiltersFromHref,
-	writeCredentialListFilters,
 } from '#client/routes/account-credentials-shared.ts'
 import {
 	RecordTable,
@@ -37,6 +35,8 @@ import {
 	credentialKindLabel,
 	credentialStatusLabel,
 	filterCredentialList,
+	readCredentialListFilters,
+	writeCredentialListQuery,
 } from '#universal/credentials-list.ts'
 import { orgResourcePath } from '#universal/org-pages.ts'
 import {
@@ -202,17 +202,43 @@ export function AccountCredentialsRoute({
 	currentHref: string
 }) {
 	const router = useRouter()
+	function readFilters(search: Record<string, unknown>) {
+		const params = new URLSearchParams()
+		for (const [key, value] of Object.entries(search)) {
+			for (const item of Array.isArray(value) ? value : [value]) {
+				if (item !== undefined && item !== null)
+					params.append(key, String(item))
+			}
+		}
+		return readCredentialListFilters(params)
+	}
 	function updateFilters(
 		next: (current: CredentialListFilters) => CredentialListFilters,
 	) {
-		void router.navigate({
-			href: writeCredentialListFilters(
-				currentHref,
-				next(readCredentialListFiltersFromHref(currentHref)),
-			),
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		return router.navigate({
+			to: matchedUrl.pathname,
 			replace: true,
+			resetScroll: false,
+			search: (previous) => {
+				// Consecutive edits compose before navigation commits, but a retained
+				// toolbar cannot inherit another page's pending search or organization.
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: { ...router.options.parseSearch!(matchedUrl.search) }
+				const params = new URLSearchParams()
+				writeCredentialListQuery(params, next(readFilters(search)))
+				for (const key of ['q', 'kind', 'scope', 'packageScoped', 'locked']) {
+					const values = params.getAll(key)
+					if (!values.length) delete search[key]
+					else search[key] = values.length === 1 ? values[0] : values
+				}
+				return search
+			},
 		})
 	}
+
 	const pageUrl =
 		typeof window === 'undefined'
 			? currentHref
@@ -220,7 +246,11 @@ export function AccountCredentialsRoute({
 	const credentials = payload?.credentials ?? []
 	const packages = payload?.packages ?? []
 	const packagesById = new Map(packages.map((pkg) => [pkg.id, pkg]))
-	const filters = readCredentialListFiltersFromHref(currentHref)
+	const filters = readFilters(
+		router.options.parseSearch!(
+			new URL(currentHref, 'http://localhost').search,
+		),
+	)
 	const filtered = filterCredentialList(credentials, filters)
 	const orgSlug = payload?.orgSlug ?? ''
 	const teamOrg = payload?.teamOrg ?? false

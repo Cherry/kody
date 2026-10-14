@@ -331,13 +331,13 @@ test('switching orgs from Credentials loads the destination org, not the one you
 	await expect(page.getByText('personalOnlySecret')).toHaveCount(0)
 	const back = await openSwitcher(page)
 	await back.panel.getByTestId(`org-switcher-${user.username}`).click()
-	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/secrets$`))
+	await expect(page).toHaveURL(new RegExp(`/@${user.username}/-/credentials$`))
 	await expect(page.getByText('personalOnlySecret')).toBeVisible()
 	await page.goBack()
-	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}/-/secrets$`))
+	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}/-/credentials$`))
 	await expect(page.getByText('personalOnlySecret')).toHaveCount(0)
 	await expect(
-		page.getByText('No secrets yet.', { exact: false }),
+		page.getByText('No credentials yet.', { exact: false }),
 	).toBeVisible()
 })
 
@@ -381,16 +381,16 @@ test('the switcher keeps each org section and reads the destination org through 
 		expect(added.ok(), await added.text()).toBe(true)
 	}
 
-	// The switcher keeps the section. The router runs the loader before it
-	// commits the URL, so the server-function input must name the team page.
-	for (const section of [
-		'memories',
-		'workflows',
-		'waiting',
-		'webhooks',
-		'credentials',
-		'values',
-	]) {
+	// The switcher keeps the section. The destination loader must read the
+	// team page before Router renders it.
+	for (const [section, label] of [
+		['memories', 'Memories'],
+		['workflows', 'Workflows'],
+		['waiting', 'Waiting'],
+		['webhooks', 'Webhooks'],
+		['credentials', 'Credentials'],
+		['values', 'Values'],
+	] as const) {
 		await page.goto(`/@${user.username}/-/${section}`)
 		await waitForClientHydration(page)
 		const destination = `/@sections-${runId}/-/${section}`
@@ -404,24 +404,17 @@ test('the switcher keeps each org section and reads the destination org through 
 		expect(response.ok(), section).toBe(true)
 		const body = await response.text()
 		await expect(page.getByTestId('not-found-page')).toHaveCount(0)
-		const labels: Record<string, string> = {
-			memories: 'Memories',
-			workflows: 'Workflows',
-			waiting: 'Waiting',
-			webhooks: 'Webhooks',
-			'mcp-servers': 'MCP servers',
-			values: 'Values',
-		}
+
 		await expect(
 			page.getByRole('heading', {
 				level: 1,
-				name: labels[section],
+				name: label,
 				exact: true,
 			}),
 		).toBeVisible()
 		const sectionLink = page
 			.getByRole('navigation', { name: 'Workspace sections' })
-			.getByRole('link', { name: labels[section], exact: true })
+			.getByRole('link', { name: label, exact: true })
 		if (section === 'values') {
 			// The shared upstream rail intentionally omits the retiring Values
 			// primitive. Its existing URL still keeps org context and loads above.
@@ -436,12 +429,12 @@ test('the switcher keeps each org section and reads the destination org through 
 			await expect(
 				page
 					.getByRole('navigation', { name: 'Activity pages' })
-					.getByRole('link', { name: labels[section], exact: true }),
+					.getByRole('link', { name: label, exact: true }),
 			).toHaveAttribute('aria-current', 'page')
 		} else {
 			await expect(sectionLink).toHaveAttribute('aria-current', 'page')
 		}
-		if (section === 'mcp-servers') {
+		if (section === 'credentials') {
 			expect(body).toContain(teamServerName)
 			expect(body).not.toContain(personalServerName)
 			await expect(

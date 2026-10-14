@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, dehydrate } from '@tanstack/react-query'
+import { emailKeys } from './email-resources.ts'
 import { loadEmailResources } from './email-resource-queries.ts'
 import {
 	loadEmailList,
@@ -76,6 +77,23 @@ it('starts independent reads together and reuses list and destinations when sele
 		additionalRemaining: 3,
 	})
 	await first
+	// Router's loader fills the same Query cache used by SSR dehydration.
+	// Destinations must be included even before their UI is mounted.
+	expect(dehydrate(client).queries).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				queryKey: emailKeys.destinations('actor'),
+				state: expect.objectContaining({
+					data: {
+						ok: true,
+						destinations: [],
+						additionalLimit: 3,
+						additionalRemaining: 3,
+					},
+				}),
+			}),
+		]),
+	)
 	vi.mocked(loadEmailDetail).mockResolvedValue(null)
 	await loadEmailResources(
 		client,

@@ -6,11 +6,6 @@ import {
 	RecordTableSearch,
 	type RecordTableColumn,
 } from './pages/record-table.tsx'
-import {
-	acknowledgeRecordTableSearchInput,
-	reconcileRecordTableSearchExternalValue,
-	writeUncontrolledSearchInput,
-} from '#client/routes/record-table-search-sync.ts'
 
 const columns: Array<RecordTableColumn> = [
 	{ key: 'name', label: 'Name', primary: true },
@@ -186,59 +181,11 @@ test('record table keeps container drops, row links, and expand/pane selection c
 	expect(overflowHtml).toContain('overflow:clip')
 })
 
-test('record table search defers focused URL updates and drops a stale pending string', () => {
-	const empty = { lastExternalValue: '', pendingExternalValue: null }
-
-	// A keystroke is user-driven: the coming URL update must not become
-	// pending, or blur would overwrite whatever the reader typed next.
-	const typed = acknowledgeRecordTableSearchInput('ab')
-	expect(reconcileRecordTableSearchExternalValue(typed, 'ab', true)).toEqual({
-		state: { lastExternalValue: 'ab', pendingExternalValue: null },
-		applyValue: null,
-	})
-
-	// Clearing the field returns `q` to the last applied empty string.
-	// Without acknowledging the keystroke, pending would stay "ab" and
-	// blur would write that stale text back.
-	const cleared = acknowledgeRecordTableSearchInput('')
-	expect(reconcileRecordTableSearchExternalValue(cleared, '', true)).toEqual({
-		state: empty,
-		applyValue: null,
-	})
-	expect(
-		reconcileRecordTableSearchExternalValue(
-			{ lastExternalValue: '', pendingExternalValue: 'ab' },
-			'',
-			true,
-		),
-	).toEqual({
-		state: empty,
-		applyValue: null,
-	})
-
-	// Back-button while focused defers until blur; unfocused applies now.
-	expect(reconcileRecordTableSearchExternalValue(typed, '', true)).toEqual({
-		state: { lastExternalValue: 'ab', pendingExternalValue: '' },
-		applyValue: null,
-	})
-	expect(reconcileRecordTableSearchExternalValue(typed, '', false)).toEqual({
-		state: empty,
-		applyValue: '',
-	})
-})
-
-test('programmatic live-search resets write the uncontrolled input', () => {
-	const input = { value: 'src/auth' } as HTMLInputElement
-	writeUncontrolledSearchInput(input, '')
-	expect(input.value).toBe('')
-	writeUncontrolledSearchInput(null, 'ignored')
-})
-
-test('record table search stays an uncontrolled searchbox outside the filtered rows', async () => {
+test('record table search renders its initial value outside the filtered rows', async () => {
 	const toolbar = jsx(RecordTableSearch, {
 		label: 'Search secrets',
 		placeholder: 'Search secrets',
-		value: '',
+		value: 'api token',
 		onInput: () => {},
 	})
 	const withRows = await renderTable({
@@ -256,6 +203,7 @@ test('record table search stays an uncontrolled searchbox outside the filtered r
 
 	for (const html of [withRows, filteredEmpty]) {
 		expect(html).toContain('role="searchbox"')
+		expect(html).toContain('value="api token"')
 		expect(html).toContain('aria-label="Search secrets"')
 		expect(html).toContain('type="text"')
 		expect(html).toMatch(/inputmode="search"/i)

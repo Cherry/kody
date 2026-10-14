@@ -111,6 +111,7 @@ test('activation honors static, infinite and disabled observers and functional f
 			queryFn: read,
 			staleTime,
 			enabled,
+			meta: { actorKey: 'a' },
 			refetchOnMount: false,
 		})
 		unsubscribes.push(observer.subscribe(() => {}))

@@ -167,7 +167,7 @@ export function AccountMcpServersPage({
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		router.navigate({ to: href, replace: true, resetScroll: false })
 	useEffect(() => {
 		if (!closeOnboardingMcpOAuthPopupIfOpened())
 			clearOnboardingMcpOAuthReturnCookie()
@@ -411,7 +411,7 @@ export function AccountMcpServersPage({
 							placeholder="Search servers"
 							value={search}
 							onInput={(value) => {
-								replaceLocation(buildHrefWithUpdatedSearch(value))
+								return replaceLocation(buildHrefWithUpdatedSearch(value))
 							}}
 						/>
 					}

@@ -101,7 +101,7 @@ export function AccountValuesPage({
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		router.navigate({ to: href, replace: true, resetScroll: false })
 
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
 
@@ -246,7 +246,7 @@ export function AccountValuesPage({
 							placeholder="Search values"
 							value={search}
 							onInput={(value) => {
-								replaceLocation(buildHrefWithUpdatedSearch(value))
+								return replaceLocation(buildHrefWithUpdatedSearch(value))
 							}}
 						/>
 					}

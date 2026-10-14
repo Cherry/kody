@@ -2,12 +2,10 @@ import type * as CloudflareWorkers from 'cloudflare:workers'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { expect, test, vi } from 'vitest'
 import type * as EmailDestinations from '#worker/email/destinations.ts'
-import { QueryClient, dehydrate } from '@tanstack/react-query'
-import { loadEmailResources } from '../../../start/pages/email-resource-queries.ts'
 import {
-	emailKeys,
-	emailResourceInput,
-} from '../../../start/pages/email-resources.ts'
+	loadEmailList,
+	loadEmailDestinations,
+} from '../../../start/server/email.ts'
 import { loadAccountEmailData } from '#app/account-email-data.ts'
 import { requireAuthenticatedPageUser } from '#app/page-auth.ts'
 import {
@@ -52,7 +50,7 @@ vi.mock('#app/org-request-binding.ts', () => ({
 	isOrgRequestDenied: async () => false,
 }))
 
-test('email inbox SSR includes destinations and not just the message list', async () => {
+test('email server resources return independent message lists and actor destinations', async () => {
 	vi.mocked(requireAuthenticatedPageUser).mockResolvedValue({
 		sessionUserId: '42',
 		userId: 42,
@@ -98,24 +96,19 @@ test('email inbox SSR includes destinations and not just the message list', asyn
 		},
 	])
 
-	const client = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	})
-	await loadEmailResources(client, 'actor', '/account/email')
-	const response = {
-		payload: client.getQueryData(
-			emailKeys.list('actor', emailResourceInput('/account/email').list),
-		),
-		destinations: client.getQueryData(emailKeys.destinations('actor')),
-	}
-	expect(dehydrate(client).queries).toEqual(
-		expect.arrayContaining([
-			expect.objectContaining({
-				queryKey: emailKeys.destinations('actor'),
-				state: expect.objectContaining({ data: response.destinations }),
-			}),
-		]),
-	)
+	const [payload, destinations] = await Promise.all([
+		loadEmailList({
+			data: {
+				org: null,
+				query: '',
+				classification: null,
+				page: 1,
+				pageSize: 25,
+			},
+		}),
+		loadEmailDestinations(),
+	])
+	const response = { payload, destinations }
 	expect(response.payload).not.toHaveProperty('selectedMessage')
 	expect(response).toMatchObject({
 		payload: expect.objectContaining({
@@ -134,5 +127,4 @@ test('email inbox SSR includes destinations and not just the message list', asyn
 			additionalRemaining: maxAdditionalEmailNotificationDestinations,
 		},
 	})
-	client.clear()
 })

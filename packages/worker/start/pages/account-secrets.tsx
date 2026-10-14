@@ -153,7 +153,7 @@ export function AccountSecretsPage({
 			resetScroll: false,
 		})
 	const replaceLocation = (href: string) =>
-		void router.navigate({
+		router.navigate({
 			to: relocateAccountHref(href, currentHref),
 			replace: true,
 			resetScroll: false,
@@ -589,7 +589,9 @@ export function AccountSecretsPage({
 							placeholder="Search secrets"
 							value={filters.search}
 							onInput={(value) => {
-								replaceLocation(buildHrefWithUpdatedFilters({ search: value }))
+								return replaceLocation(
+									buildHrefWithUpdatedFilters({ search: value }),
+								)
 							}}
 						/>
 						<RecordTableSelect

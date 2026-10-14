@@ -61,6 +61,21 @@ test('job presentation filters reuse the same payload but selected records remai
 	await page.waitForLoadState('networkidle')
 	expect(reads).toEqual([])
 	expect(allReads).toEqual([])
+	const searchbox = page.getByRole('searchbox', {
+		name: 'Search jobs',
+		exact: true,
+	})
+	await expect(searchbox).toHaveValue('example')
+	await searchbox.focus()
+	await page.evaluate(
+		(href) => window.history.pushState(null, '', href),
+		`${resourcePath}?q=history&view=all`,
+	)
+	await expect(searchbox).toHaveValue('history')
+	await page.goBack()
+	await expect(searchbox).toHaveValue('example')
+	await page.goForward()
+	await expect(searchbox).toHaveValue('history')
 	await page.evaluate(
 		(href) => window.history.pushState(null, '', href),
 		`${resourcePath}?selected=missing-test-job`,

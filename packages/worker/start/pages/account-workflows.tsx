@@ -201,7 +201,7 @@ export function AccountWorkflowsPage({
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
+		router.navigate({ to: href, replace: true, resetScroll: false })
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
@@ -404,7 +404,7 @@ export function AccountWorkflowsPage({
 								placeholder="Search workflows"
 								value={search}
 								onInput={(value) => {
-									replaceLocation(
+									return replaceLocation(
 										buildHrefWithUpdatedFilters({ search: value }),
 									)
 								}}

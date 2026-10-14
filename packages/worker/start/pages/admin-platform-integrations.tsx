@@ -57,7 +57,7 @@ export function AdminPlatformIntegrationsPage(props: {
 	)
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
-		void router.navigate({ href, replace: true })
+		router.navigate({ href, replace: true })
 	const lifetime = useRef<AbortController | null>(null)
 	const readerRef = useRef<FileReader | null>(null)
 	useEffect(() => {
@@ -377,7 +377,7 @@ export function AdminPlatformIntegrationsPage(props: {
 								placeholder="Search slug, provider, or label"
 								value={search}
 								onInput={(value) => {
-									replaceLocation(
+									return replaceLocation(
 										buildHrefWithUpdatedSearch(currentHref, value),
 									)
 								}}

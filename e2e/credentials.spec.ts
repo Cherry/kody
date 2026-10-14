@@ -64,6 +64,25 @@ test('Credentials lists a key, filters by kind, and opens its detail pane withou
 		.getByRole('combobox', { name: 'Filter credentials by kind' })
 		.selectOption('secret')
 	await expect(row).toBeVisible()
+	// Do not wait for the search navigation before changing another filter.
+	await page
+		.getByLabel('Search credentials', { exact: true })
+		.pressSequentially('DEMO')
+	await page
+		.getByRole('combobox', { name: 'Filter credentials by kind' })
+		.selectOption('oauth')
+	await expect(page).toHaveURL(
+		(url) =>
+			url.searchParams.get('q') === 'DEMO' &&
+			url.searchParams.get('kind') === 'oauth',
+	)
+	await expect(row).toHaveCount(0)
+	await page
+		.getByRole('combobox', { name: 'Filter credentials by kind' })
+		.selectOption('secret')
+	await expect(row).toBeVisible()
+	await page.getByLabel('Search credentials', { exact: true }).fill('')
+	await expect(page).toHaveURL(/\/credentials\?kind=secret$/)
 	await expect(table).toHaveAttribute('data-filter-mount', 'same')
 	page.off('request', collectRequest)
 	expect(requests).toEqual([])
@@ -150,12 +169,24 @@ test('the creation link saves Key, URL, and login credentials from their prefill
 		'DIGEST_KEY is saved',
 	)
 	await expect(page.getByText(value)).toHaveCount(0)
-	await expect(page.getByTestId('connect-credential-approve')).toHaveAttribute(
-		'href',
-		new RegExp(
-			`^/@${user.username}/pr-digest/approve-credentials\\?mine%5Bemail%5D=id%3A[^&]+$`,
-		),
-	)
+	await expect
+		.poll(async () => {
+			const href = await page
+				.getByTestId('connect-credential-approve')
+				.getAttribute('href')
+			if (!href) return null
+			const url = new URL(href, page.url())
+			return {
+				origin: url.origin,
+				pathname: url.pathname,
+				params: [...url.searchParams],
+			}
+		})
+		.toEqual({
+			origin: new URL(page.url()).origin,
+			pathname: `/@${user.username}/pr-digest/approve-credentials`,
+			params: [['mine[email]', expect.stringMatching(/^id:[^&]+$/)]],
+		})
 
 	await page.getByRole('link', { name: 'View credential' }).click()
 	const pane = page.getByRole('region', { name: 'DIGEST_KEY details' })

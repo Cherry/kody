@@ -183,7 +183,7 @@ export function AccountMemoriesPage({
 			resetScroll: false,
 		})
 	const replaceLocation = (href: string) =>
-		void router.navigate({
+		router.navigate({
 			to: relocateAccountHref(href, currentHref),
 			replace: true,
 			resetScroll: false,
@@ -324,7 +324,7 @@ export function AccountMemoriesPage({
 									placeholder="Search subject, category, tags, summary"
 									value={search}
 									onInput={(value) => {
-										replaceLocation(
+										return replaceLocation(
 											buildHrefWithUpdatedParams({ search: value }),
 										)
 									}}

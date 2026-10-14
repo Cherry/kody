@@ -68,7 +68,7 @@ export function AdminUsersPage(props: {
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
-		void router.navigate({ href, replace: true })
+		router.navigate({ href, replace: true })
 	const client = useQueryClient()
 	const activeScope = useRef<object | null>(null)
 	useEffect(() => {
@@ -617,7 +617,9 @@ export function AdminUsersPage(props: {
 							placeholder="Search by username or email"
 							value={filters.search}
 							onInput={(value) => {
-								replaceLocation(buildHrefWithUpdatedFilters({ search: value }))
+								return replaceLocation(
+									buildHrefWithUpdatedFilters({ search: value }),
+								)
 							}}
 						/>
 						<RecordTableSelect

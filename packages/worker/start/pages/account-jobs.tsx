@@ -67,8 +67,6 @@ export function AccountJobsPage({
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
-	const replaceLocation = (href: string) =>
-		void router.navigate({ to: href, replace: true, resetScroll: false })
 
 	function getCurrentHref() {
 		return currentHref
@@ -78,18 +76,34 @@ export function AccountJobsPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedFilters(next: {
+	function updateFilters(next: {
 		search?: string
 		view?: AccountJobsViewFilter
 	}) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		const search = next.search ?? nextUrl.searchParams.get('q')?.trim() ?? ''
-		const view = next.view ?? readJobsViewFilter(nextUrl.href)
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		if (view === 'active') nextUrl.searchParams.delete('view')
-		else nextUrl.searchParams.set('view', view)
-		return `${nextUrl.pathname}${nextUrl.search}`
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		// Compose consecutive filter edits from Router's latest search, even
+		// before the previous navigation commits. Pin the destination to this
+		// rendered page so a retained toolbar cannot edit a different page.
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		void router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous) => {
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				if (next.search !== undefined) {
+					if (next.search) search.q = next.search
+					else delete search.q
+				}
+				if (next.view !== undefined) {
+					if (next.view === 'active') delete search.view
+					else search.view = next.view
+				}
+				return search
+			},
+		})
 	}
 
 	function showMessage(nextMessage: string | null, tone: MessageTone = 'info') {
@@ -276,9 +290,7 @@ export function AccountJobsPage({
 								placeholder="Search jobs"
 								value={search}
 								onInput={(value) => {
-									replaceLocation(
-										buildHrefWithUpdatedFilters({ search: value }),
-									)
+									return updateFilters({ search: value })
 								}}
 							/>
 							<RecordTableSelect
@@ -292,7 +304,7 @@ export function AccountJobsPage({
 									) {
 										return
 									}
-									replaceLocation(buildHrefWithUpdatedFilters({ view: value }))
+									updateFilters({ view: value })
 								}}
 							>
 								{viewFilterOptions.map((option) => (

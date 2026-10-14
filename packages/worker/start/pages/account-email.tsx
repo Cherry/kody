@@ -118,12 +118,6 @@ export function AccountEmailPage({
 			to: relocateAccountHref(href, currentHref),
 			resetScroll: false,
 		})
-	const replaceLocation = (href: string) =>
-		void router.navigate({
-			to: relocateAccountHref(href, currentHref),
-			replace: true,
-			resetScroll: false,
-		})
 
 	const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 
@@ -135,27 +129,45 @@ export function AccountEmailPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedSearch(search: string) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		nextUrl.searchParams.delete('page')
-		return `${nextUrl.pathname}${nextUrl.search}`
-	}
-
-	function buildHrefWithPage(page: number) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (page > 1) nextUrl.searchParams.set('page', String(page))
-		else nextUrl.searchParams.delete('page')
-		return `${nextUrl.pathname}${nextUrl.search}`
-	}
-
-	function buildHrefWithClassification(filter: ClassificationFilter) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (filter === 'all') nextUrl.searchParams.delete('classification')
-		else nextUrl.searchParams.set('classification', filter)
-		nextUrl.searchParams.delete('page')
-		return `${nextUrl.pathname}${nextUrl.search}`
+	function updateFilters(next: {
+		query?: string
+		classification?: ClassificationFilter
+		pageDelta?: number
+	}) {
+		const matchedUrl = new URL(currentHref, 'http://localhost')
+		// Consecutive edits compose before the prior read settles, but a
+		// retained inbox cannot borrow search from a different destination.
+		const samePage = router.latestLocation.pathname === matchedUrl.pathname
+		void router.navigate({
+			to: matchedUrl.pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous) => {
+				const search: Record<string, unknown> = samePage
+					? { ...previous }
+					: Object.fromEntries(matchedUrl.searchParams)
+				if (next.query !== undefined) {
+					if (next.query) search.q = next.query
+					else delete search.q
+					delete search.page
+				}
+				if (next.classification !== undefined) {
+					if (next.classification === 'all') delete search.classification
+					else search.classification = next.classification
+					delete search.page
+				}
+				if (next.pageDelta !== undefined) {
+					const previousPage = Number.parseInt(String(search.page ?? 1), 10)
+					const page = Math.max(
+						1,
+						(Number.isFinite(previousPage) ? previousPage : 1) + next.pageDelta,
+					)
+					if (page > 1) search.page = page
+					else delete search.page
+				}
+				return search
+			},
+		})
 	}
 
 	const resendMutation = useMutation({
@@ -425,18 +437,17 @@ export function AccountEmailPage({
 									placeholder="Search subject or from"
 									value={searchQuery}
 									onInput={(value) => {
-										replaceLocation(buildHrefWithUpdatedSearch(value))
+										return updateFilters({ query: value })
 									}}
 								/>
 								<RecordTableSelect
 									label="Filter messages by classification"
 									value={classificationFilter}
 									onChange={(value) => {
-										replaceLocation(
-											buildHrefWithClassification(
+										updateFilters({
+											classification:
 												value === 'quarantined' ? 'quarantined' : 'all',
-											),
-										)
+										})
 									}}
 								>
 									<option value="all">All messages</option>
@@ -509,7 +520,7 @@ export function AccountEmailPage({
 										type="button"
 										disabled={currentPage <= 1}
 										onClick={() => {
-											replaceLocation(buildHrefWithPage(currentPage - 1))
+											updateFilters({ pageDelta: -1 })
 										}}
 										css={secondaryButtonCss}
 									>
@@ -528,7 +539,7 @@ export function AccountEmailPage({
 										type="button"
 										disabled={currentPage >= totalPages}
 										onClick={() => {
-											replaceLocation(buildHrefWithPage(currentPage + 1))
+											updateFilters({ pageDelta: 1 })
 										}}
 										css={secondaryButtonCss}
 									>
