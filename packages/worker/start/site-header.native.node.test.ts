@@ -56,7 +56,9 @@ test('logged-in header has only the account menu; the org switcher lives in the 
 	expect(html).not.toContain('>Create organization<')
 	expect(html).toContain('aria-label="Ada Lovelace: your account"')
 	// The avatar is the only session control in the header.
-	expect(html.match(/avatar\/abc\.jpg/g)).toHaveLength(1)
+	expect(
+		html.match(/<img\b[^>]*\bsrc="\/profiles\/ada\/avatar\/abc\.jpg"[^>]*>/g),
+	).toHaveLength(1)
 	const accountPanel = html.slice(
 		html.indexOf('data-testid="account-menu-panel"'),
 		html.indexOf('data-testid="site-menu-account"'),

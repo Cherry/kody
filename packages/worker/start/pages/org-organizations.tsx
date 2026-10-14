@@ -1,4 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import {
+	getHandleFormatError,
+	handleFormatHint,
+	suggestHandle,
+} from '@kody-internal/shared/handle-rules.ts'
+import { permanentHandleInputProps } from '#client/handle-field.ts'
 import { useServerFn } from '@tanstack/react-start'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
@@ -107,6 +113,11 @@ function CreateOrganizationForm() {
 	const [slug, setSlug] = useState(draft.get('slug') ?? '')
 	const [slugEdited, setSlugEdited] = useState(Boolean(draft.get('slug')))
 	const [confirming, setConfirming] = useState(false)
+	const [clientError, setClientError] = useState<{
+		message: string
+		field: 'displayName' | 'slug'
+	} | null>(null)
+	const formErrorId = 'create-organization-form-error'
 	const createOrganization = useServerFn(createOrg)
 	const mutation = useMutation({
 		mutationFn: ({
@@ -124,6 +135,16 @@ function CreateOrganizationForm() {
 			])
 		},
 	})
+	const formError =
+		clientError?.message ?? mutation.error?.message ?? draft.get('error')
+	const slugInvalid =
+		clientError?.field === 'slug' ||
+		Boolean(
+			formError &&
+			!clientError &&
+			/(handle|slug|taken|reserved)/i.test(formError),
+		)
+
 	return (
 		<AccountManagementShell
 			currentHref="/account/organizations/new"
@@ -134,17 +155,38 @@ function CreateOrganizationForm() {
 				description="An organization owns its own packages, secrets, and members, separate from your personal account."
 				currentHref="/account/organizations/new"
 			/>
-			{mutation.error || draft.get('error') ? (
+			{formError ? (
 				<AccountManagementMessage tone="error">
-					{mutation.error?.message ?? draft.get('error')}
+					<span id={formErrorId}>
+						{clientError?.message ??
+							mutation.error?.message ??
+							draft.get('error')}
+					</span>
 				</AccountManagementMessage>
 			) : null}
 			<AccountManagementPanel title="Details">
 				<form
 					data-testid="create-organization-form"
+					noValidate
 					onSubmit={(event) => {
 						event.preventDefault()
 						if (mutation.isPending) return
+						const name = displayName.trim()
+						if (!name || name.length > 80) {
+							setClientError({
+								message: 'Enter a name up to 80 characters.',
+								field: 'displayName',
+							})
+							setConfirming(false)
+							return
+						}
+						const error = getHandleFormatError(slug.trim(), { label: 'Handle' })
+						if (error) {
+							setClientError({ message: error, field: 'slug' })
+							setConfirming(false)
+							return
+						}
+						setClientError(null)
 						if (!confirming) {
 							setConfirming(true)
 							return
@@ -168,6 +210,10 @@ function CreateOrganizationForm() {
 							data-field-ring
 							css={accountInputCss}
 							name="displayName"
+							aria-invalid={clientError?.field === 'displayName' || undefined}
+							aria-describedby={
+								clientError?.field === 'displayName' ? formErrorId : undefined
+							}
 							required
 							maxLength={80}
 							autoComplete="organization"
@@ -175,6 +221,7 @@ function CreateOrganizationForm() {
 							onChange={(event) => {
 								const name = event.currentTarget.value
 								setDisplayName(name)
+								setClientError(null)
 								if (!slugEdited) {
 									setSlug(slugFromName(name))
 									setConfirming(false)
@@ -194,26 +241,29 @@ function CreateOrganizationForm() {
 							<input
 								data-field-ring
 								css={slugInputCss}
-								aria-describedby="create-organization-slug-note"
+								aria-describedby={[
+									'create-organization-slug-note',
+									slugInvalid ? formErrorId : null,
+								]
+									.filter(Boolean)
+									.join(' ')}
+								aria-invalid={slugInvalid || undefined}
 								name="slug"
 								value={slug}
 								onChange={(event) => {
+									setClientError(null)
 									setSlugEdited(event.currentTarget.value.length > 0)
 									setSlug(event.currentTarget.value.toLowerCase())
 									setConfirming(false)
 								}}
-								minLength={3}
-								maxLength={32}
-								pattern="[a-z0-9][a-z0-9\-]{1,30}[a-z0-9]"
-								autoCapitalize="none"
+								{...permanentHandleInputProps()}
 								autoComplete="off"
-								spellCheck={false}
 								required
 							/>
 						</span>
 						<p id="create-organization-slug-note" css={accountFieldNoteCss}>
-							3 to 32 letters, numbers, and hyphens. {handlePermanentNote} Your
-							organization's URL will be{' '}
+							{handleFormatHint} {handlePermanentNote} Your organization's URL
+							will be{' '}
 							<strong data-testid="create-organization-url-preview">
 								{handleUrlPreview(slug || 'your-handle')}
 							</strong>
@@ -257,14 +307,7 @@ function CreateOrganizationForm() {
 }
 
 function slugFromName(name: string) {
-	return name
-		.toLowerCase()
-		.normalize('NFKD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '')
-		.slice(0, 32)
-		.replace(/-+$/g, '')
+	return suggestHandle(name) ?? ''
 }
 
 type OrgViewer = { displayName: string; avatarUrl: string | null }

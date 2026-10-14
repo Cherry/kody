@@ -39,6 +39,9 @@ badges), `/@username/:kodyId/tree/:ref` (**Files** tab),
 `/@username/:kodyId/assets/…` (README-relative images from the published or
 pinned commit), `/@username/:kodyId/settings` (**Settings** tab for packages:
 lock, forkable visibility, internet-visible, webhooks, delete),
+`/@username/:kodyId/collaborators` (**Collaborators** tab, shown only with
+`package:manage_access`: teams, org members, and outside collaborators with
+their preset; add, change preset, remove, invite, revoke invite),
 `/@username/:kodyId/approve-publish` (published-vs-HEAD review), and
 `/@username/:kodyId/approve-capabilities` (credential/capability summary before
 internet-visible). Opening an allowlisted image or video in the tree renders a
@@ -74,8 +77,10 @@ fixtures use `control-kody execute` / `search` against the same origin.
 
 ## Transport
 
-Package reads, settings, and approvals use native Start server functions. Raw
-files, assets, and icons remain HTTP resources:
+Package reads, settings, approvals, and Collaborators use native Start server
+functions. Collaborator changes require `package:manage_access` and support
+granting or revoking access and sending or revoking invitations. Raw files,
+assets, and icons remain HTTP resources:
 
 - `GET /@:username/:kodyId/icon/:iconCommit`
 - `GET /account/repos/:repoId/icon/:iconCommit`

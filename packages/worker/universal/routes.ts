@@ -155,6 +155,9 @@ export const routes = route({
 	communityPackageCredentials: '/@:username/:kodyId/credentials',
 	communityPackageMappings: '/@:username/:kodyId/mappings',
 	communityPackageTriggers: '/@:username/:kodyId/triggers',
+	// Package Collaborators tab (people with package:manage_access); data comes
+	// from its native Start server function.
+	communityPackageCollaborators: '/@:username/:kodyId/collaborators',
 	// Bundled credential mapping approval; the query is the proposal
 	// (buildCredentialApprovalHref). Start loads the approval view.
 	communityPackageApproveCredentials: '/@:username/:kodyId/approve-credentials',

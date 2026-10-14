@@ -146,6 +146,7 @@ function PackageFilesExplorerContent({
 					hasPackage: data.hasPackage,
 					viewerIsOwner: data.viewerIsOwner ?? false,
 					viewerCanManage: data.viewerCanManage ?? false,
+					viewerCanManageAccess: data.viewerCanManageAccess,
 					active: 'files',
 					actions: renderPackageRepoActions(data.repoActions ?? null),
 					filesHref: data.filesBasePath,

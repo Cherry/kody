@@ -3,6 +3,9 @@ import {
 	handlePermanentNote,
 	handleUrlPreview,
 } from '@kody-internal/shared/handle-permanence.ts'
+import { handleFormatHint } from '@kody-internal/shared/handle-rules.ts'
+import { minPasswordLength } from '@kody-internal/shared/password-policy.ts'
+import { permanentHandleInputProps } from '#client/handle-field.ts'
 import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, type FormEvent } from 'react'
@@ -138,6 +141,7 @@ export function AuthForm(
 		isSignup: boolean
 		signupUsername: string
 		onSignupUsernameInput: (value: string) => void
+		onSignupUsernameBlur?: (value: string) => void
 		submitLabel: string
 		submitBusyLabel: string
 		onSubmit: (event: FormEvent<HTMLFormElement>) => void
@@ -157,6 +161,7 @@ export function AuthForm(
 			data-rise
 			method="post"
 			action="/auth"
+			noValidate
 			style={{ '--rise': '1' } as CSSProperties}
 			css={authFormCss}
 			onSubmit={props.onSubmit}
@@ -191,11 +196,13 @@ export function AuthForm(
 						required
 						autoFocus
 						autoComplete="username"
-						pattern={'[A-Za-z0-9][A-Za-z0-9\\-]{1,30}[A-Za-z0-9]'}
-						title="Use 3 to 32 letters, numbers, and hyphens. Start and end with a letter or number."
 						placeholder="kent"
 						data-field-ring
+						{...permanentHandleInputProps({ caseInsensitivePattern: true })}
 						{...fieldErrorProps('username', invalidFields, statusId)}
+						onBlur={(event) =>
+							props.onSignupUsernameBlur?.(event.currentTarget.value)
+						}
 						aria-describedby={[
 							usernameNoteId,
 							fieldErrorProps('username', invalidFields, statusId)[
@@ -217,7 +224,7 @@ export function AuthForm(
 							color: colors.textMuted,
 						}}
 					>
-						{handlePermanentNote} Your profile URL will be{' '}
+						{handleFormatHint} {handlePermanentNote} Your profile URL will be{' '}
 						<strong>
 							{handleUrlPreview(
 								props.signupUsername.trim().toLowerCase() || 'your-username',
@@ -270,8 +277,13 @@ export function AuthForm(
 					id={`${props.handleId}-password`}
 					name="password"
 					required
+					minLength={props.isSignup ? minPasswordLength : undefined}
 					autoComplete={props.isSignup ? 'new-password' : 'current-password'}
-					placeholder={props.isSignup ? 'At least 8 characters' : undefined}
+					placeholder={
+						props.isSignup
+							? `At least ${minPasswordLength} characters`
+							: undefined
+					}
 					data-field-ring
 					{...fieldErrorProps('password', invalidFields, statusId)}
 					css={authInputCss}

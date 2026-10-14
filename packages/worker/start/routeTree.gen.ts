@@ -166,6 +166,7 @@ import { Route as AtChar123orgSlugChar125WorkflowsRouteImport } from './routes/@
 import { Route as AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport } from './routes/@{$username}_.$kodyId_.approve-capabilities'
 import { Route as AtChar123usernameChar125KodyIdApproveCredentialsRouteImport } from './routes/@{$username}_.$kodyId_.approve-credentials'
 import { Route as AtChar123usernameChar125KodyIdApprovePublishRouteImport } from './routes/@{$username}_.$kodyId_.approve-publish'
+import { Route as AtChar123usernameChar125KodyIdCollaboratorsRouteImport } from './routes/@{$username}_.$kodyId_.collaborators'
 import { Route as AtChar123usernameChar125KodyIdCredentialsRouteImport } from './routes/@{$username}_.$kodyId_.credentials'
 import { Route as AtChar123usernameChar125KodyIdMappingsRouteImport } from './routes/@{$username}_.$kodyId_.mappings'
 import { Route as AtChar123usernameChar125KodyIdSettingsRouteImport } from './routes/@{$username}_.$kodyId_.settings'
@@ -1087,6 +1088,12 @@ const AtChar123usernameChar125KodyIdApprovePublishRoute =
     path: '/@{$username}/$kodyId/approve-publish',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125KodyIdCollaboratorsRoute =
+  AtChar123usernameChar125KodyIdCollaboratorsRouteImport.update({
+    id: '/@{$username}_/$kodyId_/collaborators',
+    path: '/@{$username}/$kodyId/collaborators',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdCredentialsRoute =
   AtChar123usernameChar125KodyIdCredentialsRouteImport.update({
     id: '/@{$username}_/$kodyId_/credentials',
@@ -1763,6 +1770,7 @@ export interface FileRoutesByFullPath {
   '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}/$kodyId/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}/$kodyId/collaborators': typeof AtChar123usernameChar125KodyIdCollaboratorsRoute
   '/@{$username}/$kodyId/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
   '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
@@ -2011,6 +2019,7 @@ export interface FileRoutesByTo {
   '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}/$kodyId/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}/$kodyId/collaborators': typeof AtChar123usernameChar125KodyIdCollaboratorsRoute
   '/@{$username}/$kodyId/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
   '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
@@ -2261,6 +2270,7 @@ export interface FileRoutesById {
   '/@{$username}_/$kodyId_/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   '/@{$username}_/$kodyId_/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}_/$kodyId_/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}_/$kodyId_/collaborators': typeof AtChar123usernameChar125KodyIdCollaboratorsRoute
   '/@{$username}_/$kodyId_/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
   '/@{$username}_/$kodyId_/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}_/$kodyId_/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
@@ -2512,6 +2522,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/approve-capabilities'
     | '/@{$username}/$kodyId/approve-credentials'
     | '/@{$username}/$kodyId/approve-publish'
+    | '/@{$username}/$kodyId/collaborators'
     | '/@{$username}/$kodyId/credentials'
     | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
@@ -2760,6 +2771,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/approve-capabilities'
     | '/@{$username}/$kodyId/approve-credentials'
     | '/@{$username}/$kodyId/approve-publish'
+    | '/@{$username}/$kodyId/collaborators'
     | '/@{$username}/$kodyId/credentials'
     | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
@@ -3009,6 +3021,7 @@ export interface FileRouteTypes {
     | '/@{$username}_/$kodyId_/approve-capabilities'
     | '/@{$username}_/$kodyId_/approve-credentials'
     | '/@{$username}_/$kodyId_/approve-publish'
+    | '/@{$username}_/$kodyId_/collaborators'
     | '/@{$username}_/$kodyId_/credentials'
     | '/@{$username}_/$kodyId_/mappings'
     | '/@{$username}_/$kodyId_/settings'
@@ -3255,6 +3268,7 @@ export interface RootRouteChildren {
   AtChar123usernameChar125KodyIdApproveCapabilitiesRoute: typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
   AtChar123usernameChar125KodyIdApproveCredentialsRoute: typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   AtChar123usernameChar125KodyIdApprovePublishRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  AtChar123usernameChar125KodyIdCollaboratorsRoute: typeof AtChar123usernameChar125KodyIdCollaboratorsRoute
   AtChar123usernameChar125KodyIdCredentialsRoute: typeof AtChar123usernameChar125KodyIdCredentialsRoute
   AtChar123usernameChar125KodyIdMappingsRoute: typeof AtChar123usernameChar125KodyIdMappingsRoute
   AtChar123usernameChar125KodyIdSettingsRoute: typeof AtChar123usernameChar125KodyIdSettingsRoute
@@ -4443,6 +4457,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$username}_/$kodyId_/collaborators': {
+      id: '/@{$username}_/$kodyId_/collaborators'
+      path: '/@{$username}/$kodyId/collaborators'
+      fullPath: '/@{$username}/$kodyId/collaborators'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdCollaboratorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId_/credentials': {
       id: '/@{$username}_/$kodyId_/credentials'
       path: '/@{$username}/$kodyId/credentials'
@@ -5291,6 +5312,8 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123usernameChar125KodyIdApproveCredentialsRoute,
   AtChar123usernameChar125KodyIdApprovePublishRoute:
     AtChar123usernameChar125KodyIdApprovePublishRoute,
+  AtChar123usernameChar125KodyIdCollaboratorsRoute:
+    AtChar123usernameChar125KodyIdCollaboratorsRoute,
   AtChar123usernameChar125KodyIdCredentialsRoute:
     AtChar123usernameChar125KodyIdCredentialsRoute,
   AtChar123usernameChar125KodyIdMappingsRoute:

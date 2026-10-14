@@ -1,4 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { getHandleFormatError } from '@kody-internal/shared/handle-rules.ts'
+import { validateAuthFormFields } from '#client/auth-form-validation.ts'
+import { invalidFieldsForMessage } from '#client/form-error-fields.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
 import { fathomEventNames, trackFathomEvent } from '#client/fathom-events.ts'
 import {
@@ -70,6 +73,7 @@ export function LoginPage({
 	const [status, setStatus] = useState<AuthStatus>('idle')
 	const [message, setMessage] = useState<string | null>(null)
 	const [signupUsername, setSignupUsername] = useState('')
+	const usernameFormatLive = useRef(false)
 	const [confirmedUsername, setConfirmedUsername] = useState<string | null>(
 		null,
 	)
@@ -131,12 +135,16 @@ export function LoginPage({
 		const rememberMe = mode === 'login' && formData.get('rememberMe') === 'on'
 		const protection = readPublicFormProtection(formData, form)
 
-		if (!email || !password) {
-			setState('error', 'Email and password are required.')
-			return
-		}
-		if (mode === 'signup' && !username) {
-			setState('error', 'Username is required.')
+		const clientValidation = validateAuthFormFields({
+			mode,
+			email,
+			password,
+			username,
+		})
+		if (clientValidation) {
+			if (clientValidation.field === 'username')
+				usernameFormatLive.current = true
+			setState('error', clientValidation.message)
 			return
 		}
 
@@ -368,13 +376,35 @@ export function LoginPage({
 						onSignupUsernameInput={(value) => {
 							setSignupUsername(value)
 							setConfirmedUsername(null)
-							setState('idle')
+							const error = usernameFormatLive.current
+								? getHandleFormatError(value)
+								: null
+							setState(error ? 'error' : 'idle', error)
 						}}
 						submitLabel={submitLabel}
 						submitBusyLabel={submitBusyLabel}
 						onSubmit={handleSubmit}
 						onPasskeySignIn={handlePasskeySignIn}
-						onFieldEdit={clearFieldError}
+						onFieldEdit={() => {
+							if (
+								mode === 'signup' &&
+								usernameFormatLive.current &&
+								getHandleFormatError(signupUsername)
+							)
+								return
+							clearFieldError()
+						}}
+						onSignupUsernameBlur={(value) => {
+							setSignupUsername(value)
+							usernameFormatLive.current = true
+							const error = getHandleFormatError(value)
+							if (error) setState('error', error)
+							else if (
+								status === 'error' &&
+								invalidFieldsForMessage('error', message, []).has('username')
+							)
+								clearFieldError()
+						}}
 					/>
 
 					{showSocial ? (

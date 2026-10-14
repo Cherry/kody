@@ -62,6 +62,7 @@ export function PackageSettingsRoute({
 				isListed: ownerPackage.hasCommunityListing,
 				viewerIsOwner: data.viewerIsOwner,
 				viewerCanManage: data.viewerCanManage,
+				viewerCanManageAccess: data.viewerCanManageAccess,
 				active: 'settings',
 				actions: renderPackageRepoActions(data.repoActions ?? null),
 				filesHref: getPackageTreeHref({

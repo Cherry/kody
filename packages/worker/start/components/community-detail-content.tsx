@@ -43,6 +43,7 @@ export type CommunityDetailContentProps = {
 	ownerProfilePublic: boolean
 	viewerIsOwner: boolean
 	viewerCanManage: boolean
+	viewerCanManageAccess?: boolean
 	repoActions: PackageRepoActions | null
 	treeRef?: string
 	/** Defaults to true. Plain repos pass false for the Repo mark. */
@@ -65,6 +66,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		ownerProfilePublic,
 		viewerIsOwner,
 		viewerCanManage,
+		viewerCanManageAccess,
 		repoActions,
 		treeRef,
 		hasPackage,
@@ -92,6 +94,7 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 				hasPackage: isPackage,
 				viewerIsOwner,
 				viewerCanManage,
+				viewerCanManageAccess,
 				active: 'repo',
 				filesHref,
 				description,

@@ -47,6 +47,7 @@ export function hasPendingPageMutation(
 		loadSecretProvidersPage: ['secretProviders'],
 		loadIntegrationsPage: ['integrations'],
 		loadPackageWebhooks: ['packageWebhooks'],
+		loadPackageCollaborators: ['packageCollaborators'],
 	}
 	return (
 		typeof resource === 'string' &&
@@ -59,7 +60,8 @@ export function hasPendingPageMutation(
 							return true
 						const key = options.mutationKey
 						if (
-							mutation === 'packageWebhooks' &&
+							(mutation === 'packageWebhooks' ||
+								mutation === 'packageCollaborators') &&
 							input &&
 							typeof input === 'object' &&
 							'username' in input &&

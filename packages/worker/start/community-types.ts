@@ -14,6 +14,7 @@ export type CommunityDetailApiPayload = {
 	viewerIsAdmin: boolean
 	viewerIsOwner: boolean
 	viewerCanManage: boolean
+	viewerCanManageAccess?: boolean
 	viewerCanPublish?: boolean
 	viewerCanDelete?: boolean
 	viewerCanAdoptCommunityFork?: boolean

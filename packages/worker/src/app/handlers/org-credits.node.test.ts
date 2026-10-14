@@ -45,7 +45,8 @@ vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => mocks.request,
 	setResponseHeader: vi.fn(),
 }))
-vi.mock('cloudflare:workers', () => ({
+vi.mock('cloudflare:workers', async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
 	get env() {
 		return mocks.env
 	},

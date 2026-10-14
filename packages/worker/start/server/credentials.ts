@@ -163,6 +163,7 @@ export const loadPackageCredentialsPage = createServerFn({ method: 'GET' })
 				publishedCommit: page.ownerPackage.publishedCommit ?? null,
 				ownerProfilePublic: page.ownerProfilePublic,
 				viewerCanManage: page.viewerCanManage,
+				viewerCanManageAccess: page.viewerCanManageAccess,
 			},
 			view,
 			viewError: view

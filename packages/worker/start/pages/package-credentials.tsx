@@ -117,6 +117,7 @@ export function PackageCredentialsRoute({
 				isListed: shell?.isListed ?? false,
 				viewerIsOwner: true,
 				viewerCanManage: shell?.viewerCanManage ?? false,
+				viewerCanManageAccess: shell?.viewerCanManageAccess ?? false,
 				active: path.tab,
 				filesHref: getPackageTreeHref({
 					username,

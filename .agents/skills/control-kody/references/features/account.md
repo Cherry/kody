@@ -43,7 +43,7 @@ otherwise it opens that org's workspace home (`workspaceSwitchHref`). Below
 860px the same switcher is the first item in the rail's `<details>` drawer
 (`org-switcher-drawer`, panel `org-switcher-drawer-panel`). The account rail has
 no switcher; its Workspaces group lists every org. Source:
-`packages/worker/client/workspace-switcher.tsx`.
+`packages/worker/start/components/workspace-switcher.tsx`.
 
 The site header has one session control, the account menu
 (`data-testid="account-menu"`, panel `account-menu-panel`): the person's avatar,

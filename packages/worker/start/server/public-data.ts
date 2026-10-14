@@ -265,6 +265,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			ownerProfilePublic: result.ownerProfilePublic,
 			viewerIsOwner: result.viewerIsOwner,
 			viewerCanManage: result.viewerCanManage,
+			viewerCanManageAccess: result.viewerCanManageAccess,
 			hasPackage: result.hasPackage,
 			packageShaped: result.packageShaped === true,
 			repoActions: buildPackageRepoActions({

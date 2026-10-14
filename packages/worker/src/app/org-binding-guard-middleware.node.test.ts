@@ -34,6 +34,7 @@ const personScopedAccountRoutes: Record<string, string> = {
 	accountPackageApproveCapabilities: 'package authorization checks its owner',
 	accountPackageFiles: 'package authorization checks its owner',
 	accountUsage: 'redirects to personal org usage',
+	accountCredits: 'redirects to personal org credits ledger',
 	accountCredentials: 'redirects to signup org credentials',
 }
 

@@ -7,6 +7,7 @@ const shared = {
 	handleId: 'auth',
 	turnstileSiteKey: null,
 	isSubmitting: false,
+	isInteractive: true,
 	onFieldEdit: () => {},
 	signupUsername: '',
 	onSignupUsernameInput: () => {},
@@ -58,4 +59,24 @@ test('username errors mark only that field', async () => {
 	expect(usernameHtml).toMatch(/id="auth-username"[^>]*aria-invalid="true"/)
 	expect(usernameHtml).toMatch(/id="auth-email"[^>]*autoComplete="email"/)
 	expect(usernameHtml).not.toMatch(/id="auth-email"[^>]*aria-invalid/)
+})
+
+test('signup form opts out of native validation and softens the username field for iOS', async () => {
+	const html = await renderToString(
+		jsx(AuthForm, {
+			...shared,
+			status: 'idle',
+			message: null,
+			isSignup: true,
+			submitLabel: 'Create account',
+			submitBusyLabel: 'Creating…',
+			onSubmit: () => {},
+			onPasskeySignIn: () => {},
+		}),
+	)
+	expect(html).toMatch(/<form[^>]*novalidate/i)
+	expect(html).toMatch(/id="auth-username"[^>]*autocapitalize="none"/i)
+	expect(html).toMatch(/id="auth-username"[^>]*autocorrect="off"/i)
+	expect(html).toMatch(/id="auth-username"[^>]*spellcheck="false"/i)
+	expect(html).toContain('a–z')
 })

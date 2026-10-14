@@ -118,6 +118,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/@:username/:kodyId',
 			'/@:username/:kodyId/icon/:iconCommit',
 			'/@:username/:kodyId/settings',
+			'/@:username/:kodyId/collaborators',
 			'/account/repos/:repoId/icon/:iconCommit',
 			'/@:username/:kodyId/approve-publish',
 			'/@:orgSlug/-/repositories',

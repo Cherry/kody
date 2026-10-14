@@ -180,6 +180,7 @@ export async function loadCommunityPackagePayload(input: {
 			ownerProfilePublic: page.ownerProfilePublic,
 			viewerIsOwner: page.viewerIsOwner,
 			viewerCanManage: page.viewerCanManage,
+			viewerCanManageAccess: page.viewerCanManageAccess,
 			repoActions: buildPackageRepoActionsForPage(page),
 			viewerCanPublish: page.viewerCanPublish,
 			viewerCanDelete: page.viewerCanDelete,
