@@ -1,3 +1,11 @@
+import { createAccountCredentialsApiHandler } from '#app/handlers/account-credentials.ts'
+import {
+	createAccountCredentialsHandler,
+	createConnectCredentialHandler,
+} from '#app/handlers/connect-credential.ts'
+import { createPackageCredentialsApiHandler } from '#app/handlers/package-credentials.ts'
+import { createPackageCredentialApprovalApiHandler } from '#app/handlers/package-credential-approval.ts'
+import { createOrgUsageApiHandler } from '#app/handlers/org-usage.ts'
 import { createAccountLastUsedOrgApiHandler } from '#app/handlers/account-last-used-org.ts'
 import { createRouter } from 'remix/router'
 import {
@@ -215,6 +223,7 @@ import {
 	createOrgSettingsAvatarPostHandler,
 	createOrgSettingsDeletePostHandler,
 	createOrgSettingsPostHandler,
+	createOrgSettingsCustomHostnamesPostHandler,
 } from '#app/handlers/org-settings.ts'
 import { acquisitionPages } from '#universal/acquisition/catalog.ts'
 import { renderAcquisitionMarkdown } from '#app/acquisition-markdown.ts'
@@ -382,6 +391,18 @@ export function createBackendRouter(
 			accountCreditsTopUpPost: routes.accountCreditsTopUpPost,
 			accountCreditsSettingsPost: routes.accountCreditsSettingsPost,
 			accountUsageApi: routes.accountUsageApi,
+			orgSettingsCustomHostnamesPost: routes.orgSettingsCustomHostnamesPost,
+			orgUsageApi: routes.orgUsageApi,
+			communityPackageApproveCredentialsApiPost:
+				routes.communityPackageApproveCredentialsApiPost,
+			communityPackageApproveCredentialsApi:
+				routes.communityPackageApproveCredentialsApi,
+			communityPackageCredentialsApiPost:
+				routes.communityPackageCredentialsApiPost,
+			communityPackageCredentialsApi: routes.communityPackageCredentialsApi,
+			connectCredential: routes.connectCredential,
+			accountCredentials: routes.accountCredentials,
+			accountCredentialsApi: routes.accountCredentialsApi,
 			accountWaitingApi: routes.accountWaitingApi,
 			accountWaitingClickPost: routes.accountWaitingClickPost,
 			accountExperimentsApi: routes.accountExperimentsApi,
@@ -588,10 +609,23 @@ export function createBackendRouter(
 				accountTwoFactorApiPost: createAccountTwoFactorApiHandler(env),
 				accountBillingCancellationFeedbackPost:
 					createAccountBillingCancellationFeedbackApiHandler(env),
-				accountCredits: createAccountCreditsHandler(),
+				accountCredits: createAccountCreditsHandler(env),
 				accountCreditsTopUpPost: createAccountCreditsTopUpApiHandler(env),
 				accountCreditsSettingsPost: createAccountCreditsSettingsApiHandler(env),
 				accountUsageApi: createAccountUsageApiHandler(env),
+				orgSettingsCustomHostnamesPost:
+					createOrgSettingsCustomHostnamesPostHandler(env),
+				orgUsageApi: createOrgUsageApiHandler(env),
+				communityPackageApproveCredentialsApiPost:
+					createPackageCredentialApprovalApiHandler(env),
+				communityPackageApproveCredentialsApi:
+					createPackageCredentialApprovalApiHandler(env),
+				communityPackageCredentialsApiPost:
+					createPackageCredentialsApiHandler(env),
+				communityPackageCredentialsApi: createPackageCredentialsApiHandler(env),
+				connectCredential: createConnectCredentialHandler(env),
+				accountCredentials: createAccountCredentialsHandler(env),
+				accountCredentialsApi: createAccountCredentialsApiHandler(env),
 				accountWaitingApi: createAccountWaitingApiHandler(env),
 				accountWaitingClickPost: createAccountWaitingClickHandler(env),
 				accountExperimentsApi: createAccountExperimentsApiHandler(env),

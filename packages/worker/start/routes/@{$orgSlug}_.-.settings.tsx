@@ -21,5 +21,5 @@ function Page() {
 	const { orgSlug } = Route.useParams()
 	const query = pageQuery(actorKey, { slug: orgSlug })
 	const { data } = usePageQuery(query)
-	return <OrgSettingsPage data={data} queryKey={query.queryKey} />
+	return <OrgSettingsPage key={orgSlug} data={data} queryKey={query.queryKey} />
 }

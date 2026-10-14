@@ -113,6 +113,7 @@ export function SiteHeader(props: SiteHeaderProps) {
 					{props.loggedIn ? (
 						<>
 							<AccountMenu
+								organizations={props.organizationSession?.organizations ?? []}
 								username={props.username}
 								displayName={props.displayName}
 								avatarUrl={props.avatarUrl}

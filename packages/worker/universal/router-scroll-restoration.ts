@@ -42,15 +42,6 @@ export function serializeSavedScrollPositions(
 	return JSON.stringify(positions)
 }
 
-export function getStoredScrollY(
-	positions: SavedScrollPositions,
-	historyKey: string | null | undefined,
-): number | null {
-	if (!historyKey) return null
-	const storedY = positions[historyKey]
-	return typeof storedY === 'number' ? storedY : null
-}
-
 /**
  * Blocking classic script inlined in the SSR body. Keep this a string (not a
  * function that references `window`) so `#universal` stays DOM-free. The body

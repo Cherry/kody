@@ -154,7 +154,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			{ loadDocumentHead },
 			{ loadSessionInfo },
 			{ resolvePackageListIconUrl },
-			{ buildPackagePublishApprovalPath },
+			{ buildPackageRepoActions },
 			{ routes },
 			{ redirect },
 		] = await Promise.all([
@@ -166,7 +166,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			import('./document-head.ts'),
 			import('../../src/app/session-info.ts'),
 			import('../../universal/identity-icon-urls.ts'),
-			import('../../src/package-registry/package-publish-lock.ts'),
+			import('../../src/app/package-repo-actions.ts'),
 			import('../../universal/routes.ts'),
 			import('@tanstack/react-router'),
 		])
@@ -263,26 +263,14 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			description,
 			isPrivate: result.isPrivate,
 			ownerProfilePublic: result.ownerProfilePublic,
-			loggedIn: result.loggedIn,
 			viewerIsOwner: result.viewerIsOwner,
 			viewerCanManage: result.viewerCanManage,
-			returnTo: path,
-			hasApp: result.ownerPackage?.hasApp === true,
 			hasPackage: result.hasPackage,
 			packageShaped: result.packageShaped === true,
-			publishCompareHref:
-				result.viewerCanManage && listing?.sourceAhead
-					? listing.headCommit
-						? buildPackagePublishApprovalPath({
-								username: result.username,
-								kodyId: result.kodyId,
-								commit: listing.headCommit,
-							})
-						: routes.communityPackageApprovePublish.href({
-								username: result.username,
-								kodyId: result.kodyId,
-							})
-					: null,
+			repoActions: buildPackageRepoActions({
+				...result,
+				viewerInstall: listing?.viewerInstall ?? null,
+			}),
 			iconUrl:
 				listing?.iconUrl ??
 				resolvePackageListIconUrl({

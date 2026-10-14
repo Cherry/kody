@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { OrgSettingsCustomDomains } from './org-settings-custom-domains.tsx'
 import { type ReactNode, useState, useRef } from 'react'
 import {
 	useMutation,
@@ -577,6 +578,13 @@ export function OrgSettingsPage({
 					<p>You do not have permission to change organization settings.</p>
 				)}
 			</AccountManagementPanel>
+			{!data.org.personal ? (
+				<OrgSettingsCustomDomains
+					key={data.org.slug}
+					data={data}
+					queryKey={queryKey}
+				/>
+			) : null}
 			{data.canDelete && !data.org.personal ? (
 				<AccountManagementPanel title="Delete organization">
 					<DeleteOrganization

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import {
@@ -126,6 +127,10 @@ export function ConnectSecretSetRoute({
 					value: state.value,
 					allowedHosts: policy.allowedHosts,
 					allowedPackages: policy.allowedPackages,
+					provider:
+						new URL(href, 'https://kody.local').searchParams
+							.get('provider')
+							?.trim() || null,
 				}),
 			})
 			if (response.status === 401) {
@@ -376,20 +381,20 @@ export function ConnectSecretSetRoute({
 						</div>
 					</div>
 					<SiteLink
-						href={'/account/secrets'}
+						href={routes.accountCredentials.href()}
 						css={secondaryButtonCss}
 						data-testid="connect-secret-set-back"
 					>
-						Back to secrets
+						Back to credentials
 					</SiteLink>
 				</section>
 			) : view.showBackToSecrets ? (
 				<SiteLink
-					href={'/account/secrets'}
+					href={routes.accountCredentials.href()}
 					css={secondaryButtonCss}
 					data-testid="connect-secret-set-back"
 				>
-					Back to secrets
+					Back to credentials
 				</SiteLink>
 			) : null}
 		</section>

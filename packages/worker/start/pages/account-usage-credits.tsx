@@ -2,7 +2,6 @@
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
-import { useShellData } from '../routes/__root.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { readJson } from '#client/routes/account-approval-shared.ts'
@@ -39,6 +38,7 @@ import {
 	type AccountUsageCreditsWallet,
 	type AccountUsageLoaderData,
 } from '#universal/loader-data.ts'
+import { parseOrgBillingPath } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
@@ -86,6 +86,8 @@ function readAutoRefillDraft(draft: SettingsDraft): CreditAutoRefillSettings {
 
 type AccountUsageCreditsSectionProps = {
 	credits: AccountUsageCredits
+	/** Organization this usage page is showing (checkout + top-up target). */
+	orgSlug: string
 	/** Page-load outcome for credits (top-up added, top-up failed). */
 	notice?: string
 	error?: string
@@ -102,7 +104,6 @@ export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
 	const capture = useSubmitterScope()
-	const { session } = useShellData()
 	const settingsMutation = usePageResponseMutation<AccountUsageLoaderData>(
 		'loadUsagePage',
 		settingsApiPath,
@@ -214,14 +215,19 @@ export function AccountUsageCreditsSection(
 		setSaving(false)
 	}
 
-	async function switchToPro() {
+	async function switchToPro(billingHref?: string) {
 		if (switchPending) return
 		setSwitchPending(true)
 		setMessage(null)
-		const orgSlug = session?.organizations.find((org) => org.personal)?.slug
+		const orgSlug =
+			props.orgSlug ||
+			(billingHref
+				? parseOrgBillingPath(new URL(billingHref, 'http://localhost').pathname)
+						?.slug
+				: null)
 		if (!orgSlug) {
 			setSwitchPending(false)
-			showMessage('Sign in again to switch plans.', 'error')
+			showMessage('Open billing to switch plans.', 'error')
 			return
 		}
 		const isCurrent = capture()
@@ -253,12 +259,12 @@ export function AccountUsageCreditsSection(
 		) : null
 	}
 
-	function renderSwitchToProButton(label: string) {
+	function renderSwitchToProButton(label: string, billingHref?: string) {
 		return (
 			<button
 				type="button"
 				disabled={switchPending}
-				onClick={() => void switchToPro()}
+				onClick={() => void switchToPro(billingHref)}
 				css={primaryButtonCss}
 			>
 				{switchPending ? 'Opening Stripe…' : label}
@@ -338,7 +344,7 @@ export function AccountUsageCreditsSection(
 				{renderMessage()}
 				<div css={accountActionsCss}>
 					{credits.canSwitchToPro ? (
-						renderSwitchToProButton('Switch to Pro')
+						renderSwitchToProButton('Switch to Pro', credits.billingHref)
 					) : (
 						<SiteLink href={credits.billingHref} css={primaryLinkCss}>
 							Go to billing

@@ -20,8 +20,12 @@ import {
 	type CommunityListingCategory,
 } from '#universal/community-categories.ts'
 import { type CommunityListingSort } from '#universal/community-search.ts'
+import { type AccountCredentialsResponse } from '#universal/credentials-list.ts'
+import { type PackageCredentialApprovalLoaderData } from '#universal/package-credential-approval-page.ts'
+import { type PackageCredentialsLoaderData } from '#universal/package-credentials-page.ts'
 import { type HighlightedCode } from '#universal/highlighted-code.ts'
 import { type PackageFilesContentKind } from '#universal/package-file-media.ts'
+import { type PackageRepoActions } from '#universal/package-repo-actions.ts'
 import { type WalkthroughHostPick } from '#universal/walkthrough-hosts.ts'
 import { type LandingHeroVideo } from '#universal/landing-hero-copy.ts'
 import { type ConnectedMcpAgent } from '#universal/connected-mcp-agents.ts'
@@ -224,6 +228,8 @@ export type PackageFilesLoaderData = {
 	description?: string
 	/** True when `/@owner` is publicly reachable. Omit to keep the owner link. */
 	ownerProfilePublic?: boolean
+	/** Repository action group (same model as the Repo and Settings tabs). */
+	repoActions?: PackageRepoActions | null
 }
 
 /** SSR-embedded shell data for client-only regions on the detail page. */
@@ -258,6 +264,8 @@ type CommunityDetailShellLoaderData = {
 	viewerCanAdoptCommunityFork?: boolean
 	isPrivate: boolean
 	invocationUrlOrigin: string
+	/** Repository action group for client-rendered tabs (Settings). */
+	repoActions?: PackageRepoActions | null
 }
 
 type CommunityPackageUnauthorizedLoaderData = {
@@ -1235,11 +1243,42 @@ type OrgManagementOrg = {
 	role: 'owner' | 'member' | 'billing'
 }
 
+type OrgSettingsCustomHostnameDnsRecord = {
+	type: string
+	name: string
+	value: string
+}
+
+type OrgSettingsCustomHostnameView = {
+	id: string
+	hostname: string
+	bindingKind: 'app' | 'org'
+	packageId: string | null
+	hostnameStatus: string
+	sslStatus: string
+	verifiedAt: string | null
+	dnsMissingSince: string | null
+	ownershipVerification: OrgSettingsCustomHostnameDnsRecord | null
+	sslValidationRecords: Array<OrgSettingsCustomHostnameDnsRecord>
+	createdAt: string
+	updatedAt: string
+}
+
+export type OrgSettingsCustomDomainsView = {
+	hostnames: Array<OrgSettingsCustomHostnameView>
+	dnsTarget: string | null
+}
+
 export type OrgSettingsLoaderData = {
 	ok: true
 	org: OrgManagementOrg
 	canManage: boolean
 	canDelete: boolean
+	/**
+	 * Present only when `package-app-custom-domains` is on for this
+	 * environment. Null when the flag is off (panel stays hidden).
+	 */
+	customDomains: OrgSettingsCustomDomainsView | null
 }
 
 export type OrgMemberView = {
@@ -1630,6 +1669,10 @@ export type PackageWebhookListItem = {
 	handle: string | null
 	urlHost: string | null
 	enabled: boolean | null
+	/** True once a person approved it (a live enablement exists). */
+	approved: boolean
+	/** Where to approve a minted webhook; null when unminted or approved. */
+	approvalUrl: string | null
 	/**
 	 * False for mints that predate encrypted secret storage. The UI offers
 	 * Rotate instead of Reveal for those, since the hash cannot rebuild the
@@ -1695,6 +1738,11 @@ export type PackageWebhookRevealedUrl = {
 
 export type PackageWebhooksActionPayload = PackageWebhooksLoaderData & {
 	revealed?: PackageWebhookRevealedUrl
+	/**
+	 * Set by mint / rotate while the webhook is not on for anyone: minting
+	 * never turns it on, so link the person to Approve.
+	 */
+	approvalUrl?: string
 }
 
 export type PendingVerificationLoaderData = {
@@ -2725,6 +2773,9 @@ export type AppLoaderData = {
 	accountPackages?: AccountPackagesLoaderData
 	accountPackageApprovePublish?: AccountPackageApprovePublishLoaderData
 	accountPackageApproveCapabilities?: AccountPackageApproveCapabilitiesLoaderData
+	accountCredentials?: AccountCredentialsResponse
+	packageCredentials?: PackageCredentialsLoaderData
+	packageCredentialApproval?: PackageCredentialApprovalLoaderData
 	accountSecrets?: AccountSecretsLoaderData
 	accountSecretProviders?: AccountSecretProvidersLoaderData
 	accountValues?: AccountValuesLoaderData
@@ -2775,9 +2826,9 @@ export type AccountBillingLoaderData = {
 	/** Stripe subscription uses the purchasable Pro price (credit wallet). */
 	creditsEligible: boolean
 	/** Deep link to the Credits section of the usage page; null off the signup org. */
-	creditsHref: '/account/usage#credits' | null
+	creditsHref: string | null
 	/** Account usage page (limits / consumption); null off the signup org. */
-	usageHref: '/account/usage' | null
+	usageHref: string | null
 	referralProgram: ReferralProgramSummary | null
 	org: AccountBillingOrg
 	error?: string

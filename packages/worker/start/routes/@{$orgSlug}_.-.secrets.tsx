@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute, useLocation } from '@tanstack/react-router'
+import { redirect, createFileRoute, useLocation } from '@tanstack/react-router'
 import { AccountSecretsPage } from '../pages/account-secrets.tsx'
 import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -9,6 +10,17 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
+	beforeLoad: ({ location }) => {
+		const href = credentialRedirectFor(
+			new URL(location.href, 'https://kody.local'),
+		)
+		if (href)
+			throw redirect({
+				href,
+				statusCode: 302,
+				headers: { 'Cache-Control': 'private, no-store' },
+			})
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: location.pathname + location.searchStr,

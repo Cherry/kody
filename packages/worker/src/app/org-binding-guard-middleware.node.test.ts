@@ -48,6 +48,10 @@ const personScopedAccountRoutes: Record<string, string> = {
 	accountWebhooksApproveApplyApi: 'approval link carries the webhook owner',
 	accountWebhooksApproveApplyApiPost: 'approval link carries the webhook owner',
 	accountWaitingClickPost: 'click analytics for the person',
+	// Legacy redirects to the personal org's `/@:slug/-/usage` page.
+	accountUsage: 'redirects to the personal org usage page',
+	accountCredentials: 'redirects to the signup org Credentials list',
+	accountUsageApi: 'redirects to the personal org usage JSON',
 }
 
 type RouteEntry = {
@@ -201,9 +205,13 @@ function deniedRequest(entry: RouteEntry, method: string, cookie: string) {
 			/^\/account\/([^/.]+)/
 				.exec(url.pathname)?.[1]
 				?.replace(/^(connected-agents|connection-usage)$/, 'agents')
+				?.replace(/^credentials$/, 'secrets')
 				?.replace(/^last-used-org$/, 'waiting')
 				?.replace(/-export$/, '') ?? ''
-		headers.set('Referer', `${origin}/@ghost/-/${section}`)
+		// Credits mutations bind via the usage page Referer (there is no
+		// `/@:orgSlug/-/credits` route).
+		const refererSection = section === 'credits' ? 'usage' : section
+		headers.set('Referer', `${origin}/@ghost/-/${refererSection}`)
 	}
 	if (method !== 'GET') {
 		headers.set('Origin', origin)

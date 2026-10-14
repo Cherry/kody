@@ -21,6 +21,10 @@ import {
 	packageFileLanguageLabel,
 } from '#universal/package-files.ts'
 import { directoryOfPackageFilePath } from '#universal/package-readme-images.ts'
+import { usePackageInstall } from '../use-package-install.ts'
+import { renderInstallStrip } from './community-detail-sections.tsx'
+import { PackageInstallContext } from './package-title-actions.tsx'
+import { renderPackageRepoActions } from './package-title-actions.tsx'
 import { renderPackageRepoChrome } from './package-repo-nav.tsx'
 import { renderIcon } from './icon.tsx'
 import { type PackageFilesLoaderData } from '#universal/loader-data.ts'
@@ -33,8 +37,7 @@ import {
 	typography,
 } from '#universal/styles/tokens.ts'
 import {
-	layoutMaxWidths,
-	pageGutter,
+	packageDetailPageCss,
 	proseCss,
 } from '#universal/styles/style-primitives.ts'
 
@@ -61,12 +64,29 @@ function countLines(value: string) {
 	return value.replace(/\n$/, '').split('\n').length
 }
 
-export function PackageFilesExplorer({
+export function PackageFilesExplorer(props: {
+	data: PackageFilesLoaderData
+	busy?: boolean
+}) {
+	const install = usePackageInstall(props.data.repoActions?.fork ?? null)
+	return (
+		<PackageInstallContext.Provider value={install.context}>
+			<PackageFilesExplorerContent
+				{...props}
+				installStrip={renderInstallStrip(install)}
+			/>
+		</PackageInstallContext.Provider>
+	)
+}
+
+function PackageFilesExplorerContent({
 	data,
 	busy,
+	installStrip,
 }: {
 	data: PackageFilesLoaderData
 	busy?: boolean
+	installStrip?: ReactNode
 }) {
 	const [expanded, setExpanded] = useState(
 		() =>
@@ -126,6 +146,7 @@ export function PackageFilesExplorer({
 					viewerIsOwner: data.viewerIsOwner ?? false,
 					viewerCanManage: data.viewerCanManage ?? false,
 					active: 'files',
+					actions: renderPackageRepoActions(data.repoActions ?? null),
 					filesHref: data.filesBasePath,
 					description: data.description,
 					ownerProfilePublic: data.ownerProfilePublic,
@@ -142,6 +163,7 @@ export function PackageFilesExplorer({
 					</header>
 				</>
 			)}
+			{installStrip}
 			<div css={layoutCss}>
 				<nav aria-label="Files" css={treeCss}>
 					<div css={treeHeadCss}>
@@ -498,14 +520,7 @@ function searchIcon() {
 // than the nav above it.
 // This route owns its gutters — the shell leaves it unpadded (`app.tsx`), so
 // the same box as the site header lines the two up at every width.
-const articleCss = {
-	maxWidth: layoutMaxWidths.extended,
-	marginInline: 'auto',
-	padding: `${spacing.lg} ${pageGutter} ${spacing['2xl']}`,
-	[mq.tablet]: {
-		padding: `${spacing.md} ${pageGutter} ${spacing.xl}`,
-	},
-} satisfies CSSObject
+const articleCss = packageDetailPageCss
 
 const backLinkCss = {
 	// Pinned out of the `page` transition with the rest of the explorer chrome.

@@ -10,7 +10,7 @@ import { colors, transitions, typography } from '#universal/styles/tokens.ts'
 import {
 	getGhostButtonCss,
 	getSurfaceCardCss,
-	pageHeadCss,
+	packageDetailPageCss,
 	proseCss,
 	visuallyHiddenCss,
 } from '#universal/styles/style-primitives.ts'
@@ -221,29 +221,7 @@ export function renderReportDisclosure(props: ReportDisclosureProps) {
    pattern whisper anchors to the article in rem, not to the short icon-row
    head in percentages, so it renders at the same scale and position as the
    blog post head's fabric. */
-export const detailArticleCss = {
-	position: 'relative' as const,
-	// This borrows `pageHeadCss`'s `zIndex: -1` pseudo without borrowing the
-	// rest of it, so it has to carry the `isolate` that scopes that negative
-	// z-index. Without it the glow escapes this stacking context and can fall
-	// behind an ancestor's background instead of backing the article.
-	isolation: 'isolate' as const,
-	maxWidth: '46rem',
-	marginInline: 'auto',
-	width: '100%',
-	boxSizing: 'border-box' as const,
-	padding:
-		'clamp(2.5rem, 6vw, 4rem) clamp(1.25rem, 4vw, 2.5rem) clamp(4rem, 8vw, 6.5rem)',
-	'&::before': {
-		...pageHeadCss['&::before'],
-		inset: 'auto',
-		top: '-3rem',
-		left: '-30%',
-		right: '-30%',
-		height: '44rem',
-		background: `radial-gradient(ellipse 46% 55% at 70% 22%, oklch(from ${colors.text} l c h / 0.05), transparent 72%)`,
-	},
-} satisfies CSSObject
+export const detailArticleCss = packageDetailPageCss
 
 const backLinkCss = {
 	display: 'inline-flex',

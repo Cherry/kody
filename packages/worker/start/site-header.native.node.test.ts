@@ -1,3 +1,4 @@
+import { usageHrefForAccountMenu } from './components/org-switcher.tsx'
 import { expect, test } from 'vitest'
 import { createElement as jsx, type ComponentProps } from 'react'
 import { renderStartPage } from './test-support/render-start-page.ts'
@@ -517,4 +518,60 @@ test('desktop and mobile headers include the complete Features navigation', asyn
 		),
 	).toHaveLength(2)
 	expect(html).toContain('Context that comes with you.')
+})
+
+test('account menu Usage & credits uses the URL org when billing is allowed', () => {
+	const orgs = [
+		{ slug: 'ada', personal: true, role: 'owner' as const },
+		{ slug: 'acme', personal: false, role: 'owner' as const },
+	]
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/@acme/-/billing',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@acme/-/usage')
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/account',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@ada/-/usage')
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/@acme',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@acme/-/usage')
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/@stranger/pkg',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@ada/-/usage')
+})
+
+test('account menu Usage & credits falls back when the URL org lacks billing', () => {
+	const orgs = [
+		{ slug: 'ada', personal: true, role: 'owner' as const },
+		{ slug: 'acme', personal: false, role: 'member' as const },
+	]
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/@acme/-/agents',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@ada/-/usage')
+	expect(
+		usageHrefForAccountMenu({
+			pathname: '/@acme',
+			organizations: orgs,
+			username: 'ada',
+		}),
+	).toBe('/@ada/-/usage')
 })

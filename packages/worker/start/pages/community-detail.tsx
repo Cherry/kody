@@ -1,19 +1,16 @@
 /** @jsxImportSource @emotion/react */
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
-import {
-	type CommunityDetailApiPayload,
-	type CommunityInstallApiPayload,
-	type CommunityInstallOutcome,
-} from '../community-types.ts'
+import { type CommunityDetailApiPayload } from '../community-types.ts'
 import { routes } from '#universal/routes.ts'
 import { getPackageTreeHref } from '#universal/package-files.ts'
 import {
 	type CommunityDetailContentProps,
 	CommunityDetailContent,
 } from '../components/community-detail-content.tsx'
+import { usePackageInstall } from '../use-package-install.ts'
 import { PackageInstallContext } from '../components/package-title-actions.tsx'
 import { renderMarkdownNodes } from '../components/markdown-view.tsx'
 import {
@@ -37,22 +34,8 @@ export function CommunityDetailRoute({
 	})
 	const invalidateReports = usePageInvalidation(reportResources)
 	const capture = useSubmitterScope()
-	const [confirmed, setConfirmed] = useState(false)
-	useEffect(() => {
-		if (!confirmed) return
-		const disarm = (event: MouseEvent) => {
-			if (
-				event.target instanceof Element &&
-				!event.target.closest('[data-community-install]')
-			)
-				setConfirmed(false)
-		}
-		document.addEventListener('click', disarm)
-		return () => document.removeEventListener('click', disarm)
-	}, [confirmed])
-	const [installMessage, setInstallMessage] = useState<string | null>(null)
-	const [installOutcome, setInstallOutcome] =
-		useState<CommunityInstallOutcome | null>(null)
+	const packageInstall = usePackageInstall(header.repoActions?.fork ?? null)
+	const { installMessage, installOutcome } = packageInstall
 	const [featureState, setFeatureState] = useState<
 		'idle' | 'submitting' | 'error'
 	>('idle')
@@ -117,14 +100,6 @@ export function CommunityDetailRoute({
 			context: { reconcile: () => Promise<void> } | undefined,
 		) => context?.reconcile(),
 	}
-	const installMutation = useMutation({
-		...lifecycle,
-		mutationFn: (id: string) =>
-			post<CommunityInstallApiPayload>(
-				routes.communityInstallApiPost.href({ listingId: id }),
-				{ acknowledged: true },
-			),
-	})
 	const featureMutation = useMutation({
 		...lifecycle,
 		mutationFn: (input: { id: string; featured: boolean }) =>
@@ -140,37 +115,6 @@ export function CommunityDetailRoute({
 				reason: input.reason,
 			}),
 	})
-	async function install() {
-		if (!listing || installMutation.isPending || installOutcome) return
-		if (!confirmed) {
-			setConfirmed(true)
-			return
-		}
-		const isCurrent = capture()
-		setConfirmed(false)
-		setInstallMessage(null)
-		try {
-			const result = await installMutation.mutateAsync(listing.id)
-			if (!isCurrent()) return
-			if (!result.status || !result.targetName || !result.agentPrompt)
-				throw new Error('Unable to install this public package.')
-			setInstallOutcome({
-				status: result.status,
-				targetName: result.targetName,
-				agentPrompt: result.agentPrompt,
-				packageId:
-					result.status === 'installed' ? (result.packageId ?? null) : null,
-				failedChecks: result.failedChecks ?? [],
-			})
-		} catch (error) {
-			if (isCurrent())
-				setInstallMessage(
-					error instanceof Error
-						? error.message
-						: 'Unable to install this public package.',
-				)
-		}
-	}
 	async function feature() {
 		if (!listing || featureMutation.isPending) return
 		const isCurrent = capture()
@@ -215,14 +159,7 @@ export function CommunityDetailRoute({
 		}
 	}
 	return (
-		<PackageInstallContext.Provider
-			value={{
-				busy: installMutation.isPending,
-				confirmed,
-				onInstall: () => void install(),
-				onDisarm: () => setConfirmed(false),
-			}}
-		>
+		<PackageInstallContext.Provider value={packageInstall.context}>
 			<article css={detailArticleCss}>
 				<CommunityDetailContent
 					{...header}

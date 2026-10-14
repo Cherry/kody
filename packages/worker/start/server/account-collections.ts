@@ -21,7 +21,7 @@ function validateCollectionHref(href: string) {
 		throw new Error('Invalid account collection URL')
 	return href
 }
-async function loadCollection(href: string) {
+export async function loadCollection(href: string) {
 	const [
 		{ env },
 		{ getRequest, setResponseHeader },
@@ -428,25 +428,44 @@ export const loadUsagePage = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
 		if (
 			typeof href !== 'string' ||
-			!/^\/account\/usage(?:\?[^#]*)?$/.test(collectionAliasHref(href))
+			!/^\/(?:account\/usage|@[^/?#]+\/-\/usage)(?:\?[^#]*)?(?:#[^#]*)?$/.test(
+				href,
+			)
 		)
 			throw new Error('Invalid usage URL')
 		return href
 	})
 	.handler(async ({ data: href }) => {
 		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountUsagePageResult }, { loadDocumentHead }] =
+		if (new URL(request.url).pathname === '/account/usage') {
+			const { personalUsageSlug } =
+				await import('../../src/app/handlers/account-usage.ts')
+			const { personalOrgUsageRedirectUrl } =
+				await import('../../src/app/handlers/org-usage.ts')
+			const target = new URL(
+				personalOrgUsageRedirectUrl({
+					requestUrl: request.url,
+					slug: await personalUsageSlug(bindings, user),
+				}),
+			)
+			target.hash = new URL(href, request.url).hash
+			throw redirect({
+				href: target.pathname + target.search + target.hash,
+				statusCode: 302,
+			})
+		}
+		const [{ loadOrgUsagePageResult }, { loadDocumentHead }] =
 			await Promise.all([
-				import('../../src/app/account-usage-page.ts'),
+				import('../../src/app/handlers/org-usage.ts'),
 				import('./document-head.ts'),
 			])
-		const payload = await loadAccountUsagePageResult(bindings, request, user)
+		const payload = await loadOrgUsagePageResult(bindings, request, user)
 		if (payload instanceof Response) {
 			const location = payload.headers.get('Location')
 			if (location)
 				throw redirect({ href: location, statusCode: payload.status })
-			const { notFound } = await import('@tanstack/react-router')
-			throw notFound()
+			if (payload.status === 404) throw notFound()
+			throw payload
 		}
 		const url = new URL(request.url)
 		return {

@@ -1,9 +1,7 @@
 /** @jsxImportSource @emotion/react */
-import { SiteLink } from './site-link.tsx'
 /** @jsxRuntime automatic */
-import { type CSSObject } from '@emotion/react'
 import { type CSSProperties } from 'react'
-import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
+import { SiteLink } from './site-link.tsx'
 import { type PublicCommunityListing } from '#universal/community-public-types.ts'
 import { communityPackageCategoryCopy } from '#universal/community-categories.ts'
 import { buildCommunityIndexHref } from '#universal/community-search.ts'
@@ -13,26 +11,23 @@ import {
 	formatCommunityStars,
 	shortCommunityCommit,
 } from '#universal/community-display.ts'
-import { renderIcon } from './icon.tsx'
-import { renderPackageTitleActions } from './package-title-actions.tsx'
 import {
-	communityTagListCss,
-	communityTagPillCss,
-	renderCommunityViewerInstallBadge,
-} from './community-listings-content.tsx'
+	type PackageRepoActions,
+	renderPackageRepoActions,
+} from './package-title-actions.tsx'
 import {
 	fallbackDefaultBranchName,
 	getPackageTreeHref,
 } from '#universal/package-files.ts'
 import { renderPackageRepoChrome } from './package-repo-nav.tsx'
-
+import { visuallyHiddenCss } from '#universal/styles/style-primitives.ts'
 import { colors } from '#universal/styles/tokens.ts'
-import { buildUpdatePublicListingHref } from '#universal/update-public-listing.ts'
 
 /**
  * Server-rendered package head (the `community-detail` frame): GitHub-style
- * icon + `@owner / name` + visibility + Repo/Files/Settings tabs, then the
- * public catalog extras (install badges, tags, facts) when a listing exists.
+ * icon + `@owner / name` + visibility + Repo/Files/Settings tabs with the
+ * repository action group, then the public catalog extras (status badges,
+ * category and topics, facts) when a listing exists.
  */
 
 /** GitHub-rendered agent docs for plain repos (not a /docs catalog guide). */
@@ -46,13 +41,10 @@ export type CommunityDetailContentProps = {
 	description: string
 	isPrivate: boolean
 	ownerProfilePublic: boolean
-	loggedIn: boolean
 	viewerIsOwner: boolean
 	viewerCanManage: boolean
-	returnTo: string
+	repoActions: PackageRepoActions | null
 	treeRef?: string
-	publishCompareHref?: string | null
-	hasApp?: boolean
 	/** Defaults to true. Plain repos pass false for the Repo mark. */
 	hasPackage?: boolean
 	/**
@@ -71,23 +63,14 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 		description,
 		isPrivate,
 		ownerProfilePublic,
-		loggedIn,
 		viewerIsOwner,
 		viewerCanManage,
-		returnTo,
+		repoActions,
 		treeRef,
-		publishCompareHref,
-		hasApp,
 		hasPackage,
 		packageShaped,
 		iconUrl,
 	} = props
-	const packageAppHref = resolvePackageAppHref({
-		hasApp: hasApp === true,
-		username,
-		kodyId,
-		viewerIsOwner,
-	})
 	const markUrl = listing?.iconUrl ?? iconUrl ?? null
 	const isPackage = hasPackage !== false
 	const showPlainRepoOwnerHints = !isPackage && viewerIsOwner
@@ -116,28 +99,14 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 				iconUrl: markUrl,
 				iconName: listing?.name ?? kodyId,
 				animate: true,
-				titleActions: listing
-					? renderPackageTitleActions({
-							viewerIsOwner,
-							loggedIn,
-							returnTo,
-							listingId: listing.id,
-							listingName: listing.name,
-							ownerUsername: listing.ownerUsername,
-							trusted: listing.trusted,
-							viewerInstall: listing.viewerInstall ?? null,
-						})
-					: null,
+				actions: renderPackageRepoActions(repoActions),
 			})}
 
 			{listing
 				? renderListingHead({
 						listing,
-						loggedIn,
-						returnTo,
-						viewerIsOwner,
-						viewerCanManage,
-						publishCompareHref,
+						showSourceAheadStatus:
+							listing.sourceAhead === true && !repoActions?.publishHref,
 					})
 				: null}
 
@@ -148,47 +117,33 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 					})
 				: null}
 
-			{packageAppHref ? (
-				<div
-					data-rise
-					style={{ '--rise': '3' } as CSSProperties}
-					css={packageAppLinkRowCss}
-				>
-					<SiteLink
-						href={packageAppHref}
-						data-testid="open-package-app"
-						data-rmx-document
-						css={packageAppLinkCss}
-					>
-						{renderIcon('share', { size: '1em' })}
-						Open Package App
-					</SiteLink>
-				</div>
-			) : null}
-
 			{listing ? (
 				<>
-					<ul
+					<p
 						data-rise
 						style={{ '--rise': '3' } as CSSProperties}
-						aria-label="Category and tags"
-						css={detailTagListCss}
+						data-testid="community-detail-topics"
+						css={topicsCss}
 					>
-						<li css={communityTagPillCss}>
-							<SiteLink
-								href={buildCommunityIndexHref({ category: listing.category })}
-								data-testid="community-listing-category"
-								css={detailCategoryLinkCss}
-							>
-								{communityPackageCategoryCopy[listing.category].label}
-							</SiteLink>
-						</li>
-						{listing.tags.map((tag) => (
-							<li key={tag} css={communityTagPillCss}>
-								{tag}
-							</li>
-						))}
-					</ul>
+						<SiteLink
+							href={buildCommunityIndexHref({ category: listing.category })}
+							data-testid="community-listing-category"
+							css={detailCategoryLinkCss}
+						>
+							{communityPackageCategoryCopy[listing.category].label}
+						</SiteLink>
+						{listing.tags.length > 0 ? (
+							<>
+								<span aria-hidden="true" css={topicSeparatorCss}>
+									·
+								</span>
+								<span css={visuallyHiddenCss}>Topics: </span>
+								<span data-testid="community-detail-tags">
+									{listing.tags.join(', ')}
+								</span>
+							</>
+						) : null}
+					</p>
 
 					<dl
 						data-rise
@@ -245,36 +200,12 @@ export function CommunityDetailContent(props: CommunityDetailContentProps) {
 	)
 }
 
+/** Statuses only. Anything clickable belongs in the repository action group. */
 function renderListingHead(input: {
 	listing: PublicCommunityListing
-	loggedIn: boolean
-	returnTo: string
-	viewerIsOwner: boolean
-	viewerCanManage: boolean
-	publishCompareHref?: string | null
+	showSourceAheadStatus: boolean
 }) {
-	const viewerBadge = renderCommunityViewerInstallBadge({
-		listing: input.listing,
-		variant: 'detail',
-		loggedIn: input.loggedIn,
-		returnTo: input.returnTo,
-		viewerIsOwner: input.viewerIsOwner,
-	})
-	const updateListingHref =
-		input.viewerCanManage && input.listing.listingBehind
-			? buildUpdatePublicListingHref({
-					username: input.listing.ownerUsername,
-					kodyId: input.listing.kodyId,
-				})
-			: null
-	if (
-		!input.listing.sourceAhead &&
-		!input.listing.featured &&
-		!viewerBadge &&
-		!updateListingHref
-	) {
-		return null
-	}
+	if (!input.showSourceAheadStatus && !input.listing.featured) return null
 	return (
 		<header
 			data-rise
@@ -282,35 +213,14 @@ function renderListingHead(input: {
 			css={listingHeadCss}
 		>
 			<div css={listingBadgeGroupCss}>
-				{input.listing.sourceAhead ? (
-					input.publishCompareHref ? (
-						<SiteLink
-							href={input.publishCompareHref}
-							data-testid="community-detail-source-ahead-badge"
-							title="Review the unpublished HEAD changes, then publish them."
-							css={badgeLinkCss}
-						>
-							HEAD ahead of published
-						</SiteLink>
-					) : (
-						<span
-							data-testid="community-detail-source-ahead-badge"
-							title="Default-branch HEAD is newer than the last package publish. Source at HEAD is already public; runtime still uses the published commit."
-							css={badgeCss}
-						>
-							HEAD ahead of published
-						</span>
-					)
-				) : null}
-				{updateListingHref ? (
-					<SiteLink
-						href={updateListingHref}
-						data-testid="community-detail-update-public-listing"
-						title="Publish and promote do not move the catalog listing. Open settings to republish the public snapshot."
-						css={badgeLinkCss}
+				{input.showSourceAheadStatus ? (
+					<span
+						data-testid="community-detail-source-ahead-badge"
+						title="Default-branch HEAD is newer than the last package publish. Source at HEAD is already public; runtime still uses the published commit."
+						css={badgeCss}
 					>
-						Update public listing
-					</SiteLink>
+						HEAD ahead of published
+					</span>
 				) : null}
 				{input.listing.featured ? (
 					<span
@@ -321,7 +231,6 @@ function renderListingHead(input: {
 						Featured
 					</span>
 				) : null}
-				{viewerBadge}
 			</div>
 		</header>
 	)
@@ -332,14 +241,14 @@ const listingHeadCss = {
 	display: 'flex',
 	alignItems: 'flex-start',
 	gap: '1.1rem',
-} satisfies CSSObject
+}
 
 const listingBadgeGroupCss = {
 	display: 'flex',
 	alignItems: 'center',
 	flexWrap: 'wrap' as const,
 	gap: '0.35rem',
-} satisfies CSSObject
+}
 
 const badgeCss = {
 	display: 'inline-flex',
@@ -351,28 +260,6 @@ const badgeCss = {
 	backgroundColor: colors.surface,
 	border: `1px solid ${colors.border}`,
 	color: colors.textMuted,
-} satisfies CSSObject
-
-const badgeLinkCss = {
-	...badgeCss,
-	textDecoration: 'none',
-	'&:hover': {
-		color: colors.text,
-		borderColor: colors.textMuted,
-	},
-} satisfies CSSObject
-
-function resolvePackageAppHref(input: {
-	hasApp: boolean
-	username: string
-	kodyId: string
-	viewerIsOwner: boolean
-}) {
-	if (!input.hasApp || !input.viewerIsOwner) return null
-	return buildPackageAppPath({
-		username: input.username,
-		kodyId: input.kodyId,
-	})
 }
 
 function buildPromoteToPackagePrompt(kodyId: string) {
@@ -402,14 +289,14 @@ function renderPlainRepoOwnerHints(input: {
 						<p css={plainRepoHintTextCss}>
 							Root <code>package.json</code> is at HEAD. Ask your agent to run{' '}
 							<code>repoPromoteToPackage</code>, or follow the{' '}
-							<a
+							<SiteLink
 								href={plainReposPromoteDocsHref}
 								data-testid="plain-repo-promote-docs"
 								rel="noopener noreferrer"
 								target="_blank"
 							>
 								promote docs
-							</a>
+							</SiteLink>
 							.
 						</p>
 						<pre
@@ -489,30 +376,22 @@ const plainRepoPromptCss = {
 	whiteSpace: 'pre-wrap' as const,
 }
 
-const packageAppLinkRowCss = {
+/* Category and topics read as one line of metadata: only the category is a
+   link, and nothing here borrows the pill shape the action group uses. */
+const topicsCss = {
+	margin: '1.1rem 0 0',
 	display: 'flex',
 	flexWrap: 'wrap' as const,
-	alignItems: 'center',
-	gap: '0.65rem 1.15rem',
-	margin: '0.9rem 0 0',
-} satisfies CSSObject
+	alignItems: 'baseline',
+	gap: '0.2rem 0.5rem',
+	fontSize: '0.92rem',
+	lineHeight: 1.5,
+	color: colors.textMuted,
+}
 
-const packageAppLinkCss = {
-	display: 'inline-flex',
-	alignItems: 'center',
-	gap: '0.35rem',
-	color: colors.primaryText,
-	fontWeight: 550,
-	textDecoration: 'none',
-	'&:hover': {
-		color: colors.text,
-	},
-} satisfies CSSObject
-
-const detailTagListCss = {
-	...communityTagListCss,
-	marginTop: '1rem',
-} satisfies CSSObject
+const topicSeparatorCss = {
+	color: colors.textMuted,
+}
 
 const detailCategoryLinkCss = {
 	color: colors.primaryText,
@@ -522,7 +401,7 @@ const detailCategoryLinkCss = {
 	'&:hover': {
 		color: colors.text,
 	},
-} satisfies CSSObject
+}
 
 const metaCss = {
 	margin: '1.6rem 0 0',
@@ -549,4 +428,4 @@ const metaCss = {
 	'& dd code': {
 		font: '500 0.88rem/1.2 ui-monospace, "SF Mono", Menlo, monospace',
 	},
-} satisfies CSSObject
+}

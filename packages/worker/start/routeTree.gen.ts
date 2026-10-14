@@ -108,6 +108,7 @@ import { Route as AtChar123orgSlugChar125ActivityRouteImport } from './routes/@{
 import { Route as AtChar123orgSlugChar125AgentsRouteImport } from './routes/@{$orgSlug}_.-.agents'
 import { Route as AtChar123orgSlugChar125BillingRouteImport } from './routes/@{$orgSlug}_.-.billing'
 import { Route as AtChar123orgSlugChar125CollaboratorsRouteImport } from './routes/@{$orgSlug}_.-.collaborators'
+import { Route as AtChar123orgSlugChar125CredentialsRouteImport } from './routes/@{$orgSlug}_.-.credentials'
 import { Route as AtChar123orgSlugChar125EmailRouteImport } from './routes/@{$orgSlug}_.-.email'
 import { Route as AtChar123orgSlugChar125GrantsRouteImport } from './routes/@{$orgSlug}_.-.grants'
 import { Route as AtChar123orgSlugChar125IntegrationsRouteImport } from './routes/@{$orgSlug}_.-.integrations'
@@ -122,13 +123,18 @@ import { Route as AtChar123orgSlugChar125SecretProvidersRouteImport } from './ro
 import { Route as AtChar123orgSlugChar125SecretsRouteImport } from './routes/@{$orgSlug}_.-.secrets'
 import { Route as AtChar123orgSlugChar125SettingsRouteImport } from './routes/@{$orgSlug}_.-.settings'
 import { Route as AtChar123orgSlugChar125TeamsRouteImport } from './routes/@{$orgSlug}_.-.teams'
+import { Route as AtChar123orgSlugChar125UsageRouteImport } from './routes/@{$orgSlug}_.-.usage'
 import { Route as AtChar123orgSlugChar125ValuesRouteImport } from './routes/@{$orgSlug}_.-.values'
 import { Route as AtChar123orgSlugChar125WaitingRouteImport } from './routes/@{$orgSlug}_.-.waiting'
 import { Route as AtChar123orgSlugChar125WebhooksRouteImport } from './routes/@{$orgSlug}_.-.webhooks'
 import { Route as AtChar123orgSlugChar125WorkflowsRouteImport } from './routes/@{$orgSlug}_.-.workflows'
 import { Route as AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport } from './routes/@{$username}_.$kodyId_.approve-capabilities'
+import { Route as AtChar123usernameChar125KodyIdApproveCredentialsRouteImport } from './routes/@{$username}_.$kodyId_.approve-credentials'
 import { Route as AtChar123usernameChar125KodyIdApprovePublishRouteImport } from './routes/@{$username}_.$kodyId_.approve-publish'
+import { Route as AtChar123usernameChar125KodyIdCredentialsRouteImport } from './routes/@{$username}_.$kodyId_.credentials'
+import { Route as AtChar123usernameChar125KodyIdMappingsRouteImport } from './routes/@{$username}_.$kodyId_.mappings'
 import { Route as AtChar123usernameChar125KodyIdSettingsRouteImport } from './routes/@{$username}_.$kodyId_.settings'
+import { Route as AtChar123usernameChar125KodyIdTriggersRouteImport } from './routes/@{$username}_.$kodyId_.triggers'
 import { Route as AccountActivityRunIdRouteImport } from './routes/account_.activity_.$runId'
 import { Route as AccountAgentsNewRouteImport } from './routes/account_.agents_.new'
 import { Route as AccountAgentsUsageRouteImport } from './routes/account_.agents_.usage'
@@ -161,6 +167,8 @@ import { Route as AtChar123orgSlugChar125ActivityRunIdRouteImport } from './rout
 import { Route as AtChar123orgSlugChar125AgentsNewRouteImport } from './routes/@{$orgSlug}_.-.agents_.new'
 import { Route as AtChar123orgSlugChar125AgentsUsageRouteImport } from './routes/@{$orgSlug}_.-.agents_.usage'
 import { Route as AtChar123orgSlugChar125BillingSuccessRouteImport } from './routes/@{$orgSlug}_.-.billing_.success'
+import { Route as AtChar123orgSlugChar125CredentialsCredentialIdRouteImport } from './routes/@{$orgSlug}_.-.credentials_.$credentialId'
+import { Route as AtChar123orgSlugChar125CredentialsNewRouteImport } from './routes/@{$orgSlug}_.-.credentials_.new'
 import { Route as AtChar123orgSlugChar125EmailMessageIdRouteImport } from './routes/@{$orgSlug}_.-.email_.$messageId'
 import { Route as AtChar123orgSlugChar125IntegrationsIntegrationNameRouteImport } from './routes/@{$orgSlug}_.-.integrations_.$integrationName'
 import { Route as AtChar123orgSlugChar125IntegrationsApproveRouteImport } from './routes/@{$orgSlug}_.-.integrations_.approve'
@@ -700,6 +708,12 @@ const AtChar123orgSlugChar125CollaboratorsRoute =
     path: '/@{$orgSlug}/-/collaborators',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125CredentialsRoute =
+  AtChar123orgSlugChar125CredentialsRouteImport.update({
+    id: '/@{$orgSlug}_/-/credentials',
+    path: '/@{$orgSlug}/-/credentials',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125EmailRoute =
   AtChar123orgSlugChar125EmailRouteImport.update({
     id: '/@{$orgSlug}_/-/email',
@@ -784,6 +798,12 @@ const AtChar123orgSlugChar125TeamsRoute =
     path: '/@{$orgSlug}/-/teams',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125UsageRoute =
+  AtChar123orgSlugChar125UsageRouteImport.update({
+    id: '/@{$orgSlug}_/-/usage',
+    path: '/@{$orgSlug}/-/usage',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125ValuesRoute =
   AtChar123orgSlugChar125ValuesRouteImport.update({
     id: '/@{$orgSlug}_/-/values',
@@ -814,16 +834,40 @@ const AtChar123usernameChar125KodyIdApproveCapabilitiesRoute =
     path: '/@{$username}/$kodyId/approve-capabilities',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125KodyIdApproveCredentialsRoute =
+  AtChar123usernameChar125KodyIdApproveCredentialsRouteImport.update({
+    id: '/@{$username}_/$kodyId_/approve-credentials',
+    path: '/@{$username}/$kodyId/approve-credentials',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdApprovePublishRoute =
   AtChar123usernameChar125KodyIdApprovePublishRouteImport.update({
     id: '/@{$username}_/$kodyId_/approve-publish',
     path: '/@{$username}/$kodyId/approve-publish',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123usernameChar125KodyIdCredentialsRoute =
+  AtChar123usernameChar125KodyIdCredentialsRouteImport.update({
+    id: '/@{$username}_/$kodyId_/credentials',
+    path: '/@{$username}/$kodyId/credentials',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123usernameChar125KodyIdMappingsRoute =
+  AtChar123usernameChar125KodyIdMappingsRouteImport.update({
+    id: '/@{$username}_/$kodyId_/mappings',
+    path: '/@{$username}/$kodyId/mappings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123usernameChar125KodyIdSettingsRoute =
   AtChar123usernameChar125KodyIdSettingsRouteImport.update({
     id: '/@{$username}_/$kodyId_/settings',
     path: '/@{$username}/$kodyId/settings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123usernameChar125KodyIdTriggersRoute =
+  AtChar123usernameChar125KodyIdTriggersRouteImport.update({
+    id: '/@{$username}_/$kodyId_/triggers',
+    path: '/@{$username}/$kodyId/triggers',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AccountActivityRunIdRoute = AccountActivityRunIdRouteImport.update({
@@ -996,6 +1040,18 @@ const AtChar123orgSlugChar125BillingSuccessRoute =
   AtChar123orgSlugChar125BillingSuccessRouteImport.update({
     id: '/@{$orgSlug}_/-/billing_/success',
     path: '/@{$orgSlug}/-/billing/success',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123orgSlugChar125CredentialsCredentialIdRoute =
+  AtChar123orgSlugChar125CredentialsCredentialIdRouteImport.update({
+    id: '/@{$orgSlug}_/-/credentials_/$credentialId',
+    path: '/@{$orgSlug}/-/credentials/$credentialId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AtChar123orgSlugChar125CredentialsNewRoute =
+  AtChar123orgSlugChar125CredentialsNewRouteImport.update({
+    id: '/@{$orgSlug}_/-/credentials_/new',
+    path: '/@{$orgSlug}/-/credentials/new',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125EmailMessageIdRoute =
@@ -1284,6 +1340,7 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1298,13 +1355,18 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
+  '/@{$orgSlug}/-/usage': typeof AtChar123orgSlugChar125UsageRoute
   '/@{$orgSlug}/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
   '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
+  '/@{$username}/$kodyId/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}/$kodyId/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
+  '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
+  '/@{$username}/$kodyId/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
   '/account/agents/new': typeof AccountAgentsNewRoute
   '/account/agents/usage': typeof AccountAgentsUsageRoute
@@ -1337,6 +1399,8 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
+  '/@{$orgSlug}/-/credentials/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}/-/integrations/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}/-/integrations/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1468,6 +1532,7 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1482,13 +1547,18 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
+  '/@{$orgSlug}/-/usage': typeof AtChar123orgSlugChar125UsageRoute
   '/@{$orgSlug}/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
   '/@{$username}/$kodyId/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
+  '/@{$username}/$kodyId/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}/$kodyId/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}/$kodyId/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
+  '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
+  '/@{$username}/$kodyId/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
   '/account/agents/new': typeof AccountAgentsNewRoute
   '/account/agents/usage': typeof AccountAgentsUsageRoute
@@ -1521,6 +1591,8 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/agents/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}/-/agents/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}/-/billing/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}/-/credentials/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
+  '/@{$orgSlug}/-/credentials/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}/-/email/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}/-/integrations/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}/-/integrations/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1654,6 +1726,7 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/agents': typeof AtChar123orgSlugChar125AgentsRoute
   '/@{$orgSlug}_/-/billing': typeof AtChar123orgSlugChar125BillingRoute
   '/@{$orgSlug}_/-/collaborators': typeof AtChar123orgSlugChar125CollaboratorsRoute
+  '/@{$orgSlug}_/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}_/-/email': typeof AtChar123orgSlugChar125EmailRoute
   '/@{$orgSlug}_/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}_/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -1668,13 +1741,18 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/secrets': typeof AtChar123orgSlugChar125SecretsRoute
   '/@{$orgSlug}_/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}_/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
+  '/@{$orgSlug}_/-/usage': typeof AtChar123orgSlugChar125UsageRoute
   '/@{$orgSlug}_/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}_/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}_/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}_/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
   '/@{$username}_/$kodyId_/approve-capabilities': typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
+  '/@{$username}_/$kodyId_/approve-credentials': typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   '/@{$username}_/$kodyId_/approve-publish': typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  '/@{$username}_/$kodyId_/credentials': typeof AtChar123usernameChar125KodyIdCredentialsRoute
+  '/@{$username}_/$kodyId_/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}_/$kodyId_/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
+  '/@{$username}_/$kodyId_/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
   '/account_/activity_/$runId': typeof AccountActivityRunIdRoute
   '/account_/agents_/new': typeof AccountAgentsNewRoute
   '/account_/agents_/usage': typeof AccountAgentsUsageRoute
@@ -1707,6 +1785,8 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/agents_/new': typeof AtChar123orgSlugChar125AgentsNewRoute
   '/@{$orgSlug}_/-/agents_/usage': typeof AtChar123orgSlugChar125AgentsUsageRoute
   '/@{$orgSlug}_/-/billing_/success': typeof AtChar123orgSlugChar125BillingSuccessRoute
+  '/@{$orgSlug}_/-/credentials_/$credentialId': typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
+  '/@{$orgSlug}_/-/credentials_/new': typeof AtChar123orgSlugChar125CredentialsNewRoute
   '/@{$orgSlug}_/-/email_/$messageId': typeof AtChar123orgSlugChar125EmailMessageIdRoute
   '/@{$orgSlug}_/-/integrations_/$integrationName': typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   '/@{$orgSlug}_/-/integrations_/approve': typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -1841,6 +1921,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
+    | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
@@ -1855,13 +1936,18 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/secrets'
     | '/@{$orgSlug}/-/settings'
     | '/@{$orgSlug}/-/teams'
+    | '/@{$orgSlug}/-/usage'
     | '/@{$orgSlug}/-/values'
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
     | '/@{$username}/$kodyId/approve-capabilities'
+    | '/@{$username}/$kodyId/approve-credentials'
     | '/@{$username}/$kodyId/approve-publish'
+    | '/@{$username}/$kodyId/credentials'
+    | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
+    | '/@{$username}/$kodyId/triggers'
     | '/account/activity/$runId'
     | '/account/agents/new'
     | '/account/agents/usage'
@@ -1894,6 +1980,8 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
+    | '/@{$orgSlug}/-/credentials/$credentialId'
+    | '/@{$orgSlug}/-/credentials/new'
     | '/@{$orgSlug}/-/email/$messageId'
     | '/@{$orgSlug}/-/integrations/$integrationName'
     | '/@{$orgSlug}/-/integrations/approve'
@@ -2025,6 +2113,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/agents'
     | '/@{$orgSlug}/-/billing'
     | '/@{$orgSlug}/-/collaborators'
+    | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/email'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
@@ -2039,13 +2128,18 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/secrets'
     | '/@{$orgSlug}/-/settings'
     | '/@{$orgSlug}/-/teams'
+    | '/@{$orgSlug}/-/usage'
     | '/@{$orgSlug}/-/values'
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
     | '/@{$username}/$kodyId/approve-capabilities'
+    | '/@{$username}/$kodyId/approve-credentials'
     | '/@{$username}/$kodyId/approve-publish'
+    | '/@{$username}/$kodyId/credentials'
+    | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
+    | '/@{$username}/$kodyId/triggers'
     | '/account/activity/$runId'
     | '/account/agents/new'
     | '/account/agents/usage'
@@ -2078,6 +2172,8 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/agents/new'
     | '/@{$orgSlug}/-/agents/usage'
     | '/@{$orgSlug}/-/billing/success'
+    | '/@{$orgSlug}/-/credentials/$credentialId'
+    | '/@{$orgSlug}/-/credentials/new'
     | '/@{$orgSlug}/-/email/$messageId'
     | '/@{$orgSlug}/-/integrations/$integrationName'
     | '/@{$orgSlug}/-/integrations/approve'
@@ -2210,6 +2306,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/agents'
     | '/@{$orgSlug}_/-/billing'
     | '/@{$orgSlug}_/-/collaborators'
+    | '/@{$orgSlug}_/-/credentials'
     | '/@{$orgSlug}_/-/email'
     | '/@{$orgSlug}_/-/grants'
     | '/@{$orgSlug}_/-/integrations'
@@ -2224,13 +2321,18 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/secrets'
     | '/@{$orgSlug}_/-/settings'
     | '/@{$orgSlug}_/-/teams'
+    | '/@{$orgSlug}_/-/usage'
     | '/@{$orgSlug}_/-/values'
     | '/@{$orgSlug}_/-/waiting'
     | '/@{$orgSlug}_/-/webhooks'
     | '/@{$orgSlug}_/-/workflows'
     | '/@{$username}_/$kodyId_/approve-capabilities'
+    | '/@{$username}_/$kodyId_/approve-credentials'
     | '/@{$username}_/$kodyId_/approve-publish'
+    | '/@{$username}_/$kodyId_/credentials'
+    | '/@{$username}_/$kodyId_/mappings'
     | '/@{$username}_/$kodyId_/settings'
+    | '/@{$username}_/$kodyId_/triggers'
     | '/account_/activity_/$runId'
     | '/account_/agents_/new'
     | '/account_/agents_/usage'
@@ -2263,6 +2365,8 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/agents_/new'
     | '/@{$orgSlug}_/-/agents_/usage'
     | '/@{$orgSlug}_/-/billing_/success'
+    | '/@{$orgSlug}_/-/credentials_/$credentialId'
+    | '/@{$orgSlug}_/-/credentials_/new'
     | '/@{$orgSlug}_/-/email_/$messageId'
     | '/@{$orgSlug}_/-/integrations_/$integrationName'
     | '/@{$orgSlug}_/-/integrations_/approve'
@@ -2392,6 +2496,7 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125AgentsRoute: typeof AtChar123orgSlugChar125AgentsRoute
   AtChar123orgSlugChar125BillingRoute: typeof AtChar123orgSlugChar125BillingRoute
   AtChar123orgSlugChar125CollaboratorsRoute: typeof AtChar123orgSlugChar125CollaboratorsRoute
+  AtChar123orgSlugChar125CredentialsRoute: typeof AtChar123orgSlugChar125CredentialsRoute
   AtChar123orgSlugChar125EmailRoute: typeof AtChar123orgSlugChar125EmailRoute
   AtChar123orgSlugChar125GrantsRoute: typeof AtChar123orgSlugChar125GrantsRoute
   AtChar123orgSlugChar125IntegrationsRoute: typeof AtChar123orgSlugChar125IntegrationsRoute
@@ -2406,13 +2511,18 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125SecretsRoute: typeof AtChar123orgSlugChar125SecretsRoute
   AtChar123orgSlugChar125SettingsRoute: typeof AtChar123orgSlugChar125SettingsRoute
   AtChar123orgSlugChar125TeamsRoute: typeof AtChar123orgSlugChar125TeamsRoute
+  AtChar123orgSlugChar125UsageRoute: typeof AtChar123orgSlugChar125UsageRoute
   AtChar123orgSlugChar125ValuesRoute: typeof AtChar123orgSlugChar125ValuesRoute
   AtChar123orgSlugChar125WaitingRoute: typeof AtChar123orgSlugChar125WaitingRoute
   AtChar123orgSlugChar125WebhooksRoute: typeof AtChar123orgSlugChar125WebhooksRoute
   AtChar123orgSlugChar125WorkflowsRoute: typeof AtChar123orgSlugChar125WorkflowsRoute
   AtChar123usernameChar125KodyIdApproveCapabilitiesRoute: typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRoute
+  AtChar123usernameChar125KodyIdApproveCredentialsRoute: typeof AtChar123usernameChar125KodyIdApproveCredentialsRoute
   AtChar123usernameChar125KodyIdApprovePublishRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRoute
+  AtChar123usernameChar125KodyIdCredentialsRoute: typeof AtChar123usernameChar125KodyIdCredentialsRoute
+  AtChar123usernameChar125KodyIdMappingsRoute: typeof AtChar123usernameChar125KodyIdMappingsRoute
   AtChar123usernameChar125KodyIdSettingsRoute: typeof AtChar123usernameChar125KodyIdSettingsRoute
+  AtChar123usernameChar125KodyIdTriggersRoute: typeof AtChar123usernameChar125KodyIdTriggersRoute
   AccountActivityRunIdRoute: typeof AccountActivityRunIdRoute
   AccountAgentsNewRoute: typeof AccountAgentsNewRoute
   AccountAgentsUsageRoute: typeof AccountAgentsUsageRoute
@@ -2442,6 +2552,8 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125AgentsNewRoute: typeof AtChar123orgSlugChar125AgentsNewRoute
   AtChar123orgSlugChar125AgentsUsageRoute: typeof AtChar123orgSlugChar125AgentsUsageRoute
   AtChar123orgSlugChar125BillingSuccessRoute: typeof AtChar123orgSlugChar125BillingSuccessRoute
+  AtChar123orgSlugChar125CredentialsCredentialIdRoute: typeof AtChar123orgSlugChar125CredentialsCredentialIdRoute
+  AtChar123orgSlugChar125CredentialsNewRoute: typeof AtChar123orgSlugChar125CredentialsNewRoute
   AtChar123orgSlugChar125EmailMessageIdRoute: typeof AtChar123orgSlugChar125EmailMessageIdRoute
   AtChar123orgSlugChar125IntegrationsIntegrationNameRoute: typeof AtChar123orgSlugChar125IntegrationsIntegrationNameRoute
   AtChar123orgSlugChar125IntegrationsApproveRoute: typeof AtChar123orgSlugChar125IntegrationsApproveRoute
@@ -3168,6 +3280,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125CollaboratorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/credentials': {
+      id: '/@{$orgSlug}_/-/credentials'
+      path: '/@{$orgSlug}/-/credentials'
+      fullPath: '/@{$orgSlug}/-/credentials'
+      preLoaderRoute: typeof AtChar123orgSlugChar125CredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/email': {
       id: '/@{$orgSlug}_/-/email'
       path: '/@{$orgSlug}/-/email'
@@ -3266,6 +3385,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125TeamsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/usage': {
+      id: '/@{$orgSlug}_/-/usage'
+      path: '/@{$orgSlug}/-/usage'
+      fullPath: '/@{$orgSlug}/-/usage'
+      preLoaderRoute: typeof AtChar123orgSlugChar125UsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/values': {
       id: '/@{$orgSlug}_/-/values'
       path: '/@{$orgSlug}/-/values'
@@ -3301,6 +3427,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdApproveCapabilitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$username}_/$kodyId_/approve-credentials': {
+      id: '/@{$username}_/$kodyId_/approve-credentials'
+      path: '/@{$username}/$kodyId/approve-credentials'
+      fullPath: '/@{$username}/$kodyId/approve-credentials'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdApproveCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId_/approve-publish': {
       id: '/@{$username}_/$kodyId_/approve-publish'
       path: '/@{$username}/$kodyId/approve-publish'
@@ -3308,11 +3441,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdApprovePublishRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$username}_/$kodyId_/credentials': {
+      id: '/@{$username}_/$kodyId_/credentials'
+      path: '/@{$username}/$kodyId/credentials'
+      fullPath: '/@{$username}/$kodyId/credentials'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$username}_/$kodyId_/mappings': {
+      id: '/@{$username}_/$kodyId_/mappings'
+      path: '/@{$username}/$kodyId/mappings'
+      fullPath: '/@{$username}/$kodyId/mappings'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdMappingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$username}_/$kodyId_/settings': {
       id: '/@{$username}_/$kodyId_/settings'
       path: '/@{$username}/$kodyId/settings'
       fullPath: '/@{$username}/$kodyId/settings'
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$username}_/$kodyId_/triggers': {
+      id: '/@{$username}_/$kodyId_/triggers'
+      path: '/@{$username}/$kodyId/triggers'
+      fullPath: '/@{$username}/$kodyId/triggers'
+      preLoaderRoute: typeof AtChar123usernameChar125KodyIdTriggersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/activity_/$runId': {
@@ -3537,6 +3691,20 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/billing/success'
       fullPath: '/@{$orgSlug}/-/billing/success'
       preLoaderRoute: typeof AtChar123orgSlugChar125BillingSuccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$orgSlug}_/-/credentials_/$credentialId': {
+      id: '/@{$orgSlug}_/-/credentials_/$credentialId'
+      path: '/@{$orgSlug}/-/credentials/$credentialId'
+      fullPath: '/@{$orgSlug}/-/credentials/$credentialId'
+      preLoaderRoute: typeof AtChar123orgSlugChar125CredentialsCredentialIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/@{$orgSlug}_/-/credentials_/new': {
+      id: '/@{$orgSlug}_/-/credentials_/new'
+      path: '/@{$orgSlug}/-/credentials/new'
+      fullPath: '/@{$orgSlug}/-/credentials/new'
+      preLoaderRoute: typeof AtChar123orgSlugChar125CredentialsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/email_/$messageId': {
@@ -3906,6 +4074,8 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125BillingRoute: AtChar123orgSlugChar125BillingRoute,
   AtChar123orgSlugChar125CollaboratorsRoute:
     AtChar123orgSlugChar125CollaboratorsRoute,
+  AtChar123orgSlugChar125CredentialsRoute:
+    AtChar123orgSlugChar125CredentialsRoute,
   AtChar123orgSlugChar125EmailRoute: AtChar123orgSlugChar125EmailRoute,
   AtChar123orgSlugChar125GrantsRoute: AtChar123orgSlugChar125GrantsRoute,
   AtChar123orgSlugChar125IntegrationsRoute:
@@ -3924,16 +4094,25 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125SecretsRoute: AtChar123orgSlugChar125SecretsRoute,
   AtChar123orgSlugChar125SettingsRoute: AtChar123orgSlugChar125SettingsRoute,
   AtChar123orgSlugChar125TeamsRoute: AtChar123orgSlugChar125TeamsRoute,
+  AtChar123orgSlugChar125UsageRoute: AtChar123orgSlugChar125UsageRoute,
   AtChar123orgSlugChar125ValuesRoute: AtChar123orgSlugChar125ValuesRoute,
   AtChar123orgSlugChar125WaitingRoute: AtChar123orgSlugChar125WaitingRoute,
   AtChar123orgSlugChar125WebhooksRoute: AtChar123orgSlugChar125WebhooksRoute,
   AtChar123orgSlugChar125WorkflowsRoute: AtChar123orgSlugChar125WorkflowsRoute,
   AtChar123usernameChar125KodyIdApproveCapabilitiesRoute:
     AtChar123usernameChar125KodyIdApproveCapabilitiesRoute,
+  AtChar123usernameChar125KodyIdApproveCredentialsRoute:
+    AtChar123usernameChar125KodyIdApproveCredentialsRoute,
   AtChar123usernameChar125KodyIdApprovePublishRoute:
     AtChar123usernameChar125KodyIdApprovePublishRoute,
+  AtChar123usernameChar125KodyIdCredentialsRoute:
+    AtChar123usernameChar125KodyIdCredentialsRoute,
+  AtChar123usernameChar125KodyIdMappingsRoute:
+    AtChar123usernameChar125KodyIdMappingsRoute,
   AtChar123usernameChar125KodyIdSettingsRoute:
     AtChar123usernameChar125KodyIdSettingsRoute,
+  AtChar123usernameChar125KodyIdTriggersRoute:
+    AtChar123usernameChar125KodyIdTriggersRoute,
   AccountActivityRunIdRoute: AccountActivityRunIdRoute,
   AccountAgentsNewRoute: AccountAgentsNewRoute,
   AccountAgentsUsageRoute: AccountAgentsUsageRoute,
@@ -3967,6 +4146,10 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125AgentsUsageRoute,
   AtChar123orgSlugChar125BillingSuccessRoute:
     AtChar123orgSlugChar125BillingSuccessRoute,
+  AtChar123orgSlugChar125CredentialsCredentialIdRoute:
+    AtChar123orgSlugChar125CredentialsCredentialIdRoute,
+  AtChar123orgSlugChar125CredentialsNewRoute:
+    AtChar123orgSlugChar125CredentialsNewRoute,
   AtChar123orgSlugChar125EmailMessageIdRoute:
     AtChar123orgSlugChar125EmailMessageIdRoute,
   AtChar123orgSlugChar125IntegrationsIntegrationNameRoute:
@@ -4025,11 +4208,15 @@ export const routeTree = rootRouteImport
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
+
 import type { startInstance } from './start.ts'
+
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
+
     router: Awaited<ReturnType<typeof getRouter>>
+
     config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }

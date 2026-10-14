@@ -411,7 +411,7 @@ export function ProviderIcon(props: {
  * catalog mark, auto-fetched favicon, then the letter fallback.
  * Login and onboarding still use the official inline ProviderIcon set.
  */
-function resolveProviderMarkSource(input: {
+export function resolveProviderMarkSource(input: {
 	logoPath?: string | null
 	autoLogoPath?: string | null
 	catalogLogoPath?: string | null

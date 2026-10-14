@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -277,10 +278,10 @@ export function ConnectSecretsRoute({
 					</div>
 					{showBackToSecrets ? (
 						<SiteLink
-							href={'/account/secrets'}
+							href={routes.accountCredentials.href()}
 							css={connectSecretsSecondaryButtonCss}
 						>
-							Back to secrets
+							Back to credentials
 						</SiteLink>
 					) : (
 						<div

@@ -1,10 +1,17 @@
 import { type Query } from '@tanstack/react-query'
-import { parseOrgResourcePath } from '#universal/org-pages.ts'
+import {
+	parseOrgResourcePath,
+	parseOrgUsagePath,
+	parseOrgBillingPath,
+} from '#universal/org-pages.ts'
 import { pageResourceKey } from './page-mutation-cache.ts'
 
 export function pageQueryOrg(href: string) {
+	const pathname = new URL(href, 'https://kody.local').pathname
 	return (
-		parseOrgResourcePath(new URL(href, 'https://kody.local').pathname)?.slug ??
+		parseOrgResourcePath(pathname)?.slug ??
+		parseOrgUsagePath(pathname)?.slug ??
+		parseOrgBillingPath(pathname)?.slug ??
 		null
 	)
 }

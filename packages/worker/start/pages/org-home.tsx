@@ -150,8 +150,8 @@ function renderOrgHomeMain(input: {
 					? null
 					: renderStep({
 							icon: 'box',
-							title: 'Repositories, agents, secrets, and jobs',
-							body: `${input.handle} has its own repositories, connected agents, secrets, and jobs, separate from your personal account.`,
+							title: 'Repositories, agents, credentials, and jobs',
+							body: `${input.handle} has its own repositories, connected agents, credentials, and jobs, separate from your personal account.`,
 							action: (
 								<div css={stepActionsCss}>
 									<SiteLink
@@ -173,10 +173,10 @@ function renderOrgHomeMain(input: {
 										Agents
 									</SiteLink>
 									<SiteLink
-										href={orgResourcePath(input.slug, 'secrets')}
+										href={orgResourcePath(input.slug, 'credentials')}
 										css={getGhostButtonCss({ size: 'sm' })}
 									>
-										Secrets
+										Credentials
 									</SiteLink>
 								</div>
 							),

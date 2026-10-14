@@ -1,17 +1,9 @@
 import { type CSSObject } from '@emotion/react'
-import { createMatcher } from 'remix/route-pattern/match'
-import { routes } from '#universal/routes.ts'
 import { isDocsPagePath } from '#universal/docs-nav.ts'
-import { isPackageFilesPathname } from '#universal/package-files.ts'
+import { isPackageDetailPathname } from '#universal/package-files.ts'
 import { isProfilePathname } from '#universal/profile-path.ts'
 import { getSlugFromPathname } from '#client/routes/blog-post-path.ts'
 import { mq, spacing, typography } from '#universal/styles/tokens.ts'
-
-const packageMatchers = [
-	routes.communityDetail,
-	routes.communityPackage,
-	routes.communityPackageSettings,
-].map((route) => createMatcher(route.pattern))
 
 function appPageOwnsGutters(pathname: string, illustratedError: boolean) {
 	return (
@@ -30,12 +22,8 @@ function appPageOwnsGutters(pathname: string, illustratedError: boolean) {
 		pathname.startsWith('/onboarding/step-') ||
 		isDocsPagePath(pathname) ||
 		isProfilePathname(pathname) ||
-		isPackageFilesPathname(pathname) ||
-		getSlugFromPathname(pathname) !== null ||
-		packageMatchers.some(
-			(matcher) =>
-				matcher.match(new URL(pathname, 'https://kody.local')) !== null,
-		)
+		isPackageDetailPathname(pathname) ||
+		getSlugFromPathname(pathname) !== null
 	)
 }
 
@@ -63,12 +51,12 @@ export function appMainCss(
 			? { display: 'grid' }
 			: appPageOwnsGutters(pathname, illustratedError)
 				? {}
-				: {
-						padding: `${spacing.lg} ${spacing.xl} ${spacing.sm}`,
-						[mq.tablet]: { padding: `${spacing.sm} ${spacing.sm} 0` },
-						[mq.mobile]: {
-							padding: `${spacing.md} ${spacing.md} ${spacing.sm}`,
-						},
-					}),
+				: mainGutterPaddingCss),
 	}
+}
+
+export const mainGutterPaddingCss: CSSObject = {
+	padding: `${spacing.lg} ${spacing.xl} ${spacing.sm}`,
+	[mq.tablet]: { padding: `${spacing.sm} ${spacing.sm} 0` },
+	[mq.mobile]: { padding: `${spacing.md} ${spacing.md} ${spacing.sm}` },
 }

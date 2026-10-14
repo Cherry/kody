@@ -58,7 +58,11 @@ import { visuallyHiddenUntilFocusedCss } from '#universal/styles/style-primitive
 import { documentHead } from '../components/document-head.ts'
 import { PageHead } from '../components/page-head.tsx'
 import { buildAuthLink } from '#client/auth-links.ts'
-import { appFrameCss, appMainCss } from '../components/app-layout.ts'
+import {
+	appFrameCss,
+	appMainCss,
+	mainGutterPaddingCss,
+} from '../components/app-layout.ts'
 import { AppBrowserEffects } from '../components/app-browser-effects.tsx'
 import stylesheet from '../../public/styles.css?raw'
 
@@ -166,7 +170,7 @@ export const Route = createRootRouteWithContext<{
 	errorComponent: ({ error }) => (
 		<main id="main">
 			{error instanceof Error && error.message === documentForbiddenMessage ? (
-				<section data-testid="unauthorized-page">
+				<section data-testid="unauthorized-page" css={mainGutterPaddingCss}>
 					<h1>Unauthorized</h1>
 					<p>{documentForbiddenMessage}</p>
 					<UnauthorizedAgentPrompt />

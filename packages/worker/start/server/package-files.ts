@@ -25,7 +25,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 			{ getRequest, setResponseHeader },
 			{ setAuthSessionSecret },
 			{ resolveCommunityFilesRoute },
-			{ loadAccessiblePackageFilesData, loadCommunityPackageFilesData },
+			{ loadAccessiblePackageFilesData, loadListingFilesData },
 			{ requireAuthenticatedPageUser },
 			{ getSavedPackageByIdInAnyOrg },
 			{ viewerCanReadSavedPackage },
@@ -80,10 +80,11 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 							selectedPath: target.selectedPath,
 							ref: target.ref,
 						})
-					: await loadCommunityPackageFilesData({
+					: await loadListingFilesData({
 							env: bindings,
 							request,
 							listingId: target.listingId,
+							packagePath: target.packagePath,
 							selectedPath: target.selectedPath,
 							ref: target.ref,
 						})

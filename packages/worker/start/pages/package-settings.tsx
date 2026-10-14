@@ -4,6 +4,7 @@ import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
 import { useState } from 'react'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
+import { renderPackageRepoActions } from '../components/package-title-actions.tsx'
 import { renderPackageRepoChrome } from '../components/package-repo-nav.tsx'
 import {
 	detailArticleCss,
@@ -62,6 +63,7 @@ export function PackageSettingsRoute({
 				viewerIsOwner: data.viewerIsOwner,
 				viewerCanManage: data.viewerCanManage,
 				active: 'settings',
+				actions: renderPackageRepoActions(data.repoActions ?? null),
 				filesHref: getPackageTreeHref({
 					username,
 					kodyId,

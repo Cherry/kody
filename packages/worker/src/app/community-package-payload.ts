@@ -1,3 +1,7 @@
+import {
+	buildPackageRepoActions,
+	buildPackageRepoActionsForPage,
+} from '#app/package-repo-actions.ts'
 import { loadCommunityDetailData } from '#app/community-data.ts'
 import {
 	loadPackagePage,
@@ -106,6 +110,10 @@ export async function loadCommunityDetailPayload(
 		serverTiming,
 		data: {
 			...detail,
+			repoActions: buildPackageRepoActions({
+				...detail,
+				kodyId: detail.listing.kodyId,
+			}),
 			hasPackage: true,
 			packageShaped: false,
 			readmeContent: detail.listing.readmeContent,
@@ -172,6 +180,7 @@ export async function loadCommunityPackagePayload(input: {
 			ownerProfilePublic: page.ownerProfilePublic,
 			viewerIsOwner: page.viewerIsOwner,
 			viewerCanManage: page.viewerCanManage,
+			repoActions: buildPackageRepoActionsForPage(page),
 			viewerCanPublish: page.viewerCanPublish,
 			viewerCanDelete: page.viewerCanDelete,
 			viewerCanAdoptCommunityFork: page.viewerCanAdoptCommunityFork,

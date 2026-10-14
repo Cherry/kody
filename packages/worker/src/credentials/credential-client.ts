@@ -23,6 +23,12 @@ import {
 	isFetchCapableCredentialKind,
 	type PackageCredentialKind,
 } from '#worker/package-registry/types.ts'
+import { enablementIdOf } from '#worker/request-context/request-context.ts'
+import {
+	buildCredentialCreateUrl,
+	type CredentialCreateLinkInput,
+} from '#universal/credential-contracts.ts'
+import { buildNeedCreateUrl } from './need-create-url.ts'
 import {
 	CredentialClientHandleError,
 	signCredentialClientHandle,
@@ -38,6 +44,11 @@ import {
 	type CredentialCallMap,
 	type CredentialPick,
 } from './credential-call-map.ts'
+import {
+	type CredentialMappingRowTarget,
+	loadCredentialMappings,
+	resolveStoredMapping,
+} from './credential-mappings.ts'
 import { loadPublishedCredentialNeeds } from './credential-needs-closure.ts'
 import { type CredentialNeed } from './credential-needs.ts'
 import {
@@ -86,6 +97,8 @@ export type CredentialClientErrorBody = {
 	retryWith: Array<CredentialClientRetry>
 	options?: Array<CredentialClientOption>
 	possibleMatches?: Array<CredentialClientOption>
+	/** Absolute creation link; always set for unbound and not-found errors. */
+	createUrl?: string
 }
 
 export class CredentialClientError extends McpCallerError {
@@ -104,17 +117,43 @@ function refusal(
 	message: string,
 	extra: Partial<CredentialClientErrorBody> = {},
 ) {
-	return new CredentialClientError({ code, message, retryWith: [], ...extra })
+	// The link rides in the message too: a fetch rejection carries only that.
+	const text = extra.createUrl
+		? `${message} Create one at ${extra.createUrl}`
+		: message
+	return new CredentialClientError({
+		code,
+		message: text,
+		retryWith: [],
+		...extra,
+	})
 }
 
-/** The structured error for a failure from the door, else null. */
-export function toCredentialClientError(error: unknown) {
+/**
+ * The structured error for a failure from the door, else null. With a
+ * `baseUrl`, a not-found error from the door carries a creation link for
+ * `orgSlug`'s org.
+ */
+export function toCredentialClientError(
+	error: unknown,
+	options: { baseUrl?: string; orgSlug?: string | null } = {},
+) {
 	if (error instanceof CredentialClientError) return error
 	if (error instanceof CredentialRequestRefusedError) {
 		return refusal(error.code, error.message)
 	}
 	if (error instanceof CredentialNotFoundError) {
-		return refusal('credential_not_found', error.message)
+		return refusal(
+			'credential_not_found',
+			error.message,
+			options.baseUrl
+				? {
+						createUrl: buildCredentialCreateUrl(options.baseUrl, {
+							orgSlug: options.orgSlug,
+						}),
+					}
+				: {},
+		)
 	}
 	if (error instanceof CredentialLoginFailedError) {
 		return refusal('login_failed', error.message)
@@ -254,6 +293,28 @@ async function loadNeed(ctx: CredentialClientContext, key: string) {
 	return needs.find((need) => need.key === key) ?? null
 }
 
+/** The creation link for an unbound need, naming its package when known. */
+async function createUrlForNeed(
+	ctx: CredentialClientContext,
+	input: { key: string; provider: string; need: CredentialNeed | null },
+) {
+	const saved = ctx.packageId
+		? await getSavedPackageById(ctx.env.APP_DB, {
+				userId: requireActorRequest(ctx).org.id,
+				packageId: ctx.packageId,
+			}).catch(() => null)
+		: null
+	return buildNeedCreateUrl({
+		db: ctx.env.APP_DB,
+		baseUrl: ctx.callerContext.baseUrl,
+		orgSlug: requireActorRequest(ctx).org.slug,
+		key: input.key,
+		provider: input.provider,
+		need: input.need,
+		packageKodyId: saved?.kodyId ?? null,
+	})
+}
+
 function needTarget(key: string, need: CredentialNeed | null): NeedTarget {
 	if (!need) {
 		return {
@@ -310,6 +371,8 @@ function pickOne(input: {
 	candidates: Array<UsableCredential>
 	possibleMatches: Array<UsableCredential>
 	describe: string
+	/** Set when there are no candidates: the unbound error's creation link. */
+	createUrl?: string
 }) {
 	const [only, second] = input.candidates
 	if (only && !second) return only
@@ -326,6 +389,7 @@ function pickOne(input: {
 					retryFor(input.key, match),
 				),
 				possibleMatches: input.possibleMatches.map(toOption),
+				...(input.createUrl ? { createUrl: input.createUrl } : {}),
 			},
 		)
 	}
@@ -341,10 +405,101 @@ function pickOne(input: {
 	)
 }
 
+/**
+ * A stored mapping follows the explicit-pick rule: the kind filter must match,
+ * and so must the provider when the credential has one. A need whose kind or
+ * provider changed after mapping no longer takes the old credential.
+ */
+function mappedCredentialFits(
+	credential: UsableCredential,
+	target: NeedTarget,
+): boolean {
+	if (credential.provider && credential.provider !== target.provider) {
+		return false
+	}
+	switch (target.match) {
+		case 'exact':
+			return target.kind === null || credential.kind === target.kind
+		case 'fetch-capable':
+			return isFetchCapableCredentialKind(credential.kind)
+		case 'any':
+			return true
+		default: {
+			const exhaustive: never = target.match
+			throw new Error(`Unhandled need match: ${String(exhaustive)}`)
+		}
+	}
+}
+
+/**
+ * A package need's stored mapping (trigger override, then the actor's own
+ * default, then the org default), or null to auto-resolve. Interactive runs
+ * have no trigger override; a trigger run acts as its enabler.
+ */
+async function resolveMappedNeed(
+	ctx: CredentialClientContext,
+	input: {
+		request: RequestContext
+		key: string
+		target: NeedTarget
+		usable: ReadonlyArray<UsableCredential>
+		createUrl: () => Promise<string>
+	},
+): Promise<Array<UsableCredential> | null> {
+	if (!ctx.packageId) return null
+	const enablementId = enablementIdOf(input.request)
+	const rows = await loadCredentialMappings({
+		db: ctx.env.APP_DB,
+		orgId: input.request.org.id,
+		packageId: ctx.packageId,
+		personId: input.request.actor!.userId,
+		enablementIds: enablementId ? [enablementId] : [],
+		needKey: input.key,
+	})
+	const layer = (target: CredentialMappingRowTarget['target']) =>
+		rows.find((row) => row.target.target === target)?.credentialIds ?? null
+	const resolved = resolveStoredMapping({
+		trigger: layer('enablement'),
+		mine: layer('mine'),
+		org: layer('org'),
+		usable: input.usable,
+		accepts: (credential) => mappedCredentialFits(credential, input.target),
+	})
+	if (!resolved) return null
+	const where =
+		resolved.source === 'trigger'
+			? 'this trigger'
+			: resolved.source === 'mine'
+				? 'your default'
+				: 'the org default'
+	switch (resolved.status) {
+		case 'ready':
+			return resolved.credentials
+		case 'none':
+			throw refusal(
+				'credential_unbound',
+				`Need "${input.key}" is mapped to no credential on purpose (${where}). Change that mapping in the package's credential settings, or create a credential and map it.`,
+				{ createUrl: await input.createUrl() },
+			)
+		case 'unusable':
+			throw refusal(
+				'credential_not_found',
+				`The credential mapped to need "${input.key}" for ${where} is gone or you can no longer use it. Map another credential to it in the package's trigger settings.`,
+				{ createUrl: await input.createUrl() },
+			)
+		default: {
+			const exhaustive: never = resolved
+			throw new Error(`Unhandled mapping status: ${JSON.stringify(exhaustive)}`)
+		}
+	}
+}
+
+/** With a `link`, a name with no match carries a creation link. */
 function findByName(
 	usable: ReadonlyArray<UsableCredential>,
 	pick: CredentialPick,
 	key: string | null,
+	link?: { baseUrl: string } & CredentialCreateLinkInput,
 ) {
 	const matches = usable.filter(
 		(credential) =>
@@ -355,6 +510,14 @@ function findByName(
 		throw refusal(
 			'credential_not_found',
 			`No credential named "${pick.name}" that you can use${pick.scope ? ` in ${pick.scope} scope` : ''}.`,
+			link
+				? {
+						createUrl: buildCredentialCreateUrl(link.baseUrl, {
+							...link,
+							name: pick.name,
+						}),
+					}
+				: {},
 		)
 	}
 	return pickOne({
@@ -374,9 +537,17 @@ function pickExplicit(input: {
 	pick: CredentialPick
 	usable: ReadonlyArray<UsableCredential>
 	target: NeedTarget
+	baseUrl: string
+	orgSlug: string | null
 }): Picked {
-	const credential = findByName(input.usable, input.pick, input.key)
 	const { kind, provider, match } = input.target
+	const credential = findByName(input.usable, input.pick, input.key, {
+		baseUrl: input.baseUrl,
+		orgSlug: input.orgSlug,
+		...(match === 'exact' && kind
+			? { kind, kindMode: 'required' as const }
+			: {}),
+	})
 	if (match === 'exact' && kind && credential.kind !== kind) {
 		throw refusal(
 			'invalid_request',
@@ -416,23 +587,44 @@ async function resolveKey(
 	const target = needTarget(key, need)
 	const picks = ctx.callMap?.get(key)
 	if (!picks) {
-		if (need) {
-			const resolution = resolveNeedCandidates(need, usable)
-			const credential = pickOne({
-				key,
-				candidates: resolution.candidates,
-				possibleMatches: resolution.possibleMatches,
-				describe: target.describe,
-			})
-			return [{ credential, hint: null }]
+		// Mappings belong to declared needs; a row left by a removed need is ignored.
+		const mapped = need
+			? await resolveMappedNeed(ctx, {
+					request: requireActorRequest(ctx),
+					key,
+					target,
+					usable,
+					createUrl: () =>
+						createUrlForNeed(ctx, { key, provider: target.provider, need }),
+				})
+			: null
+		if (mapped) {
+			return (mode === 'one' ? mapped.slice(0, 1) : mapped).map(
+				(credential) => ({ credential, hint: null }),
+			)
 		}
+		const { candidates, possibleMatches } = need
+			? resolveNeedCandidates(need, usable)
+			: {
+					candidates: usable.filter(
+						(candidate) => candidate.provider === target.provider,
+					),
+					possibleMatches: [],
+				}
+		const createUrl =
+			candidates.length === 0
+				? await createUrlForNeed(ctx, {
+						key,
+						provider: target.provider,
+						need,
+					})
+				: undefined
 		const credential = pickOne({
 			key,
-			candidates: usable.filter(
-				(candidate) => candidate.provider === target.provider,
-			),
-			possibleMatches: [],
+			candidates,
+			possibleMatches,
 			describe: target.describe,
+			createUrl,
 		})
 		return [{ credential, hint: null }]
 	}
@@ -440,11 +632,25 @@ async function resolveKey(
 		throw refusal(
 			'credential_unbound',
 			`The credentials map picks no credential for "${key}".`,
+			{
+				createUrl: await createUrlForNeed(ctx, {
+					key,
+					provider: target.provider,
+					need,
+				}),
+			},
 		)
 	}
 	const picked = new Map<string, Picked>()
 	for (const pick of picks) {
-		const one = pickExplicit({ key, pick, usable, target })
+		const one = pickExplicit({
+			key,
+			pick,
+			usable,
+			target,
+			baseUrl: ctx.callerContext.baseUrl,
+			orgSlug: requireActorRequest(ctx).org.slug,
+		})
 		picked.set(one.credential.id, one)
 	}
 	const all = [...picked.values()].map((one) => one.credential)
@@ -509,7 +715,10 @@ export async function openCredentialClient(
 			scope: readScope(input.scope),
 		}
 		return await issueClient(ctx, null, {
-			credential: findByName(usable, pick, null),
+			credential: findByName(usable, pick, null, {
+				baseUrl: ctx.callerContext.baseUrl,
+				orgSlug: request.org.slug,
+			}),
 			hint: null,
 		})
 	}
@@ -567,8 +776,10 @@ export async function validateCredentialCallMap(input: {
 	map: CredentialCallMap
 	packageIds: ReadonlyArray<string>
 	strict: boolean
+	/** Origin for creation links on a pick with no match. */
+	baseUrl: string
 }): Promise<{ warnings: Array<string> }> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(input, async () => {
 		const request = input.request
 		if (!request?.actor) {
 			throw refusal(
@@ -603,7 +814,14 @@ export async function validateCredentialCallMap(input: {
 			}
 			const target = needTarget(key, need)
 			for (const pick of picks) {
-				pickExplicit({ key, pick, usable, target })
+				pickExplicit({
+					key,
+					pick,
+					usable,
+					target,
+					baseUrl: input.baseUrl,
+					orgSlug: request.org.slug,
+				})
 			}
 		}
 		return { warnings }
@@ -646,11 +864,22 @@ function doorInput<T extends CredentialTarget>(
 	}
 }
 
-async function withClientErrors<T>(run: () => Promise<T>) {
+async function withClientErrors<T>(
+	link: {
+		baseUrl: string | undefined
+		request: RequestContext | null | undefined
+	},
+	run: () => Promise<T>,
+) {
 	try {
 		return await run()
 	} catch (error) {
-		throw toCredentialClientError(error) ?? error
+		throw (
+			toCredentialClientError(error, {
+				baseUrl: link.baseUrl,
+				orgSlug: link.request?.org.slug,
+			}) ?? error
+		)
 	}
 }
 
@@ -658,7 +887,7 @@ export async function signWithCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown; host?: unknown; operation?: unknown },
 ) {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext, async () => {
 		const handle = await readHandle(ctx, input.handle, ['signing'], 'sign()')
 		const host = readText(input.host, 'sign() host')
 		const operation = input.operation as SigningOperation | undefined
@@ -687,7 +916,7 @@ export async function callToolWithCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown; tool?: unknown; args?: unknown },
 ): Promise<CallToolResult> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext, async () => {
 		const handle = await readHandle(ctx, input.handle, ['mcp'], 'callTool()')
 		const toolName = readText(input.tool, 'callTool() tool name')
 		const args =
@@ -717,7 +946,7 @@ export async function refreshCredentialClient(
 	ctx: CredentialClientContext,
 	input: { handle?: unknown },
 ) {
-	return await withClientErrors(async () => {
+	return await withClientErrors(ctx.callerContext, async () => {
 		const handle = await readHandle(ctx, input.handle, ['oauth'], 'refresh')
 		return await resolveCredential(
 			doorInput(ctx, {
@@ -767,7 +996,7 @@ export async function applyCredentialClient(input: {
 	token: string
 	requestUrl: URL
 }): Promise<AppliedCredentialClient> {
-	return await withClientErrors(async () => {
+	return await withClientErrors(input, async () => {
 		const handle = await verifyCredentialClientHandle({
 			env: input.env,
 			token: input.token,

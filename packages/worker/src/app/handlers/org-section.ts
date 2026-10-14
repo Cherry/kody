@@ -44,6 +44,7 @@ export function sectionParams(
 				return { serverId: first }
 			}
 			return {}
+		case 'credentials':
 		case 'repositories':
 		case 'secret-providers':
 		case 'secrets':

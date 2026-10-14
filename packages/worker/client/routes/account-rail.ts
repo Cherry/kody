@@ -12,10 +12,12 @@ import {
 	orgTeamsPath,
 	orgSlugFromOrgOwnedPath,
 	orgSlugFromPathname,
+	orgUsagePath,
 	orderOrganizations,
 	parseOrgBillingPath,
 	parseOrgManagementPath,
 	parseOrgResourcePath,
+	parseOrgUsagePath,
 	switchOrgPath,
 	type OrganizationSummary,
 	type OrgOwnedAccountSection,
@@ -116,12 +118,6 @@ const accountRailItems: Array<AccountRailItem> = [
 		],
 	},
 	{
-		href: routes.accountUsage.href(),
-		label: 'Usage & credits',
-		icon: 'chart',
-		alsoActiveFor: [routes.accountCredits.href()],
-	},
-	{
 		href: routes.accountOrganizations.href(),
 		label: 'Organizations',
 		icon: 'users',
@@ -166,7 +162,9 @@ function orgPathOpensFor(
 ) {
 	const section = parseOrgResourcePath(pathname)?.section
 	if (org.role === null) return section === 'agents'
-	if (parseOrgBillingPath(pathname)) return orgRoleManagesBilling(org.role)
+	if (parseOrgBillingPath(pathname) || parseOrgUsagePath(pathname)) {
+		return orgRoleManagesBilling(org.role)
+	}
 	const management = parseOrgManagementPath(pathname)?.section
 	if (!management) return true
 	if (org.personal) return management === 'grants'
@@ -253,6 +251,17 @@ function billingRailItem(orgSlug: string | null | undefined): AccountRailItem {
 	}
 }
 
+function usageRailItem(orgSlug: string | null | undefined): AccountRailItem {
+	return {
+		href: orgSlug ? orgUsagePath(orgSlug) : routes.account.href(),
+		label: 'Usage & credits',
+		icon: 'chart',
+		alsoActiveFor: orgSlug
+			? [routes.accountUsage.href(), routes.accountCredits.href()]
+			: [routes.accountCredits.href()],
+	}
+}
+
 /**
  * Entry into an organization's workspace rail. Lands on Repositories (the
  * first Build section) so Activity, Secrets, and the rest stay one click away
@@ -314,7 +323,7 @@ export function teamOrgManagementItems(input: {
 		},
 	)
 	if (orgRoleManagesBilling(input.role)) {
-		items.push(billingRailItem(orgSlug))
+		items.push(usageRailItem(orgSlug), billingRailItem(orgSlug))
 	}
 	return items
 }
@@ -349,23 +358,24 @@ function agentsRailItem(orgSlug: string | null | undefined): AccountRailItem {
 	}
 }
 
-function mcpServersRailItem(
+/**
+ * One home for every credential kind. The Key, OAuth, and MCP server editors
+ * still live on their own pages, so those count as Credentials too.
+ */
+function credentialsRailItem(
 	orgSlug: string | null | undefined,
 ): AccountRailItem {
 	return {
-		href: orgSectionHref(orgSlug, 'mcp-servers'),
-		label: 'MCP servers',
-		icon: 'server',
-		description: 'Remote MCP servers whose tools Kody can call.',
-	}
-}
-
-function secretsRailItem(orgSlug: string | null | undefined): AccountRailItem {
-	return {
-		href: orgSectionHref(orgSlug, 'secrets'),
-		label: 'Secrets',
+		href: orgSectionHref(orgSlug, 'credentials'),
+		label: 'Credentials',
 		icon: 'key',
-		description: 'API keys and tokens your packages use.',
+		alsoActiveFor: orgSlug
+			? (['secrets', 'integrations', 'mcp-servers'] as const).map((section) =>
+					orgResourcePath(orgSlug, section),
+				)
+			: [],
+		description:
+			'Keys, OAuth connections, MCP servers, and vaults Kody uses for you.',
 	}
 }
 
@@ -453,14 +463,7 @@ function workspaceResourceGroups(
 		{
 			label: 'Credentials',
 			items: [
-				secretsRailItem(orgSlug),
-				{
-					href: orgSectionHref(orgSlug, 'integrations'),
-					label: 'Integrations',
-					icon: 'plug',
-					description: 'Services you connect so Kody can use them.',
-				},
-				mcpServersRailItem(orgSlug),
+				credentialsRailItem(orgSlug),
 				{
 					href: orgSectionHref(orgSlug, 'secret-providers'),
 					label: 'Secret providers',
@@ -518,13 +521,18 @@ export function workspaceRailGroups(input: {
 		]
 	}
 
+	const usage: AccountRailItem = {
+		...usageRailItem(orgSlug),
+		description: 'Activity, included compute, plan limits, and credits.',
+	}
 	const billing: AccountRailItem = {
 		...billingRailItem(orgSlug),
 		description: 'Plan, subscription, and payment method.',
 	}
+	const billingAndUsage = orgRoleManagesBilling(role) ? [usage, billing] : []
 	const organizationItems: Array<AccountRailItem> =
 		personal || !orgSlug
-			? [grantsRailItem(orgSlug), billing]
+			? [grantsRailItem(orgSlug), ...billingAndUsage]
 			: [
 					membersRailItem(orgSlug, role),
 					{
@@ -533,7 +541,7 @@ export function workspaceRailGroups(input: {
 						icon: 'edit',
 						description: 'The organization name, photo, and deletion.',
 					},
-					...(orgRoleManagesBilling(role) ? [billing] : []),
+					...billingAndUsage,
 				]
 
 	return [

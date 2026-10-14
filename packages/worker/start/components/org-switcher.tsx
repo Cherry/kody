@@ -14,6 +14,10 @@ import {
 	currentSwitcherSlug,
 	orgIdentity,
 	orgRoleLabel,
+	orgRoleManagesBilling,
+	orgSlugFromOrgOwnedPath,
+	orgSlugFromPathname,
+	orgUsagePath,
 	orgSwitcherEntries,
 	organizationsWithSignupFallback,
 	type OrganizationSummary,
@@ -297,6 +301,7 @@ export function OrgSwitcher({
 				{renderAccountGroup({
 					username: props.username,
 					currentPathname: props.currentPathname,
+					organizations,
 					heading: true,
 				})}
 			</div>
@@ -343,9 +348,32 @@ export function OrgSwitcher({
 		</div>
 	)
 }
+export function usageHrefForAccountMenu(input: {
+	pathname: string
+	organizations: ReadonlyArray<
+		Pick<OrganizationSummary, 'slug' | 'personal' | 'role'>
+	>
+	username: string
+}) {
+	const personal =
+		input.organizations.find((org) => org.personal)?.slug ??
+		input.username.trim()
+	const personalHref = personal ? orgUsagePath(personal) : routes.account.href()
+	const usageOrgSlug = (slug: string) => {
+		const org = input.organizations.find((entry) => entry.slug === slug)
+		return org && orgRoleManagesBilling(org.role) ? orgUsagePath(slug) : null
+	}
+	const owned = orgSlugFromOrgOwnedPath(input.pathname)
+	if (owned) return usageOrgSlug(owned) ?? personalHref
+	const fromPath = orgSlugFromPathname(input.pathname)
+	if (fromPath) return usageOrgSlug(fromPath) ?? personalHref
+	return personalHref
+}
+
 function accountRows(input: {
 	username: string
 	currentPathname: string
+	organizations: ReadonlyArray<OrganizationSummary>
 }): Array<SwitcherRow> {
 	const pageCurrent = (href: string) =>
 		input.currentPathname === href ? ('page' as const) : undefined
@@ -378,7 +406,11 @@ function accountRows(input: {
 		row('account-settings', routes.account.href(), 'Account settings', 'user'),
 		row(
 			'account-usage',
-			routes.accountUsage.href(),
+			usageHrefForAccountMenu({
+				pathname: input.currentPathname,
+				organizations: input.organizations,
+				username: input.username,
+			}),
 			'Usage & credits',
 			'chart',
 		),
@@ -388,6 +420,7 @@ function accountRows(input: {
 function renderAccountGroup(input: {
 	username: string
 	currentPathname: string
+	organizations: ReadonlyArray<OrganizationSummary>
 	heading: boolean
 }) {
 	return (
@@ -405,6 +438,7 @@ function renderAccountGroup(input: {
 }
 
 export function AccountMenu(props: {
+	organizations?: Array<OrganizationSummary>
 	username: string
 	displayName: string
 	avatarUrl: string | null
@@ -457,6 +491,10 @@ export function AccountMenu(props: {
 				{renderAccountGroup({
 					username: props.username,
 					currentPathname: pathname,
+					organizations: organizationsWithSignupFallback({
+						organizations: props.organizations ?? [],
+						username: props.username,
+					}),
 					heading: false,
 				})}
 			</div>
@@ -504,6 +542,7 @@ const orgSwitcherButtonCss = {
 
 const orgSwitcherLabelCss = {
 	maxWidth: '14rem',
+	lineHeight: 1.25,
 	overflow: 'hidden',
 	textOverflow: 'ellipsis',
 	whiteSpace: 'nowrap' as const,

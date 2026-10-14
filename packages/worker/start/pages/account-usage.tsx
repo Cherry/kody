@@ -29,10 +29,12 @@ import {
 	hoverMq,
 	primaryLinkCss,
 } from '#universal/styles/style-primitives.ts'
+import { warningOffersCredits } from '#universal/compute-overage.ts'
 import {
-	accountCreditsPath,
-	warningOffersCredits,
-} from '#universal/compute-overage.ts'
+	orgBillingPath,
+	orgUsageCreditsPath,
+	parseOrgUsagePath,
+} from '#universal/org-pages.ts'
 import { formatCappedPercent } from '#universal/usage-presentation.ts'
 import { creditsActionForWallet } from '#client/routes/account-usage-shared.ts'
 import { AccountUsageCreditsSection } from './account-usage-credits.tsx'
@@ -41,8 +43,6 @@ import {
 	renderCreditsAlarm,
 	renderIncludedComputePanel,
 } from './account-usage-story.tsx'
-
-const billingPath = '/account/billing'
 
 const entitlementGroupOrder: Array<
 	AccountUsageEntitlementConsumption['group']
@@ -349,6 +349,12 @@ export function AccountUsagePage({
 	currentHref: string
 }) {
 	const usage = payload
+	const orgSlug = parseOrgUsagePath(
+		new URL(currentHref, 'https://kody.local').pathname,
+	)?.slug
+	if (!orgSlug) throw new Error('Usage requires an organization URL')
+	const billingPath = orgBillingPath(orgSlug)
+	const accountCreditsPath = orgUsageCreditsPath(orgSlug)
 
 	const groupedRows = usage
 		? groupEntitlementRows(usage.entitlementConsumption)
@@ -358,6 +364,7 @@ export function AccountUsagePage({
 				usage.computeOverage.creditWallet,
 				usage.plan,
 				usage.canBuyCredits,
+				accountCreditsPath,
 			)
 		: null
 
@@ -547,6 +554,8 @@ export function AccountUsagePage({
 					))}
 					{usage.credits ? (
 						<AccountUsageCreditsSection
+							key={orgSlug}
+							orgSlug={orgSlug}
 							credits={usage.credits}
 							notice={usage.notice}
 							error={usage.error}

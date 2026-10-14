@@ -24,7 +24,8 @@ export const Route = createFileRoute('/account_/usage')({
 				'error',
 				'topup',
 				'session_id',
-			]),
+			]) +
+			(location.hash ? `#${location.hash}` : ''),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

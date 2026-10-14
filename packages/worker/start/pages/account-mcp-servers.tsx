@@ -27,6 +27,7 @@ import {
 	type MessageTone,
 	filterServers,
 	readOAuthResultFromHref,
+	readAddServerPrefill,
 	readSearchFilter,
 	renderNamedServer,
 	stateColor,
@@ -144,8 +145,16 @@ export function AccountMcpServersPage({
 	const [usageSavingId, setUsageSavingId] = useState<string | null>(null)
 	const { oauthClientOrigin, oauthCallbackUrl, oauthClientMetadataUrl } =
 		payload
-	const [addName, setAddName] = useState('')
-	const [addUrl, setAddUrl] = useState('')
+	const creating = mcpServersRoute.getSelection(currentHref).isCreating
+	const prefill = readAddServerPrefill(currentHref)
+	const [addName, setAddName] = useState(creating ? prefill.name : '')
+	const [addUrl, setAddUrl] = useState(creating ? prefill.url : '')
+	useEffect(() => {
+		if (creating) {
+			setAddName(prefill.name)
+			setAddUrl(prefill.url)
+		}
+	}, [creating, prefill.name, prefill.url])
 	const [addBearerToken, setAddBearerToken] = useState('')
 	const [message, setMessage] = useState<string | null>(
 		readOAuthResultFromHref(currentHref)?.message ?? null,

@@ -9,6 +9,8 @@ import {
 	type EffectiveCredentialMappingStatus,
 	type PackageCredentialNeedView,
 	type PackageCredentialsIncomplete,
+	type PackageCredentialsWriteError,
+	type PackageCredentialsWriteFailure,
 	type PackageTriggerView,
 	type StoredCredentialMapping,
 	type CredentialApprovalView,
@@ -37,8 +39,8 @@ import {
 	isCredentialKind,
 	buildCredentialCreateHref,
 	buildCredentialCreateUrl,
-	credentialCreateInterimHref,
 	maxCredentialProposalValues,
+	orgCredentialCreatePath,
 	parseCredentialApprovalQuery,
 	parseCredentialCreateQuery,
 	parseCredentialPick,
@@ -87,32 +89,68 @@ test('creation links lock the kind only when required and round-trip prefill', (
 	).toBe('https://kody.codes/connect/credential?name=x')
 })
 
-test('the interim creation redirect picks the existing page for the kind', () => {
-	const interim = (query: string) =>
-		credentialCreateInterimHref({
-			search: new URLSearchParams(query),
+test('links that know their org open that org, and carry package scope, expiry, and locks', () => {
+	expect(orgCredentialCreatePath('acme clients')).toBe(
+		'/@acme%20clients/-/credentials/new',
+	)
+	expect(buildCredentialCreateHref({ orgSlug: 'acme', name: 'x' })).toBe(
+		'/@acme/-/credentials/new?name=x',
+	)
+	expect(buildCredentialCreateHref({ orgSlug: ' ', name: 'x' })).toBe(
+		'/connect/credential?name=x',
+	)
+
+	const packageKey = new URL(
+		buildCredentialCreateHref({
 			orgSlug: 'acme',
-		})
-	expect(interim('kind=oauth&provider=github')).toBe(
-		'/connect/oauth?kind=oauth&provider=github',
+			kind: 'secret',
+			name: 'TOKEN',
+			packageScopedTo: 'pkg-1',
+			expiresAt: '2026-12-31',
+			allowedPackages: ['pkg-2'],
+		}),
+		'https://kody.codes',
 	)
-	expect(interim('kind=secret&name=x&forPackage=pr-digest')).toBe(
-		'/connect/secret-set?kind=secret&name=x&forPackage=pr-digest',
+	expect(Object.fromEntries(packageKey.searchParams)).toEqual({
+		kind: 'secret',
+		name: 'TOKEN',
+		scope: 'package',
+		packageId: 'pkg-1',
+		expiresAt: '2026-12-31',
+	})
+	expect(parseCredentialCreateQuery(packageKey.searchParams)).toMatchObject({
+		packageScopedTo: 'pkg-1',
+		packageScopeMissingId: false,
+		expiresAt: '2026-12-31',
+		allowedPackages: [],
+	})
+
+	const locked = parseCredentialCreateQuery(
+		new URL(
+			buildCredentialCreateHref({
+				allowedPackages: ['pkg-2', ' pkg-1 ', 'pkg-2'],
+			}),
+			'https://kody.codes',
+		).searchParams,
 	)
-	expect(interim('')).toBe('/connect/secret-set')
-	expect(interim('kind=mcp&name=linear')).toBe(
-		'/@acme/-/mcp-servers?kind=mcp&name=linear',
+	expect(locked).toMatchObject({
+		packageScopedTo: null,
+		allowedPackages: ['pkg-2', 'pkg-1'],
+	})
+	expect(locked.passthrough.toString()).toBe('')
+
+	const parse = (search: string) =>
+		parseCredentialCreateQuery(new URLSearchParams(search))
+	expect(parse('packageId=pkg-1')).toMatchObject({
+		packageScopedTo: 'pkg-1',
+	})
+	expect(parse('scope=package')).toMatchObject({
+		packageScopedTo: null,
+		packageScopeMissingId: true,
+	})
+	expect(parse('scope=user&packageId=pkg-1&allowedPackages=a,b')).toMatchObject(
+		{ packageScopedTo: null, allowedPackages: ['a', 'b'] },
 	)
-	for (const kind of ['url', 'login', 'signing']) {
-		expect(interim(`kind=${kind}&name=x`)).toBe('/@acme/-/secrets')
-	}
-	const noOrg = (query: string) =>
-		credentialCreateInterimHref({
-			search: new URLSearchParams(query),
-			orgSlug: null,
-		})
-	expect(noOrg('kind=mcp')).toBe('/account?kind=mcp')
-	expect(noOrg('kind=login')).toBe('/account')
 })
 
 test('picks parse names, scoped names, and ids', () => {
@@ -166,6 +204,7 @@ test('names that look like prefixes and brackets in names round-trip', () => {
 	])
 	expect(parseCredentialApprovalQuery(url.searchParams)).toEqual({
 		changes,
+		enable: [],
 		reason: null,
 		errors: [],
 	})
@@ -246,9 +285,59 @@ test('approval links round-trip defaults, personal defaults, triggers, and none'
 				credentials: [],
 			},
 		],
+		enable: [],
 		reason: 'Daily digest',
 		errors: [],
 	})
+})
+
+test('enable params turn triggers on with no mapping, deduped and capped with mappings', () => {
+	const href = buildCredentialApprovalHref({
+		username: 'acme',
+		kodyId: 'pr-digest',
+		changes: [],
+		enable: [
+			{ kind: 'webhook', name: 'incoming' },
+			{ kind: 'subscription', name: 'acme.thing:happened' },
+		],
+	})
+	expect(href).toBe(
+		'/@acme/pr-digest/approve-credentials?enable=webhook%3Aincoming&enable=subscription%3Aacme.thing%3Ahappened',
+	)
+	expect(
+		parseCredentialApprovalQuery(
+			new URL(href, 'https://kody.codes').searchParams,
+		),
+	).toEqual({
+		changes: [],
+		enable: [
+			{ kind: 'webhook', name: 'incoming' },
+			{ kind: 'subscription', name: 'acme.thing:happened' },
+		],
+		reason: null,
+		errors: [],
+	})
+
+	const messy = parseCredentialApprovalQuery(
+		new URLSearchParams(
+			'enable=webhook:incoming&enable= webhook : incoming &enable=hourly:x&enable=cron:&enable=daily',
+		),
+	)
+	expect(messy.enable).toEqual([{ kind: 'webhook', name: 'incoming' }])
+	expect(messy.errors).toEqual([
+		'"enable=hourly:x" is not a trigger; use <cron|subscription|webhook>:<name>.',
+		'"enable=cron:" is not a trigger; use <cron|subscription|webhook>:<name>.',
+		'"enable=daily" is not a trigger; use <cron|subscription|webhook>:<name>.',
+	])
+
+	const tooMany = new URLSearchParams()
+	for (let index = 0; index < maxCredentialProposalValues; index += 1) {
+		tooMany.append(`default[need-${index}]`, 'x')
+	}
+	tooMany.append('enable', 'webhook:incoming')
+	const capped = parseCredentialApprovalQuery(tooMany)
+	expect(capped).toMatchObject({ changes: [], enable: [] })
+	expect(capped.errors).toHaveLength(1)
 })
 
 test('approval queries report malformed mapping params and cap the size', () => {
@@ -492,8 +581,16 @@ const sampleApproval = {
 				multiple: false,
 			},
 			before: null,
+			beforeUnusableIds: [],
 			after: [acmeBot],
 			willEnable: false,
+			error: null,
+		},
+	],
+	enable: [
+		{
+			trigger: { kind: 'webhook', name: 'incoming' },
+			willEnable: true,
 			error: null,
 		},
 	],
@@ -551,6 +648,17 @@ test('each view part is addressable on its own', () => {
 		status: 'unbound',
 	}
 	const change: CredentialApprovalChangeView = sampleApproval.changes[0]!
+	const writeError: PackageCredentialsWriteError = {
+		needKey: 'github',
+		target: change.target,
+		code: 'need_unknown',
+		message: 'No such need.',
+	}
+	const failure: PackageCredentialsWriteFailure = {
+		ok: false,
+		errors: [writeError],
+	}
+	expect(failure.errors[0]?.code).toBe('need_unknown')
 	expect([
 		stored?.credentials[0]?.name,
 		status,

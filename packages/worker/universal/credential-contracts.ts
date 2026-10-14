@@ -196,6 +196,20 @@ export type PackageCredentialsView = {
 	incomplete: Array<PackageCredentialsIncomplete>
 }
 
+/** One change POST credentials.json refused; nothing was written. */
+export type PackageCredentialsWriteError = {
+	needKey: string
+	target: CredentialMappingTarget
+	code: CredentialApprovalErrorCode
+	message: string
+	createUrl?: string
+}
+
+export type PackageCredentialsWriteFailure = {
+	ok: false
+	errors: Array<PackageCredentialsWriteError>
+}
+
 export const credentialApprovalErrorCodes = [
 	'need_unknown',
 	'trigger_unknown',
@@ -221,12 +235,25 @@ export type CredentialApprovalChangeView = {
 		multiple: boolean
 	} | null
 	before: Array<CredentialRef> | null
+	/** Stored refs left out of `before` because the viewer can no longer Use them; ids only. */
+	beforeUnusableIds: Array<string>
 	after: Array<CredentialRef>
 	willEnable: boolean
 	error: {
 		code: CredentialApprovalErrorCode
 		message: string
 		createUrl?: string
+	} | null
+}
+
+/** A trigger the proposal turns on with no mapping of its own. */
+export type CredentialApprovalEnableView = {
+	trigger: CredentialTriggerRef
+	/** False when it is already on (or paused) for you; Approve is a no-op. */
+	willEnable: boolean
+	error: {
+		code: CredentialApprovalErrorCode
+		message: string
 	} | null
 }
 
@@ -237,7 +264,20 @@ export type CredentialApprovalView = {
 	canApprove: boolean
 	fingerprint: string
 	changes: Array<CredentialApprovalChangeView>
+	enable: Array<CredentialApprovalEnableView>
 	errors: Array<string>
+}
+
+/** Approve refused; nothing was written. `view` is resolved fresh. */
+export type CredentialApprovalFailure = {
+	ok: false
+	error: string
+	view: CredentialApprovalView
+}
+
+export type CredentialApprovalSuccess = {
+	ok: true
+	view: CredentialApprovalView
 }
 
 export function describeCredentialMappingTarget(
@@ -259,11 +299,22 @@ export function describeCredentialMappingTarget(
 // Creation link: /connect/credential
 // ---------------------------------------------------------------------------
 
+/**
+ * The org-less creation link. It redirects to the signed-in person's signup
+ * org; links that know their org use {@link orgCredentialCreatePath}.
+ */
 export const credentialCreatePath = '/connect/credential'
+
+/** The creation page for one org: the org the link's MCP connection or CLI is bound to. */
+export function orgCredentialCreatePath(orgSlug: string) {
+	return `/@${encodeURIComponent(orgSlug)}/-/credentials/new`
+}
 
 export type CredentialKindMode = 'hint' | 'required'
 
 export type CredentialCreateLinkInput = {
+	/** The org the credential is saved in. Omit only when no org is known. */
+	orgSlug?: string | null
 	kind?: CredentialKind | null
 	kindMode?: CredentialKindMode
 	name?: string | null
@@ -273,6 +324,12 @@ export type CredentialCreateLinkInput = {
 	/** The package (kody id) and need key the credential is for. */
 	packageKodyId?: string | null
 	needKey?: string | null
+	/** A Key only this saved package (id) can read. */
+	packageScopedTo?: string | null
+	/** UTC ISO timestamp or YYYY-MM-DD. */
+	expiresAt?: string | null
+	/** Saved package ids the Key is locked to. */
+	allowedPackages?: ReadonlyArray<string>
 	/** Passed through to the reused form (secret-set or OAuth params). */
 	extra?: Record<string, string>
 }
@@ -286,7 +343,17 @@ const createLinkKnownParams = new Set([
 	'allowedHosts',
 	'forPackage',
 	'need',
+	'scope',
+	'packageId',
+	'expiresAt',
+	'allowedPackages',
 ])
+
+function commaList(values: ReadonlyArray<string> | undefined) {
+	return [...new Set((values ?? []).map((value) => value.trim()))].filter(
+		Boolean,
+	)
+}
 
 function trimmed(value: string | null | undefined) {
 	const text = value?.trim()
@@ -309,18 +376,28 @@ export function buildCredentialCreateHref(
 	set('name', input.name)
 	set('provider', input.provider)
 	set('description', input.description)
-	const hosts = (input.allowedHosts ?? [])
-		.map((host) => host.trim())
-		.filter(Boolean)
+	const hosts = commaList(input.allowedHosts)
 	if (hosts.length > 0) params.set('allowedHosts', hosts.join(','))
 	set('forPackage', input.packageKodyId)
 	set('need', input.needKey)
+	const packageScopedTo = trimmed(input.packageScopedTo)
+	if (packageScopedTo) {
+		params.set('scope', 'package')
+		params.set('packageId', packageScopedTo)
+	}
+	set('expiresAt', input.expiresAt)
+	const allowedPackages = commaList(input.allowedPackages)
+	if (!packageScopedTo && allowedPackages.length > 0) {
+		params.set('allowedPackages', allowedPackages.join(','))
+	}
 	for (const [key, value] of Object.entries(input.extra ?? {})) {
 		if (createLinkKnownParams.has(key)) continue
 		params.set(key, value)
 	}
+	const orgSlug = trimmed(input.orgSlug)
+	const path = orgSlug ? orgCredentialCreatePath(orgSlug) : credentialCreatePath
 	const query = params.toString()
-	return query ? `${credentialCreatePath}?${query}` : credentialCreatePath
+	return query ? `${path}?${query}` : path
 }
 
 /** The creation link as an absolute URL on `baseUrl`'s origin. */
@@ -341,8 +418,20 @@ export type ParsedCredentialCreateQuery = {
 	allowedHosts: Array<string>
 	packageKodyId: string | null
 	needKey: string | null
+	/** `scope=package&packageId=…`: a Key only that saved package can read. */
+	packageScopedTo: string | null
+	/** True when `scope=package` came without a `packageId`. */
+	packageScopeMissingId: boolean
+	/** The raw `expiresAt`; the page validates it. */
+	expiresAt: string | null
+	/** Saved package ids the Key is locked to (ignored for package Keys). */
+	allowedPackages: Array<string>
 	/** Every other param, for the reused form. */
 	passthrough: URLSearchParams
+}
+
+function readCommaList(search: URLSearchParams, key: string) {
+	return commaList(search.getAll(key).flatMap((value) => value.split(',')))
 }
 
 export function parseCredentialCreateQuery(
@@ -354,56 +443,26 @@ export function parseCredentialCreateQuery(
 	for (const [key, value] of search) {
 		if (!createLinkKnownParams.has(key)) passthrough.append(key, value)
 	}
+	const scope = trimmed(search.get('scope'))
+	const packageId = trimmed(search.get('packageId'))
+	// A bare `packageId` means a package Key, as on the legacy intake page.
+	const packageScope = scope === 'package' || (scope === null && !!packageId)
 	return {
 		kind,
 		kindLocked: kind !== null && search.get('kindMode') === 'required',
 		name: trimmed(search.get('name')),
 		provider: trimmed(search.get('provider')),
 		description: trimmed(search.get('description')),
-		allowedHosts: search
-			.getAll('allowedHosts')
-			.flatMap((value) => value.split(','))
-			.map((host) => host.trim())
-			.filter(Boolean),
+		allowedHosts: readCommaList(search, 'allowedHosts'),
 		packageKodyId: trimmed(search.get('forPackage')),
 		needKey: trimmed(search.get('need')),
+		packageScopedTo: packageScope ? packageId : null,
+		packageScopeMissingId: packageScope && !packageId,
+		expiresAt: trimmed(search.get('expiresAt')),
+		allowedPackages: packageScope
+			? []
+			: readCommaList(search, 'allowedPackages'),
 		passthrough,
-	}
-}
-
-/**
- * Where `/connect/credential` sends a visit until the one-pager ships: the
- * existing page for the kind, with the same query. No existing form creates
- * `url`, `login`, or `signing`, so those land on the Secrets list instead of
- * a form that would save the wrong kind.
- */
-export function credentialCreateInterimHref(input: {
-	search: URLSearchParams
-	orgSlug: string | null
-}): string {
-	const parsed = parseCredentialCreateQuery(input.search)
-	const query = input.search.toString()
-	const withQuery = (path: string) => (query ? `${path}?${query}` : path)
-	switch (parsed.kind) {
-		case 'oauth':
-			return withQuery('/connect/oauth')
-		case 'mcp':
-			return input.orgSlug
-				? withQuery(`/@${encodeURIComponent(input.orgSlug)}/-/mcp-servers`)
-				: withQuery('/account')
-		case 'url':
-		case 'login':
-		case 'signing':
-			return input.orgSlug
-				? `/@${encodeURIComponent(input.orgSlug)}/-/secrets`
-				: '/account'
-		case 'secret':
-		case null:
-			return withQuery('/connect/secret-set')
-		default: {
-			const exhaustive: never = parsed.kind
-			throw new Error(`Unhandled credential kind: ${String(exhaustive)}`)
-		}
 	}
 }
 
@@ -488,9 +547,13 @@ function proposalParamName(change: CredentialMappingChange): string {
 
 function buildCredentialProposalSearch(input: {
 	changes: ReadonlyArray<CredentialMappingProposalChange>
+	enable?: ReadonlyArray<CredentialTriggerRef>
 	reason?: string | null
 }): URLSearchParams {
 	const params = new URLSearchParams()
+	for (const trigger of input.enable ?? []) {
+		params.append('enable', `${trigger.kind}:${trigger.name}`)
+	}
 	for (const change of input.changes) {
 		const name = proposalParamName(change)
 		if (change.credentials.length === 0) {
@@ -512,6 +575,8 @@ export function buildCredentialApprovalHref(input: {
 	username: string
 	kodyId: string
 	changes: ReadonlyArray<CredentialMappingProposalChange>
+	/** Triggers to turn on even when they map nothing (a webhook, say). */
+	enable?: ReadonlyArray<CredentialTriggerRef>
 	reason?: string | null
 }): string {
 	const path = credentialApprovalPath(input)
@@ -521,8 +586,23 @@ export function buildCredentialApprovalHref(input: {
 
 export type ParsedCredentialProposal = {
 	changes: Array<CredentialMappingProposalChange>
+	enable: Array<CredentialTriggerRef>
 	reason: string | null
 	errors: Array<string>
+}
+
+/** `webhook:incoming` (split at the first colon); null when it is not one. */
+function parseCredentialTriggerRef(value: string): CredentialTriggerRef | null {
+	const text = value.trim()
+	const colon = text.indexOf(':')
+	if (colon < 0) return null
+	const kind = text.slice(0, colon).trim()
+	const name = text.slice(colon + 1).trim()
+	if (!name) return null
+	if (!(credentialTriggerKinds as ReadonlyArray<string>).includes(kind)) {
+		return null
+	}
+	return { kind: kind as CredentialTriggerKind, name }
 }
 
 const defaultParamPattern = /^(default|mine)\[([^\]]+)\]$/
@@ -577,8 +657,20 @@ export function parseCredentialApprovalQuery(
 			values: Array<string>
 		}
 	>()
+	const enableByKey = new Map<string, CredentialTriggerRef>()
 	for (const [name, value] of search) {
 		if (name === 'reason') continue
+		if (name === 'enable') {
+			const trigger = parseCredentialTriggerRef(value)
+			if (!trigger) {
+				errors.push(
+					`"enable=${value}" is not a trigger; use <cron|subscription|webhook>:<name>.`,
+				)
+				continue
+			}
+			enableByKey.set(`${trigger.kind}:${trigger.name}`, trigger)
+			continue
+		}
 		const parsed = parseProposalParamName(name)
 		if (!parsed) {
 			if (/^(default|mine|trigger)/.test(name)) {
@@ -597,12 +689,14 @@ export function parseCredentialApprovalQuery(
 		entry.values.push(value)
 		byTarget.set(key, entry)
 	}
-	if (byTarget.size > maxCredentialProposalValues) {
+	const valueCount = byTarget.size + enableByKey.size
+	if (valueCount > maxCredentialProposalValues) {
 		return {
 			changes: [],
+			enable: [],
 			reason: null,
 			errors: [
-				`A proposal holds at most ${maxCredentialProposalValues} mapping parameters; this one has ${byTarget.size}.`,
+				`A proposal holds at most ${maxCredentialProposalValues} mapping parameters; this one has ${valueCount}.`,
 			],
 		}
 	}
@@ -634,6 +728,7 @@ export function parseCredentialApprovalQuery(
 	const reason = trimmed(search.get('reason'))
 	return {
 		changes,
+		enable: [...enableByKey.values()],
 		reason: reason ? reason.slice(0, maxCredentialProposalReasonLength) : null,
 		errors,
 	}

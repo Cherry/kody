@@ -11,12 +11,14 @@ import { expect, test, vi } from 'vitest'
 import { executeGatewayFetch } from '#mcp/fetch-gateway.ts'
 import { credentialClientHintHeaderName } from '#mcp/credential-client-gateway.ts'
 import { saveSecret } from '#mcp/secrets/service.ts'
+import { upsertPlatformOauthApp } from '#worker/integrations/platform-apps.ts'
 import { upsertGrant } from '#worker/orgs/access-writes.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { insertSavedPackage } from '#worker/package-registry/repo.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
+import { consoleError } from '#worker/test-support/console-spies.ts'
 import {
 	createAuditTestDb,
 	createTestOrgAuditWriter,
@@ -42,6 +44,12 @@ import {
 	validateCredentialCallMap,
 	type CredentialClientContext,
 } from './credential-client.ts'
+import {
+	buildWriteCredentialMappingStatement,
+	type CredentialMappingRowTarget,
+	deleteCredentialMappingsForMember,
+	deleteCredentialMappingsForPackage,
+} from './credential-mappings.ts'
 import * as needsClosure from './credential-needs-closure.ts'
 import { type CredentialNeed } from './credential-needs.ts'
 
@@ -438,6 +446,113 @@ test('a declared need picks by its kind and provider, and offers same-kind crede
 	).resolves.toMatchObject({ key: 'MAIL', name: 'resend-prod' })
 })
 
+test('unbound and not-found errors always carry a creation link for the bound org, locking a declared kind', async () => {
+	const t = await setup()
+	const bea = t.requestAs('bea', 'owner')
+	const adHoc = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { key: 'resend' }),
+	)
+	const adHocUrl =
+		'https://example.com/@acme-clients/-/credentials/new?kind=secret&name=resend&provider=resend'
+	expect(adHoc.body).toMatchObject({
+		code: 'credential_unbound',
+		createUrl: adHocUrl,
+	})
+	expect(adHoc.message).toContain(`Create one at ${adHocUrl}`)
+
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/digest',
+	})
+	mockNeeds([
+		{
+			key: 'github',
+			kind: 'oauth',
+			description: 'Read PRs to summarize them',
+		},
+	])
+	const declared = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'github',
+		}),
+	)
+	const declaredUrl = new URL(
+		(declared.body as { createUrl: string }).createUrl,
+	)
+	expect(declaredUrl.pathname).toBe('/@acme-clients/-/credentials/new')
+	expect(Object.fromEntries(declaredUrl.searchParams)).toEqual({
+		kind: 'oauth',
+		kindMode: 'required',
+		name: 'github',
+		provider: 'github',
+		description: 'Read PRs to summarize them',
+		forPackage: expect.any(String),
+		need: 'github',
+	})
+
+	const named = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { name: 'missing' }),
+	)
+	expect(named.body).toMatchObject({
+		code: 'credential_not_found',
+		createUrl:
+			'https://example.com/@acme-clients/-/credentials/new?name=missing',
+	})
+})
+
+test('an unbound link selects a built-in OAuth app, and kinds with no form point at secretSet', async () => {
+	const t = await setup()
+	const bea = t.requestAs('bea', 'owner')
+	await upsertPlatformOauthApp({
+		db: t.db,
+		env: t.env,
+		app: {
+			slug: 'github',
+			clientId: 'platform-github-client-id',
+			clientSecret: 'platform-github-client-secret',
+			tokenUrl: 'https://github.com/login/oauth/access_token',
+			authorizeUrl: 'https://github.com/login/oauth/authorize',
+			flow: 'confidential',
+			visibility: 'published',
+		},
+	})
+	const builtIn = await rejection(
+		openCredentialClient(t.contextFor({ request: bea }), { key: 'github' }),
+	)
+	const builtInUrl = new URL((builtIn.body as { createUrl: string }).createUrl)
+	expect(Object.fromEntries(builtInUrl.searchParams)).toEqual({
+		kind: 'oauth',
+		name: 'github',
+		provider: 'github',
+		platform: 'github',
+	})
+
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/hooks',
+	})
+	mockNeeds([{ key: 'github', kind: 'oauth', provider: 'github' }])
+	const declaredOauth = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'github',
+		}),
+	)
+	const declaredOauthUrl = new URL(
+		(declaredOauth.body as { createUrl: string }).createUrl,
+	)
+	expect(declaredOauthUrl.searchParams.get('kindMode')).toBe('required')
+	expect(declaredOauthUrl.searchParams.get('platform')).toBe('github')
+
+	mockNeeds([{ key: 'deploy-hook', kind: 'url', provider: 'vercel' }])
+	const urlNeed = await rejection(
+		openCredentialClient(t.contextFor({ request: bea, packageId }), {
+			key: 'deploy-hook',
+		}),
+	)
+	expect(urlNeed.message).not.toContain('secretSet')
+	expect(urlNeed.message).toMatch(/Create one at https:\/\/\S+kind=url/)
+})
+
 test('a declared need with no kind opens any fetch-capable credential for the provider', async () => {
 	const t = await setup()
 	const packageId = await t.savePackage({
@@ -687,6 +802,228 @@ test('the placed header drops the code value before placeholders expand, so a pl
 	expect(seen[0]?.headers.get('authorization')).toBe(`Bearer ${resendKey}`)
 })
 
+test('stored mappings pick the credential: trigger override, then your default, then the org default, then auto-resolve', async () => {
+	const t = await setup()
+	const keyA = await t.storeKey({ name: 'resend-a' })
+	const keyB = await t.storeKey({ name: 'resend-b' })
+	await t.grantUse(keyA, 'ann')
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme-clients/digest',
+	})
+	mockNeeds([{ key: 'resend' }])
+	const map = (
+		target: CredentialMappingRowTarget,
+		credentialIds: Array<string> | null,
+	) =>
+		buildWriteCredentialMappingStatement({
+			db: t.db,
+			orgId: t.acmeId,
+			packageId,
+			needKey: 'resend',
+			target,
+			credentialIds,
+			updatedByUserId: t.people.bea.personId,
+			now,
+		}).run()
+	const open = (request: ReturnType<typeof t.requestAs>) =>
+		openCredentialClient(t.contextFor({ request, packageId }), {
+			key: 'resend',
+		})
+	const bea = t.requestAs('bea', 'owner')
+	const ann = t.requestAs('ann', 'member')
+
+	await expect(open(bea)).rejects.toMatchObject({
+		body: { code: 'credential_ambiguous' },
+	})
+	await map({ target: 'org' }, [keyB])
+	await expect(open(bea)).resolves.toMatchObject({ name: 'resend-b' })
+	await map({ target: 'mine', personId: t.people.bea.personId }, [keyA])
+	await expect(open(bea)).resolves.toMatchObject({ name: 'resend-a' })
+	await map({ target: 'mine', personId: t.people.bea.personId }, [])
+	const none = await rejection(open(bea))
+	expect(none.body).toMatchObject({
+		code: 'credential_unbound',
+		createUrl: expect.stringContaining('/@acme-clients/-/credentials/new?'),
+	})
+	expect(none.message).toContain('mapped to no credential on purpose')
+
+	// Ann cannot Use the org default, so it is skipped and her one usable Key
+	// auto-resolves. Bea's own default never applies to Ann.
+	await expect(open(ann)).resolves.toMatchObject({ name: 'resend-a' })
+
+	// A trigger run acts as its enabler and its override never falls through.
+	const enablementId = 'enablement-ann-daily'
+	const annTrigger = deriveRequestContext({
+		user: { userId: t.people.ann.personId },
+		source: {
+			kind: 'schedule',
+			jobId: 'job-1',
+			enablement: {
+				id: enablementId,
+				enabler: { userId: t.people.ann.personId },
+				role: 'member',
+			},
+		},
+		orgBinding: { org: { id: t.acmeId, slug: 'acme-clients' }, role: null },
+	})
+	const trigger = {
+		target: 'enablement',
+		enablementId,
+		personId: t.people.ann.personId,
+	} as const
+	await map(trigger, [keyB])
+	const unusable = await rejection(open(annTrigger))
+	expect(unusable.body).toMatchObject({
+		code: 'credential_not_found',
+		createUrl: expect.stringContaining('/@acme-clients/-/credentials/new?'),
+	})
+	await expect(open(ann)).resolves.toMatchObject({ name: 'resend-a' })
+	await map(trigger, [keyA])
+	await expect(open(annTrigger)).resolves.toMatchObject({ name: 'resend-a' })
+	await map(trigger, [])
+	await expect(open(annTrigger)).rejects.toMatchObject({
+		body: { code: 'credential_unbound' },
+	})
+	await map(trigger, null)
+	await expect(open(annTrigger)).resolves.toMatchObject({ name: 'resend-a' })
+
+	// Leaving the org drops Ann's own mappings, not the org default.
+	expect(
+		await deleteCredentialMappingsForMember({
+			db: t.db,
+			orgId: t.acmeId,
+			personId: t.people.ann.personId,
+		}),
+	).toBe(0)
+	await map(trigger, [keyA])
+	expect(
+		await deleteCredentialMappingsForMember({
+			db: t.db,
+			orgId: t.acmeId,
+			personId: t.people.ann.personId,
+		}),
+	).toBe(1)
+	await expect(open(bea)).rejects.toMatchObject({
+		body: { code: 'credential_unbound' },
+	})
+})
+
+test('a stored mapping stops applying when the need changes or is removed, and a corrupt row reads as unset', async () => {
+	const t = await setup()
+	const keyA = await t.storeKey({ name: 'resend-a' })
+	await t.db
+		.prepare(
+			`INSERT INTO mcp_server_settings (id, user_id, name, url, provider, enabled)
+			 VALUES ('mcp-resend', ?, 'resend-mcp', 'https://mcp.resend.example/sse', 'resend', 1)`,
+		)
+		.bind(t.acmeId)
+		.run()
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme-clients/digest',
+	})
+	const mapOrg = (credentialIds: Array<string>) =>
+		buildWriteCredentialMappingStatement({
+			db: t.db,
+			orgId: t.acmeId,
+			packageId,
+			needKey: 'resend',
+			target: { target: 'org' },
+			credentialIds,
+			updatedByUserId: t.people.bea.personId,
+			now,
+		}).run()
+	const open = () =>
+		openCredentialClient(
+			t.contextFor({ request: t.requestAs('bea', 'owner'), packageId }),
+			{ key: 'resend' },
+		)
+
+	mockNeeds([{ key: 'resend' }])
+	await mapOrg([keyA])
+	await expect(open()).resolves.toMatchObject({ name: 'resend-a' })
+	mockNeeds([{ key: 'resend', provider: 'postmark' }])
+	await expect(open()).rejects.toMatchObject({
+		body: { code: 'credential_unbound' },
+	})
+
+	mockNeeds([{ key: 'resend', kind: undefined }])
+	await mapOrg(['mcp-resend'])
+	await expect(open()).resolves.toMatchObject({
+		name: 'resend-a',
+		kind: 'secret',
+	})
+
+	await mapOrg([])
+	await t.db
+		.prepare(`UPDATE credential_mappings SET credential_ids_json = '{bad'`)
+		.run()
+	consoleError.mockImplementation(() => {})
+	await expect(open()).resolves.toMatchObject({ name: 'resend-a' })
+	expect(consoleError).toHaveBeenCalledWith(
+		expect.stringContaining('corrupt credential ids'),
+	)
+
+	await mapOrg([])
+	await expect(open()).rejects.toMatchObject({
+		body: { code: 'credential_unbound' },
+	})
+	// Removed need: the leftover row is ignored and the key auto-resolves.
+	mockNeeds([])
+	await expect(open()).rejects.toMatchObject({
+		body: { code: 'credential_ambiguous' },
+	})
+
+	expect(
+		await deleteCredentialMappingsForPackage({
+			db: t.db,
+			orgId: t.acmeId,
+			packageId,
+		}),
+	).toBe(1)
+})
+
+test('a call map pick wins over a stored mapping, and credentials() opens every mapped credential', async () => {
+	const t = await setup()
+	const keyA = await t.storeKey({ name: 'resend-a' })
+	const keyB = await t.storeKey({ name: 'resend-b' })
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme-clients/digest',
+	})
+	mockNeeds([{ key: 'resend' }])
+	await buildWriteCredentialMappingStatement({
+		db: t.db,
+		orgId: t.acmeId,
+		packageId,
+		needKey: 'resend',
+		target: { target: 'org' },
+		credentialIds: [keyA, keyB],
+		updatedByUserId: t.people.bea.personId,
+		now,
+	}).run()
+	const request = t.requestAs('bea', 'owner')
+	await expect(
+		openCredentialClient(t.contextFor({ request, packageId }), {
+			key: 'resend',
+		}),
+	).resolves.toMatchObject({ name: 'resend-a' })
+	await expect(
+		openCredentialClient(
+			t.contextFor({ request, packageId, credentials: { resend: 'resend-b' } }),
+			{ key: 'resend' },
+		),
+	).resolves.toMatchObject({ name: 'resend-b' })
+	const all = await openCredentialClients(
+		t.contextFor({ request, packageId }),
+		{
+			key: 'resend',
+		},
+	)
+	expect(all.map((client) => client.name)).toEqual(['resend-a', 'resend-b'])
+})
+
 test('a call map picks by name among several matches, and credentials() opens every pick', async () => {
 	const t = await setup()
 	await t.storeKey({ name: 'resend-a' })
@@ -804,6 +1141,7 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 			map: normalizeCredentialCallMap(credentials)!,
 			packageIds,
 			strict,
+			baseUrl: 'https://example.com',
 		})
 	await expect(validate({ MAIL: 'resend-prod' }, true)).resolves.toEqual({
 		warnings: [],
@@ -818,9 +1156,23 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 	expect(adHoc.warnings).toEqual([
 		expect.stringContaining('credentials.resend is not a need of this code'),
 	])
-	await expect(
-		rejection(validate({ MAIL: 'missing' }, true)),
-	).resolves.toMatchObject({ body: { code: 'credential_not_found' } })
+	const missing = await rejection(validate({ MAIL: 'missing' }, true))
+	expect(missing.body).toMatchObject({ code: 'credential_not_found' })
+	expect(
+		Object.fromEntries(
+			new URL((missing.body as { createUrl: string }).createUrl).searchParams,
+		),
+	).toEqual({ kind: 'secret', kindMode: 'required', name: 'missing' })
+	const emptyPick = await rejection(
+		openCredentialClient(
+			t.contextFor({ request, packageId, credentials: { MAIL: [] } }),
+			{ key: 'MAIL' },
+		),
+	)
+	expect(emptyPick.body).toMatchObject({
+		code: 'credential_unbound',
+		createUrl: expect.stringContaining('need=MAIL'),
+	})
 	await expect(
 		rejection(
 			validateCredentialCallMap({
@@ -829,6 +1181,7 @@ test('a call map is validated before code runs: unknown keys fail an invoke and 
 				map: normalizeCredentialCallMap({ MAIL: 'resend-prod' })!,
 				packageIds: [],
 				strict: false,
+				baseUrl: 'https://example.com',
 			}),
 		),
 	).resolves.toMatchObject({ body: { code: 'credential_denied' } })
@@ -860,6 +1213,7 @@ test('call map validation keeps the entry package pinned needs over a dependency
 			map: normalizeCredentialCallMap({ MAIL: 'resend-prod' })!,
 			packageIds: [entryId, depId],
 			strict: true,
+			baseUrl: 'https://example.com',
 		}),
 	).resolves.toEqual({ warnings: [] })
 })

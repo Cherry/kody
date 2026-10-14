@@ -1,3 +1,4 @@
+import { type PackageRepoActions } from '#universal/package-repo-actions.ts'
 import { type HighlightedCode } from '#universal/highlighted-code.ts'
 import {
 	type PublicCommunityListing,
@@ -6,6 +7,7 @@ import {
 import { type AccountPackageDetail } from '#universal/loader-data.ts'
 export type CommunityDetailApiPayload = {
 	ok: true
+	repoActions?: PackageRepoActions | null
 	listing: PublicCommunityListing | null
 	ownerProfilePublic: boolean
 	loggedIn: boolean

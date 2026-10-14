@@ -1,21 +1,32 @@
 /** @jsxImportSource @emotion/react */
-import { SiteLink } from './site-link.tsx'
 /** @jsxRuntime automatic */
-import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, type ReactNode } from 'react'
+import { SiteLink } from './site-link.tsx'
 import { IdentityIconMark } from './identity-icon-mark.tsx'
 import { getPackageSettingsHref } from '#universal/package-files.ts'
+import {
+	type PackageCredentialsTab,
+	packageCredentialsTabHref,
+	packageCredentialsTabLabel,
+	packageCredentialsTabs,
+} from '#universal/package-credentials-page.ts'
 import { renderPackageStatusSignifiers } from './package-status-signifiers.tsx'
 import { routes } from '#universal/routes.ts'
-import { colors, spacing } from '#universal/styles/tokens.ts'
+import { colors, mq, spacing } from '#universal/styles/tokens.ts'
 
-export type PackageRepoNavActive = 'repo' | 'files' | 'settings'
+export type PackageRepoNavActive =
+	| 'repo'
+	| 'files'
+	| 'settings'
+	| PackageCredentialsTab
 
 function renderPackageRepoNav(input: {
 	username: string
 	kodyId: string
 	filesHref: string
 	viewerCanManage: boolean
+	/** Saved packages the viewer's org owns: credential and trigger tabs. */
+	showCredentialTabs: boolean
 	/** Defaults to true. Pass false only to hide Files intentionally. */
 	showFilesNav?: boolean
 	active: PackageRepoNavActive
@@ -49,7 +60,23 @@ function renderPackageRepoNav(input: {
 					Files
 				</SiteLink>
 			) : null}
-
+			{input.showCredentialTabs
+				? packageCredentialsTabs.map((tab) => (
+						<SiteLink
+							key={tab}
+							href={packageCredentialsTabHref({
+								username: input.username,
+								kodyId: input.kodyId,
+								tab,
+							})}
+							aria-current={input.active === tab ? 'page' : undefined}
+							data-testid={`package-repo-nav-${tab}`}
+							css={tabCss}
+						>
+							{packageCredentialsTabLabel(tab)}
+						</SiteLink>
+					))
+				: null}
 			{input.viewerCanManage ? (
 				<SiteLink
 					href={settingsHref}
@@ -81,7 +108,8 @@ export function renderPackageRepoChrome(input: {
 	iconName?: string
 	iconTestId?: string
 	animate?: boolean
-	titleActions?: ReactNode
+	/** Labeled controls on the tab row; status icons stay in the title. */
+	actions?: ReactNode
 }) {
 	const backHref = input.viewerIsOwner
 		? routes.profile.href({ username: input.username })
@@ -138,7 +166,6 @@ export function renderPackageRepoChrome(input: {
 					<span css={slashCss}>/</span>
 					<span data-testid="package-title-name" css={titleNameCss}>
 						<span css={titleLeafCss}>{input.kodyId}</span>
-						{input.titleActions}
 						{renderPackageStatusSignifiers({
 							isPrivate: input.isPrivate,
 							isListed,
@@ -152,14 +179,25 @@ export function renderPackageRepoChrome(input: {
 					{input.description}
 				</p>
 			) : null}
-			<div {...rise('3')}>
+			<div {...rise('3')} css={navRowCss}>
 				{renderPackageRepoNav({
 					username: input.username,
 					kodyId: input.kodyId,
 					filesHref: input.filesHref,
 					viewerCanManage: input.viewerCanManage,
+					showCredentialTabs: input.viewerIsOwner && hasPackage,
 					active: input.active,
 				})}
+				{input.actions ? (
+					<div
+						role="group"
+						aria-label="Repository actions"
+						data-testid="package-repo-actions"
+						css={actionsCss}
+					>
+						{input.actions}
+					</div>
+				) : null}
 			</div>
 		</div>
 	)
@@ -176,7 +214,7 @@ const backLinkCss = {
 	'&:hover': {
 		color: colors.text,
 	},
-} satisfies CSSObject
+}
 
 const headCss = {
 	marginTop: '1.8rem',
@@ -184,7 +222,7 @@ const headCss = {
 	alignItems: 'center',
 	gap: '0.85rem',
 	minWidth: 0,
-} satisfies CSSObject
+}
 
 const titleCss = {
 	margin: 0,
@@ -198,7 +236,7 @@ const titleCss = {
 	lineHeight: 1.15,
 	overflowWrap: 'anywhere' as const,
 	minWidth: 0,
-} satisfies CSSObject
+}
 
 // Keep the leaf name with its status icons. A wrap between them parks the
 // verify/fork control on the package mark, where it reads as a badge.
@@ -209,17 +247,17 @@ const titleNameCss = {
 	flexWrap: 'nowrap' as const,
 	minWidth: 0,
 	maxWidth: '100%',
-} satisfies CSSObject
+}
 
 const titleLeafCss = {
 	minWidth: 0,
 	overflowWrap: 'anywhere' as const,
-} satisfies CSSObject
+}
 
 const slashCss = {
 	color: colors.textMuted,
 	fontWeight: 500,
-} satisfies CSSObject
+}
 
 const ownerLinkCss = {
 	color: colors.text,
@@ -228,21 +266,41 @@ const ownerLinkCss = {
 	'&:hover': {
 		color: colors.primaryText,
 	},
-} satisfies CSSObject
+}
 
 const descriptionCss = {
 	margin: '1rem 0 0',
 	color: colors.textMuted,
 	fontSize: '1.05rem',
 	maxWidth: '58ch',
-} satisfies CSSObject
+}
+
+const navRowCss = {
+	display: 'flex',
+	alignItems: 'center',
+	justifyContent: 'space-between',
+	flexWrap: 'wrap' as const,
+	gap: '0.75rem 1rem',
+	marginTop: '1.1rem',
+	[mq.mobile]: {
+		flexDirection: 'column-reverse' as const,
+		alignItems: 'stretch',
+	},
+}
+
+const actionsCss = {
+	display: 'flex',
+	alignItems: 'center',
+	flexWrap: 'wrap' as const,
+	gap: '0.5rem',
+}
 
 const navCss = {
 	display: 'flex',
 	alignItems: 'center',
+	flexWrap: 'wrap' as const,
 	gap: spacing.sm,
-	marginTop: '1.1rem',
-} satisfies CSSObject
+}
 
 const tabCss = {
 	display: 'inline-flex',
@@ -260,4 +318,4 @@ const tabCss = {
 		color: colors.text,
 		borderBottomColor: colors.primary,
 	},
-} satisfies CSSObject
+}

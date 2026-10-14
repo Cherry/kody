@@ -98,9 +98,10 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await expect(
 		accountGroup.getByRole('link', { name: 'Account settings' }),
 	).toHaveAttribute('href', '/account')
+	// Usage follows the URL org (team home here), not a last-used cookie.
 	await expect(
 		accountGroup.getByRole('link', { name: 'Usage & credits' }),
-	).toHaveAttribute('href', '/account/usage')
+	).toHaveAttribute('href', `/@pinned-${runId}/-/usage`)
 	await expect(
 		accountGroup.getByRole('button', { name: 'Log out' }),
 	).toBeVisible()
@@ -133,16 +134,14 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	await page.goto(`/@pinned-${runId}/-/settings`)
 	await waitForClientHydration(page)
 	// Team workspace rail matches the personal shape: same resource sections
-	// (MCP servers, Integrations, …) plus Members, Settings, and Billing.
+	// (Credentials, Agents, …) plus Members, Settings, and Billing.
 	const teamRail = page.getByRole('navigation', { name: 'Workspace sections' })
 	for (const label of [
 		'Overview',
 		'Repositories',
 		'Jobs',
 		'Webhooks',
-		'Secrets',
-		'Integrations',
-		'MCP servers',
+		'Credentials',
 		'Secret providers',
 		'Agents',
 		'Memories',
@@ -160,8 +159,8 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		teamRail.getByRole('link', { name: 'Overview', exact: true }),
 	).toHaveAttribute('href', `/@pinned-${runId}`)
 	await expect(
-		teamRail.getByRole('link', { name: 'MCP servers', exact: true }),
-	).toHaveAttribute('href', `/@pinned-${runId}/-/mcp-servers`)
+		teamRail.getByRole('link', { name: 'Credentials', exact: true }),
+	).toHaveAttribute('href', `/@pinned-${runId}/-/credentials`)
 	await expect(page.getByTestId('org-switcher')).toHaveAccessibleName(
 		`@pinned-${runId}: switch organization`,
 	)
@@ -185,16 +184,16 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 		teamRail.getByRole('link', { name: 'Members', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 
-	// Team orgs own their secrets, jobs, agents, and repositories, so the
+	// Team orgs own their credentials, jobs, agents, and repositories, so the
 	// rail opens each of them on the team org.
 	const rail = page.getByRole('navigation', { name: 'Workspace sections' })
-	await rail.getByRole('link', { name: 'Secrets', exact: true }).click()
-	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/secrets$`))
+	await rail.getByRole('link', { name: 'Credentials', exact: true }).click()
+	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/credentials$`))
 	await expect(
-		page.getByRole('heading', { level: 1, name: 'Secrets' }),
+		page.getByRole('heading', { level: 1, name: 'Credentials' }),
 	).toBeVisible()
 	await expect(
-		rail.getByRole('link', { name: 'Secrets', exact: true }),
+		rail.getByRole('link', { name: 'Credentials', exact: true }),
 	).toHaveAttribute('aria-current', 'page')
 	await rail.getByRole('link', { name: 'Jobs', exact: true }).click()
 	await expect(page).toHaveURL(new RegExp(`/@pinned-${runId}/-/jobs$`))
@@ -269,7 +268,7 @@ test('org switcher opens under its trigger, lists orgs, and closes like a menu',
 	)
 })
 
-test('switching orgs from Secrets loads the destination org, not the one you left', async ({
+test('switching orgs from Credentials loads the destination org, not the one you left', async ({
 	page,
 	seedE2eUser,
 	login,
@@ -306,24 +305,28 @@ test('switching orgs from Secrets loads the destination org, not the one you lef
 	await page.getByRole('button', { name: 'Yes, create organization' }).click()
 	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}$`))
 
-	await page.goto(`/@${user.username}/-/secrets`)
+	await page.goto(`/@${user.username}/-/credentials`)
 	await waitForClientHydration(page)
 	await expect(page.getByText('personalOnlySecret')).toBeVisible()
 
 	// The destination travels as server-function input while the current URL
 	// still names the personal org. Verify that transport and the returned data.
-	const teamLoad = waitForDestinationRead(page, `/@switch-${runId}/-/secrets`)
+	const teamLoad = waitForDestinationRead(
+		page,
+		`/@switch-${runId}/-/credentials`,
+	)
 	const { panel } = await openSwitcher(page)
 	await panel.getByTestId(`org-switcher-switch-${runId}`).click()
-	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}/-/secrets$`))
+	await expect(page).toHaveURL(new RegExp(`/@switch-${runId}/-/credentials$`))
 	const teamResponse = await teamLoad
 	expect(teamResponse.ok()).toBe(true)
 	expect(await teamResponse.text()).not.toContain('personalOnlySecret')
+
 	await expect(
-		page.getByRole('heading', { level: 1, name: 'Secrets' }),
+		page.getByRole('heading', { level: 1, name: 'Credentials' }),
 	).toBeVisible()
 	await expect(
-		page.getByText('No secrets yet.', { exact: false }),
+		page.getByText('No credentials yet.', { exact: false }),
 	).toBeVisible()
 	await expect(page.getByText('personalOnlySecret')).toHaveCount(0)
 	const back = await openSwitcher(page)
@@ -385,7 +388,7 @@ test('the switcher keeps each org section and reads the destination org through 
 		'workflows',
 		'waiting',
 		'webhooks',
-		'mcp-servers',
+		'credentials',
 		'values',
 	]) {
 		await page.goto(`/@${user.username}/-/${section}`)

@@ -15,6 +15,8 @@ export const routes = route({
 	securityTxt: '/.well-known/security.txt',
 	openaiAppsChallenge: '/.well-known/openai-apps-challenge',
 	connectOauth: '/connect/oauth',
+	connectCredential: '/connect/credential',
+	accountCredentials: '/account/credentials',
 	connectSecrets: '/connect/secrets',
 	connectSecretSet: '/connect/secret-set',
 	connectWebhookApply: '/connect/webhook-apply',
@@ -43,6 +45,7 @@ export const routes = route({
 	accountPackageFilesApi: '/account/packages/:packageId/files.json',
 	accountPackagesApi: '/account/packages.json',
 	accountPackagesApiPost: post('/account/packages.json'),
+	accountCredentialsApi: '/account/credentials.json',
 	accountSecretsApi: '/account/secrets.json',
 	accountSecretsApiPost: post('/account/secrets.json'),
 	accountSecretProvidersApi: '/account/secret-providers.json',
@@ -102,7 +105,8 @@ export const routes = route({
 	accountBillingCancellationFeedbackPost: post(
 		'/account/billing/cancellation-feedback.json',
 	),
-	// Old `/account/credits` links open the usage page's Credits section.
+	// Old `/account/credits` and `/account/usage` links redirect to the
+	// signed-in person's personal-org usage page (and its Credits section).
 	accountCredits: '/account/credits',
 	accountCreditsTopUpPost: post('/account/credits/top-up.json'),
 	accountCreditsSettingsPost: post('/account/credits/settings.json'),
@@ -214,6 +218,11 @@ export const routes = route({
 	orgBillingCheckoutPost: post('/@:orgSlug/-/billing/checkout.json'),
 	orgBillingSuccess: get('/@:orgSlug/-/billing/success'),
 	orgBillingPortal: get('/@:orgSlug/-/billing/portal'),
+	orgCredentials: get('/@:orgSlug/-/credentials(/*rest)'),
+	// The credential creation one-pager for this org.
+	orgCredentialNew: get('/@:orgSlug/-/credentials/new'),
+	orgUsage: get('/@:orgSlug/-/usage'),
+	orgUsageApi: get('/@:orgSlug/-/usage.json'),
 	orgEmail: get('/@:orgSlug/-/email(/*rest)'),
 	orgIntegrations: get('/@:orgSlug/-/integrations(/*rest)'),
 	orgJobs: get('/@:orgSlug/-/jobs(/*rest)'),
@@ -245,6 +254,9 @@ export const routes = route({
 	orgSettingsPost: post('/@:orgSlug/-/settings.json'),
 	orgSettingsAvatarPost: post('/@:orgSlug/-/settings/avatar.json'),
 	orgSettingsDeletePost: post('/@:orgSlug/-/settings/delete.json'),
+	orgSettingsCustomHostnamesPost: post(
+		'/@:orgSlug/-/settings/custom-hostnames.json',
+	),
 	orgMembers: get('/@:orgSlug/-/members'),
 	orgMembersApi: get('/@:orgSlug/-/members.json'),
 	orgMembersRolePost: post('/@:orgSlug/-/members/role.json'),
@@ -283,6 +295,14 @@ export const routes = route({
 	// public). Third-segment noun so it cannot collide with a kodyId.
 	communityPackageIcon: '/@:username/:kodyId/icon/:iconCommit',
 	communityPackageSettings: '/@:username/:kodyId/settings',
+	// Package Credentials / Default mappings / Triggers tabs (people with
+	// package:execute); data comes from communityPackageCredentialsApi.
+	communityPackageCredentials: '/@:username/:kodyId/credentials',
+	communityPackageMappings: '/@:username/:kodyId/mappings',
+	communityPackageTriggers: '/@:username/:kodyId/triggers',
+	// Bundled credential mapping approval; the query is the proposal
+	// (buildCredentialApprovalHref). Data: communityPackageApproveCredentialsApi.
+	communityPackageApproveCredentials: '/@:username/:kodyId/approve-credentials',
 	communityPackageApprovePublish: '/@:username/:kodyId/approve-publish',
 	communityPackageApproveCapabilities:
 		'/@:username/:kodyId/approve-capabilities',
@@ -303,6 +323,20 @@ export const routes = route({
 		'/profiles/:username/packages/:kodyId/webhooks.json',
 	communityPackageWebhooksApiPost: post(
 		'/profiles/:username/packages/:kodyId/webhooks.json',
+	),
+	// Package Credentials / Default mappings / Triggers tabs: GET the view,
+	// POST mapping changes. Session-only; 404 without package:execute.
+	communityPackageCredentialsApi:
+		'/profiles/:username/packages/:kodyId/credentials.json',
+	communityPackageCredentialsApiPost: post(
+		'/profiles/:username/packages/:kodyId/credentials.json',
+	),
+	// Credential approval page data: GET resolves the proposal in the query,
+	// POST `{ action: 'approve', fingerprint }` applies it. Session-only.
+	communityPackageApproveCredentialsApi:
+		'/profiles/:username/packages/:kodyId/approve-credentials.json',
+	communityPackageApproveCredentialsApiPost: post(
+		'/profiles/:username/packages/:kodyId/approve-credentials.json',
 	),
 	profileApi: '/profiles/:username.json',
 	// `.` is a Remix route delimiter, so the filename must be `:hash.:ext`
