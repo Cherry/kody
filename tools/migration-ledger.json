@@ -515,6 +515,14 @@
 		{
 			"filename": "0139-package-app-custom-hostname-reconcile-cursor.sql",
 			"sha256": "c13313dcdb2fec49d636a9f11decec19a613a7343698390369b6819680dd9b53"
+		},
+		{
+			"filename": "0140-backfill-integration-connected-at.sql",
+			"sha256": "b24eebf38053b60ae17756bbf46c5cf47d2cf4e755fd7f93a5a793b54080daa7"
+		},
+		{
+			"filename": "0141-fix-compound-provider-marks.sql",
+			"sha256": "6569873dde8e62a1b81e9d1100022fe2d15c65926a2eb1b76970e2577d46fa9d"
 		}
 	]
 }
