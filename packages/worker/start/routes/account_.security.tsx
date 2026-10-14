@@ -3,7 +3,6 @@ import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountPage } from '../pages/account.tsx'
 import { loadAccountPage } from '#start/server/account-page'
-import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadAccountPage', loadAccountPage, {
 	staleTime: 60_000,
 })
@@ -17,7 +16,7 @@ export const Route = createFileRoute('/account_/security')({
 			pageQuery(context.actorKey, context.pageQueryInput),
 			preload,
 		),
-	head: ({ loaderData }) => documentHead(loaderData?.head),
+	head: () => ({ meta: [{ title: 'Security' }] }),
 	component: AccountRoute,
 })
 function AccountRoute() {

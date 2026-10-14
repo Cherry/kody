@@ -82,6 +82,35 @@ export function renderProfileIdentity(
 	)
 }
 
+export function renderOrgIdentity(input: {
+	name: string
+	handle: string
+	avatarName: string
+	role: string
+}) {
+	return (
+		<header css={identityCss} data-testid="org-identity">
+			<div css={avatarWrapCss}>
+				<UserAvatar
+					displayName={input.avatarName}
+					avatarUrl={null}
+					size={{ narrow: 72, wide: 160 }}
+					variant="well"
+				/>
+			</div>
+			<div css={identityCopyCss}>
+				<div css={nameRowCss}>
+					<h1 css={displayNameCss}>{input.name}</h1>
+					<span css={badgeCss} data-testid="org-role">
+						{input.role}
+					</span>
+				</div>
+				<p css={usernameCss}>{input.handle}</p>
+			</div>
+		</header>
+	)
+}
+
 function renderProfileLoggedOutCtas(returnTo: string) {
 	return (
 		<div css={guestCtaCss} data-testid="profile-guest-cta">
@@ -169,9 +198,10 @@ const badgeCss = {
 } satisfies CSSObject
 
 const actionsCss = {
-	display: 'grid',
+	display: 'flex',
+	flexWrap: 'wrap' as const,
+	alignItems: 'center',
 	gap: spacing.sm,
-	justifyItems: 'start',
 	marginTop: spacing.xs,
 } satisfies CSSObject
 

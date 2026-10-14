@@ -639,6 +639,13 @@ export function AccountPage({
 			) : null}
 			{view === 'security' ? (
 				<>
+					<AccountPasswordPanel
+						hasUsablePassword={accountConnections.hasUsablePassword}
+						onPasswordSet={() => {
+							accountConnections.markHasUsablePassword()
+						}}
+					/>
+					{accountConnections.render()}
 					{emailVerified
 						? AccountFormerEmailsPanel({
 								formerEmails: emailClaims.formerEmails,
@@ -658,13 +665,6 @@ export function AccountPage({
 								},
 							})
 						: null}
-					<AccountPasswordPanel
-						hasUsablePassword={accountConnections.hasUsablePassword}
-						onPasswordSet={() => {
-							accountConnections.markHasUsablePassword()
-						}}
-					/>
-					{accountConnections.render()}
 				</>
 			) : null}
 			{view === 'data' ? (

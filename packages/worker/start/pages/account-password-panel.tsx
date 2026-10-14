@@ -166,7 +166,7 @@ export function AccountPasswordPanel(props: {
 
 		return (
 			<AccountManagementPanel
-				title="Security"
+				title="Sign-in"
 				description="Change your password, add two-factor authentication, or sign in with passkeys."
 			>
 				<details css={accountDisclosureCss}>

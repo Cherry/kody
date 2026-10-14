@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { type ReactNode } from 'react'
+import {
+	profilePageCss,
+	profileLayoutCss,
+} from '../components/profile-layout.ts'
+import { renderOrgIdentity } from '../components/profile-identity.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { type OrgRole } from '@kody-internal/shared/request-context.ts'
 import {
@@ -9,6 +14,8 @@ import {
 import { type IconName, renderIcon } from '../components/icon.tsx'
 import {
 	orgBillingPath,
+	orgIdentity,
+	orgRoleLabel,
 	orgMembersPath,
 	orgResourcePath,
 	orgRoleManagesBilling,
@@ -321,20 +328,28 @@ export function OrgHomePage({
 		role: OrgRole | null
 	}
 }) {
+	const identity = orgIdentity(
+		{ ...org, personal: false },
+		{
+			displayName: '',
+			avatarUrl: null,
+		},
+	)
 	return (
-		<section data-testid="org-page">
-			<header>
-				{org.avatarUrl ? (
-					<img src={org.avatarUrl} alt="" width={96} height={96} />
-				) : null}
-				<h1>{org.displayName || `@${org.slug}`}</h1>
-				<p>@{org.slug}</p>
-			</header>
-			{renderOrgHomeMain({
-				slug: org.slug,
-				handle: `@${org.slug}`,
-				role: org.role,
-			})}
+		<section css={profilePageCss} data-testid="org-page">
+			<div css={profileLayoutCss}>
+				{renderOrgIdentity({
+					name: identity.name,
+					handle: identity.handle,
+					avatarName: identity.avatarName,
+					role: orgRoleLabel(org.role),
+				})}
+				{renderOrgHomeMain({
+					slug: org.slug,
+					handle: identity.handle,
+					role: org.role,
+				})}
+			</div>
 		</section>
 	)
 }

@@ -192,31 +192,45 @@ export function AdminSystemEmailPage({
 								selectedMessage ? (
 									<div css={recordBodyCss}>
 										<div css={{ display: 'grid', gap: spacing.xs }}>
-											<h2
+											<div
 												css={{
-													margin: 0,
-													fontSize: typography.fontSize.lg,
-													fontWeight: typography.fontWeight.semibold,
-													color: colors.text,
+													display: 'flex',
+													flexWrap: 'wrap',
+													gap: spacing.sm,
+													alignItems: 'center',
+													justifyContent: 'space-between',
 												}}
 											>
-												{selectedMessage.subject || '(no subject)'}
-											</h2>
-											<button
-												type="button"
-												css={getDangerPillCss({ size: 'sm' })}
-												disabled={pending}
-												aria-label={`${armedId === selectedMessage.id ? 'Confirm delete' : 'Delete'} message "${selectedMessage.subject || '(no subject)'}"`}
-												title="Delete this system email message and its attachments"
-												onBlur={() => setArmedId(null)}
-												onClick={() => void deleteMessage(selectedMessage.id)}
-											>
-												{pending
-													? 'Deleting…'
-													: armedId === selectedMessage.id
-														? 'Confirm delete'
-														: 'Delete'}
-											</button>
+												<h2
+													css={{
+														margin: 0,
+														fontSize: typography.fontSize.lg,
+														fontWeight: typography.fontWeight.semibold,
+														color: colors.text,
+													}}
+												>
+													{selectedMessage.subject || '(no subject)'}
+												</h2>
+												<button
+													type="button"
+													css={getDangerPillCss({ size: 'sm' })}
+													disabled={pending}
+													aria-label={`${armedId === selectedMessage.id ? 'Confirm delete' : 'Delete'} message "${selectedMessage.subject || '(no subject)'}"`}
+													title={
+														armedId === selectedMessage.id
+															? 'Click again to permanently delete this system email message'
+															: 'Delete this system email message and its attachments'
+													}
+													onBlur={() => setArmedId(null)}
+													onClick={() => void deleteMessage(selectedMessage.id)}
+												>
+													{pending
+														? 'Deleting…'
+														: armedId === selectedMessage.id
+															? 'Confirm delete'
+															: 'Delete'}
+												</button>
+											</div>
 											<p
 												css={{
 													margin: 0,

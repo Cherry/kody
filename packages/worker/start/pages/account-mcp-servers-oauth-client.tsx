@@ -3,7 +3,12 @@ import { useState } from 'react'
 import { PasswordRevealInput } from '../components/password-reveal-input.tsx'
 import { accountInputCss } from './account-management-components.tsx'
 import { type McpServerListItem } from './account-mcp-servers-shared.tsx'
-import { colors, radius, spacing } from '#universal/styles/tokens.ts'
+import {
+	colors,
+	radius,
+	spacing,
+	typography,
+} from '#universal/styles/tokens.ts'
 import {
 	descriptionCss,
 	fieldCss,
@@ -60,25 +65,38 @@ export function McpServerOAuthClientSection({
 				backgroundColor: colors.background,
 			}}
 		>
-			<h3 id={headingId} css={{ ...fieldLabelCss, margin: 0 }}>
-				OAuth client <span css={{ color: colors.textMuted }}>(optional)</span>
-			</h3>
-			<p css={descriptionCss}>
-				Kody registers itself with most authorization servers on its own. Add a
-				client ID and secret only when the server supports neither Client ID
-				Metadata Documents nor dynamic client registration (for example GitHub),
-				or when you must use a client you registered. Set its redirect URI to
-				the OAuth redirect URI shown above.
-			</p>
+			<div css={{ display: 'grid', gap: spacing.xs }}>
+				<h3 id={headingId} css={{ ...fieldLabelCss, margin: 0 }}>
+					OAuth client <span css={{ color: colors.textMuted }}>(optional)</span>
+				</h3>
+				<p css={{ ...descriptionCss, margin: 0 }}>
+					Kody registers itself with most authorization servers on its own. Add
+					a client ID and secret only when the server supports neither Client ID
+					Metadata Documents nor dynamic client registration (for example
+					GitHub), or when you must use a client you registered. Set its
+					redirect URI to the OAuth redirect URI shown above.
+				</p>
+			</div>
 			{configured ? (
-				<div data-testid="mcp-server-oauth-client-configured">
-					<p css={descriptionCss}>
+				<div
+					data-testid="mcp-server-oauth-client-configured"
+					css={{ display: 'grid', gap: spacing.xs }}
+				>
+					<p
+						css={{
+							margin: 0,
+							color: colors.text,
+							fontSize: typography.fontSize.sm,
+						}}
+					>
 						<strong>Configured.</strong> Client ID{' '}
-						<code>{server.oauthClientId}</code>. The secret is stored sealed and
-						is not shown again.
+						<code css={{ fontFamily: 'monospace', overflowWrap: 'anywhere' }}>
+							{server.oauthClientId}
+						</code>
+						. The secret is stored sealed and is not shown again.
 					</p>
 					{!editing ? (
-						<div css={{ display: 'flex', gap: spacing.sm }}>
+						<div css={{ display: 'flex', gap: spacing.sm, flexWrap: 'wrap' }}>
 							<button
 								type="button"
 								disabled={isMutating}
@@ -128,6 +146,7 @@ export function McpServerOAuthClientSection({
 					<label css={fieldCss}>
 						<span css={fieldLabelCss}>Client ID</span>
 						<input
+							data-field-ring
 							name="clientId"
 							value={clientId}
 							disabled={isMutating}
@@ -143,6 +162,7 @@ export function McpServerOAuthClientSection({
 							Client secret
 						</label>
 						<PasswordRevealInput
+							data-field-ring
 							id={secretId}
 							name="clientSecret"
 							value={clientSecret}
@@ -156,7 +176,7 @@ export function McpServerOAuthClientSection({
 							onChange={(event) => setClientSecret(event.currentTarget.value)}
 						/>
 					</div>
-					<div css={{ display: 'flex', gap: spacing.sm }}>
+					<div css={{ display: 'flex', gap: spacing.sm, flexWrap: 'wrap' }}>
 						<button
 							type="submit"
 							disabled={isMutating || !clientId.trim() || !clientSecret.trim()}

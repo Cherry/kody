@@ -33,6 +33,7 @@ import {
 	radius,
 	shadows,
 	spacing,
+	typography,
 } from '#universal/styles/tokens.ts'
 import { accountFieldNoteCss } from './account-management-components.tsx'
 const previewMaxDimension = 1600
@@ -418,7 +419,14 @@ export function AccountAvatarEditor({
 					</div>
 				) : null}
 				{error ? (
-					<p role="alert" css={{ ...accountFieldNoteCss, color: colors.error }}>
+					<p
+						role="alert"
+						css={{
+							margin: 0,
+							color: colors.error,
+							fontSize: typography.fontSize.sm,
+						}}
+					>
 						{error}
 					</p>
 				) : null}

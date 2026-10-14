@@ -1,5 +1,9 @@
 /** @jsxImportSource @emotion/react */
 import { type CSSObject } from '@emotion/react'
+import {
+	profilePageCss,
+	profileLayoutCss,
+} from '../components/profile-layout.ts'
 import { useShellData } from '../routes/__root.tsx'
 import { useNavigate } from '@tanstack/react-router'
 import {
@@ -19,8 +23,6 @@ import {
 	fieldCss,
 	fieldLabelCss,
 	getPrimaryButtonCss,
-	layoutMaxWidths,
-	pageGutter,
 } from '#universal/styles/style-primitives.ts'
 export function ProfileRoute({
 	data,
@@ -125,8 +127,8 @@ export function ProfileRoute({
 			</div>
 		)
 	return (
-		<section css={pageCss} data-testid="profile-page">
-			<div css={layoutCss}>
+		<section css={profilePageCss} data-testid="profile-page">
+			<div css={profileLayoutCss}>
 				{readyShell
 					? renderProfileIdentity(readyShell, {
 							workspaceOrgSlug: session?.organizations.find(
@@ -143,24 +145,6 @@ export function ProfileRoute({
 		</section>
 	)
 }
-
-const pageCss = {
-	maxWidth: layoutMaxWidths.extended,
-	marginInline: 'auto',
-	width: '100%',
-	boxSizing: 'border-box' as const,
-	padding: `clamp(2rem, 5vw, 3.5rem) ${pageGutter} clamp(4rem, 8vw, 6.5rem)`,
-} satisfies CSSObject
-
-const layoutCss = {
-	display: 'grid',
-	gap: 'clamp(1.75rem, 4vw, 3rem)',
-	alignItems: 'start',
-	'@media (min-width: 821px)': {
-		gridTemplateColumns: '17.5rem minmax(0, 1fr)',
-		gap: '2.75rem',
-	},
-} satisfies CSSObject
 
 const mainCss = {
 	display: 'grid',
@@ -198,7 +182,7 @@ const searchFieldCss = {
 
 export function ProfileUnavailable() {
 	return (
-		<section css={pageCss} data-testid="profile-unavailable">
+		<section css={profilePageCss} data-testid="profile-unavailable">
 			<h1 css={unavailableTitleCss}>This profile isn't available.</h1>
 		</section>
 	)

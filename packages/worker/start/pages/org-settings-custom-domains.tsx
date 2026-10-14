@@ -1,5 +1,7 @@
 /** @jsxImportSource @emotion/react */
+import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	useMutation,
 	useQueryClient,
@@ -10,6 +12,8 @@ import { routes } from '#universal/routes.ts'
 import {
 	AccountManagementPanel,
 	accountFieldCss,
+	accountActionsCss,
+	accountFieldNoteCss,
 	accountFieldLabelCss,
 	accountInputCss,
 } from './account-management-components.tsx'
@@ -17,7 +21,7 @@ import {
 	getGhostButtonCss,
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
-import { spacing } from '#universal/styles/tokens.ts'
+import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 type DomainWrite = {
 	action: 'add' | 'sync' | 'delete'
@@ -28,27 +32,35 @@ type DomainWrite = {
 	ssl_method?: 'http' | 'txt'
 }
 
+type DomainSubmission = Readonly<{
+	body: DomainWrite
+	slug: string
+	queryKey: QueryKey
+}>
+
 /** The organization settings query owns server state, including mutation replies. */
 export function OrgSettingsCustomDomains({
 	data,
 	queryKey,
+	onMessage,
 }: {
 	data: OrgSettingsLoaderData
 	queryKey: QueryKey
+	onMessage: (message: string, tone: 'info' | 'error') => void
 }) {
 	const client = useQueryClient()
+	const capture = useSubmitterScope()
 	const [hostname, setHostname] = useState('')
 	const [bindingKind, setBindingKind] = useState<'org' | 'app'>('org')
 	const [packageId, setPackageId] = useState('')
 	const [sslMethod, setSslMethod] = useState<'http' | 'txt'>('txt')
 	const mutation = useMutation({
-		onMutate: async () => {
-			await client.cancelQueries({ queryKey, exact: true })
-			return { queryKey }
+		onMutate: async (submission: DomainSubmission) => {
+			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
 		},
-		mutationFn: async (body: DomainWrite) => {
+		mutationFn: async ({ body, slug }: DomainSubmission) => {
 			const response = await fetch(
-				routes.orgSettingsCustomHostnamesPost.href({ orgSlug: data.org.slug }),
+				routes.orgSettingsCustomHostnamesPost.href({ orgSlug: slug }),
 				{
 					method: 'POST',
 					credentials: 'include',
@@ -66,7 +78,7 @@ export function OrgSettingsCustomDomains({
 				throw new Error(payload.error || 'Unable to update custom domains.')
 			return payload
 		},
-		onSuccess: async (payload, _body, submission) => {
+		onSuccess: async (payload, submission) => {
 			// A pre-mutation settings read must not replace the authoritative write reply.
 			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
 			client.setQueryData<OrgSettingsLoaderData>(
@@ -74,7 +86,7 @@ export function OrgSettingsCustomDomains({
 				(previous) => (previous ? payload : undefined),
 			)
 		},
-		onError: async (_error, _body, submission) => {
+		onError: async (_error, submission) => {
 			// The server may have committed before the response was lost. Keep
 			// reconciliation bound to the submitted org after navigation.
 			if (submission)
@@ -84,37 +96,45 @@ export function OrgSettingsCustomDomains({
 				})
 		},
 	})
+	async function submit(body: DomainWrite, onAdded?: () => void) {
+		const isCurrent = capture()
+		try {
+			await mutation.mutateAsync({ body, slug: data.org.slug, queryKey })
+			if (!isCurrent()) return
+			if (body.action === 'add') onAdded?.()
+			onMessage(
+				body.action === 'add'
+					? 'Custom domain registered. Publish the verification records below, then sync.'
+					: body.action === 'sync'
+						? 'Custom domain status refreshed from Cloudflare.'
+						: 'Custom domain removed.',
+				'info',
+			)
+		} catch (error) {
+			if (isCurrent())
+				onMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to update custom domains.',
+					'error',
+				)
+		}
+	}
 	const domains = data.customDomains
 	if (!domains) return null
 	return (
 		<AccountManagementPanel title="Custom domains">
-			<p>
+			<p css={accountFieldNoteCss}>
 				Point a CNAME at{' '}
-				<code>{domains.dnsTarget ?? 'domains.<package-app host>'}</code>,
-				publish the ownership and SSL validation records below, then sync until
-				hostname and certificate are both active. TXT validation lets the
-				certificate issue before traffic switches.
+				<code css={handleValueCss}>
+					{domains.dnsTarget ?? 'domains.<package-app host>'}
+				</code>
+				, publish any ownership and SSL validation records shown per domain,
+				then sync until hostname and certificate are both active. Prefer TXT SSL
+				validation so the cert can issue before traffic switches (ADR 0071).
 			</p>
-			{mutation.error ? <p role="alert">{mutation.error.message}</p> : null}
-			{mutation.isSuccess ? (
-				<p role="status">
-					{mutation.variables.action === 'add'
-						? 'Custom domain registered. Publish the verification records below, then sync.'
-						: mutation.variables.action === 'sync'
-							? 'Custom domain status refreshed from Cloudflare.'
-							: 'Custom domain removed.'}
-				</p>
-			) : null}
 			{domains.hostnames.length ? (
-				<ul
-					data-testid="org-custom-hostnames"
-					css={{
-						display: 'grid',
-						gap: spacing.lg,
-						listStyle: 'none',
-						padding: 0,
-					}}
-				>
+				<ul data-testid="org-custom-hostnames" css={hostnameListCss}>
 					{domains.hostnames.map((row) => {
 						const verified =
 							row.hostnameStatus === 'active' && row.sslStatus === 'active'
@@ -123,38 +143,47 @@ export function OrgSettingsCustomDomains({
 							...row.sslValidationRecords,
 						]
 						return (
-							<li key={row.id}>
-								<strong>{row.hostname}</strong>
-								<p>
-									{row.bindingKind === 'app' ? 'App' : 'Org'} · host{' '}
-									{row.hostnameStatus} · ssl {row.sslStatus}
-									{verified ? ' · verified' : ''}
-								</p>
-								{!verified && records.length ? (
-									<ul
-										data-testid={`org-custom-hostname-verification-${row.id}`}
-									>
-										{records.map((record) => (
-											<li key={`${record.type}:${record.name}:${record.value}`}>
-												<span>{record.type.toUpperCase()}</span>{' '}
-												<code>{record.name}</code> <code>{record.value}</code>
-											</li>
-										))}
-									</ul>
-								) : null}
+							<li key={row.id} css={hostnameRowCss}>
+								<div css={hostnameMetaCss}>
+									<strong css={handleValueCss}>{row.hostname}</strong>
+									<span css={identityDetailCss}>
+										{row.bindingKind === 'app' ? 'App' : 'Org'} · host{' '}
+										{row.hostnameStatus} · ssl {row.sslStatus}
+										{verified ? ' · verified' : ''}
+									</span>
+									{!verified && records.length ? (
+										<ul
+											css={verificationListCss}
+											data-testid={`org-custom-hostname-verification-${row.id}`}
+										>
+											{records.map((record) => (
+												<li
+													css={verificationRowCss}
+													key={`${record.type}:${record.name}:${record.value}`}
+												>
+													<span css={identityDetailCss}>
+														{record.type.toUpperCase()}
+													</span>
+													<code css={handleValueCss}>{record.name}</code>
+													<code css={handleValueCss}>{record.value}</code>
+												</li>
+											))}
+										</ul>
+									) : null}
+								</div>
 								{data.canManage ? (
-									<div css={{ display: 'flex', gap: spacing.sm }}>
+									<div css={hostnameActionsCss}>
 										<button
 											type="button"
 											css={getGhostButtonCss({ size: 'sm' })}
 											disabled={mutation.isPending}
 											onClick={() =>
-												mutation.mutate({ action: 'sync', id: row.id })
+												void submit({ action: 'sync', id: row.id })
 											}
 										>
 											{mutation.isPending &&
-											mutation.variables.action === 'sync' &&
-											mutation.variables.id === row.id
+											mutation.variables.body.action === 'sync' &&
+											mutation.variables.body.id === row.id
 												? 'Syncing…'
 												: 'Sync'}
 										</button>
@@ -163,12 +192,12 @@ export function OrgSettingsCustomDomains({
 											css={getGhostButtonCss({ size: 'sm' })}
 											disabled={mutation.isPending}
 											onClick={() =>
-												mutation.mutate({ action: 'delete', id: row.id })
+												void submit({ action: 'delete', id: row.id })
 											}
 										>
 											{mutation.isPending &&
-											mutation.variables.action === 'delete' &&
-											mutation.variables.id === row.id
+											mutation.variables.body.action === 'delete' &&
+											mutation.variables.body.id === row.id
 												? 'Removing…'
 												: 'Remove'}
 										</button>
@@ -179,15 +208,15 @@ export function OrgSettingsCustomDomains({
 					})}
 				</ul>
 			) : (
-				<p>No custom domains yet.</p>
+				<p css={mutedCopyCss}>No custom domains yet.</p>
 			)}
 			{data.canManage ? (
 				<form
-					css={{ display: 'grid', gap: spacing.md }}
+					css={formCss}
 					onSubmit={(event) => {
 						event.preventDefault()
 						if (mutation.isPending) return
-						mutation.mutate(
+						void submit(
 							{
 								action: 'add',
 								hostname,
@@ -195,11 +224,9 @@ export function OrgSettingsCustomDomains({
 								package_id: bindingKind === 'app' ? packageId : undefined,
 								ssl_method: sslMethod,
 							},
-							{
-								onSuccess: () => {
-									setHostname('')
-									setPackageId('')
-								},
+							() => {
+								setHostname('')
+								setPackageId('')
 							},
 						)
 					}}
@@ -207,6 +234,7 @@ export function OrgSettingsCustomDomains({
 					<label css={accountFieldCss}>
 						<span css={accountFieldLabelCss}>Hostname</span>
 						<input
+							data-field-ring
 							css={accountInputCss}
 							required
 							value={hostname}
@@ -235,6 +263,7 @@ export function OrgSettingsCustomDomains({
 						<label css={accountFieldCss}>
 							<span css={accountFieldLabelCss}>Package id</span>
 							<input
+								data-field-ring
 								css={accountInputCss}
 								required
 								value={packageId}
@@ -257,17 +286,86 @@ export function OrgSettingsCustomDomains({
 							<option value="http">HTTP</option>
 						</select>
 					</label>
-					<button
-						type="submit"
-						css={getPillButtonCss({ size: 'sm' })}
-						disabled={mutation.isPending}
-					>
-						{mutation.isPending && mutation.variables.action === 'add'
-							? 'Adding…'
-							: 'Add domain'}
-					</button>
+					<div css={accountActionsCss}>
+						<button
+							type="submit"
+							css={getPillButtonCss({ size: 'sm' })}
+							disabled={mutation.isPending}
+						>
+							{mutation.isPending && mutation.variables.body.action === 'add'
+								? 'Adding…'
+								: 'Add domain'}
+						</button>
+					</div>
 				</form>
 			) : null}
 		</AccountManagementPanel>
 	)
+}
+
+const mutedCopyCss: CSSObject = {
+	margin: 0,
+	color: colors.textMuted,
+}
+
+const formCss: CSSObject = {
+	display: 'grid',
+	gap: spacing.lg,
+	marginTop: spacing.md,
+}
+
+const handleValueCss: CSSObject = {
+	margin: 0,
+	fontFamily: typography.fontFamilyMono,
+	color: colors.text,
+}
+
+const identityDetailCss: CSSObject = {
+	fontSize: typography.fontSize.sm,
+	color: colors.textMuted,
+}
+
+const hostnameListCss: CSSObject = {
+	listStyle: 'none',
+	margin: `${spacing.md} 0 0`,
+	padding: 0,
+	display: 'grid',
+	gap: spacing.md,
+}
+
+const hostnameRowCss: CSSObject = {
+	display: 'grid',
+	gap: spacing.sm,
+	paddingBottom: spacing.md,
+	borderBottom: `1px solid ${colors.border}`,
+	'&:last-child': {
+		borderBottom: 'none',
+		paddingBottom: 0,
+	},
+}
+
+const hostnameMetaCss: CSSObject = {
+	display: 'grid',
+	gap: '0.2rem',
+	minWidth: 0,
+}
+
+const hostnameActionsCss: CSSObject = {
+	display: 'flex',
+	flexWrap: 'wrap' as const,
+	gap: spacing.sm,
+}
+
+const verificationListCss: CSSObject = {
+	listStyle: 'none',
+	margin: `${spacing.sm} 0 0`,
+	padding: 0,
+	display: 'grid',
+	gap: spacing.xs,
+}
+
+const verificationRowCss: CSSObject = {
+	display: 'grid',
+	gap: '0.15rem',
+	fontSize: typography.fontSize.sm,
 }

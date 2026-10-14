@@ -4,6 +4,7 @@ import { buildBillingFailureAgentPrompt } from '#universal/error-agent-prompt-pr
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { formatTimestampDate as formatCancelDate } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
+import { orgIdentity } from '#universal/org-pages.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { adminGrantDiffersFromSubscription } from '#universal/account-plan-display.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
@@ -180,6 +181,13 @@ export function AccountBillingPage({
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>(
 		payload.error ? 'error' : 'info',
 	)
+	const [planCheckoutError, setPlanCheckoutError] = useState<string | null>(
+		null,
+	)
+	const orgName = orgIdentity(payload.org, {
+		displayName: '',
+		avatarUrl: null,
+	}).name
 	const [checkoutPending, setCheckoutPending] = useState<CheckoutPending>(null)
 	const [cancellationFeedbackText, setCancellationFeedbackText] = useState('')
 	const [cancellationFeedbackPending, setCancellationFeedbackPending] =
@@ -197,15 +205,20 @@ export function AccountBillingPage({
 		setMessageTone(payload.error ? 'error' : 'info')
 	}
 
-	async function startCheckout(plan: PaidTier, interval: BillingInterval) {
+	async function startCheckout(
+		plan: PaidTier,
+		interval: BillingInterval,
+		errorPlacement: 'page' | 'plan-card' = 'plan-card',
+	) {
 		if (checkoutPending) return
 		setCheckoutPending({ plan, interval })
 		setMessage(null)
+		setPlanCheckoutError(null)
 		const isCurrent = capture()
 		const result = await requestProCheckout({
 			orgSlug: payload.org.slug,
 			interval,
-			promoCode,
+			promoCode: errorPlacement === 'plan-card' ? promoCode : '',
 		})
 		if (!isCurrent()) return
 		if (result.ok) {
@@ -218,8 +231,12 @@ export function AccountBillingPage({
 			window.location.assign(result.url)
 			return
 		}
-		setMessage(result.error)
-		setMessageTone('error')
+		if (errorPlacement === 'plan-card') {
+			setPlanCheckoutError(result.error)
+		} else {
+			setMessage(result.error)
+			setMessageTone('error')
+		}
 		setCheckoutPending(null)
 	}
 
@@ -300,7 +317,7 @@ export function AccountBillingPage({
 				description={
 					payload.org.personal
 						? 'Your plan, Stripe subscription, and referral link.'
-						: `Billing for @${payload.org.slug}, ${payload.org.seats} seats.`
+						: `${orgName}'s Kody plan. Pro is billed per seat: every owner and member is one.`
 				}
 				currentHref={currentHref}
 			/>
@@ -419,6 +436,7 @@ export function AccountBillingPage({
 												void startCheckout(
 													'pro',
 													billing.stripeInterval ?? 'month',
+													'page',
 												)
 											}
 											css={primaryButtonCss}
@@ -632,14 +650,18 @@ export function AccountBillingPage({
 					) : null}
 					{renderAccountBillingPlans({
 						promoCode,
-						checkoutError: messageTone === 'error' ? message : null,
-						onPromoCodeChange: setPromoCode,
+						checkoutError: planCheckoutError,
+						onPromoCodeChange: (value) => {
+							setPromoCode(value)
+							setPlanCheckoutError(null)
+						},
 						billing,
 						activeStripePlan,
 						paymentActionNeeded,
 						checkoutPending,
 						selectedIntervalByPlan,
 						onIntervalChange: (plan, interval) => {
+							setPlanCheckoutError(null)
 							setSelectedIntervalByPlan((previous) => ({
 								...previous,
 								[plan]: interval,
@@ -656,9 +678,7 @@ export function AccountBillingPage({
 					href={payload.org.personal ? '/account' : `/@${payload.org.slug}`}
 					css={primaryLinkCss}
 				>
-					{payload.org.personal
-						? 'Back to account'
-						: `Back to @${payload.org.slug}`}
+					{payload.org.personal ? 'Back to account' : `Back to ${orgName}`}
 				</SiteLink>
 			</p>
 		</AccountManagementShell>
