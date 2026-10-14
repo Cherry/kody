@@ -45,12 +45,14 @@ lock, forkable visibility, internet-visible, webhooks, delete),
 their preset; add, change preset, remove, invite, revoke invite),
 `/@username/:kodyId/approve-publish` (published-vs-HEAD review), and
 `/@username/:kodyId/approve-capabilities` (credential/capability summary before
-internet-visible). Opening an allowlisted image or video in the tree renders a
-preview; the bytes come from `/@username/:kodyId/raw/:ref/…` (same authz as the
-tree, 404 on every denial). Every file view links that URL as **Raw**; agents
-can fetch it with `Authorization: Bearer kody_at_…` (`package:read`).
-`/account/packages` 404s. `/account/packages/:packageId` redirects to the
-canonical package page.
+internet-visible). `/@:orgSlug/-/approvals/:bundleId` is an agent-prefilled
+bundle of pending approvals across packages (`approvalBundleCreate`), with
+Approve all and per-item Approve or Deny; only the person it was made for can
+open it. Opening an allowlisted image or video in the tree renders a preview;
+the bytes come from `/@username/:kodyId/raw/:ref/…` (same authz as the tree, 404
+on every denial). Every file view links that URL as **Raw**; agents can fetch it
+with `Authorization: Bearer kody_at_…` (`package:read`). `/account/packages`
+404s. `/account/packages/:packageId` redirects to the canonical package page.
 
 ## Drive it
 
@@ -96,6 +98,9 @@ fixtures use `control-kody execute` / `search` against the same origin.
 - `GET /account/packages/:packageId/files.json` (404 + `redirectTo` the tree)
 - `GET|POST /account/packages/:packageId/approve-publish.json`
 - `GET|POST /account/packages/:packageId/approve-capabilities.json`
+- `GET|POST /@:orgSlug/-/approvals/:bundleId.json` (approval bundle view; POST
+  `{ action: 'approve' | 'deny', item, fingerprint }` decides one item, session
+  only)
 
 ## Gotchas
 
