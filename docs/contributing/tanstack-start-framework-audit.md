@@ -59,22 +59,23 @@ fetches or a remaining Remix dispatcher:
 | `shell.ts`, `org-alias.ts`                                        | Destination URLs carry organization selection, redirect intent or auth view state.                                                                                                                                          | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience.                                                     |
 | `static-page.ts`, metadata helpers                                | Pathnames identify static presentation/canonical URLs.                                                                                                                                                                      | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                                                                                  |
 
-The Memories reader is now a bounded exception to the collection row above:
+The Memories reader is a bounded exception to the collection row above:
 `loadMemoriesPage` takes explicit organization, selection and filter fields.
 `start/memories-input.ts` normalizes route search into those Query inputs;
 `start/server/collection-context.ts` keeps the original request and binds the
-organization explicitly. The domain reader no longer accepts a Request. Query
-invalidation recognizes object `orgSlug` inputs so memory refreshes do not
-invalidate another organization's records. Other collection readers still use
-the URL-shaped helper listed above.
+organization explicitly. The domain reader accepts typed fields instead of a
+Request. Query invalidation recognizes object `orgSlug` inputs so memory
+refreshes do not invalidate another organization's records. Other collection
+readers still use the URL-shaped helper listed above.
 
-Admin users now uses explicit filters, page size, selected user and a separate
-return destination. Pagination keys include actor and page size. Billing
-completion takes organization and checkout session fields, checks the original
-principal, and owns a write lease for both SSR and RPC. The outer protocol
-boundary no longer leases billing success a second time. Login/signup accepts
-only an optional return destination. Legacy org aliases retain destination URLs
-because they are redirects, but session lookup uses the original request.
+The admin users page uses explicit filters, page size, selected user and a
+separate return destination. Pagination keys include actor and page size.
+Billing completion takes organization and checkout session fields, checks the
+original principal, and owns a write lease for both SSR and RPC. The outer
+protocol boundary does not lease billing success a second time. Login/signup
+accepts only an optional return destination. Legacy org aliases retain
+destination URLs because they are redirects, but session lookup uses the
+original request.
 
 The separate signed-token cleanup slice keeps `start/server/action-page.ts` but
 replaces generic `loadActionPage(href)` dispatch with `loadVerifyEmail`,
@@ -98,7 +99,7 @@ website route matching, hydration, data loading or navigation.
 A repository-wide search also finds Remix component/router imports inside
 `src/test-support/remix-package-app-fixture.ts`. Those are source strings for a
 hosted package-app fixture, not Kody website runtime imports. The client and
-worker TypeScript configurations now use React JSX defaults; references to the
+worker TypeScript configurations use React JSX defaults; references to the
 deleted backend router and SSR document have been removed.
 
 ## Evidence and limits
