@@ -49,18 +49,19 @@ Native transport does not automatically remove the old loader-oriented API
 shape. These are concrete follow-up targets, not evidence of internal HTTP
 fetches or a remaining Remix dispatcher:
 
-| Modules under `start/server/` | Remaining coupling | Appropriate shape |
-| --- | --- | --- |
-| `oauth.ts` | OAuth authorize protocol parameters are forwarded through a reconstructed request. | Keep the external OAuth contract; separate protocol fields from the original authenticated request in the shared reader. |
-| `org-alias.ts` | Destination URLs identify redirects. | Retain URLs where navigation is the domain input. |
-| `static-page.ts`, metadata helpers | Pathnames identify static presentation/canonical URLs. | Pathnames are appropriate for operations about a page URL. |
+| Modules under `start/server/`      | Remaining coupling                                                                 | Appropriate shape                                                                                                        |
+| ---------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `oauth.ts`                         | OAuth authorize protocol parameters are forwarded through a reconstructed request. | Keep the external OAuth contract; separate protocol fields from the original authenticated request in the shared reader. |
+| `org-alias.ts`                     | Destination URLs identify redirects.                                               | Retain URLs where navigation is the domain input.                                                                        |
+| `static-page.ts`, metadata helpers | Pathnames identify static presentation/canonical URLs.                             | Pathnames are appropriate for operations about a page URL.                                                               |
 
 Community and profile readers require typed filter inputs. Package reads retain
 original requests and explicit resource identity. Community memoization includes
 filter inputs even when reads share the same request. Session verification takes
 organization scope from native matched routes and independently checks access.
-Jobs, workflow cancellation, experiments and MCP OAuth client creation/revocation
-use operation-specific typed inputs instead of action intent dispatch.
+Jobs, workflow cancellation, experiments and MCP OAuth client
+creation/revocation use operation-specific typed inputs instead of action intent
+dispatch.
 
 Account collections, connection usage, credentials, and email take explicit
 organization, record, selection and filter fields. The `loadCollection(href)`

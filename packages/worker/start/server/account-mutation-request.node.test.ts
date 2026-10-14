@@ -54,9 +54,12 @@ vi.mock('@tanstack/react-start/server', () => ({ setResponseHeader: vi.fn() }))
 vi.mock('../../src/app/operation-result.ts', () => ({
 	requireOperationResult: (result: { value: unknown }) => result.value,
 }))
-vi.mock('../../src/app/handlers/account-experiments.ts', () => ({ saveExperimentsPreference: state.mutate }))
+vi.mock('../../src/app/handlers/account-experiments.ts', () => ({
+	saveExperimentsPreference: state.mutate,
+}))
 import {
-	updateExperiments,	setJobKillSwitch,
+	updateExperiments,
+	setJobKillSwitch,
 	runJobNow,
 	cancelWorkflowRun,
 	updateSecretProviders,
@@ -115,11 +118,17 @@ test('job and workflow operations pass validated named fields with original requ
 	)
 })
 
-
 test('experiments preference rejects untyped input before the domain write', async () => {
 	state.mutate.mockClear()
-	expect(() => updateExperiments({ data: { experimentsOptIn: 'true' } as never })).toThrow()
+	expect(() =>
+		updateExperiments({ data: { experimentsOptIn: 'true' } as never }),
+	).toThrow()
 	expect(state.mutate).not.toHaveBeenCalled()
 	await updateExperiments({ data: { experimentsOptIn: false } })
-	expect(state.mutate).toHaveBeenCalledWith(expect.objectContaining({ experimentsOptIn: false, request: state.request }))
+	expect(state.mutate).toHaveBeenCalledWith(
+		expect.objectContaining({
+			experimentsOptIn: false,
+			request: state.request,
+		}),
+	)
 })

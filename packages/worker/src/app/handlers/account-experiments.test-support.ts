@@ -32,7 +32,10 @@ export function testAccountExperimentsApiHandler(env: Env) {
 				)
 			}
 
-			if (!('experimentsOptIn' in body) || typeof body.experimentsOptIn !== 'boolean') {
+			if (
+				!('experimentsOptIn' in body) ||
+				typeof body.experimentsOptIn !== 'boolean'
+			) {
 				return operationResult(
 					{ ok: false, error: 'experimentsOptIn must be a boolean.' },
 					400,
