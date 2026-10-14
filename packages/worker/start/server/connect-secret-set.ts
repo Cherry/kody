@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
+import { notFound, redirect } from '@tanstack/react-router'
 
 export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 	.validator((href: string) => {
@@ -31,7 +31,19 @@ export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const original = getRequest()
-		const user = await requireAuthenticatedPageUser(original, bindings, {
+		const headers = new Headers(original.headers)
+		const org = new URL(href, original.url).searchParams.get('org')?.trim()
+		if (org)
+			headers.set(
+				'Referer',
+				new URL(`/@${encodeURIComponent(org)}/-/secrets`, original.url).href,
+			)
+		// Authenticate the same org-bound request used to read the data.
+		const request = new Request(
+			new URL('/account/secrets.json', original.url),
+			{ headers },
+		)
+		const user = await requireAuthenticatedPageUser(request, bindings, {
 			redirectTo: href,
 		})
 		if (user instanceof Response) {
@@ -42,11 +54,10 @@ export const loadConnectSecretSet = createServerFn({ method: 'GET' })
 				statusCode: user.status,
 			})
 		}
-		// Setup prefill must not be interpreted as a host-approval query.
-		const request = new Request(
-			new URL('/account/secrets.json', original.url),
-			{ headers: original.headers },
-		)
+		const { isOrgRequestDenied } =
+			await import('../../src/app/org-request-binding.ts')
+		if (await isOrgRequestDenied(request, bindings, user.mcpUser.userId))
+			throw notFound()
 		const payload = await loadAccountSecretsData({
 			env: bindings,
 			request,

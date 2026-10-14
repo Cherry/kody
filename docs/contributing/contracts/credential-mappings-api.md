@@ -534,6 +534,30 @@ A delivery that runs nothing answers 409:
 }
 ```
 
+### Paused on a trigger mapping
+
+Before each run, the run gate checks the credentials the instance's trigger
+mapping names for needs the package declares (not the defaults, and not `[]`).
+If a named credential is deleted, the enabler lacks Use on it, or it does not
+fit its need's current kind or provider, the enablement pauses instead of
+running:
+
+```ts
+pause: {
+	reason: 'credential_access'
+	permission: null
+	resourceType: 'credential-mapping' // enablementMappingPauseResourceType
+	resourceId: string // the need key
+	credentialId: string // the missing credential
+}
+```
+
+The next event checks the mapping again and resumes the enablement once every
+named credential is usable, including after the enabler remaps the need. The
+Waiting list says which need to remap. A publish that adds needs while the
+package has live enablements gets a check note saying how those runs resolve
+them.
+
 ## Runtime errors
 
 `CredentialClientError` bodies (`credential()` in package and ad hoc code, CLI
@@ -546,7 +570,7 @@ export type CredentialClientErrorBody = {
 	retryWith: Array<CredentialClientRetry>
 	options?: Array<CredentialClientOption>
 	possibleMatches?: Array<CredentialClientOption>
-	/** Absolute creation link. Always set for credential_unbound and credential_not_found. */
+	/** Absolute creation link. Always set for credential_unbound, credential_ambiguous, and credential_not_found. */
 	createUrl?: string
 }
 ```
@@ -557,7 +581,16 @@ export type CredentialClientErrorBody = {
   `kindMode=required`; for a need without `kind` it links with `kindMode=hint`
   (`oauth` when a platform OAuth app exists for the provider, plus
   `platform=<slug>`; else `secret`). `provider`, `name` (the need key),
-  `description`, `forPackage`, and `need` are prefilled.
+  `description`, `forPackage`, and `need` are prefilled. When the run's org is
+  known, the link opens that org's page (`/@<org>/-/credentials/new`).
+- `credential_ambiguous` carries the same link beside `options` and `retryWith`,
+  so the person can create a dedicated credential instead of picking one.
+- A failure fails only that `credential()` call. In a trigger run, a need a
+  republish added that has no single matching credential (unbound or ambiguous)
+  never pauses the trigger: the call fails with the error and its link, and the
+  trigger's other calls and later runs keep working, as for any other runtime
+  credential error. Only a credential the trigger mapping names pauses it (see
+  "Paused on a trigger mapping").
 - `credential_not_found` for `credential.named(name)` links with `name`
   prefilled and no kind.
 - A missing `{{secret:NAME}}` placeholder in a run keeps its `secret_required`

@@ -104,12 +104,24 @@ export function ConnectSecretSetRoute({
 		}: {
 			state: EditorState
 			href: string
+			actorKey: string | null
 		}) => {
 			const invalidExpires = readInvalidExpiresAtQuery(href)
 			if (invalidExpires) throw new Error(invalidExpires)
 			if (packageResolution.error) throw new Error(packageResolution.error)
 			const policy = resolveSavePolicyFromSetup({ href, state, existing })
+			const org = new URL(href, window.location.origin).searchParams
+				.get('org')
+				?.trim()
 			const response = await fetch(accountSecretsApiPath, {
+				...(org
+					? {
+							referrer: new URL(
+								`/@${encodeURIComponent(org)}/-/secrets`,
+								window.location.origin,
+							).href,
+						}
+					: {}),
 				method: 'POST',
 				credentials: 'include',
 				headers: {
@@ -144,12 +156,11 @@ export function ConnectSecretSetRoute({
 				throw new Error(payload?.error || 'Unable to save secret.')
 			return payload
 		},
-		onSuccess: async (payload, { href }) => {
+		onSuccess: async (payload, { href, actorKey }) => {
 			const queryKey = connectSecretSetQuery(actorKey, href).queryKey
 			await client.cancelQueries({ queryKey, exact: true })
 			client.setQueryData(queryKey, (old) => (old ? { ...old, payload } : old))
-			// The setup URL does not identify an org. Revalidate actor-owned secret
-			// views without publishing a personal-org response into another org cache.
+			// Refresh the submitting actor without copying one org response into another org cache.
 			await client.invalidateQueries({
 				queryKey: ['page', actorKey, 'loadSecretsPage'],
 			})
@@ -162,7 +173,7 @@ export function ConnectSecretSetRoute({
 		event.preventDefault()
 		if (saving || saved) return
 		mutation.mutate(
-			{ state, href: currentHref },
+			{ state, href: currentHref, actorKey },
 			{ onSuccess: () => setValue('') },
 		)
 	}

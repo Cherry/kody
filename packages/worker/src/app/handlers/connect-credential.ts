@@ -10,7 +10,8 @@ export function signupOrgCredentialCreateHref(
 	user: Pick<AuthenticatedAppUser, 'request' | 'username'>,
 	search: string,
 ) {
-	const slug = user.request.org.slug ?? user.username
+	const requestedOrg = new URLSearchParams(search).get('org')?.trim()
+	const slug = requestedOrg || user.request.org.slug || user.username
 	return `${orgCredentialCreatePath(slug)}${search}`
 }
 
