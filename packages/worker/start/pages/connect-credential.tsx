@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { readAccountSecretsSaveWarning } from './account-secrets-shared.ts'
+import { persistConnectOauthOrgSlug } from './connect-oauth-shared.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
 import { type ReactNode, type FormEvent, useState } from 'react'
@@ -139,6 +141,10 @@ export function ConnectCredentialRoute({
 	)
 	const [showValue, setShowValue] = useState(false)
 	const [saving, setSaving] = useState(false)
+	const [savedWarning, setSavedWarning] = useState<string | null>(null)
+	const [seededReplaceLocksForId, setSeededReplaceLocksForId] = useState<
+		string | null
+	>(null)
 	const [savedName, setSavedName] = useState<string | null>(null)
 	const [savedPackageId, setSavedPackageId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
@@ -192,11 +198,14 @@ export function ConnectCredentialRoute({
 			const payload = await readJson<{
 				ok?: boolean
 				error?: string
+				providerLinkError?: string | null
+				renameCleanupError?: string | null
 			}>(response)
 			if (!isCurrent()) return
 			if (!response.ok || !payload?.ok) {
 				throw new Error(payload?.error || 'Unable to save this credential.')
 			}
+			setSavedWarning(readAccountSecretsSaveWarning(payload))
 			setSavedName(current.name.trim())
 			setSavedPackageId(keyFormPackageId(current, kind))
 			setForm({ ...current, value: '', loginFields: {} })
@@ -243,6 +252,15 @@ export function ConnectCredentialRoute({
 					: null
 			return (
 				<section css={cardCss} data-testid="connect-credential-saved">
+					{savedWarning ? (
+						<p
+							css={{ margin: 0, color: colors.warningText }}
+							role="status"
+							data-testid="connect-credential-save-warning"
+						>
+							{savedWarning}
+						</p>
+					) : null}
 					<p css={{ margin: 0 }}>
 						<strong>{savedName}</strong> is saved. Return to your agent and
 						continue.
@@ -295,12 +313,13 @@ export function ConnectCredentialRoute({
 							value={state.name}
 							placeholder="OPENAI_API_KEY"
 							css={inputCss}
-							onChange={(event) =>
+							onChange={(event) => {
+								setSeededReplaceLocksForId(null)
 								update({
 									name: event.currentTarget.value,
 									replaceExisting: false,
 								})
-							}
+							}}
 						/>
 						<span css={mutedCss}>
 							{isKey ? (
@@ -331,8 +350,19 @@ export function ConnectCredentialRoute({
 								data-testid="connect-credential-replace"
 								onChange={(event) => {
 									const replaceExisting = event.currentTarget.checked
+									const seedLocks =
+										replaceExisting && seededReplaceLocksForId !== existing.id
+									if (seedLocks) setSeededReplaceLocksForId(existing.id)
 									update({
 										replaceExisting,
+										allowedPackages: seedLocks
+											? [
+													...new Set([
+														...(existing.lockedToPackageIds ?? []),
+														...state.allowedPackages,
+													]),
+												]
+											: state.allowedPackages,
 										provider:
 											replaceExisting && !state.provider.trim()
 												? (existing.provider ?? '')
@@ -344,13 +374,14 @@ export function ConnectCredentialRoute({
 								{isKey ? (
 									<>
 										A credential named <code>{existing.name}</code> already
-										exists. Replace it (its hosts and package locks stay).
+										exists. Replace it (its hosts stay; edit package locks
+										below).
 									</>
 								) : (
 									<>
 										A credential named <code>{existing.name}</code> already
-										exists. Replace it (its package locks stay; its hosts become
-										the ones below).
+										exists. Replace it (edit package locks below; its hosts
+										become the ones below).
 									</>
 								)}
 							</span>
@@ -579,7 +610,6 @@ export function ConnectCredentialRoute({
 					kind: selected,
 					search,
 					orgSlug,
-					personalOrgSlug: data?.personalOrgSlug ?? null,
 					valueForm: (kind) =>
 						renderKeyForm({
 							kind,
@@ -614,7 +644,6 @@ function renderKindBody(input: {
 	kind: CredentialKind
 	search: URLSearchParams
 	orgSlug: string
-	personalOrgSlug: string | null
 	valueForm: (kind: ValueFormKind) => ReactNode
 }) {
 	const mode = credentialCreateMode(input.kind)
@@ -631,15 +660,7 @@ function renderKindBody(input: {
 							? `Kody sends you to ${provider ? `${provider}'s` : 'the provider’s'} sign-in, then brings you back.`
 							: 'Add the server’s URL. Kody connects to it and asks you to sign in when the server needs it.'}
 					</p>
-					{kind === 'oauth' &&
-					input.personalOrgSlug &&
-					input.orgSlug &&
-					input.personalOrgSlug !== input.orgSlug ? (
-						<p css={mutedCss} data-testid="connect-credential-oauth-personal">
-							Kody saves OAuth connections to your personal account,{' '}
-							<code>@{input.personalOrgSlug}</code>, not to this team.
-						</p>
-					) : null}
+
 					<SiteLink
 						href={credentialCreateHandoffHref({
 							kind,
@@ -648,6 +669,9 @@ function renderKindBody(input: {
 						})}
 						css={primaryButtonCss}
 						data-testid="connect-credential-continue"
+						onClick={() => {
+							if (kind === 'oauth') persistConnectOauthOrgSlug(input.orgSlug)
+						}}
 					>
 						{kind === 'oauth'
 							? 'Continue to connect'

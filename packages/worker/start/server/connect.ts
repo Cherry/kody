@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
+import { notFound, redirect } from '@tanstack/react-router'
 function validateHref(href: string) {
 	if (
 		typeof href !== 'string' ||
@@ -119,6 +119,14 @@ export const loadConnectOauth = createServerFn({ method: 'GET' })
 				statusCode: blocked.status,
 			})
 		}
+		const [{ loadResolvedRequestAuth }, { isOrgRequestDenied }] =
+			await Promise.all([
+				import('../../src/app/request-auth-cache.ts'),
+				import('../../src/app/org-request-binding.ts'),
+			])
+		const { user } = await loadResolvedRequestAuth(request, env)
+		if (user && (await isOrgRequestDenied(request, env, user.mcpUser.userId)))
+			throw notFound()
 		const url = new URL(request.url),
 			payload = await loadConnectOauthLoaderData(bindings, request, url)
 		return {

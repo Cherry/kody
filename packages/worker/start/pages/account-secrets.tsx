@@ -54,6 +54,7 @@ import {
 	getAlreadyAddedNotice,
 	getDataRefreshKey,
 	readFilterState,
+	readAccountSecretsSaveWarning,
 	secretsBasePath,
 	secretsRoute,
 } from './account-secrets-shared.ts'
@@ -104,7 +105,7 @@ export function AccountSecretsPage({
 	)
 	const [savedEditorState, setSavedEditorState] = useState(editorState)
 	const [message, setMessage] = useState<string | null>(
-		payload.providerLinkError ?? payload.approvalError ?? null,
+		readAccountSecretsSaveWarning(payload) ?? payload.approvalError ?? null,
 	)
 	const [submittingApprovalAction, setSubmittingApprovalAction] =
 		useState<ApprovalAction | null>(null)
@@ -234,7 +235,7 @@ export function AccountSecretsPage({
 			setSavedEditorState(freshEditor)
 		}
 		setMessage(
-			payload.providerLinkError ??
+			readAccountSecretsSaveWarning(payload) ??
 				nextMessage ??
 				payload.approvalError ??
 				(selection.selectedId && !payload.selectedSecret && !payload.approval
@@ -359,6 +360,8 @@ export function AccountSecretsPage({
 			})
 			if (router.state.location.href !== currentHref) return
 
+			const warning = readAccountSecretsSaveWarning(payload)
+			if (warning) toast.error(warning)
 			const wasCreating = !submittedEditorState.currentId
 			const nextSelection: ListDetailSelection = {
 				selectedId: payload.selectedSecret?.id ?? null,

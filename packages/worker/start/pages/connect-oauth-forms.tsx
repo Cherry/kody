@@ -278,6 +278,7 @@ export function renderConnectStep(input: {
 }
 
 export function renderSuccessCard(input: {
+	connectionHref: string
 	config: ConnectOauthConfig
 	hostApprovalLinks: Array<ConnectOauthHostApprovalLink>
 	nextSteps: ConnectOauthNextSteps | null
@@ -322,10 +323,7 @@ export function renderSuccessCard(input: {
 					copyLabel="Copy prompt"
 				/>
 			</div>
-			<SiteLink
-				href={`/account/integrations/${encodeURIComponent(input.config.providerKey)}`}
-				css={primaryLinkCss}
-			>
+			<SiteLink href={input.connectionHref} css={primaryLinkCss}>
 				View this connection
 			</SiteLink>
 		</section>

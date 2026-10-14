@@ -8,6 +8,7 @@ import {
 import { loadConnectOauthChooser } from '#app/connect-oauth-chooser.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { joinAppUrl } from '#worker/app-base-url.ts'
+import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
 import { type ConnectOauthLoaderData } from '#universal/loader-data.ts'
 
 /**
@@ -59,6 +60,7 @@ export async function loadConnectOauthLoaderData(
 				? await loadConnectOauthChooser({
 						env,
 						userId: user.mcpUser.userId,
+						orgSlug: readOrgSlugFromUrl(requestUrl),
 					})
 				: { options: [] },
 		}

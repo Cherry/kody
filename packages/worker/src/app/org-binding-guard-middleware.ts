@@ -1,7 +1,7 @@
 import { type Middleware } from 'remix/router'
 import { isSecureRequest } from '#app/auth-session.ts'
 import {
-	isOrgBoundPath,
+	isOrgBoundRequest,
 	isOrgRequestDenied,
 	loadRequestOrgResolution,
 } from '#app/org-request-binding.ts'
@@ -35,7 +35,7 @@ export function createOrgBindingGuardMiddleware(
 	renderNotFound: (request: Request) => Promise<Response>,
 ): Middleware {
 	return async ({ request, url }, next) => {
-		if (!isOrgBoundPath(url.pathname)) return await next()
+		if (!isOrgBoundRequest(url)) return await next()
 		const auth = await loadResolvedRequestAuth(request, env)
 		if (!auth.user || auth.user.accountSuspended) return await next()
 		if (await isOrgRequestDenied(request, env, auth.user.mcpUser.userId)) {

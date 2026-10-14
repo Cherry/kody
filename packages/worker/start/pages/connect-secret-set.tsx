@@ -24,6 +24,7 @@ import {
 	readJson,
 } from '#client/routes/account-approval-shared.ts'
 import {
+	readAccountSecretsSaveWarning,
 	createEditorStateFromNewSecretQuery,
 	type EditorState,
 } from './account-secrets-shared.ts'
@@ -166,6 +167,9 @@ export function ConnectSecretSetRoute({
 			})
 		},
 	})
+	const saveWarning = mutation.data
+		? readAccountSecretsSaveWarning(mutation.data)
+		: null
 	const saved = mutation.isSuccess
 	const saving = mutation.isPending
 	const message = mutation.error?.message ?? null
@@ -385,6 +389,15 @@ export function ConnectSecretSetRoute({
 
 			{view.saved && view.hasName ? (
 				<section css={cardCss} data-testid="connect-secret-set-saved-card">
+					{saveWarning ? (
+						<p
+							css={{ margin: 0, color: colors.warningText }}
+							role="status"
+							data-testid="connect-secret-set-save-warning"
+						>
+							{saveWarning}
+						</p>
+					) : null}
 					<div css={{ display: 'grid', gap: spacing.sm }}>
 						<div css={{ display: 'grid', gap: spacing.xs }}>
 							<span css={{ color: colors.textMuted }}>Secret</span>

@@ -13,7 +13,10 @@ import {
 } from '#universal/oauth-scopes.ts'
 import { isConnectOauthCallbackUrl } from '#universal/oauth-connect.ts'
 
-import { submitApprovalRequest } from '#client/routes/account-approval-shared.ts'
+import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
+import { useShellData } from '../routes/__root.tsx'
+import { orgSectionRestPath } from '#universal/org-section-hrefs.ts'
+import { organizationsWithSignupFallback } from '#universal/org-pages.ts'
 
 import { ProviderMark } from '../components/provider-icons.tsx'
 import {
@@ -43,6 +46,13 @@ import {
 	type ConnectOauthChooserOption,
 	type ConnectOauthStatusTone,
 	type ConnectOauthStep,
+	approveConnectOauthHosts,
+	connectOauthAccountFetchInit,
+	persistConnectOauthOrgSlug,
+	readConnectOauthOrgSlug,
+	replaceConnectOauthCallbackUrl,
+	saveConnectOauthConnection,
+	withConnectOauthChooserOrg,
 	buildConnectOauthAuthorizeUrl,
 	buildConnectOauthIntegrationLookupHref,
 	connectOauthHeaderCss,
@@ -250,11 +260,38 @@ export function ConnectOauthRoute({
 	initialData: ConnectOauthLoaderData
 	currentHref: string
 }) {
+	const [flowOrg] = useState(() =>
+		readConnectOauthOrgSlug(new URL(currentHref, 'https://kody.local')),
+	)
+	const { session } = useShellData()
+	const organizations = session
+		? organizationsWithSignupFallback({
+				organizations: session.organizations ?? [],
+				username: session.username,
+			})
+		: []
+	const destinationOrg =
+		organizations.find((org) => org.slug === flowOrg)?.slug ??
+		organizations.find((org) => org.personal)?.slug ??
+		organizations[0]?.slug
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshRoute: true,
 	})
 	const [state, setState] = useState(() =>
-		initialOauthState(initialData, currentHref),
+		initialOauthState(
+			{
+				...initialData,
+				chooser: initialData.chooser
+					? {
+							options: withConnectOauthChooserOrg(
+								initialData.chooser.options,
+								flowOrg,
+							),
+						}
+					: undefined,
+			},
+			currentHref,
+		),
 	)
 	const {
 		statusMessage,
@@ -304,19 +341,17 @@ export function ConnectOauthRoute({
 		if (approvingAllHosts || !hostApprovalLinks.length) return
 		update({ approvingAllHosts: true })
 		try {
-			const params = new URLSearchParams({
-				names: [
-					...new Set(hostApprovalLinks.map((link) => link.secretName)),
-				].join(','),
-				hosts: [...new Set(hostApprovalLinks.map((link) => link.host))].join(
-					',',
-				),
+			const result = await approveConnectOauthHosts({
+				secretNames: hostApprovalLinks.map((link) => link.secretName),
+				hosts: hostApprovalLinks.map((link) => link.host),
+				orgSlug: flowOrg,
 			})
-			const result = await submitApprovalRequest(
-				'approve',
-				`/account/secrets.json?${params}`,
-			)
-			if (!result || !mounted.current) return
+			if (!mounted.current) return
+			if (!result.ok) {
+				setStatus(result.error, 'error')
+				return
+			}
+
 			update({
 				hostApprovalLinks: [],
 				statusMessage: 'All hosts approved.',
@@ -360,9 +395,11 @@ export function ConnectOauthRoute({
 					hasStoredClientSecret ||
 					(config.flow === 'confidential' && Boolean(clientSecret)),
 			}
+			persistConnectOauthOrgSlug(flowOrg)
 			const result = await saveConnectOauthApp(
 				nextConfig,
 				clientSecret || undefined,
+				flowOrg,
 			)
 			if (!mounted.current) return
 			if (!result.ok) {
@@ -420,6 +457,7 @@ export function ConnectOauthRoute({
 		inFlight.current = true
 		update({ submitting: true })
 		try {
+			persistConnectOauthOrgSlug(flowOrg)
 			const href = await buildConnectOauthAuthorizeUrl({
 				config,
 				hasConfigError,
@@ -440,7 +478,12 @@ export function ConnectOauthRoute({
 	useEffect(() => {
 		if (callbackStarted.current) return
 		const callback = readConnectOauthCallback()
-		if (callback.kind === 'none') return
+		if (callback.kind === 'none') {
+			persistConnectOauthOrgSlug(
+				readOrgSlugFromUrl(new URL(currentHref, window.location.origin)),
+			)
+			return
+		}
 		callbackStarted.current = true
 		async function complete() {
 			try {
@@ -455,7 +498,7 @@ export function ConnectOauthRoute({
 								parsed.value.providerKey,
 								new URL(currentHref, window.location.origin).searchParams,
 							),
-							{ headers: { Accept: 'application/json' } },
+							connectOauthAccountFetchInit(flowOrg),
 						)
 						if (redirectToLoginOn401(response)) return
 						const payload =
@@ -472,7 +515,7 @@ export function ConnectOauthRoute({
 				if (!nextConfig) {
 					const response = await fetch(
 						'/account/integrations.json?connectChooser=1',
-						{ headers: { Accept: 'application/json' } },
+						connectOauthAccountFetchInit(flowOrg),
 					)
 					if (redirectToLoginOn401(response) || !mounted.current) return
 					const fallback = (await response.json().catch(() => null)) as {
@@ -482,7 +525,10 @@ export function ConnectOauthRoute({
 					update({
 						chooserOptions:
 							response.ok && fallback?.ok
-								? (fallback.chooser?.options ?? [])
+								? withConnectOauthChooserOrg(
+										fallback.chooser?.options ?? [],
+										flowOrg,
+									)
 								: [],
 					})
 					update({
@@ -493,11 +539,8 @@ export function ConnectOauthRoute({
 					return
 				}
 				update({ config: nextConfig, currentStep: 'callback' })
-				window.history.replaceState(
-					window.history.state,
-					'',
-					getConnectOauthRedirectUri(ssrRedirectUri),
-				)
+				replaceConnectOauthCallbackUrl(ssrRedirectUri, flowOrg)
+
 				if (callback.kind === 'error') {
 					update({
 						statusMessage:
@@ -525,6 +568,7 @@ export function ConnectOauthRoute({
 					nextConfig,
 					callback.code,
 					getConnectOauthRedirectUri(ssrRedirectUri),
+					flowOrg,
 				)
 				if (!mounted.current) return
 				if (!exchange.ok) {
@@ -539,50 +583,23 @@ export function ConnectOauthRoute({
 					})
 					return
 				}
-				const response = await fetch('/account/secrets.json', {
-					method: 'POST',
-					headers: {
-						Accept: 'application/json',
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
-						action: 'connect_oauth',
-						provider: nextConfig.provider,
-						callbackUrl: window.location.href,
-						...(nextConfig.platformAppSlug
-							? { platformAppSlug: nextConfig.platformAppSlug }
-							: {}),
-						authorizeUrl: nextConfig.authorizeUrl,
-						tokenUrl: nextConfig.tokenUrl,
-						apiBaseUrl: nextConfig.apiBaseUrl,
-						scopes: nextConfig.scopes,
-						scopeSeparator: nextConfig.scopeSeparator,
-						extraAuthorizeParams: nextConfig.extraAuthorizeParams,
-						flow: nextConfig.flow,
-						usePkce: nextConfig.usePkce,
-						tokenExchangeStyle: nextConfig.tokenExchangeStyle,
-						clientId: nextConfig.clientId,
-						allowedHosts: nextConfig.allowedHosts,
-						tokenPayload: exchange.data,
-					}),
+				const payload = await saveConnectOauthConnection({
+					config: nextConfig,
+					callbackUrl: window.location.href,
+					tokenPayload: exchange.data,
+					orgSlug: flowOrg,
 				})
-				if (redirectToLoginOn401(response) || !mounted.current) return
-				const payload = (await response.json()) as {
-					ok?: boolean
-					error?: string
-					accessTokenSaved?: boolean
-					refreshTokenSaved?: boolean
-					hostApprovalLinks?: unknown
-					nextSteps?: unknown
-				}
-				if (!response.ok || !payload.ok) {
+				if (!mounted.current) return
+				if (!payload.ok) {
 					update({
-						statusMessage: payload.error || 'Unable to save OAuth tokens.',
+						statusMessage: payload.error,
 						statusTone: 'error',
 						currentStep: 'connect',
 					})
 					return
 				}
+				persistConnectOauthOrgSlug(null)
+
 				update({
 					accessTokenSaved: payload.accessTokenSaved === true,
 					refreshTokenSaved: payload.refreshTokenSaved === true,
@@ -606,7 +623,7 @@ export function ConnectOauthRoute({
 			}
 		}
 		void complete()
-	}, [currentHref, invalidatePages, ssrRedirectUri])
+	}, [currentHref, invalidatePages, ssrRedirectUri, flowOrg])
 	const headerInput = {
 		config,
 		requestedProvider,
@@ -726,6 +743,15 @@ export function ConnectOauthRoute({
 			) : null}
 			{currentStep === 'success' ? (
 				<SuccessCard
+					connectionHref={
+						destinationOrg && config
+							? orgSectionRestPath(
+									destinationOrg,
+									'integrations',
+									config.providerKey,
+								)
+							: '/account'
+					}
 					{...{
 						config: currentConfig,
 						hostApprovalLinks,

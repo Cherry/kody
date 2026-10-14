@@ -3,7 +3,9 @@ import {
 	safeParseHost,
 } from '@kody-internal/shared/url-hosts.ts'
 import { type ConnectOauthLoaderData } from '#universal/loader-data.ts'
-
+import { orgAccountApiReferrer } from '#client/org-account-api.ts'
+import { isConnectOauthCallbackUrl } from '#universal/oauth-connect.ts'
+import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
 import { colors, typography } from '#universal/styles/tokens.ts'
 import {
 	cardCss,
@@ -58,6 +60,7 @@ export type ConnectOauthChooserOption = NonNullable<
 >['options'][number]
 
 const connectOauthConfigStorageKey = 'connect-oauth:config'
+const connectOauthOrgStorageKey = 'connect-oauth:org'
 
 const reservedAuthorizeParams = new Set([
 	'client_id',
@@ -82,12 +85,199 @@ export function buildConnectOauthIntegrationLookupHref(
 }
 
 /**
- * SPA-navigation prefetch mirroring the server handler's SSR embed: the
- * stored or built-in record for `?provider=` visits, resolved before the
- * route renders. Callback returns (`code`/`error`) restore config from
- * sessionStorage and bare visits redirect server-side, so both prefetch
- * nothing.
+ * Destination org for `/connect/oauth`. The redirect URI stays org-less; the
+ * creation handoff mirrors `org` in sessionStorage only for the in-flight
+ * provider round-trip. Fresh visits use the URL alone (or the signup org).
  */
+export function persistConnectOauthOrgSlug(orgSlug: string | null) {
+	if (typeof window === 'undefined') return
+	try {
+		if (!orgSlug) {
+			sessionStorage.removeItem(connectOauthOrgStorageKey)
+			return
+		}
+		sessionStorage.setItem(connectOauthOrgStorageKey, orgSlug)
+	} catch {
+		// Org caching is best-effort; fetches without it stay on the signup org.
+	}
+}
+
+function readStoredConnectOauthOrgSlug(): string | null {
+	if (typeof window === 'undefined') return null
+	try {
+		const raw = sessionStorage.getItem(connectOauthOrgStorageKey)?.trim()
+		return raw || null
+	} catch {
+		return null
+	}
+}
+
+/**
+ * Explicit `?org=` wins. Storage is only consulted on the provider callback
+ * (registered redirect URI has no org), so a later org-less visit cannot
+ * inherit a previous team handoff.
+ */
+export function readConnectOauthOrgSlug(url: URL): string | null {
+	const fromUrl = readOrgSlugFromUrl(url)
+	if (fromUrl) return fromUrl
+	if (isConnectOauthCallbackUrl(url)) {
+		return readStoredConnectOauthOrgSlug()
+	}
+	return null
+}
+
+/** Drop code/error from the URL while keeping the handoff `org` for account binds. */
+export function replaceConnectOauthCallbackUrl(
+	ssrRedirectUri: string | null,
+	orgSlug: string | null,
+) {
+	const clean = new URL(
+		getConnectOauthRedirectUri(ssrRedirectUri),
+		window.location.origin,
+	)
+	if (orgSlug) clean.searchParams.set('org', orgSlug)
+	window.history.replaceState(
+		window.history.state,
+		'',
+		`${clean.pathname}${clean.search}`,
+	)
+}
+
+export async function approveConnectOauthHosts(input: {
+	secretNames: ReadonlyArray<string>
+	hosts: ReadonlyArray<string>
+	orgSlug: string | null
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+	const requestUrl = new URL('/account/secrets.json', window.location.origin)
+	requestUrl.searchParams.set(
+		'names',
+		[...new Set(input.secretNames)].join(','),
+	)
+	requestUrl.searchParams.set('hosts', [...new Set(input.hosts)].join(','))
+	const response = await fetch(`${requestUrl.pathname}${requestUrl.search}`, {
+		method: 'POST',
+		...connectOauthAccountFetchInit(input.orgSlug),
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ action: 'approve' }),
+	})
+	if (redirectToLoginOn401(response)) {
+		return { ok: false, error: 'Session expired.' }
+	}
+	const payload = (await response.json().catch(() => null)) as {
+		ok?: boolean
+		error?: string
+	} | null
+	if (!response.ok || payload?.ok !== true) {
+		return {
+			ok: false,
+			error: payload?.error || 'Unable to process approval.',
+		}
+	}
+	return { ok: true }
+}
+
+export async function saveConnectOauthConnection(input: {
+	config: ConnectOauthConfig
+	callbackUrl: string
+	tokenPayload: Record<string, unknown>
+	orgSlug: string | null
+}): Promise<
+	| {
+			ok: true
+			accessTokenSaved: boolean
+			refreshTokenSaved: boolean
+			hostApprovalLinks: unknown
+			nextSteps: unknown
+	  }
+	| { ok: false; error: string }
+> {
+	const { config, orgSlug } = input
+	const response = await fetch('/account/secrets.json', {
+		method: 'POST',
+		...connectOauthAccountFetchInit(orgSlug),
+		headers: {
+			'Content-Type': 'application/json',
+			Accept: 'application/json',
+		},
+		body: JSON.stringify({
+			action: 'connect_oauth',
+			provider: config.provider,
+			callbackUrl: input.callbackUrl,
+			...(config.platformAppSlug
+				? { platformAppSlug: config.platformAppSlug }
+				: {}),
+			authorizeUrl: config.authorizeUrl,
+			tokenUrl: config.tokenUrl,
+			apiBaseUrl: config.apiBaseUrl,
+			scopes: config.scopes,
+			scopeSeparator: config.scopeSeparator,
+			extraAuthorizeParams: config.extraAuthorizeParams,
+			flow: config.flow,
+			usePkce: config.usePkce,
+			tokenExchangeStyle: config.tokenExchangeStyle,
+			clientId: config.clientId,
+			allowedHosts: config.allowedHosts,
+			tokenPayload: input.tokenPayload,
+		}),
+	})
+	if (redirectToLoginOn401(response)) {
+		return { ok: false, error: 'Session expired.' }
+	}
+	const payload = await response.json().catch(() => null)
+	if (!response.ok || payload?.ok !== true) {
+		return {
+			ok: false,
+			error: payload?.error || 'Unable to save OAuth tokens.',
+		}
+	}
+	return {
+		ok: true,
+		accessTokenSaved: payload.accessTokenSaved === true,
+		refreshTokenSaved: payload.refreshTokenSaved === true,
+		hostApprovalLinks: payload.hostApprovalLinks,
+		nextSteps: payload.nextSteps,
+	}
+}
+
+/**
+ * Account JSON for connect OAuth binds the handoff org via Referer, the same
+ * way `/connect/secret-set?org=` and org credentials pages do.
+ */
+export function connectOauthAccountFetchInit(
+	orgSlug: string | null,
+	signal?: AbortSignal,
+): RequestInit {
+	if (!orgSlug) {
+		return {
+			headers: { Accept: 'application/json' },
+			credentials: 'include',
+			...(signal ? { signal } : {}),
+		}
+	}
+	return {
+		headers: { Accept: 'application/json' },
+		credentials: 'include',
+		referrer: orgAccountApiReferrer(`/@${orgSlug}/-/credentials`),
+		...(signal ? { signal } : {}),
+	}
+}
+
+/** Keep the page's org on chooser links from org-less integrations.json. */
+export function withConnectOauthChooserOrg(
+	options: ReadonlyArray<ConnectOauthChooserOption>,
+	orgSlug: string | null,
+): Array<ConnectOauthChooserOption> {
+	if (!orgSlug) return [...options]
+	return options.map((option) => {
+		const url = new URL(option.href, 'https://kody.local')
+		url.searchParams.set('org', orgSlug)
+		return { ...option, href: `${url.pathname}${url.search}` }
+	})
+}
+
 export function readConnectOauthQueryConfig(
 	url: URL,
 ): ConnectOauthQueryConfigResult {
@@ -286,6 +476,7 @@ export async function exchangeConnectOauthCode(
 	nextConfig: ConnectOauthConfig,
 	code: string,
 	redirectUri: string,
+	orgSlug: string | null = null,
 ): Promise<OAuthExchangeResult> {
 	const params = new URLSearchParams()
 	params.set('grant_type', 'authorization_code')
@@ -307,11 +498,11 @@ export async function exchangeConnectOauthCode(
 	}
 	const response = await fetch('/account/secrets.json', {
 		method: 'POST',
+		...connectOauthAccountFetchInit(orgSlug),
 		headers: {
 			Accept: 'application/json',
 			'Content-Type': 'application/json',
 		},
-		credentials: 'include',
 		body: JSON.stringify({
 			action: 'oauth_exchange',
 			tokenUrl: nextConfig.tokenUrl,
@@ -353,14 +544,15 @@ export async function exchangeConnectOauthCode(
 export async function saveConnectOauthApp(
 	nextConfig: ConnectOauthConfig,
 	clientSecret?: string,
+	orgSlug: string | null = null,
 ): Promise<SaveOauthAppResult> {
 	const response = await fetch('/account/secrets.json', {
 		method: 'POST',
+		...connectOauthAccountFetchInit(orgSlug),
 		headers: {
 			'Content-Type': 'application/json',
 			Accept: 'application/json',
 		},
-		credentials: 'include',
 		body: JSON.stringify({
 			action: 'save_oauth_app',
 			provider: nextConfig.provider,
