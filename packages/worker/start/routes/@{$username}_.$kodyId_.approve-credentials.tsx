@@ -9,8 +9,12 @@ export const Route = createFileRoute(
 	'/@{$username}_/$kodyId_/approve-credentials',
 )({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.username,
+			kodyId: params.kodyId,
+			proposal: [...new URLSearchParams(location.searchStr)],
+		},
 	}),
 	preload: false,
 	staleTime: 0,
@@ -21,13 +25,13 @@ export const Route = createFileRoute(
 	component: Page,
 })
 function Page() {
-	const { pageQueryInput } = Route.useRouteContext()
+	const { pageLocation } = Route.useRouteContext()
 	const { payload } = Route.useLoaderData()
 	return (
 		<PackageCredentialApprovalRoute
-			key={pageQueryInput}
+			key={pageLocation.href}
 			payload={payload}
-			currentHref={pageQueryInput}
+			currentHref={pageLocation.href}
 		/>
 	)
 }

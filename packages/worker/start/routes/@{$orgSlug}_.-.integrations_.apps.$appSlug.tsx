@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
@@ -18,10 +17,16 @@ export const Route = createFileRoute(
 		name: search.name,
 		package_id: search.package_id,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, ['name', 'package_id']),
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.orgSlug,
+			approve: false,
+			integrationName: undefined,
+			appSlug: params.appSlug,
+			name: new URLSearchParams(location.searchStr).get('name') ?? undefined,
+			packageId:
+				new URLSearchParams(location.searchStr).get('package_id') ?? undefined,
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

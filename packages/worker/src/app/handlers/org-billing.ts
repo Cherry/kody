@@ -153,19 +153,19 @@ function billingErrorRedirect(
  * billing permissions cannot be granted. The page has no read-only state.
  */
 export async function loadOrgBillingPageData(input: {
-	request: Request
+	errorCode: string | null
+	noticeCode: string | null
 	env: Env
 	user: AuthenticatedAppUser
 	org: BillingPageOrg
 }) {
-	const searchParams = new URL(input.request.url).searchParams
 	return await loadAccountBillingData({
 		env: input.env,
 		userId: input.user.userId,
 		org: input.org,
 		seats: Math.max(1, await countLiveSeats(input.env.APP_DB, input.org.id)),
-		errorCode: searchParams.get('error'),
-		noticeCode: searchParams.get('billing'),
+		errorCode: input.errorCode,
+		noticeCode: input.noticeCode,
 	})
 }
 

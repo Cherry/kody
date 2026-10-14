@@ -5,7 +5,7 @@ import {
 	loadEmailList,
 	loadEmailDestinations,
 } from '../../../start/server/email.ts'
-import { loadAccountEmailData } from '#app/account-email-data.ts'
+import { readAccountEmailData } from '#app/account-email-data.ts'
 import {
 	listEmailNotificationDestinations,
 	maxAdditionalEmailNotificationDestinations,
@@ -13,12 +13,13 @@ import {
 import { identityEmailDestinationId } from '#universal/email-destinations.ts'
 
 const state = vi.hoisted(() => ({ collection: vi.fn() }))
-vi.mock('../../../start/server/account-collections.ts', () => ({
-	loadCollection: state.collection,
+vi.mock('../../../start/server/collection-context.ts', () => ({
+	loadScopedCollection: state.collection,
+	loadPersonalCollection: state.collection,
 }))
 
 vi.mock('#app/account-email-data.ts', () => ({
-	loadAccountEmailData: vi.fn(),
+	readAccountEmailData: vi.fn(),
 }))
 
 vi.mock('#worker/email/destinations.ts', async (importOriginal) => {
@@ -53,12 +54,12 @@ test('email server resources return independent message lists and actor destinat
 			displayName: 'user',
 		},
 	}
-	state.collection.mockImplementation(async (href: string) => ({
+	state.collection.mockResolvedValue({
 		bindings: { APP_DB: {} },
-		request: new Request(new URL(href, 'https://example.com')),
+		request: new Request('https://example.com/_serverFn/read'),
 		user,
-	}))
-	vi.mocked(loadAccountEmailData).mockResolvedValue({
+	})
+	vi.mocked(readAccountEmailData).mockResolvedValue({
 		ok: true,
 		emailVerified: true,
 		email: 'user@example.com',
@@ -127,5 +128,39 @@ test('email server resources return independent message lists and actor destinat
 			additionalLimit: maxAdditionalEmailNotificationDestinations,
 			additionalRemaining: maxAdditionalEmailNotificationDestinations,
 		},
+	})
+})
+
+test('org inbox passes explicit filters and never derives selection from a request URL', async () => {
+	state.collection.mockResolvedValue({
+		bindings: { APP_DB: {} },
+		user: { userId: 42 },
+		request: new Request('https://example.com/_serverFn/read?selected=other'),
+	})
+	vi.mocked(readAccountEmailData).mockResolvedValue({
+		selectedMessage: null,
+	} as Awaited<ReturnType<typeof readAccountEmailData>>)
+	await loadEmailList({
+		data: {
+			org: 'team',
+			query: ' subject ',
+			classification: 'quarantined',
+			page: 3,
+			pageSize: 50,
+		},
+	})
+	expect(state.collection).toHaveBeenLastCalledWith({
+		orgSlug: 'team',
+		section: 'email',
+		returnTo:
+			'/@team/-/email?q=subject&page=3&pageSize=50&classification=quarantined',
+	})
+	expect(readAccountEmailData).toHaveBeenLastCalledWith({
+		env: { APP_DB: {} },
+		user: { userId: 42 },
+		query: 'subject',
+		classification: 'quarantined',
+		page: 3,
+		pageSize: 50,
 	})
 })

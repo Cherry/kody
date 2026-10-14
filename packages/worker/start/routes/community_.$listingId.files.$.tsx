@@ -10,9 +10,18 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 })
 
 export const Route = createFileRoute('/community_/$listingId/files/$')({
-	context: ({ location }) => ({
+	context: ({ location, params }) => ({
 		pageQueryInput: {
-			pathname:
+			resource: {
+				kind: 'listing-files' as const,
+				listingId: params.listingId,
+				relativePath: (params._splat ?? '')
+					.split('/')
+					.map(encodeURIComponent)
+					.join('/'),
+			},
+			queryRef: new URLSearchParams(location.searchStr).get('ref') ?? '',
+			location:
 				location.pathname +
 				location.searchStr +
 				(location.hash ? `#${location.hash}` : ''),

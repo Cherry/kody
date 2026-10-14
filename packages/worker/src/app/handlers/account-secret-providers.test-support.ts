@@ -20,7 +20,16 @@ export function testAccountSecretProvidersApiHandler(env: Env) {
 							user: user.mcpUser,
 						}),
 						email: user.email,
-						url: request.url,
+						approval: {
+							provider:
+								new URL(request.url).searchParams.get('provider') ?? undefined,
+							ref: new URL(request.url).searchParams.get('ref') ?? undefined,
+							packageId:
+								new URL(request.url).searchParams.get('package_id') ??
+								undefined,
+							packageName:
+								new URL(request.url).searchParams.get('package') ?? undefined,
+						},
 					}),
 				)
 			}

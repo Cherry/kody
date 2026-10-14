@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountMcpServersPage } from '../pages/account-mcp-servers.tsx'
 import { loadMcpServersPage } from '#start/server/account-collections'
@@ -11,7 +10,7 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers')({
-	beforeLoad: ({ location }) => {
+	beforeLoad: ({ location, params }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),
 		)
@@ -22,7 +21,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers')({
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
 		return {
-			pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
+			pageQueryInput: { orgSlug: params.orgSlug, serverId: undefined },
 		}
 	},
 

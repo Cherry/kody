@@ -161,18 +161,45 @@ function signInAs(person: Person | null) {
 async function call(env: Env, path: string, init?: RequestInit) {
 	const request = new Request(`https://example.com${path}`, init)
 	const user = await mocks.requireAuthenticatedPageUser(request, env)
-	const result =
-		user instanceof Response
-			? user
-			: await loadOrgUsagePageResult(env, request, user)
-	return result instanceof Response
-		? {
-				status: result.status,
-				headers: result.headers,
-				data: null,
-				error: await result.text(),
-			}
-		: { status: 200, headers: new Headers(), data: result, error: null }
+	if (user instanceof Response)
+		return {
+			status: user.status,
+			headers: user.headers,
+			data: null,
+			error: await user.text(),
+		}
+	const url = new URL(request.url)
+	const result = await loadOrgUsagePageResult({
+		env,
+		user,
+		orgSlug: url.pathname.split('/')[1]!.slice(1),
+		credits: url.searchParams.get('credits'),
+		error: url.searchParams.get('error'),
+		topup: url.searchParams.get('topup'),
+		sessionId: url.searchParams.get('session_id'),
+	})
+	if (result.kind === 'redirect')
+		return {
+			status: 302,
+			headers: new Headers({
+				Location: new URL(result.href, request.url).toString(),
+			}),
+			data: null,
+			error: '',
+		}
+	if (result.kind === 'denied')
+		return {
+			status: result.status,
+			headers: new Headers(),
+			data: null,
+			error: result.error,
+		}
+	return {
+		status: 200,
+		headers: new Headers(),
+		data: result.payload,
+		error: null,
+	}
 }
 
 beforeEach(async () => {
@@ -313,5 +340,30 @@ test('notice and error codes map to messages; unknown and prototype keys map to 
 	expect(mocks.loadAccountUsageData).toHaveBeenLastCalledWith(
 		expect.objectContaining({ notice: undefined, error: undefined }),
 	)
+	expect(mocks.applyCreditTopUpFromCheckoutSession).not.toHaveBeenCalled()
+})
+
+test('typed usage selection cannot authorize one org while reading another', async () => {
+	const env = createEnv()
+	const user = await mocks.requireAuthenticatedPageUser(
+		new Request('https://example.com/@ada/-/usage'),
+		env,
+	)
+	if (user instanceof Response) throw new Error('Expected authenticated actor')
+	const result = await loadOrgUsagePageResult({
+		env,
+		user,
+		orgSlug: 'acme',
+		credits: null,
+		error: null,
+		topup: null,
+		sessionId: null,
+	})
+	expect(result).toEqual({
+		kind: 'denied',
+		status: 404,
+		error: 'Organization unavailable.',
+	})
+	expect(mocks.loadAccountUsageData).not.toHaveBeenCalled()
 	expect(mocks.applyCreditTopUpFromCheckoutSession).not.toHaveBeenCalled()
 })

@@ -12,8 +12,13 @@ const pageQuery = createPageQuery(
 )
 export const Route = createFileRoute('/@{$username}_/$kodyId_/credentials')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.username,
+			kodyId: params.kodyId,
+			view: 'credentials' as const,
+			search: [...new URLSearchParams(location.searchStr)],
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
@@ -25,15 +30,15 @@ export const Route = createFileRoute('/@{$username}_/$kodyId_/credentials')({
 	component: Page,
 })
 function Page() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
+	const { actorKey, pageQueryInput, pageLocation } = Route.useRouteContext()
 	const result = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
 	if (result.kind === 'no_access') return <PackageNoAccessPage {...result} />
 	const { payload } = result
 	return (
 		<PackageCredentialsRoute
-			key={pageQueryInput}
+			key={pageLocation.href}
 			payload={payload}
-			currentHref={pageQueryInput}
+			currentHref={pageLocation.href}
 		/>
 	)
 }

@@ -1,21 +1,28 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountBillingPage } from '../pages/account-billing.tsx'
 import { loadBillingPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
-const pageQuery = createPageQuery('loadBillingPage', loadBillingPage)
+const pageQuery = createPageQuery('loadBillingPage', loadBillingPage, {
+	freshAuthorization: true,
+})
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/billing')({
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		billing: search.billing,
 		error: search.error,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname + pageSearch(location.searchStr, ['billing', 'error']),
-	}),
+	context: ({ location, params }) => {
+		const search = new URLSearchParams(location.searchStr)
+		return {
+			pageQueryInput: {
+				orgSlug: params.orgSlug,
+				billing: search.get('billing'),
+				error: search.get('error'),
+			},
+		}
+	},
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

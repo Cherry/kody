@@ -14,8 +14,16 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/integrations_/$integrationName',
 )({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.orgSlug,
+			approve: false,
+			integrationName: params.integrationName,
+			appSlug: undefined,
+			name: new URLSearchParams(location.searchStr).get('name') ?? undefined,
+			packageId:
+				new URLSearchParams(location.searchStr).get('package_id') ?? undefined,
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -1,16 +1,18 @@
 import { infiniteQueryOptions, type QueryClient } from '@tanstack/react-query'
 import { loadActivityPage } from '#start/server/account-collections'
 
-export function activityQuery(actorKey: string | null, href: string) {
+export type ActivityInput = Parameters<typeof loadActivityPage>[0]['data']
+
+export function activityQuery(actorKey: string | null, input: ActivityInput) {
 	return infiniteQueryOptions({
 		meta: { actorKey },
-		queryKey: ['page', actorKey, 'loadActivityPage', href] as const,
+		queryKey: ['page', actorKey, 'loadActivityPage', input] as const,
 		initialPageParam: null as string | null,
-		queryFn: ({ pageParam, signal }) => {
-			const url = new URL(href, 'https://kody.local')
-			if (pageParam !== null) url.searchParams.set('cursor', pageParam)
-			return loadActivityPage({ data: `${url.pathname}${url.search}`, signal })
-		},
+		queryFn: ({ pageParam, signal }) =>
+			loadActivityPage({
+				data: { ...input, cursor: pageParam ?? input.cursor },
+				signal,
+			}),
 		getNextPageParam: (lastPage) => lastPage.payload.nextCursor ?? undefined,
 		staleTime: 10_000,
 	})
@@ -18,10 +20,10 @@ export function activityQuery(actorKey: string | null, href: string) {
 export async function loadActivityQuery(
 	client: QueryClient,
 	actorKey: string | null,
-	href: string,
+	input: ActivityInput,
 	preload = false,
 ) {
-	const options = activityQuery(actorKey, href)
+	const options = activityQuery(actorKey, input)
 	// A foreground entry must recheck organization membership. An older
 	// preload flight must not satisfy that authorization check.
 	if (!preload)

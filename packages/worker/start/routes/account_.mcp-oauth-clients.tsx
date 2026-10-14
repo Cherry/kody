@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountMcpOauthClientsPage } from '../pages/account-mcp-oauth-clients.tsx'
 import { loadMcpOauthClientsPage } from '#start/server/account-collections'
@@ -11,9 +10,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/account_/mcp-oauth-clients')({
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
-	}),
+	context: () => ({ pageQueryInput: {} }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

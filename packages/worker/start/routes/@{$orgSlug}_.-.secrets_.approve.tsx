@@ -1,3 +1,4 @@
+import { secretsInput } from '../secrets-input.ts'
 /** @jsxImportSource @emotion/react */
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountSecretsPage } from '../pages/account-secrets.tsx'
@@ -5,10 +6,10 @@ import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/approve')({
 	loaderDeps: ({ search }) => search,
-	loader: ({ abortController, location }) =>
+	loader: ({ params, abortController, location }) =>
 		loadSecretsPage({
 			signal: abortController.signal,
-			data: location.pathname + location.searchStr,
+			data: secretsInput(params.orgSlug, location.searchStr),
 		}),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: SecretsPage,

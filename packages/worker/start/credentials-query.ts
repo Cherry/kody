@@ -45,6 +45,9 @@ const pageQuery = createPageQuery('loadCredentialsPage', loadCredentialsPage, {
 })
 
 /** Filters do not identify server data. Organization and selection still do. */
-export function credentialsPageQuery(actorKey: string | null, href: string) {
-	return pageQuery(actorKey, new URL(href, 'https://kody.local').pathname)
+export function credentialsPageQuery(
+	actorKey: string | null,
+	input: { orgSlug: string; credentialId?: string },
+) {
+	return pageQuery(actorKey, input)
 }

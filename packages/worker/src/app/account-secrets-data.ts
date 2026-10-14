@@ -102,29 +102,68 @@ export async function loadAccountSecretsData(input: {
 					new URL(input.search ?? '', input.request.url).toString(),
 				)
 			: input.selectedSecretId
-	return buildAccountSecretsPayload({
+	const url = new URL(input.request.url)
+	if (input.search !== undefined) url.search = input.search
+	return loadAccountSecretsSelection({
 		...input,
 		selectedSecretId,
+		approval: {
+			hosts: [
+				...url.searchParams.getAll('hosts'),
+				...url.searchParams.getAll('host'),
+				...url.searchParams.getAll('allowed-host'),
+				...url.searchParams.getAll('allowedHosts'),
+			],
+			names: [
+				...url.searchParams.getAll('names'),
+				...url.searchParams.getAll('name'),
+			],
+			packageId: url.searchParams.get('package_id') ?? undefined,
+			scope: readHostApprovalScope(url),
+			storagePackageId: url.searchParams.get('packageId') ?? undefined,
+			sessionId: url.searchParams.get('sessionId') ?? undefined,
+		},
 	})
 }
 
-async function buildAccountSecretsPayload(input: {
-	request: Request
-	search?: string
+export async function loadAccountSecretsSelection(input: {
 	env: Env
 	user: AuthenticatedUser
-	selectedSecretId?: string | null
+	selectedSecretId: string | null
+	approval: {
+		hosts: string[]
+		names: string[]
+		packageId?: string
+		scope: 'user' | 'package' | 'session'
+		storagePackageId?: string
+		sessionId?: string
+	}
 	packageOptions?: Array<SavedPackageOption>
 	savedPackages?: Array<SavedPackageSummary>
 }): Promise<AccountSecretsLoaderData> {
-	const url = new URL(input.request.url)
-	if (input.search !== undefined) url.search = input.search
-	const requestedApprovalHosts = readApprovalHosts(url)
+	const requestedApprovalHosts = classifyBulkApprovalHosts(
+		input.approval.hosts.flatMap((value) => value.split(',')),
+	)
 	const rejectedApprovalHosts = requestedApprovalHosts.rejected
-	const requestedPackageId = readRequestedPackageId(url)
-	const requestedSecretNames = readRequestedSecretNames(url)
-	const requestedHostScope = readHostApprovalScope(url)
-	const requestedHostStorageContext = getHostApprovalStorageContext(url)
+	const requestedPackageId = input.approval.packageId?.trim() || null
+	const requestedSecretNames = normalizeBulkPackageSecretApprovalNames(
+		input.approval.names.flatMap((value) => value.split(',')),
+	)
+	const requestedHostScope = input.approval.scope
+	const requestedHostStorageContext: StorageContext | null =
+		requestedHostScope === 'package' && input.approval.storagePackageId?.trim()
+			? {
+					packageId: input.approval.storagePackageId.trim(),
+					sessionId: null,
+					appId: null,
+				}
+			: requestedHostScope === 'session' && input.approval.sessionId?.trim()
+				? {
+						sessionId: input.approval.sessionId.trim(),
+						packageId: null,
+						appId: null,
+					}
+				: null
 	const savedPackages =
 		input.savedPackages ??
 		(await listSavedPackagesByUserId(input.env.APP_DB, {
@@ -674,21 +713,6 @@ function getHostApprovalStorageContext(url: URL): StorageContext | null {
 	}
 }
 
-function readRequestedPackageId(url: URL) {
-	const value = url.searchParams.get('package_id')
-	return value?.trim() ? value.trim() : null
-}
-
-function readRequestedSecretNames(url: URL) {
-	const values = [
-		...url.searchParams.getAll('names'),
-		...url.searchParams.getAll('name'),
-	]
-	return normalizeBulkPackageSecretApprovalNames(
-		values.flatMap((value) => value.split(',')),
-	)
-}
-
 export {
 	getHostApprovalStorageContext,
 	listAccountSecrets,
@@ -697,5 +721,3 @@ export {
 	resolveApprovalRequest,
 	toPackageOptions,
 }
-
-export { buildAccountSecretsPayload }

@@ -110,7 +110,7 @@ vi.mock('#worker/email/owner-email-reader.ts', () => ({
 	listOwnerEmailDeliveryEvents: mocks.listOwnerEmailDeliveryEvents,
 }))
 
-const { loadAccountEmailData, loadAccountEmailDetail } =
+const { readAccountEmailData, loadAccountEmailDetail } =
 	await import('./account-email-data.ts')
 
 const authenticatedUser: AuthenticatedAppUser = {
@@ -133,7 +133,7 @@ const authenticatedUser: AuthenticatedAppUser = {
 	request: sessionRequestContext('stable-user-1', 'test-user'),
 }
 
-test('loadAccountEmailData reads USER message graph only through owner Mailbox readers', async () => {
+test('readAccountEmailData reads USER message graph only through owner Mailbox readers', async () => {
 	mocks.classifyInboundEmailSender.mockResolvedValue({
 		kind: 'unverified',
 		reason: 'From address was not authenticated.',
@@ -154,11 +154,13 @@ test('loadAccountEmailData reads USER message graph only through owner Mailbox r
 		...meter.env,
 	} as Env
 
-	const result = await loadAccountEmailData({
+	const result = await readAccountEmailData({
 		env,
-		request: new Request(
-			'https://example.com/account/email.json?selected=msg-1',
-		),
+		page: 1,
+		pageSize: 25,
+		query: '',
+		classification: null,
+		selectedMessageId: 'msg-1',
 		user: authenticatedUser,
 	})
 
@@ -187,7 +189,7 @@ test('loadAccountEmailData reads USER message graph only through owner Mailbox r
 	expect(result.selectedMessage?.enable_sender).toBeNull()
 })
 
-test('loadAccountEmailData uses the org slug for a team inbox and exposes a member sender', async () => {
+test('readAccountEmailData uses the org slug for a team inbox and exposes a member sender', async () => {
 	const memberId = 'c'.repeat(64)
 	mocks.classifyInboundEmailSender.mockResolvedValue({
 		kind: 'member',
@@ -220,11 +222,13 @@ test('loadAccountEmailData uses the org slug for a team inbox and exposes a memb
 		COOKIE_SECRET: 'secret',
 		...meter.env,
 	} as Env
-	const result = await loadAccountEmailData({
+	const result = await readAccountEmailData({
 		env,
-		request: new Request(
-			'https://example.com/account/email.json?selected=msg-1',
-		),
+		page: 1,
+		pageSize: 25,
+		query: '',
+		classification: null,
+		selectedMessageId: 'msg-1',
 		user: {
 			...authenticatedUser,
 			username: 'viewer',
@@ -266,7 +270,7 @@ test('loadAccountEmailData uses the org slug for a team inbox and exposes a memb
 	)
 })
 
-test('loadAccountEmailData refuses a member without email:read', async () => {
+test('readAccountEmailData refuses a member without email:read', async () => {
 	mocks.listOwnerEmailMessagesPage.mockClear()
 	const sqlite = new DatabaseSync(':memory:')
 	const db = createD1FromSqlite(sqlite)
@@ -282,14 +286,17 @@ test('loadAccountEmailData refuses a member without email:read', async () => {
 		.run()
 	const meter = createInMemoryUserMeterEnv()
 	await expect(
-		loadAccountEmailData({
+		readAccountEmailData({
 			env: {
 				APP_DB: db,
 				APP_BASE_URL: 'https://example.com',
 				COOKIE_SECRET: 'secret',
 				...meter.env,
 			} as Env,
-			request: new Request('https://example.com/account/email.json'),
+			page: 1,
+			pageSize: 25,
+			query: '',
+			classification: null,
 			user: {
 				...authenticatedUser,
 				request: deriveRequestContext({
@@ -344,7 +351,7 @@ async function usersAndOrgsDb() {
 	return db
 }
 
-test('loadAccountEmailData hides a personal inbox until the account email is verified', async () => {
+test('readAccountEmailData hides a personal inbox until the account email is verified', async () => {
 	vi.mocked(isAccountEmailVerified).mockResolvedValueOnce(false)
 	mocks.listOwnerEmailMessagesPage.mockClear()
 	const db = await usersAndOrgsDb()
@@ -357,14 +364,17 @@ test('loadAccountEmailData hides a personal inbox until the account email is ver
 		.bind(orgId)
 		.run()
 	const meter = createInMemoryUserMeterEnv()
-	const result = await loadAccountEmailData({
+	const result = await readAccountEmailData({
 		env: {
 			APP_DB: db,
 			APP_BASE_URL: 'https://example.com',
 			COOKIE_SECRET: 'secret',
 			...meter.env,
 		} as Env,
-		request: new Request('https://example.com/account/email.json'),
+		page: 1,
+		pageSize: 25,
+		query: '',
+		classification: null,
 		user: { ...authenticatedUser, emailVerified: false },
 	})
 	expect(result.emailVerified).toBe(false)
@@ -373,7 +383,7 @@ test('loadAccountEmailData hides a personal inbox until the account email is ver
 	expect(mocks.listOwnerEmailMessagesPage).not.toHaveBeenCalled()
 })
 
-test('loadAccountEmailData shows a team inbox to an unverified owner with email:read', async () => {
+test('readAccountEmailData shows a team inbox to an unverified owner with email:read', async () => {
 	vi.mocked(isAccountEmailVerified).mockResolvedValueOnce(false)
 	mocks.classifyInboundEmailSender.mockResolvedValue({
 		kind: 'unverified',
@@ -402,14 +412,17 @@ test('loadAccountEmailData shows a team inbox to an unverified owner with email:
 		.bind(viewerId)
 		.run()
 	const meter = createInMemoryUserMeterEnv()
-	const result = await loadAccountEmailData({
+	const result = await readAccountEmailData({
 		env: {
 			APP_DB: db,
 			APP_BASE_URL: 'https://example.com',
 			COOKIE_SECRET: 'secret',
 			...meter.env,
 		} as Env,
-		request: new Request('https://example.com/account/email.json'),
+		page: 1,
+		pageSize: 25,
+		query: '',
+		classification: null,
 		user: {
 			...authenticatedUser,
 			email: 'ada@example.com',
@@ -438,7 +451,7 @@ test('loadAccountEmailData shows a team inbox to an unverified owner with email:
 	)
 })
 
-test('loadAccountEmailData shows a paid team plan instead of the viewer email free plan', async () => {
+test('readAccountEmailData shows a paid team plan instead of the viewer email free plan', async () => {
 	const actual = await vi.importActual<typeof EntitlementService>(
 		'#worker/entitlements/service.ts',
 	)
@@ -472,14 +485,17 @@ test('loadAccountEmailData shows a paid team plan instead of the viewer email fr
 		.bind(viewerId)
 		.run()
 	const meter = createInMemoryUserMeterEnv()
-	const result = await loadAccountEmailData({
+	const result = await readAccountEmailData({
 		env: {
 			APP_DB: db,
 			APP_BASE_URL: 'https://example.com',
 			COOKIE_SECRET: 'secret',
 			...meter.env,
 		} as Env,
-		request: new Request('https://example.com/account/email.json'),
+		page: 1,
+		pageSize: 25,
+		query: '',
+		classification: null,
 		user: {
 			...authenticatedUser,
 			email: 'ada@example.com',

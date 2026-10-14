@@ -1,143 +1,70 @@
 import { z } from 'zod'
 import { routes } from '#universal/routes.ts'
-import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import { notFound, redirect } from '@tanstack/react-router'
-import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
+import { createServerFn } from '@tanstack/react-start'
 import { readJsonRecord } from './json-value.ts'
-import { isOrgDocumentRequest } from './org-document-request.ts'
 
-function collectionAliasHref(href: string) {
-	if (!href.startsWith('/') || href.startsWith('//') || href.includes('\\'))
-		return ''
-	const url = new URL(href, 'https://kody.local')
-	return accountAliasPath(url.pathname) + url.search + url.hash
-}
-function validateValuesHref(href: string) {
-	if (
-		typeof href !== 'string' ||
-		!/^\/account\/values(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-			collectionAliasHref(href),
-		)
-	)
-		throw new Error('Invalid account collection URL')
-	return href
-}
-export const loadCollection = createServerOnlyFn(async (href: string) => {
-	const [
-		{ env },
-		{ getRequest, setResponseHeader },
-		{ getEnv },
-		{ setAuthSessionSecret },
-		{ requireAuthenticatedPageUser },
-	] = await Promise.all([
-		import('cloudflare:workers'),
-		import('@tanstack/react-start/server'),
-		import('../../src/app/env.ts'),
-		import('../../src/app/auth-session.ts'),
-		import('../../src/app/page-auth.ts'),
-	])
-	const bindings = getEnv(env)
-	setAuthSessionSecret(bindings.COOKIE_SECRET)
-	const original = getRequest()
-	const request = new Request(new URL(href, original.url), {
-		headers: original.headers,
-	})
-	let user = await requireAuthenticatedPageUser(original, bindings, {
-		redirectTo: href,
-	})
-	if (user instanceof Response) {
-		const cookie = user.headers.get('Set-Cookie')
-		if (cookie) setResponseHeader('Set-Cookie', cookie)
-		throw redirect({
-			href: user.headers.get('Location') ?? '/login',
-			statusCode: user.status,
-		})
-	}
-	const orgPath = parseOrgResourcePath(new URL(href, original.url).pathname)
-	if (orgPath) {
-		const [{ loadOrgBindingForSlug }, { deriveRequestContext }] =
-			await Promise.all([
-				import('#worker/orgs/repo.ts'),
-				import('#worker/request-context/request-context.ts'),
-			])
-		const binding = await loadOrgBindingForSlug(
-			bindings.APP_DB,
-			user.mcpUser.userId,
-			orgPath.slug,
-		)
-		const { orgSectionDenial } = await import('#app/org-request-binding.ts')
-		if (!binding || orgSectionDenial(binding, orgPath.section)) throw notFound()
-		user = {
-			...user,
-			request: deriveRequestContext({
-				user: user.mcpUser,
-				source: { kind: 'session' },
-				orgBinding: binding,
-			}),
-		}
-	}
-	if (orgPath) {
-		const [{ serializeLastUsedOrgCookie }, { isSecureRequest }] =
-			await Promise.all([
-				import('#universal/org-last-used-cookie.ts'),
-				import('../../src/app/auth-session.ts'),
-			])
-		if (isOrgDocumentRequest()) {
-			setResponseHeader(
-				'Set-Cookie',
-				serializeLastUsedOrgCookie({
-					slug: orgPath.slug,
-					secure: isSecureRequest(request),
-				}),
-			)
-		}
-	}
-	setResponseHeader('Cache-Control', 'no-store')
-	return { bindings, request, user }
-})
 export const loadSecretsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/secrets(?:\/(?:new|approve|user\/[^/?#]+|(?:session|package)\/[^/?#]+\/[^/?#]+))?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid secrets URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const setupUrl = new URL(href, 'https://kody.local')
-		if (
-			accountAliasPath(setupUrl.pathname) === '/account/secrets/new' &&
-			setupUrl.searchParams.get('name')?.trim()
-		)
-			throw redirect({
-				href: `/connect/secret-set${setupUrl.search}`,
-				statusCode: 302,
-			})
-
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountSecretsData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-secrets-data.ts'),
-				import('./document-head.ts'),
-			])
-		const payload = await loadAccountSecretsData({
-			env: bindings,
-			request,
-			user,
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			selectedSecretId: z.string().nullable(),
+			create: z.boolean(),
+			setupName: z.string().optional(),
+			provider: z.string().optional(),
+			approval: z.object({
+				hosts: z.array(z.string()),
+				names: z.array(z.string()),
+				packageId: z.string().optional(),
+				scope: z.enum(['user', 'package', 'session']),
+				storagePackageId: z.string().optional(),
+				sessionId: z.string().optional(),
+			}),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountSecretsSelection },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-secrets-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname = routes.orgSecrets.href({ orgSlug: data.orgSlug })
+		if (data.create && data.setupName?.trim()) {
+			const query = new URLSearchParams()
+			for (const name of data.approval.names) query.append('name', name)
+			for (const host of data.approval.hosts) query.append('hosts', host)
+			query.set('scope', data.approval.scope)
+			query.set('org', data.orgSlug)
+			if (data.provider) query.set('provider', data.provider)
+			if (data.approval.packageId)
+				query.set('package_id', data.approval.packageId)
+			if (data.approval.storagePackageId)
+				query.set('packageId', data.approval.storagePackageId)
+			if (data.approval.sessionId)
+				query.set('sessionId', data.approval.sessionId)
+			throw redirect({ href: `/connect/secret-set?${query}`, statusCode: 302 })
+		}
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'secrets',
+			returnTo: pathname,
 		})
-		const url = new URL(request.url)
+		const payload = await loadAccountSecretsSelection({
+			env: bindings,
+			user,
+			selectedSecretId: data.selectedSecretId,
+			approval: data.approval,
+		})
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgSecrets',
-				url.pathname,
-				{ accountSecrets: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgSecrets', pathname, {
+				accountSecrets: payload,
+			}),
 		}
 	})
 
@@ -192,63 +119,84 @@ export const loadMemoriesPage = createServerFn({ method: 'GET' })
 		}
 	})
 export const loadValuesPage = createServerFn({ method: 'GET' })
-	.validator(validateValuesHref)
-	.handler(async ({ data: href }) => {
-		if (
-			!accountAliasPath(
-				new URL(href, 'https://kody.local').pathname,
-			).startsWith('/account/values')
-		)
-			throw new Error('Invalid values URL')
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountValuesData }, { loadDocumentHead }] = await Promise.all(
-			[
-				import('../../src/app/account-values-data.ts'),
-				import('./document-head.ts'),
-			],
-		)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			valueId: z.string().optional(),
+			selected: z.string().optional(),
+			create: z.boolean().optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountValuesData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-values-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname =
+			routes.orgValues.href({ orgSlug: data.orgSlug }) +
+			(data.create
+				? '/new'
+				: data.valueId
+					? `/${encodeURIComponent(data.valueId)}`
+					: '')
+		const search = data.selected
+			? `?${new URLSearchParams({ selected: data.selected })}`
+			: ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'values',
+			returnTo: pathname + search,
+		})
 		const payload = await loadAccountValuesData({
 			env: bindings,
 			user,
-			url: request.url,
+			selectedValueId: data.valueId?.trim() || data.selected?.trim() || null,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgValues',
-				url.pathname,
+				pathname,
 				{ accountValues: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 
 export const loadJobsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/jobs(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid jobs URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			jobId: z.string().optional(),
+			selected: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data: input }) => {
+		const { loadScopedCollection } = await import('./collection-context.ts')
+		const pathname =
+			routes.orgJobs.href({ orgSlug: input.orgSlug }) +
+			(input.jobId ? `/${encodeURIComponent(input.jobId)}` : '')
+		const search = input.selected
+			? `?${new URLSearchParams({ selected: input.selected })}`
+			: ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: input.orgSlug,
+			section: 'jobs',
+			returnTo: pathname + search,
+		})
 		const [{ loadAccountJobsData }, { loadDocumentHead }] = await Promise.all([
 			import('../../src/app/account-jobs-data.ts'),
 			import('./document-head.ts'),
 		])
-		const url = new URL(request.url)
 		const data = await loadAccountJobsData({
 			env: bindings,
-			request,
 			user,
-			pathJobId: accountAliasPath(url.pathname).split('/')[3]
-				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
-				: undefined,
+			selectedJobId: input.jobId?.trim() || input.selected?.trim() || null,
 		})
 		const payload = {
 			...data,
@@ -265,68 +213,74 @@ export const loadJobsPage = createServerFn({ method: 'GET' })
 			payload,
 			head: loadDocumentHead(
 				'orgJobs',
-				url.pathname,
+				pathname,
 				{ accountJobs: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 
 export const loadWorkflowsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/workflows(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid workflows URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			workflowId: z.string().optional(),
+			selected: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data: input }) => {
+		const { loadScopedCollection } = await import('./collection-context.ts')
+		const pathname =
+			routes.orgWorkflows.href({ orgSlug: input.orgSlug }) +
+			(input.workflowId ? `/${encodeURIComponent(input.workflowId)}` : '')
+		const search = input.selected
+			? `?${new URLSearchParams({ selected: input.selected })}`
+			: ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: input.orgSlug,
+			section: 'workflows',
+			returnTo: pathname + search,
+		})
 		const [{ loadAccountWorkflowsData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/account-workflows-data.ts'),
 				import('./document-head.ts'),
 			])
-		const url = new URL(request.url)
 		const payload = await loadAccountWorkflowsData({
 			env: bindings,
-			request,
 			user,
-			pathWorkflowId: accountAliasPath(url.pathname).split('/')[3]
-				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
-				: undefined,
+			selectedWorkflowId:
+				input.workflowId?.trim() || input.selected?.trim() || null,
 		})
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgWorkflows',
-				url.pathname,
+				pathname,
 				{ accountWorkflows: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 
 export const loadWaitingPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/waiting(?:\?[^#]*)?$/.test(collectionAliasHref(href))
-		)
-			throw new Error('Invalid waiting URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountWaitingData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-waiting-data.ts'),
-				import('./document-head.ts'),
-			])
-		const url = new URL(request.url)
+	.validator(z.object({ orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/) }))
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountWaitingData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-waiting-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname = routes.orgWaiting.href({ orgSlug: data.orgSlug })
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'waiting',
+			returnTo: pathname,
+		})
 		const payload = await loadAccountWaitingData({
 			env: bindings,
 			user,
@@ -334,73 +288,81 @@ export const loadWaitingPage = createServerFn({ method: 'GET' })
 		})
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgWaiting',
-				url.pathname,
-				{ accountWaiting: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgWaiting', pathname, {
+				accountWaiting: payload,
+			}),
 		}
 	})
 
 export const loadExperimentsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/experiments(?:\?[^#]*)?$/.test(collectionAliasHref(href))
-		)
-			throw new Error('Invalid experiments URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountExperimentsData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-experiments-data.ts'),
-				import('./document-head.ts'),
-			])
-		const url = new URL(request.url)
+	.validator(z.object({}))
+	.handler(async () => {
+		const [
+			{ loadPersonalCollection },
+			{ loadAccountExperimentsData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-experiments-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname = '/account/experiments'
+		const { bindings, user } = await loadPersonalCollection(pathname)
 		const payload = await loadAccountExperimentsData({
 			db: bindings.APP_DB,
 			userId: user.userId,
 		})
 		return {
 			payload,
-			head: loadDocumentHead(
-				'accountExperiments',
-				url.pathname,
-				{ accountExperiments: payload },
-				url.search,
-			),
+			head: loadDocumentHead('accountExperiments', pathname, {
+				accountExperiments: payload,
+			}),
 		}
 	})
 
 export const loadActivityPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/activity(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid activity URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountActivityData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-activity-data.ts'),
-				import('./document-head.ts'),
-			])
-		const url = new URL(request.url)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			selectedRunId: z.string().nullable(),
+			viewFilter: z.enum(['errors', 'recent']),
+			statusFilter: z.enum(['error', 'all', 'success', 'running']),
+			surfaceFilter: z.enum([
+				'all',
+				'execute',
+				'export',
+				'subscription',
+				'app_fetch',
+				'app_realtime',
+				'job',
+				'workflow',
+				'retriever',
+				'webhook',
+			]),
+			triageFilter: z.enum(['open', 'ignored', 'resolved', 'all']),
+			cursor: z.string().nullable(),
+		}),
+	)
+	.handler(async ({ data: input }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountActivityData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-activity-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname = routes.orgActivity.href({ orgSlug: input.orgSlug })
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: input.orgSlug,
+			section: 'activity',
+			returnTo: pathname,
+		})
 		const data = await loadAccountActivityData({
 			env: bindings,
-			request,
 			user,
-			pathRunId: accountAliasPath(url.pathname).split('/')[3]
-				? decodeURIComponent(accountAliasPath(url.pathname).split('/')[3]!)
-				: undefined,
+			...input,
 		})
 		const payload = {
 			...data,
@@ -418,35 +380,44 @@ export const loadActivityPage = createServerFn({ method: 'GET' })
 
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgActivity',
-				url.pathname,
-				{ accountActivity: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgActivity', pathname, {
+				accountActivity: payload,
+			}),
 		}
 	})
 
 export const loadBillingPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/@[^/?#]+\/-\/billing(?:\?[^#]*)?$/.test(href)
-		)
-			throw new Error('Invalid billing URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			billing: z.string().nullable(),
+			error: z.string().nullable(),
+		}),
+	)
+	.handler(async ({ data }) => {
 		const [
+			{ loadScopedCollection },
 			{ loadOrgBillingPageData, resolveOrgBillingAccess },
 			{ loadDocumentHead },
+			{ orgBillingPath },
 		] = await Promise.all([
+			import('./collection-context.ts'),
 			import('../../src/app/handlers/org-billing.ts'),
 			import('./document-head.ts'),
+			import('../../universal/org-pages.ts'),
 		])
-		const url = new URL(request.url)
+		const pathname = orgBillingPath(data.orgSlug)
+		const params = new URLSearchParams()
+		if (data.billing !== null) params.set('billing', data.billing)
+		if (data.error !== null) params.set('error', data.error)
+		const search = params.size ? `?${params}` : ''
+		const { bindings, request, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'billing',
+			returnTo: pathname + search,
+		})
 		const access = await resolveOrgBillingAccess({
+			orgSlug: data.orgSlug,
 			request,
 			env: bindings,
 			user,
@@ -454,101 +425,137 @@ export const loadBillingPage = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) throw new Response(access.error, { status: access.status })
 		const payload = await loadOrgBillingPageData({
-			request,
 			env: bindings,
 			user,
 			org: access.org,
+			errorCode: data.error,
+			noticeCode: data.billing,
 		})
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgBilling',
-				url.pathname,
+				pathname,
 				{ accountBilling: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 
 export const loadUsagePage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/(?:account\/usage|@[^/?#]+\/-\/usage)(?:\?[^#]*)?(?:#[^#]*)?$/.test(
-				href,
+	.validator(
+		z.object({
+			orgSlug: z
+				.string()
+				.regex(/^[a-zA-Z0-9_-]+$/)
+				.optional(),
+			credits: z.string().nullable(),
+			error: z.string().nullable(),
+			topup: z.string().nullable(),
+			sessionId: z.string().nullable(),
+			hash: z.string().optional(),
+			navigationSearch: z.array(z.tuple([z.string(), z.string()])).optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection, loadPersonalCollection },
+			{ loadOrgUsagePageResult },
+			{ loadDocumentHead },
+			{ orgUsagePath },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/handlers/org-usage.ts'),
+			import('./document-head.ts'),
+			import('../../universal/org-pages.ts'),
+		])
+		const pathname = data.orgSlug
+			? orgUsagePath(data.orgSlug)
+			: '/account/usage'
+		const params = new URLSearchParams()
+		for (const [key, value] of [
+			['credits', data.credits],
+			['error', data.error],
+			['topup', data.topup],
+			['session_id', data.sessionId],
+		] as const)
+			if (value !== null) params.set(key, value)
+		const search = params.size ? `?${params}` : ''
+		const hash = data.hash ? `#${data.hash.replace(/^#/, '')}` : ''
+		if (!data.orgSlug) {
+			const navigationParams = new URLSearchParams(
+				data.navigationSearch ?? params,
 			)
-		)
-			throw new Error('Invalid usage URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		if (new URL(request.url).pathname === '/account/usage') {
+			const navigationSearch = navigationParams.size
+				? `?${navigationParams}`
+				: ''
+			const { bindings, user } = await loadPersonalCollection(
+				pathname + navigationSearch + hash,
+			)
 			const { personalUsageSlug } =
 				await import('../../src/app/handlers/account-usage.ts')
-			const { personalOrgUsageRedirectUrl } =
-				await import('../../src/app/handlers/org-usage.ts')
-			const target = new URL(
-				personalOrgUsageRedirectUrl({
-					requestUrl: request.url,
-					slug: await personalUsageSlug(bindings, user),
-				}),
-			)
-			target.hash = new URL(href, request.url).hash
 			throw redirect({
-				href: target.pathname + target.search + target.hash,
+				href:
+					orgUsagePath(await personalUsageSlug(bindings, user)) +
+					navigationSearch +
+					hash,
 				statusCode: 302,
 			})
 		}
-		const [{ loadOrgUsagePageResult }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/handlers/org-usage.ts'),
-				import('./document-head.ts'),
-			])
-		const payload = await loadOrgUsagePageResult(bindings, request, user)
-		if (payload instanceof Response) {
-			const location = payload.headers.get('Location')
-			if (location)
-				throw redirect({ href: location, statusCode: payload.status })
-			if (payload.status === 404) throw notFound()
-			throw payload
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'usage',
+			returnTo: pathname + search,
+		})
+		const result = await loadOrgUsagePageResult({
+			...data,
+			orgSlug: data.orgSlug,
+			env: bindings,
+			user,
+		})
+		if (result.kind === 'redirect')
+			throw redirect({ href: result.href, statusCode: 302 })
+		if (result.kind === 'denied') {
+			if (result.status === 404) throw notFound()
+			throw new Response(result.error, { status: result.status })
 		}
-		const url = new URL(request.url)
 		return {
-			payload,
+			payload: result.payload,
 			head: loadDocumentHead(
 				'orgUsage',
-				url.pathname,
-				{ accountUsage: payload },
-				url.search,
+				pathname,
+				{ accountUsage: result.payload },
+				search,
 			),
 		}
 	})
 
 export const loadConnectionsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/agents(?:\/(?:usage|new(?:\/[^/?#]+)?))?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const { parseAccountConnectionsPathname } =
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			view: z.enum(['list', 'usage', 'new']),
+			agent: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { loadScopedCollection } = await import('./collection-context.ts')
+		const { isAccountConnectionAgent } =
 			await import('../../universal/account-connections.ts')
 		if (
-			!parseAccountConnectionsPathname(
-				accountAliasPath(new URL(request.url).pathname),
-			)
-		) {
-			const { notFound } = await import('@tanstack/react-router')
+			data.agent &&
+			(data.view !== 'new' || !isAccountConnectionAgent(data.agent))
+		)
 			throw notFound()
-		}
-
+		const pathname =
+			routes.orgAgents.href({ orgSlug: data.orgSlug }) +
+			(data.view === 'list' ? '' : `/${data.view}`) +
+			(data.agent ? `/${encodeURIComponent(data.agent)}` : '')
+		const { bindings, request, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'agents',
+			returnTo: pathname,
+		})
 		const [{ loadAccountConnectedAgentsData }, { loadDocumentHead }] =
 			await Promise.all([
 				import('../../src/app/handlers/account-connected-agents.ts'),
@@ -559,132 +566,137 @@ export const loadConnectionsPage = createServerFn({ method: 'GET' })
 			requestUrl: request.url,
 			user,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgAgents',
-				url.pathname,
-				{ accountConnectedAgents: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgAgents', pathname, {
+				accountConnectedAgents: payload,
+			}),
 		}
 	})
 
 export const loadMcpOauthClientsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/mcp-oauth-clients(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-
-		const [{ loadClientsPayload }, { loadDocumentHead }] = await Promise.all([
+	.validator(z.object({}))
+	.handler(async () => {
+		const [
+			{ loadPersonalCollection },
+			{ loadClientsPayload },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
 			import('../../src/app/handlers/account-mcp-oauth-clients.ts'),
 			import('./document-head.ts'),
 		])
+		const pathname = '/account/mcp-oauth-clients'
+		const { bindings, user } = await loadPersonalCollection(pathname)
 		const payload = await loadClientsPayload(bindings.APP_DB, user.userId)
-		const url = new URL(request.url)
 		return {
 			payload,
-			head: loadDocumentHead(
-				'accountMcpOauthClients',
-				url.pathname,
-				{ accountMcpOauthClients: payload },
-				url.search,
-			),
+			head: loadDocumentHead('accountMcpOauthClients', pathname, {
+				accountMcpOauthClients: payload,
+			}),
 		}
 	})
 
 export const loadWebhooksPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/webhooks(?:\?[^#]*)?$/.test(collectionAliasHref(href))
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-
-		const [{ loadAccountWebhooksData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/package-webhooks-data.ts'),
-				import('./document-head.ts'),
-			])
+	.validator(z.object({ orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/) }))
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountWebhooksData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/package-webhooks-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname = routes.orgWebhooks.href({ orgSlug: data.orgSlug })
+		const { bindings, user, request } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'webhooks',
+			returnTo: pathname,
+		})
 		const payload = await loadAccountWebhooksData({
 			env: bindings,
-			requestUrl: request.url,
 			user,
+			requestUrl: request.url,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgWebhooks',
-				url.pathname,
-				{ accountWebhooks: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgWebhooks', pathname, {
+				accountWebhooks: payload,
+			}),
 		}
 	})
 
 export const loadSecretProvidersPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/secret-providers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
-		const [{ loadAccountSecretProvidersData }, { loadDocumentHead }] =
-			await Promise.all([
-				import('../../src/app/account-secret-providers-data.ts'),
-				import('./document-head.ts'),
-			])
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			approve: z.boolean().optional(),
+			provider: z.string().optional(),
+			ref: z.string().optional(),
+			packageId: z.string().optional(),
+			packageName: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ loadScopedCollection },
+			{ loadAccountSecretProvidersData },
+			{ loadDocumentHead },
+		] = await Promise.all([
+			import('./collection-context.ts'),
+			import('../../src/app/account-secret-providers-data.ts'),
+			import('./document-head.ts'),
+		])
+		const pathname =
+			routes.orgSecretProviders.href({ orgSlug: data.orgSlug }) +
+			(data.approve ? '/approve' : '')
+		const params = new URLSearchParams()
+		if (data.provider) params.set('provider', data.provider)
+		if (data.ref) params.set('ref', data.ref)
+		if (data.packageId) params.set('package_id', data.packageId)
+		if (data.packageName) params.set('package', data.packageName)
+		const search = params.size ? `?${params}` : ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'secret-providers',
+			returnTo: pathname + search,
+		})
 		const payload = await loadAccountSecretProvidersData({
 			env: bindings,
 			userId: ownerIdFromCaller({ request: user.request, user: user.mcpUser }),
 			email: user.email,
-			url: request.url,
+			approval: data,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgSecretProviders',
-				url.pathname,
+				pathname,
 				{ accountSecretProviders: payload },
-				url.search,
+				search,
 			),
 		}
 	})
 
 export const loadMcpServersPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/mcp-servers(?:\/[^/?#]+)?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			serverId: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { loadScopedCollection } = await import('./collection-context.ts')
+		const pathname =
+			routes.orgMcpServers.href({ orgSlug: data.orgSlug }) +
+			(data.serverId ? `/${encodeURIComponent(data.serverId)}` : '')
+		const { bindings, request, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'mcp-servers',
+			returnTo: pathname,
+		})
 		const [{ loadAccountMcpServersData }, { loadDocumentHead }, { waitUntil }] =
 			await Promise.all([
 				import('../../src/app/account-mcp-servers-data.ts'),
@@ -697,72 +709,67 @@ export const loadMcpServersPage = createServerFn({ method: 'GET' })
 			requestUrl: request.url,
 			waitUntil,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
-			head: loadDocumentHead(
-				'orgMcpServers',
-				url.pathname,
-				{ accountMcpServers: payload },
-				url.search,
-			),
+			head: loadDocumentHead('orgMcpServers', pathname, {
+				accountMcpServers: payload,
+			}),
 		}
 	})
 
 export const loadIntegrationsPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/integrations(?:\/(?:apps\/[^/?#]+|[^/?#]+))?(?:\?[^#]*)?$/.test(
-				collectionAliasHref(href),
-			)
-		)
-			throw new Error('Invalid account URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { bindings, request, user } = await loadCollection(href)
+	.validator(
+		z.object({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+			integrationName: z.string().optional(),
+			appSlug: z.string().optional(),
+			approve: z.boolean().optional(),
+			name: z.string().optional(),
+			packageId: z.string().optional(),
+		}),
+	)
+	.handler(async ({ data }) => {
 		const [
+			{ loadScopedCollection },
 			{ loadAccountIntegrationsData },
 			{ loadDocumentHead },
 			{ waitUntil },
 		] = await Promise.all([
+			import('./collection-context.ts'),
 			import('../../src/app/account-integrations-data.ts'),
 			import('./document-head.ts'),
 			import('cloudflare:workers'),
 		])
+		const pathname =
+			routes.orgIntegrations.href({ orgSlug: data.orgSlug }) +
+			(data.appSlug
+				? `/apps/${encodeURIComponent(data.appSlug)}`
+				: data.approve
+					? '/approve'
+					: data.integrationName
+						? `/${encodeURIComponent(data.integrationName)}`
+						: '')
+		const params = new URLSearchParams()
+		if (data.name) params.set('name', data.name)
+		if (data.packageId) params.set('package_id', data.packageId)
+		const search = params.size ? `?${params}` : ''
+		const { bindings, user } = await loadScopedCollection({
+			orgSlug: data.orgSlug,
+			section: 'integrations',
+			returnTo: pathname + search,
+		})
 		const payload = await loadAccountIntegrationsData(bindings, user, {
 			waitUntil,
-			searchParams: new URL(request.url).searchParams,
+			approvalName: data.name,
+			approvalPackageId: data.packageId,
 		})
-		const url = new URL(request.url)
 		return {
 			payload,
 			head: loadDocumentHead(
 				'orgIntegrations',
-				url.pathname,
+				pathname,
 				{ accountIntegrations: payload },
-				url.search,
+				search,
 			),
 		}
-	})
-
-export const loadPackagesIndexPage = createServerFn({ method: 'GET' })
-	.validator((href: string) => {
-		if (
-			typeof href !== 'string' ||
-			!/^\/account\/packages(?:\?[^#]*)?$/.test(collectionAliasHref(href))
-		)
-			throw new Error('Invalid packages URL')
-		return href
-	})
-	.handler(async ({ data: href }) => {
-		const { request, user } = await loadCollection(href)
-		const { routes } = await import('../../universal/routes.ts')
-		throw redirect({
-			href:
-				routes.profile.href({ username: user.username }) +
-				new URL(request.url).search,
-			statusCode: 302,
-		})
 	})

@@ -10,8 +10,8 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/new')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ params }) => ({
+		pageQueryInput: { orgSlug: params.orgSlug, serverId: undefined },
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

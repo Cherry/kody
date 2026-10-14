@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
@@ -13,7 +12,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
-	beforeLoad: ({ location }) => {
+	beforeLoad: ({ location, params }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),
 		)
@@ -24,9 +23,16 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
 		return {
-			pageQueryInput:
-				location.pathname +
-				pageSearch(location.searchStr, ['name', 'package_id']),
+			pageQueryInput: {
+				orgSlug: params.orgSlug,
+				approve: false,
+				integrationName: undefined,
+				appSlug: undefined,
+				name: new URLSearchParams(location.searchStr).get('name') ?? undefined,
+				packageId:
+					new URLSearchParams(location.searchStr).get('package_id') ??
+					undefined,
+			},
 		}
 	},
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({

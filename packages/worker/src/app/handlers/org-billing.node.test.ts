@@ -242,7 +242,12 @@ async function readWebsiteBilling(input: {
 	return access.ok
 		? {
 				status: 200,
-				data: await loadOrgBillingPageData({ ...input, org: access.org }),
+				data: await loadOrgBillingPageData({
+					...input,
+					org: access.org,
+					errorCode: new URL(input.request.url).searchParams.get('error'),
+					noticeCode: new URL(input.request.url).searchParams.get('billing'),
+				}),
 			}
 		: { status: access.status, data: { ok: false, error: access.error } }
 }

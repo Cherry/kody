@@ -584,14 +584,44 @@ export async function loadAccountEmailData(input: {
 	user: AuthenticatedUser
 	pathMessageId?: string
 }): Promise<AccountEmailLoaderData> {
-	await authorize({ env: input.env, request: input.user.request }, 'email:read')
 	const url = new URL(input.request.url, 'http://localhost')
-	const { page, pageSize, offset } = readPagination(url, {
+	const { page, pageSize } = readPagination(url, {
 		defaultPageSize,
 		maxPageSize,
 	})
-	const query = url.searchParams.get('q')?.trim() ?? ''
-	const classification = readAccountEmailClassificationFilter(input.request.url)
+	return readAccountEmailData({
+		env: input.env,
+		user: input.user,
+		page,
+		pageSize,
+		query: url.searchParams.get('q')?.trim() ?? '',
+		classification: readAccountEmailClassificationFilter(input.request.url),
+		selectedMessageId: readAccountEmailSelectedMessageId(
+			input.request.url,
+			input.pathMessageId,
+		),
+	})
+}
+
+/** Mailbox reads use explicit filters and an already authorized owner context. */
+export async function readAccountEmailData(input: {
+	env: Env
+	user: AuthenticatedUser
+	page: number
+	pageSize: number
+	query: string
+	classification: AccountEmailLoaderData['classification']
+	selectedMessageId?: string | null
+}): Promise<AccountEmailLoaderData> {
+	await authorize({ env: input.env, request: input.user.request }, 'email:read')
+	const page = Math.max(1, Math.floor(input.page))
+	const pageSize = Math.min(
+		maxPageSize,
+		Math.max(1, Math.floor(input.pageSize)),
+	)
+	const offset = (page - 1) * pageSize
+	const query = input.query.trim()
+	const classification = input.classification
 	const userId = ownerIdFromCaller({
 		request: input.user.request,
 		user: input.user.mcpUser,
@@ -619,10 +649,7 @@ export async function loadAccountEmailData(input: {
 		})
 	}
 
-	const selectedMessageId = readAccountEmailSelectedMessageId(
-		input.request.url,
-		input.pathMessageId,
-	)
+	const selectedMessageId = input.selectedMessageId?.trim() || null
 	const orgSlug = orgSlugFor(input.user)
 	const [listResult, inboxes, usage, selectedMessage] = await Promise.all([
 		listOwnerEmailMessagesPage({

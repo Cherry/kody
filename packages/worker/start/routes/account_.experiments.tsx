@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountExperimentsPage } from '../pages/account-experiments.tsx'
 import { loadExperimentsPage } from '#start/server/account-collections'
@@ -10,9 +9,7 @@ const pageQuery = createPageQuery('loadExperimentsPage', loadExperimentsPage, {
 })
 
 export const Route = createFileRoute('/account_/experiments')({
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
-	}),
+	context: () => ({ pageQueryInput: {} }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

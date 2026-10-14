@@ -11,18 +11,19 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/agents')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
+	context: ({ location, params }) => ({
+		queryInput: { orgSlug: params.orgSlug, view: 'list' as const },
 		pageQueryInput: location.pathname + location.searchStr,
 	}),
-	loader: async ({ context, preload }) => {
+	loader: async ({ context, preload, params }) => {
 		const [page] = await Promise.all([
 			loadPageQuery(
 				context.queryClient,
-				pageQuery(context.actorKey, context.pageQueryInput),
+				pageQuery(context.actorKey, context.queryInput),
 				preload,
 			),
 			context.queryClient.ensureQueryData({
-				...connectionUsageQuery(context.actorKey, context.pageQueryInput),
+				...connectionUsageQuery(context.actorKey, params.orgSlug),
 				revalidateIfStale: true,
 			}),
 		])
@@ -32,14 +33,19 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/agents')({
 	component: Page,
 })
 function Page() {
+	const { orgSlug } = Route.useParams()
 	const { payload } = usePageData()
 	const { pageQueryInput } = Route.useRouteContext()
 	return (
-		<AccountConnectionsPage payload={payload} currentHref={pageQueryInput} />
+		<AccountConnectionsPage
+			payload={payload}
+			currentHref={pageQueryInput}
+			orgSlug={orgSlug}
+		/>
 	)
 }
 
 function usePageData() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	return usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	const { actorKey, queryInput } = Route.useRouteContext()
+	return usePageQuery(pageQuery(actorKey, queryInput)).data
 }

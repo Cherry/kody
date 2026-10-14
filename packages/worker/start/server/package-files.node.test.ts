@@ -4,13 +4,14 @@ const state = vi.hoisted(() => ({
 	headers: vi.fn(),
 	status: vi.fn(),
 	auth: vi.fn(),
+	resolve: vi.fn(),
 }))
 vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
-			validator(next: typeof validate) {
-				validate = next
+			validator(next: { parse: (data: unknown) => unknown }) {
+				validate = next.parse
 				return builder
 			},
 			handler(run: (input: { data: unknown }) => Promise<unknown>) {
@@ -36,7 +37,7 @@ vi.mock('../../src/app/auth-session.ts', () => ({
 	setAuthSessionSecret: vi.fn(),
 }))
 vi.mock('../../src/app/community-package-route.ts', () => ({
-	resolveCommunityFilesRoute: async () => state.target,
+	resolveCommunityFilesRoute: state.resolve,
 }))
 vi.mock('../../src/app/package-files-data.ts', () => ({
 	loadAccessiblePackageFilesData: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('./document-head.ts', () => ({ loadDocumentHead: vi.fn() }))
 import { loadPackageFiles } from './package-files.ts'
 beforeEach(() => {
 	vi.clearAllMocks()
+	state.resolve.mockImplementation(async () => state.target)
 	state.auth.mockResolvedValue({
 		username: 'person',
 		mcpUser: { userId: 'person-id' },
@@ -75,7 +77,15 @@ test('public canonical redirect preserves query and fragment and permanent statu
 	}
 	await expect(
 		loadPackageFiles({
-			data: { pathname: '/@acme/digest/files/README.md?view=source#L4' },
+			data: {
+				resource: {
+					kind: 'package-files',
+					username: 'acme',
+					kodyId: 'digest',
+					relativePath: 'README.md',
+				},
+				location: '/@acme/digest/files/README.md?view=source#L4',
+			},
 		}),
 	).rejects.toEqual({
 		redirect: {
@@ -91,7 +101,20 @@ test('public canonical redirect preserves query and fragment and permanent statu
 test('private file login resumes the exact requested location', async () => {
 	state.target = { kind: 'unauthorized' }
 	const pathname = '/@acme/digest/tree/main/README.md?view=source#L4'
-	await expect(loadPackageFiles({ data: { pathname } })).rejects.toEqual({
+	await expect(
+		loadPackageFiles({
+			data: {
+				resource: {
+					kind: 'package-tree',
+					username: 'acme',
+					kodyId: 'digest',
+					ref: 'main',
+					relativePath: 'README.md',
+				},
+				location: pathname,
+			},
+		}),
+	).rejects.toEqual({
 		redirect: {
 			href: `/login?redirectTo=${encodeURIComponent(pathname)}`,
 			statusCode: 302,
@@ -100,7 +123,18 @@ test('private file login resumes the exact requested location', async () => {
 })
 test('account file alias preserves suffix and resolves the package organization', async () => {
 	const pathname = '/account/packages/pkg/files/README.md?view=source#L4'
-	await expect(loadPackageFiles({ data: { pathname } })).rejects.toMatchObject({
+	await expect(
+		loadPackageFiles({
+			data: {
+				resource: {
+					kind: 'account-files',
+					packageId: 'pkg',
+					relativePath: 'README.md',
+				},
+				location: pathname,
+			},
+		}),
+	).rejects.toMatchObject({
 		redirect: {
 			href: expect.stringMatching(
 				/^\/@acme\/digest\/tree\/[^/]+\/README\.md\?view=source#L4$/,
@@ -121,9 +155,20 @@ test('account file alias preserves suffix and resolves the package organization'
 test.each(['//evil.test/files', '/\\evil.test/files', '/%5cevil.test/files'])(
 	'rejects unsafe file location %s',
 	async (pathname) => {
-		await expect(loadPackageFiles({ data: { pathname } })).rejects.toEqual({
-			notFound: true,
-		})
+		await expect(
+			loadPackageFiles({
+				data: {
+					resource: {
+						kind: 'package-tree',
+						username: 'acme',
+						kodyId: 'digest',
+						ref: 'main',
+						relativePath: 'README.md',
+					},
+					location: pathname,
+				},
+			}),
+		).rejects.toThrow()
 		expect(state.auth).not.toHaveBeenCalled()
 	},
 )
@@ -137,7 +182,16 @@ test('signed-in file denial stays403 instead of redirecting to login', async () 
 		viewerUsername: 'visitor',
 	}
 	const result = await loadPackageFiles({
-		data: { pathname: '/@owner/private/tree/main/README.md' },
+		data: {
+			resource: {
+				kind: 'package-tree',
+				username: 'owner',
+				kodyId: 'private',
+				ref: 'main',
+				relativePath: 'README.md',
+			},
+			location: '/@owner/private/tree/main/README.md',
+		},
 	})
 	expect(result).toMatchObject({
 		kind: 'no_access',
@@ -149,4 +203,33 @@ test('signed-in file denial stays403 instead of redirecting to login', async () 
 		'Cache-Control',
 		'private, no-store',
 	)
+})
+
+test('resource selection comes from native params, not the navigation URL', async () => {
+	state.target = { kind: 'invalid-path' }
+	const resource = {
+		kind: 'package-tree' as const,
+		username: 'owner',
+		kodyId: 'private',
+		ref: 'main',
+		relativePath: 'README.md',
+	}
+	await expect(
+		loadPackageFiles({
+			data: {
+				resource,
+				location: '/community/other/files/README.md',
+				queryRef: 'ignored',
+			},
+		}),
+	).rejects.toEqual({ notFound: true })
+	expect(state.resolve).toHaveBeenCalledWith(
+		expect.objectContaining({
+			resource,
+			pathname: '/community/other/files/README.md',
+			request: expect.any(Request),
+		}),
+	)
+	const request = state.resolve.mock.calls[0]?.[0].request as Request
+	expect(new URL(request.url).pathname).toBe('/_serverFn/read')
 })

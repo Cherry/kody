@@ -1,4 +1,7 @@
-import { loadAccountWorkflowsData } from '#app/account-workflows-data.ts'
+import {
+	readAccountWorkflowsSelectedWorkflowId,
+	loadAccountWorkflowsData,
+} from '#app/account-workflows-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { mutateAccountWorkflows } from './account-workflows.ts'
@@ -15,7 +18,9 @@ export function testAccountWorkflowsApiHandler(env: Env) {
 				return operationResult(
 					await loadAccountWorkflowsData({
 						env,
-						request,
+						selectedWorkflowId: readAccountWorkflowsSelectedWorkflowId(
+							request.url,
+						),
 						user,
 					}),
 				)

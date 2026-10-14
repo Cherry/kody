@@ -1,4 +1,7 @@
-import { loadAccountJobsData } from '#app/account-jobs-data.ts'
+import {
+	readAccountJobsSelectedJobId,
+	loadAccountJobsData,
+} from '#app/account-jobs-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { type ServerTimingEntry } from '#worker/server-timing.ts'
@@ -17,7 +20,7 @@ export function testAccountJobsApiHandler(env: Env) {
 				return operationResult(
 					await loadAccountJobsData({
 						env,
-						request,
+						selectedJobId: readAccountJobsSelectedJobId(request.url),
 						user,
 						serverTiming,
 					}),

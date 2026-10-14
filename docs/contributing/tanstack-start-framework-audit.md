@@ -49,24 +49,26 @@ Native transport does not automatically remove the old loader-oriented API
 shape. These are concrete follow-up targets, not evidence of internal HTTP
 fetches or a remaining Remix dispatcher:
 
-| Modules under `start/server/`                                     | Remaining coupling                                                                                                                                                                                                          | Appropriate next shape                                                                                                                                                                 |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `account-collections.ts`, `connection-usage.ts`, `credentials.ts` | Many readers accept `href`, validate account aliases, recover selection/filter state from paths/search, and share `loadCollection`. That helper constructs a destination Request while binding the organization explicitly. | Validated `{ orgSlug, resourceId?, filters?, cursor? }` per reader. Keep the original authenticated request and pass redirect destinations separately when needed.                     |
-| `admin-platform-integrations.ts`, other filtered admin readers    | Admin hrefs carry selected records, search and pagination. `readAdminPageContext` uses the href as the safe login return destination.                                                                                       | Separate typed query/record inputs from the relative return URL. Preserve role checks before domain reads.                                                                             |
-| `connect.ts`, `connect-secret-set.ts`                             | Connection/approval parameters and optional organization scope arrive in a query string.                                                                                                                                    | Validated operation-specific fields with explicit organization scope. Provider callback state still needs protocol validation.                                                         |
-| `mcp-server-authorize.ts`                                         | Hrefs are parsed and reconstructed as Requests for existing consent/checkout operations.                                                                                                                                    | Explicit consent/checkout inputs and shared policy/domain operations. Preserve authenticated organization binding, callback verification, one-time behavior and GET/HEAD distinctions. |
-| `package-files.ts`                                                | A pathname is parsed into package/listing identity, ref and selected file.                                                                                                                                                  | A validated discriminated resource input, keeping redirect canonicalization and file access checks.                                                                                    |
-| `shell.ts`, `org-alias.ts`                                        | Destination URLs carry organization selection, redirect intent or auth view state.                                                                                                                                          | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience.                                                     |
-| `static-page.ts`, metadata helpers                                | Pathnames identify static presentation/canonical URLs.                                                                                                                                                                      | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                                                                                  |
+| Modules under `start/server/`                                  | Remaining coupling                                                                                                                    | Appropriate next shape                                                                                                                                                                 |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin-platform-integrations.ts`, other filtered admin readers | Admin hrefs carry selected records, search and pagination. `readAdminPageContext` uses the href as the safe login return destination. | Separate typed query/record inputs from the relative return URL. Preserve role checks before domain reads.                                                                             |
+| `connect.ts`, `connect-secret-set.ts`                          | Connection/approval parameters and optional organization scope arrive in a query string.                                              | Validated operation-specific fields with explicit organization scope. Provider callback state still needs protocol validation.                                                         |
+| `mcp-server-authorize.ts`                                      | Hrefs are parsed and reconstructed as Requests for existing consent/checkout operations.                                              | Explicit consent/checkout inputs and shared policy/domain operations. Preserve authenticated organization binding, callback verification, one-time behavior and GET/HEAD distinctions. |
+| `shell.ts`, `org-alias.ts`                                     | Destination URLs carry organization selection, redirect intent or auth view state.                                                    | Retain URLs where navigation is the actual domain input; separate resource/auth inputs where it is merely a transport convenience.                                                     |
+| `static-page.ts`, metadata helpers                             | Pathnames identify static presentation/canonical URLs.                                                                                | No automatic rewrite needed. A pathname is appropriate when the operation is about a page URL itself.                                                                                  |
 
-The Memories reader is now a bounded exception to the collection row above:
-`loadMemoriesPage` takes explicit organization, selection and filter fields.
-`start/memories-input.ts` normalizes route search into those Query inputs;
-`start/server/collection-context.ts` keeps the original request and binds the
-organization explicitly. The domain reader no longer accepts a Request. Query
-invalidation recognizes object `orgSlug` inputs so memory refreshes do not
-invalidate another organization's records. Other collection readers still use
-the URL-shaped helper listed above.
+Account collections, connection usage, credentials, and email now take explicit
+organization, record, selection and filter fields. The `loadCollection(href)`
+helper and its fabricated destination Request are removed. Scoped and personal
+read contexts keep the original authenticated request. Domain authorization
+still runs independently of route navigation. Query mutation barriers,
+invalidation and optimistic updates recognize typed organization inputs, keeping
+actor and workspace boundaries intact.
+
+Package-file readers take a discriminated resource input from native route
+parameters. Location is separate and used for canonical redirects, login return
+URLs and metadata, not resource selection. The unused packages-index read
+function was deleted, its native alias route already owns that redirect.
 
 Admin users now uses explicit filters, page size, selected user and a separate
 return destination. Pagination keys include actor and page size. Billing

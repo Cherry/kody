@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountUsagePage } from '../pages/account-usage.tsx'
 import { loadUsagePage } from '#start/server/account-collections'
@@ -17,16 +16,18 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
 		topup: search.topup,
 		session_id: search.session_id,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, [
-				'credits',
-				'error',
-				'topup',
-				'session_id',
-			]),
-	}),
+	context: ({ location, params }) => {
+		const search = new URLSearchParams(location.searchStr)
+		return {
+			pageQueryInput: {
+				orgSlug: params.orgSlug,
+				credits: search.get('credits'),
+				error: search.get('error'),
+				topup: search.get('topup'),
+				sessionId: search.get('session_id'),
+			},
+		}
+	},
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

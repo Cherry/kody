@@ -14,10 +14,13 @@ export const Route = createFileRoute(
 	validateSearch: validateCredentialSearch,
 	staticData: { presentationSearchKeys: credentialPresentationSearchKeys },
 	shouldReload: ({ context }) => !context.presentationOnly,
-	loader: ({ context, preload }) =>
+	loader: ({ context, preload, params }) =>
 		loadPageQuery(
 			context.queryClient,
-			pageQuery(context.actorKey, context.pageLocation.pathname),
+			pageQuery(context.actorKey, {
+				orgSlug: params.orgSlug,
+				credentialId: params.credentialId,
+			}),
 			preload,
 		),
 
@@ -25,9 +28,13 @@ export const Route = createFileRoute(
 	component: Page,
 })
 function Page() {
+	const params = Route.useParams()
 	const { actorKey, pageLocation } = Route.useRouteContext()
 	const { payload } = usePageQuery(
-		pageQuery(actorKey, pageLocation.pathname),
+		pageQuery(actorKey, {
+			orgSlug: params.orgSlug,
+			credentialId: params.credentialId,
+		}),
 	).data
 	return (
 		<AccountCredentialsRoute

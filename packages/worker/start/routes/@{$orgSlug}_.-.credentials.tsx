@@ -12,19 +12,20 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/credentials')({
 	validateSearch: validateCredentialSearch,
 	staticData: { presentationSearchKeys: credentialPresentationSearchKeys },
 	shouldReload: ({ context }) => !context.presentationOnly,
-	loader: ({ context, preload }) =>
+	loader: ({ context, preload, params }) =>
 		loadPageQuery(
 			context.queryClient,
-			pageQuery(context.actorKey, context.pageLocation.pathname),
+			pageQuery(context.actorKey, { orgSlug: params.orgSlug }),
 			preload,
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })
 function Page() {
+	const params = Route.useParams()
 	const { actorKey, pageLocation } = Route.useRouteContext()
 	const { payload } = usePageQuery(
-		pageQuery(actorKey, pageLocation.pathname),
+		pageQuery(actorKey, { orgSlug: params.orgSlug }),
 	).data
 	return (
 		<AccountCredentialsRoute

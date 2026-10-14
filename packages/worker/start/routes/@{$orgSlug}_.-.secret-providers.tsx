@@ -11,8 +11,18 @@ const pageQuery = createPageQuery(
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secret-providers')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.orgSlug,
+			approve: false,
+			provider:
+				new URLSearchParams(location.searchStr).get('provider') ?? undefined,
+			ref: new URLSearchParams(location.searchStr).get('ref') ?? undefined,
+			packageId:
+				new URLSearchParams(location.searchStr).get('package_id') ?? undefined,
+			packageName:
+				new URLSearchParams(location.searchStr).get('package') ?? undefined,
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

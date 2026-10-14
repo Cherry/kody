@@ -1,5 +1,4 @@
 import { createServerFn } from '@tanstack/react-start'
-import { loadCollection } from './account-collections.ts'
 import {
 	emailListHref,
 	emailSearch,
@@ -33,14 +32,18 @@ function validateList(input: EmailListInput): EmailListInput {
 export const loadEmailList = createServerFn({ method: 'GET' })
 	.validator(validateList)
 	.handler(async ({ data }) => {
-		const { bindings, request, user } = await loadCollection(
-			emailListHref(data),
-		)
-		const { loadAccountEmailData } =
+		const { bindings, user } = await emailContext(data.org, emailListHref(data))
+		const { readAccountEmailData } =
 			await import('../../src/app/account-email-data.ts')
-		// The list request deliberately has neither a detail path nor selection.
 		const { selectedMessage: _selectedMessage, ...list } =
-			await loadAccountEmailData({ env: bindings, request, user })
+			await readAccountEmailData({
+				env: bindings,
+				user,
+				query: data.query,
+				classification: data.classification,
+				page: data.page,
+				pageSize: data.pageSize,
+			})
 		return list
 	})
 export const loadEmailDetail = createServerFn({ method: 'GET' })
@@ -54,10 +57,11 @@ export const loadEmailDetail = createServerFn({ method: 'GET' })
 		})
 		if (typeof input.messageId !== 'string' || !input.messageId.trim())
 			throw new Error('Invalid email message')
-		return input
+		return { org: input.org, messageId: input.messageId }
 	})
 	.handler(async ({ data }) => {
-		const { bindings, user } = await loadCollection(
+		const { bindings, user } = await emailContext(
+			data.org,
 			emailListHref({
 				org: data.org,
 				query: '',
@@ -83,7 +87,7 @@ export const loadEmailDetail = createServerFn({ method: 'GET' })
 export const loadEmailDestinations = createServerFn({ method: 'GET' }).handler(
 	async () => {
 		// Notification destinations belong to the signed-in actor, not an org.
-		const { bindings, user } = await loadCollection('/account/email')
+		const { bindings, user } = await emailContext(null, '/account/email')
 		const {
 			listEmailNotificationDestinations,
 			buildEmailDestinationsLoaderData,
@@ -98,3 +102,11 @@ export const loadEmailDestinations = createServerFn({ method: 'GET' }).handler(
 		)
 	},
 )
+
+async function emailContext(org: string | null, returnTo: string) {
+	const { loadScopedCollection, loadPersonalCollection } =
+		await import('./collection-context.ts')
+	return org
+		? loadScopedCollection({ orgSlug: org, section: 'email', returnTo })
+		: loadPersonalCollection(returnTo)
+}

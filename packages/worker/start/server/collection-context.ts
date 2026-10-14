@@ -7,7 +7,7 @@ import { isOrgDocumentRequest } from './org-document-request.ts'
 export const loadScopedCollection = createServerOnlyFn(
 	async (input: {
 		orgSlug: string
-		section: OrgOwnedAccountSection
+		section: OrgOwnedAccountSection | 'billing' | 'usage'
 		returnTo: string
 	}) => {
 		const [
@@ -47,7 +47,13 @@ export const loadScopedCollection = createServerOnlyFn(
 			authenticated.mcpUser.userId,
 			input.orgSlug,
 		)
-		if (!binding || orgSectionDenial(binding, input.section)) throw notFound()
+		if (
+			!binding ||
+			(input.section !== 'billing' &&
+				input.section !== 'usage' &&
+				orgSectionDenial(binding, input.section))
+		)
+			throw notFound()
 		const user = {
 			...authenticated,
 			request: deriveRequestContext({
@@ -69,6 +75,38 @@ export const loadScopedCollection = createServerOnlyFn(
 					secure: isSecureRequest(request),
 				}),
 			)
+		}
+		setResponseHeader('Cache-Control', 'private, no-store')
+		return { bindings, request, user }
+	},
+)
+
+/** Person-owned settings have no workspace selector. */
+export const loadPersonalCollection = createServerOnlyFn(
+	async (returnTo: string) => {
+		const [
+			{ env },
+			{ getRequest, setResponseHeader },
+			{ getEnv },
+			{ requireAuthenticatedPageUser },
+		] = await Promise.all([
+			import('cloudflare:workers'),
+			import('@tanstack/react-start/server'),
+			import('#app/env.ts'),
+			import('#app/page-auth.ts'),
+		])
+		const bindings = getEnv(env)
+		const request = getRequest()
+		const user = await requireAuthenticatedPageUser(request, bindings, {
+			redirectTo: returnTo,
+		})
+		if (user instanceof Response) {
+			const cookies = user.headers.getSetCookie()
+			if (cookies.length) setResponseHeader('Set-Cookie', cookies)
+			throw redirect({
+				href: user.headers.get('Location') ?? '/login',
+				statusCode: user.status,
+			})
 		}
 		setResponseHeader('Cache-Control', 'private, no-store')
 		return { bindings, request, user }

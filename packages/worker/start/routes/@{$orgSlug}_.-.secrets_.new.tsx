@@ -1,3 +1,4 @@
+import { secretsInput } from '../secrets-input.ts'
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
@@ -10,8 +11,13 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/new')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ params, location }) => ({
+		pageQueryInput: secretsInput(
+			params.orgSlug,
+			location.searchStr,
+			undefined,
+			true,
+		),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -61,17 +61,19 @@ function readView(href: string): AccountConnectionsView | null {
  * MCP servers.
  */
 export function AccountConnectionsPage({
+	orgSlug,
 	payload,
 	currentHref,
 }: {
 	payload: AccountConnectedAgentsLoaderData
+	orgSlug: string
 	currentHref: string
 }) {
 	const connectedAgents = useAccountConnectedAgents(payload, currentHref)
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const view = readView(currentHref)
 	const usage = useQuery({
-		...connectionUsageQuery(actorKey, currentHref),
+		...connectionUsageQuery(actorKey, orgSlug),
 		enabled: view?.kind === 'list' || view?.kind === 'usage',
 	})
 	const usageState: ConnectionUsageState = usage.data

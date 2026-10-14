@@ -1,3 +1,4 @@
+import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
 import { expect, test, vi } from 'vitest'
 
 const mockModule = vi.hoisted(() => ({
@@ -35,7 +36,11 @@ function resolveRoute(pathname: string, withRequest = false) {
 	const url = `https://example.com${pathname}`
 	return resolveCommunityFilesRoute({
 		env,
-		url: new URL(url),
+		resource: parsePackageDocumentPath(
+			pathname,
+		) as import('./community-package-route.ts').PackageFilesResource,
+		pathname: new URL(url).pathname,
+		queryRef: new URL(url).searchParams.get('ref') ?? '',
 		...(withRequest ? { request: new Request(url) } : {}),
 	})
 }

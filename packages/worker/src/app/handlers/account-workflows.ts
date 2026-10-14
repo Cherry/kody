@@ -30,19 +30,10 @@ async function reloadWorkflowsPayload(input: {
 	user: AuthenticatedUser
 	selectedWorkflowId?: string | null
 }): Promise<AccountWorkflowsLoaderData> {
-	const requestUrl = new URL(input.request.url)
-	if (input.selectedWorkflowId) {
-		requestUrl.searchParams.set('selected', input.selectedWorkflowId)
-	} else {
-		requestUrl.searchParams.delete('selected')
-	}
 	return await loadAccountWorkflowsData({
 		env: input.env,
-		request: new Request(requestUrl.toString(), {
-			method: 'GET',
-			headers: { Accept: 'application/json' },
-		}),
 		user: input.user,
+		selectedWorkflowId: input.selectedWorkflowId ?? null,
 	})
 }
 

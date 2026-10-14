@@ -74,7 +74,10 @@ export function testAccountIntegrationsApiHandler(env: Env) {
 				return operationResult(
 					await loadAccountIntegrationsData(env, user, {
 						waitUntil,
-						searchParams: new URL(request.url).searchParams,
+						approvalName:
+							new URL(request.url).searchParams.get('name') ?? undefined,
+						approvalPackageId:
+							new URL(request.url).searchParams.get('package_id') ?? undefined,
 					}),
 				)
 			}

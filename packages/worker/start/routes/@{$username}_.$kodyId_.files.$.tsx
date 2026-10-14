@@ -10,9 +10,19 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 })
 
 export const Route = createFileRoute('/@{$username}_/$kodyId_/files/$')({
-	context: ({ location }) => ({
+	context: ({ location, params }) => ({
 		pageQueryInput: {
-			pathname:
+			resource: {
+				kind: 'package-files' as const,
+				username: params.username,
+				kodyId: params.kodyId,
+				relativePath: (params._splat ?? '')
+					.split('/')
+					.map(encodeURIComponent)
+					.join('/'),
+			},
+			queryRef: new URLSearchParams(location.searchStr).get('ref') ?? '',
+			location:
 				location.pathname +
 				location.searchStr +
 				(location.hash ? `#${location.hash}` : ''),

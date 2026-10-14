@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountWaitingPage } from '../pages/account-waiting.tsx'
 import { loadWaitingPage } from '#start/server/account-collections'
@@ -10,9 +9,7 @@ const pageQuery = createPageQuery('loadWaitingPage', loadWaitingPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/waiting')({
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
-	}),
+	context: ({ params }) => ({ pageQueryInput: { orgSlug: params.orgSlug } }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

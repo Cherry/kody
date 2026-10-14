@@ -7,10 +7,21 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/secret-providers_/approve',
 )({
 	loaderDeps: ({ search }) => search,
-	loader: ({ abortController, location }) =>
+	loader: ({ abortController, location, params }) =>
 		loadSecretProvidersPage({
 			signal: abortController.signal,
-			data: location.pathname + location.searchStr,
+			data: {
+				orgSlug: params.orgSlug,
+				approve: true,
+				provider:
+					new URLSearchParams(location.searchStr).get('provider') ?? undefined,
+				ref: new URLSearchParams(location.searchStr).get('ref') ?? undefined,
+				packageId:
+					new URLSearchParams(location.searchStr).get('package_id') ??
+					undefined,
+				packageName:
+					new URLSearchParams(location.searchStr).get('package') ?? undefined,
+			},
 		}),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,

@@ -10,27 +10,37 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new_/$agent')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
+	context: ({ location, params }) => ({
+		queryInput: {
+			orgSlug: params.orgSlug,
+			view: 'new' as const,
+			agent: params.agent,
+		},
 		pageQueryInput: location.pathname + location.searchStr,
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,
-			pageQuery(context.actorKey, context.pageQueryInput),
+			pageQuery(context.actorKey, context.queryInput),
 			preload,
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })
 function Page() {
+	const { orgSlug } = Route.useParams()
 	const { payload } = usePageData()
 	const { pageQueryInput } = Route.useRouteContext()
 	return (
-		<AccountConnectionsPage payload={payload} currentHref={pageQueryInput} />
+		<AccountConnectionsPage
+			payload={payload}
+			currentHref={pageQueryInput}
+			orgSlug={orgSlug}
+		/>
 	)
 }
 
 function usePageData() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
-	return usePageQuery(pageQuery(actorKey, pageQueryInput)).data
+	const { actorKey, queryInput } = Route.useRouteContext()
+	return usePageQuery(pageQuery(actorKey, queryInput)).data
 }

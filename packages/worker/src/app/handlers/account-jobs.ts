@@ -33,20 +33,10 @@ async function reloadJobsPayload(input: {
 	user: AuthenticatedUser
 	selectedJobId?: string | null
 }): Promise<AccountJobsLoaderData> {
-	const requestUrl = new URL(input.request.url)
-	if (input.selectedJobId) {
-		requestUrl.searchParams.set('selected', input.selectedJobId)
-	} else {
-		requestUrl.searchParams.delete('selected')
-	}
-	// Build a fresh GET-shaped Request so we do not reuse a consumed POST body.
 	return await loadAccountJobsData({
 		env: input.env,
-		request: new Request(requestUrl.toString(), {
-			method: 'GET',
-			headers: { Accept: 'application/json' },
-		}),
 		user: input.user,
+		selectedJobId: input.selectedJobId ?? null,
 	})
 }
 

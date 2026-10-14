@@ -9,8 +9,12 @@ const pageQuery = createPageQuery('loadCredentialsPage', loadCredentialsPage, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials_/new')({
 	loaderDeps: ({ search }) => search,
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + location.searchStr,
+	context: ({ location, params }) => ({
+		pageQueryInput: {
+			orgSlug: params.orgSlug,
+			create: true,
+			search: [...new URLSearchParams(location.searchStr)],
+		},
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(
@@ -22,13 +26,13 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/credentials_/new')({
 	component: Page,
 })
 function Page() {
-	const { actorKey, pageQueryInput } = Route.useRouteContext()
+	const { actorKey, pageQueryInput, pageLocation } = Route.useRouteContext()
 	const { payload } = usePageQuery(pageQuery(actorKey, pageQueryInput)).data
 	return (
 		<ConnectCredentialRoute
-			key={pageQueryInput}
+			key={pageLocation.href}
 			data={payload}
-			currentHref={pageQueryInput}
+			currentHref={pageLocation.href}
 		/>
 	)
 }

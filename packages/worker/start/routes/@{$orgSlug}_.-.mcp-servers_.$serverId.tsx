@@ -1,6 +1,5 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { pageSearch } from '../page-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountMcpServersPage } from '../pages/account-mcp-servers.tsx'
 import { loadMcpServersPage } from '#start/server/account-collections'
@@ -10,8 +9,8 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/$serverId')({
-	context: ({ location }) => ({
-		pageQueryInput: location.pathname + pageSearch(location.searchStr, []),
+	context: ({ params }) => ({
+		pageQueryInput: { orgSlug: params.orgSlug, serverId: params.serverId },
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

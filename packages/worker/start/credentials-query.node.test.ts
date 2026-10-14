@@ -5,23 +5,26 @@ import {
 	validateCredentialSearch,
 } from './credentials-query.ts'
 
-test('presentation filters share a cache entry but actors, orgs and selections do not', () => {
-	const key = credentialsPageQuery('actor', '/@acme/-/credentials').queryKey
-	expect(
-		credentialsPageQuery(
-			'actor',
-			'/@acme/-/credentials?q=key&kind=secret&scope=org&locked=true',
-		).queryKey,
-	).toEqual(key)
-	for (const [actor, href] of [
-		['other', '/@acme/-/credentials'],
-		['actor', '/@other/-/credentials'],
-		['actor', '/@acme/-/credentials/one'],
+test('credential resource keys isolate actors, orgs and selections without presentation filters', () => {
+	const key = credentialsPageQuery('actor', { orgSlug: 'acme' }).queryKey
+	expect(key).toEqual([
+		'page',
+		'actor',
+		'loadCredentialsPage',
+		{ orgSlug: 'acme' },
 	])
-		expect(credentialsPageQuery(actor!, href!).queryKey).not.toEqual(key)
 	expect(
-		credentialsPageQuery('actor', '/@acme/-/credentials').meta
-			?.freshAuthorization,
+		credentialsPageQuery('other', { orgSlug: 'acme' }).queryKey,
+	).not.toEqual(key)
+	expect(
+		credentialsPageQuery('actor', { orgSlug: 'other' }).queryKey,
+	).not.toEqual(key)
+	expect(
+		credentialsPageQuery('actor', { orgSlug: 'acme', credentialId: 'one' })
+			.queryKey,
+	).not.toEqual(key)
+	expect(
+		credentialsPageQuery('actor', { orgSlug: 'acme' }).meta?.freshAuthorization,
 	).toBe(true)
 })
 

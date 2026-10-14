@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
-import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
+import { z } from 'zod'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
 	normalizePackageFilesPath,
@@ -8,15 +8,37 @@ import {
 } from '#universal/package-files.ts'
 
 export const loadPackageFiles = createServerFn({ method: 'GET' })
-	.validator((data: { pathname: string }) => {
-		if (
-			!data ||
-			typeof data.pathname !== 'string' ||
-			!normalizeRedirectTo(data.pathname)
-		)
-			throw notFound()
-		return { pathname: data.pathname }
-	})
+	.validator(
+		z.object({
+			resource: z.discriminatedUnion('kind', [
+				z.object({
+					kind: z.literal('account-files'),
+					packageId: z.string().min(1),
+					relativePath: z.string(),
+				}),
+				z.object({
+					kind: z.literal('listing-files'),
+					listingId: z.string().min(1),
+					relativePath: z.string(),
+				}),
+				z.object({
+					kind: z.literal('package-files'),
+					username: z.string().min(1),
+					kodyId: z.string().min(1),
+					relativePath: z.string(),
+				}),
+				z.object({
+					kind: z.literal('package-tree'),
+					username: z.string().min(1),
+					kodyId: z.string().min(1),
+					ref: z.string(),
+					relativePath: z.string(),
+				}),
+			]),
+			location: z.string().refine((value) => !!normalizeRedirectTo(value)),
+			queryRef: z.string().optional(),
+		}),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ env },
@@ -46,14 +68,15 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const original = getRequest()
-		const url = new URL(data.pathname, original.url)
-		const parsed = parsePackageDocumentPath(url.pathname)
-		const account = parsed?.kind === 'account-files' ? parsed : null
-		if (!account) {
+		const url = new URL(data.location, original.url)
+		const parsed = data.resource
+		if (parsed.kind !== 'account-files') {
 			const request = original
 			const target = await resolveCommunityFilesRoute({
 				env: bindings,
-				url,
+				resource: parsed,
+				pathname: url.pathname,
+				queryRef: data.queryRef,
 				request,
 			})
 			if (!target || target.kind === 'invalid-path') throw notFound()
@@ -63,7 +86,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 			}
 			if (target.kind === 'unauthorized')
 				throw redirect({
-					href: `/login?redirectTo=${encodeURIComponent(data.pathname)}`,
+					href: `/login?redirectTo=${encodeURIComponent(data.location)}`,
 					statusCode: 302,
 				})
 			if (target.kind === 'redirect') {
@@ -113,11 +136,11 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 				),
 			}
 		}
-		const path = normalizePackageFilesPath(account.relativePath ?? '')
+		const path = normalizePackageFilesPath(parsed.relativePath ?? '')
 		if (path == null) throw notFound()
 		const request = original
 		const user = await requireAuthenticatedPageUser(request, bindings, {
-			redirectTo: data.pathname,
+			redirectTo: data.location,
 		})
 		if (user instanceof Response) {
 			const cookie = user.headers.get('Set-Cookie')
@@ -129,7 +152,7 @@ export const loadPackageFiles = createServerFn({ method: 'GET' })
 		}
 		const saved = await getSavedPackageByIdInAnyOrg(
 			bindings.APP_DB,
-			account.packageId,
+			parsed.packageId,
 		)
 		if (
 			!saved ||

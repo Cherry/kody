@@ -68,6 +68,8 @@ export function hasPendingPageMutation(
 							'kodyId' in input
 						)
 							return key?.[2] === input.username && key?.[3] === input.kodyId
+						if (input && typeof input === 'object' && 'orgSlug' in input)
+							return key?.[2] === input.orgSlug
 						if (typeof input === 'string') {
 							const org =
 								parseOrgResourcePath(

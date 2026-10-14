@@ -1,3 +1,4 @@
+import { secretsInput } from '../secrets-input.ts'
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
@@ -10,7 +11,7 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
-	beforeLoad: ({ location }) => {
+	beforeLoad: ({ params, location }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),
 		)
@@ -21,7 +22,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
 				headers: { 'Cache-Control': 'private, no-store' },
 			})
 		return {
-			pageQueryInput: location.pathname + location.searchStr,
+			pageQueryInput: secretsInput(params.orgSlug, location.searchStr),
 		}
 	},
 	loaderDeps: ({ search }) => search,

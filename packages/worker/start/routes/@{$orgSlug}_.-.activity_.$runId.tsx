@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadActivityQuery } from '../activity-query.ts'
-import { pageSearch } from '../page-search.ts'
+import { activityInput } from '../activity-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountActivityPage } from '../pages/account-activity.tsx'
 import { documentHead } from '../components/document-head.ts'
@@ -15,18 +15,12 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/activity_/$runId')({
 		triage: search.triage,
 		cursor: search.cursor,
 	}),
-	context: ({ location }) => ({
-		pageQueryInput:
-			location.pathname +
-			pageSearch(location.searchStr, [
-				'selected',
-				'view',
-				'status',
-				'surface',
-				'error_triage',
-				'triage',
-				'cursor',
-			]),
+	context: ({ params, location }) => ({
+		pageQueryInput: activityInput(
+			params.orgSlug,
+			location.searchStr,
+			params.runId,
+		),
 	}),
 	loader: ({ context, preload }) =>
 		loadActivityQuery(

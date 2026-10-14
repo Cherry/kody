@@ -209,12 +209,30 @@ async function canonicalPublicTreeRef(input: {
 	return resolveListingDefaultTreeRef(input.env, input.listingId, input.request)
 }
 
+export type PackageFilesResource =
+	| { kind: 'listing-files'; listingId: string; relativePath: string }
+	| {
+			kind: 'package-files'
+			username: string
+			kodyId: string
+			relativePath: string
+	  }
+	| {
+			kind: 'package-tree'
+			username: string
+			kodyId: string
+			ref: string
+			relativePath: string
+	  }
+
 export async function resolveCommunityFilesRoute(input: {
 	env: Env
-	url: URL
+	resource: PackageFilesResource
+	pathname: string
+	queryRef?: string
 	request?: Request
 }): Promise<CommunityFilesRouteTarget | null> {
-	const parsed = parsePackageDocumentPath(input.url.pathname)
+	const parsed = input.resource
 	const detailMatch = parsed?.kind === 'listing-files' ? parsed : null
 	if (detailMatch) {
 		const selectedPath = selectedPathFromParams(detailMatch.relativePath)
@@ -223,7 +241,7 @@ export async function resolveCommunityFilesRoute(input: {
 			env: input.env,
 			request: input.request,
 			listingId: detailMatch.listingId,
-			ref: input.url.searchParams.get('ref') ?? '',
+			ref: input.queryRef ?? '',
 		})
 		return {
 			kind: 'listing',
@@ -250,7 +268,7 @@ export async function resolveCommunityFilesRoute(input: {
 				env: input.env,
 				request: input.request,
 				listingId: target.listingId,
-				ref: input.url.searchParams.get('ref') ?? '',
+				ref: input.queryRef ?? '',
 			})
 			return filesPathRedirect(
 				getCommunityPackageFilesHref({
@@ -270,8 +288,8 @@ export async function resolveCommunityFilesRoute(input: {
 			username: leftoverFilesMatch.username,
 			kodyId: leftoverFilesMatch.kodyId,
 			selectedPath,
-			ref: input.url.searchParams.get('ref') ?? '',
-			pathname: input.url.pathname,
+			ref: input.queryRef ?? '',
+			pathname: input.pathname,
 		})
 	}
 
@@ -300,7 +318,7 @@ export async function resolveCommunityFilesRoute(input: {
 			relativePath: selectedPath,
 			ref,
 		})
-		if (target.kind === 'redirect' || canonicalPath !== input.url.pathname) {
+		if (target.kind === 'redirect' || canonicalPath !== input.pathname) {
 			return filesPathRedirect(canonicalPath, true)
 		}
 		return {
@@ -320,7 +338,7 @@ export async function resolveCommunityFilesRoute(input: {
 		kodyId: treeMatch.kodyId,
 		selectedPath,
 		ref: treeMatch.ref,
-		pathname: input.url.pathname,
+		pathname: input.pathname,
 	})
 }
 

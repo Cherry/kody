@@ -25,9 +25,7 @@ export function scopedPageResource(
 	const org = pageQueryOrg(href)
 	return {
 		queryKey: pageResourceKey(actorKey, resource),
-		predicate: (query: Query) =>
-			typeof query.queryKey[3] === 'string' &&
-			pageQueryOrg(query.queryKey[3]) === org,
+		predicate: (query: Query) => pageQueryInputOrg(query.queryKey[3]) === org,
 	}
 }
 

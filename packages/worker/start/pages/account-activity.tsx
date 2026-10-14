@@ -62,7 +62,7 @@ export function AccountActivityPage({
 	currentHref,
 }: {
 	actorKey: string | null
-	pageQueryInput: string
+	pageQueryInput: Parameters<typeof activityQuery>[1]
 	currentHref: string
 }) {
 	const query = useSuspenseInfiniteQuery(

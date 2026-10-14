@@ -86,15 +86,15 @@ test('native experiments loader requires authentication and returns persisted op
 		headers: { Location: '/login' },
 	})
 	mockModule.requireAuthenticatedPageUser.mockResolvedValueOnce(loginRedirect)
-	await expect(
-		loadExperimentsPage({ data: '/account/experiments' }),
-	).rejects.toMatchObject({ options: { href: '/login', statusCode: 302 } })
+	await expect(loadExperimentsPage({ data: {} })).rejects.toMatchObject({
+		options: { href: '/login', statusCode: 302 },
+	})
 	mockModule.requireAuthenticatedPageUser.mockResolvedValueOnce(createUser())
 	mockModule.loadAccountExperimentsData.mockResolvedValueOnce({
 		ok: true,
 		experimentsOptIn: false,
 	})
-	const result = await loadExperimentsPage({ data: '/account/experiments' })
+	const result = await loadExperimentsPage({ data: {} })
 	expect(result.payload).toEqual({ ok: true, experimentsOptIn: false })
 	expect(mockModule.loadAccountExperimentsData).toHaveBeenCalledWith({
 		db: expect.anything(),

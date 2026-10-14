@@ -1,3 +1,4 @@
+import { pageQueryInputOrg } from './page-query-scope.ts'
 import { type QueryClient } from '@tanstack/react-query'
 import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 
@@ -13,12 +14,12 @@ export function orgPageFilters(
 		queryKey: ['page', actorKey, resource] as const,
 		predicate: (query: { queryKey: readonly unknown[] }) => {
 			const input = query.queryKey[3]
+			if (orgSlug !== null) return pageQueryInputOrg(input) === orgSlug
 			if (typeof input !== 'string') return false
 			const candidate = new URL(input, 'http://localhost').pathname
-			const candidateOrg = orgSlugFromOrgOwnedPath(candidate)
-			return orgSlug !== null
-				? candidateOrg === orgSlug
-				: candidateOrg === null && candidate.startsWith('/account/')
+			return (
+				pageQueryInputOrg(input) === null && candidate.startsWith('/account/')
+			)
 		},
 	}
 }

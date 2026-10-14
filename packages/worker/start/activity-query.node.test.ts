@@ -5,6 +5,7 @@ import {
 import { expect, it, vi } from 'vitest'
 import { InfiniteQueryObserver, QueryClient } from '@tanstack/react-query'
 import { activityQuery, loadActivityQuery } from './activity-query.ts'
+import { activityInput } from './activity-input.ts'
 import { loadActivityPage } from '#start/server/account-collections'
 
 vi.mock('#start/server/account-collections', () => ({
@@ -68,12 +69,12 @@ it('reuses loader data and preserves org and filters across cursor pages', async
 	const read = vi.mocked(loadActivityPage)
 	read.mockImplementation(async ({ data }) =>
 		activityPage(
-			new URL(data, 'https://kody.local').searchParams.get('cursor') ?? 'first',
-			data.includes('cursor=second') ? null : 'second',
+			data.cursor ?? 'first',
+			data.cursor === 'second' ? null : 'second',
 		),
 	)
 	const client = new QueryClient()
-	const href = '/@team-one/-/activity?status=error&surface=execute'
+	const href = activityInput('team-one', '?status=error&surface=execute')
 	await loadActivityQuery(client, 'actor', href)
 	const observer = new InfiniteQueryObserver(
 		client,
@@ -83,7 +84,7 @@ it('reuses loader data and preserves org and filters across cursor pages', async
 	expect(read).toHaveBeenCalledTimes(1)
 	await observer.fetchNextPage()
 	expect(read).toHaveBeenCalledTimes(2)
-	expect(read.mock.calls[1]?.[0].data).toBe(`${href}&cursor=second`)
+	expect(read.mock.calls[1]?.[0].data).toEqual({ ...href, cursor: 'second' })
 	expect(
 		observer
 			.getCurrentResult()
@@ -93,7 +94,7 @@ it('reuses loader data and preserves org and filters across cursor pages', async
 	await loadActivityQuery(
 		client,
 		'actor',
-		'/@team-two/-/activity?status=error&surface=execute',
+		activityInput('team-two', '?status=error&surface=execute'),
 	)
 	expect(read).toHaveBeenCalledTimes(3)
 	expect(observer.getCurrentResult().data?.pages).toHaveLength(2)
@@ -107,7 +108,7 @@ it('foreground entry cancels an old preload and rechecks revoked membership', as
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	})
-	const href = '/@team-one/-/activity'
+	const href = activityInput('team-one', '')
 	const cached = activityPage(null, null)
 	client.setQueryData(activityQuery('actor', href).queryKey, {
 		pages: [cached],

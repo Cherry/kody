@@ -143,8 +143,8 @@ vi.mock('@tanstack/react-start', () => ({
 	createServerFn: () => {
 		let validate = (data: unknown) => data
 		const builder = {
-			validator: (fn: typeof validate) => {
-				validate = fn
+			validator: (fn: { parse: (data: unknown) => unknown }) => {
+				validate = fn.parse
 				return builder
 			},
 			handler:
@@ -186,7 +186,16 @@ test('canonical file reads resolve data and reject missing or invalid trees', as
 		content: 'export const answer = 42',
 	})
 	const result = await loadPackageFiles({
-		data: { pathname: '/@owner/demo/tree/main/src/index.ts' },
+		data: {
+			resource: {
+				kind: 'package-tree',
+				username: 'owner',
+				kodyId: 'demo',
+				ref: 'main',
+				relativePath: 'src/index.ts',
+			},
+			location: '/@owner/demo/tree/main/src/index.ts',
+		},
 	})
 	expect(result.data).toMatchObject({
 		ok: true,
@@ -196,7 +205,18 @@ test('canonical file reads resolve data and reject missing or invalid trees', as
 		kind: 'invalid-path',
 	})
 	await expect(
-		loadPackageFiles({ data: { pathname: '/@owner/demo/tree/main/secret' } }),
+		loadPackageFiles({
+			data: {
+				resource: {
+					kind: 'package-tree',
+					username: 'owner',
+					kodyId: 'demo',
+					ref: 'main',
+					relativePath: 'secret',
+				},
+				location: '/@owner/demo/tree/main/secret',
+			},
+		}),
 	).rejects.toBeDefined()
 	mockModule.resolveCommunityFilesRoute.mockResolvedValue({
 		kind: 'package',
@@ -207,7 +227,18 @@ test('canonical file reads resolve data and reject missing or invalid trees', as
 	})
 	mockModule.loadAccessiblePackageFilesData.mockResolvedValue(null)
 	await expect(
-		loadPackageFiles({ data: { pathname: '/@owner/demo/tree/main/missing' } }),
+		loadPackageFiles({
+			data: {
+				resource: {
+					kind: 'package-tree',
+					username: 'owner',
+					kodyId: 'demo',
+					ref: 'main',
+					relativePath: 'missing',
+				},
+				location: '/@owner/demo/tree/main/missing',
+			},
+		}),
 	).rejects.toBeDefined()
 })
 
@@ -238,7 +269,17 @@ test('unlisted leftover tree redirects stay private; listed leftovers stay publi
 		native.request = new Request(`https://example.com/@owner/${kodyId}/files`)
 		native.setResponseHeader.mockClear()
 		await expect(
-			loadPackageFiles({ data: { pathname: `/@owner/${kodyId}/files` } }),
+			loadPackageFiles({
+				data: {
+					resource: {
+						kind: 'package-files',
+						username: 'owner',
+						kodyId,
+						relativePath: '',
+					},
+					location: `/@owner/${kodyId}/files`,
+				},
+			}),
 		).rejects.toMatchObject({
 			status,
 			options: { href: `https://example.com/@owner/${kodyId}/tree/main` },
@@ -272,7 +313,16 @@ test('canonical listed tree server loader preserves URL package path and reposit
 	mockModule.loadListingFilesData.mockResolvedValue(withActions)
 
 	const result = await loadPackageFiles({
-		data: { pathname: '/@owner/demo/tree/main' },
+		data: {
+			resource: {
+				kind: 'package-tree',
+				username: 'owner',
+				kodyId: 'demo',
+				ref: 'main',
+				relativePath: '',
+			},
+			location: '/@owner/demo/tree/main',
+		},
 	})
 	expect(mockModule.loadListingFilesData).toHaveBeenLastCalledWith(
 		expect.objectContaining({
