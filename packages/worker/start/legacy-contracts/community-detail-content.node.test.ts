@@ -174,7 +174,7 @@ test('community detail head covers install, installed, and listing-ahead badges'
 	expect(ownerAheadHtml).toContain('Publish changes')
 	// Primary pill ink must stay on-primary (not page link green-on-green).
 	const publishClass =
-		/data-testid="community-detail-source-ahead-badge"[^>]*class="(css-[^"\s]+)/.exec(
+		/data-testid="community-detail-source-ahead-badge"[^>]*class="(native-test-[^"\s]+)/.exec(
 			ownerAheadHtml,
 		)?.[1]
 	expect(publishClass).toBeTruthy()
@@ -183,7 +183,7 @@ test('community detail head covers install, installed, and listing-ahead badges'
 	)?.[1]
 	expect(publishLayer).toMatch(/color:\s*var\(--color-on-primary\)/)
 	const navClass =
-		/data-testid="package-repo-nav"[^>]*class="(css-[^"\s]+)/.exec(
+		/data-testid="package-repo-nav"[^>]*class="(native-test-[^"\s]+)/.exec(
 			ownerAheadHtml,
 		)?.[1]
 	expect(navClass).toBeTruthy()
@@ -192,7 +192,7 @@ test('community detail head covers install, installed, and listing-ahead badges'
 	)?.[1]
 	expect(navLayer).toMatch(/gap:\s*0\.35rem/)
 	const tabClass =
-		/data-testid="package-repo-nav-repo"[^>]*class="(css-[^"\s]+)/.exec(
+		/data-testid="package-repo-nav-repo"[^>]*class="(native-test-[^"\s]+)/.exec(
 			ownerAheadHtml,
 		)?.[1]
 	expect(tabClass).toBeTruthy()
