@@ -260,6 +260,7 @@ test('native account and session reads batch user/role and flag reads into two r
 		'mcp-skills-extension': false,
 		'mcp-events-extension': false,
 		'package-app-custom-domains': false,
+		'repo-push-queue': false,
 	})
 	expect(Object.keys(response.payloads).sort()).toEqual([
 		'accountConnections',
