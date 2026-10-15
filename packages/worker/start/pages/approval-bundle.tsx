@@ -15,9 +15,8 @@ import {
 } from '@tanstack/react-query'
 import { decideApprovalBundle } from '#start/server/approval-bundles'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { invalidateCredentialResources } from '../credential-mutation.ts'
+import { permissionsMutationOptions } from '../permissions-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { pageQueryInputOrg } from '../page-query-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 import {
@@ -192,11 +191,15 @@ export function ApprovalBundleRoute({
 		total: number
 	} | null>(null)
 	const [summary, setSummary] = useState<string | null>(null)
+	const permissions = permissionsMutationOptions(client, actorKey)
 	const mutation = useMutation({
+		...permissions,
+		onMutate: async () => ({ ...(await permissions.onMutate()), queryKey }),
 		retry: false,
 		gcTime: 0,
 		mutationFn: decideApprovalBundle,
-		onSuccess: async (result) => {
+		onSuccess: async (result, _input, submitted) => {
+			const queryKey = submitted.queryKey
 			if (!result.item) return
 			const item = result.item
 			const matches = { queryKey, exact: true }
@@ -217,25 +220,6 @@ export function ApprovalBundleRoute({
 						}
 					: old,
 			)
-		},
-		onSettled: () => {
-			void invalidateCredentialResources(client, actorKey, orgSlug)
-			void client.invalidateQueries({
-				queryKey: ['page', actorKey],
-				predicate: ({ queryKey }) =>
-					[
-						'loadPackage',
-						'loadPackageFiles',
-						'loadProfile',
-						'loadCredentialApprovalPage',
-						'loadPublishReview',
-					].includes(String(queryKey[2])) &&
-					pageQueryInputOrg(queryKey[3]) === orgSlug,
-			})
-			// The public catalog spans organizations, so any published package can affect it.
-			void client.invalidateQueries({
-				queryKey: ['page', actorKey, 'loadCommunity'],
-			})
 		},
 	})
 	async function decide(

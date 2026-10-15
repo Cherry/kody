@@ -13,7 +13,7 @@ import {
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { spacing } from '#universal/styles/tokens.ts'
-import { invalidateShellQueries } from '../shell-query.ts'
+import { permissionsMutationOptions } from '../permissions-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 
 type PendingInviteRef = Pick<AccountPendingInvite, 'source' | 'id'>
@@ -30,20 +30,7 @@ export function usePendingInviteActions() {
 			action: 'accept' | 'decline'
 			actorKey: string | null
 		}) => send({ data: { id: invite.id } }),
-		onMutate: async (variables: { actorKey: string | null }) => {
-			await client.cancelQueries({ queryKey: ['page', variables.actorKey] })
-		},
-		onSettled: async (
-			_result: unknown,
-			_error: Error | null,
-			variables: { actorKey: string | null },
-		) => {
-			// Accepting can change organization membership and grants across cached pages.
-			await Promise.all([
-				client.invalidateQueries({ queryKey: ['page', variables.actorKey] }),
-				invalidateShellQueries(client, variables.actorKey),
-			])
-		},
+		...permissionsMutationOptions(client, actorKey),
 	})
 	const acceptInvite = useMutation(options(acceptPendingInvite))
 	const declineInvite = useMutation(options(declinePendingInvite))

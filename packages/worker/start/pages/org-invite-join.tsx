@@ -27,7 +27,7 @@ import {
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { invalidateShellQueries } from '../shell-query.ts'
+import { permissionsMutationOptions } from '../permissions-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 
 function inviteErrorPrompt(error: string, slug?: string) {
@@ -73,15 +73,7 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 				redirectTo: result.redirectTo,
 			}
 		},
-		onMutate: async (variables) => {
-			await client.cancelQueries({ queryKey: ['page', variables.actorKey] })
-		},
-		onSettled: async (_result, _error, variables) => {
-			await Promise.all([
-				client.invalidateQueries({ queryKey: ['page', variables.actorKey] }),
-				invalidateShellQueries(client, variables.actorKey),
-			])
-		},
+		...permissionsMutationOptions(client, actorKey),
 	})
 	if (!data.ok)
 		return (
