@@ -96,12 +96,6 @@ type SavedPackageOption = {
 	updatedAt: string
 }
 
-type ConnectOauthHostApprovalLink = {
-	secretName: string
-	host: string
-	approvalUrl: string
-}
-
 type SecretApprovalAction = 'approve' | 'reject'
 
 type SecretRefresh = Pick<
@@ -406,7 +400,6 @@ export async function connectAccountOAuth(input: {
 			})
 		}
 	}
-	const hostApprovalLinks: Array<ConnectOauthHostApprovalLink> = []
 
 	const nextSteps = buildConnectOauthNextSteps({
 		integrationName,
@@ -445,7 +438,6 @@ export async function connectAccountOAuth(input: {
 		accessTokenSaved: true,
 		refreshTokenSaved: Boolean(refreshToken),
 		allowedHosts,
-		hostApprovalLinks,
 		integrationName,
 		nextSteps,
 	})

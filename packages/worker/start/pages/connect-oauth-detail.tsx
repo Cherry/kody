@@ -19,7 +19,6 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import {
 	type ConnectOauthConfig,
-	type ConnectOauthHostApprovalLink,
 	type StoredIntegrationConfig,
 	isSafeExternalUrl,
 } from '#client/routes/connect-oauth-config.ts'
@@ -248,7 +247,6 @@ export function renderSuccessAdvancedDetails(input: {
 	config: ConnectOauthConfig
 	accessTokenSaved: boolean
 	refreshTokenSaved: boolean
-	hostApprovalLinks: Array<ConnectOauthHostApprovalLink>
 }) {
 	return (
 		<details
@@ -272,23 +270,6 @@ export function renderSuccessAdvancedDetails(input: {
 					</div>
 				</div>
 				{renderAllowedHosts(input.config)}
-				{input.hostApprovalLinks.length > 0 ? (
-					<ul css={listCss}>
-						{input.hostApprovalLinks.map((link) => (
-							<li key={`${link.secretName}:${link.host}`}>
-								<SiteLink
-									href={link.approvalUrl}
-									target="_blank"
-									rel="noreferrer noopener"
-									css={primaryLinkCss}
-								>
-									Approve <code>{link.host}</code> for{' '}
-									<code>{link.secretName}</code>
-								</SiteLink>
-							</li>
-						))}
-					</ul>
-				) : null}
 				<SiteLink
 					href="/account/secrets"
 					target="_blank"

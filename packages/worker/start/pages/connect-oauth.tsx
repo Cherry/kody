@@ -51,7 +51,6 @@ import {
 	type ConnectOauthChooserOption,
 	type ConnectOauthStatusTone,
 	type ConnectOauthStep,
-	approveConnectOauthHosts,
 	persistConnectOauthOrgSlug,
 	readConnectOauthOrgSlug,
 	connectOauthCallbackHref,
@@ -73,14 +72,12 @@ import {
 } from './connect-oauth-shared.ts'
 import {
 	type ConnectOauthConfig,
-	type ConnectOauthHostApprovalLink,
 	type ConnectOauthNextSteps,
 	type StoredIntegrationConfig,
 	formatConnectOauthCaughtError,
 	formatMissingSetupFields,
 	mergeConnectOauthConfig,
 	parseConnectOauthNextSteps,
-	parseHostApprovalLinks,
 	summarizeStoredSetupState,
 	toStoredIntegrationConfig,
 } from '#client/routes/connect-oauth-config.ts'
@@ -94,7 +91,6 @@ type OauthState = {
 	accessTokenSaved: boolean
 	refreshTokenSaved: boolean
 	hasConfigError: boolean
-	hostApprovalLinks: Array<ConnectOauthHostApprovalLink>
 	existingConnection: ConnectOauthExistingConnection | null
 	replaceConfirmed: boolean
 	chooserOptions: Array<ConnectOauthChooserOption>
@@ -102,7 +98,6 @@ type OauthState = {
 	requestedProvider: string | null
 	offeredScopeMenu: Array<string>
 	nextSteps: ConnectOauthNextSteps | null
-	approvingAllHosts: boolean
 	submitting: boolean
 	ssrRedirectUri: string | null
 	clientIdInput: string
@@ -123,7 +118,6 @@ function initialOauthState(
 	let accessTokenSaved = false
 	let refreshTokenSaved = false
 	let hasConfigError = false
-	let hostApprovalLinks: Array<ConnectOauthHostApprovalLink> = []
 	/** The connection currently stored under the target name, when any. */
 	let existingConnection: ConnectOauthExistingConnection | null = null
 	/** The user explicitly confirmed replacing a different-app connection. */
@@ -138,7 +132,6 @@ function initialOauthState(
 	 */
 	let offeredScopeMenu: Array<string> = []
 	let nextSteps: ConnectOauthNextSteps | null = null
-	let approvingAllHosts = false
 	let submitting = false
 	/**
 	 * Normalized pathname+search the current resolution state belongs to.
@@ -237,7 +230,6 @@ function initialOauthState(
 		accessTokenSaved,
 		refreshTokenSaved,
 		hasConfigError,
-		hostApprovalLinks,
 		existingConnection,
 		replaceConfirmed,
 		chooserOptions,
@@ -245,7 +237,6 @@ function initialOauthState(
 		requestedProvider,
 		offeredScopeMenu,
 		nextSteps,
-		approvingAllHosts,
 		submitting,
 		ssrRedirectUri,
 		clientIdInput,
@@ -311,7 +302,6 @@ export function ConnectOauthRoute({
 		accessTokenSaved,
 		refreshTokenSaved,
 		hasConfigError,
-		hostApprovalLinks,
 		existingConnection,
 		replaceConfirmed,
 		chooserOptions,
@@ -319,7 +309,6 @@ export function ConnectOauthRoute({
 		requestedProvider,
 		offeredScopeMenu,
 		nextSteps,
-		approvingAllHosts,
 		submitting,
 		ssrRedirectUri,
 		clientIdInput,
@@ -354,37 +343,6 @@ export function ConnectOauthRoute({
 			unsubscribe()
 		}
 	}, [router, navigationScope])
-	async function approveAllHostApprovals() {
-		if (approvingAllHosts || !hostApprovalLinks.length) return
-		update({ approvingAllHosts: true })
-		try {
-			const result = await approveConnectOauthHosts({
-				secretNames: hostApprovalLinks.map((link) => link.secretName),
-				hosts: hostApprovalLinks.map((link) => link.host),
-				orgSlug: flowOrg,
-			})
-			if (!isFlowActive()) return
-			if (!result.ok) {
-				setStatus(result.error, 'error')
-				return
-			}
-
-			update({
-				hostApprovalLinks: [],
-				statusMessage: 'All hosts approved.',
-				statusTone: 'info',
-			})
-			void invalidatePages()
-		} catch (error) {
-			if (isFlowActive())
-				setStatus(
-					formatConnectOauthCaughtError(error, 'Unable to approve all hosts.'),
-					'error',
-				)
-		} finally {
-			if (isFlowActive()) update({ approvingAllHosts: false })
-		}
-	}
 	async function handleSetupSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
 		if (!config || inFlight.current) return
@@ -621,7 +579,6 @@ export function ConnectOauthRoute({
 				update({
 					accessTokenSaved: payload.accessTokenSaved === true,
 					refreshTokenSaved: payload.refreshTokenSaved === true,
-					hostApprovalLinks: parseHostApprovalLinks(payload.hostApprovalLinks),
 					nextSteps: parseConnectOauthNextSteps(payload.nextSteps),
 					statusMessage: 'OAuth tokens saved.',
 					statusTone: 'info',
@@ -781,12 +738,7 @@ export function ConnectOauthRoute({
 					}
 					{...{
 						config: currentConfig,
-						hostApprovalLinks,
 						nextSteps,
-						approvingAllHosts,
-						onApproveAllHosts: () => {
-							void approveAllHostApprovals()
-						},
 					}}
 				/>
 			) : null}
@@ -795,7 +747,6 @@ export function ConnectOauthRoute({
 						config: currentConfig,
 						accessTokenSaved,
 						refreshTokenSaved,
-						hostApprovalLinks,
 					})
 				: renderAdvancedDetails({
 						config: currentConfig,

@@ -1,6 +1,4 @@
-import { connectSecretsInput } from '../connect-input.ts'
 import {
-	approveSecretAccess,
 	connectOAuth,
 	exchangeOAuthToken,
 	saveOAuthApp,
@@ -132,23 +130,6 @@ export function connectOauthCallbackHref(
 	return `${clean.pathname}${clean.search}`
 }
 
-export async function approveConnectOauthHosts(input: {
-	secretNames: ReadonlyArray<string>
-	hosts: ReadonlyArray<string>
-	orgSlug: string | null
-}): Promise<{ ok: true } | { ok: false; error: string }> {
-	const search = new URLSearchParams()
-	search.set('names', [...new Set(input.secretNames)].join(','))
-	search.set('hosts', [...new Set(input.hosts)].join(','))
-	await approveSecretAccess({
-		data: {
-			orgSlug: input.orgSlug ?? undefined,
-			refresh: connectSecretsInput(`?${search}`),
-		},
-	})
-	return { ok: true }
-}
-
 export async function saveConnectOauthConnection(input: {
 	config: ConnectOauthConfig
 	callbackUrl: string
@@ -159,7 +140,6 @@ export async function saveConnectOauthConnection(input: {
 			ok: true
 			accessTokenSaved: boolean
 			refreshTokenSaved: boolean
-			hostApprovalLinks: unknown
 			nextSteps: unknown
 	  }
 	| { ok: false; error: string }
@@ -193,7 +173,6 @@ export async function saveConnectOauthConnection(input: {
 		ok: true,
 		accessTokenSaved: payload.accessTokenSaved === true,
 		refreshTokenSaved: payload.refreshTokenSaved === true,
-		hostApprovalLinks: payload.hostApprovalLinks,
 		nextSteps: payload.nextSteps,
 	}
 }

@@ -27,7 +27,6 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import {
 	type ConnectOauthConfig,
-	type ConnectOauthHostApprovalLink,
 	type ConnectOauthNextSteps,
 	type StoredIntegrationConfig,
 } from '#client/routes/connect-oauth-config.ts'
@@ -280,31 +279,10 @@ export function renderConnectStep(input: {
 export function renderSuccessCard(input: {
 	connectionHref: string
 	config: ConnectOauthConfig
-	hostApprovalLinks: Array<ConnectOauthHostApprovalLink>
 	nextSteps: ConnectOauthNextSteps | null
-	approvingAllHosts: boolean
-	onApproveAllHosts: () => void
 }) {
 	return (
 		<section css={cardCss}>
-			{input.hostApprovalLinks.length > 0 ? (
-				<div css={{ display: 'grid', gap: spacing.md }}>
-					<p css={{ margin: 0, color: colors.text }}>
-						One more step: allow this connection to call {input.config.provider}
-						.
-					</p>
-					<button
-						type="button"
-						disabled={input.approvingAllHosts}
-						css={connectOauthPrimaryButtonCss}
-						onClick={() => {
-							input.onApproveAllHosts()
-						}}
-					>
-						{input.approvingAllHosts ? 'Allowing access…' : 'Allow access'}
-					</button>
-				</div>
-			) : null}
 			<div
 				data-testid="connect-oauth-whats-next"
 				css={{ ...insetCardCss, display: 'grid', gap: spacing.sm }}

@@ -115,12 +115,6 @@ export type StoredIntegrationConfig = Omit<
 	platformDescription?: string | null
 }
 
-export type ConnectOauthHostApprovalLink = {
-	secretName: string
-	host: string
-	approvalUrl: string
-}
-
 export type ConnectOauthNextSteps = {
 	service: string
 	connectionName: string
@@ -549,21 +543,6 @@ export function parseAllowedHosts(raw: string | null) {
 		.split(/[\s,]+/)
 		.map((host) => host.trim())
 		.filter(Boolean)
-}
-
-export function parseHostApprovalLinks(
-	raw: unknown,
-): Array<ConnectOauthHostApprovalLink> {
-	if (!Array.isArray(raw)) return []
-	return raw.filter(
-		(entry): entry is ConnectOauthHostApprovalLink =>
-			Boolean(entry) &&
-			typeof entry === 'object' &&
-			typeof (entry as { secretName?: unknown }).secretName === 'string' &&
-			typeof (entry as { host?: unknown }).host === 'string' &&
-			typeof (entry as { approvalUrl?: unknown }).approvalUrl === 'string' &&
-			isSafeExternalUrl((entry as { approvalUrl?: string }).approvalUrl ?? ''),
-	)
 }
 
 export function parseConnectOauthNextSteps(

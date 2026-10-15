@@ -543,7 +543,6 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 		accessTokenSaved: true,
 		refreshTokenSaved: true,
 		allowedHosts: ['api.github.com', 'github.com'],
-		hostApprovalLinks: [],
 		integrationName: 'github',
 		nextSteps: expect.objectContaining({
 			service: 'github',
@@ -705,7 +704,6 @@ test('connect oauth saves tokens via the secret store and persists app+connectio
 		ok: true,
 		accessTokenSaved: true,
 		refreshTokenSaved: true,
-		hostApprovalLinks: [],
 		integrationName: 'tesla',
 	})
 	expect(teslaPayload.allowedHosts).toEqual(expect.arrayContaining(teslaHosts))
