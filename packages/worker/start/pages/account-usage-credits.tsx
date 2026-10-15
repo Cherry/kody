@@ -3,9 +3,13 @@ import {
 	startCreditTopUp,
 	saveCreditSettings,
 } from '#start/server/billing-mutations'
-import { type QueryKey } from '@tanstack/react-query'
+import {
+	useMutation,
+	useQueryClient,
+	type QueryKey,
+} from '@tanstack/react-query'
+import { creditSettingsMutationOptions } from '../credit-settings-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
 import { useState, type FormEvent } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
@@ -40,7 +44,6 @@ import {
 import {
 	type AccountUsageCredits,
 	type AccountUsageCreditsWallet,
-	type AccountUsageLoaderData,
 } from '#universal/loader-data.ts'
 import { orgCreditsPath, parseOrgBillingPath } from '#universal/org-pages.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
@@ -102,25 +105,32 @@ export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
 	const capture = useSubmitterScope()
-	const settingsMutation = usePageResponseMutation<
-		AccountUsageLoaderData,
-		{ autoRefill: CreditAutoRefillSettings; notify: CreditNotifySettings }
-	>(
-		props.queryKey,
-		'loadUsagePage',
-		(body) =>
-			saveCreditSettings({
-				data: { orgSlug: props.orgSlug, ...body },
-			}) as Promise<AccountUsageLoaderData>,
-		{ dependencies: ['loadBillingPage'] },
+	const settingsMutation = useMutation(
+		creditSettingsMutationOptions(
+			useQueryClient(),
+			props.queryKey,
+			saveCreditSettings,
+		),
 	)
 	const [appliedCredits, setAppliedCredits] = useState(props.credits)
 	const [message, setMessage] = useState<string | null>(
 		props.error ?? props.notice ?? null,
 	)
+	const [incomingNotice, setIncomingNotice] = useState({
+		error: props.error,
+		notice: props.notice,
+	})
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>(
 		props.error ? 'error' : 'info',
 	)
+	if (
+		incomingNotice.error !== props.error ||
+		incomingNotice.notice !== props.notice
+	) {
+		setIncomingNotice({ error: props.error, notice: props.notice })
+		setMessage(props.error ?? props.notice ?? null)
+		setMessageTone(props.error ? 'error' : 'info')
+	}
 	const [draft, setDraft] = useState<SettingsDraft | null>(
 		props.credits.eligible ? draftFromWallet(props.credits) : null,
 	)
@@ -134,8 +144,6 @@ export function AccountUsageCreditsSection(
 	function applyCredits(credits: AccountUsageCredits) {
 		setAppliedCredits(credits)
 		setDraft(credits.eligible ? draftFromWallet(credits) : null)
-		setMessage(props.error ?? props.notice ?? null)
-		setMessageTone(props.error ? 'error' : 'info')
 	}
 
 	function showMessage(text: string, tone: 'info' | 'error') {
@@ -181,16 +189,21 @@ export function AccountUsageCreditsSection(
 			showMessage(autoRefill.error, 'error')
 			return
 		}
+		const isCurrent = capture()
 		setSaving(true)
 		setMessage(null)
 		try {
-			await settingsMutation.submit({
+			await settingsMutation.mutateAsync({
+				orgSlug: props.orgSlug,
 				autoRefill: autoRefill.value,
 				notify: draft.notify,
 			})
+			if (!isCurrent()) return
+			showMessage('Credit settings saved.', 'info')
 			setSaving(false)
 			return
 		} catch (error) {
+			if (!isCurrent()) return
 			showMessage(
 				error instanceof Error
 					? error.message

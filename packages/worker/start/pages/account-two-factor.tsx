@@ -5,8 +5,9 @@ import {
 	cancelTwoFactorSetup,
 	disableTwoFactor,
 } from '#start/server/security-mutations'
-import { type QueryKey } from '@tanstack/react-query'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useMutation } from '@tanstack/react-query'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { toDataURL } from 'qrcode'
 import { useState, type FormEvent } from 'react'
@@ -48,91 +49,92 @@ type TwoFactorSetup = {
 }
 
 export function AccountTwoFactorPage({
-	queryKey,
 	payload,
 	currentHref,
 }: {
-	queryKey: QueryKey
 	payload: AccountTwoFactorPayload
 	currentHref: string
 }) {
-	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const enabled = payload.enabled
 	const [setup, setSetup] = useState<TwoFactorSetup | null>(null)
 	const [confirmCode, setConfirmCode] = useState('')
 	const [disableCode, setDisableCode] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
-	const mutation = usePageResponseMutation<
-		{
-			ok?: boolean
-			enabled?: boolean
-			otpUri?: string
-			secret?: string
-			error?: string
-		},
-		| { intent: 'setup' | 'cancel' }
-		| { intent: 'confirm' | 'disable'; code: string }
-	>(
-		queryKey,
-		'loadAccountSecurity',
-		(input) => {
-			switch (input.intent) {
-				case 'setup':
-					return startTwoFactorSetup({ data: {} })
-				case 'cancel':
-					return cancelTwoFactorSetup({ data: {} })
-				case 'confirm':
-					return confirmTwoFactorSetup({ data: { code: input.code } })
-				case 'disable':
-					return disableTwoFactor({ data: { code: input.code } })
-			}
-		},
-		{
-			dependencies: ['loadAccountPage'],
-			refreshShell: true,
-			merge: (page, accepted) =>
-				page.page === 'two-factor' && typeof accepted.enabled === 'boolean'
-					? { ...page, payload: { ...page.payload, enabled: accepted.enabled } }
-					: page,
-		},
+	const capture = useSubmitterScope()
+	const invalidate = usePageInvalidation(mutationResources, {
+		refreshShell: true,
+	})
+	const mutationOptions = {
+		gcTime: 0,
+		onMutate: () => invalidate,
+		onSettled: (
+			_data: unknown,
+			_error: unknown,
+			_input: unknown,
+			reconcile: typeof invalidate | undefined,
+		) => reconcile?.(),
+	}
+	const invalidateSetupDependencies = usePageInvalidation(
+		setupMutationResources,
+		{ refreshShell: true },
 	)
-	const postTwoFactorAction = mutation.submit
+	const setupMutation = useMutation({
+		...mutationOptions,
+		onMutate: () => invalidateSetupDependencies,
+		mutationFn: async (isCurrent: () => boolean) => {
+			const result = await startTwoFactorSetup({ data: {} })
+			if (!result.ok) throw new Error(result.error)
+			if (!result.otpUri || !result.secret)
+				throw new Error('The server returned an incomplete two-factor setup.')
+			if (!isCurrent()) return
+			let qrCodeDataUrl: string | null = null
+			try {
+				qrCodeDataUrl = await toDataURL(result.otpUri, { width: 240 })
+			} catch {
+				// The textual secret is still usable when QR rendering fails.
+			}
+			if (!isCurrent()) return
+			// Never return the setup secret into Query's mutation cache.
+			setSetup({ otpUri: result.otpUri, secret: result.secret, qrCodeDataUrl })
+			setConfirmCode('')
+		},
+	})
+	const confirmMutation = useMutation({
+		...mutationOptions,
+		mutationFn: async (code: string) => {
+			const result = await confirmTwoFactorSetup({ data: { code } })
+			if (!result.ok) throw new Error(result.error)
+		},
+	})
+	const cancelMutation = useMutation({
+		...mutationOptions,
+		mutationFn: async () => {
+			await cancelTwoFactorSetup({ data: {} })
+		},
+	})
+	const disableMutation = useMutation({
+		...mutationOptions,
+		mutationFn: async (code: string) => {
+			const result = await disableTwoFactor({ data: { code } })
+			if (!result.ok) throw new Error(result.error)
+		},
+	})
 
 	async function handleStartSetup() {
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 
 		try {
-			const payload = await postTwoFactorAction({ intent: 'setup' })
-			// A null payload means a 401 redirect is already in flight.
-			if (!payload) return
-			if (!payload.otpUri || !payload.secret) {
-				setMessage('The server returned an incomplete two-factor setup.')
-				setMessageTone('error')
-				return
-			}
-			let qrCodeDataUrl: string | null = null
-			try {
-				qrCodeDataUrl = await toDataURL(payload.otpUri, { width: 240 })
-			} catch {
-				qrCodeDataUrl = null
-			}
-			setSetup({
-				otpUri: payload.otpUri,
-				secret: payload.secret,
-				qrCodeDataUrl,
-			})
-			setConfirmCode('')
+			await setupMutation.mutateAsync(isCurrent)
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to start two-factor setup.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
@@ -145,48 +147,45 @@ export function AccountTwoFactorPage({
 			return
 		}
 
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 
 		try {
-			const payload = await postTwoFactorAction({ intent: 'confirm', code })
-			if (!payload) return
+			await confirmMutation.mutateAsync(code)
+			if (!isCurrent()) return
 			// Retire older setup loads before publishing the confirmed state.
 			setSetup(null)
 			setConfirmCode('')
 			setMessage('Two-factor authentication is enabled.')
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to confirm two-factor setup.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
 	async function handleCancelSetup() {
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 
 		try {
-			const payload = await postTwoFactorAction({ intent: 'cancel' })
-			// A null payload means a 401 redirect is already in flight.
-			if (!payload) return
+			await cancelMutation.mutateAsync()
+			if (!isCurrent()) return
 			setSetup(null)
 			setConfirmCode('')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to cancel two-factor setup.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
@@ -199,24 +198,23 @@ export function AccountTwoFactorPage({
 			return
 		}
 
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 
 		try {
-			const payload = await postTwoFactorAction({ intent: 'disable', code })
-			if (!payload) return
+			await disableMutation.mutateAsync(code)
+			if (!isCurrent()) return
 			setDisableCode('')
 			setMessage('Two-factor authentication is disabled.')
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to disable two-factor authentication.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
@@ -233,7 +231,12 @@ export function AccountTwoFactorPage({
 	const status = 'ready'
 
 	const hydrated = useHydrated()
-	const isBusy = !hydrated || actionStatus === 'busy'
+	const isBusy =
+		!hydrated ||
+		setupMutation.isPending ||
+		confirmMutation.isPending ||
+		cancelMutation.isPending ||
+		disableMutation.isPending
 
 	return (
 		<AccountManagementShell
@@ -394,3 +397,7 @@ export function AccountTwoFactorPage({
 const primaryButtonCss = getPillButtonCss({ size: 'sm' })
 const secondaryButtonCss = getGhostButtonCss({ size: 'sm' })
 const dangerButtonCss = getDangerPillCss({ size: 'sm' })
+
+const mutationResources = ['loadAccountSecurity', 'loadAccountPage'] as const
+
+const setupMutationResources = ['loadAccountPage'] as const

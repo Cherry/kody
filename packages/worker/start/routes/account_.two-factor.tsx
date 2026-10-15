@@ -20,20 +20,11 @@ export const Route = createFileRoute('/account_/two-factor')({
 	component: SecurityPage,
 })
 function SecurityPage() {
-	const mutationContext = Route.useRouteContext()
-	const mutationQueryKey = pageQuery(
-		mutationContext.actorKey,
-		mutationContext.pageQueryInput,
-	).queryKey
 	const data = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
 	if (data.page !== 'two-factor') throw new Error('Unexpected security page')
 	return (
-		<AccountTwoFactorPage
-			queryKey={mutationQueryKey}
-			payload={data.payload}
-			currentHref={location.href}
-		/>
+		<AccountTwoFactorPage payload={data.payload} currentHref={location.href} />
 	)
 }
 

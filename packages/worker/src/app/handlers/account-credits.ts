@@ -2,7 +2,6 @@ import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { personalOrgUsageRedirectUrl } from '#app/handlers/org-usage.ts'
 import { operationResult } from '../operation-result.ts'
 import { loadAccountCreditsUser } from '#app/account-credits-data.ts'
-import { loadAccountUsageData } from '#app/account-usage-data.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -288,12 +287,5 @@ export async function saveWebsiteCreditSettings(input: {
 		notify,
 		now,
 	})
-	const accountUsage = await loadAccountUsageData({
-		env,
-		userId: user.userId,
-		org: access.org,
-		notice: 'Credit settings saved.',
-		now,
-	})
-	return operationResult(accountUsage ?? { ok: false, error: 'Not found.' })
+	return operationResult({ ok: true })
 }

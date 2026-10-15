@@ -19,7 +19,11 @@ import {
 	startRegistration,
 	WebAuthnAbortService,
 } from '@simplewebauthn/browser'
-import { useMutation, type QueryKey } from '@tanstack/react-query'
+import {
+	useMutation,
+	useQueryClient,
+	type QueryKey,
+} from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
 	formatNullableTimestamp,
@@ -28,7 +32,8 @@ import {
 import { SiteLink } from '../components/site-link.tsx'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { passkeyMutationOptions } from '../passkey-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	accountInputCss,
 	AccountManagementMessage,
@@ -67,16 +72,13 @@ export function AccountPasskeysPage({
 }) {
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const passkeys = payload.passkeys
-	const changePasskey = usePageResponseMutation<
-		AccountPasskeysPayload,
-		| { intent: 'delete'; passkeyId: string }
-		| { intent: 'rename'; passkeyId: string; name: string }
-	>(
-		queryKey,
-		'loadAccountSecurity',
-		({ intent, ...data }) =>
-			intent === 'delete' ? deletePasskey({ data }) : renamePasskey({ data }),
-		{ refreshShell: true },
+	const client = useQueryClient()
+	const capture = useSubmitterScope()
+	const rename = useMutation(
+		passkeyMutationOptions(client, queryKey, renamePasskey),
+	)
+	const remove = useMutation(
+		passkeyMutationOptions(client, queryKey, deletePasskey),
 	)
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
@@ -170,20 +172,22 @@ export function AccountPasskeysPage({
 	}
 
 	async function handleRenamePasskey(passkeyId: string) {
+		const isCurrent = capture()
 		setActionStatus('busy')
 		setMessage(null)
 
 		try {
-			await changePasskey.submit({
-				intent: 'rename',
+			await rename.mutateAsync({
 				passkeyId,
 				name: renameDraft,
 			})
+			if (!isCurrent()) return
 			setRenamingPasskeyId(null)
 			setRenameDraft('')
 			setMessage('Passkey renamed.')
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -191,16 +195,18 @@ export function AccountPasskeysPage({
 			)
 			setMessageTone('error')
 		} finally {
-			setActionStatus('idle')
+			if (isCurrent()) setActionStatus('idle')
 		}
 	}
 
 	async function handleDeletePasskey(passkeyId: string) {
+		const isCurrent = capture()
 		setActionStatus('busy')
 		setMessage(null)
 
 		try {
-			await changePasskey.submit({ intent: 'delete', passkeyId })
+			await remove.mutateAsync({ passkeyId })
+			if (!isCurrent()) return
 			if (renamingPasskeyId === passkeyId) {
 				setRenamingPasskeyId(null)
 				setRenameDraft('')
@@ -208,6 +214,7 @@ export function AccountPasskeysPage({
 			setMessage('Passkey deleted.')
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -215,7 +222,7 @@ export function AccountPasskeysPage({
 			)
 			setMessageTone('error')
 		} finally {
-			setActionStatus('idle')
+			if (isCurrent()) setActionStatus('idle')
 		}
 	}
 

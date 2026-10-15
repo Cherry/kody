@@ -73,7 +73,7 @@ export async function deleteAccountPasskey({
 		ip: requestIp,
 		path: '/account/passkeys',
 	})
-	return await loadPasskeysPayload(env.APP_DB, user.userId)
+	return { ok: true as const }
 }
 export async function renameAccountPasskey({
 	env,
@@ -117,5 +117,5 @@ export async function renameAccountPasskey({
 		ip: requestIp,
 		path: '/account/passkeys',
 	})
-	return await loadPasskeysPayload(env.APP_DB, user.userId)
+	return { ok: true as const }
 }

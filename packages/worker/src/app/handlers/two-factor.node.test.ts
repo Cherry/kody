@@ -234,6 +234,16 @@ test('cancelling a pending setup removes it without touching active 2fa', async 
 	expect(readRow()).toBeUndefined()
 })
 
+test('cancelling setup preserves an already enabled authenticator', async () => {
+	const { enable, post, readRow } = await setupTwoFactor()
+	await enable()
+	const active = readRow()
+	const cancelled = await post({ intent: 'cancel' })
+	expect(cancelled.status).toBe(200)
+	expect(cancelled.data).toEqual({ ok: true, enabled: true })
+	expect(readRow()).toEqual(active)
+})
+
 test('login issues the session directly without 2fa and defers it to code verification once 2fa is enabled', async () => {
 	const { enable, login, verify } = await setupTwoFactor()
 	const directLogin = await login()

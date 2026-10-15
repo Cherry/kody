@@ -159,7 +159,9 @@ test('account passkeys API lists labels/dates, renames owned keys, and deletes w
 	expect(ownRename.status).toBe(200)
 	expect(ownRename.payload.ok).toBe(true)
 	expect(
-		ownRename.payload.passkeys.find((p) => p.id === 'passkey-user-1')?.name,
+		sqlite
+			.prepare(`SELECT name FROM passkeys WHERE id = 'passkey-user-1'`)
+			.get()?.name,
 	).toBe('Phone · Google')
 
 	const blankRename = await post({
@@ -184,9 +186,12 @@ test('account passkeys API lists labels/dates, renames owned keys, and deletes w
 	})
 	expect(ownDelete.status).toBe(200)
 	expect(ownDelete.payload.ok).toBe(true)
-	expect(ownDelete.payload.passkeys.map((p) => p.id)).toEqual([
-		'passkey-user-1b',
-	])
+	expect(ownDelete.payload).toEqual({ ok: true })
+	expect(
+		sqlite
+			.prepare(`SELECT id FROM passkeys WHERE user_id = 1 ORDER BY id`)
+			.all(),
+	).toEqual([{ id: 'passkey-user-1b' }])
 })
 
 test('registration options require authentication and exclude existing credentials', async () => {
