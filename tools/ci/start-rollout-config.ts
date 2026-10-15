@@ -133,6 +133,7 @@ export function buildStartRolloutConfig(input: {
 		delete selected[key]
 	const candidateName = `kody-start-${input.release}`
 	selected.name = candidateName
+	selected.vars = { ...vars, APP_COMMIT_SHA: input.release }
 	selected.workers_dev = false
 	selected.preview_urls = false
 	const router = structuredClone(input.routerBase)

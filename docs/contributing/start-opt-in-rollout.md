@@ -68,3 +68,32 @@ table before changing it. Removing only the rollout zone route restores the
 existing production custom domain immediately. Do not delete or replace the
 legacy worker, its custom domain, resources, migrations, secrets or background
 consumers.
+
+## Inactive worker deployment mode
+
+The existing production workflow accepts `prepare-start-opt-in` and
+`deploy-start-opt-in` on the migration branch. Both require the dispatch SHA to
+equal the current open PR 3561 head and require the latest Validate run for that
+exact source commit to pass. Neither mode runs the normal production deployment
+jobs.
+
+Preparation only produces a review artifact. Inactive deployment builds and
+verifies the same isolated release, rereads production bindings to reject
+resource drift, and refuses to overwrite any existing candidate or router
+worker. The exact names are `kody-start-<full-source-sha>` and
+`kody-start-router`.
+
+The deployment step obtains existing production secrets directly from GitHub.
+Every live secret name needs an explicit reviewed mapping and a nonempty trusted
+value. Cookie and credential encryption secrets are mandatory. Wrangler's
+`--secrets-file` supplies secrets with the initial deployment, avoiding a
+separate draft worker created by secret sync. The temporary file has mode 0600
+and is removed afterward, secret values are not included in artifacts or
+application build environment variables. The router gets only the shared cookie
+secret and a separate generated, masked rollout secret.
+
+If deployment partially succeeds, another run refuses to overwrite either
+existing worker. Review the partial result before deciding how to continue.
+Inactive deployment checks that workers.dev and preview URLs remain disabled. It
+does not activate the zone route or claim browser parity against the production
+data plane.

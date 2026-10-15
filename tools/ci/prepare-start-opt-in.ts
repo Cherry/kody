@@ -269,6 +269,14 @@ if (isExecutedDirectly(import.meta.url)) {
 			assetPaths: ['build-pending.js'],
 		})
 		await writeFile(`${directory}/production.json`, JSON.stringify(production))
+		await writeFile(
+			`${directory}/secret-names.json`,
+			JSON.stringify(
+				(settings.bindings as Array<RecordValue>)
+					.filter((binding) => binding.type === 'secret_text')
+					.map((binding) => binding.name),
+			),
+		)
 		await writeFile(`${directory}/people.json`, JSON.stringify(people))
 		await writeFile(
 			'packages/worker/wrangler-start.generated.json',

@@ -1,0 +1,356 @@
+import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { mapLiveProductionSettings } from './prepare-start-opt-in.ts'
+import { parseJsonc } from './resource-utils.ts'
+import { isExecutedDirectly, resolveLocalBinary } from '../node-runtime.ts'
+
+type Config = Record<string, unknown>
+export function assertInactiveConfig(config: Config, expectedName: string) {
+	if (
+		config.name !== expectedName ||
+		config.workers_dev !== false ||
+		config.preview_urls !== false
+	)
+		throw new Error('The exact inactive worker name is required')
+	for (const key of [
+		'env',
+		'routes',
+		'route',
+		'custom_domains',
+		'triggers',
+		'migrations',
+		'email',
+		'unsafe',
+	]) {
+		if (config[key] !== undefined)
+			throw new Error(`Inactive worker cannot declare ${key}`)
+	}
+	const queues = config.queues as Config | undefined
+	if (queues?.consumers !== undefined)
+		throw new Error('Inactive worker cannot consume queues')
+	const durable = config.durable_objects as
+		| { bindings?: Array<Config> }
+		| undefined
+	for (const binding of durable?.bindings ?? [])
+		if (
+			typeof binding.script_name !== 'string' ||
+			!binding.script_name ||
+			binding.script_name === expectedName
+		)
+			throw new Error('Durable object ownership must stay external')
+	for (const workflow of (config.workflows ?? []) as Array<Config>)
+		if (
+			typeof workflow.script_name !== 'string' ||
+			!workflow.script_name ||
+			workflow.script_name === expectedName
+		)
+			throw new Error('Workflow ownership must stay external')
+}
+
+/** Object and binding ordering cannot change the meaning of a settings snapshot. */
+function normalized(value: unknown): string {
+	const bindingSets = new Set([
+		'd1_databases',
+		'kv_namespaces',
+		'r2_buckets',
+		'services',
+		'workflows',
+		'vectorize',
+		'analytics_engine_datasets',
+		'ratelimits',
+		'worker_loaders',
+		'send_email',
+		'artifacts',
+		'durable_objects.bindings',
+		'queues.producers',
+		'compatibility_flags',
+	])
+	const normalize = (entry: unknown, location = ''): unknown => {
+		if (Array.isArray(entry)) {
+			const values = entry.map((child) => normalize(child, `${location}[]`))
+			return bindingSets.has(location)
+				? values.sort((a, b) =>
+						JSON.stringify(a).localeCompare(JSON.stringify(b)),
+					)
+				: values
+		}
+		if (entry && typeof entry === 'object')
+			return Object.fromEntries(
+				Object.entries(entry)
+					.filter(([, child]) => child !== undefined)
+					.sort(([a], [b]) => a.localeCompare(b))
+					.map(([key, child]) => [
+						key,
+						normalize(child, location ? `${location}.${key}` : key),
+					]),
+			)
+		return entry
+	}
+	return JSON.stringify(normalize(value))
+}
+
+/** Compare the entire snapshot, not a handpicked subset of live resource fields. */
+export function assertProductionSnapshot(
+	snapshot: Config,
+	fresh: Config,
+	snapshotSecretNames: Array<string>,
+	freshSecretNames: Array<string>,
+) {
+	if (normalized(snapshot) !== normalized(fresh))
+		throw new Error(
+			'Production configuration changed after the snapshot, prepare again',
+		)
+	if (
+		normalized([...snapshotSecretNames].sort()) !==
+		normalized([...freshSecretNames].sort())
+	)
+		throw new Error(
+			'Production secret names changed after the snapshot, prepare again',
+		)
+}
+
+/** Every copied source field must survive the build, except explicit build/deploy transforms. */
+export function assertSharedBindings(candidate: Config, production: Config) {
+	const transformed = new Set([
+		'$schema',
+		'name',
+		'main',
+		'assets',
+		'routes',
+		'route',
+		'custom_domains',
+		'triggers',
+		'migrations',
+		'email',
+		'dispatch_namespaces',
+		'tail_consumers',
+		'unsafe',
+		'workers_dev',
+		'preview_urls',
+	])
+	for (const [key, expectedValue] of Object.entries(production)) {
+		if (transformed.has(key)) continue
+		let expected = expectedValue
+		let actual = candidate[key]
+		if (key === 'vars') {
+			const expectedVars = { ...(expected as Config) }
+			const actualVars = { ...(actual as Config) }
+			// The candidate reports its own immutable release rather than legacy's commit.
+			delete expectedVars.APP_COMMIT_SHA
+			delete actualVars.APP_COMMIT_SHA
+			expected = expectedVars
+			actual = actualVars
+		}
+		if (key === 'queues') {
+			expected = { producers: (expected as Config).producers ?? [] }
+			actual = { producers: (actual as Config | undefined)?.producers ?? [] }
+		}
+		if (normalized({ [key]: actual }) !== normalized({ [key]: expected }))
+			throw new Error(`Shared ${key} configuration changed`)
+	}
+	if (
+		(candidate.vars as Config)?.APP_BASE_URL !== 'https://kody.codes' ||
+		(production.vars as Config)?.APP_BASE_URL !== 'https://kody.codes'
+	)
+		throw new Error('Production origin must remain unchanged')
+}
+
+const candidateSecretNames = [
+	'COOKIE_SECRET',
+	'SECRET_STORE_KEY',
+	'AI_GATEWAY_ID',
+	'SENTRY_DSN',
+	'CAPABILITY_REINDEX_SECRET',
+	'GITHUB_CLIENT_ID',
+	'GITHUB_CLIENT_SECRET',
+	'GOOGLE_CLIENT_ID',
+	'GOOGLE_CLIENT_SECRET',
+	'X_CLIENT_ID',
+	'X_CLIENT_SECRET',
+	'DISCORD_CLIENT_ID',
+	'DISCORD_CLIENT_SECRET',
+	'DISCORD_BOT_TOKEN',
+	'DISCORD_GUILD_ID',
+	'DISCORD_MEMBER_ROLE_ID',
+	'DISCORD_STANDARD_ROLE_ID',
+	'DISCORD_PRO_ROLE_ID',
+	'KIT_API_KEY',
+	'STRIPE_SECRET_KEY',
+	'STRIPE_WEBHOOK_SECRET',
+	'STATUS_INCIDENT_EVENT_SECRET',
+	'YOUTUBE_DATA_API_KEY',
+	'OIDC_SIGNING_PRIVATE_KEY_PEM',
+	'OIDC_SIGNING_KEY_ID',
+	'CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN',
+	'PACKAGE_APP_TICKET_KEYS',
+] as const
+
+export function collectCandidateSecrets(
+	liveNames: Array<string>,
+	environment: NodeJS.ProcessEnv,
+) {
+	const secrets: Record<string, string> = {}
+	const allowed = new Set<string>([
+		...candidateSecretNames,
+		'CLOUDFLARE_API_TOKEN',
+	])
+	for (const name of liveNames) {
+		if (!allowed.has(name))
+			throw new Error(`Missing reviewed secret mapping for ${name}`)
+		const value =
+			environment[
+				name === 'CLOUDFLARE_API_TOKEN' ? 'CLOUDFLARE_APP_API_TOKEN' : name
+			]
+		if (!value)
+			throw new Error(`Trusted production secret is unavailable: ${name}`)
+		secrets[name] = value
+	}
+	for (const name of ['COOKIE_SECRET', 'SECRET_STORE_KEY']) {
+		if (!environment[name])
+			throw new Error(`Trusted production secret is unavailable: ${name}`)
+		secrets[name] = environment[name]!
+	}
+	return secrets
+}
+
+async function cf(endpoint: string, allowMissing = false) {
+	const response = await fetch(
+		`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/${endpoint}`,
+		{
+			headers: { Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` },
+		},
+	)
+	const body = (await response.json()) as {
+		success?: boolean
+		result?: unknown
+		errors?: Array<{ code: number }>
+	}
+	if (
+		allowMissing &&
+		response.status === 404 &&
+		body.errors?.some((error) => error.code === 10007)
+	)
+		return null
+	if (!response.ok || body.success !== true)
+		throw new Error(`Cloudflare verification failed: ${response.status}`)
+	return body.result
+}
+
+async function deploy(
+	config: string,
+	name: string,
+	secrets: Record<string, string>,
+) {
+	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-secrets-'))
+	try {
+		const file = path.join(directory, 'secrets.json')
+		await writeFile(file, JSON.stringify(secrets), { mode: 0o600 })
+		// Do not expose application secrets as build-time environment variables.
+		const env = Object.fromEntries(
+			[
+				'PATH',
+				'HOME',
+				'CI',
+				'CLOUDFLARE_API_TOKEN',
+				'CLOUDFLARE_ACCOUNT_ID',
+			].flatMap((key) => (process.env[key] ? [[key, process.env[key]!]] : [])),
+		)
+		await new Promise<void>((resolve, reject) => {
+			const child = spawn(
+				resolveLocalBinary('wrangler'),
+				['deploy', '--config', config, '--name', name, '--secrets-file', file],
+				{ env, stdio: 'inherit' },
+			)
+			child.once('error', reject)
+			child.once('close', (code) =>
+				code === 0
+					? resolve()
+					: reject(new Error(`Inactive deployment failed: ${code}`)),
+			)
+		})
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+}
+
+if (isExecutedDirectly(import.meta.url)) {
+	const release = process.env.KODY_START_RELEASE ?? ''
+	if (!/^[a-f0-9]{40}$/.test(release))
+		throw new Error('Pinned release required')
+	if (
+		!/^[a-f0-9]{32}$/.test(process.env.CLOUDFLARE_ACCOUNT_ID ?? '') ||
+		!process.env.CLOUDFLARE_API_TOKEN
+	)
+		throw new Error('Cloudflare deployment credentials required')
+	const candidateName = `kody-start-${release}`
+	const routerName = 'kody-start-router'
+	const candidate = JSON.parse(
+		await readFile('dist/server/wrangler.json', 'utf8'),
+	) as Config
+	const router = JSON.parse(
+		await readFile('.tmp/start-opt-in/router.json', 'utf8'),
+	) as Config
+	assertInactiveConfig(candidate, candidateName)
+	assertInactiveConfig(router, routerName)
+	const liveNames = JSON.parse(
+		await readFile('.tmp/start-opt-in/secret-names.json', 'utf8'),
+	) as Array<string>
+	const candidateSecrets = collectCandidateSecrets(liveNames, process.env)
+	// Read the known production worker first. Permission failures must never mean absent.
+	const production = JSON.parse(
+		await readFile('.tmp/start-opt-in/production.json', 'utf8'),
+	) as Config
+	assertSharedBindings(candidate, production)
+	const liveSettings = (await cf(
+		'workers/scripts/kody-production/settings',
+	)) as Config
+	const base = parseJsonc<Config>(
+		await readFile('packages/worker/wrangler.jsonc', 'utf8'),
+	)
+	assertProductionSnapshot(
+		production,
+		mapLiveProductionSettings(base, liveSettings),
+		liveNames,
+		(liveSettings.bindings as Array<Config>)
+			.filter((binding) => binding.type === 'secret_text')
+			.map((binding) => String(binding.name)),
+	)
+	for (const name of [candidateName, routerName]) {
+		if ((await cf(`workers/scripts/${name}/settings`, true)) !== null)
+			throw new Error(`Refusing to overwrite existing worker ${name}`)
+	}
+	const rolloutSecret = randomBytes(32).toString('hex')
+	console.log(`::add-mask::${rolloutSecret}`)
+	if (rolloutSecret === candidateSecrets.COOKIE_SECRET)
+		throw new Error('Rollout secret must be distinct')
+	const routerConfig =
+		'packages/start-routing-worker/wrangler-start.generated.json'
+	await writeFile(routerConfig, JSON.stringify(router, null, '\t'))
+	await deploy('dist/server/wrangler.json', candidateName, candidateSecrets)
+	await deploy(routerConfig, routerName, {
+		COOKIE_SECRET: candidateSecrets.COOKIE_SECRET!,
+		START_ROLLOUT_SECRET: rolloutSecret,
+	})
+	for (const name of [candidateName, routerName]) {
+		const subdomain = (await cf(`workers/scripts/${name}/subdomain`)) as {
+			enabled?: boolean
+			previews_enabled?: boolean
+		}
+		if (subdomain.enabled !== false || subdomain.previews_enabled !== false)
+			throw new Error(`Worker ${name} unexpectedly exposes a public preview`)
+	}
+	await writeFile(
+		'.tmp/start-opt-in/deployed.json',
+		JSON.stringify(
+			{ release, candidateName, routerName, activated: false },
+			null,
+			'\t',
+		),
+	)
+	console.log(
+		'Deployed isolated workers without activating routes. Live production traffic is unchanged.',
+	)
+}
