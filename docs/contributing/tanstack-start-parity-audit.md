@@ -2,6 +2,36 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `325143fe6`
+
+Preview health returned HTTP 200 at deployed merge
+`b28a6da34f955b5992ffaffa8d065b92429d0ffc`, containing PR head `aa2d650b5` and
+main `d8ee11c66`. This verifies deployment identity and health, not visual
+parity. Local commits after that head are not deployed yet.
+
+Validate run `38692964774` passed Static, Workers, and MCP. Node failed because
+an invite-revoke assertion still expected a refreshed invite list. Commit
+`325143fe6` changes the response assertion to `{ ok: true }` and retains the
+separate database assertion proving the invite is revoked. That correction still
+needs CI. E2E was running at inspection.
+
+The consent form now passes typed input directly to its Start function, without
+an unused action URL or a FormData wrapper. Its existing consent token and
+server checks remain. All four Start TypeScript projects and targeted repository
+lint passed for that change.
+
+The next architectural gaps are post-write page reconstruction in system-email
+deletion, organization custom domains, and several admin settings operations.
+These remain incomplete until mutations return operation outcomes and Query
+reconciles the affected resource independently. A successful write must not be
+reported as failed because a subsequent whole-page read failed.
+
+A fresh browser visit to the private package fixture showed a signed-out
+not-found page. Logged-in verification has not been repeated on this deployment;
+the browser sign-in attempt was blocked by approval review and awaits explicit
+authorization for the documented preview test account. This is not evidence that
+the fixture was deleted or that authenticated package navigation failed.
+
 Reviewed source: `ca68f1116bbf1ee6c05084789792e0ce2050e751`. Main included in
 that revision: `104d59e3cefa6aca891409e7e8eab51677f2792c`.
 
