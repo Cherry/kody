@@ -12,7 +12,11 @@ import {
 	type RequestOrgBinding,
 	type RequestSource,
 } from '#worker/request-context/request-context.ts'
-import { planEnablementRuns } from '#worker/enablements/run-gate.ts'
+import { buildNoEnablementSkipError } from '#worker/enablements/enablement-agent-hints.ts'
+import {
+	planEnablementRuns,
+	type EnablementSkip,
+} from '#worker/enablements/run-gate.ts'
 import {
 	createMcpCallerContext,
 	createMcpCallerContextWire,
@@ -26,7 +30,9 @@ import {
 	abandonRunRecord,
 	claimRunRecord,
 	finishRunRecord,
+	getJobRunObservability,
 	getRunRecord,
+	upsertJobRunObservability,
 } from '#worker/run-records/service.ts'
 import { type RunRecordHandle } from '#worker/run-records/types.ts'
 import { hydrateJobViewFromRunLog } from './job-run-observability-hydrate.ts'
@@ -1325,7 +1331,10 @@ async function planScheduledJobRuns(input: {
 	env: Env
 	job: JobRecord
 	idempotencyKey: string
-}): Promise<Array<{ source: RequestSource; idempotencyKey: string }>> {
+}): Promise<{
+	runs: Array<{ source: RequestSource; idempotencyKey: string }>
+	skipped: Array<EnablementSkip>
+}> {
 	const plan = await planEnablementRuns({
 		env: input.env,
 		orgId: input.job.userId,
@@ -1339,10 +1348,28 @@ async function planScheduledJobRuns(input: {
 			skipped: plan.skipped,
 		})
 	}
-	return plan.runs.map((enablement) => ({
-		source: { kind: 'schedule', jobId: input.job.id, enablement },
-		idempotencyKey: `${input.idempotencyKey}:enablement:${enablement.id}`,
-	}))
+	return {
+		runs: plan.runs.map((enablement) => ({
+			source: { kind: 'schedule', jobId: input.job.id, enablement },
+			idempotencyKey: `${input.idempotencyKey}:enablement:${enablement.id}`,
+		})),
+		skipped: plan.skipped,
+	}
+}
+
+function noEnablementSkipError(input: {
+	jobId: string
+	jobName: string
+	skipped: Array<EnablementSkip>
+}): string {
+	const pausedOnly =
+		input.skipped.length > 0 &&
+		input.skipped.every((skip) => skip.reason === 'paused')
+	return buildNoEnablementSkipError({
+		packageId: requirePackageIdFromJobId(input.jobId),
+		jobName: input.jobName,
+		reason: pausedOnly ? 'paused' : 'missing',
+	})
 }
 
 async function executeClaimedScheduledJob(input: {
@@ -1351,8 +1378,11 @@ async function executeClaimedScheduledJob(input: {
 	claimToken: string
 	scheduledFor: string
 	waitUntil?: (promise: Promise<unknown>) => void
-}): Promise<JobExecutionOutcome | null> {
-	const runs = await planScheduledJobRuns({
+}): Promise<{
+	outcome: JobExecutionOutcome | null
+	skipped: Array<EnablementSkip>
+}> {
+	const plan = await planScheduledJobRuns({
 		env: input.env,
 		job: input.row.record,
 		idempotencyKey: buildScheduledJobIdempotencyKey({
@@ -1362,9 +1392,11 @@ async function executeClaimedScheduledJob(input: {
 	}).catch((error: unknown) => {
 		throw markPreExecutionTransientError(error)
 	})
-	if (runs.length === 0) return null
+	if (plan.runs.length === 0) {
+		return { outcome: null, skipped: plan.skipped }
+	}
 	let selected: JobExecutionOutcome | null = null
-	for (const [index, run] of runs.entries()) {
+	for (const [index, run] of plan.runs.entries()) {
 		// Enablement runs share one claim, and several background-budget runs
 		// can outlast a single lease. Stop once another runner owns the slot;
 		// finalization is fenced on the same token.
@@ -1381,13 +1413,18 @@ async function executeClaimedScheduledJob(input: {
 		if (!selected || selected.execution.ok) selected = outcome
 	}
 	if (!selected) throw new Error('Expected at least one scheduled job run.')
-	return selected
+	return { outcome: selected, skipped: [] }
 }
 
 /**
- * Nothing is on for this slot, so no run is recorded. A recurring job skips
- * to its next slot. A once job keeps its slot and retries with backoff, so it
- * still fires after its enabler regains access.
+ * Nothing is on for this slot, so no package run is started. Surface the skip
+ * on job observability (last_run_error / error_count) so jobGet does not look
+ * armed and healthy.
+ *
+ * Order: renew the claim (fence superseded leases), record observability keyed
+ * by the claimed slot, then settle. When RunLog is configured and the upsert
+ * fails, retry shortly instead of advancing a recurring slot with a status-only
+ * D1 row. Re-entry for the same slot does not increment counters again.
  */
 async function deferClaimedJobWithoutEnablement(input: {
 	env: Env
@@ -1395,31 +1432,119 @@ async function deferClaimedJobWithoutEnablement(input: {
 	row: JobRow
 	claimToken: string
 	now: Date
-}) {
+	skipped: Array<EnablementSkip>
+}): Promise<{
+	settled: boolean
+	nextRunAt: string
+	error: string
+}> {
 	const { row } = input
 	const store = jobsData(input.env)
 	const scheduledFor = row.claimed_scheduled_for
+	const nowIso = input.now.toISOString()
+	const slotAt = scheduledFor ?? nowIso
+	const error = noEnablementSkipError({
+		jobId: row.id,
+		jobName: row.record.name,
+		skipped: input.skipped,
+	})
+	const stillHeld = await store.renewClaimedJob({
+		userId: input.userId,
+		jobId: row.id,
+		claimToken: input.claimToken,
+		// Use wall clock: input.now is from runDueJobsForUser start and can lag.
+		nowMs: Date.now(),
+	})
+	if (!stillHeld) {
+		logJobSchedulerEvent({
+			event: 'claim_lost_before_skip_transition',
+			userId: input.userId,
+			jobId: row.id,
+			scheduleType: row.record.schedule.type,
+			reason: 'fenced_claim_superseded',
+		})
+		return {
+			settled: false,
+			nextRunAt: row.record.nextRunAt,
+			error,
+		}
+	}
+	const existing = await getJobRunObservability({
+		env: input.env,
+		userId: input.userId,
+		jobId: row.id,
+	})
+	const alreadyRecordedForSlot =
+		existing?.lastRunAt === slotAt &&
+		existing.lastRunStatus === 'error' &&
+		existing.lastRunError === error
+	const recorded = alreadyRecordedForSlot
+		? existing
+		: await upsertJobRunObservability({
+				env: input.env,
+				userId: input.userId,
+				outcome: {
+					jobId: row.id,
+					status: 'error',
+					ranAt: slotAt,
+					error,
+					durationMs: 0,
+				},
+			})
+	const runLogConfigured = Boolean((input.env as Partial<Env>).RUN_LOG)
+	if (runLogConfigured && !recorded) {
+		const nextRunAt = computeJobRetryAt({
+			now: input.now,
+			retryCount: row.retry_count,
+		})
+		const settled = await store.retryClaimedJob({
+			userId: input.userId,
+			jobId: row.id,
+			claimToken: input.claimToken,
+			nextRunAt,
+		})
+		logJobSchedulerEvent({
+			event: settled
+				? 'scheduled_job_skip_observability_failed'
+				: 'claim_lost_before_skip_transition',
+			userId: input.userId,
+			jobId: row.id,
+			scheduleType: row.record.schedule.type,
+			reason: settled
+				? 'observability_upsert_failed'
+				: 'fenced_claim_superseded',
+			errorMessage: settled ? error : undefined,
+		})
+		return { settled, nextRunAt, error }
+	}
+	const nextRunAt =
+		row.record.schedule.type === 'once' || !scheduledFor
+			? computeJobRetryAt({
+					now: input.now,
+					retryCount: row.retry_count,
+				})
+			: computeNextRunAt({
+					schedule: row.record.schedule,
+					timezone: row.record.timezone,
+					from: input.now,
+				})
 	const settled =
 		row.record.schedule.type === 'once' || !scheduledFor
 			? await store.retryClaimedJob({
 					userId: input.userId,
 					jobId: row.id,
 					claimToken: input.claimToken,
-					nextRunAt: computeJobRetryAt({
-						now: input.now,
-						retryCount: row.retry_count,
-					}),
+					nextRunAt,
 				})
 			: await store.finalizeClaimedJob({
 					userId: input.userId,
 					job: {
 						...row.record,
-						updatedAt: input.now.toISOString(),
-						nextRunAt: computeNextRunAt({
-							schedule: row.record.schedule,
-							timezone: row.record.timezone,
-							from: input.now,
-						}),
+						updatedAt: nowIso,
+						lastRunAt: slotAt,
+						lastRunStatus: 'error',
+						lastRunError: error,
+						nextRunAt,
 					},
 					claimToken: input.claimToken,
 					scheduledFor,
@@ -1432,7 +1557,9 @@ async function deferClaimedJobWithoutEnablement(input: {
 		jobId: row.id,
 		scheduleType: row.record.schedule.type,
 		reason: settled ? 'no_enablement_on' : 'fenced_claim_superseded',
+		errorMessage: settled ? error : undefined,
 	})
+	return { settled, nextRunAt, error }
 }
 
 async function executeClaimedScheduledJobRun(input: {
@@ -1567,28 +1694,41 @@ export async function runDueJobsForUser(input: {
 				}
 				claimedJobCount += 1
 				try {
-					const outcome = await executeClaimedScheduledJob({
+					const claimed = await executeClaimedScheduledJob({
 						env: input.env,
 						row,
 						claimToken,
 						scheduledFor: row.claimed_scheduled_for,
 						waitUntil: input.waitUntil,
 					})
-					if (!outcome) {
-						await deferClaimedJobWithoutEnablement({
+					const scheduledOutcome = claimed.outcome
+					if (!scheduledOutcome) {
+						const skipped = await deferClaimedJobWithoutEnablement({
 							env: input.env,
 							userId: input.userId,
 							row,
 							claimToken,
 							now,
+							skipped: claimed.skipped,
 						})
+						if (skipped.settled) {
+							errorCount += 1
+							jobOutcomes.push({
+								jobId: row.id,
+								scheduleType: row.record.schedule.type,
+								outcome: 'failure',
+								nextRunAt: skipped.nextRunAt,
+								deleted: false,
+								error: skipped.error,
+							})
+						}
 						continue
 					}
 					const result = await processDueJobs({
 						jobs: [row.record],
 						now,
 						async executeJob() {
-							return outcome
+							return scheduledOutcome
 						},
 					})
 					const updated = result.saveJobs[0]
