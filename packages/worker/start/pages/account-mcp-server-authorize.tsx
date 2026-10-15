@@ -75,14 +75,9 @@ export function AccountMcpServerAuthorizePage({
 }) {
 	const mutation = useMutation({
 		mutationKey: ['mcpServerConsent', href],
-		mutationFn: async ({ body }: { body: FormData; path: string }) =>
-			continueMcpAuthorization({
-				data: {
-					orgSlug: payload.orgSlug,
-					serverId: payload.serverId,
-					token: String(body.get('_csrf') ?? ''),
-				},
-			}),
+		mutationFn: (
+			data: Parameters<typeof continueMcpAuthorization>[0]['data'],
+		) => continueMcpAuthorization({ data }),
 		onSuccess: (result) => {
 			if (result.ok) navigateWithoutReferrer(result.authorizationUrl)
 		},
@@ -100,10 +95,11 @@ export function AccountMcpServerAuthorizePage({
 	const submitting = mutation.isPending
 	function submitContinue(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
-		if (submitting) return
+		if (submitting || !data.pending) return
 		mutation.mutate({
-			body: new FormData(event.currentTarget),
-			path: event.currentTarget.action,
+			orgSlug: data.orgSlug,
+			serverId: data.serverId,
+			token: data.pending.csrfToken,
 		})
 	}
 	const { pending } = data
@@ -158,14 +154,7 @@ export function AccountMcpServerAuthorizePage({
 						]}
 					/>
 					<p css={noteCss}>{mode.detail}</p>
-					<form
-						method="post"
-
-						data-router-skip
-						css={accountActionsCss}
-						onSubmit={submitContinue}
-					>
-						<input type="hidden" name="_csrf" value={pending.csrfToken} />
+					<form css={accountActionsCss} onSubmit={submitContinue}>
 						<button
 							type="submit"
 							disabled={submitting}
