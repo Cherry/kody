@@ -50,7 +50,9 @@ const secretMutationScope = resourceInput
 	.omit({ search: true })
 	.extend({ refresh: secretRefreshSchema })
 export const saveSecret = createServerFn({ method: 'POST' })
-	.validator(secretMutationScope.extend({ fields: saveSecretSchema }))
+	.inputValidator(
+		resourceInput.omit({ search: true }).extend({ fields: saveSecretSchema }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
@@ -71,7 +73,9 @@ export const saveSecret = createServerFn({ method: 'POST' })
 	})
 
 export const deleteSecret = createServerFn({ method: 'POST' })
-	.validator(secretMutationScope.extend({ fields: deleteSecretSchema }))
+	.inputValidator(
+		resourceInput.omit({ search: true }).extend({ fields: deleteSecretSchema }),
+	)
 	.handler(async ({ data }) => {
 		const [
 			{ withWebsiteMutation },
@@ -224,11 +228,6 @@ export const deleteAccountValue = createServerFn({ method: 'POST' })
 export const deleteAccountMemory = createServerFn({ method: 'POST' })
 	.validator(
 		resourceInput.omit({ search: true }).extend({
-			refresh: z.object({
-				query: z.string(),
-				includeDeleted: z.boolean(),
-				selectedMemoryId: z.string().nullable(),
-			}),
 			memoryId: z.string().trim().min(1),
 			force: z.boolean(),
 		}),
@@ -251,7 +250,6 @@ export const deleteAccountMemory = createServerFn({ method: 'POST' })
 				return requireOperationResult(
 					await deleteAccountMemoryRecord({
 						...context,
-						refresh: data.refresh,
 						memoryId: data.memoryId,
 						force: data.force,
 					}),
@@ -286,18 +284,7 @@ export const setJobKillSwitch = createServerFn({ method: 'POST' })
 						killSwitchEnabled: data.killSwitchEnabled,
 					}),
 				)
-				const { readJsonRecord } = await import('./json-value.ts')
-				return {
-					...result,
-					selectedJob: result.selectedJob
-						? {
-								...result.selectedJob,
-								params: result.selectedJob.params
-									? readJsonRecord(result.selectedJob.params)
-									: null,
-							}
-						: null,
-				}
+				return result
 			},
 		)
 	})
@@ -324,18 +311,7 @@ export const runJobNow = createServerFn({ method: 'POST' })
 				const result = requireOperationResult(
 					await runAccountJobNow({ ...context, id: data.id }),
 				)
-				const { readJsonRecord } = await import('./json-value.ts')
-				return {
-					...result,
-					selectedJob: result.selectedJob
-						? {
-								...result.selectedJob,
-								params: result.selectedJob.params
-									? readJsonRecord(result.selectedJob.params)
-									: null,
-							}
-						: null,
-				}
+				return result
 			},
 		)
 	})

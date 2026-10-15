@@ -129,6 +129,10 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		outcome: 'cancelled',
 		run: { ...listedWorkflow, status: 'cancelled' },
 	})
+	mockModule.listWorkflowRunsForUser.mockClear()
+	mockModule.listWorkflowRunsForUser.mockRejectedValue(
+		new Error('Page unavailable'),
+	)
 	const cancelResponse = await handler.execute({
 		request: new Request('https://example.com/account/workflows.json', {
 			method: 'POST',
@@ -137,6 +141,9 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 		}),
 	})
 	expect(cancelResponse.status).toBe(200)
+	expect(mockModule.listWorkflowRunsForUser).not.toHaveBeenCalled()
+	expect(cancelResponse.data).not.toHaveProperty('workflows')
+	resetList()
 	expect(mockModule.cancelWorkflowRunForUser).toHaveBeenCalledWith({
 		env: expect.anything(),
 		userId: ownerIdFromStored('stable-user-1'),

@@ -1,4 +1,3 @@
-import { loadAccountProfileData } from '#app/account-profile-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { type ProfileVisibility } from '#universal/loader-data.ts'
 import {
@@ -101,5 +100,5 @@ export async function saveAccountProfile({
 		})
 	}
 
-	return await loadAccountProfileData(user, env)
+	return { ok: true as const }
 }

@@ -11,25 +11,19 @@ import {
 	resendEmailDestinationVerification,
 } from '#worker/email/destination-verification.ts'
 import {
-	buildEmailDestinationsLoaderData,
 	EmailDestinationError,
-	listEmailNotificationDestinations,
-	removeEmailNotificationDestination,
-	setDefaultEmailNotificationDestination,
+	deleteEmailNotificationDestination,
+	changeDefaultEmailNotificationDestination,
 } from '#worker/email/destinations.ts'
 
 export { emailDestinationRateLimitConfig }
-
-const destinationListPayload = buildEmailDestinationsLoaderData
 
 type DestinationContext = {
 	request: Request
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 }
-type DestinationPayload = ReturnType<
-	typeof buildEmailDestinationsLoaderData
-> & { message: string }
+type DestinationPayload = { ok: true; message: string }
 async function runDestinationOperation(
 	{ request, env, user }: DestinationContext,
 	action: 'add' | 'resend' | 'setDefault' | 'remove',
@@ -129,12 +123,6 @@ export async function addAccountEmailDestination(
 			email,
 			requestUrl: new URL(request.url),
 		})
-		const destinations = await listEmailNotificationDestinations({
-			db: env.APP_DB,
-			dbUserId: user.userId,
-			accountEmail: user.email,
-			accountEmailVerified: user.emailVerified,
-		})
 		void logAuditEvent({
 			db: auditDatabaseFromEnv(env),
 			category: 'account',
@@ -146,7 +134,7 @@ export async function addAccountEmailDestination(
 			reason: `add=${result.destination.email}`,
 		})
 		return {
-			...destinationListPayload(destinations),
+			ok: true,
 			message: result.created
 				? 'Verification email sent. Open the link to start using this address.'
 				: 'Verification email sent again. Open the latest link to start using this address.',
@@ -167,12 +155,6 @@ export async function resendAccountEmailDestination(
 			destinationId,
 			requestUrl: new URL(request.url),
 		})
-		const destinations = await listEmailNotificationDestinations({
-			db: env.APP_DB,
-			dbUserId: user.userId,
-			accountEmail: user.email,
-			accountEmailVerified: user.emailVerified,
-		})
 		void logAuditEvent({
 			db: auditDatabaseFromEnv(env),
 			category: 'account',
@@ -184,7 +166,7 @@ export async function resendAccountEmailDestination(
 			reason: `resend=${destination.email}`,
 		})
 		return {
-			...destinationListPayload(destinations),
+			ok: true,
 			message: 'Verification email sent again.',
 		}
 	})
@@ -197,7 +179,7 @@ export async function setDefaultAccountEmailDestination(
 	const destinationId = input.destinationId.trim()
 	const requestIp = getRequestIp(request) ?? undefined
 	return runDestinationOperation(input, 'setDefault', async () => {
-		const destinations = await setDefaultEmailNotificationDestination({
+		await changeDefaultEmailNotificationDestination({
 			db: env.APP_DB,
 			dbUserId: user.userId,
 			destinationId,
@@ -213,7 +195,7 @@ export async function setDefaultAccountEmailDestination(
 			reason: `set_default=${destinationId}`,
 		})
 		return {
-			...destinationListPayload(destinations),
+			ok: true,
 			message: 'Default email destination updated.',
 		}
 	})
@@ -226,7 +208,7 @@ export async function removeAccountEmailDestination(
 	const destinationId = input.destinationId.trim()
 	const requestIp = getRequestIp(request) ?? undefined
 	return runDestinationOperation(input, 'remove', async () => {
-		const destinations = await removeEmailNotificationDestination({
+		await deleteEmailNotificationDestination({
 			db: env.APP_DB,
 			dbUserId: user.userId,
 			destinationId,
@@ -242,7 +224,7 @@ export async function removeAccountEmailDestination(
 			reason: `remove=${destinationId}`,
 		})
 		return {
-			...destinationListPayload(destinations),
+			ok: true,
 			message: 'Email destination removed.',
 		}
 	})

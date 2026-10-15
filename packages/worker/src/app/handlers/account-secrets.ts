@@ -7,7 +7,7 @@ import {
 import {
 	getSecretContextForAccountSecret,
 	listAccountSecrets,
-	loadAccountSecretsSelection,
+	type loadAccountSecretsSelection,
 	resolveApprovalRequest,
 	toPackageOptions,
 } from '#app/account-secrets-data.ts'
@@ -40,7 +40,6 @@ import {
 	setSecretAllowedPackages,
 } from '#mcp/secrets/service.ts'
 import { type SecretScope } from '#mcp/secrets/types.ts'
-import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
 import {
 	credentialHostsSchema,
 	credentialProviderSchema,
@@ -886,13 +885,11 @@ async function handleApprovalAction(input: {
 					)
 				}
 			}
-			const payload = await loadAccountSecretsSelection({
-				...input.refresh,
-				env: input.env,
-				user: input.user,
-				selectedSecretId: null,
+			return operationResult({
+				ok: true,
+				action: input.action,
+				approvalKind: approval.kind,
 			})
-			return operationResult(payload)
 		}
 
 		if (approval.kind === 'package') {
@@ -942,13 +939,11 @@ async function handleApprovalAction(input: {
 					storageContext: approval.storageContext,
 				})
 			}
-			const payload = await loadAccountSecretsSelection({
-				...input.refresh,
-				env: input.env,
-				user: input.user,
-				selectedSecretId: input.refresh.selectedSecretId,
+			return operationResult({
+				ok: true,
+				action: input.action,
+				approvalKind: approval.kind,
 			})
-			return operationResult(payload)
 		}
 
 		if (approval.kind === 'host') {
@@ -996,13 +991,11 @@ async function handleApprovalAction(input: {
 				})
 			}
 
-			const payload = await loadAccountSecretsSelection({
-				...input.refresh,
-				env: input.env,
-				user: input.user,
-				selectedSecretId: input.refresh.selectedSecretId,
+			return operationResult({
+				ok: true,
+				action: input.action,
+				approvalKind: approval.kind,
 			})
-			return operationResult(payload)
 		}
 
 		if (approval.kind === 'host_bulk') {
@@ -1061,13 +1054,11 @@ async function handleApprovalAction(input: {
 					)
 				}
 			}
-			const payload = await loadAccountSecretsSelection({
-				...input.refresh,
-				env: input.env,
-				user: input.user,
-				selectedSecretId: input.refresh.selectedSecretId,
+			return operationResult({
+				ok: true,
+				action: input.action,
+				approvalKind: approval.kind,
 			})
-			return operationResult(payload)
 		}
 
 		const _exhaustive: never = approval
@@ -1088,7 +1079,6 @@ async function handleApprovalAction(input: {
 
 export async function saveAccountSecret(input: {
 	request: Request
-	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	fields: SaveSecretInput
@@ -1453,85 +1443,35 @@ export async function saveAccountSecret(input: {
 		}
 	}
 
-	function withSaveWarnings<T extends AccountSecretsLoaderData>(payload: T) {
-		return {
-			...payload,
-			...(providerLinkError ? { providerLinkError } : {}),
-			...(renameCleanupError ? { renameCleanupError } : {}),
-		}
+	const selectedSecret = {
+		id: nextId,
+		name,
+		scope,
+		description,
+		packageId: packageId ?? null,
+		packageTitle:
+			packageId == null
+				? null
+				: (packageOptions.find((option) => option.id === packageId)?.title ??
+					null),
+		allowedHosts,
+		allowedPackages,
+		createdAt: saved.createdAt,
+		updatedAt: saved.updatedAt,
+		expiresAt: saved.expiresAt,
+		ttlMs: saved.ttlMs,
+		value,
 	}
-
-	try {
-		const payload = await loadAccountSecretsSelection({
-			...input.refresh,
-			env: input.env,
-			user: input.user,
-			packageOptions,
-			savedPackages,
-			selectedSecretId: nextId,
-		})
-		return operationResult(withSaveWarnings(payload))
-	} catch {
-		// Write already succeeded. Do not report ok:false — a create retry with
-		// currentId null would 409 on the same name.
-		const selectedSecret = {
-			id: nextId,
-			name,
-			scope,
-			description,
-			packageId: packageId ?? null,
-			packageTitle:
-				packageId == null
-					? null
-					: (packageOptions.find((option) => option.id === packageId)?.title ??
-						null),
-			allowedHosts,
-			allowedPackages,
-			createdAt: saved.createdAt,
-			updatedAt: saved.updatedAt,
-			expiresAt: saved.expiresAt,
-			ttlMs: saved.ttlMs,
-			value,
-		}
-		const fallback: AccountSecretsLoaderData = {
-			ok: true,
-			email: input.user.email,
-			packageOptions,
-			packages: savedPackages.map((entry) => ({
-				id: entry.id,
-				kodyId: entry.kodyId,
-				name: entry.name,
-			})),
-			secrets: [
-				...secrets.filter(
-					(secret) => secret.id !== currentId && secret.id !== nextId,
-				),
-				{
-					id: selectedSecret.id,
-					name: selectedSecret.name,
-					scope: selectedSecret.scope,
-					description: selectedSecret.description,
-					packageId: selectedSecret.packageId,
-					packageTitle: selectedSecret.packageTitle,
-					allowedHosts: selectedSecret.allowedHosts,
-					allowedPackages: selectedSecret.allowedPackages,
-					createdAt: selectedSecret.createdAt,
-					updatedAt: selectedSecret.updatedAt,
-					expiresAt: selectedSecret.expiresAt,
-					ttlMs: selectedSecret.ttlMs,
-				},
-			],
-			selectedSecret,
-			approval: null,
-			approvalError: null,
-		}
-		return operationResult(withSaveWarnings(fallback))
-	}
+	return operationResult({
+		ok: true,
+		selectedSecret,
+		...(providerLinkError ? { providerLinkError } : {}),
+		...(renameCleanupError ? { renameCleanupError } : {}),
+	})
 }
 
 export async function deleteAccountSecret(input: {
 	request: Request
-	refresh: SecretRefresh
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 	fields: { currentId: string }
@@ -1560,16 +1500,7 @@ export async function deleteAccountSecret(input: {
 		return operationResult({ ok: false, error: 'Secret not found.' }, 404)
 	}
 
-	const payload = await loadAccountSecretsSelection({
-		...input.refresh,
-		env: input.env,
-		user: input.user,
-		selectedSecretId: null,
-	})
-	return operationResult({
-		...payload,
-		deleted: true,
-	})
+	return operationResult({ ok: true, deleted: true, secretId: currentId })
 }
 
 function readOptionalExpiresAt(body: object) {

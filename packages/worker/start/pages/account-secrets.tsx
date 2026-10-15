@@ -1,5 +1,4 @@
 /** @jsxImportSource @emotion/react */
-import { type SaveSecretInput } from '#universal/secret-mutations.ts'
 import { connectSecretsInput } from '../connect-input.ts'
 import { type ListDetailSelection } from '#client/list-detail-route.ts'
 import {
@@ -24,7 +23,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import { secretMutationOptions } from '../secret-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -126,46 +126,43 @@ export function AccountSecretsPage({
 	const [showSecretValue, setShowSecretValue] = useState(false)
 	const queryClient = useQueryClient()
 	const { actorKey, orgSlug } = useMatchedPageScope()
-	const secretsMutation = useMutation({
-		mutationKey: ['secrets', actorKey, orgSlug],
-		mutationFn: async (input: {
-			search: string
-			orgSlug: string | null
-			actorKey: string | null
-			body:
-				| ({ action: 'save' } & SaveSecretInput)
-				| { action: 'delete'; currentId: string }
-				| { action: 'approve' | 'reject' }
-		}) => {
-			const scope = {
-				orgSlug: input.orgSlug ?? undefined,
-				refresh: connectSecretsInput(input.search),
-			}
-			switch (input.body.action) {
-				case 'approve':
-					return approveSecretAccess({ data: scope })
-				case 'reject':
-					return rejectSecretAccess({ data: scope })
-				case 'save': {
-					const { action: _action, ...fields } = input.body
-					return saveSecret({ data: { ...scope, fields } })
-				}
-				case 'delete':
-					return deleteSecret({
-						data: { ...scope, fields: { currentId: input.body.currentId } },
-					})
-			}
-		},
-		onSuccess: (_result, input) =>
-			invalidatePageResources(
-				queryClient,
-				input.actorKey,
-				mutationResources,
-				'active',
-				{ orgSlug: input.orgSlug },
-			),
-		onError: (error) => toast.error(error.message),
-	})
+	const capture = useSubmitterScope()
+	const save = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			saveSecret,
+		),
+	)
+	const remove = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			deleteSecret,
+		),
+	)
+	const approve = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			approveSecretAccess,
+		),
+	)
+	const reject = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			rejectSecretAccess,
+		),
+	)
 	const router = useRouter()
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const navigate = (href: string) =>
@@ -278,6 +275,7 @@ export function AccountSecretsPage({
 		setSubmittingApprovalAction(action)
 		setMessage(null)
 
+		const isCurrent = capture()
 		try {
 			const currentUrl = new URL(getCurrentHref(), 'http://localhost')
 			const selection = secretsRoute.getSelection(currentUrl.toString())
@@ -286,20 +284,25 @@ export function AccountSecretsPage({
 			if (selection.selectedId) {
 				requestUrl.searchParams.set('selected', selection.selectedId)
 			}
-			const payload = await secretsMutation.mutateAsync({
-				search: requestUrl.search,
-				actorKey,
-				orgSlug,
-				body: { action },
-			})
-			if (router.state.location.href !== currentHref) return
+			const input = {
+				orgSlug: orgSlug ?? undefined,
+				refresh: connectSecretsInput(requestUrl.search),
+			}
+			const outcome =
+				action === 'approve'
+					? await approve.mutateAsync(input)
+					: await reject.mutateAsync(input)
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 			const isPackageApproval = Boolean(approval.requestedPackageId)
-			applyPayload(
-				payload,
-				selection,
+			setSubmittingApprovalAction(null)
+			setMessage(
 				isPackageApproval
 					? null
-					: action === 'approve'
+					: outcome.action === 'approve'
 						? 'Approved requested host.'
 						: 'Rejected host approval request.',
 			)
@@ -333,10 +336,22 @@ export function AccountSecretsPage({
 				navigate(`${nextUrl.pathname}${nextUrl.search}`)
 			}
 		} catch (error) {
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 			setSubmittingApprovalAction(null)
 			setMessage(
 				error instanceof Error ? error.message : 'Unable to process approval.',
 			)
+		} finally {
+			if (isCurrent()) {
+				save.reset()
+				remove.reset()
+				approve.reset()
+				reject.reset()
+			}
 		}
 	}
 
@@ -350,6 +365,7 @@ export function AccountSecretsPage({
 		setSaveState('saving')
 		setMessage(null)
 
+		const isCurrent = capture()
 		try {
 			const allowedHosts = normalizeAllowedHosts(
 				collectRepeatedTextRows(form, 'allowed-hosts'),
@@ -360,12 +376,9 @@ export function AccountSecretsPage({
 							left.localeCompare(right),
 						)
 					: []
-			await secretsMutation.mutateAsync({
-				search: '',
-				actorKey,
-				orgSlug,
-				body: {
-					action: 'save',
+			const payload = await save.mutateAsync({
+				orgSlug: orgSlug ?? undefined,
+				fields: {
 					currentId: submittedEditorState.currentId,
 					name: submittedEditorState.name,
 					scope: submittedEditorState.scope,
@@ -380,20 +393,22 @@ export function AccountSecretsPage({
 					allowedPackages,
 				},
 			})
-			if (router.state.location.href !== currentHref) return
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 
 			const warning = readAccountSecretsSaveWarning(payload)
 			if (warning) toast.error(warning)
 			const wasCreating = !submittedEditorState.currentId
-			const nextSelection: ListDetailSelection = {
-				selectedId: payload.selectedSecret?.id ?? null,
-				isCreating: false,
-			}
-			applyPayload(
-				payload,
-				nextSelection,
-				submittedEditorState.currentId ? 'Saved secret.' : 'Created secret.',
-			)
+			const savedEditor = createEditorStateFromSecret(payload.selectedSecret)
+			setEditorState(savedEditor)
+			setSavedEditorState(savedEditor)
+			setShowSecretValue(false)
+			setDeleteArmed(false)
+			setSaveState('idle')
+			setMessage(warning ?? (wasCreating ? 'Created secret.' : 'Saved secret.'))
 
 			if (payload.selectedSecret) {
 				navigate(
@@ -404,10 +419,22 @@ export function AccountSecretsPage({
 				)
 			}
 		} catch (error) {
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 			setSaveState('idle')
 			setMessage(
 				error instanceof Error ? error.message : 'Unable to save secret.',
 			)
+		} finally {
+			if (isCurrent()) {
+				save.reset()
+				remove.reset()
+				approve.reset()
+				reject.reset()
+			}
 		}
 	}
 
@@ -417,24 +444,38 @@ export function AccountSecretsPage({
 		setSaveState('deleting')
 		setMessage(null)
 
+		const isCurrent = capture()
 		try {
-			await secretsMutation.mutateAsync({
-				search: '',
-				actorKey,
-				orgSlug,
-				body: {
-					action: 'delete',
+			await remove.mutateAsync({
+				orgSlug: orgSlug ?? undefined,
+				fields: {
 					currentId: editorState.currentId,
 				},
 			})
-			if (router.state.location.href !== currentHref) return
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 
 			navigate(buildBaseSecretsHref(getCurrentSearch()))
 		} catch (error) {
+			if (!isCurrent()) return
+			save.reset()
+			remove.reset()
+			approve.reset()
+			reject.reset()
 			setSaveState('idle')
 			setMessage(
 				error instanceof Error ? error.message : 'Unable to delete secret.',
 			)
+		} finally {
+			if (isCurrent()) {
+				save.reset()
+				remove.reset()
+				approve.reset()
+				reject.reset()
+			}
 		}
 	}
 

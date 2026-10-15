@@ -357,3 +357,30 @@ function createExportClient(
 			params: {},
 		} as never)
 }
+
+test('accepted memory deletion does not depend on listing memories', async () => {
+	const request = createClient(
+		testAccountMemoriesApiHandler,
+		'/account/memories.json',
+	)
+	const original = mockModule.listMemoriesByUserId.getMockImplementation()
+	mockModule.listMemoriesByUserId.mockRejectedValue(
+		new Error('Page unavailable'),
+	)
+	mockModule.listMemoriesByUserId.mockClear()
+	mockModule.deleteMemory.mockResolvedValueOnce({
+		...memoryRow,
+		status: 'deleted',
+	})
+	try {
+		const response = await request(
+			'',
+			postJson({ action: 'delete', memoryId: memoryRow.id }),
+		)
+		expect(response.status).toBe(200)
+		expect(response.data).toEqual({ ok: true, deletedMemoryId: memoryRow.id })
+		expect(mockModule.listMemoriesByUserId).not.toHaveBeenCalled()
+	} finally {
+		mockModule.listMemoriesByUserId.mockImplementation(original!)
+	}
+})

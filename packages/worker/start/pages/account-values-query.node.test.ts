@@ -37,7 +37,7 @@ const key = (selection: string | { orgSlug: string }, actor = 'a') => [
 	typeof selection === 'string' ? { selectedValueId: selection } : selection,
 ]
 
-it('publishes accepted deletion after unmount, preserving selection and actor isolation', async () => {
+it('invalidates accepted deletion after unmount, cancelling stale reads with actor isolation', async () => {
 	const client = new QueryClient()
 	client.setQueryData(key('list'), data(null))
 	client.setQueryData(key('one'), data(detail))
@@ -76,17 +76,17 @@ it('publishes accepted deletion after unmount, preserving selection and actor is
 	await lateRead
 	expect(
 		client.getQueryData<ValuesQueryData>(key('list'))?.payload.values,
-	).toEqual([row(other)])
+	).toEqual([row(detail), row(other)])
 	expect(
 		client.getQueryData<ValuesQueryData>(key('one'))?.payload.selectedValue,
-	).toBeNull()
+	).toEqual(detail)
 	expect(
 		client.getQueryData<ValuesQueryData>(key('two'))?.payload.selectedValue,
 	).toEqual(other)
 	expect(
 		client.getQueryData<ValuesQueryData>(key('one', 'b'))?.payload.values,
 	).toHaveLength(2)
-	expect(client.getQueryState(key('list'))?.isInvalidated).toBe(false)
+	expect(client.getQueryState(key('list'))?.isInvalidated).toBe(true)
 	expect(client.getQueryState(key('two'))?.isInvalidated).toBe(true)
 	expect(
 		client.getQueryState(['page', 'a', 'loadUsagePage', ''])?.isInvalidated,
@@ -169,10 +169,53 @@ it('keeps the submitted org when observer options change during a pending write'
 	await submitted
 	expect(
 		client.getQueryData<ValuesQueryData>(key(alpha))?.payload.values,
-	).toHaveLength(1)
+	).toHaveLength(2)
+	expect(client.getQueryState(key(alpha))?.isInvalidated).toBe(true)
+	expect(client.getQueryState(key(beta))?.isInvalidated).toBe(false)
 	expect(
 		client.getQueryData<ValuesQueryData>(key(beta))?.payload.values,
 	).toHaveLength(2)
 	unsubscribe()
 	client.clear()
 })
+
+it.each([false, true])(
+	'refetches actual values after accepted writes and lost responses: %s',
+	async (lost) => {
+		const client = new QueryClient()
+		const queryKey = key({ orgSlug: 'alpha' })
+		client.setQueryData(queryKey, data(detail))
+		const { QueryObserver } = await import('@tanstack/react-query')
+		const page = new QueryObserver(client, {
+			queryKey,
+			staleTime: Infinity,
+			queryFn: async () => ({
+				payload: { ...data(null).payload, values: [row(other)] },
+			}),
+		})
+		const unsubscribe = page.subscribe(() => {})
+		const mutation = new MutationObserver(
+			client,
+			valuesMutationOptions(
+				client,
+				'a',
+				async () => {
+					if (lost) throw new Error('Response lost')
+					return { ok: true, deletedName: 'first' }
+				},
+				{ orgSlug: 'alpha' },
+			),
+		)
+		await mutation
+			.mutate({ name: 'first', orgSlug: 'alpha' })
+			.catch(() => undefined)
+		expect(
+			client.getQueryData<ValuesQueryData>(queryKey)?.payload.values,
+		).toEqual([row(other)])
+		expect(
+			client.getQueryData<ValuesQueryData>(queryKey)?.payload.selectedValue,
+		).toBeNull()
+		unsubscribe()
+		client.clear()
+	},
+)

@@ -1,9 +1,6 @@
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { type AccountJobsViewFilter } from '#client/routes/account-jobs-filter.ts'
-import {
-	type AccountJobListItem,
-	type AccountJobsLoaderData,
-} from '#universal/loader-data.ts'
+import { type AccountJobListItem } from '#universal/loader-data.ts'
 import { colors } from '#universal/styles/tokens.ts'
 
 export const jobsRoute = createListDetailRoute('/account/jobs')
@@ -17,16 +14,19 @@ export const viewFilterOptions: Array<{
 	{ value: 'all', label: 'All' },
 ]
 
-export type AccountJobsActionPayload = AccountJobsLoaderData & {
+export type AccountJobsActionPayload = {
+	ok: true
+	jobId: string
 	runNow?: { ok: boolean; error: string | null; deletedAfterRun: boolean }
 }
 
-export type PostAccountJobsAction = (input: {
-	body: Record<string, unknown>
-	successMessage: (payload: AccountJobsActionPayload) => string | null
-	failureMessage: string
-	afterSuccess?: (payload: AccountJobsActionPayload) => void
-}) => Promise<void>
+export type PostAccountJobsAction<TInput> = (
+	input: TInput & {
+		successMessage: (payload: AccountJobsActionPayload) => string | null
+		failureMessage: string
+		afterSuccess?: (payload: AccountJobsActionPayload) => void
+	},
+) => Promise<void>
 
 export function emptyJobsMessage(input: {
 	totalCount: number

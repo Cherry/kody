@@ -1,7 +1,4 @@
-import {
-	loadAccountValuesData,
-	userScopedStorageContext,
-} from '#app/account-values-data.ts'
+import { userScopedStorageContext } from '#app/account-values-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { deleteValue } from '#mcp/values/service.ts'
@@ -33,13 +30,7 @@ async function handleDeleteAction(input: {
 	if (!deleted) {
 		return operationResult({ ok: false, error: 'Value not found.' }, 404)
 	}
-	return operationResult(
-		await loadAccountValuesData({
-			env: input.env,
-			user: input.user,
-			selectedValueId: null,
-		}),
-	)
+	return operationResult({ ok: true, deletedName: name })
 }
 
 export async function deleteAccountValueRecord({

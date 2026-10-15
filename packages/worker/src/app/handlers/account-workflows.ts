@@ -1,7 +1,3 @@
-import {
-	loadAccountWorkflowsData,
-	type AccountWorkflowsLoaderData,
-} from '#app/account-workflows-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { cancelWorkflowRunForUser } from '#worker/package-runtime/package-workflows.ts'
@@ -10,19 +6,6 @@ import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-async function reloadWorkflowsPayload(input: {
-	env: Env
-	request: Request
-	user: AuthenticatedUser
-	selectedWorkflowId?: string | null
-}): Promise<AccountWorkflowsLoaderData> {
-	return await loadAccountWorkflowsData({
-		env: input.env,
-		user: input.user,
-		selectedWorkflowId: input.selectedWorkflowId ?? null,
-	})
-}
 
 export async function cancelAccountWorkflowRun(input: {
 	env: Env
@@ -51,12 +34,9 @@ export async function cancelAccountWorkflowRun(input: {
 			)
 		case 'already_terminal':
 		case 'cancelled': {
-			const payload = await reloadWorkflowsPayload({
-				...input,
-				selectedWorkflowId: id,
-			})
 			return operationResult({
-				...payload,
+				ok: true,
+				workflowRunId: id,
 				cancel: {
 					cancelled: result.outcome === 'cancelled',
 					alreadyTerminal: result.outcome === 'already_terminal',

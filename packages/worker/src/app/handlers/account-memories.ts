@@ -1,6 +1,4 @@
 import {
-	type AccountMemoriesLoaderData,
-	loadAccountMemoriesData,
 	loadAccountMemoriesExport,
 	readAccountMemoriesIncludeDeleted,
 } from '#app/account-memories-data.ts'
@@ -56,11 +54,6 @@ async function handleDeleteAction(input: {
 	user: AuthenticatedUser
 	memoryId: string
 	force: boolean
-	refresh: {
-		query: string
-		includeDeleted: boolean
-		selectedMemoryId: string | null
-	}
 }) {
 	const memoryId = input.memoryId.trim()
 	if (!memoryId) {
@@ -79,28 +72,17 @@ async function handleDeleteAction(input: {
 	if (!deleted) {
 		return operationResult({ ok: false, error: 'Memory not found.' }, 404)
 	}
-	const payload: AccountMemoriesLoaderData = await loadAccountMemoriesData({
-		env: input.env,
-		user: input.user,
-		...input.refresh,
-	})
-	return operationResult(payload)
+	return operationResult({ ok: true, deletedMemoryId: memoryId })
 }
 
 export async function deleteAccountMemoryRecord({
 	env,
 	user,
-	refresh,
 	memoryId,
 	force,
 }: {
 	env: Env
 	user: AuthenticatedUser
-	refresh: {
-		query: string
-		includeDeleted: boolean
-		selectedMemoryId: string | null
-	}
 	memoryId: string
 	force: boolean
 }) {
@@ -120,7 +102,6 @@ export async function deleteAccountMemoryRecord({
 			user,
 			memoryId,
 			force,
-			refresh,
 		})
 	} catch (error) {
 		return operationResult(

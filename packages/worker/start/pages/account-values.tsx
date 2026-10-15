@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { createListDetailRoute } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { deleteAccountValue } from '#start/server/account-mutations'
@@ -129,6 +130,7 @@ export function AccountValuesPage({
 		setMessageTone(tone)
 	}
 
+	const captureSubmitter = useSubmitterScope()
 	const deleteMutation = useMutation(
 		valuesMutationOptions(
 			queryClient,
@@ -144,18 +146,22 @@ export function AccountValuesPage({
 
 	function deleteValueEntry() {
 		if (!selectedValue || queryClient.isMutating({ mutationKey })) return
+		const isCurrent = captureSubmitter()
 		showMessage(null)
 		deleteMutation.mutate(
 			{ name: selectedValue.name, orgSlug },
 			{
 				onSuccess: () => {
+					if (!isCurrent()) return
 					setDeleteArmed(false)
 					showMessage('Deleted value.')
 					syncRouterLocation(
 						valuesRoute.buildListHref(getCurrentSearch(), currentHref),
 					)
 				},
-				onError: (error) => showMessage(error.message, 'error'),
+				onError: (error) => {
+					if (isCurrent()) showMessage(error.message, 'error')
+				},
 			},
 		)
 	}

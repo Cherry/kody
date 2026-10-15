@@ -28,7 +28,6 @@ import { useMutation } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
-import { memoriesInput } from '../memories-input.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -128,8 +127,7 @@ export function AccountMemoriesPage({
 	payload: AccountMemoriesLoaderData
 	currentHref: string
 }) {
-	const { orgSlug } = useMatchedPageScope()
-	const [actionState, setActionState] = useState<'idle' | 'busy'>('idle')
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	const memories = payload.memories
 	const selectedMemory = payload.selectedMemory
 	const legacyReadOnly = payload.legacyReadOnly
@@ -139,35 +137,29 @@ export function AccountMemoriesPage({
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const captureSubmitter = useSubmitterScope()
 	const deleteMutation = useMutation({
-		mutationKey: ['memories', currentHref],
+		mutationKey: ['memories', actorKey, orgSlug],
+		retry: false,
 		mutationFn: async (input: {
 			memoryId: string
 			force: boolean
-			href: string
 			orgSlug: string | null
 			isCurrentSubmitter: () => boolean
 		}) => {
-			const filters = memoriesInput(
-				'',
-				new URL(input.href, 'https://kody.local').search,
-			)
 			return deleteAccountMemory({
 				data: {
 					memoryId: input.memoryId,
 					force: input.force,
 					orgSlug: input.orgSlug ?? undefined,
-					refresh: {
-						query: filters.query,
-						includeDeleted: filters.includeDeleted,
-						selectedMemoryId: filters.selected ?? null,
-					},
 				},
 			})
 		},
 		onMutate: () => invalidatePages,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
-		onError: (error) => toast.error(error.message),
+		onError: (error, input) => {
+			if (input.isCurrentSubmitter()) toast.error(error.message)
+		},
 	})
+	const actionState = deleteMutation.isPending ? 'busy' : 'idle'
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({
@@ -223,26 +215,22 @@ export function AccountMemoriesPage({
 
 	async function postDelete(input: { memoryId: string; force: boolean }) {
 		if (legacyReadOnly || actionState !== 'idle') return
-		setActionState('busy')
 		showMessage(null)
 		const isCurrentSubmitter = captureSubmitter()
 		try {
 			await deleteMutation.mutateAsync({
 				...input,
-				href: currentHref,
 				orgSlug,
 				isCurrentSubmitter,
 			})
 			if (!isCurrentSubmitter()) return
 			clearDeleteMode()
-			setActionState('idle')
 			showMessage(
 				input.force ? 'Permanently deleted memory.' : 'Soft-deleted memory.',
 			)
 			navigate(memoriesRoute.buildListHref(getCurrentSearch()))
 		} catch (error) {
 			if (!isCurrentSubmitter()) return
-			setActionState('idle')
 			setDeleteMode(null)
 			showMessage(
 				error instanceof Error ? error.message : 'Unable to delete memory.',

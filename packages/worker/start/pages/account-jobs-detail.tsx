@@ -77,10 +77,21 @@ export function renderAccountJobDetail(input: {
 	currentHref: string
 	detail: AccountJobDetail
 	isMutating: boolean
-	postAction: PostAccountJobsAction
+	runJobAction: PostAccountJobsAction<{ id: string }>
+	setKillSwitchAction: PostAccountJobsAction<{
+		id: string
+		killSwitchEnabled: boolean
+	}>
 	navigateToList: () => void
 }) {
-	const { username, detail, isMutating, postAction, navigateToList } = input
+	const {
+		username,
+		detail,
+		isMutating,
+		runJobAction,
+		setKillSwitchAction,
+		navigateToList,
+	} = input
 	return (
 		<section css={recordBodyCss}>
 			<div css={{ display: 'grid', gap: spacing.xs }}>
@@ -339,8 +350,8 @@ export function renderAccountJobDetail(input: {
 					type="button"
 					disabled={isMutating}
 					onClick={() =>
-						postAction({
-							body: { action: 'run_now', id: detail.id },
+						runJobAction({
+							id: detail.id,
 							successMessage: (payload) => {
 								if (payload.runNow?.deletedAfterRun) {
 									return payload.runNow.ok
@@ -370,12 +381,9 @@ export function renderAccountJobDetail(input: {
 					type="button"
 					disabled={isMutating}
 					onClick={() =>
-						postAction({
-							body: {
-								action: 'set_kill_switch',
-								id: detail.id,
-								killSwitchEnabled: !detail.killSwitchEnabled,
-							},
+						setKillSwitchAction({
+							id: detail.id,
+							killSwitchEnabled: !detail.killSwitchEnabled,
 							successMessage: () =>
 								detail.killSwitchEnabled
 									? 'Cleared kill switch.'

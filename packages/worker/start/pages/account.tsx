@@ -10,10 +10,7 @@ import { toast } from '#client/toast.ts'
 import { saveProfile, updateAvatar } from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'
 import { type loadProfile } from '#start/server/public-data'
-import {
-	type AccountProfileLoaderData,
-	type ProfileVisibility,
-} from '#universal/loader-data.ts'
+import { type ProfileVisibility } from '#universal/loader-data.ts'
 import {
 	getGhostButtonCss,
 	mutedLinkCss,
@@ -38,11 +35,9 @@ import {
 	type FormEvent,
 } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import {
-	pageResourceKey,
-	snapshotPageResource,
-} from '../page-mutation-cache.ts'
+import { snapshotPageResource } from '../page-mutation-cache.ts'
 import { AccountAvatarEditor } from './account-avatar-editor.tsx'
 import { avatarMutationOptions } from './account-avatar-query.ts'
 import { useAccountConnections } from './account-connections-panel.tsx'
@@ -133,28 +128,6 @@ export function AccountPage({
 	)
 	const needsOnboarding = payloads.onboarding?.needsOnboarding === true
 	const onboardingChecklist = payloads.onboarding?.checklist ?? null
-
-	function publishProfile(
-		profile: AccountProfileLoaderData,
-		submittedActor: string | null,
-	) {
-		queryClient.setQueriesData<AccountQueryData>(
-			{ queryKey: pageResourceKey(submittedActor, 'loadAccountPage') },
-			(data) =>
-				data && {
-					...data,
-					payloads: {
-						...data.payloads,
-						accountProfile: {
-							...data.payloads.accountProfile,
-							displayName: profile.displayName,
-							bio: profile.bio,
-							profileVisibility: profile.profileVisibility,
-						},
-					},
-				},
-		)
-	}
 
 	function releaseOptimisticAvatar() {
 		if (!optimisticAvatar.current) return
@@ -304,25 +277,17 @@ export function AccountPage({
 	const isSaving = useIsMutating({ mutationKey: ['profile', actorKey] }) > 0
 	type AccountQueryData = Awaited<ReturnType<typeof loadAccountPage>>
 	type PublicProfileQueryData = Awaited<ReturnType<typeof loadProfile>>
-	const ownProfileKey = [
-		...pageResourceKey(actorKey, 'loadProfile'),
-		{ username },
-	]
 	const invalidateProfileDependents = usePageInvalidation(
 		profileMutationResources,
 		{ refreshShell: true },
 	)
 
+	const captureProfileSubmitter = useSubmitterScope()
 	const profileMutation = useMutation({
+		gcTime: 0,
 		mutationKey: ['profile', actorKey],
-		mutationFn: async (input: {
-			displayName: string
-			bio: string
-			profileVisibility: ProfileVisibility
-		}) => {
-			return saveProfile({ data: input })
-		},
-		onMutate: async (input) => {
+		mutationFn: saveProfile,
+		onMutate: async ({ data: input }) => {
 			const account = await snapshotPageResource<AccountQueryData>(
 				queryClient,
 				actorKey,
@@ -335,6 +300,7 @@ export function AccountPage({
 							...data.payloads.accountProfile,
 							displayName: input.displayName,
 							bio: input.bio,
+							profileVisibility: input.profileVisibility,
 						},
 					},
 				}),
@@ -362,8 +328,6 @@ export function AccountPage({
 			return {
 				account,
 				publicProfile,
-				actorKey,
-				ownProfileKey,
 				reconcile: invalidateProfileDependents,
 			}
 		},
@@ -382,6 +346,8 @@ export function AccountPage({
 										...current.payloads.accountProfile,
 										displayName: previous.payloads.accountProfile.displayName,
 										bio: previous.payloads.accountProfile.bio,
+										profileVisibility:
+											previous.payloads.accountProfile.profileVisibility,
 									},
 								},
 							}
@@ -407,41 +373,15 @@ export function AccountPage({
 						: current,
 				)
 			}
-			void queryClient.invalidateQueries({
-				queryKey: snapshot?.ownProfileKey ?? ownProfileKey,
-			})
-			void queryClient.invalidateQueries({
-				queryKey: pageResourceKey(
-					snapshot?.actorKey ?? actorKey,
-					'loadAccountPage',
-				),
-			})
 			// A failed save still needs feedback after navigating away from the form.
 			toast.error(
 				error instanceof Error ? error.message : 'Unable to save profile.',
 			)
 		},
-		onSuccess: async (profile, _input, snapshot) => {
-			publishProfile(profile, snapshot.actorKey)
-			queryClient.setQueriesData<PublicProfileQueryData>(
-				{ queryKey: snapshot.ownProfileKey },
-				(data) =>
-					data && data.data?.isSelf
-						? {
-								...data,
-								data: {
-									...data.data,
-									profile: {
-										...data.data.profile,
-										displayName: profile.displayName,
-										bio: profile.bio,
-									},
-								},
-							}
-						: data,
-			)
-			// Cache work belongs to the mutation and survives a page unmount.
-			void snapshot.reconcile()
+		onSettled: (_data, _error, _input, snapshot) => {
+			// Reads wait for this mutation to settle, so do not await their refetch.
+			// Reconcile even when the response was lost after a successful write.
+			void snapshot?.reconcile()
 		},
 	})
 
@@ -462,34 +402,40 @@ export function AccountPage({
 			submitted.profileVisibility !== savedProfileVisibility
 		setMessage(null)
 		setMessageTone('info')
-		profileMutation.mutate(submitted, {
-			onSuccess: (payload) => {
-				const result = interpretAccountProfileSave({
-					profileFieldsChanged,
-					responseOk: true,
-					payload,
-				})
-				if (result.status === 'saved') {
-					setDraftDisplayName((edit) =>
-						edit === submitted.displayName ? undefined : edit,
+		const isCurrent = captureProfileSubmitter()
+		profileMutation.mutate(
+			{ data: submitted },
+			{
+				onSuccess: (payload) => {
+					if (!isCurrent()) return
+					const result = interpretAccountProfileSave({
+						profileFieldsChanged,
+						responseOk: true,
+						payload,
+					})
+					if (result.status === 'saved') {
+						setDraftDisplayName((edit) =>
+							edit === submitted.displayName ? undefined : edit,
+						)
+						setDraftBio((edit) => (edit === submitted.bio ? undefined : edit))
+						setDraftProfileVisibility((edit) =>
+							edit === submitted.profileVisibility ? undefined : edit,
+						)
+						setMessage(result.message)
+					} else if (result.status === 'error') {
+						setMessage(result.message)
+						setMessageTone('error')
+					}
+				},
+				onError: (error) => {
+					if (!isCurrent()) return
+					setMessage(
+						error instanceof Error ? error.message : 'Unable to save profile.',
 					)
-					setDraftBio((edit) => (edit === submitted.bio ? undefined : edit))
-					setDraftProfileVisibility((edit) =>
-						edit === submitted.profileVisibility ? undefined : edit,
-					)
-					setMessage(result.message)
-				} else if (result.status === 'error') {
-					setMessage(result.message)
 					setMessageTone('error')
-				}
+				},
 			},
-			onError: (error) => {
-				setMessage(
-					error instanceof Error ? error.message : 'Unable to save profile.',
-				)
-				setMessageTone('error')
-			},
-		})
+		)
 	}
 
 	const view =
@@ -717,6 +663,7 @@ const mutationResources = [
 ] as const
 
 const profileMutationResources = [
+	'loadAccountPage',
 	'loadProfile',
 	'loadCommunity',
 	'loadPackage',

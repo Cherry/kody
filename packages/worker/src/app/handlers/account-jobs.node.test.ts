@@ -386,3 +386,39 @@ test('jobs API kill switch and run now are user-scoped', async () => {
 		runNow: { ok: true, deletedAfterRun: false },
 	})
 })
+
+test('accepted job changes do not depend on a jobs page read', async () => {
+	const { post } = createJobsClient()
+	const original = mockModule.inspectJobsForUser.getMockImplementation()
+	mockModule.inspectJobsForUser.mockRejectedValue(new Error('Page unavailable'))
+	mockModule.inspectJobsForUser.mockClear()
+	mockModule.updateJob.mockResolvedValue(packageJob)
+	mockModule.runJobNowViaManager.mockResolvedValue({
+		job: packageJob,
+		execution: { ok: true, logs: [] },
+		deletedAfterRun: true,
+	})
+	try {
+		const switched = await post({
+			action: 'set_kill_switch',
+			id: packageJob.id,
+			killSwitchEnabled: true,
+		})
+		expect(switched.status).toBe(200)
+		expect(switched.data).toEqual({
+			ok: true,
+			jobId: packageJob.id,
+			killSwitchEnabled: true,
+		})
+		const ran = await post({ action: 'run_now', id: packageJob.id })
+		expect(ran.status).toBe(200)
+		expect(ran.data).toEqual({
+			ok: true,
+			jobId: packageJob.id,
+			runNow: { ok: true, error: null, deletedAfterRun: true },
+		})
+		expect(mockModule.inspectJobsForUser).not.toHaveBeenCalled()
+	} finally {
+		mockModule.inspectJobsForUser.mockImplementation(original!)
+	}
+})

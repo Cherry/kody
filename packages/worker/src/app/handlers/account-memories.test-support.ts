@@ -55,11 +55,6 @@ export function testAccountMemoriesApiHandler(env: Env) {
 					'force' in body && typeof body.force === 'boolean'
 						? body.force
 						: false,
-				refresh: {
-					query: readAccountMemoriesQuery(request.url),
-					includeDeleted: readAccountMemoriesIncludeDeleted(request.url),
-					selectedMemoryId: readAccountMemoriesSelectedMemoryId(request.url),
-				},
 			})
 			return operationResult(result.data, result.status)
 		},

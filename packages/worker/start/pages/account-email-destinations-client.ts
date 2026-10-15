@@ -11,11 +11,9 @@ import {
 	useQueryClient,
 } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { emailKeys } from './email-resources.ts'
+import { emailDestinationMutationOptions } from './email-destination-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 
-type DestinationWrite =
-	| { action: 'add'; email: string }
-	| { action: 'resend' | 'setDefault' | 'remove'; id: string }
 export function useAccountEmailDestinations(
 	payload: AccountEmailDestinationsLoaderData,
 	actorKey: string | null,
@@ -29,60 +27,60 @@ export function useAccountEmailDestinations(
 			mutationKey: ['email-destination-write', actorKey],
 			status: 'pending',
 		},
-		select: (entry) => entry.state.variables as Record<string, string>,
+		select: (entry) =>
+			entry.state.variables as { data: { destinationId?: string } } | undefined,
 	})
 	const busy = pendingWrites.length > 0
-	const mutation = useMutation({
-		mutationKey: ['email-destination-write', actorKey],
-		mutationFn: async (body: DestinationWrite) => {
-			switch (body.action) {
-				case 'add':
-					return addEmailDestination({ data: { email: body.email } })
-				case 'resend':
-					return resendEmailDestination({ data: { destinationId: body.id } })
-				case 'setDefault':
-					return setDefaultEmailDestination({
-						data: { destinationId: body.id },
-					})
-				case 'remove':
-					return removeEmailDestination({ data: { destinationId: body.id } })
-			}
-		},
-		onSuccess: async (accepted) => {
-			await client.cancelQueries({
-				queryKey: emailKeys.destinations(actorKey),
-				exact: true,
-			})
-			client.setQueryData(emailKeys.destinations(actorKey), accepted)
-		},
-		// A failed response does not prove that the write failed to commit.
-		onSettled: () =>
-			client.invalidateQueries({
-				queryKey: emailKeys.destinations(actorKey),
-				exact: true,
-			}),
+	const capture = useSubmitterScope()
+	const options = emailDestinationMutationOptions(client, actorKey)
+	const addMutation = useMutation({
+		...options,
+		mutationFn: addEmailDestination,
+	})
+	const resendMutation = useMutation({
+		...options,
+		mutationFn: resendEmailDestination,
+	})
+	const defaultMutation = useMutation({
+		...options,
+		mutationFn: setDefaultEmailDestination,
+	})
+	const removeMutation = useMutation({
+		...options,
+		mutationFn: removeEmailDestination,
 	})
 	function updateDraftEmail(event: FormEvent<HTMLInputElement>) {
 		setDraftEmail(event.currentTarget.value)
 	}
-	function mutate(body: DestinationWrite) {
+	async function run(
+		write: () => Promise<{ message: string }>,
+		clearDraft = false,
+	) {
 		if (busy) return
+		const isCurrent = capture()
 		setMessage(null)
-		mutation.mutate(body, {
-			onSuccess: (accepted) => {
-				if (body.action === 'add') setDraftEmail('')
-				setMessage(accepted.message ?? 'Email destinations updated.')
-				setTone('info')
-			},
-			onError: (error) => {
-				setMessage(error.message)
-				setTone('error')
-			},
-		})
+		try {
+			const accepted = await write()
+			if (!isCurrent()) return
+			if (clearDraft) setDraftEmail('')
+			setMessage(accepted.message)
+			setTone('info')
+		} catch (error) {
+			if (!isCurrent()) return
+			setMessage(
+				error instanceof Error
+					? error.message
+					: 'Unable to update email destinations.',
+			)
+			setTone('error')
+		}
 	}
 	function handleAddSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
-		mutate({ action: 'add', email: draftEmail })
+		void run(
+			() => addMutation.mutateAsync({ data: { email: draftEmail } }),
+			true,
+		)
 	}
 	return {
 		destinations: payload.destinations,
@@ -92,11 +90,20 @@ export function useAccountEmailDestinations(
 		status: busy ? ('sending' as const) : ('idle' as const),
 		message,
 		tone,
-		pendingId: pendingWrites[0]?.id ?? null,
+		pendingId: pendingWrites[0]?.data.destinationId ?? null,
 		updateDraftEmail,
 		handleAddSubmit,
-		resend: (id: string) => mutate({ action: 'resend', id }),
-		setDefault: (id: string) => mutate({ action: 'setDefault', id }),
-		remove: (id: string) => mutate({ action: 'remove', id }),
+		resend: (id: string) =>
+			void run(() =>
+				resendMutation.mutateAsync({ data: { destinationId: id } }),
+			),
+		setDefault: (id: string) =>
+			void run(() =>
+				defaultMutation.mutateAsync({ data: { destinationId: id } }),
+			),
+		remove: (id: string) =>
+			void run(() =>
+				removeMutation.mutateAsync({ data: { destinationId: id } }),
+			),
 	}
 }

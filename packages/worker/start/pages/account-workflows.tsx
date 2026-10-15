@@ -29,8 +29,9 @@ import {
 } from '@tanstack/react-query'
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
-import { scopedPageResource } from '../page-query-scope.ts'
+import { invalidatePageResources } from '../page-invalidation-cache.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -240,97 +241,54 @@ export function AccountWorkflowsPage({
 		setMessageTone(tone)
 	}
 
-	type ActionResult = AccountWorkflowsLoaderData & {
+	type ActionResult = {
 		cancel?: {
 			cancelled: boolean
 			alreadyTerminal: boolean
 			status: AccountWorkflowRunStatus | null
 		}
 	}
+	const captureSubmitter = useSubmitterScope()
 	const mutation = useMutation({
+		retry: false,
 		mutationKey,
 		mutationFn: async (input: {
-			body: Record<string, unknown>
-			href: string
+			id: string
+			actorKey: string | null
 			orgSlug: string | null
 			failureMessage: string
 		}) => {
-			const id = input.body.id
-			if (typeof id !== 'string') throw new Error('Record id is required.')
+			const id = input.id
 			const orgSlug = input.orgSlug ?? undefined
 			return cancelWorkflowRun({ data: { orgSlug, id } })
 		},
-		onSuccess: async (accepted, { orgSlug }) => {
-			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', {
-				orgSlug,
-			})
-			await queryClient.cancelQueries({
-				...resource,
-				predicate: (query) =>
-					resource.predicate(query) && query.state.data !== undefined,
-			})
-			queryClient.setQueriesData<{ payload: AccountWorkflowsLoaderData }>(
-				resource,
-				(data) =>
-					data && {
-						...data,
-						payload: {
-							...data.payload,
-							username: accepted.username,
-							workflows: accepted.workflows,
-							selectedWorkflow:
-								data.payload.selectedWorkflow?.id ===
-								accepted.selectedWorkflow?.id
-									? accepted.selectedWorkflow
-									: data.payload.selectedWorkflow &&
-										  accepted.workflows.some(
-												(row) => row.id === data.payload.selectedWorkflow?.id,
-										  )
-										? {
-												...data.payload.selectedWorkflow,
-												...accepted.workflows.find(
-													(row) => row.id === data.payload.selectedWorkflow?.id,
-												),
-											}
-										: null,
-						},
-					},
-			)
-			void queryClient.invalidateQueries({
-				...resource,
-				predicate: (query) => {
-					if (!resource.predicate(query)) return false
-					const input = query.queryKey[3]
-					const selected =
-						input && typeof input === 'object'
-							? 'workflowId' in input && typeof input.workflowId === 'string'
-								? input.workflowId
-								: 'selected' in input && typeof input.selected === 'string'
-									? input.selected
-									: null
-							: null
-					return Boolean(selected && selected !== accepted.selectedWorkflow?.id)
-				},
-			})
-			for (const dependent of ['loadWaitingPage', 'loadActivityPage'])
-				void queryClient.invalidateQueries(
-					scopedPageResource(actorKey, dependent, { orgSlug }),
-				)
-		},
+		onSettled: (_accepted, _error, { actorKey, orgSlug }) =>
+			invalidatePageResources(
+				queryClient,
+				actorKey,
+				['loadWorkflowsPage', 'loadWaitingPage', 'loadActivityPage'],
+				'active',
+				{ orgSlug },
+			),
 	})
 	function postAction(input: {
-		body: Record<string, unknown>
+		id: string
 		successMessage: (payload: ActionResult) => string | null
 		failureMessage: string
 	}) {
 		if (queryClient.isMutating({ mutationKey })) return
+		const isCurrent = captureSubmitter()
 		showMessage(null)
 		setCancelArmed(false)
 		mutation.mutate(
-			{ ...input, href: currentHref, orgSlug },
+			{ ...input, actorKey, orgSlug },
 			{
-				onSuccess: (accepted) => showMessage(input.successMessage(accepted)),
-				onError: (error) => showMessage(error.message, 'error'),
+				onSuccess: (accepted) => {
+					if (isCurrent()) showMessage(input.successMessage(accepted))
+				},
+				onError: (error) => {
+					if (isCurrent()) showMessage(error.message, 'error')
+				},
 			},
 		)
 	}
@@ -583,7 +541,7 @@ export function AccountWorkflowsPage({
 													return
 												}
 												void postAction({
-													body: { action: 'cancel', id: detail.id },
+													id: detail.id,
 													successMessage: (payload) =>
 														payload.cancel?.alreadyTerminal
 															? `Workflow already finished with status "${statusLabel(payload.cancel.status)}".`

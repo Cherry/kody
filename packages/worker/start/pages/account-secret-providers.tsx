@@ -20,7 +20,8 @@ import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
-import { orgPageFilters } from '../org-page-cache.ts'
+import { secretMutationOptions } from '../secret-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -29,22 +30,6 @@ import {
 	AccountPageHeader,
 	accountInputCss,
 } from './account-management-components.tsx'
-
-type ProviderChange =
-	| {
-			action: 'bind'
-			provider: string
-			packageId: string
-			doorSecretName: string
-			config: Record<string, string>
-	  }
-	| { action: 'unbind'; provider: string }
-	| {
-			action: 'grant' | 'revoke'
-			provider: string
-			ref: string
-			packageId: string
-	  }
 
 export function AccountSecretProvidersPage({
 	payload,
@@ -73,81 +58,74 @@ export function AccountSecretProvidersPage({
 		return `${grant.provider}:${grant.canonicalRef}:${grant.packageId}`
 	}
 
-	const mutation = useMutation({
-		mutationKey: ['secretProviders', actorKey, orgSlug],
-		mutationFn: async ({
-			body,
-			orgSlug: submittedOrg,
-		}: {
-			body: ProviderChange
-			orgSlug: string | null
-			actorKey: string | null
-		}) => {
-			const orgSlug = submittedOrg ?? undefined
-			switch (body.action) {
-				case 'bind':
-					return bindSecretProvider({
-						data: {
-							orgSlug,
-							provider: body.provider,
-							packageId: body.packageId,
-							doorSecretName: body.doorSecretName,
-							config: body.config,
-						},
-					})
-				case 'unbind':
-					return unbindSecretProvider({
-						data: { orgSlug, provider: body.provider },
-					})
-				case 'grant':
-					return grantSecretProvider({
-						data: {
-							orgSlug,
-							provider: body.provider,
-							ref: body.ref,
-							packageId: body.packageId,
-						},
-					})
-				case 'revoke':
-					return revokeSecretProvider({
-						data: {
-							orgSlug,
-							provider: body.provider,
-							ref: body.ref,
-							packageId: body.packageId,
-						},
-					})
-			}
-		},
-		onSuccess: (_result, { orgSlug, actorKey }) => {
-			void Promise.all(
-				mutationResources.map((resource) =>
-					queryClient.invalidateQueries(
-						orgPageFilters(actorKey, resource, { orgSlug }),
-					),
-				),
-			)
-		},
-	})
-	const status = mutation.isPending
-		? 'saving'
-		: mutation.isError
-			? 'error'
+	const capture = useSubmitterScope()
+	const bind = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			bindSecretProvider,
+		),
+	)
+	const unbind = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			unbindSecretProvider,
+		),
+	)
+	const grant = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			grantSecretProvider,
+		),
+	)
+	const revoke = useMutation(
+		secretMutationOptions(
+			queryClient,
+			actorKey,
+			orgSlug,
+			mutationResources,
+			revokeSecretProvider,
+		),
+	)
+	const status =
+		bind.isPending || unbind.isPending || grant.isPending || revoke.isPending
+			? 'saving'
 			: 'idle'
-	async function submit(body: ProviderChange, successHref: string) {
-		if (mutation.isPending) return
+	async function submit(run: () => Promise<unknown>, successHref: string) {
+		if (status === 'saving') return
+		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.mutateAsync({ body, orgSlug, actorKey })
+			await run()
+			if (!isCurrent()) return
+			bind.reset()
+			unbind.reset()
+			grant.reset()
+			revoke.reset()
 			setRevokeArmed(null)
-			if (router.state.location.href === currentHref)
-				await router.navigate({ to: successHref })
+			await router.navigate({ to: successHref })
 		} catch (error) {
-			setMessage(
-				error instanceof Error
-					? error.message
-					: 'Unable to update secret providers.',
-			)
+			if (isCurrent())
+				setMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to update secret providers.',
+				)
+		} finally {
+			if (isCurrent()) {
+				bind.reset()
+				unbind.reset()
+				grant.reset()
+				revoke.reset()
+			}
 		}
 	}
 
@@ -165,7 +143,7 @@ export function AccountSecretProvidersPage({
 				currentHref={currentHref}
 			/>
 			{message ? (
-				<AccountManagementMessage tone={status === 'error' ? 'error' : 'info'}>
+				<AccountManagementMessage tone="error">
 					{message}
 				</AccountManagementMessage>
 			) : null}
@@ -209,12 +187,13 @@ export function AccountSecretProvidersPage({
 									return
 								}
 								void submit(
-									{
-										action: 'revoke',
-										provider: approval.provider,
-										ref: approval.canonicalRef,
-										packageId: approval.packageId,
-									},
+									() =>
+										revoke.mutateAsync({
+											orgSlug: orgSlug ?? undefined,
+											provider: approval.provider,
+											ref: approval.canonicalRef,
+											packageId: approval.packageId,
+										}),
 									relocateAccountHref('/account/secret-providers', currentHref),
 								)
 							}}
@@ -227,12 +206,13 @@ export function AccountSecretProvidersPage({
 							disabled={disabled}
 							onClick={() => {
 								void submit(
-									{
-										action: 'grant',
-										provider: approval.provider,
-										ref: approval.canonicalRef,
-										packageId: approval.packageId,
-									},
+									() =>
+										grant.mutateAsync({
+											orgSlug: orgSlug ?? undefined,
+											provider: approval.provider,
+											ref: approval.canonicalRef,
+											packageId: approval.packageId,
+										}),
 									relocateAccountHref('/account/secret-providers', currentHref),
 								)
 							}}
@@ -273,10 +253,11 @@ export function AccountSecretProvidersPage({
 									disabled={disabled}
 									onClick={() => {
 										void submit(
-											{
-												action: 'unbind',
-												provider: binding.provider,
-											},
+											() =>
+												unbind.mutateAsync({
+													orgSlug: orgSlug ?? undefined,
+													provider: binding.provider,
+												}),
 											relocateAccountHref(
 												'/account/secret-providers',
 												currentHref,
@@ -330,12 +311,13 @@ export function AccountSecretProvidersPage({
 											return
 										}
 										void submit(
-											{
-												action: 'revoke',
-												provider: grant.provider,
-												ref: grant.canonicalRef,
-												packageId: grant.packageId,
-											},
+											() =>
+												revoke.mutateAsync({
+													orgSlug: orgSlug ?? undefined,
+													provider: grant.provider,
+													ref: grant.canonicalRef,
+													packageId: grant.packageId,
+												}),
 											relocateAccountHref(
 												'/account/secret-providers',
 												currentHref,
@@ -439,13 +421,14 @@ export function AccountSecretProvidersPage({
 							}
 						}
 						void submit(
-							{
-								action: 'bind',
-								provider: bindProvider,
-								packageId: bindPackageId,
-								doorSecretName: bindDoorSecret,
-								config,
-							},
+							() =>
+								bind.mutateAsync({
+									orgSlug: orgSlug ?? undefined,
+									provider: bindProvider,
+									packageId: bindPackageId,
+									doorSecretName: bindDoorSecret,
+									config,
+								}),
 							relocateAccountHref('/account/secret-providers', currentHref),
 						)
 					}}

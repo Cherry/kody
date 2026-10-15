@@ -840,10 +840,8 @@ test('host approval rejects truncated and malformed hosts instead of writing the
 	expect(mixedApprove.status).toBe(200)
 	expect(mixedApprove.data).toMatchObject({
 		ok: true,
-		approval: {
-			requestedHosts: ['hooks.slack.com'],
-			rejectedHosts: [{ host: 'api.ope', reason: 'unknown_suffix' }],
-		},
+		action: 'approve',
+		approvalKind: 'host_bulk',
 	})
 	expect(mockModule.setSecretAllowedHosts).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -984,12 +982,6 @@ test('package approval reject and approve handle missing secrets and deduplicate
 		updatedAt: epoch,
 	}))
 
-	mockModule.listSavedPackagesByUserId.mockResolvedValueOnce(
-		savedPackages as never,
-	)
-	mockModule.listSecrets.mockResolvedValueOnce([])
-	mockModule.listPackageSecretsByPackageIds.mockResolvedValueOnce(new Map())
-
 	const rejectResponse = await call(
 		postRequest(
 			{ action: 'reject' },
@@ -998,10 +990,12 @@ test('package approval reject and approve handle missing secrets and deduplicate
 	)
 
 	expect(rejectResponse.status).toBe(200)
-	expect(rejectResponse.data).toMatchObject({
+	expect(rejectResponse.data).toEqual({
 		ok: true,
-		secrets: [],
+		action: 'reject',
+		approvalKind: 'package',
 	})
+	expect(mockModule.listSecrets).not.toHaveBeenCalled()
 	expect(mockModule.setSecretAllowedHosts).not.toHaveBeenCalled()
 	expect(mockModule.setSecretAllowedPackages).not.toHaveBeenCalled()
 
@@ -1122,8 +1116,7 @@ test('account secrets API loads selected secret values and deletes the selected 
 	expect(deleteResponse.data).toMatchObject({
 		ok: true,
 		deleted: true,
-		selectedSecret: null,
-		secrets: [],
+		secretId: 'user::::myApiKey',
 	})
 	expect(mockModule.deleteSecret).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -1560,7 +1553,7 @@ test('account secrets save refuses to rename or re-host an opt-in credential wit
 	expect(unchanged.status).toBe(200)
 })
 
-test('account secrets save stays ok when metadata reload fails after write', async () => {
+test('account secrets save does not reload metadata after write', async () => {
 	mockModule.listSavedPackagesByUserId.mockResolvedValue([])
 	mockModule.listPackageSecretsByPackageIds.mockResolvedValue(new Map())
 	mockModule.listSecrets
@@ -1590,9 +1583,11 @@ test('account secrets save stays ok when metadata reload fails after write', asy
 		},
 	})
 	expect(mockModule.saveSecret).toHaveBeenCalled()
+	expect(mockModule.listSecrets).toHaveBeenCalledTimes(1)
+	expect(response.data).not.toHaveProperty('secrets')
 })
 
-test('account secrets save fallback uses the saved record metadata', async () => {
+test('account secrets save outcome uses the saved record metadata', async () => {
 	const existing = makeSecret('oldApiKey', {
 		ttlMs: 60_000,
 		expiresAt: '2026-10-06T00:00:00.000Z',

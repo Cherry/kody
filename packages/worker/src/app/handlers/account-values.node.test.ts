@@ -192,3 +192,19 @@ test('values API rejects save, missing deletes, invalid actions, and unauthentic
 	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(null)
 	expect((await get()).status).toBe(401)
 })
+
+test('accepted value deletion does not depend on listing values', async () => {
+	const { post } = createValuesClient()
+	const original = mockModule.listValues.getMockImplementation()
+	mockModule.listValues.mockRejectedValue(new Error('Page unavailable'))
+	mockModule.listValues.mockClear()
+	mockModule.deleteValue.mockResolvedValueOnce(true)
+	try {
+		const response = await post({ action: 'delete', name: 'theme' })
+		expect(response.status).toBe(200)
+		expect(response.data).toEqual({ ok: true, deletedName: 'theme' })
+		expect(mockModule.listValues).not.toHaveBeenCalled()
+	} finally {
+		mockModule.listValues.mockImplementation(original!)
+	}
+})

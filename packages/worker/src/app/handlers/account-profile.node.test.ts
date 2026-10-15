@@ -259,7 +259,7 @@ test('account profile API treats an unchanged username as a no-op so grandfather
 	})
 
 	expect(response.status).toBe(200)
-	expect(response.data).toMatchObject({ ok: true, username: 'kody' })
+	expect(response.data).toEqual({ ok: true })
 	expect(username()).toBe('kody')
 	expect(mocks.updateCommunityProfile).toHaveBeenCalledWith(
 		expect.objectContaining({
@@ -301,18 +301,7 @@ test('account profile API round trips and validates displayName, bio, and visibi
 	})
 
 	expect(response.status).toBe(200)
-	expect(response.data).toEqual({
-		ok: true,
-		email: 'current-user@example.com',
-		emailVerified: false,
-		emailVerificationDelivery: null,
-		username: 'current-user',
-		displayName: 'Current User',
-		bio: 'I build packages',
-		avatarUrl: null,
-		profileVisibility: 'private',
-		formerEmails: [],
-	})
+	expect(response.data).toEqual({ ok: true })
 	expect(mocks.updateCommunityProfile).toHaveBeenCalledWith({
 		env,
 		numericUserId: 1,
@@ -344,4 +333,21 @@ test('account profile API round trips and validates displayName, bio, and visibi
 		ok: false,
 		error: 'Display name must be at most 50 characters.',
 	})
+})
+
+test('a committed profile save does not depend on reloading account data', async () => {
+	const { env, post } = createProfileClient(['current-user'])
+	const prepare = vi.spyOn(env.APP_DB, 'prepare')
+	mocks.updateCommunityProfile.mockImplementation(async () => {
+		prepare.mockImplementation(() => {
+			throw new Error('Post-write account reads are unavailable')
+		})
+	})
+	try {
+		const response = await post({ displayName: 'Updated name' })
+		expect(response.status).toBe(200)
+		expect(response.data).toEqual({ ok: true })
+	} finally {
+		prepare.mockRestore()
+	}
 })

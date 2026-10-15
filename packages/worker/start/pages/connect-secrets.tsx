@@ -9,6 +9,7 @@ import { routes } from '#universal/routes.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -73,60 +74,68 @@ export function ConnectSecretsRoute({
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const [message, setMessage] = useState<string | null>(null)
 	const [completed, setCompleted] = useState<ApprovalAction | null>(null)
-	const mutation = useMutation({
-		mutationKey: ['connectSecrets', actorKey],
-		mutationFn: async ({
-			action,
-			href,
-		}: {
-			action: ApprovalAction
-			href: string
-			invalidate: typeof invalidatePages
-			queryKey: ReturnType<typeof connectSecretsQuery>['queryKey']
-		}) => {
-			const url = new URL(href, 'http://localhost')
-			const payload = (await (
-				action === 'approve' ? approveSecretAccess : rejectSecretAccess
-			)({
+	const capture = useSubmitterScope()
+	const captureScope = () => ({
+		queryKey: connectSecretsQuery(
+			actorKey,
+			connectSecretsInput(new URL(href, 'https://kody.local').search),
+		).queryKey,
+		invalidate: invalidatePages,
+	})
+	const reconcile = async (
+		_result: unknown,
+		_error: unknown,
+		_input: unknown,
+		scope: ReturnType<typeof captureScope> | undefined,
+	) => {
+		if (!scope) return
+		await queryClient.cancelQueries({ queryKey: scope.queryKey, exact: true })
+		await Promise.all([
+			queryClient.invalidateQueries({ queryKey: scope.queryKey, exact: true }),
+			scope.invalidate(),
+		])
+	}
+	const approve = useMutation({
+		mutationFn: approveSecretAccess,
+		onMutate: captureScope,
+		onSettled: reconcile,
+		gcTime: 0,
+		retry: false,
+	})
+	const reject = useMutation({
+		mutationFn: rejectSecretAccess,
+		onMutate: captureScope,
+		onSettled: reconcile,
+		gcTime: 0,
+		retry: false,
+	})
+	const submittingAction = approve.isPending
+		? 'approve'
+		: reject.isPending
+			? 'reject'
+			: null
+	async function submitApproval(action: ApprovalAction) {
+		if (submittingAction || !data.approval) return
+		const isCurrent = capture()
+		setMessage(null)
+		try {
+			const url = new URL(href, 'https://kody.local')
+			const input = {
 				data: {
 					orgSlug: url.searchParams.get('org') ?? undefined,
 					refresh: connectSecretsInput(url.search),
 				},
-			})) as AccountSecretsLoaderData & { ok?: boolean; error?: string }
-			if (!payload?.ok)
-				throw new Error(payload?.error || 'Unable to process approval.')
-			return payload
-		},
-		onSuccess: async (payload, input) => {
-			await queryClient.cancelQueries({
-				queryKey: input.queryKey,
-				exact: true,
-			})
-			queryClient.setQueryData(input.queryKey, (previous) =>
-				previous ? { ...previous, payload } : previous,
-			)
-			void input.invalidate()
-		},
-	})
-	const submittingAction = mutation.isPending ? mutation.variables.action : null
-	async function submitApproval(action: ApprovalAction) {
-		if (mutation.isPending || !data.approval) return
-		setMessage(null)
-		try {
-			await mutation.mutateAsync({
-				action,
-				href,
-				invalidate: invalidatePages,
-				queryKey: connectSecretsQuery(
-					actorKey,
-					connectSecretsInput(new URL(href, 'https://kody.local').search),
-				).queryKey,
-			})
-			setCompleted(action)
+			}
+			if (action === 'approve') await approve.mutateAsync(input)
+			else await reject.mutateAsync(input)
+			if (isCurrent()) setCompleted(action)
 		} catch (error) {
-			setMessage(
-				error instanceof Error ? error.message : 'Unable to process approval.',
-			)
+			if (isCurrent())
+				setMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to process approval.',
+				)
 		}
 	}
 

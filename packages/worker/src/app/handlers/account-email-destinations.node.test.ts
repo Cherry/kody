@@ -91,7 +91,7 @@ beforeAll(() => {
 	setAuthSessionSecret(testCookieSecret)
 })
 
-test('account destination API lists identity, adds a pending extra, and blocks unverified accounts from mutating', async () => {
+test('account destination operations persist writes, return outcomes, and reject unverified defaults and accounts', async () => {
 	consoleWarn.mockImplementation(() => {})
 	const { sqlite, db } = createMigratedDb()
 	await seedUser(sqlite)
@@ -131,15 +131,21 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 		}),
 	)
 	expect(added.status).toBe(200)
-	const addedBody = added.data as {
-		destinations: Array<{ email: string; verified: boolean }>
-		message: string
-	}
-	expect(
-		addedBody.destinations.map((destination) => destination.email),
-	).toEqual(['owner@example.com', 'phone@example.com'])
-	expect(addedBody.destinations[1]?.verified).toBe(false)
-	expect(addedBody.message).toContain('Verification email sent')
+	expect(added.data).toEqual({
+		ok: true,
+		message:
+			'Verification email sent. Open the link to start using this address.',
+	})
+	const refreshed = await runHandler(
+		handler,
+		await createRequest({ session, method: 'GET' }),
+	)
+	expect(refreshed.data).toMatchObject({
+		destinations: [
+			{ email: 'owner@example.com' },
+			{ email: 'phone@example.com', verified: false },
+		],
+	})
 	expect(
 		sqlite
 			.prepare(
@@ -165,6 +171,57 @@ test('account destination API lists identity, adds a pending extra, and blocks u
 			)
 			.get() as { count: number },
 	).toEqual({ count: 2 })
+
+	const destination = sqlite
+		.prepare('SELECT id FROM email_notification_destinations WHERE email = ?')
+		.get('phone@example.com') as { id: string }
+	const unverifiedDefault = await runHandler(
+		handler,
+		await createRequest({
+			session,
+			body: { action: 'setDefault', id: destination.id },
+		}),
+	)
+	expect(unverifiedDefault.status).toBe(400)
+	sqlite
+		.prepare(
+			'UPDATE email_notification_destinations SET verified_at = CURRENT_TIMESTAMP WHERE id = ?',
+		)
+		.run(destination.id)
+	const changed = await runHandler(
+		handler,
+		await createRequest({
+			session,
+			body: { action: 'setDefault', id: destination.id },
+		}),
+	)
+	expect(changed.data).toEqual({
+		ok: true,
+		message: 'Default email destination updated.',
+	})
+	expect(
+		sqlite
+			.prepare(
+				'SELECT is_default FROM email_notification_destinations WHERE id = ?',
+			)
+			.get(destination.id),
+	).toEqual({ is_default: 1 })
+	const removed = await runHandler(
+		handler,
+		await createRequest({
+			session,
+			body: { action: 'remove', id: destination.id },
+		}),
+	)
+	expect(removed.data).toEqual({
+		ok: true,
+		message: 'Email destination removed.',
+	})
+	expect(
+		sqlite
+			.prepare('SELECT id FROM email_notification_destinations WHERE id = ?')
+			.get(destination.id),
+	).toBeUndefined()
 
 	const { sqlite: unverifiedSqlite, db: unverifiedDb } = createMigratedDb()
 	await seedUser(unverifiedSqlite, { verified: false })

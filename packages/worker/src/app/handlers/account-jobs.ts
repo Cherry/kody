@@ -1,7 +1,3 @@
-import {
-	loadAccountJobsData,
-	type AccountJobsLoaderData,
-} from '#app/account-jobs-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -13,19 +9,6 @@ import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-async function reloadJobsPayload(input: {
-	env: Env
-	request: Request
-	user: AuthenticatedUser
-	selectedJobId?: string | null
-}): Promise<AccountJobsLoaderData> {
-	return await loadAccountJobsData({
-		env: input.env,
-		user: input.user,
-		selectedJobId: input.selectedJobId ?? null,
-	})
-}
 
 function buildCallerContext(input: {
 	env: Env
@@ -65,12 +48,7 @@ export async function setAccountJobKillSwitch(input: {
 		callerContext: buildCallerContext(input),
 		body: { id, killSwitchEnabled },
 	})
-	return operationResult(
-		await reloadJobsPayload({
-			...input,
-			selectedJobId: id,
-		}),
-	)
+	return operationResult({ ok: true, jobId: id, killSwitchEnabled })
 }
 
 export async function runAccountJobNow(input: {
@@ -90,12 +68,9 @@ export async function runAccountJobNow(input: {
 		jobId: id,
 		callerContext: buildCallerContext(input),
 	})
-	const payload = await reloadJobsPayload({
-		...input,
-		selectedJobId: result.deletedAfterRun ? null : id,
-	})
 	return operationResult({
-		...payload,
+		ok: true,
+		jobId: id,
 		runNow: {
 			ok: result.execution.ok,
 			error: result.execution.ok ? null : result.execution.error,

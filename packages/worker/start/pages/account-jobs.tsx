@@ -17,6 +17,7 @@ import {
 } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { restorePageResource } from '../page-mutation-cache.ts'
 import { scopedPageResource } from '../page-query-scope.ts'
@@ -24,7 +25,7 @@ import {
 	renderAccountJobDetail,
 	renderJobDetailPlaceholder,
 } from './account-jobs-detail.tsx'
-import { needsJobDetailRefresh } from './account-jobs-query.ts'
+import { invalidatePageResources } from '../page-invalidation-cache.ts'
 import {
 	emptyJobsMessage,
 	jobsRoute,
@@ -114,119 +115,82 @@ export function AccountJobsPage({
 	const mutationKey = ['jobs', actorKey, orgSlug] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	type JobsQueryData = { payload: AccountJobsLoaderData }
-	const jobsMutation = useMutation({
+
+	const captureSubmitter = useSubmitterScope()
+	const reconcile = (
+		submitted: { actorKey: string | null; orgSlug: string | null } | undefined,
+	) =>
+		submitted
+			? invalidatePageResources(
+					queryClient,
+					submitted.actorKey,
+					[
+						'loadJobsPage',
+						'loadActivityPage',
+						'loadWorkflowsPage',
+						'loadUsagePage',
+					],
+					'active',
+					{ orgSlug: submitted.orgSlug },
+				)
+			: undefined
+	const runMutation = useMutation({
 		mutationKey,
-		mutationFn: async (input: {
-			body: Record<string, unknown>
+		retry: false,
+		mutationFn: (input: { id: string; orgSlug: string | null }) =>
+			runJobNow({ data: { ...input, orgSlug: input.orgSlug ?? undefined } }),
+		onMutate: ({ orgSlug }) => ({ actorKey, orgSlug }),
+		onSettled: (_data, _error, _input, submitted) => reconcile(submitted),
+	})
+	const killMutation = useMutation({
+		mutationKey,
+		retry: false,
+		mutationFn: (input: {
+			id: string
+			killSwitchEnabled: boolean
 			orgSlug: string | null
-			actorKey: string | null
-			failureMessage: string
-		}) => {
-			const id = input.body.id
-			if (typeof id !== 'string') throw new Error('Record id is required.')
-			const orgSlug = input.orgSlug ?? undefined
-			if (input.body.action === 'run_now')
-				return runJobNow({ data: { orgSlug, id } })
-			if (
-				input.body.action === 'set_kill_switch' &&
-				typeof input.body.killSwitchEnabled === 'boolean'
-			)
-				return setJobKillSwitch({
-					data: {
-						orgSlug,
-						id,
-						killSwitchEnabled: input.body.killSwitchEnabled,
-					},
-				})
-			throw new Error('Invalid job operation.')
-		},
-		onMutate: async ({ body, actorKey, orgSlug }) => {
-			const resource = scopedPageResource(actorKey, 'loadJobsPage', { orgSlug })
+		}) =>
+			setJobKillSwitch({
+				data: { ...input, orgSlug: input.orgSlug ?? undefined },
+			}),
+		onMutate: async (input) => {
+			const submitted = { actorKey, orgSlug: input.orgSlug }
+			const resource = scopedPageResource(actorKey, 'loadJobsPage', submitted)
 			await queryClient.cancelQueries(resource)
 			const snapshot = queryClient.getQueriesData<JobsQueryData>(resource)
 			queryClient.setQueriesData<JobsQueryData>(
 				resource,
 				(data) =>
-					data && { ...data, payload: optimisticJobs(data.payload, body) },
+					data && { ...data, payload: optimisticJobs(data.payload, input) },
 			)
-			return { snapshot, resource }
+			return { ...submitted, snapshot }
 		},
-		onError: async (_error, input, context) => {
+		onError: (_error, _input, context) => {
 			restorePageResource(queryClient, context?.snapshot)
-			void queryClient.invalidateQueries({
-				...scopedPageResource(input.actorKey, 'loadJobsPage', {
-					orgSlug: input.orgSlug,
-				}),
-			})
 		},
-		onSuccess: async (accepted, { body, actorKey, orgSlug }) => {
-			const resource = scopedPageResource(actorKey, 'loadJobsPage', { orgSlug })
-			await queryClient.cancelQueries({
-				...resource,
-				predicate: (query) =>
-					resource.predicate(query) && query.state.data !== undefined,
-			})
-			queryClient.setQueriesData<JobsQueryData>(
-				resource,
-				(data) =>
-					data && {
-						...data,
-						payload: {
-							...data.payload,
-							username: accepted.username,
-							jobs: accepted.jobs,
-							selectedJob:
-								data.payload.selectedJob?.id === accepted.selectedJob?.id
-									? accepted.selectedJob
-									: data.payload.selectedJob &&
-										  accepted.jobs.some(
-												(job) => job.id === data.payload.selectedJob?.id,
-										  )
-										? {
-												...data.payload.selectedJob,
-												...accepted.jobs.find(
-													(job) => job.id === data.payload.selectedJob?.id,
-												),
-											}
-										: null,
-						},
-					},
-			)
-			// The response contains the full list and the submitted detail. Other
-			// cached details only received list fields and still need revalidation.
-			const acceptedSelection = body.selectedJobId ?? body.id ?? null
-			void queryClient.invalidateQueries({
-				...resource,
-				predicate: (query) =>
-					resource.predicate(query) &&
-					needsJobDetailRefresh(query.queryKey[3], acceptedSelection),
-			})
-		},
+		onSettled: (_data, _error, _input, submitted) => reconcile(submitted),
 	})
-
 	async function postAction(input: {
-		body: Record<string, unknown>
+		write: () => Promise<AccountJobsActionPayload>
 		successMessage: (payload: AccountJobsActionPayload) => string | null
 		failureMessage: string
 		afterSuccess?: (payload: AccountJobsActionPayload) => void
 	}) {
 		if (queryClient.isMutating({ mutationKey })) return
+		const isCurrent = captureSubmitter()
 		showMessage(null)
-		jobsMutation.mutate(
-			{ ...input, actorKey, orgSlug },
-			{
-				onSuccess: (payload) => {
-					showMessage(input.successMessage(payload))
-					input.afterSuccess?.(payload)
-				},
-				onError: (error) => {
-					showMessage(
-						error instanceof Error ? error.message : input.failureMessage,
-						'error',
-					)
-				},
-			},
-		)
+		try {
+			const accepted = await input.write()
+			if (!isCurrent()) return
+			showMessage(input.successMessage(accepted))
+			input.afterSuccess?.(accepted)
+		} catch (error) {
+			if (isCurrent())
+				showMessage(
+					error instanceof Error ? error.message : input.failureMessage,
+					'error',
+				)
+		}
 	}
 
 	const status = 'ready'
@@ -361,7 +325,22 @@ export function AccountJobsPage({
 									currentHref,
 									detail,
 									isMutating,
-									postAction,
+									runJobAction: (input) =>
+										postAction({
+											...input,
+											write: () =>
+												runMutation.mutateAsync({ id: input.id, orgSlug }),
+										}),
+									setKillSwitchAction: (input) =>
+										postAction({
+											...input,
+											write: () =>
+												killMutation.mutateAsync({
+													id: input.id,
+													killSwitchEnabled: input.killSwitchEnabled,
+													orgSlug,
+												}),
+										}),
 									navigateToList: () => {
 										navigate(
 											jobsRoute.buildListHref(getCurrentSearch(), currentHref),
@@ -388,18 +367,11 @@ export function AccountJobsPage({
 
 function optimisticJobs(
 	data: AccountJobsLoaderData,
-	body: Record<string, unknown>,
+	body: { id: string; killSwitchEnabled: boolean },
 ): AccountJobsLoaderData {
 	const update = <T extends AccountJobListItem>(job: T): T => {
 		if (job.id !== body.id) return job
-		if (body.action === 'set_enabled' && typeof body.enabled === 'boolean')
-			return { ...job, enabled: body.enabled }
-		if (
-			body.action === 'set_kill_switch' &&
-			typeof body.killSwitchEnabled === 'boolean'
-		)
-			return { ...job, killSwitchEnabled: body.killSwitchEnabled }
-		return job
+		return { ...job, killSwitchEnabled: body.killSwitchEnabled }
 	}
 	return {
 		...data,
