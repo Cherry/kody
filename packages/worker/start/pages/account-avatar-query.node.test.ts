@@ -1,7 +1,7 @@
 import { QueryClient, MutationObserver } from '@tanstack/react-query'
 import { expect, test } from 'vitest'
 import { avatarMutationOptions } from './account-avatar-query.ts'
-import { type AccountProfileLoaderData } from '#universal/loader-data.ts'
+import { type updateAvatar } from '#start/server/account-mutations'
 
 test('avatar completion after unmount updates only submitted actor avatar, preserving newer profile edits', async () => {
 	const client = new QueryClient()
@@ -14,7 +14,7 @@ test('avatar completion after unmount updates only submitted actor avatar, prese
 	}
 	client.setQueryData(key, original)
 	client.setQueryData(other, original)
-	let finish!: (value: AccountProfileLoaderData) => void
+	let finish!: (value: Awaited<ReturnType<typeof updateAvatar>>) => void
 	let started!: () => void
 	const ready = new Promise<void>((resolve) => {
 		started = resolve
@@ -38,9 +38,8 @@ test('avatar completion after unmount updates only submitted actor avatar, prese
 	unsubscribe()
 	finish({
 		ok: true,
-		displayName: 'Older name',
 		avatarUrl: 'new.png',
-	} as AccountProfileLoaderData)
+	})
 	await pending
 	expect(client.getQueryData(key)).toEqual({
 		payloads: {

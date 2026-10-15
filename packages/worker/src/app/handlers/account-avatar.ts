@@ -1,4 +1,4 @@
-import { loadAccountProfileData } from '#app/account-profile-data.ts'
+import { buildUserAvatarUrl } from '#app/community-public.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	auditDatabaseFromEnv,
@@ -29,6 +29,7 @@ export async function updateAccountAvatar({
 }) {
 	// Avatars belong to the person, not their personal org.
 	const stableUserId = personalOrgId(user.mcpUser.userId)
+	let avatarKey: string | null = null
 	if (avatar === null)
 		await deleteUserAvatar({ env, numericUserId: user.userId, stableUserId })
 	else {
@@ -37,7 +38,7 @@ export async function updateAccountAvatar({
 			contentType: avatar.type || 'application/octet-stream',
 			sourceBytes: await readFileBytes(avatar),
 		})
-		await saveUserAvatar({
+		avatarKey = await saveUserAvatar({
 			env,
 			numericUserId: user.userId,
 			stableUserId,
@@ -54,5 +55,8 @@ export async function updateAccountAvatar({
 		ip: getRequestIp(request) ?? undefined,
 		path: '/account',
 	})
-	return loadAccountProfileData(user, env)
+	return {
+		ok: true as const,
+		avatarUrl: buildUserAvatarUrl({ username: user.username, avatarKey }),
+	}
 }

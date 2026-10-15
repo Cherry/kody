@@ -1,5 +1,5 @@
 import { type QueryClient } from '@tanstack/react-query'
-import { type AccountProfileLoaderData } from '#universal/loader-data.ts'
+import { type updateAvatar } from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'
 import { invalidateShellQueries } from '../shell-query.ts'
 
@@ -12,7 +12,9 @@ type Submission = {
 type AccountData = Awaited<ReturnType<typeof loadAccountPage>>
 export function avatarMutationOptions(
 	client: QueryClient,
-	send: (input: Submission) => Promise<AccountProfileLoaderData>,
+	send: (
+		input: Submission,
+	) => Promise<Awaited<ReturnType<typeof updateAvatar>>>,
 ) {
 	const accountKey = (input: Submission) =>
 		['page', input.actorKey, 'loadAccountPage'] as const
@@ -32,7 +34,11 @@ export function avatarMutationOptions(
 	return {
 		mutationFn: send,
 		gcTime: 0,
-		onSuccess: async (profile: AccountProfileLoaderData, input: Submission) => {
+		retry: false,
+		onSuccess: async (
+			profile: Awaited<ReturnType<typeof updateAvatar>>,
+			input: Submission,
+		) => {
 			await client.cancelQueries({ queryKey: accountKey(input) })
 			client.setQueriesData<AccountData>(
 				{ queryKey: accountKey(input) },

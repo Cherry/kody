@@ -15,7 +15,8 @@ vi.mock('#app/authenticated-user.ts', () => ({
 		mocks.readAuthenticatedAppUser(...args),
 }))
 
-vi.mock('#worker/community/avatar.ts', () => ({
+vi.mock('#worker/community/avatar.ts', async (importOriginal) => ({
+	...(await importOriginal<typeof import('#worker/community/avatar.ts')>()),
 	processUserAvatar: (...args: Array<unknown>) =>
 		mocks.processUserAvatar(...args),
 	saveUserAvatar: (...args: Array<unknown>) => mocks.saveUserAvatar(...args),
@@ -40,18 +41,6 @@ const authedUser = {
 		displayName: 'Alice',
 		username: 'alice',
 	},
-}
-
-const profilePayload = {
-	ok: true as const,
-	email: 'alice@example.com',
-	emailVerified: true,
-	username: 'alice',
-	displayName: 'Alice',
-	bio: null,
-	avatarUrl: '/profiles/alice/avatar/hash.png',
-	profileVisibility: 'public' as const,
-	formerEmails: [],
 }
 
 function createEnv() {
@@ -81,7 +70,9 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		contentType: 'image/png',
 	})
 	mocks.saveUserAvatar.mockResolvedValue('user-avatars/stable-alice/hash.png')
-	mocks.loadAccountProfileData.mockResolvedValue(profilePayload)
+	mocks.loadAccountProfileData.mockRejectedValue(
+		new Error('Profile read unavailable'),
+	)
 
 	const form = new FormData()
 	form.set(
@@ -99,7 +90,11 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 		params: {},
 	} as never)
 	expect(upload.status).toBe(200)
-	expect(upload.data).toEqual(profilePayload)
+	expect(upload.data).toEqual({
+		ok: true,
+		avatarUrl: '/profiles/alice/avatar/hash.png',
+	})
+	expect(mocks.loadAccountProfileData).not.toHaveBeenCalled()
 	expect(mocks.saveUserAvatar).toHaveBeenCalledWith(
 		expect.objectContaining({
 			numericUserId: 1,
@@ -109,10 +104,6 @@ test('account avatar API auth, upload, remove, and invalid type', async () => {
 	)
 
 	mocks.deleteUserAvatar.mockResolvedValue(undefined)
-	mocks.loadAccountProfileData.mockResolvedValue({
-		...profilePayload,
-		avatarUrl: null,
-	})
 	const remove = await handler.execute({
 		request: new Request('http://example.com/account/profile/avatar.json', {
 			method: 'POST',
