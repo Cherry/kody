@@ -48,8 +48,8 @@ test('two-factor lifecycle rejects invalid codes and recovers on enable, login, 
 	await page.getByLabel('Verification code').fill(await rejectedCodeFor(secret))
 	await page.getByRole('button', { name: 'Confirm' }).click()
 	await expect(page.getByText('Invalid code.', { exact: true })).toBeVisible()
-	await page.reload()
-	await waitForClientHydration(page)
+	// The setup secret is intentionally held only by this page, not reloaded
+	// through the status endpoint. A rejected code must preserve it for retry.
 	await expect(
 		page.getByRole('heading', {
 			name: 'Scan this QR code',
@@ -61,6 +61,13 @@ test('two-factor lifecycle rejects invalid codes and recovers on enable, login, 
 	await page.getByRole('button', { name: 'Confirm' }).click()
 	await expect(
 		page.getByText('Two-factor authentication is enabled.'),
+	).toBeVisible()
+	await page.reload()
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', {
+			name: 'Two-factor authentication is enabled',
+		}),
 	).toBeVisible()
 
 	await page.context().clearCookies()
