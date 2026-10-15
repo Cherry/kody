@@ -2,6 +2,36 @@
 
 ## Current evidence, October 15, 2026
 
+### Validation at source `6832c4630`
+
+Validate
+[38711856454](https://github.com/kentcdodds/kody/actions/runs/38711856454)
+finished with Static, Node, Workers and E2E failures. MCP passed. The six E2E
+failures include OAuth authorization returning 500 and follow management failing
+to arm its confirmation control. This run does not establish merge readiness.
+
+Source inspection identified a request-boundary defect: the OAuth provider adds
+helpers to the request environment, but the Start entry passed only document
+metadata into its server context. OAuth handlers read global bindings and lost
+those helpers. The correction must preserve request-local bindings for consent,
+password and OAuth client operations without exposing bindings to browser state.
+Runtime verification of that correction is outstanding.
+
+Local commits `0652b78be` and `c1fdd7dee` remove duplicate collection selection
+parsing, constant page-loading state, and the production token-preload registry.
+Native routes provide selection and preload policy. The shared collection helper
+only builds links. Route-component coverage includes legacy selected-search
+links and path precedence. Commit `c3d68fee4` uses native navigation for Manage
+follows and adds a same-document E2E assertion. These commits require CI runtime
+verification. No local runtime tests were run.
+
+Preview deployment `38711856447` succeeded for source `6832c4630`; the verified
+health response identified deployed merge
+`3ea35f9a615b9e6727b766de8a5433941c6944ff`. Public OAuth error and invalid
+unsubscribe pages were visually compared, with different authentication and
+viewport states limiting those comparisons. Full authenticated and matched
+visual parity remain incomplete.
+
 ### Follow-up at source `0c9578c8f`
 
 A subsequent source audit found a remaining cutover issue in billing/usage,
