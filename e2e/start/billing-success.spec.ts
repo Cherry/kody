@@ -32,7 +32,7 @@ test('subscription checkout, portal return, and credit payment persist through r
 		.getByRole('button', { name: 'Subscribe monthly', exact: true })
 		.click()
 	const response = await checkoutResponse
-	expect(response.ok(), await response.text()).toBe(true)
+	expect(response.ok(), `Checkout returned HTTP ${response.status()}`).toBe(true)
 	await expect(
 		page.getByRole('heading', { name: 'Test checkout' }),
 	).toBeVisible()
