@@ -40,7 +40,11 @@ async function startHistoryRecording(page: Page) {
 			const feature = document.querySelector('.feature-detail')
 			const study = feature?.querySelector('.study')
 			const split = feature?.querySelector('.split, .boundary')
-			const expectedHue = feature?.querySelector('.memory') ? '29' : '300'
+			const expectedHue = feature?.querySelector('.memory')
+				? '29'
+				: feature?.querySelector('.credentials')
+					? '148'
+					: null
 			const styled = Boolean(
 				feature &&
 				study &&
@@ -93,7 +97,7 @@ async function expectFeatureStylesheetApplied(page: Page) {
 					getComputedStyle(element).getPropertyValue('--hue').trim(),
 				),
 		)
-		.toBe(new URL(page.url()).pathname.endsWith('/memory') ? '29' : '300')
+		.toBe(new URL(page.url()).pathname.endsWith('/memory') ? '29' : '148')
 	// Ensure the recorder observes the rendered destination, not only pending frames.
 	await page.evaluate(
 		() =>

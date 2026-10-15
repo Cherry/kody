@@ -40,6 +40,11 @@ test('primitive widgets animate in view, answer clicks, and hold still for reduc
 	await expect(triggers.locator('.receipt')).toBeVisible()
 	await expect(page).toHaveURL(/\/features$/)
 
+	// The fifth card stays centered even when SSR inserts style elements.
+	await expect(
+		page.locator('.feature-overview article.feature').last(),
+	).toHaveCSS('grid-column-start', '2')
+
 	const integrations = page.getByRole('group', { name: 'Credentials example' })
 	await integrations.getByRole('button', { name: 'Book Wed 2:30' }).click()
 	await expect(integrations.locator('.pw-cal-open[data-on]')).toHaveCount(1)

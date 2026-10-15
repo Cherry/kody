@@ -36,7 +36,7 @@ import { lanternOrbMotionEvent } from './landing-lantern-motion.ts'
  * in the document for read-out and simply has no lines.
  */
 
-export const landingPrimitivesSectionId = 'primitives'
+const landingPrimitivesSectionId = 'primitives'
 
 const whatIsKodyHref = docHref('what-is-kody')
 

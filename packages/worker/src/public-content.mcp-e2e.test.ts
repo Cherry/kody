@@ -153,15 +153,7 @@ test('use-case index exposes its landing pages in HTML and Markdown', async () =
 	expect(await markdown.text()).toContain('](/compare/n8n-alternatives)')
 })
 
-test.each([
-	'',
-	'/memory',
-	'/secrets',
-	'/packages',
-	'/triggers',
-	'/integrations',
-	'/apps',
-])(
+test.each(['', '/memory', '/packages', '/triggers', '/credentials', '/apps'])(
 	'feature %s renders its content before client JavaScript',
 	async (suffix) => {
 		const { html } = await document(`/features${suffix}?utm_source=test`)
@@ -170,10 +162,15 @@ test.each([
 		expect(html.match(/<main[ >]/g)).toHaveLength(1)
 		if (suffix)
 			expect(html).toContain(
-				`/images/lantern/kody-primitives-orb-${suffix.slice(1)}.webp`,
+				`/images/lantern/kody-primitives-orb-${suffix === '/credentials' ? 'integrations' : suffix.slice(1)}.webp`,
 			)
-		if (suffix === '/secrets')
-			contains(html, ['href="/onboarding"', 'Connect your agent'])
+		if (suffix === '/credentials')
+			contains(html, [
+				'href="/onboarding"',
+				'Connect your agent',
+				'id="secret-result"',
+				'it works with Kody.',
+			])
 		if (suffix === '/packages')
 			contains(html, ['id="package-source-fallback"', 'src/brief.ts'])
 		if (suffix === '/memory')
@@ -181,6 +178,23 @@ test.each([
 				'id="ms-hero-note"',
 				'Lead with the decision. Keep updates short.',
 			])
+	},
+)
+
+test.each(['/features/secrets', '/features/integrations'])(
+	'retired feature %s permanently redirects without dropping attribution',
+	async (path) => {
+		const server = await getSharedMcpE2eServer()
+		const url = new URL(`${path}?utm_source=test&ref=shared`, server.origin)
+		const response = await fetch(url, { redirect: 'manual' })
+		expect(response.status).toBe(301)
+		const location = response.headers.get('Location')
+		expect(location).toBeTruthy()
+		const destination = new URL(location!, server.origin)
+		expect(destination.origin).toBe(server.origin)
+		expect(destination.pathname).toBe('/features/credentials')
+		expect(destination.search).toBe(url.search)
+		expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600')
 	},
 )
 
@@ -289,7 +303,7 @@ test('public signup CTAs stay tied to their plan or get-started section', async 
 	).toContain('href="/signup"')
 })
 
-test('homepage renders ordered video fixtures, tool proof, and session-aware CTA', async () => {
+test('homepage renders ordered videos and the agent-led CTA for every session', async () => {
 	const server = await getSharedMcpE2eServer()
 	const videos = [
 		{
@@ -337,7 +351,9 @@ test('homepage renders ordered video fixtures, tool proof, and session-aware CTA
 	)
 	expect(home).not.toContain('data-embed-playlist')
 	expect(home).not.toContain('href="/onboarding"')
-	expect(home).not.toContain('landing-lantern')
+	expect(home).not.toMatch(
+		/<[a-z][^>]*\sclass="(?:[^" ]+ )*landing-lantern(?: [^"]*)?"/,
+	)
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
 	const cookie = await loginToApp(server.origin, user)

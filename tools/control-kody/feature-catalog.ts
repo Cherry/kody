@@ -278,7 +278,7 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 			'/faq',
 			'/case-studies',
 			'/believe',
-			'/with/:agent',
+			'/with/$agent',
 			'/compare/n8n-alternatives',
 			'/compare/composio-alternatives',
 			'/use-cases',

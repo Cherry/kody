@@ -128,18 +128,13 @@ test('desktop and mobile headers include the complete Features navigation', asyn
 	expect(html).toContain('id="features-navigation"')
 	expect(html).toContain('id="features-navigation-mobile"')
 	expect(html.match(/href="\/features"/g)).toHaveLength(2)
-	for (const id of [
-		'memory',
-		'secrets',
-		'packages',
-		'triggers',
-		'integrations',
-		'apps',
-	]) {
+	for (const id of ['memory', 'packages', 'triggers', 'credentials', 'apps']) {
 		expect(html.match(new RegExp(`href="/features/${id}"`, 'g'))).toHaveLength(
 			2,
 		)
-		expect(html).toContain(`/images/lantern/kody-primitives-orb-${id}.webp`)
+		expect(html).toContain(
+			`/images/lantern/kody-primitives-orb-${id === 'credentials' ? 'integrations' : id}.webp`,
+		)
 	}
 	expect(
 		html.match(

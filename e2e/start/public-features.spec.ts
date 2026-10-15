@@ -86,10 +86,9 @@ for (const mobile of [false, true]) {
 		await openFeatures()
 		for (const name of [
 			'Memory',
-			'Secrets',
 			'Packages',
 			'Triggers',
-			'Integrations',
+			'Credentials',
 			'Apps',
 		]) {
 			await expect(panel.getByRole('link', { name, exact: true })).toBeVisible()
