@@ -1,4 +1,3 @@
-import { readAccountEmailData } from '#app/account-email-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { authorize } from '#worker/authorization/authorize.ts'
@@ -15,18 +14,11 @@ import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 type EmailMutationContext = {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
-	refresh: {
-		query: string
-		classification: EmailClassification | null
-		page: number
-		pageSize: number
-	}
 	messageId: string
 }
 export async function deleteAccountEmailMessage({
 	env,
 	user,
-	refresh,
 	messageId,
 }: EmailMutationContext) {
 	await authorize({ env, request: user.request }, 'email:read')
@@ -45,19 +37,11 @@ export async function deleteAccountEmailMessage({
 		return operationResult({ ok: false, error: 'Message not found.' }, 404)
 	}
 
-	return operationResult(
-		await readAccountEmailData({
-			env,
-			...refresh,
-			selectedMessageId: null,
-			user,
-		}),
-	)
+	return operationResult({ ok: true as const, messageId })
 }
 export async function classifyAccountEmailMessage({
 	env,
 	user,
-	refresh,
 	messageId,
 	classification,
 }: EmailMutationContext & { classification: EmailClassification }) {
@@ -91,12 +75,5 @@ export async function classifyAccountEmailMessage({
 		)
 	}
 
-	return operationResult(
-		await readAccountEmailData({
-			env,
-			...refresh,
-			selectedMessageId: messageId,
-			user,
-		}),
-	)
+	return operationResult({ ok: true as const, messageId, classification })
 }

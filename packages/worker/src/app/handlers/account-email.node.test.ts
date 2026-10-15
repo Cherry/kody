@@ -511,7 +511,7 @@ test('email API lists classification filters and classifies inbound messages', a
 		selectedMessage: expect.objectContaining(quarantinedFields),
 	})
 
-	// Reload after classify uses the default message list again.
+	// Mutation results are independent of the current list and selection.
 	createEnv({ meter, messages: [messageRecord] })
 	mockModule.getOwnerEmailMessageById.mockResolvedValue(messageRecord)
 	const classify = (classification: string, messageId = 'msg-1') =>
@@ -535,7 +535,8 @@ test('email API lists classification filters and classifies inbound messages', a
 	)
 	expect(quarantineResponse.data).toMatchObject({
 		ok: true,
-		selectedMessage: expect.objectContaining({ id: 'msg-1' }),
+		messageId: 'msg-1',
+		classification: 'quarantined',
 	})
 
 	const acceptResponse = await classify('accepted')
@@ -549,7 +550,7 @@ test('email API lists classification filters and classifies inbound messages', a
 	expect((await post({ action: 'unknown' })).status).toBe(400)
 })
 
-test('email API deletes an owned message and refreshes usage without a selection', async () => {
+test('email deletion succeeds without reading the list or usage again', async () => {
 	const env = createEnv({ messages: [] })
 	const { post } = createEmailClient(env)
 	const deleteCall = (messageId: string) => ({
@@ -567,17 +568,8 @@ test('email API deletes an owned message and refreshes usage without a selection
 	expect(mockModule.deleteEmailMessage).toHaveBeenCalledWith(
 		deleteCall('msg-1'),
 	)
-	expect(response.data).toMatchObject({
-		ok: true,
-		messages: [],
-		selectedMessage: null,
-		usage: expect.objectContaining({
-			stored_messages: expect.objectContaining({
-				count: expect.any(Number),
-				limit: 100,
-			}),
-		}),
-	})
+	expect(response.data).toEqual({ ok: true, messageId: 'msg-1' })
+	expect(mockModule.listEmailInboxesForUser).not.toHaveBeenCalled()
 
 	mockModule.deleteEmailMessage.mockResolvedValueOnce(false)
 	const missingResponse = await post({
@@ -613,4 +605,32 @@ test('email API gates unverified accounts and skips mailbox queries', async () =
 		total: 0,
 		classification: null,
 	})
+})
+
+test('accepted email writes do not depend on an available page read', async () => {
+	const env = createEnv()
+	const { post } = createEmailClient(env)
+	const read = mockModule.listOwnerEmailMessagesPage
+	const original = read.getMockImplementation()!
+	read.mockClear()
+	read.mockRejectedValue(new Error('Email listing unavailable'))
+	mockModule.getOwnerEmailMessageById.mockClear()
+	try {
+		expect(
+			(
+				await post({
+					action: 'classify',
+					message_id: 'msg-1',
+					classification: 'accepted',
+				})
+			).data,
+		).toEqual({ ok: true, messageId: 'msg-1', classification: 'accepted' })
+		expect(
+			(await post({ action: 'delete', message_id: 'msg-1' })).data,
+		).toEqual({ ok: true, messageId: 'msg-1' })
+		expect(read).not.toHaveBeenCalled()
+		expect(mockModule.getOwnerEmailMessageById).not.toHaveBeenCalled()
+	} finally {
+		read.mockImplementation(original)
+	}
 })

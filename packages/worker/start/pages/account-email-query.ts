@@ -7,8 +7,13 @@ import {
 	type EmailDetail,
 } from './email-resources.ts'
 
+export type EmailMutationOutcome = {
+	ok: true
+	messageId: string
+	classification?: 'accepted' | 'quarantined'
+}
+
 export type EmailAction = {
-	href: string
 	orgSlug: string | null
 	messageId: string
 } & (
@@ -53,16 +58,40 @@ export function optimisticEmail(
 	}
 }
 
-/** Responses prove the affected entity, not the freshness of unrelated rows.
- * Never replace another concurrent write with the response's list snapshot. */
+/** Navigations share these promises with ensureQueryData. Email reads do not
+ * wait for mutations, so let their first result settle before confirming it. */
+async function finishUncachedEmailReads(
+	client: QueryClient,
+	actorKey: string | null,
+	org: string | null,
+) {
+	const pending = client
+		.getQueryCache()
+		.findAll({ queryKey: emailKeys.all(actorKey, org) })
+		.filter(
+			(query) =>
+				query.state.data === undefined &&
+				query.state.fetchStatus === 'fetching',
+		)
+		.map((query) => query.promise)
+	await Promise.allSettled(pending)
+}
+
+/** Apply the accepted entity change without replacing unrelated cached rows. */
 export async function publishEmailResponse(
 	client: QueryClient,
 	actorKey: string | null,
-	accepted: AccountEmailLoaderData,
+	accepted: EmailMutationOutcome,
 	action: EmailAction,
 ) {
+	if (accepted.messageId !== action.messageId)
+		throw new Error('Email mutation returned a different message.')
 	const org = action.orgSlug
-	await client.cancelQueries({ queryKey: emailKeys.all(actorKey, org) })
+	await finishUncachedEmailReads(client, actorKey, org)
+	await client.cancelQueries({
+		queryKey: emailKeys.all(actorKey, org),
+		predicate: (query) => query.state.data !== undefined,
+	})
 	client.setQueriesData<EmailListData>(
 		{ queryKey: emailKeys.lists(actorKey, org) },
 		(data) => {
@@ -86,8 +115,6 @@ export async function publishEmailResponse(
 	)
 	const key = emailKeys.detail(actorKey, org, action.messageId)
 	if (action.action === 'delete') client.setQueryData(key, null)
-	else if (accepted.selectedMessage?.id === action.messageId)
-		client.setQueryData(key, accepted.selectedMessage)
 	else
 		client.setQueryData<EmailDetail>(key, (detail) =>
 			detail
@@ -103,26 +130,26 @@ export async function publishEmailResponse(
 		)
 }
 
-export function emailMutationOptions(
+export function emailMutationOptions<TAction extends EmailAction = EmailAction>(
 	client: QueryClient,
 	actorKey: string | null,
-	send: (action: EmailAction) => Promise<AccountEmailLoaderData>,
-	onFailure: (error: Error) => void,
+	send: (action: TAction) => Promise<EmailMutationOutcome>,
 	scope: PageOrgScope = { orgSlug: null },
 ) {
 	const org = scope.orgSlug
 	return {
 		mutationKey: emailKeys.mutations(actorKey, org),
 		mutationFn: send,
-		onSuccess: (accepted: AccountEmailLoaderData, action: EmailAction) =>
+		onSuccess: (accepted: EmailMutationOutcome, action: TAction) =>
 			publishEmailResponse(client, actorKey, accepted, action),
-		onError: (error: Error) => onFailure(error),
 		// Also reconcile a lost response: the server may have committed. Query
 		// reads never wait for writes, and the mutation-state overlay remains
 		// visible until this confirming read completes, even after unmount.
-		onSettled: (_data: unknown, _error: unknown, action: EmailAction) =>
-			client.invalidateQueries({
+		onSettled: async (_data: unknown, _error: unknown, action: TAction) => {
+			await finishUncachedEmailReads(client, actorKey, action.orgSlug)
+			await client.invalidateQueries({
 				queryKey: emailKeys.all(actorKey, action.orgSlug),
-			}),
+			})
+		},
 	}
 }

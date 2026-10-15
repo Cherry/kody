@@ -971,12 +971,6 @@ export const deleteEmailMessage = createServerFn({ method: 'POST' })
 	.validator(
 		resourceInput.omit({ search: true }).extend({
 			messageId: z.string().trim().min(1),
-			refresh: z.object({
-				query: z.string(),
-				classification: z.enum(['accepted', 'quarantined']).nullable(),
-				page: z.number().int().positive(),
-				pageSize: z.number().int().positive().max(100),
-			}),
 		}),
 	)
 	.handler(async ({ data }) => {
@@ -997,22 +991,10 @@ export const deleteEmailMessage = createServerFn({ method: 'POST' })
 				const result = requireOperationResult(
 					await deleteAccountEmailMessage({
 						...context,
-						refresh: data.refresh,
 						messageId: data.messageId,
 					}),
 				)
-				const { readJsonRecord } = await import('./json-value.ts')
-				return {
-					...result,
-					selectedMessage: result.selectedMessage
-						? {
-								...result.selectedMessage,
-								headers: result.selectedMessage.headers
-									? readJsonRecord(result.selectedMessage.headers)
-									: null,
-							}
-						: null,
-				}
+				return result
 			},
 		)
 	})
@@ -1022,12 +1004,6 @@ export const classifyEmailMessage = createServerFn({ method: 'POST' })
 		resourceInput.omit({ search: true }).extend({
 			messageId: z.string().trim().min(1),
 			classification: z.enum(['accepted', 'quarantined']),
-			refresh: z.object({
-				query: z.string(),
-				classification: z.enum(['accepted', 'quarantined']).nullable(),
-				page: z.number().int().positive(),
-				pageSize: z.number().int().positive().max(100),
-			}),
 		}),
 	)
 	.handler(async ({ data }) => {
@@ -1048,23 +1024,11 @@ export const classifyEmailMessage = createServerFn({ method: 'POST' })
 				const result = requireOperationResult(
 					await classifyAccountEmailMessage({
 						...context,
-						refresh: data.refresh,
 						messageId: data.messageId,
 						classification: data.classification,
 					}),
 				)
-				const { readJsonRecord } = await import('./json-value.ts')
-				return {
-					...result,
-					selectedMessage: result.selectedMessage
-						? {
-								...result.selectedMessage,
-								headers: result.selectedMessage.headers
-									? readJsonRecord(result.selectedMessage.headers)
-									: null,
-							}
-						: null,
-				}
+				return result
 			},
 		)
 	})

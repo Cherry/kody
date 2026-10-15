@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { toast } from '#client/toast.ts'
 import {
 	classifyEmailMessage,
@@ -53,7 +54,7 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
-import { emailKeys, emailResourceInput } from './email-resources.ts'
+import { emailKeys } from './email-resources.ts'
 import {
 	renderEmailVerificationPrompt,
 	requestResendVerification,
@@ -221,24 +222,33 @@ export function AccountEmailPage({
 	)
 		? 'deleting'
 		: 'idle'
-	const emailMutation = useMutation(
-		emailMutationOptions(
+
+	const deleteMutation = useMutation(
+		emailMutationOptions<Extract<EmailAction, { action: 'delete' }>>(
 			queryClient,
 			actorKey,
-			async (action) => {
-				const { org: _org, ...refresh } = emailResourceInput(action.href).list
-				const data = {
-					orgSlug: action.orgSlug ?? undefined,
-					refresh,
-					messageId: action.messageId,
-				}
-				return action.action === 'classify'
-					? classifyEmailMessage({
-							data: { ...data, classification: action.classification },
-						})
-					: deleteEmailMessage({ data })
-			},
-			(error) => toast.error(error.message),
+			(action) =>
+				deleteEmailMessage({
+					data: {
+						orgSlug: action.orgSlug ?? undefined,
+						messageId: action.messageId,
+					},
+				}),
+			{ orgSlug: org },
+		),
+	)
+	const classifyMutation = useMutation(
+		emailMutationOptions<Extract<EmailAction, { action: 'classify' }>>(
+			queryClient,
+			actorKey,
+			(action) =>
+				classifyEmailMessage({
+					data: {
+						orgSlug: action.orgSlug ?? undefined,
+						messageId: action.messageId,
+						classification: action.classification,
+					},
+				}),
 			{ orgSlug: org },
 		),
 	)
@@ -257,21 +267,26 @@ export function AccountEmailPage({
 			return
 		setMessage(null)
 		const listHref = emailRoute.buildListHref(getCurrentSearch(), currentHref)
-		emailMutation.mutate(
+		const isCurrentSubmitter = captureSubmitter()
+		deleteMutation.mutate(
 			{
 				action: 'delete',
 				messageId: selected.id,
-				href: currentHref,
 				orgSlug: org,
 			},
 			{
 				onSuccess: () => {
-					if (router.state.location.href !== currentHref) return
+					if (!isCurrentSubmitter()) return
 					setDeleteArmedId(null)
 					setMessage('Message deleted.')
 					navigate(listHref)
 				},
-				onError: () => setDeleteArmedId(null),
+				onError: (error) => {
+					if (isCurrentSubmitter()) {
+						setDeleteArmedId(null)
+						toast.error(getErrorMessage(error))
+					}
+				},
 			},
 		)
 	}
@@ -290,22 +305,25 @@ export function AccountEmailPage({
 		)
 			return
 		setMessage(null)
-		emailMutation.mutate(
+		const isCurrentSubmitter = captureSubmitter()
+		classifyMutation.mutate(
 			{
 				action: 'classify',
 				messageId: selected.id,
 				classification,
-				href: currentHref,
 				orgSlug: org,
 			},
 			{
 				onSuccess: () => {
-					if (router.state.location.href !== currentHref) return
+					if (!isCurrentSubmitter()) return
 					setMessage(
 						classification === 'quarantined'
 							? 'Marked as spam.'
 							: 'Marked as not spam.',
 					)
+				},
+				onError: (error) => {
+					if (isCurrentSubmitter()) toast.error(getErrorMessage(error))
 				},
 			},
 		)

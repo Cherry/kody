@@ -1,8 +1,4 @@
-import { readPagination } from '#worker/query-params.ts'
-import {
-	loadAccountEmailData,
-	readAccountEmailClassificationFilter,
-} from '#app/account-email-data.ts'
+import { loadAccountEmailData } from '#app/account-email-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import {
@@ -46,13 +42,7 @@ export function testAccountEmailApiHandler(env: Env) {
 				)
 			}
 
-			const url = new URL(request.url)
 			const context = {
-				refresh: {
-					...readPagination(url, { defaultPageSize: 25, maxPageSize: 100 }),
-					query: url.searchParams.get('q')?.trim() ?? '',
-					classification: readAccountEmailClassificationFilter(request.url),
-				},
 				env,
 				user,
 				messageId: '',

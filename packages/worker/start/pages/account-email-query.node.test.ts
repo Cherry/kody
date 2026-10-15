@@ -13,6 +13,7 @@ import {
 	optimisticEmail,
 	publishEmailResponse,
 	type EmailAction,
+	type EmailMutationOutcome,
 } from './account-email-query.ts'
 import {
 	emailKeys,
@@ -80,7 +81,6 @@ const payload = (
 })
 const action: EmailAction = {
 	action: 'classify',
-	href: '/account/email/one',
 	orgSlug: null,
 	messageId: 'one',
 	classification: 'accepted',
@@ -150,11 +150,15 @@ it('publishes only the affected entity, preserving concurrent rows, other select
 			{ ...message, id: 'two', classification: 'accepted' },
 		],
 	})
-	await publishEmailResponse(client, 'a', optimisticEmail(payload(), action), {
-		...action,
-		href: '/@acme/-/email/one',
-		orgSlug: 'acme',
-	})
+	await publishEmailResponse(
+		client,
+		'a',
+		{ ok: true, messageId: action.messageId },
+		{
+			...action,
+			orgSlug: 'acme',
+		},
+	)
 	const rows = client.getQueryData<EmailListData>(first.listKey)!.messages
 	expect(rows.map((row) => row.classification)).toEqual([
 		'accepted',
@@ -178,7 +182,6 @@ it('keeps pending deletion visible, then removes confirmed rows and detail', asy
 	const keys = seed(client, '/account/email/one')
 	const deletion: EmailAction = {
 		action: 'delete',
-		href: '/account/email/one',
 		orgSlug: null,
 		messageId: 'one',
 	}
@@ -187,7 +190,7 @@ it('keeps pending deletion visible, then removes confirmed rows and detail', asy
 	await publishEmailResponse(
 		client,
 		'a',
-		payload({ selectedMessage: null, messages: [], total: 0 }),
+		{ ok: true, messageId: deletion.messageId },
 		deletion,
 	)
 	expect(client.getQueryData(keys.detailKey)).toBeNull()
@@ -202,19 +205,18 @@ it.each(['accepted', 'lost-response'] as const)(
 			defaultOptions: { queries: { retry: false } },
 		})
 		const keys = seed(client, '/account/email/one')
-		let release!: (value: AccountEmailLoaderData) => void
+		let release!: (value: EmailMutationOutcome) => void
 		let reject!: (error: Error) => void
 		const send = vi.fn(
 			() =>
-				new Promise<AccountEmailLoaderData>((resolve, fail) => {
+				new Promise<EmailMutationOutcome>((resolve, fail) => {
 					release = resolve
 					reject = fail
 				}),
 		)
-		const notify = vi.fn()
 		const mutation = new MutationObserver(
 			client,
-			emailMutationOptions(client, 'a', send, notify),
+			emailMutationOptions(client, 'a', send),
 		)
 		const unsubscribe = mutation.subscribe(() => {})
 		const write = mutation.mutate(action).catch(() => undefined)
@@ -243,7 +245,8 @@ it.each(['accepted', 'lost-response'] as const)(
 			staleTime: Infinity,
 		})
 		const stop = observer.subscribe(() => {})
-		if (outcome === 'accepted') release(optimisticEmail(payload(), action))
+		if (outcome === 'accepted')
+			release({ ok: true, messageId: action.messageId })
 		else reject(new Error('Lost response after commit'))
 		await write
 		expect(confirmingRead).toHaveBeenCalledOnce()
@@ -251,7 +254,6 @@ it.each(['accepted', 'lost-response'] as const)(
 			client.getQueryData<AccountEmailMessageDetail>(keys.detailKey)
 				?.classification,
 		).toBe('accepted')
-		expect(notify).toHaveBeenCalledTimes(outcome === 'lost-response' ? 1 : 0)
 		expect(client.isMutating()).toBe(0)
 		stop()
 		client.clear()
@@ -267,7 +269,7 @@ it('a failed concurrent classification never rolls back another accepted message
 		messages: [message, { ...message, id: 'two' }],
 	})
 	let failFirst!: (error: Error) => void
-	let acceptSecond!: (data: AccountEmailLoaderData) => void
+	let acceptSecond!: (data: EmailMutationOutcome) => void
 	const first = new MutationObserver(
 		client,
 		emailMutationOptions(
@@ -277,7 +279,6 @@ it('a failed concurrent classification never rolls back another accepted message
 				new Promise((_resolve, reject) => {
 					failFirst = reject
 				}),
-			() => {},
 		),
 	)
 	const second = new MutationObserver(
@@ -289,23 +290,17 @@ it('a failed concurrent classification never rolls back another accepted message
 				new Promise((resolve) => {
 					acceptSecond = resolve
 				}),
-			() => {},
 		),
 	)
 	const writeOne = first.mutate(action).catch(() => undefined)
 	const actionTwo = {
 		...action,
-		href: '/account/email/two',
 		orgSlug: null,
 		messageId: 'two',
 	}
 	const writeTwo = second.mutate(actionTwo)
 	await vi.waitFor(() => expect(client.isMutating()).toBe(2))
-	acceptSecond(
-		payload({
-			selectedMessage: { ...message, id: 'two', classification: 'accepted' },
-		}),
-	)
+	acceptSecond({ ok: true, messageId: 'two', classification: 'accepted' })
 	await writeTwo
 	failFirst(new Error('First write rejected'))
 	await writeOne
@@ -330,3 +325,61 @@ it('keeps search editing whitespace in the URL while normalizing only resource i
 	expect(emailSearch({ q: ' ' }).q).toBe(' ')
 	expect(emailResourceInput('/@acme/-/email?q=%20').list.query).toBe('')
 })
+
+it.each(['accepted', 'lost-response'] as const)(
+	'preserves uncached navigation and confirms after the older read for %s',
+	async (outcome) => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		})
+		let finishRead!: (data: AccountEmailMessageDetail) => void
+		let finishWrite!: () => void
+		let failWrite!: (error: Error) => void
+		const key = emailKeys.detail('a', null, 'one')
+		const read = vi.fn<() => Promise<AccountEmailMessageDetail>>()
+		read.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishRead = resolve
+				}),
+		)
+		read.mockResolvedValue({ ...message, classification: 'accepted' })
+		const mutation = new MutationObserver(
+			client,
+			emailMutationOptions(
+				client,
+				'a',
+				() =>
+					new Promise<EmailMutationOutcome>((resolve, reject) => {
+						finishWrite = () =>
+							resolve({
+								ok: true,
+								messageId: 'one',
+								classification: 'accepted',
+							})
+						failWrite = reject
+					}),
+			),
+		)
+		const write = mutation.mutate(action).catch(() => undefined)
+		await vi.waitFor(() => expect(finishWrite).toBeDefined())
+		const options = { queryKey: key, queryFn: read, staleTime: Infinity }
+		const navigation = client.ensureQueryData(options)
+		const observer = new QueryObserver(client, options)
+		const stop = observer.subscribe(() => {})
+		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+		if (outcome === 'accepted') finishWrite()
+		else failWrite(new Error('Lost response'))
+		await Promise.resolve()
+		finishRead(message)
+		await expect(navigation).resolves.toEqual(message)
+		await write
+		expect(read).toHaveBeenCalledTimes(2)
+		expect(
+			client.getQueryData<AccountEmailMessageDetail>(key)?.classification,
+		).toBe('accepted')
+		expect(client.isMutating()).toBe(0)
+		stop()
+		client.clear()
+	},
+)
