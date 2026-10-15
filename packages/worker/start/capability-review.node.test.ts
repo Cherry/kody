@@ -33,6 +33,7 @@ const payload: AccountPackageApproveCapabilitiesLoaderData = {
 		{ kind: 'storage', storageId: 'storage-id', hosts: [], via: ['root'] },
 	],
 	fingerprintMatchesApproval: false,
+	goPublicRequestId: null,
 	latestApprovedAt: null,
 	settingsHref: '/@owner/example/settings',
 	packageHref: '/@owner/example',

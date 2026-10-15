@@ -49,6 +49,7 @@ vi.mock('../../src/app/account-package-visibility.ts', () => ({
 vi.mock('../../src/app/account-package-capability-approval.ts', () => ({
 	setAccountPackageInternetVisible: state.operation,
 	approveAccountPackageCapabilities: state.operation,
+	approveAccountPackageCapabilitiesAndGoPublic: state.operation,
 	approveAccountPackageCredentialNeeds: state.operation,
 	approveAccountPackageWentPublic: state.operation,
 }))
@@ -109,4 +110,23 @@ test('native operation validators reject missing identity and strip action dispa
 		visibility: 'public',
 		confirmName: 'repo',
 	})
+})
+
+test('combined approval validates the request identity and preserves it at the authenticated boundary', async () => {
+	await operations.approvePackageCapabilitiesAndGoPublic({
+		data: { packageId: 'pkg', fingerprint: 'reviewed', requestId: 'request-1' },
+	})
+	expect(state.operation).toHaveBeenLastCalledWith({
+		request: state.request,
+		env: {},
+		user: {},
+		packageId: 'pkg',
+		fingerprint: 'reviewed',
+		requestId: 'request-1',
+	})
+	expect(() =>
+		operations.approvePackageCapabilitiesAndGoPublic({
+			data: { packageId: 'pkg', fingerprint: 'reviewed', requestId: '' },
+		}),
+	).toThrow()
 })

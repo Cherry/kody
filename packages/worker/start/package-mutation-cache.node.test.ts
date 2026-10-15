@@ -8,6 +8,7 @@ vi.mock('#start/server/package-mutations', () => ({
 	setPackageVisibility: writePackage,
 	setPackageInternetVisible: writePackage,
 	approvePackageCapabilities: writePackage,
+	approvePackageCapabilitiesAndGoPublic: writePackage,
 	approvePackageCredentialNeeds: writePackage,
 	approvePackageWentPublic: writePackage,
 	deletePackage: writePackage,
@@ -67,6 +68,11 @@ test('accepted writes reconcile the submitting actor after unmount', async () =>
 })
 test.each([
 	{ action: 'approve-capabilities', fingerprint: 'reviewed' },
+	{
+		action: 'approve-capabilities-and-go-public',
+		fingerprint: 'reviewed',
+		requestId: 'request',
+	},
 	{ action: 'approve-credential-needs', requestId: 'request' },
 	{ action: 'set-visibility', visibility: 'public', confirmName: 'repo' },
 ] as const)(

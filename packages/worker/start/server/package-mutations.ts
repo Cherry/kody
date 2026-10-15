@@ -137,6 +137,36 @@ export const approvePackageCapabilities = createServerFn({ method: 'POST' })
 		})
 	})
 
+export const approvePackageCapabilitiesAndGoPublic = createServerFn({
+	method: 'POST',
+})
+	.validator(
+		z.object({
+			packageId: z.string().trim().min(1),
+			fingerprint: z.string(),
+			requestId: z.string().trim().min(1),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const [
+			{ withWebsiteMutation },
+			{ approveAccountPackageCapabilitiesAndGoPublic },
+			{ setResponseStatus },
+		] = await Promise.all([
+			import('./mutation-context.ts'),
+			import('../../src/app/account-package-capability-approval.ts'),
+			import('@tanstack/react-start/server'),
+		])
+		return withWebsiteMutation({}, async (context) => {
+			const result = await approveAccountPackageCapabilitiesAndGoPublic({
+				...context,
+				...data,
+			})
+			setResponseStatus(result.status)
+			return result.data
+		})
+	})
+
 export const approvePackageCredentialNeeds = createServerFn({ method: 'POST' })
 	.validator(
 		z.object({ packageId: z.string().trim().min(1), requestId: z.string() }),

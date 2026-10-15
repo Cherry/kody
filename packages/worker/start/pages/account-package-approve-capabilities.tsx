@@ -204,7 +204,13 @@ export function AccountPackageApproveCapabilitiesRoute({
 	const [approvingCapabilities, setApprovingCapabilities] = useState(false)
 	const busy =
 		mutation.isPending || approvingRequestId !== null || approvingCapabilities
-	const pendingApprovals = payload.pendingApprovals ?? []
+	const goPublicRequestId = payload.goPublicRequestId ?? null
+	const allPendingApprovals = payload.pendingApprovals ?? []
+	const pendingApprovals = goPublicRequestId
+		? allPendingApprovals.filter(
+				(approval) => approval.id !== goPublicRequestId,
+			)
+		: allPendingApprovals
 	const pageCopy = approveCapabilitiesPageCopy(payload)
 	const hasWentPublicPending = pendingApprovals.some(
 		(approval) => approval.reason === 'went_public',
@@ -247,12 +253,20 @@ export function AccountPackageApproveCapabilitiesRoute({
 		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.submit({
-				action: 'approve-capabilities',
-				fingerprint: payload.fingerprint,
-			})
+			await mutation.submit(
+				goPublicRequestId
+					? {
+							action: 'approve-capabilities-and-go-public',
+							fingerprint: payload.fingerprint,
+							requestId: goPublicRequestId,
+						}
+					: {
+							action: 'approve-capabilities',
+							fingerprint: payload.fingerprint,
+						},
+			)
 			if (isCurrent()) {
-				if (payload.package.isInternetVisible)
+				if (payload.package.isInternetVisible || goPublicRequestId)
 					await router.navigate({ to: payload.settingsHref })
 				else await router.invalidate({ sync: true })
 			}
@@ -478,10 +492,19 @@ export function AccountPackageApproveCapabilitiesRoute({
 					<PackageSecurityAuditField
 						audit={payload.securityAudit}
 						packageName={payload.package.name}
-						hasPausedPublish={pendingApprovals.some(
+						hasPausedPublish={allPendingApprovals.some(
 							(approval) => approval.pendingCommit !== payload.publishedCommit,
 						)}
 					/>
+					{goPublicRequestId ? (
+						<p
+							data-testid="package-approve-capabilities-go-public-note"
+							css={{ margin: 0, color: colors.textMuted }}
+						>
+							You asked to make this package internet-visible. One approval
+							records this capability set and turns on internet-visible serving.
+						</p>
+					) : null}
 					<div
 						css={{
 							display: 'flex',
@@ -500,9 +523,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 							>
 								{approvingCapabilities
 									? 'Approving…'
-									: payload.package.isInternetVisible
-										? 'Re-approve capability set'
-										: 'Approve capability set'}
+									: goPublicRequestId
+										? 'Approve and make internet-visible'
+										: payload.package.isInternetVisible
+											? 'Re-approve capability set'
+											: 'Approve capability set'}
 							</button>
 						) : null}
 						<SiteLink

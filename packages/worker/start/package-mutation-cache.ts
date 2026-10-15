@@ -5,6 +5,7 @@ import {
 	setPackageVisibility,
 	setPackageInternetVisible,
 	approvePackageCapabilities,
+	approvePackageCapabilitiesAndGoPublic,
 	approvePackageCredentialNeeds,
 	approvePackageWentPublic,
 	deletePackage,
@@ -44,6 +45,11 @@ export type PackageWrite =
 	  }
 	| { action: 'approve-capabilities'; fingerprint: string }
 	| {
+			action: 'approve-capabilities-and-go-public'
+			fingerprint: string
+			requestId: string
+	  }
+	| {
 			action: 'approve-credential-needs' | 'approve-went-public'
 			requestId: string
 	  }
@@ -80,6 +86,14 @@ async function writePackage(packageId: string, input: PackageWrite) {
 		case 'approve-capabilities':
 			return approvePackageCapabilities({
 				data: { packageId, fingerprint: input.fingerprint },
+			})
+		case 'approve-capabilities-and-go-public':
+			return approvePackageCapabilitiesAndGoPublic({
+				data: {
+					packageId,
+					fingerprint: input.fingerprint,
+					requestId: input.requestId,
+				},
 			})
 		case 'approve-credential-needs':
 			return approvePackageCredentialNeeds({
