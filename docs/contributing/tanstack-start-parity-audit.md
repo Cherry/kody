@@ -2,6 +2,32 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `7ac5a2af0`
+
+Preview run `38700600974` deployed merge
+`fb02ca65fc255520eebb4c34976bf436b451fe14`, containing PR head `6d7ea0401` and
+main `fc93d6632`. The health endpoint returned HTTP 200. This revision includes
+the native approval-page copy port, shared signed access tickets, and
+feature-flagged credential-need enforcement. No migration files differ from
+main.
+
+Validate `38700601053` passed Workers and MCP at inspection. Node and E2E were
+running. Static found a merged test calling a deleted handler and two unused
+exports. Commit `7ac5a2af0` updates the test to the domain operation, removes
+the unused website absorb operation, and narrows the copy export. Worker-test
+TypeScript and Knip pass locally after those corrections.
+
+Review also found settlement cancellation could reject uncached navigation
+promises, and retained account navigation could leave resend pending or accept
+an old avatar completion. Local fixes preserve uncached reads, derive network
+pending state from Query, and guard callbacks with captured submission identity.
+Regression coverage uses actual page-query barriers and held browser responses.
+These local changes are not in the verified preview and need CI execution.
+
+Terms-to-Privacy navigation and browser back completed without console errors on
+the prior preview. This narrow public smoke check is not a matched-state visual
+comparison. Authenticated parity remains unverified.
+
 ### Follow-up at source `6d83c25cc`
 
 Validate run `38697218301` for pushed head `8924216b8` passed Node, Workers, and
