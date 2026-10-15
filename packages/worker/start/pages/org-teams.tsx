@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { OrgTeamInviteLinks } from './org-teams-invite-links.tsx'
 import { type OrgPeopleAction } from './org-people-mutation.ts'
 import { type OrgTeamsLoaderData } from '#universal/loader-data.ts'
 import { orgIdentity } from '#universal/org-pages.ts'
@@ -235,6 +236,15 @@ function OrgTeamsContent({
 											{renderIcon('plus', { size: '1.05rem' })}Add
 										</button>
 									</div>
+								) : null}
+								{data.canCreateInviteLinks ? (
+									<OrgTeamInviteLinks
+										team={team}
+										links={data.inviteLinks}
+										orgSlug={data.org.slug}
+										queryKey={queryKey}
+										onMessage={(text, tone) => setMessage({ text, tone })}
+									/>
 								) : null}
 							</li>
 						))}

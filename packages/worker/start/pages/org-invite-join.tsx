@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
-import { joinOrganization } from '#start/server/join-organization'
+import {
+	joinOrganization,
+	declineOrganizationInvite,
+} from '#start/server/join-organization'
+import { inviteLinkOfferCopy } from '#universal/invite-link-offer-copy.ts'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
@@ -12,6 +17,7 @@ import { type OrgInviteJoinLoaderData } from '#universal/loader-data.ts'
 import { routes } from '#universal/routes.ts'
 import {
 	cardCss,
+	nativeDisclosureCss,
 	getPrimaryButtonCss,
 	getSecondaryButtonCss,
 	mutedLinkCss,
@@ -51,20 +57,30 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 	const mutation = useMutation({
 		mutationFn: async ({
 			token,
+			action,
 		}: {
+			action: 'accept' | 'decline'
 			token: string
 			actorKey: string | null
 		}) => {
-			const result = await joinOrganization({ data: token })
+			const result =
+				action === 'decline'
+					? await declineOrganizationInvite({ data: token })
+					: await joinOrganization({ data: token })
 			return {
 				needsLogin: false,
-				alreadyMember: result.alreadyMember,
+				alreadyMember: 'alreadyMember' in result ? result.alreadyMember : false,
 				redirectTo: result.redirectTo,
 			}
 		},
-		onSuccess: async (result, variables) => {
-			if (!result.needsLogin)
-				await invalidateShellQueries(client, variables.actorKey)
+		onMutate: async (variables) => {
+			await client.cancelQueries({ queryKey: ['page', variables.actorKey] })
+		},
+		onSettled: async (_result, _error, variables) => {
+			await Promise.all([
+				client.invalidateQueries({ queryKey: ['page', variables.actorKey] }),
+				invalidateShellQueries(client, variables.actorKey),
+			])
 		},
 	})
 	if (!data.ok)
@@ -87,6 +103,7 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 				</div>
 			</section>
 		)
+	const copy = inviteLinkOfferCopy(data)
 	const name = data.org.displayName?.trim() || data.org.slug
 	const loginHref = `/login?redirectTo=${encodeURIComponent(routes.orgInviteJoin.href({ token: data.token }))}`,
 		signupHref = `/signup?redirectTo=${encodeURIComponent(routes.orgInviteJoin.href({ token: data.token }))}`
@@ -94,17 +111,21 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 		mutation.error?.message ??
 		(mutation.isSuccess && !mutation.data.needsLogin
 			? mutation.data.alreadyMember
-				? 'You are already a member of this organization.'
-				: 'You joined the organization.'
+				? copy.satisfied
+				: mutation.variables.action === 'decline'
+					? 'Invite declined.'
+					: 'Invite accepted.'
 			: null)
 	return (
-		<section css={pageCss} data-testid="org-invite-join">
+		<section
+			css={pageCss}
+			data-testid="org-invite-join"
+			data-invite-kind={data.offer.kind}
+		>
 			<header css={pageHeaderCss}>
-				<h1 css={pageTitleCss}>Join {name}</h1>
+				<h1 css={pageTitleCss}>{copy.title}</h1>
 				<p css={pageDescriptionCss}>
-					{data.alreadyMember
-						? `You already belong to ${name}.`
-						: `You are invited to join ${name} as ${data.roleLabel}.`}
+					{data.alreadyMember ? copy.satisfied : copy.description}
 				</p>
 			</header>
 			<div css={cardCss}>
@@ -116,10 +137,15 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 						variant="well"
 					/>
 					<div css={orgTextCss}>
-						<p css={orgNameCss}>{name}</p>
-						<p css={orgDetailCss}>@{data.org.slug}</p>
+						<p css={orgNameCss}>{copy.subject}</p>
+						<p css={orgDetailCss}>{copy.subjectDetail}</p>
 					</div>
 				</div>
+				{copy.notice && !data.alreadyMember ? (
+					<p css={noticeCss} data-testid="org-invite-join-notice">
+						{copy.notice}
+					</p>
+				) : null}
 				{message ? (
 					<>
 						<p
@@ -137,8 +163,8 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 				) : null}
 				{data.alreadyMember ? (
 					<p css={footerCss}>
-						<SiteLink href={`/@${data.org.slug}`} css={getPrimaryButtonCss()}>
-							Open {name}
+						<SiteLink href={copy.openHref} css={getPrimaryButtonCss()}>
+							{copy.openLabel}
 						</SiteLink>
 					</p>
 				) : data.authenticated ? (
@@ -147,11 +173,11 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 							type="button"
 							disabled={mutation.isPending || mutation.isSuccess}
 							data-testid="org-invite-join-confirm"
-							css={getPrimaryButtonCss()}
+							css={[getPrimaryButtonCss(), iconButtonCss]}
 							onClick={() => {
 								const active = capture()
 								mutation.mutate(
-									{ token: data.token, actorKey },
+									{ token: data.token, actorKey, action: 'accept' },
 									{
 										onSuccess: (result) => {
 											if (active())
@@ -166,19 +192,64 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 							}}
 						>
 							{renderIcon('plus', { size: '1.05rem' })}
-							{mutation.isPending ? 'Joining…' : `Join ${name}`}
+							{mutation.isPending && mutation.variables.action === 'accept'
+								? 'Accepting…'
+								: copy.acceptLabel}
+						</button>
+						<button
+							type="button"
+							disabled={mutation.isPending || mutation.isSuccess}
+							data-testid="org-invite-join-decline"
+							css={getSecondaryButtonCss()}
+							onClick={() => {
+								const active = capture()
+								mutation.mutate(
+									{ token: data.token, actorKey, action: 'decline' },
+									{
+										onSuccess: (result) => {
+											if (active())
+												void router.navigate({ href: result.redirectTo })
+										},
+									},
+								)
+							}}
+						>
+							{mutation.isPending && mutation.variables.action === 'decline'
+								? 'Declining…'
+								: 'Decline'}
 						</button>
 					</div>
 				) : (
 					<div css={actionsCss}>
 						<SiteLink href={loginHref} css={getPrimaryButtonCss()}>
-							Sign in to join
+							Sign in to accept
 						</SiteLink>
 						<SiteLink href={signupHref} css={getSecondaryButtonCss()}>
 							Create an account
 						</SiteLink>
 					</div>
 				)}
+				<details css={detailsCss} data-testid="org-invite-join-details">
+					<summary>Details</summary>
+					<dl css={detailListCss}>
+						<div>
+							<dt>Organization</dt>
+							<dd>
+								{name} (@{data.org.slug})
+							</dd>
+						</div>
+						{data.invitedBy ? (
+							<div>
+								<dt>Invited by</dt>
+								<dd>{data.invitedBy}</dd>
+							</div>
+						) : null}
+						<div>
+							<dt>Expires</dt>
+							<dd>{formatTimestampDate(data.expiresAt)}</dd>
+						</div>
+					</dl>
+				</details>
 			</div>
 		</section>
 	)
@@ -239,4 +310,37 @@ const infoMessageCss: CSSObject = {
 const errorMessageCss: CSSObject = {
 	margin: `0 0 ${spacing.md}`,
 	color: colors.danger,
+}
+
+const noticeCss = {
+	margin: `0 0 ${spacing.lg}`,
+	color: colors.textMuted,
+	fontSize: typography.fontSize.sm,
+	lineHeight: 1.5,
+}
+
+const detailsCss = {
+	...nativeDisclosureCss,
+	marginTop: spacing.lg,
+}
+
+const detailListCss = {
+	margin: 0,
+	display: 'grid',
+	gap: spacing.sm,
+	'& dt': {
+		fontSize: typography.fontSize.sm,
+		color: colors.textMuted,
+	},
+	'& dd': {
+		margin: 0,
+		color: colors.text,
+		overflowWrap: 'anywhere' as const,
+	},
+}
+
+const iconButtonCss = {
+	display: 'inline-flex',
+	alignItems: 'center',
+	gap: spacing.xs,
 }

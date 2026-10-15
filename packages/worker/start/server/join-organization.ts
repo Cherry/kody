@@ -15,3 +15,18 @@ export const joinOrganization = createServerFn({ method: 'POST' })
 			}
 		})
 	})
+
+export const declineOrganizationInvite = createServerFn({ method: 'POST' })
+	.validator(z.string().trim().min(1))
+	.handler(async ({ data: token }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { declineWebsiteOrganizationInvite } =
+			await import('../../src/app/handlers/org-invite-join.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation({}, async (context) =>
+			requireOperationResult(
+				await declineWebsiteOrganizationInvite({ ...context, token }),
+			),
+		)
+	})

@@ -252,7 +252,8 @@ function OrgMembersContent({
 									onChange={(event) => setInvitee(event.currentTarget.value)}
 								/>
 								<p css={accountFieldNoteCss}>
-									They accept by pasting the invite prompt into their agent.
+									It waits on their Waiting page, or they can paste the invite
+									prompt into their agent.
 								</p>
 							</label>
 							<label css={accountFieldCss}>
@@ -290,7 +291,7 @@ function OrgMembersContent({
 				<AccountManagementPanel title="Pending invites">
 					<ul css={listCss} data-testid="org-invites">
 						{data.invites.map((invite) => (
-							<li key={invite.id} css={rowItemCss}>
+							<li key={invite.id} css={rowItemCss} data-testid="org-invite">
 								<div css={rowCss}>
 									<span aria-hidden="true" css={inviteIconCss}>
 										{renderIcon('mail', { size: '1.25rem' })}
@@ -303,10 +304,34 @@ function OrgMembersContent({
 													: 'Invite')}
 										</span>
 										<span css={rowDetailCss}>
-											{invite.roleLabel} · Expires{' '}
+											{invite.kind === 'membership'
+												? invite.roleLabel
+												: 'Access grant'}{' '}
+											· Pending · Expires{' '}
 											{formatTimestampDate(invite.expiresAt)}
 										</span>
 									</span>
+									{invite.kind === 'membership' ? (
+										<button
+											type="button"
+											disabled={mutation.isPending}
+											data-testid="org-invite-revoke"
+											css={getDangerPillCss({ size: 'sm' })}
+											onClick={() =>
+												post(
+													'memberInviteRevoke',
+													{ inviteId: invite.id },
+													'Invite revoked.',
+												)
+											}
+										>
+											{mutation.isPending &&
+											mutation.variables.action === 'memberInviteRevoke' &&
+											mutation.variables.body.inviteId === invite.id
+												? 'Revoking…'
+												: 'Revoke'}
+										</button>
+									) : null}
 								</div>
 							</li>
 						))}

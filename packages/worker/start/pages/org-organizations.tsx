@@ -5,6 +5,11 @@ import {
 	suggestHandle,
 } from '@kody-internal/shared/handle-rules.ts'
 import { permanentHandleInputProps } from '#client/handle-field.ts'
+import {
+	usePendingInviteActions,
+	renderPendingInviteActions,
+	type PendingInviteActions,
+} from './pending-invite-actions.tsx'
 import { useServerFn } from '@tanstack/react-start'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
@@ -61,6 +66,7 @@ export function OrganizationsPage({
 	data: AccountOrganizationsLoaderData
 }) {
 	const { pageLocation } = useMatchedPageScope()
+	const inviteActions = usePendingInviteActions()
 	return (
 		<AccountManagementShell currentHref={pageLocation.href}>
 			<AccountPageHeader
@@ -86,10 +92,15 @@ export function OrganizationsPage({
 			<AccountManagementPanel
 				id="invites"
 				title="Invites"
-				description="To accept an invite, paste the invite prompt you were sent into your agent."
+				description="Invites addressed to you and invite links you opened. They also wait on your Waiting page."
 				ariaLabel="Invites"
 			>
-				{renderInvites(data.invites)}
+				{inviteActions.message ? (
+					<AccountManagementMessage tone={inviteActions.tone}>
+						{inviteActions.message}
+					</AccountManagementMessage>
+				) : null}
+				{renderInvites(data.pendingInvites, inviteActions)}
 			</AccountManagementPanel>
 		</AccountManagementShell>
 	)
@@ -176,7 +187,9 @@ function CreateOrganizationForm() {
 							setConfirming(false)
 							return
 						}
-						const error = getHandleFormatError(slug.trim(), { label: 'Handle' })
+						const error = getHandleFormatError(slug.trim(), {
+							label: 'Handle',
+						})
 						if (error) {
 							setClientError({ message: error, field: 'slug' })
 							setConfirming(false)
@@ -376,20 +389,6 @@ function renderOrgRow(input: {
 	)
 }
 
-function inviteRoleLabel(
-	invite: AccountOrganizationsLoaderData['invites'][number],
-) {
-	if (invite.kind !== 'membership') return 'Access grant'
-	switch (invite.role) {
-		case 'owner':
-		case 'member':
-		case 'billing':
-			return `${orgRoleLabel(invite.role)} invite`
-		default:
-			return 'Membership invite'
-	}
-}
-
 function renderOrganizationList(data: AccountOrganizationsLoaderData) {
 	const organizations = orderOrganizations(
 		organizationsWithSignupFallback({
@@ -421,7 +420,10 @@ function renderOrganizationList(data: AccountOrganizationsLoaderData) {
 	)
 }
 
-function renderInvites(invites: AccountOrganizationsLoaderData['invites']) {
+function renderInvites(
+	invites: AccountOrganizationsLoaderData['pendingInvites'],
+	actions: PendingInviteActions,
+) {
 	if (invites.length === 0) {
 		return (
 			<div css={emptyStateCss} data-testid="invites-empty">
@@ -431,7 +433,8 @@ function renderInvites(invites: AccountOrganizationsLoaderData['invites']) {
 				<div css={{ display: 'grid', gap: spacing.xs }}>
 					<p css={emptyTitleCss}>No invites waiting</p>
 					<p css={mutedCopyCss}>
-						When someone invites you to an organization, it shows up here.
+						When someone invites you to an organization, team, or package, it
+						shows up here.
 					</p>
 				</div>
 			</div>
@@ -441,14 +444,19 @@ function renderInvites(invites: AccountOrganizationsLoaderData['invites']) {
 		<ul css={orgListCss} data-testid="invites-list">
 			{invites.map((invite) =>
 				renderOrgRow({
-					key: invite.id,
+					key: `${invite.source}:${invite.id}`,
 					slug: invite.orgSlug,
 					displayName: invite.orgDisplayName,
-					personal: false,
+					personal: invite.orgPersonal,
 					viewer: { displayName: '', avatarUrl: null },
-					detail: <>Expires {formatTimestampDate(invite.expiresAt)}</>,
-					pills: [{ label: inviteRoleLabel(invite), tone: 'quiet' }],
-					testId: 'invite',
+					detail: (
+						<>
+							{invite.label} · Expires {formatTimestampDate(invite.expiresAt)}
+						</>
+					),
+					pills: [],
+					testId: 'pending-invite',
+					trailing: renderPendingInviteActions(invite, actions),
 				}),
 			)}
 		</ul>

@@ -1,6 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import {
+	revokeOrganizationMemberInviteSchema,
 	setOrganizationMemberRoleSchema,
 	removeOrganizationMemberSchema,
 	inviteOrganizationMemberSchema,
@@ -188,6 +189,27 @@ export const revokeOrganizationGrant = createServerFn({ method: 'POST' })
 			async (context) =>
 				requireOperationResult(
 					await revokeOrganizationGrant({ ...context, ...data }),
+				),
+		)
+	})
+
+export const revokeOrganizationMemberInvite = createServerFn({ method: 'POST' })
+	.validator(
+		revokeOrganizationMemberInviteSchema.extend({
+			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+		}),
+	)
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { revokeOrganizationMemberInvite } =
+			await import('../../src/app/handlers/org-members.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation(
+			{ scope: { orgSlug: data.orgSlug } },
+			async (context) =>
+				requireOperationResult(
+					await revokeOrganizationMemberInvite({ ...context, ...data }),
 				),
 		)
 	})

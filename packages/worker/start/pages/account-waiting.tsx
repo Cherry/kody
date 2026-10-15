@@ -1,4 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import {
+	usePendingInviteActions,
+	renderPendingInviteActions,
+	type PendingInviteActions,
+} from './pending-invite-actions.tsx'
+import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { recordWaitingClick } from '#start/server/account-mutations'
 import { SiteLink } from '../components/site-link.tsx'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
@@ -10,9 +16,10 @@ import {
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
-import { type WaitingItem, type WaitingSeverity } from '#universal/waiting.ts'
+import { type WaitingSeverity } from '#universal/waiting.ts'
 import {
 	AccountManagementPanel,
+	AccountManagementMessage,
 	AccountManagementShell,
 	AccountPageHeader,
 	noticeCardCss,
@@ -31,6 +38,7 @@ export function AccountWaitingPage({
 	payload: AccountWaitingLoaderData
 	currentHref: string
 }) {
+	const inviteActions = usePendingInviteActions()
 	const data = initialPayload
 	const { orgSlug } = useMatchedPageScope()
 
@@ -42,21 +50,30 @@ export function AccountWaitingPage({
 				currentHref={currentHref}
 			/>
 
-			{data ? renderWaitingBody(data.items, currentHref, orgSlug) : null}
+			{inviteActions.message ? (
+				<AccountManagementMessage tone={inviteActions.tone}>
+					{inviteActions.message}
+				</AccountManagementMessage>
+			) : null}
+			{data
+				? renderWaitingBody(data, currentHref, orgSlug, inviteActions)
+				: null}
 		</AccountManagementShell>
 	)
 }
 
 function renderWaitingBody(
-	items: Array<WaitingItem>,
+	data: AccountWaitingLoaderData,
 	currentHref: string,
 	orgSlug: string | null,
+	inviteActions: PendingInviteActions,
 ) {
-	if (items.length === 0) {
+	const items = data.items
+	if (items.length === 0 && data.invites.length === 0) {
 		return (
 			<AccountManagementPanel
 				title="Nothing is waiting on you"
-				description="Connections are healthy, and no publishes or grants need a click."
+				description="Connections are healthy, no invites are waiting, and no publishes or grants need a click."
 			>
 				<p css={{ margin: 0, color: colors.textMuted }}>
 					<SiteLink
@@ -81,6 +98,40 @@ function renderWaitingBody(
 				gap: spacing.md,
 			}}
 		>
+			{data.invites.map((invite) => (
+				<section
+					key={`invite:${invite.source}:${invite.id}`}
+					data-testid="waiting-invite"
+					css={{
+						...noticeCardCss,
+						...getAccentCalloutCss({ accentColor: colors.primary }),
+					}}
+				>
+					<h2
+						css={{
+							margin: 0,
+							fontSize: '1.05rem',
+							fontWeight: 700,
+							letterSpacing: '-0.01em',
+							lineHeight: 1.3,
+						}}
+					>
+						{invite.label}
+					</h2>
+					<p
+						css={{
+							margin: 0,
+							color: colors.textMuted,
+							fontSize: '0.95rem',
+							lineHeight: 1.5,
+						}}
+					>
+						Invite from {invite.orgDisplayName?.trim() || `@${invite.orgSlug}`}{' '}
+						· Expires {formatTimestampDate(invite.expiresAt)}
+					</p>
+					{renderPendingInviteActions(invite, inviteActions)}
+				</section>
+			))}
 			{items.map((item) => (
 				<section
 					key={item.id}

@@ -1,4 +1,5 @@
 import {
+	revokeOrganizationMemberInvite,
 	setOrganizationMemberRole,
 	removeOrganizationMember,
 	inviteOrganizationMember,
@@ -10,6 +11,7 @@ import {
 	revokeOrganizationGrant,
 } from '#start/server/org-mutations'
 import {
+	revokeOrganizationMemberInviteSchema,
 	setOrganizationMemberRoleSchema,
 	removeOrganizationMemberSchema,
 	inviteOrganizationMemberSchema,
@@ -21,6 +23,7 @@ import {
 	revokeOrganizationGrantSchema,
 } from '#universal/org-people-mutations.ts'
 export type OrgPeopleAction =
+	| 'memberInviteRevoke'
 	| 'memberRole'
 	| 'memberRemove'
 	| 'memberInvite'
@@ -74,6 +77,15 @@ export function orgPeopleMutationOptions(
 			)
 				throw new Error('Organization unavailable.')
 			switch (action) {
+				case 'memberInviteRevoke':
+					return resultSchema.parse(
+						await revokeOrganizationMemberInvite({
+							data: {
+								orgSlug: input.slug,
+								...revokeOrganizationMemberInviteSchema.parse(body),
+							},
+						}),
+					)
 				case 'memberRole':
 					return resultSchema.parse(
 						await setOrganizationMemberRole({

@@ -2,6 +2,7 @@ import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { resolveOrgManagementAccess } from '#app/org-management-access.ts'
 import {
+	revokeOrganizationMemberInvite,
 	loadOrgMembersData,
 	inviteOrganizationMember,
 	createOrganizationInviteLink,
@@ -130,4 +131,22 @@ async function readJsonObject(request: Request) {
 	const body = await request.json().catch(() => null)
 	if (!body || typeof body !== 'object') return null
 	return body as Record<string, unknown>
+}
+
+export function testOrgMembersInviteRevokePostHandler(env: Env) {
+	return {
+		async execute({ request }: { request: Request }) {
+			const user = await readAuthenticatedAppUser(request, env)
+			if (!user)
+				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
+			const body = await readJsonObject(request)
+			return revokeOrganizationMemberInvite({
+				request,
+				env,
+				user,
+				orgSlug: new URL(request.url).pathname.split('/')[1]!.slice(1),
+				inviteId: String(body?.inviteId ?? ''),
+			})
+		},
+	}
 }

@@ -47,6 +47,7 @@ vi.mock('#worker/orgs/billing.ts', async (importOriginal) => {
 })
 
 const {
+	testOrgMembersInviteRevokePostHandler,
 	testOrgMembersApiHandler,
 	testOrgMembersInviteLinksPostHandler,
 	testOrgMembersInviteLinksRevokePostHandler,
@@ -465,4 +466,72 @@ test('signup org membership writes stay off the web even for a second owner', as
 	expect(linked.data).toMatchObject({
 		error: expect.stringMatching(/personal organization/),
 	})
+})
+
+function postJson(path: string, body: Record<string, unknown>) {
+	return new Request(`https://kody.test/@zeta-co/-/members/${path}`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
+}
+
+test('pending invites list as Pending and an owner can revoke them', async () => {
+	const env = createEnv()
+	const invite = postJson('invite.json', {
+		invitee: 'eve@example.com',
+		role: 'member',
+	})
+	await signIn('ada', invite)
+	await testOrgMembersInvitePostHandler(env).execute({
+		request: invite,
+	} as never)
+	const listed = await testOrgMembersApiHandler(env).execute({
+		request: new Request('https://kody.test/@zeta-co/-/members.json'),
+	} as never)
+	const { invites } = listed.data as {
+		invites: Array<{ id: string; inviteeEmail: string | null }>
+	}
+	expect(invites).toMatchObject([{ inviteeEmail: 'eve@example.com' }])
+	const inviteId = invites[0]!.id
+
+	const asMember = postJson('invite-revoke.json', { inviteId })
+	await signIn('bob', asMember)
+	expect(
+		(
+			await testOrgMembersInviteRevokePostHandler(env).execute({
+				request: asMember,
+			} as never)
+		).status,
+	).toBe(403)
+
+	const asOwner = postJson('invite-revoke.json', { inviteId })
+	await signIn('ada', asOwner)
+	const revoked = await testOrgMembersInviteRevokePostHandler(env).execute({
+		request: asOwner,
+	} as never)
+	expect(revoked.status).toBe(200)
+	expect(revoked.data).toMatchObject({ ok: true, invites: [] })
+	expect(
+		sqlite.prepare(`SELECT status FROM invites WHERE id = ?`).get(inviteId),
+	).toEqual({ status: 'revoked' })
+
+	const again = postJson('invite-revoke.json', { inviteId })
+	await signIn('ada', again)
+	expect(
+		(
+			await testOrgMembersInviteRevokePostHandler(env).execute({
+				request: again,
+			} as never)
+		).status,
+	).toBe(400)
+	const missing = postJson('invite-revoke.json', { inviteId: 'nope' })
+	await signIn('ada', missing)
+	expect(
+		(
+			await testOrgMembersInviteRevokePostHandler(env).execute({
+				request: missing,
+			} as never)
+		).status,
+	).toBe(404)
 })
