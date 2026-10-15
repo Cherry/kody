@@ -4,8 +4,8 @@
 
 Validate run `38727730565` for source `672913f5f` has passed Static, Workers
 and MCP. Node finished with 6,403 passes and two failures, both in the new
-imperative auth hook test harness with an invalid hook call. The harness repair
-is in progress. Browser E2E remains running at this inspection. Later local
+imperative auth hook test harness with an invalid hook call. Browser E2E also passed. Commit `be8ba14b5` repairs the hook harness using
+real React rendering and native Router context. The repair and later local
 commits have not yet been verified by CI.
 
 Preview run `38727730278` succeeded. Its health endpoint reports merge
