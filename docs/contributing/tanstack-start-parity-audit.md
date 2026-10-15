@@ -1,5 +1,29 @@
 # Start parity audit
 
+## Verification blocked at source a89c03111
+
+PR 3561 is open and conflicts with main `cf4cef2d2`. Validate and Preview cannot
+run on that source until the conflict is resolved. Merging main remains pending
+user approval because automatic approval review rejected its migrations 0154 and
+0155 under the no-schema-change instruction. The migration's follow-up commits
+add no schema changes. Main's addressed collaborator invite feature has been
+ported directly to native Start functions without restoring its HTTP action.
+
+The last completed Validate, `38773350396` on source `050de978f`, passed
+Workers, Static and MCP. Node failed four new search fixture tests because their
+origin was missing. Browser tests completed with 167 passing and nine failing:
+seven default-filter URL mismatches, unknown admin suffix handling, and an
+ambiguous memory detail selector. The pushed source contains fixes, but their
+runtime results remain unverified. The deployed preview still runs merge
+`f7aa53c9e`.
+
+Readiness still requires a green run containing the fixes and deployed checks of
+filtered links, deleted memories, invite creation/revocation and matched docs
+typography. Broader gaps include populated package credentials/mappings/triggers
+and approval journeys, populated account/security/billing states, role-matched
+organization/admin views, and remaining public/mobile screen families. Authored
+tests and sampled docs screenshots do not establish full visual parity.
+
 ## Independent source review and rendered metadata
 
 An independent read-only review at `0b110530b` found no concrete regression in
