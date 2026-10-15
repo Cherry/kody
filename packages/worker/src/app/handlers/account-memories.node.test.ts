@@ -119,8 +119,15 @@ vi.mock('#worker/orgs/is-personal-org.ts', () => ({
 		orgId === 'stable-user-1',
 }))
 
-const { testAccountMemoriesApiHandler, createAccountMemoriesExportHandler } =
+const { testAccountMemoriesApiHandler } =
 	await import('./account-memories.test-support.ts')
+
+const { createAccountMemoriesExportHandler } =
+	await import('#start/server/memories-export.ts')
+const exportOrgBinding = vi.hoisted(() => vi.fn())
+vi.mock('#worker/orgs/repo.ts', () => ({
+	loadOrgBindingForSlug: exportOrgBinding,
+}))
 
 const env = { APP_DB: {} as D1Database } as Env
 
@@ -383,4 +390,61 @@ test('accepted memory deletion does not depend on listing memories', async () =>
 	} finally {
 		mockModule.listMemoriesByUserId.mockImplementation(original!)
 	}
+})
+
+test('memories download rejects invalid, missing, and grant-only explicit org scopes before querying memories', async () => {
+	const request = createExportClient(
+		createAccountMemoriesExportHandler,
+		'/account/memories-export.json',
+	)
+	for (const binding of [
+		null,
+		{ org: { id: 'org-team', slug: 'team' }, role: null },
+	]) {
+		exportOrgBinding.mockResolvedValueOnce(binding)
+		mockModule.listMemoriesByUserIdPage.mockClear()
+		expect((await request('?org=team')).status).toBe(404)
+		expect(mockModule.listMemoriesByUserIdPage).not.toHaveBeenCalled()
+	}
+	mockModule.listMemoriesByUserIdPage.mockClear()
+	expect((await request('?org=%20')).status).toBe(404)
+	expect(mockModule.listMemoriesByUserIdPage).not.toHaveBeenCalled()
+})
+test('memories download explicitly binds a normalized member org, without relying on auth URL binding', async () => {
+	exportOrgBinding.mockResolvedValueOnce({
+		org: { id: 'org-team', slug: 'team' },
+		role: 'member',
+	})
+	const request = createExportClient(
+		createAccountMemoriesExportHandler,
+		'/account/memories-export.json',
+	)
+	expect((await request('?org=%20TEAM%20&includeDeleted=true')).status).toBe(
+		200,
+	)
+	expect(exportOrgBinding).toHaveBeenLastCalledWith(
+		env.APP_DB,
+		'stable-user-1',
+		'team',
+	)
+	expect(mockModule.listMemoriesByUserIdPage).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			userId: 'org-team',
+			statuses: ['active', 'archived', 'deleted'],
+		}),
+	)
+})
+
+test('memories download authenticates the original session independently of the explicit org query', async () => {
+	const request = new Request(
+		'https://example.com/account/memories-export.json?org=team',
+		{ headers: { cookie: 'session=original' } },
+	)
+	exportOrgBinding.mockResolvedValueOnce(null)
+	expect(
+		(await createAccountMemoriesExportHandler(env)({ request })).status,
+	).toBe(404)
+	const args = mockModule.readAuthenticatedAppUser.mock.calls.at(-1)!
+	expect(args[0]).toBe(request)
+	expect(args[2]?.resourceRequest?.url).toBe('https://example.com/')
 })

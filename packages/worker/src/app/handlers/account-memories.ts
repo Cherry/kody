@@ -1,53 +1,13 @@
-import {
-	loadAccountMemoriesExport,
-	readAccountMemoriesIncludeDeleted,
-} from '#app/account-memories-data.ts'
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import { memoryLegacyWriteFrozenMessage } from '#mcp/memory/memory-owner.ts'
 import { deleteMemory } from '#mcp/memory/service.ts'
-import { buildMemoriesExportFilename } from '#universal/memory-export.ts'
-import { jsonResponse } from '#worker/json-response.ts'
 import { isPersonalOrg } from '#worker/orgs/is-personal-org.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 
 type AuthenticatedUser = NonNullable<
 	Awaited<ReturnType<typeof readAuthenticatedAppUser>>
 >
-
-/**
- * GET /account/memories-export.json for the org whose Memories page sent it
- * (Referer), else the signed-in user's signup org.
- * Follows the page Include deleted toggle: active and archived by default;
- * deleted rows only when that control is on.
- */
-export function createAccountMemoriesExportHandler(env: Env) {
-	return async ({ request }: { request: Request }) => {
-		const user = await readAuthenticatedAppUser(request, env)
-		if (!user) {
-			return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-		}
-		if (request.method !== 'GET') {
-			return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
-		}
-
-		const includeDeleted = readAccountMemoriesIncludeDeleted(request.url)
-		const payload = await loadAccountMemoriesExport({
-			env,
-			user,
-			includeDeleted,
-		})
-		const filename = buildMemoriesExportFilename()
-		return new Response(JSON.stringify(payload, null, 2), {
-			status: 200,
-			headers: {
-				'Cache-Control': 'no-store',
-				'Content-Disposition': `attachment; filename="${filename}"`,
-				'Content-Type': 'application/json; charset=utf-8',
-			},
-		})
-	}
-}
 
 async function handleDeleteAction(input: {
 	env: Env

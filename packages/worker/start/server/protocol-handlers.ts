@@ -31,7 +31,7 @@ import { createYoutubeThumbHandler } from '#app/handlers/youtube-thumb.ts'
 import { createAccountExportHandler } from '#app/handlers/account-export.ts'
 import { createMcpServerLogoHandler } from '#app/handlers/mcp-server-logo.ts'
 import { createAccountMcpServersOauthCallbackHandler } from '#app/handlers/account-mcp-servers.ts'
-import { createAccountMemoriesExportHandler } from '#app/handlers/account-memories.ts'
+import { createAccountMemoriesExportHandler } from './memories-export.ts'
 import {
 	createCommunityDetailRawHandler,
 	createCommunityPackageRawHandler,
