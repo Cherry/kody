@@ -1,5 +1,3 @@
-import { scrollRestorationInlineScriptCspHash } from '#universal/router-scroll-restoration.ts'
-
 /**
  * First-party HTTP security headers.
  *
@@ -62,7 +60,7 @@ const contentSecurityPolicy = [
 	"img-src 'self' data: blob: https://cdn.usefathom.com https://static.scarf.sh",
 	"font-src 'self' data:",
 	"style-src 'self' 'unsafe-inline'",
-	`script-src 'self' ${scrollRestorationInlineScriptCspHash} https://cdn.usefathom.com https://static.cloudflareinsights.com https://challenges.cloudflare.com`,
+	`script-src 'self' https://cdn.usefathom.com https://static.cloudflareinsights.com https://challenges.cloudflare.com`,
 	"connect-src 'self' https://cdn.usefathom.com https://cloudflareinsights.com https://challenges.cloudflare.com",
 	'frame-src https://challenges.cloudflare.com https://www.youtube-nocookie.com',
 	"worker-src 'self' blob:",

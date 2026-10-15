@@ -130,9 +130,16 @@ Existing fast evidence includes `client-router.node.test.ts`,
       API failures remain JSON/status failures rather than login HTML
       masquerading as successful JSON.
 
-Evidence: `document-head.node.test.ts`, `router-scroll-state.node.test.ts`,
-`router-location.node.test.ts`, and
-`packages/worker/universal/router-scroll-restoration.node.test.ts`.
+Native scroll restoration is configured in `packages/worker/start/router.tsx`
+with `scrollRestoration: true` and instant restoration. Router owns restoration;
+the old inline scroll script and its CSP hash have been removed.
+
+Related regression sources are
+`packages/worker/start/components/native-document-head.node.test.ts`,
+`packages/worker/start/navigation-motion.node.test.ts`, and
+`packages/worker/start/site-link.native.node.test.ts`. These cover metadata,
+transition policy, and link semantics. They do not establish browser scroll
+restoration parity; verify back/forward positions and focus in the browser.
 
 ## Frames, security, caching, and rendering
 
