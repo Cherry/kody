@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
+import { textSearch } from '../filter-search.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
@@ -40,6 +41,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
 			},
 		}
 	},
+	validateSearch: textSearch,
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		name: search.name,
 		package_id: search.package_id,

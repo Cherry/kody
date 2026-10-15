@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { textSearch } from '../filter-search.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountValuesPage } from '../pages/account-values.tsx'
@@ -15,6 +16,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/values')({
 		orgScope: { section: 'values' },
 		presentationSearchKeys: ['q'],
 	},
+	validateSearch: textSearch,
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		selected: search.selected,
 	}),

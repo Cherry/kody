@@ -16,13 +16,6 @@ export type TokenExchangeStyleOption =
 	| 'basic-json'
 	| 'basic-form'
 
-export function buildHrefWithUpdatedSearch(href: string, search: string) {
-	const nextUrl = new URL(href, 'http://localhost')
-	if (search) nextUrl.searchParams.set('q', search)
-	else nextUrl.searchParams.delete('q')
-	return `${nextUrl.pathname}${nextUrl.search}`
-}
-
 export function filterApps(
 	apps: Array<AdminPlatformIntegrationApp>,
 	search: string,

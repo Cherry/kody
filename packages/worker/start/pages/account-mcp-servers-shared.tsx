@@ -83,10 +83,6 @@ export type McpServerUsageDraft = {
 	allowedPackageIds: Array<string>
 }
 
-export function readSearchFilter(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
 /** The add-server form's starting `name` and `url`, from a credential creation link. */
 export function readAddServerPrefill(href: string) {
 	const params = new URL(href, 'http://localhost').searchParams

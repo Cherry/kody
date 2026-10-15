@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
+import { textSearch } from '../filter-search.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { redirect, createFileRoute } from '@tanstack/react-router'
 import { AccountMcpServersPage } from '../pages/account-mcp-servers.tsx'
@@ -10,6 +11,7 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers')({
+	validateSearch: textSearch,
 	staticData: {
 		workspaceSwitch: { section: 'mcp-servers' },
 		navigation: { rail: 'workspace', item: 'credentials' },

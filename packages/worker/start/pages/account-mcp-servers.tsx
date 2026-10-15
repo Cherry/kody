@@ -24,6 +24,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { mcpServerMutationOptions } from './account-mcp-server-mutation.ts'
+import { textSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -43,7 +44,6 @@ import {
 	filterServers,
 	readAddServerPrefill,
 	readOAuthResultFromHref,
-	readSearchFilter,
 	renderNamedServer,
 	stateColor,
 	stateLabel,
@@ -81,7 +81,7 @@ export function AccountMcpServersPage({
 	currentHref: string
 	selection: { selectedId: string | null; isCreating: boolean }
 }) {
-	const { actorKey, orgSlug } = useMatchedPageScope()
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
 	const currentScope = useRef<{ actorKey: string | null; href: string } | null>(
 		null,
 	)
@@ -146,8 +146,6 @@ export function AccountMcpServersPage({
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
-	const replaceLocation = (href: string) =>
-		router.navigate({ to: href, replace: true, resetScroll: false })
 	useEffect(() => {
 		if (!closeOnboardingMcpOAuthPopupIfOpened())
 			clearOnboardingMcpOAuthReturnCookie()
@@ -165,11 +163,20 @@ export function AccountMcpServersPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedSearch(search: string) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		return `${nextUrl.pathname}${nextUrl.search}`
+	function updateSearch(q: string) {
+		const pathname: string = pageLocation.pathname
+		const samePage = router.latestLocation.pathname === pageLocation.pathname
+		return router.navigate({
+			to: pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous: Record<string, unknown>) => {
+				const search: Record<string, unknown> = samePage
+					? previous
+					: pageLocation.search
+				return { ...search, q: q || undefined }
+			},
+		})
 	}
 
 	function showMessage(nextMessage: string | null, tone: MessageTone = 'info') {
@@ -306,7 +313,8 @@ export function AccountMcpServersPage({
 	}
 
 	const isMutating = actionState !== 'idle'
-	const search = readSearchFilter(currentHref)
+	const filters = textSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
 	const filteredServers = filterServers(servers, search)
 	const server =
 		servers.find((item) => item.id === selection.selectedId) ?? null
@@ -379,13 +387,9 @@ export function AccountMcpServersPage({
 						<RecordTableSearch
 							label="Search servers"
 							placeholder="Search servers"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={filters.q ?? ''}
 							onInput={(value) => {
-								return replaceLocation(buildHrefWithUpdatedSearch(value))
+								return updateSearch(value)
 							}}
 						/>
 					}

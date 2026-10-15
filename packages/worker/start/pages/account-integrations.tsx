@@ -5,6 +5,7 @@ import {
 	disconnectIntegration,
 	deleteOauthApp,
 } from '#start/server/account-mutations'
+import { textSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import {
@@ -47,7 +48,6 @@ import {
 	integrationListId,
 	isBuiltInApp,
 	oauthAppTitle,
-	readSearchFilter,
 	type IntegrationsSelection,
 	resolveIntegrationsSelection,
 } from './account-integrations-shared.ts'
@@ -71,7 +71,7 @@ export function AccountIntegrationsPage({
 	selection: IntegrationsSelection
 }) {
 	const queryClient = useQueryClient()
-	const { actorKey, orgSlug } = useMatchedPageScope()
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
 	const capture = useSubmitterScope()
 	const writes = useMutationState({
 		filters: {
@@ -123,8 +123,6 @@ export function AccountIntegrationsPage({
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
-	const replaceLocation = (href: string) =>
-		router.navigate({ to: href, replace: true, resetScroll: false })
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const [disconnectArmed, setDisconnectArmed] = useState<string | null>(null)
 	const deleteAppConfirmation = {
@@ -383,11 +381,20 @@ export function AccountIntegrationsPage({
 		return new URL(getCurrentHref(), 'http://localhost').search
 	}
 
-	function buildHrefWithUpdatedSearch(search: string) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		return `${nextUrl.pathname}${nextUrl.search}`
+	function updateSearch(q: string) {
+		const pathname: string = pageLocation.pathname
+		const samePage = router.latestLocation.pathname === pageLocation.pathname
+		return router.navigate({
+			to: pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous: Record<string, unknown>) => {
+				const search: Record<string, unknown> = samePage
+					? previous
+					: pageLocation.search
+				return { ...search, q: q || undefined }
+			},
+		})
 	}
 
 	function applyRotatedApp(rotatedApp: AccountOauthAppListItem) {
@@ -410,7 +417,8 @@ export function AccountIntegrationsPage({
 		void invalidatePages()
 	}
 
-	const search = readSearchFilter(currentHref)
+	const filters = textSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
 	const setupIntro =
 		apps.length === 0
 			? 'No integrations yet. Pick a service and copy its prompt into your agent — setup takes a few minutes.'
@@ -477,13 +485,9 @@ export function AccountIntegrationsPage({
 							<RecordTableSearch
 								label="Search integrations"
 								placeholder="Search names, hosts, or accounts"
-								value={
-									new URL(currentHref, 'http://localhost').searchParams.get(
-										'q',
-									) ?? ''
-								}
+								value={filters.q ?? ''}
 								onInput={(value) => {
-									return replaceLocation(buildHrefWithUpdatedSearch(value))
+									return updateSearch(value)
 								}}
 							/>
 						}

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { textSearch } from '../filter-search.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AdminPlatformIntegrationsPage } from '../pages/admin-platform-integrations.tsx'
@@ -15,6 +16,7 @@ export const Route = createFileRoute('/admin/platform-integrations_/$slug')({
 		motionGroup: 'admin',
 		navigation: { rail: 'admin', item: 'platform-integrations' },
 	},
+	validateSearch: textSearch,
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: {

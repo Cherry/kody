@@ -1,8 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { textSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { type PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
-	buildHrefWithUpdatedSearch,
 	filterApps,
 	parseExtraAuthorizeParams,
 	platformIntegrationsRoute,
@@ -69,6 +69,21 @@ export function AdminPlatformIntegrationsPage(props: {
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 	})
 	const router = useRouter()
+	function updateSearch(q: string) {
+		const pathname: string = pageLocation.pathname
+		const samePage = router.latestLocation.pathname === pageLocation.pathname
+		return router.navigate({
+			to: pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous: Record<string, unknown>) => {
+				const search: Record<string, unknown> = samePage
+					? previous
+					: pageLocation.search
+				return { ...search, q: q || undefined }
+			},
+		})
+	}
 	const replaceLocation = (href: string) =>
 		router.navigate({ href, replace: true })
 	const lifetime = useRef<AbortController | null>(null)
@@ -345,8 +360,8 @@ export function AdminPlatformIntegrationsPage(props: {
 	const pending = false
 	const status: string = 'ready'
 	const selection = props.selection
-	const search =
-		new URLSearchParams(pageLocation.searchStr).get('q')?.trim() ?? ''
+	const filters = textSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
 	const filteredApps = filterApps(apps, search)
 	const editingApp = selection.isCreating
 		? null
@@ -407,13 +422,9 @@ export function AdminPlatformIntegrationsPage(props: {
 							<RecordTableSearch
 								label="Search integrations"
 								placeholder="Search slug, provider, or label"
-								value={
-									new URLSearchParams(pageLocation.searchStr).get('q') ?? ''
-								}
+								value={filters.q ?? ''}
 								onInput={(value) => {
-									return replaceLocation(
-										buildHrefWithUpdatedSearch(currentHref, value),
-									)
+									return updateSearch(value)
 								}}
 							/>
 							<button

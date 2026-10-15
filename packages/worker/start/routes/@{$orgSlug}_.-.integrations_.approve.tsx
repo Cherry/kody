@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { textSearch } from '../filter-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
@@ -9,6 +10,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/integrations_/approve')({
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'integrations' },
 	},
+	validateSearch: textSearch,
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location, params }) =>
 		loadIntegrationsPage({

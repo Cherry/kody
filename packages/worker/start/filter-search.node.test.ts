@@ -10,6 +10,7 @@ import {
 	collectionSearch,
 	memoriesSearch,
 	secretsSearch,
+	textSearch,
 } from './filter-search.ts'
 import { adminUsersFilters, adminUsersSearch } from './admin-users-input.ts'
 import { memoriesInput } from './memories-input.ts'
@@ -18,6 +19,7 @@ const validators = [
 	collectionSearch,
 	memoriesSearch,
 	secretsSearch,
+	textSearch,
 	adminUsersSearch,
 ]
 
@@ -81,4 +83,19 @@ test('memory filters keep boolean state and explicit resource scope while compos
 	expect(memoriesSearch({ ...parsed, q: 'true' }).includeDeleted).toBe(true)
 	expect(memoriesSearch({ ...parsed, includeDeleted: false }).q).toBe('123')
 	expect(memoriesSearch({}).q).toBeUndefined()
+})
+
+test('text presentation validation leaves resource selection and protocol inputs unchanged', () => {
+	const selected = { id: 'resource' }
+	const search = {
+		q: 123,
+		selected,
+		name: 'integration',
+		package_id: 'package',
+		scope: 'org',
+	}
+	expect(textSearch(search)).toEqual({ ...search, q: '123' })
+	expect(textSearch(search)).toHaveProperty('selected', selected)
+	expect(textSearch({ q: null }).q).toBe('null')
+	expect(textSearch({}).q).toBeUndefined()
 })

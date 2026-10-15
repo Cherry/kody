@@ -41,3 +41,8 @@ export function secretsSearch(search: Record<string, unknown>) {
 		scope: searchText(search.scope),
 	}
 }
+
+/** A presentation query does not change resource selection or authorization. */
+export function textSearch(search: Record<string, unknown>) {
+	return { ...search, q: searchText(search.q) }
+}

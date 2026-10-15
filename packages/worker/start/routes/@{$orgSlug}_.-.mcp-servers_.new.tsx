@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { textSearch } from '../filter-search.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountMcpServersPage } from '../pages/account-mcp-servers.tsx'
@@ -14,6 +15,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/new')({
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'mcp-servers' },
 	},
+	validateSearch: textSearch,
 	loaderDeps: ({ search }) => search,
 	context: ({ params }) => ({
 		pageQueryInput: { orgSlug: params.orgSlug, serverId: undefined },

@@ -153,10 +153,6 @@ export function filterOauthApps(
 
 export const dangerButtonCss = getDangerPillCss({ size: 'sm' })
 
-export function readSearchFilter(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
 export function formatList(values: Array<string> | null | undefined) {
 	if (!values || values.length === 0) return 'None'
 	return values.join(', ')

@@ -24,6 +24,7 @@ import {
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
+import { textSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -52,10 +53,6 @@ const valuesRoute = createListDetailLinks(accountValuesPath)
  * Selection changes need a refetch for full `selectedValue`. The client-side
  * `q` filter does not change the GET response, so it is omitted from the key.
  */
-function readSearchFilter(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
 function filterValues(values: Array<AccountValueListItem>, search: string) {
 	return values.filter((entry) =>
 		matchesSearchQuery(search, [
@@ -94,14 +91,12 @@ export function AccountValuesPage({
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const { orgSlug } = useMatchedPageScope()
+	const { orgSlug, pageLocation } = useMatchedPageScope()
 	const mutationKey = ['values', actorKey, orgSlug] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
 	const navigate = (href: string) =>
 		void router.navigate({ to: href, resetScroll: false })
-	const replaceLocation = (href: string) =>
-		router.navigate({ to: href, replace: true, resetScroll: false })
 
 	const dangerButtonCss = getDangerPillCss({ size: 'sm' })
 
@@ -117,11 +112,20 @@ export function AccountValuesPage({
 		navigate(nextPath)
 	}
 
-	function buildHrefWithUpdatedSearch(search: string) {
-		const nextUrl = new URL(getCurrentHref(), 'http://localhost')
-		if (search) nextUrl.searchParams.set('q', search)
-		else nextUrl.searchParams.delete('q')
-		return `${nextUrl.pathname}${nextUrl.search}`
+	function updateSearch(q: string) {
+		const pathname: string = pageLocation.pathname
+		const samePage = router.latestLocation.pathname === pageLocation.pathname
+		return router.navigate({
+			to: pathname,
+			replace: true,
+			resetScroll: false,
+			search: (previous: Record<string, unknown>) => {
+				const search: Record<string, unknown> = samePage
+					? previous
+					: pageLocation.search
+				return { ...search, q: q || undefined }
+			},
+		})
 	}
 
 	function showMessage(
@@ -174,7 +178,8 @@ export function AccountValuesPage({
 	}
 
 	const selectedId = selection.kind === 'detail' ? selection.valueId : null
-	const search = readSearchFilter(currentHref)
+	const filters = textSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
 	const filteredValues = filterValues(values, search)
 	const detail = selectedValue?.id === selectedId ? selectedValue : null
 	const showEditor = selectedId !== null && detail !== null
@@ -217,12 +222,9 @@ export function AccountValuesPage({
 					<RecordTableSearch
 						label="Search values"
 						placeholder="Search values"
-						value={
-							new URL(currentHref, 'http://localhost').searchParams.get('q') ??
-							''
-						}
+						value={filters.q ?? ''}
 						onInput={(value) => {
-							return replaceLocation(buildHrefWithUpdatedSearch(value))
+							return updateSearch(value)
 						}}
 					/>
 				}
