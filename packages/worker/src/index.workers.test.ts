@@ -169,6 +169,7 @@ test('platform lanes execute with their expected inputs and jobs-owned lanes are
 		'system_email_retention',
 		'storage_bucket_estimate_backfill',
 		'd1_storage_reconciliation',
+		'second_agent_gift_reconciliation',
 		'retention',
 		'usage_aggregation',
 		'auth_denial_alert',

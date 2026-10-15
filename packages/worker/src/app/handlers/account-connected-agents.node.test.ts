@@ -1,3 +1,4 @@
+import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import {
 	createAuthCookie,
 	setAuthSessionSecret,
@@ -101,6 +102,18 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	const meter = createInMemoryUserMeterEnv()
 	const sqlite = new DatabaseSync(':memory:')
 	applyAllMigrations(sqlite, new URL('../../../migrations/', import.meta.url))
+	// The two known ecosystems make this person eligible, but GET must not
+	// grant the entitlement. OAuth completion and reconciliation own that write.
+	sqlite
+		.prepare(`INSERT INTO users (username, email, password_hash, stable_user_id)
+		VALUES ('one', 'one@example.com', 'hash', ?)`)
+		.run(userOneSession.stableUserId)
+	await provisionPersonalOrg(createD1FromSqlite(sqlite), {
+		stableUserId: userOneSession.stableUserId,
+		username: 'one',
+		createdAt: new Date().toISOString(),
+	})
+
 	const insertSubscription = sqlite.prepare(
 		`INSERT INTO mcp_event_subscriptions (
 			id, user_id, oauth_client_id, event_name, arguments_json,
@@ -145,6 +158,14 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 		mcpServerUrl: string
 	}
 	expect(listBody.ok).toBe(true)
+	expect(
+		sqlite
+			.prepare(
+				'SELECT second_agent_standard_gift_granted_at AS granted FROM orgs WHERE id = ?',
+			)
+			.get(userOneSession.stableUserId)?.granted,
+	).toBeNull()
+
 	expect(listBody.agents.map((agent) => agent.label)).toEqual([
 		'ChatGPT.com',
 		'Cursor',

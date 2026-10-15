@@ -4,10 +4,6 @@ import { operationResult } from '#app/operation-result.ts'
 import { deleteMcpEventSubscriptionsForOauthClient } from '#mcp/events/subscriptions-repo.ts'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
 import {
-	countConnectedAgentEcosystems,
-	hasSecondConnectedMcpClient,
-} from '#universal/onboarding-agent-ecosystems.ts'
-import {
 	auditDatabaseFromEnv,
 	getRequestIp,
 	logAuditEvent,
@@ -22,7 +18,6 @@ import {
 	deleteAccountConnectionProfile,
 	loadConnectionProfilesForAccount,
 } from '#worker/connection-profiles/account.ts'
-import { maybeEvaluateSecondAgentStandardGift } from '#worker/entitlements/second-agent-standard-gift.ts'
 import {
 	type OAuthGrantHelpers,
 	type OAuthGrantListHelpers,
@@ -69,25 +64,13 @@ export async function loadAccountConnectedAgentsData(input: {
 	requestUrl: string | URL
 	user: ConnectedAgentsUser
 }): Promise<AccountConnectedAgentsLoaderData> {
-	const { personId, orgId, personalOrg, personalOrgOwnerId } =
-		connectedAgentsScope(input.user)
+	const { personId, orgId, personalOrg } = connectedAgentsScope(input.user)
 	const helpers = await resolveOAuthHelpers<OAuthGrantListHelpers>(input.env)
 	const state = await loadInboundMcpConnectionState(helpers, personId, {
 		env: input.env,
 		orgId,
 	})
-	if (
-		personalOrg &&
-		!state.listingFailed &&
-		hasSecondConnectedMcpClient(state.agents)
-	) {
-		await maybeEvaluateSecondAgentStandardGift({
-			db: input.env.APP_DB,
-			stableUserId: personalOrgOwnerId,
-			ecosystemCount: countConnectedAgentEcosystems(state.agents),
-			listingFailed: state.listingFailed,
-		})
-	}
+
 	return {
 		ok: true,
 		agents: state.agents,
