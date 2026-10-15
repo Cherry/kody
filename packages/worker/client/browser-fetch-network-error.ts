@@ -35,18 +35,3 @@ export function isBrowserFetchNetworkError(error: unknown): boolean {
 	if (!(error instanceof TypeError)) return false
 	return isBrowserFetchNetworkErrorMessage(error.message)
 }
-
-/**
- * True when a thrown Error's stack names Remix `resolveFrame`, the
- * `fetchFrameResolve` helper that owns the `fetch`, or `createFrameResolveInit`
- * (bundler/source-map often attributes the fetch to that init helper —
- * KODY-CLOUDFLARE-5Y / KODY-6A). Mobile Safari often keeps only the immediate
- * caller on `Error.stack`.
- */
-export function errorStackMentionsResolveFrame(error: unknown) {
-	if (typeof error !== 'object' || error === null) return false
-	if (!('stack' in error) || typeof error.stack !== 'string') return false
-	return /\b(?:resolveFrame|fetchFrameResolve|createFrameResolveInit)\b/.test(
-		error.stack,
-	)
-}

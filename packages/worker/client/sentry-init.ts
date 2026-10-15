@@ -53,8 +53,7 @@ export function initBrowserSentry(config: SentryClientConfig) {
 		// ReferenceErrors / `sendScrollEvent`→ `window.webkit.messageHandlers`
 		// TypeErrors, injected unguarded `meta[property='og:type']` probes
 		// from `global code`, and optional Shiki `syntax-highlight-core`
-		// dynamic import fetch failures, and resolveFrame fetch network
-		// TypeErrors, and local Vite / wrangler HMR loopback sessions,
+		// dynamic import fetch failures, and local Vite / wrangler HMR loopback sessions,
 		// and residual Replay onIframeLoad / observeAttachShadow
 		// SecurityError|TypeError after cross-origin iframe Element reads
 		// (KODY-8W; primary mitigation is block:['iframe'] above))

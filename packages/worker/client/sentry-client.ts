@@ -5,9 +5,6 @@ import {
 	isFirefoxDomPermissionDeniedError,
 	isMetaMaskWalletNoAccountError,
 	isLocalViteDevError,
-	isResolveFrameFetchNetworkError,
-	isRemixReconcileInsertBeforeNotFoundError,
-	isRemixReconcileRemovedComponentCommittedError,
 	isSyntaxHighlightCoreDynamicImportFailureError,
 } from '#client/sentry-browser-filters.ts'
 import {
@@ -59,11 +56,8 @@ function shouldIgnoreBufferedError(error: unknown) {
 		isBrowserInjectedGlobalNoiseError(error) ||
 		isMetaMaskWalletNoAccountError(error) ||
 		isSyntaxHighlightCoreDynamicImportFailureError(error) ||
-		isResolveFrameFetchNetworkError(error) ||
 		isLocalViteDevError(error) ||
-		isCloudflareTurnstileClientError(error) ||
-		isRemixReconcileInsertBeforeNotFoundError(error) ||
-		isRemixReconcileRemovedComponentCommittedError(error)
+		isCloudflareTurnstileClientError(error)
 	)
 }
 
