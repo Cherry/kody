@@ -13,8 +13,26 @@ const defaultPollIntervalMs = 1000
 
 export type DevWatcher = {
 	ready: Promise<void>
-	/** Replace the set of absolute paths the stat poll keeps an eye on. */
-	track: (paths: ReadonlyArray<string>) => void
+	/**
+	 * Refresh fingerprints for the currently tracked paths without changing the
+	 * path set or firing `onChange`. Call after intentional writers (e.g.
+	 * `kody.dev.prebuild`) so their output is absorbed before a mid-build
+	 * comparison.
+	 */
+	rebaseline: () => Promise<void>
+	/**
+	 * Replace the set of absolute paths the stat poll keeps an eye on.
+	 * Re-baselines fingerprints so post-build mtime chatter does not echo a
+	 * rebuild. Returns paths whose fingerprint changed since the previous
+	 * baseline and are not listed in `ignoreChanges` (the files that triggered
+	 * this build) — the caller should queue those for the next rebuild without
+	 * going through `onChange` (which is debounced and would double-schedule
+	 * when chokidar already saw the same mid-build edit).
+	 */
+	track: (
+		paths: ReadonlyArray<string>,
+		options?: { ignoreChanges?: ReadonlyArray<string> },
+	) => Promise<ReadonlyArray<string>>
 	close: () => Promise<void>
 }
 
@@ -54,19 +72,28 @@ export function createDevWatcher(input: {
 
 	type Fingerprint = string
 	let tracked = new Map<string, Fingerprint | null>()
+	let trackGeneration = 0
 	let polling = false
 	const poll = async () => {
 		if (polling) return
 		polling = true
+		// Hold map + generation. track()/rebaseline() replace `tracked` with a
+		// fresh Map at the start so an in-flight poll fails `tracked !== map`
+		// immediately — otherwise it can fingerprint post-build bytes against
+		// the pre-build baseline and echo a no-op rebuild.
+		const map = tracked
+		const generation = trackGeneration
 		try {
-			for (const [path, previous] of tracked) {
+			for (const [path, previous] of [...map]) {
+				if (tracked !== map || generation !== trackGeneration) return
 				const next = await fingerprint(path)
-				if (!tracked.has(path)) continue
+				if (tracked !== map || generation !== trackGeneration) return
+				if (!map.has(path)) continue
 				if (previous !== null && next !== previous) {
-					tracked.set(path, next)
-					input.onChange(path)
+					map.set(path, next)
+					if (tracked === map && generation === trackGeneration) input.onChange(path)
 				} else if (previous === null) {
-					tracked.set(path, next)
+					map.set(path, next)
 				}
 			}
 		} finally {
@@ -78,17 +105,51 @@ export function createDevWatcher(input: {
 
 	return {
 		ready,
-		track: (paths) => {
+		rebaseline: async () => {
+			const generation = ++trackGeneration
+			const previousTracked = tracked
+			tracked = new Map()
+			const next = new Map<string, Fingerprint | null>()
+			for (const path of previousTracked.keys()) {
+				next.set(path, await fingerprint(path))
+				if (generation !== trackGeneration) return
+			}
+			if (generation !== trackGeneration) return
+			tracked = next
+			trackGeneration++
+		},
+		track: async (paths, options) => {
+			const ignoreChanges = new Set(options?.ignoreChanges ?? [])
+			const generation = ++trackGeneration
+			const previousTracked = tracked
+			// Detach before fingerprinting so concurrent polls cannot treat the
+			// just-written files as fresh edits against the pre-build baseline.
+			tracked = new Map()
+			const changedDuringBuild: Array<string> = []
 			const next = new Map<string, Fingerprint | null>()
 			for (const path of paths) {
 				if (ignored(path)) continue
-				next.set(path, tracked.get(path) ?? null)
+				const current = await fingerprint(path)
+				if (generation !== trackGeneration) return []
+				const previous = previousTracked.get(path)
+				if (
+					previous !== undefined &&
+					previous !== null &&
+					current !== previous &&
+					!ignoreChanges.has(path)
+				) {
+					changedDuringBuild.push(path)
+				}
+				next.set(path, current)
 			}
+			if (generation !== trackGeneration) return []
 			tracked = next
-			void poll()
+			trackGeneration++
+			return changedDuringBuild
 		},
 		close: async () => {
 			clearInterval(timer)
+			trackGeneration++
 			tracked = new Map()
 			await watcher.close()
 		},

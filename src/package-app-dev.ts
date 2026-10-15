@@ -30,6 +30,7 @@ import { apiTokenEnvVar } from './defaults.js'
 import { createDevBundler, type DevBundle } from './dev/dev-bundler.js'
 import { parseWorkerdStdoutLine, type DevEvent, type DevRequestTag } from './dev/dev-events.js'
 import { devErrorHeader, devRequestIdHeader } from './dev/dev-protocol.js'
+import { devStatusPath, type DevServerStatus } from './dev/dev-registry.js'
 import { createDevWatcher, type DevWatcher } from './dev/dev-watcher.js'
 import { sendDevError, type DevErrorView } from './dev/error-page.js'
 import {
@@ -140,6 +141,8 @@ export type PackageAppDevServer = {
 		path: string,
 		init?: { method?: string; headers?: Record<string, string>; body?: string },
 	) => Promise<{ status: number; headers: Record<string, string>; body: string }>
+	/** Same JSON as `GET /__kody/dev/status`. */
+	status: () => DevServerStatus
 	close: () => Promise<void>
 }
 
@@ -211,12 +214,22 @@ export async function startPackageAppDev(
 	let buildLoop: Promise<void> | null = null
 	let rebuildAgain = false
 	const changedFiles = new Set<string>()
+	/** True while the watcher debounce timer has paths waiting to rebuild. */
+	let debouncePending = false
+	/** Resolves when the current debounce window flushes into `requestBuild`. */
+	let debounceFlush: Promise<void> | null = null
+	let resolveDebounceFlush: (() => void) | null = null
+	let debounceTimer: NodeJS.Timeout | undefined
 	const liveReloadHub = createLiveReloadHub({
 		state: () => ({
 			buildId: active?.id ?? null,
 			error: buildFailure ? buildErrorView(buildFailure) : null,
 		}),
 	})
+	const startedAt = new Date().toISOString()
+	let lastRebuild: DevServerStatus['lastRebuild'] = null
+	let lastRuntimeError: DevServerStatus['lastError'] = null
+	let buildFailureAt = startedAt
 	let markStarted: () => void = () => {}
 	const started = new Promise<void>((resolve) => {
 		markStarted = resolve
@@ -306,11 +319,24 @@ export async function startPackageAppDev(
 		let bundle: DevBundle
 		try {
 			bundle = await bundler.build()
-			watcher?.track([...bundle.inputs, options.manifest.packageJsonPath])
+			const midBuildEdits =
+				(await watcher?.track([...bundle.inputs, options.manifest.packageJsonPath], {
+					ignoreChanges: files,
+				})) ?? []
+			// Queue mid-build edits for the next loop iteration directly — do not
+			// call onChange (debounced); chokidar may already have the same paths
+			// pending and would double-schedule a rebuild after debounce.
+			if (midBuildEdits.length > 0) {
+				for (const path of midBuildEdits) changedFiles.add(path)
+				rebuildAgain = true
+			}
 			if (active && !buildFailure && bundle.code === active.code) {
+				// Still stamp lastRebuild so agents polling lastRebuild.at see
+				// the no-op rebuild finish (status already flipped building→ready).
+				lastRebuild = { ms: elapsed(started), at: new Date().toISOString() }
 				emit({
 					type: 'rebuild_ok',
-					ms: elapsed(started),
+					ms: lastRebuild.ms,
 					buildId: active.id,
 					restarted: false,
 				})
@@ -325,10 +351,13 @@ export async function startPackageAppDev(
 			active = generation
 			buildFailure = null
 			if (previous) retireGeneration(previous)
-			emit({ type: 'rebuild_ok', ms: elapsed(started), buildId: generation.id, restarted: true })
+			lastRuntimeError = null
+			lastRebuild = { ms: elapsed(started), at: new Date().toISOString() }
+			emit({ type: 'rebuild_ok', ms: lastRebuild.ms, buildId: generation.id, restarted: true })
 			liveReloadHub.broadcast({ event: 'reload', data: { buildId: generation.id } })
 		} catch (error) {
 			buildFailure = toBuildFailure(error)
+			buildFailureAt = new Date().toISOString()
 			const [first] = buildFailure.diagnostics
 			emit({
 				type: 'build_error',
@@ -441,6 +470,10 @@ export async function startPackageAppDev(
 	}
 
 	async function waitForBuild(): Promise<void> {
+		// Flush any watcher debounce first so a save → immediate fetch cannot
+		// slip through on the previous generation while the timer is still open.
+		const flush = debounceFlush
+		if (flush) await flush
 		const pending = buildLoop ?? (active || buildFailure ? null : started)
 		if (!pending) return
 		await Promise.race([
@@ -449,8 +482,54 @@ export async function startPackageAppDev(
 		])
 	}
 
+	function status(): DevServerStatus {
+		const [first] = buildFailure?.diagnostics ?? []
+		return {
+			ok: buildFailure === null && active !== undefined,
+			state:
+				buildLoop || debouncePending
+					? 'building'
+					: buildFailure
+						? 'build_error'
+						: active
+							? 'ready'
+							: 'starting',
+			buildId: active?.id ?? null,
+			url: `${hostedUrl}${appBasePath || '/'}`,
+			port: address.port,
+			basePath: appBasePath,
+			target: options.target,
+			package: {
+				name: options.manifest.name,
+				kodyId: options.manifest.kodyId,
+				root,
+			},
+			pid: process.pid,
+			startedAt,
+			lastRebuild,
+			lastError: buildFailure
+				? {
+						kind: 'build',
+						message: buildFailure.message,
+						file: first?.file ?? null,
+						line: first?.line ?? null,
+						col: first?.col ?? null,
+						at: buildFailureAt,
+					}
+				: lastRuntimeError,
+		}
+	}
+
 	function handleDevRoute(req: IncomingMessage, res: ServerResponse): boolean {
 		const pathname = stripMount(new URL(req.url ?? '/', hostedUrl).pathname, appBasePath)
+		if (pathname === devStatusPath) {
+			res.writeHead(200, {
+				'content-type': 'application/json; charset=utf-8',
+				'cache-control': 'no-store',
+			})
+			res.end(`${JSON.stringify(status(), null, 2)}\n`)
+			return true
+		}
 		if (!liveReload) return false
 		if (pathname === liveReloadEventsPath) {
 			liveReloadHub.handleEvents(req, res)
@@ -554,6 +633,7 @@ export async function startPackageAppDev(
 						liveReload &&
 						shouldInjectLiveReload({
 							method: req.method,
+							accept: req.headers.accept,
 							status,
 							headers: upstreamRes.headers,
 						})
@@ -603,6 +683,13 @@ export async function startPackageAppDev(
 			stack = raw
 		}
 		const mapped = redact(generation.mapStack(stack))
+		lastRuntimeError = {
+			kind: 'runtime',
+			message: redact(message),
+			stack: mapped,
+			request: tag,
+			at: new Date().toISOString(),
+		}
 		emit({ type: 'runtime_error', message: redact(message), stack: mapped, request: tag })
 		const view: DevErrorView = {
 			kind: 'runtime',
@@ -618,18 +705,40 @@ export async function startPackageAppDev(
 		options.watch === false
 			? null
 			: (() => {
-					let timer: NodeJS.Timeout | undefined
 					const pending = new Set<string>()
 					return createDevWatcher({
 						root,
 						onChange: (path) => {
 							if (closed) return
+							// Fold mid-build watcher events into the active loop
+							// (including another save of a file already building).
+							// Debouncing them instead schedules a second rebuild
+							// after buildLoop clears (often a no-op echo).
+							if (buildLoop) {
+								changedFiles.add(path)
+								rebuildAgain = true
+								return
+							}
 							pending.add(path)
-							clearTimeout(timer)
-							timer = setTimeout(() => {
+							debouncePending = true
+							if (!debounceFlush) {
+								debounceFlush = new Promise<void>((resolve) => {
+									resolveDebounceFlush = resolve
+								})
+							}
+							clearTimeout(debounceTimer)
+							debounceTimer = setTimeout(() => {
 								const paths = [...pending]
 								pending.clear()
-								void requestBuild(paths)
+								debouncePending = false
+								// Start the build before releasing waiters so
+								// waitForBuild sees buildLoop, not a ready gap.
+								const build = requestBuild(paths)
+								const resolve = resolveDebounceFlush
+								resolveDebounceFlush = null
+								debounceFlush = null
+								resolve?.()
+								void build
 							}, options.debounceMs ?? defaultDebounceMs)
 						},
 					})
@@ -639,6 +748,12 @@ export async function startPackageAppDev(
 		if (closed) return
 		closed = true
 		process.off('exit', killAllSync)
+		clearTimeout(debounceTimer)
+		debouncePending = false
+		const resolve = resolveDebounceFlush
+		resolveDebounceFlush = null
+		debounceFlush = null
+		resolve?.()
 		await watcher?.close()
 		await buildLoop?.catch(() => {})
 		await bundler.dispose()
@@ -690,6 +805,7 @@ export async function startPackageAppDev(
 		appBasePath,
 		packageContext,
 		fetchPath,
+		status,
 		close,
 	}
 }
