@@ -614,6 +614,7 @@ export function AccountSecretsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="secrets"
 				title="Secrets"
 				description="Passwords and tokens Kody can use for you."
 				currentHref={currentHref}

@@ -107,6 +107,7 @@ export function AccountMcpServerAuthorizePage({
 	return (
 		<AccountManagementShell currentHref={href} maxWidth="40rem">
 			<AccountPageHeader
+				entity="mcp-servers"
 				title={`Authorize ${data.serverName}`}
 				description="Review where Kody is sending you before you approve access. Nothing is approved until you click Continue."
 				currentHref={href}

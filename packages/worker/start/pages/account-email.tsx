@@ -344,6 +344,7 @@ export function AccountEmailPage({
 			busy={false}
 		>
 			<AccountPageHeader
+				entity="email"
 				title="Email inbox"
 				description="Browse inbound and outbound messages for your platform email address. Compose and reply through Kody agents. Manage the addresses emailSend may use here."
 				currentHref={currentHref}

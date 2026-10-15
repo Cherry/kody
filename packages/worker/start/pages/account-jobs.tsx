@@ -211,6 +211,7 @@ export function AccountJobsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="jobs"
 				title="Jobs"
 				description="Inspect scheduled package jobs, toggle the kill switch, and run jobs now. To change or remove a job, edit its package and publish."
 				currentHref={currentHref}

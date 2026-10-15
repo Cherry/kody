@@ -374,6 +374,7 @@ export function AccountUsagePage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="usage"
 				title="Usage"
 				description="Activity, included compute, plan limits, and credits: what counts and how close you are."
 				currentHref={currentHref}

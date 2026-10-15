@@ -84,6 +84,7 @@ export function AccountConnectionsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref}>
 			<AccountPageHeader
+				entity="connections"
 				title="Agents"
 				description="The agents connected to this Kody account, and how to connect another."
 				currentHref={currentHref}

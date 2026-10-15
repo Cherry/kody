@@ -17,7 +17,7 @@ import { CommunityListingsContent } from '../components/community-listings-conte
 import { SiteLink } from '../components/site-link.tsx'
 export function CommunityRoute({ data }: { data: CommunityIndexLoaderData }) {
 	const { query: searchQuery, sort, category } = data
-	const explainer = resolveEntityExplainer('/community')
+	const explainer = resolveEntityExplainer('community')
 	const navigate = useNavigate()
 	return (
 		<section css={communityPageCss}>

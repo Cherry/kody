@@ -10,25 +10,15 @@ import { routes } from '#universal/routes.ts'
 import { docHref } from '#universal/docs-nav.ts'
 
 test('entity explainers resolve on entity pages, render collapsed, and skip settings-only routes', async () => {
-	expect(resolveEntityExplainer('/account/email')?.id).toBe('email')
-	expect(resolveEntityExplainer(routes.community.href())?.id).toBe('community')
-
-	expect(resolveEntityExplainer(routes.account.href())).toBeNull()
-	expect(resolveEntityExplainer('/account/billing')).toBeNull()
-	expect(resolveEntityExplainer(routes.accountPasskeys.href())).toBeNull()
-	expect(resolveEntityExplainer(routes.login.href())).toBeNull()
-	expect(resolveEntityExplainer(routes.admin.href())).toBeNull()
-	expect(
-		resolveEntityExplainer(
-			routes.communityDetail.href({ listingId: 'listing_1' }),
-		),
-	).toBeNull()
+	expect(resolveEntityExplainer('email')?.id).toBe('email')
+	expect(resolveEntityExplainer('community')?.id).toBe('community')
+	expect(resolveEntityExplainer(undefined)).toBeNull()
 
 	const comparisonHref = docHref('packages-integrations-mcp')
-	const integrationsCopy = resolveEntityExplainer('/account/integrations')
+	const integrationsCopy = resolveEntityExplainer('integrations')
 	expect(integrationsCopy?.id).toBe('integrations')
 
-	const mcpCopy = resolveEntityExplainer('/account/mcp-servers')
+	const mcpCopy = resolveEntityExplainer('mcp-servers')
 	expect(mcpCopy?.id).toBe('mcp-servers')
 
 	const explainerHtml = await renderToString(
@@ -63,4 +53,17 @@ test('entity explainers resolve on entity pages, render collapsed, and skip sett
 		}),
 	)
 	expect(overviewHtml).not.toContain('data-entity-explainer')
+})
+
+test('detail headers keep their explicit section identity regardless of URL shape', async () => {
+	const html = await renderToString(
+		jsx(AccountPageHeader, {
+			title: 'Connection',
+			description: '',
+			currentHref: '/@team/-/integrations/apps/google',
+			entity: 'integrations',
+		}),
+	)
+	expect(html).toContain('data-entity-explainer="integrations"')
+	expect(html).toContain('What is an integration?')
 })

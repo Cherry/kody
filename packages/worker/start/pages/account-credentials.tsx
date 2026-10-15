@@ -293,6 +293,7 @@ export function AccountCredentialsRoute({
 	return (
 		<AccountManagementShell currentHref={currentHref}>
 			<AccountPageHeader
+				entity="credentials"
 				title="Credentials"
 				description="Keys, OAuth connections, MCP servers, and every other way Kody reaches a service for you. Kody places each value at the network boundary; values never appear here."
 				currentHref={currentHref}

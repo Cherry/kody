@@ -49,9 +49,7 @@ vi.mock('@tanstack/react-start/server', () => ({
 }))
 vi.mock('#app/env.ts', () => ({ getEnv: (env: unknown) => env }))
 vi.mock('#app/auth-session.ts', () => ({ setAuthSessionSecret: vi.fn() }))
-vi.mock('#app/org-request-binding.ts', () => ({
-	isOrgRequestDenied: async () => false,
-}))
+vi.mock('#app/org-request-binding.ts', () => ({}))
 
 function createEnv() {
 	return {

@@ -32,7 +32,11 @@ import {
 	type AccountRailGroup,
 } from '#client/routes/account-rail.ts'
 import { type IconName } from '../components/icon.tsx'
-import { EntityExplainer, resolveEntityExplainer } from './entity-explainer.tsx'
+import {
+	EntityExplainer,
+	resolveEntityExplainer,
+	type EntityExplainerId,
+} from './entity-explainer.tsx'
 import { AccountSectionTabs } from './account-section-tabs.tsx'
 import {
 	AccountManagementLinkNav,
@@ -427,6 +431,7 @@ const adminNavItems = [
 }>
 
 type AccountPageHeaderProps = {
+	entity?: EntityExplainerId
 	title: string
 	description: string
 	currentHref: string
@@ -521,7 +526,7 @@ export function AccountPageHeader(props: AccountPageHeaderProps) {
 	{
 		const currentPath = new URL(props.currentHref, 'http://localhost').pathname
 		const session = useShellData().session
-		const explainer = resolveEntityExplainer(currentPath)
+		const explainer = resolveEntityExplainer(props.entity)
 		const rail = pageRail({ session, currentPath })
 		const tabs = railTabsForPath(rail.groups, currentPath)
 

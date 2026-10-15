@@ -65,6 +65,7 @@ export function AccountExperimentsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={saving}>
 			<AccountPageHeader
+				entity="experiments"
 				title="Experiments"
 				description="Opt into early, unfinished work. Things may change or break; you can leave anytime."
 				currentHref={currentHref}

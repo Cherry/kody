@@ -4,11 +4,6 @@ import { type CSSObject } from '@emotion/react'
 import { useEffect } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { renderIcon } from '../components/icon.tsx'
-import {
-	accountAliasPath,
-	parseOrgCreditsPath,
-	parseOrgUsagePath,
-} from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
 import { docHref } from '#universal/docs-nav.ts'
 import { hoverMq } from '#universal/styles/style-primitives.ts'
@@ -27,8 +22,8 @@ type EntityExplainerLink = {
 export type EntityExplainerCopy = {
 	id: string
 	question: string
-	paragraphs: Array<string>
-	learnMore?: Array<EntityExplainerLink>
+	paragraphs: ReadonlyArray<string>
+	learnMore?: ReadonlyArray<EntityExplainerLink>
 }
 
 const packagesIntegrationsMcpGuide = {
@@ -36,22 +31,10 @@ const packagesIntegrationsMcpGuide = {
 	label: 'Packages, integrations, and MCP servers',
 } as const satisfies EntityExplainerLink
 
-type EntityExplainerDefinition = EntityExplainerCopy & {
-	match: (pathname: string) => boolean
-}
-
-function accountSection(href: string) {
-	return (pathname: string) => {
-		const aliased = accountAliasPath(pathname)
-		return aliased === href || aliased.startsWith(`${href}/`)
-	}
-}
-
-const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
+const entityExplainerDefinitions = [
 	{
 		id: 'email',
 		question: 'What is email?',
-		match: accountSection('/account/email'),
 		paragraphs: [
 			"Every Kody account gets a personal inbox at your username on this deployment's email domain. Inbound mail is stored so automations can react to it, and your agent can send you notify-self messages or reply to stored threads.",
 		],
@@ -65,7 +48,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'jobs',
 		question: 'What is a job?',
-		match: accountSection('/account/jobs'),
 		paragraphs: [
 			'A job is scheduled work that runs in the cloud on Cloudflare Workers, whether or not your computer is on. Package-owned jobs live with the saved package that declares them.',
 		],
@@ -79,7 +61,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'workflows',
 		question: 'What is a workflow?',
-		match: accountSection('/account/workflows'),
 		paragraphs: [
 			'A workflow is one-shot durable work, not a recurring schedule. Inline workflows carry their code; package workflows call a published export.',
 		],
@@ -93,7 +74,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'webhooks',
 		question: 'What is a webhook?',
-		match: accountSection('/account/webhooks'),
 		paragraphs: [
 			'A webhook is an inbound HTTP endpoint a package declares. The minted URL is a credential: when a provider POSTs to it, Kody runs that package’s export.',
 		],
@@ -107,7 +87,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'credentials',
 		question: 'What is a credential?',
-		match: accountSection('/account/credentials'),
 		paragraphs: [
 			'A credential is anything Kody uses to reach a service for you: a key (an API key or token), an OAuth connection, an MCP server, a login, a URL secret, a signing key, or a vault. Agents and packages name the credential; Kody places its value at the network boundary and never returns it.',
 		],
@@ -119,7 +98,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'secrets',
 		question: 'What is a secret?',
-		match: accountSection('/account/secrets'),
 		paragraphs: [
 			'A secret is a credential Kody stores for you — an API key or token. Your agent references it by name; Kody substitutes the value at the network boundary and never returns it to chat.',
 		],
@@ -133,7 +111,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'integrations',
 		question: 'What is an integration?',
-		match: accountSection('/account/integrations'),
 		paragraphs: [
 			'An integration is a connected service — usually OAuth — so Kody can act as you on that provider. The connection is yours: packages use it, they do not own it.',
 		],
@@ -148,7 +125,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'connections',
 		question: 'What is a connected agent?',
-		match: accountSection('/account/agents'),
 		paragraphs: [
 			'A connected agent is an AI host — Cursor, Claude, ChatGPT, Codex, a CLI — that has authorized against this Kody account over MCP. Every connected host reaches the same memories, secrets, packages, jobs, and email; Kody is the home they share, not a gateway.',
 		],
@@ -163,7 +139,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'mcp-servers',
 		question: 'What is an MCP server?',
-		match: accountSection('/account/mcp-servers'),
 		paragraphs: [
 			'An MCP server here is a remote server Kody calls for you. Its tools become callable from your agent, the inverse of connecting your agent to Kody.',
 		],
@@ -172,7 +147,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'memories',
 		question: 'What is a memory?',
-		match: accountSection('/account/memories'),
 		paragraphs: [
 			'A memory is a durable fact or preference Kody keeps about you across conversations. Agents retrieve a few relevant ones per task. Do not store secrets here.',
 		],
@@ -186,7 +160,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'waiting',
 		question: 'What is waiting?',
-		match: accountSection('/account/waiting'),
 		paragraphs: [
 			'Waiting is the queue of things only you can clear: verify email, reconnect an MCP server, promote a locked-package publish, confirm a pending email change, or finish setup.',
 		],
@@ -194,7 +167,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'experiments',
 		question: 'What are experiments?',
-		match: accountSection(routes.accountExperiments.href()),
 		paragraphs: [
 			'Experiments is an opt-in for early, unfinished work. It puts your account in the experiments audience. Each flag still has to be on for you, and you can opt out anytime.',
 		],
@@ -202,7 +174,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'activity',
 		question: 'What is activity?',
-		match: accountSection('/account/activity'),
 		paragraphs: [
 			'Activity is a short execution history for jobs, package apps, webhooks, and other runtimes: open errors with logs and triage, plus the last week of runs.',
 		],
@@ -210,9 +181,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'usage',
 		question: 'What is usage?',
-		match: (pathname) =>
-			parseOrgUsagePath(pathname) !== null ||
-			accountSection(routes.accountUsage.href())(pathname),
 		paragraphs: [
 			"Usage is how much of this organization's plan you have consumed — stored email, job slots, workflow concurrency, and other finite entitlements.",
 			'On Pro, the Credits section holds the prepaid balance: usage past the monthly include runs on credits and stops when they run out.',
@@ -227,7 +195,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'credits',
 		question: 'What are credits?',
-		match: (pathname) => parseOrgCreditsPath(pathname) !== null,
 		paragraphs: [
 			"Credits are this organization's prepaid balance. On Pro, usage past the monthly include is charged to them and stops when they run out.",
 			'The ledger lists every credit added (purchases, auto-refills, grants) and every usage charge. Budgets cap how much one person or automation can spend each month.',
@@ -242,7 +209,6 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 	{
 		id: 'community',
 		question: 'What is community?',
-		match: (pathname) => pathname === routes.community.href(),
 		paragraphs: [
 			'Community is the public catalog of published packages on this deployment. Installing creates a fork you own.',
 		],
@@ -253,18 +219,21 @@ const entityExplainerDefinitions: Array<EntityExplainerDefinition> = [
 			},
 		],
 	},
-]
+] as const
+
+export type EntityExplainerId =
+	(typeof entityExplainerDefinitions)[number]['id']
 
 export function resolveEntityExplainer(
-	pathname: string,
+	id: EntityExplainerId | undefined,
 ): EntityExplainerCopy | null {
-	const entry = entityExplainerDefinitions.find((item) => item.match(pathname))
+	const entry = entityExplainerDefinitions.find((item) => item.id === id)
 	if (!entry) return null
 	return {
 		id: entry.id,
 		question: entry.question,
 		paragraphs: entry.paragraphs,
-		...(entry.learnMore ? { learnMore: entry.learnMore } : {}),
+		...('learnMore' in entry ? { learnMore: entry.learnMore } : {}),
 	}
 }
 

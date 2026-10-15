@@ -153,6 +153,7 @@ export function AccountActivityPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="activity"
 				title="Activity"
 				description="Open failures first, plus a Recent runs week of jobs, executes, package apps, webhooks, and workflows — with the logs you need to diagnose them."
 				currentHref={currentHref}

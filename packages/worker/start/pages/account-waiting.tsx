@@ -45,6 +45,7 @@ export function AccountWaitingPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="waiting"
 				title="Waiting"
 				description="Things that need you."
 				currentHref={currentHref}

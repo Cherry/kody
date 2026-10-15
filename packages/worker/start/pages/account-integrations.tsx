@@ -435,6 +435,7 @@ export function AccountIntegrationsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="integrations"
 				title="Integrations"
 				description="Services you connect so Kody can use them."
 				currentHref={currentHref}

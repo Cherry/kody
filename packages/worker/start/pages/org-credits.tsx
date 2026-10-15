@@ -211,6 +211,7 @@ export function OrgCreditsPage({
 	return (
 		<AccountManagementShell currentHref={currentHref}>
 			<AccountPageHeader
+				entity="credits"
 				title="Credits"
 				description="Credit balance, budgets, and every credit added or spent."
 				currentHref={currentHref}

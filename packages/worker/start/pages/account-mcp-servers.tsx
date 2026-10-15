@@ -315,6 +315,7 @@ export function AccountMcpServersPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="mcp-servers"
 				title="MCP servers"
 				description="Connect remote MCP servers so their tools are available to Kody as kody.mcp capabilities. Use a bearer token for static Authorization, or complete OAuth when the server requires it."
 				currentHref={currentHref}

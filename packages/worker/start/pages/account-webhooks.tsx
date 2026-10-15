@@ -38,6 +38,7 @@ export function AccountWebhooksPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="webhooks"
 				title="Webhooks"
 				description="Every inbound webhook your packages declare, in one list. Webhooks belong to the package that declares them, so open a row to mint, reveal, copy, rotate, or disable its URL in that package's settings."
 				currentHref={currentHref}

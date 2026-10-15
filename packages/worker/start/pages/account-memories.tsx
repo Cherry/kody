@@ -257,6 +257,7 @@ export function AccountMemoriesPage({
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
 			<AccountPageHeader
+				entity="memories"
 				title="Memories"
 				description={
 					legacyReadOnly
