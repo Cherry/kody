@@ -1,9 +1,8 @@
 /**
- * Build-time credential stamp (issue #3836 phase 1): sealed allowlist of
- * literal credential keys a package may resolve, plus dependency stamp pins.
- * Runtime fail-closed enforcement is phase 3; this module only scans, gates
- * publish, merges `kody.credentials`, and stores the stamp next to the
- * published artifact.
+ * Build-time credential stamp (issue #3836): sealed allowlist of literal
+ * credential keys a package may resolve, plus dependency stamp pins. Phase 1
+ * sealed publish; phase 2 fleet-seals existing packages (mcp literals +
+ * inferred descriptions). Runtime fail-closed enforcement is phase 3.
  */
 import { canonicalJsonStringify } from '@kody-internal/shared/canonical-json.ts'
 import { sha256Hex } from '@kody-internal/shared/sha256.ts'
@@ -50,6 +49,43 @@ import {
 export const credentialStampVersion = 1 as const
 export const credentialStampFileName = 'credential-stamp.json'
 
+/**
+ * Soft cap for AST-walking a single module during stamp seal. Larger
+ * prebuilt client bundles (e.g. @kentcdodds/world-builder's ~1.7MB
+ * `public/client/main.js`) reset the Durable Object CPU budget when parsed.
+ * Client/prebuilt assets never resolve credentials server-side; skipping them
+ * keeps publish and fleet restamp safe until the dedicated publish-path fix
+ * (agent bc-58c7f5e0) lands. UTF-8 byte length.
+ */
+export const credentialStampMaxModuleScanBytes = 256 * 1024
+
+const credentialStampUtf8Encoder = new TextEncoder()
+
+export function measureCredentialStampModuleBytes(source: string): number {
+	return credentialStampUtf8Encoder.encode(source).byteLength
+}
+
+/**
+ * Drop oversized scannable modules from a package file map before stamp
+ * planning / sealing. Non-module assets and package.json are kept.
+ */
+export function omitOversizedCredentialStampModules(
+	files: Record<string, string>,
+): Record<string, string> {
+	const next: Record<string, string> = {}
+	for (const [path, content] of Object.entries(files)) {
+		if (
+			scannableModuleFilePattern.test(path) &&
+			measureCredentialStampModuleBytes(content) >
+				credentialStampMaxModuleScanBytes
+		) {
+			continue
+		}
+		next[path] = content
+	}
+	return next
+}
+
 export type CredentialDepStamp = {
 	packageId: string
 	publishedCommit: string
@@ -82,15 +118,44 @@ export type CredentialStampScan = {
 	failures: Array<CredentialStampGateFailure>
 	/** Keys present in `kody.credentials` but not in the stamp (stale). */
 	staleManifestKeys: Array<string>
+	/** Literal `kody.mcp` server names sealed as `kind: "mcp"` slots. */
+	mcpKeys: Array<string>
+	/** Literal `secretJwtSign` private-key secret names. */
+	jwtSignKeys: Array<string>
+	/** Literal integration / createAuthenticatedFetch account names. */
+	oauthKeys: Array<string>
 	scan: PackageCredentialScan
+}
+
+/**
+ * A slot the phase-2 seal codemod / backfill can write without overwriting an
+ * existing description.
+ */
+export type CredentialStampSealSlot = {
+	key: string
+	description: string
+	kind?: PackageCredentialKind
+}
+
+export type CredentialStampSealPlan = {
+	keys: Array<string>
+	/** Slots to insert or fill (existing descriptions are never overwritten). */
+	updates: Array<CredentialStampSealSlot>
+	/** Stamp keys that still need a human description. */
+	uninferableKeys: Array<string>
+	/** Gate failures that block sealing (excludes missing_description for keys in updates). */
+	blockingFailures: Array<CredentialStampGateFailure>
+	staleManifestKeys: Array<string>
+	/** True when keys are stamped, every key has a description, and nothing blocks. */
+	sealReady: boolean
 }
 
 const packageManifestPath = 'package.json'
 
 /**
  * 0010 labels that cannot be sealed into a stamp allowlist. `kody.mcp` stays
- * off this list in phase 1: 0010 reports it even when mcp slots are declared,
- * and migrating every mcp caller is phase 2. Non-literal names, `|scope=`,
+ * off this list: phase 2 stamps literal server names and fails dynamic access
+ * via {@link scanLiteralMcpServerKeys}. Non-literal names, `|scope=`,
  * secretMounts, packageSecrets.get, and plain http still fail closed.
  */
 const unstampableLegacyPatterns = new Set<LegacyCredentialPattern>([
@@ -579,14 +644,461 @@ function scanServerEvalFailures(
 }
 
 /**
+ * Collect literal `kody.mcp.SERVER` / `kody.mcp["SERVER"]` names and fail on
+ * dynamic access (`kody.mcp[variable]`, `const { mcp } = kody` then computed).
+ */
+export function scanLiteralMcpServerKeys(files: Record<string, string>): {
+	keys: Array<string>
+	failures: Array<CredentialStampGateFailure>
+} {
+	files = omitOversizedCredentialStampModules(files)
+	const keys = new Set<string>()
+	const failures: Array<CredentialStampGateFailure> = []
+	const modulePaths = listScannableModulePaths(files)
+	for (const path of modulePaths) {
+		const source = files[path]!
+		const parsed = parseModule(source)
+		if (!parsed) {
+			if (
+				/\bkody\s*(?:\?\.|\.)\s*mcp\b|\bkody\s*\[\s*['"`]mcp['"`]/.test(source)
+			) {
+				failures.push({
+					code: 'non_literal',
+					path,
+					message: `${path}: kody.mcp access could not be parsed. Call kody.mcp.SERVER (or kody.mcp["SERVER"]) with a literal server name, and declare a kind "mcp" slot for each server.`,
+				})
+			}
+			continue
+		}
+		const body = parsed.program?.body ?? []
+		const kodyAliases = new Set<string>(['kody'])
+		const mcpAliases = new Set<string>()
+		for (const node of body) {
+			if (node.type !== 'ImportDeclaration') continue
+			if (getNodeName(node.source) !== 'kody:runtime') continue
+			for (const specifier of node.specifiers ?? []) {
+				const local = getNodeName(specifier.local)
+				if (!local) continue
+				if (
+					specifier.type === 'ImportDefaultSpecifier' ||
+					specifier.type === 'ImportNamespaceSpecifier'
+				) {
+					kodyAliases.add(local)
+					continue
+				}
+				if (
+					specifier.type === 'ImportSpecifier' &&
+					getNodeName(specifier.imported) === 'kody'
+				) {
+					kodyAliases.add(local)
+				}
+			}
+		}
+		walkAst(parsed, (node, ancestors) => {
+			if (node.type === 'VariableDeclarator') {
+				// `const mcp = kody.mcp` / `const mcp = runtime.mcp`
+				if (
+					node.id?.type === 'Identifier' &&
+					node.init &&
+					isKodyMcpRoot(node.init, kodyAliases, mcpAliases)
+				) {
+					const local = getNodeName(node.id)
+					if (local) mcpAliases.add(local)
+				}
+				if (
+					node.id?.type === 'ObjectPattern' &&
+					node.init?.type === 'Identifier' &&
+					kodyAliases.has(getNodeName(node.init) ?? '')
+				) {
+					for (const property of node.id.properties ?? []) {
+						if (property.type !== 'ObjectProperty') continue
+						if (property.computed === true) {
+							failures.push({
+								code: 'non_literal',
+								path,
+								message: `${path}: destructuring kody must use literal property names (including mcp). Rewrite to a literal binding.`,
+							})
+							continue
+						}
+						if (getNodeName(property.key) !== 'mcp') continue
+						const value = property.value as AstNode | undefined
+						if (value?.type === 'Identifier') {
+							const local = getNodeName(value)
+							if (local) mcpAliases.add(local)
+							continue
+						}
+						if (value?.type === 'ObjectPattern') {
+							// `const { mcp: { linear } } = kody`
+							collectLiteralMcpServersFromObjectPattern({
+								pattern: value,
+								path,
+								keys,
+								failures,
+							})
+							continue
+						}
+						failures.push({
+							code: 'non_literal',
+							path,
+							message: `${path}: destructuring kody.mcp must bind a simple local name (then mcp.SERVER) or a literal server ObjectPattern.`,
+						})
+					}
+				}
+				if (
+					node.id?.type === 'ObjectPattern' &&
+					node.init &&
+					isKodyMcpRoot(node.init, kodyAliases, mcpAliases)
+				) {
+					collectLiteralMcpServersFromObjectPattern({
+						pattern: node.id,
+						path,
+						keys,
+						failures,
+					})
+				}
+				return
+			}
+			if (
+				node.type === 'MemberExpression' ||
+				node.type === 'OptionalMemberExpression'
+			) {
+				const server = mcpServerFromMember(node, kodyAliases, mcpAliases)
+				if (server === null) {
+					failures.push({
+						code: 'non_literal',
+						path,
+						message: `${path}: kody.mcp was accessed with a non-literal server name. Use kody.mcp.SERVER or kody.mcp["SERVER"] and declare a kind "mcp" slot for each server.`,
+					})
+					return
+				}
+				if (server !== undefined) {
+					if (packageCredentialSlotNamePattern.test(server)) keys.add(server)
+					else {
+						failures.push({
+							code: 'invalid_key',
+							path,
+							message: `${path}: MCP server "${server}" is not a valid kody.credentials key. Rename the attached server or declare it under a valid slot key.`,
+						})
+					}
+					return
+				}
+			}
+			// Fail closed when a bare kody.mcp / mcp alias escapes as a value
+			// (passed to a call, returned, stored in a container, …) instead of
+			// a literal member access or supported alias/destructure binding.
+			if (!isKodyMcpRoot(node, kodyAliases, mcpAliases)) return
+			const parent = ancestors.at(-1)
+			if (!parent) return
+			if (parent.type.startsWith('Import')) return
+			if (isNonReferenceName(node, parent)) return
+			if (
+				(parent.type === 'MemberExpression' ||
+					parent.type === 'OptionalMemberExpression') &&
+				parent.object === node
+			) {
+				return
+			}
+			if (parent.type === 'VariableDeclarator') {
+				// Binding site (`const mcp = …`) or supported init (`= kody.mcp`
+				// / `= { linear } = kody.mcp`).
+				if (parent.id === node || parent.init === node) return
+			}
+			if (
+				(parent.type === 'ObjectProperty' || parent.type === 'Property') &&
+				parent.value === node
+			) {
+				// Destructuring binding: `const { mcp } = kody` / `const { linear } = kody.mcp`.
+				return
+			}
+			failures.push({
+				code: 'non_literal',
+				path,
+				message: `${path}: kody.mcp escaped as a value. Keep MCP access as literal kody.mcp.SERVER (or a local alias used only as mcp.SERVER) and declare each server as a kind "mcp" kody.credentials slot.`,
+			})
+		})
+	}
+	return { keys: [...keys].sort(), failures: dedupeFailures(failures) }
+}
+
+function isKodyMcpRoot(
+	node: AstNode,
+	kodyAliases: Set<string>,
+	mcpAliases: Set<string>,
+): boolean {
+	if (node.type === 'Identifier') {
+		return mcpAliases.has(getNodeName(node) ?? '')
+	}
+	if (
+		node.type !== 'MemberExpression' &&
+		node.type !== 'OptionalMemberExpression'
+	) {
+		return false
+	}
+	if (node.object?.type !== 'Identifier') return false
+	if (!kodyAliases.has(getNodeName(node.object) ?? '')) return false
+	return memberPropertyName(node) === 'mcp'
+}
+
+function collectLiteralMcpServersFromObjectPattern(input: {
+	pattern: AstNode
+	path: string
+	keys: Set<string>
+	failures: Array<CredentialStampGateFailure>
+}) {
+	for (const property of input.pattern.properties ?? []) {
+		if (property.type === 'RestElement' || property.type === 'RestProperty') {
+			input.failures.push({
+				code: 'non_literal',
+				path: input.path,
+				message: `${input.path}: destructuring kody.mcp with a rest element cannot be stamped. Bind each server by literal name (const { linear } = kody.mcp) or use kody.mcp.SERVER.`,
+			})
+			continue
+		}
+		if (property.type !== 'ObjectProperty') {
+			input.failures.push({
+				code: 'non_literal',
+				path: input.path,
+				message: `${input.path}: destructuring kody.mcp must use literal server names. Declare each server as a kind "mcp" kody.credentials slot.`,
+			})
+			continue
+		}
+		if (property.computed === true) {
+			input.failures.push({
+				code: 'non_literal',
+				path: input.path,
+				message: `${input.path}: destructuring kody.mcp must use literal server names. Declare each server as a kind "mcp" kody.credentials slot.`,
+			})
+			continue
+		}
+		const server = getNodeName(property.key)
+		if (server && packageCredentialSlotNamePattern.test(server)) {
+			input.keys.add(server)
+		} else {
+			input.failures.push({
+				code: 'non_literal',
+				path: input.path,
+				message: `${input.path}: destructuring kody.mcp must use literal server names. Declare each server as a kind "mcp" kody.credentials slot.`,
+			})
+		}
+	}
+}
+
+/**
+ * Literal server name from `kody.mcp.SERVER` / `mcp.SERVER`, or null when the
+ * access is dynamic, or undefined when the node is not an mcp server access.
+ */
+function mcpServerFromMember(
+	node: AstNode,
+	kodyAliases: Set<string>,
+	mcpAliases: Set<string>,
+): string | null | undefined {
+	if (
+		node.type !== 'MemberExpression' &&
+		node.type !== 'OptionalMemberExpression'
+	) {
+		return undefined
+	}
+	if (isKodyMcpRoot(node, kodyAliases, mcpAliases)) {
+		// Bare `kody.mcp` / `mcp` root — wait for a child member when present.
+		return undefined
+	}
+	if (!node.object || !isKodyMcpRoot(node.object, kodyAliases, mcpAliases)) {
+		return undefined
+	}
+	if (node.computed === true) {
+		const property = node.property
+		if (property?.type === 'StringLiteral' || property?.type === 'Literal') {
+			return getNodeName(property)
+		}
+		return null
+	}
+	return getNodeName(node.property)
+}
+
+/**
+ * Infer a description for a stamp key from how the package uses it. Prefer
+ * specific MCP / OAuth / signing wording; fall back to a factual use sentence
+ * for other literal keys (never the empty "Describe what … is for." placeholder
+ * the publish gate rejects).
+ */
+export function inferCredentialStampDescription(input: {
+	key: string
+	kind?: PackageCredentialKind
+	mcp?: boolean
+	jwtSign?: boolean
+	oauth?: boolean
+}): string {
+	if (input.mcp || input.kind === 'mcp') {
+		return `Calls tools on the attached MCP server "${input.key}".`
+	}
+	if (input.jwtSign || input.kind === 'signing') {
+		return `Signs tokens with the "${input.key}" signing credential.`
+	}
+	if (input.oauth || input.kind === 'oauth') {
+		return `OAuth access for ${input.key}.`
+	}
+	if (input.kind === 'login') {
+		return `Login exchange for ${input.key}.`
+	}
+	if (input.kind === 'url') {
+		return `URL credential for ${input.key}.`
+	}
+	return `Used by this package as credential "${input.key}".`
+}
+
+/**
+ * Plan phase-2 seal updates: add missing slots / descriptions where inferable,
+ * and list blocking failures / uninferable keys that need an agent or owner.
+ */
+export function planCredentialStampSeal(
+	files: Record<string, string>,
+): CredentialStampSealPlan {
+	const scanned = scanCredentialStamp(files)
+	const slots = readManifestCredentialSlots(files[packageManifestPath])
+	const mcpKeySet = new Set(scanned.mcpKeys)
+	const jwtKeySet = new Set(scanned.jwtSignKeys)
+	const oauthKeySet = new Set(scanned.oauthKeys)
+	const updates: Array<CredentialStampSealSlot> = []
+	const uninferableKeys: Array<string> = []
+	const kindMismatches: Array<CredentialStampGateFailure> = []
+	for (const key of scanned.keys) {
+		const existing = slots[key]
+		const inferredKind: PackageCredentialKind | undefined = mcpKeySet.has(key)
+			? 'mcp'
+			: oauthKeySet.has(key)
+				? 'oauth'
+				: // secretJwtSign resolves a Key/secret by name — do not force kind
+					// "signing" (that is for credential(key).sign()).
+					undefined
+		if (existing?.description != null) {
+			if (
+				inferredKind === 'mcp' &&
+				existing.kind != null &&
+				existing.kind !== 'mcp'
+			) {
+				kindMismatches.push({
+					code: 'unstampable_pattern',
+					message: `kody.credentials slot for an MCP server is declared with kind "${existing.kind}" instead of "mcp". Change the kind to "mcp" (or omit kind only for fetch-capable credentials that are not MCP servers).`,
+				})
+				continue
+			}
+			if (inferredKind === 'mcp' && existing.kind == null) {
+				updates.push({
+					key,
+					description: existing.description,
+					kind: 'mcp',
+				})
+			}
+			continue
+		}
+		const kind = existing?.kind ?? inferredKind
+		updates.push({
+			key,
+			description: inferCredentialStampDescription({
+				key,
+				kind,
+				mcp: mcpKeySet.has(key),
+				jwtSign: jwtKeySet.has(key),
+				oauth: oauthKeySet.has(key),
+			}),
+			...(kind ? { kind } : {}),
+		})
+	}
+	const blockingFailures = [
+		...scanned.failures.filter(
+			(failure) => failure.code !== 'missing_description',
+		),
+		...kindMismatches,
+	]
+	const sealReady =
+		blockingFailures.length === 0 &&
+		scanned.keys.every((key) => {
+			const existing = slots[key]?.description
+			if (existing != null) return true
+			return updates.some((update) => update.key === key)
+		})
+	return {
+		keys: scanned.keys,
+		updates,
+		uninferableKeys,
+		blockingFailures,
+		staleManifestKeys: scanned.staleManifestKeys,
+		sealReady,
+	}
+}
+
+/**
+ * Apply {@link planCredentialStampSeal} updates into package.json without
+ * overwriting existing descriptions.
+ */
+export function applyCredentialStampSealPlan(
+	files: Record<string, string>,
+	plan: CredentialStampSealPlan,
+): { files: Record<string, string>; changed: boolean } {
+	if (plan.updates.length === 0) {
+		return { files, changed: false }
+	}
+	const source = files[packageManifestPath]
+	if (source == null) return { files, changed: false }
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(source)
+	} catch {
+		return { files, changed: false }
+	}
+	if (!isPlainObject(parsed)) return { files, changed: false }
+	const kody = isPlainObject(parsed.kody) ? { ...parsed.kody } : {}
+	const existing = isPlainObject(kody.credentials)
+		? { ...kody.credentials }
+		: {}
+	let changed = false
+	for (const update of plan.updates) {
+		const prior = isPlainObject(existing[update.key])
+			? { ...(existing[update.key] as Record<string, unknown>) }
+			: {}
+		const priorDescription =
+			typeof prior.description === 'string' &&
+			prior.description.trim().length > 0
+				? prior.description.trim()
+				: null
+		const next: Record<string, unknown> = { ...prior }
+		let slotChanged = false
+		if (priorDescription == null) {
+			next.description = update.description
+			slotChanged = true
+		}
+		if (update.kind && prior.kind == null) {
+			next.kind = update.kind
+			slotChanged = true
+		}
+		if (!slotChanged) continue
+		existing[update.key] = next
+		changed = true
+	}
+	if (!changed) return { files, changed: false }
+	const indent = detectJsonIndent(source)
+	const nextSource = `${JSON.stringify(
+		{ ...parsed, kody: { ...kody, credentials: existing } },
+		null,
+		indent,
+	)}\n`
+	return {
+		files: { ...files, [packageManifestPath]: nextSource },
+		changed: true,
+	}
+}
+
+/**
  * Scan package source for stampable literal credential keys and publish-time
  * gate failures (non-literal uses, unstampable legacy patterns, server eval).
  */
 export function scanCredentialStamp(
 	files: Record<string, string>,
 ): CredentialStampScan {
+	files = omitOversizedCredentialStampModules(files)
 	const keys = new Set<string>()
 	const failures: Array<CredentialStampGateFailure> = []
+	const oauthKeys = new Set<string>()
 	const slots = readManifestCredentialSlots(files[packageManifestPath])
 	const scan = scanPackageCredentials({
 		files,
@@ -598,6 +1110,7 @@ export function scanCredentialStamp(
 		if (reference.scope != null) continue
 		if (packageCredentialSlotNamePattern.test(reference.name)) {
 			keys.add(reference.name)
+			if (reference.nameKind === 'integration') oauthKeys.add(reference.name)
 		} else {
 			failures.push({
 				code: 'invalid_key',
@@ -606,9 +1119,12 @@ export function scanCredentialStamp(
 		}
 	}
 
+	const jwtSignKeys: Array<string> = []
 	for (const name of scan.jwtSignSecretNames) {
-		if (packageCredentialSlotNamePattern.test(name)) keys.add(name)
-		else {
+		if (packageCredentialSlotNamePattern.test(name)) {
+			keys.add(name)
+			jwtSignKeys.push(name)
+		} else {
 			failures.push({
 				code: 'invalid_key',
 				message: `secretJwtSign name "${name}" is not a valid kody.credentials key. Rename it to a valid literal key and declare it with a description.`,
@@ -626,8 +1142,11 @@ export function scanCredentialStamp(
 
 	scanModuleCredentialReferences(files, (path) => ({
 		add: () => {},
-		named: (name) => {
-			if (packageCredentialSlotNamePattern.test(name)) keys.add(name)
+		named: (name, kind) => {
+			if (packageCredentialSlotNamePattern.test(name)) {
+				keys.add(name)
+				if (kind === 'integration') oauthKeys.add(name)
+			}
 		},
 		// Non-literal helper args are refused via 0010 unstampable patterns.
 		computed: () => {},
@@ -688,6 +1207,10 @@ export function scanCredentialStamp(
 		else scanUnparsedCredentialKeys(files[path]!, keyScan)
 	}
 
+	const mcp = scanLiteralMcpServerKeys(files)
+	for (const key of mcp.keys) keys.add(key)
+	failures.push(...mcp.failures)
+
 	for (const finding of detectLegacyCredentialPatternsCodemod.detect(files, {
 		packageName: '',
 	})) {
@@ -723,6 +1246,9 @@ export function scanCredentialStamp(
 		keys: sortedKeys,
 		failures: dedupeFailures(failures),
 		staleManifestKeys,
+		mcpKeys: mcp.keys,
+		jwtSignKeys: [...jwtSignKeys].sort(),
+		oauthKeys: [...oauthKeys].sort(),
 		scan,
 	}
 }

@@ -16,6 +16,7 @@ import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
 import {
 	buildCredentialStamp,
 	mergeCredentialStampIntoManifestFiles,
+	omitOversizedCredentialStampModules,
 	scanCredentialStamp,
 	type CredentialDepStamp,
 	type CredentialStamp,
@@ -35,15 +36,33 @@ function isCredentialStamp(value: unknown): value is CredentialStamp {
 	)
 }
 
+/**
+ * Resolve live dependency stamp pins for a package file map (same pins
+ * `storePublishedCredentialStamp` writes). Exported so fleet can tell a
+ * current stamp from one that still pins a pre-stamp empty fallback.
+ */
+export async function resolvePublishedCredentialDepStamps(input: {
+	env: Env
+	userId: string
+	packageName: string
+	files: Record<string, string>
+}): Promise<Array<CredentialDepStamp>> {
+	return loadDependencyStamps(input)
+}
+
 async function loadDependencyStamps(input: {
 	env: Env
 	userId: string
 	packageName: string
 	files: Record<string, string>
 }): Promise<Array<CredentialDepStamp>> {
+	// Import collection AST-walks every file; drop oversized prebuilt assets
+	// the same way scanCredentialStamp does so fleet pin checks and publish
+	// do not DO-reset on multi-MB client bundles.
+	const files = omitOversizedCredentialStampModules(input.files)
 	const names = [
 		...new Set(
-			collectStaticKodyPackageImportsFromFiles(input.files)
+			collectStaticKodyPackageImportsFromFiles(files)
 				.map((imported) => imported.packageName)
 				.filter((name) => name !== input.packageName),
 		),
