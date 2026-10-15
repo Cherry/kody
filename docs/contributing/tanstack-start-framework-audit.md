@@ -204,7 +204,7 @@ restyle the committed page. Unspecified routes still require session
 verification; public document exceptions consult the document catalog using
 decoded route params.
 
-Mutation cache filters now use structured organization identity instead of
+Mutation cache filters use structured organization identity instead of
 parsing href strings. This fixes both cross-org over-invalidation and missed
 updates where callbacks still expected the retired string query keys. Mutation
 variables retain their initiating scope across later navigation.
