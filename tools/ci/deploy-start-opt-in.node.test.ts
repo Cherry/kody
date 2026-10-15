@@ -205,3 +205,81 @@ test('preserves JSON variable array order during complete snapshot comparison', 
 		'Production configuration changed',
 	)
 })
+
+test('maps documented existing production DR secrets without supplying unrelated deploy credentials', () => {
+	const names = [
+		'DR_BACKUP_ACCESS_KEY_ID',
+		'DR_BACKUP_SECRET_ACCESS_KEY',
+		'DR_BACKUP_ACCOUNT_ID',
+		'DR_BACKUP_BUCKET_NAME',
+		'DR_RESTORE_SECRET',
+	]
+	const environment = {
+		COOKIE_SECRET: 'cookie',
+		SECRET_STORE_KEY: 'store',
+		DR_BACKUP_ACCESS_KEY_ID: 's3-access',
+		DR_BACKUP_SECRET_ACCESS_KEY: 's3-secret',
+		DR_BACKUP_ACCOUNT_ID: 'backup-account',
+		DR_BACKUP_BUCKET_NAME: 'backup-bucket',
+		DR_RESTORE_SECRET: 'restore-secret',
+		DR_DEPLOY_TOKEN: 'must-not-copy-provisioner',
+	}
+	const result = collectCandidateSecrets(names, environment)
+	for (const name of names)
+		expect(result[name]).toBe(environment[name as keyof typeof environment])
+	expect(result.DR_DEPLOY_TOKEN).toBeUndefined()
+	expect(collectCandidateSecrets([], environment)).toEqual({
+		COOKIE_SECRET: 'cookie',
+		SECRET_STORE_KEY: 'store',
+	})
+})
+
+test('reports every unmapped and unavailable name together without exposing any values', () => {
+	const environment = {
+		COOKIE_SECRET: 'private-cookie-value',
+		SECRET_STORE_KEY: 'private-store-value',
+		STRIPE_SECRET_KEY: '',
+		SENTRY_DSN: '',
+		PACKAGE_APP_TICKET_KEYS: '',
+		UNKNOWN_ONE: 'private-unknown-value',
+	}
+	try {
+		collectCandidateSecrets(
+			[
+				'UNKNOWN_TWO',
+				'STRIPE_SECRET_KEY',
+				'SENTRY_DSN',
+				'PACKAGE_APP_TICKET_KEYS',
+				'UNKNOWN_ONE',
+				'STRIPE_SECRET_KEY',
+			],
+			environment,
+		)
+	} catch (error) {
+		const message = String(error)
+		expect(message).toContain(
+			'Missing reviewed secret mappings: UNKNOWN_ONE, UNKNOWN_TWO',
+		)
+		expect(message).toContain(
+			'Trusted production secrets unavailable: PACKAGE_APP_TICKET_KEYS, SENTRY_DSN, STRIPE_SECRET_KEY',
+		)
+		expect(message).not.toContain('private-cookie-value')
+		expect(message).not.toContain('private-store-value')
+		expect(message).not.toContain('private-unknown-value')
+		return
+	}
+	throw new Error(
+		'Expected incomplete trusted production secret sources to fail closed',
+	)
+})
+
+test('missing DR values remain a provisioning failure instead of silently skipping live secrets', () => {
+	expect(() =>
+		collectCandidateSecrets(
+			['DR_BACKUP_ACCESS_KEY_ID', 'DR_BACKUP_SECRET_ACCESS_KEY'],
+			{ COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' },
+		),
+	).toThrow(
+		'Trusted production secrets unavailable: DR_BACKUP_ACCESS_KEY_ID, DR_BACKUP_SECRET_ACCESS_KEY',
+	)
+})

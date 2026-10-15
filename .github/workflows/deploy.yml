@@ -160,6 +160,12 @@ jobs:
           CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN:
             ${{ secrets.CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN }}
           PACKAGE_APP_TICKET_KEYS: ${{ secrets.PACKAGE_APP_TICKET_KEYS }}
+          DR_BACKUP_ACCESS_KEY_ID: ${{ secrets.DR_BACKUP_ACCESS_KEY_ID }}
+          DR_BACKUP_SECRET_ACCESS_KEY:
+            ${{ secrets.DR_BACKUP_SECRET_ACCESS_KEY }}
+          DR_BACKUP_ACCOUNT_ID: ${{ secrets.DR_BACKUP_ACCOUNT_ID }}
+          DR_BACKUP_BUCKET_NAME: ${{ secrets.DR_BACKUP_BUCKET_NAME }}
+          DR_RESTORE_SECRET: ${{ secrets.DR_RESTORE_SECRET }}
         run: node tools/ci/deploy-start-opt-in.ts
       - name: Verify inactive workers through a private remote session
         if:
@@ -179,6 +185,7 @@ jobs:
             .tmp/start-opt-in/router.json
             .tmp/start-opt-in/deployed.json
             .tmp/start-opt-in/runtime-proof.json
+            .tmp/start-opt-in/secret-names.json
             dist
           include-hidden-files: true
           retention-days: 3

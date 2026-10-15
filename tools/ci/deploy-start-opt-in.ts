@@ -149,6 +149,12 @@ const candidateSecretNames = [
 	'OIDC_SIGNING_KEY_ID',
 	'CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN',
 	'PACKAGE_APP_TICKET_KEYS',
+	// Existing production DR settings, copied only when present in live inventory.
+	'DR_BACKUP_ACCESS_KEY_ID',
+	'DR_BACKUP_SECRET_ACCESS_KEY',
+	'DR_BACKUP_ACCOUNT_ID',
+	'DR_BACKUP_BUCKET_NAME',
+	'DR_RESTORE_SECRET',
 ] as const
 
 export function collectCandidateSecrets(
@@ -160,22 +166,43 @@ export function collectCandidateSecrets(
 		...candidateSecretNames,
 		'CLOUDFLARE_API_TOKEN',
 	])
+	if (
+		!Array.isArray(liveNames) ||
+		liveNames.some(
+			(name) =>
+				typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name),
+		)
+	)
+		throw new Error('Live secret-name inventory is invalid')
+	const unmapped = new Set<string>()
+	const unavailable = new Set<string>()
 	for (const name of liveNames) {
-		if (!allowed.has(name))
-			throw new Error(`Missing reviewed secret mapping for ${name}`)
+		if (!allowed.has(name)) {
+			unmapped.add(name)
+			continue
+		}
 		const value =
 			environment[
 				name === 'CLOUDFLARE_API_TOKEN' ? 'CLOUDFLARE_APP_API_TOKEN' : name
 			]
-		if (!value)
-			throw new Error(`Trusted production secret is unavailable: ${name}`)
-		secrets[name] = value
+		if (!value) unavailable.add(name)
+		else secrets[name] = value
 	}
 	for (const name of ['COOKIE_SECRET', 'SECRET_STORE_KEY']) {
-		if (!environment[name])
-			throw new Error(`Trusted production secret is unavailable: ${name}`)
-		secrets[name] = environment[name]!
+		if (!environment[name]) unavailable.add(name)
+		else secrets[name] = environment[name]!
 	}
+	const failures = [
+		...(unmapped.size
+			? [`Missing reviewed secret mappings: ${[...unmapped].sort().join(', ')}`]
+			: []),
+		...(unavailable.size
+			? [
+					`Trusted production secrets unavailable: ${[...unavailable].sort().join(', ')}`,
+				]
+			: []),
+	]
+	if (failures.length) throw new Error(failures.join('; '))
 	return secrets
 }
 

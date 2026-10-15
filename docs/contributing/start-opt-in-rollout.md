@@ -180,3 +180,13 @@ tool reports an unknown outcome and stops. Use the retained pre-activation
 snapshot to inspect the exact `kody.codes/*` route and `kody-start-router`
 ownership before recovery. Never retry creation blindly or delete unrelated
 routes to resolve that state.
+
+The review artifact also retains `secret-names.json`, containing names only.
+Secret preflight reports every missing mapping and unavailable trusted value
+together, before creating either worker. Documented production DR settings use
+their existing GitHub sources and are copied only when the live worker inventory
+contains them. The broader DR provisioning token is never copied. If a live
+secret was configured manually in Cloudflare and has no trusted GitHub source,
+stop and provision its existing value through the approved secret source. Do not
+skip it, guess a replacement, rotate the legacy worker, or treat an unrelated
+secret as a fallback.
