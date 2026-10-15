@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { memoriesInput } from '../memories-input.ts'
+import { memoriesSearch } from '../filter-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountMemoriesPage } from '../pages/account-memories.tsx'
 import { loadMemoriesPage } from '#start/server/account-collections'
@@ -15,17 +16,14 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/memories_/$memoryId')({
 		navigation: { rail: 'workspace', item: 'memories' },
 		orgScope: { section: 'memories' },
 	},
-	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
+	validateSearch: memoriesSearch,
+	loaderDeps: ({ search }) => ({
 		selected: search.selected,
 		q: search.q,
 		includeDeleted: search.includeDeleted,
 	}),
-	context: ({ location, params }) => ({
-		pageQueryInput: memoriesInput(
-			params.orgSlug,
-			location.searchStr,
-			params.memoryId,
-		),
+	beforeLoad: ({ search, params }) => ({
+		pageQueryInput: memoriesInput(params.orgSlug, search, params.memoryId),
 	}),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -1,8 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import {
 	filterAccountJobs,
-	readJobsSearchFilter,
-	readJobsViewFilter,
 	type AccountJobsViewFilter,
 } from '#client/routes/account-jobs-filter.ts'
 import { setJobKillSwitch, runJobNow } from '#start/server/account-mutations'
@@ -19,6 +17,7 @@ import {
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { collectionSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	renderAccountJobDetail,
@@ -63,7 +62,7 @@ export function AccountJobsPage({
 	currentHref: string
 	selectedId: string | null
 }) {
-	const { actorKey, orgSlug } = useMatchedPageScope()
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
 	const mutationKey = ['jobs', actorKey, orgSlug] as const
 	const changes = useMutationState({
 		filters: { mutationKey, status: 'pending' },
@@ -114,7 +113,7 @@ export function AccountJobsPage({
 			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				if (next.search !== undefined) {
 					if (next.search) search.q = next.search
 					else delete search.q
@@ -192,8 +191,9 @@ export function AccountJobsPage({
 		}
 	}
 
-	const search = readJobsSearchFilter(currentHref)
-	const view = readJobsViewFilter(currentHref)
+	const filters = collectionSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
+	const view = filters.view
 	const filteredJobs = filterAccountJobs(jobs, {
 		view,
 		search,
@@ -239,11 +239,7 @@ export function AccountJobsPage({
 						<RecordTableSearch
 							label="Search jobs"
 							placeholder="Search jobs"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={filters.q ?? ''}
 							onInput={(value) => {
 								return updateFilters({ search: value })
 							}}

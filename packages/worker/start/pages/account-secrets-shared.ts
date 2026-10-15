@@ -1,3 +1,4 @@
+import { secretsSearch } from '../filter-search.ts'
 import { readCommaListParams, readTrimmedParam } from '#client/url-params.ts'
 import {
 	type AccountSecretDetail,
@@ -290,15 +291,15 @@ export function getDataRefreshKey(href: string) {
 }
 
 export function readFilterState(
-	href: string,
+	searchParams: Record<string, unknown>,
 	packageOptions: Array<PackageOption>,
 ): SecretFilterState {
-	const url = new URL(href, 'http://localhost')
-	const search = url.searchParams.get('q')?.trim() ?? ''
-	const rawScope = url.searchParams.get('scope')
+	const filters = secretsSearch(searchParams)
+	const search = filters.q?.trim() ?? ''
+	const rawScope = filters.scope
 	const scope =
 		rawScope === 'user' || rawScope === 'package' ? rawScope : ('all' as const)
-	const rawPackageId = url.searchParams.get('package')?.trim() ?? ''
+	const rawPackageId = filters.package?.trim() ?? ''
 	const packageId =
 		scope === 'user'
 			? ''

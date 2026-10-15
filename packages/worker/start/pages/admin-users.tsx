@@ -15,7 +15,7 @@ import {
 	useRef,
 	useState,
 } from 'react'
-import { adminUsersFilters } from '../admin-users-input.ts'
+import { adminUsersFilters, adminUsersSearch } from '../admin-users-input.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 
 import {
@@ -44,7 +44,6 @@ import {
 } from '#universal/loader-data.ts'
 import { type RoleName } from '#universal/permissions.ts'
 import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
-import { colors } from '#universal/styles/tokens.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -90,7 +89,7 @@ export function AdminUsersPage(props: {
 	const availablePlans = props.payload.availablePlans
 	const selectedUserFallback = props.payload.selectedUser
 	const [loadAdditionalPages, setLoadAdditionalPages] = useState(false)
-	const listFilters = adminUsersFilters(pageLocation.searchStr)
+	const listFilters = adminUsersFilters(pageLocation.search)
 	const additional = useInfiniteQuery({
 		queryKey: ['admin-users-pages', actorKey, listFilters],
 		initialPageParam: props.payload.page + 1,
@@ -533,7 +532,7 @@ export function AdminUsersPage(props: {
 						<RecordTableSearch
 							label="Search users"
 							placeholder="Search by username or email"
-							value={new URLSearchParams(pageLocation.searchStr).get('q') ?? ''}
+							value={adminUsersSearch(pageLocation.search).q ?? ''}
 							onInput={(value) => {
 								return updateFilters({ search: value })
 							}}

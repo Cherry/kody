@@ -29,6 +29,7 @@ import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { usePageInvalidation } from '../page-invalidation.ts'
+import { memoriesSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
@@ -53,18 +54,6 @@ const memoriesRoute = createListDetailLinks('/account/memories')
 
 type MessageTone = 'info' | 'error'
 type DeleteMode = 'soft' | 'hard' | null
-
-function readSearchFilter(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
-function readIncludeDeleted(href: string) {
-	const raw = new URL(href, 'http://localhost').searchParams
-		.get('includeDeleted')
-		?.trim()
-		.toLowerCase()
-	return raw === '1' || raw === 'true' || raw === 'yes'
-}
 
 function filterMemories(
 	memories: Array<AccountMemoryListItem>,
@@ -129,7 +118,7 @@ export function AccountMemoriesPage({
 	currentHref: string
 	selectedId: string | null
 }) {
-	const { actorKey, orgSlug } = useMatchedPageScope()
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
 	const memories = payload.memories
 	const selectedMemory = payload.selectedMemory
 	const legacyReadOnly = payload.legacyReadOnly
@@ -192,7 +181,7 @@ export function AccountMemoriesPage({
 				// Another page's pending search never belongs to this toolbar.
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				if (next.search !== undefined) {
 					if (next.search) search.q = next.search
 					else delete search.q
@@ -248,8 +237,9 @@ export function AccountMemoriesPage({
 	}
 
 	const isMutating = actionState !== 'idle'
-	const search = readSearchFilter(currentHref)
-	const includeDeleted = readIncludeDeleted(currentHref)
+	const filters = memoriesSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
+	const includeDeleted = filters.includeDeleted
 	const filteredMemories = filterMemories(memories, search)
 	const detailMemory = selectedMemory?.id === selectedId ? selectedMemory : null
 	const showMemoryNotFound = selectedId !== null && !detailMemory
@@ -312,11 +302,7 @@ export function AccountMemoriesPage({
 								<RecordTableSearch
 									label="Search memories"
 									placeholder="Search subject, category, tags, summary"
-									value={
-										new URL(currentHref, 'http://localhost').searchParams.get(
-											'q',
-										) ?? ''
-									}
+									value={filters.q ?? ''}
 									onInput={(value) => {
 										return updateFilters({ search: value })
 									}}

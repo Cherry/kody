@@ -1,3 +1,4 @@
+import { defaultParseSearch } from '@tanstack/react-router'
 import { expect, test } from 'vitest'
 import { memoriesInput } from './memories-input.ts'
 
@@ -5,7 +6,9 @@ test('memory query keys contain normalized resource filters, not navigation deco
 	expect(
 		memoriesInput(
 			'team',
-			'?q=+meeting+&includeDeleted=YES&selected=one&youtubeId=ignored',
+			defaultParseSearch(
+				'?q=+meeting+&includeDeleted=YES&selected=one&youtubeId=ignored',
+			),
 			'two',
 		),
 	).toEqual({
@@ -15,7 +18,9 @@ test('memory query keys contain normalized resource filters, not navigation deco
 		query: 'meeting',
 		includeDeleted: true,
 	})
-	expect(memoriesInput('team', '?includeDeleted=false')).toEqual({
+	expect(
+		memoriesInput('team', defaultParseSearch('?includeDeleted=false')),
+	).toEqual({
 		orgSlug: 'team',
 		memoryId: undefined,
 		selected: undefined,

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { secretsSearch } from '../filter-search.ts'
 import { secretsInput } from '../secrets-input.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
@@ -15,6 +16,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/new')({
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'secrets' },
 	},
+	validateSearch: secretsSearch,
 	loaderDeps: ({ search }) => search,
 	context: ({ params, location }) => ({
 		pageQueryInput: secretsInput(

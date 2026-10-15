@@ -3,8 +3,6 @@ import { createListDetailLinks } from '#client/list-detail-route.ts'
 import {
 	filterAccountWorkflows,
 	isActiveAccountWorkflow,
-	readWorkflowsSearchFilter,
-	readWorkflowsViewFilter,
 	type AccountWorkflowsViewFilter,
 } from '#client/routes/account-workflows-filter.ts'
 import { cancelWorkflowRun } from '#start/server/account-mutations'
@@ -32,6 +30,7 @@ import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { workflowCancellationMutationOptions } from '../workflow-cancellation-mutation.ts'
+import { collectionSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -192,7 +191,7 @@ export function AccountWorkflowsPage({
 	const [cancelArmed, setCancelArmed] = useState(false)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const { orgSlug } = useMatchedPageScope()
+	const { orgSlug, pageLocation } = useMatchedPageScope()
 	const mutationKey = ['workflows', actorKey, orgSlug] as const
 
 	const isMutating = useIsMutating({ mutationKey }) > 0
@@ -224,7 +223,7 @@ export function AccountWorkflowsPage({
 				// Another page's pending search never belongs to this toolbar.
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				if (next.search !== undefined) {
 					if (next.search) search.q = next.search
 					else delete search.q
@@ -290,8 +289,9 @@ export function AccountWorkflowsPage({
 		)
 	}
 
-	const search = readWorkflowsSearchFilter(currentHref)
-	const view = readWorkflowsViewFilter(currentHref)
+	const filters = collectionSearch(pageLocation.search)
+	const search = filters.q?.trim() ?? ''
+	const view = filters.view
 	const filteredWorkflows = filterAccountWorkflows(workflows, {
 		view,
 		search,
@@ -343,11 +343,7 @@ export function AccountWorkflowsPage({
 						<RecordTableSearch
 							label="Search workflows"
 							placeholder="Search workflows"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={filters.q ?? ''}
 							onInput={(value) => {
 								return updateFilters({ search: value })
 							}}

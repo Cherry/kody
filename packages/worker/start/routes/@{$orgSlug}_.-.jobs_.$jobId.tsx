@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { collectionSearch } from '../filter-search.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountJobsPage } from '../pages/account-jobs.tsx'
 import { loadJobsPage } from '#start/server/account-collections'
@@ -14,15 +15,15 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/jobs_/$jobId')({
 		navigation: { rail: 'workspace', item: 'jobs' },
 		orgScope: { section: 'jobs' },
 	},
-	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
+	validateSearch: collectionSearch,
+	loaderDeps: ({ search }) => ({
 		selected: search.selected,
 	}),
-	context: ({ params, location }) => ({
+	beforeLoad: ({ params, search }) => ({
 		pageQueryInput: {
 			orgSlug: params.orgSlug,
 			jobId: params.jobId,
-			selected:
-				new URLSearchParams(location.searchStr).get('selected') ?? undefined,
+			selected: search.selected,
 		},
 	}),
 	loader: ({ context, preload }) =>

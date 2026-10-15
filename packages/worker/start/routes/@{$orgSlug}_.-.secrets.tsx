@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { secretsSearch } from '../filter-search.ts'
 import { secretsInput } from '../secrets-input.ts'
 import { credentialRedirectFor } from '#universal/credential-redirects.ts'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
@@ -30,6 +31,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
 			pageQueryInput: secretsInput(params.orgSlug, location.searchStr),
 		}
 	},
+	validateSearch: secretsSearch,
 	loaderDeps: ({ search }) => search,
 
 	loader: ({ context, preload }) =>

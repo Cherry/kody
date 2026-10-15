@@ -25,6 +25,7 @@ import { type FormEvent, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
 import { secretMutationOptions } from '../secret-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { secretsSearch } from '../filter-search.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -127,7 +128,7 @@ export function AccountSecretsPage({
 	)
 	const [showSecretValue, setShowSecretValue] = useState(false)
 	const queryClient = useQueryClient()
-	const { actorKey, orgSlug } = useMatchedPageScope()
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
 	const capture = useSubmitterScope()
 	const save = useMutation(
 		secretMutationOptions(
@@ -187,21 +188,21 @@ export function AccountSecretsPage({
 	) {
 		const currentUrl = new URL(getCurrentHref(), 'http://localhost')
 		const filters = {
-			...readFilterState(currentUrl.toString(), packageOptions),
+			...readFilterState(pageLocation.search, packageOptions),
 			...nextFilters,
 		}
-		const nextUrl = new URL(currentUrl.toString())
-		if (options?.pathname) {
-			nextUrl.pathname = options.pathname
-		}
-		if (filters.search) nextUrl.searchParams.set('q', filters.search)
-		else nextUrl.searchParams.delete('q')
-		if (filters.scope === 'all') nextUrl.searchParams.delete('scope')
-		else nextUrl.searchParams.set('scope', filters.scope)
-		if (filters.packageId)
-			nextUrl.searchParams.set('package', filters.packageId)
-		else nextUrl.searchParams.delete('package')
-		return `${nextUrl.pathname}${nextUrl.search}`
+		return router.buildLocation({
+			to: options?.pathname ?? currentUrl.pathname,
+			search: {
+				...pageLocation.search,
+				q:
+					nextFilters.search === undefined
+						? secretsSearch(pageLocation.search).q
+						: filters.search || undefined,
+				scope: filters.scope === 'all' ? undefined : filters.scope,
+				package: filters.packageId || undefined,
+			},
+		}).href
 	}
 
 	function updateFilters(next: Partial<ReturnType<typeof readFilterState>>) {
@@ -214,7 +215,7 @@ export function AccountSecretsPage({
 			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				if (next.search !== undefined) {
 					if (next.search) search.q = next.search
 					else delete search.q
@@ -543,7 +544,7 @@ export function AccountSecretsPage({
 		)
 	}
 
-	const filters = readFilterState(currentHref, packageOptions)
+	const filters = readFilterState(pageLocation.search, packageOptions)
 	const filteredSecrets = filterSecrets(secrets, filters, packagesById)
 	const packageSelectOptions: Array<ComboboxOption> = packageOptions.map(
 		(packageOption) => {
@@ -672,11 +673,7 @@ export function AccountSecretsPage({
 						<RecordTableSearch
 							label="Search secrets"
 							placeholder="Search secrets"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={secretsSearch(pageLocation.search).q ?? ''}
 							onInput={(value) => {
 								return updateFilters({ search: value })
 							}}
