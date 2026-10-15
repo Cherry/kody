@@ -140,7 +140,10 @@ export function AccountJobsPage({
 		mutationFn: (input: { id: string; orgSlug: string | null }) =>
 			runJobNow({ data: { ...input, orgSlug: input.orgSlug ?? undefined } }),
 		onMutate: ({ orgSlug }) => ({ actorKey, orgSlug }),
-		onSettled: (_data, _error, _input, submitted) => reconcile(submitted),
+		onSettled: (_data, _error, _input, submitted) => {
+			// Confirming reads wait for this mutation to finish.
+			void reconcile(submitted)
+		},
 	})
 	const killMutation = useMutation({
 		mutationKey,
@@ -168,7 +171,10 @@ export function AccountJobsPage({
 		onError: (_error, _input, context) => {
 			restorePageResource(queryClient, context?.snapshot)
 		},
-		onSettled: (_data, _error, _input, submitted) => reconcile(submitted),
+		onSettled: (_data, _error, _input, submitted) => {
+			// Confirming reads wait for this mutation to finish.
+			void reconcile(submitted)
+		},
 	})
 	async function postAction(input: {
 		write: () => Promise<AccountJobsActionPayload>

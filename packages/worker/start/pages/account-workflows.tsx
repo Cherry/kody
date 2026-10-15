@@ -262,14 +262,16 @@ export function AccountWorkflowsPage({
 			const orgSlug = input.orgSlug ?? undefined
 			return cancelWorkflowRun({ data: { orgSlug, id } })
 		},
-		onSettled: (_accepted, _error, { actorKey, orgSlug }) =>
-			invalidatePageResources(
+		onSettled: (_accepted, _error, { actorKey, orgSlug }) => {
+			// Confirming reads wait for this mutation to finish.
+			void invalidatePageResources(
 				queryClient,
 				actorKey,
 				['loadWorkflowsPage', 'loadWaitingPage', 'loadActivityPage'],
 				'active',
 				{ orgSlug },
-			),
+			)
+		},
 	})
 	function postAction(input: {
 		id: string

@@ -26,15 +26,16 @@ export function valuesMutationOptions<TResult>(
 			submitted:
 				| { actorKey: string | null; orgSlug: string | null }
 				| undefined,
-		) =>
-			submitted
-				? invalidatePageResources(
-						client,
-						submitted.actorKey,
-						['loadValuesPage', 'loadUsagePage'],
-						'active',
-						{ orgSlug: submitted.orgSlug },
-					)
-				: undefined,
+		) => {
+			// Refetch waits for the write barrier, so it cannot hold this mutation pending.
+			if (submitted)
+				void invalidatePageResources(
+					client,
+					submitted.actorKey,
+					['loadValuesPage', 'loadUsagePage'],
+					'active',
+					{ orgSlug: submitted.orgSlug },
+				)
+		},
 	}
 }

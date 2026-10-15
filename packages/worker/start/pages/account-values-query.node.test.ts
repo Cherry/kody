@@ -186,13 +186,14 @@ it.each([false, true])(
 		const queryKey = key({ orgSlug: 'alpha' })
 		client.setQueryData(queryKey, data(detail))
 		const { QueryObserver } = await import('@tanstack/react-query')
-		const page = new QueryObserver(client, {
-			queryKey,
-			staleTime: Infinity,
-			queryFn: async () => ({
+		const options = createPageQuery(
+			'loadValuesPage',
+			async () => ({
 				payload: { ...data(null).payload, values: [row(other)] },
 			}),
-		})
+			{ staleTime: Infinity },
+		)('a', { orgSlug: 'alpha' })
+		const page = new QueryObserver(client, options)
 		const unsubscribe = page.subscribe(() => {})
 		const mutation = new MutationObserver(
 			client,
@@ -209,13 +210,65 @@ it.each([false, true])(
 		await mutation
 			.mutate({ name: 'first', orgSlug: 'alpha' })
 			.catch(() => undefined)
-		expect(
-			client.getQueryData<ValuesQueryData>(queryKey)?.payload.values,
-		).toEqual([row(other)])
-		expect(
-			client.getQueryData<ValuesQueryData>(queryKey)?.payload.selectedValue,
-		).toBeNull()
+		await vi.waitFor(() => {
+			expect(
+				client.getQueryData<ValuesQueryData>(queryKey)?.payload.values,
+			).toEqual([row(other)])
+			expect(
+				client.getQueryData<ValuesQueryData>(queryKey)?.payload.selectedValue,
+			).toBeNull()
+		})
 		unsubscribe()
 		client.clear()
 	},
 )
+
+it('holds a real background page read until the write settles, then confirms without deadlock', async () => {
+	const client = new QueryClient()
+	let completeWrite!: () => void
+	let persisted = false
+	const read = vi.fn(async () => ({
+		payload: {
+			...data(null).payload,
+			values: persisted ? [row(other)] : [row(detail), row(other)],
+		},
+	}))
+	const options = createPageQuery('loadValuesPage', read, {
+		staleTime: Infinity,
+	})('a', { orgSlug: 'alpha' })
+	client.setQueryData(options.queryKey, data(detail))
+	const { QueryObserver } = await import('@tanstack/react-query')
+	const page = new QueryObserver(client, options)
+	const unsubscribe = page.subscribe(() => {})
+	const mutation = new MutationObserver(
+		client,
+		valuesMutationOptions(
+			client,
+			'a',
+			async () => {
+				await new Promise<void>((resolve) => {
+					completeWrite = resolve
+				})
+				persisted = true
+				return { ok: true, deletedName: 'first' }
+			},
+			{ orgSlug: 'alpha' },
+		),
+	)
+	const submitted = mutation.mutate({ name: 'first', orgSlug: 'alpha' })
+	await vi.waitFor(() => expect(completeWrite).toBeTypeOf('function'))
+	// The same barrier protects optimistic job changes from focus refetches.
+	const background = page.refetch()
+	await Promise.resolve()
+	expect(read).not.toHaveBeenCalled()
+	completeWrite()
+	await submitted
+	await background
+	await vi.waitFor(() =>
+		expect(
+			client.getQueryData<ValuesQueryData>(options.queryKey)?.payload.values,
+		).toEqual([row(other)]),
+	)
+	unsubscribe()
+	client.clear()
+})
