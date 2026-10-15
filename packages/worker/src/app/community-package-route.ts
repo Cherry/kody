@@ -1,4 +1,3 @@
-import { parsePackageDocumentPath } from '#universal/package-document-path.ts'
 import { loadPackagePage } from '#app/package-page.ts'
 import {
 	getCommunityPackageHref,
@@ -115,14 +114,29 @@ export function treeHrefFromPackageHome(
 	packageHref: string,
 	input: { ref?: string; relativePath?: string },
 ) {
-	const match = parsePackageDocumentPath(packageHref)
-	if (match?.kind !== 'package') return packageHref
-	return getPackageTreeHref({
-		username: match.username,
-		kodyId: match.kodyId,
-		ref: input.ref,
-		relativePath: input.relativePath,
-	})
+	// This is a canonical business redirect, not a website route classifier.
+	try {
+		const pathname = new URL(
+			packageHref,
+			'https://kody.local',
+		).pathname.replace(/\/$/, '')
+		const parts = pathname.split('/').slice(1)
+		if (
+			parts.length !== 2 ||
+			!parts[0]?.startsWith('@') ||
+			parts[0].length < 2 ||
+			!parts[1]
+		)
+			return packageHref
+		return getPackageTreeHref({
+			username: decodeURIComponent(parts[0].slice(1)),
+			kodyId: decodeURIComponent(parts[1]),
+			ref: input.ref,
+			relativePath: input.relativePath,
+		})
+	} catch {
+		return packageHref
+	}
 }
 
 async function resolveOwnerPackageFilesTarget(input: {

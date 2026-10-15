@@ -10,8 +10,6 @@ import {
 	getCommunityPackageRawHref,
 	getPackageSettingsHref,
 	getPackageTreeHref,
-	isPackageDetailPathname,
-	isPackageFilesPathname,
 	isReservedPackageFilesKodyId,
 	joinPackageFilesPath,
 	listPackageFilesChildren,
@@ -206,33 +204,5 @@ test('files hrefs use the default-branch fallback and avoid reserved kody ids', 
 		'/profiles/kentcdodds/packages/devin/files.json?path=src%2Findex.ts',
 		'/@kentcdodds/devin/raw/main/docs/logo.png',
 		'/community/listing-1/raw/docs/logo.png',
-	])
-
-	expect(
-		[
-			'/@kentcdodds/grok-bot',
-			'/@kentcdodds/grok-bot/settings',
-			'/@kentcdodds/grok-bot/collaborators',
-			'/@kentcdodds/grok-bot/tree/main',
-			'/community/listing-1',
-			'/community/listing-1/files',
-			'/account/packages/pkg-1/files',
-			'/@kentcdodds',
-			'/community',
-		].map((pathname) => [
-			pathname,
-			isPackageDetailPathname(pathname),
-			isPackageFilesPathname(pathname),
-		]),
-	).toEqual([
-		['/@kentcdodds/grok-bot', true, false],
-		['/@kentcdodds/grok-bot/settings', true, false],
-		['/@kentcdodds/grok-bot/collaborators', true, false],
-		['/@kentcdodds/grok-bot/tree/main', true, true],
-		['/community/listing-1', true, false],
-		['/community/listing-1/files', true, true],
-		['/account/packages/pkg-1/files', true, true],
-		['/@kentcdodds', false, false],
-		['/community', false, false],
 	])
 })

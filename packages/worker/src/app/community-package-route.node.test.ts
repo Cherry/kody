@@ -172,3 +172,25 @@ test('signed-in denial retains request-access data for the native files page', a
 	mockModule.loadPackagePage.mockResolvedValue(denial)
 	expect(await resolveRoute('/@owner/private/tree/main', true)).toEqual(denial)
 })
+
+test('canonical package redirect keeps tree ref and file while other redirect kinds stay untouched', async () => {
+	const { treeHrefFromPackageHome } =
+		await import('./community-package-route.ts')
+	expect(
+		treeHrefFromPackageHome('/@alice/tool/?ignored=1', {
+			ref: 'release',
+			relativePath: 'src/main.ts',
+		}),
+	).toBe('/@alice/tool/tree/release/src/main.ts')
+	expect(treeHrefFromPackageHome('/@%61lice/tool', { ref: 'main' })).toBe(
+		'/@alice/tool/tree/main',
+	)
+	for (const href of [
+		'/community/listing',
+		'/@alice/tool/settings',
+		'/login?redirectTo=%2Faccount',
+		'/@alice/%E0%A4%A',
+	]) {
+		expect(treeHrefFromPackageHome(href, { ref: 'main' })).toBe(href)
+	}
+})

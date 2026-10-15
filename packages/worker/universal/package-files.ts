@@ -1,4 +1,3 @@
-import { parsePackageDocumentPath } from './package-document-path.ts'
 import {
 	classifyPackageFileMedia,
 	type PackageFilesContentKind,
@@ -128,29 +127,6 @@ export function packageFileLanguageLabel(path: string | null | undefined) {
 	return languageLabels[language] ?? language
 }
 
-/**
- * The `/files` explorer routes, in every public shape.
- */
-export function isPackageFilesPathname(pathname: string) {
-	const parsed = parsePackageDocumentPath(pathname)
-	return (
-		parsed != null &&
-		[
-			'package-tree',
-			'package-files',
-			'listing-files',
-			'account-files',
-		].includes(parsed.kind)
-	)
-}
-export function isPackageDetailPathname(pathname: string) {
-	const parsed = parsePackageDocumentPath(pathname)
-	return (
-		parsed != null &&
-		(parsed.kind !== 'package-tab' ||
-			['settings', 'collaborators'].includes(parsed.tab))
-	)
-}
 export function isReservedPackageFilesKodyId(kodyId: string) {
 	return (reservedPackageFilesKodyIds as ReadonlyArray<string>).includes(
 		kodyId.trim().toLowerCase(),
