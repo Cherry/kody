@@ -5,7 +5,10 @@ import { resolve } from 'node:path'
 // Bundle the actual component and Emotion together so the production Redact
 // aliases apply inside Emotion too. The node-unit project otherwise uses React
 // for external packages and Remix's JSX default for legacy component tests.
-async function renderActualIntro(renderer: 'react' | 'redact') {
+async function renderActualIntro(
+	renderer: 'react' | 'redact',
+	publicBase = '/',
+) {
 	const root = resolve(import.meta.dirname, '../../../..')
 	const result = await build({
 		stdin: {
@@ -32,6 +35,7 @@ export const rendered = ['sentence', 'picker'].map(variant => renderToString(
 		write: false,
 		platform: 'node',
 		format: 'esm',
+		define: { 'import.meta.env.BASE_URL': JSON.stringify(publicBase) },
 		jsx: 'automatic',
 		jsxImportSource: '@emotion/react',
 		alias: {
@@ -74,6 +78,18 @@ for (const renderer of ['react', 'redact'] as const) {
 			expect(html).toMatch(/<style\b[^>]*>[\s\S]*?\.walkthrough-host-option/)
 			expect(html).toContain('mask-image:var(--chip-icon)')
 			expect(html).toContain('appearance:base-select')
+			expect(html).toContain('/images/icons/')
+		}
+	})
+}
+
+for (const renderer of ['react', 'redact'] as const) {
+	test(`${renderer} SSR uses the release asset base supplied by the build`, async () => {
+		const base = `/__start/${'d'.repeat(40)}/`
+		const { rendered } = await renderActualIntro(renderer, base)
+		for (const html of rendered) {
+			expect(html).toContain(`${base}images/icons/`)
+			expect(html).not.toContain('url("/images/icons/')
 		}
 	})
 }

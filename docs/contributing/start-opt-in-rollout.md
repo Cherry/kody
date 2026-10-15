@@ -97,3 +97,33 @@ existing worker. Review the partial result before deciding how to continue.
 Inactive deployment checks that workers.dev and preview URLs remain disabled. It
 does not activate the zone route or claim browser parity against the production
 data plane.
+
+## Private runtime probe before activation
+
+After inactive deployment, run the probe with the reviewed build still present
+and Cloudflare credentials that can create remote development sessions and call
+the three service bindings:
+
+```sh
+node tools/ci/probe-start-opt-in.ts .tmp/start-opt-in/review.json
+```
+
+This starts a temporary `wrangler dev --remote` session with a localhost
+listener and bindings to the exact candidate, the inactive router and legacy. It
+does not deploy a permanent public probe worker or change routes. The temporary
+probe key and Cloudflare preview session output are not printed or stored in
+artifacts. The session is stopped and its temporary config removed when the
+command finishes.
+
+The probe uses fixed GET requests only. It checks the candidate's exact release
+health, legacy health through the default router, complete public documents, an
+invalid preference staying on legacy, anonymous opt-in and RPC denial, unknown
+asset denial, and emitted CSS and JavaScript bytes through both candidate and
+router. Asset bytes must match the reviewed local build exactly. Incoming caller
+cookies and authorization headers are never forwarded, and response cookies are
+discarded.
+
+This verifies anonymous outsiders, not a signed-in third account. It does not
+mint account credentials, sign a preference, enable an account, or claim
+logged-in parity. Eligible opt-in and opt-out still need separately authorized
+browser checks before route activation is considered complete.
