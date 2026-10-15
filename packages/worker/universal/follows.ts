@@ -119,7 +119,7 @@ export type FollowSummary = {
 	lastDeliverySkipReason: string | null
 }
 
-/** `GET /profiles/:username/packages/:kodyId/follow.json`. */
+/** Authorized target and workspace choices returned by loadPackageFollow. */
 export type PackageFollowStatePayload = {
 	ok: true
 	target: { name: string; kind: FollowTargetKindName }
