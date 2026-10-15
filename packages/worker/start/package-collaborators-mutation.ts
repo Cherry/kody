@@ -25,13 +25,23 @@ export function collaboratorsMutationOptions<TResult>(
 		retry: false,
 		gcTime: 0,
 		mutationFn: send,
-		onSettled: async () => {
+		onSettled: async (_data, _error, input) => {
+			const invite =
+				input.change.intent === 'invite' ||
+				input.change.intent === 'revoke-invite'
+			const inviteKey = [
+				'page',
+				actorKey,
+				'loadPackageCollaborators',
+				page,
+			] as const
 			// Permission changes can affect any resource for this actor. Reads
 			// remain independent of writes, including a first navigation read.
 			await Promise.allSettled(
 				client
 					.getQueryCache()
 					.findAll({
+						...(invite ? { queryKey: inviteKey, exact: true } : {}),
 						predicate: (query) =>
 							query.meta?.actorKey === actorKey &&
 							query.state.data === undefined &&
@@ -39,6 +49,21 @@ export function collaboratorsMutationOptions<TResult>(
 					})
 					.map((query) => query.promise),
 			)
+			if (invite) {
+				// Pending invitations do not change access. Confirm only the
+				// submitted package, including a response lost after a committed write.
+				await client.cancelQueries({
+					queryKey: inviteKey,
+					exact: true,
+					predicate: (query) => query.state.data !== undefined,
+				})
+				await client.invalidateQueries({
+					queryKey: inviteKey,
+					exact: true,
+					refetchType: 'all',
+				})
+				return
+			}
 			// A lost response can still represent a committed permission change.
 			// Confirm inactive pages too before dropping the pending UI state.
 			await invalidatePageResources(client, actorKey, 'permissions', 'all')

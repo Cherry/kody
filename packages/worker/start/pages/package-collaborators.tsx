@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { useRef, useState, type FormEvent } from 'react'
 import { PackageInviteLinksPanel } from './package-collaborators-invite-links.tsx'
+import { PackageCollaboratorInvites } from './package-collaborators-invites.tsx'
 import {
 	useMutation,
 	useMutationState,
@@ -10,6 +11,8 @@ import { SiteLink } from '../components/site-link.tsx'
 import {
 	grantPackageCollaborator,
 	revokePackageCollaborator,
+	createPackageCollaboratorInvite,
+	revokePackageCollaboratorInvite,
 } from '#start/server/package-collaborators'
 import {
 	collaboratorsMutationKey,
@@ -92,9 +95,22 @@ export function PackageCollaboratorsRoute({
 			client,
 			actorKey,
 			page,
-			async (input: CollaboratorsMutationInput) =>
-				input.change.intent === 'grant'
-					? grantPackageCollaborator({
+			async (input: CollaboratorsMutationInput) => {
+				switch (input.change.intent) {
+					case 'invite':
+						return createPackageCollaboratorInvite({
+							data: {
+								...page,
+								invitee: input.change.invitee,
+								preset: input.change.preset,
+							},
+						})
+					case 'revoke-invite':
+						return revokePackageCollaboratorInvite({
+							data: { ...page, inviteId: input.change.inviteId },
+						})
+					case 'grant':
+						return grantPackageCollaborator({
 							data: {
 								...page,
 								subjectType: input.change.subjectType,
@@ -102,9 +118,12 @@ export function PackageCollaboratorsRoute({
 								preset: input.change.preset,
 							},
 						})
-					: revokePackageCollaborator({
+					case 'revoke':
+						return revokePackageCollaborator({
 							data: { ...page, grantId: input.change.grantId },
-						}),
+						})
+				}
+			},
 		),
 	)
 	const pending = useMutationState({
@@ -485,6 +504,14 @@ export function PackageCollaboratorsRoute({
 					</AccountManagementPanel>
 					{view.org.personal ? null : renderAddTeam(view)}
 					{view.org.personal ? null : renderAddMember(view)}
+					{view.org.personal ? (
+						<PackageCollaboratorInvites
+							key={`${actorKey}/${username}/${kodyId}`}
+							view={view}
+							busyKey={busy}
+							postChange={postChange}
+						/>
+					) : null}
 					<PackageInviteLinksPanel
 						username={username}
 						kodyId={kodyId}

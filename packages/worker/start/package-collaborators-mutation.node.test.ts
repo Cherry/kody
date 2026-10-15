@@ -91,3 +91,59 @@ for (const lostResponse of [false, true]) {
 		})
 	}
 }
+
+for (const change of [
+	{ intent: 'invite', invitee: 'friend@example.com', preset: 'use' },
+	{ intent: 'revoke-invite', inviteId: 'invite-one' },
+] as const) {
+	test(`${change.intent} confirms its package after a lost response without refreshing another package or actor`, async () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		})
+		const page = { username: 'owner', kodyId: 'submitted' }
+		const reads = new Map<string, number>()
+		for (const [actor, kodyId] of [
+			['owner', 'submitted'],
+			['owner', 'other-package'],
+			['other-actor', 'submitted'],
+		]) {
+			await client.fetchQuery({
+				queryKey: [
+					'page',
+					actor,
+					'loadPackageCollaborators',
+					{ username: 'owner', kodyId },
+				],
+				meta: { actorKey: actor },
+				queryFn: async () => {
+					const key = `${actor}/${kodyId}`
+					reads.set(key, (reads.get(key) ?? 0) + 1)
+					return reads.get(key)
+				},
+			})
+		}
+		const options = collaboratorsMutationOptions(
+			client,
+			'owner',
+			page,
+			async () => {
+				throw new Error('lost response')
+			},
+		)
+		const mutation = client.getMutationCache().build(client, options)
+		await expect(
+			mutation.execute({ key: change.intent, change }),
+		).rejects.toThrow('lost response')
+		expect(reads.get('owner/submitted')).toBe(2)
+		expect(reads.get('owner/other-package')).toBe(1)
+		expect(reads.get('other-actor/submitted')).toBe(1)
+		expect(options.mutationKey).toEqual([
+			'packageCollaborators',
+			'owner',
+			'owner',
+			'submitted',
+		])
+		expect(options.gcTime).toBe(0)
+		client.clear()
+	})
+}
