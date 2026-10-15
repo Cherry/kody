@@ -2,6 +2,13 @@
 
 ## Follow-up fixes awaiting CI and deployment
 
+At a verified 390px viewport, settled `/docs/github` production and preview
+screenshots matched the sampled mobile layout and typography. Preview's native
+Docs menu opened, selecting Figma navigated to `/docs/figma` and closed the
+menu, and browser Back restored GitHub. Temporary viewport overrides were reset.
+Evidence: `/tmp/kody-doc-github-production-mobile.png` and
+`/tmp/kody-doc-github-preview-mobile.png`.
+
 Local commit `15913c99d` completes the protocol-link correction: protocol and
 non-page destinations use browser anchors, while page links pass separate native
 Router pathname, parsed search and hash. Browser coverage exercises a hydrated
