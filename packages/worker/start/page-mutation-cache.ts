@@ -38,8 +38,6 @@ export function hasPendingPageMutation(
 		loadAccountPage: ['profile', 'accountConnections'],
 		loadProfile: ['profile'],
 		loadJobsPage: ['jobs'],
-		loadValuesPage: ['values'],
-		loadWorkflowsPage: ['workflows'],
 		loadConnectionsPage: ['connectedAgents', 'connectionProfiles'],
 		loadConnectionUsagePage: ['connectedAgents', 'connectionProfiles'],
 		loadIntegrationsPage: ['integrations'],

@@ -226,8 +226,6 @@ it.each([
 
 it.each([
 	['loadJobsPage', 'jobs'],
-	['loadValuesPage', 'values'],
-	['loadWorkflowsPage', 'workflows'],
 	['loadConnectionsPage', 'connectedAgents'],
 	['loadConnectionsPage', 'connectionProfiles'],
 	['loadIntegrationsPage', 'integrations'],

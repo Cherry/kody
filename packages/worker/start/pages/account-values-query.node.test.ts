@@ -112,39 +112,53 @@ it('keeps confirmed data when deletion fails', async () => {
 	client.clear()
 })
 
-it('waits for a pending deletion before reading an uncached navigation', async () => {
-	const client = new QueryClient()
-	let accept!: (value: ValuesQueryData['payload']) => void
-	const observer = new MutationObserver(
-		client,
-		valuesMutationOptions(
+it.each([false, true])(
+	'preserves uncached navigation and confirms an older read after deletion, lost=%s',
+	async (lost) => {
+		const client = new QueryClient()
+		let finishWrite!: () => void
+		let finishRead!: (result: ValuesQueryData) => void
+		const mutation = new MutationObserver(
 			client,
-			'a',
+			valuesMutationOptions(client, 'a', async () => {
+				await new Promise<void>((resolve) => {
+					finishWrite = resolve
+				})
+				if (lost) throw new Error('Response lost')
+				return { ok: true }
+			}),
+		)
+		const write = mutation
+			.mutate({ name: 'first', orgSlug: null })
+			.catch(() => undefined)
+		await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'))
+		const accepted = {
+			payload: { ...data(null).payload, values: [row(other)] },
+		}
+		const read = vi.fn<() => Promise<ValuesQueryData>>()
+		read.mockImplementationOnce(
 			() =>
 				new Promise((resolve) => {
-					accept = resolve
+					finishRead = resolve
 				}),
-		),
-	)
-	const submitted = observer.mutate({ name: 'first', orgSlug: null })
-	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
-	const accepted = { ...data(null).payload, values: [row(other)] }
-	const read = vi.fn(async () => ({ payload: accepted }))
-	const options = createPageQuery('loadValuesPage', read)('a', {
-		orgSlug: null,
-	})
-	const loading = ensurePageQuery(client, options, false)
-	await Promise.resolve()
-	expect(read).not.toHaveBeenCalled()
-	accept(accepted)
-	await submitted
-	await loading
-	expect(read).toHaveBeenCalledOnce()
-	expect(
-		client.getQueryData<ValuesQueryData>(options.queryKey)?.payload.values,
-	).toEqual([row(other)])
-	client.clear()
-})
+		)
+		read.mockResolvedValue(accepted)
+		const options = createPageQuery('loadValuesPage', read)('a', {
+			orgSlug: null,
+		})
+		const navigation = ensurePageQuery(client, options, false)
+		await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
+		finishWrite()
+		await Promise.resolve()
+		finishRead(data(detail))
+		await expect(navigation).resolves.toEqual(data(detail))
+		await write
+		expect(read).toHaveBeenCalledTimes(2)
+		expect(client.getQueryData(options.queryKey)).toEqual(accepted)
+		expect(client.isMutating()).toBe(0)
+		client.clear()
+	},
+)
 
 it('keeps the submitted org when observer options change during a pending write', async () => {
 	const client = new QueryClient()
@@ -227,7 +241,7 @@ it.each([false, true])(
 	},
 )
 
-it('holds a real background page read until the write settles, then confirms without deadlock', async () => {
+it('allows background values reads during deletion and confirms after settlement', async () => {
 	const client = new QueryClient()
 	let completeWrite!: () => void
 	let persisted = false
@@ -261,10 +275,10 @@ it('holds a real background page read until the write settles, then confirms wit
 	)
 	const submitted = mutation.mutate({ name: 'first', orgSlug: 'alpha' })
 	await vi.waitFor(() => expect(completeWrite).toBeTypeOf('function'))
-	// The same barrier protects optimistic job changes from focus refetches.
+	// Values deletion has no optimistic cache patch that needs a read barrier.
 	const background = page.refetch()
-	await Promise.resolve()
-	expect(read).not.toHaveBeenCalled()
+	await background
+	expect(read).toHaveBeenCalledOnce()
 	completeWrite()
 	await submitted
 	await background

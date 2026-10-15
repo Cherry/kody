@@ -1,6 +1,6 @@
 import { type QueryClient } from '@tanstack/react-query'
 import { type AccountValuesLoaderData } from '#universal/loader-data.ts'
-import { type PageOrgScope } from '../page-query-scope.ts'
+import { scopedPageResource, type PageOrgScope } from '../page-query-scope.ts'
 import { invalidatePageResources } from '../page-invalidation-cache.ts'
 
 export type ValuesQueryData = { payload: AccountValuesLoaderData }
@@ -19,7 +19,7 @@ export function valuesMutationOptions<TResult>(
 			actorKey,
 			orgSlug,
 		}),
-		onSettled: (
+		onSettled: async (
 			_data: unknown,
 			_error: Error | null,
 			_input: unknown,
@@ -27,15 +27,34 @@ export function valuesMutationOptions<TResult>(
 				| { actorKey: string | null; orgSlug: string | null }
 				| undefined,
 		) => {
-			// Refetch waits for the write barrier, so it cannot hold this mutation pending.
-			if (submitted)
-				void invalidatePageResources(
-					client,
-					submitted.actorKey,
-					['loadValuesPage', 'loadUsagePage'],
-					'active',
-					{ orgSlug: submitted.orgSlug },
+			if (!submitted) return
+			const scope = { orgSlug: submitted.orgSlug }
+			const unfinished = client
+				.getQueryCache()
+				.findAll(
+					scopedPageResource(submitted.actorKey, 'loadValuesPage', scope),
 				)
+				.filter(
+					(query) =>
+						query.state.data === undefined &&
+						query.state.fetchStatus === 'fetching',
+				)
+			// A navigation owns this first-read promise. Let it finish, then confirm
+			// the write with a new read, even if that navigation has not mounted yet.
+			await Promise.allSettled(unfinished.map((query) => query.promise))
+			await invalidatePageResources(
+				client,
+				submitted.actorKey,
+				['loadValuesPage', 'loadUsagePage'],
+				'active',
+				scope,
+			)
+			await client.refetchQueries(
+				{
+					predicate: (query) => unfinished.includes(query) && !query.isActive(),
+				},
+				{ cancelRefetch: false },
+			)
 		},
 	}
 }

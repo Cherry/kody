@@ -31,7 +31,7 @@ import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
-import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import { workflowCancellationMutationOptions } from '../workflow-cancellation-mutation.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -252,26 +252,19 @@ export function AccountWorkflowsPage({
 	const mutation = useMutation({
 		retry: false,
 		mutationKey,
-		mutationFn: async (input: {
-			id: string
-			actorKey: string | null
-			orgSlug: string | null
-			failureMessage: string
-		}) => {
-			const id = input.id
-			const orgSlug = input.orgSlug ?? undefined
-			return cancelWorkflowRun({ data: { orgSlug, id } })
-		},
-		onSettled: (_accepted, _error, { actorKey, orgSlug }) => {
-			// Confirming reads wait for this mutation to finish.
-			void invalidatePageResources(
-				queryClient,
-				actorKey,
-				['loadWorkflowsPage', 'loadWaitingPage', 'loadActivityPage'],
-				'active',
-				{ orgSlug },
-			)
-		},
+		...workflowCancellationMutationOptions(
+			queryClient,
+			async (input: {
+				id: string
+				actorKey: string | null
+				orgSlug: string | null
+				failureMessage: string
+			}) => {
+				const id = input.id
+				const orgSlug = input.orgSlug ?? undefined
+				return cancelWorkflowRun({ data: { orgSlug, id } })
+			},
+		),
 	})
 	function postAction(input: {
 		id: string
