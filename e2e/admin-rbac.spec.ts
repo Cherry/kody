@@ -8,6 +8,8 @@ test('Start matches unknown admin paths before any admin authorization redirect'
 		'/administrator',
 		'/admin/missing-route',
 		'/admin/users/missing/extra',
+		'/admin/users/missing/extra?q=kept&pageSize=37',
+		'/admin/feature-flags/missing',
 	]) {
 		const response = await page.request.get(path, { maxRedirects: 0 })
 		expect(response.status(), path).toBe(404)
@@ -16,7 +18,7 @@ test('Start matches unknown admin paths before any admin authorization redirect'
 	const trailingSlash = await page.request.get('/admin/', { maxRedirects: 0 })
 	expect(trailingSlash.status()).toBe(307)
 	expect(trailingSlash.headers().location).toBe('/admin')
-	for (const path of ['/admin', '/admin/users']) {
+	for (const path of ['/admin', '/admin/users', '/admin/users/missing']) {
 		const response = await page.request.get(path, { maxRedirects: 0 })
 		expect(response.status(), path).toBe(302)
 		expect(response.headers().location, path).toContain('/login?')

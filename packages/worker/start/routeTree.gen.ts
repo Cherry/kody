@@ -79,6 +79,7 @@ import { Route as AccountWaitingRouteImport } from './routes/account_.waiting'
 import { Route as AccountWebhooksRouteImport } from './routes/account_.webhooks'
 import { Route as AccountWorkflowsRouteImport } from './routes/account_.workflows'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminSplatRouteImport } from './routes/admin.$'
 import { Route as AdminCodemodsRouteImport } from './routes/admin.codemods'
 import { Route as AdminCommunityReportsRouteImport } from './routes/admin.community-reports'
 import { Route as AdminFeatureFlagsRouteImport } from './routes/admin.feature-flags'
@@ -616,6 +617,11 @@ const AccountWorkflowsRoute = AccountWorkflowsRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/admin/',
   path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSplatRoute = AdminSplatRouteImport.update({
+  id: '/admin/$',
+  path: '/admin/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminCodemodsRoute = AdminCodemodsRouteImport.update({
@@ -1714,6 +1720,7 @@ export interface FileRoutesByFullPath {
   '/account/waiting': typeof AccountWaitingRoute
   '/account/webhooks': typeof AccountWebhooksRoute
   '/account/workflows': typeof AccountWorkflowsRoute
+  '/admin/$': typeof AdminSplatRoute
   '/admin/codemods': typeof AdminCodemodsRoute
   '/admin/community-reports': typeof AdminCommunityReportsRoute
   '/admin/feature-flags': typeof AdminFeatureFlagsRoute
@@ -1968,6 +1975,7 @@ export interface FileRoutesByTo {
   '/account/waiting': typeof AccountWaitingRoute
   '/account/webhooks': typeof AccountWebhooksRoute
   '/account/workflows': typeof AccountWorkflowsRoute
+  '/admin/$': typeof AdminSplatRoute
   '/admin/codemods': typeof AdminCodemodsRoute
   '/admin/community-reports': typeof AdminCommunityReportsRoute
   '/admin/feature-flags': typeof AdminFeatureFlagsRoute
@@ -2224,6 +2232,7 @@ export interface FileRoutesById {
   '/account_/waiting': typeof AccountWaitingRoute
   '/account_/webhooks': typeof AccountWebhooksRoute
   '/account_/workflows': typeof AccountWorkflowsRoute
+  '/admin/$': typeof AdminSplatRoute
   '/admin/codemods': typeof AdminCodemodsRoute
   '/admin/community-reports': typeof AdminCommunityReportsRoute
   '/admin/feature-flags': typeof AdminFeatureFlagsRoute
@@ -2481,6 +2490,7 @@ export interface FileRouteTypes {
     | '/account/waiting'
     | '/account/webhooks'
     | '/account/workflows'
+    | '/admin/$'
     | '/admin/codemods'
     | '/admin/community-reports'
     | '/admin/feature-flags'
@@ -2735,6 +2745,7 @@ export interface FileRouteTypes {
     | '/account/waiting'
     | '/account/webhooks'
     | '/account/workflows'
+    | '/admin/$'
     | '/admin/codemods'
     | '/admin/community-reports'
     | '/admin/feature-flags'
@@ -2990,6 +3001,7 @@ export interface FileRouteTypes {
     | '/account_/waiting'
     | '/account_/webhooks'
     | '/account_/workflows'
+    | '/admin/$'
     | '/admin/codemods'
     | '/admin/community-reports'
     | '/admin/feature-flags'
@@ -3246,6 +3258,7 @@ export interface RootRouteChildren {
   AccountWaitingRoute: typeof AccountWaitingRoute
   AccountWebhooksRoute: typeof AccountWebhooksRoute
   AccountWorkflowsRoute: typeof AccountWorkflowsRoute
+  AdminSplatRoute: typeof AdminSplatRoute
   AdminCodemodsRoute: typeof AdminCodemodsRoute
   AdminCommunityReportsRoute: typeof AdminCommunityReportsRoute
   AdminFeatureFlagsRoute: typeof AdminFeatureFlagsRoute
@@ -3913,6 +3926,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/$': {
+      id: '/admin/$'
+      path: '/admin/$'
+      fullPath: '/admin/$'
+      preLoaderRoute: typeof AdminSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/codemods': {
@@ -5319,6 +5339,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountWaitingRoute: AccountWaitingRoute,
   AccountWebhooksRoute: AccountWebhooksRoute,
   AccountWorkflowsRoute: AccountWorkflowsRoute,
+  AdminSplatRoute: AdminSplatRoute,
   AdminCodemodsRoute: AdminCodemodsRoute,
   AdminCommunityReportsRoute: AdminCommunityReportsRoute,
   AdminFeatureFlagsRoute: AdminFeatureFlagsRoute,
