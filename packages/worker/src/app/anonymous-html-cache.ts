@@ -1,3 +1,4 @@
+import { withAgentHref, withAgents } from '#universal/with-agents.ts'
 /**
  * Shared Cache-Control for anonymous marketing HTML, auth entry pages, and the
  * viewer-independent `/llms.txt` / `/docs/llms.txt` plain-text indexes. Session
@@ -42,6 +43,8 @@ const cacheableAnonymousExactPaths = new Set([
 	'/for/business',
 	'/faq',
 	'/case-studies',
+	'/believe',
+	...withAgents.map((agent) => withAgentHref(agent.slug)),
 	'/blog',
 	'/community',
 	'/onboarding',

@@ -6,7 +6,7 @@ import {
 	wires,
 } from '../../components/primitive-widget-parts.tsx'
 /**
- * `/features/integrations` scenes. Account and package buttons sit outside
+ * `/features/credentials` OAuth scenes. Account and package buttons sit outside
  * the keyed `.pw-run` so a replay does not drop focus. The run only holds
  * the wires, the hub, and the packets.
  */

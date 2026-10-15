@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { type ReactNode, type CSSProperties } from 'react'
 import { usePrimitiveWidgetMotion } from './primitive-widget-motion.ts'
-import { type LandingPrimitiveId } from '#universal/landing-lantern.ts'
+import { type PrimitiveWidgetId } from '#universal/primitive-cards.ts'
 
 type PrimitiveWidgetSize = 'full' | 'mini'
 
@@ -13,7 +13,7 @@ export function PrimitiveWidgetFrame({
 	stack,
 	children,
 }: {
-	id: LandingPrimitiveId
+	id: PrimitiveWidgetId
 	size: PrimitiveWidgetSize
 	height?: number
 	className?: string

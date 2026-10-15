@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { primitiveFeatureHref } from '#universal/primitive-cards.ts'
 import { useEffect, useReducer, useRef, type CSSProperties } from 'react'
 import { SiteLink } from './site-link.tsx'
 import { docHref } from '#universal/docs-nav.ts'
@@ -23,8 +24,8 @@ import { LandingLantern } from './landing-lantern.tsx'
 import { lanternOrbMotionEvent } from './landing-lantern-motion.ts'
 
 /**
- * Homepage primitives block: the locked intro line, then the five-orb
- * lantern with the six words listed beside it, then the learn-more line
+ * `/features` primitives block: the locked intro line, then the five-orb
+ * lantern with the five words listed beside it, then the learn-more line
  * ("What is Kody?" → intro guide). Orbs highlight a primitive and draw
  * leader lines to its word; each word links to that primitive's feature page.
  *
@@ -235,7 +236,7 @@ export function LandingPrimitives() {
 				{renderLeaders(openId)}
 				<ul
 					className="landing-primitives-words"
-					aria-label="The six primitives"
+					aria-label="The five primitives"
 				>
 					{landingHomePrimitives.map((primitive) => (
 						<li key={primitive.id} className="landing-primitive-item">
@@ -280,7 +281,7 @@ function LandingPrimitiveWord({
 				aria-hidden="true"
 			/>
 			<SiteLink
-				href={`/features/${primitive.id}`}
+				href={primitiveFeatureHref(primitive.id)}
 				className="landing-primitive-word"
 				data-word={primitive.id}
 			>

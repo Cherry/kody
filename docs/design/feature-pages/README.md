@@ -1,25 +1,28 @@
 # Feature pages
 
-The production site has a `/features` overview and six native Start detail
+The production site has a `/features` overview and five native Start detail
 pages. Each detail page combines a hero, interactive examples, illustrated
 product stories, documentation links, and an onboarding action. The briefs here
 record the design direction and the evidence behind product claims.
 
-| Route                    | Pitch                                         | Interaction                                                                           | Brief                             |
-| ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------- |
-| `/features/memory`       | New agent. Same you.                          | Retrieve a saved preference in another agent and update it.                           | [Memory](./memory.md)             |
-| `/features/secrets`      | Your agent can use the key. It can't read it. | Compare requests to approved and unapproved destinations.                             | [Secrets](./secrets.md)           |
-| `/features/packages`     | Keep the software your agent builds.          | Inspect source and output, publish an example change, and compare access with a fork. | [Packages](./packages.md)         |
-| `/features/triggers`     | Give the next step a starting signal.         | Follow an event through a package to a result, including a quiet result.              | [Triggers](./triggers.md)         |
-| `/features/integrations` | Connect an account. Put it to work.           | Switch named accounts and reuse a connection through different packages.              | [Integrations](./integrations.md) |
-| `/features/apps`         | Give your work a place to happen.             | Save, reopen, and edit a brief, then compare package access roles.                    | [Apps](./apps.md)                 |
+| Route                   | Pitch                                         | Interaction                                                                                | Brief                                                      |
+| ----------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `/features/memory`      | New agent. Same you.                          | Retrieve a saved preference in another agent and update it.                                | [Memory](./memory.md)                                      |
+| `/features/packages`    | Keep the software your agent builds.          | Inspect source and output, publish an example change, and compare access with a fork.      | [Packages](./packages.md)                                  |
+| `/features/triggers`    | Give the next step a starting signal.         | Follow an event through a package to a result, including a quiet result.                   | [Triggers](./triggers.md)                                  |
+| `/features/credentials` | Your agent can use the key. It can't read it. | Compare approved and unapproved destinations, then switch accounts on an OAuth connection. | [Secrets](./secrets.md), [Integrations](./integrations.md) |
+| `/features/apps`        | Give your work a place to happen.             | Save, reopen, and edit a brief, then compare package access roles.                         | [Apps](./apps.md)                                          |
 
 ## Implementation
+
+- `/features/credentials` merges the secrets and integrations briefs: the
+  secrets scenes tell the safety story and the integrations scenes the OAuth
+  story. `/features/secrets` and `/features/integrations` 301 to it.
 
 - `packages/worker/universal/routes.ts` owns the public route paths.
 - `packages/worker/start/pages/features.tsx` provides the route components and
   layout dimensions.
-- `packages/worker/start/pages/features/` contains the overview, six detail
+- `packages/worker/start/pages/features/` contains the overview, five detail
   components, and their supporting components and example data.
 - `packages/worker/public/feature-pages.css` owns the shared visual styles,
   responsive layouts, theme colors, and reduced-motion behavior.
@@ -36,12 +39,12 @@ session. Documentation and onboarding links lead to real site routes.
 
 ## Shared design
 
-The pages use the six lantern colors, Bricolage Grotesque headlines, Wix Madefor
-Text, warm neutral surfaces, and the existing matching orb artwork. Each orb
-sits above its hero headline. The layouts follow the feature: memory is a saved
-note, secrets shows a credential boundary, packages exposes source and output,
-triggers follows an event, integrations distinguishes account identity from
-package behavior, and apps offers a usable form.
+The pages use the five lantern colors, Bricolage Grotesque headlines, Wix
+Madefor Text, warm neutral surfaces, and the existing matching orb artwork. Each
+orb sits above its hero headline. The layouts follow the feature: memory is a
+saved note, secrets shows a credential boundary, packages exposes source and
+output, triggers follows an event, integrations distinguishes account identity
+from package behavior, and apps offers a usable form.
 
 Controls expose selected state in text as well as color. Reduced motion
 preserves the story, and server-rendered copy and links remain available before

@@ -19,7 +19,7 @@ import {
 } from '#universal/walkthrough-hosts.ts'
 
 /**
- * Proof stage: the same six-orb lantern as the primitives section, with the
+ * Proof stage: the same five-orb lantern as the primitives section, with the
  * agents you already use floating around it. Connector lines stay off;
  * travelling orbs still run both ways on the same clocks. Orbit positions
  * live in `#universal/landing-agent-orbit`.
@@ -387,7 +387,7 @@ export function LandingHeroAgents({ hosts }: { hosts?: WalkthroughHostPick }) {
 			className="landing-hero-art landing-hero-agents"
 		>
 			<figcaption className="visually-hidden">
-				A lantern of six glowing orbs, one for each primitive, with the agents
+				A lantern of five glowing orbs, one for each primitive, with the agents
 				it plugs into floating around it.
 			</figcaption>
 			<div className="landing-hero-agents-stage" ref={stage}>

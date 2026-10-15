@@ -13,6 +13,10 @@ import {
 	applyHomeOgVariant,
 } from '#universal/home-og-variants.ts'
 import { publicOgPages, type PublicOgPageId } from '#universal/og-pages.ts'
+import {
+	findWithAgentByPathname,
+	withAgentHref,
+} from '#universal/with-agents.ts'
 
 export const DEFAULT_DOCUMENT_TITLE = 'Kody'
 export const NOT_FOUND_DOCUMENT_TITLE = 'Not found'
@@ -182,8 +186,9 @@ function publicPageHead(
 function featurePageHead(
 	pageId: PublicOgPageId,
 	title: string,
-	scenes?: string,
+	scenes: string | ReadonlyArray<string> = [],
 ): DocumentHeadDescriptor {
+	const sceneSheets = typeof scenes === 'string' ? [scenes] : scenes
 	return {
 		...publicPageHead(pageId, title, {
 			links: [
@@ -192,15 +197,11 @@ function featurePageHead(
 					hrefPath: '/feature-pages.css',
 					sameOrigin: true,
 				},
-				...(scenes
-					? [
-							{
-								rel: 'stylesheet',
-								hrefPath: `/feature-scenes/${scenes}.css`,
-								sameOrigin: true,
-							},
-						]
-					: []),
+				...sceneSheets.map((scene) => ({
+					rel: 'stylesheet',
+					hrefPath: `/feature-scenes/${scene}.css`,
+					sameOrigin: true,
+				})),
 			],
 		}),
 		description: publicOgPages[pageId].ogDescription,
@@ -418,11 +419,6 @@ const routeDocumentHeads = {
 		'Shared memory for your AI agents | Kody',
 		'memory',
 	),
-	featureSecrets: featurePageHead(
-		'feature-secrets',
-		'API secrets for your AI agents | Kody',
-		'secrets',
-	),
 	featurePackages: featurePageHead(
 		'feature-packages',
 		'Reusable packages for your AI agents | Kody',
@@ -433,10 +429,10 @@ const routeDocumentHeads = {
 		'Triggers and automation for your AI agents | Kody',
 		'triggers',
 	),
-	featureIntegrations: featurePageHead(
-		'feature-integrations',
-		'Service connections for your AI agents | Kody',
-		'integrations',
+	featureCredentials: featurePageHead(
+		'feature-credentials',
+		'Credentials for your AI agents | Kody',
+		['secrets', 'integrations'],
 	),
 	featureApps: featurePageHead(
 		'feature-apps',
@@ -461,6 +457,8 @@ const routeDocumentHeads = {
 	useCases: acquisitionHead,
 	automation: acquisitionHead,
 	caseStudies: publicPageHead('case-studies', 'Case studies'),
+	believe: publicPageHead('believe', 'What we believe'),
+	withAgent: withAgentHead,
 	support: publicPageHead('support', 'Support'),
 	privacy: publicPageHead('privacy', 'Privacy'),
 	terms: publicPageHead('terms', 'Terms'),
@@ -610,6 +608,22 @@ export function absolutizeDocumentHead(
 			type: link.type,
 			title: link.title,
 		})),
+	}
+}
+
+function withAgentHead({
+	pathname,
+}: {
+	pathname: string
+}): DocumentHeadDescriptor {
+	const agent = findWithAgentByPathname(pathname)
+	if (!agent) return titleOnly('Agent not found')
+	const title = `Kody for ${agent.name} | Kody`
+	return {
+		title,
+		description: agent.pitch,
+		canonicalPath: withAgentHref(agent.slug),
+		og: { title, description: agent.pitch, imagePath: '/og/home.png' },
 	}
 }
 

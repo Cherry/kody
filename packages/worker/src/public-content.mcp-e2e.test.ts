@@ -1,5 +1,3 @@
-import { homepageSignupPath } from '#universal/first-touch-attribution.ts'
-import { landingFactoryBeats } from '#universal/landing-factory-beats.ts'
 import { landingHeroPrimaryCta } from '#universal/landing-home-copy.ts'
 import { expect, test } from 'vitest'
 import { acquisitionPages } from '#universal/acquisition/catalog.ts'
@@ -280,7 +278,7 @@ test('public signup CTAs stay tied to their plan or get-started section', async 
 		).toContain('href="/signup"')
 	}
 	const { html: home } = await document('/')
-	expect(home).toContain(homepageSignupPath.replaceAll('&', '&amp;'))
+	expect(home).toContain('href="/docs/connect-your-agent"')
 	const slug = listBlogPosts()[0]?.slug
 	expect(slug).toBeTruthy()
 	const { html: blog } = await document(`/blog/${slug}`)
@@ -315,28 +313,20 @@ test('homepage renders ordered video fixtures, tool proof, and session-aware CTA
 		''
 	contains(hero, [
 		landingHeroPrimaryCta,
-		'href="#primitives"',
-		'/signup?utm_source=kody.codes',
+		'href="/docs/connect-your-agent"',
+		'landing-agents',
 	])
 	expect(hero).not.toContain('landing-hero-video')
 	expect(hero).not.toContain('landing-hero-agents')
 	contains(home, [
-		'id="primitives"',
-		'href="/docs"',
-		'landing-proof',
+		'class="landing-pcard"',
 		'landing-hero-agents',
 		'landing-videos',
 		'role="listbox"',
 		'landing-hero-agent-light',
 		'landing-hero-agent-track',
-		'href="/docs/github"',
-		'href="/docs/slack"',
-		'aria-label="Example triggers"',
-		...landingFactoryBeats.flatMap((beat) => [
-			`href="/docs/${beat.slug}"`,
-			beat.trigger,
-			beat.title,
-		]),
+		'href="/believe"',
+		'href="/features/credentials"',
 	])
 	const thumbnails = videos
 		.slice(0, 2)
@@ -346,21 +336,8 @@ test('homepage renders ordered video fixtures, tool proof, and session-aware CTA
 		home.indexOf(thumbnails[1]!),
 	)
 	expect(home).not.toContain('data-embed-playlist')
-	const tools =
-		home.match(
-			/<ul[^>]*class="[^"]*landing-invite-tools[^"]*"[\s\S]*?<\/ul>/,
-		)?.[0] ?? ''
-	contains(tools, [
-		'GitHub',
-		'Linear',
-		'Sentry',
-		'Cloudflare',
-		'Slack',
-		'Public packages',
-		...['github', 'linear', 'sentry', 'cloudflare', 'slack'].map(
-			(icon) => `/images/icons/${icon}.svg`,
-		),
-	])
+	expect(home).not.toContain('href="/onboarding"')
+	expect(home).not.toContain('landing-lantern')
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
 	const cookie = await loginToApp(server.origin, user)
@@ -369,7 +346,11 @@ test('homepage renders ordered video fixtures, tool proof, and session-aware CTA
 		signedIn.match(
 			/<section[^>]*class="landing-hero"[\s\S]*?<\/section>/,
 		)?.[0] ?? ''
-	contains(signedHero, [landingHeroPrimaryCta, 'href="/onboarding"'])
+	contains(signedHero, [
+		landingHeroPrimaryCta,
+		'href="/docs/connect-your-agent"',
+	])
+	expect(signedHero).not.toContain('href="/onboarding"')
 	expect(signedHero).not.toContain('/signup?utm_source=kody.codes')
 	contains(signedIn, ['landing-videos', 'landing-hero-agents'])
 })

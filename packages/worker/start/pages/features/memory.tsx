@@ -262,7 +262,7 @@ export function MemoryFeature() {
 						href: '/use-cases/shared-agent-memory',
 						label: 'Shared agent memory use case',
 					},
-					{ href: '/features/integrations', label: 'Service connections' },
+					{ href: '/features/credentials', label: 'Credentials' },
 				]}
 			/>
 			<div className="feature-start">

@@ -485,6 +485,12 @@ export const routes = {
 			`/og/${segment(params.page)}.png`,
 	},
 	features: { href: () => '/features' },
+	featureCredentials: { href: () => '/features/credentials' },
+	believe: { href: () => '/believe' },
+	withAgent: {
+		href: (params: { agent: string | number }) =>
+			`/with/${segment(params.agent)}`,
+	},
 	featureMemory: { href: () => '/features/memory' },
 	featureSecrets: { href: () => '/features/secrets' },
 	featurePackages: { href: () => '/features/packages' },

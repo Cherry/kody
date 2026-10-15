@@ -16,6 +16,7 @@ import { Route as AtChar123usernameChar125RouteImport } from './routes/@{$userna
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthDotmdRouteImport } from './routes/auth[.]md'
+import { Route as BelieveRouteImport } from './routes/believe'
 import { Route as CaseStudiesRouteImport } from './routes/case-studies'
 import { Route as CommunityRouteImport } from './routes/community'
 import { Route as DiscordRouteImport } from './routes/discord'
@@ -108,6 +109,7 @@ import { Route as DocsConnectDotmdRouteImport } from './routes/docs_.connect[.]m
 import { Route as DocsLlmsDottxtRouteImport } from './routes/docs_.llms[.]txt'
 import { Route as DocsChar123slugChar125DotmdRouteImport } from './routes/docs_.{$slug}[.]md'
 import { Route as FeaturesAppsRouteImport } from './routes/features_.apps'
+import { Route as FeaturesCredentialsRouteImport } from './routes/features_.credentials'
 import { Route as FeaturesIntegrationsRouteImport } from './routes/features_.integrations'
 import { Route as FeaturesMemoryRouteImport } from './routes/features_.memory'
 import { Route as FeaturesPackagesRouteImport } from './routes/features_.packages'
@@ -134,6 +136,7 @@ import { Route as UseCasesMcpGatewayRouteImport } from './routes/use-cases_.mcp-
 import { Route as UseCasesScheduledWorkflowsRouteImport } from './routes/use-cases_.scheduled-workflows'
 import { Route as UseCasesSharedAgentMemoryRouteImport } from './routes/use-cases_.shared-agent-memory'
 import { Route as WebhooksStripeRouteImport } from './routes/webhooks_.stripe'
+import { Route as WithAgentRouteImport } from './routes/with.$agent'
 import { Route as YoutubeThumbVideoIdRouteImport } from './routes/youtube-thumb_.$videoId'
 import { Route as DotwellKnownAgentSkillsIndexDotjsonRouteImport } from './routes/[.]well-known_.agent-skills_.index[.]json'
 import { Route as DotwellKnownMcpServerCardDotjsonRouteImport } from './routes/[.]well-known_.mcp_.server-card[.]json'
@@ -293,6 +296,11 @@ const AuthRoute = AuthRouteImport.update({
 const AuthDotmdRoute = AuthDotmdRouteImport.update({
   id: '/auth.md',
   path: '/auth.md',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BelieveRoute = BelieveRouteImport.update({
+  id: '/believe',
+  path: '/believe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CaseStudiesRoute = CaseStudiesRouteImport.update({
@@ -763,6 +771,11 @@ const FeaturesAppsRoute = FeaturesAppsRouteImport.update({
   path: '/features/apps',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FeaturesCredentialsRoute = FeaturesCredentialsRouteImport.update({
+  id: '/features_/credentials',
+  path: '/features/credentials',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FeaturesIntegrationsRoute = FeaturesIntegrationsRouteImport.update({
   id: '/features_/integrations',
   path: '/features/integrations',
@@ -896,6 +909,11 @@ const UseCasesSharedAgentMemoryRoute =
 const WebhooksStripeRoute = WebhooksStripeRouteImport.update({
   id: '/webhooks_/stripe',
   path: '/webhooks/stripe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WithAgentRoute = WithAgentRouteImport.update({
+  id: '/with/$agent',
+  path: '/with/$agent',
   getParentRoute: () => rootRouteImport,
 } as any)
 const YoutubeThumbVideoIdRoute = YoutubeThumbVideoIdRouteImport.update({
@@ -1627,6 +1645,7 @@ export interface FileRoutesByFullPath {
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
+  '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
@@ -1716,6 +1735,7 @@ export interface FileRoutesByFullPath {
   '/docs/llms.txt': typeof DocsLlmsDottxtRoute
   '/docs/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features/apps': typeof FeaturesAppsRoute
+  '/features/credentials': typeof FeaturesCredentialsRoute
   '/features/integrations': typeof FeaturesIntegrationsRoute
   '/features/memory': typeof FeaturesMemoryRoute
   '/features/packages': typeof FeaturesPackagesRoute
@@ -1741,6 +1761,7 @@ export interface FileRoutesByFullPath {
   '/use-cases/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
   '/webhooks/stripe': typeof WebhooksStripeRoute
+  '/with/$agent': typeof WithAgentRoute
   '/youtube-thumb/$videoId': typeof YoutubeThumbVideoIdRoute
   '/admin/': typeof AdminIndexRoute
   '/blog/': typeof BlogIndexRoute
@@ -1878,6 +1899,7 @@ export interface FileRoutesByTo {
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
+  '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
@@ -1966,6 +1988,7 @@ export interface FileRoutesByTo {
   '/docs/llms.txt': typeof DocsLlmsDottxtRoute
   '/docs/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features/apps': typeof FeaturesAppsRoute
+  '/features/credentials': typeof FeaturesCredentialsRoute
   '/features/integrations': typeof FeaturesIntegrationsRoute
   '/features/memory': typeof FeaturesMemoryRoute
   '/features/packages': typeof FeaturesPackagesRoute
@@ -1991,6 +2014,7 @@ export interface FileRoutesByTo {
   '/use-cases/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
   '/webhooks/stripe': typeof WebhooksStripeRoute
+  '/with/$agent': typeof WithAgentRoute
   '/youtube-thumb/$videoId': typeof YoutubeThumbVideoIdRoute
   '/admin': typeof AdminIndexRoute
   '/blog': typeof BlogIndexRoute
@@ -2129,6 +2153,7 @@ export interface FileRoutesById {
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
+  '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
   '/discord': typeof DiscordRoute
@@ -2218,6 +2243,7 @@ export interface FileRoutesById {
   '/docs_/llms.txt': typeof DocsLlmsDottxtRoute
   '/docs_/{$slug}.md': typeof DocsChar123slugChar125DotmdRoute
   '/features_/apps': typeof FeaturesAppsRoute
+  '/features_/credentials': typeof FeaturesCredentialsRoute
   '/features_/integrations': typeof FeaturesIntegrationsRoute
   '/features_/memory': typeof FeaturesMemoryRoute
   '/features_/packages': typeof FeaturesPackagesRoute
@@ -2243,6 +2269,7 @@ export interface FileRoutesById {
   '/use-cases_/scheduled-workflows': typeof UseCasesScheduledWorkflowsRoute
   '/use-cases_/shared-agent-memory': typeof UseCasesSharedAgentMemoryRoute
   '/webhooks_/stripe': typeof WebhooksStripeRoute
+  '/with/$agent': typeof WithAgentRoute
   '/youtube-thumb_/$videoId': typeof YoutubeThumbVideoIdRoute
   '/admin/': typeof AdminIndexRoute
   '/blog/': typeof BlogIndexRoute
@@ -2382,6 +2409,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/auth'
     | '/auth.md'
+    | '/believe'
     | '/case-studies'
     | '/community'
     | '/discord'
@@ -2471,6 +2499,7 @@ export interface FileRouteTypes {
     | '/docs/llms.txt'
     | '/docs/{$slug}.md'
     | '/features/apps'
+    | '/features/credentials'
     | '/features/integrations'
     | '/features/memory'
     | '/features/packages'
@@ -2496,6 +2525,7 @@ export interface FileRouteTypes {
     | '/use-cases/scheduled-workflows'
     | '/use-cases/shared-agent-memory'
     | '/webhooks/stripe'
+    | '/with/$agent'
     | '/youtube-thumb/$videoId'
     | '/admin/'
     | '/blog/'
@@ -2633,6 +2663,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/auth'
     | '/auth.md'
+    | '/believe'
     | '/case-studies'
     | '/community'
     | '/discord'
@@ -2721,6 +2752,7 @@ export interface FileRouteTypes {
     | '/docs/llms.txt'
     | '/docs/{$slug}.md'
     | '/features/apps'
+    | '/features/credentials'
     | '/features/integrations'
     | '/features/memory'
     | '/features/packages'
@@ -2746,6 +2778,7 @@ export interface FileRouteTypes {
     | '/use-cases/scheduled-workflows'
     | '/use-cases/shared-agent-memory'
     | '/webhooks/stripe'
+    | '/with/$agent'
     | '/youtube-thumb/$videoId'
     | '/admin'
     | '/blog'
@@ -2883,6 +2916,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/auth'
     | '/auth.md'
+    | '/believe'
     | '/case-studies'
     | '/community'
     | '/discord'
@@ -2972,6 +3006,7 @@ export interface FileRouteTypes {
     | '/docs_/llms.txt'
     | '/docs_/{$slug}.md'
     | '/features_/apps'
+    | '/features_/credentials'
     | '/features_/integrations'
     | '/features_/memory'
     | '/features_/packages'
@@ -2997,6 +3032,7 @@ export interface FileRouteTypes {
     | '/use-cases_/scheduled-workflows'
     | '/use-cases_/shared-agent-memory'
     | '/webhooks_/stripe'
+    | '/with/$agent'
     | '/youtube-thumb_/$videoId'
     | '/admin/'
     | '/blog/'
@@ -3135,6 +3171,7 @@ export interface RootRouteChildren {
   AccountRoute: typeof AccountRoute
   AuthRoute: typeof AuthRoute
   AuthDotmdRoute: typeof AuthDotmdRoute
+  BelieveRoute: typeof BelieveRoute
   CaseStudiesRoute: typeof CaseStudiesRoute
   CommunityRoute: typeof CommunityRoute
   DiscordRoute: typeof DiscordRoute
@@ -3224,6 +3261,7 @@ export interface RootRouteChildren {
   DocsLlmsDottxtRoute: typeof DocsLlmsDottxtRoute
   DocsChar123slugChar125DotmdRoute: typeof DocsChar123slugChar125DotmdRoute
   FeaturesAppsRoute: typeof FeaturesAppsRoute
+  FeaturesCredentialsRoute: typeof FeaturesCredentialsRoute
   FeaturesIntegrationsRoute: typeof FeaturesIntegrationsRoute
   FeaturesMemoryRoute: typeof FeaturesMemoryRoute
   FeaturesPackagesRoute: typeof FeaturesPackagesRoute
@@ -3246,6 +3284,7 @@ export interface RootRouteChildren {
   UseCasesScheduledWorkflowsRoute: typeof UseCasesScheduledWorkflowsRoute
   UseCasesSharedAgentMemoryRoute: typeof UseCasesSharedAgentMemoryRoute
   WebhooksStripeRoute: typeof WebhooksStripeRoute
+  WithAgentRoute: typeof WithAgentRoute
   YoutubeThumbVideoIdRoute: typeof YoutubeThumbVideoIdRoute
   AdminIndexRoute: typeof AdminIndexRoute
   BlogIndexRoute: typeof BlogIndexRoute
@@ -3419,6 +3458,13 @@ declare module '@tanstack/react-router' {
       path: '/auth.md'
       fullPath: '/auth.md'
       preLoaderRoute: typeof AuthDotmdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/believe': {
+      id: '/believe'
+      path: '/believe'
+      fullPath: '/believe'
+      preLoaderRoute: typeof BelieveRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/case-studies': {
@@ -4065,6 +4111,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FeaturesAppsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/features_/credentials': {
+      id: '/features_/credentials'
+      path: '/features/credentials'
+      fullPath: '/features/credentials'
+      preLoaderRoute: typeof FeaturesCredentialsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/features_/integrations': {
       id: '/features_/integrations'
       path: '/features/integrations'
@@ -4245,6 +4298,13 @@ declare module '@tanstack/react-router' {
       path: '/webhooks/stripe'
       fullPath: '/webhooks/stripe'
       preLoaderRoute: typeof WebhooksStripeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/with/$agent': {
+      id: '/with/$agent'
+      path: '/with/$agent'
+      fullPath: '/with/$agent'
+      preLoaderRoute: typeof WithAgentRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/youtube-thumb_/$videoId': {
@@ -5176,6 +5236,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountRoute: AccountRoute,
   AuthRoute: AuthRoute,
   AuthDotmdRoute: AuthDotmdRoute,
+  BelieveRoute: BelieveRoute,
   CaseStudiesRoute: CaseStudiesRoute,
   CommunityRoute: CommunityRoute,
   DiscordRoute: DiscordRoute,
@@ -5265,6 +5326,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsLlmsDottxtRoute: DocsLlmsDottxtRoute,
   DocsChar123slugChar125DotmdRoute: DocsChar123slugChar125DotmdRoute,
   FeaturesAppsRoute: FeaturesAppsRoute,
+  FeaturesCredentialsRoute: FeaturesCredentialsRoute,
   FeaturesIntegrationsRoute: FeaturesIntegrationsRoute,
   FeaturesMemoryRoute: FeaturesMemoryRoute,
   FeaturesPackagesRoute: FeaturesPackagesRoute,
@@ -5287,6 +5349,7 @@ const rootRouteChildren: RootRouteChildren = {
   UseCasesScheduledWorkflowsRoute: UseCasesScheduledWorkflowsRoute,
   UseCasesSharedAgentMemoryRoute: UseCasesSharedAgentMemoryRoute,
   WebhooksStripeRoute: WebhooksStripeRoute,
+  WithAgentRoute: WithAgentRoute,
   YoutubeThumbVideoIdRoute: YoutubeThumbVideoIdRoute,
   AdminIndexRoute: AdminIndexRoute,
   BlogIndexRoute: BlogIndexRoute,
@@ -5465,13 +5528,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

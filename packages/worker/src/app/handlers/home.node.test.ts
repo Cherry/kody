@@ -49,7 +49,7 @@ vi.mock('@tanstack/react-start', async () => ({
 	createServerOnlyFn: <T>(fn: T) => fn,
 }))
 
-test('native home prefetches flags once across page and session reads', async () => {
+test('native home leaves auth and flag reads to the session loader', async () => {
 	setAuthSessionSecret(testCookieSecret)
 	const email = 'home@example.com'
 	const stableUserId = testStableUserIdFromEmail(email)
@@ -127,8 +127,9 @@ test('native home prefetches flags once across page and session reads', async ()
 		.spyOn(globalThis, 'fetch')
 		.mockRejectedValue(new Error('offline'))
 	const home = await loadHome()
+	expect(counts.prepare).toBe(0)
 	const body = await loadSessionInfo(request, env)
-	expect(home.loggedIn).toBe(true)
+	expect(home.landingAgentOrder.length).toBeGreaterThan(0)
 	expect(body.session?.username).toBe('home-user')
 	expect(body.session?.featureFlags).toEqual({
 		'demo-indicator': true,
@@ -156,7 +157,7 @@ test('native anonymous home omits the unused onboarding chooser catalog', async 
 	native.env = { COOKIE_SECRET: testCookieSecret } as Env
 	native.request = new Request('https://example.com/')
 	const home = await loadHome()
-	expect(home.loggedIn).toBe(false)
+	expect(home.landingAgentOrder.length).toBeGreaterThan(0)
 	expect(home.landingHeroVideos).toEqual([])
 	expect(loadOnboardingData).not.toHaveBeenCalled()
 	fetchMock.mockRestore()

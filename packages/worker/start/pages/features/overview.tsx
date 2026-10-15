@@ -6,16 +6,16 @@ import {
 	primitiveFeatureHref,
 } from '#universal/primitive-cards.ts'
 import { type LandingPrimitiveId } from '#universal/landing-lantern.ts'
+import { LandingPrimitives } from '../../components/landing-primitives.tsx'
 import { OverviewWidget } from './overview-widgets.tsx'
 
 /** Card accent hues; `feature-pages.css` derives `--accent` from `--hue`. */
 const cardHues = {
 	memory: '29',
-	secrets: '300',
 	packages: '255',
 	triggers: '96',
 	integrations: '148',
-	apps: '345',
+	apps: '300',
 } as const satisfies Record<LandingPrimitiveId, string>
 
 export function FeaturesOverview() {
@@ -31,10 +31,8 @@ export function FeaturesOverview() {
 					Give your agents a place to remember what matters, connect to your
 					tools, and build software you can keep using.
 				</p>
-				<p className="overview-example">
-					Interactive examples use fictional data.
-				</p>
 			</div>
+			<LandingPrimitives />
 			<div className="features">
 				{primitiveCards.map((card) => (
 					<article
@@ -78,7 +76,7 @@ export function FeaturesOverview() {
 					<span aria-hidden="true">→</span>
 					<SiteLink href="/features/packages">Run your package</SiteLink>
 					<span aria-hidden="true">→</span>
-					<SiteLink href="/features/integrations">Use your account</SiteLink>
+					<SiteLink href="/features/credentials">Use your account</SiteLink>
 					<span aria-hidden="true">→</span>
 					<SiteLink href="/features/apps">Review in your app</SiteLink>
 				</div>

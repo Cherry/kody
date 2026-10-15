@@ -1,0 +1,71 @@
+import { jsx } from 'react/jsx-runtime'
+import { expect, test } from 'vitest'
+import { isNotFound, isRedirect } from '@tanstack/react-router'
+import { renderStartPage } from './test-support/render-start-page.ts'
+import { WithAgentRoute } from './pages/with-agent.tsx'
+import { Route as agentRoute } from './routes/with.$agent.tsx'
+import { Route as secretsRoute } from './routes/features_.secrets.tsx'
+import { Route as integrationsRoute } from './routes/features_.integrations.tsx'
+import { findWithAgent } from '#universal/with-agents.ts'
+import {
+	absolutizeDocumentHead,
+	resolveDocumentHead,
+} from '#universal/document-head.ts'
+
+test('agent page shows its connect steps and matching canonical metadata', async () => {
+	const agent = findWithAgent('claude-code')!
+	const html = await renderStartPage(
+		jsx(WithAgentRoute, { agent }),
+		'/with/claude-code',
+	)
+	expect(html).toContain('Kody for <em>Claude Code</em>')
+	expect(html).toContain(
+		'claude mcp add --transport http -s user kody https://kody.codes/mcp',
+	)
+	expect(html).toContain('href="/features/credentials"')
+	expect(html).toContain('href="/with/cursor"')
+	expect(html).not.toContain('href="/with/claude-code"')
+	expect(html).not.toContain('\u2014')
+	const head = absolutizeDocumentHead(
+		resolveDocumentHead('withAgent', '/with/claude-code'),
+		'https://kody.test',
+	)
+	expect(head.title).toBe('Kody for Claude Code | Kody')
+	expect(head.description).toBe(agent.pitch)
+	expect(head.canonicalUrl).toBe('https://kody.test/with/claude-code')
+})
+
+test('agent route rejects unknown catalog entries before rendering', () => {
+	const beforeLoad = agentRoute.options.beforeLoad as unknown as (input: {
+		params: { agent: string }
+	}) => unknown
+	expect(beforeLoad({ params: { agent: 'claude-code' } })).toEqual({
+		agent: findWithAgent('claude-code'),
+	})
+	let failure: unknown
+	try {
+		beforeLoad({ params: { agent: 'not-an-agent' } })
+	} catch (error) {
+		failure = error
+	}
+	expect(isNotFound(failure)).toBe(true)
+})
+
+test.each([secretsRoute, integrationsRoute])(
+	'retired feature route preserves search in its permanent redirect',
+	(route) => {
+		const beforeLoad = route.options.beforeLoad as (input: {
+			location: { searchStr: string }
+		}) => unknown
+		let failure: unknown
+		try {
+			beforeLoad({ location: { searchStr: '?ref=x' } })
+		} catch (error) {
+			failure = error
+		}
+		expect(isRedirect(failure)).toBe(true)
+		if (!isRedirect(failure)) throw new Error('Expected redirect')
+		expect(failure.options.href).toBe('/features/credentials?ref=x')
+		expect(failure.status).toBe(301)
+	},
+)

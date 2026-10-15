@@ -146,25 +146,29 @@ async function openWarmHomepage(
 	await page.evaluate(() => Object.assign(window, { __kodyBootDocument: true }))
 }
 
-test('a lantern link and Back/Forward paint styled and at the restored scroll', async ({
+function primitiveCardLink(page: Page, id: string) {
+	return page
+		.getByRole('main')
+		.locator(`a.landing-pcard[href="/features/${id}"]`)
+}
+
+test('a primitive card link and Back/Forward paint styled and at the restored scroll', async ({
 	page,
 }) => {
 	await openWarmHomepage(page)
 	const held = await holdFeatureModule(page)
 
-	const lanternLink = page
-		.getByRole('main')
-		.getByRole('link', { name: 'memory', exact: true })
-	await lanternLink.scrollIntoViewIfNeeded()
+	const cardLink = primitiveCardLink(page, 'memory')
+	await cardLink.scrollIntoViewIfNeeded()
 	await expect
 		.poll(() => page.evaluate(() => Math.round(window.scrollY)))
 		.toBeGreaterThan(0)
 	const homeScrollY = await page.evaluate(() => Math.round(window.scrollY))
 
 	await startHistoryRecording(page)
-	await lanternLink.click()
+	await cardLink.click()
 	await held.wait()
-	await expect(lanternLink).toBeVisible()
+	await expect(cardLink).toBeVisible()
 	await expect(page.locator('.feature-detail')).toHaveCount(0)
 	held.release()
 	await expect(page).toHaveURL(/\/features\/memory$/)
@@ -173,7 +177,7 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 	const click = await stopHistoryRecording(page)
 	expect(
 		await page.evaluate(() => '__kodyBootDocument' in window),
-		'the lantern click stayed in the SPA',
+		'the card click stayed in the SPA',
 	).toBe(true)
 	expect(click.frames.some((frame) => frame.featureOnScreen)).toBe(true)
 	expect(unstyledFeatureFrames(click), 'click painted unstyled').toEqual([])
@@ -192,7 +196,7 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 	await startHistoryRecording(page)
 	await page.goBack()
 	await expect(page).toHaveURL(/\/$/)
-	await expect(lanternLink).toBeVisible()
+	await expect(cardLink).toBeVisible()
 	await expect
 		.poll(() => page.evaluate(() => Math.round(window.scrollY)))
 		.toBe(homeScrollY)
@@ -227,21 +231,18 @@ test('a lantern link and Back/Forward paint styled and at the restored scroll', 
 test('a superseding feature navigation waits for the shared styled component', async ({
 	page,
 }) => {
-	await openWarmHomepage(page, ['/features/memory', '/features/secrets'])
+	await openWarmHomepage(page, ['/features/memory', '/features/credentials'])
 	const held = await holdFeatureModule(page)
-	const lantern = page.getByRole('main')
-	await lantern
-		.getByRole('link', { name: 'memory', exact: true })
-		.scrollIntoViewIfNeeded()
+	await primitiveCardLink(page, 'memory').scrollIntoViewIfNeeded()
 
 	await startHistoryRecording(page)
-	await lantern.getByRole('link', { name: 'memory', exact: true }).click()
+	await primitiveCardLink(page, 'memory').click()
 	await held.wait()
 	await expect(page.locator('.feature-detail')).toHaveCount(0)
-	await lantern.getByRole('link', { name: 'secrets', exact: true }).click()
+	await primitiveCardLink(page, 'credentials').click()
 	await expect(page.locator('.feature-detail')).toHaveCount(0)
 	held.release()
-	await expect(page).toHaveURL(/\/features\/secrets$/)
+	await expect(page).toHaveURL(/\/features\/credentials$/)
 	await expect(page.locator('.feature-detail')).toBeVisible()
 	await expectFeatureStylesheetApplied(page)
 	const recording = await stopHistoryRecording(page)
@@ -250,7 +251,8 @@ test('a superseding feature navigation waits for the shared styled component', a
 	expect(recording.frames.some((frame) => frame.featureOnScreen)).toBe(true)
 	expect(
 		recording.frames.filter(
-			(frame) => frame.featureOnScreen && frame.path !== '/features/secrets',
+			(frame) =>
+				frame.featureOnScreen && frame.path !== '/features/credentials',
 		),
 	).toEqual([])
 	expect(unstyledFeatureFrames(recording), 'painted unstyled').toEqual([])
@@ -301,10 +303,7 @@ test('a feature component that fails to load recovers through a document load', 
 	// reload. Wait for that load, not the earlier same-document URL change.
 	await Promise.all([
 		page.waitForEvent('load'),
-		page
-			.getByRole('main')
-			.getByRole('link', { name: 'memory', exact: true })
-			.click(),
+		primitiveCardLink(page, 'memory').click(),
 	])
 	await expect(page).toHaveURL(/\/features\/memory$/)
 	expect(await page.evaluate(() => '__kodyBootDocument' in window)).toBe(false)

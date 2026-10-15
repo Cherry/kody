@@ -292,7 +292,7 @@ export function TriggersFeature() {
 				links={[
 					{ href: '/features/packages', label: 'Reusable packages' },
 					{ href: '/features/apps', label: 'Package apps' },
-					{ href: '/features/secrets', label: 'API secrets' },
+					{ href: '/features/credentials', label: 'Credentials' },
 				]}
 			/>
 			<div className="feature-start">

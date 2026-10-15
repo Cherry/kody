@@ -318,7 +318,7 @@ export function PackagesFeature() {
 				links={[
 					{ href: '/features/triggers', label: 'Triggers and automation' },
 					{ href: '/features/apps', label: 'Package apps' },
-					{ href: '/features/secrets', label: 'API secrets' },
+					{ href: '/features/credentials', label: 'Credentials' },
 				]}
 			/>
 			<div className="feature-start">

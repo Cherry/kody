@@ -18,7 +18,7 @@ import {
 } from '#universal/landing-lantern.ts'
 
 /**
- * Six-orb lantern beside the primitives sentence. The lantern still is one
+ * Five-orb lantern beside the primitives sentence. The lantern still is one
  * image. Each orb sits in an overlay clipped to the opening inside the
  * frame, centered on its hotspot, so the highlight ring, the disc, and the
  * leader rim share one centre while the button moves.
@@ -78,7 +78,7 @@ export function LandingLantern(props: LandingLanternProps) {
 			ref={node}
 		>
 			<figcaption className="visually-hidden">
-				A lantern holding six glowing orbs, one for each Kody primitive.
+				A lantern holding five glowing orbs, one for each Kody primitive.
 			</figcaption>
 			<img
 				src={landingLanternImage.src}
