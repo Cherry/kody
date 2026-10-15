@@ -1,3 +1,8 @@
+import { useServerFn } from '@tanstack/react-start'
+import {
+	readConnectIntegration,
+	readConnectChooser,
+} from '#start/server/connect-integration'
 import {
 	connectOAuth,
 	exchangeOAuthToken,
@@ -53,6 +58,18 @@ export type OAuthCallback =
 	| { kind: 'none' }
 	| { kind: 'error'; error: string; description: string | null }
 	| { kind: 'success'; code: string; state: string | null }
+
+// These operations run imperatively during setup and callback completion.
+// Start owns redirects before the page's normal error handling sees failures.
+export function useConnectOauthOperations() {
+	return {
+		readIntegration: useServerFn(readConnectIntegration),
+		readChooser: useServerFn(readConnectChooser),
+		saveApp: useServerFn(saveConnectOauthApp),
+		exchangeCode: useServerFn(exchangeConnectOauthCode),
+		saveConnection: useServerFn(saveConnectOauthConnection),
+	}
+}
 
 export type ConnectOauthQueryConfigResult =
 	| { ok: true; value: ConnectOauthQueryConfig }
@@ -130,7 +147,7 @@ export function connectOauthCallbackHref(
 	return `${clean.pathname}${clean.search}`
 }
 
-export async function saveConnectOauthConnection(input: {
+async function saveConnectOauthConnection(input: {
 	config: ConnectOauthConfig
 	callbackUrl: string
 	tokenPayload: Record<string, unknown>
@@ -375,7 +392,7 @@ export async function buildConnectOauthAuthorizeUrl(input: {
 	return url.toString()
 }
 
-export async function exchangeConnectOauthCode(
+async function exchangeConnectOauthCode(
 	nextConfig: ConnectOauthConfig,
 	code: string,
 	redirectUri: string,
@@ -418,7 +435,7 @@ export async function exchangeConnectOauthCode(
 	return { ok: true, data: payload, status: 200 }
 }
 
-export async function saveConnectOauthApp(
+async function saveConnectOauthApp(
 	nextConfig: ConnectOauthConfig,
 	clientSecret?: string,
 	orgSlug: string | null = null,

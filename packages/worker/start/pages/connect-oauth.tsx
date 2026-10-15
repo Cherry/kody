@@ -1,8 +1,4 @@
 /** @jsxImportSource @emotion/react */
-import {
-	readConnectIntegration,
-	readConnectChooser,
-} from '#start/server/connect-integration'
 import { useRouter } from '@tanstack/react-router'
 import { createOAuthCallbackNavigationScope } from '../oauth-callback-navigation.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -53,21 +49,19 @@ import {
 	type ConnectOauthStep,
 	persistConnectOauthOrgSlug,
 	readConnectOauthOrgSlug,
+	useConnectOauthOperations,
 	connectOauthCallbackHref,
-	saveConnectOauthConnection,
 	withConnectOauthChooserOrg,
 	buildConnectOauthAuthorizeUrl,
 	connectOauthHeaderCss,
 	connectOauthEyebrowCss,
 	connectOauthPageCss,
-	exchangeConnectOauthCode,
 	getConnectOauthRedirectUri,
 	getConnectOauthStateKey,
 	persistConnectOauthConfig,
 	readConnectOauthCallback,
 	readConnectOauthQueryConfig,
 	readStoredConnectOauthConfig,
-	saveConnectOauthApp,
 	validateConnectOauthState,
 } from './connect-oauth-shared.ts'
 import {
@@ -255,6 +249,13 @@ export function ConnectOauthRoute({
 	currentHref: string
 	flowKey: string
 }) {
+	const {
+		readIntegration,
+		readChooser,
+		saveApp,
+		exchangeCode,
+		saveConnection,
+	} = useConnectOauthOperations()
 	const router = useRouter()
 	const [navigationScope] = useState(() =>
 		createOAuthCallbackNavigationScope({
@@ -371,12 +372,12 @@ export function ConnectOauthRoute({
 					(config.flow === 'confidential' && Boolean(clientSecret)),
 			}
 			persistConnectOauthOrgSlug(flowOrg)
-			const result = await saveConnectOauthApp(
+			const result = await saveApp(
 				nextConfig,
 				clientSecret || undefined,
 				flowOrg,
 			)
-			if (!isFlowActive()) return
+			if (!result || !isFlowActive()) return
 			if (!result.ok) {
 				setStatus(result.error, 'error')
 				return
@@ -478,7 +479,7 @@ export function ConnectOauthRoute({
 						new URL(currentHref, window.location.origin),
 					)
 					if (parsed.ok) {
-						const payload = await readConnectIntegration({
+						const payload = await readIntegration({
 							data: {
 								orgSlug: flowOrg ?? undefined,
 								name: parsed.value.providerKey,
@@ -488,6 +489,7 @@ export function ConnectOauthRoute({
 									) ?? undefined,
 							},
 						})
+						if (!payload || !isFlowActive()) return
 						nextConfig = mergeConnectOauthConfig({
 							queryConfig: parsed.value,
 							storedIntegration: payload.integration
@@ -498,10 +500,10 @@ export function ConnectOauthRoute({
 				}
 				if (!isFlowActive()) return
 				if (!nextConfig) {
-					const chooser = await readConnectChooser({
+					const chooser = await readChooser({
 						data: { orgSlug: flowOrg ?? undefined },
 					})
-					if (!isFlowActive()) return
+					if (!chooser || !isFlowActive()) return
 					update({
 						chooserOptions: withConnectOauthChooserOrg(
 							chooser.options,
@@ -540,13 +542,13 @@ export function ConnectOauthRoute({
 					})
 					return
 				}
-				const exchange = await exchangeConnectOauthCode(
+				const exchange = await exchangeCode(
 					nextConfig,
 					callback.code,
 					getConnectOauthRedirectUri(ssrRedirectUri),
 					flowOrg,
 				)
-				if (!isFlowActive()) return
+				if (!exchange || !isFlowActive()) return
 				if (!exchange.ok) {
 					update({
 						statusMessage: exchange.error,
@@ -559,13 +561,13 @@ export function ConnectOauthRoute({
 					})
 					return
 				}
-				const payload = await saveConnectOauthConnection({
+				const payload = await saveConnection({
 					config: nextConfig,
 					callbackUrl: window.location.href,
 					tokenPayload: exchange.data,
 					orgSlug: flowOrg,
 				})
-				if (!isFlowActive()) return
+				if (!payload || !isFlowActive()) return
 				if (!payload.ok) {
 					update({
 						statusMessage: payload.error,
@@ -599,6 +601,10 @@ export function ConnectOauthRoute({
 		}
 		void complete()
 	}, [
+		readIntegration,
+		readChooser,
+		exchangeCode,
+		saveConnection,
 		currentHref,
 		invalidatePages,
 		ssrRedirectUri,
