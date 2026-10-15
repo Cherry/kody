@@ -1,5 +1,32 @@
 # Start parity audit
 
+## Catch-up and authenticated preview evidence
+
+Source `3000d71f6` includes main `f9c6ef85a`. Incoming changes affect shared
+domain operations, admin usage calculations, the separate status page, and
+documentation. The migration adds no database migration files relative to that
+main revision.
+
+On deployed merge `b38ff142666b5577b776a0d4fa3578e5b24de08d`, browser sign-in
+with the approved preview seed account reached `/account/passkeys` through its
+preserved login destination. The account navigation and empty passkey view
+rendered. This proves that login and that empty authenticated screen work, not
+populated package parity or passkey registration.
+
+Validate `38732776038` passed Node, Workers and MCP. Static failed only the
+documentation temporal-language check, corrected in `a8e39a0d6`. Browser tests
+hit the job limit after reporting two assertion failures: the OAuth host check
+targeted the credential name link rather than its table row, and the billing
+diagnostic read a response body after navigation. Commits `b240394c2` and
+`44dc01239` correct those assertions while retaining persistence checks.
+
+Commit `b780f2a8a` fixes OAuth reset verification cookies scoped to `/oauth`,
+which browsers cannot send to Start RPC paths. The signed, short-lived cookie
+uses the root path, issuance expires its legacy path, and reset clears both
+paths. All response cookies are forwarded, including session renewal. Added
+coverage exercises consent after identity changes and cookie clearing through
+the real Start transport. This batch still requires CI and deployed checks.
+
 ## Preview and follow-up at source `231d9ec91`
 
 Preview run `38729720020` completed successfully. Health reports deployed merge
