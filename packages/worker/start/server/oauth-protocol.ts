@@ -28,9 +28,16 @@ export async function oauthAuthorizeDocument<T>({
 	}
 }
 
-export async function oauthAuthorizePost({ request }: { request: Request }) {
+export function oauthAuthorizePost({ request }: { request: Request }) {
+	return handleOAuthAuthorizePost(request, getEnv(env))
+}
+
+/** Explicit bindings preserve the provider-injected helpers at transport boundaries. */
+export async function handleOAuthAuthorizePost(
+	request: Request,
+	bindings: Env,
+) {
 	try {
-		const bindings = getEnv(env)
 		if (
 			request.headers
 				.get('Content-Type')

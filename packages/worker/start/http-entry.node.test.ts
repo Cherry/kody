@@ -48,7 +48,7 @@ test('server-function requests reach Start without legacy endpoint authorization
 	})
 	const response = await handle(request, createEnv())
 	expect(response.status).toBe(200)
-	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined)
+	expect(render).toHaveBeenCalledWith(request, expect.anything())
 	vi.unstubAllEnvs()
 })
 
@@ -140,7 +140,7 @@ test('unmapped document requests go to the native renderer with the original URL
 	)
 	const response = await handle(request, createEnv())
 	expect(response.status).toBe(200)
-	expect(render).toHaveBeenCalledWith(request, expect.anything(), undefined)
+	expect(render).toHaveBeenCalledWith(request, expect.anything())
 })
 
 test('a failed native mutation is never dispatched again to render an error', async () => {
