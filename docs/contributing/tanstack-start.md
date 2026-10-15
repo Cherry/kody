@@ -65,10 +65,9 @@ shape. Mutation identity does not come from document-head metadata. Pending
 controls follow Query mutation state; submitter guards apply to notices, draft
 resets, and navigation rather than preventing pending state from settling.
 
-Remaining page-shaped optimistic resources use
-[`mutation barriers`](../../packages/worker/start/page-mutation-cache.ts) to
-prevent a background read from replacing optimistic data with pre-write data.
-Organization and package barriers only delay reads of the matching resource.
+Page-shaped optimistic resources use scoped Query mutation overlays while writes
+are pending, then reconcile the captured resource scope when writes settle.
+Reads remain independent, including first navigation to a resource.
 Forms retain local drafts; saved server data comes from Query. Secrets and
 one-time revealed credentials stay outside reusable page caches.
 

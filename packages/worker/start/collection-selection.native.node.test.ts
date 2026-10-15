@@ -22,7 +22,6 @@ test('values uses the provided detail identity instead of reparsing link locatio
 	)
 	expect(html).toContain('Value not found')
 	expect(html).toContain('value="needle"')
-	expect(html).not.toContain('Loading value…')
 })
 
 test('memories uses the provided detail identity instead of reparsing link location', async () => {
