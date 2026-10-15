@@ -1,3 +1,4 @@
+import { isRedirect } from '@tanstack/react-router'
 import { savePackageCredentialMappings } from '#start/server/credential-approval-mutation'
 import { type CredentialMappingChange } from '#universal/credential-contracts.ts'
 import { type PackageCredentialsWriteResult } from '#client/routes/package-credentials-editing.ts'
@@ -19,6 +20,7 @@ export async function postPackageCredentialChanges(input: {
 					: 'Unable to save credential mapping.',
 		}
 	} catch (error) {
+		if (isRedirect(error)) throw error
 		return error instanceof Error && error.message === 'Please sign in again.'
 			? { kind: 'unauthorized' }
 			: {

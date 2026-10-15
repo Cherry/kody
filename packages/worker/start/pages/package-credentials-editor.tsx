@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { isRedirect } from '@tanstack/react-router'
 import { postPackageCredentialChanges } from '../package-credential-changes.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
@@ -130,11 +131,18 @@ export function usePackageMappingEditor(
 		update({ saving: true, messages: [] })
 		const started = session.current
 		const page = options.readPage()
-		const result = await mutation.mutateAsync({
-			username: page.username,
-			kodyId: page.kodyId,
-			changes: [planned.change],
-		})
+		let result
+		try {
+			result = await mutation.mutateAsync({
+				username: page.username,
+				kodyId: page.kodyId,
+				changes: [planned.change],
+			})
+		} catch (error) {
+			// Query has already handed this redirect to the router.
+			if (isRedirect(error)) return
+			throw error
+		}
 		if (result.kind === 'saved') await options.onSaved(result.view, page)
 		// The editor was closed or replaced (a tab change resets it) while
 		// the write was in flight; its outcome belongs to that old form.
