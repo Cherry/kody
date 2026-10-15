@@ -182,7 +182,7 @@ beforeEach(async () => {
 
 test('grants list includes outside collaborator grants; collaborators page lists them', async () => {
 	const env = createEnv()
-	const grantsReq = new Request('https://kody.test/@zeta-co/-/grants.json')
+	const grantsReq = new Request('https://kody.test/@zeta-co/-/grants')
 	await signIn('ada', grantsReq)
 	const grantsRes = await testOrgGrantsApiHandler(env).execute({
 		request: grantsReq,
@@ -198,9 +198,7 @@ test('grants list includes outside collaborator grants; collaborators page lists
 	expect(grantsPayload.grants[0]?.presetLabel).toBe('Use')
 	expect(grantsPayload.grants[0]).toMatchObject({ canRevoke: true })
 
-	const collabReq = new Request(
-		'https://kody.test/@zeta-co/-/collaborators.json',
-	)
+	const collabReq = new Request('https://kody.test/@zeta-co/-/collaborators')
 	await signIn('ada', collabReq)
 	const collabRes = await readCollaborators(env, {
 		request: collabReq,
@@ -242,7 +240,7 @@ test('member:write without manage access on the resource cannot revoke; owner ca
 		)
 		.run()
 
-	const listReq = new Request('https://kody.test/@zeta-co/-/grants.json')
+	const listReq = new Request('https://kody.test/@zeta-co/-/grants')
 	await signIn('bob', listReq)
 	const listed = await testOrgGrantsApiHandler(env).execute({
 		request: listReq,
@@ -263,14 +261,11 @@ test('member:write without manage access on the resource cannot revoke; owner ca
 		]),
 	)
 
-	const revokeReq = new Request(
-		'https://kody.test/@zeta-co/-/grants/revoke.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ grantId: 'grant-1' }),
-		},
-	)
+	const revokeReq = new Request('https://kody.test/@zeta-co/-/grants', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ grantId: 'grant-1' }),
+	})
 	await signIn('bob', revokeReq)
 	const denied = await testOrgGrantsRevokePostHandler(env).execute({
 		request: revokeReq,
@@ -287,14 +282,11 @@ test('member:write without manage access on the resource cannot revoke; owner ca
 		.first<{ deleted_at: string | null }>()
 	expect(stillLive?.deleted_at).toBeNull()
 
-	const ownerReq = new Request(
-		'https://kody.test/@zeta-co/-/grants/revoke.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ grantId: 'grant-1' }),
-		},
-	)
+	const ownerReq = new Request('https://kody.test/@zeta-co/-/grants', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ grantId: 'grant-1' }),
+	})
 	await signIn('ada', ownerReq)
 	const revoked = await testOrgGrantsRevokePostHandler(env).execute({
 		request: ownerReq,
@@ -316,14 +308,11 @@ test('member:write without manage access on the resource cannot revoke; owner ca
 
 test('owner can revoke a grant', async () => {
 	const env = createEnv()
-	const revokeReq = new Request(
-		'https://kody.test/@zeta-co/-/grants/revoke.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ grantId: 'grant-1' }),
-		},
-	)
+	const revokeReq = new Request('https://kody.test/@zeta-co/-/grants', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ grantId: 'grant-1' }),
+	})
 	await signIn('ada', revokeReq)
 	const revoked = await testOrgGrantsRevokePostHandler(env).execute({
 		request: revokeReq,
@@ -349,7 +338,7 @@ test('personal org owner can list and revoke grants', async () => {
 		)
 		.run(personalOrgId, people.dan.personId, people.ada.personId, now, now)
 
-	const listReq = new Request('https://kody.test/@ada/-/grants.json')
+	const listReq = new Request('https://kody.test/@ada/-/grants')
 	await signIn('ada', listReq)
 	const listRes = await testOrgGrantsApiHandler(env).execute({
 		request: listReq,
@@ -364,7 +353,7 @@ test('personal org owner can list and revoke grants', async () => {
 		expect.objectContaining({ id: 'grant-personal-1', canRevoke: true }),
 	)
 
-	const revokeReq = new Request('https://kody.test/@ada/-/grants/revoke.json', {
+	const revokeReq = new Request('https://kody.test/@ada/-/grants', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ grantId: 'grant-personal-1' }),
@@ -383,7 +372,7 @@ test('personal org owner can list and revoke grants', async () => {
 
 test('collaborators JSON is 404 for grant-only people', async () => {
 	const env = createEnv()
-	const req = new Request('https://kody.test/@zeta-co/-/collaborators.json')
+	const req = new Request('https://kody.test/@zeta-co/-/collaborators')
 	await signIn('dan', req)
 	expect(
 		(

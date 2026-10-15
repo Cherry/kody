@@ -277,16 +277,11 @@ async function call<T>(
 }
 
 function postCheckout(env: Env, orgSlug: string, body: unknown) {
-	return call(
-		startWebsiteCheckout,
-		env,
-		`/@${orgSlug}/-/billing/checkout.json`,
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body),
-		},
-	)
+	return call(startWebsiteCheckout, env, `/@${orgSlug}/-/billing`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body),
+	})
 }
 
 function subscription(input: { id: string; status: string; priceId: string }) {
@@ -669,7 +664,7 @@ test('existing subscribers switch plans through the portal update flow', async (
 test('billing data is readable by owners and billing admins of the org in the URL', async () => {
 	const env = createEnv()
 	const getBilling = (slug: string) =>
-		call(readWebsiteBilling, env, `/@${slug}/-/billing.json`)
+		call(readWebsiteBilling, env, `/@${slug}/-/billing`)
 
 	signInAs('cara')
 	const billingAdmin = await getBilling('acme')
@@ -779,7 +774,7 @@ test('the Stripe portal opens for the org in the URL and only for managers', asy
 	linkCustomer('org-acme', 'cus_acme')
 	const env = createEnv()
 	const getPortal = () =>
-		call(openWebsiteBillingPortal, env, '/@acme/-/billing/portal')
+		call(openWebsiteBillingPortal, env, '/@acme/-/billing')
 
 	signInAs('cara')
 	const opened = await getPortal()
@@ -807,16 +802,11 @@ test('billing cancellation feedback records platform feedback', async () => {
 	mocks.enqueuePlatformFeedbackDispatch.mockResolvedValue(undefined)
 	const env = createEnv()
 	const post = (body: unknown) =>
-		call(
-			submitWebsiteCancellationFeedback,
-			env,
-			'/account/billing/cancellation-feedback.json',
-			{
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(body),
-			},
-		)
+		call(submitWebsiteCancellationFeedback, env, '/account/billing', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body),
+		})
 
 	signInAs(null)
 	await expect(post({ details: 'Too expensive.' })).rejects.toThrow(

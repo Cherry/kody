@@ -156,9 +156,9 @@ beforeEach(async () => {
 	await seed()
 })
 
-test('teams JSON is 404 for collaborators, 403 for billing, readable by members', async () => {
+test('teams data is 404 for collaborators, 403 for billing, readable by members', async () => {
 	const env = createEnv()
-	const collab = new Request('https://kody.test/@zeta-co/-/teams.json')
+	const collab = new Request('https://kody.test/@zeta-co/-/teams')
 	await signIn('dan', collab)
 	expect(
 		(
@@ -168,7 +168,7 @@ test('teams JSON is 404 for collaborators, 403 for billing, readable by members'
 		).status,
 	).toBe(404)
 
-	const billing = new Request('https://kody.test/@zeta-co/-/teams.json')
+	const billing = new Request('https://kody.test/@zeta-co/-/teams')
 	await signIn('cara', billing)
 	expect(
 		(
@@ -178,7 +178,7 @@ test('teams JSON is 404 for collaborators, 403 for billing, readable by members'
 		).status,
 	).toBe(403)
 
-	const member = new Request('https://kody.test/@zeta-co/-/teams.json')
+	const member = new Request('https://kody.test/@zeta-co/-/teams')
 	await signIn('bob', member)
 	const readable = await testOrgTeamsApiHandler(env).execute({
 		request: member,
@@ -194,14 +194,11 @@ test('teams JSON is 404 for collaborators, 403 for billing, readable by members'
 
 test('owner can create a team and add a member', async () => {
 	const env = createEnv()
-	const createReq = new Request(
-		'https://kody.test/@zeta-co/-/teams/create.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ slug: 'platform', name: 'Platform' }),
-		},
-	)
+	const createReq = new Request('https://kody.test/@zeta-co/-/teams', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ slug: 'platform', name: 'Platform' }),
+	})
 	await signIn('ada', createReq)
 	const created = await testOrgTeamsCreatePostHandler(env).execute({
 		request: createReq,
@@ -220,14 +217,11 @@ test('owner can create a team and add a member', async () => {
 	expect(createdPayload.teams).toHaveLength(1)
 	const teamId = createdPayload.teams[0]!.id
 
-	const addReq = new Request(
-		'https://kody.test/@zeta-co/-/teams/member-add.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ teamId, userId: people.bob.personId }),
-		},
-	)
+	const addReq = new Request('https://kody.test/@zeta-co/-/teams', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ teamId, userId: people.bob.personId }),
+	})
 	await signIn('ada', addReq)
 	const added = await testOrgTeamsMemberAddPostHandler(env).execute({
 		request: addReq,
@@ -279,17 +273,14 @@ test('team member remove rejects a team id from another organization', async () 
 		audit: createTestOrgAuditWriter(),
 	})
 
-	const removeReq = new Request(
-		'https://kody.test/@zeta-co/-/teams/member-remove.json',
-		{
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				teamId: foreign.id,
-				userId: people.bob.personId,
-			}),
-		},
-	)
+	const removeReq = new Request('https://kody.test/@zeta-co/-/teams', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			teamId: foreign.id,
+			userId: people.bob.personId,
+		}),
+	})
 	await signIn('ada', removeReq)
 	const removed = await testOrgTeamsMemberRemovePostHandler(env).execute({
 		request: removeReq,

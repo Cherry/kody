@@ -229,7 +229,7 @@ beforeEach(async () => {
 
 test('usage data is readable by owners and billing admins of the org in the URL', async () => {
 	const env = createEnv()
-	const getUsage = (slug: string) => call(env, `/@${slug}/-/usage.json`)
+	const getUsage = (slug: string) => call(env, `/@${slug}/-/usage`)
 
 	signInAs('cara')
 	const billingAdmin = await getUsage('acme')
