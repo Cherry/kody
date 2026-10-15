@@ -15,7 +15,7 @@ an invite-revoke assertion still expected a refreshed invite list. Commit
 separate database assertion proving the invite is revoked. That correction still
 needs CI. E2E was running at inspection.
 
-The consent form now passes typed input directly to its Start function, without
+The consent form passes typed input directly to its Start function, without
 an unused action URL or a FormData wrapper. Its existing consent token and
 server checks remain. All four Start TypeScript projects and targeted repository
 lint passed for that change.

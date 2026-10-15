@@ -54,13 +54,13 @@ after the submitting component unmounts. Submitted variables retain their actor,
 organization, location, and exact query key. UI callbacks such as navigation
 remain tied to the mounted submitter.
 
-[`acceptedPageMutationOptions`](../../packages/worker/start/accepted-page-mutation.ts)
-publishes accepted responses to the exact submitted cache entry and invalidates
-related resources. Callers pass their actual query key explicitly; mutation
-identity does not come from document-head metadata. A lost response still
-triggers reconciliation because the server may have committed the write.
-Payloads that share a resource name but have different shapes cannot overwrite
-each other.
+Operation-specific Query mutations return operation results rather than rebuilt
+page payloads. Their lifecycle callbacks capture the submitted resource scope
+and reconcile related queries, including when a response is lost because the
+server may have committed the write. Entity patches target the matching cache
+shape. Mutation identity does not come from document-head metadata. Pending
+controls follow Query mutation state; submitter guards apply to notices, draft
+resets, and navigation rather than preventing pending state from settling.
 
 Remaining page-shaped optimistic resources use
 [`mutation barriers`](../../packages/worker/start/page-mutation-cache.ts) to
