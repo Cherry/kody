@@ -644,7 +644,11 @@ test('authorize info, denial, approval, and default scopes follow the OAuth work
 	})
 	const setCookie = mismatchResponse.headers.get('Set-Cookie') ?? ''
 	expect(setCookie).toContain('kody_oauth_client_reset=')
-	expect(setCookie).toContain('Path=/oauth')
+	expect(mismatchResponse.headers.getSetCookie()).toHaveLength(2)
+	expect(mismatchResponse.headers.getSetCookie()[0]).toContain('Path=/;')
+	expect(mismatchResponse.headers.getSetCookie()[0]).toContain('Max-Age=300')
+	expect(mismatchResponse.headers.getSetCookie()[1]).toContain('Path=/oauth')
+	expect(mismatchResponse.headers.getSetCookie()[1]).toContain('Max-Age=0')
 
 	const denyResponse = await handleAuthorizeRequest(
 		formRequest({ decision: 'deny' }),
@@ -1379,6 +1383,36 @@ test("reset client revokes only this user's matching grants and deletes only own
 			`${getCookiePair(cookie)}; ${getCookiePair(resetVerificationCookie)}`,
 		),
 	).toEqual(resetSucceeded(revokedAccount, ['grant-1', 'grant-2']))
+
+	const rpcReset = await decideOAuthAuthorization({
+		request: new Request('https://example.com/_serverFn/reset', {
+			method: 'POST',
+			headers: {
+				Cookie: `${getCookiePair(cookie)}; ${getCookiePair(resetVerificationCookie)}`,
+			},
+		}),
+		env: createEnv(clientMismatch.helpers, sharedClientDb),
+		authorizeUrl: new URL(exampleOAuthUrl('authorize', mismatchParams)),
+		formData: await new Request('https://example.com', {
+			method: 'POST',
+			body: new URLSearchParams({ decision: 'reset-client' }),
+		}).formData(),
+	})
+	expect(rpcReset.status).toBe(200)
+	expect(rpcReset.data.ok).toBe(true)
+	const clearedCookies = rpcReset.headers
+		.getSetCookie()
+		.filter((value) => value.startsWith('kody_oauth_client_reset='))
+	expect(clearedCookies).toHaveLength(2)
+	for (const path of ['/', '/oauth']) {
+		const cleared = clearedCookies.find((value) =>
+			value.includes(`Path=${path};`),
+		)
+		expect(cleared).toContain('Max-Age=0')
+		expect(cleared).toContain('HttpOnly')
+		expect(cleared).toContain('Secure')
+		expect(cleared).toContain('SameSite=Lax')
+	}
 
 	const localhostRedirect = resetClientHelpers(userId, [
 		['grant-1', 'client-123', 'profile'],

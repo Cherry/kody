@@ -27,7 +27,7 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 		const url = new URL(`/oauth/authorize${search}`, request.url)
 		const result = await loadOAuthAuthorizeData(request, bindings, url)
 		const { session, setCookie } = await loadSessionInfo(request, bindings)
-		const cookies = [result.setCookie, setCookie].filter(
+		const cookies = [...result.setCookies, setCookie].filter(
 			(cookie): cookie is string => Boolean(cookie),
 		)
 		if (cookies.length) setResponseHeader('Set-Cookie', cookies)

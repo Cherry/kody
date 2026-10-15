@@ -194,7 +194,9 @@ const dummyPasswordHash =
 	'pbkdf2_sha256$100000$00000000000000000000000000000000$0000000000000000000000000000000000000000000000000000000000000000'
 const oauthClientResetVerificationCookieName = 'kody_oauth_client_reset'
 const oauthClientResetVerificationMaxAgeSeconds = 60 * 5
-const oauthClientResetVerificationCookiePath = '/oauth'
+// The website reset uses Start RPCs outside /oauth. Only this signed, short-lived
+// verification cookie needs to span both transports.
+const oauthClientResetVerificationCookiePath = '/'
 
 let oauthClientResetVerificationCookie: ReturnType<typeof createCookie> | null =
 	null
@@ -269,12 +271,19 @@ async function createOAuthClientResetVerificationCookie(
 	verification: OAuthClientResetVerification,
 ) {
 	const appEnv = getEnv(env)
-	return getOAuthClientResetVerificationCookie(appEnv.COOKIE_SECRET).serialize(
-		JSON.stringify(verification),
-		{
+	const cookie = getOAuthClientResetVerificationCookie(appEnv.COOKIE_SECRET)
+	return [
+		await cookie.serialize(JSON.stringify(verification), {
 			secure: isSecureRequest(request),
-		},
-	)
+		}),
+		// Retire the pre-Start path so it cannot shadow the new cookie on /oauth.
+		await cookie.serialize('', {
+			path: '/oauth',
+			secure: isSecureRequest(request),
+			maxAge: 0,
+			expires: new Date(0),
+		}),
+	]
 }
 
 async function destroyOAuthClientResetVerificationCookie(
@@ -282,13 +291,16 @@ async function destroyOAuthClientResetVerificationCookie(
 	env: Env,
 ) {
 	const appEnv = getEnv(env)
-	return getOAuthClientResetVerificationCookie(appEnv.COOKIE_SECRET).serialize(
-		'',
-		{
-			secure: isSecureRequest(request),
-			maxAge: 0,
-			expires: new Date(0),
-		},
+	const cookie = getOAuthClientResetVerificationCookie(appEnv.COOKIE_SECRET)
+	return Promise.all(
+		['/', '/oauth'].map((path) =>
+			cookie.serialize('', {
+				path,
+				secure: isSecureRequest(request),
+				maxAge: 0,
+				expires: new Date(0),
+			}),
+		),
 	)
 }
 
@@ -497,9 +509,9 @@ async function resolveAuthorizeInfoResetState(
 	if (redirectUriMismatch) {
 		return {
 			allowClientReset: true,
-			setCookie: shouldClearVerificationCookie
+			setCookies: shouldClearVerificationCookie
 				? await destroyOAuthClientResetVerificationCookie(request, env)
-				: null,
+				: [],
 		}
 	}
 
@@ -508,7 +520,7 @@ async function resolveAuthorizeInfoResetState(
 		if (clientId) {
 			return {
 				allowClientReset: true,
-				setCookie: await createOAuthClientResetVerificationCookie(
+				setCookies: await createOAuthClientResetVerificationCookie(
 					request,
 					env,
 					{
@@ -522,9 +534,9 @@ async function resolveAuthorizeInfoResetState(
 
 	return {
 		allowClientReset: false,
-		setCookie: shouldClearVerificationCookie
+		setCookies: shouldClearVerificationCookie
 			? await destroyOAuthClientResetVerificationCookie(request, env)
-			: null,
+			: [],
 	}
 }
 
@@ -579,7 +591,7 @@ async function handleResetClientRequest(
 	)
 	const clearResetVerificationCookie = hasResetVerificationCookie
 		? await destroyOAuthClientResetVerificationCookie(request, env)
-		: null
+		: []
 	const redirectUriMismatch = await requestHasRedirectUriMismatch(
 		helpers,
 		request,
@@ -593,7 +605,7 @@ async function handleResetClientRequest(
 			'Stored client cleanup is only available for stale or mismatched client registrations.',
 			400,
 			'invalid_request',
-			createSetCookieHeaders([clearResetVerificationCookie]),
+			createSetCookieHeaders(clearResetVerificationCookie),
 		)
 	}
 
@@ -602,7 +614,7 @@ async function handleResetClientRequest(
 			'Missing client ID for stored client cleanup.',
 			400,
 			'invalid_request',
-			createSetCookieHeaders([clearResetVerificationCookie]),
+			createSetCookieHeaders(clearResetVerificationCookie),
 		)
 	}
 
@@ -624,7 +636,7 @@ async function handleResetClientRequest(
 			'Sign in before resetting this connection.',
 			401,
 			'unauthorized',
-			createSetCookieHeaders([clearResetVerificationCookie]),
+			createSetCookieHeaders(clearResetVerificationCookie),
 		)
 	}
 
@@ -648,7 +660,7 @@ async function handleResetClientRequest(
 				'Signed-in user not found.',
 				401,
 				'unauthorized',
-				createSetCookieHeaders([clearResetVerificationCookie]),
+				createSetCookieHeaders(clearResetVerificationCookie),
 			)
 		}
 		const userId = personIdFromStored(userRecord.stable_user_id)
@@ -693,7 +705,7 @@ async function handleResetClientRequest(
 			},
 			{
 				headers: createSetCookieHeaders([
-					clearResetVerificationCookie,
+					...clearResetVerificationCookie,
 					setCookie,
 				]),
 			},
@@ -713,7 +725,7 @@ async function handleResetClientRequest(
 			'Unable to reset this connection right now.',
 			500,
 			'server_error',
-			createSetCookieHeaders([clearResetVerificationCookie]),
+			createSetCookieHeaders(clearResetVerificationCookie),
 		)
 	}
 }
@@ -862,7 +874,7 @@ async function resolveAuthorizeSession(request: Request, env: Env) {
 
 export type OAuthAuthorizeDataResult = {
 	data: OAuthAuthorizeLoaderData
-	setCookie: string | null
+	setCookies: Array<string | null>
 }
 
 export async function loadOAuthAuthorizeData(
@@ -881,7 +893,7 @@ export async function loadOAuthAuthorizeData(
 				error: oauthAuthorizeClobberedResubmitMessage,
 				allowClientReset: false,
 			},
-			setCookie: null,
+			setCookies: [],
 		}
 	}
 	const oidcParamsOrError = parseOidcAuthorizeParams(
@@ -895,7 +907,7 @@ export async function loadOAuthAuthorizeData(
 				error: oidcParamsOrError.error,
 				allowClientReset: false,
 			},
-			setCookie: null,
+			setCookies: [],
 		}
 	}
 	const oidcParams = oidcParamsOrError
@@ -907,7 +919,7 @@ export async function loadOAuthAuthorizeData(
 		authorizeUrl,
 	)
 	if ('error' in resolution) {
-		const { allowClientReset, setCookie } =
+		const { allowClientReset, setCookies } =
 			await resolveAuthorizeInfoResetState(
 				request,
 				env,
@@ -921,7 +933,7 @@ export async function loadOAuthAuthorizeData(
 				error: resolution.error ?? 'Unable to parse OAuth request.',
 				allowClientReset,
 			},
-			setCookie,
+			setCookies,
 		}
 	}
 
@@ -942,7 +954,7 @@ export async function loadOAuthAuthorizeData(
 				error: oidcGate.error,
 				allowClientReset: false,
 			},
-			setCookie: null,
+			setCookies: [],
 		}
 	}
 
@@ -950,7 +962,7 @@ export async function loadOAuthAuthorizeData(
 	const clearResetVerificationCookie =
 		requestHasOAuthClientResetVerificationCookie(request)
 			? await destroyOAuthClientResetVerificationCookie(request, env)
-			: null
+			: []
 	const resolvedScopes = resolveScopes(authRequest.scope)
 	if (!Array.isArray(resolvedScopes)) {
 		return {
@@ -959,7 +971,7 @@ export async function loadOAuthAuthorizeData(
 				error: resolvedScopes.error,
 				allowClientReset: false,
 			},
-			setCookie: clearResetVerificationCookie,
+			setCookies: clearResetVerificationCookie,
 		}
 	}
 	const authorizeSession = await resolveAuthorizeSession(request, env)
@@ -1007,7 +1019,7 @@ export async function loadOAuthAuthorizeData(
 						error: error.message,
 						allowClientReset: false,
 					},
-					setCookie: clearResetVerificationCookie ?? sessionSetCookie,
+					setCookies: [...clearResetVerificationCookie, sessionSetCookie],
 				}
 			}
 			throw error
@@ -1037,7 +1049,7 @@ export async function loadOAuthAuthorizeData(
 			orgs,
 			selectedOrgSlug,
 		},
-		setCookie: clearResetVerificationCookie ?? sessionSetCookie,
+		setCookies: [...clearResetVerificationCookie, sessionSetCookie],
 	}
 }
 
@@ -1045,13 +1057,13 @@ export async function handleAuthorizeInfo(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
-	const { data, setCookie } = await loadOAuthAuthorizeData(request, env)
+	const { data, setCookies } = await loadOAuthAuthorizeData(request, env)
 	if (!data.ok) {
 		return jsonResponse(
 			{ ok: false, error: data.error, allowClientReset: data.allowClientReset },
 			{
 				status: 400,
-				headers: createSetCookieHeaders([setCookie]),
+				headers: createSetCookieHeaders(setCookies),
 			},
 		)
 	}
@@ -1067,7 +1079,7 @@ export async function handleAuthorizeInfo(
 			selectedOrgSlug: data.selectedOrgSlug,
 		},
 		{
-			headers: createSetCookieHeaders([setCookie]),
+			headers: createSetCookieHeaders(setCookies),
 		},
 	)
 }

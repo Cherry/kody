@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({
 	}),
 	read: vi.fn(async (_request: Request, _env: unknown, _url: URL) => ({
 		data: { ok: false, error: 'invalid client', allowClientReset: true },
-		setCookie: 'reset=; Max-Age=0',
+		setCookies: ['reset=; Path=/; Max-Age=0', 'reset=; Path=/oauth; Max-Age=0'],
 	})),
 	session: vi.fn(async (_request: Request, _env: unknown) => ({
 		session: null,
@@ -63,7 +63,8 @@ test('OAuth page retains original request identity for session and cookie work w
 	expect(state.read.mock.calls[0]?.[1]).toBe(state.env)
 	expect(state.session.mock.calls[0]?.[1]).toBe(state.env)
 	expect(state.header).toHaveBeenCalledWith('Set-Cookie', [
-		'reset=; Max-Age=0',
+		'reset=; Path=/; Max-Age=0',
+		'reset=; Path=/oauth; Max-Age=0',
 		'session=rotated',
 	])
 	expect(state.request.url).toBe(
