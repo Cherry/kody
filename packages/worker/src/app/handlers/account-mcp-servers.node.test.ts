@@ -117,8 +117,8 @@ const mockModule = await vi.hoisted(async () => {
 		persistMcpServerLastErrorIfChanged: vi.fn<
 			typeof settingsService.persistMcpServerLastErrorIfChanged
 		>(async () => undefined),
-		getCachedMcpClientHubSnapshot: vi.fn<
-			typeof hubClient.getCachedMcpClientHubSnapshot
+		getCachedMcpClientHubReadSnapshot: vi.fn<
+			typeof hubClient.getCachedMcpClientHubReadSnapshot
 		>(async () => ({
 			servers: [
 				{
@@ -261,9 +261,9 @@ vi.mock('#worker/authorization/authorize.ts', async (importOriginal) => ({
 }))
 
 vi.mock('#worker/mcp-client/hub-client.ts', () => ({
-	getCachedMcpClientHubSnapshot: (
-		...args: Parameters<typeof hubClient.getCachedMcpClientHubSnapshot>
-	) => mockModule.getCachedMcpClientHubSnapshot(...args),
+	getCachedMcpClientHubReadSnapshot: (
+		...args: Parameters<typeof hubClient.getCachedMcpClientHubReadSnapshot>
+	) => mockModule.getCachedMcpClientHubReadSnapshot(...args),
 	createMcpClientHubClient: (input: { userId: string }) => {
 		mockModule.hubOwners.push(input.userId)
 		return {

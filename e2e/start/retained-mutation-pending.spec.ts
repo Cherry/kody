@@ -139,11 +139,14 @@ test('avatar removal remains pending across an away-and-back retained navigation
 		username: `avatar-${id}`,
 	})
 	executeE2eD1Command(
-		`UPDATE users SET avatar_key = 'e2e-avatar-${id}' WHERE username = 'avatar-${id}'`,
+		`UPDATE users SET avatar_key = 'user-avatars/' || stable_user_id || '/e2e-avatar-${id}.png' WHERE username = 'avatar-${id}'`,
 	)
 	await login({ ...user, mode: 'login' })
 	await page.goto('/account')
 	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('button', { name: 'Remove avatar', exact: true }),
+	).toBeVisible()
 	let release!: () => void
 	const barrier = new Promise<void>((resolve) => {
 		release = resolve
@@ -171,6 +174,13 @@ test('avatar removal remains pending across an away-and-back retained navigation
 		await expect(page.getByTestId('account-avatar-file')).toBeEnabled()
 		await expect(
 			page.getByText('Avatar removed.', { exact: true }),
+		).toHaveCount(0)
+		// A fresh read confirms the held request performed the real deletion.
+		await page.reload()
+		await waitForClientHydration(page)
+		await expect(page.getByTestId('account-avatar-file')).toBeEnabled()
+		await expect(
+			page.getByRole('button', { name: 'Remove avatar', exact: true }),
 		).toHaveCount(0)
 	} finally {
 		release()

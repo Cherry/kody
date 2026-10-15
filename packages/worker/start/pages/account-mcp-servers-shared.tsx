@@ -119,6 +119,8 @@ export function stateLabel(
 		return "Tool discovery didn't finish"
 	}
 	switch (server.state) {
+		case 'unknown':
+			return 'Status unknown'
 		case 'ready':
 			return 'Connected'
 		case 'authenticating':

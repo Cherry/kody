@@ -2,6 +2,29 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `9fabf327b`
+
+Validate `38702598529` for pushed head `665fa04ff` passed Node (6082 tests in
+1544 files), Workers and MCP. Browser E2E completed with one avatar fixture
+failure: its invalid storage key hid the Remove avatar control. The fixture now
+uses the real key format and checks persistence after removal. Static failed
+only the formatting step; `d22265e57` applies the repository formatter to the
+affected documentation.
+
+Preview `38702598610` succeeded. `/health` returned HTTP 200 at deployed merge
+`e3494fa971842a5cf9792e12f7ab462feb81c132`, containing `665fa04ff` and main
+`fc93d6632`. Later local commits are not included in this deployment.
+
+Local commits add permission-change invalidation for actor-scoped resource
+caches, real package lock/visibility/delete browser coverage, and revoked-member
+navigation/write coverage. These additions have static checks but await CI.
+Billing completion is now separated from cached reads. MCP website reads now
+observe status without restoring connections or performing writes; operational
+calls maintain a sanitized projection in existing DO storage, with cold status
+reported as unknown. No schema change is required. These additions await CI.
+Authenticated and matched visual verification still keep cutover readiness
+unproven.
+
 ### Follow-up at source `665fa04ff`
 
 Validate `38700601053` completed for `6d7ea0401`: Workers, MCP and browser E2E

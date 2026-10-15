@@ -17,7 +17,7 @@ const testCookieSecret = 'test-cookie-secret-0123456789abcdef0123456789'
 const mockModule = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
 	listMcpServerSettings: vi.fn(),
-	loadMcpClientHubSnapshotOrNull: vi.fn(),
+	loadMcpClientHubReadSnapshotOrNull: vi.fn(),
 	listSavedPackagesByUserId: vi.fn(),
 	loadOnboardingAccessWin: vi.fn<
 		typeof OnboardingChecklist.loadOnboardingAccessWin
@@ -59,8 +59,8 @@ vi.mock('#mcp/capabilities/mcp-servers/shared.ts', async (importOriginal) => {
 	const actual = await importOriginal<typeof McpServersShared>()
 	return {
 		...actual,
-		loadMcpClientHubSnapshotOrNull: (...args: Array<unknown>) =>
-			mockModule.loadMcpClientHubSnapshotOrNull(...args),
+		loadMcpClientHubReadSnapshotOrNull: (...args: Array<unknown>) =>
+			mockModule.loadMcpClientHubReadSnapshotOrNull(...args),
 	}
 })
 
@@ -191,7 +191,7 @@ test('onboarding featured MCP servers overlay Notion and Linear connection state
 	mockModule.listMcpServerSettings.mockResolvedValue([
 		mcpServer('srv-linear', 'linear', 'https://mcp.linear.app/mcp'),
 	])
-	mockModule.loadMcpClientHubSnapshotOrNull.mockResolvedValue(
+	mockModule.loadMcpClientHubReadSnapshotOrNull.mockResolvedValue(
 		hubReady('srv-linear', 'list_issues'),
 	)
 
@@ -230,7 +230,7 @@ test('onboarding custom MCP servers exclude featured remotes', async () => {
 		mcpServer('srv-linear', 'linear', 'https://mcp.linear.app/mcp'),
 		mcpServer('srv-acme', 'acme', 'https://mcp.acme.example/mcp'),
 	])
-	mockModule.loadMcpClientHubSnapshotOrNull.mockResolvedValue(
+	mockModule.loadMcpClientHubReadSnapshotOrNull.mockResolvedValue(
 		hubReady('srv-acme', 'ping'),
 	)
 

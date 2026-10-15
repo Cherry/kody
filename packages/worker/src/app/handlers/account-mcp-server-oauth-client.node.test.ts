@@ -69,7 +69,7 @@ vi.mock('#worker/mcp-client/hub-client.ts', async (importOriginal) => ({
 				...clientInput,
 			}),
 	}),
-	getCachedMcpClientHubSnapshot: async () => {
+	getCachedMcpClientHubReadSnapshot: async () => {
 		if (mocks.snapshotFails) throw new Error('hub snapshot unavailable')
 		return {
 			servers: [...mocks.clientIds].map(([serverId, oauthClientId]) => ({
