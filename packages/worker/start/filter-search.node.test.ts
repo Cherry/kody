@@ -4,6 +4,7 @@ import {
 	createRoute,
 	createRouter,
 	defaultParseSearch,
+	stripSearchParams,
 } from '@tanstack/react-router'
 import { expect, test } from 'vitest'
 import {
@@ -30,6 +31,21 @@ for (const validateSearch of validators) {
 			getParentRoute: () => root,
 			path: '/filters',
 			validateSearch,
+			search: {
+				middlewares: [
+					stripSearchParams<{
+						q: string | undefined
+						view?: string
+						includeDeleted?: boolean
+					}>(
+						validateSearch === collectionSearch
+							? { view: 'active' }
+							: validateSearch === memoriesSearch
+								? { includeDeleted: false }
+								: {},
+					),
+				],
+			},
 		})
 		const router = createRouter({
 			routeTree: root.addChildren([page]),
@@ -52,6 +68,11 @@ for (const validateSearch of validators) {
 				to: '/filters',
 				search: (previous: Record<string, unknown>) => ({ ...previous, q }),
 			})
+			const params = new URLSearchParams(router.state.location.searchStr)
+			if (validateSearch === collectionSearch)
+				expect(params.has('view')).toBe(false)
+			if (validateSearch === memoriesSearch)
+				expect(params.has('includeDeleted')).toBe(false)
 			const parsed = router.state.location.search
 			expect(validateSearch(parsed).q).toBe(q)
 			expect(
@@ -60,6 +81,23 @@ for (const validateSearch of validators) {
 			expect(memoriesInput('explicit-org', parsed).query).toBe(q.trim())
 			expect(adminUsersFilters(parsed).query).toBe(q.trim())
 		}
+		if (
+			validateSearch === collectionSearch ||
+			validateSearch === memoriesSearch
+		) {
+			const key =
+				validateSearch === collectionSearch ? 'view' : 'includeDeleted'
+			const value = validateSearch === collectionSearch ? 'history' : true
+			await router.navigate({
+				to: '/filters',
+				search: { q: '123', [key]: value },
+			})
+			expect(
+				new URLSearchParams(router.state.location.searchStr).get(key),
+			).toBe(String(value))
+			expect(validateSearch(router.state.location.search).q).toBe('123')
+		}
+
 		for (const q of ['123', 'true', 'false', 'null']) {
 			await router.navigate({ href: `/filters?q=${q}` })
 			expect(validateSearch(router.state.location.search).q).toBe(q)

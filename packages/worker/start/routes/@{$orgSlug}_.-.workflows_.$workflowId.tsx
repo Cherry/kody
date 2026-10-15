@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { collectionSearch } from '../filter-search.ts'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { AccountWorkflowsPage } from '../pages/account-workflows.tsx'
 import { loadWorkflowsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -19,6 +19,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/workflows_/$workflowId')({
 		orgScope: { section: 'workflows' },
 	},
 	validateSearch: collectionSearch,
+	search: { middlewares: [stripSearchParams({ view: 'active' })] },
 	loaderDeps: ({ search }) => ({
 		selected: search.selected,
 	}),

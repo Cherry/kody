@@ -2,7 +2,7 @@
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { memoriesInput } from '../memories-input.ts'
 import { memoriesSearch } from '../filter-search.ts'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { AccountMemoriesPage } from '../pages/account-memories.tsx'
 import { loadMemoriesPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -17,6 +17,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/memories')({
 		orgScope: { section: 'memories' },
 	},
 	validateSearch: memoriesSearch,
+	search: { middlewares: [stripSearchParams({ includeDeleted: false })] },
 	loaderDeps: ({ search }) => ({
 		selected: search.selected,
 		q: search.q,

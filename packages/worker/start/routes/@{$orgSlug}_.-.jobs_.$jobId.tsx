@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { collectionSearch } from '../filter-search.ts'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { AccountJobsPage } from '../pages/account-jobs.tsx'
 import { loadJobsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -16,6 +16,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/jobs_/$jobId')({
 		orgScope: { section: 'jobs' },
 	},
 	validateSearch: collectionSearch,
+	search: { middlewares: [stripSearchParams({ view: 'active' })] },
 	loaderDeps: ({ search }) => ({
 		selected: search.selected,
 	}),
