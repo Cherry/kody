@@ -59,13 +59,17 @@ test('a memory detail click wins over an earlier pending search navigation', asy
 		await searchStarted
 		// The list is intentionally retained while its search read is blocked.
 		await link.click()
-		await expect(page).toHaveURL(new RegExp(`/memories/${memoryId}(?:\\?|$)`))
+		await expect(page).toHaveURL(
+			(url) => url.pathname === `${listPath}/${memoryId}`,
+		)
 		await expect(
 			page.getByText('Persisted detail summary', { exact: true }),
 		).toBeVisible()
 		release()
 		await searchCompleted
-		await expect(page).toHaveURL(new RegExp(`/memories/${memoryId}(?:\\?|$)`))
+		await expect(page).toHaveURL(
+			(url) => url.pathname === `${listPath}/${memoryId}`,
+		)
 		await expect(
 			page.getByRole('heading', { name: 'Navigation fixture', exact: true }),
 		).toBeVisible()
@@ -80,8 +84,7 @@ test('a memory detail click wins over an earlier pending search navigation', asy
 	await expect(
 		page.getByRole('link', { name: 'Navigation fixture', exact: true }),
 	).toHaveCount(0)
-	// Router serializes a boolean as true; the string "true" becomes quoted JSON
-	// and cannot be read by the URL-based loader input normalizer.
+	// Keep filter state as a native boolean across navigation and a full reload.
 	await page
 		.getByRole('checkbox', { name: 'Include deleted', exact: true })
 		.check()
