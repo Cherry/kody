@@ -171,11 +171,12 @@ test('OAuth callback exchanges and persists a connection with its required hosts
 	// A fresh document must read the persisted connection, rather than merely
 	// retaining the callback component's success state.
 	await page.goto(`/@${user.username}/-/credentials?kind=oauth`)
-	const row = page
+	const credentialLink = page
 		.getByRole('region', { name: 'Credentials', exact: true })
 		.getByRole('link', { name: new RegExp(provider) })
+	const row = page.getByRole('row').filter({ has: credentialLink })
 	await expect(row).toContainText(new URL(mock.origin).hostname)
-	await row.click()
+	await credentialLink.click()
 	await expect(
 		page.getByRole('heading', { name: provider, exact: true }),
 	).toBeVisible()
