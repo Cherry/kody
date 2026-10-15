@@ -182,6 +182,7 @@ export async function loadAccountMemoriesData(input: {
 	const statuses = memoryStatusesForExport(includeDeleted)
 
 	const rows = await listMemoriesByUserId(input.env.APP_DB, userId, {
+		includeDeleted,
 		statuses,
 		limit: 100,
 	})
@@ -210,6 +211,7 @@ export async function loadAccountMemoriesData(input: {
 				env: input.env,
 				userId,
 				memoryId: selectedMemoryId,
+				includeDeleted,
 			})
 		: null
 
@@ -229,11 +231,13 @@ async function resolveSelectedMemory(input: {
 	env: Env
 	userId: OwnerId
 	memoryId: string
+	includeDeleted: boolean
 }): Promise<AccountMemoryDetail | null> {
 	const memory = await getMemory({
 		env: input.env,
 		userId: input.userId,
 		memoryId: input.memoryId,
+		includeDeleted: input.includeDeleted,
 	})
 	return memory ? toDetail(memory) : null
 }
@@ -256,6 +260,7 @@ export async function loadAccountMemoriesExport(input: {
 			userId,
 			afterId,
 			statuses,
+			includeDeleted: input.includeDeleted,
 			limit: accountMemoriesExportPageSize,
 		})
 		for (const row of rows) {

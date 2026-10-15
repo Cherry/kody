@@ -162,6 +162,7 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 		'stable-user-1',
 		expect.objectContaining({
 			statuses: ['active', 'archived'],
+			includeDeleted: false,
 			limit: 100,
 		}),
 	)
@@ -195,12 +196,14 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 		'stable-user-1',
 		expect.objectContaining({
 			statuses: ['active', 'archived', 'deleted'],
+			includeDeleted: true,
 		}),
 	)
 	expect(mockModule.getMemory).toHaveBeenCalledWith(
 		expect.objectContaining({
 			userId: ownerIdFromStored('stable-user-1'),
 			memoryId: memoryRow.id,
+			includeDeleted: true,
 		}),
 	)
 	expect(filtered.data).toMatchObject({
@@ -214,6 +217,14 @@ test('memories API lists, filters, and selects user-scoped memories', async () =
 			dedupeKey: memoryRow.dedupeKey,
 		}),
 	})
+	await request(`?selected=${memoryRow.id}`)
+	expect(mockModule.getMemory).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			userId: ownerIdFromStored('stable-user-1'),
+			memoryId: memoryRow.id,
+			includeDeleted: false,
+		}),
+	)
 })
 
 test('memories API soft/force deletes and rejects invalid delete requests', async () => {
@@ -295,6 +306,7 @@ test('memories export downloads the signed-in user memories as JSON', async () =
 			userId: ownerIdFromStored('stable-user-1'),
 			afterId: null,
 			statuses: ['active', 'archived'],
+			includeDeleted: false,
 			limit: 200,
 		}),
 	)
@@ -336,6 +348,7 @@ test('memories export downloads the signed-in user memories as JSON', async () =
 	expect(mockModule.listMemoriesByUserIdPage).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			statuses: ['active', 'archived', 'deleted'],
+			includeDeleted: true,
 		}),
 	)
 	await expect(withDeleted.json()).resolves.toMatchObject({
@@ -443,6 +456,7 @@ test('memories download explicitly binds a normalized member org, without relyin
 		expect.objectContaining({
 			userId: 'org-team',
 			statuses: ['active', 'archived', 'deleted'],
+			includeDeleted: true,
 		}),
 	)
 })

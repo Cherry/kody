@@ -111,6 +111,7 @@ type MemoryDeleteInput = MemoryOwnerContext & {
 type MemoryGetInput = MemoryOwnerContext & {
 	env: Pick<Env, 'APP_DB'>
 	memoryId: string
+	includeDeleted?: boolean
 }
 
 type MemorySearchInput = MemoryOwnerContext & {
@@ -442,6 +443,7 @@ export async function getMemory(
 		input.env.APP_DB,
 		input.userId,
 		input.memoryId,
+		{ includeDeleted: input.includeDeleted },
 	)
 	return row ? toMemoryRecord(row) : null
 }
