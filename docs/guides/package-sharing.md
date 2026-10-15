@@ -88,6 +88,23 @@ package collaborator calls. Outside collaborators are listed and can be removed;
 their access is changed through `accessGrant`. Org owners always have full
 access and are not listed.
 
+In a personal org there are no members or teams to add, so the tab invites
+people instead:
+
+- **Invite a collaborator** takes an email or username and a preset: **Use** to
+  run it and read the source, **Contribute** to also update it, or **Manage** to
+  also publish, delete, and choose who else has access. It calls `inviteCreate`
+  with `kind: "grant"`.
+- The invite message is shown once, with a copy button. Send it to the person so
+  their agent can call `inviteAccept`. Open **Details** to see the message.
+- **Pending invites** lists invites that have not been accepted. **Revoke**
+  calls `inviteRevoke`.
+- Once the person accepts, they appear under **Who has access** as an outside
+  collaborator. **Remove** calls `packageCollaboratorRemove`.
+
+The tab also links to creating a team org for group sharing through members and
+teams. Team orgs use member and team controls on this tab.
+
 ## Open API
 
 The same calls are on the [Open API](/docs/open-api) (`/openapi.json`):
@@ -129,8 +146,9 @@ granted. Owners hold everything. Membership invites are refused on a personal
 
 Personal orgs can still grant Use/Contribute/Manage on packages via
 `accessGrant` / `inviteCreate` `kind: "grant"` and revoke with `accessRevoke`.
-The web Grants page is aimed at team orgs; manage personal-org grants through
-those capabilities.
+The web Grants page is aimed at team orgs. In a personal org, invite and remove
+collaborators from the package's [Collaborators tab](#on-the-web), or use those
+capabilities.
 
 ## What a collaborator can do
 
