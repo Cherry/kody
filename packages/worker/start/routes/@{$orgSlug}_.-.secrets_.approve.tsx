@@ -18,5 +18,11 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/approve')({
 function SecretsPage() {
 	const { payload } = Route.useLoaderData()
 	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountSecretsPage payload={payload} currentHref={location.href} />
+	return (
+		<AccountSecretsPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{ selectedId: null, isCreating: false }}
+		/>
+	)
 }

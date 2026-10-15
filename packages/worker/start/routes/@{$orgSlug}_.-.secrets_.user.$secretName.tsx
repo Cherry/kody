@@ -31,8 +31,17 @@ export const Route = createFileRoute(
 })
 function SecretsPage() {
 	const { payload } = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountSecretsPage payload={payload} currentHref={location.href} />
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
+	return (
+		<AccountSecretsPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{
+				selectedId: pageQueryInput.selectedSecretId,
+				isCreating: pageQueryInput.create,
+			}}
+		/>
+	)
 }
 
 function usePageData() {

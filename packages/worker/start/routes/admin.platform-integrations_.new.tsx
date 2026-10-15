@@ -35,6 +35,7 @@ function PlatformIntegrationsPage() {
 	) : (
 		<AdminPlatformIntegrationsPage
 			payload={data.payload}
+			selection={{ selectedId: null, isCreating: true }}
 			currentHref={location.href}
 		/>
 	)

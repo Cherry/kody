@@ -54,7 +54,11 @@ function Page() {
 	const { payload } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
 	return (
-		<AccountIntegrationsPage payload={payload} currentHref={location.href} />
+		<AccountIntegrationsPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{ kind: 'list' }}
+		/>
 	)
 }
 

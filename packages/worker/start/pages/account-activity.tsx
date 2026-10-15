@@ -33,7 +33,6 @@ import {
 import {
 	RecordTable,
 	RecordTableSelect,
-	recordBodyCss,
 	recordCellClamp,
 	recordStampCss,
 } from './record-table.tsx'
@@ -104,7 +103,6 @@ export function AccountActivityPage({
 		triage?: AccountActivityTriageFilter
 	}) {
 		const href = getCurrentHref()
-		const selection = activityRoute.getSelection(href)
 		const currentView = readViewFilter(href)
 		const view = input.view ?? currentView
 		const viewChanged = input.view != null && input.view !== currentView
@@ -122,22 +120,15 @@ export function AccountActivityPage({
 					? defaultAccountActivityTriageFilter(view)
 					: readTriageFilter(href)),
 		})
-		if (selection.selectedId) {
-			navigate(
-				activityRoute.buildDetailHref(
-					selection.selectedId,
-					search,
-					currentHref,
-				),
-			)
+		if (selectedId) {
+			navigate(activityRoute.buildDetailHref(selectedId, search, currentHref))
 			return
 		}
 		replaceLocation(activityRoute.buildListHref(search, currentHref))
 	}
 
-	const status = 'ready'
+	const selectedId = pageQueryInput.selectedRunId
 
-	const selection = activityRoute.getSelection(currentHref)
 	const viewFilter = readViewFilter(currentHref)
 	const statusFilter = readStatusFilter(currentHref)
 	const surfaceFilter = readSurfaceFilter(currentHref)
@@ -149,20 +140,14 @@ export function AccountActivityPage({
 		triage: triageFilter,
 	})
 	const detail =
-		selectedRun && selectedRun.id === selection.selectedId ? selectedRun : null
-	const waitingForDetail = false
-	const showRunNotFound =
-		selection.selectedId != null &&
-		!detail &&
-		!waitingForDetail &&
-		status === 'ready'
-	const readySummary = status === 'ready' ? summary : null
+		selectedRun && selectedRun.id === selectedId ? selectedRun : null
+	const showRunNotFound = selectedId != null && !detail
 	const emptyLabel = activityEmptyLabel({
 		view: viewFilter,
 		status: statusFilter,
 		surface: surfaceFilter,
 		triage: triageFilter,
-		summaryTotal: readySummary?.total ?? 0,
+		summaryTotal: summary?.total ?? 0,
 	})
 
 	return (
@@ -205,7 +190,7 @@ export function AccountActivityPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{readySummary ? (
+			{summary ? (
 				<>
 					<div
 						css={{
@@ -215,13 +200,13 @@ export function AccountActivityPage({
 						}}
 					>
 						{[
-							{ label: 'Runs (7 days)', value: String(readySummary.total) },
-							{ label: 'Open errors', value: String(readySummary.errors) },
+							{ label: 'Runs (7 days)', value: String(summary.total) },
+							{ label: 'Open errors', value: String(summary.errors) },
 							{
 								label: 'Ignored / resolved',
-								value: String(readySummary.ignored + readySummary.resolved),
+								value: String(summary.ignored + summary.resolved),
 							},
-							{ label: 'Running now', value: String(readySummary.running) },
+							{ label: 'Running now', value: String(summary.running) },
 						].map((item) => (
 							<div
 								key={item.label}
@@ -247,7 +232,7 @@ export function AccountActivityPage({
 										fontSize: typography.fontSize.xl,
 										fontWeight: typography.fontWeight.semibold,
 										color:
-											item.label === 'Open errors' && readySummary.errors > 0
+											item.label === 'Open errors' && summary.errors > 0
 												? colors.error
 												: colors.text,
 									}}
@@ -283,8 +268,7 @@ export function AccountActivityPage({
 					<RecordTable
 						mode="expand"
 						ariaLabel="Activity runs"
-						selectedId={selection.selectedId}
-						recordLoading={waitingForDetail}
+						selectedId={selectedId}
 						onNavigate={() => {}}
 						emptyLabel={emptyLabel}
 						toolbar={
@@ -446,21 +430,7 @@ export function AccountActivityPage({
 								</button>
 							) : null
 						}
-						record={
-							detail ? (
-								renderActivityRunDetail(detail)
-							) : waitingForDetail ? (
-								<p
-									css={{
-										...recordBodyCss,
-										margin: 0,
-										color: colors.textMuted,
-									}}
-								>
-									Loading run details…
-								</p>
-							) : null
-						}
+						record={detail ? renderActivityRunDetail(detail) : null}
 					/>
 				</>
 			) : null}

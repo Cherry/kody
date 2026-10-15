@@ -55,7 +55,6 @@ import {
 	readAccountSecretsSaveWarning,
 	readFilterState,
 	secretsBasePath,
-	secretsRoute,
 } from './account-secrets-shared.ts'
 import {
 	RecordTable,
@@ -81,9 +80,11 @@ const packageFilterSlotCss: CSSObject = {
 export function AccountSecretsPage({
 	payload,
 	currentHref,
+	selection,
 }: {
 	payload: AccountSecretsLoaderData
 	currentHref: string
+	selection: { selectedId: string | null; isCreating: boolean }
 }) {
 	const packageOptions = payload.packageOptions
 	const packagesById = new Map(
@@ -103,7 +104,7 @@ export function AccountSecretsPage({
 			}
 		: null
 	const [editorState, setEditorState] = useState(
-		secretsRoute.getSelection(currentHref).isCreating
+		selection.isCreating
 			? createEditorStateFromNewSecretQuery(payload.packageOptions, currentHref)
 			: payload.selectedSecret
 				? createEditorStateFromSecret(payload.selectedSecret)
@@ -278,7 +279,6 @@ export function AccountSecretsPage({
 		const isCurrent = capture()
 		try {
 			const currentUrl = new URL(getCurrentHref(), 'http://localhost')
-			const selection = secretsRoute.getSelection(currentUrl.toString())
 			const requestUrl = new URL(currentUrl)
 			requestUrl.search = currentUrl.search
 			if (selection.selectedId) {
@@ -522,8 +522,6 @@ export function AccountSecretsPage({
 		})
 	}
 
-	const selection = secretsRoute.getSelection(currentHref)
-	const status = 'ready'
 	const isRefreshingForLocationChange = false
 	const [lastPayload, setLastPayload] = useState(payload)
 	const dataKey = getDataRefreshKey(currentHref)
@@ -661,17 +659,11 @@ export function AccountSecretsPage({
 					selectedSecret == null &&
 					isRefreshingForLocationChange,
 				)}
-				countLabel={
-					status === 'ready'
-						? `${filteredSecrets.length} of ${secrets.length} shown`
-						: undefined
-				}
+				countLabel={`${filteredSecrets.length} of ${secrets.length} shown`}
 				emptyLabel={
-					status !== 'ready'
-						? 'Loading secrets…'
-						: secrets.length === 0
-							? 'No secrets yet. Create one to get started.'
-							: 'No secrets match the current filters.'
+					secrets.length === 0
+						? 'No secrets yet. Create one to get started.'
+						: 'No secrets match the current filters.'
 				}
 				toolbar={
 					<>

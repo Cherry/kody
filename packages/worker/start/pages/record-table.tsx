@@ -29,7 +29,7 @@ export {
  * Decision 0010: the record gets the whole content column instead of the
  * 434px right half of a split, and `mode` chooses where it renders rather
  * than which component the screen composes. Rows stay real anchors built
- * from `createListDetailRoute`, so the selected record stays in the URL and
+ * from `createListDetailLinks`, so the selected record stays in the URL and
  * scroll-preserving navigation continues to work. The selected row (or the
  * off-window pane) carries `data-record-focus` so a deep link can scroll to
  * it instead of leaving the reader at the top of the list.

@@ -36,8 +36,17 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/values')({
 })
 function CollectionPage() {
 	const { payload } = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountValuesPage payload={payload} currentHref={location.href} />
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
+	const selectedId = pageQueryInput.selected?.trim() || null
+	return (
+		<AccountValuesPage
+			payload={payload}
+			currentHref={location.href}
+			selection={
+				selectedId ? { kind: 'detail', valueId: selectedId } : { kind: 'list' }
+			}
+		/>
+	)
 }
 
 function usePageData() {

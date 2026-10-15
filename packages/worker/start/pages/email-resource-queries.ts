@@ -11,7 +11,7 @@ import {
 } from '#start/server/email'
 import {
 	emailKeys,
-	emailResourceInput,
+	type EmailResourceInput,
 	type EmailListInput,
 } from './email-resources.ts'
 
@@ -46,8 +46,8 @@ function emailDestinationsQuery(actor: string | null) {
 		meta: { actorKey: actor },
 	})
 }
-function queries(actor: string | null, href: string) {
-	const { list, messageId } = emailResourceInput(href)
+function queries(actor: string | null, input: EmailResourceInput) {
+	const { list, messageId } = input
 	return [
 		emailListQuery(actor, list),
 		emailDetailQuery(actor, list.org, messageId),
@@ -57,9 +57,9 @@ function queries(actor: string | null, href: string) {
 export async function loadEmailResources(
 	client: QueryClient,
 	actor: string | null,
-	href: string,
+	input: EmailResourceInput,
 ) {
-	const [list, detail, destinations] = queries(actor, href)
+	const [list, detail, destinations] = queries(actor, input)
 	// Start every independent read before awaiting, including on the server.
 	await Promise.all([
 		client.ensureQueryData({ ...list, revalidateIfStale: true }),
@@ -67,9 +67,12 @@ export async function loadEmailResources(
 		client.ensureQueryData({ ...destinations, revalidateIfStale: true }),
 	])
 }
-export function useEmailResources(actor: string | null, href: string) {
+export function useEmailResources(
+	actor: string | null,
+	input: EmailResourceInput,
+) {
 	const [list, detail, destinations] = useSuspenseQueries({
-		queries: queries(actor, href),
+		queries: queries(actor, input),
 	})
 	for (const result of [list, detail, destinations])
 		if (isNotFound(result.error)) throw result.error

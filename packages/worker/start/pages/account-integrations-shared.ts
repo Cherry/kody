@@ -1,44 +1,13 @@
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
-import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import { getDangerPillCss } from '#universal/styles/style-primitives.ts'
 
-export const integrationsRoute = createListDetailRoute(
-	'/account/integrations',
-	{
-		parseDetailId(pathname) {
-			const prefix = `${'/account/integrations'}/`
-			if (!pathname.startsWith(prefix)) return null
-			const segment = pathname.slice(prefix.length)
-			if (!segment || segment.includes('/') || segment === 'approve') {
-				return null
-			}
-			return decodePathSegment(segment)
-		},
-	},
-)
-
-const oauthAppsPathPrefix = `${'/account/integrations'}/apps/`
-
-function decodePathSegment(value: string) {
-	try {
-		return decodeURIComponent(value)
-	} catch {
-		return value
-	}
-}
-
-function readSelectedOauthAppSlug(href: string): string | null {
-	const pathname = accountAliasPath(new URL(href, 'http://localhost').pathname)
-	if (!pathname.startsWith(oauthAppsPathPrefix)) return null
-	const segment = pathname.slice(oauthAppsPathPrefix.length)
-	if (!segment || segment.includes('/')) return null
-	return decodePathSegment(segment)
-}
+export const integrationsRoute = createListDetailLinks('/account/integrations')
 
 function buildOauthAppHref(appSlug: string, search = '', currentHref = '') {
 	const path = `/account/integrations/apps/${encodeURIComponent(appSlug)}`
@@ -111,12 +80,18 @@ export type IntegrationUsageDraft = {
 	allowedPackageIds: Array<string>
 }
 
+export type IntegrationsSelection =
+	| { kind: 'list' | 'approval' }
+	| { kind: 'app'; appSlug: string }
+	| { kind: 'connection'; connectionName: string }
+
 export function resolveIntegrationsSelection(input: {
-	href: string
+	selection: IntegrationsSelection
 	apps: ReadonlyArray<AccountOauthAppListItem>
 	integrations: ReadonlyArray<AccountIntegrationListItem>
 }) {
-	const selectedAppSlug = readSelectedOauthAppSlug(input.href)
+	const selectedAppSlug =
+		input.selection.kind === 'app' ? input.selection.appSlug : null
 	if (selectedAppSlug != null) {
 		const app =
 			input.apps.find(
@@ -128,7 +103,10 @@ export function resolveIntegrationsSelection(input: {
 			missingKind: app ? null : ('integration' as const),
 		}
 	}
-	const connectionName = integrationsRoute.getSelection(input.href).selectedId
+	const connectionName =
+		input.selection.kind === 'connection'
+			? input.selection.connectionName
+			: null
 	if (connectionName == null) {
 		return {
 			selectedApp: null,

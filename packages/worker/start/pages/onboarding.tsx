@@ -109,8 +109,6 @@ export function OnboardingRoute({
 	const featuredPlatformIntegrations =
 		payload.featuredPlatformIntegrations ?? []
 	const secondAgentGiftActive = payload.secondAgentStandardGift?.active === true
-	const status = 'ready',
-		message = null
 	const location = parseOnboardingPathname(
 		new URL(currentHref, 'http://localhost').pathname,
 	)
@@ -279,13 +277,7 @@ export function OnboardingRoute({
 				</h1>
 			</header>
 
-			{message ? (
-				<p css={errorMessageCss} role="alert">
-					{message}
-				</p>
-			) : null}
-
-			{status === 'ready' ? (
+			{
 				<>
 					<WizardStepsNav
 						activeStep={activeStep}
@@ -356,7 +348,7 @@ export function OnboardingRoute({
 						/>
 					) : null}
 				</>
-			) : null}
+			}
 
 			<p
 				data-rise
@@ -415,11 +407,6 @@ const onboardHeadCss: CSSObject = {
 		fontStyle: 'normal',
 		color: colors.primaryText,
 	},
-}
-
-const errorMessageCss: CSSObject = {
-	margin: 'clamp(2.2rem, 5vw, 3.2rem) 0 0',
-	color: colors.error,
 }
 
 /* Nested surfaces step down to the page ground so they read as wells. */

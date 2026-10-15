@@ -57,9 +57,11 @@ type MessageTone = 'info' | 'error'
 export function AccountJobsPage({
 	payload: savedPayload,
 	currentHref,
+	selectedId,
 }: {
 	payload: AccountJobsLoaderData
 	currentHref: string
+	selectedId: string | null
 }) {
 	const { actorKey, orgSlug } = useMatchedPageScope()
 	const mutationKey = ['jobs', actorKey, orgSlug] as const
@@ -190,8 +192,6 @@ export function AccountJobsPage({
 		}
 	}
 
-	const status = 'ready'
-	const selection = jobsRoute.getSelection(currentHref)
 	const search = readJobsSearchFilter(currentHref)
 	const view = readJobsViewFilter(currentHref)
 	const filteredJobs = filterAccountJobs(jobs, {
@@ -205,13 +205,8 @@ export function AccountJobsPage({
 		search,
 	})
 	const detail =
-		selectedJob && selectedJob.id === selection.selectedId ? selectedJob : null
-	const waitingForDetail = false
-	const showJobNotFound =
-		selection.selectedId != null &&
-		!detail &&
-		!waitingForDetail &&
-		status === 'ready'
+		selectedJob && selectedJob.id === selectedId ? selectedJob : null
+	const showJobNotFound = selectedId != null && !detail
 
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
@@ -229,135 +224,122 @@ export function AccountJobsPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
-				<RecordTable
-					mode="expand"
-					ariaLabel="Scheduled jobs"
-					selectedId={selection.selectedId}
-					recordLoading={waitingForDetail}
-					onNavigate={() => {
-						showMessage(null)
-					}}
-					countLabel={`${filteredJobs.length} of ${jobs.length} shown`}
-					emptyLabel={listEmptyMessage ?? 'No jobs match the current filters.'}
-					toolbar={
-						<>
-							<RecordTableSearch
-								label="Search jobs"
-								placeholder="Search jobs"
-								value={
-									new URL(currentHref, 'http://localhost').searchParams.get(
-										'q',
-									) ?? ''
+			<RecordTable
+				mode="expand"
+				ariaLabel="Scheduled jobs"
+				selectedId={selectedId}
+				onNavigate={() => {
+					showMessage(null)
+				}}
+				countLabel={`${filteredJobs.length} of ${jobs.length} shown`}
+				emptyLabel={listEmptyMessage ?? 'No jobs match the current filters.'}
+				toolbar={
+					<>
+						<RecordTableSearch
+							label="Search jobs"
+							placeholder="Search jobs"
+							value={
+								new URL(currentHref, 'http://localhost').searchParams.get(
+									'q',
+								) ?? ''
+							}
+							onInput={(value) => {
+								return updateFilters({ search: value })
+							}}
+						/>
+						<RecordTableSelect
+							label="Jobs view filter"
+							value={view}
+							onChange={(value) => {
+								if (
+									value !== 'active' &&
+									value !== 'history' &&
+									value !== 'all'
+								) {
+									return
 								}
-								onInput={(value) => {
-									return updateFilters({ search: value })
-								}}
-							/>
-							<RecordTableSelect
-								label="Jobs view filter"
-								value={view}
-								onChange={(value) => {
-									if (
-										value !== 'active' &&
-										value !== 'history' &&
-										value !== 'all'
-									) {
-										return
-									}
-									updateFilters({ view: value })
-								}}
-							>
-								{viewFilterOptions.map((option) => (
-									<option key={option.value} value={option.value}>
-										{option.label}
-									</option>
-								))}
-							</RecordTableSelect>
-						</>
-					}
-					columns={[
-						{ key: 'name', label: 'Job', primary: true },
-						{ key: 'status', label: 'Status' },
-						{ key: 'schedule', label: 'Schedule', drop: 1 },
-						{ key: 'package', label: 'Package', drop: 2 },
-						{ key: 'flags', label: 'Flags', drop: 3 },
-						{ key: 'runs', label: 'Runs', align: 'end' },
-					]}
-					rows={filteredJobs.map((item) => ({
-						id: item.id,
-						// A save, toggle, or delete is in flight; the expanded
-						// editor owns the selection until it settles.
-						href: isMutating
-							? undefined
-							: jobsRoute.buildDetailHref(
-									item.id,
-									getCurrentSearch(),
-									currentHref,
-								),
-						cells: {
-							name: <span css={clampedCellCss}>{item.name}</span>,
-							status: (
-								<span css={{ color: statusColor(item) }}>
-									{statusLabel(item)}
-								</span>
+								updateFilters({ view: value })
+							}}
+						>
+							{viewFilterOptions.map((option) => (
+								<option key={option.value} value={option.value}>
+									{option.label}
+								</option>
+							))}
+						</RecordTableSelect>
+					</>
+				}
+				columns={[
+					{ key: 'name', label: 'Job', primary: true },
+					{ key: 'status', label: 'Status' },
+					{ key: 'schedule', label: 'Schedule', drop: 1 },
+					{ key: 'package', label: 'Package', drop: 2 },
+					{ key: 'flags', label: 'Flags', drop: 3 },
+					{ key: 'runs', label: 'Runs', align: 'end' },
+				]}
+				rows={filteredJobs.map((item) => ({
+					id: item.id,
+					// A save, toggle, or delete is in flight; the expanded
+					// editor owns the selection until it settles.
+					href: isMutating
+						? undefined
+						: jobsRoute.buildDetailHref(
+								item.id,
+								getCurrentSearch(),
+								currentHref,
 							),
-							schedule: (
-								<span css={clampedCellCss}>{item.scheduleSummary}</span>
-							),
-							package: <span css={clampedCellCss}>{packageLabel(item)}</span>,
-							flags: (
-								<RecordChips
-									items={item.expired ? ['Expired'] : []}
-									empty="—"
-								/>
-							),
-							runs: String(item.runCount),
-						},
-					}))}
-					record={
-						detail
-							? renderAccountJobDetail({
-									username,
-									currentHref,
-									detail,
-									isMutating,
-									runJobAction: (input) =>
-										postAction({
-											...input,
-											write: () =>
-												runMutation.mutateAsync({ id: input.id, orgSlug }),
-										}),
-									setKillSwitchAction: (input) =>
-										postAction({
-											...input,
-											write: () =>
-												killMutation.mutateAsync({
-													id: input.id,
-													killSwitchEnabled: input.killSwitchEnabled,
-													orgSlug,
-												}),
-										}),
-									navigateToList: () => {
-										navigate(
-											jobsRoute.buildListHref(getCurrentSearch(), currentHref),
-										)
-									},
-								})
-							: waitingForDetail
-								? renderJobDetailPlaceholder(
-										'Loading job',
-										'Loading job details…',
+					cells: {
+						name: <span css={clampedCellCss}>{item.name}</span>,
+						status: (
+							<span css={{ color: statusColor(item) }}>
+								{statusLabel(item)}
+							</span>
+						),
+						schedule: <span css={clampedCellCss}>{item.scheduleSummary}</span>,
+						package: <span css={clampedCellCss}>{packageLabel(item)}</span>,
+						flags: (
+							<RecordChips items={item.expired ? ['Expired'] : []} empty="—" />
+						),
+						runs: String(item.runCount),
+					},
+				}))}
+				record={
+					detail
+						? renderAccountJobDetail({
+								username,
+								currentHref,
+								detail,
+								isMutating,
+								runJobAction: (input) =>
+									postAction({
+										...input,
+										write: () =>
+											runMutation.mutateAsync({ id: input.id, orgSlug }),
+									}),
+								setKillSwitchAction: (input) =>
+									postAction({
+										...input,
+										write: () =>
+											killMutation.mutateAsync({
+												id: input.id,
+												killSwitchEnabled: input.killSwitchEnabled,
+												orgSlug,
+											}),
+									}),
+								navigateToList: () => {
+									navigate(
+										jobsRoute.buildListHref(getCurrentSearch(), currentHref),
 									)
-								: showJobNotFound
-									? renderJobDetailPlaceholder(
-											'Job not found',
-											'This job does not exist for this account or is unavailable.',
-										)
-									: null
-					}
-				/>
-			) : null}
+								},
+							})
+						: showJobNotFound
+							? renderJobDetailPlaceholder(
+									'Job not found',
+									'This job does not exist for this account or is unavailable.',
+								)
+							: null
+				}
+			/>
 		</AccountManagementShell>
 	)
 }

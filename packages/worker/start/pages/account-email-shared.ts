@@ -1,5 +1,5 @@
 import { type CSSObject } from '@emotion/react'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import {
 	colors,
 	radius,
@@ -11,7 +11,7 @@ export type ClassifyState = 'idle' | 'saving'
 export type DeleteState = 'idle' | 'deleting'
 export type ClassificationFilter = 'all' | 'quarantined'
 
-export const emailRoute = createListDetailRoute('/account/email')
+export const emailRoute = createListDetailLinks('/account/email')
 
 export function senderClassificationLabel(
 	classification: AccountEmailMessageListItem['sender_classification'],

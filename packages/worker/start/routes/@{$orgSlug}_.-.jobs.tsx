@@ -35,8 +35,14 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/jobs')({
 })
 function Page() {
 	const { payload } = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountJobsPage payload={payload} currentHref={location.href} />
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
+	return (
+		<AccountJobsPage
+			selectedId={pageQueryInput.selected?.trim() || null}
+			payload={payload}
+			currentHref={location.href}
+		/>
+	)
 }
 
 function usePageData() {

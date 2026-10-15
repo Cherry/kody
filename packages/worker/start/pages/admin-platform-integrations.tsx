@@ -1,12 +1,11 @@
 /** @jsxImportSource @emotion/react */
-import type { PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { type PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
 	buildHrefWithUpdatedSearch,
 	filterApps,
-	getCurrentSearch,
 	parseExtraAuthorizeParams,
 	platformIntegrationsRoute,
-	readSearchFilter,
 	splitListInput,
 	type ActionState,
 } from '#client/routes/admin-platform-integrations-shared.ts'
@@ -51,8 +50,10 @@ const clampedCellCss = css(recordCellClamp(28))
 export function AdminPlatformIntegrationsPage(props: {
 	payload: AdminPlatformIntegrationsLoaderData
 	currentHref: string
+	selection: { selectedId: string | null; isCreating: boolean }
 }) {
 	const { apps } = props.payload
+	const { pageLocation } = useMatchedPageScope()
 	const captureSubmitter = useSubmitterScope()
 	const invalidate = usePageInvalidation(mutationResources)
 	const saveMutation = useMutation({
@@ -171,7 +172,7 @@ export function AdminPlatformIntegrationsPage(props: {
 		if (!(event.currentTarget instanceof HTMLFormElement)) return
 		const form = event.currentTarget
 		const formData = new FormData(form)
-		const selection = platformIntegrationsRoute.getSelection(props.currentHref)
+		const selection = props.selection
 		const isEditing = !selection.isCreating && selection.selectedId != null
 		// When editing, the URL selection is the row identity; an edited slug
 		// input becomes a rename-in-place (newSlug) rather than a new row.
@@ -258,7 +259,7 @@ export function AdminPlatformIntegrationsPage(props: {
 		).then((ok) => {
 			if (!ok) return
 			resetFormState()
-			const search = getCurrentSearch(props.currentHref)
+			const search = pageLocation.searchStr
 			if (isEditing && !newSlug) {
 				setFormRevision((current) => current + 1)
 				return
@@ -321,9 +322,8 @@ export function AdminPlatformIntegrationsPage(props: {
 			app.slug,
 		).then((ok) => {
 			if (!ok) return
-			const href = props.currentHref
-			const selection = platformIntegrationsRoute.getSelection(href)
-			const search = getCurrentSearch(href)
+			const selection = props.selection
+			const search = pageLocation.searchStr
 			resetFormState()
 			if (selection.selectedId === app.slug || selection.isCreating) {
 				replaceLocation(platformIntegrationsRoute.buildListHref(search))
@@ -331,21 +331,22 @@ export function AdminPlatformIntegrationsPage(props: {
 		})
 	}
 	function cancelEditor() {
-		const search = getCurrentSearch(props.currentHref)
+		const search = pageLocation.searchStr
 		resetSelectionState()
 		replaceLocation(platformIntegrationsRoute.buildListHref(search))
 	}
 	function startCreateIntegration() {
 		if (actionState !== 'idle') return
-		const search = getCurrentSearch(props.currentHref)
+		const search = pageLocation.searchStr
 		resetSelectionState()
 		replaceLocation(platformIntegrationsRoute.buildNewHref(search))
 	}
 	const currentHref = props.currentHref
 	const pending = false
 	const status: string = 'ready'
-	const selection = platformIntegrationsRoute.getSelection(currentHref)
-	const search = readSearchFilter(currentHref)
+	const selection = props.selection
+	const search =
+		new URLSearchParams(pageLocation.searchStr).get('q')?.trim() ?? ''
 	const filteredApps = filterApps(apps, search)
 	const editingApp = selection.isCreating
 		? null
@@ -386,7 +387,7 @@ export function AdminPlatformIntegrationsPage(props: {
 									href: isMutating
 										? undefined
 										: platformIntegrationsRoute.buildNewHref(
-												getCurrentSearch(currentHref),
+												pageLocation.searchStr,
 											),
 									label: 'New integration',
 								}
@@ -407,9 +408,7 @@ export function AdminPlatformIntegrationsPage(props: {
 								label="Search integrations"
 								placeholder="Search slug, provider, or label"
 								value={
-									new URL(currentHref, 'http://localhost').searchParams.get(
-										'q',
-									) ?? ''
+									new URLSearchParams(pageLocation.searchStr).get('q') ?? ''
 								}
 								onInput={(value) => {
 									return replaceLocation(
@@ -447,7 +446,7 @@ export function AdminPlatformIntegrationsPage(props: {
 							? undefined
 							: platformIntegrationsRoute.buildDetailHref(
 									app.slug,
-									new URL(currentHref, 'http://localhost').search,
+									pageLocation.searchStr,
 								),
 						cells: {
 							slug: (

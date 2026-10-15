@@ -3,7 +3,7 @@ import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AdminUsersPage } from '../pages/admin-users.tsx'
 import { loadAdminUsers } from '#start/server/admin-users'
-import { adminUsersFilters } from '../admin-users-input.ts'
+import { adminUsersFilters, adminUsersSelection } from '../admin-users-input.ts'
 import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadAdminUsers', loadAdminUsers, {
 	freshAuthorization: true,
@@ -14,9 +14,7 @@ export const Route = createFileRoute('/admin/users')({
 	context: ({ location }) => ({
 		pageQueryInput: {
 			...adminUsersFilters(location.searchStr),
-			selectedStableUserId: new URLSearchParams(location.searchStr).get(
-				'selected',
-			),
+			selectedStableUserId: adminUsersSelection(location.searchStr),
 			detail: false,
 			returnTo: location.pathname + location.searchStr,
 		},
@@ -32,11 +30,15 @@ export const Route = createFileRoute('/admin/users')({
 })
 function UsersPage() {
 	const data = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
-		<AdminUsersPage payload={data.payload} currentHref={location.href} />
+		<AdminUsersPage
+			payload={data.payload}
+			currentHref={location.href}
+			selectedStableUserId={pageQueryInput.selectedStableUserId}
+		/>
 	)
 }
 

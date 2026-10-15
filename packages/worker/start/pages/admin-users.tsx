@@ -1,4 +1,6 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { isAdminUserVerificationFilter } from '#universal/email-verification-delivery.ts'
 import {
 	useInfiniteQuery,
 	useMutation,
@@ -19,9 +21,6 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import {
 	type AdminUserFilterState,
 	buildUserDetailHrefFrom,
-	getSelection,
-	parseSelectedStableUserId,
-	readFilterState,
 } from '#client/routes/admin-users-shared.ts'
 import {
 	readAdminUsersPage,
@@ -64,11 +63,11 @@ import {
 	RecordTableSelect,
 } from './record-table.tsx'
 const clampedCellCss = recordCellClamp(28)
-type AccountStatus = 'loading' | 'ready' | 'error'
 type UsageStatus = 'loading' | 'ready' | 'error'
 export function AdminUsersPage(props: {
 	payload: AdminUsersLoaderData
 	currentHref: string
+	selectedStableUserId: string | null
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const invalidateOwnPermissions = usePageInvalidation('permissions', {
@@ -76,6 +75,7 @@ export function AdminUsersPage(props: {
 	})
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const router = useRouter()
+	const { pageLocation } = useMatchedPageScope()
 	const client = useQueryClient()
 	const activeScope = useRef<object | null>(null)
 	useEffect(() => {
@@ -86,14 +86,11 @@ export function AdminUsersPage(props: {
 		}
 	}, [actorKey, props.currentHref])
 	const sentinelRef = useRef<HTMLDivElement | null>(null)
-	const status = 'ready' as AccountStatus
 	const availableRoles = props.payload.availableRoles
 	const availablePlans = props.payload.availablePlans
 	const selectedUserFallback = props.payload.selectedUser
 	const [loadAdditionalPages, setLoadAdditionalPages] = useState(false)
-	const listFilters = adminUsersFilters(
-		new URL(props.currentHref, 'http://localhost').search,
-	)
+	const listFilters = adminUsersFilters(pageLocation.searchStr)
 	const additional = useInfiniteQuery({
 		queryKey: ['admin-users-pages', actorKey, listFilters],
 		initialPageParam: props.payload.page + 1,
@@ -192,11 +189,8 @@ export function AdminUsersPage(props: {
 	function getCurrentHref() {
 		return props.currentHref
 	}
-	function getSelectedStableUserIdFromHref(href: string) {
-		return parseSelectedStableUserId(getSelection(href).selectedId)
-	}
-	function resolveSelectedUser(href: string) {
-		const selectedStableUserId = getSelectedStableUserIdFromHref(href)
+	function resolveSelectedUser() {
+		const selectedStableUserId = props.selectedStableUserId
 		if (selectedStableUserId == null) return null
 		return (
 			usersSnapshot.items.find(
@@ -209,15 +203,16 @@ export function AdminUsersPage(props: {
 	}
 
 	function updateFilters(next: Partial<AdminUserFilterState>) {
-		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const matchedUrl = pageLocation
+		const pathname: string = matchedUrl.pathname
 		const samePage = router.latestLocation.pathname === matchedUrl.pathname
 		return router.navigate({
-			to: matchedUrl.pathname,
+			to: pathname,
 			replace: true,
 			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				for (const [filter, key] of [
 					['search', 'q'],
 					['role', 'role'],
@@ -250,9 +245,8 @@ export function AdminUsersPage(props: {
 		return true
 	}
 	async function submitRoleAction(action: 'assign_role' | 'remove_role') {
-		const href = getCurrentHref()
 		const submittedScope = activeScope.current
-		const selectedUser = resolveSelectedUser(href)
+		const selectedUser = resolveSelectedUser()
 		if (!selectedUser || actionState !== 'idle') return
 		setActionState(action === 'assign_role' ? 'assigning' : 'removing')
 		setMessage(null)
@@ -282,9 +276,8 @@ export function AdminUsersPage(props: {
 		}
 	}
 	async function submitPlanAction() {
-		const href = getCurrentHref()
 		const submittedScope = activeScope.current
-		const selectedUser = resolveSelectedUser(href)
+		const selectedUser = resolveSelectedUser()
 		if (!selectedUser || actionState !== 'idle') return
 		const plan =
 			selectedUser.stableUserId === planDraftStableUserId
@@ -314,9 +307,8 @@ export function AdminUsersPage(props: {
 	async function submitVerificationAction(
 		action: 'mark_email_verified' | 'mint_verify_url',
 	) {
-		const href = getCurrentHref()
 		const submittedScope = activeScope.current
-		const selectedUser = resolveSelectedUser(href)
+		const selectedUser = resolveSelectedUser()
 		if (!selectedUser || actionState !== 'idle') return
 		setActionState('verifying')
 		setMessage(null)
@@ -359,9 +351,8 @@ export function AdminUsersPage(props: {
 	async function submitModerationAction(
 		action: 'suspend_user' | 'unsuspend_user' | 'resume_email_outbound',
 	) {
-		const href = getCurrentHref()
 		const submittedScope = activeScope.current
-		const selectedUser = resolveSelectedUser(href)
+		const selectedUser = resolveSelectedUser()
 		if (!selectedUser || actionState !== 'idle') return
 		setActionState('moderating')
 		setMessage(null)
@@ -453,12 +444,18 @@ export function AdminUsersPage(props: {
 	const pending = false
 
 	const { items: users, hasMore, totalCount, isLoadingMore } = usersSnapshot
-	const filters = readFilterState(currentHref)
+	const filters: AdminUserFilterState = {
+		search: listFilters.query,
+		role: listFilters.role,
+		verification: isAdminUserVerificationFilter(listFilters.verification)
+			? listFilters.verification
+			: '',
+	}
 	const hasActiveFilters = Boolean(
 		filters.search || filters.role || filters.verification,
 	)
-	const selectedStableUserId = getSelectedStableUserIdFromHref(currentHref)
-	const selectedUser = resolveSelectedUser(currentHref)
+	const selectedStableUserId = props.selectedStableUserId
+	const selectedUser = resolveSelectedUser()
 	const isMutating = actionState !== 'idle'
 	const selectedUsageId = selectedUser?.stableUserId ?? null
 	const usageQuery = useQuery({
@@ -497,11 +494,8 @@ export function AdminUsersPage(props: {
 				description="Review account metadata and manage role assignments and entitlement plans. User content is never shown here."
 				currentHref={currentHref}
 			/>
-			{status === 'loading' ? (
-				<p css={{ color: colors.textMuted, margin: 0 }}>Loading users…</p>
-			) : null}
 			{message ? (
-				<AccountManagementMessage tone={status === 'error' ? 'error' : 'info'}>
+				<AccountManagementMessage tone="info">
 					{message}
 				</AccountManagementMessage>
 			) : null}
@@ -530,22 +524,16 @@ export function AdminUsersPage(props: {
 				// field the reader is typing into.
 				countLabel={`${users.length} of ${totalCount} ${totalCount === 1 ? 'account' : 'accounts'}`}
 				emptyLabel={
-					status === 'ready'
-						? hasActiveFilters
-							? 'No users match the current filters.'
-							: 'No users found.'
-						: 'Loading users…'
+					hasActiveFilters
+						? 'No users match the current filters.'
+						: 'No users found.'
 				}
 				toolbar={
 					<>
 						<RecordTableSearch
 							label="Search users"
 							placeholder="Search by username or email"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={new URLSearchParams(pageLocation.searchStr).get('q') ?? ''}
 							onInput={(value) => {
 								return updateFilters({ search: value })
 							}}

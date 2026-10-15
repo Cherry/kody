@@ -33,11 +33,15 @@ export const Route = createFileRoute('/admin/users_/$stableUserId')({
 })
 function UsersPage() {
 	const data = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
-		<AdminUsersPage payload={data.payload} currentHref={location.href} />
+		<AdminUsersPage
+			payload={data.payload}
+			currentHref={location.href}
+			selectedStableUserId={pageQueryInput.selectedStableUserId}
+		/>
 	)
 }
 

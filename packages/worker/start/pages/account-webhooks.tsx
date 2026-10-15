@@ -32,7 +32,6 @@ export function AccountWebhooksPage({
 	currentHref: string
 }) {
 	const { username, webhooks } = payload
-	const status = 'ready'
 
 	const mintedCount = webhooks.filter((webhook) => webhook.minted).length
 
@@ -44,7 +43,7 @@ export function AccountWebhooksPage({
 				currentHref={currentHref}
 			/>
 
-			{status === 'ready' ? (
+			{
 				<RecordTable
 					mode="none"
 					ariaLabel="Webhooks"
@@ -83,9 +82,9 @@ export function AccountWebhooksPage({
 						},
 					}))}
 				/>
-			) : null}
+			}
 
-			{status === 'ready' ? (
+			{
 				<p css={{ color: colors.textMuted, margin: `${spacing.md} 0 0` }}>
 					Webhooks are declared in <code>package.json#kody.webhooks</code>; each
 					name binds one export and its URL is managed from the owning package's
@@ -94,7 +93,7 @@ export function AccountWebhooksPage({
 						Inbound webhooks docs
 					</SiteLink>
 				</p>
-			) : null}
+			}
 		</AccountManagementShell>
 	)
 }

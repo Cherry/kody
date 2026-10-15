@@ -46,11 +46,13 @@ async function renderNative(
 			})
 		: loaderData.accountIntegrations
 			? createElement(AccountIntegrationsPage, {
+					selection: { kind: 'approval' },
 					payload: loaderData.accountIntegrations,
 					currentHref: href,
 				})
 			: loaderData.accountSecrets
 				? createElement(AccountSecretsPage, {
+						selection: { selectedId: null, isCreating: false },
 						payload: loaderData.accountSecrets,
 						currentHref: href,
 					})

@@ -1,9 +1,9 @@
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { type AccountJobsViewFilter } from '#client/routes/account-jobs-filter.ts'
 import { type AccountJobListItem } from '#universal/loader-data.ts'
 import { colors } from '#universal/styles/tokens.ts'
 
-export const jobsRoute = createListDetailRoute('/account/jobs')
+export const jobsRoute = createListDetailLinks('/account/jobs')
 
 export const viewFilterOptions: Array<{
 	value: AccountJobsViewFilter

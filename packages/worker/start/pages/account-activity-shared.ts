@@ -1,4 +1,4 @@
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import {
 	type AccountActivityStatusFilter,
 	type AccountActivitySurfaceFilter,
@@ -26,7 +26,7 @@ export const activityErrorReviewPrompt = [
 	'Explain each failure and recommend whether to ignore it, mark it resolved, or fix something.',
 ].join(' ')
 
-export const activityRoute = createListDetailRoute('/account/activity')
+export const activityRoute = createListDetailLinks('/account/activity')
 
 export const viewFilterOptions: Array<{
 	value: AccountActivityViewFilter

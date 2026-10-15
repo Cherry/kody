@@ -87,7 +87,7 @@ const action: EmailAction = {
 }
 
 function seed(client: QueryClient, href: string, actor = 'a') {
-	const { list, messageId } = emailResourceInput(href)
+	const { list, messageId } = fixtureInput(href)
 	const { selectedMessage, ...data } = payload({
 		query: list.query,
 		classification: list.classification,
@@ -106,10 +106,10 @@ function seed(client: QueryClient, href: string, actor = 'a') {
 	}
 }
 it('selection reuses the list key, normalizes filters, and isolates actor and organization', () => {
-	const a = emailResourceInput(
+	const a = fixtureInput(
 		'/@acme/-/email/one?q=%20hello%20&page=01&pageSize=999',
 	)
-	const b = emailResourceInput('/@acme/-/email/two?page=1&pageSize=100&q=hello')
+	const b = fixtureInput('/@acme/-/email/two?page=1&pageSize=100&q=hello')
 	expect(emailKeys.list('a', a.list)).toEqual(emailKeys.list('a', b.list))
 	expect(a.messageId).toBe('one')
 	expect(b.messageId).toBe('two')
@@ -316,14 +316,14 @@ it('a failed concurrent classification never rolls back another accepted message
 it('keeps search editing whitespace in the URL while normalizing only resource identity', () => {
 	const editing = emailSearch({ q: '  hello ' })
 	expect(editing.q).toBe('  hello ')
-	const raw = emailResourceInput('/@acme/-/email?q=%20%20hello%20')
-	const normalized = emailResourceInput('/@acme/-/email?q=hello')
+	const raw = fixtureInput('/@acme/-/email?q=%20%20hello%20')
+	const normalized = fixtureInput('/@acme/-/email?q=hello')
 	expect(raw.list.query).toBe('hello')
 	expect(emailKeys.list('actor', raw.list)).toEqual(
 		emailKeys.list('actor', normalized.list),
 	)
 	expect(emailSearch({ q: ' ' }).q).toBe(' ')
-	expect(emailResourceInput('/@acme/-/email?q=%20').list.query).toBe('')
+	expect(fixtureInput('/@acme/-/email?q=%20').list.query).toBe('')
 })
 
 it.each(
@@ -397,3 +397,33 @@ it.each(
 		client.clear()
 	},
 )
+
+// Fixtures model Router's already decoded params and validated search input.
+function fixtureInput(href: string) {
+	const url = new URL(href, 'https://kody.test')
+	const parts = url.pathname.split('/')
+	const isOrg = parts[1]?.startsWith('@')
+	return emailResourceInput(
+		{
+			orgSlug: isOrg ? decodeURIComponent(parts[1]!.slice(1)) : null,
+			messageId: parts[isOrg ? 4 : 3]
+				? decodeURIComponent(parts[isOrg ? 4 : 3]!)
+				: undefined,
+		},
+		emailSearch(Object.fromEntries(url.searchParams)),
+	)
+}
+
+it('email inputs trust decoded Router params and use selected search only on the list route', () => {
+	const search = emailSearch({ selected: ' fallback ', q: ' hello ' })
+	expect(
+		emailResourceInput({ orgSlug: 'team', messageId: 'literal%2Fpart' }, search)
+			.messageId,
+	).toBe('literal%2Fpart')
+	expect(emailResourceInput({ orgSlug: 'team' }, search).messageId).toBe(
+		'fallback',
+	)
+	expect(
+		emailResourceInput({ orgSlug: 'team' }, emailSearch({})).messageId,
+	).toBeNull()
+})

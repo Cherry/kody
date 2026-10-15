@@ -1,11 +1,11 @@
 import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 
 import { type CredentialListItem } from '#universal/credential-contracts.ts'
 import { type AccountCredentialsResponse } from '#universal/credentials-list.ts'
 import { orgResourcePath } from '#universal/org-pages.ts'
 
-export const credentialsRoute = createListDetailRoute('/account/credentials')
+export const credentialsRoute = createListDetailLinks('/account/credentials')
 
 /**
  * The page that edits `credential` today. Personal credentials granted to a

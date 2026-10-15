@@ -34,7 +34,13 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/values_/new')({
 function CollectionPage() {
 	const { payload } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountValuesPage payload={payload} currentHref={location.href} />
+	return (
+		<AccountValuesPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{ kind: 'create' }}
+		/>
+	)
 }
 
 function usePageData() {

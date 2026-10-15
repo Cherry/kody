@@ -33,6 +33,7 @@ function Page() {
 	return (
 		<AccountCredentialsRoute
 			payload={payload}
+			selectedId={null}
 			currentHref={pageLocation.href}
 		/>
 	)

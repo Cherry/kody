@@ -4,12 +4,9 @@ import {
 	type AccountSecretListItem,
 	type AccountSecretsLoaderData,
 } from '#universal/loader-data.ts'
-import {
-	buildAccountSecretPath,
-	parseAccountSecretPath,
-} from '@kody-internal/shared/account-secret-route.ts'
+import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { normalizeSecretExpiresAt } from '@kody-internal/shared/secret-expires-at.ts'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { type ApprovalView } from '#client/routes/account-approval-shared.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { getNewSecretQueryKey } from '#client/routes/new-secret-query.ts'
@@ -43,11 +40,7 @@ export type SecretFilterState = {
 }
 
 export const secretsBasePath = '/account/secrets'
-export const secretsRoute = createListDetailRoute(secretsBasePath, {
-	parseDetailId(pathname) {
-		return parseAccountSecretPath(pathname)?.id ?? null
-	},
-})
+export const secretsRoute = createListDetailLinks(secretsBasePath)
 
 /** Non-fatal warnings after a successful secret save (provider link, rename cleanup). */
 export function readAccountSecretsSaveWarning(payload: {

@@ -25,7 +25,13 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/$serverId')({
 function Page() {
 	const { payload } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountMcpServersPage payload={payload} currentHref={location.href} />
+	return (
+		<AccountMcpServersPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{ selectedId: Route.useParams().serverId, isCreating: false }}
+		/>
+	)
 }
 
 function usePageData() {

@@ -1,4 +1,3 @@
-import { accountAliasPath, parseOrgResourcePath } from '#universal/org-pages.ts'
 import { type AccountEmailLoaderData } from '#universal/loader-data.ts'
 
 export type EmailListInput = {
@@ -40,21 +39,23 @@ export function emailSearch(search: Record<string, unknown>): {
 		selected: typeof search.selected === 'string' ? search.selected.trim() : '',
 	}
 }
-export function emailResourceInput(href: string) {
-	const url = new URL(href, 'https://kody.local')
-	const search = emailSearch(Object.fromEntries(url.searchParams))
-	const pathId = accountAliasPath(url.pathname).split('/')[3]
+export function emailResourceInput(
+	params: { orgSlug: string | null; messageId?: string },
+	search: ReturnType<typeof emailSearch>,
+) {
 	return {
 		list: {
-			org: parseOrgResourcePath(url.pathname)?.slug ?? null,
+			org: params.orgSlug,
 			query: search.q.trim(),
 			classification: search.classification,
 			page: search.page,
 			pageSize: search.pageSize,
 		} satisfies EmailListInput,
-		messageId: pathId ? decodeURIComponent(pathId) : search.selected || null,
+		messageId: params.messageId || search.selected || null,
 	}
 }
+export type EmailResourceInput = ReturnType<typeof emailResourceInput>
+
 export const emailKeys = {
 	all: (actor: string | null, org: string | null) =>
 		['email', actor, org] as const,

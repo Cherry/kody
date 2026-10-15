@@ -27,6 +27,10 @@ function Page() {
 	const { payload } = Route.useLoaderData()
 	const { pageLocation: location } = Route.useRouteContext()
 	return (
-		<AccountIntegrationsPage payload={payload} currentHref={location.href} />
+		<AccountIntegrationsPage
+			payload={payload}
+			currentHref={location.href}
+			selection={{ kind: 'approval' }}
+		/>
 	)
 }

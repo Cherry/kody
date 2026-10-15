@@ -39,9 +39,6 @@ import {
 	emailRoute,
 	messageDate,
 	quarantinedBadgeCss,
-	readClassificationFilter,
-	readPage,
-	readSearchQuery,
 	senderBadgeCss,
 	senderClassificationLabel,
 	statusLabel,
@@ -70,10 +67,12 @@ export function AccountEmailPage({
 	payload,
 	destinations,
 	currentHref,
+	selectedId,
 }: {
 	payload: AccountEmailLoaderData
 	destinations: AccountEmailDestinationsLoaderData
 	currentHref: string
+	selectedId: string | null
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
@@ -329,20 +328,14 @@ export function AccountEmailPage({
 		)
 	}
 
-	const status = 'ready'
-	const selectedMessageId = emailRoute.getSelection(currentHref).selectedId
-	const selectedMessage: AccountEmailMessageDetail | null =
-		data?.selectedMessage ?? null
-	const totalPages = data
-		? Math.max(1, Math.ceil(data.total / data.pageSize))
-		: 1
-	const currentPage = data?.page ?? readPage(currentHref)
-	const searchQuery = data?.query ?? readSearchQuery(currentHref)
+	const selectedMessageId = selectedId
+	const selectedMessage: AccountEmailMessageDetail | null = data.selectedMessage
+	const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize))
+	const currentPage = data.page
+	const searchQuery = data.query
 	const classificationFilter =
-		data?.classification === 'quarantined'
-			? 'quarantined'
-			: readClassificationFilter(currentHref)
-	const showUnverified = data != null && !data.emailVerified
+		data.classification === 'quarantined' ? 'quarantined' : 'all'
+	const showUnverified = !data.emailVerified
 
 	return (
 		<AccountManagementShell
@@ -362,7 +355,7 @@ export function AccountEmailPage({
 					{message ?? 'Message not found.'}
 				</AccountManagementMessage>
 			) : null}
-			{data && !showUnverified ? (
+			{!showUnverified ? (
 				<>
 					{data.usage || data.inboxAddress ? (
 						<div
@@ -429,11 +422,7 @@ export function AccountEmailPage({
 						busy={false}
 						ariaLabel="Inbox messages"
 						selectedId={selectedMessageId}
-						countLabel={
-							status === 'ready'
-								? `${data.total} ${data.total === 1 ? 'message' : 'messages'}`
-								: undefined
-						}
+						countLabel={`${data.total} ${data.total === 1 ? 'message' : 'messages'}`}
 						emptyLabel={
 							searchQuery || classificationFilter !== 'all'
 								? 'No messages match the current filters.'
@@ -601,7 +590,7 @@ export function AccountEmailPage({
 					/>
 				</>
 			) : null}
-			{data && showUnverified ? (
+			{showUnverified ? (
 				<>
 					{data.inboxAddress ? (
 						<p css={{ margin: 0 }}>

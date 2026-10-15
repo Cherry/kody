@@ -1,4 +1,4 @@
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { formatIntegerNumber } from '#client/charts/chart-theme.ts'
 import { isUnlimitedLimit } from '#universal/plans.ts'
 
@@ -7,9 +7,7 @@ import {
 	type AdminUserVerificationFilter,
 } from '#universal/email-verification-delivery.ts'
 
-const { getSelection, buildDetailHref } = createListDetailRoute('/admin/users')
-
-export { getSelection }
+const { buildDetailHref } = createListDetailLinks('/admin/users')
 
 export function formatUsageLimit(limit: number) {
 	return isUnlimitedLimit(limit) ? 'Unlimited' : formatIntegerNumber(limit)

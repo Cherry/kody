@@ -29,12 +29,14 @@ export const Route = createFileRoute('/admin/platform-integrations_/$slug')({
 })
 function PlatformIntegrationsPage() {
 	const data = usePageData()
+	const { slug } = Route.useParams()
 	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
 		<AdminPlatformIntegrationsPage
 			payload={data.payload}
+			selection={{ selectedId: slug, isCreating: false }}
 			currentHref={location.href}
 		/>
 	)

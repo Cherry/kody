@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { toast } from '#client/toast.ts'
 import { deleteAccountMemory } from '#start/server/account-mutations'
@@ -49,7 +49,7 @@ import {
 const clampedCellCss = recordCellClamp(30)
 
 const accountMemoriesExportPath = routes.accountMemoriesExport.href()
-const memoriesRoute = createListDetailRoute('/account/memories')
+const memoriesRoute = createListDetailLinks('/account/memories')
 
 type MessageTone = 'info' | 'error'
 type DeleteMode = 'soft' | 'hard' | null
@@ -123,9 +123,11 @@ function formatOptional(value: string | null | undefined) {
 export function AccountMemoriesPage({
 	payload,
 	currentHref,
+	selectedId,
 }: {
 	payload: AccountMemoriesLoaderData
 	currentHref: string
+	selectedId: string | null
 }) {
 	const { actorKey, orgSlug } = useMatchedPageScope()
 	const memories = payload.memories
@@ -239,8 +241,6 @@ export function AccountMemoriesPage({
 		}
 	}
 
-	const pending = false
-	const status = 'ready'
 	const [lastPayload, setLastPayload] = useState(payload)
 	if (lastPayload !== payload) {
 		setLastPayload(payload)
@@ -248,19 +248,11 @@ export function AccountMemoriesPage({
 	}
 
 	const isMutating = actionState !== 'idle'
-	const selection = memoriesRoute.getSelection(currentHref)
 	const search = readSearchFilter(currentHref)
 	const includeDeleted = readIncludeDeleted(currentHref)
 	const filteredMemories = filterMemories(memories, search)
-	const detailMemory =
-		selectedMemory?.id === selection.selectedId ? selectedMemory : null
-	const waitingForDetail =
-		selection.selectedId != null && !detailMemory && pending
-	const showMemoryNotFound =
-		selection.selectedId != null &&
-		!detailMemory &&
-		!waitingForDetail &&
-		status === 'ready'
+	const detailMemory = selectedMemory?.id === selectedId ? selectedMemory : null
+	const showMemoryNotFound = selectedId !== null && !detailMemory
 
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
@@ -280,7 +272,7 @@ export function AccountMemoriesPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' && legacyReadOnly ? (
+			{legacyReadOnly ? (
 				<AccountManagementMessage tone="info">
 					Team-org memory was retired (ADR 0072). Facts that lived here were
 					copied to each reader&apos;s personal org. Shared org knowledge
@@ -288,7 +280,7 @@ export function AccountMemoriesPage({
 					your personal org&apos;s Memories page to browse what agents recall.
 				</AccountManagementMessage>
 			) : null}
-			{status === 'ready' && !legacyReadOnly ? (
+			{!legacyReadOnly ? (
 				<>
 					<p
 						css={{
@@ -303,8 +295,7 @@ export function AccountMemoriesPage({
 					<RecordTable
 						mode="expand"
 						ariaLabel="Saved memories"
-						selectedId={selection.selectedId}
-						recordLoading={waitingForDetail}
+						selectedId={selectedId}
 						onNavigate={() => {
 							setDeleteMode(null)
 							showMessage(null)

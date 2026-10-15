@@ -220,7 +220,6 @@ export function AccountPasskeysPage({
 		}
 	}
 
-	const status = 'ready'
 	const hydrated = useHydrated()
 	const isBusy =
 		!hydrated || actionStatus === 'busy' || rename.isPending || remove.isPending
@@ -243,7 +242,7 @@ export function AccountPasskeysPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
+			{
 				<>
 					<section css={cardCss}>
 						<h2 css={cardTitleCss}>Register a passkey</h2>
@@ -426,7 +425,7 @@ export function AccountPasskeysPage({
 						</section>
 					)}
 				</>
-			) : null}
+			}
 
 			<p css={{ margin: 0 }}>
 				<SiteLink href="/account" css={primaryLinkCss}>

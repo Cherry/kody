@@ -138,8 +138,6 @@ export function AccountMcpOauthClientsPage({
 		}
 	}
 
-	const status = 'ready'
-
 	const isBusy = createMutation.isPending || revokeMutation.isPending
 
 	return (
@@ -160,7 +158,7 @@ export function AccountMcpOauthClientsPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
+			{
 				<>
 					<section css={cardCss}>
 						<h2 css={cardTitleCss}>Create a client</h2>
@@ -417,7 +415,7 @@ export function AccountMcpOauthClientsPage({
 						</section>
 					)}
 				</>
-			) : null}
+			}
 		</AccountManagementShell>
 	)
 }

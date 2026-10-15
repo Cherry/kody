@@ -1,7 +1,7 @@
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { type AdminPlatformIntegrationApp } from '#universal/loader-data.ts'
-export const platformIntegrationsRoute = createListDetailRoute(
+export const platformIntegrationsRoute = createListDetailLinks(
 	'/admin/platform-integrations',
 )
 export type ActionState =

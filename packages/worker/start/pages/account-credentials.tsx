@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { docHref } from '#universal/docs-nav.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
@@ -198,11 +199,14 @@ function isPackageScopeOption(value: string): value is PackageScopeOption {
 export function AccountCredentialsRoute({
 	payload,
 	currentHref,
+	selectedId,
 }: {
 	payload: AccountCredentialsResponse
+	selectedId: string | null
 	currentHref: string
 }) {
 	const router = useRouter()
+	const { pageLocation } = useMatchedPageScope()
 	function readFilters(search: Record<string, unknown>) {
 		const params = new URLSearchParams()
 		for (const [key, value] of Object.entries(search)) {
@@ -216,10 +220,11 @@ export function AccountCredentialsRoute({
 	function updateFilters(
 		next: (current: CredentialListFilters) => CredentialListFilters,
 	) {
-		const matchedUrl = new URL(currentHref, 'http://localhost')
+		const matchedUrl = pageLocation
+		const pathname: string = matchedUrl.pathname
 		const samePage = router.latestLocation.pathname === matchedUrl.pathname
 		return router.navigate({
-			to: matchedUrl.pathname,
+			to: pathname,
 			replace: true,
 			resetScroll: false,
 			search: (previous: Record<string, unknown>) => {
@@ -227,7 +232,7 @@ export function AccountCredentialsRoute({
 				// toolbar cannot inherit another page's pending search or organization.
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: { ...router.options.parseSearch!(matchedUrl.search) }
+					: { ...router.options.parseSearch!(matchedUrl.searchStr) }
 				const params = new URLSearchParams()
 				writeCredentialListQuery(
 					params,
@@ -253,20 +258,15 @@ export function AccountCredentialsRoute({
 	const credentials = payload?.credentials ?? []
 	const packages = payload?.packages ?? []
 	const packagesById = new Map(packages.map((pkg) => [pkg.id, pkg]))
-	const filters = readFilters(
-		router.options.parseSearch!(
-			new URL(currentHref, 'http://localhost').search,
-		),
-	)
+	const filters = readFilters(pageLocation.search)
 	const filtered = filterCredentialList(credentials, filters)
 	const orgSlug = payload?.orgSlug ?? ''
 	const teamOrg = payload?.teamOrg ?? false
-	const selection = credentialsRoute.getSelection(currentHref)
-	const search = new URL(currentHref, 'http://localhost').search
+	const search = pageLocation.searchStr
 	const selectedItem =
-		credentials.find((item) => item.id === selection.selectedId) ?? null
+		credentials.find((item) => item.id === selectedId) ?? null
 	const selectedDetail =
-		payload?.selected && payload.selected.id === selection.selectedId
+		payload?.selected && payload.selected.id === selectedId
 			? payload.selected
 			: null
 	const personalOrgSlug = payload?.personalOrgSlug ?? null
@@ -275,7 +275,7 @@ export function AccountCredentialsRoute({
 		selectedItem && !filtered.includes(selectedItem)
 			? [selectedItem, ...filtered]
 			: filtered
-	const selectedMissing = selection.selectedId !== null && !selectedItem
+	const selectedMissing = selectedId !== null && !selectedItem
 	const lockedPackageId =
 		typeof filters.locked === 'string' ? filters.locked : ''
 	const shownProviders = filterProviderBindings(
@@ -365,11 +365,7 @@ export function AccountCredentialsRoute({
 						<RecordTableSearch
 							label="Search credentials"
 							placeholder="Search credentials"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
+							value={new URLSearchParams(pageLocation.searchStr).get('q') ?? ''}
 							onInput={(q) =>
 								updateFilters((current) => ({
 									...current,
@@ -468,7 +464,7 @@ export function AccountCredentialsRoute({
 				rows={shown.map((credential) => ({
 					id: credential.id,
 					href:
-						credential.id === selection.selectedId
+						credential.id === selectedId
 							? credentialsRoute.buildListHref(search, currentHref)
 							: credentialsRoute.buildDetailHref(
 									credential.id,

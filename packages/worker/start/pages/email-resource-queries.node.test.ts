@@ -1,6 +1,10 @@
+import {
+	emailKeys,
+	emailResourceInput,
+	emailSearch,
+} from './email-resources.ts'
 import { expect, it, vi } from 'vitest'
 import { QueryClient, dehydrate } from '@tanstack/react-query'
-import { emailKeys } from './email-resources.ts'
 import { loadEmailResources } from './email-resource-queries.ts'
 import {
 	loadEmailList,
@@ -46,7 +50,10 @@ it('starts independent reads together and reuses list and destinations when sele
 	const first = loadEmailResources(
 		client,
 		'actor',
-		'/@acme/-/email/one?q=hello',
+		emailResourceInput(
+			{ orgSlug: 'acme', messageId: 'one' },
+			emailSearch({ q: 'hello' }),
+		),
 	)
 	await vi.waitFor(() => {
 		expect(loadEmailList).toHaveBeenCalledOnce()
@@ -98,12 +105,22 @@ it('starts independent reads together and reuses list and destinations when sele
 	await loadEmailResources(
 		client,
 		'actor',
-		'/@acme/-/email/two?q=%20hello%20&page=01',
+		emailResourceInput(
+			{ orgSlug: 'acme', messageId: 'two' },
+			emailSearch({ q: ' hello ', page: '01' }),
+		),
 	)
 	expect(loadEmailList).toHaveBeenCalledOnce()
 	expect(loadEmailDestinations).toHaveBeenCalledOnce()
 	expect(loadEmailDetail).toHaveBeenCalledTimes(2)
-	await loadEmailResources(client, 'actor', '/@acme/-/email/one?q=hello')
+	await loadEmailResources(
+		client,
+		'actor',
+		emailResourceInput(
+			{ orgSlug: 'acme', messageId: 'one' },
+			emailSearch({ q: 'hello' }),
+		),
+	)
 	expect(loadEmailDetail).toHaveBeenCalledTimes(2)
 	client.clear()
 })

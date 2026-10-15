@@ -42,6 +42,7 @@ function Page() {
 	return (
 		<AccountCredentialsRoute
 			payload={payload}
+			selectedId={params.credentialId}
 			currentHref={pageLocation.href}
 		/>
 	)

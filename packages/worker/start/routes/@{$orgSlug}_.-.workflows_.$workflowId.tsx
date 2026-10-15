@@ -32,8 +32,18 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/workflows_/$workflowId')({
 })
 function Page() {
 	const { payload } = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountWorkflowsPage payload={payload} currentHref={location.href} />
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
+	return (
+		<AccountWorkflowsPage
+			selectedId={
+				pageQueryInput.workflowId?.trim() ||
+				pageQueryInput.selected?.trim() ||
+				null
+			}
+			payload={payload}
+			currentHref={location.href}
+		/>
+	)
 }
 
 function usePageData() {

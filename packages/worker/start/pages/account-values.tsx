@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { matchesSearchQuery } from '#client/search-filter.ts'
 import { deleteAccountValue } from '#start/server/account-mutations'
 import {
@@ -46,7 +46,7 @@ import {
 const clampedCellCss = recordCellClamp(28)
 
 const accountValuesPath = '/account/values'
-const valuesRoute = createListDetailRoute(accountValuesPath)
+const valuesRoute = createListDetailLinks(accountValuesPath)
 
 /**
  * Selection changes need a refetch for full `selectedValue`. The client-side
@@ -82,9 +82,11 @@ function formatRelativeTtl(ttlMs: number | null) {
 export function AccountValuesPage({
 	payload,
 	currentHref,
+	selection,
 }: {
 	payload: AccountValuesLoaderData
 	currentHref: string
+	selection: { kind: 'list' | 'create' } | { kind: 'detail'; valueId: string }
 }) {
 	const { values, selectedValue } = payload
 	const [message, setMessage] = useState<string | null>(null)
@@ -171,25 +173,13 @@ export function AccountValuesPage({
 		showMessage(null)
 	}
 
-	const pending = false
-	const status = 'ready'
-
-	const selection = valuesRoute.getSelection(currentHref)
+	const selectedId = selection.kind === 'detail' ? selection.valueId : null
 	const search = readSearchFilter(currentHref)
 	const filteredValues = filterValues(values, search)
-	const detail = selectedValue
-	const isLoadingSelection =
-		selection.selectedId != null &&
-		(detail == null || detail.id !== selection.selectedId) &&
-		pending
-	const showEditor =
-		selection.selectedId != null && detail != null && !isLoadingSelection
-	const showValueNotFound =
-		selection.selectedId != null &&
-		detail == null &&
-		status === 'ready' &&
-		!pending
-	const selectedLabel = detail?.name ?? selection.selectedId ?? 'Value'
+	const detail = selectedValue?.id === selectedId ? selectedValue : null
+	const showEditor = selectedId !== null && detail !== null
+	const showValueNotFound = selectedId !== null && detail === null
+	const selectedLabel = detail?.name ?? selectedId ?? 'Value'
 
 	const monospaceValueCss: CSSObject = {
 		...accountTextareaCss,
@@ -212,198 +202,192 @@ export function AccountValuesPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
-				<RecordTable
-					mode="expand"
-					ariaLabel="Saved values"
-					selectedId={selection.selectedId}
-					recordLoading={isLoadingSelection}
-					onNavigate={resetSelectionState}
-					countLabel={`${filteredValues.length} of ${values.length} shown`}
-					emptyLabel={
-						values.length === 0
-							? 'No leftover rows.'
-							: 'No leftover rows match the current filters.'
-					}
-					toolbar={
-						<RecordTableSearch
-							label="Search values"
-							placeholder="Search values"
-							value={
-								new URL(currentHref, 'http://localhost').searchParams.get(
-									'q',
-								) ?? ''
-							}
-							onInput={(value) => {
-								return replaceLocation(buildHrefWithUpdatedSearch(value))
-							}}
-						/>
-					}
-					columns={[
-						{ key: 'name', label: 'Name', primary: true },
-						{ key: 'description', label: 'Description', drop: 1 },
-						{ key: 'preview', label: 'Value', drop: 2 },
-						{ key: 'updated', label: 'Updated' },
-					]}
-					rows={filteredValues.map((entry) => ({
-						id: entry.id,
-						// A save or delete is in flight; the expanded editor owns
-						// the selection until it settles.
-						href: isMutating
-							? undefined
-							: valuesRoute.buildDetailHref(
-									entry.id,
-									getCurrentSearch(),
-									currentHref,
-								),
-						cells: {
-							name: entry.name,
-							description: (
-								<span css={clampedCellCss}>{entry.description || '—'}</span>
+			<RecordTable
+				mode="expand"
+				ariaLabel="Saved values"
+				selectedId={selectedId}
+				onNavigate={resetSelectionState}
+				countLabel={`${filteredValues.length} of ${values.length} shown`}
+				emptyLabel={
+					values.length === 0
+						? 'No leftover rows.'
+						: 'No leftover rows match the current filters.'
+				}
+				toolbar={
+					<RecordTableSearch
+						label="Search values"
+						placeholder="Search values"
+						value={
+							new URL(currentHref, 'http://localhost').searchParams.get('q') ??
+							''
+						}
+						onInput={(value) => {
+							return replaceLocation(buildHrefWithUpdatedSearch(value))
+						}}
+					/>
+				}
+				columns={[
+					{ key: 'name', label: 'Name', primary: true },
+					{ key: 'description', label: 'Description', drop: 1 },
+					{ key: 'preview', label: 'Value', drop: 2 },
+					{ key: 'updated', label: 'Updated' },
+				]}
+				rows={filteredValues.map((entry) => ({
+					id: entry.id,
+					// A save or delete is in flight; the expanded editor owns
+					// the selection until it settles.
+					href: isMutating
+						? undefined
+						: valuesRoute.buildDetailHref(
+								entry.id,
+								getCurrentSearch(),
+								currentHref,
 							),
-							preview: (
-								<span css={[clampedCellCss, { fontFamily: 'monospace' }]}>
-									{entry.valuePreview || '—'}
-								</span>
-							),
-							updated: (
-								<span css={recordStampCss}>
-									{formatTimestampDate(entry.updatedAt)}
-								</span>
-							),
-						},
-					}))}
-					record={
-						isLoadingSelection ? (
-							<p css={{ margin: 0, color: colors.textMuted }}>Loading value…</p>
-						) : showEditor ? (
-							<div css={recordBodyCss}>
-								<div css={{ display: 'grid', gap: spacing.xs }}>
-									<h2 css={cardTitleCss}>{selectedLabel}</h2>
-									<p css={descriptionCss}>
-										Read-only leftover row. Move the contents to memories,
-										package storage, a repo, or secrets, then delete.
-									</p>
-								</div>
-
-								<label css={fieldCss}>
-									<span css={fieldLabelCss}>Name</span>
-									<input
-										data-field-ring
-										name="name"
-										type="text"
-										value={detail?.name ?? ''}
-										readOnly
-										css={{
-											...accountInputCss,
-											color: colors.textMuted,
-											cursor: 'default',
-										}}
-									/>
-								</label>
-
-								<label css={fieldCss}>
-									<span css={fieldLabelCss}>Description</span>
-									<input
-										data-field-ring
-										name="description"
-										type="text"
-										value={detail?.description ?? ''}
-										readOnly
-										css={{
-											...accountInputCss,
-											color: colors.textMuted,
-											cursor: 'default',
-										}}
-									/>
-								</label>
-
-								<label css={fieldCss}>
-									<span css={fieldLabelCss}>Value</span>
-									<textarea
-										data-field-ring
-										name="value"
-										value={detail?.value ?? ''}
-										readOnly
-										css={{
-											...monospaceValueCss,
-											color: colors.textMuted,
-											cursor: 'default',
-										}}
-									/>
-								</label>
-
-								{detail ? (
-									<MetadataGrid
-										items={[
-											{
-												label: 'Scope',
-												value: detail.scope,
-											},
-											{
-												label: 'Created',
-												value: <TimestampValue value={detail.createdAt} />,
-											},
-											{
-												label: 'Updated',
-												value: <TimestampValue value={detail.updatedAt} />,
-											},
-											{
-												label: 'TTL',
-												value: formatRelativeTtl(detail.ttlMs),
-											},
-										]}
-									/>
-								) : null}
-
-								<div
-									css={{
-										display: 'flex',
-										gap: spacing.sm,
-										flexWrap: 'wrap',
-									}}
-								>
-									<button
-										type="button"
-										disabled={isMutating}
-										css={dangerButtonCss}
-										onBlur={() => setDeleteArmed(false)}
-										onClick={() => {
-											if (deleteArmed) {
-												setDeleteArmed(false)
-												void deleteValueEntry()
-											} else setDeleteArmed(true)
-										}}
-									>
-										{isMutating
-											? 'Deleting...'
-											: deleteArmed
-												? 'Confirm delete'
-												: 'Delete'}
-									</button>
-								</div>
-							</div>
-						) : showValueNotFound ? (
-							<div css={{ ...recordBodyCss, gap: spacing.sm }}>
-								<h2
-									css={{
-										margin: 0,
-										fontSize: typography.fontSize.lg,
-										fontWeight: typography.fontWeight.semibold,
-										color: colors.text,
-									}}
-								>
-									Value not found
-								</h2>
-								<p css={{ margin: 0, color: colors.textMuted }}>
-									This value does not exist for this account or is managed by
-									another settings page.
+					cells: {
+						name: entry.name,
+						description: (
+							<span css={clampedCellCss}>{entry.description || '—'}</span>
+						),
+						preview: (
+							<span css={[clampedCellCss, { fontFamily: 'monospace' }]}>
+								{entry.valuePreview || '—'}
+							</span>
+						),
+						updated: (
+							<span css={recordStampCss}>
+								{formatTimestampDate(entry.updatedAt)}
+							</span>
+						),
+					},
+				}))}
+				record={
+					showEditor ? (
+						<div css={recordBodyCss}>
+							<div css={{ display: 'grid', gap: spacing.xs }}>
+								<h2 css={cardTitleCss}>{selectedLabel}</h2>
+								<p css={descriptionCss}>
+									Read-only leftover row. Move the contents to memories, package
+									storage, a repo, or secrets, then delete.
 								</p>
 							</div>
-						) : null
-					}
-				/>
-			) : null}
+
+							<label css={fieldCss}>
+								<span css={fieldLabelCss}>Name</span>
+								<input
+									data-field-ring
+									name="name"
+									type="text"
+									value={detail?.name ?? ''}
+									readOnly
+									css={{
+										...accountInputCss,
+										color: colors.textMuted,
+										cursor: 'default',
+									}}
+								/>
+							</label>
+
+							<label css={fieldCss}>
+								<span css={fieldLabelCss}>Description</span>
+								<input
+									data-field-ring
+									name="description"
+									type="text"
+									value={detail?.description ?? ''}
+									readOnly
+									css={{
+										...accountInputCss,
+										color: colors.textMuted,
+										cursor: 'default',
+									}}
+								/>
+							</label>
+
+							<label css={fieldCss}>
+								<span css={fieldLabelCss}>Value</span>
+								<textarea
+									data-field-ring
+									name="value"
+									value={detail?.value ?? ''}
+									readOnly
+									css={{
+										...monospaceValueCss,
+										color: colors.textMuted,
+										cursor: 'default',
+									}}
+								/>
+							</label>
+
+							{detail ? (
+								<MetadataGrid
+									items={[
+										{
+											label: 'Scope',
+											value: detail.scope,
+										},
+										{
+											label: 'Created',
+											value: <TimestampValue value={detail.createdAt} />,
+										},
+										{
+											label: 'Updated',
+											value: <TimestampValue value={detail.updatedAt} />,
+										},
+										{
+											label: 'TTL',
+											value: formatRelativeTtl(detail.ttlMs),
+										},
+									]}
+								/>
+							) : null}
+
+							<div
+								css={{
+									display: 'flex',
+									gap: spacing.sm,
+									flexWrap: 'wrap',
+								}}
+							>
+								<button
+									type="button"
+									disabled={isMutating}
+									css={dangerButtonCss}
+									onBlur={() => setDeleteArmed(false)}
+									onClick={() => {
+										if (deleteArmed) {
+											setDeleteArmed(false)
+											void deleteValueEntry()
+										} else setDeleteArmed(true)
+									}}
+								>
+									{isMutating
+										? 'Deleting...'
+										: deleteArmed
+											? 'Confirm delete'
+											: 'Delete'}
+								</button>
+							</div>
+						</div>
+					) : showValueNotFound ? (
+						<div css={{ ...recordBodyCss, gap: spacing.sm }}>
+							<h2
+								css={{
+									margin: 0,
+									fontSize: typography.fontSize.lg,
+									fontWeight: typography.fontWeight.semibold,
+									color: colors.text,
+								}}
+							>
+								Value not found
+							</h2>
+							<p css={{ margin: 0, color: colors.textMuted }}>
+								This value does not exist for this account or is managed by
+								another settings page.
+							</p>
+						</div>
+					) : null
+				}
+			/>
 		</AccountManagementShell>
 	)
 }

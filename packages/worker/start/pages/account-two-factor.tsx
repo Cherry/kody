@@ -228,8 +228,6 @@ export function AccountTwoFactorPage({
 		setDisableCode(event.currentTarget.value)
 	}
 
-	const status = 'ready'
-
 	const hydrated = useHydrated()
 	const isBusy =
 		!hydrated ||
@@ -256,7 +254,7 @@ export function AccountTwoFactorPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' && enabled ? (
+			{enabled ? (
 				<section css={cardCss}>
 					<h2 css={cardTitleCss}>Two-factor authentication is enabled</h2>
 					<p css={descriptionCss}>
@@ -293,7 +291,7 @@ export function AccountTwoFactorPage({
 				</section>
 			) : null}
 
-			{status === 'ready' && !enabled && !setup ? (
+			{!enabled && !setup ? (
 				<section css={cardCss}>
 					<h2 css={cardTitleCss}>Two-factor authentication is disabled</h2>
 					<p css={descriptionCss}>
@@ -314,7 +312,7 @@ export function AccountTwoFactorPage({
 				</section>
 			) : null}
 
-			{status === 'ready' && !enabled && setup ? (
+			{!enabled && setup ? (
 				<section css={cardCss}>
 					<h2 css={cardTitleCss}>Scan this QR code</h2>
 					<p css={descriptionCss}>

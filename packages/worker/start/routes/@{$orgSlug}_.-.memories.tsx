@@ -34,8 +34,15 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/memories')({
 })
 function CollectionPage() {
 	const { payload } = usePageData()
-	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountMemoriesPage payload={payload} currentHref={location.href} />
+	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
+	const selectedId = pageQueryInput.selected?.trim() || null
+	return (
+		<AccountMemoriesPage
+			payload={payload}
+			currentHref={location.href}
+			selectedId={selectedId}
+		/>
+	)
 }
 
 function usePageData() {

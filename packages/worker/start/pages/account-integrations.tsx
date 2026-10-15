@@ -48,6 +48,7 @@ import {
 	isBuiltInApp,
 	oauthAppTitle,
 	readSearchFilter,
+	type IntegrationsSelection,
 	resolveIntegrationsSelection,
 } from './account-integrations-shared.ts'
 import {
@@ -63,9 +64,11 @@ import {
 export function AccountIntegrationsPage({
 	payload,
 	currentHref,
+	selection,
 }: {
 	payload: AccountIntegrationsLoaderData
 	currentHref: string
+	selection: IntegrationsSelection
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey, orgSlug } = useMatchedPageScope()
@@ -163,7 +166,7 @@ export function AccountIntegrationsPage({
 	function currentSelectionMissing() {
 		return Boolean(
 			resolveIntegrationsSelection({
-				href: getCurrentHref(),
+				selection,
 				apps: live.current.apps,
 				integrations: live.current.integrations,
 			}).missingKind,
@@ -407,8 +410,6 @@ export function AccountIntegrationsPage({
 		void invalidatePages()
 	}
 
-	const status = 'ready'
-
 	const search = readSearchFilter(currentHref)
 	const setupIntro =
 		apps.length === 0
@@ -417,18 +418,14 @@ export function AccountIntegrationsPage({
 	const filteredApps = filterOauthApps(apps, search)
 	const { selectedApp, highlightedConnectionName, missingKind } =
 		resolveIntegrationsSelection({
-			href: currentHref,
+			selection,
 			apps,
 			integrations,
 		})
 	const showIntegrationNotFound =
-		missingKind === 'integration' &&
-		status === 'ready' &&
-		!isHoldingOptimisticRemoval()
+		missingKind === 'integration' && !isHoldingOptimisticRemoval()
 	const showConnectionNotFound =
-		missingKind === 'connection' &&
-		status === 'ready' &&
-		!isHoldingOptimisticRemoval()
+		missingKind === 'connection' && !isHoldingOptimisticRemoval()
 	const highlightedConnection = highlightedConnectionName
 		? (integrations.find(
 				(connection) => connection.name === highlightedConnectionName,
@@ -449,7 +446,7 @@ export function AccountIntegrationsPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' && approval
+			{approval
 				? renderApprovalCard({
 						currentHref,
 						approval,
@@ -458,7 +455,7 @@ export function AccountIntegrationsPage({
 					})
 				: null}
 
-			{status === 'ready' ? (
+			{
 				<>
 					<RecordTable
 						mode="expand"
@@ -542,11 +539,9 @@ export function AccountIntegrationsPage({
 						}
 					/>
 				</>
-			) : null}
+			}
 
-			{status === 'ready'
-				? renderIntegrationsSetupSections(setupIntro, platformCatalog)
-				: null}
+			{renderIntegrationsSetupSections(setupIntro, platformCatalog)}
 
 			<p css={{ margin: 0 }}>
 				<SiteLink href="/account" css={primaryLinkCss}>

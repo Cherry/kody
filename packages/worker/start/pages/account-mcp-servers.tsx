@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { createListDetailRoute } from '#client/list-detail-route.ts'
+import { createListDetailLinks } from '#client/list-detail-route.ts'
 import {
 	clearOnboardingMcpOAuthReturnCookie,
 	closeOnboardingMcpOAuthPopupIfOpened,
@@ -58,7 +58,7 @@ import {
 
 const clampedCellCss = recordCellClamp(26)
 
-const mcpServersRoute = createListDetailRoute('/account/mcp-servers')
+const mcpServersRoute = createListDetailLinks('/account/mcp-servers')
 
 function useMcpWrite<TInput, TResult>(
 	send: (input: { data: TInput }) => Promise<TResult>,
@@ -75,9 +75,11 @@ function useMcpWrite<TInput, TResult>(
 export function AccountMcpServersPage({
 	payload,
 	currentHref,
+	selection,
 }: {
 	payload: AccountMcpServersPayload
 	currentHref: string
+	selection: { selectedId: string | null; isCreating: boolean }
 }) {
 	const { actorKey, orgSlug } = useMatchedPageScope()
 	const currentScope = useRef<{ actorKey: string | null; href: string } | null>(
@@ -123,7 +125,7 @@ export function AccountMcpServersPage({
 	)
 	const { oauthClientOrigin, oauthCallbackUrl, oauthClientMetadataUrl } =
 		payload
-	const creating = mcpServersRoute.getSelection(currentHref).isCreating
+	const creating = selection.isCreating
 	const prefill = readAddServerPrefill(currentHref)
 	const [addName, setAddName] = useState(creating ? prefill.name : '')
 	const [addUrl, setAddUrl] = useState(creating ? prefill.url : '')
@@ -297,7 +299,6 @@ export function AccountMcpServersPage({
 		)
 	}
 
-	const status = 'ready'
 	const [lastPayload, setLastPayload] = useState(payload)
 	if (lastPayload !== payload && actionState === 'idle') {
 		setLastPayload(payload)
@@ -305,13 +306,11 @@ export function AccountMcpServersPage({
 	}
 
 	const isMutating = actionState !== 'idle'
-	const selection = mcpServersRoute.getSelection(currentHref)
 	const search = readSearchFilter(currentHref)
 	const filteredServers = filterServers(servers, search)
 	const server =
 		servers.find((item) => item.id === selection.selectedId) ?? null
-	const showServerNotFound =
-		selection.selectedId != null && !server && status === 'ready'
+	const showServerNotFound = selection.selectedId != null && !server
 
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
@@ -354,7 +353,7 @@ export function AccountMcpServersPage({
 				</AccountManagementMessage>
 			) : null}
 
-			{status === 'ready' ? (
+			{
 				<RecordTable
 					mode="expand"
 					ariaLabel="Connected MCP servers"
@@ -603,7 +602,7 @@ export function AccountMcpServersPage({
 						) : null
 					}
 				/>
-			) : null}
+			}
 		</AccountManagementShell>
 	)
 }
