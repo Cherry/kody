@@ -160,7 +160,6 @@ export function AuthForm(
 			data-public-auth-form
 			data-rise
 			method="post"
-			action="/auth"
 			noValidate
 			style={{ '--rise': '1' } as CSSProperties}
 			css={authFormCss}
