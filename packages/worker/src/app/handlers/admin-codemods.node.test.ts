@@ -289,6 +289,8 @@ test('admin codemods run POST requires admin, rejects invalid requests, audits, 
 		{ mode: 'revert', scope: 'fleet', runId: 'run-1' },
 		{ mode: 'scan', scope: 'fleet', filters: { packageIds: ['   '] } },
 		{ mode: 'scan', scope: 'fleet', filters: { userIds: [] } },
+		{ mode: 'scan', scope: 'fleet', filters: { scope: 'unknown' } },
+		{ mode: 'scan', scope: 'fleet', filters: { scope: null } },
 	]
 	for (const body of badRequests) {
 		const response = await postRun(handler, { codemodId, ...body })
@@ -312,6 +314,18 @@ test('admin codemods run POST requires admin, rejects invalid requests, audits, 
 	)?.[0] as { filters?: unknown } | undefined
 	expect(omittedCall).toBeDefined()
 	expect(omittedCall).not.toHaveProperty('filters')
+	const scoped = await postRun(handler, {
+		codemodId,
+		mode: 'scan',
+		scope: 'fleet',
+		filters: { scope: 'credential-need-enforcement' },
+	})
+	expect(scoped.status).toBe(200)
+	expect(mockModule.runPackageCodemodStep).toHaveBeenLastCalledWith(
+		expect.objectContaining({
+			filters: { scope: 'credential-need-enforcement' },
+		}),
+	)
 
 	const response = await postRun(handler, {
 		codemodId,

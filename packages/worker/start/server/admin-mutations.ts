@@ -1,3 +1,4 @@
+import { adminCodemodRunInputSchema } from '#universal/admin-codemod-input.ts'
 import {
 	providerMarkSaveSchema,
 	platformIntegrationSaveSchema,
@@ -326,7 +327,7 @@ export const createAdminUser = createServerFn({ method: 'POST' })
 		})
 	})
 export const adminCodemodRun = createServerFn({ method: 'POST' })
-	.inputValidator(z.record(z.string(), z.unknown()))
+	.inputValidator(adminCodemodRunInputSchema)
 	.handler(async ({ data }) => {
 		const [{ withWebsiteMutation }, { adminCodemodsRun }] = await Promise.all([
 			import('./mutation-context.ts'),

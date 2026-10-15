@@ -1,3 +1,4 @@
+import { credentialNeedEnforcementScope } from '#worker/credentials/credential-need-enforcement-scope.ts'
 import { getErrorMessage } from '@kody-internal/shared/error-message.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import {
@@ -18,6 +19,7 @@ import { adminOperationResult } from './operation-result.ts'
 import {
 	runPackageCodemodStep,
 	type PackageCodemodRunMode,
+	type PackageCodemodRunFilters,
 	type PackageCodemodRunScope,
 } from '#worker/package-codemods/engine.ts'
 import {
@@ -79,7 +81,7 @@ type ParseRunBodyResult =
 			codemodId: string
 			mode: PackageCodemodRunMode
 			scope: PackageCodemodRunScope
-			filters?: { userIds?: Array<string>; packageIds?: Array<string> }
+			filters?: PackageCodemodRunFilters
 			runId?: string
 			cursor?: string | null
 			limit?: number
@@ -232,7 +234,7 @@ function formatScopeForAudit(scope: PackageCodemodRunScope): string {
 function parseFilters(body: object):
 	| {
 			ok: true
-			filters?: { userIds?: Array<string>; packageIds?: Array<string> }
+			filters?: PackageCodemodRunFilters
 	  }
 	| { ok: false; error: string } {
 	const record = body as Record<string, unknown>
@@ -244,6 +246,13 @@ function parseFilters(body: object):
 		return { ok: false, error: 'filters must be an object.' }
 	}
 	const filtersRecord = filtersValue as Record<string, unknown>
+	const scope = filtersRecord.scope
+	if (scope !== undefined && scope !== credentialNeedEnforcementScope) {
+		return {
+			ok: false,
+			error: 'filters.scope must be "credential-need-enforcement".',
+		}
+	}
 	const userIds = parseOptionalStringArray(filtersRecord, 'userIds')
 	if (userIds === false) {
 		return { ok: false, error: 'filters.userIds must be an array of strings.' }
@@ -269,12 +278,13 @@ function parseFilters(body: object):
 				'filters.packageIds was supplied but contained no usable ids. Omit the key, or provide at least one non-empty id.',
 		}
 	}
-	if (!userIds && !packageIds) {
+	if (!userIds && !packageIds && scope === undefined) {
 		return { ok: true }
 	}
 	return {
 		ok: true,
 		filters: {
+			...(scope ? { scope } : {}),
 			...(userIds ? { userIds } : {}),
 			...(packageIds ? { packageIds } : {}),
 		},

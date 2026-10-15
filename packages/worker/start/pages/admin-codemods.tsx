@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { type AdminCodemodRunInput } from '#universal/admin-codemod-input.ts'
 import {
 	formatSummaryCounts,
 	maxRunSteps,
@@ -74,6 +75,7 @@ export function AdminCodemodsPage(props: {
 	const [selectedMode, setSelectedMode] = useState<RunMode>('scan')
 	const [userIdsFilter, setUserIdsFilter] = useState('')
 	const [packageIdsFilter, setPackageIdsFilter] = useState('')
+	const [enforcementOnly, setEnforcementOnly] = useState(false)
 	const [revertOfRunId, setRevertOfRunId] = useState('')
 	const [runPhase, setRunPhase] = useState<RunPhase>('idle')
 	const [stopRequested, setStopRequested] = useState(false)
@@ -146,13 +148,16 @@ export function AdminCodemodsPage(props: {
 	}) {
 		const userIds = parseCommaSeparatedIds(userIdsFilter)
 		const packageIds = parseCommaSeparatedIds(packageIdsFilter)
-		const body: Record<string, unknown> = {
+		const body: AdminCodemodRunInput = {
 			codemodId: input.codemodId,
 			mode: input.mode,
 			scope: 'fleet',
 		}
-		if (userIds.length > 0 || packageIds.length > 0) {
+		if (userIds.length > 0 || packageIds.length > 0 || enforcementOnly) {
 			body.filters = {
+				...(enforcementOnly
+					? { scope: 'credential-need-enforcement' as const }
+					: {}),
 				...(userIds.length > 0 ? { userIds } : {}),
 				...(packageIds.length > 0 ? { packageIds } : {}),
 			}
@@ -174,7 +179,7 @@ export function AdminCodemodsPage(props: {
 			// The stale-run sweep on the next history load covers this.
 		}
 	}
-	async function postRunStep(body: Record<string, unknown>) {
+	async function postRunStep(body: AdminCodemodRunInput) {
 		const payload = await adminCodemodRun({ data: body })
 		return payload
 	}
@@ -471,6 +476,25 @@ export function AdminCodemodsPage(props: {
 									}}
 									css={accountInputCss}
 								/>
+							</label>
+							<label css={fieldCss}>
+								<span css={fieldLabelCss}>Credential enforcement scope</span>
+								<select
+									value={enforcementOnly ? 'enforcement' : 'all'}
+									disabled={!canMutate || selectedMode === 'revert'}
+									css={selectCss}
+									onChange={(event) => {
+										setEnforcementOnly(
+											event.currentTarget.value === 'enforcement',
+										)
+										setPendingConfirmKey(null)
+									}}
+								>
+									<option value="all">All matching packages</option>
+									<option value="enforcement">
+										Packages subject to credential-need enforcement
+									</option>
+								</select>
 							</label>
 							{selectedMode === 'revert' ? (
 								<label css={fieldCss}>
