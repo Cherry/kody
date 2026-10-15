@@ -4,6 +4,8 @@ import {
 	packageAccessInput,
 	grantPackageCollaboratorInput,
 	revokePackageCollaboratorInput,
+	createPackageCollaboratorInviteInput,
+	revokePackageCollaboratorInviteInput,
 } from '#universal/package-access-mutations.ts'
 import { type PackageCollaboratorsLoaderData } from '#universal/package-collaborators.ts'
 
@@ -107,6 +109,50 @@ export const revokePackageCollaborator = createServerFn({ method: 'POST' })
 			])
 		return withWebsiteMutation({}, async ({ request, env, user }) => {
 			const result = await revokePackageCollaborator({
+				request,
+				env,
+				user,
+				...data,
+			})
+			if (!result.data.ok) throw new Error(result.data.error)
+			return result.data
+		})
+	})
+
+export const createPackageCollaboratorInvite = createServerFn({
+	method: 'POST',
+})
+	.validator(createPackageCollaboratorInviteInput)
+	.handler(async ({ data }) => {
+		const [{ withWebsiteMutation }, { createPackageCollaboratorInvite }] =
+			await Promise.all([
+				import('./mutation-context.ts'),
+				import('../../src/app/handlers/package-collaborators.ts'),
+			])
+		return withWebsiteMutation({}, async ({ request, env, user }) => {
+			const result = await createPackageCollaboratorInvite({
+				request,
+				env,
+				user,
+				...data,
+			})
+			if (!result.data.ok) throw new Error(result.data.error)
+			return result.data
+		})
+	})
+
+export const revokePackageCollaboratorInvite = createServerFn({
+	method: 'POST',
+})
+	.validator(revokePackageCollaboratorInviteInput)
+	.handler(async ({ data }) => {
+		const [{ withWebsiteMutation }, { revokePackageCollaboratorInvite }] =
+			await Promise.all([
+				import('./mutation-context.ts'),
+				import('../../src/app/handlers/package-collaborators.ts'),
+			])
+		return withWebsiteMutation({}, async ({ request, env, user }) => {
+			const result = await revokePackageCollaboratorInvite({
 				request,
 				env,
 				user,

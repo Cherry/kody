@@ -1,4 +1,8 @@
-import type { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import {
+	inviteCreateCapability,
+	inviteRevokeCapability,
+} from '#mcp/capabilities/access/invites.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import {
 	packageCollaboratorRemoveCapability,
@@ -14,12 +18,20 @@ import {
 	packageResource,
 } from '#worker/authorization/authorize.ts'
 import { operationResult } from '../operation-result.ts'
+import { getInviteById } from '#worker/orgs/access-writes.ts'
 import { isPersonalOrg } from '#worker/orgs/is-personal-org.ts'
-import { listPackageCollaborators } from '#worker/orgs/package-collaborators.ts'
+import {
+	listPackageCollaborators,
+	listPendingPackageInvites,
+} from '#worker/orgs/package-collaborators.ts'
 import { loadOrgBindingForSlug, type OrgBinding } from '#worker/orgs/repo.ts'
 import { resolveSavedPackage } from '#worker/package-invocations/module-artifacts.ts'
 import {
 	type PackageCollaboratorsView,
+	type PackageCollaboratorsWriteResult,
+	type PackageCollaboratorInviteCreated,
+	readPackageCollaboratorInvitee,
+	packageCollaboratorInviteeLabel,
 	type PackageCollaboratorPreset,
 } from '#universal/package-collaborators.ts'
 
@@ -29,6 +41,7 @@ export type CollaboratorsScope = {
 	ctx: CapabilityContext
 	org: OrgBinding['org']
 	orgSlug: string
+	personal: boolean
 	savedPackage: { id: string; kodyId: string; name: string }
 }
 
@@ -90,6 +103,7 @@ export async function loadCollaboratorsScope(input: {
 			ctx: { env, callerContext },
 			org: binding.org,
 			orgSlug: binding.org.slug ?? input.username,
+			personal: await isPersonalOrg(env.APP_DB, binding.org.id),
 			savedPackage: {
 				id: savedPackage.id,
 				kodyId: savedPackage.kodyId,
@@ -103,19 +117,18 @@ async function buildCollaboratorsView(
 	scope: CollaboratorsScope,
 ): Promise<PackageCollaboratorsView> {
 	const db = scope.ctx.env.APP_DB
-	const [listed, personal] = await Promise.all([
-		listPackageCollaborators({
-			db,
-			orgId: scope.org.id,
-			packageId: scope.savedPackage.id,
-		}),
-		isPersonalOrg(db, scope.org.id),
+	const target = { db, orgId: scope.org.id, packageId: scope.savedPackage.id }
+	const [listed, invites] = await Promise.all([
+		listPackageCollaborators(target),
+		scope.personal ? listPendingPackageInvites(target) : Promise.resolve([]),
 	])
 	return {
 		ok: true,
 		package: scope.savedPackage,
-		org: { slug: scope.orgSlug, personal },
-		...listed,
+		org: { slug: scope.orgSlug, personal: scope.personal },
+		collaborators: listed.collaborators,
+		invites,
+		options: listed.options,
 	}
 }
 
@@ -183,20 +196,103 @@ export function revokePackageCollaborator(
 		)
 	})
 }
+class CollaboratorChangeRefused extends Error {
+	readonly status: 400 | 404
+	constructor(message: string, status: 400 | 404 = 400) {
+		super(message)
+		this.status = status
+	}
+}
+function requirePersonalOrg(scope: CollaboratorsScope) {
+	if (scope.personal) return
+	throw new CollaboratorChangeRefused(
+		'Invites from this tab are for personal organizations. In a team organization, add teams and members instead.',
+	)
+}
+
+export function createPackageCollaboratorInvite(
+	input: CollaboratorsInput & {
+		invitee: string
+		preset: PackageCollaboratorPreset
+	},
+) {
+	return changeCollaborator(input, async (scope) => {
+		requirePersonalOrg(scope)
+		const created = await inviteCreateCapability.handler(
+			{
+				kind: 'grant',
+				...readPackageCollaboratorInvitee(input.invitee),
+				resource_type: 'package',
+				resource_id: scope.savedPackage.id,
+				preset: input.preset,
+			},
+			scope.ctx,
+		)
+		return {
+			id: created.invite.id,
+			expiresAt: created.invite.expires_at,
+			inviteeLabel: packageCollaboratorInviteeLabel({
+				inviteeEmail: created.invite.invitee_email,
+				inviteeUsername: created.invite.invitee_username,
+			}),
+			preset: input.preset,
+			prompt: created.prompt,
+		}
+	})
+}
+
+export function revokePackageCollaboratorInvite(
+	input: CollaboratorsInput & { inviteId: string },
+) {
+	return changeCollaborator(input, async (scope) => {
+		requirePersonalOrg(scope)
+		const invite = await getInviteById({
+			db: scope.ctx.env.APP_DB,
+			orgId: scope.org.id,
+			inviteId: input.inviteId,
+		})
+		if (
+			!invite ||
+			invite.kind !== 'grant' ||
+			invite.resourceType !== 'package' ||
+			invite.resourceId !== scope.savedPackage.id ||
+			invite.status !== 'pending'
+		) {
+			throw new CollaboratorChangeRefused(
+				'That invite is no longer pending.',
+				404,
+			)
+		}
+		await inviteRevokeCapability.handler({ invite_id: invite.id }, scope.ctx)
+	})
+}
+
 async function changeCollaborator(
 	input: CollaboratorsInput,
-	apply: (scope: CollaboratorsScope) => Promise<void>,
+	apply: (
+		scope: CollaboratorsScope,
+	) => Promise<PackageCollaboratorInviteCreated | void>,
 ) {
 	const loaded = await authorizedScope(input)
 	if (loaded.error) return loaded.error
+	let invite: PackageCollaboratorInviteCreated | void
 	try {
-		await apply(loaded.scope)
+		invite = await apply(loaded.scope)
 	} catch (error) {
+		if (error instanceof CollaboratorChangeRefused)
+			return operationResult(
+				{ ok: false as const, error: error.message },
+				error.status,
+			)
 		if (error instanceof AuthorizationError)
 			return operationResult({ ok: false as const, error: error.message }, 403)
 		if (isMcpCallerError(error) && error instanceof Error)
 			return operationResult({ ok: false as const, error: error.message }, 400)
 		throw error
 	}
-	return operationResult(await buildCollaboratorsView(loaded.scope))
+	const view = await buildCollaboratorsView(loaded.scope)
+	const result: PackageCollaboratorsWriteResult = invite
+		? { ...view, invite }
+		: view
+	return operationResult(result)
 }

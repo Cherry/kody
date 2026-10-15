@@ -2,6 +2,9 @@ import { beforeEach, expect, test, vi } from 'vitest'
 const state = vi.hoisted(() => ({
 	page: {} as Record<string, unknown>,
 	read: vi.fn(),
+	createInvite: vi.fn(),
+	revokeInvite: vi.fn(),
+	mutation: vi.fn(),
 	authenticated: true,
 }))
 vi.mock('@tanstack/react-start', () => ({
@@ -13,7 +16,7 @@ vi.mock('@tanstack/react-start', () => ({
 				return builder
 			},
 			handler(run: (input: { data: unknown }) => Promise<unknown>) {
-				return (input: { data: unknown }) =>
+				return async (input: { data: unknown }) =>
 					run({ data: validator.parse(input.data) })
 			},
 		}
@@ -25,9 +28,27 @@ vi.mock('@tanstack/react-router', () => ({
 	notFound: () => ({ notFound: true }),
 }))
 vi.mock('./mutation-context.ts', () => {
-	class WebsiteAuthenticationError extends Error {}
+	class WebsiteAuthenticationError extends Error {
+		constructor() {
+			super('Please sign in again.')
+		}
+	}
 	return {
 		WebsiteAuthenticationError,
+		withWebsiteMutation: async (
+			options: unknown,
+			run: (context: unknown) => Promise<unknown>,
+		) => {
+			state.mutation(options)
+			if (!state.authenticated) throw new WebsiteAuthenticationError()
+			return run({
+				request: new Request('https://kody.test/_serverFn/write', {
+					method: 'POST',
+				}),
+				env: {},
+				user: { userId: 'viewer' },
+			})
+		},
 		withWebsiteRead: async (
 			_: unknown,
 			run: (context: unknown) => Promise<unknown>,
@@ -47,9 +68,15 @@ vi.mock('../../src/app/package-page.ts', () => ({
 }))
 vi.mock('../../src/app/handlers/package-collaborators.ts', () => ({
 	readPackageCollaborators: state.read,
+	createPackageCollaboratorInvite: state.createInvite,
+	revokePackageCollaboratorInvite: state.revokeInvite,
 }))
 vi.mock('./document-head.ts', () => ({ loadDocumentHead: () => ({}) }))
-import { loadPackageCollaborators } from './package-collaborators.ts'
+import {
+	loadPackageCollaborators,
+	createPackageCollaboratorInvite,
+	revokePackageCollaboratorInvite,
+} from './package-collaborators.ts'
 const detail = {
 	kind: 'page',
 	username: 'acme',
@@ -76,6 +103,7 @@ const view = {
 	package: { id: 'pkg-1', kodyId: 'release-notes', name: 'release-notes' },
 	org: { slug: 'acme', personal: false },
 	collaborators: [],
+	invites: [],
 	options: { teams: [], members: [] },
 }
 
@@ -84,6 +112,12 @@ beforeEach(() => {
 	state.authenticated = true
 	state.page = detail
 	state.read.mockReset().mockResolvedValue({ status: 200, data: view })
+	state.createInvite.mockReset().mockResolvedValue({
+		status: 200,
+		data: { ...view, invite: { id: 'invite-1', prompt: 'one-time-token' } },
+	})
+	state.revokeInvite.mockReset().mockResolvedValue({ status: 200, data: view })
+	state.mutation.mockReset()
 })
 test('loads package chrome and the collaborators view through shared operations', async () => {
 	const result = await loadPackageCollaborators(input)
@@ -143,4 +177,61 @@ test('package page access blocks collaborator reads before loading grants', asyn
 		notFound: true,
 	})
 	expect(state.read).not.toHaveBeenCalled()
+})
+
+test('addressed invite mutations use the authenticated shared write context and return one-time handoff only from creation', async () => {
+	const created = await createPackageCollaboratorInvite({
+		data: { ...input.data, invitee: ' @outside ', preset: 'contribute' },
+	})
+	expect(state.mutation).toHaveBeenCalledWith({})
+	expect(state.createInvite).toHaveBeenCalledWith(
+		expect.objectContaining({
+			...input.data,
+			invitee: '@outside',
+			preset: 'contribute',
+			user: { userId: 'viewer' },
+		}),
+	)
+	expect(state.createInvite.mock.calls[0]?.[0].request.method).toBe('POST')
+	expect(created.invite).toMatchObject({
+		id: 'invite-1',
+		prompt: 'one-time-token',
+	})
+	const revoked = await revokePackageCollaboratorInvite({
+		data: { ...input.data, inviteId: ' invite-1 ' },
+	})
+	expect(state.revokeInvite).toHaveBeenCalledWith(
+		expect.objectContaining({
+			...input.data,
+			inviteId: 'invite-1',
+			user: { userId: 'viewer' },
+		}),
+	)
+	expect(revoked).not.toHaveProperty('invite')
+})
+
+test('invite mutation validation and shared authorization failures do not produce successful handoffs', async () => {
+	await expect(
+		createPackageCollaboratorInvite({
+			data: { ...input.data, invitee: '', preset: 'use' },
+		}),
+	).rejects.toThrow('Too small')
+	expect(state.createInvite).not.toHaveBeenCalled()
+	state.authenticated = false
+	await expect(
+		revokePackageCollaboratorInvite({
+			data: { ...input.data, inviteId: 'invite-1' },
+		}),
+	).rejects.toThrow('Please sign in again.')
+	expect(state.revokeInvite).not.toHaveBeenCalled()
+	state.authenticated = true
+	state.createInvite.mockResolvedValue({
+		status: 403,
+		data: { ok: false, error: 'Manage is required' },
+	})
+	await expect(
+		createPackageCollaboratorInvite({
+			data: { ...input.data, invitee: 'outside', preset: 'use' },
+		}),
+	).rejects.toThrow('Manage is required')
 })

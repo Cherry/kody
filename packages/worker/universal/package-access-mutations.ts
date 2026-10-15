@@ -12,6 +12,13 @@ export const grantPackageCollaboratorInput = packageAccessInput.extend({
 export const revokePackageCollaboratorInput = packageAccessInput.extend({
 	grantId: z.string().trim().min(1),
 })
+export const createPackageCollaboratorInviteInput = packageAccessInput.extend({
+	invitee: z.string().trim().min(1),
+	preset: z.enum(packageCollaboratorPresets),
+})
+export const revokePackageCollaboratorInviteInput = packageAccessInput.extend({
+	inviteId: z.string().trim().min(1),
+})
 export const packageWebhookInput = packageAccessInput.extend({
 	webhookName: z.string().trim().min(1),
 })
