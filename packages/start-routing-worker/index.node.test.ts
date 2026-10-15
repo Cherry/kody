@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { createCookie } from 'remix/cookie'
@@ -6,7 +7,7 @@ import {
 	createAuthCookie,
 	setAuthSessionSecret,
 } from '../worker/src/app/auth-session.ts'
-import { routeRequest, type RoutingEnv } from './index.ts'
+import { createRoutingWorker, type RoutingEnv } from './index.ts'
 
 const origin = 'https://kody.codes'
 const personA = 'a'.repeat(64)
@@ -14,6 +15,15 @@ const personB = 'b'.repeat(64)
 const outsider = 'c'.repeat(64)
 const release = '1'.repeat(40)
 const prefix = `/__start/${release}/`
+const assetPaths = ['assets/chunk.js', 'page-init.js']
+const manifestDigest = createHash('sha256')
+	.update(JSON.stringify([...assetPaths].sort()))
+	.digest('hex')
+const routeRequest = createRoutingWorker({
+	release,
+	assetPaths,
+	digest: manifestDigest,
+}).fetch
 const sessionSecret = 'synthetic-session-secret-0123456789abcdef'
 const rolloutSecret = 'synthetic-rollout-secret-0123456789abcdef'
 let sqlite: DatabaseSync
@@ -39,7 +49,7 @@ beforeEach(() => {
 		APP_BASE_URL: origin,
 		START_ALLOWED_PERSON_IDS: JSON.stringify([personA, personB]),
 		START_RELEASE: release,
-		START_ASSET_PATHS: JSON.stringify(['assets/chunk.js', 'page-init.js']),
+		START_ASSET_MANIFEST_SHA256: manifestDigest,
 	}
 	setAuthSessionSecret(sessionSecret)
 })
@@ -472,4 +482,74 @@ test('candidate documents cannot leak through public cache headers and legacy re
 	expect(untouched).toBe(original)
 	expect(untouched.headers.get('Cache-Control')).toBe('public, max-age=3600')
 	expect(untouched.headers.get('Vary')).toBe('Accept')
+})
+
+test('bundled manifest and small binding must agree on release and actual paths', async () => {
+	const cases = [
+		{ release: '2'.repeat(40), assetPaths, digest: manifestDigest },
+		{ release, assetPaths, digest: '0'.repeat(64) },
+		{
+			release,
+			assetPaths: [...assetPaths, 'arbitrary-document'],
+			digest: manifestDigest,
+		},
+		{
+			release,
+			assetPaths: [...assetPaths, assetPaths[0]!],
+			digest: manifestDigest,
+		},
+	]
+	for (const manifest of cases) {
+		const worker = createRoutingWorker(manifest)
+		expect(await (await worker.fetch(request('/account'), env)).text()).toBe(
+			'legacy',
+		)
+		expect(
+			(await worker.fetch(request(prefix + assetPaths[0]), env)).status,
+		).toBe(503)
+	}
+	env.START_ASSET_MANIFEST_SHA256 = '0'.repeat(64)
+	expect(
+		(await routeRequest(request(prefix + assetPaths[0]), env)).status,
+	).toBe(503)
+	expect(start).not.toHaveBeenCalled()
+})
+
+test('factory captures immutable paths and rejects unsafe paths even with matching digests', async () => {
+	const paths = [...assetPaths]
+	const worker = createRoutingWorker({
+		release,
+		assetPaths: paths,
+		digest: manifestDigest,
+	})
+	paths.push('injected-document')
+	expect(
+		(await worker.fetch(request(prefix + 'injected-document'), env)).status,
+	).toBe(404)
+	expect(
+		await (await worker.fetch(request(prefix + assetPaths[0]), env)).text(),
+	).toBe('start')
+	for (const invalidPaths of [
+		['../document'],
+		['_serverFn/read'],
+		['assets/a%2f.js'],
+		['page-init.js', 'page-init.js'],
+	]) {
+		const digest = createHash('sha256')
+			.update(JSON.stringify(invalidPaths))
+			.digest('hex')
+		const invalid = createRoutingWorker({
+			release,
+			assetPaths: invalidPaths,
+			digest,
+		})
+		expect(
+			(
+				await invalid.fetch(request(prefix + 'page-init.js'), {
+					...env,
+					START_ASSET_MANIFEST_SHA256: digest,
+				})
+			).status,
+		).toBe(503)
+	}
 })

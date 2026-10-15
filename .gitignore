@@ -56,3 +56,6 @@ packages/api-worker/wrangler-*.generated.json
 
 # Local migration measurement artifacts and captured sessions
 /tools/framework-comparison/reports/
+
+packages/start-routing-worker/wrangler-*.generated.json
+packages/start-routing-worker/start-entry.generated.ts

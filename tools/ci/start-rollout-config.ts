@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { parseJsonc } from './resource-utils.ts'
 import { isExecutedDirectly } from '../node-runtime.ts'
@@ -19,6 +20,24 @@ function required(value: unknown, label: string): string {
 	if (/preview|pr-\d+|unconfigured|placeholder|<|>/i.test(value))
 		throw new Error(`${label} must reference production`)
 	return value
+}
+
+export function assetManifestDigest(assetPaths: readonly string[]) {
+	return createHash('sha256')
+		.update(JSON.stringify([...assetPaths].sort()))
+		.digest('hex')
+}
+
+export function routerEntrySource(
+	release: string,
+	assetPaths: readonly string[],
+) {
+	const manifest = {
+		release,
+		assetPaths: [...assetPaths].sort(),
+		digest: assetManifestDigest(assetPaths),
+	}
+	return `import { createRoutingWorker } from './index.ts'\nexport default createRoutingWorker(${JSON.stringify(manifest)})\n`
 }
 
 /** Pure config transform. It never ensures resources, runs migrations or deploys. */
@@ -173,11 +192,12 @@ export function buildStartRolloutConfig(input: {
 			database_id: appDb.database_id,
 		},
 	]
+	router.main = './start-entry.generated.ts'
 	router.vars = {
 		APP_BASE_URL: vars.APP_BASE_URL,
 		START_RELEASE: input.release,
 		START_ALLOWED_PERSON_IDS: JSON.stringify(input.allowedPersonIds),
-		START_ASSET_PATHS: JSON.stringify(input.assetPaths),
+		START_ASSET_MANIFEST_SHA256: assetManifestDigest(input.assetPaths),
 	}
 	return {
 		candidate: selected,

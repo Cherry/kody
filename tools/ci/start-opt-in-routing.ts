@@ -1,3 +1,4 @@
+import { assetManifestDigest } from './start-rollout-config.ts'
 import { readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import {
@@ -214,9 +215,8 @@ async function verifyLiveRelease(review: Review, proof: Proof) {
 		'Router must allow exactly the two reviewed stable person IDs',
 	)
 	requireValue(
-		JSON.stringify(
-			(JSON.parse(String(vars.START_ASSET_PATHS)) as Array<string>).sort(),
-		) === JSON.stringify([...review.manifest.assetPaths].sort()),
+		vars.START_ASSET_MANIFEST_SHA256 ===
+			assetManifestDigest(review.manifest.assetPaths),
 		'Router asset manifest changed',
 	)
 	const services = routerBindings.filter(

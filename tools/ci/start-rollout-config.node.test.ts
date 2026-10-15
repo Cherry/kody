@@ -1,5 +1,9 @@
 import { expect, test } from 'vitest'
-import { buildStartRolloutConfig } from './start-rollout-config.ts'
+import {
+	buildStartRolloutConfig,
+	assetManifestDigest,
+	routerEntrySource,
+} from './start-rollout-config.ts'
 
 function fixture() {
 	return {
@@ -107,7 +111,7 @@ test('candidate shares resolved production resources without taking infrastructu
 	])
 	expect(result.router.vars).toMatchObject({
 		START_ALLOWED_PERSON_IDS: JSON.stringify(input.allowedPersonIds),
-		START_ASSET_PATHS: JSON.stringify(input.assetPaths),
+		START_ASSET_MANIFEST_SHA256: assetManifestDigest(input.assetPaths),
 	})
 	expect(result.manifest.activated).toBe(false)
 	// The transform must not mutate its production input.
@@ -243,4 +247,24 @@ test('candidate reports its exact source release without carrying legacy deploym
 	expect(
 		(input.production.vars as Record<string, unknown>).APP_DEPLOY_INFO,
 	).toBe('legacy-deployment-info')
+})
+
+test('embeds a large exact manifest in source and keeps text bindings small', () => {
+	const input = fixture()
+	input.assetPaths = Array.from(
+		{ length: 500 },
+		(_, i) => `assets/chunk-${i}-${'a'.repeat(100)}.js`,
+	)
+	const result = buildStartRolloutConfig(input)
+	expect(JSON.stringify(result.router.vars).length).toBeLessThan(5120)
+	expect(result.router.main).toBe('./start-entry.generated.ts')
+	const source = routerEntrySource(input.release, input.assetPaths)
+	for (const path of input.assetPaths)
+		expect(source).toContain(JSON.stringify(path))
+	expect(assetManifestDigest(input.assetPaths)).toBe(
+		assetManifestDigest([...input.assetPaths].reverse()),
+	)
+	expect(assetManifestDigest(input.assetPaths)).not.toBe(
+		assetManifestDigest(input.assetPaths.slice(1)),
+	)
 })

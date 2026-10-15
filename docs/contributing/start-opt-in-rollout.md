@@ -203,3 +203,10 @@ candidate, even if available in GitHub. The complete live inventory still
 participates in drift checks, and every other unknown or unavailable website
 secret blocks deployment. Turnstile's existing site/secret pair remains required
 whenever present in live inventory because native website auth forms use it.
+
+The router bundles the exact release asset list in its generated source entry.
+Only the SHA-256 digest of its sorted JSON list is stored in a text binding.
+Activation verifies this digest against the reviewed manifest and the proven
+immutable router version. No asset path prefix or wildcard grants access. Before
+creating either worker, deployment checks all text and secret bindings against
+Cloudflare's 5120 byte limit and dry-runs the router build.

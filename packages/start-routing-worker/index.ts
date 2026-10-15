@@ -16,7 +16,12 @@ export type RoutingEnv = {
 	APP_BASE_URL: string
 	START_ALLOWED_PERSON_IDS: string
 	START_RELEASE: string
-	START_ASSET_PATHS: string
+	START_ASSET_MANIFEST_SHA256: string
+}
+export type AssetManifest = {
+	release: string
+	assetPaths: ReadonlyArray<string>
+	digest: string
 }
 type Config = {
 	origin: string
@@ -36,7 +41,11 @@ const controlPrefix = '/__start/'
 const preferenceCookieName = '__Host-kody_start'
 const preferenceLifetime = 30 * 24 * 60 * 60
 
-function config(env: RoutingEnv): Config {
+function config(
+	env: RoutingEnv,
+	manifest: AssetManifest,
+	actualDigest: string,
+): Config {
 	const origin = new URL(env.APP_BASE_URL)
 	if (origin.protocol !== 'https:' || origin.href !== `${origin.origin}/`)
 		throw new Error('A canonical HTTPS origin is required')
@@ -51,10 +60,18 @@ function config(env: RoutingEnv): Config {
 	if (!/^[a-f0-9]{40}$/.test(env.START_RELEASE))
 		throw new Error('Configure an immutable release SHA')
 	const prefix = `${controlPrefix}${env.START_RELEASE}/`
-	const paths: unknown = JSON.parse(env.START_ASSET_PATHS)
+	if (
+		manifest.release !== env.START_RELEASE ||
+		!/^[a-f0-9]{64}$/.test(manifest.digest) ||
+		manifest.digest !== actualDigest ||
+		env.START_ASSET_MANIFEST_SHA256 !== actualDigest
+	)
+		throw new Error('Bundled asset manifest must match the reviewed release')
+	const paths = manifest.assetPaths
 	if (
 		!Array.isArray(paths) ||
 		paths.length === 0 ||
+		new Set(paths).size !== paths.length ||
 		paths.some(
 			(path) =>
 				typeof path !== 'string' ||
@@ -282,10 +299,15 @@ async function forward(service: Service, request: Request) {
 		return response(502, 'The selected app is unavailable. Reload to retry.')
 	}
 }
-export async function routeRequest(request: Request, env: RoutingEnv) {
+async function routeRequest(
+	request: Request,
+	env: RoutingEnv,
+	manifest: AssetManifest,
+	digest: () => Promise<string>,
+) {
 	let settings: Config
 	try {
-		settings = config(env)
+		settings = config(env, manifest, await digest())
 	} catch {
 		return new URL(request.url).pathname.startsWith(controlPrefix)
 			? response(503, 'Start rollout is not configured.')
@@ -362,4 +384,32 @@ function privateResponse(source: Response) {
 		headers,
 	})
 }
-export default { fetch: routeRequest }
+/** Each immutable deployment bundles its exact assets, never a public path prefix. */
+export function createRoutingWorker(input: AssetManifest) {
+	const manifest = Object.freeze({
+		release: input.release,
+		digest: input.digest,
+		assetPaths: Object.freeze([...input.assetPaths]),
+	})
+	let digest: Promise<string> | undefined
+	const actualDigest = () =>
+		(digest ??= crypto.subtle
+			.digest(
+				'SHA-256',
+				new TextEncoder().encode(
+					JSON.stringify([...manifest.assetPaths].sort()),
+				),
+			)
+			.then((bytes) =>
+				[...new Uint8Array(bytes)]
+					.map((byte) => byte.toString(16).padStart(2, '0'))
+					.join(''),
+			))
+	return {
+		fetch: (request: Request, env: RoutingEnv) =>
+			routeRequest(request, env, manifest, actualDigest),
+	}
+}
+
+// The source config is inactive until a generated entry supplies a pinned manifest.
+export default createRoutingWorker({ release: '', assetPaths: [], digest: '' })

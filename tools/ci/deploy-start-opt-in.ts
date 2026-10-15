@@ -1,3 +1,7 @@
+import {
+	assetManifestDigest,
+	routerEntrySource,
+} from './start-rollout-config.ts'
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -270,10 +274,26 @@ export function inactiveDeployInvocation(
 	}
 }
 
+export function assertBindingSizes(
+	config: Config,
+	secrets: Record<string, string>,
+) {
+	const vars = (config.vars ?? {}) as Config
+	for (const [name, value] of [
+		...Object.entries(vars),
+		...Object.entries(secrets),
+	]) {
+		const text = typeof value === 'string' ? value : JSON.stringify(value)
+		if (Buffer.byteLength(text, 'utf8') > 5120)
+			throw new Error(`Cloudflare text binding exceeds 5120 bytes: ${name}`)
+	}
+}
+
 async function deploy(
 	config: string,
 	name: string,
 	secrets: Record<string, string>,
+	dryRun = false,
 ) {
 	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-secrets-'))
 	try {
@@ -291,6 +311,12 @@ async function deploy(
 		)
 		const binary = resolveLocalBinary('wrangler')
 		const invocation = inactiveDeployInvocation(config, name, file)
+		if (dryRun)
+			invocation.args.push(
+				'--dry-run',
+				'--outdir',
+				path.join(directory, 'build'),
+			)
 		await new Promise<void>((resolve, reject) => {
 			const child = spawn(binary, invocation.args, {
 				cwd: invocation.cwd,
@@ -328,6 +354,8 @@ if (isExecutedDirectly(import.meta.url)) {
 	) as Config
 	assertInactiveConfig(candidate, candidateName)
 	assertInactiveConfig(router, routerName)
+	if (router.main !== './start-entry.generated.ts')
+		throw new Error('Router must use the reviewed compiled manifest entry')
 	const liveNames = JSON.parse(
 		await readFile('.tmp/start-opt-in/secret-names.json', 'utf8'),
 	) as Array<string>
@@ -362,11 +390,29 @@ if (isExecutedDirectly(import.meta.url)) {
 	const routerConfig =
 		'packages/start-routing-worker/wrangler-start.generated.json'
 	await writeFile(routerConfig, JSON.stringify(router, null, '\t'))
-	await deploy('dist/server/wrangler.json', candidateName, candidateSecrets)
-	await deploy(routerConfig, routerName, {
+	const review = JSON.parse(
+		await readFile('.tmp/start-opt-in/review.json', 'utf8'),
+	) as { manifest: { release: string; assetPaths: string[] } }
+	if (
+		review.manifest.release !== release ||
+		(router.vars as Config).START_ASSET_MANIFEST_SHA256 !==
+			assetManifestDigest(review.manifest.assetPaths)
+	)
+		throw new Error('Router compiled manifest does not match reviewed release')
+	await writeFile(
+		'packages/start-routing-worker/start-entry.generated.ts',
+		routerEntrySource(release, review.manifest.assetPaths),
+	)
+	const routerSecrets = {
 		COOKIE_SECRET: candidateSecrets.COOKIE_SECRET!,
 		START_ROLLOUT_SECRET: rolloutSecret,
-	})
+	}
+	assertBindingSizes(candidate, candidateSecrets)
+	assertBindingSizes(router, routerSecrets)
+	// Compile all router source before creating either immutable worker.
+	await deploy(routerConfig, routerName, routerSecrets, true)
+	await deploy('dist/server/wrangler.json', candidateName, candidateSecrets)
+	await deploy(routerConfig, routerName, routerSecrets)
 	for (const name of [candidateName, routerName]) {
 		const subdomain = (await cf(`workers/scripts/${name}/subdomain`)) as {
 			enabled?: boolean

@@ -2,7 +2,10 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseJsonc } from './resource-utils.ts'
 import { normalizeInactiveBuildConfig } from './start-opt-in-inactive-config.ts'
-import { buildStartRolloutConfig } from './start-rollout-config.ts'
+import {
+	buildStartRolloutConfig,
+	routerEntrySource,
+} from './start-rollout-config.ts'
 import { isExecutedDirectly } from '../node-runtime.ts'
 
 type RecordValue = Record<string, unknown>
@@ -301,6 +304,10 @@ if (isExecutedDirectly(import.meta.url)) {
 			allowedPersonIds: people,
 			assetPaths,
 		})
+		await writeFile(
+			'packages/start-routing-worker/start-entry.generated.ts',
+			routerEntrySource(release, assetPaths),
+		)
 		const built = normalizeInactiveBuildConfig(
 			object(JSON.parse(await readFile('dist/server/wrangler.json', 'utf8'))),
 			String(bundle.candidate.name),

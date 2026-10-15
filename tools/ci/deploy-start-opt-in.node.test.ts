@@ -2,6 +2,7 @@ import { assertInactiveConfig } from './start-opt-in-inactive-config.ts'
 import { expect, test } from 'vitest'
 import {
 	assertProductionSnapshot,
+	assertBindingSizes,
 	assertSharedBindings,
 	collectCandidateSecrets,
 	inactiveDeployInvocation,
@@ -384,4 +385,18 @@ test('deploys router source from its config directory and preserves bundled cand
 	)
 	expect(candidate.cwd).toBe(root)
 	expect(candidate.args[2]).toBe('dist/server/wrangler.json')
+})
+
+test('preflights every text and secret binding using UTF8 bytes without revealing values', () => {
+	expect(() =>
+		assertBindingSizes({ vars: { OK: 'a'.repeat(5120) } }, {}),
+	).not.toThrow()
+	for (const [config, secrets, name] of [
+		[{ vars: { LONG: 'a'.repeat(5121) } }, {}, 'LONG'],
+		[{ vars: { UNICODE: 'é'.repeat(2561) } }, {}, 'UNICODE'],
+		[{ vars: { JSON: { content: 'a'.repeat(5120) } } }, {}, 'JSON'],
+		[{}, { SECRET: 'a'.repeat(5121) }, 'SECRET'],
+	] as const) {
+		expect(() => assertBindingSizes(config, secrets)).toThrow(name)
+	}
 })

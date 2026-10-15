@@ -179,6 +179,7 @@ jobs:
           path: |
             .tmp/start-opt-in/review.json
             .tmp/start-opt-in/router.json
+            packages/start-routing-worker/start-entry.generated.ts
             .tmp/start-opt-in/deployed.json
             .tmp/start-opt-in/runtime-proof.json
             .tmp/start-opt-in/secret-names.json

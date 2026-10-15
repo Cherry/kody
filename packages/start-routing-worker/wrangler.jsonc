@@ -19,6 +19,6 @@
 		"APP_BASE_URL": "https://kody.codes",
 		"START_ALLOWED_PERSON_IDS": "[]",
 		"START_RELEASE": "",
-		"START_ASSET_PATHS": "[]",
+		"START_ASSET_MANIFEST_SHA256": "",
 	},
 }
