@@ -16,14 +16,6 @@ export type TokenExchangeStyleOption =
 	| 'basic-json'
 	| 'basic-form'
 
-export function readSearchFilter(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
-export function getCurrentSearch(href: string) {
-	return new URL(href, 'http://localhost').search
-}
-
 export function buildHrefWithUpdatedSearch(href: string, search: string) {
 	const nextUrl = new URL(href, 'http://localhost')
 	if (search) nextUrl.searchParams.set('q', search)

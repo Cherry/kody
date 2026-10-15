@@ -80,23 +80,6 @@ export const subjectCellCss: CSSObject = {
 	minWidth: 0,
 } as const
 
-export function readSearchQuery(href: string) {
-	return new URL(href, 'http://localhost').searchParams.get('q')?.trim() ?? ''
-}
-
-export function readPage(href: string) {
-	const raw = new URL(href, 'http://localhost').searchParams.get('page')
-	const parsed = raw ? Number.parseInt(raw, 10) : 1
-	return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
-}
-
-export function readClassificationFilter(href: string): ClassificationFilter {
-	const raw = new URL(href, 'http://localhost').searchParams
-		.get('classification')
-		?.trim()
-	return raw === 'quarantined' ? 'quarantined' : 'all'
-}
-
 export function messageDate(message: AccountEmailMessageListItem) {
 	return message.received_at ?? message.sent_at ?? message.created_at
 }

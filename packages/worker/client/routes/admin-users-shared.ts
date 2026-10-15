@@ -2,10 +2,7 @@ import { createListDetailLinks } from '#client/list-detail-route.ts'
 import { formatIntegerNumber } from '#client/charts/chart-theme.ts'
 import { isUnlimitedLimit } from '#universal/plans.ts'
 
-import {
-	isAdminUserVerificationFilter,
-	type AdminUserVerificationFilter,
-} from '#universal/email-verification-delivery.ts'
+import { type AdminUserVerificationFilter } from '#universal/email-verification-delivery.ts'
 
 const { buildDetailHref } = createListDetailLinks('/admin/users')
 
@@ -24,19 +21,6 @@ export type AdminUserFilterState = {
 	verification: AdminUserVerificationFilter | ''
 }
 
-/** Read the `q`/`role`/`verification` filter params the server applies. */
-export function readFilterState(href: string): AdminUserFilterState {
-	const url = new URL(href, 'http://localhost')
-	const rawVerification = url.searchParams.get('verification')?.trim() ?? ''
-	return {
-		search: url.searchParams.get('q')?.trim() ?? '',
-		role: url.searchParams.get('role')?.trim() ?? '',
-		verification: isAdminUserVerificationFilter(rawVerification)
-			? rawVerification
-			: '',
-	}
-}
-
 export function buildUserDetailHrefFrom(
 	currentHref: string,
 	stableUserId: string,
@@ -44,9 +28,4 @@ export function buildUserDetailHrefFrom(
 	const url = new URL(currentHref, 'http://localhost')
 	url.searchParams.delete('page')
 	return buildDetailHref(stableUserId, url.search)
-}
-
-export function parseSelectedStableUserId(value: string | null): string | null {
-	if (!value || !/^[a-f0-9]{64}$/.test(value)) return null
-	return value
 }
