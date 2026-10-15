@@ -12,39 +12,61 @@ const router = createRouter({
 	history: createMemoryHistory(),
 	context: { queryClient: new QueryClient(), getCommittedPage: () => null },
 })
-test('native negotiated routes own the Accept cache boundary', () => {
-	for (const pathname of [
-		'/',
-		'/use-cases',
-		'/use-cases/mcp-gateway',
-		'/compare/n8n-alternatives',
-		'/integrations/slack',
-		'/docs',
-		'/docs/',
-		'/docs/connect',
-		'/docs/secrets',
-		'/docs/secrets/',
-		'/blog/hello',
-	]) {
-		const [, , route] = router.getMatchedRoutes(pathname)
-		expect(route?.options.server?.middleware).toContain(negotiatedDocument)
-	}
-	for (const pathname of [
-		'/pricing',
-		'/blog',
-		'/docs.json',
-		'/docs/secrets.json',
-		'/docs/secrets.md',
-		'/docs/connect/github',
-		'/blog/hello/image',
-		'/_serverFn/example',
-	]) {
-		const [, , route] = router.getMatchedRoutes(pathname)
-		expect(route?.options.server?.middleware ?? []).not.toContain(
-			negotiatedDocument,
-		)
-	}
+test.each([
+	'/',
+	'/use-cases',
+	'/use-cases/mcp-gateway',
+	'/compare/n8n-alternatives',
+	'/integrations/slack',
+	'/docs',
+	'/docs/',
+	'/docs/connect',
+	'/docs/secrets',
+	'/docs/secrets/',
+	'/blog/hello',
+])('native negotiated route %s owns the Accept cache boundary', (pathname) => {
+	const [, params, route] = router.getMatchedRoutes(pathname)
+	expect(params['**']).toBeUndefined()
+	expect(route?.options.server?.middleware).toContain(negotiatedDocument)
 })
+
+test.each([
+	'/pricing',
+	'/blog',
+	'/docs.json',
+	'/docs/secrets.md',
+	'/_serverFn/example',
+])('non-negotiated path %s does not install Accept middleware', (pathname) => {
+	const [matched] = router.getMatchedRoutes(pathname)
+	expect(
+		matched.flatMap((route) => route.options.server?.middleware ?? []),
+	).not.toContain(negotiatedDocument)
+})
+
+test('unknown docs extensions remain document slugs, not protocol routes', () => {
+	const [, params, route] = router.getMatchedRoutes('/docs/secrets.json')
+	expect(route?.id).toBe('/docs/$slug')
+	expect(params).toMatchObject({ slug: 'secrets.json' })
+	expect(params['**']).toBeUndefined()
+	expect(route?.options.server?.middleware).toContain(negotiatedDocument)
+})
+
+test.each([
+	['/docs/connect/github', '/docs/connect'],
+	['/blog/hello/image', '/blog/$slug'],
+])(
+	'unmatched child %s keeps its matched document middleware',
+	(pathname, routeId) => {
+		// Start runs matched-route middleware for fuzzy matches too. Only the
+		// HTTP handler is restricted to an exact match, so error variants vary.
+		const [matched, params, route] = router.getMatchedRoutes(pathname)
+		expect(route?.id).toBe(routeId)
+		expect(params['**']).toBeDefined()
+		expect(
+			matched.flatMap((entry) => entry.options.server?.middleware ?? []),
+		).toContain(negotiatedDocument)
+	},
+)
 test('HTML variants preserve status cookies body and existing cache dimensions', async () => {
 	const original = new Response('page', {
 		status: 404,
