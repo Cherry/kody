@@ -1461,6 +1461,7 @@ test("reset client revokes only this user's matching grants and deletes only own
 		['client-123', userId],
 		['client-123', userId],
 		['client-123', userId],
+		['client-123', userId],
 	])
 	expect(mcpEventDeletes(ownedClientWrites)).toEqual([['client-123']])
 })
