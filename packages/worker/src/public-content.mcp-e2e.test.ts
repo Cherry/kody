@@ -185,7 +185,7 @@ test.each(['/features/secrets', '/features/integrations'])(
 	'retired feature %s permanently redirects without dropping attribution',
 	async (path) => {
 		const server = await getSharedMcpE2eServer()
-		const url = new URL(`${path}?utm_source=test&ref=shared`, server.origin)
+		const url = new URL(`${path}?utm_source=test`, server.origin)
 		const response = await fetch(url, { redirect: 'manual' })
 		expect(response.status).toBe(301)
 		const location = response.headers.get('Location')
@@ -195,6 +195,24 @@ test.each(['/features/secrets', '/features/integrations'])(
 		expect(destination.pathname).toBe('/features/credentials')
 		expect(destination.search).toBe(url.search)
 		expect(response.headers.get('Cache-Control')).toBe('public, max-age=3600')
+		expect(response.headers.has('Set-Cookie')).toBe(false)
+
+		// Referral attribution deliberately makes the response uncacheable:
+		// its Set-Cookie must never be shared with another visitor.
+		url.searchParams.set('ref', 'shared')
+		const referralResponse = await fetch(url, { redirect: 'manual' })
+		expect(referralResponse.status).toBe(301)
+		const referralDestination = new URL(
+			referralResponse.headers.get('Location')!,
+			server.origin,
+		)
+		expect(referralDestination.origin).toBe(server.origin)
+		expect(referralDestination.pathname).toBe('/features/credentials')
+		expect(referralDestination.search).toBe(url.search)
+		expect(referralResponse.headers.get('Cache-Control')).toBe('no-store')
+		expect(referralResponse.headers.get('Set-Cookie')).toContain(
+			'kody_ref=shared;',
+		)
 	},
 )
 
@@ -351,9 +369,10 @@ test('homepage renders ordered videos and the agent-led CTA for every session', 
 	)
 	expect(home).not.toContain('data-embed-playlist')
 	expect(home).not.toContain('href="/onboarding"')
-	expect(home).not.toMatch(
-		/<[a-z][^>]*\sclass="(?:[^" ]+ )*landing-lantern(?: [^"]*)?"/,
-	)
+	// Main retains the decorative hero lantern, but the interactive primitives
+	// section lives on /features, not the home page.
+	expect(home).toMatch(/<figure class="landing-lantern" data-decorative=""/)
+	expect(home).not.toContain('class="landing-primitives"')
 	const user = createUniqueTestUser()
 	await server.ensureUser(user)
 	const cookie = await loginToApp(server.origin, user)
