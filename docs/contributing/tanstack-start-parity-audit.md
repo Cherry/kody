@@ -2,6 +2,42 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `665fa04ff`
+
+Validate `38700601053` completed for `6d7ea0401`: Workers, MCP and browser E2E
+passed; Static and Node failed. The Node job passed 6055 tests and failed nine
+tests, with additional suite-load failures. Corrections preserve scoped write
+and persisted-state assertions while updating obsolete page-result expectations,
+validator mocks, reset mock defaults, and detached reconciliation timing.
+
+Head `665fa04ff` includes those corrections, the prior navigation settlement
+fixes, and separate typed invite operations. Package invite creation and
+revocation no longer rebuild lists after writes. Invite reads include actor
+metadata and cancellation signals for identity-aware refresh. Static checks
+passed for the changed code; runtime verification is pending in Validate
+`38702598529`. Preview run `38702598610` is also pending. The last verified
+deployment remains `fb02ca65fc255520eebb4c34976bf436b451fe14`.
+
+Authenticated preview and matched visual comparisons remain incomplete. Passing
+the earlier E2E job does not establish parity for these later changes.
+
+Critical-action coverage review found these remaining gaps in browser test source:
+
+- Package settings: publish, visibility, lock and deletion need real UI writes,
+  persistence checks and denied-user cases. Existing package access and
+  collaborator tests do not cover those operations.
+- Billing: `late-checkout.spec.ts` checks a navigation race with a mocked
+  checkout response, not successful checkout, portal or return reconciliation.
+- Organization permissions: missing role-change or member-removal UI journeys
+  followed by warm-cache navigation and a rejected write as the revoked member.
+- Invites: existing creation and acceptance journeys do not establish link
+  revocation, expiration, duplicate acceptance or lost-response behavior.
+- Passkeys and two-factor authentication have successful browser journeys, but
+  cancellation and failure coverage is incomplete.
+
+These are coverage gaps, not observed product failures. The full E2E directory
+is included by Playwright, so coverage outside `e2e/start` also counts.
+
 ### Follow-up at source `7ac5a2af0`
 
 Preview run `38700600974` deployed merge
