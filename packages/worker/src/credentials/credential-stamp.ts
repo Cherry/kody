@@ -458,6 +458,10 @@ export function collectServerRuntimeModulePaths(
 	}
 	void getPackageAppClientEntryPath(manifest)
 
+	// Reachability alone keeps unreferenced static assets (multi-MB client
+	// bundles under kody.app.assets) off this set. Do not drop assets by
+	// directory prefix: a server import of an asset module must still follow
+	// the server_eval rule and stay stamp-scanned via listScannableModulePaths.
 	const serverReachable = new Set<string>()
 	for (const entry of serverEntries) {
 		for (const path of collectReachableSourceFilePaths({
