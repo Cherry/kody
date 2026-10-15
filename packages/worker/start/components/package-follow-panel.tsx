@@ -11,6 +11,7 @@ import {
 import { followTarget, unfollowTarget } from '#start/server/follows'
 import { packageFollowQuery, followMutationOptions } from '../follows-query.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { SiteLink } from './site-link.tsx'
 import { PackageFollowContext } from './package-follow-context.ts'
 import {
 	describeFollowEvents,
@@ -421,12 +422,12 @@ function FollowProvider({
 				) : null}
 				<p css={mutedSmallCss}>
 					{followDeliveryNote}{' '}
-					<a
+					<SiteLink
 						href={orgResourcePath(workspace.slug, 'follows')}
 						data-testid="package-follow-manage"
 					>
 						Manage follows
-					</a>
+					</SiteLink>
 				</p>
 			</>
 		)
