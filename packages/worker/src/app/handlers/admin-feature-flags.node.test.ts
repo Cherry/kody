@@ -402,7 +402,7 @@ function createFeatureFlagsClient(
 			flag: Record<string, unknown>,
 		) {
 			expect(response.status).toBe(200)
-			const body = (await Promise.resolve(response.data)) as {
+			const body = (await send()).data as {
 				ok: boolean
 				featureFlags: Array<{ key: string }>
 			}

@@ -1,6 +1,5 @@
 import { base64ToBytes } from '@kody-internal/shared/base64.ts'
 import { canonicalIntegrationName } from '#mcp/capabilities/integrations/integration-shared.ts'
-import { loadAdminPlatformIntegrationsData } from '#app/admin-platform-integrations-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import type { PlatformIntegrationSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
@@ -144,9 +143,7 @@ export async function saveAdminPlatformIntegration(input: {
 		path: '/admin/platform-integrations',
 		reason: `platform_oauth_app=${slug}`,
 	})
-	return adminOperationResult(
-		await loadAdminPlatformIntegrationsData(input.env),
-	)
+	return adminOperationResult({ ok: true as const })
 }
 
 export async function deleteAdminPlatformIntegration(input: {
@@ -202,9 +199,7 @@ export async function deleteAdminPlatformIntegration(input: {
 		path: '/admin/platform-integrations',
 		reason: `platform_oauth_app=${slug}`,
 	})
-	return adminOperationResult(
-		await loadAdminPlatformIntegrationsData(input.env),
-	)
+	return adminOperationResult({ ok: true as const })
 }
 
 function optionalText(value: string | null | undefined) {

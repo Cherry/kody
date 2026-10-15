@@ -1,5 +1,4 @@
 import { base64ToBytes } from '@kody-internal/shared/base64.ts'
-import { loadAdminProviderMarksData } from '#app/admin-provider-marks-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import type { ProviderMarkSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
@@ -81,7 +80,7 @@ export async function saveAdminProviderMark(input: {
 			path: '/admin/provider-marks',
 			reason: `platform_provider_mark=${mark.slug}`,
 		})
-		return adminOperationResult(await loadAdminProviderMarksData(input.env))
+		return adminOperationResult({ ok: true as const })
 	} catch (error) {
 		if (error instanceof PlatformProviderMarkValidationError) {
 			return adminOperationResult({ ok: false, error: error.message }, 400)
@@ -130,5 +129,5 @@ export async function deleteAdminProviderMark(input: {
 		path: '/admin/provider-marks',
 		reason: `platform_provider_mark=${slug}`,
 	})
-	return adminOperationResult(await loadAdminProviderMarksData(input.env))
+	return adminOperationResult({ ok: true as const })
 }

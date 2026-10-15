@@ -22,7 +22,6 @@ import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
 import { colors, typography } from '#universal/styles/tokens.ts'
 import { css } from '@emotion/react'
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
-import { type QueryKey } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import {
 	useEffect,
@@ -32,7 +31,9 @@ import {
 	type FormEvent,
 } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useMutation } from '@tanstack/react-query'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -47,27 +48,25 @@ import {
 	recordStampCss,
 } from './record-table.tsx'
 const clampedCellCss = css(recordCellClamp(28))
-type AdminWrite =
-	| ({ action: 'save' } & PlatformIntegrationSaveInput)
-	| { action: 'delete'; slug: string }
 export function AdminPlatformIntegrationsPage(props: {
-	queryKey: QueryKey
 	payload: AdminPlatformIntegrationsLoaderData
 	currentHref: string
 }) {
 	const { apps } = props.payload
-	const mutation = usePageResponseMutation<
-		AdminPlatformIntegrationsLoaderData,
-		AdminWrite
-	>(
-		props.queryKey,
-		'loadAdminPlatformIntegrations',
-		(body) =>
-			body.action === 'delete'
-				? deleteAdminPlatformIntegration({ data: { slug: body.slug } })
-				: saveAdminPlatformIntegration({ data: body }),
-		{ dependencies: mutationResources },
-	)
+	const captureSubmitter = useSubmitterScope()
+	const invalidate = usePageInvalidation(mutationResources)
+	const saveMutation = useMutation({
+		gcTime: 0,
+		mutationFn: saveAdminPlatformIntegration,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const removeMutation = useMutation({
+		gcTime: 0,
+		mutationFn: deleteAdminPlatformIntegration,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 	const router = useRouter()
 	const replaceLocation = (href: string) =>
 		router.navigate({ href, replace: true })
@@ -111,22 +110,26 @@ export function AdminPlatformIntegrationsPage(props: {
 		setMessageTone('info')
 	}
 	async function submitAdminAction(
-		body: AdminWrite,
+		submit: () => Promise<unknown>,
 		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
+		slug: string,
 	): Promise<boolean> {
+		const isCurrent = captureSubmitter()
 		setActionState(nextActionState)
-		setPendingSlug(typeof body.slug === 'string' ? body.slug : null)
+		setPendingSlug(slug)
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			await mutation.submit(body)
+			await submit()
+			if (!isCurrent()) return false
 			if (lifetime.current?.signal.aborted) return false
 			applyData()
 			setMessage(successMessage)
 			setMessageTone('info')
 			return true
 		} catch (error) {
+			if (!isCurrent()) return false
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -135,8 +138,8 @@ export function AdminPlatformIntegrationsPage(props: {
 			setMessageTone('error')
 			return false
 		} finally {
-			setActionState('idle')
-			setPendingSlug(null)
+			if (isCurrent()) setActionState('idle')
+			if (isCurrent()) setPendingSlug(null)
 		}
 	}
 	function handleLogoFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -195,8 +198,7 @@ export function AdminPlatformIntegrationsPage(props: {
 			setMessageTone('error')
 			return
 		}
-		const body: AdminWrite = {
-			action: 'save',
+		const body: PlatformIntegrationSaveInput = {
 			slug,
 			...(newSlug ? { newSlug } : {}),
 			clientId,
@@ -242,13 +244,14 @@ export function AdminPlatformIntegrationsPage(props: {
 			body.logoBase64 = pendingLogoBase64
 		}
 		void submitAdminAction(
-			body,
+			() => saveMutation.mutateAsync({ data: body }),
 			'saving-form',
 			newSlug
 				? `Renamed platform integration ${slug} to ${newSlug}.`
 				: isEditing
 					? `Saved platform integration ${slug}.`
 					: `Created platform integration ${slug}.`,
+			slug,
 		).then((ok) => {
 			if (!ok) return
 			resetFormState()
@@ -265,45 +268,54 @@ export function AdminPlatformIntegrationsPage(props: {
 	}
 	function handleToggleEnabled(app: AdminPlatformIntegrationApp) {
 		void submitAdminAction(
-			{
-				action: 'save',
-				slug: app.slug,
-				clientId: app.clientId,
-				tokenUrl: app.tokenUrl,
-				authorizeUrl: app.authorizeUrl,
-				flow: app.flow,
-				enabled: !app.enabled,
-			},
+			() =>
+				saveMutation.mutateAsync({
+					data: {
+						slug: app.slug,
+						clientId: app.clientId,
+						tokenUrl: app.tokenUrl,
+						authorizeUrl: app.authorizeUrl,
+						flow: app.flow,
+						enabled: !app.enabled,
+					},
+				}),
 			'toggling-enabled',
 			`${app.enabled ? 'Disabled' : 'Enabled'} ${app.slug}.`,
+			app.slug,
 		)
 	}
 	function handleToggleVisibility(app: AdminPlatformIntegrationApp) {
 		const visibility = app.visibility === 'published' ? 'draft' : 'published'
 		void submitAdminAction(
-			{
-				action: 'save',
-				slug: app.slug,
-				clientId: app.clientId,
-				tokenUrl: app.tokenUrl,
-				authorizeUrl: app.authorizeUrl,
-				flow: app.flow,
-				visibility,
-			},
+			() =>
+				saveMutation.mutateAsync({
+					data: {
+						slug: app.slug,
+						clientId: app.clientId,
+						tokenUrl: app.tokenUrl,
+						authorizeUrl: app.authorizeUrl,
+						flow: app.flow,
+						visibility,
+					},
+				}),
 			'toggling-visibility',
 			visibility === 'published'
 				? `Published ${app.slug}.`
 				: `Moved ${app.slug} to draft.`,
+			app.slug,
 		)
 	}
 	function handleDelete(app: AdminPlatformIntegrationApp) {
 		void submitAdminAction(
-			{
-				action: 'delete',
-				slug: app.slug,
-			},
+			() =>
+				removeMutation.mutateAsync({
+					data: {
+						slug: app.slug,
+					},
+				}),
 			'deleting',
 			`Deleted platform integration ${app.slug}.`,
+			app.slug,
 		).then((ok) => {
 			if (!ok) return
 			const href = props.currentHref

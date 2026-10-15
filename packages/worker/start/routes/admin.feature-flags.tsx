@@ -22,21 +22,12 @@ export const Route = createFileRoute('/admin/feature-flags')({
 	component: FeatureFlagsPage,
 })
 function FeatureFlagsPage() {
-	const mutationContext = Route.useRouteContext()
-	const mutationQueryKey = pageQuery(
-		mutationContext.actorKey,
-		mutationContext.pageQueryInput,
-	).queryKey
 	const data = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
-		<AdminFeatureFlagsPage
-			queryKey={mutationQueryKey}
-			payload={data.payload}
-			currentHref={location.href}
-		/>
+		<AdminFeatureFlagsPage payload={data.payload} currentHref={location.href} />
 	)
 }
 

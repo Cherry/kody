@@ -4,7 +4,6 @@ import {
 	type ClearFeatureFlagOverrideInput,
 } from '#universal/admin-setting-mutations.ts'
 import { adminOperationResult } from './operation-result.ts'
-import { loadAdminFeatureFlagsData } from '#app/admin-feature-flags-data.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -106,7 +105,7 @@ export async function setAdminGlobalFeatureFlag(input: {
 			.join(';'),
 	})
 
-	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
+	return adminOperationResult({ ok: true as const })
 }
 
 export async function setAdminFeatureFlagOverride(input: {
@@ -167,7 +166,7 @@ export async function setAdminFeatureFlagOverride(input: {
 		].join(';'),
 	})
 
-	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
+	return adminOperationResult({ ok: true as const })
 }
 
 export async function clearAdminFeatureFlagOverride(input: {
@@ -221,7 +220,7 @@ export async function clearAdminFeatureFlagOverride(input: {
 		].join(';'),
 	})
 
-	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
+	return adminOperationResult({ ok: true as const })
 }
 
 export async function deleteAdminStaleFeatureFlag(input: {
@@ -271,7 +270,7 @@ export async function deleteAdminStaleFeatureFlag(input: {
 		reason: `key=${key}`,
 	})
 
-	return adminOperationResult(await loadAdminFeatureFlagsData(input.env))
+	return adminOperationResult({ ok: true as const })
 }
 
 type ResolveOverrideUserIdResult =

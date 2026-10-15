@@ -145,7 +145,8 @@ test('admin provider marks API saves, lists, and deletes marks, refusing logo wr
 
 	const saved = await call(saveGoogle)
 	expect(saved.status).toBe(200)
-	const savedBody = (await Promise.resolve(saved.data)) as {
+	expect(saved.data).toEqual({ ok: true })
+	const savedBody = (await call()).data as {
 		ok: true
 		marks: Array<{ slug: string; logoPath: string | null }>
 	}
@@ -159,7 +160,8 @@ test('admin provider marks API saves, lists, and deletes marks, refusing logo wr
 		{ storage: false },
 	)
 	expect(relabeled.status).toBe(200)
-	await expect(Promise.resolve(relabeled.data)).resolves.toMatchObject({
+	expect(relabeled.data).toEqual({ ok: true })
+	expect((await call()).data).toMatchObject({
 		marks: [
 			{
 				slug: 'google',
@@ -180,4 +182,21 @@ test('admin provider marks API saves, lists, and deletes marks, refusing logo wr
 		ok: true,
 		marks: [],
 	})
+})
+
+test('accepted provider mark writes do not depend on rebuilding the admin page', async () => {
+	const { call, listSlugs } = createMarksClient()
+	const pageData = await import('#app/admin-provider-marks-data.ts')
+	const load = vi
+		.spyOn(pageData, 'loadAdminProviderMarksData')
+		.mockRejectedValue(new Error('List unavailable'))
+	try {
+		const saved = await call(saveGoogle)
+		expect(saved.status).toBe(200)
+		expect(saved.data).toEqual({ ok: true })
+		expect(load).not.toHaveBeenCalled()
+	} finally {
+		load.mockRestore()
+	}
+	expect(await listSlugs()).toEqual(['google'])
 })

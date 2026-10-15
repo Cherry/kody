@@ -115,7 +115,12 @@ function createHarness() {
 				) VALUES (?, ?, NULL, ?)`,
 			)
 			.run('user-1', 'github', 'github')
-	return { sqlite, invoke, connectGithubUser }
+	const read = async () => {
+		const { loadAdminPlatformIntegrationsData } =
+			await import('#app/admin-platform-integrations-data.ts')
+		return loadAdminPlatformIntegrationsData(env)
+	}
+	return { sqlite, invoke, connectGithubUser, read }
 }
 
 const saveGithubBody = {
@@ -140,7 +145,7 @@ const editGithubBody = {
 }
 
 test('admin save and delete require admin and return HTTP shapes without echoing secrets', async () => {
-	const { sqlite, invoke, connectGithubUser } = createHarness()
+	const { sqlite, invoke, connectGithubUser, read } = createHarness()
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(
 		createActor(['user']),
@@ -149,7 +154,8 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 
 	const created = await invoke(saveGithubBody)
 	expect(created.status).toBe(200)
-	const createdPayload = (await Promise.resolve(created.data)) as AppsPayload
+	expect(created.data).toEqual({ ok: true })
+	const createdPayload = (await read()) as AppsPayload
 	expect(createdPayload.apps[0]).toMatchObject({
 		slug: 'github',
 		hasClientSecret: true,
@@ -168,16 +174,14 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 		visibility: 'published',
 	})
 	expect(publish.status).toBe(200)
-	expect(
-		((await Promise.resolve(publish.data)) as AppsPayload).apps[0],
-	).toMatchObject({
+	expect(publish.data).toEqual({ ok: true })
+	expect(((await read()) as AppsPayload).apps[0]).toMatchObject({
 		enabled: true,
 		visibility: 'published',
 	})
 	const kept = await invoke({ ...editGithubBody, slug: 'github' })
-	expect(
-		((await Promise.resolve(kept.data)) as AppsPayload).apps[0],
-	).toMatchObject({
+	expect(kept.data).toEqual({ ok: true })
+	expect(((await read()) as AppsPayload).apps[0]).toMatchObject({
 		visibility: 'published',
 	})
 	expect(
@@ -192,9 +196,8 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 		slug: 'github',
 		visibility: 'draft',
 	})
-	expect(
-		((await Promise.resolve(unpublish.data)) as AppsPayload).apps[0],
-	).toMatchObject({
+	expect(unpublish.data).toEqual({ ok: true })
+	expect(((await read()) as AppsPayload).apps[0]).toMatchObject({
 		enabled: true,
 		visibility: 'draft',
 	})
@@ -216,7 +219,7 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 })
 
 test('save with newSlug renames in place, keeping the secret and connections', async () => {
-	const { sqlite, invoke, connectGithubUser } = createHarness()
+	const { sqlite, invoke, connectGithubUser, read } = createHarness()
 
 	await invoke(saveGithubBody)
 	connectGithubUser()
@@ -229,7 +232,8 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 		label: 'GitHub',
 	})
 	expect(renamed.status).toBe(200)
-	const payload = (await Promise.resolve(renamed.data)) as AppsPayload
+	expect(renamed.data).toEqual({ ok: true })
+	const payload = (await read()) as AppsPayload
 	expect(payload.apps.map((app: { slug: string }) => app.slug)).toEqual([
 		'github-platform',
 	])
@@ -267,7 +271,8 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 		label: 'GitHub (case-only edit)',
 	})
 	expect(caseOnly.status).toBe(200)
-	const caseOnlyPayload = (await Promise.resolve(caseOnly.data)) as AppsPayload
+	expect(caseOnly.data).toEqual({ ok: true })
+	const caseOnlyPayload = (await read()) as AppsPayload
 	expect(
 		caseOnlyPayload.apps.find(
 			(app: { slug: string }) => app.slug === 'github-platform',
@@ -286,7 +291,8 @@ test('save with newSlug renames in place, keeping the secret and connections', a
 	})
 	expect(failedEdit.status).toBe(400)
 	const after = await invoke({ ...editGithubBody, slug: 'github-platform' })
-	const slugs = ((await Promise.resolve(after.data)) as AppsPayload).apps.map(
+	expect(after.data).toEqual({ ok: true })
+	const slugs = ((await read()) as AppsPayload).apps.map(
 		(app: { slug: string }) => app.slug,
 	)
 	expect(slugs).toContain('github-platform')

@@ -1,5 +1,4 @@
 import { adminOperationResult } from './operation-result.ts'
-import { loadAdminReservedUsernamesData } from '#app/admin-reserved-usernames-data.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -81,5 +80,5 @@ async function updateReservedUsernames(input: {
 		reason: `usernames=${usernames.join(',')}`,
 	})
 
-	return adminOperationResult(await loadAdminReservedUsernamesData(input.env))
+	return adminOperationResult({ ok: true as const })
 }

@@ -22,19 +22,11 @@ export const Route = createFileRoute('/admin/provider-marks')({
 	component: Page,
 })
 function Page() {
-	const mutationContext = Route.useRouteContext()
-	const mutationQueryKey = pageQuery(
-		mutationContext.actorKey,
-		mutationContext.pageQueryInput,
-	).queryKey
 	const data = usePageData()
 	return data.forbidden ? (
 		<p>Forbidden</p>
 	) : (
-		<AdminProviderMarksRoute
-			queryKey={mutationQueryKey}
-			initialData={data.payload}
-		/>
+		<AdminProviderMarksRoute initialData={data.payload} />
 	)
 }
 

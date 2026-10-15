@@ -25,11 +25,12 @@ import {
 	getSelectCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
-import { type QueryKey } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
 import { renderAdminFeatureFlagAudienceField } from '../components/admin-feature-flag-audience-field.tsx'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useMutation } from '@tanstack/react-query'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -107,70 +108,60 @@ function summarizeEffectiveSource(flag: AdminFeatureFlag): string {
 	}
 	return `on for ${flag.global.rolloutPercent}% of users${audienceSuffix}`
 }
-type FeatureFlagChange =
-	| ({
-			action: 'set_global'
-	  } & import('#universal/admin-setting-mutations.ts').SetGlobalFeatureFlagInput)
-	| ({
-			action: 'set_user_override'
-	  } & import('#universal/admin-setting-mutations.ts').SetFeatureFlagOverrideInput)
-	| ({
-			action: 'clear_user_override'
-	  } & import('#universal/admin-setting-mutations.ts').ClearFeatureFlagOverrideInput)
-	| { action: 'delete_stale'; key: string }
 export function AdminFeatureFlagsPage({
-	queryKey,
 	payload,
 	currentHref,
 }: {
-	queryKey: QueryKey
 	payload: AdminFeatureFlagsLoaderData
 	currentHref: string
 }) {
-	const mutation = usePageResponseMutation<
-		AdminFeatureFlagsLoaderData,
-		FeatureFlagChange
-	>(
-		queryKey,
-		'loadAdminFeatureFlags',
-		(change) => {
-			switch (change.action) {
-				case 'set_global': {
-					const { action: _, ...data } = change
-					return setAdminGlobalFeatureFlag({ data })
-				}
-				case 'set_user_override': {
-					const { action: _, ...data } = change
-					return setAdminFeatureFlagOverride({ data })
-				}
-				case 'clear_user_override': {
-					const { action: _, ...data } = change
-					return clearAdminFeatureFlagOverride({ data })
-				}
-				case 'delete_stale':
-					return deleteAdminStaleFeatureFlag({ data: { key: change.key } })
-			}
-		},
-		{ dependencies: 'permissions', refreshShell: true },
-	)
+	const captureSubmitter = useSubmitterScope()
+	const invalidate = usePageInvalidation('permissions', { refreshShell: true })
+	const setGlobalMutation = useMutation({
+		gcTime: 0,
+		mutationFn: setAdminGlobalFeatureFlag,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const setOverrideMutation = useMutation({
+		gcTime: 0,
+		mutationFn: setAdminFeatureFlagOverride,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const clearOverrideMutation = useMutation({
+		gcTime: 0,
+		mutationFn: clearAdminFeatureFlagOverride,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const deleteStaleMutation = useMutation({
+		gcTime: 0,
+		mutationFn: deleteAdminStaleFeatureFlag,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 	const featureFlags = payload.featureFlags
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
 	async function submitAdminAction(
-		body: FeatureFlagChange,
+		submit: () => Promise<unknown>,
 		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
 	): Promise<boolean> {
+		const isCurrent = captureSubmitter()
 		setActionState(nextActionState)
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			await mutation.submit(body)
+			await submit()
+			if (!isCurrent()) return false
 			setMessage(successMessage)
 			setMessageTone('info')
 			return true
 		} catch (error) {
+			if (!isCurrent()) return false
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -179,7 +170,7 @@ export function AdminFeatureFlagsPage({
 			setMessageTone('error')
 			return false
 		} finally {
-			setActionState('idle')
+			if (isCurrent()) setActionState('idle')
 		}
 	}
 	function handleSaveGlobalSubmit(
@@ -194,14 +185,16 @@ export function AdminFeatureFlagsPage({
 		const audience = String(formData.get('audience') ?? 'everyone').trim()
 		const note = String(formData.get('note') ?? '')
 		void submitAdminAction(
-			{
-				action: 'set_global',
-				key,
-				enabled,
-				rolloutPercent: rolloutRaw === '' ? null : Number(rolloutRaw),
-				audience,
-				note,
-			},
+			() =>
+				setGlobalMutation.mutateAsync({
+					data: {
+						key,
+						enabled,
+						rolloutPercent: rolloutRaw === '' ? null : Number(rolloutRaw),
+						audience,
+						note,
+					},
+				}),
 			'saving-global',
 			`Saved global state for ${key}.`,
 		)
@@ -217,12 +210,14 @@ export function AdminFeatureFlagsPage({
 		const username = String(formData.get('username') ?? '').trim()
 		const enabled = String(formData.get('enabled') ?? 'true') === 'true'
 		void submitAdminAction(
-			{
-				action: 'set_user_override',
-				key,
-				username,
-				enabled,
-			},
+			() =>
+				setOverrideMutation.mutateAsync({
+					data: {
+						key,
+						username,
+						enabled,
+					},
+				}),
 			'saving-override',
 			`Saved override for ${username} on ${key}.`,
 		).then((ok) => {
@@ -571,11 +566,13 @@ export function AdminFeatureFlagsPage({
 												disabled={isMutating}
 												onClick={() =>
 													void submitAdminAction(
-														{
-															action: 'clear_user_override',
-															key: flag.key,
-															stableUserId: override.stableUserId,
-														},
+														() =>
+															clearOverrideMutation.mutateAsync({
+																data: {
+																	key: flag.key,
+																	stableUserId: override.stableUserId,
+																},
+															}),
 														'clearing-override',
 														`Removed override for ${override.username}.`,
 													)
@@ -693,10 +690,12 @@ export function AdminFeatureFlagsPage({
 										disabled={isMutating}
 										onClick={() =>
 											void submitAdminAction(
-												{
-													action: 'delete_stale',
-													key: flag.key,
-												},
+												() =>
+													deleteStaleMutation.mutateAsync({
+														data: {
+															key: flag.key,
+														},
+													}),
 												'deleting-stale',
 												`Deleted stale flag ${flag.key}.`,
 											)

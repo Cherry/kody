@@ -13,9 +13,10 @@ import {
 	getPillButtonCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
-import { type QueryKey } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useMutation } from '@tanstack/react-query'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -25,43 +26,51 @@ import {
 	accountInputCss,
 	accountTextareaCss,
 } from './account-management-components.tsx'
-type ReservedUsernamesChange = { action: 'add' | 'remove'; usernames: string[] }
 type ActionState = 'idle' | 'adding' | 'removing'
 export function AdminReservedUsernamesPage(props: {
-	queryKey: QueryKey
 	payload: AdminReservedUsernamesLoaderData
 	currentHref: string
 }) {
 	const { builtIn, added, removed, conflicts } = props.payload
-	const mutation = usePageResponseMutation<
-		AdminReservedUsernamesLoaderData,
-		ReservedUsernamesChange
-	>(props.queryKey, 'loadAdminReservedUsernames', (change) =>
-		(change.action === 'add'
-			? addAdminReservedUsernames
-			: removeAdminReservedUsernames)({
-			data: { usernames: change.usernames },
-		}),
-	)
+	const captureSubmitter = useSubmitterScope()
+	const invalidate = usePageInvalidation(['loadAdminReservedUsernames'])
+	const addMutation = useMutation({
+		gcTime: 0,
+		mutationFn: addAdminReservedUsernames,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const removeMutation = useMutation({
+		gcTime: 0,
+		mutationFn: removeAdminReservedUsernames,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 	const [builtInQuery, setBuiltInQuery] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const [actionState, setActionState] = useState<ActionState>('idle')
-	async function submitAdminAction(body: ReservedUsernamesChange) {
+	async function submitAdminAction(
+		submit: () => Promise<unknown>,
+		nextState: 'adding' | 'removing',
+	) {
 		if (actionState !== 'idle') return false
-		setActionState(body.action === 'add' ? 'adding' : 'removing')
+		const isCurrent = captureSubmitter()
+		setActionState(nextState)
 		setMessage(null)
 		setMessageTone('info')
 		try {
-			await mutation.submit(body)
+			await submit()
+			if (!isCurrent()) return false
 			setMessage(
-				body.action === 'add'
+				nextState === 'adding'
 					? 'Reserved usernames updated.'
 					: 'Reserved username removed.',
 			)
 			setMessageTone('info')
 			return true
 		} catch (error) {
+			if (!isCurrent()) return false
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -70,7 +79,7 @@ export function AdminReservedUsernamesPage(props: {
 			setMessageTone('error')
 			return false
 		} finally {
-			setActionState('idle')
+			if (isCurrent()) setActionState('idle')
 		}
 	}
 	async function handleAddSubmit(event: FormEvent<HTMLFormElement>) {
@@ -78,10 +87,15 @@ export function AdminReservedUsernamesPage(props: {
 		if (!(event.currentTarget instanceof HTMLFormElement)) return
 		const form = event.currentTarget
 		const formData = new FormData(form)
-		const saved = await submitAdminAction({
-			action: 'add',
-			usernames: [String(formData.get('usernames') ?? '')],
-		})
+		const saved = await submitAdminAction(
+			() =>
+				addMutation.mutateAsync({
+					data: {
+						usernames: [String(formData.get('usernames') ?? '')],
+					},
+				}),
+			'adding',
+		)
 		if (saved) form.reset()
 	}
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
@@ -203,10 +217,15 @@ export function AdminReservedUsernamesPage(props: {
 								type="button"
 								disabled={isMutating}
 								onClick={() =>
-									void submitAdminAction({
-										action: 'remove',
-										usernames: [username],
-									})
+									void submitAdminAction(
+										() =>
+											removeMutation.mutateAsync({
+												data: {
+													usernames: [username],
+												},
+											}),
+										'removing',
+									)
 								}
 								css={secondaryButtonCss}
 							>
@@ -251,10 +270,15 @@ export function AdminReservedUsernamesPage(props: {
 								type="button"
 								disabled={isMutating}
 								onClick={() =>
-									void submitAdminAction({
-										action: 'add',
-										usernames: [username],
-									})
+									void submitAdminAction(
+										() =>
+											addMutation.mutateAsync({
+												data: {
+													usernames: [username],
+												},
+											}),
+										'adding',
+									)
 								}
 								css={primaryButtonCss}
 							>

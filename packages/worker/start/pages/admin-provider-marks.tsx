@@ -5,7 +5,6 @@ import {
 	deleteAdminProviderMark,
 } from '#start/server/admin-mutations'
 import { type CSSObject } from '@emotion/react'
-import { type QueryKey } from '@tanstack/react-query'
 import {
 	useEffect,
 	useRef,
@@ -14,7 +13,9 @@ import {
 	type FormEvent,
 } from 'react'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { useMutation } from '@tanstack/react-query'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 
 import { normalizeProviderKey } from '@kody-internal/shared/url-hosts.ts'
 
@@ -97,14 +98,9 @@ const markTileCss = {
 	},
 } satisfies CSSObject
 
-type AdminWrite =
-	| ({ action: 'save' } & ProviderMarkSaveInput)
-	| { action: 'delete'; slug: string }
 export function AdminProviderMarksRoute({
-	queryKey,
 	initialData,
 }: {
-	queryKey: QueryKey
 	initialData: AdminProviderMarksLoaderData
 }) {
 	const marks = initialData.marks
@@ -134,18 +130,20 @@ export function AdminProviderMarksRoute({
 				: 'smooth',
 		})
 	}, [formRevision])
-	const mutation = usePageResponseMutation<
-		AdminProviderMarksLoaderData,
-		AdminWrite
-	>(
-		queryKey,
-		'loadAdminProviderMarks',
-		(body) =>
-			body.action === 'delete'
-				? deleteAdminProviderMark({ data: { slug: body.slug } })
-				: saveAdminProviderMark({ data: body }),
-		{ dependencies: mutationResources, dependencyScope: 'actor' },
-	)
+	const captureSubmitter = useSubmitterScope()
+	const invalidate = usePageInvalidation(mutationResources)
+	const saveMutation = useMutation({
+		gcTime: 0,
+		mutationFn: saveAdminProviderMark,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const removeMutation = useMutation({
+		gcTime: 0,
+		mutationFn: deleteAdminProviderMark,
+		onMutate: () => invalidate,
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 	const currentHref = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		mounted.current = true
@@ -211,24 +209,25 @@ export function AdminProviderMarksRoute({
 	}
 
 	async function submitAction(
-		body: AdminWrite,
+		submit: () => Promise<unknown>,
 		nextState: ActionState,
 		successMessage: string,
 	) {
 		if (busy.current) return false
+		const isCurrent = captureSubmitter()
 		busy.current = true
 		setActionState(nextState)
 		setMessage(null)
 
 		try {
-			await mutation.submit(body)
-			if (!mounted.current) return false
+			await submit()
+			if (!mounted.current || !isCurrent()) return false
 			setMessage(successMessage)
 			setMessageTone('info')
 			resetFormState()
 			return true
 		} catch (error) {
-			if (!mounted.current) return false
+			if (!mounted.current || !isCurrent()) return false
 			setMessage(
 				error instanceof Error
 					? error.message
@@ -238,7 +237,7 @@ export function AdminProviderMarksRoute({
 			return false
 		} finally {
 			busy.current = false
-			if (mounted.current) setActionState('idle')
+			if (mounted.current && isCurrent()) setActionState('idle')
 		}
 	}
 
@@ -255,8 +254,7 @@ export function AdminProviderMarksRoute({
 
 			return
 		}
-		const body: AdminWrite = {
-			action: 'save',
+		const body: ProviderMarkSaveInput = {
 			slug,
 			label,
 			aliases,
@@ -266,21 +264,23 @@ export function AdminProviderMarksRoute({
 		} else if (pendingLogoBase64 !== undefined) {
 			body.logoBase64 = pendingLogoBase64
 		}
-		void submitAction(body, 'saving', `Saved provider mark ${slug}.`).then(
-			(ok) => {
-				if (!ok) return
-				setCreating(false)
-				const canonicalSlug = normalizeProviderKey(slug)
-				setSelectedSlug(canonicalSlug)
-				setGroup(markGroupKey(canonicalSlug), true)
-				setFormRevision((value) => value + 1)
-			},
-		)
+		void submitAction(
+			() => saveMutation.mutateAsync({ data: body }),
+			'saving',
+			`Saved provider mark ${slug}.`,
+		).then((ok) => {
+			if (!ok) return
+			setCreating(false)
+			const canonicalSlug = normalizeProviderKey(slug)
+			setSelectedSlug(canonicalSlug)
+			setGroup(markGroupKey(canonicalSlug), true)
+			setFormRevision((value) => value + 1)
+		})
 	}
 
 	function handleDelete(mark: AdminProviderMark) {
 		void submitAction(
-			{ action: 'delete', slug: mark.slug },
+			() => removeMutation.mutateAsync({ data: { slug: mark.slug } }),
 			'deleting',
 			`Deleted provider mark ${mark.slug}.`,
 		).then((ok) => {
@@ -626,6 +626,7 @@ export function AdminProviderMarksRoute({
 }
 
 const mutationResources = [
+	'loadAdminProviderMarks',
 	'loadIntegrationsPage',
 	'loadMcpServersPage',
 	'loadOnboarding',
