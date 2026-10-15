@@ -140,7 +140,7 @@ export async function updateOrganizationProfile(
 		slug: updated.slug,
 		displayName: updated.displayName,
 	}
-	return operationResult(await loadOrgSettingsData({ env, user, org: next }))
+	return operationResult({ ok: true, org: next })
 }
 
 export async function removeOrganizationPhoto(input: OrganizationWriteContext) {
@@ -160,13 +160,7 @@ export async function removeOrganizationPhoto(input: OrganizationWriteContext) {
 			400,
 		)
 	await deleteOrgAvatar({ env, orgId: access.org.id })
-	return operationResult(
-		await loadOrgSettingsData({
-			env,
-			user,
-			org: { ...access.org, avatarUrl: null },
-		}),
-	)
+	return operationResult({ ok: true, org: { ...access.org, avatarUrl: null } })
 }
 
 export async function saveOrganizationPhoto(
@@ -225,19 +219,13 @@ export async function saveOrganizationPhoto(
 			bytes: processed.bytes,
 			contentType: processed.contentType,
 		})
-		return operationResult(
-			await loadOrgSettingsData({
-				env,
-				user,
-				org: {
-					...access.org,
-					avatarUrl: buildOrgAvatarUrl({
-						slug: access.org.slug,
-						avatarKey,
-					}),
-				},
-			}),
-		)
+		return operationResult({
+			ok: true,
+			org: {
+				...access.org,
+				avatarUrl: buildOrgAvatarUrl({ slug: access.org.slug, avatarKey }),
+			},
+		})
 	} catch (error) {
 		console.error('org-avatar-save-failed', error)
 		return operationResult({ ok: false, error: 'Unable to save avatar.' }, 500)

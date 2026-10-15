@@ -33,7 +33,7 @@ import {
 	spacing,
 	typography,
 } from '#universal/styles/tokens.ts'
-import { invalidateShellQueries } from '../shell-query.ts'
+import { orgSettingsMutationOptions } from '../org-settings-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { UserAvatar } from '../components/user-avatar.tsx'
@@ -51,19 +51,6 @@ import {
 	accountFieldNoteCss,
 	accountInputCss,
 } from './account-management-components.tsx'
-
-type SettingsWrite =
-	| { kind: 'profile'; displayName: string }
-	| { kind: 'avatar'; file: File }
-	| { kind: 'remove-avatar' }
-	| { kind: 'delete'; confirmation: string }
-
-type SettingsSubmission = Readonly<{
-	input: SettingsWrite
-	slug: string
-	queryKey: QueryKey
-	actorKey: string | null
-}>
 
 type OrgSettingsProps = {
 	data: OrgSettingsLoaderData
@@ -88,83 +75,51 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 	} | null>(null)
 	const dialog = useRef<HTMLDialogElement>(null)
 	const identity = orgIdentity(data.org, { displayName: '', avatarUrl: null })
-	const mutation = useMutation({
-		onMutate: async (submission: SettingsSubmission) => {
-			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
-		},
-		mutationFn: async ({ input, slug }: SettingsSubmission) => {
-			if (input.kind === 'avatar') {
-				const form = new FormData()
-				form.set('orgSlug', slug)
-				form.set('avatar', input.file)
-				return saveOrganizationAvatar({ data: form }) as Promise<
-					OrgSettingsLoaderData & { redirectTo?: string }
-				>
-			}
-			return (
-				input.kind === 'profile'
-					? updateOrganizationProfile({
-							data: { orgSlug: slug, displayName: input.displayName },
-						})
-					: input.kind === 'delete'
-						? deleteOrganization({
-								data: { orgSlug: slug, confirmation: input.confirmation },
-							})
-						: removeOrganizationPhoto({ data: { orgSlug: slug } })
-			) as Promise<OrgSettingsLoaderData & { redirectTo?: string }>
-		},
-		onSuccess: async (payload, submitted) => {
-			await client.cancelQueries({ queryKey: submitted.queryKey, exact: true })
-			if (submitted.input.kind !== 'delete')
-				client.setQueryData<OrgSettingsLoaderData>(
-					submitted.queryKey,
-					(previous) => (previous ? payload : undefined),
-				)
-			await Promise.all([
-				client.invalidateQueries({ queryKey: submitted.queryKey, exact: true }),
-				invalidateShellQueries(client, submitted.actorKey),
-			])
-		},
-		onError: async (_error, submitted) => {
-			await client.invalidateQueries({
-				queryKey: submitted.queryKey,
-				exact: true,
-			})
-		},
-	})
-	async function submit(input: SettingsWrite) {
-		if (
-			mutation.isPending ||
-			(input.kind === 'delete' ? !data.canDelete : !data.canManage)
-		)
-			return
+	const profile = useMutation(
+		orgSettingsMutationOptions(
+			client,
+			queryKey,
+			actorKey,
+			updateOrganizationProfile,
+		),
+	)
+	const avatar = useMutation(
+		orgSettingsMutationOptions(
+			client,
+			queryKey,
+			actorKey,
+			saveOrganizationAvatar,
+		),
+	)
+	const removePhoto = useMutation(
+		orgSettingsMutationOptions(
+			client,
+			queryKey,
+			actorKey,
+			removeOrganizationPhoto,
+		),
+	)
+	const deletion = useMutation(
+		orgSettingsMutationOptions(client, queryKey, actorKey, deleteOrganization),
+	)
+	const isPending =
+		profile.isPending ||
+		avatar.isPending ||
+		removePhoto.isPending ||
+		deletion.isPending
+	async function submit<T>(
+		run: () => Promise<T>,
+		accepted: (result: T) => void | Promise<void>,
+		allowed = data.canManage,
+	) {
+		if (isPending || !allowed) return
 		const isCurrent = capture()
 		setMessage(null)
 		try {
-			const payload = await mutation.mutateAsync({
-				input,
-				slug: data.org.slug,
-				queryKey,
-				actorKey,
-			})
+			const result = await run()
 			if (!isCurrent()) return
 			setAvatarFile(null)
-			if (input.kind === 'delete') {
-				dialog.current?.close()
-				await router.navigate({
-					href: payload.redirectTo || '/account/organizations',
-				})
-				return
-			}
-			setMessage({
-				text:
-					input.kind === 'profile'
-						? 'Settings saved.'
-						: input.kind === 'avatar'
-							? 'Avatar updated.'
-							: 'Avatar removed.',
-				tone: 'info',
-			})
+			await accepted(result)
 		} catch (error) {
 			if (isCurrent())
 				setMessage({
@@ -173,6 +128,18 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 					tone: 'error',
 				})
 		}
+	}
+	function saved(text: string) {
+		setMessage({ text, tone: 'info' })
+	}
+	function uploadAvatar(file: File) {
+		const form = new FormData()
+		form.set('orgSlug', data.org.slug)
+		form.set('avatar', file)
+		return submit(
+			() => avatar.mutateAsync(form),
+			() => saved('Avatar updated.'),
+		)
 	}
 	const closeDialog = () => {
 		dialog.current?.close()
@@ -229,7 +196,7 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 										type="file"
 										accept="image/png,image/jpeg,image/webp"
 										hidden
-										disabled={mutation.isPending}
+										disabled={isPending}
 										onChange={(event) => {
 											const file = event.currentTarget.files?.[0]
 											event.currentTarget.value = ''
@@ -241,8 +208,14 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 									<button
 										type="button"
 										css={getGhostButtonCss({ size: 'sm' })}
-										disabled={mutation.isPending}
-										onClick={() => void submit({ kind: 'remove-avatar' })}
+										disabled={isPending}
+										onClick={() =>
+											void submit(
+												() =>
+													removePhoto.mutateAsync({ orgSlug: data.org.slug }),
+												() => saved('Avatar removed.'),
+											)
+										}
 									>
 										Remove photo
 									</button>
@@ -253,7 +226,7 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 							<AccountAvatarEditor
 								file={avatarFile}
 								onCancel={() => setAvatarFile(null)}
-								onApply={(file) => void submit({ kind: 'avatar', file })}
+								onApply={(file) => void uploadAvatar(file)}
 								onBusyChange={() => undefined}
 							/>
 						) : null}
@@ -262,7 +235,14 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 								css={formCss}
 								onSubmit={(event) => {
 									event.preventDefault()
-									void submit({ kind: 'profile', displayName: draftName })
+									void submit(
+										() =>
+											profile.mutateAsync({
+												orgSlug: data.org.slug,
+												displayName: draftName,
+											}),
+										() => saved('Settings saved.'),
+									)
 								}}
 							>
 								<label css={accountFieldCss}>
@@ -295,13 +275,10 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 								<div css={accountActionsCss}>
 									<button
 										type="submit"
-										disabled={mutation.isPending}
+										disabled={isPending}
 										css={getPillButtonCss({ size: 'sm' })}
 									>
-										{mutation.isPending &&
-										mutation.variables.input.kind === 'profile'
-											? 'Saving…'
-											: 'Save changes'}
+										{profile.isPending ? 'Saving…' : 'Save changes'}
 									</button>
 								</div>
 							</form>
@@ -355,7 +332,18 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 									css={deleteDialogFormCss}
 									onSubmit={(event) => {
 										event.preventDefault()
-										void submit({ kind: 'delete', confirmation })
+										void submit(
+											() =>
+												deletion.mutateAsync({
+													orgSlug: data.org.slug,
+													confirmation,
+												}),
+											async (result) => {
+												dialog.current?.close()
+												await router.navigate({ href: result.redirectTo })
+											},
+											data.canDelete,
+										)
 									}}
 								>
 									<h3 id="delete-org-title" css={deleteDialogTitleCss}>
@@ -383,11 +371,11 @@ function OrgSettingsEditor({ data, queryKey }: OrgSettingsProps) {
 											disabled={
 												(confirmation !== data.org.slug &&
 													confirmation !== 'DELETE') ||
-												mutation.isPending
+												isPending
 											}
 											css={getDangerPillCss({ size: 'sm' })}
 										>
-											{mutation.isPending ? 'Deleting…' : 'Delete organization'}
+											{isPending ? 'Deleting…' : 'Delete organization'}
 										</button>
 										<button
 											type="button"

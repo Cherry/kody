@@ -31,8 +31,13 @@ const mocks = vi.hoisted(() => ({
 	softDeleteOrg: vi.fn(),
 	processUserAvatar: vi.fn(),
 	saveOrgAvatar: vi.fn(),
+	customDomainsEnabled: vi.fn(async (..._args: unknown[]) => false),
 }))
 
+vi.mock('#worker/package-app-custom-hostnames/feature-flag.ts', () => ({
+	isPackageAppCustomDomainsEnabledForUser: (...args: unknown[]) =>
+		mocks.customDomainsEnabled(...args),
+}))
 vi.mock('#app/authenticated-user.ts', () => ({
 	readAuthenticatedAppUser: (...args: Array<unknown>) =>
 		mocks.readAuthenticatedAppUser(...args),
@@ -184,6 +189,7 @@ beforeEach(async () => {
 	mocks.softDeleteOrg.mockClear()
 	mocks.processUserAvatar.mockReset()
 	mocks.saveOrgAvatar.mockReset()
+	mocks.customDomainsEnabled.mockReset().mockResolvedValue(false)
 	await seed()
 })
 
@@ -527,6 +533,28 @@ test('former platform orgs are not personal for settings identity editing', asyn
 	expect(updated.data).toMatchObject({
 		ok: true,
 		org: { slug: 'kody', displayName: 'Kody', personal: false },
-		canManage: true,
 	})
+})
+
+test('profile write succeeds without loading unrelated custom domain settings', async () => {
+	const env = createEnv()
+	const request = new Request('https://kody.test/@zeta-co/-/settings.json', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ displayName: 'Saved name' }),
+	})
+	await signIn('ada', request)
+	mocks.customDomainsEnabled.mockRejectedValue(
+		new Error('Domain settings unavailable'),
+	)
+	const result = await callSettings(updateOrganizationProfile, env, {
+		request,
+	} as never)
+	expect(result.status).toBe(200)
+	expect(result.data).toMatchObject({
+		ok: true,
+		org: { displayName: 'Saved name' },
+	})
+	expect(result.data).not.toHaveProperty('customDomains')
+	expect(mocks.customDomainsEnabled).not.toHaveBeenCalled()
 })
