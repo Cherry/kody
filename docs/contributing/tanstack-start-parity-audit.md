@@ -20,7 +20,7 @@ fixes still require CI verification. Later local changes include the two-factor
 identity redirect fix and removal of dead resend-verification result branches in
 `cffb44b8a`.
 
-The website consent page now uses a Start server function in `9f3b983a4`.
+The website consent page uses a Start server function in `9f3b983a4`.
 `POST /oauth/authorize` remains necessary for actual MCP tooling. The shared
 decision extraction passed independent code review but still needs CI and
 deployed verification.
