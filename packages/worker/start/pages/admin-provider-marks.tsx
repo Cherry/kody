@@ -106,7 +106,6 @@ export function AdminProviderMarksRoute({
 	const marks = initialData.marks
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [actionState, setActionState] = useState<ActionState>('idle')
 	const [search, setSearch] = useState('')
 	const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
 	const [creating, setCreating] = useState(false)
@@ -144,6 +143,12 @@ export function AdminProviderMarksRoute({
 		onMutate: () => invalidate,
 		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
 	})
+	const actionState: ActionState = saveMutation.isPending
+		? 'saving'
+		: removeMutation.isPending
+			? 'deleting'
+			: 'idle'
+
 	const currentHref = useMatchedPageScope().pageLocation.href
 	useEffect(() => {
 		mounted.current = true
@@ -210,13 +215,11 @@ export function AdminProviderMarksRoute({
 
 	async function submitAction(
 		submit: () => Promise<unknown>,
-		nextState: ActionState,
 		successMessage: string,
 	) {
 		if (busy.current) return false
 		const isCurrent = captureSubmitter()
 		busy.current = true
-		setActionState(nextState)
 		setMessage(null)
 
 		try {
@@ -237,7 +240,6 @@ export function AdminProviderMarksRoute({
 			return false
 		} finally {
 			busy.current = false
-			if (mounted.current && isCurrent()) setActionState('idle')
 		}
 	}
 
@@ -266,7 +268,6 @@ export function AdminProviderMarksRoute({
 		}
 		void submitAction(
 			() => saveMutation.mutateAsync({ data: body }),
-			'saving',
 			`Saved provider mark ${slug}.`,
 		).then((ok) => {
 			if (!ok) return
@@ -281,7 +282,6 @@ export function AdminProviderMarksRoute({
 	function handleDelete(mark: AdminProviderMark) {
 		void submitAction(
 			() => removeMutation.mutateAsync({ data: { slug: mark.slug } }),
-			'deleting',
 			`Deleted provider mark ${mark.slug}.`,
 		).then((ok) => {
 			if (!ok) return

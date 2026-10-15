@@ -213,9 +213,8 @@ test('admin save and delete require admin and return HTTP shapes without echoing
 	sqlite.prepare('DELETE FROM user_integrations').run()
 	const deleted = await invoke({ action: 'delete', slug: 'github' })
 	expect(deleted.status).toBe(200)
-	await expect(Promise.resolve(deleted.data)).resolves.toMatchObject({
-		apps: [],
-	})
+	expect(deleted.data).toEqual({ ok: true })
+	expect((await read()).apps).toEqual([])
 })
 
 test('save with newSlug renames in place, keeping the secret and connections', async () => {

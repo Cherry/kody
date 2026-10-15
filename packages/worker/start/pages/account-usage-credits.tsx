@@ -138,7 +138,7 @@ export function AccountUsageCreditsSection(
 	const [topUpPendingCents, setTopUpPendingCents] = useState<number | null>(
 		null,
 	)
-	const [saving, setSaving] = useState(false)
+	const saving = settingsMutation.isPending
 	const [switchPending, setSwitchPending] = useState(false)
 
 	function applyCredits(credits: AccountUsageCredits) {
@@ -190,7 +190,6 @@ export function AccountUsageCreditsSection(
 			return
 		}
 		const isCurrent = capture()
-		setSaving(true)
 		setMessage(null)
 		try {
 			await settingsMutation.mutateAsync({
@@ -200,7 +199,6 @@ export function AccountUsageCreditsSection(
 			})
 			if (!isCurrent()) return
 			showMessage('Credit settings saved.', 'info')
-			setSaving(false)
 			return
 		} catch (error) {
 			if (!isCurrent()) return
@@ -211,7 +209,6 @@ export function AccountUsageCreditsSection(
 				'error',
 			)
 		}
-		setSaving(false)
 	}
 
 	async function switchToPro(billingHref?: string) {

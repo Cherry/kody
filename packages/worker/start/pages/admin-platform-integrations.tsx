@@ -82,10 +82,14 @@ export function AdminPlatformIntegrationsPage(props: {
 	}, [])
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [actionState, setActionState] = useState<ActionState>(
+	const [requestedAction, setRequestedAction] = useState<ActionState>(
 		'idle',
 		/** Slug of the row an action is running against, for per-row labels. */
 	)
+	const actionState =
+		saveMutation.isPending || removeMutation.isPending
+			? requestedAction
+			: 'idle'
 	const [pendingSlug, setPendingSlug] = useState<string | null>(null)
 	const [pendingLogoBase64, setPendingLogoBase64] = useState<
 		string | undefined
@@ -116,7 +120,7 @@ export function AdminPlatformIntegrationsPage(props: {
 		slug: string,
 	): Promise<boolean> {
 		const isCurrent = captureSubmitter()
-		setActionState(nextActionState)
+		setRequestedAction(nextActionState)
 		setPendingSlug(slug)
 		setMessage(null)
 		setMessageTone('info')
@@ -138,7 +142,6 @@ export function AdminPlatformIntegrationsPage(props: {
 			setMessageTone('error')
 			return false
 		} finally {
-			if (isCurrent()) setActionState('idle')
 			if (isCurrent()) setPendingSlug(null)
 		}
 	}

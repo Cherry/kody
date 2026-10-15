@@ -173,7 +173,6 @@ export function AccountPasskeysPage({
 
 	async function handleRenamePasskey(passkeyId: string) {
 		const isCurrent = capture()
-		setActionStatus('busy')
 		setMessage(null)
 
 		try {
@@ -194,14 +193,11 @@ export function AccountPasskeysPage({
 					: 'Unable to rename the passkey.',
 			)
 			setMessageTone('error')
-		} finally {
-			if (isCurrent()) setActionStatus('idle')
 		}
 	}
 
 	async function handleDeletePasskey(passkeyId: string) {
 		const isCurrent = capture()
-		setActionStatus('busy')
 		setMessage(null)
 
 		try {
@@ -221,14 +217,13 @@ export function AccountPasskeysPage({
 					: 'Unable to delete the passkey.',
 			)
 			setMessageTone('error')
-		} finally {
-			if (isCurrent()) setActionStatus('idle')
 		}
 	}
 
 	const status = 'ready'
 	const hydrated = useHydrated()
-	const isBusy = !hydrated || actionStatus === 'busy'
+	const isBusy =
+		!hydrated || actionStatus === 'busy' || rename.isPending || remove.isPending
 
 	return (
 		<AccountManagementShell
@@ -264,7 +259,7 @@ export function AccountPasskeysPage({
 								css={primaryButtonCss}
 								onClick={handleRegisterPasskey}
 							>
-								{actionStatus === 'busy' ? 'Working...' : 'Register a passkey'}
+								{isBusy ? 'Working...' : 'Register a passkey'}
 							</button>
 						</div>
 					</section>

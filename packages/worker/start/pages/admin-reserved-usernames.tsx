@@ -49,14 +49,18 @@ export function AdminReservedUsernamesPage(props: {
 	const [builtInQuery, setBuiltInQuery] = useState('')
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [actionState, setActionState] = useState<ActionState>('idle')
+	const actionState: ActionState = addMutation.isPending
+		? 'adding'
+		: removeMutation.isPending
+			? 'removing'
+			: 'idle'
+
 	async function submitAdminAction(
 		submit: () => Promise<unknown>,
 		nextState: 'adding' | 'removing',
 	) {
 		if (actionState !== 'idle') return false
 		const isCurrent = captureSubmitter()
-		setActionState(nextState)
 		setMessage(null)
 		setMessageTone('info')
 		try {
@@ -78,8 +82,6 @@ export function AdminReservedUsernamesPage(props: {
 			)
 			setMessageTone('error')
 			return false
-		} finally {
-			if (isCurrent()) setActionState('idle')
 		}
 	}
 	async function handleAddSubmit(event: FormEvent<HTMLFormElement>) {

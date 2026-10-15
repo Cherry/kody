@@ -178,10 +178,8 @@ test('admin provider marks API saves, lists, and deletes marks, refusing logo wr
 
 	const deleted = await call(deleteGoogle)
 	expect(deleted.status).toBe(200)
-	await expect(Promise.resolve(deleted.data)).resolves.toMatchObject({
-		ok: true,
-		marks: [],
-	})
+	expect(deleted.data).toEqual({ ok: true })
+	expect(await listSlugs()).toEqual([])
 })
 
 test('accepted provider mark writes do not depend on rebuilding the admin page', async () => {

@@ -144,14 +144,21 @@ export function AdminFeatureFlagsPage({
 	const featureFlags = payload.featureFlags
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const [actionState, setActionState] = useState<ActionState>('idle')
+	const actionState: ActionState = setGlobalMutation.isPending
+		? 'saving-global'
+		: setOverrideMutation.isPending
+			? 'saving-override'
+			: clearOverrideMutation.isPending
+				? 'clearing-override'
+				: deleteStaleMutation.isPending
+					? 'deleting-stale'
+					: 'idle'
+
 	async function submitAdminAction(
 		submit: () => Promise<unknown>,
-		nextActionState: Exclude<ActionState, 'idle'>,
 		successMessage: string,
 	): Promise<boolean> {
 		const isCurrent = captureSubmitter()
-		setActionState(nextActionState)
 		setMessage(null)
 		setMessageTone('info')
 		try {
@@ -169,8 +176,6 @@ export function AdminFeatureFlagsPage({
 			)
 			setMessageTone('error')
 			return false
-		} finally {
-			if (isCurrent()) setActionState('idle')
 		}
 	}
 	function handleSaveGlobalSubmit(
@@ -195,7 +200,6 @@ export function AdminFeatureFlagsPage({
 						note,
 					},
 				}),
-			'saving-global',
 			`Saved global state for ${key}.`,
 		)
 	}
@@ -218,7 +222,6 @@ export function AdminFeatureFlagsPage({
 						enabled,
 					},
 				}),
-			'saving-override',
 			`Saved override for ${username} on ${key}.`,
 		).then((ok) => {
 			if (ok) form.reset()
@@ -573,7 +576,6 @@ export function AdminFeatureFlagsPage({
 																	stableUserId: override.stableUserId,
 																},
 															}),
-														'clearing-override',
 														`Removed override for ${override.username}.`,
 													)
 												}
@@ -696,7 +698,6 @@ export function AdminFeatureFlagsPage({
 															key: flag.key,
 														},
 													}),
-												'deleting-stale',
 												`Deleted stale flag ${flag.key}.`,
 											)
 										}
