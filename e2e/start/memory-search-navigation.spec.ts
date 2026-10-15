@@ -63,7 +63,9 @@ test('a memory detail click wins over an earlier pending search navigation', asy
 			(url) => url.pathname === `${listPath}/${memoryId}`,
 		)
 		await expect(
-			page.getByText('Persisted detail summary', { exact: true }),
+			page
+				.getByRole('paragraph')
+				.filter({ hasText: /^Persisted detail summary$/ }),
 		).toBeVisible()
 		release()
 		await searchCompleted
