@@ -1,3 +1,4 @@
+import { requestHasMutationDataFields } from './server-function-requests.ts'
 import { createHash, randomBytes } from 'node:crypto'
 import { type APIRequestContext } from '@playwright/test'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
@@ -93,7 +94,24 @@ test('GitHub-only account authorizes while already signed in', async ({
 		page.getByRole('button', { name: 'Continue with GitHub' }),
 	).toHaveCount(0)
 
+	const protocolPosts: string[] = []
+	page.on('request', (request) => {
+		if (
+			request.method() === 'POST' &&
+			new URL(request.url()).pathname === '/oauth/authorize'
+		)
+			protocolPosts.push(request.url())
+	})
+	const decisionSearch = new URL(page.url()).search
+	const decisionRequest = page.waitForRequest((request) =>
+		requestHasMutationDataFields(request, {
+			search: decisionSearch,
+		}),
+	)
 	await page.getByTestId('oauth-authorize-approve').click()
+	await decisionRequest
+	expect(protocolPosts).toEqual([])
+
 	await expect(page).toHaveURL(
 		new RegExp(
 			`^${callbackRedirectUri.replace(/\./g, '\\.')}\\?.*code=.*state=${state}`,

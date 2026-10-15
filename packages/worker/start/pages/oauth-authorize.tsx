@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useServerFn } from '@tanstack/react-start'
+import { submitOAuthDecision } from '#start/server/oauth-decision'
 import { useSessionInfo } from '../session-info.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
 import {
@@ -156,6 +157,7 @@ export function OAuthAuthorizeRoute({
 	const requestResendVerification = useResendVerification()
 	const fetchSessionInfo = useSessionInfo()
 	const startSocialSignIn = useSocialSignIn()
+	const submitDecisionRequest = useServerFn(submitOAuthDecision)
 	const webauthnAuthenticationOptions = useServerFn(
 		webauthnAuthenticationOptionsFn,
 	)
@@ -376,18 +378,15 @@ export function OAuthAuthorizeRoute({
 					)
 				}
 			}
-			const response = await fetch(window.location.href, {
-				method: 'POST',
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/x-www-form-urlencoded',
+			const payload = await submitDecisionRequest({
+				data: {
+					search: window.location.search,
+					fields: Object.fromEntries(body),
 				},
-				credentials: 'include',
-				body,
 			})
-			const payload = await response.json().catch(() => null)
+			if (!payload) return
 			if (!mounted.current) return
-			if (!response.ok) {
+			if (!payload.successful) {
 				resetTurnstileWidgets()
 				const errorText =
 					typeof payload?.error === 'string'

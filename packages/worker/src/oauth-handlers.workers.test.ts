@@ -21,6 +21,7 @@ import { honeypotFieldName } from '#universal/public-form-protection.ts'
 import { oauthAuthorizeClobberedResubmitMessage } from './oauth-authorize-clobber.ts'
 import { originWorkerHandler } from './origin-handler.ts'
 import {
+	decideOAuthAuthorization,
 	handleAuthorizeInfo,
 	handleAuthorizeRequest,
 	tryHandleSilentOidcAuthorize,
@@ -452,7 +453,10 @@ async function expectApprovedRedirect(
 	iss?: string,
 ) {
 	expect(response.status).toBe(200)
-	const payload = (await response.json()) as { ok: boolean; redirectTo: string }
+	const payload = (await response.json()) as {
+		ok: boolean
+		redirectTo: string
+	}
 	expect(payload.ok).toBe(true)
 	expectRedirect(payload.redirectTo, originPath, params, iss)
 }
@@ -1610,4 +1614,123 @@ test('authorize recovers when a pre-hydration submit clobbers the OAuth query', 
 		ok: false,
 		error: oauthAuthorizeClobberedResubmitMessage,
 	})
+})
+
+test('website authorization uses explicit protocol parameters with the original RPC session and cookies', async () => {
+	const completion = completingWith(
+		'https://example.com/callback?code=website-ok',
+	)
+	const parseAuthRequest = vi.fn(async (request: Request) => {
+		expect(new URL(request.url).pathname).toBe('/oauth/authorize')
+		expect(new URL(request.url).searchParams.get('client_id')).toBe(
+			baseAuthRequest.clientId,
+		)
+		return { ...baseAuthRequest }
+	})
+	const bindings = createEnv(
+		createHelpers({ parseAuthRequest, completeAuthorization: completion }),
+		await createDatabase('password123'),
+	)
+	const request = new Request(
+		'https://example.com/_serverFn/decision?client_id=wrong',
+		{
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: '{}',
+		},
+	)
+	const formData = new FormData()
+	for (const [key, value] of Object.entries(approveWithPassword))
+		formData.set(key, value)
+	const result = await decideOAuthAuthorization({
+		request,
+		env: bindings,
+		authorizeUrl: new URL(
+			`https://example.com/oauth/authorize?client_id=${baseAuthRequest.clientId}`,
+		),
+		formData,
+	})
+	expect(result.status).toBe(200)
+	expect(result.data.ok).toBe(true)
+	expect(new URL(result.data.redirectTo!).searchParams.get('code')).toBe(
+		'website-ok',
+	)
+	expect(new URL(result.data.redirectTo!).searchParams.get('iss')).toBe(
+		'https://example.com',
+	)
+	expect(result.headers.getSetCookie().length).toBeGreaterThan(0)
+	expect(completion).toHaveBeenCalledTimes(1)
+	expect(await request.json()).toEqual({})
+})
+
+test('website authorization rejects foreign context and preserves OIDC gate before reset decisions', async () => {
+	const helpers = createHelpers()
+	const bindings = createEnv(helpers)
+	const request = new Request('https://example.com/_serverFn/decision', {
+		method: 'POST',
+	})
+	const formData = new FormData()
+	formData.set('decision', 'reset-client')
+	for (const url of [
+		'https://other.example/oauth/authorize',
+		'https://example.com/not-authorize',
+	]) {
+		await expect(
+			decideOAuthAuthorization({
+				request,
+				env: bindings,
+				authorizeUrl: new URL(url),
+				formData,
+			}),
+		).rejects.toThrow('Invalid authorization URL')
+	}
+	const result = await decideOAuthAuthorization({
+		request,
+		env: bindings,
+		authorizeUrl: new URL('https://example.com/oauth/authorize?max_age=bad'),
+		formData,
+	})
+	expect(result).toMatchObject({
+		status: 400,
+		data: {
+			ok: false,
+			code: 'invalid_request',
+			error: 'max_age must be a non-negative integer.',
+		},
+	})
+})
+
+test('website authorization binds org and profile to the document query rather than the RPC query', async () => {
+	for (const field of ['org', 'profile']) {
+		const completion = completingWith(
+			'https://example.com/callback?code=unexpected',
+		)
+		const bindings = createEnv(
+			createHelpers({
+				parseAuthRequest: async () => ({
+					...baseAuthRequest,
+					resource: `${mcpResource}?${field}=trusted`,
+				}),
+				completeAuthorization: completion,
+			}),
+			await createDatabase('password123'),
+		)
+		const formData = new FormData()
+		for (const [key, value] of Object.entries(approveWithPassword))
+			formData.set(key, value)
+		const result = await decideOAuthAuthorization({
+			request: new Request(
+				`https://example.com/_serverFn/decision?${field}=trusted`,
+				{ method: 'POST' },
+			),
+			env: bindings,
+			authorizeUrl: new URL(
+				`https://example.com/oauth/authorize?client_id=${baseAuthRequest.clientId}&${field}=different`,
+			),
+			formData,
+		})
+		expect(result.data.ok).toBe(false)
+		expect(result.data.error).toMatch(/do not match/i)
+		expect(completion).not.toHaveBeenCalled()
+	}
 })
