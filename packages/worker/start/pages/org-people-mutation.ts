@@ -188,10 +188,7 @@ export function orgPeopleMutationOptions(
 					if (kind === 'shell') return true
 					if (kind !== 'page') return false
 					if (resource === 'loadOrganizations') return true
-					if (typeof input === 'string') {
-						const pathname = new URL(input, 'https://kody.local').pathname
-						return pathname === `/@${slug}` || pathname.startsWith(`/@${slug}/`)
-					}
+
 					return (
 						input !== null &&
 						typeof input === 'object' &&

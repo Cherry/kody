@@ -19,7 +19,12 @@ test.each(['accepted', 'lost response'])(
 		const affected = [
 			key,
 			teamKey,
-			['page', 'actor-a', 'loadJobsPage', '/@team-a/-/jobs'],
+			[
+				'page',
+				'actor-a',
+				'loadJobsPage',
+				{ orgSlug: 'team-a', jobId: 'job-one' },
+			],
 			[
 				'page',
 				'actor-a',
@@ -33,7 +38,12 @@ test.each(['accepted', 'lost response'])(
 		const unaffected = [
 			otherOrg,
 			otherActor,
-			['page', 'actor-a', 'loadJobsPage', '/@team-b/-/jobs'],
+			[
+				'page',
+				'actor-a',
+				'loadJobsPage',
+				{ orgSlug: 'team-b', jobId: 'job-one' },
+			],
 			['page', 'actor-a', 'loadJobsPage', { orgSlug: 'team-b' }],
 			['shell', 'actor-b', ''],
 		]
