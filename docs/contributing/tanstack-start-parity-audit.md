@@ -2,6 +2,37 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `6d83c25cc`
+
+Validate run `38697218301` for pushed head `8924216b8` passed Node, Workers, and
+MCP. E2E was still running at inspection. Static failed formatting in this
+document and the Start architecture guide. Commit `3195588c9` formats both
+files; CI has not verified that commit.
+
+The verified preview deployment is `bdc2e9de4447380f060d965babf42295c074bf54`,
+containing head `8924216b8` and main `d46dc2a3d`. Its health endpoint returned
+HTTP 200. Later local commits are not included in that deployment.
+
+Local changes through `6d83c25cc` remove post-write page rebuilds from team
+invite links, organization settings, connected agents and profiles, social
+connections, package operations, and MCP server settings. Package and MCP writes
+use operation-specific mutations. MCP review caught a missing listing
+invalidation after response cache replacement was removed. The correction
+invalidates `loadMcpServersPage` for the submitted actor and organization, with
+coverage for successful writes and lost responses. MCP usage pending state comes
+from the mutation and its submitted server ID. These regression cases have
+static type coverage but have not run in CI.
+
+Action dispatchers in email destinations, secrets, and secret providers remain
+under review. Direct import searches still find Remix routing only in the
+customer package-app fixture, not the website implementation. This does not
+prove that all inherited architecture is removed.
+
+Public docs navigation and browser back worked on the preview without browser
+console errors during the inspected journey. The desktop docs comparison used
+anonymous preview and authenticated production, so it does not establish
+matched-state parity. Authenticated visual verification remains incomplete.
+
 ### Follow-up at source `412ad9a0b`
 
 Preview health returned HTTP 200 at deployed merge
