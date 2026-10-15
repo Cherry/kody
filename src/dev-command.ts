@@ -26,12 +26,15 @@ import type { KodyTarget } from './target.js'
 import { formatToolResult } from './tool-result.js'
 import { bundleLocalUserModule } from './local-bundle.js'
 import { formatDevEvent, type DevEvent } from './dev/dev-events.js'
+import { defaultDevPort } from './dev/dev-port.js'
 import {
 	devStatusPath,
 	findRunningDevServer,
 	removeDevRegistration,
 	writeDevRegistration,
 } from './dev/dev-registry.js'
+
+export { parseDevPort } from './dev/dev-port.js'
 
 export type DevIo = {
 	stdout: (text: string) => void
@@ -127,29 +130,69 @@ export async function runDevServe(input: {
 	serveOnce?: boolean
 }): Promise<number> {
 	const manifest = await loadPackageManifest(input.cwd)
+	if (input.port === undefined) {
+		const running = await findRunningDevServer({ root: manifest.root, target: input.target })
+		if (running) {
+			const { registration } = running
+			throw new StructuredCliError({
+				code: 'dev_already_running',
+				target: input.target,
+				message: `kody dev is already running for ${manifest.name} at ${registration.origin}${registration.basePath || '/'} (pid ${registration.pid}).`,
+				fix: `Reuse it (\`kody dev fetch <path>\` attaches automatically), stop it with \`kill ${registration.pid}\`, or pass --port to start a second server.`,
+			})
+		}
+	}
 	const onEvent = input.json
 		? (event: DevEvent) => writeJsonEvent(input.io, event)
 		: (event: DevEvent) => writeDevEvent(input.io, event)
-	const server = await startPackageAppDev({
-		manifest,
-		token: input.auth.token,
-		apiUrl: input.auth.apiUrl,
-		target: input.target,
-		port: input.port,
-		appBasePath: input.appBasePath,
-		...(input.auth.org ? { org: input.auth.org } : {}),
-		...(input.auth.depResolve ? { depResolve: input.auth.depResolve } : {}),
-		...(input.passthroughHosts?.length
-			? { passthroughHosts: input.passthroughHosts }
-			: input.auth.passthroughHosts?.length
-				? { passthroughHosts: input.auth.passthroughHosts }
-				: {}),
-		allowPrivateNetwork: input.allowPrivateNetwork,
-		liveReload: input.liveReload ?? true,
-		onStatus: (message) => input.io.stderr(`${message}\n`),
-		onError: (message) => input.io.stderr(`${message}\n`),
-		onEvent,
-	})
+	let registered = false
+	let server: Awaited<ReturnType<typeof startPackageAppDev>>
+	try {
+		server = await startPackageAppDev({
+			manifest,
+			token: input.auth.token,
+			apiUrl: input.auth.apiUrl,
+			target: input.target,
+			port: input.port,
+			defaultPort: defaultDevPort(manifest.kodyId),
+			appBasePath: input.appBasePath,
+			...(input.auth.org ? { org: input.auth.org } : {}),
+			...(input.auth.depResolve ? { depResolve: input.auth.depResolve } : {}),
+			...(input.passthroughHosts?.length
+				? { passthroughHosts: input.passthroughHosts }
+				: input.auth.passthroughHosts?.length
+					? { passthroughHosts: input.auth.passthroughHosts }
+					: {}),
+			allowPrivateNetwork: input.allowPrivateNetwork,
+			liveReload: input.liveReload ?? true,
+			onStatus: (message) => input.io.stderr(`${message}\n`),
+			onError: (message) => input.io.stderr(`${message}\n`),
+			onEvent,
+			// Register as soon as the port is bound so a second `kody dev`
+			// during the first build hits `dev_already_running` instead of
+			// stealing the next free port and overwriting the registry.
+			// Explicit `--port` starts a second server on purpose — leave the
+			// primary attach registry alone so fetch keeps talking to it.
+			onListening: async ({ port, hostedUrl, appBasePath }) => {
+				if (input.port !== undefined) return
+				await writeDevRegistration({
+					pid: process.pid,
+					origin: hostedUrl,
+					port,
+					basePath: appBasePath,
+					target: input.target,
+					root: manifest.root,
+				})
+				registered = true
+			},
+		})
+	} catch (error) {
+		if (registered) {
+			await removeDevRegistration(manifest.root, process.pid, input.target).catch(() => {})
+		}
+		await input.auth.closeMock?.()
+		throw error
+	}
 	const shutdown = async () => {
 		await server.close()
 		await removeDevRegistration(manifest.root, process.pid, input.target).catch(() => {})
@@ -166,14 +209,6 @@ export async function runDevServe(input: {
 			pid: process.pid,
 			statusUrl,
 		}
-		await writeDevRegistration({
-			pid: process.pid,
-			origin: server.hostedUrl,
-			port: server.port,
-			basePath: server.appBasePath,
-			target: input.target,
-			root: manifest.root,
-		}).catch(() => {})
 		if (input.readyFile) {
 			await mkdir(dirname(input.readyFile), { recursive: true })
 			await writeFile(input.readyFile, `${JSON.stringify(ready, null, 2)}\n`)
@@ -200,7 +235,7 @@ export async function runDevServe(input: {
 			)
 		}
 	} catch (error) {
-		// Ready-file / registration failures must not leave the listen handles up.
+		// Ready-file failures must not leave the listen handles up.
 		await shutdown().catch(() => {})
 		throw error
 	}

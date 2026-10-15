@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import psList from 'ps-list'
 import { formatDevEvent, parseWorkerdStdoutLine } from '../src/dev/dev-events.js'
 import { appLogMarker } from '../src/dev/dev-protocol.js'
 import { shouldIgnoreWatchPath } from '../src/dev/dev-watcher.js'
@@ -69,6 +70,20 @@ test('kody dev swaps workerd without a 503 and recovers from build errors', asyn
 		}, 'recovery after a build error')
 		assert.ok(events.some((event) => event.type === 'rebuild_ok' && event.restarted))
 	})
+})
+
+test('a save just before close never starts a rebuild after close', async () => {
+	await withDevServer(
+		async ({ server, events, writeMessage }) => {
+			await writeMessage(`export const message = 'late'\n`)
+			await sleep(120)
+			await server.close()
+			const seen = events.length
+			await sleep(500)
+			assert.deepEqual(events.slice(seen), [], 'the pending debounce must not rebuild')
+		},
+		{ debounceMs: 300 },
+	)
 })
 
 test('kody dev streams tagged console logs and source-maps runtime errors', async () => {
@@ -194,6 +209,30 @@ test('process reaper kills tracked pids and removes the work dir when its pipe c
 		new Promise<void>((resolve) => setTimeout(resolve, 5000).unref()),
 	])
 	assert.equal(isProcessAlive(sleeper.pid), false)
+	await waitFor(
+		async () => ((await readdir(tmpdir())).includes(workDir.split('/').pop()!) ? undefined : true),
+		'work dir removal',
+	)
+})
+
+test('process reaper kills a detached process group on pipe close', async () => {
+	const workDir = await mkdtemp(join(tmpdir(), 'kody-dev-reaper-group-'))
+	// Nested sleep under detached sh — killing only the shell would leave the child.
+	const shell = spawn('sh', ['-c', 'sleep 30'], { stdio: 'ignore', detached: true })
+	assert.ok(shell.pid)
+	shell.unref()
+	const childPid = await waitFor(async () => {
+		const listed = await psList()
+		const child = listed.find((item) => item.ppid === shell.pid && /sleep/.test(item.name))
+		return child?.pid
+	}, 'detached sleep grandchild')
+	const reaper = await startProcessReaper({ workDir })
+	reaper.trackGroup(shell.pid)
+	reaper.close()
+	await waitFor(async () => {
+		if (isProcessAlive(shell.pid!) || isProcessAlive(childPid)) return undefined
+		return true
+	}, 'detached process group death')
 	await waitFor(
 		async () => ((await readdir(tmpdir())).includes(workDir.split('/').pop()!) ? undefined : true),
 		'work dir removal',
