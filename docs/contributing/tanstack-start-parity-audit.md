@@ -1,5 +1,36 @@
 # Start parity audit
 
+## Parsed search and populated preview checks
+
+Preview merge `591de3cc774918a24d40bd39271c1fff0f3c6641` contains source
+`41caa30dd`. The supported preview script passed health, login, session and
+authenticated account/organization document checks. Browser login reached the
+requested Memories page.
+
+Authenticated browser navigation covered Security, Organizations, workspace
+overview and the existing private package fixture. Package README, file tree,
+HEAD-ahead marker, browser Back, Credentials, Default mappings, Triggers,
+Collaborators and Settings rendered. The fixture's credential and trigger states
+are empty. No client errors appeared in that pass. These checks do not establish
+matched production visual parity or permission-changing actions.
+
+A disposable memory created through supported preview capabilities appeared
+after reload, filtered by search and opened its detail. Website soft deletion
+settled and removed it from the active list. Checking Include deleted exposed a
+Router URL mismatch: the string `true` was JSON-quoted while raw URL readers
+expected an unquoted boolean. Commit `facad6baa` fixes that value; subsequent
+commits replace raw search readers and manual text-filter URL writers with
+native validators and parsed Router state across collection screens. Real Router
+tests cover JSON-like text, bookmarks and explicit resource scope. Commit
+`85f98484c` completes the remaining presentation filters locally.
+
+Validate `38769944271` passed Node and MCP, failed formatting and one Workers
+assertion, then hit the browser job limit with an OAuth selector failure. Those
+failures have committed fixes. Source `050de978f` is being checked in Validate
+`38773350396`; its runtime results remain pending. Main commits after
+`f9c6ef85a` remain unapplied because approval review rejected their database
+migration files under the user's no-schema-change restriction.
+
 ## Catch-up and authenticated preview evidence
 
 Source `3000d71f6` includes main `f9c6ef85a`. Incoming changes affect shared

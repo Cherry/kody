@@ -1,4 +1,5 @@
 import { expect, it, vi } from 'vitest'
+import { defaultParseSearch } from '@tanstack/react-router'
 import {
 	MutationObserver,
 	QueryClient,
@@ -410,7 +411,7 @@ function fixtureInput(href: string) {
 				? decodeURIComponent(parts[isOrg ? 4 : 3]!)
 				: undefined,
 		},
-		emailSearch(Object.fromEntries(url.searchParams)),
+		emailSearch(defaultParseSearch(url.search)),
 	)
 }
 
