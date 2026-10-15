@@ -1474,6 +1474,7 @@ test('ensureDmarcEmailRoutingRule creates and reuses a forward rule', async () =
 		forwardTo: 'me@kentcdodds.com',
 	}
 	const createFetcher = mockFetch(
+		ok([]),
 		ok([
 			{
 				id: 'dest-1',
@@ -1481,7 +1482,6 @@ test('ensureDmarcEmailRoutingRule creates and reuses a forward rule', async () =
 				verified: '2026-01-01T00:00:00Z',
 			},
 		]),
-		ok([]),
 		ok({
 			id: 'rule-1',
 			name: 'DMARC reports → me@kentcdodds.com',
@@ -1500,6 +1500,11 @@ test('ensureDmarcEmailRoutingRule creates and reuses a forward rule', async () =
 	})
 	expect(createFetcher).toHaveBeenNthCalledWith(
 		1,
+		`${zoneApi}/zone-mail/email/routing/rules?page=1&per_page=50`,
+		expect.objectContaining({ method: 'GET' }),
+	)
+	expect(createFetcher).toHaveBeenNthCalledWith(
+		2,
 		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
 		expect.objectContaining({ method: 'GET' }),
 	)
@@ -1520,11 +1525,39 @@ test('ensureDmarcEmailRoutingRule creates and reuses a forward rule', async () =
 	const reuseFetcher = mockFetch(
 		ok([
 			{
+				id: 'rule-1',
+				enabled: true,
+				matchers: [{ type: 'literal', field: 'to', value: 'dmarc@kody.codes' }],
+				actions: [{ type: 'forward', value: ['me@kentcdodds.com'] }],
+			},
+		]),
+		ok([
+			{
 				id: 'dest-1',
 				email: 'me@kentcdodds.com',
 				verified: '2026-01-01T00:00:00Z',
 			},
 		]),
+	)
+	await expect(
+		ensureDmarcEmailRoutingRule({ ...args, fetcher: reuseFetcher }),
+	).resolves.toMatchObject({ created: false, id: 'rule-1' })
+	expect(reuseFetcher).toHaveBeenCalledTimes(2)
+	expect(reuseFetcher).toHaveBeenNthCalledWith(
+		1,
+		`${zoneApi}/zone-mail/email/routing/rules?page=1&per_page=50`,
+		expect.objectContaining({ method: 'GET' }),
+	)
+	expect(reuseFetcher).toHaveBeenNthCalledWith(
+		2,
+		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
+		expect.objectContaining({ method: 'GET' }),
+	)
+})
+
+test('ensureDmarcEmailRoutingRule re-verifies destination when rule already matches', async () => {
+	consoleError.mockImplementation(() => {})
+	const fetcher = mockFetch(
 		ok([
 			{
 				id: 'rule-1',
@@ -1533,37 +1566,101 @@ test('ensureDmarcEmailRoutingRule creates and reuses a forward rule', async () =
 				actions: [{ type: 'forward', value: ['me@kentcdodds.com'] }],
 			},
 		]),
-	)
-	await expect(
-		ensureDmarcEmailRoutingRule({ ...args, fetcher: reuseFetcher }),
-	).resolves.toMatchObject({ created: false, id: 'rule-1' })
-	expect(reuseFetcher).toHaveBeenCalledTimes(2)
-})
-
-test('ensureDmarcEmailRoutingRule paginates destinations and rules', async () => {
-	consoleError.mockImplementation(() => {})
-	const page1Dest = Response.json({
-		success: true,
-		result: [
-			{
-				id: 'dest-other',
-				email: 'other@example.com',
-				verified: '2026-01-01T00:00:00Z',
-			},
-		],
-		result_info: { total_pages: 2 },
-	})
-	const page2Dest = Response.json({
-		success: true,
-		result: [
+		ok([
 			{
 				id: 'dest-1',
 				email: 'me@kentcdodds.com',
 				verified: '2026-01-01T00:00:00Z',
 			},
-		],
-		result_info: { total_pages: 2 },
+		]),
+	)
+	await expect(
+		ensureDmarcEmailRoutingRule({
+			...creds,
+			zoneId: 'zone-mail',
+			systemEmailDomain: 'kody.codes',
+			forwardTo: 'me@kentcdodds.com',
+			fetcher,
+		}),
+	).resolves.toMatchObject({ created: false, id: 'rule-1' })
+	expect(fetcher).toHaveBeenCalledTimes(2)
+	expect(fetcher.mock.calls[0]?.[0]).toBe(
+		`${zoneApi}/zone-mail/email/routing/rules?page=1&per_page=50`,
+	)
+	expect(fetcher.mock.calls[1]?.[0]).toBe(
+		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
+	)
+})
+
+test('ensureDmarcEmailRoutingRule rejects stale unverified destination with matching rule', async () => {
+	consoleError.mockImplementation(() => {})
+	using _exit = mockProcessExit()
+	const fetcher = mockFetch(
+		ok([
+			{
+				id: 'rule-1',
+				enabled: true,
+				matchers: [{ type: 'literal', field: 'to', value: 'dmarc@kody.codes' }],
+				actions: [{ type: 'forward', value: ['me@kentcdodds.com'] }],
+			},
+		]),
+		ok([{ id: 'dest-1', email: 'me@kentcdodds.com', verified: null }]),
+	)
+	await expect(
+		ensureDmarcEmailRoutingRule({
+			...creds,
+			zoneId: 'zone-mail',
+			systemEmailDomain: 'kody.codes',
+			forwardTo: 'me@kentcdodds.com',
+			fetcher,
+		}),
+	).rejects.toThrow('process.exit called')
+	expect(consoleError).toHaveBeenCalledWith(
+		expect.stringContaining('not verified yet'),
+	)
+})
+
+test('ensureDmarcEmailRoutingRule accepts matching rule when destinations are 403', async () => {
+	consoleError.mockImplementation(() => {})
+	const fetcher = mockFetch(
+		ok([
+			{
+				id: 'rule-1',
+				enabled: true,
+				matchers: [{ type: 'literal', field: 'to', value: 'dmarc@kody.codes' }],
+				actions: [{ type: 'forward', value: ['me@kentcdodds.com'] }],
+			},
+		]),
+		Response.json(
+			{
+				success: false,
+				errors: [{ code: 10000, message: 'Authentication error' }],
+			},
+			{ status: 403 },
+		),
+	)
+	await expect(
+		ensureDmarcEmailRoutingRule({
+			...creds,
+			zoneId: 'zone-mail',
+			systemEmailDomain: 'kody.codes',
+			forwardTo: 'me@kentcdodds.com',
+			fetcher,
+		}),
+	).resolves.toEqual({
+		mailbox: 'dmarc@kody.codes',
+		forwardTo: 'me@kentcdodds.com',
+		created: false,
+		id: 'rule-1',
+		destinationUnverified: true,
 	})
+	expect(consoleError).toHaveBeenCalledWith(
+		expect.stringContaining('cannot list destinations (403)'),
+	)
+})
+
+test('ensureDmarcEmailRoutingRule paginates destinations and rules', async () => {
+	consoleError.mockImplementation(() => {})
 	const page1Rules = Response.json({
 		success: true,
 		result: [
@@ -1590,7 +1687,14 @@ test('ensureDmarcEmailRoutingRule paginates destinations and rules', async () =>
 		],
 		result_info: { total_pages: 2 },
 	})
-	const fetcher = mockFetch(page1Dest, page2Dest, page1Rules, page2Rules)
+	const destinations = ok([
+		{
+			id: 'dest-1',
+			email: 'me@kentcdodds.com',
+			verified: '2026-01-01T00:00:00Z',
+		},
+	])
+	const fetcher = mockFetch(page1Rules, page2Rules, destinations)
 	await expect(
 		ensureDmarcEmailRoutingRule({
 			...creds,
@@ -1600,31 +1704,78 @@ test('ensureDmarcEmailRoutingRule paginates destinations and rules', async () =>
 			fetcher,
 		}),
 	).resolves.toMatchObject({ created: false, id: 'rule-1' })
-	expect(fetcher).toHaveBeenCalledTimes(4)
+	expect(fetcher).toHaveBeenCalledTimes(3)
 	expect(fetcher.mock.calls[0]?.[0]).toBe(
-		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
-	)
-	expect(fetcher.mock.calls[1]?.[0]).toBe(
-		`${accountApi}/email/routing/addresses?page=2&per_page=50`,
-	)
-	expect(fetcher.mock.calls[2]?.[0]).toBe(
 		`${zoneApi}/zone-mail/email/routing/rules?page=1&per_page=50`,
 	)
-	expect(fetcher.mock.calls[3]?.[0]).toBe(
+	expect(fetcher.mock.calls[1]?.[0]).toBe(
 		`${zoneApi}/zone-mail/email/routing/rules?page=2&per_page=50`,
+	)
+	expect(fetcher.mock.calls[2]?.[0]).toBe(
+		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
+	)
+})
+
+test('ensureDmarcEmailRoutingRule paginates destinations when creating', async () => {
+	consoleError.mockImplementation(() => {})
+	const page1Rules = Response.json({
+		success: true,
+		result: [],
+		result_info: { total_pages: 1 },
+	})
+	const page1Dest = Response.json({
+		success: true,
+		result: [
+			{
+				id: 'dest-other',
+				email: 'other@example.com',
+				verified: '2026-01-01T00:00:00Z',
+			},
+		],
+		result_info: { total_pages: 2 },
+	})
+	const page2Dest = Response.json({
+		success: true,
+		result: [
+			{
+				id: 'dest-1',
+				email: 'me@kentcdodds.com',
+				verified: '2026-01-01T00:00:00Z',
+			},
+		],
+		result_info: { total_pages: 2 },
+	})
+	const created = ok({
+		id: 'rule-1',
+		enabled: true,
+		matchers: [{ type: 'literal', field: 'to', value: 'dmarc@kody.codes' }],
+		actions: [{ type: 'forward', value: ['me@kentcdodds.com'] }],
+	})
+	const fetcher = mockFetch(page1Rules, page1Dest, page2Dest, created)
+	await expect(
+		ensureDmarcEmailRoutingRule({
+			...creds,
+			zoneId: 'zone-mail',
+			systemEmailDomain: 'kody.codes',
+			forwardTo: 'me@kentcdodds.com',
+			fetcher,
+		}),
+	).resolves.toMatchObject({ created: true, id: 'rule-1' })
+	expect(fetcher).toHaveBeenCalledTimes(4)
+	expect(fetcher.mock.calls[0]?.[0]).toBe(
+		`${zoneApi}/zone-mail/email/routing/rules?page=1&per_page=50`,
+	)
+	expect(fetcher.mock.calls[1]?.[0]).toBe(
+		`${accountApi}/email/routing/addresses?page=1&per_page=50`,
+	)
+	expect(fetcher.mock.calls[2]?.[0]).toBe(
+		`${accountApi}/email/routing/addresses?page=2&per_page=50`,
 	)
 })
 
 test('ensureDmarcEmailRoutingRule updates when forward has extra recipients', async () => {
 	consoleError.mockImplementation(() => {})
 	const fetcher = mockFetch(
-		ok([
-			{
-				id: 'dest-1',
-				email: 'me@kentcdodds.com',
-				verified: '2026-01-01T00:00:00Z',
-			},
-		]),
 		ok([
 			{
 				id: 'rule-1',
@@ -1636,6 +1787,13 @@ test('ensureDmarcEmailRoutingRule updates when forward has extra recipients', as
 						value: ['me@kentcdodds.com', 'extra@example.com'],
 					},
 				],
+			},
+		]),
+		ok([
+			{
+				id: 'dest-1',
+				email: 'me@kentcdodds.com',
+				verified: '2026-01-01T00:00:00Z',
 			},
 		]),
 		ok({
@@ -1673,6 +1831,7 @@ test('ensureDmarcEmailRoutingRule fails when destination is unverified', async (
 	consoleError.mockImplementation(() => {})
 	using _exit = mockProcessExit()
 	const unverifiedFetcher = mockFetch(
+		ok([]),
 		ok([{ id: 'dest-1', email: 'me@kentcdodds.com', verified: null }]),
 	)
 	await expect(
@@ -1686,5 +1845,36 @@ test('ensureDmarcEmailRoutingRule fails when destination is unverified', async (
 	).rejects.toThrow('process.exit called')
 	expect(consoleError).toHaveBeenCalledWith(
 		expect.stringContaining('not verified yet'),
+	)
+})
+
+test('ensureDmarcEmailRoutingRule soft-skips when destination list is 403', async () => {
+	consoleError.mockImplementation(() => {})
+	const forbiddenFetcher = mockFetch(
+		ok([]),
+		Response.json(
+			{
+				success: false,
+				errors: [{ code: 10000, message: 'Authentication error' }],
+			},
+			{ status: 403 },
+		),
+	)
+	await expect(
+		ensureDmarcEmailRoutingRule({
+			...creds,
+			zoneId: 'zone-mail',
+			systemEmailDomain: 'kody.codes',
+			forwardTo: 'me@kentcdodds.com',
+			fetcher: forbiddenFetcher,
+		}),
+	).resolves.toEqual({
+		mailbox: 'dmarc@kody.codes',
+		forwardTo: 'me@kentcdodds.com',
+		created: false,
+		skipped: true,
+	})
+	expect(consoleError).toHaveBeenCalledWith(
+		expect.stringContaining('cannot list Email Routing destinations (403)'),
 	)
 })
