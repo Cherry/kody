@@ -30,7 +30,6 @@ export function PendingVerificationPage({
 }) {
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
-		refreshRoute: true,
 	})
 	const search = useMatchedPageScope().pageLocation.searchStr
 	const redirectTo = normalizeRedirectTo(

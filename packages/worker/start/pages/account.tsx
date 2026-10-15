@@ -95,7 +95,6 @@ export function AccountPage({
 	}, [actorKey, currentHref])
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
-		refreshRoute: true,
 	})
 	const initial = payloads.accountProfile
 	const [resendStatus, setResendStatus] = useState<'idle' | 'sending'>('idle')

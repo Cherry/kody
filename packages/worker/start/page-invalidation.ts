@@ -15,7 +15,7 @@ export function usePageInvalidation(
 		refreshRoute = false,
 	}: {
 		refreshShell?: boolean
-		/** Action loaders and mutable head metadata still belong to Router. */
+		/** Token and protocol action loaders still belong to Router. */
 		refreshRoute?: boolean
 	} = {},
 ) {
@@ -24,25 +24,38 @@ export function usePageInvalidation(
 	const { actorKey, pageLocation, orgSlug } = useMatchedPageScope()
 	const href = pageLocation.href
 	return useCallback(async () => {
+		const canRefreshRoute = () => {
+			const currentContext = router.state.matches[0]?.context
+			return (
+				refreshRoute &&
+				router.state.location.href.split('#')[0] === href.split('#')[0] &&
+				currentContext?.actorKey === actorKey
+			)
+		}
+		const refreshCurrentRoute = canRefreshRoute()
 		// One owner initiates active reads. Starting both Router and Query
 		// refreshes races authorization loaders and can cancel/restart GETs.
 		await invalidatePageResources(
 			queryClient,
 			actorKey,
 			resources,
-			refreshRoute ? 'none' : 'active',
+			refreshCurrentRoute ? 'none' : 'active',
 			orgSlug === null ? undefined : { orgSlug },
 		)
-		const currentContext = router.state.matches[0]?.context
-		const isCurrentActor =
-			currentContext != null &&
-			typeof currentContext === 'object' &&
-			'actorKey' in currentContext &&
-			currentContext.actorKey === actorKey
 		await Promise.all([
 			refreshShell ? invalidateShellQueries(queryClient, actorKey) : undefined,
-			refreshRoute && router.state.location.href === href && isCurrentActor
-				? router.invalidate({ filter: (match) => match.routeId !== '__root__' })
+			refreshCurrentRoute
+				? canRefreshRoute()
+					? router.invalidate({
+							filter: (match) => match.routeId !== '__root__',
+						})
+					: invalidatePageResources(
+							queryClient,
+							actorKey,
+							resources,
+							'active',
+							orgSlug === null ? undefined : { orgSlug },
+						)
 				: undefined,
 		])
 	}, [

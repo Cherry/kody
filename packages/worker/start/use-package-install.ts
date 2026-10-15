@@ -23,7 +23,7 @@ const resources = [
 export function usePackageInstall(fork: PackageRepoForkAction | null) {
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const capture = useSubmitterScope()
-	const reconcile = usePageInvalidation(resources, { refreshRoute: true })
+	const reconcile = usePageInvalidation(resources)
 	const [confirmed, setConfirmed] = useState(false)
 	const [installMessage, setMessage] = useState<string | null>(null)
 	const [installOutcome, setOutcome] = useState<CommunityInstallOutcome | null>(

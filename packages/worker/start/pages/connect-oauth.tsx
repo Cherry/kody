@@ -274,9 +274,7 @@ export function ConnectOauthRoute({
 		organizations.find((org) => org.slug === flowOrg)?.slug ??
 		organizations.find((org) => org.personal)?.slug ??
 		organizations[0]?.slug
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
+	const invalidatePages = usePageInvalidation(mutationResources)
 	const [state, setState] = useState(() =>
 		initialOauthState(
 			{

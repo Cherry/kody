@@ -32,9 +32,7 @@ export function CommunityDetailRoute({
 	data: CommunityDetailApiPayload
 	header: CommunityDetailContentProps
 }) {
-	const invalidatePages = usePageInvalidation(mutationResources, {
-		refreshRoute: true,
-	})
+	const invalidatePages = usePageInvalidation(mutationResources)
 	const invalidateReports = usePageInvalidation(reportResources)
 	const capture = useSubmitterScope()
 	const packageInstall = usePackageInstall(header.repoActions?.fork ?? null)

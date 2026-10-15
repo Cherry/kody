@@ -26,7 +26,10 @@ test('agent page shows its connect steps and matching canonical metadata', async
 	expect(html).toContain('href="/with/cursor"')
 	expect(html).not.toContain('href="/with/claude-code"')
 	expect(html).not.toContain('\u2014')
-	expect(html).toContain('Rather let Claude Code handle it?')
+	// React separates adjacent text nodes with hydration comments, invisible to readers.
+	expect(html.replaceAll('<!-- -->', '')).toContain(
+		'Rather let Claude Code handle it?',
+	)
 	expect(html).not.toContain('official Kody setup')
 	const head = absolutizeDocumentHead(
 		resolveDocumentHead('withAgent', '/with/claude-code'),
@@ -79,7 +82,7 @@ test('unofficial agent page leads with its setup prompt and MCP URL', async () =
 		'/with/amp',
 	)
 	expect(html).toContain('Kody for <em>Amp</em>')
-	expect(html).toMatch(
+	expect(html.replaceAll('<!-- -->', '')).toMatch(
 		/Amp doesn(&rsquo;|’|&#x27;)t have an official Kody setup/,
 	)
 	expect(
