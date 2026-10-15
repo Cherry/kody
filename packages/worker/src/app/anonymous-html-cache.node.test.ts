@@ -29,7 +29,10 @@ function pageCache(pathname: string, overrides: Partial<PageCacheInput> = {}) {
 }
 
 const noStore = { cacheControl: 'no-store' }
-const sharedHtml = { cacheControl: anonymousHtmlCacheControl, vary: 'Cookie' }
+const sharedHtml = {
+	cacheControl: 'public, max-age=60, stale-while-revalidate=300',
+	vary: 'Cookie',
+}
 
 test('requestHasSessionCookie matches only the kody_session name', () => {
 	const cases = [
