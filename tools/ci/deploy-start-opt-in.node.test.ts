@@ -4,6 +4,7 @@ import {
 	assertProductionSnapshot,
 	assertSharedBindings,
 	collectCandidateSecrets,
+	inactiveDeployInvocation,
 } from './deploy-start-opt-in.ts'
 
 const inactive = () => ({
@@ -355,4 +356,32 @@ test('Vite owns the exact bundling controls transformed in the retained rollout 
 			source,
 		),
 	).toThrow('Shared d1_databases')
+})
+
+test('deploys router source from its config directory and preserves bundled candidate cwd', () => {
+	const root = '/workspace/kody'
+	const router = inactiveDeployInvocation(
+		'packages/start-routing-worker/wrangler-start.generated.json',
+		'kody-start-router',
+		'/tmp/private/secrets.json',
+		root,
+	)
+	expect(router.cwd).toBe('/workspace/kody/packages/start-routing-worker')
+	expect(router.args).toEqual([
+		'deploy',
+		'--config',
+		'wrangler-start.generated.json',
+		'--name',
+		'kody-start-router',
+		'--secrets-file',
+		'/tmp/private/secrets.json',
+	])
+	const candidate = inactiveDeployInvocation(
+		'dist/server/wrangler.json',
+		'kody-start-release',
+		'/tmp/private/secrets.json',
+		root,
+	)
+	expect(candidate.cwd).toBe(root)
+	expect(candidate.args[2]).toBe('dist/server/wrangler.json')
 })

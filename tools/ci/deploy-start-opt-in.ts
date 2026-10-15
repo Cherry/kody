@@ -244,6 +244,32 @@ async function cf(endpoint: string, allowMissing = false) {
 	return body.result
 }
 
+/** Wrangler resolves tsconfig against cwd, then esbuild uses the source project root. */
+export function inactiveDeployInvocation(
+	config: string,
+	name: string,
+	secretsFile: string,
+	repositoryRoot = process.cwd(),
+) {
+	const absoluteConfig = path.resolve(repositoryRoot, config)
+	// Keep the router source config and its main/tsconfig paths in one directory.
+	// The emitted candidate is already bundled and keeps its existing invocation.
+	const cwd =
+		name === 'kody-start-router' ? path.dirname(absoluteConfig) : repositoryRoot
+	return {
+		cwd,
+		args: [
+			'deploy',
+			'--config',
+			path.relative(cwd, absoluteConfig),
+			'--name',
+			name,
+			'--secrets-file',
+			path.resolve(repositoryRoot, secretsFile),
+		],
+	}
+}
+
 async function deploy(
 	config: string,
 	name: string,
@@ -263,12 +289,14 @@ async function deploy(
 				'CLOUDFLARE_ACCOUNT_ID',
 			].flatMap((key) => (process.env[key] ? [[key, process.env[key]!]] : [])),
 		)
+		const binary = resolveLocalBinary('wrangler')
+		const invocation = inactiveDeployInvocation(config, name, file)
 		await new Promise<void>((resolve, reject) => {
-			const child = spawn(
-				resolveLocalBinary('wrangler'),
-				['deploy', '--config', config, '--name', name, '--secrets-file', file],
-				{ env, stdio: 'inherit' },
-			)
+			const child = spawn(binary, invocation.args, {
+				cwd: invocation.cwd,
+				env,
+				stdio: 'inherit',
+			})
 			child.once('error', reject)
 			child.once('close', (code) =>
 				code === 0
