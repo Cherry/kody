@@ -182,9 +182,7 @@ it.each([
 	['loadConnectionsPage', 'connectedAgents'],
 	['loadConnectionsPage', 'connectionProfiles'],
 	['loadConnectionUsagePage', 'connectionProfiles'],
-	['loadMcpServersPage', 'mcpServers'],
 	['loadPackageWebhooks', 'packageWebhooks'],
-	['loadSecretProvidersPage', 'secretProviders'],
 	['loadIntegrationsPage', 'integrations'],
 	['loadAccountPage', 'accountConnections'],
 ])(
@@ -233,8 +231,6 @@ it.each([
 	['loadWorkflowsPage', 'workflows'],
 	['loadConnectionsPage', 'connectedAgents'],
 	['loadConnectionsPage', 'connectionProfiles'],
-	['loadMcpServersPage', 'mcpServers'],
-	['loadSecretProvidersPage', 'secretProviders'],
 	['loadIntegrationsPage', 'integrations'],
 ])(
 	'a held %s write blocks its organization, not another organization',

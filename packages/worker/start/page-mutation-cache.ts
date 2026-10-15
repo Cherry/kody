@@ -42,8 +42,6 @@ export function hasPendingPageMutation(
 		loadWorkflowsPage: ['workflows'],
 		loadConnectionsPage: ['connectedAgents', 'connectionProfiles'],
 		loadConnectionUsagePage: ['connectedAgents', 'connectionProfiles'],
-		loadMcpServersPage: ['mcpServers'],
-		loadSecretProvidersPage: ['secretProviders'],
 		loadIntegrationsPage: ['integrations'],
 		loadPackageWebhooks: ['packageWebhooks'],
 		loadPackageCollaborators: ['packageCollaborators'],
