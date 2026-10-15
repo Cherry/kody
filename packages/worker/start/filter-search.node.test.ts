@@ -37,12 +37,15 @@ for (const validateSearch of validators) {
 						q: string | undefined
 						view?: string
 						includeDeleted?: boolean
+						pageSize?: number
 					}>(
 						validateSearch === collectionSearch
 							? { view: 'active' }
 							: validateSearch === memoriesSearch
 								? { includeDeleted: false }
-								: {},
+								: validateSearch === adminUsersSearch
+									? { pageSize: 20 }
+									: {},
 					),
 				],
 			},
@@ -74,6 +77,8 @@ for (const validateSearch of validators) {
 				expect(params.has('view')).toBe(false)
 			if (validateSearch === memoriesSearch)
 				expect(params.has('includeDeleted')).toBe(false)
+			if (validateSearch === adminUsersSearch)
+				expect(params.has('pageSize')).toBe(false)
 			const parsed = router.state.location.search
 			expect(validateSearch(parsed).q).toBe(q)
 			expect(
@@ -97,6 +102,13 @@ for (const validateSearch of validators) {
 				new URLSearchParams(router.state.location.searchStr).get(key),
 			).toBe(String(value))
 			expect(validateSearch(router.state.location.search).q).toBe('123')
+		}
+
+		if (validateSearch === adminUsersSearch) {
+			await router.navigate({ to: '/filters', search: { pageSize: 50 } })
+			expect(
+				new URLSearchParams(router.state.location.searchStr).get('pageSize'),
+			).toBe('50')
 		}
 
 		for (const q of ['123', 'true', 'false', 'null']) {

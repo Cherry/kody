@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, stripSearchParams } from '@tanstack/react-router'
 import { AdminUsersPage } from '../pages/admin-users.tsx'
 import { loadAdminUsers } from '#start/server/admin-users'
 import {
@@ -19,6 +19,7 @@ export const Route = createFileRoute('/admin/users')({
 		navigation: { rail: 'admin', item: 'users' },
 	},
 	validateSearch: adminUsersSearch,
+	search: { middlewares: [stripSearchParams({ pageSize: 20 })] },
 	loaderDeps: ({ search }) => search,
 	beforeLoad: ({ location, search }) => ({
 		pageQueryInput: {
