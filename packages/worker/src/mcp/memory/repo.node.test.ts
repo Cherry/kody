@@ -4,6 +4,7 @@ import { expect, test } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import {
 	getMemoryById,
+	deleteMemory,
 	listMemoriesByUserId,
 	listMemoriesByUserIdPage,
 } from './repo.ts'
@@ -166,4 +167,37 @@ test('deleted memory reads require an explicit owner-scoped opt-in for list, det
 	expect(await getMemoryById(db, owner, 'owner-live')).toMatchObject({
 		id: 'owner-live',
 	})
+})
+
+test('permanent deletion requires explicit force for deleted rows and remains owner scoped', async () => {
+	const { sqlite, db } = createMemoryDb()
+	const owner = ownerIdFromStored('owner')
+	insertMemory(sqlite, {
+		id: 'deleted',
+		userId: owner,
+		status: 'deleted',
+		subject: 'Deleted',
+		deletedAt: '2026-01-02T00:00:00.000Z',
+	})
+	insertMemory(sqlite, {
+		id: 'live',
+		userId: owner,
+		status: 'active',
+		subject: 'Live',
+	})
+	expect(await deleteMemory(db, owner, 'deleted')).toBe(false)
+	expect(await deleteMemory(db, owner, 'deleted', { force: false })).toBe(false)
+	expect(
+		await deleteMemory(db, ownerIdFromStored('foreign'), 'deleted', {
+			force: true,
+		}),
+	).toBe(false)
+	expect(
+		await getMemoryById(db, owner, 'deleted', { includeDeleted: true }),
+	).not.toBeNull()
+	expect(await deleteMemory(db, owner, 'deleted', { force: true })).toBe(true)
+	expect(
+		await getMemoryById(db, owner, 'deleted', { includeDeleted: true }),
+	).toBeNull()
+	expect(await deleteMemory(db, owner, 'live')).toBe(true)
 })

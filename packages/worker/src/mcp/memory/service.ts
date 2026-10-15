@@ -357,6 +357,7 @@ export async function deleteMemory(
 				input.env.APP_DB,
 				input.userId,
 				input.memoryId,
+				{ includeDeleted: input.force === true },
 			)
 			if (!existing) return null
 
@@ -365,6 +366,7 @@ export async function deleteMemory(
 					input.env.APP_DB,
 					input.userId,
 					input.memoryId,
+					{ force: true },
 				)
 				if (!deleted) return null
 				try {

@@ -151,12 +151,13 @@ export async function deleteMemory(
 	db: D1Database,
 	userId: string,
 	memoryId: string,
+	options?: { force?: boolean },
 ): Promise<boolean> {
 	const out = await db
 		.prepare(
-			`DELETE FROM mcp_memories WHERE user_id = ? AND id = ?${andLiveDeletedAtSql()}`,
+			`DELETE FROM mcp_memories WHERE user_id = ? AND id = ? AND (deleted_at IS NULL OR ? = 1)`,
 		)
-		.bind(userId, memoryId)
+		.bind(userId, memoryId, options?.force === true ? 1 : 0)
 		.run()
 	return (out.meta.changes ?? 0) > 0
 }
