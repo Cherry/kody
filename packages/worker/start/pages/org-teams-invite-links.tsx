@@ -10,6 +10,7 @@ import {
 	revokeTeamInviteLink,
 } from '#start/server/invite-links'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { teamInviteMutationOptions } from './org-team-invite-mutation.ts'
 
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { renderIcon } from '../components/icon.tsx'
@@ -65,68 +66,80 @@ export function OrgTeamInviteLinks({
 	const [created, setCreated] = useState<{ id: string; url: string } | null>(
 		null,
 	)
-	const mutation = useMutation({
-		gcTime: 0,
-		retry: false,
-		mutationFn: async (
-			input:
-				| { action: 'create'; teamId: string }
-				| { action: 'revoke'; linkId: string },
-		) => {
-			const result =
-				input.action === 'create'
-					? await createTeamInviteLink({
-							data: { orgSlug, teamId: input.teamId },
-						})
-					: await revokeTeamInviteLink({
-							data: { orgSlug, linkId: input.linkId },
-						})
-			return result
-		},
-		onMutate: () => ({ queryKey }),
-		onSuccess: (_result, _input, context) =>
-			client.invalidateQueries({ queryKey: context.queryKey }),
-	})
-	const busy = mutation.isPending
-		? mutation.variables?.action === 'create'
-			? `create:${team.id}`
-			: `revoke:${mutation.variables?.linkId}`
-		: null
-	function act(
-		input:
-			| { action: 'create'; teamId: string }
-			| { action: 'revoke'; linkId: string },
-	) {
+	const create = useMutation(
+		teamInviteMutationOptions(
+			client,
+			queryKey,
+			async (input: {
+				orgSlug: string
+				teamId: string
+				active: () => boolean
+			}) => {
+				const result = await createTeamInviteLink({
+					data: { orgSlug: input.orgSlug, teamId: input.teamId },
+				})
+				if (!input.active()) return
+				// The one-time URL belongs only to this mounted form, never the query or mutation cache.
+				setCreated(result.inviteLink)
+				const copied = await copyText(result.inviteLink.url)
+				if (input.active())
+					onMessage(
+						copied
+							? 'Team invite link copied to clipboard.'
+							: 'Team invite link created. Copy it below; it is shown only once.',
+						'info',
+					)
+			},
+		),
+	)
+	const revoke = useMutation(
+		teamInviteMutationOptions(
+			client,
+			queryKey,
+			async (input: { orgSlug: string; linkId: string }) => {
+				await revokeTeamInviteLink({ data: input })
+			},
+		),
+	)
+	const busy = create.isPending
+		? `create:${team.id}`
+		: revoke.isPending
+			? `revoke:${revoke.variables?.linkId}`
+			: null
+	async function createLink() {
+		if (busy) return
 		const active = capture()
 		onMessage('', 'info')
-		mutation.mutate(input, {
-			onSuccess: async (result) => {
-				if (!active()) return
-				if (
-					input.action === 'create' &&
-					'inviteLink' in result &&
-					result.inviteLink
-				) {
-					const link = result.inviteLink
-					setCreated(link)
-					const copied = await copyText(link.url)
-					if (active())
-						onMessage(
-							copied
-								? 'Team invite link copied to clipboard.'
-								: 'Team invite link created. Copy it below; it is shown only once.',
-							'info',
-						)
-				} else {
-					if (input.action === 'revoke' && created?.id === input.linkId)
-						setCreated(null)
-					onMessage('Team invite link revoked.', 'info')
-				}
-			},
-			onError: (error) => {
-				if (active()) onMessage(error.message, 'error')
-			},
-		})
+		try {
+			await create.mutateAsync({ orgSlug, teamId: team.id, active })
+		} catch (error) {
+			if (active())
+				onMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to create team invite link.',
+					'error',
+				)
+		}
+	}
+	async function revokeLink(linkId: string) {
+		if (busy) return
+		const active = capture()
+		onMessage('', 'info')
+		try {
+			await revoke.mutateAsync({ orgSlug, linkId })
+			if (!active()) return
+			if (created?.id === linkId) setCreated(null)
+			onMessage('Team invite link revoked.', 'info')
+		} catch (error) {
+			if (active())
+				onMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to revoke team invite link.',
+					'error',
+				)
+		}
 	}
 	const teamLinks = links.filter((link) => link.teamId === team.id)
 	const createdUrl = created?.url
@@ -142,7 +155,7 @@ export function OrgTeamInviteLinks({
 					disabled={busy !== null}
 					data-testid="org-team-invite-link-create"
 					css={getPillButtonCss({ size: 'sm' })}
-					onClick={() => act({ action: 'create', teamId: team.id })}
+					onClick={() => void createLink()}
 				>
 					{renderIcon('link', { size: '1.05rem' })}
 					{busy === `create:${team.id}` ? 'Creating…' : 'Copy invite link'}
@@ -168,7 +181,7 @@ export function OrgTeamInviteLinks({
 								type="button"
 								disabled={busy !== null}
 								css={getDangerPillCss({ size: 'sm' })}
-								onClick={() => act({ action: 'revoke', linkId: link.id })}
+								onClick={() => void revokeLink(link.id)}
 							>
 								{busy === `revoke:${link.id}` ? 'Revoking…' : 'Revoke'}
 							</button>

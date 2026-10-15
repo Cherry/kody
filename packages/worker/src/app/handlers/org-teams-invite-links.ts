@@ -1,8 +1,5 @@
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
-import {
-	loadOrgTeamsData,
-	personalOrgTeamWriteResponse,
-} from '#app/handlers/org-teams.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { personalOrgTeamWriteResponse } from '#app/handlers/org-teams.ts'
 import {
 	inviteLinkUrl,
 	readInviteLinkOptions,
@@ -107,7 +104,7 @@ export async function createTeamInviteLink({
 			audit: orgAuditWriterFromRequest(env, user.request),
 		})
 		return operationResult({
-			...(await loadOrgTeamsData({ env, user, org })),
+			ok: true,
 			inviteLink: {
 				id: created.id,
 				teamId,
@@ -175,7 +172,7 @@ export async function revokeTeamInviteLink({
 			400,
 		)
 	}
-	return operationResult(await loadOrgTeamsData({ env, user, org }))
+	return operationResult({ ok: true, revokedLinkId: linkId })
 }
 
 type InviteOperationContext = {
