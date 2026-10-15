@@ -195,7 +195,7 @@ it.each([
 		const write = client
 			.getMutationCache()
 			.build(client, {
-				mutationKey: [mutationKey, 'alice', '/@one/-/agents'],
+				mutationKey: [mutationKey, 'alice', 'one'],
 				mutationFn: () =>
 					new Promise<void>((resolve) => {
 						finish = resolve
@@ -259,17 +259,13 @@ it.each([
 			'alice',
 			resource,
 			controller.signal,
-			'/@one/-/jobs',
+			{ orgSlug: 'one' },
 		).then(() => {
 			ready = true
 		})
-		await waitForPageMutations(
-			client,
-			'alice',
-			resource,
-			controller.signal,
-			'/@two/-/jobs',
-		)
+		await waitForPageMutations(client, 'alice', resource, controller.signal, {
+			orgSlug: 'two',
+		})
 		expect(ready).toBe(false)
 		finish()
 		await write

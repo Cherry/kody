@@ -128,10 +128,9 @@ it('waits for a pending deletion before reading an uncached navigation', async (
 	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
 	const accepted = { ...data(null).payload, values: [row(other)] }
 	const read = vi.fn(async () => ({ payload: accepted }))
-	const options = createPageQuery('loadValuesPage', read)(
-		'a',
-		'/account/values?selected=one',
-	)
+	const options = createPageQuery('loadValuesPage', read)('a', {
+		orgSlug: null,
+	})
 	const loading = ensurePageQuery(client, options, false)
 	await Promise.resolve()
 	expect(read).not.toHaveBeenCalled()

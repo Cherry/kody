@@ -1,5 +1,4 @@
 import { type QueryClient } from '@tanstack/react-query'
-import { parseOrgResourcePath } from '#universal/org-pages.ts'
 
 export function pageResourceKey(actorKey: string | null, resource: string) {
 	return ['page', actorKey, resource] as const
@@ -70,13 +69,7 @@ export function hasPendingPageMutation(
 							return key?.[2] === input.username && key?.[3] === input.kodyId
 						if (input && typeof input === 'object' && 'orgSlug' in input)
 							return key?.[2] === input.orgSlug
-						if (typeof input === 'string') {
-							const org =
-								parseOrgResourcePath(
-									new URL(input, 'https://kody.local').pathname,
-								)?.slug ?? null
-							return key?.[2] === org
-						}
+
 						return true
 					},
 				}) > 0,
