@@ -29,11 +29,7 @@ export function DocsConnectRoute({
 		children: (
 			<section css={connectPageCss}>
 				<header css={connectHeadCss}>
-					<p
-						data-rise
-						style={{ '--rise': '0' } as CSSProperties}
-						css={connectEyebrowCss}
-					>
+					<p data-rise style={{ '--rise': '0' } as CSSProperties}>
 						Docs
 					</p>
 					<h1
@@ -49,11 +45,7 @@ export function DocsConnectRoute({
 						Slack, or Spotify to Kody. Each walkthrough is verified against the
 						real console — append <code>.md</code> to hand it to your agent.
 					</p>
-					<p
-						data-rise
-						style={{ '--rise': '3' } as CSSProperties}
-						css={connectHintCss}
-					>
+					<p data-rise style={{ '--rise': '3' } as CSSProperties}>
 						Provider not listed? Follow{' '}
 						<SiteLink href={docHref('integration-bootstrap')}>
 							Integration bootstrap
@@ -120,25 +112,6 @@ const connectPageCss = {
 	padding: 'clamp(2.5rem, 6vw, 4rem) 0 clamp(4rem, 8vw, 6.5rem)',
 } satisfies CSSObject
 
-const connectHeadCss = {
-	...pageHeadCss,
-	textAlign: 'left' as const,
-	'& h1': {
-		...pageHeadCss['& h1'],
-		margin: '0.6rem 0 0',
-		fontSize: 'clamp(2.1rem, 5vw, 3rem)',
-	},
-	'& > p': {
-		...pageHeadCss['& > p'],
-		margin: '1rem 0 0',
-	},
-	'& a': {
-		color: colors.primaryText,
-		textDecoration: 'underline',
-		textUnderlineOffset: '0.15em',
-	},
-} satisfies CSSObject
-
 const connectEyebrowCss = {
 	fontSize: '0.8rem',
 	fontWeight: 650,
@@ -151,6 +124,27 @@ const connectHintCss = {
 	fontSize: '0.95rem',
 	color: colors.textMuted,
 	maxWidth: '58ch',
+} satisfies CSSObject
+
+const connectHeadCss = {
+	...pageHeadCss,
+	textAlign: 'left' as const,
+	'& h1': {
+		...pageHeadCss['& h1'],
+		margin: '0.6rem 0 0',
+		fontSize: 'clamp(2.1rem, 5vw, 3rem)',
+	},
+	'& > p': {
+		...pageHeadCss['& > p'],
+		margin: '1rem 0 0',
+	},
+	'& > p:first-of-type': connectEyebrowCss,
+	'& > p:last-of-type': connectHintCss,
+	'& a': {
+		color: colors.primaryText,
+		textDecoration: 'underline',
+		textUnderlineOffset: '0.15em',
+	},
 } satisfies CSSObject
 
 const relatedLinkCss = {
