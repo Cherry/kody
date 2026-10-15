@@ -2,6 +2,24 @@
 
 ## Parsed search and populated preview checks
 
+Preview run `38773350189` deployed merge
+`f7aa53c9ed9313fc3f17a24b016f673f05bf680f`, source `050de978f` merged by
+GitHub with main `e04798aba`. Origin, platform, runtime and API health checks
+passed. The source branch has not merged those newer main commits; the preview
+workflow uses GitHub's synthetic merge commit.
+
+Fresh browser login with the approved test account preserved the Memories
+destination. Include deleted produced `includeDeleted=true` and stayed checked
+after a full reload. Searching for literal `123` kept that exact input and used
+Router's quoted string serialization. The prior disposable memory was absent
+after deployment, including with deleted records enabled, so this pass proves
+filter state persistence but not populated deleted results. Screenshot:
+`/tmp/kody-preview-memory-filter-fixed.png`. Validate `38773350396` has passed
+Static and MCP; Node, Workers and browser checks are still running.
+
+Local commit `1ba7122b0` strips default collection search values through native
+Router middleware. Static checks passed; runtime coverage awaits the next push.
+
 Preview merge `591de3cc774918a24d40bd39271c1fff0f3c6641` contains source
 `41caa30dd`. The supported preview script passed health, login, session and
 authenticated account/organization document checks. Browser login reached the
