@@ -1,5 +1,8 @@
 import { anonymousDocumentCachePolicy } from '../document-cache-policy.ts'
-import { getResponseHeaders } from '@tanstack/react-start/server'
+import {
+	getResponseHeaders,
+	transferResponseBodyOwnership,
+} from '@tanstack/react-start/server'
 import { getGlobalStartContext, getRouterInstance } from '@tanstack/react-start'
 import { getStartRequestEnv } from './request-env.ts'
 import { secureNativeResponse } from '../../src/app/native-response-envelope.ts'
@@ -19,7 +22,8 @@ export async function serveNativeDocument(
 		router,
 		new URL(request.url).pathname,
 	)
-	return serveAnonymousHtmlFromCache(
+	let source: Response | undefined
+	const result = await serveAnonymousHtmlFromCache(
 		request,
 		env,
 		{
@@ -28,9 +32,10 @@ export async function serveNativeDocument(
 			},
 		},
 		async () => {
+			source = await next()
 			const response = secureNativeResponse(
 				request,
-				await next(),
+				source,
 				env,
 				context.nonce,
 				context.documentFailure,
@@ -50,4 +55,9 @@ export async function serveNativeDocument(
 			nonce: context.nonce,
 		},
 	)
+	// Cloning for cache storage tees the SSR body. Tell Start that the returned
+	// branch still owns its stream, otherwise middleware replacement disposes it.
+	return source?.body && result.body
+		? transferResponseBodyOwnership(source, result)
+		: result
 }

@@ -35,6 +35,29 @@ function contains(html: string, markers: string[]) {
 	for (const marker of markers) expect(html).toContain(marker)
 }
 
+test('native document middleware preserves complete SSR streams on public and personalized requests', async () => {
+	const server = await getSharedMcpE2eServer()
+	const user = createUniqueTestUser()
+	await server.ensureUser(user)
+	const cookie = await loginToApp(server.origin, user)
+	// These requests pass through the built Start middleware pipeline. Its
+	// ownership reconciler must not dispose SSR when cache delivery wraps it.
+	for (const headers of [new Headers(), new Headers({ Cookie: cookie })]) {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const response = await fetch(new URL('/faq', server.origin), { headers })
+			expect(response.status).toBe(200)
+			const html = await response.text()
+			expect(html).toContain('</html>')
+			expect(html).toContain('data-faq="replace-agents"')
+			const nonce = response.headers
+				.get('Content-Security-Policy')
+				?.match(/'nonce-([^']+)'/)?.[1]
+			expect(nonce).toBeTruthy()
+			expect(html).toContain(`nonce="${nonce}"`)
+		}
+	}
+})
+
 test('legacy team Secrets redirects to native Credentials and Agents remains authorized', async () => {
 	const server = await getSharedMcpE2eServer()
 	const user = createUniqueTestUser()

@@ -1,3 +1,4 @@
+import type * as StartServer from '@tanstack/react-start/server'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 const state = vi.hoisted(() => ({
 	context: {
@@ -17,9 +18,16 @@ vi.mock('@tanstack/react-start', () => ({
 		return { getMatchedRoutes: () => [[route], {}, route] }
 	},
 }))
-vi.mock('@tanstack/react-start/server', () => ({
-	getResponseHeaders: () => state.headers,
-}))
+vi.mock('@tanstack/react-start/server', async (importOriginal) => {
+	const original = await importOriginal<typeof StartServer>()
+	return {
+		...original,
+		getResponseHeaders: () => state.headers,
+		transferResponseBodyOwnership: vi.fn(
+			original.transferResponseBodyOwnership,
+		),
+	}
+})
 vi.mock('./request-env.ts', () => ({
 	getStartRequestEnv: () => ({
 		APP_BASE_URL: 'https://kody.test',
@@ -34,9 +42,11 @@ vi.mock('../../src/deferred-work.ts', () => ({
 	},
 }))
 import { serveNativeDocument } from './document-cache.ts'
+import { transferResponseBodyOwnership } from '@tanstack/react-start/server'
 const stored = new Map<string, Response>()
 beforeEach(() => {
 	stored.clear()
+	vi.mocked(transferResponseBodyOwnership).mockClear()
 	state.headers = new Headers()
 	state.policy = 'marketing'
 	state.context = { nonce: 'requestnonce', documentFailure: undefined }
@@ -55,8 +65,13 @@ const document = () =>
 	new Response('index', { headers: { 'Content-Type': 'text/plain' } })
 test('native middleware secures its response and serves GET/HEAD hits before loaders', async () => {
 	const request = new Request('https://kody.test/llms.txt')
-	const next = vi.fn(async () => document())
+	const source = document()
+	const next = vi.fn(async () => source)
 	const miss = await serveNativeDocument(request, next)
+	expect(transferResponseBodyOwnership).toHaveBeenCalledExactlyOnceWith(
+		source,
+		miss,
+	)
 	expect(miss.headers.get('X-Kody-Cache')).toBe('MISS')
 	expect(miss.headers.get('Content-Security-Policy')).toContain(
 		"'nonce-requestnonce'",
@@ -74,6 +89,8 @@ test('native middleware secures its response and serves GET/HEAD hits before loa
 	expect(head.headers.get('X-Kody-Cache')).toBe('HIT')
 	expect(await head.text()).toBe('')
 	expect(next).toHaveBeenCalledTimes(1)
+	// Cache hits never acquire an SSR stream and HEAD never claims a null body.
+	expect(transferResponseBodyOwnership).toHaveBeenCalledTimes(1)
 })
 test('native middleware never stores pending Start cookies or error pages', async () => {
 	const response = await serveNativeDocument(
