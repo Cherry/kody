@@ -1549,6 +1549,13 @@ export async function runRepoChecks(input: {
 	 * existing listings stay forkable and migratable.
 	 */
 	requirePackageDocs?: boolean
+	/**
+	 * When false, credential-stamp gate findings stay informational and do
+	 * not fail `runRepoChecks` early. Community install and platform
+	 * codemods pass false so legacy packages remain forkable and migratable
+	 * until phase 2/3 of #3836. Omit (default true) for authoring publish.
+	 */
+	enforceCredentialStamp?: boolean
 }): Promise<RepoCheckRunResult> {
 	const manifestContent = await input.workspace.readFile(input.manifestPath)
 	if (manifestContent == null) {
@@ -1655,9 +1662,38 @@ export async function runRepoChecks(input: {
 			sourceFiles: {},
 		})
 	}
-	const sourceFiles = sourceWalk.collected
+	let sourceFiles = sourceWalk.collected
 	// Before any gate that returns early, so owners see it while fixing others.
-	results.push(buildCredentialPatternCheck(sourceFiles))
+	// May auto-write missing kody.credentials keys into sourceFiles (never
+	// overwrites descriptions). Hard-fails on unstampable patterns / server eval
+	// / missing descriptions (issue #3836 phase 1) unless the caller opts out
+	// (community install / platform codemods).
+	const credentialPatternCheck = buildCredentialPatternCheck(sourceFiles)
+	sourceFiles = credentialPatternCheck.sourceFiles
+	const enforceCredentialStamp = input.enforceCredentialStamp !== false
+	const credentialCheckOk = enforceCredentialStamp
+		? credentialPatternCheck.ok
+		: true
+	const credentialCheckMessage =
+		!enforceCredentialStamp && !credentialPatternCheck.ok
+			? credentialPatternCheck.message
+					.replace(
+						/^Credential stamp publish gate \(issue #3836 phase 1\):/,
+						'Credential stamp notes (informational; enforceCredentialStamp=false):',
+					)
+					.replace(
+						/^Publish failed\. Fix each item below, then publish again\.\n?/m,
+						'Stamp findings below do not fail this check (community install / platform codemod lane). Authoring publish still enforces the gate.\n',
+					)
+			: credentialPatternCheck.message
+	results.push({
+		kind: credentialPatternCheck.kind,
+		ok: credentialCheckOk,
+		message: credentialCheckMessage,
+	})
+	if (enforceCredentialStamp && !credentialPatternCheck.ok) {
+		return toRepoCheckRunResult({ results, manifest, sourceFiles })
+	}
 	const credentialNeedsCheck = await buildCredentialNeedsCheck({
 		env: input.env,
 		userId: input.userId,
