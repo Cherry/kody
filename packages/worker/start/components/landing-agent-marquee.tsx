@@ -1,3 +1,4 @@
+import { publicAsset } from '../public-assets.ts'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { SiteLink } from './site-link.tsx'
 import {
@@ -72,7 +73,7 @@ function renderAgent(agent: WithAgent, loopCopy: 'before' | 'after' | null) {
 					aria-hidden="true"
 					style={
 						{
-							'--agent-icon': `url(${withAgentIconSrc(agent)})`,
+							'--agent-icon': `url(${publicAsset(withAgentIconSrc(agent))})`,
 						} as CSSProperties
 					}
 				></span>

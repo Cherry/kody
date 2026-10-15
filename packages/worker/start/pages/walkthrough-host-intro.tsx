@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties } from 'react'
@@ -94,7 +95,7 @@ function renderHostOption(host: WalkthroughHost) {
 				className="walkthrough-host-mark"
 				style={
 					{
-						'--chip-icon': `url("${walkthroughHostMarkUrl(host)}")`,
+						'--chip-icon': `url("${publicAsset(walkthroughHostMarkUrl(host))}")`,
 					} as CSSProperties
 				}
 				aria-hidden="true"

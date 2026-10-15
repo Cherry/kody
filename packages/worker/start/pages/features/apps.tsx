@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../../public-assets.ts'
 import { useEffect, useRef, useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { AppsSharing } from './apps-sharing.tsx'
@@ -96,7 +97,7 @@ export function AppsFeature() {
 				<div>
 					<img
 						className="feature-orb"
-						src="/images/lantern/kody-primitives-orb-apps.webp"
+						src={publicAsset('/images/lantern/kody-primitives-orb-apps.webp')}
 						alt=""
 						width="80"
 						height="80"

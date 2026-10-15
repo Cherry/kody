@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { CopyTextButton } from '../../components/copy-text-button.tsx'
@@ -110,7 +111,12 @@ export function ClaudeIntegrationsPage() {
 					</div>
 					<div className="resource-side">
 						<div className="account-title">
-							<img src="/logo-64.webp" width={32} height={32} alt="" />
+							<img
+								src={publicAsset('/logo-64.webp')}
+								width={32}
+								height={32}
+								alt=""
+							/>
 							<strong>Your Kody account</strong>
 						</div>
 						<dl>

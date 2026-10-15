@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset, publicAssetSrcSet } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, type RefCallback } from 'react'
 import { heroBaseImage } from '#universal/landing-images.ts'
@@ -251,8 +252,8 @@ export function HeroStage(props: HeroStageProps) {
 			ref={stageParallaxRef}
 		>
 			<img
-				src={heroBaseImage.src}
-				srcSet={heroBaseImage.srcSet}
+				src={publicAsset(heroBaseImage.src)}
+				srcSet={publicAssetSrcSet(heroBaseImage.srcSet)}
 				sizes={heroBaseImage.sizes}
 				width={heroBaseImage.width}
 				height={heroBaseImage.height}
@@ -265,7 +266,7 @@ export function HeroStage(props: HeroStageProps) {
 			{stageProps.map((prop) => (
 				<img
 					key={prop.src}
-					src={`/images/hero/${prop.src}.webp`}
+					src={publicAsset(`/images/hero/${prop.src}.webp`)}
 					width={prop.w}
 					height={prop.h}
 					alt=""

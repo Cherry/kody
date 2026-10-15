@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset, publicAssetSrcSet } from '../public-assets.ts'
 import { useEffect, useEffectEvent, useRef, type CSSProperties } from 'react'
 import {
 	attachLanternOrbMotion,
@@ -81,8 +82,8 @@ export function LandingLantern(props: LandingLanternProps) {
 				A lantern holding five glowing orbs, one for each Kody primitive.
 			</figcaption>
 			<img
-				src={landingLanternImage.src}
-				srcSet={landingLanternImage.srcSet}
+				src={publicAsset(landingLanternImage.src)}
+				srcSet={publicAssetSrcSet(landingLanternImage.srcSet)}
 				sizes={landingLanternImage.sizes}
 				width={landingLanternImage.width}
 				height={landingLanternImage.height}
@@ -99,7 +100,7 @@ export function LandingLantern(props: LandingLanternProps) {
 					const open = activeId === orb.id
 					const art = (
 						<img
-							src={landingLanternOrbArt[orb.id]}
+							src={publicAsset(landingLanternOrbArt[orb.id])}
 							alt=""
 							decoding="async"
 							draggable="false"

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type ReactNode, type CSSProperties } from 'react'
 import { usePrimitiveWidgetMotion } from './primitive-widget-motion.ts'
 import { type PrimitiveWidgetId } from '#universal/primitive-cards.ts'
@@ -51,7 +52,9 @@ export function icon(name: string) {
 			className="pw-icon"
 			aria-hidden="true"
 			style={
-				{ '--pw-icon': `url("/images/icons/${name}.svg")` } as CSSProperties
+				{
+					'--pw-icon': `url("${publicAsset(`/images/icons/${name}.svg`)}")`,
+				} as CSSProperties
 			}
 		></span>
 	)

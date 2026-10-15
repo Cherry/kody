@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from './site-link.tsx'
 import { colors, transitions, typography } from '#universal/styles/tokens.ts'
@@ -21,7 +22,12 @@ export function SiteFooter(props: SiteFooterProps) {
 		<footer css={footerCss}>
 			<div css={footerInnerCss}>
 				<SiteLink href="/" css={brandCss}>
-					<img src="/images/kody-mark.png" alt="" width={28} height={28} />
+					<img
+						src={publicAsset('/images/kody-mark.png')}
+						alt=""
+						width={28}
+						height={28}
+					/>
 					<span>Kody</span>
 				</SiteLink>
 				<p css={taglineCss}>

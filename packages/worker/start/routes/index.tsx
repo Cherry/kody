@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset, publicAssetSrcSet } from '../public-assets.ts'
 import { homeMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { heroBaseImage } from '#universal/landing-images.ts'
@@ -41,9 +42,9 @@ export const Route = createFileRoute('/')({
 					rel: 'preload',
 					as: 'image',
 					type: 'image/webp',
-					href: heroBaseImage.src,
+					href: publicAsset(heroBaseImage.src),
 					fetchPriority: 'high',
-					imageSrcSet: heroBaseImage.srcSet,
+					imageSrcSet: publicAssetSrcSet(heroBaseImage.srcSet),
 					imageSizes: heroBaseImage.sizes,
 				},
 			],

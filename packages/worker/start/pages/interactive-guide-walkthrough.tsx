@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type CSSProperties } from 'react'
@@ -272,7 +273,7 @@ function renderAgentMark(host: WalkthroughHost) {
 			css={agentMarkCss}
 			style={
 				{
-					'--chip-icon': `url("${walkthroughHostMarkUrl(host)}")`,
+					'--chip-icon': `url("${publicAsset(walkthroughHostMarkUrl(host))}")`,
 				} as CSSProperties
 			}
 			aria-hidden="true"
@@ -322,7 +323,7 @@ function renderInfoIcon() {
 function renderKodyMark() {
 	return (
 		<img
-			src="/images/kody-mark.png"
+			src={publicAsset('/images/kody-mark.png')}
 			alt=""
 			width={12}
 			height={12}

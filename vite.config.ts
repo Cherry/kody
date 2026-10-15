@@ -20,6 +20,13 @@ import { inlineCssText } from './tools/vite-inline-css-text.ts'
 import { markdownAsText } from './tools/vite-markdown-as-text.ts'
 import { workerWholeGraphReload } from './tools/vite-worker-whole-graph-reload.ts'
 
+import {
+	startReleaseAssets,
+	startReleaseBase,
+} from './tools/vite-start-release.ts'
+
+const releaseBase = startReleaseBase(process.env.KODY_START_RELEASE)
+
 const root = path.dirname(fileURLToPath(import.meta.url))
 // `@cloudflare/vite-plugin` reads `CLOUDFLARE_ENV` itself (not this
 // file's `envName`) to pick `env.production` / `env.test` bindings. Local
@@ -150,6 +157,7 @@ export default defineConfig(async ({ command }) => {
 	}
 
 	return {
+		base: releaseBase,
 		publicDir: 'packages/worker/public',
 		environments: {
 			client: {
@@ -194,7 +202,11 @@ export default defineConfig(async ({ command }) => {
 			redact(),
 			tanstackStart({
 				srcDirectory: 'packages/worker/start',
+				serverFns: {
+					base: releaseBase === '/' ? '/_serverFn' : `${releaseBase}_serverFn/`,
+				},
 				router: {
+					basepath: '/',
 					codeSplittingOptions: {
 						defaultBehavior: [
 							['loader'],
@@ -211,6 +223,7 @@ export default defineConfig(async ({ command }) => {
 				include: /\/start\/.*\.[jt]sx?$/,
 				jsxImportSource: '@emotion/react',
 			}),
+			startReleaseAssets(releaseBase),
 		],
 		resolve: {
 			alias: [

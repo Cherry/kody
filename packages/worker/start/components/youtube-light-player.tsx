@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 
 import { useState } from 'react'
@@ -84,7 +85,7 @@ export function YouTubeLightPlayer(props: {
 			onClick={() => setState({ renderedVideoId: videoId, playing: true })}
 		>
 			<img
-				src={youtubeThumbPath(videoId)}
+				src={publicAsset(youtubeThumbPath(videoId))}
 				alt=""
 				width={1280}
 				height={720}

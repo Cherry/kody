@@ -1,4 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import {
+	landingArtAttrs,
+	publicAsset,
+	publicAssetSrcSet,
+} from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import {
 	colors,
@@ -12,7 +17,6 @@ import {
 	cardTitleCss,
 	descriptionCss,
 } from '#universal/styles/style-primitives.ts'
-import { landingArtAttrs } from '#universal/landing-images.ts'
 
 const kodyImages = {
 	keys: {
@@ -107,8 +111,10 @@ export function renderByokExplainer(options?: {
 				}}
 			>
 				<img
-					src={image.src}
-					srcSet={'srcSet' in image ? image.srcSet : undefined}
+					src={publicAsset(image.src)}
+					srcSet={
+						'srcSet' in image ? publicAssetSrcSet(image.srcSet) : undefined
+					}
 					sizes={'sizes' in image ? image.sizes : undefined}
 					loading={'loading' in image ? image.loading : 'lazy'}
 					decoding="async"

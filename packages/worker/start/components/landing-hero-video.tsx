@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { YouTubeLightPlayer } from './youtube-light-player.tsx'
 import {
@@ -180,7 +181,7 @@ export function LandingHeroVideo({
 						>
 							<span className="landing-hero-chooser-thumb">
 								<img
-									src={youtubeThumbPath(video.videoId)}
+									src={publicAsset(youtubeThumbPath(video.videoId))}
 									alt=""
 									width={480}
 									height={270}

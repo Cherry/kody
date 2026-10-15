@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type CSSProperties } from 'react'
@@ -75,7 +76,7 @@ function renderWalkthroughHostName(host: WalkthroughHost) {
 				css={titleMarkCss}
 				style={
 					{
-						'--chip-icon': `url("${walkthroughHostMarkUrl(host)}")`,
+						'--chip-icon': `url("${publicAsset(walkthroughHostMarkUrl(host))}")`,
 					} as CSSProperties
 				}
 				aria-hidden="true"
@@ -101,7 +102,7 @@ function renderJoinedWalkthroughHostMarks(
 				css={titleMarkCss}
 				style={
 					{
-						'--chip-icon': `url("${walkthroughHostMarkUrl(host)}")`,
+						'--chip-icon': `url("${publicAsset(walkthroughHostMarkUrl(host))}")`,
 					} as CSSProperties
 				}
 				title={host.label}

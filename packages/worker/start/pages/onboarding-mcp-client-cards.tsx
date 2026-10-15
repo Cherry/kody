@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -132,7 +133,7 @@ export function AppIconCard(props: AppIconCardProps) {
 		<div data-testid="onboarding-mcp-app-icon" css={snippetCss}>
 			<div css={appIconBodyCss}>
 				<img
-					src={props.src}
+					src={publicAsset(props.src)}
 					alt="Kody app icon"
 					width={256}
 					height={256}

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties } from 'react'
 import {
@@ -70,7 +71,7 @@ function renderFeaturedPostItem(post: BlogPostSummaryLoaderData) {
 					<p css={featuredDescriptionCss}>{post.description}</p>
 				</div>
 				<img
-					src="/images/kody-agent-briefing.webp"
+					src={publicAsset('/images/kody-agent-briefing.webp')}
 					width={480}
 					height={480}
 					/*

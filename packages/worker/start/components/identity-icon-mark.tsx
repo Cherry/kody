@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 /** @jsxRuntime automatic */
 import { identityIconMonogramLetter } from '#universal/identity-icon-leaf.ts'
 import { getLogoWellCss } from '#universal/styles/style-primitives.ts'
@@ -37,7 +38,7 @@ export function IdentityIconMark(props: IdentityIconMarkProps) {
 		>
 			{iconUrl ? (
 				<img
-					src={iconUrl}
+					src={publicAsset(iconUrl)}
 					alt=""
 					aria-hidden="true"
 					width={isDetail ? 88 : 56}

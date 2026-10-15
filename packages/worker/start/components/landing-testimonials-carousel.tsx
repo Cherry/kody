@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useEffect, useRef } from 'react'
 import { SiteLink } from './site-link.tsx'
 import { isElementNearViewport } from '#client/deferred-turnstile.ts'
@@ -582,7 +583,7 @@ function renderTestimonialIdentity(item: LandingTestimonial) {
 		<>
 			{item.photo ? (
 				<img
-					src={item.photo}
+					src={publicAsset(item.photo)}
 					alt=""
 					width={56}
 					height={56}

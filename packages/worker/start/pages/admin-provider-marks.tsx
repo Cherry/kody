@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import type { ProviderMarkSaveInput } from '#universal/admin-provider-mutations.ts'
 import {
 	saveAdminProviderMark,
@@ -298,7 +299,7 @@ export function AdminProviderMarksRoute({
 			<span css={getLogoWellCss({ size: '1.75rem', radius: '0' })}>
 				{mark.logoPath ? (
 					<img
-						src={mark.logoPath}
+						src={publicAsset(mark.logoPath)}
 						alt=""
 						width={20}
 						height={20}
@@ -403,7 +404,12 @@ export function AdminProviderMarksRoute({
 							gap: spacing.sm,
 						}}
 					>
-						<img src={editingMark.logoPath} alt="" width={32} height={32} />
+						<img
+							src={publicAsset(editingMark.logoPath)}
+							alt=""
+							width={32}
+							height={32}
+						/>
 						<input
 							name="removeLogo"
 							type="checkbox"

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 /**
  * Safe markdown rendering for untrusted, third-party authored content
  * (public package READMEs).
@@ -582,7 +583,7 @@ function renderToken(
 		case 'image': {
 			const imageSrc = resolveMarkdownImageSrc(token.href, options)
 			if (imageSrc) {
-				return <img key={key} src={imageSrc} alt={token.text} />
+				return <img key={key} src={publicAsset(imageSrc)} alt={token.text} />
 			}
 			// Remote / unsafe hrefs stay links (or plain text). Auto-loading
 			// author-chosen URLs is exactly what this renderer exists to prevent.

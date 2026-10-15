@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type OnboardingChecklistLoaderData } from '#universal/loader-data.ts'
 import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
@@ -41,7 +42,7 @@ export function renderOnboardingBanner(options?: OnboardingBannerOptions) {
 			}}
 		>
 			<img
-				src="/images/kody-connect-callout.webp"
+				src={publicAsset('/images/kody-connect-callout.webp')}
 				alt=""
 				width={88}
 				height={88}

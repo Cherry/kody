@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useSessionInfo } from '../session-info.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -128,7 +129,7 @@ export function PendingVerificationPage({
 				css={pendingVerificationLayoutCss}
 			>
 				<img
-					src="/images/kody-envelope.png"
+					src={publicAsset('/images/kody-envelope.png')}
 					alt="Kody holding a sealed envelope with a green wax K stamp"
 					width={686}
 					height={1305}

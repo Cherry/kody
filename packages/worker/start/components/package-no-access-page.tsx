@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { SiteLink } from './site-link.tsx'
 import { CopyTextButton } from './copy-text-button.tsx'
 import { ErrorAgentPromptButton } from './error-agent-prompt-button.tsx'
@@ -49,7 +50,7 @@ export function PackageNoAccessPage(props: PackageNoAccessPageProps) {
 	return (
 		<section data-testid="package-no-access-page" css={illustratedErrorPageCss}>
 			<img
-				src="/images/kody-404-disappointed.png"
+				src={publicAsset('/images/kody-404-disappointed.png')}
 				alt="Kody looking disappointed, holding an Ethernet plug and a USB-C cable that do not match"
 				width={1254}
 				height={1254}

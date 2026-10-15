@@ -3,7 +3,7 @@ import { type CSSObject } from '@emotion/react'
 import { type CSSProperties } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { type CommunityIndexLoaderData } from '#universal/loader-data.ts'
-import { landingArtAttrs } from '#universal/landing-images.ts'
+import { landingArtAttrs } from '../public-assets.ts'
 import { routes } from '#universal/routes.ts'
 import { colors, transitions, typography } from '#universal/styles/tokens.ts'
 import {

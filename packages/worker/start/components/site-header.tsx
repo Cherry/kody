@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { dismissOpenPopoverPanel } from '#client/popover-open.ts'
 import { type CSSObject } from '@emotion/react'
 import { FeaturesMenu } from './features-menu.tsx'
@@ -74,7 +75,12 @@ export function SiteHeader(props: SiteHeaderProps) {
 			<header className="site-header" data-focused-header css={headerCss}>
 				<div css={navCss}>
 					<SiteLink href="/" css={brandCss}>
-						<img src="/images/kody-mark.png" alt="" width={34} height={34} />
+						<img
+							src={publicAsset('/images/kody-mark.png')}
+							alt=""
+							width={34}
+							height={34}
+						/>
 						<span>Kody</span>
 					</SiteLink>
 					<div css={{ marginLeft: 'auto', display: 'flex' }}>
@@ -99,7 +105,12 @@ export function SiteHeader(props: SiteHeaderProps) {
 		<header className="site-header" css={headerCss}>
 			<nav aria-label="Main" css={navCss}>
 				<SiteLink href="/" css={brandCss}>
-					<img src="/images/kody-mark.png" alt="" width={34} height={34} />
+					<img
+						src={publicAsset('/images/kody-mark.png')}
+						alt=""
+						width={34}
+						height={34}
+					/>
 					<span>Kody</span>
 				</SiteLink>
 				<div css={navLinksCss}>

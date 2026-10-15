@@ -1,9 +1,9 @@
 /** @jsxImportSource @emotion/react */
+import { landingArtAttrs, publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, type RefCallback } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { type HighlightedCode } from '#universal/highlighted-code.ts'
-import { landingArtAttrs } from '#universal/landing-images.ts'
 import { routes } from '#universal/routes.ts'
 import {
 	onboardingAccessLede,
@@ -390,7 +390,7 @@ function renderAgentPanelHead(props: {
 			</div>
 			<img
 				data-panel-art
-				src={props.artSrc}
+				src={publicAsset(props.artSrc)}
 				width={627}
 				height={627}
 				loading="lazy"

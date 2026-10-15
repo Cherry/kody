@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { toast } from '#client/toast.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
@@ -309,7 +310,7 @@ function ConnectedAgentMark({ icon }: { icon: string | null }) {
 			css={getLogoWellCss({ size: '1.75rem', radius: radius.md })}
 		>
 			<img
-				src={`/images/icons/${icon}.svg`}
+				src={publicAsset(`/images/icons/${icon}.svg`)}
 				alt=""
 				width={20}
 				height={20}

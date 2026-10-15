@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { CopyTextButton } from './copy-text-button.tsx'
 import { buildWithAgentPrompt } from '#universal/build-with-agent.ts'
 
@@ -39,7 +40,7 @@ export function BuildWithAgentButton({
 							{['claudecode', 'codex', 'cursor'].map((icon) => (
 								<img
 									key={icon}
-									src={`/images/icons/${icon}.svg`}
+									src={publicAsset(`/images/icons/${icon}.svg`)}
 									alt=""
 									width={18}
 									height={18}

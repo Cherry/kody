@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSProperties } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
@@ -31,7 +32,7 @@ export function WithAgentRoute({ agent }: { agent: WithAgent }) {
 					css={heroIconCss}
 					style={
 						{
-							'--agent-icon': `url(${withAgentIconSrc(agent)})`,
+							'--agent-icon': `url(${publicAsset(withAgentIconSrc(agent))})`,
 						} as CSSProperties
 					}
 				></span>
@@ -144,7 +145,7 @@ function renderOther(agent: WithAgent) {
 					aria-hidden="true"
 					style={
 						{
-							'--agent-icon': `url(${withAgentIconSrc(agent)})`,
+							'--agent-icon': `url(${publicAsset(withAgentIconSrc(agent))})`,
 						} as CSSProperties
 					}
 				></span>

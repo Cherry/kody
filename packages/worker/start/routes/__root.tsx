@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { pageNavigationForMatches } from '../page-navigation.ts'
 import { appShellForMatches } from '../app-shell.ts'
 import { requiresSessionVerification } from '../session-verification-policy.ts'
@@ -60,7 +61,7 @@ import {
 	mainGutterPaddingCss,
 } from '../components/app-layout.ts'
 import { AppBrowserEffects } from '../components/app-browser-effects.tsx'
-import stylesheet from '../../public/styles.css?raw'
+import stylesheet from '../../public/styles.css?inline'
 
 export const Route = createRootRouteWithContext<{
 	queryClient: QueryClient
@@ -348,25 +349,25 @@ function DocumentShell({ children }: { children: ReactNode }) {
 			<head>
 				<meta charSet="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
-				<link rel="icon" href="/favicon.ico" sizes="any" />
+				<link rel="icon" href={publicAsset('/favicon.ico')} sizes="any" />
 				<link
 					rel="icon"
 					type="image/png"
 					sizes="32x32"
-					href="/favicon-32x32.png"
+					href={publicAsset('/favicon-32x32.png')}
 				/>
 				<link
 					rel="icon"
 					type="image/png"
 					sizes="16x16"
-					href="/favicon-16x16.png"
+					href={publicAsset('/favicon-16x16.png')}
 				/>
 				<link
 					rel="apple-touch-icon"
 					sizes="180x180"
-					href="/apple-touch-icon.png"
+					href={publicAsset('/apple-touch-icon.png')}
 				/>
-				<link rel="manifest" href="/site.webmanifest" />
+				<link rel="manifest" href={publicAsset('/site.webmanifest')} />
 				<meta
 					name="theme-color"
 					content="#e6e8ea"
@@ -377,19 +378,19 @@ function DocumentShell({ children }: { children: ReactNode }) {
 					content="#111417"
 					media="(prefers-color-scheme: dark)"
 				/>
-				<script src="/page-init.js" />
+				<script src={publicAsset('/page-init.js')} />
 				<link
 					rel="preload"
 					as="font"
 					type="font/woff2"
-					href="/fonts/bricolage-grotesque-latin.woff2"
+					href={publicAsset('/fonts/bricolage-grotesque-latin.woff2')}
 					crossOrigin="anonymous"
 				/>
 				<link
 					rel="preload"
 					as="font"
 					type="font/woff2"
-					href="/fonts/wix-madefor-text-latin.woff2"
+					href={publicAsset('/fonts/wix-madefor-text-latin.woff2')}
 					crossOrigin="anonymous"
 				/>
 				{loaded?.canonicalOrigin ? (

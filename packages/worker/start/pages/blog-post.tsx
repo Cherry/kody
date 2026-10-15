@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { landingArtAttrs, publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { type CSSProperties, useMemo } from 'react'
 import {
@@ -7,7 +8,6 @@ import {
 	formatBlogPostDate,
 } from '#universal/blog-display.ts'
 import { type BlogPostLoaderData } from '#universal/loader-data.ts'
-import { landingArtAttrs } from '#universal/landing-images.ts'
 import { routes } from '#universal/routes.ts'
 import { publicSignupPrimaryCta } from '#universal/public-signup-copy.ts'
 import {
@@ -63,7 +63,7 @@ export function BlogPostRoute({ post }: { post: BlogPostLoaderData }) {
 
 					{post.image && post.imageAlt ? (
 						<img
-							src={post.image}
+							src={publicAsset(post.image)}
 							alt={post.imageAlt}
 							width={1600}
 							height={900}

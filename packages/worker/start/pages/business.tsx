@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { BuildWithAgentButton } from '../components/build-with-agent-button.tsx'
@@ -15,7 +16,12 @@ export function BusinessRoute() {
 			<div className="wrap">
 				<nav className="nav" aria-label="Main navigation">
 					<SiteLink className="brand" href="/">
-						<img src="/logo-64.webp" alt="" width={36} height={36} />
+						<img
+							src={publicAsset('/logo-64.webp')}
+							alt=""
+							width={36}
+							height={36}
+						/>
 						kody<span>for business</span>
 					</SiteLink>
 					<div className="navlinks">

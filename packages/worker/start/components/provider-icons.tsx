@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type JSX } from 'react'
 import { getLogoWellCss } from '#universal/styles/style-primitives.ts'
 
@@ -469,7 +470,7 @@ export function ProviderMark(props: {
 				letter
 			) : (
 				<img
-					src={imagePath ?? ''}
+					src={publicAsset(imagePath ?? '')}
 					alt=""
 					width={40}
 					height={40}

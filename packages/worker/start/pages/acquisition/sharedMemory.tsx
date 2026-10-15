@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { CopyTextButton } from '../../components/copy-text-button.tsx'
@@ -45,7 +46,12 @@ export function SharedMemoryPage() {
 				<section className="memory-demo" aria-label="Shared memory example">
 					<div className="memory-record">
 						<div className="memory-record-heading">
-							<img src="/logo-64.webp" width={28} height={28} alt="" />
+							<img
+								src={publicAsset('/logo-64.webp')}
+								width={28}
+								height={28}
+								alt=""
+							/>
 							<strong>Your Kody memory</strong>
 						</div>
 						<div className="memory-paper">

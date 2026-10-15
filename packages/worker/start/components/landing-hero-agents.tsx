@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { stageParallaxRef } from './hero-stage.tsx'
 import { LandingLantern } from './landing-lantern.tsx'
@@ -430,7 +431,7 @@ export function LandingHeroAgents({ hosts }: { hosts?: WalkthroughHostPick }) {
 								className="landing-hero-agent-tile"
 								style={
 									{
-										'--chip-icon': `url("/images/icons/${agent.icon}.svg")`,
+										'--chip-icon': `url("${publicAsset(`/images/icons/${agent.icon}.svg`)}")`,
 									} as CSSProperties
 								}
 								aria-hidden="true"

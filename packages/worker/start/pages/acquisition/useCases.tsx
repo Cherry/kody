@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../../public-assets.ts'
 import { SiteLink } from '../../components/site-link.tsx'
 import { acquisitionPageMeta } from '#universal/acquisition/metadata.ts'
 import { colors, typography } from '#universal/styles/tokens.ts'
@@ -99,7 +100,12 @@ export function UseCasesPage() {
 						↓
 					</div>
 					<div className="saved-tool">
-						<img src="/logo-64.webp" width="36" height="36" alt="" />
+						<img
+							src={publicAsset('/logo-64.webp')}
+							width="36"
+							height="36"
+							alt=""
+						/>
 						<div>
 							<strong>Release digest</strong>
 							<span>A saved Kody package</span>
@@ -151,7 +157,12 @@ export function UseCasesPage() {
 			</section>
 			<section id="agent-tools" className="agent-tools">
 				<div className="tools-heading">
-					<img src="/logo-64.webp" width="56" height="56" alt="" />
+					<img
+						src={publicAsset('/logo-64.webp')}
+						width="56"
+						height="56"
+						alt=""
+					/>
 					<h2>
 						Your next agent
 						<br />

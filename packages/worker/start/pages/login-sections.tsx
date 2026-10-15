@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import {
 	handlePermanentNote,
 	handleUrlPreview,
@@ -50,7 +51,12 @@ function renderBrand(
 			tabIndex={options.decorative ? -1 : undefined}
 			css={extraCss}
 		>
-			<img src="/images/kody-mark.png" alt="" width={34} height={34} />
+			<img
+				src={publicAsset('/images/kody-mark.png')}
+				alt=""
+				width={34}
+				height={34}
+			/>
 			<span>Kody</span>
 		</SiteLink>
 	)

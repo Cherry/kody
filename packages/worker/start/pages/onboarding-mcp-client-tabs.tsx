@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { type CSSObject } from '@emotion/react'
 import { useEffect } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -68,7 +69,7 @@ function AgentMarkIcon(props: {
 	}
 	return (
 		<img
-			src={`/images/icons/${props.icon}.svg`}
+			src={publicAsset(`/images/icons/${props.icon}.svg`)}
 			alt=""
 			width={inline ? undefined : 28}
 			height={inline ? undefined : 28}

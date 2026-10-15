@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { ErrorAgentPromptButton } from './error-agent-prompt-button.tsx'
 import { buildNotFoundErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { useLocation } from '@tanstack/react-router'
@@ -29,7 +30,7 @@ export function NotFoundPage() {
 	return (
 		<section data-testid="not-found-page" css={illustratedErrorPageCss}>
 			<img
-				src={notFoundPageImageSrc}
+				src={publicAsset(notFoundPageImageSrc)}
 				alt="Kody looking disappointed, holding an Ethernet plug and a USB-C cable that do not match"
 				width={1254}
 				height={1254}

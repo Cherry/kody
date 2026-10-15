@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { useEffect, useRef } from 'react'
 import { businessCloudMotion } from './business-hero-motion.ts'
 export function BusinessHero() {
@@ -103,7 +104,7 @@ export function BusinessHero() {
 				</g>
 				<g id="mascot" aria-hidden="true">
 					<image
-						href="/images/business/agent-cloud-pieces.webp"
+						href={publicAsset('/images/business/agent-cloud-pieces.webp')}
 						width="1536"
 						height="1024"
 						clipPath="url(#clip-mascot)"
@@ -111,7 +112,7 @@ export function BusinessHero() {
 				</g>
 				<g id="cloud" aria-hidden="true">
 					<image
-						href="/images/business/agent-cloud-pieces.webp"
+						href={publicAsset('/images/business/agent-cloud-pieces.webp')}
 						width="1536"
 						height="1024"
 						clipPath="url(#clip-cloud)"
@@ -119,7 +120,7 @@ export function BusinessHero() {
 				</g>
 				<g id="workspace-top" aria-hidden="true">
 					<image
-						href="/images/business/agent-cloud-pieces.webp"
+						href={publicAsset('/images/business/agent-cloud-pieces.webp')}
 						width="1536"
 						height="1024"
 						clipPath="url(#clip-workspace-top)"
@@ -127,7 +128,7 @@ export function BusinessHero() {
 				</g>
 				<g id="workspace-bottom" aria-hidden="true">
 					<image
-						href="/images/business/agent-cloud-pieces.webp"
+						href={publicAsset('/images/business/agent-cloud-pieces.webp')}
 						width="1536"
 						height="1024"
 						clipPath="url(#clip-workspace-bottom)"
@@ -135,7 +136,7 @@ export function BusinessHero() {
 				</g>
 				<g id="workspace-right" aria-hidden="true">
 					<image
-						href="/images/business/agent-cloud-pieces.webp"
+						href={publicAsset('/images/business/agent-cloud-pieces.webp')}
 						width="1536"
 						height="1024"
 						clipPath="url(#clip-workspace-right)"

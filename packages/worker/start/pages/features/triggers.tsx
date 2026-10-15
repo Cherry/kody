@@ -1,3 +1,4 @@
+import { publicAsset } from '../../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
@@ -41,7 +42,9 @@ export function TriggersFeature() {
 				<div>
 					<img
 						className="feature-orb"
-						src="/images/lantern/kody-primitives-orb-triggers.webp"
+						src={publicAsset(
+							'/images/lantern/kody-primitives-orb-triggers.webp',
+						)}
 						alt=""
 						width="80"
 						height="80"

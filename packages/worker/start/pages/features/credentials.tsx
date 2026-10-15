@@ -1,3 +1,4 @@
+import { publicAsset } from '../../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { SecretsVault } from './secrets-vault.tsx'
@@ -53,7 +54,9 @@ export function CredentialsFeature() {
 					<div>
 						<img
 							className="feature-orb"
-							src="/images/lantern/kody-primitives-orb-integrations.webp"
+							src={publicAsset(
+								'/images/lantern/kody-primitives-orb-integrations.webp',
+							)}
 							alt=""
 							width="80"
 							height="80"

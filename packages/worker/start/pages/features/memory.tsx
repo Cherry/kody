@@ -1,3 +1,4 @@
+import { publicAsset } from '../../public-assets.ts'
 import { useState } from 'react'
 import { SiteLink } from '../../components/site-link.tsx'
 import { FeatureRelated } from './feature-related.tsx'
@@ -57,7 +58,7 @@ export function MemoryFeature() {
 				<div>
 					<img
 						className="feature-orb"
-						src="/images/lantern/kody-primitives-orb-memory.webp"
+						src={publicAsset('/images/lantern/kody-primitives-orb-memory.webp')}
 						alt=""
 						width="80"
 						height="80"

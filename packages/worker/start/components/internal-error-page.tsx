@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { ErrorAgentPromptButton } from './error-agent-prompt-button.tsx'
 import { buildInternalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { SiteLink } from './site-link.tsx'
@@ -36,7 +37,7 @@ export function InternalErrorPage() {
 	return (
 		<section data-testid="internal-error-page" css={illustratedErrorPageCss}>
 			<img
-				src={internalErrorPageImageSrc}
+				src={publicAsset(internalErrorPageImageSrc)}
 				alt={internalErrorPageImageAlt}
 				width={1024}
 				height={1536}

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../../public-assets.ts'
 import { SiteLink } from '../../components/site-link.tsx'
 import { BuildWithAgentButton } from '../../components/build-with-agent-button.tsx'
 import {
@@ -47,7 +48,12 @@ export function FeaturesOverview() {
 						<OverviewWidget id={card.id} />
 						<div className="pitch">
 							<div className="feature-name">
-								<img src={card.orb} width="38" height="38" alt="" />
+								<img
+									src={publicAsset(card.orb)}
+									width="38"
+									height="38"
+									alt=""
+								/>
 								<h2>{card.name}</h2>
 							</div>
 							<h3>{card.title}</h3>

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import {
 	formatExtraAuthorizeParams,
 	formatTokenExchangeStyle,
@@ -378,7 +379,7 @@ export function IntegrationForm(input: {
 					>
 						<span css={getLogoWellCss({ size: '2.5rem', radius: '10px' })}>
 							<img
-								src={editingApp.logoPath}
+								src={publicAsset(editingApp.logoPath)}
 								alt=""
 								width={32}
 								height={32}

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { dismissOpenPopoverPanel } from '#client/popover-open.ts'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useRef, useState } from 'react'
@@ -84,7 +85,9 @@ export function FeaturesMenu(props: Props) {
 							css={featureCss}
 						>
 							<img
-								src={`/images/lantern/kody-primitives-orb-${feature.orb}.webp`}
+								src={publicAsset(
+									`/images/lantern/kody-primitives-orb-${feature.orb}.webp`,
+								)}
 								width="36"
 								height="36"
 								alt=""

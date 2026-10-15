@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { publicAsset } from '../public-assets.ts'
 import { renderMcpEventsFlagCallout } from './mcp-events-flag-callout.tsx'
 import { renderPackageSkillsFlagCallout } from './package-skills-flag-callout.tsx'
 import { isFeatureFlagEnabled } from '#client/feature-flags.ts'
@@ -146,7 +147,7 @@ export function DocDetailRoute({
 
 				{doc.image && doc.imageAlt ? (
 					<img
-						src={doc.image}
+						src={publicAsset(doc.image)}
 						alt={doc.imageAlt}
 						width={1024}
 						height={1024}
