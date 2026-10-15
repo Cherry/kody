@@ -1,14 +1,22 @@
 /** @jsxImportSource @emotion/react */
 import { useRef, useState, type FormEvent } from 'react'
 import { PackageInviteLinksPanel } from './package-collaborators-invite-links.tsx'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+	useMutation,
+	useMutationState,
+	useQueryClient,
+} from '@tanstack/react-query'
 import { SiteLink } from '../components/site-link.tsx'
 import {
 	grantPackageCollaborator,
 	revokePackageCollaborator,
 } from '#start/server/package-collaborators'
-import { invalidatePageResources } from '../page-invalidation-cache.ts'
-import { collaboratorsPageQuery } from '../package-collaborators-query.ts'
+import {
+	collaboratorsMutationKey,
+	collaboratorsMutationOptions,
+	type CollaboratorsMutationInput,
+} from '../package-collaborators-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -68,7 +76,8 @@ export function PackageCollaboratorsRoute({
 	const { shell, view } = payload
 	const { username, kodyId } = shell
 	const page = { username, kodyId }
-	const query = collaboratorsPageQuery(actorKey, page)
+	const mutationKey = collaboratorsMutationKey(actorKey, page)
+	const captureSubmitter = useSubmitterScope()
 	const [confirmed, setConfirmed] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
@@ -78,64 +87,50 @@ export function PackageCollaboratorsRoute({
 	const [memberPreset, setMemberPreset] =
 		useState<PackageCollaboratorPreset>('use')
 	const inFlight = useRef(false)
-	const mutation = useMutation({
-		mutationKey: ['packageCollaborators', actorKey, username, kodyId],
-		retry: false,
-		gcTime: 0,
-		mutationFn: async (input: {
-			key: string
-			change: PackageCollaboratorsChange
-		}) =>
-			input.change.intent === 'grant'
-				? grantPackageCollaborator({
-						data: {
-							...page,
-							subjectType: input.change.subjectType,
-							subjectId: input.change.subjectId,
-							preset: input.change.preset,
-						},
-					})
-				: revokePackageCollaborator({
-						data: { ...page, grantId: input.change.grantId },
-					}),
-		onMutate: () =>
-			client.cancelQueries({ queryKey: query.queryKey, exact: true }),
-		onSuccess: async (result) => {
-			await client.cancelQueries({
-				queryKey: query.queryKey,
-				exact: true,
-				predicate: (query) => query.state.data !== undefined,
-			})
-			const accepted = result
-			client.setQueryData(query.queryKey, (old) =>
-				old?.kind === 'page'
-					? {
-							...old,
-							kind: 'page' as const,
-							payload: { ...old.payload, view: accepted },
-						}
-					: old,
-			)
-		},
-		onSettled: () => {
-			void invalidatePageResources(client, actorKey, 'permissions')
-		},
+	const mutation = useMutation(
+		collaboratorsMutationOptions(
+			client,
+			actorKey,
+			page,
+			async (input: CollaboratorsMutationInput) =>
+				input.change.intent === 'grant'
+					? grantPackageCollaborator({
+							data: {
+								...page,
+								subjectType: input.change.subjectType,
+								subjectId: input.change.subjectId,
+								preset: input.change.preset,
+							},
+						})
+					: revokePackageCollaborator({
+							data: { ...page, grantId: input.change.grantId },
+						}),
+		),
+	)
+	const pending = useMutationState({
+		filters: { mutationKey, exact: true, status: 'pending' },
+		select: (entry) => entry.state.variables as CollaboratorsMutationInput,
 	})
-	const busy = mutation.isPending ? mutation.variables.key : null
+	const busy = pending.at(-1)?.key ?? null
+
 	async function postChange(
 		key: string,
 		change: PackageCollaboratorsChange,
 		success: string,
 	) {
-		if (inFlight.current) return null
+		if (inFlight.current || client.isMutating({ mutationKey, exact: true }))
+			return null
+		const isCurrent = captureSubmitter()
 		inFlight.current = true
 		setMessage(null)
 		try {
 			const result = await mutation.mutateAsync({ key, change })
+			if (!isCurrent()) return null
 			setMessage(success)
 			setMessageTone('info')
 			return result
 		} catch (error) {
+			if (!isCurrent()) return null
 			setMessage(
 				error instanceof Error ? error.message : 'Kody could not save that.',
 			)
@@ -434,7 +429,7 @@ export function PackageCollaboratorsRoute({
 		<article
 			css={detailArticleCss}
 			data-testid="package-collaborators"
-			aria-busy={mutation.isPending || undefined}
+			aria-busy={busy !== null || undefined}
 		>
 			{renderPackageRepoChrome({
 				username,

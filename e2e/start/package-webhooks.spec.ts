@@ -106,11 +106,9 @@ test('package webhook URLs mint, reveal, rotate and disable through native Start
 		const settings = `${created.packagePagePath}/settings`
 		await page.goto(settings)
 		await waitForClientHydration(page)
-		const card = page
-			.getByTestId('package-webhook-card')
-			.filter({
-				has: page.getByRole('heading', { name: 'launcher', exact: true }),
-			})
+		const card = page.getByTestId('package-webhook-card').filter({
+			has: page.getByRole('heading', { name: 'launcher', exact: true }),
+		})
 		const url = card.getByTestId('package-webhook-url').locator('pre code')
 		await expect(card).toContainText('No URL yet')
 		await card.getByTestId('package-webhook-mint').click()

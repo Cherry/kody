@@ -7,15 +7,26 @@ import {
 } from '#start/server/account-mutations'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+	useMutation,
+	useMutationState,
+	useQueryClient,
+} from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
-import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
+import { updateOrgPagePayload } from '../org-page-cache.ts'
+import { settleConnectionResources } from '../connection-resource-settlement.ts'
+import {
+	integrationMutationOptions,
+	projectIntegrationWrites,
+	type IntegrationWrite,
+} from '../integration-mutation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	type AccountIntegrationListItem,
 	type AccountIntegrationsLoaderData,
 	type AccountOauthAppListItem,
 } from '#universal/loader-data.ts'
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { useUndoableAction } from '../components/use-undoable-action.ts'
 import { UndoToast } from '../components/undo-toast.tsx'
@@ -28,14 +39,12 @@ import { RecordTable, RecordTableSearch } from './record-table.tsx'
 import { primaryLinkCss } from '#universal/styles/style-primitives.ts'
 import {
 	type IntegrationUsageDraft,
-	type IntegrationsSnapshot,
 	buildIntegrationHref,
 	connectionLabel,
 	deletedAppCopy,
 	filterOauthApps,
 	hostFromUrl,
 	integrationListId,
-	integrationsRoute,
 	isBuiltInApp,
 	oauthAppTitle,
 	readSearchFilter,
@@ -58,13 +67,26 @@ export function AccountIntegrationsPage({
 	payload: AccountIntegrationsLoaderData
 	currentHref: string
 }) {
-	const integrations = payload.integrations
-	const apps = payload.apps ?? []
+	const queryClient = useQueryClient()
+	const { actorKey, orgSlug } = useMatchedPageScope()
+	const capture = useSubmitterScope()
+	const writes = useMutationState({
+		filters: {
+			mutationKey: ['integrations', actorKey, orgSlug],
+			exact: true,
+			status: 'pending',
+		},
+		select: (mutation) => mutation.state.variables as IntegrationWrite,
+	})
+	const projected = useMemo(
+		() => projectIntegrationWrites(payload, writes),
+		[payload, writes],
+	)
+	const integrations = projected.integrations
+	const apps = projected.apps
 	const savedPackages = payload.savedPackages ?? []
 	const platformCatalog = payload.platformCatalog ?? []
 	const approval = payload.approval ?? null
-	const queryClient = useQueryClient()
-	const { actorKey, orgSlug } = useMatchedPageScope()
 	function updatePayload(
 		update: (
 			data: AccountIntegrationsLoaderData,
@@ -79,49 +101,14 @@ export function AccountIntegrationsPage({
 			update,
 		)
 	}
-	const setIntegrations = (value: AccountIntegrationListItem[]) =>
-		updatePayload((data) => ({ ...data, integrations: value }))
-	const setApps = (value: AccountOauthAppListItem[]) =>
-		updatePayload((data) => ({ ...data, apps: value }))
-	const setApproval = (value: AccountIntegrationsLoaderData['approval']) =>
-		updatePayload((data) => ({ ...data, approval: value }))
 	const mutation = useMutation({
 		mutationKey: ['integrations', actorKey, orgSlug],
-		mutationFn: async ({
-			write,
-			decision,
-		}: {
-			write: () => Promise<unknown>
-			orgSlug: string | null
-			actorKey: string | null
-			decision?: Promise<boolean>
-			optimistic?: () => void
-			rollback?: () => void
-		}) => {
-			if (decision && !(await decision)) return { undone: true as const }
-			return write()
-		},
-		onMutate: async ({ orgSlug, actorKey, optimistic }) => {
-			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
-			)
-			optimistic?.()
-		},
-		onSuccess: (result, { rollback }) => {
-			if (result && typeof result === 'object' && 'undone' in result)
-				rollback?.()
-		},
-		onError: (_error, { rollback }) => rollback?.(),
-		onSettled: (_data, _error, { orgSlug, actorKey }) => {
-			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
-			)
-		},
+		...integrationMutationOptions(queryClient),
 	})
 	function invalidatePages() {
-		return queryClient.invalidateQueries(
-			orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
-		)
+		return settleConnectionResources(queryClient, actorKey, orgSlug, [
+			'loadIntegrationsPage',
+		])
 	}
 	const [usageDrafts, setUsageDrafts] = useState(
 		new Map<string, IntegrationUsageDraft>(),
@@ -169,79 +156,6 @@ export function AccountIntegrationsPage({
 		}
 	}
 
-	function snapshotList(): IntegrationsSnapshot & { orgSlug: string | null } {
-		return {
-			integrations,
-			apps,
-			orgSlug,
-			href: getCurrentHref(),
-		}
-	}
-
-	function restoreSnapshot(
-		snapshot: IntegrationsSnapshot & { orgSlug: string | null },
-		names: Set<string>,
-		deletedApp?: AccountOauthAppListItem,
-	) {
-		updatePayload(
-			(data) => ({
-				...data,
-				integrations: [
-					...data.integrations,
-					...snapshot.integrations.filter(
-						(entry) =>
-							names.has(entry.name) &&
-							!data.integrations.some((current) => current.name === entry.name),
-					),
-				],
-				apps: snapshot.apps.reduce((current, original) => {
-					const removed = original.connections.filter((connection) =>
-						names.has(connection.name),
-					)
-					if (
-						!removed.length &&
-						(!deletedApp ||
-							integrationListId(deletedApp) !== integrationListId(original))
-					)
-						return current
-					const existing = current.find(
-						(app) => integrationListId(app) === integrationListId(original),
-					)
-					if (!existing)
-						return [
-							...current,
-							{
-								...original,
-								connections: removed,
-								connectionCount: removed.length,
-							},
-						]
-					return current.map((app) => {
-						if (app !== existing) return app
-						const connections = [
-							...app.connections,
-							...removed.filter(
-								(row) =>
-									!app.connections.some((item) => item.name === row.name),
-							),
-						]
-						return { ...app, connections, connectionCount: connections.length }
-					})
-				}, data.apps ?? []),
-			}),
-			{ orgSlug: snapshot.orgSlug },
-		)
-		setMessage(null)
-		if (
-			mounted.current &&
-			getCurrentHref() === currentHref &&
-			integrationsRoute.isRoutePath(getCurrentHref()) &&
-			getCurrentHref() !== snapshot.href
-		) {
-			navigate(snapshot.href)
-		}
-	}
-
 	function listHref() {
 		return `${relocateAccountHref('/account/integrations', currentHref)}${getCurrentSearch()}`
 	}
@@ -258,46 +172,11 @@ export function AccountIntegrationsPage({
 
 	function finishOptimisticRemoval() {
 		setHoldingOptimisticRemoval(false)
-		// The server-filtered "Connect with Kody" catalog hides built-ins whose
-		// slug any connection holds, so every removal can re-offer one. List and
-		// detail share one data latch key, so navigating between them never
-		// refetches on its own; queue the reload before either branch.
-		void invalidatePages()
 		if (!mounted.current || getCurrentHref() !== currentHref) return
 		if (currentSelectionMissing()) {
 			navigate(listHref())
 			return
 		}
-	}
-
-	function removeConnectionLocally(name: string) {
-		setIntegrations(integrations.filter((entry) => entry.name !== name))
-		setApps(
-			apps.flatMap((app) => {
-				const connections = app.connections.filter(
-					(connection) => connection.name !== name,
-				)
-				if (connections.length === app.connections.length) return [app]
-				if (connections.length === 0) return []
-				return [
-					{
-						...app,
-						connections,
-						connectionCount: connections.length,
-					},
-				]
-			}),
-		)
-	}
-
-	function removeAppLocally(app: AccountOauthAppListItem) {
-		const names = new Set(app.connections.map((connection) => connection.name))
-		setIntegrations(integrations.filter((entry) => !names.has(entry.name)))
-		setApps(
-			apps.filter(
-				(entry) => integrationListId(entry) !== integrationListId(app),
-			),
-		)
 	}
 
 	function usageDraftFor(connection: AccountIntegrationListItem) {
@@ -318,6 +197,7 @@ export function AccountIntegrationsPage({
 
 	async function submitUsage(connection: AccountIntegrationListItem) {
 		if (usageSavingName) return
+		const isCurrent = capture()
 		const draft = usageDraftFor(connection)
 		setUsageSavingName(connection.name)
 		try {
@@ -337,38 +217,28 @@ export function AccountIntegrationsPage({
 						},
 					}),
 			})
-			setIntegrations(
-				integrations.map((entry) =>
-					entry.name === connection.name
-						? {
-								...entry,
-								usageMode: draft.usageMode,
-								allowedPackageIds:
-									draft.usageMode === 'packages' ? draft.allowedPackageIds : [],
-							}
-						: entry,
-				),
-			)
+			if (!isCurrent()) return
 			setUsageDrafts((current) => {
 				const next = new Map(current)
 				next.delete(connection.name)
 				return next
 			})
-			void invalidatePages()
 			setMessage(`Updated usage for ${connectionLabel(connection)}.`)
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to update integration usage.',
 			)
 		} finally {
-			setUsageSavingName(null)
+			if (isCurrent()) setUsageSavingName(null)
 		}
 	}
 
 	async function submitApproval() {
 		if (!approval || approvalSubmitting) return
+		const isCurrent = capture()
 		setApprovalSubmitting(true)
 		try {
 			await mutation.mutateAsync({
@@ -385,31 +255,18 @@ export function AccountIntegrationsPage({
 						},
 					}),
 			})
-			setIntegrations(
-				integrations.map((entry) => {
-					if (entry.name !== approval?.name) return entry
-					if (entry.usageMode === 'any' || !entry.usageMode) return entry
-					const allowed = new Set(entry.allowedPackageIds ?? [])
-					allowed.add(approval.packageId)
-					return {
-						...entry,
-						usageMode: 'packages',
-						allowedPackageIds: Array.from(allowed),
-					}
-				}),
-			)
-			setApproval(approval ? { ...approval, alreadyGranted: true } : approval)
-			void invalidatePages()
+			if (!isCurrent()) return
 			if (getCurrentHref() !== currentHref) return
 			navigate(relocateAccountHref('/account/integrations', currentHref))
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to approve that package.',
 			)
 		} finally {
-			setApprovalSubmitting(false)
+			if (isCurrent()) setApprovalSubmitting(false)
 		}
 	}
 
@@ -417,7 +274,7 @@ export function AccountIntegrationsPage({
 		name: string
 		accountLabel?: string | null
 	}) {
-		const snapshot = snapshotList()
+		const isCurrent = capture()
 		let decide!: (commit: boolean) => void
 		const decision = new Promise<boolean>((resolve) => {
 			decide = resolve
@@ -433,8 +290,7 @@ export function AccountIntegrationsPage({
 					},
 				}),
 			decision,
-			optimistic: () => removeConnectionLocally(connection.name),
-			rollback: () => restoreSnapshot(snapshot, new Set([connection.name])),
+			removeNames: [connection.name],
 		})
 		setDisconnectArmed(null)
 		setHoldingOptimisticRemoval(true)
@@ -444,8 +300,10 @@ export function AccountIntegrationsPage({
 				try {
 					decide(true)
 					await write
+					if (!isCurrent()) return
 					finishOptimisticRemoval()
 				} catch (error) {
+					if (!isCurrent()) return
 					setHoldingOptimisticRemoval(false)
 					setMessage(
 						error instanceof Error
@@ -457,13 +315,14 @@ export function AccountIntegrationsPage({
 			onUndo: async () => {
 				decide(false)
 				await write
+				if (!isCurrent()) return
 				setHoldingOptimisticRemoval(false)
 			},
 		})
 	}
 
 	async function startDeleteApp(app: AccountOauthAppListItem) {
-		const snapshot = snapshotList()
+		const isCurrent = capture()
 		const title = oauthAppTitle(app)
 		const connectionCount = app.connections.length
 		let decide!: (commit: boolean) => void
@@ -481,13 +340,8 @@ export function AccountIntegrationsPage({
 					},
 				}),
 			decision,
-			optimistic: () => removeAppLocally(app),
-			rollback: () =>
-				restoreSnapshot(
-					snapshot,
-					new Set(app.connections.map((connection) => connection.name)),
-					app,
-				),
+			removeNames: app.connections.map((connection) => connection.name),
+			removeApp: integrationListId(app),
 		})
 		setDeleteArmed(false)
 		setHoldingOptimisticRemoval(true)
@@ -497,8 +351,10 @@ export function AccountIntegrationsPage({
 				try {
 					decide(true)
 					await write
+					if (!isCurrent()) return
 					finishOptimisticRemoval()
 				} catch (error) {
+					if (!isCurrent()) return
 					setHoldingOptimisticRemoval(false)
 					setMessage(
 						error instanceof Error
@@ -510,6 +366,7 @@ export function AccountIntegrationsPage({
 			onUndo: async () => {
 				decide(false)
 				await write
+				if (!isCurrent()) return
 				setHoldingOptimisticRemoval(false)
 			},
 		})
@@ -531,14 +388,12 @@ export function AccountIntegrationsPage({
 	}
 
 	function applyRotatedApp(rotatedApp: AccountOauthAppListItem) {
-		void invalidatePages()
-		setApps(
-			apps.map((entry) =>
+		updatePayload((data) => ({
+			...data,
+			apps: (data.apps ?? []).map((entry) =>
 				entry.slug === rotatedApp.slug && !entry.platform ? rotatedApp : entry,
 			),
-		)
-		setIntegrations(
-			integrations.map((entry) =>
+			integrations: data.integrations.map((entry) =>
 				entry.appSlug === rotatedApp.slug && !entry.platform
 					? {
 							...entry,
@@ -548,7 +403,8 @@ export function AccountIntegrationsPage({
 						}
 					: entry,
 			),
-		)
+		}))
+		void invalidatePages()
 	}
 
 	const status = 'ready'

@@ -5,7 +5,7 @@ import {
 } from '@tanstack/react-query'
 import { expect, test, vi } from 'vitest'
 import { workflowCancellationMutationOptions } from './workflow-cancellation-mutation.ts'
-import { waitForPageMutations } from './page-mutation-cache.ts'
+import { createPageQuery } from './page-query.ts'
 
 const scope = { actorKey: 'actor', orgSlug: 'submitted-org' }
 const key = [
@@ -48,20 +48,9 @@ for (const active of [true, false]) {
 			})
 			const write = mutation.mutate(scope).catch(() => undefined)
 			await vi.waitFor(() => expect(finishWrite).toBeDefined())
-			const options = {
-				queryKey: key,
-				queryFn: async ({ signal }: { signal: AbortSignal }) => {
-					await waitForPageMutations(
-						client,
-						scope.actorKey,
-						'loadWorkflowsPage',
-						signal,
-						{ orgSlug: scope.orgSlug },
-					)
-					return read()
-				},
+			const options = createPageQuery('loadWorkflowsPage', read, {
 				staleTime: Infinity,
-			}
+			})(scope.actorKey, { orgSlug: scope.orgSlug })
 			const navigation = client.ensureQueryData(options)
 			const observer = new QueryObserver(client, options)
 			const stop = active ? observer.subscribe(() => {}) : () => {}

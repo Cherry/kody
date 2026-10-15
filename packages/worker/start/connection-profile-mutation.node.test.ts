@@ -26,11 +26,11 @@ test.each([false, true])(
 		})
 		const navigation = ensurePageQuery(client, options, false)
 		await Promise.resolve()
-		expect(read).not.toHaveBeenCalled()
+		await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
 		completeWrite()
 		await submitted
 		await expect(navigation).resolves.toEqual({ profiles: ['saved-profile'] })
-		expect(read).toHaveBeenCalledOnce()
+		expect(read).toHaveBeenCalledTimes(2)
 		client.clear()
 	},
 )

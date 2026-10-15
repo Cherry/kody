@@ -95,9 +95,25 @@ function harness() {
 		client.setQueryData(key(org, actor), { payload: listedAgents })
 	const ids = (org: string, actor = 'actor') =>
 		clientIds(
-			client.getQueryData<{ payload: AccountConnectedAgentsLoaderData }>(
-				key(org, actor),
-			)!.payload.agents,
+			client
+				.getQueryData<{ payload: AccountConnectedAgentsLoaderData }>(
+					key(org, actor),
+				)!
+				.payload.agents.filter(
+					(agent) =>
+						!client
+							.getMutationCache()
+							.findAll({
+								mutationKey: ['connectedAgents', actor, org],
+								exact: true,
+								status: 'pending',
+							})
+							.some(
+								(mutation) =>
+									(mutation.state.variables as { clientId: string })
+										.clientId === agent.clientId,
+							),
+				),
 		)
 	const revoke = (clientId: string, org = 'one', actorKey = 'actor') =>
 		client
@@ -144,7 +160,7 @@ test('revoke optimistically removes only its row and failure restores it', async
 	expect(h.ids('one')).toEqual(expect.arrayContaining(clientIds(allAgents)))
 })
 
-test('concurrent revokes stay independent and refresh only after the last settlement', async () => {
+test('concurrent revokes project independently while each outcome confirms server state', async () => {
 	using h = harness()
 	h.seed('one')
 	const first = h.revoke(cursorOld.clientId),
@@ -154,7 +170,7 @@ test('concurrent revokes stay independent and refresh only after the last settle
 	expect(h.ids('one')).not.toContain(cursorNew.clientId)
 	h.respond(cursorOld.clientId)
 	expect(await first).toBeNull()
-	expect(h.client.getQueryState(h.key('one'))?.isInvalidated).toBe(false)
+	expect(h.client.getQueryState(h.key('one'))?.isInvalidated).toBe(true)
 	h.respond(cursorNew.clientId)
 	expect(await second).toBeNull()
 	expect(h.ids('one')).not.toContain(cursorOld.clientId)

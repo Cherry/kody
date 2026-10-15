@@ -5,7 +5,8 @@ import {
 	profileLayoutCss,
 } from '../components/profile-layout.ts'
 import { useShellData } from '../routes/__root.tsx'
-import { useNavigate } from '@tanstack/react-router'
+import { usePendingProfile } from './account-profile-query.ts'
+import { useRouteContext, useNavigate } from '@tanstack/react-router'
 import {
 	type ProfileLoaderData,
 	toProfileShellLoaderData,
@@ -25,7 +26,7 @@ import {
 	getPrimaryButtonCss,
 } from '#universal/styles/style-primitives.ts'
 export function ProfileRoute({
-	data,
+	data: savedData,
 	currentHref,
 	basePath,
 }: {
@@ -33,6 +34,19 @@ export function ProfileRoute({
 	currentHref: string
 	basePath?: string
 }) {
+	const { actorKey } = useRouteContext({ from: '__root__' })
+	const pendingProfile = usePendingProfile(actorKey)
+	const data =
+		savedData.isSelf && pendingProfile
+			? {
+					...savedData,
+					profile: {
+						...savedData.profile,
+						displayName: pendingProfile.displayName,
+						bio: pendingProfile.bio,
+					},
+				}
+			: savedData
 	const { session } = useShellData()
 	const readyShell = toProfileShellLoaderData(data)
 	const visibleList = data

@@ -1,7 +1,16 @@
 /** @jsxImportSource @emotion/react */
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from '#client/toast.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
+import {
+	useMutation,
+	useMutationState,
+	useQueryClient,
+} from '@tanstack/react-query'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { connectedAgentMutationOptions } from '../connected-agent-mutation.ts'
+import {
+	connectedAgentMutationOptions,
+	type ConnectedAgentRevoke,
+} from '../connected-agent-mutation.ts'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
@@ -35,9 +44,20 @@ import {
 export function useAccountConnectedAgents(
 	initialPayload: AccountConnectedAgentsLoaderData,
 ) {
-	const agents = initialPayload.agents
 	const queryClient = useQueryClient()
 	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
+	const capture = useSubmitterScope()
+	const pending = useMutationState({
+		filters: {
+			mutationKey: ['connectedAgents', actorKey, orgSlug],
+			exact: true,
+			status: 'pending',
+		},
+		select: (mutation) => mutation.state.variables as ConnectedAgentRevoke,
+	})
+	const agents = initialPayload.agents.filter(
+		(agent) => !pending.some((write) => write.clientId === agent.clientId),
+	)
 	const currentHref = pageLocation.href
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const mutation = useMutation({
@@ -46,7 +66,18 @@ export function useAccountConnectedAgents(
 	})
 	function revokeAgent(clientId: string) {
 		setRevokeArmed(null)
-		mutation.mutate({ clientId, orgSlug, actorKey })
+		const isCurrent = capture()
+		mutation.mutate(
+			{ clientId, orgSlug, actorKey },
+			{
+				onSuccess: () => {
+					if (isCurrent()) toast.success('Agent disconnected.')
+				},
+				onError: (error) => {
+					if (isCurrent()) toast.error(error.message)
+				},
+			},
+		)
 	}
 
 	return {

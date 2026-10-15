@@ -8,8 +8,6 @@ import {
 import { shouldShowOnboardingChecklist } from '#universal/onboarding-checklist.ts'
 import { toast } from '#client/toast.ts'
 import { saveProfile, updateAvatar } from '#start/server/account-mutations'
-import { type loadAccountPage } from '#start/server/account-page'
-import { type loadProfile } from '#start/server/public-data'
 import { type ProfileVisibility } from '#universal/loader-data.ts'
 import {
 	getGhostButtonCss,
@@ -38,7 +36,11 @@ import {
 import { SiteLink } from '../components/site-link.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { snapshotPageResource } from '../page-mutation-cache.ts'
+import { usePendingProfile } from './account-profile-query.ts'
+import {
+	settleAccountMutation,
+	profileResources,
+} from './account-mutation-settlement.ts'
 import { AccountAvatarEditor } from './account-avatar-editor.tsx'
 import { avatarMutationOptions } from './account-avatar-query.ts'
 import { useAccountConnections } from './account-connections-panel.tsx'
@@ -80,7 +82,8 @@ export function AccountPage({
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
-	const initial = payloads.accountProfile
+	const pendingProfile = usePendingProfile(actorKey)
+	const initial = { ...payloads.accountProfile, ...pendingProfile }
 	const [resendMessage, setResendMessage] = useState<string | null>(null)
 	const [resendTone, setResendTone] = useState<'error' | 'info'>('info')
 	const { email, emailVerified, username } = initial
@@ -273,114 +276,26 @@ export function AccountPage({
 	})
 
 	const isSaving = useIsMutating({ mutationKey: ['profile', actorKey] }) > 0
-	type AccountQueryData = Awaited<ReturnType<typeof loadAccountPage>>
-	type PublicProfileQueryData = Awaited<ReturnType<typeof loadProfile>>
-	const invalidateProfileDependents = usePageInvalidation(
-		profileMutationResources,
-		{ refreshShell: true },
-	)
-
 	const captureProfileSubmitter = useSubmitterScope()
 	const profileMutation = useMutation({
 		gcTime: 0,
 		mutationKey: ['profile', actorKey],
 		mutationFn: saveProfile,
-		onMutate: async ({ data: input }) => {
-			const account = await snapshotPageResource<AccountQueryData>(
-				queryClient,
-				actorKey,
-				'loadAccountPage',
-				(data) => ({
-					...data,
-					payloads: {
-						...data.payloads,
-						accountProfile: {
-							...data.payloads.accountProfile,
-							displayName: input.displayName,
-							bio: input.bio,
-							profileVisibility: input.profileVisibility,
-						},
-					},
-				}),
-			)
-			const publicProfile = await snapshotPageResource<PublicProfileQueryData>(
-				queryClient,
-				actorKey,
-				'loadProfile',
-				(data) =>
-					data.data?.isSelf
-						? {
-								...data,
-								data: {
-									...data.data,
-									profile: {
-										...data.data.profile,
-										displayName: input.displayName,
-										bio: input.bio,
-									},
-								},
-							}
-						: data,
-				[{ username }],
-			)
-			return {
-				account,
-				publicProfile,
-				reconcile: invalidateProfileDependents,
-			}
-		},
-		onError: async (error, _input, snapshot) => {
-			// onMutate retired older reads. New reads wait for this mutation,
-			// including uncached navigations which must survive a rejected write.
-			for (const [key, previous] of snapshot?.account ?? []) {
-				if (!previous) continue
-				queryClient.setQueryData<AccountQueryData>(key, (current) =>
-					current
-						? {
-								...current,
-								payloads: {
-									...current.payloads,
-									accountProfile: {
-										...current.payloads.accountProfile,
-										displayName: previous.payloads.accountProfile.displayName,
-										bio: previous.payloads.accountProfile.bio,
-										profileVisibility:
-											previous.payloads.accountProfile.profileVisibility,
-									},
-								},
-							}
-						: current,
-				)
-			}
-			for (const [key, previous] of snapshot?.publicProfile ?? []) {
-				if (!previous?.data) continue
-				const profile = previous.data.profile
-				queryClient.setQueryData<PublicProfileQueryData>(key, (current) =>
-					current?.data
-						? {
-								...current,
-								data: {
-									...current.data,
-									profile: {
-										...current.data.profile,
-										displayName: profile.displayName,
-										bio: profile.bio,
-									},
-								},
-							}
-						: current,
-				)
-			}
-			// A failed save still needs feedback after navigating away from the form.
+		onMutate: () => ({ actorKey }),
+		onError: (error) => {
 			toast.error(
 				error instanceof Error ? error.message : 'Unable to save profile.',
 			)
 		},
-		onSettled: (_data, _error, _input, snapshot) => {
-			// Reads wait for this mutation to settle, so do not await their refetch.
-			// Reconcile even when the response was lost after a successful write.
-			void snapshot?.reconcile()
-		},
+		onSettled: (_data, _error, _input, submitted) =>
+			submitted
+				? settleAccountMutation(
+						queryClient,
+						submitted.actorKey,
+						profileResources,
+						{ shell: true },
+					)
+				: undefined,
 	})
 
 	function handleProfileSubmit(event: FormEvent<HTMLFormElement>) {
@@ -654,13 +569,6 @@ export function AccountPage({
 const compactGhostButtonCss = getGhostButtonCss({ size: 'sm' })
 
 const mutationResources = [
-	'loadAccountPage',
-	'loadProfile',
-	'loadCommunity',
-	'loadPackage',
-] as const
-
-const profileMutationResources = [
 	'loadAccountPage',
 	'loadProfile',
 	'loadCommunity',

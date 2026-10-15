@@ -106,12 +106,6 @@ export function deletedAppCopy(title: string, connectionCount: number) {
 	return `Deleted ${title} and ${connectionCount} accounts.`
 }
 
-export type IntegrationsSnapshot = {
-	integrations: Array<AccountIntegrationListItem>
-	apps: Array<AccountOauthAppListItem>
-	href: string
-}
-
 export type IntegrationUsageDraft = {
 	usageMode: 'any' | 'packages'
 	allowedPackageIds: Array<string>

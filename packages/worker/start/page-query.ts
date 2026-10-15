@@ -1,8 +1,4 @@
 import {
-	waitForPageMutations,
-	hasPendingPageMutation,
-} from './page-mutation-cache.ts'
-import {
 	queryOptions,
 	useSuspenseQuery,
 	type QueryKey,
@@ -30,10 +26,7 @@ export function createPageQuery<TInput, TData>(
 	return (actorKey: string | null, input: TInput) =>
 		queryOptions({
 			queryKey: ['page', actorKey, resource, input] as const,
-			queryFn: async ({ signal, client }) => {
-				await waitForPageMutations(client, actorKey, resource, signal, input)
-				return read({ data: input, signal })
-			},
+			queryFn: ({ signal }) => read({ data: input, signal }),
 			staleTime: policy.staleTime ?? 30_000,
 			gcTime: policy.gcTime ?? 5 * 60_000,
 			meta: {
@@ -68,17 +61,8 @@ export async function ensurePageQuery<TData, TKey extends QueryKey>(
 		return client.fetchQuery({ ...options, staleTime: 0 })
 	}
 	const state = client.getQueryState(options.queryKey)
-	const [, actorKey, resource, input] = options.queryKey
-	// Focus can invalidate a cached optimistic page while its write is held.
-	// That page stays navigable; its confirming read already waits on the
-	// mutation barrier. An uncached page still waits for authoritative data.
-	const pendingOptimisticPage =
-		state?.data !== undefined &&
-		hasPendingPageMutation(client, actorKey, resource, input)
-	// Once the write settles, explicit invalidation waits for the confirmed
-	// revision so Router metadata follows it. Elapsed age alone remains SWR.
-	if (state?.isInvalidated && !pendingOptimisticPage)
-		return client.fetchQuery(options)
+	// Explicit invalidation requires authoritative data; elapsed age alone is SWR.
+	if (state?.isInvalidated) return client.fetchQuery(options)
 	return client.ensureQueryData({ ...options, revalidateIfStale: true })
 }
 

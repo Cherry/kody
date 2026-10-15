@@ -13,19 +13,21 @@ import {
 import {
 	useIsMutating,
 	useMutation,
+	useMutationState,
 	useQueryClient,
 } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
-import { restorePageResource } from '../page-mutation-cache.ts'
-import { scopedPageResource } from '../page-query-scope.ts'
 import {
 	renderAccountJobDetail,
 	renderJobDetailPlaceholder,
 } from './account-jobs-detail.tsx'
-import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import {
+	settleAccountMutation,
+	jobResources,
+} from './account-mutation-settlement.ts'
 import {
 	emptyJobsMessage,
 	jobsRoute,
@@ -53,12 +55,31 @@ const clampedCellCss = recordCellClamp(28)
 type MessageTone = 'info' | 'error'
 
 export function AccountJobsPage({
-	payload,
+	payload: savedPayload,
 	currentHref,
 }: {
 	payload: AccountJobsLoaderData
 	currentHref: string
 }) {
+	const { actorKey, orgSlug } = useMatchedPageScope()
+	const mutationKey = ['jobs', actorKey, orgSlug] as const
+	const changes = useMutationState({
+		filters: { mutationKey, status: 'pending' },
+		select: (mutation) =>
+			mutation.state.variables as
+				| { id: string; killSwitchEnabled?: boolean }
+				| undefined,
+	})
+	const payload = changes.reduce(
+		(data, input) =>
+			input && typeof input.killSwitchEnabled === 'boolean'
+				? optimisticJobs(data, {
+						id: input.id,
+						killSwitchEnabled: input.killSwitchEnabled,
+					})
+				: data,
+		savedPayload,
+	)
 	const { username, jobs, selectedJob } = payload
 
 	const [message, setMessage] = useState<string | null>(null)
@@ -111,39 +132,25 @@ export function AccountJobsPage({
 	}
 
 	const queryClient = useQueryClient()
-	const { actorKey, orgSlug } = useMatchedPageScope()
-	const mutationKey = ['jobs', actorKey, orgSlug] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
-	type JobsQueryData = { payload: AccountJobsLoaderData }
 
 	const captureSubmitter = useSubmitterScope()
 	const reconcile = (
-		submitted: { actorKey: string | null; orgSlug: string | null } | undefined,
+		input: { orgSlug: string | null },
+		submitted: { actorKey: string | null },
 	) =>
-		submitted
-			? invalidatePageResources(
-					queryClient,
-					submitted.actorKey,
-					[
-						'loadJobsPage',
-						'loadActivityPage',
-						'loadWorkflowsPage',
-						'loadUsagePage',
-					],
-					'active',
-					{ orgSlug: submitted.orgSlug },
-				)
-			: undefined
+		settleAccountMutation(queryClient, submitted.actorKey, jobResources, {
+			orgSlug: input.orgSlug,
+		})
+
 	const runMutation = useMutation({
 		mutationKey,
 		retry: false,
 		mutationFn: (input: { id: string; orgSlug: string | null }) =>
 			runJobNow({ data: { ...input, orgSlug: input.orgSlug ?? undefined } }),
-		onMutate: ({ orgSlug }) => ({ actorKey, orgSlug }),
-		onSettled: (_data, _error, _input, submitted) => {
-			// Confirming reads wait for this mutation to finish.
-			void reconcile(submitted)
-		},
+		onMutate: () => ({ actorKey }),
+		onSettled: (_data, _error, input, submitted) =>
+			submitted ? reconcile(input, submitted) : undefined,
 	})
 	const killMutation = useMutation({
 		mutationKey,
@@ -156,25 +163,9 @@ export function AccountJobsPage({
 			setJobKillSwitch({
 				data: { ...input, orgSlug: input.orgSlug ?? undefined },
 			}),
-		onMutate: async (input) => {
-			const submitted = { actorKey, orgSlug: input.orgSlug }
-			const resource = scopedPageResource(actorKey, 'loadJobsPage', submitted)
-			await queryClient.cancelQueries(resource)
-			const snapshot = queryClient.getQueriesData<JobsQueryData>(resource)
-			queryClient.setQueriesData<JobsQueryData>(
-				resource,
-				(data) =>
-					data && { ...data, payload: optimisticJobs(data.payload, input) },
-			)
-			return { ...submitted, snapshot }
-		},
-		onError: (_error, _input, context) => {
-			restorePageResource(queryClient, context?.snapshot)
-		},
-		onSettled: (_data, _error, _input, submitted) => {
-			// Confirming reads wait for this mutation to finish.
-			void reconcile(submitted)
-		},
+		onMutate: () => ({ actorKey }),
+		onSettled: (_data, _error, input, submitted) =>
+			submitted ? reconcile(input, submitted) : undefined,
 	})
 	async function postAction(input: {
 		write: () => Promise<AccountJobsActionPayload>

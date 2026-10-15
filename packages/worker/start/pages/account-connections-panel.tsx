@@ -13,14 +13,21 @@ import {
 	mutedLinkCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+	useIsMutating,
+	useMutation,
+	useQueryClient,
+} from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { pageResourceKey } from '../page-mutation-cache.ts'
+import {
+	settleAccountMutation,
+	accountConnectionResources,
+} from './account-mutation-settlement.ts'
+import { pageResourceKey } from '../page-query-scope.ts'
 import { startSocialSignIn } from '../social-sign-in.ts'
 import { AccountManagementPanel } from './account-management-components.tsx'
 
@@ -68,7 +75,6 @@ export function useAccountConnections(
 	initial: AccountConnectionsLoaderData,
 	href: string,
 ) {
-	const invalidatePages = usePageInvalidation(mutationResources)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const [connecting, setConnectionsBusy] = useState(false)
@@ -83,30 +89,29 @@ export function useAccountConnections(
 	const options = {
 		mutationKey: ['accountConnections', actorKey],
 		gcTime: 0,
-		onMutate: async () => {
-			const reconcile = invalidatePages
-			await queryClient.cancelQueries({
-				queryKey: pageResourceKey(actorKey, 'loadAccountPage'),
-			})
-			return reconcile
-		},
+		onMutate: () => ({ actorKey }),
 		onSettled: (
 			_data: unknown,
 			_error: Error | null,
 			_input: unknown,
-			reconcile: typeof invalidatePages | undefined,
-		) => {
-			// Active account queries wait for this mutation's write barrier.
-			void reconcile?.()
-		},
+			submitted: { actorKey: string | null } | undefined,
+		) =>
+			submitted
+				? settleAccountMutation(
+						queryClient,
+						submitted.actorKey,
+						accountConnectionResources,
+					)
+				: undefined,
 	}
 	const syncMutation = useMutation({ ...options, mutationFn: syncDiscordRole })
 	const disconnectMutation = useMutation({
 		...options,
 		mutationFn: disconnectAccountProvider,
 	})
-	const connectionsBusy =
-		connecting || syncMutation.isPending || disconnectMutation.isPending
+	const pendingConnections =
+		useIsMutating({ mutationKey: ['accountConnections', actorKey] }) > 0
+	const connectionsBusy = connecting || pendingConnections
 
 	const [connectionsMessage, setConnectionsMessage] = useState<{
 		text: string
@@ -134,6 +139,10 @@ export function useAccountConnections(
 	}
 
 	function syncDiscordMemberRole() {
+		if (
+			queryClient.isMutating({ mutationKey: ['accountConnections', actorKey] })
+		)
+			return
 		const isCurrent = capture()
 		setConnectionsMessage(null)
 		syncMutation.mutate(
@@ -160,6 +169,10 @@ export function useAccountConnections(
 		)
 	}
 	function disconnectProvider(providerId: string) {
+		if (
+			queryClient.isMutating({ mutationKey: ['accountConnections', actorKey] })
+		)
+			return
 		if (
 			providerId !== 'github' &&
 			providerId !== 'google' &&
@@ -369,9 +382,3 @@ export function useAccountConnections(
 const compactGhostButtonCss = getGhostButtonCss({ size: 'sm' })
 
 const dangerButtonCss = getDangerPillCss({ size: 'sm' })
-
-const mutationResources = [
-	'loadAccountPage',
-	'loadDiscord',
-	'loadOnboarding',
-] as const

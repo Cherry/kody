@@ -1,5 +1,8 @@
 import { type Query } from '@tanstack/react-query'
-import { pageResourceKey } from './page-mutation-cache.ts'
+
+export function pageResourceKey(actorKey: string | null, resource: string) {
+	return ['page', actorKey, resource] as const
+}
 
 export type PageOrgScope = { orgSlug: string | null }
 /** Actor identity is shared across orgs, resource payloads are not. */

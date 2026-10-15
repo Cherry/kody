@@ -10,7 +10,7 @@ thrown `Response` values as raw responses; its browser fetcher returns those
 before checking HTTP status. A caller can therefore receive a Response instead
 of the expected typed data or rejected error. Server authorization is still
 enforced, but error rendering and completion redirects can regress. These throws
-now use native serializable errors and explicit status locally. All four Start
+use native serializable errors and explicit status locally. All four Start
 typechecks pass; added read and completion regression tests still require CI
 runtime proof.
 
@@ -22,9 +22,9 @@ containing this head and main `3c09d6737`. Validate `38708657887` has Static
 failures for two unused follows validators and stale architecture-map paths, and
 one Workers failure from the new scheduled lane missing its dispatch-test mock.
 Those are corrected locally; Node and E2E remain running at this check. The
-architecture map and unused-export checks now pass locally.
+architecture map and unused-export checks pass locally.
 
-The incoming follows feature now uses native Start routes, Query resources and
+The incoming follows feature uses native Start routes, Query resources and
 separate follow, resume and unfollow server functions. Shared operations retain
 workspace binding, target permissions, rate limits and ownership checks. The
 legacy follows page, package controller and HTTP handler total 1,231 removed

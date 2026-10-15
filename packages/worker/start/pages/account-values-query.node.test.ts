@@ -37,7 +37,7 @@ const key = (selection: string | { orgSlug: string }, actor = 'a') => [
 	typeof selection === 'string' ? { selectedValueId: selection } : selection,
 ]
 
-it('invalidates accepted deletion after unmount, cancelling stale reads with actor isolation', async () => {
+it('confirms accepted deletion after unmount, cancelling cached stale reads with actor isolation', async () => {
 	const client = new QueryClient()
 	client.setQueryData(key('list'), data(null))
 	client.setQueryData(key('one'), data(detail))
@@ -61,25 +61,38 @@ it('invalidates accepted deletion after unmount, cancelling stale reads with act
 	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
 	unsubscribe()
 	let finishRead!: (value: ValuesQueryData) => void
-	const lateRead = client
-		.fetchQuery({
-			queryKey: key('one'),
-			queryFn: () =>
-				new Promise<ValuesQueryData>((resolve) => {
-					finishRead = resolve
-				}),
+	const confirmed: ValuesQueryData = {
+		payload: { ...data(null).payload, values: [row(other)] },
+	}
+	const cancelled = vi.fn()
+	// The first request was already running at commit time. The confirming
+	// request is a different read and must return the persisted deletion.
+	const read =
+		vi.fn<({ signal }: { signal: AbortSignal }) => Promise<ValuesQueryData>>()
+	read.mockImplementationOnce(({ signal }) => {
+		signal.addEventListener('abort', cancelled, { once: true })
+		return new Promise((resolve) => {
+			finishRead = resolve
 		})
+	})
+	read.mockResolvedValue(confirmed)
+	const lateRead = client
+		.fetchQuery({ queryKey: key('one'), queryFn: read })
 		.catch(() => undefined)
+	await vi.waitFor(() => expect(read).toHaveBeenCalledOnce())
 	accept({ ...data(null).payload, values: [row(other)] })
 	await submitted
+	expect(cancelled).toHaveBeenCalledOnce()
+	expect(read).toHaveBeenCalledTimes(2)
 	finishRead(data(detail))
 	await lateRead
+	expect(client.getQueryData(key('one'))).toEqual(confirmed)
 	expect(
 		client.getQueryData<ValuesQueryData>(key('list'))?.payload.values,
 	).toEqual([row(detail), row(other)])
 	expect(
 		client.getQueryData<ValuesQueryData>(key('one'))?.payload.selectedValue,
-	).toEqual(detail)
+	).toBeNull()
 	expect(
 		client.getQueryData<ValuesQueryData>(key('two'))?.payload.selectedValue,
 	).toEqual(other)

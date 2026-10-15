@@ -130,12 +130,11 @@ flowchart TD
     I --> K[Old submitter cannot reset a new draft or navigate it]
 ```
 
-Two strategies currently coexist. Email derives optimistic classification from
-mutation state without blocking reads. Some remaining page-shaped resources use
-scoped write barriers to prevent reads from replacing optimistic data with
-pre-write data. A mutation must not await a refetch that is itself waiting for
-that mutation to settle. Settlement also preserves uncached navigation reads
-that are waiting behind a barrier.
+Pending mutations supply temporary presentation state over Query's saved data.
+Reads continue independently, including first navigation reads. Settlement
+preserves those first-read promises, then confirms the captured actor and
+resource scope, including inactive queries and writes whose responses were lost.
+There is no global table that blocks reads by mutation family.
 
 ## 6. State ownership
 

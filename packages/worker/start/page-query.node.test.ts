@@ -29,49 +29,35 @@ describe('page query ownership', () => {
 		['loadProfile', 'profile'],
 		['loadJobsPage', 'jobs'],
 	])(
-		'keeps invalidated optimistic %s navigable while its write is pending',
+		'loads an invalidated %s independently of its pending write',
 		async (resource, mutationName) => {
 			const cache = client()
 			const write = deferred<void>()
 			const nextRead = deferred<{ title: string }>()
 			const read = vi.fn(() => nextRead.promise)
 			const options = createPageQuery(resource, read)('actor-a', undefined)
-			cache.setQueryData(options.queryKey, { title: 'Optimistic title' })
+			cache.setQueryData(options.queryKey, { title: 'Previous title' })
 			const mutation = cache.getMutationCache().build(cache, {
 				mutationKey: [mutationName, 'actor-a'],
 				mutationFn: () => write.promise,
 			})
 			const writing = mutation.execute(undefined)
-			await vi.waitFor(() => expect(cache.isMutating()).toBe(1))
 			await cache.invalidateQueries({
 				queryKey: options.queryKey,
 				refetchType: 'none',
 			})
-			// This must resolve before the test releases the write, exactly as a
-			// user navigating away and back while a slow POST remains pending.
-			expect(await ensurePageQuery(cache, options, false)).toEqual({
-				title: 'Optimistic title',
-			})
-			expect(read).not.toHaveBeenCalled()
+			const navigation = ensurePageQuery(cache, options, false)
+			await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+			nextRead.resolve({ title: 'Server title' })
+			expect(await navigation).toEqual({ title: 'Server title' })
+			expect(cache.isMutating()).toBe(1)
 			write.resolve()
 			await writing
-			await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
-			let confirmed = false
-			const navigation = ensurePageQuery(cache, options, false).then(
-				(value) => {
-					confirmed = true
-					return value
-				},
-			)
-			await Promise.resolve()
-			expect(confirmed).toBe(false)
-			nextRead.resolve({ title: 'Accepted title' })
-			expect(await navigation).toEqual({ title: 'Accepted title' })
 		},
 	)
 
 	it.each([false, true])(
-		'keeps uncached or authorization-sensitive reads blocking during a pending write (cached: %s)',
+		'authorizes independently of a pending write (cached: %s)',
 		async (cached) => {
 			const cache = client()
 			const write = deferred<void>()
@@ -85,25 +71,13 @@ describe('page query ownership', () => {
 				mutationFn: () => write.promise,
 			})
 			const writing = mutation.execute(undefined)
-			await vi.waitFor(() => expect(cache.isMutating()).toBe(1))
-			await cache.invalidateQueries({
-				queryKey: options.queryKey,
-				refetchType: 'none',
+			expect(await ensurePageQuery(cache, options, false)).toEqual({
+				title: 'Server title',
 			})
-			let settled = false
-			const navigation = ensurePageQuery(cache, options, false).then(
-				(value) => {
-					settled = true
-					return value
-				},
-			)
-			await Promise.resolve()
-			await Promise.resolve()
-			expect(settled).toBe(false)
-			expect(read).not.toHaveBeenCalled()
+			expect(read).toHaveBeenCalledTimes(1)
+			expect(cache.isMutating()).toBe(1)
 			write.resolve()
 			await writing
-			expect(await navigation).toEqual({ title: 'Server title' })
 		},
 	)
 
