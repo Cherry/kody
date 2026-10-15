@@ -17,7 +17,7 @@ copy is selected explicitly by page owners rather than by a pathname matcher.
 
 All four Start typechecks, worker-test and tools typechecks, lint, Knip, and
 documentation reference checks passed. Runtime confirmation is pending in
-Validate run `38717968492`. Workers and MCP passed; E2E is still running. Node
+Validate run `38717968492`. Workers, MCP, and E2E passed. Node
 finished with six failures: four OAuth scope fixtures imported an incomplete
 Cloudflare mock, and two MCP authorization cases treated an inaccessible
 organization as signed out. Corrections are being reviewed locally without
@@ -36,6 +36,14 @@ unknown route returned 404 on both hosts, but its preview title was `Kody`
 instead of production's `Not found`. That is an open head-metadata regression,
 not a passing parity check. These HTTP observations do not verify rendering,
 navigation, sitemap contents, or authenticated behavior.
+
+Browser comparison of `/faq` confirmed the first disclosure opens with matching
+answer text and documentation link on both hosts. Screenshots showed matching
+main content typography and wrapping. Measured main content height was
+1242.6328125px on both; its vertical origin differed by 1.640625px, matching the
+header height difference. Production was signed in and preview anonymous, with
+1728px widths but different viewport heights (941px and 885px). This is limited
+FAQ interaction evidence, not exact matched-state visual parity.
 
 ## Preview check at source `fb9728a37`
 
