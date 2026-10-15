@@ -92,10 +92,10 @@ keep their existing external contracts.
 Actor verification, organization scoping, mutation dependencies, and
 cache-driven head updates express Kody behavior. These are application code, not
 features that adopting Start removes. Start owns HTTP and browser routing.
-Shared URL builders only construct paths and do not dispatch requests.
-Retained Remix imports provide cookie, schema, data-table, and HTML utilities;
-they do not match website routes or dispatch website actions. User-authored package apps may also use
-Remix independently of Kody's web UI.
+Shared URL builders only construct paths and do not dispatch requests. Retained
+Remix imports provide cookie, schema, data-table, and HTML utilities; they do
+not match website routes or dispatch website actions. User-authored package apps
+may also use Remix independently of Kody's web UI.
 
 Local [Redact](../../patches/@tanstack+redact+0.1.4.patch) and
 [Router](../../patches/@tanstack+router-core+1.171.34.patch) patches are part of

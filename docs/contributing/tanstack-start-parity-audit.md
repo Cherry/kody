@@ -9,24 +9,25 @@ Preview health returned HTTP 200 at deployed merge
 main `d46dc2a3d`. This verifies deployment identity and health, not visual
 parity. The subsequent local fixes have not been deployed.
 
-Validate run `38695335762` passed Workers and MCP. Static failed two documentation
-checks: temporal wording and a link to a deleted mutation helper. Both checks
-pass locally after `78007b36a`. Node passed 6018 tests and failed three: the same
-broken link and two deletion assertions expecting rebuilt lists. The deletion
-tests in `412ad9a0b` assert operation results and independently read persisted
-state. Browser E2E was still running at inspection. These fixes need CI.
+Validate run `38695335762` passed Workers and MCP. Static failed two
+documentation checks: temporal wording and a link to a deleted mutation helper.
+Both checks pass locally after `78007b36a`. Node passed 6018 tests and failed
+three: the same broken link and two deletion assertions expecting rebuilt lists.
+The deletion tests in `412ad9a0b` assert operation results and independently
+read persisted state. Browser E2E was still running at inspection. These fixes
+need CI.
 
 System-email deletion, custom domains, admin settings, credit settings, passkey
 rename/delete, and OAuth client writes return operation outcomes independently
-of subsequent reads. The generic page-response mutation helper is deleted.
-Query lifecycle callbacks reconcile submitted resource scopes. Retained-page
-pending controls derive from mutation state, with browser coverage added for
-search and hash navigation during an accepted write. That new coverage has not
-run yet. Start type checks and targeted lint passed for the pending-state and
-codemod input changes; no local runtime tests were run.
+of subsequent reads. The generic page-response mutation helper is deleted. Query
+lifecycle callbacks reconcile submitted resource scopes. Retained-page pending
+controls derive from mutation state, with browser coverage added for search and
+hash navigation during an accepted write. That new coverage has not run yet.
+Start type checks and targeted lint passed for the pending-state and codemod
+input changes; no local runtime tests were run.
 
-A desktop pricing comparison used authenticated production and anonymous
-preview sessions. The extra improved-search sentence is controlled by
+A desktop pricing comparison used authenticated production and anonymous preview
+sessions. The extra improved-search sentence is controlled by
 `jevSearchRerankFlagKey` in the Start pricing route. This comparison does not
 establish matched-state visual parity.
 
