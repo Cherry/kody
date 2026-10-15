@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadMemoriesPage', loadMemoriesPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/memories')({
+	staticData: { orgScope: { section: 'memories' } },
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		selected: search.selected,
 		q: search.q,

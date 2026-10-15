@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadValuesPage', loadValuesPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/values_/new')({
+	staticData: { orgScope: { section: 'values' } },
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		selected: search.selected,
 	}),

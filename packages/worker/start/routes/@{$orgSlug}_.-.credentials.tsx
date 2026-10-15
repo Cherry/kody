@@ -10,7 +10,10 @@ import {
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials')({
 	validateSearch: validateCredentialSearch,
-	staticData: { presentationSearchKeys: credentialPresentationSearchKeys },
+	staticData: {
+		orgScope: { section: 'credentials' },
+		presentationSearchKeys: credentialPresentationSearchKeys,
+	},
 	shouldReload: ({ context }) => !context.presentationOnly,
 	loader: ({ context, preload, params }) =>
 		loadPageQuery(

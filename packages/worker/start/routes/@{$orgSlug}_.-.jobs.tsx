@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadJobsPage', loadJobsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/jobs')({
-	staticData: { presentationSearchKeys: ['q', 'view'] },
+	staticData: {
+		orgScope: { section: 'jobs' },
+		presentationSearchKeys: ['q', 'view'],
+	},
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		selected: search.selected,
 	}),

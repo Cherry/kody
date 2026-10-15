@@ -116,7 +116,9 @@ beforeEach(() => {
 
 test('the signup org overview renders without remembering the org', async () => {
 	expect(await getOverview(await createEnv(), 'ada')).toEqual({ slug: 'ada' })
-	expect(native.setResponseHeader).not.toHaveBeenCalled()
+	expect(native.setResponseHeader.mock.calls).toEqual([
+		['Cache-Control', 'private, no-store'],
+	])
 })
 test('a team org overview redirects to the team home', async () => {
 	await expect(getOverview(await createEnv(), 'acme')).rejects.toMatchObject({

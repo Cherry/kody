@@ -5,6 +5,7 @@ import { AccountSecretsPage } from '../pages/account-secrets.tsx'
 import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/approve')({
+	staticData: { orgScope: { section: 'secrets' } },
 	loaderDeps: ({ search }) => search,
 	loader: ({ params, abortController, location }) =>
 		loadSecretsPage({

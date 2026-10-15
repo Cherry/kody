@@ -6,6 +6,7 @@ import { AccountBillingSuccessPage } from '../pages/account-billing-success.tsx'
 import { documentHead } from '../components/document-head.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/billing_/success')({
+	staticData: { orgScope: {} },
 	server: { handlers: { HEAD: rejectActionPageHead } },
 	preload: false,
 	staleTime: Infinity,

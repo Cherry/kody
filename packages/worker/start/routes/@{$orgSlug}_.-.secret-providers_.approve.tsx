@@ -6,6 +6,7 @@ import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/secret-providers_/approve',
 )({
+	staticData: { orgScope: { section: 'secret-providers' } },
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location, params }) =>
 		loadSecretProvidersPage({

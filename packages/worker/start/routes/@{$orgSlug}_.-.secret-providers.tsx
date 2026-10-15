@@ -10,6 +10,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secret-providers')({
+	staticData: { orgScope: { section: 'secret-providers' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		pageQueryInput: {

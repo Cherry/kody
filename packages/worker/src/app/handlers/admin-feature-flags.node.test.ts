@@ -612,9 +612,8 @@ test('reserved username operations independently require admin before writing', 
 		addAdminReservedUsernames,
 		removeAdminReservedUsernames,
 	]) {
-		const outcome = await adminOperationOutcome(() =>
+		await expect(
 			operation({ env, request, usernames: ['example'] }),
-		)
-		expect(outcome.status).toBe(403)
+		).rejects.toMatchObject({ status: 403 })
 	}
 })

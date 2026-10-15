@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/new')({
+	staticData: { orgScope: { section: 'mcp-servers' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ params }) => ({
 		pageQueryInput: { orgSlug: params.orgSlug, serverId: undefined },

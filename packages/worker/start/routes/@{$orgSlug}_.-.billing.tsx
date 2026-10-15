@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadBillingPage', loadBillingPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/billing')({
+	staticData: { orgScope: {} },
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		billing: search.billing,
 		error: search.error,

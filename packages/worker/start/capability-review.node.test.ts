@@ -119,7 +119,8 @@ test('pending review offers separate credential and public-serving approvals', a
 	)
 	for (const value of [
 		'Approve package changes',
-		'previously published version keeps running',
+		'Review the credential and internet-visibility changes below.',
+		'Internet-visible serving stays off until you approve.',
 		'Credential access changed',
 		'paused-commit',
 		'Add mail credential for api.example.com',

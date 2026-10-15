@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
+	staticData: { orgScope: {} },
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		credits: search.credits,
 		error: search.error,

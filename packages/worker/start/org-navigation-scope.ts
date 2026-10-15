@@ -1,15 +1,23 @@
-import { isOrgOwnedAccountSection } from '#universal/org-pages.ts'
+import { type OrgOwnedAccountSection } from '#universal/org-pages.ts'
 
-/** Use Router's matched resource and decoded params, never a second URL matcher. */
+export type OrgNavigationPolicy = { section?: OrgOwnedAccountSection }
+
+declare module '@tanstack/router-core' {
+	interface StaticDataRouteOption {
+		orgScope?: OrgNavigationPolicy
+	}
+}
+
+/** The matched route owns its authorization scope. Route names and URLs do not. */
 export function orgNavigationScope(
-	matches: ReadonlyArray<{ routeId: unknown; params: unknown }>,
+	matches: ReadonlyArray<{
+		staticData: { orgScope?: OrgNavigationPolicy }
+		params: unknown
+	}>,
 ) {
 	for (const match of [...matches].reverse()) {
-		if (
-			typeof match.routeId !== 'string' ||
-			!match.routeId.startsWith('/@{$orgSlug}_/-/')
-		)
-			continue
+		const policy = match.staticData.orgScope
+		if (!policy) continue
 		if (
 			!match.params ||
 			typeof match.params !== 'object' ||
@@ -18,12 +26,7 @@ export function orgNavigationScope(
 			continue
 		const orgSlug = match.params.orgSlug
 		if (typeof orgSlug !== 'string') continue
-		const section =
-			match.routeId.split('/-/')[1]?.split('/')[0]?.replace(/_$/, '') ?? ''
-		return {
-			orgSlug,
-			section: isOrgOwnedAccountSection(section) ? section : undefined,
-		}
+		return { orgSlug, section: policy.section }
 	}
 	return undefined
 }

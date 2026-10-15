@@ -239,7 +239,7 @@ first-party credential leak to package code) showed up in the surfaces reviewed.
 ### M6 — Origin SSR graph eagerly imports `marked`
 
 - **Area:** performance (Worker startup)
-- **Location:** origin router → `packages/worker/src/app/handlers/blog.tsx` →
+- **Location:** origin router → `packages/worker/src/app/handlers/blog.ts` →
   highlight/markdown path; `startup-budget.md`
 - **Evidence:** `marked` is listed as a heavy module-scope lib. The origin
   router statically imports blog. Client `markdown-view.tsx` is already in a

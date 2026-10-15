@@ -13,6 +13,7 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/integrations_/$integrationName',
 )({
+	staticData: { orgScope: { section: 'integrations' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		pageQueryInput: {

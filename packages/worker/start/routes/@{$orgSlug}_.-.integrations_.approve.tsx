@@ -4,6 +4,7 @@ import { AccountIntegrationsPage } from '../pages/account-integrations.tsx'
 import { loadIntegrationsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/integrations_/approve')({
+	staticData: { orgScope: { section: 'integrations' } },
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location, params }) =>
 		loadIntegrationsPage({

@@ -12,7 +12,10 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/credentials_/$credentialId',
 )({
 	validateSearch: validateCredentialSearch,
-	staticData: { presentationSearchKeys: credentialPresentationSearchKeys },
+	staticData: {
+		orgScope: { section: 'credentials' },
+		presentationSearchKeys: credentialPresentationSearchKeys,
+	},
 	shouldReload: ({ context }) => !context.presentationOnly,
 	loader: ({ context, preload, params }) =>
 		loadPageQuery(
