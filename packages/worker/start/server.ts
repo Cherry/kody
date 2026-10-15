@@ -41,6 +41,7 @@ export async function renderNativeDocument(
 		return startHandler(request, {
 			context: {
 				nonce,
+				env,
 				documentFailure,
 			},
 		})

@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
 	binding: vi.fn(),
 	lease: vi.fn(),
 	header: vi.fn(),
+	env: { APP_DB: {}, OAUTH_PROVIDER: { revokeGrant: vi.fn() } },
 }))
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () =>
@@ -14,7 +15,9 @@ vi.mock('@tanstack/react-start/server', () => ({
 		}),
 	setResponseHeader: state.header,
 }))
-vi.mock('cloudflare:workers', () => ({ env: { APP_DB: {} } }))
+vi.mock('@tanstack/react-start', () => ({
+	getGlobalStartContext: () => ({ env: state.env }),
+}))
 vi.mock('#app/env.ts', () => ({ getEnv: (value: unknown) => value }))
 vi.mock('#app/authenticated-user.ts', () => ({
 	readAuthenticatedAppUser: state.authenticated,
@@ -153,5 +156,21 @@ test('write leases use the stamped personal org instead of the person id', async
 	await withWebsiteMutation({}, async () => ({ ok: true }))
 	expect(state.lease).toHaveBeenCalledWith(
 		expect.objectContaining({ stableUserId: 'org_distinct' }),
+	)
+})
+
+test('request OAuth helpers reach reads, authenticated writes, and deletion leases', async () => {
+	await withWebsiteRead({}, async ({ env }) => {
+		expect(env).toBe(state.env)
+	})
+	await withWebsiteMutation({}, async ({ env }) => {
+		expect(env).toBe(state.env)
+	})
+	expect(state.authenticated).toHaveBeenCalledWith(
+		expect.any(Request),
+		state.env,
+	)
+	expect(state.lease).toHaveBeenCalledWith(
+		expect.objectContaining({ env: state.env }),
 	)
 })

@@ -1,13 +1,12 @@
 import { getRequest, setResponseHeader } from '@tanstack/react-start/server'
-import { env as workerEnv } from 'cloudflare:workers'
-import { getEnv } from '#app/env.ts'
+import { getStartRequestEnv } from './request-env.ts'
 import { setAuthSessionSecret } from '#app/auth-session.ts'
 import { checkAuthRateLimit } from '#app/rate-limit.ts'
 import { getRequestIp } from '#worker/audit-log.ts'
 
 export async function publicAuthContext() {
 	const request = getRequest()
-	const env = getEnv(workerEnv)
+	const env = getStartRequestEnv()
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	setResponseHeader('Cache-Control', 'private, no-store')
 	const limit = await checkAuthRateLimit(

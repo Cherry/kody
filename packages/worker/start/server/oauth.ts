@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { getStartRequestEnv } from './request-env.ts'
 
 export const loadOAuthPage = createServerFn({ method: 'GET' })
 	.validator((search: string) => {
@@ -11,21 +12,17 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 	})
 	.handler(async ({ data: search }) => {
 		const [
-			{ env },
 			{ getRequest, setResponseHeader },
-			{ getEnv },
 			{ loadSessionInfo },
 			{ loadOAuthAuthorizeData },
 			{ publicAuthProvidersLoaderData },
 		] = await Promise.all([
-			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
-			import('../../src/app/env.ts'),
 			import('../../src/app/session-info.ts'),
 			import('../../src/oauth-handlers.ts'),
 			import('../../src/app/public-auth-providers.ts'),
 		])
-		const bindings = getEnv(env)
+		const bindings = getStartRequestEnv()
 		const request = getRequest()
 		const url = new URL(`/oauth/authorize${search}`, request.url)
 		const result = await loadOAuthAuthorizeData(request, bindings, url)

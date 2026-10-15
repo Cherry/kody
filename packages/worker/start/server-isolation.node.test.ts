@@ -7,6 +7,7 @@ const { renderStart } = vi.hoisted(() => ({
 			options: {
 				context: {
 					nonce: string
+					env?: Env
 				}
 			},
 		) => {
@@ -15,7 +16,7 @@ const { renderStart } = vi.hoisted(() => ({
 				setTimeout(resolve, request.url.endsWith('/pricing') ? 5 : 0),
 			)
 			return new Response(
-				JSON.stringify({ url: request.url, ...options.context }),
+				JSON.stringify({ url: request.url, nonce: options.context.nonce }),
 				{ headers: { 'Content-Type': 'text/html' } },
 			)
 		},
@@ -59,5 +60,27 @@ test('Start creates a fresh matching nonce for overlapping requests', async () =
 			`'nonce-${bodies[index]?.nonce}'`,
 		)
 		expect(bodies[index]?.url).toBe(requests[index]?.url)
+	}
+})
+
+test('Start preserves each provider binding object across overlapping requests', async () => {
+	const bindings = ['first', 'second'].map(
+		(provider) =>
+			({
+				COOKIE_SECRET: 'private-cookie-secret',
+				WRANGLER_IS_LOCAL_DEV: 'true',
+				OAUTH_PROVIDER: { provider },
+			}) as unknown as Env,
+	)
+	const requests = ['/pricing', '/faq'].map(
+		(path) => new Request(`https://kody.test${path}`),
+	)
+	renderStart.mockClear()
+	await Promise.all(
+		requests.map((request, index) => handleRequest(request, bindings[index]!)),
+	)
+	for (const [index, request] of requests.entries()) {
+		const call = renderStart.mock.calls.find(([seen]) => seen === request)
+		expect(call?.[1].context.env).toBe(bindings[index])
 	}
 })

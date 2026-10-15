@@ -1,5 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
+	env: { OAUTH_PROVIDER: { marker: 'request provider' } },
 	silent: vi.fn<(request: Request, env: unknown) => Promise<Response | null>>(
 		async () => null,
 	),
@@ -12,7 +13,9 @@ const mocks = vi.hoisted(() => ({
 	status: vi.fn(),
 	report: vi.fn(),
 }))
-vi.mock('cloudflare:workers', () => ({ env: {} }))
+vi.mock('@tanstack/react-start', () => ({
+	getGlobalStartContext: () => ({ env: mocks.env }),
+}))
 vi.mock('../../src/app/env.ts', () => ({ getEnv: (env: unknown) => env }))
 vi.mock('@sentry/cloudflare', () => ({ captureException: mocks.report }))
 vi.mock('@tanstack/react-start/server', () => ({
@@ -45,7 +48,7 @@ test('interactive authorization falls through once without pre-reading consent o
 	})
 	const next = vi.fn(async () => response)
 	expect(await oauthAuthorizeDocument({ request, next })).toBe(response)
-	expect(mocks.silent).toHaveBeenCalledExactlyOnceWith(request, {})
+	expect(mocks.silent).toHaveBeenCalledExactlyOnceWith(request, mocks.env)
 	expect(next).toHaveBeenCalledTimes(1)
 })
 test('silent authorization returns its response without rendering or reading consent again', async () => {
@@ -93,7 +96,7 @@ test('approval posts preserve the original body and operation response', async (
 	})
 	await oauthAuthorizePost({ request })
 	expect(mocks.protect).not.toHaveBeenCalled()
-	expect(mocks.post).toHaveBeenCalledExactlyOnceWith(request, {})
+	expect(mocks.post).toHaveBeenCalledExactlyOnceWith(request, mocks.env)
 	expect((await request.formData()).get('decision')).toBe('approve')
 })
 test.each(['?error=', '?error_description=denied', '?error=access_denied'])(

@@ -89,6 +89,7 @@ vi.mock('@tanstack/react-start/server', () => ({
 }))
 vi.mock('#app/env.ts', () => ({ getEnv: (env: Env) => env }))
 vi.mock('@tanstack/react-start', async () => ({
+	getGlobalStartContext: () => ({ env: native.env }),
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,

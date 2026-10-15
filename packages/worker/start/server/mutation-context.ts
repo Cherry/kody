@@ -1,9 +1,8 @@
 import { getRequest, setResponseHeader } from '@tanstack/react-start/server'
-import { env as workerEnv } from 'cloudflare:workers'
+import { getStartRequestEnv } from './request-env.ts'
 import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadResolvedRequestAuth } from '#app/request-auth-cache.ts'
-import { getEnv } from '#app/env.ts'
 import { loadOrgBindingForSlug } from '#worker/orgs/repo.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { withAccountWriteLease } from '#worker/account/deletion-state.ts'
@@ -25,7 +24,7 @@ export class WebsiteAuthenticationError extends Error {
 /** Explicit scope is checked against the session principal, never the Referer. */
 async function websiteContext(options: WebsiteScope): Promise<WebsiteContext> {
 	const request = getRequest()
-	const env = getEnv(workerEnv)
+	const env = getStartRequestEnv()
 	setResponseHeader('Cache-Control', 'private, no-store')
 	const authenticated = await readAuthenticatedAppUser(request, env)
 	if (!authenticated) throw new WebsiteAuthenticationError()

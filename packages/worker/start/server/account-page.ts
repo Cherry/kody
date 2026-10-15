@@ -1,3 +1,4 @@
+import { getStartRequestEnv } from './request-env.ts'
 import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { createServerFn } from '@tanstack/react-start'
@@ -15,9 +16,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 	})
 	.handler(async ({ data: search }) => {
 		const [
-			{ env },
 			{ getRequest, setResponseHeader },
-			{ getEnv },
 			{ setAuthSessionSecret },
 			{ requireAuthenticatedPageUser },
 			{ loadAccountConnectionsData },
@@ -25,9 +24,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			{ loadOnboardingData },
 			{ loadChecklist },
 		] = await Promise.all([
-			import('cloudflare:workers'),
 			import('@tanstack/react-start/server'),
-			import('../../src/app/env.ts'),
 			import('../../src/app/auth-session.ts'),
 			import('../../src/app/page-auth.ts'),
 			import('../../src/app/account-connections-data.ts'),
@@ -35,7 +32,7 @@ export const loadAccountPage = createServerFn({ method: 'GET' })
 			import('../../src/app/onboarding-data.ts'),
 			import('../../src/app/handlers/onboarding.ts'),
 		])
-		const appEnv = getEnv(env)
+		const appEnv = getStartRequestEnv()
 		setAuthSessionSecret(appEnv.COOKIE_SECRET)
 		const request = getRequest()
 		setResponseHeader('Cache-Control', 'private, no-store')

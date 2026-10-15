@@ -1,5 +1,4 @@
-import { env } from 'cloudflare:workers'
-import { getEnv } from '#app/env.ts'
+import { getStartRequestEnv } from './request-env.ts'
 import {
 	createRobotsTxtHandler,
 	createSitemapHandler,
@@ -57,34 +56,34 @@ import { createAuthProviderCallbackHandler } from '#app/handlers/auth-provider.t
 import { createSessionHandler } from '#app/handlers/session.ts'
 
 export const robotsTxtHttp = ({ request }: { request: Request; params: {} }) =>
-	createRobotsTxtHandler(getEnv(env))({ request })
+	createRobotsTxtHandler(getStartRequestEnv())({ request })
 
 export const sitemapHttp = ({ request }: { request: Request; params: {} }) =>
-	createSitemapHandler(getEnv(env))({ request })
+	createSitemapHandler(getStartRequestEnv())({ request })
 
 export const authMarkdownHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createAuthMarkdownHandler(getEnv(env))({ request })
+}) => createAuthMarkdownHandler(getStartRequestEnv())({ request })
 
 export const mcpServerCardHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createMcpServerCardHandler(getEnv(env))({ request })
+}) => createMcpServerCardHandler(getStartRequestEnv())({ request })
 
 export const apiCatalogHttp = ({ request }: { request: Request; params: {} }) =>
-	createApiCatalogHandler(getEnv(env))({ request })
+	createApiCatalogHandler(getStartRequestEnv())({ request })
 
 export const agentSkillsIndexHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createAgentSkillsIndexHandler(getEnv(env))({ request })
+}) => createAgentSkillsIndexHandler(getStartRequestEnv())({ request })
 
 export const agentSkillMarkdownHttp = ({
 	params,
@@ -92,7 +91,7 @@ export const agentSkillMarkdownHttp = ({
 	request: Request
 	params: { skillId: string }
 }) =>
-	createAgentSkillMarkdownHandler(getEnv(env))({
+	createAgentSkillMarkdownHandler(getStartRequestEnv())({
 		params: { skillId: params.skillId },
 	})
 
@@ -101,20 +100,20 @@ export const securityTxtHttp = ({
 }: {
 	request: Request
 	params: {}
-}) => createSecurityTxtHandler(getEnv(env))({ request })
+}) => createSecurityTxtHandler(getStartRequestEnv())({ request })
 
 export const openaiAppsChallengeHttp = () =>
-	createOpenaiAppsChallengeHandler(getEnv(env))()
+	createOpenaiAppsChallengeHandler(getStartRequestEnv())()
 
 export const healthHttp = ({ request }: { request: Request; params: {} }) =>
-	createHealthHandler(getEnv(env))({ request })
+	createHealthHandler(getStartRequestEnv())({ request })
 
 const healthCollectors = new WeakMap<
 	Env,
 	ReturnType<typeof createHealthComponentsHandler>
 >()
 export const healthComponentsHttp = () => {
-	const bindings = getEnv(env)
+	const bindings = getStartRequestEnv()
 	let collector = healthCollectors.get(bindings)
 	if (!collector) {
 		collector = createHealthComponentsHandler(bindings)
@@ -128,7 +127,7 @@ export const sentryTunnelHttp = ({
 }: {
 	request: Request
 	params: {}
-}) => createSentryTunnelHandler(getEnv(env))({ request })
+}) => createSentryTunnelHandler(getStartRequestEnv())({ request })
 
 export const ogPageImageHttp = ({
 	request,
@@ -137,13 +136,13 @@ export const ogPageImageHttp = ({
 	request: Request
 	params: { page: string }
 }) =>
-	createOgPageImageHandler(getEnv(env))({
+	createOgPageImageHandler(getStartRequestEnv())({
 		request,
 		params: { page: params.page },
 	})
 
 export const blogRssHttp = ({ request }: { request: Request; params: {} }) =>
-	createBlogRssHandler(getEnv(env))({ request })
+	createBlogRssHandler(getStartRequestEnv())({ request })
 
 export const blogPostMarkdownHttp = ({
 	params,
@@ -151,7 +150,9 @@ export const blogPostMarkdownHttp = ({
 	request: Request
 	params: { slug: string }
 }) =>
-	createBlogPostMarkdownHandler(getEnv(env))({ params: { slug: params.slug } })
+	createBlogPostMarkdownHandler(getStartRequestEnv())({
+		params: { slug: params.slug },
+	})
 
 export const blogPostOgImageHttp = ({
 	request,
@@ -160,7 +161,7 @@ export const blogPostOgImageHttp = ({
 	request: Request
 	params: { slug: string }
 }) =>
-	createBlogPostOgImageHandler(getEnv(env))({
+	createBlogPostOgImageHandler(getStartRequestEnv())({
 		request,
 		params: { slug: params.slug },
 	})
@@ -170,21 +171,21 @@ export const docsMarkdownHttp = ({
 }: {
 	request: Request
 	params: {}
-}) => createDocsMarkdownHandler(getEnv(env))({ request })
+}) => createDocsMarkdownHandler(getStartRequestEnv())({ request })
 
 export const docsLlmsTxtHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createDocsLlmsTxtHandler(getEnv(env))({ request })
+}) => createDocsLlmsTxtHandler(getStartRequestEnv())({ request })
 
 export const docsConnectMarkdownHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createDocsConnectMarkdownHandler(getEnv(env))({ request })
+}) => createDocsConnectMarkdownHandler(getStartRequestEnv())({ request })
 
 export const docDetailMarkdownHttp = ({
 	request,
@@ -193,7 +194,7 @@ export const docDetailMarkdownHttp = ({
 	request: Request
 	params: { slug: string }
 }) =>
-	createDocDetailMarkdownHandler(getEnv(env))({
+	createDocDetailMarkdownHandler(getStartRequestEnv())({
 		request,
 		params: { slug: params.slug },
 	})
@@ -205,13 +206,13 @@ export const docDetailOgImageHttp = ({
 	request: Request
 	params: { slug: string }
 }) =>
-	createDocDetailOgImageHandler(getEnv(env))({
+	createDocDetailOgImageHandler(getStartRequestEnv())({
 		request,
 		params: { slug: params.slug },
 	})
 
 export const llmsTxtHttp = ({ request }: { request: Request; params: {} }) =>
-	createLlmsTxtHandler(getEnv(env))({ request })
+	createLlmsTxtHandler(getStartRequestEnv())({ request })
 
 export const youtubeThumbHttp = ({
 	request,
@@ -220,7 +221,7 @@ export const youtubeThumbHttp = ({
 	request: Request
 	params: { videoId: string }
 }) =>
-	createYoutubeThumbHandler(getEnv(env))({
+	createYoutubeThumbHandler(getStartRequestEnv())({
 		request,
 		params: { videoId: params.videoId },
 	})
@@ -230,7 +231,7 @@ export const accountExportHttp = ({
 }: {
 	request: Request
 	params: {}
-}) => createAccountExportHandler(getEnv(env))({ request })
+}) => createAccountExportHandler(getStartRequestEnv())({ request })
 
 export const accountMcpServerLogoHttp = ({
 	request,
@@ -239,7 +240,7 @@ export const accountMcpServerLogoHttp = ({
 	request: Request
 	params: { serverId: string }
 }) =>
-	createMcpServerLogoHandler(getEnv(env))({
+	createMcpServerLogoHandler(getStartRequestEnv())({
 		request,
 		params: { serverId: params.serverId },
 	})
@@ -249,14 +250,15 @@ export const accountMcpServersOauthCallbackHttp = ({
 }: {
 	request: Request
 	params: {}
-}) => createAccountMcpServersOauthCallbackHandler(getEnv(env))({ request })
+}) =>
+	createAccountMcpServersOauthCallbackHandler(getStartRequestEnv())({ request })
 
 export const accountMemoriesExportHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createAccountMemoriesExportHandler(getEnv(env))({ request })
+}) => createAccountMemoriesExportHandler(getStartRequestEnv())({ request })
 
 export const communityDetailRawHttp = ({
 	request,
@@ -265,7 +267,7 @@ export const communityDetailRawHttp = ({
 	request: Request
 	params: { listingId: string; _splat?: string }
 }) =>
-	createCommunityDetailRawHandler(getEnv(env))({
+	createCommunityDetailRawHandler(getStartRequestEnv())({
 		request,
 		params: {
 			listingId: params.listingId,
@@ -280,7 +282,7 @@ export const communityPackageRawHttp = ({
 	request: Request
 	params: { username: string; kodyId: string; ref: string; _splat?: string }
 }) =>
-	createCommunityPackageRawHandler(getEnv(env))({
+	createCommunityPackageRawHandler(getStartRequestEnv())({
 		request,
 		params: {
 			username: params.username,
@@ -297,7 +299,7 @@ export const communityPackageAssetHttp = ({
 	request: Request
 	params: { username: string; kodyId: string; _splat?: string }
 }) =>
-	createCommunityPackageAssetHandler(getEnv(env))({
+	createCommunityPackageAssetHandler(getStartRequestEnv())({
 		request,
 		params: {
 			username: params.username,
@@ -312,7 +314,7 @@ export const communityDetailAssetHttp = ({
 	request: Request
 	params: { listingId: string; _splat?: string }
 }) =>
-	createCommunityDetailAssetHandler(getEnv(env))({
+	createCommunityDetailAssetHandler(getStartRequestEnv())({
 		params: {
 			listingId: params.listingId,
 			relativePath: params._splat ?? '',
@@ -325,7 +327,7 @@ export const communityDetailIconHttp = ({
 	request: Request
 	params: { listingId: string; iconCommit: string }
 }) =>
-	createCommunityIconHandler(getEnv(env))({
+	createCommunityIconHandler(getStartRequestEnv())({
 		params: {
 			listingId: params.listingId,
 			iconCommit: params.iconCommit,
@@ -339,7 +341,7 @@ export const communityPackageIconHttp = ({
 	request: Request
 	params: { username: string; kodyId: string; iconCommit: string }
 }) =>
-	createCommunityPackageIconHandler(getEnv(env))({
+	createCommunityPackageIconHandler(getStartRequestEnv())({
 		request,
 		params: {
 			username: params.username,
@@ -355,7 +357,7 @@ export const accountRepoIconHttp = ({
 	request: Request
 	params: { repoId: string; iconCommit: string }
 }) =>
-	createAccountRepoIconHandler(getEnv(env))({
+	createAccountRepoIconHandler(getStartRequestEnv())({
 		request,
 		params: {
 			repoId: params.repoId,
@@ -370,7 +372,7 @@ export const integrationLogoHttp = ({
 	request: Request
 	params: { integrationSlug: string }
 }) =>
-	createIntegrationLogoHandler(getEnv(env))({
+	createIntegrationLogoHandler(getStartRequestEnv())({
 		request,
 		params: { integrationSlug: params.integrationSlug },
 	})
@@ -381,7 +383,9 @@ export const providerMarkLogoHttp = ({
 	request: Request
 	params: { slug: string }
 }) =>
-	createProviderMarkLogoHandler(getEnv(env))({ params: { slug: params.slug } })
+	createProviderMarkLogoHandler(getStartRequestEnv())({
+		params: { slug: params.slug },
+	})
 
 export const communityDetailOgImageHttp = ({
 	request,
@@ -390,7 +394,7 @@ export const communityDetailOgImageHttp = ({
 	request: Request
 	params: { listingId: string }
 }) =>
-	createCommunityDetailOgImageHandler(getEnv(env))({
+	createCommunityDetailOgImageHandler(getStartRequestEnv())({
 		request,
 		params: { listingId: params.listingId },
 	})
@@ -402,7 +406,7 @@ export const orgAvatarHttp = ({
 	request: Request
 	params: { orgSlug: string; hash: string; ext: string }
 }) =>
-	createOrgAvatarHandler(getEnv(env))({
+	createOrgAvatarHandler(getStartRequestEnv())({
 		request,
 		params: {
 			orgSlug: params.orgSlug,
@@ -418,7 +422,7 @@ export const profileAvatarHttp = ({
 	request: Request
 	params: { username: string; hash: string; ext: string }
 }) =>
-	createProfileAvatarHandler(getEnv(env))({
+	createProfileAvatarHandler(getStartRequestEnv())({
 		request,
 		params: {
 			username: params.username,
@@ -434,7 +438,7 @@ export const profileOgImageHttp = ({
 	request: Request
 	params: { username: string }
 }) =>
-	createProfileOgImageHandler(getEnv(env))({
+	createProfileOgImageHandler(getStartRequestEnv())({
 		request,
 		params: { username: params.username },
 	})
@@ -449,17 +453,17 @@ export const webhookIngressHttp = ({
 		webhookName: string
 		urlSecret: string
 	}
-}) => createWebhookIngressHandler(getEnv(env))({ request })
+}) => createWebhookIngressHandler(getStartRequestEnv())({ request })
 
 export const stripeWebhookHttp = ({
 	request,
 }: {
 	request: Request
 	params: {}
-}) => createStripeWebhookHandler(getEnv(env))({ request })
+}) => createStripeWebhookHandler(getStartRequestEnv())({ request })
 
 export const authHttp = ({ request }: { request: Request; params: {} }) =>
-	createAuthHandler(getEnv(env))({ request })
+	createAuthHandler(getStartRequestEnv())({ request })
 
 export const authProviderCallbackHttp = ({
 	request,
@@ -468,10 +472,10 @@ export const authProviderCallbackHttp = ({
 	request: Request
 	params: { provider: string }
 }) =>
-	createAuthProviderCallbackHandler(getEnv(env))({
+	createAuthProviderCallbackHandler(getStartRequestEnv())({
 		request,
 		params: { provider: params.provider },
 	})
 
 export const sessionHttp = ({ request }: { request: Request; params: {} }) =>
-	createSessionHandler(getEnv(env))({ request })
+	createSessionHandler(getStartRequestEnv())({ request })

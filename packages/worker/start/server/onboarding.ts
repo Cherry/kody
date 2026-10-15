@@ -1,3 +1,4 @@
+import { getStartRequestEnv } from './request-env.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { pickOnboardingAgentChooser } from '#universal/onboarding-mcp-clients.ts'
 
@@ -5,21 +6,17 @@ import { pickOnboardingAgentChooser } from '#universal/onboarding-mcp-clients.ts
 export const loadOnboarding = createServerFn({ method: 'GET' }).handler(
 	async () => {
 		const [
-			{ env },
-			{ getEnv },
 			{ getRequest },
 			{ setAuthSessionSecret },
 			{ readOnboardingPageData },
 			{ getCanonicalAppBaseUrl },
 		] = await Promise.all([
-			import('cloudflare:workers'),
-			import('../../src/app/env.ts'),
 			import('@tanstack/react-start/server'),
 			import('../../src/app/auth-session.ts'),
 			import('../../src/app/handlers/onboarding.ts'),
 			import('../../src/app-base-url.ts'),
 		])
-		const bindings = getEnv(env)
+		const bindings = getStartRequestEnv()
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const request = getRequest()
 		const { payload } = await readOnboardingPageData(bindings, request)

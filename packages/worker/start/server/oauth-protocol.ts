@@ -1,7 +1,6 @@
-import { env } from 'cloudflare:workers'
 import * as Sentry from '@sentry/cloudflare'
 import { setResponseStatus } from '@tanstack/react-start/server'
-import { getEnv } from '../../src/app/env.ts'
+import { getStartRequestEnv } from './request-env.ts'
 import { verifyPublicFormProtection } from '../../src/app/public-form-protection.ts'
 import { discardUnreadRequestBody } from '../../src/request-body.ts'
 import {
@@ -20,7 +19,10 @@ export async function oauthAuthorizeDocument<T>({
 	next: () => T
 }) {
 	try {
-		const response = await tryHandleSilentOidcAuthorize(request, getEnv(env))
+		const response = await tryHandleSilentOidcAuthorize(
+			request,
+			getStartRequestEnv(),
+		)
 		return response ?? (await next())
 	} catch (error) {
 		Sentry.captureException(error)
@@ -29,7 +31,7 @@ export async function oauthAuthorizeDocument<T>({
 }
 
 export function oauthAuthorizePost({ request }: { request: Request }) {
-	return handleOAuthAuthorizePost(request, getEnv(env))
+	return handleOAuthAuthorizePost(request, getStartRequestEnv())
 }
 
 /** Explicit bindings preserve the provider-injected helpers at transport boundaries. */
