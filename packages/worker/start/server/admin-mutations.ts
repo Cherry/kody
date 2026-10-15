@@ -204,17 +204,13 @@ export const banAdminReportOwner = createServerFn({ method: 'POST' })
 		})
 	})
 export const deleteAdminSystemEmail = createServerFn({ method: 'POST' })
-	.inputValidator(
-		z.object({ messageId: z.string(), search: z.string().optional() }),
-	)
+	.inputValidator(z.object({ messageId: z.string() }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { deleteAdminSystemEmail } =
 			await import('../../src/admin/system-email-operations.ts')
 		return withWebsiteMutation({}, async ({ env, request }) => {
-			const url = new URL('/admin/system-email', request.url)
-			url.search = data.search ?? ''
-			return deleteAdminSystemEmail({ env, request, ...data, url })
+			return deleteAdminSystemEmail({ env, request, ...data })
 		})
 	})
 export const assignAdminUserRole = createServerFn({ method: 'POST' })

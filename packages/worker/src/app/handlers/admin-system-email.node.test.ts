@@ -175,7 +175,6 @@ function createHarness() {
 				return deleteAdminSystemEmail({
 					env,
 					request,
-					url: requestUrl,
 					messageId:
 						typeof input.body.message_id === 'string'
 							? input.body.message_id
@@ -250,18 +249,7 @@ test('admin system email API lists, gets, and deletes operator-owned mail only',
 		body: { action: 'delete', message_id: messageId },
 	})
 	expect(deleted.status).toBe(200)
-	const deletedBody = (await Promise.resolve(deleted.data)) as {
-		ok: boolean
-		total: number
-		selectedMessage: unknown
-		messages: Array<unknown>
-	}
-	expect(deletedBody).toMatchObject({
-		ok: true,
-		total: 0,
-		selectedMessage: null,
-		messages: [],
-	})
+	expect(deleted.data).toEqual({ ok: true, deletedMessageId: messageId })
 	expect(
 		sqlite
 			.prepare(`SELECT id FROM system_email_messages WHERE id = ?`)
@@ -294,4 +282,20 @@ test('admin system email API lists, gets, and deletes operator-owned mail only',
 			reason: `target_message_id=${messageId}`,
 		}),
 	)
+})
+
+test('committed system email deletion does not depend on reloading the inbox', async () => {
+	const { call, messageId } = createHarness()
+	const data = await import('#worker/admin/system-email-data.ts')
+	const read = vi
+		.spyOn(data, 'loadAdminSystemEmailData')
+		.mockRejectedValue(new Error('Inbox unavailable'))
+	try {
+		const deleted = await call({ body: { message_id: messageId } })
+		expect(deleted.status).toBe(200)
+		expect(deleted.data).toEqual({ ok: true, deletedMessageId: messageId })
+		expect(read).not.toHaveBeenCalled()
+	} finally {
+		read.mockRestore()
+	}
 })

@@ -13,12 +13,12 @@ import {
 	typography,
 } from '#universal/styles/tokens.ts'
 import { css } from '@emotion/react'
-import { type QueryKey } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
 import { Tab, TabList, TabPanel, Tabs } from '../components/tabs.tsx'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
@@ -59,24 +59,23 @@ function messageHref(messageId: string) {
 	return `/admin/system-email?messageId=${encodeURIComponent(messageId)}`
 }
 export function AdminSystemEmailPage({
-	queryKey,
 	payload: data,
 	currentHref,
 }: {
-	queryKey: QueryKey
 	payload: AdminSystemEmailLoaderData
 	currentHref: string
 }) {
 	const router = useRouter()
 	const captureSubmitter = useSubmitterScope()
-	const mutation = usePageResponseMutation<
-		AdminSystemEmailLoaderData,
-		{ messageId: string }
-	>(queryKey, 'loadAdminSystemEmail', (body, href) =>
-		deleteAdminSystemEmail({
-			data: { ...body, search: new URL(href, 'http://localhost').search },
-		}),
-	)
+	const invalidate = usePageInvalidation(['loadAdminSystemEmail'])
+	const mutation = useMutation({
+		gcTime: 0,
+		mutationFn: (input: { messageId: string }) =>
+			deleteAdminSystemEmail({ data: input }),
+		onMutate: () => invalidate,
+		// A lost reply can follow a committed deletion. Reconcile the submitting actor.
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 	const [armedId, setArmedId] = useState<string | null>(null)
 	const [message, setMessage] = useState<string | null>(null)
 	const pending = mutation.isPending
@@ -89,7 +88,7 @@ export function AdminSystemEmailPage({
 		const isCurrent = captureSubmitter()
 		setMessage(null)
 		try {
-			await mutation.submit({ messageId: id })
+			await mutation.mutateAsync({ messageId: id })
 			if (!isCurrent()) return
 			setArmedId(null)
 			await router.navigate({ href: '/admin/system-email' })

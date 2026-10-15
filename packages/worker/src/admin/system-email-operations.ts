@@ -4,7 +4,6 @@ import {
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
-import { loadAdminSystemEmailData } from '#worker/admin/system-email-data.ts'
 import { requireUserWithRole } from '#app/permissions-server.ts'
 import { deleteSystemEmailMessageById } from '#worker/email/system-email-graph-store.ts'
 
@@ -34,12 +33,10 @@ export async function auditSystemEmailAccess(input: {
 export async function deleteAdminSystemEmail({
 	env,
 	request,
-	url,
 	messageId: submittedMessageId,
 }: {
 	env: Env
 	request: Request
-	url: URL
 	messageId: string
 }) {
 	const actor = await requireUserWithRole(request, env, 'admin')
@@ -93,9 +90,5 @@ export async function deleteAdminSystemEmail({
 		throw error
 	}
 
-	const listUrl = new URL(url)
-	listUrl.searchParams.delete('messageId')
-	return adminOperationResult(
-		await loadAdminSystemEmailData(env, listUrl.toString()),
-	)
+	return { ok: true as const, deletedMessageId: messageId }
 }

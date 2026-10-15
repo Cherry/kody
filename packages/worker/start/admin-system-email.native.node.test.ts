@@ -43,12 +43,6 @@ const payload: AdminSystemEmailLoaderData = {
 test('selected system mail exposes the destructive action with message identity', async () => {
 	const html = await renderStartPage(
 		createElement(AdminSystemEmailPage, {
-			queryKey: [
-				'page',
-				null,
-				'loadAdminSystemEmail',
-				'/admin/system-email?messageId=message-1',
-			],
 			payload,
 			currentHref: '/admin/system-email?messageId=message-1',
 		}),
@@ -63,7 +57,6 @@ test('selected system mail exposes the destructive action with message identity'
 test('empty system inbox has no destructive message action', async () => {
 	const html = await renderStartPage(
 		createElement(AdminSystemEmailPage, {
-			queryKey: ['page', null, 'loadAdminSystemEmail', '/admin/system-email'],
 			payload: { ...payload, selectedMessage: null, messages: [], total: 0 },
 			currentHref: '/admin/system-email',
 		}),
