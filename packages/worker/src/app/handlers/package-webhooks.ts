@@ -191,12 +191,7 @@ async function changePackageWebhook(
 		)
 		audit('success')
 		const payload: PackageWebhooksActionPayload = {
-			...(await loadPackageWebhooksData({
-				env,
-				requestUrl: request.url,
-				user,
-				kodyId: packageKodyId,
-			})),
+			ok: true,
 			...(revealed ? { revealed } : {}),
 			...(approvalUrl ? { approvalUrl } : {}),
 		}

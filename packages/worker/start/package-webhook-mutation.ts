@@ -25,6 +25,7 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			webhookId: string
 			intent: WebhookIntent
 			queryKey: QueryKey
+			/** Related page resources only, never the package webhook read itself. */
 			invalidate: () => Promise<void>
 		}) => {
 			const operation = {
@@ -48,23 +49,35 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 		onMutate: async ({ queryKey }) => {
 			await queryClient.cancelQueries({ queryKey, exact: true })
 		},
-		onSuccess: async (accepted, input) => {
+		onSettled: async (_accepted, _error, input) => {
+			// A navigation can start its first read while this write is pending.
+			// Let that shared promise finish before starting a confirming read.
+			await Promise.allSettled(
+				queryClient
+					.getQueryCache()
+					.findAll({ queryKey: input.queryKey, exact: true })
+					.filter(
+						(query) =>
+							query.state.data === undefined &&
+							query.state.fetchStatus === 'fetching',
+					)
+					.map((query) => query.promise),
+			)
+
 			await queryClient.cancelQueries({
 				queryKey: input.queryKey,
 				exact: true,
 				predicate: (query) => query.state.data !== undefined,
 			})
-			// Never place revealed credential URLs in the shared query cache.
-			const { revealed: _revealed, ...safePayload } = accepted
-			// An uncached navigation may be awaiting this query's barrier-held fetch.
-			// Seeding it here would let invalidation cancel that original promise.
-			queryClient.setQueryData(input.queryKey, (existing: unknown) =>
-				existing === undefined ? undefined : safePayload,
-			)
-			void input.invalidate()
-		},
-		onError: (_error, { queryKey }) => {
-			void queryClient.invalidateQueries({ queryKey, exact: true })
+			// Reconcile the submitted package even if its committed response was lost.
+			// One-time reveal and approval URLs never enter the read cache.
+			await Promise.all([
+				queryClient.invalidateQueries({
+					queryKey: input.queryKey,
+					exact: true,
+				}),
+				input.invalidate(),
+			])
 		},
 	})
 }

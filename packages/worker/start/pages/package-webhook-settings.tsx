@@ -2,7 +2,7 @@
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { packageWebhookMutationOptions } from '../package-webhook-mutation.ts'
 import { orgResourcePath } from '#universal/org-pages.ts'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
 import { packageWebhooksQuery } from '../package-webhooks-query.ts'
@@ -29,6 +29,7 @@ export function PackageWebhookSettings({
 	kodyId: string
 }) {
 	const capture = useSubmitterScope()
+	const submissionId = useRef(0)
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
@@ -52,6 +53,7 @@ export function PackageWebhookSettings({
 		intent: WebhookIntent,
 	) {
 		if (mutating) return
+		const currentSubmission = ++submissionId.current
 		const isCurrent = capture()
 		setMessage(null)
 		try {
@@ -64,7 +66,7 @@ export function PackageWebhookSettings({
 				queryKey: query.queryKey,
 				invalidate: invalidatePages,
 			})
-			mutation.reset()
+			if (submissionId.current === currentSubmission) mutation.reset()
 			if (!isCurrent()) return
 			setConfirmed(null)
 			setRevealedUrls((previous) => {

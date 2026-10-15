@@ -182,7 +182,6 @@ it.each([
 	['loadConnectionsPage', 'connectedAgents'],
 	['loadConnectionsPage', 'connectionProfiles'],
 	['loadConnectionUsagePage', 'connectionProfiles'],
-	['loadPackageWebhooks', 'packageWebhooks'],
 	['loadIntegrationsPage', 'integrations'],
 	['loadAccountPage', 'accountConnections'],
 ])(
@@ -271,13 +270,13 @@ it.each([
 	},
 )
 
-it('a pending webhook write only blocks reads of its package', async () => {
+it('a pending collaborator write only blocks reads of its package', async () => {
 	const client = new QueryClient()
 	let finish!: () => void
 	const write = client
 		.getMutationCache()
 		.build(client, {
-			mutationKey: ['packageWebhooks', 'alice', 'owner', 'one'],
+			mutationKey: ['packageCollaborators', 'alice', 'owner', 'one'],
 			mutationFn: () =>
 				new Promise<void>((resolve) => {
 					finish = resolve
@@ -290,16 +289,22 @@ it('a pending webhook write only blocks reads of its package', async () => {
 	const own = waitForPageMutations(
 		client,
 		'alice',
-		'loadPackageWebhooks',
+		'loadPackageCollaborators',
 		signal,
 		{ username: 'owner', kodyId: 'one' },
 	).then(() => {
 		ready = true
 	})
-	await waitForPageMutations(client, 'alice', 'loadPackageWebhooks', signal, {
-		username: 'owner',
-		kodyId: 'two',
-	})
+	await waitForPageMutations(
+		client,
+		'alice',
+		'loadPackageCollaborators',
+		signal,
+		{
+			username: 'owner',
+			kodyId: 'two',
+		},
+	)
 	expect(ready).toBe(false)
 	finish()
 	await write

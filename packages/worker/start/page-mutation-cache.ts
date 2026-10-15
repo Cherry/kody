@@ -43,7 +43,6 @@ export function hasPendingPageMutation(
 		loadConnectionsPage: ['connectedAgents', 'connectionProfiles'],
 		loadConnectionUsagePage: ['connectedAgents', 'connectionProfiles'],
 		loadIntegrationsPage: ['integrations'],
-		loadPackageWebhooks: ['packageWebhooks'],
 		loadPackageCollaborators: ['packageCollaborators'],
 	}
 	return (
@@ -57,8 +56,7 @@ export function hasPendingPageMutation(
 							return true
 						const key = options.mutationKey
 						if (
-							(mutation === 'packageWebhooks' ||
-								mutation === 'packageCollaborators') &&
+							mutation === 'packageCollaborators' &&
 							input &&
 							typeof input === 'object' &&
 							'username' in input &&

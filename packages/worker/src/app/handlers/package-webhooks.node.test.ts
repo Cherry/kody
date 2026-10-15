@@ -1,3 +1,4 @@
+import * as webhookReads from '#app/package-webhooks-data.ts'
 import { ownerIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, test, vi } from 'vitest'
@@ -240,10 +241,12 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 
 	const minted = await act('mint')
 	expect(minted.status).toBe(200)
+	expect(minted.body).not.toHaveProperty('webhooks')
+	expect(minted.body).not.toHaveProperty('username')
 	expect(minted.body.revealed?.id).toBe('sentry-bridge/launcher')
 	expect(minted.body.revealed?.handle.startsWith('whh_')).toBe(true)
 	// The URL comes from the request origin so previews show their own host,
-	// and the response reveals it exactly once alongside the refreshed list.
+	// and the response reveals it exactly once without rebuilding the list.
 	expect(minted.body.revealed?.url).toMatch(
 		/^https:\/\/kody\.example\/@owner\/webhooks\/sentry-bridge\/launcher\/[A-Za-z0-9_-]+$/,
 	)
@@ -254,7 +257,9 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 	const approvalUrl =
 		'https://kody.example/@owner/sentry-bridge/approve-credentials?enable=webhook%3Alauncher'
 	expect(minted.body.approvalUrl).toBe(approvalUrl)
-	expect(launcherOf(minted.body)).toMatchObject({
+	expect(
+		launcherOf((await get()).data as PackageWebhooksLoaderData),
+	).toMatchObject({
 		minted: true,
 		enabled: true,
 		approved: false,
@@ -262,7 +267,7 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 		urlRecoverable: true,
 		handle: mintedHandle,
 	})
-	expect(JSON.stringify(minted.body.webhooks)).not.toContain(
+	expect(JSON.stringify((await get()).data)).not.toContain(
 		urlSecretOf(mintedUrl),
 	)
 	expect(logAuditEventSpy).toHaveBeenCalledWith(
@@ -299,13 +304,17 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 	const disabled = await act('disable')
 	expect(disabled.status).toBe(200)
 	expect(disabled.body.revealed).toBeUndefined()
-	expect(launcherOf(disabled.body).enabled).toBe(false)
+	expect(
+		launcherOf((await get()).data as PackageWebhooksLoaderData).enabled,
+	).toBe(false)
 
 	const rotated = await act('rotate')
 	expect(rotated.status).toBe(200)
 	expect(rotated.body.revealed?.url).not.toBe(mintedUrl)
 	expect(rotated.body.revealed?.handle).toBe(mintedHandle)
-	const rotatedLauncher = launcherOf(rotated.body)
+	const rotatedLauncher = launcherOf(
+		(await get()).data as PackageWebhooksLoaderData,
+	)
 	// Rotate keeps the disabled state; only Enable flips it back.
 	expect(rotatedLauncher.enabled).toBe(false)
 	expect(rotatedLauncher.previousUrlActiveUntil).toEqual(expect.any(String))
@@ -316,7 +325,9 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 
 	const enabled = await act('enable')
 	expect(enabled.status).toBe(200)
-	expect(launcherOf(enabled.body).enabled).toBe(true)
+	expect(
+		launcherOf((await get()).data as PackageWebhooksLoaderData).enabled,
+	).toBe(true)
 
 	const whereLauncher = `WHERE user_id = ? AND package_id = 'pkg-1' AND webhook_name = 'launcher'`
 	const stored = await db
@@ -434,4 +445,28 @@ test('native webhook reads share API data and owner-only denials', async () => {
 		status: 401,
 		error: 'Unauthorized.',
 	})
+})
+
+test('committed webhook mint succeeds without rebuilding a failing read model', async () => {
+	const { act } = await setup()
+	const read = vi
+		.spyOn(webhookReads, 'loadPackageWebhooksData')
+		.mockRejectedValue(new Error('read model unavailable'))
+	try {
+		const result = await act('mint')
+		expect(result.status).toBe(200)
+		expect(result.body).toMatchObject({
+			ok: true,
+			revealed: { id: 'sentry-bridge/launcher' },
+		})
+		expect(result.body).not.toHaveProperty('webhooks')
+		expect(read).not.toHaveBeenCalled()
+		const audits = logAuditEventSpy.mock.calls
+			.map(([event]) => event)
+			.filter((event) => event.action === 'webhook_url_mint')
+		expect(audits).toHaveLength(1)
+		expect(audits[0]?.result).toBe('success')
+	} finally {
+		read.mockRestore()
+	}
 })

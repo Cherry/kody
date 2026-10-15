@@ -1,5 +1,9 @@
 import { jsx } from 'react/jsx-runtime'
-import { QueryClient, MutationObserver } from '@tanstack/react-query'
+import {
+	QueryClient,
+	QueryObserver,
+	MutationObserver,
+} from '@tanstack/react-query'
 import { expect, test, vi } from 'vitest'
 import { renderStartPage } from './test-support/render-start-page.ts'
 import { renderPackageWebhookCard as PackageWebhookCard } from './pages/package-webhook-card.tsx'
@@ -120,7 +124,7 @@ test('revealed credential is rendered only while supplied to the local card', as
 	expect(await renderCard(run)).not.toContain(secretUrl)
 })
 
-test('accepted webhook data strips revealed secrets from Query and resets transient mutation state', async () => {
+test('accepted webhook outcome stays out of Query and resets transient mutation state', async () => {
 	const client = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	})
@@ -136,11 +140,10 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 		'loadPackageWebhooks',
 		{ username: 'jane', kodyId: 'other' },
 	] as const
-	const payload = listPayload([run])
 	client.setQueryData(key, listPayload([listCommands]))
 	client.setQueryData(other, { marker: 'other' })
 	native.revealPackageWebhook.mockResolvedValueOnce({
-		...payload,
+		ok: true,
 		revealed: { id: run.id, url: secretUrl },
 	})
 	const observer = new MutationObserver(
@@ -167,7 +170,8 @@ test('accepted webhook data strips revealed secrets from Query and resets transi
 				webhookName: run.name,
 			},
 		})
-		expect(client.getQueryData(key)).toEqual(payload)
+		expect(client.getQueryData(key)).toEqual(listPayload([listCommands]))
+		expect(client.getQueryState(key)?.isInvalidated).toBe(true)
 		expect(
 			JSON.stringify(
 				client
@@ -261,7 +265,7 @@ test.each([{ webhooks: [] }, { webhooks: [run] }])(
 	},
 )
 
-test('webhook settlement keeps an uncached barrier-held navigation alive', async () => {
+test('webhook settlement keeps an uncached navigation alive', async () => {
 	const client = new QueryClient()
 	const payload = listPayload([run])
 	let finish!: (value: typeof payload) => void
@@ -289,9 +293,7 @@ test('webhook settlement keeps an uncached barrier-held navigation alive', async
 		webhookId: run.id,
 		intent: 'reveal',
 		queryKey: query.queryKey,
-		invalidate: async () => {
-			await client.invalidateQueries({ queryKey: query.queryKey, exact: true })
-		},
+		invalidate: async () => {},
 	})
 	await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
 	const navigation = ensurePageQuery(client, query, false)
@@ -300,3 +302,117 @@ test('webhook settlement keeps an uncached barrier-held navigation alive', async
 	await expect(navigation).resolves.toEqual(payload)
 	client.clear()
 })
+
+test('webhook mutation waits for authoritative scoped read without caching its outcome', async () => {
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	})
+	const before = listPayload([run])
+	const after = listPayload([{ ...run, enabled: false }])
+	let finish!: (data: typeof after) => void
+	const query = createPageQuery(
+		'loadPackageWebhooks',
+		async (_input: {
+			data: { username: string; kodyId: string }
+			signal: AbortSignal
+		}) =>
+			new Promise<typeof after>((resolve) => {
+				finish = resolve
+			}),
+	)('actor', { username: 'jane', kodyId: 'raycast' })
+	client.setQueryData(query.queryKey, before)
+	const observer = new QueryObserver(client, { ...query, staleTime: Infinity })
+	const unsubscribe = observer.subscribe(() => {})
+	native.rotatePackageWebhook.mockResolvedValueOnce({ ok: true })
+	const mutation = client.getMutationCache().build(client, {
+		...packageWebhookMutationOptions(client),
+		mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
+	})
+	const pending = mutation.execute({
+		username: 'jane',
+		kodyId: 'raycast',
+		webhookName: run.name,
+		webhookId: run.id,
+		intent: 'rotate',
+		queryKey: query.queryKey,
+		invalidate: async () => {},
+	})
+	await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+	expect(mutation.state.status).toBe('pending')
+	expect(client.getQueryData(query.queryKey)).toEqual(before)
+	finish(after)
+	await pending
+	expect(mutation.state.status).toBe('success')
+	expect(client.getQueryData(query.queryKey)).toEqual(after)
+	unsubscribe()
+	client.clear()
+})
+
+test.each(['success', 'lost response'])(
+	'uncached webhook navigation confirms after its older read: %s',
+	async (outcome) => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		})
+		const before = listPayload([run])
+		const after = listPayload([{ ...run, enabled: false }])
+		let finishRead!: (data: typeof before) => void
+		let finishWrite!: () => void
+		let failWrite!: (error: Error) => void
+		native.rotatePackageWebhook.mockImplementationOnce(
+			() =>
+				new Promise((resolve, reject) => {
+					finishWrite = () => resolve({ ok: true })
+					failWrite = reject
+				}),
+		)
+		const read = vi.fn<() => Promise<typeof before>>()
+		read.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishRead = resolve
+				}),
+		)
+		read.mockResolvedValue(after)
+		const query = createPageQuery(
+			'loadPackageWebhooks',
+			async (_input: {
+				data: { username: string; kodyId: string }
+				signal: AbortSignal
+			}) => read(),
+		)('actor', { username: 'jane', kodyId: 'raycast' })
+		const mutation = client
+			.getMutationCache()
+			.build(client, {
+				...packageWebhookMutationOptions(client),
+				mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
+			})
+		const write = mutation
+			.execute({
+				username: 'jane',
+				kodyId: 'raycast',
+				webhookName: run.name,
+				webhookId: run.id,
+				intent: 'rotate',
+				queryKey: query.queryKey,
+				invalidate: async () => {},
+			})
+			.catch(() => undefined)
+		await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'))
+		const navigation = ensurePageQuery(client, query, false)
+		const observer = new QueryObserver(client, query)
+		const stop = observer.subscribe(() => {})
+		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+		if (outcome === 'success') finishWrite()
+		else failWrite(new Error('Lost response'))
+		await Promise.resolve()
+		finishRead(before)
+		await expect(navigation).resolves.toEqual(before)
+		await write
+		expect(read).toHaveBeenCalledTimes(2)
+		expect(client.getQueryData(query.queryKey)).toEqual(after)
+		expect(client.isMutating()).toBe(0)
+		stop()
+		client.clear()
+	},
+)

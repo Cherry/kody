@@ -1794,7 +1794,8 @@ export type PackageWebhookRevealedUrl = {
 	url: string
 }
 
-export type PackageWebhooksActionPayload = PackageWebhooksLoaderData & {
+export type PackageWebhooksActionPayload = {
+	ok: true
 	revealed?: PackageWebhookRevealedUrl
 	/**
 	 * Set by mint / rotate while the webhook is not on for anyone: minting
