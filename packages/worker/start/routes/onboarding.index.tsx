@@ -12,6 +12,7 @@ export const Route = createFileRoute('/onboarding/')({
 			onboardingQuery(context.actorKey, undefined),
 			location,
 			preload,
+			'index',
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 })

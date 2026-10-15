@@ -26,6 +26,7 @@ export const Route = createFileRoute('/onboarding/step-1_/$agent')({
 			onboardingQuery(context.actorKey, undefined),
 			location,
 			preload,
+			context.onboardingSelection,
 		),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 })

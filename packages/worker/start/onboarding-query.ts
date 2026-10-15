@@ -6,9 +6,8 @@ import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
 	onboardingIndexRedirectHref,
-	onboardingStepPaths,
 	onboardingWizardStepHref,
-	parseOnboardingPathname,
+	type OnboardingLocation,
 } from '#universal/onboarding-process.ts'
 import {
 	absolutizeDocumentHead,
@@ -33,6 +32,7 @@ export async function loadOnboardingRoute(
 	options: ReturnType<typeof onboardingQuery>,
 	location: { pathname: string; searchStr: string },
 	preload: boolean,
+	selection: OnboardingLocation | 'index',
 ) {
 	const { payload, canonicalBaseUrl } = await ensurePageQuery(
 		queryClient,
@@ -47,14 +47,10 @@ export async function loadOnboardingRoute(
 		throw redirect({
 			href: `/pending-verification${redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : ''}`,
 		})
-	if (
-		location.pathname === onboardingStepPaths.index ||
-		location.pathname === `${onboardingStepPaths.index}/`
-	)
+	if (selection === 'index')
 		throw redirect({ href: onboardingIndexRedirectHref(search, payload) })
-	const step = parseOnboardingPathname(location.pathname)
-	if (step && !step.valid)
-		throw redirect({ href: onboardingWizardStepHref(step.step, search) })
+	if (!selection.valid)
+		throw redirect({ href: onboardingWizardStepHref(selection.step, search) })
 	return {
 		head: absolutizeDocumentHead(
 			resolveDocumentHead(

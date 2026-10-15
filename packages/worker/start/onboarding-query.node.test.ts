@@ -57,6 +57,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 			options,
 			{ pathname: '/onboarding/step-1', searchStr: '' },
 			false,
+			{ step: 1, agent: null, valid: true },
 		)
 		expect(first.head.title).toBe('Get started')
 		await loadOnboardingRoute(
@@ -64,6 +65,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 			options,
 			{ pathname: '/onboarding/step-2', searchStr: '?redirectTo=%2Faccount' },
 			false,
+			{ step: 2, agent: null, valid: true },
 		)
 		expect(read).toHaveBeenCalledTimes(1)
 		read.mockResolvedValue({
@@ -77,6 +79,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 			options,
 			{ pathname: '/onboarding/step-1', searchStr: '' },
 			false,
+			{ step: 1, agent: null, valid: true },
 		)
 		expect(read).toHaveBeenCalledTimes(2)
 		expect(seen).toContain(false)
@@ -90,8 +93,26 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 				options,
 				{ pathname: '/onboarding', searchStr: '' },
 				false,
+				'index',
 			),
 		).rejects.toMatchObject({ options: { href: '/onboarding/step-2' } })
+		// Route selection owns redirect intent even if presentation location differs.
+		for (const step of [1, 2, 3] as const) {
+			await expect(
+				loadOnboardingRoute(
+					client,
+					options,
+					{
+						pathname: '/onboarding/step-1',
+						searchStr: '?redirectTo=%2Faccount',
+					},
+					false,
+					{ step, agent: null, valid: false },
+				),
+			).rejects.toMatchObject({
+				options: { href: `/onboarding/step-${step}?redirectTo=%2Faccount` },
+			})
+		}
 		read.mockRejectedValueOnce(new Error('Temporary failure'))
 		await observer.refetch()
 		expect(observer.getCurrentResult().data?.payload.hasMcpClient).toBe(true)
@@ -116,6 +137,7 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 					options,
 					{ pathname, searchStr: '?redirectTo=%2Faccount' },
 					false,
+					'index',
 				),
 			).rejects.toMatchObject({
 				options: { href: '/pending-verification?redirectTo=%2Faccount' },
