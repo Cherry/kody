@@ -28,6 +28,7 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import {
 	colors,
+	mq,
 	radius,
 	spacing,
 	typography,
@@ -281,6 +282,15 @@ export function AccountPackageApproveCapabilitiesRoute({
 			if (isCurrent()) setApprovingCapabilities(false)
 		}
 	}
+	const restingApproveLabel = goPublicRequestId
+		? 'Approve and make internet-visible'
+		: payload?.package.isInternetVisible
+			? 'Re-approve capability set'
+			: 'Approve capability set'
+	const approveActionLabel = approvingCapabilities
+		? 'Approving…'
+		: restingApproveLabel
+
 	return (
 		<AccountManagementShell
 			currentHref={currentHref}
@@ -505,37 +515,37 @@ export function AccountPackageApproveCapabilitiesRoute({
 							records this capability set and turns on internet-visible serving.
 						</p>
 					) : null}
-					<div
-						css={{
-							display: 'flex',
-							flexWrap: 'wrap',
-							gap: spacing.sm,
-							alignItems: 'center',
-						}}
-					>
+					<div css={approveActionRowCss}>
 						{pageCopy.mentionInternet ? (
 							<button
 								type="button"
 								disabled={busy || !payload.publishedCommit}
 								data-testid="package-approve-capabilities"
-								css={getPrimaryButtonCss()}
+								css={[getPrimaryButtonCss(), approveActionControlCss]}
 								onClick={() => void approveCapabilities()}
 							>
-								{approvingCapabilities
-									? 'Approving…'
-									: goPublicRequestId
-										? 'Approve and make internet-visible'
-										: payload.package.isInternetVisible
-											? 'Re-approve capability set'
-											: 'Approve capability set'}
+								{equalActionLabel(
+									approveActionLabel,
+									restingApproveLabel,
+									backToSettingsLabel,
+								)}
 							</button>
 						) : null}
 						<SiteLink
 							href={payload.settingsHref}
-							css={getGhostButtonCss()}
+							css={[
+								getGhostButtonCss(),
+								pageCopy.mentionInternet && approveActionControlCss,
+							]}
 							data-testid="package-approve-capabilities-back"
 						>
-							Back to package settings
+							{pageCopy.mentionInternet
+								? equalActionLabel(
+										backToSettingsLabel,
+										restingApproveLabel,
+										backToSettingsLabel,
+									)
+								: backToSettingsLabel}
 						</SiteLink>
 					</div>
 					<details
@@ -594,4 +604,54 @@ const capabilityRowCss: CSSObject = {
 	border: `1px solid ${colors.border}`,
 	backgroundColor: colors.surface,
 	minWidth: 0,
+}
+
+const backToSettingsLabel = 'Back to package settings'
+
+function equalActionLabel(visible: string, ...sizers: Array<string>) {
+	return (
+		<>
+			<span css={approveActionFaceCss}>{visible}</span>
+			{sizers.map((sizer) => (
+				<span key={sizer} aria-hidden="true" css={approveActionSizerCss}>
+					{sizer}
+				</span>
+			))}
+		</>
+	)
+}
+
+const approveActionRowCss = {
+	display: 'flex',
+	flexWrap: 'wrap' as const,
+	gap: spacing.sm,
+	[mq.mobile]: {
+		flexDirection: 'column' as const,
+	},
+}
+
+const approveActionControlCss = {
+	display: 'inline-grid',
+	alignItems: 'center',
+	justifyItems: 'center',
+	maxWidth: '100%',
+	padding: `${spacing.sm} ${spacing.md}`,
+	appearance: 'none' as const,
+	fontFamily: typography.fontFamily,
+	fontSize: typography.fontSize.base,
+	fontWeight: typography.fontWeight.semibold,
+	lineHeight: 1.25,
+	whiteSpace: 'normal' as const,
+	[mq.mobile]: {
+		width: '100%',
+	},
+}
+
+const approveActionFaceCss = {
+	gridArea: '1 / 1',
+}
+
+const approveActionSizerCss = {
+	gridArea: '1 / 1',
+	visibility: 'hidden' as const,
 }
