@@ -20,6 +20,7 @@ function SecretsPage() {
 	const { pageLocation: location } = Route.useRouteContext()
 	return (
 		<AccountSecretsPage
+			packageApproval={true}
 			payload={payload}
 			currentHref={location.href}
 			selection={{ selectedId: null, isCreating: false }}

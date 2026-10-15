@@ -32,7 +32,6 @@ import {
 	AccountPageHeader,
 } from './account-management-components.tsx'
 import {
-	isPackageApprovalHref,
 	isPackageSecretApprovalAlreadyGranted,
 	renderAlreadyAddedNotice,
 	renderPackageSecretApprovalPage,
@@ -81,10 +80,12 @@ export function AccountSecretsPage({
 	payload,
 	currentHref,
 	selection,
+	packageApproval,
 }: {
 	payload: AccountSecretsLoaderData
 	currentHref: string
 	selection: { selectedId: string | null; isCreating: boolean }
+	packageApproval: boolean
 }) {
 	const packageOptions = payload.packageOptions
 	const packagesById = new Map(
@@ -572,7 +573,7 @@ export function AccountSecretsPage({
 		setCompletedPackageApproval(null)
 	}
 
-	if (isPackageApprovalHref(currentHref)) {
+	if (packageApproval) {
 		const approvalError = payload.approvalError ?? null
 		const pageApprovalError = approvalError
 		const alreadyGranted =

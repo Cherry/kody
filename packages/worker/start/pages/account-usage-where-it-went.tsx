@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { whereItWentSectionId } from '#universal/org-pages.ts'
+import { SiteLink } from '../components/site-link.tsx'
 import { useState } from 'react'
 import { AreaChart } from '../charts/area-chart.tsx'
 import { chartColor, formatIntegerNumber } from '#client/charts/chart-theme.ts'
@@ -149,9 +150,9 @@ export function WhereItWentPanel({
 											{renderMeterSplit(row)}
 											{row.href ? (
 												<p css={{ margin: 0 }}>
-													<a href={row.href} css={primaryLinkCss}>
+													<SiteLink href={row.href} css={primaryLinkCss}>
 														Open package
-													</a>
+													</SiteLink>
 												</p>
 											) : null}
 										</>

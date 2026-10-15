@@ -2,7 +2,6 @@
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { type AccountSecretsLoaderData } from '#universal/loader-data.ts'
-import { parseAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
 import { type CSSObject } from '@emotion/react'
 import { SiteLink } from '../components/site-link.tsx'
 import {
@@ -14,7 +13,7 @@ import {
 	approvalRequestedHosts,
 	getScopeLabel,
 } from '#client/routes/account-approval-shared.ts'
-import { accountAliasPath, relocateAccountHref } from '#universal/org-pages.ts'
+import { relocateAccountHref } from '#universal/org-pages.ts'
 import {
 	colors,
 	radius,
@@ -336,15 +335,6 @@ const packageApprovalSecondaryButtonCss = getSecondaryButtonCss({
 	size: 'lg',
 	weight: 'semibold',
 })
-
-export function isPackageApprovalHref(href: string) {
-	const url = new URL(href, 'http://localhost')
-	if (accountAliasPath(url.pathname) === '/account/secrets/approve') return true
-	if (!url.searchParams.get('package_id')?.trim()) return false
-	return (
-		parseAccountSecretPath(accountAliasPath(url.pathname))?.scope === 'user'
-	)
-}
 
 export function isPackageSecretApprovalAlreadyGranted(input: {
 	secrets: AccountSecretsLoaderData['secrets']

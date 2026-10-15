@@ -34,6 +34,7 @@ function SecretsPage() {
 	const { pageLocation: location, pageQueryInput } = Route.useRouteContext()
 	return (
 		<AccountSecretsPage
+			packageApproval={Boolean(pageQueryInput.approval.packageId?.trim())}
 			payload={payload}
 			currentHref={location.href}
 			selection={{

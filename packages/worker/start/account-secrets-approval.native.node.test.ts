@@ -1,6 +1,5 @@
 import { expect, test } from 'vitest'
 import {
-	isPackageApprovalHref,
 	isPackageSecretApprovalAlreadyGranted,
 	readPackageSecretApprovalView,
 } from './pages/account-secrets-approval.tsx'
@@ -32,33 +31,7 @@ const approval = {
 	currentAllowedPackages: [],
 }
 
-test('package secret approval hrefs and already-granted checks match host-approval spirit', () => {
-	const hrefs: Array<[string, boolean]> = [
-		['/account/secrets/approve', true],
-		[
-			'/account/secrets/approve?package_id=pkg-notes&names=openai-api-key',
-			true,
-		],
-		[
-			'/account/secrets/user/openai-api-key?package_id=pkg-notes&package=notes',
-			true,
-		],
-		['/account/secrets/user/openai-api-key', false],
-		['/account/secrets', false],
-		[
-			'/account/secrets/new?package_id=pkg-notes&package=notes&name=openai-api-key',
-			false,
-		],
-		['/account/secrets?package_id=pkg-notes', false],
-		[
-			'/account/secrets/package/pkg-notes/signingSecret?package_id=pkg-notes',
-			false,
-		],
-	]
-	expect(
-		hrefs.filter(([href, want]) => isPackageApprovalHref(href) !== want),
-	).toEqual([])
-
+test('package secret already-granted checks match host-approval spirit', () => {
 	const granted = (
 		secrets: Array<typeof secret>,
 		names: Array<string> = approval.names,

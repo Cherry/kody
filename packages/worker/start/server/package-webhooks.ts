@@ -1,3 +1,4 @@
+import { packageWebhookApprovalHref } from '../package-webhook-approval.ts'
 import { packageWebhookInput } from '#universal/package-access-mutations.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { notFound, redirect } from '@tanstack/react-router'
@@ -35,7 +36,20 @@ export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 
 		if (result.status === 401) throw redirect({ href: '/login' })
 		if (result.status === 404) throw notFound()
-		return result.data
+		if (!result.data.ok) return result.data
+		const payload = result.data
+		return {
+			...result.data,
+			webhooks: result.data.webhooks.map((webhook) => ({
+				...webhook,
+				approvalUrl: packageWebhookApprovalHref({
+					username: payload.username,
+					kodyId: payload.kodyId,
+					webhookName: webhook.name,
+					approvalUrl: webhook.approvalUrl,
+				}),
+			})),
+		}
 	})
 
 export const mintPackageWebhook = createServerFn({ method: 'POST' })

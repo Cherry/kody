@@ -268,14 +268,14 @@ export function renderPackageWebhookCard(input: {
 				>
 					{!webhook.approved ? (
 						webhook.approvalUrl ? (
-							<a
+							<SiteLink
 								href={webhook.approvalUrl}
 								aria-label={`Approve ${webhookLabel}`}
 								data-testid="package-webhook-approve"
 								css={primaryButtonCss}
 							>
 								Approve
-							</a>
+							</SiteLink>
 						) : (
 							<span css={{ color: colors.textMuted }}>
 								Approve it from this package's Credentials page.

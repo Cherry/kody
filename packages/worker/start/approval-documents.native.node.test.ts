@@ -52,6 +52,7 @@ async function renderNative(
 				})
 			: loaderData.accountSecrets
 				? createElement(AccountSecretsPage, {
+						packageApproval: false,
 						selection: { selectedId: null, isCreating: false },
 						payload: loaderData.accountSecrets,
 						currentHref: href,
