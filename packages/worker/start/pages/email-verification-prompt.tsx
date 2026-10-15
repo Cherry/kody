@@ -21,7 +21,7 @@ export { buildPendingVerificationPath } from '#client/routes/pending-verificatio
 
 export type ResendVerificationResult =
 	| { ok: true; message: string }
-	| { ok: false; message: string; unauthorized?: boolean }
+	| { ok: false; message: string }
 
 export async function requestResendVerification(
 	redirectTo?: string | null,

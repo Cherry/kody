@@ -188,10 +188,6 @@ export function AccountEmailPage({
 		try {
 			const result = await resendMutation.mutateAsync()
 			if (!isCurrentSubmitter()) return
-			if (!result.ok && result.unauthorized) {
-				window.location.assign('/login')
-				return
-			}
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
 			if (result.ok) {

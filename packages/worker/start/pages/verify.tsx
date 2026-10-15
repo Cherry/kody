@@ -4,6 +4,7 @@ import {
 	resetTurnstileWidgets,
 	turnstileWidgetClassName,
 } from '#client/public-form-protection.ts'
+import { useServerFn } from '@tanstack/react-start'
 import { verifyWebsiteTwoFactor } from '#start/server/auth-mutations'
 import {
 	normalizeRedirectTo,
@@ -36,6 +37,7 @@ function buildLoginHref(redirectTo: string | null) {
 }
 
 export function VerifyRoute() {
+	const verifyTwoFactor = useServerFn(verifyWebsiteTwoFactor)
 	const hydrated = useHydrated()
 	const [status, setStatus] = useState<'idle' | 'submitting'>('idle')
 	const [message, setMessage] = useState<string | null>(null)
@@ -64,9 +66,10 @@ export function VerifyRoute() {
 		setMessage(null)
 
 		try {
-			const payload = await verifyWebsiteTwoFactor({
+			const payload = await verifyTwoFactor({
 				data: { code, ...protection },
 			})
+			if (!payload) return
 			if (!payload.successful || !payload.ok) {
 				if (payload?.code === 'expired') {
 					window.location.assign(buildLoginHref(getRedirectTo()))

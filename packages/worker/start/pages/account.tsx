@@ -254,10 +254,6 @@ export function AccountPage({
 		try {
 			const result = await resendMutation.mutateAsync()
 			if (!isCurrent()) return
-			if (!result.ok && result.unauthorized) {
-				window.location.assign('/login')
-				return
-			}
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
 		} catch {

@@ -19,6 +19,7 @@ async function rejectedCodeFor(secret: string) {
 
 test('two-factor lifecycle rejects invalid codes and recovers on enable, login, and disable', async ({
 	page,
+	browser,
 	seedE2eUser,
 	login,
 }) => {
@@ -102,6 +103,21 @@ test('two-factor lifecycle rejects invalid codes and recovers on enable, login, 
 	await expect(
 		page.getByRole('heading', { name: 'Authorization resumed' }),
 	).toHaveCount(0)
+	// Keep a pending verification document while another session finishes login.
+	const staleContext = await browser.newContext({
+		storageState: await page.context().storageState(),
+	})
+	const staleVerify = await staleContext.newPage()
+	await staleVerify.goto(
+		new URL('/verify?redirectTo=%2Faccount', page.url()).href,
+	)
+	await waitForClientHydration(staleVerify)
+	await staleVerify
+		.getByLabel('Verification code')
+		.fill(await currentCodeFor(secret))
+	await staleVerify.evaluate(() => {
+		document.documentElement.dataset.verificationDocument = 'pending'
+	})
 	await page.getByLabel('Verification code').fill(await currentCodeFor(secret))
 	await page.getByRole('button', { name: 'Verify' }).click()
 	await expect(
@@ -112,6 +128,28 @@ test('two-factor lifecycle rejects invalid codes and recovers on enable, login, 
 	expect(resumed.searchParams.get('prompt')).toBe('consent')
 	expect(resumed.searchParams.get('state')).toBe('state-kept')
 	expect(resumed.searchParams.get('client_id')).toBe('redirect-audit')
+	try {
+		// Install the real successful login cookies without activating/reloading
+		// the old document, so the submit itself must handle the identity redirect.
+		await staleContext.clearCookies()
+		await staleContext.addCookies(await page.context().cookies())
+		await staleVerify
+			.getByRole('button', { name: 'Verify' })
+			.evaluate((button: HTMLButtonElement) => button.click())
+		await expect(staleVerify).toHaveURL(/\/account$/)
+		await expect(staleVerify.getByText(`Email: ${user.email}`)).toBeVisible()
+		await expect(staleVerify.locator('html')).not.toHaveAttribute(
+			'data-verification-document',
+			'pending',
+		)
+		await expect(
+			staleVerify.getByText('Network error. Please try again.', {
+				exact: true,
+			}),
+		).toHaveCount(0)
+	} finally {
+		await staleContext.close()
+	}
 	await page.unroute('**/oauth/authorize?**')
 	await page.goto('/account')
 	await expect(page.getByText(`Email: ${user.email}`)).toBeVisible()

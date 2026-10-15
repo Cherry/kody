@@ -93,15 +93,6 @@ export function PendingVerificationPage({
 			const result = await requestResendVerification(redirectTo)
 			if (!result) return
 			if (result.ok) void invalidatePages()
-			if (!result.ok && result.unauthorized) {
-				await router.navigate({
-					href: buildAuthLink(
-						'/login',
-						buildPendingVerificationPath(redirectTo),
-					),
-				})
-				return
-			}
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
 			if (result.ok) setDelivery(acceptedEmailVerificationDelivery())
