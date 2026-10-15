@@ -3,8 +3,6 @@ import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
 	isNotFound,
-	isRedirect,
-	useRouter,
 	useLocation,
 	useRouteContext,
 } from '@tanstack/react-router'
@@ -77,7 +75,6 @@ function FollowProvider({
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const hash = useLocation({ select: (location) => location.hash })
 	const capture = useSubmitterScope()
-	const router = useRouter()
 	const client = useQueryClient()
 	const [panelChoice, setPanelChoice] = useState<{
 		hash: string
@@ -107,10 +104,6 @@ function FollowProvider({
 		enabled: open && Boolean(follow?.loggedIn),
 		retry: false,
 	})
-	useEffect(() => {
-		if (open && isRedirect(read.error))
-			void router.navigate(router.resolveRedirect(read.error).options)
-	}, [open, read.error, router])
 	const state = read.data
 	const workspace =
 		state?.workspaces.find((workspace) => workspace.slug === selectedSlug) ??
