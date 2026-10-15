@@ -207,7 +207,10 @@ test('owner can create a team and add a member', async () => {
 		request: createReq,
 	} as never)
 	expect(created.status).toBe(200)
-	const createdPayload = created.data as {
+	expect(created.data).toEqual({ ok: true })
+	const createdPayload = (
+		await testOrgTeamsApiHandler(env).execute({ request: createReq } as never)
+	).data as {
 		ok: boolean
 		teams: Array<{ id: string; slug: string; memberCount: number }>
 		canManage: boolean
@@ -230,7 +233,10 @@ test('owner can create a team and add a member', async () => {
 		request: addReq,
 	} as never)
 	expect(added.status).toBe(200)
-	const addedPayload = added.data as {
+	expect(added.data).toEqual({ ok: true })
+	const addedPayload = (
+		await testOrgTeamsApiHandler(env).execute({ request: addReq } as never)
+	).data as {
 		teams: Array<{ memberCount: number; members: Array<{ username: string }> }>
 	}
 	expect(addedPayload.teams[0]?.memberCount).toBe(1)

@@ -22,6 +22,7 @@ import {
 	AccountManagementShell,
 	AccountPageHeader,
 } from './account-management-components.tsx'
+import { revokeOrganizationGrant } from '#start/server/org-mutations'
 import { useOrgPeopleMutation } from './org-people-mutation.ts'
 function grantSummary(grant: OrgGrantView) {
 	const access = grant.presetLabel ?? 'Custom permissions'
@@ -48,7 +49,7 @@ function OrgGrantsContent({
 		tone: 'info' | 'error'
 		text: string
 	} | null>(null)
-	const mutation = useOrgPeopleMutation(queryKey)
+	const mutation = useOrgPeopleMutation(queryKey, revokeOrganizationGrant)
 	return (
 		<AccountManagementShell currentHref={`/@${data.org.slug}/-/grants`}>
 			<AccountPageHeader
@@ -128,8 +129,8 @@ function OrgGrantsContent({
 														setMessage(null)
 														mutation.mutate(
 															{
-																action: 'grantRevoke',
-																body: { grantId: grant.id },
+																orgSlug: data.org.slug,
+																grantId: grant.id,
 															},
 															{
 																onSuccess: () => {

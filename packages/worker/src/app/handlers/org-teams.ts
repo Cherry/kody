@@ -221,7 +221,7 @@ export async function createOrganizationTeam({
 			conflict ? 409 : 400,
 		)
 	}
-	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
+	return operationResult({ ok: true as const })
 }
 export async function addOrganizationTeamMember({
 	request,
@@ -273,7 +273,7 @@ export async function addOrganizationTeamMember({
 				: 'Unable to add that person to the team.'
 		return operationResult({ ok: false, error: message }, 400)
 	}
-	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
+	return operationResult({ ok: true as const })
 }
 export async function removeOrganizationTeamMember({
 	request,
@@ -324,5 +324,5 @@ export async function removeOrganizationTeamMember({
 				: 'Unable to remove that person from the team.'
 		return operationResult({ ok: false, error: message }, 400)
 	}
-	return operationResult(await loadOrgTeamsData({ env, user, org: access.org }))
+	return operationResult({ ok: true as const })
 }

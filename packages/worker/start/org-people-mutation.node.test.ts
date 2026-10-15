@@ -1,5 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { MutationObserver, QueryClient } from '@tanstack/react-query'
+import {
+	MutationObserver,
+	QueryObserver,
+	QueryClient,
+} from '@tanstack/react-query'
 import { removeOrganizationMember } from '#start/server/org-mutations'
 vi.mock('#start/server/org-mutations', () => ({
 	removeOrganizationMember: vi.fn(),
@@ -62,33 +66,19 @@ test.each(['accepted', 'lost response'])(
 		)
 		const observer = new MutationObserver(
 			client,
-			orgPeopleMutationOptions(client, key),
+			orgPeopleMutationOptions(client, key, removeOrganizationMember),
 		)
 		const unsubscribe = observer.subscribe(() => {})
 		const write = observer.mutate({
-			action: 'memberRemove',
-			body: { userId: 'previous-member' },
+			orgSlug: 'team-a',
+			userId: 'previous-member',
 		})
 		await vi.waitFor(() =>
 			expect(removeOrganizationMember).toHaveBeenCalledOnce(),
 		)
 		unsubscribe()
 		if (outcome === 'accepted') {
-			resolve({
-				ok: true,
-				org: {
-					id: 'org-a',
-					slug: 'team-a',
-					displayName: 'Team A',
-					avatarUrl: null,
-					personal: false,
-					role: 'owner',
-				},
-				members: [],
-				invites: [],
-				inviteLinks: [],
-				canManage: true,
-			})
+			resolve({ ok: true })
 			await write
 		} else {
 			reject(new Error('Response lost after write'))
@@ -101,3 +91,41 @@ test.each(['accepted', 'lost response'])(
 		client.clear()
 	},
 )
+
+test('accepted one-time invitation results survive a failed confirmation read', async () => {
+	const client = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
+	})
+	const key = ['page', 'actor-a', 'loadOrgMembers', { slug: 'team-a' }]
+	client.setQueryData(key, { members: [] })
+	const read = vi.fn(async () => {
+		throw new Error('Read temporarily unavailable')
+	})
+	const page = new QueryObserver(client, {
+		queryKey: key,
+		queryFn: read,
+		staleTime: Infinity,
+	})
+	const unsubscribe = page.subscribe(() => {})
+	const accepted = {
+		ok: true,
+		inviteLink: {
+			url: 'https://kody.test/join/token',
+			token: 'token',
+			expiresAt: '2026-11-01',
+		},
+	}
+	const send = vi.fn(async (_input: { data: { orgSlug: string } }) => accepted)
+	const mutation = new MutationObserver(
+		client,
+		orgPeopleMutationOptions(client, key, send),
+	)
+	await expect(mutation.mutate({ orgSlug: 'team-a' })).resolves.toEqual(
+		accepted,
+	)
+	expect(send).toHaveBeenCalledWith({ data: { orgSlug: 'team-a' } })
+	expect(read).toHaveBeenCalledOnce()
+	expect(client.getQueryState(key)?.status).toBe('error')
+	unsubscribe()
+	client.clear()
+})

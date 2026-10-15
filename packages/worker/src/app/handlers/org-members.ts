@@ -16,7 +16,6 @@ import {
 	inviteLinkUrl,
 	readInviteLinkOptions,
 } from '#app/invite-link-options.ts'
-import { getInviteById } from '#worker/orgs/access-writes.ts'
 import { computeEffectivePermissions } from '#worker/authorization/authorize.ts'
 import { buildUserAvatarUrl } from '#worker/community/public-urls.ts'
 import { normalizeEmailAddress } from '#worker/email/address.ts'
@@ -25,6 +24,7 @@ import {
 	normalizeUsername,
 } from '#worker/identity/username.ts'
 import {
+	getInviteById,
 	createInvite,
 	markInviteRevoked,
 	updateOrgMemberRole,
@@ -261,9 +261,7 @@ export async function setOrganizationMemberRole({
 			orgId: access.org.id,
 		})
 	}
-	return operationResult(
-		await loadOrgMembersData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true as const })
 }
 export async function removeOrganizationMember({
 	request,
@@ -348,9 +346,7 @@ export async function removeOrganizationMember({
 			orgId: access.org.id,
 		})
 	}
-	return operationResult(
-		await loadOrgMembersData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true as const })
 }
 export async function inviteOrganizationMember({
 	request,
@@ -436,9 +432,8 @@ export async function inviteOrganizationMember({
 		tokenHash,
 		audit: orgAuditWriterFromRequest(env, user.request),
 	})
-	const payload = await loadOrgMembersData({ env, user, org: access.org })
 	return operationResult({
-		...payload,
+		ok: true as const,
 		invite: {
 			id: created.id,
 			expiresAt: created.expiresAt,
@@ -512,13 +507,8 @@ export async function createOrganizationInviteLink({
 			expiresAt,
 			audit: orgAuditWriterFromRequest(env, user.request),
 		})
-		const payload = await loadOrgMembersData({
-			env,
-			user,
-			org: access.org,
-		})
 		return operationResult({
-			...payload,
+			ok: true as const,
 			inviteLink: {
 				id: created.id,
 				expiresAt: created.expiresAt,
@@ -589,9 +579,7 @@ export async function revokeOrganizationInviteLink({
 				: 'Unable to revoke that invite link.'
 		return operationResult({ ok: false, error: message }, 400)
 	}
-	return operationResult(
-		await loadOrgMembersData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true as const })
 }
 
 export async function revokeOrganizationMemberInvite({
@@ -650,7 +638,5 @@ export async function revokeOrganizationMemberInvite({
 			error instanceof Error ? error.message : 'Unable to revoke that invite.'
 		return operationResult({ ok: false, error: message }, 400)
 	}
-	return operationResult(
-		await loadOrgMembersData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true as const })
 }

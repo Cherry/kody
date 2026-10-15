@@ -1,5 +1,10 @@
 /** @jsxImportSource @emotion/react */
-import { type OrgPeopleAction } from './org-people-mutation.ts'
+import {
+	inviteOrganizationMember,
+	setOrganizationMemberRole,
+	removeOrganizationMember,
+	revokeOrganizationMemberInvite,
+} from '#start/server/org-mutations'
 import {
 	type OrgMembersLoaderData,
 	type OrgMemberView,
@@ -57,52 +62,62 @@ function OrgMembersContent({
 	data: OrgMembersLoaderData
 	queryKey: QueryKey
 }) {
-	const mutation = useOrgPeopleMutation(queryKey),
-		capture = useSubmitterScope()
+	const inviteMutation = useOrgPeopleMutation(
+		queryKey,
+		inviteOrganizationMember,
+	)
+	const roleMutation = useOrgPeopleMutation(queryKey, setOrganizationMemberRole)
+	const removeMutation = useOrgPeopleMutation(
+		queryKey,
+		removeOrganizationMember,
+	)
+	const revokeMutation = useOrgPeopleMutation(
+		queryKey,
+		revokeOrganizationMemberInvite,
+	)
+	const pending =
+		inviteMutation.isPending ||
+		roleMutation.isPending ||
+		removeMutation.isPending ||
+		revokeMutation.isPending
+	const capture = useSubmitterScope()
 	const [message, setMessage] = useState<{
 		text: string
 		tone: 'info' | 'error'
 	} | null>(null)
 	const [invitee, setInvitee] = useState(''),
-		[inviteRole, setInviteRole] = useState('member'),
+		[inviteRole, setInviteRole] = useState<'owner' | 'member' | 'billing'>(
+			'member',
+		),
 		[invitePrompt, setInvitePrompt] = useState<string | null>(null),
 		[confirmed, setConfirmed] = useState<string | null>(null),
 		[inviteRevision, setInviteRevision] = useState(0)
-	const args = { orgSlug: data.org.slug },
-		inviteHref = 'memberInvite',
-		roleHref = 'memberRole'
+	const args = { orgSlug: data.org.slug }
 	const ownerCount = data.members.filter(
 		(member) => member.role === 'owner',
 	).length
-	function post(
-		action: OrgPeopleAction,
-		body: Record<string, unknown>,
+	async function post<T>(
+		perform: () => Promise<T>,
 		success: string,
+		done?: (result: T) => void,
 	) {
 		const active = capture()
 		setMessage(null)
-		mutation.mutate(
-			{ action, body },
-			{
-				onSuccess: (result) => {
-					if (!active()) return
-					if (action === inviteHref) {
-						setInvitee('')
-						setInvitePrompt(result.invite?.prompt ?? null)
-					}
-					setMessage({
-						text: result.invite?.prompt
-							? 'Invite created. Send this prompt to them.'
-							: success,
-						tone: 'info',
-					})
-				},
-				onError: (error) => {
-					if (active()) setMessage({ text: error.message, tone: 'error' })
-				},
-			},
-		)
+		try {
+			const result = await perform()
+			if (!active()) return
+			done?.(result)
+			setMessage({ text: success, tone: 'info' })
+		} catch (error) {
+			if (active())
+				setMessage({
+					text:
+						error instanceof Error ? error.message : 'Unable to save changes.',
+					tone: 'error',
+				})
+		}
 	}
+
 	return (
 		<AccountManagementShell currentHref={routes.orgMembers.href(args)}>
 			<AccountPageHeader
@@ -134,9 +149,8 @@ function OrgMembersContent({
 							{ displayName: '', avatarUrl: null },
 						)
 						const updatingRole =
-							mutation.isPending &&
-							mutation.variables?.action === roleHref &&
-							mutation.variables.body.userId === member.userId
+							roleMutation.isPending &&
+							roleMutation.variables?.userId === member.userId
 						return (
 							<li key={member.userId} data-testid="org-member" css={rowItemCss}>
 								<div css={rowCss}>
@@ -160,18 +174,20 @@ function OrgMembersContent({
 												aria-label={`Role for ${memberName(member)}`}
 												value={
 													updatingRole
-														? String(mutation.variables?.body.role)
+														? String(roleMutation.variables?.role)
 														: member.role
 												}
-												disabled={lastOwner || mutation.isPending}
+												disabled={lastOwner || pending}
 												css={selectCss}
 												onChange={(event) =>
 													post(
-														roleHref,
-														{
-															userId: member.userId,
-															role: event.currentTarget.value,
-														},
+														() =>
+															roleMutation.mutateAsync({
+																...args,
+																userId: member.userId,
+																role: event.currentTarget
+																	.value as typeof member.role,
+															}),
 														'Role updated.',
 													)
 												}
@@ -184,7 +200,7 @@ function OrgMembersContent({
 											</select>
 											<button
 												type="button"
-												disabled={lastOwner || mutation.isPending}
+												disabled={lastOwner || pending}
 												css={getDangerPillCss({ size: 'sm' })}
 												onBlur={() => setConfirmed(null)}
 												onClick={() => {
@@ -194,8 +210,11 @@ function OrgMembersContent({
 													}
 													setConfirmed(null)
 													post(
-														'memberRemove',
-														{ userId: member.userId },
+														() =>
+															removeMutation.mutateAsync({
+																...args,
+																userId: member.userId,
+															}),
 														'Member removed.',
 													)
 												}}
@@ -235,9 +254,17 @@ function OrgMembersContent({
 								setInvitePrompt(null)
 								setInviteRevision((value) => value + 1)
 								post(
-									inviteHref,
-									{ invitee, role: inviteRole },
-									'Invite created.',
+									() =>
+										inviteMutation.mutateAsync({
+											...args,
+											invitee,
+											role: inviteRole,
+										}),
+									'Invite created. Send this prompt to them.',
+									(result) => {
+										setInvitee('')
+										setInvitePrompt(result.invite?.prompt ?? null)
+									},
 								)
 							}}
 						>
@@ -261,7 +288,11 @@ function OrgMembersContent({
 								<select
 									value={inviteRole}
 									css={selectCss}
-									onChange={(event) => setInviteRole(event.currentTarget.value)}
+									onChange={(event) =>
+										setInviteRole(
+											event.currentTarget.value as typeof inviteRole,
+										)
+									}
 								>
 									{memberRoles.map((role) => (
 										<option key={role} value={role}>
@@ -273,14 +304,11 @@ function OrgMembersContent({
 							<div css={accountActionsCss}>
 								<button
 									type="submit"
-									disabled={mutation.isPending || invitee.trim().length === 0}
+									disabled={pending || invitee.trim().length === 0}
 									css={getPillButtonCss({ size: 'sm' })}
 								>
 									{renderIcon('plus', { size: '1.05rem' })}
-									{mutation.isPending &&
-									mutation.variables?.action === inviteHref
-										? 'Inviting…'
-										: 'Send invite'}
+									{inviteMutation.isPending ? 'Inviting…' : 'Send invite'}
 								</button>
 							</div>
 						</form>
@@ -314,20 +342,22 @@ function OrgMembersContent({
 									{invite.kind === 'membership' ? (
 										<button
 											type="button"
-											disabled={mutation.isPending}
+											disabled={pending}
 											data-testid="org-invite-revoke"
 											css={getDangerPillCss({ size: 'sm' })}
 											onClick={() =>
 												post(
-													'memberInviteRevoke',
-													{ inviteId: invite.id },
+													() =>
+														revokeMutation.mutateAsync({
+															...args,
+															inviteId: invite.id,
+														}),
 													'Invite revoked.',
 												)
 											}
 										>
-											{mutation.isPending &&
-											mutation.variables.action === 'memberInviteRevoke' &&
-											mutation.variables.body.inviteId === invite.id
+											{revokeMutation.isPending &&
+											revokeMutation.variables?.inviteId === invite.id
 												? 'Revoking…'
 												: 'Revoke'}
 										</button>

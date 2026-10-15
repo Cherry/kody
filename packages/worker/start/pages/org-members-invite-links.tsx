@@ -1,5 +1,8 @@
 /** @jsxImportSource @emotion/react */
-import { type OrgPeopleAction } from './org-people-mutation.ts'
+import {
+	createOrganizationInviteLink,
+	revokeOrganizationInviteLink,
+} from '#start/server/org-mutations'
 import { type OrgInviteLinkView } from '#universal/loader-data.ts'
 import { orgRoleLabel } from '#universal/org-pages.ts'
 import {
@@ -49,7 +52,7 @@ export function OrgMembersInviteLinks({
 	queryKey: QueryKey
 	onMessage: (message: string, tone: 'info' | 'error') => void
 }) {
-	const [role, setRole] = useState('member'),
+	const [role, setRole] = useState<'member' | 'billing'>('member'),
 		[domains, setDomains] = useState(''),
 		[maxUses, setMaxUses] = useState(''),
 		[days, setDays] = useState('7'),
@@ -59,41 +62,68 @@ export function OrgMembersInviteLinks({
 		} | null>(null)
 	const copiedLinkUrl =
 		copiedLink?.revision === clearRevision ? copiedLink.url : null
-	const mutation = useOrgPeopleMutation(queryKey),
-		capture = useSubmitterScope()
-	const createHref = 'inviteLinkCreate'
-	const creating =
-		mutation.isPending && mutation.variables?.action === createHref
-	function post(action: OrgPeopleAction, body: Record<string, unknown>) {
+	const createMutation = useOrgPeopleMutation(
+		queryKey,
+		createOrganizationInviteLink,
+	)
+	const revokeMutation = useOrgPeopleMutation(
+		queryKey,
+		revokeOrganizationInviteLink,
+	)
+	const capture = useSubmitterScope()
+	const creating = createMutation.isPending
+	const pending = creating || revokeMutation.isPending
+	async function createLink() {
 		const active = capture()
 		setCopiedLink(null)
 		onMessage('', 'info')
-		mutation.mutate(
-			{ action, body },
-			{
-				onSuccess: async (result) => {
-					if (!active()) return
-					if (action === createHref) {
-						const url = result.inviteLink?.url
-						if (url) {
-							const copied = await copyText(url)
-							if (!active()) return
-							setCopiedLink({ url, revision: clearRevision })
-							onMessage(
-								copied
-									? 'Invite link copied to clipboard.'
-									: 'Invite link created. Copy it below.',
-								'info',
-							)
-						} else onMessage('Invite link created.', 'info')
-					} else onMessage('Invite link revoked.', 'info')
-				},
-				onError: (error) => {
-					if (active()) onMessage(error.message, 'error')
-				},
-			},
-		)
+		try {
+			const result = await createMutation.mutateAsync({
+				orgSlug: slug,
+				role,
+				allowedEmailDomains: domains,
+				maxUses: maxUses.trim() || null,
+				expiresInDays: days.trim() || '7',
+			})
+			if (!active()) return
+			const url = result.inviteLink.url
+			const copied = await copyText(url)
+			if (!active()) return
+			setCopiedLink({ url, revision: clearRevision })
+			onMessage(
+				copied
+					? 'Invite link copied to clipboard.'
+					: 'Invite link created. Copy it below.',
+				'info',
+			)
+		} catch (error) {
+			if (active())
+				onMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to create invite link.',
+					'error',
+				)
+		}
 	}
+	async function revokeLink(linkId: string) {
+		const active = capture()
+		setCopiedLink(null)
+		onMessage('', 'info')
+		try {
+			await revokeMutation.mutateAsync({ orgSlug: slug, linkId })
+			if (active()) onMessage('Invite link revoked.', 'info')
+		} catch (error) {
+			if (active())
+				onMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to revoke invite link.',
+					'error',
+				)
+		}
+	}
+
 	return (
 		<>
 			<AccountManagementPanel title="Invite link">
@@ -102,12 +132,7 @@ export function OrgMembersInviteLinks({
 					css={formCss}
 					onSubmit={(event) => {
 						event.preventDefault()
-						post(createHref, {
-							role,
-							allowedEmailDomains: domains,
-							maxUses: maxUses.trim() || null,
-							expiresInDays: days.trim() || '7',
-						})
+						void createLink()
 					}}
 				>
 					<label css={accountFieldCss}>
@@ -116,7 +141,9 @@ export function OrgMembersInviteLinks({
 							value={role}
 							aria-label="Invite link role"
 							css={selectCss}
-							onChange={(event) => setRole(event.currentTarget.value)}
+							onChange={(event) =>
+								setRole(event.currentTarget.value as typeof role)
+							}
 						>
 							{(['member', 'billing'] as const).map((value) => (
 								<option key={value} value={value}>
@@ -172,7 +199,7 @@ export function OrgMembersInviteLinks({
 					<div css={accountActionsCss}>
 						<button
 							type="submit"
-							disabled={mutation.isPending}
+							disabled={pending}
 							css={getPillButtonCss({ size: 'sm' })}
 							data-testid="org-invite-link-copy"
 						>
@@ -231,14 +258,12 @@ export function OrgMembersInviteLinks({
 									<span css={rowActionsCss}>
 										<button
 											type="button"
-											disabled={mutation.isPending}
+											disabled={pending}
 											css={getDangerPillCss({ size: 'sm' })}
-											onClick={() =>
-												post('inviteLinkRevoke', { linkId: link.id })
-											}
+											onClick={() => void revokeLink(link.id)}
 										>
-											{mutation.isPending &&
-											mutation.variables?.body.linkId === link.id
+											{revokeMutation.isPending &&
+											revokeMutation.variables?.linkId === link.id
 												? 'Revoking…'
 												: 'Revoke'}
 										</button>

@@ -300,7 +300,10 @@ test('member:write without manage access on the resource cannot revoke; owner ca
 		request: ownerReq,
 	} as never)
 	expect(revoked.status).toBe(200)
-	const payload = revoked.data as { grants: Array<{ id: string }> }
+	expect(revoked.data).toEqual({ ok: true })
+	const payload = (
+		await testOrgGrantsApiHandler(env).execute({ request: ownerReq } as never)
+	).data as { grants: Array<{ id: string }> }
 	expect(payload.grants.map((grant) => grant.id)).not.toContain('grant-1')
 	const gone = await db
 		.prepare(
@@ -326,7 +329,10 @@ test('owner can revoke a grant', async () => {
 		request: revokeReq,
 	} as never)
 	expect(revoked.status).toBe(200)
-	const payload = revoked.data as { grants: Array<unknown> }
+	expect(revoked.data).toEqual({ ok: true })
+	const payload = (
+		await testOrgGrantsApiHandler(env).execute({ request: revokeReq } as never)
+	).data as { grants: Array<unknown> }
 	expect(payload.grants).toEqual([])
 })
 
@@ -368,7 +374,10 @@ test('personal org owner can list and revoke grants', async () => {
 		request: revokeReq,
 	} as never)
 	expect(revoked.status).toBe(200)
-	const payload = revoked.data as { grants: Array<{ id: string }> }
+	expect(revoked.data).toEqual({ ok: true })
+	const payload = (
+		await testOrgGrantsApiHandler(env).execute({ request: revokeReq } as never)
+	).data as { grants: Array<{ id: string }> }
 	expect(payload.grants.map((g) => g.id)).not.toContain('grant-personal-1')
 })
 

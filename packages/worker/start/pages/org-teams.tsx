@@ -1,6 +1,10 @@
 /** @jsxImportSource @emotion/react */
 import { OrgTeamInviteLinks } from './org-teams-invite-links.tsx'
-import { type OrgPeopleAction } from './org-people-mutation.ts'
+import {
+	createOrganizationTeam,
+	addOrganizationTeamMember,
+	removeOrganizationTeamMember,
+} from '#start/server/org-mutations'
 import { type OrgTeamsLoaderData } from '#universal/loader-data.ts'
 import { orgIdentity } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
@@ -56,7 +60,16 @@ function OrgTeamsContent({
 	data: OrgTeamsLoaderData
 	queryKey: QueryKey
 }) {
-	const mutation = useOrgPeopleMutation(queryKey)
+	const createMutation = useOrgPeopleMutation(queryKey, createOrganizationTeam)
+	const addMutation = useOrgPeopleMutation(queryKey, addOrganizationTeamMember)
+	const removeMutation = useOrgPeopleMutation(
+		queryKey,
+		removeOrganizationTeamMember,
+	)
+	const pending =
+		createMutation.isPending ||
+		addMutation.isPending ||
+		removeMutation.isPending
 	const capture = useSubmitterScope()
 	const [message, setMessage] = useState<{
 		text: string
@@ -68,29 +81,28 @@ function OrgTeamsContent({
 	const [addByTeam, setAddByTeam] = useState<Record<string, string>>({})
 	const [confirmed, setConfirmed] = useState<string | null>(null)
 	const args = { orgSlug: data.org.slug }
-	function post(
-		action: OrgPeopleAction,
-		body: Record<string, unknown>,
+	async function post<T>(
+		perform: () => Promise<T>,
 		success: string,
-		done?: () => void,
+		done?: (result: T) => void,
 	) {
 		const active = capture()
 		setMessage(null)
-		mutation.mutate(
-			{ action, body },
-			{
-				onSuccess: () => {
-					if (active()) {
-						done?.()
-						setMessage({ text: success, tone: 'info' })
-					}
-				},
-				onError: (error) => {
-					if (active()) setMessage({ text: error.message, tone: 'error' })
-				},
-			},
-		)
+		try {
+			const result = await perform()
+			if (!active()) return
+			done?.(result)
+			setMessage({ text: success, tone: 'info' })
+		} catch (error) {
+			if (active())
+				setMessage({
+					text:
+						error instanceof Error ? error.message : 'Unable to save changes.',
+					tone: 'error',
+				})
+		}
 	}
+
 	return (
 		<AccountManagementShell currentHref={routes.orgTeams.href(args)}>
 			<AccountPageHeader
@@ -159,7 +171,7 @@ function OrgTeamsContent({
 														{data.canRemoveMembers ? (
 															<button
 																type="button"
-																disabled={mutation.isPending}
+																disabled={pending}
 																css={getDangerPillCss({ size: 'sm' })}
 																onBlur={() => setConfirmed(null)}
 																onClick={() => {
@@ -169,8 +181,12 @@ function OrgTeamsContent({
 																	}
 																	setConfirmed(null)
 																	post(
-																		'teamMemberRemove',
-																		{ teamId: team.id, userId: member.userId },
+																		() =>
+																			removeMutation.mutateAsync({
+																				...args,
+																				teamId: team.id,
+																				userId: member.userId,
+																			}),
 																		'Member removed from the team.',
 																	)
 																}}
@@ -218,12 +234,16 @@ function OrgTeamsContent({
 										</select>
 										<button
 											type="button"
-											disabled={!addByTeam[team.id] || mutation.isPending}
+											disabled={!addByTeam[team.id] || pending}
 											css={getPillButtonCss({ size: 'sm' })}
 											onClick={() =>
 												post(
-													'teamMemberAdd',
-													{ teamId: team.id, userId: addByTeam[team.id] },
+													() =>
+														addMutation.mutateAsync({
+															...args,
+															teamId: team.id,
+															userId: addByTeam[team.id] ?? '',
+														}),
 													'Member added to the team.',
 													() =>
 														setAddByTeam((current) => ({
@@ -259,12 +279,13 @@ function OrgTeamsContent({
 						onSubmit={(event) => {
 							event.preventDefault()
 							post(
-								'teamCreate',
-								{
-									slug: createSlug,
-									name: createName,
-									description: createDescription,
-								},
+								() =>
+									createMutation.mutateAsync({
+										...args,
+										slug: createSlug,
+										name: createName,
+										description: createDescription,
+									}),
 								'Team created.',
 								() => {
 									setCreateSlug('')
@@ -314,14 +335,11 @@ function OrgTeamsContent({
 						<div css={accountActionsCss}>
 							<button
 								type="submit"
-								disabled={mutation.isPending || createSlug.trim().length === 0}
+								disabled={pending || createSlug.trim().length === 0}
 								css={getPillButtonCss({ size: 'sm' })}
 							>
 								{renderIcon('plus', { size: '1.05rem' })}
-								{mutation.isPending &&
-								mutation.variables?.action === 'teamCreate'
-									? 'Creating…'
-									: 'Create team'}
+								{createMutation.isPending ? 'Creating…' : 'Create team'}
 							</button>
 						</div>
 					</form>

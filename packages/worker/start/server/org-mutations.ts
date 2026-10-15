@@ -13,7 +13,7 @@ import {
 	revokeOrganizationGrantSchema,
 } from '#universal/org-people-mutations.ts'
 export const setOrganizationMemberRole = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		setOrganizationMemberRoleSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -33,7 +33,7 @@ export const setOrganizationMemberRole = createServerFn({ method: 'POST' })
 		)
 	})
 export const removeOrganizationMember = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		removeOrganizationMemberSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -53,7 +53,7 @@ export const removeOrganizationMember = createServerFn({ method: 'POST' })
 		)
 	})
 export const inviteOrganizationMember = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		inviteOrganizationMemberSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -73,7 +73,7 @@ export const inviteOrganizationMember = createServerFn({ method: 'POST' })
 		)
 	})
 export const createOrganizationInviteLink = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		createOrganizationInviteLinkSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -93,7 +93,7 @@ export const createOrganizationInviteLink = createServerFn({ method: 'POST' })
 		)
 	})
 export const revokeOrganizationInviteLink = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		revokeOrganizationInviteLinkSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -113,7 +113,7 @@ export const revokeOrganizationInviteLink = createServerFn({ method: 'POST' })
 		)
 	})
 export const createOrganizationTeam = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		createOrganizationTeamSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -133,7 +133,7 @@ export const createOrganizationTeam = createServerFn({ method: 'POST' })
 		)
 	})
 export const addOrganizationTeamMember = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		addOrganizationTeamMemberSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -153,7 +153,7 @@ export const addOrganizationTeamMember = createServerFn({ method: 'POST' })
 		)
 	})
 export const removeOrganizationTeamMember = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		removeOrganizationTeamMemberSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -173,7 +173,7 @@ export const removeOrganizationTeamMember = createServerFn({ method: 'POST' })
 		)
 	})
 export const revokeOrganizationGrant = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		revokeOrganizationGrantSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),
@@ -194,7 +194,7 @@ export const revokeOrganizationGrant = createServerFn({ method: 'POST' })
 	})
 
 export const revokeOrganizationMemberInvite = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		revokeOrganizationMemberInviteSchema.extend({
 			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
 		}),

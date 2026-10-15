@@ -147,7 +147,5 @@ export async function revokeOrganizationGrant({
 			error instanceof Error ? error.message : 'Unable to revoke that grant.'
 		return operationResult({ ok: false, error: message }, 400)
 	}
-	return operationResult(
-		await loadOrgGrantsData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true as const })
 }

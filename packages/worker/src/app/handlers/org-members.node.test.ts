@@ -1,3 +1,4 @@
+import type * as OrgBilling from '#worker/orgs/billing.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
@@ -37,8 +38,7 @@ vi.mock('#worker/orgs/seat-sync-after-membership.ts', () => ({
 		mocks.syncSeatsAfterMembershipChange(...args),
 }))
 vi.mock('#worker/orgs/billing.ts', async (importOriginal) => {
-	const actual =
-		await importOriginal<typeof import('#worker/orgs/billing.ts')>()
+	const actual = await importOriginal<typeof OrgBilling>()
 	return {
 		...actual,
 		assertCanAcceptFreeOrgOwnership: (...args: Array<unknown>) =>
@@ -388,13 +388,18 @@ test('owner can create invite links; member and billing cannot; owner role is re
 	expect(created.status).toBe(200)
 	const payload = created.data as {
 		ok: boolean
-		inviteLinks: Array<{ id: string; useCount: number }>
 		inviteLink: { id: string; url: string; token: string }
 	}
 	expect(payload.ok).toBe(true)
 	expect(payload.inviteLink.url).toContain('/join/')
 	expect(payload.inviteLink.url).toContain(payload.inviteLink.token)
-	expect(payload.inviteLinks).toHaveLength(1)
+	expect(created.data).not.toHaveProperty('inviteLinks')
+	expect(
+		(await testOrgMembersApiHandler(env).execute({ request: create } as never))
+			.data,
+	).toMatchObject({
+		inviteLinks: [expect.objectContaining({ id: payload.inviteLink.id })],
+	})
 
 	const revoke = new Request(
 		'https://kody.test/@zeta-co/-/members/invite-links-revoke.json',
@@ -409,10 +414,11 @@ test('owner can create invite links; member and billing cannot; owner role is re
 		{ request: revoke } as never,
 	)
 	expect(revoked.status).toBe(200)
-	expect(revoked.data).toMatchObject({
-		ok: true,
-		inviteLinks: [],
-	})
+	expect(revoked.data).toEqual({ ok: true })
+	expect(
+		(await testOrgMembersApiHandler(env).execute({ request: revoke } as never))
+			.data,
+	).toMatchObject({ inviteLinks: [] })
 })
 
 test('signup org membership writes stay off the web even for a second owner', async () => {
