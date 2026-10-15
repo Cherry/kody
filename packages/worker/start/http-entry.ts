@@ -1,6 +1,5 @@
 import { isServerFunctionRequest } from './action-page-method.ts'
 import * as Sentry from '@sentry/cloudflare'
-import { type OAuthPageOptions } from '#universal/oauth-page.ts'
 import { setAuthSessionSecret } from '../src/app/auth-session.ts'
 import { getEnv } from '../src/app/env.ts'
 import { runWithRequestContext } from '../src/request-context.ts'
@@ -14,7 +13,6 @@ import {
 type RenderDocument = (
 	request: Request,
 	env: Env,
-	oauthPage?: OAuthPageOptions,
 	failure?: { status: 403 | 404 | 500 },
 ) => Promise<Response>
 
@@ -24,7 +22,6 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 		request: Request,
 		env: Env,
 		ctx?: Pick<ExecutionContext, 'waitUntil'>,
-		oauthPage?: OAuthPageOptions,
 	) {
 		const inRequest = <T>(run: () => Promise<T>) =>
 			runWithDeferredWork(
@@ -36,7 +33,7 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 			setAuthSessionSecret(bindings.COOKIE_SECRET)
 			return await inRequest(async () => {
 				if (isServerFunctionRequest(request)) {
-					const response = await renderDocument(request, bindings, oauthPage)
+					const response = await renderDocument(request, bindings)
 					// Start serializes thrown redirects after request middleware finishes.
 					// Enforce RPC privacy on the final response, even when shared document
 					// loaders set public caching for their canonical document redirects.
@@ -48,7 +45,7 @@ export function createHttpRequestHandler(renderDocument: RenderDocument) {
 						headers,
 					})
 				}
-				return renderDocument(request, bindings, oauthPage)
+				return renderDocument(request, bindings)
 			})
 		} catch (error) {
 			console.error('Native app request failed:', error)

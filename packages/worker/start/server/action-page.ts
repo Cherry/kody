@@ -1,5 +1,4 @@
 import { createServerFn } from '@tanstack/react-start'
-import type { AppPageResult } from '../../src/app/page-result.ts'
 
 function tokenInput(data: {
 	token: string | null
@@ -23,15 +22,17 @@ async function tokenContext() {
 	return { request: getRequest(), env: getEnv(env) }
 }
 
-async function pageResult(result: AppPageResult | Response) {
-	if (result instanceof Response)
-		throw new Error('Unexpected non-page token result')
+async function applyTokenHeaders({
+	status,
+	setCookie,
+}: {
+	status?: number
+	setCookie?: string
+}) {
 	const { setResponseStatus, setResponseHeader } =
 		await import('@tanstack/react-start/server')
-	setResponseStatus(result.status ?? 200)
-	if (result.extraSetCookies?.length)
-		setResponseHeader('Set-Cookie', result.extraSetCookies)
-	return { title: result.title, loaderData: result.loaderData }
+	setResponseStatus(status ?? 200)
+	if (setCookie) setResponseHeader('Set-Cookie', setCookie)
 }
 
 export const loadVerifyEmail = createServerFn({ method: 'GET' })
@@ -39,9 +40,12 @@ export const loadVerifyEmail = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const { executeVerifyEmail } =
 			await import('../../src/app/handlers/verify-email.ts')
-		return pageResult(
-			await executeVerifyEmail({ ...(await tokenContext()), ...data }),
-		)
+		const { status, setCookie, ...outcome } = await executeVerifyEmail({
+			...(await tokenContext()),
+			...data,
+		})
+		await applyTokenHeaders({ status, setCookie })
+		return outcome
 	})
 
 export const loadVerifyEmailChange = createServerFn({ method: 'GET' })
@@ -49,9 +53,12 @@ export const loadVerifyEmailChange = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const { executeVerifyEmailChange } =
 			await import('../../src/app/handlers/verify-email-change.ts')
-		return pageResult(
-			await executeVerifyEmailChange({ ...(await tokenContext()), ...data }),
-		)
+		const { status, setCookie, ...outcome } = await executeVerifyEmailChange({
+			...(await tokenContext()),
+			...data,
+		})
+		await applyTokenHeaders({ status, setCookie })
+		return outcome
 	})
 
 export const loadVerifyEmailClaimRelease = createServerFn({ method: 'GET' })
@@ -59,12 +66,13 @@ export const loadVerifyEmailClaimRelease = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const { executeVerifyEmailClaimRelease } =
 			await import('../../src/app/handlers/verify-email-claim-release.ts')
-		return pageResult(
+		const { status, setCookie, ...outcome } =
 			await executeVerifyEmailClaimRelease({
 				...(await tokenContext()),
 				...data,
-			}),
-		)
+			})
+		await applyTokenHeaders({ status, setCookie })
+		return outcome
 	})
 
 export const loadVerifyEmailDestination = createServerFn({ method: 'GET' })
@@ -72,13 +80,13 @@ export const loadVerifyEmailDestination = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const { executeVerifyEmailDestination } =
 			await import('../../src/app/handlers/verify-email-destination.ts')
-		return pageResult(
+		const { status, setCookie, ...outcome } =
 			await executeVerifyEmailDestination({
 				...(await tokenContext()),
 				...data,
-				consume: true,
-			}),
-		)
+			})
+		await applyTokenHeaders({ status, setCookie })
+		return outcome
 	})
 
 export const loadUnsubscribeTips = createServerFn({ method: 'GET' })
@@ -86,11 +94,10 @@ export const loadUnsubscribeTips = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const { executeUnsubscribeTips } =
 			await import('../../src/app/handlers/unsubscribe-tips.ts')
-		return pageResult(
-			await executeUnsubscribeTips({
-				...(await tokenContext()),
-				...data,
-				oneClick: false,
-			}),
-		)
+		const { status, ...outcome } = await executeUnsubscribeTips({
+			...(await tokenContext()),
+			...data,
+		})
+		await applyTokenHeaders({ status })
+		return outcome
 	})

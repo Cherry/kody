@@ -1,4 +1,4 @@
-import { type AppPageResult } from '#app/page-result.ts'
+import { type TipsUnsubscribeResult } from '#universal/token-outcomes.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -6,7 +6,6 @@ import {
 } from '#worker/audit-log.ts'
 import {
 	optOutTipsEmails,
-	tipsUnsubscribeOneClickBody,
 	verifyTipsUnsubscribeToken,
 } from '#worker/usage/tips-unsubscribe.ts'
 
@@ -23,30 +22,15 @@ function getUnsubscribeError(reason: 'missing_token' | 'invalid_token') {
 	}
 }
 
-export async function loadUnsubscribeTipsPage(
-	request: Request,
-	env: Env,
-): Promise<AppPageResult | Response> {
-	const url = new URL(request.url)
-	return executeUnsubscribeTips({
-		request,
-		env,
-		token: url.searchParams.get('token'),
-		oneClick: request.method === 'POST',
-	})
-}
-
 export async function executeUnsubscribeTips({
 	request,
 	env,
 	token,
-	oneClick,
 }: {
 	request: Request
 	env: Env
 	token: string | null
-	oneClick: boolean
-}): Promise<AppPageResult | Response> {
+}): Promise<TipsUnsubscribeResult> {
 	const claims = await verifyTipsUnsubscribeToken({
 		env,
 		token,
@@ -64,40 +48,11 @@ export async function executeUnsubscribeTips({
 			path: '/unsubscribe/tips',
 			reason,
 		})
-		if (oneClick) {
-			return new Response(getUnsubscribeError(reason), {
-				status: 400,
-				headers: { 'content-type': 'text/plain; charset=utf-8' },
-			})
-		}
 		return {
 			title: 'Unsubscribe from tips',
 			status: 400,
-			loaderData: {
-				tipsUnsubscribe: {
-					ok: false,
-					error: getUnsubscribeError(reason),
-				},
-			},
-		}
-	}
-
-	if (oneClick) {
-		const body = (await request.text()).trim()
-		if (body && body !== tipsUnsubscribeOneClickBody) {
-			void logAuditEvent({
-				db: auditDatabaseFromEnv(env),
-				category: 'auth',
-				action: 'tips_unsubscribe',
-				result: 'failure',
-				ip: requestIp,
-				path: '/unsubscribe/tips',
-				reason: 'invalid_one_click_body',
-			})
-			return new Response('Invalid one-click unsubscribe body.', {
-				status: 400,
-				headers: { 'content-type': 'text/plain; charset=utf-8' },
-			})
+			ok: false,
+			error: getUnsubscribeError(reason),
 		}
 	}
 
@@ -120,41 +75,21 @@ export async function executeUnsubscribeTips({
 	})
 
 	if (!result.optedOut) {
-		if (oneClick) {
-			return new Response('Unsubscribe link is invalid.', {
-				status: 400,
-				headers: { 'content-type': 'text/plain; charset=utf-8' },
-			})
-		}
 		return {
 			title: 'Unsubscribe from tips',
 			status: 400,
-			loaderData: {
-				tipsUnsubscribe: {
-					ok: false,
-					error: 'Unsubscribe link is invalid.',
-				},
-			},
+			ok: false,
+			error: 'Unsubscribe link is invalid.',
 		}
 	}
 
 	const message = result.alreadyOptedOut
 		? 'You were already unsubscribed from Kody tips.'
 		: 'You are unsubscribed from Kody tips. Transactional mail such as verification, billing, and error-rate alerts is unchanged.'
-	if (oneClick) {
-		return new Response(message, {
-			status: 200,
-			headers: { 'content-type': 'text/plain; charset=utf-8' },
-		})
-	}
 	return {
 		title: 'Unsubscribed from tips',
-		loaderData: {
-			tipsUnsubscribe: {
-				ok: true,
-				alreadyOptedOut: result.alreadyOptedOut,
-				message,
-			},
-		},
+		ok: true,
+		alreadyOptedOut: result.alreadyOptedOut,
+		message,
 	}
 }

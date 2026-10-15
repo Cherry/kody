@@ -5,9 +5,7 @@ import { handleRequest } from '../start/http-entry.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
 import {
 	handleAuthorizeRouteException,
-	handleAuthorizeRequest,
 	handleAuthorizeInfo,
-	handleOAuthCallback,
 	handleOAuthProtectedApiMe,
 	oauthPaths,
 } from './oauth-handlers.ts'
@@ -308,37 +306,6 @@ const appHandler = withCors({
 			)
 		}
 
-		if (url.pathname === oauthPaths.authorize) {
-			try {
-				if (
-					request.method === 'POST' &&
-					request.headers
-						.get('Content-Type')
-						?.includes('application/x-www-form-urlencoded')
-				) {
-					const formData = await request.clone().formData()
-					// Only the signed-out inline-login form accepts credentials.
-					// Signed-in approval/denial posts remain protected by session
-					// and OAuth request state rather than a public bot challenge.
-					if (formData.has('email') || formData.has('password')) {
-						const protection = await verifyPublicFormProtection({
-							env,
-							request,
-							body: Object.fromEntries(formData),
-						})
-						if (!protection.ok) {
-							await discardUnreadRequestBody(request)
-							return protection.response
-						}
-					}
-				}
-				return await handleAuthorizeRequest(request, env)
-			} catch (error) {
-				Sentry.captureException(error)
-				return handleAuthorizeRouteException(request)
-			}
-		}
-
 		if (url.pathname === oauthPaths.authorizeInfo) {
 			try {
 				return await handleAuthorizeInfo(request, env)
@@ -346,10 +313,6 @@ const appHandler = withCors({
 				Sentry.captureException(error)
 				return handleAuthorizeRouteException(request)
 			}
-		}
-
-		if (url.pathname === oauthPaths.callback) {
-			return handleOAuthCallback(request, env)
 		}
 
 		if (url.pathname === '/.well-known/appspecific/com.chrome.devtools.json') {

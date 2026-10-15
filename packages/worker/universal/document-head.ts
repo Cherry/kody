@@ -473,32 +473,6 @@ const routeDocumentHeads = {
 		return titleOnly('Invite link')
 	},
 	verify: titleOnly('Two-factor authentication'),
-	verifyEmail: ({ loaderData }) => {
-		const verification = loaderData?.emailVerification
-		return titleOnly(verification?.ok ? 'Email verified' : 'Verify email')
-	},
-	verifyEmailChange: ({ loaderData }) => {
-		const verification = loaderData?.emailVerification
-		return titleOnly(verification?.ok ? 'Email changed' : 'Verify email change')
-	},
-	verifyEmailClaimRelease: ({ loaderData }) => {
-		const verification = loaderData?.emailVerification
-		return titleOnly(verification?.ok ? 'Email released' : 'Release email')
-	},
-	verifyEmailDestination: ({ loaderData }) => {
-		const verification = loaderData?.emailVerification
-		return titleOnly(
-			verification?.ok
-				? 'Email destination verified'
-				: 'Verify email destination',
-		)
-	},
-	unsubscribeTips: ({ loaderData }) => {
-		const unsubscribe = loaderData?.tipsUnsubscribe
-		return titleOnly(
-			unsubscribe?.ok ? 'Unsubscribed from tips' : 'Unsubscribe from tips',
-		)
-	},
 	connectOauth: ({ loaderData }) => {
 		const provider = loaderData?.connectOauth?.provider?.trim()
 		return titleOnly(provider ? `Connect ${provider}` : 'Connect an account')

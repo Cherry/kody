@@ -12,13 +12,9 @@ import {
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { type EmailVerificationLoaderData } from '#universal/loader-data.ts'
+import { type EmailVerificationOutcome } from '#universal/token-outcomes.ts'
 
-export function VerifyEmailRoute({
-	data,
-}: {
-	data: EmailVerificationLoaderData
-}) {
+export function VerifyEmailRoute({ data }: { data: EmailVerificationOutcome }) {
 	const isEmailChange = data.ok && data.kind === 'email_change'
 	const isEmailClaimRelease = data.ok && data.kind === 'email_claim_release'
 	const isEmailDestination = data.kind === 'email_destination'

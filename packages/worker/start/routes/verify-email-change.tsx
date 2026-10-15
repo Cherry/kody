@@ -20,7 +20,6 @@ export const Route = createFileRoute('/verify-email-change')({
 	component: Page,
 })
 function Page() {
-	const data = Route.useLoaderData().loaderData?.emailVerification
-	if (!data) throw new Error('Missing action result')
+	const data = Route.useLoaderData()
 	return <VerifyEmailRoute data={data} />
 }

@@ -1,4 +1,4 @@
-import { type AppPageResult } from '#app/page-result.ts'
+import { type EmailVerificationResult } from '#universal/token-outcomes.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -26,39 +26,20 @@ function getVerifyEmailDestinationError(reason: VerifyEmailDestinationReason) {
 	}
 }
 
-export async function loadVerifyEmailDestinationPage(
-	request: Request,
-	env: Env,
-): Promise<AppPageResult | Response> {
-	const url = new URL(request.url)
-	return executeVerifyEmailDestination({
-		request,
-		env,
-		token: url.searchParams.get('token'),
-		consume: request.method !== 'HEAD',
-	})
-}
-
 export async function executeVerifyEmailDestination({
 	request,
 	env,
 	token,
-	consume,
 }: {
 	request: Request
 	env: Env
 	token: string | null
-	consume: boolean
-}): Promise<AppPageResult | Response> {
+}): Promise<EmailVerificationResult> {
 	const result = await verifyEmailDestinationToken({
 		db: env.APP_DB,
 		token: token,
-		consume,
+		consume: true,
 	})
-
-	if (!consume) {
-		return new Response(null, { status: result.ok ? 200 : 400 })
-	}
 
 	const requestIp = getRequestIp(request) ?? undefined
 
@@ -75,16 +56,12 @@ export async function executeVerifyEmailDestination({
 		return {
 			title: 'Verify email destination',
 			status: 400,
-			loaderData: {
-				emailVerification: {
-					ok: false,
-					kind: 'email_destination',
-					reason: result.reason,
-					error: getVerifyEmailDestinationError(result.reason),
-					ctaHref: emailDestinationsHref,
-					ctaLabel: 'Resend from email inbox',
-				},
-			},
+			ok: false,
+			kind: 'email_destination',
+			reason: result.reason,
+			error: getVerifyEmailDestinationError(result.reason),
+			ctaHref: emailDestinationsHref,
+			ctaLabel: 'Resend from email inbox',
 		}
 	}
 
@@ -99,15 +76,11 @@ export async function executeVerifyEmailDestination({
 	})
 	return {
 		title: 'Email destination verified',
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_destination',
-				message:
-					'emailSend can now use this address. Mail comes from your platform inbox. Set it as the default from the email inbox if you want omitted `to` to use it.',
-				ctaHref: emailDestinationsHref,
-				ctaLabel: 'Go to email inbox',
-			},
-		},
+		ok: true,
+		kind: 'email_destination',
+		message:
+			'emailSend can now use this address. Mail comes from your platform inbox. Set it as the default from the email inbox if you want omitted `to` to use it.',
+		ctaHref: emailDestinationsHref,
+		ctaLabel: 'Go to email inbox',
 	}
 }

@@ -5,7 +5,6 @@
   "license": "FSL-1.1-ALv2",
   "type": "module",
   "imports": {
-    "#app/oauth-page.ts": "./packages/worker/start/oauth-page.ts",
     "#app/*": "./packages/worker/src/app/*",
     "#client/*": "./packages/worker/client/*",
     "#universal/*": "./packages/worker/universal/*",

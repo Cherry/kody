@@ -31,7 +31,6 @@
 	},
 	"include": [
 		"./start/http-entry.ts",
-		"./start/oauth-page.ts",
 		"./start/server.ts",
 		"./start/request-context.ts",
 		"./start/document-negotiation.ts",

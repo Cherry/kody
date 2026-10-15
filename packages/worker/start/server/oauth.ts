@@ -1,5 +1,4 @@
-import type {} from '../request-context.ts'
-import { createServerFn, getGlobalStartContext } from '@tanstack/react-start'
+import { createServerFn } from '@tanstack/react-start'
 
 export const loadOAuthPage = createServerFn({ method: 'GET' })
 	.validator((search: string) => {
@@ -29,14 +28,7 @@ export const loadOAuthPage = createServerFn({ method: 'GET' })
 		const bindings = getEnv(env)
 		const request = getRequest()
 		const url = new URL(`/oauth/authorize${search}`, request.url)
-		const initial = getGlobalStartContext()?.oauthPage
-		const initialData =
-			initial?.href === url.href
-				? initial.loaderData?.oauthAuthorize
-				: undefined
-		const result = initialData
-			? { data: initialData, setCookie: null }
-			: await loadOAuthAuthorizeData(request, bindings, url)
+		const result = await loadOAuthAuthorizeData(request, bindings, url)
 		const { session, setCookie } = await loadSessionInfo(request, bindings)
 		const cookies = [result.setCookie, setCookie].filter(
 			(cookie): cookie is string => Boolean(cookie),

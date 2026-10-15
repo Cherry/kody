@@ -11,7 +11,6 @@ export default defineConfig({
 		'packages/worker': {
 			paths: {
 				'#start/server/*': ['./start/server/*.ts'],
-				'#app/oauth-page.ts': ['./start/oauth-page.ts'],
 			},
 			entry: [
 				'start/client.tsx',

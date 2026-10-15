@@ -1,4 +1,4 @@
-import { type AppPageResult } from '#app/page-result.ts'
+import { type EmailVerificationResult } from '#universal/token-outcomes.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -43,7 +43,7 @@ export async function executeVerifyEmailClaimRelease({
 	request: Request
 	env: Env
 	token: string | null
-}): Promise<AppPageResult> {
+}): Promise<EmailVerificationResult> {
 	const result = await verifyEmailClaimReleaseToken({
 		db: env.APP_DB,
 		token: token,
@@ -63,12 +63,8 @@ export async function executeVerifyEmailClaimRelease({
 		return {
 			title: 'Release email',
 			status: result.reason === 'daily_cap' ? 429 : 400,
-			loaderData: {
-				emailVerification: {
-					ok: false,
-					error: getVerifyEmailClaimReleaseError(result.reason),
-				},
-			},
+			ok: false,
+			error: getVerifyEmailClaimReleaseError(result.reason),
 		}
 	}
 
@@ -83,15 +79,11 @@ export async function executeVerifyEmailClaimRelease({
 	})
 	return {
 		title: 'Email released',
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_claim_release',
-				message:
-					'That former address is no longer tied to this account. It can be used to create a new Kody account.',
-				ctaHref: '/account',
-				ctaLabel: 'Go to account',
-			},
-		},
+		ok: true,
+		kind: 'email_claim_release',
+		message:
+			'That former address is no longer tied to this account. It can be used to create a new Kody account.',
+		ctaHref: '/account',
+		ctaLabel: 'Go to account',
 	}
 }

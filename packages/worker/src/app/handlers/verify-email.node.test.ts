@@ -60,15 +60,11 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		redirectTo: oauthResume,
 	})
 	expect(oauthResponse).toMatchObject({
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_verify',
-				message: expect.any(String),
-				ctaHref: oauthResume,
-				ctaLabel: 'Continue authorization',
-			},
-		},
+		ok: true,
+		kind: 'email_verify',
+		message: expect.any(String),
+		ctaHref: oauthResume,
+		ctaLabel: 'Continue authorization',
 	})
 
 	const maliciousResponse = await executeVerifyEmail({
@@ -78,15 +74,11 @@ test('verify-email handler wires success CTA from redirectTo and rejects open re
 		redirectTo: 'https://evil.example',
 	})
 	expect(maliciousResponse).toMatchObject({
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_verify',
-				message: expect.any(String),
-				ctaHref: '/onboarding',
-				ctaLabel: 'Continue to onboarding',
-			},
-		},
+		ok: true,
+		kind: 'email_verify',
+		message: expect.any(String),
+		ctaHref: '/onboarding',
+		ctaLabel: 'Continue to onboarding',
 	})
 
 	expect(sendConnectAgentEmail).not.toHaveBeenCalled()
@@ -127,7 +119,7 @@ test('verify-email sends the connect-agent mail only on newly verified accounts'
 			)
 		}),
 	])
-	expect(response.loaderData?.emailVerification?.ok).toBe(true)
+	expect(response.ok).toBe(true)
 	expect(sendConnectAgentEmail).toHaveBeenCalledWith({
 		env: expect.anything(),
 		email: 'verified@example.com',

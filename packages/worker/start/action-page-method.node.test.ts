@@ -7,7 +7,10 @@ import {
 	isServerFunctionRequest,
 	rejectActionPageHead,
 } from './action-page-method.ts'
-import { verifyEmailDestinationHead } from '#start/server/action-page-http'
+import {
+	verifyEmailDestinationHead,
+	unsubscribeTipsPost,
+} from '#start/server/action-page-http'
 import { actionPagePaths } from './action-pages.ts'
 
 const router = createRouter({
@@ -53,4 +56,11 @@ test('native RPC detection does not depend on the token-page URL inventory', () 
 	} finally {
 		vi.unstubAllEnvs()
 	}
+})
+
+test('mail-provider one-click unsubscribe has an explicit native POST handler', () => {
+	const [, , route] = router.getMatchedRoutes('/unsubscribe/tips')
+	const handlers = route?.options.server?.handlers
+	assert.ok(handlers && typeof handlers === 'object')
+	assert.equal(handlers.POST, unsubscribeTipsPost)
 })

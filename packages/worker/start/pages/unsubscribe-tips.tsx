@@ -10,12 +10,12 @@ import {
 	stackedPageCss,
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { type TipsUnsubscribeLoaderData } from '#universal/loader-data.ts'
+import { type TipsUnsubscribeOutcome } from '#universal/token-outcomes.ts'
 
 export function UnsubscribeTipsRoute({
 	data,
 }: {
-	data: TipsUnsubscribeLoaderData
+	data: TipsUnsubscribeOutcome
 }) {
 	return (
 		<section css={pageCss}>

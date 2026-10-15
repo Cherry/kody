@@ -199,13 +199,7 @@ export default defineConfig(async ({ command }) => {
 					find: /^use-sync-external-store\/shim\/index\.js$/,
 					replacement: '@tanstack/redact',
 				},
-				{
-					find: /^#app\/oauth-page\.ts$/,
-					replacement: path.resolve(
-						root,
-						'packages/worker/start/oauth-page.ts',
-					),
-				},
+
 				{
 					find: /^#start\/server\/(.*)$/,
 					replacement: path.resolve(root, 'packages/worker/start/server/$1.ts'),

@@ -4,11 +4,10 @@ import { DatabaseSync } from 'node:sqlite'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { testCookieSecret } from '#worker/test-support/auth-provider-harness.ts'
-import { loadUnsubscribeTipsPage } from '#app/handlers/unsubscribe-tips.ts'
+import { executeUnsubscribeTips } from '#app/handlers/unsubscribe-tips.ts'
 import {
 	createTipsUnsubscribeToken,
 	isTipsEmailsOptedOut,
-	tipsUnsubscribeOneClickBody,
 } from '#worker/usage/tips-unsubscribe.ts'
 
 function createDb() {
@@ -34,7 +33,7 @@ function createEnv(db: D1Database) {
 	} as unknown as Env
 }
 
-test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', async () => {
+test('unsubscribe-tips operation validates token and applies idempotent opt-out', async () => {
 	const db = createDb()
 	await insertUser(db)
 	const env = createEnv(db)
@@ -44,67 +43,39 @@ test('unsubscribe-tips GET applies opt-out and POST accepts RFC one-click', asyn
 		userId: ownerIdFromStored('user-tips'),
 	})
 
-	const missing = await loadUnsubscribeTipsPage(
-		new Request('https://example.com/unsubscribe/tips'),
+	const missing = await executeUnsubscribeTips({
+		request: new Request('https://example.com/unsubscribe/tips'),
 		env,
-	)
+		token: null,
+	})
 	expect(missing).toMatchObject({
 		status: 400,
-		loaderData: {
-			tipsUnsubscribe: {
-				ok: false,
-				error: 'Unsubscribe token is required.',
-			},
-		},
+		ok: false,
+		error: 'Unsubscribe token is required.',
 	})
 
 	const getUrl = `https://example.com/unsubscribe/tips?token=${encodeURIComponent(token)}`
-	const first = await loadUnsubscribeTipsPage(new Request(getUrl), env)
+	const first = await executeUnsubscribeTips({
+		request: new Request(getUrl),
+		env,
+		token,
+	})
 	expect(first).toMatchObject({
-		loaderData: {
-			tipsUnsubscribe: {
-				ok: true,
-				alreadyOptedOut: false,
-				message: expect.stringContaining('unsubscribed from Kody tips'),
-			},
-		},
+		ok: true,
+		alreadyOptedOut: false,
+		message: expect.stringContaining('unsubscribed from Kody tips'),
 	})
 	expect(
 		await isTipsEmailsOptedOut({ db, userId: ownerIdFromStored('user-tips') }),
 	).toBe(true)
 
-	const again = await loadUnsubscribeTipsPage(new Request(getUrl), env)
+	const again = await executeUnsubscribeTips({
+		request: new Request(getUrl),
+		env,
+		token,
+	})
 	expect(again).toMatchObject({
-		loaderData: {
-			tipsUnsubscribe: { ok: true, alreadyOptedOut: true },
-		},
+		ok: true,
+		alreadyOptedOut: true,
 	})
-
-	const otherDb = createDb()
-	await insertUser(otherDb, 'user-one-click')
-	const otherEnv = createEnv(otherDb)
-
-	const postToken = await createTipsUnsubscribeToken({
-		env: otherEnv,
-		userId: ownerIdFromStored('user-one-click'),
-	})
-	const postUrl = `https://example.com/unsubscribe/tips?token=${encodeURIComponent(postToken)}`
-	const posted = await loadUnsubscribeTipsPage(
-		new Request(postUrl, {
-			method: 'POST',
-			headers: { 'content-type': 'application/x-www-form-urlencoded' },
-			body: tipsUnsubscribeOneClickBody,
-		}),
-		otherEnv,
-	)
-	expect(posted).toBeInstanceOf(Response)
-	if (!(posted instanceof Response)) throw new Error('Expected POST response')
-	expect(posted.status).toBe(200)
-	expect(await posted.text()).toContain('unsubscribed from Kody tips')
-	expect(
-		await isTipsEmailsOptedOut({
-			db: otherDb,
-			userId: ownerIdFromStored('user-one-click'),
-		}),
-	).toBe(true)
 })

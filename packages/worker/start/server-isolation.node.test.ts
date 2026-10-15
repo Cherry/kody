@@ -7,7 +7,6 @@ const { renderStart } = vi.hoisted(() => ({
 			options: {
 				context: {
 					nonce: string
-					oauthPage?: { setCookie?: string; href: string }
 				}
 			},
 		) => {
@@ -51,7 +50,6 @@ test('Start creates a fresh matching nonce for overlapping requests', async () =
 				response.json() as Promise<{
 					nonce: string
 					url: string
-					oauthPage?: unknown
 				}>,
 		),
 	)
@@ -61,42 +59,5 @@ test('Start creates a fresh matching nonce for overlapping requests', async () =
 			`'nonce-${bodies[index]?.nonce}'`,
 		)
 		expect(bodies[index]?.url).toBe(requests[index]?.url)
-		expect(bodies[index]?.oauthPage).toBeUndefined()
 	}
-})
-
-test('trusted OAuth options and cookies never leak between Start requests', async () => {
-	const env = {
-		COOKIE_SECRET: 'test-only',
-		WRANGLER_IS_LOCAL_DEV: 'true',
-	} as Env
-	const oauth = new Request('https://kody.test/oauth/authorize?state=one')
-	const ordinary = new Request('https://kody.test/pricing')
-	const [oauthResponse, ordinaryResponse] = await Promise.all([
-		handleRequest(oauth, env, undefined, {
-			status: 400,
-			setCookie: 'oauth_state=one; HttpOnly',
-		}),
-		handleRequest(ordinary, env),
-	])
-	const oauthBody = (await oauthResponse.json()) as {
-		nonce: string
-		oauthPage: { href: string }
-	}
-	const ordinaryBody = (await ordinaryResponse.json()) as {
-		nonce: string
-		oauthPage?: unknown
-	}
-	expect(oauthResponse.status).toBe(400)
-	expect(oauthResponse.headers.get('Set-Cookie')).toBe(
-		'oauth_state=one; HttpOnly',
-	)
-	expect(oauthBody.oauthPage.href).toBe(oauth.url)
-	expect(ordinaryResponse.status).toBe(200)
-	expect(ordinaryResponse.headers.get('Set-Cookie')).toBeNull()
-	expect(ordinaryBody.oauthPage).toBeUndefined()
-	expect(ordinaryBody.nonce).not.toBe(oauthBody.nonce)
-	const later = await handleRequest(new Request('https://kody.test/faq'), env)
-	expect(later.headers.get('Set-Cookie')).toBeNull()
-	expect(await later.json()).not.toHaveProperty('oauthPage')
 })

@@ -1811,42 +1811,6 @@ export type PendingVerificationLoaderData = {
 	emailVerificationDelivery?: EmailVerificationDelivery | null
 }
 
-export type EmailVerificationLoaderData =
-	| {
-			ok: true
-			kind:
-				| 'email_verify'
-				| 'email_change'
-				| 'email_claim_release'
-				| 'email_destination'
-			message: string
-			ctaHref?: string
-			ctaLabel?: string
-	  }
-	| {
-			ok: false
-			error: string
-			kind?:
-				| 'email_verify'
-				| 'email_change'
-				| 'email_claim_release'
-				| 'email_destination'
-			reason?: 'missing_token' | 'invalid_token' | 'expired_token'
-			ctaHref?: string
-			ctaLabel?: string
-	  }
-
-export type TipsUnsubscribeLoaderData =
-	| {
-			ok: true
-			alreadyOptedOut: boolean
-			message: string
-	  }
-	| {
-			ok: false
-			error: string
-	  }
-
 export type AccountIntegrationListItem = {
 	name: string
 	appSlug: string
@@ -2903,8 +2867,6 @@ export type AppLoaderData = {
 	accountMemories?: AccountMemoriesLoaderData
 	accountEmail?: AccountEmailLoaderData
 	authProviders?: AuthProvidersLoaderData
-	emailVerification?: EmailVerificationLoaderData
-	tipsUnsubscribe?: TipsUnsubscribeLoaderData
 	oauthAuthorize?: OAuthAuthorizeLoaderData
 	accountBilling?: AccountBillingLoaderData
 	accountBillingSuccess?: AccountBillingSuccessLoaderData

@@ -23,6 +23,7 @@ import { originWorkerHandler } from './origin-handler.ts'
 import {
 	handleAuthorizeInfo,
 	handleAuthorizeRequest,
+	tryHandleSilentOidcAuthorize,
 	oauthEmailVerificationRequiredMessage,
 	oauthScopes,
 } from './oauth-handlers.ts'
@@ -1541,12 +1542,12 @@ test('malformed max_age returns an OAuth error for silent authorization', async 
 	})
 
 	// Interactive recovery HTML is covered by the compiled native document test.
-	const silent = await handleAuthorizeRequest(
+	const silent = await tryHandleSilentOidcAuthorize(
 		new Request(`${authorizeUrl}&prompt=none`),
 		createEnv(createHelpers()),
 	)
-	expect(silent.status).toBe(302)
-	const silentLocation = silent.headers.get('Location')
+	expect(silent?.status).toBe(302)
+	const silentLocation = silent?.headers.get('Location')
 	expect(silentLocation).toBeTruthy()
 	expectRedirect(silentLocation ?? '', callbackUri, {
 		error: 'invalid_request',

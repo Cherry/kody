@@ -1,4 +1,4 @@
-import { type AppPageResult } from '#app/page-result.ts'
+import { type EmailVerificationResult } from '#universal/token-outcomes.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -40,7 +40,7 @@ export async function executeVerifyEmail({
 	env: Env
 	token: string | null
 	redirectTo?: string | null
-}): Promise<AppPageResult> {
+}): Promise<EmailVerificationResult> {
 	const result = await verifyEmailToken({
 		db: env.APP_DB,
 		token: token,
@@ -60,12 +60,8 @@ export async function executeVerifyEmail({
 		return {
 			title: 'Verify email',
 			status: 400,
-			loaderData: {
-				emailVerification: {
-					ok: false,
-					error: getVerifyEmailError(result.reason),
-				},
-			},
+			ok: false,
+			error: getVerifyEmailError(result.reason),
 		}
 	}
 
@@ -117,14 +113,10 @@ export async function executeVerifyEmail({
 	const cta = resolveVerifyEmailSuccessCta(redirectTo ?? null)
 	return {
 		title: 'Email verified',
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_verify',
-				message: cta.message,
-				ctaHref: cta.href,
-				ctaLabel: cta.label,
-			},
-		},
+		ok: true,
+		kind: 'email_verify',
+		message: cta.message,
+		ctaHref: cta.href,
+		ctaLabel: cta.label,
 	}
 }

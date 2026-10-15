@@ -24,8 +24,6 @@ import {
 	type OAuthAuthorizeConsentOrg,
 	type OAuthAuthorizeLoaderData,
 } from '#universal/loader-data.ts'
-import { publicAuthProvidersLoaderData } from '#app/public-auth-providers.ts'
-import { renderOAuthPage } from '#app/oauth-page.ts'
 import {
 	personalOrgId,
 	personIdFromStored,
@@ -1070,7 +1068,7 @@ export function handleAuthorizeRouteException(
 	return standaloneAuthorizeErrorHtmlResponse(message, 500)
 }
 
-async function tryHandleSilentOidcAuthorize(
+export async function tryHandleSilentOidcAuthorize(
 	request: Request,
 	env: Env,
 ): Promise<Response | null> {
@@ -1362,19 +1360,6 @@ export async function handleAuthorizeRequest(
 	request: Request,
 	env: Env,
 ): Promise<Response> {
-	if (request.method === 'GET') {
-		const silentOrError = await tryHandleSilentOidcAuthorize(request, env)
-		if (silentOrError) return silentOrError
-		const { data, setCookie } = await loadOAuthAuthorizeData(request, env)
-		return renderOAuthPage(request, env, {
-			loaderData: {
-				oauthAuthorize: data,
-				authProviders: publicAuthProvidersLoaderData(env),
-			},
-			setCookie,
-		})
-	}
-
 	if (request.method !== 'POST') {
 		return new Response('Method not allowed', { status: 405 })
 	}
@@ -1851,16 +1836,6 @@ export async function handleAuthorizeRequest(
 	}
 
 	return respondAuthorizeError(request, resolvedScopes.error)
-}
-
-export function handleOAuthCallback(
-	request: Request,
-	env: Env,
-): Promise<Response> {
-	const url = new URL(request.url)
-	const hasError =
-		url.searchParams.has('error') || url.searchParams.has('error_description')
-	return renderOAuthPage(request, env, { status: hasError ? 400 : 200 })
 }
 
 /**

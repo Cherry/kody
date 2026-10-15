@@ -15,8 +15,7 @@
 		"worker-configuration.d.ts",
 		"src/**/*.d.ts",
 		"../shared/src/**/*.ts",
-		"start/server.ts",
-		"start/oauth-page.ts"
+		"start/server.ts"
 	],
 	"exclude": [
 		"**/*.test.ts",

@@ -60,8 +60,9 @@ beforeEach(() => {
 	state.operation.mockResolvedValue({
 		title: 'Token result',
 		status: 400,
-		extraSetCookies: ['session=updated; HttpOnly'],
-		loaderData: { emailVerification: { ok: false, error: 'Invalid' } },
+		setCookie: 'session=updated; HttpOnly',
+		ok: false,
+		error: 'Invalid',
 	})
 })
 test.each([
@@ -73,12 +74,24 @@ test.each([
 ])(
 	'token function uses validated input and original request, forwards status/cookies',
 	async (fn) => {
+		if (fn === loadUnsubscribeTips)
+			state.operation.mockResolvedValue({
+				title: 'Token result',
+				status: 400,
+				ok: false,
+				error: 'Invalid',
+			})
 		const data = {
 			token: 'explicit-token',
 			request: 'untrusted',
 			env: 'untrusted',
 		}
-		await fn({ data })
+		const result = await fn({ data })
+		expect(result).toEqual({
+			title: 'Token result',
+			ok: false,
+			error: 'Invalid',
+		})
 		expect(state.operation).toHaveBeenCalledWith(
 			expect.objectContaining({
 				token: 'explicit-token',
@@ -87,19 +100,22 @@ test.each([
 			}),
 		)
 		expect(state.status).toHaveBeenCalledWith(400)
-		expect(state.header).toHaveBeenCalledWith('Set-Cookie', [
-			'session=updated; HttpOnly',
-		])
+		if (fn === loadUnsubscribeTips) expect(state.header).not.toHaveBeenCalled()
+		else
+			expect(state.header).toHaveBeenCalledWith(
+				'Set-Cookie',
+				'session=updated; HttpOnly',
+			)
 	},
 )
 test('RPC transport method does not select one-click unsubscribe or HEAD semantics', async () => {
 	await loadUnsubscribeTips({ data: { token: 'tip' } })
 	expect(state.operation).toHaveBeenLastCalledWith(
-		expect.objectContaining({ oneClick: false }),
+		expect.not.objectContaining({ oneClick: expect.anything() }),
 	)
 	await loadVerifyEmailDestination({ data: { token: 'destination' } })
 	expect(state.operation).toHaveBeenLastCalledWith(
-		expect.objectContaining({ consume: true }),
+		expect.not.objectContaining({ consume: expect.anything() }),
 	)
 })
 test('verification forwards only explicit redirect input', async () => {

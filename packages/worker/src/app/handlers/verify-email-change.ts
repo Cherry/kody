@@ -1,4 +1,4 @@
-import { type AppPageResult } from '#app/page-result.ts'
+import { type EmailVerificationResult } from '#universal/token-outcomes.ts'
 import {
 	auditDatabaseFromEnv,
 	getRequestIp,
@@ -43,7 +43,7 @@ export async function executeVerifyEmailChange({
 	request: Request
 	env: Env
 	token: string | null
-}): Promise<AppPageResult> {
+}): Promise<EmailVerificationResult> {
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	const result = await verifyEmailChangeToken({
 		db: env.APP_DB,
@@ -64,12 +64,8 @@ export async function executeVerifyEmailChange({
 		return {
 			title: 'Verify email change',
 			status: 400,
-			loaderData: {
-				emailVerification: {
-					ok: false,
-					error: getVerifyEmailChangeError(result.reason),
-				},
-			},
+			ok: false,
+			error: getVerifyEmailChangeError(result.reason),
 		}
 	}
 
@@ -98,14 +94,10 @@ export async function executeVerifyEmailChange({
 	})
 	return {
 		title: 'Email changed',
-		extraSetCookies: setCookie ? [setCookie] : undefined,
-		loaderData: {
-			emailVerification: {
-				ok: true,
-				kind: 'email_change',
-				message:
-					'Your account email has been changed and verified. The previous address stays tied to this account until you release it from Account settings → Former addresses.',
-			},
-		},
+		setCookie: setCookie ?? undefined,
+		ok: true,
+		kind: 'email_change',
+		message:
+			'Your account email has been changed and verified. The previous address stays tied to this account until you release it from Account settings → Former addresses.',
 	}
 }

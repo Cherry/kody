@@ -80,3 +80,20 @@ test('safe reads bypass protocol CSRF and RPC delegates to the separate strict n
 	)
 	expect(rpc.next).toHaveBeenCalledOnce()
 })
+
+test.each([
+	[{ Origin: 'https://evil.test' }, 403],
+	[{ 'Sec-Fetch-Site': 'cross-site' }, 403],
+	[{ Origin: 'https://kody.test', 'Sec-Fetch-Site': 'same-origin' }, 200],
+	[{}, 200],
+] as const)(
+	'OAuth consent POST uses native browser CSRF protection: %j',
+	async (headers, status) => {
+		const result = await run(
+			'/oauth/authorize?client_id=app&state=client-state',
+			headers,
+		)
+		expect(result.response.status).toBe(status)
+		expect(result.next).toHaveBeenCalledTimes(status === 200 ? 1 : 0)
+	},
+)

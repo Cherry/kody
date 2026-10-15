@@ -4,7 +4,6 @@ import { getAppBaseUrl } from '../src/app-base-url.ts'
 import { isNegotiatedDocumentPath } from './document-negotiation.ts'
 import { resolveAppPageCacheControl } from '../src/app/anonymous-html-cache.ts'
 import type {} from './request-context.ts'
-import { type OAuthPageOptions } from '#universal/oauth-page.ts'
 import {
 	createStartHandler,
 	defaultStreamHandler,
@@ -33,7 +32,6 @@ const startHandler = createStartHandler(async (context) => {
 export async function renderNativeDocument(
 	request: Request,
 	env: Env,
-	oauthPage?: OAuthPageOptions,
 	documentFailure?: { status: 403 | 404 | 500 },
 ) {
 	const url = new URL(request.url)
@@ -44,7 +42,6 @@ export async function renderNativeDocument(
 			context: {
 				nonce,
 				documentFailure,
-				oauthPage: oauthPage ? { ...oauthPage, href: request.url } : undefined,
 			},
 		})
 	}
@@ -62,9 +59,8 @@ export async function renderNativeDocument(
 		pathname: url.pathname,
 		request,
 		session: request.headers.has('Authorization') ? {} : null,
-		responseSetsCookie:
-			headers.has('Set-Cookie') || Boolean(oauthPage?.setCookie),
-		status: documentFailure?.status ?? oauthPage?.status ?? response.status,
+		responseSetsCookie: headers.has('Set-Cookie'),
+		status: documentFailure?.status ?? response.status,
 		localDev: env.WRANGLER_IS_LOCAL_DEV === 'true',
 	})
 	if (
@@ -86,11 +82,10 @@ export async function renderNativeDocument(
 		if (!vary.includes('accept') && !vary.includes('*'))
 			headers.append('Vary', 'Accept')
 	}
-	if (oauthPage?.setCookie) headers.append('Set-Cookie', oauthPage.setCookie)
 	const documentResponse = new Response(
 		request.method === 'HEAD' ? null : response.body,
 		{
-			status: documentFailure?.status ?? oauthPage?.status ?? response.status,
+			status: documentFailure?.status ?? response.status,
 			statusText: response.statusText,
 			headers,
 		},
