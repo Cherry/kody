@@ -154,8 +154,17 @@ test('OAuth callback exchanges and persists a connection with its required hosts
 	await page.getByRole('button', { name: 'Save and continue' }).click()
 	await page.getByRole('button', { name: `Continue to ${provider}` }).click()
 	await expect(
-		page.getByText('OAuth tokens saved.', { exact: true }),
+		page.getByText("You're connected.", { exact: true }),
 	).toBeVisible()
+	const details = page.getByTestId('connect-oauth-advanced')
+	await details.getByText('Advanced details', { exact: true }).click()
+	await expect(
+		details.getByText('Access token saved', { exact: true }),
+	).toBeVisible()
+	await expect(
+		details.getByText('Refresh token saved', { exact: true }),
+	).toBeVisible()
+	await expect(details.getByText('Yes', { exact: true })).toHaveCount(2)
 	await expect(page).toHaveURL(/\/connect\/oauth$/)
 	expect(authorizations).toBe(1)
 
