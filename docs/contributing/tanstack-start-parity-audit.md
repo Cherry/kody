@@ -1,13 +1,20 @@
 # Start parity audit
 
-## Cutover coverage review at source `996f6264d`
+## Current cutover evidence
 
-Validate run `38723276806` finished with E2E, Static and Workers passing, but
-Node and MCP failures. Source `5b1e2760d` fixes the empty-document regression
-using Start's response-body ownership transfer and corrects the negotiation test
-fixture. Its Validate run `38725337019` has passed Static, Workers and MCP; Node
-and E2E were still running when inspected. Later local commits through
-`996f6264d` still require CI.
+Validate run `38727730565` for source `672913f5f` has passed Static, Workers
+and MCP. Node finished with 6,403 passes and two failures, both in the new
+imperative auth hook test harness with an invalid hook call. The harness repair
+is in progress. Browser E2E remains running at this inspection. Later local
+commits have not yet been verified by CI.
+
+Preview run `38727730278` succeeded. Its health endpoint reports merge
+`15aff77590127fbde7ebd91cd92ef93b4688552d`, containing source `672913f5f`.
+The homepage returned complete HTML. Login rendered and hydrated, and its
+Forgot password link reached the rendered reset-password page. No credentials
+were entered during this check.
+
+## Earlier visual comparisons
 
 Preview merge `7a1dcb3dbe7e21216249949b3bc9f28b66b4ee8b` serves the `5b1e2760d`
 source. Its homepage returned complete HTML, matching CSP and markup nonces, and
@@ -39,9 +46,11 @@ Remaining gaps in browser and visual evidence:
   Real external-provider behavior remains unverified.
 - Billing: `e2e/start/late-checkout.spec.ts` mocks checkout to test stale
   navigation. `credit-top-up-return.spec.ts` covers anonymous redirects, HEAD
-  safety and invalid sessions. Successful checkout, portal return and credited
-  balance refresh lack a complete browser journey. Server completion and Stripe
-  worker tests provide narrower coverage.
+  safety and invalid sessions. Commit `07d603505` adds a local Stripe simulator
+  and a browser journey through subscription checkout, portal return, credit
+  purchase, reload and duplicate-return protection. It uses real Start operations
+  and checks the persisted balance and ledger count. Runtime confirmation is
+  pending; a simulated provider does not establish live Stripe parity.
 - Visuals: recorded comparisons use different authentication states or viewport
   sizes, and preview community listings are empty while production is populated.
   There are no screenshot assertions under `e2e`. Populated package detail and
