@@ -264,10 +264,6 @@ export function AccountProfilePanel(props: AccountProfilePanelProps) {
 				</div>
 			</form>
 			{emailVerified ? (
-				/* Remix drops `open` when the prop is undefined. A natively
-				 * opened disclosure must latch into emailChangeOpen on toggle,
-				 * or the first New email keystroke closes it and focus lands
-				 * on Former email. */
 				<details
 					open={emailChangeOpen ? true : undefined}
 					data-testid="account-change-email"

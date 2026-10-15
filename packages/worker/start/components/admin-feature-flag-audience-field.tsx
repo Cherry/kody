@@ -9,10 +9,6 @@ import {
 	type FeatureFlagAudience,
 } from '#universal/feature-flags/audiences.ts'
 const selectCss = getSelectCss()
-/**
- * Remix applies `defaultValue` as an HTML attribute, which `<select>` ignores.
- * Set `selected` on each option so saved audience hydrates after load/remount.
- */
 export function renderAdminFeatureFlagAudienceField(input: {
 	audience: FeatureFlagAudience | undefined
 	disabled: boolean

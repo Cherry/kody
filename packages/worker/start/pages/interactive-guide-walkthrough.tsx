@@ -34,8 +34,7 @@ import {
 /**
  * Shared interactive-guide transcript renderer (How Kody works, Google OAuth,
  * and later siblings). Tool calls are native <details> so they work without
- * JavaScript. This is a render helper, not a Remix component — only
- * CopyCodeBlock needs a handle.
+ * JavaScript. CopyCodeBlock owns its clipboard interaction.
  */
 export function renderInteractiveGuideWalkthrough(input: {
 	lead: ReactNode
@@ -43,7 +42,7 @@ export function renderInteractiveGuideWalkthrough(input: {
 	afterActs?: ReactNode
 	highlights?: Record<string, HighlightedCode>
 	hosts?: WalkthroughHostPick
-	/** Keep Remix-owned transcript DOM out of Chrome Translate (KODY-7N). */
+	/** Keep dynamic transcript DOM out of Chrome Translate (KODY-7N). */
 	lockTranslation?: boolean
 }) {
 	return (

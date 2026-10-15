@@ -20,10 +20,8 @@ import { colors, radius } from '#universal/styles/tokens.ts'
  * Customizable select is a progressive enhancement; other browsers keep
  * a native select styled as the same inline chip.
  *
- * `translate="no"` + `notranslate` keep Chrome Translate (and similar)
- * from rewriting Remix-owned select/label DOM. A host change calls
- * `handle.update()`; reconcile then throws NotFoundError if a translator
- * has replaced nodes Remix still holds as anchors (KODY-7N).
+ * Keep browser translators from replacing the live select and label nodes
+ * while host selection updates the transcript (KODY-7N).
  */
 export function WalkthroughHostIntro(props: {
 	hosts: WalkthroughHostPick
