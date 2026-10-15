@@ -83,6 +83,9 @@ Package reads, settings, individual and bundled approvals, and Collaborators use
 native Start server functions. Collaborator changes require
 `package:manage_access` and support granting or revoking internal team/member
 access through `packageCollaboratorSet` and `packageCollaboratorRemove`.
+Personal packages also create addressed invites by email or username and revoke
+pending invites through native Start functions, backed by `inviteCreate` and
+`inviteRevoke`. One-time messages stay local to the submitted actor and package.
 Existing outside collaborators are listed read-only and can be removed. Raw
 files, assets, and icons remain HTTP resources:
 

@@ -26,6 +26,7 @@ const rowSchema = z.object({
 		'orphan_purged',
 		'orphan_would_purge',
 		'already_gone',
+		'soft_delete_failed',
 	]),
 })
 
@@ -58,6 +59,13 @@ const inputSchema = z.object({
 		.optional()
 		.describe(
 			'Resume memories after this id inside the first org after orgCursor. Pass the previous nextMemoryCursor until it is null.',
+		),
+	plannedPurgeMemoryIds: z
+		.array(z.string().min(1))
+		.max(10_000)
+		.optional()
+		.describe(
+			'Dry-run only: pass previous nextPlannedPurgeMemoryIds so the final grant sweep counts would-purge memories from earlier pages of the same org. Ignored when dryRun is false.',
 		),
 	orgLimit: z
 		.number()
@@ -101,10 +109,12 @@ const outputSchema = z.object({
 	orphanPurged: count,
 	grantsWouldRevoke: count,
 	grantsRevoked: count,
+	vectorCleanupFailed: count,
 	rows: z.array(rowSchema),
 	grantRows: z.array(grantRowSchema),
 	nextOrgCursor: z.string().nullable(),
 	nextMemoryCursor: z.string().nullable(),
+	nextPlannedPurgeMemoryIds: z.array(z.string()),
 	warnings: z.array(z.string()),
 })
 
@@ -115,7 +125,7 @@ export const adminMemoryPersonalizePurgeCapability = defineDomainCapability(
 		idempotent: true,
 		name: 'adminMemoryPersonalizePurge',
 		description:
-			'Soft-delete verified legacy team-org mcp_memories and obsolete memory grants after ADR 0072 copy (adminMemoryPersonalizeCopy). Never deletes a memory until every effective reader has a personal copy (provenance URI or identical content). Rows report counts and provenance URIs only — never subject/summary/details. dryRun defaults to true. Page with orgCursor and memoryCursor until both next cursors are null.',
+			'Soft-delete verified legacy team-org mcp_memories and obsolete memory grants after ADR 0072 copy (adminMemoryPersonalizeCopy). Never deletes a memory until every effective reader has a personal copy (provenance URI or identical content). Rows report counts and provenance URIs only — never subject/summary/details. dryRun defaults to true. Page with orgCursor, memoryCursor, and plannedPurgeMemoryIds until nextOrgCursor and nextMemoryCursor are null (pass nextPlannedPurgeMemoryIds back on dry-run mid-org pages).',
 		keywords: [
 			'admin',
 			'memory',
@@ -141,6 +151,7 @@ export const adminMemoryPersonalizePurgeCapability = defineDomainCapability(
 						dryRun: args.dryRun !== false,
 						orgCursor: args.orgCursor ?? null,
 						memoryCursor: args.memoryCursor ?? null,
+						plannedPurgeMemoryIds: args.plannedPurgeMemoryIds ?? null,
 						orgLimit: args.orgLimit,
 						memoryLimitPerOrg: args.memoryLimitPerOrg,
 						orgIds: args.orgIds ?? null,
@@ -148,7 +159,7 @@ export const adminMemoryPersonalizePurgeCapability = defineDomainCapability(
 					}),
 				{
 					successReason: (result) =>
-						`dry_run=${result.dryRun};orgs=${result.scannedOrgs};memories=${result.scannedMemories};would=${result.wouldPurge};purged=${result.purged};blocked=${result.blockedMissingCopy};orphanWould=${result.orphanWouldPurge};orphanPurged=${result.orphanPurged};grantsWould=${result.grantsWouldRevoke};grantsRevoked=${result.grantsRevoked};nextOrg=${result.nextOrgCursor ?? 'done'};nextMemory=${result.nextMemoryCursor ?? 'done'}`,
+						`dry_run=${result.dryRun};orgs=${result.scannedOrgs};memories=${result.scannedMemories};would=${result.wouldPurge};purged=${result.purged};blocked=${result.blockedMissingCopy};orphanWould=${result.orphanWouldPurge};orphanPurged=${result.orphanPurged};grantsWould=${result.grantsWouldRevoke};grantsRevoked=${result.grantsRevoked};vectorFailed=${result.vectorCleanupFailed};nextOrg=${result.nextOrgCursor ?? 'done'};nextMemory=${result.nextMemoryCursor ?? 'done'}`,
 				},
 			)
 		},

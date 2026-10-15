@@ -1,13 +1,13 @@
 # Start parity audit
 
-## Verification blocked at source a89c03111
+## Main catch-up verification
 
-PR 3561 is open and conflicts with main `cf4cef2d2`. Validate and Preview cannot
-run on that source until the conflict is resolved. Merging main remains pending
-user approval because automatic approval review rejected its migrations 0154 and
-0155 under the no-schema-change instruction. The migration's follow-up commits
-add no schema changes. Main's addressed collaborator invite feature has been
-ported directly to native Start functions without restoring its HTTP action.
+The user approved keeping up with main, including its existing migrations 0154
+and 0155. The catch-up to `e6a1556d2` retains those migrations unchanged and
+adds none of our own. Collaborator conflicts preserve the native Start invite
+port, operation-only mutation results, handoff reconciliation and security
+coverage. Obsolete client routes remain deleted. Validate and Preview must run
+again on the merged source before readiness can be assessed.
 
 The last completed Validate, `38773350396` on source `050de978f`, passed
 Workers, Static and MCP. Node failed four new search fixture tests because their
