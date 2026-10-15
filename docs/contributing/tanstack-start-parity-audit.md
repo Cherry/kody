@@ -1,5 +1,26 @@
 # Start parity audit
 
+## Preview and follow-up at source `231d9ec91`
+
+Preview run `38729720020` completed successfully. Health reports deployed merge
+`85c87e2115fc8a9906279f73ddddf14262d192f3`, combining this source with main
+`95904f850`. The homepage returns complete HTML with its title and main content.
+Anonymous `/account` and `/account/passkeys` requests redirect to login with
+`redirectTo` preserved. An unknown route returns 404 with the Not found title.
+In Chrome, login hydrates and enables controls; Forgot password reaches the
+rendered reset-password page. No credentials or reset emails were submitted.
+
+Validate `38729719947` has passed Workers and MCP. Static failed on two unused
+OAuth type exports and audit formatting, fixed locally in `cfafb012f`. Node and
+browser E2E remain running at this inspection. Later local changes include the
+two-factor identity redirect fix and removal of dead resend-verification result
+branches in `cffb44b8a`.
+
+The website consent page still needs its OAuth decision transport migrated to a
+Start server function. `POST /oauth/authorize` remains necessary for actual MCP
+tooling; that external contract does not require the website to use raw fetch.
+The shared decision extraction is under independent review and is not deployed.
+
 ## Current cutover evidence
 
 Validate run `38727730565` for source `672913f5f` has passed Static, Workers and
