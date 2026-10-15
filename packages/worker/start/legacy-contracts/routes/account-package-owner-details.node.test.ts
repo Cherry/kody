@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query'
 import { jsx } from 'react/jsx-runtime'
 import { renderStartPage as renderToString } from '../../test-support/render-start-page.ts'
 import { expect, test } from 'vitest'
@@ -273,3 +274,57 @@ test('package settings forwards each server permission independently', async () 
 		expect(html).not.toContain('Delete package')
 	}
 })
+
+for (const fails of [false, true]) {
+	test(`visibility pending state survives a new observer and clears after ${fails ? 'failure' : 'success'}`, async () => {
+		const client = new QueryClient()
+		let finish!: () => void
+		const response = new Promise<void>((resolve) => {
+			finish = resolve
+		})
+		const mutation = client.getMutationCache().build(client, {
+			mutationKey: ['package', null, 'pkg-1'],
+			meta: { operation: 'set-visibility' },
+			mutationFn: async () => {
+				await response
+				if (fails) throw new Error('Response lost')
+				return { ok: true }
+			},
+		})
+		const settled = mutation.execute(undefined).catch(() => undefined)
+		const render = () =>
+			renderToString(
+				jsx(AccountPackageOwnerDetails, {
+					ownerUsername: 'kentcdodds',
+					packageDetail: packageDetail(),
+					lockInFlight: false,
+					viewerCanPublish: true,
+					viewerCanDelete: false,
+					viewerCanAdoptCommunityFork: false,
+					onToggleLock: () => {},
+				}),
+				'/@kentcdodds/demo-app/settings',
+				null,
+				(next) => {
+					next.getMutationCache().add(mutation)
+				},
+			)
+		try {
+			// A navigation remount has no local submitting flag or original observer.
+			const pending = await render()
+			expect(pending).toMatch(
+				/<button[^>]*disabled=""[^>]*data-testid="package-make-private"/,
+			)
+			finish()
+			await settled
+			const complete = await render()
+			expect(complete).not.toMatch(
+				/<button[^>]*disabled=""[^>]*data-testid="package-make-private"/,
+			)
+		} finally {
+			finish()
+			await settled
+			client.clear()
+		}
+	})
+}

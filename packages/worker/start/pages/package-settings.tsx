@@ -4,6 +4,7 @@ import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
 import { useState } from 'react'
+import { colors } from '#universal/styles/tokens.ts'
 import { type CommunityDetailApiPayload } from '../community-types.ts'
 import { renderPackageRepoActions } from '../components/package-title-actions.tsx'
 import { renderPackageRepoChrome } from '../components/package-repo-nav.tsx'
@@ -101,7 +102,18 @@ export function PackageSettingsRoute({
 				css={detailSectionCss}
 			>
 				<h2 id="package-owner-details-title">Package details</h2>
-				{message ? <p role="alert">{message}</p> : null}
+				{message ? (
+					<p
+						role="alert"
+						css={{
+							margin: '0.8rem 0 0',
+							color: colors.error,
+							fontSize: '0.95rem',
+						}}
+					>
+						{message}
+					</p>
+				) : null}
 				{ownerPackage.creditAttribution ? (
 					<PackageCreditAttributionPanel row={ownerPackage.creditAttribution} />
 				) : null}

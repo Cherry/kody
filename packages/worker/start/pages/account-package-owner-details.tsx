@@ -64,9 +64,8 @@ export function AccountPackageOwnerDetails(props: {
 	)
 	const capture = useSubmitterScope()
 	const [confirmName, setConfirmName] = useState('')
-	const [visibilityState, setVisibilityState] = useState<
-		'idle' | 'submitting' | 'error'
-	>('idle')
+	const visibilityPending =
+		visibilityMutation.pendingAction === 'set-visibility'
 	const [visibilityMessage, setVisibilityMessage] = useState<string | null>(
 		null,
 	)
@@ -75,9 +74,8 @@ export function AccountPackageOwnerDetails(props: {
 		packageDetail: AccountPackageDetail,
 		visibility: 'public' | 'private',
 	) {
-		if (visibilityState === 'submitting') return
+		if (visibilityPending) return
 		if (confirmName.trim() !== packageDetail.kodyId) {
-			setVisibilityState('error')
 			setVisibilityMessage(
 				visibility === 'public'
 					? `Type ${packageDetail.kodyId} to make this package forkable. Anyone will be able to read and fork the default branch on /community.`
@@ -86,7 +84,6 @@ export function AccountPackageOwnerDetails(props: {
 
 			return
 		}
-		setVisibilityState('submitting')
 		setVisibilityMessage(null)
 
 		const isCurrent = capture()
@@ -97,11 +94,9 @@ export function AccountPackageOwnerDetails(props: {
 				confirmName: confirmName.trim(),
 			})
 			if (!isCurrent()) return
-			setVisibilityState('idle')
 			setConfirmName('')
 		} catch (error) {
 			if (!isCurrent()) return
-			setVisibilityState('error')
 			setVisibilityMessage(
 				error instanceof Error
 					? error.message
@@ -315,7 +310,7 @@ export function AccountPackageOwnerDetails(props: {
 						</label>
 						<button
 							type="button"
-							disabled={visibilityState === 'submitting'}
+							disabled={visibilityPending}
 							data-testid={
 								packageDetail.isPrivate
 									? 'package-make-public'
@@ -329,7 +324,7 @@ export function AccountPackageOwnerDetails(props: {
 								)
 							}
 						>
-							{visibilityState === 'submitting'
+							{visibilityPending
 								? 'Saving…'
 								: packageDetail.isPrivate
 									? 'Make public on the community'
