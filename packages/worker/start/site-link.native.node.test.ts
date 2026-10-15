@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, type ReactNode } from 'react'
 import { renderToString } from 'react-dom/server'
 import {
 	createMemoryHistory,
@@ -11,7 +11,24 @@ import {
 import { memoriesSearch } from './filter-search.ts'
 import { expect, test } from 'vitest'
 import { SiteLink } from './components/site-link.tsx'
-import { renderStartPage } from './test-support/render-start-page.ts'
+async function renderStartPage(page: ReactNode, href = '/test') {
+	const root = createRootRoute()
+	const routes = ['/test', '/docs', '/docs/connect', '/onboarding/step-2'].map(
+		(path) =>
+			createRoute({
+				getParentRoute: () => root,
+				path,
+				component: () => page,
+			}),
+	)
+	const router = createRouter({
+		origin: 'https://kody.test',
+		routeTree: root.addChildren(routes),
+		history: createMemoryHistory({ initialEntries: [href] }),
+	})
+	await router.load()
+	return renderToString(createElement(RouterProvider, { router }))
+}
 
 test('exact active links preserve explicit current semantics and default to page', async () => {
 	for (const current of ['step', 'true', false, undefined] as const) {
@@ -80,6 +97,7 @@ async function renderMemoryLink(href: string, documentNavigation = false) {
 		component: () => createElement(SiteLink, { href }, 'Memory'),
 	})
 	const router = createRouter({
+		origin: 'https://kody.test',
 		routeTree: root.addChildren([route]),
 		history: createMemoryHistory({ initialEntries: ['/memories/one'] }),
 	})
@@ -110,5 +128,5 @@ test('document links preserve opaque protocol query values and hash exactly', as
 	expect(html).toContain(
 		'href="/memories/one?state=%22opaque%22&amp;includeDeleted=false#detail"',
 	)
-	expect(html).not.toContain('documentHref=')
+	expect(html).not.toContain('data-status=')
 })
