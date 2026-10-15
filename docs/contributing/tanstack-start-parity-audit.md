@@ -1,5 +1,25 @@
 # Start parity audit
 
+## Follow-up at source `b1ae9038c`
+
+The previous E2E run finished with 167 passes and three failures. Two retained
+admin-form cases exposed a stale reserved-name snapshot across request env
+objects; admin reads now bypass the public username-validation memo, with a
+cross-env regression case. The webhook fixture attempted Git against the local
+mock Artifacts service; it now publishes through that service's snapshot API.
+The production package source safety policy remains unchanged.
+
+This source also replaces the global organization pathname guard with native
+route authorization and explicit OAuth/download scope checks. Invalid OAuth
+organization input cannot become personal scope. Unsupported methods may return
+native 405 before authorization instead of the old early 404. Entity explanation
+copy is selected explicitly by page owners rather than by a pathname matcher.
+
+All four Start typechecks, worker-test and tools typechecks, lint, Knip, and
+documentation reference checks passed. Runtime confirmation is pending in
+Validate run `38717968492`; preview run `38717968495` is also pending. These
+changes do not establish authenticated or populated-fixture visual parity.
+
 ## Preview check at source `fb9728a37`
 
 Preview run `38715337497` succeeded. The health endpoint reports deployed merge
