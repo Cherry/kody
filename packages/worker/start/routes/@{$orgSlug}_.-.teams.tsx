@@ -7,7 +7,10 @@ const pageQuery = createPageQuery('loadOrgTeams', loadOrgTeams, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/teams')({
-	staticData: { orgScope: {} },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'teams' },
+		orgScope: {},
+	},
 	loader: ({ context, params, preload }) =>
 		loadPageQuery(
 			context.queryClient,

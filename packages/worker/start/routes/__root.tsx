@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { pageNavigationForMatches } from '../page-navigation.ts'
 import { appShellForMatches } from '../app-shell.ts'
 import { requiresSessionVerification } from '../session-verification-policy.ts'
 import { routeMethods } from '../route-method-middleware.ts'
@@ -84,6 +85,7 @@ export const Route = createRootRouteWithContext<{
 		context,
 		matches,
 	}) => {
+		const pageNavigation = pageNavigationForMatches(matches)
 		const orgScope = orgNavigationScope(matches)
 		const appShell = appShellForMatches(matches)
 		if (typeof document === 'undefined') {
@@ -103,6 +105,7 @@ export const Route = createRootRouteWithContext<{
 			return {
 				...identity,
 				orgScope,
+				pageNavigation,
 				pageLocation: location,
 				appShell,
 				verifyAccess: false,
@@ -119,6 +122,7 @@ export const Route = createRootRouteWithContext<{
 		return {
 			actorKey,
 			orgScope,
+			pageNavigation,
 			pageLocation: location,
 			appShell,
 			presentationOnly,

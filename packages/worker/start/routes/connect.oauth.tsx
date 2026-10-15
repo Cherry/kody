@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { oauthCallbackFlowKey } from '../oauth-callback-navigation.ts'
 import { connectOauthInput } from '../connect-input.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadConnectOauth } from '#start/server/connect'
@@ -20,7 +21,8 @@ function Page() {
 	const href = location.href
 	return (
 		<ConnectOauthRoute
-			key={location.state.__TSR_key ?? location.state.key}
+			key={oauthCallbackFlowKey(location)}
+			flowKey={oauthCallbackFlowKey(location)!}
 			currentHref={href}
 			initialData={Route.useLoaderData().payload}
 		/>

@@ -64,7 +64,9 @@ import { renderOnboardingBanner } from './onboarding-banner.tsx'
 export function AccountPage({
 	payloads,
 	currentHref,
+	view,
 }: {
+	view: 'profile' | 'security' | 'data'
 	payloads: AccountPagePayloads
 	currentHref: string
 }) {
@@ -350,13 +352,6 @@ export function AccountPage({
 			},
 		)
 	}
-
-	const view =
-		new URL(currentHref, 'https://kody.local').pathname === '/account/security'
-			? 'security'
-			: new URL(currentHref, 'https://kody.local').pathname === '/account/data'
-				? 'data'
-				: 'profile'
 
 	const emailClaims = accountEmailClaims.snapshot
 	const isSendingEmailChange = emailClaims.emailChangeStatus === 'sending'

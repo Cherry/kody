@@ -19,8 +19,11 @@ export function AppBrowserEffects() {
 			new URL(window.location.href).searchParams.get('accountCreated') === '1'
 		)
 			clearStoredFirstTouchAttribution()
-		return scheduleConsumeAccountCreatedFathomSignal()
-	}, [])
+		return scheduleConsumeAccountCreatedFathomSignal({
+			replaceHref: (next) =>
+				router.history.replace(next, router.history.location.state),
+		})
+	}, [router])
 	useEffect(() => {
 		persistReferralCookieFromLocation()
 		const next = locationWithoutHomeOgParam(window.location.href)

@@ -10,7 +10,7 @@ import { type AccountRailTab } from '#client/routes/account-rail.ts'
  */
 export function AccountSectionTabs(props: {
 	label: string
-	tabs: ReadonlyArray<AccountRailTab & { active: boolean }>
+	tabs: ReadonlyArray<Omit<AccountRailTab, 'id'> & { active: boolean }>
 }) {
 	return (
 		<nav

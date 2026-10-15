@@ -3,8 +3,10 @@ import {
 	readConnectIntegration,
 	readConnectChooser,
 } from '#start/server/connect-integration'
+import { useRouter } from '@tanstack/react-router'
+import { createOAuthCallbackNavigationScope } from '../oauth-callback-navigation.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { useState, useRef, useEffect, type FormEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react'
 import {
 	type ConnectOauthExistingConnection,
 	type ConnectOauthLoaderData,
@@ -52,7 +54,7 @@ import {
 	approveConnectOauthHosts,
 	persistConnectOauthOrgSlug,
 	readConnectOauthOrgSlug,
-	replaceConnectOauthCallbackUrl,
+	connectOauthCallbackHref,
 	saveConnectOauthConnection,
 	withConnectOauthChooserOrg,
 	buildConnectOauthAuthorizeUrl,
@@ -256,10 +258,19 @@ function initialOauthState(
 export function ConnectOauthRoute({
 	initialData,
 	currentHref,
+	flowKey,
 }: {
 	initialData: ConnectOauthLoaderData
 	currentHref: string
+	flowKey: string
 }) {
+	const router = useRouter()
+	const [navigationScope] = useState(() =>
+		createOAuthCallbackNavigationScope({
+			href: currentHref,
+			state: router.latestLocation.state,
+		}),
+	)
 	const [flowOrg] = useState(() =>
 		readConnectOauthOrgSlug(new URL(currentHref, 'https://kody.local')),
 	)
@@ -320,6 +331,10 @@ export function ConnectOauthRoute({
 	const mounted = useRef(false),
 		inFlight = useRef(false),
 		callbackStarted = useRef(false)
+	const isFlowActive = useCallback(
+		() => mounted.current && navigationScope.isActive(),
+		[navigationScope],
+	)
 	function update(next: Partial<typeof state>) {
 		setState((previous) => ({ ...previous, ...next }))
 	}
@@ -331,10 +346,14 @@ export function ConnectOauthRoute({
 	}
 	useEffect(() => {
 		mounted.current = true
+		const unsubscribe = router.subscribe('onBeforeNavigate', ({ toLocation }) =>
+			navigationScope.navigate(toLocation),
+		)
 		return () => {
 			mounted.current = false
+			unsubscribe()
 		}
-	}, [])
+	}, [router, navigationScope])
 	async function approveAllHostApprovals() {
 		if (approvingAllHosts || !hostApprovalLinks.length) return
 		update({ approvingAllHosts: true })
@@ -344,7 +363,7 @@ export function ConnectOauthRoute({
 				hosts: hostApprovalLinks.map((link) => link.host),
 				orgSlug: flowOrg,
 			})
-			if (!mounted.current) return
+			if (!isFlowActive()) return
 			if (!result.ok) {
 				setStatus(result.error, 'error')
 				return
@@ -357,13 +376,13 @@ export function ConnectOauthRoute({
 			})
 			void invalidatePages()
 		} catch (error) {
-			if (mounted.current)
+			if (isFlowActive())
 				setStatus(
 					formatConnectOauthCaughtError(error, 'Unable to approve all hosts.'),
 					'error',
 				)
 		} finally {
-			if (mounted.current) update({ approvingAllHosts: false })
+			if (isFlowActive()) update({ approvingAllHosts: false })
 		}
 	}
 	async function handleSetupSubmit(event: FormEvent<HTMLFormElement>) {
@@ -399,7 +418,7 @@ export function ConnectOauthRoute({
 				clientSecret || undefined,
 				flowOrg,
 			)
-			if (!mounted.current) return
+			if (!isFlowActive()) return
 			if (!result.ok) {
 				setStatus(result.error, 'error')
 				return
@@ -418,7 +437,7 @@ export function ConnectOauthRoute({
 			})
 			void invalidatePages()
 		} catch (error) {
-			if (mounted.current)
+			if (isFlowActive())
 				setStatus(
 					formatConnectOauthCaughtError(
 						error,
@@ -428,7 +447,7 @@ export function ConnectOauthRoute({
 				)
 		} finally {
 			inFlight.current = false
-			if (mounted.current) update({ submitting: false })
+			if (isFlowActive()) update({ submitting: false })
 		}
 	}
 	function toggleRequestedScope(scope: string) {
@@ -461,21 +480,23 @@ export function ConnectOauthRoute({
 				hasConfigError,
 				redirectUri: getConnectOauthRedirectUri(ssrRedirectUri),
 			})
-			if (mounted.current) window.location.assign(href)
+			if (isFlowActive()) window.location.assign(href)
 		} catch (error) {
-			if (mounted.current)
+			if (isFlowActive())
 				setStatus(
 					formatConnectOauthCaughtError(error, 'Unable to start OAuth.'),
 					'error',
 				)
 		} finally {
 			inFlight.current = false
-			if (mounted.current) update({ submitting: false })
+			if (isFlowActive()) update({ submitting: false })
 		}
 	}
 	useEffect(() => {
 		if (callbackStarted.current) return
-		const callback = readConnectOauthCallback()
+		const callback = readConnectOauthCallback(
+			new URL(currentHref, 'https://kody.local').search,
+		)
 		if (callback.kind === 'none') {
 			persistConnectOauthOrgSlug(
 				readOrgSlugFromUrl(new URL(currentHref, window.location.origin)),
@@ -485,6 +506,14 @@ export function ConnectOauthRoute({
 		callbackStarted.current = true
 		async function complete() {
 			try {
+				const cleanHref = connectOauthCallbackHref(ssrRedirectUri, flowOrg)
+				navigationScope.replace(cleanHref, flowKey)
+				await router.navigate({
+					href: cleanHref,
+					replace: true,
+					state: { oauthCallbackFlow: { key: flowKey, href: cleanHref } },
+				})
+				if (!isFlowActive()) return
 				let nextConfig = readStoredConnectOauthConfig()
 				if (!nextConfig) {
 					const parsed = readConnectOauthQueryConfig(
@@ -509,12 +538,12 @@ export function ConnectOauthRoute({
 						})
 					}
 				}
-				if (!mounted.current) return
+				if (!isFlowActive()) return
 				if (!nextConfig) {
 					const chooser = await readConnectChooser({
 						data: { orgSlug: flowOrg ?? undefined },
 					})
-					if (!mounted.current) return
+					if (!isFlowActive()) return
 					update({
 						chooserOptions: withConnectOauthChooserOrg(
 							chooser.options,
@@ -529,7 +558,6 @@ export function ConnectOauthRoute({
 					return
 				}
 				update({ config: nextConfig, currentStep: 'callback' })
-				replaceConnectOauthCallbackUrl(ssrRedirectUri, flowOrg)
 
 				if (callback.kind === 'error') {
 					update({
@@ -560,7 +588,7 @@ export function ConnectOauthRoute({
 					getConnectOauthRedirectUri(ssrRedirectUri),
 					flowOrg,
 				)
-				if (!mounted.current) return
+				if (!isFlowActive()) return
 				if (!exchange.ok) {
 					update({
 						statusMessage: exchange.error,
@@ -579,7 +607,7 @@ export function ConnectOauthRoute({
 					tokenPayload: exchange.data,
 					orgSlug: flowOrg,
 				})
-				if (!mounted.current) return
+				if (!isFlowActive()) return
 				if (!payload.ok) {
 					update({
 						statusMessage: payload.error,
@@ -601,7 +629,7 @@ export function ConnectOauthRoute({
 				})
 				void invalidatePages()
 			} catch (error) {
-				if (mounted.current)
+				if (isFlowActive())
 					update({
 						statusMessage: formatConnectOauthCaughtError(
 							error,
@@ -613,7 +641,16 @@ export function ConnectOauthRoute({
 			}
 		}
 		void complete()
-	}, [currentHref, invalidatePages, ssrRedirectUri, flowOrg])
+	}, [
+		currentHref,
+		invalidatePages,
+		ssrRedirectUri,
+		flowOrg,
+		flowKey,
+		router,
+		navigationScope,
+		isFlowActive,
+	])
 	const headerInput = {
 		config,
 		requestedProvider,

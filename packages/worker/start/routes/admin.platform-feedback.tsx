@@ -12,6 +12,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/admin/platform-feedback')({
+	staticData: { navigation: { rail: 'admin', item: 'platform-feedback' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: {

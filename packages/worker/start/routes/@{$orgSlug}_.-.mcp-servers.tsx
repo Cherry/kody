@@ -10,7 +10,10 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers')({
-	staticData: { orgScope: { section: 'mcp-servers' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'mcp-servers' },
+	},
 	beforeLoad: ({ location, params }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),

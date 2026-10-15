@@ -17,8 +17,25 @@ copy is selected explicitly by page owners rather than by a pathname matcher.
 
 All four Start typechecks, worker-test and tools typechecks, lint, Knip, and
 documentation reference checks passed. Runtime confirmation is pending in
-Validate run `38717968492`; preview run `38717968495` is also pending. These
-changes do not establish authenticated or populated-fixture visual parity.
+Validate run `38717968492`. Workers and MCP passed; E2E is still running. Node
+finished with six failures: four OAuth scope fixtures imported an incomplete
+Cloudflare mock, and two MCP authorization cases treated an inaccessible
+organization as signed out. Corrections are being reviewed locally without
+weakening the assertions. Static failed only its Format step; local formatting
+corrections have not yet been verified by a subsequent CI run. Preview run
+`38717968495` succeeded, and the health endpoint confirms deployed merge
+`27bb89acdc80ce0a36f754a5b5c03f048ce26f3d`, combining this source with main
+`742ca59d3ccd3fe366668f6870c376cba91c012f`. These changes do not establish
+authenticated or populated-fixture visual parity.
+
+Live anonymous HTTP comparisons on that deployed merge matched production status
+and title for `/faq`, `/pricing`, `/login`, and `/community`. Canonicals
+retained each page path on the respective deployment origin. `/robots.txt` and
+`/sitemap.xml` returned 200 with the expected text and XML content types. An
+unknown route returned 404 on both hosts, but its preview title was `Kody`
+instead of production's `Not found`. That is an open head-metadata regression,
+not a passing parity check. These HTTP observations do not verify rendering,
+navigation, sitemap contents, or authenticated behavior.
 
 ## Preview check at source `fb9728a37`
 

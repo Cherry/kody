@@ -99,6 +99,11 @@ export function PageHead({
 	overrideHead,
 }: { overrideHead?: ResolvedDocumentHead } = {}) {
 	const tags = useTags()
+	const unmatched = useRouterState({
+		select: (state) => state.matches.some((match) => match._notFound),
+	})
+	const resolvedOverride =
+		overrideHead ?? (unmatched ? unavailableHead : undefined)
 	const reference = useRouterState({
 		select: (state) => {
 			const match = state.matches.at(-1)
@@ -115,8 +120,8 @@ export function PageHead({
 				: undefined
 		},
 	})
-	return overrideHead ? (
-		<HeadTags tags={mergePageHeadTags(tags, overrideHead, undefined)} />
+	return resolvedOverride ? (
+		<HeadTags tags={mergePageHeadTags(tags, resolvedOverride, undefined)} />
 	) : reference ? (
 		<QueryPageHead reference={reference} tags={tags} />
 	) : (

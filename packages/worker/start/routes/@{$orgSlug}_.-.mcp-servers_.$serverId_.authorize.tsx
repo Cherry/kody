@@ -13,7 +13,10 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize',
 )({
-	staticData: { orgScope: { section: 'mcp-servers' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'mcp-servers' },
+	},
 	context: ({ params }) => ({
 		pageQueryInput: { orgSlug: params.orgSlug, serverId: params.serverId },
 	}),

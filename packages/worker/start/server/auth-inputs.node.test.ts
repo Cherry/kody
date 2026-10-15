@@ -76,7 +76,6 @@ test('auth returns configuration without redirecting unauthenticated requests', 
 	await expect(
 		loadAuthPage({ data: { redirectTo: '/account' } }),
 	).resolves.toMatchObject({
-		session: null,
 		authConfig: { ok: true, providers: [] },
 	})
 })

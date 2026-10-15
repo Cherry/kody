@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { createFileRoute } from '@tanstack/react-router'
+import { isAccountConnectionAgent } from '#universal/account-connections.ts'
 import { AccountConnectionsPage } from '../pages/account-connections.tsx'
 import { loadConnectionsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -9,7 +10,10 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new_/$agent')({
-	staticData: { orgScope: { section: 'agents' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'agents' },
+		orgScope: { section: 'agents' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		queryInput: {
@@ -29,11 +33,12 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new_/$agent')({
 	component: Page,
 })
 function Page() {
-	const { orgSlug } = Route.useParams()
+	const { orgSlug, agent } = Route.useParams()
 	const { payload } = usePageData()
 	const { pageQueryInput } = Route.useRouteContext()
 	return (
 		<AccountConnectionsPage
+			view={isAccountConnectionAgent(agent) ? { kind: 'new', agent } : null}
 			payload={payload}
 			currentHref={pageQueryInput}
 			orgSlug={orgSlug}

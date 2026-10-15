@@ -67,9 +67,9 @@ resets, and navigation rather than preventing pending state from settling.
 
 Page-shaped optimistic resources use scoped Query mutation overlays while writes
 are pending, then reconcile the captured resource scope when writes settle.
-Reads remain independent, including first navigation to a resource.
-Forms retain local drafts; saved server data comes from Query. Secrets and
-one-time revealed credentials stay outside reusable page caches.
+Reads remain independent, including first navigation to a resource. Forms retain
+local drafts; saved server data comes from Query. Secrets and one-time revealed
+credentials stay outside reusable page caches.
 
 ## HTTP boundary
 

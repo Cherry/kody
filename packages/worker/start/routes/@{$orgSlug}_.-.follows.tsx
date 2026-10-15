@@ -6,7 +6,10 @@ import { orgFollowsQuery } from '../follows-query.ts'
 import { OrgFollowsPage } from '../pages/org-follows.tsx'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/follows')({
-	staticData: { orgScope: { section: 'follows' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'follows' },
+		orgScope: { section: 'follows' },
+	},
 	loader: ({ context, params }) =>
 		context.queryClient.ensureQueryData(
 			orgFollowsQuery(context.actorKey, params.orgSlug),

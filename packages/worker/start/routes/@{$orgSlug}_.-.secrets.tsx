@@ -11,7 +11,10 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
-	staticData: { orgScope: { section: 'secrets' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'secrets' },
+	},
 	beforeLoad: ({ params, location }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),

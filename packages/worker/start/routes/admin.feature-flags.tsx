@@ -11,6 +11,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/admin/feature-flags')({
+	staticData: { navigation: { rail: 'admin', item: 'feature-flags' } },
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

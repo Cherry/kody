@@ -25,7 +25,6 @@ function AuthPage() {
 			mode="login"
 			currentHref={location.href}
 			authConfig={data.authConfig}
-			session={data.session}
 		/>
 	)
 }

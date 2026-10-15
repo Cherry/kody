@@ -5,6 +5,7 @@ import { AccountPackageApprovePublishRoute } from '../pages/account-package-appr
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$username}_/$kodyId_/approve-publish')(
 	{
+		staticData: { navigation: { rail: 'workspace', item: 'packages' } },
 		validateSearch: (search: Record<string, unknown>) => ({
 			commit: typeof search.commit === 'string' ? search.commit : undefined,
 		}),

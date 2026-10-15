@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadAccountSecurity', loadAccountSecurity, {
 })
 
 export const Route = createFileRoute('/account_/passkeys')({
+	staticData: { navigation: { rail: 'account', item: 'security' } },
 	context: () => ({ pageQueryInput: 'passkeys' as const }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

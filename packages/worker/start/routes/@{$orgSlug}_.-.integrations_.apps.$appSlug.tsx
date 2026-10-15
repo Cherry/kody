@@ -13,7 +13,10 @@ const pageQuery = createPageQuery(
 export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/integrations_/apps/$appSlug',
 )({
-	staticData: { orgScope: { section: 'integrations' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'integrations' },
+	},
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		name: search.name,
 		package_id: search.package_id,

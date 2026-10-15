@@ -1,3 +1,5 @@
+import { routeTree } from '../routeTree.gen.ts'
+import { pageNavigationForMatches } from '../page-navigation.ts'
 import { type AppShell } from '../app-shell.ts'
 import { type SessionInfo } from '#client/session.ts'
 import createCache from '@emotion/cache'
@@ -31,7 +33,23 @@ export async function renderStartPage(
 		queryClient: QueryClient
 		actorKey: string | null
 	}>()({
-		beforeLoad: ({ location }) => ({ pageLocation: location }),
+		beforeLoad: ({ location }) => {
+			const lookup = createRouter({
+				routeTree,
+				history: createMemoryHistory(),
+				context: { queryClient, getCommittedPage: () => null },
+			})
+			const [routes, params] = lookup.getMatchedRoutes(location.pathname)
+			return {
+				pageLocation: location,
+				pageNavigation: pageNavigationForMatches(
+					routes.map((route) => ({
+						staticData: route.options.staticData ?? {},
+						params,
+					})),
+				),
+			}
+		},
 		loader: ({ location }) => ({
 			shellLocation: {
 				pathname: location.pathname,

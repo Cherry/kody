@@ -101,16 +101,26 @@ test('wizard steps share refreshed progress and isolate it from another actor', 
 			onboardingAgentChooser: canonicalOnboardingAgentChooser(),
 		})
 		await observer.refetch()
-		await expect(
-			loadOnboardingRoute(
-				client,
-				options,
-				{ pathname: '/onboarding/step-1', searchStr: '?redirectTo=%2Faccount' },
-				false,
-			),
-		).rejects.toMatchObject({
-			options: { href: '/pending-verification?redirectTo=%2Faccount' },
-		})
+		for (const pathname of [
+			'/onboarding',
+			'/onboarding/step-1',
+			'/onboarding/step-1/cursor',
+			'/onboarding/step-2',
+			'/onboarding/step-2/github',
+			'/onboarding/step-3',
+			'/onboarding/step-3/cursor',
+		]) {
+			await expect(
+				loadOnboardingRoute(
+					client,
+					options,
+					{ pathname, searchStr: '?redirectTo=%2Faccount' },
+					false,
+				),
+			).rejects.toMatchObject({
+				options: { href: '/pending-verification?redirectTo=%2Faccount' },
+			})
+		}
 	} finally {
 		unsubscribe()
 		client.clear()

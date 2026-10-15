@@ -1,15 +1,48 @@
+import { createRouter, createMemoryHistory } from '@tanstack/react-router'
+import { QueryClient } from '@tanstack/react-query'
+import { routeTree } from '../../start/routeTree.gen.ts'
+import { pageNavigationForMatches } from '../../start/page-navigation.ts'
 import { expect, test } from 'vitest'
 import {
 	accountRailGroups,
 	accountRailOrgSlug,
-	isAccountNavItemActive,
-	isAccountRailPath,
-	railTabsForPath,
+	isAccountNavItemSelected,
+	railTabsForSelection,
 	workspaceHomeHref,
 	workspaceLandingItem,
 	workspaceRailGroups,
 	workspaceSwitchHref,
 } from '#client/routes/account-rail.ts'
+
+const router = createRouter({
+	routeTree,
+	history: createMemoryHistory(),
+	context: { queryClient: new QueryClient(), getCommittedPage: () => null },
+})
+function navigation(path: string) {
+	const [routes, params] = router.getMatchedRoutes(path)
+	return pageNavigationForMatches(
+		routes.map((route) => ({
+			staticData: route.options.staticData ?? {},
+			params,
+		})),
+	)
+}
+function isAccountNavItemActive(
+	item: Parameters<typeof isAccountNavItemSelected>[0],
+	path: string,
+) {
+	return isAccountNavItemSelected(item, navigation(path)?.item)
+}
+function isAccountRailPath(path: string) {
+	return navigation(path)?.rail === 'account'
+}
+function railTabsForPath(
+	groups: Parameters<typeof railTabsForSelection>[0],
+	path: string,
+) {
+	return railTabsForSelection(groups, navigation(path)?.item)
+}
 
 test('account rail holds the person: profile, security, organizations, experiments, data', () => {
 	const items = accountRailGroups().flatMap((group) => group.items)
@@ -64,6 +97,7 @@ test('workspace home is the overview for the signup org and /@slug for a team', 
 
 test('workspace landing opens Repositories so the rail is one click away', () => {
 	expect(workspaceLandingItem('jane')).toEqual({
+		id: 'workspace',
 		href: '/@jane/-/repositories',
 		label: 'Workspace',
 		icon: 'box',
@@ -83,6 +117,7 @@ test('workspace rail groups what the organization owns and keeps its slug in eve
 		items: [
 			{
 				href: '/@jane/-/overview',
+				id: 'overview',
 				label: 'Overview',
 				icon: 'home',
 				description: 'Every section this workspace owns, one click away.',
@@ -361,14 +396,14 @@ test('account rail org slug prefers the path org over username', () => {
 	]
 	expect(
 		accountRailOrgSlug({
-			pathname: '/@acme/-/jobs',
+			orgSlug: navigation('/@acme/-/jobs')?.orgSlug ?? null,
 			organizations: summaries,
 			username: 'ada-new',
 		}),
 	).toBe('acme')
 	expect(
 		accountRailOrgSlug({
-			pathname: '/account',
+			orgSlug: navigation('/account')?.orgSlug ?? null,
 			organizations: summaries,
 			username: 'ada-new',
 		}),
@@ -378,14 +413,14 @@ test('account rail org slug prefers the path org over username', () => {
 test('account rail org slug trusts org-owned URLs when the session list is stale', () => {
 	expect(
 		accountRailOrgSlug({
-			pathname: '/@acme/-/settings',
+			orgSlug: navigation('/@acme/-/settings')?.orgSlug ?? null,
 			organizations: [{ slug: 'ada-old', personal: true }],
 			username: 'ada-new',
 		}),
 	).toBe('acme')
 	expect(
 		accountRailOrgSlug({
-			pathname: '/@acme/-/grants',
+			orgSlug: navigation('/@acme/-/grants')?.orgSlug ?? null,
 			organizations: [],
 			username: 'ada-new',
 		}),

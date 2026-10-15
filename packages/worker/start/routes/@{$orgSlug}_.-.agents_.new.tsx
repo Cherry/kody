@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new')({
-	staticData: { orgScope: { section: 'agents' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'agents' },
+		orgScope: { section: 'agents' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		queryInput: { orgSlug: params.orgSlug, view: 'new' as const },
@@ -30,6 +33,7 @@ function Page() {
 	const { pageQueryInput } = Route.useRouteContext()
 	return (
 		<AccountConnectionsPage
+			view={{ kind: 'new', agent: null }}
 			payload={payload}
 			currentHref={pageQueryInput}
 			orgSlug={orgSlug}

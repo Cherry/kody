@@ -45,7 +45,7 @@ import {
 	type AccountUsageCredits,
 	type AccountUsageCreditsWallet,
 } from '#universal/loader-data.ts'
-import { orgCreditsPath, parseOrgBillingPath } from '#universal/org-pages.ts'
+import { orgCreditsPath } from '#universal/org-pages.ts'
 import { colors, mq, spacing, typography } from '#universal/styles/tokens.ts'
 import {
 	descriptionCss,
@@ -211,16 +211,11 @@ export function AccountUsageCreditsSection(
 		}
 	}
 
-	async function switchToPro(billingHref?: string) {
+	async function switchToPro() {
 		if (switchPending) return
 		setSwitchPending(true)
 		setMessage(null)
-		const orgSlug =
-			props.orgSlug ||
-			(billingHref
-				? parseOrgBillingPath(new URL(billingHref, 'http://localhost').pathname)
-						?.slug
-				: null)
+		const orgSlug = props.orgSlug
 		if (!orgSlug) {
 			setSwitchPending(false)
 			showMessage('Open billing to switch plans.', 'error')
@@ -255,12 +250,12 @@ export function AccountUsageCreditsSection(
 		) : null
 	}
 
-	function renderSwitchToProButton(label: string, billingHref?: string) {
+	function renderSwitchToProButton(label: string) {
 		return (
 			<button
 				type="button"
 				disabled={switchPending}
-				onClick={() => void switchToPro(billingHref)}
+				onClick={() => void switchToPro()}
 				css={primaryButtonCss}
 			>
 				{switchPending ? 'Opening Stripe…' : label}
@@ -354,7 +349,7 @@ export function AccountUsageCreditsSection(
 				{renderMessage()}
 				<div css={accountActionsCss}>
 					{credits.canSwitchToPro ? (
-						renderSwitchToProButton('Switch to Pro', credits.billingHref)
+						renderSwitchToProButton('Switch to Pro')
 					) : (
 						<SiteLink href={credits.billingHref} css={primaryLinkCss}>
 							Go to billing

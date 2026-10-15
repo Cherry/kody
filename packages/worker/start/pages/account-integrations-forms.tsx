@@ -21,6 +21,7 @@ import {
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { type CSSObject } from '@emotion/react'
 import { useMutation } from '@tanstack/react-query'
+import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { usePageInvalidation } from '../page-invalidation.ts'
@@ -50,6 +51,8 @@ export function AddAccountForm(props: {
 	open: boolean
 	openHref: string
 }) {
+	const router = useRouter()
+	const { orgSlug } = useMatchedPageScope()
 	const [nameError, setNameError] = useState<string | null>(null)
 	const [editedName, setEditedName] = useState<string | null>(null)
 	const [boundSlug, setBoundSlug] = useState(props.slug)
@@ -57,6 +60,7 @@ export function AddAccountForm(props: {
 	function connectHref(connectionName: string) {
 		return buildConnectOauthHref({
 			name: connectionName,
+			orgSlug,
 			appSlug: props.slug,
 			platformSlug: props.platform ? props.slug : undefined,
 		})
@@ -98,7 +102,7 @@ export function AddAccountForm(props: {
 					return
 				}
 				setNameError(null)
-				window.location.assign(connectHref(resolved.name))
+				void router.navigate({ href: connectHref(resolved.name) })
 			}}
 			css={{
 				display: 'grid',

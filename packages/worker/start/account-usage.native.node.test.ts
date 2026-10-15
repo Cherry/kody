@@ -282,9 +282,13 @@ function usagePage(input: {
 	}
 }
 
-async function renderUsagePage(accountUsage: AccountUsageLoaderData) {
+async function renderUsagePage(
+	accountUsage: AccountUsageLoaderData,
+	orgSlug = session.username,
+) {
 	const html = await renderToString(
 		jsx(AccountUsagePage, {
+			orgSlug,
 			queryKey: ['page', null, 'loadUsagePage', orgUsagePath(session.username)],
 			payload: accountUsage,
 			currentHref: orgUsagePath(session.username),
@@ -359,4 +363,12 @@ test('Pro usage page past include matches credits: capped bar, dollars on credit
 	expect(text).toContain('43,768 of 350 worker-compute days included')
 	expect(html).not.toContain('data-credits-alarm')
 	expect(text).not.toMatch(overHundredPercent)
+})
+
+test('usage links use the explicit route organization instead of the presentation href', async () => {
+	const { html } = await renderUsagePage(
+		usagePage({ plan: 'free', computeOverage: overage({}) }),
+		'selected-team',
+	)
+	expect(html).toContain('href="/@selected-team/-/billing"')
 })

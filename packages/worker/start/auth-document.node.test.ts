@@ -36,7 +36,6 @@ test('native signup renders accessible social provider controls before hydration
 			mode: 'signup',
 			currentHref: '/signup',
 			authConfig,
-			session: null,
 		}),
 		'/signup',
 	)

@@ -49,6 +49,5 @@ export const loadAuthPage = createServerFn({ method: 'GET' })
 					label: oauthProviderDefinitions[provider].label,
 				})),
 			},
-			session,
 		}
 	})

@@ -27,7 +27,6 @@ import {
 	accountConnectionAgentIds,
 	accountConnectionsNewHref,
 	accountConnectionsListHref,
-	parseAccountConnectionsPathname,
 } from '#universal/account-connections.ts'
 import { docHref } from '#universal/docs-nav.ts'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
@@ -45,12 +44,6 @@ import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
 const connectYourAgentDocHref = docHref('connect-your-agent')
 
-function readView(href: string): AccountConnectionsView | null {
-	return parseAccountConnectionsPathname(
-		new URL(href, 'http://localhost').pathname,
-	)
-}
-
 /**
  * `/@slug/-/agents` — the durable home for inbound MCP hosts. The
  * connected list is the same panel Overview used to host. Connect an agent
@@ -62,16 +55,17 @@ function readView(href: string): AccountConnectionsView | null {
  */
 export function AccountConnectionsPage({
 	orgSlug,
+	view,
 	payload,
 	currentHref,
 }: {
 	payload: AccountConnectedAgentsLoaderData
+	view: AccountConnectionsView | null
 	orgSlug: string
 	currentHref: string
 }) {
 	const connectedAgents = useAccountConnectedAgents(payload)
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const view = readView(currentHref)
 	const usage = useQuery({
 		...connectionUsageQuery(actorKey, orgSlug),
 		enabled: view?.kind === 'list' || view?.kind === 'usage',

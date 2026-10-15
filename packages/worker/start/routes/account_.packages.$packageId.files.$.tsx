@@ -10,7 +10,10 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 })
 
 export const Route = createFileRoute('/account_/packages/$packageId/files/$')({
-	staticData: { shell: { gutters: 'page' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'packages' },
+		shell: { gutters: 'page' },
+	},
 	context: ({ location, params }) => ({
 		pageQueryInput: {
 			resource: {

@@ -52,7 +52,11 @@ export async function loadConsentContext(input: {
 }): Promise<ConsentContext | ConsentRefusal> {
 	const { env, request, params } = input
 	const authenticated =
-		input.user ?? (await readAuthenticatedAppUser(request, env))
+		input.user ??
+		(await readAuthenticatedAppUser(request, env, {
+			// Authenticate the person first; params below own resource authorization.
+			resourceRequest: new Request(new URL('/', request.url)),
+		}))
 	if (!authenticated) return { kind: 'signed-out' }
 	const resolution =
 		(await loadOrgBindingForSlug(

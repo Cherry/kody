@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { useMatches } from '@tanstack/react-router'
+import { useMatches, useRouteContext } from '@tanstack/react-router'
+import { type MatchedPageNavigation } from '../page-navigation.ts'
 import { appShellForMatches } from '../app-shell.ts'
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type FormEvent } from 'react'
@@ -25,9 +26,8 @@ import { getSessionDisplayName, type SessionInfo } from '#client/session.ts'
 import {
 	accountRailGroups,
 	accountRailOrgSlug,
-	isAccountNavItemActive,
-	isAccountRailPath,
-	railTabsForPath,
+	isAccountNavItemSelected,
+	railTabsForSelection,
 	workspaceRailGroups,
 	type AccountRailGroup,
 } from '#client/routes/account-rail.ts'
@@ -256,8 +256,9 @@ export function AccountManagementShell(props: AccountManagementShellProps) {
 function ShellNavigation({ currentHref }: { currentHref: string }) {
 	const currentPath = new URL(currentHref, 'http://localhost').pathname
 	const session = useShellData().session
-	const admin = currentPath === '/admin' || currentPath.startsWith('/admin/')
-	const rail = pageRail({ session, currentPath })
+	const { pageNavigation } = useRouteContext({ strict: false })
+	const admin = pageNavigation?.rail === 'admin'
+	const rail = pageRail({ session, currentPath, navigation: pageNavigation })
 	return (
 		<div
 			data-account-navigation
@@ -279,16 +280,11 @@ function ShellNavigation({ currentHref }: { currentHref: string }) {
 										href: item.href,
 										label: item.label,
 										icon: item.icon,
-										active: item.paths.some(
-											(path) =>
-												path === currentPath ||
-												(path !== '/admin' &&
-													currentPath.startsWith(`${path}/`)),
-										),
+										active: item.id === pageNavigation?.item,
 									})),
 								},
 							]
-						: railLinkGroups(rail.groups, currentPath)
+						: railLinkGroups(rail.groups, pageNavigation?.item)
 				}
 			/>
 		</div>
@@ -361,73 +357,73 @@ const adminNavItems = [
 		href: '/admin/users',
 		label: 'Users',
 		icon: 'users',
-		paths: ['/admin', '/admin/users'],
+		id: 'users',
 	},
 	{
 		href: '/admin/insights',
 		label: 'Insights',
 		icon: 'pie-chart',
-		paths: ['/admin/insights'],
+		id: 'insights',
 	},
 	{
 		href: '/admin/reserved-usernames',
 		label: 'Reserved usernames',
 		icon: 'user-cross',
-		paths: ['/admin/reserved-usernames'],
+		id: 'reserved-usernames',
 	},
 	{
 		href: '/admin/feature-flags',
 		label: 'Feature flags',
 		icon: 'flag',
-		paths: ['/admin/feature-flags'],
+		id: 'feature-flags',
 	},
 	{
 		href: '/admin/platform-integrations',
 		label: 'Platform integrations',
 		icon: 'globe',
-		paths: ['/admin/platform-integrations'],
+		id: 'platform-integrations',
 	},
 	{
 		href: '/admin/provider-marks',
 		label: 'Provider marks',
 		icon: 'photo',
-		paths: ['/admin/provider-marks'],
+		id: 'provider-marks',
 	},
 	{
 		href: '/admin/codemods',
 		label: 'Codemods',
 		icon: 'code',
-		paths: ['/admin/codemods'],
+		id: 'codemods',
 	},
 	{
 		href: '/admin/roles',
 		label: 'Roles',
 		icon: 'shield',
-		paths: ['/admin/roles'],
+		id: 'roles',
 	},
 	{
 		href: '/admin/community-reports',
 		label: 'Community reports',
 		icon: 'warning-triangle',
-		paths: ['/admin/community-reports'],
+		id: 'community-reports',
 	},
 	{
 		href: routes.adminPlatformFeedback.href(),
 		label: 'Platform feedback',
 		icon: 'message',
-		paths: [routes.adminPlatformFeedback.href()],
+		id: 'platform-feedback',
 	},
 	{
 		href: '/admin/system-email',
 		label: 'System email',
 		icon: 'inbox',
-		paths: ['/admin/system-email'],
+		id: 'system-email',
 	},
 ] as const satisfies ReadonlyArray<{
 	href: string
 	label: string
 	icon: IconName
-	paths: ReadonlyArray<string>
+	id: string
 }>
 
 type AccountPageHeaderProps = {
@@ -438,7 +434,10 @@ type AccountPageHeaderProps = {
 	actions?: AccountManagementSlot
 }
 
-function railLinkGroups(groups: Array<AccountRailGroup>, currentPath: string) {
+function railLinkGroups(
+	groups: Array<AccountRailGroup>,
+	itemId: string | undefined,
+) {
 	return groups.map((group) => ({
 		label: group.label,
 		note: group.note,
@@ -446,14 +445,18 @@ function railLinkGroups(groups: Array<AccountRailGroup>, currentPath: string) {
 			href: item.href,
 			label: item.label,
 			icon: item.icon,
-			active: isAccountNavItemActive(item, currentPath),
+			active: isAccountNavItemSelected(item, itemId),
 		})),
 	}))
 }
 
-function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
+function pageRail(input: {
+	session: SessionInfo | null
+	currentPath: string
+	navigation: MatchedPageNavigation | undefined
+}) {
 	const organizations = input.session?.organizations ?? []
-	if (isAccountRailPath(input.currentPath)) {
+	if (input.navigation?.rail !== 'workspace') {
 		return {
 			label: 'Account sections',
 			heading: { eyebrow: 'Account' },
@@ -462,7 +465,11 @@ function pageRail(input: { session: SessionInfo | null; currentPath: string }) {
 		}
 	}
 	const orgSlug = accountRailOrgSlug({
-		pathname: input.currentPath,
+		orgSlug:
+			input.navigation.orgSlug ??
+			(organizations.some((org) => org.slug === input.navigation?.profileSlug)
+				? (input.navigation.profileSlug ?? null)
+				: null),
 		organizations,
 		username: input.session?.username,
 	})
@@ -527,8 +534,9 @@ export function AccountPageHeader(props: AccountPageHeaderProps) {
 		const currentPath = new URL(props.currentHref, 'http://localhost').pathname
 		const session = useShellData().session
 		const explainer = resolveEntityExplainer(props.entity)
-		const rail = pageRail({ session, currentPath })
-		const tabs = railTabsForPath(rail.groups, currentPath)
+		const { pageNavigation } = useRouteContext({ strict: false })
+		const rail = pageRail({ session, currentPath, navigation: pageNavigation })
+		const tabs = railTabsForSelection(rail.groups, pageNavigation?.item)
 
 		return (
 			<>

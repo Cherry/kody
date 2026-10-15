@@ -26,6 +26,12 @@ vi.mock('../../src/app/auth-session.ts', () => ({
 vi.mock('../../src/app/request-auth-cache.ts', () => ({
 	loadResolvedRequestAuth: state.auth,
 }))
+// Read scope never acquires a write lease or loads its Durable Object graph.
+vi.mock('#worker/account/deletion-state.ts', () => ({
+	withAccountWriteLease: vi.fn(() => {
+		throw new Error('Unexpected write lease during read')
+	}),
+}))
 vi.mock('./request-env.ts', () => ({ getStartRequestEnv: () => state.env }))
 vi.mock('#app/authenticated-user.ts', () => ({
 	readAuthenticatedAppUser: state.authenticated,

@@ -8,7 +8,10 @@ import {
 } from '../pages/email-resource-queries.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/email_/$messageId')({
-	staticData: { orgScope: { section: 'email' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'email' },
+		orgScope: { section: 'email' },
+	},
 	validateSearch: emailSearch,
 	search: { middlewares: [stripSearchParams(emailSearch({}))] },
 	loaderDeps: ({ search }) => ({

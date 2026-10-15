@@ -1,5 +1,7 @@
 import { createElement } from 'react'
 import { expect, test } from 'vitest'
+import { AccountPage } from './pages/account.tsx'
+import { AccountConnectionsPage } from './pages/account-connections.tsx'
 import { AccountValuesPage } from './pages/account-values.tsx'
 import { AccountMemoriesPage } from './pages/account-memories.tsx'
 import { renderStartPage } from './test-support/render-start-page.ts'
@@ -44,4 +46,51 @@ test('memories uses the provided detail identity instead of reparsing link locat
 	)
 	expect(html).toContain('Memory not found')
 	expect(html).toContain('value="needle"')
+})
+
+test('account renders the native data view even with a retained profile location', async () => {
+	const html = await renderStartPage(
+		createElement(AccountPage, {
+			view: 'data',
+			currentHref: '/account',
+			payloads: {
+				accountProfile: {
+					ok: true,
+					email: 'owner@example.com',
+					emailVerified: true,
+					username: 'owner',
+					displayName: 'Owner',
+					bio: null,
+					avatarUrl: null,
+					profileVisibility: 'public',
+					formerEmails: [],
+				},
+				accountConnections: {
+					ok: true,
+					connections: [],
+					canDisconnect: false,
+					hasUsablePassword: true,
+					availableProviders: [],
+					canSyncDiscordRoles: false,
+				},
+				onboarding: null,
+			},
+		}),
+		'/account',
+	)
+	expect(html).toContain('Data &amp; deletion')
+	expect(html).not.toContain('How you appear across Kody')
+})
+test('agents renders the native unknown-agent view instead of selecting a list from href', async () => {
+	const html = await renderStartPage(
+		createElement(AccountConnectionsPage, {
+			view: null,
+			currentHref: '/@team/-/agents',
+			orgSlug: 'team',
+			payload: { ok: true, agents: [], mcpServerUrl: 'https://kody.test/mcp' },
+		}),
+		'/@team/-/agents',
+	)
+	expect(html).toContain('Unknown agent')
+	expect(html).toContain('/@team/-/agents/new')
 })

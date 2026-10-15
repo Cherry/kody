@@ -12,7 +12,10 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
-	staticData: { orgScope: { section: 'integrations' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'integrations' },
+	},
 	beforeLoad: ({ location, params }) => {
 		const href = credentialRedirectFor(
 			new URL(location.href, 'https://kody.local'),

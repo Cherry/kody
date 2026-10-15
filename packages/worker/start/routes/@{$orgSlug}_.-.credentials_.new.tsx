@@ -8,7 +8,10 @@ const pageQuery = createPageQuery('loadCredentialsPage', loadCredentialsPage, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials_/new')({
-	staticData: { orgScope: { section: 'credentials' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'credentials' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		pageQueryInput: {

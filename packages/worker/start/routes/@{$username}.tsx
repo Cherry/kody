@@ -12,7 +12,10 @@ const pageQuery = createPageQuery('loadProfile', loadProfile, {
 })
 
 export const Route = createFileRoute('/@{$username}')({
-	staticData: { shell: { gutters: 'page' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'overview' },
+		shell: { gutters: 'page' },
+	},
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		limit: search.limit,

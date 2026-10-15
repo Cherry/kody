@@ -9,7 +9,11 @@ const pageQuery = createPageQuery(
 	{ freshAuthorization: true },
 )
 export const Route = createFileRoute('/@{$orgSlug}_/-/collaborators')({
-	staticData: { orgScope: {}, shell: { gutters: 'page' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'collaborators' },
+		orgScope: {},
+		shell: { gutters: 'page' },
+	},
 	loader: ({ context, params, preload }) =>
 		loadPageQuery(
 			context.queryClient,

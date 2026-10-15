@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadWaitingPage', loadWaitingPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/waiting')({
-	staticData: { orgScope: { section: 'waiting' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'waiting' },
+		orgScope: { section: 'waiting' },
+	},
 	context: ({ params }) => ({ pageQueryInput: { orgSlug: params.orgSlug } }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

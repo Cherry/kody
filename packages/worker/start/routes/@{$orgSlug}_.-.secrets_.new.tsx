@@ -10,7 +10,10 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/new')({
-	staticData: { orgScope: { section: 'secrets' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
+		orgScope: { section: 'secrets' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ params, location }) => ({
 		pageQueryInput: secretsInput(

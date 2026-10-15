@@ -120,7 +120,7 @@ export function readConnectOauthOrgSlug(url: URL): string | null {
 }
 
 /** Drop code/error from the URL while keeping the handoff `org` for account binds. */
-export function replaceConnectOauthCallbackUrl(
+export function connectOauthCallbackHref(
 	ssrRedirectUri: string | null,
 	orgSlug: string | null,
 ) {
@@ -129,11 +129,7 @@ export function replaceConnectOauthCallbackUrl(
 		window.location.origin,
 	)
 	if (orgSlug) clean.searchParams.set('org', orgSlug)
-	window.history.replaceState(
-		window.history.state,
-		'',
-		`${clean.pathname}${clean.search}`,
-	)
+	return `${clean.pathname}${clean.search}`
 }
 
 export async function approveConnectOauthHosts(input: {
@@ -294,9 +290,10 @@ export function readConnectOauthQueryConfig(
 	}
 }
 
-export function readConnectOauthCallback(): OAuthCallback {
-	if (typeof window === 'undefined') return { kind: 'none' }
-	const params = new URLSearchParams(window.location.search)
+export function readConnectOauthCallback(search?: string): OAuthCallback {
+	if (search === undefined && typeof window === 'undefined')
+		return { kind: 'none' }
+	const params = new URLSearchParams(search ?? window.location.search)
 	const error = params.get('error')
 	const description = params.get('error_description')
 	if (error) {

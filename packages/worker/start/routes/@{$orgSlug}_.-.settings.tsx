@@ -7,7 +7,11 @@ const pageQuery = createPageQuery('loadOrgSettings', loadOrgSettings, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/settings')({
-	staticData: { orgScope: {}, shell: { gutters: 'page' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'settings' },
+		orgScope: {},
+		shell: { gutters: 'page' },
+	},
 	loader: ({ context, params, preload }) =>
 		loadPageQuery(
 			context.queryClient,

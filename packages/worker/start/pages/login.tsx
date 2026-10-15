@@ -15,7 +15,6 @@ import {
 	resetTurnstileWidgets,
 } from '#client/public-form-protection.ts'
 import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
-import { type SessionInfo } from '#client/session.ts'
 import {
 	authenticateWebsite,
 	webauthnAuthenticationOptions,
@@ -62,12 +61,10 @@ export function LoginPage({
 	mode,
 	currentHref,
 	authConfig,
-	session,
 }: {
 	mode: 'login' | 'signup'
 	currentHref: string
 	authConfig: PublicAuthConfig
-	session: SessionInfo | null
 }) {
 	const hydrated = useHydrated()
 	const [status, setStatus] = useState<AuthStatus>('idle')
@@ -86,7 +83,6 @@ export function LoginPage({
 	useEffect(() => {
 		const controller = new AbortController()
 		lifecycle.current = controller
-		if (session) window.location.assign(redirectTo ?? '/account')
 		if (turnstileSiteKey) renderTurnstileWidgets(turnstileSiteKey)
 		if (mode === 'signup' && !signupStartedTracked.current) {
 			readSignupFirstTouchAttribution()
@@ -98,7 +94,7 @@ export function LoginPage({
 			controller.abort()
 			WebAuthnAbortService.cancelCeremony()
 		}
-	}, [mode, currentHref, session, redirectTo, turnstileSiteKey])
+	}, [mode, currentHref, turnstileSiteKey])
 	function setState(nextStatus: AuthStatus, nextMessage: string | null = null) {
 		if (lifecycle.current?.signal.aborted) return
 		setStatus(nextStatus)

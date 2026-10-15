@@ -1,3 +1,8 @@
+import {
+	loadRequestOrgResolution,
+	orgSectionDenial,
+} from '#app/org-request-binding.ts'
+import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { loadAccountMcpServersData } from '#app/account-mcp-servers-data.ts'
 import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
@@ -16,10 +21,38 @@ export * from './account-mcp-servers.ts'
 export function testAccountMcpServersApiHandler(env: Env) {
 	return {
 		async execute({ request }: { request: Request }) {
-			const user = await readAuthenticatedAppUser(request, env)
+			let user = await readAuthenticatedAppUser(request, env, {
+				resourceRequest: new Request(new URL('/', request.url)),
+			})
 			if (!user) {
 				return operationResult({ ok: false, error: 'Unauthorized.' }, 401)
 			}
+
+			// Reconstruct the explicit resource scope for this legacy test adapter,
+			// matching the named operations' already-authorized principal contract.
+			const binding = await loadRequestOrgResolution(
+				request,
+				env,
+				user.mcpUser.userId,
+			)
+			if (
+				binding === 'denied' ||
+				(binding !== 'personal' && orgSectionDenial(binding, 'mcp-servers'))
+			) {
+				return operationResult(
+					{ ok: false, error: 'MCP server not found.' },
+					400,
+				)
+			}
+			if (binding !== 'personal')
+				user = {
+					...user,
+					request: deriveRequestContext({
+						user: user.mcpUser,
+						source: { kind: 'session' },
+						orgBinding: binding,
+					}),
+				}
 
 			if (request.method === 'GET') {
 				return operationResult(

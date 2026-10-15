@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadAdminRoles', loadAdminRoles, {
 })
 
 export const Route = createFileRoute('/admin/roles')({
+	staticData: { navigation: { rail: 'admin', item: 'roles' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: { returnTo: location.pathname + location.searchStr },

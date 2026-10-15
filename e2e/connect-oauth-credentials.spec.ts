@@ -64,3 +64,43 @@ test('connect oauth credential typing does not trip the update cascade guard', a
 
 	expect(cascadeLogs, cascadeLogs.join('\n')).toEqual([])
 })
+
+for (const callback of [
+	{
+		search:
+			'error=access_denied&error_description=Provider%20declined%20the%20request',
+		message: 'Provider declined the request',
+	},
+	{
+		search: 'code=unused-code&state=untrusted-state',
+		message: 'State mismatch. Restart the OAuth flow.',
+	},
+]) {
+	test(`OAuth callback survives native URL cleanup: ${callback.message}`, async ({
+		page,
+		seedE2eUser,
+		login,
+	}) => {
+		const id = crypto.randomUUID().slice(0, 8)
+		const user = await seedE2eUser({
+			email: `callback-${id}@example.com`,
+			username: `callback-${id}`,
+		})
+		await login({ ...user, mode: 'login' })
+		const configuration = new URLSearchParams({
+			provider: 'notion-test',
+			authorizeUrl: 'https://api.notion.com/v1/oauth/authorize',
+			tokenUrl: 'https://api.notion.com/v1/oauth/token',
+			flow: 'confidential',
+			allowedHosts: 'api.notion.com',
+		})
+		await page.goto(`/connect/oauth?${configuration}&${callback.search}`)
+		await waitForClientHydration(page)
+		await expect(page).toHaveURL(/\/connect\/oauth$/)
+		// Remounting on replacement would discard the captured callback/configuration
+		// and show the chooser instead of the provider or state-validation error.
+		await expect(
+			page.getByText(callback.message, { exact: true }),
+		).toBeVisible()
+	})
+}

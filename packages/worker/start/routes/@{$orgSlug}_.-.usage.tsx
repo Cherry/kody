@@ -12,7 +12,10 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 })
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
-	staticData: { orgScope: {} },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'usage' },
+		orgScope: {},
+	},
 	server: {
 		handlers: {
 			HEAD: ({ request, next }) => {
@@ -72,6 +75,7 @@ function Page() {
 	return (
 		<AccountUsagePage
 			queryKey={mutationQueryKey}
+			orgSlug={mutationContext.pageQueryInput.orgSlug}
 			payload={payload}
 			currentHref={location.href}
 		/>

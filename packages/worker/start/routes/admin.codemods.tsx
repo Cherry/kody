@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadAdminCodemods', loadAdminCodemods, {
 })
 
 export const Route = createFileRoute('/admin/codemods')({
+	staticData: { navigation: { rail: 'admin', item: 'codemods' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: { returnTo: location.pathname + location.searchStr },

@@ -13,7 +13,10 @@ import { colors, radius, spacing } from '#universal/styles/tokens.ts'
 import { renderIcon } from '../components/icon.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 export const Route = createFileRoute('/@{$orgSlug}_/-/overview')({
-	staticData: { orgScope: {} },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'overview' },
+		orgScope: {},
+	},
 	loader: ({ params }) => loadOrgOverview({ data: { slug: params.orgSlug } }),
 	component: Page,
 	head: () => ({ meta: [{ title: 'Overview' }] }),

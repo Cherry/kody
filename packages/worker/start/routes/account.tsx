@@ -8,6 +8,7 @@ const pageQuery = createPageQuery('loadAccountPage', loadAccountPage, {
 })
 
 export const Route = createFileRoute('/account')({
+	staticData: { navigation: { rail: 'account', item: 'profile' } },
 	// Account data is independent of presentation and attribution parameters.
 	context: () => ({ pageQueryInput: '' }),
 	loader: ({ context, preload }) =>
@@ -22,7 +23,13 @@ export const Route = createFileRoute('/account')({
 function AccountRoute() {
 	const { payloads } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
-	return <AccountPage payloads={payloads} currentHref={location.href} />
+	return (
+		<AccountPage
+			view="profile"
+			payloads={payloads}
+			currentHref={location.href}
+		/>
+	)
 }
 
 function usePageData() {

@@ -8,7 +8,10 @@ const pageQuery = createPageQuery('loadCreditsPage', loadCreditsPage, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/credits')({
-	staticData: { orgScope: {} },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'credits' },
+		orgScope: {},
+	},
 	validateSearch: (search: Record<string, unknown>) => ({
 		...search,
 		cursor: typeof search.cursor === 'string' ? search.cursor : undefined,

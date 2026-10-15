@@ -11,6 +11,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/admin/community-reports')({
+	staticData: { navigation: { rail: 'admin', item: 'community-reports' } },
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: {

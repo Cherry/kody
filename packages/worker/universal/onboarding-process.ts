@@ -376,7 +376,9 @@ function onboardingAgentPathSegment(agent: McpClientKind) {
 	return agent === 'other' ? onboardingNotListedSegment : agent
 }
 
-function readOnboardingAgentSegment(segment: string): McpClientKind | null {
+export function readOnboardingAgentSegment(
+	segment: string,
+): McpClientKind | null {
 	if (segment === onboardingNotListedSegment) return 'other'
 	return isMcpClientKind(segment) ? segment : null
 }

@@ -15,7 +15,7 @@ import { type OnboardingPayload } from '#universal/onboarding-types.ts'
 import {
 	onboardingWizardStepHref,
 	onboardingWizardStepByNumber,
-	parseOnboardingPathname,
+	type OnboardingLocation,
 	resolveOnboardingFirstAgentKind,
 	onboardingSecondAgentHref,
 	type OnboardingWizardStepNumber,
@@ -55,10 +55,12 @@ import { getGhostButtonCss } from '#universal/styles/style-primitives.ts'
 const subscribeHydration = () => () => {}
 export function OnboardingRoute({
 	payload,
+	selection,
 	initialAgentChooser,
 	refresh,
 }: {
 	payload: OnboardingPayload
+	selection: OnboardingLocation | null
 	initialAgentChooser: OnboardingAgentChooserPick
 	refresh: () => void
 }) {
@@ -109,15 +111,12 @@ export function OnboardingRoute({
 	const featuredPlatformIntegrations =
 		payload.featuredPlatformIntegrations ?? []
 	const secondAgentGiftActive = payload.secondAgentStandardGift?.active === true
-	const location = parseOnboardingPathname(
-		new URL(currentHref, 'http://localhost').pathname,
-	)
-	const activeStep: OnboardingWizardStepNumber = location?.valid
-		? location.step
+	const activeStep: OnboardingWizardStepNumber = selection?.valid
+		? selection.step
 		: hasMcpClient
 			? 2
 			: 1
-	const selectedAgent = location?.valid ? location.agent : null
+	const selectedAgent = selection?.valid ? selection.agent : null
 	const visibleSelectedAgent =
 		activeStep === 3
 			? resolveOnboardingStep3SelectedAgent(selectedAgent)
@@ -204,11 +203,12 @@ export function OnboardingRoute({
 			connected: payload.hasMcpClient,
 		}
 		if (payload.loggedIn && !payload.emailVerified) {
-			window.location.assign(
-				resolveOnboardingPendingVerificationPath(
+			void router.navigate({
+				href: resolveOnboardingPendingVerificationPath(
 					normalizeRedirectTo(new URLSearchParams(search).get('redirectTo')),
 				),
-			)
+				replace: true,
+			})
 			return
 		}
 		if (

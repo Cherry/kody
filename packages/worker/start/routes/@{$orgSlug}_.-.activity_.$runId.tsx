@@ -6,7 +6,10 @@ import { AccountActivityPage } from '../pages/account-activity.tsx'
 import { documentHead } from '../components/document-head.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/activity_/$runId')({
-	staticData: { orgScope: { section: 'activity' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'activity' },
+		orgScope: { section: 'activity' },
+	},
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		selected: search.selected,
 		view: search.view,

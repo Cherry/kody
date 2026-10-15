@@ -31,11 +31,7 @@ import {
 	primaryLinkCss,
 } from '#universal/styles/style-primitives.ts'
 import { warningOffersCredits } from '#universal/compute-overage.ts'
-import {
-	orgBillingPath,
-	orgUsageCreditsPath,
-	parseOrgUsagePath,
-} from '#universal/org-pages.ts'
+import { orgBillingPath, orgUsageCreditsPath } from '#universal/org-pages.ts'
 import { formatCappedPercent } from '#universal/usage-presentation.ts'
 import { creditsActionForWallet } from '#client/routes/account-usage-shared.ts'
 import { AccountUsageCreditsSection } from './account-usage-credits.tsx'
@@ -346,16 +342,14 @@ export function AccountUsagePage({
 	queryKey,
 	payload,
 	currentHref,
+	orgSlug,
 }: {
 	queryKey: QueryKey
 	payload: AccountUsageLoaderData
 	currentHref: string
+	orgSlug: string
 }) {
 	const usage = payload
-	const orgSlug = parseOrgUsagePath(
-		new URL(currentHref, 'https://kody.local').pathname,
-	)?.slug
-	if (!orgSlug) throw new Error('Usage requires an organization URL')
 	const billingPath = orgBillingPath(orgSlug)
 	const accountCreditsPath = orgUsageCreditsPath(orgSlug)
 

@@ -13,6 +13,7 @@ export const Route = createFileRoute(
 )({
 	validateSearch: validateCredentialSearch,
 	staticData: {
+		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'credentials' },
 		presentationSearchKeys: credentialPresentationSearchKeys,
 	},

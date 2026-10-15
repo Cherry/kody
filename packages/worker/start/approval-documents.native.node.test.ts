@@ -48,6 +48,7 @@ async function renderNative(
 	const page = loaderData.connectOauth
 		? createElement(ConnectOauthRoute, {
 				initialData: loaderData.connectOauth,
+				flowKey: 'native-test-flow',
 				currentHref: href,
 			})
 		: loaderData.accountIntegrations

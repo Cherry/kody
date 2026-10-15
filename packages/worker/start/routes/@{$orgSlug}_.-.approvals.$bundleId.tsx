@@ -10,7 +10,11 @@ const pageQuery = createPageQuery('loadApprovalBundle', loadApprovalBundle, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/approvals/$bundleId')({
-	staticData: { orgScope: {}, shell: { mode: 'focused' } },
+	staticData: {
+		navigation: { rail: 'workspace', item: 'approvals' },
+		orgScope: {},
+		shell: { mode: 'focused' },
+	},
 	context: ({ params }) => ({
 		pageQueryInput: { orgSlug: params.orgSlug, bundleId: params.bundleId },
 	}),
