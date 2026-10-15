@@ -140,7 +140,6 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			{ loadDocumentHead },
 			{ loadSessionInfo },
 			{ resolvePackageListIconUrl },
-			{ buildPackageRepoActions },
 			{ routes },
 			{ redirect },
 		] = await Promise.all([
@@ -152,7 +151,6 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			import('./document-head.ts'),
 			import('../../src/app/session-info.ts'),
 			import('../../universal/identity-icon-urls.ts'),
-			import('../../src/app/package-repo-actions.ts'),
 			import('../../universal/routes.ts'),
 			import('@tanstack/react-router'),
 		])
@@ -253,21 +251,7 @@ export const loadPackage = createServerFn({ method: 'GET' })
 			viewerCanManageAccess: result.viewerCanManageAccess,
 			hasPackage: result.hasPackage,
 			packageShaped: result.packageShaped === true,
-			repoActions: buildPackageRepoActions({
-				...result,
-				ownerPackage: result.ownerPackage
-					? {
-							hasApp: result.ownerPackage.hasApp,
-							sourceAhead:
-								result.ownerPackage.pendingCommitKnown &&
-								Boolean(result.ownerPackage.pendingCommit) &&
-								result.ownerPackage.pendingCommit !==
-									result.ownerPackage.publishedCommit,
-							headCommit: result.ownerPackage.pendingCommit,
-						}
-					: null,
-				viewerInstall: listing?.viewerInstall ?? null,
-			}),
+			repoActions: result.repoActions ?? null,
 			iconUrl:
 				listing?.iconUrl ??
 				resolvePackageListIconUrl({

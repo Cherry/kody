@@ -189,6 +189,7 @@ test.each([true, false])(
 			viewerIsOwner: viewerCanManage,
 			viewerCanManage,
 			loggedIn: true,
+			repoActions: { publishHref: viewerCanManage ? '/approval' : null },
 			ownerPackage: {
 				id: 'owned-package',
 				hasApp: false,
@@ -271,3 +272,35 @@ test('package domain authorization sees the original request', async () => {
 		}),
 	)
 })
+
+// The domain payload has already applied target discovery and authorization.
+// Reconstructing actions from its display fields loses the follow target.
+test.each(['repo', 'package'] as const)(
+	'preserves domain actions for a followable %s',
+	async (kind) => {
+		const repoActions = {
+			fork: null,
+			publishHref: '/@owner/package/approve-publish?commit=new-head',
+			packageAppHref: '/@owner/package/app',
+			follow: {
+				kind,
+				loggedIn: true,
+				loginHref: '/login',
+				repoHref: '/@owner/package',
+				following: true,
+			},
+		}
+		mocks.payload = {
+			ok: true,
+			username: 'owner',
+			kodyId: 'package',
+			listing: null,
+			ownerPackage: null,
+			repoActions,
+		}
+		const result = await loadPackage({
+			data: { username: 'owner', kodyId: 'package' },
+		})
+		expect(result).toMatchObject({ kind: 'page', header: { repoActions } })
+	},
+)

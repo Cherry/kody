@@ -7,7 +7,11 @@ import {
 } from '../account-fixtures.ts'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
-for (const outcome of ['accepted', 'rejected'] as const) {
+for (const outcome of [
+	'accepted',
+	'rejected',
+	'rejected-while-mounted',
+] as const) {
 	test(`email classification survives navigation and ${outcome} writes`, async ({
 		page,
 		baseURL,
@@ -123,7 +127,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					return route.fallback()
 				captured()
 				await barrier
-				if (outcome === 'rejected')
+				if (outcome !== 'accepted')
 					await route.fulfill({
 						status: 500,
 						contentType: 'text/plain',
@@ -147,38 +151,45 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 					.filter({ hasText: /^Quarantined$/ })
 					.first(),
 			).toBeVisible()
-			await page.getByTestId('account-menu').click()
-			await page
-				.getByTestId('account-menu-panel')
-				.getByRole('link', { name: 'Account settings', exact: true })
-				.click()
-			await expect(
-				page.getByLabel('Display name', { exact: true }),
-			).toBeVisible()
-			await page.evaluate(
-				(href) => window.history.pushState(null, '', href),
-				`/@${user.username}/-/email`,
-			)
-			await expect(
-				page
-					.locator('span')
-					.filter({ hasText: /^Quarantined$/ })
-					.first(),
-			).toBeVisible()
-			await page.getByTestId('account-menu').click()
-			await page
-				.getByTestId('account-menu-panel')
-				.getByRole('link', { name: 'Account settings', exact: true })
-				.click()
-			await expect(
-				page.getByLabel('Display name', { exact: true }),
-			).toBeVisible()
+			if (outcome !== 'rejected-while-mounted') {
+				await page.getByTestId('account-menu').click()
+				await page
+					.getByTestId('account-menu-panel')
+					.getByRole('link', { name: 'Account settings', exact: true })
+					.click()
+				await expect(
+					page.getByLabel('Display name', { exact: true }),
+				).toBeVisible()
+				await page.evaluate(
+					(href) => window.history.pushState(null, '', href),
+					`/@${user.username}/-/email`,
+				)
+				await expect(
+					page
+						.locator('span')
+						.filter({ hasText: /^Quarantined$/ })
+						.first(),
+				).toBeVisible()
+				await page.getByTestId('account-menu').click()
+				await page
+					.getByTestId('account-menu-panel')
+					.getByRole('link', { name: 'Account settings', exact: true })
+					.click()
+				await expect(
+					page.getByLabel('Display name', { exact: true }),
+				).toBeVisible()
+			}
 			release()
 			await (await response).finished()
-			if (outcome === 'rejected')
+			if (outcome === 'rejected-while-mounted')
 				await expect(
 					page.getByText('Controlled email rejection', { exact: true }),
 				).toBeVisible()
+			else if (outcome === 'rejected')
+				// An abandoned submitter must not notify an unrelated screen.
+				await expect(
+					page.getByText('Controlled email rejection', { exact: true }),
+				).toHaveCount(0)
 			await page.unrouteAll({ behavior: 'wait' })
 			await page.evaluate(
 				(href) => window.history.pushState(null, '', href),
