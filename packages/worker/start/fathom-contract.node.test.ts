@@ -71,7 +71,6 @@ test('native tracker and beacon hosts are permitted by the first-party CSP witho
 	)
 	expect(directives.get('script-src')).toEqual([
 		"'self'",
-		expect.stringMatching(/^'sha256-[^']+'$/),
 		'https://cdn.usefathom.com',
 		'https://static.cloudflareinsights.com',
 		'https://challenges.cloudflare.com',

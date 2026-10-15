@@ -1,8 +1,8 @@
 /**
  * First-party HTTP security headers.
  *
- * These are applied to the trusted account/auth UI shell (see
- * `packages/worker/src/app/render.ts`). They are intentionally NOT applied to
+ * These are applied to the trusted website responses by Start's server entry.
+ * They are intentionally NOT applied to
  * untrusted, dynamically-authored surfaces such as hosted package apps
  * (`/@username/packages/*`), which execute author-supplied HTML/JS and need
  * their own, looser policies.
@@ -11,10 +11,9 @@
  * - `script-src 'self'` (no `'unsafe-inline'`) is the important protection: the
  *   client bundle is loaded as an external module from the same origin, so an
  *   injected inline `<script>` cannot execute. Do NOT add `'unsafe-inline'` to
- *   `script-src`. The one first-party exception is the scroll-restoration
- *   restore script in the SSR body, allowed only by its sha256 hash (React
- *   Router's `<ScrollRestoration />` pattern) so a refresh can restore
- *   `scrollY` before paint.
+ *   `script-src`. Start document responses add a request-specific nonce for
+ *   framework scripts, including native Router scroll restoration. The base
+ *   policy has no static inline-script hash allowance.
  * - `style-src` allows `'unsafe-inline'` because SSR streamed styles arrive as
  *   inline `<style>` tags; style injection is far lower risk than script
  *   injection. Client-side styles use constructable stylesheets, which CSP does
