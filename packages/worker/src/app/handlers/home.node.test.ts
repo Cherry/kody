@@ -140,6 +140,7 @@ test('native home leaves auth and flag reads to the session loader', async () =>
 		'mcp-events-extension': false,
 		'package-app-custom-domains': false,
 		'repo-push-queue': false,
+		'credential-need-enforcement': false,
 	})
 	expect(counts.batchSizes).toEqual([2, 3])
 	expect(loadOnboardingData).not.toHaveBeenCalled()

@@ -31,6 +31,12 @@ import {
 } from '#universal/credential-contracts.ts'
 import { buildNeedCreateUrl } from './need-create-url.ts'
 import {
+	assertCredentialUsesDeclared,
+	CredentialNeedUndeclaredError,
+	type credentialNeedUndeclaredCode,
+	isPackageCredentialUseLimited,
+} from './credential-need-enforcement.ts'
+import {
 	CredentialClientHandleError,
 	signCredentialClientHandle,
 	verifyCredentialClientHandle,
@@ -76,6 +82,7 @@ export type CredentialClientErrorCode =
 	| 'credential_not_found'
 	| 'credential_denied'
 	| 'credential_need_unknown'
+	| typeof credentialNeedUndeclaredCode
 	| 'host_not_allowed'
 	| 'insecure_transport'
 	| 'invalid_request'
@@ -145,6 +152,9 @@ export function toCredentialClientError(
 	options: { baseUrl?: string; orgSlug?: string | null } = {},
 ) {
 	if (error instanceof CredentialClientError) return error
+	if (error instanceof CredentialNeedUndeclaredError) {
+		return refusal(error.code, error.detail)
+	}
 	if (error instanceof CredentialRequestRefusedError) {
 		return refusal(error.code, error.message)
 	}
@@ -315,7 +325,16 @@ async function assertNamedAllowed(ctx: CredentialClientContext) {
 				.bind(ctx.packageId)
 				.first<{ listed: number }>()
 		: null
-	if (!personal || listed) {
+	const limited =
+		personal && !listed
+			? await isPackageCredentialUseLimited({
+					env: ctx.env,
+					request,
+					orgId: request.org.id,
+					packageId: ctx.packageId,
+				})
+			: true
+	if (limited) {
 		throw refusal(
 			'credential_denied',
 			'credential.named works only in ad hoc execute and in unshared packages of your personal org. Declare the credential in kody.credentials and call credential(key) instead.',
@@ -515,7 +534,21 @@ async function resolveKey(
 	usable: ReadonlyArray<UsableCredential>,
 	mode: 'one' | 'many',
 ): Promise<Array<Picked>> {
-	const need = await loadNeed(ctx, key)
+	const runNeed = await loadNeed(ctx, key)
+	// The run's needs can come from a sibling entry, so the calling package's
+	// own closure decides; a key only it declares resolves as it declares it.
+	const declared = ctx.packageId
+		? await assertCredentialUsesDeclared({
+				env: ctx.env,
+				request: requireActorRequest(ctx),
+				orgId: requireActorRequest(ctx).org.id,
+				packageId: ctx.packageId,
+				references: [{ use: 'key', key }],
+			}).catch((error: unknown) => {
+				throw toCredentialClientError(error) ?? error
+			})
+		: null
+	const need = runNeed ?? declared?.get(key) ?? null
 	const target = needTarget(key, need)
 	const picks = ctx.callMap?.get(key)
 	if (!picks) {
