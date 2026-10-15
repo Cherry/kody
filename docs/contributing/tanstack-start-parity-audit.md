@@ -2,29 +2,37 @@
 
 ## Current evidence, October 15, 2026
 
-### Follow-up at source `325143fe6`
+### Follow-up at source `412ad9a0b`
 
 Preview health returned HTTP 200 at deployed merge
-`b28a6da34f955b5992ffaffa8d065b92429d0ffc`, containing PR head `aa2d650b5` and
-main `d8ee11c66`. This verifies deployment identity and health, not visual
-parity. Local commits after that head are not deployed yet.
+`a3a326c411a7e7a2f91377a65bfe8bf7be1967ef`, containing PR head `87483f6df` and
+main `d46dc2a3d`. This verifies deployment identity and health, not visual
+parity. The subsequent local fixes have not been deployed.
 
-Validate run `38692964774` passed Static, Workers, and MCP. Node failed because
-an invite-revoke assertion still expected a refreshed invite list. Commit
-`325143fe6` changes the response assertion to `{ ok: true }` and retains the
-separate database assertion proving the invite is revoked. That correction still
-needs CI. E2E was running at inspection.
+Validate run `38695335762` passed Workers and MCP. Static failed two documentation
+checks: temporal wording and a link to a deleted mutation helper. Both checks
+pass locally after `78007b36a`. Node passed 6018 tests and failed three: the same
+broken link and two deletion assertions expecting rebuilt lists. The deletion
+tests in `412ad9a0b` assert operation results and independently read persisted
+state. Browser E2E was still running at inspection. These fixes need CI.
 
-The consent form passes typed input directly to its Start function, without
-an unused action URL or a FormData wrapper. Its existing consent token and
-server checks remain. All four Start TypeScript projects and targeted repository
-lint passed for that change.
+System-email deletion, custom domains, admin settings, credit settings, passkey
+rename/delete, and OAuth client writes return operation outcomes independently
+of subsequent reads. The generic page-response mutation helper is deleted.
+Query lifecycle callbacks reconcile submitted resource scopes. Retained-page
+pending controls derive from mutation state, with browser coverage added for
+search and hash navigation during an accepted write. That new coverage has not
+run yet. Start type checks and targeted lint passed for the pending-state and
+codemod input changes; no local runtime tests were run.
 
-The next architectural gaps are post-write page reconstruction in system-email
-deletion, organization custom domains, and several admin settings operations.
-These remain incomplete until mutations return operation outcomes and Query
-reconciles the affected resource independently. A successful write must not be
-reported as failed because a subsequent whole-page read failed.
+A desktop pricing comparison used authenticated production and anonymous
+preview sessions. The extra improved-search sentence is controlled by
+`jevSearchRerankFlagKey` in the Start pricing route. This comparison does not
+establish matched-state visual parity.
+
+A source search across packages found no production imports of Remix routing
+modules outside the customer package-app fixture. This is evidence about direct
+imports, not proof that all inherited architectural patterns are gone.
 
 A fresh browser visit to the private package fixture showed a signed-out
 not-found page. Logged-in verification has not been repeated on this deployment;
