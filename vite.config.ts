@@ -80,6 +80,26 @@ export default defineConfig(async ({ command }) => {
 			vars: collectLocalOriginDevVars(process.env, process.env.PORT),
 			generatedBasename,
 		})
+		if (process.env.KODY_E2E_WEB_SERVER === '1') {
+			const { unstable_getVarsForDev } = await import('wrangler')
+			const expected = collectLocalOriginDevVars(process.env, process.env.PORT)
+			const resolved = unstable_getVarsForDev(
+				serveWranglerConfigPath,
+				undefined,
+				expected,
+				envName,
+				true,
+			)
+			if (
+				!expected.STRIPE_SECRET_KEY?.startsWith('sk_test_e2e_') ||
+				resolved.STRIPE_SECRET_KEY?.value !== expected.STRIPE_SECRET_KEY ||
+				resolved.STRIPE_API_BASE_URL?.value !== expected.STRIPE_API_BASE_URL
+			) {
+				throw new Error(
+					'E2E Stripe configuration was overridden by local environment files. Remove the Stripe overrides before running isolated billing tests.',
+				)
+			}
+		}
 		// Jobs + highlight stay attached in the test env (Playwright e2e).
 		// Platform/runtime have no test env and stay skipped there. Pin the
 		// registered names so origin `service: "kody-jobs"` / `kody-highlight`
