@@ -271,9 +271,10 @@ Remaining gaps in browser and visual evidence:
   including owner-visible use count and denied team access. These additions
   require CI; they do not exercise an explicit Retry button.
 - Authentication recovery: `e2e/passkeys.spec.ts` and `e2e/two-factor.spec.ts`
-  cover successful lifecycles. Cancelled WebAuthn, failed authenticator
-  assertions, rejected TOTP and retry feedback are not covered by those
-  journeys.
+  cover successful lifecycles. The two-factor suite also authors rejected-code
+  and retry journeys for enable, login and disable; their current CI result is
+  still required. Cancelled WebAuthn and failed authenticator assertions remain
+  uncovered by the identified browser journeys.
 
 Package settings and organization revocation now have the browser coverage
 listed in the updated historical review below. Session identity, admin
