@@ -5,7 +5,13 @@ export default defineConfig({
 	include: ['files', 'exports', 'types'],
 	workspaces: {
 		'.': {
-			entry: [...toolCliEntryFiles(process.cwd()), 'e2e/**/*.ts', 'vitest*.ts'],
+			entry: [
+				...toolCliEntryFiles(process.cwd()),
+				// Wrangler loads this default export through the generated remote probe config.
+				'tools/ci/start-opt-in-probe-worker.ts',
+				'e2e/**/*.ts',
+				'vitest*.ts',
+			],
 			project: ['tools/**/*.{ts,js,mjs}', '*.ts', 'e2e/**/*.ts'],
 		},
 		'packages/worker': {

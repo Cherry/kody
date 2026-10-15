@@ -127,3 +127,56 @@ This verifies anonymous outsiders, not a signed-in third account. It does not
 mint account credentials, sign a preference, enable an account, or claim
 logged-in parity. Eligible opt-in and opt-out still need separately authorized
 browser checks before route activation is considered complete.
+
+## Route activation and rollback
+
+`activate-start-opt-in` is a separate workflow dispatch mode. Supply the exact
+reviewed source SHA and the successful inactive verification run ID in
+`start_evidence_run`. The workflow checks the source SHA, latest passing
+Validate run and evidence-run provenance before reading production credentials.
+It downloads only that run's reviewed config and private runtime proof.
+`verify-start-opt-in` can refresh expired runtime proof without redeploying
+either worker.
+
+Activation requires proof less than one hour old, with unchanged candidate and
+router deployment IDs, version IDs and settings digests. It rereads the two
+production account IDs, router service targets, asset list, production database
+binding, candidate config and disabled public preview domains. The current
+`kody.codes` custom domain must still belong to `kody-production`. Any existing
+zone route that overlaps the normal host blocks activation for review.
+
+The only routing mutation adds `kody.codes/*` pointing to `kody-start-router`.
+The existing custom domain and route table are captured first. The newly created
+route ID is saved immediately in the rollback receipt, then activation verifies
+the topology and worker identities again. A failed verification attempts to
+remove only that exact new overlay, and preserves the receipt if recovery cannot
+be confirmed.
+
+The activation workflow retains the receipt as `start-opt-in-route-<release>`
+for 30 days. To roll back, download that receipt and use the trusted Cloudflare
+credentials with the same account and zone:
+
+```sh
+node tools/ci/start-opt-in-routing.ts rollback /path/to/route-receipt.json
+```
+
+Rollback refuses a changed route ID, pattern or script. It deletes only the
+recorded `kody.codes/*` route owned by `kody-start-router`. It does not replace
+a route table, redeploy workers, or touch the legacy custom domain, data,
+secrets or background jobs.
+
+`rollback-start-opt-in` provides the same exact-route deletion through GitHub's
+trusted Cloudflare credentials. Set `start_release` to the original activation
+source SHA and `start_evidence_run` to the activation run that retained the
+receipt. It verifies that receipt's provenance and contents before reading
+production credentials. Recovery does not depend on current PR head, fresh
+runtime proof or green CI, so a later broken build cannot block removal of the
+existing overlay. The recovery code is pinned to the dispatch commit, while the
+receipt remains pinned to the original activated release.
+
+Receipt updates use atomic writes, so a failed update preserves the previous
+snapshot. If Cloudflare accepts route creation but its response is lost, the
+tool reports an unknown outcome and stops. Use the retained pre-activation
+snapshot to inspect the exact `kody.codes/*` route and `kody-start-router`
+ownership before recovery. Never retry creation blindly or delete unrelated
+routes to resolve that state.

@@ -141,6 +141,9 @@ export function assertSharedBindings(candidate: Config, production: Config) {
 			// The candidate reports its own immutable release rather than legacy's commit.
 			delete expectedVars.APP_COMMIT_SHA
 			delete actualVars.APP_COMMIT_SHA
+			delete expectedVars.APP_DEPLOY_INFO
+			if (actualVars.APP_DEPLOY_INFO !== undefined)
+				throw new Error('Candidate must not carry stale production deploy info')
 			expected = expectedVars
 			actual = actualVars
 		}

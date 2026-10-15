@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { workerEvidence } from './start-opt-in-cloudflare.ts'
 import { isExecutedDirectly, resolveLocalBinary } from '../node-runtime.ts'
 
 type Review = {
@@ -49,6 +50,8 @@ async function port() {
 
 if (isExecutedDirectly(import.meta.url)) {
 	const reviewPath = process.argv[2] ?? '.tmp/start-opt-in/review.json'
+	// Failed re-verification must not leave an older success proof available.
+	await rm('.tmp/start-opt-in/runtime-proof.json', { force: true })
 	const review = JSON.parse(await readFile(reviewPath, 'utf8')) as Review
 	const { release, candidateName, legacyName, assetPaths } = review.manifest
 	assert(
@@ -60,63 +63,68 @@ if (isExecutedDirectly(import.meta.url)) {
 	const css = assetPaths.find((asset) => asset.endsWith('.css'))
 	const script = assetPaths.find((asset) => asset.endsWith('.js'))
 	assert(css && script, 'Emitted CSS and JavaScript asset paths are required')
-	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-probe-'))
-	const key = randomBytes(32).toString('hex')
-	const localPort = await port()
-	const config = {
-		name: `kody-start-probe-${release.slice(0, 12)}`,
-		main: path.resolve('tools/ci/start-opt-in-probe-worker.ts'),
-		compatibility_date: '2026-04-16',
-		workers_dev: false,
-		preview_urls: false,
-		services: [
-			{ binding: 'START', service: candidateName },
-			{ binding: 'LEGACY', service: legacyName },
-			{ binding: 'ROUTER', service: 'kody-start-router' },
-		],
-		vars: {
-			START_RELEASE: release,
-			ASSET_PATHS: JSON.stringify([css, script]),
-			PROBE_KEY: key,
-		},
+	const versions = {
+		candidate: await workerEvidence(candidateName),
+		router: await workerEvidence('kody-start-router'),
 	}
-	const configPath = path.join(directory, 'wrangler.json')
-	await writeFile(configPath, JSON.stringify(config), { mode: 0o600 })
-	const child = spawn(
-		resolveLocalBinary('wrangler'),
-		[
-			'dev',
-			'--remote',
-			'--config',
-			configPath,
-			'--ip',
-			'127.0.0.1',
-			'--port',
-			String(localPort),
-			'--local-protocol',
-			'http',
-			'--log-level',
-			'error',
-		],
-		{ stdio: ['ignore', 'pipe', 'pipe'], env: process.env },
-	)
-	// Remote preview URLs and tokens must never be copied into logs or artifacts.
-	child.stdout.resume()
-	child.stderr.resume()
+	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-probe-'))
+	let child: ChildProcess | undefined
 	let ended = false
-	child.once('error', () => {
-		ended = true
-	})
-	child.once('close', () => {
-		ended = true
-	})
-	const fetchProbe = (route: string) =>
-		fetch(`http://127.0.0.1:${localPort}${route}`, {
-			headers: { 'X-Kody-Probe-Key': key },
-			redirect: 'manual',
-			signal: AbortSignal.timeout(15_000),
-		})
 	try {
+		const key = randomBytes(32).toString('hex')
+		const localPort = await port()
+		const config = {
+			name: `kody-start-probe-${release.slice(0, 12)}`,
+			main: path.resolve('tools/ci/start-opt-in-probe-worker.ts'),
+			compatibility_date: '2026-04-16',
+			workers_dev: false,
+			preview_urls: false,
+			services: [
+				{ binding: 'START', service: candidateName },
+				{ binding: 'LEGACY', service: legacyName },
+				{ binding: 'ROUTER', service: 'kody-start-router' },
+			],
+			vars: {
+				START_RELEASE: release,
+				ASSET_PATHS: JSON.stringify([css, script]),
+				PROBE_KEY: key,
+			},
+		}
+		const configPath = path.join(directory, 'wrangler.json')
+		await writeFile(configPath, JSON.stringify(config), { mode: 0o600 })
+		child = spawn(
+			resolveLocalBinary('wrangler'),
+			[
+				'dev',
+				'--remote',
+				'--config',
+				configPath,
+				'--ip',
+				'127.0.0.1',
+				'--port',
+				String(localPort),
+				'--local-protocol',
+				'http',
+				'--log-level',
+				'error',
+			],
+			{ stdio: ['ignore', 'pipe', 'pipe'], env: process.env },
+		)
+		// Remote preview URLs and tokens must never be copied into logs or artifacts.
+		child.stdout?.resume()
+		child.stderr?.resume()
+		child.once('error', () => {
+			ended = true
+		})
+		child.once('close', () => {
+			ended = true
+		})
+		const fetchProbe = (route: string) =>
+			fetch(`http://127.0.0.1:${localPort}${route}`, {
+				headers: { 'X-Kody-Probe-Key': key },
+				redirect: 'manual',
+				signal: AbortSignal.timeout(15_000),
+			})
 		let ready = false
 		const deadline = Date.now() + 45_000
 		while (!ended && Date.now() < deadline) {
@@ -196,26 +204,41 @@ if (isExecutedDirectly(import.meta.url)) {
 				)
 			}
 		}
-		console.log(
-			JSON.stringify({
-				release,
-				legacySha,
-				health: 'passed',
-				publicDocuments: 'passed',
-				exactAssets: 'passed',
-				anonymousDenial: 'passed',
-				invalidPreference: 'legacy',
-				activated: false,
-			}),
+		const after = {
+			candidate: await workerEvidence(candidateName),
+			router: await workerEvidence('kody-start-router'),
+		}
+		assert(
+			JSON.stringify(after) === JSON.stringify(versions),
+			'Inactive workers changed during private runtime verification',
 		)
+		const proof = {
+			release,
+			candidateName,
+			routerName: 'kody-start-router',
+			checkedAt: new Date().toISOString(),
+			versions,
+			legacySha,
+			health: 'passed',
+			publicDocuments: 'passed',
+			exactAssets: 'passed',
+			anonymousDenial: 'passed',
+			invalidPreference: 'legacy',
+			activated: false,
+		}
+		await writeFile(
+			'.tmp/start-opt-in/runtime-proof.json',
+			JSON.stringify(proof, null, '\t'),
+		)
+		console.log(JSON.stringify(proof))
 	} finally {
-		child.kill('SIGTERM')
+		child?.kill('SIGTERM')
 		await new Promise<void>((resolve) => {
-			if (ended) resolve()
+			if (!child || ended) resolve()
 			else {
 				child.once('close', () => resolve())
 				setTimeout(() => {
-					child.kill('SIGKILL')
+					child?.kill('SIGKILL')
 					resolve()
 				}, 3000).unref()
 			}

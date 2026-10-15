@@ -228,3 +228,19 @@ test('requires the existing legacy production worker by exact name', () => {
 		'legacy worker must be kody-production',
 	)
 })
+
+test('candidate reports its exact source release without carrying legacy deployment metadata', () => {
+	const input = fixture()
+	Object.assign(input.production.vars, {
+		APP_COMMIT_SHA: 'd'.repeat(40),
+		APP_DEPLOY_INFO: 'legacy-deployment-info',
+	})
+	const result = buildStartRolloutConfig(input)
+	expect(result.candidate.vars).toMatchObject({ APP_COMMIT_SHA: input.release })
+	expect(
+		(result.candidate.vars as Record<string, unknown>).APP_DEPLOY_INFO,
+	).toBeUndefined()
+	expect(
+		(input.production.vars as Record<string, unknown>).APP_DEPLOY_INFO,
+	).toBe('legacy-deployment-info')
+})
