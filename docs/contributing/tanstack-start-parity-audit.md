@@ -2,11 +2,30 @@
 
 ## Parsed search and populated preview checks
 
+The populated follow-up on merge `f7aa53c9e` found two remaining defects. A
+memory detail link duplicated the query string because SiteLink supplied a full
+URL in Router's pathname field. Local commit `066dcd44b` separates pathname,
+search and hash; protocol click behavior still needs review before deployment.
+Soft deletion of preview fixture `28ca44d6-83b8-475b-914d-f40b22b0d319`
+succeeded, but Include deleted returned no rows after reload. The shared memory
+repository always adds `deleted_at IS NULL`, including when the caller requests
+deleted statuses. This contradicts populated filter parity and is being fixed
+with an explicit opt-in read option. Screenshot:
+`/tmp/kody-preview-deleted-memory-confirmed.png`.
+
+Validate `38773350396` passed Workers, Static and MCP. Node reported four
+failures in the new memory-history Router test because it lacked a Node-safe
+origin. Local commit `68de1a986` supplies the explicit origin, matching existing
+navigation test setup. Its runtime result is unverified. Browser CI remains in
+progress. Local commit `8e1bcc315` adds authenticated HEAD support to the memory
+download, with bodyless response coverage; static server-test typechecking
+passes.
+
 Preview run `38773350189` deployed merge
-`f7aa53c9ed9313fc3f17a24b016f673f05bf680f`, source `050de978f` merged by
-GitHub with main `e04798aba`. Origin, platform, runtime and API health checks
-passed. The source branch has not merged those newer main commits; the preview
-workflow uses GitHub's synthetic merge commit.
+`f7aa53c9ed9313fc3f17a24b016f673f05bf680f`, source `050de978f` merged by GitHub
+with main `e04798aba`. Origin, platform, runtime and API health checks passed.
+The source branch has not merged those newer main commits; the preview workflow
+uses GitHub's synthetic merge commit.
 
 Fresh browser login with the approved test account preserved the Memories
 destination. Include deleted produced `includeDeleted=true` and stayed checked
