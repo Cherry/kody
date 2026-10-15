@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest'
 import {
 	connectOauthInput,
+	connectOauthSchema,
 	connectSecretsInput,
 	connectWebhookInput,
 	connectSecretsSchema,
@@ -33,4 +34,22 @@ test('OAuth callback and setup fields remain distinct from navigation state', ()
 	expect(
 		connectWebhookInput('?handle=%20abc%20&fingerprint=%20def%20'),
 	).toMatchObject({ handle: 'abc', fingerprint: 'def' })
+})
+
+test.each(['?org=', '?org=%20%20', '?org=../other', '?org=team%2Fother'])(
+	'OAuth rejects explicit malformed scope %s',
+	(search) => {
+		expect(
+			connectOauthSchema.safeParse(connectOauthInput(search)).success,
+		).toBe(false)
+	},
+)
+test('OAuth accepts absent personal scope and preserves valid first organization scope', () => {
+	expect(
+		connectOauthSchema.parse(connectOauthInput('?provider=github')).orgSlug,
+	).toBeUndefined()
+	expect(
+		connectOauthSchema.parse(connectOauthInput('?org=%20team%20&org=other'))
+			.orgSlug,
+	).toBe('team')
 })

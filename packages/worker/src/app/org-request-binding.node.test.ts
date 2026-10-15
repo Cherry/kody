@@ -3,7 +3,7 @@ import { expect, test } from 'vitest'
 import { createD1FromSqlite } from '#worker/test-support/create-d1-from-sqlite.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
 import {
-	isOrgRequestDenied,
+	orgSectionDenial,
 	loadRequestOrgResolution,
 } from './org-request-binding.ts'
 
@@ -66,15 +66,15 @@ test('organization documents bind their explicit path', async () => {
 		),
 	).resolves.toMatchObject({ org: { id: acmeId, slug: 'acme' } })
 	await expect(
-		isOrgRequestDenied(
+		loadRequestOrgResolution(
 			new Request('https://kody.test/@ada/-/memories'),
 			env,
 			adaId,
 		),
-	).resolves.toBe(true)
+	).resolves.toBe('denied')
 	await expect(
-		isOrgRequestDenied(new Request('https://kody.test/@ada'), env, adaId),
-	).resolves.toBe(false)
+		loadRequestOrgResolution(new Request('https://kody.test/@ada'), env, adaId),
+	).resolves.toBe('personal')
 })
 
 test.each(['/connect/oauth', '/account/memories-export.json'])(
@@ -92,12 +92,12 @@ test.each(['/connect/oauth', '/account/memories-export.json'])(
 		).resolves.toMatchObject({ org: { id: acmeId, slug: 'acme' } })
 		for (const org of ['ada', '', 'Not%20A%20Slug', 'missing']) {
 			await expect(
-				isOrgRequestDenied(
+				loadRequestOrgResolution(
 					new Request(`https://kody.test${path}?org=${org}`),
 					env,
 					adaId,
 				),
-			).resolves.toBe(true)
+			).resolves.toBe('denied')
 		}
 		await expect(
 			loadRequestOrgResolution(
@@ -124,19 +124,14 @@ test('org sections follow the page gate for grant-only collaborators', async () 
 			 VALUES ('grant-1', ?, 'secret', 'secret-1', 'user', ?, 'use', ?, ?, ?)`,
 		)
 		.run(acmeId, adaId, acmeId, now, now)
-	const deniedPage = (url: string) =>
-		isOrgRequestDenied(new Request(url), env, adaId)
-	await expect(deniedPage('https://kody.test/@acme/-/agents')).resolves.toBe(
-		false,
+	const resolution = await loadRequestOrgResolution(
+		new Request('https://kody.test/@acme/-/agents'),
+		env,
+		adaId,
 	)
-	await expect(deniedPage('https://kody.test/@acme/-/memories')).resolves.toBe(
-		true,
+	expect(orgSectionDenial(resolution, 'agents')).toBeNull()
+	expect(orgSectionDenial(resolution, 'memories')).toBe(
+		'Organization resources unavailable',
 	)
-	await expect(
-		deniedPage('https://kody.test/account/memories-export.json?org=acme'),
-	).resolves.toBe(true)
-	// Management pages check their own permission once the org is bound.
-	await expect(deniedPage('https://kody.test/@acme/-/settings')).resolves.toBe(
-		false,
-	)
+	expect(resolution).toMatchObject({ org: { id: acmeId }, role: null })
 })

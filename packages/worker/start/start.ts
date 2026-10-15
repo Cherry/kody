@@ -42,7 +42,7 @@ const rpcResponsePolicy = createMiddleware().server(({ handlerType, next }) => {
 const documentPolicies = createMiddleware().server(
 	({ request, handlerType, next }) => {
 		if (handlerType === 'serverFn') return next()
-		return applyDocumentPolicies(request, async (options) => next(options))
+		return applyDocumentPolicies(request, async () => next())
 	},
 )
 

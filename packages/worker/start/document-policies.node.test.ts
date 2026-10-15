@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ denied: vi.fn(), lease: vi.fn(), env: {} }))
+const mocks = vi.hoisted(() => ({ lease: vi.fn(), env: {} }))
 vi.mock('cloudflare:workers', async (importOriginal) => ({
 	...(await importOriginal<Record<string, unknown>>()),
 	get env() {
@@ -7,9 +7,6 @@ vi.mock('cloudflare:workers', async (importOriginal) => ({
 	},
 }))
 vi.mock('#app/env.ts', () => ({ getEnv: () => mocks.env }))
-vi.mock('#app/org-binding-guard-middleware.ts', () => ({
-	orgRequestIsDenied: mocks.denied,
-}))
 vi.mock('#app/account-write-lease-middleware.ts', () => ({
 	withProtocolAccountWriteLease: mocks.lease,
 }))
@@ -21,7 +18,6 @@ import { startInstance } from './start.ts'
 const middleware = (await startInstance.getOptions()).requestMiddleware![2]!
 const server = middleware.options.server!
 beforeEach(() => {
-	mocks.denied.mockReset().mockResolvedValue(false)
 	mocks.lease
 		.mockReset()
 		.mockImplementation(
@@ -53,35 +49,19 @@ async function run(
 	})
 	return { result, next, response }
 }
-test('denied documents enter native rendering with trusted404 context', async () => {
-	mocks.denied.mockResolvedValue(true)
-	const { result, next } = await run('/@outsider/-/secrets')
-	expect(next).toHaveBeenCalledWith({
-		context: { documentFailure: { status: 404 } },
-	})
-	expect(result).toMatchObject({
-		context: { documentFailure: { status: 404 } },
-	})
-})
-test('denied protocol requests stop before handlers and leases', async () => {
-	mocks.denied.mockResolvedValue(true)
-	const { result, next } = await run(
-		'/account/memories-export.json?org=outsider',
-	)
-	expect(next).not.toHaveBeenCalled()
-	expect(mocks.lease).not.toHaveBeenCalled()
-	expect(result).toBeInstanceOf(Response)
-	if (!(result instanceof Response)) throw new Error('Expected denial response')
-	expect(result.status).toBe(404)
-	expect(await result.json()).toEqual({
-		ok: false,
-		error: 'Organization not found.',
-	})
-})
+test.each([
+	'/@outsider/-/secrets',
+	'/account/memories-export.json?org=outsider',
+])(
+	'organization access for %s belongs to the native route or protocol',
+	async (path) => {
+		const { next } = await run(path)
+		expect(next).toHaveBeenCalledWith()
+	},
+)
 test('RPC bypasses document org policy and outer write lease', async () => {
 	const { next } = await run('/_serverFn/write', 'serverFn', 'POST')
 	expect(next).toHaveBeenCalledOnce()
-	expect(mocks.denied).not.toHaveBeenCalled()
 	expect(mocks.lease).not.toHaveBeenCalled()
 })
 test('native middleware preserves result context and appends referral to final cookies', async () => {

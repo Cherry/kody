@@ -38,7 +38,8 @@ function connectionLocation(search: string) {
 	const params = new URLSearchParams(search)
 	return {
 		params,
-		orgSlug: params.get('org')?.trim() || undefined,
+		// Present-but-empty scope must fail validation, never select personal scope.
+		orgSlug: params.has('org') ? params.get('org')!.trim() : undefined,
 		search: Array.from(params.entries()),
 	}
 }

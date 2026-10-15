@@ -1,7 +1,6 @@
 import { loadOrgBindingForSlug, type OrgBinding } from '#worker/orgs/repo.ts'
 import { readOrgSlugFromUrl } from '#universal/org-binding/url.ts'
 import {
-	orgOwnedSectionForPath,
 	orgSlugFromOrgOwnedPath,
 	type OrgOwnedAccountSection,
 } from '#universal/org-pages.ts'
@@ -43,53 +42,12 @@ export function orgSectionDenial(
 	return null
 }
 
-/** Organization-owned document and protocol paths. */
-export function isOrgBoundPath(pathname: string): boolean {
-	return orgSlugFromPageUrl(pathname) !== null
-}
-/**
- * True when this request can bind a non-signup org: an org-bound path, or
- * `/connect/oauth?org=<slug>` (the OAuth redirect URI stays path-org-less).
- * An explicit empty/invalid `org=` is also bound so the guard can deny it
- * instead of falling through to the signup org.
- */
-export function isOrgBoundRequest(url: URL): boolean {
-	return (
-		isOrgBoundPath(url.pathname) ||
-		hasInvalidExplicitOrg(url) ||
-		orgSlugFromExplicitOrgUrl(url) !== null
-	)
-}
-
 function hasInvalidExplicitOrg(url: URL): boolean {
 	return (
 		hasExplicitOrgQuery(url.pathname) &&
 		url.searchParams.has('org') &&
 		readOrgSlugFromUrl(url) === null
 	)
-}
-
-/**
- * True when this request names an org the person cannot use: an `/@slug/-/…`
- * URL for an org they neither belong to nor hold a grant in, or a section URL
- * (page or export download) that
- * {@link orgSectionDenial} closes to them. Authentication also rejects denied
- * orgs; this guard preserves the document/protocol denial response before
- * any handler runs. Billing and management URLs only need the org; their
- * handlers check the permission.
- */
-export async function isOrgRequestDenied(
-	request: Request,
-	env: Env,
-	personId: string,
-): Promise<boolean> {
-	const url = new URL(request.url)
-	if (!isOrgBoundRequest(url)) return false
-	const resolution = await loadRequestOrgResolution(request, env, personId)
-	if (resolution === 'denied') return true
-	if (resolution === 'personal') return false
-	const section = orgOwnedSectionForPath(url.pathname)
-	return section !== null && orgSectionDenial(resolution, section) !== null
 }
 
 function orgSlugFromPageUrl(pathname: string): string | null {

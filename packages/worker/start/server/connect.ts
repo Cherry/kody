@@ -98,11 +98,24 @@ export const loadConnectWebhookApply = createServerFn({ method: 'GET' })
 		}
 	})
 export const loadConnectOauth = createServerFn({ method: 'GET' })
-	.validator(connectOauthSchema)
+	.validator((input: z.input<typeof connectOauthSchema>) => {
+		const result = connectOauthSchema.safeParse(input)
+		if (!result.success) {
+			if (result.error.issues.some((issue) => issue.path[0] === 'orgSlug'))
+				throw notFound()
+			throw result.error
+		}
+		return result.data
+	})
 	.handler(async ({ data }) => {
 		const { loadConnectOauthLoaderData } =
 			await import('../../src/app/handlers/connect-oauth.ts')
 		if (!data.provider?.trim() && (data.code || data.error)) {
+			if (data.orgSlug) {
+				const { verifySession } = await import('./shell.ts')
+				await verifySession({ data: { orgSlug: data.orgSlug } })
+			}
+
 			const [
 				{ getRequest, setResponseHeader },
 				{ env },
