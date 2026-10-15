@@ -520,8 +520,6 @@ export const loadUsagePage = createServerFn({ method: 'GET' })
 			env: bindings,
 			user,
 		})
-		if (result.kind === 'redirect')
-			throw redirect({ href: result.href, statusCode: 302 })
 		if (result.kind === 'denied') {
 			if (result.status === 404) throw notFound()
 			throw new Response(result.error, { status: result.status })

@@ -1,5 +1,9 @@
 export type BillingInterval = 'month' | 'year'
-import { startCheckout } from '#start/server/billing-mutations'
+import { mutationOptions } from '@tanstack/react-query'
+import {
+	startCheckout,
+	openBillingPortal,
+} from '#start/server/billing-mutations'
 export async function requestProCheckout(input: {
 	orgSlug: string
 	interval?: 'month' | 'year'
@@ -27,3 +31,20 @@ export async function requestProCheckout(input: {
 		}
 	}
 }
+
+export const billingPortalMutationOptions = mutationOptions({
+	retry: false,
+	gcTime: 0,
+	mutationFn: (orgSlug: string) => openBillingPortal({ data: { orgSlug } }),
+})
+
+export const billingCheckoutMutationOptions = mutationOptions({
+	retry: false,
+	gcTime: 0,
+	mutationFn: (input: {
+		orgSlug: string
+		plan: 'pro'
+		interval: BillingInterval
+		promoCode: string
+	}) => requestProCheckout(input),
+})

@@ -1,6 +1,8 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { createFileRoute } from '@tanstack/react-router'
+import { rejectActionPageHead } from '../action-page-method.ts'
+import { completeCreditTopUp } from '#start/server/credit-top-up-completion'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { AccountUsagePage } from '../pages/account-usage.tsx'
 import { loadUsagePage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
@@ -11,6 +13,18 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
 	staticData: { orgScope: {} },
+	server: {
+		handlers: {
+			HEAD: ({ request, next }) => {
+				const search = new URL(request.url).searchParams
+				return search.get('topup') === 'success' &&
+					search.get('session_id')?.trim()
+					? rejectActionPageHead()
+					: next()
+			},
+		},
+	},
+	preloadStaleTime: 0,
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		credits: search.credits,
 		error: search.error,
@@ -29,12 +43,21 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
 			},
 		}
 	},
-	loader: ({ context, preload }) =>
-		loadPageQuery(
+	loader: async ({ context, preload }) => {
+		const input = context.pageQueryInput
+		if (input.topup === 'success' && input.sessionId?.trim()) {
+			if (preload) return { head: undefined }
+			const result = await completeCreditTopUp({
+				data: { orgSlug: input.orgSlug, sessionId: input.sessionId },
+			})
+			throw redirect({ href: result.href, statusCode: 302 })
+		}
+		return loadPageQuery(
 			context.queryClient,
 			pageQuery(context.actorKey, context.pageQueryInput),
 			preload,
-		),
+		)
+	},
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: Page,
 })

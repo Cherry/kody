@@ -45,7 +45,8 @@ vi.mock('#worker/billing/credit-top-ups.ts', async (importOriginal) => {
 	}
 })
 
-const { loadOrgUsagePageResult } = await import('./org-usage.ts')
+const { loadOrgUsagePageResult, completeOrgCreditTopUp } =
+	await import('./org-usage.ts')
 
 const now = '2026-01-01T00:00:00.000Z'
 
@@ -158,7 +159,12 @@ function signInAs(person: Person | null) {
 	)
 }
 
-async function call(env: Env, path: string, init?: RequestInit) {
+async function call(
+	env: Env,
+	path: string,
+	init?: RequestInit,
+	completion = false,
+) {
 	const request = new Request(`https://example.com${path}`, init)
 	const user = await mocks.requireAuthenticatedPageUser(request, env)
 	if (user instanceof Response)
@@ -169,15 +175,22 @@ async function call(env: Env, path: string, init?: RequestInit) {
 			error: await user.text(),
 		}
 	const url = new URL(request.url)
-	const result = await loadOrgUsagePageResult({
-		env,
-		user,
-		orgSlug: url.pathname.split('/')[1]!.slice(1),
-		credits: url.searchParams.get('credits'),
-		error: url.searchParams.get('error'),
-		topup: url.searchParams.get('topup'),
-		sessionId: url.searchParams.get('session_id'),
-	})
+	const result = completion
+		? await completeOrgCreditTopUp({
+				env,
+				user,
+				orgSlug: url.pathname.split('/')[1]!.slice(1),
+				sessionId: url.searchParams.get('session_id') ?? '',
+			})
+		: await loadOrgUsagePageResult({
+				env,
+				user,
+				orgSlug: url.pathname.split('/')[1]!.slice(1),
+				credits: url.searchParams.get('credits'),
+				error: url.searchParams.get('error'),
+				topup: url.searchParams.get('topup'),
+				sessionId: url.searchParams.get('session_id'),
+			})
 	if (result.kind === 'redirect')
 		return {
 			status: 302,
@@ -280,10 +293,23 @@ test('the usage page mirrors the API access matrix', async () => {
 	expect(outsider.error).toContain('Organization unavailable')
 })
 
-test('a confirmed Stripe return lands on the Credits section with the added notice', async () => {
+const complete = (env: Env, path: string) => call(env, path, undefined, true)
+
+test('usage reads never apply a checkout even when legacy return parameters are present', async () => {
 	const env = createEnv()
 	signInAs('ada')
 	const response = await call(
+		env,
+		'/@ada/-/usage?topup=success&session_id=cs_123',
+	)
+	expect(response.status).toBe(200)
+	expect(mocks.applyCreditTopUpFromCheckoutSession).not.toHaveBeenCalled()
+})
+
+test('a confirmed Stripe return lands on the Credits section with the added notice', async () => {
+	const env = createEnv()
+	signInAs('ada')
+	const response = await complete(
 		env,
 		'/@ada/-/usage?topup=success&session_id=cs_123',
 	)
@@ -307,7 +333,10 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 	mocks.applyCreditTopUpFromCheckoutSession.mockRejectedValueOnce(
 		new CreditTopUpError('not_paid', 'Not paid.'),
 	)
-	const notPaid = await call(env, '/@ada/-/usage?topup=success&session_id=cs_1')
+	const notPaid = await complete(
+		env,
+		'/@ada/-/usage?topup=success&session_id=cs_1',
+	)
 	expect(notPaid.headers.get('Location')).toBe(
 		'https://example.com/@ada/-/usage?error=not_paid#credits',
 	)
@@ -315,7 +344,10 @@ test('a rejected Stripe return keeps known codes and folds the rest into topup_f
 	mocks.applyCreditTopUpFromCheckoutSession.mockRejectedValueOnce(
 		new CreditTopUpError('user_not_found', 'Missing.'),
 	)
-	const unknown = await call(env, '/@ada/-/usage?topup=success&session_id=cs_2')
+	const unknown = await complete(
+		env,
+		'/@ada/-/usage?topup=success&session_id=cs_2',
+	)
 	expect(unknown.headers.get('Location')).toBe(
 		'https://example.com/@ada/-/usage?error=topup_failed#credits',
 	)

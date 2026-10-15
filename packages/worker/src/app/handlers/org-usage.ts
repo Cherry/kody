@@ -86,6 +86,51 @@ async function resolveOrgUsageAccess(input: {
 	}
 }
 
+/** Foreground checkout completion, separate from reusable usage reads. */
+export async function completeOrgCreditTopUp(input: {
+	env: Env
+	user: AuthenticatedAppUser
+	orgSlug: string
+	sessionId: string
+}) {
+	const { env } = input
+	const access = await resolveOrgUsageAccess({
+		...input,
+		permission: 'billing:read',
+	})
+	if (!access.ok)
+		return {
+			kind: 'denied' as const,
+			status: access.status,
+			error: access.error,
+		}
+	let query: Record<string, string>
+	try {
+		await applyCreditTopUpFromCheckoutSession({
+			env,
+			sessionId: input.sessionId.trim(),
+			expectedStableUserId: access.org.id,
+			now: new Date(),
+		})
+		query = { credits: 'added' }
+	} catch (error) {
+		const code = error instanceof CreditTopUpError ? error.code : 'topup_failed'
+		console.error('credit_top_up_confirm_failed', { code })
+		query = {
+			error: readMessage(creditsErrorMessages, code) ? code : 'topup_failed',
+		}
+	}
+	const target = new URL(
+		orgUsageCreditsPath(access.org.slug),
+		'https://kody.local',
+	)
+	target.search = new URLSearchParams(query).toString()
+	return {
+		kind: 'redirect' as const,
+		href: target.pathname + target.search + target.hash,
+	}
+}
+
 export async function loadOrgUsagePageResult(input: {
 	env: Env
 	user: AuthenticatedAppUser
@@ -106,35 +151,6 @@ export async function loadOrgUsagePageResult(input: {
 			status: access.status,
 			error: access.error,
 		}
-	const sessionId = input.sessionId?.trim()
-	if (input.topup === 'success' && sessionId) {
-		let query: Record<string, string>
-		try {
-			await applyCreditTopUpFromCheckoutSession({
-				env,
-				sessionId,
-				expectedStableUserId: access.org.id,
-				now: new Date(),
-			})
-			query = { credits: 'added' }
-		} catch (error) {
-			const code =
-				error instanceof CreditTopUpError ? error.code : 'topup_failed'
-			console.error('credit_top_up_confirm_failed', { code })
-			query = {
-				error: readMessage(creditsErrorMessages, code) ? code : 'topup_failed',
-			}
-		}
-		const target = new URL(
-			orgUsageCreditsPath(access.org.slug),
-			'https://kody.local',
-		)
-		target.search = new URLSearchParams(query).toString()
-		return {
-			kind: 'redirect' as const,
-			href: target.pathname + target.search + target.hash,
-		}
-	}
 	const payload = await loadAccountUsageData({
 		env,
 		userId: user.userId,

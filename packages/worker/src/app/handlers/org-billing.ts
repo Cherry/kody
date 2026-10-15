@@ -1,4 +1,3 @@
-import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
 import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { operationResult } from '../operation-result.ts'
 import { type OrgPermission } from '@kody-internal/shared/org-permissions.ts'
@@ -264,7 +263,7 @@ export async function completeOrgBillingCheckout({
 		})
 		const hasMcpClient = await userHasMcpOAuthGrants(
 			env,
-			personalOrgId(user.mcpUser.userId),
+			personalOrgIdForPerson(user.mcpUser),
 		)
 		const needsOnboarding = !user.emailVerified || !hasMcpClient
 		return { ok: true as const, needsOnboarding }

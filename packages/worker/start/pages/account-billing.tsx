@@ -1,13 +1,11 @@
 /** @jsxImportSource @emotion/react */
-import {
-	sendCancellationFeedback,
-	openBillingPortal,
-} from '#start/server/billing-mutations'
+import { sendCancellationFeedback } from '#start/server/billing-mutations'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildBillingFailureAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { formatTimestampDate as formatCancelDate } from '../components/local-timestamp.tsx'
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import { orgIdentity } from '#universal/org-pages.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { adminGrantDiffersFromSubscription } from '#universal/account-plan-display.ts'
@@ -34,7 +32,10 @@ import {
 	renderAccountBillingPlans,
 	resolveActiveStripePlan,
 } from './account-billing-plans.tsx'
-import { requestProCheckout } from '../billing-checkout.ts'
+import {
+	billingCheckoutMutationOptions,
+	billingPortalMutationOptions,
+} from '../billing-checkout.ts'
 
 import {
 	colors,
@@ -181,11 +182,23 @@ export function AccountBillingPage({
 		displayName: '',
 		avatarUrl: null,
 	}).name
-	const [portalPending, setPortalPending] = useState(false)
-	const [checkoutPending, setCheckoutPending] = useState<CheckoutPending>(null)
+	const portalMutation = useMutation(billingPortalMutationOptions)
+	const portalPending = portalMutation.isPending
+	const checkoutMutation = useMutation(billingCheckoutMutationOptions)
+	const checkoutPending: CheckoutPending = checkoutMutation.isPending
+		? {
+				plan: checkoutMutation.variables.plan,
+				interval: checkoutMutation.variables.interval,
+			}
+		: null
 	const [cancellationFeedbackText, setCancellationFeedbackText] = useState('')
-	const [cancellationFeedbackPending, setCancellationFeedbackPending] =
-		useState(false)
+	const feedbackMutation = useMutation({
+		mutationFn: (details: string) =>
+			sendCancellationFeedback({ data: { details } }),
+		retry: false,
+		gcTime: 0,
+	})
+	const cancellationFeedbackPending = feedbackMutation.isPending
 	const [cancellationFeedbackSent, setCancellationFeedbackSent] =
 		useState(false)
 	const [cancellationFeedbackError, setCancellationFeedbackError] = useState<
@@ -205,11 +218,11 @@ export function AccountBillingPage({
 		errorPlacement: 'page' | 'plan-card' = 'plan-card',
 	) {
 		if (checkoutPending) return
-		setCheckoutPending({ plan, interval })
 		setMessage(null)
 		setPlanCheckoutError(null)
 		const isCurrent = capture()
-		const result = await requestProCheckout({
+		const result = await checkoutMutation.mutateAsync({
+			plan,
 			orgSlug: payload.org.slug,
 			interval,
 			promoCode: errorPlacement === 'plan-card' ? promoCode : '',
@@ -231,7 +244,6 @@ export function AccountBillingPage({
 			setMessage(result.error)
 			setMessageTone('error')
 		}
-		setCheckoutPending(null)
 	}
 
 	async function submitCancellationFeedback() {
@@ -242,17 +254,17 @@ export function AccountBillingPage({
 			setCancellationFeedbackError('Share a sentence or two before sending.')
 			return
 		}
-		setCancellationFeedbackPending(true)
+		const isCurrent = capture()
 		setCancellationFeedbackError(null)
 		try {
-			await sendCancellationFeedback({ data: { details } })
-			setCancellationFeedbackSent(true)
+			await feedbackMutation.mutateAsync(details)
+			if (isCurrent()) setCancellationFeedbackSent(true)
 		} catch (error) {
-			setCancellationFeedbackError(
-				error instanceof Error ? error.message : sendFallback,
-			)
+			if (isCurrent())
+				setCancellationFeedbackError(
+					error instanceof Error ? error.message : sendFallback,
+				)
 		}
-		setCancellationFeedbackPending(false)
 	}
 
 	const billing = payload
@@ -618,21 +630,20 @@ export function AccountBillingPage({
 									disabled={portalPending}
 									onClick={async () => {
 										if (portalPending) return
-										setPortalPending(true)
+										const isCurrent = capture()
 										try {
-											const result = await openBillingPortal({
-												data: { orgSlug: payload.org.slug },
-											})
-											window.location.assign(result.url)
+											const result = await portalMutation.mutateAsync(
+												payload.org.slug,
+											)
+											if (isCurrent()) window.location.assign(result.url)
 										} catch (error) {
+											if (!isCurrent()) return
 											setMessage(
 												error instanceof Error
 													? error.message
 													: 'Unable to open billing portal.',
 											)
 											setMessageTone('error')
-										} finally {
-											setPortalPending(false)
 										}
 									}}
 									css={{

@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { rejectActionPageHead } from '../action-page-method.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { AccountUsagePage } from '../pages/account-usage.tsx'
 import { loadUsagePage } from '#start/server/account-collections'
@@ -9,6 +10,17 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 })
 
 export const Route = createFileRoute('/account_/usage')({
+	server: {
+		handlers: {
+			HEAD: ({ request, next }) => {
+				const search = new URL(request.url).searchParams
+				return search.get('topup') === 'success' &&
+					search.get('session_id')?.trim()
+					? rejectActionPageHead()
+					: next()
+			},
+		},
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => {
 		const search = new URLSearchParams(location.searchStr)

@@ -25,7 +25,7 @@ import { ensureUsersTestSchema } from '#worker/users-test-schema.ts'
 const mocks = vi.hoisted(() => ({
 	readAuthenticatedAppUser: vi.fn(),
 	requireAuthenticatedPageUser: vi.fn(),
-	userHasMcpOAuthGrants: vi.fn(async () => false),
+	userHasMcpOAuthGrants: vi.fn(async (..._args: Array<unknown>) => false),
 	linkStripeCustomerFromCheckoutSessionAttribution:
 		vi.fn<(...args: Array<unknown>) => Promise<unknown>>(),
 	loadAccountBillingData: vi.fn(async (input: Record<string, unknown>) => ({
@@ -56,7 +56,8 @@ vi.mock('#app/page-auth.ts', () => ({
 		mocks.requireAuthenticatedPageUser(...args),
 }))
 vi.mock('#app/onboarding-data.ts', () => ({
-	userHasMcpOAuthGrants: () => mocks.userHasMcpOAuthGrants(),
+	userHasMcpOAuthGrants: (...args: Array<unknown>) =>
+		mocks.userHasMcpOAuthGrants(...args),
 }))
 vi.mock('#app/account-billing-data.ts', () => ({
 	loadAccountBillingData: (input: Record<string, unknown>) =>
@@ -739,6 +740,39 @@ test('checkout return links the Stripe customer onto the org in the URL', async 
 	expect(
 		mocks.linkStripeCustomerFromCheckoutSessionAttribution,
 	).toHaveBeenCalledTimes(1)
+})
+
+test('checkout return checks onboarding against the stamped personal organization', async () => {
+	const env = createEnv()
+	signInAs('ada')
+	mocks.linkStripeCustomerFromCheckoutSessionAttribution.mockResolvedValue({})
+	mocks.userHasMcpOAuthGrants.mockResolvedValue(true)
+	const request = new Request('https://example.com/@acme/-/billing/success')
+	const user: AuthenticatedAppUser = await mocks.readAuthenticatedAppUser(
+		request,
+		env,
+	)
+	user.mcpUser = {
+		...user.mcpUser,
+		personalOrgId: ownerIdFromStored('personal-org-distinct'),
+	}
+	const result = await completeOrgBillingCheckout({
+		request,
+		env,
+		user,
+		orgSlug: 'acme',
+		sessionId: 'cs_test',
+	})
+	expect(result).toEqual({ ok: true, needsOnboarding: false })
+	expect(mocks.userHasMcpOAuthGrants).toHaveBeenCalledWith(
+		env,
+		ownerIdFromStored('personal-org-distinct'),
+	)
+	expect(
+		mocks.linkStripeCustomerFromCheckoutSessionAttribution,
+	).toHaveBeenCalledWith(
+		expect.objectContaining({ orgId: ownerIdFromStored('org-acme') }),
+	)
 })
 
 test('the Stripe portal opens for the org in the URL and only for managers', async () => {
