@@ -27,13 +27,13 @@ Preview run `38715337497` succeeded. The health endpoint reports deployed merge
 `dac9ea01b12fb4824d437792b6c578c23ced797e`.
 
 The anonymous community page rendered its empty state in Chrome at 1728×941,
-with the heading, search form, illustration, and connect links visible. No browser
-console errors were captured. Production has populated package listings, so this
-does not prove populated listing or package detail parity. Authenticated and
-matched-fixture visual checks remain incomplete.
+with the heading, search form, illustration, and connect links visible. No
+browser console errors were captured. Production has populated package listings,
+so this does not prove populated listing or package detail parity. Authenticated
+and matched-fixture visual checks remain incomplete.
 
-Validate run `38715337519` passed Workers and MCP. Static and Node failed;
-the stale documentation reference, removed-copy assertion, and native test fixture
+Validate run `38715337519` passed Workers and MCP. Static and Node failed; the
+stale documentation reference, removed-copy assertion, and native test fixture
 failures have subsequent local fixes. E2E was still running at this observation.
 
 ## Current evidence, October 15, 2026
