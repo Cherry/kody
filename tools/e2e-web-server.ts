@@ -1,3 +1,4 @@
+import { startStripeMock } from '../e2e/stripe-mock-server.ts'
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -130,6 +131,10 @@ async function startE2eWebServer() {
 		throw error
 	}
 
+	const stripe = await startStripeMock().catch(async (error) => {
+		await mock[Symbol.asyncDispose]()
+		throw error
+	})
 	const extraArgs = process.argv.slice(2)
 	// Isolate from a concurrent healthy `dev:ensure` origin: own persist dir,
 	// dedicated e2e flag (disables the Vite Cloudflare inspector), and the
@@ -137,6 +142,8 @@ async function startE2eWebServer() {
 	// reuseExistingServer in playwright.config.ts (#3731).
 	const viteEnv = {
 		...process.env,
+		STRIPE_API_BASE_URL: stripe.origin,
+		KODY_E2E_STRIPE_TOKEN: stripe.token,
 		CLOUDFLARE_API_BASE_URL: mock.origin,
 		CLOUDFLARE_API_TOKEN: mock.token,
 		CLOUDFLARE_ACCOUNT_ID: e2eCloudflareMockAccountId,
@@ -179,6 +186,7 @@ async function startE2eWebServer() {
 		if (shuttingDown) return
 		shuttingDown = true
 		await stopChildProcessTree(vite)
+		await stripe.close()
 		await mock[Symbol.asyncDispose]()
 		process.exit(exitCode)
 	}

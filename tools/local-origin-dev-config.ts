@@ -38,6 +38,18 @@ export function collectLocalOriginDevVars(
 		const value = env[key]?.trim()
 		if (value) vars[key] = value
 	}
+	// Only the isolated E2E runner may inject a disposable provider simulator.
+	if (
+		env.KODY_E2E_WEB_SERVER === '1' &&
+		env.CLOUDFLARE_ENV === 'test' &&
+		env.KODY_E2E_STRIPE_TOKEN?.startsWith('sk_test_e2e_')
+	) {
+		const stripe = new URL(env.STRIPE_API_BASE_URL ?? '')
+		if (stripe.protocol !== 'http:' || stripe.hostname !== '127.0.0.1')
+			throw new Error('E2E Stripe must use loopback')
+		vars.STRIPE_API_BASE_URL = stripe.origin
+		vars.STRIPE_SECRET_KEY = env.KODY_E2E_STRIPE_TOKEN
+	}
 	return vars
 }
 

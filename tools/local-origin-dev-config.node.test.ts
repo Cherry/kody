@@ -110,3 +110,26 @@ test('writes local-dev vars onto the selected env without dropping committed var
 		await rm(dir, { recursive: true, force: true })
 	}
 })
+
+test('Stripe simulator config is restricted to the isolated test runner', () => {
+	const values = {
+		KODY_E2E_WEB_SERVER: '1',
+		CLOUDFLARE_ENV: 'test',
+		KODY_E2E_STRIPE_TOKEN: 'sk_test_e2e_fixture',
+		STRIPE_API_BASE_URL: 'http://127.0.0.1:1234',
+		STRIPE_SECRET_KEY: 'never-use-live-key',
+	}
+	expect(collectLocalOriginDevVars(values)).toMatchObject({
+		STRIPE_SECRET_KEY: 'sk_test_e2e_fixture',
+		STRIPE_API_BASE_URL: 'http://127.0.0.1:1234',
+	})
+	expect(
+		collectLocalOriginDevVars({ ...values, CLOUDFLARE_ENV: 'production' }),
+	).not.toHaveProperty('STRIPE_SECRET_KEY')
+	expect(() =>
+		collectLocalOriginDevVars({
+			...values,
+			STRIPE_API_BASE_URL: 'https://api.stripe.com',
+		}),
+	).toThrow('loopback')
+})
