@@ -48,6 +48,7 @@ for (const validateSearch of validators) {
 			},
 		})
 		const router = createRouter({
+			origin: 'https://kody.test',
 			routeTree: root.addChildren([page]),
 			history: createMemoryHistory({ initialEntries: ['/filters'] }),
 			isServer: false,
