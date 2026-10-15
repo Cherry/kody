@@ -37,8 +37,8 @@ sequenceDiagram
 ```
 
 Each server request gets its own QueryClient. The browser retains its own client
-across navigation. Successful and pending queries can be dehydrated for streaming;
-settled authorization errors are not reusable hydration data.
+across navigation. Successful and pending queries can be dehydrated for
+streaming; settled authorization errors are not reusable hydration data.
 
 ## 2. Navigation and private access
 
@@ -55,10 +55,11 @@ flowchart TD
     H --> I[Commit matched page, head and scroll state]
 ```
 
-Identity checks and destination reads start concurrently. Private warm navigation
-can reuse data but still checks access. Known static public pages skip that check.
-Permission-sensitive resources explicitly require fresh foreground authorization.
-Retained pages use their matched location while the next navigation is pending.
+Identity checks and destination reads start concurrently. Private warm
+navigation can reuse data but still checks access. Known static public pages
+skip that check. Permission-sensitive resources explicitly require fresh
+foreground authorization. Retained pages use their matched location while the
+next navigation is pending.
 
 ## 3. Repeated reads and performance
 
@@ -75,8 +76,8 @@ flowchart TD
     G --> H
 ```
 
-Default freshness is 30 seconds and inactive cache retention is 5 minutes,
-with resource-specific overrides possible. Query owns freshness even for intent
+Default freshness is 30 seconds and inactive cache retention is 5 minutes, with
+resource-specific overrides possible. Query owns freshness even for intent
 preloads. Automatic retries are disabled by default. Cancellation belongs to the
 query, not an individual navigation that might share it.
 
@@ -107,8 +108,8 @@ sequenceDiagram
     Q-->>U: Pending status and guarded UI feedback
 ```
 
-The organization is explicit validated input, not inferred from Referer.
-Shared domain code retains resource authorization, relevant rate limits and audit
+The organization is explicit validated input, not inferred from Referer. Shared
+domain code retains resource authorization, relevant rate limits and audit
 events. Normal website writes use an account write lease; account deletion has
 its own exclusive lifecycle lock. Private responses use `private, no-store`.
 
@@ -153,10 +154,10 @@ flowchart LR
 ```
 
 Presentation-only filters can change the URL without fetching the same data
-again. Draft text can retain whitespace while query inputs normalize it.
-Secrets and one-time credential or invite reveals stay outside reusable page
-caches. Pending controls follow mutation status, not a local flag that can get
-stuck when navigation changes.
+again. Draft text can retain whitespace while query inputs normalize it. Secrets
+and one-time credential or invite reveals stay outside reusable page caches.
+Pending controls follow mutation status, not a local flag that can get stuck
+when navigation changes.
 
 ## 7. Tab activation, session changes and refresh
 
@@ -190,9 +191,9 @@ flowchart TD
 ```
 
 One-time results do not enter a reusable resource cache. HEAD cannot consume
-signed verification links. A failed request is not dispatched again to render
-an error, since its operation may already have committed. Redirects, metadata
-and token flows still need parity verification, not just a successful build.
+signed verification links. A failed request is not dispatched again to render an
+error, since its operation may already have committed. Redirects, metadata and
+token flows still need parity verification, not just a successful build.
 
 ## 9. External protocols and shared business logic
 
@@ -208,9 +209,10 @@ flowchart LR
 ```
 
 External OAuth callbacks, webhooks, downloads, assets, discovery and health URLs
-retain HTTP contracts. They do not justify a second website action router.
-See [the endpoint inventory](./tanstack-start-http-contracts.md) for exact methods,
-paths and consumers. User-authored package apps remain a separate runtime concern.
+retain HTTP contracts. They do not justify a second website action router. See
+[the endpoint inventory](./tanstack-start-http-contracts.md) for exact methods,
+paths and consumers. User-authored package apps remain a separate runtime
+concern.
 
 ## 10. Verification and deployment
 
@@ -230,7 +232,8 @@ flowchart TD
 ```
 
 The current workflow skips local runtime tests before catch-up pushes by user
-request. CI success does not prove visual or authenticated action parity.
-The [parity audit](./tanstack-start-parity-audit.md) tracks evidence and gaps.
+request. CI success does not prove visual or authenticated action parity. The
+[parity audit](./tanstack-start-parity-audit.md) tracks evidence and gaps.
 
-Implementation details and source links: [web architecture](./tanstack-start.md).
+Implementation details and source links:
+[web architecture](./tanstack-start.md).

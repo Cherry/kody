@@ -21,7 +21,8 @@ deployment remains `fb02ca65fc255520eebb4c34976bf436b451fe14`.
 Authenticated preview and matched visual comparisons remain incomplete. Passing
 the earlier E2E job does not establish parity for these later changes.
 
-Critical-action coverage review found these remaining gaps in browser test source:
+Critical-action coverage review found these remaining gaps in browser test
+source:
 
 - Package settings: publish, visibility, lock and deletion need real UI writes,
   persistence checks and denied-user cases. Existing package access and

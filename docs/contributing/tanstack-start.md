@@ -1,7 +1,7 @@
 # Web app rendering and server state
 
-See [process flow diagrams](./tanstack-start-flows.md) for ownership, navigation,
-reads, writes, state, authorization, protocols, and deployment.
+See [process flow diagrams](./tanstack-start-flows.md) for ownership,
+navigation, reads, writes, state, authorization, protocols, and deployment.
 
 The web app uses TanStack Start, Router, Query, and Redact. The existing worker
 services remain shared business logic. Website reads and mutations use native
