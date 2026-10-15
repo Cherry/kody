@@ -46,11 +46,11 @@ import {
 export type ConnectOauthStatusTone = 'info' | 'warn' | 'error'
 export type ConnectOauthStep = 'setup' | 'connect' | 'callback' | 'success'
 
-export type OAuthExchangeResult =
+type OAuthExchangeResult =
 	| { ok: true; data: Record<string, unknown>; status: number }
 	| { ok: false; status: number; error: string }
 
-export type SaveOauthAppResult =
+type SaveOauthAppResult =
 	| { ok: true; clientId: string }
 	| { ok: false; error: string }
 

@@ -2,17 +2,18 @@
 
 ## Current cutover evidence
 
-Validate run `38727730565` for source `672913f5f` has passed Static, Workers
-and MCP. Node finished with 6,403 passes and two failures, both in the new
-imperative auth hook test harness with an invalid hook call. Browser E2E also passed. Commit `be8ba14b5` repairs the hook harness using
-real React rendering and native Router context. The repair and later local
-commits have not yet been verified by CI.
+Validate run `38727730565` for source `672913f5f` has passed Static, Workers and
+MCP. Node finished with 6,403 passes and two failures, both in the new
+imperative auth hook test harness with an invalid hook call. Browser E2E also
+passed. Commit `be8ba14b5` repairs the hook harness using real React rendering
+and native Router context. The repair and later local commits have not yet been
+verified by CI.
 
 Preview run `38727730278` succeeded. Its health endpoint reports merge
-`15aff77590127fbde7ebd91cd92ef93b4688552d`, containing source `672913f5f`.
-The homepage returned complete HTML. Login rendered and hydrated, and its
-Forgot password link reached the rendered reset-password page. No credentials
-were entered during this check.
+`15aff77590127fbde7ebd91cd92ef93b4688552d`, containing source `672913f5f`. The
+homepage returned complete HTML. Login rendered and hydrated, and its Forgot
+password link reached the rendered reset-password page. No credentials were
+entered during this check.
 
 ## Incoming self-publish feature
 
@@ -61,9 +62,10 @@ Remaining gaps in browser and visual evidence:
   navigation. `credit-top-up-return.spec.ts` covers anonymous redirects, HEAD
   safety and invalid sessions. Commit `07d603505` adds a local Stripe simulator
   and a browser journey through subscription checkout, portal return, credit
-  purchase, reload and duplicate-return protection. It uses real Start operations
-  and checks the persisted balance and ledger count. Runtime confirmation is
-  pending; a simulated provider does not establish live Stripe parity.
+  purchase, reload and duplicate-return protection. It uses real Start
+  operations and checks the persisted balance and ledger count. Runtime
+  confirmation is pending; a simulated provider does not establish live Stripe
+  parity.
 - Visuals: recorded comparisons use different authentication states or viewport
   sizes, and preview community listings are empty while production is populated.
   There are no screenshot assertions under `e2e`. Populated package detail and
