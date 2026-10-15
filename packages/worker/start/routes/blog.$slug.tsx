@@ -2,6 +2,7 @@
 import { blogMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { NotFoundPage } from '../components/not-found-page.tsx'
+import { negotiatedDocument } from '../document-negotiation.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadBlogPost } from '#start/server/blog'
 import { documentHead } from '../components/document-head.ts'
@@ -14,7 +15,7 @@ const pageQuery = createPageQuery('loadBlogPost', loadBlogPost, {
 
 export const Route = createFileRoute('/blog/$slug')({
 	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
-	server: { handlers: { GET: blogMarkdown } },
+	server: { middleware: [negotiatedDocument], handlers: { GET: blogMarkdown } },
 	// Blog content is build-backed and does not depend on search parameters.
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),
 	loader: ({ context, preload }) =>

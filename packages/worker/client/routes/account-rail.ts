@@ -11,13 +11,9 @@ import {
 	orgSettingsPath,
 	orgTeamsPath,
 	orgUsagePath,
-	parseOrgBillingPath,
-	parseOrgCreditsPath,
-	parseOrgManagementPath,
-	parseOrgResourcePath,
-	parseOrgUsagePath,
-	switchOrgPath,
 	type OrganizationSummary,
+	type WorkspaceSwitchTarget,
+	isOrganizationSlug,
 	type OrgOwnedAccountSection,
 } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
@@ -131,42 +127,33 @@ export function workspaceHomeHref(org: { slug: string; personal: boolean }) {
 		: routes.profile.href({ username: org.slug })
 }
 
-/**
- * Whether `pathname` (already rewritten into `org`) is a page this role can
- * open there. Mirrors the server: grant-only collaborators open Agents
- * only, Billing needs `billing:write`, Teams needs `team:read`, and a
- * personal org has no Settings, Members, Teams, or Collaborators pages.
- */
-function orgPathOpensFor(
-	pathname: string,
-	org: Pick<OrganizationSummary, 'personal' | 'role'>,
-) {
-	const section = parseOrgResourcePath(pathname)?.section
-	if (parseOrgCreditsPath(pathname)) return true
-	if (org.role === null) return section === 'agents'
-	if (parseOrgBillingPath(pathname) || parseOrgUsagePath(pathname)) {
-		return orgRoleManagesBilling(org.role)
-	}
-	const management = parseOrgManagementPath(pathname)?.section
-	if (!management) return true
-	if (org.personal) return management === 'grants'
-	if (management === 'teams') return org.role !== 'billing'
-	return true
-}
-
-/**
- * Where the org switcher sends you: the same page in the target org when
- * you can open it there, otherwise that org's workspace home.
- */
+/** Target policy is presentation only; destination loaders authorize every request. */
 export function workspaceSwitchHref(
-	pathname: string,
+	target: WorkspaceSwitchTarget | undefined,
 	org: Pick<OrganizationSummary, 'slug' | 'personal' | 'role'>,
 ) {
-	const next = switchOrgPath(pathname, org.slug)
-	if (next === routes.profile.href({ username: org.slug })) {
+	if (!isOrganizationSlug(org.slug)) return '/'
+	if (!target) return workspaceHomeHref(org)
+	const { section, rest } = target
+	if (section !== 'credits' && org.role === null && section !== 'agents')
 		return workspaceHomeHref(org)
-	}
-	return orgPathOpensFor(next, org) ? next : workspaceHomeHref(org)
+	if (
+		(section === 'billing' || section === 'usage') &&
+		!orgRoleManagesBilling(org.role)
+	)
+		return workspaceHomeHref(org)
+	const management = [
+		'settings',
+		'members',
+		'teams',
+		'grants',
+		'collaborators',
+	].includes(section)
+	if (management && org.personal && section !== 'grants')
+		return workspaceHomeHref(org)
+	if (section === 'teams' && org.role === 'billing')
+		return workspaceHomeHref(org)
+	return `/@${org.slug}/-/${section}${rest ? `/${rest}` : ''}`
 }
 
 /**

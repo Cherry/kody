@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { docsConnectMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { negotiatedDocument } from '../document-negotiation.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadDocsConnect } from '#start/server/docs'
 import { DocsConnectRoute } from '../pages/docs-connect.tsx'
@@ -12,8 +13,15 @@ const pageQuery = createPageQuery('loadDocsConnect', loadDocsConnect, {
 })
 
 export const Route = createFileRoute('/docs/connect')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
-	server: { handlers: { GET: docsConnectMarkdown } },
+	staticData: {
+		motionGroup: 'docs',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
+	server: {
+		middleware: [negotiatedDocument],
+		handlers: { GET: docsConnectMarkdown },
+	},
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

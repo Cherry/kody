@@ -4,7 +4,10 @@ import { organizationsQuery } from '../organizations-query.ts'
 import { loadPageQuery } from '../page-query.ts'
 import { CreateOrganizationPage } from '../pages/org-organizations.tsx'
 export const Route = createFileRoute('/account_/organizations_/new')({
-	staticData: { navigation: { rail: 'account', item: 'organizations' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'account', item: 'organizations' },
+	},
 	loader: ({ context, preload }) =>
 		loadPageQuery(
 			context.queryClient,

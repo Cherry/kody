@@ -19,7 +19,6 @@ import {
 	parseOrgResourcePath,
 	parseOrgCreditsPath,
 	parseOrgUsagePath,
-	switchOrgPath,
 	type OrganizationSummary,
 	urlOrgSlug,
 } from './org-pages.ts'
@@ -108,30 +107,6 @@ test('org resource paths alias back to account loaders and ignore package apps',
 		rest: '',
 	})
 	expect(parseOrgResourcePath('/@acme/-/packages')).toBeNull()
-})
-
-test('switching keeps the same kind of page or falls back to organization home', () => {
-	expect(switchOrgPath('/@acme/-/secrets', 'other')).toBe('/@other/-/secrets')
-	expect(switchOrgPath('/@acme/-/secrets/new', 'other')).toBe(
-		'/@other/-/secrets/new',
-	)
-	expect(switchOrgPath('/@acme/-/billing', 'other')).toBe('/@other/-/billing')
-	expect(switchOrgPath('/@acme/-/billing/success', 'other')).toBe(
-		'/@other/-/billing',
-	)
-	expect(switchOrgPath('/@acme/-/usage', 'other')).toBe('/@other/-/usage')
-	expect(switchOrgPath('/@acme/-/usage.json', 'other')).toBe('/@other')
-	expect(switchOrgPath('/@acme/-/settings', 'other')).toBe('/@other/-/settings')
-	expect(switchOrgPath('/@acme/-/members', 'other')).toBe('/@other/-/members')
-	expect(switchOrgPath('/@acme/-/teams', 'other')).toBe('/@other/-/teams')
-	expect(switchOrgPath('/@acme/-/grants', 'other')).toBe('/@other/-/grants')
-	expect(switchOrgPath('/@acme/-/collaborators', 'other')).toBe(
-		'/@other/-/collaborators',
-	)
-	expect(switchOrgPath('/@acme/devin', 'other')).toBe('/@other')
-	expect(switchOrgPath('/account', 'other')).toBe('/@other')
-	expect(switchOrgPath('/pricing', 'other')).toBe('/@other')
-	expect(switchOrgPath('/@acme/-/overview', 'other')).toBe('/@other')
 })
 
 test('the workspace overview is an org-owned page under the /- separator', () => {
@@ -290,7 +265,6 @@ test('credits paths bind to the organization in the URL', () => {
 	expect(parseOrgCreditsPath('/@acme/-/credits/extra')).toBeNull()
 	expect(parseOrgCreditsPath('/@acme/credits')).toBeNull()
 	expect(parseOrgCreditsPath('/@Not A Slug/-/credits')).toBeNull()
-	expect(switchOrgPath('/@acme/-/credits', 'other')).toBe('/@other/-/credits')
 })
 
 test('every org-bound URL names its section, or none for billing and management', () => {
@@ -327,7 +301,6 @@ test.each([
 	(pathname) => {
 		expect(orgSlugFromOrgOwnedPath(pathname)).toBeNull()
 		expect(orgOwnedSectionForPath(pathname)).toBeNull()
-		expect(switchOrgPath(pathname, 'other')).toBe('/@other')
 	},
 )
 

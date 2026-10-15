@@ -7,6 +7,7 @@ import { documentHead } from '../components/document-head.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/activity_/$runId')({
 	staticData: {
+		workspaceSwitch: { section: 'activity', suffix: [{ param: 'runId' }] },
 		navigation: { rail: 'workspace', item: 'activity' },
 		orgScope: { section: 'activity' },
 	},

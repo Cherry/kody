@@ -8,13 +8,11 @@ import {
 	getAccountPackageFilesHref,
 	getCommunityPackageFilesHref,
 	getCommunityPackageRawHref,
-	getPackageRepoChromeKey,
 	getPackageSettingsHref,
 	getPackageTreeHref,
 	isPackageDetailPathname,
 	isPackageFilesPathname,
 	isReservedPackageFilesKodyId,
-	isSamePackageRepoChromeHref,
 	joinPackageFilesPath,
 	listPackageFilesChildren,
 	normalizePackageFilesPath,
@@ -209,42 +207,6 @@ test('files hrefs use the default-branch fallback and avoid reserved kody ids', 
 		'/@kentcdodds/devin/raw/main/docs/logo.png',
 		'/community/listing-1/raw/docs/logo.png',
 	])
-
-	expect(
-		[
-			'/@kentcdodds/grok-bot',
-			'/@kentcdodds/grok-bot/tree/main',
-			'/@kentcdodds/grok-bot/settings',
-			'/@kentcdodds/grok-bot/credentials',
-			'/@kentcdodds/grok-bot/mappings',
-			'/@kentcdodds/grok-bot/triggers',
-			'/@kentcdodds',
-			'/@kentcdodds/-/credentials',
-			'/@kentcdodds/-/settings',
-		].map(getPackageRepoChromeKey),
-	).toEqual([
-		'kentcdodds/grok-bot',
-		'kentcdodds/grok-bot',
-		'kentcdodds/grok-bot',
-		'kentcdodds/grok-bot',
-		'kentcdodds/grok-bot',
-		'kentcdodds/grok-bot',
-		null,
-		null,
-		null,
-	])
-	expect(
-		isSamePackageRepoChromeHref(
-			'/@kentcdodds/grok-bot',
-			'/@kentcdodds/grok-bot/tree/main/src',
-		),
-	).toBe(true)
-	expect(
-		isSamePackageRepoChromeHref(
-			'/@kentcdodds/grok-bot/settings',
-			'/@kentcdodds/other-bot',
-		),
-	).toBe(false)
 
 	expect(
 		[

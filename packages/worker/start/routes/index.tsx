@@ -2,6 +2,7 @@
 import { homeMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { heroBaseImage } from '#universal/landing-images.ts'
+import { negotiatedDocument } from '../document-negotiation.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { loadHome } from '#start/server/home'
 import { HomeRoute } from '../pages/home.tsx'
@@ -12,7 +13,7 @@ const pageQuery = createPageQuery('loadHome', loadHome, { staleTime: 60_000 })
 
 export const Route = createFileRoute('/')({
 	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
-	server: { handlers: { GET: homeMarkdown } },
+	server: { middleware: [negotiatedDocument], handlers: { GET: homeMarkdown } },
 	validateSearch: (search: Record<string, unknown>) => search,
 	context: () => ({ pageQueryInput: undefined }),
 	loader: async ({ context, preload }) => {

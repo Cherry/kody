@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadWebhooksPage', loadWebhooksPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/webhooks')({
 	staticData: {
+		workspaceSwitch: { section: 'webhooks' },
 		navigation: { rail: 'workspace', item: 'webhooks' },
 		orgScope: { section: 'webhooks' },
 	},

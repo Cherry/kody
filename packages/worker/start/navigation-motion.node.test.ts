@@ -7,7 +7,13 @@ import {
 	redirect,
 	type AnyRoute,
 } from '@tanstack/react-router'
-import { installNavigationMotion } from './navigation-motion.ts'
+import {
+	installNavigationMotion,
+	navigationMotionGroup,
+	shouldUseViewTransition,
+} from './navigation-motion.ts'
+import { routeTree } from './routeTree.gen.ts'
+import { QueryClient } from '@tanstack/react-query'
 
 function fixture() {
 	const root = createRootRoute()
@@ -22,7 +28,19 @@ function fixture() {
 		'/docs/two',
 		'/account',
 		'/account/jobs',
-	].map((path) => createRoute({ getParentRoute: () => root, path }))
+	].map((path) =>
+		createRoute({
+			getParentRoute: () => root,
+			path,
+			staticData: {
+				motionGroup: path.startsWith('/docs')
+					? 'docs'
+					: path.startsWith('/account')
+						? 'account'
+						: undefined,
+			},
+		}),
+	)
 	children.push(
 		createRoute({
 			getParentRoute: () => root,
@@ -146,4 +164,54 @@ test('history traversal never starts a view transition', async () => {
 	await f.router.navigate({ href: '/docs/one' })
 	expect(f.router.options.defaultViewTransition).toBe(true)
 	f.stop()
+})
+
+test('native chrome metadata preserves shell wizard profile and package transition exclusions', () => {
+	const router = createRouter({
+		origin: 'https://motion.test',
+		routeTree,
+		history: createMemoryHistory(),
+		context: { queryClient: new QueryClient(), getCommittedPage: () => null },
+	})
+	const transition = (from: string, to: string) =>
+		shouldUseViewTransition({
+			from,
+			to,
+			fromGroup: navigationMotionGroup(
+				router,
+				new URL(from, 'https://kody.test').pathname,
+			),
+			toGroup: navigationMotionGroup(
+				router,
+				new URL(to, 'https://kody.test').pathname,
+			),
+			canStart: true,
+			prefersReducedMotion: false,
+		})
+	for (const [from, to] of [
+		['/account', '/account/security'],
+		['/account/jobs', '/account/packages/pkg/files/src'],
+		['/admin/users', '/admin/platform-integrations/new'],
+		['/docs', '/docs/secrets'],
+		['/onboarding/step-1/cursor', '/onboarding/step-3/claude-code'],
+		['/@alice?sort=popular', '/@alice?sort=newest'],
+		['/@acme/-/repositories?sort=popular', '/@acme/-/repositories?sort=newest'],
+		['/@alice/tool', '/@alice/tool/tree/main/src/index.ts'],
+		['/@alice/tool/files/src/index.ts', '/@alice/tool/settings'],
+		['/@ALICE/TOOL/credentials', '/@alice/tool/mappings'],
+		['/@alice/%74ool', '/@alice/tool/settings'],
+		['/@alice/tool/triggers', '/@alice/tool/collaborators'],
+	] as const)
+		expect(transition(from, to)).toBe(false)
+	for (const [from, to] of [
+		['/account', '/admin/users'],
+		['/docs', '/pricing'],
+		['/account/security', '/account/not-a-real-page'],
+		['/@alice', '/@bob'],
+		['/@alice/tool', '/@alice/other'],
+		['/@alice/tool', '/@alice/tool/approve-capabilities'],
+		['/@alice/-/credentials', '/@alice/-/settings'],
+		['/community/listing', '/community/listing/files/src'],
+	] as const)
+		expect(transition(from, to)).toBe(true)
 })

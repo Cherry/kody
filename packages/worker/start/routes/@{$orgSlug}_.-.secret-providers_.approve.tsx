@@ -7,6 +7,7 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/secret-providers_/approve',
 )({
 	staticData: {
+		workspaceSwitch: { section: 'secret-providers', suffix: ['approve'] },
 		navigation: { rail: 'workspace', item: 'secret-providers' },
 		orgScope: { section: 'secret-providers' },
 	},

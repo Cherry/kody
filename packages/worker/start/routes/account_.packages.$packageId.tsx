@@ -3,7 +3,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { loadAccountPackageAlias } from '#start/server/package-alias'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 export const Route = createFileRoute('/account_/packages/$packageId')({
-	staticData: { navigation: { rail: 'workspace', item: 'packages' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'workspace', item: 'packages' },
+	},
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, params, location }) =>
 		loadAccountPackageAlias({

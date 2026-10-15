@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadCreditsPage', loadCreditsPage, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/credits')({
 	staticData: {
+		workspaceSwitch: { section: 'credits' },
 		navigation: { rail: 'workspace', item: 'credits' },
 		orgScope: {},
 	},

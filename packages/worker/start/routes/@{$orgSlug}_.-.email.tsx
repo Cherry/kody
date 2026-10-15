@@ -9,6 +9,7 @@ import {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/email')({
 	staticData: {
+		workspaceSwitch: { section: 'email' },
 		navigation: { rail: 'workspace', item: 'email' },
 		orgScope: { section: 'email' },
 	},

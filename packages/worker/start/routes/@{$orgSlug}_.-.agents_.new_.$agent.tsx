@@ -11,6 +11,7 @@ const pageQuery = createPageQuery('loadConnectionsPage', loadConnectionsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/agents_/new_/$agent')({
 	staticData: {
+		workspaceSwitch: { section: 'agents', suffix: ['new', { param: 'agent' }] },
 		navigation: { rail: 'workspace', item: 'agents' },
 		orgScope: { section: 'agents' },
 	},

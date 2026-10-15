@@ -72,7 +72,8 @@ vi.mock('#worker/package-registry/user-scope.ts', () => ({
 		mockModule.getMcpUserPackageScope(...args),
 }))
 
-vi.mock('@tanstack/react-start', async () => ({
+vi.mock('@tanstack/react-start', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@tanstack/react-start')>()),
 	createServerFn: (
 		await import('#worker/test-support/start-server-function.ts')
 	).createTestServerFn,

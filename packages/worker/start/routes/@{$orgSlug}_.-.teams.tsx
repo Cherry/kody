@@ -8,6 +8,7 @@ const pageQuery = createPageQuery('loadOrgTeams', loadOrgTeams, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/teams')({
 	staticData: {
+		workspaceSwitch: { section: 'teams' },
 		navigation: { rail: 'workspace', item: 'teams' },
 		orgScope: {},
 	},

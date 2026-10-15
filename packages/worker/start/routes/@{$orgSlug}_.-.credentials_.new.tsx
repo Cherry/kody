@@ -9,6 +9,7 @@ const pageQuery = createPageQuery('loadCredentialsPage', loadCredentialsPage, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials_/new')({
 	staticData: {
+		workspaceSwitch: { section: 'credentials', suffix: ['new'] },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'credentials' },
 	},

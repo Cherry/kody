@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadBillingPage', loadBillingPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/billing')({
 	staticData: {
+		workspaceSwitch: { section: 'billing' },
 		navigation: { rail: 'workspace', item: 'billing' },
 		orgScope: {},
 	},

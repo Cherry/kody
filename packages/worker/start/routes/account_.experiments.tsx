@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadExperimentsPage', loadExperimentsPage, {
 })
 
 export const Route = createFileRoute('/account_/experiments')({
-	staticData: { navigation: { rail: 'account', item: 'experiments' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'account', item: 'experiments' },
+	},
 	context: () => ({ pageQueryInput: {} }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

@@ -151,23 +151,6 @@ export function isPackageDetailPathname(pathname: string) {
 			['settings', 'collaborators'].includes(parsed.tab))
 	)
 }
-export function getPackageRepoChromeKey(pathname: string) {
-	const parsed = parsePackageDocumentPath(pathname)
-	return parsed && 'username' in parsed && parsed.kodyId !== '-'
-		? `${parsed.username.toLowerCase()}/${parsed.kodyId.toLowerCase()}`
-		: null
-}
-
-export function isSamePackageRepoChromeHref(from: string, to: string) {
-	const fromKey = getPackageRepoChromeKey(
-		new URL(from, 'http://localhost').pathname,
-	)
-	const toKey = getPackageRepoChromeKey(
-		new URL(to, 'http://localhost').pathname,
-	)
-	return fromKey != null && fromKey === toKey
-}
-
 export function isReservedPackageFilesKodyId(kodyId: string) {
 	return (reservedPackageFilesKodyIds as ReadonlyArray<string>).includes(
 		kodyId.trim().toLowerCase(),

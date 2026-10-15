@@ -6,7 +6,8 @@ import {
 	createMemoryHistory,
 	createRootRoute,
 	createRoute,
-	RouterProvider,
+	RouterContextProvider,
+	Match,
 	Outlet,
 	useRouteContext,
 } from '@tanstack/react-router'
@@ -56,7 +57,7 @@ test.each([
 ] as const)(
 	'native selection for %s owns rail, item, and workspace',
 	(path, rail, item, orgSlug) => {
-		expect(resolve(path)).toEqual({ rail, item, orgSlug })
+		expect(resolve(path)).toMatchObject({ rail, item, orgSlug })
 	},
 )
 test('retained page reads its own route context while destination loader is pending', async () => {
@@ -107,20 +108,23 @@ test('retained page reads its own route context while destination loader is pend
 		defaultPendingMs: 60_000,
 	})
 	await pendingRouter.load()
-	expect(
-		renderToString(createElement(RouterProvider, { router: pendingRouter })),
-	).toContain('workspace:jobs')
+	// Snapshot the real match tree without mounting the browser transition adapter.
+	// Its layout-effect acknowledgment cannot run in renderToString.
+	const render = () =>
+		renderToString(
+			createElement(RouterContextProvider, {
+				router: pendingRouter,
+				children: createElement(Match, { routeId: root.id }),
+			}),
+		)
+	expect(render()).toContain('workspace:jobs')
 	const navigation = pendingRouter.navigate({ to: '/security' })
 	await entered
 	expect(pendingRouter.latestLocation.pathname).toBe('/security')
-	expect(
-		renderToString(createElement(RouterProvider, { router: pendingRouter })),
-	).toContain('workspace:jobs')
+	expect(render()).toContain('workspace:jobs')
 	release()
 	await navigation
-	expect(
-		renderToString(createElement(RouterProvider, { router: pendingRouter })),
-	).toContain('account:security')
+	expect(render()).toContain('account:security')
 })
 test('profile identity stays distinct from an explicitly scoped workspace', () => {
 	expect(resolve('/@acme')).toEqual({
@@ -141,4 +145,45 @@ test('profile identity stays distinct from an explicitly scoped workspace', () =
 		orgSlug: null,
 	})
 	expect(resolve('/missing-page')).toBeUndefined()
+})
+
+test.each([
+	['/@acme', undefined],
+	['/@acme/-/secrets/user/token', { section: 'secrets', rest: 'user/token' }],
+	['/@acme/-/credentials/token', { section: 'credentials', rest: 'token' }],
+	[
+		'/@acme/-/integrations/apps/google',
+		{ section: 'integrations', rest: 'apps/google' },
+	],
+	[
+		'/@acme/-/mcp-servers/server/authorize',
+		{ section: 'mcp-servers', rest: 'server/authorize' },
+	],
+	['/@acme/-/secrets/new', { section: 'secrets', rest: 'new' }],
+	['/@acme/-/billing/success', { section: 'billing', rest: undefined }],
+	['/@acme/-/overview', undefined],
+])(
+	'native switch destination preserves the matched family and suffix: %s',
+	(path, target) => {
+		expect(resolve(path)?.workspaceSwitch).toEqual(target)
+	},
+)
+
+test('switch suffix encodes matched identifiers as single path segments', () => {
+	const navigation = pageNavigationForMatches([
+		{
+			staticData: {
+				navigation: { rail: 'workspace', item: 'credentials' },
+				workspaceSwitch: {
+					section: 'secrets',
+					suffix: ['user', { param: 'secretName' }],
+				},
+			},
+			params: { orgSlug: 'acme', secretName: 'literal%2F/part' },
+		},
+	])
+	expect(navigation?.workspaceSwitch).toEqual({
+		section: 'secrets',
+		rest: 'user/literal%252F%2Fpart',
+	})
 })

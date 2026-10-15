@@ -1,7 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { resolveOrgAlias } from '#start/server/org-alias'
 export const Route = createFileRoute('/account_/billing')({
-	staticData: { navigation: { rail: 'workspace', item: 'billing' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'workspace', item: 'billing' },
+	},
 	preload: false,
 	loaderDeps: ({ search }) => search,
 	loader: ({ location }) =>

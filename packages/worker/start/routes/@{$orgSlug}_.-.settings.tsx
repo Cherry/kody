@@ -8,6 +8,7 @@ const pageQuery = createPageQuery('loadOrgSettings', loadOrgSettings, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/settings')({
 	staticData: {
+		workspaceSwitch: { section: 'settings' },
 		navigation: { rail: 'workspace', item: 'settings' },
 		orgScope: {},
 		shell: { gutters: 'page' },

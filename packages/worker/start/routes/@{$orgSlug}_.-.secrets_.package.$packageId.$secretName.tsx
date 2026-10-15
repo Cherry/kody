@@ -13,6 +13,10 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/secrets_/package/$packageId/$secretName',
 )({
 	staticData: {
+		workspaceSwitch: {
+			section: 'secrets',
+			suffix: ['package', { param: 'packageId' }, { param: 'secretName' }],
+		},
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'secrets' },
 	},

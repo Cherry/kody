@@ -11,6 +11,7 @@ import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/credentials')({
 	validateSearch: validateCredentialSearch,
 	staticData: {
+		workspaceSwitch: { section: 'credentials' },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'credentials' },
 		presentationSearchKeys: credentialPresentationSearchKeys,

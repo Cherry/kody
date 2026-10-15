@@ -12,6 +12,7 @@ const pageQuery = createPageQuery('loadSecretsPage', loadSecretsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets')({
 	staticData: {
+		workspaceSwitch: { section: 'secrets' },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'secrets' },
 	},

@@ -6,7 +6,8 @@ import {
 	createRoute,
 	createRouter,
 	createMemoryHistory,
-	RouterProvider,
+	RouterContextProvider,
+	Match,
 	Outlet,
 } from '@tanstack/react-router'
 import { PageHead } from './page-head.tsx'
@@ -32,16 +33,27 @@ test('unmatched SSR and native navigation use Not found metadata, then restore s
 	})
 	const router = createRouter({
 		origin: 'https://kody.test',
+		isServer: false,
 		routeTree: root.addChildren([found]),
 		history: createMemoryHistory({ initialEntries: ['/missing'] }),
 	})
 	await router.load()
-	const render = () => renderToString(createElement(RouterProvider, { router }))
+	// Render native matches without the client transition adapter, whose layout
+	// effects cannot acknowledge a commit during a server-rendered snapshot.
+	const render = () =>
+		renderToString(
+			createElement(RouterContextProvider, {
+				router,
+				children: createElement(Match, { routeId: root.id }),
+			}),
+		)
 	expect(render()).toContain('<title>Not found</title>')
 	expect(router.state.matches.some((match) => match._notFound)).toBe(true)
 	await router.navigate({ href: '/found' })
+	expect(router.state.location.pathname).toBe('/found')
 	expect(render()).toContain('<title>Found page</title>')
 	await router.navigate({ href: '/missing-again' })
+	expect(router.state.location.pathname).toBe('/missing-again')
 	expect(render()).toContain('<title>Not found</title>')
 	expect(render()).not.toContain('<title>Found page</title>')
 })

@@ -10,7 +10,10 @@ const pageQuery = createPageQuery('loadAdminUsers', loadAdminUsers, {
 })
 
 export const Route = createFileRoute('/admin/users')({
-	staticData: { navigation: { rail: 'admin', item: 'users' } },
+	staticData: {
+		motionGroup: 'admin',
+		navigation: { rail: 'admin', item: 'users' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location }) => ({
 		pageQueryInput: {

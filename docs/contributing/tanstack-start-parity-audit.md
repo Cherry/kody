@@ -1,5 +1,31 @@
 # Start parity audit
 
+## Follow-up at source `d9c4311c6`
+
+Preview run `38720130802` succeeded. The health endpoint confirmed deployed
+merge `8dbec28f73254a1b4a66b1a66131f4a2214cbf09`. The unknown-route response now
+returns HTTP 404 with the title `Not found`.
+
+Validate run `38720130750` passed Workers and MCP. Node finished with 6,341
+passing tests, six failed assertions, and one suite-loading failure. The
+community-detail fixture replaced the entire Start module and omitted native
+middleware. The OAuth navigation fixture ran Router in server mode, where client
+navigation is ignored. Both have local corrections that preserve the existing
+assertions. Retained-page and head-navigation failures are still under review.
+The account-rail assertion and Static typecheck boundary have local corrections.
+Browser E2E remained in progress at this observation.
+
+The working tree also moves workspace-switch destinations and document
+negotiation into native route metadata and middleware. Independent review found
+that negotiated redirects need `Vary: Accept` as well as HTML bodies; the local
+correction covers redirects and bodyless responses. Motion grouping now belongs
+to native route metadata, with an independent review of shell, profile, package,
+encoding, and unknown-path behavior. The duplicate URL classifier was removed.
+Two-factor operations now enforce rate limits at the shared business boundary,
+with regression coverage. Local full typecheck, formatting, lint, and Knip
+passed before the latest test fixture corrections. No local runtime tests were
+run. These changes still need CI and deployed confirmation.
+
 ## Follow-up at source `b1ae9038c`
 
 The previous E2E run finished with 167 passes and three failures. Two retained

@@ -10,6 +10,7 @@ const pageQuery = createPageQuery(
 )
 export const Route = createFileRoute('/@{$orgSlug}_/-/collaborators')({
 	staticData: {
+		workspaceSwitch: { section: 'collaborators' },
 		navigation: { rail: 'workspace', item: 'collaborators' },
 		orgScope: {},
 		shell: { gutters: 'page' },

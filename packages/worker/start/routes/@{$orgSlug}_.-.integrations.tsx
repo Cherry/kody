@@ -13,6 +13,7 @@ const pageQuery = createPageQuery(
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/integrations')({
 	staticData: {
+		workspaceSwitch: { section: 'integrations' },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'integrations' },
 	},

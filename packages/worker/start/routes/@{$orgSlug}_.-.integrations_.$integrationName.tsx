@@ -14,6 +14,10 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/integrations_/$integrationName',
 )({
 	staticData: {
+		workspaceSwitch: {
+			section: 'integrations',
+			suffix: [{ param: 'integrationName' }],
+		},
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'integrations' },
 	},

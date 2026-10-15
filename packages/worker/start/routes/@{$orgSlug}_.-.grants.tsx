@@ -8,6 +8,7 @@ const pageQuery = createPageQuery('loadOrgGrants', loadOrgGrants, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/grants')({
 	staticData: {
+		workspaceSwitch: { section: 'grants' },
 		navigation: { rail: 'workspace', item: 'grants' },
 		orgScope: {},
 	},

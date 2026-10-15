@@ -35,6 +35,7 @@ export async function renderStartPage(
 	}>()({
 		beforeLoad: ({ location }) => {
 			const lookup = createRouter({
+				origin: 'https://kody.test',
 				routeTree,
 				history: createMemoryHistory(),
 				context: { queryClient, getCommittedPage: () => null },
@@ -64,6 +65,7 @@ export async function renderStartPage(
 		component: () => page,
 	})
 	const router = createRouter({
+		origin: 'https://kody.test',
 		routeTree: root.addChildren([route]),
 		history: createMemoryHistory({ initialEntries: [href] }),
 		context: { queryClient, actorKey: null },

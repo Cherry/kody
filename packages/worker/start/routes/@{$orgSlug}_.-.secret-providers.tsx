@@ -11,6 +11,7 @@ const pageQuery = createPageQuery(
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/secret-providers')({
 	staticData: {
+		workspaceSwitch: { section: 'secret-providers' },
 		navigation: { rail: 'workspace', item: 'secret-providers' },
 		orgScope: { section: 'secret-providers' },
 	},

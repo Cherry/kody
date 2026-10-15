@@ -1,7 +1,6 @@
 import { getGlobalStartContext } from '@tanstack/react-start'
 import { withAgentDiscoveryLinkHeaders } from '../src/app/agent-discovery.ts'
 import { getAppBaseUrl } from '../src/app-base-url.ts'
-import { isNegotiatedDocumentPath } from './document-negotiation.ts'
 import { resolveAppPageCacheControl } from '../src/app/anonymous-html-cache.ts'
 import type {} from './request-context.ts'
 import {
@@ -71,18 +70,6 @@ export async function renderNativeDocument(
 	)
 		headers.set('Cache-Control', cache.cacheControl)
 	if (cache.vary) headers.append('Vary', cache.vary)
-	if (
-		headers.get('Content-Type')?.includes('text/html') &&
-		isNegotiatedDocumentPath(url.pathname)
-	) {
-		const vary =
-			headers
-				.get('Vary')
-				?.split(',')
-				.map((value) => value.trim().toLowerCase()) ?? []
-		if (!vary.includes('accept') && !vary.includes('*'))
-			headers.append('Vary', 'Accept')
-	}
 	const documentResponse = new Response(
 		request.method === 'HEAD' ? null : response.body,
 		{

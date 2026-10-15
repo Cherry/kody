@@ -1,16 +1,26 @@
-import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
+import { createMiddleware } from '@tanstack/react-start'
 
-/** HTML variants whose original routes also serve Markdown by Accept header. */
-export function isNegotiatedDocumentPath(pathname: string) {
-	if (
-		pathname === '/' ||
-		pathname === '/use-cases' ||
-		acquisitionPageSummaries.some((page) => page.path === pathname)
-	)
-		return true
-	if (/\.(?:json|md)\/?$/.test(pathname)) return false
-	return (
-		/^\/docs(?:\/[^/]+)?\/?$/.test(pathname) ||
-		/^\/blog\/[^/]+\/?$/.test(pathname)
-	)
+/** Keep route representations distinct, including redirects and errors. */
+export function withNegotiatedDocumentVary(response: Response) {
+	const values =
+		response.headers
+			.get('Vary')
+			?.toLowerCase()
+			.split(',')
+			.map((value) => value.trim()) ?? []
+	if (values.includes('accept') || values.includes('*')) return response
+	const headers = new Headers(response.headers)
+	headers.append('Vary', 'Accept')
+	return new Response(response.body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers,
+	})
 }
+
+export const negotiatedDocument = createMiddleware().server(
+	async ({ next }) => {
+		const result = await next()
+		return { ...result, response: withNegotiatedDocumentVary(result.response) }
+	},
+)

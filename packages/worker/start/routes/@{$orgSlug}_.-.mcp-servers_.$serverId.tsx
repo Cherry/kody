@@ -10,6 +10,10 @@ const pageQuery = createPageQuery('loadMcpServersPage', loadMcpServersPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/mcp-servers_/$serverId')({
 	staticData: {
+		workspaceSwitch: {
+			section: 'mcp-servers',
+			suffix: [{ param: 'serverId' }],
+		},
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'mcp-servers' },
 	},

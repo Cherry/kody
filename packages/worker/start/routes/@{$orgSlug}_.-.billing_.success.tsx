@@ -7,6 +7,7 @@ import { documentHead } from '../components/document-head.ts'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/billing_/success')({
 	staticData: {
+		workspaceSwitch: { section: 'billing' },
 		navigation: { rail: 'workspace', item: 'billing' },
 		orgScope: {},
 	},

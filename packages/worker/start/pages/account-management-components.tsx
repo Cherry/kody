@@ -215,9 +215,7 @@ export function AccountManagementShell(props: AccountManagementShellProps) {
 				[accountManagementNarrowMq]: { gridTemplateColumns: 'minmax(0, 1fr)' },
 			}}
 		>
-			{hasNavigation && props.currentHref ? (
-				<ShellNavigation currentHref={props.currentHref} />
-			) : null}
+			{hasNavigation && props.currentHref ? <ShellNavigation /> : null}
 			<div
 				data-account-content
 				css={{
@@ -253,12 +251,11 @@ export function AccountManagementShell(props: AccountManagementShellProps) {
 	)
 }
 
-function ShellNavigation({ currentHref }: { currentHref: string }) {
-	const currentPath = new URL(currentHref, 'http://localhost').pathname
+function ShellNavigation() {
 	const session = useShellData().session
 	const { pageNavigation } = useRouteContext({ strict: false })
 	const admin = pageNavigation?.rail === 'admin'
-	const rail = pageRail({ session, currentPath, navigation: pageNavigation })
+	const rail = pageRail({ session, navigation: pageNavigation })
 	return (
 		<div
 			data-account-navigation
@@ -452,7 +449,6 @@ function railLinkGroups(
 
 function pageRail(input: {
 	session: SessionInfo | null
-	currentPath: string
 	navigation: MatchedPageNavigation | undefined
 }) {
 	const organizations = input.session?.organizations ?? []
@@ -509,7 +505,7 @@ function pageRail(input: {
 						username: session.username,
 						displayName: getSessionDisplayName(session),
 						avatarUrl: session.avatarUrl,
-						currentPathname: input.currentPath,
+						switchTarget: input.navigation?.workspaceSwitch,
 					}
 				: undefined,
 		groups: workspaceRailGroups({
@@ -531,11 +527,10 @@ function pageRail(input: {
  */
 export function AccountPageHeader(props: AccountPageHeaderProps) {
 	{
-		const currentPath = new URL(props.currentHref, 'http://localhost').pathname
 		const session = useShellData().session
 		const explainer = resolveEntityExplainer(props.entity)
 		const { pageNavigation } = useRouteContext({ strict: false })
-		const rail = pageRail({ session, currentPath, navigation: pageNavigation })
+		const rail = pageRail({ session, navigation: pageNavigation })
 		const tabs = railTabsForSelection(rail.groups, pageNavigation?.item)
 
 		return (

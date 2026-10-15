@@ -4,7 +4,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { loadAdminIndex } from '#start/server/admin-index'
 
 export const Route = createFileRoute('/admin/')({
-	staticData: { navigation: { rail: 'admin', item: 'users' } },
+	staticData: {
+		motionGroup: 'admin',
+		navigation: { rail: 'admin', item: 'users' },
+	},
 	head: staticDocumentHead('admin'),
 	preload: false,
 	shouldReload: true,

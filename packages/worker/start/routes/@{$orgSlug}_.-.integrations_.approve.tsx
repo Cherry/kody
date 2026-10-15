@@ -5,6 +5,7 @@ import { loadIntegrationsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/integrations_/approve')({
 	staticData: {
+		workspaceSwitch: { section: 'integrations', suffix: ['approve'] },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'integrations' },
 	},

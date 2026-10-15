@@ -6,6 +6,7 @@ import { loadSecretsPage } from '#start/server/account-collections'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$orgSlug}_/-/secrets_/approve')({
 	staticData: {
+		workspaceSwitch: { section: 'secrets', suffix: ['approve'] },
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'secrets' },
 	},

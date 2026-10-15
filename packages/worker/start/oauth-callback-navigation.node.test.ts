@@ -19,6 +19,8 @@ async function fixture(callback: string) {
 	})
 	const other = createRoute({ getParentRoute: () => root, path: '/other' })
 	const router = createRouter({
+		// Exercise client history commits in Node. Server routers intentionally ignore navigate().
+		isServer: false,
 		origin: 'https://kody.test',
 		routeTree: root.addChildren([route, other]),
 		history: createMemoryHistory({ initialEntries: [callback] }),

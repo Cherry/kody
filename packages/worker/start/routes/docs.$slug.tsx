@@ -2,6 +2,7 @@
 import { docMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
 import { NotFoundPage } from '../components/not-found-page.tsx'
+import { negotiatedDocument } from '../document-negotiation.ts'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { docHref, resolveLegacyDocSlug } from '#universal/docs-nav.ts'
 import { DocDetailRoute } from '../pages/doc-detail.tsx'
@@ -16,8 +17,12 @@ const pageQuery = createPageQuery('loadDoc', loadDoc, {
 })
 
 export const Route = createFileRoute('/docs/$slug')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public-doc' },
-	server: { handlers: { GET: docMarkdown } },
+	staticData: {
+		motionGroup: 'docs',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public-doc',
+	},
+	server: { middleware: [negotiatedDocument], handlers: { GET: docMarkdown } },
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),
 	beforeLoad: ({ location, params }) => {
 		const alias = resolveLegacyDocSlug(params.slug)

@@ -11,6 +11,7 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 
 export const Route = createFileRoute('/account_/packages/$packageId/files/$')({
 	staticData: {
+		motionGroup: 'account',
 		navigation: { rail: 'workspace', item: 'packages' },
 		shell: { gutters: 'page' },
 	},

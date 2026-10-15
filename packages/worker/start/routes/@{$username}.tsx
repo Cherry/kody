@@ -13,6 +13,7 @@ const pageQuery = createPageQuery('loadProfile', loadProfile, {
 
 export const Route = createFileRoute('/@{$username}')({
 	staticData: {
+		motionGroup: 'profile',
 		navigation: { rail: 'workspace', item: 'overview' },
 		shell: { gutters: 'page' },
 	},

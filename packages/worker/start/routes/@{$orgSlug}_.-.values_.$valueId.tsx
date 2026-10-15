@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadValuesPage', loadValuesPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/values_/$valueId')({
 	staticData: {
+		workspaceSwitch: { section: 'values', suffix: [{ param: 'valueId' }] },
 		navigation: { rail: 'workspace', item: 'values' },
 		orgScope: { section: 'values' },
 	},

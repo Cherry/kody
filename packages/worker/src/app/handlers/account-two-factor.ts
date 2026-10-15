@@ -1,3 +1,8 @@
+import {
+	checkAuthRateLimit,
+	checkRateLimit,
+	twoFactorVerifyRateLimitConfig,
+} from '#app/rate-limit.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	cancelTwoFactorSetup,
@@ -16,6 +21,32 @@ import {
 	getRequestIp,
 	logAuditEvent,
 } from '#worker/audit-log.ts'
+
+async function limitTwoFactorMutation(
+	env: Env,
+	request: Request,
+	user: AuthenticatedAppUser,
+	verifiesCode: boolean,
+) {
+	const ingress = await checkAuthRateLimit(
+		env,
+		`auth:ip:${getRequestIp(request) ?? 'unknown'}`,
+	)
+	const limit =
+		!ingress.allowed || !verifiesCode
+			? ingress
+			: await checkRateLimit(
+					env.APP_DB,
+					`auth:2fa-manage:${user.sessionUserId}`,
+					twoFactorVerifyRateLimitConfig,
+				)
+	if (limit.allowed) return null
+	return {
+		ok: false as const,
+		error: 'Too many attempts. Please try again later.',
+		retryAfter: String(limit.retryAfterSeconds ?? 60),
+	}
+}
 
 export async function loadTwoFactorStatus(
 	db: D1Database,
@@ -36,6 +67,9 @@ export async function startAccountTwoFactorSetup({
 	request: Request
 	user: AuthenticatedAppUser
 }) {
+	const limited = await limitTwoFactorMutation(env, request, user, false)
+	if (limited) return limited
+
 	const url = new URL(request.url)
 	const requestIp = getRequestIp(request) ?? undefined
 	// A hijacked session must not be able to swap out the active
@@ -76,6 +110,9 @@ export async function confirmAccountTwoFactorSetup({
 	user: AuthenticatedAppUser
 	code: string
 }) {
+	const limited = await limitTwoFactorMutation(env, request, user, true)
+	if (limited) return limited
+
 	const requestIp = getRequestIp(request) ?? undefined
 	const code = rawCode.trim()
 	if (!code) {
@@ -133,13 +170,16 @@ export async function confirmAccountTwoFactorSetup({
 }
 export async function cancelAccountTwoFactorSetup({
 	env,
-	request: _request,
+	request,
 	user,
 }: {
 	env: Env
 	request: Request
 	user: AuthenticatedAppUser
 }) {
+	const limited = await limitTwoFactorMutation(env, request, user, false)
+	if (limited) return limited
+
 	await cancelTwoFactorSetup(env.APP_DB, user.userId)
 	return await loadTwoFactorStatus(env.APP_DB, user.userId)
 }
@@ -154,6 +194,9 @@ export async function disableAccountTwoFactor({
 	user: AuthenticatedAppUser
 	code: string
 }) {
+	const limited = await limitTwoFactorMutation(env, request, user, true)
+	if (limited) return limited
+
 	const requestIp = getRequestIp(request) ?? undefined
 	const code = rawCode.trim()
 	// Disabling weakens account security, so require a fresh code

@@ -11,6 +11,7 @@ const pageQuery = createPageQuery('loadMemoriesPage', loadMemoriesPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/memories')({
 	staticData: {
+		workspaceSwitch: { section: 'memories' },
 		navigation: { rail: 'workspace', item: 'memories' },
 		orgScope: { section: 'memories' },
 	},

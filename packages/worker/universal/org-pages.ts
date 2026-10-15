@@ -363,34 +363,18 @@ export function orgCollaboratorsPath(slug: string) {
 	return `/@${slug}/${orgPageSeparator}/collaborators`
 }
 
-/** Same kind of page in `targetSlug` when the path is an org resource; otherwise that organization's home. */
-export function switchOrgPath(pathname: string, targetSlug: string) {
-	if (!isOrganizationSlug(targetSlug)) return '/'
-	if (parseOrgBillingPath(pathname)) return orgBillingPath(targetSlug)
-	if (parseOrgUsagePath(pathname)) return orgUsagePath(targetSlug)
-	if (parseOrgCreditsPath(pathname)) return orgCreditsPath(targetSlug)
-	const management = parseOrgManagementPath(pathname)
-	if (management) {
-		switch (management.section) {
-			case 'settings':
-				return orgSettingsPath(targetSlug)
-			case 'members':
-				return orgMembersPath(targetSlug)
-			case 'teams':
-				return orgTeamsPath(targetSlug)
-			case 'grants':
-				return orgGrantsPath(targetSlug)
-			case 'collaborators':
-				return orgCollaboratorsPath(targetSlug)
-			default: {
-				const exhaustive: never = management.section
-				return exhaustive
-			}
-		}
-	}
-	const parsed = parseOrgResourcePath(pathname)
-	if (!parsed) return `/@${targetSlug}`
-	return orgResourcePath(targetSlug, parsed.section, parsed.rest)
+export type WorkspaceSwitchTarget = {
+	section:
+		| OrgOwnedAccountSection
+		| 'billing'
+		| 'usage'
+		| 'credits'
+		| 'settings'
+		| 'members'
+		| 'teams'
+		| 'grants'
+		| 'collaborators'
+	rest?: string
 }
 
 export function orderOrganizations<T extends OrganizationSummary>(

@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadJobsPage', loadJobsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/jobs')({
 	staticData: {
+		workspaceSwitch: { section: 'jobs' },
 		navigation: { rail: 'workspace', item: 'jobs' },
 		orgScope: { section: 'jobs' },
 		presentationSearchKeys: ['q', 'view'],

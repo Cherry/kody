@@ -3,6 +3,7 @@ import { resolveOrgAlias } from '#start/server/org-alias'
 export const Route = createFileRoute(
 	'/account_/integrations_/$integrationName',
 )({
+	staticData: { motionGroup: 'account' },
 	preload: false,
 	loaderDeps: ({ search }) => search,
 	loader: ({ location }) =>

@@ -7,8 +7,10 @@ import { QueryClient } from '@tanstack/react-query'
 import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 import { InternalErrorPage } from './components/internal-error-page.tsx'
 import { captureClientException } from '#client/sentry-client.ts'
-import { installNavigationMotion } from './navigation-motion.ts'
-import { persistentShellNavSelector } from '#universal/navigation-motion.ts'
+import {
+	installNavigationMotion,
+	persistentShellNavSelector,
+} from './navigation-motion.ts'
 import { readDocumentActor } from './document-actor.ts'
 import { shouldDehydrateAppQuery } from './query-dehydration.ts'
 import { routeTree } from './routeTree.gen'

@@ -1,7 +1,7 @@
 import { createRouter, createMemoryHistory } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
-import { routeTree } from '../../start/routeTree.gen.ts'
-import { pageNavigationForMatches } from '../../start/page-navigation.ts'
+import { routeTree } from './routeTree.gen.ts'
+import { pageNavigationForMatches } from './page-navigation.ts'
 import { expect, test } from 'vitest'
 import {
 	accountRailGroups,
@@ -15,6 +15,7 @@ import {
 } from '#client/routes/account-rail.ts'
 
 const router = createRouter({
+	origin: 'https://kody.test',
 	routeTree,
 	history: createMemoryHistory(),
 	context: { queryClient: new QueryClient(), getCommittedPage: () => null },
@@ -282,10 +283,10 @@ test('team organization rail shares the sections and keeps members, settings, an
 		['Settings', expect.any(String)],
 		['Credits', 'Your monthly budget and what it has spent.'],
 	])
-	// Team Overview is the org home; exact match so section pages stay off.
+	// Team Overview is selected by the native org home route only.
 	const teamOverview = teamOwner[0]?.items[0]
 	expect(teamOverview?.href).toBe('/@acme')
-	expect(teamOverview?.exact).toBe(true)
+	expect(navigation('/@acme')?.item).toBe(teamOverview?.id)
 	expect(teamOverview && isAccountNavItemActive(teamOverview, '/@acme')).toBe(
 		true,
 	)
@@ -353,40 +354,46 @@ test('switching workspaces keeps the page when the role can open it there', () =
 	const acmeBilling = { ...acmeOwner, role: 'billing' } as const
 	const acmeGuest = { ...acmeOwner, role: null }
 	const jane = { slug: 'jane', personal: true, role: 'owner' } as const
-	expect(workspaceSwitchHref('/@jane/-/secrets', acmeOwner)).toBe(
+	expect(workspaceSwitchHref({ section: 'secrets' }, acmeOwner)).toBe(
 		'/@acme/-/secrets',
 	)
-	expect(workspaceSwitchHref('/@acme/-/billing', jane)).toBe('/@jane/-/billing')
-	expect(workspaceSwitchHref('/@jane/-/billing', acmeBilling)).toBe(
+	expect(workspaceSwitchHref({ section: 'billing' }, jane)).toBe(
+		'/@jane/-/billing',
+	)
+	expect(workspaceSwitchHref({ section: 'billing' }, acmeBilling)).toBe(
 		'/@acme/-/billing',
 	)
-	expect(workspaceSwitchHref('/@jane/-/usage', acmeOwner)).toBe(
+	expect(workspaceSwitchHref({ section: 'usage' }, acmeOwner)).toBe(
 		'/@acme/-/usage',
 	)
-	expect(workspaceSwitchHref('/@jane/-/usage', acmeBilling)).toBe(
+	expect(workspaceSwitchHref({ section: 'usage' }, acmeBilling)).toBe(
 		'/@acme/-/usage',
 	)
-	expect(workspaceSwitchHref('/@acme/-/usage', jane)).toBe('/@jane/-/usage')
-	expect(workspaceSwitchHref('/@acme/-/teams', acmeBilling)).toBe('/@acme')
-	expect(workspaceSwitchHref('/@acme/-/settings', jane)).toBe(
+	expect(workspaceSwitchHref({ section: 'usage' }, jane)).toBe('/@jane/-/usage')
+	expect(workspaceSwitchHref({ section: 'teams' }, acmeBilling)).toBe('/@acme')
+	expect(workspaceSwitchHref({ section: 'settings' }, jane)).toBe(
 		'/@jane/-/overview',
 	)
-	expect(workspaceSwitchHref('/@acme/-/grants', jane)).toBe('/@jane/-/grants')
-	expect(workspaceSwitchHref('/@jane/-/agents', acmeGuest)).toBe(
+	expect(workspaceSwitchHref({ section: 'grants' }, jane)).toBe(
+		'/@jane/-/grants',
+	)
+	expect(workspaceSwitchHref({ section: 'agents' }, acmeGuest)).toBe(
 		'/@acme/-/agents',
 	)
-	expect(workspaceSwitchHref('/@jane/-/secrets', acmeGuest)).toBe('/@acme')
-	expect(workspaceSwitchHref('/@jane/-/usage', acmeGuest)).toBe('/@acme')
+	expect(workspaceSwitchHref({ section: 'secrets' }, acmeGuest)).toBe('/@acme')
+	expect(workspaceSwitchHref({ section: 'usage' }, acmeGuest)).toBe('/@acme')
 	const acmeMember = { ...acmeOwner, role: 'member' } as const
-	expect(workspaceSwitchHref('/@jane/-/usage', acmeMember)).toBe('/@acme')
-	expect(workspaceSwitchHref('/@jane/-/credits', acmeMember)).toBe(
+	expect(workspaceSwitchHref({ section: 'usage' }, acmeMember)).toBe('/@acme')
+	expect(workspaceSwitchHref({ section: 'credits' }, acmeMember)).toBe(
 		'/@acme/-/credits',
 	)
-	expect(workspaceSwitchHref('/@acme/-/credits', jane)).toBe('/@jane/-/credits')
-	expect(workspaceSwitchHref('/@jane/-/credits', acmeGuest)).toBe(
+	expect(workspaceSwitchHref({ section: 'credits' }, jane)).toBe(
+		'/@jane/-/credits',
+	)
+	expect(workspaceSwitchHref({ section: 'credits' }, acmeGuest)).toBe(
 		'/@acme/-/credits',
 	)
-	expect(workspaceSwitchHref('/@acme', jane)).toBe('/@jane/-/overview')
+	expect(workspaceSwitchHref(undefined, jane)).toBe('/@jane/-/overview')
 })
 
 test('account rail org slug prefers the path org over username', () => {

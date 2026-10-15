@@ -14,6 +14,10 @@ export const Route = createFileRoute(
 	'/@{$orgSlug}_/-/mcp-servers_/$serverId_/authorize',
 )({
 	staticData: {
+		workspaceSwitch: {
+			section: 'mcp-servers',
+			suffix: [{ param: 'serverId' }, 'authorize'],
+		},
 		navigation: { rail: 'workspace', item: 'credentials' },
 		orgScope: { section: 'mcp-servers' },
 	},

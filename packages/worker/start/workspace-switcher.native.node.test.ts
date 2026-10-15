@@ -23,7 +23,7 @@ function render(data: Partial<WorkspaceSwitcherData>) {
 			username: 'ada',
 			displayName: 'Ada Lovelace',
 			avatarUrl: null,
-			currentPathname: '/@ada/-/secrets',
+			switchTarget: { section: 'secrets' },
 			...data,
 			placement: 'rail',
 		}),
@@ -43,7 +43,7 @@ function rowHref(html: string, slug: string) {
 test('switcher lists the signup organization, then others with roles, then create and waiting invites', async () => {
 	const html = await render({
 		currentSlug: 'acme',
-		currentPathname: '/@acme/-/secrets',
+		switchTarget: { section: 'secrets' },
 		organizations: [
 			{ slug: 'acme', displayName: 'Acme', role: 'member', personal: false },
 			ada,
@@ -97,7 +97,7 @@ test('a single organization is the person: their name and handle, no role, no in
 test('switcher stays on the URL org when the session lists only personal', async () => {
 	const html = await render({
 		currentSlug: 'acme',
-		currentPathname: '/@acme/-/settings',
+		switchTarget: { section: 'settings' },
 	})
 	expect(html).toContain('aria-label="@acme: switch organization"')
 	// The missing team gets its own member-shaped row.
@@ -109,7 +109,7 @@ test('switcher stays on the URL org when the session lists only personal', async
 
 test('switcher opens the org home when the current page is not open to that role there', async () => {
 	const collaborator = await render({
-		currentPathname: '/@ada/-/settings',
+		switchTarget: { section: 'settings' },
 		organizations: [
 			{ slug: 'acme', displayName: 'Acme', role: null, personal: false },
 			ada,
@@ -119,7 +119,7 @@ test('switcher opens the org home when the current page is not open to that role
 
 	const billing = await render({
 		currentSlug: 'acme',
-		currentPathname: '/@acme/-/teams',
+		switchTarget: { section: 'teams' },
 		organizations: [
 			{ slug: 'acme', displayName: 'Acme', role: 'billing', personal: false },
 			{ slug: 'zeta', displayName: 'Zeta', role: 'billing', personal: false },
@@ -147,10 +147,10 @@ test('switcher keeps every org-owned section when switching between orgs', async
 		'waiting',
 		'webhooks',
 		'workflows',
-	]
+	] as const
 	for (const section of sections) {
 		const html = await render({
-			currentPathname: `/@ada/-/${section}`,
+			switchTarget: { section },
 			organizations: [
 				ada,
 				{ slug: 'acme', displayName: 'Acme', role: 'member', personal: false },
@@ -170,7 +170,7 @@ test('switcher keeps every org-owned section when switching between orgs', async
 test('switcher draws a team photo on the trigger and the account photo for the signup org', async () => {
 	const html = await render({
 		currentSlug: 'kody',
-		currentPathname: '/@kody/-/settings',
+		switchTarget: { section: 'settings' },
 		avatarUrl: '/profiles/ada/avatar/ada.png',
 		organizations: [
 			{

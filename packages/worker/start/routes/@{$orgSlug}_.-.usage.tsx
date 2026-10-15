@@ -13,6 +13,7 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
 	staticData: {
+		workspaceSwitch: { section: 'usage' },
 		navigation: { rail: 'workspace', item: 'usage' },
 		orgScope: {},
 	},

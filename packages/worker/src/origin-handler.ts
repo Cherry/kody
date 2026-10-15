@@ -140,18 +140,10 @@ const rateLimitedAuthPaths = new Set([
 	'/auth',
 	...socialLoginStartPaths,
 	'/oauth/authorize',
-	'/password-reset',
-	'/password-reset/confirm',
-	'/verify/2fa.json',
-	'/account/two-factor.json',
-	'/account/password.json',
 	'/webauthn/authentication',
 ])
 
-const protectedPublicJsonFormPaths = new Set([
-	'/verify/2fa.json',
-	'/webauthn/authentication',
-])
+const protectedPublicJsonFormPaths = new Set(['/webauthn/authentication'])
 
 const appHandler = withCors({
 	getCorsHeaders(request): Record<string, string> | null {

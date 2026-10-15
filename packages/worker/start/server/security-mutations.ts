@@ -33,6 +33,11 @@ export const startTwoFactorSetup = createServerFn({ method: 'POST' })
 			await import('../../src/app/handlers/account-two-factor.ts')
 		return withWebsiteMutation({}, async (context) => {
 			const result = await startAccountTwoFactorSetup({ ...context, ...data })
+			if ('retryAfter' in result) {
+				const { setResponseHeader } =
+					await import('@tanstack/react-start/server')
+				setResponseHeader('Retry-After', result.retryAfter)
+			}
 			return result
 		})
 	})
@@ -44,6 +49,11 @@ export const confirmTwoFactorSetup = createServerFn({ method: 'POST' })
 			await import('../../src/app/handlers/account-two-factor.ts')
 		return withWebsiteMutation({}, async (context) => {
 			const result = await confirmAccountTwoFactorSetup({ ...context, ...data })
+			if ('retryAfter' in result) {
+				const { setResponseHeader } =
+					await import('@tanstack/react-start/server')
+				setResponseHeader('Retry-After', result.retryAfter)
+			}
 			return result
 		})
 	})
@@ -55,6 +65,11 @@ export const cancelTwoFactorSetup = createServerFn({ method: 'POST' })
 			await import('../../src/app/handlers/account-two-factor.ts')
 		return withWebsiteMutation({}, async (context) => {
 			const result = await cancelAccountTwoFactorSetup({ ...context, ...data })
+			if ('retryAfter' in result) {
+				const { setResponseHeader } =
+					await import('@tanstack/react-start/server')
+				setResponseHeader('Retry-After', result.retryAfter)
+			}
 			return result
 		})
 	})
@@ -66,6 +81,11 @@ export const disableTwoFactor = createServerFn({ method: 'POST' })
 			await import('../../src/app/handlers/account-two-factor.ts')
 		return withWebsiteMutation({}, async (context) => {
 			const result = await disableAccountTwoFactor({ ...context, ...data })
+			if ('retryAfter' in result) {
+				const { setResponseHeader } =
+					await import('@tanstack/react-start/server')
+				setResponseHeader('Retry-After', result.retryAfter)
+			}
 			return result
 		})
 	})

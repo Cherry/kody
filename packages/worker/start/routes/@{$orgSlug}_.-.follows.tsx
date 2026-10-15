@@ -7,6 +7,7 @@ import { OrgFollowsPage } from '../pages/org-follows.tsx'
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/follows')({
 	staticData: {
+		workspaceSwitch: { section: 'follows' },
 		navigation: { rail: 'workspace', item: 'follows' },
 		orgScope: { section: 'follows' },
 	},

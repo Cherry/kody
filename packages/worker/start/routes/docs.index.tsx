@@ -1,6 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { docsMarkdown } from '#start/server/markdown'
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
+import { negotiatedDocument } from '../document-negotiation.ts'
 import { createFileRoute } from '@tanstack/react-router'
 import { docsIntroSlug } from '#universal/docs-nav.ts'
 import { DocDetailRoute } from '../pages/doc-detail.tsx'
@@ -13,8 +14,12 @@ const pageQuery = createPageQuery('loadDoc', loadDoc, {
 })
 
 export const Route = createFileRoute('/docs/')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
-	server: { handlers: { GET: docsMarkdown } },
+	staticData: {
+		motionGroup: 'docs',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
+	server: { middleware: [negotiatedDocument], handlers: { GET: docsMarkdown } },
 	context: () => ({ pageQueryInput: { slug: docsIntroSlug } }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

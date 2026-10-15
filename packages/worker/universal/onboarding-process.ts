@@ -10,14 +10,10 @@ import {
 } from '#universal/onboarding-mcp-clients.ts'
 import { routes } from '#universal/routes.ts'
 
-export const onboardingStepPaths = {
-	index: '/onboarding',
+const onboardingStepPaths = {
 	step1: '/onboarding/step-1',
-	step1Agent: '/onboarding/step-1/:agent',
 	step2: '/onboarding/step-2',
-	step2Service: '/onboarding/step-2/:service',
 	step3: '/onboarding/step-3',
-	step3Agent: '/onboarding/step-3/:agent',
 } as const
 
 const onboardingNotListedSegment = 'not-listed'
@@ -358,18 +354,6 @@ export function onboardingChecklistItemHref(
 	if ('href' in item) return item.href
 	if ('profile' in item) return routes.profile.href({ username })
 	return onboardingWizardStepHref(item.wizardStep)
-}
-
-export function isOnboardingPagePath(pathname: string) {
-	return (
-		pathname === onboardingStepPaths.index ||
-		pathname === onboardingStepPaths.step1 ||
-		pathname === onboardingStepPaths.step2 ||
-		pathname === onboardingStepPaths.step3 ||
-		pathname.startsWith(`${onboardingStepPaths.step1}/`) ||
-		pathname.startsWith(`${onboardingStepPaths.step2}/`) ||
-		pathname.startsWith(`${onboardingStepPaths.step3}/`)
-	)
 }
 
 function onboardingAgentPathSegment(agent: McpClientKind) {

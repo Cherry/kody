@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadAccountSecurity', loadAccountSecurity, {
 })
 
 export const Route = createFileRoute('/account_/two-factor')({
-	staticData: { navigation: { rail: 'account', item: 'security' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'account', item: 'security' },
+	},
 	context: () => ({ pageQueryInput: 'two-factor' as const }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

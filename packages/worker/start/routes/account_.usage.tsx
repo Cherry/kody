@@ -9,7 +9,10 @@ const pageQuery = createPageQuery('loadUsagePage', loadUsagePage, {
 })
 
 export const Route = createFileRoute('/account_/usage')({
-	staticData: { navigation: { rail: 'workspace', item: 'usage' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'workspace', item: 'usage' },
+	},
 	server: {
 		handlers: {
 			HEAD: ({ request, next }) => {

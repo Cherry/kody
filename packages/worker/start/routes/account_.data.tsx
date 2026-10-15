@@ -8,7 +8,10 @@ const pageQuery = createPageQuery('loadAccountPage', loadAccountPage, {
 })
 
 export const Route = createFileRoute('/account_/data')({
-	staticData: { navigation: { rail: 'account', item: 'data' } },
+	staticData: {
+		motionGroup: 'account',
+		navigation: { rail: 'account', item: 'data' },
+	},
 	// Account data is independent of presentation and attribution parameters.
 	context: () => ({ pageQueryInput: '' }),
 	loader: ({ context, preload }) =>

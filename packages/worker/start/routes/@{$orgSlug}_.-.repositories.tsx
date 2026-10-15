@@ -12,6 +12,8 @@ const pageQuery = createPageQuery('loadOrgRepositories', loadOrgRepositories, {
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/repositories')({
 	staticData: {
+		motionGroup: 'profile',
+		workspaceSwitch: { section: 'repositories' },
 		navigation: { rail: 'workspace', item: 'repositories' },
 		orgScope: { section: 'repositories' },
 		shell: { gutters: 'page' },

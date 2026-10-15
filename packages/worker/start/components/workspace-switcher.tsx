@@ -19,6 +19,7 @@ import {
 	orgRoleLabel,
 	orgSwitcherEntries,
 	type OrganizationSummary,
+	type WorkspaceSwitchTarget,
 	type OrgSwitcherEntry,
 } from '#universal/org-pages.ts'
 import { routes } from '#universal/routes.ts'
@@ -38,7 +39,7 @@ export type WorkspaceSwitcherData = {
 	username: string
 	displayName: string
 	avatarUrl: string | null
-	currentPathname: string
+	switchTarget?: WorkspaceSwitchTarget
 }
 
 /**
@@ -119,7 +120,7 @@ function workspaceSwitcherRows(data: WorkspaceSwitcherData) {
 				const selected = entry.org.slug === data.currentSlug
 				return {
 					key: entry.org.slug,
-					href: workspaceSwitchHref(data.currentPathname, entry.org),
+					href: workspaceSwitchHref(data.switchTarget, entry.org),
 					label: identity.name,
 					detail: identity.hasName
 						? [identity.handle, role].filter(Boolean).join(' · ')

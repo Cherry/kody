@@ -10,6 +10,7 @@ const pageQuery = createPageQuery('loadWorkflowsPage', loadWorkflowsPage, {
 
 export const Route = createFileRoute('/@{$orgSlug}_/-/workflows')({
 	staticData: {
+		workspaceSwitch: { section: 'workflows' },
 		navigation: { rail: 'workspace', item: 'workflows' },
 		orgScope: { section: 'workflows' },
 	},
