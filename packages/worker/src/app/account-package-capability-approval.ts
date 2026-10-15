@@ -26,6 +26,7 @@ import {
 	getPendingWentPublicApproval,
 } from '#worker/package-capabilities/went-public-approval.ts'
 import { loadPackageSecurityAuditState } from '#worker/package-capabilities/security-audit-state.ts'
+import { loadPackageSecurityAuditNextStep } from '#worker/package-capabilities/security-audit-next-step.ts'
 import { type AccountPackageApproveCapabilitiesLoaderData } from '#universal/loader-data.ts'
 import { logOrgAuditEvent } from '#worker/orgs/org-audit.ts'
 import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
@@ -503,13 +504,26 @@ async function changePackageCapabilityApproval(
 				requestedByUserId: actorUserId,
 			})
 		}
+		const securityAudit = await loadPackageSecurityAuditNextStep({
+			db: input.env.APP_DB,
+			ownerUserId,
+			packageId: savedPackage.id,
+			packageName: savedPackage.name,
+			publishedCommit: summary.publishedCommit,
+			fingerprint: summary.capabilitySet.fingerprint,
+			approvalUrl,
+		})
+		const approvalStep = summary.fingerprintMatchesApproval
+			? 'Approve making this package internet-visible on the approval page.'
+			: 'Review the credentials and capabilities on the approval page. One Approve records them and makes this package internet-visible.'
 		return packageMutationResult(
 			{
 				ok: false,
-				error: summary.fingerprintMatchesApproval
-					? 'Approve making this package internet-visible on the approval page.'
-					: 'Review the credentials and capabilities on the approval page. One Approve records them and makes this package internet-visible.',
+				error: securityAudit
+					? `${approvalStep} No security audit is recorded for this version yet; the approval page has a prompt to copy for your agent.`
+					: approvalStep,
 				approvalUrl,
+				...(securityAudit ? { securityAudit } : {}),
 			},
 			400,
 		)

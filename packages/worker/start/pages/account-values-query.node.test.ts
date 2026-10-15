@@ -227,7 +227,7 @@ it('holds a real background page read until the write settles, then confirms wit
 	const client = new QueryClient()
 	let completeWrite!: () => void
 	let persisted = false
-	const read = vi.fn(async () => ({
+	const read = vi.fn(async (): Promise<ValuesQueryData> => ({
 		payload: {
 			...data(null).payload,
 			values: persisted ? [row(other)] : [row(detail), row(other)],
