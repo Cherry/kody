@@ -31,10 +31,12 @@ passkey session before authenticator invocation. They require CI.
 
 Remaining gaps in browser and visual evidence:
 
-- OAuth: `e2e/connect-oauth-credentials.spec.ts` covers typing, provider denial
-  and invalid callback state. It does not complete a valid provider callback,
-  token exchange, credential persistence, host approval and subsequent use.
-  Native callback navigation tests cover lifecycle mechanics separately.
+- OAuth: `9b624a151` adds a valid callback through the existing mock provider,
+  actual server token exchange, persisted credential listing and reloaded
+  detail. Runtime confirmation and subsequent credential use remain unproven.
+  The current shared operation returns no separate host approval links; this
+  journey checks saved required hosts rather than inventing an approval step.
+  Real external-provider behavior remains unverified.
 - Billing: `e2e/start/late-checkout.spec.ts` mocks checkout to test stale
   navigation. `credit-top-up-return.spec.ts` covers anonymous redirects, HEAD
   safety and invalid sessions. Successful checkout, portal return and credited
@@ -45,9 +47,10 @@ Remaining gaps in browser and visual evidence:
   There are no screenshot assertions under `e2e`. Populated package detail and
   publishing, authenticated account/org/admin screens and mobile states still
   need matching roles, fixtures, viewport, theme and deployed revisions.
-- Invites: `e2e/invite-links.spec.ts` covers package/team acceptance and
-  addressed-invite revocation. Expired or revoked-link acceptance, duplicate
-  acceptance and lost-response retries remain unproven browser journeys.
+- Invites: `7acc1e432` adds revoked and expired stale-offer rejection,
+  lost-response reconciliation and duplicate acceptance from a second tab,
+  including owner-visible use count and denied team access. These additions
+  require CI; they do not exercise an explicit Retry button.
 - Authentication recovery: `e2e/passkeys.spec.ts` and `e2e/two-factor.spec.ts`
   cover successful lifecycles. Cancelled WebAuthn, failed authenticator
   assertions, rejected TOTP and retry feedback are not covered by those
