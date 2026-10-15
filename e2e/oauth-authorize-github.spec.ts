@@ -110,13 +110,13 @@ test('GitHub-only account authorizes while already signed in', async ({
 	)
 	await page.getByTestId('oauth-authorize-approve').click()
 	await decisionRequest
-	expect(protocolPosts).toEqual([])
 
 	await expect(page).toHaveURL(
 		new RegExp(
 			`^${callbackRedirectUri.replace(/\./g, '\\.')}\\?.*code=.*state=${state}`,
 		),
 	)
+	expect(protocolPosts).toEqual([])
 })
 
 test('GitHub sign-in from authorize returns with OAuth params intact', async ({

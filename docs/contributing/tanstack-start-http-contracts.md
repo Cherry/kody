@@ -6,10 +6,15 @@ assets need a stable URL. They are registered in `packages/worker/start/routes`,
 not a second backend router. GET routes also support HEAD unless consuming a
 token.
 
+Website consent, denial, inline login and client reset use
+`submitOAuthDecision`, a native Start server function. The retained OAuth POST
+and that function share the authorization operation, preserving the external
+protocol contract without sending website mutations through its HTTP adapter.
+
 | Method | Path                                                          | Consumer                                                                |
 | ------ | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | GET    | `/oauth/authorize`                                            | OAuth clients, consent document and silent authorization, HEAD rejected |
-| POST   | `/oauth/authorize`                                            | OAuth consent and inline login protocol                                 |
+| POST   | `/oauth/authorize`                                            | MCP client consent and inline login protocol                            |
 | GET    | `/oauth/callback`                                             | OAuth client callback document, error status preserved                  |
 | GET    | `/robots.txt`                                                 | Discovery, crawlers, feeds, or machine-readable documentation           |
 | GET    | `/sitemap.xml`                                                | Discovery, crawlers, feeds, or machine-readable documentation           |
@@ -72,3 +77,9 @@ The retired `/account/*.json`, `/admin/*.json`, and public JSON companion routes
 are not a supported API. Use the official API or MCP for automation, and the
 website UI to verify browser mutations. `/auth` and `/session` remain explicit
 tooling exceptions, the website itself uses native functions for both.
+
+Website consent uses the `submitOAuthDecision` Start server function. It shares
+approval, denial and client reset operations with `POST /oauth/authorize` while
+keeping the original request for identity and cookie checks. The POST endpoint
+remains for `tools/mcp-oauth-client.ts`, which submits authorization decisions
+as an external MCP OAuth client. The site does not post to that endpoint.
