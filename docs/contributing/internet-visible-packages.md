@@ -52,6 +52,54 @@ step (`security-audit-next-step.ts`): audit, record with
 `published_commit`, and `fingerprint`, then hand the owner the approval link.
 The audit is informational and approves nothing.
 
+## Self-publish
+
+`packageUpdate` (`internet_visible: true`) approves going public itself when
+`evaluateSelfPublish`
+(`packages/worker/src/package-capabilities/self-publish.ts`) finds all of these:
+
+- the global `credential-need-enforcement` flag is on, so declaring nothing
+  means the fetch gateway and `credential()` fill nothing for the package;
+- the package and every package in its resolved dependency snapshot are
+  published, each still at the commit the snapshot pins (otherwise
+  `stale_dependencies`), since only the current publish is read;
+- none of them declares `kody.credentials` (or has a fresh needs closure that
+  does), `secretMounts`, `secretProvider`, `subscriptions`, `emits`, `jobs`,
+  `retrievers`, or `webhooks`;
+- a security audit with verdict `pass` is recorded
+  (`packageSecurityAuditRecord`) for the package's current published commit and
+  capability fingerprint;
+- the caller has `package:publish` on the package.
+
+It is evaluated in two places, both through `attemptSelfPublish`: when
+`packageUpdate` sets `internet_visible: true` (again on every re-toggle), and
+when `packageSecurityAuditRecord` records a `pass` while a `went_public` request
+is pending. Anything that fails a check stays pending for the owner, and the
+response's `self_publish_blocker` names the first failed check (`not_audited`
+and `audit_concerns` for the audit).
+
+`selfPublishPackage` then records the capability pin (refusing if the package
+was published again since the audited commit), enqueues or reuses the one
+pending `went_public` request and marks it `selfPublish: true` in place,
+approves it through `approveWentPublicRequest` (the same checks as the owner's
+click), and writes one org audit event, `package.went_public.self_publish`. If
+the approval fails or throws, the mark is cleared in place, so the request stays
+pending for the owner and an owner Approve never reads as self-publish;
+`packageUpdate` then reports `self_publish_error` with the owner's
+`approval_url` (or errors when nothing is pending anymore). From
+`packageSecurityAuditRecord`, self-publish marks and approves only the pending
+request the audit saw and never enqueues one, so a request the owner withdrew
+meanwhile is not replaced.
+
+The credential door (`resolveCredential`) refuses every credential to a package
+that is internet-visible and whose latest approved `went_public` request is a
+self-publish one, with `credential_need_undeclared`
+(`self-published-package-guard.ts`). That covers by-name helpers that
+credential-need enforcement does not limit (`secretJwtSign`,
+`integrationTokenRefresh`, `kody.mcp`). It holds whatever the package declares
+later, and whether or not the flag stays on, until the owner approves going
+public again (turn internet-visible off, then on).
+
 ## ADR 0001 exception
 
 Public-site pinning of an approved dependency snapshot is the accepted exception
