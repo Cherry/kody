@@ -1,4 +1,4 @@
-import { generateTOTP } from '@epic-web/totp'
+import { generateTOTP, verifyTOTP } from '@epic-web/totp'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
 import { clearAuthRateLimitsInE2eDatabase } from './d1-utils.ts'
 
@@ -7,7 +7,17 @@ async function currentCodeFor(secret: string) {
 	return otp
 }
 
-test('two-factor lifecycle: enable, login with code, disable', async ({
+async function rejectedCodeFor(secret: string) {
+	// Exclude every code in a ten-minute window on either side, far beyond this
+	// test's deadline, so a time-step rollover cannot make the rejected code valid.
+	for (let candidate = 0; candidate < 1_000_000; candidate++) {
+		const otp = String(candidate).padStart(6, '0')
+		if ((await verifyTOTP({ secret, otp, window: 20 })) === null) return otp
+	}
+	throw new Error('Could not find an invalid authenticator code')
+}
+
+test('two-factor lifecycle rejects invalid codes and recovers on enable, login, and disable', async ({
 	page,
 	seedE2eUser,
 	login,
@@ -34,6 +44,18 @@ test('two-factor lifecycle: enable, login with code, disable', async ({
 
 	const secret = (await page.getByTestId('totp-secret').textContent()) ?? ''
 	expect(secret.length).toBeGreaterThan(0)
+
+	await page.getByLabel('Verification code').fill(await rejectedCodeFor(secret))
+	await page.getByRole('button', { name: 'Confirm' }).click()
+	await expect(page.getByText('Invalid code.', { exact: true })).toBeVisible()
+	await page.reload()
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', {
+			name: 'Scan this QR code',
+		}),
+	).toBeVisible()
+	await expect(page.getByTestId('totp-secret')).toHaveText(secret)
 
 	await page.getByLabel('Verification code').fill(await currentCodeFor(secret))
 	await page.getByRole('button', { name: 'Confirm' }).click()
@@ -62,6 +84,17 @@ test('two-factor lifecycle: enable, login with code, disable', async ({
 	await waitForClientHydration(page)
 
 	clearAuthRateLimitsInE2eDatabase()
+	const verificationUrl = page.url()
+	await page.getByLabel('Verification code').fill(await rejectedCodeFor(secret))
+	await page.getByRole('button', { name: 'Verify' }).click()
+	await expect(page.getByText('Invalid code.', { exact: true })).toBeVisible()
+	await expect(page).toHaveURL(verificationUrl)
+	await page.reload()
+	await waitForClientHydration(page)
+	await expect(page).toHaveURL(verificationUrl)
+	await expect(
+		page.getByRole('heading', { name: 'Authorization resumed' }),
+	).toHaveCount(0)
 	await page.getByLabel('Verification code').fill(await currentCodeFor(secret))
 	await page.getByRole('button', { name: 'Verify' }).click()
 	await expect(
@@ -77,6 +110,16 @@ test('two-factor lifecycle: enable, login with code, disable', async ({
 	await expect(page.getByText(`Email: ${user.email}`)).toBeVisible()
 
 	await page.goto('/account/two-factor')
+	await waitForClientHydration(page)
+	await expect(
+		page.getByRole('heading', {
+			name: 'Two-factor authentication is enabled',
+		}),
+	).toBeVisible()
+	await page.getByLabel('Verification code').fill(await rejectedCodeFor(secret))
+	await page.getByRole('button', { name: 'Disable 2FA' }).click()
+	await expect(page.getByText('Invalid code.', { exact: true })).toBeVisible()
+	await page.reload()
 	await waitForClientHydration(page)
 	await expect(
 		page.getByRole('heading', {
