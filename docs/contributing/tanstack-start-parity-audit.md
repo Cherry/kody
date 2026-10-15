@@ -1,5 +1,42 @@
 # Start parity audit
 
+## Cutover coverage review at source `1b97b13d6`
+
+Validate run `38723276806` is not green. An MCP empty-document regression is
+under investigation. The previous E2E run had 164 passes and two credit-return
+failures; current-head corrections still require runtime confirmation.
+
+Remaining gaps in browser and visual evidence:
+
+- OAuth: `e2e/connect-oauth-credentials.spec.ts` covers typing, provider denial
+  and invalid callback state. It does not complete a valid provider callback,
+  token exchange, credential persistence, host approval and subsequent use.
+  Native callback navigation tests cover lifecycle mechanics separately.
+- Billing: `e2e/start/late-checkout.spec.ts` mocks checkout to test stale
+  navigation. `credit-top-up-return.spec.ts` covers anonymous redirects, HEAD
+  safety and invalid sessions. Successful checkout, portal return and credited
+  balance refresh lack a complete browser journey. Server completion and Stripe
+  worker tests provide narrower coverage.
+- Visuals: recorded comparisons use different authentication states or viewport
+  sizes, and preview community listings are empty while production is populated.
+  There are no screenshot assertions under `e2e`. Populated package detail and
+  publishing, authenticated account/org/admin screens and mobile states still
+  need matching roles, fixtures, viewport, theme and deployed revisions.
+- Invites: `e2e/invite-links.spec.ts` covers package/team acceptance and
+  addressed-invite revocation. Expired or revoked-link acceptance, duplicate
+  acceptance and lost-response retries remain unproven browser journeys.
+- Authentication recovery: `e2e/passkeys.spec.ts` and `e2e/two-factor.spec.ts`
+  cover successful lifecycles. Cancelled WebAuthn, failed authenticator
+  assertions, rejected TOTP and retry feedback are not covered by those
+  journeys.
+
+Package settings and organization revocation now have the browser coverage
+listed in the updated historical review below. Session identity, admin
+revocation, cross-site RPC rejection, collaborators, webhooks and held profile
+mutations also have dedicated browser tests. Test source establishes coverage
+intent, not a passing result for the current revision. These gaps are not newly
+observed product failures, and behavioral tests do not prove pixel parity.
+
 ## Native cache and credit-return follow-up
 
 Anonymous cache eligibility and TTL now live on native routes. The origin no
@@ -252,23 +289,14 @@ deployment remains `fb02ca65fc255520eebb4c34976bf436b451fe14`.
 Authenticated preview and matched visual comparisons remain incomplete. Passing
 the earlier E2E job does not establish parity for these later changes.
 
-Critical-action coverage review found these remaining gaps in browser test
-source:
-
-- Package settings: publish, visibility, lock and deletion need real UI writes,
-  persistence checks and denied-user cases. Existing package access and
-  collaborator tests do not cover those operations.
-- Billing: `late-checkout.spec.ts` checks a navigation race with a mocked
-  checkout response, not successful checkout, portal or return reconciliation.
-- Organization permissions: missing role-change or member-removal UI journeys
-  followed by warm-cache navigation and a rejected write as the revoked member.
-- Invites: existing creation and acceptance journeys do not establish link
-  revocation, expiration, duplicate acceptance or lost-response behavior.
-- Passkeys and two-factor authentication have successful browser journeys, but
-  cancellation and failure coverage is incomplete.
-
-These are coverage gaps, not observed product failures. The full E2E directory
-is included by Playwright, so coverage outside `e2e/start` also counts.
+The coverage gaps recorded here were reviewed again at source `1b97b13d6`.
+Package settings now have real UI lock, public-visibility and deletion writes,
+reload persistence, confirmation and denied-account replay coverage in
+`e2e/start/package-settings-mutations.spec.ts`. Removed organization membership
+now has warm-cache revisit and a real rejected write covered by
+`e2e/start/org-permission-revocation.spec.ts`. These additions close the earlier
+blanket gaps for those cases, not every publishing or permission-change flow.
+See the current cutover coverage review above for remaining gaps.
 
 ### Follow-up at source `7ac5a2af0`
 
