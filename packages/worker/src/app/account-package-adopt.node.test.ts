@@ -68,10 +68,9 @@ test('the signed-in owner adopts a community fork from the account API', async (
 		method: 'POST',
 	})
 	mockModule.adoptCommunityFork.mockResolvedValue({ alreadyAdopted: false })
-	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({
-		ok: true,
-		selectedPackage: { id: 'pkg-1' },
-	})
+	mockModule.reloadAccountPackagesAfterWrite.mockRejectedValue(
+		new Error('Page read unavailable'),
+	)
 
 	const response = await adoptAccountPackageFork({
 		env,
@@ -83,7 +82,7 @@ test('the signed-in owner adopts a community fork from the account API', async (
 	expect(response?.status).toBe(200)
 	expect(response?.data).toEqual({
 		ok: true,
-		selectedPackage: { id: 'pkg-1' },
+		packageId: 'pkg-1',
 	})
 	expect(mockModule.adoptCommunityFork).toHaveBeenCalledWith({
 		env,
@@ -91,13 +90,7 @@ test('the signed-in owner adopts a community fork from the account API', async (
 		packageId: 'pkg-1',
 		reviewSummary: 'Read src/ and package.json; no exfiltration.',
 	})
-	expect(mockModule.reloadAccountPackagesAfterWrite).toHaveBeenCalledWith({
-		env,
-		request,
-		user,
-		packageId: 'pkg-1',
-		ownerUserId: ownerIdFromStored('stable-user-1'),
-	})
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 })
 
 test('account adopt requires org owner role on the package owning org', async () => {

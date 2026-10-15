@@ -1,5 +1,4 @@
 import { loadWritableAccountSavedPackage } from '#app/account-package-write-access.ts'
-import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import { loadOrgBindingForOrg } from '#worker/orgs/repo.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadPublicTreeFiles } from '#app/package-files-data.ts'
@@ -225,15 +224,7 @@ async function changePackagePublishState(
 
 	if (action === 'lock' || action === 'unlock') {
 		if (action === 'lock' && isSavedPackageLocked(savedPackage.lockedAt)) {
-			return packageMutationResult(
-				await reloadAccountPackagesAfterWrite({
-					env: input.env,
-					request: input.request,
-					user: input.user,
-					packageId,
-					ownerUserId,
-				}),
-			)
+			return packageMutationResult({ ok: true, packageId })
 		}
 		const changed = await setSavedPackageLockedAt(input.env.APP_DB, {
 			userId: ownerUserId,
@@ -246,15 +237,7 @@ async function changePackagePublishState(
 				404,
 			)
 		}
-		return packageMutationResult(
-			await reloadAccountPackagesAfterWrite({
-				env: input.env,
-				request: input.request,
-				user: input.user,
-				packageId,
-				ownerUserId,
-			}),
-		)
+		return packageMutationResult({ ok: true, packageId })
 	}
 
 	const commit = ('commit' in input ? input.commit : '').trim()
@@ -304,13 +287,6 @@ async function changePackagePublishState(
 	switch (publishResult.status) {
 		case 'published':
 		case 'already_published': {
-			const packagesPayload = await reloadAccountPackagesAfterWrite({
-				env: input.env,
-				request: input.request,
-				user: input.user,
-				packageId,
-				ownerUserId,
-			})
 			const ownerBinding = await loadOrgBindingForOrg(
 				input.env.APP_DB,
 				input.user.mcpUser.userId,
@@ -326,7 +302,8 @@ async function changePackagePublishState(
 				promotedCommit: commit,
 			})
 			return packageMutationResult({
-				...packagesPayload,
+				ok: true,
+				packageId,
 				listing,
 			})
 		}

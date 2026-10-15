@@ -264,7 +264,7 @@ export const absorbPackageListing = createServerFn({ method: 'POST' })
 			import('./mutation-context.ts'),
 			import('@tanstack/react-start/server'),
 		])
-		return withWebsiteMutation({}, async ({ request, env, user }) => {
+		return withWebsiteMutation({}, async ({ env, user }) => {
 			const { loadWritableAccountSavedPackage } =
 				await import('../../src/app/account-package-write-access.ts')
 			const resolved = await loadWritableAccountSavedPackage({
@@ -294,14 +294,6 @@ export const absorbPackageListing = createServerFn({ method: 'POST' })
 				}
 				throw error
 			}
-			const { reloadAccountPackagesAfterWrite } =
-				await import('../../src/app/account-packages-data.ts')
-			return reloadAccountPackagesAfterWrite({
-				request,
-				env,
-				user,
-				packageId: data.packageId,
-				ownerUserId: resolved.package.ownerUserId,
-			})
+			return { ok: true, packageId: data.packageId }
 		})
 	})

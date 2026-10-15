@@ -51,7 +51,9 @@ async function setup() {
 			'2026-10-13T00:00:00.000Z',
 		)
 		.run()
-	mocks.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
+	mocks.reloadAccountPackagesAfterWrite.mockRejectedValue(
+		new Error('Unrelated package list unavailable'),
+	)
 	const user = {
 		userId: 0,
 		username: 'bea',

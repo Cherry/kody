@@ -1,4 +1,3 @@
-import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { viewerIsSavedPackageOrgOwner } from '#app/package-viewer-access.ts'
 import { CommunityActionError } from '#worker/community/errors.ts'
@@ -58,13 +57,5 @@ export async function adoptAccountPackageFork(input: {
 		}
 		throw error
 	}
-	return packageMutationResult(
-		await reloadAccountPackagesAfterWrite({
-			env: input.env,
-			request: input.request,
-			user: input.user,
-			packageId,
-			ownerUserId,
-		}),
-	)
+	return packageMutationResult({ ok: true, packageId })
 }

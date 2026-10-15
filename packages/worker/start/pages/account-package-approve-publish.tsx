@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { type PackageWrite } from '../package-mutation-cache.ts'
+import { approvePackagePublish } from '#start/server/package-mutations'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildHumanApprovalErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -86,7 +86,11 @@ export function AccountPackageApprovePublishRoute({
 	username: string
 	kodyId: string
 }) {
-	const mutation = usePackageMutation(payload.package.id)
+	const mutation = usePackageMutation(
+		payload.package.id,
+		approvePackagePublish,
+		'approve-publish',
+	)
 	const capture = useSubmitterScope()
 	const router = useRouter(),
 		currentHref = useMatchedPageScope().pageLocation.href
@@ -106,13 +110,16 @@ export function AccountPackageApprovePublishRoute({
 		if (!payload.pendingCommit || busyRef.current) return
 		await submit(
 			{
-				action: 'approve-publish',
+				packageId: payload.package.id,
 				commit: payload.pendingCommit,
 			},
 			payload.packageHref,
 		)
 	}
-	async function submit(body: PackageWrite, destination: string) {
+	async function submit(
+		body: Parameters<typeof approvePackagePublish>[0]['data'],
+		destination: string,
+	) {
 		if (busyRef.current) return
 		busyRef.current = true
 		setBusy(true)

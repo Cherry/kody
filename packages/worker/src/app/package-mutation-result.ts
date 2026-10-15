@@ -1,11 +1,6 @@
 import { type RepoSessionCheckStatus } from '../repo/types.ts'
-import {
-	type AccountPackagesLoaderData,
-	type AccountPackageListingBehindHint,
-} from '#universal/loader-data.ts'
-export type PackageMutationPayload = Partial<
-	Omit<AccountPackagesLoaderData, 'ok'>
-> & {
+import { type AccountPackageListingBehindHint } from '#universal/loader-data.ts'
+export type PackageMutationPayload = {
 	ok: boolean
 	error?: string
 	approvalUrl?: string

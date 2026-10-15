@@ -1,4 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import {
+	setPackageVisibility,
+	setPackageInternetVisible,
+} from '#start/server/package-mutations'
 import { buildPackageAppPath } from '@kody-internal/shared/public-urls.ts'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
@@ -48,7 +52,16 @@ export function AccountPackageOwnerDetails(props: {
 	viewerCanAdoptCommunityFork: boolean
 	onToggleLock: () => void
 }) {
-	const mutation = usePackageMutation(props.packageDetail.id)
+	const visibilityMutation = usePackageMutation(
+		props.packageDetail.id,
+		setPackageVisibility,
+		'set-visibility',
+	)
+	const internetMutation = usePackageMutation(
+		props.packageDetail.id,
+		setPackageInternetVisible,
+		'set-internet-visible',
+	)
 	const capture = useSubmitterScope()
 	const [confirmName, setConfirmName] = useState('')
 	const [visibilityState, setVisibilityState] = useState<
@@ -78,8 +91,8 @@ export function AccountPackageOwnerDetails(props: {
 
 		const isCurrent = capture()
 		try {
-			await mutation.submit({
-				action: 'set-visibility',
+			await visibilityMutation.submit({
+				packageId: props.packageDetail.id,
 				visibility,
 				confirmName: confirmName.trim(),
 			})
@@ -105,16 +118,14 @@ export function AccountPackageOwnerDetails(props: {
 	const [internetVisibleApprovalUrl, setInternetVisibleApprovalUrl] = useState<
 		string | null
 	>(null)
-	const internetVisibleState =
-		mutation.isPending &&
-		mutation.variables?.body.action === 'set-internet-visible'
-			? 'submitting'
-			: 'idle'
+	const internetVisibleState = internetMutation.isPending
+		? 'submitting'
+		: 'idle'
 	async function submitInternetVisible(
 		packageDetail: AccountPackageDetail,
 		internetVisible: boolean,
 	) {
-		if (mutation.isPending) return
+		if (visibilityMutation.isPending || internetMutation.isPending) return
 		setInternetVisibleApprovalUrl(null)
 		if (internetVisibleConfirmName.trim() !== packageDetail.kodyId) {
 			setInternetVisibleMessage(
@@ -127,8 +138,8 @@ export function AccountPackageOwnerDetails(props: {
 		const isCurrent = capture()
 		setInternetVisibleMessage(null)
 		try {
-			await mutation.submit({
-				action: 'set-internet-visible',
+			await internetMutation.submit({
+				packageId: props.packageDetail.id,
 				internetVisible,
 				confirmName: internetVisibleConfirmName.trim(),
 			})

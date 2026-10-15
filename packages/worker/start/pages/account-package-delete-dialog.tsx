@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { deletePackage } from '#start/server/package-mutations'
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { type CSSObject } from '@emotion/react'
@@ -51,7 +52,12 @@ export function AccountPackageDeleteDialog(props: {
 	const [status, setStatus] = useState<DeleteStatus>('idle')
 	const [error, setError] = useState<string | null>(null)
 	const dialogRef = useRef<HTMLDialogElement>(null)
-	const mutation = usePackageMutation(props.packageDetail.id)
+	const mutation = usePackageMutation(
+		props.packageDetail.id,
+		deletePackage,
+		'delete',
+		'deleted',
+	)
 	const capture = useSubmitterScope()
 	const router = useRouter()
 	const busyRef = useRef(false),
@@ -123,7 +129,7 @@ export function AccountPackageDeleteDialog(props: {
 		const isCurrent = capture()
 		try {
 			const payload = await mutation.submit({
-				action: 'delete',
+				packageId: props.packageDetail.id,
 				confirmName: confirmation.trim(),
 			})
 			if (!payload.deleted) throw new Error('Unable to delete this package.')

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { adoptPackageFork } from '#start/server/package-mutations'
 import { type CSSObject } from '@emotion/react'
 import { useState, type FormEvent } from 'react'
 import { usePackageMutation } from '../package-mutation.ts'
@@ -30,7 +31,11 @@ export function AccountPackageForkAdoption(props: {
 	packageDetail: AccountPackageDetail
 	communityFork: AccountPackageCommunityFork
 }) {
-	const mutation = usePackageMutation(props.packageDetail.id)
+	const mutation = usePackageMutation(
+		props.packageDetail.id,
+		adoptPackageFork,
+		'adopt-community-fork',
+	)
 	const capture = useSubmitterScope()
 	const [reviewNote, setReviewNote] = useState('')
 	const [submitting, setSubmitting] = useState(false)
@@ -45,7 +50,7 @@ export function AccountPackageForkAdoption(props: {
 		const isCurrent = capture()
 		try {
 			await mutation.submit({
-				action: 'adopt-community-fork',
+				packageId: props.packageDetail.id,
 				reviewNote: reviewNote.trim(),
 			})
 			if (!isCurrent()) return

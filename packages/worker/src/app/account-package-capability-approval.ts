@@ -8,7 +8,6 @@ import {
 	type readAuthenticatedAppUser,
 } from '#app/authenticated-user.ts'
 import { loadWritableAccountSavedPackage } from '#app/account-package-write-access.ts'
-import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import {
 	approveCredentialNeedsRequest,
 	approveWentPublicRequest,
@@ -355,16 +354,7 @@ async function changePackageCapabilityApproval(
 		return approved
 	}
 
-	const reloaded = async () =>
-		packageMutationResult(
-			await reloadAccountPackagesAfterWrite({
-				env: input.env,
-				request: input.request,
-				user: input.user,
-				packageId,
-				ownerUserId,
-			}),
-		)
+	const accepted = () => packageMutationResult({ ok: true, packageId })
 
 	if (
 		action === 'approve-credential-needs' ||
@@ -423,7 +413,7 @@ async function changePackageCapabilityApproval(
 				approved.status,
 			)
 		}
-		return await reloaded()
+		return accepted()
 	}
 
 	if (action === 'approve-capabilities') {
@@ -431,7 +421,7 @@ async function changePackageCapabilityApproval(
 			'fingerprint' in input ? input.fingerprint.trim() : '',
 		)
 		if (!capabilities.ok) return capabilities.response
-		return await reloaded()
+		return accepted()
 	}
 
 	const internetVisible =
@@ -460,7 +450,7 @@ async function changePackageCapabilityApproval(
 				404,
 			)
 		}
-		return await reloaded()
+		return accepted()
 	}
 
 	if (confirmName !== savedPackage.kodyId) {

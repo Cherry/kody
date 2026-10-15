@@ -1,4 +1,10 @@
 /** @jsxImportSource @emotion/react */
+import {
+	approvePackageCapabilities,
+	approvePackageCapabilitiesAndGoPublic,
+	approvePackageCredentialNeeds,
+	approvePackageWentPublic,
+} from '#start/server/package-mutations'
 import { PackageSecurityAuditField } from './package-security-audit-field.tsx'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState, type ReactNode } from 'react'
@@ -195,7 +201,26 @@ export function AccountPackageApproveCapabilitiesRoute({
 	username: string
 	kodyId: string
 }) {
-	const mutation = usePackageMutation(payload.package.id)
+	const capabilities = usePackageMutation(
+		payload.package.id,
+		approvePackageCapabilities,
+		'approve-capabilities',
+	)
+	const goPublic = usePackageMutation(
+		payload.package.id,
+		approvePackageCapabilitiesAndGoPublic,
+		'approve-capabilities-and-go-public',
+	)
+	const credentials = usePackageMutation(
+		payload.package.id,
+		approvePackageCredentialNeeds,
+		'approve-credential-needs',
+	)
+	const wentPublic = usePackageMutation(
+		payload.package.id,
+		approvePackageWentPublic,
+		'approve-went-public',
+	)
 	const capture = useSubmitterScope()
 	const router = useRouter()
 	const currentHref = useMatchedPageScope().pageLocation.href
@@ -204,7 +229,9 @@ export function AccountPackageApproveCapabilitiesRoute({
 	)
 	const [approvingCapabilities, setApprovingCapabilities] = useState(false)
 	const busy =
-		mutation.isPending || approvingRequestId !== null || approvingCapabilities
+		capabilities.pendingAction !== undefined ||
+		approvingRequestId !== null ||
+		approvingCapabilities
 	const goPublicRequestId = payload.goPublicRequestId ?? null
 	const allPendingApprovals = payload.pendingApprovals ?? []
 	const pendingApprovals = goPublicRequestId
@@ -232,10 +259,10 @@ export function AccountPackageApproveCapabilitiesRoute({
 		setApprovingRequestId(approval.id)
 		setMessage(null)
 		try {
-			await mutation.submit({
-				action: approval.approveAction,
-				requestId: approval.id,
-			})
+			const input = { packageId: payload.package.id, requestId: approval.id }
+			if (approval.approveAction === 'approve-credential-needs')
+				await credentials.submit(input)
+			else await wentPublic.submit(input)
 			if (isCurrent()) await router.invalidate({ sync: true })
 		} catch (error) {
 			if (isCurrent())
@@ -254,18 +281,13 @@ export function AccountPackageApproveCapabilitiesRoute({
 		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.submit(
-				goPublicRequestId
-					? {
-							action: 'approve-capabilities-and-go-public',
-							fingerprint: payload.fingerprint,
-							requestId: goPublicRequestId,
-						}
-					: {
-							action: 'approve-capabilities',
-							fingerprint: payload.fingerprint,
-						},
-			)
+			const input = {
+				packageId: payload.package.id,
+				fingerprint: payload.fingerprint,
+			}
+			if (goPublicRequestId)
+				await goPublic.submit({ ...input, requestId: goPublicRequestId })
+			else await capabilities.submit(input)
 			if (isCurrent()) {
 				if (payload.package.isInternetVisible || goPublicRequestId)
 					await router.navigate({ to: payload.settingsHref })

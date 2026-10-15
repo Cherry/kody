@@ -10,7 +10,6 @@ import {
 } from '#worker/community/service.ts'
 import { getCommunityListingByOwnerAndPackage } from '#worker/community/repo.ts'
 import { updateSavedPackage } from '#worker/package-registry/repo.ts'
-import { reloadAccountPackagesAfterWrite } from '#app/account-packages-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 
 type AuthenticatedUser = NonNullable<
@@ -122,13 +121,5 @@ export async function setAccountPackageVisibility(input: {
 		throw error
 	}
 
-	return packageMutationResult(
-		await reloadAccountPackagesAfterWrite({
-			env: input.env,
-			request: input.request,
-			user: input.user,
-			packageId,
-			ownerUserId,
-		}),
-	)
+	return packageMutationResult({ ok: true, packageId })
 }

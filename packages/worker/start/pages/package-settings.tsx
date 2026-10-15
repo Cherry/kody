@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { lockPackage, unlockPackage } from '#start/server/package-mutations'
 import { usePackageMutation } from '../package-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
@@ -25,7 +26,18 @@ export function PackageSettingsRoute({
 }) {
 	const ownerPackage = data.ownerPackage ?? null
 	const capture = useSubmitterScope()
-	const lock = usePackageMutation(ownerPackage?.id ?? '')
+	const lock = usePackageMutation(
+		ownerPackage?.id ?? '',
+		lockPackage,
+		'lock',
+		'package',
+	)
+	const unlock = usePackageMutation(
+		ownerPackage?.id ?? '',
+		unlockPackage,
+		'unlock',
+		'package',
+	)
 	const [message, setMessage] = useState<string | null>(null)
 	const username = data.username,
 		kodyId = data.kodyId
@@ -41,7 +53,9 @@ export function PackageSettingsRoute({
 		setMessage(null)
 		const isCurrent = capture()
 		try {
-			await lock.submit({ action: ownerPackage.lockedAt ? 'unlock' : 'lock' })
+			if (ownerPackage.lockedAt)
+				await unlock.submit({ packageId: ownerPackage.id })
+			else await lock.submit({ packageId: ownerPackage.id })
 		} catch (error) {
 			if (!isCurrent()) return
 			setMessage(
