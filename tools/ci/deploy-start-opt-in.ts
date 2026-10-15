@@ -149,13 +149,21 @@ const candidateSecretNames = [
 	'OIDC_SIGNING_KEY_ID',
 	'CLOUDFLARE_CUSTOM_HOSTNAMES_API_TOKEN',
 	'PACKAGE_APP_TICKET_KEYS',
-	// Existing production DR settings, copied only when present in live inventory.
+	'TURNSTILE_SITE_KEY',
+	'TURNSTILE_SECRET_KEY',
+] as const
+
+// These credentials belong only to legacy /__maintenance protocols and the
+// legacy scheduled exporter. Start website/server routes do not import DR;
+// the routing worker always sends maintenance requests to legacy, and the
+// candidate declares no scheduled triggers or queue consumers.
+const legacyProtocolOnlySecrets = new Set([
+	'DR_RESTORE_SECRET',
 	'DR_BACKUP_ACCESS_KEY_ID',
 	'DR_BACKUP_SECRET_ACCESS_KEY',
 	'DR_BACKUP_ACCOUNT_ID',
 	'DR_BACKUP_BUCKET_NAME',
-	'DR_RESTORE_SECRET',
-] as const
+])
 
 export function collectCandidateSecrets(
 	liveNames: Array<string>,
@@ -177,6 +185,7 @@ export function collectCandidateSecrets(
 	const unmapped = new Set<string>()
 	const unavailable = new Set<string>()
 	for (const name of liveNames) {
+		if (legacyProtocolOnlySecrets.has(name)) continue
 		if (!allowed.has(name)) {
 			unmapped.add(name)
 			continue

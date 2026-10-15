@@ -190,3 +190,16 @@ secret was configured manually in Cloudflare and has no trusted GitHub source,
 stop and provision its existing value through the approved secret source. Do not
 skip it, guess a replacement, rotate the legacy worker, or treat an unrelated
 secret as a fallback.
+
+The DR exclusion is an ownership boundary, not a missing-value fallback.
+`DR_RESTORE_SECRET`, `DR_BACKUP_ACCESS_KEY_ID`, `DR_BACKUP_SECRET_ACCESS_KEY`,
+`DR_BACKUP_ACCOUNT_ID` and `DR_BACKUP_BUCKET_NAME` serve the legacy maintenance
+handlers and scheduled exporter. `origin-handler.ts` mounts DR
+restore/export/PITR/mailbox import beneath `/__maintenance/`, and the routing
+worker always forwards that namespace to legacy. Start website routes and server
+functions do not import the DR modules, and the candidate has no scheduled
+triggers or queue consumers. Those five values are never supplied to the
+candidate, even if available in GitHub. The complete live inventory still
+participates in drift checks, and every other unknown or unavailable website
+secret blocks deployment. Turnstile's existing site/secret pair remains required
+whenever present in live inventory because native website auth forms use it.

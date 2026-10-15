@@ -206,7 +206,7 @@ test('preserves JSON variable array order during complete snapshot comparison', 
 	)
 })
 
-test('maps documented existing production DR secrets without supplying unrelated deploy credentials', () => {
+test('keeps audited legacy DR credentials out of the website candidate even when available', () => {
 	const names = [
 		'DR_BACKUP_ACCESS_KEY_ID',
 		'DR_BACKUP_SECRET_ACCESS_KEY',
@@ -224,14 +224,19 @@ test('maps documented existing production DR secrets without supplying unrelated
 		DR_RESTORE_SECRET: 'restore-secret',
 		DR_DEPLOY_TOKEN: 'must-not-copy-provisioner',
 	}
-	const result = collectCandidateSecrets(names, environment)
-	for (const name of names)
-		expect(result[name]).toBe(environment[name as keyof typeof environment])
-	expect(result.DR_DEPLOY_TOKEN).toBeUndefined()
-	expect(collectCandidateSecrets([], environment)).toEqual({
+	expect(collectCandidateSecrets(names, environment)).toEqual({
 		COOKIE_SECRET: 'cookie',
 		SECRET_STORE_KEY: 'store',
 	})
+	expect(
+		collectCandidateSecrets(names, {
+			COOKIE_SECRET: 'cookie',
+			SECRET_STORE_KEY: 'store',
+		}),
+	).toEqual({ COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' })
+	expect(() =>
+		collectCandidateSecrets([...names, 'DR_DEPLOY_TOKEN'], environment),
+	).toThrow('Missing reviewed secret mappings: DR_DEPLOY_TOKEN')
 })
 
 test('reports every unmapped and unavailable name together without exposing any values', () => {
@@ -273,13 +278,37 @@ test('reports every unmapped and unavailable name together without exposing any 
 	)
 })
 
-test('missing DR values remain a provisioning failure instead of silently skipping live secrets', () => {
+test('protocol-only exclusion cannot remove mandatory website session or encryption secrets', () => {
+	expect(() => collectCandidateSecrets(['DR_RESTORE_SECRET'], {})).toThrow(
+		'Trusted production secrets unavailable: COOKIE_SECRET, SECRET_STORE_KEY',
+	)
 	expect(() =>
 		collectCandidateSecrets(
-			['DR_BACKUP_ACCESS_KEY_ID', 'DR_BACKUP_SECRET_ACCESS_KEY'],
+			['DR_BACKUP_SECRET_ACCESS_KEY', 'STRIPE_SECRET_KEY'],
 			{ COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' },
 		),
+	).toThrow('Trusted production secrets unavailable: STRIPE_SECRET_KEY')
+})
+
+test('preserves the existing Turnstile key pair required by native website auth forms', () => {
+	const environment = {
+		COOKIE_SECRET: 'cookie',
+		SECRET_STORE_KEY: 'store',
+		TURNSTILE_SITE_KEY: 'production-site-key',
+		TURNSTILE_SECRET_KEY: 'production-secret-key',
+	}
+	expect(
+		collectCandidateSecrets(
+			['TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY'],
+			environment,
+		),
+	).toEqual(environment)
+	expect(() =>
+		collectCandidateSecrets(['TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY'], {
+			COOKIE_SECRET: 'cookie',
+			SECRET_STORE_KEY: 'store',
+		}),
 	).toThrow(
-		'Trusted production secrets unavailable: DR_BACKUP_ACCESS_KEY_ID, DR_BACKUP_SECRET_ACCESS_KEY',
+		'Trusted production secrets unavailable: TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY',
 	)
 })
