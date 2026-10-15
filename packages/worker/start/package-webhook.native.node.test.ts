@@ -348,9 +348,19 @@ test('webhook mutation waits for authoritative scoped read without caching its o
 	client.clear()
 })
 
-test.each(['success', 'lost response'])(
-	'uncached webhook navigation confirms after its older read: %s',
-	async (outcome) => {
+test.each(
+	(['success', 'lost response'] as const).flatMap((outcome) =>
+		[true, false].flatMap((active) =>
+			[true, false].map((readFinishesFirst) => ({
+				outcome,
+				active,
+				readFinishesFirst,
+			})),
+		),
+	),
+)(
+	'uncached webhook navigation confirms after its older read: $outcome active=$active read-first=$readFinishesFirst',
+	async ({ outcome, active, readFinishesFirst }) => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false } },
 		})
@@ -385,6 +395,8 @@ test.each(['success', 'lost response'])(
 			...packageWebhookMutationOptions(client),
 			mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
 		})
+		const navigation = ensurePageQuery(client, query, false)
+		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
 		const write = mutation
 			.execute({
 				username: 'jane',
@@ -397,14 +409,17 @@ test.each(['success', 'lost response'])(
 			})
 			.catch(() => undefined)
 		await vi.waitFor(() => expect(finishWrite).toBeTypeOf('function'))
-		const navigation = ensurePageQuery(client, query, false)
 		const observer = new QueryObserver(client, query)
-		const stop = observer.subscribe(() => {})
+		const stop = active ? observer.subscribe(() => {}) : () => {}
 		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+		if (readFinishesFirst) {
+			finishRead(before)
+			await navigation
+		}
 		if (outcome === 'success') finishWrite()
 		else failWrite(new Error('Lost response'))
 		await Promise.resolve()
-		finishRead(before)
+		if (!readFinishesFirst) finishRead(before)
 		await expect(navigation).resolves.toEqual(before)
 		await write
 		expect(read).toHaveBeenCalledTimes(2)

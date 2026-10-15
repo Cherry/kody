@@ -326,9 +326,19 @@ it('keeps search editing whitespace in the URL while normalizing only resource i
 	expect(emailResourceInput('/@acme/-/email?q=%20').list.query).toBe('')
 })
 
-it.each(['accepted', 'lost-response'] as const)(
-	'preserves uncached navigation and confirms after the older read for %s',
-	async (outcome) => {
+it.each(
+	(['accepted', 'lost-response'] as const).flatMap((outcome) =>
+		[true, false].flatMap((active) =>
+			[true, false].map((readFinishesFirst) => ({
+				outcome,
+				active,
+				readFinishesFirst,
+			})),
+		),
+	),
+)(
+	'preserves uncached navigation and confirms after the older read for $outcome active=$active read-first=$readFinishesFirst',
+	async ({ outcome, active, readFinishesFirst }) => {
 		const client = new QueryClient({
 			defaultOptions: { queries: { retry: false } },
 		})
@@ -366,12 +376,16 @@ it.each(['accepted', 'lost-response'] as const)(
 		const options = { queryKey: key, queryFn: read, staleTime: Infinity }
 		const navigation = client.ensureQueryData(options)
 		const observer = new QueryObserver(client, options)
-		const stop = observer.subscribe(() => {})
+		const stop = active ? observer.subscribe(() => {}) : () => {}
 		await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+		if (readFinishesFirst) {
+			finishRead(message)
+			await navigation
+		}
 		if (outcome === 'accepted') finishWrite()
 		else failWrite(new Error('Lost response'))
 		await Promise.resolve()
-		finishRead(message)
+		if (!readFinishesFirst) finishRead(message)
 		await expect(navigation).resolves.toEqual(message)
 		await write
 		expect(read).toHaveBeenCalledTimes(2)

@@ -41,21 +41,13 @@ export function workflowCancellationMutationOptions<
 						query.state.fetchStatus === 'fetching',
 				)
 			await Promise.allSettled(unfinished.map((query) => query.promise))
+			// Confirm inactive reads too: navigation may have completed while the
+			// write was pending, before this settlement callback captured queries.
 			// A lost response may still mean the server cancelled the run. Always
 			// reconcile the submitted actor and org, even after leaving the page.
-			await invalidatePageResources(
-				client,
-				input.actorKey,
-				resources,
-				'active',
-				{ orgSlug: input.orgSlug },
-			)
-			await client.refetchQueries(
-				{
-					predicate: (query) => unfinished.includes(query) && !query.isActive(),
-				},
-				{ cancelRefetch: false },
-			)
+			await invalidatePageResources(client, input.actorKey, resources, 'all', {
+				orgSlug: input.orgSlug,
+			})
 		},
 	}
 }

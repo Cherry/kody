@@ -149,6 +149,7 @@ export function emailMutationOptions<TAction extends EmailAction = EmailAction>(
 			await finishUncachedEmailReads(client, actorKey, action.orgSlug)
 			await client.invalidateQueries({
 				queryKey: emailKeys.all(actorKey, action.orgSlug),
+				refetchType: 'all',
 			})
 		},
 	}

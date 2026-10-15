@@ -63,16 +63,14 @@ export function followMutationOptions<
 						query.state.fetchStatus === 'fetching',
 				)
 			await Promise.allSettled(unfinished.map((query) => query.promise))
+			// Confirm inactive reads too: navigation may have completed while the
+			// write was pending, before this settlement callback captured queries.
 			await Promise.all([
-				...keys.map((queryKey) => client.invalidateQueries({ queryKey })),
+				...keys.map((queryKey) =>
+					client.invalidateQueries({ queryKey, refetchType: 'all' }),
+				),
 				invalidatePageResources(client, scope.actor, ['loadPackage']),
 			])
-			await client.refetchQueries(
-				{
-					predicate: (query) => unfinished.includes(query) && !query.isActive(),
-				},
-				{ cancelRefetch: false },
-			)
 		},
 	}
 }

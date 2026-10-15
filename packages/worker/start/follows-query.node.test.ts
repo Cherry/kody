@@ -90,3 +90,48 @@ test('uncached navigation keeps its first promise then gets a confirming read af
 	expect(client.getQueryData(key)).toBe('new')
 	client.clear()
 })
+
+test.each([false, true])(
+	'confirms an inactive navigation that completed before write settlement, lost=%s',
+	async (lost) => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		})
+		let finish!: () => void
+		const mutation = new MutationObserver(
+			client,
+			followMutationOptions(
+				client,
+				'alice',
+				async (_input: { orgSlug: string }) => {
+					await new Promise<void>((resolve) => {
+						finish = resolve
+					})
+					if (lost) throw new Error('Lost response')
+					return { ok: true }
+				},
+			),
+		)
+		const write = mutation.mutate({ orgSlug: 'team' }).catch(() => undefined)
+		await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+		const key = followsKeys.org('alice', 'team')
+		const read = vi.fn().mockResolvedValueOnce('old').mockResolvedValue('new')
+		await expect(
+			client.fetchQuery({ queryKey: key, queryFn: read }),
+		).resolves.toBe('old')
+		expect(mutation.getCurrentResult().isPending).toBe(true)
+		const otherOrg = followsKeys.org('alice', 'other')
+		const otherActor = followsKeys.org('bob', 'team')
+		const unrelatedRead = vi.fn().mockResolvedValue('unchanged')
+		await client.fetchQuery({ queryKey: otherOrg, queryFn: unrelatedRead })
+		await client.fetchQuery({ queryKey: otherActor, queryFn: unrelatedRead })
+		finish()
+		await write
+		expect(read).toHaveBeenCalledTimes(2)
+		expect(client.getQueryData(key)).toBe('new')
+		expect(unrelatedRead).toHaveBeenCalledTimes(2)
+		expect(client.getQueryState(otherOrg)?.isInvalidated).toBe(false)
+		expect(client.getQueryState(otherActor)?.isInvalidated).toBe(false)
+		client.clear()
+	},
+)

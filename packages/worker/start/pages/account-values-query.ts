@@ -42,18 +42,14 @@ export function valuesMutationOptions<TResult>(
 			// A navigation owns this first-read promise. Let it finish, then confirm
 			// the write with a new read, even if that navigation has not mounted yet.
 			await Promise.allSettled(unfinished.map((query) => query.promise))
+			// Confirm inactive reads too: navigation may have completed while the
+			// write was pending, before this settlement callback captured queries.
 			await invalidatePageResources(
 				client,
 				submitted.actorKey,
 				['loadValuesPage', 'loadUsagePage'],
-				'active',
+				'all',
 				scope,
-			)
-			await client.refetchQueries(
-				{
-					predicate: (query) => unfinished.includes(query) && !query.isActive(),
-				},
-				{ cancelRefetch: false },
 			)
 		},
 	}

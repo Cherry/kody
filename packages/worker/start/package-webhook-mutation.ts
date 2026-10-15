@@ -47,7 +47,11 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			return payload
 		},
 		onMutate: async ({ queryKey }) => {
-			await queryClient.cancelQueries({ queryKey, exact: true })
+			await queryClient.cancelQueries({
+				queryKey,
+				exact: true,
+				predicate: (query) => query.state.data !== undefined,
+			})
 		},
 		onSettled: async (_accepted, _error, input) => {
 			// A navigation can start its first read while this write is pending.
@@ -74,6 +78,7 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			await Promise.all([
 				queryClient.invalidateQueries({
 					queryKey: input.queryKey,
+					refetchType: 'all',
 					exact: true,
 				}),
 				input.invalidate(),

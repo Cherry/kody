@@ -10,7 +10,7 @@ export async function invalidatePageResources(
 	client: QueryClient,
 	actorKey: string | null,
 	resources: PageMutationDependencies,
-	refetchType: 'active' | 'none' = 'active',
+	refetchType: 'active' | 'all' | 'none' = 'active',
 	scope?: PageOrgScope,
 ) {
 	const filters = {
