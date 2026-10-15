@@ -312,3 +312,47 @@ test('preserves the existing Turnstile key pair required by native website auth 
 		'Trusted production secrets unavailable: TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY',
 	)
 })
+
+test('Vite owns the exact bundling controls transformed in the retained rollout artifact', () => {
+	const source = {
+		vars: { APP_BASE_URL: 'https://kody.codes' },
+		compatibility_date: '2026-04-16',
+		compatibility_flags: ['nodejs_compat'],
+		minify: true,
+		find_additional_modules: true,
+		rules: [{ type: 'Text', globs: ['./docs/*.md'] }],
+		d1_databases: [{ binding: 'APP_DB', database_id: 'existing-db' }],
+		services: [
+			{ binding: 'JOBS', service: 'kody-jobs', entrypoint: 'JobsService' },
+		],
+		limits: { cpu_ms: 30000 },
+		observability: { enabled: true },
+	}
+	const built: Record<string, unknown> = structuredClone(source)
+	delete built.minify
+	delete built.find_additional_modules
+	built.no_bundle = true
+	built.rules = [{ type: 'ESModule', globs: ['**/*.js', '**/*.mjs'] }]
+	expect(() => assertSharedBindings(built, source)).not.toThrow()
+	expect(() =>
+		assertSharedBindings({ ...built, limits: { cpu_ms: 1000 } }, source),
+	).toThrow('Shared limits')
+	expect(() =>
+		assertSharedBindings(
+			{ ...built, observability: { enabled: false } },
+			source,
+		),
+	).toThrow('Shared observability')
+	expect(() =>
+		assertSharedBindings({ ...built, compatibility_flags: [] }, source),
+	).toThrow('Shared compatibility_flags')
+	expect(() =>
+		assertSharedBindings(
+			{
+				...built,
+				d1_databases: [{ binding: 'APP_DB', database_id: 'different-db' }],
+			},
+			source,
+		),
+	).toThrow('Shared d1_databases')
+})

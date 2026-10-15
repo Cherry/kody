@@ -90,6 +90,12 @@ export function assertSharedBindings(candidate: Config, production: Config) {
 		'unsafe',
 		'workers_dev',
 		'preview_urls',
+		// Vite owns compilation. The installed Cloudflare plugin removes
+		// minify/find_additional_modules and emits its own rules/no_bundle.
+		'minify',
+		'find_additional_modules',
+		'rules',
+		'no_bundle',
 	])
 	for (const [key, expectedValue] of Object.entries(production)) {
 		if (transformed.has(key)) continue
