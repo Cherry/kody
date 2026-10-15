@@ -290,9 +290,8 @@ async function changeCollaborator(
 			return operationResult({ ok: false as const, error: error.message }, 400)
 		throw error
 	}
-	const view = await buildCollaboratorsView(loaded.scope)
 	const result: PackageCollaboratorsWriteResult = invite
-		? { ...view, invite }
-		: view
+		? { ok: true, invite }
+		: { ok: true }
 	return operationResult(result)
 }

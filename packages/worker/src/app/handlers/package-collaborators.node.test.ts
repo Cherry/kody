@@ -8,8 +8,10 @@ import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { personIdFromStored } from '@kody-internal/shared/owner-person-ids.ts'
 import { beforeEach, expect, test, vi } from 'vitest'
+import type * as PackageCollaboratorsRepo from '#worker/orgs/package-collaborators.ts'
 import {
 	type PackageCollaboratorsChange,
+	type PackageCollaboratorsView,
 	type PackageCollaboratorsWriteResult,
 } from '#universal/package-collaborators.ts'
 import {
@@ -22,7 +24,30 @@ import {
 
 const mocks = vi.hoisted(() => ({
 	resolveSavedPackage: vi.fn(),
+	failListReads: false,
+	listReads: 0,
 }))
+
+vi.mock('#worker/orgs/package-collaborators.ts', async (importOriginal) => {
+	const actual = await importOriginal<typeof PackageCollaboratorsRepo>()
+	return {
+		...actual,
+		listPackageCollaborators: (
+			...args: Parameters<typeof actual.listPackageCollaborators>
+		) => {
+			mocks.listReads++
+			if (mocks.failListReads) throw new Error('Collaborators list unavailable')
+			return actual.listPackageCollaborators(...args)
+		},
+		listPendingPackageInvites: (
+			...args: Parameters<typeof actual.listPendingPackageInvites>
+		) => {
+			mocks.listReads++
+			if (mocks.failListReads) throw new Error('Invites list unavailable')
+			return actual.listPendingPackageInvites(...args)
+		},
+	}
+})
 
 vi.mock('#worker/package-invocations/module-artifacts.ts', () => ({
 	resolveSavedPackage: (...args: Array<unknown>) =>
@@ -41,6 +66,8 @@ let seed: PackageCollaboratorsSeed
 
 beforeEach(async () => {
 	seed = await seedPackageCollaborators()
+	mocks.failListReads = false
+	mocks.listReads = 0
 	mocks.resolveSavedPackage.mockReset()
 	mocks.resolveSavedPackage.mockImplementation(
 		async (input: { userId: string; packageIdOrKodyId: string }) =>
@@ -132,13 +159,32 @@ async function call(
 		status: result.status,
 		body: result.data as
 			| PackageCollaboratorsWriteResult
+			| PackageCollaboratorsView
 			| { ok: false; error: string },
 	}
 }
 
 function view(result: Awaited<ReturnType<typeof call>>) {
 	if (!result.body.ok) throw new Error(result.body.error)
+	if (!('package' in result.body))
+		throw new Error('Expected a separate collaborators read.')
 	return result.body
+}
+
+function acknowledgement(
+	result: Awaited<ReturnType<typeof call>>,
+): PackageCollaboratorsWriteResult {
+	if (!result.body.ok) throw new Error(result.body.error)
+	return result.body
+}
+
+async function changeAndRead(
+	person: CollaboratorPerson,
+	change: PackageCollaboratorsChange,
+	target = { username: 'zeta-co', kodyId: 'demo-package' },
+) {
+	expect((await call(person, change, target)).body).toEqual({ ok: true })
+	return view(await call(person, undefined, target))
 }
 
 async function auditActions() {
@@ -159,14 +205,12 @@ test('an owner sees the teams and members they can add', async () => {
 })
 
 test('adding a team and a member, changing a preset, and removing are audited', async () => {
-	const teamAdded = view(
-		await call('ada', {
-			intent: 'grant',
-			subjectType: 'team',
-			subjectId: 'team-design',
-			preset: 'contribute',
-		}),
-	)
+	const teamAdded = await changeAndRead('ada', {
+		intent: 'grant',
+		subjectType: 'team',
+		subjectId: 'team-design',
+		preset: 'contribute',
+	})
 	expect(teamAdded.collaborators).toEqual([
 		expect.objectContaining({
 			kind: 'team',
@@ -176,22 +220,18 @@ test('adding a team and a member, changing a preset, and removing are audited', 
 	])
 	expect(teamAdded.options.teams).toEqual([])
 
-	view(
-		await call('ada', {
-			intent: 'grant',
-			subjectType: 'user',
-			subjectId: collaboratorPeople.bob.personId,
-			preset: 'use',
-		}),
-	)
-	const changed = view(
-		await call('ada', {
-			intent: 'grant',
-			subjectType: 'user',
-			subjectId: collaboratorPeople.bob.personId,
-			preset: 'manage',
-		}),
-	)
+	await changeAndRead('ada', {
+		intent: 'grant',
+		subjectType: 'user',
+		subjectId: collaboratorPeople.bob.personId,
+		preset: 'use',
+	})
+	const changed = await changeAndRead('ada', {
+		intent: 'grant',
+		subjectType: 'user',
+		subjectId: collaboratorPeople.bob.personId,
+		preset: 'manage',
+	})
 	const bob = changed.collaborators.find(
 		(collaborator) => collaborator.username === 'bob',
 	)
@@ -203,9 +243,10 @@ test('adding a team and a member, changing a preset, and removing are audited', 
 	})
 	expect(changed.collaborators).toHaveLength(2)
 
-	const removed = view(
-		await call('ada', { intent: 'revoke', grantId: bob!.grantId }),
-	)
+	const removed = await changeAndRead('ada', {
+		intent: 'revoke',
+		grantId: bob!.grantId,
+	})
 	expect(removed.collaborators.map((row) => row.kind)).toEqual(['team'])
 
 	expect(await auditActions()).toEqual([
@@ -249,9 +290,10 @@ test('an outside collaborator is listed and can be removed but not changed', asy
 		preset: 'contribute',
 	})
 	expect(refused.status).toBe(400)
-	const removed = view(
-		await call('ada', { intent: 'revoke', grantId: 'grant-dan' }),
-	)
+	const removed = await changeAndRead('ada', {
+		intent: 'revoke',
+		grantId: 'grant-dan',
+	})
 	expect(removed.collaborators).toEqual([])
 	expect(await auditActions()).toEqual(['grant.revoked'])
 })
@@ -376,7 +418,7 @@ test('a personal org owner invites by username, sees it pending, and revokes it'
 	expect(loaded.collaborators).toEqual([])
 	expect(loaded.invites).toEqual([])
 
-	const invited = view(
+	const invited = acknowledgement(
 		await callPersonal({
 			intent: 'invite',
 			invitee: '@dan',
@@ -388,19 +430,20 @@ test('a personal org owner invites by username, sees it pending, and revokes it'
 		preset: 'contribute',
 		prompt: expect.stringMatching(/Call inviteAccept with this token: \w+/),
 	})
-	expect(invited.invites).toEqual([
+	const pending = view(await callPersonal()).invites
+	expect(pending).toEqual([
 		expect.objectContaining({
 			inviteeUsername: 'dan',
 			inviteeEmail: null,
 			preset: 'contribute',
 		}),
 	])
-	expect(invited.invite?.id).toBe(invited.invites[0]!.id)
+	expect(invited.invite?.id).toBe(pending[0]!.id)
 	const stored = await seed.db
 		.prepare(
 			`SELECT kind, resource_type, resource_id, preset FROM invites WHERE id = ?`,
 		)
-		.bind(invited.invites[0]!.id)
+		.bind(pending[0]!.id)
 		.first()
 	expect(stored).toEqual({
 		kind: 'grant',
@@ -410,21 +453,22 @@ test('a personal org owner invites by username, sees it pending, and revokes it'
 	})
 
 	const reloaded = view(await callPersonal())
-	expect(reloaded.invite).toBeUndefined()
+	expect(reloaded).not.toHaveProperty('invite')
 	expect(reloaded.invites).toHaveLength(1)
 
-	const revoked = view(
+	const revoked = acknowledgement(
 		await callPersonal({
 			intent: 'revoke-invite',
-			inviteId: invited.invites[0]!.id,
+			inviteId: pending[0]!.id,
 		}),
 	)
-	expect(revoked.invites).toEqual([])
+	expect(revoked).toEqual({ ok: true })
+	expect(view(await callPersonal()).invites).toEqual([])
 	expect(await auditActions()).toEqual(['invite.created', 'invite.revoked'])
 
 	const again = await callPersonal({
 		intent: 'revoke-invite',
-		inviteId: invited.invites[0]!.id,
+		inviteId: pending[0]!.id,
 	})
 	expect(again.status).toBe(404)
 	expect(again.body).toMatchObject({ error: /no longer pending/ })
@@ -432,7 +476,7 @@ test('a personal org owner invites by username, sees it pending, and revokes it'
 
 test('a personal invite takes an email, and refuses a malformed username', async () => {
 	await addPersonalPackage()
-	const invited = view(
+	const invited = acknowledgement(
 		await callPersonal({
 			intent: 'invite',
 			invitee: 'Jesse@Example.com',
@@ -440,7 +484,8 @@ test('a personal invite takes an email, and refuses a malformed username', async
 		}),
 	)
 	expect(invited.invite?.inviteeLabel).toBe('jesse@example.com')
-	expect(invited.invites).toEqual([
+	const pending = view(await callPersonal()).invites
+	expect(pending).toEqual([
 		expect.objectContaining({
 			inviteeEmail: 'jesse@example.com',
 			inviteeUsername: null,
@@ -513,9 +558,212 @@ test('a personal org outside collaborator is listed and can be removed', async (
 			preset: 'use',
 		}),
 	])
-	const removed = view(
-		await callPersonal({ intent: 'revoke', grantId: 'grant-dan-personal' }),
+	const removed = await changeAndRead(
+		'ada',
+		{ intent: 'revoke', grantId: 'grant-dan-personal' },
+		personalPackage,
 	)
 	expect(removed.collaborators).toEqual([])
 	expect(await auditActions()).toEqual(['grant.revoked'])
+})
+
+test('a committed invite returns its one-time handoff even when confirming lists are unavailable', async () => {
+	await addPersonalPackage()
+	mocks.failListReads = true
+	const created = acknowledgement(
+		await callPersonal({ intent: 'invite', invitee: '@dan', preset: 'use' }),
+	)
+	expect(created).toEqual({
+		ok: true,
+		invite: expect.objectContaining({
+			id: expect.any(String),
+			prompt: expect.stringMatching(/Call inviteAccept with this token: \w+/),
+		}),
+	})
+	expect(mocks.listReads).toBe(0)
+	const id = created.invite!.id
+	const stored = await seed.db
+		.prepare('SELECT status FROM invites WHERE id = ?')
+		.bind(id)
+		.first()
+	expect(stored).toEqual({ status: 'pending' })
+	await expect(callPersonal()).rejects.toThrow('list unavailable')
+	expect(mocks.listReads).toBeGreaterThan(0)
+	mocks.listReads = 0
+	expect(
+		acknowledgement(
+			await callPersonal({ intent: 'revoke-invite', inviteId: id }),
+		),
+	).toEqual({ ok: true })
+	expect(mocks.listReads).toBe(0)
+	expect(await auditActions()).toEqual(['invite.created', 'invite.revoked'])
+})
+
+test('collaborator grant and revoke acknowledgements do not depend on a confirming list', async () => {
+	mocks.failListReads = true
+	expect(
+		acknowledgement(
+			await call('ada', {
+				intent: 'grant',
+				subjectType: 'user',
+				subjectId: collaboratorPeople.bob.personId,
+				preset: 'use',
+			}),
+		),
+	).toEqual({ ok: true })
+	const grant = await seed.db
+		.prepare('SELECT id FROM grants WHERE resource_id = ? AND subject_id = ?')
+		.bind('pkg-1', collaboratorPeople.bob.personId)
+		.first<{ id: string }>()
+	expect(grant).not.toBeNull()
+	expect(
+		acknowledgement(
+			await call('ada', { intent: 'revoke', grantId: grant!.id }),
+		),
+	).toEqual({ ok: true })
+	expect(mocks.listReads).toBe(0)
+	expect(await auditActions()).toEqual(['grant.created', 'grant.revoked'])
+})
+
+test('a personal package contributor and stranger cannot create or revoke addressed invites', async () => {
+	const orgId = await addPersonalPackage()
+	insertCollaboratorGrant(
+		{ ...seed, orgId },
+		{
+			id: 'personal-contributor',
+			packageId: 'pkg-ada',
+			subjectType: 'user',
+			subjectId: collaboratorPeople.bob.personId,
+			preset: 'contribute',
+		},
+	)
+	const created = acknowledgement(
+		await callPersonal({ intent: 'invite', invitee: '@dan', preset: 'use' }),
+	)
+	for (const [person, status] of [
+		['bob', 403],
+		['erin', 404],
+	] as const) {
+		const create = await call(
+			person,
+			{ intent: 'invite', invitee: '@dan', preset: 'manage' },
+			personalPackage,
+		)
+		expect(create.status).toBe(status)
+		const revoke = await call(
+			person,
+			{ intent: 'revoke-invite', inviteId: created.invite!.id },
+			personalPackage,
+		)
+		expect(revoke.status).toBe(status)
+	}
+	expect(
+		await seed.db.prepare('SELECT COUNT(*) AS count FROM invites').first(),
+	).toEqual({ count: 1 })
+	expect(
+		await seed.db
+			.prepare('SELECT status FROM invites WHERE id = ?')
+			.bind(created.invite!.id)
+			.first(),
+	).toEqual({ status: 'pending' })
+	expect(await auditActions()).toEqual(['invite.created'])
+})
+
+test('pending package invites exclude expired, accepted, revoked, foreign and non-package records', async () => {
+	const orgId = await addPersonalPackage()
+	for (const row of [
+		{
+			id: 'live',
+			orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'pending',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'expired',
+			orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'pending',
+			expires: '2000-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'accepted',
+			orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'accepted',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'revoked',
+			orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'revoked',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'foreign-org',
+			orgId: seed.orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'pending',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'other-package',
+			orgId,
+			kind: 'grant',
+			type: 'package',
+			resource: 'pkg-elsewhere',
+			status: 'pending',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'non-package',
+			orgId,
+			kind: 'grant',
+			type: 'credential',
+			resource: 'pkg-ada',
+			status: 'pending',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+		{
+			id: 'membership',
+			orgId,
+			kind: 'membership',
+			type: 'package',
+			resource: 'pkg-ada',
+			status: 'pending',
+			expires: '2999-01-01T00:00:00.000Z',
+		},
+	]) {
+		seed.sqlite
+			.prepare(
+				`INSERT INTO invites (id,org_id,kind,resource_type,resource_id,preset,invitee_username,token_hash,status,invited_by_user_id,expires_at,created_at) VALUES (?,?,?,?,?,'use','dan',?,?,?,?,'2026-01-01T00:00:00.000Z')`,
+			)
+			.run(
+				row.id,
+				row.orgId,
+				row.kind,
+				row.type,
+				row.resource,
+				`secret-hash-${row.id}`,
+				row.status,
+				collaboratorPeople.ada.personId,
+				row.expires,
+			)
+	}
+	const pending = view(await callPersonal()).invites
+	expect(pending.map((invite) => invite.id)).toEqual(['live'])
+	expect(pending[0]).not.toHaveProperty('token_hash')
+	expect(pending[0]).not.toHaveProperty('prompt')
+	expect(JSON.stringify(pending)).not.toContain('secret-hash')
 })

@@ -114,9 +114,11 @@ beforeEach(() => {
 	state.read.mockReset().mockResolvedValue({ status: 200, data: view })
 	state.createInvite.mockReset().mockResolvedValue({
 		status: 200,
-		data: { ...view, invite: { id: 'invite-1', prompt: 'one-time-token' } },
+		data: { ok: true, invite: { id: 'invite-1', prompt: 'one-time-token' } },
 	})
-	state.revokeInvite.mockReset().mockResolvedValue({ status: 200, data: view })
+	state.revokeInvite
+		.mockReset()
+		.mockResolvedValue({ status: 200, data: { ok: true } })
 	state.mutation.mockReset()
 })
 test('loads package chrome and the collaborators view through shared operations', async () => {
@@ -180,6 +182,7 @@ test('package page access blocks collaborator reads before loading grants', asyn
 })
 
 test('addressed invite mutations use the authenticated shared write context and return one-time handoff only from creation', async () => {
+	state.read.mockRejectedValue(new Error('Confirming read unavailable'))
 	const created = await createPackageCollaboratorInvite({
 		data: { ...input.data, invitee: ' @outside ', preset: 'contribute' },
 	})
@@ -208,6 +211,9 @@ test('addressed invite mutations use the authenticated shared write context and 
 		}),
 	)
 	expect(revoked).not.toHaveProperty('invite')
+	expect(revoked).toEqual({ ok: true })
+	expect(created).not.toHaveProperty('collaborators')
+	expect(state.read).not.toHaveBeenCalled()
 })
 
 test('invite mutation validation and shared authorization failures do not produce successful handoffs', async () => {
