@@ -16,6 +16,13 @@ main layout and typography, but production was authenticated and preview was
 anonymous. Feature-flag copy and account-dependent controls differ, so this is
 bounded visual evidence, not matched-state parity.
 
+At the same preview revision, the settled `/docs` first viewport was visually
+compared with production at 390 by 844. Header, docs disclosure, title, article
+wrapping and background aligned; preview had no horizontal overflow. The mobile
+main menu opened, its Pricing link reached `/pricing`, and the menu closed on
+arrival. This checks one public viewport and one navigation, not all mobile
+screens or authenticated state parity.
+
 The local authentication correction uses native Start redirect handling for
 imperative calls and stops follow-up work when navigation consumes the result.
 Query mutations retain native Query/Router error handling so redirects cannot be
