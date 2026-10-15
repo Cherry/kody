@@ -517,7 +517,7 @@ test('pending invites list as Pending and an owner can revoke them', async () =>
 		request: asOwner,
 	} as never)
 	expect(revoked.status).toBe(200)
-	expect(revoked.data).toMatchObject({ ok: true, invites: [] })
+	expect(revoked.data).toEqual({ ok: true })
 	expect(
 		sqlite.prepare(`SELECT status FROM invites WHERE id = ?`).get(inviteId),
 	).toEqual({ status: 'revoked' })
