@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { renderIcon } from '../components/icon.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
+import { useInviteHandoff } from '../use-invite-handoff.ts'
 import {
 	AccountManagementPanel,
 	accountActionsCss,
@@ -55,11 +56,12 @@ export function OrgMembersInviteLinks({
 	const [role, setRole] = useState<'member' | 'billing'>('member'),
 		[domains, setDomains] = useState(''),
 		[maxUses, setMaxUses] = useState(''),
-		[days, setDays] = useState('7'),
-		[copiedLink, setCopiedLink] = useState<{
-			url: string
-			revision: number
-		} | null>(null)
+		[days, setDays] = useState('7')
+	const [copiedLink, setCopiedLink] = useInviteHandoff<{
+		id: string
+		url: string
+		revision: number
+	}>(links)
 	const copiedLinkUrl =
 		copiedLink?.revision === clearRevision ? copiedLink.url : null
 	const createMutation = useOrgPeopleMutation(
@@ -75,7 +77,6 @@ export function OrgMembersInviteLinks({
 	const pending = creating || revokeMutation.isPending
 	async function createLink() {
 		const active = capture()
-		setCopiedLink(null)
 		onMessage('', 'info')
 		try {
 			const result = await createMutation.mutateAsync({
@@ -89,7 +90,7 @@ export function OrgMembersInviteLinks({
 			const url = result.inviteLink.url
 			const copied = await copyText(url)
 			if (!active()) return
-			setCopiedLink({ url, revision: clearRevision })
+			setCopiedLink({ id: result.inviteLink.id, url, revision: clearRevision })
 			onMessage(
 				copied
 					? 'Invite link copied to clipboard.'
@@ -108,11 +109,13 @@ export function OrgMembersInviteLinks({
 	}
 	async function revokeLink(linkId: string) {
 		const active = capture()
-		setCopiedLink(null)
 		onMessage('', 'info')
 		try {
 			await revokeMutation.mutateAsync({ orgSlug: slug, linkId })
-			if (active()) onMessage('Invite link revoked.', 'info')
+			if (active()) {
+				setCopiedLink((current) => (current?.id === linkId ? null : current))
+				onMessage('Invite link revoked.', 'info')
+			}
 		} catch (error) {
 			if (active())
 				onMessage(
@@ -235,7 +238,12 @@ export function OrgMembersInviteLinks({
 				<AccountManagementPanel title="Active invite links">
 					<ul css={listCss} data-testid="org-invite-links">
 						{links.map((link) => (
-							<li key={link.id} css={rowItemCss}>
+							<li
+								key={link.id}
+								css={rowItemCss}
+								data-testid="org-invite-link"
+								data-invite-link-id={link.id}
+							>
 								<div css={rowCss}>
 									<span aria-hidden="true" css={inviteIconCss}>
 										{renderIcon('link', { size: '1.25rem' })}
