@@ -43,16 +43,24 @@ export function WithAgentRoute({ agent }: { agent: WithAgent }) {
 
 			<section aria-labelledby="with-connect-title" css={connectCss}>
 				<h2 id="with-connect-title">Connect {agent.name}</h2>
+				{agent.official ? null : (
+					<p css={genericNoteCss}>
+						{agent.note ?? (
+							<>
+								{agent.name} doesn&rsquo;t have an official Kody setup yet. It
+								needs to support remote MCP servers; if it does, it can usually
+								connect itself.
+							</>
+						)}
+					</p>
+				)}
 				<ol>{agent.steps.map((step, index) => renderStep(step, index))}</ol>
-				<div css={promptCss}>
-					<p>Rather let {agent.name} handle it? Paste this setup prompt.</p>
-					<BuildWithAgentButton
-						label="Copy setup prompt"
-						variant="pill"
-						onboardingPage={false}
-						icons={false}
-					/>
-				</div>
+				{agent.official ? (
+					<div css={promptCss}>
+						<p>Rather let {agent.name} handle it? Paste this setup prompt.</p>
+						{renderPromptButton()}
+					</div>
+				) : null}
 				<p css={moreCss}>
 					<SiteLink href={docHref('connect-your-agent')}>
 						More ways to connect
@@ -90,6 +98,9 @@ function renderStep(step: WithAgentStep, index: number) {
 	return (
 		<li key={index}>
 			<p>{step.text}</p>
+			{step.prompt ? (
+				<div css={stepPromptCss}>{renderPromptButton()}</div>
+			) : null}
 			{step.link ? (
 				<SiteLink href={step.link.href} css={stepLinkCss}>
 					{step.link.label} <span aria-hidden="true">↗</span>
@@ -111,6 +122,17 @@ function renderStep(step: WithAgentStep, index: number) {
 				</div>
 			) : null}
 		</li>
+	)
+}
+
+function renderPromptButton() {
+	return (
+		<BuildWithAgentButton
+			label="Copy setup prompt"
+			variant="pill"
+			onboardingPage={false}
+			icons={false}
+		/>
 	)
 }
 
@@ -231,6 +253,16 @@ const codeRowCss = {
 		fontSize: '0.85rem',
 		lineHeight: 1.5,
 	},
+}
+
+const genericNoteCss = {
+	margin: '0.6rem 0 0',
+	color: colors.textMuted,
+	lineHeight: 1.55,
+}
+
+const stepPromptCss = {
+	marginTop: '0.6rem',
 }
 
 const promptCss = {

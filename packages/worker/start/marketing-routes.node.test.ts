@@ -26,6 +26,8 @@ test('agent page shows its connect steps and matching canonical metadata', async
 	expect(html).toContain('href="/with/cursor"')
 	expect(html).not.toContain('href="/with/claude-code"')
 	expect(html).not.toContain('\u2014')
+	expect(html).toContain('Rather let Claude Code handle it?')
+	expect(html).not.toContain('official Kody setup')
 	const head = absolutizeDocumentHead(
 		resolveDocumentHead('withAgent', '/with/claude-code'),
 		'https://kody.test',
@@ -69,3 +71,24 @@ test.each([secretsRoute, integrationsRoute])(
 		expect(failure.status).toBe(301)
 	},
 )
+
+test('unofficial agent page leads with its setup prompt and MCP URL', async () => {
+	const agent = findWithAgent('amp')!
+	const html = await renderStartPage(
+		jsx(WithAgentRoute, { agent }),
+		'/with/amp',
+	)
+	expect(html).toContain('Kody for <em>Amp</em>')
+	expect(html).toMatch(
+		/Amp doesn(&rsquo;|’|&#x27;)t have an official Kody setup/,
+	)
+	expect(
+		html.match(/aria-label="Copy setup prompt, copy setup prompt"/g),
+	).toHaveLength(1)
+	expect(html).toContain('<code>https://kody.codes/mcp</code>')
+	expect(html).not.toContain('Rather let ')
+	expect(html).toContain('href="/with/cursor"')
+	expect(resolveDocumentHead('withAgent', '/with/amp').title).toBe(
+		'Kody for Amp | Kody',
+	)
+})

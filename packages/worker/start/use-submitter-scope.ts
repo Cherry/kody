@@ -26,9 +26,15 @@ export function useSubmitterScope() {
 	}, [actorKey, href, router])
 	return () => {
 		const submission = current.current
+		// Fragments never reach SSR, so hydrated match context can omit one
+		// even when the browser opened this document at an anchor. Capture the
+		// browser href now, then require that exact location until completion.
+		const submittedHref = router.latestLocation.href
+		const sameDocument = submittedHref.split('#')[0] === href.split('#')[0]
 		return () =>
+			sameDocument &&
 			submission !== null &&
 			current.current === submission &&
-			router.latestLocation.href === href
+			router.latestLocation.href === submittedHref
 	}
 }

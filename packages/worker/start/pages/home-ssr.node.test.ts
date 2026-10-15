@@ -24,8 +24,18 @@ test('homepage renders agent-led connect links and a deterministic accessible ma
 		(match) => match[1],
 	)
 	expect(order.slice(0, 3)).toEqual(['muse', 'codex', 'cursor'])
-	expect(order).toHaveLength(withAgents.length * 2)
-	expect(marquee.match(/tabindex="-1"/g)).toHaveLength(withAgents.length)
+	expect(order.slice(withAgents.length, withAgents.length + 3)).toEqual([
+		'muse',
+		'codex',
+		'cursor',
+	])
+	expect(order).toHaveLength(withAgents.length * 3)
+	expect(marquee.match(/tabindex="-1"/g)).toHaveLength(withAgents.length * 2)
+	expect(
+		marquee.match(
+			/aria-hidden="true" class="landing-agents-item"|class="landing-agents-item" aria-hidden="true"/g,
+		),
+	).toHaveLength(withAgents.length * 2)
 	for (const agent of withAgents)
 		expect(html).toContain(`href="/with/${agent.slug}"`)
 	expect(html).not.toContain('href="/onboarding')
