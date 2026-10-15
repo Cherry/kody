@@ -162,7 +162,7 @@ test('web create organization form rejects the reserved `me` handle in any case'
 			} as unknown as Env,
 			request,
 		)
-		await expect(attempt).rejects.toThrow('This name is reserved.')
+		await expect(attempt).rejects.toThrow('This username is reserved.')
 	}
 	expect(
 		await db
