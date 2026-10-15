@@ -10,16 +10,20 @@ Anonymous `/account` and `/account/passkeys` requests redirect to login with
 In Chrome, login hydrates and enables controls; Forgot password reaches the
 rendered reset-password page. No credentials or reset emails were submitted.
 
-Validate `38729719947` has passed Workers and MCP. Static failed on two unused
-OAuth type exports and audit formatting, fixed locally in `cfafb012f`. Node and
-browser E2E remain running at this inspection. Later local changes include the
-two-factor identity redirect fix and removal of dead resend-verification result
-branches in `cffb44b8a`.
+Validate `38729719947` passed Workers, MCP and Node (6,436 tests). Static failed
+on two unused OAuth type exports and audit formatting, fixed in `cfafb012f`.
+Browser E2E reached its 20-minute job limit after reporting five failures: OAuth
+connection success text, three invite reconciliation cases, and billing
+checkout. Follow-up commits correct the OAuth assertion, wait for billing
+hydration, and refresh Router-owned invite data after failed acceptance. These
+fixes still require CI verification. Later local changes include the two-factor
+identity redirect fix and removal of dead resend-verification result branches in
+`cffb44b8a`.
 
-The website consent page still needs its OAuth decision transport migrated to a
-Start server function. `POST /oauth/authorize` remains necessary for actual MCP
-tooling; that external contract does not require the website to use raw fetch.
-The shared decision extraction is under independent review and is not deployed.
+The website consent page now uses a Start server function in `9f3b983a4`.
+`POST /oauth/authorize` remains necessary for actual MCP tooling. The shared
+decision extraction passed independent code review but still needs CI and
+deployed verification.
 
 ## Current cutover evidence
 
