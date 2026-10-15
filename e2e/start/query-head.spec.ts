@@ -285,7 +285,8 @@ test('background permission failure removes cached private document metadata', a
 			(response) =>
 				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
 				response.request().method() === 'POST' &&
-				response.request().postData()?.includes('remove_role') === true,
+				response.request().postData()?.includes('stableUserId') === true &&
+				response.request().postData()?.includes('admin') === true,
 		)
 		await operatorPage
 			.getByRole('button', { name: 'Remove', exact: true })

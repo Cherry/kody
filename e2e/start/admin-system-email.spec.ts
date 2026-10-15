@@ -29,8 +29,7 @@ test('system email deletion requires confirmation and persists through reload', 
 			if (
 				request.method() === 'POST' &&
 				new URL(request.url()).pathname.startsWith('/_serverFn/') &&
-				(request.postData() ?? '').includes(id) &&
-				(request.postData() ?? '').includes('delete')
+				(request.postData() ?? '').includes(id)
 			)
 				deletes.push(request.postData() ?? '')
 		})

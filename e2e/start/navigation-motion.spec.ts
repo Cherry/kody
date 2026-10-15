@@ -94,7 +94,7 @@ test('page navigation preserves selective motion and suppresses repeated homepag
 	const guide = page.locator(`main a[href="${guideHref}"]`).first()
 	await guide.click()
 	await expect.poll(() => new URL(page.url()).pathname).toBe(guideHref)
-	await page.waitForLoadState('networkidle')
+	await expect(page.locator('main h1')).toHaveText('Search and execute')
 	const afterHeading = await page.locator('main h1').textContent()
 	const guideTransitions = await page.evaluate(
 		(before) =>
