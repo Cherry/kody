@@ -1,7 +1,8 @@
 /** @jsxImportSource @emotion/react */
+import { useServerFn } from '@tanstack/react-start'
 import { deletePasskey, renamePasskey } from '#start/server/security-mutations'
 import {
-	webauthnRegistrationOptions,
+	webauthnRegistrationOptions as webauthnRegistrationOptionsFn,
 	webauthnRegistrationVerify,
 } from '#start/server/auth-mutations'
 import {
@@ -70,6 +71,7 @@ export function AccountPasskeysPage({
 	payload: AccountPasskeysPayload
 	currentHref: string
 }) {
+	const webauthnRegistrationOptions = useServerFn(webauthnRegistrationOptionsFn)
 	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const passkeys = payload.passkeys
 	const client = useQueryClient()
@@ -124,6 +126,7 @@ export function AccountPasskeysPage({
 				data: {},
 				signal: lifetime.current?.signal,
 			})
+			if (!optionsPayload) return
 			if (
 				!optionsPayload.successful ||
 				!optionsPayload?.ok ||

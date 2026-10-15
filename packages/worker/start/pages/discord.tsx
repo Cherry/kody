@@ -5,7 +5,7 @@ import { usePageInvalidation } from '../page-invalidation.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useEffect, useState } from 'react'
-import { startSocialSignIn } from '../social-sign-in.ts'
+import { useSocialSignIn } from '../social-sign-in.ts'
 import { syncDiscordMemberRole } from '#start/server/account-mutations'
 import {
 	emptyPublicFormProtection,
@@ -100,6 +100,7 @@ export function DiscordPage({
 	page: DiscordPageLoaderData
 	currentHref: string
 }) {
+	const startSocialSignIn = useSocialSignIn()
 	const invalidatePages = usePageInvalidation(mutationResources)
 	const [busy, setBusy] = useState(false)
 	const [actionMessage, setActionMessage] = useState<DiscordPageMessage | null>(

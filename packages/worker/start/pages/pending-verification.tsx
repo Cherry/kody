@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { fetchSessionInfo } from '../session-info.ts'
+import { useSessionInfo } from '../session-info.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { useEffect, useState } from 'react'
@@ -20,7 +20,7 @@ import {
 import {
 	buildPendingVerificationPath,
 	renderEmailVerificationPrompt,
-	requestResendVerification,
+	useResendVerification,
 } from './email-verification-prompt.tsx'
 
 export function PendingVerificationPage({
@@ -28,6 +28,8 @@ export function PendingVerificationPage({
 }: {
 	data: PendingVerificationLoaderData
 }) {
+	const requestResendVerification = useResendVerification()
+	const fetchSessionInfo = useSessionInfo()
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
@@ -49,7 +51,7 @@ export function PendingVerificationPage({
 			try {
 				if (document.visibilityState === 'visible') {
 					const session = await fetchSessionInfo(controller.signal)
-					if (controller.signal.aborted) return
+					if (controller.signal.aborted || session === undefined) return
 					if (!session) {
 						await router.navigate({
 							href: buildAuthLink(
@@ -82,13 +84,14 @@ export function PendingVerificationPage({
 			controller.abort()
 			clearTimeout(timer)
 		}
-	}, [redirectTo, router])
+	}, [redirectTo, router, fetchSessionInfo])
 	async function resend() {
 		setResendStatus('sending')
 		setResendMessage(null)
 		setResendTone('info')
 		try {
 			const result = await requestResendVerification(redirectTo)
+			if (!result) return
 			if (result.ok) void invalidatePages()
 			if (!result.ok && result.unauthorized) {
 				await router.navigate({
@@ -111,9 +114,9 @@ export function PendingVerificationPage({
 	}
 	async function continueAfterVerification() {
 		try {
-			const feedback = resolveContinueVerificationFeedback(
-				await fetchSessionInfo(),
-			)
+			const session = await fetchSessionInfo()
+			if (session === undefined) return
+			const feedback = resolveContinueVerificationFeedback(session)
 			if (feedback.status === 'verified') {
 				await router.navigate({
 					href: resolvePostVerificationRedirect(redirectTo),

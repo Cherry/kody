@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { fetchSessionInfo } from '../session-info.ts'
+import { useServerFn } from '@tanstack/react-start'
+import { useSessionInfo } from '../session-info.ts'
 import { buildAuthLink } from '#client/auth-links.ts'
 import {
 	emptyPublicFormProtection,
@@ -24,8 +25,8 @@ import {
 import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
 import { getSessionDisplayName, type SessionInfo } from '#client/session.ts'
 import {
-	webauthnAuthenticationOptions,
-	webauthnAuthenticationVerify,
+	webauthnAuthenticationOptions as webauthnAuthenticationOptionsFn,
+	webauthnAuthenticationVerify as webauthnAuthenticationVerifyFn,
 } from '#start/server/auth-mutations'
 import { buildMcpAuthorizeErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { type OAuthAuthorizeLoaderData } from '#universal/loader-data.ts'
@@ -61,11 +62,11 @@ import { ProviderIcon } from '../components/provider-icons.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { useHydrated } from '../components/use-hydrated.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
+import { useSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	renderEmailVerificationPrompt as EmailVerificationPrompt,
-	requestResendVerification,
+	useResendVerification,
 } from './email-verification-prompt.tsx'
 import { AuthorizeOrgField } from './oauth-authorize-org-picker.tsx'
 
@@ -152,6 +153,15 @@ export function OAuthAuthorizeRoute({
 	session: SessionInfo | null
 	authProviders: PublicAuthConfig
 }) {
+	const requestResendVerification = useResendVerification()
+	const fetchSessionInfo = useSessionInfo()
+	const startSocialSignIn = useSocialSignIn()
+	const webauthnAuthenticationOptions = useServerFn(
+		webauthnAuthenticationOptionsFn,
+	)
+	const webauthnAuthenticationVerify = useServerFn(
+		webauthnAuthenticationVerifyFn,
+	)
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 		refreshRoute: true,
@@ -249,6 +259,7 @@ export function OAuthAuthorizeRoute({
 				return
 			}
 			const options = await webauthnAuthenticationOptions({ data: {} })
+			if (!options) return
 			if (!options.successful || options?.ok !== true || !options.options) {
 				signInError('Unable to start passkey sign-in.')
 				return
@@ -265,6 +276,7 @@ export function OAuthAuthorizeRoute({
 				data: { response, rememberMe: false, ...protection() },
 			})
 			controller.signal.throwIfAborted()
+			if (!result) return
 			if (!result.successful || result?.ok !== true) {
 				signInError(
 					typeof result?.error === 'string'
@@ -290,6 +302,7 @@ export function OAuthAuthorizeRoute({
 	}
 	async function refreshSession() {
 		const nextSession = await fetchSessionInfo()
+		if (nextSession === undefined) return
 		await invalidatePages()
 		return nextSession
 	}
@@ -299,6 +312,7 @@ export function OAuthAuthorizeRoute({
 		setResendTone('info')
 		try {
 			const result = await requestResendVerification(readOAuthResumeTarget())
+			if (!result) return
 			if (!mounted.current) return
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
@@ -313,6 +327,7 @@ export function OAuthAuthorizeRoute({
 	async function handleContinueAfterVerify() {
 		try {
 			const nextSession = await refreshSession()
+			if (nextSession === undefined) return
 			if (!mounted.current) return
 			setResendTone('info')
 			setResendMessage(

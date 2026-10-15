@@ -28,7 +28,7 @@ import {
 	accountConnectionResources,
 } from './account-mutation-settlement.ts'
 import { pageResourceKey } from '../page-query-scope.ts'
-import { startSocialSignIn } from '../social-sign-in.ts'
+import { useSocialSignIn } from '../social-sign-in.ts'
 import { AccountManagementPanel } from './account-management-components.tsx'
 
 const providerLabels: Record<string, string> = {
@@ -75,6 +75,7 @@ export function useAccountConnections(
 	initial: AccountConnectionsLoaderData,
 	href: string,
 ) {
+	const startSocialSignIn = useSocialSignIn()
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const [connecting, setConnectionsBusy] = useState(false)

@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useServerFn } from '@tanstack/react-start'
 import { resendWebsiteVerification } from '#start/server/auth-mutations'
 import {
 	describeEmailVerificationDelivery,
@@ -45,6 +46,13 @@ export async function requestResendVerification(
 				? payload.message
 				: 'Verification email sent. Check your inbox.',
 	}
+}
+
+/** Direct event callers need native redirect handling outside Query. */
+export function useResendVerification(): (
+	redirectTo?: string | null,
+) => Promise<ResendVerificationResult | undefined> {
+	return useServerFn(requestResendVerification)
 }
 
 type EmailVerificationPromptOptions = {

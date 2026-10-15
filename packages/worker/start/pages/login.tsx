@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useServerFn } from '@tanstack/react-start'
 import { getHandleFormatError } from '@kody-internal/shared/handle-rules.ts'
 import { validateAuthFormFields } from '#client/auth-form-validation.ts'
 import { invalidFieldsForMessage } from '#client/form-error-fields.ts'
@@ -16,9 +17,9 @@ import {
 } from '#client/public-form-protection.ts'
 import { resolvePasswordAuthRedirect } from '#client/routes/resolve-password-auth-redirect.ts'
 import {
-	authenticateWebsite,
-	webauthnAuthenticationOptions,
-	webauthnAuthenticationVerify,
+	authenticateWebsite as authenticateWebsiteFn,
+	webauthnAuthenticationOptions as webauthnAuthenticationOptionsFn,
+	webauthnAuthenticationVerify as webauthnAuthenticationVerifyFn,
 } from '#start/server/auth-mutations'
 import { buildOauthLoginErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
 import { withAccountCreatedQuery } from '#universal/fathom-events.ts'
@@ -45,7 +46,7 @@ import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { useHydrated } from '../components/use-hydrated.ts'
-import { startSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
+import { useSocialSignIn, type PublicAuthConfig } from '../social-sign-in.ts'
 import {
 	AuthForm,
 	formMessageCss,
@@ -66,6 +67,14 @@ export function LoginPage({
 	currentHref: string
 	authConfig: PublicAuthConfig
 }) {
+	const startSocialSignIn = useSocialSignIn()
+	const authenticateWebsite = useServerFn(authenticateWebsiteFn)
+	const webauthnAuthenticationOptions = useServerFn(
+		webauthnAuthenticationOptionsFn,
+	)
+	const webauthnAuthenticationVerify = useServerFn(
+		webauthnAuthenticationVerifyFn,
+	)
 	const hydrated = useHydrated()
 	const [status, setStatus] = useState<AuthStatus>('idle')
 	const [message, setMessage] = useState<string | null>(null)
@@ -176,6 +185,7 @@ export function LoginPage({
 						: {}),
 				},
 			})
+			if (!payload) return
 			if (lifecycle.current?.signal.aborted) return
 
 			if (!payload.successful) {
@@ -252,6 +262,7 @@ export function LoginPage({
 
 		try {
 			const optionsPayload = await webauthnAuthenticationOptions({ data: {} })
+			if (!optionsPayload) return
 			if (
 				!optionsPayload.successful ||
 				optionsPayload?.ok !== true ||
@@ -290,6 +301,7 @@ export function LoginPage({
 				},
 			})
 			if (lifecycle.current?.signal.aborted) return
+			if (!verificationPayload) return
 			if (!verificationPayload.successful || verificationPayload?.ok !== true) {
 				const errorMessage =
 					typeof verificationPayload?.error === 'string'
