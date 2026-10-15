@@ -10,10 +10,16 @@ const RouterAnchor = createLink(
 		HTMLAnchorElement,
 		ComponentProps<'a'> & {
 			current?: ComponentProps<'a'>['aria-current']
+			documentHref?: string
 		}
-	>(function RouterAnchor({ current, children, ...props }, ref) {
+	>(function RouterAnchor({ current, documentHref, children, ...props }, ref) {
 		return (
-			<a {...props} ref={ref} aria-current={current ?? props['aria-current']}>
+			<a
+				{...props}
+				href={documentHref ?? props.href}
+				ref={ref}
+				aria-current={current ?? props['aria-current']}
+			>
 				{children}
 			</a>
 		)
@@ -45,7 +51,11 @@ export function SiteLink({
 	const navigation = linkNavigation(router, destination.pathname)
 	return (
 		<RouterAnchor
-			to={href}
+			to={destination.pathname}
+			search={router.options.parseSearch!(destination.search)}
+			hash={destination.hash.slice(1)}
+			// Protocol URLs carry opaque query values, preserve their browser href.
+			documentHref={navigation.reloadDocument ? href : undefined}
 			current={props['aria-current']}
 			// Section navigation supplies its own current state for descendants.
 			// Ordinary links should not mark their parent URL as the current page.
