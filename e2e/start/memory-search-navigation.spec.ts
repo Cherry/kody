@@ -73,4 +73,32 @@ test('a memory detail click wins over an earlier pending search navigation', asy
 		release()
 		await page.unrouteAll({ behavior: 'wait' })
 	}
+	await page.getByRole('button', { name: 'Soft delete', exact: true }).click()
+	await page
+		.getByRole('button', { name: 'Confirm soft delete', exact: true })
+		.click()
+	await expect(
+		page.getByRole('link', { name: 'Navigation fixture', exact: true }),
+	).toHaveCount(0)
+	// Router serializes a boolean as true; the string "true" becomes quoted JSON
+	// and cannot be read by the URL-based loader input normalizer.
+	await page
+		.getByRole('checkbox', { name: 'Include deleted', exact: true })
+		.check()
+	await expect(page).toHaveURL(
+		(url) => url.searchParams.get('includeDeleted') === 'true',
+	)
+	await expect(
+		page.getByRole('link', { name: 'Navigation fixture', exact: true }),
+	).toBeVisible()
+	await expect(
+		page.getByRole('cell', { name: 'Deleted', exact: true }),
+	).toBeVisible()
+	await page.reload()
+	await expect(
+		page.getByRole('checkbox', { name: 'Include deleted', exact: true }),
+	).toBeChecked()
+	await expect(
+		page.getByRole('cell', { name: 'Deleted', exact: true }),
+	).toBeVisible()
 })

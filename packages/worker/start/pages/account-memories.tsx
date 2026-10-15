@@ -198,7 +198,7 @@ export function AccountMemoriesPage({
 					else delete search.q
 				}
 				if (next.includeDeleted !== undefined) {
-					if (next.includeDeleted) search.includeDeleted = 'true'
+					if (next.includeDeleted) search.includeDeleted = true
 					else delete search.includeDeleted
 				}
 				return search
