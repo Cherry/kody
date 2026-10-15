@@ -14,6 +14,7 @@ import {
 	emailSendingEventTypes,
 	emptyR2Bucket,
 	encodeR2ObjectKey,
+	deleteEmailSendingEventSubscriptionIfPresent,
 	ensureArtifactsAccountEventSubscription,
 	ensureArtifactsNamespace,
 	ensureCloudflareQueue,
@@ -660,6 +661,60 @@ test('Queue and Email Sending subscription ensure creates and reconciles Cloudfl
 		destination,
 		events: [...emailSendingEventTypes],
 	})
+})
+
+test('deleteEmailSendingEventSubscriptionIfPresent deletes by name when present', async () => {
+	consoleError.mockImplementation(() => {})
+	const deleteFetch = mockFetch(
+		listed([
+			{
+				id: 'subscription-system',
+				name: 'kody-system-email-delivery-events',
+				enabled: true,
+				events: [...emailSendingEventTypes],
+				source: {
+					type: 'email.sending',
+					domain: 'kody.codes',
+					zone_id: 'zone-1',
+				},
+				destination: { type: 'queues.queue', queue_id: 'queue-1' },
+			},
+		]),
+		// Cloudflare DELETE may omit `result`; allowMissingResult must accept that.
+		Response.json({ success: true }),
+	)
+	await expect(
+		deleteEmailSendingEventSubscriptionIfPresent({
+			...creds,
+			name: 'kody-system-email-delivery-events',
+			fetcher: deleteFetch,
+		}),
+	).resolves.toEqual({
+		deleted: true,
+		id: 'subscription-system',
+		name: 'kody-system-email-delivery-events',
+	})
+	expect(deleteFetch).toHaveBeenNthCalledWith(
+		2,
+		`${accountApi}/event_subscriptions/subscriptions/subscription-system`,
+		expect.objectContaining({
+			method: 'DELETE',
+			signal: expect.any(AbortSignal),
+		}),
+	)
+
+	const absentFetch = mockFetch(listed([]))
+	await expect(
+		deleteEmailSendingEventSubscriptionIfPresent({
+			...creds,
+			name: 'kody-system-email-delivery-events',
+			fetcher: absentFetch,
+		}),
+	).resolves.toEqual({
+		deleted: false,
+		name: 'kody-system-email-delivery-events',
+	})
+	expect(absentFetch).toHaveBeenCalledTimes(1)
 })
 
 test('ensureArtifactsAccountEventSubscription creates account-level lifecycle subscription', async () => {

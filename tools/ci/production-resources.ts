@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import {
+	deleteEmailSendingEventSubscriptionIfPresent,
 	ensureArtifactsAccountEventSubscription,
 	ensureCloudflareQueue,
 	ensureEmailSendingEventSubscription,
@@ -68,6 +69,7 @@ type ResolvedProductionBindings = {
 	webhookDispatchQueueName: string
 	webhookDispatchDeadLetterQueueName: string
 	committedUserEmailDomain: string | null
+	committedSystemEmailDomain: string | null
 	packageAppHostname: string | null
 	packageAppLegacyHostnames: Array<string>
 }
@@ -180,6 +182,73 @@ function resolveEmailSendingDomain(input: {
 		)
 	}
 	return `inbox.${new URL(appBaseUrl).hostname.toLowerCase()}`
+}
+
+/**
+ * System/transactional mail (`kody@<SYSTEM_EMAIL_DOMAIN>`) is a separate
+ * Email Sending domain from user inboxes. Cloudflare event subscriptions are
+ * domain-scoped, so signup/password-reset/email-change lifecycle events only
+ * arrive when this domain also has a subscription on `kody-email-delivery`.
+ */
+function resolveSystemEmailSendingDomain(input: {
+	dryRun: boolean
+	committedSystemEmailDomain: string | null
+}) {
+	const configured = process.env.SYSTEM_EMAIL_DOMAIN?.trim()
+		.toLowerCase()
+		.replace(/\.$/, '')
+	if (configured && !isValidBareHostname(configured)) {
+		fail(`SYSTEM_EMAIL_DOMAIN is not a valid bare hostname: ${configured}`)
+	}
+	if (configured) return configured
+	if (input.committedSystemEmailDomain) {
+		if (!isValidBareHostname(input.committedSystemEmailDomain)) {
+			fail(
+				`Committed SYSTEM_EMAIL_DOMAIN in wrangler.jsonc is not a valid bare hostname: ${input.committedSystemEmailDomain}`,
+			)
+		}
+		return input.committedSystemEmailDomain
+	}
+	const appBaseUrl = process.env.APP_BASE_URL?.trim()
+	if (!appBaseUrl) {
+		if (input.dryRun) return 'example.com'
+		fail(
+			'Missing APP_BASE_URL or SYSTEM_EMAIL_DOMAIN; cannot configure Email Sending event subscription.',
+		)
+	}
+	return new URL(appBaseUrl).hostname.toLowerCase()
+}
+
+/**
+ * Unique Email Sending domains that need an `email.sending` queue
+ * subscription. User inbox and system/transactional domains are often
+ * different (`inbox.kody.codes` vs `kody.codes`); subscribing only to the
+ * inbox domain leaves verification mail stuck at `accepted`.
+ */
+export function resolveEmailSendingEventSubscriptionDomains(input: {
+	userDomain: string
+	systemDomain: string
+}): Array<{ domain: string; kind: 'user' | 'system' }> {
+	const user = input.userDomain.trim().toLowerCase().replace(/\.$/, '')
+	const system = input.systemDomain.trim().toLowerCase().replace(/\.$/, '')
+	if (user === system) {
+		return [{ domain: user, kind: 'user' }]
+	}
+	return [
+		{ domain: user, kind: 'user' },
+		{ domain: system, kind: 'system' },
+	]
+}
+
+function emailSendingEventSubscriptionName(input: {
+	workerName: string
+	kind: 'user' | 'system'
+}) {
+	const suffix =
+		input.kind === 'system'
+			? '-system-email-delivery-events'
+			: '-email-delivery-events'
+	return truncateWithSuffix(input.workerName, suffix, 63)
 }
 
 function ensureD1Database({
@@ -479,6 +548,15 @@ async function resolveProductionBindings({
 		committedUserEmailDomainRaw.trim().length > 0
 			? committedUserEmailDomainRaw.trim().toLowerCase().replace(/\.$/, '')
 			: null
+	const committedSystemEmailDomainRaw =
+		productionVars && typeof productionVars === 'object'
+			? (productionVars as Record<string, unknown>).SYSTEM_EMAIL_DOMAIN
+			: undefined
+	const committedSystemEmailDomain =
+		typeof committedSystemEmailDomainRaw === 'string' &&
+		committedSystemEmailDomainRaw.trim().length > 0
+			? committedSystemEmailDomainRaw.trim().toLowerCase().replace(/\.$/, '')
+			: null
 
 	const packageAppBaseUrlRaw =
 		productionVars && typeof productionVars === 'object'
@@ -549,6 +627,7 @@ async function resolveProductionBindings({
 		repoSessionBlobsBucketName,
 		operatorBackupsBucketName,
 		committedUserEmailDomain,
+		committedSystemEmailDomain,
 		packageAppHostname,
 		packageAppLegacyHostnames,
 		...queueResources,
@@ -691,19 +770,62 @@ async function ensureProductionResources(options: CliOptions) {
 		name: bindings.webhookDispatchDeadLetterQueueName,
 		existingQueues,
 	})
-	const emailSendingDomain = resolveEmailSendingDomain({
+	const emailSendingUserDomain = resolveEmailSendingDomain({
 		dryRun: options.dryRun,
 		committedUserEmailDomain: bindings.committedUserEmailDomain,
 	})
-	const emailEventSubscription = await ensureEmailSendingEventSubscription({
-		accountId: accountId ?? 'dry-run-account',
-		apiToken: apiToken ?? 'dry-run-token',
-		name: truncateWithSuffix(bindings.workerName, '-email-delivery-events', 63),
-		queueId: emailDeliveryQueue.id,
-		domain: emailSendingDomain,
-		zoneId: zoneId ?? 'dry-run-zone',
+	const emailSendingSystemDomain = resolveSystemEmailSendingDomain({
 		dryRun: options.dryRun,
+		committedSystemEmailDomain: bindings.committedSystemEmailDomain,
 	})
+	const emailSendingSubscriptionDomains =
+		resolveEmailSendingEventSubscriptionDomains({
+			userDomain: emailSendingUserDomain,
+			systemDomain: emailSendingSystemDomain,
+		})
+	const emailEventSubscriptions: Array<{
+		id: string
+		name: string
+		domain: string
+		kind: 'user' | 'system'
+	}> = []
+	for (const entry of emailSendingSubscriptionDomains) {
+		const subscription = await ensureEmailSendingEventSubscription({
+			accountId: accountId ?? 'dry-run-account',
+			apiToken: apiToken ?? 'dry-run-token',
+			name: emailSendingEventSubscriptionName({
+				workerName: bindings.workerName,
+				kind: entry.kind,
+			}),
+			queueId: emailDeliveryQueue.id,
+			domain: entry.domain,
+			zoneId: zoneId ?? 'dry-run-zone',
+			dryRun: options.dryRun,
+		})
+		emailEventSubscriptions.push({
+			id: subscription.id,
+			name: subscription.name,
+			domain: entry.domain,
+			kind: entry.kind,
+		})
+	}
+	// When user and system domains collapse to one hostname, stop ensuring a
+	// separate system subscription and delete any leftover so the queue does
+	// not keep receiving events for an obsolete domain or duplicates.
+	const needsSystemEmailSubscription = emailSendingSubscriptionDomains.some(
+		(entry) => entry.kind === 'system',
+	)
+	if (!needsSystemEmailSubscription) {
+		await deleteEmailSendingEventSubscriptionIfPresent({
+			accountId: accountId ?? 'dry-run-account',
+			apiToken: apiToken ?? 'dry-run-token',
+			name: emailSendingEventSubscriptionName({
+				workerName: bindings.workerName,
+				kind: 'system',
+			}),
+			dryRun: options.dryRun,
+		})
+	}
 	const artifactsEventSubscription =
 		await ensureArtifactsAccountEventSubscription({
 			accountId: accountId ?? 'dry-run-account',
@@ -887,7 +1009,14 @@ async function ensureProductionResources(options: CliOptions) {
 	console.log(
 		`package_events_dispatch_dead_letter_queue_name=${packageEventsDispatchDeadLetterQueue.name}`,
 	)
-	console.log(`email_event_subscription_id=${emailEventSubscription.id}`)
+	for (const subscription of emailEventSubscriptions) {
+		console.log(
+			`email_event_subscription_id_${subscription.kind}=${subscription.id}`,
+		)
+		console.log(
+			`email_event_subscription_domain_${subscription.kind}=${subscription.domain}`,
+		)
+	}
 	console.log(
 		`artifacts_event_subscription_id=${artifactsEventSubscription.id}`,
 	)
