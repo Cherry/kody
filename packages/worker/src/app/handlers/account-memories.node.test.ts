@@ -123,7 +123,7 @@ const { testAccountMemoriesApiHandler } =
 	await import('./account-memories.test-support.ts')
 
 const { createAccountMemoriesExportHandler } =
-	await import('#start/server/memories-export.ts')
+	await import('../../../start/server/memories-export.ts')
 const exportOrgBinding = vi.hoisted(() => vi.fn())
 vi.mock('#worker/orgs/repo.ts', () => ({
 	loadOrgBindingForSlug: exportOrgBinding,

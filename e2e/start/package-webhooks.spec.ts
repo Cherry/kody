@@ -1,65 +1,62 @@
-import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
-import {
-	createPreviewPackage,
-	type GitRemoteResult,
-} from '../../tools/control-kody/package-create.ts'
+import { createPreviewPackage } from '../../tools/control-kody/package-create.ts'
+import { readE2eCloudflareMockState } from '../../tools/e2e-cloudflare-mock-state.ts'
 import { executeE2eD1Command } from '../d1-utils.ts'
 import { requestHasMutationDataFields } from '../server-function-requests.ts'
 import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
 
-async function pushWebhook(remote: GitRemoteResult) {
-	const directory = await mkdtemp(path.join(tmpdir(), 'kody-webhook-e2e-'))
-	const repo = path.join(directory, 'repo')
-	function git(args: string[], cwd?: string) {
-		try {
-			execFileSync('git', args, {
-				cwd,
-				env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-				stdio: 'pipe',
-			})
-		} catch {
-			// Git errors can contain the authenticated remote. Never print its token.
-			throw new Error(`Webhook fixture git ${args[0]} failed`)
-		}
+async function seedWebhook(packageId: string) {
+	// The local Artifacts service stores snapshots, it does not implement Git.
+	// Seed a new published snapshot through that service, keeping all real URL
+	// mint/reveal/rotate/disable operations and their authorization intact.
+	const mock = readE2eCloudflareMockState()
+	const url = new URL(
+		`/client/v4/accounts/${mock.accountId}/artifacts/namespaces/default/repos/package-${packageId}/mock-source-snapshot`,
+		mock.origin,
+	)
+	const headers = {
+		Authorization: `Bearer ${mock.token}`,
+		'Content-Type': 'application/json',
 	}
-	try {
-		git(['clone', '--quiet', remote.authenticated_remote, repo])
-		git(['config', 'user.name', remote.git_author.name], repo)
-		git(['config', 'user.email', remote.git_author.email], repo)
-		const manifestPath = path.join(repo, 'package.json')
-		const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-		manifest.exports = {
-			...manifest.exports,
-			'./launcher': './src/launcher.ts',
-		}
-		manifest.kody = {
-			...manifest.kody,
-			webhooks: [
-				{
-					name: 'launcher',
-					export: './launcher',
-					responseMode: 'sync',
-					inputMode: 'params',
-				},
-			],
-		}
-		await mkdir(path.join(repo, 'src'), { recursive: true })
-		await writeFile(
-			path.join(repo, 'src/launcher.ts'),
-			'export default async function launcher() { return { ok: true } }\n',
-		)
-		await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-		git(['add', 'package.json', 'src/launcher.ts'], repo)
-		git(['commit', '-m', 'Add disposable webhook fixture'], repo)
-		git(['push', '--quiet', 'origin', 'HEAD'], repo)
-	} finally {
-		await rm(directory, { recursive: true, force: true })
+	const current = await fetch(url, { headers })
+	expect(current.ok).toBe(true)
+	const {
+		result: { files },
+	} = (await current.json()) as { result: { files: Record<string, string> } }
+	const manifest = JSON.parse(files['package.json']!)
+	manifest.exports = { ...manifest.exports, './launcher': './src/launcher.ts' }
+	manifest.kody = {
+		...manifest.kody,
+		webhooks: [
+			{
+				name: 'launcher',
+				export: './launcher',
+				responseMode: 'sync',
+				inputMode: 'params',
+			},
+		],
 	}
+	const published = await fetch(url, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify({
+			files: {
+				...files,
+				'package.json': JSON.stringify(manifest),
+				'src/launcher.ts':
+					'export default async function launcher() { return { ok: true } }',
+			},
+		}),
+	})
+	expect(published.ok).toBe(true)
+	const {
+		result: { published_commit },
+	} = (await published.json()) as { result: { published_commit: string } }
+	expect(published_commit).toBeTruthy()
+	executeE2eD1Command(
+		`UPDATE entity_sources SET published_commit=${quoteSqlString(published_commit)}, indexed_commit=NULL WHERE id=(SELECT source_id FROM saved_packages WHERE id=${quoteSqlString(packageId)});`,
+	)
 }
 
 test('package webhook URLs mint, reveal, rotate and disable through native Start calls', async ({
@@ -99,10 +96,10 @@ test('package webhook URLs mint, reveal, rotate and disable through native Start
 			email: owner.email,
 			password: owner.password,
 			kodyId: `webhooks-${id}`,
-			headAhead: true,
+			headAhead: false,
 			cookieHeader,
-			pushHeadAhead: pushWebhook,
 		})
+		await seedWebhook(created.packageId)
 		const settings = `${created.packagePagePath}/settings`
 		await page.goto(settings)
 		await waitForClientHydration(page)
