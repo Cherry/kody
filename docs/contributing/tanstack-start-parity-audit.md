@@ -1,5 +1,23 @@
 # Start parity audit
 
+## Authorization, cache and redirect evidence
+
+Node job `116554589185` in Validate `38773350396` passed the focused
+organization authorization, organization cache, package mutation cache, document
+cache, Query read redirect and Query mutation redirect suites. The job failed in
+the separate new search fixture, so these are individual suite results, not a
+green gate.
+
+The authorization suite exercises foreground permission rechecks over warm
+payloads, membership revocation, suspended/deleting actors and grant-only
+access. Query keys include actor, resource and normalized input. Fresh access
+checks cancel prior preloads before rereading protected resources. Redirect
+tests mount multiple Query observers and assert one navigation owner for both
+client and document redirects. Cache tests distinguish public marketing and
+visibility-sensitive content from private, protocol and signed-link routes. This
+verifies covered ownership and reuse rules, not measured production latency or
+all authenticated screen parity.
+
 ## Parsed search and populated preview checks
 
 The populated follow-up on merge `f7aa53c9e` found two remaining defects. A
