@@ -21,7 +21,10 @@ export const Route = createFileRoute('/oauth/authorize')({
 			OPTIONS: rejectOAuthAuthorizeMethod,
 		},
 	},
-	staticData: { shell: { preserveLoginReturn: true } },
+	staticData: {
+		documentNavigation: true,
+		shell: { preserveLoginReturn: true },
+	},
 	head: staticDocumentHead('oauthAuthorize'),
 	preload: false,
 	loaderDeps: ({ search }) => search,

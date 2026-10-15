@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { linkNavigation } from '../link-navigation.ts'
 import { createLink, useRouter } from '@tanstack/react-router'
 import { forwardRef, type ComponentProps } from 'react'
 
@@ -29,7 +30,11 @@ export function SiteLink({
 	preload?: false | 'intent' | 'viewport' | 'render'
 }) {
 	const router = useRouter()
-	if (!href?.startsWith('/') || href.startsWith('//')) {
+	if (
+		!href?.startsWith('/') ||
+		href.startsWith('//') ||
+		(props.download !== undefined && props.download !== false)
+	) {
 		return (
 			<a href={href} {...props}>
 				{children}
@@ -37,8 +42,7 @@ export function SiteLink({
 		)
 	}
 	const destination = new URL(href, 'https://kody.local')
-	const [, params, route] = router.getMatchedRoutes(destination.pathname)
-	const matchesPage = Boolean(route && !(route.path !== '/' && params['**']))
+	const navigation = linkNavigation(router, destination.pathname)
 	return (
 		<RouterAnchor
 			to={href}
@@ -46,10 +50,8 @@ export function SiteLink({
 			// Section navigation supplies its own current state for descendants.
 			// Ordinary links should not mark their parent URL as the current page.
 			activeOptions={{ exact: true }}
-			preload={route?.options.preload === false ? false : preload}
-			reloadDocument={
-				destination.pathname.startsWith('/oauth/') || !matchesPage
-			}
+			preload={navigation.preload === false ? false : preload}
+			reloadDocument={navigation.reloadDocument}
 			{...props}
 		>
 			{children}

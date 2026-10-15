@@ -45,3 +45,16 @@ test('external links remain plain anchors with their supplied accessibility stat
 	expect(html).not.toContain('data-status=')
 	expect(html).not.toMatch(/\scurrent=/)
 })
+
+test('download links retain browser download semantics without Router interception', async () => {
+	const html = await renderStartPage(
+		createElement(
+			SiteLink,
+			{ href: '/account/export.json', download: 'kody.json' },
+			'Export',
+		),
+	)
+	expect(html).toContain('href="/account/export.json"')
+	expect(html).toContain('download="kody.json"')
+	expect(html).not.toContain('data-status=')
+})
