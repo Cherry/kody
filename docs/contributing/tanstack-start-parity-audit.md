@@ -1,10 +1,26 @@
 # Start parity audit
 
-## Cutover coverage review at source `1b97b13d6`
+## Cutover coverage review at source `996f6264d`
 
-Validate run `38723276806` is not green. An MCP empty-document regression is
-under investigation. The previous E2E run had 164 passes and two credit-return
-failures; current-head corrections still require runtime confirmation.
+Validate run `38723276806` finished with E2E, Static and Workers passing, but
+Node and MCP failures. Source `5b1e2760d` fixes the empty-document regression
+using Start's response-body ownership transfer and corrects the negotiation test
+fixture. Its Validate run `38725337019` has passed Static, Workers and MCP; Node
+and E2E were still running when inspected. Later local commits through
+`996f6264d` still require CI.
+
+Preview merge `7a1dcb3dbe7e21216249949b3bc9f28b66b4ee8b` serves the `5b1e2760d`
+source. Its homepage returned complete HTML, matching CSP and markup nonces, and
+rendered visibly in Chrome. A pricing comparison at 1280 by 800 showed aligned
+main layout and typography, but production was authenticated and preview was
+anonymous. Feature-flag copy and account-dependent controls differ, so this is
+bounded visual evidence, not matched-state parity.
+
+The local authentication correction uses native Start redirect handling for
+imperative calls and stops follow-up work when navigation consumes the result.
+Query mutations retain native Query/Router error handling so redirects cannot be
+mistaken for successful writes. Added tests cover both boundaries and an expired
+passkey session before authenticator invocation. They require CI.
 
 Remaining gaps in browser and visual evidence:
 
