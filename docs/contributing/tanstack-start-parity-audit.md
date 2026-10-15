@@ -14,6 +14,19 @@ The homepage returned complete HTML. Login rendered and hydrated, and its
 Forgot password link reached the rendered reset-password page. No credentials
 were entered during this check.
 
+## Incoming self-publish feature
+
+Main `95904f850` was merged locally without conflicts. The automatic publishing
+and credential restriction implementations match main. Start package mutations
+still delegate to the shared owner approval operations, as main's website does.
+Automatic publishing is initiated by agent package updates or successful
+security-audit recording, not by the website visibility button. Website input
+cannot supply the domain's self-publish request marker.
+
+The imported tests cover stale commits, permission denial, request races,
+credential restrictions and owner reapproval. This is source parity evidence;
+the merged revision still needs CI and deployed verification.
+
 ## Earlier visual comparisons
 
 Preview merge `7a1dcb3dbe7e21216249949b3bc9f28b66b4ee8b` serves the `5b1e2760d`
