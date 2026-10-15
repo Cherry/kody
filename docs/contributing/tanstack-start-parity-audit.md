@@ -1,5 +1,18 @@
 # Start parity audit
 
+## Independent source review and rendered metadata
+
+An independent read-only review at `0b110530b` found no concrete regression in
+SiteLink dispatch, explicit deleted-memory reads, forced deletion, scoped
+collection reads, server-function CSRF/document identity or cached private
+navigation. The reviewer inspected source only, so this does not replace runtime
+or protocol handshake verification.
+
+The supported preview request returned HTTP 200 for `/docs/github`, with its
+page-specific description and canonical URL on the preview origin. The observed
+response was `private, no-store` and `text/html; charset=utf-8`. This is a
+rendered metadata and response-policy check, not a production indexing audit.
+
 ## Follow-up fixes awaiting CI and deployment
 
 At a verified 390px viewport, settled `/docs/github` production and preview
