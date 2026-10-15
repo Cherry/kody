@@ -40,12 +40,21 @@ const copyTooltipId = 'package-title-copy-tooltip'
 import {
 	type PackageRepoActions,
 	type PackageRepoForkAction,
+	type PackageRepoFollowAction,
+	PACKAGE_FOLLOW_HASH,
+	PACKAGE_FOLLOW_PANEL_ID,
 } from '#universal/package-repo-actions.ts'
+import { PackageFollowContext } from './package-follow-context.ts'
 export { type PackageRepoActions } from '#universal/package-repo-actions.ts'
 
 function hasPackageRepoActions(actions: PackageRepoActions | null) {
 	if (!actions) return false
-	return Boolean(actions.fork || actions.publishHref || actions.packageAppHref)
+	return Boolean(
+		actions.fork ||
+		actions.publishHref ||
+		actions.packageAppHref ||
+		actions.follow,
+	)
 }
 
 /**
@@ -87,6 +96,7 @@ export function renderPackageRepoActions(
 					</span>
 				</SiteLink>
 			) : null}
+			{actions.follow ? renderFollowControl(actions.follow) : null}
 			{actions.fork ? renderSetupPromptControl(install) : null}
 			{install?.forkAhead && install.listingDiffHref ? (
 				<SiteLink
@@ -118,6 +128,64 @@ export function renderPackageRepoActions(
 				</a>
 			) : null}
 		</>
+	)
+}
+
+/**
+ * Opens the Follow panel on the Repo tab. Other tabs follow the link there,
+ * and signed-out visitors sign in first.
+ */
+function renderFollowControl(follow: PackageRepoFollowAction) {
+	return <FollowControl follow={follow} />
+}
+function FollowControl({ follow }: { follow: PackageRepoFollowAction }) {
+	const panel = useContext(PackageFollowContext)
+	const following = panel?.following ?? follow.following
+	const label = following ? 'Following' : 'Follow'
+	const tooltip = following
+		? 'Your workspace gets events from this. Change events or unfollow.'
+		: follow.kind === 'repo'
+			? 'Get pushes from this repository in your workspace.'
+			: 'Get new versions and pushes from this in your workspace.'
+	return (
+		<SiteLink
+			href={
+				follow.loggedIn
+					? `${follow.repoHref}${PACKAGE_FOLLOW_HASH}`
+					: follow.loginHref
+			}
+			data-testid="package-follow-toggle"
+			data-package-follow={follow.loggedIn ? follow.kind : undefined}
+			data-following={following ? 'true' : 'false'}
+			aria-controls={follow.loggedIn ? PACKAGE_FOLLOW_PANEL_ID : undefined}
+			aria-expanded={follow.loggedIn ? (panel?.open ?? false) : undefined}
+			onClick={
+				panel && follow.loggedIn
+					? (event) => {
+							if (
+								event.button !== 0 ||
+								event.metaKey ||
+								event.ctrlKey ||
+								event.shiftKey ||
+								event.altKey
+							)
+								return
+							event.preventDefault()
+							panel.toggle()
+						}
+					: undefined
+			}
+			aria-describedby="package-follow-tooltip"
+			css={packageActionSecondaryCss}
+		>
+			{renderIcon(following ? 'check' : 'eye', {
+				size: actionIconSize,
+			})}
+			<span>{label}</span>
+			<span id="package-follow-tooltip" role="tooltip" aria-hidden="true">
+				{tooltip}
+			</span>
+		</SiteLink>
 	)
 }
 

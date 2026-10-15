@@ -148,6 +148,7 @@ import { Route as AtChar123orgSlugChar125ConnectionsRouteImport } from './routes
 import { Route as AtChar123orgSlugChar125CredentialsRouteImport } from './routes/@{$orgSlug}_.-.credentials'
 import { Route as AtChar123orgSlugChar125CreditsRouteImport } from './routes/@{$orgSlug}_.-.credits'
 import { Route as AtChar123orgSlugChar125EmailRouteImport } from './routes/@{$orgSlug}_.-.email'
+import { Route as AtChar123orgSlugChar125FollowsRouteImport } from './routes/@{$orgSlug}_.-.follows'
 import { Route as AtChar123orgSlugChar125GrantsRouteImport } from './routes/@{$orgSlug}_.-.grants'
 import { Route as AtChar123orgSlugChar125IntegrationsRouteImport } from './routes/@{$orgSlug}_.-.integrations'
 import { Route as AtChar123orgSlugChar125JobsRouteImport } from './routes/@{$orgSlug}_.-.jobs'
@@ -981,6 +982,12 @@ const AtChar123orgSlugChar125EmailRoute =
     path: '/@{$orgSlug}/-/email',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AtChar123orgSlugChar125FollowsRoute =
+  AtChar123orgSlugChar125FollowsRouteImport.update({
+    id: '/@{$orgSlug}_/-/follows',
+    path: '/@{$orgSlug}/-/follows',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AtChar123orgSlugChar125GrantsRoute =
   AtChar123orgSlugChar125GrantsRouteImport.update({
     id: '/@{$orgSlug}_/-/grants',
@@ -1777,6 +1784,7 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/credits': typeof AtChar123orgSlugChar125CreditsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
+  '/@{$orgSlug}/-/follows': typeof AtChar123orgSlugChar125FollowsRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
   '/@{$orgSlug}/-/jobs': typeof AtChar123orgSlugChar125JobsRoute
@@ -2030,6 +2038,7 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}/-/credits': typeof AtChar123orgSlugChar125CreditsRoute
   '/@{$orgSlug}/-/email': typeof AtChar123orgSlugChar125EmailRoute
+  '/@{$orgSlug}/-/follows': typeof AtChar123orgSlugChar125FollowsRoute
   '/@{$orgSlug}/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
   '/@{$orgSlug}/-/jobs': typeof AtChar123orgSlugChar125JobsRoute
@@ -2285,6 +2294,7 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/credentials': typeof AtChar123orgSlugChar125CredentialsRoute
   '/@{$orgSlug}_/-/credits': typeof AtChar123orgSlugChar125CreditsRoute
   '/@{$orgSlug}_/-/email': typeof AtChar123orgSlugChar125EmailRoute
+  '/@{$orgSlug}_/-/follows': typeof AtChar123orgSlugChar125FollowsRoute
   '/@{$orgSlug}_/-/grants': typeof AtChar123orgSlugChar125GrantsRoute
   '/@{$orgSlug}_/-/integrations': typeof AtChar123orgSlugChar125IntegrationsRoute
   '/@{$orgSlug}_/-/jobs': typeof AtChar123orgSlugChar125JobsRoute
@@ -2541,6 +2551,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/credits'
     | '/@{$orgSlug}/-/email'
+    | '/@{$orgSlug}/-/follows'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
     | '/@{$orgSlug}/-/jobs'
@@ -2794,6 +2805,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/credentials'
     | '/@{$orgSlug}/-/credits'
     | '/@{$orgSlug}/-/email'
+    | '/@{$orgSlug}/-/follows'
     | '/@{$orgSlug}/-/grants'
     | '/@{$orgSlug}/-/integrations'
     | '/@{$orgSlug}/-/jobs'
@@ -3048,6 +3060,7 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/credentials'
     | '/@{$orgSlug}_/-/credits'
     | '/@{$orgSlug}_/-/email'
+    | '/@{$orgSlug}_/-/follows'
     | '/@{$orgSlug}_/-/grants'
     | '/@{$orgSlug}_/-/integrations'
     | '/@{$orgSlug}_/-/jobs'
@@ -3299,6 +3312,7 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125CredentialsRoute: typeof AtChar123orgSlugChar125CredentialsRoute
   AtChar123orgSlugChar125CreditsRoute: typeof AtChar123orgSlugChar125CreditsRoute
   AtChar123orgSlugChar125EmailRoute: typeof AtChar123orgSlugChar125EmailRoute
+  AtChar123orgSlugChar125FollowsRoute: typeof AtChar123orgSlugChar125FollowsRoute
   AtChar123orgSlugChar125GrantsRoute: typeof AtChar123orgSlugChar125GrantsRoute
   AtChar123orgSlugChar125IntegrationsRoute: typeof AtChar123orgSlugChar125IntegrationsRoute
   AtChar123orgSlugChar125JobsRoute: typeof AtChar123orgSlugChar125JobsRoute
@@ -4384,6 +4398,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125EmailRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/@{$orgSlug}_/-/follows': {
+      id: '/@{$orgSlug}_/-/follows'
+      path: '/@{$orgSlug}/-/follows'
+      fullPath: '/@{$orgSlug}/-/follows'
+      preLoaderRoute: typeof AtChar123orgSlugChar125FollowsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/@{$orgSlug}_/-/grants': {
       id: '/@{$orgSlug}_/-/grants'
       path: '/@{$orgSlug}/-/grants'
@@ -5368,6 +5389,7 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125CredentialsRoute,
   AtChar123orgSlugChar125CreditsRoute: AtChar123orgSlugChar125CreditsRoute,
   AtChar123orgSlugChar125EmailRoute: AtChar123orgSlugChar125EmailRoute,
+  AtChar123orgSlugChar125FollowsRoute: AtChar123orgSlugChar125FollowsRoute,
   AtChar123orgSlugChar125GrantsRoute: AtChar123orgSlugChar125GrantsRoute,
   AtChar123orgSlugChar125IntegrationsRoute:
     AtChar123orgSlugChar125IntegrationsRoute,

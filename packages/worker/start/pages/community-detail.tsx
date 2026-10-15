@@ -14,6 +14,10 @@ import {
 	CommunityDetailContent,
 } from '../components/community-detail-content.tsx'
 import { usePackageInstall } from '../use-package-install.ts'
+import {
+	PackageFollowProvider,
+	PackageFollowPanel,
+} from '../components/package-follow-panel.tsx'
 import { PackageInstallContext } from '../components/package-title-actions.tsx'
 import { renderMarkdownNodes } from '../components/markdown-view.tsx'
 import {
@@ -138,51 +142,58 @@ export function CommunityDetailRoute({
 		}
 	}
 	return (
-		<PackageInstallContext.Provider value={packageInstall.context}>
-			<article css={detailArticleCss}>
-				<CommunityDetailContent
-					{...header}
-					listing={
-						header.listing
-							? {
-									...header.listing,
-									listingBehind:
-										data.viewerCanManage &&
-										data.ownerPackage?.listingNeedsRepublish === true,
-								}
-							: null
-					}
-				/>
-				{listingId
-					? renderInstallStrip({ installMessage, installOutcome })
-					: null}
-				{data.readmeContent
-					? renderReadmeSection(readme, agentsDocsHref)
-					: renderEmptyReadme(agentsDocsHref)}
-				{listingId && data.viewerIsAdmin ? (
-					<AdminFeatureSection
-						{...{
-							featured: listing?.featured ?? false,
-							featureState,
-							featureMessage,
-							onToggleFeature: () => void feature(),
-						}}
+		<PackageFollowProvider
+			username={data.username}
+			kodyId={data.kodyId}
+			follow={header.repoActions?.follow ?? null}
+		>
+			<PackageInstallContext.Provider value={packageInstall.context}>
+				<article css={detailArticleCss}>
+					<CommunityDetailContent
+						{...header}
+						listing={
+							header.listing
+								? {
+										...header.listing,
+										listingBehind:
+											data.viewerCanManage &&
+											data.ownerPackage?.listingNeedsRepublish === true,
+									}
+								: null
+						}
 					/>
-				) : null}
-				{listingId ? (
-					<ReportDisclosure
-						{...{
-							loggedIn: data.loggedIn,
-							reportReason,
-							reportState,
-							reportMessage,
-							onReasonInput: setReportReason,
-							onSubmitReport: () => void report(),
-						}}
-					/>
-				) : null}
-			</article>
-		</PackageInstallContext.Provider>
+					<PackageFollowPanel />
+					{listingId
+						? renderInstallStrip({ installMessage, installOutcome })
+						: null}
+					{data.readmeContent
+						? renderReadmeSection(readme, agentsDocsHref)
+						: renderEmptyReadme(agentsDocsHref)}
+					{listingId && data.viewerIsAdmin ? (
+						<AdminFeatureSection
+							{...{
+								featured: listing?.featured ?? false,
+								featureState,
+								featureMessage,
+								onToggleFeature: () => void feature(),
+							}}
+						/>
+					) : null}
+					{listingId ? (
+						<ReportDisclosure
+							{...{
+								loggedIn: data.loggedIn,
+								reportReason,
+								reportState,
+								reportMessage,
+								onReasonInput: setReportReason,
+								onSubmitReport: () => void report(),
+							}}
+						/>
+					) : null}
+				</article>
+			</PackageInstallContext.Provider>
+		</PackageFollowProvider>
 	)
 }
 

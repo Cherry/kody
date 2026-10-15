@@ -197,6 +197,13 @@ export const featureCatalog: ReadonlyArray<Feature> = [
 		apis: [],
 	},
 	{
+		id: 'follows',
+		title: 'Follows',
+		file: 'follows.md',
+		paths: ['/@{$username}/$kodyId', '/@{$orgSlug}/-/follows'],
+		apis: [],
+	},
+	{
 		id: 'activity',
 		title: 'Activity',
 		file: 'activity.md',

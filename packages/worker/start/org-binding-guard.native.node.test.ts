@@ -100,7 +100,7 @@ function accountRoutesNamedLikeOrgSections(entries: Array<RouteEntry>) {
 	})
 }
 
-/** Legacy `/-/packages` (+ `.json`) and `/-/connections` only 301 to the new names. */
+/** Legacy `/-/packages` and `/-/connections` only 301 to the new names. */
 const legacyOrgListRedirectRoutes = new Set([
 	'/@{$orgSlug}/-/connections',
 	'/@{$orgSlug}/-/connections/$',

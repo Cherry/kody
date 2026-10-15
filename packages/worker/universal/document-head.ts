@@ -540,6 +540,7 @@ const orgDocumentHeads = {
 	orgJobs: titleOnly('Jobs'),
 	orgMcpServers: titleOnly('MCP servers'),
 	orgMemories: titleOnly('Memories'),
+	orgFollows: titleOnly('Follows'),
 	orgOverview: titleOnly('Overview'),
 	orgRepositories: titleOnly('Repositories'),
 	orgSecretProviders: titleOnly('Secret providers'),

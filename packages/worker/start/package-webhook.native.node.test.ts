@@ -381,12 +381,10 @@ test.each(['success', 'lost response'])(
 				signal: AbortSignal
 			}) => read(),
 		)('actor', { username: 'jane', kodyId: 'raycast' })
-		const mutation = client
-			.getMutationCache()
-			.build(client, {
-				...packageWebhookMutationOptions(client),
-				mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
-			})
+		const mutation = client.getMutationCache().build(client, {
+			...packageWebhookMutationOptions(client),
+			mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
+		})
 		const write = mutation
 			.execute({
 				username: 'jane',

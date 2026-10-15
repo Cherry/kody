@@ -19,4 +19,15 @@ export type PackageRepoActions = {
 	publishHref: string | null
 	/** Owner: the package declares an app. */
 	packageAppHref: string | null
+	follow?: PackageRepoFollowAction | null
 }
+
+export type PackageRepoFollowAction = {
+	kind: 'package' | 'repo'
+	loggedIn: boolean
+	loginHref: string
+	repoHref: string
+	following: boolean
+}
+export const PACKAGE_FOLLOW_PANEL_ID = 'package-follow-panel'
+export const PACKAGE_FOLLOW_HASH = '#follow'

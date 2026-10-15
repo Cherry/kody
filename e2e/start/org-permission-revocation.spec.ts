@@ -51,19 +51,23 @@ INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES
 
 		await page.context().clearCookies()
 		await login({ ...member, mode: 'login' })
-		const listHref = `/@${orgSlug}/-/mcp-servers`
+		const listHref = `/@${orgSlug}/-/credentials?kind=mcp`
 		await page.goto(listHref)
 		await waitForClientHydration(page)
 		await expect(
-			page.getByRole('heading', { name: 'MCP servers', exact: true }),
+			page.getByRole('heading', { name: 'Credentials', exact: true }),
 		).toBeVisible()
 		await page.evaluate((value) => {
 			;(window as unknown as Record<string, unknown>).__revocationDocument =
 				value
 		}, id)
-		await page.getByRole('button', { name: 'Add server', exact: true }).click()
-		await expect(page).toHaveURL(new RegExp(`/@${orgSlug}/-/mcp-servers/new$`))
-		await expect(page.getByLabel('Server URL')).toBeVisible()
+		await page
+			.getByRole('link', { name: 'Add credential', exact: true })
+			.click()
+		await expect(page).toHaveURL(new RegExp(`/@${orgSlug}/-/credentials/new$`))
+		await expect(
+			page.getByRole('heading', { name: 'Add a credential', exact: true }),
+		).toBeVisible()
 
 		await memberRow.getByRole('button', { name: 'Remove', exact: true }).click()
 		await memberRow
@@ -74,10 +78,12 @@ INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES
 			ownerPage.getByText('Member removed.', { exact: true }),
 		).toBeVisible()
 
-		// Same document and QueryClient, within the list's 60 second freshness
+		// Same document and QueryClient, within the list's 30 second freshness
 		// window. Back navigation must recheck access instead of reusing the cache.
 		await page.goBack()
-		await expect(page).toHaveURL(new RegExp(`/@${orgSlug}/-/mcp-servers$`))
+		await expect(page).toHaveURL(
+			new RegExp(`/@${orgSlug}/-/credentials\\?kind=mcp$`),
+		)
 		await expect(page.getByTestId('not-found-page')).toBeVisible()
 		expect(
 			await page.evaluate(
@@ -86,7 +92,7 @@ INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES
 			),
 		).toBe(id)
 		await expect(
-			page.getByRole('heading', { name: 'MCP servers', exact: true }),
+			page.getByRole('heading', { name: 'Credentials', exact: true }),
 		).toHaveCount(0)
 
 		// As in org-binding-guard, forge only the org input from a usable form.
@@ -136,7 +142,7 @@ INSERT INTO org_memberships (org_id, user_id, role, created_at) VALUES
 		await ownerPage.goto(`${origin}${listHref}`)
 		await waitForClientHydration(ownerPage)
 		await expect(
-			ownerPage.getByRole('heading', { name: 'MCP servers', exact: true }),
+			ownerPage.getByRole('heading', { name: 'Credentials', exact: true }),
 		).toBeVisible()
 		await expect(
 			ownerPage.getByText(`revoked-write-${id}`, { exact: true }),
