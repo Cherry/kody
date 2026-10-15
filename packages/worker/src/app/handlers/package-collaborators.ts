@@ -6,7 +6,7 @@ import {
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import {
 	packageCollaboratorRemoveCapability,
-	packageCollaboratorSetCapability,
+	setPackageCollaboratorAccess,
 } from '#mcp/capabilities/access/package-collaborators.ts'
 import { type CapabilityContext } from '#mcp/capabilities/types.ts'
 import { createMcpCallerContext } from '#mcp/context.ts'
@@ -174,7 +174,7 @@ export function grantPackageCollaborator(
 	},
 ) {
 	return changeCollaborator(input, async ({ ctx, savedPackage }) => {
-		await packageCollaboratorSetCapability.handler(
+		await setPackageCollaboratorAccess(
 			{
 				package_id: savedPackage.id,
 				...(input.subjectType === 'team'
