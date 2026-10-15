@@ -1,5 +1,22 @@
 # Start parity audit
 
+## Matched documentation typography
+
+Desktop `/docs/connect` comparisons used the same browser viewport on production
+and preview merge `f7aa53c9e`. Main article text and provider content matched,
+but the preview header's generic paragraph selector overrode its label and hint
+styles. Production's Docs label is 12.8px and green; preview used the 17.28px
+muted paragraph style. The hint was 15.2px on production and 17.28px on preview,
+wrapping to three lines rather than two. Local commit `b21c89fd0` moves those
+overrides into more specific header selectors. Start app typechecking, lint and
+formatting pass; deployed visual verification is pending.
+
+Screenshots: `/tmp/kody-docs-production-desktop.png` and
+`/tmp/kody-docs-preview-desktop.png`. Production was signed in as an admin,
+preview as the test account, so account avatar, Admin navigation and the 2.54px
+header-height difference are not matched-state evidence. These comparisons do
+not establish all-screen parity.
+
 ## Authorization, cache and redirect evidence
 
 Node job `116554589185` in Validate `38773350396` passed the focused
