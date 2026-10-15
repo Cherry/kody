@@ -1,6 +1,8 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
 	method: 'POST',
+	status: vi.fn(),
+	header: vi.fn(),
 	write: vi.fn(),
 	complete: vi.fn(),
 	pageAuth: vi.fn(),
@@ -25,6 +27,8 @@ vi.mock('@tanstack/react-start', async (original) => ({
 	},
 }))
 vi.mock('@tanstack/react-start/server', () => ({
+	setResponseStatus: mocks.status,
+	setResponseHeader: mocks.header,
 	getRequest: () =>
 		new Request('https://kody.test/@team/-/usage', { method: mocks.method }),
 }))
@@ -72,7 +76,9 @@ test('HEAD never authorizes or applies a credit top-up', async () => {
 	mocks.method = 'HEAD'
 	await expect(
 		completeCreditTopUp({ data: { orgSlug: 'team', sessionId: 'cs_1' } }),
-	).rejects.toMatchObject({ status: 405 })
+	).rejects.toThrow('Method not allowed.')
+	expect(mocks.status).toHaveBeenCalledWith(405)
+	expect(mocks.header).toHaveBeenCalledWith('Allow', 'GET, POST')
 	expect(mocks.write).not.toHaveBeenCalled()
 	expect(mocks.complete).not.toHaveBeenCalled()
 })
@@ -91,7 +97,8 @@ test('domain permission rejection propagates instead of reporting added credits'
 	})
 	await expect(
 		completeCreditTopUp({ data: { orgSlug: 'team', sessionId: 'cs_1' } }),
-	).rejects.toMatchObject({ status: 403 })
+	).rejects.toThrow('Billing access required')
+	expect(mocks.status).toHaveBeenCalledWith(403)
 })
 
 test('signed-out completion preserves the checkout return URL and never writes', async () => {
@@ -112,4 +119,15 @@ test('signed-out completion preserves the checkout return URL and never writes',
 	})
 	expect(mocks.write).not.toHaveBeenCalled()
 	expect(mocks.complete).not.toHaveBeenCalled()
+})
+
+test('missing organization uses native not-found instead of a raw HTTP response', async () => {
+	mocks.complete.mockResolvedValue({
+		kind: 'denied',
+		status: 404,
+		error: 'Organization unavailable.',
+	})
+	await expect(
+		completeCreditTopUp({ data: { orgSlug: 'team', sessionId: 'cs_1' } }),
+	).rejects.toMatchObject({ isNotFound: true })
 })

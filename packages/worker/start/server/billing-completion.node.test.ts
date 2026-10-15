@@ -35,9 +35,11 @@ vi.mock('../../src/app/env.ts', () => ({
 vi.mock('@tanstack/react-start/server', () => ({
 	getRequest: () => state.request,
 	setResponseHeader: state.header,
+	setResponseStatus: state.status,
 }))
 vi.mock('@tanstack/react-router', () => ({
 	redirect: (value: unknown) => value,
+	notFound: () => ({ isNotFound: true }),
 }))
 vi.mock('../../src/app/auth-session.ts', () => ({
 	setAuthSessionSecret: vi.fn(),
@@ -135,7 +137,7 @@ test('unknown organization is denied before completion', async () => {
 		loadBillingCompletion({
 			data: { orgSlug: 'team', sessionId: 'cs_checkout' },
 		}),
-	).rejects.toMatchObject({ status: 404 })
+	).rejects.toMatchObject({ isNotFound: true })
 	expect(state.operation).not.toHaveBeenCalled()
 })
 test('HEAD cannot authenticate or complete checkout', async () => {
@@ -146,7 +148,9 @@ test('HEAD cannot authenticate or complete checkout', async () => {
 		loadBillingCompletion({
 			data: { orgSlug: 'team', sessionId: 'cs_checkout' },
 		}),
-	).rejects.toMatchObject({ status: 405 })
+	).rejects.toThrow('Method not allowed.')
+	expect(state.status).toHaveBeenCalledWith(405)
+	expect(state.header).toHaveBeenCalledWith('Allow', 'GET')
 	expect(state.auth).not.toHaveBeenCalled()
 	expect(state.operation).not.toHaveBeenCalled()
 })
@@ -182,7 +186,10 @@ test('deleting accounts receive 409 before authentication, scope lookup or Strip
 		loadBillingCompletion({
 			data: { orgSlug: 'team', sessionId: 'cs_checkout' },
 		}),
-	).rejects.toMatchObject({ status: 409 })
+	).rejects.toThrow(
+		'Account deletion is in progress; user-owned writes are disabled.',
+	)
+	expect(state.status).toHaveBeenCalledWith(409)
 	expect(state.lease).not.toHaveBeenCalled()
 	expect(state.auth).not.toHaveBeenCalled()
 	expect(state.operation).not.toHaveBeenCalled()
@@ -198,7 +205,24 @@ test.each([
 			loadBillingCompletion({
 				data: { orgSlug: 'team', sessionId: 'cs_checkout' },
 			}),
-		).rejects.toMatchObject({ status })
+		).rejects.toThrow(
+			'Account deletion is in progress; user-owned writes are disabled.',
+		)
+		expect(state.status).toHaveBeenCalledWith(status)
 		expect(state.operation).not.toHaveBeenCalled()
 	},
 )
+
+test('checkout permission denial rejects with its message and HTTP status', async () => {
+	state.operation.mockResolvedValue({
+		ok: false,
+		status: 403,
+		error: 'Billing access required',
+	})
+	await expect(
+		loadBillingCompletion({
+			data: { orgSlug: 'team', sessionId: 'cs_checkout' },
+		}),
+	).rejects.toThrow('Billing access required')
+	expect(state.status).toHaveBeenCalledWith(403)
+})

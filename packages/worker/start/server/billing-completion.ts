@@ -1,5 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
-import { redirect } from '@tanstack/react-router'
+import { notFound, redirect } from '@tanstack/react-router'
 
 export const loadBillingCompletion = createServerFn({ method: 'GET' })
 	.validator((data: { orgSlug: string; sessionId: string | null }) => {
@@ -15,7 +15,7 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 	.handler(async ({ data }) => {
 		const [
 			{ env },
-			{ getRequest, setResponseHeader },
+			{ getRequest, setResponseHeader, setResponseStatus },
 			{ getEnv },
 			{ setAuthSessionSecret },
 			{ completeOrgBillingCheckout },
@@ -36,8 +36,11 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 			import('../../src/request-context/request-context.ts'),
 			import('../../universal/org-pages.ts'),
 		])
-		if (getRequest().method !== 'GET')
-			throw new Response(null, { status: 405, headers: { Allow: 'GET' } })
+		if (getRequest().method !== 'GET') {
+			setResponseStatus(405)
+			setResponseHeader('Allow', 'GET')
+			throw new Error('Method not allowed.')
+		}
 		const bindings = getEnv(env)
 		setAuthSessionSecret(bindings.COOKIE_SECRET)
 		const request = getRequest()
@@ -90,13 +93,32 @@ export const loadBillingCompletion = createServerFn({ method: 'GET' })
 			const cookies = result.headers.getSetCookie()
 			if (cookies.length) setResponseHeader('Set-Cookie', cookies)
 			const location = result.headers.get('Location')
-			if (!location) throw result
+			if (!location) {
+				setResponseStatus(result.status)
+				// The shared write lease returns its account lifecycle error as JSON.
+				const body: unknown = await result.json()
+				const message =
+					body &&
+					typeof body === 'object' &&
+					'error' in body &&
+					body.error &&
+					typeof body.error === 'object' &&
+					'message' in body.error &&
+					typeof body.error.message === 'string'
+						? body.error.message
+						: 'Checkout completion failed.'
+				throw new Error(message)
+			}
 			throw redirect({
 				href: location,
 				statusCode: result.status,
 			})
 		}
-		if (!result.ok) throw new Response(result.error, { status: result.status })
+		if (!result.ok) {
+			if (result.status === 404) throw notFound()
+			setResponseStatus(result.status)
+			throw new Error(result.error)
+		}
 		return {
 			payload: result,
 			head: loadDocumentHead('orgBillingSuccess', pathname, {

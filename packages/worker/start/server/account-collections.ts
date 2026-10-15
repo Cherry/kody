@@ -430,7 +430,12 @@ export const loadBillingPage = createServerFn({ method: 'GET' })
 			user,
 			permission: 'billing:read',
 		})
-		if (!access.ok) throw new Response(access.error, { status: access.status })
+		if (!access.ok) {
+			if (access.status === 404) throw notFound()
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(access.status)
+			throw new Error(access.error)
+		}
 		const payload = await loadOrgBillingPageData({
 			env: bindings,
 			user,
@@ -522,7 +527,9 @@ export const loadUsagePage = createServerFn({ method: 'GET' })
 		})
 		if (result.kind === 'denied') {
 			if (result.status === 404) throw notFound()
-			throw new Response(result.error, { status: result.status })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(result.status)
+			throw new Error(result.error)
 		}
 		return {
 			payload: result.payload,

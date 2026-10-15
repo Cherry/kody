@@ -2,10 +2,45 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `0c9578c8f`
+
+A subsequent source audit found a remaining cutover issue in billing/usage,
+organization reads and billing completion errors. Installed Start 1.170.34 marks
+thrown `Response` values as raw responses; its browser fetcher returns those
+before checking HTTP status. A caller can therefore receive a Response instead
+of the expected typed data or rejected error. Server authorization is still
+enforced, but error rendering and completion redirects can regress. These throws
+now use native serializable errors and explicit status locally. All four Start
+typechecks pass; added read and completion regression tests still require CI
+runtime proof.
+
+Pushed head `0c9578c8f5c3830826a4066c5b370e7fe2397d7a` includes main
+`3c09d6737`. All four Start TypeScript configurations passed after merging.
+Validate `38708657887` and Preview `38708657868` are running, so runtime and
+deployment verification for this head remain pending.
+
+The incoming follows feature now uses native Start routes, Query resources and
+separate follow, resume and unfollow server functions. Shared operations retain
+workspace binding, target permissions, rate limits and ownership checks. The
+legacy follows page, package controller and HTTP handler total 1,231 removed
+lines compared with incoming main. No website follows JSON endpoints remain.
+Retired org JSON/action paths no longer count as website routes. Modified
+follow-link clicks retain normal browser navigation.
+
+The preceding Validate `38705271509` finished with one E2E failure: the
+revocation test expected the retired MCP index, which redirects to Credentials.
+The corrected test warms the canonical Credentials page and retains real
+membership removal, same-document cache revisit and forged-write denial. That
+correction, the new follows coverage and the direct HEAD verification RPC
+regression await the current CI run. No local runtime tests were run for this
+catch-up. Migration files and the migration ledger match fetched main exactly.
+
+Authenticated preview and matched visual verification remain incomplete.
+
 ### Follow-up at source `083f0e961`
 
 Validate `38705271509` for pushed head `423e7534c` passed Static, Node, Workers
-and MCP. Browser E2E is still running at this inspection. Preview `38705271507`
+and MCP. Browser E2E later failed as described above. Preview `38705271507`
 completed successfully. `/health` returned `ok: true` at deployed merge
 `12d4f005d572da2bdaf78634f284d4ca760f6b1d`, containing `423e7534c` and main
 `8494ca6b7`.

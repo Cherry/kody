@@ -50,7 +50,9 @@ export const loadOrgMembers = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) {
 			if (access.status === 404) throw notFound()
-			throw new Response(access.error, { status: 403 })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(403)
+			throw new Error(access.error)
 		}
 
 		return loadOrgMembersData({ ...input, org: access.org })
@@ -71,7 +73,9 @@ export const loadOrgSettings = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) {
 			if (access.status === 404) throw notFound()
-			throw new Response(access.error, { status: 403 })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(403)
+			throw new Error(access.error)
 		}
 
 		return loadOrgSettingsData({ ...input, org: access.org })
@@ -92,7 +96,9 @@ export const loadOrgTeams = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) {
 			if (access.status === 404) throw notFound()
-			throw new Response(access.error, { status: 403 })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(403)
+			throw new Error(access.error)
 		}
 
 		return loadOrgTeamsData({ ...input, org: access.org })
@@ -113,7 +119,9 @@ export const loadOrgGrants = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) {
 			if (access.status === 404) throw notFound()
-			throw new Response(access.error, { status: 403 })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(403)
+			throw new Error(access.error)
 		}
 
 		return loadOrgGrantsData({ ...input, org: access.org })
@@ -134,7 +142,9 @@ export const loadOrgCollaborators = createServerFn({ method: 'GET' })
 		})
 		if (!access.ok) {
 			if (access.status === 404) throw notFound()
-			throw new Response(access.error, { status: 403 })
+			const { setResponseStatus } = await import('@tanstack/react-start/server')
+			setResponseStatus(403)
+			throw new Error(access.error)
 		}
 
 		return loadOrgCollaboratorsData({ ...input, org: access.org })

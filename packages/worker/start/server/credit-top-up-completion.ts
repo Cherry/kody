@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start'
+import { notFound } from '@tanstack/react-router'
 import { z } from 'zod'
 
 export const completeCreditTopUp = createServerFn({ method: 'POST' })
@@ -9,9 +10,13 @@ export const completeCreditTopUp = createServerFn({ method: 'POST' })
 		}),
 	)
 	.handler(async ({ data }) => {
-		const { getRequest } = await import('@tanstack/react-start/server')
-		if (getRequest().method === 'HEAD')
-			throw new Response(null, { status: 405, headers: { Allow: 'GET, POST' } })
+		const { getRequest, setResponseStatus, setResponseHeader } =
+			await import('@tanstack/react-start/server')
+		if (getRequest().method === 'HEAD') {
+			setResponseStatus(405)
+			setResponseHeader('Allow', 'GET, POST')
+			throw new Error('Method not allowed.')
+		}
 		const { loadScopedCollection } = await import('./collection-context.ts')
 		const search = new URLSearchParams({
 			topup: 'success',
@@ -29,8 +34,11 @@ export const completeCreditTopUp = createServerFn({ method: 'POST' })
 			{ scope: { orgSlug: data.orgSlug } },
 			async (context) => {
 				const result = await completeOrgCreditTopUp({ ...context, ...data })
-				if (result.kind === 'denied')
-					throw new Response(result.error, { status: result.status })
+				if (result.kind === 'denied') {
+					if (result.status === 404) throw notFound()
+					setResponseStatus(result.status)
+					throw new Error(result.error)
+				}
 				return { href: result.href }
 			},
 		)
