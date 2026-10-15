@@ -17,13 +17,13 @@ copy is selected explicitly by page owners rather than by a pathname matcher.
 
 All four Start typechecks, worker-test and tools typechecks, lint, Knip, and
 documentation reference checks passed. Runtime confirmation is pending in
-Validate run `38717968492`. Workers, MCP, and E2E passed. Node
-finished with six failures: four OAuth scope fixtures imported an incomplete
-Cloudflare mock, and two MCP authorization cases treated an inaccessible
-organization as signed out. Corrections are being reviewed locally without
-weakening the assertions. Static failed only its Format step; local formatting
-corrections have not yet been verified by a subsequent CI run. Preview run
-`38717968495` succeeded, and the health endpoint confirms deployed merge
+Validate run `38717968492`. Workers, MCP, and E2E passed. Node finished with six
+failures: four OAuth scope fixtures imported an incomplete Cloudflare mock, and
+two MCP authorization cases treated an inaccessible organization as signed out.
+Corrections are being reviewed locally without weakening the assertions. Static
+failed only its Format step; local formatting corrections have not yet been
+verified by a subsequent CI run. Preview run `38717968495` succeeded, and the
+health endpoint confirms deployed merge
 `27bb89acdc80ce0a36f754a5b5c03f048ce26f3d`, combining this source with main
 `742ca59d3ccd3fe366668f6870c376cba91c012f`. These changes do not establish
 authenticated or populated-fixture visual parity.
