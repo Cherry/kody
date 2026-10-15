@@ -1,7 +1,7 @@
 /** Keep cached SSR documents reusable without sharing a script nonce with visitors. */
 export function prepareNonceHtmlForDelivery(
 	response: Response,
-	{ cached }: { cached: boolean },
+	{ cached, nonce: deliveryNonce }: { cached: boolean; nonce?: string },
 ) {
 	if (
 		!response.headers.get('Content-Type')?.toLowerCase().includes('text/html')
@@ -10,7 +10,9 @@ export function prepareNonceHtmlForDelivery(
 	const policy = response.headers.get('Content-Security-Policy')
 	const previous = policy?.match(/'nonce-([A-Za-z0-9+/_=-]+)'/)?.[1]
 	if (!previous || !policy) return response
-	const nonce = cached ? crypto.randomUUID().replaceAll('-', '') : previous
+	const nonce = cached
+		? (deliveryNonce ?? crypto.randomUUID().replaceAll('-', ''))
+		: previous
 	const headers = new Headers(response.headers)
 	headers.set(
 		'Content-Security-Policy',

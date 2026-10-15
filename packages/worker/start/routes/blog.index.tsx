@@ -11,7 +11,11 @@ const pageQuery = createPageQuery('loadBlog', loadBlog, {
 })
 
 export const Route = createFileRoute('/blog/')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	// Blog content is build-backed and does not depend on search parameters.
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>

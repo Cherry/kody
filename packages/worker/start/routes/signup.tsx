@@ -4,7 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { LoginPage } from '../pages/login.tsx'
 import { loadAuthPage } from '#start/server/auth-page'
 export const Route = createFileRoute('/signup')({
-	staticData: { shell: { mode: 'auth' } },
+	staticData: { anonymousDocumentCache: 'marketing', shell: { mode: 'auth' } },
 	head: staticDocumentHead('signup'),
 	loaderDeps: ({ search }) => search,
 	loader: ({ abortController, location }) =>

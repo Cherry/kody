@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { GmailPage } from '../pages/acquisition/gmail.tsx'
 export const Route = createFileRoute('/integrations_/gmail')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('gmail'),
 	server: {
 		middleware: [negotiatedDocument],

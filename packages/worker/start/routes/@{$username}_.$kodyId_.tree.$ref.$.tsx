@@ -10,7 +10,11 @@ const pageQuery = createPageQuery('loadPackageFiles', loadPackageFiles, {
 })
 
 export const Route = createFileRoute('/@{$username}_/$kodyId_/tree/$ref/$')({
-	staticData: { motionGroup: 'package', shell: { gutters: 'page' } },
+	staticData: {
+		anonymousDocumentCache: 'visibility',
+		motionGroup: 'package',
+		shell: { gutters: 'page' },
+	},
 	context: ({ location, params }) => ({
 		pageQueryInput: {
 			resource: {

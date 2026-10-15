@@ -12,7 +12,10 @@ const pageQuery = createPageQuery('loadPackage', loadPackage, {
 })
 
 export const Route = createFileRoute('/community_/$listingId')({
-	staticData: { shell: { gutters: 'page' } },
+	staticData: {
+		anonymousDocumentCache: 'visibility',
+		shell: { gutters: 'page' },
+	},
 	loaderDeps: ({ search }) => search,
 	context: ({ location, params }) => ({
 		pageQueryInput: {

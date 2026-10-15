@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { AutomationPage } from '../pages/acquisition/automation.tsx'
 export const Route = createFileRoute('/use-cases_/ai-workflow-automation')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('automation'),
 	server: {
 		middleware: [negotiatedDocument],

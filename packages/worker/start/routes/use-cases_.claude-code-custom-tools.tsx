@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { CustomToolsPage } from '../pages/acquisition/customTools.tsx'
 export const Route = createFileRoute('/use-cases_/claude-code-custom-tools')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('customTools'),
 	server: {
 		middleware: [negotiatedDocument],

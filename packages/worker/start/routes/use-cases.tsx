@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { UseCasesPage } from '../pages/acquisition/useCases.tsx'
 export const Route = createFileRoute('/use-cases')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('useCases'),
 	server: {
 		middleware: [negotiatedDocument],

@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { loadPageQuery, createPageQuery, usePageQuery } from '../page-query.ts'
-import { rejectActionPageHead } from '../action-page-method.ts'
+import { creditTopUpHead } from '../credit-top-up-head.ts'
 import { completeCreditTopUp } from '#start/server/credit-top-up-completion'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { AccountUsagePage } from '../pages/account-usage.tsx'
@@ -17,17 +17,7 @@ export const Route = createFileRoute('/@{$orgSlug}_/-/usage')({
 		navigation: { rail: 'workspace', item: 'usage' },
 		orgScope: {},
 	},
-	server: {
-		handlers: {
-			HEAD: ({ request, next }) => {
-				const search = new URL(request.url).searchParams
-				return search.get('topup') === 'success' &&
-					search.get('session_id')?.trim()
-					? rejectActionPageHead()
-					: next()
-			},
-		},
-	},
+	server: { middleware: [creditTopUpHead] },
 	preloadStaleTime: 0,
 	loaderDeps: ({ search }: { search: Record<string, unknown> }) => ({
 		credits: search.credits,

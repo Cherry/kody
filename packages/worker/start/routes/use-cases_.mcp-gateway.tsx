@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { McpGatewayPage } from '../pages/acquisition/mcpGateway.tsx'
 export const Route = createFileRoute('/use-cases_/mcp-gateway')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('mcpGateway'),
 	server: {
 		middleware: [negotiatedDocument],

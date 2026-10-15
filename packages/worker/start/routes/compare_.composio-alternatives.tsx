@@ -6,7 +6,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { ComposioAlternativesPage } from '../pages/acquisition/composioAlternatives.tsx'
 export const Route = createFileRoute('/compare_/composio-alternatives')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	head: staticDocumentHead('composioAlternatives'),
 	server: {
 		middleware: [negotiatedDocument],

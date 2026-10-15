@@ -61,7 +61,7 @@ import {
 	resolveVerifiedCustomHostnameIfEnabled,
 } from '#app/package-app-origin.ts'
 import { refuseNonCanonicalProductionHost } from '#app/canonical-host.ts'
-import { serveAnonymousHtmlFromCache } from '#app/anonymous-html-edge-cache.ts'
+import { deliverAnonymousDocument } from '#app/anonymous-html-edge-cache.ts'
 import { handleInboundEmail } from '#worker/email/inbound.ts'
 import { handleQueueBatch } from '#worker/queue-handler.ts'
 import { handleDrRestoreRequest } from '#worker/dr/dr-restore.ts'
@@ -846,8 +846,9 @@ async function fetchWithDynamicWorkerBudget(
 		if (gitResponse) return gitResponse
 	}
 
-	return serveAnonymousHtmlFromCache(request, env, ctx, () =>
-		handleOriginAppFetch(request, env, ctx, url),
+	return deliverAnonymousDocument(
+		request,
+		await handleOriginAppFetch(request, env, ctx, url),
 	)
 }
 

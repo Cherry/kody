@@ -1,5 +1,24 @@
 # Start parity audit
 
+## Native cache and credit-return follow-up
+
+Anonymous cache eligibility and TTL now live on native routes. The origin no
+longer maintains a separate URL table. Frame-specific cache handling and the
+package document classifier are removed. Independent review checked session,
+authorization, referral, cookie, deployment-version, completeness, and nonce
+boundaries. Pending Start event cookies force no-store for every content type,
+including plaintext responses that already carry public cache headers.
+
+Added native middleware lifecycle coverage for cache hits skipping loaders, HEAD
+bodies, pending cookies, private routes, and error responses, plus workerd nonce
+rewrite coverage. These tests await CI execution. Full typecheck passed; the
+final event-cookie adjustment also passed the server-test typecheck.
+
+Both usage routes now share native middleware that rejects actionable payment
+HEAD requests before loaders. Ordinary requests reach native authentication and
+redirect loaders, correcting the two browser failures from run `38720130750`.
+Runtime confirmation remains pending.
+
 ## Follow-up at source `d9c4311c6`
 
 Preview run `38720130802` succeeded. The health endpoint confirmed deployed
@@ -13,7 +32,10 @@ middleware. The OAuth navigation fixture ran Router in server mode, where client
 navigation is ignored. Both have local corrections that preserve the existing
 assertions. Retained-page and head-navigation failures are still under review.
 The account-rail assertion and Static typecheck boundary have local corrections.
-Browser E2E remained in progress at this observation.
+Browser E2E finished with 164 passes and two failures, both on the legacy
+/account/usage credit-return URL: anonymous login redirection and safe HEAD
+handling. The server reported that a componentless route cannot defer to the app
+renderer. This is a route contract regression under correction.
 
 The working tree also moves workspace-switch destinations and document
 negotiation into native route metadata and middleware. Independent review found
@@ -25,6 +47,14 @@ Two-factor operations now enforce rate limits at the shared business boundary,
 with regression coverage. Local full typecheck, formatting, lint, and Knip
 passed before the latest test fixture corrections. No local runtime tests were
 run. These changes still need CI and deployed confirmation.
+
+Browser comparison on deployed merge `8dbec28f7` followed the docs index's Next
+link to `/docs/search-and-execute`, then used browser Back to return to `/docs`
+on both hosts. Destination headings and URLs matched. Viewed screenshots of
+Search and execute showed matching article typography, wrapping, sidebar
+selection, and background treatment. Production remained signed in and preview
+anonymous, so header/admin navigation differences and viewport-height
+differences prevent an exact matched-state visual parity claim.
 
 ## Follow-up at source `b1ae9038c`
 

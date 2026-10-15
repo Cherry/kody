@@ -234,5 +234,32 @@ The current workflow skips local runtime tests before catch-up pushes by user
 request. CI success does not prove visual or authenticated action parity. The
 [parity audit](./tanstack-start-parity-audit.md) tracks evidence and gaps.
 
+## 11. Anonymous document caching
+
+```mermaid
+flowchart TD
+    A[Start matches native route] --> B[Route declares anonymous cache policy]
+    B --> C{Request eligible?}
+    C -->|Session, authorization, referral or excluded request| D[Run authorized loaders and render]
+    C -->|Anonymous GET or HEAD| E[Look up deployment-specific cache key]
+    E -->|Miss| D
+    E -->|Hit| F[Skip document loaders]
+    D --> G{Successful complete response without cookies?}
+    G -->|Yes, opted-in route| H[Store document with its matching CSP]
+    G -->|No| I[Do not store]
+    F --> J[Rewrite cached markup to current request nonce]
+    H --> K[Deliver response]
+    I --> K
+    J --> K
+    K --> L[HTML is private, no-store in the browser]
+```
+
+Native route metadata owns eligibility and the marketing or visibility-sensitive
+TTL. Cache keys include the Worker version so a deployment cannot replay old
+asset references. Cached HTML receives a fresh nonce that matches the delivered
+CSP. HEAD returns no body and does not populate the cache. Method guards reject
+actionable HEAD requests before document loaders. This lifecycle awaits CI
+verification; it is not yet deployed evidence.
+
 Implementation details and source links:
 [web architecture](./tanstack-start.md).

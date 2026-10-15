@@ -81,12 +81,7 @@ test('anonymous HTML Cache API stores only cookie-less 200 HTML with the shared 
 			{ headers: { Cookie: 'kody_session=stale' } },
 			false,
 		],
-		[
-			'https://kody.codes/community',
-			{ headers: { 'x-remix-target': 'community-listings' } },
-			false,
-		],
-		['https://kody.codes/community?__frame=community-listings', {}, false],
+		['https://kody.codes/?ref=alice', {}, false],
 		['https://kody.codes.legacy.example/', {}, false],
 		['https://kody-apps.example/', {}, false],
 		[
@@ -104,7 +99,11 @@ test('anonymous HTML Cache API stores only cookie-less 200 HTML with the shared 
 	expect(
 		requestCases.filter(
 			([url, init, expected, env = canonicalEnv]) =>
-				isAnonymousHtmlCacheRequest(new Request(url, init), env) !== expected,
+				isAnonymousHtmlCacheRequest(
+					new Request(url, init),
+					env,
+					'marketing',
+				) !== expected,
 		),
 	).toEqual([])
 
@@ -181,4 +180,13 @@ test('the stored entry keeps the buffered body and moves Vary aside', async () =
 	expect(entry.headers.get('X-Kody-Browser-Vary')).toBe('Cookie, Accept')
 	expect(entry.headers.get('Vary')).toBe('Accept')
 	expect(entry.headers.get('Cache-Control')).toBe(anonymousHtmlCacheControl)
+})
+
+test('routes that do not opt in never look up shared entries', () => {
+	expect(
+		isAnonymousHtmlCacheRequest(
+			new Request('https://kody.codes/account'),
+			canonicalEnv,
+		),
+	).toBe(false)
 })

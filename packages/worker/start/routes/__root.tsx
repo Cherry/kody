@@ -2,6 +2,7 @@
 import { pageNavigationForMatches } from '../page-navigation.ts'
 import { appShellForMatches } from '../app-shell.ts'
 import { requiresSessionVerification } from '../session-verification-policy.ts'
+import { documentCache } from '../document-cache.ts'
 import { routeMethods } from '../route-method-middleware.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildUnauthorizedErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -65,7 +66,7 @@ export const Route = createRootRouteWithContext<{
 	queryClient: QueryClient
 	getCommittedPage: () => CommittedPage | null
 }>()({
-	server: { middleware: [routeMethods] },
+	server: { middleware: [routeMethods, documentCache] },
 	// Query owns shell presentation freshness. Private foreground navigation
 	// independently verifies the immutable document actor before committing.
 	preload: false,

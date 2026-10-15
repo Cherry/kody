@@ -14,6 +14,7 @@ const pageQuery = createPageQuery('loadDocsConnect', loadDocsConnect, {
 
 export const Route = createFileRoute('/docs/connect')({
 	staticData: {
+		anonymousDocumentCache: 'marketing',
 		motionGroup: 'docs',
 		shell: { gutters: 'page' },
 		sessionVerification: 'public',

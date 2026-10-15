@@ -4,7 +4,11 @@ import { staticDocumentHead } from '../components/document-head.ts'
 import { WithAgentRoute } from '../pages/with-agent.tsx'
 import { findWithAgent } from '#universal/with-agents.ts'
 export const Route = createFileRoute('/with/$agent')({
-	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		shell: { gutters: 'page' },
+		sessionVerification: 'public',
+	},
 	beforeLoad: ({ params }) => {
 		const agent = findWithAgent(params.agent ?? '')
 		if (!agent) throw notFound()

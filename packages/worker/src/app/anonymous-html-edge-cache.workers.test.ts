@@ -3,10 +3,23 @@ import { expect, test } from 'vitest'
 import { anonymousHtmlCacheControl } from '#app/anonymous-html-cache.ts'
 import {
 	anonymousHtmlEdgeCacheHeader,
+	deliverAnonymousDocument,
 	buildAnonymousHtmlCacheKey,
-	serveAnonymousHtmlFromCache,
+	serveAnonymousHtmlFromCache as serveWithPolicy,
 } from '#app/anonymous-html-edge-cache.ts'
 import { silenceExpectedConsoleWarns } from '#worker/test-support/console-spies.ts'
+
+async function serveAnonymousHtmlFromCache(
+	...args: Parameters<typeof serveWithPolicy>
+) {
+	return deliverAnonymousDocument(
+		args[0],
+		await serveWithPolicy(args[0], args[1], args[2], args[3], {
+			policy: 'marketing',
+			...args[4],
+		}),
+	)
+}
 
 const env = {
 	CF_VERSION_METADATA: { id: 'version-1' },
@@ -286,4 +299,57 @@ test('a deployment cannot replay previous assets or accept a caller-selected ver
 	expect(missing.lookup).toBeNull()
 	expect(missing.body).toContain('/assets/uncached.js')
 	expect((await fetchVersion(undefined)).lookup).toBeNull()
+})
+
+test('native cache hit uses the current request nonce without executing its loader', async () => {
+	const url = `https://test.kody.dev/pricing?request-nonce=${crypto.randomUUID()}`
+	const request = new Request(url)
+	const ctx = createExecutionContext()
+	const first = await serveAnonymousHtmlFromCache(
+		request,
+		env,
+		ctx,
+		async () =>
+			new Response('<html><script nonce="firstrequest">ok()</script></html>', {
+				headers: {
+					'Content-Type': 'text/html',
+					'Content-Security-Policy': "script-src 'self' 'nonce-firstrequest'",
+					'Cache-Control': anonymousHtmlCacheControl,
+				},
+			}),
+		{ policy: 'marketing', nonce: 'firstrequest' },
+	)
+	await first.text()
+	await waitOnExecutionContext(ctx)
+	const hit = await serveAnonymousHtmlFromCache(
+		request,
+		env,
+		createExecutionContext(),
+		async () => {
+			throw new Error('Cached route must not execute its loader')
+		},
+		{ policy: 'marketing', nonce: 'secondrequest' },
+	)
+	expect(hit.headers.get('X-Kody-Cache')).toBe('HIT')
+	expect(hit.headers.get('Content-Security-Policy')).toContain(
+		"'nonce-secondrequest'",
+	)
+	expect(await hit.text()).toContain('nonce="secondrequest"')
+	expect(hit.headers.get('Cache-Control')).toBe('private, no-store')
+})
+
+test('personalized and referral requests bypass a populated native cache', async () => {
+	const url = `https://test.kody.dev/pricing?personalization=${crypto.randomUUID()}`
+	await serve(new Request(url), () => storeableHtml('<html>anonymous</html>'))
+	for (const request of [
+		new Request(url, { headers: { Cookie: 'kody_session=private' } }),
+		new Request(url, { headers: { Authorization: 'Bearer private' } }),
+		new Request(`${url}&ref=alice`),
+	]) {
+		const result = await serve(request, () =>
+			storeableHtml('<html>fresh</html>'),
+		)
+		expect(result.text).toContain('fresh')
+		expect(result.response.headers.get('X-Kody-Cache')).toBeNull()
+	}
 })

@@ -4,11 +4,11 @@ import {
 	anonymousHtmlCacheControl,
 	anonymousVisibilityGatedCacheControl,
 	clearRetiredSiteBannerDismissCookie,
-	isCacheableAnonymousPath,
+	type AnonymousDocumentCachePolicy,
 	requestHasRetiredSiteBannerDismissCookie,
 	requestHasSessionCookie,
 } from '#app/anonymous-html-cache.ts'
-import { requestBypassesAnonymousDocumentCache } from '#universal/frame-constants.ts'
+import { parseReferralCode } from '#universal/referral-program.ts'
 import { prefersMarkdown } from '#app/markdown-negotiation.ts'
 
 export const anonymousHtmlEdgeCacheHeader = 'X-Kody-Cache'
@@ -35,7 +35,9 @@ function requestBypassesAnonymousHtmlCache(request: Request) {
 export function isAnonymousHtmlCacheRequest(
 	request: Request,
 	env: AnonymousHtmlCacheEnv,
+	policy?: AnonymousDocumentCachePolicy,
 ) {
+	if (!policy) return false
 	// Local dev persists caches.default under .wrangler/state and workerd
 	// honors stale-while-revalidate, so a stored document outlives the edit
 	// that changed it by minutes: the browser reload Vite triggers after an
@@ -50,7 +52,6 @@ export function isAnonymousHtmlCacheRequest(
 	// Skip shared cache while the retired dismiss cookie is present so origin
 	// can expire it (Set-Cookie responses are never stored).
 	if (requestHasRetiredSiteBannerDismissCookie(request)) return false
-	if (requestBypassesAnonymousDocumentCache(request)) return false
 	if (requestBypassesAnonymousHtmlCache(request)) return false
 	if (prefersMarkdown(request)) return false
 	let url: URL
@@ -65,7 +66,7 @@ export function isAnonymousHtmlCacheRequest(
 	if (url.origin !== getCanonicalAppBaseUrl({ env, requestUrl: url })) {
 		return false
 	}
-	return isCacheableAnonymousPath(url.pathname)
+	return !parseReferralCode({ searchParams: url.searchParams })
 }
 
 export function buildAnonymousHtmlCacheKey(
@@ -206,15 +207,13 @@ function workerDefaultCache(): Cache | null {
 export async function serveAnonymousHtmlFromCache(
 	request: Request,
 	env: AnonymousHtmlCacheEnv,
-	ctx: ExecutionContext,
+	ctx: Pick<ExecutionContext, 'waitUntil'>,
 	next: () => Promise<Response>,
+	options: { policy?: AnonymousDocumentCachePolicy; nonce?: string } = {},
 ): Promise<Response> {
-	const eligible = isAnonymousHtmlCacheRequest(request, env)
+	const eligible = isAnonymousHtmlCacheRequest(request, env, options.policy)
 	if (!eligible) {
-		return expireRetiredSiteBannerDismissCookie(
-			request,
-			await prepareNonceHtmlForDelivery(await next(), { cached: false }),
-		)
+		return prepareNonceHtmlForDelivery(await next(), { cached: false })
 	}
 
 	const cacheKey = buildAnonymousHtmlCacheKey(request, env)
@@ -224,7 +223,7 @@ export async function serveAnonymousHtmlFromCache(
 		if (cached) {
 			return prepareNonceHtmlForDelivery(
 				withAnonymousHtmlCacheLookup(cached, 'HIT', request.method),
-				{ cached: true },
+				{ cached: true, nonce: options.nonce },
 			)
 		}
 	}
@@ -270,4 +269,14 @@ function expireRetiredSiteBannerDismissCookie(
 		statusText: response.statusText,
 		headers,
 	})
+}
+
+export async function deliverAnonymousDocument(
+	request: Request,
+	response: Response,
+) {
+	return expireRetiredSiteBannerDismissCookie(
+		request,
+		await prepareNonceHtmlForDelivery(response, { cached: false }),
+	)
 }

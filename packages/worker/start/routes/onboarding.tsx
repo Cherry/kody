@@ -8,7 +8,11 @@ import { onboardingQuery, onboardingNeedsRefresh } from '../onboarding-query.ts'
 import { OnboardingRoute } from '../pages/onboarding.tsx'
 
 export const Route = createFileRoute('/onboarding')({
-	staticData: { motionGroup: 'onboarding', shell: { gutters: 'page' } },
+	staticData: {
+		anonymousDocumentCache: 'marketing',
+		motionGroup: 'onboarding',
+		shell: { gutters: 'page' },
+	},
 	head: staticDocumentHead('onboarding'),
 	component: OnboardingLayout,
 })
