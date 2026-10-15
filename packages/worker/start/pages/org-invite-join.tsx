@@ -3,6 +3,7 @@ import {
 	joinOrganization,
 	declineOrganizationInvite,
 } from '#start/server/join-organization'
+import { captureClientException } from '#client/sentry-client.ts'
 import { inviteLinkOfferCopy } from '#universal/invite-link-offer-copy.ts'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { type CSSObject } from '@emotion/react'
@@ -75,17 +76,15 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 		},
 		...permissionsMutationOptions(client, actorKey),
 	})
-	async function reconcileFailedAcceptance(
-		error: unknown,
-		active: () => boolean,
-	) {
+	function reconcileFailedAcceptance(error: unknown, active: () => boolean) {
 		if (!active() || isRedirect(error)) return
 		// This entry read also records a pending invitation. Reconcile acceptance failures
 		// (including committed writes whose response was lost), but do not rerun
 		// it for a decline whose response could be lost and recreate its pending row.
-		await router.invalidate({
-			filter: (match) => match.routeId === '/join/$token',
-		})
+		// Per-call mutation callbacks do not await returned promises.
+		void router
+			.invalidate({ filter: (match) => match.routeId === '/join/$token' })
+			.catch(captureClientException)
 	}
 	if (!data.ok)
 		return (
