@@ -30,11 +30,11 @@ const data = (selectedValue: AccountValueDetail | null): ValuesQueryData => ({
 		selectedValueId: selectedValue?.id ?? null,
 	},
 })
-const key = (selection: string, actor = 'a') => [
+const key = (selection: string | { orgSlug: string }, actor = 'a') => [
 	'page',
 	actor,
 	'loadValuesPage',
-	selection,
+	typeof selection === 'string' ? { selectedValueId: selection } : selection,
 ]
 
 it('publishes accepted deletion after unmount, preserving selection and actor isolation', async () => {
@@ -147,8 +147,8 @@ it('waits for a pending deletion before reading an uncached navigation', async (
 
 it('keeps the submitted org when observer options change during a pending write', async () => {
 	const client = new QueryClient()
-	const alpha = '/@alpha/-/values'
-	const beta = '/@beta/-/values'
+	const alpha = { orgSlug: 'alpha' }
+	const beta = { orgSlug: 'beta' }
 	client.setQueryData(key(alpha), data(detail))
 	client.setQueryData(key(beta), data(detail))
 	let accept!: (value: ValuesQueryData['payload']) => void

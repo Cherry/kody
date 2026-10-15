@@ -80,6 +80,9 @@ async function render(data: AccountPackageApproveCapabilitiesLoaderData) {
 			kodyId: 'mau-chart',
 		}),
 		approveHref,
+		null,
+		undefined,
+		{ mode: 'focused' },
 	)
 }
 
