@@ -14,6 +14,7 @@ import {
 } from './large-file-policy.ts'
 import { PackageCredentialNeedsApprovalError } from '#worker/credentials/credential-needs-approval.ts'
 import { storePublishedCredentialNeeds } from '#worker/credentials/credential-needs-closure.ts'
+import { storePublishedCredentialStamp } from '#worker/credentials/credential-stamp-store.ts'
 import { parseAuthoredPackageJson } from '#worker/package-registry/manifest.ts'
 import {
 	loadLockedSavedPackage,
@@ -72,6 +73,12 @@ type SyncArtifactSourceInput = {
 	 * `publishFromExternalRef`.
 	 */
 	requirePackageDocs?: boolean
+	/**
+	 * Forwarded to `runRepoChecks`. Platform codemods pass `false` so legacy
+	 * credential patterns stay migratable until phase 2/3 of #3836. Omit
+	 * (default true) for authoring publish.
+	 */
+	enforceCredentialStamp?: boolean
 	/**
 	 * When false, skip the throwing publish-check gate in bootstrap / loopback
 	 * / package update sync. Community install persists an inert fork first and
@@ -259,6 +266,9 @@ export async function syncArtifactSourceSnapshot(
 								...(input.requirePackageDocs === false
 									? { requirePackageDocs: false }
 									: {}),
+								...(input.enforceCredentialStamp === false
+									? { enforceCredentialStamp: false }
+									: {}),
 							})
 							if (!checks.ok) {
 								throw createRepoChecksFailedError(checks.results)
@@ -300,6 +310,12 @@ export async function syncArtifactSourceSnapshot(
 							publishedCommit: snapshot.published_commit,
 							files: input.files,
 						})
+						await storePublishedCredentialStamp({
+							env: input.env,
+							source,
+							publishedCommit: snapshot.published_commit,
+							files: input.files,
+						})
 						return snapshot.published_commit
 					},
 				)
@@ -322,6 +338,9 @@ export async function syncArtifactSourceSnapshot(
 							: {}),
 						...(input.requirePackageDocs === false
 							? { requirePackageDocs: false }
+							: {}),
+						...(input.enforceCredentialStamp === false
+							? { enforceCredentialStamp: false }
 							: {}),
 						...(input.runPublishChecks === false
 							? { runPublishChecks: false }
@@ -352,6 +371,12 @@ export async function syncArtifactSourceSnapshot(
 				}),
 			)
 			await storePublishedCredentialNeeds({
+				env: input.env,
+				source,
+				publishedCommit: bootstrapResult.publishedCommit,
+				files: snapshotFiles,
+			})
+			await storePublishedCredentialStamp({
 				env: input.env,
 				source,
 				publishedCommit: bootstrapResult.publishedCommit,
@@ -394,6 +419,9 @@ export async function syncArtifactSourceSnapshot(
 					: {}),
 				...(input.requirePackageDocs === false
 					? { requirePackageDocs: false }
+					: {}),
+				...(input.enforceCredentialStamp === false
+					? { enforceCredentialStamp: false }
 					: {}),
 			})
 			if (!checkRun.ok) {
