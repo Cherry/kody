@@ -2,9 +2,10 @@
 import { updateExperiments } from '#start/server/account-mutations'
 import { type AccountExperimentsLoaderData } from '#universal/loader-data.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
-import { type QueryKey } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -16,34 +17,34 @@ import {
 } from './account-management-components.tsx'
 
 export function AccountExperimentsPage({
-	queryKey,
 	payload,
 	currentHref,
 }: {
-	queryKey: QueryKey
 	payload: AccountExperimentsLoaderData
 	currentHref: string
 }) {
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
-	const mutation = usePageResponseMutation<
-		AccountExperimentsLoaderData,
-		{ experimentsOptIn: boolean }
-	>(
-		queryKey,
-		'loadExperimentsPage',
-		(body) => updateExperiments({ data: body }),
-		{ dependencies: 'permissions', refreshShell: true },
-	)
+	const capture = useSubmitterScope()
+	const invalidate = usePageInvalidation('permissions', { refreshShell: true })
+	const mutation = useMutation({
+		gcTime: 0,
+		mutationFn: (data: { experimentsOptIn: boolean }) =>
+			updateExperiments({ data }),
+		onMutate: () => invalidate,
+		onSettled: (_result, _error, _input, reconcile) => reconcile?.(),
+	})
 	const saving = mutation.isPending
 	const optedIn = mutation.isPending
-		? mutation.variables?.body.experimentsOptIn === true
+		? mutation.variables?.experimentsOptIn === true
 		: payload.experimentsOptIn
 	async function saveOptIn(enabled: boolean) {
 		if (saving) return
+		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.submit({ experimentsOptIn: enabled })
+			await mutation.mutateAsync({ experimentsOptIn: enabled })
+			if (!isCurrent()) return
 			setMessage(
 				enabled
 					? 'You are opted into experiments. You can turn this off anytime.'
@@ -51,6 +52,7 @@ export function AccountExperimentsPage({
 			)
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message

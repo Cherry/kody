@@ -20,19 +20,10 @@ export const Route = createFileRoute('/account_/experiments')({
 	component: Page,
 })
 function Page() {
-	const mutationContext = Route.useRouteContext()
-	const mutationQueryKey = pageQuery(
-		mutationContext.actorKey,
-		mutationContext.pageQueryInput,
-	).queryKey
 	const { payload } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
 	return (
-		<AccountExperimentsPage
-			queryKey={mutationQueryKey}
-			payload={payload}
-			currentHref={location.href}
-		/>
+		<AccountExperimentsPage payload={payload} currentHref={location.href} />
 	)
 }
 

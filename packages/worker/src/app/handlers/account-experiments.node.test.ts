@@ -117,10 +117,9 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 
 	const user = createUser()
 	mockModule.readAuthenticatedAppUser.mockResolvedValue(user)
-	mockModule.loadAccountExperimentsData.mockResolvedValue({
-		ok: true,
-		experimentsOptIn: true,
-	})
+	mockModule.loadAccountExperimentsData.mockRejectedValue(
+		new Error('Preference read unavailable'),
+	)
 	const optIn = await handler.execute({
 		request: new Request(url, {
 			method: 'POST',
@@ -130,6 +129,7 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 		params: {},
 		url,
 	} as never)
+	expect(mockModule.loadAccountExperimentsData).not.toHaveBeenCalled()
 	expect(mockModule.setExperimentsOptIn).toHaveBeenCalledWith(env.APP_DB, {
 		userId: 7,
 		enabled: true,
@@ -148,10 +148,6 @@ test('account experiments API persists opt-in and opt-out with audit', async () 
 		experimentsOptIn: true,
 	})
 
-	mockModule.loadAccountExperimentsData.mockResolvedValue({
-		ok: true,
-		experimentsOptIn: false,
-	})
 	await handler.execute({
 		request: new Request(url, {
 			method: 'POST',

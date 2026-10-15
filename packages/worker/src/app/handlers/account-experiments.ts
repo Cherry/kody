@@ -1,7 +1,4 @@
-import {
-	loadAccountExperimentsData,
-	setExperimentsOptIn,
-} from '#app/account-experiments-data.ts'
+import { setExperimentsOptIn } from '#app/account-experiments-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { operationResult } from '#app/operation-result.ts'
 import {
@@ -38,10 +35,5 @@ export async function saveExperimentsPreference({
 		reason: `experiments_opt_in=${experimentsOptIn}`,
 	})
 
-	return operationResult(
-		await loadAccountExperimentsData({
-			db: env.APP_DB,
-			userId: user.userId,
-		}),
-	)
+	return operationResult({ ok: true as const, experimentsOptIn })
 }
