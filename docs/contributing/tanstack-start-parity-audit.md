@@ -1,4 +1,42 @@
-# Start parity audit, October 13, 2026
+# Start parity audit
+
+## Current evidence, October 15, 2026
+
+Reviewed source: `ca68f1116bbf1ee6c05084789792e0ce2050e751`. Main included in
+that revision: `104d59e3cefa6aca891409e7e8eab51677f2792c`.
+
+The October 13 findings below are historical. In particular, their retained
+Remix router description no longer describes the website. Start owns website
+server functions and explicit HTTP routes; Router owns navigation; Query owns
+page payloads and mutation reconciliation. A source search of worker Start,
+client, worker server, and shared code found no website Remix router imports.
+Remix router strings remain in the hosted package-app test fixture, which tests
+customer applications rather than routing the Kody website. Leaf cookie, schema,
+data-table, and HTML helpers remain intentional. See
+[retained HTTP contracts](./tanstack-start-http-contracts.md).
+
+Recent changes removed redundant route refreshes, URL-derived cache scope, and
+admin writes that rebuilt discarded list payloads. Organization cache tests now
+exercise structured organization and resource inputs. Admin regression cases
+check that writes and one-time setup results do not depend on list reads.
+
+| Evidence                                     | Scope and limit                                                                                                                                                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Validate run `38689815628`, head `5632ec74c` | E2E, Workers and MCP passed. Static formatting and two SSR text assertions failed and were corrected afterward. This does not validate later commits.                                                                                  |
+| Validate run `38691381293`, head `1d928058d` | Workers and MCP passed at inspection. Node and E2E were running. Static found a missing context type guard, fixed in `cf5a7fc0a`.                                                                                                      |
+| Full Start TypeScript checks                 | Passed through `ca68f1116`. Static evidence only, no runtime test claim.                                                                                                                                                               |
+| Preview health                               | HTTP 200 at deployed merge `33a6999565bcd68bd8994a1ec2f4a3378a8623b0`, containing `1d928058d`. Does not include subsequent local commits.                                                                                              |
+| Desktop homepage comparison                  | Viewed live baseline and preview at 1280x900, dark theme. Heading dimensions and wrapping matched, vertical position differed by 1.64px. Baseline was authenticated and preview anonymous, so this is not a matched-state parity pass. |
+
+Full cutover readiness is not established. Remaining visual evidence must pair
+matching roles, fixtures, viewport, theme, and revisions. This includes public
+page families, populated package detail and publishing states, invitation flows,
+account and organization screens, and administration. Historical screenshots
+without revision and fixture records do not establish current parity. Browser
+behavior tests also do not prove pixel equivalence. Real-provider callbacks and
+other external protocol journeys need their own scoped evidence.
+
+## Historical audit, October 13, 2026
 
 Baseline: `d52300fa4a8602e2a06b7cdd583168641e486b5d`. This audit compares
 behavior and source against that fixed main commit, not moving main.
