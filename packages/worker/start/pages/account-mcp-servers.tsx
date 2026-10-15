@@ -23,8 +23,7 @@ import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
-import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
-import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import { mcpServerMutationOptions } from './account-mcp-server-mutation.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
@@ -61,25 +60,17 @@ const clampedCellCss = recordCellClamp(26)
 
 const mcpServersRoute = createListDetailRoute('/account/mcp-servers')
 
-type McpServerChange =
-	| { action: 'add'; name: string; url: string; bearerToken?: string }
-	| {
-			action: 'reconnect' | 'refresh' | 'delete' | 'remove-oauth-client'
-			id: string
-	  }
-	| { action: 'set-enabled'; id: string; enabled: boolean }
-	| {
-			action: 'set-usage'
-			id: string
-			usageMode: 'any' | 'packages'
-			allowedPackageIds: string[]
-	  }
-	| {
-			action: 'set-oauth-client'
-			id: string
-			clientId: string
-			clientSecret: string
-	  }
+function useMcpWrite<TInput, TResult>(
+	send: (input: { data: TInput }) => Promise<TResult>,
+) {
+	const client = useQueryClient()
+	const { actorKey, orgSlug } = useMatchedPageScope()
+	return useMutation(
+		mcpServerMutationOptions(client, { actorKey, orgSlug }, (data: TInput) =>
+			send({ data }),
+		),
+	)
+}
 
 export function AccountMcpServersPage({
 	payload,
@@ -88,7 +79,6 @@ export function AccountMcpServersPage({
 	payload: AccountMcpServersPayload
 	currentHref: string
 }) {
-	const queryClient = useQueryClient()
 	const { actorKey, orgSlug } = useMatchedPageScope()
 	const currentScope = useRef<{ actorKey: string | null; href: string } | null>(
 		null,
@@ -106,89 +96,31 @@ export function AccountMcpServersPage({
 			currentScope.current.href === currentHref
 		)
 	}
-	const mutation = useMutation({
-		mutationKey: ['mcpServers', actorKey, orgSlug],
-		mutationFn: async (input: {
-			body: McpServerChange
-			orgSlug: string | null
-			actorKey: string | null
-			failureMessage: string
-		}) => {
-			const orgSlug = input.orgSlug ?? undefined
-			switch (input.body.action) {
-				case 'add': {
-					const { action: _action, ...fields } = input.body
-					return addMcpServer({ data: { orgSlug, ...fields } })
-				}
-				case 'reconnect': {
-					const { action: _action, ...fields } = input.body
-					return reconnectMcpServer({ data: { orgSlug, ...fields } })
-				}
-				case 'refresh': {
-					const { action: _action, ...fields } = input.body
-					return refreshMcpServer({ data: { orgSlug, ...fields } })
-				}
-				case 'set-enabled': {
-					const { action: _action, ...fields } = input.body
-					return setMcpServerEnabled({ data: { orgSlug, ...fields } })
-				}
-				case 'set-usage': {
-					const { action: _action, ...fields } = input.body
-					return setMcpServerUsage({ data: { orgSlug, ...fields } })
-				}
-				case 'delete': {
-					const { action: _action, ...fields } = input.body
-					return deleteMcpServer({ data: { orgSlug, ...fields } })
-				}
-				case 'set-oauth-client': {
-					const { action: _action, ...fields } = input.body
-					return setMcpServerOAuthClient({ data: { orgSlug, ...fields } })
-				}
-				case 'remove-oauth-client': {
-					const { action: _action, ...fields } = input.body
-					return removeMcpServerOAuthClient({ data: { orgSlug, ...fields } })
-				}
-			}
-		},
-		onMutate: async ({ orgSlug, actorKey }) => {
-			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
-			)
-		},
-		onSuccess: async (accepted, { orgSlug, actorKey }) => {
-			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
-			)
-			updateOrgPagePayload<AccountMcpServersPayload>(
-				queryClient,
-				actorKey,
-				'loadMcpServersPage',
-				{ orgSlug },
-				() => accepted,
-			)
-		},
-		onSettled: (_data, _error, { orgSlug, actorKey }) => {
-			void invalidatePageResources(
-				queryClient,
-				actorKey,
-				mutationResources,
-				'active',
-				{ orgSlug },
-			)
-		},
-		onError: (_error, { orgSlug, actorKey }) => {
-			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
-			)
-		},
-	})
-	const actionState = mutation.isPending ? 'busy' : 'idle'
+	const addMutation = useMcpWrite(addMcpServer)
+	const reconnectMutation = useMcpWrite(reconnectMcpServer)
+	const refreshMutation = useMcpWrite(refreshMcpServer)
+	const enabledMutation = useMcpWrite(setMcpServerEnabled)
+	const usageMutation = useMcpWrite(setMcpServerUsage)
+	const deleteMutation = useMcpWrite(deleteMcpServer)
+	const oauthMutation = useMcpWrite(setMcpServerOAuthClient)
+	const removeOauthMutation = useMcpWrite(removeMcpServerOAuthClient)
+	const actionState = [
+		addMutation,
+		reconnectMutation,
+		refreshMutation,
+		enabledMutation,
+		usageMutation,
+		deleteMutation,
+		oauthMutation,
+		removeOauthMutation,
+	].some((mutation) => mutation.isPending)
+		? 'busy'
+		: 'idle'
 	const servers = payload.servers
 	const savedPackages = payload.savedPackages ?? []
 	const [usageDrafts, setUsageDrafts] = useState(
 		new Map<string, McpServerUsageDraft>(),
 	)
-	const [usageSavingId, setUsageSavingId] = useState<string | null>(null)
 	const { oauthClientOrigin, oauthCallbackUrl, oauthClientMetadataUrl } =
 		payload
 	const creating = mcpServersRoute.getSelection(currentHref).isCreating
@@ -275,33 +207,28 @@ export function AccountMcpServersPage({
 			),
 		)
 
-		setUsageSavingId(null)
 		setDeleteArmed(false)
 	}
 
-	async function postAction(input: {
-		body: McpServerChange
-		successMessage: (payload: AccountMcpServersPayload) => string | null
+	async function postAction<T>(input: {
+		write: () => Promise<T>
+		successMessage: (payload: T) => string | null
 		failureMessage: string
-		afterSuccess?: (payload: AccountMcpServersPayload) => void
+		afterSuccess?: (payload: T) => void
 	}) {
 		if (actionState !== 'idle') return false
 		showMessage(null)
 		try {
-			const payload = await mutation.mutateAsync({
-				...input,
-				orgSlug,
-				actorKey,
-			})
+			const payload = await input.write()
 			if (!isSubmitterCurrent() || router.state.location.href !== currentHref)
 				return false
-			applyPayload(payload)
+			setDeleteArmed(false)
 			showMessage(input.successMessage(payload))
 			input.afterSuccess?.(payload)
 			return true
 		} catch (error) {
-			if (!isSubmitterCurrent()) return false
-			setUsageSavingId(null)
+			if (!isSubmitterCurrent() || router.state.location.href !== currentHref)
+				return false
 			showMessage(
 				error instanceof Error ? error.message : input.failureMessage,
 				'error',
@@ -328,21 +255,18 @@ export function AccountMcpServersPage({
 		}
 		const bearerToken = token.trim()
 		await postAction({
-			body: {
-				action: 'add',
-				name,
-				url,
-				...(bearerToken ? { bearerToken } : {}),
-			},
+			write: () =>
+				addMutation.mutateAsync({
+					orgSlug: orgSlug ?? undefined,
+					name,
+					url,
+					...(bearerToken ? { bearerToken } : {}),
+				}),
 			successMessage: (payload) => {
 				setAddName('')
 				setAddUrl('')
 				setAddBearerToken('')
-				const added = payload.selectedServerId
-					? payload.servers.find(
-							(server) => server.id === payload.selectedServerId,
-						)
-					: null
+				const added = payload
 				if (added?.authUrl && added.state === 'authenticating') {
 					return `Added MCP server "${added.name}". It requires authorization before its tools become available.`
 				}
@@ -540,7 +464,9 @@ export function AccountMcpServersPage({
 								server,
 								savedPackages,
 								usageDraft: getUsageDraft(server),
-								usageSaving: usageSavingId === server.id,
+								usageSaving:
+									usageMutation.isPending &&
+									usageMutation.variables?.id === server.id,
 								isMutating,
 								deleteArmed,
 								onDeleteArm: () => setDeleteArmed(true),
@@ -555,28 +481,30 @@ export function AccountMcpServersPage({
 								},
 								onUsageSave: () => {
 									const draft = getUsageDraft(server)
-									setUsageSavingId(server.id)
 									void postAction({
-										body: {
-											action: 'set-usage',
-											id: server.id,
-											usageMode: draft.usageMode,
-											allowedPackageIds:
-												draft.usageMode === 'packages'
-													? draft.allowedPackageIds
-													: [],
-										},
+										write: () =>
+											usageMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+												usageMode: draft.usageMode,
+												allowedPackageIds:
+													draft.usageMode === 'packages'
+														? draft.allowedPackageIds
+														: [],
+											}),
 										successMessage: () => 'Updated MCP server usage.',
 										failureMessage: 'Unable to update MCP server usage.',
 									})
 								},
 								onReconnect: () => {
 									void postAction({
-										body: { action: 'reconnect', id: server.id },
+										write: () =>
+											reconnectMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+											}),
 										successMessage: (payload) => {
-											const reconnected = payload.servers.find(
-												(item) => item.id === server.id,
-											)
+											const reconnected = payload
 											return reconnected?.authUrl
 												? 'Authorization needed. Open the new authorization link and approve access once more.'
 												: 'Reconnected MCP server.'
@@ -586,18 +514,23 @@ export function AccountMcpServersPage({
 								},
 								onRefresh: () => {
 									void postAction({
-										body: { action: 'refresh', id: server.id },
+										write: () =>
+											refreshMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+											}),
 										successMessage: () => 'Refreshed server tools.',
 										failureMessage: 'Unable to refresh MCP server tools.',
 									})
 								},
 								onToggleEnabled: () => {
 									void postAction({
-										body: {
-											action: 'set-enabled',
-											id: server.id,
-											enabled: !server.enabled,
-										},
+										write: () =>
+											enabledMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+												enabled: !server.enabled,
+											}),
 										successMessage: () =>
 											server.enabled
 												? 'Disabled MCP server.'
@@ -607,28 +540,36 @@ export function AccountMcpServersPage({
 								},
 								onOAuthClientSave: (client) =>
 									postAction({
-										body: {
-											action: 'set-oauth-client',
-											id: server.id,
-											...client,
-										},
+										write: () =>
+											oauthMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+												...client,
+											}),
 										successMessage: (accepted) =>
-											accepted.servers.find((item) => item.id === server.id)
-												?.authUrl
+											accepted.authUrl
 												? 'Saved the OAuth client. Authorize the server to finish connecting.'
 												: 'Saved the OAuth client.',
 										failureMessage: 'Unable to save the OAuth client.',
 									}),
 								onOAuthClientRemove: () => {
 									void postAction({
-										body: { action: 'remove-oauth-client', id: server.id },
+										write: () =>
+											removeOauthMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+											}),
 										successMessage: () => 'Removed the OAuth client.',
 										failureMessage: 'Unable to remove the OAuth client.',
 									})
 								},
 								onDelete: () => {
 									void postAction({
-										body: { action: 'delete', id: server.id },
+										write: () =>
+											deleteMutation.mutateAsync({
+												orgSlug: orgSlug ?? undefined,
+												id: server.id,
+											}),
 										successMessage: () => 'Removed MCP server.',
 										failureMessage: 'Unable to remove MCP server.',
 										afterSuccess: () => {
@@ -666,9 +607,3 @@ export function AccountMcpServersPage({
 		</AccountManagementShell>
 	)
 }
-
-const mutationResources = [
-	'loadOnboarding',
-	'loadAccountPage',
-	'loadUsagePage',
-] as const

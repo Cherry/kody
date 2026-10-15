@@ -383,6 +383,14 @@ test('MCP servers API lists, adds, reconnects, disables, and deletes with user s
 		savedPackages: [{ id: 'pkg-drafts', kodyId: 'gmail-drafts' }],
 	})
 
+	const listImplementation =
+		mockModule.listMcpServerSettings.getMockImplementation()!
+	// Accepted writes must not depend on rebuilding the settings page.
+	mockModule.listMcpServerSettings.mockClear()
+	mockModule.listMcpServerSettings.mockRejectedValue(
+		new Error('List unavailable'),
+	)
+
 	const addResponse = await post({
 		action: 'add',
 		name: 'notion',
@@ -468,6 +476,14 @@ test('MCP servers API lists, adds, reconnects, disables, and deletes with user s
 	expect(mockModule.deleteMcpServer).toHaveBeenCalledWith(
 		expect.objectContaining(userScope),
 	)
+	mockModule.listMcpServerSettings.mockImplementation(listImplementation)
+	expect(mockModule.listMcpServerSettings).not.toHaveBeenCalled()
+	expect(addResponse.data).not.toHaveProperty('servers')
+	expect(hungReconnect.data).toMatchObject({
+		state: 'connected',
+		error: hung.message,
+		toolCount: 0,
+	})
 })
 
 test('MCP servers OAuth callback ignores HEAD and redirects with the auth outcome', async () => {

@@ -253,12 +253,11 @@ test('an org admin saves, replaces, and removes a client; only the sealed secret
 	})
 	expect(saved.status).toBe(200)
 	expect(saved.text).not.toContain(clientSecret)
-	const savedServer = (
-		JSON.parse(saved.text) as {
-			servers: Array<{ id: string; oauthClientId: string | null }>
-		}
-	).servers.find((server) => server.id === 'server-acme')
-	expect(savedServer?.oauthClientId).toBe(clientId)
+	expect(JSON.parse(saved.text)).toMatchObject({
+		ok: true,
+		selectedServerId: 'server-acme',
+		oauthClientId: clientId,
+	})
 
 	const firstCall = hubCall(0)
 	expect(firstCall).toMatchObject({
@@ -466,14 +465,12 @@ test('the save response shows the hub reply even when the snapshot read fails', 
 		},
 	})
 	expect(saved.status).toBe(200)
-	const servers = (
-		JSON.parse(saved.text) as {
-			servers: Array<{ id: string; oauthClientId: string | null }>
-		}
-	).servers
-	expect(servers.find((server) => server.id === 'server-acme')).toMatchObject({
+	expect(JSON.parse(saved.text)).toMatchObject({
+		ok: true,
+		selectedServerId: 'server-acme',
 		oauthClientId: clientId,
 	})
+	expect(JSON.parse(saved.text)).not.toHaveProperty('servers')
 	expect(saved.text).not.toContain(clientSecret)
 	expect(JSON.stringify(consoleCalls)).not.toContain(clientSecret)
 })
