@@ -4,6 +4,10 @@ import {
 	emailSearch,
 } from './email-resources.ts'
 import { expect, it, vi } from 'vitest'
+import {
+	defaultParseSearch,
+	defaultStringifySearch,
+} from '@tanstack/react-router'
 import { QueryClient, dehydrate } from '@tanstack/react-query'
 import { loadEmailResources } from './email-resource-queries.ts'
 import {
@@ -12,6 +16,17 @@ import {
 	loadEmailDestinations,
 } from '#start/server/email'
 
+it.each(['123', 'true', 'false', 'null', '"hello"', '[]', '{}', ' 123 '])(
+	'email search preserves Router text %s',
+	(q) => {
+		const parsed = defaultParseSearch(defaultStringifySearch({ q }))
+		expect(emailSearch(parsed).q).toBe(q)
+	},
+)
+
+it.each(['123', 'true', 'null'])('email bookmarks retain text %s', (q) => {
+	expect(emailSearch(defaultParseSearch(`?q=${q}`)).q).toBe(q)
+})
 vi.mock('#start/server/email', () => ({
 	loadEmailList: vi.fn(),
 	loadEmailDetail: vi.fn(),

@@ -1,9 +1,28 @@
 import { expect, test, vi } from 'vitest'
+import {
+	defaultParseSearch,
+	defaultStringifySearch,
+} from '@tanstack/react-router'
 vi.mock('#start/server/credentials', () => ({ loadCredentialsPage: vi.fn() }))
 import {
 	credentialsPageQuery,
 	validateCredentialSearch,
 } from './credentials-query.ts'
+
+test.each(['123', 'true', 'false', 'null', '"hello"', '[]', '{}', ' 123 '])(
+	'credential search preserves Router text %s',
+	(q) => {
+		const parsed = defaultParseSearch(defaultStringifySearch({ q }))
+		expect(validateCredentialSearch(parsed).q).toBe(q)
+	},
+)
+
+test.each(['123', 'true', 'null'])(
+	'credential bookmarks retain text %s',
+	(q) => {
+		expect(validateCredentialSearch(defaultParseSearch(`?q=${q}`)).q).toBe(q)
+	},
+)
 
 test('credential resource keys isolate actors, orgs and selections without presentation filters', () => {
 	const key = credentialsPageQuery('actor', { orgSlug: 'acme' }).queryKey

@@ -1,6 +1,7 @@
 import { createPageQuery } from './page-query.ts'
 import { loadCredentialsPage } from '#start/server/credentials'
 import { isCredentialKind } from '#universal/credential-contracts.ts'
+import { searchText } from './filter-search.ts'
 
 export const credentialPresentationSearchKeys = [
 	'q',
@@ -14,7 +15,7 @@ export const credentialPresentationSearchKeys = [
 export function validateCredentialSearch(search: Record<string, unknown>) {
 	const kinds = Array.isArray(search.kind) ? search.kind : [search.kind]
 	return {
-		q: typeof search.q === 'string' ? search.q : undefined,
+		q: searchText(search.q),
 		kind: Array.isArray(search.kind)
 			? kinds.filter(isCredentialKind)
 			: isCredentialKind(search.kind)

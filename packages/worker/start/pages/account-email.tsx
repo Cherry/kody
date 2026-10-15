@@ -76,7 +76,7 @@ export function AccountEmailPage({
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const { orgSlug: org } = useMatchedPageScope()
+	const { orgSlug: org, pageLocation } = useMatchedPageScope()
 	const mutationKey = emailKeys.mutations(actorKey, org)
 	const pendingActions = useMutationState({
 		filters: {
@@ -147,7 +147,7 @@ export function AccountEmailPage({
 			search: (previous: Record<string, unknown>) => {
 				const search: Record<string, unknown> = samePage
 					? { ...previous }
-					: Object.fromEntries(matchedUrl.searchParams)
+					: { ...pageLocation.search }
 				if (next.query !== undefined) {
 					if (next.query) search.q = next.query
 					else delete search.q

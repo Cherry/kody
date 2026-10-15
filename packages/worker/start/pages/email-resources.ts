@@ -1,4 +1,5 @@
 import { type AccountEmailLoaderData } from '#universal/loader-data.ts'
+import { searchText } from '../filter-search.ts'
 
 export type EmailListInput = {
 	org: string | null
@@ -28,7 +29,7 @@ export function emailSearch(search: Record<string, unknown>): {
 	selected: string
 } {
 	return {
-		q: typeof search.q === 'string' ? search.q : '',
+		q: searchText(search.q) ?? '',
 		classification:
 			search.classification === 'accepted' ||
 			search.classification === 'quarantined'

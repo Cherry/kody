@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
+import { validateCredentialSearch } from '../credentials-query.ts'
 import { docHref } from '#universal/docs-nav.ts'
 import { SiteLink } from '../components/site-link.tsx'
 
@@ -366,7 +367,7 @@ export function AccountCredentialsRoute({
 						<RecordTableSearch
 							label="Search credentials"
 							placeholder="Search credentials"
-							value={new URLSearchParams(pageLocation.searchStr).get('q') ?? ''}
+							value={validateCredentialSearch(pageLocation.search).q ?? ''}
 							onInput={(q) =>
 								updateFilters((current) => ({
 									...current,
