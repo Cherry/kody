@@ -4,7 +4,7 @@ const state = vi.hoisted(() => ({
 		COOKIE_SECRET: 'request-secret',
 		OAUTH_PROVIDER: { revokeGrant: vi.fn() },
 	},
-	limit: vi.fn().mockResolvedValue({ allowed: true }),
+	limit: vi.fn(),
 	secret: vi.fn(),
 }))
 vi.mock('@tanstack/react-start', () => ({
@@ -21,6 +21,7 @@ vi.mock('#worker/audit-log.ts', () => ({ getRequestIp: () => '127.0.0.1' }))
 import { publicAuthContext } from './auth-mutation-context.ts'
 
 test('password reset receives request OAuth helpers after auth rate limiting', async () => {
+	state.limit.mockResolvedValue({ allowed: true })
 	const context = await publicAuthContext()
 	expect(context.env).toBe(state.env)
 	expect(state.limit).toHaveBeenCalledWith(state.env, 'auth:ip:127.0.0.1')

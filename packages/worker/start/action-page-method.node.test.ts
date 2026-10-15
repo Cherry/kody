@@ -95,6 +95,7 @@ test('native action route policy blocks explicit preloads but permits a real nav
 			routeTree: root.addChildren([action]),
 			history: createMemoryHistory({ initialEntries: ['/'] }),
 			isServer: false,
+			origin: 'https://kody.test',
 		})
 		await isolatedRouter.preloadRoute({ to: '/action' })
 		assert.equal(

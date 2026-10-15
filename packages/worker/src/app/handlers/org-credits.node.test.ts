@@ -27,6 +27,7 @@ vi.mock('#app/org-credits-data.ts', async (importOriginal) => ({
 		mocks.loadOrgCreditsData(input),
 }))
 vi.mock('@tanstack/react-start', () => ({
+	getGlobalStartContext: () => ({ env: mocks.env }),
 	createServerFn: () => {
 		let validate = (v: unknown) => v
 		const builder = {

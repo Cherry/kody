@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, type ComponentProps } from 'react'
 import { featureFlagKeys } from '#universal/feature-flags/registry.ts'
 import { type SessionInfo } from '#client/session.ts'
 import { expect, test } from 'vitest'
@@ -29,7 +29,11 @@ async function renderNative(
 	href: string,
 	{
 		loaderData,
+		integrationSelection,
 	}: {
+		integrationSelection?: ComponentProps<
+			typeof AccountIntegrationsPage
+		>['selection']
 		loaderData: {
 			connectOauth?: ConnectOauthLoaderData
 			accountIntegrations?: AccountIntegrationsLoaderData
@@ -39,6 +43,8 @@ async function renderNative(
 		}
 	},
 ) {
+	if (loaderData.accountIntegrations && !integrationSelection)
+		throw new Error('Missing integration selection')
 	const page = loaderData.connectOauth
 		? createElement(ConnectOauthRoute, {
 				initialData: loaderData.connectOauth,
@@ -46,7 +52,7 @@ async function renderNative(
 			})
 		: loaderData.accountIntegrations
 			? createElement(AccountIntegrationsPage, {
-					selection: { kind: 'approval' },
+					selection: integrationSelection!,
 					payload: loaderData.accountIntegrations,
 					currentHref: href,
 				})
@@ -306,10 +312,12 @@ test('native pages server-renders simplified integration and secret-approval pag
 	}
 	const renderIntegrations = async (
 		path: string,
+		selection: ComponentProps<typeof AccountIntegrationsPage>['selection'],
 		integrations: Array<AccountIntegrationListItem> = [googleConnection],
 		apps: Array<AccountOauthAppListItem> = [googleApp],
 	) => {
 		const page = await renderNative(`/@account-user/-/integrations${path}`, {
+			integrationSelection: selection,
 			loaderData: {
 				accountIntegrations: {
 					ok: true,
@@ -323,7 +331,10 @@ test('native pages server-renders simplified integration and secret-approval pag
 		return page.html
 	}
 
-	const connectionHtml = await renderIntegrations('/google')
+	const connectionHtml = await renderIntegrations('/google', {
+		kind: 'connection',
+		connectionName: 'google',
+	})
 
 	expectHtml(
 		connectionHtml,
@@ -342,7 +353,10 @@ test('native pages server-renders simplified integration and secret-approval pag
 	)
 
 	expectHtml(
-		await renderIntegrations('/apps/google'),
+		await renderIntegrations('/apps/google', {
+			kind: 'app',
+			appSlug: 'google',
+		}),
 		[
 			'1 account connected.',
 			'data-testid="integration-advanced"',
@@ -354,6 +368,7 @@ test('native pages server-renders simplified integration and secret-approval pag
 	const builtInConnection = { ...googleConnection, platform: true }
 	const builtInHtml = await renderIntegrations(
 		'/google',
+		{ kind: 'connection', connectionName: 'google' },
 		[
 			builtInConnection,
 			{
@@ -390,17 +405,28 @@ test('native pages server-renders simplified integration and secret-approval pag
 	)
 
 	expectHtml(
-		await renderIntegrations('/google?add-account=1#add-account'),
+		await renderIntegrations('/google?add-account=1#add-account', {
+			kind: 'connection',
+			connectionName: 'google',
+		}),
 		['data-testid="add-account-form"', 'id="add-account"', 'value="google-2"'],
 		['data-testid="add-account-open"'],
 	)
-	expect(await renderIntegrations('/missing-connection')).toContain(
-		'data-testid="connection-not-found"',
+	expect(
+		await renderIntegrations('/missing-connection', {
+			kind: 'connection',
+			connectionName: 'missing-connection',
+		}),
+	).toContain('data-testid="connection-not-found"')
+	expect(
+		await renderIntegrations('/apps/missing-app', {
+			kind: 'app',
+			appSlug: 'missing-app',
+		}),
+	).toContain('data-testid="integration-not-found"')
+	expect(await renderIntegrations('', { kind: 'list' }, [], [])).toContain(
+		'No integrations yet.',
 	)
-	expect(await renderIntegrations('/apps/missing-app')).toContain(
-		'data-testid="integration-not-found"',
-	)
-	expect(await renderIntegrations('', [], [])).toContain('No integrations yet.')
 
 	const secret = {
 		id: 'user:googleAccessToken',
