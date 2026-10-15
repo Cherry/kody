@@ -4,7 +4,6 @@ import {
 	useMutation,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { useServerFn } from '@tanstack/react-start'
 import { useState } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import {
@@ -61,20 +60,18 @@ export function OrgFollowsPage({
 		text: string
 		tone: 'info' | 'error'
 	} | null>(null)
-	const sendResume = useServerFn(resumeFollow)
-	const sendUnfollow = useServerFn(unfollowTarget)
 	const resume = useMutation(
 		followMutationOptions(
 			client,
 			actorKey,
-			(data: { orgSlug: string; id: string }) => sendResume({ data }),
+			(data: { orgSlug: string; id: string }) => resumeFollow({ data }),
 		),
 	)
 	const unfollow = useMutation(
 		followMutationOptions(
 			client,
 			actorKey,
-			(data: { orgSlug: string; id: string }) => sendUnfollow({ data }),
+			(data: { orgSlug: string; id: string }) => unfollowTarget({ data }),
 		),
 	)
 	const mutationFilter = {

@@ -10,7 +10,6 @@ import {
 	renderPendingInviteActions,
 	type PendingInviteActions,
 } from './pending-invite-actions.tsx'
-import { useServerFn } from '@tanstack/react-start'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
@@ -125,14 +124,13 @@ function CreateOrganizationForm() {
 		field: 'displayName' | 'slug'
 	} | null>(null)
 	const formErrorId = 'create-organization-form-error'
-	const createOrganization = useServerFn(createOrg)
 	const mutation = useMutation({
 		mutationFn: ({
 			data,
 		}: {
 			data: { displayName: string; slug: string }
 			actorKey: string | null
-		}) => createOrganization({ data }),
+		}) => createOrg({ data }),
 		onSuccess: async (_result, { actorKey }) => {
 			await Promise.all([
 				invalidateShellQueries(client, actorKey),
