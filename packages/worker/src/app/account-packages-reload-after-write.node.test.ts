@@ -91,7 +91,7 @@ function memberUser(): AuthenticatedAppUser {
 	}
 }
 
-test('reload after team package lock includes selectedPackage from the owning org', async () => {
+test('team package lock returns an outcome and persists the lock in the owning org', async () => {
 	const env = await createTeamEnv()
 	const user = memberUser()
 	const request = new Request(
@@ -105,18 +105,17 @@ test('reload after team package lock includes selectedPackage from the owning or
 		packageId: 'pkg-team',
 	})
 	expect(response?.status).toBe(200)
-	const payload = response?.data as {
-		selectedPackage?: {
-			id: string
-			kodyId: string
-			name: string
-			lockedAt: string
-		}
-	}
-	expect(payload.selectedPackage).toMatchObject({
+	expect(response.data).toEqual({ ok: true, packageId: 'pkg-team' })
+	const persisted = await env.APP_DB.prepare(
+		'SELECT id, user_id, kody_id, name, locked_at FROM saved_packages WHERE id = ?',
+	)
+		.bind('pkg-team')
+		.first()
+	expect(persisted).toMatchObject({
 		id: 'pkg-team',
-		kodyId: 'shared',
+		user_id: teamId,
+		kody_id: 'shared',
 		name: '@acme/shared',
-		lockedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+		locked_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
 	})
 })

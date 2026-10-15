@@ -1,7 +1,12 @@
 /** @jsxImportSource @emotion/react */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
-import { updatePendingInvite } from '#start/server/account-invites'
+import {
+	acceptPendingInvite,
+	declinePendingInvite,
+	acceptPendingInviteLink,
+	declinePendingInviteLink,
+} from '#start/server/account-invites'
 import { type AccountPendingInvite } from '#universal/loader-data.ts'
 import {
 	getGhostButtonCss,
@@ -17,19 +22,22 @@ export function usePendingInviteActions() {
 	const router = useRouter()
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const capture = useSubmitterScope()
-	const mutation = useMutation({
+	const options = (send: typeof acceptPendingInvite) => ({
 		mutationFn: ({
 			invite,
-			action,
 		}: {
 			invite: PendingInviteRef
 			action: 'accept' | 'decline'
 			actorKey: string | null
-		}) => updatePendingInvite({ data: { ...invite, action } }),
-		onMutate: async (variables) => {
+		}) => send({ data: { id: invite.id } }),
+		onMutate: async (variables: { actorKey: string | null }) => {
 			await client.cancelQueries({ queryKey: ['page', variables.actorKey] })
 		},
-		onSettled: async (_result, _error, variables) => {
+		onSettled: async (
+			_result: unknown,
+			_error: Error | null,
+			variables: { actorKey: string | null },
+		) => {
 			// Accepting can change organization membership and grants across cached pages.
 			await Promise.all([
 				client.invalidateQueries({ queryKey: ['page', variables.actorKey] }),
@@ -37,10 +45,27 @@ export function usePendingInviteActions() {
 			])
 		},
 	})
+	const acceptInvite = useMutation(options(acceptPendingInvite))
+	const declineInvite = useMutation(options(declinePendingInvite))
+	const acceptLink = useMutation(options(acceptPendingInviteLink))
+	const declineLink = useMutation(options(declinePendingInviteLink))
+	const mutations = [acceptInvite, declineInvite, acceptLink, declineLink]
+	const mutation = [...mutations].sort(
+		(a, b) => b.submittedAt - a.submittedAt,
+	)[0]!
 	function run(invite: PendingInviteRef, action: 'accept' | 'decline') {
-		if (mutation.isPending) return
+		if (mutations.some((operation) => operation.isPending)) return
 		const active = capture()
-		mutation.mutate(
+		for (const previous of mutations) previous.reset()
+		const operation =
+			action === 'accept'
+				? invite.source === 'link'
+					? acceptLink
+					: acceptInvite
+				: invite.source === 'link'
+					? declineLink
+					: declineInvite
+		operation.mutate(
 			{ invite, action, actorKey },
 			{
 				onSuccess: (result) => {

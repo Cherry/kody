@@ -104,8 +104,9 @@ function PackageInviteLinksContent({
 	const queryKey = ['packageInviteLinks', actorKey, page] as const
 	const query = useQuery({
 		queryKey,
-		queryFn: async () => {
-			const result = await loadPackageInviteLinks({ data: page })
+		meta: { actorKey },
+		queryFn: async ({ signal }) => {
+			const result = await loadPackageInviteLinks({ data: page, signal })
 			return result.links
 		},
 		staleTime: 0,
@@ -120,31 +121,19 @@ function PackageInviteLinksContent({
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const createdUrl = created?.url
-	type Action =
-		| {
-				action: 'create'
-				preset: PackageCollaboratorPreset
-				maxUses: string | null
-				expiresInDays: string
-		  }
-		| { action: 'revoke'; linkId: string }
-	const mutation = useMutation({
+	const lifecycle = {
 		retry: false,
 		gcTime: 0,
-		mutationFn: async (input: Action) => {
-			const result =
-				input.action === 'create'
-					? await createPackageInviteLink({ data: { ...page, ...input } })
-					: await revokePackageInviteLink({
-							data: { ...page, linkId: input.linkId },
-						})
-			return result
-		},
 		onMutate: async () => {
 			await client.cancelQueries({ queryKey })
 			return { queryKey }
 		},
-		onSettled: async (_result, _error, _input, context) => {
+		onSettled: async (
+			_result: unknown,
+			_error: unknown,
+			_input: unknown,
+			context: { queryKey: typeof queryKey } | undefined,
+		) => {
 			if (!context) return
 			await client.cancelQueries({
 				queryKey: context.queryKey,
@@ -156,59 +145,79 @@ function PackageInviteLinksContent({
 				exact: true,
 			})
 		},
+	}
+	const createMutation = useMutation({
+		...lifecycle,
+		mutationFn: (input: {
+			preset: PackageCollaboratorPreset
+			maxUses: string | null
+			expiresInDays: string
+		}) => createPackageInviteLink({ data: { ...page, ...input } }),
 	})
-	const busy = mutation.isPending
-		? mutation.variables?.action === 'create'
-			? 'create'
-			: `revoke:${mutation.variables?.linkId}`
-		: null
-	function act(input: Action) {
+	const revokeMutation = useMutation({
+		...lifecycle,
+		mutationFn: (linkId: string) =>
+			revokePackageInviteLink({ data: { ...page, linkId } }),
+	})
+	const busy = createMutation.isPending
+		? 'create'
+		: revokeMutation.isPending
+			? `revoke:${revokeMutation.variables}`
+			: null
+	async function create(event: FormEvent) {
+		event.preventDefault()
+		if (busy) return
 		const active = capture()
 		setMessage(null)
-		mutation.mutate(input, {
-			onSuccess: async (result) => {
-				if (!active()) return
-				if (
-					input.action === 'create' &&
-					'inviteLink' in result &&
-					result.inviteLink
-				) {
-					const link = result.inviteLink
-					setCreated(link)
-					const copied = await copyText(link.url)
-					if (!active()) return
-					setMessage(
-						copied
-							? 'Invite link copied to clipboard.'
-							: 'Invite link created. Copy it below; it is shown only once.',
-					)
-				} else {
-					if (input.action === 'revoke' && created?.id === input.linkId)
-						setCreated(null)
-					setMessage('Invite link revoked.')
-				}
-				setMessageTone('info')
-			},
-			onError: (error) => {
-				if (active()) {
-					setMessage(error.message)
-					setMessageTone('error')
-				}
-			},
-		})
-	}
-	function create(event: FormEvent) {
-		event.preventDefault()
-		if (!busy)
-			act({
-				action: 'create',
+		try {
+			const result = await createMutation.mutateAsync({
 				preset,
 				maxUses: maxUses.trim() || null,
 				expiresInDays: expiresInDays.trim() || '7',
 			})
+			createMutation.reset()
+			if (!active()) return
+			const link = result.inviteLink
+			setCreated(link)
+			const copied = await copyText(link.url)
+			if (!active()) return
+			setMessage(
+				copied
+					? 'Invite link copied to clipboard.'
+					: 'Invite link created. Copy it below; it is shown only once.',
+			)
+			setMessageTone('info')
+		} catch (error) {
+			if (active()) {
+				setMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to create invite link.',
+				)
+				setMessageTone('error')
+			}
+		}
 	}
-	function revoke(linkId: string) {
-		if (!busy) act({ action: 'revoke', linkId })
+	async function revoke(linkId: string) {
+		if (busy) return
+		const active = capture()
+		setMessage(null)
+		try {
+			await revokeMutation.mutateAsync(linkId)
+			if (!active()) return
+			if (created?.id === linkId) setCreated(null)
+			setMessage('Invite link revoked.')
+			setMessageTone('info')
+		} catch (error) {
+			if (active()) {
+				setMessage(
+					error instanceof Error
+						? error.message
+						: 'Unable to revoke invite link.',
+				)
+				setMessageTone('error')
+			}
+		}
 	}
 	async function copyAgain() {
 		if (!createdUrl) return

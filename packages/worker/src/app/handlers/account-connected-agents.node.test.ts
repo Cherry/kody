@@ -359,7 +359,8 @@ test('connected agents API on a team org lists and revokes only agents approved 
 	expect(revoked.status).toBe(200)
 	expect(helpers.revokeGrant).toHaveBeenCalledTimes(1)
 	expect(helpers.revokeGrant).toHaveBeenCalledWith('grant-team', personId)
-	expect(revoked.body.agents).toEqual([])
+	expect(revoked.body).toEqual({ ok: true })
+	expect((await call()).body.agents).toEqual([])
 	// Cursor is still connected to the signup org, so its subscriptions stay.
 	expect(
 		sqlite

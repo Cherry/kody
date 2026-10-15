@@ -43,7 +43,12 @@ vi.mock('../../src/app/handlers/org-invite-join.ts', () => ({
 	acceptWebsiteInviteLink: mocks.acceptLink,
 	declineWebsiteInviteLink: mocks.declineLink,
 }))
-import { updatePendingInvite } from './account-invites.ts'
+import {
+	acceptPendingInvite,
+	declinePendingInvite,
+	acceptPendingInviteLink,
+	declinePendingInviteLink,
+} from './account-invites.ts'
 beforeEach(() => {
 	vi.resetAllMocks()
 	for (const operation of [
@@ -57,8 +62,8 @@ beforeEach(() => {
 test('pending invite actions require authenticated website mutation context', async () => {
 	mocks.authorize.mockRejectedValue(new Error('Unauthorized'))
 	await expect(
-		updatePendingInvite({
-			data: { source: 'invite', action: 'accept', id: 'invite-1' },
+		acceptPendingInvite({
+			data: { id: 'invite-1' },
 		}),
 	).rejects.toThrow('Unauthorized')
 	expect(mocks.acceptInvite).not.toHaveBeenCalled()
@@ -67,11 +72,21 @@ test.each(['invite', 'link'] as const)(
 	'validates and dispatches %s actions without trusting a caller identity',
 	async (source) => {
 		await expect(
-			updatePendingInvite({ data: { source, action: 'accept', id: '' } }),
-		).rejects.toThrow()
+			(source === 'link' ? acceptPendingInviteLink : acceptPendingInvite)({
+				data: { id: '' },
+			}),
+		).rejects.toThrow(/Too small/)
 		expect(mocks.authorize).not.toHaveBeenCalled()
 		for (const action of ['accept', 'decline'] as const) {
-			await updatePendingInvite({ data: { source, action, id: 'target' } })
+			await (
+				source === 'link'
+					? action === 'accept'
+						? acceptPendingInviteLink
+						: declinePendingInviteLink
+					: action === 'accept'
+						? acceptPendingInvite
+						: declinePendingInvite
+			)({ data: { id: 'target' } })
 			const operation =
 				source === 'link'
 					? action === 'accept'
@@ -95,8 +110,8 @@ test('domain rejection propagates instead of appearing successful', async () => 
 		data: { ok: false, error: 'This invite link has expired.' },
 	})
 	await expect(
-		updatePendingInvite({
-			data: { source: 'link', action: 'accept', id: 'expired' },
+		acceptPendingInviteLink({
+			data: { id: 'expired' },
 		}),
 	).rejects.toThrow('This invite link has expired.')
 })
@@ -107,8 +122,8 @@ test('accept preserves the destination returned by the authorized operation', as
 		data: { ok: true, redirectTo: '/@team/package' },
 	})
 	expect(
-		await updatePendingInvite({
-			data: { source: 'invite', action: 'accept', id: 'offer' },
+		await acceptPendingInvite({
+			data: { id: 'offer' },
 		}),
 	).toEqual({ ok: true, redirectTo: '/@team/package' })
 })

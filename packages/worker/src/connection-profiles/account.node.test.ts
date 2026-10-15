@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
 import {
 	createAccountConnectionProfile,
 	updateAccountConnectionProfile,
@@ -25,6 +25,12 @@ vi.mock('#worker/connection-profiles/repo.ts', () => ({
 vi.mock('#worker/package-registry/repo.ts', () => ({
 	listSavedPackagesByUserId: mocks.packages,
 }))
+
+beforeEach(() => {
+	mocks.enabled.mockResolvedValue(true)
+	mocks.list.mockRejectedValue(new Error('Profile listing unavailable'))
+	mocks.packages.mockRejectedValue(new Error('Package listing unavailable'))
+})
 
 const context = {
 	env: {

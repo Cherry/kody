@@ -143,7 +143,6 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 	expect(cancelResponse.status).toBe(200)
 	expect(mockModule.listWorkflowRunsForUser).not.toHaveBeenCalled()
 	expect(cancelResponse.data).not.toHaveProperty('workflows')
-	resetList()
 	expect(mockModule.cancelWorkflowRunForUser).toHaveBeenCalledWith({
 		env: expect.anything(),
 		userId: ownerIdFromStored('stable-user-1'),
@@ -157,6 +156,8 @@ test('workflows API lists, cancels, and rejects unauthenticated or invalid reque
 			status: 'cancelled',
 		},
 	})
+
+	resetList()
 
 	mockModule.readAuthenticatedAppUser.mockResolvedValueOnce(null)
 	const unauthorized = await handler.execute({

@@ -51,16 +51,15 @@ export const loadPackageInviteLinks = createServerFn({ method: 'GET' })
 	.validator(packageAccessInput)
 	.handler(async ({ data }) => {
 		const { withWebsiteRead } = await import('./mutation-context.ts')
-		const { operatePackageInviteLinks } =
+		const { readPackageInviteLinks } =
 			await import('../../src/app/handlers/package-invite-links.ts')
 		const { requireOperationResult } =
 			await import('../../src/app/operation-result.ts')
 		return withWebsiteRead({}, async (context) =>
 			requireOperationResult(
-				await operatePackageInviteLinks({
+				await readPackageInviteLinks({
 					...context,
 					...data,
-					action: 'read',
 				}),
 			),
 		)
@@ -75,16 +74,15 @@ export const createPackageInviteLink = createServerFn({ method: 'POST' })
 	)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		const { operatePackageInviteLinks } =
+		const { createPackageInviteLink } =
 			await import('../../src/app/handlers/package-invite-links.ts')
 		const { requireOperationResult } =
 			await import('../../src/app/operation-result.ts')
 		return withWebsiteMutation({}, async (context) =>
 			requireOperationResult(
-				await operatePackageInviteLinks({
+				await createPackageInviteLink({
 					...context,
 					...data,
-					action: 'create',
 				}),
 			),
 		)
@@ -94,16 +92,15 @@ export const revokePackageInviteLink = createServerFn({ method: 'POST' })
 	.validator(packageAccessInput.extend({ linkId: z.string().trim().min(1) }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
-		const { operatePackageInviteLinks } =
+		const { revokePackageInviteLink } =
 			await import('../../src/app/handlers/package-invite-links.ts')
 		const { requireOperationResult } =
 			await import('../../src/app/operation-result.ts')
 		return withWebsiteMutation({}, async (context) =>
 			requireOperationResult(
-				await operatePackageInviteLinks({
+				await revokePackageInviteLink({
 					...context,
 					...data,
-					action: 'revoke',
 				}),
 			),
 		)

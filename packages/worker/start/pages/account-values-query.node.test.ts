@@ -86,7 +86,9 @@ it('invalidates accepted deletion after unmount, cancelling stale reads with act
 	expect(
 		client.getQueryData<ValuesQueryData>(key('one', 'b'))?.payload.values,
 	).toHaveLength(2)
-	expect(client.getQueryState(key('list'))?.isInvalidated).toBe(true)
+	await vi.waitFor(() =>
+		expect(client.getQueryState(key('list'))?.isInvalidated).toBe(true),
+	)
 	expect(client.getQueryState(key('two'))?.isInvalidated).toBe(true)
 	expect(
 		client.getQueryState(['page', 'a', 'loadUsagePage', ''])?.isInvalidated,
@@ -170,7 +172,9 @@ it('keeps the submitted org when observer options change during a pending write'
 	expect(
 		client.getQueryData<ValuesQueryData>(key(alpha))?.payload.values,
 	).toHaveLength(2)
-	expect(client.getQueryState(key(alpha))?.isInvalidated).toBe(true)
+	await vi.waitFor(() =>
+		expect(client.getQueryState(key(alpha))?.isInvalidated).toBe(true),
+	)
 	expect(client.getQueryState(key(beta))?.isInvalidated).toBe(false)
 	expect(
 		client.getQueryData<ValuesQueryData>(key(beta))?.payload.values,

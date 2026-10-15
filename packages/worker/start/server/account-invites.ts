@@ -1,45 +1,69 @@
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
-export const updatePendingInvite = createServerFn({ method: 'POST' })
-	.validator(
-		z.object({
-			source: z.enum(['link', 'invite']),
-			id: z.string().trim().min(1),
-			action: z.enum(['accept', 'decline']),
-		}),
-	)
+export const acceptPendingInvite = createServerFn({ method: 'POST' })
+	.validator(z.object({ id: z.string().trim().min(1) }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { acceptWebsiteInvite } =
+			await import('../../src/app/handlers/account-invites.ts')
 		const { requireOperationResult } =
 			await import('../../src/app/operation-result.ts')
-		return withWebsiteMutation({}, async (context) => {
-			if (data.source === 'link') {
-				const { acceptWebsiteInviteLink, declineWebsiteInviteLink } =
-					await import('../../src/app/handlers/org-invite-join.ts')
-				return resultWithRedirect(
-					requireOperationResult(
-						await (
-							data.action === 'accept'
-								? acceptWebsiteInviteLink
-								: declineWebsiteInviteLink
-						)({ ...context, linkId: data.id }),
-					),
-				)
-			}
-			const { acceptWebsiteInvite, declineWebsiteInvite } =
-				await import('../../src/app/handlers/account-invites.ts')
-			return resultWithRedirect(
+		return withWebsiteMutation({}, async (context) =>
+			resultWithRedirect(
 				requireOperationResult(
-					await (
-						data.action === 'accept'
-							? acceptWebsiteInvite
-							: declineWebsiteInvite
-					)({ ...context, inviteId: data.id }),
+					await acceptWebsiteInvite({ ...context, inviteId: data.id }),
 				),
-			)
-		})
+			),
+		)
 	})
-
+export const declinePendingInvite = createServerFn({ method: 'POST' })
+	.validator(z.object({ id: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { declineWebsiteInvite } =
+			await import('../../src/app/handlers/account-invites.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation({}, async (context) =>
+			resultWithRedirect(
+				requireOperationResult(
+					await declineWebsiteInvite({ ...context, inviteId: data.id }),
+				),
+			),
+		)
+	})
+export const acceptPendingInviteLink = createServerFn({ method: 'POST' })
+	.validator(z.object({ id: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { acceptWebsiteInviteLink } =
+			await import('../../src/app/handlers/org-invite-join.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation({}, async (context) =>
+			resultWithRedirect(
+				requireOperationResult(
+					await acceptWebsiteInviteLink({ ...context, linkId: data.id }),
+				),
+			),
+		)
+	})
+export const declinePendingInviteLink = createServerFn({ method: 'POST' })
+	.validator(z.object({ id: z.string().trim().min(1) }))
+	.handler(async ({ data }) => {
+		const { withWebsiteMutation } = await import('./mutation-context.ts')
+		const { declineWebsiteInviteLink } =
+			await import('../../src/app/handlers/org-invite-join.ts')
+		const { requireOperationResult } =
+			await import('../../src/app/operation-result.ts')
+		return withWebsiteMutation({}, async (context) =>
+			resultWithRedirect(
+				requireOperationResult(
+					await declineWebsiteInviteLink({ ...context, linkId: data.id }),
+				),
+			),
+		)
+	})
 function resultWithRedirect(result: { ok: true }) {
 	return {
 		ok: true as const,

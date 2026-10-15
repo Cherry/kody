@@ -149,7 +149,7 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 		}),
 	})
 
-	mockModule.listValues.mockResolvedValueOnce([])
+	mockModule.listValues.mockClear()
 	const deleteResponse = await post({ action: 'delete', name: 'theme' })
 	expect(deleteResponse.status).toBe(200)
 	expect(mockModule.deleteValue).toHaveBeenCalledWith(
@@ -159,12 +159,8 @@ test('values API lists, selects, and deletes leftover user-scoped rows', async (
 			name: 'theme',
 		}),
 	)
-	expect(deleteResponse.data).toEqual({
-		ok: true,
-		values: [],
-		selectedValue: null,
-		selectedValueId: null,
-	})
+	expect(deleteResponse.data).toEqual({ ok: true, deletedName: 'theme' })
+	expect(mockModule.listValues).not.toHaveBeenCalled()
 })
 
 test('values API rejects save, missing deletes, invalid actions, and unauthenticated requests', async () => {

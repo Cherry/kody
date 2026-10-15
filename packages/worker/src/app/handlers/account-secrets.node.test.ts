@@ -1185,13 +1185,6 @@ test('account secrets save sets the provider from a creation link on org Keys on
 			}),
 		)
 
-	mockModule.listSecrets
-		.mockResolvedValueOnce([])
-		.mockResolvedValueOnce([makeSecret('resend')])
-	mockModule.resolveSecret.mockResolvedValueOnce({
-		found: true,
-		value: 'fresh-secret',
-	} as never)
 	mockModule.updateCredentialFields.mockRejectedValueOnce(
 		new Error('credential provider update failed'),
 	)
@@ -1201,6 +1194,8 @@ test('account secrets save sets the provider from a creation link on org Keys on
 		ok: true,
 		providerLinkError: 'credential provider update failed',
 	})
+
+	expect(mockModule.listSecrets).toHaveBeenCalledOnce()
 
 	mockModule.updateCredentialFields.mockClear()
 	expect((await save({ scope: 'user', provider: 'resend' })).status).toBe(200)

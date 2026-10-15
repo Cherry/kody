@@ -1,4 +1,4 @@
-import { readAuthenticatedAppUser } from '#app/authenticated-user.ts'
+import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import { loadCollaboratorsScope } from '#app/handlers/package-collaborators.ts'
 import {
 	inviteLinkUrl,
@@ -52,27 +52,19 @@ async function listView(
 	return { ok: true, links: links.flatMap(toView) }
 }
 
-/** Manage shareable package links after checking package:manage_access.
- * The domain operation is shared by the separate Start read and mutation functions.
- */
-export async function operatePackageInviteLinks({
+type PackageInviteScope = InviteOperationContext & {
+	username: string
+	kodyId: string
+}
+
+/** Every operation independently verifies package:manage_access. */
+async function loadPackageInviteScope({
 	env,
 	request,
 	user,
 	username,
 	kodyId,
-	action,
-	...body
-}: InviteOperationContext & {
-	username: string
-	kodyId: string
-	action: 'read' | 'create' | 'revoke'
-	preset?: string
-	linkId?: string
-	maxUses?: string | number | null
-	expiresInDays?: string | number | null
-	allowedEmailDomains?: string | string[]
-}) {
+}: PackageInviteScope) {
 	const loaded = await loadCollaboratorsScope({
 		env,
 		request,
@@ -81,63 +73,93 @@ export async function operatePackageInviteLinks({
 		kodyId: kodyId,
 	})
 	if (loaded.kind === 'not_found') {
-		return operationResult({ ok: false, error: 'Package not found.' }, 404)
+		return {
+			ok: false as const,
+			result: operationResult({ ok: false, error: 'Package not found.' }, 404),
+		}
 	}
 	if (loaded.kind === 'forbidden') {
-		return operationResult(
-			{
-				ok: false,
-				error: 'You need Manage on this package to share it with a link.',
-			},
-			403,
-		)
+		return {
+			ok: false as const,
+			result: operationResult(
+				{
+					ok: false,
+					error: 'You need Manage on this package to share it with a link.',
+				},
+				403,
+			),
+		}
 	}
 	const { scope } = loaded
-	const db = env.APP_DB
 	const linkScope: InviteLinkScope = {
 		kind: 'resource',
 		resourceType: 'package',
 		resourceId: scope.savedPackage.id,
 	}
-	if (action === 'read') {
-		return operationResult(await listView(db, scope.org.id, linkScope))
-	}
-	if (action === 'revoke') {
-		const linkId = typeof body?.linkId === 'string' ? body.linkId.trim() : ''
-		if (!linkId) {
-			return operationResult(
-				{ ok: false, error: 'An invite link is required.' },
-				400,
-			)
-		}
-		try {
-			await revokeOrgInviteLink({
-				db,
-				orgId: scope.org.id,
-				linkId,
-				scope: linkScope,
-				audit: orgAuditWriterFromRequest(env, user.request),
-			})
-		} catch (error) {
-			return operationResult(
-				{
-					ok: false,
-					error:
-						error instanceof Error
-							? error.message
-							: 'Unable to revoke that invite link.',
-				},
-				400,
-			)
-		}
-		return operationResult(await listView(db, scope.org.id, linkScope))
-	}
-	if (action !== 'create') {
+	return { ok: true as const, scope, linkScope }
+}
+
+export async function readPackageInviteLinks(input: PackageInviteScope) {
+	const loaded = await loadPackageInviteScope(input)
+	if (!loaded.ok) return loaded.result
+	return operationResult(
+		await listView(input.env.APP_DB, loaded.scope.org.id, loaded.linkScope),
+	)
+}
+
+export async function revokePackageInviteLink(
+	input: PackageInviteScope & { linkId: string },
+) {
+	const loaded = await loadPackageInviteScope(input)
+	if (!loaded.ok) return loaded.result
+	const { scope, linkScope } = loaded
+	const { env, user } = input
+	const db = env.APP_DB
+	const body = input
+	const linkId = typeof body?.linkId === 'string' ? body.linkId.trim() : ''
+	if (!linkId) {
 		return operationResult(
-			{ ok: false, error: 'Choose create or revoke.' },
+			{ ok: false, error: 'An invite link is required.' },
 			400,
 		)
 	}
+	try {
+		await revokeOrgInviteLink({
+			db,
+			orgId: scope.org.id,
+			linkId,
+			scope: linkScope,
+			audit: orgAuditWriterFromRequest(env, user.request),
+		})
+	} catch (error) {
+		return operationResult(
+			{
+				ok: false,
+				error:
+					error instanceof Error
+						? error.message
+						: 'Unable to revoke that invite link.',
+			},
+			400,
+		)
+	}
+	return operationResult({ ok: true, linkId })
+}
+
+export async function createPackageInviteLink(
+	input: PackageInviteScope & {
+		preset: string
+		maxUses?: string | number | null
+		expiresInDays?: string | number | null
+		allowedEmailDomains?: string | string[]
+	},
+) {
+	const loaded = await loadPackageInviteScope(input)
+	if (!loaded.ok) return loaded.result
+	const { scope } = loaded
+	const { env, request, user } = input
+	const db = env.APP_DB
+	const body = input
 	if (!isInviteLinkResourcePreset(body?.preset)) {
 		return operationResult(
 			{ ok: false, error: 'Choose Use, Contribute, or Manage.' },
@@ -170,7 +192,7 @@ export async function operatePackageInviteLinks({
 			audit: orgAuditWriterFromRequest(env, user.request),
 		})
 		return operationResult({
-			...(await listView(db, scope.org.id, linkScope)),
+			ok: true,
 			inviteLink: {
 				id: created.id,
 				expiresAt: created.expiresAt,
