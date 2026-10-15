@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseJsonc } from './resource-utils.ts'
+import { normalizeInactiveBuildConfig } from './start-opt-in-inactive-config.ts'
 import { buildStartRolloutConfig } from './start-rollout-config.ts'
 import { isExecutedDirectly } from '../node-runtime.ts'
 
@@ -300,17 +301,14 @@ if (isExecutedDirectly(import.meta.url)) {
 			allowedPersonIds: people,
 			assetPaths,
 		})
-		const built = object(
-			JSON.parse(await readFile('dist/server/wrangler.json', 'utf8')),
+		const built = normalizeInactiveBuildConfig(
+			object(JSON.parse(await readFile('dist/server/wrangler.json', 'utf8'))),
+			String(bundle.candidate.name),
 		)
-		if (
-			built.name !== bundle.candidate.name ||
-			built.workers_dev !== false ||
-			built.preview_urls !== false ||
-			built.routes !== undefined ||
-			built.migrations !== undefined
+		await writeFile(
+			'dist/server/wrangler.json',
+			JSON.stringify(built, null, '\t'),
 		)
-			throw new Error('Emitted candidate is not inactive')
 		await writeFile(
 			`${directory}/review.json`,
 			JSON.stringify(bundle, null, '\t'),

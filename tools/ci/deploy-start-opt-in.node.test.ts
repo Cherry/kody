@@ -1,6 +1,6 @@
+import { assertInactiveConfig } from './start-opt-in-inactive-config.ts'
 import { expect, test } from 'vitest'
 import {
-	assertInactiveConfig,
 	assertProductionSnapshot,
 	assertSharedBindings,
 	collectCandidateSecrets,
@@ -18,13 +18,13 @@ test('rejects ingress, schema and resource ownership changes', () => {
 	for (const key of ['routes', 'migrations', 'triggers', 'env', 'unsafe'])
 		expect(() =>
 			assertInactiveConfig({ ...inactive(), [key]: [] }, 'kody-start-router'),
-		).toThrow('cannot declare')
+		).toThrow(key)
 	expect(() =>
 		assertInactiveConfig(
 			{ ...inactive(), queues: { consumers: [] } },
 			'kody-start-router',
 		),
-	).toThrow('consume queues')
+	).toThrow('queues.consumers')
 	expect(() =>
 		assertInactiveConfig(
 			{
@@ -33,9 +33,9 @@ test('rejects ingress, schema and resource ownership changes', () => {
 			},
 			'kody-start-router',
 		),
-	).toThrow('stay external')
+	).toThrow('durable_objects.bindings.script_name')
 	expect(() => assertInactiveConfig(inactive(), 'kody-production')).toThrow(
-		'exact inactive',
+		'name',
 	)
 })
 test('requires trusted cookie and encryption secrets and rejects unknown live secret mappings', () => {

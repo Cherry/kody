@@ -170,6 +170,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: node tools/ci/probe-start-opt-in.ts
       - name: Upload inactive review bundle
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: start-opt-in-${{ inputs.start_release }}

@@ -4,51 +4,11 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { mapLiveProductionSettings } from './prepare-start-opt-in.ts'
+import { assertInactiveConfig } from './start-opt-in-inactive-config.ts'
 import { parseJsonc } from './resource-utils.ts'
 import { isExecutedDirectly, resolveLocalBinary } from '../node-runtime.ts'
 
 type Config = Record<string, unknown>
-export function assertInactiveConfig(config: Config, expectedName: string) {
-	if (
-		config.name !== expectedName ||
-		config.workers_dev !== false ||
-		config.preview_urls !== false
-	)
-		throw new Error('The exact inactive worker name is required')
-	for (const key of [
-		'env',
-		'routes',
-		'route',
-		'custom_domains',
-		'triggers',
-		'migrations',
-		'email',
-		'unsafe',
-	]) {
-		if (config[key] !== undefined)
-			throw new Error(`Inactive worker cannot declare ${key}`)
-	}
-	const queues = config.queues as Config | undefined
-	if (queues?.consumers !== undefined)
-		throw new Error('Inactive worker cannot consume queues')
-	const durable = config.durable_objects as
-		| { bindings?: Array<Config> }
-		| undefined
-	for (const binding of durable?.bindings ?? [])
-		if (
-			typeof binding.script_name !== 'string' ||
-			!binding.script_name ||
-			binding.script_name === expectedName
-		)
-			throw new Error('Durable object ownership must stay external')
-	for (const workflow of (config.workflows ?? []) as Array<Config>)
-		if (
-			typeof workflow.script_name !== 'string' ||
-			!workflow.script_name ||
-			workflow.script_name === expectedName
-		)
-			throw new Error('Workflow ownership must stay external')
-}
 
 /** Object and binding ordering cannot change the meaning of a settings snapshot. */
 function normalized(value: unknown): string {
