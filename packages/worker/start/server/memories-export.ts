@@ -19,7 +19,7 @@ export function createAccountMemoriesExportHandler(env: Env) {
 			resourceRequest: new Request(new URL('/', request.url)),
 		})
 		if (!user) return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401)
-		if (request.method !== 'GET')
+		if (request.method !== 'GET' && request.method !== 'HEAD')
 			return jsonResponse({ ok: false, error: 'Method not allowed.' }, 405)
 		const url = new URL(request.url)
 		let scopedUser = user
@@ -48,13 +48,16 @@ export function createAccountMemoriesExportHandler(env: Env) {
 			user: scopedUser,
 			includeDeleted: readAccountMemoriesIncludeDeleted(request.url),
 		})
-		return new Response(JSON.stringify(payload, null, 2), {
-			status: 200,
-			headers: {
-				'Cache-Control': 'no-store',
-				'Content-Disposition': `attachment; filename="${buildMemoriesExportFilename()}"`,
-				'Content-Type': 'application/json; charset=utf-8',
+		return new Response(
+			request.method === 'HEAD' ? null : JSON.stringify(payload, null, 2),
+			{
+				status: 200,
+				headers: {
+					'Cache-Control': 'no-store',
+					'Content-Disposition': `attachment; filename="${buildMemoriesExportFilename()}"`,
+					'Content-Type': 'application/json; charset=utf-8',
+				},
 			},
-		})
+		)
 	}
 }

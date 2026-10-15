@@ -260,6 +260,18 @@ test('memories export filename uses the UTC calendar date', () => {
 	).toBe('kody-memories-2026-08-31.json')
 })
 
+test('memories export supports authenticated HEAD without a response body', async () => {
+	const response = await createAccountMemoriesExportHandler(env)({
+		request: new Request('https://example.com/account/memories-export.json', {
+			method: 'HEAD',
+		}),
+	})
+	expect(response.status).toBe(200)
+	expect(response.headers.get('Cache-Control')).toBe('no-store')
+	expect(response.headers.get('Content-Disposition')).toContain('attachment;')
+	expect(await response.text()).toBe('')
+})
+
 test('memories export downloads the signed-in user memories as JSON', async () => {
 	const request = createExportClient(
 		createAccountMemoriesExportHandler,
