@@ -1,0 +1,185 @@
+import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { quoteSqlString } from '@kody-internal/shared/sql-literals.ts'
+import {
+	createPreviewPackage,
+	type GitRemoteResult,
+} from '../../tools/control-kody/package-create.ts'
+import { executeE2eD1Command } from '../d1-utils.ts'
+import { requestHasMutationDataFields } from '../server-function-requests.ts'
+import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
+
+async function pushWebhook(remote: GitRemoteResult) {
+	const directory = await mkdtemp(path.join(tmpdir(), 'kody-webhook-e2e-'))
+	const repo = path.join(directory, 'repo')
+	function git(args: string[], cwd?: string) {
+		try {
+			execFileSync('git', args, {
+				cwd,
+				env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+				stdio: 'pipe',
+			})
+		} catch {
+			// Git errors can contain the authenticated remote. Never print its token.
+			throw new Error(`Webhook fixture git ${args[0]} failed`)
+		}
+	}
+	try {
+		git(['clone', '--quiet', remote.authenticated_remote, repo])
+		git(['config', 'user.name', remote.git_author.name], repo)
+		git(['config', 'user.email', remote.git_author.email], repo)
+		const manifestPath = path.join(repo, 'package.json')
+		const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+		manifest.exports = {
+			...manifest.exports,
+			'./launcher': './src/launcher.ts',
+		}
+		manifest.kody = {
+			...manifest.kody,
+			webhooks: [
+				{
+					name: 'launcher',
+					export: './launcher',
+					responseMode: 'sync',
+					inputMode: 'params',
+				},
+			],
+		}
+		await mkdir(path.join(repo, 'src'), { recursive: true })
+		await writeFile(
+			path.join(repo, 'src/launcher.ts'),
+			'export default async function launcher() { return { ok: true } }\n',
+		)
+		await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+		git(['add', 'package.json', 'src/launcher.ts'], repo)
+		git(['commit', '-m', 'Add disposable webhook fixture'], repo)
+		git(['push', '--quiet', 'origin', 'HEAD'], repo)
+	} finally {
+		await rm(directory, { recursive: true, force: true })
+	}
+}
+
+test('package webhook URLs mint, reveal, rotate and disable through native Start calls', async ({
+	page,
+	browser,
+	baseURL,
+	seedE2eUser,
+	login,
+}) => {
+	test.setTimeout(240_000)
+	const id = randomUUID().slice(0, 8)
+	const owner = await seedE2eUser({
+		email: `webhook-owner-${id}@example.com`,
+		username: `webhook-owner-${id}`,
+		admin: true,
+	})
+	const stranger = await seedE2eUser({
+		email: `webhook-other-${id}@example.com`,
+		username: `webhook-other-${id}`,
+	})
+	executeE2eD1Command(
+		`UPDATE orgs SET plan='standard' WHERE slug=${quoteSqlString(owner.username)};`,
+	)
+	await login({ ...owner, mode: 'login' })
+	const other = await browser.newContext({ baseURL })
+	let created: Awaited<ReturnType<typeof createPreviewPackage>> | undefined
+	try {
+		const signedIn = await other.request.post('/auth', {
+			data: { ...stranger, mode: 'login' },
+		})
+		expect(signedIn.ok()).toBe(true)
+		const cookieHeader = (await page.context().cookies(baseURL))
+			.map(({ name, value }) => `${name}=${value}`)
+			.join('; ')
+		created = await createPreviewPackage({
+			origin: baseURL!,
+			email: owner.email,
+			password: owner.password,
+			kodyId: `webhooks-${id}`,
+			headAhead: true,
+			cookieHeader,
+			pushHeadAhead: pushWebhook,
+		})
+		const settings = `${created.packagePagePath}/settings`
+		await page.goto(settings)
+		await waitForClientHydration(page)
+		const card = page
+			.getByTestId('package-webhook-card')
+			.filter({
+				has: page.getByRole('heading', { name: 'launcher', exact: true }),
+			})
+		const url = card.getByTestId('package-webhook-url').locator('pre code')
+		await expect(card).toContainText('No URL yet')
+		await card.getByTestId('package-webhook-mint').click()
+		await expect(url).toBeVisible()
+		const original = await url.innerText()
+		expect(original).toMatch(/^https?:\/\//)
+		await expect(card).toContainText('Needs approval')
+		await card.getByTestId('package-webhook-hide-url').click()
+		await expect(url).toHaveCount(0)
+		const revealing = page.waitForRequest((request) =>
+			requestHasMutationDataFields(request, {
+				username: owner.username,
+				kodyId: created!.kodyId,
+				webhookName: 'launcher',
+			}),
+		)
+		await card.getByTestId('package-webhook-reveal').click()
+		const revealRequest = await revealing
+		await expect(url).toHaveText(original)
+		const headers = await revealRequest.allHeaders()
+		delete headers.cookie
+		delete headers['x-kody-document-actor']
+		delete headers['x-kody-document-destination']
+		delete headers['content-length']
+		const denied = await other.request.post(revealRequest.url(), {
+			headers,
+			data: revealRequest.postData()!,
+		})
+		const deniedBody = await denied.text()
+		expect(deniedBody).toContain('Package not found.')
+		expect(deniedBody).not.toContain(original)
+		await page.reload()
+		await waitForClientHydration(page)
+		await expect(card.getByTestId('package-webhook-reveal')).toBeVisible()
+		await expect(url).toHaveCount(0)
+		await card.getByRole('button', { name: /^Rotate URL for / }).click()
+		await expect(url).toHaveCount(0)
+		await card.getByRole('button', { name: /^Confirm rotate URL for / }).click()
+		await expect(url).toBeVisible()
+		await expect(url).not.toHaveText(original)
+		const rotated = await url.innerText()
+		await card.getByTestId('package-webhook-approve').click()
+		await expect(page.getByTestId('credential-approval-approve')).toBeEnabled()
+		await page.getByTestId('credential-approval-approve').click()
+		await expect(page.getByTestId('credential-approval-done')).toBeVisible()
+		await page.goto(settings)
+		await waitForClientHydration(page)
+		await expect(card).toContainText('Active')
+		await card.getByTestId('package-webhook-reveal').click()
+		await expect(url).toHaveText(rotated)
+		await card.getByRole('button', { name: /^Disable / }).click()
+		await expect(card).toContainText('Active')
+		await card.getByRole('button', { name: /^Confirm disable / }).click()
+		await expect(card).toContainText('Disabled')
+		await page.reload()
+		await waitForClientHydration(page)
+		await expect(card).toContainText('Disabled')
+		await expect(card.getByRole('button', { name: /^Enable / })).toBeEnabled()
+		await expect(url).toHaveCount(0)
+		// Never send a delivery to either URL, these assertions only manage configuration.
+	} finally {
+		if (created) {
+			await page.goto(`${created.packagePagePath}/settings`)
+			await waitForClientHydration(page)
+			await page.getByTestId('package-delete').click()
+			await page.getByTestId('package-delete-confirmation').fill(created.name)
+			await page.getByTestId('package-delete-confirm').click()
+			await expect(page.getByTestId('package-delete-dialog')).not.toBeVisible()
+		}
+		await other.close()
+	}
+})
