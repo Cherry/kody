@@ -73,8 +73,8 @@ function hasInvalidExplicitOrg(url: URL): boolean {
  * True when this request names an org the person cannot use: an `/@slug/-/…`
  * URL for an org they neither belong to nor hold a grant in, or a section URL
  * (page or export download) that
- * {@link orgSectionDenial} closes to them. `readAuthenticatedAppUser` falls
- * back to the signup org for a denied org, so these requests must stop before
+ * {@link orgSectionDenial} closes to them. Authentication also rejects denied
+ * orgs; this guard preserves the document/protocol denial response before
  * any handler runs. Billing and management URLs only need the org; their
  * handlers check the permission.
  */

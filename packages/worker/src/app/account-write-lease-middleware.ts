@@ -8,8 +8,6 @@ import { loadResolvedRequestAuth } from './request-auth-cache.ts'
 
 const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const mutatingGetPaths = new Set(['/account/mcp-servers/oauth/callback'])
-/** Checkout completion owns its native lease; the portal remains a protocol. */
-const mutatingBillingGetPath = /^\/@[^/]+\/-\/billing\/portal$/
 
 function accountDeletingResponse(status: number) {
 	return Response.json(
@@ -32,14 +30,8 @@ export async function withProtocolAccountWriteLease<T>(
 ): Promise<T | Response> {
 	const url = new URL(request.url)
 	const mutating =
-		unsafeMethods.has(request.method) ||
-		mutatingGetPaths.has(url.pathname) ||
-		mutatingBillingGetPath.test(url.pathname)
-	if (
-		!mutating ||
-		url.pathname === '/account/delete' ||
-		url.pathname === '/logout'
-	) {
+		unsafeMethods.has(request.method) || mutatingGetPaths.has(url.pathname)
+	if (!mutating) {
 		return await next()
 	}
 	return withAccountRequestWriteLease(request, env, next)

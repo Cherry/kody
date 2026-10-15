@@ -51,8 +51,10 @@ async function readAuthenticatedAppUserInternal(
 		env,
 		resolved.user.mcpUser.userId,
 	)
+	// A denied resource must never inherit the person's personal workspace.
+	if (resolution === 'denied') return null
 	const orgBinding =
-		resolution === 'personal' || resolution === 'denied'
+		resolution === 'personal'
 			? await loadOrgBindingForPerson(env.APP_DB, resolved.user.mcpUser.userId)
 			: resolution
 	const user = {

@@ -80,24 +80,6 @@ test('authenticated delayed mutation holds web lease through handler completion'
 	expect(await meterA.countActiveWriteLeases()).toEqual({ count: 0 })
 })
 
-test('logout is not blocked while an account is deleting', async () => {
-	authMock.loadResolvedRequestAuth.mockResolvedValue({
-		sessionUserId: '1',
-		user: {
-			accountDeleting: true,
-			mcpUser: { userId: ownerIdFromStored('user-a') },
-		},
-	})
-	const next = vi.fn(async () => new Response(null, { status: 302 }))
-	const response = await withProtocolAccountWriteLease(
-		new Request('https://example.com/logout', { method: 'POST' }),
-		{} as Env,
-		next,
-	)
-	expect(next).toHaveBeenCalledOnce()
-	expect(response.status).toBe(302)
-})
-
 test('nonmutating documents preserve the native middleware result without auth or a lease', async () => {
 	authMock.loadResolvedRequestAuth.mockClear()
 	const result = {
@@ -117,7 +99,11 @@ test('nonmutating documents preserve the native middleware result without auth o
 test.each([
 	['POST', '/auth'],
 	['GET', '/account/mcp-servers/oauth/callback'],
-	['GET', '/@acme/-/billing/portal'],
+	['POST', '/logout'],
+	['POST', '/account/delete'],
+	['PUT', '/protocol-write'],
+	['PATCH', '/protocol-write'],
+	['DELETE', '/protocol-write'],
 ])(
 	'deleting accounts cannot enter mutating protocol %s %s',
 	async (method, path) => {
@@ -144,14 +130,21 @@ test.each([
 	},
 )
 
-test('checkout success documents defer leasing to their native function exactly once', async () => {
-	authMock.loadResolvedRequestAuth.mockClear()
-	const next = vi.fn(async () => ({ response: new Response('checkout') }))
-	await withProtocolAccountWriteLease(
-		new Request('https://example.com/@acme/-/billing/success'),
-		{} as Env,
-		next,
-	)
-	expect(next).toHaveBeenCalledOnce()
-	expect(authMock.loadResolvedRequestAuth).not.toHaveBeenCalled()
-})
+test.each([
+	'/account/billing/success',
+	'/@acme/-/billing/success',
+	'/@acme/-/billing/portal',
+])(
+	'GET %s does not claim a protocol lease for a native mutation',
+	async (path) => {
+		authMock.loadResolvedRequestAuth.mockClear()
+		const next = vi.fn(async () => ({ response: new Response('checkout') }))
+		await withProtocolAccountWriteLease(
+			new Request(`https://example.com${path}`),
+			{} as Env,
+			next,
+		)
+		expect(next).toHaveBeenCalledOnce()
+		expect(authMock.loadResolvedRequestAuth).not.toHaveBeenCalled()
+	},
+)
