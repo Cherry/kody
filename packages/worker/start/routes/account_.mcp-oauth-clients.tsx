@@ -21,19 +21,10 @@ export const Route = createFileRoute('/account_/mcp-oauth-clients')({
 	component: Page,
 })
 function Page() {
-	const mutationContext = Route.useRouteContext()
-	const mutationQueryKey = pageQuery(
-		mutationContext.actorKey,
-		mutationContext.pageQueryInput,
-	).queryKey
 	const { payload } = usePageData()
 	const { pageLocation: location } = Route.useRouteContext()
 	return (
-		<AccountMcpOauthClientsPage
-			queryKey={mutationQueryKey}
-			payload={payload}
-			currentHref={location.href}
-		/>
+		<AccountMcpOauthClientsPage payload={payload} currentHref={location.href} />
 	)
 }
 

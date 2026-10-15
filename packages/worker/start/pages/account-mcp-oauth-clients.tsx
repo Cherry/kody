@@ -20,9 +20,10 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { type CSSObject } from '@emotion/react'
-import { type QueryKey } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { usePageResponseMutation } from '../use-page-response-mutation.ts'
+import { usePageInvalidation } from '../page-invalidation.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	accountInputCss,
 	AccountManagementMessage,
@@ -36,53 +37,42 @@ type CreatedClient = AccountMcpOauthClientsLoaderData['clients'][number] & {
 }
 
 export function AccountMcpOauthClientsPage({
-	queryKey,
 	payload,
 	currentHref,
 }: {
-	queryKey: QueryKey
 	payload: AccountMcpOauthClientsLoaderData
 	currentHref: string
 }) {
-	const [actionStatus, setActionStatus] = useState<'idle' | 'busy'>('idle')
 	const clients = payload.clients
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'error' | 'info'>('info')
 	const [labelDraft, setLabelDraft] = useState('Open WebUI')
 	const [redirectUrisDraft, setRedirectUrisDraft] = useState('')
 	const [createdClient, setCreatedClient] = useState<CreatedClient | null>(null)
-	const createMutation = usePageResponseMutation<
-		AccountMcpOauthClientsLoaderData & { createdClient?: CreatedClient },
-		{ label: string; redirectUris: string }
-	>(
-		queryKey,
-		'loadMcpOauthClientsPage',
-		(data) => createMcpOauthClient({ data }),
-		{
-			dependencies: mutationResources,
-			dependencyScope: 'actor',
-			merge: (page, accepted) => ({
-				...page,
-				payload: { ok: accepted.ok, clients: accepted.clients },
-			}),
+	const capture = useSubmitterScope()
+	const invalidate = usePageInvalidation(mutationResources)
+	const createMutation = useMutation({
+		gcTime: 0,
+		onMutate: () => invalidate,
+		mutationFn: async (input: {
+			label: string
+			redirectUris: string
+			isCurrent: () => boolean
+		}) => {
+			const result = await createMcpOauthClient({
+				data: { label: input.label, redirectUris: input.redirectUris },
+			})
+			// Keep the one-time secret out of both query and mutation caches.
+			if (input.isCurrent()) setCreatedClient(result.createdClient)
 		},
-	)
-	const revokeMutation = usePageResponseMutation<
-		AccountMcpOauthClientsLoaderData,
-		{ id: string }
-	>(
-		queryKey,
-		'loadMcpOauthClientsPage',
-		(data) => revokeMcpOauthClient({ data }),
-		{
-			dependencies: mutationResources,
-			dependencyScope: 'actor',
-			merge: (page, accepted) => ({
-				...page,
-				payload: { ok: accepted.ok, clients: accepted.clients },
-			}),
-		},
-	)
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
+	const revokeMutation = useMutation({
+		gcTime: 0,
+		onMutate: () => invalidate,
+		mutationFn: (data: { id: string }) => revokeMcpOauthClient({ data }),
+		onSettled: (_data, _error, _input, reconcile) => reconcile?.(),
+	})
 
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const primaryButtonCss = getPillButtonCss({ size: 'sm' })
@@ -92,50 +82,48 @@ export function AccountMcpOauthClientsPage({
 
 	async function handleCreate(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault()
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 		try {
-			const payload = await createMutation.submit({
+			await createMutation.mutateAsync({
+				isCurrent,
 				label: labelDraft,
 				redirectUris: redirectUrisDraft,
 			})
-			if (!payload.createdClient)
-				throw new Error('Unable to create the OAuth client.')
-			setCreatedClient(payload.createdClient)
+			if (!isCurrent()) return
 			setMessage(
 				'Copy the client secret now. Kody does not store it after this page.',
 			)
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to create the OAuth client.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
 	async function handleRevoke(id: string) {
-		setActionStatus('busy')
+		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await revokeMutation.submit({ id })
+			await revokeMutation.mutateAsync({ id })
+			if (!isCurrent()) return
 			if (createdClient?.id === id) setCreatedClient(null)
 			setRevokeArmed(null)
 			setMessage('OAuth client revoked.')
 			setMessageTone('info')
 		} catch (error) {
+			if (!isCurrent()) return
 			setMessage(
 				error instanceof Error
 					? error.message
 					: 'Unable to revoke the OAuth client.',
 			)
 			setMessageTone('error')
-		} finally {
-			setActionStatus('idle')
 		}
 	}
 
@@ -152,7 +140,7 @@ export function AccountMcpOauthClientsPage({
 
 	const status = 'ready'
 
-	const isBusy = actionStatus === 'busy'
+	const isBusy = createMutation.isPending || revokeMutation.isPending
 
 	return (
 		<AccountManagementShell
@@ -440,4 +428,7 @@ const inlineCodeCss: CSSObject = {
 	color: colors.text,
 }
 
-const mutationResources = ['loadConnectionsPage'] as const
+const mutationResources = [
+	'loadMcpOauthClientsPage',
+	'loadConnectionsPage',
+] as const

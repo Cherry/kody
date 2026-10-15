@@ -102,6 +102,10 @@ test('account MCP OAuth clients API mints, lists without the secret, isolates us
 	)
 	expect(anonymous.status).toBe(401)
 
+	const clientOperations = await import('#app/account-mcp-oauth-clients.ts')
+	const listRead = vi
+		.spyOn(clientOperations, 'listUserMcpOauthClients')
+		.mockRejectedValue(new Error('Client list unavailable'))
 	const created = await runHandler(
 		handler,
 		new Request('http://example.com/account/mcp-oauth-clients.json', {
@@ -117,11 +121,12 @@ test('account MCP OAuth clients API mints, lists without the secret, isolates us
 			}),
 		}),
 	)
+	expect(listRead).not.toHaveBeenCalled()
+	listRead.mockRestore()
 	expect(created.status).toBe(200)
 	const createdPayload = created.data as {
 		ok: boolean
-		clients: Array<{ id: string; clientId: string }>
-		createdClient: { clientId: string; clientSecret: string }
+		createdClient: { id: string; clientId: string; clientSecret: string }
 	}
 	expect(createdPayload.ok).toBe(true)
 	expect(createdPayload.createdClient).toEqual(
@@ -130,7 +135,7 @@ test('account MCP OAuth clients API mints, lists without the secret, isolates us
 			clientSecret: 'shown-once',
 		}),
 	)
-	const createdId = createdPayload.clients[0]?.id
+	const createdId = createdPayload.createdClient.id
 	expect(createdId).toBeTruthy()
 
 	const listed = await runHandler(
@@ -185,10 +190,17 @@ test('account MCP OAuth clients API mints, lists without the secret, isolates us
 	)
 	expect(revoked.status).toBe(200)
 	expect(helpers.deleteClient).toHaveBeenCalledWith('client-one')
-	const revokedPayload = revoked.data as {
-		clients: Array<{ revokedAt: string | null }>
-	}
-	expect(revokedPayload.clients[0]?.revokedAt).toBeTruthy()
+	expect(revoked.data).toEqual({ ok: true, revokedClientId: createdId })
+	const afterRevoke = await runHandler(
+		handler,
+		new Request('http://example.com/account/mcp-oauth-clients.json', {
+			headers: { Cookie: cookie },
+		}),
+	)
+	expect(
+		(afterRevoke.data as { clients: Array<{ revokedAt: string | null }> })
+			.clients[0]?.revokedAt,
+	).toBeTruthy()
 
 	const unverifiedSqlite = new DatabaseSync(':memory:')
 	applyAllMigrations(

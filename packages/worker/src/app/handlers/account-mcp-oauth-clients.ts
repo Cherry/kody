@@ -92,7 +92,7 @@ export async function createAccountMcpOauthClient({
 		clientId: minted.client.clientId,
 	})
 	return operationResult({
-		...(await loadClientsPayload(env.APP_DB, user.userId)),
+		ok: true,
 		createdClient: minted.client,
 	})
 }
@@ -141,5 +141,5 @@ export async function revokeAccountMcpOauthClient({
 		ip: requestIp,
 		path: new URL(request.url).pathname,
 	})
-	return operationResult(await loadClientsPayload(env.APP_DB, user.userId))
+	return operationResult({ ok: true, revokedClientId: id })
 }
