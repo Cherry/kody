@@ -20,7 +20,6 @@ export function AdminUserDestinationPanel({
 	stableUserId: string
 }) {
 	const { actorKey } = useMatchedPageScope()
-	const href = useMatchedPageScope().pageLocation.href
 	const mutation = useMutation(
 		adminDestinationMutationOptions(useQueryClient()),
 	)
@@ -40,7 +39,6 @@ export function AdminUserDestinationPanel({
 				actorKey,
 				stableUserId,
 				destinationEmail,
-				href,
 			})
 			if (isCurrent()) {
 				setEmail('')

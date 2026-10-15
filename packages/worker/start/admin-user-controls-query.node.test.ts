@@ -110,9 +110,8 @@ test('destination verification submits the captured user and invalidates only it
 		actorKey: 'actor-a',
 		stableUserId: 'user-a',
 		destinationEmail: 'extra@example.com',
-		href: '/admin/users?q=example&selected=user-a',
 	})
-	expect(userRpc.mock.calls[0]![0].data).toMatchObject({
+	expect(userRpc.mock.calls[0]![0].data).toEqual({
 		stableUserId: 'user-a',
 		destinationEmail: 'extra@example.com',
 	})

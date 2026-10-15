@@ -218,161 +218,115 @@ export const deleteAdminSystemEmail = createServerFn({ method: 'POST' })
 		})
 	})
 export const assignAdminUserRole = createServerFn({ method: 'POST' })
-	.inputValidator(
-		assignAdminUserRoleSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(assignAdminUserRoleSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { assignAdminUserRole } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return assignAdminUserRole({ env, request, url, ...data })
+			return assignAdminUserRole({ env, request, ...data })
 		})
 	})
 export const removeAdminUserRole = createServerFn({ method: 'POST' })
-	.inputValidator(
-		removeAdminUserRoleSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(removeAdminUserRoleSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { removeAdminUserRole } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return removeAdminUserRole({ env, request, url, ...data })
+			return removeAdminUserRole({ env, request, ...data })
 		})
 	})
 export const setAdminUserPlan = createServerFn({ method: 'POST' })
-	.inputValidator(
-		setAdminUserPlanSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(setAdminUserPlanSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { setAdminUserPlan } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return setAdminUserPlan({ env, request, url, ...data })
+			return setAdminUserPlan({ env, request, ...data })
 		})
 	})
 export const suspendAdminUser = createServerFn({ method: 'POST' })
-	.inputValidator(
-		suspendAdminUserSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(suspendAdminUserSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { setAdminUserSuspension } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
 			return setAdminUserSuspension({
 				env,
 				request,
-				url,
 				...data,
 				suspended: true,
 			})
 		})
 	})
 export const unsuspendAdminUser = createServerFn({ method: 'POST' })
-	.inputValidator(
-		unsuspendAdminUserSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(unsuspendAdminUserSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { setAdminUserSuspension } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
 			return setAdminUserSuspension({
 				env,
 				request,
-				url,
 				...data,
 				suspended: false,
 			})
 		})
 	})
 export const resumeAdminUserEmail = createServerFn({ method: 'POST' })
-	.inputValidator(
-		resumeAdminUserEmailSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(resumeAdminUserEmailSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { resumeAdminUserEmail } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return resumeAdminUserEmail({ env, request, url, ...data })
+			return resumeAdminUserEmail({ env, request, ...data })
 		})
 	})
 export const verifyAdminUserEmail = createServerFn({ method: 'POST' })
-	.inputValidator(
-		verifyAdminUserEmailSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(verifyAdminUserEmailSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { verifyAdminUserEmail } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return verifyAdminUserEmail({ env, request, url, ...data })
+			return verifyAdminUserEmail({ env, request, ...data })
 		})
 	})
 export const mintAdminUserVerificationUrl = createServerFn({ method: 'POST' })
-	.inputValidator(
-		mintAdminUserVerificationUrlSchema.extend({
-			search: z.string().optional(),
-		}),
-	)
+	.inputValidator(mintAdminUserVerificationUrlSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { mintAdminUserVerificationUrl } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return mintAdminUserVerificationUrl({ env, request, url, ...data })
+			return mintAdminUserVerificationUrl({ env, request, ...data })
 		})
 	})
 export const verifyAdminUserEmailDestination = createServerFn({
 	method: 'POST',
 })
-	.inputValidator(
-		verifyAdminUserEmailDestinationSchema.extend({
-			search: z.string().optional(),
-		}),
-	)
+	.inputValidator(verifyAdminUserEmailDestinationSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { verifyAdminUserEmailDestination } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return verifyAdminUserEmailDestination({ env, request, url, ...data })
+			return verifyAdminUserEmailDestination({ env, request, ...data })
 		})
 	})
 export const createAdminUser = createServerFn({ method: 'POST' })
-	.inputValidator(
-		createAdminUserSchema.extend({ search: z.string().optional() }),
-	)
+	.inputValidator(createAdminUserSchema)
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { createAdminUser } =
 			await import('../../src/admin/users-operations.ts')
 		return withWebsiteMutation({}, async ({ request, env }) => {
-			const url = new URL('/admin/users', request.url)
-			url.search = data.search ?? ''
-			return createAdminUser({ env, request, url, ...data })
+			return createAdminUser({ env, request, ...data })
 		})
 	})
 export const adminCodemodRun = createServerFn({ method: 'POST' })

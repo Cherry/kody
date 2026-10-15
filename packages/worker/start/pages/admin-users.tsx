@@ -128,7 +128,6 @@ export function AdminUsersPage(props: {
 	}
 	const write = useMutation({
 		mutationFn: async (input: {
-			search: string
 			perform: () =>
 				| ReturnType<typeof createAdminUser>
 				| ReturnType<typeof mintAdminUserVerificationUrl>
@@ -158,19 +157,14 @@ export function AdminUsersPage(props: {
 		gcTime: 0,
 	})
 	function submitUserChange(
-		href: string,
 		target: string | null,
-		perform: (
-			search: string,
-		) =>
+		perform: () =>
 			| ReturnType<typeof createAdminUser>
 			| ReturnType<typeof mintAdminUserVerificationUrl>
 			| ReturnType<typeof assignAdminUserRole>,
 	) {
-		const search = new URL(href, 'http://localhost').search
 		return write.mutateAsync({
-			search,
-			perform: () => perform(search),
+			perform,
 			actorKey,
 			target,
 			permissions: target === actorKey,
@@ -263,12 +257,9 @@ export function AdminUsersPage(props: {
 		setActionState(action === 'assign_role' ? 'assigning' : 'removing')
 		setMessage(null)
 		try {
-			// Carry filters + selected so the mutation response refreshes the
-			// same list window and selectedUser fallback the UI is showing.
-			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+			await submitUserChange(selectedUser.stableUserId, () =>
 				(action === 'assign_role' ? assignAdminUserRole : removeAdminUserRole)({
 					data: {
-						search,
 						stableUserId: selectedUser.stableUserId,
 						role: selectedRoleToAssign,
 					},
@@ -302,11 +293,9 @@ export function AdminUsersPage(props: {
 		setActionState('saving-plan')
 		setMessage(null)
 		try {
-			// Carry filters + selected so the mutation response refreshes the
-			// same list window and selectedUser fallback the UI is showing.
-			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+			await submitUserChange(selectedUser.stableUserId, () =>
 				setAdminUserPlan({
-					data: { search, stableUserId: selectedUser.stableUserId, plan },
+					data: { stableUserId: selectedUser.stableUserId, plan },
 				}),
 			)
 			if (activeScope.current !== submittedScope) return
@@ -332,15 +321,12 @@ export function AdminUsersPage(props: {
 		setActionState('verifying')
 		setMessage(null)
 		try {
-			const payload = await submitUserChange(
-				href,
-				selectedUser.stableUserId,
-				(search) =>
-					(action === 'mint_verify_url'
-						? mintAdminUserVerificationUrl
-						: verifyAdminUserEmail)({
-						data: { search, stableUserId: selectedUser.stableUserId },
-					}),
+			const payload = await submitUserChange(selectedUser.stableUserId, () =>
+				(action === 'mint_verify_url'
+					? mintAdminUserVerificationUrl
+					: verifyAdminUserEmail)({
+					data: { stableUserId: selectedUser.stableUserId },
+				}),
 			)
 			if (activeScope.current !== submittedScope) return
 			resetPlanDraft()
@@ -380,15 +366,13 @@ export function AdminUsersPage(props: {
 		setActionState('moderating')
 		setMessage(null)
 		try {
-			// Carry filters + selected so the mutation response refreshes the
-			// same list window and selectedUser fallback the UI is showing.
-			await submitUserChange(href, selectedUser.stableUserId, (search) =>
+			await submitUserChange(selectedUser.stableUserId, () =>
 				(action === 'suspend_user'
 					? suspendAdminUser
 					: action === 'unsuspend_user'
 						? unsuspendAdminUser
 						: resumeAdminUserEmail)({
-					data: { search, stableUserId: selectedUser.stableUserId },
+					data: { stableUserId: selectedUser.stableUserId },
 				}),
 			)
 			if (activeScope.current !== submittedScope) return
@@ -417,16 +401,14 @@ export function AdminUsersPage(props: {
 		if (actionState !== 'idle') return
 		const form = event.currentTarget
 		const formData = new FormData(form)
-		const href = getCurrentHref()
 		const submittedScope = activeScope.current
 		setActionState('creatingUser')
 		setCreatedUser(null)
 		setMessage(null)
 		try {
-			const payload = await submitUserChange(href, null, (search) =>
+			const payload = await submitUserChange(null, () =>
 				createAdminUser({
 					data: {
-						search,
 						email: String(formData.get('email') ?? '').trim(),
 						username: String(formData.get('username') ?? '').trim(),
 					},

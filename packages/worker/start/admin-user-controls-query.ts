@@ -70,11 +70,9 @@ export function adminDestinationMutationOptions(client: QueryClient) {
 			actorKey: string | null
 			stableUserId: string
 			destinationEmail: string
-			href: string
 		}) =>
 			verifyAdminUserEmailDestination({
 				data: {
-					search: new URL(input.href, 'http://localhost').search,
 					stableUserId: input.stableUserId,
 					destinationEmail: input.destinationEmail,
 				},

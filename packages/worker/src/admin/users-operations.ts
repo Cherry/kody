@@ -14,8 +14,6 @@ import {
 	clearAdminUserEmailOutboundPause,
 	loadAdminUserByTarget,
 	loadAdminUserRowByStableUserId,
-	adminUserMatchesListFilters,
-	loadAdminUsersData,
 	loadRolesByUserIds,
 	updateAdminUserPlan,
 	updateAdminUserSuspension,
@@ -31,7 +29,6 @@ import {
 } from '#worker/email/destination-verification-admin.ts'
 import {
 	parsePlanName,
-	planNames,
 	resolvePlanWrite,
 	type PlanName,
 } from '#universal/plans.ts'
@@ -53,7 +50,6 @@ export {
 export async function assignAdminUserRole(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 	role?: unknown
 }) {
@@ -96,39 +92,28 @@ export async function assignAdminUserRole(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId};role=${roleName}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
-/**
- * Mutation responses carry the refreshed page slice plus the updated target
- * user, because with infinite scroll the target may live outside the first
- * page and the client patches it in place instead of resetting the list.
- */
+/** Return the changed resource, leaving list refreshes to the query owner. */
 async function buildMutationResponse(
 	env: Env,
-	requestUrl: string,
 	targetStableUserId: string,
 	extra: { verifyUrl?: string | null; verifyUrlExpiresAt?: number | null } = {},
 ) {
-	const [payload, updatedUser] = await Promise.all([
-		loadAdminUsersData(env, requestUrl),
-		loadAdminUserByTarget(env.APP_DB, { stableUserId: targetStableUserId }),
-	])
-	return adminOperationResult({ ...payload, updatedUser, ...extra })
+	const updatedUser = await loadAdminUserByTarget(env.APP_DB, {
+		stableUserId: targetStableUserId,
+	})
+	return adminOperationResult({ ok: true as const, updatedUser, ...extra })
 }
 
 export async function removeAdminUserRole(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 	role?: unknown
 }) {
@@ -181,7 +166,7 @@ export async function removeAdminUserRole(input: {
 					result: 'failure',
 					email: actor.email,
 					ip: requestIp,
-					path: input.url.pathname,
+					path: '/admin/users',
 					reason: 'last_admin',
 				})
 				return adminOperationResult(
@@ -212,21 +197,16 @@ export async function removeAdminUserRole(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId};role=${roleName}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 export async function setAdminUserPlan(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 	plan?: unknown
 }) {
@@ -269,15 +249,11 @@ export async function setAdminUserPlan(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId};plan=${planUpdate.plan}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 /**
@@ -288,7 +264,6 @@ export async function setAdminUserPlan(input: {
 export async function setAdminUserSuspension(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 	suspended: boolean
 }) {
@@ -327,15 +302,11 @@ export async function setAdminUserSuspension(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 /**
@@ -345,7 +316,6 @@ export async function setAdminUserSuspension(input: {
 export async function resumeAdminUserEmail(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 }) {
 	const actor = await requireUserWithPermission(
@@ -376,21 +346,16 @@ export async function resumeAdminUserEmail(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 export async function verifyAdminUserEmail(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 }) {
 	const actor = await requireUserWithPermission(
@@ -428,21 +393,16 @@ export async function verifyAdminUserEmail(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 export async function mintAdminUserVerificationUrl(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 }) {
 	const actor = await requireUserWithPermission(
@@ -462,7 +422,7 @@ export async function mintAdminUserVerificationUrl(input: {
 	try {
 		minted = await mintAdminEmailVerificationUrl({
 			db: input.env.APP_DB,
-			appBaseUrl: new URL(input.url.toString()).origin,
+			appBaseUrl: new URL(input.request.url).origin,
 			target: { stableUserId: targetStableUserId },
 		})
 	} catch (error) {
@@ -483,25 +443,19 @@ export async function mintAdminUserVerificationUrl(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-		{
-			verifyUrl: minted.verifyUrl,
-			verifyUrlExpiresAt: minted.expiresAt,
-		},
-	)
+	return buildMutationResponse(input.env, targetStableUserId, {
+		verifyUrl: minted.verifyUrl,
+		verifyUrlExpiresAt: minted.expiresAt,
+	})
 }
 
 export async function verifyAdminUserEmailDestination(input: {
 	env: Env
 	request: Request
-	url: URL
 	stableUserId?: unknown
 	destinationEmail?: unknown
 }) {
@@ -551,21 +505,16 @@ export async function verifyAdminUserEmailDestination(input: {
 		result: 'success',
 		email: actor.email,
 		ip: requestIp,
-		path: input.url.pathname,
+		path: '/admin/users',
 		reason: `target_stable_user_id=${targetStableUserId};destination=${marked.destination.email}`,
 	})
 
-	return buildMutationResponse(
-		input.env,
-		input.url.toString(),
-		targetStableUserId,
-	)
+	return buildMutationResponse(input.env, targetStableUserId)
 }
 
 export async function createAdminUser(input: {
 	env: Env
 	request: Request
-	url: URL
 	email?: unknown
 	username?: unknown
 }) {
@@ -583,7 +532,7 @@ export async function createAdminUser(input: {
 			env: input.env,
 			email,
 			username,
-			setupLinkOrigin: input.url,
+			setupLinkOrigin: new URL(input.request.url),
 		})
 		scheduleUserCreatedEvent({
 			env: input.env,
@@ -602,7 +551,7 @@ export async function createAdminUser(input: {
 			result: 'success',
 			email: actor.email,
 			ip: requestIp,
-			path: input.url.pathname,
+			path: '/admin/users',
 			reason: [
 				`actor_stable_user_id=${actor.mcpUser.userId}`,
 				`target_stable_user_id=${createdUser.stableUserId}`,
@@ -611,43 +560,10 @@ export async function createAdminUser(input: {
 		})
 
 		const { userId: _userId, ...boundaryUser } = createdUser
-		const createdListItem = await loadAdminUserByTarget(input.env.APP_DB, {
-			stableUserId: createdUser.stableUserId,
-		}).catch(() => null)
-		const createdUserInFilteredList = createdListItem
-			? await adminUserMatchesListFilters(
-					input.env,
-					input.url.toString(),
-					createdUser.stableUserId,
-				).catch(() => false)
-			: false
-		try {
-			const payload = await loadAdminUsersData(input.env, input.url.toString())
-			return adminOperationResult({
-				...payload,
-				updatedUser: createdListItem,
-				createdUser: boundaryUser,
-				createdUserInFilteredList,
-			})
-		} catch (error) {
-			// The account and one-time setup link already exist. A list refresh
-			// failure must not become a 500 that drops that link.
-			console.warn('admin-users-create-list-refresh-failed', error)
-			return adminOperationResult({
-				ok: true,
-				users: [],
-				selectedUser: null,
-				page: 1,
-				pageSize: 20,
-				total: 0,
-				availableRoles: [...roleNames],
-				availablePlans: [...planNames],
-				updatedUser: createdListItem,
-				createdUser: boundaryUser,
-				createdUserInFilteredList,
-				listRefreshFailed: true,
-			})
-		}
+		return adminOperationResult({
+			ok: true as const,
+			createdUser: boundaryUser,
+		})
 	} catch (error) {
 		const message =
 			error instanceof Error ? error.message : 'Unable to create user.'

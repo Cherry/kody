@@ -1,4 +1,7 @@
-import { type AdminUsersMutationData } from '#universal/loader-data.ts'
+import {
+	type AdminUsersMutationData,
+	type AdminUsersLoaderData,
+} from '#universal/loader-data.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import type * as UsersData from '#worker/admin/users-data.ts'
 import { adminUserListItemFieldNames } from '#worker/admin/users-data.ts'
@@ -207,28 +210,24 @@ function setupAdminUsers(
 						return userOperations.assignAdminUserRole({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'remove_role':
 						return userOperations.removeAdminUserRole({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'update_plan':
 						return userOperations.setAdminUserPlan({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'suspend_user':
 						return userOperations.setAdminUserSuspension({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 							suspended: true,
 						})
@@ -236,7 +235,6 @@ function setupAdminUsers(
 						return userOperations.setAdminUserSuspension({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 							suspended: false,
 						})
@@ -244,35 +242,30 @@ function setupAdminUsers(
 						return userOperations.resumeAdminUserEmail({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'mark_email_verified':
 						return userOperations.verifyAdminUserEmail({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'mint_verify_url':
 						return userOperations.mintAdminUserVerificationUrl({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'mark_email_destination_verified':
 						return userOperations.verifyAdminUserEmailDestination({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					case 'create_user':
 						return userOperations.createAdminUser({
 							env: env as unknown as Env,
 							request,
-							url,
 							...body,
 						})
 					default:
@@ -297,7 +290,7 @@ function setupAdminUsers(
 		list: async (search: string) => {
 			const response = await send(search)
 			expect(response.status).toBe(200)
-			return (await Promise.resolve(response.data)) as AdminUsersMutationData
+			return (await Promise.resolve(response.data)) as AdminUsersLoaderData
 		},
 	}
 }
@@ -340,9 +333,7 @@ test('admin users list payload exposes only account metadata fields', async () =
 	const response = await get()
 
 	expect(response.status).toBe(200)
-	const payload = (await Promise.resolve(
-		response.data,
-	)) as AdminUsersMutationData
+	const payload = (await Promise.resolve(response.data)) as AdminUsersLoaderData
 	expect(Object.keys(payload).sort()).toEqual(
 		[
 			'availablePlans',
@@ -544,9 +535,7 @@ test('assign role action updates user roles and logs audit event', async () => {
 	const payload = (await Promise.resolve(
 		response.data,
 	)) as AdminUsersMutationData
-	expect(payload.users[0]?.roles).toContain('admin')
-	// Mutations return the updated target so the client can patch it into
-	// an infinite-scroll window without resetting to the first page.
+	expect(payload.updatedUser?.roles).toContain('admin')
 	expect(payload.updatedUser).toEqual(
 		expect.objectContaining({
 			stableUserId: stableUserId(2),
@@ -556,6 +545,31 @@ test('assign role action updates user roles and logs audit event', async () => {
 	expect(logAuditEventSpy).toHaveBeenCalledWith(
 		expect.objectContaining({ category: 'admin', action: 'assign_role' }),
 	)
+})
+
+test('role writes do not reload the admin list', async () => {
+	const { post } = setupAdminUsers([makeUser(2, 'member')], [[2, 'user']])
+	const listRead = vi.fn(async () => {
+		throw new Error('list unavailable')
+	})
+	mockModule.loadAdminUsersData = listRead
+	try {
+		const response = await post(
+			{ action: 'assign_role', stableUserId: stableUserId(2), role: 'admin' },
+			'?q=unrelated&page=4',
+		)
+		expect(response.status).toBe(200)
+		expect(response.data).toEqual({
+			ok: true,
+			updatedUser: expect.objectContaining({
+				stableUserId: stableUserId(2),
+				roles: expect.arrayContaining(['admin']),
+			}),
+		})
+		expect(listRead).not.toHaveBeenCalled()
+	} finally {
+		mockModule.loadAdminUsersData = undefined
+	}
 })
 
 test('remove role rejects the last admin and removes admin when another admin remains', async () => {
@@ -581,9 +595,7 @@ test('remove role rejects the last admin and removes admin when another admin re
 	const payload = (await Promise.resolve(
 		response.data,
 	)) as AdminUsersMutationData
-	const secondAdmin = payload.users.find(
-		(user) => user.stableUserId === stableUserId(2),
-	)
+	const secondAdmin = payload.updatedUser
 	if (!secondAdmin) throw new Error('Expected second admin in payload')
 	expect(secondAdmin.roles).not.toContain('admin')
 	expectAdminAudit('remove_role')
@@ -604,7 +616,7 @@ test('update plan action sets, maps null to free, validates, and scopes plan cha
 	expect(setPlanResponse.status).toBe(200)
 	expect(
 		((await Promise.resolve(setPlanResponse.data)) as AdminUsersMutationData)
-			.users[0]?.plan,
+			.updatedUser?.plan,
 	).toBe('pro')
 	expectAdminAudit('update_plan', `target_stable_user_id=${target};plan=pro`)
 
@@ -616,7 +628,7 @@ test('update plan action sets, maps null to free, validates, and scopes plan cha
 	expect(clearPlanResponse.status).toBe(200)
 	expect(
 		((await Promise.resolve(clearPlanResponse.data)) as AdminUsersMutationData)
-			.users[0]?.plan,
+			.updatedUser?.plan,
 	).toBe('free')
 	expectAdminAudit('update_plan', `target_stable_user_id=${target};plan=free`)
 
@@ -653,7 +665,7 @@ test('suspend, unsuspend, and resume email actions update flags and log audit ev
 	expect(suspendResponse.status).toBe(200)
 	expect(
 		((await Promise.resolve(suspendResponse.data)) as AdminUsersMutationData)
-			.users[0]?.suspended_at,
+			.updatedUser?.suspended_at,
 	).toBeTruthy()
 	expectAdminAudit('suspend_user', targetReason)
 
@@ -661,7 +673,7 @@ test('suspend, unsuspend, and resume email actions update flags and log audit ev
 	expect(unsuspendResponse.status).toBe(200)
 	expect(
 		((await Promise.resolve(unsuspendResponse.data)) as AdminUsersMutationData)
-			.users[0]?.suspended_at,
+			.updatedUser?.suspended_at,
 	).toBeNull()
 	expectAdminAudit('unsuspend_user', targetReason)
 
@@ -669,7 +681,7 @@ test('suspend, unsuspend, and resume email actions update flags and log audit ev
 	expect(resumeResponse.status).toBe(200)
 	expect(
 		((await Promise.resolve(resumeResponse.data)) as AdminUsersMutationData)
-			.users[0]?.email_outbound_paused_at,
+			.updatedUser?.email_outbound_paused_at,
 	).toBeNull()
 	expectAdminAudit('resume_email_outbound', targetReason)
 
@@ -717,7 +729,7 @@ test('mark email verified and mint verify url actions update the account and log
 	expect(minted.verifyUrl).toMatch(
 		/^https:\/\/example.com\/verify-email\?token=/,
 	)
-	expect(minted.users[0]?.email_verified).toBe(false)
+	expect(minted.updatedUser?.email_verified).toBe(false)
 	expectAdminAudit('mint_verify_url', targetReason)
 
 	const verifyResponse = await act('mark_email_verified')
@@ -725,8 +737,8 @@ test('mark email verified and mint verify url actions update the account and log
 	const verified = (await Promise.resolve(
 		verifyResponse.data,
 	)) as AdminUsersMutationData
-	expect(verified.users[0]?.email_verified).toBe(true)
-	expect(verified.users[0]?.email_verification_delivery).toBeNull()
+	expect(verified.updatedUser?.email_verified).toBe(true)
+	expect(verified.updatedUser?.email_verification_delivery).toBeNull()
 	expectAdminAudit('mark_email_verified', targetReason)
 
 	expect((await act('mint_verify_url')).status).toBe(400)
@@ -803,38 +815,8 @@ test('create_user action returns setup link, logs audit, maps duplicate email to
 		created.data,
 	)) as AdminUsersMutationData
 	expect(createdPayload.createdUser).toEqual(createdUserPayload)
-	expect(createdPayload.updatedUser).toEqual(
-		expect.objectContaining({
-			stableUserId: createdUser.stableUserId,
-			username: createdUser.username,
-			email: createdUser.email,
-		}),
-	)
-	expect(createdPayload.users).toEqual([
-		expect.objectContaining({ stableUserId: createdUser.stableUserId }),
-	])
-	expect(createdPayload.createdUserInFilteredList).toBe(true)
+	expect(createdPayload).toEqual({ ok: true, createdUser: createdUserPayload })
 
-	const filterCases: Array<[string, boolean]> = [
-		['?role=admin', false],
-		['?q=nobody-matches', false],
-		['?q=new-user', true],
-		['?verification=stalled', false],
-	]
-	for (const [search, inList] of filterCases) {
-		mockModule.adminCreateUserWithPasswordSetup.mockResolvedValueOnce(
-			createdUser,
-		)
-		const response = await post(createBody, search)
-		expect(response.status).toBe(200)
-		const payload = (await Promise.resolve(
-			response.data,
-		)) as AdminUsersMutationData
-		expect([search, payload.createdUserInFilteredList]).toEqual([
-			search,
-			inList,
-		])
-	}
 	expect(mockModule.scheduleUserCreatedEvent).toHaveBeenCalledWith({
 		env,
 		user: {
@@ -864,9 +846,10 @@ test('create_user action returns setup link, logs audit, maps duplicate email to
 	})
 
 	mockModule.adminCreateUserWithPasswordSetup.mockResolvedValueOnce(createdUser)
-	mockModule.loadAdminUsersData = async () => {
+	const listRead = vi.fn(async () => {
 		throw new Error('list refresh failed')
-	}
+	})
+	mockModule.loadAdminUsersData = listRead
 	consoleWarn.mockImplementation(() => {})
 	try {
 		const refreshFailed = await post({
@@ -879,19 +862,11 @@ test('create_user action returns setup link, logs audit, maps duplicate email to
 			refreshFailed.data,
 		)) as AdminUsersMutationData
 		expect(refreshFailedPayload.ok).toBe(true)
-		expect(refreshFailedPayload.listRefreshFailed).toBe(true)
-		expect(refreshFailedPayload.createdUser).toEqual(createdUserPayload)
-		expect(refreshFailedPayload.updatedUser).toEqual(
-			expect.objectContaining({
-				stableUserId: createdUser.stableUserId,
-				username: createdUser.username,
-			}),
-		)
-		expect(refreshFailedPayload.createdUserInFilteredList).toBe(true)
-		expect(consoleWarn).toHaveBeenCalledWith(
-			'admin-users-create-list-refresh-failed',
-			expect.any(Error),
-		)
+		expect(refreshFailedPayload).toEqual({
+			ok: true,
+			createdUser: createdUserPayload,
+		})
+		expect(listRead).not.toHaveBeenCalled()
 	} finally {
 		mockModule.loadAdminUsersData = undefined
 	}

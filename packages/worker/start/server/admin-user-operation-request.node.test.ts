@@ -51,12 +51,11 @@ import {
 	deleteAdminSystemEmail,
 } from './admin-mutations.ts'
 afterEach(() => vi.clearAllMocks())
-test('named admin role write preserves audit request and list filters', async () => {
+test('named admin role write preserves audit request without coupling writes to list filters', async () => {
 	await assignAdminUserRole({
 		data: {
 			stableUserId: 'person-a',
 			role: 'admin',
-			search: '?q=alice&role=user&selected=person-a',
 		},
 	})
 	expect(state.lease).toHaveBeenCalledWith({})
@@ -67,12 +66,8 @@ test('named admin role write preserves audit request and list filters', async ()
 		role: 'admin',
 	})
 	expect(input).not.toHaveProperty('body')
-	expect(input).toHaveProperty(
-		'url',
-		new URL(
-			'https://kody.test/admin/users?q=alice&role=user&selected=person-a',
-		),
-	)
+	expect(input).not.toHaveProperty('url')
+	expect(input).not.toHaveProperty('search')
 	expect(() =>
 		assignAdminUserRole({
 			data: { stableUserId: 'person-a', role: 'unknown' as 'admin' },

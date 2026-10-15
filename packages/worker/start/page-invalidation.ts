@@ -29,7 +29,10 @@ export function usePageInvalidation(
 			return (
 				refreshRoute &&
 				router.state.location.href.split('#')[0] === href.split('#')[0] &&
-				currentContext?.actorKey === actorKey
+				currentContext != null &&
+				typeof currentContext === 'object' &&
+				'actorKey' in currentContext &&
+				currentContext.actorKey === actorKey
 			)
 		}
 		const refreshCurrentRoute = canRefreshRoute()
