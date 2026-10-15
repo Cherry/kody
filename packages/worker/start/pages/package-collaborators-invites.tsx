@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useState, type FormEvent } from 'react'
+import { useInviteHandoff } from '../use-invite-handoff.ts'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
@@ -69,7 +70,7 @@ export function PackageCollaboratorInvites({
 	const [invitee, setInvitee] = useState('')
 	const [preset, setPreset] = useState<PackageCollaboratorPreset>('use')
 	const [created, setCreated] =
-		useState<PackageCollaboratorInviteCreated | null>(null)
+		useInviteHandoff<PackageCollaboratorInviteCreated>(view.invites)
 	const [confirmed, setConfirmed] = useState<string | null>(null)
 	const busy = busyKey !== null
 	async function submit(event: FormEvent<HTMLFormElement>) {

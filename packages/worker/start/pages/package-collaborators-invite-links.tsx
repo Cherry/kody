@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useState, type FormEvent } from 'react'
+import { useInviteHandoff } from '../use-invite-handoff.ts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
 	loadPackageInviteLinks,
@@ -117,7 +118,7 @@ function PackageInviteLinksContent({
 	const [preset, setPreset] = useState<PackageCollaboratorPreset>('use')
 	const [maxUses, setMaxUses] = useState('1')
 	const [expiresInDays, setExpiresInDays] = useState('7')
-	const [created, setCreated] = useState<CreatedLink | null>(null)
+	const [created, setCreated] = useInviteHandoff<CreatedLink>(query.data)
 	const [message, setMessage] = useState<string | null>(null)
 	const [messageTone, setMessageTone] = useState<'info' | 'error'>('info')
 	const createdUrl = created?.url

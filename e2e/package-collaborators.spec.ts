@@ -1,3 +1,4 @@
+import { type Route } from '@playwright/test'
 import { seedStableUserIdFromEmail } from '../tools/seed-sql.ts'
 import { executeE2eD1Command } from './d1-utils.ts'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
@@ -190,10 +191,28 @@ INSERT INTO saved_packages (
 	await expect(ready).toContainText(`Invite ready for @${friend.username}`)
 	await expect(invites).toHaveCount(1)
 
-	await pending.getByRole('button', { name: 'Revoke' }).click()
-	await pending.getByRole('button', { name: 'Confirm revoke' }).click()
-	await expect(invites).toHaveCount(0)
-	await expect(ready).toHaveCount(0)
+	let droppedRevoke = false
+	const loseRevokeResponse = async (route: Route) => {
+		if (
+			route.request().method() !== 'POST' ||
+			!route.request().postData()?.includes('inviteId')
+		)
+			return route.fallback()
+		const response = await route.fetch()
+		expect(response.ok()).toBe(true)
+		droppedRevoke = true
+		await route.abort('failed')
+	}
+	await page.route('**/_serverFn/**', loseRevokeResponse)
+	try {
+		await pending.getByRole('button', { name: 'Revoke' }).click()
+		await pending.getByRole('button', { name: 'Confirm revoke' }).click()
+		await expect(invites).toHaveCount(0)
+		await expect(ready).toHaveCount(0)
+		expect(droppedRevoke).toBe(true)
+	} finally {
+		await page.unroute('**/_serverFn/**', loseRevokeResponse)
+	}
 
 	await form
 		.getByRole('textbox', { name: 'Email or username' })

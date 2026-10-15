@@ -147,3 +147,59 @@ for (const change of [
 		client.clear()
 	})
 }
+
+for (const lostResponse of [false, true]) {
+	test(`invite settlement preserves its original outcome when the confirming read fails, lost response=${lostResponse}`, async () => {
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		})
+		const page = { username: 'owner', kodyId: 'submitted' }
+		const queryKey = [
+			'page',
+			'owner',
+			'loadPackageCollaborators',
+			page,
+		] as const
+		const readFailure = new Error('confirming read failed')
+		const writeFailure = new Error('invite response lost')
+		const snapshot = { invites: [] }
+		let reads = 0
+		await client.fetchQuery({
+			queryKey,
+			meta: { actorKey: 'owner' },
+			queryFn: async () => {
+				if (++reads === 1) return snapshot
+				throw readFailure
+			},
+		})
+		const handoff = {
+			ok: true as const,
+			invite: { id: 'new-invite', prompt: 'one-time-token' },
+		}
+		let writes = 0
+		const mutation = client.getMutationCache().build(
+			client,
+			collaboratorsMutationOptions(client, 'owner', page, async () => {
+				writes++
+				if (lostResponse) throw writeFailure
+				return handoff
+			}),
+		)
+		const result = mutation.execute({
+			key: 'invite',
+			change: {
+				intent: 'invite',
+				invitee: 'friend@example.com',
+				preset: 'use',
+			},
+		})
+		if (lostResponse) await expect(result).rejects.toBe(writeFailure)
+		else await expect(result).resolves.toBe(handoff)
+		expect(writes).toBe(1)
+		expect(reads).toBe(2)
+		expect(client.getQueryState(queryKey)?.error).toBe(readFailure)
+		expect(client.getQueryData(queryKey)).toEqual(snapshot)
+		expect(client.getQueryData(queryKey)).not.toHaveProperty('invite')
+		client.clear()
+	})
+}

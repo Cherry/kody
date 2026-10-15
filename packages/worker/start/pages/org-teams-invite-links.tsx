@@ -1,5 +1,5 @@
 /** @jsxImportSource @emotion/react */
-import { useState } from 'react'
+import { useInviteHandoff } from '../use-invite-handoff.ts'
 import {
 	useMutation,
 	useQueryClient,
@@ -63,8 +63,8 @@ export function OrgTeamInviteLinks({
 }) {
 	const client = useQueryClient()
 	const capture = useSubmitterScope()
-	const [created, setCreated] = useState<{ id: string; url: string } | null>(
-		null,
+	const [created, setCreated] = useInviteHandoff<{ id: string; url: string }>(
+		links,
 	)
 	const create = useMutation(
 		teamInviteMutationOptions(

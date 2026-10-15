@@ -1,3 +1,4 @@
+import { type Route } from '@playwright/test'
 import { seedStableUserIdFromEmail } from '../tools/seed-sql.ts'
 import { executeE2eD1Command } from './d1-utils.ts'
 import { expect, test, waitForClientHydration } from './playwright-utils.ts'
@@ -378,5 +379,59 @@ for (const state of ['revoked', 'expired'] as const) {
 		).toBeVisible()
 		await expect(page.getByTestId('org-teams')).toHaveCount(0)
 		await expect(page.getByText('Writers', { exact: true })).toHaveCount(0)
+	})
+}
+
+for (const kind of ['package', 'team'] as const) {
+	test(`${kind} invite handoff disappears after a committed revoke loses its response`, async ({
+		page,
+		seedE2eUser,
+		login,
+	}) => {
+		const runId = Date.now()
+		const owner = await seedE2eUser({
+			email: `lost-${kind}-${runId}@example.com`,
+			username: `lost-${kind}-${runId}`,
+		})
+		const packageName = `lost-${kind}-${runId}`
+		const { orgSlug } = seedTeamOrg({
+			runId,
+			ownerId: seedStableUserIdFromEmail(owner.email),
+			packageName,
+		})
+		await login({ ...owner, mode: 'login' })
+		await page.goto(
+			kind === 'package'
+				? `/@${orgSlug}/${packageName}/collaborators`
+				: `/@${orgSlug}/-/teams`,
+		)
+		await waitForClientHydration(page)
+		const prefix =
+			kind === 'package' ? 'package-invite-link' : 'org-team-invite-link'
+		await page.getByTestId(`${prefix}-create`).click()
+		await expect(page.getByTestId(`${prefix}-url`)).toBeVisible()
+		const row = page.getByTestId(prefix)
+		await expect(row).toHaveCount(1)
+		let droppedRevoke = false
+		const loseRevokeResponse = async (route: Route) => {
+			if (
+				route.request().method() !== 'POST' ||
+				!route.request().postData()?.includes('linkId')
+			)
+				return route.fallback()
+			const response = await route.fetch()
+			expect(response.ok()).toBe(true)
+			droppedRevoke = true
+			await route.abort('failed')
+		}
+		await page.route('**/_serverFn/**', loseRevokeResponse)
+		try {
+			await row.getByRole('button', { name: 'Revoke', exact: true }).click()
+			await expect(row).toHaveCount(0)
+			await expect(page.getByTestId(`${prefix}-url`)).toHaveCount(0)
+			expect(droppedRevoke).toBe(true)
+		} finally {
+			await page.unroute('**/_serverFn/**', loseRevokeResponse)
+		}
 	})
 }
