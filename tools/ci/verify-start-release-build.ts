@@ -70,6 +70,29 @@ export async function verifyStartReleaseBuild(
 		if (!(await stat(path.join(client, reference.slice(1)))).isFile())
 			throw new Error(`Missing SSR manifest asset: ${reference}`)
 	}
+	if (sources.includes('__VITE_PUBLIC_ASSET__')) {
+		throw new Error(
+			'Unresolved Vite public asset tokens escaped into JavaScript',
+		)
+	}
+	const stylesheetReferences = [...references].filter((reference) =>
+		reference.endsWith('.css'),
+	)
+	const stylesheets = (
+		await Promise.all(
+			stylesheetReferences.map((reference) =>
+				readFile(path.join(client, reference.slice(1)), 'utf8'),
+			),
+		)
+	).join('\n')
+	if (
+		!stylesheets.includes('@font-face') ||
+		!stylesheets.includes(`${base}fonts/wix-madefor-text-latin.woff2`)
+	) {
+		throw new Error(
+			'Start SSR manifest must load the root stylesheet with namespaced font URLs',
+		)
+	}
 	return references.size
 }
 

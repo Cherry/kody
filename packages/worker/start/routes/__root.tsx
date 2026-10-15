@@ -61,7 +61,7 @@ import {
 	mainGutterPaddingCss,
 } from '../components/app-layout.ts'
 import { AppBrowserEffects } from '../components/app-browser-effects.tsx'
-import stylesheet from '../../public/styles.css?inline'
+import '../../public/styles.css'
 
 export const Route = createRootRouteWithContext<{
 	queryClient: QueryClient
@@ -402,7 +402,6 @@ function DocumentShell({ children }: { children: ReactNode }) {
 				<meta name={documentActorMetaName} content={JSON.stringify(actorKey)} />
 				<PageHead overrideHead={failureHead} />
 				<FathomTracker siteId={loaded?.fathomSiteId} />
-				<style dangerouslySetInnerHTML={{ __html: stylesheet }} />
 			</head>
 			<body>
 				<AppBrowserEffects />

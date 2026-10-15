@@ -21,7 +21,7 @@ test('checks embedded SSR references against the unchanged Cloudflare asset bind
 		)
 		await writeFile(
 			path.join(server, 'index.js'),
-			`const manifest = {script: '${base}assets/app.js'}; const rpc = '${base}_serverFn/';`,
+			`const manifest = {script: '${base}assets/app.js', css: '${base}assets/root.css'}; const rpc = '${base}_serverFn/';`,
 		)
 		for (const file of [
 			'page-init.js',
@@ -31,7 +31,22 @@ test('checks embedded SSR references against the unchanged Cloudflare asset bind
 		]) {
 			await writeFile(path.join(publicDirectory, file), '')
 		}
-		expect(await verifyStartReleaseBuild(directory, release)).toBe(1)
+		await writeFile(
+			path.join(publicDirectory, 'assets/root.css'),
+			`@font-face{src:url(${base}fonts/wix-madefor-text-latin.woff2)}`,
+		)
+		expect(await verifyStartReleaseBuild(directory, release)).toBe(2)
+		await writeFile(
+			path.join(publicDirectory, 'assets/root.css'),
+			'@font-face{src:url(/fonts/wix-madefor-text-latin.woff2)}',
+		)
+		await expect(verifyStartReleaseBuild(directory, release)).rejects.toThrow(
+			'namespaced font URLs',
+		)
+		await writeFile(
+			path.join(publicDirectory, 'assets/root.css'),
+			`@font-face{src:url(${base}fonts/wix-madefor-text-latin.woff2)}`,
+		)
 		await rm(path.join(publicDirectory, 'assets/app.js'))
 		await expect(verifyStartReleaseBuild(directory, release)).rejects.toThrow(
 			'ENOENT',
