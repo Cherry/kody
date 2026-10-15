@@ -174,7 +174,10 @@ test('OAuth callback exchanges and persists a connection with its required hosts
 	const credentialLink = page
 		.getByRole('region', { name: 'Credentials', exact: true })
 		.getByRole('link', { name: new RegExp(provider) })
-	const row = page.getByRole('row').filter({ has: credentialLink })
+	const row = page
+		.getByRole('region', { name: 'Credentials', exact: true })
+		.getByRole('row')
+		.filter({ hasText: provider })
 	await expect(row).toContainText(new URL(mock.origin).hostname)
 	await credentialLink.click()
 	await expect(
