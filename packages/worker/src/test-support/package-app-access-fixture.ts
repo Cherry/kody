@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers'
 import { createPackageAppSessionCookie } from '#app/package-app-session.ts'
 import { ensureOrgsTestSchema } from '#worker/orgs/orgs-test-schema.ts'
+import { ensureAuditEventsTestSchema } from '#worker/test-support/audit-events-test-schema.ts'
 import { testStableUserIdFromEmail } from '#worker/test-support/stable-user-id.ts'
 import {
 	ensurePackageSubscriptionTestSchema,
@@ -59,6 +60,7 @@ export async function seedPackageAppAccessFixture() {
 	} catch {
 		// Column already present from an earlier seed.
 	}
+	await ensureAuditEventsTestSchema(env.AUDIT_DB)
 	for (const person of Object.values(accessFixture.people)) {
 		await seedAccount({
 			db: env.APP_DB,
@@ -182,6 +184,17 @@ export async function seedPackageAppAccessFixture() {
 		now,
 		now,
 	)
+}
+
+/** Audit rows the package-app access gate wrote for `action`. */
+export async function packageAppAccessAuditRows(action: string) {
+	const { results } = await env.AUDIT_DB.prepare(
+		`SELECT action, result, path, reason FROM audit_events WHERE action = ?
+		 ORDER BY id`,
+	)
+		.bind(action)
+		.all<{ action: string; result: string; path: string; reason: string }>()
+	return results
 }
 
 /** A `kody_pkg_session` cookie pair for `person` on the fixture org host. */
