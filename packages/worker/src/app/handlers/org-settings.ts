@@ -340,9 +340,7 @@ async function writeOrganizationDomain(
 		}
 		throw error
 	}
-	return operationResult(
-		await loadOrgSettingsData({ env, user, org: access.org }),
-	)
+	return operationResult({ ok: true })
 }
 
 export async function addOrganizationDomain(

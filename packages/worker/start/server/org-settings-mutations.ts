@@ -2,7 +2,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 const orgSlug = z.string().min(1)
 export const updateOrganizationProfile = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		z.object({
 			orgSlug,
 			displayName: z.string().optional(),
@@ -24,7 +24,7 @@ export const updateOrganizationProfile = createServerFn({ method: 'POST' })
 		)
 	})
 export const deleteOrganization = createServerFn({ method: 'POST' })
-	.validator(z.object({ orgSlug, confirmation: z.string() }))
+	.inputValidator(z.object({ orgSlug, confirmation: z.string() }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { deleteOrganization } =
@@ -40,7 +40,7 @@ export const deleteOrganization = createServerFn({ method: 'POST' })
 		)
 	})
 export const removeOrganizationPhoto = createServerFn({ method: 'POST' })
-	.validator(z.object({ orgSlug }))
+	.inputValidator(z.object({ orgSlug }))
 	.handler(async ({ data }) => {
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		const { removeOrganizationPhoto } =
@@ -56,7 +56,7 @@ export const removeOrganizationPhoto = createServerFn({ method: 'POST' })
 		)
 	})
 export const addOrganizationDomain = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		z.object({
 			orgSlug,
 			hostname: z.string(),
@@ -80,7 +80,7 @@ export const addOrganizationDomain = createServerFn({ method: 'POST' })
 		)
 	})
 export const syncOrganizationDomain = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		z.object({
 			orgSlug,
 			hostname: z.string().optional(),
@@ -102,7 +102,7 @@ export const syncOrganizationDomain = createServerFn({ method: 'POST' })
 		)
 	})
 export const deleteOrganizationDomain = createServerFn({ method: 'POST' })
-	.validator(
+	.inputValidator(
 		z.object({
 			orgSlug,
 			hostname: z.string().optional(),
@@ -124,7 +124,7 @@ export const deleteOrganizationDomain = createServerFn({ method: 'POST' })
 		)
 	})
 export const saveOrganizationAvatar = createServerFn({ method: 'POST' })
-	.validator((data: FormData) => {
+	.inputValidator((data: FormData) => {
 		if (!(data instanceof FormData)) throw new Error('Invalid avatar form')
 		orgSlug.parse(data.get('orgSlug'))
 		return data

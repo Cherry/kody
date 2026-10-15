@@ -6,6 +6,7 @@ import {
 } from '#start/server/org-settings-mutations'
 import { type CSSObject } from '@emotion/react'
 import { useState } from 'react'
+import { orgDomainMutationOptions } from './org-domain-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	useMutation,
@@ -27,23 +28,7 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 
-type DomainWrite =
-	| {
-			action: 'add'
-			hostname: string
-			binding_kind: 'app' | 'org'
-			package_id?: string
-			ssl_method?: 'http' | 'txt'
-	  }
-	| { action: 'sync' | 'delete'; hostname?: string; id?: string }
-
-type DomainSubmission = Readonly<{
-	body: DomainWrite
-	slug: string
-	queryKey: QueryKey
-}>
-
-/** The organization settings query owns server state, including mutation replies. */
+/** The organization settings query owns domain state and refreshes after writes. */
 export function OrgSettingsCustomDomains({
 	data,
 	queryKey,
@@ -59,63 +44,27 @@ export function OrgSettingsCustomDomains({
 	const [bindingKind, setBindingKind] = useState<'org' | 'app'>('org')
 	const [packageId, setPackageId] = useState('')
 	const [sslMethod, setSslMethod] = useState<'http' | 'txt'>('txt')
-	const mutation = useMutation({
-		onMutate: async (submission: DomainSubmission) => {
-			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
-		},
-		mutationFn: async ({ body, slug }: DomainSubmission) => {
-			return (
-				body.action === 'add'
-					? addOrganizationDomain({
-							data: {
-								orgSlug: slug,
-								hostname: body.hostname,
-								bindingKind: body.binding_kind,
-								packageId: body.package_id,
-								sslMethod: body.ssl_method,
-							},
-						})
-					: body.action === 'sync'
-						? syncOrganizationDomain({
-								data: { orgSlug: slug, hostname: body.hostname, id: body.id },
-							})
-						: deleteOrganizationDomain({
-								data: { orgSlug: slug, hostname: body.hostname, id: body.id },
-							})
-			) as Promise<OrgSettingsLoaderData>
-		},
-		onSuccess: async (payload, submission) => {
-			// A pre-mutation settings read must not replace the authoritative write reply.
-			await client.cancelQueries({ queryKey: submission.queryKey, exact: true })
-			client.setQueryData<OrgSettingsLoaderData>(
-				submission.queryKey,
-				(previous) => (previous ? payload : undefined),
-			)
-		},
-		onError: async (_error, submission) => {
-			// The server may have committed before the response was lost. Keep
-			// reconciliation bound to the submitted org after navigation.
-			if (submission)
-				await client.invalidateQueries({
-					queryKey: submission.queryKey,
-					exact: true,
-				})
-		},
-	})
-	async function submit(body: DomainWrite, onAdded?: () => void) {
+	const add = useMutation(
+		orgDomainMutationOptions(client, queryKey, addOrganizationDomain),
+	)
+	const sync = useMutation(
+		orgDomainMutationOptions(client, queryKey, syncOrganizationDomain),
+	)
+	const remove = useMutation(
+		orgDomainMutationOptions(client, queryKey, deleteOrganizationDomain),
+	)
+	const isPending = add.isPending || sync.isPending || remove.isPending
+	async function submit(
+		run: () => Promise<unknown>,
+		message: string,
+		onSuccess?: () => void,
+	) {
 		const isCurrent = capture()
 		try {
-			await mutation.mutateAsync({ body, slug: data.org.slug, queryKey })
+			await run()
 			if (!isCurrent()) return
-			if (body.action === 'add') onAdded?.()
-			onMessage(
-				body.action === 'add'
-					? 'Custom domain registered. Publish the verification records below, then sync.'
-					: body.action === 'sync'
-						? 'Custom domain status refreshed from Cloudflare.'
-						: 'Custom domain removed.',
-				'info',
-			)
+			onSuccess?.()
+			onMessage(message, 'info')
 		} catch (error) {
 			if (isCurrent())
 				onMessage(
@@ -182,28 +131,38 @@ export function OrgSettingsCustomDomains({
 										<button
 											type="button"
 											css={getGhostButtonCss({ size: 'sm' })}
-											disabled={mutation.isPending}
+											disabled={isPending}
 											onClick={() =>
-												void submit({ action: 'sync', id: row.id })
+												void submit(
+													() =>
+														sync.mutateAsync({
+															orgSlug: data.org.slug,
+															id: row.id,
+														}),
+													'Custom domain status refreshed from Cloudflare.',
+												)
 											}
 										>
-											{mutation.isPending &&
-											mutation.variables.body.action === 'sync' &&
-											mutation.variables.body.id === row.id
+											{sync.isPending && sync.variables.id === row.id
 												? 'Syncing…'
 												: 'Sync'}
 										</button>
 										<button
 											type="button"
 											css={getGhostButtonCss({ size: 'sm' })}
-											disabled={mutation.isPending}
+											disabled={isPending}
 											onClick={() =>
-												void submit({ action: 'delete', id: row.id })
+												void submit(
+													() =>
+														remove.mutateAsync({
+															orgSlug: data.org.slug,
+															id: row.id,
+														}),
+													'Custom domain removed.',
+												)
 											}
 										>
-											{mutation.isPending &&
-											mutation.variables.body.action === 'delete' &&
-											mutation.variables.body.id === row.id
+											{remove.isPending && remove.variables.id === row.id
 												? 'Removing…'
 												: 'Remove'}
 										</button>
@@ -221,15 +180,17 @@ export function OrgSettingsCustomDomains({
 					css={formCss}
 					onSubmit={(event) => {
 						event.preventDefault()
-						if (mutation.isPending) return
+						if (isPending) return
 						void submit(
-							{
-								action: 'add',
-								hostname,
-								binding_kind: bindingKind,
-								package_id: bindingKind === 'app' ? packageId : undefined,
-								ssl_method: sslMethod,
-							},
+							() =>
+								add.mutateAsync({
+									orgSlug: data.org.slug,
+									hostname,
+									bindingKind,
+									packageId: bindingKind === 'app' ? packageId : undefined,
+									sslMethod,
+								}),
+							'Custom domain registered. Publish the verification records below, then sync.',
 							() => {
 								setHostname('')
 								setPackageId('')
@@ -296,11 +257,9 @@ export function OrgSettingsCustomDomains({
 						<button
 							type="submit"
 							css={getPillButtonCss({ size: 'sm' })}
-							disabled={mutation.isPending}
+							disabled={isPending}
 						>
-							{mutation.isPending && mutation.variables.body.action === 'add'
-								? 'Adding…'
-								: 'Add domain'}
+							{add.isPending ? 'Adding…' : 'Add domain'}
 						</button>
 					</div>
 				</form>
