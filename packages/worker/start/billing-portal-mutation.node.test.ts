@@ -1,3 +1,11 @@
+import {
+	createMemoryHistory,
+	createRootRoute,
+	createRoute,
+	createRouter,
+	redirect,
+} from '@tanstack/react-router'
+import { setupRouterSsrQueryIntegration } from '@tanstack/react-router-ssr-query'
 import { QueryClient, MutationObserver } from '@tanstack/react-query'
 import { expect, test, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ open: vi.fn(), checkout: vi.fn() }))
@@ -75,4 +83,76 @@ test('checkout pending clears after navigation and retains submitted plan variab
 	expect(navigate).not.toHaveBeenCalled()
 	unsubscribe()
 	client.clear()
+})
+
+for (const reloadDocument of [false, true]) {
+	test(`checkout auth redirects reach native Query integration, document=${reloadDocument}`, async () => {
+		const queryClient = new QueryClient()
+		const root = createRootRoute()
+		const router = createRouter({
+			origin: 'https://kody.test',
+			isServer: false,
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+			routeTree: root.addChildren(
+				['/', '/login'].map((path) =>
+					createRoute({ getParentRoute: () => root, path }),
+				),
+			),
+		})
+		setupRouterSsrQueryIntegration({ router, queryClient })
+		await router.load()
+		const navigate = reloadDocument
+			? vi.spyOn(router, 'navigate').mockResolvedValue(undefined)
+			: null
+		const failure = redirect({ href: '/login', reloadDocument, replace: true })
+		mocks.checkout.mockRejectedValueOnce(failure)
+		const onSuccess = vi.fn()
+		const mutation = queryClient
+			.getMutationCache()
+			.build(queryClient, { ...billingCheckoutMutationOptions, onSuccess })
+		try {
+			await expect(
+				mutation.execute({
+					orgSlug: 'team',
+					plan: 'pro',
+					interval: 'month',
+					promoCode: '',
+				}),
+			).rejects.toBe(failure)
+			expect(mutation.state.status).toBe('error')
+			expect(onSuccess).not.toHaveBeenCalled()
+			if (navigate)
+				expect(navigate).toHaveBeenCalledWith(
+					expect.objectContaining({
+						href: '/login',
+						reloadDocument: true,
+						replace: true,
+					}),
+				)
+			else expect(router.state.location.pathname).toBe('/login')
+		} finally {
+			navigate?.mockRestore()
+			queryClient.clear()
+		}
+	})
+}
+
+test('checkout ordinary failures retain the plan-card error result', async () => {
+	const client = new QueryClient()
+	mocks.checkout.mockRejectedValueOnce(new Error('Billing is unavailable.'))
+	const mutation = client
+		.getMutationCache()
+		.build(client, billingCheckoutMutationOptions)
+	try {
+		await expect(
+			mutation.execute({
+				orgSlug: 'team',
+				plan: 'pro',
+				interval: 'month',
+				promoCode: '',
+			}),
+		).resolves.toEqual({ ok: false, error: 'Billing is unavailable.' })
+	} finally {
+		client.clear()
+	}
 })

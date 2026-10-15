@@ -24,6 +24,7 @@ import {
 } from './account-management-components.tsx'
 import { renderCreditsDebitRateCard } from './account-credits-rate-card.tsx'
 import { RecordTable } from './record-table.tsx'
+import { useServerFn } from '@tanstack/react-start'
 import { requestProCheckout } from '../billing-checkout.ts'
 import {
 	formatCentsForInput,
@@ -104,6 +105,7 @@ type AccountUsageCreditsSectionProps = {
 export function AccountUsageCreditsSection(
 	props: AccountUsageCreditsSectionProps,
 ) {
+	const checkout = useServerFn(requestProCheckout)
 	const capture = useSubmitterScope()
 	const settingsMutation = useMutation(
 		creditSettingsMutationOptions(
@@ -222,7 +224,8 @@ export function AccountUsageCreditsSection(
 			return
 		}
 		const isCurrent = capture()
-		const result = await requestProCheckout({ orgSlug })
+		const result = await checkout({ orgSlug })
+		if (!result) return
 		if (!isCurrent()) return
 		if (result.ok) {
 			window.location.assign(result.url)

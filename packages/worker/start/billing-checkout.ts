@@ -1,4 +1,5 @@
 export type BillingInterval = 'month' | 'year'
+import { isRedirect } from '@tanstack/react-router'
 import { mutationOptions } from '@tanstack/react-query'
 import {
 	startCheckout,
@@ -22,6 +23,7 @@ export async function requestProCheckout(input: {
 		})
 		return { ok: true as const, url: result.url, mode: result.mode ?? null }
 	} catch (error) {
+		if (isRedirect(error)) throw error
 		return {
 			ok: false as const,
 			error:
