@@ -7,7 +7,7 @@ import { inviteLinkOfferCopy } from '#universal/invite-link-offer-copy.ts'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
 import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
+import { isRedirect, useRouter, useRouteContext } from '@tanstack/react-router'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildErrorAgentPrompt } from '#universal/error-agent-prompt.ts'
 import { renderIcon } from '../components/icon.tsx'
@@ -75,6 +75,18 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 		},
 		...permissionsMutationOptions(client, actorKey),
 	})
+	async function reconcileFailedAcceptance(
+		error: unknown,
+		active: () => boolean,
+	) {
+		if (!active() || isRedirect(error)) return
+		// This entry read also records a pending invitation. Reconcile acceptance failures
+		// (including committed writes whose response was lost), but do not rerun
+		// it for a decline whose response could be lost and recreate its pending row.
+		await router.invalidate({
+			filter: (match) => match.routeId === '/join/$token',
+		})
+	}
 	if (!data.ok)
 		return (
 			<section css={pageCss}>
@@ -171,6 +183,8 @@ export function OrgInviteJoinPage({ data }: { data: OrgInviteJoinLoaderData }) {
 								mutation.mutate(
 									{ token: data.token, actorKey, action: 'accept' },
 									{
+										onError: (error) =>
+											reconcileFailedAcceptance(error, active),
 										onSuccess: (result) => {
 											if (active())
 												void router.navigate({
