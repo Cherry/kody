@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { test, vi } from 'vitest'
-import { createMemoryHistory, createRouter } from '@tanstack/react-router'
+import {
+	createMemoryHistory,
+	createRouter,
+	createRootRoute,
+	createRoute,
+} from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { routeTree } from './routeTree.gen.ts'
 import {
@@ -11,7 +16,16 @@ import {
 	verifyEmailDestinationHead,
 	unsubscribeTipsPost,
 } from '#start/server/action-page-http'
-import { actionPagePaths } from './action-pages.ts'
+// Coverage inventory only. Production preload policy belongs to each native route.
+const actionPagePaths = [
+	'/account/billing/success',
+	'/verify-email',
+	'/verify-email-change',
+	'/verify-email-claim-release',
+	'/verify-email-destination',
+	'/unsubscribe/tips',
+	'/@example/-/billing/success',
+]
 
 const router = createRouter({
 	routeTree,
@@ -20,7 +34,7 @@ const router = createRouter({
 })
 
 test('native HEAD handlers prevent token and billing document loaders from running', async () => {
-	for (const pathname of [...actionPagePaths, '/@example/-/billing/success']) {
+	for (const pathname of actionPagePaths) {
 		const [, , route] = router.getMatchedRoutes(pathname)
 		assert.ok(route)
 		assert.equal(route.options.preload, false)
@@ -63,4 +77,36 @@ test('mail-provider one-click unsubscribe has an explicit native POST handler', 
 	const handlers = route?.options.server?.handlers
 	assert.ok(handlers && typeof handlers === 'object')
 	assert.equal(handlers.POST, unsubscribeTipsPost)
+})
+
+test('native action route policy blocks explicit preloads but permits a real navigation', async () => {
+	for (const pathname of [...actionPagePaths, '/oauth/authorize']) {
+		const [, , nativeRoute] = router.getMatchedRoutes(pathname)
+		assert.ok(nativeRoute)
+		const loader = vi.fn(() => 'consumed')
+		const root = createRootRoute()
+		const action = createRoute({
+			getParentRoute: () => root,
+			path: '/action',
+			preload: nativeRoute.options.preload,
+			loader,
+		})
+		const isolatedRouter = createRouter({
+			routeTree: root.addChildren([action]),
+			history: createMemoryHistory({ initialEntries: ['/'] }),
+			isServer: false,
+		})
+		await isolatedRouter.preloadRoute({ to: '/action' })
+		assert.equal(
+			loader.mock.calls.length,
+			0,
+			`${pathname} must not consume on preload`,
+		)
+		await isolatedRouter.navigate({ to: '/action' })
+		assert.equal(
+			loader.mock.calls.length,
+			1,
+			`${pathname} must load on navigation`,
+		)
+	}
 })

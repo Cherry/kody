@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { createLink, useRouter } from '@tanstack/react-router'
 import { forwardRef, type ComponentProps } from 'react'
-import { actionPagePaths } from '../action-pages.ts'
 
 // Router supplies aria-current="page" for exact active URLs. Section and wizard
 // links can have a more specific current state, which belongs to their caller.
@@ -47,7 +46,7 @@ export function SiteLink({
 			// Section navigation supplies its own current state for descendants.
 			// Ordinary links should not mark their parent URL as the current page.
 			activeOptions={{ exact: true }}
-			preload={actionPagePaths.has(destination.pathname) ? false : preload}
+			preload={route?.options.preload === false ? false : preload}
 			reloadDocument={
 				destination.pathname.startsWith('/oauth/') || !matchesPage
 			}
