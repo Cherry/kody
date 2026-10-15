@@ -5,7 +5,14 @@ One block. Copy this shape. Put the rollup in the summary (`composes` and low,
 does. Leave a blank line after `<summary>` and around every fence, or GitHub
 will not render the diagram. Participants are primitive `id`s from
 `primitives.yaml`. Prefer a sequence diagram. Add a second diagram only when it
-shows something the first cannot.
+shows something the first cannot. Omit optional sections rather than leaving
+them empty.
+
+Optional sections (add only when they have real content): **Before / after**
+(schema, API shape, or route changes as compact before/after fenced blocks or
+tables); **Invariants** (only when the change touches an invariant from
+`primitives.yaml`); **Plan vs actual** (recap mode only, when a plan-mode block
+existed — what shipped as planned and what drifted).
 
 <!-- system-recap:start -->
 
