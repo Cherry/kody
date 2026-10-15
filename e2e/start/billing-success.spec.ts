@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { expect, test } from '../playwright-utils.ts'
+import { expect, test, waitForClientHydration } from '../playwright-utils.ts'
+import { requestHasMutationDataFields } from '../server-function-requests.ts'
 
 test('subscription checkout, portal return, and credit payment persist through real Start operations', async ({
 	page,
@@ -19,9 +20,19 @@ test('subscription checkout, portal return, and credit payment persist through r
 	const billing = `/@${user.username}/-/billing`
 	const usage = `/@${user.username}/-/usage`
 	await page.goto(billing)
+	await waitForClientHydration(page)
+	const checkoutResponse = page.waitForResponse((response) =>
+		requestHasMutationDataFields(response.request(), {
+			orgSlug: user.username,
+			plan: 'pro',
+			interval: 'month',
+		}),
+	)
 	await page
 		.getByRole('button', { name: 'Subscribe monthly', exact: true })
 		.click()
+	const response = await checkoutResponse
+	expect(response.ok(), await response.text()).toBe(true)
 	await expect(
 		page.getByRole('heading', { name: 'Test checkout' }),
 	).toBeVisible()
@@ -31,6 +42,7 @@ test('subscription checkout, portal return, and credit payment persist through r
 	await expect(page.getByRole('heading', { name: 'You’re in' })).toBeVisible()
 	// Completion links the customer and reconciles the real org subscription.
 	await page.goto(billing)
+	await waitForClientHydration(page)
 	await expect(
 		page.getByRole('button', { name: 'Current plan', exact: true }),
 	).toBeVisible()
@@ -43,6 +55,7 @@ test('subscription checkout, portal return, and credit payment persist through r
 	await page.getByRole('button', { name: 'Return to Kody' }).click()
 	await expect(page).toHaveURL(new RegExp(`${billing}$`))
 	await page.goto(usage)
+	await waitForClientHydration(page)
 	const balance = page.locator('[data-credits-balance]')
 	await expect(balance).toBeVisible()
 	const before = Number((await balance.innerText()).replace(/[^\d.-]/g, ''))
