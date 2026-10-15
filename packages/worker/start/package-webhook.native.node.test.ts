@@ -4,6 +4,7 @@ import { expect, test, vi } from 'vitest'
 import { renderStartPage } from './test-support/render-start-page.ts'
 import { renderPackageWebhookCard as PackageWebhookCard } from './pages/package-webhook-card.tsx'
 import { PackageWebhookSettings } from './pages/package-webhook-settings.tsx'
+import { createPageQuery, ensurePageQuery } from './page-query.ts'
 import { packageWebhooksQuery } from './package-webhooks-query.ts'
 import { packageWebhookMutationOptions } from './package-webhook-mutation.ts'
 import {
@@ -259,3 +260,43 @@ test.each([{ webhooks: [] }, { webhooks: [run] }])(
 		}
 	},
 )
+
+test('webhook settlement keeps an uncached barrier-held navigation alive', async () => {
+	const client = new QueryClient()
+	const payload = listPayload([run])
+	let finish!: (value: typeof payload) => void
+	native.revealPackageWebhook.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				finish = resolve
+			}),
+	)
+	const query = createPageQuery(
+		'loadPackageWebhooks',
+		async (_input: {
+			data: { username: string; kodyId: string }
+			signal: AbortSignal
+		}) => payload,
+	)('actor', { username: 'jane', kodyId: 'raycast' })
+	const mutation = client.getMutationCache().build(client, {
+		...packageWebhookMutationOptions(client),
+		mutationKey: ['packageWebhooks', 'actor', 'jane', 'raycast'],
+	})
+	const pending = mutation.execute({
+		username: 'jane',
+		kodyId: 'raycast',
+		webhookName: run.name,
+		webhookId: run.id,
+		intent: 'reveal',
+		queryKey: query.queryKey,
+		invalidate: async () => {
+			await client.invalidateQueries({ queryKey: query.queryKey, exact: true })
+		},
+	})
+	await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+	const navigation = ensurePageQuery(client, query, false)
+	finish(payload)
+	await pending
+	await expect(navigation).resolves.toEqual(payload)
+	client.clear()
+})

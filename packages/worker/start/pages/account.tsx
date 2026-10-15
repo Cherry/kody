@@ -24,6 +24,7 @@ import {
 import {
 	useIsMutating,
 	useMutation,
+	useMutationState,
 	useQueryClient,
 } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
@@ -67,24 +68,12 @@ export function AccountPage({
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const avatarSubmitter = useRef<{
-		actorKey: string | null
-		href: string
-	} | null>(null)
-	function isAvatarSubmitterCurrent() {
-		return (
-			avatarSubmitter.current !== null &&
-			avatarSubmitter.current.actorKey === actorKey &&
-			avatarSubmitter.current.href === currentHref
-		)
-	}
+	const captureAccountSubmitter = useSubmitterScope()
 	useEffect(() => {
-		avatarSubmitter.current = { actorKey, href: currentHref }
 		setAvatarPreview(undefined)
 		setAvatarStatus('idle')
 		setEditorFile(null)
 		return () => {
-			avatarSubmitter.current = null
 			releaseOptimisticAvatar()
 		}
 	}, [actorKey, currentHref])
@@ -92,7 +81,6 @@ export function AccountPage({
 		refreshShell: true,
 	})
 	const initial = payloads.accountProfile
-	const [resendStatus, setResendStatus] = useState<'idle' | 'sending'>('idle')
 	const [resendMessage, setResendMessage] = useState<string | null>(null)
 	const [resendTone, setResendTone] = useState<'error' | 'info'>('info')
 	const { email, emailVerified, username } = initial
@@ -110,9 +98,20 @@ export function AccountPage({
 	const [avatarPreview, setAvatarPreview] = useState<string | null>()
 	const avatarUrl =
 		avatarPreview === undefined ? initial.avatarUrl : avatarPreview
-	const [avatarStatus, setAvatarStatus] = useState<
+	const [avatarEditorStatus, setAvatarStatus] = useState<
 		'idle' | 'editing' | 'uploading' | 'removing'
 	>('idle')
+	const pendingAvatars = useMutationState({
+		filters: { mutationKey: ['avatar', actorKey], status: 'pending' },
+		select: (mutation) =>
+			mutation.state.variables as { file?: File } | undefined,
+	})
+	const avatarStatus =
+		pendingAvatars.length > 0
+			? pendingAvatars[0]?.file
+				? 'uploading'
+				: 'removing'
+			: avatarEditorStatus
 	const [editorFile, setEditorFile] = useState<File | null>(null)
 	const [avatarDropActive, setAvatarDropActive] = useState(false)
 	const [message, setMessage] = useState<string | null>(null)
@@ -173,25 +172,26 @@ export function AccountPage({
 	}
 
 	function uploadPreparedAvatar(prepared: File) {
+		const isCurrent = captureAccountSubmitter()
 		setEditorFile(null)
 		releaseOptimisticAvatar()
 		optimisticAvatar.current = URL.createObjectURL(prepared)
 		setAvatarPreview(optimisticAvatar.current)
-		setAvatarStatus('uploading')
+		setAvatarStatus('idle')
 
 		avatarMutation.mutate(
 			{ actorKey, href: currentHref, username, file: prepared },
 			{
 				onSuccess: () => {
-					if (isAvatarSubmitterCurrent()) toast.success('Avatar updated.')
+					if (isCurrent()) toast.success('Avatar updated.')
 				},
 				onError: (error) =>
-					isAvatarSubmitterCurrent() &&
+					isCurrent() &&
 					toast.error(
 						error instanceof Error ? error.message : 'Unable to upload avatar.',
 					),
 				onSettled: () => {
-					if (!isAvatarSubmitterCurrent()) return
+					if (!isCurrent()) return
 					releaseOptimisticAvatar()
 					setAvatarPreview(undefined)
 					setAvatarStatus('idle')
@@ -211,23 +211,24 @@ export function AccountPage({
 	}
 
 	function handleRemoveAvatar() {
+		const isCurrent = captureAccountSubmitter()
 		releaseOptimisticAvatar()
 		setAvatarPreview(null)
-		setAvatarStatus('removing')
+		setAvatarStatus('idle')
 
 		avatarMutation.mutate(
 			{ actorKey, href: currentHref, username },
 			{
 				onSuccess: () => {
-					if (isAvatarSubmitterCurrent()) toast.success('Avatar removed.')
+					if (isCurrent()) toast.success('Avatar removed.')
 				},
 				onError: (error) =>
-					isAvatarSubmitterCurrent() &&
+					isCurrent() &&
 					toast.error(
 						error instanceof Error ? error.message : 'Unable to remove avatar.',
 					),
 				onSettled: () => {
-					if (!isAvatarSubmitterCurrent()) return
+					if (!isCurrent()) return
 					setAvatarPreview(undefined)
 					setAvatarStatus('idle')
 				},
@@ -242,13 +243,12 @@ export function AccountPage({
 		onSettled: (_data, _error, _variables, reconcile) => reconcile?.(),
 	})
 	async function handleResendVerification() {
-		const submittedScope = avatarSubmitter.current
-		setResendStatus('sending')
+		const isCurrent = captureAccountSubmitter()
 		setResendMessage(null)
 		setResendTone('info')
 		try {
 			const result = await resendMutation.mutateAsync()
-			if (!submittedScope || avatarSubmitter.current !== submittedScope) return
+			if (!isCurrent()) return
 			if (!result.ok && result.unauthorized) {
 				window.location.assign('/login')
 				return
@@ -256,23 +256,21 @@ export function AccountPage({
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
 		} catch {
-			if (!submittedScope || avatarSubmitter.current !== submittedScope) return
+			if (!isCurrent()) return
 			setResendTone('error')
 			setResendMessage('Unable to send the verification email.')
-		} finally {
-			if (submittedScope && avatarSubmitter.current === submittedScope)
-				setResendStatus('idle')
 		}
 	}
 
-	const avatarMutation = useMutation(
-		avatarMutationOptions(queryClient, async ({ file }) => {
+	const avatarMutation = useMutation({
+		mutationKey: ['avatar', actorKey],
+		...avatarMutationOptions(queryClient, async ({ file }) => {
 			const data = new FormData()
 			if (file) data.set('avatar', file)
 			else data.set('remove', 'true')
 			return updateAvatar({ data })
 		}),
-	)
+	})
 
 	const isSaving = useIsMutating({ mutationKey: ['profile', actorKey] }) > 0
 	type AccountQueryData = Awaited<ReturnType<typeof loadAccountPage>>
@@ -486,7 +484,7 @@ export function AccountPage({
 								description:
 									'Check your inbox for the verification link. MCP access and email features stay locked until this account email is verified.',
 								delivery: emailVerificationDelivery,
-								resendStatus,
+								resendStatus: resendMutation.isPending ? 'sending' : 'idle',
 								resendMessage,
 								resendTone,
 								onResend: () => {

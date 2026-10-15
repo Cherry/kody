@@ -49,10 +49,18 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			await queryClient.cancelQueries({ queryKey, exact: true })
 		},
 		onSuccess: async (accepted, input) => {
-			await queryClient.cancelQueries({ queryKey: input.queryKey, exact: true })
+			await queryClient.cancelQueries({
+				queryKey: input.queryKey,
+				exact: true,
+				predicate: (query) => query.state.data !== undefined,
+			})
 			// Never place revealed credential URLs in the shared query cache.
 			const { revealed: _revealed, ...safePayload } = accepted
-			queryClient.setQueryData(input.queryKey, safePayload)
+			// An uncached navigation may be awaiting this query's barrier-held fetch.
+			// Seeding it here would let invalidation cancel that original promise.
+			queryClient.setQueryData(input.queryKey, (existing: unknown) =>
+				existing === undefined ? undefined : safePayload,
+			)
 			void input.invalidate()
 		},
 		onError: (_error, { queryKey }) => {

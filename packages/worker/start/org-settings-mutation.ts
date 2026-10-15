@@ -18,10 +18,18 @@ export function orgSettingsMutationOptions<TInput, TResult>(
 		onSettled: async (_result, _error, _variables, scope) => {
 			if (!scope) return
 			await Promise.all([
-				client.cancelQueries({ queryKey: scope.queryKey, exact: true }),
-				client.cancelQueries({ queryKey: ['shell', scope.actorKey] }),
+				client.cancelQueries({
+					queryKey: scope.queryKey,
+					exact: true,
+					predicate: (query) => query.state.data !== undefined,
+				}),
+				client.cancelQueries({
+					queryKey: ['shell', scope.actorKey],
+					predicate: (query) => query.state.data !== undefined,
+				}),
 				client.cancelQueries({
 					queryKey: ['page', scope.actorKey, 'loadOrganizations'],
+					predicate: (query) => query.state.data !== undefined,
 				}),
 			])
 			await Promise.all([

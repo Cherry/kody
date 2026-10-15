@@ -26,7 +26,7 @@ import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { orgPageFilters } from '../org-page-cache.ts'
+import { connectionProfileMutationOptions } from '../connection-profile-mutation.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { accountInputCss } from './account-management-components.tsx'
@@ -82,37 +82,11 @@ export function ConnectionProfiles({
 	const queryClient = useQueryClient()
 	const { actorKey, orgSlug } = useMatchedPageScope()
 	const capture = useSubmitterScope()
-	const options = {
-		mutationKey: ['connectionProfiles', actorKey, orgSlug],
-		gcTime: 0,
-		onMutate: async () => {
-			const scope = { actorKey, orgSlug }
-			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
-			)
-			return scope
-		},
-		onSettled: (
-			_data: unknown,
-			_error: unknown,
-			_input: unknown,
-			scope: { actorKey: string | null; orgSlug: string | null } | undefined,
-		) => {
-			if (!scope) return
-			// The query's write barrier waits for settlement. Do not await these reads here.
-			for (const resource of [
-				'loadConnectionsPage',
-				'loadConnectionUsagePage',
-			] as const) {
-				const filters = orgPageFilters(scope.actorKey, resource, {
-					orgSlug: scope.orgSlug,
-				})
-				void queryClient
-					.cancelQueries(filters)
-					.then(() => queryClient.invalidateQueries(filters))
-			}
-		},
-	}
+	const options = connectionProfileMutationOptions(
+		queryClient,
+		actorKey,
+		orgSlug,
+	)
 	const create = useMutation({
 		...options,
 		mutationFn: createConnectionProfile,

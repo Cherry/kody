@@ -248,20 +248,17 @@ test('turning on internet-visible on an audited version adds no audit step', asy
 		recordedAt: '2026-10-15T00:00:00.000Z',
 	})
 
-	const response = await handleAccountPackageInternetVisibleAction({
+	const response = await setAccountPackageInternetVisible({
 		env,
 		request: new Request('https://example.com/account/packages.json', {
 			method: 'POST',
 		}),
 		user: createUser(),
-		body: {
-			action: 'set-internet-visible',
-			packageId: 'pkg-1',
-			internetVisible: true,
-			confirmName: 'notes',
-		},
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
 	})
-	const body = (await response?.json()) as Record<string, unknown>
+	const body = response?.data
 	expect(body).toMatchObject({ ok: false, approvalUrl: expect.any(String) })
 	expect(body).not.toHaveProperty('securityAudit')
 	expect(body.error).not.toContain('security audit')

@@ -34,8 +34,10 @@ import type * as static_page from '#start/server/static-page'
 import type * as verify from '#start/server/verify'
 
 import type * as credentials from '#start/server/credentials'
+import type * as connection_usage from '#start/server/connection-usage'
 
 export type PageResource =
+	| keyof typeof connection_usage
 	| keyof typeof credentials
 	| keyof typeof account_collections
 	| keyof typeof account_page

@@ -144,8 +144,17 @@ function PackageInviteLinksContent({
 			await client.cancelQueries({ queryKey })
 			return { queryKey }
 		},
-		onSuccess: (result, _input, context) => {
-			client.setQueryData(context.queryKey, result.links)
+		onSettled: async (_result, _error, _input, context) => {
+			if (!context) return
+			await client.cancelQueries({
+				queryKey: context.queryKey,
+				exact: true,
+				predicate: (query) => query.state.data !== undefined,
+			})
+			await client.invalidateQueries({
+				queryKey: context.queryKey,
+				exact: true,
+			})
 		},
 	})
 	const busy = mutation.isPending

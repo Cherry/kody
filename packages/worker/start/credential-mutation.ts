@@ -29,7 +29,11 @@ export async function invalidateCredentialResources(
 			credentialResources.has(String(queryKey[2])) &&
 			pageQueryInputOrg(queryKey[3]) === orgSlug,
 	}
-	await client.cancelQueries(filters)
+	await client.cancelQueries({
+		...filters,
+		predicate: (query) =>
+			query.state.data !== undefined && filters.predicate(query),
+	})
 	await client.invalidateQueries(filters)
 }
 

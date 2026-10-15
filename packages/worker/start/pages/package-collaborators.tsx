@@ -101,7 +101,11 @@ export function PackageCollaboratorsRoute({
 		onMutate: () =>
 			client.cancelQueries({ queryKey: query.queryKey, exact: true }),
 		onSuccess: async (result) => {
-			await client.cancelQueries({ queryKey: query.queryKey, exact: true })
+			await client.cancelQueries({
+				queryKey: query.queryKey,
+				exact: true,
+				predicate: (query) => query.state.data !== undefined,
+			})
 			const accepted = result
 			client.setQueryData(query.queryKey, (old) =>
 				old?.kind === 'page'
