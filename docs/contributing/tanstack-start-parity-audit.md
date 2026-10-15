@@ -16,8 +16,13 @@ runtime proof.
 
 Pushed head `0c9578c8f5c3830826a4066c5b370e7fe2397d7a` includes main
 `3c09d6737`. All four Start TypeScript configurations passed after merging.
-Validate `38708657887` and Preview `38708657868` are running, so runtime and
-deployment verification for this head remain pending.
+Preview `38708657868` completed successfully. Its health endpoint reports
+`ok: true` at deployed merge `5c4b473ec7385ab72eb0fe0c969b9bbb343be95a`,
+containing this head and main `3c09d6737`. Validate `38708657887` has Static
+failures for two unused follows validators and stale architecture-map paths, and
+one Workers failure from the new scheduled lane missing its dispatch-test mock.
+Those are corrected locally; Node and E2E remain running at this check. The
+architecture map and unused-export checks now pass locally.
 
 The incoming follows feature now uses native Start routes, Query resources and
 separate follow, resume and unfollow server functions. Shared operations retain

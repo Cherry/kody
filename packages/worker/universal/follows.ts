@@ -15,10 +15,6 @@ export type FollowPauseReason = (typeof followPauseReasons)[number]
 export const followCreateLimitPerHour = 30
 export const followPausedRetentionDays = 30
 
-export function isFollowEvent(value: unknown): value is FollowEvent {
-	return value === 'published' || value === 'pushed'
-}
-
 export function isFollowPauseReason(
 	value: unknown,
 ): value is FollowPauseReason {
@@ -101,12 +97,6 @@ export function followPausedDeleteAt(pausedAt: string | null) {
 }
 
 export type FollowTargetKindName = 'package' | 'repo'
-
-export function isFollowTargetKindName(
-	value: unknown,
-): value is FollowTargetKindName {
-	return value === 'package' || value === 'repo'
-}
 
 type FollowStatusName = 'active' | 'paused'
 
