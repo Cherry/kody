@@ -10,6 +10,7 @@ const pageQuery = createPageQuery(
 )
 
 export const Route = createFileRoute('/500')({
+	staticData: { shell: { gutters: 'page' } },
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

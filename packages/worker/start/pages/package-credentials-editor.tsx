@@ -75,7 +75,7 @@ function writeErrorMessages(
  * on success, hands the refreshed view back to the page.
  */
 export function usePackageMappingEditor(
-	href: string,
+	orgSlug: string,
 	options: {
 		readPage: () => {
 			username: string
@@ -99,7 +99,10 @@ export function usePackageMappingEditor(
 		},
 		[],
 	)
-	const mutation = useCredentialMutation(href, postPackageCredentialChanges)
+	const mutation = useCredentialMutation(
+		{ orgSlug },
+		postPackageCredentialChanges,
+	)
 	function update(next: Partial<OpenEditor>) {
 		if (!open) return
 		setOpen({ ...open, ...next })

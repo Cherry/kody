@@ -6,6 +6,7 @@ import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute(
 	'/@{$username}_/$kodyId_/approve-capabilities',
 )({
+	staticData: { shell: { mode: 'focused' } },
 	preload: false,
 	shouldReload: true,
 	loader: ({ abortController, params, location }) =>

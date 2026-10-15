@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { isFocusedPagePathname } from '#universal/focused-page-path.ts'
+import { useMatches } from '@tanstack/react-router'
+import { appShellForMatches } from '../app-shell.ts'
 import { type CSSObject } from '@emotion/react'
 import { type ReactNode, type FormEvent } from 'react'
 import { organizationsWithSignupFallback } from '#universal/org-pages.ts'
@@ -184,9 +185,8 @@ type AccountManagementShellProps = {
 const accountSectionGap = 'clamp(2rem, 4vw, 2.75rem)'
 
 export function AccountManagementShell(props: AccountManagementShellProps) {
-	const hasNavigation = Boolean(
-		props.currentHref && !isFocusedPagePathname(props.currentHref),
-	)
+	const shell = useMatches({ select: appShellForMatches })
+	const hasNavigation = Boolean(props.currentHref && shell.mode !== 'focused')
 	return (
 		<section
 			data-account-shell

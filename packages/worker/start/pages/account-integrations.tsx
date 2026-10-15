@@ -5,10 +5,10 @@ import {
 	disconnectIntegration,
 	deleteOauthApp,
 } from '#start/server/account-mutations'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import {
 	type AccountIntegrationListItem,
@@ -64,18 +64,18 @@ export function AccountIntegrationsPage({
 	const platformCatalog = payload.platformCatalog ?? []
 	const approval = payload.approval ?? null
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	function updatePayload(
 		update: (
 			data: AccountIntegrationsLoaderData,
 		) => AccountIntegrationsLoaderData,
-		href = currentHref,
+		scope = { orgSlug },
 	) {
 		updateOrgPagePayload(
 			queryClient,
 			actorKey,
 			'loadIntegrationsPage',
-			href,
+			scope,
 			update,
 		)
 	}
@@ -86,13 +86,14 @@ export function AccountIntegrationsPage({
 	const setApproval = (value: AccountIntegrationsLoaderData['approval']) =>
 		updatePayload((data) => ({ ...data, approval: value }))
 	const mutation = useMutation({
-		mutationKey: ['integrations', actorKey, pageQueryOrg(currentHref)],
+		mutationKey: ['integrations', actorKey, orgSlug],
 		mutationFn: async ({
 			write,
 			decision,
 		}: {
 			write: () => Promise<unknown>
-			href: string
+			orgSlug: string | null
+			actorKey: string | null
 			decision?: Promise<boolean>
 			optimistic?: () => void
 			rollback?: () => void
@@ -100,9 +101,9 @@ export function AccountIntegrationsPage({
 			if (decision && !(await decision)) return { undone: true as const }
 			return write()
 		},
-		onMutate: async ({ href, optimistic }) => {
+		onMutate: async ({ orgSlug, actorKey, optimistic }) => {
 			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadIntegrationsPage', href),
+				orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
 			)
 			optimistic?.()
 		},
@@ -111,15 +112,15 @@ export function AccountIntegrationsPage({
 				rollback?.()
 		},
 		onError: (_error, { rollback }) => rollback?.(),
-		onSettled: (_data, _error, { href }) => {
+		onSettled: (_data, _error, { orgSlug, actorKey }) => {
 			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadIntegrationsPage', href),
+				orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
 			)
 		},
 	})
 	function invalidatePages() {
 		return queryClient.invalidateQueries(
-			orgPageFilters(actorKey, 'loadIntegrationsPage', currentHref),
+			orgPageFilters(actorKey, 'loadIntegrationsPage', { orgSlug }),
 		)
 	}
 	const [usageDrafts, setUsageDrafts] = useState(
@@ -168,16 +169,17 @@ export function AccountIntegrationsPage({
 		}
 	}
 
-	function snapshotList(): IntegrationsSnapshot {
+	function snapshotList(): IntegrationsSnapshot & { orgSlug: string | null } {
 		return {
 			integrations,
 			apps,
+			orgSlug,
 			href: getCurrentHref(),
 		}
 	}
 
 	function restoreSnapshot(
-		snapshot: IntegrationsSnapshot,
+		snapshot: IntegrationsSnapshot & { orgSlug: string | null },
 		names: Set<string>,
 		deletedApp?: AccountOauthAppListItem,
 	) {
@@ -227,7 +229,7 @@ export function AccountIntegrationsPage({
 					})
 				}, data.apps ?? []),
 			}),
-			snapshot.href,
+			{ orgSlug: snapshot.orgSlug },
 		)
 		setMessage(null)
 		if (
@@ -320,11 +322,12 @@ export function AccountIntegrationsPage({
 		setUsageSavingName(connection.name)
 		try {
 			await mutation.mutateAsync({
-				href: currentHref,
+				orgSlug,
+				actorKey,
 				write: () =>
 					setIntegrationUsage({
 						data: {
-							orgSlug: pageQueryOrg(currentHref) ?? undefined,
+							orgSlug: orgSlug ?? undefined,
 							input: {
 								name: connection.name,
 								usageMode: draft.usageMode,
@@ -369,11 +372,12 @@ export function AccountIntegrationsPage({
 		setApprovalSubmitting(true)
 		try {
 			await mutation.mutateAsync({
-				href: currentHref,
+				orgSlug,
+				actorKey,
 				write: () =>
 					approveIntegrationPackage({
 						data: {
-							orgSlug: pageQueryOrg(currentHref) ?? undefined,
+							orgSlug: orgSlug ?? undefined,
 							input: {
 								name: approval.name,
 								packageId: approval.packageId,
@@ -419,14 +423,15 @@ export function AccountIntegrationsPage({
 			decide = resolve
 		})
 		const write = mutation.mutateAsync({
+			orgSlug,
+			actorKey,
 			write: () =>
 				disconnectIntegration({
 					data: {
-						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						orgSlug: orgSlug ?? undefined,
 						input: { name: connection.name },
 					},
 				}),
-			href: currentHref,
 			decision,
 			optimistic: () => removeConnectionLocally(connection.name),
 			rollback: () => restoreSnapshot(snapshot, new Set([connection.name])),
@@ -466,14 +471,15 @@ export function AccountIntegrationsPage({
 			decide = resolve
 		})
 		const write = mutation.mutateAsync({
+			orgSlug,
+			actorKey,
 			write: () =>
 				deleteOauthApp({
 					data: {
-						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						orgSlug: orgSlug ?? undefined,
 						input: { appSlug: app.slug },
 					},
 				}),
-			href: currentHref,
 			decision,
 			optimistic: () => removeAppLocally(app),
 			rollback: () =>

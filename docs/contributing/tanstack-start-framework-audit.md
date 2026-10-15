@@ -192,7 +192,22 @@ from explicit creation fields. It preserves allowed hosts, package restrictions,
 provider, description and expiry instead of rewriting allowedHosts as hosts. The
 route organization remains authoritative over any query-string org.
 
-Main’s URL-only organization behavior is ported to native routes. Header ordering
-uses route scope or the personal organization, the Organizations page has no
-current badge, community installation targets the personal organization, and
-no navigation commit writes a remembered-organization cookie.
+Main’s URL-only organization behavior is ported to native routes. Header
+ordering uses route scope or the personal organization, the Organizations page
+has no current badge, community installation targets the personal organization,
+and no navigation commit writes a remembered-organization cookie.
+
+The next source pass moves shell gutters, auth/focused layout, and public-route
+session verification policy onto native route staticData. Root loader data
+captures the destination shell policy so pending navigation cannot restyle the
+committed page. Unspecified routes still require session verification; public
+document exceptions consult the document catalog using decoded route params.
+
+Mutation cache filters now use structured organization identity instead of
+parsing href strings. This fixes both cross-org over-invalidation and missed
+updates where callbacks still expected the retired string query keys. Mutation
+variables retain their initiating scope across later navigation.
+
+The obsolete non-Start Remix JSX compiler is removed. Remaining non-Start TSX
+modules contained no JSX and are plain TypeScript helpers. Hosted user-package
+Remix fixtures remain separate from the website runtime.

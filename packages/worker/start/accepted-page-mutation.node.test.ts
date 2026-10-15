@@ -4,9 +4,14 @@ import { acceptedPageMutationOptions } from './accepted-page-mutation.ts'
 
 test('accepted response reconciles the submitted actor and org after unmount', async () => {
 	const client = new QueryClient()
-	const key = ['page', 'actor-a', 'loadValuesPage', '/@team-a/-/values']
-	const otherOrg = ['page', 'actor-a', 'loadValuesPage', '/@team-b/-/values']
-	const otherActor = ['page', 'actor-b', 'loadValuesPage', '/@team-a/-/values']
+	const key = ['page', 'actor-a', 'loadValuesPage', { orgSlug: 'team-a' }]
+	const otherOrg = ['page', 'actor-a', 'loadValuesPage', { orgSlug: 'team-b' }]
+	const otherActor = [
+		'page',
+		'actor-b',
+		'loadValuesPage',
+		{ orgSlug: 'team-a' },
+	]
 	for (const queryKey of [key, otherOrg, otherActor])
 		client.setQueryData(queryKey, { payload: { ok: true, revision: 1 } })
 	let finish!: (value: { ok: boolean; revision: number }) => void
@@ -34,10 +39,12 @@ test('accepted response reconciles the submitted actor and org after unmount', a
 	expect(client.getQueryData(key)).toEqual({
 		payload: { ok: true, revision: 2 },
 	})
-	for (const queryKey of [otherOrg, otherActor])
+	for (const queryKey of [otherOrg, otherActor]) {
+		expect(client.getQueryState(queryKey)?.isInvalidated).toBe(false)
 		expect(client.getQueryData(queryKey)).toEqual({
 			payload: { ok: true, revision: 1 },
 		})
+	}
 	client.clear()
 })
 
@@ -151,9 +158,9 @@ test('different query inputs share invalidation, never an accepted payload', asy
 test('lost permission-write responses reconcile submitted dependencies and shell after observer options change', async () => {
 	const client = new QueryClient()
 	const queryKey = ['page', 'a', 'loadAdminFeatureFlags', undefined]
-	const dependency = ['page', 'a', 'loadValuesPage', '/@team/-/values']
+	const dependency = ['page', 'a', 'loadValuesPage', { orgSlug: 'team' }]
 	const shell = ['shell', 'a', 'default']
-	const otherActor = ['page', 'b', 'loadValuesPage', '/@team/-/values']
+	const otherActor = ['page', 'b', 'loadValuesPage', { orgSlug: 'team' }]
 	for (const key of [queryKey, dependency, shell, otherActor]) {
 		client.setQueryDefaults(key, { meta: { actorKey: key[1] } })
 		client.setQueryData(key, { payload: { ok: true } })

@@ -79,3 +79,18 @@ test('navless shells do not acquire workspace navigation', async () => {
 	expect(html).toContain('data-account-content')
 	expect(html).toContain('Verify your email')
 })
+
+test('focused matched route hides the rail without inferring policy from its URL', async () => {
+	const html = await renderStartPage(
+		createElement(AccountManagementShell, {
+			currentHref: '/@acme/-/jobs',
+			children: 'Review',
+		}),
+		'/@acme/-/jobs',
+		null,
+		undefined,
+		{ mode: 'focused' },
+	)
+	expect(html).not.toContain('aria-label="Activity pages"')
+	expect(html).toContain('Review')
+})

@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { FaqRoute } from '../pages/faq.tsx'
 
 export const Route = createFileRoute('/faq')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	head: staticDocumentHead('faq'),
 	component: FaqRoute,
 })

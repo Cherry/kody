@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { ScheduledWorkflowsPage } from '../pages/acquisition/scheduledWorkflows.tsx'
 export const Route = createFileRoute('/use-cases_/scheduled-workflows')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	head: staticDocumentHead('scheduledWorkflows'),
 	server: { handlers: { GET: acquisitionMarkdown } },
 	component: () => (

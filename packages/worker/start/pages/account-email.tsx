@@ -21,7 +21,7 @@ import {
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { formatNullableTimestamp } from '../components/local-timestamp.tsx'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useShellData } from '../routes/__root.tsx'
 import { invalidateShellQueries } from '../shell-query.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
@@ -76,7 +76,7 @@ export function AccountEmailPage({
 }) {
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const org = pageQueryOrg(currentHref)
+	const { orgSlug: org } = useMatchedPageScope()
 	const mutationKey = emailKeys.mutations(actorKey, org)
 	const pendingActions = useMutationState({
 		filters: {
@@ -228,7 +228,7 @@ export function AccountEmailPage({
 			async (action) => {
 				const { org: _org, ...refresh } = emailResourceInput(action.href).list
 				const data = {
-					orgSlug: pageQueryOrg(action.href) ?? undefined,
+					orgSlug: action.orgSlug ?? undefined,
 					refresh,
 					messageId: action.messageId,
 				}
@@ -239,7 +239,7 @@ export function AccountEmailPage({
 					: deleteEmailMessage({ data })
 			},
 			(error) => toast.error(error.message),
-			currentHref,
+			{ orgSlug: org },
 		),
 	)
 
@@ -258,7 +258,12 @@ export function AccountEmailPage({
 		setMessage(null)
 		const listHref = emailRoute.buildListHref(getCurrentSearch(), currentHref)
 		emailMutation.mutate(
-			{ action: 'delete', messageId: selected.id, href: currentHref },
+			{
+				action: 'delete',
+				messageId: selected.id,
+				href: currentHref,
+				orgSlug: org,
+			},
 			{
 				onSuccess: () => {
 					if (router.state.location.href !== currentHref) return
@@ -291,6 +296,7 @@ export function AccountEmailPage({
 				messageId: selected.id,
 				classification,
 				href: currentHref,
+				orgSlug: org,
 			},
 			{
 				onSuccess: () => {

@@ -3,7 +3,6 @@ import { QueryClient } from '@tanstack/react-query'
 const read = vi.hoisted(() => vi.fn(async () => ({ revision: 1 })))
 vi.mock('#start/server/shell', () => ({ loadShell: read }))
 import {
-	requiresSessionVerification,
 	shellQuery,
 	shellSearch,
 	invalidateShellQueries,
@@ -34,60 +33,4 @@ it('retains video dependencies in a stable key', () => {
 	expect(shellQuery('a', '?youtubeId=first').queryKey).not.toEqual(
 		shellQuery('a', '?youtubeId=second').queryKey,
 	)
-})
-it('only skips foreground identity checks for known public content', () => {
-	for (const path of [
-		'/',
-		'/pricing',
-		'/features',
-		'/features/memory',
-		'/features/secrets',
-		'/features/packages',
-		'/features/apps',
-		'/features/integrations',
-		'/features/triggers',
-		'/for/business',
-		'/use-cases',
-		'/use-cases/shared-agent-memory',
-		'/use-cases/claude-code-custom-tools',
-		'/use-cases/scheduled-workflows',
-		'/use-cases/mcp-gateway',
-		'/use-cases/ai-workflow-automation',
-		'/integrations/claude',
-		'/integrations/gmail',
-		'/integrations/slack',
-		'/compare/n8n-alternatives',
-		'/compare/composio-alternatives',
-		'/support',
-		'/blog/post',
-		'/docs/connect',
-		'/docs/what-is-kody',
-		'/docs/integration-backed-app-happy-path',
-	])
-		expect(requiresSessionVerification(path)).toBe(false)
-	for (const path of [
-		'/discord',
-		'/docs/admin-events',
-		'/docs/admin%2Devents',
-		'/docs/unknown',
-		'/docs/%invalid',
-		'/account',
-		'/account/jobs',
-		'/admin/users',
-		'/@jane',
-		'/@jane/private',
-		'/community',
-		'/connect/oauth',
-		'/verify-email',
-		'/account/billing/success',
-		'/unknown',
-		'/features/private',
-		'/integrations/unknown',
-		'/use-cases/private',
-		'/compare/unknown',
-		'/for/private',
-		'/onboarding',
-		'/oauth/callback',
-	])
-		expect(requiresSessionVerification(path)).toBe(true)
 })

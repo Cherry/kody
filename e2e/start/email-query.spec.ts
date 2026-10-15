@@ -116,7 +116,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			await page.route('**/_serverFn/**', async (route) => {
 				if (
 					!requestHasMutationDataFields(route.request(), {
-						messageId: seededId,
+						messageId,
 						classification: 'quarantined',
 					})
 				)
@@ -133,7 +133,7 @@ for (const outcome of ['accepted', 'rejected'] as const) {
 			})
 			const response = page.waitForResponse((value) =>
 				requestHasMutationDataFields(value.request(), {
-					messageId: seededId,
+					messageId,
 					classification: 'quarantined',
 				}),
 			)

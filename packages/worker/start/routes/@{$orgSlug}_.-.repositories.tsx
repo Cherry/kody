@@ -11,6 +11,7 @@ const pageQuery = createPageQuery('loadOrgRepositories', loadOrgRepositories, {
 	freshAuthorization: true,
 })
 export const Route = createFileRoute('/@{$orgSlug}_/-/repositories')({
+	staticData: { shell: { gutters: 'page' } },
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => ({
 		limit: search.limit,

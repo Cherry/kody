@@ -11,6 +11,7 @@ import { documentHead } from '../components/document-head.ts'
 const pageQuery = createPageQuery('loadHome', loadHome, { staleTime: 60_000 })
 
 export const Route = createFileRoute('/')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	server: { handlers: { GET: homeMarkdown } },
 	validateSearch: (search: Record<string, unknown>) => search,
 	context: () => ({ pageQueryInput: undefined }),

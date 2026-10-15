@@ -1,3 +1,4 @@
+import { type AppShell } from '../app-shell.ts'
 import { type SessionInfo } from '#client/session.ts'
 import createCache from '@emotion/cache'
 import { CacheProvider } from '@emotion/react'
@@ -18,6 +19,7 @@ export async function renderStartPage(
 	href: string = '/test',
 	session: SessionInfo | null = null,
 	seedQueries?: (client: QueryClient) => void,
+	shell?: Partial<AppShell>,
 ) {
 	const cache = createCache({ key: 'native-test' })
 	const queryClient = new QueryClient({
@@ -40,6 +42,7 @@ export async function renderStartPage(
 	const route = createRoute({
 		getParentRoute: () => root,
 		path: '$',
+		staticData: { shell },
 		component: () => page,
 	})
 	const router = createRouter({

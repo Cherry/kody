@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { AcquisitionPage } from '../pages/acquisition.tsx'
 import { N8nAlternativesPage } from '../pages/acquisition/n8nAlternatives.tsx'
 export const Route = createFileRoute('/compare_/n8n-alternatives')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	head: staticDocumentHead('n8nAlternatives'),
 	server: { handlers: { GET: acquisitionMarkdown } },
 	component: () => (

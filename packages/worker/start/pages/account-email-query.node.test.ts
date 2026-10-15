@@ -81,6 +81,7 @@ const payload = (
 const action: EmailAction = {
 	action: 'classify',
 	href: '/account/email/one',
+	orgSlug: null,
 	messageId: 'one',
 	classification: 'accepted',
 }
@@ -152,6 +153,7 @@ it('publishes only the affected entity, preserving concurrent rows, other select
 	await publishEmailResponse(client, 'a', optimisticEmail(payload(), action), {
 		...action,
 		href: '/@acme/-/email/one',
+		orgSlug: 'acme',
 	})
 	const rows = client.getQueryData<EmailListData>(first.listKey)!.messages
 	expect(rows.map((row) => row.classification)).toEqual([
@@ -177,6 +179,7 @@ it('keeps pending deletion visible, then removes confirmed rows and detail', asy
 	const deletion: EmailAction = {
 		action: 'delete',
 		href: '/account/email/one',
+		orgSlug: null,
 		messageId: 'one',
 	}
 	const before = payload()
@@ -290,7 +293,12 @@ it('a failed concurrent classification never rolls back another accepted message
 		),
 	)
 	const writeOne = first.mutate(action).catch(() => undefined)
-	const actionTwo = { ...action, href: '/account/email/two', messageId: 'two' }
+	const actionTwo = {
+		...action,
+		href: '/account/email/two',
+		orgSlug: null,
+		messageId: 'two',
+	}
 	const writeTwo = second.mutate(actionTwo)
 	await vi.waitFor(() => expect(client.isMutating()).toBe(2))
 	acceptSecond(

@@ -21,11 +21,11 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
 import { invalidatePageResources } from '../page-invalidation-cache.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -89,7 +89,7 @@ export function AccountMcpServersPage({
 	currentHref: string
 }) {
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	const currentScope = useRef<{ actorKey: string | null; href: string } | null>(
 		null,
 	)
@@ -107,14 +107,14 @@ export function AccountMcpServersPage({
 		)
 	}
 	const mutation = useMutation({
-		mutationKey: ['mcpServers', actorKey, pageQueryOrg(currentHref)],
+		mutationKey: ['mcpServers', actorKey, orgSlug],
 		mutationFn: async (input: {
 			body: McpServerChange
-			href: string
+			orgSlug: string | null
 			actorKey: string | null
 			failureMessage: string
 		}) => {
-			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			const orgSlug = input.orgSlug ?? undefined
 			switch (input.body.action) {
 				case 'add': {
 					const { action: _action, ...fields } = input.body
@@ -150,35 +150,35 @@ export function AccountMcpServersPage({
 				}
 			}
 		},
-		onMutate: async ({ href, actorKey }) => {
+		onMutate: async ({ orgSlug, actorKey }) => {
 			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
 			)
 		},
-		onSuccess: async (accepted, { href, actorKey }) => {
+		onSuccess: async (accepted, { orgSlug, actorKey }) => {
 			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
 			)
 			updateOrgPagePayload<AccountMcpServersPayload>(
 				queryClient,
 				actorKey,
 				'loadMcpServersPage',
-				href,
+				{ orgSlug },
 				() => accepted,
 			)
 		},
-		onSettled: (_data, _error, { href, actorKey }) => {
+		onSettled: (_data, _error, { orgSlug, actorKey }) => {
 			void invalidatePageResources(
 				queryClient,
 				actorKey,
 				mutationResources,
 				'active',
-				href,
+				{ orgSlug },
 			)
 		},
-		onError: (_error, { href, actorKey }) => {
+		onError: (_error, { orgSlug, actorKey }) => {
 			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadMcpServersPage', href),
+				orgPageFilters(actorKey, 'loadMcpServersPage', { orgSlug }),
 			)
 		},
 	})
@@ -290,7 +290,7 @@ export function AccountMcpServersPage({
 		try {
 			const payload = await mutation.mutateAsync({
 				...input,
-				href: currentHref,
+				orgSlug,
 				actorKey,
 			})
 			if (!isSubmitterCurrent() || router.state.location.href !== currentHref)

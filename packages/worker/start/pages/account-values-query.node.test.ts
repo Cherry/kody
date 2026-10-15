@@ -57,7 +57,7 @@ it('publishes accepted deletion after unmount, preserving selection and actor is
 		),
 	)
 	const unsubscribe = observer.subscribe(() => {})
-	const submitted = observer.mutate({ name: 'first', href: '/account/values' })
+	const submitted = observer.mutate({ name: 'first', orgSlug: null })
 	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
 	unsubscribe()
 	let finishRead!: (value: ValuesQueryData) => void
@@ -104,7 +104,7 @@ it('keeps confirmed data when deletion fails', async () => {
 		}),
 	)
 	await expect(
-		observer.mutate({ name: 'first', href: '/account/values' }),
+		observer.mutate({ name: 'first', orgSlug: null }),
 	).rejects.toThrow('Denied')
 	expect(client.getQueryData(key('one'))).toEqual(data(detail))
 	client.clear()
@@ -124,7 +124,7 @@ it('waits for a pending deletion before reading an uncached navigation', async (
 				}),
 		),
 	)
-	const submitted = observer.mutate({ name: 'first', href: '/account/values' })
+	const submitted = observer.mutate({ name: 'first', orgSlug: null })
 	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
 	const accepted = { ...data(null).payload, values: [row(other)] }
 	const read = vi.fn(async () => ({ payload: accepted }))
@@ -158,12 +158,14 @@ it('keeps the submitted org when observer options change during a pending write'
 		})
 	const observer = new MutationObserver(
 		client,
-		valuesMutationOptions(client, 'a', send, alpha),
+		valuesMutationOptions(client, 'a', send, { orgSlug: 'alpha' }),
 	)
 	const unsubscribe = observer.subscribe(() => {})
-	const submitted = observer.mutate({ name: 'first', href: alpha })
+	const submitted = observer.mutate({ name: 'first', orgSlug: 'alpha' })
 	await vi.waitFor(() => expect(accept).toBeTypeOf('function'))
-	observer.setOptions(valuesMutationOptions(client, 'a', send, beta))
+	observer.setOptions(
+		valuesMutationOptions(client, 'a', send, { orgSlug: 'beta' }),
+	)
 	accept({ ...data(null).payload, values: [row(other)] })
 	await submitted
 	expect(

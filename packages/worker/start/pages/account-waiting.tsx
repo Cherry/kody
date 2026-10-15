@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { recordWaitingClick } from '#start/server/account-mutations'
 import { SiteLink } from '../components/site-link.tsx'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 
 import { type AccountWaitingLoaderData } from '#universal/loader-data.ts'
 import { relocateAccountHref } from '#universal/org-pages.ts'
@@ -32,6 +32,7 @@ export function AccountWaitingPage({
 	currentHref: string
 }) {
 	const data = initialPayload
+	const { orgSlug } = useMatchedPageScope()
 
 	return (
 		<AccountManagementShell currentHref={currentHref} busy={false}>
@@ -41,12 +42,16 @@ export function AccountWaitingPage({
 				currentHref={currentHref}
 			/>
 
-			{data ? renderWaitingBody(data.items, currentHref) : null}
+			{data ? renderWaitingBody(data.items, currentHref, orgSlug) : null}
 		</AccountManagementShell>
 	)
 }
 
-function renderWaitingBody(items: Array<WaitingItem>, currentHref: string) {
+function renderWaitingBody(
+	items: Array<WaitingItem>,
+	currentHref: string,
+	orgSlug: string | null,
+) {
 	if (items.length === 0) {
 		return (
 			<AccountManagementPanel
@@ -114,7 +119,7 @@ function renderWaitingBody(items: Array<WaitingItem>, currentHref: string) {
 							void recordWaitingClick({
 								data: {
 									cardId: item.id,
-									orgSlug: pageQueryOrg(currentHref) ?? undefined,
+									orgSlug: orgSlug ?? undefined,
 								},
 							}).catch(() => {})
 						}}

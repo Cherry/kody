@@ -11,6 +11,7 @@ const pageQuery = createPageQuery('loadStaticPage', loadStaticPage, {
 })
 
 export const Route = createFileRoute('/case-studies')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	context: () => ({ pageQueryInput: '/case-studies' }),
 	loader: ({ context, preload }) =>
 		loadPageQuery(

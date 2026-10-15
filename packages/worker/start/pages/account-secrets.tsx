@@ -20,12 +20,12 @@ import { relocateAccountHref } from '#universal/org-pages.ts'
 import { getPillButtonCss } from '#universal/styles/style-primitives.ts'
 import { type CSSObject } from '@emotion/react'
 import { buildAccountSecretPath } from '@kody-internal/shared/account-secret-route.ts'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { usePageInvalidation } from '../page-invalidation.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { invalidatePageResources } from '../page-invalidation-cache.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -124,19 +124,21 @@ export function AccountSecretsPage({
 		'idle',
 	)
 	const [showSecretValue, setShowSecretValue] = useState(false)
-	const invalidatePages = usePageInvalidation(mutationResources)
+	const queryClient = useQueryClient()
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	const secretsMutation = useMutation({
-		mutationKey: ['secrets', currentHref],
+		mutationKey: ['secrets', actorKey, orgSlug],
 		mutationFn: async (input: {
 			search: string
-			href: string
+			orgSlug: string | null
+			actorKey: string | null
 			body:
 				| ({ action: 'save' } & SaveSecretInput)
 				| { action: 'delete'; currentId: string }
 				| { action: 'approve' | 'reject' }
 		}) => {
 			const scope = {
-				orgSlug: pageQueryOrg(input.href) ?? undefined,
+				orgSlug: input.orgSlug ?? undefined,
 				refresh: connectSecretsInput(input.search),
 			}
 			switch (input.body.action) {
@@ -154,7 +156,14 @@ export function AccountSecretsPage({
 					})
 			}
 		},
-		onSuccess: () => invalidatePages(),
+		onSuccess: (_result, input) =>
+			invalidatePageResources(
+				queryClient,
+				input.actorKey,
+				mutationResources,
+				'active',
+				{ orgSlug: input.orgSlug },
+			),
 		onError: (error) => toast.error(error.message),
 	})
 	const router = useRouter()
@@ -279,7 +288,8 @@ export function AccountSecretsPage({
 			}
 			const payload = await secretsMutation.mutateAsync({
 				search: requestUrl.search,
-				href: currentHref,
+				actorKey,
+				orgSlug,
 				body: { action },
 			})
 			if (router.state.location.href !== currentHref) return
@@ -352,7 +362,8 @@ export function AccountSecretsPage({
 					: []
 			await secretsMutation.mutateAsync({
 				search: '',
-				href: currentHref,
+				actorKey,
+				orgSlug,
 				body: {
 					action: 'save',
 					currentId: submittedEditorState.currentId,
@@ -409,7 +420,8 @@ export function AccountSecretsPage({
 		try {
 			await secretsMutation.mutateAsync({
 				search: '',
-				href: currentHref,
+				actorKey,
+				orgSlug,
 				body: {
 					action: 'delete',
 					currentId: editorState.currentId,

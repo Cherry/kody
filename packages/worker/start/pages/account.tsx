@@ -5,7 +5,7 @@ import {
 	interpretAccountProfileSave,
 	readProfileFormValues,
 } from '#client/routes/account-profile-save.ts'
-import { shouldShowOnboardingChecklist } from '#client/routes/onboarding-checklist.tsx'
+import { shouldShowOnboardingChecklist } from '#universal/onboarding-checklist.ts'
 import { toast } from '#client/toast.ts'
 import { saveProfile, updateAvatar } from '#start/server/account-mutations'
 import { type loadAccountPage } from '#start/server/account-page'

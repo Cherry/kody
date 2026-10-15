@@ -5,6 +5,7 @@ import { documentHead } from '../components/document-head.ts'
 import { loadNotFoundPage } from '#start/server/error-page'
 
 export const Route = createFileRoute('/404')({
+	staticData: { shell: { gutters: 'page' } },
 	loader: () => loadNotFoundPage(),
 	head: ({ loaderData }) => documentHead(loaderData?.head),
 	component: NotFoundPage,

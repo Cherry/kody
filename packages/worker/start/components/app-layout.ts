@@ -1,41 +1,6 @@
 import { type CSSObject } from '@emotion/react'
-import { acquisitionPageSummaries } from '#universal/acquisition/metadata.ts'
-import { isDocsPagePath } from '#universal/docs-nav.ts'
-import { isPackageDetailPathname } from '#universal/package-files.ts'
-import { isProfilePathname } from '#universal/profile-path.ts'
-import { getSlugFromPathname } from '#client/routes/blog-post-path.ts'
+import { type AppShell } from '../app-shell.ts'
 import { mq, spacing, typography } from '#universal/styles/tokens.ts'
-
-function appPageOwnsGutters(pathname: string, illustratedError: boolean) {
-	return (
-		illustratedError ||
-		[
-			'/404',
-			'/500',
-			'/',
-			'/features',
-			'/features/memory',
-			'/features/secrets',
-			'/features/packages',
-			'/features/triggers',
-			'/features/integrations',
-			'/features/apps',
-			'/for/business',
-			'/pricing',
-			'/faq',
-			'/case-studies',
-			'/blog',
-			'/community',
-			'/onboarding',
-		].includes(pathname) ||
-		acquisitionPageSummaries.some((page) => page.path === pathname) ||
-		pathname.startsWith('/onboarding/step-') ||
-		isDocsPagePath(pathname) ||
-		isProfilePathname(pathname) ||
-		isPackageDetailPathname(pathname) ||
-		getSlugFromPathname(pathname) !== null
-	)
-}
 
 export const appFrameCss: CSSObject = {
 	width: '100%',
@@ -48,10 +13,10 @@ export const appFrameCss: CSSObject = {
 }
 
 export function appMainCss(
-	pathname: string,
+	shell: AppShell,
 	illustratedError: boolean,
 ): CSSObject {
-	const auth = pathname === '/login' || pathname === '/signup'
+	const auth = shell.mode === 'auth'
 	return {
 		width: '100%',
 		boxSizing: 'border-box',
@@ -59,7 +24,7 @@ export function appMainCss(
 		viewTransitionName: 'page',
 		...(auth
 			? { display: 'grid' }
-			: appPageOwnsGutters(pathname, illustratedError)
+			: illustratedError || shell.gutters === 'page'
 				? {}
 				: mainGutterPaddingCss),
 	}

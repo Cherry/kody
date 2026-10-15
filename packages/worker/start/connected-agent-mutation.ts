@@ -1,30 +1,30 @@
 import { toast } from '#client/toast.ts'
 import { revokeConnectedAgent } from '#start/server/account-mutations'
 import { type AccountConnectedAgentsLoaderData } from '#universal/loader-data.ts'
-import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 import { mutationOptions, type QueryClient } from '@tanstack/react-query'
 import { orgPageFilters, updateOrgPagePayload } from './org-page-cache.ts'
-import { pageQueryOrg } from './page-query-scope.ts'
 
 export function connectedAgentMutationOptions(queryClient: QueryClient) {
 	return mutationOptions({
 		mutationFn: async ({
 			clientId,
-			href,
+			orgSlug,
 		}: {
 			clientId: string
-			href: string
+			orgSlug: string | null
 			actorKey: string | null
 		}) => {
 			await revokeConnectedAgent({
 				data: {
-					orgSlug: pageQueryOrg(href) ?? undefined,
+					orgSlug: orgSlug ?? undefined,
 					clientId,
 				},
 			})
 		},
-		onMutate: async ({ actorKey, clientId, href }) => {
-			const filters = orgPageFilters(actorKey, 'loadConnectionsPage', href)
+		onMutate: async ({ actorKey, clientId, orgSlug }) => {
+			const filters = orgPageFilters(actorKey, 'loadConnectionsPage', {
+				orgSlug,
+			})
 			await queryClient.cancelQueries(filters)
 			const removed = queryClient
 				.getQueriesData<{ payload: AccountConnectedAgentsLoaderData }>(filters)
@@ -38,7 +38,7 @@ export function connectedAgentMutationOptions(queryClient: QueryClient) {
 				queryClient,
 				actorKey,
 				'loadConnectionsPage',
-				href,
+				{ orgSlug },
 				(payload) => ({
 					...payload,
 					agents: payload.agents.filter((agent) => agent.clientId !== clientId),
@@ -70,17 +70,14 @@ export function connectedAgentMutationOptions(queryClient: QueryClient) {
 					)
 			toast.error(error.message)
 		},
-		onSettled: (_data, _error, { actorKey, href }) => {
-			const orgSlug = orgSlugFromOrgOwnedPath(
-				new URL(href, 'http://localhost').pathname,
-			)
+		onSettled: (_data, _error, { actorKey, orgSlug }) => {
 			if (
 				queryClient.isMutating({
 					mutationKey: ['connectedAgents', actorKey, orgSlug],
 				}) === 1
 			)
 				void queryClient.invalidateQueries(
-					orgPageFilters(actorKey, 'loadConnectionsPage', href),
+					orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
 				)
 		},
 	})

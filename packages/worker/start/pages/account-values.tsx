@@ -23,7 +23,7 @@ import {
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { formatTimestampDate } from '../components/local-timestamp.tsx'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -91,7 +91,8 @@ export function AccountValuesPage({
 	const [deleteArmed, setDeleteArmed] = useState(false)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const mutationKey = ['values', actorKey, pageQueryOrg(currentHref)] as const
+	const { orgSlug } = useMatchedPageScope()
+	const mutationKey = ['values', actorKey, orgSlug] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
 	const navigate = (href: string) =>
@@ -132,12 +133,12 @@ export function AccountValuesPage({
 		valuesMutationOptions(
 			queryClient,
 			actorKey,
-			async ({ name, href }) => {
+			async ({ name, orgSlug }) => {
 				return deleteAccountValue({
-					data: { name, orgSlug: pageQueryOrg(href) ?? undefined },
+					data: { name, orgSlug: orgSlug ?? undefined },
 				})
 			},
-			currentHref,
+			{ orgSlug },
 		),
 	)
 
@@ -145,7 +146,7 @@ export function AccountValuesPage({
 		if (!selectedValue || queryClient.isMutating({ mutationKey })) return
 		showMessage(null)
 		deleteMutation.mutate(
-			{ name: selectedValue.name, href: currentHref },
+			{ name: selectedValue.name, orgSlug },
 			{
 				onSuccess: () => {
 					setDeleteArmed(false)

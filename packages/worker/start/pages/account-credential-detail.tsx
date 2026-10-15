@@ -190,8 +190,8 @@ export function renderCredentialDetail(input: {
 	manageHref: string
 	teamOrg: boolean
 	packagesById: ReadonlyMap<string, { kodyId: string }>
-	/** The page href, so host edits bind this page's org. */
-	href: string
+	/** The organization whose credential is being edited. */
+	orgSlug: string
 }) {
 	const { credential, detail, packagesById } = input
 	const lockedTo = credential.lockedToPackageIds.map((id) =>
@@ -278,7 +278,7 @@ export function renderCredentialDetail(input: {
 							credentialId={credential.id}
 							credentialName={credential.name}
 							settings={detail.hostSettings}
-							href={input.href}
+							orgSlug={input.orgSlug}
 						/>
 					) : null}
 				</div>,

@@ -1,6 +1,6 @@
 import { type QueryClient } from '@tanstack/react-query'
 import { type AccountValuesLoaderData } from '#universal/loader-data.ts'
-import { scopedPageResource, pageQueryOrg } from '../page-query-scope.ts'
+import { scopedPageResource, type PageOrgScope } from '../page-query-scope.ts'
 
 export type ValuesQueryData = { payload: AccountValuesLoaderData }
 
@@ -9,18 +9,20 @@ export function valuesMutationOptions(
 	actorKey: string | null,
 	send: (action: {
 		name: string
-		href: string
+		orgSlug: string | null
 	}) => Promise<AccountValuesLoaderData>,
-	href = '/account/values',
+	scope: PageOrgScope = { orgSlug: null },
 ) {
 	return {
-		mutationKey: ['values', actorKey, pageQueryOrg(href)] as const,
+		mutationKey: ['values', actorKey, scope.orgSlug] as const,
 		mutationFn: send,
 		onSuccess: async (
 			accepted: AccountValuesLoaderData,
-			{ name, href }: { name: string; href: string },
+			{ name, orgSlug }: { name: string; orgSlug: string | null },
 		) => {
-			const resource = scopedPageResource(actorKey, 'loadValuesPage', href)
+			const resource = scopedPageResource(actorKey, 'loadValuesPage', {
+				orgSlug,
+			})
 			// Cancel reads started before the accepted deletion, including reads
 			// started after the submitting page unmounted.
 			await client.cancelQueries({
@@ -57,7 +59,7 @@ export function valuesMutationOptions(
 				refetchType: 'none',
 			})
 			void client.invalidateQueries({
-				...scopedPageResource(actorKey, 'loadUsagePage', href),
+				...scopedPageResource(actorKey, 'loadUsagePage', { orgSlug }),
 			})
 		},
 	}

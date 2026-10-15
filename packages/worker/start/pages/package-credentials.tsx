@@ -1,6 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
+import { useRouteContext, useParams } from '@tanstack/react-router'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { NotFoundPage } from '../components/not-found-page.tsx'
 import { resolvePackageListIconUrl } from '#universal/identity-icon-urls.ts'
@@ -81,19 +81,26 @@ export function PackageCredentialsRoute({
 	const path = readPackageCredentialsTabPath(
 		new URL(currentHref, 'https://kody.local').pathname,
 	)
+	const params = useParams({ strict: false })
 	const shell = data.ok ? data.shell : null
-	const username = shell?.username ?? path?.username ?? ''
-	const kodyId = shell?.kodyId ?? path?.kodyId ?? ''
-	const editor = usePackageMappingEditor(currentHref, {
+	const username = shell?.username ?? params.username ?? ''
+	const kodyId = shell?.kodyId ?? params.kodyId ?? ''
+	const editor = usePackageMappingEditor(username, {
 		readPage: () => ({ username, kodyId, orgSlug: username }),
 		onSaved: async (view, postedTo) => {
 			const filter = {
 				queryKey: ['page', actorKey, 'loadPackageCredentialsPage'],
-				predicate: (query: { queryKey: readonly unknown[] }) =>
-					typeof query.queryKey[3] === 'string' &&
-					query.queryKey[3].startsWith(
-						`/@${postedTo.username}/${postedTo.kodyId}/`,
-					),
+				predicate: (query: { queryKey: readonly unknown[] }) => {
+					const input = query.queryKey[3]
+					return (
+						typeof input === 'object' &&
+						input !== null &&
+						'orgSlug' in input &&
+						input.orgSlug === postedTo.username &&
+						'kodyId' in input &&
+						input.kodyId === postedTo.kodyId
+					)
+				},
 			}
 			await client.cancelQueries(filter)
 			client.setQueriesData<{

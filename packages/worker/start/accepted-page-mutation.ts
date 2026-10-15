@@ -1,5 +1,5 @@
 import { hashKey, type QueryKey, type QueryClient } from '@tanstack/react-query'
-import { pageQueryOrg } from './page-query-scope.ts'
+import { pageQueryInputOrg } from './page-query-scope.ts'
 import {
 	invalidatePageResources,
 	type PageMutationDependencies,
@@ -27,12 +27,11 @@ export function acceptedPageMutationOptions<TBody, TResponse>(
 		merge?: (page: Page<TResponse>, accepted: TResponse) => Page<TResponse>
 	},
 ) {
-	function filters({ actorKey, href, queryKey }: Submission<TBody>) {
+	function filters({ actorKey, queryKey }: Submission<TBody>) {
 		return {
 			queryKey: ['page', actorKey, queryKey[2]],
 			predicate: (query: { queryKey: readonly unknown[] }) =>
-				typeof query.queryKey[3] !== 'string' ||
-				pageQueryOrg(query.queryKey[3]) === pageQueryOrg(href),
+				pageQueryInputOrg(query.queryKey[3]) === pageQueryInputOrg(queryKey[3]),
 		}
 	}
 	async function reconcileDependencies(
@@ -45,7 +44,10 @@ export function acceptedPageMutationOptions<TBody, TResponse>(
 				submission.actorKey,
 				snapshot.dependencies,
 				'active',
-				snapshot.dependencyScope === 'actor' ? undefined : submission.href,
+				snapshot.dependencyScope === 'actor' ||
+					pageQueryInputOrg(submission.queryKey[3]) === null
+					? undefined
+					: { orgSlug: pageQueryInputOrg(submission.queryKey[3]) },
 			)
 		if (snapshot.refreshShell)
 			await invalidateShellQueries(client, submission.actorKey)

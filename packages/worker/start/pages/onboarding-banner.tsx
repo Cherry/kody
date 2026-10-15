@@ -8,7 +8,7 @@ import { onboardingPath } from '#client/routes/onboarding-redirect.ts'
 import {
 	getFirstUndoneChecklistItemLabel,
 	shouldShowOnboardingChecklist,
-} from '#client/routes/onboarding-checklist.tsx'
+} from '#universal/onboarding-checklist.ts'
 
 type OnboardingBannerOptions = {
 	checklist?: OnboardingChecklistLoaderData | null

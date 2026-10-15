@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { useParams } from '@tanstack/react-router'
 import {
 	parseCredentialApprovalQuery,
 	readCredentialProposalId,
@@ -66,22 +67,6 @@ type ApprovalPath = {
 	username: string
 	kodyId: string
 	search: string
-}
-function readApprovalPath(href: string): ApprovalPath | null {
-	const url = new URL(href, 'http://localhost')
-	const match = /^\/@([^/]+)\/([^/]+)\/approve-credentials\/?$/.exec(
-		url.pathname,
-	)
-	if (!match || match[2] === '-') return null
-	try {
-		return {
-			username: decodeURIComponent(match[1]!),
-			kodyId: decodeURIComponent(match[2]!),
-			search: url.search,
-		}
-	} catch {
-		return null
-	}
 }
 function needSummary(change: CredentialApprovalChangeView) {
 	if (!change.need) return null
@@ -269,6 +254,15 @@ export function PackageCredentialApprovalRoute({
 	payload: PackageCredentialApprovalLoaderData
 	currentHref: string
 }) {
+	const params = useParams({ strict: false })
+	const path: ApprovalPath | null =
+		params.username && params.kodyId
+			? {
+					username: params.username,
+					kodyId: params.kodyId,
+					search: new URL(currentHref, 'http://localhost').search,
+				}
+			: null
 	const [latest, setLatest] = useState<{
 		base: CredentialApprovalView
 		view: CredentialApprovalView
@@ -280,7 +274,7 @@ export function PackageCredentialApprovalRoute({
 	const [message, setMessage] = useState<string | null>(null)
 	const capture = useSubmitterScope()
 	const mutation = useCredentialMutation(
-		currentHref,
+		{ orgSlug: path?.username ?? null },
 		({ path, view }: { path: ApprovalPath; view: CredentialApprovalView }) =>
 			approvePackageCredentials({
 				data: {
@@ -325,7 +319,6 @@ export function PackageCredentialApprovalRoute({
 			)
 		}
 	}
-	const path = readApprovalPath(currentHref)
 	if (!path || !payload.ok) return <NotFoundPage />
 	const loaded = payload.view
 	const snapshot: {

@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest'
 import { listBlogPosts } from '#worker/blog/catalog.ts'
-import { createBlogPostOgImageHandler } from './blog.tsx'
+import { createBlogPostOgImageHandler } from './blog.ts'
 
 const mocks = vi.hoisted(() => ({
 	renderBlogPostOgImage: vi.fn(),

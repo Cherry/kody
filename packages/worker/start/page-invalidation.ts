@@ -21,7 +21,7 @@ export function usePageInvalidation(
 ) {
 	const queryClient = useQueryClient()
 	const router = useRouter()
-	const { actorKey, pageLocation } = useMatchedPageScope()
+	const { actorKey, pageLocation, orgSlug } = useMatchedPageScope()
 	const href = pageLocation.href
 	return useCallback(async () => {
 		// One owner initiates active reads. Starting both Router and Query
@@ -31,7 +31,7 @@ export function usePageInvalidation(
 			actorKey,
 			resources,
 			refreshRoute ? 'none' : 'active',
-			href,
+			orgSlug === null ? undefined : { orgSlug },
 		)
 		const currentContext = router.state.matches[0]?.context
 		const isCurrentActor =
@@ -47,6 +47,7 @@ export function usePageInvalidation(
 		])
 	}, [
 		actorKey,
+		orgSlug,
 		queryClient,
 		router,
 		resources,

@@ -1,5 +1,4 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
-import { isPublicDocSlug } from './page-access.ts'
 import { loadShell } from '#start/server/shell'
 
 export function shellSearch(search: string) {
@@ -40,51 +39,4 @@ export function invalidateShellQueries(
 	actorKey: string | null,
 ) {
 	return client.invalidateQueries({ queryKey: ['shell', actorKey] })
-}
-
-/** Other routes can contain private or actor-specific data even at public URLs. */
-export function requiresSessionVerification(pathname: string) {
-	if (
-		[
-			'/',
-			'/pricing',
-			'/features',
-			'/features/memory',
-			'/features/secrets',
-			'/features/packages',
-			'/features/apps',
-			'/features/integrations',
-			'/features/triggers',
-			'/for/business',
-			'/use-cases',
-			'/use-cases/shared-agent-memory',
-			'/use-cases/claude-code-custom-tools',
-			'/use-cases/scheduled-workflows',
-			'/use-cases/mcp-gateway',
-			'/use-cases/ai-workflow-automation',
-			'/integrations/claude',
-			'/integrations/gmail',
-			'/integrations/slack',
-			'/compare/n8n-alternatives',
-			'/compare/composio-alternatives',
-			'/support',
-			'/privacy',
-			'/terms',
-			'/case-studies',
-			'/faq',
-			'/blog',
-			'/docs',
-			'/docs/connect',
-		].includes(pathname)
-	)
-		return false
-	const doc = /^\/docs\/([^/]+)$/.exec(pathname)
-	if (doc) {
-		try {
-			return !isPublicDocSlug(decodeURIComponent(doc[1]!))
-		} catch {
-			return true
-		}
-	}
-	return !/^\/blog\/[^/]+$/.test(pathname)
 }

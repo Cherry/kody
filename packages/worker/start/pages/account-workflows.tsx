@@ -30,7 +30,8 @@ import {
 import { useRouteContext, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
-import { pageQueryOrg, scopedPageResource } from '../page-query-scope.ts'
+import { scopedPageResource } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementShell,
@@ -188,11 +189,8 @@ export function AccountWorkflowsPage({
 	const [cancelArmed, setCancelArmed] = useState(false)
 	const queryClient = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const mutationKey = [
-		'workflows',
-		actorKey,
-		pageQueryOrg(currentHref),
-	] as const
+	const { orgSlug } = useMatchedPageScope()
+	const mutationKey = ['workflows', actorKey, orgSlug] as const
 
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	const router = useRouter()
@@ -254,15 +252,18 @@ export function AccountWorkflowsPage({
 		mutationFn: async (input: {
 			body: Record<string, unknown>
 			href: string
+			orgSlug: string | null
 			failureMessage: string
 		}) => {
 			const id = input.body.id
 			if (typeof id !== 'string') throw new Error('Record id is required.')
-			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			const orgSlug = input.orgSlug ?? undefined
 			return cancelWorkflowRun({ data: { orgSlug, id } })
 		},
-		onSuccess: async (accepted, { href }) => {
-			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', href)
+		onSuccess: async (accepted, { orgSlug }) => {
+			const resource = scopedPageResource(actorKey, 'loadWorkflowsPage', {
+				orgSlug,
+			})
 			await queryClient.cancelQueries({
 				...resource,
 				predicate: (query) =>
@@ -299,18 +300,21 @@ export function AccountWorkflowsPage({
 				...resource,
 				predicate: (query) => {
 					if (!resource.predicate(query)) return false
+					const input = query.queryKey[3]
 					const selected =
-						workflowsRoute.getSelection(String(query.queryKey[3])).selectedId ??
-						new URL(
-							String(query.queryKey[3]),
-							'https://kody.local',
-						).searchParams.get('selected')
+						input && typeof input === 'object'
+							? 'workflowId' in input && typeof input.workflowId === 'string'
+								? input.workflowId
+								: 'selected' in input && typeof input.selected === 'string'
+									? input.selected
+									: null
+							: null
 					return Boolean(selected && selected !== accepted.selectedWorkflow?.id)
 				},
 			})
 			for (const dependent of ['loadWaitingPage', 'loadActivityPage'])
 				void queryClient.invalidateQueries(
-					scopedPageResource(actorKey, dependent, href),
+					scopedPageResource(actorKey, dependent, { orgSlug }),
 				)
 		},
 	})
@@ -323,7 +327,7 @@ export function AccountWorkflowsPage({
 		showMessage(null)
 		setCancelArmed(false)
 		mutation.mutate(
-			{ ...input, href: currentHref },
+			{ ...input, href: currentHref, orgSlug },
 			{
 				onSuccess: (accepted) => showMessage(input.successMessage(accepted)),
 				onError: (error) => showMessage(error.message, 'error'),

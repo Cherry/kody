@@ -72,7 +72,7 @@ function groupBlock(html: string, label: string, nextLabel?: string) {
 }
 
 function Panel() {
-	return useAccountConnectedAgents(listedAgents, '/account/agents').render()
+	return useAccountConnectedAgents(listedAgents).render()
 }
 test('connected agents panel groups same-name hosts, shows logos, and keeps revoke inside details', async () => {
 	const html = (

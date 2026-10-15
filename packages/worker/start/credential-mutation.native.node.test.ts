@@ -18,13 +18,13 @@ test('credential approval refreshes every dependent read only for its submitting
 		'actor-a',
 		resource,
 		resource === 'loadPackageCredentialsPage'
-			? '/@acme/package/credentials'
-			: '/@acme/-/credentials',
+			? { username: 'acme', kodyId: 'package' }
+			: { orgSlug: 'acme' },
 	])
 	const typed = ['page', 'actor-a', 'loadCredentialsPage', { orgSlug: 'acme' }]
 	const unrelated = [
-		['page', 'actor-b', 'loadCredentialsPage', '/@acme/-/credentials'],
-		['page', 'actor-a', 'loadCredentialsPage', '/@other/-/credentials'],
+		['page', 'actor-b', 'loadCredentialsPage', { orgSlug: 'acme' }],
+		['page', 'actor-a', 'loadCredentialsPage', { username: 'other' }],
 		['page', 'actor-a', 'loadCredentialsPage', { orgSlug: 'other' }],
 		['page', 'actor-a', 'loadCredentialsPage', {}],
 		['page', 'actor-a', 'loadDocs', '/docs'],

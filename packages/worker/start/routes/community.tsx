@@ -9,6 +9,7 @@ import { loadCommunity } from '#start/server/public-data'
 const pageQuery = createPageQuery('loadCommunity', loadCommunity)
 
 export const Route = createFileRoute('/community')({
+	staticData: { shell: { gutters: 'page' } },
 	validateSearch: (search: Record<string, unknown>) => search,
 	loaderDeps: ({ search }) => ({
 		q: search.q,

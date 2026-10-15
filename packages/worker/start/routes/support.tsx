@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { SupportRoute } from '../pages/support.tsx'
 
 export const Route = createFileRoute('/support')({
+	staticData: { sessionVerification: 'public' },
 	head: staticDocumentHead('support'),
 	component: SupportRoute,
 })

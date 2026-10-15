@@ -35,12 +35,12 @@ export async function invalidateCredentialResources(
 
 /** Credential writes invalidate only the submitting actor and organization. */
 export function useCredentialMutation<TInput, TResult>(
-	href: string,
+	scope: { orgSlug: string | null },
 	send: (input: TInput) => Promise<TResult>,
 ) {
 	const client = useQueryClient()
 	const { actorKey } = useRouteContext({ from: '__root__' })
-	const org = pageQueryInputOrg(href)
+	const org = scope.orgSlug
 	return useMutation({
 		mutationKey: ['credentials', actorKey, org],
 		mutationFn: send,

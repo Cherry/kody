@@ -1,38 +1,17 @@
-import { pageQueryInputOrg } from './page-query-scope.ts'
+import { scopedPageResource, type PageOrgScope } from './page-query-scope.ts'
 import { type QueryClient } from '@tanstack/react-query'
-import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
 
-/** A mutation belongs to its initiating workspace even after navigation. */
-export function orgPageFilters(
-	actorKey: string | null,
-	resource: string,
-	href: string,
-) {
-	const pathname = new URL(href, 'http://localhost').pathname
-	const orgSlug = orgSlugFromOrgOwnedPath(pathname)
-	return {
-		queryKey: ['page', actorKey, resource] as const,
-		predicate: (query: { queryKey: readonly unknown[] }) => {
-			const input = query.queryKey[3]
-			if (orgSlug !== null) return pageQueryInputOrg(input) === orgSlug
-			if (typeof input !== 'string') return false
-			const candidate = new URL(input, 'http://localhost').pathname
-			return (
-				pageQueryInputOrg(input) === null && candidate.startsWith('/account/')
-			)
-		},
-	}
-}
-
+/** A mutation carries its initiating workspace even after navigation. */
+export const orgPageFilters = scopedPageResource
 export function updateOrgPagePayload<T>(
 	client: QueryClient,
 	actorKey: string | null,
 	resource: string,
-	href: string,
+	scope: PageOrgScope,
 	update: (payload: T) => T,
 ) {
 	client.setQueriesData<{ payload: T }>(
-		orgPageFilters(actorKey, resource, href),
+		orgPageFilters(actorKey, resource, scope),
 		(data) => (data ? { ...data, payload: update(data.payload) } : data),
 	)
 }

@@ -12,6 +12,7 @@ const pageQuery = createPageQuery('loadDocsConnect', loadDocsConnect, {
 })
 
 export const Route = createFileRoute('/docs/connect')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	server: { handlers: { GET: docsConnectMarkdown } },
 	context: () => ({ pageQueryInput: undefined }),
 	loader: ({ context, preload }) =>

@@ -37,7 +37,7 @@ export const loadDoc = createServerFn({ method: 'GET' })
 			import('../../src/app/env.ts'),
 			import('@tanstack/react-start/server'),
 			import('../../src/app/auth-session.ts'),
-			import('../../src/app/handlers/docs.tsx'),
+			import('../../src/app/handlers/docs.ts'),
 			import('../../src/app/session-info.ts'),
 			import('./document-head.ts'),
 		])

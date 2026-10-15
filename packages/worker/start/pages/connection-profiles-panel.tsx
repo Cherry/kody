@@ -24,11 +24,10 @@ import {
 } from '#universal/styles/tokens.ts'
 import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
 import { type ReactNode, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
 import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { accountInputCss } from './account-management-components.tsx'
 import { CopyCard } from './onboarding-mcp-client-cards.tsx'
 type PackageOption = NonNullable<
@@ -81,29 +80,30 @@ export function ConnectionProfiles({
 		text: string
 	} | null>(null)
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	const mutation = useMutation({
-		mutationKey: ['connectionProfiles', actorKey, pageQueryOrg(currentHref)],
+		mutationKey: ['connectionProfiles', actorKey, orgSlug],
 		mutationFn: async ({
 			write,
 		}: {
 			write: () => Promise<AccountConnectedAgentsLoaderData>
-			href: string
+			orgSlug: string | null
+			actorKey: string | null
 		}) => write(),
-		onMutate: async ({ href }) => {
+		onMutate: async ({ orgSlug, actorKey }) => {
 			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', href),
+				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
 			)
 		},
-		onSuccess: async (accepted, { href }) => {
+		onSuccess: async (accepted, { orgSlug, actorKey }) => {
 			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', href),
+				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
 			)
 			updateOrgPagePayload<AccountConnectedAgentsLoaderData>(
 				queryClient,
 				actorKey,
 				'loadConnectionsPage',
-				href,
+				{ orgSlug },
 				(current) => ({
 					...current,
 					connectionProfilesEnabled: accepted.connectionProfilesEnabled,
@@ -113,12 +113,12 @@ export function ConnectionProfiles({
 				}),
 			)
 		},
-		onSettled: (_data, _error, { href }) => {
+		onSettled: (_data, _error, { orgSlug, actorKey }) => {
 			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', href),
+				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
 			)
 			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadConnectionUsagePage', href),
+				orgPageFilters(actorKey, 'loadConnectionUsagePage', { orgSlug }),
 			)
 		},
 	})
@@ -130,7 +130,7 @@ export function ConnectionProfiles({
 		if (busy) return false
 		setMessage(null)
 		try {
-			await mutation.mutateAsync({ write, href: currentHref })
+			await mutation.mutateAsync({ write, orgSlug, actorKey })
 			return true
 		} catch (error) {
 			setMessage({
@@ -146,7 +146,7 @@ export function ConnectionProfiles({
 			() =>
 				createConnectionProfile({
 					data: {
-						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						orgSlug: orgSlug ?? undefined,
 						name: createName,
 						grants: toGrantPayload(createGrants),
 					},
@@ -171,7 +171,7 @@ export function ConnectionProfiles({
 			() =>
 				updateConnectionProfile({
 					data: {
-						orgSlug: pageQueryOrg(currentHref) ?? undefined,
+						orgSlug: orgSlug ?? undefined,
 						profileId,
 						grants: toGrantPayload(grants),
 					},
@@ -317,8 +317,7 @@ export function ConnectionProfiles({
 															() =>
 																deleteConnectionProfile({
 																	data: {
-																		orgSlug:
-																			pageQueryOrg(currentHref) ?? undefined,
+																		orgSlug: orgSlug ?? undefined,
 																		profileId: profile.id,
 																	},
 																}),

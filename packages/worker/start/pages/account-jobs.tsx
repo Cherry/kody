@@ -15,10 +15,11 @@ import {
 	useMutation,
 	useQueryClient,
 } from '@tanstack/react-query'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { restorePageResource } from '../page-mutation-cache.ts'
-import { pageQueryOrg, scopedPageResource } from '../page-query-scope.ts'
+import { scopedPageResource } from '../page-query-scope.ts'
 import {
 	renderAccountJobDetail,
 	renderJobDetailPlaceholder,
@@ -109,20 +110,21 @@ export function AccountJobsPage({
 	}
 
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
-	const mutationKey = ['jobs', actorKey, pageQueryOrg(currentHref)] as const
+	const { actorKey, orgSlug } = useMatchedPageScope()
+	const mutationKey = ['jobs', actorKey, orgSlug] as const
 	const isMutating = useIsMutating({ mutationKey }) > 0
 	type JobsQueryData = { payload: AccountJobsLoaderData }
 	const jobsMutation = useMutation({
 		mutationKey,
 		mutationFn: async (input: {
 			body: Record<string, unknown>
-			href: string
+			orgSlug: string | null
+			actorKey: string | null
 			failureMessage: string
 		}) => {
 			const id = input.body.id
 			if (typeof id !== 'string') throw new Error('Record id is required.')
-			const orgSlug = pageQueryOrg(input.href) ?? undefined
+			const orgSlug = input.orgSlug ?? undefined
 			if (input.body.action === 'run_now')
 				return runJobNow({ data: { orgSlug, id } })
 			if (
@@ -138,8 +140,8 @@ export function AccountJobsPage({
 				})
 			throw new Error('Invalid job operation.')
 		},
-		onMutate: async ({ body, href }) => {
-			const resource = scopedPageResource(actorKey, 'loadJobsPage', href)
+		onMutate: async ({ body, actorKey, orgSlug }) => {
+			const resource = scopedPageResource(actorKey, 'loadJobsPage', { orgSlug })
 			await queryClient.cancelQueries(resource)
 			const snapshot = queryClient.getQueriesData<JobsQueryData>(resource)
 			queryClient.setQueriesData<JobsQueryData>(
@@ -152,11 +154,13 @@ export function AccountJobsPage({
 		onError: async (_error, input, context) => {
 			restorePageResource(queryClient, context?.snapshot)
 			void queryClient.invalidateQueries({
-				...scopedPageResource(actorKey, 'loadJobsPage', input.href),
+				...scopedPageResource(input.actorKey, 'loadJobsPage', {
+					orgSlug: input.orgSlug,
+				}),
 			})
 		},
-		onSuccess: async (accepted, { body, href }) => {
-			const resource = scopedPageResource(actorKey, 'loadJobsPage', href)
+		onSuccess: async (accepted, { body, actorKey, orgSlug }) => {
+			const resource = scopedPageResource(actorKey, 'loadJobsPage', { orgSlug })
 			await queryClient.cancelQueries({
 				...resource,
 				predicate: (query) =>
@@ -209,7 +213,7 @@ export function AccountJobsPage({
 		if (queryClient.isMutating({ mutationKey })) return
 		showMessage(null)
 		jobsMutation.mutate(
-			{ ...input, href: currentHref },
+			{ ...input, actorKey, orgSlug },
 			{
 				onSuccess: (payload) => {
 					showMessage(input.successMessage(payload))

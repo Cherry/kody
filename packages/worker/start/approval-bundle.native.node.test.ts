@@ -43,6 +43,9 @@ function render(payload: ApprovalBundleLoaderData) {
 			],
 		}),
 		'/@acme/-/approvals/bundle-1',
+		null,
+		undefined,
+		{ mode: 'focused' },
 	)
 }
 function data(items: ApprovalItemView[]): ApprovalBundleLoaderData {

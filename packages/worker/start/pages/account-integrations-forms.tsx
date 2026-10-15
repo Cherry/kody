@@ -24,7 +24,6 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
@@ -280,7 +279,7 @@ export function RotateCredentialsForm(props: {
 	app: AccountOauthAppListItem
 	onRotated: (app: AccountOauthAppListItem) => void
 }) {
-	const href = useMatchedPageScope().pageLocation.href
+	const { orgSlug } = useMatchedPageScope()
 	const captureSubmitter = useSubmitterScope()
 	const invalidate = usePageInvalidation([
 		'loadIntegrationsPage',
@@ -288,13 +287,13 @@ export function RotateCredentialsForm(props: {
 	])
 	const mutation = useMutation({
 		mutationFn: async (input: {
-			href: string
+			orgSlug: string | null
 			body: Parameters<typeof rotateOauthAppCredentials>[0]['data']['input']
 		}) => {
 			const result = await rotateOauthAppCredentials({
 				data: {
 					input: input.body,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					orgSlug: input.orgSlug ?? undefined,
 				},
 			})
 			if (!('app' in result)) throw new Error('Unable to rotate credentials.')
@@ -348,7 +347,7 @@ export function RotateCredentialsForm(props: {
 		const isCurrentSubmitter = captureSubmitter()
 		try {
 			const rotatedApp = await mutation.mutateAsync({
-				href,
+				orgSlug,
 				body: {
 					appSlug: app.slug,
 					...(nextClientId ? { clientId: nextClientId } : {}),

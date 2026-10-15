@@ -69,7 +69,7 @@ export function AccountConnectionsPage({
 	orgSlug: string
 	currentHref: string
 }) {
-	const connectedAgents = useAccountConnectedAgents(payload, currentHref)
+	const connectedAgents = useAccountConnectedAgents(payload)
 	const { actorKey } = useRouteContext({ from: '__root__' })
 	const view = readView(currentHref)
 	const usage = useQuery({

@@ -148,22 +148,6 @@ export default defineConfig(async ({ command }) => {
 			outDir: process.env.KODY_VITE_OUTDIR ?? 'dist',
 		},
 		plugins: [
-			{
-				name: 'kody-legacy-jsx-compiler',
-				enforce: 'pre' as const,
-				transform(source: string, id: string) {
-					if (
-						!id.endsWith('.tsx') ||
-						id.includes('/start/') ||
-						!id.includes('/packages/worker/')
-					)
-						return
-					return {
-						code: `/** @jsxImportSource remix/component */\n${source}`,
-						map: null,
-					}
-				},
-			},
 			markdownAsText(),
 			inlineCssText(),
 			cloudflare({

@@ -5,6 +5,7 @@ import { loadOAuthPage } from '#start/server/oauth'
 import { OAuthAuthorizeRoute } from '../pages/oauth-authorize.tsx'
 
 export const Route = createFileRoute('/oauth/authorize')({
+	staticData: { shell: { preserveLoginReturn: true } },
 	head: staticDocumentHead('oauthAuthorize'),
 	preload: false,
 	loaderDeps: ({ search }) => search,

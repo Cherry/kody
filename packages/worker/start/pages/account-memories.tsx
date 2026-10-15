@@ -30,7 +30,7 @@ import { useState } from 'react'
 import { SiteLink } from '../components/site-link.tsx'
 import { memoriesInput } from '../memories-input.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useSubmitterScope } from '../use-submitter-scope.ts'
 import {
 	AccountManagementMessage,
@@ -82,10 +82,9 @@ function filterMemories(
 	)
 }
 
-function buildMemoriesExportHref(includeDeleted: boolean, currentHref: string) {
+function buildMemoriesExportHref(includeDeleted: boolean, org: string | null) {
 	const requestUrl = new URL(accountMemoriesExportPath, 'http://localhost')
 	if (includeDeleted) requestUrl.searchParams.set('includeDeleted', 'true')
-	const org = pageQueryOrg(currentHref)
 	if (org) requestUrl.searchParams.set('org', org)
 	return `${requestUrl.pathname}${requestUrl.search}`
 }
@@ -129,6 +128,7 @@ export function AccountMemoriesPage({
 	payload: AccountMemoriesLoaderData
 	currentHref: string
 }) {
+	const { orgSlug } = useMatchedPageScope()
 	const [actionState, setActionState] = useState<'idle' | 'busy'>('idle')
 	const memories = payload.memories
 	const selectedMemory = payload.selectedMemory
@@ -144,6 +144,7 @@ export function AccountMemoriesPage({
 			memoryId: string
 			force: boolean
 			href: string
+			orgSlug: string | null
 			isCurrentSubmitter: () => boolean
 		}) => {
 			const filters = memoriesInput(
@@ -154,7 +155,7 @@ export function AccountMemoriesPage({
 				data: {
 					memoryId: input.memoryId,
 					force: input.force,
-					orgSlug: pageQueryOrg(input.href) ?? undefined,
+					orgSlug: input.orgSlug ?? undefined,
 					refresh: {
 						query: filters.query,
 						includeDeleted: filters.includeDeleted,
@@ -229,6 +230,7 @@ export function AccountMemoriesPage({
 			await deleteMutation.mutateAsync({
 				...input,
 				href: currentHref,
+				orgSlug,
 				isCurrentSubmitter,
 			})
 			if (!isCurrentSubmitter()) return
@@ -363,7 +365,7 @@ export function AccountMemoriesPage({
 									Include deleted
 								</label>
 								<SiteLink
-									href={buildMemoriesExportHref(includeDeleted, currentHref)}
+									href={buildMemoriesExportHref(includeDeleted, orgSlug)}
 									download={buildMemoriesExportFilename()}
 									css={secondaryButtonCss}
 								>

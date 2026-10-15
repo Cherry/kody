@@ -142,17 +142,13 @@ describe('mutation resource invalidation', () => {
 
 it('an organization write only invalidates that organization resource', async () => {
 	const client = new QueryClient()
-	const acme = ['page', 'actor', 'loadJobsPage', '/@acme/-/jobs'] as const
-	const other = ['page', 'actor', 'loadJobsPage', '/@other/-/jobs'] as const
+	const acme = ['page', 'actor', 'loadJobsPage', { orgSlug: 'acme' }] as const
+	const other = ['page', 'actor', 'loadJobsPage', { orgSlug: 'other' }] as const
 	client.setQueryData(acme, { messages: [] })
 	client.setQueryData(other, { messages: [] })
-	await invalidatePageResources(
-		client,
-		'actor',
-		['loadJobsPage'],
-		'none',
-		'/@acme/-/jobs/one',
-	)
+	await invalidatePageResources(client, 'actor', ['loadJobsPage'], 'none', {
+		orgSlug: 'acme',
+	})
 	expect(client.getQueryState(acme)?.isInvalidated).toBe(true)
 	expect(client.getQueryState(other)?.isInvalidated).toBe(false)
 	client.clear()
@@ -161,10 +157,10 @@ it('an organization write only invalidates that organization resource', async ()
 it('cross-surface writes without org identity invalidate named resources across the actor caches', async () => {
 	const client = new QueryClient()
 	const keys = [
-		['page', 'actor', 'loadSecretsPage', '/@acme/-/secrets'],
-		['page', 'actor', 'loadSecretsPage', '/@other/-/secrets'],
-		['page', 'other-actor', 'loadSecretsPage', '/@acme/-/secrets'],
-		['page', 'actor', 'loadJobsPage', '/@acme/-/jobs'],
+		['page', 'actor', 'loadSecretsPage', { orgSlug: 'acme' }],
+		['page', 'actor', 'loadSecretsPage', { orgSlug: 'other' }],
+		['page', 'other-actor', 'loadSecretsPage', { orgSlug: 'acme' }],
+		['page', 'actor', 'loadJobsPage', { orgSlug: 'acme' }],
 	]
 	for (const key of keys) client.setQueryData(key, {})
 	await invalidatePageResources(
@@ -172,7 +168,7 @@ it('cross-surface writes without org identity invalidate named resources across 
 		'actor',
 		['loadSecretsPage'],
 		'none',
-		'/connect/secrets?state=opaque',
+		undefined,
 	)
 	expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([
 		true,
@@ -192,13 +188,9 @@ test('typed collection inputs invalidate the submitting actor and org only', asy
 		['page', 'bob', 'loadMemoriesPage', { orgSlug: 'team', query: '' }],
 	]
 	for (const key of keys) client.setQueryData(key, {})
-	await invalidatePageResources(
-		client,
-		'alice',
-		['loadMemoriesPage'],
-		'none',
-		'/@team/-/memories',
-	)
+	await invalidatePageResources(client, 'alice', ['loadMemoriesPage'], 'none', {
+		orgSlug: 'team',
+	})
 	expect(keys.map((key) => client.getQueryState(key)?.isInvalidated)).toEqual([
 		true,
 		true,

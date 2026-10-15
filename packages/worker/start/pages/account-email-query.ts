@@ -1,14 +1,15 @@
+import { type PageOrgScope } from '../page-query-scope.ts'
 import { type QueryClient } from '@tanstack/react-query'
 import { type AccountEmailLoaderData } from '#universal/loader-data.ts'
 import {
 	emailKeys,
-	emailResourceInput,
 	type EmailListData,
 	type EmailDetail,
 } from './email-resources.ts'
 
 export type EmailAction = {
 	href: string
+	orgSlug: string | null
 	messageId: string
 } & (
 	| { action: 'classify'; classification: 'accepted' | 'quarantined' }
@@ -60,9 +61,7 @@ export async function publishEmailResponse(
 	accepted: AccountEmailLoaderData,
 	action: EmailAction,
 ) {
-	const {
-		list: { org },
-	} = emailResourceInput(action.href)
+	const org = action.orgSlug
 	await client.cancelQueries({ queryKey: emailKeys.all(actorKey, org) })
 	client.setQueriesData<EmailListData>(
 		{ queryKey: emailKeys.lists(actorKey, org) },
@@ -109,11 +108,9 @@ export function emailMutationOptions(
 	actorKey: string | null,
 	send: (action: EmailAction) => Promise<AccountEmailLoaderData>,
 	onFailure: (error: Error) => void,
-	href = '/account/email',
+	scope: PageOrgScope = { orgSlug: null },
 ) {
-	const {
-		list: { org },
-	} = emailResourceInput(href)
+	const org = scope.orgSlug
 	return {
 		mutationKey: emailKeys.mutations(actorKey, org),
 		mutationFn: send,
@@ -125,10 +122,7 @@ export function emailMutationOptions(
 		// visible until this confirming read completes, even after unmount.
 		onSettled: (_data: unknown, _error: unknown, action: EmailAction) =>
 			client.invalidateQueries({
-				queryKey: emailKeys.all(
-					actorKey,
-					emailResourceInput(action.href).list.org,
-				),
+				queryKey: emailKeys.all(actorKey, action.orgSlug),
 			}),
 	}
 }

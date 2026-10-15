@@ -18,10 +18,10 @@ import {
 } from '#universal/styles/style-primitives.ts'
 import { colors, spacing, typography } from '#universal/styles/tokens.ts'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext, useRouter } from '@tanstack/react-router'
+import { useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 import { orgPageFilters } from '../org-page-cache.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import {
 	AccountManagementMessage,
 	AccountManagementPanel,
@@ -54,7 +54,7 @@ export function AccountSecretProvidersPage({
 	currentHref: string
 }) {
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { actorKey, orgSlug } = useMatchedPageScope()
 	const router = useRouter()
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 
@@ -74,15 +74,16 @@ export function AccountSecretProvidersPage({
 	}
 
 	const mutation = useMutation({
-		mutationKey: ['secretProviders', actorKey, pageQueryOrg(currentHref)],
+		mutationKey: ['secretProviders', actorKey, orgSlug],
 		mutationFn: async ({
 			body,
-			href,
+			orgSlug: submittedOrg,
 		}: {
 			body: ProviderChange
-			href: string
+			orgSlug: string | null
+			actorKey: string | null
 		}) => {
-			const orgSlug = pageQueryOrg(href) ?? undefined
+			const orgSlug = submittedOrg ?? undefined
 			switch (body.action) {
 				case 'bind':
 					return bindSecretProvider({
@@ -118,11 +119,11 @@ export function AccountSecretProvidersPage({
 					})
 			}
 		},
-		onSuccess: (_result, { href }) => {
+		onSuccess: (_result, { orgSlug, actorKey }) => {
 			void Promise.all(
 				mutationResources.map((resource) =>
 					queryClient.invalidateQueries(
-						orgPageFilters(actorKey, resource, href),
+						orgPageFilters(actorKey, resource, { orgSlug }),
 					),
 				),
 			)
@@ -137,7 +138,7 @@ export function AccountSecretProvidersPage({
 		if (mutation.isPending) return
 		setMessage(null)
 		try {
-			await mutation.mutateAsync({ body, href: currentHref })
+			await mutation.mutateAsync({ body, orgSlug, actorKey })
 			setRevokeArmed(null)
 			if (router.state.location.href === currentHref)
 				await router.navigate({ to: successHref })

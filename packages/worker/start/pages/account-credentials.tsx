@@ -348,7 +348,7 @@ export function AccountCredentialsRoute({
 								}),
 								teamOrg,
 								packagesById,
-								href: currentHref,
+								orgSlug,
 							})
 						: undefined
 				}

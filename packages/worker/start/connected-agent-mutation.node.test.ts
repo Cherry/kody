@@ -90,7 +90,7 @@ function harness() {
 	)
 
 	const key = (org: string, actor = 'actor') =>
-		['page', actor, 'loadConnectionsPage', `/@${org}/-/agents`] as const
+		['page', actor, 'loadConnectionsPage', { orgSlug: org }] as const
 	const seed = (org: string, actor = 'actor') =>
 		client.setQueryData(key(org, actor), { payload: listedAgents })
 	const ids = (org: string, actor = 'actor') =>
@@ -106,7 +106,7 @@ function harness() {
 				...connectedAgentMutationOptions(client),
 				mutationKey: ['connectedAgents', actorKey, org],
 			})
-			.execute({ clientId, href: `/@${org}/-/agents`, actorKey })
+			.execute({ clientId, orgSlug: org, actorKey })
 			.then(
 				() => null,
 				(error: unknown) => error,

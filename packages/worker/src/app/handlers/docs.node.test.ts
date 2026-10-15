@@ -19,7 +19,7 @@ import {
 	createDocsMarkdownHandler,
 	createLlmsTxtHandler,
 	createDocsLlmsTxtHandler,
-} from './docs.tsx'
+} from './docs.ts'
 import { resolveLegacyGuidesLocation } from './legacy-guides-redirect.ts'
 
 vi.mock('#app/authenticated-user.ts', () => ({

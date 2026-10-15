@@ -48,7 +48,7 @@ export const reportCommunityPackage = createServerFn({ method: 'POST' })
 		const { withWebsiteMutation } = await import('./mutation-context.ts')
 		return withWebsiteMutation({}, async ({ env, user }) => {
 			const { reportWebsiteCommunityPackage } =
-				await import('../../src/app/handlers/community-detail.tsx')
+				await import('../../src/app/handlers/community-detail.ts')
 			return (
 				await reportWebsiteCommunityPackage({
 					env,

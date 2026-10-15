@@ -5,6 +5,7 @@ import { collaboratorsPageQuery as pageQuery } from '../package-collaborators-qu
 import { PackageCollaboratorsRoute } from '../pages/package-collaborators.tsx'
 import { documentHead } from '../components/document-head.ts'
 export const Route = createFileRoute('/@{$username}_/$kodyId_/collaborators')({
+	staticData: { shell: { gutters: 'page' } },
 	context: ({ params }) => ({
 		pageQueryInput: { username: params.username, kodyId: params.kodyId },
 	}),

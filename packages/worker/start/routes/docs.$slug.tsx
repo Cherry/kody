@@ -16,6 +16,7 @@ const pageQuery = createPageQuery('loadDoc', loadDoc, {
 })
 
 export const Route = createFileRoute('/docs/$slug')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public-doc' },
 	server: { handlers: { GET: docMarkdown } },
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),
 	beforeLoad: ({ location, params }) => {

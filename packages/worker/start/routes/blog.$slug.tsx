@@ -13,6 +13,7 @@ const pageQuery = createPageQuery('loadBlogPost', loadBlogPost, {
 })
 
 export const Route = createFileRoute('/blog/$slug')({
+	staticData: { shell: { gutters: 'page' }, sessionVerification: 'public' },
 	server: { handlers: { GET: blogMarkdown } },
 	// Blog content is build-backed and does not depend on search parameters.
 	context: ({ params }) => ({ pageQueryInput: { slug: params.slug } }),

@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { isFocusedPagePathname } from '#universal/focused-page-path.ts'
+import { appShellForMatches } from '../app-shell.ts'
+import { requiresSessionVerification } from '../session-verification-policy.ts'
 import { routeMethods } from '../route-method-middleware.ts'
 import { ErrorAgentPromptButton } from '../components/error-agent-prompt-button.tsx'
 import { buildUnauthorizedErrorAgentPrompt } from '#universal/error-agent-prompt-presets.ts'
@@ -44,16 +45,8 @@ import { readDocumentFailure } from '#start/server/document-failure'
 import { documentForbiddenMessage } from '../document-failure.ts'
 import { SiteLink } from '../components/site-link.tsx'
 import { verifySession } from '#start/server/shell'
-import {
-	shellQuery,
-	ensureShellQuery,
-	requiresSessionVerification,
-} from '../shell-query.ts'
-import {
-	NOT_FOUND_DOCUMENT_TITLE,
-	absolutizeDocumentHead,
-	resolveDocumentHead,
-} from '#universal/document-head.ts'
+import { shellQuery, ensureShellQuery } from '../shell-query.ts'
+import { NOT_FOUND_DOCUMENT_TITLE } from '#universal/document-head.ts'
 import { SiteHeader } from '../components/site-header.tsx'
 import { SiteFooter } from '../components/site-footer.tsx'
 import { visuallyHiddenUntilFocusedCss } from '#universal/styles/style-primitives.ts'
@@ -92,6 +85,7 @@ export const Route = createRootRouteWithContext<{
 		matches,
 	}) => {
 		const orgScope = orgNavigationScope(matches)
+		const appShell = appShellForMatches(matches)
 		if (typeof document === 'undefined') {
 			const identity = await verifySession({
 				data: orgScope,
@@ -110,6 +104,7 @@ export const Route = createRootRouteWithContext<{
 				...identity,
 				orgScope,
 				pageLocation: location,
+				appShell,
 				verifyAccess: false,
 				presentationOnly: false,
 			}
@@ -125,11 +120,10 @@ export const Route = createRootRouteWithContext<{
 			actorKey,
 			orgScope,
 			pageLocation: location,
+			appShell,
 			presentationOnly,
 			verifyAccess:
-				!preload &&
-				requiresSessionVerification(location.pathname) &&
-				!presentationOnly,
+				!preload && requiresSessionVerification(matches) && !presentationOnly,
 		}
 	},
 	loader: {
@@ -155,6 +149,7 @@ export const Route = createRootRouteWithContext<{
 			abortController.signal.throwIfAborted()
 			return {
 				actorKey: shell.actorKey,
+				appShell: context.appShell,
 				shellLocation: {
 					pathname: location.pathname,
 					searchStr: location.searchStr,
@@ -214,7 +209,7 @@ function Root() {
 }
 
 function LoadedAppLayout() {
-	const { shellLocation } = Route.useLoaderData()
+	const { shellLocation, appShell } = Route.useLoaderData()
 	const { session, youtubeWatch } = useShellData()
 	const router = useRouter()
 	const { queryClient, actorKey } = Route.useRouteContext()
@@ -259,10 +254,10 @@ function LoadedAppLayout() {
 	const authReturnHref = `${shellLocation.pathname}${shellLocation.searchStr}`
 	const loginHref = buildAuthLink(
 		'/login',
-		pathname === '/oauth/authorize' ? authReturnHref : null,
+		appShell.preserveLoginReturn ? authReturnHref : null,
 	)
-	const authShell = pathname === '/login' || pathname === '/signup'
-	const focused = isFocusedPagePathname(pathname)
+	const authShell = appShell.mode === 'auth'
+	const focused = appShell.mode === 'focused'
 	return (
 		<div data-app-frame css={appFrameCss}>
 			<a href="#main" css={visuallyHiddenUntilFocusedCss}>
@@ -285,7 +280,7 @@ function LoadedAppLayout() {
 			<main
 				id="main"
 				tabIndex={-1}
-				css={appMainCss(pathname, illustratedError)}
+				css={appMainCss(appShell, illustratedError)}
 			>
 				<Outlet />
 			</main>

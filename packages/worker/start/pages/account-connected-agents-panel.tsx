@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRouteContext } from '@tanstack/react-router'
-import { orgSlugFromOrgOwnedPath } from '#universal/org-pages.ts'
+import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { connectedAgentMutationOptions } from '../connected-agent-mutation.ts'
 import { useState, type ReactNode } from 'react'
 import { type CSSObject } from '@emotion/react'
@@ -35,25 +34,19 @@ import {
 
 export function useAccountConnectedAgents(
 	initialPayload: AccountConnectedAgentsLoaderData,
-	currentHref: string,
 ) {
 	const agents = initialPayload.agents
 	const queryClient = useQueryClient()
-	const { actorKey } = useRouteContext({ from: '__root__' })
+	const { actorKey, orgSlug, pageLocation } = useMatchedPageScope()
+	const currentHref = pageLocation.href
 	const [revokeArmed, setRevokeArmed] = useState<string | null>(null)
 	const mutation = useMutation({
-		mutationKey: [
-			'connectedAgents',
-			actorKey,
-			orgSlugFromOrgOwnedPath(
-				new URL(currentHref, 'http://localhost').pathname,
-			),
-		],
+		mutationKey: ['connectedAgents', actorKey, orgSlug],
 		...connectedAgentMutationOptions(queryClient),
 	})
 	function revokeAgent(clientId: string) {
 		setRevokeArmed(null)
-		mutation.mutate({ clientId, href: currentHref, actorKey })
+		mutation.mutate({ clientId, orgSlug, actorKey })
 	}
 
 	return {

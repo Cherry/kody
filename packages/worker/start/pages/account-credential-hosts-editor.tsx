@@ -8,7 +8,6 @@ import {
 } from './account-management-components.tsx'
 import { saveCredentialHosts } from '#start/server/credential-hosts'
 import { useCredentialMutation } from '../credential-mutation.ts'
-import { pageQueryOrg } from '../page-query-scope.ts'
 import { type CredentialHostSettings } from '#universal/credentials-list.ts'
 import {
 	getGhostButtonCss,
@@ -19,7 +18,7 @@ type CredentialHostsEditorProps = {
 	credentialId: string
 	credentialName: string
 	settings: CredentialHostSettings
-	href: string
+	orgSlug: string
 }
 const listCss = css({
 	margin: 0,
@@ -85,13 +84,16 @@ export function CredentialHostsEditor(props: CredentialHostsEditorProps) {
 	} | null>(null)
 	const settings =
 		saved && saved.from === props.settings ? saved.settings : props.settings
-	const mutation = useCredentialMutation(props.href, (hosts: string[]) => {
-		const orgSlug = pageQueryOrg(props.href)
-		if (!orgSlug) throw new Error('Organization not found.')
-		return saveCredentialHosts({
-			data: { orgSlug, credentialId: props.credentialId, hosts },
-		})
-	})
+	const mutation = useCredentialMutation(
+		{ orgSlug: props.orgSlug },
+		(hosts: string[]) => {
+			const orgSlug = props.orgSlug
+			if (!orgSlug) throw new Error('Organization not found.')
+			return saveCredentialHosts({
+				data: { orgSlug, credentialId: props.credentialId, hosts },
+			})
+		},
+	)
 	const saving = mutation.isPending
 	function startEditing() {
 		setEditing(true)

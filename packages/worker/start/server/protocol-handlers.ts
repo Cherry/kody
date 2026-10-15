@@ -19,7 +19,7 @@ import {
 	createBlogRssHandler,
 	createBlogPostMarkdownHandler,
 	createBlogPostOgImageHandler,
-} from '#app/handlers/blog.tsx'
+} from '#app/handlers/blog.ts'
 import {
 	createDocsMarkdownHandler,
 	createDocsLlmsTxtHandler,
@@ -27,7 +27,7 @@ import {
 	createDocDetailMarkdownHandler,
 	createDocDetailOgImageHandler,
 	createLlmsTxtHandler,
-} from '#app/handlers/docs.tsx'
+} from '#app/handlers/docs.ts'
 import { createYoutubeThumbHandler } from '#app/handlers/youtube-thumb.ts'
 import { createAccountExportHandler } from '#app/handlers/account-export.ts'
 import { createMcpServerLogoHandler } from '#app/handlers/mcp-server-logo.ts'
@@ -46,10 +46,10 @@ import { createCommunityPackageIconHandler } from '#app/handlers/community-packa
 import { createAccountRepoIconHandler } from '#app/handlers/account-repo-icon.ts'
 import { createIntegrationLogoHandler } from '#app/handlers/integration-logo.ts'
 import { createProviderMarkLogoHandler } from '#app/handlers/provider-mark-logo.ts'
-import { createCommunityDetailOgImageHandler } from '#app/handlers/community-detail.tsx'
+import { createCommunityDetailOgImageHandler } from '#app/handlers/community-detail.ts'
 import { createOrgAvatarHandler } from '#app/handlers/org-avatar.ts'
 import { createProfileAvatarHandler } from '#app/handlers/profile-avatar.ts'
-import { createProfileOgImageHandler } from '#app/handlers/profile.tsx'
+import { createProfileOgImageHandler } from '#app/handlers/profile.ts'
 import { createWebhookIngressHandler } from '#app/handlers/webhook-ingress.ts'
 import { createStripeWebhookHandler } from '#app/handlers/stripe-webhook.ts'
 import { createAuthHandler } from '#app/handlers/auth.ts'
