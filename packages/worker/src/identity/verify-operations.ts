@@ -1,3 +1,4 @@
+import { personalOrgIdFromUserRow } from '#worker/orgs/personal-org-id.ts'
 import { authOperationResult } from './auth-operation-result.ts'
 import { object, parseSafe, string } from 'remix/data-schema'
 import {
@@ -121,7 +122,7 @@ export async function verifyWebsiteTwoFactor({
 			code,
 			type: twoFactorVerificationType,
 		}))
-	if (!codeValid) {
+	if (!userRecord || !codeValid) {
 		void logAuditEvent({
 			db: auditDatabaseFromEnv(env),
 			category: 'auth',
@@ -162,7 +163,7 @@ export async function verifyWebsiteTwoFactor({
 	})
 	await reconcileSignupWelcomeCreditsIfPending({
 		db: env.APP_DB,
-		userId: pendingSession.stableUserId,
+		userId: personalOrgIdFromUserRow(userRecord),
 	})
 	void logAuditEvent({
 		db: auditDatabaseFromEnv(env),

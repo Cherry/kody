@@ -1,3 +1,4 @@
+import { personalOrgIdFromUserRow } from '#worker/orgs/personal-org-id.ts'
 import { authOperationResult } from './auth-operation-result.ts'
 import {
 	generateAuthenticationOptions,
@@ -381,7 +382,7 @@ export async function webauthnAuthenticationVerify({
 	})
 	await reconcileSignupWelcomeCreditsIfPending({
 		db: env.APP_DB,
-		userId: stableUserId,
+		userId: personalOrgIdFromUserRow(userRecord),
 	})
 	void logAuditEvent({
 		db: auditDatabaseFromEnv(env),

@@ -124,6 +124,8 @@ test('private package source and settings stay isolated across owner, granted gu
 		await expect(lock).toHaveAttribute('data-locked', 'false')
 		await lock.click()
 		await expect(lock).toHaveAttribute('data-locked', 'true')
+		// The lock renders optimistically. Wait for persistence before reloading.
+		await expect(lock).toBeEnabled()
 		await page.reload()
 		await waitForClientHydration(page)
 		await expect(lock).toHaveAttribute('data-locked', 'true')

@@ -27,6 +27,7 @@ export async function updateAccountAvatar({
 	request: Request
 	avatar: File | null
 }) {
+	// Avatars belong to the person, not their personal org.
 	const stableUserId = personalOrgId(user.mcpUser.userId)
 	if (avatar === null)
 		await deleteUserAvatar({ env, numericUserId: user.userId, stableUserId })

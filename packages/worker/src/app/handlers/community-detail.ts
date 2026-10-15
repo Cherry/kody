@@ -147,6 +147,7 @@ export async function reportWebsiteCommunityPackage(input: {
 	try {
 		await reportCommunityListing({
 			env,
+			// Reports identify the acting person, not their personal org.
 			userId: personalOrgId(user.mcpUser.userId),
 			listingId: listingId,
 			reason: parsedReason.data,

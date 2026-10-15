@@ -285,6 +285,7 @@ export async function redirectOnboardingIndex(env: Env, request: Request) {
 	const progress = await loadOnboardingResumeProgress(
 		env,
 		personalOrgIdForPerson(user.mcpUser),
+		// OAuth connections are person-owned; the chooser inventory is org-owned.
 		personalOrgId(user.mcpUser.userId),
 	)
 	return Response.redirect(

@@ -1,4 +1,4 @@
-import { personalOrgId } from '@kody-internal/shared/owner-person-ids.ts'
+import { personalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { type AuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	decodeCreditLedgerCursor,
@@ -35,7 +35,7 @@ export async function loadAuthorizedOrgCredits({
 			id: user.request.org.id,
 			slug: record.slug,
 			displayName: record.display_name,
-			personal: user.request.org.id === personalOrgId(user.mcpUser.userId),
+			personal: user.request.org.id === personalOrgIdForPerson(user.mcpUser),
 		},
 		viewerUserId: user.mcpUser.userId,
 		canReadBilling,

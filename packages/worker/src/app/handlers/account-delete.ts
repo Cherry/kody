@@ -101,6 +101,7 @@ export async function deleteAccount({
 	try {
 		result = await softDeleteUserAccount({
 			env,
+			// Account deletion targets the person, not their personal org.
 			userId: personalOrgId(user.mcpUser.userId),
 			actorUserId: personalOrgId(user.mcpUser.userId),
 			actorUsername: user.username,

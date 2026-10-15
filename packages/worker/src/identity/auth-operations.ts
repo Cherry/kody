@@ -1,3 +1,4 @@
+import { personalOrgIdFromUserRow } from '#worker/orgs/personal-org-id.ts'
 import { authOperationResult } from './auth-operation-result.ts'
 import { enum_, object, parseSafe, string } from 'remix/data-schema'
 import {
@@ -577,7 +578,8 @@ export async function authenticateWebsite({
 			try {
 				await ensureDefaultEmailInbox({
 					db: env.APP_DB,
-					userId: record.stableUserId,
+					userId: record.personalOrgId,
+					actorPersonId: record.stableUserId,
 					username: normalizedUsername,
 					domain: platformEmailDomain,
 				})
@@ -747,7 +749,7 @@ export async function authenticateWebsite({
 	})
 	await reconcileSignupWelcomeCreditsIfPending({
 		db: env.APP_DB,
-		userId: stableUserId,
+		userId: personalOrgIdFromUserRow(userRecord),
 	})
 	void logAuditEvent({
 		db: auditDatabaseFromEnv(env),

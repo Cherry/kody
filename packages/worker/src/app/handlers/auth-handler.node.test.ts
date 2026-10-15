@@ -479,7 +479,10 @@ test('auth handler login and signup workflow', async () => {
 	expectAuthAudit('signup', 'failure', { reason: 'email_exists' })
 
 	const email = 'session-user@example.com'
-	await productionContext.testDb.addUser(email, 'secret')
+	const sessionUser = await productionContext.testDb.addUser(email, 'secret')
+	sessionUser.personal_org_id = testStableUserIdFromEmail(
+		'distinct-personal-org@example.com',
+	)
 	const login = (extra = {}, url?: string) =>
 		productionContext.request(
 			{ email, password: 'secret', mode: 'login', ...extra },
@@ -497,6 +500,13 @@ test('auth handler login and signup workflow', async () => {
 		expect(cookie).toContain('kody_session=')
 		expect(cookie).toContain(maxAge)
 	}
+	expect(
+		welcomeCreditMocks.reconcileSignupWelcomeCreditsIfPending,
+	).toHaveBeenLastCalledWith({
+		db: productionContext.testDb.db,
+		userId: sessionUser.personal_org_id,
+	})
+	expect(sessionUser.personal_org_id).not.toBe(sessionUser.stable_user_id)
 	expectAuthAudit('login', 'success', { email })
 
 	const secureCookieResponse = await login({}, 'https://example.com/auth')

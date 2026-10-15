@@ -218,6 +218,7 @@ export async function changeAccountPassword({
 		d1: env.APP_DB,
 		helpers,
 		userId: user.userId,
+		// Password sessions are person-owned.
 		stableUserId: personalOrgId(personIdFromStored(userRecord.stable_user_id)),
 		password: newPassword,
 	})

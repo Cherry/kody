@@ -57,8 +57,7 @@ test('system email deletion requires confirmation and persists through reload', 
 			(response) =>
 				response.request().method() === 'POST' &&
 				new URL(response.url()).pathname.startsWith('/_serverFn/') &&
-				(response.request().postData() ?? '').includes(id) &&
-				(response.request().postData() ?? '').includes('delete'),
+				(response.request().postData() ?? '').includes(id),
 		)
 		await page
 			.getByRole('button', {

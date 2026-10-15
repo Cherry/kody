@@ -1,3 +1,4 @@
+import { loadPersonalOrgIdForPerson } from '#worker/orgs/personal-org-id.ts'
 import { applyPasswordChange } from '#app/apply-password-change.ts'
 import { normalizeRedirectTo } from '#app/auth-redirect.ts'
 import {
@@ -306,6 +307,7 @@ export function createAuthProviderCallbackHandler(env: Env) {
 				clearReferralCookie?: boolean
 			} = {},
 		) {
+			// Authentication sessions are person-owned.
 			const stableUserId = personalOrgId(
 				personIdFromStored(user.stable_user_id),
 			)
@@ -356,7 +358,10 @@ export function createAuthProviderCallbackHandler(env: Env) {
 			await touchLastActiveAt(env.APP_DB, { stableUserId })
 			await reconcileSignupWelcomeCreditsIfPending({
 				db: env.APP_DB,
-				userId: stableUserId,
+				userId: await loadPersonalOrgIdForPerson(
+					env.APP_DB,
+					personIdFromStored(user.stable_user_id),
+				),
 			})
 			void logAuditEvent({
 				db: auditDatabaseFromEnv(env),
@@ -733,7 +738,8 @@ export function createAuthProviderCallbackHandler(env: Env) {
 			try {
 				await ensureDefaultEmailInbox({
 					db: env.APP_DB,
-					userId: stableUserId,
+					userId: signupPersonalOrgId,
+					actorPersonId: stableUserId,
 					username,
 					domain: platformEmailDomain,
 				})
