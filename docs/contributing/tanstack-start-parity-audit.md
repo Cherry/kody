@@ -2,6 +2,27 @@
 
 ## Current evidence, October 15, 2026
 
+### Follow-up at source `083f0e961`
+
+Validate `38705271509` for pushed head `423e7534c` passed Static, Node, Workers
+and MCP. Browser E2E is still running at this inspection. Preview `38705271507`
+completed successfully. `/health` returned `ok: true` at deployed merge
+`12d4f005d572da2bdaf78634f284d4ca760f6b1d`, containing `423e7534c` and main
+`8494ca6b7`.
+
+Local commits `428474138`, `895100ab9`, and `083f0e961` remove email and webhook
+post-write page reconstruction and entitlement writes during website reads.
+Query reconciliation preserves uncached navigation promises and performs
+confirming reads after older responses settle. Entitlement recovery uses the
+existing scheduled infrastructure and storage, with atomic deletion and
+personal-org mapping checks. Start and worker-test static checks passed; these
+local additions still need CI runtime coverage.
+
+Source inspection of the installed Start server-functions handler confirms that
+direct RPC HEAD requests to GET token functions receive 405 before handler
+execution. Existing mocked token tests do not prove this HTTP behavior.
+Authenticated preview and matched visual verification remain incomplete.
+
 ### Follow-up at source `9fabf327b`
 
 Validate `38702598529` for pushed head `665fa04ff` passed Node (6082 tests in
@@ -239,12 +260,15 @@ local disposable fixtures because the preview seed user is not an admin.
 
 ## Backend scope
 
-This is not a complete removal of Remix. Start renders the app and handles
-server functions. The retained HTTP/API router uses `remix/router`; D1 access
-uses `remix/data-table`; validation uses `remix/data-schema`. Cookies, route
-helpers, cross-origin protection, and some HTML utilities also remain. There is
-one runtime router creation and 104 type-only router imports in the non-test
-worker/shared source inventory. Import counts are not bundle sizes. Core
-billing, MCP, jobs, package runtime, database, shared code, and the runtime,
-platform, and jobs workers retain their baseline implementation. These are
-separate from the migrated browser router and client state ownership.
+Start owns website routing, rendering, server functions, and the retained
+website HTTP contracts. A source import audit at `423e7534c` found no
+`remix/router`, `react-router`, or `@remix-run` imports in application code. The
+remaining `remix/router` matches are source strings in the test fixture for
+user-authored package apps, which are a separate runtime concern.
+
+Remix remains for leaf utilities such as D1 tables, schemas, cookies, and HTML
+responses. Shared billing, MCP, jobs, package execution, storage, and protocol
+business logic still run behind their respective boundaries. Removing router
+imports does not prove that all inherited architectural patterns or behavioral
+regressions are gone. The read-side effects and mutation lifecycle audits above
+remain part of that assessment.
