@@ -105,23 +105,12 @@ export async function loadConnectionProfilesForAccount(input: {
 	}
 }
 
-async function writeConnectionProfile(input: {
+async function writeConnectionProfile<T>(input: {
 	env: Env
-	requestUrl: string | URL
 	userId: string
-	emailVerified: boolean
-	write: () => Promise<unknown>
+	write: () => Promise<T>
 }): Promise<
-	| {
-			ok: true
-			connectionProfiles: Array<AccountConnectionProfileView>
-			connectionProfilePackageOptions: Array<{
-				id: string
-				name: string
-				kodyId: string
-			}>
-	  }
-	| { ok: false; error: string; status: number }
+	{ ok: true; result: T } | { ok: false; error: string; status: number }
 > {
 	const enabled = await isConnectionProfilesEnabledForUser({
 		db: input.env.APP_DB,
@@ -135,7 +124,7 @@ async function writeConnectionProfile(input: {
 		}
 	}
 	try {
-		await input.write()
+		return { ok: true, result: await input.write() }
 	} catch (error) {
 		if (error instanceof McpCallerError) {
 			return { ok: false, error: error.message, status: 400 }
@@ -144,17 +133,6 @@ async function writeConnectionProfile(input: {
 			return { ok: false, error: error.message, status: 400 }
 		}
 		throw error
-	}
-	const loaded = await loadConnectionProfilesForAccount({
-		env: input.env,
-		requestUrl: input.requestUrl,
-		userId: input.userId,
-		emailVerified: input.emailVerified,
-	})
-	return {
-		ok: true,
-		connectionProfiles: loaded.connectionProfiles,
-		connectionProfilePackageOptions: loaded.connectionProfilePackageOptions,
 	}
 }
 

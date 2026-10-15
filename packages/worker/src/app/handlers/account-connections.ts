@@ -1,4 +1,3 @@
-import { loadAccountConnectionsData } from '#app/account-connections-data.ts'
 import { type readAuthenticatedAppUser } from '#app/authenticated-user.ts'
 import {
 	isOauthProviderId,
@@ -55,10 +54,7 @@ export async function syncAccountDiscordRole({
 		reason: `status=${result.status}`,
 	})
 	return operationResult({
-		...(await loadAccountConnectionsData({
-			env,
-			userId: user.userId,
-		})),
+		ok: true as const,
 		discordMemberRole: result,
 	})
 }
@@ -130,7 +126,5 @@ export async function disconnectAccountProvider({
 		path: new URL(request.url).pathname,
 		reason: `provider=${provider}`,
 	})
-	return operationResult(
-		await loadAccountConnectionsData({ env, userId: user.userId }),
-	)
+	return operationResult({ ok: true as const })
 }

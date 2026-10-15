@@ -6,6 +6,7 @@ import { orgPageFilters, updateOrgPagePayload } from './org-page-cache.ts'
 
 export function connectedAgentMutationOptions(queryClient: QueryClient) {
 	return mutationOptions({
+		gcTime: 0,
 		mutationFn: async ({
 			clientId,
 			orgSlug,
@@ -76,9 +77,13 @@ export function connectedAgentMutationOptions(queryClient: QueryClient) {
 					mutationKey: ['connectedAgents', actorKey, orgSlug],
 				}) === 1
 			)
-				void queryClient.invalidateQueries(
-					orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
-				)
+				for (const resource of [
+					'loadConnectionsPage',
+					'loadConnectionUsagePage',
+				] as const)
+					void queryClient.invalidateQueries(
+						orgPageFilters(actorKey, resource, { orgSlug }),
+					)
 		},
 	})
 }

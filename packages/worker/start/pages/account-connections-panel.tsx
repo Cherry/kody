@@ -18,6 +18,7 @@ import { useRouteContext } from '@tanstack/react-router'
 import { useState } from 'react'
 import { ProviderIcon } from '../components/provider-icons.tsx'
 import { SiteLink } from '../components/site-link.tsx'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { pageResourceKey } from '../page-mutation-cache.ts'
 import { startSocialSignIn } from '../social-sign-in.ts'
@@ -78,46 +79,34 @@ export function useAccountConnections(
 		availableProviders,
 		canSyncDiscordRoles,
 	} = initial
-	function publish(payload: AccountConnectionsLoaderData) {
-		queryClient.setQueriesData<Awaited<ReturnType<typeof loadAccountPage>>>(
-			{ queryKey: pageResourceKey(actorKey, 'loadAccountPage') },
-			(data) =>
-				data
-					? {
-							...data,
-							payloads: { ...data.payloads, accountConnections: payload },
-						}
-					: data,
-		)
-	}
-	const mutation = useMutation({
+	const capture = useSubmitterScope()
+	const options = {
 		mutationKey: ['accountConnections', actorKey],
-		mutationFn: async (
-			input:
-				| { intent: 'disconnect'; provider: string }
-				| { intent: 'sync-discord-role' },
-		) => {
-			if (input.intent === 'sync-discord-role')
-				return syncDiscordRole({ data: {} })
-			if (
-				input.provider !== 'github' &&
-				input.provider !== 'google' &&
-				input.provider !== 'x' &&
-				input.provider !== 'discord'
-			)
-				throw new Error('Invalid provider.')
-			return disconnectAccountProvider({ data: { provider: input.provider } })
-		},
-		onMutate: () =>
-			queryClient.cancelQueries({
+		gcTime: 0,
+		onMutate: async () => {
+			const reconcile = invalidatePages
+			await queryClient.cancelQueries({
 				queryKey: pageResourceKey(actorKey, 'loadAccountPage'),
-			}),
-		onSuccess: publish,
-		onSettled: () => {
-			void invalidatePages()
+			})
+			return reconcile
 		},
+		onSettled: (
+			_data: unknown,
+			_error: Error | null,
+			_input: unknown,
+			reconcile: typeof invalidatePages | undefined,
+		) => {
+			// Active account queries wait for this mutation's write barrier.
+			void reconcile?.()
+		},
+	}
+	const syncMutation = useMutation({ ...options, mutationFn: syncDiscordRole })
+	const disconnectMutation = useMutation({
+		...options,
+		mutationFn: disconnectAccountProvider,
 	})
-	const connectionsBusy = connecting || mutation.isPending
+	const connectionsBusy =
+		connecting || syncMutation.isPending || disconnectMutation.isPending
 
 	const [connectionsMessage, setConnectionsMessage] = useState<{
 		text: string
@@ -145,11 +134,13 @@ export function useAccountConnections(
 	}
 
 	function syncDiscordMemberRole() {
+		const isCurrent = capture()
 		setConnectionsMessage(null)
-		mutation.mutate(
-			{ intent: 'sync-discord-role' },
+		syncMutation.mutate(
+			{ data: {} },
 			{
 				onSuccess: (payload) => {
+					if (!isCurrent()) return
 					const status =
 						('discordMemberRole' in payload
 							? payload.discordMemberRole?.status
@@ -163,21 +154,32 @@ export function useAccountConnections(
 					})
 				},
 				onError: (error) =>
+					isCurrent() &&
 					setConnectionsMessage({ text: error.message, tone: 'error' }),
 			},
 		)
 	}
 	function disconnectProvider(providerId: string) {
+		if (
+			providerId !== 'github' &&
+			providerId !== 'google' &&
+			providerId !== 'x' &&
+			providerId !== 'discord'
+		)
+			return
+		const isCurrent = capture()
 		setConnectionsMessage(null)
-		mutation.mutate(
-			{ intent: 'disconnect', provider: providerId },
+		disconnectMutation.mutate(
+			{ data: { provider: providerId } },
 			{
 				onSuccess: () =>
+					isCurrent() &&
 					setConnectionsMessage({
 						text: `${providerLabels[providerId] ?? providerId} disconnected.`,
 						tone: 'info',
 					}),
 				onError: (error) =>
+					isCurrent() &&
 					setConnectionsMessage({ text: error.message, tone: 'error' }),
 			},
 		)
@@ -188,7 +190,23 @@ export function useAccountConnections(
 			return hasUsablePassword
 		},
 		markHasUsablePassword() {
-			publish({ ...initial, hasUsablePassword: true, canDisconnect: true })
+			queryClient.setQueriesData<Awaited<ReturnType<typeof loadAccountPage>>>(
+				{ queryKey: pageResourceKey(actorKey, 'loadAccountPage') },
+				(page) =>
+					page
+						? {
+								...page,
+								payloads: {
+									...page.payloads,
+									accountConnections: {
+										...page.payloads.accountConnections,
+										hasUsablePassword: true,
+										canDisconnect: true,
+									},
+								},
+							}
+						: page,
+			)
 		},
 		setMessage(next: { text: string; tone: 'error' | 'info' } | null) {
 			setConnectionsMessage(next ?? connectionsMessage)

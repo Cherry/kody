@@ -159,7 +159,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	expect(unverified.status).toBe(200)
 	// Same gate as the onboarding payload: no MCP URL until the email is
 	// verified, so the page cannot push a user into the authorize → 403 loop.
-	expect((unverified.data as { mcpServerUrl: string }).mcpServerUrl).toBe('')
+	expect(unverified.data).toMatchObject({ mcpServerUrl: '' })
 	signIn(true)
 
 	await recordInboundMcpConnectionLastUsed({
@@ -181,6 +181,7 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	expect(
 		(
 			listedWithLastUsed.data as {
+				ok: boolean
 				agents: Array<{ clientId: string; lastUsedAt: string | null }>
 			}
 		).agents,
@@ -208,7 +209,8 @@ test('connected agents API lists unique inbound clients and revokes every grant 
 	const revoked = await revoke('client-a')
 	expect(revoked.status).toBe(200)
 	expect(helpers.revokeGrant).toHaveBeenCalledTimes(2)
-	const revokeBody = revoked.data as {
+	expect(revoked.data).toEqual({ ok: true })
+	const revokeBody = (await request()).data as {
 		ok: true
 		agents: Array<{ clientId: string }>
 	}

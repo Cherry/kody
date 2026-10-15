@@ -26,7 +26,8 @@ import { type CSSObject } from '@emotion/react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type ReactNode, useState } from 'react'
 import { Combobox, type ComboboxOption } from '../components/combobox.tsx'
-import { orgPageFilters, updateOrgPagePayload } from '../org-page-cache.ts'
+import { orgPageFilters } from '../org-page-cache.ts'
+import { useSubmitterScope } from '../use-submitter-scope.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { accountInputCss } from './account-management-components.tsx'
 import { CopyCard } from './onboarding-mcp-client-cards.tsx'
@@ -63,7 +64,6 @@ type MessageTarget =
 export function ConnectionProfiles({
 	payload,
 	agents,
-	currentHref,
 }: {
 	payload: AccountConnectedAgentsLoaderData
 	agents: Array<AccountConnectedAgentListItem>
@@ -81,58 +81,65 @@ export function ConnectionProfiles({
 	} | null>(null)
 	const queryClient = useQueryClient()
 	const { actorKey, orgSlug } = useMatchedPageScope()
-	const mutation = useMutation({
+	const capture = useSubmitterScope()
+	const options = {
 		mutationKey: ['connectionProfiles', actorKey, orgSlug],
-		mutationFn: async ({
-			write,
-		}: {
-			write: () => Promise<AccountConnectedAgentsLoaderData>
-			orgSlug: string | null
-			actorKey: string | null
-		}) => write(),
-		onMutate: async ({ orgSlug, actorKey }) => {
+		gcTime: 0,
+		onMutate: async () => {
+			const scope = { actorKey, orgSlug }
 			await queryClient.cancelQueries(
 				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
 			)
+			return scope
 		},
-		onSuccess: async (accepted, { orgSlug, actorKey }) => {
-			await queryClient.cancelQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
-			)
-			updateOrgPagePayload<AccountConnectedAgentsLoaderData>(
-				queryClient,
-				actorKey,
+		onSettled: (
+			_data: unknown,
+			_error: unknown,
+			_input: unknown,
+			scope: { actorKey: string | null; orgSlug: string | null } | undefined,
+		) => {
+			if (!scope) return
+			// The query's write barrier waits for settlement. Do not await these reads here.
+			for (const resource of [
 				'loadConnectionsPage',
-				{ orgSlug },
-				(current) => ({
-					...current,
-					connectionProfilesEnabled: accepted.connectionProfilesEnabled,
-					connectionProfiles: accepted.connectionProfiles,
-					connectionProfilePackageOptions:
-						accepted.connectionProfilePackageOptions,
-				}),
-			)
+				'loadConnectionUsagePage',
+			] as const) {
+				const filters = orgPageFilters(scope.actorKey, resource, {
+					orgSlug: scope.orgSlug,
+				})
+				void queryClient
+					.cancelQueries(filters)
+					.then(() => queryClient.invalidateQueries(filters))
+			}
 		},
-		onSettled: (_data, _error, { orgSlug, actorKey }) => {
-			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadConnectionsPage', { orgSlug }),
-			)
-			void queryClient.invalidateQueries(
-				orgPageFilters(actorKey, 'loadConnectionUsagePage', { orgSlug }),
-			)
-		},
+	}
+	const create = useMutation({
+		...options,
+		mutationFn: createConnectionProfile,
 	})
-	const busy = mutation.isPending
+	const update = useMutation({
+		...options,
+		mutationFn: updateConnectionProfile,
+	})
+	const remove = useMutation({
+		...options,
+		mutationFn: deleteConnectionProfile,
+	})
+	const busy = create.isPending || update.isPending || remove.isPending
+
 	async function postMutation(
-		write: () => Promise<AccountConnectedAgentsLoaderData>,
+		write: () => Promise<unknown>,
 		target: MessageTarget,
 	) {
 		if (busy) return false
+		const isCurrent = capture()
 		setMessage(null)
 		try {
-			await mutation.mutateAsync({ write, orgSlug, actorKey })
+			await write()
+			if (!isCurrent()) return false
 			return true
 		} catch (error) {
+			if (!isCurrent()) return false
 			setMessage({
 				target,
 				text:
@@ -144,7 +151,7 @@ export function ConnectionProfiles({
 	async function createProfile() {
 		const saved = await postMutation(
 			() =>
-				createConnectionProfile({
+				create.mutateAsync({
 					data: {
 						orgSlug: orgSlug ?? undefined,
 						name: createName,
@@ -169,7 +176,7 @@ export function ConnectionProfiles({
 		)
 		const saved = await postMutation(
 			() =>
-				updateConnectionProfile({
+				update.mutateAsync({
 					data: {
 						orgSlug: orgSlug ?? undefined,
 						profileId,
@@ -315,7 +322,7 @@ export function ConnectionProfiles({
 													onClick={() => {
 														void postMutation(
 															() =>
-																deleteConnectionProfile({
+																remove.mutateAsync({
 																	data: {
 																		orgSlug: orgSlug ?? undefined,
 																		profileId: profile.id,

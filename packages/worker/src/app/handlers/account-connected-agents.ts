@@ -114,14 +114,14 @@ type AgentMutationContext = {
 	env: Env
 	user: NonNullable<Awaited<ReturnType<typeof readAuthenticatedAppUser>>>
 }
-async function changeAccountConnectionProfile(
-	{ request, env, user }: AgentMutationContext,
+async function changeAccountConnectionProfile<T>(
+	{ env, user }: AgentMutationContext,
 	write: (context: {
 		env: Env
-		requestUrl: string
 		userId: string
-		emailVerified: boolean
-	}) => ReturnType<typeof createAccountConnectionProfile>,
+	}) => Promise<
+		{ ok: true; result: T } | { ok: false; error: string; status: number }
+	>,
 ) {
 	if (!connectedAgentsScope(user).personalOrg) {
 		return operationResult(
@@ -135,9 +135,7 @@ async function changeAccountConnectionProfile(
 	}
 	const mutation = await write({
 		env,
-		requestUrl: request.url,
 		userId: personalOrgId(user.mcpUser.userId),
-		emailVerified: user.emailVerified,
 	})
 	if (!mutation.ok) {
 		return operationResult(
@@ -145,16 +143,7 @@ async function changeAccountConnectionProfile(
 			mutation.status,
 		)
 	}
-	const payload = await loadAccountConnectedAgentsData({
-		env,
-		requestUrl: request.url,
-		user,
-	})
-	return operationResult({
-		...payload,
-		connectionProfiles: mutation.connectionProfiles,
-		connectionProfilePackageOptions: mutation.connectionProfilePackageOptions,
-	})
+	return operationResult(mutation)
 }
 export function createConnectedAgentProfile(
 	input: AgentMutationContext & { name: string; grants: unknown },
@@ -245,11 +234,5 @@ export async function revokeAccountConnectedAgent({
 		path: new URL(request.url).pathname,
 		clientId: clientId,
 	})
-	return operationResult(
-		await loadAccountConnectedAgentsData({
-			env,
-			requestUrl: request.url,
-			user,
-		}),
-	)
+	return operationResult({ ok: true as const })
 }

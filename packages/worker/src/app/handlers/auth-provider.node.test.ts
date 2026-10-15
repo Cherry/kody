@@ -621,11 +621,9 @@ test('discord sign-in creates a verified account and assigns the guild role', as
 	)
 	const syncPayload = syncResponse.data as {
 		ok: boolean
-		canSyncDiscordRoles: boolean
 		discordMemberRole?: { status: string }
 	}
 	expect(syncPayload.ok).toBe(true)
-	expect(syncPayload.canSyncDiscordRoles).toBe(true)
 	expect(syncPayload.discordMemberRole?.status).toBe('assigned')
 	expect(rolePuts).toEqual(['222222222222222222', '222222222222222222'])
 	expect(roleDeletes).toHaveLength(4)
@@ -643,12 +641,10 @@ test('discord sign-in creates a verified account and assigns the guild role', as
 	)
 	const disconnectPayload = disconnectResponse.data as {
 		ok: boolean
-		connections: Array<unknown>
-		canSyncDiscordRoles: boolean
 	}
 	expect(disconnectPayload.ok).toBe(true)
-	expect(disconnectPayload.connections).toHaveLength(0)
-	expect(disconnectPayload.canSyncDiscordRoles).toBe(false)
+	expect(disconnectPayload).toEqual({ ok: true })
+	expect(countRows(sqlite, 'oauth_connections')).toBe(0)
 	expect(roleDeletes).toHaveLength(7)
 	expect(
 		roleDeletes.filter((roleId) => roleId === '222222222222222222'),
@@ -951,10 +947,9 @@ test('signed-in users link and disconnect providers from their account', async (
 	)
 	const disconnectPayload = disconnectResponse.data as {
 		ok: boolean
-		connections: Array<unknown>
 	}
 	expect(disconnectPayload.ok).toBe(true)
-	expect(disconnectPayload.connections).toHaveLength(0)
+	expect(disconnectPayload).toEqual({ ok: true })
 	expect(countRows(sqlite, 'oauth_connections')).toBe(0)
 })
 
@@ -996,8 +991,7 @@ test('MOCK_ client ids run the whole flow in-worker and refuse disconnecting the
 		connectionsHandler,
 		connectionsRequest(cookie),
 	)
-	const listPayload = listResponse.data as { canDisconnect: boolean }
-	expect(listPayload.canDisconnect).toBe(false)
+	expect(listResponse.data).toMatchObject({ canDisconnect: false })
 
 	const disconnectResponse = await runConnectionsOperation(
 		connectionsHandler,

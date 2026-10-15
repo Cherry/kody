@@ -111,9 +111,9 @@ function harness() {
 				() => null,
 				(error: unknown) => error,
 			)
-	const respond = (id: string, status = 200, agents = allAgents) => {
+	const respond = (id: string, status = 200) => {
 		const pending = resolvers.get(id)!
-		if (status === 200) pending.resolve({ ...listedAgents, agents })
+		if (status === 200) pending.resolve({ ok: true })
 		else pending.reject(new Error('Denied.'))
 	}
 
@@ -144,7 +144,7 @@ test('revoke optimistically removes only its row and failure restores it', async
 	expect(h.ids('one')).toEqual(expect.arrayContaining(clientIds(allAgents)))
 })
 
-test('concurrent revokes stay independent and stale success payloads cannot restore committed siblings', async () => {
+test('concurrent revokes stay independent and refresh only after the last settlement', async () => {
 	using h = harness()
 	h.seed('one')
 	const first = h.revoke(cursorOld.clientId),
@@ -169,6 +169,18 @@ test.each([200, 403])(
 		h.seed('one')
 		h.seed('two')
 		h.seed('one', 'other-actor')
+		const usageKey = (org: string, actor = 'actor') => [
+			'page',
+			actor,
+			'loadConnectionUsagePage',
+			{ orgSlug: org },
+		]
+		for (const key of [
+			usageKey('one'),
+			usageKey('two'),
+			usageKey('one', 'other-actor'),
+		])
+			h.client.setQueryData(key, { usage: [] })
 		const pending = h.revoke(cursorOld.clientId)
 		await vi.waitFor(() =>
 			expect(h.resolvers.has(cursorOld.clientId)).toBe(true),
@@ -182,5 +194,10 @@ test.each([200, 403])(
 			h.client.getQueryState(h.key('one', 'other-actor'))?.isInvalidated,
 		).toBe(false)
 		expect(h.ids('one').includes(cursorOld.clientId)).toBe(status !== 200)
+		expect(h.client.getQueryState(usageKey('one'))?.isInvalidated).toBe(true)
+		expect(h.client.getQueryState(usageKey('two'))?.isInvalidated).toBe(false)
+		expect(
+			h.client.getQueryState(usageKey('one', 'other-actor'))?.isInvalidated,
+		).toBe(false)
 	},
 )
