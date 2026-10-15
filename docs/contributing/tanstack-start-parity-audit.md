@@ -1,5 +1,25 @@
 # Start parity audit
 
+## Follow-up fixes awaiting CI and deployment
+
+Local commit `15913c99d` completes the protocol-link correction: protocol and
+non-page destinations use browser anchors, while page links pass separate native
+Router pathname, parsed search and hash. Browser coverage exercises a hydrated
+left click and exact opaque query preservation.
+
+Commit `442b71f44` adds explicit deleted-memory reads for owner-scoped website
+list, detail and export. Commit `5f0be0ee0` allows authorized permanent deletion
+after soft deletion. Default repository reads and writes still exclude deleted
+rows. Coverage checks foreign-owner denial and default versus explicit options.
+These have static type, lint and deletion-guard checks, but no local runtime
+execution; their CI and deployed results are pending.
+
+Settled desktop `/docs/github` screenshots matched sampled content, typography
+and article layout apart from the known account-dependent header offset. No
+browser console errors were recorded. Evidence:
+`/tmp/kody-doc-github-production-desktop.png` and
+`/tmp/kody-doc-github-preview-desktop.png`.
+
 ## Matched documentation typography
 
 Desktop `/docs/connect` comparisons used the same browser viewport on production
