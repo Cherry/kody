@@ -343,11 +343,17 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           const release = process.env.KODY_START_RELEASE
-          if (!/^[a-f0-9]{40}$/.test(release) || !/^[0-9]+$/.test(process.env.EVIDENCE_RUN)) throw new Error('Pinned activation source and receipt run ID required')
+          if (!/^[a-f0-9]{40}$/.test(release) || !/^[0-9]+$/.test(process.env.EVIDENCE_RUN)) throw new Error('Pinned target release and activation receipt run ID required')
           const response = await fetch(`https://api.github.com/repos/${process.env.REPOSITORY}/actions/runs/${process.env.EVIDENCE_RUN}`, { headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' } })
           if (!response.ok) throw new Error(`Receipt verification failed: ${response.status}`)
           const evidence = await response.json()
-          if (evidence.head_sha !== release || evidence.status !== 'completed' || evidence.event !== 'workflow_dispatch' || evidence.path !== '.github/workflows/deploy.yml' || evidence.head_branch !== 'taren/tanstack-start-migration') throw new Error('Receipt must come from the original deployment workflow at the activation source SHA')
+          if (!/^[a-f0-9]{40}$/.test(evidence.head_sha) || evidence.status !== 'completed' || evidence.event !== 'workflow_dispatch' || evidence.path !== '.github/workflows/deploy.yml' || evidence.head_branch !== 'taren/tanstack-start-migration' || evidence.repository?.full_name !== process.env.REPOSITORY) throw new Error('Receipt must come from the trusted completed activation workflow')
+          const jobsResponse = await fetch(`https://api.github.com/repos/${process.env.REPOSITORY}/actions/runs/${process.env.EVIDENCE_RUN}/jobs?per_page=100`, { headers: { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json' } })
+          if (!jobsResponse.ok) throw new Error(`Activation job verification failed: ${jobsResponse.status}`)
+          const jobs = await jobsResponse.json()
+          const activation = jobs.jobs?.filter(job => job.name === 'Activate reviewed two-account Start opt-in route')
+          if (activation?.length !== 1 || !activation[0].steps?.some(step => step.name === 'Activate only the reviewed zone route overlay' && ['success', 'failure', 'cancelled', 'timed_out'].includes(step.conclusion))) throw new Error('Receipt must come from an executed activation step')
+          // The run pins controller code. The downloaded receipt pins the target release.
           JS
       - uses: actions/checkout@v6.0.2
         with:
@@ -370,7 +376,7 @@ jobs:
           node --input-type=module <<'JS'
           import { readFile } from 'node:fs/promises'
           const receipt = JSON.parse(await readFile('.tmp/start-opt-in/route-receipt.json', 'utf8'))
-          if (receipt.release !== process.env.KODY_START_RELEASE) throw new Error('Receipt release does not match the original activation source')
+          if (receipt.release !== process.env.KODY_START_RELEASE) throw new Error('Receipt target release does not match the requested rollback release')
           JS
       - name: Delete only the exact recorded rollout zone route
         env:

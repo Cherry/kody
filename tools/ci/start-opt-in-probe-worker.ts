@@ -84,7 +84,8 @@ export async function probeRequest(request: Request, env: ProbeEnv) {
 			)
 				return new Response('Unknown asset', { status: 404 })
 			service = url.pathname === '/start/asset' ? env.START : env.ROUTER
-			target = `${prefix}${asset}`
+			const canonical = asset.split('/').map(encodeURIComponent).join('/')
+			target = `${prefix}${url.pathname === '/start/asset' || url.searchParams.get('encoded') === '1' ? canonical : asset}`
 			headers.set('Accept', '*/*')
 			break
 		}

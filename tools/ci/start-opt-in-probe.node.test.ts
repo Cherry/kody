@@ -230,3 +230,25 @@ test('document inspection accepts valid SSR title attributes and preserves title
 		),
 	).toThrow('"title":false')
 })
+
+test('private asset probes check literal and encoded router paths while Start uses canonical filenames', async () => {
+	const { env, calls } = fixture()
+	const asset = 'assets/@__username__._kodyId-Ck-3NbJV.js'
+	env.ASSET_PATHS = JSON.stringify([asset])
+	for (const [lane, query, expected] of [
+		['start', '', 'assets/%40__username__._kodyId-Ck-3NbJV.js'],
+		['router', '', 'assets/@__username__._kodyId-Ck-3NbJV.js'],
+		['router', '&encoded=1', 'assets/%40__username__._kodyId-Ck-3NbJV.js'],
+	]) {
+		await probeRequest(
+			new Request(
+				`http://localhost/${lane}/asset?path=${encodeURIComponent(asset!)}${query}`,
+				{ headers: { 'X-Kody-Probe-Key': env.PROBE_KEY } },
+			),
+			env,
+		)
+		expect(new URL(calls.at(-1)!.request.url).pathname).toBe(
+			`/__start/${env.START_RELEASE}/${expected}`,
+		)
+	}
+})

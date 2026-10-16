@@ -111,6 +111,11 @@ if (isExecutedDirectly(import.meta.url)) {
 	const css = assetPaths.find((asset) => asset.endsWith('.css'))
 	const script = assetPaths.find((asset) => asset.endsWith('.js'))
 	assert(css && script, 'Emitted CSS and JavaScript asset paths are required')
+	const reservedChunk = assetPaths.find(
+		(asset) => asset.endsWith('.js') && asset.includes('@'),
+	)
+	assert(reservedChunk, 'An emitted reserved-character route chunk is required')
+	const sampledAssets = [css, script, reservedChunk]
 	const versions = {
 		candidate: await workerEvidence(candidateName),
 		router: await workerEvidence(routerName),
@@ -136,7 +141,7 @@ if (isExecutedDirectly(import.meta.url)) {
 			],
 			vars: {
 				START_RELEASE: release,
-				ASSET_PATHS: JSON.stringify([css, script]),
+				ASSET_PATHS: JSON.stringify(sampledAssets),
 				PROBE_KEY: key,
 			},
 		}
@@ -230,13 +235,17 @@ if (isExecutedDirectly(import.meta.url)) {
 			(await fetchProbe('/router/unknown-asset')).status === 404,
 			'Unknown release asset was not denied',
 		)
-		for (const asset of [css, script]) {
+		for (const asset of sampledAssets) {
 			const expected = await readFile(
 				path.join('dist/client/__start', release, asset),
 			)
-			for (const lane of ['start', 'router']) {
+			for (const [lane, encoded] of [
+				['start', ''],
+				['router', ''],
+				['router', '&encoded=1'],
+			]) {
 				const response = await fetchProbe(
-					`/${lane}/asset?path=${encodeURIComponent(asset)}`,
+					`/${lane}/asset?path=${encodeURIComponent(asset)}${encoded}`,
 				)
 				assert(response.status === 200, `${lane} emitted asset failed`)
 				const type = response.headers.get('X-Probe-Content-Type') ?? ''

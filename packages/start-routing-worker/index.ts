@@ -28,7 +28,7 @@ type Config = {
 	allowed: ReadonlySet<string>
 	release: string
 	prefix: string
-	assets: ReadonlySet<string>
+	assets: ReadonlyMap<string, string>
 }
 type User = {
 	stable_user_id: string
@@ -100,7 +100,17 @@ function config(
 		allowed: new Set(ids),
 		release: env.START_RELEASE,
 		prefix,
-		assets: new Set(paths.map((path) => prefix + path)),
+		assets: new Map(
+			paths.flatMap((path) => {
+				const literal = prefix + path
+				const canonical =
+					prefix + path.split('/').map(encodeURIComponent).join('/')
+				return [
+					[literal, canonical],
+					[canonical, canonical],
+				] as const
+			}),
+		),
 	}
 }
 function preferenceCookie(env: RoutingEnv) {
@@ -325,10 +335,15 @@ async function routeRequest(
 	}
 	const path = new URL(request.url).pathname
 	// Public assets must exist in the build manifest, never fall through to SSR.
-	if (settings.assets.has(path)) {
+	const canonicalAssetPath = settings.assets.get(path)
+	if (canonicalAssetPath) {
 		if (!['GET', 'HEAD'].includes(request.method))
 			return response(405, 'Method not allowed.', { Allow: 'GET, HEAD' })
-		return forward(env.START, request)
+		// Cloudflare assets canonicalize reserved filename characters, such as @.
+		// Forward directly to that exact manifest-derived URL to avoid redirects.
+		const assetUrl = new URL(request.url)
+		assetUrl.pathname = canonicalAssetPath
+		return forward(env.START, new Request(assetUrl, request))
 	}
 	if (path.startsWith(`${settings.prefix}_serverFn/`)) {
 		if (request.headers.get('Upgrade'))

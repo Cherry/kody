@@ -553,3 +553,41 @@ test('factory captures immutable paths and rejects unsafe paths even with matchi
 		).toBe(503)
 	}
 })
+
+test('exact manifest assets support canonical encoded filenames without widening paths', async () => {
+	const paths = [
+		'assets/@__username__._kodyId-Ck-3NbJV.js',
+		'assets/chunk+name.js',
+	]
+	const worker = createRoutingWorker({
+		release,
+		assetPaths: paths,
+		digest: createHash('sha256')
+			.update(JSON.stringify([...paths].sort()))
+			.digest('hex'),
+	})
+	const bindings = {
+		...env,
+		START_ASSET_MANIFEST_SHA256: createHash('sha256')
+			.update(JSON.stringify([...paths].sort()))
+			.digest('hex'),
+	}
+	for (const asset of paths) {
+		const canonical =
+			prefix + asset.split('/').map(encodeURIComponent).join('/')
+		for (const path of [prefix + asset, canonical]) {
+			expect((await worker.fetch(request(path), bindings)).status).toBe(200)
+			expect(new URL(start.mock.calls.at(-1)![0].url).pathname).toBe(canonical)
+		}
+	}
+	for (const path of [
+		'assets/%2540__username__._kodyId-Ck-3NbJV.js',
+		'assets/%40unknown.js',
+		'assets%2F%40__username__._kodyId-Ck-3NbJV.js',
+		'assets/%2e%2e/private.js',
+	]) {
+		expect((await worker.fetch(request(prefix + path), bindings)).status).toBe(
+			404,
+		)
+	}
+})
