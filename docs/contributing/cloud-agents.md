@@ -342,31 +342,20 @@ npx @kodycodes/cli auth bootstrap --code 'kody_bc_…' --lifetime short
 
 ### Changing the CLI
 
-`@kodycodes/cli` lives in [kody-bot/cli](https://github.com/kody-bot/cli), not
-this repository. A Cloud Agent on `kentcdodds/kody` cannot push there
-(`Permission to kody-bot/cli.git denied to cursor[bot]`). This environment does
-not grant that App access; do not treat a 403 as a missing local credential.
+`@kodycodes/cli` lives in `packages/cli`. `npm run cli:validate` typechecks,
+tests, and builds it. `npm run cli:openapi:check` fails when
+`packages/cli/src/generated/openapi-routes.ts` drifts from
+`packages/worker/src/open-api/operations.ts`.
 
-Supported path:
+Merges to `main` that change the CLI in a publishable way (conventional `fix` /
+`feat` / `perf`, or a generated route-table diff) publish through
+[`.github/workflows/publish-cli.yml`](../../.github/workflows/publish-cli.yml).
+The package version in git stays `0.0.0-semantically-released`. Tags are
+`cli-vX.Y.Z`, continuing from `cli-v1.26.3`. npm trusted publishing for this
+repository and workflow is required; the workflow does not read an npm token.
 
-1. Implement and test in a local clone
-   (`git clone https://github.com/kody-bot/cli.git`).
-2. `git format-patch` the commits.
-3. Upload the patch with `kody:@kentcdodds/agent-files/create-upload`
-   (`confirm: true`, PUT with the returned `upload.headers`, then use
-   `downloadUrl`).
-4. Launch a Cloud Agent on that repo with `kody:@kentcdodds/cursor/agents`
-   `createAgent` (`repository: 'https://github.com/kody-bot/cli'`,
-   `ref: 'main'`). Put the patch `downloadUrl` in the prompt text (not
-   `prompt.images`). Tell it to apply the patch, push, and open the PR itself
-   via ManagePullRequest as the Kent C. Dodds Cursor/GitHub account. The
-   delegated agent may add its own branch suffix.
-5. Follow-up review fixes: `kody:@kentcdodds/cursor/runs` `createRun` with
-   another patch upload and that upload's `downloadUrl` in the prompt.
-
-Squash titles must be conventional (`fix:` / `feat:`). Merges to `main` publish
-`@kodycodes/cli` through semantic-release. Origin-side contracts to apply in
-that repo:
+Keep the merge commit (do not squash away the subtree history). Origin-side
+contracts:
 [CLI local credential runtime](./contracts/cli-local-credential-runtime.md) and
 [CLI streaming gateway-fetch](./contracts/cli-streaming-gateway-fetch.md).
 

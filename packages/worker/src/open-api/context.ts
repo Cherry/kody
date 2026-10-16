@@ -47,6 +47,8 @@ export type ApiInvocationContext = {
 	}
 	principal: ApiPrincipal
 	waitUntil?: (promise: Promise<unknown>) => void
+	/** Worker entrypoint exports for hosted execute loopback. */
+	loopbackExports?: Cloudflare.Exports
 	/** Memoized per invocation; resolves on first flag-gated check. */
 	getFeatureFlags: () => Promise<CallerFeatureFlags>
 }

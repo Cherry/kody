@@ -1,4 +1,8 @@
+import { z } from 'zod'
+import { mintCliLoginDeviceToken } from '#worker/api-tokens/cli-login-device-token.ts'
 import { toApiTokenView } from '#worker/api-tokens/service.ts'
+import { executeOperationDefinition } from './execute-operation.ts'
+import { searchToolOperationDefinition } from './search-tool-operation.ts'
 import {
 	capabilityProxyCallInputSchema,
 	capabilityProxyCallOutputSchema,
@@ -19,6 +23,8 @@ import { type NativeApiOperationId } from './operations.ts'
 import {
 	emptyInputSchema,
 	cliCredentialBootstrapRedeemDefinition,
+	tokenCreateInputSchema,
+	tokenSecretViewSchema,
 	tokenOperationDefinitions,
 } from './token-operations.ts'
 
@@ -124,12 +130,60 @@ const capabilityProxyOperationDefinitions: Record<
 	},
 }
 
+const cliLoginDeviceTokenDefinition: NativeApiOperationDefinition = {
+	summary: 'Mint a device API token from CLI login',
+	description:
+		'Exchange the official CLI OAuth access token from `kody login` for a user-owned `kody_at_` device token. The OAuth bearer is accepted only on this route (and on local-execute HTTP for older CLIs). The token value is returned once. Scopes are the org-permission vocabulary; the caller role still applies. Requires `lifetime` (`short` or `long`) or both idle and max seconds.',
+	inputSchema: tokenCreateInputSchema.pick({
+		lifetime: true,
+		idle_ttl_seconds: true,
+		max_lifetime_seconds: true,
+		name: true,
+	}),
+	outputSchema: tokenSecretViewSchema.extend({
+		login_org: z
+			.object({
+				slug: z.string(),
+			})
+			.nullable()
+			.describe(
+				'Org the CLI OAuth grant was bound to. The device token is user-owned; pass this slug as ?org= on later calls.',
+			),
+	}),
+	readOnly: false,
+	async handler(params, ctx) {
+		const input = parseNativeInput(
+			tokenCreateInputSchema.pick({
+				lifetime: true,
+				idle_ttl_seconds: true,
+				max_lifetime_seconds: true,
+				name: true,
+			}),
+			params,
+		)
+		return mintCliLoginDeviceToken({
+			ctx,
+			...(input.lifetime === undefined ? {} : { lifetime: input.lifetime }),
+			...(input.idle_ttl_seconds === undefined
+				? {}
+				: { idleTtlSeconds: input.idle_ttl_seconds }),
+			...(input.max_lifetime_seconds === undefined
+				? {}
+				: { maxLifetimeSeconds: input.max_lifetime_seconds }),
+			...(input.name === undefined ? {} : { name: input.name }),
+		})
+	},
+}
+
 export const nativeApiOperationDefinitions: Record<
 	NativeApiOperationId,
 	NativeApiOperationDefinition
 > = {
 	...tokenOperationDefinitions,
 	cliCredentialBootstrapRedeem: cliCredentialBootstrapRedeemDefinition,
+	cliLoginDeviceToken: cliLoginDeviceTokenDefinition,
 	...capabilityProxyOperationDefinitions,
 	...localExecutePackageGraphOperationDefinitions,
+	execute: executeOperationDefinition,
+	searchTool: searchToolOperationDefinition,
 }

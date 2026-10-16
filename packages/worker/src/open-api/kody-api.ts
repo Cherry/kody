@@ -29,6 +29,7 @@ export class KodyApi extends WorkerEntrypoint<Env> {
 			env: this.env,
 			appOrigin: getAppBaseUrl({ env: this.env }),
 			waitUntil: (promise) => this.ctx.waitUntil(promise),
+			loopbackExports: this.ctx.exports,
 		})
 	}
 }

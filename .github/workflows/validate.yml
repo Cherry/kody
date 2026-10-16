@@ -459,6 +459,28 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  cli:
+    runs-on: ubuntu-latest
+    name: 🧰 CLI
+    timeout-minutes: 20
+    if: >-
+      github.event_name != 'pull_request' || github.event.pull_request.draft ==
+      false
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: 🧰 Setup
+        uses: ./.github/actions/setup-validate
+
+      - name: 🔌 OpenAPI client check
+        run: npm run cli:openapi:check
+
+      - name: 🧪 CLI validate
+        run: npm run cli:validate
+
   validate:
     runs-on: ubuntu-latest
     name: ✅ Validate
@@ -469,6 +491,7 @@ jobs:
       - workers
       - mcp
       - e2e
+      - cli
     # always() so a failed sibling still reports; !cancelled() so a
     # superseded run (cancel-in-progress) does not paint ✅ Validate red.
     # A sibling job timeout still fails this job: the workflow is not
@@ -481,18 +504,19 @@ jobs:
         if: >-
           needs.static.result == 'success' && needs.node.result == 'success' &&
           needs.workers.result == 'success' && needs.mcp.result == 'success' &&
-          needs.e2e.result == 'success'
+          needs.e2e.result == 'success' && needs.cli.result == 'success'
         run: echo "All validate jobs passed"
 
       - name: ❌ Report failures
         if: >-
           needs.static.result != 'success' || needs.node.result != 'success' ||
           needs.workers.result != 'success' || needs.mcp.result != 'success' ||
-          needs.e2e.result != 'success'
+          needs.e2e.result != 'success' || needs.cli.result != 'success'
         run: |
           echo "static=${{ needs.static.result }}"
           echo "node=${{ needs.node.result }}"
           echo "workers=${{ needs.workers.result }}"
           echo "mcp=${{ needs.mcp.result }}"
           echo "e2e=${{ needs.e2e.result }}"
+          echo "cli=${{ needs.cli.result }}"
           exit 1

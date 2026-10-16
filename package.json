@@ -74,6 +74,8 @@
     "decorative-banners:check": "node tools/check-decorative-banners.ts",
     "slop-ratchet:check": "node tools/check-file-size-ratchet.ts && node tools/check-decorative-banners.ts",
     "knip": "knip",
+    "cli:validate": "npm run validate -w @kodycodes/cli",
+    "cli:openapi:check": "node --experimental-strip-types tools/generate-cli-openapi-client.ts --check",
     "deploy-guardrails:check": "node tools/check-deploy-guardrails.ts",
     "workflows:check": "node tools/check-workflow-refs.ts",
     "origin-production-exports:check": "node tools/check-origin-production-exports.ts",
@@ -198,6 +200,7 @@
     "packages/status",
     "packages/nx-cache",
     "packages/worker",
+    "packages/cli",
     "packages/mock-servers/*"
   ],
   "allowScripts": {

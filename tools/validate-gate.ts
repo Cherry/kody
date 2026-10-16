@@ -137,6 +137,12 @@ export const parallelValidateLegs = [
 		weight: 'check',
 	},
 	{ name: 'knip', command: 'npm run knip', weight: 'build' },
+	{ name: 'cli', command: 'npm run cli:validate', weight: 'build' },
+	{
+		name: 'cli-openapi',
+		command: 'npm run cli:openapi:check',
+		weight: 'check',
+	},
 	{ name: 'audit', command: 'npm run audit:prod', weight: 'check' },
 	{ name: 'lockfile', command: 'npm run lockfile:check', weight: 'check' },
 	{

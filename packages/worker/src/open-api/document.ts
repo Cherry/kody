@@ -127,6 +127,8 @@ const tagDescriptions: Record<ApiOperation['tag'], string> = {
 	tokens: 'Scoped, short-lived API tokens.',
 	'capability-proxy':
 		'Platform I/O for a local execute venue: CapabilityProxy hops (`kody:runtime` calls) and `POST /v1/local-execute/package-graph` (stamped `kody:@…` module download). Requires `org:execute` and a scoped API token or CLI `kody login` MCP OAuth bearer.',
+	execute:
+		'Cloud sandbox execute. `POST /v1/execute` runs a module and returns the MCP execute envelope. Requires `org:execute` and a `kody_at_` token.',
 }
 
 function stripSchemaMeta(schema: JsonSchema): JsonSchema {
