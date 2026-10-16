@@ -1,4 +1,9 @@
-import { apiTokenEnvVar, defaultApiUrl, defaultMcpUrl, onboardingUrl } from './defaults.js'
+import {
+	apiTokenEnvVar,
+	defaultApiUrl,
+	defaultMcpUrl,
+	onboardingUrl,
+} from './defaults.js'
 import { hostIds } from './host-catalog.js'
 import { orgEnvVar } from './org-slug.js'
 import { readPackageVersion } from './package-info.js'
@@ -26,12 +31,14 @@ function formatOrgsHelpBlock(orgs: Array<ListedOrg>, indent = '  '): string {
 	return `${lines.join('\n')}\n`
 }
 
-export function buildUsage(input: {
-	mcpUrl?: string
-	backend?: SecretBackend
-	resolution?: StoreResolution
-	orgs?: Array<ListedOrg>
-} = {}): string {
+export function buildUsage(
+	input: {
+		mcpUrl?: string
+		backend?: SecretBackend
+		resolution?: StoreResolution
+		orgs?: Array<ListedOrg>
+	} = {},
+): string {
 	const mcpUrl = input.mcpUrl ?? defaultMcpUrl
 	let orgs = input.orgs
 	if (!orgs) {

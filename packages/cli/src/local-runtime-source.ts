@@ -420,9 +420,11 @@ export function __kodyRunInLocalRuntime(callback) {
  * origin-supplied gateway-fetch shim so ambient `{{secret:…}}` fetch hops
  * even when the entry has no `kody:@` imports (kentcdodds/kody#3020).
  */
-export function createLocalEntrySource(input: {
-	sideEffectModules?: ReadonlyArray<string>
-} = {}): string {
+export function createLocalEntrySource(
+	input: {
+		sideEffectModules?: ReadonlyArray<string>
+	} = {},
+): string {
 	const sideEffectImports = [...new Set(input.sideEffectModules ?? [])]
 		.filter((name) => typeof name === 'string' && name.trim().length > 0)
 		.map((name) => `import ${JSON.stringify(name)};`)
@@ -526,7 +528,9 @@ export function createWorkerdConfig(input: {
 	packageModules?: Array<WorkerdPackageModuleFile>
 	allowPrivateNetwork?: boolean
 }): string {
-	const flags = localExecuteCompatibilityFlags.map((flag) => JSON.stringify(flag)).join(', ')
+	const flags = localExecuteCompatibilityFlags
+		.map((flag) => JSON.stringify(flag))
+		.join(', ')
 	const networkAllow = input.allowPrivateNetwork
 		? '["public", "private", "local"]'
 		: '["public"]'

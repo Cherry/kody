@@ -9,7 +9,7 @@
 import * as esbuild from 'esbuild'
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import { join, resolve, sep } from 'node:path'
 import { createBundleError } from '../local-bundle.js'
 import { bundleInputs } from './dev-bundler.js'
@@ -38,7 +38,9 @@ export function createDevClientBundler(input: {
 	const externals = input.externals ?? []
 	const workingDir = process.cwd()
 	let disposed = false
-	let context: Promise<esbuild.BuildContext<{ write: false; metafile: true }>> | null = null
+	let context: Promise<
+		esbuild.BuildContext<{ write: false; metafile: true }>
+	> | null = null
 	const createContext = () =>
 		esbuild.context({
 			absWorkingDir: workingDir,
@@ -61,7 +63,9 @@ export function createDevClientBundler(input: {
 				if (disposed) throw new Error('kody dev bundler was already disposed.')
 				context ??= createContext()
 				const result = await (await context).rebuild()
-				const code = result.outputFiles.find((file) => file.path.endsWith('.js'))?.text ?? ''
+				const code =
+					result.outputFiles.find((file) => file.path.endsWith('.js'))?.text ??
+					''
 				const hash = createHash('sha256')
 					.update(code)
 					.digest('base64url')
@@ -91,13 +95,16 @@ export function createDevClientBundler(input: {
  * Exact specifier or a subpath of it, so `preact` does not also externalize
  * `preact-render-to-string` (esbuild's own `external` matches by prefix).
  */
-function clientExternalsPlugin(externals: ReadonlyArray<string>): esbuild.Plugin {
+function clientExternalsPlugin(
+	externals: ReadonlyArray<string>,
+): esbuild.Plugin {
 	return {
 		name: 'kody-dev-client-externals',
 		setup(build) {
 			build.onResolve({ filter: /^[^./]/ }, (args) =>
 				externals.some(
-					(external) => args.path === external || args.path.startsWith(`${external}/`),
+					(external) =>
+						args.path === external || args.path.startsWith(`${external}/`),
 				)
 					? { path: args.path, external: true }
 					: undefined,
@@ -119,7 +126,10 @@ export function parseDevAssetPath(pathname: string): string | null {
 }
 
 /** Absolute file under `assetsDir`, or null for traversal / absolute paths. */
-export function resolveDevAssetFile(assetsDir: string, relativePath: string): string | null {
+export function resolveDevAssetFile(
+	assetsDir: string,
+	relativePath: string,
+): string | null {
 	if (relativePath.includes('\0') || relativePath.startsWith('/')) return null
 	const root = resolve(assetsDir)
 	const file = resolve(root, relativePath)
@@ -143,18 +153,25 @@ export async function serveDevAsset(input: {
 		return
 	}
 	if (input.relativePath === devVersionAssetName) {
-		send(req, res, 'application/json; charset=utf-8', JSON.stringify({
-			clientModuleUrl: input.clientModuleUrl,
-			assetBasePath: `${input.appBasePath}/_assets`,
-			publishedCommit: null,
-		}))
+		send(
+			req,
+			res,
+			'application/json; charset=utf-8',
+			JSON.stringify({
+				clientModuleUrl: input.clientModuleUrl,
+				assetBasePath: `${input.appBasePath}/_assets`,
+				publishedCommit: null,
+			}),
+		)
 		return
 	}
 	if (input.client && input.relativePath === input.client.name) {
 		send(req, res, 'text/javascript; charset=utf-8', input.client.code)
 		return
 	}
-	const file = input.assetsDir ? resolveDevAssetFile(input.assetsDir, input.relativePath) : null
+	const file = input.assetsDir
+		? resolveDevAssetFile(input.assetsDir, input.relativePath)
+		: null
 	const body = file ? await readAssetFile(file) : null
 	if (!file || !body) {
 		res.writeHead(404, {
@@ -165,9 +182,15 @@ export async function serveDevAsset(input: {
 		return
 	}
 	const contentType = inferDevAssetContentType(file)
-	send(req, res, contentType, body, contentType.startsWith('text/javascript')
-		? { 'service-worker-allowed': `${input.appBasePath}/` }
-		: {})
+	send(
+		req,
+		res,
+		contentType,
+		body,
+		contentType.startsWith('text/javascript')
+			? { 'service-worker-allowed': `${input.appBasePath}/` }
+			: {},
+	)
 }
 
 async function readAssetFile(file: string): Promise<Buffer | null> {
@@ -236,6 +259,7 @@ const contentTypesByExtension: Record<string, string> = {
 export function inferDevAssetContentType(path: string): string {
 	const name = path.split(/[\\/]/).pop() ?? ''
 	const separator = name.lastIndexOf('.')
-	const extension = separator <= 0 ? '' : name.slice(separator + 1).toLowerCase()
+	const extension =
+		separator <= 0 ? '' : name.slice(separator + 1).toLowerCase()
 	return contentTypesByExtension[extension] ?? 'application/octet-stream'
 }

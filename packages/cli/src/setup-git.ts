@@ -18,7 +18,7 @@ import {
 	type StoredApiToken,
 } from './api-token-store.js'
 import { OpenApiError, openApiGet, openApiRequest } from './open-api-client.js'
-import type { SecretBackend, StoreResolution } from './store.js'
+import { type SecretBackend, type StoreResolution } from './store.js'
 import { which as whichOnPath } from './which.js'
 
 /** Scopes setup-git always requires for clone/fetch (+ push). */
@@ -58,7 +58,9 @@ export type TokenCurrentMetadata = {
  * Origin host for `credential.https://<host>.*` (guide: `kody.codes`).
  * Derived from the MCP URL origin so preview / self-host installs match.
  */
-export function gitCredentialHostFromMcpUrl(mcpUrl: string = defaultMcpUrl): string {
+export function gitCredentialHostFromMcpUrl(
+	mcpUrl: string = defaultMcpUrl,
+): string {
 	return new URL(mcpUrl).host
 }
 
@@ -103,9 +105,12 @@ export async function fetchTokenCurrentMetadata(input: {
 		id: String(current.id ?? ''),
 		orgBinding,
 		scopes: Array.isArray(current.scopes)
-			? current.scopes.filter((scope): scope is string => typeof scope === 'string')
+			? current.scopes.filter(
+					(scope): scope is string => typeof scope === 'string',
+				)
 			: [],
-		expiresAt: typeof current.expires_at === 'string' ? current.expires_at : null,
+		expiresAt:
+			typeof current.expires_at === 'string' ? current.expires_at : null,
 	}
 }
 
@@ -114,7 +119,9 @@ export async function fetchTokenCurrentMetadata(input: {
  * metadata. Older origins omit the field — refuse rather than install a
  * broken helper.
  */
-export function assertUserOwnedTokensLive(metadata: TokenCurrentMetadata): void {
+export function assertUserOwnedTokensLive(
+	metadata: TokenCurrentMetadata,
+): void {
 	if (metadata.orgBinding === null) {
 		throw new Error(
 			'This Kody origin does not advertise user-owned API tokens (`org_binding` missing on GET /v1/tokens/current). Upgrade the server (kody auth setup-git / persistent git HTTPS) before installing the credential helper.',
@@ -142,8 +149,7 @@ export function decideSetupGitToken(input: {
 	lifetime?: ResolvedCliTokenLifetime
 }): SetupGitTokenDecision {
 	const lifetime =
-		input.lifetime ??
-		resolveCliTokenLifetime({ lifetime: 'long' })
+		input.lifetime ?? resolveCliTokenLifetime({ lifetime: 'long' })
 
 	if (
 		input.stored &&
@@ -249,7 +255,9 @@ const requireFromSetupGit = createRequire(import.meta.url)
 export function readCliPackageVersion(): string {
 	try {
 		const pkg = requireFromSetupGit('../package.json') as { version?: string }
-		return typeof pkg.version === 'string' ? pkg.version : gitCredentialHelperPinFallbackVersion
+		return typeof pkg.version === 'string'
+			? pkg.version
+			: gitCredentialHelperPinFallbackVersion
 	} catch {
 		return gitCredentialHelperPinFallbackVersion
 	}
@@ -396,7 +404,11 @@ export function gitCredentialHelperCommand(input?: {
 			return `!${shellQuote(globalKody)} git-credential`
 		}
 	}
-	if (entryPath && entryPath.length > 0 && !isEphemeralNpxEntryPath(entryPath)) {
+	if (
+		entryPath &&
+		entryPath.length > 0 &&
+		!isEphemeralNpxEntryPath(entryPath)
+	) {
 		const execPath = input?.execPath ?? process.execPath
 		return `!${shellQuote(execPath)} ${shellQuote(entryPath)} git-credential`
 	}
@@ -413,7 +425,7 @@ function shellQuote(value: string): string {
 
 /** Detect major-only npx pins (`@1`, `@2`) that can resolve to a stale cache. */
 export function isMajorOnlyNpxHelper(helper: string): boolean {
-	return /@kodycodes\/cli@\d+(?![\.\d])/.test(helper)
+	return /@kodycodes\/cli@\d+(?![.\d])/.test(helper)
 }
 
 /** Exact `@kodycodes/cli@x.y.z` pin from a helper command, if present. */
@@ -604,7 +616,11 @@ export async function authSetupGit(input: {
 	const mcpUrl = input.mcpUrl || defaultMcpUrl
 	const host = gitCredentialHostFromMcpUrl(mcpUrl)
 
-	const storedExisting = loadStoredApiToken(apiUrl, input.backend, input.resolution)
+	const storedExisting = loadStoredApiToken(
+		apiUrl,
+		input.backend,
+		input.resolution,
+	)
 	const probeToken = input.token || storedExisting?.token
 	const hasLoginSession = input.hasLoginSession === true
 	if (!probeToken && !hasLoginSession) {
@@ -738,7 +754,9 @@ export type RemovedGitConfigEntry = {
 export type AuthRemoveGitResult = {
 	host: string
 	removedHelpers: Array<RemovedGitConfigEntry>
-	removedPathKeys: Array<Omit<RemovedGitConfigEntry, 'value'> & { value?: string }>
+	removedPathKeys: Array<
+		Omit<RemovedGitConfigEntry, 'value'> & { value?: string }
+	>
 	tokenId: string | null
 	/** Server-side revoke via DELETE /v1/tokens/current (`token:delete`). */
 	tokenRevoked: 'yes' | 'no' | 'already' | 'skipped' | 'failed'
@@ -756,7 +774,8 @@ export function isKodyGitCredentialHelperValue(value: string): boolean {
 	if (!v) return false
 	if (v.includes('@kodycodes/cli')) return true
 	if (isEphemeralNpxEntryPath(v)) return true
-	if (/\bgit-credential\b/.test(v) && /(^|[\/\s!])kody(\s|$)/.test(v)) return true
+	if (/\bgit-credential\b/.test(v) && /(^|[/\s!])kody(\s|$)/.test(v))
+		return true
 	if (/\bgit-credential\b/.test(v) && /kody/i.test(v)) return true
 	return false
 }
@@ -834,7 +853,10 @@ export async function authRemoveGit(input: {
 			})
 			tokenRevoked = 'yes'
 		} catch (error) {
-			if (error instanceof OpenApiError && (error.status === 401 || error.status === 404)) {
+			if (
+				error instanceof OpenApiError &&
+				(error.status === 401 || error.status === 404)
+			) {
 				tokenRevoked = 'already'
 			} else {
 				tokenRevoked = 'failed'
@@ -880,7 +902,9 @@ export function formatAuthRemoveGitReport(result: AuthRemoveGitResult): string {
 		lines.push(`  ${entry.scope} ${entry.key}: ${entry.value}`)
 	}
 	for (const entry of result.removedPathKeys) {
-		lines.push(`  ${entry.scope} ${entry.key}${entry.value ? `: ${entry.value}` : ''}`)
+		lines.push(
+			`  ${entry.scope} ${entry.key}${entry.value ? `: ${entry.value}` : ''}`,
+		)
 	}
 
 	if (result.tokenRevoked === 'yes') {
@@ -900,7 +924,9 @@ export function formatAuthRemoveGitReport(result: AuthRemoveGitResult): string {
 	}
 
 	if (result.tokenDeletedLocally) {
-		lines.push('Deleted stored API token from the OS keychain (and file fallback).')
+		lines.push(
+			'Deleted stored API token from the OS keychain (and file fallback).',
+		)
 	} else if (result.tokenRevoked !== 'skipped') {
 		lines.push('Stored API token was already absent from the local store.')
 	}

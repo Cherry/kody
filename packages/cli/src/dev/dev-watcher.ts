@@ -47,7 +47,9 @@ export function createDevWatcher(input: {
 	ignore?: ReadonlyArray<string>
 	pollIntervalMs?: number
 }): DevWatcher {
-	const ignorePrefixes = (input.ignore ?? []).map(normalizePrefix).filter(Boolean)
+	const ignorePrefixes = (input.ignore ?? [])
+		.map(normalizePrefix)
+		.filter(Boolean)
 	const ignored = (path: string) =>
 		shouldIgnoreWatchPath(relative(input.root, path), ignorePrefixes)
 
@@ -108,7 +110,10 @@ export function createDevWatcher(input: {
 			polling = false
 		}
 	}
-	const timer = setInterval(() => void poll(), input.pollIntervalMs ?? defaultPollIntervalMs)
+	const timer = setInterval(
+		() => void poll(),
+		input.pollIntervalMs ?? defaultPollIntervalMs,
+	)
 	timer.unref()
 
 	return {
@@ -184,11 +189,16 @@ export function shouldIgnoreWatchPath(
 	if (!relativePath || relativePath === '.') return false
 	if (relativePath.startsWith('..')) return true
 	const segments = relativePath.split(sep)
-	if (segments.some((segment) => segment === 'node_modules' || segment.startsWith('.'))) {
+	if (
+		segments.some(
+			(segment) => segment === 'node_modules' || segment.startsWith('.'),
+		)
+	) {
 		return true
 	}
 	if (relativePath.endsWith('.map')) return true
 	return ignorePrefixes.some(
-		(prefix) => relativePath === prefix || relativePath.startsWith(`${prefix}${sep}`),
+		(prefix) =>
+			relativePath === prefix || relativePath.startsWith(`${prefix}${sep}`),
 	)
 }

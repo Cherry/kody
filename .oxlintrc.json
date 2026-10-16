@@ -4,5 +4,15 @@
 		"./node_modules/@epic-web/config/oxlint-config.json",
 		"./tools/oxlint/oxlint-rules.json"
 	],
-	"plugins": ["import", "jsx-a11y", "react", "typescript", "vitest"]
+	"plugins": ["import", "jsx-a11y", "react", "typescript", "vitest"],
+	"overrides": [
+		{
+			"files": ["packages/cli/**"],
+			"rules": {
+				"vitest/no-import-node-test": "off",
+				"typescript/no-explicit-any": "off",
+				"eslint/no-warning-comments": "off"
+			}
+		}
+	]
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -93,7 +93,10 @@ function reset() {
 }
 
 function tempBackend() {
-	const path = join(mkdtempSync(join(tmpdir(), 'kody-cli-boot-')), 'api-token.json')
+	const path = join(
+		mkdtempSync(join(tmpdir(), 'kody-cli-boot-')),
+		'api-token.json',
+	)
 	return createFileBackend(path)
 }
 
@@ -109,8 +112,14 @@ test('parseCliBootstrapCode accepts platform-shaped codes', () => {
 test('resolveCliTokenLifetime requires a choice and expands short/long/explicit', () => {
 	assert.throws(() => resolveCliTokenLifetime({}), /Token lifetime is required/)
 	assert.throws(() => resolveCliTokenLifetime({}), /--lifetime short\|long/)
-	assert.throws(() => resolveCliTokenLifetime({}), /Single-task agents should use --lifetime short/)
-	assert.equal(cliTokenLifetimeMissingError().includes('--lifetime short|long'), true)
+	assert.throws(
+		() => resolveCliTokenLifetime({}),
+		/Single-task agents should use --lifetime short/,
+	)
+	assert.equal(
+		cliTokenLifetimeMissingError().includes('--lifetime short|long'),
+		true,
+	)
 	assert.deepEqual(resolveCliTokenLifetime({ lifetime: 'short' }), {
 		kind: 'alias',
 		lifetime: 'short',
@@ -191,7 +200,9 @@ test('authBootstrap redeems and stores without exposing the token in returned me
 	assert.equal(loaded?.token, goodToken)
 	assert.equal(loaded?.tokenId, 'tok_bootstrap_1')
 	assert.ok(backend.path)
-	const onDisk = JSON.parse(readFileSync(backend.path, 'utf8')) as StoredApiToken
+	const onDisk = JSON.parse(
+		readFileSync(backend.path, 'utf8'),
+	) as StoredApiToken
 	assert.equal(onDisk.token, goodToken)
 	assert.equal(onDisk.version, 1)
 	assert.equal('lifetime' in onDisk, false)
@@ -228,7 +239,10 @@ test('runCli auth bootstrap redeems and never prints the kody_at_ token', async 
 		assert.match(stdout, /tok_bootstrap_1/)
 		assert.match(stdout, /local-execute/)
 		assert.doesNotMatch(stdout, /kody_at_/)
-		assert.doesNotMatch(stdout, new RegExp(goodToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+		assert.doesNotMatch(
+			stdout,
+			new RegExp(goodToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+		)
 		assert.equal(requests[0]?.authorization, null)
 		assert.deepEqual(requests[0]?.body, { code: goodCode, lifetime: 'short' })
 	} finally {
@@ -278,7 +292,9 @@ test('resolveLocalExecuteBearer prefers stored bootstrap token over login OAuth'
 		apiUrl: 'https://api.kody.codes',
 		apiTokenBackend: backend,
 		ensureCredentials: async () => {
-			throw new Error('login should not be consulted when bootstrap token is stored')
+			throw new Error(
+				'login should not be consulted when bootstrap token is stored',
+			)
 		},
 	})
 	assert.equal(token, 'kody_at_stored_bootstrap')
@@ -329,7 +345,10 @@ test('whoami uses stored bootstrap token without env, --token, or login', async 
 	})
 	const authHeaders: Array<string | null> = []
 	const previousFetch = globalThis.fetch
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = String(input)
 		const headers = new Headers(init?.headers)
 		authHeaders.push(headers.get('authorization'))
@@ -408,13 +427,18 @@ test('search uses stored bootstrap token without env, --token, or login', async 
 	})
 	const authHeaders: Array<string | null> = []
 	const previousFetch = globalThis.fetch
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = String(input)
 		const headers = new Headers(init?.headers)
 		authHeaders.push(headers.get('authorization'))
 		if (url.includes('/v1/search')) {
 			return new Response(
-				JSON.stringify({ results: [{ id: 'guide:open_api', title: 'Open API' }] }),
+				JSON.stringify({
+					results: [{ id: 'guide:open_api', title: 'Open API' }],
+				}),
 				{ status: 200 },
 			)
 		}
@@ -472,7 +496,9 @@ test('redact strips kody_at_ and kody_bc_ secrets from messages', () => {
 test('redeemBootstrapCode surfaces already-used codes clearly', async () => {
 	reset()
 	redeemStatus = 400
-	redeemBody = { error: { code: 'invalid_request', message: 'already redeemed' } }
+	redeemBody = {
+		error: { code: 'invalid_request', message: 'already redeemed' },
+	}
 	await assert.rejects(
 		() =>
 			redeemBootstrapCode({

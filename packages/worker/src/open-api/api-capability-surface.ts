@@ -27,7 +27,9 @@ export const openApiExcludedCapabilities = new Set([
  * Search hits that return false are execute-only.
  */
 export function isCapabilityAvailableViaApiTool(capabilityName: string) {
-	return apiOperationsById.has(capabilityName)
+	// Native routes may reuse a capability name (hosted `execute`) without
+	// publishing that capability on the `api` tool.
+	return apiOperationsById.get(capabilityName)?.kind === 'capability'
 }
 
 export function capabilityApiAvailabilitySummary(capabilityName: string) {

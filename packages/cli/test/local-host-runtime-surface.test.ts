@@ -27,11 +27,22 @@ import {
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), '../src')
 
 test('hosted local-execute runtime surface lists gatewayFetchStream as a special host method', () => {
-	assert.deepEqual([...hostedLocalHostSpecialFunctions], ['kody.gatewayFetchStream'])
-	assert.ok(hostedLocalExecuteRuntimeSurface.includes('kody.gatewayFetchStream'))
+	assert.deepEqual(
+		[...hostedLocalHostSpecialFunctions],
+		['kody.gatewayFetchStream'],
+	)
+	assert.ok(
+		hostedLocalExecuteRuntimeSurface.includes('kody.gatewayFetchStream'),
+	)
 	assert.ok(hostedCapabilityProxySpecialFunctions.includes('kody.gatewayFetch'))
-	assert.ok(hostedCapabilityProxySpecialFunctions.includes('kody.authenticatedFetch'))
-	assert.ok(hostedCapabilityProxySpecialFunctions.includes('kody.oauthClientCredentials'))
+	assert.ok(
+		hostedCapabilityProxySpecialFunctions.includes('kody.authenticatedFetch'),
+	)
+	assert.ok(
+		hostedCapabilityProxySpecialFunctions.includes(
+			'kody.oauthClientCredentials',
+		),
+	)
 })
 
 test('CLI --local runtime source implements every hosted special host marker (drift guard)', () => {
@@ -48,9 +59,18 @@ test('CLI --local runtime source implements every hosted special host marker (dr
 		mockStorage: true,
 	})
 	const entry = createLocalEntrySource()
-	const bridgeSource = readFileSync(join(srcDir, 'local-runtime-bridge.ts'), 'utf8')
-	const capabilitySource = readFileSync(join(srcDir, 'capability-proxy.ts'), 'utf8')
-	const forwardSource = readFileSync(join(srcDir, 'local-gateway-fetch-forward.ts'), 'utf8')
+	const bridgeSource = readFileSync(
+		join(srcDir, 'local-runtime-bridge.ts'),
+		'utf8',
+	)
+	const capabilitySource = readFileSync(
+		join(srcDir, 'capability-proxy.ts'),
+		'utf8',
+	)
+	const forwardSource = readFileSync(
+		join(srcDir, 'local-gateway-fetch-forward.ts'),
+		'utf8',
+	)
 
 	for (const marker of localHostImplementedRuntimeMarkers) {
 		assert.match(
@@ -68,7 +88,10 @@ test('CLI --local runtime source implements every hosted special host marker (dr
 			assert.match(bridgeSource, /gateway-fetch/)
 			assert.equal(localBridgeGatewayFetchPath, '/gateway-fetch')
 			assert.match(capabilitySource, /capability-proxy\/gateway-fetch/)
-			assert.equal(capabilityProxyGatewayFetchPath, 'v1/capability-proxy/gateway-fetch')
+			assert.equal(
+				capabilityProxyGatewayFetchPath,
+				'v1/capability-proxy/gateway-fetch',
+			)
 			assert.match(forwardSource, /callCapabilityProxyGatewayFetchStream/)
 		}
 		if (marker.bridgeMarker === '/call') {

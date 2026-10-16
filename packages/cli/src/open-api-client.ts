@@ -7,9 +7,13 @@ import {
 	readInsufficientScopeDetails,
 } from './api-token.js'
 import { apiTokenEnvVar, cliName, defaultApiUrl } from './defaults.js'
-import { assertTokenSafeApiUrl, capabilityProxyUrl } from './capability-proxy.js'
+import {
+	assertTokenSafeApiUrl,
+	capabilityProxyUrl,
+} from './capability-proxy.js'
 import { describeNetworkError } from './network-error.js'
-import type { ToolCallResult } from './tool-result.js'
+import { bakedOpenApiRoutes } from './generated/openapi-routes.js'
+import { type ToolCallResult } from './tool-result.js'
 import { readPackageVersion } from './package-info.js'
 import { userCacheDir } from './workerd-binary.js'
 
@@ -103,18 +107,27 @@ function isOperationRoute(value: unknown): value is OpenApiOperationRoute {
 }
 
 /** Unreadable, corrupt or mismatched files count as a miss and get replaced by the next 200. */
-async function readPersistedRoutes(origin: string): Promise<OpenApiRouteCacheEntry | null> {
+async function readPersistedRoutes(
+	origin: string,
+): Promise<OpenApiRouteCacheEntry | null> {
 	try {
 		const etag = (await readFile(originPointerPath(origin), 'utf8')).trim()
 		if (!etag) return null
 		const raw: unknown = JSON.parse(await readFile(routeMapPath(etag), 'utf8'))
 		if (!raw || typeof raw !== 'object') return null
 		const entry = raw as Record<string, unknown>
-		if (entry.version !== openApiRouteCacheVersion || entry.etag !== etag) return null
-		if (!Array.isArray(entry.operations) || !entry.operations.every(isOperationRoute)) return null
+		if (entry.version !== openApiRouteCacheVersion || entry.etag !== etag)
+			return null
+		if (
+			!Array.isArray(entry.operations) ||
+			!entry.operations.every(isOperationRoute)
+		)
+			return null
 		return {
 			etag,
-			operations: new Map(entry.operations.map((route) => [route.operationId, route])),
+			operations: new Map(
+				entry.operations.map((route) => [route.operationId, route]),
+			),
 		}
 	} catch {
 		return null
@@ -148,7 +161,10 @@ async function persistRoutes(
 }
 
 export async function openApiGet(
-	input: OpenApiClientInput & { path: string; query?: Record<string, string | number | undefined> },
+	input: OpenApiClientInput & {
+		path: string
+		query?: Record<string, string | number | undefined>
+	},
 ): Promise<unknown> {
 	return openApiRequest({
 		...input,
@@ -221,12 +237,15 @@ export async function callOpenApiOperation(
 ): Promise<unknown> {
 	const operationId = input.operationId.trim()
 	if (!operationId) {
-		throw new OpenApiError('Provide an Open API operationId (e.g. usageGet, metaGetCurrentUser).')
+		throw new OpenApiError(
+			'Provide an Open API operationId (e.g. usageGet, metaGetCurrentUser).',
+		)
 	}
 	assertApiOperationAllowed(operationId)
 	const apiUrl = input.apiUrl || defaultApiUrl
 	const operations =
-		input.operations ?? (await loadOpenApiOperations({ apiUrl, fetchFn: input.fetchFn }))
+		input.operations ??
+		(await loadOpenApiOperations({ apiUrl, fetchFn: input.fetchFn }))
 	const route = operations.get(operationId)
 	if (!route) {
 		throw new OpenApiError(
@@ -275,7 +294,11 @@ export function buildOpenApiHttpRequest(input: {
 	const remaining: Record<string, unknown> = { ...input.params }
 	const pathParams: Record<string, string> = {}
 	for (const name of input.route.pathParamNames) {
-		if (!(name in remaining) || remaining[name] === undefined || remaining[name] === null) {
+		if (
+			!(name in remaining) ||
+			remaining[name] === undefined ||
+			remaining[name] === null
+		) {
 			throw new OpenApiError(
 				`Missing required path parameter "${name}" for ${input.route.operationId} (${input.route.pathTemplate}).`,
 			)
@@ -331,6 +354,13 @@ export async function loadOpenApiOperations(input: {
 			},
 		})
 	} catch (error) {
+		if (bakedOpenApiRoutes.length > 0) {
+			const operations = new Map(
+				bakedOpenApiRoutes.map((route) => [route.operationId, route]),
+			)
+			openApiRouteCache.set(cacheKey, { etag: null, operations })
+			return operations
+		}
 		const reason = describeNetworkError(error)
 		throw new OpenApiError(
 			`Could not load OpenAPI from ${url.href} (${reason}). Check --api-url / KODY_API_URL and your network.`,
@@ -347,14 +377,19 @@ export async function loadOpenApiOperations(input: {
 			{ status: response.status },
 		)
 	}
-	const entry = { etag: response.headers.get('etag'), operations: indexOpenApiOperations(body) }
+	const entry = {
+		etag: response.headers.get('etag'),
+		operations: indexOpenApiOperations(body),
+	}
 	openApiRouteCache.set(cacheKey, entry)
 	await persistRoutes(cacheKey, persisted?.etag ?? null, entry)
 	return entry.operations
 }
 
 /** Visible for tests. */
-export function indexOpenApiOperations(document: unknown): Map<string, OpenApiOperationRoute> {
+export function indexOpenApiOperations(
+	document: unknown,
+): Map<string, OpenApiOperationRoute> {
 	if (!isRecord(document) || !isRecord(document.paths)) {
 		throw new OpenApiError('OpenAPI document is missing a paths object.')
 	}
@@ -398,7 +433,9 @@ function fillPathTemplate(
 	return pathTemplate.replace(/\{([^{}/]+)\}/g, (_full, name: string) => {
 		const value = pathParams[name]
 		if (value === undefined) {
-			throw new OpenApiError(`Missing path parameter "${name}" for ${pathTemplate}.`)
+			throw new OpenApiError(
+				`Missing path parameter "${name}" for ${pathTemplate}.`,
+			)
 		}
 		return encodeURIComponent(value)
 	})
@@ -423,42 +460,54 @@ function appendQueryParams(
 
 function stringifyQueryValue(value: unknown): string {
 	if (typeof value === 'string') return value
-	if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+	if (typeof value === 'number' || typeof value === 'boolean')
+		return String(value)
 	return JSON.stringify(value)
 }
 
-export async function searchWithApiToken(input: OpenApiClientInput & {
-	query?: string
-	domain?: string
-	limit?: number
-	entity?: string
-}): Promise<ToolCallResult> {
-	if (input.entity) {
-		throw new OpenApiError(
-			`Open API search does not support --entity yet. Run \`kody login\` and use MCP search, or omit --entity.`,
-			{ status: null, code: 'unsupported' },
-		)
-	}
-	const body = await openApiGet({
-		...input,
-		path: 'v1/search',
-		query: {
-			query: input.query,
-			domain: input.domain,
-			limit: input.limit,
+export async function searchWithApiToken(
+	input: OpenApiClientInput & {
+		query?: string
+		domain?: string
+		limit?: number
+		entity?: string
+	},
+): Promise<ToolCallResult> {
+	const body = await openApiRequest({
+		token: input.token,
+		...(input.apiUrl ? { apiUrl: input.apiUrl } : {}),
+		...(input.fetchFn ? { fetchFn: input.fetchFn } : {}),
+		...(input.org ? { org: input.org } : {}),
+		method: 'POST',
+		path: 'v1/search/tool',
+		body: {
+			...(input.query ? { query: input.query } : {}),
+			...(input.domain ? { domain: input.domain } : {}),
+			...(input.limit !== undefined ? { limit: input.limit } : {}),
+			...(input.entity ? { entity: input.entity } : {}),
 		},
 	})
-	const text = JSON.stringify(body, null, 2)
+	return toolResultFromHttpBody(body)
+}
+
+export function toolResultFromHttpBody(payload: unknown): ToolCallResult {
+	if (isRecord(payload) && Array.isArray(payload.content)) {
+		return {
+			content: payload.content as ToolCallResult['content'],
+			structuredContent: payload.structuredContent,
+			isError: payload.isError === true,
+		}
+	}
+	const text =
+		typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2)
 	return {
 		content: [{ type: 'text', text }],
-		structuredContent: body,
+		structuredContent: payload,
 		isError: false,
 	}
 }
 
-export async function whoamiWithApiToken(
-	input: OpenApiClientInput,
-): Promise<{
+export async function whoamiWithApiToken(input: OpenApiClientInput): Promise<{
 	mcpUrl?: undefined
 	apiUrl: string
 	token: {
@@ -500,10 +549,16 @@ export async function whoamiWithApiToken(
 			id: String(current.id ?? ''),
 			name: typeof current.name === 'string' ? current.name : null,
 			scopes: Array.isArray(current.scopes)
-				? current.scopes.filter((scope): scope is string => typeof scope === 'string')
+				? current.scopes.filter(
+						(scope): scope is string => typeof scope === 'string',
+					)
 				: [],
-			expiresAt: typeof current.expires_at === 'string' ? current.expires_at : null,
-			maxExpiresAt: typeof current.max_expires_at === 'string' ? current.max_expires_at : null,
+			expiresAt:
+				typeof current.expires_at === 'string' ? current.expires_at : null,
+			maxExpiresAt:
+				typeof current.max_expires_at === 'string'
+					? current.max_expires_at
+					: null,
 		},
 		user,
 	}
@@ -519,20 +574,28 @@ async function readJson(response: Response): Promise<unknown> {
 	}
 }
 
-function readErrorBody(body: unknown): { code: string | null; message: string } | null {
+function readErrorBody(
+	body: unknown,
+): { code: string | null; message: string } | null {
 	if (!isRecord(body) || body.error == null) return null
 	const { error } = body
 	if (typeof error === 'string') return { code: null, message: error }
 	if (isRecord(error)) {
 		const code = typeof error.code === 'string' ? error.code : null
 		const message =
-			typeof error.message === 'string' ? error.message : code ?? JSON.stringify(error)
+			typeof error.message === 'string'
+				? error.message
+				: (code ?? JSON.stringify(error))
 		return { code, message }
 	}
 	return { code: null, message: String(error) }
 }
 
-function describeOpenApiFailure(status: number, body: unknown, url: URL): OpenApiError {
+function describeOpenApiFailure(
+	status: number,
+	body: unknown,
+	url: URL,
+): OpenApiError {
 	const failure = readErrorBody(body)
 	const code = failure?.code ?? null
 	const detail = failure?.message ? ` Server said: ${failure.message}` : ''
@@ -552,10 +615,14 @@ function describeOpenApiFailure(status: number, body: unknown, url: URL): OpenAp
 		)
 	}
 	if (code === 'feature_disabled') {
-		return new OpenApiError(`Kody returned feature_disabled.${detail}`, { status, code })
+		return new OpenApiError(`Kody returned feature_disabled.${detail}`, {
+			status,
+			code,
+		})
 	}
 	return new OpenApiError(
-		failure?.message ?? `Kody API request failed with HTTP ${status} (${url.pathname}).`,
+		failure?.message ??
+			`Kody API request failed with HTTP ${status} (${url.pathname}).`,
 		{ status, code },
 	)
 }

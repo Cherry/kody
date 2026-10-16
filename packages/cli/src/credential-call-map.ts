@@ -181,8 +181,13 @@ export function formatCredentialFlagSuggestion(
  * Print code + message, and render `retryWith[].credentials` as `--credential`
  * suggestions (ADR 0068).
  */
-export function formatCredentialClientError(error: CredentialClientErrorBody): string {
-	const code = typeof error.code === 'string' && error.code ? error.code : 'credential_error'
+export function formatCredentialClientError(
+	error: CredentialClientErrorBody,
+): string {
+	const code =
+		typeof error.code === 'string' && error.code
+			? error.code
+			: 'credential_error'
 	const message =
 		typeof error.message === 'string' && error.message
 			? error.message
@@ -192,10 +197,16 @@ export function formatCredentialClientError(error: CredentialClientErrorBody): s
 	for (const entry of retries) {
 		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
 		const credentials = (entry as { credentials?: unknown }).credentials
-		if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) {
+		if (
+			!credentials ||
+			typeof credentials !== 'object' ||
+			Array.isArray(credentials)
+		) {
 			continue
 		}
-		for (const [key, pick] of Object.entries(credentials as Record<string, unknown>)) {
+		for (const [key, pick] of Object.entries(
+			credentials as Record<string, unknown>,
+		)) {
 			const suggestion = formatCredentialFlagSuggestion(key, pick)
 			if (suggestion) {
 				for (const line of suggestion.split('\n')) {

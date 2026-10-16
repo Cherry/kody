@@ -3,7 +3,10 @@
  * can suggest `.kody/mocks.ts` before `--target mock` fails closed.
  */
 
-import { init as initEsModuleLexer, parse as parseEsModule } from 'es-module-lexer'
+import {
+	init as initEsModuleLexer,
+	parse as parseEsModule,
+} from 'es-module-lexer'
 
 const esModuleLexerReady = initEsModuleLexer()
 
@@ -62,7 +65,10 @@ export async function detectCredentialedFetchInSource(
 			}
 			const statementStart = record.importStart ?? record.ss
 			const statementEnd = record.importEnd ?? record.se
-			if (typeof statementStart !== 'number' || typeof statementEnd !== 'number') {
+			if (
+				typeof statementStart !== 'number' ||
+				typeof statementEnd !== 'number'
+			) {
 				continue
 			}
 			const statement = code.slice(statementStart, statementEnd)

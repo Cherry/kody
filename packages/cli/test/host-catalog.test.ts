@@ -12,7 +12,10 @@ import {
 
 test('parseHostIds rejects web clients and accepts local aliases', () => {
 	assert.deepEqual(parseHostIds('cursor,vscode'), ['cursor', 'vscode'])
-	assert.deepEqual(parseHostIds('github-copilot-cli,gemini'), ['copilot-cli', 'gemini-cli'])
+	assert.deepEqual(parseHostIds('github-copilot-cli,gemini'), [
+		'copilot-cli',
+		'gemini-cli',
+	])
 	assert.deepEqual(parseHostIds('kilo,kimi,kiro,mastra,pi-agent'), [
 		'kilo-code',
 		'kimi-code',
@@ -30,16 +33,23 @@ test('detectRunningHosts only matches local process names', () => {
 		{ name: 'Cursor', cmd: '/Applications/Cursor.app/Contents/MacOS/Cursor' },
 		{ name: 'Claude', cmd: '/Applications/Claude.app/Contents/MacOS/Claude' },
 		{ name: 'claude', cmd: '/usr/local/bin/claude' },
-		{ name: 'Code Helper', cmd: '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app' },
+		{
+			name: 'Code Helper',
+			cmd: '/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app',
+		},
 		{ name: 'Goose', cmd: '/Applications/Goose.app/Contents/MacOS/Goose' },
 		{ name: 'grok', cmd: '/usr/local/bin/grok' },
 		{ name: 'Safari', cmd: '/Applications/Safari.app/Contents/MacOS/Safari' },
 		{ name: 'chrome', cmd: 'Google Chrome claude.ai chatgpt.com grok.com' },
 	])
-	assert.deepEqual(
-		detected.map((host) => host.id).sort(),
-		['claude-code', 'claude-desktop', 'cursor', 'goose', 'grok-build', 'vscode'],
-	)
+	assert.deepEqual(detected.map((host) => host.id).sort(), [
+		'claude-code',
+		'claude-desktop',
+		'cursor',
+		'goose',
+		'grok-build',
+		'vscode',
+	])
 })
 
 test('add-mcp hosts added after 2.0 match local process names', () => {
@@ -52,15 +62,22 @@ test('add-mcp hosts added after 2.0 match local process names', () => {
 		{ name: 'pi', cmd: '/usr/local/bin/pi' },
 		{ name: 'Safari', cmd: '/Applications/Safari.app/Contents/MacOS/Safari' },
 	])
-	assert.deepEqual(
-		detected.map((host) => host.id).sort(),
-		['fx', 'kilo-code', 'kimi-code', 'kiro-cli', 'mastracode', 'pi'],
-	)
+	assert.deepEqual(detected.map((host) => host.id).sort(), [
+		'fx',
+		'kilo-code',
+		'kimi-code',
+		'kiro-cli',
+		'mastracode',
+		'pi',
+	])
 })
 
 test('Cursor is not classified as VS Code', () => {
 	const detected = detectRunningHosts([
-		{ name: 'Cursor Helper', cmd: '/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app' },
+		{
+			name: 'Cursor Helper',
+			cmd: '/Applications/Cursor.app/Contents/Frameworks/Cursor Helper.app',
+		},
 	])
 	assert.deepEqual(
 		detected.map((host) => host.id),
@@ -70,7 +87,12 @@ test('Cursor is not classified as VS Code', () => {
 
 test('hostConfigPath uses user-level files by default', () => {
 	assert.equal(
-		hostConfigPath({ id: 'cursor', home: '/home/me', cwd: '/proj', project: false }),
+		hostConfigPath({
+			id: 'cursor',
+			home: '/home/me',
+			cwd: '/proj',
+			project: false,
+		}),
 		'/home/me/.cursor/mcp.json',
 	)
 	assert.equal(
@@ -93,11 +115,21 @@ test('hostConfigPath uses user-level files by default', () => {
 		null,
 	)
 	assert.equal(
-		hostConfigPath({ id: 'goose', home: '/home/me', cwd: '/proj', project: true }),
+		hostConfigPath({
+			id: 'goose',
+			home: '/home/me',
+			cwd: '/proj',
+			project: true,
+		}),
 		null,
 	)
 	assert.equal(
-		hostConfigPath({ id: 'cursor', home: '/home/me', cwd: '/proj', project: true }),
+		hostConfigPath({
+			id: 'cursor',
+			home: '/home/me',
+			cwd: '/proj',
+			project: true,
+		}),
 		'/proj/.cursor/mcp.json',
 	)
 	assert.equal(
@@ -111,7 +143,12 @@ test('hostConfigPath uses user-level files by default', () => {
 		'/home/me/.config/kilo/kilo.json',
 	)
 	assert.equal(
-		hostConfigPath({ id: 'kilo-code', home: '/home/me', cwd: '/proj', project: true }),
+		hostConfigPath({
+			id: 'kilo-code',
+			home: '/home/me',
+			cwd: '/proj',
+			project: true,
+		}),
 		'/proj/kilo.json',
 	)
 	assert.equal(
@@ -119,18 +156,31 @@ test('hostConfigPath uses user-level files by default', () => {
 		null,
 	)
 	assert.equal(
-		hostConfigPath({ id: 'fx', home: '/home/me', cwd: '/proj', project: false }),
+		hostConfigPath({
+			id: 'fx',
+			home: '/home/me',
+			cwd: '/proj',
+			project: false,
+		}),
 		'/home/me/.fx/mcp.json',
 	)
 	assert.equal(
-		hostConfigPath({ id: 'pi', home: '/home/me', cwd: '/proj', project: false }),
+		hostConfigPath({
+			id: 'pi',
+			home: '/home/me',
+			cwd: '/proj',
+			project: false,
+		}),
 		'/home/me/.pi/agent/mcp.json',
 	)
 })
 
 test('install deeplinks encode the MCP URL', () => {
 	assert.match(buildCursorInstallUrl('https://kody.codes/mcp'), /^cursor:\/\//)
-	assert.match(buildGooseInstallUrl('https://kody.codes/mcp'), /streamable_http/)
+	assert.match(
+		buildGooseInstallUrl('https://kody.codes/mcp'),
+		/streamable_http/,
+	)
 })
 
 test('every add-mcp agent is mapped or intentionally skipped', () => {
@@ -138,6 +188,10 @@ test('every add-mcp agent is mapped or intentionally skipped', () => {
 	const mapped = new Set<string>(Object.values(addMcpAgentByHostId))
 	for (const agent of getAgentTypes()) {
 		if (skipped.has(agent)) continue
-		assert.equal(mapped.has(agent), true, `missing add-mcp mapping for ${agent}`)
+		assert.equal(
+			mapped.has(agent),
+			true,
+			`missing add-mcp mapping for ${agent}`,
+		)
 	}
 })

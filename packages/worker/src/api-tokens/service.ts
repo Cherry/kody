@@ -149,7 +149,12 @@ export function resolveApiTokenLifetime(input: {
 	}
 }
 
-export const apiTokenCreatedVia = ['api', 'mcp-api', 'cli-bootstrap'] as const
+export const apiTokenCreatedVia = [
+	'api',
+	'mcp-api',
+	'cli-bootstrap',
+	'cli-login',
+] as const
 export type ApiTokenCreatedVia = (typeof apiTokenCreatedVia)[number]
 
 /** How the token picks an org on each request. */

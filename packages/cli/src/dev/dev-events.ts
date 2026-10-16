@@ -4,7 +4,10 @@
  * same objects as NDJSON.
  */
 
-import { formatBundleDiagnostic, type BundleDiagnostic } from '../local-bundle.js'
+import {
+	formatBundleDiagnostic,
+	type BundleDiagnostic,
+} from '../local-bundle.js'
 import { appLogMarker } from './dev-protocol.js'
 
 export type DevRequestTag = { id: string; method: string; path: string }
@@ -39,10 +42,18 @@ export type DevEvent =
 			request: DevRequestTag | null
 	  }
 
-const logLevels = new Set<DevLogLevel>(['log', 'info', 'warn', 'error', 'debug'])
+const logLevels = new Set<DevLogLevel>([
+	'log',
+	'info',
+	'warn',
+	'error',
+	'debug',
+])
 
 /** Parse one workerd stdout line; plain lines become untagged `log` events. */
-export function parseWorkerdStdoutLine(line: string): Extract<DevEvent, { type: 'log' }> {
+export function parseWorkerdStdoutLine(
+	line: string,
+): Extract<DevEvent, { type: 'log' }> {
 	if (line.startsWith(appLogMarker)) {
 		try {
 			const parsed = JSON.parse(line.slice(appLogMarker.length)) as {
@@ -51,19 +62,29 @@ export function parseWorkerdStdoutLine(line: string): Extract<DevEvent, { type: 
 				request?: unknown
 			}
 			const level =
-				typeof parsed.level === 'string' && logLevels.has(parsed.level as DevLogLevel)
+				typeof parsed.level === 'string' &&
+				logLevels.has(parsed.level as DevLogLevel)
 					? (parsed.level as DevLogLevel)
 					: 'log'
 			return {
 				type: 'log',
 				source: 'app',
 				level,
-				message: typeof parsed.message === 'string' ? parsed.message : String(parsed.message),
+				message:
+					typeof parsed.message === 'string'
+						? parsed.message
+						: String(parsed.message),
 				request: readRequestTag(parsed.request),
 			}
 		} catch {}
 	}
-	return { type: 'log', source: 'app', level: 'log', message: line, request: null }
+	return {
+		type: 'log',
+		source: 'app',
+		level: 'log',
+		message: line,
+		request: null,
+	}
 }
 
 function readRequestTag(value: unknown): DevRequestTag | null {
@@ -83,7 +104,9 @@ function readRequestTag(value: unknown): DevRequestTag | null {
  * shim that throws in Workers — hosted apps fail the same way.
  */
 export function runtimeErrorFix(message: string): string | undefined {
-	const dynamicRequire = /Dynamic require of "([^"]+)" is not supported/.exec(message)
+	const dynamicRequire = /Dynamic require of "([^"]+)" is not supported/.exec(
+		message,
+	)
 	if (dynamicRequire) {
 		return (
 			`A CommonJS dependency calls require("${dynamicRequire[1]}"), which an ESM Worker cannot run (hosted apps fail the same way). ` +
@@ -94,16 +117,24 @@ export function runtimeErrorFix(message: string): string | undefined {
 }
 
 export function formatRequestTag(request: DevRequestTag | null): string {
-	return request ? `[${request.method} ${request.path} #${request.id}]` : '[app]'
+	return request
+		? `[${request.method} ${request.path} #${request.id}]`
+		: '[app]'
 }
 
 /** One human-readable block for terminals. */
-export function formatDevEvent(event: DevEvent): { stream: 'stdout' | 'stderr'; text: string } {
+export function formatDevEvent(event: DevEvent): {
+	stream: 'stdout' | 'stderr'
+	text: string
+} {
 	switch (event.type) {
 		case 'rebuild_start':
 			return {
 				stream: 'stderr',
-				text: event.files.length > 0 ? `Rebuilding (${event.files.join(', ')})…` : 'Building…',
+				text:
+					event.files.length > 0
+						? `Rebuilding (${event.files.join(', ')})…`
+						: 'Building…',
 			}
 		case 'rebuild_ok':
 			return {
@@ -123,9 +154,16 @@ export function formatDevEvent(event: DevEvent): { stream: 'stdout' | 'stderr'; 
 				text: `${formatRequestTag(event.request)} Uncaught ${event.stack || event.message}${event.fix ? `\nfix: ${event.fix}` : ''}`,
 			}
 		case 'log': {
-			const tag = event.source === 'app' ? formatRequestTag(event.request) : `[${event.source}]`
-			const level = event.level === 'log' || event.level === 'info' ? '' : `${event.level}: `
-			const stream = event.level === 'error' || event.level === 'warn' ? 'stderr' : 'stdout'
+			const tag =
+				event.source === 'app'
+					? formatRequestTag(event.request)
+					: `[${event.source}]`
+			const level =
+				event.level === 'log' || event.level === 'info'
+					? ''
+					: `${event.level}: `
+			const stream =
+				event.level === 'error' || event.level === 'warn' ? 'stderr' : 'stdout'
 			return { stream, text: `${tag} ${level}${event.message}` }
 		}
 		default: {

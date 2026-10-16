@@ -16,15 +16,30 @@ import {
 } from '../src/dev-command.js'
 import { loadPackageManifest } from '../src/package-manifest.js'
 
-const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-package')
+const fixtureRoot = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'fixtures/sample-package',
+)
 
 test('resolveCommand recognizes kody dev and --target', () => {
 	assert.equal(resolveCommand(['dev']).command, 'dev')
 	assert.equal(resolveCommand(['dev', 'fetch', '/']).command, 'dev')
-	assert.equal(resolveCommand(['dev', 'emit', 'demo.event']).positionals[0], 'emit')
-	assert.equal(resolveCommand(['execute', '--target', 'mock']).values.target, 'mock')
-	assert.equal(resolveCommand(['search', '--target', 'prod']).values.target, 'prod')
-	assert.equal(resolveCommand(['dev', '--reset-storage']).values['reset-storage'], true)
+	assert.equal(
+		resolveCommand(['dev', 'emit', 'demo.event']).positionals[0],
+		'emit',
+	)
+	assert.equal(
+		resolveCommand(['execute', '--target', 'mock']).values.target,
+		'mock',
+	)
+	assert.equal(
+		resolveCommand(['search', '--target', 'prod']).values.target,
+		'prod',
+	)
+	assert.equal(
+		resolveCommand(['dev', '--reset-storage']).values['reset-storage'],
+		true,
+	)
 })
 
 test('parseDevSubcommand defaults to serve', () => {
@@ -33,7 +48,10 @@ test('parseDevSubcommand defaults to serve', () => {
 		subcommand: 'fetch',
 		rest: ['/health'],
 	})
-	assert.throws(() => parseDevSubcommand(['nope']), /Unknown kody dev subcommand/)
+	assert.throws(
+		() => parseDevSubcommand(['nope']),
+		/Unknown kody dev subcommand/,
+	)
 })
 
 test('loadPackageManifest reads four surfaces from the fixture', async () => {
@@ -256,7 +274,10 @@ test('kody dev fetch --json writes a build_error object to stdout on bundle fail
 			JSON.stringify({
 				name: '@local/broken-dev-json-package',
 				type: 'module',
-				kody: { id: 'broken-dev-json-package', app: { entry: './app/entry.ts' } },
+				kody: {
+					id: 'broken-dev-json-package',
+					app: { entry: './app/entry.ts' },
+				},
 			}),
 		)
 		await mkdir(join(root, 'app'))
@@ -285,7 +306,11 @@ test('kody dev fetch --json writes a build_error object to stdout on bundle fail
 			}),
 			/app\/entry\.ts:1:52/,
 		)
-		const event = JSON.parse(stdout) as { type: string; message: string; ts: string }
+		const event = JSON.parse(stdout) as {
+			type: string
+			message: string
+			ts: string
+		}
 		assert.equal(event.type, 'build_error')
 		assert.match(event.message, /app\/entry\.ts:1:52/)
 		assert.ok(typeof event.ts === 'string' && event.ts.length > 0)

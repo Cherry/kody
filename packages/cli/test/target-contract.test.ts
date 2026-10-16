@@ -26,9 +26,12 @@ async function assertSharedContract(input: {
 	apiUrl: string
 	token: string
 }): Promise<void> {
-	const session = await fetch(new URL('v1/capability-proxy/session', `${input.apiUrl}/`), {
-		headers: { authorization: `Bearer ${input.token}` },
-	})
+	const session = await fetch(
+		new URL('v1/capability-proxy/session', `${input.apiUrl}/`),
+		{
+			headers: { authorization: `Bearer ${input.token}` },
+		},
+	)
 	assert.equal(session.status, 200, `${input.label} session`)
 
 	const me = await callCapabilityProxy({

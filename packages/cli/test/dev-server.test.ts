@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises'
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	rm,
+	utimes,
+	writeFile,
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -70,9 +77,13 @@ test('kody dev swaps workerd without a 503 and recovers from build errors', asyn
 		await writeMessage(`export const message = 'fixed'\n`)
 		await waitFor(async () => {
 			const response = await server.fetchPath('/')
-			return response.status === 200 && response.body.includes('fixed') ? true : undefined
+			return response.status === 200 && response.body.includes('fixed')
+				? true
+				: undefined
 		}, 'recovery after a build error')
-		assert.ok(events.some((event) => event.type === 'rebuild_ok' && event.restarted))
+		assert.ok(
+			events.some((event) => event.type === 'rebuild_ok' && event.restarted),
+		)
 	})
 })
 
@@ -84,7 +95,11 @@ test('a save just before close never starts a rebuild after close', async () => 
 			await server.close()
 			const seen = events.length
 			await sleep(500)
-			assert.deepEqual(events.slice(seen), [], 'the pending debounce must not rebuild')
+			assert.deepEqual(
+				events.slice(seen),
+				[],
+				'the pending debounce must not rebuild',
+			)
 		},
 		{ debounceMs: 300 },
 	)
@@ -92,7 +107,9 @@ test('a save just before close never starts a rebuild after close', async () => 
 
 test('kody dev streams tagged console logs and source-maps runtime errors', async () => {
 	await withDevServer(async ({ server, events }) => {
-		const html = await server.fetchPath('/boom', { headers: { accept: 'text/html' } })
+		const html = await server.fetchPath('/boom', {
+			headers: { accept: 'text/html' },
+		})
 		assert.equal(html.status, 500)
 		assert.match(html.headers['content-type'] ?? '', /text\/html/)
 		assert.match(html.body, /Runtime error/)
@@ -114,7 +131,8 @@ test('kody dev streams tagged console logs and source-maps runtime errors', asyn
 		const log = await waitFor(
 			async () =>
 				events.find(
-					(event) => event.type === 'log' && event.message.includes('handling /boom'),
+					(event) =>
+						event.type === 'log' && event.message.includes('handling /boom'),
 				),
 			'app console.log',
 		)
@@ -148,9 +166,11 @@ test('createStackMapper maps bundle frames to sources and drops runtime frames',
 	)
 	assert.equal(
 		mapped,
-		['Error: kaboom', '    at Object.fetch (app/entry.ts:7:11)', '    at kody:@scope/pkg/export:3:9'].join(
-			'\n',
-		),
+		[
+			'Error: kaboom',
+			'    at Object.fetch (app/entry.ts:7:11)',
+			'    at kody:@scope/pkg/export:3:9',
+		].join('\n'),
 	)
 })
 
@@ -213,15 +233,23 @@ test('shouldIgnoreWatchPath skips dependencies, dotfiles, maps, and custom prefi
 	assert.equal(shouldIgnoreWatchPath('.git/HEAD'), true)
 	assert.equal(shouldIgnoreWatchPath('app/.cache/file'), true)
 	assert.equal(shouldIgnoreWatchPath('dist/app.js.map'), true)
-	assert.equal(shouldIgnoreWatchPath('public/generated/a.css', ['public/generated']), true)
-	assert.equal(shouldIgnoreWatchPath('public/generator.ts', ['public/generated']), false)
+	assert.equal(
+		shouldIgnoreWatchPath('public/generated/a.css', ['public/generated']),
+		true,
+	)
+	assert.equal(
+		shouldIgnoreWatchPath('public/generator.ts', ['public/generated']),
+		false,
+	)
 })
 
 test('process reaper kills tracked pids and removes the work dir when its pipe closes', async () => {
 	const workDir = await mkdtemp(join(tmpdir(), 'kody-dev-reaper-test-'))
 	const sleeper = spawn('sleep', ['30'], { stdio: 'ignore' })
 	assert.ok(sleeper.pid)
-	const exited = new Promise<void>((resolve) => sleeper.once('exit', () => resolve()))
+	const exited = new Promise<void>((resolve) =>
+		sleeper.once('exit', () => resolve()),
+	)
 	const reaper = await startProcessReaper({ workDir })
 	reaper.track(sleeper.pid)
 	reaper.close()
@@ -231,7 +259,10 @@ test('process reaper kills tracked pids and removes the work dir when its pipe c
 	])
 	assert.equal(isProcessAlive(sleeper.pid), false)
 	await waitFor(
-		async () => ((await readdir(tmpdir())).includes(workDir.split('/').pop()!) ? undefined : true),
+		async () =>
+			(await readdir(tmpdir())).includes(workDir.split('/').pop()!)
+				? undefined
+				: true,
 		'work dir removal',
 	)
 })
@@ -239,12 +270,17 @@ test('process reaper kills tracked pids and removes the work dir when its pipe c
 test('process reaper kills a detached process group on pipe close', async () => {
 	const workDir = await mkdtemp(join(tmpdir(), 'kody-dev-reaper-group-'))
 	// Nested sleep under detached sh — killing only the shell would leave the child.
-	const shell = spawn('sh', ['-c', 'sleep 30'], { stdio: 'ignore', detached: true })
+	const shell = spawn('sh', ['-c', 'sleep 30'], {
+		stdio: 'ignore',
+		detached: true,
+	})
 	assert.ok(shell.pid)
 	shell.unref()
 	const childPid = await waitFor(async () => {
 		const listed = await psList()
-		const child = listed.find((item) => item.ppid === shell.pid && /sleep/.test(item.name))
+		const child = listed.find(
+			(item) => item.ppid === shell.pid && /sleep/.test(item.name),
+		)
 		return child?.pid
 	}, 'detached sleep grandchild')
 	const reaper = await startProcessReaper({ workDir })
@@ -255,7 +291,10 @@ test('process reaper kills a detached process group on pipe close', async () => 
 		return true
 	}, 'detached process group death')
 	await waitFor(
-		async () => ((await readdir(tmpdir())).includes(workDir.split('/').pop()!) ? undefined : true),
+		async () =>
+			(await readdir(tmpdir())).includes(workDir.split('/').pop()!)
+				? undefined
+				: true,
 		'work dir removal',
 	)
 })
@@ -266,15 +305,24 @@ test('sweepStaleDevDirs reaps dirs of dead owners and legacy orphans only', asyn
 		const make = async (name: string, owner?: number, ageMs = 0) => {
 			const dir = join(tmp, name)
 			await mkdir(dir)
-			if (owner !== undefined) await writeFile(join(dir, 'owner.json'), JSON.stringify({ pid: owner }))
+			if (owner !== undefined)
+				await writeFile(join(dir, 'owner.json'), JSON.stringify({ pid: owner }))
 			const when = new Date(Date.now() - ageMs)
 			await utimes(dir, when, when)
 			return dir
 		}
 		const live = await make('kody-dev-live', 100)
 		const dead = await make('kody-dev-dead', 200)
-		const legacyOrphan = await make('kody-dev-legacy-orphan', undefined, 3_600_000)
-		const legacyActive = await make('kody-dev-legacy-active', undefined, 3_600_000)
+		const legacyOrphan = await make(
+			'kody-dev-legacy-orphan',
+			undefined,
+			3_600_000,
+		)
+		const legacyActive = await make(
+			'kody-dev-legacy-active',
+			undefined,
+			3_600_000,
+		)
 		const legacyFresh = await make('kody-dev-legacy-fresh')
 		const killed: Array<number> = []
 		const result = await sweepStaleDevDirs({
@@ -282,17 +330,41 @@ test('sweepStaleDevDirs reaps dirs of dead owners and legacy orphans only', asyn
 			isAlive: (pid) => pid === 100 || pid === 500,
 			kill: (pid) => killed.push(pid),
 			listProcesses: async () => [
-				{ pid: 11, ppid: 100, name: 'workerd', cmd: `workerd serve ${live}/g1/config.capnp` },
-				{ pid: 12, ppid: 1, name: 'workerd', cmd: `workerd serve ${dead}/g1/config.capnp` },
-				{ pid: 13, ppid: 1, name: 'workerd', cmd: `workerd serve ${legacyOrphan}/config.capnp` },
-				{ pid: 14, ppid: 500, name: 'workerd', cmd: `workerd serve ${legacyActive}/config.capnp` },
+				{
+					pid: 11,
+					ppid: 100,
+					name: 'workerd',
+					cmd: `workerd serve ${live}/g1/config.capnp`,
+				},
+				{
+					pid: 12,
+					ppid: 1,
+					name: 'workerd',
+					cmd: `workerd serve ${dead}/g1/config.capnp`,
+				},
+				{
+					pid: 13,
+					ppid: 1,
+					name: 'workerd',
+					cmd: `workerd serve ${legacyOrphan}/config.capnp`,
+				},
+				{
+					pid: 14,
+					ppid: 500,
+					name: 'workerd',
+					cmd: `workerd serve ${legacyActive}/config.capnp`,
+				},
 				{ pid: 500, ppid: 1, name: 'node', cmd: 'node kody dev' },
 			],
 		})
 		assert.deepEqual(killed.sort(), [12, 13])
 		assert.deepEqual(result.removed.sort(), [dead, legacyOrphan].sort())
 		const left = (await readdir(tmp)).sort()
-		assert.deepEqual(left, ['kody-dev-legacy-active', 'kody-dev-legacy-fresh', 'kody-dev-live'])
+		assert.deepEqual(left, [
+			'kody-dev-legacy-active',
+			'kody-dev-legacy-fresh',
+			'kody-dev-live',
+		])
 		void legacyFresh
 	} finally {
 		await rm(tmp, { recursive: true, force: true })

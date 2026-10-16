@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -22,9 +22,8 @@ import {
 import { buildUsage } from '../src/help.js'
 import { readPackageVersion } from '../src/package-info.js'
 import { isPairedApiUrl } from '../src/api-token.js'
-import type { StoredApiToken } from '../src/api-token-store.js'
+import { type StoredApiToken } from '../src/api-token-store.js'
 import { modernMcpProtocolVersion } from '../src/defaults.js'
-import { listKodyTools } from '../src/mcp.js'
 import { formatToolResult } from '../src/tool-result.js'
 import { clearOpenApiRouteCache } from '../src/open-api-client.js'
 import { redact } from '../src/redact.js'
@@ -57,11 +56,20 @@ test('resolveCommand maps subcommands and flags', () => {
 	assert.equal(resolveCommand(['search', 'what can you do']).command, 'search')
 	assert.equal(resolveCommand(['api', 'usageGet']).command, 'api')
 	assert.equal(resolveCommand(['api', 'usageGet']).positionals[0], 'usageGet')
-	assert.equal(resolveCommand(['package', 'publish', '@acme/pkg']).command, 'package')
+	assert.equal(
+		resolveCommand(['package', 'publish', '@acme/pkg']).command,
+		'package',
+	)
 	assert.equal(resolveCommand(['package', 'publish']).positionals[0], 'publish')
 	assert.equal(resolveCommand(['install', '--yes']).command, 'install')
-	assert.equal(resolveCommand(['auth', 'bootstrap', '--code', 'kody_bc_x']).command, 'auth')
-	assert.equal(resolveCommand(['auth', 'bootstrap']).positionals[0], 'bootstrap')
+	assert.equal(
+		resolveCommand(['auth', 'bootstrap', '--code', 'kody_bc_x']).command,
+		'auth',
+	)
+	assert.equal(
+		resolveCommand(['auth', 'bootstrap']).positionals[0],
+		'bootstrap',
+	)
 	assert.equal(resolveCommand(['--help']).command, 'help')
 	assert.equal(resolveCommand(['--version']).command, 'version')
 	assert.equal(
@@ -70,7 +78,8 @@ test('resolveCommand maps subcommands and flags', () => {
 	)
 	assert.equal(resolveCommand(['login', '--org', 'Acme']).values.org, 'Acme')
 	assert.equal(
-		resolveCommand(['execute', '--invoke', 'kody:@scope/pkg/export']).values.invoke,
+		resolveCommand(['execute', '--invoke', 'kody:@scope/pkg/export']).values
+			.invoke,
 		'kody:@scope/pkg/export',
 	)
 	assert.throws(() => resolveCommand(['explode']), /Unknown command "explode"/)
@@ -85,7 +94,10 @@ test('resolveCommand maps subcommands and flags', () => {
 
 test('help header version matches --version (same package.json source)', async () => {
 	const version = readPackageVersion()
-	assert.match(buildUsage({ orgs: [] }), new RegExp(`^Kody CLI ${version.replace(/\./g, '\\.')}\\b`))
+	assert.match(
+		buildUsage({ orgs: [] }),
+		new RegExp(`^Kody CLI ${version.replace(/\./g, '\\.')}\\b`),
+	)
 	let stdout = ''
 	const code = await runCli(['--version'], {
 		stdout: (text) => {
@@ -119,8 +131,16 @@ test('packagePublishParams maps positional UUID vs kody_id; --params wins', () =
 
 test('resolvePackagePublishTarget turns a package name into the package_id the route needs', async () => {
 	const packages = [
-		{ package_id: 'id-asteroids', kody_id: 'asteroids', name: '@kentcdodds/asteroids' },
-		{ package_id: 'id-kit', kody_id: 'package-app-kit', name: '@kentcdodds/package-app-kit' },
+		{
+			package_id: 'id-asteroids',
+			kody_id: 'asteroids',
+			name: '@kentcdodds/asteroids',
+		},
+		{
+			package_id: 'id-kit',
+			kody_id: 'package-app-kit',
+			name: '@kentcdodds/package-app-kit',
+		},
 		{ package_id: 'id-dup-a', kody_id: 'dup', name: '@a/dup' },
 		{ package_id: 'id-dup-b', kody_id: 'dup', name: '@b/dup' },
 	]
@@ -130,16 +150,25 @@ test('resolvePackagePublishTarget turns a package name into the package_id the r
 		return { packages }
 	}
 	assert.deepEqual(
-		await resolvePackagePublishTarget({ kody_id: '@kentcdodds/asteroids', allow_force: true }, call),
+		await resolvePackagePublishTarget(
+			{ kody_id: '@kentcdodds/asteroids', allow_force: true },
+			call,
+		),
 		{ package_id: 'id-asteroids', allow_force: true },
 	)
-	assert.deepEqual(await resolvePackagePublishTarget({ kody_id: 'package-app-kit' }, call), {
-		package_id: 'id-kit',
-	})
+	assert.deepEqual(
+		await resolvePackagePublishTarget({ kody_id: 'package-app-kit' }, call),
+		{
+			package_id: 'id-kit',
+		},
+	)
 	assert.deepEqual(calls, ['packageList', 'packageList'])
-	assert.deepEqual(await resolvePackagePublishTarget({ package_id: 'given' }, call), {
-		package_id: 'given',
-	})
+	assert.deepEqual(
+		await resolvePackagePublishTarget({ package_id: 'given' }, call),
+		{
+			package_id: 'given',
+		},
+	)
 	assert.equal(calls.length, 2, 'a package_id needs no lookup')
 	await assert.rejects(
 		resolvePackagePublishTarget({ kody_id: '@someone/asteroids' }, call),
@@ -209,7 +238,8 @@ test('allow-private-network is limited to execute --local', async () => {
 
 test('allow-private-network is allowed with execute --target mock', async () => {
 	const previous = process.env.KODY_WORKERD_PATH
-	process.env.KODY_WORKERD_PATH = '/nonexistent/workerd-for-private-network-guard'
+	process.env.KODY_WORKERD_PATH =
+		'/nonexistent/workerd-for-private-network-guard'
 	let stderr = ''
 	try {
 		await runCli(
@@ -233,7 +263,10 @@ test('allow-private-network is allowed with execute --target mock', async () => 
 })
 
 test('resolveApiToken prefers --token, falls back to KODY_API_TOKEN, and requires one', () => {
-	assert.equal(resolveApiToken({ token: 'flag' }, { KODY_API_TOKEN: 'env' }), 'flag')
+	assert.equal(
+		resolveApiToken({ token: 'flag' }, { KODY_API_TOKEN: 'env' }),
+		'flag',
+	)
 	assert.equal(resolveApiToken({}, { KODY_API_TOKEN: ' env ' }), 'env')
 	assert.throws(
 		() => resolveApiToken({}, {}),
@@ -399,8 +432,14 @@ test('resolveLocalExecuteBearer fails clearly when neither login nor token is av
 
 test('apiUrlFrom defaults to api.kody.codes', () => {
 	assert.equal(apiUrlFrom({}, {}), 'https://api.kody.codes')
-	assert.equal(apiUrlFrom({}, { KODY_API_URL: 'http://localhost:8787' }), 'http://localhost:8787')
-	assert.equal(apiUrlFrom({ apiUrl: 'http://x' }, { KODY_API_URL: 'http://y' }), 'http://x')
+	assert.equal(
+		apiUrlFrom({}, { KODY_API_URL: 'http://localhost:8787' }),
+		'http://localhost:8787',
+	)
+	assert.equal(
+		apiUrlFrom({ apiUrl: 'http://x' }, { KODY_API_URL: 'http://y' }),
+		'http://x',
+	)
 })
 
 test('shouldUseApiToken prefers explicit --token and env token when not logged in', () => {
@@ -496,7 +535,10 @@ test('api command calls Open API by operationId with scoped token', async () => 
 	clearOpenApiRouteCache()
 	const previousFetch = globalThis.fetch
 	const calls: Array<string> = []
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = new URL(String(input))
 		calls.push(`${(init?.method ?? 'GET').toUpperCase()} ${url.pathname}`)
 		if (url.pathname === '/openapi.json') {
@@ -556,7 +598,14 @@ test('api command calls Open API by operationId with scoped token', async () => 
 test('api command refuses bootstrap redeem and documents auth bootstrap', async () => {
 	let stderr = ''
 	const code = await runCli(
-		['api', 'cliCredentialBootstrapRedeem', '--params', '{"code":"kody_bc_x"}', '--token', 'tok'],
+		[
+			'api',
+			'cliCredentialBootstrapRedeem',
+			'--params',
+			'{"code":"kody_bc_x"}',
+			'--token',
+			'tok',
+		],
 		{
 			stdout: () => undefined,
 			stderr: (text) => {
@@ -619,7 +668,10 @@ type ApiStub = {
 
 /** Loopback stand-in for api.kody.codes; CapabilityProxy requests go over node:http. */
 async function startApiStub(
-	respond: (request: { method: string; url: string }) => { status: number; body: unknown },
+	respond: (request: { method: string; url: string }) => {
+		status: number
+		body: unknown
+	},
 ): Promise<ApiStub> {
 	const requests: ApiStub['requests'] = []
 	const server = createServer((request, response) => {
@@ -646,14 +698,13 @@ async function startApiStub(
 	}
 }
 
-test('execute with --token (no --local) uses CapabilityProxy and never requires login', async () => {
+test('execute with --token (no --local) posts /v1/execute and never requires login', async () => {
 	const previousMcpUrl = process.env.KODY_MCP_URL
 	process.env.KODY_MCP_URL = 'http://127.0.0.1:9/unreachable-mcp'
-	const api = await startApiStub((request) =>
-		request.url.includes('/session')
-			? { status: 200, body: { scopes: ['local-execute'] } }
-			: { status: 200, body: { result: { ok: true, result: { cloud: true }, logs: [] } } },
-	)
+	const api = await startApiStub(() => ({
+		status: 200,
+		body: { ok: true, result: { cloud: true }, logs: [] },
+	}))
 	let stdout = ''
 	let stderr = ''
 	try {
@@ -667,7 +718,10 @@ test('execute with --token (no --local) uses CapabilityProxy and never requires 
 				'--code',
 				'export default async () => ({ cloud: true })',
 			],
-			{ stdout: (text) => (stdout += text), stderr: (text) => (stderr += text) },
+			{
+				stdout: (text) => (stdout += text),
+				stderr: (text) => (stderr += text),
+			},
 		)
 		assert.equal(code, 0, stderr)
 	} finally {
@@ -676,8 +730,11 @@ test('execute with --token (no --local) uses CapabilityProxy and never requires 
 		else process.env.KODY_MCP_URL = previousMcpUrl
 	}
 	assert.deepEqual(JSON.parse(stdout), { cloud: true })
-	assert.ok(api.requests.some((request) => request.url === '/v1/capability-proxy/session'))
-	assert.ok(api.requests.some((request) => request.url === '/v1/capability-proxy/call'))
+	assert.deepEqual(
+		api.requests.map((request) => `${request.method} ${request.url}`),
+		['POST /v1/execute'],
+	)
+	assert.equal(api.requests[0]?.authorization, 'Bearer tok')
 })
 
 test('execute without token or login prompts clearly', async () => {
@@ -747,7 +804,9 @@ test('execute --local with login (no API token) sends OAuth access token as Bear
 	saveCredentials(credentials, createFileBackend(fileStorePath(mcpUrl)))
 	const api = await startApiStub(() => ({
 		status: 403,
-		body: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
+		body: {
+			error: { code: 'feature_disabled', message: 'local-execute is off' },
+		},
 	}))
 
 	let stderr = ''
@@ -802,7 +861,9 @@ test('execute --local prefers --token over a stored login session', async () => 
 	)
 	const api = await startApiStub(() => ({
 		status: 403,
-		body: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
+		body: {
+			error: { code: 'feature_disabled', message: 'local-execute is off' },
+		},
 	}))
 
 	let stderr = ''
@@ -856,10 +917,16 @@ test('execute token paths surface feature_disabled and insufficient_scope', asyn
 		'--code',
 		'export default () => 1',
 	]
-	const cases: Array<{ args: Array<string>; statusBody: unknown; pattern: RegExp }> = [
+	const cases: Array<{
+		args: Array<string>
+		statusBody: unknown
+		pattern: RegExp
+	}> = [
 		{
 			args: ['execute', '--local', '--token', 'tok', ...moduleArgs],
-			statusBody: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
+			statusBody: {
+				error: { code: 'feature_disabled', message: 'local-execute is off' },
+			},
 			pattern: /feature_disabled[\s\S]*local-execute/,
 		},
 		{
@@ -871,11 +938,14 @@ test('execute token paths surface feature_disabled and insufficient_scope', asyn
 					details: { required_scope: 'local-execute' },
 				},
 			},
-			pattern: /insufficient_scope[\s\S]*cliCredentialBootstrap[\s\S]*tokenCreate[\s\S]*local-execute/,
+			pattern:
+				/insufficient_scope[\s\S]*cliCredentialBootstrap[\s\S]*tokenCreate[\s\S]*local-execute/,
 		},
 		{
 			args: ['execute', '--token', 'tok', ...moduleArgs],
-			statusBody: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
+			statusBody: {
+				error: { code: 'feature_disabled', message: 'local-execute is off' },
+			},
 			pattern: /feature_disabled[\s\S]*local-execute/,
 		},
 		{
@@ -913,13 +983,19 @@ test('execute --local --invoke kody:@… mints passthrough (does not reject)', a
 	// Without auth / package-graph the run fails later — but not with the old
 	// "--local runs a module you provide" rejection that forced a --code wrapper.
 	let stderr = ''
-	const code = await runCli(['execute', '--local', '--invoke', 'kody:@me/pkg/export'], {
-		stdout: () => {},
-		stderr: (text) => (stderr += text),
-	})
+	const code = await runCli(
+		['execute', '--local', '--invoke', 'kody:@me/pkg/export'],
+		{
+			stdout: () => {},
+			stderr: (text) => (stderr += text),
+		},
+	)
 	assert.equal(code, 1)
 	assert.doesNotMatch(stderr, /--local runs a module you provide/)
-	assert.doesNotMatch(stderr, /neither a local package export nor a published package specifier/)
+	assert.doesNotMatch(
+		stderr,
+		/neither a local package export nor a published package specifier/,
+	)
 })
 
 test('execute --local --invoke rejects non-package export keys outside a package', async () => {
@@ -928,12 +1004,18 @@ test('execute --local --invoke rejects non-package export keys outside a package
 	let stderr = ''
 	try {
 		process.chdir(root)
-		const code = await runCli(['execute', '--local', '--invoke', './not-an-export'], {
-			stdout: () => {},
-			stderr: (text) => (stderr += text),
-		})
+		const code = await runCli(
+			['execute', '--local', '--invoke', './not-an-export'],
+			{
+				stdout: () => {},
+				stderr: (text) => (stderr += text),
+			},
+		)
 		assert.equal(code, 1)
-		assert.match(stderr, /neither a local package export nor a published package specifier/)
+		assert.match(
+			stderr,
+			/neither a local package export nor a published package specifier/,
+		)
 	} finally {
 		process.chdir(previous)
 		await rm(root, { recursive: true, force: true })
@@ -997,8 +1079,14 @@ test('executeSourcesConflict rejects invoke with code or file flags', () => {
 })
 
 test('buildExecuteToolArgs errors when neither invoke nor code is provided', () => {
-	assert.throws(() => buildExecuteToolArgs({}), /Provide --invoke, --code, --file/)
-	assert.throws(() => buildExecuteToolArgs({ code: '' }), /Provide --invoke, --code, --file/)
+	assert.throws(
+		() => buildExecuteToolArgs({}),
+		/Provide --invoke, --code, --file/,
+	)
+	assert.throws(
+		() => buildExecuteToolArgs({ code: '' }),
+		/Provide --invoke, --code, --file/,
+	)
 	assert.throws(
 		() => buildExecuteToolArgs({ invoke: '' }),
 		/Provide a non-empty --invoke value/,
@@ -1023,52 +1111,4 @@ test('redact strips token-looking assignments', () => {
 
 test('CLI pins the stateless MCP protocol revision', () => {
 	assert.equal(modernMcpProtocolVersion, '2026-07-28')
-})
-
-test('listKodyTools opens the 2026-07-28 lane with POST server/discover, never GET SSE', async () => {
-	const backend = createFileBackend(join(mkdtempSync(join(tmpdir(), 'kody-cli-')), 'creds.json'))
-	saveCredentials(
-		{
-			version: 1,
-			mcpUrl: 'https://kody.codes/mcp',
-			resource: 'https://kody.codes/mcp',
-			authorizationServerUrl: 'https://kody.codes',
-			clientId: 'client-1',
-			accessToken: 'access-1',
-			refreshToken: 'refresh-1',
-			tokenType: 'bearer',
-			expiresAt: Date.now() + 120_000,
-			scope: 'profile email',
-		},
-		backend,
-	)
-	const requests: Array<{ method: string; mcpMethod: string | null; protocol: string | null }> =
-		[]
-	const fetchFn = (async (
-		_input: Parameters<typeof fetch>[0],
-		init?: Parameters<typeof fetch>[1],
-	) => {
-		const headers = new Headers(init?.headers)
-		requests.push({
-			method: (init?.method ?? 'GET').toUpperCase(),
-			mcpMethod: headers.get('mcp-method'),
-			protocol: headers.get('mcp-protocol-version'),
-		})
-		return new Response('probe-closed', { status: 204 })
-	}) as typeof fetch
-
-	await assert.rejects(
-		() => listKodyTools({ mcpUrl: 'https://kody.codes/mcp', backend, fetchFn }),
-		/2026-07-28|server\/discover|negotiation/i,
-	)
-	assert.ok(requests.length > 0)
-	assert.equal(
-		requests.some((request) => request.method === 'GET'),
-		false,
-	)
-	assert.deepEqual(requests[0], {
-		method: 'POST',
-		mcpMethod: 'server/discover',
-		protocol: '2026-07-28',
-	})
 })

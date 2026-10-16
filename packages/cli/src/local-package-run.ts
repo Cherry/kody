@@ -10,7 +10,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { request as httpRequest, type IncomingMessage } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { Readable } from 'node:stream'
+import { type Readable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
 	assertTokenSafeApiUrl,
@@ -46,8 +46,8 @@ import {
 	type PackageLocalContext,
 } from './package-local-runtime-source.js'
 import { redact } from './redact.js'
-import type { KodyTarget } from './target.js'
-import type { ToolCallResult } from './tool-result.js'
+import { type KodyTarget } from './target.js'
+import { type ToolCallResult } from './tool-result.js'
 import { ensureWorkerdBinary } from './workerd-binary.js'
 
 export type LocalPackageRunInput = {
@@ -82,7 +82,11 @@ export type LocalPackageRunInput = {
 	onStatus?: (message: string) => void
 }
 
-type SandboxResponse = { result?: unknown; error?: string; logs?: Array<string> }
+type SandboxResponse = {
+	result?: unknown
+	error?: string
+	logs?: Array<string>
+}
 
 const workerdStartTimeoutMs = 30_000
 const workerdExitGraceMs = 1_000
@@ -130,7 +134,12 @@ export async function runLocalPackageModule(
 		if (typeof sandbox.error === 'string') {
 			return {
 				content: [{ type: 'text', text: `Error: ${sandbox.error}` }],
-				structuredContent: { ...base, returnedBytes: 0, error: sandbox.error, logs },
+				structuredContent: {
+					...base,
+					returnedBytes: 0,
+					error: sandbox.error,
+					logs,
+				},
 				isError: true,
 			}
 		}
@@ -215,7 +224,9 @@ export async function runLocalPackageModule(
 		}
 		await writeFile(
 			join(workDir, files.entry),
-			createPackageModuleEntrySource({ sideEffectModules: gatewayFetchShimModules }),
+			createPackageModuleEntrySource({
+				sideEffectModules: gatewayFetchShimModules,
+			}),
 		)
 		await writeFile(join(workDir, files.user), code)
 		await writeFile(
@@ -240,7 +251,10 @@ export async function runLocalPackageModule(
 			}),
 		)
 
-		const env: NodeJS.ProcessEnv = { ...process.env, [runSecretEnvVar]: runSecret }
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			[runSecretEnvVar]: runSecret,
+		}
 		delete env[apiTokenEnvVar]
 		child = spawn(workerdPath, ['serve', configPath, '--control-fd=3'], {
 			cwd: workDir,
@@ -262,10 +276,16 @@ export async function runLocalPackageModule(
 				body: JSON.stringify({ params: input.params ?? {} }),
 			})
 		} catch (error) {
-			const exitDetail = await Promise.race([workerd.exited, delay(workerdExitGraceMs, null)])
-			if (exitDetail !== null) throw new Error(`workerd exited during the run${exitDetail}`)
+			const exitDetail = await Promise.race([
+				workerd.exited,
+				delay(workerdExitGraceMs, null),
+			])
+			if (exitDetail !== null)
+				throw new Error(`workerd exited during the run${exitDetail}`)
 			const reason = error instanceof Error ? error.message : String(error)
-			throw new Error(`Local package run failed (${reason}).${workerd.stderr()}`)
+			throw new Error(
+				`Local package run failed (${reason}).${workerd.stderr()}`,
+			)
 		}
 		if (response.status !== 200) {
 			throw new Error(
@@ -331,39 +351,51 @@ function watchWorkerd(child: ChildProcess) {
 			resolve(` (workerd exit ${signal ?? code})${stderr()}`)
 		})
 	})
-	const listening = new Promise<{ port: number } | { exitDetail: string }>((resolve, reject) => {
-		const control = child.stdio[3] as Readable | null
-		let buffered = ''
-		const timer = setTimeout(() => {
-			reject(new Error(`workerd did not start within ${workerdStartTimeoutMs / 1000}s.${stderr()}`))
-		}, workerdStartTimeoutMs)
-		control?.on('data', (chunk: Buffer) => {
-			buffered += chunk.toString('utf8')
-			for (const line of buffered.split('\n')) {
-				const port = parseListenPort(line)
-				if (port !== null) {
-					clearTimeout(timer)
-					resolve({ port })
+	const listening = new Promise<{ port: number } | { exitDetail: string }>(
+		(resolve, reject) => {
+			const control = child.stdio[3] as Readable | null
+			let buffered = ''
+			const timer = setTimeout(() => {
+				reject(
+					new Error(
+						`workerd did not start within ${workerdStartTimeoutMs / 1000}s.${stderr()}`,
+					),
+				)
+			}, workerdStartTimeoutMs)
+			control?.on('data', (chunk: Buffer) => {
+				buffered += chunk.toString('utf8')
+				for (const line of buffered.split('\n')) {
+					const port = parseListenPort(line)
+					if (port !== null) {
+						clearTimeout(timer)
+						resolve({ port })
+					}
 				}
-			}
-		})
-		child.once('error', (error) => {
-			clearTimeout(timer)
-			reject(new Error(`Could not start workerd: ${error.message}`))
-		})
-		void exited.then((exitDetail) => {
-			clearTimeout(timer)
-			resolve({ exitDetail })
-		})
-	})
+			})
+			child.once('error', (error) => {
+				clearTimeout(timer)
+				reject(new Error(`Could not start workerd: ${error.message}`))
+			})
+			void exited.then((exitDetail) => {
+				clearTimeout(timer)
+				resolve({ exitDetail })
+			})
+		},
+	)
 	return { listening, exited, stderr }
 }
 
 function parseListenPort(line: string): number | null {
 	if (!line.trim()) return null
 	try {
-		const event = JSON.parse(line) as { event?: string; socket?: string; port?: number }
-		return event.event === 'listen' && event.socket === 'http' && typeof event.port === 'number'
+		const event = JSON.parse(line) as {
+			event?: string
+			socket?: string
+			port?: number
+		}
+		return event.event === 'listen' &&
+			event.socket === 'http' &&
+			typeof event.port === 'number'
 			? event.port
 			: null
 	} catch {

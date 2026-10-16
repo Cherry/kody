@@ -10,8 +10,11 @@ import {
 	type Server,
 	type ServerResponse,
 } from 'node:http'
-import type { AddressInfo } from 'node:net'
-import { notImplementedInMock, StructuredCliError } from '../structured-error.js'
+import { type AddressInfo } from 'node:net'
+import {
+	notImplementedInMock,
+	StructuredCliError,
+} from '../structured-error.js'
 import { unmockedRequestError } from './mock-fetch-gateway.js'
 import {
 	isMockCapabilityPath,
@@ -62,9 +65,12 @@ export function mintMockApiToken(sessionId: string): string {
 	return `${mockTokenPrefix}${sessionId}`
 }
 
-export async function startMockServer(options: MockServerOptions = {}): Promise<MockServer> {
+export async function startMockServer(
+	options: MockServerOptions = {},
+): Promise<MockServer> {
 	const sessionIdForClose =
-		options.sessionId?.trim() || defaultMockSessionId(options.env ?? process.env)
+		options.sessionId?.trim() ||
+		defaultMockSessionId(options.env ?? process.env)
 	if (options.resetStorage) {
 		// Close SQLite handles before wiping the session directory so reset
 		// does not leave a live connection to a deleted file.
@@ -122,7 +128,12 @@ export async function ensureMockTarget(input: {
 	env?: NodeJS.ProcessEnv
 	/** Reuse an already-started server (e.g. long-lived `kody dev`). */
 	existing?: MockServer
-}): Promise<{ apiUrl: string; token: string; server: MockServer; started: boolean }> {
+}): Promise<{
+	apiUrl: string
+	token: string
+	server: MockServer
+	started: boolean
+}> {
 	if (input.existing) {
 		return {
 			apiUrl: input.existing.url,
@@ -174,7 +185,13 @@ async function handleRequest(
 		if (method === 'GET' && url.pathname === '/v1/capability-proxy/session') {
 			assertMockAuth(req)
 			return sendJson(res, 200, {
-				scopes: ['org:execute', 'org:read', 'package:execute', 'package:read', 'search:read'],
+				scopes: [
+					'org:execute',
+					'org:read',
+					'package:execute',
+					'package:read',
+					'search:read',
+				],
 				features: ['local-execute', 'credential-call-map'],
 				expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
 			})
@@ -182,8 +199,12 @@ async function handleRequest(
 
 		if (method === 'POST' && url.pathname === '/v1/capability-proxy/call') {
 			assertMockAuth(req)
-			const path = Array.isArray(body?.path) ? (body.path as Array<string>) : null
-			const args = Array.isArray(body?.args) ? (body.args as Array<unknown>) : []
+			const path = Array.isArray(body?.path)
+				? (body.path as Array<string>)
+				: null
+			const args = Array.isArray(body?.args)
+				? (body.args as Array<unknown>)
+				: []
 			if (!path || path.length === 0) {
 				return sendJson(res, 400, {
 					error: { code: 'invalid_request', message: 'path is required' },
@@ -191,7 +212,9 @@ async function handleRequest(
 			}
 			const pathKey = path.join('.')
 			if (!isMockCapabilityPath(pathKey)) {
-				const err = notImplementedInMock({ operation: `CapabilityProxy ${pathKey}` })
+				const err = notImplementedInMock({
+					operation: `CapabilityProxy ${pathKey}`,
+				})
 				return sendJson(res, 501, { error: err.toJSON() })
 			}
 			try {
@@ -206,7 +229,10 @@ async function handleRequest(
 			}
 		}
 
-		if (method === 'POST' && url.pathname === '/v1/local-execute/package-graph') {
+		if (
+			method === 'POST' &&
+			url.pathname === '/v1/local-execute/package-graph'
+		) {
 			assertMockAuth(req)
 			// Empty module list: local unpublished code has no stamped kody:@ deps
 			// from origin. Gateway-fetch shim is omitted; ambient secret placeholders
@@ -223,12 +249,32 @@ async function handleRequest(
 			assertMockAuth(req)
 			const query = url.searchParams.get('query') ?? ''
 			const entity = url.searchParams.get('entity') ?? undefined
-			return sendJson(res, 200, mockSearch(callCtx.getState(), { query, entity }))
+			return sendJson(
+				res,
+				200,
+				mockSearch(callCtx.getState(), { query, entity }),
+			)
+		}
+
+		if (method === 'POST' && url.pathname === '/v1/search/tool') {
+			assertMockAuth(req)
+			const query = typeof body?.query === 'string' ? body.query : ''
+			const entity = typeof body?.entity === 'string' ? body.entity : undefined
+			const limit = typeof body?.limit === 'number' ? body.limit : undefined
+			return sendJson(
+				res,
+				200,
+				mockSearch(callCtx.getState(), { query, entity, limit }),
+			)
 		}
 
 		if (method === 'GET' && url.pathname === '/v1/me') {
 			assertMockAuth(req)
-			return sendJson(res, 200, mockCurrentUser(callCtx.getState(), callCtx.orgSlug))
+			return sendJson(
+				res,
+				200,
+				mockCurrentUser(callCtx.getState(), callCtx.orgSlug),
+			)
 		}
 
 		// Generic Open API POST /v1/... by operation is not fully routed; refuse.
@@ -263,11 +309,18 @@ class AuthError extends Error {
 
 function assertMockAuth(req: IncomingMessage): void {
 	const header = req.headers.authorization
-	if (typeof header !== 'string' || !header.toLowerCase().startsWith('bearer ')) {
+	if (
+		typeof header !== 'string' ||
+		!header.toLowerCase().startsWith('bearer ')
+	) {
 		throw new AuthError('Mock API requires Authorization: Bearer <token>.')
 	}
 	const token = header.slice('bearer '.length).trim()
-	if (!isMockApiToken(token) && !token.startsWith('kody_at_') && token.length > 0) {
+	if (
+		!isMockApiToken(token) &&
+		!token.startsWith('kody_at_') &&
+		token.length > 0
+	) {
 		// Accept any non-empty bearer for local bridging when callers forward a
 		// login token; mock still never reaches prod secrets.
 		return
@@ -285,7 +338,11 @@ async function dispatchCapabilityCall(
 		case 'kody.metaGetCurrentUser':
 			return mockCurrentUser(state, ctx.orgSlug)
 		case 'kody.search': {
-			const params = (args[0] ?? {}) as { query?: string; entity?: string; limit?: number }
+			const params = (args[0] ?? {}) as {
+				query?: string
+				entity?: string
+				limit?: number
+			}
 			return mockSearch(state, params)
 		}
 		case 'kody.usageGet':
@@ -309,7 +366,12 @@ async function dispatchCapabilityCall(
 		case 'kody.__mockPackageStorageSet':
 		case 'kody.packageStorageSet': {
 			const input = args[0] as { key?: string; value?: unknown }
-			packageStorageSet(state, ctx.packageId, String(input?.key ?? ''), input?.value)
+			packageStorageSet(
+				state,
+				ctx.packageId,
+				String(input?.key ?? ''),
+				input?.value,
+			)
 			await ctx.setState(state)
 			return { ok: true }
 		}
@@ -326,10 +388,15 @@ async function dispatchCapabilityCall(
 		}
 		case 'kody.__mockPackageStorageSql':
 		case 'kody.packageStorageSql': {
-			const input = (args[0] ?? {}) as { query?: string; bindings?: Array<unknown> }
+			const input = (args[0] ?? {}) as {
+				query?: string
+				bindings?: Array<unknown>
+			}
 			const query = String(input.query ?? '')
 			if (!query.trim()) {
-				throw new Error('packageStorage().sql requires a non-empty query string.')
+				throw new Error(
+					'packageStorage().sql requires a non-empty query string.',
+				)
 			}
 			return packageStorageSql(
 				state,
@@ -357,13 +424,16 @@ async function dispatchCapabilityCall(
 			if (key && matches.length === 0) {
 				return { ok: true, value: [] }
 			}
-			const opened = (key ? matches : Object.values(state.credentials)).map((cred) =>
-				mockOpenedCredential(cred),
+			const opened = (key ? matches : Object.values(state.credentials)).map(
+				(cred) => mockOpenedCredential(cred),
 			)
 			return { ok: true, value: opened }
 		}
 		case 'kody.credentialClientCheck':
-			return { ok: true, value: { warnings: [], checked: args[0] ?? null, strict: false } }
+			return {
+				ok: true,
+				value: { warnings: [], checked: args[0] ?? null, strict: false },
+			}
 		case 'kody.credentialClientRefresh':
 			return { ok: true, value: { refreshed: false, mock: true } }
 		case 'kody.authenticatedFetch':
@@ -385,13 +455,16 @@ async function dispatchCapabilityCall(
 				message: `Unmocked ${pathKey} under --target mock (missing request.url).`,
 				target: 'mock',
 				where: pathKey,
-				fix:
-					'Pass request.url, or add handlers in .kody/mocks.ts. createAuthenticatedFetch, credential().fetch, gatewayFetch, and gatewayFetchStream go through the same MSW gateway.',
+				fix: 'Pass request.url, or add handlers in .kody/mocks.ts. createAuthenticatedFetch, credential().fetch, gatewayFetch, and gatewayFetchStream go through the same MSW gateway.',
 				details: { mocksPath: '.kody/mocks.ts' },
 			})
 		}
 		case 'kody.adminUserList': {
-			const params = (args[0] ?? {}) as { page?: number; pageSize?: number; limit?: number }
+			const params = (args[0] ?? {}) as {
+				page?: number
+				pageSize?: number
+				limit?: number
+			}
 			const page = typeof params.page === 'number' ? params.page : 1
 			const pageSize =
 				typeof params.pageSize === 'number'
@@ -460,7 +533,8 @@ function openMockCredential(
 		state.credentials[key] ??
 		state.credentials[key.toUpperCase()] ??
 		Object.values(state.credentials).find(
-			(entry) => entry.name === key || entry.name.toUpperCase() === key.toUpperCase(),
+			(entry) =>
+				entry.name === key || entry.name.toUpperCase() === key.toUpperCase(),
 		)
 	if (!cred) {
 		throw new StructuredCliError({
@@ -508,7 +582,9 @@ function mockSearch(
 ) {
 	if (params.entity) {
 		const hit = state.searchCatalog.find(
-			(item) => `${item.type}:${item.id}` === params.entity || item.id === params.entity,
+			(item) =>
+				`${item.type}:${item.id}` === params.entity ||
+				item.id === params.entity,
 		)
 		return {
 			conversationId: `mock-${state.sessionId}`,
@@ -570,6 +646,12 @@ function mockOpenApiDocument() {
 					summary: 'Search the mock catalog',
 				},
 			},
+			'/v1/search/tool': {
+				post: {
+					operationId: 'searchTool',
+					summary: 'Search the mock catalog (MCP search tool shape)',
+				},
+			},
 			'/v1/me': {
 				get: {
 					operationId: 'metaGetCurrentUser',
@@ -581,7 +663,9 @@ function mockOpenApiDocument() {
 	}
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown> | null> {
+async function readJsonBody(
+	req: IncomingMessage,
+): Promise<Record<string, unknown> | null> {
 	const chunks: Array<Buffer> = []
 	for await (const chunk of req) {
 		chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))

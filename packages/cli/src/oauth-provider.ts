@@ -1,12 +1,4 @@
 import {
-	type OAuthClientMetadata,
-	type OAuthClientProvider,
-	type OAuthDiscoveryState,
-	type StoredOAuthClientInformation,
-	type StoredOAuthTokens,
-	validateClientMetadataUrl,
-} from '@modelcontextprotocol/client'
-import {
 	cliClientMetadataUrl,
 	cliClientUri,
 	cliName,
@@ -14,12 +6,22 @@ import {
 	defaultScopes,
 } from './defaults.js'
 import { orgSlugFromFlag } from './org-slug.js'
-import type { StoredCredentials } from './store.js'
-import { openUrl } from './open-url.js'
+import { type StoredCredentials } from './store.js'
 
 export { orgSlugFromFlag } from './org-slug.js'
 
-export function buildCliClientMetadata(): OAuthClientMetadata {
+export type CliClientMetadata = {
+	client_name: string
+	client_uri: string
+	redirect_uris: Array<string>
+	grant_types: Array<string>
+	response_types: Array<string>
+	token_endpoint_auth_method: 'none'
+	application_type: 'native'
+	scope: string
+}
+
+export function buildCliClientMetadata(): CliClientMetadata {
 	return {
 		client_name: cliName,
 		client_uri: cliClientUri,
@@ -32,7 +34,7 @@ export function buildCliClientMetadata(): OAuthClientMetadata {
 	}
 }
 
-/** SEP-2352 issuer stamp restored from durable CLI storage. */
+/** Issuer stamp restored from durable CLI storage. */
 export function issuerFromStoredCredentials(
 	credentials: StoredCredentials,
 ): string {
@@ -41,102 +43,6 @@ export function issuerFromStoredCredentials(
 	return new URL(credentials.mcpUrl).origin
 }
 
-export function createCliOAuthProvider(input: {
-	mcpUrl: string
-	redirectUri: URL
-	existing?: StoredCredentials
-	loadStoredTokens: boolean
-	openBrowser: boolean
-	expectedState: string
-	/**
-	 * Bind the grant to this org. Set on the authorize URL (`?org=`).
-	 * Do not put it on the OAuth `resource`: production rejects a resource
-	 * that adds a query (`?org=` or `?profile=`).
-	 */
-	org?: string
-	onAuthorizationUrl?: (url: URL) => void
-}): OAuthClientProvider {
-	const clientMetadataUrl = cliClientMetadataUrl(input.mcpUrl)
-	validateClientMetadataUrl(clientMetadataUrl)
-	let codeVerifier = ''
-	let discoveryState: OAuthDiscoveryState | undefined
-	// Leave clientInformation unset on a fresh login. Seeding `{ client_id }`
-	// without an `issuer` stamp makes auth() warn (SEP-2352) on the first
-	// read. With `clientMetadataUrl` set, the SDK writes
-	// `{ client_id: clientMetadataUrl, issuer }` when the AS advertises CIMD.
-	// When reloading stored credentials, stamp `issuer` from durable storage
-	// so SEP-2352 isolation stays active without a relogin.
-	let clientInformation: StoredOAuthClientInformation | undefined =
-		input.existing
-			? {
-					client_id: input.existing.clientId,
-					...(input.existing.clientSecret
-						? { client_secret: input.existing.clientSecret }
-						: {}),
-					issuer: issuerFromStoredCredentials(input.existing),
-				}
-			: undefined
-	let tokens: StoredOAuthTokens | undefined =
-		input.loadStoredTokens && input.existing
-			? {
-					access_token: input.existing.accessToken,
-					token_type: input.existing.tokenType,
-					...(input.existing.refreshToken
-						? { refresh_token: input.existing.refreshToken }
-						: {}),
-					...(input.existing.scope ? { scope: input.existing.scope } : {}),
-					issuer: issuerFromStoredCredentials(input.existing),
-				}
-			: undefined
-
-	return {
-		clientMetadataUrl,
-		get redirectUrl() {
-			return input.redirectUri
-		},
-		get clientMetadata() {
-			return buildCliClientMetadata()
-		},
-		state() {
-			return input.expectedState
-		},
-		clientInformation() {
-			return clientInformation
-		},
-		saveClientInformation(next) {
-			// Round-trip the SEP-2352 `issuer` stamp verbatim.
-			clientInformation = next
-		},
-		tokens() {
-			return tokens
-		},
-		saveTokens(next) {
-			// Round-trip the SEP-2352 `issuer` stamp verbatim.
-			tokens = next
-		},
-		async redirectToAuthorization(authorizationUrl) {
-			if (input.org !== undefined) {
-				authorizationUrl.searchParams.set('org', orgSlugFromFlag(input.org))
-			}
-			input.onAuthorizationUrl?.(authorizationUrl)
-			if (input.openBrowser) {
-				await openUrl(authorizationUrl.href)
-			}
-		},
-		saveCodeVerifier(next) {
-			codeVerifier = next
-		},
-		codeVerifier() {
-			if (!codeVerifier) {
-				throw new Error('OAuth PKCE verifier is missing.')
-			}
-			return codeVerifier
-		},
-		saveDiscoveryState(next) {
-			discoveryState = next
-		},
-		discoveryState() {
-			return discoveryState
-		},
-	}
+export function cliMetadataUrl(mcpUrl: string): string {
+	return cliClientMetadataUrl(mcpUrl)
 }

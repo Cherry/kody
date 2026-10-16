@@ -4,17 +4,12 @@ import {
 	type Server,
 	type ServerResponse,
 } from 'node:http'
-import {
-	auth,
-	type OAuthClientInformationMixed,
-	type OAuthTokens,
-} from '@modelcontextprotocol/client'
-import { missingCliAuthMessage } from './api-token.js'
+import { isScopedApiToken, missingCliAuthMessage } from './api-token.js'
 import {
 	accessTokenSkewMs,
 	cliRedirectUrl,
+	defaultApiUrl,
 	defaultMcpUrl,
-	defaultScopes,
 	loginTimeoutMs,
 } from './defaults.js'
 import {
@@ -28,7 +23,16 @@ import {
 	type LoginCallbackAccount,
 	type LoginCallbackErrorKind,
 } from './login-callback-page.js'
-import { createCliOAuthProvider, orgSlugFromFlag } from './oauth-provider.js'
+import { orgSlugFromFlag } from './oauth-provider.js'
+import {
+	buildCliAuthorizationUrl,
+	createPkcePair,
+	discoverCliAuthorizationServer,
+	exchangeAuthorizationCode,
+	refreshOAuthTokens,
+} from './oauth-browser.js'
+import { openApiRequest } from './open-api-client.js'
+import { openUrl } from './open-url.js'
 import { redactError } from './redact.js'
 import {
 	loadCredentialStore,
@@ -57,9 +61,14 @@ export type LoginOptions = {
 	 * callback page can show them (and multi-org storage can name the login).
 	 * Defaults to `metaGetCurrentUser` via {@link discoverLoginIdentity}.
 	 */
+	/** Open API origin that mints the device token. Defaults to the paired API. */
+	apiUrl?: string
+	/** Device token lifetime. Defaults to long (interactive login). */
+	lifetime?: 'short' | 'long'
 	discoverIdentity?: (input: {
 		mcpUrl: string
 		accessToken: string
+		apiUrl?: string
 		fetchFn?: typeof fetch
 	}) => Promise<LoginIdentity>
 }
@@ -76,8 +85,14 @@ export function credentialsFromTokens(input: {
 	mcpUrl: string
 	resource: string
 	authorizationServerUrl: string
-	client: OAuthClientInformationMixed
-	tokens: OAuthTokens
+	client: { client_id: string; client_secret?: string }
+	tokens: {
+		access_token: string
+		token_type?: string
+		refresh_token?: string
+		expires_in?: number
+		scope?: string
+	}
 	previous?: StoredCredentials
 	org?: string
 	now?: number
@@ -107,47 +122,76 @@ export function credentialsFromTokens(input: {
 	}
 }
 
-async function persistAuthorizedSession(input: {
+function deviceCredentials(input: {
 	mcpUrl: string
-	provider: ReturnType<typeof createCliOAuthProvider>
-	backend?: SecretBackend
-	resolution?: StoreResolution
+	apiUrl: string
+	authorizationServerUrl: string
+	token: string
+	expiresAt: number | undefined
+	scopes: Array<string>
 	previous?: StoredCredentials
 	org?: string
-	now?: number
-	/** When false, refresh tokens without changing the active org. Default true. */
-	activate?: boolean
-}): Promise<{
-	credentials: StoredCredentials
-	saved: ReturnType<typeof saveCredentials>
-}> {
-	const tokens = await input.provider.tokens()
-	const client = await input.provider.clientInformation()
-	if (!tokens || !client) {
-		throw new Error('OAuth completed without tokens. Run `kody login`.')
-	}
-	const clientIssuer =
-		'issuer' in client && typeof client.issuer === 'string'
-			? client.issuer
-			: undefined
-	const credentials = credentialsFromTokens({
+}): StoredCredentials {
+	const org = input.org ?? input.previous?.org
+	return {
+		version: 1,
 		mcpUrl: input.mcpUrl,
+		...(org ? { org } : {}),
 		resource: input.mcpUrl,
-		authorizationServerUrl:
-			tokens.issuer ??
-			clientIssuer ??
-			input.previous?.authorizationServerUrl ??
-			new URL(input.mcpUrl).origin,
-		client,
-		tokens,
-		previous: input.previous,
-		org: input.org ?? input.previous?.org,
-		now: input.now,
+		authorizationServerUrl: input.authorizationServerUrl,
+		clientId: new URL(
+			'/oauth/cli-client-metadata.json',
+			input.authorizationServerUrl,
+		).href,
+		accessToken: input.token,
+		tokenType: 'bearer',
+		expiresAt: input.expiresAt,
+		scope: input.scopes.join(' '),
+	}
+}
+
+async function mintDeviceToken(input: {
+	apiUrl: string
+	oauthAccessToken: string
+	lifetime: 'short' | 'long'
+	fetchFn?: typeof fetch
+}): Promise<{ token: string; expiresAt?: number; scopes: Array<string> }> {
+	const minted = await openApiRequest({
+		token: input.oauthAccessToken,
+		apiUrl: input.apiUrl,
+		fetchFn: input.fetchFn,
+		method: 'POST',
+		path: 'v1/tokens/device',
+		body: { lifetime: input.lifetime, name: 'kody-cli' },
 	})
-	const saved = saveCredentials(credentials, input.backend, input.resolution, {
-		activate: input.activate !== false,
-	})
-	return { credentials, saved }
+	if (!minted || typeof minted !== 'object' || Array.isArray(minted)) {
+		throw new Error('Device token mint returned no token.')
+	}
+	const record = minted as {
+		token?: unknown
+		expires_at?: unknown
+		scopes?: unknown
+	}
+	if (
+		typeof record.token !== 'string' ||
+		!record.token.startsWith('kody_at_')
+	) {
+		throw new Error('Device token mint did not return a kody_at_ token.')
+	}
+	const expiresAt =
+		typeof record.expires_at === 'string'
+			? Date.parse(record.expires_at)
+			: undefined
+	const scopes = Array.isArray(record.scopes)
+		? record.scopes.filter(
+				(scope): scope is string => typeof scope === 'string',
+			)
+		: []
+	return {
+		token: record.token,
+		...(Number.isFinite(expiresAt) ? { expiresAt } : {}),
+		scopes,
+	}
 }
 
 export async function refreshStoredCredentials(input: {
@@ -156,38 +200,40 @@ export async function refreshStoredCredentials(input: {
 	resolution?: StoreResolution
 	now?: number
 	fetchFn?: typeof fetch
+	apiUrl?: string
 }): Promise<StoredCredentials> {
 	const { credentials } = input
+	if (isScopedApiToken(credentials.accessToken)) {
+		if (!isAccessTokenExpired(credentials, input.now)) return credentials
+		throw new Error('Stored API token expired. Run `kody login`.')
+	}
 	if (!credentials.refreshToken) {
 		throw new Error('No refresh token is stored. Run `kody login`.')
 	}
-	const provider = createCliOAuthProvider({
+	const refreshed = await refreshOAuthTokens({
+		issuer: credentials.authorizationServerUrl,
 		mcpUrl: credentials.mcpUrl,
-		redirectUri: cliRedirectUrl(),
-		existing: credentials,
-		loadStoredTokens: true,
-		openBrowser: false,
-		expectedState: crypto.randomUUID(),
-	})
-	const result = await auth(provider, {
-		serverUrl: credentials.mcpUrl,
-		scope: defaultScopes.join(' '),
+		refreshToken: credentials.refreshToken,
 		fetchFn: input.fetchFn,
 	})
-	if (result !== 'AUTHORIZED') {
-		throw new Error('Token refresh requires a new `kody login`.')
-	}
-	const { credentials: next } = await persistAuthorizedSession({
+	const apiUrl = input.apiUrl ?? defaultApiUrl
+	const device = await mintDeviceToken({
+		apiUrl,
+		oauthAccessToken: refreshed.accessToken,
+		lifetime: 'long',
+		fetchFn: input.fetchFn,
+	})
+	const next = deviceCredentials({
 		mcpUrl: credentials.mcpUrl,
-		provider,
-		backend: input.backend,
-		resolution: input.resolution,
+		apiUrl,
+		authorizationServerUrl: refreshed.issuer,
+		token: device.token,
+		expiresAt: device.expiresAt,
+		scopes: device.scopes,
 		previous: credentials,
 		org: credentials.org,
-		now: input.now,
-		// Do not steal activeOrg during a one-shot `--org` / KODY_ORG refresh.
-		activate: false,
 	})
+	saveCredentials(next, input.backend, input.resolution, { activate: false })
 	return next
 }
 
@@ -197,6 +243,7 @@ export async function refreshStoredCredentials(input: {
  */
 export async function resolvePendingOrgSlug(input: {
 	mcpUrl?: string
+	apiUrl?: string
 	backend?: SecretBackend
 	resolution?: StoreResolution
 	now?: number
@@ -221,6 +268,7 @@ export async function resolvePendingOrgSlug(input: {
 				resolution: input.resolution,
 				now: input.now,
 				fetchFn: input.fetchFn,
+				apiUrl: input.apiUrl,
 			})
 		} catch {
 			return null
@@ -242,6 +290,7 @@ export async function resolvePendingOrgSlug(input: {
 
 export async function ensureFreshCredentials(input: {
 	mcpUrl?: string
+	apiUrl?: string
 	org?: string
 	backend?: SecretBackend
 	resolution?: StoreResolution
@@ -256,6 +305,7 @@ export async function ensureFreshCredentials(input: {
 	const mcpUrl = input.mcpUrl ?? defaultMcpUrl
 	await resolvePendingOrgSlug({
 		mcpUrl,
+		apiUrl: input.apiUrl,
 		backend: input.backend,
 		resolution: input.resolution,
 		now: input.now,
@@ -282,6 +332,7 @@ export async function ensureFreshCredentials(input: {
 		resolution: input.resolution,
 		now: input.now,
 		fetchFn: input.fetchFn,
+		apiUrl: input.apiUrl,
 	})
 }
 
@@ -366,50 +417,53 @@ function waitForCallback(input: {
 			rejectOnce(new Error('Timed out waiting for the browser login.'))
 		}, input.timeoutMs)
 
-		input.server.on('request', (request: IncomingMessage, response: ServerResponse) => {
-			try {
-				const url = new URL(request.url ?? '/', input.redirectUri)
-				if (url.pathname !== input.redirectUri.pathname) {
-					response.writeHead(404).end('Not found')
-					return
+		input.server.on(
+			'request',
+			(request: IncomingMessage, response: ServerResponse) => {
+				try {
+					const url = new URL(request.url ?? '/', input.redirectUri)
+					if (url.pathname !== input.redirectUri.pathname) {
+						response.writeHead(404).end('Not found')
+						return
+					}
+					const error = url.searchParams.get('error')
+					if (error) {
+						const description = url.searchParams.get('error_description') ?? ''
+						const kind = loginCallbackErrorFromOAuthError(error)
+						sendCallbackHtml(response, 400, { kind: 'error', error: kind })
+						rejectOnce(new Error(description || error))
+						return
+					}
+					const state = url.searchParams.get('state')
+					const code = url.searchParams.get('code')
+					const iss = url.searchParams.get('iss') ?? undefined
+					if (state !== input.expectedState || !code) {
+						const kind: LoginCallbackErrorKind =
+							state && state !== input.expectedState
+								? 'state_mismatch'
+								: 'failed'
+						sendCallbackHtml(response, 400, { kind: 'error', error: kind })
+						rejectOnce(new Error('OAuth callback missing code or state.'))
+						return
+					}
+					pendingResponse = response
+					resolveOnce({
+						code,
+						...(iss ? { iss } : {}),
+						complete(page) {
+							sendCallbackHtml(
+								response,
+								page.kind === 'success' ? 200 : 400,
+								page,
+							)
+							closeServer()
+						},
+					})
+				} catch (error) {
+					rejectOnce(redactError(error))
 				}
-				const error = url.searchParams.get('error')
-				if (error) {
-					const description = url.searchParams.get('error_description') ?? ''
-					const kind = loginCallbackErrorFromOAuthError(error)
-					sendCallbackHtml(response, 400, { kind: 'error', error: kind })
-					rejectOnce(new Error(description || error))
-					return
-				}
-				const state = url.searchParams.get('state')
-				const code = url.searchParams.get('code')
-				const iss = url.searchParams.get('iss') ?? undefined
-				if (state !== input.expectedState || !code) {
-					const kind: LoginCallbackErrorKind =
-						state && state !== input.expectedState
-							? 'state_mismatch'
-							: 'failed'
-					sendCallbackHtml(response, 400, { kind: 'error', error: kind })
-					rejectOnce(new Error('OAuth callback missing code or state.'))
-					return
-				}
-				pendingResponse = response
-				resolveOnce({
-					code,
-					...(iss ? { iss } : {}),
-					complete(page) {
-						sendCallbackHtml(
-							response,
-							page.kind === 'success' ? 200 : 400,
-							page,
-						)
-						closeServer()
-					},
-				})
-			} catch (error) {
-				rejectOnce(redactError(error))
-			}
-		})
+			},
+		)
 	})
 }
 
@@ -422,58 +476,58 @@ export async function login(options: LoginOptions = {}): Promise<{
 	account?: LoginCallbackAccount
 }> {
 	const mcpUrl = options.mcpUrl ?? defaultMcpUrl
+	const apiUrl = options.apiUrl ?? defaultApiUrl
 	const orgHint =
 		options.org === undefined ? undefined : orgSlugFromFlag(options.org)
 	const redirectUri = cliRedirectUrl()
 	const expectedState = crypto.randomUUID()
-	const server = await startCallbackServer(redirectUri)
-	let authorizationUrl = redirectUri
-	const provider = createCliOAuthProvider({
+	const issuer = new URL(mcpUrl).origin
+	const authorizationServer = await discoverCliAuthorizationServer({
+		issuer: new URL(issuer),
+		fetchFn: options.fetchFn,
+	})
+	const pkce = await createPkcePair()
+	const authorizationUrl = await buildCliAuthorizationUrl({
+		authorizationServer,
 		mcpUrl,
 		redirectUri,
-		loadStoredTokens: false,
-		openBrowser: options.openBrowser !== false,
-		expectedState,
+		state: expectedState,
+		codeChallenge: pkce.challenge,
 		...(orgHint ? { org: orgHint } : {}),
-		onAuthorizationUrl: (url) => {
-			authorizationUrl = url
-			options.onAuthorizationUrl?.(url)
-		},
 	})
+	const server = await startCallbackServer(redirectUri)
+	options.onAuthorizationUrl?.(authorizationUrl)
+	if (options.openBrowser !== false) {
+		await openUrl(authorizationUrl.href)
+	}
 	let completeCallback: CallbackSuccess['complete'] | undefined
 	try {
-		const first = await auth(provider, {
-			serverUrl: mcpUrl,
-			scope: defaultScopes.join(' '),
+		const callback = await waitForCallback({
+			server,
+			redirectUri,
+			expectedState,
+			timeoutMs: options.timeoutMs ?? loginTimeoutMs,
+		})
+		completeCallback = callback.complete
+		const callbackUrl = new URL(redirectUri.href)
+		callbackUrl.searchParams.set('code', callback.code)
+		callbackUrl.searchParams.set('state', expectedState)
+		if (callback.iss) callbackUrl.searchParams.set('iss', callback.iss)
+		const tokens = await exchangeAuthorizationCode({
+			authorizationServer,
+			mcpUrl,
+			redirectUri,
+			callback: callbackUrl,
+			state: expectedState,
+			codeVerifier: pkce.verifier,
 			fetchFn: options.fetchFn,
 		})
-		if (first !== 'AUTHORIZED') {
-			const callback = await waitForCallback({
-				server,
-				redirectUri,
-				expectedState,
-				timeoutMs: options.timeoutMs ?? loginTimeoutMs,
-			})
-			completeCallback = callback.complete
-			const exchanged = await auth(provider, {
-				serverUrl: mcpUrl,
-				authorizationCode: callback.code,
-				...(callback.iss ? { iss: callback.iss } : {}),
-				scope: defaultScopes.join(' '),
-				fetchFn: options.fetchFn,
-			})
-			if (exchanged !== 'AUTHORIZED') {
-				completeCallback({ kind: 'error', error: 'failed' })
-				completeCallback = undefined
-				throw new Error('OAuth redirect completed without tokens.')
-			}
-		} else {
-			server.close()
-		}
-		const tokens = await provider.tokens()
-		if (!tokens?.access_token) {
-			throw new Error('OAuth completed without tokens. Run `kody login`.')
-		}
+		const device = await mintDeviceToken({
+			apiUrl,
+			oauthAccessToken: tokens.accessToken,
+			lifetime: options.lifetime ?? 'long',
+			fetchFn: options.fetchFn,
+		})
 
 		let org = orgHint
 		let account: LoginCallbackAccount | undefined
@@ -481,7 +535,8 @@ export async function login(options: LoginOptions = {}): Promise<{
 		try {
 			const identity = await discover({
 				mcpUrl,
-				accessToken: tokens.access_token,
+				apiUrl,
+				accessToken: device.token,
 				fetchFn: options.fetchFn,
 			})
 			if (orgHint && identity.org !== orgHint) {
@@ -520,14 +575,20 @@ export async function login(options: LoginOptions = {}): Promise<{
 			}
 		}
 
-		const { credentials, saved } = await persistAuthorizedSession({
+		const credentials = deviceCredentials({
 			mcpUrl,
-			provider,
-			backend: options.backend,
-			resolution: options.resolution,
+			apiUrl,
+			authorizationServerUrl: tokens.issuer,
+			token: device.token,
+			expiresAt: device.expiresAt,
+			scopes: device.scopes,
 			org,
-			now: options.now?.(),
 		})
+		const saved = saveCredentials(
+			credentials,
+			options.backend,
+			options.resolution,
+		)
 
 		completeCallback?.({
 			kind: 'success',

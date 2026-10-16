@@ -11,8 +11,9 @@
 import { access, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { bundleLocalUserModule } from './local-bundle.js'
-import type { LocalPackageGraph, LocalPackageModule } from './local-package-graph.js'
 import {
+	type LocalPackageGraph,
+	type LocalPackageModule,
 	hasLiteralDynamicSavedPackageImports,
 	listSavedPackageImports,
 	LocalPackageGraphError,
@@ -58,7 +59,9 @@ export function parseKodyPackageSpecifier(specifier: string): {
 	}
 }
 
-export async function loadLocalDepMap(packageRoot: string): Promise<LocalDepMap> {
+export async function loadLocalDepMap(
+	packageRoot: string,
+): Promise<LocalDepMap> {
 	const fromFile = await readDepsJson(join(packageRoot, localDepsRelativePath))
 	const fromManifest = await readDepsFromPackageJson(packageRoot)
 	return { ...fromManifest, ...fromFile }
@@ -70,7 +73,8 @@ async function readDepsJson(path: string): Promise<LocalDepMap> {
 		if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
 		const out: LocalDepMap = {}
 		for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-			if (typeof value === 'string' && value.trim()) out[normalizeDepKey(key)] = value.trim()
+			if (typeof value === 'string' && value.trim())
+				out[normalizeDepKey(key)] = value.trim()
 		}
 		return out
 	} catch {
@@ -78,16 +82,21 @@ async function readDepsJson(path: string): Promise<LocalDepMap> {
 	}
 }
 
-async function readDepsFromPackageJson(packageRoot: string): Promise<LocalDepMap> {
+async function readDepsFromPackageJson(
+	packageRoot: string,
+): Promise<LocalDepMap> {
 	try {
-		const raw = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')) as {
+		const raw = JSON.parse(
+			await readFile(join(packageRoot, 'package.json'), 'utf8'),
+		) as {
 			kody?: { localDeps?: Record<string, unknown> }
 		}
 		const map = raw.kody?.localDeps
 		if (!map || typeof map !== 'object') return {}
 		const out: LocalDepMap = {}
 		for (const [key, value] of Object.entries(map)) {
-			if (typeof value === 'string' && value.trim()) out[normalizeDepKey(key)] = value.trim()
+			if (typeof value === 'string' && value.trim())
+				out[normalizeDepKey(key)] = value.trim()
 		}
 		return out
 	} catch {

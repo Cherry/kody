@@ -11,7 +11,7 @@ import {
 	type Server,
 	type ServerResponse,
 } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { Readable } from 'node:stream'
 import { redact } from './redact.js'
 import { runSecretHeader } from './local-runtime-source.js'
@@ -63,7 +63,11 @@ export async function startLocalRuntimeBridge(
 			response.end(JSON.stringify(body))
 		}
 		/** Open API-shaped error so workerd `gatewayFetchStream` throws (needs no-store). */
-		const replyGatewayFetchError = (status: number, message: string, code: string) => {
+		const replyGatewayFetchError = (
+			status: number,
+			message: string,
+			code: string,
+		) => {
 			replyJson(
 				status,
 				{ error: { code, message } },
@@ -89,7 +93,10 @@ export async function startLocalRuntimeBridge(
 			}
 			return
 		}
-		if (request.method === 'POST' && request.url === localBridgeGatewayFetchPath) {
+		if (
+			request.method === 'POST' &&
+			request.url === localBridgeGatewayFetchPath
+		) {
 			try {
 				await input.forwardGatewayFetchStream({
 					request,
@@ -112,7 +119,8 @@ export async function startLocalRuntimeBridge(
 			return
 		}
 		replyJson(404, {
-			error: 'Not found: the kody bridge only accepts POST /call and POST /gateway-fetch.',
+			error:
+				'Not found: the kody bridge only accepts POST /call and POST /gateway-fetch.',
 		})
 	})
 	await new Promise<void>((resolve, reject) => {

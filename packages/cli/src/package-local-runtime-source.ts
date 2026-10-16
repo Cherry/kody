@@ -14,7 +14,11 @@ import {
 	runSecretEnvVar,
 	runSecretHeader,
 } from './local-runtime-source.js'
-import { appLogMarker, devErrorHeader, devRequestIdHeader } from './dev/dev-protocol.js'
+import {
+	appLogMarker,
+	devErrorHeader,
+	devRequestIdHeader,
+} from './dev/dev-protocol.js'
 
 export type PackageLocalContext = {
 	packageId: string

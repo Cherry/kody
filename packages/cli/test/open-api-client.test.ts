@@ -16,17 +16,30 @@ import {
 	whoamiWithApiToken,
 } from '../src/open-api-client.js'
 
-test('searchWithApiToken calls GET /v1/search with the bearer token', async () => {
-	const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+test('searchWithApiToken posts /v1/search/tool with the bearer token', async () => {
+	const fetchFn = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = new URL(String(input))
-		assert.equal(url.pathname, '/v1/search')
-		assert.equal(url.searchParams.get('query'), 'email')
-		assert.equal(url.searchParams.get('domain'), 'email')
-		assert.equal(init?.headers && (init.headers as Record<string, string>).authorization, 'Bearer tok')
-		return new Response(JSON.stringify({ matches: [{ id: 'emailSend' }], conversationId: 'c1' }), {
-			status: 200,
-			headers: { 'content-type': 'application/json' },
+		assert.equal(url.pathname, '/v1/search/tool')
+		assert.equal(init?.method, 'POST')
+		assert.deepEqual(JSON.parse(String(init?.body)), {
+			query: 'email',
+			domain: 'email',
+			entity: 'capability:emailSend',
 		})
+		assert.equal(
+			init?.headers && (init.headers as Record<string, string>).authorization,
+			'Bearer tok',
+		)
+		return new Response(
+			JSON.stringify({ matches: [{ id: 'emailSend' }], conversationId: 'c1' }),
+			{
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			},
+		)
 	}) as typeof fetch
 
 	const result = await searchWithApiToken({
@@ -34,21 +47,11 @@ test('searchWithApiToken calls GET /v1/search with the bearer token', async () =
 		apiUrl: 'https://api.kody.codes',
 		query: 'email',
 		domain: 'email',
+		entity: 'capability:emailSend',
 		fetchFn,
 	})
 	assert.equal(result.isError, false)
 	assert.match(result.content[0]?.text ?? '', /emailSend/)
-})
-
-test('searchWithApiToken rejects --entity with a clear message', async () => {
-	await assert.rejects(
-		() =>
-			searchWithApiToken({
-				token: 'tok',
-				entity: 'capability:emailSend',
-			}),
-		/does not support --entity/,
-	)
 })
 
 test('searchWithApiToken maps insufficient_scope to a mint-token hint', async () => {
@@ -64,7 +67,13 @@ test('searchWithApiToken maps insufficient_scope to a mint-token hint', async ()
 			{ status: 403, headers: { 'content-type': 'application/json' } },
 		)) as typeof fetch
 	await assert.rejects(
-		() => searchWithApiToken({ token: 'tok', apiUrl: 'https://api.kody.codes', query: 'x', fetchFn }),
+		() =>
+			searchWithApiToken({
+				token: 'tok',
+				apiUrl: 'https://api.kody.codes',
+				query: 'x',
+				fetchFn,
+			}),
 		(error: unknown) => {
 			assert.ok(error instanceof OpenApiError)
 			assert.equal(error.status, 403)
@@ -240,9 +249,14 @@ test('assertApiOperationAllowed refuses bootstrap redeem', () => {
 test('callOpenApiOperation loads openapi.json then calls the route', async () => {
 	clearOpenApiRouteCache()
 	const calls: Array<string> = []
-	const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	const fetchFn = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = new URL(String(input))
-		calls.push(`${(init?.method ?? 'GET').toUpperCase()} ${url.pathname}${url.search}`)
+		calls.push(
+			`${(init?.method ?? 'GET').toUpperCase()} ${url.pathname}${url.search}`,
+		)
 		if (url.pathname === '/openapi.json') {
 			return new Response(
 				JSON.stringify({
@@ -315,11 +329,17 @@ test('callOpenApiOperation refuses cliCredentialBootstrapRedeem', async () => {
 })
 
 test('callOpenApiOperation POSTs body params for write ops', async () => {
-	const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	const fetchFn = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = new URL(String(input))
 		assert.equal(url.pathname, '/v1/tokens')
 		assert.equal(init?.method, 'POST')
-		assert.equal(init?.body, JSON.stringify({ name: 'cli', scopes: ['search:read'] }))
+		assert.equal(
+			init?.body,
+			JSON.stringify({ name: 'cli', scopes: ['search:read'] }),
+		)
 		return new Response(JSON.stringify({ id: 'tok_1', name: 'cli' }), {
 			status: 200,
 			headers: { 'content-type': 'application/json' },
@@ -352,16 +372,25 @@ test('loadOpenApiOperations keeps the parsed route map on disk by content hash a
 	const cacheDir = mkdtempSync(join(tmpdir(), 'kody-openapi-cache-'))
 	process.env.KODY_CACHE_DIR = cacheDir
 	const apiUrl = 'https://api.openapi-cache.test'
-	const document = (path: string) => ({ paths: { [path]: { get: { operationId: 'usageGet' } } } })
-	let serve: { etag: string; path: string } = { etag: '"hash-a"', path: '/v1/account/usage' }
+	const document = (path: string) => ({
+		paths: { [path]: { get: { operationId: 'usageGet' } } },
+	})
+	let serve: { etag: string; path: string } = {
+		etag: '"hash-a"',
+		path: '/v1/account/usage',
+	}
 	const conditionals: Array<string | null> = []
 	const statuses: Array<number> = []
-	const fetchFn = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	const fetchFn = (async (
+		_input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const ifNoneMatch = new Headers(init?.headers).get('if-none-match')
 		conditionals.push(ifNoneMatch)
 		const status = ifNoneMatch === serve.etag ? 304 : 200
 		statuses.push(status)
-		if (status === 304) return new Response(null, { status, headers: { etag: serve.etag } })
+		if (status === 304)
+			return new Response(null, { status, headers: { etag: serve.etag } })
 		return new Response(JSON.stringify(document(serve.path)), {
 			status,
 			headers: { 'content-type': 'application/json', etag: serve.etag },

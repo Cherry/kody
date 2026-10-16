@@ -5,22 +5,26 @@
  * and members of the org the request is bound to (`--org`).
  */
 
-export const packageCollaboratorPresets = ['use', 'contribute', 'manage'] as const
+export const packageCollaboratorPresets = [
+	'use',
+	'contribute',
+	'manage',
+] as const
 
-export type PackageCollaboratorPreset = (typeof packageCollaboratorPresets)[number]
+export type PackageCollaboratorPreset =
+	(typeof packageCollaboratorPresets)[number]
 
 export type PackageCollaboratorAction = 'collaborators' | 'grant' | 'revoke'
 
-export const packageCollaboratorActions: ReadonlyArray<PackageCollaboratorAction> = [
-	'collaborators',
-	'grant',
-	'revoke',
-]
+export const packageCollaboratorActions: ReadonlyArray<PackageCollaboratorAction> =
+	['collaborators', 'grant', 'revoke']
 
 export function isPackageCollaboratorAction(
 	value: string | undefined,
 ): value is PackageCollaboratorAction {
-	return (packageCollaboratorActions as ReadonlyArray<string | undefined>).includes(value)
+	return (
+		packageCollaboratorActions as ReadonlyArray<string | undefined>
+	).includes(value)
 }
 
 export const packageCollaboratorUsage = [
@@ -29,7 +33,9 @@ export const packageCollaboratorUsage = [
 	'       kody package revoke <package> (--team <slug> | --user <username> | --grant <grant_id>) [--org <slug>] [--json]',
 ].join('\n')
 
-type Subject = { kind: 'team'; slug: string } | { kind: 'user'; username: string }
+type Subject =
+	| { kind: 'team'; slug: string }
+	| { kind: 'user'; username: string }
 
 export type PackageCollaboratorPlan =
 	| { action: 'collaborators'; packageId: string }
@@ -78,7 +84,9 @@ function readSubject(values: FlagValues, allowGrant: boolean) {
 function readPreset(value: unknown): PackageCollaboratorPreset {
 	const preset = readFlag(value, 'preset') ?? 'use'
 	if (!(packageCollaboratorPresets as ReadonlyArray<string>).includes(preset)) {
-		throw new Error(`--preset must be one of ${packageCollaboratorPresets.join(', ')}.`)
+		throw new Error(
+			`--preset must be one of ${packageCollaboratorPresets.join(', ')}.`,
+		)
 	}
 	return preset as PackageCollaboratorPreset
 }
@@ -108,9 +116,15 @@ export function parsePackageCollaboratorCommand(input: {
 		}
 		case 'revoke':
 			if (input.values.preset !== undefined) {
-				throw new Error(`--preset is only for grant.\n${packageCollaboratorUsage}`)
+				throw new Error(
+					`--preset is only for grant.\n${packageCollaboratorUsage}`,
+				)
 			}
-			return { action: 'revoke', packageId, target: readSubject(input.values, true) }
+			return {
+				action: 'revoke',
+				packageId,
+				target: readSubject(input.values, true),
+			}
 		default: {
 			const exhaustive: never = input.action
 			throw new Error(`Unhandled package action: ${String(exhaustive)}`)
@@ -134,7 +148,10 @@ export type PackageCollaborator = {
 
 type PackageSummary = { id: string; kody_id: string; name: string }
 
-type CollaboratorList = { package: PackageSummary; collaborators: Array<PackageCollaborator> }
+type CollaboratorList = {
+	package: PackageSummary
+	collaborators: Array<PackageCollaborator>
+}
 
 export type CallOperation = (
 	operationId: string,
@@ -142,7 +159,9 @@ export type CallOperation = (
 ) => Promise<unknown>
 
 function describeSubject(subject: Subject) {
-	return subject.kind === 'team' ? `team ${subject.slug}` : `@${subject.username}`
+	return subject.kind === 'team'
+		? `team ${subject.slug}`
+		: `@${subject.username}`
 }
 
 export function collaboratorLabel(collaborator: PackageCollaborator) {
@@ -151,14 +170,18 @@ export function collaboratorLabel(collaborator: PackageCollaborator) {
 			? `${collaborator.team_slug}${collaborator.team_name ? ` (${collaborator.team_name})` : ''}`
 			: collaborator.subject_id
 	}
-	if (!collaborator.username) return collaborator.display_name ?? collaborator.subject_id
+	if (!collaborator.username)
+		return collaborator.display_name ?? collaborator.subject_id
 	return collaborator.display_name
 		? `@${collaborator.username} (${collaborator.display_name})`
 		: `@${collaborator.username}`
 }
 
 function presetLabel(collaborator: PackageCollaborator) {
-	return collaborator.preset ?? `custom (${collaborator.permissions.length} permissions)`
+	return (
+		collaborator.preset ??
+		`custom (${collaborator.permissions.length} permissions)`
+	)
 }
 
 /** Plain-text table for `kody package collaborators`. */
@@ -177,7 +200,9 @@ export function formatCollaboratorList(list: CollaboratorList): string {
 		Math.max(...rows.map((row) => row[column]!.length)),
 	)
 	const lines = rows.map((row) =>
-		row.map((cell, column) => (column < 3 ? cell.padEnd(widths[column]!) : cell)).join('  '),
+		row
+			.map((cell, column) => (column < 3 ? cell.padEnd(widths[column]!) : cell))
+			.join('  '),
 	)
 	return `${header}\n${lines.join('\n')}\n`
 }
@@ -185,12 +210,15 @@ export function formatCollaboratorList(list: CollaboratorList): string {
 function findCollaborator(list: CollaboratorList, subject: Subject) {
 	const match = list.collaborators.find((collaborator) =>
 		subject.kind === 'team'
-			? collaborator.subject_type === 'team' && collaborator.team_slug === subject.slug
+			? collaborator.subject_type === 'team' &&
+				collaborator.team_slug === subject.slug
 			: collaborator.subject_type === 'user' &&
 				collaborator.username?.toLowerCase() === subject.username.toLowerCase(),
 	)
 	if (!match) {
-		throw new Error(`${describeSubject(subject)} is not a collaborator on ${list.package.name}.`)
+		throw new Error(
+			`${describeSubject(subject)} is not a collaborator on ${list.package.name}.`,
+		)
 	}
 	return match
 }

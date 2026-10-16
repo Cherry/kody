@@ -10,6 +10,7 @@
 /** Open API operationIds the mock answers. */
 export const mockOpenApiOperationIds = [
 	'search',
+	'searchTool',
 	'metaGetCurrentUser',
 	'usageGet',
 ] as const
@@ -53,11 +54,15 @@ export const mockCapabilityPaths = [
 export type MockOpenApiOperationId = (typeof mockOpenApiOperationIds)[number]
 export type MockCapabilityPath = (typeof mockCapabilityPaths)[number]
 
-export function isMockOpenApiOperation(id: string): id is MockOpenApiOperationId {
+export function isMockOpenApiOperation(
+	id: string,
+): id is MockOpenApiOperationId {
 	return (mockOpenApiOperationIds as ReadonlyArray<string>).includes(id)
 }
 
-export function isMockCapabilityPath(pathKey: string): pathKey is MockCapabilityPath {
+export function isMockCapabilityPath(
+	pathKey: string,
+): pathKey is MockCapabilityPath {
 	return (mockCapabilityPaths as ReadonlyArray<string>).includes(pathKey)
 }
 

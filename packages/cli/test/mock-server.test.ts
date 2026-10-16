@@ -9,7 +9,10 @@ import {
 	startMockServer,
 	withMockServer,
 } from '../src/mock/mock-server.js'
-import { mockCapabilityPaths, mockOpenApiOperationIds } from '../src/mock/mock-supported.js'
+import {
+	mockCapabilityPaths,
+	mockOpenApiOperationIds,
+} from '../src/mock/mock-supported.js'
 
 test('mock session + search + metaGetCurrentUser work', async () => {
 	const cache = await mkdtemp(join(tmpdir(), 'kody-mock-cache-'))
@@ -35,7 +38,9 @@ test('mock session + search + metaGetCurrentUser work', async () => {
 					headers: { authorization: `Bearer ${token}` },
 				})
 				assert.equal(search.status, 200)
-				const searchBody = (await search.json()) as { matches: Array<{ id: string }> }
+				const searchBody = (await search.json()) as {
+					matches: Array<{ id: string }>
+				}
 				assert.ok(searchBody.matches.some((m) => m.id === 'local_execute'))
 			},
 		)
@@ -60,7 +65,10 @@ test('mock CapabilityProxy call for metaGetCurrentUser', async () => {
 					authorization: `Bearer ${token}`,
 					'content-type': 'application/json',
 				},
-				body: JSON.stringify({ path: ['kody', 'metaGetCurrentUser'], args: [{}] }),
+				body: JSON.stringify({
+					path: ['kody', 'metaGetCurrentUser'],
+					args: [{}],
+				}),
 			})
 			assert.equal(response.status, 200)
 			const body = (await response.json()) as {
@@ -80,7 +88,11 @@ test('mock refuses unimplemented capability paths with not_implemented_in_mock',
 	const cache = await mkdtemp(join(tmpdir(), 'kody-mock-cache-'))
 	try {
 		await withMockServer(
-			{ sessionId: 'refuse', env: { KODY_CACHE_DIR: cache }, resetStorage: true },
+			{
+				sessionId: 'refuse',
+				env: { KODY_CACHE_DIR: cache },
+				resetStorage: true,
+			},
 			async (server) => {
 				const token = mintMockApiToken(server.sessionId)
 				const response = await fetch(`${server.url}/v1/capability-proxy/call`, {
@@ -108,17 +120,24 @@ test('mock package-graph returns empty modules', async () => {
 	const cache = await mkdtemp(join(tmpdir(), 'kody-mock-cache-'))
 	try {
 		await withMockServer(
-			{ sessionId: 'graph', env: { KODY_CACHE_DIR: cache }, resetStorage: true },
+			{
+				sessionId: 'graph',
+				env: { KODY_CACHE_DIR: cache },
+				resetStorage: true,
+			},
 			async (server) => {
 				const token = mintMockApiToken(server.sessionId)
-				const response = await fetch(`${server.url}/v1/local-execute/package-graph`, {
-					method: 'POST',
-					headers: {
-						authorization: `Bearer ${token}`,
-						'content-type': 'application/json',
+				const response = await fetch(
+					`${server.url}/v1/local-execute/package-graph`,
+					{
+						method: 'POST',
+						headers: {
+							authorization: `Bearer ${token}`,
+							'content-type': 'application/json',
+						},
+						body: JSON.stringify({ code: 'export default async () => ({})' }),
 					},
-					body: JSON.stringify({ code: 'export default async () => ({})' }),
-				})
+				)
 				assert.equal(response.status, 200)
 				const body = (await response.json()) as { modules: Array<unknown> }
 				assert.deepEqual(body.modules, [])
@@ -134,10 +153,16 @@ test('ensureMockTarget mints a bearer and can reset storage', async () => {
 	const previous = process.env.KODY_CACHE_DIR
 	process.env.KODY_CACHE_DIR = cache
 	try {
-		const first = await ensureMockTarget({ sessionId: 'ensure', resetStorage: true })
+		const first = await ensureMockTarget({
+			sessionId: 'ensure',
+			resetStorage: true,
+		})
 		first.server.state().packageStorage['p'] = { rows: { a: 1 } }
 		await first.server.close()
-		const second = await ensureMockTarget({ sessionId: 'ensure', resetStorage: true })
+		const second = await ensureMockTarget({
+			sessionId: 'ensure',
+			resetStorage: true,
+		})
 		assert.deepEqual(second.server.state().packageStorage, {})
 		await second.server.close()
 		assert.ok(second.token.startsWith('kody_mock_'))
@@ -200,81 +225,110 @@ test('mock credentials OpenAll + authenticatedFetch + adminUserList fixtures', a
 			{ sessionId: 'ops', env: { KODY_CACHE_DIR: cache }, resetStorage: true },
 			async (server) => {
 				const token = mintMockApiToken(server.sessionId)
-				const call = async (path: Array<string>, args: Array<unknown> = [{}]) => {
-					const response = await fetch(`${server.url}/v1/capability-proxy/call`, {
-						method: 'POST',
-						headers: {
-							authorization: `Bearer ${token}`,
-							'content-type': 'application/json',
+				const call = async (
+					path: Array<string>,
+					args: Array<unknown> = [{}],
+				) => {
+					const response = await fetch(
+						`${server.url}/v1/capability-proxy/call`,
+						{
+							method: 'POST',
+							headers: {
+								authorization: `Bearer ${token}`,
+								'content-type': 'application/json',
+							},
+							body: JSON.stringify({ path, args }),
 						},
-						body: JSON.stringify({ path, args }),
-					})
+					)
 					assert.equal(response.status, 200)
 					return (await response.json()) as { result: unknown }
 				}
 
-				const openAll = (await call(['kody', 'credentialClientOpenAll'], [
-					{ key: 'MOCK_SECRET' },
-				])) as {
-					result: { ok: boolean; value: Array<{ name: string; hosts: Array<string> }> }
+				const openAll = (await call(
+					['kody', 'credentialClientOpenAll'],
+					[{ key: 'MOCK_SECRET' }],
+				)) as {
+					result: {
+						ok: boolean
+						value: Array<{ name: string; hosts: Array<string> }>
+					}
 				}
 				assert.equal(openAll.result.ok, true)
 				assert.equal(openAll.result.value.length, 1)
 				assert.equal(openAll.result.value[0]?.name, 'MOCK_SECRET')
 
-				const oauthResponse = await fetch(`${server.url}/v1/capability-proxy/call`, {
-					method: 'POST',
-					headers: {
-						authorization: `Bearer ${token}`,
-						'content-type': 'application/json',
-					},
-					body: JSON.stringify({
-						path: ['kody', 'authenticatedFetch'],
-						args: [
-							{
-								providerName: 'linkedin',
-								request: {
-									url: 'https://api.linkedin.com/v2/userinfo',
-									method: 'GET',
+				const oauthResponse = await fetch(
+					`${server.url}/v1/capability-proxy/call`,
+					{
+						method: 'POST',
+						headers: {
+							authorization: `Bearer ${token}`,
+							'content-type': 'application/json',
+						},
+						body: JSON.stringify({
+							path: ['kody', 'authenticatedFetch'],
+							args: [
+								{
+									providerName: 'linkedin',
+									request: {
+										url: 'https://api.linkedin.com/v2/userinfo',
+										method: 'GET',
+									},
 								},
-							},
-						],
-					}),
-				})
+							],
+						}),
+					},
+				)
 				assert.equal(oauthResponse.status, 400)
 				const oauthBody = (await oauthResponse.json()) as {
 					error: { code: string }
 				}
 				assert.equal(oauthBody.error.code, 'unmocked_request')
 
-				const storage = (await call(['kody', 'packageStorageSet'], [
-					{ key: 'k', value: 1 },
-				])) as { result: { ok: boolean } }
+				const storage = (await call(
+					['kody', 'packageStorageSet'],
+					[{ key: 'k', value: 1 }],
+				)) as { result: { ok: boolean } }
 				assert.equal(storage.result.ok, true)
-				const got = (await call(['kody', 'packageStorageGet'], [{ key: 'k' }])) as {
+				const got = (await call(
+					['kody', 'packageStorageGet'],
+					[{ key: 'k' }],
+				)) as {
 					result: { value: number }
 				}
 				assert.equal(got.result.value, 1)
 
-				const create = (await call(['kody', 'packageStorageSql'], [
-					{
-						query:
-							'CREATE TABLE IF NOT EXISTS sightings (file_id TEXT PRIMARY KEY, name TEXT NOT NULL)',
-					},
-				])) as { result: { rows: Array<unknown> } }
+				const create = (await call(
+					['kody', 'packageStorageSql'],
+					[
+						{
+							query:
+								'CREATE TABLE IF NOT EXISTS sightings (file_id TEXT PRIMARY KEY, name TEXT NOT NULL)',
+						},
+					],
+				)) as { result: { rows: Array<unknown> } }
 				assert.deepEqual(create.result.rows, [])
-				await call(['kody', '__mockPackageStorageSql'], [
-					{
-						query: 'INSERT INTO sightings (file_id, name) VALUES (?, ?)',
-						bindings: ['f1', 'a.txt'],
-					},
+				await call(
+					['kody', '__mockPackageStorageSql'],
+					[
+						{
+							query: 'INSERT INTO sightings (file_id, name) VALUES (?, ?)',
+							bindings: ['f1', 'a.txt'],
+						},
+					],
+				)
+				const selected = (await call(
+					['kody', 'packageStorageSql'],
+					[{ query: 'SELECT file_id, name FROM sightings ORDER BY file_id' }],
+				)) as { result: { rows: Array<{ file_id: string; name: string }> } }
+				assert.deepEqual(selected.result.rows, [
+					{ file_id: 'f1', name: 'a.txt' },
 				])
-				const selected = (await call(['kody', 'packageStorageSql'], [
-					{ query: 'SELECT file_id, name FROM sightings ORDER BY file_id' },
-				])) as { result: { rows: Array<{ file_id: string; name: string }> } }
-				assert.deepEqual(selected.result.rows, [{ file_id: 'f1', name: 'a.txt' }])
 
-				const admin = (await call(['kody', 'adminUserList'], [{ page: 1 }])) as {
+				const admin = (await call(
+					['kody', 'adminUserList'],
+					[{ page: 1 }],
+				)) as {
 					result: {
 						total: number
 						page: number

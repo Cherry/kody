@@ -16,9 +16,9 @@ This is the kody `ship-pr` skill, scoped to `@kodycodes/cli`.
 Self-assess; user policy overrides.
 
 **Kent's standing policy (2026-08-08):** auto-ship (squash-merge + verify
-publish) once AI reviewer feedback is addressed and CI is green, unless
-**high** risk. High risk still parks ready-for-review unless merge authority
-was granted explicitly.
+publish) once AI reviewer feedback is addressed and CI is green, unless **high**
+risk. High risk still parks ready-for-review unless merge authority was granted
+explicitly.
 
 - **Low** — green CI; nits ignorable; squash-merge when policy allows.
 - **Medium** — wait for AI reviewer(s); address **valid** feedback (ignore
@@ -27,8 +27,9 @@ was granted explicitly.
 
 ## AI reviewers
 
-Prefer **Cursor Bugbot** (`Cursor Bugbot` check / `cursor[bot]` review comments).
-Trigger with `bugbot run` or `@cursor review` on the PR if it has not started.
+Prefer **Cursor Bugbot** (`Cursor Bugbot` check / `cursor[bot]` review
+comments). Trigger with `bugbot run` or `@cursor review` on the PR if it has not
+started.
 
 **CodeRabbit:** if it is rate-limited, errored, or otherwise unavailable, **do
 not wait** on it for low/medium risk — proceed with Bugbot + CI. Only wait on
@@ -49,16 +50,16 @@ CodeRabbit when the change is **high** risk (or the user explicitly asks).
 
 ## Gates ≠ CI
 
-Blocked on a release / trusted-publishing / calendar gate → **end the run**
-and schedule a wake (Kody `job_schedule` + `createRun`). Don't sleep-poll or
+Blocked on a release / trusted-publishing / calendar gate → **end the run** and
+schedule a wake (Kody `job_schedule` + `createRun`). Don't sleep-poll or
 code-thrash an intentional time window.
 
 ## Merge / publish
 
 When policy + risk allow: squash-merge via `kody:@kentcdodds/github/pr/merge`
 `{ prUrl, mergeMethod: 'squash' }`. `main` conventional commits publish
-`@kodycodes/cli` through semantic-release. Useful: `pr/get-checks`,
-`request`, `graphql` on the same package.
+`@kodycodes/cli` through semantic-release. Useful: `pr/get-checks`, `request`,
+`graphql` on the same package.
 
 ## Done → Discord
 

@@ -32,7 +32,11 @@ test('track detaches the poll map so a concurrent poll cannot echo a rebuild', a
 		await sleep(50)
 		await tracking
 		await sleep(50)
-		assert.deepEqual(changes, [], 'poll must not echo the file track just baselined')
+		assert.deepEqual(
+			changes,
+			[],
+			'poll must not echo the file track just baselined',
+		)
 		await watcher.close()
 	} finally {
 		await rm(root, { recursive: true, force: true })
@@ -56,7 +60,9 @@ test('track reports mid-build edits that are not in ignoreChanges', async () => 
 		await watcher.track([entry, other])
 		// Change length so size:mtime fingerprints differ even on coarse FS clocks.
 		await writeFile(other, 'export const b = 22\n')
-		const changed = await watcher.track([entry, other], { ignoreChanges: [entry] })
+		const changed = await watcher.track([entry, other], {
+			ignoreChanges: [entry],
+		})
 		assert.deepEqual([...changed], [other])
 		await watcher.close()
 	} finally {

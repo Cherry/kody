@@ -4,7 +4,7 @@ import {
 	type InstallResult,
 	type McpServerConfig,
 } from 'add-mcp'
-import type { HostId } from './host-catalog.js'
+import { type HostId } from './host-catalog.js'
 
 /**
  * Hosts whose on-disk MCP config `add-mcp` already knows how to merge.
@@ -66,7 +66,10 @@ export function isAddMcpHostId(id: HostId): id is AddMcpHostId {
 	return Object.hasOwn(addMcpAgentByHostId, id)
 }
 
-export function addMcpUsesProjectScope(id: AddMcpHostId, project: boolean): boolean {
+export function addMcpUsesProjectScope(
+	id: AddMcpHostId,
+	project: boolean,
+): boolean {
 	return project && addMcpProjectHosts.has(id)
 }
 

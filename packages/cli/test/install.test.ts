@@ -15,14 +15,24 @@ import {
 const mcpUrl = 'https://kody.codes/mcp'
 
 test('resolveCommand maps install flags', () => {
-	const parsed = resolveCommand(['install', '--clients', 'cursor,goose', '--yes'])
+	const parsed = resolveCommand([
+		'install',
+		'--clients',
+		'cursor,goose',
+		'--yes',
+	])
 	assert.equal(parsed.command, 'install')
 	assert.equal(parsed.values.clients, 'cursor,goose')
 	assert.equal(parsed.values.yes, true)
 })
 
 test('runInstall writes Cursor config for an explicit client', async () => {
-	const upserts: Array<{ agent: string; name: string; url?: string; local?: boolean }> = []
+	const upserts: Array<{
+		agent: string
+		name: string
+		url?: string
+		local?: boolean
+	}> = []
 	const opened: Array<string> = []
 	let output = ''
 	const result = await runInstall(
@@ -128,7 +138,9 @@ test('runInstall writes leftover VS Code Insiders config without add-mcp', async
 	assert.equal(result.results[0]?.status, 'wrote')
 	assert.deepEqual(upserts, [])
 	assert.deepEqual(
-		JSON.parse(files.get('/home/me/.config/Code - Insiders/User/mcp.json') ?? '{}'),
+		JSON.parse(
+			files.get('/home/me/.config/Code - Insiders/User/mcp.json') ?? '{}',
+		),
 		{ servers: { kody: { type: 'http', url: mcpUrl } } },
 	)
 })
@@ -183,7 +195,9 @@ test('onboarding prompt and help note stay copyable', () => {
 					label: 'Cursor',
 					status: 'wrote',
 					path: '/home/me/.cursor/mcp.json',
-					instructions: ['Approve Kody in the browser when the client starts OAuth.'],
+					instructions: [
+						'Approve Kody in the browser when the client starts OAuth.',
+					],
 				},
 			],
 		}),

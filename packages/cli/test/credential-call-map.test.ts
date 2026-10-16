@@ -96,7 +96,10 @@ test('parseCredentialFlags rejects empty + named for the same key', () => {
 test('parseCredentialFlag rejects bad shapes', () => {
 	assert.throws(() => parseCredentialFlag('=work'), /Invalid --credential/)
 	assert.throws(() => parseCredentialFlag('github'), /Invalid --credential/)
-	assert.throws(() => parseCredentialFlag(' github=work'), /Invalid --credential key/)
+	assert.throws(
+		() => parseCredentialFlag(' github=work'),
+		/Invalid --credential key/,
+	)
 	assert.doesNotThrow(() => parseCredentialFlag('github='))
 })
 
@@ -140,8 +143,14 @@ test('formatCredentialClientError prints code, message, and --credential retries
 		formatCredentialFlagSuggestion('github', { name: 'work', scope: 'org' }),
 		'--credential github=org:work',
 	)
-	assert.equal(formatCredentialFlagSuggestion('github', 'work'), '--credential github=work')
-	assert.equal(formatCredentialFlagSuggestion('github', []), '--credential github=')
+	assert.equal(
+		formatCredentialFlagSuggestion('github', 'work'),
+		'--credential github=work',
+	)
+	assert.equal(
+		formatCredentialFlagSuggestion('github', []),
+		'--credential github=',
+	)
 	const text = formatCredentialClientError({
 		code: 'credential_ambiguous',
 		message: 'Several credentials match github.',
@@ -158,7 +167,10 @@ test('formatCredentialClientError prints code, message, and --credential retries
 			},
 		],
 	})
-	assert.match(text, /^credential_ambiguous: Several credentials match github\./)
+	assert.match(
+		text,
+		/^credential_ambiguous: Several credentials match github\./,
+	)
 	assert.match(text, /retry: --credential github=org:work/)
 	assert.match(text, /retry: --credential github=personal/)
 	assert.match(text, /retry: --credential github=personal:home/)

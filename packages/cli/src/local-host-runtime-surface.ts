@@ -32,7 +32,9 @@ export const hostedCapabilityProxySpecialPrefixes = [
  * Host methods that cannot use the JSON `/call` Proxy hop. The CLI workerd
  * `kody:runtime` must implement these (streaming body / real `Response`).
  */
-export const hostedLocalHostSpecialFunctions = ['kody.gatewayFetchStream'] as const
+export const hostedLocalHostSpecialFunctions = [
+	'kody.gatewayFetchStream',
+] as const
 
 /**
  * Full audit list: every hosted special the CLI `--local` host must support

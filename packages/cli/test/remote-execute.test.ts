@@ -16,17 +16,29 @@ test('parseExecuteInvokeSpecifier normalizes @scope and hash exports', () => {
 		parseExecuteInvokeSpecifier('kody:@scope/pkg/export'),
 		'kody:@scope/pkg/export',
 	)
-	assert.equal(parseExecuteInvokeSpecifier('@scope/pkg#export'), 'kody:@scope/pkg/export')
-	assert.throws(() => parseExecuteInvokeSpecifier('https://example.com/x'), /Unsupported/)
+	assert.equal(
+		parseExecuteInvokeSpecifier('@scope/pkg#export'),
+		'kody:@scope/pkg/export',
+	)
+	assert.throws(
+		() => parseExecuteInvokeSpecifier('https://example.com/x'),
+		/Unsupported/,
+	)
 })
 
 test('isPublishedPackageInvokeSpecifier distinguishes local export keys', () => {
-	assert.equal(isPublishedPackageInvokeSpecifier('kody:@scope/pkg/export'), true)
+	assert.equal(
+		isPublishedPackageInvokeSpecifier('kody:@scope/pkg/export'),
+		true,
+	)
 	assert.equal(isPublishedPackageInvokeSpecifier('@scope/pkg#export'), true)
 	assert.equal(isPublishedPackageInvokeSpecifier('@scope/pkg/export'), true)
 	assert.equal(isPublishedPackageInvokeSpecifier('./greet'), false)
 	assert.equal(isPublishedPackageInvokeSpecifier('.'), false)
-	assert.equal(isPublishedPackageInvokeSpecifier('https://example.com/x'), false)
+	assert.equal(
+		isPublishedPackageInvokeSpecifier('https://example.com/x'),
+		false,
+	)
 })
 
 test('buildExecuteInvokePassthroughSource matches the MCP thin glue shape', () => {
@@ -45,7 +57,10 @@ test('resolveRemoteExecuteCode prefers invoke minting and rejects empty input', 
 		resolveRemoteExecuteCode({ invoke: '@scope/pkg#go' }),
 		/kody:@scope\/pkg\/go/,
 	)
-	assert.equal(resolveRemoteExecuteCode({ code: 'export default () => 1' }), 'export default () => 1')
+	assert.equal(
+		resolveRemoteExecuteCode({ code: 'export default () => 1' }),
+		'export default () => 1',
+	)
 	assert.throws(() => resolveRemoteExecuteCode({}), /Provide --invoke, --code/)
 	assert.throws(
 		() => resolveRemoteExecuteCode({ code: 'a', invoke: 'kody:@x/y' }),
@@ -71,20 +86,17 @@ test('formatExecuteCapabilityResult maps ok/error envelopes', () => {
 	assert.equal(failed.content[0]?.text, 'Error: boom')
 })
 
-test('runRemoteExecuteWithToken opens a session then calls kody.execute', async () => {
+test('runRemoteExecuteWithToken posts /v1/execute', async () => {
 	const calls: Array<{ method: string; url: string; body: unknown }> = []
-	const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	const fetchFn = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = String(input)
 		const body = init?.body ? JSON.parse(String(init.body)) : null
 		calls.push({ method: (init?.method ?? 'GET').toUpperCase(), url, body })
-		if (url.endsWith('/v1/capability-proxy/session')) {
-			return new Response(JSON.stringify({ scopes: ['local-execute'] }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' },
-			})
-		}
 		return new Response(
-			JSON.stringify({ result: { ok: true, result: { ran: true }, logs: [] } }),
+			JSON.stringify({ ok: true, result: { ran: true }, logs: [] }),
 			{ status: 200, headers: { 'content-type': 'application/json' } },
 		)
 	}) as typeof fetch
@@ -98,21 +110,24 @@ test('runRemoteExecuteWithToken opens a session then calls kody.execute', async 
 	})
 	assert.equal(result.isError, false)
 	assert.deepEqual(JSON.parse(result.content[0]?.text ?? ''), { ran: true })
-	assert.equal(calls.length, 2)
-	assert.match(calls[0]!.url, /\/v1\/capability-proxy\/session$/)
-	assert.match(calls[1]!.url, /\/v1\/capability-proxy\/call$/)
-	assert.deepEqual(calls[1]!.body, {
-		path: ['kody', 'execute'],
-		args: [{ code: 'export default async () => ({ ran: true })', params: { a: 1 } }],
+	assert.equal(calls.length, 1)
+	assert.equal(calls[0]!.method, 'POST')
+	assert.match(calls[0]!.url, /\/v1\/execute$/)
+	assert.deepEqual(calls[0]!.body, {
+		code: 'export default async () => ({ ran: true })',
+		params: { a: 1 },
 	})
 })
 
 test('runRemoteExecuteWithToken surfaces missing-token session 401 clearly', async () => {
 	const fetchFn = (async () =>
-		new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'nope' } }), {
-			status: 401,
-			headers: { 'content-type': 'application/json' },
-		})) as typeof fetch
+		new Response(
+			JSON.stringify({ error: { code: 'unauthorized', message: 'nope' } }),
+			{
+				status: 401,
+				headers: { 'content-type': 'application/json' },
+			},
+		)) as typeof fetch
 	await assert.rejects(
 		() =>
 			runRemoteExecuteWithToken({

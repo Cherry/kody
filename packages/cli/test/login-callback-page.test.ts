@@ -23,7 +23,10 @@ test('success page shows org and account without echoing secrets', () => {
 	assert.match(html, /Bricolage Grotesque/)
 	assert.match(html, /kody-pattern|data:image\/webp/)
 	assert.match(html, /data:image\/png;base64,/)
-	assert.doesNotMatch(html, /access_token|refresh_token|kody_at_|authorization_code/i)
+	assert.doesNotMatch(
+		html,
+		/access_token|refresh_token|kody_at_|authorization_code/i,
+	)
 	assert.doesNotMatch(html, /\bcode=[A-Za-z0-9]/)
 })
 
@@ -51,6 +54,9 @@ test('error pages cover denied, state mismatch, and expired', () => {
 test('oauth error codes map to designed states', () => {
 	assert.equal(loginCallbackErrorFromOAuthError('access_denied'), 'denied')
 	assert.equal(loginCallbackErrorFromOAuthError('expired_token'), 'expired')
-	assert.equal(loginCallbackErrorFromOAuthError('invalid_state'), 'state_mismatch')
+	assert.equal(
+		loginCallbackErrorFromOAuthError('invalid_state'),
+		'state_mismatch',
+	)
 	assert.equal(loginCallbackErrorFromOAuthError('server_error'), 'failed')
 })

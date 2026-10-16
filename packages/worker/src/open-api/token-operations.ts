@@ -85,7 +85,7 @@ const tokenViewSchema = z.object({
 		),
 })
 
-const tokenSecretViewSchema = tokenViewSchema.extend({
+export const tokenSecretViewSchema = tokenViewSchema.extend({
 	token: z
 		.string()
 		.describe(
@@ -100,7 +100,7 @@ const lifetimeAliasSchema = z.enum(
 	apiTokenLifetimeAliasNames as [string, ...Array<string>],
 )
 
-const tokenCreateInputSchema = z
+export const tokenCreateInputSchema = z
 	.object({
 		name: z
 			.string()

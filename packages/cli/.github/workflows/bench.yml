@@ -25,7 +25,9 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/kody/workerd
-          key: workerd-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/workerd-binary.ts') }}
+          key:
+            workerd-${{ runner.os }}-${{ runner.arch }}-${{
+            hashFiles('src/workerd-binary.ts') }}
 
       - name: Install
         run: npm install
@@ -34,7 +36,9 @@ jobs:
         run: npm run build
 
       - name: Benchmark
-        run: node scripts/bench.mjs --runs 20 --json bench.json --budget scripts/bench-budgets.json
+        run:
+          node scripts/bench.mjs --runs 20 --json bench.json --budget
+          scripts/bench-budgets.json
 
       - name: Upload results
         if: always()

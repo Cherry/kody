@@ -6,5 +6,8 @@ import { createPackageAppEntrySource } from '../src/package-local-runtime-source
 test('the kody dev app entry parses and explains a request without the run secret', async () => {
 	const source = createPackageAppEntrySource({ sideEffectModules: [] })
 	await esbuild.transform(source, { loader: 'js', format: 'esm' })
-	assert.match(source, /Forbidden: missing dev run secret\. Open the URL kody dev printed/)
+	assert.match(
+		source,
+		/Forbidden: missing dev run secret\. Open the URL kody dev printed/,
+	)
 })

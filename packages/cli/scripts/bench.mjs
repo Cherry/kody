@@ -44,7 +44,8 @@ const server = createServer(async (request, response) => {
 		const { imports = [] } = JSON.parse(raw)
 		const modules = imports.map((name) => ({
 			name,
-			esModule: 'export default function greet(name) { return { hello: name } }\n',
+			esModule:
+				'export default function greet(name) { return { hello: name } }\n',
 		}))
 		return send(200, {
 			imports,
@@ -57,7 +58,14 @@ const server = createServer(async (request, response) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const apiUrl = `http://127.0.0.1:${server.address().port}`
 
-const executeFlags = ['execute', '--local', '--api-url', apiUrl, '--token', 'kody_at_bench']
+const executeFlags = [
+	'execute',
+	'--local',
+	'--api-url',
+	apiUrl,
+	'--token',
+	'kody_at_bench',
+]
 // Commands that need a login stop at the "not logged in" error, after loading
 // everything they would need for the real call.
 const noConfig = { XDG_CONFIG_HOME: '/nonexistent', KODY_API_TOKEN: '' }
@@ -71,7 +79,11 @@ const scenarios = {
 	'git-credential get': { args: ['git-credential', 'get'], env: noConfig },
 	'dev (no app entry)': { args: ['dev'], env: noConfig, exit: 1 },
 	'execute --local empty': {
-		args: [...executeFlags, '--code', 'export default async function main() { return null }'],
+		args: [
+			...executeFlags,
+			'--code',
+			'export default async function main() { return null }',
+		],
 	},
 	'execute --local kody:@ import': {
 		args: [
@@ -92,7 +104,10 @@ const scenarios = {
 // Spawn asynchronously so the loopback API above keeps serving while the CLI runs.
 function run(command, args, env) {
 	return new Promise((resolve, reject) => {
-		const child = spawn(command, args, { env, stdio: ['ignore', 'ignore', 'pipe'] })
+		const child = spawn(command, args, {
+			env,
+			stdio: ['ignore', 'ignore', 'pipe'],
+		})
 		let stderr = ''
 		child.stderr.setEncoding('utf8')
 		child.stderr.on('data', (chunk) => (stderr += chunk))
@@ -133,7 +148,9 @@ for (const [name, scenario] of Object.entries(scenarios)) {
 }
 server.close()
 
-const budgets = values.budget ? JSON.parse(readFileSync(values.budget, 'utf8')) : {}
+const budgets = values.budget
+	? JSON.parse(readFileSync(values.budget, 'utf8'))
+	: {}
 const baseline = results['node baseline'].p50
 const lines = [
 	'| scenario | p50 ms | p95 ms | min ms | over baseline | budget |',
@@ -151,9 +168,17 @@ for (const [name, stats] of Object.entries(results)) {
 }
 const table = lines.join('\n')
 console.log(`Node ${process.version}, ${runs} runs each\n\n${table}`)
-if (values.json) writeFileSync(values.json, JSON.stringify({ node: process.version, results }, null, 2))
+if (values.json)
+	writeFileSync(
+		values.json,
+		JSON.stringify({ node: process.version, results }, null, 2),
+	)
 if (process.env.GITHUB_STEP_SUMMARY) {
-	writeFileSync(process.env.GITHUB_STEP_SUMMARY, `## CLI benchmark (Node ${process.version})\n\n${table}\n`, { flag: 'a' })
+	writeFileSync(
+		process.env.GITHUB_STEP_SUMMARY,
+		`## CLI benchmark (Node ${process.version})\n\n${table}\n`,
+		{ flag: 'a' },
+	)
 }
 if (failed) {
 	console.error('\nBenchmark budget exceeded.')

@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { KodyTarget } from '../target.js'
+import { type KodyTarget } from '../target.js'
 import { userCacheDir } from '../workerd-binary.js'
 import { isProcessAlive } from './process-reaper.js'
 
@@ -61,7 +61,10 @@ export function devRegistryPath(
 	target: KodyTarget,
 	cacheDir: string = userCacheDir(),
 ): string {
-	const key = createHash('sha256').update(`${root}\0${target}`).digest('hex').slice(0, 16)
+	const key = createHash('sha256')
+		.update(`${root}\0${target}`)
+		.digest('hex')
+		.slice(0, 16)
 	return join(cacheDir, 'dev-servers', `${key}.json`)
 }
 
@@ -127,7 +130,8 @@ export async function findRunningDevServer(input: {
 		)
 		if (!response.ok) return null
 		const status = (await response.json()) as DevServerStatus
-		if (status.package?.root !== input.root || status.target !== input.target) return null
+		if (status.package?.root !== input.root || status.target !== input.target)
+			return null
 		return { registration, status }
 	} catch {
 		return null
@@ -136,7 +140,9 @@ export async function findRunningDevServer(input: {
 
 async function readRegistration(path: string): Promise<DevRegistration | null> {
 	try {
-		const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<DevRegistration>
+		const parsed = JSON.parse(
+			await readFile(path, 'utf8'),
+		) as Partial<DevRegistration>
 		if (
 			typeof parsed.pid !== 'number' ||
 			typeof parsed.origin !== 'string' ||
@@ -148,7 +154,10 @@ async function readRegistration(path: string): Promise<DevRegistration | null> {
 		return {
 			pid: parsed.pid,
 			origin: parsed.origin,
-			port: typeof parsed.port === 'number' ? parsed.port : Number(new URL(parsed.origin).port),
+			port:
+				typeof parsed.port === 'number'
+					? parsed.port
+					: Number(new URL(parsed.origin).port),
 			basePath: typeof parsed.basePath === 'string' ? parsed.basePath : '',
 			target: parsed.target,
 			root: parsed.root,

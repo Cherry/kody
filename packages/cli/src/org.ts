@@ -27,8 +27,12 @@ export function formatStoredOrgsHelpBlock(
 	const lines = [`${indent}Logged-in orgs:`]
 	for (const org of orgs) {
 		const mark = org.active ? '*' : ' '
-		const pending = org.pending ? '  (slug pending — run any authenticated command)' : ''
-		lines.push(`${indent}  ${mark} ${org.slug}${org.active ? '  (active)' : ''}${pending}`)
+		const pending = org.pending
+			? '  (slug pending — run any authenticated command)'
+			: ''
+		lines.push(
+			`${indent}  ${mark} ${org.slug}${org.active ? '  (active)' : ''}${pending}`,
+		)
 	}
 	return `${lines.join('\n')}\n`
 }
@@ -113,7 +117,11 @@ export async function chooseOrgInteractively(input: {
 			throw new Error('No organization selected.')
 		}
 		const asNumber = Number(answer)
-		if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= usable.length) {
+		if (
+			Number.isInteger(asNumber) &&
+			asNumber >= 1 &&
+			asNumber <= usable.length
+		) {
 			return usable[asNumber - 1]!.slug
 		}
 		return orgSlugFromFlag(answer)

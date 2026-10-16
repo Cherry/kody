@@ -29,6 +29,7 @@ import {
 	capabilityProxyObservationEntityId,
 	invokeApiOperation,
 	isCapabilityProxyOperation,
+	operationAllowsCliOauth,
 	isCliCredentialBootstrapRedeemOperation,
 } from './invoke.ts'
 import { runCapabilityProxyGatewayFetchStream } from './capability-proxy-gateway-fetch-stream.ts'
@@ -162,6 +163,7 @@ async function handleOperation(input: {
 	env: Env
 	appOrigin: string
 	waitUntil: (promise: Promise<unknown>) => void
+	loopbackExports?: Cloudflare.Exports
 }) {
 	const match = matchApiRoute(input.request.method, input.url.pathname)
 	switch (match.kind) {
@@ -264,10 +266,10 @@ async function handleOperation(input: {
 	try {
 		ctx = await authenticateApiRequest({
 			...input,
-			// CLI `kody login` OAuth is accepted only on local-execute routes
-			// (CapabilityProxy + package-graph). Other Open API ops stay
-			// `kody_at_`-only (ADR 0053/0055).
-			allowMcpOauth: isCapabilityProxyOperation(matchedOperation),
+			// CLI `kody login` OAuth is accepted on local-execute routes (older
+			// CLIs) and on POST /v1/tokens/device (mint a device kody_at_).
+			// Other Open API ops stay `kody_at_`-only (ADR 0053/0055).
+			allowMcpOauth: operationAllowsCliOauth(matchedOperation),
 		})
 	} catch (error) {
 		const apiError = toApiError(error)
@@ -279,6 +281,7 @@ async function handleOperation(input: {
 		}
 		throw error
 	}
+	if (input.loopbackExports) ctx.loopbackExports = input.loopbackExports
 	const resolved = resolveApiOperation(
 		matchedOperation,
 		await getStaticRegistry(),
@@ -416,6 +419,7 @@ export async function handleOpenApiRequest(input: {
 	env: Env
 	appOrigin: string
 	waitUntil: (promise: Promise<unknown>) => void
+	loopbackExports?: Cloudflare.Exports
 }): Promise<Response> {
 	const url = new URL(input.request.url)
 	try {

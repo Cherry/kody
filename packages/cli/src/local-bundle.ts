@@ -117,7 +117,9 @@ export function localBundleOptions(entry: string) {
  * Bundle a `--file` entry for local workerd the same way hosted execute /
  * publish resolves code.
  */
-export async function bundleLocalUserModule(modulePath: string): Promise<string> {
+export async function bundleLocalUserModule(
+	modulePath: string,
+): Promise<string> {
 	const entry = resolve(modulePath)
 	let result: esbuild.BuildResult
 	try {
@@ -127,7 +129,10 @@ export async function bundleLocalUserModule(modulePath: string): Promise<string>
 	}
 	const output = result.outputFiles?.[0]
 	if (output === undefined) {
-		throw new BundleError(`Could not bundle ${modulePath}: esbuild produced no output.`, [])
+		throw new BundleError(
+			`Could not bundle ${modulePath}: esbuild produced no output.`,
+			[],
+		)
 	}
 	if (result.errors.length > 0) {
 		throw createBundleError(modulePath, { errors: result.errors })
@@ -204,7 +209,13 @@ function toDiagnostic(
 ): BundleDiagnostic {
 	const location = item.location
 	if (!location) {
-		return { file: null, line: null, col: null, message: item.text.trim(), frame: null }
+		return {
+			file: null,
+			line: null,
+			col: null,
+			message: item.text.trim(),
+			frame: null,
+		}
 	}
 	const absolute = resolve(paths.workingDir, location.file)
 	const fromRoot = relative(paths.displayRoot, absolute)
@@ -222,7 +233,10 @@ function codeFrame(location: esbuild.Location): string | null {
 	if (!location.lineText) return null
 	const gutter = String(location.line)
 	const pad = ' '.repeat(gutter.length)
-	const caretWidth = Math.max(1, Math.min(location.length || 1, location.lineText.length))
+	const caretWidth = Math.max(
+		1,
+		Math.min(location.length || 1, location.lineText.length),
+	)
 	return (
 		`  ${gutter} | ${location.lineText}\n` +
 		`  ${pad} | ${' '.repeat(location.column)}${'^'.repeat(caretWidth)}`

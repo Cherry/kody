@@ -1,5 +1,9 @@
-import type { Agent as HttpAgent, IncomingMessage, request as httpRequest } from 'node:http'
-import type { Socket } from 'node:net'
+import {
+	type Agent as HttpAgent,
+	type IncomingMessage,
+	type request as httpRequest,
+} from 'node:http'
+import { type Socket } from 'node:net'
 import { Readable } from 'node:stream'
 import {
 	capabilityProxyForbiddenMessage,
@@ -44,7 +48,8 @@ import { readPackageVersion } from './package-info.js'
 export const capabilityProxySessionPath = 'v1/capability-proxy/session'
 export const capabilityProxyCallPath = 'v1/capability-proxy/call'
 /** Streaming ambient/secret fetch hop (raw body; not JSON `/call`). */
-export const capabilityProxyGatewayFetchPath = 'v1/capability-proxy/gateway-fetch'
+export const capabilityProxyGatewayFetchPath =
+	'v1/capability-proxy/gateway-fetch'
 
 /** Allowlisted metadata headers for {@link capabilityProxyGatewayFetchPath}. */
 export const gatewayFetchUrlHeaderName = 'X-Kody-Gateway-Url'
@@ -85,7 +90,9 @@ export function nodeUsesEnvProxy(
 /** `http.Agent({ proxyEnv })` exists from these releases; older Node ignores the option. */
 const envProxyAgentMinimumNode: Record<number, number> = { 22: 21, 24: 5 }
 
-export function nodeAgentHonorsEnvProxy(version: string = process.versions.node): boolean {
+export function nodeAgentHonorsEnvProxy(
+	version: string = process.versions.node,
+): boolean {
 	const [major = 0, minor = 0] = version.split('.').map(Number)
 	const minimumMinor = envProxyAgentMinimumNode[major]
 	if (minimumMinor === undefined) return major > 24
@@ -110,7 +117,8 @@ export function createCapabilityProxyFetch(
 	options: CapabilityProxyFetchOptions = {},
 ): typeof fetch {
 	const timeoutMs = options.timeoutMs ?? capabilityProxyHttpTimeoutMs
-	const connectTimeoutMs = options.connectTimeoutMs ?? capabilityProxyConnectTimeoutMs
+	const connectTimeoutMs =
+		options.connectTimeoutMs ?? capabilityProxyConnectTimeoutMs
 	const useEnvProxy = options.useEnvProxy ?? nodeUsesEnvProxy()
 	if (useEnvProxy && !nodeAgentHonorsEnvProxy()) {
 		throw new Error(
@@ -119,12 +127,17 @@ export function createCapabilityProxyFetch(
 	}
 	let transports: Promise<Transports> | null = null
 	return async (input, init = {}) => {
-		const url = input instanceof URL ? input : new URL(input instanceof Request ? input.url : input)
+		const url =
+			input instanceof URL
+				? input
+				: new URL(input instanceof Request ? input.url : input)
 		// node:http and node:https cost ~7ms to load, so only commands that send a request pay for it.
 		transports ??= loadTransports(useEnvProxy)
 		const transport = (await transports)[url.protocol as keyof Transports]
 		if (!transport) {
-			throw new TypeError(`Unsupported protocol for the Kody API: ${url.protocol}`)
+			throw new TypeError(
+				`Unsupported protocol for the Kody API: ${url.protocol}`,
+			)
 		}
 		const body = init.body
 		if (body !== undefined && body !== null && typeof body !== 'string') {
@@ -143,7 +156,9 @@ export function createCapabilityProxyFetch(
 					const chunks: Array<Buffer> = []
 					response.on('data', (chunk: Buffer) => chunks.push(chunk))
 					response.on('error', reject)
-					response.on('end', () => resolve(toResponse(response, Buffer.concat(chunks))))
+					response.on('end', () =>
+						resolve(toResponse(response, Buffer.concat(chunks))),
+					)
 				},
 			)
 			// request.setTimeout only arms after the socket is connected; bound DNS/TCP/TLS separately.
@@ -175,7 +190,9 @@ export function createCapabilityProxyFetch(
 			})
 			request.setTimeout(timeoutMs, () =>
 				request.destroy(
-					new Error(`Kody API sent nothing for ${timeoutMs}ms (${url.pathname}).`),
+					new Error(
+						`Kody API sent nothing for ${timeoutMs}ms (${url.pathname}).`,
+					),
 				),
 			)
 			request.on('error', (error) => {
@@ -192,7 +209,9 @@ export function createCapabilityProxyFetch(
 					abort()
 				} else {
 					signal.addEventListener('abort', abort, { once: true })
-					request.once('close', () => signal.removeEventListener('abort', abort))
+					request.once('close', () =>
+						signal.removeEventListener('abort', abort),
+					)
 				}
 			}
 			request.end(body ?? undefined)
@@ -204,11 +223,23 @@ type Transport = { agent: HttpAgent; request: typeof httpRequest }
 type Transports = { 'http:': Transport; 'https:': Transport }
 
 async function loadTransports(useEnvProxy: boolean): Promise<Transports> {
-	const [http, https] = await Promise.all([import('node:http'), import('node:https')])
-	const agentOptions = { keepAlive: true, ...(useEnvProxy ? { proxyEnv: process.env } : {}) }
+	const [http, https] = await Promise.all([
+		import('node:http'),
+		import('node:https'),
+	])
+	const agentOptions = {
+		keepAlive: true,
+		...(useEnvProxy ? { proxyEnv: process.env } : {}),
+	}
 	return {
-		'http:': { agent: unrefFreeSockets(new http.Agent(agentOptions)), request: http.request },
-		'https:': { agent: unrefFreeSockets(new https.Agent(agentOptions)), request: https.request },
+		'http:': {
+			agent: unrefFreeSockets(new http.Agent(agentOptions)),
+			request: http.request,
+		},
+		'https:': {
+			agent: unrefFreeSockets(new https.Agent(agentOptions)),
+			request: https.request,
+		},
 	}
 }
 
@@ -345,11 +376,15 @@ export async function openCapabilityProxySession(
 	const record = isRecord(body) ? body : {}
 	return {
 		scopes: Array.isArray(record.scopes)
-			? record.scopes.filter((scope): scope is string => typeof scope === 'string')
+			? record.scopes.filter(
+					(scope): scope is string => typeof scope === 'string',
+				)
 			: [],
 		expiresAt: typeof record.expiresAt === 'string' ? record.expiresAt : null,
 		features: Array.isArray(record.features)
-			? record.features.filter((feature): feature is string => typeof feature === 'string')
+			? record.features.filter(
+					(feature): feature is string => typeof feature === 'string',
+				)
 			: [],
 	}
 }
@@ -362,7 +397,8 @@ export async function callCapabilityProxy(
 		input.org,
 	)
 	const payload: CapabilityProxyCall = { path: input.path, args: input.args }
-	if (input.conversationId !== undefined) payload.conversationId = input.conversationId
+	if (input.conversationId !== undefined)
+		payload.conversationId = input.conversationId
 	if (input.credentials !== undefined) payload.credentials = input.credentials
 	const response = await send(input, url, {
 		method: 'POST',
@@ -375,7 +411,10 @@ export async function callCapabilityProxy(
 	}
 	const failure = readErrorBody(body)
 	if (failure) {
-		throw new CapabilityProxyError(failure.message, { status: response.status, code: failure.code })
+		throw new CapabilityProxyError(failure.message, {
+			status: response.status,
+			code: failure.code,
+		})
 	}
 	return isRecord(body) ? body.result : undefined
 }
@@ -424,7 +463,9 @@ export async function callCapabilityProxyGatewayFetchStream(
 	const transports = await loadTransports(useEnvProxy)
 	const transport = transports[url.protocol as keyof Transports]
 	if (!transport) {
-		throw new TypeError(`Unsupported protocol for the Kody API: ${url.protocol}`)
+		throw new TypeError(
+			`Unsupported protocol for the Kody API: ${url.protocol}`,
+		)
 	}
 	const headers: Record<string, string | number | Array<string>> = {
 		accept: '*/*',
@@ -439,7 +480,9 @@ export async function callCapabilityProxyGatewayFetchStream(
 		headers[gatewayFetchPackageIdHeaderName] = input.gateway.packageId
 	}
 	if (input.gateway.headers && Object.keys(input.gateway.headers).length > 0) {
-		headers[gatewayFetchHeadersHeaderName] = JSON.stringify(input.gateway.headers)
+		headers[gatewayFetchHeadersHeaderName] = JSON.stringify(
+			input.gateway.headers,
+		)
 	}
 	if (input.gateway.secretResolution) {
 		headers[secretResolutionHeaderName] = input.gateway.secretResolution
@@ -489,7 +532,9 @@ export async function callCapabilityProxyGatewayFetchStream(
 		})
 		request.setTimeout(timeoutMs, () =>
 			request.destroy(
-				new Error(`Kody API sent nothing for ${timeoutMs}ms (${url.pathname}).`),
+				new Error(
+					`Kody API sent nothing for ${timeoutMs}ms (${url.pathname}).`,
+				),
 			),
 		)
 		request.on('error', (error) => {
@@ -538,7 +583,11 @@ export function nodeIncomingToWebResponse(response: IncomingMessage): Response {
 	}
 	const status = response.statusCode ?? 0
 	const bodyless =
-		status === 101 || status === 103 || status === 204 || status === 205 || status === 304
+		status === 101 ||
+		status === 103 ||
+		status === 204 ||
+		status === 205 ||
+		status === 304
 	if (bodyless) {
 		response.resume()
 		return new Response(null, {
@@ -585,16 +634,21 @@ export async function checkCredentialCallMap(
 		credentials: input.credentials,
 	})
 	if (!isRecord(result)) {
-		throw new CapabilityProxyError('credentialClientCheck returned an unexpected result.')
+		throw new CapabilityProxyError(
+			'credentialClientCheck returned an unexpected result.',
+		)
 	}
 	if (result.ok === false) {
 		const error = isRecord(result.error) ? result.error : {}
-		const code = typeof error.code === 'string' ? error.code : 'credential_error'
+		const code =
+			typeof error.code === 'string' ? error.code : 'credential_error'
 		throw new CapabilityProxyError(formatCredentialClientError(error), { code })
 	}
 	const value = isRecord(result.value) ? result.value : null
 	const warnings = Array.isArray(value?.warnings)
-		? value.warnings.filter((warning): warning is string => typeof warning === 'string')
+		? value.warnings.filter(
+				(warning): warning is string => typeof warning === 'string',
+			)
 		: []
 	return { warnings }
 }
@@ -634,14 +688,18 @@ async function readJson(response: Response): Promise<unknown> {
 	}
 }
 
-function readErrorBody(body: unknown): { code: string | null; message: string } | null {
+function readErrorBody(
+	body: unknown,
+): { code: string | null; message: string } | null {
 	if (!isRecord(body) || body.error == null) return null
 	const { error } = body
 	if (typeof error === 'string') return { code: null, message: error }
 	if (isRecord(error)) {
 		const code = typeof error.code === 'string' ? error.code : null
 		const message =
-			typeof error.message === 'string' ? error.message : code ?? JSON.stringify(error)
+			typeof error.message === 'string'
+				? error.message
+				: (code ?? JSON.stringify(error))
 		return { code, message }
 	}
 	return { code: null, message: String(error) }
@@ -664,7 +722,10 @@ function describeFailure(
 		return new CapabilityProxyError(message, { status, code })
 	}
 	if (code === 'feature_disabled') {
-		return new CapabilityProxyError(`${featureDisabledMessage()}${detail}`, { status, code })
+		return new CapabilityProxyError(`${featureDisabledMessage()}${detail}`, {
+			status,
+			code,
+		})
 	}
 	if (code === 'insufficient_scope') {
 		return new CapabilityProxyError(
@@ -677,7 +738,10 @@ function describeFailure(
 	}
 	if (status === 403 && stage === 'session') {
 		return new CapabilityProxyError(
-			capabilityProxyForbiddenMessage({ code, serverMessage: failure?.message }),
+			capabilityProxyForbiddenMessage({
+				code,
+				serverMessage: failure?.message,
+			}),
 			{ status, code },
 		)
 	}
@@ -688,7 +752,8 @@ function describeFailure(
 		)
 	}
 	return new CapabilityProxyError(
-		failure?.message ?? `Kody API request failed with HTTP ${status} (${url.pathname}).`,
+		failure?.message ??
+			`Kody API request failed with HTTP ${status} (${url.pathname}).`,
 		{ status, code },
 	)
 }

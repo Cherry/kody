@@ -1,23 +1,33 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { redeemBootstrapCode } from '../src/auth-bootstrap.js'
-import { nonJsonErrorBodyMaxChars, summarizeNonJsonErrorBody } from '../src/http-error-body.js'
+import {
+	nonJsonErrorBodyMaxChars,
+	summarizeNonJsonErrorBody,
+} from '../src/http-error-body.js'
 
 const goodCode = `kody_bc_${'a'.repeat(16)}_${'B'.repeat(32)}`
 
 function largeNotFoundPage(): string {
-	const filler = '<div class="row">padding text for a large page</div>\n'.repeat(2000)
+	const filler =
+		'<div class="row">padding text for a large page</div>\n'.repeat(2000)
 	return `<!DOCTYPE html>\n<html><head><title>Not found | Kody</title><style>body{color:red}</style></head><body><h1>Not found</h1>${filler}<script>window.x = 1</script></body></html>`
 }
 
 test('summarizeNonJsonErrorBody keeps a short plain-text body as-is', () => {
-	assert.equal(summarizeNonJsonErrorBody('  upstream unavailable \n'), 'upstream unavailable')
+	assert.equal(
+		summarizeNonJsonErrorBody('  upstream unavailable \n'),
+		'upstream unavailable',
+	)
 })
 
 test('summarizeNonJsonErrorBody reduces an HTML page to its title and size', () => {
 	const page = largeNotFoundPage()
 	const summary = summarizeNonJsonErrorBody(page)
-	assert.match(summary, /^Not found \| Kody \(HTML response, \d+ bytes; check --api-url/)
+	assert.match(
+		summary,
+		/^Not found \| Kody \(HTML response, \d+ bytes; check --api-url/,
+	)
 	assert.ok(summary.includes(String(Buffer.byteLength(page))))
 	assert.ok(summary.length < 200)
 	assert.doesNotMatch(summary, /<|padding text|window\.x/)
@@ -56,6 +66,12 @@ test('redeemBootstrapCode does not dump an HTML 404 page from the wrong host', a
 	)
 	assert.ok(error instanceof Error)
 	assert.match(error.message, /^Bootstrap redeem failed \(HTTP 404\)\./)
-	assert.match(error.message, /Server said: Not found \| Kody \(HTML response, \d+ bytes; check --api-url/)
-	assert.ok(error.message.length < 500, `message was ${error.message.length} chars`)
+	assert.match(
+		error.message,
+		/Server said: Not found \| Kody \(HTML response, \d+ bytes; check --api-url/,
+	)
+	assert.ok(
+		error.message.length < 500,
+		`message was ${error.message.length} chars`,
+	)
 })

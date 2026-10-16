@@ -23,9 +23,7 @@ import {
 
 const mcpUrl = 'https://multi-org.test/mcp'
 
-function sample(
-	overrides: Partial<StoredCredentials> = {},
-): StoredCredentials {
+function sample(overrides: Partial<StoredCredentials> = {}): StoredCredentials {
 	return {
 		version: 1,
 		mcpUrl,
@@ -94,7 +92,10 @@ test('login save upserts one org and keeps the other', () => {
 	assert.equal(store?.orgs.acme?.accessToken, 'a2')
 	assert.equal(store?.orgs.beta?.accessToken, 'b1')
 	assert.equal(loadCredentials(mcpUrl, backend)?.accessToken, 'a2')
-	assert.equal(loadCredentials(mcpUrl, backend, undefined, { org: 'beta' })?.accessToken, 'b1')
+	assert.equal(
+		loadCredentials(mcpUrl, backend, undefined, { org: 'beta' })?.accessToken,
+		'b1',
+	)
 })
 
 test('pending-only store serves --org without attaching an unverified slug', () => {
@@ -175,7 +176,10 @@ test('saveCredentials activate:false refreshes tokens without switching activeOr
 
 test('promotePendingOrg does not overwrite a fresh named login or steal activeOrg', () => {
 	const backend = tempBackend()
-	saveCredentials(sample({ accessToken: 'legacy', refreshToken: 'legacy-r' }), backend)
+	saveCredentials(
+		sample({ accessToken: 'legacy', refreshToken: 'legacy-r' }),
+		backend,
+	)
 	assert.ok(loadCredentialStore(mcpUrl, backend)?.pending)
 	saveCredentials(
 		sample({ org: 'beta', accessToken: 'fresh-beta', refreshToken: 'fresh-r' }),
@@ -193,9 +197,16 @@ test('promotePendingOrg does not overwrite a fresh named login or steal activeOr
 	assert.equal(afterOther?.orgs.beta?.accessToken, 'fresh-beta')
 	assert.equal(afterOther?.orgs.acme?.accessToken, 'legacy')
 
-	saveCredentials(sample({ accessToken: 'legacy-2', refreshToken: 'legacy-2-r' }), backend)
 	saveCredentials(
-		sample({ org: 'acme', accessToken: 'fresh-acme', refreshToken: 'fresh-acme-r' }),
+		sample({ accessToken: 'legacy-2', refreshToken: 'legacy-2-r' }),
+		backend,
+	)
+	saveCredentials(
+		sample({
+			org: 'acme',
+			accessToken: 'fresh-acme',
+			refreshToken: 'fresh-acme-r',
+		}),
 		backend,
 	)
 	promotePendingOrg(mcpUrl, 'acme', backend)
@@ -237,19 +248,22 @@ test('kody org list and org use work for agents', async () => {
 		saveCredentials(sample({ org: 'beta', accessToken: 'b' }), backend)
 
 		let stdout = ''
-		const listCode = await runCli(['org', 'list', '--mcp-url', mcpUrl, '--json'], {
-			stdout: (text) => {
-				stdout += text
+		const listCode = await runCli(
+			['org', 'list', '--mcp-url', mcpUrl, '--json'],
+			{
+				stdout: (text) => {
+					stdout += text
+				},
 			},
-		})
+		)
 		assert.equal(listCode, 0, stdout)
 		const parsed = JSON.parse(stdout) as {
 			orgs: Array<{ slug: string; active: boolean }>
 		}
-		assert.deepEqual(
-			parsed.orgs.map((row) => row.slug).sort(),
-			['acme', 'beta'],
-		)
+		assert.deepEqual(parsed.orgs.map((row) => row.slug).sort(), [
+			'acme',
+			'beta',
+		])
 
 		stdout = ''
 		const useCode = await runCli(['org', 'use', 'acme', '--mcp-url', mcpUrl], {
@@ -274,7 +288,10 @@ test('kody org use without a slug errors without a TTY', async () => {
 		},
 	})
 	assert.equal(code, 1)
-	assert.match(stderr, /requires a TTY|No named org logins|Not logged in|Usage: kody org/)
+	assert.match(
+		stderr,
+		/requires a TTY|No named org logins|Not logged in|Usage: kody org/,
+	)
 })
 
 test('parseCredentials still derives a missing authorizationServerUrl (SEP-2352)', async () => {

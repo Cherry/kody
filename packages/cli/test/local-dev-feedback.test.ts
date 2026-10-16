@@ -23,7 +23,10 @@ import {
 	unmockedRequestError,
 } from '../src/mock/mock-fetch-gateway.js'
 
-const samplePackageRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-package')
+const samplePackageRoot = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'fixtures/sample-package',
+)
 
 test('unmocked_request includes ready-to-paste stub + .kody/mocks.ts pointer', () => {
 	const error = unmockedRequestError('POST', 'https://api.example.com/v1/items')
@@ -33,7 +36,10 @@ test('unmocked_request includes ready-to-paste stub + .kody/mocks.ts pointer', (
 	assert.match(error.fix ?? '', /http\.post/)
 	assert.match(error.fix ?? '', /append this handler/)
 	assert.equal(error.details?.mocksPath, '.kody/mocks.ts')
-	assert.match(String(error.details?.handlerStub ?? ''), /export const handlers/)
+	assert.match(
+		String(error.details?.handlerStub ?? ''),
+		/export const handlers/,
+	)
 	assert.match(String(error.details?.handlerLine ?? ''), /http\.post/)
 	const stub = buildHandlerStub('GET', 'https://api.example.com/x')
 	const line = buildHandlerLine('GET', 'https://api.example.com/x')
@@ -68,7 +74,10 @@ test('execute --local --invoke @scope/pkg#export works from a package directory'
 		assert.equal(code, 1)
 		// Must mint published passthrough — not treat # form as a missing local export.
 		assert.doesNotMatch(stderr, /No package export/)
-		assert.doesNotMatch(stderr, /neither a local package export nor a published package specifier/)
+		assert.doesNotMatch(
+			stderr,
+			/neither a local package export nor a published package specifier/,
+		)
 		assert.doesNotMatch(stderr, /dev_surface_missing/)
 	} finally {
 		process.chdir(previous)

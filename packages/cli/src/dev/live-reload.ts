@@ -5,8 +5,8 @@
  * the page from the new build.
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { DevErrorView } from './error-page.js'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
+import { type DevErrorView } from './error-page.js'
 
 export const devRoutePrefix = '/__kody/dev/'
 export const liveReloadEventsPath = '/__kody/dev/events'
@@ -88,10 +88,13 @@ export function shouldInjectLiveReload(input: {
 }): boolean {
 	if (input.method === 'HEAD') return false
 	if (!/\btext\/html\b/i.test(input.accept ?? '')) return false
-	if (input.status === 204 || input.status === 304 || input.status < 200) return false
+	if (input.status === 204 || input.status === 304 || input.status < 200)
+		return false
 	const contentType = String(input.headers['content-type'] ?? '')
 	if (!/^\s*text\/html\b/i.test(contentType)) return false
-	const encoding = String(input.headers['content-encoding'] ?? 'identity').trim().toLowerCase()
+	const encoding = String(input.headers['content-encoding'] ?? 'identity')
+		.trim()
+		.toLowerCase()
 	return encoding === '' || encoding === 'identity'
 }
 

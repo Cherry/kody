@@ -1,5 +1,9 @@
 import { join } from 'node:path'
-import { haystackMatches, nameEquals, type ProcessInfo } from './process-info.js'
+import {
+	haystackMatches,
+	nameEquals,
+	type ProcessInfo,
+} from './process-info.js'
 
 export const hostIds = [
 	'amazon-q',
@@ -74,7 +78,9 @@ export function parseHostIds(raw: string): Array<HostId> {
 		.map((part) => part.trim())
 		.filter(Boolean)
 	if (ids.length === 0) {
-		throw new Error(`Provide at least one client id. Known: ${hostIds.join(', ')}`)
+		throw new Error(
+			`Provide at least one client id. Known: ${hostIds.join(', ')}`,
+		)
 	}
 	const known: Array<HostId> = []
 	for (const id of ids) {
@@ -115,7 +121,8 @@ export const hostCatalog: ReadonlyArray<HostDefinition> = [
 		label: 'Cursor',
 		kind: 'file',
 		matches: (process) =>
-			nameEquals(process, 'cursor') || haystackMatches(process, /Cursor\.app/iu),
+			nameEquals(process, 'cursor') ||
+			haystackMatches(process, /Cursor\.app/iu),
 	},
 	{
 		id: 'vscode-insiders',
@@ -130,8 +137,12 @@ export const hostCatalog: ReadonlyArray<HostDefinition> = [
 		label: 'VS Code',
 		kind: 'file',
 		matches: (process) => {
-			if (haystackMatches(process, /insiders|cursor|windsurf|antigravity/iu)) return false
-			const base = process.name.replace(/\.exe$/iu, '').trim().toLowerCase()
+			if (haystackMatches(process, /insiders|cursor|windsurf|antigravity/iu))
+				return false
+			const base = process.name
+				.replace(/\.exe$/iu, '')
+				.trim()
+				.toLowerCase()
 			return (
 				base === 'code' ||
 				base === 'code - oss' ||
@@ -150,7 +161,8 @@ export const hostCatalog: ReadonlyArray<HostDefinition> = [
 		id: 'claude-code',
 		label: 'Claude Code',
 		kind: 'command',
-		matches: (process) => nameEquals(process, 'claude') && !isClaudeDesktop(process),
+		matches: (process) =>
+			nameEquals(process, 'claude') && !isClaudeDesktop(process),
 	},
 	{
 		id: 'codex',
@@ -170,20 +182,23 @@ export const hostCatalog: ReadonlyArray<HostDefinition> = [
 		label: 'Goose',
 		kind: 'file',
 		matches: (process) =>
-			nameEquals(process, 'goose', 'goosed') || haystackMatches(process, /Goose\.app/iu),
+			nameEquals(process, 'goose', 'goosed') ||
+			haystackMatches(process, /Goose\.app/iu),
 	},
 	{
 		id: 'windsurf',
 		label: 'Windsurf',
 		kind: 'file',
 		matches: (process) =>
-			nameEquals(process, 'windsurf') || haystackMatches(process, /Windsurf\.app/iu),
+			nameEquals(process, 'windsurf') ||
+			haystackMatches(process, /Windsurf\.app/iu),
 	},
 	{
 		id: 'zed',
 		label: 'Zed',
 		kind: 'file',
-		matches: (process) => nameEquals(process, 'zed') || haystackMatches(process, /Zed\.app/iu),
+		matches: (process) =>
+			nameEquals(process, 'zed') || haystackMatches(process, /Zed\.app/iu),
 	},
 	{
 		id: 'copilot-cli',
@@ -216,13 +231,16 @@ export const hostCatalog: ReadonlyArray<HostDefinition> = [
 		label: 'Antigravity',
 		kind: 'file',
 		matches: (process) =>
-			nameEquals(process, 'antigravity') || haystackMatches(process, /Antigravity\.app/iu),
+			nameEquals(process, 'antigravity') ||
+			haystackMatches(process, /Antigravity\.app/iu),
 	},
 	{
 		id: 'cline',
 		label: 'Cline',
 		kind: 'file',
-		matches: (process) => nameEquals(process, 'cline-vscode') || haystackMatches(process, /cline-vscode/iu),
+		matches: (process) =>
+			nameEquals(process, 'cline-vscode') ||
+			haystackMatches(process, /cline-vscode/iu),
 	},
 	{
 		id: 'cline-cli',
@@ -306,8 +324,13 @@ export function hostById(id: HostId): HostDefinition {
 	return host
 }
 
-export function configHome(home: string, platform: NodeJS.Platform = process.platform): string {
-	return platform === 'win32' ? join(home, 'AppData', 'Roaming') : join(home, '.config')
+export function configHome(
+	home: string,
+	platform: NodeJS.Platform = process.platform,
+): string {
+	return platform === 'win32'
+		? join(home, 'AppData', 'Roaming')
+		: join(home, '.config')
 }
 
 export function applicationSupport(
@@ -315,7 +338,8 @@ export function applicationSupport(
 	app: string,
 	platform: NodeJS.Platform = process.platform,
 ): string {
-	if (platform === 'darwin') return join(home, 'Library', 'Application Support', app)
+	if (platform === 'darwin')
+		return join(home, 'Library', 'Application Support', app)
 	if (platform === 'win32') return join(home, 'AppData', 'Roaming', app)
 	return join(home, '.config', app)
 }
@@ -384,9 +408,17 @@ export function hostConfigPath(input: {
 		case 'cursor':
 			return join(input.home, '.cursor', 'mcp.json')
 		case 'vscode':
-			return join(applicationSupport(input.home, 'Code', platform), 'User', 'mcp.json')
+			return join(
+				applicationSupport(input.home, 'Code', platform),
+				'User',
+				'mcp.json',
+			)
 		case 'vscode-insiders':
-			return join(applicationSupport(input.home, 'Code - Insiders', platform), 'User', 'mcp.json')
+			return join(
+				applicationSupport(input.home, 'Code - Insiders', platform),
+				'User',
+				'mcp.json',
+			)
 		case 'claude-code':
 			return join(input.home, '.claude.json')
 		case 'codex':
@@ -419,7 +451,13 @@ export function hostConfigPath(input: {
 				'cline_mcp_settings.json',
 			)
 		case 'cline-cli':
-			return join(input.home, '.cline', 'data', 'settings', 'cline_mcp_settings.json')
+			return join(
+				input.home,
+				'.cline',
+				'data',
+				'settings',
+				'cline_mcp_settings.json',
+			)
 		case 'grok-build':
 			return join(input.home, '.grok', 'config.toml')
 		case 'mcporter':

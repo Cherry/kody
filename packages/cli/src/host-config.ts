@@ -16,7 +16,10 @@ function asObject(value: unknown, label: string): Record<string, unknown> {
 	throw new Error(`${label} must be a JSON object.`)
 }
 
-function nestedObject(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+function nestedObject(
+	parent: Record<string, unknown>,
+	key: string,
+): Record<string, unknown> {
 	const current = parent[key]
 	if (current == null) {
 		const next = {}

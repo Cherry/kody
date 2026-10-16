@@ -5,7 +5,9 @@ export const minimumLocalExecuteNodeMajor = 22
  * Refuse `execute --local` before workerd download or spawn when Node is too old.
  * `package.json` `engines` is advisory; npx and a direct `node` launch do not enforce it.
  */
-export function assertLocalExecuteNodeEngine(version: string = process.versions.node): void {
+export function assertLocalExecuteNodeEngine(
+	version: string = process.versions.node,
+): void {
 	const major = nodeMajor(version)
 	if (major !== null && major >= minimumLocalExecuteNodeMajor) return
 	const reported = version.trim() || 'unknown'

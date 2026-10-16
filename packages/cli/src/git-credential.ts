@@ -4,19 +4,21 @@ import {
 	cliCredentialBootstrapOperationId,
 	resolveCliTokenLifetime,
 } from './auth-bootstrap.js'
-import {
-	loadStoredApiToken,
-	type StoredApiToken,
-} from './api-token-store.js'
+import { loadStoredApiToken, type StoredApiToken } from './api-token-store.js'
 import { defaultApiUrl, defaultMcpUrl } from './defaults.js'
-import { callKodyApiOperation } from './mcp.js'
+import { callOpenApiOperation } from './open-api-client.js'
+import { ensureFreshCredentials } from './auth.js'
 import {
 	apiTokenNeedsRefresh,
 	ensureSetupGitScopes,
 	gitCredentialHostFromMcpUrl,
 	setupGitDefaultScopes,
 } from './setup-git.js'
-import { loadCredentials, type SecretBackend, type StoreResolution } from './store.js'
+import {
+	loadCredentials,
+	type SecretBackend,
+	type StoreResolution,
+} from './store.js'
 
 export type GitCredentialAction = 'get' | 'store' | 'erase'
 
@@ -111,12 +113,15 @@ export async function ensureGitApiToken(input: {
 
 	const mint =
 		input.mint ??
-		(async (params: Record<string, unknown>) =>
-			callKodyApiOperation({
+		(async (params: Record<string, unknown>) => {
+			const session = await ensureFreshCredentials({ mcpUrl, apiUrl })
+			return callOpenApiOperation({
 				operationId: cliCredentialBootstrapOperationId,
 				params,
-				mcpUrl,
-			}))
+				token: session.accessToken,
+				apiUrl,
+			})
+		})
 
 	try {
 		const scopes = ensureSetupGitScopes(
@@ -164,7 +169,9 @@ export async function handleGitCredential(input: {
 		throw new Error(`Unknown git-credential action "${String(input.action)}".`)
 	}
 
-	const expectedHost = gitCredentialHostFromMcpUrl(input.mcpUrl || defaultMcpUrl)
+	const expectedHost = gitCredentialHostFromMcpUrl(
+		input.mcpUrl || defaultMcpUrl,
+	)
 	if (
 		!isKodyGitHttpsHost({
 			protocol: input.request.protocol,
@@ -195,9 +202,12 @@ export async function handleGitCredential(input: {
 	})
 }
 
-export function parseGitCredentialAction(argv: ReadonlyArray<string>): GitCredentialAction {
+export function parseGitCredentialAction(
+	argv: ReadonlyArray<string>,
+): GitCredentialAction {
 	const action = argv[0]
-	if (action === 'get' || action === 'store' || action === 'erase') return action
+	if (action === 'get' || action === 'store' || action === 'erase')
+		return action
 	throw new Error(
 		'Usage: kody git-credential <get|store|erase>\n(Git invokes this as a credential helper; see `kody auth setup-git`.)',
 	)

@@ -14,7 +14,6 @@ test('search and api agree on which capabilities api can call', async () => {
 	const executeOnlySamples = [
 		'webhookSyntheticDispatch',
 		'adminPlatformFeedbackGet',
-		'execute',
 	]
 	for (const name of executeOnlySamples) {
 		expect(registry.capabilitySpecs[name]).toBeTruthy()
@@ -25,6 +24,10 @@ test('search and api agree on which capabilities api can call', async () => {
 			'execute-only',
 		)
 	}
+	expect(registry.capabilitySpecs.execute).toBeTruthy()
+	expect(isCapabilityAvailableViaApiTool('execute')).toBe(false)
+	expect(apiOperationsById.get('execute')?.kind).toBe('native')
+	expect(capabilityApiAvailabilitySummary('execute').apiAvailable).toBe(false)
 
 	expect(isCapabilityAvailableViaApiTool('webhookDeliveryList')).toBe(true)
 	expect(isCapabilityAvailableViaApiTool('metaGetCurrentUser')).toBe(true)

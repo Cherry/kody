@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { installSkill, projectSkillTargets, userSkillTargets } from '../src/skill.js'
+import {
+	installSkill,
+	projectSkillTargets,
+	userSkillTargets,
+} from '../src/skill.js'
 
 const sourcePath = fileURLToPath(
 	new URL('../skills/kody/SKILL.md', import.meta.url),
@@ -22,11 +26,14 @@ test('installSkill writes the bundled skill to user host directories', async () 
 		assert.match(body, /auth bootstrap|cliCredentialBootstrap/)
 		assert.match(
 			body,
-			/Prefer local CLI execute when\s+Node ≥22 and `@kodycodes\/cli` are available/,
+			/Prefer local CLI execute when\s+Node ≥22\s+and `@kodycodes\/cli` are available/,
 		)
 		assert.match(body, /execute --local/)
 		assert.doesNotMatch(body, /skip the CLI/i)
-		assert.doesNotMatch(body, /Do not keep using the CLI as the everyday interface/)
+		assert.doesNotMatch(
+			body,
+			/Do not keep using the CLI as the everyday interface/,
+		)
 		assert.doesNotMatch(body, /CLI fallback/)
 	}
 })

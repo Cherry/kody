@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+	existsSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
@@ -29,8 +35,14 @@ test('workerdTargetFor covers Linux and macOS on x64/arm64 only', () => {
 	assert.equal(workerdTargetFor('linux', 'arm64'), 'linux-arm64')
 	assert.equal(workerdTargetFor('darwin', 'x64'), 'darwin-64')
 	assert.equal(workerdTargetFor('darwin', 'arm64'), 'darwin-arm64')
-	assert.throws(() => workerdTargetFor('win32', 'x64'), /supports Linux and macOS/)
-	assert.throws(() => workerdTargetFor('linux', 'ia32'), /supports Linux and macOS/)
+	assert.throws(
+		() => workerdTargetFor('win32', 'x64'),
+		/supports Linux and macOS/,
+	)
+	assert.throws(
+		() => workerdTargetFor('linux', 'ia32'),
+		/supports Linux and macOS/,
+	)
 })
 
 test('workerdAssetUrl points at the pinned GitHub release asset', () => {
@@ -41,10 +53,19 @@ test('workerdAssetUrl points at the pinned GitHub release asset', () => {
 })
 
 test('userCacheDir honors KODY_CACHE_DIR, XDG_CACHE_HOME, and macOS Caches', () => {
-	assert.equal(userCacheDir({ KODY_CACHE_DIR: '/x/kody' }, 'linux', '/home/u'), '/x/kody')
-	assert.equal(userCacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux', '/home/u'), '/xdg/kody')
+	assert.equal(
+		userCacheDir({ KODY_CACHE_DIR: '/x/kody' }, 'linux', '/home/u'),
+		'/x/kody',
+	)
+	assert.equal(
+		userCacheDir({ XDG_CACHE_HOME: '/xdg' }, 'linux', '/home/u'),
+		'/xdg/kody',
+	)
 	assert.equal(userCacheDir({}, 'linux', '/home/u'), '/home/u/.cache/kody')
-	assert.equal(userCacheDir({}, 'darwin', '/Users/u'), '/Users/u/Library/Caches/kody')
+	assert.equal(
+		userCacheDir({}, 'darwin', '/Users/u'),
+		'/Users/u/Library/Caches/kody',
+	)
 })
 
 test('ensureWorkerdBinary prefers KODY_WORKERD_PATH without downloading', async () => {
@@ -59,9 +80,12 @@ test('ensureWorkerdBinary prefers KODY_WORKERD_PATH without downloading', async 
 
 test('ensureWorkerdBinary refuses a download whose digest does not match the pin', async () => {
 	const cacheDir = mkdtempSync(join(tmpdir(), 'kody-workerd-'))
-	const { fetchFn, urls } = serve(gzipSync(Buffer.from('#!/bin/sh\necho tampered\n')))
+	const { fetchFn, urls } = serve(
+		gzipSync(Buffer.from('#!/bin/sh\necho tampered\n')),
+	)
 	await assert.rejects(
-		() => ensureWorkerdBinary({ env: {}, cacheDir, target: 'linux-64', fetchFn }),
+		() =>
+			ensureWorkerdBinary({ env: {}, cacheDir, target: 'linux-64', fetchFn }),
 		/failed verification/,
 	)
 	assert.deepEqual(urls, [workerdAssetUrl('linux-64')])

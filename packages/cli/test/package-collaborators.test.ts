@@ -9,9 +9,15 @@ import {
 	runPackageCollaboratorPlan,
 } from '../src/package-collaborators.js'
 
-const pkg = { id: 'pkg-1', kody_id: 'release-notes', name: '@acme/release-notes' }
+const pkg = {
+	id: 'pkg-1',
+	kody_id: 'release-notes',
+	name: '@acme/release-notes',
+}
 
-function collaborator(overrides: Partial<PackageCollaborator>): PackageCollaborator {
+function collaborator(
+	overrides: Partial<PackageCollaborator>,
+): PackageCollaborator {
 	return {
 		grant_id: 'grant-1',
 		subject_type: 'user',
@@ -70,17 +76,37 @@ test('grant parses --team / --user and defaults the preset to use', () => {
 })
 
 test('grant and revoke reject missing, doubled, or invalid flags', () => {
-	const parse = (action: 'grant' | 'revoke', positionals: Array<string>, values = {}) => () =>
-		parsePackageCollaboratorCommand({ action, positionals, values })
+	const parse =
+		(action: 'grant' | 'revoke', positionals: Array<string>, values = {}) =>
+		() =>
+			parsePackageCollaboratorCommand({ action, positionals, values })
 	assert.throws(parse('grant', ['pkg']), /exactly one of --team or --user/)
-	assert.throws(parse('grant', ['pkg'], { team: 'a', user: 'b' }), /exactly one/)
-	assert.throws(parse('grant', ['pkg'], { grant: 'g' }), /exactly one of --team or --user/)
-	assert.throws(parse('grant', ['pkg'], { team: 'a', preset: 'owner' }), /--preset must be one of/)
-	assert.throws(parse('grant', [], { team: 'a' }), /Usage: kody package collaborators/)
+	assert.throws(
+		parse('grant', ['pkg'], { team: 'a', user: 'b' }),
+		/exactly one/,
+	)
+	assert.throws(
+		parse('grant', ['pkg'], { grant: 'g' }),
+		/exactly one of --team or --user/,
+	)
+	assert.throws(
+		parse('grant', ['pkg'], { team: 'a', preset: 'owner' }),
+		/--preset must be one of/,
+	)
+	assert.throws(
+		parse('grant', [], { team: 'a' }),
+		/Usage: kody package collaborators/,
+	)
 	assert.throws(parse('grant', ['pkg', 'extra'], { team: 'a' }), /Usage/)
 	assert.throws(parse('grant', ['pkg'], { team: '  ' }), /--team needs a value/)
-	assert.throws(parse('revoke', ['pkg'], { grant: 'g', preset: 'use' }), /only for grant/)
-	assert.throws(parse('revoke', ['pkg'], { team: 'a', grant: 'g' }), /exactly one of --team, --user, or --grant/)
+	assert.throws(
+		parse('revoke', ['pkg'], { grant: 'g', preset: 'use' }),
+		/only for grant/,
+	)
+	assert.throws(
+		parse('revoke', ['pkg'], { team: 'a', grant: 'g' }),
+		/exactly one of --team, --user, or --grant/,
+	)
 })
 
 test('collaborators prints a table and the API JSON with --json', async () => {
@@ -105,7 +131,10 @@ test('collaborators prints a table and the API JSON with --json', async () => {
 		json: true,
 	})
 	assert.deepEqual(JSON.parse(json), list)
-	assert.deepEqual(calls[0], ['packageCollaboratorList', { package_id: 'release-notes' }])
+	assert.deepEqual(calls[0], [
+		'packageCollaboratorList',
+		{ package_id: 'release-notes' },
+	])
 	assert.match(
 		formatCollaboratorList({ package: pkg, collaborators: [] }),
 		/No collaborators\. Org owners always have full access\./,
@@ -130,7 +159,10 @@ test('revoke by team or user looks up the grant; by grant id it does not', async
 		call,
 		json: false,
 	})
-	assert.equal(removed, 'Removed @bob (Bob Builder) from @acme/release-notes.\n')
+	assert.equal(
+		removed,
+		'Removed @bob (Bob Builder) from @acme/release-notes.\n',
+	)
 	await runPackageCollaboratorPlan({
 		plan: {
 			action: 'revoke',
@@ -163,7 +195,10 @@ test('kody package grant and revoke call the package-scoped routes with --org', 
 	clearOpenApiRouteCache()
 	const previousFetch = globalThis.fetch
 	const calls: Array<string> = []
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = new URL(String(input))
 		const method = (init?.method ?? 'GET').toUpperCase()
 		const json = (body: unknown) =>
@@ -195,7 +230,15 @@ test('kody package grant and revoke call the package-scoped routes with --org', 
 		let stdout = ''
 		let stderr = ''
 		const code = await runCli(
-			[...args, '--org', 'acme', '--token', 'kody_at_test', '--api-url', 'https://api.kody.codes'],
+			[
+				...args,
+				'--org',
+				'acme',
+				'--token',
+				'kody_at_test',
+				'--api-url',
+				'https://api.kody.codes',
+			],
 			{
 				stdout: (text) => {
 					stdout += text
@@ -245,5 +288,8 @@ test('kody package with an unknown action lists every package command', async ()
 	})
 	assert.equal(code, 1)
 	assert.match(stderr, /kody package publish/)
-	assert.match(stderr, /kody package grant <package> \(--team <slug> \| --user <username>\)/)
+	assert.match(
+		stderr,
+		/kody package grant <package> \(--team <slug> \| --user <username>\)/,
+	)
 })

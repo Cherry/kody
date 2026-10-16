@@ -14,9 +14,18 @@ export function userSkillTargets(home: string = homedir()): Array<{
 	path: string
 }> {
 	return [
-		{ host: 'Claude Code', path: join(home, '.claude', 'skills', 'kody', 'SKILL.md') },
-		{ host: 'Cursor', path: join(home, '.cursor', 'skills', 'kody', 'SKILL.md') },
-		{ host: 'Agents', path: join(home, '.agents', 'skills', 'kody', 'SKILL.md') },
+		{
+			host: 'Claude Code',
+			path: join(home, '.claude', 'skills', 'kody', 'SKILL.md'),
+		},
+		{
+			host: 'Cursor',
+			path: join(home, '.cursor', 'skills', 'kody', 'SKILL.md'),
+		},
+		{
+			host: 'Agents',
+			path: join(home, '.agents', 'skills', 'kody', 'SKILL.md'),
+		},
 	]
 }
 
@@ -25,9 +34,18 @@ export function projectSkillTargets(cwd: string = process.cwd()): Array<{
 	path: string
 }> {
 	return [
-		{ host: 'Agents', path: join(cwd, '.agents', 'skills', 'kody', 'SKILL.md') },
-		{ host: 'Cursor', path: join(cwd, '.cursor', 'skills', 'kody', 'SKILL.md') },
-		{ host: 'Claude Code', path: join(cwd, '.claude', 'skills', 'kody', 'SKILL.md') },
+		{
+			host: 'Agents',
+			path: join(cwd, '.agents', 'skills', 'kody', 'SKILL.md'),
+		},
+		{
+			host: 'Cursor',
+			path: join(cwd, '.cursor', 'skills', 'kody', 'SKILL.md'),
+		},
+		{
+			host: 'Claude Code',
+			path: join(cwd, '.claude', 'skills', 'kody', 'SKILL.md'),
+		},
 	]
 }
 

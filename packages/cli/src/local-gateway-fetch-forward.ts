@@ -3,7 +3,7 @@
  * mock MSW path (buffered) or prod CapabilityProxy streaming hop.
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import {
 	callCapabilityProxyGatewayFetchStream,
 	gatewayFetchHeadersHeaderName,
@@ -13,11 +13,8 @@ import {
 	secretResolutionHeaderName,
 	type CapabilityProxyClientInput,
 } from './capability-proxy.js'
-import {
-	readBodyBuffer,
-	writeWebResponse,
-} from './local-runtime-bridge.js'
-import type { MockFetchGateway } from './mock/mock-fetch-gateway.js'
+import { readBodyBuffer, writeWebResponse } from './local-runtime-bridge.js'
+import { type MockFetchGateway } from './mock/mock-fetch-gateway.js'
 import { runSecretHeader } from './local-runtime-source.js'
 
 const gatewayMetaHeaderNames = [
@@ -46,7 +43,10 @@ export async function forwardLocalGatewayFetchStream(input: {
 	client: CapabilityProxyClientInput
 	mockFetchGateway?: MockFetchGateway
 }): Promise<void> {
-	const url = headerValue(input.request.headers, gatewayFetchUrlHeaderName)?.trim()
+	const url = headerValue(
+		input.request.headers,
+		gatewayFetchUrlHeaderName,
+	)?.trim()
 	if (!url) {
 		await writeWebResponse(
 			input.response,
@@ -67,8 +67,10 @@ export async function forwardLocalGatewayFetchStream(input: {
 	if (input.mockFetchGateway) {
 		const body = await readBodyBuffer(input.request)
 		const method =
-			headerValue(input.request.headers, gatewayFetchMethodHeaderName)?.trim() ||
-			'GET'
+			headerValue(
+				input.request.headers,
+				gatewayFetchMethodHeaderName,
+			)?.trim() || 'GET'
 		const packageId = headerValue(
 			input.request.headers,
 			gatewayFetchPackageIdHeaderName,
@@ -81,7 +83,11 @@ export async function forwardLocalGatewayFetchStream(input: {
 		if (rawHeaders) {
 			try {
 				const parsed = JSON.parse(rawHeaders) as unknown
-				if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+				if (
+					parsed != null &&
+					typeof parsed === 'object' &&
+					!Array.isArray(parsed)
+				) {
 					headers = Object.fromEntries(
 						Object.entries(parsed as Record<string, unknown>).flatMap(
 							([key, value]) =>
@@ -145,7 +151,10 @@ export async function forwardLocalGatewayFetchStream(input: {
 		return
 	}
 
-	const method = headerValue(input.request.headers, gatewayFetchMethodHeaderName)
+	const method = headerValue(
+		input.request.headers,
+		gatewayFetchMethodHeaderName,
+	)
 	const packageId = headerValue(
 		input.request.headers,
 		gatewayFetchPackageIdHeaderName,
@@ -158,10 +167,15 @@ export async function forwardLocalGatewayFetchStream(input: {
 	if (rawHeaders) {
 		try {
 			const parsed = JSON.parse(rawHeaders) as unknown
-			if (parsed != null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+			if (
+				parsed != null &&
+				typeof parsed === 'object' &&
+				!Array.isArray(parsed)
+			) {
 				outboundHeaders = Object.fromEntries(
-					Object.entries(parsed as Record<string, unknown>).flatMap(([key, value]) =>
-						typeof value === 'string' ? [[key, value] as const] : [],
+					Object.entries(parsed as Record<string, unknown>).flatMap(
+						([key, value]) =>
+							typeof value === 'string' ? [[key, value] as const] : [],
 					),
 				)
 			}
@@ -209,5 +223,7 @@ export async function forwardLocalGatewayFetchStream(input: {
 export function isGatewayFetchForwardHeader(name: string): boolean {
 	const lower = name.toLowerCase()
 	if (lower === runSecretHeader) return false
-	return gatewayMetaHeaderNames.some((allowed) => allowed.toLowerCase() === lower)
+	return gatewayMetaHeaderNames.some(
+		(allowed) => allowed.toLowerCase() === lower,
+	)
 }

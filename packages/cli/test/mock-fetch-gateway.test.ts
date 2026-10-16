@@ -29,7 +29,10 @@ test('parsePassthroughHosts splits and lowercases', () => {
 })
 
 test('hostMatchesPassthrough supports exact and wildcard hosts', () => {
-	assert.equal(hostMatchesPassthrough('api.example.com', ['api.example.com']), true)
+	assert.equal(
+		hostMatchesPassthrough('api.example.com', ['api.example.com']),
+		true,
+	)
 	assert.equal(hostMatchesPassthrough('foo.github.com', ['*.github.com']), true)
 	assert.equal(hostMatchesPassthrough('github.com', ['*.github.com']), false)
 	assert.equal(hostMatchesPassthrough('evil.com', ['api.example.com']), false)
@@ -52,7 +55,9 @@ test('dispatchMockGatewayFetch returns MSW handler responses', async () => {
 		},
 	})
 	assert.equal(result.status, 200)
-	const body = JSON.parse(Buffer.from(result.bodyBase64, 'base64').toString('utf8')) as {
+	const body = JSON.parse(
+		Buffer.from(result.bodyBase64, 'base64').toString('utf8'),
+	) as {
 		ok: boolean
 	}
 	assert.equal(body.ok, true)
@@ -114,7 +119,9 @@ test('passthrough hosts use real network without credential headers', async () =
 	// Authorization from the package is forwarded as a normal header (not a
 	// secret placement); the opaque credential handle is stripped.
 	assert.equal(seen[0]?.authorization, 'Bearer should-not-forward-as-secret')
-	const body = JSON.parse(Buffer.from(result.bodyBase64, 'base64').toString('utf8')) as {
+	const body = JSON.parse(
+		Buffer.from(result.bodyBase64, 'base64').toString('utf8'),
+	) as {
 		passthrough: boolean
 	}
 	assert.equal(body.passthrough, true)
@@ -180,10 +187,14 @@ test('mock gateway fetch shim uses a flat module name (no path-join)', async () 
 			],
 		})
 		assert.ok(
-			installed.packageModules.some((m) => m.name === '.__kody_virtual__/runtime.js'),
+			installed.packageModules.some(
+				(m) => m.name === '.__kody_virtual__/runtime.js',
+			),
 		)
 		assert.ok(
-			installed.packageModules.some((m) => m.name === mockGatewayFetchShimModuleName),
+			installed.packageModules.some(
+				(m) => m.name === mockGatewayFetchShimModuleName,
+			),
 		)
 		assert.deepEqual(installed.sideEffectModules, [
 			'.__kody_virtual__/runtime.js',

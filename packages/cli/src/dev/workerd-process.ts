@@ -5,7 +5,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import type { Readable } from 'node:stream'
+import { type Readable } from 'node:stream'
 import { redact } from '../redact.js'
 
 const workerdStartTimeoutMs = 30_000
@@ -28,11 +28,15 @@ export async function startWorkerd(input: {
 	onStdoutLine: (line: string) => void
 	onStderrLine: (line: string) => void
 }): Promise<WorkerdHandle> {
-	const child = spawn(input.workerdPath, ['serve', input.configPath, '--control-fd=3'], {
-		cwd: input.cwd,
-		env: input.env,
-		stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
-	})
+	const child = spawn(
+		input.workerdPath,
+		['serve', input.configPath, '--control-fd=3'],
+		{
+			cwd: input.cwd,
+			env: input.env,
+			stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+		},
+	)
 	if (child.pid !== undefined) input.onSpawn?.(child.pid)
 
 	let startupStderr = ''
@@ -44,7 +48,9 @@ export async function startWorkerd(input: {
 	})
 
 	const exited = new Promise<string>((resolve) => {
-		child.once('exit', (code, signal) => resolve(`workerd exit ${signal ?? code}`))
+		child.once('exit', (code, signal) =>
+			resolve(`workerd exit ${signal ?? code}`),
+		)
 		child.once('error', (error) => resolve(`workerd error: ${error.message}`))
 	})
 
@@ -60,12 +66,18 @@ export async function startWorkerd(input: {
 		kill: async () => {
 			if (child.exitCode !== null || child.signalCode !== null) return
 			child.kill('SIGKILL')
-			await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 1000))])
+			await Promise.race([
+				exited,
+				new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+			])
 		},
 	}
 }
 
-function forEachLine(stream: Readable | null, onLine: (line: string) => void): void {
+function forEachLine(
+	stream: Readable | null,
+	onLine: (line: string) => void,
+): void {
 	if (!stream) return
 	const lines = createInterface({ input: stream, crlfDelay: Infinity })
 	lines.on('line', (line) => {
@@ -92,7 +104,9 @@ function waitForListen(
 			settle(() => {
 				child.kill('SIGKILL')
 				reject(
-					new Error(`workerd did not start within ${workerdStartTimeoutMs / 1000}s.${stderr()}`),
+					new Error(
+						`workerd did not start within ${workerdStartTimeoutMs / 1000}s.${stderr()}`,
+					),
 				)
 			})
 		}, workerdStartTimeoutMs)
@@ -106,7 +120,9 @@ function waitForListen(
 			}
 		})
 		void exited.then((detail) => {
-			settle(() => reject(new Error(`workerd failed to start (${detail})${stderr()}`)))
+			settle(() =>
+				reject(new Error(`workerd failed to start (${detail})${stderr()}`)),
+			)
 		})
 	})
 }
@@ -114,8 +130,14 @@ function waitForListen(
 export function parseListenPort(line: string): number | null {
 	if (!line.trim()) return null
 	try {
-		const event = JSON.parse(line) as { event?: string; socket?: string; port?: number }
-		return event.event === 'listen' && event.socket === 'http' && typeof event.port === 'number'
+		const event = JSON.parse(line) as {
+			event?: string
+			socket?: string
+			port?: number
+		}
+		return event.event === 'listen' &&
+			event.socket === 'http' &&
+			typeof event.port === 'number'
 			? event.port
 			: null
 	} catch {
@@ -132,7 +154,8 @@ export function cleanWorkerdStderrLine(line: string): string | null {
 	const trimmed = line.trim()
 	if (!trimmed) return null
 	if (/^stack:(\s+\S+@[0-9a-fx]+)+\s*$/i.test(trimmed)) return null
-	const prefixed = /^workerd\/\S+:\d+: (?:error|warning|info|debug): (.*)$/.exec(trimmed)
+	const prefixed =
+		/^workerd\/\S+:\d+: (?:error|warning|info|debug): (.*)$/.exec(trimmed)
 	const body = prefixed ? prefixed[1]! : trimmed
 	return body
 		.replace(/\S+\.(?:c\+\+|h):\d+: failed: /g, '')

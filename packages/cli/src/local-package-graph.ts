@@ -1,4 +1,7 @@
-import { init as initEsModuleLexer, parse as parseEsModule } from 'es-module-lexer'
+import {
+	init as initEsModuleLexer,
+	parse as parseEsModule,
+} from 'es-module-lexer'
 import {
 	assertTokenSafeApiUrl,
 	capabilityProxyUrl,
@@ -49,8 +52,12 @@ export const packageGraphInlineCodePreferImportsChars = 400_000
  * Tiny entry for package-graph when the full module is too large to POST.
  * Side-effect imports only — enough for origin's static scanner.
  */
-export function synthesizePackageGraphEntry(imports: ReadonlyArray<string>): string {
-	const unique = [...new Set(imports)].sort((left, right) => left.localeCompare(right))
+export function synthesizePackageGraphEntry(
+	imports: ReadonlyArray<string>,
+): string {
+	const unique = [...new Set(imports)].sort((left, right) =>
+		left.localeCompare(right),
+	)
 	if (unique.length === 0) {
 		return 'export default async function main() {}\n'
 	}
@@ -93,7 +100,9 @@ function parseModuleImports(code: string): ReturnType<typeof parseEsModule>[0] {
 	}
 }
 
-export async function listSavedPackageImports(code: string): Promise<Array<string>> {
+export async function listSavedPackageImports(
+	code: string,
+): Promise<Array<string>> {
 	await esModuleLexerReady
 	const imports = parseModuleImports(code)
 	const found = new Set<string>()
@@ -115,7 +124,9 @@ export async function hasSavedPackageImports(code: string): Promise<boolean> {
  * Literal `import("kody:@…")` — static `from` imports are fine; computed
  * `import(specifier)` cannot be bound into workerd ahead of time.
  */
-export async function hasLiteralDynamicSavedPackageImports(code: string): Promise<boolean> {
+export async function hasLiteralDynamicSavedPackageImports(
+	code: string,
+): Promise<boolean> {
 	await esModuleLexerReady
 	return parseModuleImports(code).some((im) => {
 		if (im.type !== 'dynamic' || im.probablyTypeOnly) return false
@@ -129,7 +140,8 @@ export async function hasLiteralDynamicSavedPackageImports(code: string): Promis
  * workerd also rejects leading-`/` absolute module names.
  */
 export function flatAliasForBareKodyBuiltin(specifier: string): string | null {
-	if (!specifier.startsWith('kody:') || specifier.startsWith('kody:@')) return null
+	if (!specifier.startsWith('kody:') || specifier.startsWith('kody:@'))
+		return null
 	if (specifier === localWorkerModuleNames.runtime) {
 		return localWorkerModuleNames.runtimeFlatAlias
 	}
@@ -144,7 +156,9 @@ export function flatAliasForBareKodyBuiltin(specifier: string): string | null {
  * not path-join them under path-like module names
  * (`kody:@scope/pkg/export` → `kody:@scope/pkg/kody:runtime`).
  */
-export async function rewriteBareKodyBuiltinImports(esModule: string): Promise<string> {
+export async function rewriteBareKodyBuiltinImports(
+	esModule: string,
+): Promise<string> {
 	await esModuleLexerReady
 	const edits = parseModuleImports(esModule)
 		.filter((im) => typeof im.specifier === 'string')
@@ -154,7 +168,10 @@ export async function rewriteBareKodyBuiltinImports(esModule: string): Promise<s
 			if (!alias) return null
 			return { start: im.start, end: im.end, alias }
 		})
-		.filter((edit): edit is { start: number; end: number; alias: string } => edit !== null)
+		.filter(
+			(edit): edit is { start: number; end: number; alias: string } =>
+				edit !== null,
+		)
 		.sort((a, b) => b.start - a.start)
 	let out = esModule
 	for (const edit of edits) {
@@ -256,8 +273,11 @@ export async function resolveLocalPackageGraph(input: {
 
 	let localModules: Array<LocalPackageModule> = []
 	let unresolved = imports
-	const { mergePackageGraphs, resolveLocalPackageModules, tryLoadSelfManifest } =
-		await import('./mock-local-deps.js')
+	const {
+		mergePackageGraphs,
+		resolveLocalPackageModules,
+		tryLoadSelfManifest,
+	} = await import('./mock-local-deps.js')
 	if (imports.length > 0 && input.packageRoot) {
 		const selfManifest = await tryLoadSelfManifest(input.packageRoot)
 		const local = await resolveLocalPackageModules({
@@ -279,7 +299,11 @@ export async function resolveLocalPackageGraph(input: {
 		}
 	}
 
-	if (unresolved.length > 0 && !input.depResolve && isLikelyMockBearer(input.token)) {
+	if (
+		unresolved.length > 0 &&
+		!input.depResolve &&
+		isLikelyMockBearer(input.token)
+	) {
 		throw new LocalPackageGraphError(
 			`kody:@ dependencies need published package-graph while --target mock keeps storage/credentials local. ` +
 				`Map them in .kody/deps.json (or package.json#kody.localDeps), keep them in this package's exports, ` +
@@ -380,7 +404,13 @@ export async function fetchLocalPackageGraph(
 
 	const body = await readJson(response)
 	if (!response.ok) {
-		throw describePackageGraphFailure(response.status, body, url, required, input.token)
+		throw describePackageGraphFailure(
+			response.status,
+			body,
+			url,
+			required,
+			input.token,
+		)
 	}
 
 	const graph = parsePackageGraphBody(body, required)
@@ -396,7 +426,10 @@ export async function fetchLocalPackageGraph(
 	return graph
 }
 
-function parsePackageGraphBody(body: unknown, imports: Array<string>): LocalPackageGraph {
+function parsePackageGraphBody(
+	body: unknown,
+	imports: Array<string>,
+): LocalPackageGraph {
 	if (!isRecord(body) || !Array.isArray(body.modules)) {
 		throw new LocalPackageGraphError(
 			`Kody package-graph response was missing a modules array. ${localPackageGraphPlatformIssueUrl}`,
@@ -405,7 +438,11 @@ function parsePackageGraphBody(body: unknown, imports: Array<string>): LocalPack
 	}
 	const modules: Array<LocalPackageModule> = []
 	for (const entry of body.modules) {
-		if (!isRecord(entry) || typeof entry.name !== 'string' || !entry.name.trim()) {
+		if (
+			!isRecord(entry) ||
+			typeof entry.name !== 'string' ||
+			!entry.name.trim()
+		) {
 			throw new LocalPackageGraphError(
 				`Kody package-graph response included a module without a name. ${localPackageGraphPlatformIssueUrl}`,
 				{ code: 'invalid_package_graph' },
@@ -461,10 +498,10 @@ function describePackageGraphFailure(
 		return new LocalPackageGraphError(message, { status, code })
 	}
 	if (code === 'feature_disabled') {
-		return new LocalPackageGraphError(
-			`${featureDisabledMessage()}${detail}`,
-			{ status, code },
-		)
+		return new LocalPackageGraphError(`${featureDisabledMessage()}${detail}`, {
+			status,
+			code,
+		})
 	}
 	if (code === 'insufficient_scope') {
 		return new LocalPackageGraphError(
@@ -477,7 +514,10 @@ function describePackageGraphFailure(
 	}
 	if (status === 403) {
 		return new LocalPackageGraphError(
-			capabilityProxyForbiddenMessage({ code, serverMessage: failure?.message }),
+			capabilityProxyForbiddenMessage({
+				code,
+				serverMessage: failure?.message,
+			}),
 			{ status, code },
 		)
 	}
@@ -510,15 +550,22 @@ async function readJson(response: Response): Promise<unknown> {
 	}
 }
 
-function readErrorBody(body: unknown): { code: string | null; message: string } | null {
+function readErrorBody(
+	body: unknown,
+): { code: string | null; message: string } | null {
 	if (!isRecord(body) || body.error == null) return null
 	const { error } = body
 	if (typeof error === 'string') return { code: null, message: error }
 	if (isRecord(error)) {
 		const code = typeof error.code === 'string' ? error.code : null
 		const message =
-			typeof error.message === 'string' ? error.message : (code ?? JSON.stringify(error))
-		return { code, message: preferActionableInvalidParametersMessage(error, message) }
+			typeof error.message === 'string'
+				? error.message
+				: (code ?? JSON.stringify(error))
+		return {
+			code,
+			message: preferActionableInvalidParametersMessage(error, message),
+		}
 	}
 	return { code: null, message: String(error) }
 }
@@ -535,11 +582,14 @@ function preferActionableInvalidParametersMessage(
 ): string {
 	if (message !== 'Invalid parameters.') return message
 	const details = error.details
-	const issues = isRecord(details) && Array.isArray(details.issues) ? details.issues : null
+	const issues =
+		isRecord(details) && Array.isArray(details.issues) ? details.issues : null
 	if (issues === null || issues.length === 0) return message
 	const issueMessages = issues
 		.filter(isRecord)
-		.map((issue) => (typeof issue.message === 'string' ? issue.message.trim() : ''))
+		.map((issue) =>
+			typeof issue.message === 'string' ? issue.message.trim() : '',
+		)
 		.filter((text) => text.length > 0)
 	if (issueMessages.length === 0) return message
 	const sizeIssue = issueMessages.find((text) =>

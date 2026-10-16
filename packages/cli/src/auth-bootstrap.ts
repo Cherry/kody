@@ -1,13 +1,13 @@
-import { assertTokenSafeApiUrl, capabilityProxyUrl } from './capability-proxy.js'
+import {
+	assertTokenSafeApiUrl,
+	capabilityProxyUrl,
+} from './capability-proxy.js'
 import { cliName, defaultApiUrl } from './defaults.js'
 import { summarizeNonJsonErrorBody } from './http-error-body.js'
 import { describeNetworkError } from './network-error.js'
 import { readPackageVersion } from './package-info.js'
-import {
-	saveStoredApiToken,
-	type StoredApiToken,
-} from './api-token-store.js'
-import type { SecretBackend, StoreResolution } from './store.js'
+import { saveStoredApiToken, type StoredApiToken } from './api-token-store.js'
+import { type SecretBackend, type StoreResolution } from './store.js'
 
 /** ADR 0056 one-shot bootstrap code prefix (`kody_bc_…`). */
 export const cliBootstrapCodePrefix = 'kody_bc_'
@@ -82,7 +82,9 @@ export type BootstrapRedeemRequestBody =
 			max_lifetime_seconds: number
 	  }
 
-export function parseCliBootstrapCode(value: string): { codeId: string; secret: string } | null {
+export function parseCliBootstrapCode(
+	value: string,
+): { codeId: string; secret: string } | null {
 	const match = bootstrapCodePattern.exec(value.trim())
 	if (!match) return null
 	const [, codeId, secret] = match
@@ -120,7 +122,8 @@ export function resolveCliTokenLifetime(input: {
 	idleTtlSeconds?: number
 	maxLifetimeSeconds?: number
 }): ResolvedCliTokenLifetime {
-	const aliasRaw = typeof input.lifetime === 'string' ? input.lifetime.trim() : ''
+	const aliasRaw =
+		typeof input.lifetime === 'string' ? input.lifetime.trim() : ''
 	const hasAlias = aliasRaw.length > 0
 	const hasIdle = input.idleTtlSeconds !== undefined
 	const hasMax = input.maxLifetimeSeconds !== undefined
@@ -281,7 +284,9 @@ export function storedApiTokenFromRedeem(input: {
 }): StoredApiToken {
 	const token = input.redeemed.token.trim()
 	if (!token.startsWith('kody_at_')) {
-		throw new Error('Bootstrap redeem did not return a scoped kody_at_… API token.')
+		throw new Error(
+			'Bootstrap redeem did not return a scoped kody_at_… API token.',
+		)
 	}
 	return {
 		version: 1,
@@ -289,7 +294,9 @@ export function storedApiTokenFromRedeem(input: {
 		token,
 		tokenId: input.redeemed.id,
 		...(input.redeemed.name ? { name: input.redeemed.name } : {}),
-		...(Array.isArray(input.redeemed.scopes) ? { scopes: input.redeemed.scopes } : {}),
+		...(Array.isArray(input.redeemed.scopes)
+			? { scopes: input.redeemed.scopes }
+			: {}),
 		expiresAt: input.redeemed.expires_at ?? null,
 		maxExpiresAt: input.redeemed.max_expires_at ?? null,
 		createdVia: input.redeemed.created_via ?? 'cli-bootstrap',
@@ -346,7 +353,9 @@ export type BootstrapMintResponse = {
  * Parse `--scopes`. Comma- or space-separated, deduped, order kept. The list
  * replaces cliCredentialBootstrap's default scopes; the server validates names.
  */
-export function parseCliScopesFlag(raw: string | undefined): Array<string> | undefined {
+export function parseCliScopesFlag(
+	raw: string | undefined,
+): Array<string> | undefined {
 	if (raw === undefined) return undefined
 	const scopes = [
 		...new Set(
@@ -357,7 +366,9 @@ export function parseCliScopesFlag(raw: string | undefined): Array<string> | und
 		),
 	]
 	if (scopes.length === 0) {
-		throw new Error('--scopes needs at least one scope (e.g. --scopes org:execute,package:write).')
+		throw new Error(
+			'--scopes needs at least one scope (e.g. --scopes org:execute,package:write).',
+		)
 	}
 	return scopes
 }
@@ -384,7 +395,9 @@ export function bootstrapMintLifetimeFields(
 			}
 }
 
-export function parseBootstrapMintResponse(body: unknown): BootstrapMintResponse {
+export function parseBootstrapMintResponse(
+	body: unknown,
+): BootstrapMintResponse {
 	if (
 		!isRecord(body) ||
 		typeof body.bootstrap_code !== 'string' ||
@@ -396,7 +409,9 @@ export function parseBootstrapMintResponse(body: unknown): BootstrapMintResponse
 	return {
 		bootstrap_code: body.bootstrap_code,
 		scopes: Array.isArray(body.scopes)
-			? body.scopes.filter((scope): scope is string => typeof scope === 'string')
+			? body.scopes.filter(
+					(scope): scope is string => typeof scope === 'string',
+				)
 			: [],
 		idle_ttl_seconds: body.idle_ttl_seconds,
 		max_lifetime_seconds: body.max_lifetime_seconds,
@@ -460,23 +475,34 @@ function readRequiredInteger(input: {
 }
 
 function parseRedeemResponse(body: unknown): BootstrapRedeemResponse {
-	if (!isRecord(body) || typeof body.token !== 'string' || typeof body.id !== 'string') {
+	if (
+		!isRecord(body) ||
+		typeof body.token !== 'string' ||
+		typeof body.id !== 'string'
+	) {
 		throw new Error('Bootstrap redeem returned an unexpected response.')
 	}
 	return {
 		token: body.token,
-		token_type: typeof body.token_type === 'string' ? body.token_type : undefined,
+		token_type:
+			typeof body.token_type === 'string' ? body.token_type : undefined,
 		id: body.id,
 		name: typeof body.name === 'string' ? body.name : null,
 		scopes: Array.isArray(body.scopes)
-			? body.scopes.filter((scope): scope is string => typeof scope === 'string')
+			? body.scopes.filter(
+					(scope): scope is string => typeof scope === 'string',
+				)
 			: undefined,
 		status: typeof body.status === 'string' ? body.status : undefined,
 		idle_ttl_seconds:
-			typeof body.idle_ttl_seconds === 'number' ? body.idle_ttl_seconds : undefined,
+			typeof body.idle_ttl_seconds === 'number'
+				? body.idle_ttl_seconds
+				: undefined,
 		expires_at: typeof body.expires_at === 'string' ? body.expires_at : null,
-		max_expires_at: typeof body.max_expires_at === 'string' ? body.max_expires_at : null,
-		created_via: typeof body.created_via === 'string' ? body.created_via : undefined,
+		max_expires_at:
+			typeof body.max_expires_at === 'string' ? body.max_expires_at : null,
+		created_via:
+			typeof body.created_via === 'string' ? body.created_via : undefined,
 	}
 }
 
@@ -504,7 +530,9 @@ async function readJson(response: Response): Promise<unknown> {
 	}
 }
 
-function readErrorBody(body: unknown): { code: string | null; message: string } | null {
+function readErrorBody(
+	body: unknown,
+): { code: string | null; message: string } | null {
 	if (!isRecord(body) || body.error == null) {
 		if (typeof body === 'string' && body.trim()) {
 			return { code: null, message: summarizeNonJsonErrorBody(body) }
@@ -519,7 +547,9 @@ function readErrorBody(body: unknown): { code: string | null; message: string } 
 	if (isRecord(error)) {
 		const code = typeof error.code === 'string' ? error.code : null
 		const message =
-			typeof error.message === 'string' ? error.message : code ?? JSON.stringify(error)
+			typeof error.message === 'string'
+				? error.message
+				: (code ?? JSON.stringify(error))
 		return { code, message }
 	}
 	return { code: null, message: String(error) }

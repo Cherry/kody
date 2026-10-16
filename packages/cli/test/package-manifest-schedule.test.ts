@@ -33,8 +33,14 @@ test('loadPackageManifest accepts object-form job schedules like prod', async ()
 			}),
 		)
 		await writeFile(join(dir, 'index.ts'), 'export default async () => ({})\n')
-		await writeFile(join(dir, 'jobs/daily.ts'), 'export default async () => ({})\n')
-		await writeFile(join(dir, 'jobs/hourly.ts'), 'export default async () => ({})\n')
+		await writeFile(
+			join(dir, 'jobs/daily.ts'),
+			'export default async () => ({})\n',
+		)
+		await writeFile(
+			join(dir, 'jobs/hourly.ts'),
+			'export default async () => ({})\n',
+		)
 
 		const manifest = await loadPackageManifest(dir)
 		assert.equal(manifest.jobs['daily-check']?.schedule, '0 9 * * *')

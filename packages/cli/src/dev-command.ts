@@ -11,10 +11,16 @@ import {
 	mocksSuggestionDetail,
 	type CredentialedFetchSignal,
 } from './credentialed-fetch-scan.js'
-import { buildLocalPackageContext, runLocalPackageModule } from './local-package-run.js'
+import {
+	buildLocalPackageContext,
+	runLocalPackageModule,
+} from './local-package-run.js'
 import { ensureMockTarget, type MockServer } from './mock/mock-server.js'
 import { packageMocksRelativePath } from './mock/load-package-mocks.js'
-import { startPackageAppDev, type PackageAppDevServer } from './package-app-dev.js'
+import {
+	startPackageAppDev,
+	type PackageAppDevServer,
+} from './package-app-dev.js'
 import {
 	loadPackageManifest,
 	resolveExportModulePath,
@@ -22,7 +28,7 @@ import {
 	type KodyPackageManifest,
 } from './package-manifest.js'
 import { StructuredCliError } from './structured-error.js'
-import type { KodyTarget } from './target.js'
+import { type KodyTarget } from './target.js'
 import { formatToolResult } from './tool-result.js'
 import { bundleLocalUserModule } from './local-bundle.js'
 import { formatDevEvent, type DevEvent } from './dev/dev-events.js'
@@ -131,7 +137,10 @@ export async function runDevServe(input: {
 }): Promise<number> {
 	const manifest = await loadPackageManifest(input.cwd)
 	if (input.port === undefined) {
-		const running = await findRunningDevServer({ root: manifest.root, target: input.target })
+		const running = await findRunningDevServer({
+			root: manifest.root,
+			target: input.target,
+		})
 		if (running) {
 			const { registration } = running
 			throw new StructuredCliError({
@@ -188,15 +197,22 @@ export async function runDevServe(input: {
 		})
 	} catch (error) {
 		if (registered) {
-			await removeDevRegistration(manifest.root, process.pid, input.target).catch(() => {})
+			await removeDevRegistration(
+				manifest.root,
+				process.pid,
+				input.target,
+			).catch(() => {})
 		}
 		await input.auth.closeMock?.()
 		throw error
 	}
 	const shutdown = async () => {
 		await server.close()
-		await removeDevRegistration(manifest.root, process.pid, input.target).catch(() => {})
-		if (input.readyFile) await removeOwnedReadyFile(input.readyFile, process.pid)
+		await removeDevRegistration(manifest.root, process.pid, input.target).catch(
+			() => {},
+		)
+		if (input.readyFile)
+			await removeOwnedReadyFile(input.readyFile, process.pid)
 		await input.auth.closeMock?.()
 	}
 	try {
@@ -283,10 +299,13 @@ export async function tryAttachedDevFetch(input: {
 	const { registration } = running
 	const rest = input.path.startsWith('/') ? input.path : `/${input.path}`
 	const url = new URL(
-		`${registration.basePath}${rest === '/' && registration.basePath ? '' : rest}` || '/',
+		`${registration.basePath}${rest === '/' && registration.basePath ? '' : rest}` ||
+			'/',
 		registration.origin,
 	)
-	input.io.stderr(`Attached to running kody dev (pid ${registration.pid}) at ${registration.origin}\n`)
+	input.io.stderr(
+		`Attached to running kody dev (pid ${registration.pid}) at ${registration.origin}\n`,
+	)
 	const response = await fetch(url, {
 		method: input.method ?? 'GET',
 		headers: input.body ? { 'content-type': 'application/json' } : undefined,
@@ -360,9 +379,7 @@ export async function runDevFetch(input: {
 		const result = await server.fetchPath(input.path, {
 			method: input.method,
 			body: input.body,
-			headers: input.body
-				? { 'content-type': 'application/json' }
-				: undefined,
+			headers: input.body ? { 'content-type': 'application/json' } : undefined,
 		})
 		if (input.json) {
 			input.io.stdout(`${JSON.stringify(result, null, 2)}\n`)
@@ -451,7 +468,10 @@ export async function runDevWebhook(input: {
 			target: input.target,
 		})
 	}
-	const rawBody = await readFile(resolve(input.cwd ?? process.cwd(), input.bodyPath), 'utf8')
+	const rawBody = await readFile(
+		resolve(input.cwd ?? process.cwd(), input.bodyPath),
+		'utf8',
+	)
 	let jsonBody: unknown = null
 	try {
 		jsonBody = JSON.parse(rawBody)
@@ -537,7 +557,10 @@ export async function runDevEmit(input: {
 			target: input.target,
 		})
 	}
-	const rawBody = await readFile(resolve(input.cwd ?? process.cwd(), input.bodyPath), 'utf8')
+	const rawBody = await readFile(
+		resolve(input.cwd ?? process.cwd(), input.bodyPath),
+		'utf8',
+	)
 	let envelope: Record<string, unknown>
 	try {
 		const parsed = JSON.parse(rawBody) as unknown
@@ -550,7 +573,9 @@ export async function runDevEmit(input: {
 			code: 'package_manifest_invalid',
 			message: `Could not parse event body ${input.bodyPath} as a JSON object.`,
 			fix: 'Pass --body event.json with the platform delivery envelope fields.',
-			details: { cause: error instanceof Error ? error.message : String(error) },
+			details: {
+				cause: error instanceof Error ? error.message : String(error),
+			},
 			target: input.target,
 		})
 	}
@@ -606,11 +631,16 @@ export async function runDevCheck(input: {
 		checks.push({ name, ok, detail })
 	}
 
-	const bundleAndScan = async (label: string, modulePath: string): Promise<void> => {
+	const bundleAndScan = async (
+		label: string,
+		modulePath: string,
+	): Promise<void> => {
 		try {
 			const bundled = await bundleLocalUserModule(modulePath)
 			push(label, true, label.startsWith('app.entry') ? modulePath : undefined)
-			credentialSignals.push(...(await detectCredentialedFetchInSource(bundled, label)))
+			credentialSignals.push(
+				...(await detectCredentialedFetchInSource(bundled, label)),
+			)
 		} catch (error) {
 			push(label, false, error instanceof Error ? error.message : String(error))
 		}
@@ -778,7 +808,7 @@ async function printDevDryRun(input: {
 			surface: input.surface,
 			modulePath: input.modulePath,
 			params: input.params ?? null,
-			...(input.extra ?? {}),
+			...input.extra,
 			note:
 				input.target === 'prod'
 					? 'No module run and no prod side effects. Drop --dry-run to invoke once against prod CapabilityProxy.'
@@ -840,7 +870,10 @@ export function parseDevSubcommand(positionals: Array<string>): {
  * Remove `--ready-file` only when it still names this process. A successor
  * `kody dev` may have rewritten the same path before our shutdown finishes.
  */
-export async function removeOwnedReadyFile(path: string, ownerPid: number): Promise<void> {
+export async function removeOwnedReadyFile(
+	path: string,
+	ownerPid: number,
+): Promise<void> {
 	try {
 		const parsed = JSON.parse(await readFile(path, 'utf8')) as { pid?: unknown }
 		if (parsed.pid !== ownerPid) return

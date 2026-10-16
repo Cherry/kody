@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { createServer, request as httpRequest } from 'node:http'
-import { connect, createServer as createTcpServer, type AddressInfo } from 'node:net'
+import {
+	connect,
+	createServer as createTcpServer,
+	type AddressInfo,
+} from 'node:net'
 import { test } from 'node:test'
 import {
 	assertTokenSafeApiUrl,
@@ -19,9 +23,16 @@ import {
 const token = 'kody_at_secret_value'
 
 function respondWith(status: number, body: unknown) {
-	const requests: Array<{ url: string; method: string; headers: Headers; body: string | null }> =
-		[]
-	const fetchFn = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	const requests: Array<{
+		url: string
+		method: string
+		headers: Headers
+		body: string | null
+	}> = []
+	const fetchFn = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		requests.push({
 			url: String(input),
 			method: init?.method ?? 'GET',
@@ -35,11 +46,15 @@ function respondWith(status: number, body: unknown) {
 
 test('capabilityProxyUrl keeps an API base path prefix', () => {
 	assert.equal(
-		capabilityProxyUrl('https://api.kody.codes', 'v1/capability-proxy/call').href,
+		capabilityProxyUrl('https://api.kody.codes', 'v1/capability-proxy/call')
+			.href,
 		'https://api.kody.codes/v1/capability-proxy/call',
 	)
 	assert.equal(
-		capabilityProxyUrl('http://localhost:8787/api/', 'v1/capability-proxy/session').href,
+		capabilityProxyUrl(
+			'http://localhost:8787/api/',
+			'v1/capability-proxy/session',
+		).href,
 		'http://localhost:8787/api/v1/capability-proxy/session',
 	)
 })
@@ -60,15 +75,25 @@ test('openCapabilityProxySession sends the bearer token and reads scopes + TTL',
 		expiresAt: '2026-10-01T00:10:00Z',
 		features: ['credential-call-map'],
 	})
-	assert.equal(requests[0]?.url, 'https://api.kody.codes/v1/capability-proxy/session')
+	assert.equal(
+		requests[0]?.url,
+		'https://api.kody.codes/v1/capability-proxy/session',
+	)
 	assert.equal(requests[0]?.method, 'GET')
 	assert.equal(requests[0]?.headers.get('authorization'), `Bearer ${token}`)
 })
 
 test('openCapabilityProxySession explains a rejected token without echoing it', async () => {
-	const { fetchFn } = respondWith(401, { error: { code: 'invalid_token', message: 'expired' } })
+	const { fetchFn } = respondWith(401, {
+		error: { code: 'invalid_token', message: 'expired' },
+	})
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		(error: Error) => {
 			assert.match(error.message, /rejected the API token/)
 			assert.match(error.message, /--token or KODY_API_TOKEN/)
@@ -84,7 +109,12 @@ test('openCapabilityProxySession explains rejected login OAuth and names the pla
 		error: { code: 'unauthorized', message: 'Invalid API token.' },
 	})
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token: oauth, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token: oauth,
+				fetchFn,
+			}),
 		(error: Error) => {
 			assert.match(error.message, /kody login/)
 			assert.match(error.message, /kentcdodds\/kody\/issues\/2812/)
@@ -100,7 +130,12 @@ test('openCapabilityProxySession names the local-execute flag when it is off', a
 		error: { code: 'feature_disabled', message: 'local-execute is off' },
 	})
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		/feature_disabled[\s\S]*feature flag `local-execute`/,
 	)
 })
@@ -110,7 +145,12 @@ test('openCapabilityProxySession explains a refused token in one line plus a fix
 		error: { code: 'forbidden', message: 'token cannot execute' },
 	})
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		(error: Error) => {
 			const lines = error.message.split('\n')
 			assert.equal(lines.length, 2)
@@ -120,7 +160,10 @@ test('openCapabilityProxySession explains a refused token in one line plus a fix
 			)
 			assert.match(lines[1] ?? '', /^Fix: run `npx @kodycodes\/cli login`/)
 			assert.match(lines[1] ?? '', /cliCredentialBootstrap/)
-			assert.match(lines[1] ?? '', /auth bootstrap --code <kody_bc_…> --lifetime short/)
+			assert.match(
+				lines[1] ?? '',
+				/auth bootstrap --code <kody_bc_…> --lifetime short/,
+			)
 			assert.match(lines[1] ?? '', /KODY_API_TOKEN/)
 			return true
 		},
@@ -136,7 +179,12 @@ test('openCapabilityProxySession names insufficient_scope and the required scope
 		},
 	})
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		/insufficient_scope[\s\S]*local-execute[\s\S]*cliCredentialBootstrap[\s\S]*tokenCreate[\s\S]*KODY_API_TOKEN/,
 	)
 })
@@ -144,7 +192,12 @@ test('openCapabilityProxySession names insufficient_scope and the required scope
 test('openCapabilityProxySession reports a missing CapabilityProxy deployment', async () => {
 	const { fetchFn } = respondWith(404, null)
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		/CapabilityProxy was not found at https:\/\/api\.kody\.codes\/v1\/capability-proxy\/session/,
 	)
 })
@@ -156,7 +209,12 @@ test('openCapabilityProxySession reports unreachable APIs with the network cause
 		})
 	}) as typeof fetch
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token, fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token,
+				fetchFn,
+			}),
 		/Could not reach the Kody API at https:\/\/api\.kody\.codes \(fetch failed: ECONNREFUSED\)/,
 	)
 })
@@ -166,8 +224,14 @@ test('assertTokenSafeApiUrl allows https and loopback http only', () => {
 	assert.doesNotThrow(() => assertTokenSafeApiUrl('http://localhost:8787'))
 	assert.doesNotThrow(() => assertTokenSafeApiUrl('http://127.0.0.1:8787/api'))
 	assert.doesNotThrow(() => assertTokenSafeApiUrl('http://[::1]:8787'))
-	assert.throws(() => assertTokenSafeApiUrl('http://api.kody.codes'), /Refusing to send the API token/)
-	assert.throws(() => assertTokenSafeApiUrl('not a url'), /Invalid Kody API URL/)
+	assert.throws(
+		() => assertTokenSafeApiUrl('http://api.kody.codes'),
+		/Refusing to send the API token/,
+	)
+	assert.throws(
+		() => assertTokenSafeApiUrl('not a url'),
+		/Invalid Kody API URL/,
+	)
 })
 
 test('callCapabilityProxy posts the runtime path, args, and conversation id', async () => {
@@ -182,7 +246,10 @@ test('callCapabilityProxy posts the runtime path, args, and conversation id', as
 	})
 	assert.deepEqual(result, { sent: true })
 	assert.equal(requests[0]?.method, 'POST')
-	assert.equal(requests[0]?.url, 'https://api.kody.codes/v1/capability-proxy/call')
+	assert.equal(
+		requests[0]?.url,
+		'https://api.kody.codes/v1/capability-proxy/call',
+	)
 	assert.equal(requests[0]?.headers.get('authorization'), `Bearer ${token}`)
 	assert.deepEqual(JSON.parse(requests[0]?.body ?? ''), {
 		path: ['kody', 'mcp', 'home', 'lights_on'],
@@ -209,7 +276,9 @@ test('callCapabilityProxy sends credentials as a top-level field outside args', 
 })
 
 test('checkCredentialCallMap preflights picks and surfaces structured failures', async () => {
-	const ok = respondWith(200, { result: { ok: true, value: { warnings: ['unknown key'] } } })
+	const ok = respondWith(200, {
+		result: { ok: true, value: { warnings: ['unknown key'] } },
+	})
 	assert.deepEqual(
 		await checkCredentialCallMap({
 			apiUrl: 'https://api.kody.codes',
@@ -226,7 +295,10 @@ test('checkCredentialCallMap preflights picks and surfaces structured failures',
 	})
 
 	const fail = respondWith(200, {
-		result: { ok: false, error: { code: 'credential_not_found', message: 'No match.' } },
+		result: {
+			ok: false,
+			error: { code: 'credential_not_found', message: 'No match.' },
+		},
 	})
 	await assert.rejects(
 		() =>
@@ -249,7 +321,9 @@ test('checkCredentialCallMap preflights picks and surfaces structured failures',
 			error: {
 				code: 'credential_ambiguous',
 				message: 'Several match.',
-				retryWith: [{ credentials: { github: { name: 'work', scope: 'org' } } }],
+				retryWith: [
+					{ credentials: { github: { name: 'work', scope: 'org' } } },
+				],
 			},
 		},
 	})
@@ -266,7 +340,10 @@ test('checkCredentialCallMap preflights picks and surfaces structured failures',
 })
 
 test('callCapabilityProxy surfaces capability errors from string or object bodies', async () => {
-	for (const body of [{ error: 'Unknown capability' }, { error: { code: 'x', message: 'Unknown capability' } }]) {
+	for (const body of [
+		{ error: 'Unknown capability' },
+		{ error: { code: 'x', message: 'Unknown capability' } },
+	]) {
 		const { fetchFn } = respondWith(200, body)
 		await assert.rejects(
 			() =>
@@ -281,7 +358,10 @@ test('callCapabilityProxy surfaces capability errors from string or object bodie
 		)
 	}
 	const forbidden = respondWith(403, {
-		error: { code: 'capability_denied', message: 'emailSend needs a verified destination' },
+		error: {
+			code: 'capability_denied',
+			message: 'emailSend needs a verified destination',
+		},
 	})
 	await assert.rejects(
 		() =>
@@ -292,7 +372,8 @@ test('callCapabilityProxy surfaces capability errors from string or object bodie
 				path: ['kody', 'emailSend'],
 				args: [{}],
 			}),
-		(error: Error) => error.message === 'emailSend needs a verified destination',
+		(error: Error) =>
+			error.message === 'emailSend needs a verified destination',
 	)
 	const missingScope = respondWith(403, {
 		error: {
@@ -312,7 +393,9 @@ test('callCapabilityProxy surfaces capability errors from string or object bodie
 			}),
 		/insufficient_scope[\s\S]*email:send[\s\S]*cliCredentialBootstrap[\s\S]*tokenCreate/,
 	)
-	const { fetchFn } = respondWith(422, { error: { code: 'invalid_args', message: 'to is required' } })
+	const { fetchFn } = respondWith(422, {
+		error: { code: 'invalid_args', message: 'to is required' },
+	})
 	await assert.rejects(
 		() =>
 			callCapabilityProxy({
@@ -328,11 +411,17 @@ test('callCapabilityProxy surfaces capability errors from string or object bodie
 
 async function withDelayedHeadersServer(
 	delayMs: number,
-	run: (apiUrl: string, seen: Array<{ url: string; authorization: string | null }>) => Promise<void>,
+	run: (
+		apiUrl: string,
+		seen: Array<{ url: string; authorization: string | null }>,
+	) => Promise<void>,
 ) {
 	const seen: Array<{ url: string; authorization: string | null }> = []
 	const server = createServer((request, response) => {
-		seen.push({ url: request.url ?? '', authorization: request.headers.authorization ?? null })
+		seen.push({
+			url: request.url ?? '',
+			authorization: request.headers.authorization ?? null,
+		})
 		request.resume()
 		setTimeout(() => {
 			response.writeHead(200, { 'content-type': 'application/json' })
@@ -352,7 +441,9 @@ async function withDelayedHeadersServer(
 test('CapabilityProxy HTTP timeouts outlast the 5-minute gateway deadline plus overhead', () => {
 	assert.equal(capabilityProxyGatewayDeadlineMs, 5 * 60_000)
 	// Node's global fetch defaults headersTimeout to 300s, the same as the deadline.
-	assert.ok(capabilityProxyHttpTimeoutMs >= capabilityProxyGatewayDeadlineMs + 60_000)
+	assert.ok(
+		capabilityProxyHttpTimeoutMs >= capabilityProxyGatewayDeadlineMs + 60_000,
+	)
 })
 
 test('the CapabilityProxy sender governs how long a call waits for headers', async () => {
@@ -365,7 +456,10 @@ test('the CapabilityProxy sender governs how long a call waits for headers', asy
 				path: ['kody', 'emailSend'],
 				args: [{}],
 			})
-		await assert.rejects(() => call(1_000), /Could not reach the Kody API[\s\S]*sent nothing for 1000ms/)
+		await assert.rejects(
+			() => call(1_000),
+			/Could not reach the Kody API[\s\S]*sent nothing for 1000ms/,
+		)
 		assert.deepEqual(await call(10_000), { ok: true })
 	})
 })
@@ -438,8 +532,16 @@ test('the CapabilityProxy sender reuses one connection across session and calls'
 			fetchFn: createCapabilityProxyFetch({ useEnvProxy: false }),
 		}
 		await openCapabilityProxySession(client)
-		await callCapabilityProxy({ ...client, path: ['kody', 'emailSend'], args: [{}] })
-		await callCapabilityProxy({ ...client, path: ['kody', 'emailSend'], args: [{}] })
+		await callCapabilityProxy({
+			...client,
+			path: ['kody', 'emailSend'],
+			args: [{}],
+		})
+		await callCapabilityProxy({
+			...client,
+			path: ['kody', 'emailSend'],
+			args: [{}],
+		})
 		assert.equal(sockets.size, 1)
 	} finally {
 		server.closeAllConnections()
@@ -480,12 +582,21 @@ test('callCapabilityProxy reaches a real server through the default node:http se
 	})
 })
 
-test('nodeUsesEnvProxy mirrors Node\'s NODE_USE_ENV_PROXY / --use-env-proxy opt-in', async () => {
+test("nodeUsesEnvProxy mirrors Node's NODE_USE_ENV_PROXY / --use-env-proxy opt-in", async () => {
 	assert.equal(nodeUsesEnvProxy({}, []), false)
-	assert.equal(nodeUsesEnvProxy({ HTTPS_PROXY: 'http://proxy.test:8080' }, []), false)
+	assert.equal(
+		nodeUsesEnvProxy({ HTTPS_PROXY: 'http://proxy.test:8080' }, []),
+		false,
+	)
 	assert.equal(nodeUsesEnvProxy({ NODE_USE_ENV_PROXY: '1' }, []), true)
 	assert.equal(nodeUsesEnvProxy({}, ['--use-env-proxy']), true)
-	assert.equal(nodeUsesEnvProxy({ NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy' }, []), true)
+	assert.equal(
+		nodeUsesEnvProxy(
+			{ NODE_OPTIONS: '--max-old-space-size=4096 --use-env-proxy' },
+			[],
+		),
+		true,
+	)
 })
 
 test('nodeAgentHonorsEnvProxy names the Node releases that ship http.Agent proxyEnv', () => {
@@ -495,7 +606,10 @@ test('nodeAgentHonorsEnvProxy names the Node releases that ship http.Agent proxy
 	assert.equal(nodeAgentHonorsEnvProxy('24.5.0'), true)
 	assert.equal(nodeAgentHonorsEnvProxy('23.11.0'), false)
 	assert.equal(nodeAgentHonorsEnvProxy('26.0.0'), true)
-	assert.equal(nodeAgentHonorsEnvProxy(), nodeAgentHonorsEnvProxy(process.versions.node))
+	assert.equal(
+		nodeAgentHonorsEnvProxy(),
+		nodeAgentHonorsEnvProxy(process.versions.node),
+	)
 })
 
 test('with env proxy enabled on older Node, createCapabilityProxyFetch fails closed', () => {
@@ -518,10 +632,14 @@ test('with env proxy enabled, CapabilityProxy calls go through HTTP_PROXY', asyn
 				response.writeHead(502).end()
 				return
 			}
-			const upstream = httpRequest(target, { method: request.method, headers: request.headers }, (res) => {
-				response.writeHead(res.statusCode ?? 502, res.headers)
-				res.pipe(response)
-			})
+			const upstream = httpRequest(
+				target,
+				{ method: request.method, headers: request.headers },
+				(res) => {
+					response.writeHead(res.statusCode ?? 502, res.headers)
+					res.pipe(response)
+				},
+			)
 			upstream.on('error', () => response.writeHead(502).end())
 			request.pipe(upstream)
 		})
@@ -539,10 +657,16 @@ test('with env proxy enabled, CapabilityProxy calls go through HTTP_PROXY', asyn
 		})
 		await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve))
 		const { port } = proxy.address() as AddressInfo
-		const previous = { HTTP_PROXY: process.env.HTTP_PROXY, NO_PROXY: process.env.NO_PROXY }
+		const previous = {
+			HTTP_PROXY: process.env.HTTP_PROXY,
+			NO_PROXY: process.env.NO_PROXY,
+		}
 		process.env.HTTP_PROXY = `http://127.0.0.1:${port}`
 		delete process.env.NO_PROXY
-		const fetchFn = createCapabilityProxyFetch({ timeoutMs: 5_000, useEnvProxy: true })
+		const fetchFn = createCapabilityProxyFetch({
+			timeoutMs: 5_000,
+			useEnvProxy: true,
+		})
 		try {
 			const result = await callCapabilityProxy({
 				apiUrl,
@@ -553,7 +677,12 @@ test('with env proxy enabled, CapabilityProxy calls go through HTTP_PROXY', asyn
 			})
 			assert.deepEqual(result, { ok: true })
 			assert.equal(proxied.length, 1)
-			assert.match(proxied[0] ?? '', new RegExp(`^(CONNECT ${new URL(apiUrl).host}|POST ${apiUrl}/v1/capability-proxy/call)$`))
+			assert.match(
+				proxied[0] ?? '',
+				new RegExp(
+					`^(CONNECT ${new URL(apiUrl).host}|POST ${apiUrl}/v1/capability-proxy/call)$`,
+				),
+			)
 			assert.equal(seen[0]?.url, '/v1/capability-proxy/call')
 		} finally {
 			for (const [key, value] of Object.entries(previous)) {

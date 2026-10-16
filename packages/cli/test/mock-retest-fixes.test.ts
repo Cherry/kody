@@ -29,10 +29,16 @@ import {
 	LocalPackageGraphError,
 	rewriteBareKodyBuiltinImports,
 } from '../src/local-package-graph.js'
-import { createWorkerdConfig, localWorkerModuleNames } from '../src/local-runtime-source.js'
+import {
+	createWorkerdConfig,
+	localWorkerModuleNames,
+} from '../src/local-runtime-source.js'
 import { buildUsage } from '../src/help.js'
 import { StructuredCliError } from '../src/structured-error.js'
-import { resolveExportModulePath, loadPackageManifest } from '../src/package-manifest.js'
+import {
+	resolveExportModulePath,
+	loadPackageManifest,
+} from '../src/package-manifest.js'
 
 test('P1: authenticatedFetch and gatewayFetch go through MSW handlers', async () => {
 	const handlers = [
@@ -206,15 +212,23 @@ test('P2: metaGetCurrentUser is flat user_id; --org honored', async () => {
 				assert.equal(body.org.slug, 'acme')
 				assert.equal('user' in body, false)
 
-				const viaQuery = await fetch(`${server.url}/v1/capability-proxy/call?org=other`, {
-					method: 'POST',
-					headers: {
-						authorization: `Bearer ${token}`,
-						'content-type': 'application/json',
+				const viaQuery = await fetch(
+					`${server.url}/v1/capability-proxy/call?org=other`,
+					{
+						method: 'POST',
+						headers: {
+							authorization: `Bearer ${token}`,
+							'content-type': 'application/json',
+						},
+						body: JSON.stringify({
+							path: ['kody', 'metaGetCurrentUser'],
+							args: [{}],
+						}),
 					},
-					body: JSON.stringify({ path: ['kody', 'metaGetCurrentUser'], args: [{}] }),
-				})
-				const qBody = (await viaQuery.json()) as { result: { org: { slug: string } } }
+				)
+				const qBody = (await viaQuery.json()) as {
+					result: { org: { slug: string } }
+				}
 				assert.equal(qBody.result.org.slug, 'other')
 			},
 		)
@@ -256,7 +270,9 @@ test('P2: local deps resolve self-package without login', async () => {
 			selfManifest: manifest,
 		})
 		assert.equal(resolved.unresolved.length, 0)
-		assert.ok(resolved.modules.some((m) => m.name === 'kody:@local/demo/helper'))
+		assert.ok(
+			resolved.modules.some((m) => m.name === 'kody:@local/demo/helper'),
+		)
 		assert.match(resolved.modules[0]?.esModule ?? '', /42/)
 		void code
 	} finally {
@@ -309,10 +325,13 @@ test('P2: .kody/deps.json maps unpublished sibling packages', async () => {
 })
 
 test('P2: parseKodyPackageSpecifier handles scoped packages', () => {
-	assert.deepEqual(parseKodyPackageSpecifier('kody:@kentcdodds/github/graphql'), {
-		packageName: '@kentcdodds/github',
-		exportKey: './graphql',
-	})
+	assert.deepEqual(
+		parseKodyPackageSpecifier('kody:@kentcdodds/github/graphql'),
+		{
+			packageName: '@kentcdodds/github',
+			exportKey: './graphql',
+		},
+	)
 	assert.deepEqual(parseKodyPackageSpecifier('kody:@kentcdodds/linkedin'), {
 		packageName: '@kentcdodds/linkedin',
 		exportKey: '.',
@@ -334,7 +353,8 @@ test('P2: --invoke unknown export lists keys (exportsOnly)', async () => {
 		await writeFile(join(root, 'b.ts'), 'export default 2\n')
 		const manifest = await loadPackageManifest(root)
 		assert.throws(
-			() => resolveExportModulePath(manifest, './profile', { exportsOnly: true }),
+			() =>
+				resolveExportModulePath(manifest, './profile', { exportsOnly: true }),
 			(error: unknown) => {
 				assert.ok(error instanceof StructuredCliError)
 				assert.equal(error.code, 'dev_surface_missing')
@@ -400,7 +420,9 @@ test('P2: comments with kody:@ do not count as imports (es-module-lexer)', async
 const docs = "from 'kody:@scope/pkg/docs'"
 import real from 'kody:@scope/pkg/real'
 `
-	assert.deepEqual(await listSavedPackageImports(code), ['kody:@scope/pkg/real'])
+	assert.deepEqual(await listSavedPackageImports(code), [
+		'kody:@scope/pkg/real',
+	])
 })
 
 test('P2: linkedin-style doc comment does not trigger local dep bundling', async () => {
@@ -468,9 +490,15 @@ test('P2: local dep bundle failure tip is not npm install', async () => {
 			(error: unknown) => {
 				assert.ok(error instanceof LocalPackageGraphError)
 				assert.equal(error.code, 'local_dep_bundle_failed')
-				assert.match(error.message, /Could not bundle local dep kody:@local\/demo\/broken/)
+				assert.match(
+					error.message,
+					/Could not bundle local dep kody:@local\/demo\/broken/,
+				)
 				assert.doesNotMatch(error.message, /\.kody\/deps\.json/)
-				assert.match(error.message, /Fix the missing import inside the local dep|npm install/)
+				assert.match(
+					error.message,
+					/Fix the missing import inside the local dep|npm install/,
+				)
 				return true
 			},
 		)
@@ -491,7 +519,10 @@ test('P2/#5: local dep bundles rewrite kody:runtime to flat alias', async () => 
 			JSON.stringify({
 				name: '@kentcdodds/grok-bot',
 				type: 'module',
-				exports: { './kody:runtime': './src/export.ts', './export': './src/export.ts' },
+				exports: {
+					'./kody:runtime': './src/export.ts',
+					'./export': './src/export.ts',
+				},
 				kody: { id: 'grok-bot' },
 			}),
 		)
@@ -518,11 +549,16 @@ test('P2/#5: local dep bundles rewrite kody:runtime to flat alias', async () => 
 			selfManifest: manifest,
 		})
 		assert.equal(resolved.unresolved.length, 0)
-		const mod = resolved.modules.find((m) => m.name === 'kody:@kentcdodds/grok-bot/export')
+		const mod = resolved.modules.find(
+			(m) => m.name === 'kody:@kentcdodds/grok-bot/export',
+		)
 		assert.ok(mod)
 		assert.match(mod.esModule, /from ["']\.__kody_runtime__\.js["']/)
 		assert.doesNotMatch(mod.esModule, /from ["']kody:runtime["']/)
-		assert.doesNotMatch(mod.esModule, /kody:@kentcdodds\/grok-bot\/kody:runtime/)
+		assert.doesNotMatch(
+			mod.esModule,
+			/kody:@kentcdodds\/grok-bot\/kody:runtime/,
+		)
 	} finally {
 		await rm(parent, { recursive: true, force: true })
 	}
@@ -538,7 +574,10 @@ const dyn = await import('kody:runtime')
 	const flat = localWorkerModuleNames.runtimeFlatAlias
 	assert.match(rewritten, new RegExp(`from '${flat.replace(/\./g, '\\.')}'`))
 	assert.match(rewritten, new RegExp(`from "${flat.replace(/\./g, '\\.')}"`))
-	assert.match(rewritten, new RegExp(`import\\('${flat.replace(/\./g, '\\.')}'\\)`))
+	assert.match(
+		rewritten,
+		new RegExp(`import\\('${flat.replace(/\./g, '\\.')}'\\)`),
+	)
 	assert.match(rewritten, /from "kody:@kentcdodds\/grok-bot\/export"/)
 	assert.doesNotMatch(rewritten, /kody:@kentcdodds\/grok-bot\/kody:runtime/)
 	assert.doesNotMatch(rewritten, /from 'kody:runtime'/)
@@ -546,7 +585,8 @@ const dyn = await import('kody:runtime')
 })
 
 test('P2/#5: createWorkerdConfig registers flat kody:runtime re-export alias', async () => {
-	const { createRuntimeFlatAliasSource } = await import('../src/local-runtime-source.js')
+	const { createRuntimeFlatAliasSource } =
+		await import('../src/local-runtime-source.js')
 	const aliasSource = createRuntimeFlatAliasSource()
 	assert.match(aliasSource, /export \* from ["']kody:runtime["']/)
 	assert.match(aliasSource, /export \{ default \} from ["']kody:runtime["']/)
@@ -630,7 +670,9 @@ test('prod still fetches package-graph when local deps cover all imports (gatewa
 		})
 		assert.equal(called, true)
 		assert.ok(
-			result.modules.some((m) => m.name === localExecuteGatewayFetchShimModuleName),
+			result.modules.some(
+				(m) => m.name === localExecuteGatewayFetchShimModuleName,
+			),
 		)
 		assert.ok(result.modules.some((m) => m.name === 'kody:@local/demo/helper'))
 	} finally {

@@ -58,7 +58,10 @@ async function defaultReadFile(path: string): Promise<string | null> {
 	}
 }
 
-async function defaultRunCommand(command: string, args: Array<string>): Promise<boolean> {
+async function defaultRunCommand(
+	command: string,
+	args: Array<string>,
+): Promise<boolean> {
 	return await new Promise((resolve) => {
 		const child = spawn(command, args, { stdio: 'ignore' })
 		child.on('error', () => resolve(false))
@@ -67,8 +70,10 @@ async function defaultRunCommand(command: string, args: Array<string>): Promise<
 }
 
 async function defaultOpenApp(name: string): Promise<boolean> {
-	if (process.platform === 'darwin') return defaultRunCommand('open', ['-a', name])
-	if (process.platform === 'win32') return defaultRunCommand('cmd', ['/c', 'start', '', name])
+	if (process.platform === 'darwin')
+		return defaultRunCommand('open', ['-a', name])
+	if (process.platform === 'win32')
+		return defaultRunCommand('cmd', ['/c', 'start', '', name])
 	return defaultRunCommand(name, [])
 }
 
@@ -80,8 +85,12 @@ function runtimeMethods(runtime: InstallRuntime) {
 		runCommand: runtime.runCommand ?? defaultRunCommand,
 		readFile: runtime.readFile ?? defaultReadFile,
 		writeFile:
-			runtime.writeFile ?? ((path: string, body: string) => writeFile(path, body, 'utf8')),
-		mkdir: runtime.mkdir ?? ((path: string) => mkdir(path, { recursive: true }).then(() => undefined)),
+			runtime.writeFile ??
+			((path: string, body: string) => writeFile(path, body, 'utf8')),
+		mkdir:
+			runtime.mkdir ??
+			((path: string) =>
+				mkdir(path, { recursive: true }).then(() => undefined)),
 		upsertServer: runtime.upsertServer ?? defaultUpsertServer,
 	}
 }
@@ -125,7 +134,10 @@ function writeAddMcpHost(
 		},
 	)
 	if (!result.success) {
-		return { changed: false, error: result.error ?? `add-mcp could not configure ${id}.` }
+		return {
+			changed: false,
+			error: result.error ?? `add-mcp could not configure ${id}.`,
+		}
 	}
 	return { path: result.path, changed: true }
 }
@@ -275,13 +287,23 @@ export async function applyHost(input: {
 			}
 		}
 		case 'vscode-insiders': {
-			const written = await writeLeftoverFile(input.id, input.mcpUrl, input.runtime)
+			const written = await writeLeftoverFile(
+				input.id,
+				input.mcpUrl,
+				input.runtime,
+			)
 			const url = buildVsCodeInstallUrl(input.mcpUrl, 'vscode-insiders')
 			const opened = written?.changed ? await io.openUrl(url) : false
-			return leftoverResult(host.label, input.id, written, [
-				'Use Agent mode in Copilot Chat after the server is added.',
-				oauthNote,
-			], opened ? url : undefined)
+			return leftoverResult(
+				host.label,
+				input.id,
+				written,
+				[
+					'Use Agent mode in Copilot Chat after the server is added.',
+					oauthNote,
+				],
+				opened ? url : undefined,
+			)
 		}
 		case 'goose': {
 			const written = writeMappedHost(input)
@@ -290,7 +312,10 @@ export async function applyHost(input: {
 			return {
 				...written,
 				opened: opened ? url : undefined,
-				instructions: ['Restart Goose if the extension does not appear.', oauthNote],
+				instructions: [
+					'Restart Goose if the extension does not appear.',
+					oauthNote,
+				],
 			}
 		}
 		case 'codex': {
@@ -300,7 +325,10 @@ export async function applyHost(input: {
 			}
 			return {
 				...written,
-				instructions: ['If OAuth does not start, run: codex mcp login kody', oauthNote],
+				instructions: [
+					'If OAuth does not start, run: codex mcp login kody',
+					oauthNote,
+				],
 			}
 		}
 		case 'opencode': {
@@ -310,7 +338,10 @@ export async function applyHost(input: {
 			}
 			return {
 				...written,
-				instructions: ['If OAuth does not start, run: opencode mcp auth kody', oauthNote],
+				instructions: [
+					'If OAuth does not start, run: opencode mcp auth kody',
+					oauthNote,
+				],
 			}
 		}
 		case 'windsurf':
@@ -333,7 +364,11 @@ export async function applyHost(input: {
 		case 'qwen-code':
 		case 'amazon-q':
 		case 'visual-studio': {
-			const written = await writeLeftoverFile(input.id, input.mcpUrl, input.runtime)
+			const written = await writeLeftoverFile(
+				input.id,
+				input.mcpUrl,
+				input.runtime,
+			)
 			return leftoverResult(host.label, input.id, written, [
 				`Restart ${host.label} if the new server does not appear.`,
 				oauthNote,
@@ -393,11 +428,14 @@ function leftoverResult(
 	opened?: string,
 ): ApplyResult {
 	if (!written) {
-	return {
+		return {
 			id,
 			label,
 			status: 'manual',
-			instructions: [`${label} has no automatic config path for this scope.`, ...instructions],
+			instructions: [
+				`${label} has no automatic config path for this scope.`,
+				...instructions,
+			],
 		}
 	}
 	return {

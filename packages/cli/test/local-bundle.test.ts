@@ -47,10 +47,10 @@ export default async function main(p: { a?: string }): Promise<string> {
 	assert.match(source, /from\s+["']kody:@owner\/leaf\/a\/b\/c["']/)
 	assert.doesNotMatch(source, /kody:@me\/pkg\/types/)
 	assert.doesNotMatch(source, /from\s+['"]\.\/helper\.js['"]/)
-	assert.deepEqual(new Set(await listSavedPackageImports(source)), new Set([
-		'kody:@owner/leaf/a/b/c',
-		'kody:@test/pkg/hello',
-	]))
+	assert.deepEqual(
+		new Set(await listSavedPackageImports(source)),
+		new Set(['kody:@owner/leaf/a/b/c', 'kody:@test/pkg/hello']),
+	)
 })
 
 test('bundleLocalUserModule keeps node:* imports external for workerd nodejs_compat', async () => {

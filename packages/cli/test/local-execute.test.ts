@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -48,14 +48,16 @@ test('workerd network access is public-only by default and keeps the loopback br
 		files: { entry: 'entry.js', user: 'main.js', runtime: 'runtime.js' },
 		allowPrivateNetwork: true,
 	})
-	assert.match(
-		privateNetworkConfig,
-		/allow = \["public", "private", "local"\]/,
-	)
+	assert.match(privateNetworkConfig, /allow = \["public", "private", "local"\]/)
 	assert.match(privateNetworkConfig, /address = "127\.0\.0\.1:4321"/)
 })
 
-type ProxyRequest = { method: string; url: string; authorization: string | null; body: unknown }
+type ProxyRequest = {
+	method: string
+	url: string
+	authorization: string | null
+	body: unknown
+}
 
 const proxyRequests: Array<ProxyRequest> = []
 let sessionStatus: { status: number; body: unknown } = {
@@ -122,7 +124,9 @@ before(async () => {
 				credentials?: Record<string, unknown>
 			}
 			if (path.join('.') === 'kody.explode') {
-				send(200, { error: { code: 'capability_failed', message: 'explode is broken' } })
+				send(200, {
+					error: { code: 'capability_failed', message: 'explode is broken' },
+				})
 				return
 			}
 			if (path.join('.') === 'kody.credentialClientCheck') {
@@ -132,7 +136,8 @@ before(async () => {
 						value: {
 							warnings: [],
 							checked: credentials ?? null,
-							strict: (args[0] as { strict?: boolean } | undefined)?.strict === true,
+							strict:
+								(args[0] as { strict?: boolean } | undefined)?.strict === true,
 						},
 					},
 				})
@@ -158,7 +163,9 @@ before(async () => {
 					result: {
 						ok: true,
 						value:
-							path.join('.') === 'kody.credentialClientOpenAll' ? [opened] : opened,
+							path.join('.') === 'kody.credentialClientOpenAll'
+								? [opened]
+								: opened,
 					},
 				})
 				return
@@ -177,7 +184,8 @@ before(async () => {
 				send(422, {
 					error: {
 						code: 'package_import_unresolved',
-						message: 'Could not resolve saved package import kody:@missing/package/export.',
+						message:
+							'Could not resolve saved package import kody:@missing/package/export.',
 					},
 				})
 				return
@@ -210,7 +218,9 @@ export default greet
 				})
 				return
 			}
-			send(404, { error: { code: 'not_found', message: 'package-graph not deployed' } })
+			send(404, {
+				error: { code: 'not_found', message: 'package-graph not deployed' },
+			})
 			return
 		}
 		send(404, { error: 'not found' })
@@ -230,7 +240,10 @@ export default async function main() {
 	return await new Promise((resolve) => setTimeout(resolve, 600_000))
 }`
 
-async function waitFor<T>(label: string, check: () => T | null | undefined): Promise<T> {
+async function waitFor<T>(
+	label: string,
+	check: () => T | null | undefined,
+): Promise<T> {
 	for (let attempt = 0; attempt < 300; attempt++) {
 		const value = check()
 		if (value != null) return value
@@ -240,9 +253,12 @@ async function waitFor<T>(label: string, check: () => T | null | undefined): Pro
 }
 
 function workerdPidUnder(dir: string): number | null {
-	const listing = execFileSync('ps', ['-A', '-o', 'pid=,args='], { encoding: 'utf8' })
+	const listing = execFileSync('ps', ['-A', '-o', 'pid=,args='], {
+		encoding: 'utf8',
+	})
 	for (const line of listing.split('\n')) {
-		if (line.includes('workerd') && line.includes(dir)) return Number(line.trim().split(/\s+/)[0])
+		if (line.includes('workerd') && line.includes(dir))
+			return Number(line.trim().split(/\s+/)[0])
 	}
 	return null
 }
@@ -270,12 +286,20 @@ function reset() {
 }
 
 test('hasSavedPackageImports detects static and dynamic kody:@ imports', async () => {
-	assert.equal(await hasSavedPackageImports(`import skill from 'kody:@me/skills/get'`), true)
 	assert.equal(
-		await hasSavedPackageImports(`const m = await import("kody:@me/skills/get")`),
+		await hasSavedPackageImports(`import skill from 'kody:@me/skills/get'`),
 		true,
 	)
-	assert.equal(await hasSavedPackageImports(`import { kody } from 'kody:runtime'`), false)
+	assert.equal(
+		await hasSavedPackageImports(
+			`const m = await import("kody:@me/skills/get")`,
+		),
+		true,
+	)
+	assert.equal(
+		await hasSavedPackageImports(`import { kody } from 'kody:runtime'`),
+		false,
+	)
 })
 
 test('createLocalEntrySource side-effect imports the gateway-fetch shim before user code', () => {
@@ -317,7 +341,9 @@ export default async function main(params) {
 		})
 		assert.equal(proxyRequests[0]?.url, `/${localPackageGraphPath}`)
 		assert.equal(
-			proxyRequests.some((request) => request.url === `/${localPackageGraphPath}`),
+			proxyRequests.some(
+				(request) => request.url === `/${localPackageGraphPath}`,
+			),
 			true,
 		)
 		assert.equal(
@@ -350,7 +376,9 @@ export default async function main() { return missing({}) }`
 			/Could not resolve saved package import kody:@missing\/package\/export/,
 		)
 		assert.equal(
-			proxyRequests.some((request) => request.url === '/v1/capability-proxy/call'),
+			proxyRequests.some(
+				(request) => request.url === '/v1/capability-proxy/call',
+			),
 			false,
 		)
 	},
@@ -373,7 +401,10 @@ export default async function main() { return x }`
 				}),
 			(error: unknown) => {
 				assert.ok(error instanceof Error)
-				assert.match(error.message, /will not silently fall back to cloud kody\.execute/)
+				assert.match(
+					error.message,
+					/will not silently fall back to cloud kody\.execute/,
+				)
 				assert.match(
 					error.message,
 					new RegExp(localPackageGraphPlatformIssueUrl.replace(/\./g, '\\.')),
@@ -388,7 +419,11 @@ test('buildLocalExecuteResult matches the cloud execute envelope', () => {
 	const startedAt = new Date('2026-09-30T00:00:00.000Z')
 	const endedAt = new Date('2026-09-30T00:00:00.250Z')
 	assert.deepEqual(
-		buildLocalExecuteResult({ sandbox: { result: { ok: true }, logs: ['hi'] }, startedAt, endedAt }),
+		buildLocalExecuteResult({
+			sandbox: { result: { ok: true }, logs: ['hi'] },
+			startedAt,
+			endedAt,
+		}),
 		{
 			content: [{ type: 'text', text: '{\n  "ok": true\n}' }],
 			structuredContent: {
@@ -423,9 +458,16 @@ test('buildLocalExecuteResult matches the cloud execute envelope', () => {
 		error: 'boom',
 		logs: [],
 	})
-	const text = buildLocalExecuteResult({ sandbox: { result: 'hé' }, startedAt, endedAt })
+	const text = buildLocalExecuteResult({
+		sandbox: { result: 'hé' },
+		startedAt,
+		endedAt,
+	})
 	assert.deepEqual(text.content, [{ type: 'text', text: 'hé' }])
-	assert.equal((text.structuredContent as { returnedBytes: number }).returnedBytes, 3)
+	assert.equal(
+		(text.structuredContent as { returnedBytes: number }).returnedBytes,
+		3,
+	)
 })
 
 test(
@@ -484,18 +526,21 @@ export default async function main(params) {
 
 test('createLocalRuntimeModuleSource exports credential and credentials for ad hoc local execute', () => {
 	const source = createLocalRuntimeModuleSource()
-	assert.match(source, /export const credential = __kodyCredentialRuntime\.credential/)
-	assert.match(source, /export const credentials = __kodyCredentialRuntime\.credentials/)
+	assert.match(
+		source,
+		/export const credential = __kodyCredentialRuntime\.credential/,
+	)
+	assert.match(
+		source,
+		/export const credentials = __kodyCredentialRuntime\.credentials/,
+	)
 	assert.match(source, /x-kody-credential-client/)
 	assert.match(source, /credentialClientOpen/)
 	assert.match(source, /credentialClientOpenAll/)
 	assert.match(source, /opened\.hint/)
 	// Secret values stay on origin: the host only hops tool names + opaque handles.
 	assert.doesNotMatch(source, /secretValue|plaintext|apiKeyValue/)
-	assert.match(
-		source,
-		/credential,\s*credentials,/s,
-	)
+	assert.match(source, /credential,\s*credentials,/s)
 })
 
 test('createLocalRuntimeModuleSource implements kody.gatewayFetchStream as a host method', () => {
@@ -552,7 +597,9 @@ export default async function main() {
 		assert.equal(structured.result.status, 201)
 		assert.equal(structured.result.text, 'echo:stream-body-bytes')
 		assert.equal(structured.result.upstream, 'streamed')
-		const hop = proxyRequests.find((entry) => entry.url === '/v1/capability-proxy/gateway-fetch')
+		const hop = proxyRequests.find(
+			(entry) => entry.url === '/v1/capability-proxy/gateway-fetch',
+		)
 		assert.ok(hop)
 		assert.equal(hop?.authorization, `Bearer ${goodToken}`)
 		assert.deepEqual(hop?.body, {
@@ -642,8 +689,8 @@ export default async function main() {
 			(request) =>
 				request.url === '/v1/capability-proxy/call' &&
 				Array.isArray((request.body as { path?: unknown })?.path) &&
-				((request.body as { path: Array<string> }).path.join('.') ===
-					'kody.credentialClientOpen'),
+				(request.body as { path: Array<string> }).path.join('.') ===
+					'kody.credentialClientOpen',
 		)
 		assert.ok(openCall)
 		assert.deepEqual(openCall?.body, {
@@ -654,8 +701,8 @@ export default async function main() {
 			(request) =>
 				request.url === '/v1/capability-proxy/call' &&
 				Array.isArray((request.body as { path?: unknown })?.path) &&
-				((request.body as { path: Array<string> }).path.join('.') ===
-					'kody.credentialClientOpenAll'),
+				(request.body as { path: Array<string> }).path.join('.') ===
+					'kody.credentialClientOpenAll',
 		)
 		assert.ok(openAllCall)
 		assert.deepEqual(openAllCall?.body, {
@@ -693,8 +740,8 @@ export default async function main() {
 			(request) =>
 				request.url === '/v1/capability-proxy/call' &&
 				Array.isArray((request.body as { path?: unknown })?.path) &&
-				((request.body as { path: Array<string> }).path.join('.') ===
-					'kody.credentialClientCheck'),
+				(request.body as { path: Array<string> }).path.join('.') ===
+					'kody.credentialClientCheck',
 		)
 		assert.ok(checkCall)
 		assert.deepEqual(checkCall?.body, {
@@ -706,8 +753,8 @@ export default async function main() {
 			(request) =>
 				request.url === '/v1/capability-proxy/call' &&
 				Array.isArray((request.body as { path?: unknown })?.path) &&
-				((request.body as { path: Array<string> }).path.join('.') ===
-					'kody.credentialClientOpen'),
+				(request.body as { path: Array<string> }).path.join('.') ===
+					'kody.credentialClientOpen',
 		)
 		assert.ok(openCall)
 		assert.deepEqual(openCall?.body, {
@@ -763,7 +810,9 @@ test(
 		assert.equal(result.isError, false)
 		assert.ok(statuses.includes(localExecutePackageGraphResolveStatus))
 		assert.equal(
-			proxyRequests.some((request) => request.url === `/${localPackageGraphPath}`),
+			proxyRequests.some(
+				(request) => request.url === `/${localPackageGraphPath}`,
+			),
 			true,
 		)
 		const graphRequest = proxyRequests.find(
@@ -791,7 +840,9 @@ test(
 		})
 		assert.equal(thrown.isError, true)
 		assert.deepEqual(thrown.content, [{ type: 'text', text: 'Error: boom' }])
-		assert.deepEqual((thrown.structuredContent as { logs: unknown }).logs, ['[error] bad'])
+		assert.deepEqual((thrown.structuredContent as { logs: unknown }).logs, [
+			'[error] bad',
+		])
 
 		const noDefault = await runLocalExecute({
 			code: 'export const value = 1',
@@ -799,7 +850,10 @@ test(
 			apiUrl,
 		})
 		assert.deepEqual(noDefault.content, [
-			{ type: 'text', text: 'Error: Kody execute modules must default export a function.' },
+			{
+				type: 'text',
+				text: 'Error: Kody execute modules must default export a function.',
+			},
 		])
 
 		const syntaxError = await runLocalExecute({
@@ -882,7 +936,10 @@ export default async function main(p: { a?: string }) {
 				'--file',
 				file,
 			],
-			{ stdout: (text) => (stdout += text), stderr: (text) => (stderr += text) },
+			{
+				stdout: (text) => (stdout += text),
+				stderr: (text) => (stderr += text),
+			},
 		)
 		assert.equal(code, 0, stderr)
 		assert.deepEqual(JSON.parse(stdout), { value: 'kept' })
@@ -901,7 +958,10 @@ test('runLocalExecute stops before starting workerd when the token or flag is re
 				workerdPath: neverRuns,
 			}),
 		(error: Error) => {
-			assert.match(error.message, /rejected the API token \(expired, revoked, or malformed\)/)
+			assert.match(
+				error.message,
+				/rejected the API token \(expired, revoked, or malformed\)/,
+			)
 			assert.match(error.message, /Mint a fresh scoped token/)
 			assert.match(error.message, /--token or KODY_API_TOKEN/)
 			return true
@@ -909,7 +969,9 @@ test('runLocalExecute stops before starting workerd when the token or flag is re
 	)
 	packageGraphStatus = {
 		status: 403,
-		body: { error: { code: 'feature_disabled', message: 'local-execute is off' } },
+		body: {
+			error: { code: 'feature_disabled', message: 'local-execute is off' },
+		},
 	}
 	await assert.rejects(
 		() =>
@@ -934,14 +996,24 @@ test('runLocalExecute stops before starting workerd when the token or flag is re
 				workerdPath: neverRuns,
 			}),
 		(error: Error) => {
-			assert.match(error.message, /not allowed to use CapabilityProxy \(forbidden\)/)
-			assert.match(error.message, /cliCredentialBootstrap|auth bootstrap|tokenCreate/)
+			assert.match(
+				error.message,
+				/not allowed to use CapabilityProxy \(forbidden\)/,
+			)
+			assert.match(
+				error.message,
+				/cliCredentialBootstrap|auth bootstrap|tokenCreate/,
+			)
 			assert.equal(error.message.includes('saved package import'), false)
 			return true
 		},
 	)
 	assert.equal(proxyRequests.length, 3)
-	assert.ok(proxyRequests.every((request) => request.url === `/${localPackageGraphPath}`))
+	assert.ok(
+		proxyRequests.every(
+			(request) => request.url === `/${localPackageGraphPath}`,
+		),
+	)
 })
 
 test(
@@ -967,7 +1039,10 @@ test(
 					'--code',
 					"import { kody } from 'kody:runtime'\nexport default (params) => kody.emailSend(params)",
 				],
-				{ stdout: (text) => (stdout += text), stderr: (text) => (stderr += text) },
+				{
+					stdout: (text) => (stdout += text),
+					stderr: (text) => (stderr += text),
+				},
 			)
 			assert.equal(code, 0, stderr)
 		} finally {
@@ -991,12 +1066,26 @@ test(
 		const previousTmpdir = process.env.TMPDIR
 		process.env.TMPDIR = scratch
 		try {
-			const run = runLocalExecute({ code: hangAfterPing, token: goodToken, apiUrl })
+			const run = runLocalExecute({
+				code: hangAfterPing,
+				token: goodToken,
+				apiUrl,
+			})
 			await waitFor('the module to start', () =>
-				proxyRequests.some((request) => request.url === '/v1/capability-proxy/call') ? true : null,
+				proxyRequests.some(
+					(request) => request.url === '/v1/capability-proxy/call',
+				)
+					? true
+					: null,
 			)
-			process.kill(await waitFor('workerd', () => workerdPidUnder(scratch)), 'SIGKILL')
-			await assert.rejects(run, /workerd exited during the run \(workerd exit SIGKILL\)/)
+			process.kill(
+				await waitFor('workerd', () => workerdPidUnder(scratch)),
+				'SIGKILL',
+			)
+			await assert.rejects(
+				run,
+				/workerd exited during the run \(workerd exit SIGKILL\)/,
+			)
 		} finally {
 			if (previousTmpdir === undefined) delete process.env.TMPDIR
 			else process.env.TMPDIR = previousTmpdir
@@ -1013,7 +1102,17 @@ test(
 		const scratch = mkdtempSync(join(tmpdir(), 'kody-signal-'))
 		const cli = spawn(
 			process.execPath,
-			['--import', 'tsx', 'src/bin.ts', 'execute', '--local', '--api-url', apiUrl, '--code', hangAfterPing],
+			[
+				'--import',
+				'tsx',
+				'src/bin.ts',
+				'execute',
+				'--local',
+				'--api-url',
+				apiUrl,
+				'--code',
+				hangAfterPing,
+			],
 			{
 				env: { ...process.env, TMPDIR: scratch, KODY_API_TOKEN: goodToken },
 				stdio: 'ignore',
@@ -1023,12 +1122,18 @@ test(
 			cli.once('exit', (_code, signal) => resolve(signal)),
 		)
 		await waitFor('the module to start', () =>
-			proxyRequests.some((request) => request.url === '/v1/capability-proxy/call') ? true : null,
+			proxyRequests.some(
+				(request) => request.url === '/v1/capability-proxy/call',
+			)
+				? true
+				: null,
 		)
 		const workerdPid = await waitFor('workerd', () => workerdPidUnder(scratch))
 		cli.kill('SIGTERM')
 		assert.equal(await exited, 'SIGTERM')
-		await waitFor('workerd to stop', () => (isRunning(workerdPid) ? null : true))
+		await waitFor('workerd to stop', () =>
+			isRunning(workerdPid) ? null : true,
+		)
 		assert.deepEqual(
 			readdirSync(scratch).filter((entry) => entry.startsWith('kody-local-')),
 			[],

@@ -1,13 +1,20 @@
 import { homedir } from 'node:os'
 import checkbox from '@inquirer/checkbox'
-import { detectRunningHosts, listRunningProcesses } from './detect-running-hosts.js'
+import {
+	detectRunningHosts,
+	listRunningProcesses,
+} from './detect-running-hosts.js'
 import { hostById, parseHostIds, type HostId } from './host-catalog.js'
-import { applyHost, type ApplyResult, type InstallRuntime } from './install-hosts.js'
+import {
+	applyHost,
+	type ApplyResult,
+	type InstallRuntime,
+} from './install-hosts.js'
 import {
 	buildOnboardingContinuationPrompt,
 	webClientsOnboardingNote,
 } from './onboarding-prompt.js'
-import type { ProcessInfo } from './process-info.js'
+import { type ProcessInfo } from './process-info.js'
 
 export type InstallOptions = {
 	mcpUrl: string
@@ -24,7 +31,9 @@ export type InstallIo = {
 	home?: string
 	cwd?: string
 	listProcesses?: () => Promise<Array<ProcessInfo>>
-	chooseHosts?: (hosts: Array<{ id: HostId; label: string }>) => Promise<Array<HostId>>
+	chooseHosts?: (
+		hosts: Array<{ id: HostId; label: string }>,
+	) => Promise<Array<HostId>>
 	runtime?: Partial<InstallRuntime>
 }
 
@@ -74,7 +83,9 @@ export async function runInstall(
 		return { code: 1, results: [] }
 	} else {
 		const choose = io.chooseHosts ?? defaultChooseHosts
-		selected = await choose(detected.map((host) => ({ id: host.id, label: host.label })))
+		selected = await choose(
+			detected.map((host) => ({ id: host.id, label: host.label })),
+		)
 		if (selected.length === 0) {
 			write(`No clients selected.\n${webClientsOnboardingNote(mcpUrl)}\n`)
 			return { code: 1, results: [] }

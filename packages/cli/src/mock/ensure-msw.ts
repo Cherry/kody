@@ -117,7 +117,9 @@ function tryResolveLocalMswPackageDir(): string | null {
 /**
  * Ensure + dynamic-import the pinned MSW module from the Kody cache.
  */
-export async function importMsw(input: EnsureMswInput = {}): Promise<MswModule> {
+export async function importMsw(
+	input: EnsureMswInput = {},
+): Promise<MswModule> {
 	const packageDir = await ensureMsw(input)
 	const require = createRequire(join(packageDir, 'package.json'))
 	const entry = require.resolve('msw')
@@ -125,7 +127,9 @@ export async function importMsw(input: EnsureMswInput = {}): Promise<MswModule> 
 }
 
 /** Absolute `file://` href for rewriting bundled `.kody/mocks.ts` imports. */
-export async function resolveMswEntryHref(input: EnsureMswInput = {}): Promise<string> {
+export async function resolveMswEntryHref(
+	input: EnsureMswInput = {},
+): Promise<string> {
 	const packageDir = await ensureMsw(input)
 	const require = createRequire(join(packageDir, 'package.json'))
 	return pathToFileURL(require.resolve('msw')).href

@@ -8,13 +8,16 @@ export const nonJsonErrorBodyMaxChars = 200
 export function summarizeNonJsonErrorBody(text: string): string {
 	const trimmed = text.trim()
 	const looksLikeHtml = /^<(?:!doctype|html|head|body)\b/i.test(trimmed)
-	const title = looksLikeHtml ? trimmed.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] : undefined
+	const title = looksLikeHtml
+		? trimmed.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+		: undefined
 	const excerpt = collapseWhitespace(
 		looksLikeHtml ? stripHtml(title?.trim() ? title : trimmed) : trimmed,
 	)
 	const kind = looksLikeHtml ? 'HTML' : 'non-JSON'
 	const bytes = Buffer.byteLength(text)
-	if (excerpt.length <= nonJsonErrorBodyMaxChars && !looksLikeHtml) return excerpt
+	if (excerpt.length <= nonJsonErrorBodyMaxChars && !looksLikeHtml)
+		return excerpt
 	const shortened =
 		excerpt.length > nonJsonErrorBodyMaxChars
 			? `${excerpt.slice(0, nonJsonErrorBodyMaxChars).trimEnd()}…`

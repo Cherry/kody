@@ -5,9 +5,12 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { loadStoredApiToken } from '../src/api-token-store.js'
 import { runCli } from '../src/cli.js'
-import { modernMcpProtocolVersion } from '../src/defaults.js'
 import { setupGitDefaultScopes } from '../src/setup-git.js'
-import { createFileBackend, fileStorePath, saveCredentials } from '../src/store.js'
+import {
+	createFileBackend,
+	fileStorePath,
+	saveCredentials,
+} from '../src/store.js'
 
 const apiUrl = 'https://api.setup-git-login-cli.test'
 const mcpUrl = 'https://login-setup-git.test/mcp'
@@ -50,7 +53,10 @@ const redeemResponse = {
 }
 
 async function withCliEnv<T>(
-	fetchStub: (url: string, init: RequestInit | undefined) => Promise<Response> | Response,
+	fetchStub: (
+		url: string,
+		init: RequestInit | undefined,
+	) => Promise<Response> | Response,
 	run: (ctx: { home: string; requests: Array<Recorded> }) => Promise<T>,
 ): Promise<T> {
 	const home = mkdtempSync(join(tmpdir(), 'kody-cli-setup-git-login-'))
@@ -72,9 +78,14 @@ async function withCliEnv<T>(
 	delete process.env.KODY_API_URL
 	const requests: Array<Recorded> = []
 	const previousFetch = globalThis.fetch
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = input instanceof Request ? input.url : String(input)
-		const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+		const headers = new Headers(
+			input instanceof Request ? input.headers : init?.headers,
+		)
 		const rawBody = typeof init?.body === 'string' ? init.body : null
 		requests.push({
 			url,
@@ -101,48 +112,6 @@ function json(body: unknown, status = 200) {
 	})
 }
 
-function fakeMcp(
-	urlPrefix: string,
-	onToolCall: (params: unknown) => unknown,
-): (url: string, init: RequestInit | undefined) => Response | null {
-	return (url, init) => {
-		if (!url.startsWith(urlPrefix)) return null
-		if ((init?.method ?? 'GET') !== 'POST') return new Response(null, { status: 405 })
-		const message = JSON.parse(String(init?.body)) as {
-			id?: number
-			method: string
-			params?: { protocolVersion?: string }
-		}
-		if (message.id === undefined) return new Response(null, { status: 202 })
-		switch (message.method) {
-			case 'server/discover':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: { supportedVersions: [modernMcpProtocolVersion], capabilities: { tools: {} } },
-				})
-			case 'initialize':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: {
-						protocolVersion: message.params?.protocolVersion,
-						capabilities: { tools: {} },
-						serverInfo: { name: 'kody-test', version: '0.0.0' },
-					},
-				})
-			case 'tools/call':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: { resultType: 'complete', ...(onToolCall(message.params) as object) },
-				})
-			default:
-				return json({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'nope' } })
-		}
-	}
-}
-
 function saveLogin(url: string) {
 	saveCredentials(
 		{
@@ -152,11 +121,10 @@ function saveLogin(url: string) {
 			resource: url,
 			authorizationServerUrl: new URL(url).origin,
 			clientId: 'client-1',
-			accessToken: 'oauth-access-from-login',
-			refreshToken: 'refresh-1',
+			accessToken: 'kody_at_login_session',
 			tokenType: 'bearer',
 			expiresAt: Date.now() + 120_000,
-			scope: 'openid profile email',
+			scope: 'org:execute package:write',
 		},
 		createFileBackend(fileStorePath(url)),
 	)
@@ -172,22 +140,14 @@ async function capture(args: Array<string>) {
 	return { code, stdout, stderr }
 }
 
-test('auth setup-git after kody login (no env token) mints via MCP and installs helper', async () => {
-	const toolCalls: Array<unknown> = []
-	const mcp = fakeMcp(mcpUrl, (params) => {
-		toolCalls.push(params)
-		return {
-			content: [{ type: 'text', text: 'ok' }],
-			structuredContent: {
-				operationId: 'cliCredentialBootstrap',
-				result: mintResponse(setupGitDefaultScopes),
-			},
-		}
-	})
+test('auth setup-git after kody login (no env token) mints via Open API and installs helper', async () => {
 	await withCliEnv(
-		(url, init) => {
+		(url) => {
 			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap/redeem')) return json(redeemResponse)
+			if (url.endsWith('/v1/tokens/bootstrap'))
+				return json(mintResponse(setupGitDefaultScopes))
+			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+				return json(redeemResponse)
 			if (url.includes('/v1/tokens/current')) {
 				return json({
 					id: 'tok_setup_git_login',
@@ -196,7 +156,7 @@ test('auth setup-git after kody login (no env token) mints via MCP and installs 
 					expires_at: redeemResponse.expires_at,
 				})
 			}
-			return mcp(url, init) ?? json({ error: { code: 'not_found', message: url } }, 404)
+			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
 		async ({ home, requests }) => {
 			saveLogin(mcpUrl)
@@ -213,29 +173,21 @@ test('auth setup-git after kody login (no env token) mints via MCP and installs 
 			])
 			assert.equal(result.code, 0, result.stderr || result.stdout)
 			assert.match(result.stdout, /Git HTTPS credential helper installed/)
-			assert.match(result.stdout, /token: minted tok_setup_git_login \(org_binding=user\)/)
+			assert.match(
+				result.stdout,
+				/token: minted tok_setup_git_login \(org_binding=user\)/,
+			)
 			assert.match(result.stdout, /all orgs/)
 			assert.doesNotMatch(result.stdout, /kody_at_|kody_bc_/)
 
-			assert.equal(toolCalls.length, 1)
-			assert.deepEqual(toolCalls[0], {
-				...(toolCalls[0] as object),
-				name: 'api',
-				arguments: {
-					operationId: 'cliCredentialBootstrap',
-					params: {
-						scopes: [...setupGitDefaultScopes],
-						lifetime: 'long',
-					},
-				},
-			})
-			const mcpRequest = requests.find((request) => request.url.startsWith(mcpUrl))
-			assert.equal(mcpRequest?.authorization, 'Bearer oauth-access-from-login')
-			assert.equal(
-				requests.some((request) => request.url.endsWith('/v1/tokens/bootstrap')),
-				false,
-				'login path must mint via MCP, not Open API bootstrap',
+			const mint = requests.find((request) =>
+				request.url.endsWith('/v1/tokens/bootstrap'),
 			)
+			assert.equal(mint?.authorization, 'Bearer kody_at_login_session')
+			assert.deepEqual(mint?.body, {
+				scopes: [...setupGitDefaultScopes],
+				lifetime: 'long',
+			})
 			assert.equal(loadStoredApiToken(apiUrl)?.tokenId, 'tok_setup_git_login')
 
 			const gitconfig = readFileSync(join(home, 'gitconfig'), 'utf8')

@@ -227,7 +227,9 @@ function recordToCredentials(
 	})
 }
 
-function credentialsToRecord(credentials: StoredCredentials): OrgCredentialRecord {
+function credentialsToRecord(
+	credentials: StoredCredentials,
+): OrgCredentialRecord {
 	return {
 		...(credentials.org ? { org: credentials.org } : {}),
 		resource: credentials.resource,
@@ -277,7 +279,9 @@ function parseOrgRecord(value: unknown): OrgCredentialRecord | null {
 			? { refreshToken: value.refreshToken }
 			: {}),
 		tokenType: value.tokenType,
-		...(typeof value.expiresAt === 'number' ? { expiresAt: value.expiresAt } : {}),
+		...(typeof value.expiresAt === 'number'
+			? { expiresAt: value.expiresAt }
+			: {}),
 		...(typeof value.scope === 'string' ? { scope: value.scope } : {}),
 	}
 }
@@ -301,25 +305,32 @@ export function parseCredentialStore(
 			for (const [key, value] of Object.entries(parsed.orgs)) {
 				const record = parseOrgRecord(value)
 				if (!record) {
-					throw new Error('Stored Kody credentials are invalid. Run `kody login`.')
+					throw new Error(
+						'Stored Kody credentials are invalid. Run `kody login`.',
+					)
 				}
 				const slug = (record.org ?? key).trim().toLowerCase()
 				if (!slug) {
-					throw new Error('Stored Kody credentials are invalid. Run `kody login`.')
+					throw new Error(
+						'Stored Kody credentials are invalid. Run `kody login`.',
+					)
 				}
 				orgs[slug] = { ...record, org: slug }
 			}
 		}
-		const pending = parsed.pending !== undefined ? parseOrgRecord(parsed.pending) : undefined
+		const pending =
+			parsed.pending !== undefined ? parseOrgRecord(parsed.pending) : undefined
 		if (parsed.pending !== undefined && !pending) {
 			throw new Error('Stored Kody credentials are invalid. Run `kody login`.')
 		}
 		const activeOrgRaw =
-			typeof parsed.activeOrg === 'string' ? parsed.activeOrg.trim().toLowerCase() : null
+			typeof parsed.activeOrg === 'string'
+				? parsed.activeOrg.trim().toLowerCase()
+				: null
 		const activeOrg =
 			activeOrgRaw && orgs[activeOrgRaw]
 				? activeOrgRaw
-				: Object.keys(orgs).sort((a, b) => a.localeCompare(b))[0] ?? null
+				: (Object.keys(orgs).sort((a, b) => a.localeCompare(b))[0] ?? null)
 		return {
 			version: 2,
 			mcpUrl,
@@ -519,7 +530,8 @@ export function saveCredentials(
 	const record = credentialsToRecord({
 		...credentials,
 		...(slug ? { org: slug } : {}),
-		authorizationServerUrl: withDerivedIssuer(credentials).authorizationServerUrl,
+		authorizationServerUrl:
+			withDerivedIssuer(credentials).authorizationServerUrl,
 	})
 	const activate = options?.activate !== false
 
@@ -573,7 +585,9 @@ export function promotePendingOrg(
 	if (!snapshot?.pending) return snapshot
 	const slug = org.trim().toLowerCase()
 	if (!slug) {
-		throw new Error('Organization slug is required to finish credential migration.')
+		throw new Error(
+			'Organization slug is required to finish credential migration.',
+		)
 	}
 	const existingNamed = snapshot.orgs[slug]
 	const orgs = existingNamed
@@ -681,7 +695,7 @@ export function deleteCredentials(
 		}
 		const target =
 			snapshot.activeOrg ??
-			(snapshot.pending ? null : listOrgSlugs(snapshot)[0] ?? null)
+			(snapshot.pending ? null : (listOrgSlugs(snapshot)[0] ?? null))
 		if (target) {
 			return deleteOrgFromStore(snapshot, target, store, backend, resolution)
 		}
@@ -739,7 +753,7 @@ function deleteOrgFromStore(
 	}
 	const nextActive =
 		snapshot.activeOrg === slug
-			? remainingSlugs.sort((a, b) => a.localeCompare(b))[0] ?? null
+			? (remainingSlugs.sort((a, b) => a.localeCompare(b))[0] ?? null)
 			: snapshot.activeOrg
 	const next: MultiOrgCredentialStore = {
 		version: 2,
@@ -762,7 +776,11 @@ function deleteOrgFromStore(
 			} catch {
 				// best-effort; file has the reduced store either way
 			}
-			return { deleted: true, backend: fallback, remaining: remainingSlugs.length }
+			return {
+				deleted: true,
+				backend: fallback,
+				remaining: remainingSlugs.length,
+			}
 		}
 		throw error
 	}

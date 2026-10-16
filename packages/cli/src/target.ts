@@ -25,7 +25,9 @@ export function defaultTargetFor(command: TargetAwareCommand): KodyTarget {
 			return 'prod'
 		default: {
 			const exhaustive: never = command
-			throw new Error(`Unhandled command for target default: ${String(exhaustive)}`)
+			throw new Error(
+				`Unhandled command for target default: ${String(exhaustive)}`,
+			)
 		}
 	}
 }
@@ -57,7 +59,9 @@ export function parseTargetFlag(value: string): KodyTarget {
 }
 
 /** True when this command accepts `--target` / `KODY_TARGET`. */
-export function commandAcceptsTarget(command: string): command is TargetAwareCommand {
+export function commandAcceptsTarget(
+	command: string,
+): command is TargetAwareCommand {
 	return (
 		command === 'dev' ||
 		command === 'execute' ||

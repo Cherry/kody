@@ -30,7 +30,7 @@ done
 for entry in $pids; do
   case "$entry" in
     g*) /bin/kill -s KILL -- -\${entry#g} 2>/dev/null ;;
-    *) /bin/kill -s KILL -- \$entry 2>/dev/null ;;
+    *) /bin/kill -s KILL -- $entry 2>/dev/null ;;
   esac
 done
 rm -rf "$1"
@@ -45,17 +45,23 @@ export type ProcessReaper = {
 	close: () => void
 }
 
-export async function startProcessReaper(input: { workDir: string }): Promise<ProcessReaper> {
+export async function startProcessReaper(input: {
+	workDir: string
+}): Promise<ProcessReaper> {
 	await writeFile(
 		join(input.workDir, ownerFileName),
 		JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
 	)
 	let reaper: ChildProcess | undefined
 	try {
-		reaper = spawn('/bin/sh', ['-c', reaperScript, 'kody-dev-reaper', input.workDir], {
-			stdio: ['pipe', 'ignore', 'ignore'],
-			detached: true,
-		})
+		reaper = spawn(
+			'/bin/sh',
+			['-c', reaperScript, 'kody-dev-reaper', input.workDir],
+			{
+				stdio: ['pipe', 'ignore', 'ignore'],
+				detached: true,
+			},
+		)
 		reaper.on('error', () => {
 			reaper = undefined
 		})
@@ -103,7 +109,9 @@ export async function sweepStaleDevDirs(
 	const killed: Array<number> = []
 	let entries: Array<string>
 	try {
-		entries = (await readdir(tmp)).filter((name) => name.startsWith(devWorkDirPrefix))
+		entries = (await readdir(tmp)).filter((name) =>
+			name.startsWith(devWorkDirPrefix),
+		)
 	} catch {
 		return { removed, killed }
 	}
@@ -121,7 +129,8 @@ export async function sweepStaleDevDirs(
 			const owner = await readOwnerPid(dir)
 			if (owner !== null && isAlive(owner)) continue
 			const workerds = processes.filter(
-				(item) => /workerd/.test(item.name) && (item.cmd ?? '').includes(`${dir}/`),
+				(item) =>
+					/workerd/.test(item.name) && (item.cmd ?? '').includes(`${dir}/`),
 			)
 			if (owner === null) {
 				const info = await stat(dir)
@@ -150,12 +159,17 @@ function isOrphaned(
 	if (item.ppid === undefined) return false
 	if (item.ppid <= 1 || !isAlive(item.ppid)) return true
 	const parent = byPid.get(item.ppid)
-	return parent !== undefined && !/node|kody/i.test(`${parent.name} ${parent.cmd ?? ''}`)
+	return (
+		parent !== undefined &&
+		!/node|kody/i.test(`${parent.name} ${parent.cmd ?? ''}`)
+	)
 }
 
 async function readOwnerPid(dir: string): Promise<number | null> {
 	try {
-		const parsed = JSON.parse(await readFile(join(dir, ownerFileName), 'utf8')) as {
+		const parsed = JSON.parse(
+			await readFile(join(dir, ownerFileName), 'utf8'),
+		) as {
 			pid?: unknown
 		}
 		return typeof parsed.pid === 'number' ? parsed.pid : null

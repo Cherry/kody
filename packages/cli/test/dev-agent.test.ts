@@ -21,7 +21,10 @@ import {
 import { ensureWorkerdBinary } from '../src/workerd-binary.js'
 import { waitFor, withDevServer } from './dev-server-harness.js'
 
-const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-package')
+const fixtureRoot = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'fixtures/sample-package',
+)
 
 test('GET /__kody/dev/status reports build id, state, and the last error', async () => {
 	await withDevServer(async ({ server, root, writeMessage }) => {
@@ -40,7 +43,10 @@ test('GET /__kody/dev/status reports build id, state, and the last error', async
 		await server.fetchPath('/boom')
 		const afterBoom = server.status()
 		assert.equal(afterBoom.lastError?.kind, 'runtime')
-		assert.match(afterBoom.lastError?.kind === 'runtime' ? afterBoom.lastError.stack : '', /app\/entry\.ts/)
+		assert.match(
+			afterBoom.lastError?.kind === 'runtime' ? afterBoom.lastError.stack : '',
+			/app\/entry\.ts/,
+		)
 
 		await writeMessage(`export const message = = 'broken'\n`)
 		const broken = await waitFor(async () => {
@@ -91,14 +97,17 @@ test('kody dev --json emits NDJSON events and --ready-file is written before rea
 						const event = JSON.parse(line) as Record<string, unknown>
 						lines.push(event)
 						if (event.type === 'rebuild_start') {
-							registeredAtRebuildStart = existsSync(devRegistryPath(root, 'mock', cache))
+							registeredAtRebuildStart = existsSync(
+								devRegistryPath(root, 'mock', cache),
+							)
 						}
 						if (event.type === 'ready') {
-							readyFileAtReady = JSON.parse(readFileSync(readyFile, 'utf8')) as Record<
-								string,
-								unknown
-							>
-							registeredAtReady = existsSync(devRegistryPath(root, 'mock', cache))
+							readyFileAtReady = JSON.parse(
+								readFileSync(readyFile, 'utf8'),
+							) as Record<string, unknown>
+							registeredAtReady = existsSync(
+								devRegistryPath(root, 'mock', cache),
+							)
 						}
 					}
 				},
@@ -123,7 +132,11 @@ test('kody dev --json emits NDJSON events and --ready-file is written before rea
 			'registry is advertised as soon as the port binds, before the first build finishes',
 		)
 		assert.equal(registeredAtReady, true)
-		assert.equal(existsSync(readyFile), false, 'ready file is removed on shutdown')
+		assert.equal(
+			existsSync(readyFile),
+			false,
+			'ready file is removed on shutdown',
+		)
 		assert.equal(
 			existsSync(devRegistryPath(root, 'mock', cache)),
 			false,
@@ -144,9 +157,16 @@ test('removeOwnedReadyFile only deletes the ready file when the pid still matche
 	const dir = await mkdtemp(join(tmpdir(), 'kody-ready-file-'))
 	try {
 		const path = join(dir, 'ready.json')
-		await writeFile(path, `${JSON.stringify({ url: 'http://127.0.0.1:1/', pid: 111 }, null, 2)}\n`)
+		await writeFile(
+			path,
+			`${JSON.stringify({ url: 'http://127.0.0.1:1/', pid: 111 }, null, 2)}\n`,
+		)
 		await removeOwnedReadyFile(path, 222)
-		assert.equal(existsSync(path), true, 'leaves a successor process ready file alone')
+		assert.equal(
+			existsSync(path),
+			true,
+			'leaves a successor process ready file alone',
+		)
 		await removeOwnedReadyFile(path, 111)
 		assert.equal(existsSync(path), false, 'removes the file this process wrote')
 		await removeOwnedReadyFile(path, 111)
@@ -214,10 +234,24 @@ test('findRunningDevServer drops registrations whose process is gone', async () 
 			cache,
 		)
 		assert.equal(existsSync(path), true)
-		assert.equal(await findRunningDevServer({ root: '/nowhere', target: 'mock', cacheDir: cache }), null)
+		assert.equal(
+			await findRunningDevServer({
+				root: '/nowhere',
+				target: 'mock',
+				cacheDir: cache,
+			}),
+			null,
+		)
 		assert.equal(existsSync(path), false)
 		await writeFile(path, 'not json')
-		assert.equal(await findRunningDevServer({ root: '/nowhere', target: 'mock', cacheDir: cache }), null)
+		assert.equal(
+			await findRunningDevServer({
+				root: '/nowhere',
+				target: 'mock',
+				cacheDir: cache,
+			}),
+			null,
+		)
 	} finally {
 		await rm(cache, { recursive: true, force: true })
 	}
@@ -253,14 +287,30 @@ test('dev registry keys by target and removeDevRegistration refuses successor/un
 		assert.equal(existsSync(prodPath), true)
 
 		await removeDevRegistration('/pkg', 999, 'mock', cache)
-		assert.equal(existsSync(mockPath), true, 'wrong pid leaves the registration alone')
+		assert.equal(
+			existsSync(mockPath),
+			true,
+			'wrong pid leaves the registration alone',
+		)
 		await removeDevRegistration('/pkg', 111, 'mock', cache)
-		assert.equal(existsSync(mockPath), false, 'matching pid removes this target only')
-		assert.equal(existsSync(prodPath), true, 'other target registration survives')
+		assert.equal(
+			existsSync(mockPath),
+			false,
+			'matching pid removes this target only',
+		)
+		assert.equal(
+			existsSync(prodPath),
+			true,
+			'other target registration survives',
+		)
 
 		await writeFile(prodPath, 'not json')
 		await removeDevRegistration('/pkg', 222, 'prod', cache)
-		assert.equal(existsSync(prodPath), true, 'unreadable successor file is not deleted')
+		assert.equal(
+			existsSync(prodPath),
+			true,
+			'unreadable successor file is not deleted',
+		)
 	} finally {
 		await rm(cache, { recursive: true, force: true })
 	}

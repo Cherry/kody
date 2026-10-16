@@ -5,7 +5,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import type { Readable } from 'node:stream'
+import { type Readable } from 'node:stream'
 import { apiTokenEnvVar } from '../defaults.js'
 
 const outputTailLines = 20
@@ -68,21 +68,25 @@ export async function runPrebuild(input: {
 	}
 
 	try {
-		const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-			(resolve, reject) => {
-				child.once('error', reject)
-				child.once('close', (code, signal) => resolve({ code, signal }))
-			},
-		)
+		const result = await new Promise<{
+			code: number | null
+			signal: NodeJS.Signals | null
+		}>((resolve, reject) => {
+			child.once('error', reject)
+			child.once('close', (code, signal) => resolve({ code, signal }))
+		})
 		if (input.signal?.aborted) {
 			throw new PrebuildError('kody.dev.prebuild aborted')
 		}
 		if (result.code === 0) return
-		const how = result.signal ? `signal ${result.signal}` : `exit ${result.code}`
+		const how = result.signal
+			? `signal ${result.signal}`
+			: `exit ${result.code}`
 		throw new PrebuildError(
-			[`kody.dev.prebuild failed (${how}): ${input.command}`, ...tail.map((line) => `  ${line}`)].join(
-				'\n',
-			),
+			[
+				`kody.dev.prebuild failed (${how}): ${input.command}`,
+				...tail.map((line) => `  ${line}`),
+			].join('\n'),
 		)
 	} finally {
 		input.signal?.removeEventListener('abort', killChild)
@@ -91,7 +95,10 @@ export async function runPrebuild(input: {
 }
 
 /** Split stream chunks into lines, including a final incomplete line on end. */
-function forEachLine(stream: Readable | null, onLine: (line: string) => void): void {
+function forEachLine(
+	stream: Readable | null,
+	onLine: (line: string) => void,
+): void {
 	if (!stream) return
 	let buffered = ''
 	stream.on('data', (chunk: Buffer | string) => {

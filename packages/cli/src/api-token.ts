@@ -1,13 +1,6 @@
-import {
-	loadStoredApiToken,
-	type StoredApiToken,
-} from './api-token-store.js'
-import {
-	apiTokenEnvVar,
-	defaultApiUrl,
-	defaultMcpUrl,
-} from './defaults.js'
-import type { SecretBackend, StoreResolution } from './store.js'
+import { loadStoredApiToken, type StoredApiToken } from './api-token-store.js'
+import { apiTokenEnvVar, defaultApiUrl, defaultMcpUrl } from './defaults.js'
+import { type SecretBackend, type StoreResolution } from './store.js'
 
 /** Mirrors `cliTokenLifetimeAliases` in auth-bootstrap (keep in sync; avoid import cycle). */
 export type CliTokenLifetimeAlias = 'short' | 'long'
@@ -55,8 +48,10 @@ export function isPairedApiUrl(
 	const apiIsLoopback = loopbackHosts.has(api.hostname.toLowerCase())
 	const mcpIsLoopback = loopbackHosts.has(mcp.hostname.toLowerCase())
 	if (apiIsLoopback && mcpIsLoopback) {
-		return ['http:', 'https:'].includes(api.protocol) &&
+		return (
+			['http:', 'https:'].includes(api.protocol) &&
 			['http:', 'https:'].includes(mcp.protocol)
+		)
 	}
 	if (api.protocol !== 'https:' || mcp.protocol !== 'https:') return false
 	const apiIsWorkersDev = isWorkersDevHostname(api.hostname)
@@ -112,7 +107,10 @@ export function resolveScopedApiToken(
 	if (token) return token
 	const apiUrl = input.apiUrl || defaultApiUrl
 	const loadApi = input.loadApiToken ?? loadStoredApiToken
-	return loadApi(apiUrl, input.apiTokenBackend, input.apiTokenResolution)?.token ?? null
+	return (
+		loadApi(apiUrl, input.apiTokenBackend, input.apiTokenResolution)?.token ??
+		null
+	)
 }
 
 /** True when the bearer looks like a minted Open API token (not MCP OAuth). */
@@ -223,7 +221,9 @@ export type InsufficientScopeDetails = {
 	denial: string | null
 }
 
-export function readInsufficientScopeDetails(body: unknown): InsufficientScopeDetails {
+export function readInsufficientScopeDetails(
+	body: unknown,
+): InsufficientScopeDetails {
 	const details =
 		isRecord(body) && isRecord(body.error) && isRecord(body.error.details)
 			? body.error.details
@@ -301,7 +301,9 @@ export function insufficientScopeMessage(
 		input.mintScopes && input.mintScopes.length > 0
 			? input.mintScopes
 			: input.currentScopes && input.currentScopes.length > 0
-				? [...new Set([...input.currentScopes, ...required.split(/,\s*/)])].sort()
+				? [
+						...new Set([...input.currentScopes, ...required.split(/,\s*/)]),
+					].sort()
 				: null
 	if (!mintScopes) {
 		return `Kody returned insufficient_scope: this token is missing "${required}". Mint a token whose scopes include "${required}" plus the ones you already use (scopes replace the defaults): run \`${cliBootstrapScopesCommand(['<current scopes>', required], lifetimeFlags)}\` after \`kody login\`, or from Kody MCP call \`${cliBootstrapMintCall(['<current scopes>', required], lifetimeMint)}\` and run its cli_command. For CI/headless, mint with tokenCreate including "${required}" and pass --token or set ${apiTokenEnvVar}.`

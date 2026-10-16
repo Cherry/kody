@@ -22,5 +22,8 @@ test('assertLocalExecuteNodeEngine names Node 22 and workerd before any runtime 
 		() => assertLocalExecuteNodeEngine('21.7.3'),
 		/Node\.js 22 or newer \(this process is v21\.7\.3\)/,
 	)
-	assert.throws(() => assertLocalExecuteNodeEngine('not-a-version'), /this process is vnot-a-version/)
+	assert.throws(
+		() => assertLocalExecuteNodeEngine('not-a-version'),
+		/this process is vnot-a-version/,
+	)
 })

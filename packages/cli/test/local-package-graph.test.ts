@@ -17,11 +17,14 @@ import {
 const goodToken = 'kody_tok_pkg'
 
 test('listSavedPackageImports finds static and literal-dynamic kody:@ specifiers', async () => {
-	assert.deepEqual(await listSavedPackageImports(`import skill from 'kody:@me/skills/get'`), [
-		'kody:@me/skills/get',
-	])
 	assert.deepEqual(
-		await listSavedPackageImports(`const m = await import("kody:@me/skills/get")`),
+		await listSavedPackageImports(`import skill from 'kody:@me/skills/get'`),
+		['kody:@me/skills/get'],
+	)
+	assert.deepEqual(
+		await listSavedPackageImports(
+			`const m = await import("kody:@me/skills/get")`,
+		),
 		['kody:@me/skills/get'],
 	)
 	assert.deepEqual(
@@ -34,8 +37,14 @@ export default async () => {
 }`),
 		['kody:@a/pkg/one', 'kody:@b/pkg/two'],
 	)
-	assert.equal(await hasSavedPackageImports(`import { kody } from 'kody:runtime'`), false)
-	assert.equal(await hasLiteralDynamicSavedPackageImports(`import x from 'kody:@me/p/e'`), false)
+	assert.equal(
+		await hasSavedPackageImports(`import { kody } from 'kody:runtime'`),
+		false,
+	)
+	assert.equal(
+		await hasLiteralDynamicSavedPackageImports(`import x from 'kody:@me/p/e'`),
+		false,
+	)
 	assert.equal(
 		await hasLiteralDynamicSavedPackageImports(`await import('kody:@me/p/e')`),
 		true,
@@ -136,7 +145,11 @@ test('fetchLocalPackageGraph posts even when there are no kody:@ imports to load
 test('fetchLocalPackageGraph posts code + imports and returns embeddable modules', async () => {
 	const code = `import { greet } from 'kody:@test/pkg/hello'
 export default async function main(params) { return greet(params.name) }`
-	const requests: Array<{ url: string; body: unknown; authorization: string | null }> = []
+	const requests: Array<{
+		url: string
+		body: unknown
+		authorization: string | null
+	}> = []
 	const result = await fetchLocalPackageGraph({
 		apiUrl: 'https://api.kody.codes',
 		token: goodToken,
@@ -148,7 +161,9 @@ export default async function main(params) { return greet(params.name) }`
 			requests.push({
 				url,
 				body,
-				authorization: (init?.headers as Record<string, string> | undefined)?.authorization ?? null,
+				authorization:
+					(init?.headers as Record<string, string> | undefined)
+						?.authorization ?? null,
 			})
 			assert.equal(init?.method, 'POST')
 			return new Response(
@@ -185,9 +200,16 @@ export default async function main(params) { return greet(params.name) }`
 })
 
 test('synthesizePackageGraphEntry builds a tiny scannable stub', () => {
-	assert.equal(synthesizePackageGraphEntry([]), 'export default async function main() {}\n')
 	assert.equal(
-		synthesizePackageGraphEntry(['kody:@b/pkg/x', 'kody:@a/pkg/x', 'kody:@b/pkg/x']),
+		synthesizePackageGraphEntry([]),
+		'export default async function main() {}\n',
+	)
+	assert.equal(
+		synthesizePackageGraphEntry([
+			'kody:@b/pkg/x',
+			'kody:@a/pkg/x',
+			'kody:@b/pkg/x',
+		]),
 		`import "kody:@a/pkg/x"\nimport "kody:@b/pkg/x"\nexport default async function main() {}\n`,
 	)
 })
@@ -239,16 +261,25 @@ test('fetchLocalPackageGraph fails clearly when the platform endpoint is missing
 				token: goodToken,
 				code,
 				fetchFn: async () =>
-					new Response(JSON.stringify({ error: { code: 'not_found', message: 'nope' } }), {
-						status: 404,
-						headers: { 'content-type': 'application/json' },
-					}),
+					new Response(
+						JSON.stringify({ error: { code: 'not_found', message: 'nope' } }),
+						{
+							status: 404,
+							headers: { 'content-type': 'application/json' },
+						},
+					),
 			}),
 		(error: unknown) => {
 			assert.ok(error instanceof LocalPackageGraphError)
 			assert.equal(error.status, 404)
-			assert.match(error.message, /will not silently fall back to cloud kody\.execute/)
-			assert.match(error.message, new RegExp(localPackageGraphPlatformIssueUrl.replace(/\./g, '\\.')))
+			assert.match(
+				error.message,
+				/will not silently fall back to cloud kody\.execute/,
+			)
+			assert.match(
+				error.message,
+				new RegExp(localPackageGraphPlatformIssueUrl.replace(/\./g, '\\.')),
+			)
 			assert.match(error.message, /kody:@missing\/pkg\/export/)
 			return true
 		},
@@ -268,7 +299,8 @@ test('fetchLocalPackageGraph surfaces unresolved package errors from the API', a
 						JSON.stringify({
 							error: {
 								code: 'package_import_unresolved',
-								message: 'Could not resolve saved package import kody:@nope/pkg/export.',
+								message:
+									'Could not resolve saved package import kody:@nope/pkg/export.',
 							},
 						}),
 						{ status: 422, headers: { 'content-type': 'application/json' } },
@@ -352,10 +384,15 @@ test('fetchLocalPackageGraph rejects incomplete module lists', async () => {
 				token: goodToken,
 				code,
 				fetchFn: async () =>
-					new Response(JSON.stringify({ modules: [{ name: 'other', esModule: 'export {}' }] }), {
-						status: 200,
-						headers: { 'content-type': 'application/json' },
-					}),
+					new Response(
+						JSON.stringify({
+							modules: [{ name: 'other', esModule: 'export {}' }],
+						}),
+						{
+							status: 200,
+							headers: { 'content-type': 'application/json' },
+						},
+					),
 			}),
 		/omitted modules for: kody:@a\/pkg\/one/,
 	)

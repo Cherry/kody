@@ -3,7 +3,6 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { auth } from '@modelcontextprotocol/client'
 import {
 	credentialsFromTokens,
 	isAccessTokenExpired,
@@ -16,9 +15,9 @@ import {
 	modernMcpProtocolVersion,
 	scopeIncludesOpenid,
 } from '../src/defaults.js'
+import { buildCliAuthorizationUrl } from '../src/oauth-browser.js'
 import {
 	buildCliClientMetadata,
-	createCliOAuthProvider,
 	issuerFromStoredCredentials,
 	orgSlugFromFlag,
 } from '../src/oauth-provider.js'
@@ -106,34 +105,20 @@ test('credentialsFromTokens stores a rotated refresh token', () => {
 	assert.equal(next.expiresAt, 10_000)
 })
 
-test('CLI OAuth identity is CIMD with a fixed loopback redirect', async () => {
+test('CLI OAuth identity is CIMD with a fixed loopback redirect', () => {
 	const mcpUrl = 'https://kody.codes/mcp'
 	const metadata = buildCliClientMetadata()
-	const provider = createCliOAuthProvider({
-		mcpUrl,
-		redirectUri: cliRedirectUrl(),
-		loadStoredTokens: false,
-		openBrowser: false,
-		expectedState: 'state',
-	})
 	assert.equal(
 		cliClientMetadataUrl(mcpUrl),
 		'https://kody.codes/oauth/cli-client-metadata.json',
 	)
 	assert.equal(metadata.client_name, '@kodycodes/cli')
+	assert.equal(metadata.client_uri, 'https://github.com/kentcdodds/kody')
 	assert.deepEqual(metadata.redirect_uris, [cliRedirectUrl().href])
 	assert.equal(metadata.token_endpoint_auth_method, 'none')
 	assert.equal(metadata.application_type, 'native')
 	assert.equal(metadata.scope, 'openid profile email')
 	assert.equal(modernMcpProtocolVersion, '2026-07-28')
-	assert.equal(
-		provider.clientMetadataUrl,
-		'https://kody.codes/oauth/cli-client-metadata.json',
-	)
-	// Fresh login leaves clientInformation unset so auth() can stamp issuer
-	// (SEP-2352) when it writes the CIMD client_id.
-	assert.equal(await provider.clientInformation(), undefined)
-	assert.equal(provider.clientMetadata.scope, 'openid profile email')
 })
 
 test('orgSlugFromFlag lowercases and rejects a blank slug', () => {
@@ -142,29 +127,21 @@ test('orgSlugFromFlag lowercases and rejects a blank slug', () => {
 	assert.throws(() => orgSlugFromFlag('   '), /kody login --org acme/)
 })
 
-test('login authorize URL gets ?org= and keeps the canonical resource', async () => {
-	const seen: Array<URL> = []
-	const provider = createCliOAuthProvider({
-		mcpUrl: 'https://kody.codes/mcp',
-		redirectUri: cliRedirectUrl(),
-		loadStoredTokens: false,
-		openBrowser: false,
-		expectedState: 'state',
-		org: 'Acme',
-		onAuthorizationUrl: (url) => {
-			seen.push(new URL(url.href))
+test('authorize URL gets ?org= and keeps the canonical resource', async () => {
+	const url = await buildCliAuthorizationUrl({
+		authorizationServer: {
+			issuer: 'https://kody.codes',
+			authorization_endpoint: 'https://kody.codes/oauth/authorize',
 		},
+		mcpUrl: 'https://kody.codes/mcp',
+		state: 'state',
+		codeChallenge: 'challenge',
+		org: 'Acme',
 	})
-	const authorizationUrl = new URL(
-		'https://kody.codes/oauth/authorize?response_type=code&resource=https%3A%2F%2Fkody.codes%2Fmcp&profile=CI+Bot',
-	)
-	await provider.redirectToAuthorization(authorizationUrl)
-	assert.equal(seen.length, 1)
-	const url = seen[0]
-	assert.ok(url)
+	assert.equal(url.origin + url.pathname, 'https://kody.codes/oauth/authorize')
 	assert.equal(url.searchParams.get('org'), 'acme')
-	assert.equal(url.searchParams.get('profile'), 'CI Bot')
 	assert.equal(url.searchParams.get('resource'), 'https://kody.codes/mcp')
+	assert.equal(url.searchParams.get('code_challenge'), 'challenge')
 	assert.equal(new URL(url.searchParams.get('resource') ?? '').search, '')
 })
 
@@ -251,23 +228,17 @@ test('login appends ?org= on the authorize URL and omits it otherwise', async ()
 })
 
 test('authorize URL omits org when the flag is absent', async () => {
-	let seen: URL | undefined
-	const provider = createCliOAuthProvider({
-		mcpUrl: 'https://kody.codes/mcp',
-		redirectUri: cliRedirectUrl(),
-		loadStoredTokens: false,
-		openBrowser: false,
-		expectedState: 'state',
-		onAuthorizationUrl: (url) => {
-			seen = new URL(url.href)
+	const url = await buildCliAuthorizationUrl({
+		authorizationServer: {
+			issuer: 'https://kody.codes',
+			authorization_endpoint: 'https://kody.codes/oauth/authorize',
 		},
+		mcpUrl: 'https://kody.codes/mcp',
+		state: 'state',
+		codeChallenge: 'challenge',
 	})
-	const authorizationUrl = new URL(
-		'https://kody.codes/oauth/authorize?response_type=code&resource=https%3A%2F%2Fkody.codes%2Fmcp',
-	)
-	await provider.redirectToAuthorization(authorizationUrl)
-	assert.equal(seen?.searchParams.get('org'), null)
-	assert.equal(seen?.searchParams.get('resource'), 'https://kody.codes/mcp')
+	assert.equal(url.searchParams.get('org'), null)
+	assert.equal(url.searchParams.get('resource'), 'https://kody.codes/mcp')
 })
 
 function captureWarns(): { warnings: string[]; restore: () => void } {
@@ -309,83 +280,6 @@ test('fresh login does not warn about a missing SEP-2352 issuer stamp', async ()
 	)
 })
 
-test('provider round-trips issuer on saveTokens and saveClientInformation', async () => {
-	const provider = createCliOAuthProvider({
-		mcpUrl: 'https://kody.codes/mcp',
-		redirectUri: cliRedirectUrl(),
-		loadStoredTokens: false,
-		openBrowser: false,
-		expectedState: 'state',
-	})
-	await provider.saveClientInformation?.({
-		client_id: 'https://kody.codes/oauth/cli-client-metadata.json',
-		issuer: 'https://kody.codes',
-	})
-	await provider.saveTokens?.({
-		access_token: 'access',
-		token_type: 'bearer',
-		refresh_token: 'refresh',
-		issuer: 'https://kody.codes',
-	})
-	assert.deepEqual(await provider.clientInformation(), {
-		client_id: 'https://kody.codes/oauth/cli-client-metadata.json',
-		issuer: 'https://kody.codes',
-	})
-	assert.deepEqual(await provider.tokens(), {
-		access_token: 'access',
-		token_type: 'bearer',
-		refresh_token: 'refresh',
-		issuer: 'https://kody.codes',
-	})
-})
-
-test('reloading stored credentials stamps issuer so auth does not warn', async () => {
-	const origin = 'https://oauth.test'
-	const fetchFn = oauthDiscoveryFetch(origin)
-	const existing: StoredCredentials = {
-		version: 1,
-		mcpUrl: `${origin}/mcp`,
-		resource: `${origin}/mcp`,
-		authorizationServerUrl: origin,
-		clientId: `${origin}/oauth/cli-client-metadata.json`,
-		accessToken: 'access',
-		refreshToken: 'refresh',
-		tokenType: 'bearer',
-		expiresAt: Date.now() + 3600_000,
-		scope: 'openid profile email',
-	}
-	const provider = createCliOAuthProvider({
-		mcpUrl: existing.mcpUrl,
-		redirectUri: cliRedirectUrl(),
-		existing,
-		loadStoredTokens: true,
-		openBrowser: false,
-		expectedState: 'state',
-	})
-	assert.equal((await provider.clientInformation())?.issuer, origin)
-	assert.equal((await provider.tokens())?.issuer, origin)
-
-	const { warnings, restore } = captureWarns()
-	try {
-		// Discovery + issuer check run before refresh/redirect. A 404 token
-		// endpoint may yield REDIRECT; either way SEP-2352 must stay quiet.
-		await auth(provider, {
-			serverUrl: existing.mcpUrl,
-			scope: defaultScopes.join(' '),
-			fetchFn,
-		})
-	} catch {
-		// Refresh against the discovery stub can fail; the issuer read already ran.
-	} finally {
-		restore()
-	}
-	assert.equal(
-		warnings.some((line) => line.includes('SEP-2352')),
-		false,
-		`unexpected SEP-2352 warnings: ${warnings.join('\n')}`,
-	)
-})
-
 test('issuerFromStoredCredentials falls back to the MCP origin', () => {
 	assert.equal(
 		issuerFromStoredCredentials({
@@ -412,7 +306,10 @@ test('parseCredentials migrates a missing authorizationServerUrl from mcpUrl', (
 })
 
 test('save/load round-trip keeps authorizationServerUrl for issuer reload', async () => {
-	const path = join(mkdtempSync(join(tmpdir(), 'kody-cli-')), 'credentials.json')
+	const path = join(
+		mkdtempSync(join(tmpdir(), 'kody-cli-')),
+		'credentials.json',
+	)
 	const backend = createFileBackend(path)
 	const credentials: StoredCredentials = {
 		...previous,
@@ -422,13 +319,8 @@ test('save/load round-trip keeps authorizationServerUrl for issuer reload', asyn
 	saveCredentials(credentials, backend)
 	const loaded = loadCredentials(credentials.mcpUrl, backend)
 	assert.equal(loaded?.authorizationServerUrl, 'https://kody.codes')
-	const provider = createCliOAuthProvider({
-		mcpUrl: credentials.mcpUrl,
-		redirectUri: cliRedirectUrl(),
-		existing: loaded ?? undefined,
-		loadStoredTokens: true,
-		openBrowser: false,
-		expectedState: 'state',
-	})
-	assert.equal((await provider.tokens())?.issuer, 'https://kody.codes')
+	assert.equal(
+		loaded ? issuerFromStoredCredentials(loaded) : '',
+		'https://kody.codes',
+	)
 })

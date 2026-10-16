@@ -1,4 +1,4 @@
-import type { ensureFreshCredentials } from './auth.js'
+import { type ensureFreshCredentials } from './auth.js'
 import {
 	missingLocalExecuteAuthMessage,
 	expectedPairedApiOrigin,
@@ -7,7 +7,7 @@ import {
 	type ResolveScopedApiTokenInput,
 } from './api-token.js'
 import { defaultApiUrl, defaultMcpUrl } from './defaults.js'
-import type { SecretBackend } from './store.js'
+import { type SecretBackend } from './store.js'
 
 function urlOriginOrValue(value: string): string {
 	try {
@@ -54,7 +54,8 @@ export async function resolveLocalExecuteBearer(
 	}
 
 	const ensure =
-		input.ensureCredentials ?? (await import('./auth.js')).ensureFreshCredentials
+		input.ensureCredentials ??
+		(await import('./auth.js')).ensureFreshCredentials
 	try {
 		const credentials = await ensure({
 			mcpUrl: input.mcpUrl,
@@ -68,10 +69,12 @@ export async function resolveLocalExecuteBearer(
 		// Preserve org-specific guidance from ensureFreshCredentials.
 		if (
 			error instanceof Error &&
-			/^No login stored for org "/.test(error.message)
+			error.message.startsWith('No login stored for org "')
 		) {
 			throw error
 		}
-		throw new Error(missingLocalExecuteAuthMessage(input.purpose ?? 'execute --local'))
+		throw new Error(
+			missingLocalExecuteAuthMessage(input.purpose ?? 'execute --local'),
+		)
 	}
 }

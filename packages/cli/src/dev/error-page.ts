@@ -4,7 +4,7 @@
  * (curl, agents, `kody dev fetch`).
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 
 export type DevErrorKind = 'build' | 'runtime'
 
@@ -38,12 +38,20 @@ export function sendDevError(
 		'x-kody-dev-error': view.kind,
 	}
 	if (wantsHtml(req)) {
-		res.writeHead(status, { ...headers, 'content-type': 'text/html; charset=utf-8' })
+		res.writeHead(status, {
+			...headers,
+			'content-type': 'text/html; charset=utf-8',
+		})
 		res.end(renderDevErrorPage(view) + (options.htmlTail ?? ''))
 		return
 	}
-	res.writeHead(status, { ...headers, 'content-type': 'text/plain; charset=utf-8' })
-	res.end(`kody dev ${view.kind} error${view.request ? ` (${view.request})` : ''}\n\n${view.detail}\n`)
+	res.writeHead(status, {
+		...headers,
+		'content-type': 'text/plain; charset=utf-8',
+	})
+	res.end(
+		`kody dev ${view.kind} error${view.request ? ` (${view.request})` : ''}\n\n${view.detail}\n`,
+	)
 }
 
 export function renderDevErrorPage(view: DevErrorView): string {

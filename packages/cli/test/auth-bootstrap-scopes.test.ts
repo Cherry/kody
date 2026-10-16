@@ -17,8 +17,11 @@ import {
 } from '../src/auth-bootstrap.js'
 import { openCapabilityProxySession } from '../src/capability-proxy.js'
 import { runCli } from '../src/cli.js'
-import { modernMcpProtocolVersion } from '../src/defaults.js'
-import { createFileBackend, fileStorePath, saveCredentials } from '../src/store.js'
+import {
+	createFileBackend,
+	fileStorePath,
+	saveCredentials,
+} from '../src/store.js'
 
 const apiUrl = 'https://api.scopes.test'
 const mintedCode = `kody_bc_${'c'.repeat(16)}_${'D'.repeat(32)}`
@@ -60,7 +63,10 @@ const redeemResponse = {
 
 /** Isolate HOME/XDG/env, install a fetch stub, and restore everything after. */
 async function withCliEnv<T>(
-	fetchStub: (url: string, init: RequestInit | undefined) => Promise<Response> | Response,
+	fetchStub: (
+		url: string,
+		init: RequestInit | undefined,
+	) => Promise<Response> | Response,
 	run: (ctx: { home: string; requests: Array<Recorded> }) => Promise<T>,
 ): Promise<T> {
 	const home = mkdtempSync(join(tmpdir(), 'kody-cli-scopes-'))
@@ -78,9 +84,14 @@ async function withCliEnv<T>(
 	delete process.env.KODY_API_URL
 	const requests: Array<Recorded> = []
 	const previousFetch = globalThis.fetch
-	globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+	globalThis.fetch = (async (
+		input: Parameters<typeof fetch>[0],
+		init?: RequestInit,
+	) => {
 		const url = input instanceof Request ? input.url : String(input)
-		const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
+		const headers = new Headers(
+			input instanceof Request ? input.headers : init?.headers,
+		)
 		const rawBody = typeof init?.body === 'string' ? init.body : null
 		requests.push({
 			url,
@@ -107,49 +118,6 @@ function json(body: unknown, status = 200) {
 	})
 }
 
-/** Minimal Kody MCP endpoint: negotiates the pinned protocol and answers tools/call. */
-function fakeMcp(
-	mcpUrl: string,
-	onToolCall: (params: unknown) => unknown,
-): (url: string, init: RequestInit | undefined) => Response | null {
-	return (url, init) => {
-		if (!url.startsWith(mcpUrl)) return null
-		if ((init?.method ?? 'GET') !== 'POST') return new Response(null, { status: 405 })
-		const message = JSON.parse(String(init?.body)) as {
-			id?: number
-			method: string
-			params?: { protocolVersion?: string }
-		}
-		if (message.id === undefined) return new Response(null, { status: 202 })
-		switch (message.method) {
-			case 'server/discover':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: { supportedVersions: [modernMcpProtocolVersion], capabilities: { tools: {} } },
-				})
-			case 'initialize':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: {
-						protocolVersion: message.params?.protocolVersion,
-						capabilities: { tools: {} },
-						serverInfo: { name: 'kody-test', version: '0.0.0' },
-					},
-				})
-			case 'tools/call':
-				return json({
-					jsonrpc: '2.0',
-					id: message.id,
-					result: { resultType: 'complete', ...(onToolCall(message.params) as object) },
-				})
-			default:
-				return json({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'nope' } })
-		}
-	}
-}
-
 function saveLogin(mcpUrl: string) {
 	saveCredentials(
 		{
@@ -159,11 +127,10 @@ function saveLogin(mcpUrl: string) {
 			resource: mcpUrl,
 			authorizationServerUrl: new URL(mcpUrl).origin,
 			clientId: 'client-1',
-			accessToken: 'oauth-access-from-login',
-			refreshToken: 'refresh-1',
+			accessToken: 'kody_at_login_session',
 			tokenType: 'bearer',
 			expiresAt: Date.now() + 120_000,
-			scope: 'openid profile email',
+			scope: 'org:execute package:read package:write',
 		},
 		createFileBackend(fileStorePath(mcpUrl)),
 	)
@@ -181,10 +148,10 @@ async function capture(args: Array<string>) {
 
 test('parseCliScopesFlag splits on commas or spaces and dedupes', () => {
 	assert.equal(parseCliScopesFlag(undefined), undefined)
-	assert.deepEqual(parseCliScopesFlag('org:execute, package:write org:execute'), [
-		'org:execute',
-		'package:write',
-	])
+	assert.deepEqual(
+		parseCliScopesFlag('org:execute, package:write org:execute'),
+		['org:execute', 'package:write'],
+	)
 	assert.throws(() => parseCliScopesFlag(' , '), /at least one scope/)
 })
 
@@ -192,8 +159,10 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 	await withCliEnv(
 		(url) => {
 			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap')) return json(mintResponse(requestedScopes))
-			if (url.endsWith('/v1/tokens/bootstrap/redeem')) return json(redeemResponse)
+			if (url.endsWith('/v1/tokens/bootstrap'))
+				return json(mintResponse(requestedScopes))
+			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+				return json(redeemResponse)
 			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
 		async ({ requests }) => {
@@ -210,9 +179,14 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 				apiUrl,
 			])
 			assert.equal(result.code, 0, result.stderr)
-			const mint = requests.find((request) => request.url.endsWith('/v1/tokens/bootstrap'))
+			const mint = requests.find((request) =>
+				request.url.endsWith('/v1/tokens/bootstrap'),
+			)
 			assert.equal(mint?.authorization, 'Bearer kody_at_parent')
-			assert.deepEqual(mint?.body, { scopes: requestedScopes, lifetime: 'short' })
+			assert.deepEqual(mint?.body, {
+				scopes: requestedScopes,
+				lifetime: 'short',
+			})
 			const redeem = requests.find((request) =>
 				request.url.endsWith('/v1/tokens/bootstrap/redeem'),
 			)
@@ -222,7 +196,10 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 				idle_ttl_seconds: 3600,
 				max_lifetime_seconds: 86400,
 			})
-			assert.match(result.stdout, /scopes: org:execute, package:read, package:write/)
+			assert.match(
+				result.stdout,
+				/scopes: org:execute, package:read, package:write/,
+			)
 			assert.doesNotMatch(result.stdout, /kody_at_|kody_bc_/)
 			assert.equal(loadStoredApiToken(apiUrl)?.tokenId, 'tok_scoped_1')
 		},
@@ -231,11 +208,17 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 
 test('resolveMintedRedeemLifetime trusts server clamp and coerces idle when max is lower', () => {
 	assert.deepEqual(
-		resolveMintedRedeemLifetime({ idle_ttl_seconds: 3600, max_lifetime_seconds: 86400 }),
+		resolveMintedRedeemLifetime({
+			idle_ttl_seconds: 3600,
+			max_lifetime_seconds: 86400,
+		}),
 		{ kind: 'explicit', idleTtlSeconds: 3600, maxLifetimeSeconds: 86400 },
 	)
 	assert.deepEqual(
-		resolveMintedRedeemLifetime({ idle_ttl_seconds: 3600, max_lifetime_seconds: 45 }),
+		resolveMintedRedeemLifetime({
+			idle_ttl_seconds: 3600,
+			max_lifetime_seconds: 45,
+		}),
 		{ kind: 'explicit', idleTtlSeconds: 45, maxLifetimeSeconds: 45 },
 	)
 })
@@ -253,7 +236,8 @@ test('auth bootstrap --scopes redeems server-clamped lifetimes without CLI flag 
 					max_lifetime_seconds: 45,
 				})
 			}
-			if (url.endsWith('/v1/tokens/bootstrap/redeem')) return json(redeemResponse)
+			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+				return json(redeemResponse)
 			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
 		async ({ requests }) => {
@@ -291,7 +275,8 @@ test('auth bootstrap --scopes explains how to widen when the token cannot grant 
 				{
 					error: {
 						code: 'invalid_input',
-						message: 'A token cannot grant scopes it does not hold: package:write.',
+						message:
+							'A token cannot grant scopes it does not hold: package:write.',
 					},
 				},
 				400,
@@ -311,7 +296,10 @@ test('auth bootstrap --scopes explains how to widen when the token cannot grant 
 				apiUrl,
 			])
 			assert.equal(result.code, 1)
-			assert.match(result.stderr, /cannot grant scopes it does not hold: package:write/)
+			assert.match(
+				result.stderr,
+				/cannot grant scopes it does not hold: package:write/,
+			)
 			assert.match(result.stderr, /kody login/)
 			assert.ok(
 				result.stderr.includes(
@@ -327,23 +315,16 @@ test('auth bootstrap --scopes explains how to widen when the token cannot grant 
 	)
 })
 
-test('auth bootstrap --scopes with a kody login session mints through the MCP api tool', async () => {
+test('auth bootstrap --scopes with a kody login session mints through the Open API', async () => {
 	const mcpUrl = 'https://login-scopes.test/mcp'
-	const toolCalls: Array<unknown> = []
-	const mcp = fakeMcp(mcpUrl, (params) => {
-		toolCalls.push(params)
-		return {
-			content: [{ type: 'text', text: 'ok' }],
-			structuredContent: {
-				operationId: 'cliCredentialBootstrap',
-				result: mintResponse(requestedScopes),
-			},
-		}
-	})
 	await withCliEnv(
-		(url, init) => {
-			if (url.endsWith('/v1/tokens/bootstrap/redeem')) return json(redeemResponse)
-			return mcp(url, init) ?? json({ error: { code: 'not_found', message: url } }, 404)
+		(url) => {
+			if (url.endsWith('/openapi.json')) return json(openApiDocument)
+			if (url.endsWith('/v1/tokens/bootstrap'))
+				return json(mintResponse(requestedScopes))
+			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+				return json(redeemResponse)
+			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
 		async ({ requests }) => {
 			saveLogin(mcpUrl)
@@ -360,35 +341,38 @@ test('auth bootstrap --scopes with a kody login session mints through the MCP ap
 				apiUrl,
 			])
 			assert.equal(result.code, 0, result.stderr)
-			assert.equal(toolCalls.length, 1)
-			assert.deepEqual(toolCalls[0], {
-				...(toolCalls[0] as object),
-				name: 'api',
-				arguments: {
-					operationId: 'cliCredentialBootstrap',
-					params: { scopes: requestedScopes, lifetime: 'short' },
-				},
+			const mint = requests.find((request) =>
+				request.url.endsWith('/v1/tokens/bootstrap'),
+			)
+			assert.equal(mint?.authorization, 'Bearer kody_at_login_session')
+			assert.deepEqual(mint?.body, {
+				scopes: requestedScopes,
+				lifetime: 'short',
 			})
-			const mcpRequest = requests.find((request) => request.url.startsWith(mcpUrl))
-			assert.equal(mcpRequest?.authorization, 'Bearer oauth-access-from-login')
 			assert.equal(loadStoredApiToken(apiUrl)?.tokenId, 'tok_scoped_1')
 			assert.doesNotMatch(result.stdout, /kody_at_|kody_bc_/)
 		},
 	)
 })
 
-test('auth bootstrap surfaces MCP api errors from the login session', async () => {
+test('auth bootstrap surfaces Open API errors from the login session', async () => {
 	const mcpUrl = 'https://login-scopes-error.test/mcp'
-	const mcp = fakeMcp(mcpUrl, () => ({
-		isError: true,
-		content: [{ type: 'text', text: 'Error (invalid_input): bad scope' }],
-		structuredContent: {
-			operationId: 'cliCredentialBootstrap',
-			error: { code: 'invalid_input', message: 'Unknown scope "nope:write".' },
-		},
-	}))
 	await withCliEnv(
-		(url, init) => mcp(url, init) ?? json({ error: { code: 'not_found', message: url } }, 404),
+		(url) => {
+			if (url.endsWith('/openapi.json')) return json(openApiDocument)
+			if (url.endsWith('/v1/tokens/bootstrap')) {
+				return json(
+					{
+						error: {
+							code: 'invalid_input',
+							message: 'Unknown scope "nope:write".',
+						},
+					},
+					400,
+				)
+			}
+			return json({ error: { code: 'not_found', message: url } }, 404)
+		},
 		async ({ requests }) => {
 			saveLogin(mcpUrl)
 			const result = await capture([
@@ -482,7 +466,10 @@ test('inferCliTokenLifetimeAlias preserves long tokens from absolute expiry', ()
 	)
 	assert.equal(
 		inferCliTokenLifetimeAlias(
-			{ expiresAt: '2026-11-01T00:00:00.000Z', maxExpiresAt: '2027-01-01T00:00:00.000Z' },
+			{
+				expiresAt: '2026-11-01T00:00:00.000Z',
+				maxExpiresAt: '2027-01-01T00:00:00.000Z',
+			},
 			now,
 		),
 		'long',
@@ -508,11 +495,14 @@ test('readInsufficientScopeDetails reads platform required_permission, mint_scop
 			denial: 'credential_scope',
 		},
 	)
-	assert.deepEqual(readInsufficientScopeDetails({ error: { code: 'insufficient_scope' } }), {
-		requiredScope: null,
-		mintScopes: null,
-		denial: null,
-	})
+	assert.deepEqual(
+		readInsufficientScopeDetails({ error: { code: 'insufficient_scope' } }),
+		{
+			requiredScope: null,
+			mintScopes: null,
+			denial: null,
+		},
+	)
 })
 
 test('insufficientScopeMessage names the missing scope and the exact mint commands', () => {
@@ -558,7 +548,11 @@ test('insufficientScopeMessage names the missing scope and the exact mint comman
 		requiredScope: 'search:read',
 		currentScopes: ['org:read', 'org:execute'],
 	})
-	assert.ok(fromCurrent.includes(cliBootstrapScopesCommand(['org:execute', 'org:read', 'search:read'])))
+	assert.ok(
+		fromCurrent.includes(
+			cliBootstrapScopesCommand(['org:execute', 'org:read', 'search:read']),
+		),
+	)
 
 	const roleDenial = insufficientScopeMessage({
 		requiredScope: 'package:write',
@@ -567,8 +561,14 @@ test('insufficientScopeMessage names the missing scope and the exact mint comman
 	assert.match(roleDenial, /org role does not grant "package:write"/)
 	assert.doesNotMatch(roleDenial, /auth bootstrap/)
 
-	const unknownScopes = insufficientScopeMessage({ requiredScope: 'package:write' })
-	assert.ok(unknownScopes.includes(cliBootstrapMintCall(['<current scopes>', 'package:write'])))
+	const unknownScopes = insufficientScopeMessage({
+		requiredScope: 'package:write',
+	})
+	assert.ok(
+		unknownScopes.includes(
+			cliBootstrapMintCall(['<current scopes>', 'package:write']),
+		),
+	)
 })
 
 test('CapabilityProxy insufficient_scope prints the platform mint scopes as commands', async () => {
@@ -588,7 +588,12 @@ test('CapabilityProxy insufficient_scope prints the platform mint scopes as comm
 			403,
 		)) as typeof fetch
 	await assert.rejects(
-		() => openCapabilityProxySession({ apiUrl: 'https://api.kody.codes', token: 'kody_at_x', fetchFn }),
+		() =>
+			openCapabilityProxySession({
+				apiUrl: 'https://api.kody.codes',
+				token: 'kody_at_x',
+				fetchFn,
+			}),
 		(error: Error) => {
 			assert.ok(
 				error.message.includes(

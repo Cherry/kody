@@ -19,7 +19,7 @@ import {
 	type Server,
 	type ServerResponse,
 } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import {
@@ -72,7 +72,11 @@ import {
 	startWorkerd,
 	type WorkerdHandle,
 } from './dev/workerd-process.js'
-import { BundleError, formatBundleDiagnostic, type BundleDiagnostic } from './local-bundle.js'
+import {
+	BundleError,
+	formatBundleDiagnostic,
+	type BundleDiagnostic,
+} from './local-bundle.js'
 import {
 	localExecuteGatewayFetchShimModuleName,
 	resolveLocalPackageGraph,
@@ -97,10 +101,12 @@ import {
 	runSecretHeader,
 	type PackageLocalContext,
 } from './package-local-runtime-source.js'
-import type { KodyPackageManifest } from './package-manifest.js'
-import { resolvePackagePath } from './package-manifest.js'
+import {
+	type KodyPackageManifest,
+	resolvePackagePath,
+} from './package-manifest.js'
 import { redact } from './redact.js'
-import type { KodyTarget } from './target.js'
+import { type KodyTarget } from './target.js'
 import { ensureWorkerdBinary } from './workerd-binary.js'
 
 export type PackageAppDevOptions = {
@@ -175,7 +181,11 @@ export type PackageAppDevServer = {
 	fetchPath: (
 		path: string,
 		init?: { method?: string; headers?: Record<string, string>; body?: string },
-	) => Promise<{ status: number; headers: Record<string, string>; body: string }>
+	) => Promise<{
+		status: number
+		headers: Record<string, string>
+		body: string
+	}>
 	/** Same JSON as `GET /__kody/dev/status`. */
 	status: () => DevServerStatus
 	close: () => Promise<void>
@@ -237,7 +247,8 @@ export async function startPackageAppDev(
 	const workerdPath =
 		options.workerdPath ??
 		(await ensureWorkerdBinary({
-			onDownload: (url) => options.onStatus?.(`Downloading workerd from ${url}…`),
+			onDownload: (url) =>
+				options.onStatus?.(`Downloading workerd from ${url}…`),
 		}))
 
 	const client = {
@@ -387,7 +398,10 @@ export async function startPackageAppDev(
 	/** `performance.now()` until which onChange ignores events (failed-prebuild absorb). */
 	let ignoreWatcherUntil = 0
 	let prebuildAbort: AbortController | undefined
-	const workerdEnv: NodeJS.ProcessEnv = { ...process.env, [runSecretEnvVar]: runSecret }
+	const workerdEnv: NodeJS.ProcessEnv = {
+		...process.env,
+		[runSecretEnvVar]: runSecret,
+	}
 	delete workerdEnv[apiTokenEnvVar]
 
 	function requestBuild(paths: Iterable<string>): Promise<void> {
@@ -412,10 +426,15 @@ export async function startPackageAppDev(
 
 	async function buildOnce(files: Array<string>): Promise<void> {
 		const started = performance.now()
-		emit({ type: 'rebuild_start', files: files.map((file) => relative(root, file) || file) })
+		emit({
+			type: 'rebuild_start',
+			files: files.map((file) => relative(root, file) || file),
+		})
 		const assetsChanged =
 			assetsDir !== null &&
-			files.some((file) => file === assetsDir || file.startsWith(`${assetsDir}${sep}`))
+			files.some(
+				(file) => file === assetsDir || file.startsWith(`${assetsDir}${sep}`),
+			)
 		try {
 			if (prebuild) {
 				await runPrebuildStep(prebuild)
@@ -426,7 +445,11 @@ export async function startPackageAppDev(
 			])
 			const midBuildEdits =
 				(await watcher?.track(
-					[...bundle.inputs, ...(client?.inputs ?? []), options.manifest.packageJsonPath],
+					[
+						...bundle.inputs,
+						...(client?.inputs ?? []),
+						options.manifest.packageJsonPath,
+					],
 					{ ignoreChanges: files },
 				)) ?? []
 			// Queue mid-build edits for the next loop iteration directly — do not
@@ -452,7 +475,10 @@ export async function startPackageAppDev(
 					restarted: false,
 				})
 				if (assetsChanged || prebuild) {
-					liveReloadHub.broadcast({ event: 'reload', data: { buildId: active.id } })
+					liveReloadHub.broadcast({
+						event: 'reload',
+						data: { buildId: active.id },
+					})
 				}
 				return
 			}
@@ -467,8 +493,16 @@ export async function startPackageAppDev(
 			if (previous) retireGeneration(previous)
 			lastRuntimeError = null
 			lastRebuild = { ms: elapsed(started), at: new Date().toISOString() }
-			emit({ type: 'rebuild_ok', ms: lastRebuild.ms, buildId: generation.id, restarted: true })
-			liveReloadHub.broadcast({ event: 'reload', data: { buildId: generation.id } })
+			emit({
+				type: 'rebuild_ok',
+				ms: lastRebuild.ms,
+				buildId: generation.id,
+				restarted: true,
+			})
+			liveReloadHub.broadcast({
+				event: 'reload',
+				data: { buildId: generation.id },
+			})
 		} catch (error) {
 			buildFailure = toBuildFailure(error)
 			buildFailureAt = new Date().toISOString()
@@ -482,7 +516,10 @@ export async function startPackageAppDev(
 				col: first?.col ?? null,
 				diagnostics: buildFailure.diagnostics,
 			})
-			liveReloadHub.broadcast({ event: 'build_error', data: buildErrorView(buildFailure) })
+			liveReloadHub.broadcast({
+				event: 'build_error',
+				data: buildErrorView(buildFailure),
+			})
 		}
 	}
 
@@ -639,7 +676,9 @@ export async function startPackageAppDev(
 		if (!pending) return
 		await Promise.race([
 			pending.catch(() => {}),
-			new Promise<void>((resolve) => setTimeout(resolve, rebuildGateMs).unref()),
+			new Promise<void>((resolve) =>
+				setTimeout(resolve, rebuildGateMs).unref(),
+			),
 		])
 	}
 
@@ -682,7 +721,10 @@ export async function startPackageAppDev(
 	}
 
 	function handleDevRoute(req: IncomingMessage, res: ServerResponse): boolean {
-		const pathname = stripMount(new URL(req.url ?? '/', hostedUrl).pathname, appBasePath)
+		const pathname = stripMount(
+			new URL(req.url ?? '/', hostedUrl).pathname,
+			appBasePath,
+		)
 		if (pathname === devStatusPath) {
 			res.writeHead(200, {
 				'content-type': 'application/json; charset=utf-8',
@@ -707,7 +749,10 @@ export async function startPackageAppDev(
 		return false
 	}
 
-	async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+	async function handleRequest(
+		req: IncomingMessage,
+		res: ServerResponse,
+	): Promise<void> {
 		try {
 			if (handleDevRoute(req, res)) return
 			await waitForBuild()
@@ -736,7 +781,11 @@ export async function startPackageAppDev(
 			const generation = active
 			if (!generation) {
 				res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
-				res.end(closed ? 'kody dev is shutting down.\n' : 'kody dev is still starting.\n')
+				res.end(
+					closed
+						? 'kody dev is shutting down.\n'
+						: 'kody dev is still starting.\n',
+				)
 				return
 			}
 			generation.inflight += 1
@@ -853,7 +902,11 @@ export async function startPackageAppDev(
 		let message = 'Uncaught error'
 		let stack = ''
 		try {
-			const parsed = JSON.parse(raw) as { name?: string; message?: string; stack?: string }
+			const parsed = JSON.parse(raw) as {
+				name?: string
+				message?: string
+				stack?: string
+			}
 			message = `${parsed.name ?? 'Error'}: ${parsed.message ?? ''}`
 			stack = parsed.stack ?? message
 		} catch {
@@ -908,7 +961,10 @@ export async function startPackageAppDev(
 							const now = performance.now()
 							// Soft absorb: fingerprint already advanced by the
 							// poller — prebuild's own writes / brief settle chatter.
-							if (prebuildRunning || now - prebuildSettledAt < prebuildSettleMs) {
+							if (
+								prebuildRunning ||
+								now - prebuildSettledAt < prebuildSettleMs
+							) {
 								return
 							}
 							// Hard defer after a *failed* prebuild: leave the
@@ -966,7 +1022,9 @@ export async function startPackageAppDev(
 		await buildLoop?.catch(() => {})
 		await bundler.dispose()
 		await clientBundler?.dispose()
-		await Promise.all([...generations].map((generation) => stopGeneration(generation)))
+		await Promise.all(
+			[...generations].map((generation) => stopGeneration(generation)),
+		)
 		reaper.close()
 		await bridge.close()
 		liveReloadHub.close()
@@ -990,9 +1048,13 @@ export async function startPackageAppDev(
 		await close()
 		throw new Error(message)
 	}
-	if (active) options.onStatus?.(`App ready at ${hostedUrl}${appBasePath || '/'}`)
+	if (active)
+		options.onStatus?.(`App ready at ${hostedUrl}${appBasePath || '/'}`)
 
-	const fetchPath: PackageAppDevServer['fetchPath'] = async (path, init = {}) => {
+	const fetchPath: PackageAppDevServer['fetchPath'] = async (
+		path,
+		init = {},
+	) => {
 		const url = new URL(joinUrlPath(appBasePath, path), hostedUrl)
 		const response = await fetch(url, {
 			method: init.method ?? 'GET',

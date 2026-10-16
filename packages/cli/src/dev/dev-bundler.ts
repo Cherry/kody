@@ -7,7 +7,11 @@
 
 import * as esbuild from 'esbuild'
 import { join, resolve } from 'node:path'
-import { BundleError, createBundleError, localBundleOptions } from '../local-bundle.js'
+import {
+	BundleError,
+	createBundleError,
+	localBundleOptions,
+} from '../local-bundle.js'
 
 export type DevBundle = {
 	code: string
@@ -24,7 +28,10 @@ export type DevBundler = {
 
 type DevBuildContext = esbuild.BuildContext<{ write: false; metafile: true }>
 
-export function createDevBundler(input: { entryPath: string; root: string }): DevBundler {
+export function createDevBundler(input: {
+	entryPath: string
+	root: string
+}): DevBundler {
 	const entry = resolve(input.entryPath)
 	const base = localBundleOptions(entry)
 	const options = {
@@ -61,7 +68,10 @@ export function createDevBundler(input: { entryPath: string; root: string }): De
 	}
 }
 
-export function bundleInputs(metafile: esbuild.Metafile | undefined, workingDir: string): Array<string> {
+export function bundleInputs(
+	metafile: esbuild.Metafile | undefined,
+	workingDir: string,
+): Array<string> {
 	return Object.keys(metafile?.inputs ?? {})
 		.filter((path) => !path.includes('node_modules') && !path.includes(':'))
 		.map((path) => resolve(workingDir, path))
@@ -76,7 +86,10 @@ export function readBundle(
 	const js = outputs.find((file) => file.path.endsWith('.js'))
 	const map = outputs.find((file) => file.path.endsWith('.js.map'))
 	if (!js) {
-		throw new BundleError(`Could not bundle ${entryPath}: esbuild produced no output.`, [])
+		throw new BundleError(
+			`Could not bundle ${entryPath}: esbuild produced no output.`,
+			[],
+		)
 	}
 	return {
 		code: js.text.replace(/\n\/\/# sourceMappingURL=\S+\s*$/, '\n'),

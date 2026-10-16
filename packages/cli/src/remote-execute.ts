@@ -1,10 +1,7 @@
-import {
-	assertTokenSafeApiUrl,
-	callCapabilityProxy,
-	openCapabilityProxySession,
-} from './capability-proxy.js'
-import type { CredentialCallMapInput } from './credential-call-map.js'
-import type { ToolCallResult } from './tool-result.js'
+import { assertTokenSafeApiUrl } from './capability-proxy.js'
+import { openApiRequest } from './open-api-client.js'
+import { type CredentialCallMapInput } from './credential-call-map.js'
+import { type ToolCallResult } from './tool-result.js'
 import { resolveExecuteInvokeCode } from './invoke-passthrough.js'
 
 export type RemoteExecuteInput = {
@@ -25,7 +22,7 @@ export type RemoteExecuteInput = {
 }
 
 export const credentialFlagRequiresLocalOrMcpMessage =
-	'--credential picks a credential for this run, but token-auth cloud execute goes through CapabilityProxy → kody.execute, which does not take a call map (package code must not pick by name). Use `execute --local --credential …`, or omit --token / KODY_API_TOKEN and use a `kody login` MCP session so execute receives credentials.'
+	'--credential picks a credential for this run. Cloud execute sends it on POST /v1/execute. Use `execute --local --credential …` when the module must run on this machine.'
 
 /**
  * Cloud (non-`--local`) execute authenticated only with a scoped API token:
@@ -39,29 +36,48 @@ export async function runRemoteExecuteWithToken(
 	input: RemoteExecuteInput,
 ): Promise<ToolCallResult> {
 	assertTokenSafeApiUrl(input.apiUrl)
-	if (input.credentials) {
-		throw new Error(credentialFlagRequiresLocalOrMcpMessage)
-	}
 	const code = resolveRemoteExecuteCode(input)
-	const client = {
-		apiUrl: input.apiUrl,
+	const body: Record<string, unknown> = {}
+	if (input.invoke && !code.includes('import action from')) {
+		body.invoke = input.invoke
+	} else {
+		body.code = code
+	}
+	if (input.params !== undefined) body.params = input.params
+	if (input.conversationId !== undefined)
+		body.conversationId = input.conversationId
+	if (input.credentials !== undefined) body.credentials = input.credentials
+	const payload = await openApiRequest({
 		token: input.token,
+		apiUrl: input.apiUrl,
 		fetchFn: input.fetchFn,
 		...(input.org ? { org: input.org } : {}),
-	}
-	await openCapabilityProxySession(client)
-
-	const args: Record<string, unknown> = { code }
-	if (input.params !== undefined) args.params = input.params
-	if (input.conversationId !== undefined) args.conversationId = input.conversationId
-
-	const payload = await callCapabilityProxy({
-		...client,
-		path: ['kody', 'execute'],
-		args: [args],
-		conversationId: input.conversationId,
+		method: 'POST',
+		path: 'v1/execute',
+		body,
 	})
+	return toolResultFromExecuteBody(payload)
+}
 
+function toolResultFromExecuteBody(payload: unknown): ToolCallResult {
+	if (
+		payload &&
+		typeof payload === 'object' &&
+		!Array.isArray(payload) &&
+		'content' in payload &&
+		Array.isArray((payload as { content: unknown }).content)
+	) {
+		const record = payload as {
+			content: ToolCallResult['content']
+			structuredContent?: ToolCallResult['structuredContent']
+			isError?: boolean
+		}
+		return {
+			content: record.content,
+			structuredContent: record.structuredContent,
+			isError: record.isError === true,
+		}
+	}
 	return formatExecuteCapabilityResult(payload)
 }
 
@@ -72,7 +88,9 @@ export function resolveRemoteExecuteCode(input: {
 	const code = input.code?.trim() ? input.code : undefined
 	const invoke = input.invoke?.trim() ? input.invoke : undefined
 	if (code && invoke) {
-		throw new Error('--invoke cannot be combined with --code, --file, or a module string.')
+		throw new Error(
+			'--invoke cannot be combined with --code, --file, or a module string.',
+		)
 	}
 	if (invoke) return resolveExecuteInvokeCode(invoke)
 	if (code) return code
@@ -83,11 +101,15 @@ export function resolveRemoteExecuteCode(input: {
  * Map `kody.execute` capability output (returned as CapabilityProxy `result`)
  * into the same ToolCallResult envelope MCP execute / local execute use.
  */
-export function formatExecuteCapabilityResult(payload: unknown): ToolCallResult {
+export function formatExecuteCapabilityResult(
+	payload: unknown,
+): ToolCallResult {
 	const record = isRecord(payload) ? payload : null
 	if (!record) {
 		const text =
-			typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2) ?? 'undefined'
+			typeof payload === 'string'
+				? payload
+				: (JSON.stringify(payload, null, 2) ?? 'undefined')
 		return {
 			content: [{ type: 'text', text }],
 			structuredContent: { result: payload },
@@ -97,7 +119,9 @@ export function formatExecuteCapabilityResult(payload: unknown): ToolCallResult 
 
 	const ok = record.ok !== false && typeof record.error !== 'string'
 	const conversationId =
-		typeof record.conversationId === 'string' ? record.conversationId : undefined
+		typeof record.conversationId === 'string'
+			? record.conversationId
+			: undefined
 	const logs = Array.isArray(record.logs) ? record.logs : []
 	const base: Record<string, unknown> = {
 		...(conversationId !== undefined ? { conversationId } : {}),
@@ -133,7 +157,9 @@ export function formatExecuteCapabilityResult(payload: unknown): ToolCallResult 
 
 	const result = record.result
 	const text =
-		typeof result === 'string' ? result : (JSON.stringify(result, null, 2) ?? 'undefined')
+		typeof result === 'string'
+			? result
+			: (JSON.stringify(result, null, 2) ?? 'undefined')
 	return {
 		content: [{ type: 'text', text }],
 		structuredContent: { ...base, result },

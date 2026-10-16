@@ -88,7 +88,9 @@ export async function loadPackageManifest(
 			message: `Could not read package.json at ${packageJsonPath}.`,
 			where: packageJsonPath,
 			fix: 'Run `kody dev` from a package directory with a valid package.json.',
-			details: { cause: error instanceof Error ? error.message : String(error) },
+			details: {
+				cause: error instanceof Error ? error.message : String(error),
+			},
 		})
 	}
 	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -120,7 +122,8 @@ export async function loadPackageManifest(
 		root,
 		name: name || `@local/${kodyId}`,
 		kodyId,
-		description: typeof kody.description === 'string' ? kody.description : undefined,
+		description:
+			typeof kody.description === 'string' ? kody.description : undefined,
 		exports: exportsField,
 		app,
 		dev,
@@ -157,10 +160,16 @@ function normalizeExports(exportsField: unknown): Record<string, string> {
 		out['.'] = exportsField
 		return out
 	}
-	if (!exportsField || typeof exportsField !== 'object' || Array.isArray(exportsField)) {
+	if (
+		!exportsField ||
+		typeof exportsField !== 'object' ||
+		Array.isArray(exportsField)
+	) {
 		return out
 	}
-	for (const [key, value] of Object.entries(exportsField as Record<string, unknown>)) {
+	for (const [key, value] of Object.entries(
+		exportsField as Record<string, unknown>,
+	)) {
 		if (typeof value === 'string') {
 			out[key] = value
 			continue
@@ -195,7 +204,8 @@ function parseApp(raw: unknown, where: string): PackageAppManifest | undefined {
 			if (!record.client.trim()) {
 				throw new StructuredCliError({
 					code: 'package_manifest_invalid',
-					message: 'kody.app.client must be a non-empty string path or { entry, externals? }.',
+					message:
+						'kody.app.client must be a non-empty string path or { entry, externals? }.',
 					where,
 					fix: 'Set `"client": "./app/client.ts"` or `"client": { "entry": "./app/client.ts" }`.',
 				})
@@ -203,7 +213,11 @@ function parseApp(raw: unknown, where: string): PackageAppManifest | undefined {
 			client = record.client
 		} else {
 			const clientRecord = asRecord(record.client)
-			if (!clientRecord || typeof clientRecord.entry !== 'string' || !clientRecord.entry.trim()) {
+			if (
+				!clientRecord ||
+				typeof clientRecord.entry !== 'string' ||
+				!clientRecord.entry.trim()
+			) {
 				throw new StructuredCliError({
 					code: 'package_manifest_invalid',
 					message: 'kody.app.client.entry must be a non-empty string path.',
@@ -213,7 +227,9 @@ function parseApp(raw: unknown, where: string): PackageAppManifest | undefined {
 			}
 			client = clientRecord.entry
 			clientExternals = Array.isArray(clientRecord.externals)
-				? clientRecord.externals.filter((item): item is string => typeof item === 'string')
+				? clientRecord.externals.filter(
+						(item): item is string => typeof item === 'string',
+					)
 				: undefined
 		}
 	}
@@ -236,7 +252,10 @@ function parseDev(raw: unknown, where: string): PackageDevManifest {
 			fix: 'Use `"kody": { "dev": { "prebuild": "node scripts/build-assets.mjs", "ignore": ["public/generated"] } }`.',
 		})
 	}
-	if (record.prebuild !== undefined && (typeof record.prebuild !== 'string' || !record.prebuild.trim())) {
+	if (
+		record.prebuild !== undefined &&
+		(typeof record.prebuild !== 'string' || !record.prebuild.trim())
+	) {
 		throw new StructuredCliError({
 			code: 'package_manifest_invalid',
 			message: 'kody.dev.prebuild must be a non-empty shell command string.',
@@ -245,21 +264,28 @@ function parseDev(raw: unknown, where: string): PackageDevManifest {
 	}
 	if (
 		record.ignore !== undefined &&
-		(!Array.isArray(record.ignore) || !record.ignore.every((item) => typeof item === 'string'))
+		(!Array.isArray(record.ignore) ||
+			!record.ignore.every((item) => typeof item === 'string'))
 	) {
 		throw new StructuredCliError({
 			code: 'package_manifest_invalid',
-			message: 'kody.dev.ignore must be an array of root-relative path prefixes.',
+			message:
+				'kody.dev.ignore must be an array of root-relative path prefixes.',
 			where,
 		})
 	}
 	return {
-		...(typeof record.prebuild === 'string' ? { prebuild: record.prebuild.trim() } : {}),
+		...(typeof record.prebuild === 'string'
+			? { prebuild: record.prebuild.trim() }
+			: {}),
 		ignore: (record.ignore as Array<string> | undefined) ?? [],
 	}
 }
 
-function parseJobs(raw: unknown, where: string): Record<string, PackageJobManifest> {
+function parseJobs(
+	raw: unknown,
+	where: string,
+): Record<string, PackageJobManifest> {
 	if (raw === undefined || raw === null) return {}
 	const record = asRecord(raw)
 	if (!record) {
@@ -330,13 +356,20 @@ function parseJobSchedule(
 	})
 }
 
-function parseWebhooks(raw: unknown, where: string): Record<string, PackageWebhookManifest> {
+function parseWebhooks(
+	raw: unknown,
+	where: string,
+): Record<string, PackageWebhookManifest> {
 	if (raw === undefined || raw === null) return {}
 	if (Array.isArray(raw)) {
 		const out: Record<string, PackageWebhookManifest> = {}
 		for (const item of raw) {
 			const webhook = asRecord(item)
-			if (!webhook || typeof webhook.name !== 'string' || typeof webhook.export !== 'string') {
+			if (
+				!webhook ||
+				typeof webhook.name !== 'string' ||
+				typeof webhook.export !== 'string'
+			) {
 				throw new StructuredCliError({
 					code: 'package_manifest_invalid',
 					message: 'Each kody.webhooks[] entry needs name and export.',
@@ -345,7 +378,10 @@ function parseWebhooks(raw: unknown, where: string): Record<string, PackageWebho
 			}
 			out[webhook.name] = {
 				export: webhook.export,
-				description: typeof webhook.description === 'string' ? webhook.description : undefined,
+				description:
+					typeof webhook.description === 'string'
+						? webhook.description
+						: undefined,
 				inputMode: webhook.inputMode === 'params' ? 'params' : 'request',
 			}
 		}
@@ -371,7 +407,10 @@ function parseWebhooks(raw: unknown, where: string): Record<string, PackageWebho
 		}
 		out[name] = {
 			export: webhook.export,
-			description: typeof webhook.description === 'string' ? webhook.description : undefined,
+			description:
+				typeof webhook.description === 'string'
+					? webhook.description
+					: undefined,
 			inputMode: webhook.inputMode === 'params' ? 'params' : 'request',
 		}
 	}
@@ -403,7 +442,8 @@ function parseSubscriptions(
 		}
 		out[topic] = {
 			handler: sub.handler,
-			description: typeof sub.description === 'string' ? sub.description : undefined,
+			description:
+				typeof sub.description === 'string' ? sub.description : undefined,
 			filters: sub.filters,
 		}
 	}
@@ -411,12 +451,16 @@ function parseSubscriptions(
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		return null
 	return value as Record<string, unknown>
 }
 
 /** Resolve a package-relative path against the package root. */
-export function resolvePackagePath(manifest: KodyPackageManifest, relativePath: string): string {
+export function resolvePackagePath(
+	manifest: KodyPackageManifest,
+	relativePath: string,
+): string {
 	return resolve(manifest.root, relativePath)
 }
 
@@ -443,7 +487,10 @@ export function resolveExportModulePath(
 	}
 	// Bare path into the package (webhooks / jobs may pass relative files).
 	// --invoke uses exportsOnly so unknown keys list known exports instead of ENOENT.
-	if (!options.exportsOnly && (trimmed.startsWith('.') || trimmed.startsWith('/'))) {
+	if (
+		!options.exportsOnly &&
+		(trimmed.startsWith('.') || trimmed.startsWith('/'))
+	) {
 		return resolvePackagePath(manifest, trimmed)
 	}
 	throw new StructuredCliError({

@@ -11,14 +11,10 @@
  * hosts fail closed with `unmocked_request`.
  */
 
-import type { RequestHandler } from 'msw'
+import { type RequestHandler } from 'msw'
 import { StructuredCliError } from '../structured-error.js'
-import type { KodyTarget } from '../target.js'
-import {
-	type EnsureMswInput,
-	importMsw,
-	mswPackageSpec,
-} from './ensure-msw.js'
+import { type KodyTarget } from '../target.js'
+import { type EnsureMswInput, importMsw, mswPackageSpec } from './ensure-msw.js'
 import { loadPackageMocks } from './load-package-mocks.js'
 
 export type MockGatewayFetchRequest = {
@@ -46,7 +42,10 @@ export type MockFetchGateway = {
 	handlers: ReadonlyArray<RequestHandler>
 	passthroughHosts: ReadonlyArray<string>
 	allowPrivateNetwork: boolean
-	handle: (args: unknown, signal?: AbortSignal) => Promise<MockGatewayFetchResult>
+	handle: (
+		args: unknown,
+		signal?: AbortSignal,
+	) => Promise<MockGatewayFetchResult>
 	/** OAuth / createAuthenticatedFetch hop — never returns placeholder stubs. */
 	handleAuthenticatedFetch: (
 		args: unknown,
@@ -200,17 +199,22 @@ function readGatewayRequest(args: unknown): MockGatewayFetchRequest {
 			? (args as Record<string, unknown>)
 			: {}
 	const nested =
-		record.request && typeof record.request === 'object' && !Array.isArray(record.request)
+		record.request &&
+		typeof record.request === 'object' &&
+		!Array.isArray(record.request)
 			? (record.request as Record<string, unknown>)
 			: record
 	return {
 		url: typeof nested.url === 'string' ? nested.url : undefined,
 		method: typeof nested.method === 'string' ? nested.method : undefined,
 		headers:
-			nested.headers && typeof nested.headers === 'object' && !Array.isArray(nested.headers)
+			nested.headers &&
+			typeof nested.headers === 'object' &&
+			!Array.isArray(nested.headers)
 				? (nested.headers as Record<string, string>)
 				: undefined,
-		bodyBase64: typeof nested.bodyBase64 === 'string' ? nested.bodyBase64 : undefined,
+		bodyBase64:
+			typeof nested.bodyBase64 === 'string' ? nested.bodyBase64 : undefined,
 	}
 }
 
@@ -220,17 +224,22 @@ function readAuthenticatedFetchRequest(args: unknown): MockGatewayFetchRequest {
 			? (args as Record<string, unknown>)
 			: {}
 	const nested =
-		record.request && typeof record.request === 'object' && !Array.isArray(record.request)
+		record.request &&
+		typeof record.request === 'object' &&
+		!Array.isArray(record.request)
 			? (record.request as Record<string, unknown>)
 			: record
 	return {
 		url: typeof nested.url === 'string' ? nested.url : undefined,
 		method: typeof nested.method === 'string' ? nested.method : undefined,
 		headers:
-			nested.headers && typeof nested.headers === 'object' && !Array.isArray(nested.headers)
+			nested.headers &&
+			typeof nested.headers === 'object' &&
+			!Array.isArray(nested.headers)
 				? (nested.headers as Record<string, string>)
 				: undefined,
-		bodyBase64: typeof nested.bodyBase64 === 'string' ? nested.bodyBase64 : undefined,
+		bodyBase64:
+			typeof nested.bodyBase64 === 'string' ? nested.bodyBase64 : undefined,
 	}
 }
 
@@ -251,7 +260,10 @@ export function hostMatchesPassthrough(
 }
 
 /** Refuse private/local hosts unless `--allow-private-network` (clear error). */
-export function assertOutboundAllowed(url: URL, allowPrivateNetwork: boolean): void {
+export function assertOutboundAllowed(
+	url: URL,
+	allowPrivateNetwork: boolean,
+): void {
 	if (allowPrivateNetwork) return
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
 		throw new StructuredCliError({
@@ -281,8 +293,8 @@ export function isPrivateOrLocalHost(hostname: string): boolean {
 		host === '::1' ||
 		host === '[::1]' ||
 		host.endsWith('.local') ||
-		/^10\./.test(host) ||
-		/^192\.168\./.test(host) ||
+		host.startsWith('10.') ||
+		host.startsWith('192.168.') ||
 		/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
 	)
 }
@@ -314,7 +326,9 @@ async function realNetworkFetch(input: {
 	return await serializeResponse(response)
 }
 
-async function serializeResponse(response: Response): Promise<MockGatewayFetchResult> {
+async function serializeResponse(
+	response: Response,
+): Promise<MockGatewayFetchResult> {
 	const bytes = new Uint8Array(await response.arrayBuffer())
 	return {
 		status: response.status,
@@ -324,7 +338,10 @@ async function serializeResponse(response: Response): Promise<MockGatewayFetchRe
 	}
 }
 
-export function unmockedRequestError(method: string, url: string): StructuredCliError {
+export function unmockedRequestError(
+	method: string,
+	url: string,
+): StructuredCliError {
 	const stub = buildHandlerStub(method, url)
 	const handlerLine = buildHandlerLine(method, url)
 	return new StructuredCliError({
@@ -337,7 +354,13 @@ export function unmockedRequestError(method: string, url: string): StructuredCli
 			`or pass --passthrough ${safeHost(url)} for real network without secrets.\n\n` +
 			`Ready-to-paste .kody/mocks.ts:\n\n${stub}\n\n` +
 			`Or append this handler to an existing handlers array:\n\n${handlerLine}`,
-		details: { method, url, handlerStub: stub, handlerLine, mocksPath: '.kody/mocks.ts' },
+		details: {
+			method,
+			url,
+			handlerStub: stub,
+			handlerLine,
+			mocksPath: '.kody/mocks.ts',
+		},
 	})
 }
 
@@ -366,7 +389,9 @@ export function buildHandlerStub(method: string, url: string): string {
 
 function httpMethodForStub(method: string): string {
 	const verb = method.toLowerCase()
-	return ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(verb)
+	return ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(
+		verb,
+	)
 		? verb
 		: 'all'
 }
@@ -392,7 +417,10 @@ export function tryHandleMockGatewayFetchCall(input: {
 }): Promise<MockGatewayFetchResult> | null {
 	if (!input.gateway) return null
 	const pathKey = input.path.join('.')
-	if (pathKey === 'kody.gatewayFetch' || pathKey === 'kody.gatewayFetchStream') {
+	if (
+		pathKey === 'kody.gatewayFetch' ||
+		pathKey === 'kody.gatewayFetchStream'
+	) {
 		return input.gateway.handle(input.args[0], input.signal)
 	}
 	if (pathKey === 'kody.authenticatedFetch') {

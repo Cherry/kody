@@ -7,7 +7,9 @@ const mcpUrl = 'https://kody.codes/mcp'
 test('mergeHostDocument writes leftover-host remote entries and keeps siblings', () => {
 	const insiders = mergeHostDocument({
 		id: 'vscode-insiders',
-		existing: JSON.stringify({ servers: { other: { url: 'https://example.test' } } }),
+		existing: JSON.stringify({
+			servers: { other: { url: 'https://example.test' } },
+		}),
 		mcpUrl,
 	})
 	assert.equal(insiders.changed, true)
@@ -18,7 +20,11 @@ test('mergeHostDocument writes leftover-host remote entries and keeps siblings',
 		},
 	})
 
-	const visualStudio = mergeHostDocument({ id: 'visual-studio', existing: null, mcpUrl })
+	const visualStudio = mergeHostDocument({
+		id: 'visual-studio',
+		existing: null,
+		mcpUrl,
+	})
 	assert.deepEqual(JSON.parse(visualStudio.body), {
 		servers: { kody: { type: 'http', url: mcpUrl } },
 	})
@@ -28,7 +34,11 @@ test('mergeHostDocument writes leftover-host remote entries and keeps siblings',
 		mcpServers: { kody: { type: 'http', url: mcpUrl } },
 	})
 
-	const qwen = mergeHostDocument({ id: 'qwen-code', existing: '{"theme":"dark"}', mcpUrl })
+	const qwen = mergeHostDocument({
+		id: 'qwen-code',
+		existing: '{"theme":"dark"}',
+		mcpUrl,
+	})
 	assert.deepEqual(JSON.parse(qwen.body), {
 		theme: 'dark',
 		mcpServers: { kody: { httpUrl: mcpUrl } },
@@ -36,7 +46,15 @@ test('mergeHostDocument writes leftover-host remote entries and keeps siblings',
 })
 
 test('mergeHostDocument is idempotent when the URL already matches', () => {
-	const first = mergeHostDocument({ id: 'vscode-insiders', existing: null, mcpUrl })
-	const second = mergeHostDocument({ id: 'vscode-insiders', existing: first.body, mcpUrl })
+	const first = mergeHostDocument({
+		id: 'vscode-insiders',
+		existing: null,
+		mcpUrl,
+	})
+	const second = mergeHostDocument({
+		id: 'vscode-insiders',
+		existing: first.body,
+		mcpUrl,
+	})
 	assert.equal(second.changed, false)
 })

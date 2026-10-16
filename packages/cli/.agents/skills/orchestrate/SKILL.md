@@ -4,8 +4,8 @@ description: >
   Orchestrate sub-agents for large tasks inside a single environment: plan,
   delegate coding to cheap/fast models, parallelize the critical path, keep
   reviews lean, and close every loop. Use when acting as an orchestrator or
-  writing a kickoff for one. Prefer implement when fan-out does not clearly
-  pay. For multi-environment fleets, use conduct instead.
+  writing a kickoff for one. Prefer implement when fan-out does not clearly pay.
+  For multi-environment fleets, use conduct instead.
 ---
 
 # Orchestrate
@@ -25,7 +25,8 @@ optimized for cheap/fast execution.
 - **No orchestration theater.** Ban review → recheck → final → CI-watch chains
   per slice. **One** hard-to-reverse review before merge.
 - **One CI wait path** — parent `gh pr checks` _or_ a ci-watcher, not both.
-- **Targeted tests while iterating;** `npm run validate` before ready-for-review.
+- **Targeted tests while iterating;** `npm run validate` before
+  ready-for-review.
 - Close loops yourself — don't leave humans as the relay.
 
 ## Role

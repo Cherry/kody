@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
@@ -18,7 +18,10 @@ import {
 	listenDevServer,
 	parseDevPort,
 } from '../src/dev/dev-port.js'
-import { devRegistryPath, writeDevRegistration } from '../src/dev/dev-registry.js'
+import {
+	devRegistryPath,
+	writeDevRegistration,
+} from '../src/dev/dev-registry.js'
 import { PrebuildError, runPrebuild } from '../src/dev/prebuild.js'
 import { startPackageAppDev } from '../src/package-app-dev.js'
 import { loadPackageManifest } from '../src/package-manifest.js'
@@ -26,7 +29,10 @@ import { StructuredCliError } from '../src/structured-error.js'
 import { ensureWorkerdBinary } from '../src/workerd-binary.js'
 import { appEntry, waitFor, withDevServer } from './dev-server-harness.js'
 
-const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-package')
+const fixtureRoot = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'fixtures/sample-package',
+)
 
 const clientEntryApp = `import { packageContext } from 'kody:runtime'
 
@@ -40,7 +46,10 @@ export default {
 }
 `
 
-async function editPackageJson(root: string, edit: (kody: Record<string, any>) => void) {
+async function editPackageJson(
+	root: string,
+	edit: (kody: Record<string, any>) => void,
+) {
 	const path = join(root, 'package.json')
 	const pkg = JSON.parse(await readFile(path, 'utf8'))
 	edit(pkg.kody)
@@ -65,7 +74,10 @@ test('defaultDevPort is stable per package and inside the dev range', () => {
 	assert.notEqual(defaultDevPort('slideshow'), port)
 	for (const id of ['a', 'b', 'asteroids', 'slideshow', 'x'.repeat(100)]) {
 		const value = defaultDevPort(id)
-		assert.ok(value >= devPortRange.min && value <= devPortRange.max, `${id} → ${value}`)
+		assert.ok(
+			value >= devPortRange.min && value <= devPortRange.max,
+			`${id} → ${value}`,
+		)
 	}
 })
 
@@ -92,11 +104,18 @@ test('listenDevServer walks to the next free port unless the port is explicit', 
 		assert.ok(bound > taken && bound <= taken + 20)
 
 		await assert.rejects(
-			listenDevServer(exact, { host: '127.0.0.1', port: taken, explicit: true }),
+			listenDevServer(exact, {
+				host: '127.0.0.1',
+				port: taken,
+				explicit: true,
+			}),
 			(error: unknown) => {
 				assert.ok(error instanceof StructuredCliError)
 				assert.equal(error.code, 'dev_port_in_use')
-				assert.match(error.message, new RegExp(`Port ${taken} on 127\\.0\\.0\\.1 is already in use`))
+				assert.match(
+					error.message,
+					new RegExp(`Port ${taken} on 127\\.0\\.0\\.1 is already in use`),
+				)
 				assert.match(error.message, /lsof -nP -iTCP:\d+ -sTCP:LISTEN/)
 				return true
 			},
@@ -114,12 +133,18 @@ test('dev asset paths are decoded and never escape the assets dir', () => {
 	assert.equal(parseDevAssetPath('/_assets/'), null)
 	assert.equal(parseDevAssetPath('/other'), null)
 	assert.equal(parseDevAssetPath('/_assets/%E0%A4%A'), null)
-	assert.equal(resolveDevAssetFile('/pkg/public', 'css/app.css'), '/pkg/public/css/app.css')
+	assert.equal(
+		resolveDevAssetFile('/pkg/public', 'css/app.css'),
+		'/pkg/public/css/app.css',
+	)
 	assert.equal(resolveDevAssetFile('/pkg/public', '../package.json'), null)
 	assert.equal(resolveDevAssetFile('/pkg/public', '/etc/passwd'), null)
 	assert.equal(resolveDevAssetFile('/pkg/public', 'a\0b'), null)
 	assert.equal(inferDevAssetContentType('x/app.CSS'), 'text/css; charset=utf-8')
-	assert.equal(inferDevAssetContentType('sw.js'), 'text/javascript; charset=utf-8')
+	assert.equal(
+		inferDevAssetContentType('sw.js'),
+		'text/javascript; charset=utf-8',
+	)
 	assert.equal(inferDevAssetContentType('LICENSE'), 'application/octet-stream')
 })
 
@@ -144,22 +169,37 @@ test('loadPackageManifest reads kody.dev and the object form of kody.app.client'
 		const manifest = await loadPackageManifest(root)
 		assert.equal(manifest.app?.client, './app/client.ts')
 		assert.deepEqual(manifest.app?.clientExternals, ['preact'])
-		assert.deepEqual(manifest.dev, { prebuild: 'node gen.mjs', ignore: ['public/generated'] })
-
-		await writeFile(
-			join(root, 'package.json'),
-			JSON.stringify({ name: 'm', kody: { id: 'm', dev: { ignore: 'public' } } }),
-		)
-		await assert.rejects(loadPackageManifest(root), /kody\.dev\.ignore must be an array/)
+		assert.deepEqual(manifest.dev, {
+			prebuild: 'node gen.mjs',
+			ignore: ['public/generated'],
+		})
 
 		await writeFile(
 			join(root, 'package.json'),
 			JSON.stringify({
 				name: 'm',
-				kody: { id: 'm', app: { entry: './app/entry.ts', client: { file: './app/client.ts' } } },
+				kody: { id: 'm', dev: { ignore: 'public' } },
 			}),
 		)
-		await assert.rejects(loadPackageManifest(root), /kody\.app\.client\.entry must be a non-empty string/)
+		await assert.rejects(
+			loadPackageManifest(root),
+			/kody\.dev\.ignore must be an array/,
+		)
+
+		await writeFile(
+			join(root, 'package.json'),
+			JSON.stringify({
+				name: 'm',
+				kody: {
+					id: 'm',
+					app: { entry: './app/entry.ts', client: { file: './app/client.ts' } },
+				},
+			}),
+		)
+		await assert.rejects(
+			loadPackageManifest(root),
+			/kody\.app\.client\.entry must be a non-empty string/,
+		)
 	} finally {
 		await rm(root, { recursive: true, force: true })
 	}
@@ -175,17 +215,25 @@ test('kody dev serves kody.app.client, __version.json, and the assets dir like t
 			assert.equal(context.assetBasePath, '/_assets')
 			assert.match(
 				context.clientModuleUrl,
-				new RegExp(`^${server.hostedUrl}/_assets/client\\.[A-Za-z0-9_-]{16}\\.js$`),
+				new RegExp(
+					`^${server.hostedUrl}/_assets/client\\.[A-Za-z0-9_-]{16}\\.js$`,
+				),
 			)
 			const clientPath = new URL(context.clientModuleUrl).pathname
 			const client = await server.fetchPath(clientPath)
 			assert.equal(client.status, 200)
 			assert.match(client.headers['content-type'] ?? '', /text\/javascript/)
 			assert.match(client.body, /client-v1/)
-			assert.match(client.body, /from "preact"/, 'declared externals stay bare imports')
+			assert.match(
+				client.body,
+				/from "preact"/,
+				'declared externals stay bare imports',
+			)
 			assert.match(client.body, /sourceMappingURL=data:application\/json/)
 
-			const version = JSON.parse((await server.fetchPath('/_assets/__version.json')).body)
+			const version = JSON.parse(
+				(await server.fetchPath('/_assets/__version.json')).body,
+			)
 			assert.deepEqual(version, {
 				clientModuleUrl: context.clientModuleUrl,
 				assetBasePath: '/_assets',
@@ -198,20 +246,27 @@ test('kody dev serves kody.app.client, __version.json, and the assets dir like t
 			assert.equal(css.headers['cache-control'], 'no-store')
 			assert.equal(css.body, 'body { color: red }\n')
 			assert.equal((await server.fetchPath('/_assets/missing.css')).status, 404)
-			assert.equal((await server.fetchPath('/_assets/..%2Fpackage.json')).status, 404)
+			assert.equal(
+				(await server.fetchPath('/_assets/..%2Fpackage.json')).status,
+				404,
+			)
 
 			await writeFile(join(root, 'app/client.ts'), clientSource('client-v2'))
 			const nextUrl = await waitFor(async () => {
 				const body = JSON.parse((await server.fetchPath('/')).body) as {
 					clientModuleUrl: string
 				}
-				return body.clientModuleUrl !== context.clientModuleUrl ? body.clientModuleUrl : undefined
+				return body.clientModuleUrl !== context.clientModuleUrl
+					? body.clientModuleUrl
+					: undefined
 			}, 'client hash changes after editing the client entry')
 			const next = await server.fetchPath(new URL(nextUrl).pathname)
 			assert.match(next.body, /client-v2/)
 			assert.equal((await server.fetchPath(clientPath)).status, 404)
 
-			const reloadsBefore = events.filter((event) => event.type === 'rebuild_ok').length
+			const reloadsBefore = events.filter(
+				(event) => event.type === 'rebuild_ok',
+			).length
 			await writeFile(join(root, 'public/app.css'), 'body { color: blue }\n')
 			await waitFor(async () => {
 				const response = await server.fetchPath('/_assets/app.css')
@@ -219,7 +274,8 @@ test('kody dev serves kody.app.client, __version.json, and the assets dir like t
 			}, 'asset edits are served immediately')
 			await waitFor(
 				async () =>
-					events.filter((event) => event.type === 'rebuild_ok').length > reloadsBefore
+					events.filter((event) => event.type === 'rebuild_ok').length >
+					reloadsBefore
 						? true
 						: undefined,
 				'an asset edit runs a (no-op) rebuild so live reload fires',
@@ -260,22 +316,36 @@ test('kody.dev.prebuild runs before every build, without retriggering itself', a
 			}, 'rebuild after an edit')
 			assert.match(next.body, /v1 gen-2/)
 			await new Promise((resolve) => setTimeout(resolve, 400))
-			assert.equal((await readFile(join(root, 'count.txt'), 'utf8')).trim(), '2')
+			assert.equal(
+				(await readFile(join(root, 'count.txt'), 'utf8')).trim(),
+				'2',
+			)
 			assert.ok(
 				events.some(
-					(event) => event.type === 'log' && event.source === 'prebuild' && /generated/.test(event.message),
+					(event) =>
+						event.type === 'log' &&
+						event.source === 'prebuild' &&
+						/generated/.test(event.message),
 				),
 			)
 
-			await writeFile(join(root, 'gen.sh'), 'echo "boom from prebuild" >&2\nexit 3\n')
+			await writeFile(
+				join(root, 'gen.sh'),
+				'echo "boom from prebuild" >&2\nexit 3\n',
+			)
 			await writeMessage(`export const message = 'v2'\n`)
 			const failed = await waitFor(async () => {
 				const response = await server.fetchPath('/')
 				return response.status === 500 ? response : undefined
 			}, 'prebuild failure becomes a build error')
-			assert.match(failed.body, /kody\.dev\.prebuild failed \(exit 3\): sh gen\.sh/)
+			assert.match(
+				failed.body,
+				/kody\.dev\.prebuild failed \(exit 3\): sh gen\.sh/,
+			)
 			assert.match(failed.body, /boom from prebuild/)
-			const rebuildStartsAfterFailure = events.filter((event) => event.type === 'rebuild_start').length
+			const rebuildStartsAfterFailure = events.filter(
+				(event) => event.type === 'rebuild_start',
+			).length
 			// Longer than failedPrebuildAbsorbMs so late chokidar/poll echoes are
 			// covered on slow CI (lts/* runners have shown +1 rebuild_start at ~1s).
 			await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -314,7 +384,10 @@ test('kody.dev.prebuild runs before every build, without retriggering itself', a
 test('runPrebuild keeps a final incomplete stderr line and aborts on signal', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'kody-prebuild-unit-'))
 	try {
-		await writeFile(join(root, 'partial.sh'), 'printf "no-newline-error" >&2\nexit 2\n')
+		await writeFile(
+			join(root, 'partial.sh'),
+			'printf "no-newline-error" >&2\nexit 2\n',
+		)
 		await assert.rejects(
 			runPrebuild({ command: 'sh partial.sh', cwd: root }),
 			(error: unknown) => {
@@ -326,7 +399,11 @@ test('runPrebuild keeps a final incomplete stderr line and aborts on signal', as
 
 		await writeFile(join(root, 'slow.sh'), 'sleep 30\n')
 		const abort = new AbortController()
-		const pending = runPrebuild({ command: 'sh slow.sh', cwd: root, signal: abort.signal })
+		const pending = runPrebuild({
+			command: 'sh slow.sh',
+			cwd: root,
+			signal: abort.signal,
+		})
 		abort.abort()
 		await assert.rejects(pending, /kody\.dev\.prebuild aborted/)
 	} finally {
@@ -355,7 +432,12 @@ test('kody dev refuses to start a second server for the same package unless --po
 			(error: unknown) => {
 				assert.ok(error instanceof StructuredCliError)
 				assert.equal(error.code, 'dev_already_running')
-				assert.match(error.message, new RegExp(`already running .* at ${server.hostedUrl}/ \\(pid ${process.pid}\\)`))
+				assert.match(
+					error.message,
+					new RegExp(
+						`already running .* at ${server.hostedUrl}/ \\(pid ${process.pid}\\)`,
+					),
+				)
 				assert.match(error.message, /kody dev fetch/)
 				return true
 			},
@@ -400,7 +482,10 @@ test('onListening failure closes the bound HTTP server', async () => {
 	try {
 		await cp(fixtureRoot, root, { recursive: true })
 		await writeFile(join(root, 'app/entry.ts'), appEntry)
-		await writeFile(join(root, 'app/message.ts'), `export const message = 'v0'\n`)
+		await writeFile(
+			join(root, 'app/message.ts'),
+			`export const message = 'v0'\n`,
+		)
 		const auth = await resolveDevAuth({
 			target: 'mock',
 			token: 'mock',

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveDevAuth } from '../src/dev-command.js'
-import type { DevEvent } from '../src/dev/dev-events.js'
+import { type DevEvent } from '../src/dev/dev-events.js'
 import {
 	startPackageAppDev,
 	type PackageAppDevOptions,
@@ -12,7 +12,10 @@ import {
 import { loadPackageManifest } from '../src/package-manifest.js'
 import { ensureWorkerdBinary } from '../src/workerd-binary.js'
 
-const fixtureRoot = join(dirname(fileURLToPath(import.meta.url)), 'fixtures/sample-package')
+const fixtureRoot = join(
+	dirname(fileURLToPath(import.meta.url)),
+	'fixtures/sample-package',
+)
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export const appEntry = `import { message } from './message.ts'
@@ -101,4 +104,3 @@ export async function waitFor<T>(
 	}
 	throw new Error(`Timed out waiting for ${label}`)
 }
-

@@ -21,6 +21,12 @@ export async function registerSearchTool(agent: McpRegistrationAgent) {
 			annotations: searchTool.annotations,
 			...(icons ? { icons } : {}),
 		},
-		async (args: SearchToolArgs) => runSearchTool({ agent, args }),
+		async (args: SearchToolArgs) =>
+			runSearchTool({
+				env: agent.getEnv(),
+				callerContext: agent.getCallerContext(),
+				args,
+				mcpAgent: agent,
+			}),
 	)
 }

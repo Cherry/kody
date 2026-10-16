@@ -57,7 +57,9 @@ export default async function main(params) {
 }
 
 export function resolveExecuteInvokeCode(invoke: string): string {
-	return buildExecuteInvokePassthroughSource(parseExecuteInvokeSpecifier(invoke))
+	return buildExecuteInvokePassthroughSource(
+		parseExecuteInvokeSpecifier(invoke),
+	)
 }
 
 /**

@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs'
+import {
+	chmodSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	statSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -56,7 +62,10 @@ function tempFilePath(): string {
 }
 
 test('accountForMcpUrl is origin-scoped', () => {
-	assert.equal(accountForMcpUrl('https://kody.codes/mcp'), 'cli:https://kody.codes')
+	assert.equal(
+		accountForMcpUrl('https://kody.codes/mcp'),
+		'cli:https://kody.codes',
+	)
 	assert.equal(
 		accountForMcpUrl('https://preview.kody.codes/mcp'),
 		'cli:https://preview.kody.codes',
@@ -185,7 +194,9 @@ test('loadCredentials prefers keyring credentials over a leftover file', () => {
 	)
 	const loaded = loadCredentials(sample.mcpUrl, undefined, {
 		createKeyring: () =>
-			memoryKeyring(JSON.stringify({ ...sample, accessToken: 'keyring-access' })),
+			memoryKeyring(
+				JSON.stringify({ ...sample, accessToken: 'keyring-access' }),
+			),
 		fileStorePath: () => path,
 	})
 	assert.equal(loaded?.accessToken, 'keyring-access')

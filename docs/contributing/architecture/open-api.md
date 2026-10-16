@@ -87,9 +87,17 @@ document stays unique; HTTP still dispatches both paths to the capability. Put
 the preferred client path on `path` (for example `repoGetGitRemote`'s body-only
 `/v1/repos/git-remote`, with `/v1/repos/{repo_id}/git-remote` as an alias).
 
-Never in the Open API: `execute`, secret plaintext, the inbound webhook receive
-path, package-app HTTP/WebSocket/realtime traffic, admin capabilities, and
-runtime-only capabilities (values, package-app fetch, synthetic dispatch).
+`POST /v1/execute` runs a module in Kody's cloud sandbox and returns the MCP
+execute envelope (`content`, `structuredContent`, `isError`) with HTTP 200 when
+the module fails. It accepts `kody_at_…` with `org:execute` only.
+`POST /v1/search/tool` is the MCP `search` tool over HTTP (`search:read`),
+including `entity` detail. `GET /v1/search` stays the search capability.
+
+Never in the Open API: secret plaintext, the inbound webhook receive path,
+package-app HTTP/WebSocket/realtime traffic, admin capabilities, and
+runtime-only capabilities (values, package-app fetch, synthetic dispatch). The
+`execute` capability stays off the MCP `api` tool; hosted execute is the native
+`execute` operation.
 
 Plain API reads and token mints need no execute entitlement and never start a
 Dynamic Worker. Writes hold the account write lease, like MCP tool calls.
@@ -101,13 +109,17 @@ the Open API. They are a separate credential class from MCP OAuth
 ([ADR 0053](../decisions/0053-scoped-api-tokens-are-not-mcp-oauth-scopes.md)).
 Kody stores only a SHA-256 hash; the value is returned once, on mint or rotate.
 
-On **local-execute HTTP only** (CapabilityProxy,
+On **local-execute HTTP** (CapabilityProxy,
 `POST /v1/capability-proxy/gateway-fetch`, and
-`POST /v1/local-execute/package-graph`), a valid CLI MCP OAuth access token from
-`kody login` (official CLI CIMD client id) is also accepted as Bearer with the
-full MCP grant, without API-token scope checks
-([ADR 0055](../decisions/0055-cli-mcp-oauth-local-execute-http.md)). Other `/v1`
-operations reject non-`kody_at_` bearers with `401 Invalid API token`.
+`POST /v1/local-execute/package-graph`) and on `POST /v1/tokens/device`, a valid
+CLI MCP OAuth access token from `kody login` (official CLI CIMD client id) is
+accepted as Bearer
+([ADR 0055](../decisions/0055-cli-mcp-oauth-local-execute-http.md),
+[ADR 0076](../decisions/0076-cli-login-device-token.md)).
+`POST /v1/tokens/device` exchanges that OAuth access token for a user-owned
+`kody_at_…` device token. Other `/v1` operations, including `POST /v1/execute`,
+reject non-`kody_at_` bearers with `401 Invalid API token`. Older CLIs keep
+using MCP and the local-execute OAuth routes.
 
 - Scopes are org permissions (`resource-type:action`: `org:read`, `org:execute`,
   `package:read`, `search:read`, …). Vocabulary:

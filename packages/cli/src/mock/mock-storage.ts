@@ -53,7 +53,9 @@ export function mockSessionRoot(
 	return join(userCacheDir(env), 'mock-sessions', sessionId)
 }
 
-export function defaultMockSessionId(env: NodeJS.ProcessEnv = process.env): string {
+export function defaultMockSessionId(
+	env: NodeJS.ProcessEnv = process.env,
+): string {
 	return env.KODY_MOCK_SESSION_ID?.trim() || 'default'
 }
 
@@ -112,7 +114,8 @@ export async function loadMockSession(input: {
 				type: 'guide',
 				id: 'package_apps',
 				title: 'Package apps',
-				description: 'Hosted Worker apps on *.kody.run; use kody dev for local.',
+				description:
+					'Hosted Worker apps on *.kody.run; use kody dev for local.',
 			},
 		],
 	}
@@ -127,16 +130,24 @@ export async function persistMockSession(
 	state.updatedAt = new Date().toISOString()
 	const root = mockSessionRoot(state.sessionId, env)
 	await mkdir(root, { recursive: true })
-	await writeFile(join(root, mockStateFile), `${JSON.stringify(state, null, 2)}\n`)
+	await writeFile(
+		join(root, mockStateFile),
+		`${JSON.stringify(state, null, 2)}\n`,
+	)
 }
 
 /** Backfill hosts/scope on older mock session files so credential() stays iterable. */
-function normalizeMockSessionCredentials(state: MockSessionState): MockSessionState {
+function normalizeMockSessionCredentials(
+	state: MockSessionState,
+): MockSessionState {
 	const credentials: MockSessionState['credentials'] = {}
 	for (const [key, cred] of Object.entries(state.credentials ?? {})) {
 		credentials[key] = {
 			...cred,
-			hosts: Array.isArray(cred.hosts) && cred.hosts.length > 0 ? cred.hosts : ['example.com'],
+			hosts:
+				Array.isArray(cred.hosts) && cred.hosts.length > 0
+					? cred.hosts
+					: ['example.com'],
 			scope: cred.scope === 'org' ? 'org' : 'personal',
 		}
 	}
@@ -245,15 +256,20 @@ export function packageStorageSql(
 ): { rows: Array<Record<string, unknown>>; changes?: number } {
 	const db = openPackageSqlDb(state, packageId, env)
 	const stmt = db.prepare(query)
-	const params: Array<null | number | bigint | string | Uint8Array> = bindings.map((value) => {
-		if (value === null) return null
-		if (typeof value === 'string' || typeof value === 'number' || typeof value === 'bigint') {
-			return value
-		}
-		if (typeof value === 'boolean') return value ? 1 : 0
-		if (value instanceof Uint8Array) return value
-		return String(value)
-	})
+	const params: Array<null | number | bigint | string | Uint8Array> =
+		bindings.map((value) => {
+			if (value === null) return null
+			if (
+				typeof value === 'string' ||
+				typeof value === 'number' ||
+				typeof value === 'bigint'
+			) {
+				return value
+			}
+			if (typeof value === 'boolean') return value ? 1 : 0
+			if (value instanceof Uint8Array) return value
+			return String(value)
+		})
 	const trimmed = query.trimStart().toLowerCase()
 	const isQuery =
 		trimmed.startsWith('select') ||
@@ -265,5 +281,8 @@ export function packageStorageSql(
 		return { rows }
 	}
 	const info = stmt.run(...params) as { changes?: number }
-	return { rows: [], changes: typeof info.changes === 'number' ? info.changes : 0 }
+	return {
+		rows: [],
+		changes: typeof info.changes === 'number' ? info.changes : 0,
+	}
 }

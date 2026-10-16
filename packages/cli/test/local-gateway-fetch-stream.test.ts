@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { type AddressInfo } from 'node:net'
 import { Readable } from 'node:stream'
 import { test } from 'node:test'
 import {
@@ -52,8 +52,14 @@ test('callCapabilityProxyGatewayFetchStream posts metadata headers and streams t
 		})
 		assert.equal(response.status, 201)
 		assert.equal(await response.text(), 'upstream-ok')
-		assert.equal(requestHeaders[gatewayFetchUrlHeaderName.toLowerCase()], 'https://example.com/upload')
-		assert.equal(requestHeaders[gatewayFetchMethodHeaderName.toLowerCase()], 'POST')
+		assert.equal(
+			requestHeaders[gatewayFetchUrlHeaderName.toLowerCase()],
+			'https://example.com/upload',
+		)
+		assert.equal(
+			requestHeaders[gatewayFetchMethodHeaderName.toLowerCase()],
+			'POST',
+		)
 		assert.equal(requestHeaders['content-type'], 'text/plain')
 		assert.equal(
 			requestHeaders[gatewayFetchHeadersHeaderName.toLowerCase()],
@@ -152,7 +158,10 @@ test('mock gateway-fetch null-body statuses do not throw', async () => {
 		handlers: [],
 		passthroughAll: true,
 		fetchFn: (async () =>
-			new Response(null, { status: 204, statusText: 'No Content' })) as typeof fetch,
+			new Response(null, {
+				status: 204,
+				statusText: 'No Content',
+			})) as typeof fetch,
 	})
 	const bridge = await startLocalRuntimeBridge({
 		runSecret: 'secret',
