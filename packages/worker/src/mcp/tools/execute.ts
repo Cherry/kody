@@ -293,921 +293,931 @@ export async function registerExecuteTool(agent: McpRegistrationAgent) {
 			},
 			annotations: executeTool.annotations,
 		},
-		async (
-			{
-				code,
-				invoke,
-				params,
-				responseLimit,
-				conversationId,
-				memoryContext,
-				idempotencyKey,
-				credentials,
-			}: {
-				code?: string
-				invoke?: string
-				params?: Record<string, unknown>
-				responseLimit?: number
-				conversationId?: string
-				memoryContext?: z.infer<typeof memoryContextInputField>
-				idempotencyKey?: string
-				credentials?: CredentialCallMapInput
+		async (args, toolExtra) =>
+			runExecuteToolCall({
+				env: agent.getEnv(),
+				callerContext: agent.getCallerContext(),
+				loopbackExports: agent.getLoopbackExports(),
+				waitUntil: agent.waitUntil?.bind(agent),
+				mcpAgent: agent,
+				args,
+				extra: toolExtra,
+			}),
+	)
+}
+
+export type ExecuteToolCallArgs = {
+	code?: string
+	invoke?: string
+	params?: Record<string, unknown>
+	responseLimit?: number
+	conversationId?: string
+	memoryContext?: z.infer<typeof memoryContextInputField>
+	idempotencyKey?: string
+	credentials?: CredentialCallMapInput
+}
+
+export async function runExecuteToolCall(input: {
+	env: Env
+	callerContext: ReturnType<McpRegistrationAgent['getCallerContext']>
+	loopbackExports: Cloudflare.Exports
+	waitUntil?: (promise: Promise<unknown>) => void
+	mcpAgent?: McpRegistrationAgent
+	args: ExecuteToolCallArgs
+	extra?: McpToolCallExtra
+}) {
+	const {
+		code,
+		invoke,
+		params,
+		responseLimit,
+		conversationId,
+		memoryContext,
+		idempotencyKey,
+		credentials,
+	} = input.args
+	const timingStart = startToolTiming()
+	const env = input.env
+	// Hand terminal run-record writes and nested-invocation
+	// observability to the caller's waitUntil so they stop
+	// serializing the execute response they observe.
+	const waitUntil = input.waitUntil
+	const reportProgress = createProgressReporter(input.extra)
+	const callerContext = input.callerContext
+	const resolvedConversationId = resolveConversationId(conversationId)
+	const {
+		baseUrl,
+		hasUser,
+		userId,
+		storageId: boundStorageId,
+	} = callerContextFields(callerContext)
+	const activeStorageId = boundStorageId ?? null
+	const mcpCallerFields = {
+		baseUrl,
+		hasUser,
+		userId,
+		conversationId: resolvedConversationId,
+		...(activeStorageId ? { storageId: activeStorageId } : {}),
+	}
+	let claimedRunHandle: RunRecordHandle | null = null
+	let runRowOwned = false
+	let transportDetached = false
+	let detachTransportAfterResponse = false
+	let transportSignal: ReturnType<typeof createDetachableAbortSignal> | null =
+		null
+	let claimedExecuteUsage: ClaimedExecuteUsage | null = null
+	const response = await attachExecuteUsage(
+		await runExecuteToolWithErrorBoundary(),
+	)
+	// Detach only after the follow response is built, including the
+	// usage read. A caller cancel before that still stops the sandbox.
+	// Nested-function assignments are invisible to TS control-flow
+	// analysis on the outer lets, so reassert the declared type.
+	const signalAfterResponse = transportSignal as ReturnType<
+		typeof createDetachableAbortSignal
+	> | null
+	if (detachTransportAfterResponse && signalAfterResponse) {
+		if (!signalAfterResponse.signal.aborted) {
+			signalAfterResponse.detach()
+		}
+		transportDetached = true
+	}
+	return response
+
+	async function attachExecuteUsage<
+		Response extends { structuredContent: Record<string, unknown> },
+	>(response: Response): Promise<Response> {
+		const ownerId = ownerIdFromCaller(callerContext)
+		if (!callerContext.user?.userId || !ownerId) return response
+		const now = new Date()
+		const usage =
+			claimedUsageForNow(claimedExecuteUsage, now) ??
+			(await readExecuteUniqueWorkerUsage({
+				db: env.APP_DB,
+				env,
+				userId: ownerId,
+				email: entitlementEmailForOwner(callerContext, ownerId),
+				now,
+			}).catch((error: unknown) => {
+				console.warn('execute-usage-read-failed', error)
+				return null
+			}))
+		if (!usage) return response
+		return {
+			...response,
+			structuredContent: {
+				...response.structuredContent,
+				usage: buildExecuteUsageReport(usage, now),
 			},
-			toolExtra?: McpToolCallExtra,
-		) => {
-			const timingStart = startToolTiming()
-			const env = agent.getEnv()
-			// Hand terminal run-record writes and nested-invocation
-			// observability to the Durable Object's waitUntil so they stop
-			// serializing the execute response they observe.
-			const waitUntil = agent.waitUntil?.bind(agent)
-			const reportProgress = createProgressReporter(toolExtra)
-			const callerContext = agent.getCallerContext()
-			const resolvedConversationId = resolveConversationId(conversationId)
-			const {
-				baseUrl,
-				hasUser,
-				userId,
-				storageId: boundStorageId,
-			} = callerContextFields(callerContext)
-			const activeStorageId = boundStorageId ?? null
-			const mcpCallerFields = {
-				baseUrl,
-				hasUser,
-				userId,
-				conversationId: resolvedConversationId,
-				...(activeStorageId ? { storageId: activeStorageId } : {}),
-			}
-			let claimedRunHandle: RunRecordHandle | null = null
-			let runRowOwned = false
-			let transportDetached = false
-			let detachTransportAfterResponse = false
-			let transportSignal: ReturnType<
-				typeof createDetachableAbortSignal
-			> | null = null
-			let claimedExecuteUsage: ClaimedExecuteUsage | null = null
-			const response = await attachExecuteUsage(
-				await runExecuteToolWithErrorBoundary(),
-			)
-			// Detach only after the follow response is built, including the
-			// usage read. A caller cancel before that still stops the sandbox.
+		}
+	}
+
+	async function runExecuteToolWithErrorBoundary() {
+		try {
+			return await runExecuteTool()
+		} catch (cause) {
+			// Setup failures (registry build, module bundling, executor
+			// creation) must return a structured MCP error instead of an
+			// unhandled rejection, mirroring the search tool boundary.
+			// Finalize any pre-claimed keyed run so retries can replay the
+			// error instead of seeing a stuck `running` row.
 			// Nested-function assignments are invisible to TS control-flow
-			// analysis on the outer lets, so reassert the declared type.
-			const signalAfterResponse = transportSignal as ReturnType<
-				typeof createDetachableAbortSignal
-			> | null
-			if (detachTransportAfterResponse && signalAfterResponse) {
-				if (!signalAfterResponse.signal.aborted) {
-					signalAfterResponse.detach()
-				}
-				transportDetached = true
+			// analysis on the outer `let`, so reassert the declared type.
+			const claimedHandle = claimedRunHandle as RunRecordHandle | null
+			// Setup failures happen before sandbox work: release the key so
+			// a later retry is not poisoned by a non-sandbox error. A
+			// transport-budget detach already handed the caller this run,
+			// so abandoning it would delete the handle they are polling.
+			if (claimedHandle && !transportDetached) {
+				await abandonRunRecord({ env, handle: claimedHandle })
 			}
-			return response
-
-			async function attachExecuteUsage<
-				Response extends { structuredContent: Record<string, unknown> },
-			>(response: Response): Promise<Response> {
-				const ownerId = ownerIdFromCaller(callerContext)
-				if (!callerContext.user?.userId || !ownerId) return response
-				const now = new Date()
-				const usage =
-					claimedUsageForNow(claimedExecuteUsage, now) ??
-					(await readExecuteUniqueWorkerUsage({
-						db: env.APP_DB,
-						env,
-						userId: ownerId,
-						email: entitlementEmailForOwner(callerContext, ownerId),
-						now,
-					}).catch((error: unknown) => {
-						console.warn('execute-usage-read-failed', error)
-						return null
-					}))
-				if (!usage) return response
-				return {
-					...response,
-					structuredContent: {
-						...response.structuredContent,
-						usage: buildExecuteUsageReport(usage, now),
-					},
-				}
-			}
-
-			async function runExecuteToolWithErrorBoundary() {
-				try {
-					return await runExecuteTool()
-				} catch (cause) {
-					// Setup failures (registry build, module bundling, executor
-					// creation) must return a structured MCP error instead of an
-					// unhandled rejection, mirroring the search tool boundary.
-					// Finalize any pre-claimed keyed run so retries can replay the
-					// error instead of seeing a stuck `running` row.
-					// Nested-function assignments are invisible to TS control-flow
-					// analysis on the outer `let`, so reassert the declared type.
-					const claimedHandle = claimedRunHandle as RunRecordHandle | null
-					// Setup failures happen before sandbox work: release the key so
-					// a later retry is not poisoned by a non-sandbox error. A
-					// transport-budget detach already handed the caller this run,
-					// so abandoning it would delete the handle they are polling.
-					if (claimedHandle && !transportDetached) {
-						await abandonRunRecord({ env, handle: claimedHandle })
-					}
-					const timing = finishToolTiming(timingStart)
-					const error =
-						cause instanceof Error ? cause : new Error(String(cause))
-					const { errorName, errorMessage } = errorFields(error)
-					const errorDetails = getExecutionErrorDetails(error, {
-						orgSlug: callerContext.request?.org.slug,
-					})
-					logMcpEvent({
-						category: 'mcp',
-						tool: 'execute',
-						toolName: 'execute',
-						outcome: 'failure',
-						durationMs: timing.durationMs,
-						...mcpCallerFields,
-						sandboxError: false,
-						errorName,
-						errorMessage,
-						cause: error,
-					})
-					return {
-						content: prependToolMetadataContent(resolvedConversationId, [
-							{ type: 'text', text: `Error: ${error.message}` },
-						]),
-						structuredContent: {
-							conversationId: resolvedConversationId,
-							timing,
-							error: error.message,
-							...(errorDetails ? { errorDetails } : {}),
-							...entitlementStructuredContent(error),
-							...executeAdmissionStructuredContent(error),
-						},
-						isError: true,
-					}
-				}
-			}
-
-			async function runExecuteTool() {
-				const normalizedIdempotencyKey =
-					normalizeExecuteIdempotencyKey(idempotencyKey)
-				// Look up an existing keyed execute run before admission so
-				// transport-timeout retries can replay / report in-progress
-				// without spending the runaway brake or loading a worker.
-				const storageOwnerId = ownerIdFromCaller(callerContext)
-				const entitlementEmail = entitlementEmailForOwner(
-					callerContext,
-					storageOwnerId,
-				)
-				if (normalizedIdempotencyKey && storageOwnerId) {
-					const existing = await getRunRecordByIdempotencyKey({
-						env,
-						userId: storageOwnerId,
-						idempotencyKey: normalizedIdempotencyKey,
-						surface: 'execute',
-					})
-					if (existing) {
-						const timing = finishToolTiming(timingStart)
-						return buildKeyedExecuteLookupResponse({
-							run: existing,
-							conversationId: resolvedConversationId,
-							timing,
-						})
-					}
-				}
-
-				// Schema omit/advertise is decided at register. Re-read the
-				// flag here so a kill-switch applies on the next call even
-				// when a legacy session still has invoke in its tool list.
-				// Plan lookup overlaps that read. The daily counter is spent
-				// only after the read succeeds — an evaluation failure is
-				// fail-closed and must not consume quota.
-				const liveFlagsPromise = resolveCallerFeatureFlags(env, callerContext)
-				const entitlementPrefetch = callerContext.user?.userId
-					? getCachedUserEntitlement(env.APP_DB, {
-							userId: storageOwnerId,
-							email: entitlementEmail,
-						}).then(
-							() => undefined,
-							() => undefined,
-						)
-					: null
-				const liveFlags = await liveFlagsPromise
-				if (await callerFeatureFlagEvaluationFailed(env, callerContext)) {
-					throw new Error('Feature flag evaluation failed')
-				}
-				void entitlementPrefetch
-				// Registry assembly overlaps the quota check. Context retrievers
-				// stay after quota and a fresh idempotency claim so a denied
-				// call does not run bundled package code.
-				const registryPromise = getCapabilityRegistryForContext({
-					env,
-					callerContext,
-				})
-				void registryPromise.catch(() => {})
-				const resolvedModule = resolveExecuteModule({
-					code,
-					invoke,
-					invokeEnabled: liveFlags[executeInvokeFlagKey] === true,
-				})
-				const executeAttribution = buildExecuteAttributionMetadata({
-					entry: resolvedModule.entry,
-					invoke: resolvedModule.invoke,
-				})
-				const executeRunMetadata = {
+			const timing = finishToolTiming(timingStart)
+			const error = cause instanceof Error ? cause : new Error(String(cause))
+			const { errorName, errorMessage } = errorFields(error)
+			const errorDetails = getExecutionErrorDetails(error, {
+				orgSlug: callerContext.request?.org.slug,
+			})
+			logMcpEvent({
+				category: 'mcp',
+				tool: 'execute',
+				toolName: 'execute',
+				outcome: 'failure',
+				durationMs: timing.durationMs,
+				...mcpCallerFields,
+				sandboxError: false,
+				errorName,
+				errorMessage,
+				cause: error,
+			})
+			return {
+				content: prependToolMetadataContent(resolvedConversationId, [
+					{ type: 'text', text: `Error: ${error.message}` },
+				]),
+				structuredContent: {
 					conversationId: resolvedConversationId,
-					...executeAttribution,
-				}
+					timing,
+					error: error.message,
+					...(errorDetails ? { errorDetails } : {}),
+					...entitlementStructuredContent(error),
+					...executeAdmissionStructuredContent(error),
+				},
+				isError: true,
+			}
+		}
+	}
 
-				// Runaway and loop brakes before claim/bundling/sandbox so a refused call
-				// costs nothing and does not poison a key. The plan cap counts
-				// unique workers and is spent inside the executor, once the
-				// worker id is known and before that worker loads.
-				const claimWorkerDay =
-					callerContext.user?.userId && storageOwnerId
-						? createExecuteWorkerDayClaim({
-								env,
-								ownerId: storageOwnerId,
-								email: entitlementEmail,
-								onUsage: (claimed) => {
-									claimedExecuteUsage = claimed
-								},
-								waitUntil,
-								orgBudget: callerContext.request
-									? {
-											orgId: callerContext.request.org.id,
-											orgSlug: callerContext.request.org.slug,
-											actorUserId: callerContext.request.actor?.userId ?? null,
-											actorUsername:
-												callerContext.request.actor?.username ?? null,
-										}
-									: undefined,
-							})
-						: undefined
-				// Admission is a UserMeter round trip that only gates work below it,
-				// so let it overlap the registry read; nothing that writes, retrieves
-				// memories, or runs sandbox code proceeds until it has admitted.
-				const normalizedCallMap = normalizeCredentialCallMap(credentials)
-				const admissionPromise = claimWorkerDay
-					? admitHostedExecuteCall({
-							env,
-							ownerId: storageOwnerId,
-							email: entitlementEmail,
-							repeatKey: await executeRepeatKey({
-								credential: callerContext.request?.credential ?? null,
-								actorUserId:
-									callerContext.request?.actor?.userId ??
-									callerContext.user?.userId ??
-									null,
-								conversationId,
-								code,
-								invoke,
-								params,
-								credentials: normalizedCallMap,
-							}),
-						})
-					: null
-				void admissionPromise?.catch(() => {})
+	async function runExecuteTool() {
+		const normalizedIdempotencyKey =
+			normalizeExecuteIdempotencyKey(idempotencyKey)
+		// Look up an existing keyed execute run before admission so
+		// transport-timeout retries can replay / report in-progress
+		// without spending the runaway brake or loading a worker.
+		const storageOwnerId = ownerIdFromCaller(callerContext)
+		const entitlementEmail = entitlementEmailForOwner(
+			callerContext,
+			storageOwnerId,
+		)
+		if (normalizedIdempotencyKey && storageOwnerId) {
+			const existing = await getRunRecordByIdempotencyKey({
+				env,
+				userId: storageOwnerId,
+				idempotencyKey: normalizedIdempotencyKey,
+				surface: 'execute',
+			})
+			if (existing) {
+				const timing = finishToolTiming(timingStart)
+				return buildKeyedExecuteLookupResponse({
+					run: existing,
+					conversationId: resolvedConversationId,
+					timing,
+				})
+			}
+		}
 
-				if (storageOwnerId) {
-					// Claim or begin before sandbox work so a transport-budget
-					// follow response already has a run id. Caller-supplied keys
-					// stay on the awaited claim path. Omitted keys get a
-					// server-assigned key without failing the call when RUN_LOG
-					// cannot record one.
-					await admissionPromise
-				}
-				if (normalizedIdempotencyKey && storageOwnerId) {
-					const claim = await claimRunRecord({
+		// Schema omit/advertise is decided at register. Re-read the
+		// flag here so a kill-switch applies on the next call even
+		// when a legacy session still has invoke in its tool list.
+		// Plan lookup overlaps that read. The daily counter is spent
+		// only after the read succeeds — an evaluation failure is
+		// fail-closed and must not consume quota.
+		const liveFlagsPromise = resolveCallerFeatureFlags(env, callerContext)
+		const entitlementPrefetch = callerContext.user?.userId
+			? getCachedUserEntitlement(env.APP_DB, {
+					userId: storageOwnerId,
+					email: entitlementEmail,
+				}).then(
+					() => undefined,
+					() => undefined,
+				)
+			: null
+		const liveFlags = await liveFlagsPromise
+		if (await callerFeatureFlagEvaluationFailed(env, callerContext)) {
+			throw new Error('Feature flag evaluation failed')
+		}
+		void entitlementPrefetch
+		// Registry assembly overlaps the quota check. Context retrievers
+		// stay after quota and a fresh idempotency claim so a denied
+		// call does not run bundled package code.
+		const registryPromise = getCapabilityRegistryForContext({
+			env,
+			callerContext,
+		})
+		void registryPromise.catch(() => {})
+		const resolvedModule = resolveExecuteModule({
+			code,
+			invoke,
+			invokeEnabled: liveFlags[executeInvokeFlagKey] === true,
+		})
+		const executeAttribution = buildExecuteAttributionMetadata({
+			entry: resolvedModule.entry,
+			invoke: resolvedModule.invoke,
+		})
+		const executeRunMetadata = {
+			conversationId: resolvedConversationId,
+			...executeAttribution,
+		}
+
+		// Runaway and loop brakes before claim/bundling/sandbox so a refused call
+		// costs nothing and does not poison a key. The plan cap counts
+		// unique workers and is spent inside the executor, once the
+		// worker id is known and before that worker loads.
+		const claimWorkerDay =
+			callerContext.user?.userId && storageOwnerId
+				? createExecuteWorkerDayClaim({
 						env,
-						userId: storageOwnerId,
-						context: {
-							surface: 'execute',
-							name: null,
-							storageId: activeStorageId,
-							idempotencyKey: normalizedIdempotencyKey,
-							metadata: executeRunMetadata,
+						ownerId: storageOwnerId,
+						email: entitlementEmail,
+						onUsage: (claimed) => {
+							claimedExecuteUsage = claimed
 						},
-					})
-					if (!claim) {
-						throw new Error(
-							'Unable to claim execute idempotency key; RUN_LOG is unavailable.',
-						)
-					}
-					if (!claim.claimed) {
-						const timing = finishToolTiming(timingStart)
-						return buildKeyedExecuteLookupResponse({
-							run: claim.run,
-							conversationId: resolvedConversationId,
-							timing,
-						})
-					}
-					claimedRunHandle = claim.handle
-					runRowOwned = true
-				} else if (storageOwnerId) {
-					const generatedKey = createDefaultExecuteIdempotencyKey()
-					claimedRunHandle = beginRunRecord({
-						env,
-						userId: storageOwnerId,
 						waitUntil,
-						context: {
-							surface: 'execute',
-							name: null,
-							storageId: activeStorageId,
-							idempotencyKey: generatedKey,
-							metadata: executeRunMetadata,
-						},
-					})
-				}
-
-				// Registry assembly and memory retrieval can run package code.
-				// The transport deadline covers that setup plus the sandbox, so a
-				// slow prelude still returns a follow handle before the client
-				// drops the tools/call.
-				let surfacedMemories: Awaited<
-					ReturnType<typeof surfaceToolMemories>
-				> | null = null
-				let registeredCapabilityCount = 0
-				const rawFetchHosts = createRawFetchHostSink()
-				const credentialCallMapWarnings: Array<string> = []
-				transportSignal = createDetachableAbortSignal(getInboundRequestSignal())
-				const activeTransportSignal = transportSignal
-				const recordDetachedExecuteFailure = async (cause: unknown) => {
-					if (!claimedRunHandle) return
-					try {
-						const current = await getRunRecord({
-							env,
-							userId: claimedRunHandle.userId,
-							runId: claimedRunHandle.id,
-						}).catch(() => null)
-						if (current && current.run.status !== 'running') return
-						// The caller already left with this run id. Persist the
-						// failure for runGet even if the running row is not
-						// readable yet. finish upserts the terminal row.
-						await finishRunRecord({
-							env,
-							handle: claimedRunHandle,
-							status: 'error',
-							error: cause,
-						})
-					} catch (error) {
-						console.warn('execute-transport-budget-finish-failed', error)
-					}
-				}
-				const readTransportBudgetFollow = async (handle: RunRecordHandle) => {
-					let started = false
-					let current: { run: RunRecord } | null = null
-					try {
-						started = await ensureRunRecordStarted({ env, handle })
-						current = await getRunRecord({
-							env,
-							userId: handle.userId,
-							runId: handle.id,
-						})
-					} catch (error) {
-						console.warn('execute-transport-budget-read-failed', error)
-					}
-					if (current && current.run.status !== 'running') {
-						return {
-							transportFollow: 'terminal' as const,
-							run: current.run,
-						}
-					}
-					// A caller-supplied claim already owns the key. A generated
-					// key is advertised only after the running row is readable,
-					// so a retry cannot claim the same key and start a second
-					// sandbox.
-					const keyOwned = runRowOwned || started || Boolean(current)
-					const idempotencyKey = keyOwned
-						? (handle.context.idempotencyKey?.trim() ?? '')
-						: ''
-					await reportProgress?.({
-						progress: 1,
-						message: idempotencyKey
-							? `Still running (runId: ${handle.id}). Poll runGet. idempotencyKey: ${idempotencyKey}.`
-							: `Still running (runId: ${handle.id}). Poll runGet. Do not start another mutation.`,
-					})
-					return {
-						transportFollow: 'running' as const,
-						runId: handle.id,
-						idempotencyKey,
-					}
-				}
-				const admittedWork = (async () => {
-					const [registry] = await Promise.all([
-						registryPromise,
-						admissionPromise,
-					])
-					registeredCapabilityCount = Object.keys(
-						registry.capabilityHandlers,
-					).length
-					surfacedMemories = await surfaceToolMemories({
-						env,
-						callerContext,
-						conversationId: resolvedConversationId,
-						retrievalQuery: buildMemoryRetrievalQuery(memoryContext),
-					})
-					const credentialCallMap = normalizedCallMap
-						? {
-								map: normalizedCallMap,
-								strict: resolvedModule.entry === 'invoke',
-								onWarnings: (warnings: Array<string>) => {
-									credentialCallMapWarnings.push(...warnings)
-								},
-							}
-						: null
-					return await Sentry.startSpan(
-						{
-							name: 'mcp.tool.execute',
-							op: 'mcp.tool',
-							attributes: {
-								'mcp.tool': 'execute',
-							},
-						},
-						async () => {
-							try {
-								const execution = runWithRequestPermissions(
-									{ env, request: callerContext.request },
-									async () =>
-										runModuleWithRegistry(
-											env,
-											callerContext,
-											resolvedModule.code,
-											params,
-											{
-												executorExports: agent.getLoopbackExports(),
-												capabilityRegistry: registry,
-												rawFetchHostSink: rawFetchHosts.sink,
-												conversationId: resolvedConversationId,
-												runRecordHandle: claimedRunHandle,
-												claimWorkerDay,
-												credentialCallMap,
-												waitUntil,
-												reportProgress: reportProgress ?? undefined,
-												signal: activeTransportSignal.signal,
-												runRecord: {
-													surface: 'execute',
-													name: null,
-													storageId: activeStorageId,
-													idempotencyKey:
-														claimedRunHandle?.context.idempotencyKey ??
-														normalizedIdempotencyKey,
-													metadata: executeRunMetadata,
-												},
-											},
-										),
-								)
-								const settled = execution.then(
-									async (value) => {
-										if (transportDetached && !value.error) {
-											const passthrough = extractMcpPassthrough(value.result)
-											if (!passthrough?.isError) {
-												await scheduleFleetExecuteLastSuccess({
-													waitUntil,
-													kv: env.BUNDLE_ARTIFACTS_KV,
-												})
-											}
-										}
-										return value
-									},
-									async (cause: unknown) => {
-										if (transportDetached) {
-											await recordDetachedExecuteFailure(cause)
-										}
-										throw cause
-									},
-								)
-								return await settled
-							} catch (cause) {
-								if (transportDetached && claimedRunHandle) {
-									const idempotencyKey = runRowOwned
-										? (claimedRunHandle.context.idempotencyKey?.trim() ?? '')
-										: ''
-									return {
-										transportFollow: 'running' as const,
-										runId: claimedRunHandle.id,
-										idempotencyKey,
-									}
+						orgBudget: callerContext.request
+							? {
+									orgId: callerContext.request.org.id,
+									orgSlug: callerContext.request.org.slug,
+									actorUserId: callerContext.request.actor?.userId ?? null,
+									actorUsername: callerContext.request.actor?.username ?? null,
 								}
-								// A usage denial happens before the worker loads: the
-								// outer boundary releases the key, as for any other
-								// pre-sandbox refusal.
-								if (isPreRunUsageDenial(cause)) throw cause
-								// Bundling the caller-provided module (syntax errors,
-								// unresolved imports) throws before the sandbox runs;
-								// route it through the sandbox-error result path so it
-								// is not logged as a platform failure. Finish a still-
-								// running claimed row only — if the registry already
-								// wrote a terminal row, do not double-finish.
-								if (claimedRunHandle) {
-									const current = await getRunRecord({
-										env,
-										userId: claimedRunHandle.userId,
-										runId: claimedRunHandle.id,
-									}).catch(() => null)
-									if (!current || current.run.status === 'running') {
-										await finishRunRecord({
-											env,
-											handle: claimedRunHandle,
-											status: 'error',
-											error: cause,
+							: undefined,
+					})
+				: undefined
+		// Admission is a UserMeter round trip that only gates work below it,
+		// so let it overlap the registry read; nothing that writes, retrieves
+		// memories, or runs sandbox code proceeds until it has admitted.
+		const normalizedCallMap = normalizeCredentialCallMap(credentials)
+		const admissionPromise = claimWorkerDay
+			? admitHostedExecuteCall({
+					env,
+					ownerId: storageOwnerId,
+					email: entitlementEmail,
+					repeatKey: await executeRepeatKey({
+						credential: callerContext.request?.credential ?? null,
+						actorUserId:
+							callerContext.request?.actor?.userId ??
+							callerContext.user?.userId ??
+							null,
+						conversationId,
+						code,
+						invoke,
+						params,
+						credentials: normalizedCallMap,
+					}),
+				})
+			: null
+		void admissionPromise?.catch(() => {})
+
+		if (storageOwnerId) {
+			// Claim or begin before sandbox work so a transport-budget
+			// follow response already has a run id. Caller-supplied keys
+			// stay on the awaited claim path. Omitted keys get a
+			// server-assigned key without failing the call when RUN_LOG
+			// cannot record one.
+			await admissionPromise
+		}
+		if (normalizedIdempotencyKey && storageOwnerId) {
+			const claim = await claimRunRecord({
+				env,
+				userId: storageOwnerId,
+				context: {
+					surface: 'execute',
+					name: null,
+					storageId: activeStorageId,
+					idempotencyKey: normalizedIdempotencyKey,
+					metadata: executeRunMetadata,
+				},
+			})
+			if (!claim) {
+				throw new Error(
+					'Unable to claim execute idempotency key; RUN_LOG is unavailable.',
+				)
+			}
+			if (!claim.claimed) {
+				const timing = finishToolTiming(timingStart)
+				return buildKeyedExecuteLookupResponse({
+					run: claim.run,
+					conversationId: resolvedConversationId,
+					timing,
+				})
+			}
+			claimedRunHandle = claim.handle
+			runRowOwned = true
+		} else if (storageOwnerId) {
+			const generatedKey = createDefaultExecuteIdempotencyKey()
+			claimedRunHandle = beginRunRecord({
+				env,
+				userId: storageOwnerId,
+				waitUntil,
+				context: {
+					surface: 'execute',
+					name: null,
+					storageId: activeStorageId,
+					idempotencyKey: generatedKey,
+					metadata: executeRunMetadata,
+				},
+			})
+		}
+
+		// Registry assembly and memory retrieval can run package code.
+		// The transport deadline covers that setup plus the sandbox, so a
+		// slow prelude still returns a follow handle before the client
+		// drops the tools/call.
+		let surfacedMemories: Awaited<
+			ReturnType<typeof surfaceToolMemories>
+		> | null = null
+		let registeredCapabilityCount = 0
+		const rawFetchHosts = createRawFetchHostSink()
+		const credentialCallMapWarnings: Array<string> = []
+		transportSignal = createDetachableAbortSignal(getInboundRequestSignal())
+		const activeTransportSignal = transportSignal
+		const recordDetachedExecuteFailure = async (cause: unknown) => {
+			if (!claimedRunHandle) return
+			try {
+				const current = await getRunRecord({
+					env,
+					userId: claimedRunHandle.userId,
+					runId: claimedRunHandle.id,
+				}).catch(() => null)
+				if (current && current.run.status !== 'running') return
+				// The caller already left with this run id. Persist the
+				// failure for runGet even if the running row is not
+				// readable yet. finish upserts the terminal row.
+				await finishRunRecord({
+					env,
+					handle: claimedRunHandle,
+					status: 'error',
+					error: cause,
+				})
+			} catch (error) {
+				console.warn('execute-transport-budget-finish-failed', error)
+			}
+		}
+		const readTransportBudgetFollow = async (handle: RunRecordHandle) => {
+			let started = false
+			let current: { run: RunRecord } | null = null
+			try {
+				started = await ensureRunRecordStarted({ env, handle })
+				current = await getRunRecord({
+					env,
+					userId: handle.userId,
+					runId: handle.id,
+				})
+			} catch (error) {
+				console.warn('execute-transport-budget-read-failed', error)
+			}
+			if (current && current.run.status !== 'running') {
+				return {
+					transportFollow: 'terminal' as const,
+					run: current.run,
+				}
+			}
+			// A caller-supplied claim already owns the key. A generated
+			// key is advertised only after the running row is readable,
+			// so a retry cannot claim the same key and start a second
+			// sandbox.
+			const keyOwned = runRowOwned || started || Boolean(current)
+			const idempotencyKey = keyOwned
+				? (handle.context.idempotencyKey?.trim() ?? '')
+				: ''
+			await reportProgress?.({
+				progress: 1,
+				message: idempotencyKey
+					? `Still running (runId: ${handle.id}). Poll runGet. idempotencyKey: ${idempotencyKey}.`
+					: `Still running (runId: ${handle.id}). Poll runGet. Do not start another mutation.`,
+			})
+			return {
+				transportFollow: 'running' as const,
+				runId: handle.id,
+				idempotencyKey,
+			}
+		}
+		const admittedWork = (async () => {
+			const [registry] = await Promise.all([registryPromise, admissionPromise])
+			registeredCapabilityCount = Object.keys(
+				registry.capabilityHandlers,
+			).length
+			surfacedMemories = await surfaceToolMemories({
+				env,
+				callerContext,
+				conversationId: resolvedConversationId,
+				retrievalQuery: buildMemoryRetrievalQuery(memoryContext),
+			})
+			const credentialCallMap = normalizedCallMap
+				? {
+						map: normalizedCallMap,
+						strict: resolvedModule.entry === 'invoke',
+						onWarnings: (warnings: Array<string>) => {
+							credentialCallMapWarnings.push(...warnings)
+						},
+					}
+				: null
+			return await Sentry.startSpan(
+				{
+					name: 'mcp.tool.execute',
+					op: 'mcp.tool',
+					attributes: {
+						'mcp.tool': 'execute',
+					},
+				},
+				async () => {
+					try {
+						const execution = runWithRequestPermissions(
+							{ env, request: callerContext.request },
+							async () =>
+								runModuleWithRegistry(
+									env,
+									callerContext,
+									resolvedModule.code,
+									params,
+									{
+										executorExports: input.loopbackExports,
+										capabilityRegistry: registry,
+										rawFetchHostSink: rawFetchHosts.sink,
+										conversationId: resolvedConversationId,
+										runRecordHandle: claimedRunHandle,
+										claimWorkerDay,
+										credentialCallMap,
+										waitUntil,
+										reportProgress: reportProgress ?? undefined,
+										signal: activeTransportSignal.signal,
+										runRecord: {
+											surface: 'execute',
+											name: null,
+											storageId: activeStorageId,
+											idempotencyKey:
+												claimedRunHandle?.context.idempotencyKey ??
+												normalizedIdempotencyKey,
+											metadata: executeRunMetadata,
+										},
+									},
+								),
+						)
+						const settled = execution.then(
+							async (value) => {
+								if (transportDetached && !value.error) {
+									const passthrough = extractMcpPassthrough(value.result)
+									if (!passthrough?.isError) {
+										await scheduleFleetExecuteLastSuccess({
+											waitUntil,
+											kv: env.BUNDLE_ARTIFACTS_KV,
 										})
 									}
 								}
-								return {
-									result: undefined,
-									error: getErrorMessage(cause),
-									logs: [],
-									...(claimedRunHandle ? { runId: claimedRunHandle.id } : {}),
+								return value
+							},
+							async (cause: unknown) => {
+								if (transportDetached) {
+									await recordDetachedExecuteFailure(cause)
 								}
-							}
-						},
-					)
-				})()
-				let transportBudgetFollow = false
-				const observedAdmittedWork = admittedWork.then(
-					() => undefined,
-					async (cause: unknown) => {
-						// Registry or memory can fail after we commit to a follow
-						// response and before the sandbox promise exists. Record
-						// that on the run the caller is polling. `transportDetached`
-						// flips only after the usage read, which is too late.
-						if (!transportDetached && !transportBudgetFollow) return
-						await recordDetachedExecuteFailure(cause)
-					},
-				)
-				waitUntil?.(observedAdmittedWork)
-				let spanned:
-					| Awaited<typeof admittedWork>
-					| Awaited<ReturnType<typeof readTransportBudgetFollow>>
-				if (!claimedRunHandle) {
-					spanned = await admittedWork
-				} else {
-					const watched = watchExecuteTransport(
-						admittedWork,
-						remainingTransportBudgetMs({
-							startedAtMs: timingStart.startedAtMs,
-						}),
-					)
-					const raced = await watched.raced
-					if (raced.kind === 'budget') {
-						await Promise.resolve()
-						const peeked = watched.peek()
-						if (peeked?.ok === true) {
-							spanned = peeked.value
-						} else if (peeked && peeked.ok === false) {
-							throw peeked.error
-						} else {
-							// Stay attached while the run row is confirmed. A caller
-							// cancel during that read must still stop the sandbox.
-							// Detach only once the follow response is about to return,
-							// so completing the HTTP response does not cancel the work.
-							transportBudgetFollow = true
-							const follow = await readTransportBudgetFollow(claimedRunHandle)
-							// A caller cancel does not overwrite an in-flight success
-							// with client_disconnected, and the response still carries
-							// the run id. The abort signal stays attached, so a sandbox
-							// that is still running stops through its own handler.
-							if (follow.transportFollow === 'terminal') {
-								activeTransportSignal.detach()
-								transportDetached = true
-							} else {
-								detachTransportAfterResponse = true
-							}
-							spanned = follow
-						}
-					} else if (raced.kind === 'rejected') {
-						throw raced.error
-					} else {
-						spanned = raced.value
-					}
-				}
-				if (
-					'transportFollow' in spanned &&
-					spanned.transportFollow === 'terminal'
-				) {
-					const timing = finishToolTiming(timingStart)
-					const outcome = spanned.run.status === 'error' ? 'failure' : 'success'
-					logMcpEvent({
-						category: 'mcp',
-						tool: 'execute',
-						toolName: 'execute',
-						outcome,
-						durationMs: timing.durationMs,
-						...mcpCallerFields,
-						registeredCapabilityCount,
-						sandboxError: outcome === 'failure',
-						context: { transportBudgetFollow: true, runId: spanned.run.id },
-					})
-					return buildKeyedExecuteLookupResponse({
-						run: spanned.run,
-						conversationId: resolvedConversationId,
-						timing,
-					})
-				}
-				if (
-					'transportFollow' in spanned &&
-					spanned.transportFollow === 'running'
-				) {
-					const timing = finishToolTiming(timingStart)
-					logMcpEvent({
-						category: 'mcp',
-						tool: 'execute',
-						toolName: 'execute',
-						outcome: 'success',
-						durationMs: timing.durationMs,
-						...mcpCallerFields,
-						registeredCapabilityCount,
-						sandboxError: false,
-						context: {
-							transportBudgetFollow: true,
-							runId: spanned.runId,
-						},
-					})
-					return buildTransportBudgetFollowResponse({
-						conversationId: resolvedConversationId,
-						timing,
-						runId: spanned.runId,
-						idempotencyKey: spanned.idempotencyKey,
-						memories: surfacedMemories,
-					})
-				}
-				const result = spanned
-				const timing = {
-					...finishToolTiming(timingStart),
-					...(result.serverTiming && result.serverTiming.length > 0
-						? { serverTiming: result.serverTiming }
-						: {}),
-				}
-				const durationMs = timing.durationMs
-				const rawFetchHostNudges = [
-					...credentialCallMapWarnings,
-					...(await resolveRawFetchHostNudges({
-						agent,
-						env,
-						callerContext,
-						conversationId: resolvedConversationId,
-						hostCounts: rawFetchHosts.hostCounts(),
-						usedIntegrationAuthHelpers: codeUsesIntegrationAuthHelpers(
-							resolvedModule.code,
-						),
-					})),
-				]
-				const runId =
-					typeof result.runId === 'string'
-						? result.runId
-						: (claimedRunHandle?.id ?? undefined)
-				// A generated key is not durable until the running row is confirmed.
-				// In-budget responses already carry the module result, so they
-				// include only a caller-supplied key. The transport-budget
-				// follow response adds a generated key after that confirmation.
-				const idempotencyKeyForResponse = runRowOwned
-					? claimedRunHandle?.context.idempotencyKey?.trim() ||
-						normalizedIdempotencyKey ||
-						undefined
-					: undefined
-				const follow = {
-					...(runId ? { runId } : {}),
-					...(idempotencyKeyForResponse
-						? { idempotencyKey: idempotencyKeyForResponse }
-						: {}),
-				}
-
-				if (result.error) {
-					const errorDetails = getExecutionErrorDetails(result.error, {
-						orgSlug: callerContext.request?.org.slug,
-					})
-					const { errorName, errorMessage } = errorFields(result.error)
-					logMcpEvent({
-						category: 'mcp',
-						tool: 'execute',
-						toolName: 'execute',
-						outcome: 'failure',
-						durationMs,
-						...mcpCallerFields,
-						registeredCapabilityCount,
-						sandboxError: true,
-						errorName,
-						errorMessage,
-						cause: result.error,
-					})
-					return {
-						content: prependToolMetadataContent(resolvedConversationId, [
-							{
-								type: 'text',
-								text: formatExecutionOutput(result),
+								throw cause
 							},
-							...formatRawFetchHostNudgeContent(rawFetchHostNudges),
-							...formatSurfacedMemoriesMarkdown(surfacedMemories),
-						]),
-						structuredContent: {
-							conversationId: resolvedConversationId,
-							timing,
-							...follow,
-							returnedBytes: 0,
-							error: errorMessage,
-							errorDetails,
-							...entitlementStructuredContent(result.error),
-							logs: result.logs ?? [],
-							...(rawFetchHostNudges.length > 0
-								? { warnings: rawFetchHostNudges }
-								: {}),
-							...buildMemoryStructuredContent(surfacedMemories),
-						},
-						isError: true,
-					}
-				}
-
-				logMcpEvent({
-					category: 'mcp',
-					tool: 'execute',
-					toolName: 'execute',
-					outcome: 'success',
-					durationMs,
-					...mcpCallerFields,
-					registeredCapabilityCount,
-					sandboxError: false,
-					context: activeStorageId ? { storageId: activeStorageId } : undefined,
-				})
-				const responseLimitBytes =
-					responseLimit ?? defaultExecutionResponseLimitBytes
-				const passthrough = extractMcpPassthrough(result.result)
-				const rawContent = passthrough?.content ?? null
-
-				if (rawContent) {
-					let validatedContent: Array<ContentBlock>
-					try {
-						validatedContent = validateDownstreamMcpContentBlocks(rawContent, {
-							kind: 'execute',
-							label: 'default export (__mcpContent)',
-						})
-					} catch (error) {
-						const message = getErrorMessage(error)
-						return {
-							content: prependToolMetadataContent(resolvedConversationId, [
-								{
-									type: 'text',
-									text: `Error: ${message}`,
-								},
-								...formatSurfacedMemoriesMarkdown(surfacedMemories),
-							]),
-							structuredContent: {
-								conversationId: resolvedConversationId,
-								timing,
-								...follow,
-								returnedBytes: 0,
-								error: message,
-								result: passthrough?.structuredResult ?? null,
-								logs: result.logs ?? [],
-								...buildMemoryStructuredContent(surfacedMemories),
-							},
-							isError: true,
-						}
-					}
-
-					const contentLimited = limitMcpContentBlocks(
-						validatedContent,
-						defaultMcpContentLimitBytes,
-					)
-					if (!contentLimited.ok) {
-						return {
-							content: prependToolMetadataContent(resolvedConversationId, [
-								{
-									type: 'text',
-									text: `Error: ${contentLimited.note}`,
-								},
-								...formatSurfacedMemoriesMarkdown(surfacedMemories),
-							]),
-							structuredContent: {
-								conversationId: resolvedConversationId,
-								timing,
-								...follow,
-								returnedBytes: contentLimited.returnedBytes,
-								truncated: true,
-								note: contentLimited.note,
-								result: passthrough?.structuredResult ?? null,
-								logs: result.logs ?? [],
-								...buildMemoryStructuredContent(surfacedMemories),
-							},
-							isError: true,
-						}
-					}
-
-					const companionLimited =
-						passthrough?.structuredResult === undefined ||
-						passthrough.structuredResult === null
-							? null
-							: limitExecutionResultValue(
-									passthrough.structuredResult,
-									responseLimitBytes,
-								)
-					const isError = passthrough?.isError ?? false
-					const truncationNote =
-						contentLimited.truncated && companionLimited?.truncated
-							? `${contentLimited.note} ${companionLimited.note}`
-							: contentLimited.truncated
-								? contentLimited.note
-								: companionLimited?.truncated
-									? companionLimited.note
-									: undefined
-					if (!isError) {
-						await scheduleFleetExecuteLastSuccess({
-							waitUntil,
-							kv: env.BUNDLE_ARTIFACTS_KV,
-						})
-					}
-
-					return {
-						content: prependToolMetadataContent(resolvedConversationId, [
-							...contentLimited.blocks,
-							...formatRawFetchHostNudgeContent(rawFetchHostNudges),
-							...formatSurfacedMemoriesMarkdown(surfacedMemories),
-						]),
-						structuredContent: {
-							conversationId: resolvedConversationId,
-							timing,
-							...follow,
-							returnedBytes:
-								contentLimited.returnedBytes +
-								(companionLimited?.returnedBytes ?? 0),
-							...(truncationNote
-								? {
-										truncated: true,
-										note: truncationNote,
-									}
-								: {}),
-							result: companionLimited
-								? companionLimited.value
-								: (passthrough?.structuredResult ?? null),
-							logs: result.logs ?? [],
-							...(rawFetchHostNudges.length > 0
-								? { warnings: rawFetchHostNudges }
-								: {}),
-							...buildMemoryStructuredContent(surfacedMemories),
-						},
-						isError,
-					}
-				}
-
-				const limitedResult = limitExecutionResultValue(
-					result.result,
-					responseLimitBytes,
-				)
-				const markerOnlyPassthrough =
-					passthrough &&
-					(passthrough.isError || passthrough.structuredResult !== null)
-						? passthrough
-						: null
-				const structuredResultValue = markerOnlyPassthrough
-					? limitExecutionResultValue(
-							markerOnlyPassthrough.structuredResult ?? {},
-							responseLimitBytes,
 						)
-					: limitedResult
-				const isError = markerOnlyPassthrough?.isError ?? false
-				if (!isError) {
-					await scheduleFleetExecuteLastSuccess({
-						waitUntil,
-						kv: env.BUNDLE_ARTIFACTS_KV,
-					})
+						return await settled
+					} catch (cause) {
+						if (transportDetached && claimedRunHandle) {
+							const idempotencyKey = runRowOwned
+								? (claimedRunHandle.context.idempotencyKey?.trim() ?? '')
+								: ''
+							return {
+								transportFollow: 'running' as const,
+								runId: claimedRunHandle.id,
+								idempotencyKey,
+							}
+						}
+						// A usage denial happens before the worker loads: the
+						// outer boundary releases the key, as for any other
+						// pre-sandbox refusal.
+						if (isPreRunUsageDenial(cause)) throw cause
+						// Bundling the caller-provided module (syntax errors,
+						// unresolved imports) throws before the sandbox runs;
+						// route it through the sandbox-error result path so it
+						// is not logged as a platform failure. Finish a still-
+						// running claimed row only — if the registry already
+						// wrote a terminal row, do not double-finish.
+						if (claimedRunHandle) {
+							const current = await getRunRecord({
+								env,
+								userId: claimedRunHandle.userId,
+								runId: claimedRunHandle.id,
+							}).catch(() => null)
+							if (!current || current.run.status === 'running') {
+								await finishRunRecord({
+									env,
+									handle: claimedRunHandle,
+									status: 'error',
+									error: cause,
+								})
+							}
+						}
+						return {
+							result: undefined,
+							error: getErrorMessage(cause),
+							logs: [],
+							...(claimedRunHandle ? { runId: claimedRunHandle.id } : {}),
+						}
+					}
+				},
+			)
+		})()
+		let transportBudgetFollow = false
+		const observedAdmittedWork = admittedWork.then(
+			() => undefined,
+			async (cause: unknown) => {
+				// Registry or memory can fail after we commit to a follow
+				// response and before the sandbox promise exists. Record
+				// that on the run the caller is polling. `transportDetached`
+				// flips only after the usage read, which is too late.
+				if (!transportDetached && !transportBudgetFollow) return
+				await recordDetachedExecuteFailure(cause)
+			},
+		)
+		waitUntil?.(observedAdmittedWork)
+		let spanned:
+			| Awaited<typeof admittedWork>
+			| Awaited<ReturnType<typeof readTransportBudgetFollow>>
+		if (!claimedRunHandle) {
+			spanned = await admittedWork
+		} else {
+			const watched = watchExecuteTransport(
+				admittedWork,
+				remainingTransportBudgetMs({
+					startedAtMs: timingStart.startedAtMs,
+				}),
+			)
+			const raced = await watched.raced
+			if (raced.kind === 'budget') {
+				await Promise.resolve()
+				const peeked = watched.peek()
+				if (peeked?.ok === true) {
+					spanned = peeked.value
+				} else if (peeked && peeked.ok === false) {
+					throw peeked.error
+				} else {
+					// Stay attached while the run row is confirmed. A caller
+					// cancel during that read must still stop the sandbox.
+					// Detach only once the follow response is about to return,
+					// so completing the HTTP response does not cancel the work.
+					transportBudgetFollow = true
+					const follow = await readTransportBudgetFollow(claimedRunHandle)
+					// A caller cancel does not overwrite an in-flight success
+					// with client_disconnected, and the response still carries
+					// the run id. The abort signal stays attached, so a sandbox
+					// that is still running stops through its own handler.
+					if (follow.transportFollow === 'terminal') {
+						activeTransportSignal.detach()
+						transportDetached = true
+					} else {
+						detachTransportAfterResponse = true
+					}
+					spanned = follow
 				}
+			} else if (raced.kind === 'rejected') {
+				throw raced.error
+			} else {
+				spanned = raced.value
+			}
+		}
+		if (
+			'transportFollow' in spanned &&
+			spanned.transportFollow === 'terminal'
+		) {
+			const timing = finishToolTiming(timingStart)
+			const outcome = spanned.run.status === 'error' ? 'failure' : 'success'
+			logMcpEvent({
+				category: 'mcp',
+				tool: 'execute',
+				toolName: 'execute',
+				outcome,
+				durationMs: timing.durationMs,
+				...mcpCallerFields,
+				registeredCapabilityCount,
+				sandboxError: outcome === 'failure',
+				context: { transportBudgetFollow: true, runId: spanned.run.id },
+			})
+			return buildKeyedExecuteLookupResponse({
+				run: spanned.run,
+				conversationId: resolvedConversationId,
+				timing,
+			})
+		}
+		if ('transportFollow' in spanned && spanned.transportFollow === 'running') {
+			const timing = finishToolTiming(timingStart)
+			logMcpEvent({
+				category: 'mcp',
+				tool: 'execute',
+				toolName: 'execute',
+				outcome: 'success',
+				durationMs: timing.durationMs,
+				...mcpCallerFields,
+				registeredCapabilityCount,
+				sandboxError: false,
+				context: {
+					transportBudgetFollow: true,
+					runId: spanned.runId,
+				},
+			})
+			return buildTransportBudgetFollowResponse({
+				conversationId: resolvedConversationId,
+				timing,
+				runId: spanned.runId,
+				idempotencyKey: spanned.idempotencyKey,
+				memories: surfacedMemories,
+			})
+		}
+		const result = spanned
+		const timing = {
+			...finishToolTiming(timingStart),
+			...(result.serverTiming && result.serverTiming.length > 0
+				? { serverTiming: result.serverTiming }
+				: {}),
+		}
+		const durationMs = timing.durationMs
+		const rawFetchHostNudges = [
+			...credentialCallMapWarnings,
+			...(await resolveRawFetchHostNudges({
+				agent: input.mcpAgent ?? agentlessNudgeState(),
+				env,
+				callerContext,
+				conversationId: resolvedConversationId,
+				hostCounts: rawFetchHosts.hostCounts(),
+				usedIntegrationAuthHelpers: codeUsesIntegrationAuthHelpers(
+					resolvedModule.code,
+				),
+			})),
+		]
+		const runId =
+			typeof result.runId === 'string'
+				? result.runId
+				: (claimedRunHandle?.id ?? undefined)
+		// A generated key is not durable until the running row is confirmed.
+		// In-budget responses already carry the module result, so they
+		// include only a caller-supplied key. The transport-budget
+		// follow response adds a generated key after that confirmation.
+		const idempotencyKeyForResponse = runRowOwned
+			? claimedRunHandle?.context.idempotencyKey?.trim() ||
+				normalizedIdempotencyKey ||
+				undefined
+			: undefined
+		const follow = {
+			...(runId ? { runId } : {}),
+			...(idempotencyKeyForResponse
+				? { idempotencyKey: idempotencyKeyForResponse }
+				: {}),
+		}
 
+		if (result.error) {
+			const errorDetails = getExecutionErrorDetails(result.error, {
+				orgSlug: callerContext.request?.org.slug,
+			})
+			const { errorName, errorMessage } = errorFields(result.error)
+			logMcpEvent({
+				category: 'mcp',
+				tool: 'execute',
+				toolName: 'execute',
+				outcome: 'failure',
+				durationMs,
+				...mcpCallerFields,
+				registeredCapabilityCount,
+				sandboxError: true,
+				errorName,
+				errorMessage,
+				cause: result.error,
+			})
+			return {
+				content: prependToolMetadataContent(resolvedConversationId, [
+					{
+						type: 'text',
+						text: formatExecutionOutput(result),
+					},
+					...formatRawFetchHostNudgeContent(rawFetchHostNudges),
+					...formatSurfacedMemoriesMarkdown(surfacedMemories),
+				]),
+				structuredContent: {
+					conversationId: resolvedConversationId,
+					timing,
+					...follow,
+					returnedBytes: 0,
+					error: errorMessage,
+					errorDetails,
+					...entitlementStructuredContent(result.error),
+					logs: result.logs ?? [],
+					...(rawFetchHostNudges.length > 0
+						? { warnings: rawFetchHostNudges }
+						: {}),
+					...buildMemoryStructuredContent(surfacedMemories),
+				},
+				isError: true,
+			}
+		}
+
+		logMcpEvent({
+			category: 'mcp',
+			tool: 'execute',
+			toolName: 'execute',
+			outcome: 'success',
+			durationMs,
+			...mcpCallerFields,
+			registeredCapabilityCount,
+			sandboxError: false,
+			context: activeStorageId ? { storageId: activeStorageId } : undefined,
+		})
+		const responseLimitBytes =
+			responseLimit ?? defaultExecutionResponseLimitBytes
+		const passthrough = extractMcpPassthrough(result.result)
+		const rawContent = passthrough?.content ?? null
+
+		if (rawContent) {
+			let validatedContent: Array<ContentBlock>
+			try {
+				validatedContent = validateDownstreamMcpContentBlocks(rawContent, {
+					kind: 'execute',
+					label: 'default export (__mcpContent)',
+				})
+			} catch (error) {
+				const message = getErrorMessage(error)
 				return {
 					content: prependToolMetadataContent(resolvedConversationId, [
 						{
 							type: 'text',
-							text: formatLimitedExecutionOutput({
-								value: structuredResultValue.value,
-								truncated: structuredResultValue.truncated,
-								note: structuredResultValue.note,
-								displayText: structuredResultValue.displayText,
-							}),
+							text: `Error: ${message}`,
 						},
-						...formatRawFetchHostNudgeContent(rawFetchHostNudges),
 						...formatSurfacedMemoriesMarkdown(surfacedMemories),
 					]),
 					structuredContent: {
 						conversationId: resolvedConversationId,
 						timing,
 						...follow,
-						returnedBytes: structuredResultValue.returnedBytes,
-						...(structuredResultValue.truncated
-							? {
-									truncated: true,
-									note: structuredResultValue.note,
-								}
-							: {}),
-						result: structuredResultValue.value,
+						returnedBytes: 0,
+						error: message,
+						result: passthrough?.structuredResult ?? null,
 						logs: result.logs ?? [],
-						...(rawFetchHostNudges.length > 0
-							? { warnings: rawFetchHostNudges }
-							: {}),
 						...buildMemoryStructuredContent(surfacedMemories),
 					},
-					isError,
+					isError: true,
 				}
 			}
-		},
-	)
+
+			const contentLimited = limitMcpContentBlocks(
+				validatedContent,
+				defaultMcpContentLimitBytes,
+			)
+			if (!contentLimited.ok) {
+				return {
+					content: prependToolMetadataContent(resolvedConversationId, [
+						{
+							type: 'text',
+							text: `Error: ${contentLimited.note}`,
+						},
+						...formatSurfacedMemoriesMarkdown(surfacedMemories),
+					]),
+					structuredContent: {
+						conversationId: resolvedConversationId,
+						timing,
+						...follow,
+						returnedBytes: contentLimited.returnedBytes,
+						truncated: true,
+						note: contentLimited.note,
+						result: passthrough?.structuredResult ?? null,
+						logs: result.logs ?? [],
+						...buildMemoryStructuredContent(surfacedMemories),
+					},
+					isError: true,
+				}
+			}
+
+			const companionLimited =
+				passthrough?.structuredResult === undefined ||
+				passthrough.structuredResult === null
+					? null
+					: limitExecutionResultValue(
+							passthrough.structuredResult,
+							responseLimitBytes,
+						)
+			const isError = passthrough?.isError ?? false
+			const truncationNote =
+				contentLimited.truncated && companionLimited?.truncated
+					? `${contentLimited.note} ${companionLimited.note}`
+					: contentLimited.truncated
+						? contentLimited.note
+						: companionLimited?.truncated
+							? companionLimited.note
+							: undefined
+			if (!isError) {
+				await scheduleFleetExecuteLastSuccess({
+					waitUntil,
+					kv: env.BUNDLE_ARTIFACTS_KV,
+				})
+			}
+
+			return {
+				content: prependToolMetadataContent(resolvedConversationId, [
+					...contentLimited.blocks,
+					...formatRawFetchHostNudgeContent(rawFetchHostNudges),
+					...formatSurfacedMemoriesMarkdown(surfacedMemories),
+				]),
+				structuredContent: {
+					conversationId: resolvedConversationId,
+					timing,
+					...follow,
+					returnedBytes:
+						contentLimited.returnedBytes +
+						(companionLimited?.returnedBytes ?? 0),
+					...(truncationNote
+						? {
+								truncated: true,
+								note: truncationNote,
+							}
+						: {}),
+					result: companionLimited
+						? companionLimited.value
+						: (passthrough?.structuredResult ?? null),
+					logs: result.logs ?? [],
+					...(rawFetchHostNudges.length > 0
+						? { warnings: rawFetchHostNudges }
+						: {}),
+					...buildMemoryStructuredContent(surfacedMemories),
+				},
+				isError,
+			}
+		}
+
+		const limitedResult = limitExecutionResultValue(
+			result.result,
+			responseLimitBytes,
+		)
+		const markerOnlyPassthrough =
+			passthrough &&
+			(passthrough.isError || passthrough.structuredResult !== null)
+				? passthrough
+				: null
+		const structuredResultValue = markerOnlyPassthrough
+			? limitExecutionResultValue(
+					markerOnlyPassthrough.structuredResult ?? {},
+					responseLimitBytes,
+				)
+			: limitedResult
+		const isError = markerOnlyPassthrough?.isError ?? false
+		if (!isError) {
+			await scheduleFleetExecuteLastSuccess({
+				waitUntil,
+				kv: env.BUNDLE_ARTIFACTS_KV,
+			})
+		}
+
+		return {
+			content: prependToolMetadataContent(resolvedConversationId, [
+				{
+					type: 'text',
+					text: formatLimitedExecutionOutput({
+						value: structuredResultValue.value,
+						truncated: structuredResultValue.truncated,
+						note: structuredResultValue.note,
+						displayText: structuredResultValue.displayText,
+					}),
+				},
+				...formatRawFetchHostNudgeContent(rawFetchHostNudges),
+				...formatSurfacedMemoriesMarkdown(surfacedMemories),
+			]),
+			structuredContent: {
+				conversationId: resolvedConversationId,
+				timing,
+				...follow,
+				returnedBytes: structuredResultValue.returnedBytes,
+				...(structuredResultValue.truncated
+					? {
+							truncated: true,
+							note: structuredResultValue.note,
+						}
+					: {}),
+				result: structuredResultValue.value,
+				logs: result.logs ?? [],
+				...(rawFetchHostNudges.length > 0
+					? { warnings: rawFetchHostNudges }
+					: {}),
+				...buildMemoryStructuredContent(surfacedMemories),
+			},
+			isError,
+		}
+	}
 }
 
 function normalizeExecuteIdempotencyKey(
@@ -1349,6 +1359,13 @@ function formatRawFetchHostNudgeContent(nudges: Array<string>) {
 			text: nudges.join('\n'),
 		},
 	]
+}
+
+function agentlessNudgeState(): McpRegistrationAgent {
+	return {
+		state: {},
+		setState() {},
+	} as unknown as McpRegistrationAgent
 }
 
 async function resolveRawFetchHostNudges(input: {

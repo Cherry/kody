@@ -7,10 +7,11 @@ import * as Sentry from '@sentry/cloudflare'
 import { getPackageAppBaseUrl } from '#worker/app-base-url.ts'
 import { stampFirstSearch } from '#worker/identity/activation-stamps.ts'
 import { resolvePublicUsername } from '#worker/identity/user-lookup.ts'
+import { type McpCallerContext } from '@kody-internal/shared/chat.ts'
+import { type McpRegistrationAgent } from '#mcp/mcp-registration-agent.ts'
 import { isMcpCallerError } from '#mcp/caller-error.ts'
 import { entitlementStructuredContent } from '#mcp/entitlement-metadata.ts'
 import { rateLimitStructuredContent } from '#mcp/rate-limit-metadata.ts'
-import { type McpRegistrationAgent } from '#mcp/mcp-registration-agent.ts'
 import {
 	callerContextFields,
 	errorFields,
@@ -110,30 +111,52 @@ function resolveListGuidance(input: {
 }
 
 async function stampFirstSearchIfAuthenticated(
-	agent: McpRegistrationAgent,
+	env: Env,
 	userId: OwnerId | null,
 ) {
 	if (!userId) return
-	const db = agent.getEnv().APP_DB
+	const db = env.APP_DB
 	if (!db) return
 	// Await the write. List-mode search builds the leftover-steps notice in
 	// the same request, and waitUntil would leave first_search_at unset so
 	// the notice still says Step 2 is left after this search completed it.
 	try {
-		await stampFirstSearch(db, { stableUserId: userId }, agent.getEnv())
+		await stampFirstSearch(db, { stableUserId: userId }, env)
 	} catch (error: unknown) {
 		console.warn('activation-stamp-search-failed', error)
 	}
 }
 
 export async function runSearchTool(input: {
-	agent: McpRegistrationAgent
+	env: Env
+	callerContext: McpCallerContext
 	args: SearchToolArgs
+	/**
+	 * MCP Durable Object, when this call is the `search` tool. HTTP omits it;
+	 * preamble and onboarding-notice memory stay request-local.
+	 */
+	mcpAgent?: object
 }) {
-	const { agent, args } = input
+	const { env, callerContext, args } = input
+	const agent = (input.mcpAgent ?? {
+		getEnv: () => env,
+		getCallerContext: () => callerContext,
+	}) as {
+		getEnv: () => Env
+		getCallerContext: () => McpCallerContext
+		state?: {
+			searchConversationIdsWithPreamble?: Array<string>
+			onboardingNoticeConversationIds?: Array<string>
+			onboardingNoticeLastShownAtMs?: number
+		}
+		setState?: (state: {
+			searchConversationIdsWithPreamble?: Array<string>
+			onboardingNoticeConversationIds?: Array<string>
+			onboardingNoticeLastShownAtMs?: number
+		}) => void
+	}
 	const timingStart = startToolTiming()
 	const conversationId = resolveConversationId(args.conversationId)
-	const callerContext = agent.getCallerContext()
 	const {
 		baseUrl,
 		hasUser,
@@ -172,18 +195,7 @@ export async function runSearchTool(input: {
 	let warnings: Array<string> = []
 	let username: string | null = null
 	const endToEndPhaseTimings: Partial<SearchPhaseTimings> = {}
-	const statefulAgent = agent as McpRegistrationAgent & {
-		state?: {
-			searchConversationIdsWithPreamble?: Array<string>
-			onboardingNoticeConversationIds?: Array<string>
-			onboardingNoticeLastShownAtMs?: number
-		}
-		setState?: (state: {
-			searchConversationIdsWithPreamble?: Array<string>
-			onboardingNoticeConversationIds?: Array<string>
-			onboardingNoticeLastShownAtMs?: number
-		}) => void
-	}
+	const statefulAgent = agent
 	const searchConversationIdsWithPreamble = Array.isArray(
 		statefulAgent.state?.searchConversationIdsWithPreamble,
 	)
@@ -207,7 +219,7 @@ export async function runSearchTool(input: {
 		const query = trimmedQuery
 		if (!args.entity) {
 			const execution = await executeSearchList({
-				env: agent.getEnv(),
+				env: env,
 				callerContext,
 				conversationId,
 				query,
@@ -225,7 +237,7 @@ export async function runSearchTool(input: {
 			Object.assign(endToEndPhaseTimings, execution.phaseTimings)
 			signal.throwIfAborted()
 			const stampStart = performance.now()
-			await stampFirstSearchIfAuthenticated(agent, personOwnerId)
+			await stampFirstSearchIfAuthenticated(env, personOwnerId)
 			endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 			const structuredWarnings = [...warnings]
 			const onboardingStart = performance.now()
@@ -248,7 +260,7 @@ export async function runSearchTool(input: {
 			if (considerOnboardingNotice) {
 				const settlement = await settleWithBudget(
 					buildOnboardingSearchNotice({
-						env: agent.getEnv(),
+						env: env,
 						userId: personOwnerId,
 						baseUrl,
 					}),
@@ -288,7 +300,7 @@ export async function runSearchTool(input: {
 				try {
 					const waiting = await settleWithBudget(
 						deriveWaitingItemsForStableUser({
-							env: agent.getEnv(),
+							env: env,
 							personId: callerUserId,
 							orgId: callerContext.request?.org.id ?? null,
 							email: callerContext.user?.email ?? '',
@@ -330,14 +342,14 @@ export async function runSearchTool(input: {
 		username = boundToTeamOrg
 			? boundOrgSlug
 			: await resolvePublicUsername({
-					db: agent.getEnv().APP_DB,
+					db: env.APP_DB,
 					username: callerContext.user?.username ?? null,
 					email: callerContext.user?.email ?? null,
 				})
 		endToEndPhaseTimings.usernameLookupMs = elapsedMs(usernameStart)
 		const rowAndRegistryLoadStart = performance.now()
 		const rowsPromise = loadSearchRowsAndRegistry({
-			env: agent.getEnv(),
+			env: env,
 			callerContext,
 			userId,
 			includeHiddenPackages,
@@ -357,7 +369,7 @@ export async function runSearchTool(input: {
 				args.entity.map(async (entityRef) => {
 					try {
 						const detail = await resolveEntityDetail({
-							agent,
+							agent: agent as McpRegistrationAgent,
 							callerContext,
 							userId,
 							username,
@@ -385,7 +397,7 @@ export async function runSearchTool(input: {
 			signal.throwIfAborted()
 			if (batchResults.some((entry) => entry.ok)) {
 				const stampStart = performance.now()
-				await stampFirstSearchIfAuthenticated(agent, personOwnerId)
+				await stampFirstSearchIfAuthenticated(env, personOwnerId)
 				endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 			}
 			return {
@@ -395,7 +407,7 @@ export async function runSearchTool(input: {
 		}
 		const entityResolveStart = performance.now()
 		const detail = await resolveEntityDetail({
-			agent,
+			agent: agent as McpRegistrationAgent,
 			callerContext,
 			userId,
 			username,
@@ -405,7 +417,7 @@ export async function runSearchTool(input: {
 		endToEndPhaseTimings.entityResolveMs = elapsedMs(entityResolveStart)
 		signal.throwIfAborted()
 		const stampStart = performance.now()
-		await stampFirstSearchIfAuthenticated(agent, personOwnerId)
+		await stampFirstSearchIfAuthenticated(env, personOwnerId)
 		endToEndPhaseTimings.firstSearchStampMs = elapsedMs(stampStart)
 		return {
 			mode: 'entity' as const,
@@ -471,7 +483,7 @@ export async function runSearchTool(input: {
 				...mcpCallerFields,
 				context: { phaseTimings },
 			})
-			recordSearchObservabilityEvent(agent.getEnv(), {
+			recordSearchObservabilityEvent(env, {
 				outcome: 'success',
 				mode: 'entity',
 				durationMs: timing.durationMs,
@@ -589,7 +601,7 @@ export async function runSearchTool(input: {
 						}
 					: { context: { phaseTimings } }),
 			})
-			recordSearchObservabilityEvent(agent.getEnv(), {
+			recordSearchObservabilityEvent(env, {
 				outcome: allFailed ? 'failure' : 'success',
 				mode: 'entity-batch',
 				durationMs: timing.durationMs,
@@ -683,7 +695,7 @@ export async function runSearchTool(input: {
 		const slimMatches = toSlimStructuredMatches({
 			matches: trimmedPayload.matches,
 			baseUrl,
-			packageAppBaseUrl: getPackageAppBaseUrl({ env: agent.getEnv() }),
+			packageAppBaseUrl: getPackageAppBaseUrl({ env: env }),
 			username,
 		})
 		const formattingMs = elapsedMs(formattingStartMs)
@@ -758,7 +770,7 @@ export async function runSearchTool(input: {
 				phaseTimings,
 			},
 		})
-		recordSearchObservabilityEvent(agent.getEnv(), {
+		recordSearchObservabilityEvent(env, {
 			outcome: 'success',
 			mode: 'list',
 			durationMs: timing.durationMs,
@@ -827,7 +839,7 @@ export async function runSearchTool(input: {
 			cause: error,
 			context: { phaseTimings },
 		})
-		recordSearchObservabilityEvent(agent.getEnv(), {
+		recordSearchObservabilityEvent(env, {
 			outcome: 'failure',
 			mode: args.entity
 				? Array.isArray(args.entity)

@@ -3,6 +3,7 @@ import { toolCliEntryFiles } from './tools/knip-tool-entries.ts'
 
 export default defineConfig({
 	include: ['files', 'exports', 'types'],
+	ignore: ['packages/cli/**'],
 	workspaces: {
 		'.': {
 			entry: [...toolCliEntryFiles(process.cwd()), 'e2e/**/*.ts', 'vitest*.ts'],

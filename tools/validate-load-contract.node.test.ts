@@ -198,6 +198,7 @@ test('small machine skips the startup-time check after a suite failure', async (
 				'platform-build',
 				'startup',
 				'knip',
+				'cli',
 			],
 			maxProcesses: 1,
 		},

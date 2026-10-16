@@ -29,6 +29,19 @@ export function isCapabilityProxyOperation(operation: ApiOperation): boolean {
 	return operation.kind === 'native' && operation.tag === 'capability-proxy'
 }
 
+/**
+ * CLI `kody login` OAuth is a bearer only long enough to mint a device
+ * `kody_at_` (and on the pre-existing local-execute routes, so older CLIs
+ * keep working). Every other Open API route stays `kody_at_`-only.
+ */
+export function operationAllowsCliOauth(operation: ApiOperation): boolean {
+	return (
+		isCapabilityProxyOperation(operation) ||
+		(operation.kind === 'native' &&
+			operation.operationId === 'cliLoginDeviceToken')
+	)
+}
+
 /** Code-authenticated CLI redeem — no Bearer (ADR 0056). */
 export function isCliCredentialBootstrapRedeemOperation(
 	operation: ApiOperation,

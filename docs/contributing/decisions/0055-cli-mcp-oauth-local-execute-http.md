@@ -52,3 +52,7 @@ the CLI's own `kody login` store is used on the client.
   instead of a second OAuth or chat-facing `tokenCreate`.
 - Revisit if a weaker-than-owner MCP session is needed beyond API tokens, or if
   OAuth should expand beyond local-execute HTTP.
+- **Amended by [0076](./0076-cli-login-device-token.md):**
+  `POST /v1/tokens/device` also accepts CLI MCP OAuth, and only to mint a
+  `kody_at_…` device token. `POST /v1/execute` is `kody_at_`-only. Local-execute
+  OAuth stays for older CLIs.

@@ -28,6 +28,7 @@ export const apiOperationTags = [
 	'community',
 	'tokens',
 	'capability-proxy',
+	'execute',
 ] as const
 
 export type ApiOperationTag = (typeof apiOperationTags)[number]
@@ -74,6 +75,9 @@ export const nativeApiOperationIds = [
 	'capabilityProxyCall',
 	'capabilityProxyGatewayFetch',
 	'localExecutePackageGraph',
+	'execute',
+	'searchTool',
+	'cliLoginDeviceToken',
 ] as const
 
 export type NativeApiOperationId = (typeof nativeApiOperationIds)[number]
@@ -135,10 +139,11 @@ const capabilityProxyRoute = {
  * add operations freely, but never rename an operationId, change a method or
  * path, or remove an operation without a new version.
  *
- * Deliberately absent: `execute` (use MCP or local execute), secret
- * plaintext reads, inbound webhook receive, package-app HTTP/WebSocket
- * traffic, admin, and runtime-only capabilities (values, package-app fetch,
- * synthetic dispatch).
+ * Deliberately absent: secret plaintext reads, inbound webhook receive,
+ * package-app HTTP/WebSocket traffic, admin, and runtime-only capabilities
+ * (values, package-app fetch, synthetic dispatch). Hosted execute is
+ * `POST /v1/execute` (native). The in-sandbox `execute` capability stays
+ * off this list.
  */
 export const apiOperations: ReadonlyArray<ApiOperation> = [
 	...capabilityRoutes('account', [
@@ -467,6 +472,13 @@ export const apiOperations: ReadonlyArray<ApiOperation> = [
 		'org:execute',
 		capabilityProxyRoute,
 	),
+	nativeRoute('POST', '/v1/execute', 'execute', 'org:execute', {
+		tag: 'execute',
+	}),
+	nativeRoute('POST', '/v1/search/tool', 'searchTool', 'search:read', {
+		tag: 'search',
+	}),
+	nativeRoute('POST', '/v1/tokens/device', 'cliLoginDeviceToken', 'none'),
 ]
 
 export const apiOperationsById: ReadonlyMap<string, ApiOperation> = new Map(

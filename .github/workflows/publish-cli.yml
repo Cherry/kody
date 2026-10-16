@@ -1,0 +1,37 @@
+name: 📦 Publish CLI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'packages/cli/**'
+      - 'packages/worker/src/open-api/**'
+      - 'packages/shared/**'
+      - 'tools/generate-cli-openapi-client.ts'
+      - 'tools/cli-release-plan.ts'
+      - 'tools/publish-cli.ts'
+      - '.github/workflows/publish-cli.yml'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: 🧰 Setup
+        uses: ./.github/actions/setup-validate
+
+      - name: 🚀 Publish @kodycodes/cli
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tools/publish-cli.ts
