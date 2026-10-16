@@ -175,15 +175,29 @@ test('control GET has no side effect, signed secure POST opts in, and opt-out wo
 
 test('forged, expired and other-release preferences fail closed', async () => {
 	const opted = await optIn()
-	const forged =
-		opted.preference.slice(0, -1) + (opted.preference.endsWith('a') ? 'b' : 'a')
-	expect(await lane(request('/account', `${opted.auth}; ${forged}`))).toBe(
-		'legacy',
-	)
 	const signer = createCookie('__Host-kody_start', {
 		path: '/',
 		secrets: [rolloutSecret],
 	})
+	const separator = opted.preference.indexOf('=')
+	const signed = decodeURIComponent(opted.preference.slice(separator + 1))
+	const signatureSeparator = signed.lastIndexOf('.')
+	const signature = Buffer.from(signed.slice(signatureSeparator + 1), 'base64')
+	// Changing the last Base64 character can change only ignored padding bits.
+	// Flip an actual HMAC byte so this is always a cryptographically different token.
+	signature[0] = signature[0]! ^ 1
+	const forged =
+		opted.preference.slice(0, separator + 1) +
+		encodeURIComponent(
+			signed.slice(0, signatureSeparator + 1) +
+				signature.toString('base64').replace(/=+$/, ''),
+		)
+	expect(forged).not.toBe(opted.preference)
+	expect(await signer.parse(opted.preference)).toBeTypeOf('string')
+	expect(await signer.parse(forged)).toBeNull()
+	expect(await lane(request('/account', `${opted.auth}; ${forged}`))).toBe(
+		'legacy',
+	)
 	for (const value of [
 		{ v: 1, person: personA, release, expiresAt: 0 },
 		{
