@@ -50,6 +50,7 @@ import {
 	type PackageOption,
 	type SecretFilterScope,
 	accountSecretsRouteLoader,
+	applyStuckRenameRecovery,
 	buildBaseSecretsHref,
 	buildNewSecretHref,
 	buildSecretHref,
@@ -91,11 +92,7 @@ export function AccountSecretsRoute(handle: Handle) {
 	let approval: ApprovalView | null = null
 	let editorState = createEmptyEditorState([])
 	let message: string | null = null
-	/**
-	 * Save warnings (provider link / rename cleanup) must survive the
-	 * post-save navigate → GET applyPayload cycle, which otherwise clears
-	 * `message` because the loader payload has no warning fields.
-	 */
+	/** One-shot: survives navigate → GET applyPayload (warnings / stuck rename). */
 	let stickySaveWarning: string | null = null
 	let submittingApprovalAction: ApprovalAction | null = null
 	let completedPackageApproval: ApprovalAction | null = null
@@ -191,8 +188,6 @@ export function AccountSecretsRoute(handle: Handle) {
 		const saveWarning = readAccountSecretsSaveWarning(payload)
 		if (saveWarning) stickySaveWarning = saveWarning
 		const sticky = stickySaveWarning
-		// Consume after one apply so post-save navigate → GET keeps the
-		// warning once, without pinning it across later secret views.
 		if (sticky && !saveWarning) stickySaveWarning = null
 		message =
 			sticky ??
@@ -353,7 +348,22 @@ export function AccountSecretsRoute(handle: Handle) {
 				AccountSecretsLoaderData & { error?: string; ok?: boolean }
 			>(response)
 			if (!response.ok || !payload?.ok) {
-				throw new Error(payload?.error || 'Unable to save secret.')
+				const stuck = payload?.selectedSecret
+				const errorMessage = payload?.error || 'Unable to save secret.'
+				if (stuck) {
+					const recovered = applyStuckRenameRecovery({
+						editor: submittedEditorState,
+						stuck,
+						search: getCurrentSearch(),
+						currentHref: getCurrentHref(),
+					})
+					stickySaveWarning = errorMessage
+					editorState = recovered.editor
+					saveState = 'idle'
+					navigate(recovered.href)
+					return
+				}
+				throw new Error(errorMessage)
 			}
 
 			const wasCreating = !submittedEditorState.currentId
