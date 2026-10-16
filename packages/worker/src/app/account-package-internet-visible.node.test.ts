@@ -838,13 +838,9 @@ test('matching-pin visibility failure returns a native mutation error without a 
 		fingerprintMatchesApproval: true,
 		capabilitySet: { entries: [], fingerprint: 'abc' },
 	})
-	mockModule.approvePackageCapabilitySet.mockResolvedValue({
-		wentPublicRequest: { id: 'req-1' },
-	})
-	mockModule.approveWentPublicRequest.mockResolvedValue({
+	mockModule.applyMatchingPinInternetVisible.mockResolvedValue({
 		ok: false,
 		error: 'Approval no longer pending.',
-		status: 409,
 	})
 	const result = await setAccountPackageInternetVisible({
 		env: { APP_DB: {} } as Env,
@@ -861,5 +857,13 @@ test('matching-pin visibility failure returns a native mutation error without a 
 		ok: false,
 		error: 'Approval no longer pending.',
 	})
+	expect(mockModule.applyMatchingPinInternetVisible).toHaveBeenCalledWith(
+		expect.objectContaining({
+			savedPackage: mockModule.writablePackage,
+			fingerprint: 'abc',
+		}),
+	)
+	expect(mockModule.approvePackageCapabilitySet).not.toHaveBeenCalled()
+	expect(mockModule.approveWentPublicRequest).not.toHaveBeenCalled()
 	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 })

@@ -52,16 +52,37 @@ test('server-function requests reach Start without legacy endpoint authorization
 	vi.unstubAllEnvs()
 })
 
-test('getEnv memoizes per env identity and requires AUTH_RATE_LIMITER in production', () => {
+test('getEnv memoizes per env identity and requires production rate limiting and Turnstile', () => {
 	const env = createEnv()
 	expect(getEnv(env)).toBe(getEnv(env))
 	expect(getEnv(createEnv())).not.toBe(getEnv(env))
 	expect(() => getEnv(createEnv({ SENTRY_ENVIRONMENT: 'production' }))).toThrow(
 		'AUTH_RATE_LIMITER',
 	)
+	for (const keys of [
+		{},
+		{ TURNSTILE_SITE_KEY: 'test-site' },
+		{ TURNSTILE_SECRET_KEY: 'test-secret' },
+		{ TURNSTILE_SITE_KEY: ' ', TURNSTILE_SECRET_KEY: 'test-secret' },
+	]) {
+		expect(() =>
+			getEnv(
+				createEnv({
+					SENTRY_ENVIRONMENT: 'production',
+					AUTH_RATE_LIMITER: {},
+					...keys,
+				}),
+			),
+		).toThrow('TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY')
+	}
 	expect(() =>
 		getEnv(
-			createEnv({ SENTRY_ENVIRONMENT: 'production', AUTH_RATE_LIMITER: {} }),
+			createEnv({
+				SENTRY_ENVIRONMENT: 'production',
+				AUTH_RATE_LIMITER: {},
+				TURNSTILE_SITE_KEY: 'test-site',
+				TURNSTILE_SECRET_KEY: 'test-secret',
+			}),
 		),
 	).not.toThrow()
 })
