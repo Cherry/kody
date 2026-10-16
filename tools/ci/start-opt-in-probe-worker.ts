@@ -101,6 +101,25 @@ export async function probeRequest(request: Request, env: ProbeEnv) {
 		}),
 	)
 	const safeHeaders = new Headers({ 'Cache-Control': 'no-store' })
+	if (target === '/health') {
+		safeHeaders.set(
+			'X-Probe-Commit-Present',
+			result.headers.has('X-App-Commit-Sha') ? 'true' : 'false',
+		)
+		let category = 'none'
+		if (result.status >= 500) {
+			const body = await result.clone().text()
+			category = body.includes('illustrated-error-page')
+				? 'native-error-page'
+				: /(?:Error|error code)\s*1101\b/.test(body)
+					? 'cloudflare-1101'
+					: /(?:Error|error code)\s*1102\b/.test(body)
+						? 'cloudflare-1102'
+						: 'unknown-error'
+		}
+		safeHeaders.set('X-Probe-Error-Class', category)
+	}
+
 	for (const name of ['Content-Type', 'Cache-Control']) {
 		const value = result.headers.get(name)
 		if (value) safeHeaders.set(`X-Probe-${name}`, value)

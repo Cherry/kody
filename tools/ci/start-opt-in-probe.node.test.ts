@@ -153,7 +153,9 @@ test('health diagnostics identify lane and response shape without printing body 
 			}),
 			'start',
 		),
-	).rejects.toThrow('start health (status 200, JSON content type false)')
+	).rejects.toThrow(
+		'start health (status 200, JSON content type false, error unknown, commit header false)',
+	)
 	await expect(
 		inspectHealthResponse(
 			new Response('private malformed', {
@@ -162,7 +164,7 @@ test('health diagnostics identify lane and response shape without printing body 
 			'router',
 		),
 	).rejects.toThrow(
-		'router health (status 200, JSON content type true) returned invalid JSON',
+		'router health (status 200, JSON content type true, error unknown, commit header false) returned invalid JSON',
 	)
 	await expect(
 		inspectHealthResponse(
@@ -173,4 +175,58 @@ test('health diagnostics identify lane and response shape without printing body 
 			'legacy',
 		),
 	).resolves.toBe('release')
+})
+
+test('failed health exposes only fixed error category and commit header presence', async () => {
+	const { env } = fixture()
+	env.START = {
+		fetch: async () =>
+			new Response(
+				'<html class="illustrated-error-page">private error details</html>',
+				{
+					status: 500,
+					headers: {
+						'Content-Type': 'text/html',
+						'X-App-Commit-Sha': 'private-sha',
+					},
+				},
+			),
+	}
+	const response = await probeRequest(
+		new Request('http://localhost/start/health', {
+			headers: { 'X-Kody-Probe-Key': env.PROBE_KEY },
+		}),
+		env,
+	)
+	expect(response.headers.get('X-Probe-Error-Class')).toBe('native-error-page')
+	expect(response.headers.get('X-Probe-Commit-Present')).toBe('true')
+	expect(response.headers.get('X-App-Commit-Sha')).toBeNull()
+})
+
+test('document inspection accepts valid SSR title attributes and preserves title requirement', () => {
+	const release = 'a'.repeat(40)
+	expect(() =>
+		inspectPublicDocument(
+			'<!doctype html><html><head><title data-rh="true">Kody</title></head><body></body></html>',
+			release,
+			false,
+			'legacy',
+		),
+	).not.toThrow()
+	expect(() =>
+		inspectPublicDocument(
+			'<!doctype html><html><head><title data-rh="true"> </title></head><body></body></html>',
+			release,
+			false,
+			'start',
+		),
+	).toThrow('start public document is not complete HTML')
+	expect(() =>
+		inspectPublicDocument(
+			'<!doctype html><html><head></head><body>private body</body></html>',
+			release,
+			false,
+			'router',
+		),
+	).toThrow('"title":false')
 })

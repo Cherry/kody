@@ -1,3 +1,4 @@
+import { startPrivateCandidateTail } from './start-opt-in-diagnostics.ts'
 import { reviewedRouterName } from './start-rollout-config.ts'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
@@ -22,7 +23,17 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 export async function inspectHealthResponse(response: Response, lane: string) {
 	const type = response.headers.get('X-Probe-Content-Type') ?? ''
-	const context = `${lane} health (status ${response.status}, JSON content type ${/^application\/json(?:;|$)/i.test(type)})`
+	const category = response.headers.get('X-Probe-Error-Class') ?? 'unknown'
+	const knownCategory = [
+		'none',
+		'native-error-page',
+		'cloudflare-1101',
+		'cloudflare-1102',
+		'unknown-error',
+	].includes(category)
+		? category
+		: 'unknown'
+	const context = `${lane} health (status ${response.status}, JSON content type ${/^application\/json(?:;|$)/i.test(type)}, error ${knownCategory}, commit header ${response.headers.get('X-Probe-Commit-Present') === 'true'})`
 	assert(response.status === 200, `${context} failed`)
 	assert(
 		/^application\/json(?:;|$)/i.test(type),
@@ -47,10 +58,21 @@ export function inspectPublicDocument(
 	html: string,
 	release: string,
 	expectStart: boolean,
+	lane = 'public',
 ) {
+	const title = /<title\b([^>]*)>([\s\S]*?)<\/title>/i.exec(html)
+	const shape = {
+		doctype: /<!doctype\s+html\b/i.test(html),
+		html: /<html\b/i.test(html),
+		head: /<head\b/i.test(html),
+		body: /<body\b/i.test(html),
+		title: Boolean(title),
+		titleAttributes: Boolean(title?.[1]?.trim()),
+		titleText: Boolean(title?.[2]?.trim()),
+	}
 	assert(
-		/<!doctype html/i.test(html) && /<title>[\s\S]+?<\/title>/i.test(html),
-		'Public document is not complete HTML',
+		shape.doctype && shape.titleText,
+		`${lane} public document is not complete HTML: ${JSON.stringify(shape)}`,
 	)
 	assert(
 		html.includes(`/__start/${release}/`) === expectStart,
@@ -96,7 +118,9 @@ if (isExecutedDirectly(import.meta.url)) {
 	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-probe-'))
 	let child: ChildProcess | undefined
 	let ended = false
+	let stopTail = () => {}
 	try {
+		stopTail = startPrivateCandidateTail(release, candidateName)
 		const key = randomBytes(32).toString('hex')
 		const localPort = await port()
 		const config = {
@@ -179,14 +203,24 @@ if (isExecutedDirectly(import.meta.url)) {
 		for (const lane of ['start', 'legacy', 'router']) {
 			const response = await fetchProbe(`/${lane}/document`)
 			assert(response.status === 200, `${lane} public document failed`)
-			inspectPublicDocument(await response.text(), release, lane === 'start')
+			inspectPublicDocument(
+				await response.text(),
+				release,
+				lane === 'start',
+				lane,
+			)
 		}
 		const invalid = await fetchProbe('/router/invalid-preference')
 		assert(
 			invalid.status === 200,
 			'Invalid preference did not retain the legacy app',
 		)
-		inspectPublicDocument(await invalid.text(), release, false)
+		inspectPublicDocument(
+			await invalid.text(),
+			release,
+			false,
+			'router-invalid-preference',
+		)
 		for (const route of ['/router/opt-in', '/router/rpc'])
 			assert(
 				(await fetchProbe(route)).status === 403,
@@ -248,6 +282,7 @@ if (isExecutedDirectly(import.meta.url)) {
 		)
 		console.log(JSON.stringify(proof))
 	} finally {
+		stopTail()
 		child?.kill('SIGTERM')
 		await new Promise<void>((resolve) => {
 			if (!child || ended) resolve()
