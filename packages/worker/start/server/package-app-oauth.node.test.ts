@@ -64,10 +64,12 @@ vi.mock('../../src/audit-log.ts', () => ({
 import {
 	loadPackageAppOauthConsent,
 	decidePackageAppOauthConsent,
+} from './package-app-oauth.ts'
+import {
 	packageAppOauthAuthorizeDocument,
 	packageAppOauthAuthorizePost,
 	packageAppOauthHostAuth,
-} from './package-app-oauth.ts'
+} from './package-app-oauth-protocol.ts'
 beforeEach(() => {
 	vi.clearAllMocks()
 	state.dedicatedHost = ''

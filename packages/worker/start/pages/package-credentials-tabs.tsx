@@ -47,7 +47,7 @@ export type MappingCellInput = {
 	editable: boolean
 	trigger: PackageTriggerView | null
 }
-export type TriggerEnablementActionInput = PackageCredentialsEnablementAction
+type TriggerEnablementActionInput = PackageCredentialsEnablementAction
 
 export type PackageTabContext = {
 	orgSlug: string

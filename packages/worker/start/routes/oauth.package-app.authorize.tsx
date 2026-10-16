@@ -1,11 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { staticDocumentHead } from '../components/document-head.ts'
 import {
-	loadPackageAppOauthConsent,
 	packageAppOauthAuthorizeDocument,
 	packageAppOauthAuthorizePost,
 	rejectPackageAppOauthMethod,
-} from '#start/server/package-app-oauth'
+} from '#start/server/package-app-oauth-protocol'
+import { loadPackageAppOauthConsent } from '#start/server/package-app-oauth'
 import { PackageAppOauthConsentPage } from '../pages/package-app-oauth-consent.tsx'
 import { createElement } from 'react'
 

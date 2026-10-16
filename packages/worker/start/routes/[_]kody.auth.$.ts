@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { packageAppOauthHostAuth } from '#start/server/package-app-oauth'
+import { packageAppOauthHostAuth } from '#start/server/package-app-oauth-protocol'
 export const Route = createFileRoute('/_kody/auth/$')({
 	server: {
 		handlers: {

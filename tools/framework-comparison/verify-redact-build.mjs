@@ -41,6 +41,19 @@ for (const environment of ['client', 'server']) {
 			`${environment}: retired website rendering runtime remains in the build: ${JSON.stringify(retiredWebsiteRuntime)}`,
 		)
 	}
+	if (environment === 'client') {
+		const serverOnly = modules.filter(
+			(source) =>
+				/\/@resvg\/resvg-wasm\//.test(source) ||
+				/(?:^|\/)packages\/worker\/(?:start\/server\/package-app-oauth-protocol|src\/app\/package-app-oauth-authorize)\.ts$/.test(
+					source,
+				),
+		)
+		if (serverOnly.length > 0)
+			throw new Error(
+				`client: server-only OAuth or image rasterization modules remain in the build: ${JSON.stringify(serverOnly)}`,
+			)
+	}
 	console.log(
 		`${environment}: ${redact.length} Redact source entries, no upstream React or retired website runtime entries`,
 	)

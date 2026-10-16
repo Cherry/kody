@@ -42,7 +42,10 @@ test('package-app OAuth consent renders Kody shell fields', async () => {
 
 	expect(html).toContain('data-testid="package-app-oauth-consent"')
 	expect(html).toContain('Allow demo?')
-	expect(html).toContain('Published by Acme Apps')
+	const publisherText = html
+		.match(/<p\b[^>]*>Published by[\s\S]*?<\/p>/)?.[0]
+		.replace(/<!--[\s\S]*?-->|<[^>]+>/g, '')
+	expect(publisherText).toBe('Published by Acme Apps (@acme)')
 	expect(html).toContain('acme.kody.run')
 	expect(html).toContain('See your email address')
 	expect(html).toContain('data-testid="package-app-oauth-approve"')
