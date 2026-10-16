@@ -530,9 +530,17 @@ packages on the publish gate. It uses `applyMode: 'published-only'`.
 
 After apply (or for packages that were already seal-ready), run
 `adminCredentialStampBackfill` to restamp seal-ready packages that still lack a
-KV stamp at the current `published_commit`. Phase 3 must not start until that
-fleet report shows zero `missing_stamp` / `needs_manifest` / `unconvertible` /
-`deferred_scan_budget` packages among published packages that need stamps.
+KV stamp at the current `published_commit`. A package with a stored stamp is
+limited at runtime to its declared credential slots, including a stamp the fleet
+still calls `would_restamp` (keys or dependency pins drifted). Packages this
+scan reports as `needs_manifest`, `unconvertible`, `deferred_scan_budget`, or
+`failed` have no stamp and keep the legacy credential path until a republish
+stores one. `missingStampPackages` counts only `would_restamp` rows. It does not
+include `unconvertiblePackages`, `needsManifestPackages`,
+`deferredScanBudgetPackages`, or `failedPackages`. The legacy path can be
+removed when one full dry-run (`nextCursor` null) reports every one of those
+counters, plus `missingStampPackages`, as zero. Only `stamped` and
+`skipped_unpublished` remain.
 
 ### `0015-convert-credential-stamps`
 

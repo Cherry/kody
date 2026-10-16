@@ -14,6 +14,8 @@ import * as featureFlags from '#worker/feature-flags/service.ts'
 import { createOrganization } from '#worker/orgs/create-organization.ts'
 import { provisionPersonalOrg } from '#worker/orgs/provision.ts'
 import { insertSavedPackage } from '#worker/package-registry/repo.ts'
+import * as runtimeArtifacts from '#worker/package-runtime/published-runtime-artifacts.ts'
+import * as entitySources from '#worker/repo/entity-sources.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 import { applyAllMigrations } from '#worker/test-support/apply-all-migrations.ts'
 import {
@@ -30,6 +32,8 @@ import {
 } from './credential-need-enforcement.ts'
 import * as needsClosure from './credential-needs-closure.ts'
 import { type CredentialNeed } from './credential-needs.ts'
+import * as stampPresence from './credential-stamp-presence.ts'
+import { resolveCredential } from './resolve-credential.ts'
 
 vi.mock('cloudflare:workers', async (importOriginal) => ({
 	...(await importOriginal<typeof import('cloudflare:workers')>()),
@@ -193,6 +197,12 @@ function enforcement(enabled: boolean) {
 	vi.spyOn(featureFlags, 'isFeatureGloballyEnabled').mockResolvedValue(enabled)
 }
 
+function stamp(present: boolean) {
+	vi.spyOn(stampPresence, 'packageCarriesCredentialStamp').mockResolvedValue(
+		present,
+	)
+}
+
 function declare(stored: Array<CredentialNeed>, fresh = stored) {
 	return vi
 		.spyOn(needsClosure, 'loadPublishedCredentialNeeds')
@@ -211,6 +221,197 @@ test('with the flag off a team package fills any placeholder, as today', async (
 	await expect(
 		t.fill({ orgId: t.acmeId, packageId, header: 'Bearer {{secret:RESEND}}' }),
 	).resolves.toBe(`Bearer ${keyValue}`)
+})
+
+test('with the flag off an unstamped author package still fills any placeholder', async () => {
+	const t = await setup()
+	await t.storeSecret(t.personalId, 'RESEND')
+	const packageId = await t.savePackage({
+		ownerId: t.personalId,
+		name: '@bea/mailer',
+	})
+	enforcement(false)
+	stamp(false)
+	declare([])
+	await expect(
+		t.fill({
+			orgId: t.personalId,
+			packageId,
+			header: 'Bearer {{secret:RESEND}}',
+		}),
+	).resolves.toBe(`Bearer ${keyValue}`)
+})
+
+test('a stamped package fills only declared slots even when the flag is off', async () => {
+	const t = await setup()
+	await t.storeSecret(t.acmeId, 'RESEND')
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	enforcement(false)
+	stamp(true)
+	declare([])
+	const error = await t
+		.fill({ orgId: t.acmeId, packageId, header: 'Bearer {{secret:RESEND}}' })
+		.catch((caught: unknown) => caught as Error)
+	expect(error).toMatchObject({
+		code: 'credential_need_undeclared',
+		key: 'RESEND',
+	})
+	expect((error as Error).message).toContain('credential stamp')
+	expect((error as Error).message).not.toContain(keyValue)
+
+	declare([need('RESEND')])
+	await expect(
+		t.fill({ orgId: t.acmeId, packageId, header: 'Bearer {{secret:RESEND}}' }),
+	).resolves.toBe(`Bearer ${keyValue}`)
+})
+
+test('a stamped package owned by another org is still limited to its declarations', async () => {
+	const t = await setup()
+	await t.storeSecret(t.personalId, 'RESEND')
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	enforcement(false)
+	stamp(true)
+	declare([need('RESEND')])
+	const declared = await t
+		.fill({
+			orgId: t.personalId,
+			packageId,
+			header: 'Bearer {{secret:RESEND}}',
+		})
+		.catch((caught: unknown) => caught)
+	expect(declared).not.toMatchObject({ code: 'credential_need_undeclared' })
+
+	declare([])
+	await expect(
+		t.fill({
+			orgId: t.personalId,
+			packageId,
+			header: 'Bearer {{secret:RESEND}}',
+		}),
+	).rejects.toMatchObject({ code: 'credential_need_undeclared' })
+})
+
+test('stamp presence follows a package owned by another org', async () => {
+	const t = await setup()
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	vi.spyOn(runtimeArtifacts, 'hasPublishedRuntimeArtifacts').mockReturnValue(
+		true,
+	)
+	vi.spyOn(runtimeArtifacts, 'readPublishedCredentialStamp').mockResolvedValue({
+		version: 1,
+		keys: ['RESEND'],
+		depStamps: [],
+		stampHash: 'abc',
+	})
+	vi.spyOn(entitySources, 'getEntitySourceById').mockResolvedValue({
+		published_commit: 'commit-1',
+		user_id: t.acmeId,
+	} as unknown as Awaited<ReturnType<typeof entitySources.getEntitySourceById>>)
+	await expect(
+		stampPresence.packageCarriesCredentialStamp({
+			env: t.env,
+			request: null,
+			orgId: t.personalId,
+			packageId,
+		}),
+	).resolves.toBe(true)
+})
+
+test('a stamped package limits its author; an unstamped author package does not', async () => {
+	const t = await setup()
+	await t.storeSecret(t.personalId, 'RESEND')
+	const own = await t.savePackage({
+		ownerId: t.personalId,
+		name: '@bea/mailer',
+	})
+	enforcement(false)
+	stamp(true)
+	declare([])
+	await expect(
+		t.fill({
+			orgId: t.personalId,
+			packageId: own,
+			header: 'Bearer {{secret:RESEND}}',
+		}),
+	).rejects.toMatchObject({ code: 'credential_need_undeclared' })
+
+	stamp(false)
+	await expect(
+		t.fill({
+			orgId: t.personalId,
+			packageId: own,
+			header: 'Bearer {{secret:RESEND}}',
+		}),
+	).resolves.toBe(`Bearer ${keyValue}`)
+})
+
+test('a stamped package secret read by name is limited even when the flag is off', async () => {
+	const t = await setup()
+	await t.storeSecret(t.acmeId, 'RESEND')
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	enforcement(false)
+	stamp(true)
+	declare([])
+	const read = (name: string) =>
+		resolveCredential({
+			env: t.env,
+			orgId: t.acmeId,
+			actor: t.clientContext(t.acmeId, packageId).callerContext.request,
+			packageStamp: { kind: 'attested', packageId },
+			baseUrl: 'https://example.com',
+			credential: {
+				use: 'secret',
+				name,
+				scope: 'user',
+				storageContext: {
+					sessionId: null,
+					appId: null,
+					packageId,
+				},
+			},
+		})
+	await expect(read('RESEND')).rejects.toMatchObject({
+		code: 'credential_need_undeclared',
+	})
+	declare([need('RESEND')])
+	await expect(read('RESEND')).resolves.toMatchObject({ found: true })
+
+	declare([need('RESEND', { kind: 'signing' })])
+	await expect(read('RESEND')).resolves.toMatchObject({ found: true })
+})
+
+test('a stamped package webhook secret stays on the legacy access path', async () => {
+	const t = await setup()
+	await t.storeSecret(t.acmeId, 'RESEND')
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	enforcement(false)
+	stamp(true)
+	declare([])
+	await expect(
+		resolveCredential({
+			env: t.env,
+			orgId: t.acmeId,
+			actor: t.clientContext(t.acmeId, packageId).callerContext.request,
+			packageStamp: { kind: 'attested', packageId },
+			baseUrl: 'https://example.com',
+			credential: { use: 'webhook-secret', name: 'RESEND' },
+		}),
+	).resolves.toMatchObject({ found: true })
 })
 
 test('with the flag on a team package fills only what it declares', async () => {
@@ -414,13 +615,54 @@ test('credential.named is refused in a personal package limited to its declarati
 		})
 
 	enforcement(false)
+	stamp(false)
 	await expect(openNamed(visible)).resolves.toMatchObject({ name: 'RESEND' })
+	await expect(openNamed(own)).resolves.toMatchObject({ name: 'RESEND' })
+
+	stamp(true)
+	await expect(openNamed(own)).rejects.toMatchObject({
+		body: { code: 'credential_denied' },
+	})
+	stamp(false)
 
 	enforcement(true)
 	await expect(openNamed(visible)).rejects.toMatchObject({
 		body: { code: 'credential_denied' },
 	})
 	await expect(openNamed(own)).resolves.toMatchObject({ name: 'RESEND' })
+})
+
+test('a missing stamp stays legacy and any stored blob fail-closes', () => {
+	expect(stampPresence.storedCredentialStampEnforces(null)).toBe(false)
+	expect(stampPresence.storedCredentialStampEnforces(undefined)).toBe(false)
+	expect(
+		stampPresence.storedCredentialStampEnforces({
+			version: 1,
+			stampHash: 'abc',
+			keys: ['RESEND'],
+			depStamps: [],
+		}),
+	).toBe(true)
+	expect(
+		stampPresence.storedCredentialStampEnforces({ version: 99, keys: [1] }),
+	).toBe(true)
+	expect(stampPresence.storedCredentialStampEnforces('not-a-stamp')).toBe(true)
+})
+
+test('a package with no artifact binding is unstamped', async () => {
+	const t = await setup()
+	const packageId = await t.savePackage({
+		ownerId: t.acmeId,
+		name: '@acme/mailer',
+	})
+	await expect(
+		stampPresence.packageCarriesCredentialStamp({
+			env: t.env,
+			request: null,
+			orgId: t.acmeId,
+			packageId,
+		}),
+	).resolves.toBe(false)
 })
 
 test('a declared slot counts only when its kind can fill the use', () => {
@@ -437,6 +679,11 @@ test('a declared slot counts only when its kind can fill the use', () => {
 			{ use: 'secret', name: 'A', scope: null },
 			[need('A', { kind: 'oauth' })],
 			false,
+		],
+		[
+			{ use: 'secret', name: 'A', scope: null },
+			[need('A', { kind: 'signing' })],
+			true,
 		],
 		[{ use: 'secret', name: 'A', scope: 'package' }, [], true],
 		[{ use: 'secret', name: 'A', scope: 'user' }, [], false],
