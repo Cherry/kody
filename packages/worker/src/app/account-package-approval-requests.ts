@@ -425,6 +425,9 @@ export async function approveWentPublicRequest(input: {
 	})
 	if (!changed) {
 		// Clear (or another writer) won the race after we claimed the request.
+		// Do not re-enqueue: a concurrent clear deliberately withdrew the ask;
+		// recreating a pending row would undo that cancellation. Callers that
+		// still want internet-visible call packageUpdate / the toggle again.
 		return {
 			ok: false,
 			status: 409,
