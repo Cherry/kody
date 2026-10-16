@@ -202,6 +202,26 @@ test('scanLiteralMcpServerKeys stamps literal servers and fails dynamic access',
 	expect(dynamic.keys).toEqual([])
 	expect(dynamic.failures.some((f) => f.code === 'non_literal')).toBe(true)
 
+	// Official *-mcp helpers use `kody.mcp?.[SERVER_NAME]` with a module const.
+	const constName = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/mcp.ts': [
+			"import { kody } from 'kody:runtime'",
+			"export const CANVA_MCP_NAME = 'canva'",
+			'export function getCanvaMcp() {',
+			'\treturn kody.mcp?.[CANVA_MCP_NAME] ?? null',
+			'}',
+		].join('\n'),
+		'src/index.ts': [
+			"import { getCanvaMcp } from './mcp.ts'",
+			'export default async function run() {',
+			'\treturn getCanvaMcp()',
+			'}',
+		].join('\n'),
+	})
+	expect(constName.keys).toEqual(['canva'])
+	expect(constName.failures).toEqual([])
+
 	const computedDestructure = scanLiteralMcpServerKeys({
 		'package.json': manifest(),
 		'src/index.ts': [
@@ -429,6 +449,23 @@ function appManifestFiles(extra: Record<string, string>) {
 		...extra,
 	}
 }
+
+test('literal dynamic import with TS assertion is not server_eval', () => {
+	const stamped = scanCredentialStamp(
+		appManifestFiles({
+			'src/server.ts': [
+				'export default {',
+				'  async fetch() {',
+				"    const mod = await import('kody:@kentcdodds/helper/run' as `kody:@${string}/${string}`)",
+				'    return mod.default()',
+				'  },',
+				'}',
+			].join('\n'),
+			'src/client.ts': 'export {}',
+		}),
+	)
+	expect(stamped.failures.filter((f) => f.code === 'server_eval')).toEqual([])
+})
 
 test('server eval / new Function / non-literal import fail; UI client entry is exempt', () => {
 	const serverEval = scanCredentialStamp(
