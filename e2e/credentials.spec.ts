@@ -400,20 +400,17 @@ test('case-only credential rename persists on the secrets editor', async ({
 		password: 'cred-case-rename-password',
 	})
 	await login({ email: user.email, password: user.password, mode: 'login' })
-	const created = await page.request.post('/account/secrets.json', {
-		data: {
-			action: 'save',
-			name: 'Henry',
-			scope: 'user',
-			kind: 'url',
-			value: 'https://hooks.example.com/henry',
-			hosts: ['hooks.example.com'],
-			allowedHosts: [],
-			allowedPackages: [],
-		},
-		headers: { 'Content-Type': 'application/json' },
-	})
-	expect(created.ok()).toBe(true)
+	await page.goto(
+		'/connect/credential?kind=url&kindMode=required&name=Henry&allowedHosts=hooks.example.com',
+	)
+	await waitForClientHydration(page)
+	await page
+		.getByRole('textbox', { name: 'Value', exact: true })
+		.fill('https://hooks.example.com/henry')
+	await page.getByTestId('connect-credential-save').click()
+	await expect(page.getByTestId('connect-credential-saved')).toContainText(
+		'Henry is saved',
+	)
 
 	await page.goto(`/@${user.username}/-/secrets/user/Henry`)
 	await waitForClientHydration(page)
@@ -429,15 +426,17 @@ test('case-only credential rename persists on the secrets editor', async ({
 		page.getByRole('link', { name: 'henry', exact: true }),
 	).toBeVisible()
 
-	const listed = await page.request.get('/account/credentials.json')
-	expect(listed.ok()).toBe(true)
-	const payload = (await listed.json()) as {
-		credentials: Array<{ name: string }>
-	}
-	expect(payload.credentials.map((credential) => credential.name)).toContain(
-		'henry',
+	// A fresh document proves the stored name and kind, independent of the editor cache.
+	await page.goto(`/@${user.username}/-/credentials`)
+	await waitForClientHydration(page)
+	const table = page.getByRole('region', { name: 'Credentials', exact: true })
+	const renamed = table.getByRole('link', { name: /^henry(?:\s|$)/ })
+	await expect(renamed).toBeVisible()
+	await expect(renamed.locator('xpath=ancestor::tr')).toContainText('URL')
+	await expect(table.getByRole('link', { name: /^Henry(?:\s|$)/ })).toHaveCount(
+		0,
 	)
-	expect(
-		payload.credentials.map((credential) => credential.name),
-	).not.toContain('Henry')
+	await page.goto(`/@${user.username}/-/secrets/user/henry`)
+	await waitForClientHydration(page)
+	await expect(nameInput).toHaveValue('henry')
 })
