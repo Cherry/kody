@@ -191,7 +191,7 @@ test('approveWentPublicRequest flips internet-visible when capability pin matche
 	)
 })
 
-test('approveWentPublicRequest fails closed when clear bumps updated_at after claim', async () => {
+test('approveWentPublicRequest fails closed when clear bumps updated_at after claim without re-opening the ask', async () => {
 	stubApproveWentPublicHappyPath()
 	mockModule.updateSavedPackage.mockResolvedValue(false)
 

@@ -272,7 +272,7 @@ test('turning on internet-visible on an audited version adds no audit step', asy
 	)
 })
 
-test('turning on internet-visible with matching approval refreshes pin and enqueues went_public', async () => {
+test('turning on internet-visible with matching approval turns serving on without another Approve', async () => {
 	const env = { APP_DB: {} } as Env
 	const user = createUser()
 	const request = new Request('https://example.com/account/packages.json', {
@@ -306,6 +306,8 @@ test('turning on internet-visible with matching approval refreshes pin and enque
 		capabilitySet: { entries: [], fingerprint: 'abc' },
 		wentPublicRequest: { id: 'req-1' },
 	})
+	mockModule.approveWentPublicRequest.mockResolvedValue({ ok: true })
+	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
 	const response = await setAccountPackageInternetVisible({
 		env,
@@ -315,17 +317,18 @@ test('turning on internet-visible with matching approval refreshes pin and enque
 		internetVisible: true,
 		confirmName: 'notes',
 	})
-	expect(response?.status).toBe(400)
-	expect(response?.data).toMatchObject({
-		ok: false,
-		error: expect.stringContaining('internet-visible'),
-		approvalUrl: expect.stringContaining('/approve-capabilities'),
-	})
+	expect(response?.status).toBe(200)
+	expect(response?.data).toMatchObject({ ok: true })
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
 		expect.objectContaining({
 			expectedFingerprint: 'abc',
 		}),
 	)
+	expect(mockModule.approveWentPublicRequest).toHaveBeenCalledWith(
+		expect.objectContaining({ requestId: 'req-1' }),
+	)
+	expect(mockModule.enqueueWentPublicApproval).not.toHaveBeenCalled()
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 })
 
 test('approve-capabilities binds the reviewed fingerprint', async () => {
@@ -702,4 +705,38 @@ test('approve-capabilities-and-go-public pins nothing when the went_public reque
 	expect(mockModule.approvePackageCapabilitySet).not.toHaveBeenCalled()
 	expect(mockModule.approveWentPublicRequest).not.toHaveBeenCalled()
 	expect(mockModule.logOrgAuditEvent).not.toHaveBeenCalled()
+})
+
+test('matching-pin visibility failure returns a native mutation error without a post-write reload', async () => {
+	mockModule.writablePackage = createSavedPackage(false)
+	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
+	mockModule.loadCapabilityApprovalSummary.mockResolvedValue({
+		publishedCommit: 'deadbeef',
+		fingerprintMatchesApproval: true,
+		capabilitySet: { entries: [], fingerprint: 'abc' },
+	})
+	mockModule.approvePackageCapabilitySet.mockResolvedValue({
+		wentPublicRequest: { id: 'req-1' },
+	})
+	mockModule.approveWentPublicRequest.mockResolvedValue({
+		ok: false,
+		error: 'Approval no longer pending.',
+		status: 409,
+	})
+	const result = await setAccountPackageInternetVisible({
+		env: { APP_DB: {} } as Env,
+		request: new Request('https://example.com/account/packages.json', {
+			method: 'POST',
+		}),
+		user: createUser(),
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
+	})
+	expect(result.status).toBe(400)
+	expect(result.data).toMatchObject({
+		ok: false,
+		error: 'Approval no longer pending.',
+	})
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 })

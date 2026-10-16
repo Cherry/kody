@@ -425,6 +425,37 @@ const packageAppRuntimeMock = vi.hoisted(() => ({
 			dispatch: vi.fn(async () => ({})),
 		}),
 	),
+	credentialClientBindingsSeen: [] as Array<string>,
+	createCredentialClientKodyTools: vi.fn(
+		(input: { options: { binding: string } }) => {
+			packageAppRuntimeMock.credentialClientBindingsSeen.push(
+				input.options.binding,
+			)
+			return {
+				credentialClientOpen: async () => ({
+					ok: true,
+					value: {
+						handle: 'h-from-props',
+						name: 'powersync-jwt',
+						scope: 'org',
+						kind: 'signing',
+						hosts: ['powersync.example'],
+					},
+				}),
+				credentialClientSign: async () => ({
+					ok: true,
+					value: { signature: 'sig-from-props' },
+				}),
+			}
+		},
+	),
+}))
+
+vi.mock('#worker/mcp/credential-client-tools.ts', () => ({
+	createCredentialClientKodyTools: (...args: Array<unknown>) =>
+		packageAppRuntimeMock.createCredentialClientKodyTools(
+			...(args as [{ options: { binding: string } }]),
+		),
 }))
 
 vi.mock('cloudflare:workers', async (importOriginal) => {
@@ -682,6 +713,7 @@ function makeBuildInput(
 
 function createPackageAppRuntimeBridgeForTest(input?: {
 	packageStorageGrantIds?: Array<string>
+	credentialClientBinding?: string
 }) {
 	const waitUntilTasks: Array<Promise<unknown>> = []
 	const bridge = new PackageAppRuntimeBridge(
@@ -698,6 +730,8 @@ function createPackageAppRuntimeBridgeForTest(input?: {
 				sourceId: 'source-1',
 				publishedCommit: 'commit-1',
 				packageStorageGrantIds: input?.packageStorageGrantIds ?? ['package-1'],
+				credentialClientBinding:
+					input?.credentialClientBinding ?? 'run:test-package-app-binding',
 			},
 			waitUntil: (promise: Promise<unknown>) => {
 				waitUntilTasks.push(promise)
@@ -754,6 +788,188 @@ test('buildPackageAppWorker serves an artifactName-null artifact hit and reuses 
 	const packageAppHostSource = workerOptions?.modules['package-app-entry.js']
 	expect(packageAppHostSource).toContain('packages: null,')
 	expect(packageAppHostSource).not.toContain('createPackagesProxy')
+	// ADR 0068 credential() must be bound into the package-app ALS runtime
+	// (execute already had it; package-app historically omitted it).
+	expect(packageAppHostSource).toContain('__kodyCreateCredentialRuntime')
+	expect(packageAppHostSource).toContain(
+		'credential: credentialRuntime.credential',
+	)
+	expect(packageAppHostSource).toContain('__kodyCredentialRuntimeFor')
+	expect(packageAppHostSource).toContain('credentialClientCall')
+	expect(packageAppHostSource).toContain('x-kody-credential-client')
+	expect(packageAppHostSource).toContain('Leave x-kody-credential-client alone')
+	const bridgeProps = packageAppRuntimeMock.packageAppRuntimeBridge.mock
+		.calls[0]?.[0] as { props?: { credentialClientBinding?: string } }
+	expect(bridgeProps?.props?.credentialClientBinding).toMatch(/^run:/)
+})
+
+test('package app createCredentialRuntime exposes callable credential().sign via the bridge', async () => {
+	const { createCredentialClientRuntimeSource, credentialClientToolNames } =
+		await import('#worker/mcp/execute-modules/credential-client-source.ts')
+	type CredentialClientCallInput = { name: string; args?: unknown }
+	type CredentialRuntimeBridge = {
+		credentialClientCall: (input: CredentialClientCallInput) => Promise<unknown>
+	}
+	type CredentialRuntime = {
+		credential: ((
+			key: string,
+		) => Promise<{ sign: (operation: unknown) => Promise<string> }>) & {
+			named: (name: string) => Promise<unknown>
+		}
+		credentials: (key: string) => Promise<unknown>
+	}
+	const calls: Array<CredentialClientCallInput> = []
+	const runtimeBridge: CredentialRuntimeBridge = {
+		credentialClientCall: async (input) => {
+			calls.push(input)
+			if (input.name === credentialClientToolNames.open) {
+				return {
+					ok: true,
+					value: {
+						handle: 'h1',
+						name: 'powersync-jwt',
+						scope: 'org',
+						kind: 'signing',
+						hosts: ['powersync.example'],
+					},
+				}
+			}
+			if (input.name === credentialClientToolNames.sign) {
+				return { ok: true, value: { signature: 'signed-jwt' } }
+			}
+			return {
+				ok: false,
+				error: {
+					code: 'invalid_request',
+					message: `unexpected ${input.name}`,
+					retryWith: [],
+				},
+			}
+		},
+	}
+	const createCredentialRuntime = new Function(
+		'runtimeBridge',
+		'packageId',
+		`${createCredentialClientRuntimeSource()}
+		${extractGeneratedSource(
+			'function createCredentialRuntime(runtimeBridge, packageId) {',
+			'\nfunction createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {',
+		)}
+		return createCredentialRuntime(runtimeBridge, packageId);`,
+	) as (
+		bridge: CredentialRuntimeBridge,
+		packageId?: string,
+	) => CredentialRuntime
+
+	const { credential } = createCredentialRuntime(runtimeBridge)
+	expect(typeof credential).toBe('function')
+	const client = await credential('powersync-jwt')
+	await expect(client.sign({ payload: { sub: 'user-1' } })).resolves.toBe(
+		'signed-jwt',
+	)
+	expect(calls).toEqual([
+		{
+			name: credentialClientToolNames.open,
+			args: { key: 'powersync-jwt' },
+		},
+		{
+			name: credentialClientToolNames.sign,
+			args: {
+				handle: 'h1',
+				host: 'powersync.example',
+				operation: { payload: { sub: 'user-1' } },
+			},
+		},
+	])
+
+	calls.length = 0
+	const bound = createCredentialRuntime(runtimeBridge, 'pkg-dep')
+	await bound.credential('resend')
+	expect(calls[0]).toEqual({
+		name: credentialClientToolNames.open,
+		args: { key: 'resend', packageId: 'pkg-dep' },
+	})
+})
+
+test('package app runtime bridge credentialClientCall dispatches known tools and rejects unknown ones', async () => {
+	const { credentialClientToolNames } =
+		await import('#worker/mcp/execute-modules/credential-client-source.ts')
+	const { bridge } = createPackageAppRuntimeBridgeForTest()
+	const openArgs: Array<unknown> = []
+	vi.spyOn(
+		bridge as unknown as {
+			getCredentialClientTools: () => Promise<
+				Record<string, (args: unknown) => Promise<unknown>>
+			>
+		},
+		'getCredentialClientTools',
+	).mockResolvedValue({
+		[credentialClientToolNames.open]: async (args) => {
+			openArgs.push(args)
+			return {
+				ok: true,
+				value: {
+					handle: 'h1',
+					name: 'powersync-jwt',
+					scope: 'org',
+					kind: 'signing',
+					hosts: ['powersync.example'],
+				},
+			}
+		},
+		[credentialClientToolNames.sign]: async () => ({
+			ok: true,
+			value: { signature: 'sig' },
+		}),
+	})
+
+	await expect(
+		bridge.credentialClientCall({
+			name: credentialClientToolNames.open,
+			args: { key: 'powersync-jwt' },
+		}),
+	).resolves.toEqual({
+		ok: true,
+		value: expect.objectContaining({ handle: 'h1', kind: 'signing' }),
+	})
+	expect(openArgs).toEqual([{ key: 'powersync-jwt' }])
+
+	await expect(
+		bridge.credentialClientCall({ name: 'credentialClientNope', args: {} }),
+	).rejects.toThrow('Unknown credential client tool "credentialClientNope".')
+})
+
+test('package app credential client binding comes from bridge props so open and sign share it across RPC instances', async () => {
+	const sharedBinding = 'run:shared-across-rpc-instances'
+	packageAppRuntimeMock.credentialClientBindingsSeen.length = 0
+	packageAppRuntimeMock.createCredentialClientKodyTools.mockClear()
+
+	const opener = createPackageAppRuntimeBridgeForTest({
+		credentialClientBinding: sharedBinding,
+	}).bridge
+	const signer = createPackageAppRuntimeBridgeForTest({
+		credentialClientBinding: sharedBinding,
+	}).bridge
+
+	const { credentialClientToolNames } =
+		await import('#worker/mcp/execute-modules/credential-client-source.ts')
+	await opener.credentialClientCall({
+		name: credentialClientToolNames.open,
+		args: { key: 'powersync-jwt' },
+	})
+	await signer.credentialClientCall({
+		name: credentialClientToolNames.sign,
+		args: {
+			handle: 'h-from-props',
+			host: 'powersync.example',
+			operation: {},
+		},
+	})
+
+	expect(packageAppRuntimeMock.credentialClientBindingsSeen).toEqual([
+		sharedBinding,
+		sharedBinding,
+	])
 })
 
 test('buildPackageAppWorker claims the unique Dynamic Worker day with its surface off the stub path, only after acquiring the stub', async () => {

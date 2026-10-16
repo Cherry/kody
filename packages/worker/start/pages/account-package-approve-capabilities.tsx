@@ -453,8 +453,9 @@ export function AccountPackageApproveCapabilitiesRoute({
 							data-testid="package-approve-capabilities-go-public-note"
 							css={{ margin: 0, color: colors.textMuted }}
 						>
-							You asked to make this package internet-visible. One approval
-							records this capability set and turns on internet-visible serving.
+							{payload.fingerprintMatchesApproval
+								? 'You asked to make this package internet-visible. Approving turns on internet-visible serving.'
+								: 'You asked to make this package internet-visible. One approval records this capability set and turns on internet-visible serving.'}
 						</p>
 					) : null}
 					<div css={approveActionRowCss}>

@@ -30,20 +30,26 @@ current `published_commit`
 ([ADR 0069](./decisions/0069-internet-visible-capability-pinning.md)).
 
 Turning internet-visible on (settings toggle or `packageUpdate`) records the
-`went_public` request right away, even before the capability set is approved.
-When that request is pending and the live capability set still needs approval,
-the approval page shows one **Approve and make internet-visible** button
-(`approve-capabilities-and-go-public`). It runs both decisions in order, each
-with its own checks and its own org audit event: the capability pin
-(`package.capabilities.approve`), then the `went_public` request
-(`package.went_public.approve`). The pin does not enqueue a new `went_public`
-request, so a request turned off meanwhile stays off. If the second step fails,
-the pin stays recorded and the page falls back to the separate went-public card
-when the request is still pending. The two steps were never split for a security
-reason; they share one queue
+`went_public` request right away when the capability set is not yet approved.
+While that request is pending, the approval page shows one **Approve and make
+internet-visible** button (`approve-capabilities-and-go-public`). It runs the
+capability pin (`package.capabilities.approve`), then the `went_public` request
+(`package.went_public.approve`), each with its own checks and org audit event.
+The pin does not enqueue a new `went_public` request, so a request turned off
+meanwhile stays off. If the visibility write loses a race after the request is
+claimed, a fresh `went_public` row is re-queued so Approve is not lost.
+
+When the capability set is **already** approved (matching pin), the settings
+toggle and `packageUpdate` turn internet-visible on immediately — they refresh
+the pin and approve `went_public` without sending the owner to the approval page
+again. The two steps were never split for a security reason; they share one
+queue
 ([ADR 0068 amendment](./decisions/0068-credentials-own-placement-scoped-clients.md)).
 An approval bundle's went-public item cannot be approved until the capability
 set is, so it points at the package's approval page instead.
+`approvalPendingList` lists pending `went_public` rows for anyone with
+`package:write` on the package (same bar as the approval page); `canApprove`
+still needs `package:publish`.
 
 When the current published version has no security audit, the toggle response
 (`securityAudit`) and `packageUpdate` (`security_audit`) carry the agent's next

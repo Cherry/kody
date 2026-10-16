@@ -1,7 +1,8 @@
 /**
- * Agent-directed wording when a trigger/job is armed but not turned on for a
- * person. Publishing and `jobs.enabled` never create enablements — agents must
- * ask the user, then call enablementEnable (or Approve for webhooks/email).
+ * Agent-directed wording when a trigger is armed but not turned on for a
+ * person. Creating a scheduled job auto-enables it for the owner; other
+ * package triggers never auto-enable on publish — agents must ask the user,
+ * then call enablementEnable (or Approve for webhooks/email).
  */
 
 import { type EnablementTriggerKind } from './types.ts'
@@ -46,6 +47,9 @@ function triggerLabel(kind: EnablementTriggerKind, name: string) {
 
 /**
  * One-trigger agent hint used on jobGet / jobList / jobUpdate and skip errors.
+ * Cron jobs the owner created are auto-enabled on create — do not ask the user
+ * about those. Other triggers still need an explicit ask + enablementEnable /
+ * Approve.
  */
 export function buildSingleTriggerEnablementHint(
 	input: EnablementHintPackageRef & {
@@ -60,6 +64,18 @@ export function buildSingleTriggerEnablementHint(
 			? `Ask the user to fix the paused enablement for ${label}. Webhook turn-on is Approve, not enablementEnable.`
 			: `Ask the user whether to turn on ${label} for them. Webhooks need Approve (enablementEnable cannot turn a webhook on the first time).`
 	}
+	// Cron before email-topic name matching: a job can reuse an email topic
+	// string as its cron name and still needs cron enablementEnable guidance.
+	if (input.triggerKind === 'cron') {
+		const call = formatEnablementEnableCall({
+			...input,
+			triggerKind: 'cron',
+		})
+		if (input.reason === 'paused') {
+			return `Ask the user to fix the paused enablement for ${label}, or re-enable with ${call}.`
+		}
+		return `Call ${call} to turn on ${label} for the owner. Creating a job enables it for the owner automatically; other package triggers still need an explicit enable.`
+	}
 	if (isEmailSubscriptionTopic(input.triggerName)) {
 		return input.reason === 'paused'
 			? `Ask the user to fix the paused enablement for ${label}. Inbound email turn-on is Approve from the inbox, not enablementEnable.`
@@ -72,7 +88,7 @@ export function buildSingleTriggerEnablementHint(
 	if (input.reason === 'paused') {
 		return `Ask the user to fix the paused enablement for ${label}, or re-enable with ${call}.`
 	}
-	return `Ask the user whether to enable ${label} for them: ${call}. Publishing and jobs.enabled never turn a trigger on.`
+	return `Ask the user whether to enable ${label} for them: ${call}. Publishing never turns a trigger on.`
 }
 
 /**
@@ -91,6 +107,16 @@ export function buildMultiTriggerEnablementHint(
 				? `- ${label} (paused): ask the user to fix the pause; turn-on is Approve, not enablementEnable.`
 				: `- ${label}: ask the user whether to Approve it (enablementEnable cannot turn a webhook on the first time).`
 		}
+		if (trigger.kind === 'cron') {
+			const call = formatEnablementEnableCall({
+				...input,
+				triggerKind: 'cron',
+				triggerName: trigger.name,
+			})
+			return trigger.reason === 'paused'
+				? `- ${label} (paused): ask the user to fix the pause, or re-enable with ${call}.`
+				: `- ${label}: call ${call} to turn it on for the owner (creating a job enables the owner automatically).`
+		}
 		if (isEmailSubscriptionTopic(trigger.name)) {
 			return trigger.reason === 'paused'
 				? `- ${label} (paused): ask the user to fix the pause; turn-on is Approve from the inbox.`
@@ -106,7 +132,7 @@ export function buildMultiTriggerEnablementHint(
 			: `- ${label}: ask the user whether to enable it with ${call}.`
 	})
 	return [
-		'Ask the user whether to turn these triggers on for them (publishing never turns triggers on):',
+		'Enable missing triggers as follows (publishing does not auto-enable webhooks or subscriptions; new package jobs enable for the owner on create):',
 		...lines,
 	].join('\n')
 }
