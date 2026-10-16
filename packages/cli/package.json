@@ -1,0 +1,67 @@
+{
+	"name": "@kodycodes/cli",
+	"version": "0.0.0-semantically-released",
+	"description": "Official Kody MCP client CLI: login, secure token storage, search, and execute.",
+	"type": "module",
+	"bin": {
+		"kody": "dist/bin.js"
+	},
+	"main": "./dist/cli.js",
+	"types": "./dist/cli.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/cli.d.ts",
+			"default": "./dist/cli.js"
+		}
+	},
+	"files": [
+		"dist",
+		"skills"
+	],
+	"scripts": {
+		"build": "node scripts/build.mjs && tsc -p tsconfig.build.json",
+		"bench": "node scripts/bench.mjs",
+		"typecheck": "tsc --noEmit",
+		"test": "tsx --test test/*.test.ts",
+		"validate": "npm run typecheck && npm run test && npm run build"
+	},
+	"engines": {
+		"node": ">=22"
+	},
+	"keywords": [
+		"kody",
+		"mcp",
+		"cli",
+		"oauth"
+	],
+	"author": "Kent C. Dodds <me@kentcdodds.com> (https://kentcdodds.com)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kody-bot/cli.git"
+	},
+	"bugs": {
+		"url": "https://github.com/kody-bot/cli/issues"
+	},
+	"homepage": "https://kody.codes",
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@napi-rs/keyring": "^2.1.0",
+		"esbuild": "^0.25.12",
+		"ps-list": "^9.0.0"
+	},
+	"devDependencies": {
+		"@inquirer/checkbox": "^5.2.2",
+		"@jridgewell/trace-mapping": "^0.3.31",
+		"@modelcontextprotocol/client": "2.0.0",
+		"@types/node": "^24.5.2",
+		"add-mcp": "^2.4.0",
+		"chokidar": "^4.0.3",
+		"es-module-lexer": "^3.0.3",
+		"msw": "3.0.3",
+		"tsx": "^4.20.5",
+		"typescript": "^5.9.2"
+	}
+}

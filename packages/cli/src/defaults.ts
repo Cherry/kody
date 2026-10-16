@@ -1,0 +1,40 @@
+export const defaultMcpUrl = 'https://kody.codes/mcp'
+/** Kody Open API origin; hosts CapabilityProxy for `execute --local`. */
+export const defaultApiUrl = 'https://api.kody.codes'
+export const apiTokenEnvVar = 'KODY_API_TOKEN'
+/** Pin to Kody's stateless `/mcp` lane. */
+export const modernMcpProtocolVersion = '2026-07-28'
+export const defaultScopes = ['openid', 'profile', 'email'] as const
+
+/** True when a stored OAuth scope string already includes `openid`. */
+export function scopeIncludesOpenid(scope: string | undefined): boolean {
+	if (!scope) return false
+	return scope.split(/\s+/).includes('openid')
+}
+
+/** Hint when MCP whoami/search fail because the login session lacks openid. */
+export const missingOpenidReloginHint =
+	'Your login session is missing the openid scope. Run `kody logout && kody login` to refresh.'
+
+export const keyringService = 'kody.codes'
+export const loginTimeoutMs = 5 * 60 * 1000
+export const accessTokenSkewMs = 60_000
+export const cliName = '@kodycodes/cli'
+export const cliClientUri = 'https://github.com/kody-bot/cli'
+/** Fixed loopback port so CIMD can list an exact redirect URI. */
+export const oauthCallbackPort = 43742
+export const cliClientIdMetadataPath = '/oauth/cli-client-metadata.json'
+
+export function cliClientMetadataUrl(mcpUrl: string): string {
+	return new URL(cliClientIdMetadataPath, mcpUrl).href
+}
+
+export function cliRedirectUrl(port: number = oauthCallbackPort): URL {
+	return new URL(`http://127.0.0.1:${port}/callback`)
+}
+
+export const onboardingPath = '/onboarding'
+
+export function onboardingUrl(mcpUrl: string): string {
+	return new URL(onboardingPath, mcpUrl).href
+}
