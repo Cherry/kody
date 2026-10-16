@@ -10,6 +10,7 @@ import {
 	type CredentialTriggerKind,
 	type CredentialTriggerRef,
 	type EffectiveCredentialMappingStatus,
+	isInboundEmailApprovalTopic,
 	type PackageCredentialNeedView,
 	type PackageCredentialsIncomplete,
 	type PackageCredentialsView,
@@ -183,7 +184,9 @@ export function describeIncompleteMapping(
 	const where =
 		item.where.type === 'default'
 			? 'Runs'
-			: `${describeTrigger(item.where.trigger)} runs`
+			: item.where.enablementId
+				? `${describeTrigger(item.where.trigger)} (one of your instances) runs`
+				: `${describeTrigger(item.where.trigger)} runs`
 	switch (item.status) {
 		case 'unbound':
 			return `${where} have no credential for “${item.needKey}”. Add one or map an existing one.`
@@ -248,15 +251,12 @@ export function withheldTriggerMappingsNote(trigger: PackageTriggerView) {
 	}
 }
 
-export function triggerStateLabel(trigger: PackageTriggerView) {
-	if (!trigger.enablement) {
-		return trigger.trigger.kind === 'webhook' && trigger.instanceId === null
-			? 'Not minted'
-			: 'Off'
-	}
-	const state = trigger.enablement.state
-	const who = trigger.enablement.enabledByYou ? 'by you' : 'by someone else'
-	switch (state) {
+export function triggerEnablementStateLabel(input: {
+	state: 'on' | 'paused' | 'off'
+	enabledByYou: boolean
+}) {
+	const who = input.enabledByYou ? 'by you' : 'by someone else'
+	switch (input.state) {
 		case 'on':
 			return `On ${who}`
 		case 'paused':
@@ -264,8 +264,38 @@ export function triggerStateLabel(trigger: PackageTriggerView) {
 		case 'off':
 			return 'Off'
 		default: {
-			const exhaustive: never = state
+			const exhaustive: never = input.state
 			return exhaustive
 		}
 	}
+}
+
+export function triggerStateLabel(trigger: PackageTriggerView) {
+	if (!trigger.enablement) {
+		return trigger.trigger.kind === 'webhook' && trigger.instanceId === null
+			? 'Not minted'
+			: 'Off'
+	}
+	return triggerEnablementStateLabel(trigger.enablement)
+}
+
+/** Whether the Triggers tab may offer an on/off switch for this declared trigger. */
+export function canToggleTriggerEnablement(trigger: PackageTriggerView) {
+	if (!trigger.canEdit) return false
+	if (
+		trigger.trigger.kind === 'subscription' &&
+		isInboundEmailApprovalTopic(trigger.trigger.name)
+	) {
+		// Inbound email runs per sender via Approve; enablementEnable refuses it.
+		return false
+	}
+	if (trigger.trigger.kind === 'webhook' && trigger.instanceId === null) {
+		return false
+	}
+	// A webhook's first turn-on needs Approve; the switch only toggles an
+	// enablement that already exists (or a cron / subscription).
+	if (trigger.trigger.kind === 'webhook' && trigger.enablement === null) {
+		return false
+	}
+	return true
 }

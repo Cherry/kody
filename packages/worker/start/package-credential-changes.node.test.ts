@@ -102,3 +102,27 @@ test('mapping identity change reaches native Query redirect handling without rep
 		queryClient.clear()
 	}
 })
+
+test('native trigger writes forward additive instance and specific disable actions without mapping changes', async () => {
+	const enablements = [
+		{
+			trigger: { kind: 'cron' as const, name: 'daily' },
+			state: 'on' as const,
+			createInstance: true,
+		},
+		{
+			trigger: { kind: 'cron' as const, name: 'daily' },
+			state: 'off' as const,
+			enablementId: 'original',
+		},
+	]
+	save.mockResolvedValue({ ok: true, needs: [] })
+	await postPackageCredentialChanges({
+		username: 'team',
+		kodyId: 'repo',
+		enablements,
+	})
+	expect(save).toHaveBeenLastCalledWith({
+		data: { username: 'team', kodyId: 'repo', enablements },
+	})
+})

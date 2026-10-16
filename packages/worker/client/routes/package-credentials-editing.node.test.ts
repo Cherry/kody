@@ -10,6 +10,7 @@ import {
 	draftFromStored,
 	draftToChange,
 	mappingOptions,
+	mappingEditorKey,
 	type MappingDraft,
 	mappingSaveAgentPrompt,
 	toggleDraftPick,
@@ -59,6 +60,8 @@ function trigger(overrides: Partial<PackageTriggerView> = {}) {
 		enablement: null,
 		canEdit: true,
 		mappings: [],
+		instances: [],
+		canAddInstance: true,
 		...overrides,
 	} satisfies PackageTriggerView
 }
@@ -166,6 +169,23 @@ test('only the enabler edits a trigger, and an off trigger turns on when saved',
 	expect(triggerWillEnable(trigger(), pick)).toBe(true)
 	expect(triggerWillEnable(trigger(), { mode: 'none' })).toBe(true)
 	expect(triggerWillEnable(trigger(), inherit)).toBe(false)
+	const createTarget = {
+		type: 'trigger' as const,
+		trigger: { kind: 'cron' as const, name: 'daily' },
+		createInstance: true,
+	}
+	expect(
+		triggerWillEnable(
+			trigger({
+				enablement: { id: 'en', state: 'on', enabledByYou: true },
+			}),
+			pick,
+			createTarget,
+		),
+	).toBe(true)
+	expect(triggerDraftProblem(trigger(), inherit, createTarget)).toContain(
+		'not create another instance',
+	)
 	expect(triggerDraftProblem(trigger(), inherit)).toContain('stay off')
 	expect(triggerDraftProblem(trigger(), pick)).toBeNull()
 	expect(triggerDraftProblem(null, inherit)).toBeNull()
@@ -230,4 +250,21 @@ test('the agent prompt names the mapping and never asks for a value', () => {
 			'Help me fix it. Do not ask me to paste any credential value into chat.',
 		].join('\n'),
 	)
+})
+
+test('mapping editor state stays separate for each live trigger instance and a new instance', () => {
+	const trigger = { kind: 'cron' as const, name: 'daily' }
+	const first = mappingEditorKey(
+		{ type: 'trigger', trigger, enablementId: 'first' },
+		'github',
+	)
+	const second = mappingEditorKey(
+		{ type: 'trigger', trigger, enablementId: 'second' },
+		'github',
+	)
+	const next = mappingEditorKey(
+		{ type: 'trigger', trigger, createInstance: true },
+		'github',
+	)
+	expect(new Set([first, second, next]).size).toBe(3)
 })

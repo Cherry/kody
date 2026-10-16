@@ -1,6 +1,6 @@
 import {
 	credentialProposalSchema,
-	credentialMappingChangesSchema,
+	packageCredentialChangesSchema,
 } from '#universal/credential-mutations.ts'
 import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
@@ -51,10 +51,9 @@ export const approvePackageCredentials = createServerFn({ method: 'POST' })
 	})
 export const savePackageCredentialMappings = createServerFn({ method: 'POST' })
 	.validator(
-		z.object({
+		packageCredentialChangesSchema.safeExtend({
 			username: z.string().min(1),
 			kodyId: z.string().min(1),
-			changes: credentialMappingChangesSchema.shape.changes,
 		}),
 	)
 	.handler(async ({ data }) => {
@@ -75,7 +74,7 @@ export const savePackageCredentialMappings = createServerFn({ method: 'POST' })
 			return (
 				await mutatePackageCredentialMappings({
 					scope,
-					body: { changes: data.changes },
+					body: { changes: data.changes, enablements: data.enablements },
 				})
 			).data
 		})

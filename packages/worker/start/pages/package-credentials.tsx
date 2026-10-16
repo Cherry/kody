@@ -1,5 +1,6 @@
 /** @jsxImportSource @emotion/react */
-import { useQueryClient } from '@tanstack/react-query'
+import { useServerFn } from '@tanstack/react-start'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouteContext, useParams } from '@tanstack/react-router'
 import { CopyTextButton } from '../components/copy-text-button.tsx'
 import { NotFoundPage } from '../components/not-found-page.tsx'
@@ -17,13 +18,19 @@ import { renderPackageRepoChrome } from '../components/package-repo-nav.tsx'
 import { cardCss, cardTitleCss } from '#universal/styles/style-primitives.ts'
 import { colors, spacing } from '#universal/styles/tokens.ts'
 import { detailArticleCss } from '../components/community-detail-sections.tsx'
+import { packageCredentialsQueryFilter } from '../package-credentials-cache.ts'
+import { postPackageCredentialChanges } from '../package-credential-changes.ts'
+import {
+	type PackageCredentialsEnablementAction,
+	type PackageCredentialsView,
+} from '#universal/credential-contracts.ts'
 import { usePackageMappingEditor } from './package-credentials-editor.tsx'
 import {
 	type PackageTabContext,
 	renderCredentialsTab,
 	renderMappingsTab,
-	renderTriggersTab,
 } from './package-credentials-tabs.tsx'
+import { renderTriggersTab } from './package-credentials-triggers-tab.tsx'
 function renderTab(tab: PackageCredentialsTab, context: PackageTabContext) {
 	switch (tab) {
 		case 'credentials':
@@ -85,32 +92,63 @@ export function PackageCredentialsRoute({
 	const shell = data.ok ? data.shell : null
 	const username = shell?.username ?? params.username ?? ''
 	const kodyId = shell?.kodyId ?? params.kodyId ?? ''
-	const editor = usePackageMappingEditor(username, {
-		readPage: () => ({ username, kodyId, orgSlug: username }),
-		onSaved: async (view, postedTo) => {
-			const filter = {
-				queryKey: ['page', actorKey, 'loadPackageCredentialsPage'],
-				predicate: (query: { queryKey: readonly unknown[] }) => {
-					const input = query.queryKey[3]
-					return (
-						typeof input === 'object' &&
-						input !== null &&
-						'orgSlug' in input &&
-						input.orgSlug === postedTo.username &&
-						'kodyId' in input &&
-						input.kodyId === postedTo.kodyId
-					)
-				},
-			}
-			await client.cancelQueries(filter)
-			client.setQueriesData<{
-				payload: PackageCredentialsLoaderData
-			}>(filter, (cached) =>
-				cached?.payload.ok
-					? { ...cached, payload: { ...cached.payload, view, viewError: null } }
-					: cached,
+	const replaceView = async (
+		view: PackageCredentialsView,
+		postedTo: { username: string; kodyId: string; actorKey: string | null },
+	) => {
+		const filter = packageCredentialsQueryFilter(postedTo)
+		await client.cancelQueries(filter)
+		client.setQueriesData<{
+			payload: PackageCredentialsLoaderData
+		}>(filter, (cached) =>
+			cached?.payload.ok
+				? { ...cached, payload: { ...cached.payload, view, viewError: null } }
+				: cached,
+		)
+	}
+	const sendEnablement = useServerFn(postPackageCredentialChanges)
+	const enablementMutation = useMutation({
+		mutationKey: ['package-trigger-enablement', actorKey, username, kodyId],
+		mutationFn: async (input: {
+			actorKey: string | null
+			username: string
+			kodyId: string
+			action: PackageCredentialsEnablementAction
+		}) => {
+			const result = await sendEnablement({
+				username: input.username,
+				kodyId: input.kodyId,
+				enablements: [input.action],
+			})
+			if (result === undefined) return undefined
+			if (result.kind === 'saved') return result.view
+			throw new Error(
+				result.kind === 'error'
+					? result.message
+					: result.kind === 'refused'
+						? (result.errors[0]?.message ??
+							'Kody could not update this trigger.')
+						: 'Please sign in again.',
 			)
 		},
+		onSuccess: async (view, input) => {
+			if (view) await replaceView(view, input)
+		},
+		onSettled: (_view, _error, input) =>
+			client.invalidateQueries(packageCredentialsQueryFilter(input)),
+	})
+	const ownEnablement =
+		enablementMutation.variables?.actorKey === actorKey &&
+		enablementMutation.variables?.username === username &&
+		enablementMutation.variables?.kodyId === kodyId
+	const busyKey =
+		ownEnablement && enablementMutation.isPending
+			? (enablementMutation.variables?.action.enablementId ??
+				`${enablementMutation.variables?.action.trigger.kind}:${enablementMutation.variables?.action.trigger.name}`)
+			: null
+	const editor = usePackageMappingEditor(username, {
+		readPage: () => ({ username, kodyId, orgSlug: username }),
+		onSaved: (view, postedTo) => replaceView(view, { ...postedTo, actorKey }),
 	})
 	if (!path || !data.ok) return <NotFoundPage />
 	const view = data.view
@@ -151,6 +189,20 @@ export function PackageCredentialsRoute({
 						kodyId,
 						view,
 						renderMappingCell: editor.renderCell,
+						setTriggerEnablement: (action) => {
+							if (!busyKey)
+								enablementMutation.mutate({
+									actorKey,
+									username,
+									kodyId,
+									action,
+								})
+						},
+						enablementBusyKey: busyKey,
+						enablementError:
+							ownEnablement && enablementMutation.error
+								? enablementMutation.error.message
+								: null,
 					})
 				: null}
 			{data && !data.view

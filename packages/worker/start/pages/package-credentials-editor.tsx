@@ -114,7 +114,11 @@ export function usePackageMappingEditor(
 	}
 	async function save(input: MappingCellInput) {
 		if (!open || open.saving) return
-		const unchanged = triggerDraftProblem(input.trigger, open.draft)
+		const unchanged = triggerDraftProblem(
+			input.trigger,
+			open.draft,
+			input.target,
+		)
 		if (unchanged) {
 			update({ messages: [{ text: unchanged }] })
 			return
@@ -271,7 +275,8 @@ export function usePackageMappingEditor(
 					{radio('none', 'None on purpose (runs get no credential)')}
 					{radio('inherit', input.inheritLabel)}
 				</fieldset>
-				{input.trigger && triggerWillEnable(input.trigger, draft) ? (
+				{input.trigger &&
+				triggerWillEnable(input.trigger, draft, input.target) ? (
 					<p css={{ margin: 0, color: colors.warningText }}>
 						Saving turns this trigger on for you.
 					</p>

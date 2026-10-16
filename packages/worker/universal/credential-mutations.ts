@@ -15,6 +15,8 @@ const credentialMappingChangeSchema = z.strictObject({
 		}),
 		z.strictObject({
 			type: z.literal('trigger'),
+			enablementId: z.string().trim().min(1).optional(),
+			createInstance: z.boolean().optional(),
 			trigger: z.strictObject({
 				kind: z.enum(credentialTriggerKinds),
 				name: z.string().trim().min(1),
@@ -84,4 +86,28 @@ export const credentialProposalSchema = z
 			proposal.changes.length + proposal.enable.length <=
 			maxCredentialProposalValues,
 		'Too many proposal changes.',
+	)
+
+const enablementActionSchema = z.strictObject({
+	trigger: z.strictObject({
+		kind: z.enum(credentialTriggerKinds),
+		name: z.string().trim().min(1),
+	}),
+	state: z.enum(['on', 'off']),
+	enablementId: z.string().trim().min(1).optional(),
+	createInstance: z.boolean().optional(),
+})
+
+export const packageCredentialChangesSchema = z
+	.strictObject({
+		changes: z
+			.array(credentialMappingChangeSchema)
+			.max(maxCredentialProposalValues)
+			.optional(),
+		enablements: z.array(enablementActionSchema).max(16).optional(),
+	})
+	.refine(
+		(body) =>
+			(body.changes?.length ?? 0) > 0 || (body.enablements?.length ?? 0) > 0,
+		{ message: 'expected { changes } and/or { enablements }' },
 	)
