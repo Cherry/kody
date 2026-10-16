@@ -68,6 +68,15 @@ import {
 import { isPackageSecretAccessUnavailableError } from '#mcp/secrets/package-access.ts'
 import { attestedPackageStamp } from '#worker/credentials/package-stamp.ts'
 import { resolveCredential } from '#worker/credentials/resolve-credential.ts'
+import { newRunCredentialClientBinding } from '#worker/credentials/credential-client-handle.ts'
+import { loadRunCredentialNeeds } from '#worker/credentials/credential-client.ts'
+import { type CredentialNeed } from '#worker/credentials/credential-needs.ts'
+import {
+	createCredentialClientRuntimeSource,
+	credentialClientToolNames,
+} from '#worker/mcp/execute-modules/credential-client-source.ts'
+import { createCredentialClientKodyTools } from '#worker/mcp/credential-client-tools.ts'
+import { type AdditionalKodyTools } from '#worker/mcp/runtime-helper-manifest.ts'
 import { ownerIdFromCaller } from '#worker/request-context/owner-id.ts'
 import {
 	resolveSecretAuthorityPackageId,
@@ -165,6 +174,10 @@ if (!globalThis[__kodyEvaluateFetchPatchedSymbol]) {
 		if (authority) {
 			headers.set(${JSON.stringify(secretAuthorityHeaderName)}, authority);
 		}
+		// Leave x-kody-credential-client alone: globalOutbound KodyFetchGateway
+		// matches it against the run binding on its props and places the
+		// credential. Stripping it would send an unauthenticated upstream
+		// request; throwing would block legitimate credential().fetch.
 		return __kodyNativeFetch(input, { ...init, headers });
 	};
 	globalThis[__kodyEvaluateFetchPatchedSymbol] = true;
@@ -617,6 +630,19 @@ function createPackageAppEnv(env, userModule) {
 	return runtimeEnv;
 }
 
+${createCredentialClientRuntimeSource()}
+
+function createCredentialRuntime(runtimeBridge, packageId) {
+	return __kodyCreateCredentialRuntime((name, args) =>
+		runtimeBridge.credentialClientCall({
+			name,
+			args: packageId
+				? { ...(args ?? {}), packageId }
+				: (args ?? {}),
+		}),
+	);
+}
+
 function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {
 	const packageId = packageContext?.packageId ?? '';
 	const packageSecrets =
@@ -634,6 +660,7 @@ function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {
 						)
 					},
 				}
+	const credentialRuntime = createCredentialRuntime(runtimeBridge);
 	return {
 		kody: createKodyProxy(runtimeBridge, mcpServerNamesOrLoader),
 		storage: undefined,
@@ -679,6 +706,10 @@ function createRuntime(runtimeBridge, packageContext, mcpServerNamesOrLoader) {
 		createAuthenticatedFetch: createAuthenticatedFetchHelper(runtimeBridge),
 		realtime: createRealtimeProxy(runtimeBridge),
 		packageSecrets,
+		credential: credentialRuntime.credential,
+		credentials: credentialRuntime.credentials,
+		__kodyCredentialRuntimeFor: (boundPackageId) =>
+			createCredentialRuntime(runtimeBridge, boundPackageId),
 		workflows: createWorkflowsProxy(runtimeBridge),
 		packages: null,
 		events: createEventsProxy(runtimeBridge),
@@ -1030,6 +1061,12 @@ type PackageAppRuntimeBridgeProps = {
 	sourceId: string
 	publishedCommit: string | null
 	packageStorageGrantIds: Array<string>
+	/**
+	 * Run-scoped credential-client binding shared with KodyFetchGateway.
+	 * Lives on props (not the entrypoint instance) so open → sign survives
+	 * across WorkerEntrypoint RPC invocations.
+	 */
+	credentialClientBinding: string
 }
 
 function redactRunRecordLogs(
@@ -1061,6 +1098,7 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 	PackageAppRuntimeBridgeProps
 > {
 	private packageEventTools: Promise<PackageEventTools> | null = null
+	private credentialClientTools: Promise<AdditionalKodyTools> | null = null
 	private readonly secretRedactor: ExecutionSecretRedactor =
 		createExecutionSecretRedactor()
 
@@ -1625,6 +1663,55 @@ export class PackageAppRuntimeBridge extends WorkerEntrypoint<
 		const tools = await this.createPackageEventTools()
 		return await tools.dispatch(input)
 	}
+
+	private async getCredentialClientTools() {
+		if (this.credentialClientTools) return await this.credentialClientTools
+		const binding = this.ctx.props.credentialClientBinding
+		this.credentialClientTools = (async () => {
+			const callerContext = await this.createCallerContext(null)
+			const grantedPackageIds = new Set(this.ctx.props.packageStorageGrantIds)
+			let runNeeds: Promise<ReadonlyMap<string, CredentialNeed>> | null = null
+			return createCredentialClientKodyTools({
+				env: this.env,
+				callerContext,
+				options: {
+					binding,
+					resolvePackageId: async (requested) =>
+						typeof requested === 'string' && grantedPackageIds.has(requested)
+							? requested
+							: this.ctx.props.packageId,
+					runNeeds: () => {
+						const request = callerContext.request
+						if (!request) return Promise.resolve(new Map())
+						runNeeds ??= loadRunCredentialNeeds({
+							env: this.env,
+							request,
+							packageIds: [this.ctx.props.packageId],
+						})
+						return runNeeds
+					},
+					waitUntil: (promise) => {
+						this.ctx.waitUntil(promise)
+					},
+				},
+			})
+		})()
+		return await this.credentialClientTools
+	}
+
+	async credentialClientCall(input: { name: string; args?: unknown }) {
+		const name = input.name.trim()
+		const allowed = new Set<string>(Object.values(credentialClientToolNames))
+		if (!allowed.has(name)) {
+			throw new Error(`Unknown credential client tool "${name}".`)
+		}
+		const tools = await this.getCredentialClientTools()
+		const tool = tools[name]
+		if (typeof tool !== 'function') {
+			throw new Error(`Credential client tool "${name}" is not available.`)
+		}
+		return await tool(input.args ?? {})
+	}
 }
 
 type PackageAppWorkerOptions = Parameters<Env['APP_LOADER']['load']>[0]
@@ -2090,6 +2177,11 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 			preloadMcpServerNames: modulesReferenceKodyMcp(bundled.modules),
 		}),
 	}
+	// One binding for this worker-options build (visitor-scoped via the cache
+	// key). Props — not WorkerEntrypoint instance fields — carry it so open
+	// and sign share the same run binding across RPC invocations, and the
+	// fetch gateway can place credential().fetch handles.
+	const credentialClientBinding = newRunCredentialClientBinding()
 	return {
 		...createDynamicWorkerCompatibilityOptions(),
 		mainModule,
@@ -2112,6 +2204,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 					sourceId: input.savedPackage.sourceId,
 					publishedCommit: input.savedPackage.publishedCommit,
 					packageStorageGrantIds,
+					credentialClientBinding,
 				},
 			}),
 			__kodyPackageContext: {
@@ -2137,6 +2230,7 @@ async function buildPackageAppWorkerOptionsUncached(input: {
 							storageId: null,
 						},
 						grantedSecretAuthorityPackageIds: packageStorageGrantIds,
+						credentialClientBinding,
 					},
 				})
 			: null,
