@@ -8,6 +8,10 @@ import {
 	inactiveDeployInvocation,
 } from './deploy-start-opt-in.ts'
 
+const turnstileKeys = {
+	TURNSTILE_SITE_KEY: 'trusted-site-key',
+	TURNSTILE_SECRET_KEY: 'trusted-secret-key',
+}
 const inactive = () => ({
 	name: 'kody-start-router',
 	workers_dev: false,
@@ -43,28 +47,32 @@ test('rejects ingress, schema and resource ownership changes', () => {
 test('requires trusted cookie and encryption secrets and rejects unknown live secret mappings', () => {
 	expect(() => collectCandidateSecrets([], {})).toThrow('COOKIE_SECRET')
 	expect(() =>
-		collectCandidateSecrets([], { COOKIE_SECRET: 'cookie' }),
+		collectCandidateSecrets([], { ...turnstileKeys, COOKIE_SECRET: 'cookie' }),
 	).toThrow('SECRET_STORE_KEY')
 	expect(() =>
 		collectCandidateSecrets(['UNKNOWN'], {
+			...turnstileKeys,
 			COOKIE_SECRET: 'cookie',
 			SECRET_STORE_KEY: 'store',
 		}),
 	).toThrow('reviewed secret mapping')
 	expect(() =>
 		collectCandidateSecrets(['STRIPE_SECRET_KEY'], {
+			...turnstileKeys,
 			COOKIE_SECRET: 'cookie',
 			SECRET_STORE_KEY: 'store',
 		}),
 	).toThrow('STRIPE_SECRET_KEY')
 	expect(
 		collectCandidateSecrets(['CLOUDFLARE_API_TOKEN'], {
+			...turnstileKeys,
 			COOKIE_SECRET: 'cookie',
 			SECRET_STORE_KEY: 'store',
 			CLOUDFLARE_API_TOKEN: 'deploy-token',
 			CLOUDFLARE_APP_API_TOKEN: 'application-token',
 		}),
 	).toEqual({
+		...turnstileKeys,
 		COOKIE_SECRET: 'cookie',
 		SECRET_STORE_KEY: 'store',
 		CLOUDFLARE_API_TOKEN: 'application-token',
@@ -217,6 +225,7 @@ test('keeps audited legacy DR credentials out of the website candidate even when
 		'DR_RESTORE_SECRET',
 	]
 	const environment = {
+		...turnstileKeys,
 		COOKIE_SECRET: 'cookie',
 		SECRET_STORE_KEY: 'store',
 		DR_BACKUP_ACCESS_KEY_ID: 's3-access',
@@ -227,15 +236,21 @@ test('keeps audited legacy DR credentials out of the website candidate even when
 		DR_DEPLOY_TOKEN: 'must-not-copy-provisioner',
 	}
 	expect(collectCandidateSecrets(names, environment)).toEqual({
+		...turnstileKeys,
 		COOKIE_SECRET: 'cookie',
 		SECRET_STORE_KEY: 'store',
 	})
 	expect(
 		collectCandidateSecrets(names, {
+			...turnstileKeys,
 			COOKIE_SECRET: 'cookie',
 			SECRET_STORE_KEY: 'store',
 		}),
-	).toEqual({ COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' })
+	).toEqual({
+		...turnstileKeys,
+		COOKIE_SECRET: 'cookie',
+		SECRET_STORE_KEY: 'store',
+	})
 	expect(() =>
 		collectCandidateSecrets([...names, 'DR_DEPLOY_TOKEN'], environment),
 	).toThrow('Missing reviewed secret mappings: DR_DEPLOY_TOKEN')
@@ -243,6 +258,7 @@ test('keeps audited legacy DR credentials out of the website candidate even when
 
 test('reports every unmapped and unavailable name together without exposing any values', () => {
 	const environment = {
+		...turnstileKeys,
 		COOKIE_SECRET: 'private-cookie-value',
 		SECRET_STORE_KEY: 'private-store-value',
 		STRIPE_SECRET_KEY: '',
@@ -287,13 +303,14 @@ test('protocol-only exclusion cannot remove mandatory website session or encrypt
 	expect(() =>
 		collectCandidateSecrets(
 			['DR_BACKUP_SECRET_ACCESS_KEY', 'STRIPE_SECRET_KEY'],
-			{ COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' },
+			{ ...turnstileKeys, COOKIE_SECRET: 'cookie', SECRET_STORE_KEY: 'store' },
 		),
 	).toThrow('Trusted production secrets unavailable: STRIPE_SECRET_KEY')
 })
 
 test('preserves the existing Turnstile key pair required by native website auth forms', () => {
 	const environment = {
+		...turnstileKeys,
 		COOKIE_SECRET: 'cookie',
 		SECRET_STORE_KEY: 'store',
 		TURNSTILE_SITE_KEY: 'production-site-key',
@@ -411,4 +428,39 @@ test('release-specific router source keeps Wrangler config cwd resolution', () =
 	)
 	expect(invocation.cwd).toBe('/workspace/kody/packages/start-routing-worker')
 	expect(invocation.args[2]).toBe('wrangler-start.generated.json')
+})
+
+test('production candidate refuses missing Turnstile keys even when absent from live inventory', () => {
+	expect(() =>
+		collectCandidateSecrets([], {
+			COOKIE_SECRET: 'cookie',
+			SECRET_STORE_KEY: 'store',
+		}),
+	).toThrow(
+		'Trusted production secrets unavailable: TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY',
+	)
+	expect(
+		collectCandidateSecrets([], {
+			...turnstileKeys,
+			COOKIE_SECRET: 'cookie',
+			SECRET_STORE_KEY: 'store',
+		}),
+	).toEqual({
+		...turnstileKeys,
+		COOKIE_SECRET: 'cookie',
+		SECRET_STORE_KEY: 'store',
+	})
+})
+
+test('blank Turnstile provisioning is rejected before candidate creation', () => {
+	expect(() =>
+		collectCandidateSecrets([], {
+			COOKIE_SECRET: 'cookie',
+			SECRET_STORE_KEY: 'store',
+			TURNSTILE_SITE_KEY: '  ',
+			TURNSTILE_SECRET_KEY: '\t',
+		}),
+	).toThrow(
+		'Trusted production secrets unavailable: TURNSTILE_SECRET_KEY, TURNSTILE_SITE_KEY',
+	)
 })

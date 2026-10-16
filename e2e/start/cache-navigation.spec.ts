@@ -343,51 +343,6 @@ test('evicted initial docs keep the previous page while their new read is held',
 	}
 })
 
-test('value search stays local while changing the selected record reads its own query', async ({
-	page,
-	seedE2eUser,
-	login,
-}) => {
-	const id = randomUUID().slice(0, 8)
-	const user = await seedE2eUser({
-		email: `value-cache-${id}@example.com`,
-		username: `value-cache-${id}`,
-	})
-	await login({ ...user, mode: 'login' })
-	const resourcePath = orgResourcePath(user.username, 'values')
-	await page.goto(resourcePath)
-	await waitForClientHydration(page)
-	await page.waitForLoadState('networkidle')
-	const reads: Array<string> = []
-	page.on('request', (request) => {
-		const url = decodeURIComponent(request.url())
-		if (
-			requestHasDataFields(
-				request,
-				{ orgSlug: user.username, valueId: undefined },
-				['section'],
-			)
-		)
-			reads.push(url)
-	})
-	await page.evaluate(
-		(href) => window.history.pushState(null, '', href),
-		`${resourcePath}?q=example&utm_source=test`,
-	)
-	await expect(
-		page.getByRole('heading', { name: 'Values', exact: true }),
-	).toBeVisible()
-	await page.waitForLoadState('networkidle')
-	expect(reads).toEqual([])
-	await page.evaluate(
-		(href) => window.history.pushState(null, '', href),
-		`${resourcePath}?selected=missing-value&q=example`,
-	)
-	await expect.poll(() => reads.length).toBe(1)
-	expect(reads[0]).toContain('missing-value')
-	expect(reads[0]).toContain('selected')
-})
-
 test('retained Agents keeps its own view while navigating back to Profile', async ({
 	page,
 	seedE2eUser,

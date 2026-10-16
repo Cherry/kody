@@ -68,7 +68,6 @@ test('every native organization route declares its verification policy', () => {
 		'repositories',
 		'secret-providers',
 		'secrets',
-		'values',
 		'waiting',
 		'webhooks',
 		'workflows',

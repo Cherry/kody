@@ -311,12 +311,6 @@ export const routes = {
 			rest?: string | number | null
 		}) => `/@${segment(params.orgSlug)}/-/secrets${filePath(params.rest)}`,
 	},
-	orgValues: {
-		href: (params: {
-			orgSlug: string | number
-			rest?: string | number | null
-		}) => `/@${segment(params.orgSlug)}/-/values${filePath(params.rest)}`,
-	},
 	orgWaiting: {
 		href: (params: {
 			orgSlug: string | number

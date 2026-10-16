@@ -395,12 +395,17 @@ export default async function digest(input: { account: string; key: string }) {
 }
 ```
 
-Publish error (credentials check `ok: false`): declare every credential this
-package can use as a `kody.credentials` slot with a real description, branch
-with literal `credential("KEY")` / `createAuthenticatedFetch("account")` only,
-and remove `|scope=` / computed names. Literal `kody.mcp.SERVER` names are
-stamped as `kind: "mcp"` slots (phase 2); dynamic `kody.mcp[variable]` fails the
-stamp gate. The `kody.mcp` 0010 label remains for migration tracking.
+Publish error (credentials check `ok: false`): the package must be
+**conversion-ready**. Declare every credential as a fixed `kody.credentials`
+slot with a real description, call only literal keys (`credential("SLOT")` /
+`createAuthenticatedFetch("SLOT")` / `{{secret:SLOT}}`), and remove `|scope=`,
+`secretMounts`, vault placeholders, server `eval` / `new Function` / non-literal
+`import()`, and computed names. Callers pick which saved credential fills each
+slot with the execute `credentials` call map (`{ "SLOT": "credential-name" }` or
+CLI `--credential SLOT=name`) or a stored/trigger mapping — never choose the
+credential name at runtime inside package code. Literal `kody.mcp.SERVER` names
+are stamped as `kind: "mcp"` slots (phase 2); dynamic `kody.mcp[variable]` fails
+the stamp gate. The `kody.mcp` 0010 label remains for migration tracking.
 `credential.named()` stays limited to ad hoc runs and unshared personal-org
 packages (not stamped).
 
@@ -519,15 +524,49 @@ signing names get `kind: "signing"`.
 
 Packages with unstampable patterns (non-literal names, `|scope=`,
 `secretMounts`, `packageSecrets.get`, `credential.named`, server eval, dynamic
-`kody.mcp`) stay `needs_manual`: an agent tries converting them first, then
-stop-and-notify Kent on #3836 if they still fail. It uses
-`applyMode: 'published-only'`.
+`kody.mcp`) stay `needs_manual`. Prefer `0015-convert-credential-stamps` /
+`adminCredentialStampMigrate` for behavior-preserving conversion before leaving
+packages on the publish gate. It uses `applyMode: 'published-only'`.
 
 After apply (or for packages that were already seal-ready), run
 `adminCredentialStampBackfill` to restamp seal-ready packages that still lack a
 KV stamp at the current `published_commit`. Phase 3 must not start until that
 fleet report shows zero `missing_stamp` / `needs_manifest` / `unconvertible` /
 `deferred_scan_budget` packages among published packages that need stamps.
+
+### `0015-convert-credential-stamps`
+
+Platform migration for
+[issue #3836](https://github.com/kentcdodds/kody/issues/3836): convert other
+owners' published packages (including `@kody/*`) when the result is
+stamp-sealable without disruption. Operator surface:
+`adminCredentialStampMigrate` (audited admin mutation; dry-run default).
+
+Safe transforms only:
+
+- Declare allowlisted missing bare npm deps the tree already imports, including
+  side-effect imports (today: `remix@3.0.0`).
+- Seal inferred `kody.credentials` descriptions (same plan as `0014`).
+
+Does **not** strip `|scope=package` (or any `|scope=`): unsuffixed secret lookup
+prefers session before package, so removing the suffix would widen resolution.
+Those packages stay on the publish gate. Package-bound Keys can fill that same
+package's declared needs (exact name match or sole candidate), which lets owners
+convert off `|scope=package` placeholders onto needs without new secrets; this
+codemod still does not rewrite those placeholders itself.
+
+Skips without writing when:
+
+- The package is a Kent holdout (`@kentcdodds/raycast`,
+  `@kentcdodds/oauth-integration-health`).
+- Blocking stamp-gate failures remain (computed names, any `|scope=`,
+  `secretMounts`, vault placeholders, `server_eval`, `credential.named`, …).
+
+Never emails or notifies owners, never creates credential values, and relies on
+the existing republish path so job/trigger enablements stay as they are. Uses
+`applyMode: 'published-only'`. After apply pages finish, run
+`adminCredentialStampBackfill` to write KV stamps. Leftover cleanup is tracked
+in the linked #3836 cleanup issue.
 
 ## Engine
 
@@ -606,8 +645,8 @@ Artifacts default-branch HEAD to equal `published_commit`, then writes through
 `syncArtifactSourceSnapshot` so HEAD and published stay aligned. Drifted
 packages are `skipped_drift`.
 
-Codemods that set `applyMode: 'published-only'` (today: `0012`, `0013`, `0014`)
-change only the **drifted** lane:
+Codemods that set `applyMode: 'published-only'` (today: `0012`, `0013`, `0014`,
+`0015`) change only the **drifted** lane:
 
 1. Load the published tree (same as today).
 2. Run the same transform + check gates.

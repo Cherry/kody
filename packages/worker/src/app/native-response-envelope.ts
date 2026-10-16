@@ -1,4 +1,8 @@
-import { withAgentDiscoveryLinkHeaders } from './agent-discovery.ts'
+import { prefersMarkdown, withVaryAccept } from './markdown-negotiation.ts'
+import {
+	buildNotFoundMarkdown,
+	withAgentDiscoveryLinkHeaders,
+} from './agent-discovery.ts'
 import { getAppBaseUrl } from '../app-base-url.ts'
 import {
 	resolveAppPageCacheControl,
@@ -14,7 +18,18 @@ export function secureNativeResponse(
 	policy?: AnonymousDocumentCachePolicy,
 ) {
 	const url = new URL(request.url)
+	const status = documentFailure?.status ?? response.status
+	const negotiatedNotFound =
+		status === 404 &&
+		['GET', 'HEAD'].includes(request.method) &&
+		Boolean(response.headers.get('Content-Type')?.includes('text/html'))
+	const markdown = negotiatedNotFound && prefersMarkdown(request)
 	const headers = new Headers(response.headers)
+	if (markdown) {
+		headers.set('Content-Type', 'text/markdown; charset=utf-8')
+		headers.delete('Content-Length')
+		headers.delete('Content-Encoding')
+	}
 	for (const [name, value] of Object.entries(firstPartySecurityHeaders))
 		headers.set(name, value)
 	headers.set(
@@ -39,14 +54,19 @@ export function secureNativeResponse(
 	)
 		headers.set('Cache-Control', cache.cacheControl)
 	if (cache.vary) headers.append('Vary', cache.vary)
-	const documentResponse = new Response(
-		request.method === 'HEAD' ? null : response.body,
+	let documentResponse = new Response(
+		request.method === 'HEAD'
+			? null
+			: markdown
+				? buildNotFoundMarkdown(getAppBaseUrl({ env, requestUrl: request.url }))
+				: response.body,
 		{
 			status: documentFailure?.status ?? response.status,
 			statusText: response.statusText,
 			headers,
 		},
 	)
+	if (negotiatedNotFound) documentResponse = withVaryAccept(documentResponse)
 	return url.pathname === '/' &&
 		headers.get('Content-Type')?.includes('text/html')
 		? withAgentDiscoveryLinkHeaders(

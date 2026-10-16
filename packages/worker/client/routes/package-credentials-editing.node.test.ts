@@ -7,12 +7,14 @@ import {
 } from '#universal/credential-contracts.ts'
 import {
 	canEditTrigger,
+	draftForMappingEditor,
 	draftFromStored,
 	draftToChange,
 	mappingOptions,
 	mappingEditorKey,
 	type MappingDraft,
 	mappingSaveAgentPrompt,
+	packageBoundKeysPickerNote,
 	toggleDraftPick,
 	triggerMappingRows,
 	triggerDraftProblem,
@@ -160,6 +162,62 @@ test('the org default offers org credentials only', () => {
 			trigger: { kind: 'cron', name: 'daily' },
 		}),
 	).toEqual([orgRef, mineRef])
+})
+
+test('the mapping editor pre-selects a sole option or an exact name match', () => {
+	const target = { type: 'default', layer: 'mine' } as const
+	const unbound = {
+		source: 'auto' as const,
+		status: 'unbound' as const,
+		credentials: [],
+		candidates: [],
+		createUrl: null,
+	}
+	expect(
+		draftForMappingEditor(
+			need({ effective: unbound, options: [] }),
+			target,
+			null,
+		),
+	).toEqual({ mode: 'inherit' })
+	expect(
+		draftForMappingEditor(
+			need({ effective: unbound, options: [orgRef] }),
+			{ type: 'default', layer: 'org' },
+			null,
+		),
+	).toEqual({ mode: 'pick', ids: ['cred-1'] })
+	const named: CredentialRef = {
+		id: 'cred-openai',
+		name: 'openai',
+		scope: 'org',
+		kind: 'secret',
+	}
+	expect(
+		draftForMappingEditor(
+			need({ effective: unbound, options: [orgRef, named] }),
+			target,
+			null,
+		),
+	).toEqual({ mode: 'pick', ids: ['cred-openai'] })
+	// Auto-ready stays inherit so saving is not required.
+	expect(
+		draftForMappingEditor(
+			need({
+				effective: {
+					source: 'auto',
+					status: 'ready',
+					credentials: [orgRef],
+					candidates: [],
+					createUrl: null,
+				},
+				options: [orgRef],
+			}),
+			{ type: 'default', layer: 'org' },
+			null,
+		),
+	).toEqual({ mode: 'inherit' })
+	expect(packageBoundKeysPickerNote).toContain('other packages are hidden')
 })
 
 test('only the enabler edits a trigger, and an off trigger turns on when saved', () => {

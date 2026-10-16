@@ -76,6 +76,10 @@ test('the markdown root is intro plus index', async () => {
 	expect(markdownIndex.headers.get('content-type')).toBe(markdownType)
 	const indexBody = await markdownIndex.text()
 	expect(indexBody).toContain('https://kody.example/llms.txt')
+	expect(indexBody).toContain('## Kody Open API')
+	expect(indexBody).toContain('https://api.kody.codes/openapi.json')
+	expect(indexBody).toContain('https://api-docs.kody.codes/')
+	expect(indexBody).toContain('/docs/open-api.md')
 	expect(indexBody).toContain('## Examples')
 	expect(indexBody).toContain('/docs/flake-hunter.md')
 	expectOrdered(indexBody, ['## Introduction', '## Get started'])
@@ -102,6 +106,10 @@ test('the markdown root is intro plus index', async () => {
 	expect(llmsBody.startsWith('# Kody\n')).toBe(true)
 	expect(llmsBody).toContain('individuals and teams')
 	expect(llmsBody).toContain('credentials it never reads')
+	expect(llmsBody).toContain('## Kody Open API')
+	expect(llmsBody).toContain('https://api.kody.codes/openapi.json')
+	expect(llmsBody).toContain('https://api-docs.kody.codes/')
+	expect(llmsBody).toContain('Kody Docs')
 	expect(llmsBody).not.toContain('/docs/values.md')
 	expect(llmsBody).not.toContain('/docs/admin-events.md')
 	expectOrdered(llmsBody, [
@@ -192,11 +200,9 @@ test('provider and platform doc markdown details stay stable', async () => {
 		call(createDocDetailMarkdownHandler, `/docs/${slug}.md`, { slug })
 	const apiDetail = (slug: string) => readDetail(slug)
 
-	for (const slug of ['values', 'oauth', 'github', 'google-oauth']) {
+	for (const slug of ['oauth', 'github', 'google-oauth']) {
 		expect([slug, (await markdownDetail(slug)).status]).toEqual([slug, 200])
 	}
-	const valuesBody = await (await markdownDetail('values')).text()
-	expect(valuesBody.startsWith('#')).toBe(true)
 	const oauthDetail = await markdownDetail('oauth')
 	expect(oauthDetail.headers.get('content-type')).toBe(markdownType)
 	const oauthBody = await oauthDetail.text()

@@ -75,12 +75,12 @@ async function listUsage(input: {
 	credentialId: string
 	packages: ReadonlyArray<SavedPackageRecord>
 }) {
-	const [usable, closures] = await Promise.all([
-		listUsableCredentials({ env: input.env, request: input.request }),
-		Promise.all(
-			input.packages.map(async (pkg) => ({
-				pkg,
-				needs: await loadPublishedCredentialNeeds({
+	// Load closures and per-package usable lists in parallel so a 40-package
+	// detail view does not re-walk credentials serially.
+	const packageViews = await Promise.all(
+		input.packages.map(async (pkg) => {
+			const [needs, usable] = await Promise.all([
+				loadPublishedCredentialNeeds({
 					env: input.env,
 					userId: input.orgId,
 					sourceId: pkg.sourceId,
@@ -91,12 +91,18 @@ async function listUsage(input: {
 					})
 					return null
 				}),
-			})),
-		),
-	])
+				listUsableCredentials({
+					env: input.env,
+					request: input.request,
+					packageId: pkg.id,
+				}),
+			])
+			return { pkg, needs, usable }
+		}),
+	)
 	const usage: AccountCredentialDetail['usage'] = []
 	let unreadable = 0
-	for (const { pkg, needs } of closures) {
+	for (const { pkg, needs, usable } of packageViews) {
 		if (needs === null) {
 			unreadable += 1
 			continue
@@ -178,15 +184,16 @@ export async function loadCredentialDetail(input: {
 	/** The org's packages, most recently updated first. */
 	packages: ReadonlyArray<SavedPackageRecord>
 }): Promise<AccountCredentialDetail> {
-	// A package key fills its own package's placeholders, never declared needs,
-	// and a locked credential is never picked for a package outside its locks.
+	// A package key fills its own package's placeholders and that package's
+	// declared needs. A locked credential is never picked for a package
+	// outside its locks.
 	const locks = input.credential.lockedToPackageIds
 	const reachable =
 		locks.length > 0
 			? input.packages.filter((pkg) => locks.includes(pkg.id))
 			: input.packages
 	const checked = input.credential.packageId
-		? []
+		? reachable.filter((pkg) => pkg.id === input.credential.packageId)
 		: reachable.slice(0, maxUsagePackages)
 	const [grants, usage, hostSettings] = await Promise.all([
 		input.ownedByViewer

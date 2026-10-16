@@ -81,3 +81,29 @@ test('SSR preserves document metadata and critical resource ordering', async ({
 		await context.close()
 	}
 })
+
+test('homepage SSR includes nonce-authorized SoftwareApplication JSON-LD only on home', async ({
+	page,
+}) => {
+	const response = await page.goto('/')
+	const structured = page.locator('head script[type="application/ld+json"]')
+	await expect(structured).toHaveCount(1)
+	const data = JSON.parse((await structured.textContent())!)
+	expect(data).toMatchObject({
+		'@type': 'SoftwareApplication',
+		url: 'https://kody.codes',
+		offers: { price: '0', priceCurrency: 'USD' },
+	})
+	expect(data.sameAs).toContain('https://github.com/kentcdodds/kody')
+	const nonce = await structured.evaluate(
+		(node: HTMLScriptElement) => node.nonce,
+	)
+	expect(nonce).not.toBe('')
+	expect(response?.headers()['content-security-policy']).toContain(
+		`'nonce-${nonce}'`,
+	)
+	await page.goto('/pricing')
+	await expect(
+		page.locator('head script[type="application/ld+json"]'),
+	).toHaveCount(0)
+})

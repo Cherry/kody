@@ -22,6 +22,14 @@ export const authMdPath = '/auth.md'
 export const robotsTxtPath = '/robots.txt'
 export const sitemapPath = '/sitemap.xml'
 
+/** Production Open API host (separate Worker from the marketing origin). */
+export const kodyOpenApiOrigin = 'https://api.kody.codes'
+/** Scalar interactive docs for {@link kodyOpenApiOrigin}. */
+export const kodyApiDocsOrigin = 'https://api-docs.kody.codes'
+export const kodyOpenApiSpecUrl = `${kodyOpenApiOrigin}/openapi.json`
+export const kodyOpenApiV1Anchor = `${kodyOpenApiOrigin}/v1`
+export const kodyGithubUrl = 'https://github.com/kentcdodds/kody'
+
 /**
  * Public OpenAI Apps domain-verification token for `openaiAppsChallengePath`.
  * Not a secret: the portal fetches it unauthenticated as `text/plain`.
@@ -270,6 +278,30 @@ export function buildApiCatalog(origin: string) {
 				],
 			},
 			{
+				anchor: kodyOpenApiV1Anchor,
+				'service-desc': [
+					{
+						href: kodyOpenApiSpecUrl,
+						type: 'application/json',
+					},
+				],
+				'service-doc': [
+					{
+						href: `${kodyApiDocsOrigin}/`,
+						type: 'text/html',
+					},
+					{
+						href: `${origin}/docs/open-api.md`,
+						type: 'text/markdown',
+					},
+				],
+				status: [
+					{
+						href: `${kodyOpenApiOrigin}/health`,
+					},
+				],
+			},
+			{
 				anchor: `${origin}${oauthPaths.authorize}`,
 				'service-desc': [
 					{
@@ -373,6 +405,55 @@ export function buildHomeMarkdown(origin: string): string {
 		'',
 		'The MCP surface is two tools: `search` and `execute`. After connecting,',
 		'search first.',
+		'',
+	].join('\n')
+}
+
+/**
+ * Markdown body for generic HTTP 404s when the client prefers
+ * `Accept: text/markdown`. Status stays 404; HTML remains the default.
+ */
+export function buildNotFoundMarkdown(origin: string): string {
+	return [
+		'# Not found',
+		'',
+		'That URL is not on this Kody site (HTTP 404).',
+		'',
+		'Useful next steps:',
+		'',
+		`- [Kody docs](${origin}/docs)`,
+		`- [Sitemap](${origin}${sitemapPath})`,
+		`- [llms.txt](${origin}/llms.txt)`,
+		'',
+	].join('\n')
+}
+
+export {
+	buildHomeSoftwareApplicationJsonLd,
+	homeSoftwareApplicationJsonLdScriptText,
+	kodyCanonicalMarketingOrigin,
+} from '#universal/home-json-ld.ts'
+
+/**
+ * CSP `script-src` hash for {@link homeSoftwareApplicationJsonLdScriptText}
+ * at {@link kodyCanonicalMarketingOrigin}. Recompute if that JSON changes.
+ */
+export const homeSoftwareApplicationJsonLdCspHash =
+	"'sha256-kA29cEckpxqhx3UH7quLqXA+rWPkZNkKL8yWo/7LPiY='"
+
+/**
+ * Shared Open API discovery links for `/docs.md` and `/llms.txt`.
+ * The REST surface lives on fixed production hosts, not the request origin.
+ */
+export function buildOpenApiDiscoveryMarkdown(baseUrl: string): string {
+	return [
+		'## Kody Open API',
+		'',
+		'Call Kody over HTTPS (OpenAPI 3.1). Available to every signed-in account.',
+		'',
+		`- [Interactive docs](${kodyApiDocsOrigin}/) — Scalar UI at api-docs.kody.codes`,
+		`- [OpenAPI description](${kodyOpenApiSpecUrl}) — machine-readable service description`,
+		`- [Kody Open API guide](${baseUrl}/docs/open-api.md) — how to mint tokens and call \`/v1\``,
 		'',
 	].join('\n')
 }

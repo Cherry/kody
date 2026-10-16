@@ -65,10 +65,27 @@ export const saveSecret = createServerFn({ method: 'POST' })
 		])
 		return withWebsiteMutation(
 			{ scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined },
-			async (context) =>
-				requireOperationResult(
-					await saveAccountSecret({ ...context, ...data }),
-				),
+			async (context) => {
+				const result = await saveAccountSecret({ ...context, ...data })
+				if (
+					result.status === 400 &&
+					!result.data.ok &&
+					'selectedSecret' in result.data
+				) {
+					const recovery = z
+						.strictObject({
+							ok: z.literal(false),
+							error: z.string(),
+							selectedSecret: z.strictObject({
+								id: z.string(),
+								name: z.string(),
+							}),
+						})
+						.parse(result.data)
+					return recovery
+				}
+				return requireOperationResult(result)
+			},
 		)
 	})
 
@@ -200,31 +217,6 @@ export const exchangeOAuthToken = createServerFn({ method: 'POST' })
 		)
 	})
 
-export const deleteAccountValue = createServerFn({ method: 'POST' })
-	.validator(resourceInput.extend({ name: z.string().trim().min(1) }))
-	.handler(async ({ data }) => {
-		const [
-			{ withWebsiteMutation },
-			{ deleteAccountValueRecord },
-			{ requireOperationResult },
-		] = await Promise.all([
-			import('./mutation-context.ts'),
-			import('../../src/app/handlers/account-values.ts'),
-			import('../../src/app/operation-result.ts'),
-		])
-		return withWebsiteMutation(
-			{
-				scope: data.orgSlug ? { orgSlug: data.orgSlug } : undefined,
-			},
-			async (context) =>
-				requireOperationResult(
-					await deleteAccountValueRecord({
-						...context,
-						name: data.name,
-					}),
-				),
-		)
-	})
 export const deleteAccountMemory = createServerFn({ method: 'POST' })
 	.validator(
 		resourceInput.omit({ search: true }).extend({

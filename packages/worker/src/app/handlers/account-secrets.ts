@@ -33,6 +33,7 @@ import {
 	deleteSecret,
 	findSecret,
 	listSecrets,
+	renameSecret,
 	resolveSecret,
 	saveSecret,
 	type SaveSecretCredential,
@@ -1223,6 +1224,8 @@ export async function saveAccountSecret(input: {
 		scope,
 		packageId,
 	})
+	// Uniqueness matches lookup: exact (case-sensitive) name + scope. A
+	// case-only rename of the current secret is therefore not a collision.
 	if (currentId !== nextId && secretById.has(nextId)) {
 		return operationResult(
 			{
@@ -1232,6 +1235,17 @@ export async function saveAccountSecret(input: {
 			409,
 		)
 	}
+
+	const samePlacement =
+		currentSecret != null &&
+		currentSecret.scope === scope &&
+		(currentSecret.packageId ?? null) === (packageId ?? null)
+	const nameChanged = currentSecret != null && currentSecret.name !== name
+	// Same-scope renames (including Henry → henry) update the row in place so
+	// the credential id and opt-in kind stay put. Scope/package moves still use
+	// create-under-new + delete-old below. Validate before renaming so a failed
+	// save cannot leave the editor pointing at a name that no longer exists.
+	const willRenameInPlace = nameChanged && samePlacement
 
 	const orgId = ownerIdFromCaller({
 		request: input.user.request,
@@ -1271,11 +1285,12 @@ export async function saveAccountSecret(input: {
 			const placement = await readStoredCredentialPlacement({
 				db: input.env.APP_DB,
 				orgId,
+				// Still under the prior name until rename commits below.
 				name: currentSecret?.scope === 'user' ? currentSecret.name : name,
 			})
 			keepsOptInHosts = placement != null && placement.kind !== 'secret'
 			if (placement && keepsOptInHosts) {
-				if (currentSecret && currentId !== nextId) {
+				if (currentSecret && currentId !== nextId && !willRenameInPlace) {
 					return operationResult(
 						{
 							ok: false,
@@ -1310,6 +1325,45 @@ export async function saveAccountSecret(input: {
 			400,
 		)
 	}
+
+	let renamedInPlace = false
+	if (willRenameInPlace && currentSecret) {
+		try {
+			const renamed = await renameSecret({
+				env: input.env,
+				userId: ownerIdFromCaller({
+					request: input.user.request,
+					user: input.user.mcpUser,
+				}),
+				scope: currentSecret.scope,
+				fromName: currentSecret.name,
+				toName: name,
+				storageContext: getSecretContextForAccountSecret(currentSecret),
+			})
+			if (renamed.name !== name) {
+				return operationResult(
+					{
+						ok: false,
+						error: 'Secret rename did not persist the new name.',
+					},
+					500,
+				)
+			}
+			renamedInPlace = true
+		} catch (error) {
+			return operationResult(
+				{
+					ok: false,
+					error:
+						error instanceof Error ? error.message : 'Unable to rename secret.',
+				},
+				error instanceof Error && error.message.includes('already exists')
+					? 409
+					: 400,
+			)
+		}
+	}
+
 	const setsKeyHosts =
 		credential == null ? !keepsOptInHosts : credential.kind === 'secret'
 
@@ -1364,14 +1418,36 @@ export async function saveAccountSecret(input: {
 			}),
 		})
 	} catch (error) {
-		return operationResult(
-			{
-				ok: false,
-				error:
-					error instanceof Error ? error.message : 'Unable to save secret.',
-			},
-			400,
-		)
+		const saveError =
+			error instanceof Error ? error.message : 'Unable to save secret.'
+		if (renamedInPlace && currentSecret) {
+			try {
+				await renameSecret({
+					env: input.env,
+					userId: ownerIdFromCaller({
+						request: input.user.request,
+						user: input.user.mcpUser,
+					}),
+					scope: currentSecret.scope,
+					fromName: name,
+					toName: currentSecret.name,
+					storageContext: getSecretContextForAccountSecret(currentSecret),
+				})
+				renamedInPlace = false
+			} catch {
+				// Rename stuck at the new name, surface it so the editor can
+				// retarget currentId instead of 404ing on the prior casing.
+				return operationResult(
+					{
+						ok: false,
+						error: saveError,
+						selectedSecret: { id: nextId, name },
+					},
+					400,
+				)
+			}
+		}
+		return operationResult({ ok: false, error: saveError }, 400)
 	}
 
 	// Post-commit provider link must not claim the save failed — a create retry
@@ -1414,7 +1490,7 @@ export async function saveAccountSecret(input: {
 		}
 	}
 
-	if (currentSecret && currentSecret.id !== nextId) {
+	if (currentSecret && currentSecret.id !== nextId && !renamedInPlace) {
 		try {
 			await deleteSecret({
 				env: input.env,

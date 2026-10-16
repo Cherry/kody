@@ -413,7 +413,6 @@ test('the switcher keeps each org section and reads the destination org through 
 		['waiting', 'Waiting'],
 		['webhooks', 'Webhooks'],
 		['credentials', 'Credentials'],
-		['values', 'Values'],
 	] as const) {
 		await page.goto(`/@${user.username}/-/${section}`)
 		await waitForClientHydration(page)
@@ -439,8 +438,8 @@ test('the switcher keeps each org section and reads the destination org through 
 		const sectionLink = page
 			.getByRole('navigation', { name: 'Workspace sections' })
 			.getByRole('link', { name: label, exact: true })
-		if (section === 'values' || section === 'memories') {
-			// The rail omits retiring Values and personal-only Memories for teams.
+		if (section === 'memories') {
+			// The rail omits personal-only Memories for teams.
 			// Legacy URLs retain org context and remain readable.
 			await expect(sectionLink).toHaveCount(0)
 		} else if (section === 'workflows' || section === 'waiting') {

@@ -41,6 +41,7 @@ import {
 import { SecretEditor } from './account-secrets-editor.tsx'
 import {
 	type SecretFilterScope,
+	applyStuckRenameRecovery,
 	buildBaseSecretsHref,
 	buildNewSecretHref,
 	buildSecretHref,
@@ -400,6 +401,18 @@ export function AccountSecretsPage({
 			remove.reset()
 			approve.reset()
 			reject.reset()
+			if (!payload.ok) {
+				const recovered = applyStuckRenameRecovery({
+					editor: submittedEditorState,
+					stuck: payload.selectedSecret,
+					search: getCurrentSearch(),
+				})
+				setEditorState(recovered.editor)
+				setSaveState('idle')
+				toast.error(payload.error)
+				navigate(recovered.href)
+				return
+			}
 
 			const warning = readAccountSecretsSaveWarning(payload)
 			if (warning) toast.error(warning)

@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/cloudflare'
 import { getRequestIp } from '#worker/audit-log.ts'
 import {
 	honeypotFieldName,
@@ -8,14 +9,18 @@ export { honeypotFieldName, turnstileResponseFieldName }
 
 type PublicFormBody = Record<string, unknown>
 
+type PublicFormProtectionEnv = {
+	TURNSTILE_SITE_KEY?: string | undefined
+	TURNSTILE_SECRET_KEY?: string | undefined
+	SENTRY_ENVIRONMENT?: string | undefined
+}
+
 function readTrimmedString(body: PublicFormBody, fieldName: string) {
 	const value = body[fieldName]
 	return typeof value === 'string' ? value.trim() : ''
 }
 
-export function getTurnstileSiteKey(
-	env: Pick<Env, 'TURNSTILE_SITE_KEY' | 'TURNSTILE_SECRET_KEY'>,
-) {
+export function getTurnstileSiteKey(env: PublicFormProtectionEnv) {
 	const siteKey = env.TURNSTILE_SITE_KEY?.trim()
 	const secretKey = env.TURNSTILE_SECRET_KEY?.trim()
 	return siteKey && secretKey ? siteKey : null
@@ -23,10 +28,13 @@ export function getTurnstileSiteKey(
 
 export type PublicFormProtectionResult =
 	| { ok: true }
-	| { ok: false; error: string }
+	| { ok: false; error: string; status?: number }
+
+const turnstileKeysMissingProductionMessage =
+	'Production public forms require TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY.'
 
 export async function checkPublicFormProtection(input: {
-	env: Pick<Env, 'TURNSTILE_SITE_KEY' | 'TURNSTILE_SECRET_KEY'>
+	env: PublicFormProtectionEnv
 	request: Request
 	body: PublicFormBody
 }): Promise<PublicFormProtectionResult> {
@@ -39,10 +47,26 @@ export async function checkPublicFormProtection(input: {
 
 	const siteKey = input.env.TURNSTILE_SITE_KEY?.trim()
 	const secretKey = input.env.TURNSTILE_SECRET_KEY?.trim()
-	// Turnstile is deliberately opt-in so local development, previews, and tests
-	// continue to work. A partial configuration also stays disabled because the
-	// browser cannot produce a usable token without the public site key.
-	if (!siteKey || !secretKey) return { ok: true }
+	// Local development, previews, and tests may omit Turnstile. Production
+	// must never fail open: refuse with a server error and report to Sentry.
+	// Boot also refuses when keys are missing (getEnv / env.ts).
+	if (!siteKey || !secretKey) {
+		if (input.env.SENTRY_ENVIRONMENT !== 'production') return { ok: true }
+
+		const error = new Error(turnstileKeysMissingProductionMessage)
+		Sentry.captureException(error, {
+			tags: {
+				surface: 'public-form-protection',
+				reason: 'turnstile-keys-missing',
+			},
+		})
+		return {
+			ok: false,
+			error:
+				'Human verification is not configured on this deployment. Please try again later.',
+			status: 503,
+		}
+	}
 
 	const token = readTrimmedString(input.body, turnstileResponseFieldName)
 	if (!token) {
@@ -109,6 +133,9 @@ export async function verifyPublicFormProtection(
 		? result
 		: {
 				ok: false as const,
-				response: Response.json({ error: result.error }, { status: 400 }),
+				response: Response.json(
+					{ error: result.error },
+					{ status: result.status ?? 400 },
+				),
 			}
 }

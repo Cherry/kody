@@ -430,7 +430,8 @@ export function buildKeySaveBody(input: {
 }): CredentialSaveBody {
 	const { form } = input
 	const name = form.name.trim()
-	const replacing = form.replaceExisting && input.existing !== null
+	const existing = input.existing
+	const replacing = form.replaceExisting && existing !== null
 	const hosts = parseHostsInput(form.hosts)
 	const packageId = keyFormPackageId(form, input.kind)
 	const scope: 'package' | 'user' = packageId ? 'package' : 'user'
@@ -441,9 +442,16 @@ export function buildKeySaveBody(input: {
 			)
 	const common = {
 		action: 'save' as const,
-		currentId: replacing
-			? buildAccountSecretId({ name, scope, packageId })
-			: null,
+		// Replace targets the existing row by its stored name (exact), not the
+		// form name, a case-only rename must keep currentId on the prior casing.
+		currentId:
+			replacing && existing
+				? buildAccountSecretId({
+						name: existing.name,
+						scope,
+						packageId,
+					})
+				: null,
 		name,
 		scope,
 		packageId,

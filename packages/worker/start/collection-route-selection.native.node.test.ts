@@ -1,7 +1,5 @@
 import { createElement, type ComponentType } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { Route as valuesList } from './routes/@{$orgSlug}_.-.values.tsx'
-import { Route as valuesDetail } from './routes/@{$orgSlug}_.-.values_.$valueId.tsx'
 import { Route as memoriesList } from './routes/@{$orgSlug}_.-.memories.tsx'
 import { Route as memoriesDetail } from './routes/@{$orgSlug}_.-.memories_.$memoryId.tsx'
 import type * as PageQueryModule from './page-query.ts'
@@ -14,17 +12,10 @@ vi.mock('./page-query.ts', async (importOriginal) => ({
 }))
 afterEach(() => vi.restoreAllMocks())
 
-for (const family of ['values', 'memories'] as const) {
+for (const family of ['memories'] as const) {
 	for (const detail of [false, true]) {
 		test(`${family} ${detail ? 'path wins over selected search' : 'legacy selected search opens detail'}`, async () => {
-			const route =
-				family === 'values'
-					? detail
-						? valuesDetail
-						: valuesList
-					: detail
-						? memoriesDetail
-						: memoriesList
+			const route = detail ? memoriesDetail : memoriesList
 			const id = 'literal%2Fpart'
 			const href = `/@team/-/${family}${detail ? `/${id}` : ''}?selected=${detail ? 'other' : id}`
 			// The committed match owns both the read input and rendered selection.
@@ -34,23 +25,11 @@ for (const family of ['values', 'memories'] as const) {
 				pageLocation: { href: `/@team/-/${family}/other` },
 				pageQueryInput: {
 					orgSlug: 'team',
-					valueId: family === 'values' && detail ? id : undefined,
-					memoryId: family === 'memories' && detail ? id : undefined,
+					memoryId: detail ? id : undefined,
 					selected: detail ? 'other' : ` ${id} `,
 				},
 			} as ReturnType<typeof route.useRouteContext>)
 			const timestamp = '2026-01-01T00:00:00.000Z'
-			const value = {
-				id,
-				name: 'Chosen value',
-				description: '',
-				value: 'Chosen content',
-				valuePreview: 'Chosen content',
-				scope: 'user',
-				createdAt: timestamp,
-				updatedAt: timestamp,
-				ttlMs: null,
-			}
 			const memory = {
 				id,
 				subject: 'Chosen memory',
@@ -66,35 +45,23 @@ for (const family of ['values', 'memories'] as const) {
 				lastAccessedAt: null,
 				deletedAt: null,
 			}
-			state.payload =
-				family === 'values'
-					? {
-							ok: true,
-							values: [value],
-							selectedValue: value,
-							selectedValueId: id,
-						}
-					: {
-							ok: true,
-							email: 'owner@example.com',
-							username: 'owner',
-							memories: [memory],
-							selectedMemory: memory,
-							query: '',
-							includeDeleted: false,
-							legacyReadOnly: false,
-						}
+			state.payload = {
+				ok: true,
+				email: 'owner@example.com',
+				username: 'owner',
+				memories: [memory],
+				selectedMemory: memory,
+				query: '',
+				includeDeleted: false,
+				legacyReadOnly: false,
+			}
 			const html = await renderStartPage(
 				createElement(route.options.component as ComponentType),
 				href,
 			)
 			expect(html).toContain('Chosen content')
-			expect(html).toContain(
-				family === 'values' ? 'name="value"' : 'Chosen summary',
-			)
-			expect(html).not.toContain(
-				family === 'values' ? 'Value not found' : 'Memory not found',
-			)
+			expect(html).toContain('Chosen summary')
+			expect(html).not.toContain('Memory not found')
 		})
 	}
 }

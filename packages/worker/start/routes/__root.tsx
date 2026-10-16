@@ -1,4 +1,5 @@
 /** @jsxImportSource @emotion/react */
+import { homeSoftwareApplicationJsonLdScriptText } from '#universal/home-json-ld.ts'
 import { publicAsset } from '../public-assets.ts'
 import { pageNavigationForMatches } from '../page-navigation.ts'
 import { appShellForMatches } from '../app-shell.ts'
@@ -300,6 +301,13 @@ function LoadedAppLayout() {
 
 /** The document must render even when beforeLoad prevents every loader. */
 function DocumentShell({ children }: { children: ReactNode }) {
+	const nonce = useRouter().options.ssr?.nonce
+	const homeDocument = useRouterState({
+		select: (state) =>
+			state.matches.some(
+				(match) => match.routeId === '/' && match.status === 'success',
+			),
+	})
 	const scarfTracker = useRef<ReturnType<typeof createScarfPageTracker> | null>(
 		null,
 	)
@@ -348,6 +356,15 @@ function DocumentShell({ children }: { children: ReactNode }) {
 		<html lang="en" suppressHydrationWarning>
 			<head>
 				<meta charSet="utf-8" />
+				{homeDocument ? (
+					<script
+						nonce={nonce}
+						type="application/ld+json"
+						dangerouslySetInnerHTML={{
+							__html: homeSoftwareApplicationJsonLdScriptText(),
+						}}
+					/>
+				) : null}
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<link rel="icon" href={publicAsset('/favicon.ico')} sizes="any" />
 				<link

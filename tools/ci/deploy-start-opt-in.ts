@@ -207,8 +207,13 @@ export function collectCandidateSecrets(
 		if (!value) unavailable.add(name)
 		else secrets[name] = value
 	}
-	for (const name of ['COOKIE_SECRET', 'SECRET_STORE_KEY']) {
-		if (!environment[name]) unavailable.add(name)
+	for (const name of [
+		'COOKIE_SECRET',
+		'SECRET_STORE_KEY',
+		'TURNSTILE_SITE_KEY',
+		'TURNSTILE_SECRET_KEY',
+	]) {
+		if (!environment[name]?.trim()) unavailable.add(name)
 		else secrets[name] = environment[name]!
 	}
 	const failures = [

@@ -351,3 +351,33 @@ test('a committed profile save does not depend on reloading account data', async
 		prepare.mockRestore()
 	}
 })
+
+test('clearing displayName persists null and acknowledges the committed native save', async () => {
+	// Auth resolves once per request with the stored display name. Clearing
+	// must not fall back to that cached value in the POST response (Devin on
+	// #3879).
+	const { testDb, post } = createProfileClient(['ada'])
+	const user = testDb.users.get(1)
+	expect(user).toBeDefined()
+	user!.display_name = 'Ada Lovelace'
+
+	const trimmedOrNull = (value: string) => value.trim() || null
+	mocks.updateCommunityProfile.mockImplementation(
+		async (input: { displayName?: string }) => {
+			const row = testDb.users.get(1)
+			if (!row) return
+			if (input.displayName !== undefined) {
+				row.display_name = trimmedOrNull(input.displayName)
+			}
+		},
+	)
+
+	const response = await post({ displayName: '' })
+
+	expect(response.status).toBe(200)
+	expect(await response.json()).toMatchObject({
+		username: 'ada',
+		displayName: 'ada',
+	})
+	expect(testDb.users.get(1)?.display_name).toBeNull()
+})

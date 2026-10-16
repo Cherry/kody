@@ -40,12 +40,18 @@ export const submitOAuthDecision = createServerFn({ method: 'POST' })
 					request,
 					body: data.fields,
 				})
-				if (!protection.ok)
+				if (!protection.ok) {
+					if (protection.status) {
+						const { setResponseStatus } =
+							await import('@tanstack/react-start/server')
+						setResponseStatus(protection.status)
+					}
 					return {
 						successful: false,
 						ok: false,
 						error: protection.error,
 					}
+				}
 			}
 			const formData = new FormData()
 			for (const [key, value] of Object.entries(data.fields))

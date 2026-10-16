@@ -318,12 +318,6 @@ export const accountUserDataTargets: ReadonlyArray<UserScopedDataTarget> = [
 	},
 	{
 		kind: 'bucket_parent',
-		table: 'value_entries',
-		parentTable: 'value_buckets',
-	},
-	{ kind: 'user_id', table: 'value_buckets' },
-	{
-		kind: 'bucket_parent',
 		table: 'secret_entries',
 		parentTable: 'secret_buckets',
 	},

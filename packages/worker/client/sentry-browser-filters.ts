@@ -578,13 +578,13 @@ function filterMetaMaskWalletNoAccountSentryEvent<
  *
  * Pre-SDK buffering attributes the flush stack to `captureBrowserException`,
  * so there are no chrome-extension event frames to require (unlike
- * Client-has-been-destroyed). Match is intentionally narrow: this exact
- * "Message channel disconnected" wording (optional `MessageDisconnectedError:`
- * / `Error:` preface). For plain-object originalExceptions, also accept when
- * the message matches AND (`code === 4900` OR string `stack` contains
- * `chrome-extension:`) — message-only is enough for the buffered case
- * (same as MetaMask wallet-no-account). Never blanket-drop unrelated
- * `{ code, message, stack }` objects or EIP-1193 `4900` with other messages.
+ * Client-has-been-destroyed). Match requires the exact wording (optional
+ * `MessageDisconnectedError:` / `Error:` preface) AND extension provenance:
+ * EIP-1193 `code === 4900`, a string `stack` containing `chrome-extension:`,
+ * or (for Sentry events without a matching originalException) at least one
+ * `chrome-extension:` stack frame. Never drop a first-party Error that only
+ * shares the message, bare strings with no provenance, unrelated
+ * `{ code, message, stack }` objects, or EIP-1193 `4900` with other messages.
  */
 const chromeExtensionMessageChannelDisconnectedMessage =
 	/^(?:(?:MessageDisconnectedError|Error):\s*)?Message channel disconnected\.?$/i
@@ -593,15 +593,41 @@ function isChromeExtensionMessageChannelDisconnectedMessage(message: string) {
 	return chromeExtensionMessageChannelDisconnectedMessage.test(message.trim())
 }
 
+function isChromeExtensionStackFrameUrl(url: string) {
+	try {
+		return (
+			new URL(url, 'https://sentry.invalid').protocol === 'chrome-extension:'
+		)
+	} catch {
+		return false
+	}
+}
+
+function hasChromeExtensionMessageChannelDisconnectedEvidence(
+	error: object,
+): boolean {
+	if ('code' in error && error.code === 4900) return true
+	if (
+		'stack' in error &&
+		typeof error.stack === 'string' &&
+		error.stack.includes('chrome-extension:')
+	) {
+		return true
+	}
+	return false
+}
+
 export function isChromeExtensionMessageChannelDisconnectedError(
 	error: unknown,
 ) {
-	if (typeof error === 'string') {
-		return isChromeExtensionMessageChannelDisconnectedMessage(error)
-	}
+	// Bare strings have no extension provenance — keep them visible.
+	if (typeof error === 'string') return false
 	if (typeof error !== 'object' || error === null) return false
 	if (!('message' in error) || typeof error.message !== 'string') return false
-	return isChromeExtensionMessageChannelDisconnectedMessage(error.message)
+	if (!isChromeExtensionMessageChannelDisconnectedMessage(error.message)) {
+		return false
+	}
+	return hasChromeExtensionMessageChannelDisconnectedEvidence(error)
 }
 
 function isChromeExtensionMessageChannelDisconnectedSentryEvent(
@@ -611,11 +637,29 @@ function isChromeExtensionMessageChannelDisconnectedSentryEvent(
 	if (isChromeExtensionMessageChannelDisconnectedError(originalException)) {
 		return true
 	}
-	return sentryEventMessages(event).some(
-		(message) =>
-			typeof message === 'string' &&
-			isChromeExtensionMessageChannelDisconnectedMessage(message),
-	)
+
+	// Same-entry gate: never pair a matching message from one exception
+	// value with a chrome-extension frame from another (Devin on #3917).
+	const values = event.exception?.values ?? []
+	if (values.length > 0) {
+		return values.some((value) => {
+			if (typeof value.value !== 'string') return false
+			if (!isChromeExtensionMessageChannelDisconnectedMessage(value.value)) {
+				return false
+			}
+			return (value.stacktrace?.frames ?? []).some((frame) =>
+				stackFrameUrls(frame).some(isChromeExtensionStackFrameUrl),
+			)
+		})
+	}
+
+	if (
+		typeof event.message !== 'string' ||
+		!isChromeExtensionMessageChannelDisconnectedMessage(event.message)
+	) {
+		return false
+	}
+	return sentryEventStackFrameUrls(event).some(isChromeExtensionStackFrameUrl)
 }
 
 function filterChromeExtensionMessageChannelDisconnectedSentryEvent<
@@ -651,16 +695,6 @@ const chromeExtensionClientDestroyedMessage =
 
 function isChromeExtensionClientDestroyedMessage(message: string) {
 	return chromeExtensionClientDestroyedMessage.test(message.trim())
-}
-
-function isChromeExtensionStackFrameUrl(url: string) {
-	try {
-		return (
-			new URL(url, 'https://sentry.invalid').protocol === 'chrome-extension:'
-		)
-	} catch {
-		return false
-	}
 }
 
 function isChromeExtensionClientDestroyedError(error: unknown) {
@@ -1071,6 +1105,52 @@ function filterBrowserBlobImportScriptsNetworkSentryEvent<
 	T extends SentryErrorEventLike,
 >(event: T, originalException?: unknown): T | null {
 	if (isBrowserBlobImportScriptsNetworkSentryEvent(event, originalException)) {
+		return null
+	}
+	return event
+}
+
+/**
+ * Stale Start release after a deploy: a browser tab still holding a previous
+ * client build calls `/__start/<old-hash>/_serverFn/...`, gets HTTP 404 with
+ * body exactly `Unknown Start release.`, and the createServerFn client throws
+ * that into Sentry (KODY-9E / issue 7795797021 on `/account`). Expected
+ * post-deploy stale-tab noise — not an app defect. Match only this exact
+ * wording (optional `Error:` preface). Never blanket-drop other "Unknown …"
+ * errors. Client recovery is a one-shot hard reload (see
+ * `reload-on-unknown-start-release.ts`).
+ */
+const unknownStartReleaseMessage = /^(?:Error:\s*)?Unknown Start release\.?$/
+
+function isUnknownStartReleaseMessage(message: string) {
+	return unknownStartReleaseMessage.test(message.trim())
+}
+
+export function isUnknownStartReleaseError(error: unknown) {
+	if (typeof error === 'string') {
+		return isUnknownStartReleaseMessage(error)
+	}
+	if (typeof error !== 'object' || error === null) return false
+	if (!('message' in error) || typeof error.message !== 'string') return false
+	return isUnknownStartReleaseMessage(error.message)
+}
+
+function isUnknownStartReleaseSentryEvent(
+	event: SentryErrorEventLike,
+	originalException?: unknown,
+) {
+	if (isUnknownStartReleaseError(originalException)) return true
+	return sentryEventMessages(event).some(
+		(message) =>
+			typeof message === 'string' && isUnknownStartReleaseMessage(message),
+	)
+}
+
+function filterUnknownStartReleaseSentryEvent<T extends SentryErrorEventLike>(
+	event: T,
+	originalException?: unknown,
+): T | null {
+	if (isUnknownStartReleaseSentryEvent(event, originalException)) {
 		return null
 	}
 	return event
@@ -1726,6 +1806,9 @@ export function filterBrowserSentryEvent<T extends SentryErrorEventLike>(
 			originalException,
 		) === null
 	) {
+		return null
+	}
+	if (filterUnknownStartReleaseSentryEvent(event, originalException) === null) {
 		return null
 	}
 	if (

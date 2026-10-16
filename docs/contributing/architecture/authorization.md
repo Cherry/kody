@@ -100,7 +100,10 @@ Profiles and the signed-in step are the other denials that can fire.
    and package stamp kind. A fetch-gateway placeholder fill also records
    `placement` (the lowercase header name, or `url` / `body`; a header named
    `url` or `body` is `header:url` or `header:body`), one row per place, still
-   one credential read. It never holds the value.
+   one credential read. It never holds the value. Each later call on an MCP
+   connection handle writes its own `mcp.call` row (tool name, connection,
+   success or failure, error class, and duration) and never the arguments or
+   return value. That row is not a second `credential.resolve`.
 
 **Credential ids and grants.** Org secrets, OAuth integrations, MCP servers, and
 vault bindings each have a stable credential id: the database assigns one on

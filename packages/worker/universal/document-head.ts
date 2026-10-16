@@ -520,7 +520,6 @@ const orgDocumentHeads = {
 	orgRepositories: titleOnly('Repositories'),
 	orgSecretProviders: titleOnly('Secret providers'),
 	orgSecrets: titleOnly('Secrets'),
-	orgValues: titleOnly('Values'),
 	orgWaiting: titleOnly('Waiting'),
 	orgWebhooks: titleOnly('Webhooks'),
 	orgWorkflows: titleOnly('Workflows'),

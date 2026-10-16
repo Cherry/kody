@@ -549,9 +549,14 @@ function findByName(
 				: {},
 		)
 	}
+	// Package-bound Keys share scope `org` with user-scope Keys. Name picks
+	// (call map / credential.named) keep the historical user-scope Key when
+	// both exist; package Keys fill declared needs via auto-pick instead.
+	const unbound = matches.filter((credential) => credential.packageId == null)
+	const candidates = unbound.length > 0 ? unbound : matches
 	return pickOne({
 		key,
-		candidates: matches,
+		candidates,
 		possibleMatches: [],
 		describe: `the name "${pick.name}"`,
 	})
@@ -646,26 +651,27 @@ async function resolveKey(
 				(credential) => ({ credential, hint: null }),
 			)
 		}
-		const { candidates, possibleMatches } = need
+		const resolution = need
 			? resolveNeedCandidates(need, usable)
 			: {
+					autoPick: null as UsableCredential | null,
 					candidates: usable.filter(
 						(candidate) => candidate.provider === target.provider,
 					),
-					possibleMatches: [],
+					possibleMatches: [] as Array<UsableCredential>,
 				}
-		const createUrl =
-			candidates.length !== 1
-				? await createUrlForNeed(ctx, {
-						key,
-						provider: target.provider,
-						need,
-					})
-				: undefined
+		if (resolution.autoPick) {
+			return [{ credential: resolution.autoPick, hint: null }]
+		}
+		const createUrl = await createUrlForNeed(ctx, {
+			key,
+			provider: target.provider,
+			need,
+		})
 		const credential = pickOne({
 			key,
-			candidates,
-			possibleMatches,
+			candidates: resolution.candidates,
+			possibleMatches: resolution.possibleMatches,
 			describe: target.describe,
 			createUrl,
 		})
@@ -758,7 +764,11 @@ export async function openCredentialClient(
 ): Promise<OpenedCredentialClient> {
 	if (input.name != null) {
 		const request = requireActorRequest(ctx)
-		const usable = await listUsableCredentials({ env: ctx.env, request })
+		const usable = await listUsableCredentials({
+			env: ctx.env,
+			request,
+			packageId: ctx.packageId,
+		})
 		await assertNamedAllowed(ctx)
 		const pick = {
 			name: readText(input.name, 'A credential name'),
@@ -778,6 +788,7 @@ export async function openCredentialClient(
 	const usable = await listUsableCredentials({
 		env: ctx.env,
 		request: requireActorRequest(opener),
+		packageId: opener.packageId,
 	})
 	const picked = await resolveKey(opener, key, usable, 'one')
 	if (owner) assertApprovedForVisitors(key, owner, picked)
@@ -800,6 +811,7 @@ export async function openCredentialClients(
 	const usable = await listUsableCredentials({
 		env: ctx.env,
 		request: requireActorRequest(opener),
+		packageId: opener.packageId,
 	})
 	const picked = await resolveKey(opener, key, usable, 'many')
 	if (owner) assertApprovedForVisitors(key, owner, picked)
@@ -858,21 +870,56 @@ export async function validateCredentialCallMap(input: {
 				'A credentials map needs a person. This run has no acting person.',
 			)
 		}
-		const [usable, needs] = await Promise.all([
-			listUsableCredentials({ env: input.env, request }),
-			loadRunCredentialNeeds({
+		const entryPackageIds = input.packageIds
+		const [baseUsable, needLists, boundLists] = await Promise.all([
+			listUsableCredentials({
 				env: input.env,
-				orgId: request.org.id,
-				packageIds: input.packageIds,
+				request,
+				packageId: null,
 			}),
+			Promise.all(
+				entryPackageIds.map(async (packageId) => ({
+					packageId,
+					needs: await loadPackageNeeds({
+						env: input.env,
+						orgId: request.org.id,
+						packageId,
+					}),
+				})),
+			),
+			Promise.all(
+				entryPackageIds.map(async (packageId) => ({
+					packageId,
+					bound: (
+						await listUsableCredentials({
+							env: input.env,
+							request,
+							packageId,
+						})
+					).filter((credential) => credential.packageId === packageId),
+				})),
+			),
 		])
+		const needs = new Map<string, CredentialNeed>()
+		const needDeclaredBy = new Map<string, Array<string>>()
+		for (const { packageId, needs: list } of needLists) {
+			for (const need of list) {
+				if (!needs.has(need.key)) needs.set(need.key, need)
+				const owners = needDeclaredBy.get(need.key) ?? []
+				owners.push(packageId)
+				needDeclaredBy.set(need.key, owners)
+			}
+		}
+		const boundByPackage = new Map(
+			boundLists.map(({ packageId, bound }) => [packageId, bound]),
+		)
 		const warnings: Array<string> = []
 		for (const [key, picks] of input.map) {
 			const need = needs.get(key) ?? null
 			if (!need) {
 				const declared = [...needs.keys()]
 				const message = `credentials.${key} is not a need ${
-					input.packageIds.length > 0
+					entryPackageIds.length > 0
 						? 'any package in this run declares'
 						: 'of this code'
 				}${declared.length > 0 ? ` (declared: ${declared.join(', ')})` : ''}.`
@@ -884,15 +931,36 @@ export async function validateCredentialCallMap(input: {
 				)
 			}
 			const target = needTarget(key, need)
+			// Keep package-bound Keys inside the declaring package's pool so a
+			// multi-entry run cannot pick package A's Key for package B's need.
+			const owners = needDeclaredBy.get(key) ?? []
+			const pools =
+				owners.length > 0
+					? owners.map((packageId) => [
+							...baseUsable,
+							...(boundByPackage.get(packageId) ?? []),
+						])
+					: [baseUsable]
 			for (const pick of picks) {
-				pickExplicit({
-					key,
-					pick,
-					usable,
-					target,
-					baseUrl: input.baseUrl,
-					orgSlug: request.org.slug,
-				})
+				let lastError: unknown
+				let ok = false
+				for (const usable of pools) {
+					try {
+						pickExplicit({
+							key,
+							pick,
+							usable,
+							target,
+							baseUrl: input.baseUrl,
+							orgSlug: request.org.slug,
+						})
+						ok = true
+						break
+					} catch (error) {
+						lastError = error
+					}
+				}
+				if (!ok) throw lastError
 			}
 		}
 		return { warnings }

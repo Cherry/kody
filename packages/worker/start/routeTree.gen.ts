@@ -74,7 +74,6 @@ import { Route as AccountSecretsRouteImport } from './routes/account_.secrets'
 import { Route as AccountSecurityRouteImport } from './routes/account_.security'
 import { Route as AccountTwoFactorRouteImport } from './routes/account_.two-factor'
 import { Route as AccountUsageRouteImport } from './routes/account_.usage'
-import { Route as AccountValuesRouteImport } from './routes/account_.values'
 import { Route as AccountWaitingRouteImport } from './routes/account_.waiting'
 import { Route as AccountWebhooksRouteImport } from './routes/account_.webhooks'
 import { Route as AccountWorkflowsRouteImport } from './routes/account_.workflows'
@@ -164,7 +163,6 @@ import { Route as AtChar123orgSlugChar125SecretsRouteImport } from './routes/@{$
 import { Route as AtChar123orgSlugChar125SettingsRouteImport } from './routes/@{$orgSlug}_.-.settings'
 import { Route as AtChar123orgSlugChar125TeamsRouteImport } from './routes/@{$orgSlug}_.-.teams'
 import { Route as AtChar123orgSlugChar125UsageRouteImport } from './routes/@{$orgSlug}_.-.usage'
-import { Route as AtChar123orgSlugChar125ValuesRouteImport } from './routes/@{$orgSlug}_.-.values'
 import { Route as AtChar123orgSlugChar125WaitingRouteImport } from './routes/@{$orgSlug}_.-.waiting'
 import { Route as AtChar123orgSlugChar125WebhooksRouteImport } from './routes/@{$orgSlug}_.-.webhooks'
 import { Route as AtChar123orgSlugChar125WorkflowsRouteImport } from './routes/@{$orgSlug}_.-.workflows'
@@ -196,8 +194,6 @@ import { Route as AccountPackagesPackageIdRouteImport } from './routes/account_.
 import { Route as AccountSecretProvidersApproveRouteImport } from './routes/account_.secret-providers_.approve'
 import { Route as AccountSecretsApproveRouteImport } from './routes/account_.secrets_.approve'
 import { Route as AccountSecretsNewRouteImport } from './routes/account_.secrets_.new'
-import { Route as AccountValuesValueIdRouteImport } from './routes/account_.values_.$valueId'
-import { Route as AccountValuesNewRouteImport } from './routes/account_.values_.new'
 import { Route as AccountWorkflowsWorkflowIdRouteImport } from './routes/account_.workflows_.$workflowId'
 import { Route as AdminPlatformIntegrationsSlugRouteImport } from './routes/admin.platform-integrations_.$slug'
 import { Route as AdminPlatformIntegrationsNewRouteImport } from './routes/admin.platform-integrations_.new'
@@ -232,8 +228,6 @@ import { Route as AtChar123orgSlugChar125MemoriesMemoryIdRouteImport } from './r
 import { Route as AtChar123orgSlugChar125SecretProvidersApproveRouteImport } from './routes/@{$orgSlug}_.-.secret-providers_.approve'
 import { Route as AtChar123orgSlugChar125SecretsApproveRouteImport } from './routes/@{$orgSlug}_.-.secrets_.approve'
 import { Route as AtChar123orgSlugChar125SecretsNewRouteImport } from './routes/@{$orgSlug}_.-.secrets_.new'
-import { Route as AtChar123orgSlugChar125ValuesValueIdRouteImport } from './routes/@{$orgSlug}_.-.values_.$valueId'
-import { Route as AtChar123orgSlugChar125ValuesNewRouteImport } from './routes/@{$orgSlug}_.-.values_.new'
 import { Route as AtChar123orgSlugChar125WorkflowsWorkflowIdRouteImport } from './routes/@{$orgSlug}_.-.workflows_.$workflowId'
 import { Route as AtChar123usernameChar125KodyIdAssetsSplatRouteImport } from './routes/@{$username}_.$kodyId_.assets_.$'
 import { Route as AtChar123usernameChar125KodyIdFilesSplatRouteImport } from './routes/@{$username}_.$kodyId_.files.$'
@@ -594,11 +588,6 @@ const AccountTwoFactorRoute = AccountTwoFactorRouteImport.update({
 const AccountUsageRoute = AccountUsageRouteImport.update({
   id: '/account_/usage',
   path: '/account/usage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AccountValuesRoute = AccountValuesRouteImport.update({
-  id: '/account_/values',
-  path: '/account/values',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountWaitingRoute = AccountWaitingRouteImport.update({
@@ -1080,12 +1069,6 @@ const AtChar123orgSlugChar125UsageRoute =
     path: '/@{$orgSlug}/-/usage',
     getParentRoute: () => rootRouteImport,
   } as any)
-const AtChar123orgSlugChar125ValuesRoute =
-  AtChar123orgSlugChar125ValuesRouteImport.update({
-    id: '/@{$orgSlug}_/-/values',
-    path: '/@{$orgSlug}/-/values',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const AtChar123orgSlugChar125WaitingRoute =
   AtChar123orgSlugChar125WaitingRouteImport.update({
     id: '/@{$orgSlug}_/-/waiting',
@@ -1255,16 +1238,6 @@ const AccountSecretsApproveRoute = AccountSecretsApproveRouteImport.update({
 const AccountSecretsNewRoute = AccountSecretsNewRouteImport.update({
   id: '/account_/secrets_/new',
   path: '/account/secrets/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AccountValuesValueIdRoute = AccountValuesValueIdRouteImport.update({
-  id: '/account_/values_/$valueId',
-  path: '/account/values/$valueId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AccountValuesNewRoute = AccountValuesNewRouteImport.update({
-  id: '/account_/values_/new',
-  path: '/account/values/new',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountWorkflowsWorkflowIdRoute =
@@ -1462,18 +1435,6 @@ const AtChar123orgSlugChar125SecretsNewRoute =
   AtChar123orgSlugChar125SecretsNewRouteImport.update({
     id: '/@{$orgSlug}_/-/secrets_/new',
     path: '/@{$orgSlug}/-/secrets/new',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AtChar123orgSlugChar125ValuesValueIdRoute =
-  AtChar123orgSlugChar125ValuesValueIdRouteImport.update({
-    id: '/@{$orgSlug}_/-/values_/$valueId',
-    path: '/@{$orgSlug}/-/values/$valueId',
-    getParentRoute: () => rootRouteImport,
-  } as any)
-const AtChar123orgSlugChar125ValuesNewRoute =
-  AtChar123orgSlugChar125ValuesNewRouteImport.update({
-    id: '/@{$orgSlug}_/-/values_/new',
-    path: '/@{$orgSlug}/-/values/new',
     getParentRoute: () => rootRouteImport,
   } as any)
 const AtChar123orgSlugChar125WorkflowsWorkflowIdRoute =
@@ -1729,7 +1690,6 @@ export interface FileRoutesByFullPath {
   '/account/security': typeof AccountSecurityRoute
   '/account/two-factor': typeof AccountTwoFactorRoute
   '/account/usage': typeof AccountUsageRoute
-  '/account/values': typeof AccountValuesRoute
   '/account/waiting': typeof AccountWaitingRoute
   '/account/webhooks': typeof AccountWebhooksRoute
   '/account/workflows': typeof AccountWorkflowsRoute
@@ -1819,7 +1779,6 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
   '/@{$orgSlug}/-/usage': typeof AtChar123orgSlugChar125UsageRoute
-  '/@{$orgSlug}/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
@@ -1850,8 +1809,6 @@ export interface FileRoutesByFullPath {
   '/account/secret-providers/approve': typeof AccountSecretProvidersApproveRoute
   '/account/secrets/approve': typeof AccountSecretsApproveRoute
   '/account/secrets/new': typeof AccountSecretsNewRoute
-  '/account/values/$valueId': typeof AccountValuesValueIdRoute
-  '/account/values/new': typeof AccountValuesNewRoute
   '/account/workflows/$workflowId': typeof AccountWorkflowsWorkflowIdRoute
   '/admin/platform-integrations/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations/new': typeof AdminPlatformIntegrationsNewRoute
@@ -1887,8 +1844,6 @@ export interface FileRoutesByFullPath {
   '/@{$orgSlug}/-/secret-providers/approve': typeof AtChar123orgSlugChar125SecretProvidersApproveRoute
   '/@{$orgSlug}/-/secrets/approve': typeof AtChar123orgSlugChar125SecretsApproveRoute
   '/@{$orgSlug}/-/secrets/new': typeof AtChar123orgSlugChar125SecretsNewRoute
-  '/@{$orgSlug}/-/values/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
-  '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}/$kodyId/assets/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
@@ -1986,7 +1941,6 @@ export interface FileRoutesByTo {
   '/account/security': typeof AccountSecurityRoute
   '/account/two-factor': typeof AccountTwoFactorRoute
   '/account/usage': typeof AccountUsageRoute
-  '/account/values': typeof AccountValuesRoute
   '/account/waiting': typeof AccountWaitingRoute
   '/account/webhooks': typeof AccountWebhooksRoute
   '/account/workflows': typeof AccountWorkflowsRoute
@@ -2076,7 +2030,6 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
   '/@{$orgSlug}/-/usage': typeof AtChar123orgSlugChar125UsageRoute
-  '/@{$orgSlug}/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
@@ -2107,8 +2060,6 @@ export interface FileRoutesByTo {
   '/account/secret-providers/approve': typeof AccountSecretProvidersApproveRoute
   '/account/secrets/approve': typeof AccountSecretsApproveRoute
   '/account/secrets/new': typeof AccountSecretsNewRoute
-  '/account/values/$valueId': typeof AccountValuesValueIdRoute
-  '/account/values/new': typeof AccountValuesNewRoute
   '/account/workflows/$workflowId': typeof AccountWorkflowsWorkflowIdRoute
   '/admin/platform-integrations/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations/new': typeof AdminPlatformIntegrationsNewRoute
@@ -2144,8 +2095,6 @@ export interface FileRoutesByTo {
   '/@{$orgSlug}/-/secret-providers/approve': typeof AtChar123orgSlugChar125SecretProvidersApproveRoute
   '/@{$orgSlug}/-/secrets/approve': typeof AtChar123orgSlugChar125SecretsApproveRoute
   '/@{$orgSlug}/-/secrets/new': typeof AtChar123orgSlugChar125SecretsNewRoute
-  '/@{$orgSlug}/-/values/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
-  '/@{$orgSlug}/-/values/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}/-/workflows/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}/$kodyId/assets/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}/$kodyId/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
@@ -2245,7 +2194,6 @@ export interface FileRoutesById {
   '/account_/security': typeof AccountSecurityRoute
   '/account_/two-factor': typeof AccountTwoFactorRoute
   '/account_/usage': typeof AccountUsageRoute
-  '/account_/values': typeof AccountValuesRoute
   '/account_/waiting': typeof AccountWaitingRoute
   '/account_/webhooks': typeof AccountWebhooksRoute
   '/account_/workflows': typeof AccountWorkflowsRoute
@@ -2335,7 +2283,6 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/settings': typeof AtChar123orgSlugChar125SettingsRoute
   '/@{$orgSlug}_/-/teams': typeof AtChar123orgSlugChar125TeamsRoute
   '/@{$orgSlug}_/-/usage': typeof AtChar123orgSlugChar125UsageRoute
-  '/@{$orgSlug}_/-/values': typeof AtChar123orgSlugChar125ValuesRoute
   '/@{$orgSlug}_/-/waiting': typeof AtChar123orgSlugChar125WaitingRoute
   '/@{$orgSlug}_/-/webhooks': typeof AtChar123orgSlugChar125WebhooksRoute
   '/@{$orgSlug}_/-/workflows': typeof AtChar123orgSlugChar125WorkflowsRoute
@@ -2366,8 +2313,6 @@ export interface FileRoutesById {
   '/account_/secret-providers_/approve': typeof AccountSecretProvidersApproveRoute
   '/account_/secrets_/approve': typeof AccountSecretsApproveRoute
   '/account_/secrets_/new': typeof AccountSecretsNewRoute
-  '/account_/values_/$valueId': typeof AccountValuesValueIdRoute
-  '/account_/values_/new': typeof AccountValuesNewRoute
   '/account_/workflows_/$workflowId': typeof AccountWorkflowsWorkflowIdRoute
   '/admin/platform-integrations_/$slug': typeof AdminPlatformIntegrationsSlugRoute
   '/admin/platform-integrations_/new': typeof AdminPlatformIntegrationsNewRoute
@@ -2403,8 +2348,6 @@ export interface FileRoutesById {
   '/@{$orgSlug}_/-/secret-providers_/approve': typeof AtChar123orgSlugChar125SecretProvidersApproveRoute
   '/@{$orgSlug}_/-/secrets_/approve': typeof AtChar123orgSlugChar125SecretsApproveRoute
   '/@{$orgSlug}_/-/secrets_/new': typeof AtChar123orgSlugChar125SecretsNewRoute
-  '/@{$orgSlug}_/-/values_/$valueId': typeof AtChar123orgSlugChar125ValuesValueIdRoute
-  '/@{$orgSlug}_/-/values_/new': typeof AtChar123orgSlugChar125ValuesNewRoute
   '/@{$orgSlug}_/-/workflows_/$workflowId': typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   '/@{$username}_/$kodyId_/assets_/$': typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   '/@{$username}_/$kodyId_/files/$': typeof AtChar123usernameChar125KodyIdFilesSplatRoute
@@ -2505,7 +2448,6 @@ export interface FileRouteTypes {
     | '/account/security'
     | '/account/two-factor'
     | '/account/usage'
-    | '/account/values'
     | '/account/waiting'
     | '/account/webhooks'
     | '/account/workflows'
@@ -2595,7 +2537,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/settings'
     | '/@{$orgSlug}/-/teams'
     | '/@{$orgSlug}/-/usage'
-    | '/@{$orgSlug}/-/values'
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
@@ -2626,8 +2567,6 @@ export interface FileRouteTypes {
     | '/account/secret-providers/approve'
     | '/account/secrets/approve'
     | '/account/secrets/new'
-    | '/account/values/$valueId'
-    | '/account/values/new'
     | '/account/workflows/$workflowId'
     | '/admin/platform-integrations/$slug'
     | '/admin/platform-integrations/new'
@@ -2663,8 +2602,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/secret-providers/approve'
     | '/@{$orgSlug}/-/secrets/approve'
     | '/@{$orgSlug}/-/secrets/new'
-    | '/@{$orgSlug}/-/values/$valueId'
-    | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
     | '/@{$username}/$kodyId/assets/$'
     | '/@{$username}/$kodyId/files/$'
@@ -2762,7 +2699,6 @@ export interface FileRouteTypes {
     | '/account/security'
     | '/account/two-factor'
     | '/account/usage'
-    | '/account/values'
     | '/account/waiting'
     | '/account/webhooks'
     | '/account/workflows'
@@ -2852,7 +2788,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/settings'
     | '/@{$orgSlug}/-/teams'
     | '/@{$orgSlug}/-/usage'
-    | '/@{$orgSlug}/-/values'
     | '/@{$orgSlug}/-/waiting'
     | '/@{$orgSlug}/-/webhooks'
     | '/@{$orgSlug}/-/workflows'
@@ -2883,8 +2818,6 @@ export interface FileRouteTypes {
     | '/account/secret-providers/approve'
     | '/account/secrets/approve'
     | '/account/secrets/new'
-    | '/account/values/$valueId'
-    | '/account/values/new'
     | '/account/workflows/$workflowId'
     | '/admin/platform-integrations/$slug'
     | '/admin/platform-integrations/new'
@@ -2920,8 +2853,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}/-/secret-providers/approve'
     | '/@{$orgSlug}/-/secrets/approve'
     | '/@{$orgSlug}/-/secrets/new'
-    | '/@{$orgSlug}/-/values/$valueId'
-    | '/@{$orgSlug}/-/values/new'
     | '/@{$orgSlug}/-/workflows/$workflowId'
     | '/@{$username}/$kodyId/assets/$'
     | '/@{$username}/$kodyId/files/$'
@@ -3020,7 +2951,6 @@ export interface FileRouteTypes {
     | '/account_/security'
     | '/account_/two-factor'
     | '/account_/usage'
-    | '/account_/values'
     | '/account_/waiting'
     | '/account_/webhooks'
     | '/account_/workflows'
@@ -3110,7 +3040,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/settings'
     | '/@{$orgSlug}_/-/teams'
     | '/@{$orgSlug}_/-/usage'
-    | '/@{$orgSlug}_/-/values'
     | '/@{$orgSlug}_/-/waiting'
     | '/@{$orgSlug}_/-/webhooks'
     | '/@{$orgSlug}_/-/workflows'
@@ -3141,8 +3070,6 @@ export interface FileRouteTypes {
     | '/account_/secret-providers_/approve'
     | '/account_/secrets_/approve'
     | '/account_/secrets_/new'
-    | '/account_/values_/$valueId'
-    | '/account_/values_/new'
     | '/account_/workflows_/$workflowId'
     | '/admin/platform-integrations_/$slug'
     | '/admin/platform-integrations_/new'
@@ -3178,8 +3105,6 @@ export interface FileRouteTypes {
     | '/@{$orgSlug}_/-/secret-providers_/approve'
     | '/@{$orgSlug}_/-/secrets_/approve'
     | '/@{$orgSlug}_/-/secrets_/new'
-    | '/@{$orgSlug}_/-/values_/$valueId'
-    | '/@{$orgSlug}_/-/values_/new'
     | '/@{$orgSlug}_/-/workflows_/$workflowId'
     | '/@{$username}_/$kodyId_/assets_/$'
     | '/@{$username}_/$kodyId_/files/$'
@@ -3279,7 +3204,6 @@ export interface RootRouteChildren {
   AccountSecurityRoute: typeof AccountSecurityRoute
   AccountTwoFactorRoute: typeof AccountTwoFactorRoute
   AccountUsageRoute: typeof AccountUsageRoute
-  AccountValuesRoute: typeof AccountValuesRoute
   AccountWaitingRoute: typeof AccountWaitingRoute
   AccountWebhooksRoute: typeof AccountWebhooksRoute
   AccountWorkflowsRoute: typeof AccountWorkflowsRoute
@@ -3365,7 +3289,6 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125SettingsRoute: typeof AtChar123orgSlugChar125SettingsRoute
   AtChar123orgSlugChar125TeamsRoute: typeof AtChar123orgSlugChar125TeamsRoute
   AtChar123orgSlugChar125UsageRoute: typeof AtChar123orgSlugChar125UsageRoute
-  AtChar123orgSlugChar125ValuesRoute: typeof AtChar123orgSlugChar125ValuesRoute
   AtChar123orgSlugChar125WaitingRoute: typeof AtChar123orgSlugChar125WaitingRoute
   AtChar123orgSlugChar125WebhooksRoute: typeof AtChar123orgSlugChar125WebhooksRoute
   AtChar123orgSlugChar125WorkflowsRoute: typeof AtChar123orgSlugChar125WorkflowsRoute
@@ -3396,8 +3319,6 @@ export interface RootRouteChildren {
   AccountSecretProvidersApproveRoute: typeof AccountSecretProvidersApproveRoute
   AccountSecretsApproveRoute: typeof AccountSecretsApproveRoute
   AccountSecretsNewRoute: typeof AccountSecretsNewRoute
-  AccountValuesValueIdRoute: typeof AccountValuesValueIdRoute
-  AccountValuesNewRoute: typeof AccountValuesNewRoute
   AccountWorkflowsWorkflowIdRoute: typeof AccountWorkflowsWorkflowIdRoute
   AdminPlatformIntegrationsSlugRoute: typeof AdminPlatformIntegrationsSlugRoute
   AdminPlatformIntegrationsNewRoute: typeof AdminPlatformIntegrationsNewRoute
@@ -3430,8 +3351,6 @@ export interface RootRouteChildren {
   AtChar123orgSlugChar125SecretProvidersApproveRoute: typeof AtChar123orgSlugChar125SecretProvidersApproveRoute
   AtChar123orgSlugChar125SecretsApproveRoute: typeof AtChar123orgSlugChar125SecretsApproveRoute
   AtChar123orgSlugChar125SecretsNewRoute: typeof AtChar123orgSlugChar125SecretsNewRoute
-  AtChar123orgSlugChar125ValuesValueIdRoute: typeof AtChar123orgSlugChar125ValuesValueIdRoute
-  AtChar123orgSlugChar125ValuesNewRoute: typeof AtChar123orgSlugChar125ValuesNewRoute
   AtChar123orgSlugChar125WorkflowsWorkflowIdRoute: typeof AtChar123orgSlugChar125WorkflowsWorkflowIdRoute
   AtChar123usernameChar125KodyIdAssetsSplatRoute: typeof AtChar123usernameChar125KodyIdAssetsSplatRoute
   AtChar123usernameChar125KodyIdFilesSplatRoute: typeof AtChar123usernameChar125KodyIdFilesSplatRoute
@@ -3918,13 +3837,6 @@ declare module '@tanstack/react-router' {
       path: '/account/usage'
       fullPath: '/account/usage'
       preLoaderRoute: typeof AccountUsageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/account_/values': {
-      id: '/account_/values'
-      path: '/account/values'
-      fullPath: '/account/values'
-      preLoaderRoute: typeof AccountValuesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/waiting': {
@@ -4550,13 +4462,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123orgSlugChar125UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/@{$orgSlug}_/-/values': {
-      id: '/@{$orgSlug}_/-/values'
-      path: '/@{$orgSlug}/-/values'
-      fullPath: '/@{$orgSlug}/-/values'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ValuesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/@{$orgSlug}_/-/waiting': {
       id: '/@{$orgSlug}_/-/waiting'
       path: '/@{$orgSlug}/-/waiting'
@@ -4772,20 +4677,6 @@ declare module '@tanstack/react-router' {
       path: '/account/secrets/new'
       fullPath: '/account/secrets/new'
       preLoaderRoute: typeof AccountSecretsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/account_/values_/$valueId': {
-      id: '/account_/values_/$valueId'
-      path: '/account/values/$valueId'
-      fullPath: '/account/values/$valueId'
-      preLoaderRoute: typeof AccountValuesValueIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/account_/values_/new': {
-      id: '/account_/values_/new'
-      path: '/account/values/new'
-      fullPath: '/account/values/new'
-      preLoaderRoute: typeof AccountValuesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account_/workflows_/$workflowId': {
@@ -5024,20 +4915,6 @@ declare module '@tanstack/react-router' {
       path: '/@{$orgSlug}/-/secrets/new'
       fullPath: '/@{$orgSlug}/-/secrets/new'
       preLoaderRoute: typeof AtChar123orgSlugChar125SecretsNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/@{$orgSlug}_/-/values_/$valueId': {
-      id: '/@{$orgSlug}_/-/values_/$valueId'
-      path: '/@{$orgSlug}/-/values/$valueId'
-      fullPath: '/@{$orgSlug}/-/values/$valueId'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ValuesValueIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/@{$orgSlug}_/-/values_/new': {
-      id: '/@{$orgSlug}_/-/values_/new'
-      path: '/@{$orgSlug}/-/values/new'
-      fullPath: '/@{$orgSlug}/-/values/new'
-      preLoaderRoute: typeof AtChar123orgSlugChar125ValuesNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/@{$orgSlug}_/-/workflows_/$workflowId': {
@@ -5376,7 +5253,6 @@ const rootRouteChildren: RootRouteChildren = {
   AccountSecurityRoute: AccountSecurityRoute,
   AccountTwoFactorRoute: AccountTwoFactorRoute,
   AccountUsageRoute: AccountUsageRoute,
-  AccountValuesRoute: AccountValuesRoute,
   AccountWaitingRoute: AccountWaitingRoute,
   AccountWebhooksRoute: AccountWebhooksRoute,
   AccountWorkflowsRoute: AccountWorkflowsRoute,
@@ -5470,7 +5346,6 @@ const rootRouteChildren: RootRouteChildren = {
   AtChar123orgSlugChar125SettingsRoute: AtChar123orgSlugChar125SettingsRoute,
   AtChar123orgSlugChar125TeamsRoute: AtChar123orgSlugChar125TeamsRoute,
   AtChar123orgSlugChar125UsageRoute: AtChar123orgSlugChar125UsageRoute,
-  AtChar123orgSlugChar125ValuesRoute: AtChar123orgSlugChar125ValuesRoute,
   AtChar123orgSlugChar125WaitingRoute: AtChar123orgSlugChar125WaitingRoute,
   AtChar123orgSlugChar125WebhooksRoute: AtChar123orgSlugChar125WebhooksRoute,
   AtChar123orgSlugChar125WorkflowsRoute: AtChar123orgSlugChar125WorkflowsRoute,
@@ -5510,8 +5385,6 @@ const rootRouteChildren: RootRouteChildren = {
   AccountSecretProvidersApproveRoute: AccountSecretProvidersApproveRoute,
   AccountSecretsApproveRoute: AccountSecretsApproveRoute,
   AccountSecretsNewRoute: AccountSecretsNewRoute,
-  AccountValuesValueIdRoute: AccountValuesValueIdRoute,
-  AccountValuesNewRoute: AccountValuesNewRoute,
   AccountWorkflowsWorkflowIdRoute: AccountWorkflowsWorkflowIdRoute,
   AdminPlatformIntegrationsSlugRoute: AdminPlatformIntegrationsSlugRoute,
   AdminPlatformIntegrationsNewRoute: AdminPlatformIntegrationsNewRoute,
@@ -5561,9 +5434,6 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123orgSlugChar125SecretsApproveRoute,
   AtChar123orgSlugChar125SecretsNewRoute:
     AtChar123orgSlugChar125SecretsNewRoute,
-  AtChar123orgSlugChar125ValuesValueIdRoute:
-    AtChar123orgSlugChar125ValuesValueIdRoute,
-  AtChar123orgSlugChar125ValuesNewRoute: AtChar123orgSlugChar125ValuesNewRoute,
   AtChar123orgSlugChar125WorkflowsWorkflowIdRoute:
     AtChar123orgSlugChar125WorkflowsWorkflowIdRoute,
   AtChar123usernameChar125KodyIdAssetsSplatRoute:

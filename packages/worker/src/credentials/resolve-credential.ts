@@ -26,7 +26,10 @@
  *    placement is its own row (lowercase header name, or `url` / `body`) and
  *    the credential is still read once. A later placement of a credential
  *    this request already resolved records another row without reading it
- *    again. The row never holds the credential value.
+ *    again. The row never holds the credential value. A later MCP tool call
+ *    is not part of that row: each `callTool` on the connection handle writes
+ *    its own `mcp.call` row (tool name, connection, success or failure, error
+ *    class, duration) and never the arguments or return value.
  *
  * A request with no acting person holds no permissions. The only path with
  * no request at all is webhook ingress verifying a signature, which passes an

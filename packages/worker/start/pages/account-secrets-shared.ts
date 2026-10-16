@@ -265,6 +265,27 @@ export function buildSecretHref(
 	)
 }
 
+/** Retarget the editor and URL when a failed rollback leaves the new name saved. */
+export function applyStuckRenameRecovery(input: {
+	editor: EditorState
+	stuck: { id: string; name: string }
+	search: string
+}): { editor: EditorState; href: string } {
+	const packageId =
+		input.editor.scope === 'package' ? input.editor.packageId : null
+	return {
+		editor: {
+			...input.editor,
+			currentId: input.stuck.id,
+			name: input.stuck.name,
+		},
+		href: buildSecretHref(
+			{ name: input.stuck.name, scope: input.editor.scope, packageId },
+			input.search,
+		),
+	}
+}
+
 export function buildNewSecretHref(search = '') {
 	return `${secretsBasePath}/new${search}`
 }

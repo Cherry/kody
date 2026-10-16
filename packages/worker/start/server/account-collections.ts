@@ -125,56 +125,6 @@ export const loadMemoriesPage = createServerFn({ method: 'GET' })
 			),
 		}
 	})
-export const loadValuesPage = createServerFn({ method: 'GET' })
-	.validator(
-		z.object({
-			orgSlug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-			valueId: z.string().optional(),
-			selected: z.string().optional(),
-			create: z.boolean().optional(),
-		}),
-	)
-	.handler(async ({ data }) => {
-		const [
-			{ loadScopedCollection },
-			{ loadAccountValuesData },
-			{ loadDocumentHead },
-		] = await Promise.all([
-			import('./collection-context.ts'),
-			import('../../src/app/account-values-data.ts'),
-			import('./document-head.ts'),
-		])
-		const pathname =
-			routes.orgValues.href({ orgSlug: data.orgSlug }) +
-			(data.create
-				? '/new'
-				: data.valueId
-					? `/${encodeURIComponent(data.valueId)}`
-					: '')
-		const search = data.selected
-			? `?${new URLSearchParams({ selected: data.selected })}`
-			: ''
-		const { bindings, user } = await loadScopedCollection({
-			orgSlug: data.orgSlug,
-			section: 'values',
-			returnTo: pathname + search,
-		})
-		const payload = await loadAccountValuesData({
-			env: bindings,
-			user,
-			selectedValueId: data.valueId?.trim() || data.selected?.trim() || null,
-		})
-		return {
-			payload,
-			head: loadDocumentHead(
-				'orgValues',
-				pathname,
-				{ accountValues: payload },
-				search,
-			),
-		}
-	})
-
 export const loadJobsPage = createServerFn({ method: 'GET' })
 	.validator(
 		z.object({

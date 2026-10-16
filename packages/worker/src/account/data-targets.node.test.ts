@@ -74,8 +74,8 @@ test('shared user-scoped target match SQL is identical for deletion and export s
 		},
 		{
 			kind: 'bucket_parent',
-			table: 'value_entries',
-			parentTable: 'value_buckets',
+			table: 'secret_entries',
+			parentTable: 'secret_buckets',
 		},
 		{
 			kind: 'community_listing_child',
@@ -160,8 +160,8 @@ test('shared user-scoped target match SQL is identical for deletion and export s
 	})
 
 	expect(matchFor(samples[7]!).qualifiedWhereSql).toBe(
-		`value_entries.bucket_id IN (
-						SELECT id FROM value_buckets WHERE user_id = ?
+		`secret_entries.bucket_id IN (
+						SELECT id FROM secret_buckets WHERE user_id = ?
 					)`,
 	)
 	expect(matchFor(samples[8]!).qualifiedWhereSql).toBe(
@@ -348,6 +348,8 @@ test('final schema drops retired tables without stale deletion/export inventory 
 		'user_package_run_successes',
 		'user_activation_milestones',
 		'package_invocation_tokens',
+		'value_buckets',
+		'value_entries',
 	]
 	const deletionStatements = accountUserDataTargets.map(
 		(target) => buildUserScopedDeleteOrUpdateSql(matchFor(target)).sql,
