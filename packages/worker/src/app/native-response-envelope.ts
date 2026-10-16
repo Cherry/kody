@@ -26,6 +26,7 @@ export function secureNativeResponse(
 	const markdown = negotiatedNotFound && prefersMarkdown(request)
 	const headers = new Headers(response.headers)
 	if (markdown) {
+		headers.set('Cache-Control', 'no-store')
 		headers.set('Content-Type', 'text/markdown; charset=utf-8')
 		headers.delete('Content-Length')
 		headers.delete('Content-Encoding')

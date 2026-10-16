@@ -375,9 +375,6 @@ test('clearing displayName persists null and acknowledges the committed native s
 	const response = await post({ displayName: '' })
 
 	expect(response.status).toBe(200)
-	expect(await response.json()).toMatchObject({
-		username: 'ada',
-		displayName: 'ada',
-	})
+	expect(response.data).toEqual({ ok: true })
 	expect(testDb.users.get(1)?.display_name).toBeNull()
 })

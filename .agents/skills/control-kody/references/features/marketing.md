@@ -6,7 +6,7 @@ blog, Discord invite.
 ## How to get there
 
 `/`, `/for/business`, `/pricing`, `/faq`, `/case-studies`, `/believe`,
-`/with/:agent`, `/support`, `/privacy`, `/terms`, `/docs`, `/docs/:slug`,
+`/with/:agent`, `/support`, `/about`, `/contact`, `/privacy`, `/terms`, `/docs`, `/docs/:slug`,
 `/docs/connect`, `/llms.txt`, `/blog`, `/blog/:slug`, `/discord`. Legacy
 `/guides*` URLs 308 to `/docs*`. Intra-docs navigation (doc to doc, or a doc to
 `/docs` / `/docs/connect`) is an instant shell swap — no page view-transition —
@@ -21,7 +21,7 @@ opt-in server function to turn it on for themselves; signed-out visitors log in
 with `redirectTo` back to that page. `/docs/mcp-events` does the same for
 `mcp-events-extension` through its native opt-in server function. Custom secret
 providers are documented at `/docs/secret-providers`. Open API is documented at
-`/docs/open-api`; local CLI execute at `/docs/local-execute`.
+`/docs/open-api`; versioning at `/docs/api-versioning`; local CLI execute at `/docs/local-execute`.
 
 ## Drive it
 

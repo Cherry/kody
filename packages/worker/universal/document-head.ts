@@ -460,6 +460,8 @@ const routeDocumentHeads = {
 	believe: publicPageHead('believe', 'What we believe'),
 	withAgent: withAgentHead,
 	support: publicPageHead('support', 'Support'),
+	about: publicPageHead('about', 'About Kody'),
+	contact: publicPageHead('contact', 'Contact Kody'),
 	privacy: publicPageHead('privacy', 'Privacy'),
 	terms: publicPageHead('terms', 'Terms'),
 	discord: publicPageHead('discord', 'Discord'),

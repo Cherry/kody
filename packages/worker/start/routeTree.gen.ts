@@ -13,12 +13,14 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as R404RouteImport } from './routes/404'
 import { Route as R500RouteImport } from './routes/500'
 import { Route as AtChar123usernameChar125RouteImport } from './routes/@{$username}'
+import { Route as AboutRouteImport } from './routes/about'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthDotmdRouteImport } from './routes/auth[.]md'
 import { Route as BelieveRouteImport } from './routes/believe'
 import { Route as CaseStudiesRouteImport } from './routes/case-studies'
 import { Route as CommunityRouteImport } from './routes/community'
+import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DiscordRouteImport } from './routes/discord'
 import { Route as DocsDotmdRouteImport } from './routes/docs[.]md'
 import { Route as FaqRouteImport } from './routes/faq'
@@ -281,6 +283,11 @@ const AtChar123usernameChar125Route =
     path: '/@{$username}',
     getParentRoute: () => rootRouteImport,
   } as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountRoute = AccountRouteImport.update({
   id: '/account',
   path: '/account',
@@ -309,6 +316,11 @@ const CaseStudiesRoute = CaseStudiesRouteImport.update({
 const CommunityRoute = CommunityRouteImport.update({
   id: '/community',
   path: '/community',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DiscordRoute = DiscordRouteImport.update({
@@ -1629,12 +1641,14 @@ export interface FileRoutesByFullPath {
   '/404': typeof R404Route
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
+  '/about': typeof AboutRoute
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
   '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
+  '/contact': typeof ContactRoute
   '/discord': typeof DiscordRoute
   '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
@@ -1881,12 +1895,14 @@ export interface FileRoutesByTo {
   '/404': typeof R404Route
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
+  '/about': typeof AboutRoute
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
   '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
+  '/contact': typeof ContactRoute
   '/discord': typeof DiscordRoute
   '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
@@ -2133,12 +2149,14 @@ export interface FileRoutesById {
   '/404': typeof R404Route
   '/500': typeof R500Route
   '/@{$username}': typeof AtChar123usernameChar125Route
+  '/about': typeof AboutRoute
   '/account': typeof AccountRoute
   '/auth': typeof AuthRoute
   '/auth.md': typeof AuthDotmdRoute
   '/believe': typeof BelieveRoute
   '/case-studies': typeof CaseStudiesRoute
   '/community': typeof CommunityRoute
+  '/contact': typeof ContactRoute
   '/discord': typeof DiscordRoute
   '/docs.md': typeof DocsDotmdRoute
   '/faq': typeof FaqRoute
@@ -2387,12 +2405,14 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/@{$username}'
+    | '/about'
     | '/account'
     | '/auth'
     | '/auth.md'
     | '/believe'
     | '/case-studies'
     | '/community'
+    | '/contact'
     | '/discord'
     | '/docs.md'
     | '/faq'
@@ -2639,12 +2659,14 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/@{$username}'
+    | '/about'
     | '/account'
     | '/auth'
     | '/auth.md'
     | '/believe'
     | '/case-studies'
     | '/community'
+    | '/contact'
     | '/discord'
     | '/docs.md'
     | '/faq'
@@ -2890,12 +2912,14 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/@{$username}'
+    | '/about'
     | '/account'
     | '/auth'
     | '/auth.md'
     | '/believe'
     | '/case-studies'
     | '/community'
+    | '/contact'
     | '/discord'
     | '/docs.md'
     | '/faq'
@@ -3143,12 +3167,14 @@ export interface RootRouteChildren {
   R404Route: typeof R404Route
   R500Route: typeof R500Route
   AtChar123usernameChar125Route: typeof AtChar123usernameChar125Route
+  AboutRoute: typeof AboutRoute
   AccountRoute: typeof AccountRoute
   AuthRoute: typeof AuthRoute
   AuthDotmdRoute: typeof AuthDotmdRoute
   BelieveRoute: typeof BelieveRoute
   CaseStudiesRoute: typeof CaseStudiesRoute
   CommunityRoute: typeof CommunityRoute
+  ContactRoute: typeof ContactRoute
   DiscordRoute: typeof DiscordRoute
   DocsDotmdRoute: typeof DocsDotmdRoute
   FaqRoute: typeof FaqRoute
@@ -3412,6 +3438,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account': {
       id: '/account'
       path: '/account'
@@ -3452,6 +3485,13 @@ declare module '@tanstack/react-router' {
       path: '/community'
       fullPath: '/community'
       preLoaderRoute: typeof CommunityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/discord': {
@@ -5192,12 +5232,14 @@ const rootRouteChildren: RootRouteChildren = {
   R404Route: R404Route,
   R500Route: R500Route,
   AtChar123usernameChar125Route: AtChar123usernameChar125Route,
+  AboutRoute: AboutRoute,
   AccountRoute: AccountRoute,
   AuthRoute: AuthRoute,
   AuthDotmdRoute: AuthDotmdRoute,
   BelieveRoute: BelieveRoute,
   CaseStudiesRoute: CaseStudiesRoute,
   CommunityRoute: CommunityRoute,
+  ContactRoute: ContactRoute,
   DiscordRoute: DiscordRoute,
   DocsDotmdRoute: DocsDotmdRoute,
   FaqRoute: FaqRoute,

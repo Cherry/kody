@@ -50,6 +50,8 @@ export function SiteFooter(props: SiteFooterProps) {
 					<SiteLink href="/use-cases">Use cases</SiteLink>
 					<SiteLink href="/pricing">Pricing</SiteLink>
 					<SiteLink href="/faq">FAQ</SiteLink>
+					<SiteLink href="/about">About</SiteLink>
+					<SiteLink href="/contact">Contact</SiteLink>
 					<SiteLink href="/support">Support</SiteLink>
 					<SiteLink href="/blog">Blog</SiteLink>
 					<SiteLink

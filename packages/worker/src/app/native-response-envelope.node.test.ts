@@ -24,7 +24,7 @@ test('native generic markdown 404 preserves status, privacy, security and negoti
 	expect(response.status).toBe(404)
 	expect(response.headers.get('Content-Type')).toContain('text/markdown')
 	expect(response.headers.get('Vary')).toMatch(/Cookie.*Accept/)
-	expect(response.headers.get('Cache-Control')).toBe('private, no-store')
+	expect(response.headers.get('Cache-Control')).toBe('no-store')
 	expect(response.headers.get('Content-Security-Policy')).toContain(
 		"'nonce-request-nonce'",
 	)

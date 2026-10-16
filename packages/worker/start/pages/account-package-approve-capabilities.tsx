@@ -15,6 +15,7 @@ import {
 	reachingDependency,
 	storageSummary,
 } from '#client/routes/account-package-approve-capabilities-copy.ts'
+import { withApprovalTimeout } from '../approval-request.ts'
 import { PackageSecurityAuditField } from './package-security-audit-field.tsx'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { useState, type ReactNode } from 'react'
@@ -107,22 +108,22 @@ export function AccountPackageApproveCapabilitiesRoute({
 }) {
 	const capabilities = usePackageMutation(
 		payload.package.id,
-		approvePackageCapabilities,
+		withApprovalTimeout(approvePackageCapabilities),
 		'approve-capabilities',
 	)
 	const goPublic = usePackageMutation(
 		payload.package.id,
-		approvePackageCapabilitiesAndGoPublic,
+		withApprovalTimeout(approvePackageCapabilitiesAndGoPublic),
 		'approve-capabilities-and-go-public',
 	)
 	const credentials = usePackageMutation(
 		payload.package.id,
-		approvePackageCredentialNeeds,
+		withApprovalTimeout(approvePackageCredentialNeeds),
 		'approve-credential-needs',
 	)
 	const wentPublic = usePackageMutation(
 		payload.package.id,
-		approvePackageWentPublic,
+		withApprovalTimeout(approvePackageWentPublic),
 		'approve-went-public',
 	)
 	const capture = useSubmitterScope()
@@ -171,9 +172,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 		} catch (error) {
 			if (isCurrent())
 				setMessage(
-					error instanceof Error
-						? error.message
-						: 'Could not approve this publish.',
+					error instanceof DOMException && error.name === 'TimeoutError'
+						? 'Approval timed out. Reload and try again.'
+						: error instanceof Error
+							? error.message
+							: 'Could not approve this publish.',
 				)
 		} finally {
 			if (isCurrent()) setApprovingRequestId(null)
@@ -200,9 +203,11 @@ export function AccountPackageApproveCapabilitiesRoute({
 		} catch (error) {
 			if (isCurrent())
 				setMessage(
-					error instanceof Error
-						? error.message
-						: 'Could not approve capabilities.',
+					error instanceof DOMException && error.name === 'TimeoutError'
+						? 'Approval timed out. Reload and try again.'
+						: error instanceof Error
+							? error.message
+							: 'Could not approve capabilities.',
 				)
 		} finally {
 			if (isCurrent()) setApprovingCapabilities(false)
@@ -333,7 +338,7 @@ export function AccountPackageApproveCapabilitiesRoute({
 							</p>
 						</div>
 					) : null}
-					{payload.fingerprintMatchesApproval ? (
+					{payload.fingerprintMatchesApproval && !hasCredentialNeedsPending ? (
 						<div css={getAccentCalloutCss()}>
 							<p css={{ margin: 0, color: colors.textMuted }}>
 								This capability set is already approved

@@ -19,6 +19,8 @@ const mockModule = vi.hoisted(() => ({
 	getPendingWentPublicApproval: vi.fn(),
 	logOrgAuditEvent: vi.fn(),
 	loadCurrentPackageSecurityAudit: vi.fn(),
+	attemptSelfPublish: vi.fn(),
+	applyMatchingPinInternetVisible: vi.fn(),
 }))
 
 vi.mock('#worker/package-capabilities/security-audit-state.ts', () => ({
@@ -32,6 +34,13 @@ vi.mock('#worker/package-capabilities/went-public-approval.ts', () => ({
 		mockModule.enqueueWentPublicApproval(...args),
 	getPendingWentPublicApproval: (...args: Array<unknown>) =>
 		mockModule.getPendingWentPublicApproval(...args),
+}))
+
+vi.mock('#worker/package-capabilities/self-publish.ts', () => ({
+	attemptSelfPublish: (...args: Array<unknown>) =>
+		mockModule.attemptSelfPublish(...args),
+	applyMatchingPinInternetVisible: (...args: Array<unknown>) =>
+		mockModule.applyMatchingPinInternetVisible(...args),
 }))
 
 vi.mock('#worker/orgs/org-audit.ts', () => ({
@@ -128,6 +137,12 @@ beforeEach(() => {
 	mockModule.logOrgAuditEvent.mockResolvedValue(undefined)
 	mockModule.loadCurrentPackageSecurityAudit.mockReset()
 	mockModule.loadCurrentPackageSecurityAudit.mockResolvedValue(null)
+	mockModule.attemptSelfPublish.mockReset()
+	mockModule.attemptSelfPublish.mockResolvedValue({
+		status: 'blocked',
+		blocker: 'not_audited',
+	})
+	mockModule.applyMatchingPinInternetVisible.mockReset()
 })
 
 function createUser(): AuthenticatedAppUser {
@@ -301,12 +316,7 @@ test('turning on internet-visible with matching approval turns serving on withou
 		fingerprintMatchesApproval: true,
 		isInternetVisible: false,
 	})
-	mockModule.approvePackageCapabilitySet.mockResolvedValue({
-		approval: { id: 'approval-1' },
-		capabilitySet: { entries: [], fingerprint: 'abc' },
-		wentPublicRequest: { id: 'req-1' },
-	})
-	mockModule.approveWentPublicRequest.mockResolvedValue({ ok: true })
+	mockModule.applyMatchingPinInternetVisible.mockResolvedValue({ ok: true })
 	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
 
 	const response = await setAccountPackageInternetVisible({
@@ -319,16 +329,117 @@ test('turning on internet-visible with matching approval turns serving on withou
 	})
 	expect(response?.status).toBe(200)
 	expect(response?.data).toMatchObject({ ok: true })
-	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
+	expect(mockModule.applyMatchingPinInternetVisible).toHaveBeenCalledWith(
 		expect.objectContaining({
-			expectedFingerprint: 'abc',
+			fingerprint: 'abc',
+			ownerUserId: mockModule.writablePackage?.userId,
 		}),
 	)
-	expect(mockModule.approveWentPublicRequest).toHaveBeenCalledWith(
-		expect.objectContaining({ requestId: 'req-1' }),
+	expect(mockModule.enqueueWentPublicApproval).not.toHaveBeenCalled()
+})
+
+test('turning on internet-visible self-publishes when the capability set is empty and the audit passed', async () => {
+	const env = { APP_DB: {} } as Env
+	const user = createUser()
+	mockModule.writablePackage = createSavedPackage(false)
+	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
+	mockModule.loadCapabilityApprovalSummary.mockResolvedValue({
+		capabilitySet: { entries: [], fingerprint: 'abc' },
+		dependencySnapshot: null,
+		publishedCommit: 'deadbeef',
+		latestApproval: null,
+		matchingApproval: null,
+		fingerprintMatchesApproval: false,
+		isInternetVisible: false,
+	})
+	mockModule.attemptSelfPublish.mockResolvedValue({
+		status: 'self_published',
+	})
+	mockModule.reloadAccountPackagesAfterWrite.mockResolvedValue({ ok: true })
+
+	const response = await setAccountPackageInternetVisible({
+		env,
+		request: new Request('https://example.com/account/packages.json', {
+			method: 'POST',
+		}),
+		user,
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
+	})
+	expect(response?.status).toBe(200)
+	expect(response?.data).toMatchObject({ ok: true })
+	expect(mockModule.attemptSelfPublish).toHaveBeenCalledWith(
+		expect.objectContaining({
+			ownerUserId: mockModule.writablePackage?.userId,
+			actorUserId: user.mcpUser.userId,
+			requestUrl: 'https://example.com/account/packages.json',
+		}),
 	)
 	expect(mockModule.enqueueWentPublicApproval).not.toHaveBeenCalled()
-	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
+	expect(mockModule.applyMatchingPinInternetVisible).not.toHaveBeenCalled()
+})
+
+test('turning on internet-visible does not recreate a canceled went_public ask after self-publish fails', async () => {
+	const env = { APP_DB: {} } as Env
+	const user = createUser()
+	mockModule.writablePackage = createSavedPackage(false)
+	mockModule.loadOrgBindingForOrg.mockResolvedValue(null)
+	mockModule.loadCapabilityApprovalSummary.mockResolvedValue({
+		capabilitySet: { entries: [], fingerprint: 'abc' },
+		dependencySnapshot: null,
+		publishedCommit: 'deadbeef',
+		latestApproval: null,
+		matchingApproval: { fingerprint: 'abc' },
+		fingerprintMatchesApproval: true,
+		isInternetVisible: false,
+	})
+	mockModule.attemptSelfPublish.mockResolvedValue({
+		status: 'failed',
+		error:
+			'The request to make this package internet-visible was resolved meanwhile, so nothing was approved.',
+	})
+	mockModule.getPendingWentPublicApproval.mockResolvedValueOnce(null)
+
+	const canceled = await setAccountPackageInternetVisible({
+		env,
+		request: new Request('https://example.com/account/packages.json', {
+			method: 'POST',
+		}),
+		user,
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
+	})
+	expect(canceled?.status).toBe(400)
+	expect(canceled?.data).toMatchObject({
+		ok: false,
+		error: expect.stringContaining('Nothing is pending'),
+	})
+	expect(mockModule.enqueueWentPublicApproval).not.toHaveBeenCalled()
+	expect(mockModule.applyMatchingPinInternetVisible).not.toHaveBeenCalled()
+
+	mockModule.getPendingWentPublicApproval.mockResolvedValueOnce({
+		id: 'request-still-pending',
+	})
+	const pending = await setAccountPackageInternetVisible({
+		env,
+		request: new Request('https://example.com/account/packages.json', {
+			method: 'POST',
+		}),
+		user,
+		packageId: 'pkg-1',
+		internetVisible: true,
+		confirmName: 'notes',
+	})
+	expect(pending?.status).toBe(400)
+	expect(pending?.data).toMatchObject({
+		ok: false,
+		error: expect.stringContaining('resolved meanwhile'),
+		approvalUrl: expect.stringContaining('/approve-capabilities'),
+	})
+	expect(mockModule.enqueueWentPublicApproval).not.toHaveBeenCalled()
+	expect(mockModule.applyMatchingPinInternetVisible).not.toHaveBeenCalled()
 })
 
 test('approve-capabilities binds the reviewed fingerprint', async () => {
@@ -354,9 +465,12 @@ test('approve-capabilities binds the reviewed fingerprint', async () => {
 		fingerprint: 'reviewed-fp',
 	})
 	expect(response?.status).toBe(200)
+	expect(response?.data).toMatchObject({ ok: true, packageId: 'pkg-1' })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
 		expect.objectContaining({
 			expectedFingerprint: 'reviewed-fp',
+			recordPin: true,
 		}),
 	)
 })
@@ -430,7 +544,11 @@ test('approve-credential-needs approves the named request as the acting person',
 	})
 
 	mockModule.approveCredentialNeedsRequest.mockResolvedValueOnce({ ok: true })
-	expect((await approve({ requestId: 'request-1' }))?.status).toBe(200)
+	mockModule.reloadAccountPackagesAfterWrite.mockClear()
+	const ok = await approve({ requestId: 'request-1' })
+	expect(ok?.status).toBe(200)
+	expect(ok?.data).toMatchObject({ ok: true, packageId: 'pkg-1' })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approveCredentialNeedsRequest).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			requestId: 'request-1',
@@ -475,9 +593,11 @@ test('approve-went-public approves the named request as the acting person', asyn
 	})
 
 	mockModule.approveWentPublicRequest.mockResolvedValueOnce({ ok: true })
-	expect((await approve({ requestId: 'request-went-public' }))?.status).toBe(
-		200,
-	)
+	mockModule.reloadAccountPackagesAfterWrite.mockClear()
+	const ok = await approve({ requestId: 'request-went-public' })
+	expect(ok?.status).toBe(200)
+	expect(ok?.data).toMatchObject({ ok: true, packageId: 'pkg-1' })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approveWentPublicRequest).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			requestId: 'request-went-public',
@@ -513,9 +633,12 @@ test('approve-capabilities-and-go-public records both decisions with one audit e
 	})
 
 	expect(response?.status).toBe(200)
+	expect(response?.data).toMatchObject({ ok: true, packageId: 'pkg-1' })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
 		expect.objectContaining({
 			expectedFingerprint: 'reviewed-fp',
+			recordPin: true,
 			actorUserId: personIdFromStored('stable-user-1'),
 		}),
 	)
