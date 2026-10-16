@@ -11,10 +11,29 @@ import {
 import { type JobRepoCheckPolicy } from '@kody-internal/shared/jobs/types.ts'
 import { DurableObject } from 'cloudflare:workers'
 import { type JobsWorkerEnv } from './env.ts'
+import { tryRearmAlarmForRetryableD1Failure } from './manager-alarm-deferral.ts'
 import { buildSentryOptions } from './sentry-options.ts'
 import { getNextRunnableJob } from './store.ts'
 
 const userIdStorageKey = 'user-id'
+
+/**
+ * Atomically rearm while keeping any earlier wake already scheduled on this
+ * DO (for example a nearer job armed via syncAlarm). `setAlarm` replaces the
+ * single DO alarm; without a get-then-set under concurrency block we could
+ * push a nearer schedule out to the D1 backoff.
+ */
+async function rearmAlarmPreservingEarlier(
+	ctx: DurableObjectState,
+	atMs: number,
+): Promise<void> {
+	await ctx.blockConcurrencyWhile(async () => {
+		const currentAlarmAt = await ctx.storage.getAlarm()
+		if (currentAlarmAt == null || currentAlarmAt > atMs) {
+			await ctx.storage.setAlarm(atMs)
+		}
+	})
+}
 
 /**
  * When more due jobs remain after an alarm run (each run processes at most
@@ -200,6 +219,19 @@ export class JobManagerBase extends DurableObject<JobsWorkerEnv> {
 				isRetry: alarmInfo?.isRetry,
 				...schedulerErrorFields(error),
 			})
+			if (
+				await tryRearmAlarmForRetryableD1Failure({
+					setAlarm: (atMs) => rearmAlarmPreservingEarlier(this.ctx, atMs),
+					getAlarm: () => this.ctx.storage.getAlarm(),
+					userId,
+					error,
+					phase: 'run_due_jobs',
+					retryCount: alarmInfo?.retryCount,
+					isRetry: alarmInfo?.isRetry,
+				})
+			) {
+				return
+			}
 			throw error
 		}
 		try {
@@ -212,6 +244,19 @@ export class JobManagerBase extends DurableObject<JobsWorkerEnv> {
 				isRetry: alarmInfo?.isRetry,
 				...schedulerErrorFields(error),
 			})
+			if (
+				await tryRearmAlarmForRetryableD1Failure({
+					setAlarm: (atMs) => rearmAlarmPreservingEarlier(this.ctx, atMs),
+					getAlarm: () => this.ctx.storage.getAlarm(),
+					userId,
+					error,
+					phase: 'sync_alarm',
+					retryCount: alarmInfo?.retryCount,
+					isRetry: alarmInfo?.isRetry,
+				})
+			) {
+				return
+			}
 			throw error
 		}
 	}
