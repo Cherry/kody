@@ -5,6 +5,7 @@ export function packageWebhookApprovalHref(input: {
 	username: string
 	kodyId: string
 	webhookName: string
+	endpointId?: string | null
 	approvalUrl: string | null
 }) {
 	if (!input.approvalUrl) return null
@@ -12,6 +13,12 @@ export function packageWebhookApprovalHref(input: {
 		username: input.username,
 		kodyId: input.kodyId,
 		changes: [],
-		enable: [{ kind: 'webhook', name: input.webhookName }],
+		enable: [
+			{
+				kind: 'webhook',
+				name: input.webhookName,
+				...(input.endpointId ? { endpointId: input.endpointId } : {}),
+			},
+		],
 	})
 }

@@ -7,6 +7,7 @@ import {
 import { RecordTable, recordCellClamp } from './record-table.tsx'
 import {
 	buildPackageWebhooksHref,
+	webhookDeclaredCount,
 	webhookModeLabel,
 	webhookStatusColor,
 	webhookStatusLabel,
@@ -48,7 +49,7 @@ export function AccountWebhooksPage({
 				<RecordTable
 					mode="none"
 					ariaLabel="Webhooks"
-					countLabel={`${webhooks.length} declared · ${mintedCount} minted`}
+					countLabel={`${webhookDeclaredCount(webhooks)} declared · ${mintedCount} minted`}
 					emptyLabel="No package on this account declares a webhook yet. Add a kody.webhooks entry to a package manifest and publish it."
 					columns={[
 						{ key: 'name', label: 'Webhook', primary: true },
@@ -63,6 +64,7 @@ export function AccountWebhooksPage({
 							username,
 							kodyId: webhook.packageKodyId,
 							webhookName: webhook.name,
+							endpointId: webhook.endpointId,
 						}),
 						cells: {
 							name: <span css={clampedCellCss}>{webhook.name}</span>,

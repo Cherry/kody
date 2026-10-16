@@ -21,4 +21,7 @@ export const revokePackageCollaboratorInviteInput = packageAccessInput.extend({
 })
 export const packageWebhookInput = packageAccessInput.extend({
 	webhookName: z.string().trim().min(1),
+	endpointId: z.string().trim().min(1).optional(),
+	createInstance: z.boolean().optional(),
+	instanceLabel: z.string().trim().min(1).max(64).optional(),
 })

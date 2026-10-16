@@ -270,7 +270,18 @@ function renderInstanceCard(
 								fontWeight: typography.fontWeight.semibold,
 							}}
 						>
-							Instance {index + 1}
+							{instance.instanceLabel?.trim()
+								? instance.instanceLabel.trim()
+								: `Instance ${index + 1}`}
+						</p>
+					) : instance.instanceLabel?.trim() ? (
+						<p
+							css={{
+								margin: 0,
+								fontWeight: typography.fontWeight.semibold,
+							}}
+						>
+							{instance.instanceLabel.trim()}
 						</p>
 					) : null}
 					<span css={mutedCss}>{stateLabel}</span>
@@ -343,7 +354,14 @@ export function renderTriggersTab(context: PackageTabContext): ReactNode {
 							username: context.username,
 							kodyId: context.kodyId,
 							changes: [],
-							enable: [trigger.trigger],
+							enable: [
+								{
+									...trigger.trigger,
+									...(trigger.instanceId
+										? { endpointId: trigger.instanceId }
+										: {}),
+								},
+							],
 						})
 					: null
 				return (
@@ -396,9 +414,7 @@ export function renderTriggersTab(context: PackageTabContext): ReactNode {
 										instances.length,
 									),
 								)}
-						{trigger.canAddInstance &&
-						context.setTriggerEnablement &&
-						instances.length > 0 ? (
+						{trigger.canAddInstance && instances.length > 0 ? (
 							<details
 								css={{
 									...accountDisclosureCss,
@@ -409,25 +425,36 @@ export function renderTriggersTab(context: PackageTabContext): ReactNode {
 							>
 								<summary>Add another instance</summary>
 								<div css={{ display: 'grid', gap: spacing.sm }}>
-									<p css={mutedCss}>
-										Adds another live copy that uses your default credentials.
-										Then change that instance’s credential mapping on its card
-										(saving one need at a time never mints a second copy).
-									</p>
-									<button
-										type="button"
-										disabled={Boolean(context.enablementBusyKey)}
-										css={secondaryButtonCss}
-										onClick={() => {
-											context.setTriggerEnablement?.({
-												trigger: trigger.trigger,
-												state: 'on',
-												createInstance: true,
-											})
-										}}
-									>
-										Add another instance
-									</button>
+									{trigger.trigger.kind === 'webhook' ? (
+										<SiteLink
+											href={`/@${context.username}/${context.kodyId}/settings#webhooks`}
+										>
+											Mint another labeled URL in Settings
+										</SiteLink>
+									) : (
+										<>
+											<p css={mutedCss}>
+												Adds another live copy that uses your default
+												credentials. Then change that instance’s credential
+												mapping on its card (saving one need at a time never
+												mints a second copy).
+											</p>
+											<button
+												type="button"
+												disabled={Boolean(context.enablementBusyKey)}
+												css={secondaryButtonCss}
+												onClick={() => {
+													context.setTriggerEnablement?.({
+														trigger: trigger.trigger,
+														state: 'on',
+														createInstance: true,
+													})
+												}}
+											>
+												Add another instance
+											</button>
+										</>
+									)}
 								</div>
 							</details>
 						) : null}

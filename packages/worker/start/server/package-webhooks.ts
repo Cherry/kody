@@ -47,6 +47,7 @@ export const loadPackageWebhooks = createServerFn({ method: 'GET' })
 					kodyId: payload.kodyId,
 					webhookName: webhook.name,
 					approvalUrl: webhook.approvalUrl,
+					endpointId: webhook.endpointId,
 				}),
 			})),
 		}
@@ -67,6 +68,9 @@ export const mintPackageWebhook = createServerFn({ method: 'POST' })
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
 						webhookName: data.webhookName,
+						endpointId: data.endpointId,
+						createInstance: data.createInstance,
+						instanceLabel: data.instanceLabel,
 					})
 				).data,
 		)
@@ -86,6 +90,9 @@ export const rotatePackageWebhook = createServerFn({ method: 'POST' })
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
 						webhookName: data.webhookName,
+						endpointId: data.endpointId,
+						createInstance: data.createInstance,
+						instanceLabel: data.instanceLabel,
 					})
 				).data,
 		)
@@ -105,6 +112,9 @@ export const revealPackageWebhook = createServerFn({ method: 'POST' })
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
 						webhookName: data.webhookName,
+						endpointId: data.endpointId,
+						createInstance: data.createInstance,
+						instanceLabel: data.instanceLabel,
 					})
 				).data,
 		)
@@ -124,6 +134,9 @@ export const enablePackageWebhook = createServerFn({ method: 'POST' })
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
 						webhookName: data.webhookName,
+						endpointId: data.endpointId,
+						createInstance: data.createInstance,
+						instanceLabel: data.instanceLabel,
 					})
 				).data,
 		)
@@ -143,6 +156,9 @@ export const disablePackageWebhook = createServerFn({ method: 'POST' })
 						env,
 						params: { username: data.username, kodyId: data.kodyId },
 						webhookName: data.webhookName,
+						endpointId: data.endpointId,
+						createInstance: data.createInstance,
+						instanceLabel: data.instanceLabel,
 					})
 				).data,
 		)

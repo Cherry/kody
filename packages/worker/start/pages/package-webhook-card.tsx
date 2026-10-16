@@ -155,15 +155,23 @@ function challengeValue(webhook: PackageWebhookListItem) {
  * and Enable / Disable actions. The
  * card never renders a URL it did not just receive from a reveal.
  */
+export type PackageWebhookCardIntent = {
+	intent: WebhookIntent
+	createInstance?: boolean
+	instanceLabel?: string
+}
+
 export function renderPackageWebhookCard(input: {
 	webhook: PackageWebhookListItem
 	revealedUrl: string | null
 	isMutating: boolean
 	rotateCheck: WebhookConfirmation
 	disableCheck: WebhookConfirmation
-	onIntent: (intent: WebhookIntent) => void
+	onIntent: (payload: PackageWebhookCardIntent) => void
 	onHideUrl: () => void
 	deliveriesHref: string
+	/** Show “Mint another URL” when this card is the first minted sibling. */
+	showMintAnother?: boolean
 }) {
 	const {
 		webhook,
@@ -173,12 +181,20 @@ export function renderPackageWebhookCard(input: {
 		disableCheck,
 		onIntent,
 		onHideUrl,
+		showMintAnother = false,
 	} = input
 	const webhookLabel = `${webhook.packageKodyId}/${webhook.name}`
-	const titleId = `${packageWebhookCardId(webhook.name)}-title`
+	const cardDomId = packageWebhookCardId({
+		webhookName: webhook.name,
+		endpointId: webhook.endpointId,
+	})
+	const titleId = `${cardDomId}-title`
+	const titleText = webhook.instanceLabel
+		? `${webhook.name} · ${webhook.instanceLabel}`
+		: webhook.name
 	return (
 		<article
-			id={packageWebhookCardId(webhook.name)}
+			id={cardDomId}
 			aria-labelledby={titleId}
 			css={cardCss}
 			data-testid="package-webhook-card"
@@ -187,7 +203,7 @@ export function renderPackageWebhookCard(input: {
 			<div css={{ display: 'grid', gap: spacing.xs }}>
 				<div css={cardHeadCss}>
 					<h3 id={titleId} css={cardTitleCss}>
-						{webhook.name}
+						{titleText}
 					</h3>
 					<span css={{ ...statusPillCss, color: webhookStatusColor(webhook) }}>
 						{webhookStatusLabel(webhook)}
@@ -302,7 +318,7 @@ export function renderPackageWebhookCard(input: {
 							disabled={isMutating}
 							aria-label={`Enable ${webhookLabel}`}
 							css={secondaryButtonCss}
-							onClick={() => onIntent('enable')}
+							onClick={() => onIntent({ intent: 'enable' })}
 						>
 							Enable
 						</button>
@@ -351,6 +367,74 @@ export function renderPackageWebhookCard(input: {
 					</SiteLink>
 				</p>
 			) : null}
+
+			{showMintAnother && webhook.minted ? (
+				<details
+					css={{
+						marginTop: spacing.sm,
+						paddingTop: spacing.sm,
+						borderTop: `1px solid ${colors.border}`,
+					}}
+					data-testid="package-webhook-mint-another"
+				>
+					<summary>Mint another URL</summary>
+					<form
+						css={{
+							display: 'grid',
+							gap: spacing.sm,
+							marginTop: spacing.sm,
+						}}
+						onSubmit={(event) => {
+							event.preventDefault()
+							const form = event.currentTarget as HTMLFormElement
+							const label = new FormData(form)
+								.get('instanceLabel')
+								?.toString()
+								.trim()
+							if (!label) return
+							onIntent({
+								intent: 'mint',
+								createInstance: true,
+								instanceLabel: label,
+							})
+							form.reset()
+						}}
+					>
+						<p css={{ margin: 0, color: colors.textMuted }}>
+							Creates another URL under <code>{webhook.name}</code> with its own
+							Approve. Give it a short label so you can tell them apart.
+						</p>
+						<label css={fieldCss}>
+							<span css={fieldLabelCss}>Instance label</span>
+							<input
+								name="instanceLabel"
+								type="text"
+								required
+								maxLength={64}
+								placeholder="staging"
+								disabled={isMutating}
+								css={{
+									padding: `${spacing.xs} ${spacing.sm}`,
+									border: `1px solid ${colors.border}`,
+									borderRadius: '4px',
+									fontFamily: 'inherit',
+								}}
+							/>
+						</label>
+						<div>
+							<button
+								type="submit"
+								disabled={isMutating}
+								aria-label={`Mint another URL for ${webhook.packageKodyId}/${webhook.name}`}
+								data-testid="package-webhook-mint-another-submit"
+								css={primaryButtonCss}
+							>
+								Mint another URL
+							</button>
+						</div>
+					</form>
+				</details>
+			) : null}
 		</article>
 	)
 }
@@ -359,7 +443,7 @@ function renderUrlSection(input: {
 	webhook: PackageWebhookListItem
 	revealedUrl: string | null
 	isMutating: boolean
-	onIntent: (intent: WebhookIntent) => void
+	onIntent: (payload: PackageWebhookCardIntent) => void
 	onHideUrl: () => void
 }) {
 	const { webhook, revealedUrl, isMutating, onIntent, onHideUrl } = input
@@ -379,7 +463,7 @@ function renderUrlSection(input: {
 						aria-label={`Mint URL for ${webhook.packageKodyId}/${webhook.name}`}
 						data-testid="package-webhook-mint"
 						css={primaryButtonCss}
-						onClick={() => onIntent('mint')}
+						onClick={() => onIntent({ intent: 'mint' })}
 					>
 						Mint URL
 					</button>
@@ -432,7 +516,7 @@ function renderUrlSection(input: {
 					aria-label={`Reveal URL for ${webhook.packageKodyId}/${webhook.name}`}
 					data-testid="package-webhook-reveal"
 					css={secondaryButtonCss}
-					onClick={() => onIntent('reveal')}
+					onClick={() => onIntent({ intent: 'reveal' })}
 				>
 					Reveal URL
 				</button>

@@ -14,6 +14,7 @@ test.each([
 			username: 'team',
 			kodyId: 'demo',
 			webhookName: 'event/one',
+			endpointId: 'endpoint-staging',
 			approvalUrl,
 		})
 		expect(href).toBe(
@@ -21,7 +22,13 @@ test.each([
 				username: 'team',
 				kodyId: 'demo',
 				changes: [],
-				enable: [{ kind: 'webhook', name: 'event/one' }],
+				enable: [
+					{
+						kind: 'webhook',
+						name: 'event/one',
+						endpointId: 'endpoint-staging',
+					},
+				],
 			}),
 		)
 		expect(href).toMatch(/^\/@team\/demo\//)

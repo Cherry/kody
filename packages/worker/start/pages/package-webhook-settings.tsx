@@ -9,13 +9,16 @@ import { packageWebhooksQuery } from '../package-webhooks-query.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
 import { type PackageWebhookListItem } from '#universal/loader-data.ts'
 import {
-	type WebhookIntent,
 	webhookFailureMessage,
 	webhookSuccessMessage,
+	webhookDeclaredCount,
 	packageWebhooksSectionId,
 	webhooksDocHref,
 } from '#client/routes/webhooks-shared.ts'
-import { renderPackageWebhookCard as PackageWebhookCard } from './package-webhook-card.tsx'
+import {
+	type PackageWebhookCardIntent,
+	renderPackageWebhookCard as PackageWebhookCard,
+} from './package-webhook-card.tsx'
 import { AccountManagementMessage } from './account-management-components.tsx'
 import { SiteLink } from '../components/site-link.tsx'
 import { detailSectionCss } from '../components/community-detail-sections.tsx'
@@ -50,8 +53,9 @@ export function PackageWebhookSettings({
 	const mutating = mutation.isPending
 	async function runIntent(
 		webhook: PackageWebhookListItem,
-		intent: WebhookIntent,
+		payload: PackageWebhookCardIntent,
 	) {
+		const { intent } = payload
 		if (mutating) return
 		const currentSubmission = ++submissionId.current
 		const isCurrent = capture()
@@ -61,6 +65,9 @@ export function PackageWebhookSettings({
 				username,
 				kodyId,
 				webhookName: webhook.name,
+				endpointId: webhook.endpointId,
+				createInstance: payload.createInstance,
+				instanceLabel: payload.instanceLabel,
 				webhookId: webhook.id,
 				intent,
 				queryKey: query.queryKey,
@@ -95,7 +102,7 @@ export function PackageWebhookSettings({
 			armed: confirmed === key,
 			onBlur: () => setConfirmed(null),
 			onClick: () => {
-				if (confirmed === key) void runIntent(webhook, intent)
+				if (confirmed === key) void runIntent(webhook, { intent })
 				else setConfirmed(key)
 			},
 		}
@@ -150,7 +157,7 @@ export function PackageWebhookSettings({
 			{status === 'ready' && webhooks.length ? (
 				<>
 					<p css={mutedCss} data-testid="package-webhook-settings-count">
-						{webhooks.length} declared ·{' '}
+						{webhookDeclaredCount(webhooks)} declared ·{' '}
 						{webhooks.filter((x) => x.minted).length} minted
 					</p>
 					<div
@@ -167,7 +174,12 @@ export function PackageWebhookSettings({
 											isMutating: mutating,
 											rotateCheck: confirmation(webhook, 'rotate'),
 											disableCheck: confirmation(webhook, 'disable'),
-											onIntent: (intent) => void runIntent(webhook, intent),
+											onIntent: (payload) => void runIntent(webhook, payload),
+											showMintAnother:
+												webhook.minted &&
+												webhooks.find(
+													(item) => item.name === webhook.name && item.minted,
+												)?.id === webhook.id,
 											onHideUrl: () =>
 												setRevealedUrls((previous) => {
 													const next = new Map(previous)

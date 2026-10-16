@@ -195,3 +195,48 @@ test('invalid turn-on actions cannot commit a valid mapping change first', async
 		expect(state.apply).not.toHaveBeenCalled()
 	}
 })
+
+test('a named webhook enablement is validated against its endpoint sibling, not the first same-name URL', async () => {
+	const ownRow = { id: 'enablement-b', enablerUserId: 'actor-a', state: 'on' }
+	const multiScope = {
+		...scope,
+		triggers: [
+			{
+				kind: 'webhook',
+				name: 'notify',
+				instanceId: 'endpoint-a',
+				enablements: [
+					{ id: 'enablement-a', enablerUserId: 'actor-other', state: 'on' },
+				],
+			},
+			{
+				kind: 'webhook',
+				name: 'notify',
+				instanceId: 'endpoint-b',
+				enablements: [ownRow],
+			},
+		],
+	} as unknown as typeof scope
+	state.row.mockResolvedValue({
+		packageId: 'package-a',
+		enablerUserId: 'actor-a',
+		triggerKind: 'webhook',
+		triggerName: 'notify',
+		state: 'on',
+	})
+	const result = await mutatePackageCredentialMappings({
+		scope: multiScope,
+		body: {
+			enablements: [
+				{
+					trigger: { kind: 'webhook', name: 'notify' },
+					state: 'on',
+					enablementId: 'enablement-b',
+				},
+			],
+		},
+	})
+	expect(result.status).toBe(200)
+	expect(state.enable).not.toHaveBeenCalled()
+	expect(state.write).not.toHaveBeenCalled()
+})

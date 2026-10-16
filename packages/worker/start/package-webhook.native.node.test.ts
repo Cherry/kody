@@ -30,6 +30,8 @@ const listCommands: PackageWebhookListItem = {
 	packageKodyId: 'raycast',
 	packageName: '@jane/raycast',
 	name: 'list-commands',
+	endpointId: null,
+	instanceLabel: null,
 	exportName: './list-commands',
 	description: 'Raycast asks for the command list',
 	responseMode: 'sync',
@@ -157,6 +159,7 @@ test('accepted webhook outcome stays out of Query and resets transient mutation 
 			username: 'jane',
 			kodyId: 'raycast',
 			webhookName: run.name,
+			endpointId: 'endpoint-staging',
 			webhookId: run.id,
 			intent: 'reveal',
 			queryKey: key,
@@ -168,6 +171,9 @@ test('accepted webhook outcome stays out of Query and resets transient mutation 
 				username: 'jane',
 				kodyId: 'raycast',
 				webhookName: run.name,
+				endpointId: 'endpoint-staging',
+				createInstance: undefined,
+				instanceLabel: undefined,
 			},
 		})
 		expect(client.getQueryData(key)).toEqual(listPayload([listCommands]))
@@ -429,3 +435,29 @@ test.each(
 		client.clear()
 	},
 )
+
+test('labeled webhook cards use endpoint anchors and offer an additional URL without revealing cached secrets', async () => {
+	const html = await renderStartPage(
+		jsx(PackageWebhookCard, {
+			webhook: {
+				...run,
+				endpointId: 'endpoint-staging',
+				instanceLabel: 'staging',
+			},
+			revealedUrl: null,
+			isMutating: false,
+			rotateCheck: { armed: false, onClick() {}, onBlur() {} },
+			disableCheck: { armed: false, onClick() {}, onBlur() {} },
+			onIntent() {},
+			onHideUrl() {},
+			deliveriesHref: '/@jane/-/activity',
+			showMintAnother: true,
+		}),
+	)
+	expect(html).toContain('id="webhook-run-endpoint-staging"')
+	expect(html).toContain('run · staging')
+	expect(html).toContain('name="instanceLabel"')
+	expect(html).toContain('maxLength="64"')
+	expect(html).toContain('data-testid="package-webhook-mint-another-submit"')
+	expect(html).not.toContain(secretUrl)
+})

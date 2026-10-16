@@ -22,6 +22,9 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 			username: string
 			kodyId: string
 			webhookName: string
+			endpointId?: string | null
+			createInstance?: boolean
+			instanceLabel?: string
 			webhookId: string
 			intent: WebhookIntent
 			queryKey: QueryKey
@@ -40,6 +43,9 @@ export function packageWebhookMutationOptions(queryClient: QueryClient) {
 					username: input.username,
 					kodyId: input.kodyId,
 					webhookName: input.webhookName,
+					endpointId: input.endpointId ?? undefined,
+					createInstance: input.createInstance,
+					instanceLabel: input.instanceLabel,
 				},
 			})
 			if (!payload.ok)

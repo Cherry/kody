@@ -92,21 +92,34 @@ type PackageWebhookInput = {
 	params: { username: string; kodyId: string }
 	env: Env
 	webhookName: string
+	endpointId?: string | null
+	createInstance?: boolean
+	instanceLabel?: string | null
 }
 export function mintPackageWebhook(input: PackageWebhookInput) {
 	return changePackageWebhook(input, 'mint', async (target) => {
-		if (await isWebhookUrlMinted(target))
+		if (!input.createInstance && (await isWebhookUrlMinted(target)))
 			throw new McpCallerError(
-				'This webhook already has a URL. Rotate it to issue a new one.',
+				'This webhook already has a URL. Rotate it to issue a new one, or mint another URL with a label.',
 			)
-		const { approvalUrl } = await mintWebhookUrlForUser(target)
-		return { revealed: await revealForUi(target), approvalUrl }
+		const minted = await mintWebhookUrlForUser({
+			...target,
+			createInstance: input.createInstance === true,
+			instanceLabel: input.instanceLabel?.trim() || null,
+		})
+		return {
+			revealed: await revealForUi({ ...target, endpointId: minted.endpointId }),
+			approvalUrl: minted.approvalUrl,
+		}
 	})
 }
 export function rotatePackageWebhook(input: PackageWebhookInput) {
 	return changePackageWebhook(input, 'rotate', async (target) => {
-		const { approvalUrl } = await rotateWebhookUrlForUser(target)
-		return { revealed: await revealForUi(target), approvalUrl }
+		const { approvalUrl, endpointId } = await rotateWebhookUrlForUser(target)
+		return {
+			revealed: await revealForUi({ ...target, endpointId }),
+			approvalUrl,
+		}
 	})
 }
 export function revealPackageWebhook(input: PackageWebhookInput) {
@@ -144,6 +157,7 @@ function webhookTarget(
 		packageKodyId,
 		webhookName,
 		requestUrl: request.url,
+		endpointId: null as string | null,
 	}
 }
 async function changePackageWebhook(
@@ -180,15 +194,18 @@ async function changePackageWebhook(
 			reason: [
 				`package=${packageKodyId}`,
 				`webhook=${webhookName}`,
+				...(input.endpointId ? [`endpoint=${input.endpointId}`] : []),
+				...(input.createInstance ? ['createInstance'] : []),
 				...(reason ? [reason] : []),
 			].join(' '),
 		})
 	}
 
 	try {
-		const { revealed, approvalUrl } = await apply(
-			webhookTarget(env, request, user, packageKodyId, webhookName),
-		)
+		const { revealed, approvalUrl } = await apply({
+			...webhookTarget(env, request, user, packageKodyId, webhookName),
+			endpointId: input.endpointId?.trim() || null,
+		})
 		audit('success')
 		const payload: PackageWebhooksActionPayload = {
 			ok: true,
@@ -224,6 +241,7 @@ async function revealForUi(input: {
 	packageKodyId: string
 	webhookName: string
 	requestUrl: string
+	endpointId?: string | null
 }): Promise<PackageWebhookRevealedUrl> {
 	const revealed = await revealWebhookUrlForWebsite({
 		env: input.env,
@@ -231,12 +249,17 @@ async function revealForUi(input: {
 		email: input.email,
 		username: input.username,
 		requestUrl: input.requestUrl,
-		target: { kodyId: input.packageKodyId, webhookName: input.webhookName },
+		target: {
+			kodyId: input.packageKodyId,
+			webhookName: input.webhookName,
+			endpointId: input.endpointId,
+		},
 	})
 	return {
 		id: packageWebhookItemId({
 			packageKodyId: input.packageKodyId,
 			name: input.webhookName,
+			endpointId: revealed.endpointId,
 		}),
 		handle: revealed.handle,
 		url: revealed.url,

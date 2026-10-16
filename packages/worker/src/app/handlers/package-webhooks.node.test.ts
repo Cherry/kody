@@ -128,11 +128,11 @@ async function setup(sessionUsername = 'owner') {
 			previous_url_secret_expires_at TEXT,
 			enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
 			deleted_at TEXT,
-
+			instance_label TEXT,
 			created_at TEXT NOT NULL,
 			rotated_at TEXT NOT NULL
 		);
-		CREATE UNIQUE INDEX idx_webhook_endpoints_user_package_name
+		CREATE INDEX idx_webhook_endpoints_user_package_name
 		ON webhook_endpoints(user_id, package_id, webhook_name);
 		CREATE TABLE enablements (
 			id TEXT PRIMARY KEY NOT NULL,
@@ -182,7 +182,13 @@ async function setup(sessionUsername = 'owner') {
 		disable: disablePackageWebhook,
 	}
 	const post = (
-		body: { intent: keyof typeof operations; webhookName: string },
+		body: {
+			intent: keyof typeof operations
+			webhookName: string
+			endpointId?: string
+			createInstance?: boolean
+			instanceLabel?: string
+		},
 		params = ownerParams,
 	) =>
 		operations[body.intent]({
@@ -190,6 +196,9 @@ async function setup(sessionUsername = 'owner') {
 			request: new Request(apiUrl),
 			params,
 			webhookName: body.webhookName,
+			endpointId: body.endpointId,
+			createInstance: body.createInstance,
+			instanceLabel: body.instanceLabel,
 		})
 	const act = async (
 		intent: keyof typeof operations,
@@ -243,8 +252,11 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 	expect(minted.status).toBe(200)
 	expect(minted.body).not.toHaveProperty('webhooks')
 	expect(minted.body).not.toHaveProperty('username')
-	expect(minted.body.revealed?.id).toBe('sentry-bridge/launcher')
 	expect(minted.body.revealed?.handle.startsWith('whh_')).toBe(true)
+	const mintedEndpointId = minted.body.revealed!.handle.replace(/^whh_/, '')
+	expect(minted.body.revealed?.id).toBe(
+		`sentry-bridge/launcher/${mintedEndpointId}`,
+	)
 	// The URL comes from the request origin so previews show their own host,
 	// and the response reveals it exactly once without rebuilding the list.
 	expect(minted.body.revealed?.url).toMatch(
@@ -254,8 +266,7 @@ test('package webhooks API mints, reveals, rotates, and toggles a declared webho
 	const mintedHandle = minted.body.revealed!.handle
 	// Minting never turns the webhook on: the answer and the list both point
 	// at Approve, and the card must not read Active.
-	const approvalUrl =
-		'https://kody.example/@owner/sentry-bridge/approve-credentials?enable=webhook%3Alauncher'
+	const approvalUrl = `https://kody.example/@owner/sentry-bridge/approve-credentials?enable=webhook%3Alauncher%3A${mintedEndpointId}`
 	expect(minted.body.approvalUrl).toBe(approvalUrl)
 	expect(
 		launcherOf((await get()).data as PackageWebhooksLoaderData),
@@ -469,4 +480,73 @@ test('committed webhook mint succeeds without rebuilding a failing read model', 
 	} finally {
 		read.mockRestore()
 	}
+})
+
+test('native webhook operations mint labeled siblings and target one endpoint without changing its sibling', async () => {
+	const { act, post, get } = await setup()
+	const first = await act('mint')
+	const originalId = first.body.revealed!.handle.replace(/^whh_/, '')
+	const extra = await post({
+		intent: 'mint',
+		webhookName: 'launcher',
+		createInstance: true,
+		instanceLabel: 'staging',
+	})
+	expect(extra.status).toBe(200)
+	const payload = extra.data as PackageWebhooksActionPayload
+	expect(payload).not.toHaveProperty('webhooks')
+	const extraId = payload.revealed!.handle.replace(/^whh_/, '')
+	expect(extraId).not.toBe(originalId)
+	expect(payload.revealed!.id).toBe(`sentry-bridge/launcher/${extraId}`)
+	expect(payload.approvalUrl).toContain(
+		encodeURIComponent(`webhook:launcher:${extraId}`),
+	)
+	const listed = (await get()).data as PackageWebhooksLoaderData
+	const siblings = listed.webhooks.filter((row) => row.name === 'launcher')
+	expect(siblings).toHaveLength(2)
+	expect(
+		siblings.find((row) => row.endpointId === extraId)?.instanceLabel,
+	).toBe('staging')
+	const reveal = await post({
+		intent: 'reveal',
+		webhookName: 'launcher',
+		endpointId: extraId,
+	})
+	expect((reveal.data as PackageWebhooksActionPayload).revealed?.url).toBe(
+		payload.revealed?.url,
+	)
+	expect(
+		(
+			await post({
+				intent: 'disable',
+				webhookName: 'launcher',
+				endpointId: extraId,
+			})
+		).status,
+	).toBe(200)
+	const after = (await get()).data as PackageWebhooksLoaderData
+	expect(
+		after.webhooks.find((row) => row.endpointId === extraId)?.enabled,
+	).toBe(false)
+	expect(
+		after.webhooks.find((row) => row.endpointId === originalId)?.enabled,
+	).toBe(true)
+	expect(
+		(
+			await post({
+				intent: 'mint',
+				webhookName: 'launcher',
+				createInstance: true,
+			})
+		).status,
+	).toBe(400)
+	expect(
+		(
+			await post({
+				intent: 'reveal',
+				webhookName: 'sentry',
+				endpointId: extraId,
+			})
+		).status,
+	).toBe(400)
 })

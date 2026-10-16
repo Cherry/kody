@@ -77,7 +77,10 @@ async function validateEnablementActions(input: {
 			const trigger = input.scope.triggers.find(
 				(declared) =>
 					declared.kind === action.trigger.kind &&
-					declared.name === action.trigger.name,
+					declared.name === action.trigger.name &&
+					(declared.kind !== 'webhook' ||
+						!action.enablementId ||
+						declared.enablements.some((row) => row.id === action.enablementId)),
 			)
 			if (!trigger)
 				throw new TriggerEnablementError(

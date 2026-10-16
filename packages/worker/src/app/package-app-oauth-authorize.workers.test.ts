@@ -1,6 +1,10 @@
 import { env } from 'cloudflare:workers'
 import { expect, test } from 'vitest'
 import { createAuthCookie, setAuthSessionSecret } from '#app/auth-session.ts'
+import {
+	handlePackageAppOauthHostAuth,
+	isPackageAppOauthHostAuthPath,
+} from '#app/package-app-oauth-host-auth.ts'
 import { handlePackageAppOauthAuthorizeRequest } from '#app/package-app-oauth-authorize.ts'
 import { packageAppOauthPaths } from '#universal/package-app-oauth-paths.ts'
 import { createS256CodeChallenge } from '#app/package-app-oauth-pkce-cookie.ts'
@@ -28,11 +32,20 @@ function configureOrigins() {
 }
 
 async function workerFetch(url: string | URL, init: RequestInit = {}) {
-	return handlePackageAppOauthAuthorizeRequest(
-		new Request(url, { redirect: 'manual', ...init }),
-		env,
-		{ allowConsentSkip: false },
-	)
+	const request = new Request(url, { redirect: 'manual', ...init })
+	if (isPackageAppOauthHostAuthPath(new URL(request.url).pathname)) {
+		const response = await handlePackageAppOauthHostAuth({
+			request,
+			env,
+			url: new URL(request.url),
+		})
+		if (!response)
+			throw new Error('Expected package app host protocol response')
+		return response
+	}
+	return handlePackageAppOauthAuthorizeRequest(request, env, {
+		allowConsentSkip: false,
+	})
 }
 
 async function ensureOauthGrantSchema() {
@@ -47,6 +60,28 @@ async function ensureOauthGrantSchema() {
 			revoked_at TEXT
 		)`,
 	).run()
+}
+
+async function seedOwnerPackageApp(slug = 'demo') {
+	const ownerId = testStableUserIdFromEmail(ownerEmail)
+	const now = '2026-10-16T00:00:00.000Z'
+	await env.APP_DB.prepare(
+		`INSERT OR REPLACE INTO saved_packages (
+			id, user_id, name, kody_id, description, tags_json, search_text,
+			source_id, has_app, hidden, is_private, is_internet_visible,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, '', '[]', NULL, ?, 1, 0, 1, 0, ?, ?)`,
+	)
+		.bind(
+			`pkg-oauth-${ownerUsername}-${slug}`,
+			ownerId,
+			`@${ownerUsername}/${slug}`,
+			slug,
+			`src-oauth-${ownerUsername}-${slug}`,
+			now,
+			now,
+		)
+		.run()
 }
 
 async function seedOwnerSessionCookie() {
@@ -79,6 +114,7 @@ async function seedOwnerSessionCookie() {
 		email: ownerEmail,
 		username: ownerUsername,
 	})
+	await seedOwnerPackageApp('demo')
 	setAuthSessionSecret(env.COOKIE_SECRET)
 	const setCookie = await createAuthCookie(
 		{
@@ -188,4 +224,68 @@ test('authenticated consent decisions reject a foreign origin before creating a 
 		'SELECT COUNT(*) AS count FROM package_app_oauth_grants',
 	).first<{ count: number }>()
 	expect(row?.count).toBe(0)
+})
+
+test('package-app OAuth authorize rejects client_id that is not a published package app', async () => {
+	configureOrigins()
+	const sessionCookie = await seedOwnerSessionCookie()
+	const verifier = 'oauth-workers-test-verifier-32chars!!'
+	const challenge = await createS256CodeChallenge(verifier)
+	const url = new URL(packageAppOauthPaths.authorize, appOrigin)
+	url.searchParams.set('response_type', 'code')
+	// Bogus subdomain-shaped owner label — no such published package.
+	url.searchParams.set('client_id', 'kentcdodds-world-builder/world-builder')
+	url.searchParams.set(
+		'redirect_uri',
+		`https://kentcdodds-world-builder.packages.isolated.test${packageAppOauthPaths.callback}`,
+	)
+	url.searchParams.set('state', 'state-bogus')
+	url.searchParams.set('code_challenge', challenge)
+	url.searchParams.set('code_challenge_method', 'S256')
+	url.searchParams.set('scope', 'profile')
+
+	const response = await workerFetch(url, {
+		headers: { Cookie: sessionCookie },
+	})
+	if (!(response instanceof Response))
+		throw new Error('Expected OAuth protocol response')
+	expect(response.status).toBe(400)
+	await expect(response.text()).resolves.toMatch(
+		/invalid_client|published package app/,
+	)
+})
+
+test('package-app OAuth login on unverified subdomain label rejects without trusting the host as owner', async () => {
+	configureOrigins()
+	await seedOwnerSessionCookie()
+	const loginUrl = new URL(
+		`https://kentcdodds-world-builder.packages.isolated.test${packageAppOauthPaths.login}`,
+	)
+	loginUrl.searchParams.set('app', 'world-builder')
+	const response = await workerFetch(loginUrl)
+	if (!(response instanceof Response))
+		throw new Error('Expected OAuth protocol response')
+	expect(response.status).toBe(400)
+	const body = await response.text()
+	expect(body).toMatch(/Unknown or unpublished package app/)
+	expect(response.headers.get('Location')).toBeNull()
+})
+
+test('package-app OAuth login on a real owner subdomain redirects to authorize with that client_id', async () => {
+	configureOrigins()
+	await seedOwnerSessionCookie()
+	const loginUrl = new URL(
+		`https://${ownerUsername}.packages.isolated.test${packageAppOauthPaths.login}`,
+	)
+	loginUrl.searchParams.set('app', 'demo')
+	const response = await workerFetch(loginUrl)
+	if (!(response instanceof Response))
+		throw new Error('Expected OAuth protocol response')
+	expect(response.status).toBe(302)
+	const location = response.headers.get('Location')
+	expect(location).toBeTruthy()
+	const authorize = new URL(location!)
+	expect(authorize.origin).toBe(appOrigin)
+	expect(authorize.pathname).toBe(packageAppOauthPaths.authorize)
+	expect(authorize.searchParams.get('client_id')).toBe(`${ownerUsername}/demo`)
 })
