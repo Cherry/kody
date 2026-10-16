@@ -459,16 +459,26 @@ test('native webhook reads share API data and owner-only denials', async () => {
 })
 
 test('committed webhook mint succeeds without rebuilding a failing read model', async () => {
-	const { act } = await setup()
+	const { act, db, userId } = await setup()
 	const read = vi
 		.spyOn(webhookReads, 'loadPackageWebhooksData')
 		.mockRejectedValue(new Error('read model unavailable'))
 	try {
 		const result = await act('mint')
 		expect(result.status).toBe(200)
+		const stored = await db
+			.prepare(
+				`SELECT id FROM webhook_endpoints WHERE user_id = ? AND package_id = 'pkg-1' AND webhook_name = 'launcher'`,
+			)
+			.bind(userId)
+			.first<{ id: string }>()
+		expect(stored?.id).toEqual(expect.any(String))
 		expect(result.body).toMatchObject({
 			ok: true,
-			revealed: { id: 'sentry-bridge/launcher' },
+			revealed: {
+				id: `sentry-bridge/launcher/${stored!.id}`,
+				handle: `whh_${stored!.id}`,
+			},
 		})
 		expect(result.body).not.toHaveProperty('webhooks')
 		expect(read).not.toHaveBeenCalled()

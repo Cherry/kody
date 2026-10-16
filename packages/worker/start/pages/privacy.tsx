@@ -378,9 +378,9 @@ export function PrivacyRoute() {
 					<code>__Host-kody_pkg_session_&lt;hash&gt;</code> on HTTPS,{' '}
 					<code>kody_pkg_session_&lt;hash&gt;</code> on HTTP; one cookie per
 					package app on shared hosts). Short-lived cookies support two-factor
-					verification, passkey challenges, and OAuth login. Analytics (Fathom) is cookieless. The browser uses sessionStorage for
-					first-touch signup attribution and scroll restoration, not tracking
-					cookies.
+					verification, passkey challenges, and OAuth login. Analytics (Fathom)
+					is cookieless. The browser uses sessionStorage for first-touch signup
+					attribution and scroll restoration, not tracking cookies.
 				</p>
 			</section>
 
