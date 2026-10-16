@@ -48,3 +48,56 @@ test('mapping validation distinguishes inheritance from intentionally empty pick
 		credentialMappingChangesSchema.safeParse({ changes: [] }).success,
 	).toBe(false)
 })
+
+test('typed approval preserves the exact minted endpoint and rejects malformed endpoint refs', () => {
+	const parsed = parseCredentialApprovalQuery(
+		new URLSearchParams('enable=webhook:incoming:endpoint-staging'),
+	)
+	expect(credentialProposalSchema.parse(parsed)).toEqual(parsed)
+	expect(credentialProposalSchema.parse(parsed).enable).toEqual([
+		{ kind: 'webhook', name: 'incoming', endpointId: 'endpoint-staging' },
+	])
+	for (const ref of [
+		{ kind: 'webhook', name: 'incoming', endpointId: '' },
+		{ kind: 'cron', name: 'daily', endpointId: 'endpoint-staging' },
+		{
+			kind: 'webhook',
+			name: 'incoming',
+			endpointId: 'endpoint-staging',
+			ownerId: 'other',
+		},
+	]) {
+		expect(
+			credentialProposalSchema.safeParse({ ...parsed, enable: [ref] }).success,
+		).toBe(false)
+	}
+})
+
+test('mapping inputs retain the selected webhook endpoint without accepting caller authority', () => {
+	const trigger = {
+		kind: 'webhook',
+		name: 'incoming',
+		endpointId: 'endpoint-staging',
+	}
+	const changes = [
+		{
+			target: { type: 'trigger', trigger },
+			needKey: 'github',
+			credentials: [],
+		},
+	]
+	expect(credentialMappingChangesSchema.parse({ changes })).toEqual({ changes })
+	expect(
+		credentialMappingChangesSchema.safeParse({
+			changes: [
+				{
+					...changes[0],
+					target: {
+						type: 'trigger',
+						trigger: { ...trigger, ownerId: 'other' },
+					},
+				},
+			],
+		}).success,
+	).toBe(false)
+})

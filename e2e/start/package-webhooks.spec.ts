@@ -154,6 +154,44 @@ test('package webhook URLs mint, reveal, rotate and disable through native Start
 		await page.goto(settings)
 		await waitForClientHydration(page)
 		await expect(card).toContainText('Active')
+		const originalEndpoint = (await card.getAttribute('data-webhook-id'))!
+			.split('/')
+			.at(-1)!
+		await card
+			.getByTestId('package-webhook-mint-another')
+			.locator('summary')
+			.click()
+		await card.locator('input[name="instanceLabel"]').fill('staging')
+		await card.getByTestId('package-webhook-mint-another-submit').click()
+		const sibling = page.getByTestId('package-webhook-card').filter({
+			has: page.getByRole('heading', {
+				name: 'launcher · staging',
+				exact: true,
+			}),
+		})
+		await expect(sibling).toContainText('Needs approval')
+		await expect(card).toContainText('Active')
+		const siblingEndpoint = (await sibling.getAttribute('data-webhook-id'))!
+			.split('/')
+			.at(-1)!
+		expect(siblingEndpoint).not.toBe(originalEndpoint)
+		const siblingApproval = sibling.getByTestId('package-webhook-approve')
+		const siblingHref = await siblingApproval.getAttribute('href')
+		expect(
+			new URL(siblingHref!, baseURL).searchParams.getAll('enable'),
+		).toEqual([`webhook:launcher:${siblingEndpoint}`])
+		await siblingApproval.click()
+		await expect(page.getByTestId('credential-approval-approve')).toBeEnabled()
+		await page.getByTestId('credential-approval-approve').click()
+		await expect(page.getByTestId('credential-approval-done')).toBeVisible()
+		await page.goto(settings)
+		await waitForClientHydration(page)
+		await expect(sibling).toContainText('Active')
+		await expect(card).toContainText('Active')
+		await sibling.getByRole('button', { name: /^Disable / }).click()
+		await sibling.getByRole('button', { name: /^Confirm disable / }).click()
+		await expect(sibling).toContainText('Disabled')
+		await expect(card).toContainText('Active')
 		await card.getByTestId('package-webhook-reveal').click()
 		await expect(url).toHaveText(rotated)
 		await card.getByRole('button', { name: /^Disable / }).click()

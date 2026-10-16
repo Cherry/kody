@@ -95,3 +95,17 @@ test('credential approval validates, enforces execute scope and preserves every 
 		error: 'Webhook incoming is already on for another person.',
 	})
 })
+
+test('native approval forwards the selected webhook endpoint to scoped business approval', async () => {
+	mocks.loadScope.mockResolvedValue(scope)
+	mocks.approve.mockResolvedValue({ status: 'approved', view })
+	const proposal = parseCredentialApprovalQuery(
+		new URLSearchParams('enable=webhook:incoming:endpoint-staging'),
+	)
+	expect(
+		await approvePackageCredentials({ data: { ...data, proposal } }),
+	).toEqual({ ok: true, view })
+	expect(mocks.approve).toHaveBeenLastCalledWith(
+		expect.objectContaining({ scope, proposal }),
+	)
+})

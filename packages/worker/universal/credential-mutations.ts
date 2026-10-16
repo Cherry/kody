@@ -7,6 +7,15 @@ import {
 	maxCredentialProposalReasonLength,
 	normalizeProposalSenderValue,
 } from './credential-contracts.ts'
+const credentialTriggerRefSchema = z
+	.strictObject({
+		kind: z.enum(credentialTriggerKinds),
+		name: z.string().trim().min(1),
+		endpointId: z.string().trim().min(1).optional(),
+	})
+	.refine((ref) => !ref.endpointId || ref.kind === 'webhook', {
+		message: 'Only webhook triggers can select an endpoint.',
+	})
 const credentialMappingChangeSchema = z.strictObject({
 	target: z.discriminatedUnion('type', [
 		z.strictObject({
@@ -17,10 +26,7 @@ const credentialMappingChangeSchema = z.strictObject({
 			type: z.literal('trigger'),
 			enablementId: z.string().trim().min(1).optional(),
 			createInstance: z.boolean().optional(),
-			trigger: z.strictObject({
-				kind: z.enum(credentialTriggerKinds),
-				name: z.string().trim().min(1),
-			}),
+			trigger: credentialTriggerRefSchema,
 		}),
 	]),
 	needKey: z.string().trim().min(1),
@@ -49,12 +55,7 @@ export const credentialProposalSchema = z
 			)
 			.max(maxCredentialProposalValues),
 		enable: z
-			.array(
-				z.strictObject({
-					kind: z.enum(credentialTriggerKinds),
-					name: z.string().trim().min(1),
-				}),
-			)
+			.array(credentialTriggerRefSchema)
 			.max(maxCredentialProposalValues),
 		sender: z
 			.strictObject({
