@@ -355,11 +355,11 @@ export async function loadOpenApiOperations(input: {
 		})
 	} catch (error) {
 		if (bakedOpenApiRoutes.length > 0) {
-			const operations = new Map(
+			// Do not cache the baked table: a later call in this process should
+			// retry the network and pick up routes published after this CLI built.
+			return new Map(
 				bakedOpenApiRoutes.map((route) => [route.operationId, route]),
 			)
-			openApiRouteCache.set(cacheKey, { etag: null, operations })
-			return operations
 		}
 		const reason = describeNetworkError(error)
 		throw new OpenApiError(

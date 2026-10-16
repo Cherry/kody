@@ -7,7 +7,7 @@ import {
 import { loadStoredApiToken, type StoredApiToken } from './api-token-store.js'
 import { defaultApiUrl, defaultMcpUrl } from './defaults.js'
 import { callOpenApiOperation } from './open-api-client.js'
-import { ensureFreshCredentials } from './auth.js'
+import { ensureOpenApiCredentials } from './auth.js'
 import {
 	apiTokenNeedsRefresh,
 	ensureSetupGitScopes,
@@ -114,7 +114,7 @@ export async function ensureGitApiToken(input: {
 	const mint =
 		input.mint ??
 		(async (params: Record<string, unknown>) => {
-			const session = await ensureFreshCredentials({ mcpUrl, apiUrl })
+			const session = await ensureOpenApiCredentials({ mcpUrl, apiUrl })
 			return callOpenApiOperation({
 				operationId: cliCredentialBootstrapOperationId,
 				params,

@@ -13,6 +13,9 @@ test('POST /v1/tokens/device mints a kody_at_ token from CLI OAuth', async () =>
 	expect(minted.body['token']).toEqual(expect.stringMatching(/^kody_at_/))
 	expect(minted.body['created_via']).toBe('cli-login')
 	expect(minted.body['org_binding']).toBe('user')
+	expect(minted.body['login_org']).toEqual({
+		slug: expect.any(String),
+	})
 	expect(minted.body['scopes']).toEqual(
 		expect.arrayContaining(['org:execute', 'search:read']),
 	)

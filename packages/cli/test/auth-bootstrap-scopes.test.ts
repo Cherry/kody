@@ -111,6 +111,10 @@ async function withCliEnv<T>(
 	}
 }
 
+function requestPath(url: string): string {
+	return new URL(url).pathname
+}
+
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
 		status,
@@ -158,10 +162,11 @@ test('parseCliScopesFlag splits on commas or spaces and dedupes', () => {
 test('auth bootstrap --scopes with --token mints through the Open API, then redeems and stores', async () => {
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap'))
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap'))
 				return json(mintResponse(requestedScopes))
-			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap/redeem'))
 				return json(redeemResponse)
 			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
@@ -180,7 +185,7 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 			])
 			assert.equal(result.code, 0, result.stderr)
 			const mint = requests.find((request) =>
-				request.url.endsWith('/v1/tokens/bootstrap'),
+				requestPath(request.url).endsWith('/v1/tokens/bootstrap'),
 			)
 			assert.equal(mint?.authorization, 'Bearer kody_at_parent')
 			assert.deepEqual(mint?.body, {
@@ -188,7 +193,7 @@ test('auth bootstrap --scopes with --token mints through the Open API, then rede
 				lifetime: 'short',
 			})
 			const redeem = requests.find((request) =>
-				request.url.endsWith('/v1/tokens/bootstrap/redeem'),
+				requestPath(request.url).endsWith('/v1/tokens/bootstrap/redeem'),
 			)
 			assert.equal(redeem?.authorization, null)
 			assert.deepEqual(redeem?.body, {
@@ -226,8 +231,9 @@ test('resolveMintedRedeemLifetime trusts server clamp and coerces idle when max 
 test('auth bootstrap --scopes redeems server-clamped lifetimes without CLI flag validation', async () => {
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap')) {
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap')) {
 				return json({
 					...mintResponse(requestedScopes),
 					// Parent token remaining lifetime clamps max below requested idle
@@ -236,7 +242,7 @@ test('auth bootstrap --scopes redeems server-clamped lifetimes without CLI flag 
 					max_lifetime_seconds: 45,
 				})
 			}
-			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap/redeem'))
 				return json(redeemResponse)
 			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
@@ -255,7 +261,7 @@ test('auth bootstrap --scopes redeems server-clamped lifetimes without CLI flag 
 			])
 			assert.equal(result.code, 0, result.stderr)
 			const redeem = requests.find((request) =>
-				request.url.endsWith('/v1/tokens/bootstrap/redeem'),
+				requestPath(request.url).endsWith('/v1/tokens/bootstrap/redeem'),
 			)
 			assert.deepEqual(redeem?.body, {
 				code: mintedCode,
@@ -270,7 +276,8 @@ test('auth bootstrap --scopes redeems server-clamped lifetimes without CLI flag 
 test('auth bootstrap --scopes explains how to widen when the token cannot grant a scope', async () => {
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
 			return json(
 				{
 					error: {
@@ -308,7 +315,9 @@ test('auth bootstrap --scopes explains how to widen when the token cannot grant 
 				result.stderr,
 			)
 			assert.equal(
-				requests.some((request) => request.url.endsWith('/redeem')),
+				requests.some((request) =>
+					requestPath(request.url).endsWith('/redeem'),
+				),
 				false,
 			)
 		},
@@ -319,10 +328,11 @@ test('auth bootstrap --scopes with a kody login session mints through the Open A
 	const mcpUrl = 'https://login-scopes.test/mcp'
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap'))
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap'))
 				return json(mintResponse(requestedScopes))
-			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap/redeem'))
 				return json(redeemResponse)
 			return json({ error: { code: 'not_found', message: url } }, 404)
 		},
@@ -342,7 +352,7 @@ test('auth bootstrap --scopes with a kody login session mints through the Open A
 			])
 			assert.equal(result.code, 0, result.stderr)
 			const mint = requests.find((request) =>
-				request.url.endsWith('/v1/tokens/bootstrap'),
+				requestPath(request.url).endsWith('/v1/tokens/bootstrap'),
 			)
 			assert.equal(mint?.authorization, 'Bearer kody_at_login_session')
 			assert.deepEqual(mint?.body, {
@@ -359,8 +369,9 @@ test('auth bootstrap surfaces Open API errors from the login session', async () 
 	const mcpUrl = 'https://login-scopes-error.test/mcp'
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap')) {
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap')) {
 				return json(
 					{
 						error: {
@@ -390,7 +401,9 @@ test('auth bootstrap surfaces Open API errors from the login session', async () 
 			assert.equal(result.code, 1)
 			assert.match(result.stderr, /Unknown scope "nope:write"/)
 			assert.equal(
-				requests.some((request) => request.url.endsWith('/redeem')),
+				requests.some((request) =>
+					requestPath(request.url).endsWith('/redeem'),
+				),
 				false,
 			)
 		},

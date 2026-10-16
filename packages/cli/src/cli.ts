@@ -25,7 +25,12 @@ import { defaultApiUrl, defaultMcpUrl } from './defaults.js'
 import { buildUsage } from './help.js'
 import { orgSlugFromFlag, resolveOrgSlug } from './org-resolve.js'
 import { refreshGitCredentialHelperPinIfNeeded } from './setup-git.js'
-import { deleteCredentials, listStoredOrgs, loadCredentials } from './store.js'
+import {
+	deleteCredentials,
+	listStoredOrgs,
+	loadCredentialStore,
+	loadCredentials,
+} from './store.js'
 import { formatToolResult } from './tool-result.js'
 import { resolveLocalExecuteBearer } from './local-execute-auth.js'
 import {
@@ -312,7 +317,10 @@ async function dispatch(
 	// org-scoped commands and must not bind browser login or change logout).
 	const orgFlagOnly =
 		orgFlag !== undefined ? orgSlugFromFlag(orgFlag) : undefined
-	const org = resolveOrgSlug({ flag: orgFlag })
+	const org = resolveOrgSlug({
+		flag: orgFlag,
+		activeOrg: loadCredentialStore(mcpUrl)?.activeOrg,
+	})
 
 	switch (parsed.command) {
 		case 'help':
@@ -698,8 +706,12 @@ async function dispatch(
 				)
 				return 0
 			}
-			const { ensureFreshCredentials } = await import('./auth.js')
-			const credentials = await ensureFreshCredentials({ mcpUrl, org, apiUrl })
+			const { ensureOpenApiCredentials } = await import('./auth.js')
+			const credentials = await ensureOpenApiCredentials({
+				mcpUrl,
+				org,
+				apiUrl,
+			})
 			const { whoamiWithApiToken } = await import('./open-api-client.js')
 			const identity = await whoamiWithApiToken({
 				token: credentials.accessToken,
@@ -811,8 +823,8 @@ async function dispatch(
 					write(formatToolResult(result, json))
 					return result.isError ? 1 : 0
 				}
-				const { ensureFreshCredentials } = await import('./auth.js')
-				const credentials = await ensureFreshCredentials({
+				const { ensureOpenApiCredentials } = await import('./auth.js')
+				const credentials = await ensureOpenApiCredentials({
 					mcpUrl,
 					org,
 					apiUrl,
@@ -1110,8 +1122,8 @@ async function dispatch(
 								...(org ? { org } : {}),
 							})
 						: await (async () => {
-								const { ensureFreshCredentials } = await import('./auth.js')
-								const session = await ensureFreshCredentials({
+								const { ensureOpenApiCredentials } = await import('./auth.js')
+								const session = await ensureOpenApiCredentials({
 									mcpUrl,
 									org,
 									apiUrl,
@@ -1439,7 +1451,12 @@ async function dispatch(
 			const result = await callOpenApiOperation({
 				operationId,
 				params,
-				token: requireApiToken(tokenValues, process.env, 'api', { apiUrl }),
+				token: await accessTokenForOpenApi({
+					tokenValues,
+					apiUrl,
+					mcpUrl,
+					org,
+				}),
 				apiUrl,
 				...(org ? { org } : {}),
 			})
@@ -1462,14 +1479,12 @@ async function dispatch(
 					positionals: parsed.positionals.slice(1),
 					values: parsed.values,
 				})
-				const token = requireApiToken(
+				const token = await accessTokenForOpenApi({
 					tokenValues,
-					process.env,
-					`package ${action}`,
-					{
-						apiUrl,
-					},
-				)
+					apiUrl,
+					mcpUrl,
+					org,
+				})
 				const { callOpenApiOperation } = await import('./open-api-client.js')
 				write(
 					await runPackageCollaboratorPlan({
@@ -1500,14 +1515,12 @@ async function dispatch(
 						: undefined,
 			})
 			const { callOpenApiOperation } = await import('./open-api-client.js')
-			const publishToken = requireApiToken(
+			const publishToken = await accessTokenForOpenApi({
 				tokenValues,
-				process.env,
-				'package publish',
-				{
-					apiUrl,
-				},
-			)
+				apiUrl,
+				mcpUrl,
+				org,
+			})
 			const call = (
 				operationId: string,
 				operationParams: Record<string, unknown>,
@@ -1836,8 +1849,8 @@ function bootstrapMinter(input: {
 				org: input.org,
 			})
 		) {
-			const { ensureFreshCredentials } = await import('./auth.js')
-			const session = await ensureFreshCredentials({
+			const { ensureOpenApiCredentials } = await import('./auth.js')
+			const session = await ensureOpenApiCredentials({
 				mcpUrl: input.mcpUrl,
 				apiUrl: input.apiUrl,
 				...(input.org ? { org: input.org } : {}),
@@ -1863,6 +1876,28 @@ function tokenFlagValues(values: ReturnType<typeof parseKnown>['values']): {
 	return {
 		token: typeof values.token === 'string' ? values.token : undefined,
 	}
+}
+
+/** Explicit token, else the login device token (exchanging OAuth when needed). */
+async function accessTokenForOpenApi(input: {
+	tokenValues: { token?: string }
+	apiUrl: string
+	mcpUrl: string
+	org?: string
+}): Promise<string> {
+	const explicit = resolveScopedApiToken({
+		tokenValues: input.tokenValues,
+		env: process.env,
+		apiUrl: input.apiUrl,
+	})
+	if (explicit) return explicit
+	const { ensureOpenApiCredentials } = await import('./auth.js')
+	const session = await ensureOpenApiCredentials({
+		mcpUrl: input.mcpUrl,
+		apiUrl: input.apiUrl,
+		...(input.org ? { org: input.org } : {}),
+	})
+	return session.accessToken
 }
 
 /** Parse `--params` JSON for `kody api` (flat object, same as MCP `api`). */

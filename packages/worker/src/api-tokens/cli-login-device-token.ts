@@ -23,7 +23,7 @@ export async function mintCliLoginDeviceToken(input: {
 	idleTtlSeconds?: number
 	maxLifetimeSeconds?: number
 	name?: string
-}): Promise<ApiTokenSecretView> {
+}): Promise<ApiTokenSecretView & { login_org: { slug: string } | null }> {
 	if (input.ctx.principal.kind !== 'mcp-oauth') {
 		throw invalidRequest(
 			'POST /v1/tokens/device accepts the official CLI login OAuth access token. Send that bearer once; store the returned kody_at_ token.',
@@ -43,7 +43,7 @@ export async function mintCliLoginDeviceToken(input: {
 	const callerProfileName =
 		input.ctx.callerContext.request?.credential.profileName ?? null
 	try {
-		return await mintApiToken({
+		const minted = await mintApiToken({
 			db: input.ctx.env.APP_DB,
 			userId: input.ctx.callerContext.user.userId,
 			orgBinding: 'user',
@@ -54,6 +54,11 @@ export async function mintCliLoginDeviceToken(input: {
 			createdVia: 'cli-login',
 			...(callerProfileName ? { profileName: callerProfileName } : {}),
 		})
+		const slug = input.ctx.callerContext.request?.org.slug?.trim() ?? ''
+		return {
+			...minted,
+			login_org: slug ? { slug } : null,
+		}
 	} catch (error) {
 		if (error instanceof McpCallerError) throw invalidRequest(error.message)
 		throw error

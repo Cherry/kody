@@ -4,7 +4,7 @@ export const cliBaselineTag = `cli-v${cliBaselineVersion}`
 
 const releasableTypes = new Set(['feat', 'fix', 'perf', 'revert'])
 
-export type ReleaseBump = 'major' | 'minor' | 'patch' | 'none'
+type ReleaseBump = 'major' | 'minor' | 'patch' | 'none'
 
 export type ReleaseCommit = {
 	subject: string
@@ -16,7 +16,7 @@ export type ReleaseCommit = {
 const conventional =
 	/^(?<type>feat|fix|perf|revert|chore|docs|ci|test|build|style|refactor)(?:\([^)]+\))?(?<breaking>!)?:/
 
-export function bumpForCommit(commit: ReleaseCommit): ReleaseBump {
+function bumpForCommit(commit: ReleaseCommit): ReleaseBump {
 	const match = conventional.exec(commit.subject.trim())
 	if (!match?.groups?.type) return 'none'
 	const breaking =
@@ -53,14 +53,14 @@ function rank(bump: ReleaseBump): number {
 	}
 }
 
-export function highestBump(bumps: Array<ReleaseBump>): ReleaseBump {
+function highestBump(bumps: Array<ReleaseBump>): ReleaseBump {
 	return bumps.reduce<ReleaseBump>(
 		(current, next) => (rank(next) > rank(current) ? next : current),
 		'none',
 	)
 }
 
-export function nextVersion(current: string, bump: ReleaseBump): string | null {
+function nextVersion(current: string, bump: ReleaseBump): string | null {
 	if (bump === 'none') return null
 	const parts = current.split('.').map((part) => Number(part))
 	if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) {

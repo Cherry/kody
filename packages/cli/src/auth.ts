@@ -31,7 +31,7 @@ import {
 	exchangeAuthorizationCode,
 	refreshOAuthTokens,
 } from './oauth-browser.js'
-import { openApiRequest } from './open-api-client.js'
+import { OpenApiError, openApiGet, openApiRequest } from './open-api-client.js'
 import { openUrl } from './open-url.js'
 import { redactError } from './redact.js'
 import {
@@ -69,6 +69,7 @@ export type LoginOptions = {
 		mcpUrl: string
 		accessToken: string
 		apiUrl?: string
+		org?: string
 		fetchFn?: typeof fetch
 	}) => Promise<LoginIdentity>
 }
@@ -155,7 +156,12 @@ async function mintDeviceToken(input: {
 	oauthAccessToken: string
 	lifetime: 'short' | 'long'
 	fetchFn?: typeof fetch
-}): Promise<{ token: string; expiresAt?: number; scopes: Array<string> }> {
+}): Promise<{
+	token: string
+	expiresAt?: number
+	scopes: Array<string>
+	loginOrg?: string
+}> {
 	const minted = await openApiRequest({
 		token: input.oauthAccessToken,
 		apiUrl: input.apiUrl,
@@ -171,6 +177,7 @@ async function mintDeviceToken(input: {
 		token?: unknown
 		expires_at?: unknown
 		scopes?: unknown
+		login_org?: { slug?: unknown } | null
 	}
 	if (
 		typeof record.token !== 'string' ||
@@ -187,10 +194,15 @@ async function mintDeviceToken(input: {
 				(scope): scope is string => typeof scope === 'string',
 			)
 		: []
+	const loginOrg =
+		typeof record.login_org?.slug === 'string' && record.login_org.slug.trim()
+			? record.login_org.slug.trim()
+			: undefined
 	return {
 		token: record.token,
 		...(Number.isFinite(expiresAt) ? { expiresAt } : {}),
 		scopes,
+		...(loginOrg ? { loginOrg } : {}),
 	}
 }
 
@@ -205,6 +217,8 @@ export async function refreshStoredCredentials(input: {
 	const { credentials } = input
 	if (isScopedApiToken(credentials.accessToken)) {
 		if (!isAccessTokenExpired(credentials, input.now)) return credentials
+		const slid = await adoptSlidingDeviceExpiry(input)
+		if (slid) return slid
 		throw new Error('Stored API token expired. Run `kody login`.')
 	}
 	if (!credentials.refreshToken) {
@@ -231,7 +245,7 @@ export async function refreshStoredCredentials(input: {
 		expiresAt: device.expiresAt,
 		scopes: device.scopes,
 		previous: credentials,
-		org: credentials.org,
+		org: credentials.org ?? device.loginOrg,
 	})
 	saveCredentials(next, input.backend, input.resolution, { activate: false })
 	return next
@@ -334,6 +348,68 @@ export async function ensureFreshCredentials(input: {
 		fetchFn: input.fetchFn,
 		apiUrl: input.apiUrl,
 	})
+}
+
+/**
+ * Credentials for Open API calls. A still-valid OAuth access token is exchanged
+ * for a device `kody_at_` immediately — Open API routes reject MCP OAuth.
+ * Local execute keeps {@link ensureFreshCredentials} so an unexpired OAuth
+ * session can still reach the local-execute routes that allow it.
+ */
+export async function ensureOpenApiCredentials(
+	input: Parameters<typeof ensureFreshCredentials>[0],
+): Promise<StoredCredentials> {
+	const credentials = await ensureFreshCredentials(input)
+	if (isScopedApiToken(credentials.accessToken)) return credentials
+	return refreshStoredCredentials({
+		credentials,
+		backend: input.backend,
+		resolution: input.resolution,
+		now: input.now,
+		fetchFn: input.fetchFn,
+		apiUrl: input.apiUrl,
+	})
+}
+
+async function adoptSlidingDeviceExpiry(input: {
+	credentials: StoredCredentials
+	backend?: SecretBackend
+	resolution?: StoreResolution
+	now?: number
+	fetchFn?: typeof fetch
+	apiUrl?: string
+}): Promise<StoredCredentials | null> {
+	const { credentials } = input
+	try {
+		const current = await openApiGet({
+			token: credentials.accessToken,
+			apiUrl: input.apiUrl ?? defaultApiUrl,
+			path: 'v1/tokens/current',
+			fetchFn: input.fetchFn,
+			...(credentials.org ? { org: credentials.org } : {}),
+		})
+		if (!current || typeof current !== 'object' || Array.isArray(current)) {
+			return null
+		}
+		const expiresAt = Date.parse(
+			typeof (current as { expires_at?: unknown }).expires_at === 'string'
+				? (current as { expires_at: string }).expires_at
+				: '',
+		)
+		const now = input.now ?? Date.now()
+		if (!Number.isFinite(expiresAt) || expiresAt <= now) return null
+		const next = { ...credentials, expiresAt }
+		saveCredentials(next, input.backend, input.resolution, { activate: false })
+		return next
+	} catch (error) {
+		if (
+			error instanceof OpenApiError &&
+			(error.status === 401 || error.status === 403)
+		) {
+			return null
+		}
+		throw error
+	}
 }
 
 function startCallbackServer(redirectUri: URL): Promise<Server> {
@@ -529,15 +605,17 @@ export async function login(options: LoginOptions = {}): Promise<{
 			fetchFn: options.fetchFn,
 		})
 
-		let org = orgHint
+		let org = device.loginOrg ?? orgHint
 		let account: LoginCallbackAccount | undefined
 		const discover = options.discoverIdentity ?? discoverLoginIdentity
 		try {
+			const boundOrg = org
 			const identity = await discover({
 				mcpUrl,
 				apiUrl,
 				accessToken: device.token,
 				fetchFn: options.fetchFn,
+				...(boundOrg ? { org: boundOrg } : {}),
 			})
 			if (orgHint && identity.org !== orgHint) {
 				completeCallback?.({ kind: 'error', error: 'failed' })
@@ -559,7 +637,7 @@ export async function login(options: LoginOptions = {}): Promise<{
 			) {
 				throw error
 			}
-			if (!orgHint) {
+			if (!org) {
 				const existing = loadCredentialStore(
 					mcpUrl,
 					options.backend,

@@ -36,12 +36,19 @@ export async function runRemoteExecuteWithToken(
 	input: RemoteExecuteInput,
 ): Promise<ToolCallResult> {
 	assertTokenSafeApiUrl(input.apiUrl)
-	const code = resolveRemoteExecuteCode(input)
+	const invoke = input.invoke?.trim()
 	const body: Record<string, unknown> = {}
-	if (input.invoke && !code.includes('import action from')) {
-		body.invoke = input.invoke
+	if (invoke) {
+		if (input.code?.trim()) {
+			throw new Error(
+				'--invoke cannot be combined with --code, --file, or a module string.',
+			)
+		}
+		// Send the package specifier itself. A generated import wrapper would
+		// run as caller code and drop the server's invoke attribution.
+		body.invoke = invoke
 	} else {
-		body.code = code
+		body.code = resolveRemoteExecuteCode(input)
 	}
 	if (input.params !== undefined) body.params = input.params
 	if (input.conversationId !== undefined)

@@ -3,6 +3,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import {
+	ensureOpenApiCredentials,
+	refreshStoredCredentials,
+} from '../src/auth.js'
 import { runCli } from '../src/cli.js'
 import { buildUsage } from '../src/help.js'
 import { formatStoredOrgsHelpBlock } from '../src/org.js'
@@ -52,6 +56,64 @@ test('resolveOrgSlug prefers --org over KODY_ORG', () => {
 	)
 	assert.equal(resolveOrgSlug({ env: { [orgEnvVar]: 'Beta' } }), 'beta')
 	assert.equal(resolveOrgSlug({ env: {} }), undefined)
+	assert.equal(resolveOrgSlug({ env: {}, activeOrg: 'Acme' }), 'acme')
+	assert.equal(
+		resolveOrgSlug({
+			env: { [orgEnvVar]: 'Beta' },
+			activeOrg: 'Acme',
+		}),
+		'beta',
+	)
+})
+
+test('a locally expired device token keeps a server-slid expiry', async () => {
+	const backend = tempBackend()
+	const token = 'kody_at_slid'
+	saveCredentials(
+		sample({
+			accessToken: token,
+			org: 'acme',
+			expiresAt: Date.now() - 5_000,
+		}),
+		backend,
+	)
+	const stored = loadCredentials(mcpUrl, backend, undefined, { org: 'acme' })
+	assert.ok(stored)
+	const future = new Date(Date.now() + 60_000).toISOString()
+	const refreshed = await refreshStoredCredentials({
+		credentials: stored,
+		backend,
+		apiUrl: 'https://api.kody.codes',
+		fetchFn: (async (input: Parameters<typeof fetch>[0]) => {
+			assert.match(String(input), /\/v1\/tokens\/current/)
+			return new Response(JSON.stringify({ expires_at: future }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			})
+		}) as typeof fetch,
+	})
+	assert.equal(refreshed.accessToken, token)
+	assert.ok((refreshed.expiresAt ?? 0) > Date.now())
+})
+
+test('Open API login exchanges an unexpired OAuth token for a device token', async () => {
+	const backend = tempBackend()
+	saveCredentials(
+		sample({ accessToken: 'oauth-access', expiresAt: Date.now() + 60_000 }),
+		backend,
+	)
+	await assert.rejects(
+		() =>
+			ensureOpenApiCredentials({
+				mcpUrl,
+				backend,
+				apiUrl: 'https://api.kody.codes',
+				fetchFn: (async () => {
+					throw new Error('refresh-attempted')
+				}) as typeof fetch,
+			}),
+		/refresh-attempted/,
+	)
 })
 
 test('v1 credentials migrate silently into a multi-org store as pending or named', () => {

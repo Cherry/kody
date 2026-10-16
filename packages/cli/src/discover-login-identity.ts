@@ -16,6 +16,8 @@ export async function discoverLoginIdentity(input: {
 	mcpUrl: string
 	accessToken: string
 	apiUrl?: string
+	/** Org the login should bind. Sent as `?org=` so a team login is not the personal org. */
+	org?: string
 	fetchFn?: typeof fetch
 }): Promise<LoginIdentity> {
 	const payload = await openApiGet({
@@ -23,6 +25,7 @@ export async function discoverLoginIdentity(input: {
 		apiUrl: input.apiUrl ?? defaultApiUrl,
 		path: 'v1/me',
 		fetchFn: input.fetchFn,
+		...(input.org ? { org: input.org } : {}),
 	})
 	if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
 		throw new Error(

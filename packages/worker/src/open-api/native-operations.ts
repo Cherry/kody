@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { mintCliLoginDeviceToken } from '#worker/api-tokens/cli-login-device-token.ts'
 import { toApiTokenView } from '#worker/api-tokens/service.ts'
 import { executeOperationDefinition } from './execute-operation.ts'
@@ -139,7 +140,16 @@ const cliLoginDeviceTokenDefinition: NativeApiOperationDefinition = {
 		max_lifetime_seconds: true,
 		name: true,
 	}),
-	outputSchema: tokenSecretViewSchema,
+	outputSchema: tokenSecretViewSchema.extend({
+		login_org: z
+			.object({
+				slug: z.string(),
+			})
+			.nullable()
+			.describe(
+				'Org the CLI OAuth grant was bound to. The device token is user-owned; pass this slug as ?org= on later calls.',
+			),
+	}),
 	readOnly: false,
 	async handler(params, ctx) {
 		const input = parseNativeInput(

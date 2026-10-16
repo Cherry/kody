@@ -117,6 +117,15 @@ test('runRemoteExecuteWithToken posts /v1/execute', async () => {
 		code: 'export default async () => ({ ran: true })',
 		params: { a: 1 },
 	})
+
+	calls.length = 0
+	await runRemoteExecuteWithToken({
+		invoke: '@scope/pkg#go',
+		token: 'tok',
+		apiUrl: 'https://api.kody.codes',
+		fetchFn,
+	})
+	assert.deepEqual(calls[0]!.body, { invoke: '@scope/pkg#go' })
 })
 
 test('runRemoteExecuteWithToken surfaces missing-token session 401 clearly', async () => {

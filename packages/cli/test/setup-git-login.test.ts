@@ -105,6 +105,10 @@ async function withCliEnv<T>(
 	}
 }
 
+function requestPath(url: string): string {
+	return new URL(url).pathname
+}
+
 function json(body: unknown, status = 200) {
 	return new Response(JSON.stringify(body), {
 		status,
@@ -143,10 +147,11 @@ async function capture(args: Array<string>) {
 test('auth setup-git after kody login (no env token) mints via Open API and installs helper', async () => {
 	await withCliEnv(
 		(url) => {
-			if (url.endsWith('/openapi.json')) return json(openApiDocument)
-			if (url.endsWith('/v1/tokens/bootstrap'))
+			if (requestPath(url).endsWith('/openapi.json'))
+				return json(openApiDocument)
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap'))
 				return json(mintResponse(setupGitDefaultScopes))
-			if (url.endsWith('/v1/tokens/bootstrap/redeem'))
+			if (requestPath(url).endsWith('/v1/tokens/bootstrap/redeem'))
 				return json(redeemResponse)
 			if (url.includes('/v1/tokens/current')) {
 				return json({
@@ -181,7 +186,7 @@ test('auth setup-git after kody login (no env token) mints via Open API and inst
 			assert.doesNotMatch(result.stdout, /kody_at_|kody_bc_/)
 
 			const mint = requests.find((request) =>
-				request.url.endsWith('/v1/tokens/bootstrap'),
+				requestPath(request.url).endsWith('/v1/tokens/bootstrap'),
 			)
 			assert.equal(mint?.authorization, 'Bearer kody_at_login_session')
 			assert.deepEqual(mint?.body, {

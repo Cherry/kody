@@ -157,6 +157,10 @@ writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, '\t')}\n`)
 const publish = process.argv.includes('--publish') || process.env.CI === 'true'
 try {
 	if (publish) {
+		execFileSync('npm', ['run', 'build', '-w', cliPackageName], {
+			cwd: repoRoot,
+			stdio: 'inherit',
+		})
 		execFileSync(
 			'npm',
 			['publish', '-w', cliPackageName, '--provenance', '--access', 'public'],
