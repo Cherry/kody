@@ -130,3 +130,15 @@ test('combined approval validates the request identity and preserves it at the a
 		}),
 	).toThrow()
 })
+
+test('native approval refuses legacy action dispatch fields before any business mutation', () => {
+	state.operation.mockClear()
+	for (const action of ['not-a-real-action', 'set-internet-visible', null]) {
+		expect(() =>
+			operations.approvePackageCapabilities({
+				data: { packageId: 'pkg', fingerprint: 'reviewed', action } as never,
+			}),
+		).toThrow('Unrecognized key')
+	}
+	expect(state.operation).not.toHaveBeenCalled()
+})

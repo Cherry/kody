@@ -2790,6 +2790,23 @@ export type OAuthAuthorizeLoaderData =
 			code?: 'email_verification_required'
 	  }
 
+/** Hosted package-app OAuth consent on `/oauth/package-app/authorize`. */
+export type PackageAppOauthConsentLoaderData = {
+	ok: true
+	packageName: string
+	iconUrl: string | null
+	publisherDisplayName: string
+	publisherUsername: string
+	appDomain: string | null
+	viewerDisplayName: string
+	clientId: string
+	kodyId: string
+	redirectUri: string
+	scopes: Array<string>
+	claimLabels: Array<string>
+	hiddenFields: Record<string, string>
+}
+
 export type DiscordPageLoaderData = {
 	ok: true
 	signedIn: boolean
@@ -2869,6 +2886,7 @@ export type AppLoaderData = {
 	accountEmail?: AccountEmailLoaderData
 	authProviders?: AuthProvidersLoaderData
 	oauthAuthorize?: OAuthAuthorizeLoaderData
+	packageAppOauthConsent?: PackageAppOauthConsentLoaderData
 	accountBilling?: AccountBillingLoaderData
 	accountBillingSuccess?: AccountBillingSuccessLoaderData
 	accountUsage?: AccountUsageLoaderData

@@ -9,6 +9,7 @@ import {
 	handleOAuthProtectedApiMe,
 	oauthPaths,
 } from './oauth-handlers.ts'
+import { packageAppOauthPaths } from '#universal/package-app-oauth-paths.ts'
 import {
 	createSharedOAuthProviderOptions,
 	mcpOAuthResourceUri,
@@ -140,6 +141,7 @@ const rateLimitedAuthPaths = new Set([
 	'/auth',
 	...socialLoginStartPaths,
 	'/oauth/authorize',
+	packageAppOauthPaths.authorize,
 	'/webauthn/authentication',
 ])
 

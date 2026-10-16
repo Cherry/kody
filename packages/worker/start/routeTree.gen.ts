@@ -176,6 +176,7 @@ import { Route as AtChar123usernameChar125KodyIdCredentialsRouteImport } from '.
 import { Route as AtChar123usernameChar125KodyIdMappingsRouteImport } from './routes/@{$username}_.$kodyId_.mappings'
 import { Route as AtChar123usernameChar125KodyIdSettingsRouteImport } from './routes/@{$username}_.$kodyId_.settings'
 import { Route as AtChar123usernameChar125KodyIdTriggersRouteImport } from './routes/@{$username}_.$kodyId_.triggers'
+import { Route as KodyAuthSplatRouteImport } from './routes/[_]kody.auth.$'
 import { Route as AccountActivityRunIdRouteImport } from './routes/account_.activity_.$runId'
 import { Route as AccountAgentsNewRouteImport } from './routes/account_.agents_.new'
 import { Route as AccountAgentsUsageRouteImport } from './routes/account_.agents_.usage'
@@ -207,6 +208,7 @@ import { Route as CommunityListingIdOgDotpngRouteImport } from './routes/communi
 import { Route as DocsSlugOgDotpngRouteImport } from './routes/docs_.$slug_.og[.]png'
 import { Route as IntegrationsLogosIntegrationSlugRouteImport } from './routes/integrations_.logos_.$integrationSlug'
 import { Route as IntegrationsProviderMarksSlugRouteImport } from './routes/integrations_.provider-marks_.$slug'
+import { Route as OauthPackageAppAuthorizeRouteImport } from './routes/oauth.package-app.authorize'
 import { Route as OnboardingStep1AgentRouteImport } from './routes/onboarding.step-1_.$agent'
 import { Route as OnboardingStep2ServiceRouteImport } from './routes/onboarding.step-2_.$service'
 import { Route as OnboardingStep3AgentRouteImport } from './routes/onboarding.step-3_.$agent'
@@ -1150,6 +1152,11 @@ const AtChar123usernameChar125KodyIdTriggersRoute =
     path: '/@{$username}/$kodyId/triggers',
     getParentRoute: () => rootRouteImport,
   } as any)
+const KodyAuthSplatRoute = KodyAuthSplatRouteImport.update({
+  id: '/_kody/auth/$',
+  path: '/_kody/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AccountActivityRunIdRoute = AccountActivityRunIdRouteImport.update({
   id: '/account_/activity_/$runId',
   path: '/account/activity/$runId',
@@ -1314,6 +1321,12 @@ const IntegrationsProviderMarksSlugRoute =
   IntegrationsProviderMarksSlugRouteImport.update({
     id: '/integrations_/provider-marks_/$slug',
     path: '/integrations/provider-marks/$slug',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const OauthPackageAppAuthorizeRoute =
+  OauthPackageAppAuthorizeRouteImport.update({
+    id: '/oauth/package-app/authorize',
+    path: '/oauth/package-app/authorize',
     getParentRoute: () => rootRouteImport,
   } as any)
 const OnboardingStep1AgentRoute = OnboardingStep1AgentRouteImport.update({
@@ -1818,6 +1831,7 @@ export interface FileRoutesByFullPath {
   '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/@{$username}/$kodyId/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
+  '/_kody/auth/$': typeof KodyAuthSplatRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
   '/account/agents/new': typeof AccountAgentsNewRoute
   '/account/agents/usage': typeof AccountAgentsUsageRoute
@@ -1848,6 +1862,7 @@ export interface FileRoutesByFullPath {
   '/docs/$slug/og.png': typeof DocsSlugOgDotpngRoute
   '/integrations/logos/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
   '/integrations/provider-marks/$slug': typeof IntegrationsProviderMarksSlugRoute
+  '/oauth/package-app/authorize': typeof OauthPackageAppAuthorizeRoute
   '/onboarding/step-1/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
@@ -2073,6 +2088,7 @@ export interface FileRoutesByTo {
   '/@{$username}/$kodyId/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}/$kodyId/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/@{$username}/$kodyId/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
+  '/_kody/auth/$': typeof KodyAuthSplatRoute
   '/account/activity/$runId': typeof AccountActivityRunIdRoute
   '/account/agents/new': typeof AccountAgentsNewRoute
   '/account/agents/usage': typeof AccountAgentsUsageRoute
@@ -2103,6 +2119,7 @@ export interface FileRoutesByTo {
   '/docs/$slug/og.png': typeof DocsSlugOgDotpngRoute
   '/integrations/logos/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
   '/integrations/provider-marks/$slug': typeof IntegrationsProviderMarksSlugRoute
+  '/oauth/package-app/authorize': typeof OauthPackageAppAuthorizeRoute
   '/onboarding/step-1/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3/$agent': typeof OnboardingStep3AgentRoute
@@ -2330,6 +2347,7 @@ export interface FileRoutesById {
   '/@{$username}_/$kodyId_/mappings': typeof AtChar123usernameChar125KodyIdMappingsRoute
   '/@{$username}_/$kodyId_/settings': typeof AtChar123usernameChar125KodyIdSettingsRoute
   '/@{$username}_/$kodyId_/triggers': typeof AtChar123usernameChar125KodyIdTriggersRoute
+  '/_kody/auth/$': typeof KodyAuthSplatRoute
   '/account_/activity_/$runId': typeof AccountActivityRunIdRoute
   '/account_/agents_/new': typeof AccountAgentsNewRoute
   '/account_/agents_/usage': typeof AccountAgentsUsageRoute
@@ -2360,6 +2378,7 @@ export interface FileRoutesById {
   '/docs_/$slug_/og.png': typeof DocsSlugOgDotpngRoute
   '/integrations_/logos_/$integrationSlug': typeof IntegrationsLogosIntegrationSlugRoute
   '/integrations_/provider-marks_/$slug': typeof IntegrationsProviderMarksSlugRoute
+  '/oauth/package-app/authorize': typeof OauthPackageAppAuthorizeRoute
   '/onboarding/step-1_/$agent': typeof OnboardingStep1AgentRoute
   '/onboarding/step-2_/$service': typeof OnboardingStep2ServiceRoute
   '/onboarding/step-3_/$agent': typeof OnboardingStep3AgentRoute
@@ -2588,6 +2607,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
     | '/@{$username}/$kodyId/triggers'
+    | '/_kody/auth/$'
     | '/account/activity/$runId'
     | '/account/agents/new'
     | '/account/agents/usage'
@@ -2618,6 +2638,7 @@ export interface FileRouteTypes {
     | '/docs/$slug/og.png'
     | '/integrations/logos/$integrationSlug'
     | '/integrations/provider-marks/$slug'
+    | '/oauth/package-app/authorize'
     | '/onboarding/step-1/$agent'
     | '/onboarding/step-2/$service'
     | '/onboarding/step-3/$agent'
@@ -2843,6 +2864,7 @@ export interface FileRouteTypes {
     | '/@{$username}/$kodyId/mappings'
     | '/@{$username}/$kodyId/settings'
     | '/@{$username}/$kodyId/triggers'
+    | '/_kody/auth/$'
     | '/account/activity/$runId'
     | '/account/agents/new'
     | '/account/agents/usage'
@@ -2873,6 +2895,7 @@ export interface FileRouteTypes {
     | '/docs/$slug/og.png'
     | '/integrations/logos/$integrationSlug'
     | '/integrations/provider-marks/$slug'
+    | '/oauth/package-app/authorize'
     | '/onboarding/step-1/$agent'
     | '/onboarding/step-2/$service'
     | '/onboarding/step-3/$agent'
@@ -3099,6 +3122,7 @@ export interface FileRouteTypes {
     | '/@{$username}_/$kodyId_/mappings'
     | '/@{$username}_/$kodyId_/settings'
     | '/@{$username}_/$kodyId_/triggers'
+    | '/_kody/auth/$'
     | '/account_/activity_/$runId'
     | '/account_/agents_/new'
     | '/account_/agents_/usage'
@@ -3129,6 +3153,7 @@ export interface FileRouteTypes {
     | '/docs_/$slug_/og.png'
     | '/integrations_/logos_/$integrationSlug'
     | '/integrations_/provider-marks_/$slug'
+    | '/oauth/package-app/authorize'
     | '/onboarding/step-1_/$agent'
     | '/onboarding/step-2_/$service'
     | '/onboarding/step-3_/$agent'
@@ -3352,6 +3377,7 @@ export interface RootRouteChildren {
   AtChar123usernameChar125KodyIdMappingsRoute: typeof AtChar123usernameChar125KodyIdMappingsRoute
   AtChar123usernameChar125KodyIdSettingsRoute: typeof AtChar123usernameChar125KodyIdSettingsRoute
   AtChar123usernameChar125KodyIdTriggersRoute: typeof AtChar123usernameChar125KodyIdTriggersRoute
+  KodyAuthSplatRoute: typeof KodyAuthSplatRoute
   AccountActivityRunIdRoute: typeof AccountActivityRunIdRoute
   AccountAgentsNewRoute: typeof AccountAgentsNewRoute
   AccountAgentsUsageRoute: typeof AccountAgentsUsageRoute
@@ -3382,6 +3408,7 @@ export interface RootRouteChildren {
   DocsSlugOgDotpngRoute: typeof DocsSlugOgDotpngRoute
   IntegrationsLogosIntegrationSlugRoute: typeof IntegrationsLogosIntegrationSlugRoute
   IntegrationsProviderMarksSlugRoute: typeof IntegrationsProviderMarksSlugRoute
+  OauthPackageAppAuthorizeRoute: typeof OauthPackageAppAuthorizeRoute
   ProfilesUsernameOgDotpngRoute: typeof ProfilesUsernameOgDotpngRoute
   AccountPackagesIndexRoute: typeof AccountPackagesIndexRoute
   DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute: typeof DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute
@@ -4607,6 +4634,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AtChar123usernameChar125KodyIdTriggersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_kody/auth/$': {
+      id: '/_kody/auth/$'
+      path: '/_kody/auth/$'
+      fullPath: '/_kody/auth/$'
+      preLoaderRoute: typeof KodyAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/account_/activity_/$runId': {
       id: '/account_/activity_/$runId'
       path: '/account/activity/$runId'
@@ -4822,6 +4856,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations/provider-marks/$slug'
       fullPath: '/integrations/provider-marks/$slug'
       preLoaderRoute: typeof IntegrationsProviderMarksSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/oauth/package-app/authorize': {
+      id: '/oauth/package-app/authorize'
+      path: '/oauth/package-app/authorize'
+      fullPath: '/oauth/package-app/authorize'
+      preLoaderRoute: typeof OauthPackageAppAuthorizeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/onboarding/step-1_/$agent': {
@@ -5449,6 +5490,7 @@ const rootRouteChildren: RootRouteChildren = {
     AtChar123usernameChar125KodyIdSettingsRoute,
   AtChar123usernameChar125KodyIdTriggersRoute:
     AtChar123usernameChar125KodyIdTriggersRoute,
+  KodyAuthSplatRoute: KodyAuthSplatRoute,
   AccountActivityRunIdRoute: AccountActivityRunIdRoute,
   AccountAgentsNewRoute: AccountAgentsNewRoute,
   AccountAgentsUsageRoute: AccountAgentsUsageRoute,
@@ -5480,6 +5522,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsSlugOgDotpngRoute: DocsSlugOgDotpngRoute,
   IntegrationsLogosIntegrationSlugRoute: IntegrationsLogosIntegrationSlugRoute,
   IntegrationsProviderMarksSlugRoute: IntegrationsProviderMarksSlugRoute,
+  OauthPackageAppAuthorizeRoute: OauthPackageAppAuthorizeRoute,
   ProfilesUsernameOgDotpngRoute: ProfilesUsernameOgDotpngRoute,
   AccountPackagesIndexRoute: AccountPackagesIndexRoute,
   DotwellKnownAgentSkillsSkillIdSKILLDotmdRoute:

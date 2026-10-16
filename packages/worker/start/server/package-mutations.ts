@@ -115,7 +115,10 @@ export const setPackageInternetVisible = createServerFn({ method: 'POST' })
 
 export const approvePackageCapabilities = createServerFn({ method: 'POST' })
 	.validator(
-		z.object({ packageId: z.string().trim().min(1), fingerprint: z.string() }),
+		z.strictObject({
+			packageId: z.string().trim().min(1),
+			fingerprint: z.string(),
+		}),
 	)
 	.handler(async ({ data }) => {
 		const [
@@ -141,7 +144,7 @@ export const approvePackageCapabilitiesAndGoPublic = createServerFn({
 	method: 'POST',
 })
 	.validator(
-		z.object({
+		z.strictObject({
 			packageId: z.string().trim().min(1),
 			fingerprint: z.string(),
 			requestId: z.string().trim().min(1),
@@ -169,7 +172,10 @@ export const approvePackageCapabilitiesAndGoPublic = createServerFn({
 
 export const approvePackageCredentialNeeds = createServerFn({ method: 'POST' })
 	.validator(
-		z.object({ packageId: z.string().trim().min(1), requestId: z.string() }),
+		z.strictObject({
+			packageId: z.string().trim().min(1),
+			requestId: z.string(),
+		}),
 	)
 	.handler(async ({ data }) => {
 		const [
@@ -193,7 +199,10 @@ export const approvePackageCredentialNeeds = createServerFn({ method: 'POST' })
 
 export const approvePackageWentPublic = createServerFn({ method: 'POST' })
 	.validator(
-		z.object({ packageId: z.string().trim().min(1), requestId: z.string() }),
+		z.strictObject({
+			packageId: z.string().trim().min(1),
+			requestId: z.string(),
+		}),
 	)
 	.handler(async ({ data }) => {
 		const [

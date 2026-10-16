@@ -35,6 +35,7 @@ import { drainOrgAuditOutbox } from '#worker/orgs/org-audit-outbox.ts'
 import { checkWebhookAuthRegressionsAndAlert } from '#worker/webhooks/auth-regression-alert.ts'
 import { reconcilePackageAppCustomHostnames } from '#worker/package-app-custom-hostnames/reconcile.ts'
 import { runFollowMaintenance } from '#worker/follow/maintenance.ts'
+import { checkDlqDepthAndAlert } from './dlq-depth-alert.ts'
 
 export {
 	isScheduledLaneName,
@@ -299,6 +300,11 @@ export async function runScheduledLane(input: {
 			return runDrExportTick({ env: input.env, now: input.scheduledAt })
 		case 'dr_export_watchdog':
 			return runDrExportWatchdogTick({
+				env: input.env,
+				now: input.scheduledAt,
+			})
+		case 'dlq_depth_alert':
+			return checkDlqDepthAndAlert({
 				env: input.env,
 				now: input.scheduledAt,
 			})
