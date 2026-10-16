@@ -9,6 +9,8 @@ import {
 	approveCapabilitiesPageCopy,
 	credentialsSectionIntro,
 	credentialSummary,
+	credentialVisitorsNote,
+	credentialEntryKey,
 	noCapabilitiesMessage,
 	reachingDependency,
 	storageSummary,
@@ -68,8 +70,11 @@ function approveCapabilitiesDetailItems(
 			value: <IdValue value={payload.fingerprint} label="fingerprint" />,
 		},
 	]
+	const listedCredentialIds = new Set<string>()
 	for (const entry of payload.entries) {
 		if (entry.kind === 'credential' && entry.credentialId) {
+			if (listedCredentialIds.has(entry.credentialId)) continue
+			listedCredentialIds.add(entry.credentialId)
 			const name = entry.name ?? 'Credential'
 			items.push({
 				key: `credential:${entry.credentialId}`,
@@ -384,25 +389,39 @@ export function AccountPackageApproveCapabilitiesRoute({
 											})}
 										</p>
 										<ul css={cardListCss}>
-											{credentialEntries.map((entry) => (
-												<li
-													key={entry.credentialId ?? entry.name}
-													data-testid="package-approve-capabilities-credential"
-													css={capabilityRowCss}
-												>
-													<strong css={cardTitleCss}>
-														{entry.name ?? 'Unnamed credential'}
-													</strong>
-													<span css={{ color: colors.textMuted }}>
-														{credentialSummary(entry)}
-													</span>
-													<span css={{ color: colors.textMuted }}>
-														{entry.hosts.length > 0
-															? `Can only be sent to ${entry.hosts.join(', ')}`
-															: 'No hosts approved yet'}
-													</span>
-												</li>
-											))}
+											{credentialEntries.map((entry) => {
+												const visitorsNote = credentialVisitorsNote(entry)
+												return (
+													<li
+														key={credentialEntryKey(entry)}
+														data-testid="package-approve-capabilities-credential"
+														css={capabilityRowCss}
+													>
+														<strong css={cardTitleCss}>
+															{entry.name ?? 'Unnamed credential'}
+														</strong>
+														<span css={{ color: colors.textMuted }}>
+															{credentialSummary(entry)}
+														</span>
+														{visitorsNote ? (
+															<span
+																data-testid="package-approve-capabilities-credential-visitors"
+																css={{
+																	color: colors.text,
+																	fontWeight: typography.fontWeight.semibold,
+																}}
+															>
+																{visitorsNote}
+															</span>
+														) : null}
+														<span css={{ color: colors.textMuted }}>
+															{entry.hosts.length > 0
+																? `Can only be sent to ${entry.hosts.join(', ')}`
+																: 'No hosts approved yet'}
+														</span>
+													</li>
+												)
+											})}
 										</ul>
 									</>
 								)}
