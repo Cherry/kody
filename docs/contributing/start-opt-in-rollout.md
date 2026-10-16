@@ -210,3 +210,16 @@ Activation verifies this digest against the reviewed manifest and the proven
 immutable router version. No asset path prefix or wildcard grants access. Before
 creating either worker, deployment checks all text and secret bindings against
 Cloudflare's 5120 byte limit and dry-runs the router build.
+
+`verify-start-opt-in` uses the current validated PR head as its controller,
+while `start_release` selects an existing validated inactive release. Set
+`start_evidence_run` to the original deployment run. Its inactive deployment
+step must have succeeded, even if its later probe failed. Verification downloads
+that run's exact review, receipt, and built assets. It does not rebuild or
+redeploy.
+
+For activation, use the successful verification run as `start_evidence_run` and
+keep the same target `start_release`. The current controller and historical
+target must both have green validation. Activation checks the verification
+controller's provenance, original deployment receipt, and fresh immutable worker
+proof.

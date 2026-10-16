@@ -91,6 +91,7 @@ export async function probeRequest(request: Request, env: ProbeEnv) {
 		default:
 			return new Response('Unknown probe', { status: 404 })
 	}
+	if (target === '/health') headers.set('Accept', 'application/json')
 	// Neither incoming cookies nor credentials can reach production services.
 	const result = await service.fetch(
 		new Request(`https://kody.codes${target}`, {

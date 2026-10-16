@@ -18,6 +18,29 @@ type Review = {
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message)
 }
+export async function inspectHealthResponse(response: Response, lane: string) {
+	const type = response.headers.get('X-Probe-Content-Type') ?? ''
+	const context = `${lane} health (status ${response.status}, JSON content type ${/^application\/json(?:;|$)/i.test(type)})`
+	assert(response.status === 200, `${context} failed`)
+	assert(
+		/^application\/json(?:;|$)/i.test(type),
+		`${context} did not return JSON`,
+	)
+	let result: { ok?: boolean; commitSha?: string }
+	try {
+		result = (await response.json()) as typeof result
+	} catch {
+		throw new Error(`${context} returned invalid JSON`)
+	}
+	assert(
+		result !== null &&
+			typeof result === 'object' &&
+			result.ok === true &&
+			typeof result.commitSha === 'string',
+		`${context} is not healthy`,
+	)
+	return result.commitSha
+}
 export function inspectPublicDocument(
 	html: string,
 	release: string,
@@ -138,19 +161,9 @@ if (isExecutedDirectly(import.meta.url)) {
 			await new Promise((resolve) => setTimeout(resolve, 250))
 		}
 		assert(ready, 'Temporary remote service probe did not start')
-		const health = async (lane: string) => {
-			const response = await fetchProbe(`/${lane}/health`)
-			assert(response.status === 200, `${lane} health failed`)
-			const result = (await response.json()) as {
-				ok?: boolean
-				commitSha?: string
-			}
-			assert(
-				result.ok === true && typeof result.commitSha === 'string',
-				`${lane} health is not healthy`,
-			)
-			return result.commitSha
-		}
+		const health = async (lane: string) =>
+			inspectHealthResponse(await fetchProbe(`/${lane}/health`), lane)
+
 		assert(
 			(await health('start')) === release,
 			'Candidate health does not match exact source release',

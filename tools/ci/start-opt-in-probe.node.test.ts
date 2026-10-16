@@ -1,6 +1,9 @@
 import { expect, test } from 'vitest'
 import { probeRequest, type ProbeEnv } from './start-opt-in-probe-worker.ts'
-import { inspectPublicDocument } from './probe-start-opt-in.ts'
+import {
+	inspectPublicDocument,
+	inspectHealthResponse,
+} from './probe-start-opt-in.ts'
 
 function fixture() {
 	const calls: Array<{ lane: string; request: Request }> = []
@@ -128,4 +131,46 @@ test('public document proof requires exact release namespace and complete HTML',
 	expect(() => inspectPublicDocument('error', release, false)).toThrow(
 		'not complete HTML',
 	)
+})
+
+test('health service requests negotiate JSON in every lane', async () => {
+	const { env, calls } = fixture()
+	for (const lane of ['start', 'legacy', 'router']) {
+		await probeRequest(
+			new Request(`http://localhost/${lane}/health`, {
+				headers: { 'X-Kody-Probe-Key': env.PROBE_KEY },
+			}),
+			env,
+		)
+		expect(calls.at(-1)!.request.headers.get('Accept')).toBe('application/json')
+	}
+})
+test('health diagnostics identify lane and response shape without printing body data', async () => {
+	await expect(
+		inspectHealthResponse(
+			new Response('<!doctype html>private', {
+				headers: { 'X-Probe-Content-Type': 'text/html' },
+			}),
+			'start',
+		),
+	).rejects.toThrow('start health (status 200, JSON content type false)')
+	await expect(
+		inspectHealthResponse(
+			new Response('private malformed', {
+				headers: { 'X-Probe-Content-Type': 'application/json' },
+			}),
+			'router',
+		),
+	).rejects.toThrow(
+		'router health (status 200, JSON content type true) returned invalid JSON',
+	)
+	await expect(
+		inspectHealthResponse(
+			Response.json(
+				{ ok: true, commitSha: 'release' },
+				{ headers: { 'X-Probe-Content-Type': 'application/json' } },
+			),
+			'legacy',
+		),
+	).resolves.toBe('release')
 })
