@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import {
 	assertDeploymentEvidence,
 	assertDeployedReceipt,
+	recognizedProofLayout,
 } from './start-opt-in-evidence.ts'
 const release = 'a'.repeat(40)
 const run = {
@@ -64,7 +65,7 @@ test('requires exact inactive deployed target receipt and review', () => {
 	const receipt = {
 		release,
 		candidateName: `kody-start-${release}`,
-		routerName: 'kody-start-router',
+		routerName: `kody-start-router-${release}`,
 		activated: false,
 	}
 	const review = {
@@ -72,6 +73,7 @@ test('requires exact inactive deployed target receipt and review', () => {
 			release,
 			candidateName: receipt.candidateName,
 			legacyName: 'kody-production',
+			routerName: receipt.routerName,
 			activated: false,
 		},
 	}
@@ -87,4 +89,27 @@ test('requires exact inactive deployed target receipt and review', () => {
 		expect(() =>
 			assertDeployedReceipt(review, { ...receipt, ...change }, release),
 		).toThrow(/required|succeeded/)
+})
+
+test('selects only one recognized successful artifact layout', () => {
+	const verify = {
+		name: 'Verify existing inactive Start release',
+		conclusion: 'success',
+	}
+	const deploy = {
+		name: 'Prepare inactive Start opt-in release',
+		conclusion: 'success',
+	}
+	expect(recognizedProofLayout({ jobs: [verify] })).toBe('flat')
+	expect(recognizedProofLayout({ jobs: [deploy] })).toBe('nested')
+	for (const entries of [
+		[],
+		[verify, deploy],
+		[{ ...verify, conclusion: 'failure' }],
+		[{ ...deploy, conclusion: 'skipped' }],
+		[{ name: 'Unknown', conclusion: 'success' }],
+	])
+		expect(() => recognizedProofLayout({ jobs: entries })).toThrow(
+			'Exactly one recognized',
+		)
 })

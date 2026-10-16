@@ -2,9 +2,18 @@ import { expect, test } from 'vitest'
 import {
 	buildCredentialStamp,
 	collectServerRuntimeModulePaths,
+	credentialStampMaxModuleScanBytes,
 	mergeCredentialStampIntoManifestFiles,
+	omitOversizedCredentialStampModules,
+	planCredentialStampSeal,
 	scanCredentialStamp,
+	scanLiteralMcpServerKeys,
 } from './credential-stamp.ts'
+import {
+	isPackageAppAssetPath,
+	listScannableModulePaths,
+	readPackageAppAssetsDirectory,
+} from './module-placeholder-scan.ts'
 
 function manifest(kody: Record<string, unknown> = {}) {
 	return JSON.stringify({
@@ -13,6 +22,28 @@ function manifest(kody: Record<string, unknown> = {}) {
 		kody: { id: 'stamp', description: 'Stamp test.', ...kody },
 	})
 }
+
+test('omitOversizedCredentialStampModules drops huge prebuilt client bundles from the stamp scan', () => {
+	const huge = `${'a'.repeat(credentialStampMaxModuleScanBytes + 1)}`
+	const files = {
+		'package.json': manifest(),
+		'index.ts': [
+			"import { credential } from 'kody:runtime'",
+			'export default async function run() { return credential("API_KEY") }',
+		].join('\n'),
+		'public/client/main.js': huge,
+	}
+	const filtered = omitOversizedCredentialStampModules(files)
+	expect(filtered['public/client/main.js']).toBeUndefined()
+	expect(filtered['index.ts']).toBe(files['index.ts'])
+	expect(filtered['package.json']).toBe(files['package.json'])
+
+	const scanned = scanCredentialStamp(files)
+	expect(scanned.keys).toEqual(['API_KEY'])
+	expect(scanned.failures.some((f) => f.code === 'missing_description')).toBe(
+		true,
+	)
+})
 
 test('scanCredentialStamp collects sorted literal keys from credential() and placeholders', () => {
 	const result = scanCredentialStamp({
@@ -130,6 +161,195 @@ test('scanCredentialStamp fails credential.named() in stamped packages', () => {
 	expect(bound.failures.some((f) => f.code === 'non_literal')).toBe(true)
 	expect(bound.failures[0]?.message).toMatch(/passes credential/)
 	expect(bound.keys).toEqual([])
+})
+
+test('scanLiteralMcpServerKeys stamps literal servers and fails dynamic access', () => {
+	const literal = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\tawait kody.mcp.linear.list_issues({})',
+			'\tawait kody.mcp["home"].set_pin({ pin: "1" })',
+			'}',
+		].join('\n'),
+	})
+	expect(literal.keys).toEqual(['home', 'linear'])
+	expect(literal.failures).toEqual([])
+
+	const viaAlias = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'const mcp = kody.mcp',
+			'export default async function run() {',
+			'\treturn mcp.linear.list_issues({})',
+			'}',
+		].join('\n'),
+	})
+	expect(viaAlias.keys).toEqual(['linear'])
+	expect(viaAlias.failures).toEqual([])
+
+	const dynamic = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run(server: string) {',
+			'\treturn kody.mcp[server]',
+			'}',
+		].join('\n'),
+	})
+	expect(dynamic.keys).toEqual([])
+	expect(dynamic.failures.some((f) => f.code === 'non_literal')).toBe(true)
+
+	const computedDestructure = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run(server: string) {',
+			'\tconst { [server]: tool } = kody.mcp',
+			'\treturn tool',
+			'}',
+		].join('\n'),
+	})
+	expect(computedDestructure.keys).toEqual([])
+	expect(
+		computedDestructure.failures.some((f) => f.code === 'non_literal'),
+	).toBe(true)
+
+	const nestedDestructure = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\tconst { mcp: { linear } } = kody',
+			'\treturn linear.list_issues({})',
+			'}',
+		].join('\n'),
+	})
+	expect(nestedDestructure.keys).toEqual(['linear'])
+	expect(nestedDestructure.failures).toEqual([])
+
+	const escapedRoot = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run(call: (mcp: unknown) => unknown) {',
+			'\treturn call(kody.mcp)',
+			'}',
+		].join('\n'),
+	})
+	expect(escapedRoot.keys).toEqual([])
+	expect(escapedRoot.failures.some((f) => f.code === 'non_literal')).toBe(true)
+
+	const restDestructure = scanLiteralMcpServerKeys({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\tconst { ...servers } = kody.mcp',
+			'\treturn servers',
+			'}',
+		].join('\n'),
+	})
+	expect(restDestructure.keys).toEqual([])
+	expect(restDestructure.failures.some((f) => f.code === 'non_literal')).toBe(
+		true,
+	)
+})
+
+test('planCredentialStampSeal infers MCP and OAuth descriptions without overwriting', () => {
+	const plan = planCredentialStampSeal({
+		'package.json': manifest({
+			credentials: {
+				EXISTING: { description: 'Keep me.' },
+			},
+		}),
+		'src/index.ts': [
+			"import { createAuthenticatedFetch, kody } from 'kody:runtime'",
+			'export default async function run() {',
+			"\tawait createAuthenticatedFetch('google')",
+			'\tawait kody.mcp.linear.list_issues({})',
+			'\treturn 1',
+			'}',
+		].join('\n'),
+	})
+	expect(plan.blockingFailures).toEqual([])
+	expect(plan.updates.map((slot) => slot.key).sort()).toEqual([
+		'google',
+		'linear',
+	])
+	expect(plan.updates.find((slot) => slot.key === 'linear')).toMatchObject({
+		kind: 'mcp',
+		description: 'Calls tools on the attached MCP server "linear".',
+	})
+	expect(plan.updates.find((slot) => slot.key === 'google')).toMatchObject({
+		kind: 'oauth',
+		description: 'OAuth access for google.',
+	})
+	expect(plan.sealReady).toBe(true)
+})
+
+test('planCredentialStampSeal fills mcp kind on described slots and never forces signing for secretJwtSign', () => {
+	const fillKind = planCredentialStampSeal({
+		'package.json': manifest({
+			credentials: {
+				linear: { description: 'Linear MCP server.' },
+			},
+		}),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\treturn kody.mcp.linear.list_issues({})',
+			'}',
+		].join('\n'),
+	})
+	expect(fillKind.blockingFailures).toEqual([])
+	expect(fillKind.updates).toEqual([
+		{
+			key: 'linear',
+			description: 'Linear MCP server.',
+			kind: 'mcp',
+		},
+	])
+	expect(fillKind.sealReady).toBe(true)
+
+	const jwt = planCredentialStampSeal({
+		'package.json': manifest(),
+		'src/index.ts': [
+			"import { secretJwtSign } from 'kody:runtime'",
+			'export default async function run() {',
+			'\treturn secretJwtSign({ private_key_secret_name: "JWT_KEY", claims: {} })',
+			'}',
+		].join('\n'),
+	})
+	expect(jwt.blockingFailures).toEqual([])
+	expect(jwt.updates.find((slot) => slot.key === 'JWT_KEY')).toMatchObject({
+		description: 'Signs tokens with the "JWT_KEY" signing credential.',
+	})
+	expect(jwt.updates.find((slot) => slot.key === 'JWT_KEY')?.kind).toBe(
+		undefined,
+	)
+
+	const kindMismatch = planCredentialStampSeal({
+		'package.json': manifest({
+			credentials: {
+				linear: { kind: 'oauth', description: 'Wrong kind for MCP.' },
+			},
+		}),
+		'src/index.ts': [
+			"import { kody } from 'kody:runtime'",
+			'export default async function run() {',
+			'\treturn kody.mcp.linear.list_issues({})',
+			'}',
+		].join('\n'),
+	})
+	expect(kindMismatch.sealReady).toBe(false)
+	expect(
+		kindMismatch.blockingFailures.some(
+			(failure) => failure.code === 'unstampable_pattern',
+		),
+	).toBe(true)
 })
 
 test('scanCredentialStamp fails missing descriptions without inventing placeholders', () => {
@@ -279,6 +499,120 @@ test('server eval / new Function / non-literal import fail; UI client entry is e
 	)
 	expect(serverPaths.has('src/server.ts')).toBe(true)
 	expect(serverPaths.has('src/client.ts')).toBe(false)
+})
+
+function assetsAppFiles(extra: Record<string, string>) {
+	return {
+		'package.json': JSON.stringify({
+			name: '@kody/assets-app',
+			exports: { '.': './src/server.ts' },
+			kody: {
+				id: 'assets-app',
+				description: 'Assets app.',
+				app: { entry: './src/server.ts', assets: './public' },
+				credentials: {
+					API_KEY: { kind: 'secret', description: 'API key.' },
+				},
+			},
+		}),
+		...extra,
+	}
+}
+
+test('unreferenced kody.app.assets modules are not scannable; server-imported assets stay covered', () => {
+	expect(
+		readPackageAppAssetsDirectory(
+			JSON.stringify({ kody: { app: { assets: './public/' } } }),
+		),
+	).toBe('public')
+	expect(isPackageAppAssetPath('public/client/main.js', 'public')).toBe(true)
+	expect(isPackageAppAssetPath('src/server.ts', 'public')).toBe(false)
+
+	const unreferenced = assetsAppFiles({
+		'src/server.ts': 'export default { fetch() { return new Response("ok") } }',
+		'public/client/main.js':
+			'eval("asset"); new Function("return 1"); import(name); credential("LEAK")',
+	})
+	expect(listScannableModulePaths(unreferenced)).toEqual(['src/server.ts'])
+	expect(listScannableModulePaths(unreferenced)).not.toContain(
+		'public/client/main.js',
+	)
+	const unreferencedServer = collectServerRuntimeModulePaths(unreferenced)
+	expect(unreferencedServer.has('src/server.ts')).toBe(true)
+	expect(unreferencedServer.has('public/client/main.js')).toBe(false)
+
+	const unreferencedStamp = scanCredentialStamp(unreferenced)
+	expect(
+		unreferencedStamp.failures.filter((f) => f.code === 'server_eval'),
+	).toEqual([])
+	expect(unreferencedStamp.keys).not.toContain('LEAK')
+
+	// A server import of an asset module must still stamp credentials and
+	// enforce server_eval (reviewers: do not exempt by directory alone).
+	const imported = assetsAppFiles({
+		'src/server.ts':
+			'import "../public/helper.js"; export default { fetch() { return new Response("ok") } }',
+		'public/helper.js':
+			'import { credential } from "kody:runtime"; export const leak = () => credential("LEAK"); eval("1")',
+	})
+	expect(listScannableModulePaths(imported)).toContain('public/helper.js')
+	expect(
+		collectServerRuntimeModulePaths(imported).has('public/helper.js'),
+	).toBe(true)
+	const importedStamp = scanCredentialStamp(imported)
+	expect(importedStamp.keys).toContain('LEAK')
+	expect(
+		importedStamp.failures.some(
+			(f) => f.code === 'server_eval' && f.path === 'public/helper.js',
+		),
+	).toBe(true)
+})
+
+test('large prebuilt client asset does not fail stamp and stays cheap to scan', () => {
+	// ~1.7 MB of minified-shaped JS with eval / Function / dynamic import —
+	// mirrors @kentcdodds/world-builder public/client/main.js before the
+	// assets skip. The scan must stay well under DO CPU limits.
+	const chunk =
+		'function x(){eval("1");new Function("return 1");import(n);return 1}'
+	const largeClient = `${chunk};`.repeat(
+		Math.ceil((1.7 * 1024 * 1024) / (chunk.length + 1)),
+	)
+	expect(largeClient.length).toBeGreaterThan(1.5 * 1024 * 1024)
+
+	const files = assetsAppFiles({
+		'src/server.ts': [
+			"import { credential } from 'kody:runtime'",
+			'export default {',
+			'  async fetch() {',
+			'    await credential("API_KEY")',
+			'    return new Response("ok")',
+			'  },',
+			'}',
+		].join('\n'),
+		'public/client/main.js': largeClient,
+	})
+
+	const started = performance.now()
+	const stamp = scanCredentialStamp(files)
+	const elapsedMs = performance.now() - started
+	expect(stamp.failures).toEqual([])
+	expect(stamp.keys).toEqual(['API_KEY'])
+	expect(listScannableModulePaths(files)).not.toContain('public/client/main.js')
+	// Soft budget: parsing a 1.7 MB asset used to blow the DO CPU limit;
+	// skipping it should finish in well under a second on Node.
+	expect(elapsedMs).toBeLessThan(2_000)
+
+	const serverStillFails = scanCredentialStamp(
+		assetsAppFiles({
+			'src/server.ts': 'export default { fetch() { return eval("1") } }',
+			'public/client/main.js': largeClient,
+		}),
+	)
+	expect(
+		serverStillFails.failures.some(
+			(f) => f.code === 'server_eval' && f.path === 'src/server.ts',
+		),
+	).toBe(true)
 })
 
 test('computed |scope= and secretMounts fail the stamp gate', () => {

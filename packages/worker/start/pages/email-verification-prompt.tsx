@@ -4,6 +4,7 @@ import { resendWebsiteVerification } from '#start/server/auth-mutations'
 import {
 	describeEmailVerificationDelivery,
 	type EmailVerificationDelivery,
+	type EmailVerificationDeliveryIndicator,
 } from '#universal/email-verification-delivery.ts'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
 import {
@@ -70,6 +71,66 @@ type EmailVerificationPromptOptions = {
 	secondaryLabel?: string | null
 }
 
+function renderDeliveryIndicator(
+	indicator: EmailVerificationDeliveryIndicator,
+) {
+	const label =
+		indicator === 'waiting'
+			? 'Waiting for delivery confirmation'
+			: indicator === 'delivered'
+				? 'Delivered to mailbox'
+				: indicator === 'delayed'
+					? 'Delivery delayed'
+					: 'Delivery failed'
+	const iconColor =
+		indicator === 'failed'
+			? colors.danger
+			: indicator === 'delayed'
+				? colors.warningText
+				: colors.primary
+	return (
+		<p
+			role="status"
+			data-testid="email-verification-delivery-indicator"
+			data-indicator={indicator}
+			css={{
+				display: 'flex',
+				alignItems: 'center',
+				gap: spacing.sm,
+				margin: 0,
+				color: iconColor,
+				fontSize: '0.95rem',
+			}}
+		>
+			<span
+				aria-hidden="true"
+				css={
+					indicator === 'waiting'
+						? deliverySpinnerCss
+						: {
+								display: 'inline-flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								width: '1.1rem',
+								height: '1.1rem',
+								fontWeight: 700,
+								lineHeight: 1,
+							}
+				}
+			>
+				{indicator === 'waiting'
+					? null
+					: indicator === 'delivered'
+						? '✓'
+						: indicator === 'delayed'
+							? '…'
+							: '!'}
+			</span>
+			<span>{label}</span>
+		</p>
+	)
+}
+
 /**
  * Shared verify-email callout used by pending signup, account, and the MCP
  * authorize gate. Keeps resend/continue actions consistent.
@@ -104,7 +165,15 @@ export function renderEmailVerificationPrompt(
 			}}
 		>
 			<h2 css={cardTitleCss}>{promptTitle}</h2>
+			{renderDeliveryIndicator(delivery.indicator)}
 			<p css={descriptionCss}>{promptDescription}</p>
+			{delivery.helpHref && delivery.helpLabel ? (
+				<p css={{ ...descriptionCss, margin: 0 }}>
+					<SiteLink href={delivery.helpHref} css={mutedLinkCss}>
+						{delivery.helpLabel}
+					</SiteLink>
+				</p>
+			) : null}
 			{options.email ? (
 				<p css={{ ...descriptionCss, margin: 0 }}>
 					Sent to <strong>{options.email}</strong>
@@ -158,4 +227,17 @@ export function renderEmailVerificationPrompt(
 			) : null}
 		</section>
 	)
+}
+
+const deliverySpinnerCss = {
+	display: 'inline-block',
+	width: '1.1rem',
+	height: '1.1rem',
+	borderRadius: '999px',
+	border: `2px solid color-mix(in srgb, ${colors.primary} 30%, transparent)`,
+	borderTopColor: colors.primary,
+	animation: 'kody-email-delivery-spin 0.8s linear infinite',
+	'@keyframes kody-email-delivery-spin': {
+		to: { transform: 'rotate(360deg)' },
+	},
 }

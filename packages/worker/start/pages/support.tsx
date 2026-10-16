@@ -29,9 +29,20 @@ export function SupportRoute() {
 				</p>
 			</header>
 
+			<p css={pageDescriptionCss}>
+				Site blocked by a DNS filter, or signup mail never arrives? See{' '}
+				<SiteLink href="/docs/cant-open-or-get-mail" css={mutedLinkCss}>
+					If you can't open kody.codes or get mail from us
+				</SiteLink>
+				.
+			</p>
 			<p css={{ margin: 0 }}>
 				<SiteLink href="/faq" css={mutedLinkCss}>
 					FAQ
+				</SiteLink>
+				{' · '}
+				<SiteLink href="/docs/cant-open-or-get-mail" css={mutedLinkCss}>
+					Can't open or get mail
 				</SiteLink>
 				{' · '}
 				<SiteLink href="/discord" css={mutedLinkCss}>

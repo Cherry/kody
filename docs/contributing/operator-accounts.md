@@ -112,11 +112,24 @@ User inboxes: `{username}@inbox.kody.codes`. System / transactional:
 
 Dashboard on the `kody.codes` zone: **Email → Email Routing** (MX, subdomain
 `inbox`, catch-all to the origin Worker) and **Email → Email Sending** (domain
-verification, `email.sending` event subscription on `kody-email-delivery`).
+verification, `email.sending` event subscriptions on `kody-email-delivery` for
+both `inbox.kody.codes` and `kody.codes`).
 
 Binding: `EMAIL` (`send_email`). REST fallback uses `CLOUDFLARE_API_TOKEN` +
 `CLOUDFLARE_ACCOUNT_ID`. Committed pins: `USER_EMAIL_DOMAIN=inbox.kody.codes`,
-`SYSTEM_EMAIL_DOMAIN=kody.codes` in `packages/worker/wrangler.jsonc`.
+`SYSTEM_EMAIL_DOMAIN=kody.codes` in `packages/worker/wrangler.jsonc`. Production
+deploy ensures two Queue event subscriptions when those domains differ:
+`kody-email-delivery-events` (user inbox) and
+`kody-system-email-delivery-events` (transactional `kody@`).
+
+DMARC reporting: production ensure upserts `_dmarc.kody.codes` and
+`_dmarc.inbox.kody.codes` to `v=DMARC1; p=reject; rua=mailto:dmarc@kody.codes`,
+and an Email Routing rule that forwards `dmarc@kody.codes` to
+`me@kentcdodds.com` (override with Actions env `DMARC_REPORT_FORWARD_TO`). The
+forward destination must already be verified under **Email → Email Routing →
+Destination addresses** — Cloudflare's verification email is Kent-only and is
+not skippable via API. Deploy token needs DNS Edit plus Email Routing edit on
+the mail zone.
 
 ### Access (Zero Trust)
 

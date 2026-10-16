@@ -193,13 +193,16 @@ lifecycle events (`delivered`, `bounced`, `failed`, `rejected`, `complained`)
 update that status. A Fastmail-style sender-domain/IP block (`RLR613`, `RLR813`,
 "blacklisted") is classified as `sender_block`. The pending-verification,
 account, and OAuth authorize UIs surface the bounce instead of staying silently
-pending, and `POST /account/resend-verification.json` refuses to retry into a
-known `sender_block`. The first terminal failure fans
-`user.email_verification.failed` to admin-owned packages. When a send stays
-`accepted` for an hour with no lifecycle event, the hourly
-`email_verification_stall_alert` lane fans `user.email_verification.stalled`.
-`/admin/users` and `adminUserList` accept `verification=stalled` for the same
-derived set. See
+pending, and the native `resendWebsiteVerification` server function refuses to
+retry into a known `sender_block`. `/pending-verification` polls the native
+`readWebsiteSessionInfo` server function (session cookie only; no email input)
+for delivery indicators without exposing other users' delivery state. Polls time
+out after ten seconds, and successful resend invalidates earlier reads. The
+first terminal failure fans `user.email_verification.failed` to admin-owned
+packages. When a send stays `accepted` for an hour with no lifecycle event, the
+hourly `email_verification_stall_alert` lane fans
+`user.email_verification.stalled`. `/admin/users` and `adminUserList` accept
+`verification=stalled` for the same derived set. See
 [the admin events guide](../../guides/admin-events.md#useremailverificationfailed-admins)
 and
 [stalled verification](../../guides/admin-events.md#useremailverificationstalled-admins).

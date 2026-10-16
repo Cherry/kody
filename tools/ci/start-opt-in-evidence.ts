@@ -1,4 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { reviewedRouterName } from './start-rollout-config.ts'
+import { readFile, writeFile, appendFile } from 'node:fs/promises'
 import { isExecutedDirectly } from '../node-runtime.ts'
 type RecordValue = {
 	id?: number
@@ -18,12 +19,28 @@ type RecordValue = {
 		release: string
 		candidateName: string
 		legacyName: string
+		routerName?: string
 		activated: boolean
 	}
 	release?: string
 	candidateName?: string
 	routerName?: string
 	activated?: boolean
+}
+export function recognizedProofLayout(jobs: RecordValue) {
+	const matches = (jobs.jobs ?? []).filter(
+		(job) =>
+			job.conclusion === 'success' &&
+			[
+				'Verify existing inactive Start release',
+				'Prepare inactive Start opt-in release',
+			].includes(job.name ?? ''),
+	)
+	if (matches.length !== 1)
+		throw new Error('Exactly one recognized successful proof job required')
+	return matches[0]!.name === 'Verify existing inactive Start release'
+		? 'flat'
+		: 'nested'
 }
 export function assertDeploymentEvidence(
 	run: RecordValue,
@@ -61,7 +78,8 @@ export function assertDeployedReceipt(
 		review.manifest?.activated !== false ||
 		receipt.release !== release ||
 		receipt.candidateName !== `kody-start-${release}` ||
-		receipt.routerName !== 'kody-start-router' ||
+		receipt.routerName !==
+			reviewedRouterName(release, review.manifest?.routerName) ||
 		receipt.activated !== false
 	)
 		throw new Error('Exact inactive target deployment receipt required')
@@ -146,6 +164,10 @@ if (isExecutedDirectly(import.meta.url)) {
 		)
 			throw new Error('Successful trusted verification workflow required')
 		await validate(evidence.head_sha!)
+		const jobs = await api(`actions/runs/${evidenceId}/jobs?per_page=100`)
+		const layout = recognizedProofLayout(jobs)
+		if (process.env.GITHUB_OUTPUT)
+			await appendFile(process.env.GITHUB_OUTPUT, `layout=${layout}\n`)
 	} else if (mode === 'proof') {
 		const provenance = JSON.parse(
 			await readFile('.tmp/start-opt-in/controller.json', 'utf8'),

@@ -258,8 +258,9 @@ export function inactiveDeployInvocation(
 	const absoluteConfig = path.resolve(repositoryRoot, config)
 	// Keep the router source config and its main/tsconfig paths in one directory.
 	// The emitted candidate is already bundled and keeps its existing invocation.
-	const cwd =
-		name === 'kody-start-router' ? path.dirname(absoluteConfig) : repositoryRoot
+	const cwd = /^kody-start-router-[a-f0-9]{40}$/.test(name)
+		? path.dirname(absoluteConfig)
+		: repositoryRoot
 	return {
 		cwd,
 		args: [
@@ -345,7 +346,7 @@ if (isExecutedDirectly(import.meta.url)) {
 	)
 		throw new Error('Cloudflare deployment credentials required')
 	const candidateName = `kody-start-${release}`
-	const routerName = 'kody-start-router'
+	const routerName = `kody-start-router-${release}`
 	const candidate = JSON.parse(
 		await readFile('dist/server/wrangler.json', 'utf8'),
 	) as Config
@@ -428,6 +429,15 @@ if (isExecutedDirectly(import.meta.url)) {
 			null,
 			'\t',
 		),
+	)
+	await writeFile(
+		'.tmp/start-opt-in/controller.json',
+		JSON.stringify({
+			controller: process.env.GITHUB_SHA,
+			release,
+			deploymentRun: process.env.GITHUB_RUN_ID,
+			verificationRun: process.env.GITHUB_RUN_ID,
+		}),
 	)
 	console.log(
 		'Deployed isolated workers without activating routes. Live production traffic is unchanged.',

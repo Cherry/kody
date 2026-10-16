@@ -22,6 +22,14 @@ function required(value: unknown, label: string): string {
 	return value
 }
 
+export function reviewedRouterName(release: string, declared?: unknown) {
+	if (!/^[a-f0-9]{40}$/.test(release))
+		throw new Error('Exact router release required')
+	const expected = `kody-start-router-${release}`
+	if (declared === expected) return expected
+	throw new Error('Router name must pin exact reviewed release')
+}
+
 export function assetManifestDigest(assetPaths: readonly string[]) {
 	return createHash('sha256')
 		.update(JSON.stringify([...assetPaths].sort()))
@@ -179,6 +187,8 @@ export function buildStartRolloutConfig(input: {
 		'unsafe',
 	])
 		delete router[key]
+	const routerName = `kody-start-router-${input.release}`
+	router.name = routerName
 	router.workers_dev = false
 	router.preview_urls = false
 	router.services = [
@@ -205,6 +215,7 @@ export function buildStartRolloutConfig(input: {
 		manifest: {
 			release: input.release,
 			candidateName,
+			routerName,
 			legacyName,
 			origin: vars.APP_BASE_URL,
 			activationRoute: 'kody.codes/*',

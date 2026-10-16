@@ -223,3 +223,9 @@ keep the same target `start_release`. The current controller and historical
 target must both have green validation. Activation checks the verification
 controller's provenance, original deployment receipt, and fresh immutable worker
 proof.
+
+Each new release creates its own immutable `kody-start-router-<full SHA>`
+worker. The review manifest, runtime proof, activation route, and rollback
+receipt pin that exact name. Existing inactive candidate and router workers are
+preserved. The historical c85 release alone supports its original stable router
+name during verification, it cannot use the new activation path.

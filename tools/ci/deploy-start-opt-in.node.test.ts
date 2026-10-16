@@ -363,7 +363,7 @@ test('deploys router source from its config directory and preserves bundled cand
 	const root = '/workspace/kody'
 	const router = inactiveDeployInvocation(
 		'packages/start-routing-worker/wrangler-start.generated.json',
-		'kody-start-router',
+		`kody-start-router-${'a'.repeat(40)}`,
 		'/tmp/private/secrets.json',
 		root,
 	)
@@ -373,7 +373,7 @@ test('deploys router source from its config directory and preserves bundled cand
 		'--config',
 		'wrangler-start.generated.json',
 		'--name',
-		'kody-start-router',
+		`kody-start-router-${'a'.repeat(40)}`,
 		'--secrets-file',
 		'/tmp/private/secrets.json',
 	])
@@ -399,4 +399,16 @@ test('preflights every text and secret binding using UTF8 bytes without revealin
 	] as const) {
 		expect(() => assertBindingSizes(config, secrets)).toThrow(name)
 	}
+})
+
+test('release-specific router source keeps Wrangler config cwd resolution', () => {
+	const name = `kody-start-router-${'a'.repeat(40)}`
+	const invocation = inactiveDeployInvocation(
+		'packages/start-routing-worker/wrangler-start.generated.json',
+		name,
+		'/tmp/secrets.json',
+		'/workspace/kody',
+	)
+	expect(invocation.cwd).toBe('/workspace/kody/packages/start-routing-worker')
+	expect(invocation.args[2]).toBe('wrangler-start.generated.json')
 })

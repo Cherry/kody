@@ -79,7 +79,11 @@ export function activeWorkerVersion(result: JsonRecord) {
 	}
 }
 export async function workerEvidence(name: string) {
-	if (!/^kody-(?:production|start-router|start-[a-f0-9]{40})$/.test(name))
+	if (
+		!/^kody-(?:production|start-router-[a-f0-9]{40}|start-[a-f0-9]{40})$/.test(
+			name,
+		)
+	)
 		throw new Error('Unexpected rollout worker name')
 	const prefix = `/accounts/${rolloutAccount()}/workers/scripts/${name}`
 	const settings = (await rolloutApi(`${prefix}/settings`)) as JsonRecord

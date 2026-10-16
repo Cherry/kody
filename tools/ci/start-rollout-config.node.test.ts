@@ -3,6 +3,7 @@ import {
 	buildStartRolloutConfig,
 	assetManifestDigest,
 	routerEntrySource,
+	reviewedRouterName,
 } from './start-rollout-config.ts'
 
 function fixture() {
@@ -267,4 +268,21 @@ test('embeds a large exact manifest in source and keeps text bindings small', ()
 	expect(assetManifestDigest(input.assetPaths)).not.toBe(
 		assetManifestDigest(input.assetPaths.slice(1)),
 	)
+})
+
+test('router names are immutable per release and missing or mismatched names fail closed', () => {
+	const release = 'a'.repeat(40)
+	expect(reviewedRouterName(release, `kody-start-router-${release}`)).toBe(
+		`kody-start-router-${release}`,
+	)
+	expect(() => reviewedRouterName(release)).toThrow('exact reviewed release')
+	expect(() =>
+		reviewedRouterName(release, `kody-start-router-${'b'.repeat(40)}`),
+	).toThrow('exact reviewed release')
+	expect(() => reviewedRouterName(release, 'kody-start-router')).toThrow(
+		'exact reviewed release',
+	)
+	const bundle = buildStartRolloutConfig(fixture())
+	expect(bundle.router.name).toBe(`kody-start-router-${release}`)
+	expect(bundle.manifest.routerName).toBe(bundle.router.name)
 })

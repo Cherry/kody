@@ -1,3 +1,4 @@
+import { reviewedRouterName } from './start-rollout-config.ts'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -12,6 +13,7 @@ type Review = {
 		release: string
 		candidateName: string
 		legacyName: string
+		routerName?: string
 		assetPaths: Array<string>
 	}
 }
@@ -83,12 +85,13 @@ if (isExecutedDirectly(import.meta.url)) {
 			legacyName === 'kody-production',
 		'Pinned deployment review bundle required',
 	)
+	const routerName = reviewedRouterName(release, review.manifest.routerName)
 	const css = assetPaths.find((asset) => asset.endsWith('.css'))
 	const script = assetPaths.find((asset) => asset.endsWith('.js'))
 	assert(css && script, 'Emitted CSS and JavaScript asset paths are required')
 	const versions = {
 		candidate: await workerEvidence(candidateName),
-		router: await workerEvidence('kody-start-router'),
+		router: await workerEvidence(routerName),
 	}
 	const directory = await mkdtemp(path.join(tmpdir(), 'kody-start-probe-'))
 	let child: ChildProcess | undefined
@@ -105,7 +108,7 @@ if (isExecutedDirectly(import.meta.url)) {
 			services: [
 				{ binding: 'START', service: candidateName },
 				{ binding: 'LEGACY', service: legacyName },
-				{ binding: 'ROUTER', service: 'kody-start-router' },
+				{ binding: 'ROUTER', service: routerName },
 			],
 			vars: {
 				START_RELEASE: release,
@@ -219,7 +222,7 @@ if (isExecutedDirectly(import.meta.url)) {
 		}
 		const after = {
 			candidate: await workerEvidence(candidateName),
-			router: await workerEvidence('kody-start-router'),
+			router: await workerEvidence(routerName),
 		}
 		assert(
 			JSON.stringify(after) === JSON.stringify(versions),
@@ -228,7 +231,7 @@ if (isExecutedDirectly(import.meta.url)) {
 		const proof = {
 			release,
 			candidateName,
-			routerName: 'kody-start-router',
+			routerName,
 			checkedAt: new Date().toISOString(),
 			versions,
 			legacySha,

@@ -27,7 +27,7 @@ const version = {
 const proof = () => ({
 	release,
 	candidateName: `kody-start-${release}`,
-	routerName: 'kody-start-router',
+	routerName: `kody-start-router-${release}`,
 	checkedAt: '2026-10-15T18:00:00.000Z',
 	versions: { candidate: version, router: version },
 	health: 'passed',
@@ -72,7 +72,13 @@ test('activation requires existing legacy custom domain and rejects every overla
 	).toThrow('Conflicting')
 	expect(() =>
 		validateRouteSnapshot(
-			[{ id: 'x', pattern: 'kody.codes/*', script: 'kody-start-router' }],
+			[
+				{
+					id: 'x',
+					pattern: 'kody.codes/*',
+					script: `kody-start-router-${release}`,
+				},
+			],
 			[domain],
 			zone,
 		),
@@ -99,7 +105,7 @@ test('rollback validates only the exact captured overlay ID, name and pattern', 
 	const route = {
 		id: 'f'.repeat(32),
 		pattern: 'kody.codes/*',
-		script: 'kody-start-router',
+		script: `kody-start-router-${release}`,
 	}
 	const receipt = {
 		accountId: '1'.repeat(32),

@@ -46,7 +46,7 @@ import { useSocialSignIn } from './social-sign-in.ts'
 import { useSessionInfo } from './session-info.ts'
 import { useResendVerification } from './pages/email-verification-prompt.tsx'
 
-async function renderAuthHooks() {
+async function renderAuthHooks(throwOnSessionError = false) {
 	const root = createRootRoute()
 	const router = createRouter({
 		origin: 'https://kody.test',
@@ -70,7 +70,7 @@ async function renderAuthHooks() {
 	function AuthHooks() {
 		const hooks = {
 			social: useSocialSignIn(),
-			session: useSessionInfo(),
+			session: useSessionInfo({ throwOnError: throwOnSessionError }),
 			resend: useResendVerification(),
 			connection: useConnectOauthOperations(),
 		}
@@ -243,4 +243,13 @@ test('connection operations retain token results and propagate ordinary failures
 		operations.exchangeCode(config, 'code', 'https://kody.codes/connect/oauth'),
 	).rejects.toThrow('Provider unavailable')
 	expect(hooks.navigate).not.toHaveBeenCalled()
+})
+
+test('verification polling preserves transport failures while retaining native signed-out results', async () => {
+	const { session } = await renderAuthHooks(true)
+	const failure = new Error('session network failed')
+	state.session.mockRejectedValueOnce(failure)
+	await expect(session()).rejects.toBe(failure)
+	state.session.mockResolvedValueOnce(null)
+	expect(await session()).toBeNull()
 })

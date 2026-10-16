@@ -3,6 +3,7 @@ import { publicAsset } from '../public-assets.ts'
 import { useSessionInfo } from '../session-info.ts'
 import { useMatchedPageScope } from '../use-matched-page-scope.ts'
 import { usePageInvalidation } from '../page-invalidation.ts'
+import { createVerificationDeliveryPoll } from '../verification-delivery-poll.ts'
 import { useEffect, useState } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { normalizeRedirectTo } from '#universal/safe-redirect.ts'
@@ -30,7 +31,7 @@ export function PendingVerificationPage({
 	data: PendingVerificationLoaderData
 }) {
 	const requestResendVerification = useResendVerification()
-	const fetchSessionInfo = useSessionInfo()
+	const fetchSessionInfo = useSessionInfo({ throwOnError: true })
 	const invalidatePages = usePageInvalidation(mutationResources, {
 		refreshShell: true,
 	})
@@ -39,6 +40,7 @@ export function PendingVerificationPage({
 		new URLSearchParams(search).get('redirectTo'),
 	)
 	const router = useRouter()
+	const [deliveryPoll] = useState(createVerificationDeliveryPoll)
 	const [delivery, setDelivery] = useState(
 		data.emailVerificationDelivery ?? null,
 	)
@@ -46,14 +48,17 @@ export function PendingVerificationPage({
 	const [resendMessage, setResendMessage] = useState<string | null>(null)
 	const [resendTone, setResendTone] = useState<'error' | 'info'>('info')
 	useEffect(() => {
-		const controller = new AbortController()
+		let disposed = false
 		let timer: ReturnType<typeof setTimeout>
 		const poll = async () => {
+			let finished = false
 			try {
 				if (document.visibilityState === 'visible') {
-					const session = await fetchSessionInfo(controller.signal)
-					if (controller.signal.aborted || session === undefined) return
+					const result = await deliveryPoll.read(fetchSessionInfo)
+					if (disposed || !result.current || result.value === undefined) return
+					const session = result.value
 					if (!session) {
+						finished = true
 						await router.navigate({
 							href: buildAuthLink(
 								'/login',
@@ -63,6 +68,7 @@ export function PendingVerificationPage({
 						return
 					}
 					if (session.emailVerified) {
+						finished = true
 						await router.navigate({
 							href: resolvePostVerificationRedirect(redirectTo),
 						})
@@ -72,20 +78,22 @@ export function PendingVerificationPage({
 				}
 			} catch {
 				/* The next poll retries a transient delivery status failure. */
+			} finally {
+				if (!disposed && !finished)
+					timer = setTimeout(() => {
+						void poll()
+					}, 15_000)
 			}
-			if (!controller.signal.aborted)
-				timer = setTimeout(() => {
-					void poll()
-				}, 15_000)
 		}
 		timer = setTimeout(() => {
 			void poll()
 		}, 15_000)
 		return () => {
-			controller.abort()
+			disposed = true
+			deliveryPoll.invalidate()
 			clearTimeout(timer)
 		}
-	}, [redirectTo, router, fetchSessionInfo])
+	}, [redirectTo, router, fetchSessionInfo, deliveryPoll])
 	async function resend() {
 		setResendStatus('sending')
 		setResendMessage(null)
@@ -96,7 +104,10 @@ export function PendingVerificationPage({
 			if (result.ok) void invalidatePages()
 			setResendTone(result.ok ? 'info' : 'error')
 			setResendMessage(result.message)
-			if (result.ok) setDelivery(acceptedEmailVerificationDelivery())
+			if (result.ok) {
+				deliveryPoll.invalidate()
+				setDelivery(acceptedEmailVerificationDelivery())
+			}
 		} catch {
 			setResendTone('error')
 			setResendMessage('Unable to resend the verification email.')

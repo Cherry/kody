@@ -36,7 +36,10 @@ import { wantsJson } from './utils.ts'
 import { isTwoFactorEnabled } from '#app/two-factor.ts'
 import { verifyPassword } from '@kody-internal/shared/password-hash.ts'
 import { invalidClientIdMismatchMessage } from '@kody-internal/shared/oauth-messages.ts'
-import { getUsernameFormatValidationError } from '#worker/identity/username.ts'
+import {
+	getUsernameFormatValidationError,
+	resolveStoredDisplayName,
+} from '#worker/identity/username.ts'
 import { getPkceValidationError } from '#worker/oauth-pkce.ts'
 import { oauthPaths } from '#universal/oauth-paths.ts'
 import { getAppBaseUrl } from '#worker/app-base-url.ts'
@@ -1370,7 +1373,10 @@ export async function tryHandleSilentOidcAuthorize(
 				userId: approvedUserId,
 				email: approvedEmail,
 				username,
-				displayName: username,
+				displayName: resolveStoredDisplayName(
+					userRecord.display_name,
+					username,
+				),
 				authTime,
 				...(oidcParams.nonce ? { nonce: oidcParams.nonce } : {}),
 				...profileFields.props,
@@ -1576,6 +1582,7 @@ export async function decideOAuthAuthorization({
 
 	let approvedEmail = ''
 	let approvedUsername = ''
+	let approvedDisplayName = ''
 	let approvedUserId = ''
 	let requiresOrgChoiceReload = false
 	if (hasFormCredentials) {
@@ -1671,6 +1678,10 @@ export async function decideOAuthAuthorization({
 		}
 		approvedEmail = normalizedEmail
 		approvedUsername = username
+		approvedDisplayName = resolveStoredDisplayName(
+			userRecord.display_name,
+			username,
+		)
 		approvedUserId = personIdFromStored(userRecord.stable_user_id)
 		// Inline login never saw the org picker (loader had no session). After
 		// email verification, establish a browser session and reload authorize
@@ -1725,6 +1736,10 @@ export async function decideOAuthAuthorization({
 		}
 		approvedEmail = userRecord.email.trim().toLowerCase()
 		approvedUsername = username
+		approvedDisplayName = resolveStoredDisplayName(
+			userRecord.display_name,
+			username,
+		)
 		approvedUserId = personIdFromStored(userRecord.stable_user_id)
 		if (session && approvedEmail !== sessionEmail) {
 			setCookie = await createAuthCookie(
@@ -1795,7 +1810,7 @@ export async function decideOAuthAuthorization({
 	const resolvedScopes = resolveScopes(authRequest.scope)
 	if (Array.isArray(resolvedScopes)) {
 		const userId = approvedUserId
-		const displayName = approvedUsername
+		const displayName = approvedDisplayName || approvedUsername
 		const authTime = hasFormCredentials
 			? Math.floor(Date.now() / 1000)
 			: authorizeSession.issuedAt

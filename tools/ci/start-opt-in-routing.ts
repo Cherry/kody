@@ -1,4 +1,7 @@
-import { assetManifestDigest } from './start-rollout-config.ts'
+import {
+	assetManifestDigest,
+	reviewedRouterName,
+} from './start-rollout-config.ts'
 import { readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import {
@@ -43,6 +46,7 @@ type Review = {
 		release: string
 		candidateName: string
 		legacyName: string
+		routerName?: string
 		allowedPersonIds: Array<string>
 		assetPaths: Array<string>
 	}
@@ -73,7 +77,6 @@ async function writeRoutingReceipt(
 }
 
 const pattern = 'kody.codes/*'
-const routerName = 'kody-start-router'
 function requireValue(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message)
 }
@@ -118,7 +121,7 @@ export function validateRuntimeProof(
 		/^[a-f0-9]{40}$/.test(release) &&
 			proof.release === release &&
 			proof.candidateName === `kody-start-${release}` &&
-			proof.routerName === routerName,
+			proof.routerName === `kody-start-router-${release}`,
 		'Runtime proof must pin the exact approved release',
 	)
 	const age = now - Date.parse(proof.checkedAt)
@@ -138,8 +141,10 @@ export function validateRuntimeProof(
 	)
 }
 export function validateRollbackRoute(actual: Route, receipt: Receipt) {
+	const routerName = `kody-start-router-${receipt.release}`
 	requireValue(
-		receipt.route.pattern === pattern &&
+		/^[a-f0-9]{40}$/.test(receipt.release) &&
+			receipt.route.pattern === pattern &&
 			receipt.route.script === routerName &&
 			/^[a-f0-9]{32}$/.test(receipt.route.id),
 		'Receipt must identify the exact created rollout route',
@@ -170,6 +175,10 @@ async function topology(zoneId: string) {
 	return { routes: routes as Array<Route>, domains: domains as Array<Domain> }
 }
 async function verifyLiveRelease(review: Review, proof: Proof) {
+	const routerName = reviewedRouterName(
+		review.manifest.release,
+		review.manifest.routerName,
+	)
 	const account = rolloutAccount()
 	const versions = {
 		candidate: await workerEvidence(review.manifest.candidateName),
@@ -310,6 +319,7 @@ if (isExecutedDirectly(import.meta.url)) {
 			await readFile('.tmp/start-opt-in/runtime-proof.json', 'utf8'),
 		) as Proof
 		const release = process.env.KODY_START_RELEASE ?? ''
+		const routerName = reviewedRouterName(release, review.manifest.routerName)
 		validateRuntimeProof(proof, release)
 		requireValue(
 			review.manifest.release === release &&

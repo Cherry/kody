@@ -180,6 +180,7 @@ jobs:
             .tmp/start-opt-in/router.json
             packages/start-routing-worker/start-entry.generated.ts
             .tmp/start-opt-in/deployed.json
+            .tmp/start-opt-in/controller.json
             .tmp/start-opt-in/runtime-proof.json
             .tmp/start-opt-in/secret-names.json
             dist
@@ -276,6 +277,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Verify current controller and target evidence
+        id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
           EVIDENCE_RUN: ${{ inputs.start_evidence_run }}
@@ -288,10 +290,17 @@ jobs:
           path: .tmp/start-opt-in/download
       - name: Select exact reviewed evidence files
         run: |
-          cp .tmp/start-opt-in/download/review.json .tmp/start-opt-in/review.json
-          cp .tmp/start-opt-in/download/runtime-proof.json .tmp/start-opt-in/runtime-proof.json
-          cp .tmp/start-opt-in/download/controller.json .tmp/start-opt-in/controller.json
-          cp .tmp/start-opt-in/download/deployed.json .tmp/start-opt-in/deployed.json
+          if [ "${{ steps.evidence.outputs.layout }}" = "nested" ]; then
+            evidence_dir=.tmp/start-opt-in/download/.tmp/start-opt-in
+          elif [ "${{ steps.evidence.outputs.layout }}" = "flat" ]; then
+            evidence_dir=.tmp/start-opt-in/download
+          else
+            exit 1
+          fi
+          cp "$evidence_dir/review.json" .tmp/start-opt-in/review.json
+          cp "$evidence_dir/runtime-proof.json" .tmp/start-opt-in/runtime-proof.json
+          cp "$evidence_dir/controller.json" .tmp/start-opt-in/controller.json
+          cp "$evidence_dir/deployed.json" .tmp/start-opt-in/deployed.json
       - name: Verify target receipt and controller provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1011,6 +1020,9 @@ jobs:
           SYSTEM_EMAIL_DOMAIN: ${{ vars.SYSTEM_EMAIL_DOMAIN }}
           LEGACY_USER_EMAIL_DOMAINS: ${{ vars.LEGACY_USER_EMAIL_DOMAINS }}
           LEGACY_SYSTEM_EMAIL_DOMAINS: ${{ vars.LEGACY_SYSTEM_EMAIL_DOMAINS }}
+          # Optional override for DMARC rua forward destination (default
+          # me@kentcdodds.com in tools/ci/resource-utils.ts).
+          DMARC_REPORT_FORWARD_TO: ${{ vars.DMARC_REPORT_FORWARD_TO }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
           # Prefer environment secret when Kent (or CI) stored the zone id as a

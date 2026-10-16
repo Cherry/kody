@@ -476,11 +476,55 @@ function collectManifestEntryPaths(manifestSource: string | undefined) {
 }
 
 /**
- * Modules the package can run: every scannable file except test-named ones,
- * plus test-named files reachable from package.json runtime entries (including
- * app, job, and subscription handlers) via static or bundler-resolved imports.
+ * Declared `kody.app.assets` directory from package.json, or null. Static
+ * files under that directory are served as-is and are not package runtime
+ * modules, so credential / stamp / eval AST walks skip them (multi-MB
+ * prebuilt client bundles must not burn Durable Object CPU at publish).
+ */
+export function readPackageAppAssetsDirectory(
+	manifestSource: string | undefined,
+): string | null {
+	if (manifestSource == null) return null
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(manifestSource)
+	} catch {
+		return null
+	}
+	if (!isPlainObject(parsed) || !isPlainObject(parsed.kody)) return null
+	if (!isPlainObject(parsed.kody.app)) return null
+	const assets = parsed.kody.app.assets
+	if (typeof assets !== 'string' || assets.trim().length === 0) return null
+	const normalized = normalizePackageEntryPath(assets.trim()).replace(
+		/\/+$/,
+		'',
+	)
+	return normalized.length > 0 ? normalized : null
+}
+
+/** True when `path` is inside the declared assets directory. */
+export function isPackageAppAssetPath(
+	path: string,
+	assetsDirectory: string | null,
+) {
+	if (assetsDirectory == null) return false
+	return path === assetsDirectory || path.startsWith(`${assetsDirectory}/`)
+}
+
+/**
+ * Modules the package can run: every scannable file except test-named ones
+ * and unreferenced files under `kody.app.assets`, plus test-named or asset
+ * files reachable from package.json runtime entries (including app, job, and
+ * subscription handlers) via static or bundler-resolved imports.
+ *
+ * Static prebuilt client bundles under assets are skipped for CPU (they are
+ * never imported). An asset that a server/runtime entry actually imports
+ * stays scannable so credential stamps and server_eval still cover it.
  */
 export function listScannableModulePaths(files: Record<string, string>) {
+	const assetsDirectory = readPackageAppAssetsDirectory(
+		files[packageManifestPath],
+	)
 	const modulePaths = Object.keys(files).filter(
 		(path) =>
 			typeof files[path] === 'string' && scannableModuleFilePattern.test(path),
@@ -511,9 +555,12 @@ export function listScannableModulePaths(files: Record<string, string>) {
 			if (target) queue.push(target)
 		}
 	}
-	return modulePaths.filter(
-		(path) => !testFilePattern.test(path) || runtime.has(path),
-	)
+	return modulePaths.filter((path) => {
+		if (runtime.has(path)) return true
+		if (testFilePattern.test(path)) return false
+		if (isPackageAppAssetPath(path, assetsDirectory)) return false
+		return true
+	})
 }
 
 const packageManifestPath = 'package.json'
