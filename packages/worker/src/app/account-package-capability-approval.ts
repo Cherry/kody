@@ -308,6 +308,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 				savedPackage,
 				requestUrl: input.request.url,
 				expectedFingerprint,
+				recordPin: true,
 				...options,
 			})
 			await audit('package.capabilities.approve', 'success', {
@@ -361,6 +362,11 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 				ownerUserId,
 			}),
 		)
+
+	// The approve-capabilities page only checks `ok` then navigates or reloads.
+	// Returning the full account packages payload after Approve made Kent's
+	// org-sized accounts hang on "Approving…" (#3914 follow-up).
+	const approvePageOk = () => jsonResponse({ ok: true as const })
 
 	if (
 		action === 'approve-credential-needs' ||
@@ -419,7 +425,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 				approved.status,
 			)
 		}
-		return await reloaded()
+		return approvePageOk()
 	}
 
 	if (action === 'approve-capabilities') {
@@ -427,7 +433,7 @@ export async function handleAccountPackageInternetVisibleAction(input: {
 			readBodyString(input.body, 'fingerprint'),
 		)
 		if (!capabilities.ok) return capabilities.response
-		return await reloaded()
+		return approvePageOk()
 	}
 
 	const internetVisible =

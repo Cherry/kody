@@ -17,6 +17,14 @@ const mocks = vi.hoisted(() => ({
 	publishFromExternalRef: vi.fn(),
 	publishSession: vi.fn(),
 	liveSessionIds: new Set<string>(),
+	loadCapabilityApprovalSummary: vi.fn(),
+	approvePackageCapabilitySet: vi.fn(),
+	CapabilityApprovalError: class CapabilityApprovalError extends Error {
+		constructor(message: string) {
+			super(message)
+			this.name = 'CapabilityApprovalError'
+		}
+	},
 }))
 
 vi.mock('./credential-needs-closure.ts', async (importOriginal) => ({
@@ -43,6 +51,14 @@ vi.mock('#worker/repo/repo-session-rpc.ts', () => ({
 			mocks.publishFromExternalRef(...args),
 		publishSession: (...args: Array<unknown>) => mocks.publishSession(...args),
 	}),
+}))
+
+vi.mock('#worker/package-capabilities/capability-approval-service.ts', () => ({
+	loadCapabilityApprovalSummary: (...args: Array<unknown>) =>
+		mocks.loadCapabilityApprovalSummary(...args),
+	approvePackageCapabilitySet: (...args: Array<unknown>) =>
+		mocks.approvePackageCapabilitySet(...args),
+	CapabilityApprovalError: mocks.CapabilityApprovalError,
 }))
 
 const {
@@ -134,6 +150,18 @@ beforeEach(() => {
 	mocks.publishFromExternalRef.mockReset()
 	mocks.publishSession.mockReset()
 	mocks.liveSessionIds.clear()
+	mocks.loadCapabilityApprovalSummary.mockReset()
+	mocks.approvePackageCapabilitySet.mockReset()
+	mocks.loadCapabilityApprovalSummary.mockResolvedValue({
+		publishedCommit: 'commit-new',
+		capabilitySet: { fingerprint: 'fp-after-needs', entries: [] },
+		fingerprintMatchesApproval: false,
+	})
+	mocks.approvePackageCapabilitySet.mockResolvedValue({
+		approval: { id: 'pin-1', publishedCommit: 'commit-new' },
+		capabilitySet: { fingerprint: 'fp-after-needs', entries: [] },
+		wentPublicRequest: null,
+	})
 })
 
 test('only added or reshaped needs count as a change', () => {
@@ -357,12 +385,142 @@ test('a needs change queues one pending approval per package; unchanged, removed
 	).resolves.toEqual([])
 })
 
+test('approving needs on a private package does not pin internet-visible capabilities', async () => {
+	const t = await setup({ internetVisible: false })
+	const savedPackage = {
+		id: t.packageId,
+		userId: ownerId,
+		sourceId: 'source-mailer',
+		isInternetVisible: false,
+	} as SavedPackageRecord
+	const request = await enqueuePackageApprovalRequest(t.db, {
+		packageId: t.packageId,
+		ownerUserId: ownerId,
+		reason: 'credential_needs_changed',
+		pendingCommit: 'commit-new',
+		baseCommit: 'commit-old',
+		details: { changes: [] },
+		requestedByUserId: null,
+	})
+	mocks.publishFromExternalRef.mockResolvedValueOnce({
+		status: 'published',
+		previous_commit: 'commit-old',
+		published_commit: 'commit-new',
+	})
+	await expect(
+		approveCredentialNeedsRequest({
+			env: t.env,
+			request: new Request('https://kody.test/approve'),
+			savedPackage,
+			ownerUserId: ownerId,
+			actorUserId: 'person-bea',
+			requestId: request.id,
+		}),
+	).resolves.toEqual({ ok: true })
+	expect(mocks.approvePackageCapabilitySet).not.toHaveBeenCalled()
+})
+
+test('a failed capability pin after needs publish leaves the request pending for retry', async () => {
+	const t = await setup({ internetVisible: true })
+	const savedPackage = {
+		id: t.packageId,
+		userId: ownerId,
+		sourceId: 'source-mailer',
+		isInternetVisible: true,
+	} as SavedPackageRecord
+	const request = await enqueuePackageApprovalRequest(t.db, {
+		packageId: t.packageId,
+		ownerUserId: ownerId,
+		reason: 'credential_needs_changed',
+		pendingCommit: 'commit-new',
+		baseCommit: 'commit-old',
+		details: {
+			changes: [
+				{
+					key: 'database',
+					change: 'changed',
+					before: { provider: 'database', multiple: false },
+					after: {
+						provider: 'database',
+						multiple: false,
+						ownerCredentialForVisitors: true,
+					},
+				},
+			],
+		},
+		requestedByUserId: null,
+	})
+	mocks.publishFromExternalRef.mockResolvedValueOnce({
+		status: 'published',
+		previous_commit: 'commit-old',
+		published_commit: 'commit-new',
+	})
+	mocks.approvePackageCapabilitySet.mockRejectedValueOnce(
+		new mocks.CapabilityApprovalError(
+			'The capability set changed since you loaded this page. Reload, review the updated summary, and approve again.',
+		),
+	)
+	const approve = () =>
+		approveCredentialNeedsRequest({
+			env: t.env,
+			request: new Request('https://kody.test/approve'),
+			savedPackage,
+			ownerUserId: ownerId,
+			actorUserId: 'person-bea',
+			requestId: request.id,
+		})
+	await expect(approve()).resolves.toMatchObject({ ok: false, status: 409 })
+	await expect(
+		getPackageApprovalRequest(t.db, {
+			id: request.id,
+			packageId: t.packageId,
+			ownerUserId: ownerId,
+		}),
+	).resolves.toMatchObject({ status: 'pending' })
+
+	// Publish already moved the source off the pause base; the page still
+	// shows the request, and a second Approve pins without republishing.
+	mocks.source = { ...t.source, published_commit: 'commit-new' }
+	await expect(
+		loadPendingPackageApprovals({
+			env: t.env,
+			ownerUserId: ownerId,
+			packageId: t.packageId,
+			publishedCommit: 'commit-new',
+		}),
+	).resolves.toEqual([
+		expect.objectContaining({
+			id: request.id,
+			approveAction: 'approve-credential-needs',
+			pendingCommit: 'commit-new',
+		}),
+	])
+	mocks.approvePackageCapabilitySet.mockClear()
+	mocks.publishFromExternalRef.mockClear()
+	mocks.approvePackageCapabilitySet.mockResolvedValueOnce({
+		approval: { id: 'pin-retry', publishedCommit: 'commit-new' },
+		capabilitySet: { fingerprint: 'fp-after-needs', entries: [] },
+		wentPublicRequest: null,
+	})
+	await expect(approve()).resolves.toEqual({ ok: true })
+	expect(mocks.publishFromExternalRef).not.toHaveBeenCalled()
+	expect(mocks.approvePackageCapabilitySet).toHaveBeenCalledTimes(1)
+	await expect(
+		getPackageApprovalRequest(t.db, {
+			id: request.id,
+			packageId: t.packageId,
+			ownerUserId: ownerId,
+		}),
+	).resolves.toMatchObject({ status: 'approved' })
+})
+
 test('approving publishes the paused commit past the pause; a moved base supersedes it', async () => {
 	const t = await setup({ internetVisible: true })
 	const savedPackage = {
 		id: t.packageId,
 		userId: ownerId,
 		sourceId: 'source-mailer',
+		isInternetVisible: true,
 	} as SavedPackageRecord
 	const enqueue = (pendingCommit: string) =>
 		enqueuePackageApprovalRequest(t.db, {
@@ -408,6 +566,14 @@ test('approving publishes the paused commit past the pause; a moved base superse
 			destructiveOverwriteConfirmed: false,
 			allowLockedPublish: true,
 			credentialNeedsApproved: true,
+		}),
+	)
+	expect(mocks.approvePackageCapabilitySet).toHaveBeenCalledWith(
+		expect.objectContaining({
+			expectedFingerprint: 'fp-after-needs',
+			enqueueWentPublic: false,
+			recordPin: true,
+			actorUserId: 'person-bea',
 		}),
 	)
 	expect(
@@ -491,6 +657,7 @@ test('approving a paused session publish re-runs that session at the paused comm
 		id: t.packageId,
 		userId: ownerId,
 		sourceId: 'source-mailer',
+		isInternetVisible: true,
 	} as SavedPackageRecord
 	mocks.after = [need('NEW')]
 	const paused = await requireCredentialNeedsApproval({

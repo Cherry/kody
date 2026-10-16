@@ -480,6 +480,8 @@ test('approve-capabilities binds the reviewed fingerprint', async () => {
 		},
 	})
 	expect(response?.status).toBe(200)
+	await expect(response?.json()).resolves.toEqual({ ok: true })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
 		expect.objectContaining({
 			expectedFingerprint: 'reviewed-fp',
@@ -560,7 +562,11 @@ test('approve-credential-needs approves the named request as the acting person',
 	})
 
 	mockModule.approveCredentialNeedsRequest.mockResolvedValueOnce({ ok: true })
-	expect((await approve({ requestId: 'request-1' }))?.status).toBe(200)
+	mockModule.reloadAccountPackagesAfterWrite.mockClear()
+	const ok = await approve({ requestId: 'request-1' })
+	expect(ok?.status).toBe(200)
+	await expect(ok?.json()).resolves.toEqual({ ok: true })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approveCredentialNeedsRequest).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			requestId: 'request-1',
@@ -604,9 +610,11 @@ test('approve-went-public approves the named request as the acting person', asyn
 	})
 
 	mockModule.approveWentPublicRequest.mockResolvedValueOnce({ ok: true })
-	expect((await approve({ requestId: 'request-went-public' }))?.status).toBe(
-		200,
-	)
+	mockModule.reloadAccountPackagesAfterWrite.mockClear()
+	const ok = await approve({ requestId: 'request-went-public' })
+	expect(ok?.status).toBe(200)
+	await expect(ok?.json()).resolves.toEqual({ ok: true })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approveWentPublicRequest).toHaveBeenLastCalledWith(
 		expect.objectContaining({
 			requestId: 'request-went-public',
@@ -645,6 +653,8 @@ test('approve-capabilities-and-go-public records both decisions with one audit e
 	})
 
 	expect(response?.status).toBe(200)
+	await expect(response?.json()).resolves.toEqual({ ok: true })
+	expect(mockModule.reloadAccountPackagesAfterWrite).not.toHaveBeenCalled()
 	expect(mockModule.approvePackageCapabilitySet).toHaveBeenCalledWith(
 		expect.objectContaining({
 			expectedFingerprint: 'reviewed-fp',
