@@ -278,7 +278,9 @@ export function usePackageMappingEditor(
 				{input.trigger &&
 				triggerWillEnable(input.trigger, draft, input.target) ? (
 					<p css={{ margin: 0, color: colors.warningText }}>
-						Saving turns this trigger on for you.
+						{input.target.type === 'trigger' && input.target.createInstance
+							? 'Saving turns on another instance for you.'
+							: 'Saving turns this trigger on for you.'}
 					</p>
 				) : null}
 				{input.stored && input.stored.unusableIds.length > 0 ? (

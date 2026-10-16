@@ -79,6 +79,7 @@ fixtures use `control-kody execute` / `search` against the same origin.
 
 ## Transport
 
+<<<<<<< HEAD
 Package reads, settings, individual and bundled approvals, and Collaborators use
 native Start server functions. Collaborator changes require
 `package:manage_access` and support granting or revoking internal team/member
@@ -92,6 +93,31 @@ files, assets, and icons remain HTTP resources:
 - `GET /@:username/:kodyId/icon/:iconCommit`
 - `GET /account/repos/:repoId/icon/:iconCommit`
 - `GET /@:username/:kodyId/raw/:ref(/*relativePath)`
+=======
+- `GET|POST /account/packages.json` (list / lock, unlock, set-visibility,
+  set-internet-visible, approve-capabilities, delete, adopt-community-fork,
+  absorb-listing; no package-create action)
+- `GET /profiles/:username/packages/:kodyId.json`
+- `GET /profiles/:username/packages/:kodyId/files.json`
+- `GET /@:username/:kodyId/icon/:iconCommit` (package or plain-repo list mark)
+- `GET /account/repos/:repoId/icon/:iconCommit` (MCP/owner-only repo mark)
+- `GET /@:username/:kodyId/raw/:ref(/*relativePath)` (raw file bytes)
+- `GET /profiles/:username/packages/:kodyId/approve-publish.json`
+- `GET|POST /profiles/:username/packages/:kodyId/collaborators.json` (view / one
+  change: `grant`, `revoke`, and personal-org-only `invite`, `revoke-invite`;
+  403 without `package:manage_access`)
+- `GET|POST /profiles/:username/packages/:kodyId/approve-capabilities.json`
+- `GET|POST /profiles/:username/packages/:kodyId/credentials.json` (Credentials
+  / Default mappings / Triggers tabs; POST `{ changes }` and/or
+  `{ enablements }` for mapping edits and the viewer’s own on/off /
+  multi-instance toggles)
+- `GET /account/packages/:packageId/files.json` (404 + `redirectTo` the tree)
+- `GET|POST /account/packages/:packageId/approve-publish.json`
+- `GET|POST /account/packages/:packageId/approve-capabilities.json`
+- `GET|POST /@:orgSlug/-/approvals/:bundleId.json` (approval bundle view; POST
+  `{ action: 'approve' | 'deny', item, fingerprint }` decides one item, session
+  only)
+>>>>>>> origin/main
 
 ## Gotchas
 
