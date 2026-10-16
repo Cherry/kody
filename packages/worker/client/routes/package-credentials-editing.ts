@@ -4,6 +4,7 @@ import {
 	type CredentialMappingTarget,
 	type CredentialRef,
 	type PackageCredentialNeedView,
+	type PackageCredentialsEnablementAction,
 	type PackageCredentialsView,
 	type PackageCredentialsWriteError,
 	type PackageCredentialsWriteFailure,
@@ -31,6 +32,8 @@ export function mappingEditorKey(
 				'trigger',
 				target.trigger.kind,
 				target.trigger.name,
+				target.enablementId ?? '',
+				target.createInstance ? 'new' : '',
 				needKey,
 			])
 		default: {
@@ -116,25 +119,30 @@ export function draftToChange(input: {
 
 /**
  * Writing a credential choice turns the trigger on for a writer who has not
- * enabled it. Inherit writes nothing, so an off trigger stays off.
+ * enabled it, or creates another instance when `createInstance` is set.
+ * Inherit writes nothing, so an off trigger stays off.
  */
 export function triggerWillEnable(
 	trigger: PackageTriggerView,
 	draft: MappingDraft,
+	target?: CredentialMappingTarget,
 ) {
-	return (
-		trigger.canEdit && trigger.enablement === null && draft.mode !== 'inherit'
-	)
+	if (!trigger.canEdit || draft.mode === 'inherit') return false
+	if (target?.type === 'trigger' && target.createInstance) return true
+	return trigger.enablement === null
 }
 
 /** Why saving this draft would change nothing, or null when it writes. */
 export function triggerDraftProblem(
 	trigger: PackageTriggerView | null,
 	draft: MappingDraft,
+	target?: CredentialMappingTarget,
 ) {
-	if (!trigger || trigger.enablement !== null || draft.mode !== 'inherit') {
-		return null
+	if (!trigger || draft.mode !== 'inherit') return null
+	if (target?.type === 'trigger' && target.createInstance) {
+		return 'Inheriting writes nothing, so it would not create another instance. Pick a credential (or none on purpose), or use Add another instance for defaults.'
 	}
+	if (trigger.enablement !== null) return null
 	return 'This trigger is off, and inheriting writes nothing, so it would stay off. Pick a credential (or none on purpose) to turn it on with this mapping.'
 }
 
@@ -173,8 +181,17 @@ export type PackageCredentialsWriteResult =
 export async function postPackageCredentialChanges(input: {
 	username: string
 	kodyId: string
-	changes: Array<CredentialMappingChange>
+	changes?: Array<CredentialMappingChange>
+	enablements?: Array<PackageCredentialsEnablementAction>
 }): Promise<PackageCredentialsWriteResult> {
+	const body: {
+		changes?: Array<CredentialMappingChange>
+		enablements?: Array<PackageCredentialsEnablementAction>
+	} = {}
+	if (input.changes && input.changes.length > 0) body.changes = input.changes
+	if (input.enablements && input.enablements.length > 0) {
+		body.enablements = input.enablements
+	}
 	let response: Response
 	try {
 		response = await fetch(
@@ -189,7 +206,7 @@ export async function postPackageCredentialChanges(input: {
 					Accept: 'application/json',
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({ changes: input.changes }),
+				body: JSON.stringify(body),
 			},
 		)
 	} catch {

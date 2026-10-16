@@ -1,11 +1,8 @@
 import { type RemixNode, css } from 'remix/component'
 import {
-	canEditTrigger,
-	triggerMappingRows,
-} from '#client/routes/package-credentials-editing.ts'
-import {
 	type CredentialMappingTarget,
 	type CredentialRef,
+	type CredentialTriggerRef,
 	type EffectiveCredentialMapping,
 	type PackageCredentialNeedView,
 	type PackageCredentialsView,
@@ -17,7 +14,6 @@ import {
 	credentialRefHref,
 	credentialRefLabel,
 	describeIncompleteMapping,
-	describeTrigger,
 	incompleteMappingTab,
 	type MappingStatusTone,
 	mappingSourceLabel,
@@ -26,8 +22,6 @@ import {
 	packageCredentialsTabLabel,
 	type PackageCredentialsTab,
 	sortNeedsByAttention,
-	triggerStateLabel,
-	withheldTriggerMappingsNote,
 } from '#universal/package-credentials-page.ts'
 import {
 	cardCss,
@@ -52,6 +46,13 @@ export type MappingCellInput = {
 	trigger: PackageTriggerView | null
 }
 
+export type TriggerEnablementActionInput = {
+	trigger: CredentialTriggerRef
+	state: 'on' | 'off'
+	enablementId?: string
+	createInstance?: boolean
+}
+
 export type PackageTabContext = {
 	orgSlug: string
 	username: string
@@ -59,9 +60,14 @@ export type PackageTabContext = {
 	view: PackageCredentialsView
 	/** Renders an editable cell; without it, cells are read-only. */
 	renderMappingCell?: (input: MappingCellInput) => RemixNode
+	/** Session turn-on / turn-off for the viewer's own enablement. */
+	setTriggerEnablement?: (input: TriggerEnablementActionInput) => void
+	/** Busy key while an enablement write is in flight (`kind:name` or id). */
+	enablementBusyKey?: string | null
+	enablementError?: string | null
 }
 
-function renderMappingCell(
+export function renderMappingCell(
 	context: PackageTabContext,
 	input: MappingCellInput,
 ) {
@@ -70,7 +76,7 @@ function renderMappingCell(
 		: renderStored(context.orgSlug, input.stored, input.inheritLabel)
 }
 
-const mutedCss = { margin: 0, color: colors.textMuted }
+export const mutedCss = { margin: 0, color: colors.textMuted }
 const listCss = {
 	margin: 0,
 	padding: 0,
@@ -78,13 +84,13 @@ const listCss = {
 	display: 'grid',
 	gap: spacing.sm,
 }
-const rowCss = {
+export const rowCss = {
 	display: 'flex',
 	flexWrap: 'wrap' as const,
 	alignItems: 'baseline',
 	gap: spacing.sm,
 }
-const tableCss = {
+export const tableCss = {
 	width: '100%',
 	borderCollapse: 'collapse' as const,
 	fontSize: typography.fontSize.sm,
@@ -119,7 +125,7 @@ function toneColor(tone: MappingStatusTone) {
 	}
 }
 
-function renderStatus(mapping: EffectiveCredentialMapping) {
+export function renderStatus(mapping: EffectiveCredentialMapping) {
 	const { label, tone } = mappingStatusLabel(mapping.status)
 	return (
 		<span
@@ -159,7 +165,10 @@ function renderRefs(orgSlug: string, refs: ReadonlyArray<CredentialRef>) {
 }
 
 /** What a run would use for a need: its refs, or the candidates to pick from. */
-function renderEffective(orgSlug: string, mapping: EffectiveCredentialMapping) {
+export function renderEffective(
+	orgSlug: string,
+	mapping: EffectiveCredentialMapping,
+) {
 	switch (mapping.status) {
 		case 'ready':
 			return renderRefs(orgSlug, mapping.credentials)
@@ -214,10 +223,10 @@ function needSummary(need: PackageCredentialNeedView) {
 	return parts.join(' · ')
 }
 
-const tabBodyCss = { display: 'grid', gap: spacing.md }
+export const tabBodyCss = { display: 'grid', gap: spacing.md }
 
 /** Every incomplete mapping on Credentials; on the other tabs, only the ones that tab fixes. */
-function renderIncomplete(
+export function renderIncomplete(
 	context: PackageTabContext,
 	currentTab: PackageCredentialsTab,
 ) {
@@ -249,7 +258,11 @@ function renderIncomplete(
 				{items.map((item) => {
 					const tab = incompleteMappingTab(item)
 					const createUrl = needs.get(item.needKey)?.createUrl
-					const key = `${item.needKey}:${item.where.type === 'trigger' ? `${item.where.trigger.kind}:${item.where.trigger.name}` : 'default'}`
+					const key = `${item.needKey}:${
+						item.where.type === 'trigger'
+							? `${item.where.trigger.kind}:${item.where.trigger.name}:${item.where.enablementId ?? ''}`
+							: 'default'
+					}`
 					return (
 						<li key={key} mix={css({ display: 'grid', gap: spacing.xs })}>
 							<span>{describeIncompleteMapping(item)}</span>
@@ -461,135 +474,6 @@ export function renderMappingsTab(context: PackageTabContext): RemixNode {
 					<a href={need.createUrl}>Add a credential for {need.key}</a>
 				</section>
 			))}
-		</div>
-	)
-}
-
-function renderTriggerMappings(
-	context: PackageTabContext,
-	trigger: PackageTriggerView,
-) {
-	const withheld = withheldTriggerMappingsNote(trigger)
-	if (withheld) return <p mix={css(mutedCss)}>{withheld}</p>
-	if (trigger.trigger.kind === 'webhook' && trigger.instanceId === null) {
-		return (
-			<p mix={css(mutedCss)}>
-				{context.view.package.canManage
-					? 'This webhook has no URL yet. Once someone mints it from Settings, its runs use their default mappings.'
-					: 'This webhook has no URL yet. Once someone who manages this package mints it, its runs use their default mappings.'}
-			</p>
-		)
-	}
-	const editable = Boolean(context.renderMappingCell) && canEditTrigger(trigger)
-	const rows = editable
-		? triggerMappingRows(context.view, trigger)
-		: trigger.mappings.flatMap((mapping) => {
-				const need = context.view.needs.find(
-					(candidate) => candidate.key === mapping.needKey,
-				)
-				return need ? [{ need, mapping }] : []
-			})
-	if (rows.length === 0) {
-		return (
-			<p mix={css(mutedCss)}>
-				Runs of this trigger use the package’s default mappings.
-			</p>
-		)
-	}
-	return (
-		<div mix={css({ display: 'grid', gap: spacing.sm })}>
-			{editable && trigger.canEdit && trigger.enablement === null ? (
-				<p
-					data-testid="package-trigger-will-enable"
-					mix={css({ margin: 0, color: colors.warningText })}
-				>
-					This trigger is off. Saving a credential choice here turns it on for
-					you.
-				</p>
-			) : null}
-			<div mix={css({ overflowX: 'auto' })}>
-				<table mix={css(tableCss)}>
-					<thead>
-						<tr>
-							<th scope="col">Need</th>
-							<th scope="col">This trigger</th>
-							<th scope="col">Runs use</th>
-							<th scope="col">Status</th>
-						</tr>
-					</thead>
-					<tbody>
-						{rows.map(({ need, mapping }) => (
-							<tr key={need.key}>
-								<td>
-									<strong>{need.key}</strong>
-								</td>
-								<td>
-									{renderMappingCell(context, {
-										target: { type: 'trigger', trigger: trigger.trigger },
-										need,
-										stored: mapping?.override ?? null,
-										inheritLabel: 'Inherits your default',
-										editable,
-										trigger,
-									})}
-								</td>
-								<td>
-									{mapping ? (
-										renderEffective(context.orgSlug, mapping.effective)
-									) : (
-										<span mix={css(mutedCss)}>Your default, once on</span>
-									)}
-								</td>
-								<td>{mapping ? renderStatus(mapping.effective) : null}</td>
-							</tr>
-						))}
-					</tbody>
-				</table>
-			</div>
-		</div>
-	)
-}
-
-export function renderTriggersTab(context: PackageTabContext): RemixNode {
-	const { view } = context
-	if (view.triggers.length === 0) {
-		return (
-			<section mix={css(cardCss)}>
-				<p mix={css(mutedCss)}>
-					This package declares no schedules, subscriptions, or webhooks.
-				</p>
-			</section>
-		)
-	}
-	return (
-		<div mix={css(tabBodyCss)}>
-			{renderIncomplete(context, 'triggers')}
-			<p mix={css(mutedCss)}>
-				Each trigger runs as the person who turned it on. A trigger can map its
-				own credentials; any need it leaves alone uses that person’s default
-				mapping.
-			</p>
-			{view.triggers.map((trigger, index) => {
-				const id = `package-trigger-${trigger.trigger.kind}-${trigger.trigger.name}`
-				// Trigger names may hold spaces; aria-labelledby splits on them.
-				const titleId = `package-trigger-title-${index}`
-				return (
-					<section
-						key={id}
-						aria-labelledby={titleId}
-						data-testid={id}
-						mix={css(cardCss)}
-					>
-						<div mix={css({ ...rowCss, justifyContent: 'space-between' })}>
-							<h2 id={titleId} mix={css(cardTitleCss)}>
-								{describeTrigger(trigger.trigger)}
-							</h2>
-							<span mix={css(mutedCss)}>{triggerStateLabel(trigger)}</span>
-						</div>
-						{renderTriggerMappings(context, trigger)}
-					</section>
-				)
-			})}
 		</div>
 	)
 }

@@ -102,7 +102,11 @@ export function createPackageMappingEditor(
 
 	async function save(input: MappingCellInput) {
 		if (!open || open.saving) return
-		const unchanged = triggerDraftProblem(input.trigger, open.draft)
+		const unchanged = triggerDraftProblem(
+			input.trigger,
+			open.draft,
+			input.target,
+		)
 		if (unchanged) {
 			update({ messages: [{ text: unchanged }] })
 			return
@@ -257,9 +261,12 @@ export function createPackageMappingEditor(
 					{radio('none', 'None on purpose (runs get no credential)')}
 					{radio('inherit', input.inheritLabel)}
 				</fieldset>
-				{input.trigger && triggerWillEnable(input.trigger, draft) ? (
+				{input.trigger &&
+				triggerWillEnable(input.trigger, draft, input.target) ? (
 					<p mix={css({ margin: 0, color: colors.warningText })}>
-						Saving turns this trigger on for you.
+						{input.target.type === 'trigger' && input.target.createInstance
+							? 'Saving turns on another instance for you.'
+							: 'Saving turns this trigger on for you.'}
 					</p>
 				) : null}
 				{input.stored && input.stored.unusableIds.length > 0 ? (
