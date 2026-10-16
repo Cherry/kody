@@ -41,6 +41,12 @@ type RuntimeModule = {
 		| undefined
 	codemode?: unknown
 	capabilities?: unknown
+	credential?:
+		| (((key: string) => Promise<unknown>) & {
+				named: (name: string) => Promise<unknown>
+		  })
+		| undefined
+	credentials?: ((key: string) => Promise<unknown>) | undefined
 	email: { getMessage: (id: string) => Promise<unknown> } | null
 	packageContext: Record<string, unknown> | null
 	packageSecrets: { get: (alias: string) => Promise<string> }
@@ -199,6 +205,253 @@ test('optional runtime exports stay falsy when the wrapper omits them', async ()
 			expect(observedPackageContext).toEqual({ packageId: 'pkg-1' })
 		},
 	)
+})
+
+// Package-app once imported runtime.js at entry load (before ALS.run). That
+// froze credential as undefined forever — later createRuntime bindings never
+// healed the export. Entry must defer first runtime evaluation until inside
+// ALS (user import of kody:runtime), and read secret authority via Symbol.for.
+test('credential freezes undefined when runtime.js first evaluates outside ALS', async () => {
+	await withRuntimeIsolationCleanup(async ({ loadPreloadedRuntime }) => {
+		const { storage, mod } = await loadPreloadedRuntime()
+		expect(mod.credential).toBeUndefined()
+		expect(mod.credentials).toBeUndefined()
+		const credentialRuntime = {
+			credential: Object.assign(
+				async (key: string) => ({ key, sign: async () => 'sig' }),
+				{ named: async (name: string) => ({ name }) },
+			),
+			credentials: async (key: string) => [{ key }],
+		}
+		await storage.run(credentialRuntime, async () => {
+			expect(mod.credential).toBeUndefined()
+			expect(mod.credentials).toBeUndefined()
+		})
+	})
+})
+
+test('credential is callable when runtime.js first evaluates inside ALS with binding', async () => {
+	await withRuntimeIsolationCleanup(
+		async ({ writeRuntimeFile, installSharedStorage }) => {
+			const storage = installSharedStorage()
+			const credentialRuntime = {
+				credential: Object.assign(
+					async (key: string) => ({
+						key,
+						sign: async () => `signed:${key}`,
+					}),
+					{ named: async (name: string) => ({ name }) },
+				),
+				credentials: async (key: string) => [{ key }],
+			}
+			const result = await storage.run(credentialRuntime, async () => {
+				const mod = (await import(await writeRuntimeFile())) as RuntimeModule
+				expect(typeof mod.credential).toBe('function')
+				expect(typeof mod.credentials).toBe('function')
+				if (!mod.credential) throw new Error('credential missing')
+				const handle = (await mod.credential('powersync-jwt')) as {
+					key: string
+					sign: () => Promise<string>
+				}
+				return {
+					key: handle.key,
+					signature: await handle.sign(),
+					named: await mod.credential.named('powersync-jwt'),
+					list: await mod.credentials?.('powersync-jwt'),
+				}
+			})
+			expect(result).toEqual({
+				key: 'powersync-jwt',
+				signature: 'signed:powersync-jwt',
+				named: { name: 'powersync-jwt' },
+				list: [{ key: 'powersync-jwt' }],
+			})
+		},
+	)
+})
+
+function createCredentialRuntimeForFetchPathTest() {
+	return {
+		credential: Object.assign(
+			async (key: string) => ({
+				key,
+				sign: async () => `signed:${key}`,
+			}),
+			{ named: async (name: string) => ({ name }) },
+		),
+		credentials: async (key: string) => [{ key }],
+	}
+}
+
+const packageAppUserFetchSource = `
+import { credential } from './.__kody_virtual__/runtime.js';
+export default {
+	async fetch() {
+		if (typeof credential !== 'function') {
+			throw new TypeError('credential is not a function');
+		}
+		const handle = await credential('powersync-jwt');
+		const signature = await handle.sign();
+		return { ok: true, key: handle.key, signature };
+	},
+};
+`
+
+// Mirrors PackageApp Entrypoint.fetch: createRuntime → ALS.run → import user →
+// user.fetch. Entry load happens before ALS (Worker evaluates mainModule first).
+async function runPackageAppFetchPath(input: {
+	writeTempFiles: (
+		files: Record<string, string>,
+	) => Promise<Record<string, string>>
+	installSharedStorage: () => AsyncLocalStorage<unknown>
+	entrySource: string
+}) {
+	input.installSharedStorage()
+	const urls = await input.writeTempFiles({
+		'.__kody_virtual__/runtime.js': runtimeSource,
+		'app.js': packageAppUserFetchSource,
+		'package-app-entry.js': input.entrySource,
+	})
+	// Isolate loads mainModule before any request — same moment the old bug
+	// statically imported runtime.js and froze credential.
+	const entry = (await import(urls['package-app-entry.js'] ?? '')) as {
+		simulateFetch: (runtime: unknown) => Promise<unknown>
+	}
+	return await entry.simulateFetch(createCredentialRuntimeForFetchPathTest())
+}
+
+test('hosted package-app fetch path: entry that pre-imports runtime freezes credential', async () => {
+	await withRuntimeIsolationCleanup(
+		async ({ writeTempFiles, installSharedStorage }) => {
+			await expect(
+				runPackageAppFetchPath({
+					writeTempFiles,
+					installSharedStorage,
+					entrySource: `
+import { __kodyGetSecretAuthority } from './.__kody_virtual__/runtime.js';
+const storage = globalThis[Symbol.for('kody.runtimeStorage')];
+export async function simulateFetch(runtime) {
+	void __kodyGetSecretAuthority;
+	return storage.run(runtime, async () => {
+		const userModule = await import('./app.js');
+		return await userModule.default.fetch();
+	});
+}
+`,
+				}),
+			).rejects.toThrow(/credential is not a function/)
+		},
+	)
+})
+
+test('hosted package-app fetch path: deferred runtime import keeps credential callable', async () => {
+	await withRuntimeIsolationCleanup(
+		async ({ writeTempFiles, installSharedStorage }) => {
+			const result = await runPackageAppFetchPath({
+				writeTempFiles,
+				installSharedStorage,
+				entrySource: `
+// Fixed package-app entry: no static import of runtime.js. Preload inside
+// ALS before the user module so optional exports see the bound store and
+// secret-authority stamps use the module export (not a forgeable Symbol).
+const storage = globalThis[Symbol.for('kody.runtimeStorage')];
+let getSecretAuthority = null;
+async function ensureRuntimeLoaded() {
+	if (typeof getSecretAuthority === 'function') return;
+	const runtimeModule = await import('./.__kody_virtual__/runtime.js');
+	getSecretAuthority = runtimeModule.__kodyGetSecretAuthority;
+}
+export async function simulateFetch(runtime) {
+	return storage.run(runtime, async () => {
+		await ensureRuntimeLoaded();
+		const userModule = await import('./app.js');
+		return await userModule.default.fetch();
+	});
+}
+`,
+			})
+			expect(result).toEqual({
+				ok: true,
+				key: 'powersync-jwt',
+				signature: 'signed:powersync-jwt',
+			})
+		},
+	)
+})
+
+test('hosted package-app fetch path: host stamps ignore a forged Symbol.for authority', async () => {
+	const { Worker } = await import('node:worker_threads')
+	const result = await new Promise<{
+		forgedBeforeLoad: string | null
+		hostStamp: string
+		moduleStamp: string | null
+	}>((resolve, reject) => {
+		const worker = new Worker(
+			`
+import { parentPort } from 'node:worker_threads'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+
+const authoritySymbol = Symbol.for('kody.getSecretAuthority')
+Object.defineProperty(globalThis, authoritySymbol, {
+	value: () => 'pkg-forged-dependency',
+	writable: true,
+	configurable: true,
+	enumerable: false,
+})
+const storage = new AsyncLocalStorage()
+globalThis[Symbol.for('kody.runtimeStorage')] = storage
+const dir = join(tmpdir(), \`kody-host-stamp-\${Date.now()}\`)
+mkdirSync(join(dir, '.__kody_virtual__'), { recursive: true })
+writeFileSync(join(dir, '.__kody_virtual__/runtime.js'), ${JSON.stringify(runtimeSource)})
+writeFileSync(
+	join(dir, 'package-app-entry.js'),
+	\`
+let getSecretAuthority = null;
+function readSecretAuthority() {
+	return typeof getSecretAuthority === 'function' ? (getSecretAuthority() ?? '') : '';
+}
+async function ensureRuntimeLoaded() {
+	if (typeof getSecretAuthority === 'function') return;
+	const runtimeModule = await import('./.__kody_virtual__/runtime.js');
+	getSecretAuthority = runtimeModule.__kodyGetSecretAuthority;
+}
+const storage = globalThis[Symbol.for('kody.runtimeStorage')];
+export async function simulateFetch(runtime) {
+	const forgedBeforeLoad = globalThis[Symbol.for('kody.getSecretAuthority')]();
+	return storage.run(runtime, async () => {
+		await ensureRuntimeLoaded();
+		return {
+			forgedBeforeLoad,
+			hostStamp: readSecretAuthority(),
+			moduleStamp: getSecretAuthority(),
+		};
+	});
+}
+\`,
+)
+try {
+	const entry = await import(pathToFileURL(join(dir, 'package-app-entry.js')).href)
+	const outcome = await entry.simulateFetch({})
+	parentPort.postMessage(outcome)
+} finally {
+	rmSync(dir, { recursive: true, force: true })
+}
+`,
+			{ eval: true },
+		)
+		worker.on('message', resolve)
+		worker.on('error', reject)
+		worker.on('exit', (code) => {
+			if (code !== 0) reject(new Error(`worker exited ${code}`))
+		})
+	})
+	expect(result.forgedBeforeLoad).toBe('pkg-forged-dependency')
+	expect(result.hostStamp).toBe('')
+	expect(result.moduleStamp).toBeNull()
 })
 
 test('preloaded kody exports resolve from the active runtime store', async () => {
