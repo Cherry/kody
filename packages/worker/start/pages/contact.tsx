@@ -55,7 +55,7 @@ export function ContactRoute() {
 				</SiteLink>{' '}
 				or through{' '}
 				<SiteLink
-					href="https://github.com/kentcdodds/kody/security/advisories/new"
+					href="https://github.com/kody-hq/kody/security/advisories/new"
 					css={mutedLinkCss}
 					target="_blank"
 					rel="noreferrer noopener"
@@ -64,7 +64,7 @@ export function ContactRoute() {
 				</SiteLink>
 				. The public policy is in{' '}
 				<SiteLink
-					href="https://github.com/kentcdodds/kody/blob/main/SECURITY.md"
+					href="https://github.com/kody-hq/kody/blob/main/SECURITY.md"
 					css={mutedLinkCss}
 					target="_blank"
 					rel="noreferrer noopener"
@@ -85,12 +85,12 @@ export function ContactRoute() {
 				</SiteLink>
 				). Product source, issues, and pull requests live at{' '}
 				<SiteLink
-					href="https://github.com/kentcdodds/kody"
+					href="https://github.com/kody-hq/kody"
 					css={mutedLinkCss}
 					target="_blank"
 					rel="noreferrer noopener"
 				>
-					github.com/kentcdodds/kody
+					github.com/kody-hq/kody
 				</SiteLink>
 				. Site blocked by a DNS filter, or signup mail never arrives? See{' '}
 				<SiteLink href="/docs/cant-open-or-get-mail" css={mutedLinkCss}>

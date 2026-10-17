@@ -47,7 +47,7 @@ export function AboutRoute() {
 				Kent C. Dodds operates the hosted service at kody.codes and is the data
 				controller for that deployment. The project is open on{' '}
 				<SiteLink
-					href="https://github.com/kentcdodds/kody"
+					href="https://github.com/kody-hq/kody"
 					css={mutedLinkCss}
 					target="_blank"
 					rel="noreferrer noopener"

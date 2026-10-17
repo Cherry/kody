@@ -55,7 +55,7 @@ export function SiteFooter(props: SiteFooterProps) {
 					<SiteLink href="/support">Support</SiteLink>
 					<SiteLink href="/blog">Blog</SiteLink>
 					<SiteLink
-						href="https://github.com/kentcdodds/kody"
+						href="https://github.com/kody-hq/kody"
 						target="_blank"
 						rel="noreferrer noopener"
 					>

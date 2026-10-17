@@ -4,7 +4,7 @@ import { createHealthHandler } from '#app/handlers/health.ts'
 
 const commitSha = 'f2d82dba4ba50cf2ad3f56f5c88f7b8ef5f97d8e'
 const deployInfo = {
-	repoUrl: 'https://github.com/kentcdodds/kody',
+	repoUrl: 'https://github.com/kody-hq/kody',
 	commit: {
 		sha: commitSha,
 		message: 'feat: richer /health metadata (#1799)',
@@ -12,7 +12,7 @@ const deployInfo = {
 	},
 	pullRequest: {
 		number: 1799,
-		url: 'https://github.com/kentcdodds/kody/pull/1799',
+		url: 'https://github.com/kody-hq/kody/pull/1799',
 		title: 'Richer /health metadata',
 	},
 	deploy: {
@@ -21,7 +21,7 @@ const deployInfo = {
 		workflow: '🔎 Preview',
 		job: 'deploy',
 		runId: '99',
-		runUrl: 'https://github.com/kentcdodds/kody/actions/runs/99',
+		runUrl: 'https://github.com/kody-hq/kody/actions/runs/99',
 	},
 } satisfies DeployInfo
 
@@ -63,7 +63,7 @@ test('health handler reports commit, PR, and deploy metadata for JSON and HTML c
 		commitSha,
 		commit: {
 			sha: commitSha,
-			url: `https://github.com/kentcdodds/kody/commit/${commitSha}`,
+			url: `https://github.com/kody-hq/kody/commit/${commitSha}`,
 			message: null,
 			committedAt: null,
 		},
@@ -81,7 +81,7 @@ test('health handler reports commit, PR, and deploy metadata for JSON and HTML c
 		commitSha,
 		commit: {
 			sha: commitSha,
-			url: `https://github.com/kentcdodds/kody/commit/${commitSha}`,
+			url: `https://github.com/kody-hq/kody/commit/${commitSha}`,
 			message: deployInfo.commit.message,
 			committedAt: deployInfo.commit.committedAt,
 		},
@@ -97,9 +97,7 @@ test('health handler reports commit, PR, and deploy metadata for JSON and HTML c
 	)
 	const html = await htmlResponse.text()
 	expect(html).toContain(commitSha)
-	expect(html).toContain(
-		`https://github.com/kentcdodds/kody/commit/${commitSha}`,
-	)
+	expect(html).toContain(`https://github.com/kody-hq/kody/commit/${commitSha}`)
 	expect(html).toContain(deployInfo.pullRequest.url)
 	expect(html).toContain(deployInfo.deploy.runUrl)
 	expect(html).toContain(deployInfo.commit.message)

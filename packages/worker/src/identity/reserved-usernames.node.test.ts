@@ -37,10 +37,17 @@ test('reserved username validation rejects brand, support, and infrastructure na
 	expect(getUsernameValidationError('ab')).not.toBeNull()
 	expect(isPermanentlyReservedUsername('kody')).toBe(true)
 	expect(isPermanentlyReservedUsername('support')).toBe(true)
+	expect(isPermanentlyReservedUsername('team')).toBe(true)
 	expect(isPermanentlyReservedUsername('kody-bot')).toBe(true)
 	expect(isPermanentlyReservedUsername('kody-r-deadbeef')).toBe(true)
 	expect(isPermanentlyReservedUsername('faq')).toBe(false)
 	expect(isPermanentlyReservedUsername('alice')).toBe(false)
+	expect(isUsernameEffectivelyReserved('team', { removed: ['team'] })).toBe(
+		true,
+	)
+	// Inbound alias permanent reserve is exact/compact only.
+	expect(isReservedUsername('team-one')).toBe(false)
+	expect(isReservedUsername('fresh-team')).toBe(false)
 
 	expect(isUsernameEffectivelyReserved('faq', { removed: ['faq'] })).toBe(false)
 	expect(

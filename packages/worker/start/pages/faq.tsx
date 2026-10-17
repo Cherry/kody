@@ -191,7 +191,7 @@ const faqItems: ReadonlyArray<FaqItem> = [
 				<p>
 					Kody is Fair Source. The{' '}
 					<SiteLink
-						href="https://github.com/kentcdodds/kody"
+						href="https://github.com/kody-hq/kody"
 						target="_blank"
 						rel="noreferrer noopener"
 					>

@@ -25,8 +25,10 @@ export const localWorkerModuleNames = {
 	/**
 	 * Flat alias for `kody:runtime`. Path-like package module names
 	 * (`kody:@scope/pkg/export`) path-join bare `kody:runtime` into
-	 * `kody:@scope/pkg/kody:runtime`; local deps rewrite to this slash-free
-	 * name instead. workerd rejects leading-`/` absolute module names.
+	 * `kody:@scope/pkg/kody:runtime`; local deps rewrite imports to this
+	 * registered name, then prefix `/` on the import reference so workerd
+	 * does not still join it onto the importer. Registered names must not
+	 * start with `/` — workerd rejects those.
 	 */
 	runtimeFlatAlias: '.__kody_runtime__.js',
 } as const
@@ -76,7 +78,7 @@ const __kodySecretResolutionHeader = 'x-kody-secret-resolution';
 /**
  * Streaming CapabilityProxy hop (POST /v1/capability-proxy/gateway-fetch via the
  * loopback bridge). Returns a real Response — not the JSON gatewayFetch envelope.
- * See kentcdodds/kody docs/contributing/contracts/cli-streaming-gateway-fetch.md.
+ * See kody-hq/kody docs/contributing/contracts/cli-streaming-gateway-fetch.md.
  */
 async function gatewayFetchStream(input) {
 	if (__kodyBridge === null || typeof __kodyBridge.gatewayFetch !== 'function') {
@@ -228,7 +230,7 @@ export const workflows = {
 // kody:@scope/package/export import when the name is known, or import(specifier)
 // when the name is data. Under --local, static kody:@ imports are resolved into
 // the workerd module list via POST /v1/local-execute/package-graph (see
-// local-package-graph.ts / kentcdodds/kody#2808) — never a whole-module
+// local-package-graph.ts / kody-hq/kody#2808) — never a whole-module
 // CapabilityProxy → kody.execute hop.
 export const packages = null;
 
@@ -418,7 +420,7 @@ export function __kodyRunInLocalRuntime(callback) {
  * Local workerd entry. Optional `sideEffectModules` are imported for their
  * evaluation side effects before the user module runs — used to load the
  * origin-supplied gateway-fetch shim so ambient `{{secret:…}}` fetch hops
- * even when the entry has no `kody:@` imports (kentcdodds/kody#3020).
+ * even when the entry has no `kody:@` imports (kody-hq/kody#3020).
  */
 export function createLocalEntrySource(
 	input: {
