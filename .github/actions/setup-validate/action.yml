@@ -12,9 +12,10 @@ inputs:
     default: 'false'
   no_cache:
     description: >
-      When true, skip setup-node npm cache, Playwright actions/cache
-      restore/save, and Nx remote-cache probe (caller must also clear the
-      remote-cache token and set NX_SKIP_NX_CACHE). Always runs a fresh npm ci.
+      When true, disable setup-node package-manager-cache (no npm Actions cache
+      restore), skip Playwright actions/cache restore/save, and skip the Nx
+      remote-cache probe (caller must also clear the remote-cache token and set
+      NX_SKIP_NX_CACHE). Always runs a fresh npm ci.
     required: false
     default: 'false'
 
@@ -38,7 +39,7 @@ runs:
           else
             echo "- NX_SELF_HOSTED_REMOTE_CACHE_SERVER: unset"
           fi
-          echo "- setup-node npm cache: omitted"
+          echo "- setup-node: package-manager-cache=false (no npm Actions cache)"
           echo "- actions/cache (Playwright): skipped"
           echo "- npm ci: fresh (--prefer-online)"
         } | tee -a "$GITHUB_STEP_SUMMARY"
@@ -50,11 +51,15 @@ runs:
         node-version: 26
         cache: npm
 
+    # setup-node@v6 auto-caches npm when package.json has packageManager;
+    # package-manager-cache: false is required or no_cache still restores
+    # ~/.npm from the Actions cache (seen on the first ubuntu baseline).
     - name: 🟢 Setup Node (no cache)
       if: inputs.no_cache == 'true'
       uses: actions/setup-node@v6
       with:
         node-version: 26
+        package-manager-cache: false
 
     - name: 🎭 Cache Playwright Browsers
       if: inputs.playwright == 'true' && inputs.no_cache != 'true'

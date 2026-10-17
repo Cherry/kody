@@ -58,7 +58,10 @@ export async function runNxRemoteCacheSmoke() {
 		},
 	}
 
-	const env = {
+	// Isolate from Validate no_cache (NX_SKIP_NX_CACHE=true). This smoke
+	// uses its own local HTTP cache server and must exercise PUT/GET hits;
+	// inheriting the workflow skip flag makes Nx skip the cache entirely.
+	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		NX_DAEMON: 'false',
 		NX_CACHE_DIRECTORY: cacheDirectory,
@@ -68,6 +71,7 @@ export async function runNxRemoteCacheSmoke() {
 		NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: server.token,
 		NX_CACHE_SMOKE_FAIL_IF_RUN: '',
 	}
+	delete env.NX_SKIP_NX_CACHE
 
 	await wipeIsolatedLocalState(cacheDirectory, workspaceDataDirectory)
 	const first = await runNxSmokeProbe(env)
