@@ -1,12 +1,18 @@
 import { setAuthSessionSecret } from '#app/auth-session.ts'
-import { loadResolvedRequestAuth } from '#app/request-auth-cache.ts'
+import {
+	loadResolvedRequestAuth,
+	markResolvedRequestAuthSignedOut,
+} from '#app/request-auth-cache.ts'
 import { prefetchRequestFeatureFlagsForHtmlPage } from '#app/request-feature-flags-cache.ts'
 import { type EmailVerificationDelivery } from '#universal/email-verification-delivery.ts'
 import { type PermissionString, type RoleName } from '#universal/permissions.ts'
 import { type McpUserContext } from '@kody-internal/shared/chat.ts'
 import { type RequestContext } from '@kody-internal/shared/request-context.ts'
 import { loadRequestOrgResolution } from '#app/org-request-binding.ts'
-import { loadOrgBindingForPerson } from '#worker/orgs/repo.ts'
+import {
+	loadOrgBindingForPerson,
+	PersonalOrgBindingMissingError,
+} from '#worker/orgs/repo.ts'
 import { deriveRequestContext } from '#worker/request-context/request-context.ts'
 
 export type AuthenticatedAppUser = {
@@ -48,9 +54,28 @@ async function readAuthenticatedAppUserInternal(
 		env,
 		resolved.user.mcpUser.userId,
 	)
+	// Every live person must have a personal-org membership. Check that even
+	// when the request is bound to a team org, so a broken personal row cannot
+	// keep acting on team surfaces.
+	let personalBinding
+	try {
+		personalBinding = await loadOrgBindingForPerson(
+			env.APP_DB,
+			resolved.user.mcpUser.userId,
+		)
+	} catch (error) {
+		// Soft-deleted people (or otherwise missing personal-org membership)
+		// must not 500 on every authenticated surface — fail closed as signed
+		// out and destroy the cookie so /login does not bounce them back.
+		if (error instanceof PersonalOrgBindingMissingError) {
+			await markResolvedRequestAuthSignedOut(request)
+			return null
+		}
+		throw error
+	}
 	const orgBinding =
 		resolution === 'personal' || resolution === 'denied'
-			? await loadOrgBindingForPerson(env.APP_DB, resolved.user.mcpUser.userId)
+			? personalBinding
 			: resolution
 	const user = {
 		sessionUserId: resolved.sessionUserId,

@@ -8,6 +8,7 @@ import {
 	readAuthenticatedAppUser,
 	readAuthenticatedAppUserForDeletion,
 } from './authenticated-user.ts'
+import { loadResolvedRequestAuth } from '#app/request-auth-cache.ts'
 import {
 	hasResolvedRequestFeatureFlags,
 	loadRequestFeatureFlags,
@@ -38,10 +39,16 @@ function createUsersDb(
 	options: {
 		user?: Record<string, unknown>
 		rolesError?: boolean
+		missingPersonalOrgBinding?: boolean
 		counts?: { batch: number; flagPrepares: number }
 	} = {},
 ) {
-	const { user, rolesError = false, counts } = options
+	const {
+		user,
+		rolesError = false,
+		missingPersonalOrgBinding = false,
+		counts,
+	} = options
 	const env = {
 		APP_DB: {
 			prepare(query: string) {
@@ -62,6 +69,7 @@ function createUsersDb(
 								normalized.includes('join org_memberships')) &&
 							normalized.includes('join orgs')
 						) {
+							if (missingPersonalOrgBinding) return null
 							const slug =
 								typeof user?.username === 'string' ? user.username : 'html-user'
 							return {
@@ -151,6 +159,52 @@ test('deleting accounts are invalid for normal requests but can retry deletion',
 	).resolves.toEqual(
 		expect.objectContaining({ userId: 7, username: 'deleting-user' }),
 	)
+})
+
+test('soft-deleted accounts are invalid even for deletion retry', async () => {
+	const env = createUsersDb({
+		user: {
+			username: 'soft-deleted-user',
+			deleted_at: '2026-10-16T22:23:07.000Z',
+		},
+	})
+	const url = 'https://example.com/@soft-deleted-user/-/billing.json'
+	await expect(
+		readAuthenticatedAppUser(await sessionRequest(url), env),
+	).resolves.toBeNull()
+	await expect(
+		readAuthenticatedAppUserForDeletion(await sessionRequest(url), env),
+	).resolves.toBeNull()
+})
+
+test('missing personal-org membership fails closed as signed out instead of 500', async () => {
+	const env = createUsersDb({
+		user: { username: 'orphan-user' },
+		missingPersonalOrgBinding: true,
+	})
+	const request = await sessionRequest(
+		'https://example.com/account/organizations.json',
+	)
+	await expect(readAuthenticatedAppUser(request, env)).resolves.toBeNull()
+	// Same-request SSR/login must see signed-out + destroy-cookie so a live
+	// person with no personal-org membership cannot redirect-loop on /login.
+	const resolved = await loadResolvedRequestAuth(request, env)
+	expect(resolved.user).toBeNull()
+	expect(resolved.setCookie ?? '').toContain('kody_session=')
+	expect(resolved.setCookie ?? '').toContain('Max-Age=0')
+})
+
+test('missing personal-org membership fails closed even when a team org is bound', async () => {
+	const env = createUsersDb({
+		user: { username: 'team-orphan' },
+		missingPersonalOrgBinding: true,
+	})
+	// Org-binding middleware would set a team slug; resolution that is not
+	// personal/denied must still require a live personal-org membership.
+	const request = await sessionRequest(
+		'https://example.com/@acme/-/billing.json',
+	)
+	await expect(readAuthenticatedAppUser(request, env)).resolves.toBeNull()
 })
 
 test('readAuthenticatedAppUser prefetches flags only when HTML pages opt in', async () => {
