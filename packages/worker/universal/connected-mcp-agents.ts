@@ -72,6 +72,9 @@ const clientNameKindRules = [
 	{ kind: 'devin', needles: ['devin'] },
 	{ kind: 'opencode', needles: ['opencode', 'open code'] },
 	{ kind: 'openclaw', needles: ['openclaw', 'open claw'] },
+	// Hermes registers its OAuth client as "Hermes Agent".
+	// Do not match bare `hermes` — that would mis-label clients like "Hermes Metrics".
+	{ kind: 'hermes', needles: ['hermes agent', 'hermes-agent'] },
 	// OpenMuse before bare `muse` so CopilotKit OpenMuse does not classify as Muse.
 	{ kind: 'openmuse', needles: ['openmuse', 'open muse'] },
 	{ kind: 'wajo', needles: ['wajo'] },
@@ -94,6 +97,8 @@ const hostKindRules = [
 	{ kind: 'devin', hosts: ['devin.ai', 'app.devin.ai'] },
 	{ kind: 'opencode', hosts: ['opencode.ai'] },
 	{ kind: 'openclaw', hosts: ['openclaw.ai'] },
+	// `client_uri` in Hermes's CIMD client metadata document.
+	{ kind: 'hermes', hosts: ['hermes-agent.nousresearch.com'] },
 	{ kind: 'wajo', hosts: ['wajo.ai'] },
 	{ kind: 'cue', hosts: ['cue.im'] },
 	// Muse Code docs/OAuth live under dev.meta.ai — not muse.ai (video) or
@@ -102,6 +107,20 @@ const hostKindRules = [
 ] as const satisfies ReadonlyArray<{
 	kind: McpClientKind
 	hosts: ReadonlyArray<string>
+}>
+
+/**
+ * CIMD `client_id` URLs on shared hosts, where the host alone is too broad.
+ * Matched even when the metadata lookup fails.
+ */
+const clientIdUrlKindRules = [
+	{
+		kind: 'hermes',
+		prefixes: ['https://nousresearch.github.io/hermes-agent/'],
+	},
+] as const satisfies ReadonlyArray<{
+	kind: McpClientKind
+	prefixes: ReadonlyArray<string>
 }>
 
 export function uniqueOAuthClientIds(
@@ -334,7 +353,20 @@ function kindFromInboundSignals(
 	if (surface === 'cloud') return 'cursor-cloud'
 	if (surface === 'local') return 'cursor-local'
 	if (named) return named
-	return kindFromHosts(collectSignalHosts(signals))
+	return (
+		kindFromClientIdUrl(signals.clientId) ??
+		kindFromHosts(collectSignalHosts(signals))
+	)
+}
+
+function kindFromClientIdUrl(clientId: string): McpClientKind | null {
+	const normalized = clientId.trim().toLowerCase()
+	for (const rule of clientIdUrlKindRules) {
+		if (rule.prefixes.some((prefix) => normalized.startsWith(prefix))) {
+			return rule.kind
+		}
+	}
+	return null
 }
 
 function kindFromClientName(clientName: string | null): McpClientKind | null {

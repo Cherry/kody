@@ -9,6 +9,8 @@ import {
 	buildCopilotCliMcpJson,
 	buildGrokCliAddCommand,
 	buildGrokCliMcpToml,
+	buildHermesMcpAddCommand,
+	buildHermesMcpYaml,
 	buildKodyAppIconUrl,
 	buildKodyCliInstallCommand,
 	buildMuseSettingsJson,
@@ -64,6 +66,9 @@ test('onboarding MCP client builders emit the structured configs each host expec
 				{ id: 'cursor', viewport: 'mobile-only' },
 				{ id: 'claude-code', viewport: 'mobile-only' },
 				{ id: 'devin' },
+				{ id: 'openclaw', viewport: 'mobile-only' },
+				{ id: 'hermes', viewport: 'mobile-only' },
+				{ id: 'muse', viewport: 'both' },
 				{ id: 'wajo', viewport: 'both' },
 				{ id: 'cue', viewport: 'both' },
 				{ id: 'openmuse', viewport: 'both' },
@@ -138,6 +143,12 @@ test('onboarding MCP client builders emit the structured configs each host expec
 			},
 		},
 	})
+	expect(buildHermesMcpAddCommand(mcpServerUrl)).toBe(
+		`hermes mcp add kody --url ${mcpServerUrl} --auth oauth`,
+	)
+	expect(buildHermesMcpYaml(mcpServerUrl)).toBe(
+		`mcp_servers:\n  kody:\n    url: "${mcpServerUrl}"\n    auth: oauth\n`,
+	)
 	expect(JSON.parse(buildMuseSettingsJson(mcpServerUrl))).toEqual({
 		schema_version: 1,
 		mcp_servers: {
