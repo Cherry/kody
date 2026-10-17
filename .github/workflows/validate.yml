@@ -13,6 +13,15 @@ on:
       - synchronize
       - ready_for_review
   workflow_dispatch:
+    inputs:
+      no_cache:
+        description: >
+          Skip every Validate cache layer (Nx remote token unbound, NX_SKIP_NX_CACHE,
+          setup-node npm cache, Playwright actions/cache) and run a fresh npm ci.
+          Use for apples-to-apples runner timing baselines. Default true on
+          manual dispatch; push/PR runs ignore this and keep normal caching.
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -28,23 +37,35 @@ permissions:
 # probes before setting the server URL. Cached npm scripts then run
 # through tools/run-nx.ts so a rejected token or a mid-run /v1/cache
 # transport flake cannot fail the job after tasks already succeeded.
+# workflow_dispatch + no_cache: leave the remote-cache token empty and set
+# NX_SKIP_NX_CACHE so neither remote nor local Nx cache is used.
 env:
   CI: '1'
-  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN:
-    ${{ github.event.pull_request.head.repo.fork == true &&
+  VALIDATE_NO_CACHE: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.no_cache && 'true'
+    || 'false' }}
+  NX_SKIP_NX_CACHE: >-
+    ${{ github.event_name == 'workflow_dispatch' && inputs.no_cache && 'true'
+    || '' }}
+  NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN: >-
+    ${{ (github.event_name != 'workflow_dispatch' || inputs.no_cache != true) &&
+    (github.event.pull_request.head.repo.fork == true &&
     secrets.NX_SELF_HOSTED_REMOTE_CACHE_READ_TOKEN ||
     github.event.pull_request.head.repo.fork != true &&
-    secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || '' }}
+    secrets.NX_SELF_HOSTED_REMOTE_CACHE_ACCESS_TOKEN || '') || '' }}
 
 # PR and manual runs cancel superseded runs. `main` pushes queue instead: a
 # busy `main` cancelled every run and starved production deploys (#3380). One
 # run stays in progress and GitHub replaces the pending one with the newest
 # push; deploy.yml's sha-guard can deploy any completed run that is ahead of
 # production, though its own queue may replace an older pending deploy.
+# workflow_dispatch includes no_cache in the group so a cached and uncached
+# manual run on the same ref do not cancel each other.
 concurrency:
   group: >-
     validate-${{ github.event_name }}-${{ github.event.pull_request.number ||
-    github.ref }}
+    github.ref }}${{ github.event_name == 'workflow_dispatch' &&
+    format('-nocache-{0}', inputs.no_cache) || '' }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 # Same checks as `npm run validate`, split across runners so CPU-heavy suites
@@ -64,6 +85,9 @@ jobs:
       github.event_name != 'pull_request' || github.event.pull_request.draft ==
       false
     steps:
+      - name: ⏱️ Mark job start
+        run: echo "VALIDATE_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
         with:
@@ -74,6 +98,8 @@ jobs:
 
       - name: 🧰 Setup
         uses: ./.github/actions/setup-validate
+        with:
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       # Keep running sibling static checks after a failure (same as local
       # `npm run validate`), unless the job was cancelled.
@@ -224,6 +250,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm run audit:prod
 
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: static"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   node:
     runs-on: ubuntu-latest
     name: 🧪 Node
@@ -237,7 +277,10 @@ jobs:
       # baseline with headroom; cache hit or miss does not change it. Setup +
       # tests both count; do not delete tests to stay under.
       - name: ⏱️ Mark job start
-        run: echo "UNIT_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+        run: |
+          epoch=$(date +%s)
+          echo "UNIT_JOB_START_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "VALIDATE_JOB_START_EPOCH=$epoch" >> "$GITHUB_ENV"
 
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
@@ -251,6 +294,7 @@ jobs:
         uses: ./.github/actions/setup-validate
         with:
           worker-env: 'true'
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       - name: 🧪 Node unit tests
         run: npm run test:node
@@ -264,6 +308,20 @@ jobs:
         run: >-
           node tools/ci/enforce-unit-job-budget.ts --leg node --start-epoch
           "$UNIT_JOB_START_EPOCH"
+
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: node"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   workers:
     runs-on: ubuntu-latest
@@ -283,7 +341,10 @@ jobs:
       # check measures the successful attempt; overall job wall is the
       # 30-minute timeout above.
       - name: ⏱️ Mark job start
-        run: echo "UNIT_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+        run: |
+          epoch=$(date +%s)
+          echo "UNIT_JOB_START_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "VALIDATE_JOB_START_EPOCH=$epoch" >> "$GITHUB_ENV"
 
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
@@ -294,6 +355,7 @@ jobs:
         uses: ./.github/actions/setup-validate
         with:
           worker-env: 'true'
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       # Soft-cap the first attempt at the remaining unit-job budget so a slow
       # runner cannot burn the whole job timeout and leave Validate as
@@ -368,6 +430,20 @@ jobs:
           node tools/ci/enforce-unit-job-budget.ts --leg workers --start-epoch
           "$UNIT_JOB_START_EPOCH"
 
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: workers"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   mcp:
     runs-on: ubuntu-latest
     name: 🔌 MCP
@@ -376,6 +452,9 @@ jobs:
       github.event_name != 'pull_request' || github.event.pull_request.draft ==
       false
     steps:
+      - name: ⏱️ Mark job start
+        run: echo "VALIDATE_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
         with:
@@ -385,9 +464,24 @@ jobs:
         uses: ./.github/actions/setup-validate
         with:
           worker-env: 'true'
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       - name: 🔌 MCP E2E
         run: npm run test:mcp
+
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: mcp"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   e2e:
     runs-on: ubuntu-latest
@@ -397,6 +491,9 @@ jobs:
       github.event_name != 'pull_request' || github.event.pull_request.draft ==
       false
     steps:
+      - name: ⏱️ Mark job start
+        run: echo "VALIDATE_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
         with:
@@ -407,6 +504,7 @@ jobs:
         with:
           playwright: 'true'
           worker-env: 'true'
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       # Wrangler's local workerd occasionally crashes mid-suite ("Broken
       # pipe" → "Network connection lost"), which kills the Playwright
@@ -448,6 +546,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: e2e"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   cli:
     runs-on: ubuntu-latest
     name: 🧰 CLI
@@ -456,6 +568,9 @@ jobs:
       github.event_name != 'pull_request' || github.event.pull_request.draft ==
       false
     steps:
+      - name: ⏱️ Mark job start
+        run: echo "VALIDATE_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: 📦 Checkout
         uses: actions/checkout@v6.0.2
         with:
@@ -463,12 +578,28 @@ jobs:
 
       - name: 🧰 Setup
         uses: ./.github/actions/setup-validate
+        with:
+          no_cache: ${{ env.VALIDATE_NO_CACHE }}
 
       - name: 🔌 OpenAPI client check
         run: npm run cli:openapi:check
 
       - name: 🧪 CLI validate
         run: npm run cli:validate
+
+      - name: ⏱️ Job wall-clock
+        if: always() && !cancelled()
+        run: |
+          end=$(date +%s)
+          start="${VALIDATE_JOB_START_EPOCH:-$end}"
+          dur=$((end - start))
+          {
+            echo "### Job wall-clock"
+            echo "- job: cli"
+            echo "- runner: \`${RUNNER_NAME:-unknown}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- duration_seconds: **${dur}**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   validate:
     runs-on: ubuntu-latest
@@ -481,6 +612,9 @@ jobs:
       - mcp
       - e2e
       - cli
+    permissions:
+      contents: read
+      actions: read
     # always() so a failed sibling still reports; !cancelled() so a
     # superseded run (cancel-in-progress) does not paint ✅ Validate red.
     # A sibling job timeout still fails this job: the workflow is not
@@ -489,6 +623,79 @@ jobs:
       always() && !cancelled() && (github.event_name != 'pull_request' ||
       github.event.pull_request.draft == false)
     steps:
+      - name: ⏱️ Run wall-clock summary
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          {
+            echo "## Validate wall-clock"
+            echo "- event: \`${{ github.event_name }}\`"
+            echo "- no_cache: \`${VALIDATE_NO_CACHE}\`"
+            echo "- runs-on (workflow default): \`ubuntu-latest\` (or whatever this job used)"
+            echo "- run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            echo
+            echo "| Job | Conclusion | Duration |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Prefer Actions API timings (started_at/completed_at) so the gate
+          # job can total siblings without artifacts.
+          JOBS_JSON=$(gh api \
+            "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs")
+          export JOBS_JSON
+          # Heredoc body must share the run-script indent so YAML dedent leaves
+          # valid top-level Python (no leading spaces inside the script).
+          python3 >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, os
+          from datetime import datetime
+
+          def parse(ts):
+              if not ts:
+                  return None
+              return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+          payload = json.loads(os.environ["JOBS_JSON"])
+          jobs = payload.get("jobs", [])
+          leaf_names = (
+              "🧹 Static",
+              "🧪 Node",
+              "☁️ Workers",
+              "🔌 MCP",
+              "🎭 E2E",
+              "🧰 CLI",
+          )
+          by_name = {j.get("name"): j for j in jobs}
+          total = 0
+          earliest = None
+          latest = None
+          for name in leaf_names:
+              job = by_name.get(name)
+              if not job:
+                  print(f"| {name} | missing | — |")
+                  continue
+              start = parse(job.get("started_at"))
+              end = parse(job.get("completed_at"))
+              conclusion = job.get("conclusion") or job.get("status") or "?"
+              if start and end:
+                  dur = int((end - start).total_seconds())
+                  total += dur
+                  earliest = start if earliest is None or start < earliest else earliest
+                  latest = end if latest is None or end > latest else latest
+                  print(f"| {name} | {conclusion} | {dur}s |")
+              else:
+                  print(f"| {name} | {conclusion} | — |")
+          wall = (
+              int((latest - earliest).total_seconds())
+              if earliest and latest
+              else total
+          )
+          print()
+          print(f"- **sum of job durations:** {total}s")
+          print(f"- **wall-clock (earliest start → latest end):** {wall}s")
+          PY
+
       - name: ✅ All checks passed
         if: >-
           needs.static.result == 'success' && needs.node.result == 'success' &&
